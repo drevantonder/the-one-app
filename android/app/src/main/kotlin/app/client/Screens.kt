@@ -465,11 +465,14 @@ private class Bridge(val context: Context, val store: Store, val route: Route, v
     private var misses = 0
     private var loading: Job? = null
 
-    /** Loads the screen's page; offline, an app's screen shows its last copy, saying so, and asks again and again,
-     *  waiting longer each time, as the iPhone's does. */
+    /** Loads the screen's page: an app's shows its page as the node last gave it at once, while the node is asked,
+     *  which replaces it only if it's changed since (its app deployed). Offline, an app's screen shows its last copy,
+     *  saying so, and asks again and again, waiting longer each time, as the iPhone's does. */
     fun load() {
         val web = web ?: return
         loading?.cancel()
+        val copy = if (offline == null) app?.let { ScreenCache.last(it) }?.first else null
+        if (copy != null) web.loadDataWithBaseURL("$ORIGIN/", copy, "text/html", "utf-8", null)
         loading = scope.launch {
             val page = try {
                 store.screen(route)
@@ -478,7 +481,7 @@ private class Bridge(val context: Context, val store: Store, val route: Route, v
             } catch (e: Exception) {
                 val app = app
                 val kept = offline?.kept ?: app?.let { ScreenCache.last(it) }?.let { (html, time) ->
-                    web.loadDataWithBaseURL("$ORIGIN/", html, "text/html", "utf-8", null)
+                    if (copy == null) web.loadDataWithBaseURL("$ORIGIN/", html, "text/html", "utf-8", null)
                     time
                 }
                 if (kept == null || (e as? NodeError)?.signedOut == true) {
@@ -493,7 +496,7 @@ private class Bridge(val context: Context, val store: Store, val route: Route, v
                 load()
                 return@launch
             }
-            web.loadDataWithBaseURL("$ORIGIN/", page, "text/html", "utf-8", null)
+            if (page != copy) web.loadDataWithBaseURL("$ORIGIN/", page, "text/html", "utf-8", null)
             app?.let { ScreenCache.keep(it, page) }
             misses = 0
             offline = null
@@ -780,8 +783,8 @@ private class Bridge(val context: Context, val store: Store, val route: Route, v
     }
 }
 
-/** The last copy of each app screen this phone showed, which stands in while the node can't be reached; gone once
- *  the person signs out. */
+/** The last copy of each app screen this phone showed: shown at once while the node is asked, and while it can't be
+ *  reached; gone once the person signs out. */
 object ScreenCache {
     lateinit var dir: File
 

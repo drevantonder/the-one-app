@@ -562,6 +562,9 @@ final class Store {
     }
 
     func refreshState() async throws {
+        // The first time, the apps are asked for beside the state, not after it.
+        let node = node
+        let early: Task<[AppInfo]?, Never>? = self.state == nil && signedIn ? Task { try? await node.apps() } : nil
         let state = try await node.state()
         let first = self.state == nil
         let arrived = self.state?.install?.joining != false && state.install?.joining == false
@@ -570,7 +573,7 @@ final class Store {
         arrangements = (state.arrangements ?? [:]).merging(unsaved) { $1 }
         phase = .ready
         if first, signedIn { await renameIfHostname() }
-        if first || arrived || apps.isEmpty || regrouped { await refreshApps() }
+        if first || arrived || apps.isEmpty || regrouped { await refreshApps(early: await early?.value) }
     }
 
     private func handle(_ event: NodeEvent) async {
@@ -618,10 +621,10 @@ final class Store {
 
     // MARK: Apps
 
-    func refreshApps() async {
+    func refreshApps(early: [AppInfo]? = nil) async {
         guard install != nil, signedIn else { return }
         do {
-            let apps = try await node.apps()
+            let apps = if let early { early } else { try await node.apps() }
             if apps != self.apps { self.apps = apps }
             // A node that just started lists its deployed apps before it can describe them.
             if apps.contains(where: { ($0.deploys ?? 0) > 0 && $0.title == nil }) { throw NodeError("starting") }
@@ -655,7 +658,10 @@ final class Store {
         keepWidgetsShownBefore()
         scheduleRedraw()
         var counts: [String: [String: Int]] = [:]
-        for page in allPages { counts[page.scope] = (try? await node.badges(scope: page.scope)) ?? [:] }
+        await withTaskGroup(of: (String, [String: Int]).self) { tasks in
+            for page in allPages { tasks.addTask { (page.scope, (try? await node.badges(scope: page.scope)) ?? [:]) } }
+            for await (scope, count) in tasks { counts[scope] = count }
+        }
         if counts != badges { badges = counts }
     }
 

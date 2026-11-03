@@ -251,13 +251,17 @@ private struct ScreenWebView: Representable {
             self.web = web
             let route = view.route, settings = view.settings, node = view.store.node
             loading?.cancel()
+            // The page as the node last gave it shows at once while the node is asked, which replaces it only if it's
+            // changed since (its app deployed).
+            let copy = view.offline == nil ? ScreenCache.last(for: route)?.html : nil
+            if let copy { web.loadHTMLString(copy, baseURL: nil) }
             loading = Task { [weak self] in
                 do {
                     let page = try await settings ? node.settingsPage(route.screen, params: route.params) : node.page(app: route.app, screen: route.screen, params: route.params, scope: route.scope)
                     guard let self, !Task.isCancelled else { return }
                     // No base: a screen is an app's code, never at the node's address, where it would ask as this
                     // machine's own programs.
-                    web.loadHTMLString(page, baseURL: nil)
+                    if copy.map({ ScreenCache.same($0, page) }) != true { web.loadHTMLString(page, baseURL: nil) }
                     ScreenCache.keep(page, for: route)
                     misses = 0
                     view.offline = nil
@@ -268,9 +272,9 @@ private struct ScreenWebView: Representable {
                     let kept: Date
                     if let offline = view.offline {
                         kept = offline.kept
-                    } else if let copy = ScreenCache.last(for: route) {
-                        web.loadHTMLString(copy.html, baseURL: nil)
-                        kept = copy.time
+                    } else if let last = ScreenCache.last(for: route) {
+                        if copy == nil { web.loadHTMLString(last.html, baseURL: nil) }
+                        kept = last.time
                     } else {
                         view.failure = error.localizedDescription
                         return
@@ -705,7 +709,8 @@ extension Store {
     }
 }
 
-/// The last copy of each screen this device drew, by route, for when the node can't be reached.
+/// The last copy of each screen this device drew, by route: shown at once while the node is asked, and while it can't be
+/// reached.
 /// A screen shown from its last copy: when that was kept, and when the node is next asked for it (nil while it's being asked).
 struct Offline {
     var kept: Date
@@ -726,6 +731,11 @@ enum ScreenCache {
 
     static func keep(_ html: String, for route: ScreenRoute) {
         try? Data(html.utf8).write(to: file(route), options: .atomic)
+    }
+
+    /// Two pages the same but for their nonce.
+    static func same(_ a: String, _ b: String) -> Bool {
+        a.replacing(/nonce(-|=")[0-9a-f]{32}/, with: "") == b.replacing(/nonce(-|=")[0-9a-f]{32}/, with: "")
     }
 
     static func last(for route: ScreenRoute) -> (html: String, time: Date)? {

@@ -15,6 +15,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -220,18 +221,20 @@ class Store(private val application: android.app.Application, val signIn: SignIn
         app.client.widget.HomeWidgets.signedOut()
     }
 
-    suspend fun refreshState() {
+    suspend fun refreshState(): Unit = coroutineScope {
+        // The first time, the apps are asked for beside the state, not after it.
+        val early = if (state == null) async { runCatching { get<List<AppInfo>>("/v1/apps") }.getOrNull() } else null
         val next: NodeState = get("/v1/state")
         val regrouped = (next.user to next.install?.groups) != (state?.user to state?.install?.groups)
         val first = state == null
         state = next
         failure = null
-        if (first || regrouped || apps.isEmpty()) refreshApps()
+        if (first || regrouped || apps.isEmpty()) refreshApps(early?.await())
     }
 
-    suspend fun refreshApps() {
+    suspend fun refreshApps(early: List<AppInfo>? = null) {
         if (state?.install == null) return
-        apps = get("/v1/apps")
+        apps = early ?: get("/v1/apps")
     }
 
     /** Every page's widgets, for the home screen's, while any is there (or `always`, as one is chosen). */
