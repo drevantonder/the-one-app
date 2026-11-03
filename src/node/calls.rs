@@ -203,6 +203,7 @@ impl Node {
 
     pub(super) async fn run_here(&self, req: &CallRequest, me: &Caller, limit: Duration) -> Result<Reply> {
         let input = if req.input.is_null() { json!({}) } else { req.input.clone() };
+        self.read_callers_logs(me).await?;
         if req.app == members::APP {
             return self.node_op(&req.op, &input, me).await.map(Reply::Ok);
         }

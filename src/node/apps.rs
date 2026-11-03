@@ -257,6 +257,7 @@ impl Node {
 
     /// Installs (or uninstalls) `app` in `scope` for `caller`, and what it uses.
     pub async fn install(&self, caller: &Caller, app: &str, scope: &Scope, installed: bool) -> Result<()> {
+        self.read_callers_logs(caller).await?;
         let entries = self.install_entries(caller, app, scope, installed).await?;
         for (scope, content) in entries {
             self.append_as(&scope, &caller.user, content).await?;

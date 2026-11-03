@@ -216,6 +216,41 @@ impl Node {
         kept.get(&hash(token)).filter(|s| s.until > now_ms()).and_then(|s| s.keys.get(&(scope.to_string(), app.to_string(), database.to_string())).cloned()).unwrap_or_default()
     }
 
+    /// The keys of a scope's log that live sessions were handed, if they hold its newest epoch's: what this device
+    /// reads and writes the entries of a scope it runs but doesn't open with, while someone who opens it uses it here.
+    pub(super) fn handed_log(&self, scope: &Scope) -> Result<Keys> {
+        let (now, newest) = (now_ms(), self.with(|i| Ok(i.r.members.epoch(scope)))?);
+        let id = (scope.to_string(), members::APP.to_string(), crate::log::NAME.to_string());
+        let mut keys = Keys::new();
+        for s in self.0.sessions.kept.lock().unwrap().values().filter(|s| s.live(now)) {
+            keys.extend(s.keys.get(&id).into_iter().flatten().map(|(n, k)| (*n, *k)));
+        }
+        crate::db::handed(keys, newest).map_err(|_| NotGiven(scope.clone(), self.device_name()).into())
+    }
+
+    /// Reads the entries of each scope a token caller uses that this device runs but doesn't open (someone else's own,
+    /// or a group its person isn't in), with the keys of its log the caller hands, which it's asked for (428) if it
+    /// didn't: what their calls are checked by (which apps are there, who may do what), and written after.
+    pub(super) async fn read_callers_logs(&self, me: &Caller) -> Result<()> {
+        if me.token.as_deref().is_none_or(|t| t.starts_with(standing::GRANT)) {
+            return Ok(());
+        }
+        let want: Vec<(Scope, &str, &str)> = self.with(|i| {
+            let m = &i.r.members;
+            Ok(m.scopes().into_iter().filter(|s| *s != Scope::Global && i.r.holds(s) && m.may_use(&me.user, s) && m.epoch(s) > 0 && !self.opens(m, s)).map(|s| (s, members::APP, crate::log::NAME)).collect())
+        })?;
+        self.needs(me, &want).await?;
+        for (scope, ..) in &want {
+            self.read_log(scope).await?;
+        }
+        Ok(())
+    }
+
+    /// Whether this device opens a scope with its own keys: it's a client device of someone who uses it.
+    pub(super) fn opens(&self, m: &Members, scope: &Scope) -> bool {
+        *scope == Scope::Global || super::databases::clients_of(m, scope).iter().any(|(k, _)| *k == self.0.id)
+    }
+
     /// A scope's newest epoch: the newest an `epoch` entry that counts made, whatever the bucket holds. 0 while it has
     /// none.
     pub(super) async fn newest_epoch(&self, scope: &Scope) -> Result<u32> {

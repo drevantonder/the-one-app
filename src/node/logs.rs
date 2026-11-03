@@ -127,8 +127,12 @@ impl Node {
         bail!("{scope} changed too often to write to")
     }
 
-    /// The keys a scope's entries are sealed with in the bucket, by epoch: the node's `log` of the scope.
+    /// The keys a scope's entries are sealed with in the bucket, by epoch: the node's `log` of the scope. Of one this
+    /// device runs but doesn't open, those a caller who does handed it.
     pub(super) async fn log_key(&self, scope: &Scope) -> Result<crate::db::Keys> {
+        if !self.with(|i| Ok(self.opens(&i.r.members, scope)))? {
+            return self.handed_log(scope);
+        }
         self.database_keys(scope, members::APP, crate::log::NAME, false).await
     }
 

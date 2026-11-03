@@ -800,6 +800,7 @@ impl Node {
     /// `previous` it follows (every log's end there, and in `global`), and each log's end there by author (`logs`, its
     /// own log's the backlink).
     pub async fn entry_heads(&self, caller: &Caller, scope: &Scope) -> Result<Value> {
+        self.read_callers_logs(caller).await?;
         self.read_log(scope).await?;
         self.with(|i| {
             ensure!(i.r.members.may_use(&caller.user, scope) && i.r.holds(scope), "this device doesn't hold {scope} for you");
@@ -845,6 +846,7 @@ impl Node {
         for entry in &entries {
             ensure!(entry.user() == caller.user, "entry {} isn't written as you", entry.id());
         }
+        self.read_callers_logs(caller).await?;
         self.put_checked(entries).await
     }
 
