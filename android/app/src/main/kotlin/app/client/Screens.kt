@@ -240,7 +240,7 @@ private fun Approve(store: Store) {
         Spacer(Modifier.height(28.dp))
         Text(store.code ?: "", fontSize = 40.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 4.sp, color = p.label, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
         Spacer(Modifier.weight(1.4f))
-        TextButton({ store.signOut() }) { Text("Sign Out", color = p.accent) }
+        TextButton({ store.signOut() }) { Text("Sign Out", color = p.tint) }
     }
 }
 
