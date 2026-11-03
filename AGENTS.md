@@ -12,6 +12,12 @@ Your devices, and your team's, as one place for apps and agents. Read `ARCHITECT
 - One name per thing. A rename reaches everything in the same change: code, files, docs, screens, CLI and MCP text, every caller and the data, rolled out to every device together. No aliases or fallbacks for old names, and no internal words (module names, "provider") where a person reads. What a person joins and uses is "your One App": "You've joined your One App". A workplace's white label is shared, so it's "the" with its name: "You've joined the PTC App". Kernel, node, install, scope and sidecar are our words, not theirs.
 - The old One App and the PTC App are feature lists, not code to copy.
 
+## Design
+
+- Three layers. Principles, the same everywhere: content first; order from type size and weight, not boxes, outlines or shadows; colour has two jobs, the tint for "tap this" and warn or danger for "this needs you"; fine is silent (no "Connected" or green); a problem shows on the thing itself, as one problem box (symbol, title, one sentence, the action that fixes it); an empty screen is one grey line, with a button only for an obvious first step; one component per job.
+- Our look, the same on every client: plain neutrals, soft rounded cards with rows inside, app icons as gradient tiles, external brands' real logos, red count badges. Its values are `src/screen/kit.css`'s, the one list every client copies and `tests/contracts.rs` holds them to.
+- The platform's own: the tint (each client passes its system tint as `--tint`), font, menus, sheets, alerts, Back and window material.
+
 ## Work
 
 - `one try` (`target/debug/one try` for your build, which `cargo test` or `cargo build` made: never build release to try it, which compiles it all again) starts your checkout's own install beside the real one, with only what every new install starts with (what a new person sees) and its own kernel, where its person signs in with no passkey. Test there with `one try <command>` or `one try mcp`; `one try client web|android|windows` gives a client of your checkout's build signed in to it (on a copy of a device borrowed for you), and says how to see and use it; `--as sam` (web, android) gives one signed in as Sam, whom its person invited with Add Someone, for what an invited person sees and anything with two people. `one try stop` deletes it and gives its devices back.
