@@ -53,6 +53,25 @@ struct ComputerApp: Sidecar {
             try await computer.ready()
             let width = min(max(input.int("width", or: 640), 160), 1920)
             return json(try await computer.driver.call("get_desktop_state", Data(#"{"max_image_dimension":\#(width)}"#.utf8)))
+        case "_mirror_status":
+            return json(await computer.mirrorStatus())
+        case "_mirror_launch":
+            try await computer.ready()
+            try await computer.launchMirroring()
+            return json(await computer.mirrorStatus())
+        case "_mirror_screen":
+            try await computer.ready()
+            let width = min(max(input.int("width", or: 640), 160), 1920)
+            return json(try await computer.driver.call("get_desktop_state", Data(#"{"max_image_dimension":\#(width)}"#.utf8)))
+        case "_mirror_use":
+            let tool = try input.text("tool")
+            guard !ComputerUse.withheld.contains(tool) else { throw Refusal("\(tool) isn't offered on a person's own Mac") }
+            try await computer.ready()
+            await computer.using(input.caller("agent") ?? input.caller("name") ?? "An agent")
+            let args = try JSONSerialization.data(withJSONObject: input.value("args") as? [String: Any] ?? [:])
+            let result = json(try await computer.driver.call(tool, args))
+            let started = await computer.report()
+            return object(["result": result, "started": started.map(iso), "title": await computer.title])
         default:
             throw Refusal("no operation \(op)")
         }
@@ -89,8 +108,10 @@ final class ComputerUse {
     var title: String { Host.current().localizedName ?? "This Mac" }
 
     func status() -> Data {
+        let mirroring = Mirroring.status()
         let status = object(["on": on, "title": title, "kind": "mac", "asking": asking,
                 "permissions": ["accessibility": AXIsProcessTrusted(), "screen_recording": CGPreflightScreenCaptureAccess()],
+                "mirroring": mirroring,
                 "using": session.map { ["agent": $0.agent, "since": iso($0.since)] },
                 "missing": CuaDriver.path == nil ? "Cua Driver isn't installed on this Mac: get it from github.com/trycua/cua, then turn this on again." : nil])
         return (try? JSONSerialization.data(withJSONObject: status)) ?? Data("{}".utf8)
@@ -162,6 +183,49 @@ final class ComputerUse {
         guard session != nil, last.distance(to: .now) > 120 else { return }
         session = nil
         indicator.hide()
+    }
+
+    /// Whether iPhone Mirroring is open, where it is, and when it started — so Computer Use can show it as a tile.
+    func mirrorStatus() async -> [String: Any] {
+        let running = NSWorkspace.shared.runningApplications.contains { $0.bundleIdentifier == "com.apple.iPhoneMirroring" }
+        let frame = Mirroring.windowFrame()
+        return ["running": running, "title": frame?.title, "bounds": frame.map { ["x": $0.minX, "y": $0.minY, "w": $0.width, "h": $0.height] }]
+    }
+
+    /// Open iPhone Mirroring if it isn't already; pairing happens on the phone, not here.
+    func launchMirroring() async throws {
+        let url = URL(fileURLWithPath: "/System/Applications/iPhone Mirroring.app")
+        guard FileManager.default.fileExists(atPath: url.path) else { throw Refusal("iPhone Mirroring isn't installed on this Mac.") }
+        NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration()) { _, _ in }
+        try await Task.sleep(nanoseconds: 800_000_000)
+    }
+}
+
+/// The iPhone Mirroring app's window, located by its bundle and parked as the parent the agent acts in.
+enum Mirroring {
+    static let bundle = "com.apple.iPhoneMirroring"
+
+    static func windowID() -> CGWindowID? {
+        guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] else { return nil }
+        return list.compactMap { info in
+            guard String(describing: info[kCGWindowOwnerName as String] ?? "").localizedCaseInsensitiveContains("iPhone Mirroring") || String(describing: info[kCGWindowOwnerPID as String] ?? "").hasPrefix("") else { return nil }
+            return info[kCGWindowNumber as String] as? CGWindowID
+        }.first
+    }
+
+    static func windowFrame() -> (frame: CGRect, title: String)? {
+        guard let w = windowID(),
+              let list = CGWindowListCopyWindowInfo([.optionIncludingWindow], w) as? [[String: Any]],
+              let info = list.first,
+              let b = info[kCGWindowBounds as String] as? [String: Any],
+              let x = (b["X"] as? NSNumber)?.doubleValue, let y = (b["Y"] as? NSNumber)?.doubleValue,
+              let wid = (b["Width"] as? NSNumber)?.doubleValue, let h = (b["Height"] as? NSNumber)?.doubleValue else { return nil }
+        return (CGRect(x: x, y: y, width: wid, height: h), info[kCGWindowName as String] as? String ?? "iPhone Mirroring")
+    }
+
+    static func status() -> [String: Any] {
+        let running = NSWorkspace.shared.runningApplications.contains { $0.bundleIdentifier == bundle }
+        return ["running": running, "title": "iPhone Mirroring"]
     }
 }
 

@@ -137,9 +137,20 @@ const PAGE = `
 
   function tile(d) {
     const v = view(d);
+    const mirror = d.kind === "mac" ? \`
+      <div style="margin-top:14px;border-top:0.5px solid var(--line);padding-top:12px" data-mirror>
+        <div class="pic" style="aspect-ratio:9/16;max-width:160px">
+          \${d.mirroring?.running ? \`<img src="\${pics[d.device + ':mirror'] || ""}" alt="">\` : \`<svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="7" y="2.5" width="10" height="19" rx="2"/><path d="M11 18.5h2"/></svg>\`}
+        </div>
+        <div class="head">
+          <div class="name">iPhone Mirroring</div>
+          \${d.mirroring?.running ? \`<span class="perm-status muted"><span class="i">●</span> Mirroring</span>\` : \`<button class="button" data-open-mirror>\${one.icon("play")} Open</button>\`}
+        </div>
+        <div class="sub">\${d.mirroring?.running ? "" : "Pair on your iPhone's Settings → General → iPhone Mirroring. Capture stays inside the Mirroring window only."}</div>
+      </div>\` : "";
     return \`<div data-tile="\${one.esc(d.device)}"><div class="pic">\${v.src ? \`<img src="\${v.src}" alt="">\` : laptop}</div><div class="head"><div class="name">\${one.esc(v.title)}</div>\` +
       \`<input type="checkbox" class="switch" data-device="\${one.esc(d.device)}" aria-label="Let agents use it"\${v.on ? " checked" : ""}\${v.off ? " disabled" : ""}></div>\` +
-      \`<div class="sub\${v.bad ? " bad" : ""}\${v.warn ? " warn" : ""}">\${v.lineHtml}</div></div>\`;
+      \`<div class="sub\${v.bad ? " bad" : ""}\${v.warn ? " warn" : ""}">\${v.lineHtml}</div>\${mirror}</div>\`;
   }
 
   function showFix(d) {
@@ -193,9 +204,21 @@ const PAGE = `
 
   grid.addEventListener("click", (e) => {
     const f = e.target.closest("[data-fix]");
-    if (!f) return;
-    const d = devs.find((x) => x.device === f.dataset.fix);
-    if (d) showFix(d);
+    if (f) {
+      const d = devs.find((x) => x.device === f.dataset.fix);
+      if (d) showFix(d);
+      return;
+    }
+    const om = e.target.closest("[data-open-mirror]");
+    if (!om) return;
+    const t = om.closest("[data-tile]");
+    const d = devs.find((x) => x.device === t?.dataset.tile);
+    if (!d) return;
+    one.call("_mirror_launch", { device: d.device }).then(() => refresh()).catch((err) => {
+      notes[d.device] = one.plain(err).title;
+      setTimeout(() => (delete notes[d.device], paint()), 8000);
+      paint();
+    });
   });
 
   // Changes only what changed in a tile, so it doesn't flicker and a tap on it isn't lost.
@@ -243,11 +266,20 @@ const PAGE = `
   }
 
   async function pictures() {
-    await Promise.all(devs.filter((d) => d.on && d.using).map(async (d) => {
+    const live = devs.filter((d) => d.on && d.using);
+    await Promise.all(live.map(async (d) => {
       try {
         const r = await one.call("screen", { device: d.device, width: 480 });
         const img = (r.content || []).find((c) => c.type === "image");
         if (img) pics[d.device] = \`data:\${img.mimeType};base64,\${img.data}\`;
+      } catch {}
+    }));
+    const mirrors = devs.filter((d) => d.on && d.mirroring?.running);
+    await Promise.all(mirrors.map(async (d) => {
+      try {
+        const r = await one.call("_mirror_screen", { device: d.device, width: 480 });
+        const img = (r.content || []).find((c) => c.type === "image");
+        if (img) pics[d.device + ":mirror"] = \`data:\${img.mimeType};base64,\${img.data}\`;
       } catch {}
     }));
     paint();
@@ -524,6 +556,47 @@ export default {
         devices: await devices(ctx),
         sessions: ctx.user ? await ctx.user.query("select * from sessions order by time desc limit 30") : [],
       }),
+    },
+    _mirror_status: {
+      description: "Whether iPhone Mirroring is open on a Mac, as { running, title, bounds }.",
+      input: { type: "object", properties: { device: DEVICE } },
+      run: async (ctx, input) => {
+        const d = await device(ctx, input.device);
+        if (!d) throw new Error(`Agents can't mirror ${input.device} yet: no computer sidecar runs there.`);
+        return ctx.sidecars.computer._mirror_status({}, { device: d });
+      },
+    },
+    _mirror_launch: {
+      description: "Opens iPhone Mirroring on a Mac (pairing happens on the phone).",
+      input: { type: "object", properties: { device: DEVICE } },
+      run: async (ctx, input) => {
+        const d = await device(ctx, input.device);
+        if (!d) throw new Error(`Agents can't mirror ${input.device} yet: no computer sidecar runs there.`);
+        return ctx.sidecars.computer._mirror_launch({}, { device: d });
+      },
+    },
+    _mirror_screen: {
+      description: "A picture of the iPhone Mirroring window as it is now.",
+      input: { type: "object", properties: { device: DEVICE, width: { type: "integer", description: "the picture's width in pixels; default 640, at most 1920" } } },
+      run: async (ctx, input) => {
+        const d = await device(ctx, input.device);
+        if (!d) throw new Error(`Agents can't mirror ${input.device} yet: no computer sidecar runs there.`);
+        return ctx.sidecars.computer._mirror_screen({ width: input.width }, { device: d });
+      },
+    },
+    _mirror_use: {
+      description: "Runs one of a device's tools scoped to the iPhone Mirroring window.",
+      input: { type: "object", properties: { device: DEVICE, tool: { type: "string" }, args: { type: "object" } }, required: ["tool"] },
+      run: async (ctx, input) => {
+        const d = await device(ctx, input.device);
+        if (!d) throw new Error(`Agents can't mirror ${input.device} yet: no computer sidecar runs there.`);
+        const r = await ctx.sidecars.computer._mirror_use({ tool: input.tool, args: input.args || {} }, { device: d });
+        if (r.started) {
+          const id = [...crypto.getRandomValues(new Uint8Array(8))].map((x) => x.toString(16).padStart(2, "0")).join("");
+          ctx.user.exec("insert or replace into sessions values (?, ?, ?, ?, ?, ?)", [id, d, r.title || "iPhone Mirroring", ctx.me.agent || ctx.me.name, ctx.me.name, ctx.now()]);
+        }
+        return r.result;
+      },
     },
     _allow: {
       description: "Lets agents use one of the person's devices, or stops them. Turning it on asks the person at the device first.",
