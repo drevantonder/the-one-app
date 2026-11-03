@@ -1,6 +1,8 @@
 //! The install's Cloudflare Tunnel, which the kernel's gateway reaches nodes through with no public address
 //! (`kernel set node-url cloudflare:<id>`): an admin keeps its token as a Tunnel item in Everyone's Vault, and every
-//! device of the install runs a connector for it, so Cloudflare sends each request to whichever is up.
+//! device of the install runs a connector for it, so Cloudflare sends each request to whichever is up. A Mac leaves it
+//! to the others while one that isn't a Mac is online: Cloudflare spreads requests evenly over connectors, and a
+//! laptop's (asleep, on Wi-Fi, building an update) held a quarter of them for seconds while servers answered in ms.
 
 use sha2::Digest;
 
@@ -28,6 +30,10 @@ impl Node {
     pub(super) fn follow_tunnel(&self) {
         let wanted = self.with(|i| {
             if i.r.members.device(&self.0.id).is_none() {
+                return Ok(None);
+            }
+            let mac = |target: &str| target.contains("apple");
+            if mac(crate::config::TARGET) && i.r.members.devices().any(|d| d.key != self.0.id && i.online(&d.key) && i.builds.get(&d.key).is_some_and(|b| !b.target.is_empty() && !mac(&b.target))) {
                 return Ok(None);
             }
             let Some((_, global)) = i.views.get("global") else { return Ok(None) };
@@ -112,8 +118,10 @@ async fn connect(token: String, dir: PathBuf) {
                 .stdin(std::process::Stdio::null())
                 .stdout(std::process::Stdio::null())
                 .stderr(std::fs::File::create(dir.join("cloudflared.log"))?)
-                .kill_on_drop(true)
                 .spawn()?;
+            // Stopped with SIGTERM, so it takes its connections off Cloudflare's list before it goes: one killed
+            // outright leaves them there, and Cloudflare sends requests to them for seconds.
+            let _stop = Kept(child.id().map_or(0, |id| id as i32));
             if let Some(id) = child.id() {
                 std::fs::write(&pid, id.to_string())?;
                 std::fs::write(&for_token, &hash)?;

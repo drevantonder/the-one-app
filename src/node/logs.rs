@@ -150,6 +150,8 @@ impl Node {
         loop {
             if self.has_install() {
                 self.say_hello();
+                // Who's online decides whether a Mac runs the tunnel's connector.
+                self.follow_tunnel();
             }
             tokio::time::sleep(PRESENCE_EVERY).await;
         }
