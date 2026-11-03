@@ -132,7 +132,7 @@ window.home = (() => {
   const open = (a, p, screen = "main", params = {}) => () => one.open(screen, params, a.name, p ? { scope: p.scope } : {});
   const settings = (a, p, add) => (has(a, "settings") ? open(a, p, "settings", add ? { add: true } : {}) : null);
   const inStore = (a) => (store() && has(store(), "app") && (a.deploys || 0) > 0 ? open(store(), null, "app", { app: a.name }) : null);
-  const addService = () => (store() ? open(store(), null, "main", { service: true }) : null);
+  const addService = (p) => (store() ? open(store(), null, "main", { service: true, to: p.scope }) : null);
   const openStore = () => store() && open(store(), null)();
 
   // MARK: Changing things

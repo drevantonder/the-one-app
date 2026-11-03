@@ -351,9 +351,11 @@ export default {
 <script>
 ${addTo}
 ${onAPage}
-document.getElementById("top").innerHTML = one.largeTitle("App Store");
-// Services would bury the rest, so they get their own tab. A shell's Add a Service opens it with { service: true }, on
-// that tab.
+// A page's Add a Service opens it with { service: true, to: the page's scope }: only services, each added to that page
+// with Add, which then goes back to it. Anywhere else, services get their own tab, as they'd bury the rest.
+const to = one.params.service ? one.params.to || null : null;
+document.getElementById("top").innerHTML = one.largeTitle(to ? "Add a Service" : "App Store");
+if (to) document.getElementById("tabs").style.display = "none";
 let tab = one.params.service ? "services" : "apps";
 let query = "";
 let data = null;
@@ -368,12 +370,22 @@ one.search("#search", { placeholder: "Search", onSearch: (q) => ((query = q.trim
 // in its settings).
 const MADE_HERE = one.config?.made_here || "Made here";
 
-const row = (a) => \`<div class="row" data-app="\${one.esc(a.name)}">
+// Added to the page it's for, or Add, where they may (Only admins may add one no one has yet).
+function here(a) {
+  const place = data.places.find((p) => p.scope === to);
+  if (place && a.installed.includes(place.id)) return { button: '<button class="button capsule" disabled>Added</button>' };
+  const why = !place ? "Not yours to change" : !a.added && !data.admin ? "Only admins" : place.why;
+  return { why, button: '<button class="button capsule" data-add-here="' + one.esc(a.name) + '"' + (why ? " disabled" : "") + ">Add</button>" };
+}
+const row = (a) => {
+  const h = to && !a.deleted ? here(a) : null;
+  return \`<div class="row" data-app="\${one.esc(a.name)}">
     \${one.appIcon(a, 48)}
-    <div class="main"><div class="title"><span>\${one.esc(a.title)}</span></div><div class="sub">\${one.esc(a.tagline || a.description || "")}</div></div>
-    \${a.deleted ? (a.mine ? '<button class="button capsule" data-restore="' + one.esc(a.name) + '">Restore</button>' : "")
+    <div class="main"><div class="title"><span>\${one.esc(a.title)}</span></div><div class="sub">\${one.esc(h?.why || a.tagline || a.description || "")}</div></div>
+    \${h ? h.button : a.deleted ? (a.mine ? '<button class="button capsule" data-restore="' + one.esc(a.name) + '">Restore</button>' : "")
       : '<button class="button capsule" data-add="' + one.esc(a.name) + '">' + (onAPage(a, data.places) ? "Manage" : "Add to…") + "</button>"}
   </div>\`;
+};
 const section = (title, list) => list.length ? '<h2 class="section">' + one.esc(title) + '</h2><div class="list">' + list.map(row).join("") + "</div>" : "";
 
 function html() {
@@ -387,6 +399,13 @@ function draw() {
 document.getElementById("list").addEventListener("click", (e) => {
   const add = e.target.closest("[data-add]");
   if (add) return addTo(add.dataset.add, data);
+  const adding = e.target.closest("[data-add-here]");
+  if (adding) {
+    one.tap();
+    adding.disabled = true;
+    return one.call("add", { app: adding.dataset.addHere, scope: to })
+      .then(() => one.close(), (err) => ((adding.disabled = false), one.alert({ title: "Couldn’t Add It", text: one.plain(err).title })));
+  }
   const restore = e.target.closest("[data-restore]");
   // Restored at once, into Built In or Made Here; put back if it fails.
   if (restore) {
