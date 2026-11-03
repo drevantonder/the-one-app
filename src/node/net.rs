@@ -23,6 +23,14 @@ const STREAMS: u32 = 32;
 const JOINING: usize = 4;
 /// How long a client device may take to send a request's head on a stream.
 const REQUEST_HEAD: Duration = Duration::from_secs(30);
+/// How many connections a client device may have open to this one at once.
+const CLIENT_CONNS: usize = 4;
+/// The most a client device's request may send, but a blob's, which streams.
+const CLIENT_BODY: usize = 4 << 20;
+/// How long a client device's request may take to send its body.
+const CLIENT_BODY_TIME: Duration = Duration::from_secs(60);
+/// How long a client device's connection stays open with nothing asked on it.
+const CLIENT_IDLE: Duration = Duration::from_secs(10 * 60);
 
 /// This device's endpoint, and its connections to other devices.
 #[derive(Default)]
@@ -37,6 +45,8 @@ pub(super) struct Net {
     joining: std::sync::atomic::AtomicUsize,
     /// The removed devices this device told the relay to take out.
     removed: Mutex<std::collections::HashSet<Key>>,
+    /// The connections each client device has open to this one's local API.
+    clients: Mutex<HashMap<Key, Vec<Connection>>>,
 }
 
 /// Why an ask never reached the device.
@@ -228,6 +238,15 @@ impl Node {
     async fn take_client(&self, conn: Connection) {
         let remote = *conn.remote_id().as_bytes();
         let listed = self.client(&remote).is_some();
+        {
+            let mut clients = self.0.net.clients.lock().unwrap();
+            let open = clients.entry(remote).or_default();
+            open.retain(|c| c.close_reason().is_none());
+            if open.len() >= CLIENT_CONNS {
+                return conn.close(2u32.into(), b"too many connections");
+            }
+            open.push(conn.clone());
+        }
         // The certificate checked last, and the session it vouched for: one check a connection, unless it's renewed.
         let vouched: Arc<Mutex<Option<(String, crate::keys::Session)>>> = Arc::default();
         let (node, closing) = (self.clone(), conn.clone());
@@ -247,6 +266,15 @@ impl Node {
                 match who {
                     Ok(key) => {
                         req.extensions_mut().insert(crate::api::FromClient(key));
+                        // What it sends is read in a while and up to a size, but a blob's, which streams.
+                        if !req.uri().path().starts_with("/v1/blobs/") {
+                            let (parts, body) = req.into_parts();
+                            let Ok(Ok(bytes)) = tokio::time::timeout(CLIENT_BODY_TIME, axum::body::to_bytes(body, CLIENT_BODY)).await else {
+                                let said = format!("a request sends at most {} MiB, within {} s", CLIENT_BODY >> 20, CLIENT_BODY_TIME.as_secs());
+                                return axum::response::IntoResponse::into_response((axum::http::StatusCode::PAYLOAD_TOO_LARGE, said));
+                            };
+                            req = axum::extract::Request::from_parts(parts, axum::body::Body::from(bytes));
+                        }
                         next.run(req).await
                     }
                     Err(err) => {
@@ -258,7 +286,16 @@ impl Node {
             }
         }));
         let service = hyper_util::service::TowerToHyperService::new(api);
-        while let Ok((send, recv)) = conn.accept_bi().await {
+        let busy = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        loop {
+            use std::sync::atomic::Ordering::SeqCst;
+            let (send, recv) = match tokio::time::timeout(CLIENT_IDLE, conn.accept_bi()).await {
+                Ok(Ok(stream)) => stream,
+                Ok(Err(_)) => break,
+                // Nothing asked a while, and nothing still answering (events, say): it's let go.
+                Err(_) if busy.load(SeqCst) == 0 => return conn.close(0u32.into(), b"idle"),
+                Err(_) => continue,
+            };
             // A device removed while connected is answered no more (a session's, at its next request).
             if listed && self.client(&remote).is_none() {
                 return conn.close(1u32.into(), b"not a device of this install");
@@ -270,10 +307,13 @@ impl Node {
                 .timer(hyper_util::rt::TokioTimer::new())
                 .header_read_timeout(REQUEST_HEAD)
                 .serve_connection(hyper_util::rt::TokioIo::new(Stream { send, recv }), service.clone());
+            let busy = busy.clone();
+            busy.fetch_add(1, SeqCst);
             tokio::spawn(async move {
                 if let Err(err) = http.await {
                     tracing::debug!("answering {}: {err:#}", short(&remote));
                 }
+                busy.fetch_sub(1, SeqCst);
             });
         }
     }
@@ -385,6 +425,32 @@ impl Node {
     /// Whether `key` is the install's serverless node's endpoint, as `serverless deploy` set it.
     fn is_serverless(&self, key: &Key) -> bool {
         self.with(|i| Ok(i.r.members.settings.get("serverless").is_some_and(|k| *k == hex(key)))).unwrap_or(false)
+    }
+
+    /// Closes the connections of devices the install no longer lists: client devices' to the local API, and those
+    /// held to devices and services.
+    pub(super) fn close_removed(&self) {
+        let (clients, held): (Vec<Key>, Vec<Key>) = (self.0.net.clients.lock().unwrap().keys().copied().collect(), self.0.net.conns.lock().unwrap().keys().copied().collect());
+        let (gone_clients, gone_held): (Vec<Key>, Vec<Key>) = self
+            .with(|i| {
+                let m = &i.r.members;
+                // A session's endpoint, listed nowhere, is cut off at its next request instead.
+                Ok((clients.into_iter().filter(|k| m.machines.contains_key(k) && m.client(k).is_none()).collect(), held.into_iter().filter(|k| m.compute(k).is_none() && m.service(k).is_none() && m.settings.get("serverless").is_none_or(|s| *s != hex(k))).collect()))
+            })
+            .unwrap_or_default();
+        for key in gone_clients {
+            for conn in self.0.net.clients.lock().unwrap().remove(&key).unwrap_or_default() {
+                conn.close(1u32.into(), b"removed from this install");
+            }
+        }
+        for key in gone_held {
+            if let Some(slot) = self.0.net.conns.lock().unwrap().remove(&key)
+                && let Ok(held) = slot.try_lock()
+                && let Some(conn) = held.as_ref()
+            {
+                conn.close(1u32.into(), b"removed from this install");
+            }
+        }
     }
 
     fn conn_slot(&self, to: &Key) -> Arc<tokio::sync::Mutex<Option<Connection>>> {

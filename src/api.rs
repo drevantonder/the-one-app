@@ -978,9 +978,16 @@ async fn client_screen(State(node): State<Node>, me: Me, Path(name): Path<String
     Ok(axum::response::Html(node.client_screen(me.caller, &name, params)?).into_response())
 }
 
-async fn events(State(node): State<Node>) -> Sse<impl tokio_stream::Stream<Item = Result<SseEvent, Infallible>>> {
+async fn events(State(node): State<Node>, me: Me) -> Sse<impl tokio_stream::Stream<Item = Result<SseEvent, Infallible>>> {
+    // Someone other than this machine's person hears only of the apps they reach.
+    let user = (node.user().ok().as_deref() != Some(me.caller.user.as_str())).then_some(me.caller.user);
+    let events = node.clone();
     let stream = BroadcastStream::new(node.subscribe())
         .filter_map(|e| e.ok())
+        .map(move |e| match &user {
+            Some(user) => events.event_for(e, user),
+            None => e,
+        })
         .map(|e| Ok(SseEvent::default().json_data(e).unwrap_or_default()));
     Sse::new(stream).keep_alive(KeepAlive::default())
 }

@@ -559,6 +559,17 @@ impl Node {
         Ok(())
     }
 
+    /// What `user` is told of `event`: of changed apps, only those they reach.
+    pub fn event_for(&self, event: Event, user: &str) -> Event {
+        match event {
+            Event::Changed { apps } => {
+                let apps = self.with(|i| Ok(apps.into_iter().filter(|a| !reachable(i, a, user).is_empty()).collect())).unwrap_or_default();
+                Event::Changed { apps }
+            }
+            other => other,
+        }
+    }
+
     pub fn subscribe(&self) -> broadcast::Receiver<Event> {
         self.0.events.subscribe()
     }
@@ -797,6 +808,9 @@ impl Node {
             self.forget_sessions_of(&handled.lost);
         }
         if handled.members {
+            // A device removed keeps nothing it handed this one, nor its connections.
+            self.forget_removed_clients();
+            self.close_removed();
             self.0.changed.notify_one();
             self.emit(Event::Devices);
             self.seal_epochs();
