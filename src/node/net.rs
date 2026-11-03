@@ -194,6 +194,12 @@ impl Node {
                 *held = Some(conn.clone());
             }
         }
+        self.serve_device(remote, conn).await;
+    }
+
+    /// Answers what another device asks on a connection, whichever of the two opened it: both ends serve one they hold, as
+    /// each may reach the other on whichever is open.
+    async fn serve_device(&self, remote: Key, conn: Connection) {
         while let Ok((mut send, mut recv)) = conn.accept_bi().await {
             // A device removed while connected is answered no more.
             if !self.is_device(&remote) {
@@ -494,6 +500,11 @@ impl Node {
             Err(_) => bail!(NotThere(format!("{} isn't connected", short(to)))),
         };
         *held = Some(conn.clone());
+        if !self.is_service(to) {
+            // The other end asks on it too, once it keeps it for its asks (take_conn).
+            let (node, to, conn) = (self.clone(), *to, conn.clone());
+            tokio::spawn(async move { node.serve_device(to, conn).await });
+        }
         self.caught_up();
         Ok(conn)
     }
