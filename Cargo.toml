@@ -35,7 +35,7 @@ blake3 = "1"
 # Entries are packed in CBOR in the bucket (src/entry.rs); the serverless node reads them too.
 ciborium = "0.2"
 # `serialize` makes and reads an app database's copy in memory (src/db.rs).
-rusqlite = { version = "0.41", features = ["bundled", "limits", "serialize"] }
+rusqlite = { version = "0.41", features = ["bundled", "hooks", "limits", "serialize"] }
 serde = { version = "1", features = ["derive"] }
 sha2 = "0.11"
 serde_json = "1"
