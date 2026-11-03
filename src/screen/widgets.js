@@ -1,6 +1,6 @@
 // Widgets drawn from their trees (`GET /v1/widgets`), in a web page: the pages screen (pages.html) and `one mcp`'s view
 // in chats. The Apple shells draw the same trees natively (apple/Shared/Views/WidgetTree.swift). Nodes it doesn't know
-// draw nothing. Its styles come with it. `host` is what buttons, toggles and links act through: `run(app, op, input)` → the error's text for people if it
+// draw nothing. Its styles come with it. `host` is what buttons, toggles and links act through: `run(app, op, input, widget)` → the error's text for people if it
 // failed, and `follow(link, widget)` for a web page's address or `{ screen, params }`. A tree is the app's, so nothing in
 // it is ever markup: what's drawn is text, a number (`num`), or one of the names here.
 window.oneWidgets = (() => {
@@ -27,6 +27,19 @@ window.oneWidgets = (() => {
   .w-button:disabled { opacity: .5; }
   label.w-toggle { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex: 1; }
   .w-linked { cursor: pointer; }
+  /* Pressed: a soft grey, the same in light and dark. */
+  .w-button:active { background: rgba(128, 128, 128, 0.32); }
+  .w-card.w-linked:active { background-image: linear-gradient(rgba(128, 128, 128, 0.14), rgba(128, 128, 128, 0.14)); }
+  .w-linked:not(.w-card):active, .w-link:active { opacity: .6; }
+  /* Running: a button stays pressed with a spinner in place of its words; a toggle, a spinner beside it. */
+  .w-busy { position: relative; pointer-events: none; }
+  .w-button.w-busy, .w-button.w-busy:disabled { opacity: 1; color: transparent; background: rgba(128, 128, 128, 0.32); }
+  .w-busy::after { content: ""; box-sizing: border-box; flex: none; width: 11px; height: 11px; border-radius: 50%; border: 1.5px solid var(--muted); border-right-color: transparent; animation: w-spin .7s linear infinite; }
+  .w-button.w-busy::after { position: absolute; inset: 0; margin: auto; }
+  @keyframes w-spin { to { rotate: 360deg; } }
+  /* Opening what it links to. */
+  .w-card.w-wait { opacity: .5; pointer-events: none; transition: opacity .2s; }
+  .w-img { background: rgba(128, 128, 128, 0.15); }
   .w-broken { color: var(--warn); font-weight: 500; font-size: 13px; } .w-why { color: var(--muted); font-size: 11px; overflow-wrap: anywhere; user-select: text; }`;
 
   const classes = ["col", "row", "text", "xl", "lg", "sm", "xs", "medium", "bold"];
@@ -169,10 +182,11 @@ window.oneWidgets = (() => {
         break;
       }
       case "image":
-        el = node("img");
+        el = node("img", "w-img");
         el.src = /^(https:|data:image\/)/.test(n.url || "") ? n.url : "";
         el.alt = "";
-        el.style.cssText = `width:${num(n.w) ? num(n.w) + "px" : "100%"};height:${num(n.h) ? num(n.h) + "px" : "auto"};object-fit:cover;border-radius:${n.round ? "50%" : "8px"};flex:none`;
+        // Without a height, a shape of its own (square beside a width, else 16:9), so the card doesn't move when it loads.
+        el.style.cssText = `width:${num(n.w) ? num(n.w) + "px" : "100%"};height:${num(n.h) ? num(n.h) + "px" : "auto"};${num(n.h) ? "" : `aspect-ratio:${num(n.w) ? "1" : "16 / 9"};`}object-fit:cover;border-radius:${n.round ? "50%" : "8px"};flex:none`;
         break;
       case "dot": el = tone(node("span", "w-dot")); break;
       case "icon": {
@@ -214,11 +228,16 @@ window.oneWidgets = (() => {
     if (n.link) { el.classList?.add("w-linked"); el.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); host.follow(n.link, w); }); }
     return el;
 
-    // A button or toggle: runs the app's operation as the person; the host draws the widgets again.
+    // A button or toggle: runs the app's operation as the person, pressed with a spinner meanwhile; the host draws
+    // the widget again. A toggle that failed goes back to how it was.
     async function act(target, op, input) {
+      const shown = target.closest("label") || target;
       target.disabled = true;
-      const error = await host.run(w.app, op, input);
+      shown.classList.add("w-busy");
+      const error = await host.run(w.app, op, input, w);
       target.disabled = false;
+      shown.classList.remove("w-busy");
+      if (error && target.type === "checkbox") target.checked = !target.checked;
       target.title = error || "";
     }
   }

@@ -1,7 +1,8 @@
 // What the pages and Services screens know, the same on every client: the person's pages (theirs, their groups',
 // everyone's), the apps on each and what each offers, all read from the node as the person looking (`one.api`).
 window.home = (() => {
-  const h = { state: null, apps: [], widgets: {}, badges: {} };
+  // `failed`: the pages whose widgets couldn't be read, so theirs stand as grey cards until they can.
+  const h = { state: null, apps: [], widgets: {}, badges: {}, failed: new Set() };
   const me = () => h.state?.user;
   const install = () => h.state?.install;
   const isAdmin = () => me()?.role === "admin";
@@ -83,6 +84,9 @@ window.home = (() => {
     return (h.widgets[p.scope] || []).filter((w) => here.has(w.app));
   }
 
+  /// Whether a page's widgets are still to come: not read yet, or reading them failed.
+  const waiting = (p) => !h.widgets[p.scope] || h.failed.has(p.scope);
+
   const SIZES = ["small", "medium", "large", "xl"];
   const supported = (w) => SIZES.filter((s) => !w.sizes || w.sizes[s]);
   const tree = (w, size) => w.sizes?.[size] || w.root;
@@ -98,7 +102,8 @@ window.home = (() => {
   }
 
   /// What a page shows, in its person's order: the widgets they put there and its apps' icons, those installed since
-  /// they last arranged it at the end, without those they took off it. A page never arranged shows its apps.
+  /// they last arranged it at the end, without those they took off it. A page never arranged shows its apps. A widget
+  /// still to come keeps its place (`pending`), at its size, as a grey card.
   function items(p) {
     const apps = appsOn(p), widgets = widgetsOn(p);
     const arrangement = h.state?.arrangements?.[p.scope];
@@ -107,9 +112,10 @@ window.home = (() => {
     for (const item of arrangement.items || []) {
       if (item.widget) {
         const w = widgets.find((w) => w.app === item.app && w.widget === item.widget);
-        if (!item.id || !w || seen.has(`widget:${item.id}`)) continue;
+        if (!item.id || seen.has(`widget:${item.id}`)) continue;
+        if (!w && !(waiting(p) && h.apps.some((a) => a.name === item.app && scopes(a).includes(p.scope)))) continue;
         seen.add(`widget:${item.id}`);
-        out.push({ widget: placed(w, item), kept: item });
+        out.push(w ? { widget: placed(w, item), kept: item } : { pending: true, kept: item });
       } else {
         const a = apps.find((a) => a.name === item.app);
         if (a && !seen.has(`app:${a.name}`)) {
@@ -144,12 +150,16 @@ window.home = (() => {
   /// Says what went wrong, in the shell's own alert.
   const failed = (err) => one.alert({ title: "Couldn’t Do That", text: one.plain(err).title });
 
-  /// Runs a change, then takes in what it changed; says what went wrong if it failed.
-  async function change(work) {
+  /// Runs a change, then takes in what it changed; says what went wrong if it failed. With `guess`, what it does to
+  /// the apps is drawn at once, and undone if it fails.
+  async function change(work, guess) {
+    const was = h.apps;
+    if (guess) h.apps = guess(h.apps), h.redraw?.();
     try {
       await work();
-      await load();
+      await load(h.redraw);
     } catch (err) {
+      if (guess) h.apps = was, h.redraw?.();
       failed(err);
     }
   }
@@ -160,7 +170,8 @@ window.home = (() => {
     if (settings(a, p)) out.push({ title: "Settings", icon: "gear-six", run: settings(a, p) });
     if (inStore(a)) out.push({ title: "Open in App Store", icon: "bag", run: inStore(a) });
     if (canArrange(p.scope) && (a.deploys || 0) > 0) {
-      out.push({ title: `Remove from ${p.title}`, icon: "minus-circle", danger: true, section: true, run: () => change(() => one.api("POST", "/v1/install", { app: a.name, scope: p.scope, installed: false })) });
+      out.push({ title: `Remove from ${p.title}`, icon: "minus-circle", danger: true, section: true, run: () => change(() => one.api("POST", "/v1/install", { app: a.name, scope: p.scope, installed: false }),
+        (apps) => apps.map((x) => (x.name === a.name ? { ...x, installed: (x.installed || []).filter((s) => (s.startsWith("user:") ? "user" : s) !== p.scope) } : x))) });
     }
     if (owns(a) && (a.deploys || 0) > 0) {
       out.push({
@@ -170,7 +181,7 @@ window.home = (() => {
             title: `Delete ${label(a)}?`, action: "Delete App", danger: true,
             text: `${label(a)} leaves every page, for everyone. Restore it from Recently Deleted in the App Store.`,
           });
-          if (sure) change(() => one.api("POST", "/v1/retire", { app: a.name, how: "deleted" }));
+          if (sure) change(() => one.api("POST", "/v1/retire", { app: a.name, how: "deleted" }), (apps) => apps.filter((x) => x.name !== a.name));
         },
       });
     }
@@ -187,45 +198,68 @@ window.home = (() => {
 
   // MARK: Reading
 
-  /// Loads what the screens show: the node's state, its apps, and each page's widgets and badges.
-  async function load() {
+  /// Loads what the screens show: the node's state, its apps, and each page's widgets and badges. `drawn` runs as
+  /// soon as there's something new to draw: the state and apps, then each page's widgets and badges as they come, so
+  /// a slow one holds up only itself.
+  async function load(drawn) {
     [h.state, h.apps] = await Promise.all([one.api("GET", "/v1/state"), one.api("GET", "/v1/apps")]);
-    await loadWidgets();
+    drawn?.();
+    await loadWidgets(null, drawn);
   }
 
-  async function loadWidgets() {
-    await Promise.all(allPages().map(async (p) => {
-      [h.widgets[p.scope], h.badges[p.scope]] = await Promise.all([
-        one.api("GET", `/v1/widgets?scope=${encodeURIComponent(p.scope)}`).catch(() => h.widgets[p.scope] || []),
-        one.api("GET", `/v1/badges?scope=${encodeURIComponent(p.scope)}`).catch(() => ({})),
-      ]);
-    }));
+  /// Reads the widgets and badges of the pages in `only` (scopes), or of every page.
+  async function loadWidgets(only, drawn) {
+    const q = (p) => `scope=${encodeURIComponent(p.scope)}`;
+    await Promise.all(allPages().filter((p) => !only || only.includes(p.scope)).flatMap((p) => [
+      one.api("GET", `/v1/widgets?${q(p)}`).then((w) => { h.widgets[p.scope] = w; h.failed.delete(p.scope); }, () => void h.failed.add(p.scope)).then(() => drawn?.()),
+      // Badges that couldn't be read stay as they were.
+      one.api("GET", `/v1/badges?${q(p)}`).then((b) => { h.badges[p.scope] = b; }, () => {}).then(() => drawn?.()),
+    ]));
   }
+
+  /// The pages an app is on: those to read again when its data changes.
+  const pagesOf = (names) => allPages().filter((p) => h.apps.some((a) => names.includes(a.name) && scopes(a).includes(p.scope))).map((p) => p.scope);
 
   /// Keeps up: `draw` runs again whenever the node says something changed, and when the soonest widget asks to be
-  /// drawn again (a tree's `next`), between a minute and fifteen from now.
+  /// drawn again (a tree's `next`), between a minute and fifteen from now. An app's data changing reads again only
+  /// the pages it's on; anything else (who's in, what's where, how pages are arranged) reads everything.
   function watch(draw) {
-    let soon, redraw;
-    const again = (work) => {
+    let soon, redraw, all = false;
+    const only = new Set();
+    const again = (these) => {
+      if (these) these.forEach((s) => only.add(s));
+      else all = true;
       clearTimeout(soon);
-      soon = setTimeout(() => work().then(() => { draw(); schedule(); }).catch(() => {}), 250);
+      soon = setTimeout(() => {
+        // The apps too, for their icons.
+        const work = all ? load(draw) : Promise.all([one.api("GET", "/v1/apps").then((a) => { h.apps = a; }), loadWidgets([...only], draw)]);
+        all = false;
+        only.clear();
+        work.then(() => { draw(); schedule(); retry(); }).catch(() => {});
+      }, 250);
     };
+    // Pages whose widgets couldn't be read are asked again in a while.
+    let later;
+    const retry = () => { clearTimeout(later); if (h.failed.size) later = setTimeout(() => again([...h.failed]), 10_000); };
     const schedule = () => {
       clearTimeout(redraw);
       const nexts = [];
       const walk = (n) => { if (n && typeof n === "object") { if (n.next) nexts.push(n.next); (n.c || []).forEach(walk); } };
       Object.values(h.widgets).flat().forEach((w) => Object.values(w.sizes || { root: w.root }).forEach(walk));
-      if (nexts.length) redraw = setTimeout(() => again(loadWidgets), Math.min(15 * 60_000, Math.max(60_000, Math.min(...nexts) - Date.now())));
+      if (nexts.length) redraw = setTimeout(() => again(allPages().map((p) => p.scope)), Math.min(15 * 60_000, Math.max(60_000, Math.min(...nexts) - Date.now())));
     };
     one.on("changed", (e) => {
-      if (["changed", "devices", "install"].includes(e.type)) again(load);
+      if (e.type === "changed" && e.apps?.length) again(pagesOf(e.apps));
+      else if (["changed", "devices", "install"].includes(e.type)) again();
     });
     schedule();
+    retry();
     h.redrawn = schedule;
+    h.redraw = draw;
   }
 
   return {
-    data: h, me, install, label, app, has, hasScreens, allPages, pageChoices, pages, page, canArrange, appsOn, servicesOn, badge, widgetsOn, items,
+    data: h, me, install, label, app, has, hasScreens, allPages, pageChoices, pages, page, canArrange, appsOn, servicesOn, badge, widgetsOn, waiting, items,
     supported, tree, store, open, settings, inStore, addService, openStore, call, failed, change, actions, menu, load, loadWidgets, watch,
   };
 })();
