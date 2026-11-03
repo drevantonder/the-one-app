@@ -142,6 +142,7 @@ window.__one = {};
   // MARK: The node
 
   class NodeError extends Error {}
+  const UNANSWERED = "Your devices aren’t answering. Make sure one of them is on and online.";
 
   /// How long to wait before asking again the `n`th time running (from 0) after the node didn't answer: at once, then
   /// a quarter second, doubling, up to five. A node restarting for an update is back within a moment.
@@ -181,7 +182,7 @@ window.__one = {};
       if (r.status === 401) throw Object.assign(new NodeError("Signed out."), { signedOut: true });
       if (raw && r.ok) return r;
       const out = await r.json().catch(() => null);
-      if (!r.ok || out?.error) throw new NodeError(out?.error || (r.status >= 500 ? "Your devices aren’t answering." : "That didn’t work. Try again."));
+      if (!r.ok || out?.error) throw new NodeError(out?.error || (r.status >= 500 ? UNANSWERED : "That didn’t work. Try again."));
       return out;
     }
   }
@@ -997,17 +998,20 @@ window.__one = {};
     ask(route());
     if (lastWindow()) render();
     else root.innerHTML = `<div class="starting">${one.loading("Starting")}</div>`;
+    // A device that takes the request and never answers (asleep, stuck) is one that can't be reached, while it's still asked.
+    const away = setTimeout(() => $(".window", root) || showUnreachable(UNANSWERED), 15000);
     for (let misses = 1; ; misses++) {
       try {
         await refreshState({ apps: true });
         break;
       } catch (err) {
-        if (err.signedOut) return showSignedOut();
+        if (err.signedOut) return clearTimeout(away), showSignedOut();
         // What it showed last stays, as a screen whose node is restarting does.
-        if (!$(".window", root)) showUnreachable(err instanceof NodeError ? err.message : "Your devices aren’t answering.");
+        if (!$(".window", root)) showUnreachable(err instanceof NodeError ? err.message : UNANSWERED);
         await sleep(retryWait(misses));
       }
     }
+    clearTimeout(away);
     if (request?.id && request.scope) openSheet(own("request", { scope: request.scope, id: request.id }));
     listen();
   }
