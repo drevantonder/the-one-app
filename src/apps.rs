@@ -28,7 +28,7 @@ const PACKAGES: &[(&str, &str, &str)] = &[
     ("x86_64-apple-darwin", "darwin-64", "qjXbqX7J50hqThWbYzT2c5yxr5Ymq6m6WETgPGqOAbIY+aZ11NQhnEV1Vsd/3Ljt97ctApQ1v8aCwX4Fa16nYQ=="),
 ];
 pub const COMPATIBILITY_DATE: &str = "2026-10-01";
-/// How long an app may take to answer before its runtime is restarted.
+/// How long an app may take to answer.
 const TIME_LIMIT: Duration = Duration::from_secs(30);
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -177,7 +177,7 @@ impl Apps {
         self.ask_for(app, what, body, TIME_LIMIT).await
     }
 
-    /// Asks the runtime, stopping it if it takes longer than `limit`.
+    /// Asks the runtime, failing if it takes longer than `limit`, and restarting it if it's stuck.
     async fn ask_for(&self, app: &str, what: &str, body: Value, limit: Duration) -> Result<Value> {
         if !self.has(app) {
             bail!("no app named {app} runs here");
@@ -198,9 +198,14 @@ impl Apps {
             };
             match sent {
                 Ok(mut resp) => Ok(resp.body_mut().with_config().limit(64 << 20).read_json()?),
+                // Only this call fails, unless the runtime is stuck (an app spinning holds its one thread): then
+                // every call is, and it starts again.
                 Err(ureq::Error::Timeout(_)) => {
-                    runtime.restart();
-                    bail!("the app took longer than {}s; it was stopped", limit.as_secs())
+                    if !runtime.answers() {
+                        tracing::warn!("the app runtime is stuck; starting it again");
+                        runtime.restart();
+                    }
+                    bail!("the app took longer than {}s", limit.as_secs())
                 }
                 Err(err) => Err(err.into()),
             }
@@ -263,6 +268,12 @@ impl Runtime {
         if let Some(pid) = *self.pid.lock().unwrap() {
             let _ = std::process::Command::new("kill").arg("-9").arg(pid.to_string()).status();
         }
+    }
+
+    /// Whether the runtime answers at all within a few seconds.
+    fn answers(&self) -> bool {
+        let agent: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(5))).build().into();
+        agent.get(format!("{}/ready", self.base)).call().is_ok()
     }
 
     /// Waits until the runtime answers with the config of `generation`.
