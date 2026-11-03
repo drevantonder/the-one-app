@@ -16,6 +16,13 @@ async function sidecar(ctx, op, input, on) {
   }
 }
 
+/// A short hash of a string (FNV-1a), to tell whether it changed.
+function fnv(s) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 0x01000193);
+  return (h >>> 0).toString(36);
+}
+
 const NEEDS = "Agent Devices needs a device with Podman, or a Mac, and none of yours runs it.";
 const TYPE = "Browser profile";
 
@@ -144,14 +151,20 @@ const PAGE = `
     }
   }
 
+  let listed = ""; // the list's hash: it's sent only when it changed
   async function refresh() {
     try {
-      devices = ((await one.call("_list", {})).devices || []).filter((c) => !c.spare || c.borrowed);
+      const r = await one.call("_list", { have: listed });
+      if (!r.same) {
+        devices = (r.devices || []).filter((c) => !c.spare || c.borrowed);
+        listed = r.hash || "";
+        draw();
+      }
     } catch (e) {
+      listed = "";
       grid.innerHTML = \`<div class="empty error" style="grid-column:1/-1">\${one.esc(one.plain(e).title)}</div>\`;
       return;
     }
-    draw();
     pictures();
   }
 
@@ -444,10 +457,15 @@ export default {
     },
     _list: {
       reads: true,
-      description: "The agent devices on all of your devices: the device each is on and its kind, whether it's running, paused or stopped, its size, the memory and CPU it uses now, who has borrowed it and what for, and of, for a throwaway copy, the lasting device it's a copy of.",
-      input: { type: "object", properties: { here: { type: "boolean", description: "only the ones on this device" } } },
-      // The page's: as the sidecars last knew it, asked again in the background, since it asks every few seconds.
-      run: (ctx, input) => sidecar(ctx, "list", { ...input, kept: true }),
+      description: "For the page: the agent devices on all of your devices, as the sidecars last knew them: the device each is on, its kind, whether it's running, who has borrowed it and what for. None if it's the one the page has (have, its hash).",
+      input: { type: "object", properties: { have: { type: "string" } } },
+      // Only what the page shows, so it's the same until something it shows changes, and then the page is sent it.
+      run: async (ctx, { have }) => {
+        const r = await sidecar(ctx, "list", { kept: true });
+        const devices = (r.devices || []).map(({ name, on, kind, state, borrowed, spare, of }) => ({ name, on, kind, state, borrowed, spare, of }));
+        const hash = fnv(JSON.stringify([devices, r.unreachable]));
+        return have === hash ? { same: true, hash } : { devices, unreachable: r.unreachable, hash };
+      },
     },
     _screen: {
       reads: true,
