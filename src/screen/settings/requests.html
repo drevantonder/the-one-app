@@ -6,7 +6,7 @@
   // trust.
   const esc = one.esc;
   const section = (title, rows) => (rows.length ? `<h2 class="section">${title}</h2><div class="list">${rows.join("")}</div>` : "");
-  const row = (icon, title, sub, button) => `<div class="row">${icon}<div class="main"><div class="title"><span>${esc(title)}</span></div>` +
+  const row = (icon, title, sub, button) => `<div class="row still">${icon}<div class="main"><div class="title"><span>${esc(title)}</span></div>` +
     (sub ? `<div class="sub wrap">${esc(sub)}</div>` : "") + `</div>${button}</div>`;
   const draw = () => one.render("#requests", async () => {
     const [state, apps, asked] = await Promise.all([one.api("GET", "/v1/state"), one.api("GET", "/v1/apps"), one.api("GET", "/v1/vault/requests")]);
@@ -24,18 +24,32 @@
     return section("Vault", vault) + section("Invites", invites) + section("Devices", devices);
   });
 
-  // Each button does its one thing, and the list shows what's left.
+  // A row gone, or back: with the last of its section, the section too.
+  const shown = (row, on) => {
+    row.style.display = on ? "" : "none";
+    const list = row.parentElement, left = [...list.children].some((r) => r.style.display !== "none");
+    list.style.display = list.previousElementSibling.style.display = left ? "" : "none";
+  };
+
+  // Each button does its one thing, and its row goes at once: Join and Trust as they're tapped, put back with why if
+  // they fail; Choose once the item's chosen.
   document.getElementById("requests").addEventListener("click", async (e) => {
     const b = e.target.closest("button[data-request], button[data-join], button[data-trust]");
     if (!b || b.disabled) return;
-    const error = document.getElementById("error");
+    const error = document.getElementById("error"), row = b.closest(".row");
     error.textContent = "";
     b.disabled = true;
     try {
-      if (b.dataset.request) await one.request(b.dataset.scope, b.dataset.request);
-      if (b.dataset.join) await one.api("POST", "/v1/accept", { group: b.dataset.join });
-      if (b.dataset.trust) await one.api("POST", "/v1/trust", { device: b.dataset.trust, trust: true });
+      if (b.dataset.request) {
+        if (await one.request(b.dataset.scope, b.dataset.request)) shown(row, false);
+      } else {
+        shown(row, false);
+        one.tap();
+        if (b.dataset.join) await one.api("POST", "/v1/accept", { group: b.dataset.join });
+        if (b.dataset.trust) await one.api("POST", "/v1/trust", { device: b.dataset.trust, trust: true });
+      }
     } catch (err) {
+      shown(row, true);
       error.textContent = one.plain(err).title;
     }
     b.disabled = false;

@@ -29,7 +29,7 @@
         : `<label class="pick">${role === "admin" ? "Admin" : "Member"}<select aria-label="${one.esc(u.name)}'s role" data-user="${one.esc(u.id)}">
             <option value="admin"${role === "admin" ? " selected" : ""}>Admin</option><option value="member"${role === "member" ? " selected" : ""}>Member</option>
             <option disabled>──────</option><option value="">Remove ${one.esc(u.name)}</option></select></label>`;
-      return `<div class="row">${one.avatar(u.id, u.name)}<div class="main"><div class="title"><span>${one.esc(u.name)}${u.id === me ? " (you)" : ""}</span></div></div>${trailing}</div>`;
+      return `<div class="row still">${one.avatar(u.id, u.name)}<div class="main"><div class="title"><span>${one.esc(u.name)}${u.id === me ? " (you)" : ""}</span></div></div>${trailing}</div>`;
     });
     let html = `<div class="large-title">Users</div><div class="list">${rows.join("")}</div><div id="confirm"></div>`;
     html += error ? `<p class="footer error">${one.esc(error)}</p>` : "";
@@ -82,7 +82,7 @@
     name.oninput = () => (go.disabled = !name.value.trim());
     name.onkeydown = (e) => e.key === "Enter" && !go.disabled && go.click();
     go.onclick = async () => {
-      go.disabled = true;
+      const back = one.busy(go);
       try {
         const who = name.value.trim();
         const { link, until } = await one.api("POST", "/v1/invite-link", { name: who });
@@ -94,6 +94,7 @@
       } catch (e) {
         note.className = "footer error";
         note.textContent = one.plain(e).title;
+        back();
         go.disabled = false;
       }
     };

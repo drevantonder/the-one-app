@@ -21,6 +21,8 @@
   const esc = one.esc;
   let request, apps = [], picked = null, error = "", busy = false;
   const values = {};
+  // In the button tapped, from the tap until the answer is in.
+  const spin = `<span class="spinner small" aria-hidden="true"></span>`;
   one.title("Vault");
 
   /// A field's name as a person reads it: "api_key" → "API key".
@@ -47,9 +49,9 @@
           wanted.map((f) => `<label class="row plain"><span class="name">${esc(fieldLabel(f.name))}</span><input data-field="${esc(f.name)}" type="${f.secret ? "password" : "text"}" autocomplete="${f.secret ? "new-password" : "off"}" spellcheck="false" value="${esc(values[f.name] || "")}"></label>`).join("") +
           `</div>${request.hosts?.length ? `<div class="footer">Sent only to ${esc(request.hosts.join(", "))}</div>` : ""}`;
       }
-      html += `<div class="list"><button class="row plain decline" data-decline>Decline</button></div>`;
+      html += `<div class="list"><button class="row plain decline" data-decline${busy ? " disabled" : ""}>${busy === "decline" ? `${spin}Declining…` : "Decline"}</button></div>`;
       if (error) html += `<div class="error">${esc(error)}</div>`;
-      html += `<div class="allow"><button class="button primary" data-allow>Allow</button></div>`;
+      html += `<div class="allow"><button class="button primary" data-allow>${busy === "allow" ? `${spin}Allowing…` : "Allow"}</button></div>`;
     } else {
       html += `<div class="list"><div class="row plain muted">${esc(request.state === "set" ? "Allowed." : request.state === "declined" ? "Declined." : `This request expired. Ask ${asker} to ask again.`)}</div></div>`;
     }
@@ -65,7 +67,7 @@
 
   async function answer(declined) {
     if (busy) return;
-    busy = true;
+    busy = declined ? "decline" : "allow";
     error = "";
     draw();
     const body = { scope: request.scope, id: request.id };
@@ -82,7 +84,7 @@
       one.tap(declined ? "selection" : "success");
       one.close(!declined);
     } catch (err) {
-      error = err.message;
+      error = one.plain(err).title;
       busy = false;
       draw();
     }

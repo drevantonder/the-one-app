@@ -50,7 +50,7 @@
 
   // A row is tapped to remove it, unless it's the device looking.
   const row = ({ key, name, online, lines, trailing, removable }) =>
-    `<${removable ? `a class="row" data-remove="${one.esc(key)}"` : 'div class="row"'}>
+    `<${removable ? `a class="row" data-remove="${one.esc(key)}"` : 'div class="row still"'}>
       <div class="tile${online ? "" : " off"}">${one.icon(icon(name || "phone"))}</div>
       <div class="main"><div class="title"><span>${one.esc(shown(name) || "Phone")}</span></div>${subs(...lines)}</div>${trailing}</${removable ? "a" : "div"}>`;
 
@@ -138,7 +138,7 @@
     const t = e.target;
     if (t.id === "name") rename(t);
     else if (t.dataset.trust) trust(t.dataset.trust, t);
-    else if (t.dataset.place) place(t.dataset.place, t.value, t);
+    else if (t.dataset.place) place(t.dataset.place, t.value);
   });
   document.addEventListener("click", (e) => {
     const t = e.target.closest?.("[data-remove], [data-pair], [data-out]");
@@ -154,14 +154,22 @@
     act(() => one.api("POST", "/v1/name", { name }));
   }
 
+  // Trusting a device and choosing where things run show at once (the page drawn as it will be), then go to the node;
+  // what failed goes back as it was when the page is drawn again.
+  const now = () => one.render("#page", async () => page());
   function trust(device, input) {
     one.tap();
+    const s = state.install.devices.find((x) => x.key === device);
+    s.trusted_by = input.checked ? [...(s.trusted_by || []), me()] : (s.trusted_by || []).filter((u) => u !== me());
+    now();
     act(() => one.api("POST", "/v1/trust", { device, trust: input.checked }));
   }
 
-  function place(device, use, select) {
+  function place(device, use) {
     one.tap();
-    select.disabled = true;
+    const s = device === "cloudflare" ? state.install.serverless : state.install.devices.find((x) => x.key === device);
+    if (s) s.use = use;
+    now();
     act(() => one.api("POST", "/v1/use", { device, use }));
   }
 
