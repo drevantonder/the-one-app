@@ -8,8 +8,9 @@ set -eu
 if [ -n "${CONFIG:-}" ]; then CONFIG="$(cd "$(dirname "$CONFIG")" && pwd)/$(basename "$CONFIG")"; export CONFIG; fi
 cd "$(dirname "$0")"
 export ANDROID_HOME="${ANDROID_HOME:-$HOME/Android/Sdk}"
-# No daemon: one left idle holds GBs on machines many agents share, and a warm one built no faster there.
-./gradlew --quiet --no-daemon assembleRelease
+# No daemon: one left idle holds GBs on machines many agents share, and a warm one built no faster there. Its
+# single-use one is listed in this checkout only, so another's `gradlew --stop` can't stop this build.
+./gradlew --quiet --no-daemon -Dorg.gradle.daemon.registry.base="$PWD/.gradle/daemon" assembleRelease
 config="${CONFIG:-../config.toml}"
 cli=$(sed -n '/^\[/q; s/^cli *= *"\([^"]*\)".*/\1/p' "$config")
 mkdir -p build
