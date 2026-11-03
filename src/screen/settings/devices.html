@@ -27,6 +27,8 @@
   let error = "";
   // A new device's code, from its QR's link (`/approve#CODE`), asked about once.
   let scanned = one.params?.approve || "";
+  // An app's screen sends its person here to choose a device to keep it running (`keep`, in `scope`), asked once.
+  let keepAsked = one.params?.keep ? { app: String(one.params.keep), scope: one.params.scope && String(one.params.scope) } : null;
 
   const me = () => state.user?.id;
   const shown = (name) => (name.endsWith(".local") ? name.slice(0, -6) : name);
@@ -83,13 +85,45 @@
     return html + `<p class="footer">Things run on the first device here that’s on and has room.</p>`;
   };
 
-  // "linux keeps WhatsApp running for you", until it's removed.
+  // Standing work: "linux keeps WhatsApp running for you", until when, with Stop. It lasts 30 days, and longer as
+  // they use the app.
+  const appTitle = (name) => apps.find((a) => a.name === name)?.title || name;
+  const forWhom = (scope) => (scope === `user:${me()}` ? "you" : scope === "global" ? "everyone" : state.install?.groups.find((g) => `group:${g.id}` === scope)?.name || "a group");
   const grantRow = (g) => {
-    const on = [...(state.install?.devices || []), ...(state.install?.clients || [])].find((d) => d.key === g.endpoint);
-    const title = apps.find((a) => a.name === g.app)?.title || g.app;
-    return `<div class="row plain"><div class="main"><div class="title"><span>${one.esc(shown(on?.name || "A device"))} keeps ${one.esc(title)} running for you</span></div></div>` +
-      `<button class="button plain small" data-grant='${one.esc(JSON.stringify(g))}'>Remove</button></div>`;
+    const on = (state.install?.devices || []).find((d) => d.key === g.endpoint);
+    const until = new Date(g.until).toLocaleDateString(undefined, { day: "numeric", month: "long" });
+    return `<div class="row plain"><div class="main"><div class="title"><span>${one.esc(shown(on?.name || "A device"))} keeps ${one.esc(appTitle(g.app))} running for ${one.esc(forWhom(g.scope))}</span></div>` +
+      `${subs(`Until ${until}, and longer as ${g.scope === `user:${me()}` ? "you use it" : "it’s used"}`)}</div>` +
+      `<button class="button plain small" data-grant='${one.esc(JSON.stringify({ device: g.endpoint, app: g.app, scope: g.scope }))}'>Stop</button></div>`;
   };
+  // The devices that may keep an app running in a scope: those that hold it.
+  const keepers = (scope) => (state.install?.devices || []).filter((d) => (d.runs_for || []).includes(scope));
+
+  /// Asks which app (unless it's given) and which device keeps it running, then grants it.
+  function keep({ app, scope } = {}) {
+    scope ||= `user:${me()}`;
+    const { body, close } = one.sheet({ title: app ? `Keep ${appTitle(app)} Running` : "Keep an App Running", done: "Cancel", onClose: draw });
+    const choose = (rows, footer) => (body.innerHTML = `<div class="list">${rows.join("") || '<div class="row plain"><div class="main"><div class="sub">None yet</div></div></div>'}</div><p class="footer">${one.esc(footer)}</p><div id="keep-error"></div>`);
+    const pick = (name, data) => `<a class="row plain go" ${data}><div class="main"><div class="title"><span>${one.esc(name)}</span></div></div><span class="chev">${one.icon("caret-right")}</span></a>`;
+    const devices = () => {
+      const on = keepers(scope);
+      choose(on.map((d) => pick(shown(d.name), `data-keep-device="${one.esc(d.key)}"`)), `Its schedules run on the device you choose, which holds ${appTitle(app)}’s keys alone, while it’s on.`);
+    };
+    body.addEventListener("click", async (e) => {
+      const t = e.target.closest("[data-keep-app], [data-keep-device]");
+      if (t?.dataset.keepApp) return ((app = t.dataset.keepApp), devices());
+      if (!t?.dataset.keepDevice) return;
+      try {
+        await one.api("POST", "/v1/grant", { device: t.dataset.keepDevice, app, scope });
+        close();
+      } catch (err) {
+        body.querySelector("#keep-error").innerHTML = one.banner(err, { retry: false });
+      }
+    });
+    if (app) return devices();
+    const scheduled = apps.filter((a) => (a.schedules || []).some((s) => s.scope === scope && !s.removed));
+    choose(scheduled.map((a) => pick(a.title || a.name, `data-keep-app="${one.esc(a.name)}"`)), "Apps that run on their own, every so often.");
+  }
 
   // Where their own things run: the machines that run things, each with a switch. Their own machines always do; the
   // rest only as their own device says (`runs`), which only they change.
@@ -129,7 +163,8 @@
         '<div id="approve"></div><p class="footer">Type the code it shows, or scan its QR code with your phone.</p>';
       if (passkey) html += `<div class="list passkey"><a class="row plain action-row" data-passkey>${one.icon("key")}<span>Use this passkey to get back in if you lose your devices</span></a></div>`;
       const grants = (state.install?.grants || []).filter((g) => g.until > Date.now());
-      if (grants.length) html += '<h2 class="section">Kept Running</h2><div class="list">' + grants.map(grantRow).join("") + "</div>";
+      html += '<h2 class="section">Kept Running</h2><div class="list">' + grants.map(grantRow).join("") +
+        `<a class="row plain action-row" data-keep>${one.icon("arrows-clockwise")}<span>Keep an App Running…</span></a></div>`;
     }
     if (others.length) html += '<h2 class="section">Shared Devices</h2><div class="list">' + others.map(deviceRow).join("") + "</div>";
     html += orderSection();
@@ -146,7 +181,7 @@
     [state, device] = await Promise.all([one.api("GET", "/v1/state"), one.device()]);
     if (device.keys) {
       passkey = (await one.api("GET", "/v1/devices/passkey").catch(() => ({}))).passkey === true;
-      if ((state.install?.grants || []).length && !apps.length) apps = await one.api("GET", "/v1/apps").catch(() => []);
+      if (!apps.length) apps = await one.api("GET", "/v1/apps").catch(() => []);
     }
     const html = page();
     // Not while they're naming this device or answering a question.
@@ -172,12 +207,13 @@
     else if (t.dataset.runs) runs(t.dataset.runs, t.checked);
   });
   document.addEventListener("click", (e) => {
-    const t = e.target.closest?.("[data-more], [data-pair], [data-out], [data-passkey], [data-grant]");
+    if (e.target.closest(".sheet")) return;
+    const t = e.target.closest?.("[data-more], [data-pair], [data-out], [data-passkey], [data-grant], [data-keep]");
     if (t?.hasAttribute("data-out")) signOut();
+    else if (t?.hasAttribute("data-keep")) keep();
     else if (t?.hasAttribute("data-passkey")) act(() => one.api("POST", "/v1/devices/passkey", {}));
     else if (t?.dataset.grant) {
-      const g = JSON.parse(t.dataset.grant);
-      act(() => one.api("POST", "/v1/grant", { endpoint: g.endpoint, scope: g.scope, app: g.app }));
+      act(() => one.api("POST", "/v1/grant", { ...JSON.parse(t.dataset.grant), days: 0 }));
     }
     else if (t?.hasAttribute("data-more")) menu(t.closest("[data-device]").dataset.device, t);
     else if (t) pair();
@@ -277,5 +313,8 @@
   }
 
   one.on("changed", draw);
-  draw().then(() => scanned && (approve(scanned), (scanned = "")));
+  draw().then(() => {
+    if (scanned) approve(scanned), (scanned = "");
+    if (keepAsked && device.keys) keep(keepAsked), (keepAsked = null);
+  });
 </script>

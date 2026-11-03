@@ -1,5 +1,4 @@
 // The kernel's formats, for tests/contracts.rs to check against the Rust that reads them: POST { op, ... } → result.
-import { next, when } from "../schedules/worker.js";
 import { b64u, canonical, certify, checkCertificate, epochHash, checkEntry, checkRequest, databaseKey, ed25519Public, epochOf, hex, idOf, inviteProof, joinCode, keyPair, open, openAppKey, openHandoff, openSealed, openUnder, passkeyKeys, seal, sealAppKey, sealHandoff, sealTo, sealUnder, signEntry, signedRequest, tokenId, twinPublic, x25519Public } from "../shared/crypto.js";
 import { members } from "../web/members.js";
 
@@ -9,9 +8,6 @@ const ops = {
     const made = await certify(b64u.decode(seed), await ed25519Public(b64u.decode(seed)), hex.decode(endpoint), until, at);
     const checked = await Promise.all(check.map((c) => checkCertificate(c, now).catch((err) => ({ error: String(err.message || err) }))));
     return { made, checked };
-  },
-  async next({ spec, now }) {
-    return { next: next(when(spec), now) };
   },
   async sealAppKey({ scopeKey, app, key }) {
     return { sealed: b64u.encode(await sealAppKey(b64u.decode(scopeKey), app, b64u.decode(key))) };

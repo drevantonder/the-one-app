@@ -42,6 +42,8 @@ pub use devices::{DeviceRequest, Invited};
 pub use net::{alpn, relay, service_alpn};
 pub use sessions::{Needs, client_token, passed_token};
 mod sidecars;
+mod standing;
+pub use standing::GRANT_DAYS;
 mod state;
 mod status;
 mod storage;
@@ -367,6 +369,8 @@ pub struct Inner {
     forgotten: Mutex<()>,
     /// What the vault gave this device for the sign-ins its calls came with.
     sessions: sessions::Sessions,
+    /// The keys of the apps this device keeps running for their people.
+    standing: standing::Standing,
     /// This device's iroh endpoint.
     net: net::Net,
     /// How many times its deploys were settled (`settle`), the first once its apps are loaded.
@@ -487,6 +491,7 @@ impl Node {
             unshared: Mutex::new(Vec::new()),
             forgotten: Mutex::new(()),
             sessions: Default::default(),
+            standing: Default::default(),
             net: Default::default(),
             settled: tokio::sync::watch::channel(0).0,
             settling: tokio::sync::Mutex::new(()),
@@ -518,6 +523,7 @@ impl Node {
         tokio::spawn(node.clone().presence_loop());
         tokio::spawn(node.clone().tick_loop());
         tokio::spawn(node.clone().backup_loop());
+        tokio::spawn(node.clone().schedule_loop());
         tokio::spawn(node.clone().update_loop());
         let worker = node.clone();
         tokio::spawn(async move {

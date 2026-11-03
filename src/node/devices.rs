@@ -60,8 +60,10 @@ impl Node {
 
     /// Keeps a key sealed by a device of `caller`'s, who may use the scope: epoch `n` sealed to `to`, an endpoint listed
     /// as someone's who may use the scope (or the recovery key, or a new epoch, only by one who may start it), only if
-    /// it isn't there (→ `{}`); or an app's key in epoch `n`, if it isn't there (→ `{ sealed }`, whichever is there
-    /// now, which every device then uses).
+    /// it isn't there (→ `{}`); an app's key in epoch `n`, if it isn't there (→ `{ sealed }`, whichever is there
+    /// now, which every device then uses); or with both, an app's key in epoch `n` sealed to `to`, an endpoint of the
+    /// install that will keep the app running there (`keys::grant_name`), by one who may grant that (→ `{}`, there
+    /// already or not: its `grant` entry names the hash of the one it means).
     pub async fn seal_key(&self, caller: &Caller, scope: &Scope, n: u32, to: Option<&str>, app: Option<&str>, sealed: &str) -> Result<Value> {
         let sealed = B64U.decode(sealed.trim().as_bytes()).map_err(|_| anyhow!("sealed is base64url"))?;
         ensure!(!sealed.is_empty() && sealed.len() <= SEALED_MAX, "a sealed key is at most {SEALED_MAX} bytes");
@@ -102,7 +104,20 @@ impl Node {
                 };
                 Ok(json!({ "sealed": B64U.encode(&there) }))
             }
-            _ => bail!("give to (an endpoint's key, or recovery) or app"),
+            (Some(to), Some(app)) => {
+                ensure!(members::valid_app_name(app), "{app} isn't an app's name");
+                let key = crate::keys::unhex(to)?;
+                self.with(|i| {
+                    let m = &i.r.members;
+                    ensure!(m.grants_in(&caller.user, scope), "only {scope}'s person, or its group's admins, keep its apps running");
+                    ensure!(m.machine(&key).is_some(), "that endpoint isn't one of the install's");
+                    Ok(())
+                })?;
+                ensure!(n >= 1 && n <= newest, "{scope} has no epoch {n}: its newest is {newest}");
+                crate::db::created(&bucket, &crate::keys::grant_name(&name, app, to, n), &sealed).await?;
+                Ok(json!({}))
+            }
+            _ => bail!("give to (an endpoint's key, or recovery), app, or both"),
         }
     }
 }

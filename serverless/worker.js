@@ -1005,8 +1005,7 @@ async function route(p, request) {
     return screenOf(p, who, view, app, screenAt[2], params, url.searchParams.get("scope"));
   }
   // The rest is a machine's when one answers; while none does, this node answers what it can.
-  // A scheduled run answers once it's run, as a call does.
-  const r = await fromMachine(request, p.env, path === "/v1/events" ? 5_000 : path === "/v1/kernel/run" ? 120_000 : 8_000);
+  const r = await fromMachine(request, p.env, path === "/v1/events" ? 5_000 : 8_000);
   if (r) return r;
   const own = request.method === "GET" && path.startsWith("/v1/client-screens/");
   if (own || (request.method === "GET" && ["/v1/state", "/v1/apps", "/v1/widgets", "/v1/badges", "/v1/events"].includes(path))) {

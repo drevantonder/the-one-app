@@ -204,9 +204,7 @@ fn start_new(dir: &Path) -> Result<String> {
     // Read back as the kernel reads it, with its secrets.
     let settings = load_kernel(dir)?;
     spawn_kernel(dir, &settings)?;
-    for (name, value) in [("address", &settings.address), ("kernel_schedules", &settings.schedules_url)] {
-        crate::request(agent().post(on("/v1/settings")).send_json(json!({ "name": name, "value": value })))?;
-    }
+    crate::request(agent().post(on("/v1/settings")).send_json(json!({ "name": "address", "value": &settings.address })))?;
     // Its data moves to the try bucket, which its node reaches only through the kernel's URL signer from then on.
     let moved = crate::request(agent().post(on("/v1/storage")).send_json(json!({ "endpoint": format!("http://{bucket}"), "bucket": "try" })))?;
     anyhow::ensure!(moved["id"].is_string(), "the try install's node couldn't reach its bucket through the URL signer: {moved}");
@@ -682,7 +680,7 @@ fn device_client(dir: &Path, checkout: &Path, settings: &one::kernel::Settings, 
             device
         }
     };
-    let port = settings.ports[2];
+    let port = settings.ports[1];
     agent_devices("reach", json!({ "device": device, "port": port }))?;
     // A native client reads who's who from the bucket itself, at the URLs the signer gives it: the try bucket's port.
     if let Some(bucket) = std::fs::read_to_string(dir.join("bucket-addr")).ok().and_then(|a| a.trim().rsplit_once(':').and_then(|(_, p)| p.parse::<u16>().ok())) {

@@ -1,4 +1,4 @@
-//! The kernel services (`kernel/`: auth, schedules, the relay, the URL signer) as nodes meet them: the formats they agree on
+//! The kernel services (`kernel/`: auth, the relay, the URL signer) as nodes meet them: the formats they agree on
 //! (`kernel/shared/crypto.js` writes the same ones, and `tests/contracts.rs` checks they do), checking access tokens,
 //! and building and running the services in workerd.
 
@@ -199,20 +199,6 @@ impl Issuer {
         }
         unreachable!("the second try returns")
     }
-}
-
-// The schedules service, as nodes meet it.
-
-/// A run the schedules service hands a node: `POST <address>/v1/kernel/run`, its token as the bearer. `run` names
-/// it, the same each time it's sent, so a node that leases by it runs it once.
-#[derive(Debug, Clone, Deserialize)]
-pub struct Run {
-    pub run: String,
-    pub app: String,
-    pub schedule: String,
-    pub op: String,
-    pub input: Value,
-    pub scope: String,
 }
 
 #[cfg(feature = "node")]

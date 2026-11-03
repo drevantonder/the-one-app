@@ -232,9 +232,12 @@ impl Node {
         (until > 0).then(|| crate::keys::seal_handoff(to, &crate::keys::Handoff { for_: crate::keys::token_id(token), until, keys }).ok()).flatten()
     }
 
-    /// The keys a token caller was handed for a database, by epoch.
+    /// The keys a token caller was handed for a database, by epoch: for standing work, its grant's.
     fn handed(&self, me: &Caller, scope: &Scope, app: &str, database: &str) -> Keys {
         let Some(token) = &me.token else { return Keys::new() };
+        if token.starts_with(standing::GRANT) {
+            return self.standing_handed(token, scope, app, database);
+        }
         let kept = self.0.sessions.kept.lock().unwrap();
         kept.get(&hash(token)).filter(|s| s.until > now_ms()).and_then(|s| s.keys.get(&(scope.to_string(), app.to_string(), database.to_string())).cloned()).unwrap_or_default()
     }
@@ -274,8 +277,8 @@ impl Node {
         Needs { need, to: hex(&me.key), seal: hex(&me.seal) }
     }
 
-    /// A call's database: for a token caller, opened with the keys it was handed, and kept open here no longer than
-    /// its token lasts; else with this device's own, for its own person alone.
+    /// A call's database: for a token caller, opened with the keys it was handed (standing work: its grant's), and
+    /// kept open here no longer than its token (or grant) lasts; else with this device's own, for its own person alone.
     pub(super) async fn call_database(&self, me: &Caller, scope: &Scope, app: &str, database: &str, schema: Option<Vec<String>>) -> Result<(Arc<tokio::sync::Mutex<Db>>, Copied)> {
         let bucket = self.bucket()?;
         let Some(token) = &me.token else {
@@ -294,7 +297,10 @@ impl Node {
             }
             Ok(db) => db,
         };
-        let until = self.0.sessions.kept.lock().unwrap().get(&hash(token)).map(|s| s.until).unwrap_or(0);
+        let until = match token.starts_with(standing::GRANT) {
+            true => self.standing_until(token),
+            false => self.0.sessions.kept.lock().unwrap().get(&hash(token)).map(|s| s.until).unwrap_or(0),
+        };
         let mut opened = self.0.sessions.opened.lock().unwrap();
         let at = opened.entry((scope.clone(), format!("{app}/{database}"))).or_default();
         *at = (*at).max(until);

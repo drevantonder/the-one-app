@@ -1,5 +1,5 @@
-//! Schedules: an app's operations that run on their own, every so often or at a time of day.
-//! The kernel's schedules service runs them (src/node/scheduled.rs).
+//! Schedules: an app's operations that run on their own, every so often or at a time of day, on the machine keeping the
+//! app running (src/node/scheduled.rs).
 
 use anyhow::{Context as _, Result, bail, ensure};
 use serde_json::{Value, json};

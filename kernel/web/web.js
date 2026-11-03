@@ -250,7 +250,10 @@ window.__one = {};
 
   /// Runs an app's operation as this person → its result.
   async function call(app, op, input = {}) {
-    return (await api("/v1/call", { method: "POST", body: { app, op, input, client: "web" } })).ok;
+    const out = (await api("/v1/call", { method: "POST", body: { app, op, input, client: "web" } })).ok;
+    // Using an app keeps the devices keeping it running for this person doing so.
+    device?.renew(app);
+    return out;
   }
 
   // MARK: What the window shows
@@ -780,7 +783,9 @@ window.__one = {};
           return reply(await call(r.app, String(m.op || ""), m.input ?? {}));
         case "open": {
           const params = JSON.stringify(m.params || {});
-          const to = typeof m.app === "string" && m.app ? { kind: "screen", app: m.app, screen: String(m.screen || "main"), params, scope: m.scope || r.scope }
+          // Any screen may send its person to choose the device that keeps its app running, in Settings › Devices.
+          const to = m.app === "settings" && m.screen === "devices" ? { kind: "own", name: "devices", params }
+            : typeof m.app === "string" && m.app ? { kind: "screen", app: m.app, screen: String(m.screen || "main"), params, scope: m.scope || r.scope }
             : mine ? { kind: "own", name: String(m.screen || ""), params }
             : { kind: "screen", app: r.app, screen: String(m.screen || "main"), params, scope: m.scope || r.scope };
           if (m.sheet) return reply(await openSheet(to));
@@ -1001,7 +1006,8 @@ window.__one = {};
     // An app on everyone's page is a change to who can do what; on yours or a group's, a node writes it.
     "POST /v1/install": (b) => (b.scope === "global" ? write(members.install({ app: b.app, installed: b.installed !== false })) : api("/v1/install", { method: "POST", body: b })),
     "POST /v1/invite-link": (b) => device.invite(String(b.name || "")),
-    "POST /v1/grant": (b) => write(members.grant({ endpoint: b.endpoint, scope: b.scope, app: b.app, until: 0 })),
+    // As a machine's node answers it: `device` by its key; `scope` user (theirs), global or group:<id>; `days`, 0 to stop.
+    "POST /v1/grant": (b) => device.grant({ endpoint: String(b.device || ""), app: String(b.app || ""), scope: !b.scope || b.scope === "user" ? `user:${me().id}` : String(b.scope), days: b.days ?? undefined }),
     "GET /v1/devices/passkey": async () => ({ passkey: !!passkeyToList() }),
     // As a machine's node answers it: without `confirm`, which device it is; with, it's let in.
     "POST /v1/devices/approve": async (b) => {

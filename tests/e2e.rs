@@ -567,6 +567,87 @@ async fn epochs_are_sealed_only_to_the_scopes_endpoints() {
     assert!(format!("{again:#}").contains("already"), "what's sealed is never replaced: {again:#}");
 }
 
+/// Standing work: a device that keeps an app running in a scope is sealed that app's key there and nothing else of the
+/// scope, which opens that app's databases and no other's; it runs the app's calls there with it alone, and only
+/// while the grant lasts. A device with no grant is sealed nothing.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_grant_opens_only_its_app_in_its_scope_while_it_lasts() {
+    use one::entry::{Scope, hex};
+    eprintln!("GRANTS 1");
+    let dir = temp("grants");
+    eprintln!("GRANTS 2");
+    std::fs::write(dir.join("device.json"), json!({ "secret": hex(&rand::random()), "name": "mac" }).to_string()).unwrap();
+    eprintln!("GRANTS 3");
+    let a = Node::start(&dir, one::sidecars::built_in()).await.unwrap();
+    eprintln!("GRANTS 4");
+    a.create("Home", "Andre").await.unwrap();
+    eprintln!("GRANTS 5");
+    let me = one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None, token: None };
+    eprintln!("GRANTS 6");
+    let mine = Scope::User(me.user.clone());
+    eprintln!("GRANTS 7");
+    let writes = |app: &str| format!(r#"export default {{ name: "{app}", schema: {{ user: ["create table t (x)"] }}, ops: {{ add: {{ description: "", input: {{}}, run: (ctx) => {{ ctx.user.exec("insert into t values (1)"); return "ok"; }} }} }} }};"#);
+    eprintln!("GRANTS 8");
+    for app in ["tick", "notes"] {
+        deploy_module(&a, app, &writes(app)).await;
+        a.install(&me, app, &mine, true).await.unwrap();
+        eventually("the app to run", async || a.call(CallRequest { scopes: Some(vec!["user".into()]), ..call(app, "add", json!({})) }).await.is_ok()).await;
+    }
+    // linux, a machine of Andre's that runs calls and opens nothing of his itself.
+    let linux = ed25519_dalek::SigningKey::from_bytes(&rand::random());
+    eprintln!("GRANTS 15");
+    a.append(&Scope::Global, one::members::device(&one::keys::Endpoint::of(&linux), &me.user, "linux", &[one::members::Kind::Compute], None)).await.unwrap();
+    eprintln!("GRANTS 16");
+    let bucket = dir.join("install/bucket");
+    eprintln!("GRANTS 17");
+    let opened = |key: &ed25519_dalek::SigningKey| -> Vec<(String, Vec<u8>)> {
+        walk(&bucket).into_iter().filter_map(|f| Some((f.strip_prefix(&bucket).unwrap().to_string_lossy().to_string(), one::kernel::open_sealed(&one::keys::seal_secret(key), &std::fs::read(&f).ok()?).ok()?))).collect()
+    };
+    eprintln!("GRANTS 20");
+    assert!(opened(&linux).is_empty(), "a device with no grant opens nothing");
+    eprintln!("GRANTS 21");
+
+    a.keep_running(&me, "linux", "tick", &mine, 30).await.unwrap();
+    eprintln!("GRANTS 23");
+    let folder = one::bucket::folder(&mine.to_string());
+    eprintln!("GRANTS 24");
+    let got = opened(&linux);
+    eprintln!("GRANTS 25");
+    assert_eq!(got.iter().map(|(n, _)| n.clone()).collect::<Vec<_>>(), vec![format!("{folder}/tick/_grants/{}/1", hex(&linux.verifying_key().to_bytes()))], "only tick's key in Andre's scope");
+    eprintln!("GRANTS 26");
+    let tick: [u8; 32] = got[0].1.clone().try_into().unwrap();
+    eprintln!("GRANTS 27");
+    let main = one::kernel::database_key(&tick, "main");
+    eprintln!("GRANTS 28");
+    let opens = |app: &str| walk(&bucket.join(&folder).join(app).join("main")).iter().filter(|f| f.file_name().unwrap() != "newest").any(|f| {
+        let name = f.strip_prefix(&bucket).unwrap().to_string_lossy().to_string();
+        one::keys::open(&main, &name, &std::fs::read(f).unwrap()).is_ok()
+    });
+    eprintln!("GRANTS 32");
+    assert!(opens("tick") && !opens("notes"), "its key opens tick's data and not notes'");
+    eprintln!("GRANTS 33");
+
+    // This device runs the standing work it keeps, with its grant's keys alone: tick's, while it lasts.
+    let add = async |app: &str| a.standing_call(&mine, app, &me.user, "add", json!({}), "schedule").await;
+    eprintln!("GRANTS 36");
+    assert!(add("tick").await.is_err(), "mac keeps nothing running yet");
+    eprintln!("GRANTS 37");
+    a.keep_running(&me, "mac", "tick", &mine, 30).await.unwrap();
+    eprintln!("GRANTS 38");
+    add("tick").await.unwrap();
+    eprintln!("GRANTS 39");
+    let refused = add("notes").await.unwrap_err();
+    eprintln!("GRANTS 40");
+    assert!(format!("{refused:#}").contains("doesn't keep notes running"), "{refused:#}");
+    eprintln!("GRANTS 41");
+    a.keep_running(&me, "mac", "tick", &mine, 0).await.unwrap();
+    eprintln!("GRANTS 42");
+    let stopped = add("tick").await.unwrap_err();
+    eprintln!("GRANTS 43");
+    assert!(format!("{stopped:#}").contains("doesn't keep tick running"), "{stopped:#}");
+    eprintln!("GRANTS 44");
+}
+
 /// A device is approved only by its person's own device, or a newcomer's by the admin whose invite their proof was made
 /// with; a device removed opens no epoch made after.
 #[tokio::test(flavor = "multi_thread")]

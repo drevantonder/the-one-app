@@ -195,11 +195,13 @@ fn merge(cuts: &mut Cuts, more: &Cuts) -> bool {
     changed
 }
 
-/// A grant of standing work: who gave it, and until when.
+/// A grant of standing work: who gave it, until when, and the hash (`keys::epoch_hash`) of the app's key in each epoch
+/// it sealed to the endpoint (`keys::grant_name`), so the endpoint takes from the bucket only those.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Grant {
     pub by: String,
     pub until: u64,
+    pub hashes: BTreeMap<u32, String>,
 }
 
 /// A scope's epoch: its number, the endpoints it was first sealed to (`keys::epoch_name`), besides the recovery key,
@@ -293,9 +295,20 @@ impl Members {
         self.machine(key).map(|m| m.seal)
     }
 
-    /// The grants of standing work in force at `now`: (endpoint, scope, app) each.
-    pub fn grants_at(&self, now: u64) -> impl Iterator<Item = &(Key, Scope, String)> {
-        self.grants.iter().filter(move |(_, g)| g.until > now).map(|(k, _)| k)
+    /// The grants of standing work in force at `now`, each by (endpoint, scope, app): not expired, to an endpoint still
+    /// listed, by someone who may still grant there.
+    pub fn grants_at(&self, now: u64) -> impl Iterator<Item = (&(Key, Scope, String), &Grant)> {
+        self.grants.iter().filter(move |((k, s, _), g)| g.until > now && self.machine(k).is_some() && self.grants_in(&g.by, s))
+    }
+
+    /// Whether `user` may grant standing work in a scope: their own, a group's they're an admin of, or `global` as an
+    /// admin of the install.
+    pub fn grants_in(&self, user: &str, scope: &Scope) -> bool {
+        match scope {
+            Scope::User(u) => u == user && self.user(user).is_some(),
+            Scope::Group(g) => self.group_role(user, g) == Some(Role::Admin),
+            Scope::Global => self.is_admin(user),
+        }
     }
 
     // Who is who.
@@ -586,17 +599,18 @@ impl Members {
                 let endpoint = key_of("endpoint")?;
                 let scope = Scope::parse(&text("scope")?)?;
                 let app = text("app")?;
+                // The node's own databases of a scope (its log, its Vault) are never an app's to keep running.
+                ensure!(valid_app_name(&app), "standing work is an app's");
                 let until = data["until"].as_u64().context("no until")?;
-                let allowed = match &scope {
-                    Scope::User(u) => *u == w,
-                    Scope::Group(g) => self.group_role(&w, g) == Some(Role::Admin),
-                    Scope::Global => self.is_admin(&w),
-                };
-                ensure!(allowed, "only the scope's person, or its group's admins, grant standing work in it");
+                let mut hashes = BTreeMap::new();
+                for (n, h) in data["keys"].as_object().into_iter().flatten() {
+                    hashes.insert(n.parse::<u32>().context("an epoch is a number")?, epoch_hash_of(h)?);
+                }
+                ensure!(self.grants_in(&w, &scope), "only the scope's person, or its group's admins, grant standing work in it");
                 ensure!(until == 0 || self.machine(&endpoint).is_some(), "no such endpoint");
                 match until {
                     0 => drop(self.grants.remove(&(endpoint, scope, app))),
-                    until => drop(self.grants.insert((endpoint, scope, app), Grant { by: w, until })),
+                    until => drop(self.grants.insert((endpoint, scope, app), Grant { by: w, until, hashes })),
                 }
             }
             "group" => {
@@ -1074,8 +1088,9 @@ pub fn runs(on: &[Key]) -> Content {
 }
 
 /// Standing work: `endpoint` keeps `app` running in `scope` until `until`, or no longer with 0.
-pub fn grant(endpoint: &Key, scope: &Scope, app: &str, until: u64) -> Content {
-    node("grant", json!({ "endpoint": hex(endpoint), "scope": scope.to_string(), "app": app, "until": until }))
+pub fn grant(endpoint: &Key, scope: &Scope, app: &str, until: u64, keys: &BTreeMap<u32, String>) -> Content {
+    let keys: serde_json::Map<String, Value> = keys.iter().map(|(n, h)| (n.to_string(), json!(h))).collect();
+    node("grant", json!({ "endpoint": hex(endpoint), "scope": scope.to_string(), "app": app, "until": until, "keys": keys }))
 }
 
 /// Deletes an app (`deleted`), restores it (`restored`) or erases it (`erased`), as its owner (`owner`) says.
@@ -1407,5 +1422,45 @@ mod tests {
         assert!(keys(BOB, &[Scope::Global, bob]).is_empty(), "nor a call that reaches it");
         assert!(keys(BOB, &[andre]).is_empty(), "nor Andre's, which Bob may not use");
         assert!(keys("stranger", &[Scope::Global]).is_empty());
+    }
+
+    #[test]
+    fn only_a_scopes_person_or_its_groups_admins_keep_its_apps_running_until_it_ends() {
+        let (mut mac, mut entries) = setup();
+        let (mut bobs, linux) = (Dev::new(3), Dev::new(4));
+        add(&mut entries, &mut mac, ANDRE, device(&linux.endpoint(), ANDRE, "linux", &[Kind::Compute], None));
+        add(&mut entries, &mut mac, ANDRE, device(&bobs.endpoint(), BOB, "bob's phone", &[Kind::Client], Some(("Bob", Role::Member))));
+        add(&mut entries, &mut mac, ANDRE, group("f000000000000003", "Family"));
+        add(&mut entries, &mut mac, ANDRE, invite("f000000000000003", BOB, Role::Member));
+        add(&mut entries, &mut bobs, BOB, accept("f000000000000003"));
+        let (andre, family, keys) = (Scope::User(ANDRE.into()), Scope::Group("f000000000000003".into()), BTreeMap::from([(1, H.repeat(64))]));
+        let kept = |entries: &[Entry], scope: &Scope, now: u64| members(entries).grants_at(now).any(|((k, s, a), _)| *k == linux.id() && s == scope && a == "whatsapp");
+
+        // Bob keeps nothing running in Andre's scope, nor, as a member, in the group's; Andre does in both.
+        add(&mut entries, &mut bobs, BOB, grant(&linux.id(), &andre, "whatsapp", 100, &keys));
+        add(&mut entries, &mut bobs, BOB, grant(&linux.id(), &family, "whatsapp", 100, &keys));
+        assert!(!kept(&entries, &andre, 0) && !kept(&entries, &family, 0));
+        add(&mut entries, &mut mac, ANDRE, grant(&linux.id(), &andre, "whatsapp", 100, &keys));
+        add(&mut entries, &mut mac, ANDRE, grant(&linux.id(), &family, "whatsapp", 100, &keys));
+        assert!(kept(&entries, &andre, 0) && kept(&entries, &family, 0));
+        assert_eq!(members(&entries).grants[&(linux.id(), andre.clone(), "whatsapp".into())].hashes, keys, "it names the keys it sealed");
+        add(&mut entries, &mut mac, ANDRE, grant(&linux.id(), &andre, APP, 100, &keys));
+        assert!(!members(&entries).grants.keys().any(|(_, _, a)| a == APP), "the node's own databases are no app's to keep running");
+
+        // It ends when it expires; Bob, a member, doesn't stop it; Andre stops it with 0.
+        assert!(!kept(&entries, &andre, 100), "expired");
+        add(&mut entries, &mut bobs, BOB, grant(&linux.id(), &andre, "whatsapp", 0, &BTreeMap::new()));
+        assert!(kept(&entries, &andre, 0));
+        add(&mut entries, &mut mac, ANDRE, grant(&linux.id(), &andre, "whatsapp", 0, &BTreeMap::new()));
+        assert!(!kept(&entries, &andre, 0), "stopped");
+
+        // The group's ends when its granter is no longer an admin of it, and every grant to a device ends with it.
+        add(&mut entries, &mut mac, ANDRE, member("f000000000000003", BOB, Some(Role::Admin)));
+        add(&mut entries, &mut mac, ANDRE, member("f000000000000003", ANDRE, None));
+        assert!(!kept(&entries, &family, 0), "its granter left the group");
+        add(&mut entries, &mut bobs, BOB, grant(&linux.id(), &family, "whatsapp", 100, &keys));
+        assert!(kept(&entries, &family, 0), "the group's new admin keeps it running");
+        add(&mut entries, &mut mac, ANDRE, remove_device(&linux.id(), None));
+        assert!(!kept(&entries, &family, 0), "linux was removed");
     }
 }

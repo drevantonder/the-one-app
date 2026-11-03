@@ -1,150 +1,89 @@
-//! Schedules: the kernel's schedules service runs them, each with only the keys of the scope and app
-//! its person let it use. A node tells the service what runs as a signed-in person whenever they change it, and runs
-//! each slot the service hands in (`POST /v1/kernel/run`) as that person, with the run's own token.
+//! Schedules: an app's schedules run on the machine its person chose to keep the app running (a grant, src/node/
+//! standing.rs), from its node, with the grant's keys alone: each slot once, whichever such machine takes it first,
+//! and none while every one is off.
 
 use std::collections::BTreeSet;
 
 use super::*;
 
+/// How often the node looks for schedules that are due.
+const TICK: Duration = Duration::from_secs(10);
+
 impl Node {
-    /// The schedules service the install's schedules run from, once its kernel is set up: (the install's address, the
-    /// service's).
-    pub fn schedules_service(&self) -> Option<(String, String)> {
-        self.with(|i| {
-            let s = &i.r.members.settings;
-            Ok(s.get("address").cloned().zip(s.get("kernel_schedules").cloned()))
-        })
-        .ok()
-        .flatten()
-    }
-
-    /// Refuses, before anything is written, what would make a schedule of one of `apps` run as `me` on a One App whose
-    /// schedules run from its kernel, when `me` isn't signed in: the schedules service takes a schedule only with a
-    /// sign-in's token, so it would show on and never run.
-    pub(super) async fn may_schedule(&self, me: &Caller, apps: &[&str]) -> Result<()> {
-        if self.schedules_service().is_none() || me.token.as_deref().is_some_and(|t| !t.starts_with("run.")) {
-            return Ok(());
-        }
-        let declared = self.declared().await;
-        if let Some((app, _)) = declared.iter().find(|(a, list)| apps.contains(&a.as_str()) && list.iter().any(Result::is_ok)) {
-            bail!("sign in first ({} sign-in): {app}'s schedules run only for someone signed in", crate::config::CLI);
-        }
-        Ok(())
-    }
-
-    /// Brings what `me` has let run at the schedules service in line with the schedules that run as them here, in the
-    /// background: after they install an app, or switch one of its schedules.
-    pub(super) fn sync_schedules_later(&self, me: &Caller) {
-        let (node, me) = (self.clone(), me.clone());
-        tokio::spawn(async move {
-            if let Err(err) = node.sync_schedules(&me).await {
-                tracing::warn!("telling the schedules service what runs as {}: {err:#}", me.user);
+    /// Runs the schedules due of each app this device keeps running, every `TICK`, for as long as the node runs.
+    pub(super) async fn schedule_loop(self) {
+        // Each schedule's next slot, by (scope, app, schedule), with what it was worked out from.
+        let mut next: HashMap<(Scope, String, String), (Value, u64)> = HashMap::new();
+        loop {
+            tokio::time::sleep(TICK).await;
+            self.forget_standing();
+            if let Err(err) = self.run_due(&mut next).await {
+                tracing::debug!("schedules: {err:#}");
             }
-        });
+        }
     }
 
-    /// Lets each schedule that runs as `me` here run at the schedules service, and stops each there that doesn't: one
-    /// whose app was removed, that was switched off, or whose deploy changed when it runs.
-    pub(super) async fn sync_schedules(&self, me: &Caller) -> Result<()> {
-        let Some((address, service)) = self.schedules_service() else { return Ok(()) };
-        let token = me.token.clone().filter(|t| !t.starts_with("run.")).with_context(|| format!("sign in first ({} sign-in): schedules here run from your One App's kernel, with what your sign-in lets them use", crate::config::CLI))?;
+    /// Starts each schedule whose slot came, of the apps this device keeps running: one first seen waits for its next
+    /// slot, so nothing missed while it was off runs late.
+    async fn run_due(&self, next: &mut HashMap<(Scope, String, String), (Value, u64)>) -> Result<()> {
+        let now = now_ms();
         let declared = self.declared().await;
-        // (scope, app, schedule) → when it runs, as the service says it.
-        let want: BTreeMap<(String, String, String), (Value, Schedule)> = self.with(|i| {
+        let due = self.with(|i| {
             let m = &i.r.members;
-            let mut want = BTreeMap::new();
-            for (log, (_, state)) in &i.views {
-                let Ok(scope) = Scope::parse(log) else { continue };
-                for (app, list) in declared.iter().filter(|(app, _)| state.installed.contains(app)) {
-                    for s in list.iter().filter_map(|s| s.as_ref().ok()) {
-                        if runs_as(m, state, &scope, app, &s.name).as_deref() == Some(me.user.as_str()) {
-                            want.insert((scope.to_string(), app.clone(), s.name.clone()), (when(&s.spec()), s.clone()));
-                        }
+            let mut due = Vec::new();
+            let mut seen = BTreeSet::new();
+            for ((_, scope, app), _) in m.grants_at(now).filter(|((k, ..), _)| *k == self.0.id) {
+                let Some((_, state)) = i.views.get(&scope.to_string()).filter(|(_, s)| s.installed.contains(app)) else { continue };
+                let Some((_, list)) = declared.iter().find(|(a, _)| a == app) else { continue };
+                for s in list.iter().filter_map(|s| s.as_ref().ok()) {
+                    let Some(user) = runs_as(m, state, scope, app, &s.name) else { continue };
+                    let id = (scope.clone(), app.clone(), s.name.clone());
+                    seen.insert(id.clone());
+                    let spec = s.spec();
+                    let at = match next.get(&id).filter(|(was, _)| *was == spec) {
+                        Some((_, at)) => *at,
+                        None => s.next(now).unwrap_or(u64::MAX),
+                    };
+                    if at <= now {
+                        due.push((scope.clone(), app.clone(), s.clone(), user, at));
                     }
+                    next.insert(id, (spec, if at <= now { s.next(now).unwrap_or(u64::MAX) } else { at }));
                 }
             }
-            Ok(want)
+            next.retain(|id, _| seen.contains(id));
+            Ok(due)
         })?;
-        let ask = |method: &'static str, path: String, body: Option<Value>| {
-            let (url, token) = (format!("{}{path}", service.trim_end_matches('/')), token.clone());
-            async move {
-                tokio::task::spawn_blocking(move || -> Result<Value> {
-                    let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).timeout_global(Some(Duration::from_secs(30))).build().into();
-                    let bearer = format!("Bearer {token}");
-                    let mut resp = match (method, body) {
-                        ("GET", _) => agent.get(&url).header("authorization", &bearer).call()?,
-                        ("DELETE", _) => agent.delete(&url).header("authorization", &bearer).call()?,
-                        (_, body) => agent.post(&url).header("authorization", &bearer).send_json(body.unwrap_or_default())?,
-                    };
-                    let out: Value = resp.body_mut().read_json().unwrap_or(Value::Null);
-                    ensure!(resp.status() == 200, "the schedules service said: {}", out["error"].as_str().unwrap_or("nothing"));
-                    Ok(out)
-                })
-                .await?
-            }
-        };
-        let mut have = BTreeSet::new();
-        for s in ask("GET", "/schedules".into(), None).await?["schedules"].as_array().cloned().unwrap_or_default() {
-            let id = (s["scope"].as_str().unwrap_or("").to_string(), s["app"].as_str().unwrap_or("").to_string(), s["name"].as_str().unwrap_or("").to_string());
-            if want.get(&id).is_some_and(|(w, _)| *w == when(&s)) && s["node"].as_str() == Some(address.as_str()) {
-                have.insert(id);
-            } else {
-                ask("DELETE", format!("/schedules/{}", s["id"].as_str().unwrap_or("")), None).await?;
-            }
-        }
-        for ((scope, app, name), (when, schedule)) in want.into_iter().filter(|(id, _)| !have.contains(id)) {
-            let title = self.0.apps.describe(&app).await.ok().and_then(|d| d["title"].as_str().map(str::to_string)).unwrap_or_else(|| app.clone());
-            let mut body = json!({
-                "app": app, "name": name, "scope": scope, "op": schedule.op, "input": schedule.input, "node": address,
-                "title": if schedule.description.is_empty() { name.clone() } else { schedule.description.clone() },
-                "what": title,
+        for (scope, app, schedule, user, slot) in due {
+            let node = self.clone();
+            tokio::spawn(async move {
+                if let Err(err) = node.run_schedule(&scope, &app, &schedule, &user, slot).await {
+                    tracing::warn!("{app}'s schedule {} in {scope}: {err:#}", schedule.name);
+                }
             });
-            for (k, v) in when.as_object().into_iter().flatten() {
-                body[k] = v.clone();
-            }
-            ask("POST", "/schedules".into(), Some(body)).await?;
         }
         Ok(())
     }
 
-    /// Runs a slot the schedules service handed in, as the person who let it run, with the run's token (its keys
-    /// reach only that scope and app): once, whichever device takes its slot first, and only while it still runs as
-    /// them here. How it went is written as every run's is.
-    pub async fn kernel_run(&self, me: &Caller, run: &crate::kernel::Run) -> Result<Value> {
-        let scope = Scope::parse(&run.scope)?;
-        let slot: u64 = run.run.rsplit_once('/').and_then(|(_, s)| s.parse().ok()).context("that isn't a run of a schedule's slot")?;
-        let schedule = self.0.apps.describe(&run.app).await.ok().and_then(|d| Schedule::all(&d).into_iter().filter_map(Result::ok).find(|s| s.name == run.schedule));
-        let schedule = schedule.with_context(|| format!("{}'s latest deploy has no schedule {}", run.app, run.schedule))?;
-        let title = self.title(&run.app).await;
-        self.with(|i| {
-            let name = scope_name(i, &run.scope);
-            let state = i.views.get(&scope.to_string()).map(|(_, s)| s).with_context(|| format!("This device can't open {name} yet."))?;
-            ensure!(state.installed.contains(&run.app), "{title} isn't on {name}.");
-            ensure!(runs_as(&i.r.members, state, &scope, &run.app, &run.schedule).as_deref() == Some(me.user.as_str()), "{} doesn't run as you in {name} any more.", run.schedule);
-            Ok(())
-        })?;
-        let lease = format!("{}/{}/slots/{}/{}/{slot}", crate::bucket::folder(&scope.to_string()), members::APP, run.app, schedule.name);
+    /// Runs one slot of a schedule here, as whom it runs as, with the grant's keys: once, whichever device takes its
+    /// slot first. How it went is written as every run's is, where this device opens the scope's own rows.
+    async fn run_schedule(&self, scope: &Scope, app: &str, schedule: &Schedule, user: &str, slot: u64) -> Result<()> {
+        self.standing_keys(scope, app).await?;
+        let lease = format!("{}/{}/slots/{app}/{}/{slot}", crate::bucket::folder(&scope.to_string()), members::APP, schedule.name);
         if !crate::bucket::Bucket::create(&self.bucket()?, &lease, hex(&self.0.id).as_bytes()).await? {
-            return Ok(json!({ "ran": "already" }));
+            return Ok(());
         }
         let started = Instant::now();
-        let req = CallRequest { app: run.app.clone(), op: schedule.op.clone(), input: schedule.input.clone(), scopes: Some(vec![scope.to_string()]), client: Some("schedule".into()), ..Default::default() };
-        let ran = match self.count(&run.app, "schedule").await {
+        let ran = match self.count(app, "schedule").await {
             Err(err) => Err(err),
-            Ok(()) => Box::pin(self.route(req, me.clone())).await,
+            Ok(()) => self.standing_call(scope, app, user, &schedule.op, schedule.input.clone(), "schedule").await,
         };
         let error = ran.as_ref().err().map(|e| format!("{e:#}").chars().take(500).collect::<String>());
-        let said = status::Run { slot, time: now_ms(), device: self.0.id, user: me.user.clone(), ok: error.is_none(), error, ms: started.elapsed().as_millis() as u64, spec: schedule.spec() };
-        self.say(&scope, status::Said::Ran { app: run.app.clone(), schedule: schedule.name.clone(), run: said }).await?;
-        Ok(json!({ "ran": ran.is_ok() }))
-    }
-}
-
-/// When a schedule runs, as the schedules service keeps it: `{ every }` or `{ at, tz, days }`.
-fn when(spec: &Value) -> Value {
-    match spec["every"].as_str() {
-        Some(every) => json!({ "every": every }),
-        None => json!({ "at": spec["at"], "tz": spec["tz"].as_str().unwrap_or("UTC"), "days": spec["days"].as_array().cloned().unwrap_or_default() }),
+        let said = status::Run { slot, time: now_ms(), device: self.0.id, user: user.to_string(), ok: error.is_none(), error, ms: started.elapsed().as_millis() as u64, spec: schedule.spec() };
+        // The scope's own rows open only with its epochs, which a machine that only keeps the app running hasn't.
+        if let Err(err) = self.say(scope, status::Said::Ran { app: app.to_string(), schedule: schedule.name.clone(), run: said }).await {
+            tracing::debug!("{app}'s run of {} in {scope} isn't written: {err:#}", schedule.name);
+        }
+        ran.map(|_| ())
     }
 }
 
@@ -211,12 +150,14 @@ impl Node {
                 }
                 let status = i.status.get(&scope.to_string()).cloned().unwrap_or_default();
                 let scope_name = handles(m, std::slice::from_ref(&scope), &viewer.user).remove(0).name;
+                // The devices that keep it running there: none, and its schedules don't run.
+                let kept_by: Vec<String> = m.grants_at(now).filter(|((_, s, a), _)| *s == scope && a == app).filter_map(|((k, ..), _)| m.machine(k).map(|d| d.name.clone())).collect();
                 let base = |name: &str| {
                     let key = (app.to_string(), name.to_string());
                     let runs = status.runs.get(&key);
                     let last = runs.and_then(|r| r.last()).map(|r| json!({ "time": r.time, "ok": r.ok, "error": r.error }));
                     let changed = status.changed.get(&key).filter(|(.., t)| now.saturating_sub(*t) < CHANGED_SHOWN).map(|(was, is, t)| json!({ "was": schedules::say(was), "is": schedules::say(is), "time": t }));
-                    json!({ "name": name, "scope": scope.to_string(), "scope_name": scope_name, "may_switch": members::manages_scope(m, &viewer.user, &scope), "last": last, "changed": changed })
+                    json!({ "name": name, "scope": scope.to_string(), "scope_name": scope_name, "may_switch": members::manages_scope(m, &viewer.user, &scope), "may_keep": m.grants_in(&viewer.user, &scope), "kept_by": kept_by, "last": last, "changed": changed })
                 };
                 for s in declared {
                     let mut v = match s {
@@ -230,7 +171,7 @@ impl Node {
                             v["on"] = json!(switched.is_none_or(|(on, ..)| *on));
                             v["switched"] = json!(switched.map(|(on, by, t)| json!({ "on": on, "by": user_name(by), "time": t })));
                             v["runs_as"] = json!(user.as_deref().map(user_name));
-                            v["next"] = json!(user.and(s.next(now)));
+                            v["next"] = json!(user.filter(|_| !kept_by.is_empty()).and(s.next(now)));
                             v
                         }
                         Err((name, why)) => {
@@ -272,13 +213,7 @@ impl Node {
     pub async fn switch_schedule(&self, caller: &Caller, app: &str, schedule: &str, scope: &Scope, on: bool) -> Result<()> {
         let title = self.title(app).await;
         let content = self.with(|i| switch_entry(i, &caller.user, scope, app, &title, schedule, on))?;
-        if on {
-            self.may_schedule(caller, &[app]).await?;
-        }
         self.append_as(scope, &caller.user, content).await?;
-        if self.schedules_service().is_some() && caller.token.is_some() {
-            self.sync_schedules(caller).await.context("it's switched, but the schedules service didn't take it")?;
-        }
         Ok(())
     }
 }

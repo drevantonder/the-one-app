@@ -14,6 +14,9 @@ import { members } from "./members.js";
 
 const text = new TextEncoder();
 
+/// How long standing work lasts (src/node/standing.rs), unless its person renews it as they use the app.
+const GRANT_DAYS = 30, DAY = 86_400_000;
+
 // MARK: Kept in this browser
 
 const raw = async (key) => new Uint8Array(await crypto.subtle.exportKey("raw", key));
@@ -79,6 +82,8 @@ export class Device {
     this.dbKeys = new Map();
     /// What each kind of request needed the last time, and the node that said so (`one.needs`, which names no key).
     this.needs = JSON.parse(localStorage.getItem("one.needs") || "{}");
+    /// The grants this browser is renewing now.
+    this.renewing = new Set();
   }
 
   get user() {
@@ -174,6 +179,15 @@ export class Device {
     const id = `${scope} ${app}`;
     const had = this.appKeys.get(id)?.get(n);
     if (had) return had;
+    const key = await hkdfKey(await this.appKeyBytes(scope, app, n));
+    if (!this.appKeys.has(id)) this.appKeys.set(id, new Map());
+    this.appKeys.get(id).set(n, key);
+    return key;
+  }
+
+  /// An app's key in epoch `n` of a scope as its bytes, opened now (for sealing it to a device that keeps the app
+  /// running): the one sealed under the epoch, or a new one if it has none yet.
+  async appKeyBytes(scope, app, n) {
     const epoch = await this.epoch(scope, n);
     let sealed = (await this.api(`/v1/keys?scope=${encodeURIComponent(scope)}&app=${encodeURIComponent(app)}`)).sealed?.[n];
     if (!sealed) {
@@ -181,10 +195,44 @@ export class Device {
       sealed = (await this.api("/v1/keys", { method: "POST", body: { scope, n, app, sealed: b64u.encode(await sealAppKey(epoch, app, made)) } })).sealed;
       made.fill(0);
     }
-    const key = await hkdfKey(await openAppKey(epoch, app, b64u.decode(sealed)));
-    if (!this.appKeys.has(id)) this.appKeys.set(id, new Map());
-    this.appKeys.get(id).set(n, key);
-    return key;
+    return openAppKey(epoch, app, b64u.decode(sealed));
+  }
+
+  // Standing work.
+
+  /// Keeps `app` running in `scope` on one of the install's devices (`endpoint`) for `days`, 30 at most (0 stops it):
+  /// the app's key in each epoch of the scope, sealed to it first, then the `grant` naming each one's hash.
+  async grant({ endpoint, app, scope, days = GRANT_DAYS }) {
+    const st = this.state();
+    const e = st.install.devices.find((d) => d.key === endpoint);
+    if (!e) throw new Error("That device isn’t one of yours.");
+    const until = days === 0 ? 0 : Date.now() + Math.min(days, GRANT_DAYS) * DAY;
+    const keys = {};
+    if (until) {
+      const made = Object.keys(st.install.epochs?.[scope]?.hashes || {}).map(Number);
+      for (const n of made.length ? made : [1]) {
+        const key = await this.appKeyBytes(scope, app, n);
+        await this.api("/v1/keys", { method: "POST", body: { scope, n, app, to: endpoint, sealed: b64u.encode(await sealTo(hex.decode(e.seal), key)) } });
+        keys[n] = await epochHash(key);
+        key.fill(0);
+      }
+    }
+    await this.write("global", members.grant({ endpoint, scope, app, until, keys }));
+  }
+
+  /// Renews, in the background, this person's grants of `app` as they use it: once a day at most, and at once when
+  /// the scope has an epoch a grant's keys don't reach.
+  renew(app) {
+    const st = this.state(), now = Date.now();
+    for (const g of st.install?.grants || []) {
+      const newest = st.install.epochs?.[g.scope]?.n || 0;
+      const reaches = Math.max(0, ...Object.keys(g.keys || {}).map(Number));
+      if (g.app !== app || g.by !== this.user || g.until <= now || (g.until > now + (GRANT_DAYS - 1) * DAY && reaches >= newest)) continue;
+      const id = `${g.endpoint} ${g.scope} ${g.app}`;
+      if (this.renewing.has(id)) continue;
+      this.renewing.add(id);
+      this.grant({ endpoint: g.endpoint, app: g.app, scope: g.scope }).catch(() => {}).finally(() => this.renewing.delete(id));
+    }
   }
 
   async databaseKey({ scope, app, database, epoch }) {

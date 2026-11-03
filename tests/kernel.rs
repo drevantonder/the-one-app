@@ -392,9 +392,8 @@ impl Kernel {
     fn start_as(node_url: Option<String>, google: bool, devices: Vec<String>, serverless: Option<(Vec<(String, &'static str, Vec<u8>)>, u64)>, mcp: Option<kernel::Modules>) -> Kernel {
         let gateway = port();
         let mut settings = kernel::Settings::new("Test", &format!("http://localhost:{gateway}"));
-        settings.ports = [port(), port(), gateway];
+        settings.ports = [port(), gateway];
         settings.auth_url = format!("http://127.0.0.1:{}", settings.ports[0]);
-        settings.schedules_url = format!("http://127.0.0.1:{}", settings.ports[1]);
         settings.resources = vec![RESOURCE.into()];
         settings.node_url = node_url;
         settings.devices = devices;

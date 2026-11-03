@@ -6,6 +6,7 @@
 //! <folder>/_epochs/<n>/<endpoint key hex>   epoch n's key, sealed to that endpoint's seal key (`kernel::seal_to`)
 //! <folder>/_epochs/<n>/recovery             and to the install's recovery key
 //! <folder>/<app>/_key/<n>                    the app's key in epoch n, sealed under epoch n's key (`kernel::seal_app_key`)
+//! <folder>/<app>/_grants/<endpoint>/<n>      and sealed to an endpoint a `grant` keeps it running on (`kernel::seal_to`)
 //! ```
 //!
 //! An endpoint is known by its Ed25519 key, which signs, and things are sealed to its X25519 key: for one in Rust, its
@@ -153,7 +154,7 @@ pub fn epoch_name(scope: &str, n: u32, to: &str) -> String {
 }
 
 /// What an `epoch` entry says of its key, so a device takes a key from the bucket as epoch n only if it's the one the
-/// signed entry made: HKDF-SHA256(key, "one/epoch-hash"), hex.
+/// signed entry made, and a `grant` of each app key it seals: HKDF-SHA256(key, "one/epoch-hash"), hex.
 pub fn epoch_hash(key: &[u8; 32]) -> String {
     HEXLOWER.encode(&hkdf(key, b"one/epoch-hash"))
 }
@@ -161,6 +162,12 @@ pub fn epoch_hash(key: &[u8; 32]) -> String {
 /// Where an app's key in epoch `n` of a scope is kept, sealed under that epoch's key.
 pub fn app_key_name(scope: &str, app: &str, n: u32) -> String {
     format!("{}/{app}/_key/{n}", crate::bucket::folder(scope))
+}
+
+/// Where an app's key in epoch `n` of a scope is kept sealed to an endpoint that keeps the app running there (a
+/// `grant`, for standing work): its key in hex.
+pub fn grant_name(scope: &str, app: &str, endpoint: &str, n: u32) -> String {
+    format!("{}/{app}/_grants/{endpoint}/{n}", crate::bucket::folder(scope))
 }
 
 /// Seals an object under an epoch's key (or a key from it) and its name: epoch (u32, big-endian) ‖ nonce ‖

@@ -194,6 +194,7 @@ pub fn routes() -> Router<Node> {
         .route("/v1/devices/requests", get(device_requests))
         .route("/v1/services/install-link", post(install_link))
         .route("/v1/devices/approve", post(approve))
+        .route("/v1/grant", post(grant))
         .route("/v1/accept", post(accept))
         .route("/v1/member", post(member))
         .route("/v1/app", post(app))
@@ -205,7 +206,6 @@ pub fn routes() -> Router<Node> {
         .route("/v1/sidecar", post(sidecar))
         .route("/v1/fork", post(fork))
         .route("/v1/source/{app}", get(source))
-        .route("/v1/kernel/run", post(kernel_run))
         .route("/v1/storage", get(storage_get).post(storage_post))
         .route("/v1/storage/{op}", post(storage_post))
         .route("/v1/tunnel", get(tunnel_get).post(tunnel_post))
@@ -276,8 +276,6 @@ pub const SIGNED_IN: &[&str] = &[
     "/v1/member",
     "/v1/backups",
     "/v1/backups/{op}",
-    // A run the schedules service hands in, with its own token.
-    "/v1/kernel/run",
 ];
 
 /// The skills for this machine's person (src/skills.rs).
@@ -388,14 +386,10 @@ async fn only_this_machine(State(node): State<Node>, mut req: axum::extract::Req
         if !SIGNED_IN.contains(&path.as_str()) && !from_this_machine(&node, &req) {
             return refuse(req, (StatusCode::FORBIDDEN, Json(json!({ "error": "only this machine's own programs may use this" }))).into_response()).await;
         }
-        // A run the schedules service hands in brings a token for that alone.
-        if token.starts_with("run.") != (path == "/v1/kernel/run") {
-            return refuse(req, (StatusCode::FORBIDDEN, Json(json!({ "error": "only a scheduled run asks that, and it asks nothing else" }))).into_response()).await;
-        }
         return match signed_in(&node, token.clone()).await {
             // This machine's own programs, signed in as its node's own person, are this device's own client: they
             // use its keys, as when not signed in.
-            Ok(me) if from_this_machine(&node, &req) && node.user().is_ok_and(|u| u == me.caller.user) && !token.starts_with("run.") => next.run(req).await,
+            Ok(me) if from_this_machine(&node, &req) && node.user().is_ok_and(|u| u == me.caller.user) => next.run(req).await,
             Ok(me) => {
                 // The keys its caller hands this device for the token's calls, sealed to it.
                 if let Some(handed) = req.headers().get(KEYS_HEADER).and_then(|h| h.to_str().ok())
@@ -419,7 +413,7 @@ async fn only_this_machine(State(node): State<Node>, mut req: axum::extract::Req
 /// A client device's request over iroh is its person's, as a sign-in's is, for what `SIGNED_IN` lists and MCP: the
 /// device must still be one of the install's, and the keys it hands are for its key, kept no longer than `until`.
 async fn from_client(node: &Node, key: crate::entry::Key, until: u64, path: &str, mut req: axum::extract::Request, next: axum::middleware::Next) -> Response {
-    if !(SIGNED_IN.contains(&path) || path == "/mcp") || path == "/v1/kernel/run" {
+    if !(SIGNED_IN.contains(&path) || path == "/mcp") {
         return refuse(req, (StatusCode::FORBIDDEN, Json(json!({ "error": "only this machine's own programs may use this" }))).into_response()).await;
     }
     let Some((user, name)) = node.client(&key) else {
@@ -605,13 +599,6 @@ fn text<'a>(body: &'a Value, key: &str) -> Result<&'a str, Error> {
     body[key].as_str().filter(|s| !s.trim().is_empty()).map(str::trim).ok_or_else(|| anyhow::anyhow!("give {key}").into())
 }
 
-/// A slot of a schedule the schedules service runs: `kernel::Run`, as the person who let it run.
-async fn kernel_run(State(node): State<Node>, me: Me, Json(run): Json<crate::kernel::Run>) -> Reply {
-    if !me.caller.token.as_deref().is_some_and(|t| t.starts_with("run.")) {
-        return Err(anyhow::anyhow!("only the schedules service hands in runs").into());
-    }
-    Ok(Json(node.kernel_run(&me.caller, &run).await?))
-}
 
 /// This device as an endpoint, `{ key, seal }` (hex): what a caller seals the keys it hands a call to (`x-one-keys`).
 async fn endpoint(State(node): State<Node>) -> Json<Value> {
@@ -636,7 +623,8 @@ async fn keys_get(State(node): State<Node>, me: Me, Query(q): Query<std::collect
     Ok(Json(node.sealed_keys(&me.caller, &scope, q.get("to").map(String::as_str), q.get("app").map(String::as_str)).await?))
 }
 
-/// `{ scope, n, to, sealed }` or `{ scope, n, app, sealed }`: keeps a key sealed by the caller's device (`Node::seal_key`).
+/// `{ scope, n, to, sealed }`, `{ scope, n, app, sealed }` or `{ scope, n, app, to, sealed }`: keeps a key sealed by the
+/// caller's device (`Node::seal_key`).
 async fn keys_post(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
     only(&body, &["scope", "n", "to", "app", "sealed"])?;
     let scope = crate::entry::Scope::parse(text(&body, "scope")?)?;
@@ -674,6 +662,16 @@ async fn retire(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Re
 async fn arrange(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
     node.arrange(&me.caller, text(&body, "page")?, body["items"].clone(), body["hidden"].clone(), body["pages"].clone()).await?;
     done()
+}
+
+/// `{ device, app, scope?, days? }`: keeps an app running in a scope (`user` by default) on a device of the install, for
+/// `days` (30 by default; 0 stops it), as this machine's person (`Node::keep_running`).
+async fn grant(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
+    only(&body, &["device", "app", "scope", "days"])?;
+    let me = local(&node)?;
+    let scope = node.scope_for(&me, body["scope"].as_str().unwrap_or("user"))?;
+    let days = body["days"].as_u64().unwrap_or(crate::node::GRANT_DAYS);
+    Ok(Json(node.keep_running(&me, text(&body, "device")?, text(&body, "app")?, &scope, days).await?))
 }
 
 async fn schedule(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {

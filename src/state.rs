@@ -137,8 +137,9 @@ fn install(m: &Members, me: &str, settings: &Map<String, Value>, here: &Here) ->
         "recovery_used": m.recovery_used.as_ref().map(|(time, user)| json!({ "time": time, "user": user })),
         "member": here.member,
         "users": users, "groups": groups, "devices": devices, "devices_at": m.devices_at, "clients": clients,
-        // Standing work this person granted: which endpoint keeps which app running in which scope, until when.
-        "grants": m.grants.iter().filter(|(_, g)| g.by == me).map(|((k, s, a), g)| json!({ "endpoint": hex(k), "scope": s.to_string(), "app": a, "until": g.until })).collect::<Vec<_>>(),
+        // Standing work in the scopes this person may grant it in: which endpoint keeps which app running in which
+        // scope, until when, and who granted it. One whose endpoint is gone, or whose granter may grant no more, is over.
+        "grants": m.grants.iter().filter(|((k, s, _), g)| m.grants_in(me, s) && m.machine(k).is_some() && m.grants_in(&g.by, s)).map(|((k, s, a), g)| json!({ "endpoint": hex(k), "scope": s.to_string(), "app": a, "until": g.until, "by": g.by, "keys": g.hashes })).collect::<Vec<_>>(),
         "entries": here.entries, "settings": settings,
         // The serverless node, once an admin deployed one (`serverless deploy` sets `serverless`).
         "serverless": settings.contains_key("serverless").then(|| json!({ "use": rank::place(&set, rank::CLOUDFLARE, rank::CLOUDFLARE) })),

@@ -387,7 +387,7 @@ fn the_kernel_and_nodes_agree_on_keys_and_seals() {
     use one::kernel;
 
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("kernel");
-    let files = ["shared/crypto.js", "shared/token.js", "schedules/worker.js", "web/members.js", "test/formats.js"].map(|p| (p.to_string(), std::fs::read(root.join(p)).unwrap()));
+    let files = ["shared/crypto.js", "shared/token.js", "web/members.js", "test/formats.js"].map(|p| (p.to_string(), std::fs::read(root.join(p)).unwrap()));
     let dir = crate::temp("formats");
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = listener.local_addr().unwrap().to_string();
@@ -559,7 +559,8 @@ fn the_kernel_and_nodes_agree_on_keys_and_seals() {
             (members::rename("key", &key, "Work Mac"), json!(["rename", { "what": "key", "id": key, "name": "Work Mac" }])),
             (members::rename("group", group, "Kin"), json!(["rename", { "what": "group", "id": group, "name": "Kin" }])),
             (members::epoch(&Scope::User(user.into()), 2, &[endpoint.key], &seal), json!(["epoch", { "scope": format!("user:{user}"), "n": 2, "to": [key], "hash": seal }])),
-            (members::grant(&endpoint.key, &Scope::Group(group.into()), "whatsapp", 0), json!(["grant", { "endpoint": key, "scope": format!("group:{group}"), "app": "whatsapp", "until": 0 }])),
+            (members::grant(&endpoint.key, &Scope::Group(group.into()), "whatsapp", 0, &Default::default()), json!(["grant", { "endpoint": key, "scope": format!("group:{group}"), "app": "whatsapp", "until": 0 }])),
+            (members::grant(&endpoint.key, &Scope::User(user.into()), "whatsapp", 1_800_000_000_000, &[(1, seal.clone()), (2, key.clone())].into()), json!(["grant", { "endpoint": key, "scope": format!("user:{user}"), "app": "whatsapp", "until": 1_800_000_000_000_u64, "keys": { "1": seal, "2": key } }])),
             (members::retire("notes", "admins", "deleted").unwrap(), json!(["retire", { "app": "notes", "owner": "admins", "how": "deleted" }])),
             (members::retire("notes", "admins", "restored").unwrap(), json!(["retire", { "app": "notes", "owner": "admins", "how": "restored" }])),
             (members::install("notes", false), json!(["install", { "app": "notes", "installed": false }])),
@@ -569,24 +570,6 @@ fn the_kernel_and_nodes_agree_on_keys_and_seals() {
         let out = js(json!({ "op": "members", "calls": both.iter().map(|(_, call)| call.clone()).collect::<Vec<_>>() }));
         for ((rust, call), js) in both.iter().zip(out["contents"].as_array().expect("contents")) {
             assert_eq!(js, &serde_json::to_value(rust).unwrap(), "{call}");
-        }
-    }
-
-    // The schedules service and the node agree when a schedule runs next, across daylight saving's changes too.
-    let specs = [
-        json!({ "op": "x", "at": "09:00", "tz": "Australia/Melbourne" }),
-        json!({ "op": "x", "at": "02:30", "tz": "America/New_York", "days": ["sun"] }),
-        json!({ "op": "x", "at": "23:59", "tz": "Europe/London", "days": ["mon", "fri"] }),
-        json!({ "op": "x", "every": "15m" }),
-        json!({ "op": "x", "every": "1d" }),
-    ];
-    // Around Melbourne's change in April and October 2026, New York's in March and November, and an ordinary day.
-    let instants: [u64; 5] = [1_775_318_400_000, 1_791_043_200_000, 1_772_928_000_000, 1_793_491_200_000, 1_793_600_000_000];
-    for spec in &specs {
-        let rust = one::schedules::Schedule::parse("s", spec).unwrap();
-        for at in instants.iter().flat_map(|t| (0..48).map(move |h| t + h * 1_800_000)) {
-            let js = js(json!({ "op": "next", "spec": spec, "now": at }));
-            assert_eq!(js["next"].as_u64(), rust.next(at), "{spec} after {at}");
         }
     }
 

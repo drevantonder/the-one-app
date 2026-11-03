@@ -141,10 +141,11 @@ impl Node {
     /// Asks another device to run a call: a sign-in's with the keys its caller handed this device, sealed to that one.
     pub(super) async fn ask_device(&self, device: Key, req: &CallRequest, me: &Caller) -> Result<Reply> {
         // A sign-in's token goes along, with the keys it was handed: to a service only if it serves everyone, which
-        // checks it itself, and never keys. A call handed keys with no sign-in passes on its keys alone (below).
+        // checks it itself, and never keys. A call handed keys with no sign-in passes on its keys alone (below), and
+        // standing work, kept by its grant here, passes on none.
         let service = self.is_service(&device);
         let shared = self.with(|i| Ok(i.r.members.service(&device).is_some_and(|s| s.shared)))?;
-        let token = me.token.as_ref().filter(|t| !sessions::unsigned(t) && (!service || (shared && sessions::is_sign_in(t))));
+        let token = me.token.as_ref().filter(|t| !sessions::unsigned(t) && !t.starts_with(standing::GRANT) && (!service || (shared && sessions::is_sign_in(t))));
         let mut request = json!({ "app": req.app, "sidecar": req.sidecar, "op": req.op, "input": req.input, "scopes": req.scopes, "depth": req.depth, "from": req.from, "client": req.client, "me": { "key": hex(&me.key), "user": me.user, "agent": me.agent, "token": token } });
         // Keys handed here with no sign-in (a client device's, or with a call passed on) go on to another node sealed
         // to it for this node's key, of the scopes the call reaches alone, which it runs on them alone.
@@ -269,6 +270,10 @@ impl Node {
             }
         };
         self.record(&req.app, req, me, None);
+        // Its person using it keeps the grants that keep it running for them.
+        if !me.token.as_deref().is_some_and(|t| t.starts_with(standing::GRANT)) {
+            self.renew_grants(me, &req.app);
+        }
         if outcome.later {
             self.keep_for_later(granted);
         }
@@ -395,14 +400,6 @@ impl Node {
                 self.write_insight(to, me, said);
             }
         }
-        let schedules_changed = appends.iter().any(|a| matches!(a, Append::Install { .. } | Append::Switch { .. }));
-        let scheduling: Vec<String> = appends
-            .iter()
-            .filter_map(|a| match a {
-                Append::Switch { app, on: true, .. } | Append::Install { app, installed: true, .. } => Some(app.clone()),
-                _ => None,
-            })
-            .collect();
         let (installs, appends): (Vec<_>, Vec<_>) = appends.into_iter().partition(|a| matches!(a, Append::Install { .. }));
         let (execs, appends): (Vec<_>, Vec<_>) = appends.into_iter().partition(|a| matches!(a, Append::Exec { .. }));
         let (items, appends): (Vec<_>, Vec<_>) = appends.into_iter().partition(|a| matches!(a, Append::Vault { .. }));
@@ -430,7 +427,6 @@ impl Node {
             };
             writes.push(self.with(|i| check_append(i, append, scopes, me, &title))?);
         }
-        self.may_schedule(me, &scheduling.iter().map(String::as_str).collect::<Vec<_>>()).await?;
         let wrote = !statements.is_empty();
         for (scope, list, kept) in statements {
             let (db, bucket) = self.call_database(me, &scope, app, DATABASE, None).await?;
@@ -461,9 +457,6 @@ impl Node {
         }
         for (scope, content) in writes {
             self.append_as(&scope, &me.user, content).await?;
-        }
-        if schedules_changed && self.schedules_service().is_some() && me.token.is_some() {
-            self.sync_schedules_later(me);
         }
         Ok(())
     }

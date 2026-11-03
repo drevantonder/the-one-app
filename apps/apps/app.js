@@ -501,22 +501,26 @@ const sections = [
     if (!rows.length) return '<div class="needs">' + one.esc(where.line) + "</div>";
     return '<h2 class="section">' + one.esc(where.runs.length ? "Runs On" : where.needs || "Runs On") + '</h2><div class="list">' + rows.join("") + "</div>";
   },
-  function schedules({ health }) {
+  function schedules({ a, health }) {
     // One a deploy removed no longer runs: it isn't the app's any more.
     const list = (health?.schedules || []).filter((s) => !s.removed);
     if (!list.length) return "";
+    // Schedules run only on a device chosen to keep the app running: one that's on with none says so, with the fix.
+    const unkept = list.find((s) => !s.invalid && s.on && s.runs_as && !(s.kept_by || []).length && s.may_keep);
+    const problem = unkept ? '<div class="banner"><span class="banner-icon">' + one.icon("warning-circle") + '</span><div class="banner-text">' + one.esc((a.title || name) + " needs a device to keep it running")
+      + "<span>Its schedules run on a device you choose, while it’s on.</span></div>" + \`<button class="button" onclick='keepIt(\${JSON.stringify(unkept.scope)})'>Choose a Device</button></div>\` : "";
     const places = new Set(list.map((s) => s.scope)).size > 1;
     const row = (s) => {
       let line;
       if (s.invalid) line = '<span class="error">' + one.esc(s.invalid) + "</span>";
       else if (s.last && !s.last.ok) line = '<span class="error">Failed ' + ago(s.last.time) + ": " + one.esc(one.plain(s.last.error).title) + "</span>";
-      else if (s.on && s.runs_as) line = one.esc(cap(s.when)) + (places ? " · " + one.esc(s.scope_name) : "") + (s.next ? " · next " + soon(s.next) : "");
+      else if (s.on && s.runs_as) line = one.esc(cap(s.when)) + (places ? " · " + one.esc(s.scope_name) : "") + (s.next ? " · next " + soon(s.next) : "") + ((s.kept_by || []).length ? " · on " + one.esc(s.kept_by.join(", ")) : "");
       else if (s.on) line = "Off. Switch it on to run it as you.";
       else line = one.esc(cap(s.when)) + (s.switched ? " · off since " + ago(s.switched.time) : "");
       const toggle = !s.invalid ? \`<input type="checkbox" class="switch"\${s.on && s.runs_as ? " checked" : ""}\${s.may_switch ? "" : " disabled"} onchange='switchIt(this, \${JSON.stringify({ schedule: s.name, scope: s.scope })})'>\` : "";
       return \`<div class="row plain"><div class="main"><div class="title"><span>\${one.esc(s.description || s.name)}</span></div><div class="sub">\${line}</div></div>\${toggle}</div>\`;
     };
-    return '<h2 class="section">Schedules</h2><div class="list">' + list.map(row).join("") + "</div>";
+    return problem + '<h2 class="section">Schedules</h2><div class="list">' + list.map(row).join("") + "</div>";
   },
   function works({ a, apps }) {
     const rows = a.uses.apps.map((n) => link(apps.find((x) => x.name === n) || { name: n, title: n }));
@@ -635,6 +639,11 @@ function soon(ms) {
   const m = Math.max(0, Math.round((ms - Date.now()) / 60000));
   return m < 1 ? "now" : m < 60 ? "in " + m + "m" : m < 1440 ? "in " + Math.round(m / 60) + "h" : "in " + Math.round(m / 1440) + "d";
 }
+/// Opens Settings › Devices to choose the device that keeps this app running in `scope`.
+function keepIt(scope) {
+  one.open("devices", { keep: name, scope }, "settings");
+}
+
 // The switch stays where it was put while the call goes, and goes back only if it fails.
 async function switchIt(box, { schedule, scope }) {
   if (box.__busy) return void (box.checked = !box.checked);

@@ -67,7 +67,7 @@ fn every_command() -> String {
                                        answers one, a new item's values on stdin (one line, or a JSON object)
   {CLI} kernel                         where this machine's kernel is: its services' addresses and what it's set to
   {CLI} kernel serve [--address <url>]
-                                       run the kernel's services (auth, vault, schedules, and the gateway people reach
+                                       run the kernel's services (auth, the relay, the URL signer, and the gateway people reach
                                        at the install's address) on this machine; the first time, with that address
   {CLI} kernel deploy [--domain <domain>] [--address <url>] [--account <id>] [--new]
                                        deploy the kernel's services to Cloudflare as Workers, with an API token that
@@ -88,11 +88,10 @@ fn every_command() -> String {
                                        /v1/ to it; what needs a machine goes on to node-url
   {CLI} kernel set <setting> <value>   change one: node-url (where the address sends /v1/: a node's address, or
                                        cloudflare:<id>, the Workers VPC service of a Cloudflare Tunnel to one),
-                                       auth-url, schedules-url, resources (nodes' own addresses,
-                                       comma-separated), bucket (its JSON object piped, with - as its value) or
+                                       auth-url, resources (nodes' own addresses, comma-separated), bucket (its JSON object piped, with - as its value) or
                                        android (the SHA-256 fingerprints of the certificates the Android app is signed
                                        with, comma-separated, or -: links to the address open the app)
-  {CLI} kernel use <address> <schedules>
+  {CLI} kernel use <address>
                                        point this install at its kernel: its nodes take sign-ins made at the address
   {CLI} kernel tunnel                  whether this device runs a connector for the install's Cloudflare Tunnel, which
                                        the address reaches nodes through (node-url cloudflare:<id>): piped the
@@ -132,6 +131,9 @@ fn every_command() -> String {
                                        with it as it would with a node
   {CLI} sidecars install-link          what --install takes, for a service of yours: your One App's address and a
                                        one-time secret, good for a day; approve the service on this device
+  {CLI} devices keep|stop <app> on <device> [--scope user|global|<group>] [--days <n>]
+                                       keep an app running on one of your devices (its schedules run there, with that
+                                       app's keys alone, for 30 days and longer as you use it), or stop it
   {CLI} schedule on|off <app> <name> [--scope user|global|<group>]
                                        switch an app's schedule on (it then runs as you) or off
   {CLI} <app>                          an app's operations
@@ -450,7 +452,7 @@ fn run(args: Vec<String>) -> Result<()> {
                     let at = |service: &str| format!("https://{}.{domain}", one::kernel::worker_name(service));
                     let address = flags.get("address").and_then(Value::as_str).map(|a| a.trim_end_matches('/').to_string()).unwrap_or(address);
                     let mut settings = one::kernel::Settings::new(NAME, &address);
-                    (settings.auth_url, settings.schedules_url) = (at("auth"), at("schedules"));
+                    settings.auth_url = at("auth");
                     settings.save()?;
                     println!("Keep {} too: the kernel's secrets are in it, and a deploy without them can't read what's there. Better, move each to 1Password and leave an op(op://…) reference in its place.\n", one::kernel::Settings::path().with_file_name(".env.local").display());
                     // People signing in with Google need its OAuth client, which is put beside the secrets first.
@@ -518,7 +520,6 @@ fn run(args: Vec<String>) -> Result<()> {
             match *name {
                 "node-url" => settings.node_url = Some(value.trim_end_matches('/').to_string()).filter(|v| !v.is_empty() && v != "-"),
                 "auth-url" => settings.auth_url = value.trim_end_matches('/').to_string(),
-                "schedules-url" => settings.schedules_url = value.trim_end_matches('/').to_string(),
                 "resources" => settings.resources = value.split(',').map(|r| r.trim().to_string()).filter(|r| !r.is_empty()).collect(),
                 "bucket" if *value == "-" => {
                     let bucket = piped()?;
@@ -536,15 +537,13 @@ fn run(args: Vec<String>) -> Result<()> {
                     }
                     settings.android = prints;
                 }
-                _ => bail!("no kernel setting {name}: node-url, auth-url, schedules-url, resources, bucket or android"),
+                _ => bail!("no kernel setting {name}: node-url, auth-url, resources, bucket or android"),
             }
             settings.save()?;
             println!("Set {name}. {CLI} kernel serve takes it at its next start, and {CLI} kernel deploy when it next runs.");
         }
-        ["kernel", "use", address, schedules] => {
-            for (name, url) in [("address", address), ("kernel_schedules", schedules)] {
-                post("/v1/settings", json!({ "name": name, "value": url.trim_end_matches('/') }))?;
-            }
+        ["kernel", "use", address] => {
+            post("/v1/settings", json!({ "name": "address", "value": address.trim_end_matches('/') }))?;
             println!("This install is at {address}: its nodes take sign-ins made there.");
         }
         ["kernel", "tunnel"] => {
@@ -787,6 +786,13 @@ fn run(args: Vec<String>) -> Result<()> {
                     println!("{} {}  in {}  {state}{last}", app["name"].as_str().unwrap_or(""), s["name"].as_str().unwrap_or(""), s["scope"].as_str().unwrap_or(""));
                 }
             }
+        }
+        ["devices", op @ ("keep" | "stop"), app, "on", device] => {
+            takes_only(&flags, &["scope", "days"])?;
+            let mut input = flags.clone();
+            input.insert("app".into(), json!(app));
+            input.insert("device".into(), json!(device));
+            println!("{}", devices_tool(op, &input, "cli")?.as_str().unwrap_or(""));
         }
         ["schedule", on @ ("on" | "off"), app, name] => {
             let scope = flags.get("scope").and_then(Value::as_str).unwrap_or("user");
@@ -1641,9 +1647,9 @@ fn cloudflare(flags: &Map<String, Value>, settings: Option<&one::kernel::Setting
 
 /// Where a kernel is, and what it's set to, without its secrets.
 fn kernel_said(s: &one::kernel::Settings) -> String {
-    let mut out = format!("{}'s kernel\n  address   {}\n  schedules {}\n", s.name, s.address, s.schedules_url);
+    let mut out = format!("{}'s kernel\n  address   {}\n", s.name, s.address);
     if s.auth_url.starts_with("http://127.0.0.1") {
-        out += &format!("  here on   127.0.0.1:{} (the address), :{} (auth), :{} (schedules)\n", s.ports[2], s.ports[0], s.ports[1]);
+        out += &format!("  here on   127.0.0.1:{} (the address), :{} (auth)\n", s.ports[1], s.ports[0]);
     }
     out += &format!("  /v1/ to   {}\n", s.node_url.as_deref().unwrap_or("no node yet: kernel set node-url"));
     if !s.resources.is_empty() {
@@ -1780,6 +1786,11 @@ fn devices_tool(op: &str, input: &Map<String, Value>, client: &str) -> Result<Va
             };
             anyhow::ensure!(input.get("confirm") == Some(&json!(true)), "devices_remove can't be undone, and the person hasn't agreed to it: ask them, and give confirm: true only if they say yes to this very device or person");
             post("/v1/remove", what).map(|r| json!(removed_said(&r)))
+        }
+        "keep" | "stop" => {
+            let scope = input.get("scope").and_then(Value::as_str).unwrap_or("user");
+            let days = if op == "stop" { json!(0) } else { input.get("days").cloned().unwrap_or(Value::Null) };
+            post("/v1/grant", json!({ "app": text("app")?, "device": text("device")?, "scope": scope, "days": days })).map(|r| r["said"].clone())
         }
         "invite" => post("/v1/invite-link", json!({ "name": text("name")?, "admin": input.get("admin") == Some(&json!(true)) })).map(|r| json!(invited_said(text("name").unwrap_or(""), &r))),
         other => anyhow::bail!("no tool devices_{other}"),
