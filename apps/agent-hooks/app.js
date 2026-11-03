@@ -30,6 +30,26 @@ function wanted(events, name) {
   return true;
 }
 
+/// Runs each provider due for this event and joins what they say. Providers run as their own calls
+/// (shell), so this works from ops and hooks alike; one failing says nothing.
+async function due(ctx, name, device) {
+  const b = board(ctx);
+  const all = b ? await b.query("select command, events from providers order by name") : [];
+  const list = all.filter((p) => wanted(p.events, name));
+  const side = (input) => (device ? ctx.sidecars.shell.run(input, { device }) : ctx.sidecars.shell.run(input));
+  const said = await Promise.all(list.map(async (p) => {
+    const command = String(p.command).replaceAll("{device}", device || "").replaceAll(/  +/g, " ").trim();
+    try {
+      const r = await side({ command, timeout: TIMEOUT });
+      const out = String(r?.stdout || "").trim();
+      return r?.exit === 0 ? out.slice(0, CAP) : "";
+    } catch {
+      return "";
+    }
+  }));
+  return said.filter(Boolean).join("\n").slice(0, CAP * list.length);
+}
+
 export default {
   name: "agent-hooks",
   title: "Agent Hooks",
@@ -110,22 +130,8 @@ export default {
         },
       },
       async run(ctx, { format = "text", event, hook_event_name, device }) {
-        const b = board(ctx);
         const name = hook_event_name || eventName(event);
-        const all = b ? await b.query("select command, events from providers order by name") : [];
-        const due = all.filter((p) => wanted(p.events, name));
-        const side = (input) => (device ? ctx.sidecars.shell.run(input, { device }) : ctx.sidecars.shell.run(input));
-        const said = await Promise.all(due.map(async (p) => {
-          const command = String(p.command).replaceAll("{device}", device || "").replaceAll(/  +/g, " ").trim();
-          try {
-            const r = await side({ command, timeout: TIMEOUT });
-            const out = String(r?.stdout || "").trim();
-            return r?.exit === 0 ? out.slice(0, CAP) : "";
-          } catch {
-            return "";
-          }
-        }));
-        const text = said.filter(Boolean).join("\n").slice(0, CAP * due.length);
+        const text = await due(ctx, name, device);
         if (format === "claude" || format === "codex") {
           if (!text) return {};
           return { hookSpecificOutput: { hookEventName: name || "SessionStart", additionalContext: text } };
