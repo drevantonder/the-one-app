@@ -8,6 +8,7 @@
 // keys it needs.
 import { answer, browserKeys, browserName, codeOf, Device, joinAsk } from "./device.js";
 import { members } from "./members.js";
+import { net } from "./net.js";
 import { qrSvg } from "./qr.js";
 
 window.__one = {};
@@ -148,20 +149,24 @@ window.__one = {};
   /// This browser as its person's device, once it's listed as one (`join`): null until then.
   let device = null;
 
-  /// A request to the node, as this person: JSON in and out, or with `raw` the response itself. Once this browser is a
-  /// device, it goes with the keys it needed last time; a node that needs others says so (428), and it goes again once
-  /// with them.
+  /// A request to the node, as this person: JSON in and out, or with `raw` the response itself. Once this browser is
+  /// one of their devices, it asks their nodes itself, over iroh (net.js); until then, through the address, with its
+  /// access token. As a device, it goes with the keys it needed last time; a node that needs others says so (428), and
+  /// it goes again once with them.
   async function api(path, { method = "GET", body, query, raw, signal } = {}) {
     const url = new URL(path, location.origin);
     for (const [k, v] of Object.entries(query || {})) if (v != null) url.searchParams.set(k, typeof v === "string" ? v : JSON.stringify(v));
     const route = Device.route(url.pathname, body);
-    let token = await auth.token();
+    const user = auth.user();
+    const direct = !!user && (await net.start(user).catch(() => false));
+    let token = direct ? null : await auth.token();
     for (let tries = 0, needed = false; ; tries++) {
-      const headers = { authorization: `Bearer ${token}` };
+      const headers = direct ? {} : { authorization: `Bearer ${token}` };
       if (body !== undefined) headers["content-type"] = "application/json";
       const keys = device && (await device.handoff(route, token, auth.kept()?.until || Date.now() + 60_000));
       if (keys) headers["x-one-keys"] = keys;
-      const r = await fetch(url, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), signal });
+      const sent = body === undefined ? undefined : JSON.stringify(body);
+      const r = direct ? await net.fetch(method, url.pathname + url.search, headers, sent, signal) : await fetch(url, { method, headers, body: sent, signal });
       if (r.status === 401 && tries === 0) {
         token = await auth.token(token);
         continue;
@@ -230,6 +235,9 @@ window.__one = {};
   /// Loads what the sidebar shows: the node's state, then its apps and badges.
   async function refreshState() {
     const state = await api("/v1/state");
+    // The nodes this browser asks itself, in the order things run on them.
+    const nodes = (state.install?.devices || []).filter((d) => d.serves_me).sort((a, b) => a.order - b.order).map((d) => d.key);
+    if (state.user && nodes.length) net.nodes(state.user.id, nodes);
     const regrouped = JSON.stringify([state.user, state.install?.groups]) !== JSON.stringify([store.state?.user, store.state?.install?.groups]);
     const first = !store.state;
     store.state = state;
@@ -811,7 +819,7 @@ window.__one = {};
       try {
         await new Device(keys, { state: () => store.state, api, bearer }).approveByPasskey(Uint8Array.from(atob(prf.replaceAll("-", "+").replaceAll("_", "/")), (c) => c.charCodeAt(0)));
         await refreshState();
-        if (listed()) return made();
+        if (listed()) return await net.start(user, true).catch(() => {}), made();
       } catch (err) {
         console.warn("the passkey didn't let this browser in:", err);
       }
@@ -829,6 +837,8 @@ window.__one = {};
     }
     sessionStorage.removeItem("one.invite");
     root.innerHTML = "";
+    // Let in, it reaches its nodes itself from now on.
+    await net.start(user, true).catch(() => {});
     return made();
   }
 

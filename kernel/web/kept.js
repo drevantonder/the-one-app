@@ -1,0 +1,20 @@
+// What this browser keeps in IndexedDB's `one` database, its one store: its keys by person (`device:<user>`), the
+// invites it made (`invite:<user>`), and the nodes it asks (`nodes:<user>`). A module of its own, for the worker that
+// reaches the nodes (net-worker.js) to read with nothing else.
+
+function kept(mode, act) {
+  return new Promise((resolve, reject) => {
+    const open = indexedDB.open("one", 1);
+    open.onupgradeneeded = () => open.result.createObjectStore("kept");
+    open.onerror = () => reject(open.error);
+    open.onsuccess = () => {
+      const tx = open.result.transaction("kept", mode);
+      const req = act(tx.objectStore("kept"));
+      tx.oncomplete = () => (open.result.close(), resolve(req?.result));
+      tx.onerror = () => (open.result.close(), reject(tx.error));
+    };
+  });
+}
+
+export const get = (id) => kept("readonly", (s) => s.get(id));
+export const put = (id, v) => kept("readwrite", (s) => s.put(v, id));

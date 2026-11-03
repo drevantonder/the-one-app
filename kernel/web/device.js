@@ -5,28 +5,12 @@
 // that can't be read back, and goes with it. What changes who can do what it signs itself (members.js).
 
 import { b64u, databaseKey, ed25519Public, epochHash, hex, hkdfKey, inviteProof, joinCode, openAppKey, openSealed, passkeyKeys, random, sealAppKey, sealHandoff, sealTo, sha256, signEntry, signedRequest, tokenId, twinPublic, x25519Public } from "../shared/crypto.js";
+import { get, put } from "./kept.js";
 import { members } from "./members.js";
 
 const text = new TextEncoder();
 
 // MARK: Kept in this browser
-
-/// IndexedDB's `one` database, its one store: this browser's keys by person, and the invites it made (`invite:<user>`).
-function kept(mode, act) {
-  return new Promise((resolve, reject) => {
-    const open = indexedDB.open("one", 1);
-    open.onupgradeneeded = () => open.result.createObjectStore("kept");
-    open.onerror = () => reject(open.error);
-    open.onsuccess = () => {
-      const tx = open.result.transaction("kept", mode);
-      const req = act(tx.objectStore("kept"));
-      tx.oncomplete = () => (open.result.close(), resolve(req?.result));
-      tx.onerror = () => (open.result.close(), reject(tx.error));
-    };
-  });
-}
-const get = (id) => kept("readonly", (s) => s.get(id));
-const put = (id, v) => kept("readwrite", (s) => s.put(v, id));
 
 const raw = async (key) => new Uint8Array(await crypto.subtle.exportKey("raw", key));
 
@@ -205,14 +189,15 @@ export class Device {
     return at === "/v1/call" ? `call ${body?.app || ""}` : at.replace(/^\/v1\/screens\/([^/]+)\/.*/, "/v1/screens/$1");
   }
 
-  /// The `x-one-keys` a request goes with: the keys it needed before, sealed to the node, for `token` until `until`.
+  /// The `x-one-keys` a request goes with: the keys it needed before, sealed to the node, for this browser's key when
+  /// it reaches the node itself (`token` null), or for `token` through the address, until `until`.
   async handoff(route, token, until) {
     const needs = this.needs[route];
     if (!needs?.length) return null;
     this.node ||= (await this.api("/v1/endpoint", { bare: true })).seal;
     const keys = [];
     for (const n of needs) keys.push({ ...n, key: b64u.encode(await this.databaseKey(n)) });
-    return sealHandoff(hex.decode(this.node), { for: await tokenId(token), until, keys });
+    return sealHandoff(hex.decode(this.node), { for: token ? await tokenId(token) : this.me.key, until, keys });
   }
 
   /// A node's 428: what the request needed, remembered for next time (each kind of request keeps its last 64), and the

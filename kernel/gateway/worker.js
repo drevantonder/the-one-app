@@ -77,6 +77,8 @@ async function toWeb(request, env, url) {
   headers.set("x-frame-options", "SAMEORIGIN");
   const type = TYPES[path.split(".").pop().toLowerCase()];
   if (resp.ok && type) headers.set("content-type", type);
+  // The client's WebAssembly is at a path named by what it is, so it's never fetched twice.
+  if (resp.ok && path.startsWith("/client/")) headers.set("cache-control", "public, max-age=31536000, immutable");
   return new Response(resp.body, { status: resp.status, headers });
 }
 

@@ -121,6 +121,20 @@ fn main() {
         Err(_) => vec![],
     };
     let out = format!("{out}pub const SERVERLESS: &[(&str, &[u8])] = &[{}];\n", serverless.join(", "));
+    // And the client's, for browsers (client/src/wasm.rs), in CLIENT, which the address serves the web client.
+    println!("cargo:rerun-if-env-changed=CLIENT");
+    let client: Vec<String> = match std::env::var("CLIENT") {
+        Ok(dir) => ["one_client.js", "one_client_bg.wasm"]
+            .iter()
+            .map(|name| {
+                let path = std::path::Path::new(&dir).join(name);
+                println!("cargo:rerun-if-changed={}", path.display());
+                format!("({name:?}, include_bytes!({:?}))", std::fs::canonicalize(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display())))
+            })
+            .collect(),
+        Err(_) => vec![],
+    };
+    let out = format!("{out}pub const CLIENT: &[(&str, &[u8])] = &[{}];\n", client.join(", "));
     // The apps every agent needs from the start: their guide is in MCP's instructions, and code mode keeps their tools.
     let always_on: String = config.get("always_on").and_then(|a| a.as_array()).into_iter().flatten().filter_map(|d| d.as_str()).map(|n| format!("{n:?},")).collect();
     let out = format!("{out}pub const ALWAYS_ON: &[&str] = &[{always_on}];\n");

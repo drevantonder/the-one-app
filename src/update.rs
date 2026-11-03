@@ -75,6 +75,8 @@ pub fn run(tag: Option<&str>) -> Result<()> {
     build.current_dir(&src).env("CONFIG", &config).args(["build", "--release"]);
     // Every release carries the serverless node: one without it couldn't deploy the kernel.
     build.env("SERVERLESS", serverless(&src, &config).context("couldn't build the serverless node, so nothing was sent out")?);
+    // And the web client's way to nodes: one without it couldn't reach them.
+    build.env("CLIENT", client(&src, &config).context("couldn't build the web client's WebAssembly, so nothing was sent out")?);
     run_quiet(&mut build)?;
 
     // An update's Macs build in the background, and a release's build it with what it publishes, which it waits for.
@@ -511,6 +513,21 @@ fn serverless(src: &Path, config: &Path) -> Result<PathBuf> {
     let out = src.join("target/serverless");
     let wasm = src.join("target/wasm32-unknown-unknown/release/one_serverless.wasm");
     run_quiet(Command::new("wasm-bindgen").args(["--target", "web", "--out-dir"]).arg(&out).arg(&wasm)).context("make its glue (cargo install wasm-bindgen-cli, the version in Cargo.lock)")?;
+    Ok(out)
+}
+
+/// Builds the client (`client/`) into WebAssembly for browsers, as small as it builds, and its JavaScript glue: → the
+/// folder they're in. It needs what `serverless` does, and makes it smaller still with wasm-opt where it's installed.
+pub fn client(src: &Path, config: &Path) -> Result<PathBuf> {
+    run_quiet(Command::new(cargo()).current_dir(src).env("CONFIG", config).args(["rustc", "-p", "one-client", "--profile", "web", "--target", "wasm32-unknown-unknown", "--crate-type", "cdylib"]))
+        .context("build the client (rustup target add wasm32-unknown-unknown)")?;
+    let out = src.join("target/client");
+    let wasm = src.join("target/wasm32-unknown-unknown/web/one_client.wasm");
+    run_quiet(Command::new("wasm-bindgen").args(["--target", "web", "--out-dir"]).arg(&out).arg(&wasm)).context("make its glue (cargo install wasm-bindgen-cli, the version in Cargo.lock)")?;
+    let built = out.join("one_client_bg.wasm");
+    if quiet(Command::new("wasm-opt").arg("--version")) {
+        run_quiet(Command::new("wasm-opt").args(["-Oz", "--enable-bulk-memory", "--enable-nontrapping-float-to-int", "--enable-sign-ext", "--enable-mutable-globals", "--enable-reference-types", "--enable-multivalue", "-o"]).arg(&built).arg(&built))?;
+    }
     Ok(out)
 }
 

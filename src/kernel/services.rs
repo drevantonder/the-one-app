@@ -469,6 +469,18 @@ pub fn served_with(settings: &Settings, modules: Vec<Vec<u8>>, web: &Path, serve
         .collect()
 }
 
+/// The client's build, as the web client fetches it (`/client/<version>/`): what its files hash to, so a browser
+/// keeps one for good. None if this build has no client (`update` builds it, where Rust builds for WebAssembly).
+pub fn client_version() -> Option<String> {
+    use sha2::Digest;
+    let mut hash = sha2::Sha256::new();
+    for (name, bytes) in crate::config::CLIENT {
+        hash.update(name.as_bytes());
+        hash.update(bytes);
+    }
+    (!crate::config::CLIENT.is_empty()).then(|| data_encoding::HEXLOWER.encode(&hash.finalize()[..8]))
+}
+
 /// The Android app's package, as android/app/build.gradle.kts names it.
 pub fn android_package() -> String {
     format!("app.{}.android", crate::config::CLI)
@@ -486,6 +498,15 @@ impl Settings {
         if let Some((_, page)) = files.iter_mut().find(|(path, _)| path == "index.html") {
             let label = format!("<title>{}</title>\n<meta name=\"application-name\" content=\"{}\">\n<meta name=\"theme-color\" content=\"{}\">", attr(crate::config::NAME), attr(crate::config::NAME), attr(crate::config::ACCENT));
             *page = String::from_utf8_lossy(page).replacen("<title></title>", &label, 1).into_bytes();
+        }
+        // The client that reaches nodes over iroh, at a path named by its build, which the page says (net.js).
+        if let Some(version) = client_version() {
+            for (name, bytes) in crate::config::CLIENT {
+                files.push((format!("client/{version}/{name}"), bytes.to_vec()));
+            }
+            if let Some((_, page)) = files.iter_mut().find(|(path, _)| path == "index.html") {
+                *page = String::from_utf8_lossy(page).replacen(r#"<meta name="one-client" content="">"#, &format!(r#"<meta name="one-client" content="{version}">"#), 1).into_bytes();
+            }
         }
         if !self.android.is_empty() {
             let links = json!([{

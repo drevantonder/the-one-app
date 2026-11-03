@@ -458,7 +458,11 @@ fn client(dir: &Path, checkout: &Path, settings: &one::kernel::Settings, rest: &
     let first = settings.try_person.as_ref().map(|(_, name)| name.to_lowercase());
     let person = person.filter(|name| Some(name.to_lowercase()) != first);
     match rest.first().map(String::as_str) {
-        Some("web") => web(dir, settings, person.as_deref())?,
+        Some("web") => {
+            // A browser reaches nodes over iroh, as the client's WebAssembly; a build without it would test the address.
+            anyhow::ensure!(one::kernel::client_version().is_some(), "this build has no web client's WebAssembly: build it with CLIENT set, as {CLI} update does");
+            web(dir, settings, person.as_deref())?
+        }
         Some(kind @ ("android" | "windows")) => {
             if let Some(name) = &person {
                 // They join where anyone does, in a browser: the try install's own here.
