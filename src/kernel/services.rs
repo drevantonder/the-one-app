@@ -515,6 +515,60 @@ pub fn android_package() -> String {
     format!("app.{}.android", crate::config::CLI)
 }
 
+/// A script of the web client, its imports of other scripts of it written as their names by content (`/device.js?v=…`),
+/// and the hash it's named by (the start of its SHA-256), which those are in turn: so a change to one script renames
+/// each that imports it. Memoised in `done`; `path`s in `stack` are being named, so an import cycle (there is none) keeps its
+/// plain path.
+fn name_script(path: &str, files: &[(String, Vec<u8>)], scripts: &[String], done: &mut std::collections::HashMap<String, (Vec<u8>, String)>, stack: &mut Vec<String>) -> Option<String> {
+    use sha2::Digest;
+    if let Some((_, v)) = done.get(path) {
+        return Some(v.clone());
+    }
+    if stack.iter().any(|p| p == path) {
+        return None;
+    }
+    stack.push(path.to_string());
+    let text = String::from_utf8_lossy(&files.iter().find(|(p, _)| p == path)?.1).into_owned();
+    let dir = path.rsplit_once('/').map_or("", |(dir, _)| dir);
+    let mut out = String::new();
+    let mut at = 0;
+    // Each quoted `./x.js`, `../x.js` or `/x.js` that is another script of the client.
+    for (i, _) in text.match_indices('"') {
+        if i < at {
+            continue;
+        }
+        let end = text[i + 1..].find(|c: char| !(c.is_ascii_alphanumeric() || "./_-".contains(c))).map(|n| i + 1 + n);
+        let Some(end) = end.filter(|&e| text[e..].starts_with('"')) else { continue };
+        let spec = &text[i + 1..end];
+        if !spec.ends_with(".js") || !(spec.starts_with("./") || spec.starts_with("../") || spec.starts_with('/')) {
+            continue;
+        }
+        // Resolved as the browser does, from this script's place: `..` at the top stays there.
+        let mut parts: Vec<&str> = if spec.starts_with('/') { vec![] } else { dir.split('/').filter(|p| !p.is_empty()).collect() };
+        for part in spec.split('/') {
+            match part {
+                "" | "." => {}
+                ".." => drop(parts.pop()),
+                part => parts.push(part),
+            }
+        }
+        let target = parts.join("/");
+        if target == path || !scripts.contains(&target) {
+            continue;
+        }
+        if let Some(v) = name_script(&target, files, scripts, done, stack) {
+            out.push_str(&text[at..i]);
+            out.push_str(&format!("\"/{target}?v={v}\""));
+            at = end + 1;
+        }
+    }
+    out.push_str(&text[at..]);
+    stack.pop();
+    let v = data_encoding::HEXLOWER.encode(&sha2::Sha256::digest(out.as_bytes()))[..16].to_string();
+    done.insert(path.to_string(), (out.into_bytes(), v.clone()));
+    Some(v)
+}
+
 impl Settings {
     /// The files the address serves itself: the web client's, as this release has them, Android's App Links file
     /// (`.well-known/assetlinks.json`) and Windows' web links file (`.well-known/windows-app-web-link`), which let the
@@ -531,18 +585,19 @@ impl Settings {
             use sha2::Digest;
             format!("/{path}?v={}", &data_encoding::HEXLOWER.encode(&sha2::Sha256::digest(bytes))[..16])
         };
-        // The worker that reaches nodes names the modules it imports by theirs, so a cold open fetches nothing before it
-        // connects; then it's named by what it is with them, and start.js starts it by that name (`one-files`).
-        let imports: Vec<(String, String)> = files.iter().filter(|(path, _)| ["shared/crypto.js", "kept.js"].contains(&path.as_str())).map(|(path, bytes)| (format!("import(\"/{path}\")"), format!("import(\"{}\")", named(path, bytes)))).collect();
-        if let Some((_, worker)) = files.iter_mut().find(|(path, _)| path == "net-worker.js") {
-            let mut text = String::from_utf8_lossy(worker).into_owned();
-            for (path, name) in &imports {
-                text = text.replace(path, name);
-            }
-            *worker = text.into_bytes();
+        // A script names the scripts it imports by their content too (each after its own imports), so a reopen fetches
+        // none of them: web.js's, and the worker's that reaches nodes. What it's named by is what it is with them.
+        let scripts: Vec<String> = files.iter().map(|(path, _)| path.clone()).filter(|path| path.ends_with(".js") && !["sw.js", "start.js"].contains(&path.as_str())).collect();
+        let mut done: std::collections::HashMap<String, (Vec<u8>, String)> = Default::default();
+        for path in &scripts {
+            name_script(path, &files, &scripts, &mut done, &mut vec![]);
         }
-        // net.js keeps its own path: web.js imports it as ./net.js, and a second URL would be a second copy of it.
-        let names: Vec<(String, String)> = files.iter().filter(|(path, _)| !["index.html", "sw.js", "net.js"].contains(&path.as_str())).map(|(path, bytes)| (path.clone(), named(path, bytes))).collect();
+        for (path, bytes) in files.iter_mut() {
+            if let Some((rewritten, _)) = done.remove(path.as_str()) {
+                *bytes = rewritten;
+            }
+        }
+        let names: Vec<(String, String)> = files.iter().filter(|(path, _)| !["index.html", "sw.js"].contains(&path.as_str())).map(|(path, bytes)| (path.clone(), named(path, bytes))).collect();
         let start = files.iter().find(|(path, _)| path == "start.js").map(|(_, bytes)| String::from_utf8_lossy(bytes).into_owned());
         if let Some((_, page)) = files.iter_mut().find(|(path, _)| path == "index.html") {
             let mut text = String::from_utf8_lossy(page).into_owned();
@@ -556,6 +611,9 @@ impl Settings {
             for (path, name) in &names {
                 text = text.replace(&format!("=\"/{path}\""), &format!("=\"{name}\""));
             }
+            // The scripts web.js imports are asked for beside it, not a round trip after each, on a first visit.
+            let preload: String = names.iter().filter(|(path, _)| scripts.contains(path) && !["web.js", "net-worker.js"].contains(&path.as_str())).map(|(_, name)| format!("<link rel=\"modulepreload\" href=\"{name}\">\n")).collect();
+            text = text.replacen("<script type=\"module\"", &format!("{preload}<script type=\"module\""), 1);
             let asked = names.iter().filter(|(path, _)| ["frame.html", "icons.json", "net-worker.js"].contains(&path.as_str())).map(|(path, name)| format!("{path}={}", &name[name.len() - 16..])).collect::<Vec<_>>().join(" ");
             let label = format!(
                 "<title>{}</title>\n<meta name=\"application-name\" content=\"{}\">\n<meta name=\"one-files\" content=\"{asked}\">",

@@ -1033,6 +1033,28 @@ fn the_address_serves_only_scripts_that_parse() {
     assert!(kernel::parses(&inline).is_err(), "so is an HTML page's inline script");
 }
 
+/// A reopen draws with no trip to the address only if every script the page imports is asked for by its content (the
+/// gateway keeps those for good): a plain path is a round trip, and a hash that isn't the file's is kept for nothing.
+#[test]
+fn the_web_client_imports_each_script_by_its_content() {
+    let web: std::collections::HashMap<String, Vec<u8>> = kernel::Settings::new("Test", "https://one.example.com").web().into_iter().collect();
+    let mut named = 0;
+    for (path, bytes) in web.iter().filter(|(path, _)| path.ends_with(".js") && !path.starts_with("client/")) {
+        let text = String::from_utf8_lossy(bytes);
+        for quoted in text.split('"').skip(1).step_by(2).filter(|q| q.starts_with('/') || q.starts_with("./") || q.starts_with("../")) {
+            let (file, v) = quoted.split_once("?v=").unwrap_or((quoted, ""));
+            let file = file.trim_start_matches("../").trim_start_matches("./").trim_start_matches('/');
+            if !file.ends_with(".js") || !web.contains_key(file) || file == "sw.js" {
+                continue;
+            }
+            let hash = data_encoding::HEXLOWER.encode(&<sha2::Sha256 as sha2::Digest>::digest(&web[file]));
+            assert!(!v.is_empty() && hash.starts_with(v) && v.len() >= 12, "{path} imports {quoted}, not {file} by its content ({})", &hash[..16]);
+            named += 1;
+        }
+    }
+    assert!(named >= 6, "web.js and the worker import their scripts: {named}");
+}
+
 /// The serverless node, the node's Rust as WebAssembly, built as `one update` builds it: what doesn't build, it can't
 /// send out. Built in a target folder of its own, kept between runs, so this test's cargo never waits on the one running
 /// it: → its modules (`serverless::modules_from`).
