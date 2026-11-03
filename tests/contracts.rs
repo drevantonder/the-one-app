@@ -491,6 +491,17 @@ fn the_kernel_and_nodes_agree_on_keys_and_seals() {
         assert_eq!((from_js.hash(), from_js.previous().to_vec()), (rust.hash(), vec![p1.min(p2), p1.max(p2)]));
         assert_eq!(out["checked"], json!({ "hash": rust.hash().to_hex(), "user": "0123456789abcdef", "kind": "group" }), "JavaScript checks one Rust signed");
         assert_ne!(out["tampered"], json!("checked"), "but not with another body");
+        // What Rust refuses, JavaScript refuses too: a number above 2^53, a log that isn't a scope.
+        let made = |log: &str, time: u64| Entry::create(&key, Ext { log: log.into(), time, user: "0123456789abcdef".into(), epoch: 0, previous: vec![] }, None, Content::new("node", "group", json!({}))).to_json();
+        let bad = [made("global", 1 << 53), made("nowhere", 1), made("user:0123456789ABCDEF", 1)];
+        for e in &bad {
+            assert!(Entry::from_json(e).is_err(), "Rust refuses {e}");
+        }
+        let out = js(json!({ "op": "refused", "entries": bad }));
+        for why in out["refused"].as_array().unwrap() {
+            assert_ne!(why, "checked", "JavaScript refuses what Rust does");
+        }
+        assert_eq!(js(json!({ "op": "refused", "entries": [made("global", (1 << 53) - 1)] }))["refused"], json!(["checked"]));
     }
 
     // Member entries' content (src/members.rs), as the web client builds what a browser signs (kernel/web/members.js).

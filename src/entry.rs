@@ -26,6 +26,9 @@ pub type Key = [u8; 32];
 /// What an entry's signature is for.
 pub const DOMAIN: &str = "one/entry";
 
+/// The most any number in an entry's header may be: 2^53 - 1, the most JavaScript's JSON keeps exactly.
+pub const NUMBER_MAX: u64 = (1 << 53) - 1;
+
 /// An entry's hash: the sha256 of its header.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, std::hash::Hash)]
 pub struct Hash([u8; 32]);
@@ -152,7 +155,7 @@ impl Header {
     fn parse(v: &Value) -> Result<Header> {
         ensure!(v["v"] == 1, "not an entry this device reads");
         let text = |k: &str| v[k].as_str().with_context(|| format!("no {k}"));
-        let number = |k: &str| v[k].as_u64().with_context(|| format!("no {k}"));
+        let number = |k: &str| v[k].as_u64().filter(|n| *n <= NUMBER_MAX).with_context(|| format!("no {k}, or one above 2^53"));
         let previous = v["previous"].as_array().context("no previous")?.iter().map(|h| Hash::from_hex(h.as_str().unwrap_or(""))).collect::<Result<Vec<_>>>()?;
         ensure!(previous.windows(2).all(|w| w[0] < w[1]), "previous isn't in order");
         Ok(Header {

@@ -61,6 +61,11 @@ const ops = {
   async members({ calls }) {
     return { contents: calls.map(([name, args]) => members[name](args)) };
   },
+  /// Entries Rust refuses: → why JavaScript does too, or "checked".
+  async refused({ entries }) {
+    const check = (e) => checkEntry({ header: b64u.decode(e.header), signature: b64u.decode(e.signature), body: b64u.decode(e.body) });
+    return { refused: await Promise.all(entries.map((e) => check(e).then(() => "checked", (err) => String(err)))) };
+  },
   async openUnder({ secret, sealed }) {
     return { plain: b64u.encode(await openUnder(secret, b64u.decode(sealed))) };
   },

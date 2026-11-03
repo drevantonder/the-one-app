@@ -237,18 +237,33 @@ export async function signEntry(key, by, fields, body) {
   return { header: raw, signature: await sign(key, "one/entry", header), body, hash: hex.encode(await sha256(raw)) };
 }
 
+const isHash = (s) => typeof s === "string" && /^[0-9a-f]{64}$/.test(s);
+/// A number an entry may hold: a whole one from 0 to `max`, and never above 2^53 - 1, which JSON keeps exactly here.
+const isCount = (n, max = Number.MAX_SAFE_INTEGER) => Number.isSafeInteger(n) && n >= 0 && n <= max;
+const U32 = 0xffffffff;
+
 /// Checks an entry as Rust does (`Entry::decode`): → its header's fields, `hash` and `content`, or throws.
 export async function checkEntry({ header, signature, body }) {
   header = bytes(header);
   body = bytes(body);
   const h = JSON.parse(new TextDecoder().decode(header));
+  if (!h || typeof h !== "object" || Array.isArray(h)) throw new Error("not an entry");
   if (hex.encode(canonical(h)) !== hex.encode(header)) throw new Error("its header isn't canonical JSON");
   if (h.v !== 1) throw new Error("not an entry this device reads");
-  if (!Array.isArray(h.previous) || h.previous.some((p, i) => i > 0 && !(h.previous[i - 1] < p))) throw new Error("previous isn't in order");
+  if (!isHash(h.author)) throw new Error("no author");
+  if (typeof h.log !== "string" || !/^(global|(group|user):[0-9a-f]{16})$/.test(h.log)) throw new Error(`${h.log} isn't a scope: global, group:<id> or user:<id>`);
+  if (!isCount(h.seq, U32) || !isCount(h.epoch, U32) || !isCount(h.time) || !isCount(h.size)) throw new Error("its numbers aren't whole numbers it may hold");
+  if (typeof h.user !== "string") throw new Error("no user");
+  if (!isHash(h.body)) throw new Error("no body");
+  if (h.backlink !== null && !isHash(h.backlink)) throw new Error("backlink isn't a hash");
+  if (!Array.isArray(h.previous) || !h.previous.every(isHash) || h.previous.some((p, i) => i > 0 && !(h.previous[i - 1] < p))) throw new Error("previous isn't in order");
   if ((h.seq === 0) !== (h.backlink === null)) throw new Error("only an entry that starts its log has no backlink");
   if (h.size !== body.length || h.body !== hex.encode(await sha256(body))) throw new Error("its body isn't the one it names");
   if (!(await verify(hex.decode(h.author), "one/entry", h, signature))) throw new Error("its signature is wrong");
-  return { ...h, hash: hex.encode(await sha256(header)), content: JSON.parse(new TextDecoder().decode(body)) };
+  const content = JSON.parse(new TextDecoder().decode(body));
+  if (!content || typeof content.app !== "string" || typeof content.kind !== "string") throw new Error("its body isn't an entry's content");
+  if (content.blobs !== undefined && !(Array.isArray(content.blobs) && content.blobs.every((b) => typeof b === "string"))) throw new Error("its blobs aren't names");
+  return { ...h, hash: hex.encode(await sha256(header)), content };
 }
 
 /// A scope's folder in the bucket: `user:<id>` is written `user-<id>`.
