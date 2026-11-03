@@ -149,10 +149,11 @@ impl Node {
         let service = self.is_service(&device);
         let shared = self.with(|i| Ok(i.r.members.service(&device).is_some_and(|s| s.shared)))?;
         let token = me.token.as_ref().filter(|t| !sessions::unsigned(t) && !t.starts_with(standing::GRANT) && (!service || (shared && sessions::is_sign_in(t))));
-        // A node listed as the caller's own client asks sidecars as itself. Forwarding another client's key
-        // (or app database keys) would make the receiving device refuse its own person's call.
+        // A node listed as the caller's own client asks sidecars as itself, for a direct client's call only — never
+        // one another node passed on: forwarding another client's key, or app database keys, would make the
+        // receiving device refuse its own person's call.
         let as_own_client = req.sidecar.is_some()
-            && me.token.as_ref().is_none_or(|t| sessions::unsigned(t))
+            && me.token.as_ref().is_none_or(|t| t == &client_token(&me.key))
             && self.with(|i| Ok(i.r.members.client(&self.0.id).is_some_and(|c| c.user == me.user)))?;
         let key = if as_own_client { self.0.id } else { me.key };
         let mut request = json!({ "app": req.app, "sidecar": req.sidecar, "op": req.op, "input": req.input, "scopes": req.scopes, "depth": req.depth, "from": req.from, "client": req.client, "me": { "key": hex(&key), "user": me.user, "agent": me.agent, "token": token } });

@@ -1126,6 +1126,19 @@ async fn a_persons_own_node_asks_their_other_devices_sidecars_as_itself() {
     .unwrap();
     assert_eq!(asked, json!({ "user": me.user, "agent": "the phone", "input": { "text": "by phone" } }), "{asked}");
 
+    // A call passed on by another node as Andre's is no client's own: the same sidecar call with a passed token must
+    // stay a call passed on, which the sidecar's device refuses — the node may not ask as itself for it.
+    let origin = ed25519_dalek::SigningKey::from_bytes(&rand::random());
+    let key = origin.verifying_key().to_bytes();
+    let refused = tokio::time::timeout(
+        Duration::from_secs(15),
+        a.call_as(check(json!({ "text": "passed on" }), "own-b"), one::node::Caller { key, user: me.user.clone(), agent: None, token: Some(one::node::passed_token(&key, &me.user)) }),
+    )
+    .await
+    .expect("a sidecar call passed on as Andre's")
+    .unwrap_err();
+    assert_eq!(got.load(std::sync::atomic::Ordering::Relaxed), 2, "a passed call reached the sidecar as the node's own: {refused:#}");
+
     // A client of Sam's, a member Andre let in, gets nothing: no other person's calls, even from an admin's node.
     let sam = one::entry::new_id();
     let sams = ed25519_dalek::SigningKey::from_bytes(&rand::random());
