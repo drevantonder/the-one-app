@@ -56,6 +56,9 @@ pub fn try_install(rest: &[String]) -> Result<()> {
         None => start(&dir)?,
     };
     let kernel = dir.join("kernel").join("settings.json");
+    if rest.iter().map(String::as_str).eq(["serverless", "deploy"]) {
+        return serverless(&dir);
+    }
     if rest.first().map(String::as_str) == Some("client") {
         let settings = load_kernel(&dir)?;
         return client(&dir, &checkout, &settings, &rest[1..]);
@@ -83,6 +86,24 @@ recovery key; its kernel's settings are in {}.
         dir.display(),
         kernel.display()
     );
+    Ok(())
+}
+
+/// Runs the try install's serverless node beside its kernel, in its workerd, as `serverless deploy` puts one in
+/// Cloudflare: the gateway sends `/v1/` and `/mcp` to it, and its devices answer its endpoint.
+fn serverless(dir: &Path) -> Result<()> {
+    anyhow::ensure!(one::serverless::modules().is_ok(), "this build has no serverless node: build it with SERVERLESS set, as {CLI} update does");
+    let mut settings = load_kernel(dir)?;
+    if !settings.serverless {
+        settings.serverless = true;
+        with_home(dir, || settings.save())?;
+        stop(dir, false)?;
+        start(dir)?;
+    }
+    let addr = running(dir).context("the try install didn't start again")?;
+    let key = settings.serverless_endpoint().context("the try install's kernel has no serverless key")?;
+    crate::request(try_agent(dir).post(format!("http://{addr}/v1/settings")).send_json(json!({ "name": "serverless", "value": key })))?;
+    println!("The try install's serverless node runs beside its kernel, its endpoint {}; {} sends /v1/ and /mcp to it.", &key[..8], settings.address);
     Ok(())
 }
 

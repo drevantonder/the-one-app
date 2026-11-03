@@ -380,10 +380,19 @@ struct Error(anyhow::Error);
 
 impl IntoResponse for Error {
     fn into_response(self) -> Response {
-        if let Some(n) = self.0.downcast_ref::<crate::node::Needs>() {
-            return (StatusCode::PRECONDITION_REQUIRED, Json(json!({ "error": n.to_string(), "need": n.need, "to": n.to, "seal": n.seal }))).into_response();
-        }
-        (StatusCode::BAD_REQUEST, Json(json!({ "error": format!("{:#}", self.0) }))).into_response()
+        let status = match self.0.downcast_ref::<crate::node::Needs>() {
+            Some(_) => StatusCode::PRECONDITION_REQUIRED,
+            None => StatusCode::BAD_REQUEST,
+        };
+        (status, Json(failed(&self.0))).into_response()
+    }
+}
+
+/// Why something failed, as the API says it: `{ error }`, with `{ need, to, seal }` for keys a call wasn't handed.
+fn failed(err: &anyhow::Error) -> Value {
+    match err.downcast_ref::<crate::node::Needs>() {
+        Some(n) => json!({ "error": n.to_string(), "need": n.need, "to": n.to, "seal": n.seal }),
+        None => json!({ "error": format!("{err:#}") }),
     }
 }
 
@@ -536,14 +545,38 @@ async fn schedule(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
 }
 
 async fn call(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
-    only(&body, &["id", "app", "sidecar", "op", "input", "scopes", "device", "agent", "depth", "from", "client"])?;
-    let mut req: CallRequest = serde_json::from_value(body).map_err(anyhow::Error::from)?;
+    Ok(Json(call_for(&node, me, body).await?))
+}
+
+/// A call as `/v1/call` takes it, for `me`: → `{ ok }`.
+async fn call_for(node: &Node, me: Me, body: Value) -> anyhow::Result<Value> {
+    only(&body, &["id", "app", "sidecar", "op", "input", "scopes", "device", "agent", "depth", "from", "client"]).map_err(|e| e.0)?;
+    let mut req: CallRequest = serde_json::from_value(body)?;
     // Only the node says an app made a call, and how deep it is.
     (req.from, req.depth) = (None, 0);
     if me.sign_in.is_some() {
         req = node.for_sign_in(req)?;
     }
-    Ok(Json(json!({ "ok": node.call_as(req, me.caller).await? })))
+    Ok(json!({ "ok": node.call_as(req, me.caller).await? }))
+}
+
+/// A call the serverless node passes on over iroh (src/node/net.rs), as `/v1/call` takes one through the gateway: its
+/// person's, by the access token it carries in `me`, with the keys they hand this device (`keys`, as `x-one-keys`).
+/// → `{ ok }`, or what failed as the API says it.
+pub(crate) async fn call_signed_in(node: &Node, mut call: Value) -> Value {
+    let (me, keys) = match call.as_object_mut() {
+        Some(c) => (c.remove("me").unwrap_or_default(), c.remove("keys")),
+        None => (Value::Null, None),
+    };
+    let ran = async {
+        let token = me["token"].as_str().filter(|t| !t.is_empty()).ok_or_else(|| anyhow::anyhow!("sign in first"))?;
+        let me = signed_in(node, token.to_string()).await?;
+        if let Some(handed) = keys.as_ref().and_then(Value::as_str) {
+            node.hand(token, &me.caller.user, handed)?;
+        }
+        call_for(node, me, call).await
+    };
+    ran.await.unwrap_or_else(|err| failed(&err))
 }
 
 #[derive(Deserialize)]

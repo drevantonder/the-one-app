@@ -65,6 +65,9 @@ pub struct Settings {
     /// the relay starts its list with them, as its admins', when it has none yet.
     #[serde(skip)]
     pub devices: Vec<String>,
+    /// The serverless node's endpoint key (hex), which only its Worker holds: its public half is on the relay's list.
+    #[serde(default, skip_serializing)]
+    pub serverless_key: String,
     /// Better Auth's own secret, for its cookies and the keys it keeps.
     #[serde(default, skip_serializing)]
     pub auth_secret: String,
@@ -118,6 +121,9 @@ GOOGLE_CLIENT_SECRET=
 # The API token kernel deploy edits the Cloudflare account's Workers with, where CLOUDFLARE_API_TOKEN isn't set.
 # @optional
 CLOUDFLARE_API_TOKEN=
+# The serverless node's endpoint key, made by serverless deploy.
+# @optional
+SERVERLESS_KEY=
 ";
 
 /// The Varlock `kernel` reads secrets with, and each platform's download of it with the download's sha256, as its
@@ -210,6 +216,7 @@ impl Settings {
         settings.auth_secret = get("AUTH_SECRET").context("no AUTH_SECRET")?;
         settings.bucket = get("BUCKET").map(|b| serde_json::from_str(&b)).transpose().context("BUCKET isn't JSON")?;
         settings.cloudflare_token = get("CLOUDFLARE_API_TOKEN");
+        settings.serverless_key = get("SERVERLESS_KEY").unwrap_or_default();
         if settings.try_person.is_none() && google() {
             settings.google = get("GOOGLE_CLIENT_ID").zip(get("GOOGLE_CLIENT_SECRET"));
             ensure!(settings.google.is_some(), "no GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET: the Google OAuth client people sign in with, whose redirect URI is {}/api/auth/callback/google", settings.address);
@@ -236,6 +243,7 @@ impl Settings {
             schedules_url: format!("http://127.0.0.1:{}", ports[2]),
             node_url: None,
             serverless: false,
+            serverless_key: data_encoding::HEXLOWER.encode(&rand::random::<[u8; 32]>()),
             ports,
             auth_secret: secret(),
             resources: vec![],
@@ -274,6 +282,9 @@ impl Settings {
             if let Some(bucket) = &self.bucket {
                 text += &format!("BUCKET={}\n", quoted(&bucket.to_string()));
             }
+            if !self.serverless_key.is_empty() {
+                text += &format!("SERVERLESS_KEY={}\n", quoted(&self.serverless_key));
+            }
             write_private(&local(), &text)?;
         }
         std::fs::write(path.with_file_name(".env.schema"), SCHEMA)?;
@@ -301,6 +312,12 @@ impl Settings {
         }
     }
 
+    /// The serverless node's endpoint (its public key, hex), once it has a key.
+    pub fn serverless_endpoint(&self) -> Option<String> {
+        let seed: [u8; 32] = data_encoding::HEXLOWER.decode(self.serverless_key.as_bytes()).ok()?.try_into().ok()?;
+        Some(data_encoding::HEXLOWER.encode(ed25519_dalek::SigningKey::from_bytes(&seed).verifying_key().as_bytes()))
+    }
+
     /// Where a service is reached, and the local port it listens on: none for the relay and the URL signer, which only
     /// other Workers' bindings reach.
     pub fn place(&self, service: &str) -> Option<(&str, u16)> {
@@ -309,7 +326,8 @@ impl Settings {
     }
 
     /// Each service's bindings: (name, value, whether it's secret). A value `service:<name>` is another service,
-    /// `vpc:<id>` a Cloudflare Workers VPC service, and `r2:<bucket>` an R2 bucket of the account's.
+    /// `object:<name>:<class>` another service's Durable Object class, `loader:` Worker Loader, `vpc:<id>` a Cloudflare
+    /// Workers VPC service, and `r2:<bucket>` an R2 bucket of the account's.
     pub fn bindings(&self, service: &str) -> Vec<(String, String, bool)> {
         // The gateway holds no secrets.
         if service == "gateway" {
@@ -319,11 +337,31 @@ impl Settings {
             };
             return vec![("AUTH".into(), "service:auth".into(), false), ("IROH".into(), "service:relay".into(), false), ("SIGNER".into(), "service:signer".into(), false), node];
         }
-        // Nor does the relay: only the keys of the install's first devices, which it starts its list with.
+        let location = (!crate::config::RELAY_LOCATION.is_empty()).then(|| ("LOCATION".into(), crate::config::RELAY_LOCATION.into(), false));
+        // Nor does the relay: only the keys of the install's first devices, which it starts its list with, and the
+        // serverless node's, whose datagrams it hands its Durable Object.
         if service == "relay" {
             let devices = (!self.devices.is_empty()).then(|| ("DEVICES".into(), json!(self.devices).to_string(), false));
-            let location = (!crate::config::RELAY_LOCATION.is_empty()).then(|| ("LOCATION".into(), crate::config::RELAY_LOCATION.into(), false));
-            return devices.into_iter().chain(location).collect();
+            let bound = self.serverless_endpoint().filter(|_| self.serverless).map(|key| [("BOUND".into(), key, false), ("NODE".into(), format!("object:{}:Node", crate::serverless::SERVICE), false)]);
+            return devices.into_iter().chain(bound.into_iter().flatten()).chain(location).collect();
+        }
+        // The serverless node: its endpoint's key, the relay it's reached through, and the node on a machine the rest
+        // of what needs one goes on to.
+        if service == crate::serverless::SERVICE {
+            let mut out = vec![
+                ("AUTH".into(), "service:auth".into(), false),
+                ("VAULT".into(), "service:vault".into(), false),
+                ("LOADER".into(), "loader:".into(), false),
+                ("ADDRESS".into(), self.address.clone(), false),
+                ("NAME".into(), self.name.clone(), false),
+                ("NODE_KEY".into(), self.serverless_key.clone(), true),
+                ("RELAY".into(), "object:relay:Relay".into(), false),
+            ];
+            out.extend(location);
+            if self.node_url.is_some() {
+                out.push(self.machine("MACHINE"));
+            }
+            return out;
         }
         // The URL signer holds only the bucket's credentials, and asks the relay who's allowed.
         if service == "signer" {
@@ -376,15 +414,16 @@ impl Settings {
 }
 
 /// The kernel's services as one workerd runs them, with `modules` in `SERVICES`' order, and the gateway serving the
-/// web client's files from `web`.
+/// web client's files from `web`; and the serverless node, if the install has one and this build carries it.
 pub fn served(settings: &Settings, modules: Vec<Vec<u8>>, web: &Path) -> Vec<Served> {
+    let node = crate::serverless::modules().ok().filter(|_| settings.serverless).map(|modules| crate::serverless::served(settings, modules));
     SERVICES
         .iter()
         .zip(modules)
         .map(|((name, entry, class), module)| Served {
             name: name.to_string(),
             module,
-            wasm: wasm(entry),
+            modules: wasm(entry),
             class: class.map(str::to_string),
             listen: settings.place(name).map(|(_, port)| format!("127.0.0.1:{port}")),
             bindings: settings.bindings(name).into_iter().map(|(n, v, _)| (n, v)).collect(),
@@ -393,6 +432,7 @@ pub fn served(settings: &Settings, modules: Vec<Vec<u8>>, web: &Path) -> Vec<Ser
             // install's URL signer reaches its bucket on this machine.
             outbound: (*name == "gateway" || *name == "signer" && settings.try_person.is_some()).then(|| NEARBY.to_string()),
         })
+        .chain(node)
         .collect()
 }
 
@@ -574,7 +614,7 @@ pub struct Served {
     pub name: String,
     pub module: Vec<u8>,
     /// Its WebAssembly modules, (name, bytes).
-    pub wasm: Vec<(String, Vec<u8>)>,
+    pub modules: Vec<(String, Vec<u8>)>,
     pub class: Option<String>,
     /// Where it listens, if anywhere but its binding.
     pub listen: Option<String>,
@@ -602,10 +642,15 @@ pub fn write_config(dir: &Path, served: &[Served]) -> Result<PathBuf> {
         ensure!(s.name.chars().all(|c| c.is_ascii_lowercase() || c == '-'), "a kernel service's name is lowercase");
         std::fs::write(dir.join(format!("{}.js", s.name)), &s.module)?;
         let mut modules = vec![format!("(name = \"worker.js\", esModule = embed {})", quote(&format!("{}.js", s.name)))];
-        for (name, bytes) in &s.wasm {
+        for (name, bytes) in &s.modules {
             let file = format!("{}-{name}", s.name);
             std::fs::write(dir.join(&file), bytes)?;
-            modules.push(format!("(name = {}, wasm = embed {})", quote(name), quote(&file)));
+            let kind = match name.rsplit('.').next() {
+                Some("wasm") => "wasm",
+                Some("js") => "esModule",
+                _ => "text",
+            };
+            modules.push(format!("(name = {}, {kind} = embed {})", quote(name), quote(&file)));
         }
         let data = dir.join("data").join(&s.name);
         std::fs::create_dir_all(&data)?;
@@ -626,9 +671,12 @@ pub fn write_config(dir: &Path, served: &[Served]) -> Result<PathBuf> {
             if value.starts_with("r2:") {
                 continue;
             }
-            bindings.push(match value.strip_prefix("service:") {
-                Some(service) => format!("(name = {}, service = {})", quote(name), quote(service)),
-                None => format!("(name = {}, text = {})", quote(name), quote(value)),
+            let object = value.strip_prefix("object:").and_then(|o| o.split_once(':'));
+            bindings.push(match (value.strip_prefix("service:"), object) {
+                (Some(service), _) => format!("(name = {}, service = {})", quote(name), quote(service)),
+                (_, Some((service, class))) => format!("(name = {}, durableObjectNamespace = (className = {}, serviceName = {}))", quote(name), quote(class), quote(service)),
+                _ if value == "loader:" => format!("(name = {}, workerLoader = ())", quote(name)),
+                _ => format!("(name = {}, text = {})", quote(name), quote(value)),
             });
         }
         let objects = match &s.class {
@@ -866,9 +914,18 @@ pub fn metadata(settings: &Settings, service: &str, class: Option<&str>, migrate
     let mut complete = true;
     let mut bindings: Vec<Value> = class.iter().map(|class| json!({ "type": "durable_object_namespace", "name": class.to_uppercase(), "class_name": class })).collect();
     for (name, value, secret) in settings.bindings(service) {
+        let object = value.strip_prefix("object:").and_then(|o| o.split_once(':'));
         match value.strip_prefix("service:") {
             Some(other) if exists(&worker_name(other)) => bindings.push(json!({ "type": "service", "name": name, "service": worker_name(other) })),
             Some(_) => complete = false,
+            // Another Worker's class, once it's there: the relay and the serverless node each bind the other's, so the
+            // first of them deployed goes without, and has it when it's deployed again.
+            None if object.is_some() => {
+                if let Some((other, class)) = object.filter(|(other, _)| exists(&worker_name(other))) {
+                    bindings.push(json!({ "type": "durable_object_namespace", "name": name, "class_name": class, "script_name": worker_name(other) }));
+                }
+            }
+            None if value == "loader:" => bindings.push(json!({ "type": "worker_loader", "name": name })),
             None => match (value.strip_prefix("vpc:"), value.strip_prefix("r2:")) {
                 (Some(id), _) => bindings.push(json!({ "type": "vpc_service", "name": name, "service_id": id })),
                 (_, Some(bucket)) => bindings.push(json!({ "type": "r2_bucket", "name": name, "bucket_name": bucket })),

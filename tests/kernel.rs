@@ -124,7 +124,7 @@ impl StandIn {
     fn start() -> StandIn {
         let auth = port();
         // Nodes fetch its keys from the address their sign-ins are for, as from the auth service at an install's.
-        let running = run(vec![Served { name: "auth".into(), module: module("test/auth.js"), wasm: vec![], class: None, listen: Some(format!("127.0.0.1:{auth}")), bindings: vec![], assets: None, outbound: None }]);
+        let running = run(vec![Served { name: "auth".into(), module: module("test/auth.js"), modules: vec![], class: None, listen: Some(format!("127.0.0.1:{auth}")), bindings: vec![], assets: None, outbound: None }]);
         StandIn { _running: running, auth: format!("http://127.0.0.1:{auth}"), issuer: format!("http://127.0.0.1:{auth}/api/auth") }
     }
 
@@ -163,12 +163,12 @@ impl UrlSigner {
         let (signer, sites) = (port(), port());
         let bucket = json!({ "endpoint": "https://s3.test", "bucket": "install", "region": "auto", "key_id": "id", "secret": "bucket secret" }).to_string();
         let running = run(vec![
-            Served { name: "relay".into(), module: module("test/relay.js"), wasm: vec![], class: None, listen: None, bindings: vec![("ALLOWED".into(), allowed.to_string())], assets: None, outbound: None },
-            Served { name: "sites".into(), module: module("test/sites.js"), wasm: vec![], class: None, listen: Some(format!("127.0.0.1:{sites}")), bindings: vec![], assets: None, outbound: None },
+            Served { name: "relay".into(), module: module("test/relay.js"), modules: vec![], class: None, listen: None, bindings: vec![("ALLOWED".into(), allowed.to_string())], assets: None, outbound: None },
+            Served { name: "sites".into(), module: module("test/sites.js"), modules: vec![], class: None, listen: Some(format!("127.0.0.1:{sites}")), bindings: vec![], assets: None, outbound: None },
             Served {
                 name: "signer".into(),
                 module: module("signer/worker.js"),
-                wasm: vec![],
+                modules: vec![],
                 class: None,
                 listen: Some(format!("127.0.0.1:{signer}")),
                 bindings: vec![("RELAY".into(), "service:relay".into()), ("BUCKET".into(), bucket)],
@@ -357,21 +357,27 @@ impl Kernel {
     /// Runs them as `one kernel serve` does, from new settings, with the stand-in sites as the bucket, the gateway
     /// sending `/v1/` to `node_url` and serving a web client of two pages.
     pub(crate) fn start(node_url: Option<String>) -> Kernel {
-        Kernel::start_as(node_url, false, vec![])
+        Kernel::start_as(node_url, false, vec![], None)
     }
 
     /// As `start`, its relay taking only `devices` (public keys, hex) and those they admit.
     pub(crate) fn for_devices(devices: Vec<String>) -> Kernel {
-        Kernel::start_as(None, false, devices)
+        Kernel::start_as(None, false, devices, None)
+    }
+
+    /// As `for_devices`, with the serverless node of `modules` (`serverless::modules_from`) beside it, ending itself
+    /// once it's idled `idle` ms.
+    pub(crate) fn with_serverless(devices: Vec<String>, modules: Vec<(String, &'static str, Vec<u8>)>, idle: u64) -> Kernel {
+        Kernel::start_as(None, false, devices, Some((modules, idle)))
     }
 
     /// As `for_devices`, for an install whose people sign in with Google at test.example, the stand-in sites as
     /// Google.
     fn google(devices: Vec<String>) -> Kernel {
-        Kernel::start_as(None, true, devices)
+        Kernel::start_as(None, true, devices, None)
     }
 
-    fn start_as(node_url: Option<String>, google: bool, devices: Vec<String>) -> Kernel {
+    fn start_as(node_url: Option<String>, google: bool, devices: Vec<String>, serverless: Option<(Vec<(String, &'static str, Vec<u8>)>, u64)>) -> Kernel {
         let gateway = port();
         let mut settings = kernel::Settings::new("Test", &format!("http://localhost:{gateway}"));
         settings.ports = [port(), port(), port(), gateway];
@@ -380,6 +386,7 @@ impl Kernel {
         settings.resources = vec![RESOURCE.into()];
         settings.node_url = node_url;
         settings.devices = devices;
+        settings.serverless = serverless.is_some();
         settings.bucket = Some(json!({ "endpoint": "https://s3.test", "bucket": "install", "region": "auto", "key_id": "id", "secret": "bucket secret" }));
         let modules = kernel::SERVICES.iter().map(|(_, entry, _)| module(entry)).collect();
         let sites = port();
@@ -394,7 +401,12 @@ impl Kernel {
             served[0].outbound = Some("sites".into());
             served[0].bindings.extend([("SIGN_IN", "google"), ("JOIN_DOMAIN", "test.example"), ("GOOGLE_CLIENT_ID", "a client id"), ("GOOGLE_CLIENT_SECRET", "a client secret")].map(|(n, v)| (n.into(), v.into())));
         }
-        served.push(Served { name: "sites".into(), module: module("test/sites.js"), wasm: vec![], class: None, listen: Some(format!("127.0.0.1:{sites}")), bindings: vec![], assets: None, outbound: None });
+        served.push(Served { name: "sites".into(), module: module("test/sites.js"), modules: vec![], class: None, listen: Some(format!("127.0.0.1:{sites}")), bindings: vec![], assets: None, outbound: None });
+        if let Some((modules, idle)) = serverless {
+            let mut node = one::serverless::served(&settings, modules);
+            node.bindings.push(("IDLE".into(), idle.to_string()));
+            served.push(node);
+        }
         let running = run(served);
         Kernel { _running: running, address: settings.address.clone(), settings }
     }
@@ -981,18 +993,23 @@ fn the_address_serves_only_scripts_that_parse() {
     assert!(kernel::parses(&inline).is_err(), "so is an HTML page's inline script");
 }
 
-/// The serverless node is the node's Rust as WebAssembly: what doesn't build for it, `one update` can't send out.
-/// Checked in a target folder of its own, kept between runs, so this test's cargo never waits on the one running it.
-#[test]
-fn the_serverless_node_builds_for_webassembly() {
+/// The serverless node, the node's Rust as WebAssembly, built as `one update` builds it: what doesn't build, it can't
+/// send out. Built in a target folder of its own, kept between runs, so this test's cargo never waits on the one running
+/// it: → its modules (`serverless::modules_from`).
+pub(crate) fn serverless_node() -> Vec<(String, &'static str, Vec<u8>)> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let target = root.join("target/serverless-test");
     let out = std::process::Command::new(std::env::var("CARGO").unwrap_or_else(|_| "cargo".into()))
-        .args(["check", "-q", "-p", "one-serverless", "--target", "wasm32-unknown-unknown", "--target-dir"])
-        .arg(root.join("target/serverless-check"))
+        .args(["build", "-q", "--release", "-p", "one-serverless", "--target", "wasm32-unknown-unknown", "--target-dir"])
+        .arg(&target)
         .current_dir(root)
         .output()
         .unwrap();
     assert!(out.status.success(), "the serverless node doesn't build (it needs rustup target add wasm32-unknown-unknown, and clang):\n{}", String::from_utf8_lossy(&out.stderr));
+    let glue = target.join("glue");
+    let out = std::process::Command::new("wasm-bindgen").args(["--target", "web", "--out-dir"]).arg(&glue).arg(target.join("wasm32-unknown-unknown/release/one_serverless.wasm")).output().unwrap();
+    assert!(out.status.success(), "wasm-bindgen (the version in Cargo.lock) didn't make its glue:\n{}", String::from_utf8_lossy(&out.stderr));
+    one::serverless::modules_from(std::fs::read(glue.join("one_serverless.js")).unwrap(), std::fs::read(glue.join("one_serverless_bg.wasm")).unwrap())
 }
 
 /// iroh endpoints, as nodes are, through the relay at a kernel's address and nothing else: its relay protocol is
@@ -1080,6 +1097,54 @@ mod relay {
 
     fn ticket() -> String {
         data_encoding::HEXLOWER.encode(&rand::random::<[u8; 32]>())
+    }
+
+    /// Asks on a stream of its own, as nodes ask each other (src/node/net.rs): → the answer on it.
+    async fn ask(conn: &iroh::endpoint::Connection, msg: &Value) -> anyhow::Result<Value> {
+        let (mut send, mut recv) = conn.open_bi().await?;
+        send.write_all(msg.to_string().as_bytes()).await?;
+        send.finish()?;
+        Ok(serde_json::from_slice(&recv.read_to_end(1 << 20).await?)?)
+    }
+
+    /// The serverless node is an iroh endpoint with no socket: the relay hands it what's sent to its key, by RPC to its
+    /// Durable Object, which runs iroh as WebAssembly with a transport of its own, and passes on what it sends. Native
+    /// iroh, iroh in WebAssembly and the relay must agree on every packet for an ask to be answered at all. Since iroh
+    /// keeps it awake for good, it ends itself once nobody has asked for a while, its connections with it.
+    #[test]
+    fn the_serverless_node_answers_through_the_relay_and_ends_itself_when_idle() {
+        let modules = super::serverless_node();
+        let first = SecretKey::generate();
+        let idle = 2_000;
+        let k = super::Kernel::with_serverless(vec![hex(&first)], modules, idle);
+        let address = k.address.replace("localhost", "127.0.0.1");
+        let node: iroh::PublicKey = k.settings.serverless_endpoint().unwrap().parse().unwrap();
+        let alpn = format!("{}/1", one::config::CLI).into_bytes();
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        runtime.block_on(async {
+            let a = online(&address, &first, None).await.expect("the install's first device isn't let in");
+            let at = EndpointAddr::new(node).with_relay_url(address.parse().unwrap());
+            // A call asked as nodes ask: it runs as `/v1/call` runs there, which takes only a sign-in's.
+            let call = json!({ "kind": "ask", "body": { "call": { "app": "board", "op": "read", "input": {}, "me": {} } } });
+            let said = |answer: &Value| answer["error"].as_str().is_some_and(|e| e.contains("sign in"));
+            let woke = std::time::Instant::now();
+            let conn = a.connect(at.clone(), &alpn).await.expect("the serverless node wasn't reached");
+            let connected = woke.elapsed();
+            let answer = ask(&conn, &call).await.unwrap();
+            assert!(said(&answer), "the serverless node didn't answer as /v1/call does: {answer}");
+            let first_answer = woke.elapsed();
+            let asked = std::time::Instant::now();
+            assert!(said(&ask(&conn, &call).await.unwrap()));
+            eprintln!("serverless node: woken and connected in {connected:?}, first answer in {first_answer:?}, then a round trip in {:?}", asked.elapsed());
+
+            // Once idle, it ends: the connection goes with it, and the next call wakes it again on a new one.
+            tokio::time::sleep(Duration::from_millis(idle + 3_000)).await;
+            let stale = tokio::time::timeout(Duration::from_secs(5), ask(&conn, &call)).await;
+            assert!(!matches!(stale, Ok(Ok(_))), "the serverless node didn't end itself once idle");
+            let conn = a.connect(at, &alpn).await.expect("the serverless node didn't wake again");
+            assert!(said(&ask(&conn, &call).await.unwrap()));
+            a.close().await;
+        });
     }
 
     #[test]

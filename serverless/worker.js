@@ -7,16 +7,23 @@
 // Vault's items, so no secret reaches this node.
 //
 // Calls of apps that keep to their own data run here when the install's order (src/rank.rs, set in Devices) puts this
-// node before every machine, or the machines are far. Everything else goes first to the install's node on a machine
-// (`MACHINE`), as the gateway sent it; when none answers, this node answers what it can (the install's state, apps,
-// widgets, badges, and any app with no sidecar) and says plainly that the rest needs a device that's off.
+// node before every machine, or the machines are far. Everything else goes first to the install's nodes on machines:
+// calls over iroh, from this node's own endpoint (`Node`), the rest as the gateway sent it (`MACHINE`); when none
+// answers, this node answers what it can (the install's state, apps, widgets, badges, and any app with no sidecar) and
+// says plainly that the rest needs a device that's off.
 //
-// Bindings: AUTH and VAULT (the kernel's services), LOADER (Worker Loader), MACHINE (a node on a machine: a Workers
-// VPC service; or MACHINE_URL, its address), ADDRESS (the install's) and NAME (its name). `built.js`, made when it's
-// deployed, is the shim; `icons.json` is the icons every device draws.
+// `Node` is this node as an iroh endpoint (src/net.rs), of its own key, with no socket: one Durable Object, which the
+// relay wakes with the datagrams sent to it and which sends its own back through the relay. It answers the asks others
+// send it as `/v1/call` here, and asks devices for calls; its connections to them live as long as it does, and it ends
+// itself once nobody has asked for a while, since iroh's timers would keep it awake, and billed, for good.
+//
+// Bindings: AUTH and VAULT (the kernel's services), LOADER (Worker Loader), NODE (this Worker's `Node`), NODE_KEY (its
+// endpoint's key, a secret), RELAY (the relay's Durable Object), LOCATION (where the relay is made), MACHINE (a node
+// on a machine: a Workers VPC service; or MACHINE_URL, its address), ADDRESS (the install's) and NAME (its name).
+// `built.js`, made when it's deployed, is the shim; `icons.json` is the icons every device draws.
 
-import { RpcTarget } from "cloudflare:workers";
-import { initSync, verify, open, query, write, close, statements, screen, client_screen, config, prefix, following as after, read_log, groups, scopes_of, install, bundle } from "./one_serverless.js";
+import { DurableObject, RpcTarget } from "cloudflare:workers";
+import { initSync, verify, open, query, write, close, statements, screen, client_screen, config, prefix, following as after, read_log, groups, scopes_of, install, bundle, endpoint_start, endpoint_deliver, endpoint_ask, endpoint_close } from "./one_serverless.js";
 import wasm from "./one_serverless_bg.wasm";
 import { shim, compatibilityDate } from "./built.js";
 import icons from "./icons.json";
@@ -303,14 +310,11 @@ class Call {
     return JSON.parse(query(await this.db(scope), sql, JSON.stringify(params)));
   }
 
-  /// Writes a call's appends: each scope's statements as one step, which a node on a machine is told of. → the
-  /// databases it wrote.
+  /// Writes a call's appends: each scope's statements as one step. Nobody is told: this node runs only while no
+  /// machine's answers, and devices read what changed from the bucket. → the databases it wrote.
   async write(appends) {
     const each = JSON.parse(statements(JSON.stringify(appends), JSON.stringify(this.scopes)));
-    for (const [scope, list] of Object.entries(each)) {
-      const at = await write(await this.db(scope), this.bucket, JSON.stringify(list));
-      if (at) this.ctx.waitUntil(changed(this.env, this.view, { scope, app: this.app.name, database: "main", at }));
-    }
+    for (const [scope, list] of Object.entries(each)) await write(await this.db(scope), this.bucket, JSON.stringify(list));
     return Object.keys(each).map((scope) => prefix(scope, this.app.name, "main"));
   }
 
@@ -463,7 +467,7 @@ class ForCall extends RpcTarget {
           // A sidecar, or an app this node can't run, goes to a node on a machine, when one answers.
           const callee = deployed(view, q.app);
           const d = callee && !q.sidecar && !q.device ? await describe(env, who, callee) : null;
-          if (!d || d.uses?.sidecars?.length) return Response.json(await machineCall(env, who, q, d));
+          if (!d || d.uses?.sidecars?.length) return Response.json(await machineCall(this.run, q, d));
           return Response.json(await this.run.call({ app: q.app, op: q.op, input: q.input }, this.app.name, this.depth + 1));
         }
         case "GET vault": {
@@ -486,13 +490,44 @@ class ForCall extends RpcTarget {
 }
 
 /// An app's call that needs a node on a machine (a sidecar's, or one of an app that uses one), as this person.
-async function machineCall(env, who, q, d) {
-  const request = new Request(`${env.ADDRESS}/v1/call`, { method: "POST", headers: { authorization: `Bearer ${who.token}`, "content-type": "application/json" }, body: JSON.stringify({ app: q.app, op: q.op, input: q.input ?? {}, sidecar: q.sidecar ? q.app : undefined, device: q.device }) });
-  const r = await fromMachine(request, env);
-  if (!r) refuse(503, needsDevice(d, q.app));
-  const out = await r.json().catch(() => ({}));
-  if (!r.ok) refuse(r.status, out.error || `${q.app} failed`);
-  return out;
+async function machineCall(run, q, d) {
+  const call = { app: q.app, op: q.op, input: q.input ?? {}, sidecar: q.sidecar ? q.app : undefined, device: q.device };
+  const out = await onMachine(run.env, run.who, run.view, call, 15_000);
+  if (!out) refuse(503, needsDevice(d, q.app));
+  return answered(out, q.app);
+}
+
+// Its endpoint, which reaches devices over iroh.
+
+/// How long reaching a device may take, and how long this node stays awake once nobody asks it anything.
+const CONNECT = 2_000;
+const IDLE = 30_000;
+
+const hex = (bytes) => [...new Uint8Array(bytes)].map((b) => b.toString(16).padStart(2, "0")).join("");
+const unhex = (s) => Uint8Array.from(s.match(/../g) || [], (h) => parseInt(h, 16));
+const near = (env) => (env.LOCATION ? { locationHint: env.LOCATION } : {});
+
+/// Asks the install's nodes on machines to run `call` as `who`, over iroh, each in Where Things Run's order until one is
+/// reached, with the keys its caller handed (`x-one-keys`, sealed to the node they meant): → its answer, `{ ok }` or
+/// what failed as `/v1/call` says it; or null if none was reached.
+async function onMachine(env, who, view, call, wait, keys = null) {
+  if (!env.NODE) return null;
+  const to = [...view.state.install.devices].sort((a, b) => a.order - b.order).map((s) => s.key);
+  if (!to.length) return null;
+  const message = JSON.stringify({ kind: "ask", body: { call: { ...call, me: { token: who.token }, keys: keys ?? undefined } } });
+  const r = await env.NODE.get(env.NODE.idFromName("node"), near(env)).ask(to, message, wait);
+  if (r.unreached !== undefined) {
+    console.log(JSON.stringify({ machine: "off", why: r.unreached }));
+    return null;
+  }
+  if (r.connect) machineRtt = r.connect;
+  return JSON.parse(r.answer);
+}
+
+/// What a node on a machine answered, as an app's call here takes it.
+function answered(out, app) {
+  if (out.ok !== undefined) return out;
+  refuse(out.need ? 428 : 400, out.error || out.elsewhere || `${app} failed`);
 }
 
 /// An app's screen, as its page (src/screen.rs).
@@ -505,32 +540,21 @@ async function screenOf(env, who, view, app, name, params, scope) {
 
 // Requests.
 
-/// Until when a node on a machine didn't answer, so requests meanwhile don't wait for it again.
+/// Until when a node on a machine didn't answer through the tunnel, so requests meanwhile don't wait for it again.
 let machineOffUntil = 0;
 
-/// A machine whose round trip through the tunnel is longer than this is far (src/node.rs's FAR): this node, near the
-/// person asking, runs what it can rather than wait on it.
+/// A machine whose round trip is longer than this is far (src/node.rs's FAR): this node, near the person asking, runs
+/// what it can rather than wait on it.
 const FAR = 250;
-/// The tunnel's last round trip from here, and when it was measured.
+/// How long the last connection made to a machine's node took: one round trip, through the relay.
 let machineRtt = 0;
-let measuredAt = 0;
-
-/// Measures the tunnel's round trip now and then: how long a node on a machine takes to say what it says to nothing.
-function measure(env, ctx) {
-  if ((!env.MACHINE && !env.MACHINE_URL) || Date.now() - measuredAt < 60_000) return;
-  measuredAt = Date.now();
-  const started = Date.now();
-  const sent = env.MACHINE ? env.MACHINE.fetch(`http://${new URL(env.ADDRESS).host}/v1/far`) : fetch(`${env.MACHINE_URL}/v1/far`);
-  ctx.waitUntil(sent.then((r) => r.body?.cancel()).then(() => (machineRtt = Date.now() - started)).catch(() => {}));
-}
 
 const PLACES = { first: 0, needed: 1, last: 2 };
 
-/// Whether an app's call this node could run goes to a machine first: a machine is up, not far, and comes at this
-/// node's place in the install's order or before it (at the same place a machine costs less).
-function machineFirst(view, env, ctx) {
-  measure(env, ctx);
-  if (Date.now() < machineOffUntil || machineRtt > FAR) return false;
+/// Whether an app's call this node could run goes to a machine first: one is not far, and comes at this node's place
+/// in the install's order or before it (at the same place a machine costs less).
+function machineFirst(view) {
+  if (machineRtt > FAR) return false;
   const mine = PLACES[view.state.install.serverless?.use] ?? PLACES.needed;
   return view.state.install.devices.some((s) => (PLACES[s.use] ?? PLACES.first) <= mine);
 }
@@ -558,18 +582,6 @@ async function fromMachine(request, env, wait = 15_000) {
   }
 }
 
-/// Tells the devices of the install, through the gateway's relay, that this node wrote step `at` of a database, so
-/// those that hold the scope read it from the bucket now, not at their next look. Only a hint.
-async function changed(env, view, wrote) {
-  if (!env.RELAY) return;
-  const to = view.state.install.devices.map((s) => s.key);
-  try {
-    await env.RELAY.get(env.RELAY.idFromName("relay")).fetch("http://relay/notice", { method: "POST", body: JSON.stringify({ to, notice: { changed: wrote } }) });
-  } catch (err) {
-    console.log(JSON.stringify({ changed: wrote.scope, why: String(err?.message ?? err) }));
-  }
-}
-
 /// While no device is on, the events a shell listens for: none, kept open a minute, so it asks again then.
 function quietEvents() {
   const enc = new TextEncoder();
@@ -585,21 +597,22 @@ function quietEvents() {
   return new Response(body, { headers: { "content-type": "text/event-stream", "cache-control": "no-store" } });
 }
 
-async function route(request, env, ctx) {
+/// Answers a request. One `asked` over iroh runs here, or not at all: whoever asked tried the machines.
+async function route(request, env, ctx, asked = false) {
   const url = new URL(request.url);
   const path = url.pathname;
   if (request.method === "GET" && path === "/v1/icons") return new Response(icons, { headers: { "content-type": "application/json", "cache-control": "max-age=86400" } });
   if (request.method === "POST" && path === "/v1/call") {
-    const req = await request.clone().json().catch(() => refuse(400, "the body isn't JSON"));
-    if (req.sidecar || req.device) return (await fromMachine(request, env, 120_000)) || refuse(503, needsDevice(null, req.app));
+    const req = await request.json().catch(() => refuse(400, "the body isn't JSON"));
     const who = await whom(request, env);
     const run = new Run(env, ctx, who, await installFor(env, who));
-    const app = deployed(run.view, req.app);
+    const app = !req.sidecar && !req.device && deployed(run.view, req.app);
     const d = app && (await describe(env, who, app));
     // An app that keeps to its own data runs here, unless a machine comes first; the rest on a machine when one answers.
-    if (d && plain(d) && !machineFirst(run.view, env, ctx)) return json(await run.call(req));
-    const r = await fromMachine(request, env, 120_000);
-    if (r) return r;
+    if (d && plain(d) && (asked || !machineFirst(run.view))) return json(await run.call(req));
+    const r = !asked && (await onMachine(env, who, run.view, req, 120_000, request.headers.get("x-one-keys")));
+    // Keys it needs are its caller's to send again, sealed to the node that said so.
+    if (r) return json(r, r.ok !== undefined ? 200 : r.need ? 428 : 400);
     if (!d || d.uses?.sidecars?.length) refuse(503, needsDevice(d, req.app));
     return json(await run.call(req));
   }
@@ -610,7 +623,7 @@ async function route(request, env, ctx) {
     const app = deployed(view, screenAt[1]);
     const d = app && (await describe(env, who, app));
     const params = JSON.parse(url.searchParams.get("params") || "{}");
-    if (d && plain(d) && !machineFirst(view, env, ctx)) return screenOf(env, who, view, app, screenAt[2], params, url.searchParams.get("scope"));
+    if (d && plain(d) && !machineFirst(view)) return screenOf(env, who, view, app, screenAt[2], params, url.searchParams.get("scope"));
     const r = await fromMachine(request, env);
     if (r) return r;
     if (!d || d.uses?.sidecars?.length) refuse(503, needsDevice(d, screenAt[1]));
@@ -640,14 +653,140 @@ async function route(request, env, ctx) {
   refuse(503, `That needs one of your devices, and ${OFF}.`);
 }
 
+async function answer(request, env, ctx, asked) {
+  try {
+    return await route(request, env, ctx, asked);
+  } catch (err) {
+    if (err instanceof Refused) return json({ error: err.message }, err.status);
+    console.error(err.stack || err);
+    return json({ error: String(err?.message ?? err) }, 400);
+  }
+}
+
 export default {
-  async fetch(request, env, ctx) {
-    try {
-      return await route(request, env, ctx);
-    } catch (err) {
-      if (err instanceof Refused) return json({ error: err.message }, err.status);
-      console.error(err.stack || err);
-      return json({ error: String(err?.message ?? err) }, 400);
-    }
-  },
+  fetch: (request, env, ctx) => answer(request, env, ctx, false),
 };
+
+/// This node as an iroh endpoint: one object, woken by the relay or by this Worker asking a device for a call.
+export class Node extends DurableObject {
+  constructor(ctx, env) {
+    super(ctx, env);
+    /// Datagrams it sent this turn, for the relay; asks running now, and when the last one began or ended.
+    this.out = [];
+    this.asking = 0;
+    this.last = Date.now();
+  }
+
+  relay() {
+    return this.env.RELAY.get(this.env.RELAY.idFromName("relay"), near(this.env));
+  }
+
+  /// Its endpoint, started once in the object's life: the first packet or ask after it slept waits for this.
+  start() {
+    if (!this.started) {
+      const began = Date.now();
+      const send = (dst, seg, contents) => {
+        this.out.push([hex(dst), seg, contents]);
+        if (this.out.length > 1) return;
+        queueMicrotask(() => {
+          const items = this.out;
+          this.out = [];
+          this.sent = this.relay().fromNode(items).catch(() => {});
+          this.ctx.waitUntil(this.sent);
+        });
+      };
+      this.started = endpoint_start(unhex(this.env.NODE_KEY), send, (remote, message) => this.asked(remote, message)).then((key) => {
+        console.log(JSON.stringify({ woke: key.slice(0, 8), ms: Date.now() - began }));
+        return key;
+      });
+      this.started.catch(() => (this.started = null));
+      this.awake();
+    }
+    return this.started;
+  }
+
+  /// Datagrams the relay was handed for it: `[src, segment size, contents]` each.
+  async deliver(batch) {
+    await this.start();
+    for (const [src, seg, contents] of batch) endpoint_deliver(unhex(src), seg, contents);
+  }
+
+  /// Asks the first of `to` (keys, in the order to try them) that's connected to the relay, and reached: → `{ answer,
+  /// by, connect }`, `connect` how long making a new connection took (0 if one was open); or `{ unreached }`, why none was.
+  async ask(to, message, wait) {
+    this.asking++;
+    this.awake();
+    try {
+      // Only those connected to the relay can be reached from here; with none, it needn't start its endpoint.
+      const here = new Set(await this.relay().connected(to));
+      if (here.size) await this.start();
+      const why = [];
+      for (const key of to) {
+        if (!here.has(key)) continue;
+        try {
+          const { answer, connect } = await endpoint_ask(key, message, CONNECT, wait);
+          return { answer, by: key, connect };
+        } catch (err) {
+          if (!err.unreached) throw err;
+          why.push(`${key.slice(0, 8)} ${err.message}`);
+        }
+      }
+      return { unreached: why.join("; ") || "none of them is connected" };
+    } finally {
+      this.asking--;
+      this.awake();
+    }
+  }
+
+  /// What another endpoint asks it on a stream: a call, answered as `/v1/call` here answers it, run here. A notice
+  /// needs no answer: this node keeps nothing a notice would change.
+  async asked(remote, text) {
+    this.asking++;
+    this.awake();
+    try {
+      const msg = JSON.parse(text);
+      if (msg.kind === "notice") return null;
+      if (msg.kind !== "ask" || !msg.body?.call) return JSON.stringify({ error: "the serverless node answers calls" });
+      const { me, keys, ...call } = msg.body.call;
+      const headers = { "content-type": "application/json" };
+      if (me?.token) headers.authorization = `Bearer ${me.token}`;
+      if (keys) headers["x-one-keys"] = keys;
+      const request = new Request(`${this.env.ADDRESS}/v1/call`, { method: "POST", headers, body: JSON.stringify(call) });
+      return await (await answer(request, this.env, this.ctx, true)).text();
+    } catch (err) {
+      return JSON.stringify({ error: String(err?.message ?? err) });
+    } finally {
+      this.asking--;
+      this.awake();
+    }
+  }
+
+  /// iroh always has a timer pending, which keeps the object in memory, and billed: so once nobody has asked anything
+  /// for IDLE, an alarm ends it, and the next packet starts it again, a new connection for whoever calls. Packets alone
+  /// don't keep it: connections' keep-alives would, forever.
+  awake() {
+    this.last = Date.now();
+    if (!this.alarmAt || this.alarmAt < this.last + this.idle() / 2) this.arm(this.last + this.idle());
+  }
+
+  idle() {
+    return Number(this.env.IDLE) || IDLE;
+  }
+
+  arm(at) {
+    this.alarmAt = at;
+    this.ctx.storage.setAlarm(at);
+  }
+
+  async alarm() {
+    this.alarmAt = null;
+    if (!this.started) return;
+    if (this.asking) return this.arm(Date.now() + this.idle());
+    if (Date.now() - this.last < this.idle() - 1_000) return this.arm(this.last + this.idle());
+    // Its connections' ends reach their peers before it does.
+    await endpoint_close();
+    await this.sent;
+    console.log(JSON.stringify({ sleeps: true }));
+    this.ctx.abort("idle");
+  }
+}

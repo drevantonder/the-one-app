@@ -136,6 +136,9 @@ impl Node {
     /// device directly (its LAN, its tailnet, a port its router maps) can connect, which the relay never sees.
     async fn take_conn(&self, conn: Connection) {
         let remote = *conn.remote_id().as_bytes();
+        if !self.is_device(&remote) && self.is_serverless(&remote) {
+            return self.take_serverless(conn).await;
+        }
         if !self.is_device(&remote) {
             return self.take_joining(conn).await;
         }
@@ -167,6 +170,31 @@ impl Node {
                 };
                 if let Err(err) = async { send.write_all(answer.to_string().as_bytes()).await?; send.finish()?; anyhow::Ok(()) }.await {
                     tracing::debug!("answering {}: {err:#}", short(&remote));
+                }
+            });
+        }
+    }
+
+    /// The install's serverless node, which asks only for calls, each a sign-in's, by its token: as `/v1/call` takes
+    /// one through the gateway.
+    async fn take_serverless(&self, conn: Connection) {
+        let remote = *conn.remote_id().as_bytes();
+        while let Ok((mut send, mut recv)) = conn.accept_bi().await {
+            if !self.is_serverless(&remote) {
+                return conn.close(1u32.into(), b"not this install's serverless node");
+            }
+            let node = self.clone();
+            tokio::spawn(async move {
+                let msg: Value = match recv.read_to_end(MESSAGE_LIMIT).await.map_err(anyhow::Error::from).and_then(|b| Ok(serde_json::from_slice(&b)?)) {
+                    Ok(msg) => msg,
+                    Err(err) => return tracing::debug!("what the serverless node sent: {err:#}"),
+                };
+                let answer = match msg["kind"].as_str() {
+                    Some("ask") => crate::api::call_signed_in(&node, msg["body"]["call"].clone()).await,
+                    _ => json!({ "error": "the serverless node only asks for calls" }),
+                };
+                if let Err(err) = async { send.write_all(answer.to_string().as_bytes()).await?; send.finish()?; anyhow::Ok(()) }.await {
+                    tracing::debug!("answering the serverless node: {err:#}");
                 }
             });
         }
@@ -225,6 +253,11 @@ impl Node {
 
     fn is_device(&self, key: &Key) -> bool {
         self.with(|i| Ok(i.r.members.compute(key).is_some())).unwrap_or(false)
+    }
+
+    /// Whether `key` is the install's serverless node's endpoint, as `serverless deploy` set it.
+    fn is_serverless(&self, key: &Key) -> bool {
+        self.with(|i| Ok(i.r.members.settings.get("serverless").is_some_and(|k| *k == hex(key)))).unwrap_or(false)
     }
 
     fn conn_slot(&self, to: &Key) -> Arc<tokio::sync::Mutex<Option<Connection>>> {

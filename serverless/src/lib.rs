@@ -2,6 +2,8 @@
 //! asks the vault and runs apps; this checks access tokens, and reads and writes apps' databases in the bucket
 //! (`src/db.rs`), through the presigned URLs `worker.js` gets for each call. Nothing outlives the call.
 
+mod net;
+
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 

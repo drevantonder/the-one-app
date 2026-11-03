@@ -22,3 +22,13 @@ sqlite-wasm-rs = { version = "0.6", features = ["wasm-bindgen"] }
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 js-sys = "0.3"
+# It's an iroh endpoint as every node is (src/net.rs), with no socket: its only transport is a custom one, the relay
+# handing it datagrams by RPC. Pinned to the nodes' and relay's iroh, as custom transports are unstable between versions.
+iroh = { version = "=1.4.1", default-features = false, features = ["tls-ring", "unstable-custom-transports"] }
+iroh-base = { version = "=1.4.1", default-features = false, features = ["key", "relay"] }
+n0-future = "0.3"
+n0-watcher = "1"
+noq-udp = "1.4"
+# iroh's randomness, from the Worker's crypto.getRandomValues, for each version of getrandom it builds.
+getrandom = { version = "0.4", features = ["wasm_js"] }
+getrandom03 = { package = "getrandom", version = "0.3", features = ["wasm_js"] }

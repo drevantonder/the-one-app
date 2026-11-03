@@ -126,3 +126,22 @@ pub fn endpoint_gone(id: &[u8]) -> Result<Vec<u8>, JsError> {
     let id = PublicKey::try_from(id).map_err(|e| JsError::new(&e.to_string()))?;
     Ok(RelayToClientMsg::EndpointGone(id).write_to(Vec::new()))
 }
+
+/// The datagrams in a client's Datagrams frame, for an endpoint that isn't a socket (the serverless node): its
+/// segment size (2 bytes, 0 for one datagram), then their contents.
+#[wasm_bindgen]
+pub fn datagrams_of(msg: &[u8]) -> Result<Vec<u8>, JsError> {
+    let msg = KEYS.with(|k| ClientToRelayMsg::from_bytes(Bytes::copy_from_slice(msg), k)).map_err(|e| JsError::new(&e.to_string()))?;
+    let ClientToRelayMsg::Datagrams { datagrams, .. } = msg else { return Err(JsError::new("not datagrams")) };
+    let mut out = datagrams.segment_size.map_or(0, |s| s.get()).to_be_bytes().to_vec();
+    out.extend_from_slice(&datagrams.contents);
+    Ok(out)
+}
+
+/// The frame a socket gets for datagrams from `src`, an endpoint that isn't a socket.
+#[wasm_bindgen]
+pub fn to_client(src: &[u8], segment_size: u16, contents: &[u8]) -> Result<Vec<u8>, JsError> {
+    let src = PublicKey::try_from(src).map_err(|e| JsError::new(&e.to_string()))?;
+    let datagrams = protos::relay::Datagrams { ecn: None, segment_size: std::num::NonZeroU16::new(segment_size), contents: Bytes::copy_from_slice(contents) };
+    Ok(RelayToClientMsg::Datagrams { remote_endpoint_id: src, datagrams }.write_to(Vec::new()))
+}

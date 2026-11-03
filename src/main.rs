@@ -418,9 +418,15 @@ fn run(args: Vec<String>) -> Result<()> {
         ["serverless", "deploy"] => {
             let mut settings = devices_here(one::kernel::Settings::load()?, true)?;
             let cf = cloudflare(&flags, Some(&settings))?;
+            // Its endpoint's key, made once and kept with the kernel's secrets.
+            if settings.serverless_endpoint().is_none() {
+                settings.serverless_key = data_encoding::HEXLOWER.encode(&rand::random::<[u8; 32]>());
+                settings.set_secret("SERVERLESS_KEY", &settings.serverless_key)?;
+            }
+            // The relay it deploys again binds the serverless node's endpoint only for an install that has one.
+            let was = std::mem::replace(&mut settings.serverless, true);
             one::serverless::deploy(&cf, &settings)?;
-            if !settings.serverless {
-                settings.serverless = true;
+            if !was {
                 settings.save()?;
                 let gateway = one::kernel::SERVICES.iter().position(|(s, _, _)| *s == "gateway").unwrap();
                 let mut modules = vec![Vec::new(); one::kernel::SERVICES.len()];
@@ -428,8 +434,9 @@ fn run(args: Vec<String>) -> Result<()> {
                 let web = settings.web();
                 one::kernel::deploy_some(&cf, &settings, &modules, &web, &["gateway"])?;
             }
-            // So Devices shows it, for its admins to say where it comes in the order things run in.
-            post("/v1/settings", json!({ "name": "serverless", "value": "on" }))?;
+            // So devices answer its endpoint, and Devices shows it, for its admins to say where it comes in the order
+            // things run in.
+            post("/v1/settings", json!({ "name": "serverless", "value": settings.serverless_endpoint() }))?;
             println!("The serverless node is in your Cloudflare account, and {} sends /v1/ and /mcp to it; what needs a machine goes on to {}.", settings.address, settings.node_url.as_deref().unwrap_or("no machine yet: kernel set node-url"));
         }
         ["kernel", "invite", name] => {

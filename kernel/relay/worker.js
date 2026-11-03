@@ -20,9 +20,13 @@
 //   the same way, by its code's maker too.
 // - `{ pairing: { hash, until } }`: the SHA-256 (hex) of a pairing code's ticket and until when it works (ms).
 // - `{ unpair }`: a pairing code's hash, to end it, by its maker or an admin.
+//
+// One endpoint isn't a socket: the serverless node (`BOUND`, its key), a Durable Object of its own Worker (`NODE`) that
+// sleeps until someone calls it. Datagrams sent to it go to it by RPC, gathered each turn, waking it; what it sends
+// comes back by RPC (`fromNode`) and goes out as from it. It's one of the install's endpoints, as compute.
 import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
 import wasm from "./relay_protos_bg.wasm";
-import { initSync, challenge, verify, confirm, deny, from_client, endpoint_gone } from "./relay_protos.js";
+import { initSync, challenge, verify, confirm, deny, from_client, endpoint_gone, datagrams_of, to_client } from "./relay_protos.js";
 import { checkRequest, FRESH } from "../shared/crypto.js";
 
 initSync({ module: wasm });
@@ -105,12 +109,15 @@ export default class extends WorkerEntrypoint {
     return isKey(key) ? this.relay().allowed(key) : null;
   }
 
-  /// The install's one relay, made near its people (`LOCATION`, a location hint) rather than wherever its first request
-  /// came from.
   relay() {
-    return this.env.RELAY.get(this.env.RELAY.idFromName("relay"), this.env.LOCATION ? { locationHint: this.env.LOCATION } : {});
+    return relay(this.env);
   }
 }
+
+/// The install's one relay, made near its people (`LOCATION`, a location hint) rather than wherever its first request
+/// came from.
+const near = (env) => (env.LOCATION ? { locationHint: env.LOCATION } : {});
+const relay = (env) => env.RELAY.get(env.RELAY.idFromName("relay"), near(env));
 
 export class Relay extends DurableObject {
   constructor(ctx, env) {
@@ -150,6 +157,7 @@ export class Relay extends DurableObject {
 
   /// `{ admin }` if `key` is one of the install's endpoints; a computer let in by a pairing code isn't, until it's added.
   allowed(key) {
+    if (key === this.env.BOUND) return { admin: false };
     const it = this.key(key);
     return it ? { admin: it.admin === 1 } : null;
   }
@@ -208,6 +216,7 @@ export class Relay extends DurableObject {
     if (out[0] !== 0) return;
     const to = hex(out.subarray(1, 33));
     if (said.pairing && to !== said.to) return;
+    if (to === this.env.BOUND && this.env.NODE) return this.toNode(said.id, bytes);
     const other = this.sockets.get(to);
     if (other) {
       try {
@@ -223,6 +232,44 @@ export class Relay extends DurableObject {
     }
     this.told.set(pair, now);
     ws.send(endpoint_gone(unhex(to)));
+  }
+
+  /// Datagrams for the serverless node, from `src`: gathered this turn, then handed to it by RPC, which wakes it.
+  toNode(src, frame) {
+    let d;
+    try {
+      d = datagrams_of(frame);
+    } catch {
+      return;
+    }
+    (this.forNode ||= []).push([src, (d[0] << 8) | d[1], d.slice(2)]);
+    if (this.forNode.length > 1) return;
+    queueMicrotask(() => {
+      const batch = this.forNode;
+      this.forNode = [];
+      const node = this.env.NODE.get(this.env.NODE.idFromName("node"), near(this.env));
+      this.ctx.waitUntil(node.deliver(batch).catch((err) => console.log(JSON.stringify({ node: "unreached", why: String(err?.message ?? err) }))));
+    });
+  }
+
+  /// Datagrams the serverless node sends, `[dst, segment size, contents]` each, passed on as from it: → the keys of
+  /// those not here, so it stops waiting for them.
+  fromNode(items) {
+    const gone = new Set();
+    for (const [dst, seg, contents] of items) {
+      const to = this.sockets.get(dst);
+      if (!to) gone.add(dst);
+      else
+        try {
+          to.send(to_client(unhex(this.env.BOUND), seg, contents));
+        } catch {}
+    }
+    return [...gone];
+  }
+
+  /// Which of `keys` are connected here now.
+  connected(keys) {
+    return keys.filter((k) => this.sockets.has(k));
   }
 
   /// A socket's answer to its challenge: it's let in if it proves a key on the list, or the key its pairing code let in.

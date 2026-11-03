@@ -20,6 +20,24 @@ export function confirm() {
 }
 
 /**
+ * The datagrams in a client's Datagrams frame, for an endpoint that isn't a socket (the serverless node): its
+ * segment size (2 bytes, 0 for one datagram), then their contents.
+ * @param {Uint8Array | number[]} msg
+ * @returns {Uint8Array}
+ */
+export function datagrams_of(msg) {
+    const ptr0 = passArray8ToWasm0(msg, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.datagrams_of(ptr0, len0);
+    if (ret[3]) {
+        throw takeFromExternrefTable0(ret[2]);
+    }
+    var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v2;
+}
+
+/**
  * ServerDeniesAuth is `{ reason: String }`, which postcard writes as the string alone.
  * @param {string} reason
  * @returns {Uint8Array}
@@ -76,6 +94,35 @@ export function from_client(src, msg) {
     var v3 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
     wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
     return v3;
+}
+
+/**
+ * The frame a socket gets for datagrams from `src`, an endpoint that isn't a socket.
+ * @param {Uint8Array | number[]} src
+ * @param {number} segment_size
+ * @param {Uint8Array | number[]} contents
+ * @returns {Uint8Array}
+ */
+export function to_client(src, segment_size, contents) {
+    const val3 = +segment_size;
+    let ptr0, len0, ptr1, len1;
+    try {
+        ptr0 = passArray8ToWasm0(src, wasm.__wbindgen_malloc);
+        len0 = WASM_VECTOR_LEN;
+        ptr1 = passArray8ToWasm0(contents, wasm.__wbindgen_malloc);
+        len1 = WASM_VECTOR_LEN;
+    } catch (e) {
+        if (ptr1) { wasm.__wbindgen_free(ptr1, len1 * 1, 1); }
+        if (ptr0) { wasm.__wbindgen_free(ptr0, len0 * 1, 1); }
+        throw e;
+    }
+    const ret = wasm.to_client(ptr0, len0, val3, ptr1, len1);
+    if (ret[3]) {
+        throw takeFromExternrefTable0(ret[2]);
+    }
+    var v4 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v4;
 }
 
 /**

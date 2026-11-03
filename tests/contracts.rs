@@ -391,7 +391,7 @@ fn the_kernel_and_nodes_agree_on_keys_and_seals() {
     let dir = crate::temp("formats");
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = listener.local_addr().unwrap().to_string();
-    let served = kernel::Served { name: "formats".into(), module: kernel::module_from(files.to_vec(), "test/formats.js").unwrap(), wasm: vec![], class: None, listen: Some(addr.clone()), bindings: vec![], assets: None, outbound: None };
+    let served = kernel::Served { name: "formats".into(), module: kernel::module_from(files.to_vec(), "test/formats.js").unwrap(), modules: vec![], class: None, listen: Some(addr.clone()), bindings: vec![], assets: None, outbound: None };
     let mut child = kernel::start(&kernel::write_config(&dir, &[served]).unwrap(), vec![("formats".into(), listener)]).unwrap();
     let js = |body: Value| -> Value {
         let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).build().into();
@@ -560,7 +560,7 @@ fn the_gateway_sends_nodes_what_they_take_sign_ins_at_marked_as_from_elsewhere()
         let mut served = vec![kernel::Served {
             name: "gateway".into(),
             module: kernel::module_from(files.clone(), "gateway/worker.js").unwrap(),
-            wasm: vec![],
+            modules: vec![],
             class: None,
             listen: Some(addr.clone()),
             bindings: vec![if tunnel { ("NODE".into(), "service:tunnelled".into()) } else { ("NODE_URL".into(), node.clone()) }],
@@ -570,7 +570,7 @@ fn the_gateway_sends_nodes_what_they_take_sign_ins_at_marked_as_from_elsewhere()
         if tunnel {
             listening.push(("tunnelled".into(), std::net::TcpListener::bind("127.0.0.1:0").unwrap()));
             let listen = listening[1].1.local_addr().unwrap().to_string();
-            served.push(kernel::Served { name: "tunnelled".into(), module: tunnelled.to_vec(), wasm: vec![], class: None, listen: Some(listen), bindings: vec![], assets: None, outbound: None });
+            served.push(kernel::Served { name: "tunnelled".into(), module: tunnelled.to_vec(), modules: vec![], class: None, listen: Some(listen), bindings: vec![], assets: None, outbound: None });
         }
         let mut child = kernel::start(&kernel::write_config(&dir, &served).unwrap(), listening).unwrap();
         let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).build().into();

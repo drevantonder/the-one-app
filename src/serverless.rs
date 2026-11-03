@@ -1,5 +1,6 @@
 //! The serverless node (`serverless/`) on Cloudflare: a node of the install as a Worker in its kernel's account, with
-//! no address of its own, which the gateway sends `/v1/` and `/mcp` to by service binding. A release carries its built
+//! no address of its own, which the gateway sends `/v1/` and `/mcp` to by service binding, and an iroh endpoint of its
+//! own key, which the relay wakes. A release carries its built
 //! WebAssembly (`update` builds it, where Rust builds for WebAssembly); the apps it runs it reads from the install's
 //! bucket, each at its latest deploy.
 
@@ -19,45 +20,57 @@ pub fn modules() -> Result<Vec<(String, &'static str, Vec<u8>)>> {
         let found = crate::config::SERVERLESS.iter().find(|(n, _)| *n == name).map(|(_, b)| b.to_vec());
         found.with_context(|| format!("this build of {} has no serverless node: {} update builds one, on a Linux device with Rust", crate::config::NAME, crate::config::CLI))
     };
+    Ok(modules_from(built("one_serverless.js")?, built("one_serverless_bg.wasm")?))
+}
+
+/// Its modules, from its WebAssembly's glue and the WebAssembly, as wasm-bindgen makes them.
+pub fn modules_from(glue: Vec<u8>, wasm: Vec<u8>) -> Vec<(String, &'static str, Vec<u8>)> {
     let shim = include_str!("runtime/shim.js");
     let built_js = format!("export const shim = {};\nexport const compatibilityDate = {};\n", json!(shim), json!(crate::apps::COMPATIBILITY_DATE));
-    Ok(vec![
+    vec![
         ("worker.js".into(), "application/javascript+module", include_bytes!("../serverless/worker.js").to_vec()),
-        ("one_serverless.js".into(), "application/javascript+module", built("one_serverless.js")?),
-        ("one_serverless_bg.wasm".into(), "application/wasm", built("one_serverless_bg.wasm")?),
+        ("one_serverless.js".into(), "application/javascript+module", glue),
+        ("one_serverless_bg.wasm".into(), "application/wasm", wasm),
         ("built.js".into(), "application/javascript+module", built_js.into_bytes()),
         ("icons.json".into(), "text/plain", include_bytes!("../vendor/phosphor/icons.json").to_vec()),
-    ])
+    ]
 }
 
-/// Its bindings: the kernel's auth and vault, Worker Loader, the install's address and name, the gateway's relay, and
-/// the node on a machine that what needs one goes on to.
-pub fn metadata(settings: &Settings) -> Value {
-    let mut bindings = vec![
-        json!({ "type": "service", "name": "AUTH", "service": worker_name("auth") }),
-        json!({ "type": "service", "name": "VAULT", "service": worker_name("vault") }),
-        json!({ "type": "worker_loader", "name": "LOADER" }),
-        json!({ "type": "plain_text", "name": "ADDRESS", "text": settings.address }),
-        json!({ "type": "plain_text", "name": "NAME", "text": settings.name }),
-        // The gateway's relay, which tells devices what this node wrote.
-        json!({ "type": "durable_object_namespace", "name": "RELAY", "class_name": "Relay", "script_name": worker_name("gateway") }),
-    ];
-    if settings.node_url.is_some() {
-        bindings.push(match settings.machine("MACHINE") {
-            (name, value, _) if value.starts_with("vpc:") => json!({ "type": "vpc_service", "name": name, "service_id": &value[4..] }),
-            (name, value, _) => json!({ "type": "plain_text", "name": name, "text": value }),
-        });
+/// It as the kernel's workerd runs it here, from `modules`, beside the kernel's services.
+pub fn served(settings: &Settings, mut modules: Vec<(String, &'static str, Vec<u8>)>) -> crate::kernel::Served {
+    let (_, _, main) = modules.remove(0);
+    crate::kernel::Served {
+        name: SERVICE.into(),
+        module: main,
+        modules: modules.into_iter().map(|(name, _, bytes)| (name, bytes)).collect(),
+        class: Some("Node".into()),
+        listen: None,
+        bindings: settings.bindings(SERVICE).into_iter().map(|(n, v, _)| (n, v)).collect(),
+        assets: None,
+        // Its node on a machine, and a try install's bucket, are on this machine.
+        outbound: Some(crate::kernel::NEARBY.to_string()),
     }
-    // Its logs say which calls ran here, for whoever owns the account.
-    json!({ "main_module": "worker.js", "compatibility_date": crate::apps::COMPATIBILITY_DATE, "bindings": bindings, "observability": { "enabled": true } })
 }
 
-/// Puts the serverless node in the kernel's Cloudflare account, with no address but the gateway's binding to it.
+/// What its upload says besides its modules: its bindings (`Settings::bindings`), its endpoint's Durable Object class
+/// `Node` and that class's migration the first time, and its logs on.
+pub fn metadata(settings: &Settings, migrated: bool, exists: impl Fn(&str) -> bool) -> Value {
+    let (mut meta, _) = crate::kernel::metadata(settings, SERVICE, Some("Node"), migrated, exists);
+    // Its logs say which calls ran here, for whoever owns the account.
+    meta["observability"] = json!({ "enabled": true });
+    meta
+}
+
+/// Puts the serverless node in the kernel's Cloudflare account, with no address but the gateway's binding to it, and
+/// the relay again, which hands it the datagrams sent to its endpoint once it's there.
 pub fn deploy(cf: &Cloudflare, settings: &Settings) -> Result<()> {
     anyhow::ensure!(settings.try_person.is_none(), "a try install's kernel runs only beside its try install");
+    anyhow::ensure!(settings.serverless_endpoint().is_some(), "the serverless node has no key: serverless deploy makes one");
     let modules = modules()?;
     let name = worker_name(SERVICE);
-    let meta = metadata(settings);
+    let scripts = cf.scripts()?;
+    let migrated = scripts.get(&name).is_some_and(|s| s.migration.as_deref() == Some("v1"));
+    let meta = metadata(settings, migrated, |other| scripts.contains_key(other));
     let mut what = vec![meta.to_string().into_bytes()];
     what.extend(modules.iter().flat_map(|(n, k, b)| [n.as_bytes().to_vec(), k.as_bytes().to_vec(), b.clone()]));
     let what = Uploaded::hash(&what);
@@ -68,5 +81,9 @@ pub fn deploy(cf: &Cloudflare, settings: &Settings) -> Result<()> {
         uploaded.record(vec![(name.clone(), what, version)])?;
     }
     // Its address may have been turned on by hand.
-    cf.hide(&name)
+    cf.hide(&name)?;
+    let relay = crate::kernel::SERVICES.iter().position(|(s, _, _)| *s == "relay").unwrap();
+    let mut kernel = vec![Vec::new(); crate::kernel::SERVICES.len()];
+    kernel[relay] = crate::kernel::module(crate::kernel::SERVICES[relay].1)?;
+    crate::kernel::deploy_some(cf, settings, &kernel, &[], &["relay"])
 }
