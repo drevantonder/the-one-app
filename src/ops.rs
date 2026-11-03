@@ -212,7 +212,22 @@ pub fn unknown(app: &str, op: Option<&str>, cli: bool) -> Result<String> {
     let mut apps = get("/v1/apps")?.as_array().cloned().unwrap_or_default();
     apps.extend(node_apps());
     let ops_of = |a: &Value| -> Vec<String> { a["ops"].as_array().into_iter().flatten().filter_map(|o| o["name"].as_str()).filter(|o| !o.starts_with('_')).map(String::from).collect() };
+    // One the person could add: the node lists it, without operations for them, since it isn't added where they are.
+    let addable = |a: &Value| a["ops"].is_null() && a["deleted"].is_null();
     if let Some(a) = apps.iter().find(|a| a["name"] == app) {
+        let title = a["title"].as_str().unwrap_or(app);
+        if !a["deleted"].is_null() {
+            return Ok(match cli {
+                true => format!("{title} was deleted: {CLI} apps restore {app} brings it back, for its owners"),
+                false => format!("{title} was deleted: apps_restore with app {app} brings it back, for its owners"),
+            });
+        }
+        if addable(a) {
+            return Ok(match cli {
+                true => format!("{title} isn't added yet: {CLI} apps add {app} user adds it for you, or {CLI} apps add {app} global for everyone"),
+                false => format!("{title} isn't added yet: apps_add with app {app} and scope user adds it for the person, or global for everyone"),
+            });
+        }
         let (op, ops) = (op.unwrap_or(""), ops_of(a));
         let guess = nearest(op, &ops.iter().map(String::as_str).collect::<Vec<_>>()).first().map(|n| format!(": did you mean {n}?")).unwrap_or_else(|| ".".into());
         return Ok(format!("{app} has no operation {op}{guess} Its operations: {}", ops.join(", ")));
@@ -225,19 +240,7 @@ pub fn unknown(app: &str, op: Option<&str>, cli: bool) -> Result<String> {
     if let Some(command) = tool.filter(|_| cli) {
         return Ok(format!("no app {app}: did you mean {CLI} {command}{}?", op.map(|o| format!(" {o}")).unwrap_or_default()));
     }
-    // One the App Store has that isn't added where the caller sees it.
-    let listed = post("/v1/call", json!({ "app": "apps", "op": "list", "input": {}, "client": "cli" })).ok();
-    let line = listed.as_ref().and_then(|l| l["ok"].as_str()).and_then(|l| l.lines().find(|l| l.contains(&format!(" ({app}): not added"))).map(String::from));
-    if let Some((title, _)) = line.as_deref().and_then(|l| l.split_once(&format!(" ({app})"))) {
-        return Ok(match cli {
-            true => format!("{title} isn't added yet: {CLI} apps add {app} user adds it for you, or {CLI} apps add {app} global for everyone"),
-            false => format!("{title} isn't added yet: apps_add with app {app} and scope user adds it for the person, or global for everyone"),
-        });
-    }
-    let mut names: Vec<String> = apps.iter().filter_map(|a| a["name"].as_str()).map(String::from).collect();
-    // And the App Store's, added or not: `Gmail (gmail): not added. …`.
-    let store = listed.as_ref().and_then(|l| l["ok"].as_str()).unwrap_or("");
-    names.extend(store.lines().filter_map(|l| l.split_once(" (")?.1.split_once("): ").map(|(n, _)| n.to_string())).filter(|n| !names.contains(n)).collect::<Vec<_>>());
+    let names: Vec<String> = apps.iter().filter(|a| a["deleted"].is_null()).filter_map(|a| a["name"].as_str()).map(String::from).collect();
     let commands = if cli { crate::commands() } else { Vec::new() };
     let all: Vec<&str> = names.iter().chain(&commands).map(String::as_str).collect();
     Ok(match nearest(app, &all).first() {
