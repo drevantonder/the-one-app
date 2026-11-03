@@ -68,7 +68,7 @@ struct WidgetChoices: EntityQuery {
 struct Entry: TimelineEntry {
     var date = Date.now
     var widget: WidgetCache.Item?
-    /// The widget chosen, if it's gone: its id.
+    /// The widget chosen, if it's gone: its title.
     var missing: String?
     var signedOut = false
 }
@@ -102,9 +102,9 @@ struct Provider: AppIntentTimelineProvider {
         let cache = WidgetCache.load()
         if cache?.signedOut == true { return Entry(signedOut: true) }
         let items = cache?.widgets ?? []
-        guard let chosen = configuration.widget?.id else { return Entry(widget: items.first) }
-        if let item = items.first(where: { $0.id == chosen }) { return Entry(widget: item) }
-        return items.isEmpty ? Entry() : Entry(missing: chosen)
+        guard let choice = configuration.widget else { return Entry(widget: items.first) }
+        if let item = items.first(where: { $0.id == choice.id }) { return Entry(widget: item) }
+        return items.isEmpty ? Entry() : Entry(missing: choice.title.isEmpty ? String(localized: "This widget") : choice.title)
     }
 }
 
@@ -154,7 +154,7 @@ struct EntryView: View {
             }
             .widgetURL((widget.tree(size).link ?? .screen("main", params: nil)).url(app: host.app, scope: host.scope))
         } else if let missing = entry.missing {
-            Broken(title: appName, text: "\(missing.split(separator: "/").last.map(String.init) ?? missing) isn’t on your pages any more. Touch and hold to choose another.")
+            Broken(title: appName, text: "\(missing) isn’t on your pages any more. Touch and hold to choose another.")
         } else if family == .accessoryInline {
             Text(appName)
         } else {

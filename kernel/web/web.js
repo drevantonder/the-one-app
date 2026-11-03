@@ -27,7 +27,7 @@ window.__one = {};
     /// The auth service's endpoints, as it says them.
     async meta() {
       const r = await fetch("/.well-known/oauth-authorization-server");
-      if (!r.ok) throw new Error("The sign-in service isn't answering.");
+      if (!r.ok) throw new Error("The sign-in service isn’t answering. Try again in a moment.");
       return r.json();
     },
 
@@ -152,7 +152,7 @@ window.__one = {};
       if (r.status === 401) throw Object.assign(new NodeError("Signed out."), { signedOut: true });
       if (raw && r.ok) return r;
       const out = await r.json().catch(() => null);
-      if (!r.ok || out?.error) throw new NodeError(out?.error || (r.status >= 500 ? "Your device isn't answering." : `It didn't work (${r.status}).`));
+      if (!r.ok || out?.error) throw new NodeError(out?.error || (r.status >= 500 ? "Your devices aren’t answering." : "That didn’t work. Try again."));
       return out;
     }
   }
@@ -306,7 +306,7 @@ window.__one = {};
 
   function render() {
     if (!store.state) return;
-    if (!install()) return void (root.innerHTML = message("Nothing Here Yet", `This device isn't set up yet. Set it up from the ${esc(config().name || "app")} app on one of your devices.`));
+    if (!install()) return void (root.innerHTML = message("Not Set Up Yet", "Set it up on one of your computers first."));
     if (!$(".window", root)) root.innerHTML = `<div class="window"><nav class="sidebar"></nav><main class="detail"></main></div>`;
     drawSidebar();
     drawDetail();
@@ -631,7 +631,7 @@ window.__one = {};
   /// `one.api` for a client's own screen: the node's /v1 at this origin, as this person; nothing else here.
   async function clientApi(m) {
     const url = new URL(String(m.path || ""), location.origin);
-    if (url.origin !== location.origin || !url.pathname.startsWith("/v1/")) throw new Error("That isn't your device's.");
+    if (url.origin !== location.origin || !url.pathname.startsWith("/v1/")) throw new Error("That isn’t on your devices.");
     const method = String(m.method || "GET").toUpperCase();
     const body = method === "GET" ? undefined : m.body ?? {};
     if (url.pathname === "/v1/call" && body && typeof body === "object") body.client = "web";
@@ -691,8 +691,7 @@ window.__one = {};
   }
 
   function showUnreachable(text) {
-    const name = config().name;
-    root.innerHTML = message(`Can’t Reach ${name}`, esc(text), `<div class="unavailable-text">It keeps trying.</div>`);
+    root.innerHTML = message("Can’t Reach Your Devices", esc(text), `<div class="unavailable-text">Trying again…</div>`);
   }
 
   async function start() {
@@ -714,7 +713,7 @@ window.__one = {};
         break;
       } catch (err) {
         if (err.signedOut) return showSignedOut();
-        showUnreachable(err.message);
+        showUnreachable(err instanceof NodeError ? err.message : "Your devices aren’t answering.");
         await new Promise((r) => setTimeout(r, wait));
       }
     }

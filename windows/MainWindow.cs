@@ -267,13 +267,13 @@ public sealed class MainWindow : Window
             }
             catch (Exception e)
             {
-                body.Content = Look.Unavailable($"Can’t Reach {WhiteLabel.Name}", e.Message, Look.Text("It keeps trying.", 13, Look.Secondary));
+                body.Content = Look.Unavailable("Can’t Reach Your Devices", e.Message, Look.Text("Trying again…", 13, Look.Secondary));
                 await Task.Delay(wait);
             }
         }
         if (Store.Shared.Install == null)
         {
-            body.Content = Look.Unavailable("Nothing Here Yet", $"It isn’t set up yet. Set it up from the {WhiteLabel.Name} app on one of your devices.");
+            body.Content = Look.Unavailable("Not Set Up Yet", "Set it up on one of your computers first.");
             return;
         }
         try

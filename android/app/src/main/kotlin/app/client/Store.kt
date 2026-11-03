@@ -131,7 +131,7 @@ class Store(private val application: android.app.Application, val signIn: SignIn
             val error = runCatching { (json.parseToJsonElement(r.text) as? JsonObject)?.get("error")?.let { (it as? JsonPrimitive)?.content } }.getOrNull()
             if (r.status == 401) throw NodeError(error ?: "Sign in again.", signedOut = true)
             if (r.status !in 200..299 || error != null) {
-                throw NodeError(error ?: if (r.status >= 500) "Your devices aren’t answering." else "It didn’t work (${r.status}).")
+                throw NodeError(error ?: if (r.status >= 500) "Your devices aren’t answering." else "That didn’t work. Try again.")
             }
             return r.bytes
         }
@@ -174,7 +174,7 @@ class Store(private val application: android.app.Application, val signIn: SignIn
                     if (e.signedOut) return@launch signedOut(e.message)
                     unreachable(e.message)
                 } catch (e: Exception) {
-                    unreachable("Can’t reach ${signIn.address}.")
+                    unreachable("Your devices aren’t answering.")
                 }
                 delay(wait)
                 wait = minOf(wait * 2, 15_000)

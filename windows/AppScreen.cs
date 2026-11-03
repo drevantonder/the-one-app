@@ -184,7 +184,7 @@ public sealed class AppScreen : Grid
         }
     }
 
-    /// The bar over a screen shown as it last looked: since when, and when it's asked again (`next`), with Try Now;
+    /// The bar over a screen shown as it last looked: since when, with Try Now while it waits to ask again (`next`);
     /// asking now, if `next` is null; gone once the node answers.
     void Offline(DateTime? next)
     {
@@ -205,7 +205,7 @@ public sealed class AppScreen : Grid
             now.Click += (_, _) => waiting?.Cancel();
             offline.ActionButton = now;
             Children.Add(offline);
-            ticking = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+            ticking = new DispatcherTimer { Interval = TimeSpan.FromSeconds(30) };
             ticking.Tick += (_, _) => Say();
             ticking.Start();
         }
@@ -214,8 +214,8 @@ public sealed class AppScreen : Grid
         {
             if (offline == null) return;
             var ago = DateTime.Now - since;
-            var when = ago.TotalMinutes < 1 ? "just now" : ago.TotalHours < 1 ? $"{(int)ago.TotalMinutes} min ago" : ago.TotalDays < 1 ? $"{(int)ago.TotalHours} hr ago" : since.ToString("d MMM");
-            offline.Message = $"Offline: this is how it looked {when}. " + (next is { } n ? $"Reconnecting in {Math.Max(1, (int)Math.Ceiling((n - DateTime.Now).TotalSeconds))}s" : "Reconnecting…");
+            var when = ago.TotalMinutes < 1 ? null : ago.TotalHours < 1 ? $"{(int)ago.TotalMinutes} min ago" : ago.TotalDays < 1 ? $"{(int)ago.TotalHours} hr ago" : since.ToString("d MMM");
+            offline.Message = (when == null ? "Offline" : $"Offline · from {when}") + (next == null ? " · Trying again…" : "");
         }
         Say();
     }

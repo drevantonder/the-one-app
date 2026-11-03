@@ -59,7 +59,7 @@ public static class Node
             r.Dispose();
             string? error = null;
             try { error = JsonNode.Parse(text)?["error"]?.GetValue<string>(); } catch { }
-            throw new NodeException(error ?? ((int)r.StatusCode >= 500 ? "Your devices aren’t answering." : $"It didn’t work ({(int)r.StatusCode})."));
+            throw new NodeException(error ?? ((int)r.StatusCode >= 500 ? "Your devices aren’t answering." : "That didn’t work. Try again."));
         }
     }
 

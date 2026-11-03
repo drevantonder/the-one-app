@@ -148,7 +148,7 @@ struct ServicesView: View {
                 }
             }
             if all.isEmpty {
-                Text("No services yet.").foregroundStyle(.secondary)
+                Text("No services").foregroundStyle(.secondary)
             }
             if store.canArrange(page.scope), let route = store.serviceStoreRoute {
                 Section {

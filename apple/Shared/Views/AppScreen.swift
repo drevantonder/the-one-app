@@ -25,19 +25,16 @@ struct AppScreen: View {
             .opacity(loaded ? 1 : 0)
             .safeAreaInset(edge: .top, spacing: 0) {
                 if let offline {
-                    TimelineView(.periodic(from: .now, by: 1)) { context in
+                    TimelineView(.periodic(from: .now, by: 30)) { context in
                         HStack(spacing: 10) {
-                            Label("Offline: this is how it looked \(offline.kept.formatted(.relative(presentation: .named, unitsStyle: .wide))).", systemImage: "wifi.slash")
+                            Label(context.date.timeIntervalSince(offline.kept) < 60 ? "Offline" : "Offline · from \(offline.kept.formatted(.relative(presentation: .named, unitsStyle: .wide)))", systemImage: "wifi.slash")
                                 .foregroundStyle(.secondary)
-                            if let next = offline.next {
-                                Text("Reconnecting in \(max(1, Int(next.timeIntervalSince(context.date).rounded(.up))))s")
-                                    .foregroundStyle(.tertiary)
-                                    .monospacedDigit()
+                            if offline.next != nil {
                                 Button("Try Now") { tries += 1 }
                                     .buttonStyle(.borderless)
                             } else {
                                 ProgressView().controlSize(.small)
-                                Text("Reconnecting…").foregroundStyle(.tertiary)
+                                Text("Trying again…").foregroundStyle(.tertiary)
                             }
                         }
                     }

@@ -59,13 +59,13 @@ actor Auth {
     }
 
     private func meta() async throws -> Meta {
-        guard let address = Self.address else { throw SignedOut(message: String(localized: "Give your install’s address first.")) }
+        guard let address = Self.address else { throw SignedOut(message: String(localized: "Enter the address first.")) }
         do {
             let (data, response) = try await URLSession.shared.data(from: address.appending(path: ".well-known/oauth-authorization-server"))
             guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.badServerResponse) }
             return try JSONDecoder().decode(Meta.self, from: data)
         } catch {
-            throw NodeError(String(localized: "The sign-in service at \(address.host() ?? "") isn’t answering."))
+            throw NodeError(String(localized: "Can’t reach that address. Check it, and that you’re online."))
         }
     }
 

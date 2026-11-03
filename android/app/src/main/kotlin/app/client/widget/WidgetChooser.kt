@@ -81,7 +81,7 @@ private fun Chooser(shown: HomeWidgets.Shown, widgetId: Int, choose: (KeptWidget
             Spacer(Modifier.height(4.dp))
             Text("Pick which of your pages’ widgets this shows.", style = Type.subheadline, color = p.secondary)
         }
-        if (!shown.signedIn) return@Column Unavailable("Not Signed In", "Sign in to ${BuildConfig.NAME} to see your pages’ widgets.")
+        if (!shown.signedIn) return@Column Unavailable("Not Signed In", "Sign in to ${BuildConfig.NAME} to see your pages.")
         if (widgets.isEmpty()) return@Column Unavailable("No Widgets Yet", "Open ${BuildConfig.NAME} to see your pages, and their widgets show up here.")
         val pages = widgets.groupBy { it.scope }
         LazyColumn(Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {

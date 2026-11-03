@@ -15,7 +15,7 @@ struct RootView: View {
                     } description: {
                         Text(message)
                     } actions: {
-                        Text("It keeps trying.").foregroundStyle(.secondary)
+                        Text("Trying again…").foregroundStyle(.secondary)
                     }
                 } else {
                     ProgressView("Starting \(appName)…")
@@ -64,7 +64,7 @@ private struct MainView: View {
                 ContentUnavailableView {
                     Label("Joining…", systemImage: "arrow.trianglehead.2.clockwise")
                 } description: {
-                    Text("This device is taking in what it keeps from the device it paired with.")
+                    Text("Getting everything from your other device…")
                 }
             } else {
                 @Bindable var store = store

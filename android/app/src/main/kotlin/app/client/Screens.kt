@@ -193,8 +193,8 @@ fun Shell(store: Store) {
 private fun Starting(store: Store) {
     val p = LocalPalette.current
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        if (store.phase == Store.Phase.Unreachable) Unavailable("Can’t Reach Your Devices", (store.failure ?: "") + "\nIt keeps trying.")
-        else if (store.state != null && store.install == null) Unavailable("Nothing Here Yet", "It isn’t set up yet. Set it up from the ${BuildConfig.NAME} app on one of your devices.")
+        if (store.phase == Store.Phase.Unreachable) Unavailable("Can’t Reach Your Devices", (store.failure ?: "") + "\nTrying again…")
+        else if (store.state != null && store.install == null) Unavailable("Not Set Up Yet", "Set it up on one of your computers first.")
         else CircularProgressIndicator(color = p.secondary)
     }
 }
@@ -292,7 +292,7 @@ private fun ScreenView(store: Store, route: Route, sheet: Sheet? = null, pushed:
     } }
 }
 
-/** Over a screen shown as it last looked: since when, and when it's tried again, or Try Now. */
+/** Over a screen shown as it last looked: since when, and Try Now, or that it's trying again. */
 @Composable
 private fun BoxScope.Offline(offline: Bridge.Offline, tryNow: () -> Unit) {
     val p = LocalPalette.current
@@ -300,24 +300,23 @@ private fun BoxScope.Offline(offline: Bridge.Offline, tryNow: () -> Unit) {
     LaunchedEffect(offline) {
         while (true) {
             now = System.currentTimeMillis()
-            delay(1000)
+            delay(30_000)
         }
     }
-    val ago = if (now - offline.kept < 60_000) "just now"
+    val ago = if (now - offline.kept < 60_000) null
     else android.text.format.DateUtils.getRelativeTimeSpanString(offline.kept, now, android.text.format.DateUtils.MINUTE_IN_MILLIS).toString()
     Row(
         Modifier.align(Alignment.TopCenter).padding(8.dp).shadow(6.dp, RoundedCornerShape(50)).background(p.card, RoundedCornerShape(50)).padding(start = 14.dp, end = 4.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Symbol("wifi-slash", p.secondary, 16.dp)
-        Text("Offline: this is how it looked ${ago.replaceFirstChar { it.lowercase() }}.", style = Type.footnote, fontWeight = FontWeight.Medium, color = p.secondary, modifier = Modifier.weight(1f, fill = false))
+        Text(if (ago == null) "Offline" else "Offline · from ${ago.replaceFirstChar { it.lowercase() }}", style = Type.footnote, fontWeight = FontWeight.Medium, color = p.secondary, modifier = Modifier.weight(1f, fill = false))
         val next = offline.next
         if (next != null) {
-            Text("Reconnecting in ${maxOf(1, ((next - now + 999) / 1000).toInt())}s", style = Type.footnote, color = p.tertiary)
             TextButton(tryNow) { Text("Try Now", style = Type.footnote, fontWeight = FontWeight.SemiBold, color = p.accent) }
         } else {
             CircularProgressIndicator(Modifier.size(14.dp), color = p.secondary, strokeWidth = 2.dp)
-            Text("Reconnecting…", style = Type.footnote, color = p.tertiary, modifier = Modifier.padding(end = 12.dp, top = 14.dp, bottom = 14.dp))
+            Text("Trying again…", style = Type.footnote, color = p.tertiary, modifier = Modifier.padding(end = 12.dp, top = 14.dp, bottom = 14.dp))
         }
     }
 }
@@ -467,7 +466,7 @@ private class Bridge(val context: Context, val store: Store, val route: Route, v
         }
         val rules = setOf(ORIGIN)
         check(WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER) && WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
-            "This phone’s web view is too old to show screens: update Android System WebView."
+            "Update Android System WebView in Google Play, then open this again."
         }
         WebViewCompat.addDocumentStartJavaScript(web, shim, rules)
         WebViewCompat.addWebMessageListener(web, "oneShell", rules) { _, message, origin, isMainFrame, reply ->
@@ -537,10 +536,10 @@ private class Bridge(val context: Context, val store: Store, val route: Route, v
     /** Each of the bridge's messages (src/screen/bridge.js's list; tests/contracts.rs holds this to it). */
     private suspend fun answer(m: JsonObject): JsonElement? {
         val type = str(m, "type")
-        if (type in listOf("api", "signOut", "appearance", "device", "request", "cache") && !own) throw NodeError("Only the app’s own screens can do that.")
+        if (type in listOf("api", "signOut", "appearance", "device", "request", "cache") && !own) throw NodeError("Only Settings can do that.")
         when (type) {
             "call" -> {
-                val app = app ?: throw NodeError("This screen has no app to call.")
+                val app = app ?: throw NodeError("Settings has no app to call.")
                 return store.call(app.app, str(m, "op") ?: "", m["input"] ?: JsonObject(emptyMap()))
             }
             "open" -> {
@@ -601,7 +600,7 @@ private class Bridge(val context: Context, val store: Store, val route: Route, v
                 follow(Uri.parse(str(m, "url") ?: ""))
                 return null
             }
-            "scan" -> return Scanner.scan(context as? ComponentActivity ?: throw NodeError("This phone can’t scan documents here."))
+            "scan" -> return Scanner.scan(context as? ComponentActivity ?: throw NodeError("This device can’t scan documents. Choose the files instead."))
             "vault" -> {
                 val app = app ?: throw NodeError("This screen has no app to ask for.")
                 val scope = app.scope ?: "user"

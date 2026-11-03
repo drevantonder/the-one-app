@@ -52,7 +52,7 @@ struct PagesView: View {
                     } description: {
                         Text(message)
                     } actions: {
-                        Text("It keeps trying.").foregroundStyle(.secondary)
+                        Text("Trying again…").foregroundStyle(.secondary)
                     }
                     .background(.regularMaterial)
                 } else if store.state == nil {

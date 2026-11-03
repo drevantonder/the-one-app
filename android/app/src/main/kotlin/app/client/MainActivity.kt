@@ -164,7 +164,7 @@ private fun Welcome(store: Store) {
             } catch (e: NodeError) {
                 MainActivity.welcomeError = e.message
             } catch (e: Exception) {
-                MainActivity.welcomeError = "Can’t reach $at."
+                MainActivity.welcomeError = "Can’t reach that address. Check it, and that you’re online."
             }
             busy = false
         }

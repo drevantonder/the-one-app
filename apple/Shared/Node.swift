@@ -250,7 +250,7 @@ struct HTTPNode: NodeTransport {
     private var here: Bool { base.host() == "127.0.0.1" }
 
     var unreachable: String {
-        here ? "The node isn't answering on \(base.host() ?? ""):\(base.port ?? 0)." : String(localized: "Your devices aren’t answering.")
+        String(localized: here ? "It isn’t running on this Mac." : "Your devices aren’t answering.")
     }
 
     /// A request as the person signed in, if they are: a refused token is renewed once. To this Mac's own node, it's
@@ -287,7 +287,7 @@ struct HTTPNode: NodeTransport {
             struct Failure: Decodable { var error: String? }
             let error = (try? JSONDecoder().decode(Failure.self, from: data))?.error
             if auth != nil, status == 401 { throw Auth.SignedOut(message: error ?? String(localized: "Sign in again.")) }
-            throw NodeError(error ?? (!here && status >= 500 ? String(localized: "Your devices aren’t answering.") : "The node answered \(status)"))
+            throw NodeError(error ?? (!here && status >= 500 ? String(localized: "Your devices aren’t answering.") : String(localized: "That didn’t work. Try again.")))
         }
         return data
     }
@@ -497,7 +497,7 @@ struct NodeClient: Sendable {
     /// request's do (a device that a phone asks matches bare paths). → its JSON reply.
     func api(_ method: String, _ path: String, body: Any?) async throws -> Any {
         var parts = URLComponents(string: path)
-        guard let bare = parts?.path, bare.hasPrefix("/v1/"), !bare.contains("..") else { throw NodeError("That isn't your device's.") }
+        guard let bare = parts?.path, bare.hasPrefix("/v1/"), !bare.contains("..") else { throw NodeError("That isn’t on your devices.") }
         var fields = body as? [String: Any] ?? [:]
         for item in parts?.queryItems ?? [] { fields[item.name] = item.value ?? "" }
         parts?.queryItems = nil
@@ -576,21 +576,19 @@ struct NodeClient: Sendable {
 
 }
 
-/// A failed join, said as what went wrong and what to do next, with the node's own words for whoever needs them.
+/// A failed join, said as what went wrong and what to do next.
 func joinFailure(_ error: Error) -> String {
-    let raw = NodeError(error.localizedDescription).message
-    let lower = raw.lowercased()
-    let next: String
+    let lower = NodeError(error.localizedDescription).message.lowercased()
     if lower.contains("already used") || lower.contains("expired") || lower.contains("refused") {
-        next = String(localized: "That pairing code has been used or has run out: each works once, for a few minutes. Make a new one on your other device, then try again.")
+        return String(localized: "That pairing code was used or has expired. Make a new one on your other device.")
     } else if lower.contains("already belongs") {
-        next = String(localized: "This device is already in an install. Remove it there first, or install the other context’s own app.")
+        let name = appName.hasPrefix("The ") ? String(appName.dropFirst(4)) : appName
+        return String(localized: "This device is already in another \(name). Remove it there first.")
     } else if lower.contains("decode") || lower.contains("invalid") || lower.contains("base") || lower.contains("parse") || lower.contains("bad") {
-        next = String(localized: "That isn’t a whole pairing code. Copy it again, all of it.")
+        return String(localized: "That isn’t a whole pairing code. Copy it again, all of it.")
     } else if lower.contains("timed out") || lower.contains("timeout") || lower.contains("connect") || lower.contains("unreachable") || lower.contains("no route") || lower.contains("network") {
-        next = String(localized: "Couldn’t reach the device that made the code. Check that it’s on and online (and so is this one), then try again.")
+        return String(localized: "Couldn’t reach the device that made the code. Check both are online, then try again.")
     } else {
-        next = String(localized: "Couldn’t join. Make a new pairing code on your other device and try again.")
+        return String(localized: "Couldn’t join. Make a new pairing code on your other device and try again.")
     }
-    return "\(next)\n(\(raw))"
 }

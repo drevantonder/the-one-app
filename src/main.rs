@@ -275,7 +275,7 @@ fn run(args: Vec<String>) -> Result<()> {
         }
         ["pair"] => {
             let r = post("/v1/pair", json!({ "user": flags.get("user") }))?;
-            println!("On the other machine, run:\n\n  {CLI} join {}\n\nThe pairing code works once, for a week.", r["code"].as_str().unwrap_or(""));
+            println!("On the other machine, run:\n\n  {CLI} join {}\n\nThe pairing code works once, for seven days.", r["code"].as_str().unwrap_or(""));
         }
         ["join", code] => {
             post("/v1/join", json!({ "code": code }))?;

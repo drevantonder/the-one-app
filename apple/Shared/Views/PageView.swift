@@ -542,7 +542,7 @@ private struct EmptyPage: View {
             Text("Nothing here yet")
                 .font(.headline)
             Text(store.canArrange(page.scope)
-                 ? "Apps you add to \(page.title) show up here."
+                 ? page.scope == "user" ? "Apps you add for yourself show up here." : "Apps you add to \(page.title) show up here."
                  : "When its admins add apps to \(page.title), they show up here.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)

@@ -29,7 +29,7 @@ struct ScreensHome: View {
                         } description: {
                             Text(message)
                         } actions: {
-                            Text("It keeps trying.").foregroundStyle(.secondary)
+                            Text("Trying again…").foregroundStyle(.secondary)
                         }
                         .background(.regularMaterial)
                     }

@@ -74,7 +74,7 @@ public sealed class WidgetCard
         var body = new JsonArray { card.Text("Choose a Widget", "default", weight: "bolder") };
         if (items.Count == 0)
         {
-            body.Add(card.Text($"Open {WhiteLabel.Name} to see your pages, and their widgets show up here.", "small", subtle: true, wrap: true));
+            body.Add(card.Text($"Open {WhiteLabel.Name} to see your pages.", "small", subtle: true, wrap: true));
             return (Card(body, null).ToJsonString(), card.data.ToJsonString());
         }
         body.Add(card.Text("Pick which of your pages’ widgets this shows.", "small", subtle: true, wrap: true));

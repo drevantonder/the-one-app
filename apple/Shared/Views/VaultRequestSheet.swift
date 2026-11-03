@@ -181,7 +181,7 @@ struct VaultRequestSheet: View {
                 picked = request.matches?.first?.id
                 title = request.label
             } else {
-                error = String(localized: "It isn’t for you, or it’s from another install.")
+                error = String(localized: "This request isn’t for you.")
             }
         } catch { self.error = error.localizedDescription }
     }

@@ -64,8 +64,8 @@ class SignIn(private val context: Context) {
 
     /** The auth service's endpoints, as it says them. */
     private suspend fun meta(): Meta {
-        val r = http("GET", "${address ?: throw NodeError("Give your install’s address first.")}/.well-known/oauth-authorization-server")
-        if (r.status != 200) throw NodeError("The sign-in service isn’t answering.")
+        val r = http("GET", "${address ?: throw NodeError("Enter the address first.")}/.well-known/oauth-authorization-server")
+        if (r.status != 200) throw NodeError("Can’t reach that address. Check it, and that you’re online.")
         return json.decodeFromString(r.text)
     }
 
