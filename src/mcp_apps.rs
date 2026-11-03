@@ -47,7 +47,7 @@ pub fn tools() -> Vec<Value> {
             "name": "screens_open",
             "description": "Open one of an app's screens inline, where the chat can draw it, for the person to use there.",
             "inputSchema": { "type": "object", "required": ["app"], "properties": {
-                "app": { "type": "string" },
+                "app": { "type": "string", "description": "the app's name, like board" },
                 "screen": { "type": "string", "description": "the screen's name; main by default" },
                 "params": { "type": "object", "description": "what the screen is opened with" },
                 "scope": { "type": "string", "description": "the page it's opened from: user, group:<id> or global" },

@@ -661,6 +661,7 @@ pub fn help(app: &Value, op: &Value) -> String {
         rows.push(("--device <name>".into(), about.into()));
     }
     rows.push(("--out <path>".into(), "save what it gives back there".into()));
+    rows.push(("--json".into(), "print what it gives back as JSON".into()));
     if op["confirm"] == true {
         rows.push(("--confirm".into(), "go ahead without asking: it can't be undone".into()));
     }
@@ -699,7 +700,7 @@ pub fn list(apps: &[Value]) -> Vec<String> {
         .flat_map(|a| {
             let name = a["name"].as_str().unwrap_or("").to_string();
             a["ops"].as_array().cloned().unwrap_or_default().into_iter().filter(|o| !o["name"].as_str().unwrap_or("").starts_with('_')).map(move |o| {
-                let mark = if o["confirm"] == true { " (can't be undone)" } else { "" };
+                let mark = if o["confirm"] == true { " (needs --confirm)" } else { "" };
                 (format!("{CLI} {name} {}", o["name"].as_str().unwrap_or("")), format!("{}{mark}", first_sentence(o["description"].as_str().unwrap_or(""))))
             })
         })
