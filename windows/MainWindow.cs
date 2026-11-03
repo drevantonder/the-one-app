@@ -1,8 +1,9 @@
 // The window, as the web client's (kernel/web/web.js): a sidebar with a section per page, listing its apps and its
 // Services, then Settings', listing its items; beside it, where the window is: a screen the node serves (AppScreen), a
 // page, Services, a Settings screen or an app's. A sidebar row replaces where the window is; what a screen opens is
-// pushed on top, so Back returns to it, or slides up over it as a sheet. Signed out, it welcomes the person and signs
-// them in.
+// pushed on top, so Back returns to it, or slides up over it as a sheet. Back is ← in the title bar, shown once something
+// is pushed, beside the path there ("Backups › Archive disk"), each part going back to it. The title bar and sidebar
+// are on Mica; where the window is, on the kit's page colour. Signed out, it welcomes the person and signs them in.
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -49,10 +50,24 @@ public sealed class MainWindow : Window
         var bar = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, Padding = new Thickness(16, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
         bar.Children.Add(new Image { Source = new BitmapImage(new Uri(System.IO.Path.Combine(AppContext.BaseDirectory, "Assets", "Logo.png"))), Width = 16, Height = 16 });
         bar.Children.Add(new TextBlock { Text = WhiteLabel.Name, FontSize = 12, VerticalAlignment = VerticalAlignment.Center });
+        // What's dragged: all of the title bar but Back and the path, which are pressed.
         var titleBar = new Grid { Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent) };
         titleBar.Children.Add(bar);
-        root.Children.Add(titleBar);
+        var top = new Grid();
+        top.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        top.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        top.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        back.Click += (_, _) => Back();
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(back, "Back");
+        path.ItemClicked += (_, e) => BackTo(e.Index);
+        Grid.SetColumn(path, 1);
+        Grid.SetColumn(titleBar, 2);
+        top.Children.Add(back);
+        top.Children.Add(path);
+        top.Children.Add(titleBar);
+        root.Children.Add(top);
         SetTitleBar(titleBar);
+        logo = bar;
         Grid.SetRow(body, 1);
         root.Children.Add(body);
         root.RequestedTheme = Appearance.Theme;
@@ -63,7 +78,16 @@ public sealed class MainWindow : Window
         {
             Buttons();
             DrawSidebar();
+            detail.Background = Look.Page;
+            detail.BorderBrush = Look.CardStroke;
         };
+        // The person's accent colour, changed in Windows' Settings: the sidebar's and every screen's tint.
+        Tint.Changed += () => DispatcherQueue.TryEnqueue(() =>
+        {
+            AppScreen.Restyle();
+            DrawSidebar();
+            _ = System.Threading.Tasks.Task.Run(() => Widgets.Changed(WidgetCache.Of(Store.Shared)));
+        });
         Buttons();
         // The screens keep up by themselves; the sidebar and the taskbar's count, with what the store reads.
         Store.Shared.Changed += DrawSidebar;
@@ -86,14 +110,20 @@ public sealed class MainWindow : Window
         Store.Shared.WidgetsRead += () =>
         {
             var list = WidgetCache.Of(Store.Shared);
-            var accent = Store.Shared.Config?.Accent ?? WhiteLabel.Accent;
-            _ = System.Threading.Tasks.Task.Run(() => Widgets.Changed(list, accent));
+            _ = System.Threading.Tasks.Task.Run(() => Widgets.Changed(list));
         };
         Closed += (_, _) => listening?.Cancel();
         _ = Start();
     }
 
     readonly Windows.UI.ViewManagement.UISettings texts = new();
+    readonly Button back = new()
+    {
+        Content = new FontIcon { Glyph = "\uE72B", FontSize = 12 }, Width = 40, Height = 32, Margin = new Thickness(4, 0, 0, 0),
+        Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), BorderThickness = new Thickness(0), Visibility = Visibility.Collapsed,
+    };
+    readonly BreadcrumbBar path = new() { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(6, 0, 0, 0), Visibility = Visibility.Collapsed };
+    FrameworkElement? logo;
 
     /// The count on the taskbar's button, or none.
     static void Taskbar(int count)
@@ -335,7 +365,7 @@ public sealed class MainWindow : Window
                 }
             }
             address.KeyDown += (_, e) => { if (e.Key == Windows.System.VirtualKey.Enter) Go(); };
-            var go = Look.Accented("Continue", Go);
+            var go = Look.Tinted("Continue", Go);
             go.HorizontalAlignment = HorizontalAlignment.Center;
             panel.Children.Add(go);
             panel.Children.Add(problem);
@@ -344,7 +374,7 @@ public sealed class MainWindow : Window
         {
             if (invited)
                 panel.Children.Add(new TextBlock { Text = "Make your passkey in your browser, where your invite opened. Then sign in here.", FontSize = 14, HorizontalAlignment = HorizontalAlignment.Center, TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.WrapWholeWords });
-            var signIn = Look.Accented("Sign In", () => { });
+            var signIn = Look.Tinted("Sign In", () => { });
             signIn.HorizontalAlignment = HorizontalAlignment.Center;
             signIn.Padding = new Thickness(28, 8, 28, 9);
             signIn.FontSize = 15;
@@ -438,7 +468,7 @@ public sealed class MainWindow : Window
     void ShowMain()
     {
         // A window of its own each sign-in: nothing of the last one's.
-        detail = new Grid();
+        detail = new Grid { Background = Look.Page, CornerRadius = new CornerRadius(8, 0, 0, 0), BorderBrush = Look.CardStroke, BorderThickness = new Thickness(1, 1, 0, 0) };
         pushed.Clear();
         shown = null;
         // A page this computer wasn't let into opens the first it was.
@@ -446,7 +476,7 @@ public sealed class MainWindow : Window
         nav = new NavigationView
         {
             PaneDisplayMode = NavigationViewPaneDisplayMode.Left, IsSettingsVisible = false, IsPaneToggleButtonVisible = false,
-            OpenPaneLength = 250, IsBackButtonVisible = NavigationViewBackButtonVisible.Visible, IsTitleBarAutoPaddingEnabled = false,
+            OpenPaneLength = 250, IsBackButtonVisible = NavigationViewBackButtonVisible.Collapsed, IsTitleBarAutoPaddingEnabled = false,
             Content = detail, AlwaysShowHeader = false,
         };
         nav.ItemInvoked += (_, e) =>
@@ -454,7 +484,6 @@ public sealed class MainWindow : Window
             if (e.InvokedItemContainer?.Tag is Route r) Go(r);
             else if (e.InvokedItemContainer?.Tag is string url) Shell.Open(url);
         };
-        nav.BackRequested += (_, _) => Back();
         body.Content = nav;
         DrawSidebar();
         DrawDetail();
@@ -487,6 +516,14 @@ public sealed class MainWindow : Window
         DrawDetail();
     }
 
+    /// Back to a part of the path: 0 is what the sidebar picked.
+    void BackTo(int part)
+    {
+        if (part >= pushed.Count) return;
+        pushed.RemoveRange(part, pushed.Count - part);
+        DrawDetail();
+    }
+
     /// A screen's `one.close`, where it was pushed: back to what's under it.
     public void Back(AppScreen screen)
     {
@@ -510,7 +547,20 @@ public sealed class MainWindow : Window
         foreach (var gone in detail.Children.OfType<FrameworkElement>().Where(c => !kept.Contains(c)).ToList()) detail.Children.Remove(gone);
         foreach (var child in detail.Children.OfType<FrameworkElement>()) child.Visibility = child == view ? Visibility.Visible : Visibility.Collapsed;
         if (!detail.Children.Contains(view)) detail.Children.Add(view);
-        nav!.IsBackEnabled = pushed.Count > 0;
+        DrawPath();
+    }
+
+    /// The title bar: the window's name, or once something is pushed, Back and the path to it.
+    void DrawPath()
+    {
+        var deep = nav != null && pushed.Count > 0;
+        back.Visibility = path.Visibility = deep ? Visibility.Visible : Visibility.Collapsed;
+        if (logo != null) logo.Visibility = deep ? Visibility.Collapsed : Visibility.Visible;
+        if (!deep) return;
+        string Named(FrameworkElement? view, Route r) => view != null && titles.TryGetValue(view, out var t) && t.Length > 0 ? t : TitleOf(r);
+        var parts = new List<string> { Named(shown, selection) };
+        parts.AddRange(pushed.Select(p => Named(p.view, p.route)));
+        path.ItemsSource = parts;
     }
 
     /// What a route is called: a page's name, Services, Vault, a Settings item's, or an app screen's.
@@ -531,16 +581,20 @@ public sealed class MainWindow : Window
 
     /// A screen under a bar with its title, which the screen may change; a page shows its own large title, so its bar
     /// has none.
+    readonly System.Runtime.CompilerServices.ConditionalWeakTable<FrameworkElement, string> titles = new();
+
     FrameworkElement Screen(Route r)
     {
         var title = new TextBlock { FontSize = 14, FontWeight = FontWeights.SemiBold, Margin = new Thickness(20, 6, 20, 6), Height = 22 };
+        var grid = new Grid();
         void Retitle(string text)
         {
             title.Text = text;
             title.Visibility = text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+            titles.AddOrUpdate(grid, text);
+            if (pushed.Count > 0) DrawPath();
         }
         Retitle(r.Own && r.Screen == "pages" ? "" : TitleOf(r));
-        var grid = new Grid();
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         grid.Children.Add(title);
@@ -578,7 +632,7 @@ public sealed class MainWindow : Window
         var first = true;
         void Head(Route route, string title)
         {
-            var head = new TextBlock { Text = title, FontSize = 12, FontWeight = FontWeights.SemiBold, Foreground = route == at ? Look.AccentBrush : Look.Secondary, TextWrapping = TextWrapping.WrapWholeWords, MaxLines = 3, Margin = new Thickness(0, first ? 0 : 10, 0, 0) };
+            var head = new TextBlock { Text = title, FontSize = 12, FontWeight = FontWeights.SemiBold, Foreground = Look.Secondary, TextWrapping = TextWrapping.WrapWholeWords, MaxLines = 3, Margin = new Thickness(0, first ? 0 : 10, 0, 0) };
             first = false;
             var headItem = Item(route, head);
             headItem.MinHeight = 28;

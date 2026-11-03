@@ -20,21 +20,21 @@ public sealed class WidgetCard
     const double Width = 208;
 
     readonly JsonObject data = new();
-    readonly string accent;
+    /// The person's Windows accent colour, which reads on the board in light and dark alike.
+    readonly string tint = Tint.Hex(true);
     readonly string app;
     readonly string? scope;
 
-    WidgetCard(string accent, string app, string? scope)
+    WidgetCard(string app, string? scope)
     {
-        this.accent = accent;
         this.app = app;
         this.scope = scope;
     }
 
     /// The card for one widget at `size`, and its data.
-    public static (string template, string data) Of(WidgetCache.Item w, string size, string accent, string? problem)
+    public static (string template, string data) Of(WidgetCache.Item w, string size, string? problem)
     {
-        var card = new WidgetCard(accent, w.App, w.Scope);
+        var card = new WidgetCard(w.App, w.Scope);
         var tree = w.Tree(size);
         var body = new JsonArray();
         if (problem != null) body.Add(card.Note(problem, "attention"));
@@ -62,7 +62,7 @@ public sealed class WidgetCard
     /// A card that only says something, quietly (the board names the app above it), and opens the app when it's tapped.
     public static (string template, string data) Saying(string text)
     {
-        var card = new WidgetCard("", "", null);
+        var card = new WidgetCard("", null);
         var body = new JsonArray { card.Text(text, "small", subtle: true, wrap: true) };
         return (Card(body, new JsonObject { ["type"] = "Action.OpenUrl", ["url"] = $"{WhiteLabel.Cli}://open" }).ToJsonString(), card.data.ToJsonString());
     }
@@ -70,7 +70,7 @@ public sealed class WidgetCard
     /// Choosing which widget it shows: every widget on the person's pages, by page.
     public static (string template, string data) Chooser(IReadOnlyList<WidgetCache.Item> items, string? chosen)
     {
-        var card = new WidgetCard("", "", null);
+        var card = new WidgetCard("", null);
         var body = new JsonArray { card.Text("Choose a Widget", "default", weight: "bolder") };
         if (items.Count == 0)
         {
@@ -211,7 +211,7 @@ public sealed class WidgetCard
         "bad" => "#ff3b30",
         "blue" => "#0a9edc",
         "purple" => "#a550d9",
-        "accent" => accent,
+        "accent" => tint,
         _ => otherwise,
     };
 
@@ -300,7 +300,7 @@ public sealed class WidgetCard
                     var items = new JsonArray();
                     if (Str(n, "label") is { } label) items.Add(Text(label, "small", true));
                     var fraction = Fraction(n);
-                    var color = Paint(Str(n, "tone"), accent)!;
+                    var color = Paint(Str(n, "tone"), tint)!;
                     var w = Num(n, "w") ?? at.Width;
                     var bar = Picture(_ => WidgetArt.Bar(fraction, color, w, 6), false, w, 6, stretch: Num(n, "w") == null, center: at.Center);
                     if (items.Count == 0) return bar;
@@ -311,7 +311,7 @@ public sealed class WidgetCard
             case "spark":
                 {
                     var values = Values(n);
-                    var color = Paint(Str(n, "tone"), accent)!;
+                    var color = Paint(Str(n, "tone"), tint)!;
                     var w = Num(n, "w") ?? at.Width;
                     var h = Num(n, "h") ?? 28;
                     return Picture(_ => WidgetArt.Spark(values, Num(n, "max"), color, w, h), false, w, h, stretch: Num(n, "w") == null, center: at.Center);
@@ -461,7 +461,7 @@ public sealed class WidgetCard
     {
         var size = Num(n, "w") ?? 46;
         var fraction = Fraction(n);
-        var color = Paint(Str(n, "tone"), accent)!;
+        var color = Paint(Str(n, "tone"), tint)!;
         var label = Str(n, "label");
         if (label == "") return Picture(_ => WidgetArt.Ring(fraction, color, size), false, size, size, center: at.Center);
         var face = new JsonObject
@@ -482,7 +482,7 @@ public sealed class WidgetCard
     {
         var values = Values(n);
         var labels = n.TryGetProperty("labels", out var l) && l.ValueKind == JsonValueKind.Array ? l.EnumerateArray().Select(x => x.ValueKind == JsonValueKind.String ? x.GetString() ?? "" : "").ToList() : [];
-        var color = Paint(Str(n, "tone"), accent)!;
+        var color = Paint(Str(n, "tone"), tint)!;
         var h = (Num(n, "h") ?? 80) - (labels.Count > 0 ? 16 : 0);
         var w = at.Width;
         var items = new JsonArray(Picture(_ => WidgetArt.Chart(values, Str(n, "kind") == "line", color, w, h), false, w, h, stretch: true));
@@ -501,7 +501,7 @@ public sealed class WidgetCard
     {
         var path = Str(n, "path");
         var w = Num(n, "w") ?? (path == null ? Text(Str(n, "size")) * 1.3 : 22);
-        var tone = Paint(Str(n, "tone"), path == null ? accent : null);
+        var tone = Paint(Str(n, "tone"), path == null ? tint : null);
         var badge = Str(n, "badge");
         if (path != null) return Picture(fg => WidgetArt.Outline(path, badge, tone ?? fg, w), tone == null, w, w, center: at.Center);
         if (Str(n, "name") is not { } name || !WidgetArt.Has(name)) return null;
@@ -517,7 +517,7 @@ public sealed class WidgetCard
         var columns = new JsonArray();
         if (Str(n, "icon") is { } name && WidgetArt.Has(name))
         {
-            var color = Paint(Str(n, "tone"), accent)!;
+            var color = Paint(Str(n, "tone"), tint)!;
             columns.Add(new JsonObject { ["type"] = "Column", ["width"] = "auto", ["verticalContentAlignment"] = "center", ["items"] = new JsonArray(Picture(_ => WidgetArt.Glyph(name, null, color, 18), false, 18, 18)) });
         }
         var texts = new JsonArray(Text(Str(n, "title") ?? "", "default", at.Dim, lines: 1));
@@ -542,7 +542,7 @@ public sealed class WidgetCard
             ["data"] = new JsonObject { ["app"] = app, ["op"] = op, ["input"] = Input(n) },
         };
         if (Str(n, "tone") == "bad") action["style"] = "destructive";
-        if (Str(n, "icon") is { } icon && WidgetArt.Has(icon)) action["iconUrl"] = WidgetArt.Glyph(icon, null, Paint(Str(n, "tone"), accent)!, 16);
+        if (Str(n, "icon") is { } icon && WidgetArt.Has(icon)) action["iconUrl"] = WidgetArt.Glyph(icon, null, Paint(Str(n, "tone"), tint)!, 16);
         return new JsonObject { ["type"] = "ActionSet", ["actions"] = new JsonArray(action) };
     }
 
@@ -555,7 +555,7 @@ public sealed class WidgetCard
             ["type"] = "ColumnSet",
             ["columns"] = new JsonArray(
                 new JsonObject { ["type"] = "Column", ["width"] = "stretch", ["verticalContentAlignment"] = "center", ["items"] = new JsonArray(Text(Str(n, "label") ?? "", "default", at.Dim, lines: 1)) },
-                new JsonObject { ["type"] = "Column", ["width"] = "auto", ["verticalContentAlignment"] = "center", ["items"] = new JsonArray(Picture(_ => WidgetArt.Switch(on, accent), false, 40, 20)) }),
+                new JsonObject { ["type"] = "Column", ["width"] = "auto", ["verticalContentAlignment"] = "center", ["items"] = new JsonArray(Picture(_ => WidgetArt.Switch(on, tint), false, 40, 20)) }),
         };
         if (Str(n, "op") is { } op)
         {

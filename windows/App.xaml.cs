@@ -1,4 +1,4 @@
-// The app: one window. The install's accent is the controls' accent, in place of Windows' own.
+// The app: one window, in the person's own accent colour, as Windows' apps are.
 using System;
 using System.Threading.Tasks;
 using Microsoft.UI.Xaml;
@@ -27,7 +27,6 @@ public partial class App : Application
     {
         try
         {
-            Accent(Look.Hex(WhiteLabel.Accent));
             // Pages and screens sit on the window's backdrop alike, as the Mac app's do on its window.
             Resources["NavigationViewContentBackground"] = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent);
             Resources["NavigationViewContentGridBorderBrush"] = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent);
@@ -59,17 +58,5 @@ public partial class App : Application
             System.IO.File.AppendAllText(System.IO.Path.Combine(WhiteLabel.Folder, "What went wrong.txt"), $"{DateTime.Now:u} {e}\n\n");
         }
         catch { }
-    }
-
-    /// The accent and its lighter and darker shades, as Windows makes its own.
-    void Accent(Color c)
-    {
-        Color Mix(double t, byte to) => Color.FromArgb(255, (byte)(c.R + (to - c.R) * t), (byte)(c.G + (to - c.G) * t), (byte)(c.B + (to - c.B) * t));
-        Resources["SystemAccentColor"] = c;
-        for (var i = 1; i <= 3; i++)
-        {
-            Resources[$"SystemAccentColorLight{i}"] = Mix(0.18 * i, 255);
-            Resources[$"SystemAccentColorDark{i}"] = Mix(0.18 * i, 0);
-        }
     }
 }

@@ -284,11 +284,11 @@ public sealed partial class Widgets : IWidgetProvider, IWidgetProvider2
     {
         // Signed out in the window since they were read: none of the person's widgets are drawn again.
         if (!Auth.Shared.SignedIn) (items, away) = (null, "signed out");
-        Send(id, p, items, Store.Shared.Config?.Accent ?? WhiteLabel.Accent, away);
+        Send(id, p, items, away);
     }
 
     /// What a pinned widget shows, sent to the board.
-    static void Send(string id, Pinned p, List<WidgetCache.Item>? list, string accent, string? why)
+    static void Send(string id, Pinned p, List<WidgetCache.Item>? list, string? why)
     {
         (string template, string data) card;
         // One never chosen shows the first, as the iPhone's does.
@@ -300,7 +300,7 @@ public sealed partial class Widgets : IWidgetProvider, IWidgetProvider2
         else if (p.Choosing)
             card = WidgetCard.Chooser(list, p.Chosen);
         else if (item != null)
-            card = Drawn(item, p.Size, accent, p.Problem);
+            card = Drawn(item, p.Size, p.Problem);
         else if (p.Chosen != null && list.Count > 0)
             card = WidgetCard.Saying($"{p.Title ?? "This widget"} isn’t on your pages any more. Choose another with Customize, in this widget’s menu.");
         else
@@ -317,24 +317,24 @@ public sealed partial class Widgets : IWidgetProvider, IWidgetProvider2
     }
 
     /// A widget's card; one this can't draw says so, as a widget that stopped working does.
-    static (string template, string data) Drawn(WidgetCache.Item item, string size, string accent, string? problem)
+    static (string template, string data) Drawn(WidgetCache.Item item, string size, string? problem)
     {
-        try { return WidgetCard.Of(item, size, accent, problem); }
+        try { return WidgetCard.Of(item, size, problem); }
         catch (Exception e)
         {
             App.Problem(e);
-            return WidgetCard.Of(item with { Error = e.Message }, size, accent, problem);
+            return WidgetCard.Of(item with { Error = e.Message }, size, problem);
         }
     }
 
     /// From the window, once it has read its widgets again: the pinned ones drawn with them, as the board has them.
-    public static void Changed(List<WidgetCache.Item> list, string accent)
+    public static void Changed(List<WidgetCache.Item> list)
     {
-        if (list.Count > 0) Each(p => !p.Choosing, (id, p) => Send(id, p, list, accent, null));
+        if (list.Count > 0) Each(p => !p.Choosing, (id, p) => Send(id, p, list, null));
     }
 
     /// From the window, as the person signs out: every pinned widget says to sign in, at once.
-    public static void SignedOut() => Each(_ => true, (id, p) => Send(id, p, null, WhiteLabel.Accent, "signed out"));
+    public static void SignedOut() => Each(_ => true, (id, p) => Send(id, p, null, "signed out"));
 
     static void Each(Func<Pinned, bool> which, Action<string, Pinned> send)
     {

@@ -12,7 +12,6 @@ public sealed class Config
 {
     [JsonPropertyName("name")] public required string Name { get; init; }
     [JsonPropertyName("cli")] public required string Cli { get; init; }
-    [JsonPropertyName("accent")] public required string Accent { get; init; }
 }
 
 public sealed class NodeState

@@ -77,7 +77,8 @@ public sealed class AppScreen : Grid
     {
         if (web.CoreWebView2 == null) return;
         web.CoreWebView2.Profile.PreferredColorScheme = Scheme;
-        _ = web.CoreWebView2.ExecuteScriptAsync($"document.documentElement.style.zoom = '{Zoom}'");
+        _ = web.CoreWebView2.ExecuteScriptAsync($"document.documentElement.style.zoom = '{Zoom}'; " +
+            $"document.getElementById('one-tint') && (document.getElementById('one-tint').textContent = {System.Text.Json.JsonSerializer.Serialize(TintCss)})");
     }
 
     async Task Start()
@@ -265,28 +266,23 @@ public sealed class AppScreen : Grid
     /// Accessibility > Text size).
     static string Zoom => (14.0 / 17 * new Windows.UI.ViewManagement.UISettings().TextScaleFactor).ToString(System.Globalization.CultureInfo.InvariantCulture);
 
-    /// What makes a screen sit in the window as its own: the window's backdrop shows through, the install's accent in
-    /// light and dark, and on a computer, Windows' size of text (a page's widgets keep their own size).
-    static string Fitted()
-    {
-        var accent = Store.Shared.Config?.Accent ?? WhiteLabel.Accent;
-        string Css(bool dark)
-        {
-            var c = Look.Hex(accent, dark);
-            return $"rgb({c.R}, {c.G}, {c.B})";
-        }
-        return $$"""
-            document.addEventListener("DOMContentLoaded", () => {
-              const style = document.createElement("style");
-              style.textContent = `
-                html, body { background: transparent !important; }
-                :root:root { --accent: {{Css(false)}}; --bg: transparent; --card: rgba(0, 0, 0, 0.04); }
-                @media (prefers-color-scheme: dark) { :root:root { --accent: {{Css(true)}}; --card: rgba(255, 255, 255, 0.05); } }`;
-              document.head.appendChild(style);
-              document.documentElement.style.zoom = "{{Zoom}}";
-            });
-            """;
-    }
+    /// The person's tint in light and dark (Tint.cs), as the screen's `--tint`.
+    static string TintCss => $$"""
+        :root:root { --tint: {{Tint.Css(false)}}; }
+        @media (prefers-color-scheme: dark) { :root:root { --tint: {{Tint.Css(true)}}; } }
+        """;
+
+    /// What makes a screen sit in the window as its own: the person's tint, and on a computer, Windows' size of text
+    /// (a page's widgets keep their own size). It draws its own page colour, beside the sidebar's Mica.
+    static string Fitted() => $$"""
+        document.addEventListener("DOMContentLoaded", () => {
+          const style = document.createElement("style");
+          style.id = "one-tint";
+          style.textContent = {{System.Text.Json.JsonSerializer.Serialize(TintCss)}};
+          document.head.appendChild(style);
+          document.documentElement.style.zoom = "{{Zoom}}";
+        });
+        """;
 
     static void Outside(string uri)
     {

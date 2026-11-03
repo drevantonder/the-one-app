@@ -1,4 +1,4 @@
-// The look of the window's own parts (the sidebar, the welcome): the install's accent, app icons as tiles, people's
+// The look of the window's own parts (the sidebar, the welcome): the kit's colours, the person's tint, app icons as tiles, people's
 // initials, the icons apps name (Phosphor's), and light or dark.
 using System;
 using System.Collections.Generic;
@@ -30,8 +30,8 @@ public static class Look
     /// The window's theme, for what's drawn outside it (sheets), which otherwise take Windows' own.
     public static ElementTheme Theme => Dark ? ElementTheme.Dark : ElementTheme.Light;
 
-    public static Color Accent => Hex(Store.Shared.Config?.Accent ?? WhiteLabel.Accent, Dark);
-    public static SolidColorBrush AccentBrush => new(Accent);
+    /// The person's own tint (Tint.cs), as the window's theme has it.
+    public static SolidColorBrush TintBrush => new(One.Tint.Of(Dark));
 
     // The kit's colours (src/screen/kit.css), light then dark: tests/contracts.rs holds them to it.
     public static readonly (uint Light, uint Dark) bg = (0xffffff, 0x141414);
@@ -56,6 +56,7 @@ public static class Look
     public static Brush Primary => Of(text);
     public static Brush Secondary => Of(muted);
     public static Brush Tertiary => Of(faint);
+    public static Brush Page => Of(bg);
     public static Brush Card => Of(card);
     public static Brush CardStroke => Of(line);
     public static Brush Critical => Of(danger);
@@ -81,7 +82,7 @@ public static class Look
         return new Viewbox
         {
             Width = size, Height = size,
-            Child = new Canvas { Width = 256, Height = 256, Children = { new Microsoft.UI.Xaml.Shapes.Path { Data = geometry, Fill = brush ?? AccentBrush } } },
+            Child = new Canvas { Width = 256, Height = 256, Children = { new Microsoft.UI.Xaml.Shapes.Path { Data = geometry, Fill = brush ?? TintBrush } } },
         };
     }
 
@@ -238,7 +239,7 @@ public static class Look
         return panel;
     }
 
-    public static Button Accented(string text, Action click)
+    public static Button Tinted(string text, Action click)
     {
         var b = new Button { Content = text, Style = (Microsoft.UI.Xaml.Style)Application.Current.Resources["AccentButtonStyle"] };
         b.Click += (_, _) => click();

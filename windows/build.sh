@@ -46,7 +46,6 @@ public static class WhiteLabel
     public const string Cli = $(quote "$cli");
     /// What a person calls the install: "your One App", or a workplace's, "the PTC App".
     public const string Yours = $(quote "$yours");
-    public const string Accent = $(quote "$(field accent)");
     /// The install's address, for a white label with one install; empty, the person gives it.
     public const string Address = $(quote "$(field address)");
     /// The COM class the Widgets board starts this program as, for its widgets (Package.appxmanifest).
