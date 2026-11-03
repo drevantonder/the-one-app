@@ -236,6 +236,49 @@ pub fn close(handle: u32) {
     OPEN.with(|o| o.borrow_mut().1.remove(&handle));
 }
 
+/// The migrations of a scope's Vault database (`node`'s `vault`), for `open`.
+#[wasm_bindgen]
+pub fn vault_schema() -> String {
+    json!([one::vault::SCHEMA]).to_string()
+}
+
+/// The items `app` is switched on for in a call's scopes, as `ctx.vault.items()` gives them (never a secret field's
+/// value): `opened` is `[[scope, handle]]`, each scope's Vault database (`node`'s `vault`), opened with its keys.
+#[wasm_bindgen]
+pub fn vault_items(opened: &str, app: &str, user: &str) -> Result<String, JsError> {
+    Ok(Value::from(lookup(opened, app, user)?.for_app()).to_string())
+}
+
+/// An app's request out (JSON `{ url, headers, body }`, its body text or null) with the fields of the items it's
+/// switched on for filled in from `opened` (as `vault_items`), a secret one only if `host` is one of its item's hosts,
+/// as a node on a machine fills an app's requests (`src/outbound.rs`).
+#[wasm_bindgen]
+pub fn vault_fill(opened: &str, app: &str, user: &str, host: &str, request: &str) -> Result<String, JsError> {
+    let found = lookup(opened, app, user)?;
+    let fill = |text: &str| one::vault::fill(text, host, |name| found.get(name)).map_err(thrown);
+    let mut req: Value = serde_json::from_str(request)?;
+    req["url"] = json!(fill(req["url"].as_str().unwrap_or(""))?);
+    if let Some(headers) = req["headers"].as_object_mut() {
+        for value in headers.values_mut() {
+            *value = json!(fill(value.as_str().unwrap_or(""))?);
+        }
+    }
+    if let Some(body) = req["body"].as_str() {
+        req["body"] = json!(fill(body)?);
+    }
+    Ok(req.to_string())
+}
+
+fn lookup(opened: &str, app: &str, user: &str) -> Result<one::vault::Lookup, JsError> {
+    let opened: Vec<(String, u32)> = serde_json::from_str(opened)?;
+    let mut scopes = Vec::new();
+    for (scope, handle) in opened {
+        let items = OPEN.with(|o| o.borrow().1.get(&handle).context("that database isn't open").and_then(|db| one::vault::load(db.connection()))).map_err(thrown)?;
+        scopes.push((Scope::parse(&scope).map_err(thrown)?, items));
+    }
+    Ok(one::vault::Lookup { app: app.into(), user: user.into(), scopes })
+}
+
 /// A call's appends (JSON, as the shim gives them) as each scope's statements, `{ <scope>: [[sql, params, check]] }`,
 /// for the scopes the call named; what this node can't write yet refuses the call, so it writes nothing.
 #[wasm_bindgen]

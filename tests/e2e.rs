@@ -196,7 +196,7 @@ async fn agents_ask_for_items_and_never_see_them() {
     let id = asked["id"].as_str().unwrap().to_string();
     assert!(asked["link"].as_str().unwrap().contains(&format!("vault?id={id}")), "{asked}");
     assert_eq!(a.state()["vault_requests"], 1, "the shell shows a request waiting");
-    let waiting = a.item_requests(&me, None, Some(&id)).unwrap();
+    let waiting = a.item_requests(&me, None, Some(&id)).await.unwrap();
     assert_eq!(waiting[0]["state"], "waiting");
     assert_eq!(waiting[0]["agent"], "Claude Code");
     assert_eq!(waiting[0]["why"], "Your example.com API key, from its settings page");
@@ -204,7 +204,7 @@ async fn agents_ask_for_items_and_never_see_them() {
 
     let answer = json!({ "fields": { "user": "andre", "key": "s3cret" } });
     a.answer_request(&me, &mine, &id, &answer).await.unwrap();
-    let done = a.item_requests(&me, None, Some(&id)).unwrap();
+    let done = a.item_requests(&me, None, Some(&id)).await.unwrap();
     assert_eq!(done[0]["state"], "set", "{done:?}");
     assert!(!format!("{done:?}").contains("s3cret"), "a request never says a secret");
     let items = a.vault(&me, Some(&mine)).await.unwrap();
@@ -220,7 +220,7 @@ async fn agents_ask_for_items_and_never_see_them() {
     deploy_module(&a, "other", r#"export default { name: "other", ops: {} };"#).await;
     let again = a.request_item(&me, &mine, "other", None, &ask, "").await.unwrap();
     let again = again["id"].as_str().unwrap();
-    let matches = &a.item_requests(&me, None, Some(again)).unwrap()[0]["matches"];
+    let matches = &a.item_requests(&me, None, Some(again)).await.unwrap()[0]["matches"];
     let item = matches[0]["id"].as_str().unwrap().to_string();
     a.answer_request(&me, &mine, again, &json!({ "item": item })).await.unwrap();
     assert_eq!(a.vault(&me, Some(&mine)).await.unwrap()[0]["apps"], json!(["board", "other"]));
@@ -229,7 +229,10 @@ async fn agents_ask_for_items_and_never_see_them() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn apps_use_only_the_items_they_are_switched_on_for() {
-    let a = start("vault").await;
+    let dir = temp("vault");
+    let device = ed25519_dalek::SigningKey::from_bytes(&rand::random());
+    std::fs::write(dir.join("device.json"), json!({ "secret": one::entry::hex(device.as_bytes()), "name": "vault" }).to_string()).unwrap();
+    let a = Node::start(&dir, one::sidecars::built_in()).await.unwrap();
     a.create("Vault", "Andre").await.unwrap();
     let port = echo().await;
     let module = |name: &str| format!(r#"export default {{
@@ -272,7 +275,7 @@ async fn apps_use_only_the_items_they_are_switched_on_for() {
     assert_eq!(listed[0]["wanted_by"], json!(["one", "two"]), "both ask for its fields");
     // A request for what an app declares asks for its fields, and offers the item that has them.
     let asked = a.request_item(&me, &mine, "two", Some("account"), &json!({}), "").await.unwrap();
-    let asked = &a.item_requests(&me, None, asked["id"].as_str()).unwrap()[0];
+    let asked = &a.item_requests(&me, None, asked["id"].as_str()).await.unwrap()[0];
     assert_eq!((asked["title"].as_str(), asked["matches"][0]["id"].as_str()), (Some("Example account"), Some(id.as_str())));
 
     // The same account signed in from another app is the same item, now switched on for both.
@@ -293,6 +296,45 @@ async fn apps_use_only_the_items_they_are_switched_on_for() {
     let refused = a.call(call("two", "send", json!({ "url": format!("http://localhost:{port}/"), "auth": "{{token}}" }))).await.unwrap_err();
     assert!(format!("{refused:#}").contains("sent only to 127.0.0.1"), "{refused:#}");
     assert!(a.call(call("one", "sign_out", json!({ "id": made }))).await.is_err(), "an app lets go only of what it uses");
+
+    // A sign-in's call fills an item only with the key of its scope's Vault, handed with it: the app's own isn't enough.
+    let who = one::node::Caller { token: Some("a sign-in".into()), ..me.clone() };
+    let needs = |err: anyhow::Error| err.downcast::<one::node::Needs>().expect("it says what it needs").need;
+    let need = needs(a.call_as(send("two", "{{token}}"), who.clone()).await.unwrap_err());
+    let vault = |n: &one::keys::Need| n.scope == mine.to_string() && n.app == "node" && n.database == "vault";
+    assert!(need.iter().any(vault) && need.iter().any(|n| n.app == "two" && n.database == "main"), "{need:?}");
+    let bucket = one::bucket::Place::Folder(dir.join("install").join("bucket"));
+    let key_of = |n: &one::keys::Need| {
+        let to = one::entry::hex(&one::keys::Endpoint::of(&device).key);
+        let epoch: [u8; 32] = one::kernel::open_sealed(&one::keys::seal_secret(&device), &bucket.get(&one::keys::epoch_name(&n.scope, n.epoch, &to)).unwrap().unwrap()).unwrap().try_into().unwrap();
+        // An app's key in an epoch is made by the first device to need it, as a client does.
+        let name = one::keys::app_key_name(&n.scope, &n.app, n.epoch);
+        bucket.create(&name, &one::kernel::seal_app_key(&epoch, &n.app, &rand::random())).unwrap();
+        let app = one::kernel::open_app_key(&epoch, &n.app, &bucket.get(&name).unwrap().unwrap()).unwrap();
+        one::keys::Handed { key: one::kernel::database_key(&app, &n.database), scope: n.scope.clone(), epoch: n.epoch, app: n.app.clone(), database: n.database.clone() }
+    };
+    let hand = |keys: Vec<one::keys::Handed>| {
+        let until = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u64 + 600_000;
+        let handoff = one::keys::Handoff { for_: one::keys::token_id("a sign-in"), until, keys };
+        a.hand("a sign-in", &me.user, &one::keys::seal_handoff(&a.endpoint().seal, &handoff).unwrap()).unwrap();
+    };
+    hand(need.iter().filter(|n| !vault(n)).map(key_of).collect());
+    let still = needs(a.call_as(send("two", "{{token}}"), who.clone()).await.unwrap_err());
+    assert!(!still.is_empty() && still.iter().all(vault), "only the Vault's key is missing: {still:?}");
+    hand(still.iter().map(key_of).collect());
+    assert_eq!(a.call_as(send("two", "{{token}}"), who.clone()).await.unwrap()["authorization"], "k");
+    hand(needs(a.call_as(send("one", "{{token}}"), who.clone()).await.unwrap_err()).iter().map(key_of).collect());
+    assert_eq!(a.call_as(send("one", "{{token}}"), who.clone()).await.unwrap()["authorization"], "{{token}}", "still only for the app switched on");
+
+    // The item is sealed wherever it's kept: no file of the device or its bucket has it in the clear.
+    a.set_item(&me, &mine, json!({ "id": made, "fields": { "token": { "value": "s3cret-in-the-vault", "secret": true } } })).await.unwrap();
+    assert_eq!(a.call(send("two", "{{token}}")).await.unwrap()["authorization"], "s3cret-in-the-vault");
+    for file in walk(&dir) {
+        let bytes = std::fs::read(&file).unwrap_or_default();
+        assert!(!bytes.windows(19).any(|w| w == b"s3cret-in-the-vault"), "{} has the secret in the clear", file.display());
+    }
+    // Nothing a person or app reads says it.
+    assert!(!json!([a.vault(&me, None).await.unwrap(), a.call(call("two", "items", json!({}))).await.unwrap(), a.state()]).to_string().contains("s3cret-in-the-vault"));
 }
 
 /// A device whose key is still in server.json, from before devices were called devices, never quietly becomes a new one.
@@ -340,7 +382,9 @@ async fn backups_go_to_a_folder_encrypted_and_restore_with_the_recovery_key_alon
     assert_eq!(checked["install"], "Home");
     assert_eq!(checked["people"], json!(["Andre"]));
     assert!(checked["apps"].as_array().unwrap().contains(&json!("board")), "{checked}");
-    assert!(checked["vault"].as_array().unwrap().contains(&json!("Example key")), "{checked}");
+    let mine = format!("user:{}", me.user);
+    let items = backed_up(&dir, &install, &one::entry::unhex(&recovery).unwrap(), &mine, "node", "vault", "select item from items").await;
+    assert!(items.iter().any(|i| i.contains("\"Example key\"")), "the Vault's item came back: {items:?}");
     let restored = one::backups::restore(&place, &install, "global", &keys["global"]).unwrap();
     assert!(restored.entries.iter().any(|e| e.content.kind == "genesis"));
     assert_eq!(backed_up_posts(&dir, &install, &one::entry::unhex(&recovery).unwrap()).await, ["before the backup"]);
@@ -405,15 +449,22 @@ async fn backups_go_to_a_folder_encrypted_and_restore_with_the_recovery_key_alon
 /// The board's posts in `global` as a place's copy of the install's bucket holds them, opened with the recovery key
 /// alone: each epoch's key sealed to it, each app's key in the epoch sealed under that.
 async fn backed_up_posts(dir: &std::path::Path, install: &str, recovery: &[u8; 32]) -> Vec<String> {
+    backed_up(dir, install, recovery, "global", "board", "main", "select text from posts order by time").await
+}
+
+/// The first column of what `sql` reads from `app`'s `database` in `scope`, as the backup's copy of the bucket has it,
+/// opened with the recovery key alone.
+async fn backed_up(dir: &std::path::Path, install: &str, recovery: &[u8; 32], scope: &str, app: &str, database: &str, sql: &str) -> Vec<String> {
     let copy = one::bucket::Place::Folder(dir.join(install).join("bucket"));
+    let folder = one::bucket::folder(scope);
     let mut keys = one::db::Keys::new();
-    for n in copy.list("global/_epochs").unwrap().iter().filter_map(|n| n.parse::<u32>().ok()) {
-        let epoch = one::backups::unseal(recovery, &copy.get(&one::keys::epoch_name("global", n, "recovery")).unwrap().unwrap()).unwrap();
-        let Ok(Some(sealed)) = copy.get(&one::keys::app_key_name("global", "board", n)) else { continue };
-        keys.insert(n, one::kernel::database_key(&one::kernel::open_app_key(&epoch, "board", &sealed).unwrap(), "main"));
+    for n in copy.list(&format!("{folder}/_epochs")).unwrap().iter().filter_map(|n| n.parse::<u32>().ok()) {
+        let epoch = one::backups::unseal(recovery, &copy.get(&one::keys::epoch_name(scope, n, "recovery")).unwrap().unwrap()).unwrap();
+        let Ok(Some(sealed)) = copy.get(&one::keys::app_key_name(scope, app, n)) else { continue };
+        keys.insert(n, one::kernel::database_key(&one::kernel::open_app_key(&epoch, app, &sealed).unwrap(), database));
     }
-    match one::db::Db::open(&copy, "global/board/main", keys).await {
-        Ok(db) => db.query("select text from posts order by time", &[]).unwrap().into_iter().map(|r| r["text"].as_str().unwrap().to_string()).collect(),
+    match one::db::Db::open(&copy, &format!("{folder}/{app}/{database}"), keys).await {
+        Ok(db) => db.query(sql, &[]).unwrap().into_iter().filter_map(|r| r.values().next().and_then(|v| v.as_str()).map(str::to_string)).collect(),
         Err(_) => Vec::new(),
     }
 }

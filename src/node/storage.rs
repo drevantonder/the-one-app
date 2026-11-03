@@ -76,8 +76,7 @@ impl Node {
     /// Follows the install's newest Storage item, when this device keeps its data anywhere else: in the background.
     pub(super) fn follow_storage(&self) {
         let wanted = self.with(|i| {
-            let Some((_, global)) = i.views.get("global") else { return Ok(None) };
-            let Some(item) = global.items.values().filter(|it| it.kind == STORAGE && it.apps.contains(members::APP)).max_by_key(|it| it.made) else { return Ok(None) };
+            let Some(item) = i.vault.values().filter(|it| it.kind == STORAGE && it.apps.contains(members::APP)).max_by_key(|it| it.made) else { return Ok(None) };
             let fields: BTreeMap<String, String> = item.fields.iter().map(|(n, f)| (n.clone(), f.value.clone())).collect();
             Ok(Some(fields).filter(|f| i.bucket.as_ref().is_none_or(|(_, now)| now != f)))
         });

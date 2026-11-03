@@ -397,7 +397,7 @@ async fn sandboxed(mut resp: Response) -> Response {
 /// An MCP client elsewhere is told where to sign in, as MCP's authorization spec says: the install's
 /// protected-resource metadata, at its address, which names the kernel's auth service.
 fn sign_in_first(node: &Node, error: Option<String>) -> Response {
-    let Ok((address, _)) = node.kernel() else {
+    let Ok(address) = node.kernel() else {
         return (StatusCode::FORBIDDEN, Json(json!({ "error": "this install has no address to sign in at yet, so only this machine's own programs may use this" }))).into_response();
     };
     let invalid = if error.is_some() { r#"error="invalid_token", "# } else { "" };
@@ -486,7 +486,7 @@ async fn signed_in(node: &Node, token: String) -> anyhow::Result<Me> {
     if let Some((me, _)) = SIGNED_INS.lock().unwrap().get(&hash).filter(|(_, until)| now < *until) {
         return Ok(me.clone());
     }
-    let (address, _) = node.kernel()?;
+    let address = node.kernel()?;
     let issuer = node.issuer()?;
     let asked = token.clone();
     let claims = tokio::task::spawn_blocking(move || {
@@ -925,7 +925,7 @@ async fn reply(State(node): State<Node>, Path((app, id)): Path<(String, u64)>, J
 
 /// A sidecar's text filled from the Vault for a call of its that waits, for the host it's going to.
 async fn fill(State(node): State<Node>, Path((app, id)): Path<(String, u64)>, Json(body): Json<Value>) -> Reply {
-    let text = node.sidecar_fill(&app, id, text(&body, "text")?, text(&body, "host")?)?;
+    let text = node.sidecar_fill(&app, id, text(&body, "text")?, text(&body, "host")?).await?;
     Ok(Json(json!({ "text": text })))
 }
 

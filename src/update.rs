@@ -727,10 +727,10 @@ fn blob(hash: &str) -> Result<Vec<u8>> {
 
 #[test]
 fn a_change_sends_out_only_what_it_touched() {
-    assert_eq!(Parts::of(["README.md", "docs/a.md", "tests/e2e.rs", "android/x", "windows/App.cs", "kernel/test/vault.test.js"]), Parts::default());
+    assert_eq!(Parts::of(["README.md", "docs/a.md", "tests/e2e.rs", "android/x", "windows/App.cs", "kernel/test/tests.js"]), Parts::default());
     assert_eq!(Parts::of(["apps/board/app.js", "apps/board/screen.html", "apps/vault/app.js"]), Parts { apps: vec!["board".into(), "vault".into()], ..Default::default() });
     assert_eq!(Parts::of(["apple/Mac/App.swift"]), Parts { mac: true, ..Default::default() });
     assert_eq!(Parts::of(["src/node.rs", "apps/board/app.js"]), Parts { node: true, mac: true, apps: vec!["board".into()] });
-    assert_eq!(Parts::of(["kernel/vault/vault.js", "serverless/worker.js"]), Parts { node: true, ..Default::default() });
+    assert_eq!(Parts::of(["kernel/signer/worker.js", "serverless/worker.js"]), Parts { node: true, ..Default::default() });
     assert_eq!(Parts::of(["Cargo.lock"]), Parts::everything());
 }

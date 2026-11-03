@@ -16,7 +16,6 @@ use super::*;
 /// one's WebAssembly is the `.wasm` files in its module's folder, modules of its own (Workers can't compile it).
 pub const SERVICES: &[(&str, &str, Option<&str>)] = &[
     ("auth", "auth/worker.js", Some("Auth")),
-    ("vault", "vault/worker.js", Some("Vault")),
     ("schedules", "schedules/worker.js", Some("Schedules")),
     ("relay", "relay/worker.js", Some("Relay")),
     ("signer", "signer/worker.js", None),
@@ -47,8 +46,7 @@ pub struct Settings {
     pub address: String,
     /// Where the kernel's own tools reach the auth service; people reach it at the address.
     pub auth_url: String,
-    /// Where nodes reach the vault and the schedules service.
-    pub vault_url: String,
+    /// Where nodes reach the schedules service.
     pub schedules_url: String,
     /// Where the gateway sends `/v1/` and `/mcp`: a node's address, or `cloudflare:<id>` for a node behind a Cloudflare
     /// Tunnel with no public address, which the gateway on Cloudflare reaches by that Workers VPC service.
@@ -58,9 +56,9 @@ pub struct Settings {
     /// which sends on to `node_url` what needs a machine.
     #[serde(default)]
     pub serverless: bool,
-    /// The local ports the auth service, the vault, the schedules service and the gateway listen on, when this machine
-    /// runs them. The relay and the URL signer have none: other Workers reach them by binding.
-    pub ports: [u16; 4],
+    /// The local ports the auth service, the schedules service and the gateway listen on, when this machine runs them.
+    /// The relay and the URL signer have none: other Workers reach them by binding.
+    pub ports: [u16; 3],
     /// The install's devices' public keys (hex), from the node on this machine when the kernel is deployed or served:
     /// the relay starts its list with them, as its admins', when it has none yet.
     #[serde(skip)]
@@ -233,14 +231,13 @@ impl Settings {
     /// New settings, with new secrets.
     pub fn new(name: &str, address: &str) -> Settings {
         let port = crate::config::PORT;
-        let ports = [port + 10, port + 11, port + 12, port + 13];
+        let ports = [port + 10, port + 12, port + 13];
         let secret = || B64U.encode(&rand::random::<[u8; 32]>());
         Settings {
             name: name.into(),
             address: address.trim_end_matches('/').into(),
             auth_url: format!("http://127.0.0.1:{}", ports[0]),
-            vault_url: format!("http://127.0.0.1:{}", ports[1]),
-            schedules_url: format!("http://127.0.0.1:{}", ports[2]),
+            schedules_url: format!("http://127.0.0.1:{}", ports[1]),
             node_url: None,
             serverless: false,
             serverless_key: data_encoding::HEXLOWER.encode(&rand::random::<[u8; 32]>()),
@@ -261,9 +258,9 @@ impl Settings {
     /// data (`bucket`), and `person` signed in with nothing to show.
     pub fn for_try(node: &str, bucket: &str, person: (String, String)) -> Result<Settings> {
         let free = || -> Result<u16> { Ok(std::net::TcpListener::bind("127.0.0.1:0")?.local_addr()?.port()) };
-        let ports = [free()?, free()?, free()?, free()?];
-        let mut settings = Settings::new("Try", &format!("http://127.0.0.1:{}", ports[3]));
-        (settings.auth_url, settings.vault_url, settings.schedules_url) = (format!("http://127.0.0.1:{}", ports[0]), format!("http://127.0.0.1:{}", ports[1]), format!("http://127.0.0.1:{}", ports[2]));
+        let ports = [free()?, free()?, free()?];
+        let mut settings = Settings::new("Try", &format!("http://127.0.0.1:{}", ports[2]));
+        (settings.auth_url, settings.schedules_url) = (format!("http://127.0.0.1:{}", ports[0]), format!("http://127.0.0.1:{}", ports[1]));
         settings.ports = ports;
         settings.node_url = Some(format!("http://{node}"));
         settings.try_person = Some(person);
@@ -321,8 +318,8 @@ impl Settings {
     /// Where a service is reached, and the local port it listens on: none for the relay and the URL signer, which only
     /// other Workers' bindings reach.
     pub fn place(&self, service: &str) -> Option<(&str, u16)> {
-        let i = ["auth", "vault", "schedules", "gateway"].iter().position(|s| *s == service)?;
-        Some(([&self.auth_url, &self.vault_url, &self.schedules_url, &self.address][i].as_str(), self.ports[i]))
+        let i = ["auth", "schedules", "gateway"].iter().position(|s| *s == service)?;
+        Some(([&self.auth_url, &self.schedules_url, &self.address][i].as_str(), self.ports[i]))
     }
 
     /// Each service's bindings: (name, value, whether it's secret). A value `service:<name>` is another service,
@@ -350,7 +347,6 @@ impl Settings {
         if service == crate::serverless::SERVICE {
             let mut out = vec![
                 ("AUTH".into(), "service:auth".into(), false),
-                ("VAULT".into(), "service:vault".into(), false),
                 ("SIGNER".into(), "service:signer".into(), false),
                 ("LOADER".into(), "loader:".into(), false),
                 ("ADDRESS".into(), self.address.clone(), false),

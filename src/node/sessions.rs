@@ -72,7 +72,7 @@ fn hash(token: &str) -> [u8; 32] {
 impl Node {
     /// The auth service at the install's address, as this device checks the tokens it's given.
     pub fn issuer(&self) -> Result<Arc<crate::kernel::Issuer>> {
-        let (address, _) = self.kernel()?;
+        let address = self.kernel()?;
         let iss = crate::kernel::Issuer::new(&address).iss;
         let mut kept = self.0.sessions.issuer.lock().unwrap();
         Ok(match kept.as_ref().filter(|i| i.iss == iss) {

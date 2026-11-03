@@ -179,7 +179,7 @@ pub struct Epoch {
 }
 
 /// Node entries that change only their own scope's state, never the members, so no other scope replays them.
-const SCOPE_ONLY: &[&str] = &["schedule", "secret-request", "vault-request", "item", "keep", "forget", "backup-key"];
+const SCOPE_ONLY: &[&str] = &["schedule", "vault-request", "keep", "forget", "backup-key"];
 
 /// Whether an entry is one of `global`'s node entries, which every scope's replay replays.
 pub fn is_member_entry(e: &Entry) -> bool {
@@ -617,8 +617,8 @@ pub fn valid_app_name(name: &str) -> bool {
     !name.is_empty() && name.len() <= 40 && name.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-') && name != APP
 }
 
-/// What a scope's own node entries add up to: the apps installed in it, every `open` of it, its Vault items, and its
-/// schedules' switches.
+/// What a scope's own node entries add up to: the apps installed in it, every `open` of it, requests for Vault items
+/// (the items themselves are in its `vault` database, `src/vault.rs`), and its schedules' switches.
 #[derive(Clone, Debug, Default)]
 pub struct ScopeState {
     pub installed: BTreeSet<String>,
@@ -630,8 +630,6 @@ pub struct ScopeState {
     pub requests: BTreeMap<String, VaultRequest>,
     /// The blobs this scope's apps said they no longer need, though their entries name them.
     pub forgotten: BTreeSet<String>,
-    /// The Vault's items here, by id.
-    pub items: BTreeMap<String, crate::vault::Item>,
     /// In a user's own scope: how they arranged each page, by page (`user`, `group:<id>` or `global`):
     /// `{ items, hidden }`, as their latest `arrange` of it said.
     pub arrangements: BTreeMap<String, Value>,
@@ -730,12 +728,6 @@ fn apply_in_scope(m: &Members, state: &mut ScopeState, e: &Entry) -> Result<()> 
             let on = data["on"].as_bool().context("on or off?")?;
             state.switches.insert((app, name), (on, w.to_string(), e.time()));
         }
-        "item" => {
-            ensure!(manages_scope(m, w, &scope), "not allowed to change the Vault there");
-            let data = &e.content.data;
-            let id = crate::vault::apply(&mut state.items, data, w, e.time(), |a| !m.apps.get(a).is_some_and(|a| a.erased))?;
-            answered(state, data, &id, w, e.time());
-        }
         "backup-key" => {
             ensure!(state.backup_key.is_none(), "the scope has its backup key");
             let key = unhex(e.content.data["key"].as_str().context("no key")?)?;
@@ -747,14 +739,15 @@ fn apply_in_scope(m: &Members, state: &mut ScopeState, e: &Entry) -> Result<()> 
             let blob = e.content.data["blob"].as_str().filter(|b| b.len() == 64 && b.bytes().all(|c| c.is_ascii_hexdigit())).context("no blob")?;
             state.forgotten.insert(blob.to_string());
         }
-        "secret-request" | "vault-request" => {
+        "vault-request" => {
             ensure!(manages_scope(m, w, &scope), "not allowed to change the Vault there");
             let data = &e.content.data;
             let id = data["id"].as_str().filter(|id| is_id(id)).context("no id")?.to_string();
-            if data["declined"] == true {
+            // Answered: declined, or set once the item it asked for is in the scope's Vault (`src/node/vault.rs`).
+            if let Some(how) = ["declined", "set"].into_iter().find(|how| data[*how] == true) {
                 let r = state.requests.get_mut(&id).context("no such request")?;
                 ensure!(r.answer.is_none(), "already answered");
-                r.answer = Some(("declined".into(), w.to_string(), e.time()));
+                r.answer = Some((how.into(), w.to_string(), e.time()));
                 return Ok(());
             }
             ensure!(!state.requests.contains_key(&id), "that request is already made");
@@ -762,14 +755,8 @@ fn apply_in_scope(m: &Members, state: &mut ScopeState, e: &Entry) -> Result<()> 
             // An item the node itself uses (a backup place's) is asked for as the node's, and one agents use (vault_fetch)
             // as theirs.
             ensure!(m.apps.contains_key(&app) || app == APP || app == AGENTS, "no such app");
-            // An earlier device's asks for one secret field, `name`.
-            let (title, fields) = match data["name"].as_str() {
-                Some(name) => (name.to_string(), vec![(name.to_string(), true)]),
-                None => {
-                    let fields: Vec<(String, bool)> = data["fields"].as_object().context("no fields")?.iter().map(|(n, f)| (n.clone(), f["secret"] == true)).collect();
-                    (data["title"].as_str().unwrap_or("").trim().to_string(), fields)
-                }
-            };
+            let fields: Vec<(String, bool)> = data["fields"].as_object().context("no fields")?.iter().map(|(n, f)| (n.clone(), f["secret"] == true)).collect();
+            let title = data["title"].as_str().unwrap_or("").trim().to_string();
             ensure!(!title.is_empty(), "a request has a title");
             ensure!(!fields.is_empty(), "a request asks for one field or more");
             if let Some((name, _)) = fields.iter().find(|(n, _)| !valid_secret_name(n)) {
@@ -829,13 +816,10 @@ pub fn replay_from(root: Option<Hash>, member_entries: &[Entry], scope_entries: 
         let order = e.order();
         while let Some(me) = members.next_if(|me| me.order() < order) {
             m.step(me);
-            forget_erased(&m, &mut state, me);
         }
         let counted = if is_member_entry(e) {
             members.next_if(|me| me.order() == order);
-            let counted = m.step(e) && (!matches!(e.content.kind.as_str(), "install" | "uninstall") || apply_in_scope(&m, &mut state, e).is_ok());
-            forget_erased(&m, &mut state, e);
-            counted
+            m.step(e) && (!matches!(e.content.kind.as_str(), "install" | "uninstall") || apply_in_scope(&m, &mut state, e).is_ok())
         } else if e.content.app == APP && e.log() == "global" {
             // A scope-only node entry of `global`'s.
             m.counts(e) && apply_in_scope(&m, &mut state, e).is_ok()
@@ -850,27 +834,8 @@ pub fn replay_from(root: Option<Hash>, member_entries: &[Entry], scope_entries: 
     }
     for me in members {
         m.step(me);
-        forget_erased(&m, &mut state, me);
     }
     (m, state)
-}
-
-/// After `e`, an `app` that erased an app: it's off every item in the scope, and the items it made or only it used
-/// go, as no app of its name runs again.
-pub fn forget_erased(m: &Members, state: &mut ScopeState, e: &Entry) {
-    if e.content.app == APP && e.content.kind == "app" && e.content.data["erased"] == true {
-        if let Some(name) = e.content.data["name"].as_str().filter(|n| m.apps.get(*n).is_some_and(|a| a.erased)) {
-            crate::vault::forget_app(&mut state.items, name);
-        }
-    }
-}
-
-/// An `item` (or earlier `secret`) that answers a request here, by an app it switches on for: the request is set.
-fn answered(state: &mut ScopeState, data: &Value, id: &str, w: &str, time: u64) {
-    let Some(r) = data["request"].as_str().and_then(|rid| state.requests.get_mut(rid)) else { return };
-    if r.answer.is_none() && state.items.get(id).is_some_and(|i| i.apps.contains(&r.app)) {
-        r.answer = Some(("set".into(), w.to_string(), time));
-    }
 }
 
 // Building node entries.

@@ -90,11 +90,11 @@ Usage:
                                        /v1/ and /mcp to it; what needs a machine goes on to node-url
   {CLI} kernel set <setting> <value>   change one: node-url (where the address sends /v1/: a node's address, or
                                        cloudflare:<id>, the Workers VPC service of a Cloudflare Tunnel to one),
-                                       auth-url, vault-url, schedules-url, resources (nodes' own addresses,
+                                       auth-url, schedules-url, resources (nodes' own addresses,
                                        comma-separated), bucket (its JSON object piped, with - as its value) or
                                        android (the SHA-256 fingerprints of the certificates the Android app is signed
                                        with, comma-separated, or -: links to the address open the app)
-  {CLI} kernel use <address> <vault> <schedules>
+  {CLI} kernel use <address> <schedules>
                                        point this install at its kernel: its nodes take sign-ins made at the address
   {CLI} kernel tunnel                  whether this device runs a connector for the install's Cloudflare Tunnel, which
                                        the address reaches nodes through (node-url cloudflare:<id>): piped the
@@ -379,7 +379,7 @@ fn run(args: Vec<String>) -> Result<()> {
                 Err(err) => {
                     one::kernel::Settings::none_here().map_err(|here| err.context(format!("{here:#}")))?;
                     // A kernel already in the account was made elsewhere: new settings here would replace its secrets.
-                    let made = cf.scripts()?.contains_key(&one::kernel::worker_name("vault"));
+                    let made = cf.scripts()?.contains_key(&one::kernel::worker_name("auth"));
                     anyhow::ensure!(!made || flags.contains_key("new"), "the Cloudflare account has a kernel already, made on another machine: deploy it there, where its settings are, or bring them here ({} and .env.local). --new replaces it, and everything it holds can't be read again", one::kernel::Settings::path().display());
                     let domain = flags.get("domain").and_then(Value::as_str).map(|d| d.trim_matches('.').to_string());
                     let (domain, address) = match domain {
@@ -392,7 +392,7 @@ fn run(args: Vec<String>) -> Result<()> {
                     let at = |service: &str| format!("https://{}.{domain}", one::kernel::worker_name(service));
                     let address = flags.get("address").and_then(Value::as_str).map(|a| a.trim_end_matches('/').to_string()).unwrap_or(address);
                     let mut settings = one::kernel::Settings::new(NAME, &address);
-                    (settings.auth_url, settings.vault_url, settings.schedules_url) = (at("auth"), at("vault"), at("schedules"));
+                    (settings.auth_url, settings.schedules_url) = (at("auth"), at("schedules"));
                     settings.save()?;
                     println!("Keep {} too: the kernel's secrets are in it, and a deploy without them can't read what's there. Better, move each to 1Password and leave an op(op://…) reference in its place.\n", one::kernel::Settings::path().with_file_name(".env.local").display());
                     // People signing in with Google need its OAuth client, which is put beside the secrets first.
@@ -460,7 +460,6 @@ fn run(args: Vec<String>) -> Result<()> {
             match *name {
                 "node-url" => settings.node_url = Some(value.trim_end_matches('/').to_string()).filter(|v| !v.is_empty() && v != "-"),
                 "auth-url" => settings.auth_url = value.trim_end_matches('/').to_string(),
-                "vault-url" => settings.vault_url = value.trim_end_matches('/').to_string(),
                 "schedules-url" => settings.schedules_url = value.trim_end_matches('/').to_string(),
                 "resources" => settings.resources = value.split(',').map(|r| r.trim().to_string()).filter(|r| !r.is_empty()).collect(),
                 "bucket" if *value == "-" => {
@@ -479,13 +478,13 @@ fn run(args: Vec<String>) -> Result<()> {
                     }
                     settings.android = prints;
                 }
-                _ => bail!("no kernel setting {name}: node-url, auth-url, vault-url, schedules-url, resources, bucket or android"),
+                _ => bail!("no kernel setting {name}: node-url, auth-url, schedules-url, resources, bucket or android"),
             }
             settings.save()?;
             println!("Set {name}. {CLI} kernel serve takes it at its next start, and {CLI} kernel deploy when it next runs.");
         }
-        ["kernel", "use", address, vault, schedules] => {
-            for (name, url) in [("address", address), ("kernel_vault", vault), ("kernel_schedules", schedules)] {
+        ["kernel", "use", address, schedules] => {
+            for (name, url) in [("address", address), ("kernel_schedules", schedules)] {
                 post("/v1/settings", json!({ "name": name, "value": url.trim_end_matches('/') }))?;
             }
             println!("This install is at {address}: its nodes take sign-ins made there.");
@@ -1476,9 +1475,9 @@ fn cloudflare(flags: &Map<String, Value>, settings: Option<&one::kernel::Setting
 
 /// Where a kernel is, and what it's set to, without its secrets.
 fn kernel_said(s: &one::kernel::Settings) -> String {
-    let mut out = format!("{}'s kernel\n  address   {}\n  vault     {}\n  schedules {}\n", s.name, s.address, s.vault_url, s.schedules_url);
-    if s.vault_url.starts_with("http://127.0.0.1") {
-        out += &format!("  here on   127.0.0.1:{} (the address), :{} (auth), :{} (vault), :{} (schedules)\n", s.ports[3], s.ports[0], s.ports[1], s.ports[2]);
+    let mut out = format!("{}'s kernel\n  address   {}\n  schedules {}\n", s.name, s.address, s.schedules_url);
+    if s.auth_url.starts_with("http://127.0.0.1") {
+        out += &format!("  here on   127.0.0.1:{} (the address), :{} (auth), :{} (schedules)\n", s.ports[2], s.ports[0], s.ports[1]);
     }
     out += &format!("  /v1/ to   {}\n", s.node_url.as_deref().unwrap_or("no node yet: kernel set node-url"));
     if !s.resources.is_empty() {

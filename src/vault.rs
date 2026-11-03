@@ -1,17 +1,30 @@
 //! The Vault: items, each in one scope, with named fields (secret ones set, never read back), the hosts its secret
-//! fields go to, and the apps switched on for it. Apps write `{{<item id>:field}}` (or `{{field}}`) where a field
-//! goes, and the node fills it in on the way out: into a web request to one of its hosts, or into the input of a call
-//! to a sidecar whose name is one of them.
+//! fields go to, and the apps switched on for it. A scope's items are rows of the node's database `vault` there,
+//! sealed under the scope's epoch like any data, so a node reads them only with that database's key: its own person's,
+//! or one a caller hands a call (`x-one-keys`), never the whole log's. Apps write `{{<item id>:field}}` (or
+//! `{{field}}`) where a field goes, and the node fills it in on the way out: into a web request to one of its hosts,
+//! or into the input of a call to a sidecar whose name is one of them.
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::{Context, Result, bail, ensure};
+use rusqlite::Connection;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::entry::is_id;
+use crate::entry::{Scope, is_id};
 
-/// An item: what its entries add up to.
-#[derive(Clone, Default)]
+/// The node's database of a scope's items.
+pub const DATABASE: &str = "vault";
+
+/// Its schema: each item as one row, its fields' values with it.
+pub const SCHEMA: &str = "create table items (id text primary key, item text not null)";
+
+/// A scope's items, by id.
+pub type Items = BTreeMap<String, Item>;
+
+/// An item: title, fields, hosts and the apps switched on for it.
+#[derive(Clone, Default, Serialize, Deserialize)]
 pub struct Item {
     pub title: String,
     pub kind: String,
@@ -27,7 +40,7 @@ pub struct Item {
     pub made: u64,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Field {
     pub value: String,
     pub secret: bool,
@@ -45,8 +58,9 @@ pub fn valid_field(name: &str) -> bool {
     crate::members::valid_secret_name(name)
 }
 
-/// Applies an `item` entry's data, written by `user` at `time`, to `items`. `known` says whether an app name may be
-/// switched on (it isn't erased). Fails, changing nothing, if it doesn't make sense.
+/// Applies a change to an item (`{ id, title?, type?, domain?, fields?, hosts?, apps?, app?, deleted? }`), made by
+/// `user` at `time`, to `items`. `known` says whether an app name may be switched on (it isn't erased). Fails,
+/// changing nothing, if it doesn't make sense.
 pub fn apply(items: &mut BTreeMap<String, Item>, data: &Value, user: &str, time: u64, known: impl Fn(&str) -> bool) -> Result<String> {
     let id = data["id"].as_str().filter(|id| is_id(id)).context("an item's id is 16 hex characters")?.to_string();
     if data["deleted"] == true {
@@ -98,18 +112,73 @@ pub fn apply(items: &mut BTreeMap<String, Item>, data: &Value, user: &str, time:
     Ok(id)
 }
 
-/// After `app` is erased: it's off every item, and the items it made or only it used are gone.
-pub fn forget_app(items: &mut BTreeMap<String, Item>, app: &str) {
-    items.retain(|_, item| {
-        let only = item.apps.len() == 1 && item.apps.contains(app);
-        item.apps.remove(app);
-        !(only || (item.app.as_deref() == Some(app) && item.apps.is_empty()))
-    });
+/// A scope's items, as its database has them.
+pub fn load(conn: &Connection) -> Result<Items> {
+    let mut out = Items::new();
+    for row in crate::db::query(conn, "select id, item from items", &[])? {
+        let (Some(id), Some(item)) = (row["id"].as_str(), row["item"].as_str()) else { continue };
+        out.insert(id.to_string(), serde_json::from_str(item).context("an item that isn't one")?);
+    }
+    Ok(out)
 }
 
-/// The oldest item `app` is switched on for that has `field`, with its id.
-pub fn find<'a>(items: &'a BTreeMap<String, Item>, app: &str, field: &str) -> Option<(&'a String, &'a Item)> {
-    items.iter().filter(|(_, i)| i.apps.contains(app) && i.fields.contains_key(field)).min_by_key(|(_, i)| i.made)
+/// Applies a change (as `apply`) to a scope's database, inside a write: → the item's id.
+pub fn change(conn: &Connection, data: &Value, user: &str, time: u64, known: impl Fn(&str) -> bool) -> Result<String> {
+    let mut items = load(conn)?;
+    let id = apply(&mut items, data, user, time, known)?;
+    match items.get(&id) {
+        Some(item) => crate::db::execute(conn, "insert or replace into items values (?, ?)", &[json!(id), json!(serde_json::to_string(item)?)])?,
+        None => crate::db::execute(conn, "delete from items where id = ?", &[json!(id)])?,
+    };
+    Ok(id)
+}
+
+/// The items a call of `app` for `user` may fill its placeholders from: those switched on for it in the scopes the
+/// call reached, each opened with that scope's own key. An erased app's name is never switched on.
+pub struct Lookup {
+    pub app: String,
+    pub user: String,
+    pub scopes: Vec<(Scope, Items)>,
+}
+
+impl Lookup {
+    fn items(&self, scope: &Scope) -> impl Iterator<Item = (&String, &Item)> {
+        self.scopes.iter().filter(move |(s, _)| s == scope).flat_map(|(_, items)| items.iter())
+    }
+
+    fn oldest(&self, scope: &Scope, field: &str) -> Option<(Vec<String>, String)> {
+        let found = self.items(scope).filter(|(_, i)| i.apps.contains(&self.app) && i.fields.contains_key(field)).min_by_key(|(_, i)| i.made)?;
+        filled(found.1, field)
+    }
+
+    /// What a placeholder names, as (hosts, value; no hosts for a plain field): `<item id>:field` of an item in any of
+    /// the scopes, `field` of the oldest item that has it in the user's own scope, else in `global`, or
+    /// `<group id>/field` in that group's; always of an item the app is switched on for.
+    pub fn get(&self, name: &str) -> Option<(Vec<String>, String)> {
+        match (name.split_once(':'), name.split_once('/')) {
+            (Some((id, field)), _) => self.scopes.iter().find_map(|(_, items)| items.get(id)).filter(|it| it.apps.contains(&self.app)).and_then(|it| filled(it, field)),
+            (None, Some((group, field))) => self.oldest(&Scope::Group(group.to_string()), field),
+            (None, None) => self.oldest(&Scope::User(self.user.clone()), name).or_else(|| self.oldest(&Scope::Global, name)),
+        }
+    }
+
+    /// The items the app is switched on for, as its calls see them (`ctx.vault.items()`): the user's own first, then
+    /// their groups', then `global`'s, each scope's oldest first.
+    pub fn for_app(&self) -> Vec<Value> {
+        let mut scopes: Vec<&(Scope, Items)> = self.scopes.iter().collect();
+        scopes.sort_by_key(|(s, _)| match s {
+            Scope::User(_) => 0,
+            Scope::Group(_) => 1,
+            Scope::Global => 2,
+        });
+        let mut out = Vec::new();
+        for (scope, items) in scopes {
+            let mut mine: Vec<(&String, &Item)> = items.iter().filter(|(_, it)| it.apps.contains(&self.app)).collect();
+            mine.sort_by_key(|(_, it)| it.made);
+            out.extend(mine.into_iter().map(|(id, it)| for_app(id, &scope.to_string(), it)));
+        }
+        out
+    }
 }
 
 /// What a placeholder gives: the field's value, and the hosts it may go to (none for a plain field: anywhere).

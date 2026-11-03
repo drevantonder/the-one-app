@@ -3,13 +3,9 @@
 use super::*;
 
 impl Node {
-    /// Where the install's kernel is, for nodes to take its sign-ins: (the install's address, the vault's).
-    pub fn kernel(&self) -> Result<(String, String)> {
-        self.with(|i| {
-            let s = &i.r.members.settings;
-            let address = s.get("address").context("this install has no address yet, so it takes no sign-ins: an admin sets one with kernel use")?;
-            Ok((address.clone(), s.get("kernel_vault").context("this install doesn't know its vault: an admin says with kernel use")?.clone()))
-        })
+    /// Where the install's kernel is, for nodes to take its sign-ins: the install's address.
+    pub fn kernel(&self) -> Result<String> {
+        self.with(|i| Ok(i.r.members.settings.get("address").context("this install has no address yet, so it takes no sign-ins: an admin sets one with kernel use")?.clone()))
     }
 
     /// Whether `user` is a person of the install.
@@ -61,7 +57,7 @@ impl Node {
         // The device looking, if it's one.
         let device = sign_in.is_none().then_some(viewer.key);
         let ready = self.ready();
-        let waiting = self.item_requests(viewer, None, None).map(|r| r.iter().filter(|r| r["state"] == "waiting").count()).unwrap_or(0);
+        let waiting = self.waiting_requests(viewer).unwrap_or(0);
         let arrangements = self.arrangements(&viewer.user);
         let install = self.0.install.lock().unwrap();
         let viewer_name = if viewer.key == self.0.id { self.device_name() } else { install.as_ref().and_then(|i| i.r.members.machine(&viewer.key)).map(|m| m.name.clone()).unwrap_or_default() };

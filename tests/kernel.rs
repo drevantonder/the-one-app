@@ -380,9 +380,9 @@ impl Kernel {
     fn start_as(node_url: Option<String>, google: bool, devices: Vec<String>, serverless: Option<(Vec<(String, &'static str, Vec<u8>)>, u64)>) -> Kernel {
         let gateway = port();
         let mut settings = kernel::Settings::new("Test", &format!("http://localhost:{gateway}"));
-        settings.ports = [port(), port(), port(), gateway];
+        settings.ports = [port(), port(), gateway];
         settings.auth_url = format!("http://127.0.0.1:{}", settings.ports[0]);
-        (settings.vault_url, settings.schedules_url) = (format!("http://127.0.0.1:{}", settings.ports[1]), format!("http://127.0.0.1:{}", settings.ports[2]));
+        settings.schedules_url = format!("http://127.0.0.1:{}", settings.ports[1]);
         settings.resources = vec![RESOURCE.into()];
         settings.node_url = node_url;
         settings.devices = devices;
@@ -796,7 +796,6 @@ fn a_sign_in_uses_settings_as_its_person_and_only_with_their_rights() {
     rt.block_on(async {
         node.member("device", json!({ "key": one::entry::hex(&sams_phone.key), "seal": one::entry::hex(&sams_phone.seal), "user": sam, "roles": ["client"], "name": "Sam's phone", "user_name": "Sam", "role": "member" })).await.unwrap();
         node.member("setting", json!({ "name": "address", "value": v.auth })).await.unwrap();
-        node.member("setting", json!({ "name": "kernel_vault", "value": "http://127.0.0.1:9" })).await.unwrap();
     });
     let (andres, sams) = (v.token(&andre, "web"), v.token(&sam, "web"));
     let ask = |token: &str, method: &str, path: &str, body: Value| ask_at(&api, token, method, path, body);

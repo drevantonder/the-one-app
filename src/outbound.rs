@@ -50,9 +50,15 @@ async fn out(node: Node, req: Request) -> Result<Response> {
     }
     let url = format!("{scheme}://{authority}{}", parts.uri.path_and_query().map(|p| p.as_str()).unwrap_or("/"));
     let body = axum::body::to_bytes(body, LIMIT).await?.to_vec();
+    // The call's items, opened only if the request has a placeholder, from the scopes it named, with their keys.
+    let placed = url.contains("{{") || parts.headers.values().any(|v| v.as_bytes().windows(2).any(|w| w == b"{{")) || body.windows(2).any(|w| w == b"{{");
+    let lookup = match &grant {
+        Some(g) if placed => Some(node.lookup(&g.caller, &g.app, &g.scopes).await?),
+        _ => None,
+    };
     let fill = |text: &str| -> Result<String> {
-        match &grant {
-            Some(g) => crate::vault::fill(text, &host, |name| node.vault_for(&g.app, &g.caller.user, name)),
+        match &lookup {
+            Some(l) => crate::vault::fill(text, &host, |name| l.get(name)),
             None => Ok(text.to_string()),
         }
     };

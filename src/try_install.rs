@@ -172,7 +172,7 @@ fn start_new(dir: &Path) -> Result<String> {
     // Read back as the kernel reads it, with its secrets.
     let settings = load_kernel(dir)?;
     spawn_kernel(dir, &settings)?;
-    for (name, value) in [("address", &settings.address), ("kernel_vault", &settings.vault_url), ("kernel_schedules", &settings.schedules_url)] {
+    for (name, value) in [("address", &settings.address), ("kernel_schedules", &settings.schedules_url)] {
         crate::request(agent().post(on("/v1/settings")).send_json(json!({ "name": name, "value": value })))?;
     }
     // Its data moves to the try bucket, which its node reaches only through the kernel's URL signer from then on.
@@ -612,7 +612,7 @@ fn device_client(dir: &Path, checkout: &Path, settings: &one::kernel::Settings, 
             device
         }
     };
-    let port = settings.ports[3];
+    let port = settings.ports[2];
     agent_devices("reach", json!({ "device": device, "port": port }))?;
     // A copy is given back after 15 minutes without a call: a build may take longer.
     let building = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));

@@ -38,11 +38,10 @@ impl Problem {
 /// Both end by themselves once a run works.
 fn problems(i: &Install, now: u64) -> Result<Vec<Problem>> {
     let m = &i.r.members;
-    let Some((_, global)) = i.views.get("global") else { return Ok(Vec::new()) };
     let status = i.status.get("global").cloned().unwrap_or_default();
     let name = |k: &Key| m.machine(k).map(|s| s.name.clone()).unwrap_or_else(|| short(k));
     let mut out = Vec::new();
-    for p in places(global) {
+    for p in places(&i.vault) {
         let runs: Vec<&BackupRun> = status.backups.iter().filter(|r| r.place == p.id).collect();
         let failing: Vec<&&BackupRun> = runs.iter().rev().take_while(|r| r.error.is_some()).collect();
         if let Some(last) = failing.first() {
@@ -104,9 +103,8 @@ struct PlaceItem {
 }
 
 /// What a place's item says, read from global's items.
-fn places(state: &ScopeState) -> Vec<PlaceItem> {
-    state
-        .items
+fn places(items: &crate::vault::Items) -> Vec<PlaceItem> {
+    items
         .iter()
         .filter(|(_, it)| it.apps.contains(members::APP) && it.kind == b::KIND)
         .map(|(id, it)| {
@@ -226,7 +224,9 @@ impl Node {
         let keys = self.held_keys().await;
         let (install, plan) = self.with(|i| {
             let m = &i.r.members;
-            let Some(global) = i.views.get("global").map(|(_, s)| s) else { return Ok((String::new(), Vec::new())) };
+            if !i.views.contains_key("global") {
+                return Ok((String::new(), Vec::new()));
+            }
             let install = i.r.root.map(|r| r.to_hex()[..16].to_string()).context("no install")?;
             m.recovery.context("the install has no recovery key")?;
             let frontier = i.r.store.frontier()?;
@@ -234,7 +234,7 @@ impl Node {
             let failed = self.0.backup_failed.lock().unwrap();
             let pruned = self.0.pruned.lock().unwrap();
             let mut plan = Vec::new();
-            for p in places(global) {
+            for p in places(&i.vault) {
                 if !force && failed.get(&p.id).is_some_and(|t| now - t < b::EVERY) {
                     continue;
                 }
@@ -248,10 +248,14 @@ impl Node {
                 });
                 let prune = prune.transpose()?;
                 let mut due = Vec::new();
+                // Every scope it holds, as one may have databases (its Vault's among them) and no entries yet.
                 let mut logs = i.r.store.logs()?;
-                if !logs.iter().any(|l| l == "global") {
-                    logs.insert(0, "global".into());
+                for scope in m.scopes().iter().map(Scope::to_string) {
+                    if !logs.contains(&scope) {
+                        logs.push(scope);
+                    }
                 }
+                logs.sort_by_key(|l| l != "global");
                 for log in logs {
                     let Ok(scope) = Scope::parse(&log) else { continue };
                     if !i.r.holds(&scope) {
@@ -404,13 +408,11 @@ impl Node {
     pub fn backups(&self) -> Result<Value> {
         self.with(|i| {
             let m = &i.r.members;
-            let empty = ScopeState::default();
-            let global = i.views.get("global").map(|(_, s)| s).unwrap_or(&empty);
             let name = |k: &Key| m.machine(k).map(|s| s.name.clone()).unwrap_or_else(|| short(k));
             let runs = i.status.get("global").map(|s| s.backups.clone()).unwrap_or_default();
             let problems = problems(i, now_ms())?;
             let mut out = Vec::new();
-            for p in places(global) {
+            for p in places(&i.vault) {
                 let mine: Vec<&BackupRun> = runs.iter().filter(|r| r.place == p.id).collect();
                 let last_ok = mine.iter().rev().find(|r| r.error.is_none());
                 let (kind, place_where, endpoint) = match &p.place {
@@ -429,7 +431,7 @@ impl Node {
                     "last": last_ok.map(|r| json!({ "time": r.time, "device": name(&r.device) })),
                 }));
             }
-            let titles: BTreeMap<String, String> = places(global).into_iter().map(|p| (p.id, p.title)).collect();
+            let titles: BTreeMap<String, String> = places(&i.vault).into_iter().map(|p| (p.id, p.title)).collect();
             // The install's snapshots, newest first: the runs of each minute, whichever devices and places, as one.
             let mut moments: Vec<(u64, BTreeSet<String>, BTreeSet<String>, BTreeSet<String>)> = Vec::new();
             for r in runs.iter().rev().filter(|r| !r.snapshots.is_empty() && titles.contains_key(&r.place)) {
@@ -514,7 +516,7 @@ impl Node {
 
     /// Stops backing up to a place: deletes its item. What's in the place stays there.
     pub async fn remove_place(&self, caller: &Caller, id: &str) -> Result<()> {
-        let known = self.with(|i| Ok(i.views.get("global").is_some_and(|(_, s)| places(s).iter().any(|p| p.id == id))))?;
+        let known = self.with(|i| Ok(places(&i.vault).iter().any(|p| p.id == id)))?;
         ensure!(known, "no place {id}");
         self.set_item(caller, &Scope::Global, json!({ "id": id, "deleted": true })).await?;
         Ok(())
@@ -525,8 +527,8 @@ impl Node {
     pub async fn check_backups(&self) -> Result<Value> {
         let keys = self.held_keys().await;
         let (install, places, root) = self.with(|i| {
-            let global = &i.views.get("global").context("no install")?.1;
-            let places: Vec<(String, Place)> = places(global).into_iter().filter_map(|p| Some((p.title, p.place.ok()?))).filter(|(_, p)| p.present()).collect();
+            ensure!(i.views.contains_key("global"), "no install");
+            let places: Vec<(String, Place)> = places(&i.vault).into_iter().filter_map(|p| Some((p.title, p.place.ok()?))).filter(|(_, p)| p.present()).collect();
             Ok((i.r.root.map(|r| r.to_hex()[..16].to_string()).unwrap_or_default(), places, i.r.root))
         })?;
         let mut out = Vec::new();

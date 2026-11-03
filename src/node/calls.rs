@@ -198,8 +198,12 @@ impl Node {
             self.record(&req.app, req, me, Some(&why));
             return Ok(Reply::Error(why));
         }
-        // A sign-in's call that lacks a key of a scope it names fails here, before it runs or writes anything.
-        let want: Vec<(Scope, &str, &str)> = scopes.iter().map(|s| (s.clone(), req.app.as_str(), DATABASE)).collect();
+        // A sign-in's call that lacks a key of a scope it names fails here, before it runs or writes anything: its
+        // app's database's, and the Vault's there too if it says it uses items.
+        let mut want: Vec<(Scope, &str, &str)> = scopes.iter().map(|s| (s.clone(), req.app.as_str(), DATABASE)).collect();
+        if self.0.apps.describe(&req.app).await?["vault"].is_object() {
+            want.extend(scopes.iter().map(|s| (s.clone(), members::APP, crate::vault::DATABASE)));
+        }
         self.needs(me, &want).await?;
         // A call that writes, tried on another device before this one, ran there if it took the lease first.
         if let (Some(id), Some(scope)) = (&req.id, scopes.first()) {
@@ -357,6 +361,7 @@ impl Node {
         let schedules_changed = appends.iter().any(|a| matches!(a, Append::Install { .. } | Append::Switch { .. }));
         let (installs, appends): (Vec<_>, Vec<_>) = appends.into_iter().partition(|a| matches!(a, Append::Install { .. }));
         let (execs, appends): (Vec<_>, Vec<_>) = appends.into_iter().partition(|a| matches!(a, Append::Exec { .. }));
+        let (items, appends): (Vec<_>, Vec<_>) = appends.into_iter().partition(|a| matches!(a, Append::Vault { .. }));
         // Each scope's statements, in the order the call ran them, and the blobs they keep.
         type Statement = (String, Vec<Value>, Option<String>);
         let mut statements: Vec<(Scope, Vec<Statement>, Vec<String>)> = Vec::new();
@@ -375,7 +380,7 @@ impl Node {
         }
         let mut writes = Vec::new();
         for append in appends {
-            writes.push(self.with(|i| check_append(i, app, append, scopes, me))?);
+            writes.push(self.with(|i| check_append(i, append, scopes, me))?);
         }
         let wrote = !statements.is_empty();
         for (scope, list, kept) in statements {
@@ -393,6 +398,11 @@ impl Node {
         }
         if wrote {
             self.emit(Event::Changed { apps: vec![app.to_string()] });
+        }
+        for item in items {
+            if let Append::Vault { id, scope, data, same, release } = item {
+                self.call_item(app, me, scopes, &id, scope, data, same, release).await?;
+            }
         }
         for append in installs {
             if let Append::Install { app, scope, installed } = append {
@@ -433,9 +443,11 @@ impl Node {
         // named among its item's hosts, and blotted out of the answer.
         let mut input = input;
         let used = std::sync::Mutex::new(Vec::<String>::new());
-        if let Some(from) = &from {
+        if let Some(from) = from.as_ref().filter(|_| input.to_string().contains("{{")) {
+            let scopes = self.with(|i| Ok(reachable(i, from, &me.user).into_iter().filter(|s| i.r.holds(s)).collect::<Vec<_>>()))?;
+            let lookup = self.lookup(me, from, &scopes).await?;
             crate::vault::fill_value(&mut input, app, &|name| {
-                let found = self.vault_for(from, &me.user, name);
+                let found = lookup.get(name);
                 if let Some((hosts, value)) = &found {
                     if !hosts.is_empty() {
                         used.lock().unwrap().push(value.clone());
@@ -631,7 +643,7 @@ impl Node {
                 }
                 ok(json!({ "ok": db.query(req["sql"].as_str().unwrap_or(""), &params)? }))
             }
-            ("GET", "/vault") => ok(json!(self.vault_of(&grant.app, &grant.caller.user)?)),
+            ("GET", "/vault") => ok(json!(self.lookup(&grant.caller, &grant.app, &grant.scopes).await?.for_app())),
             ("POST", "/vault/match") => {
                 // The item a sign-in would change rather than make: one of that type whose plain field has that value.
                 let req: Value = serde_json::from_slice(&body)?;
@@ -641,11 +653,8 @@ impl Node {
                 };
                 ensure!(grant.scopes.contains(&scope), "the call didn't name {scope}");
                 let (kind, field, value) = (req["type"].as_str().unwrap_or(""), req["field"].as_str().unwrap_or(""), req["value"].as_str());
-                let id = self.with(|i| {
-                    Ok(i.views.get(&scope.to_string()).and_then(|(_, s)| {
-                        s.items.iter().filter(|(_, it)| it.kind == kind && it.fields.get(field).is_some_and(|f| !f.secret && Some(f.value.as_str()) == value)).min_by_key(|(_, it)| it.made).map(|(id, _)| id.clone())
-                    }))
-                })?;
+                let items = self.items(&grant.caller, &scope).await?;
+                let id = items.iter().filter(|(_, it)| it.kind == kind && it.fields.get(field).is_some_and(|f| !f.secret && Some(f.value.as_str()) == value)).min_by_key(|(_, it)| it.made).map(|(id, _)| id.clone());
                 ok(json!({ "id": id }))
             }
             ("POST", "/blob") => {

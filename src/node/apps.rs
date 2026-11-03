@@ -15,7 +15,7 @@ impl Node {
     /// Deletes an app (`deleted`), restores it (`restored`) or erases it for good (`erased`), for someone acting for
     /// its owner. A deleted app stops running and leaves every page, but keeps its data until it's erased.
     pub async fn retire(&self, caller: &Caller, app: &str, how: &str) -> Result<()> {
-        let (_, content) = self.with(|i| check_append(i, app, Append::Retire { app: app.into(), how: how.into() }, &[], caller))?;
+        let (_, content) = self.with(|i| check_append(i, Append::Retire { app: app.into(), how: how.into() }, &[], caller))?;
         self.member_content(caller, content).await?;
         if how == "erased" {
             self.destroy_keys(app).await?;

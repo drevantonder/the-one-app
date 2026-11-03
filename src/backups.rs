@@ -461,8 +461,8 @@ pub fn import(store: &crate::store::Store, entries: &[Entry]) -> Result<usize> {
 }
 
 /// Restores every scope `keys` opens from a place into a throwaway store, checking every signature, chain and blob,
-/// then says what came back: each scope's entries and blobs, and by name the people, apps and Vault items; and how
-/// much the install's backup takes there.
+/// then says what came back: each scope's entries, blobs and databases, and by name the people and apps; and how much
+/// the install's backup takes there.
 pub fn check(place: &Place, install: &str, keys: &BTreeMap<String, Vec<[u8; 32]>>, root: Option<crate::entry::Hash>) -> Result<serde_json::Value> {
     let store = crate::store::Store::memory()?;
     let mut scopes = Vec::new();
@@ -479,12 +479,6 @@ pub fn check(place: &Place, install: &str, keys: &BTreeMap<String, Vec<[u8; 32]>
     let root = root.or_else(|| all.iter().find(|e| e.content.app == crate::members::APP && e.content.kind == "genesis").map(|e| e.hash()));
     let member_entries: Vec<Entry> = all.iter().filter(|e| crate::members::is_member_entry(e)).cloned().collect();
     let m = crate::members::Members::replay(root, &member_entries);
-    let mut vault = Vec::new();
-    for scope in scopes.iter().filter_map(|s| s["scope"].as_str()) {
-        let entries: Vec<Entry> = all.iter().filter(|e| e.log() == scope).cloned().collect();
-        let (_, state) = crate::members::replay(root, &member_entries, &entries, |_, _, _| {});
-        vault.extend(state.items.values().map(|it| it.title.clone()));
-    }
     let bytes: u64 = place.objects(&format!("{install}/objects"))?.iter().map(|o| o.2).sum();
     Ok(serde_json::json!({
         "install": m.name,
@@ -492,7 +486,6 @@ pub fn check(place: &Place, install: &str, keys: &BTreeMap<String, Vec<[u8; 32]>
         "scopes": scopes,
         "people": m.users.values().filter(|u| !u.removed).map(|u| u.name.clone()).collect::<Vec<_>>(),
         "apps": m.apps.values().filter(|a| !a.erased && a.bundle.is_some()).map(|a| a.name.clone()).collect::<Vec<_>>(),
-        "vault": vault,
     }))
 }
 

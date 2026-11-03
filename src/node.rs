@@ -136,6 +136,8 @@ struct Install {
     status: HashMap<String, status::Status>,
     /// Each scope's views: how far they've replayed, and what the scope's node entries add up to.
     views: HashMap<String, (Order, ScopeState)>,
+    /// `global`'s Vault items, as this device last read them with its own keys: what the node itself keeps there.
+    vault: crate::vault::Items,
     /// How long each device took to answer a call lately.
     nearest: HashMap<Key, Duration>,
     /// How far each device is: how long it took to answer this device's last hello.
@@ -492,8 +494,7 @@ impl Node {
             }
             node.replay_all().await?;
             node.keep_alone_here()?;
-            node.follow_storage();
-            node.follow_tunnel();
+            node.read_own_items();
             node.follow_net();
             node.read_all_status();
             let reader = node.clone();
@@ -576,7 +577,7 @@ impl Node {
         let root: [u8; 32] = data_encoding::HEXLOWER.decode(file.root.as_bytes())?.try_into().map_err(|_| anyhow!("bad root"))?;
         let r = Replica::new(self.0.key.clone(), store, Some(Hash::from_bytes(root)))?;
         let bucket = file.bucket.map(|f| Ok::<_, anyhow::Error>((self.install_place(&f)?, f))).transpose()?;
-        let install = Install { r, user: file.user, bucket, peers: HashMap::new(), builds: HashMap::new(), status: HashMap::new(), views: HashMap::new(), nearest: HashMap::new(), far: HashMap::new(), read: false };
+        let install = Install { r, user: file.user, bucket, peers: HashMap::new(), builds: HashMap::new(), status: HashMap::new(), views: HashMap::new(), vault: Default::default(), nearest: HashMap::new(), far: HashMap::new(), read: false };
         *self.0.install.lock().unwrap() = Some(install);
         Ok(())
     }
@@ -853,6 +854,7 @@ impl Node {
                 self.write_epoch_entries().await;
                 self.forget_sessions();
                 self.read_all_status();
+                self.read_own_items();
             }
             if tick % 6 == 0 && self.has_install() {
                 self.share_unshared().await;
@@ -871,12 +873,6 @@ impl Node {
 /// Brings each scope's state up to date with new entries: from the ones after what it has, or from the start when one
 /// sorts before them or the members changed earlier.
 fn update_views(i: &mut Install, new: &[Entry]) -> Result<()> {
-    // An erase takes the app's secrets from every scope's state, as replaying the scope again would.
-    for e in new.iter().filter(|e| members::is_member_entry(e)) {
-        for (_, state) in i.views.values_mut() {
-            members::forget_erased(&i.r.members, state, e);
-        }
-    }
     let earliest_member = new.iter().filter(|e| members::is_member_entry(e)).map(Entry::order).min();
     let mut logs: Vec<String> = new.iter().map(|e| e.log().to_string()).collect();
     if let Some(m) = &earliest_member {
@@ -963,7 +959,7 @@ fn node_me(node: &Node, m: &Members, caller: &Caller) -> Me {
 }
 
 /// Checks one of a call's appends: into a scope it named, which the caller may write.
-fn check_append(i: &Install, app: &str, append: Append, scopes: &[Scope], me: &Caller) -> Result<(Scope, Content)> {
+fn check_append(i: &Install, append: Append, scopes: &[Scope], me: &Caller) -> Result<(Scope, Content)> {
     Ok(match append {
         Append::Switch { app, schedule, scope, on } => {
             let scope = if scope == "user" { Scope::User(me.user.clone()) } else { Scope::parse(&scope)? };
@@ -997,8 +993,7 @@ fn check_append(i: &Install, app: &str, append: Append, scopes: &[Scope], me: &C
             (Scope::Global, members::node("app", json!({ "name": name, "owner": a.owner.to_string(), "source": link })))
         }
         Append::Sidecar { device, name, installed } => (Scope::Global, sidecar_entry(&i.r.members, &me.user, &device, &name, installed)?),
-        Append::Vault { id, scope, data, same, release } => vault_entry(i, app, me, scopes, &id, scope, data, same, release)?,
-        Append::Install { .. } | Append::Cost { .. } | Append::Exec { .. } => bail!("installs, costs and statements are written on their own"),
+        Append::Install { .. } | Append::Cost { .. } | Append::Exec { .. } | Append::Vault { .. } => bail!("installs, costs, statements and items are written on their own"),
     })
 }
 
@@ -1017,63 +1012,6 @@ fn switch_entry(i: &Install, user: &str, scope: &Scope, app: &str, schedule: &st
     ensure!(i.views.get(&scope.to_string()).is_some_and(|(_, s)| s.installed.contains(app)), "{app} isn't installed in {scope}");
     ensure!(i.r.holds(scope), "this device doesn't hold {scope}");
     Ok(members::node("schedule", json!({ "app": app, "schedule": schedule, "on": on })))
-}
-
-/// An `item` entry `user` may write in `scope`, checked as replaying it will check it.
-fn item_entry(i: &Install, user: &str, scope: &Scope, data: Value) -> Result<Content> {
-    let m = &i.r.members;
-    ensure!(members::manages_scope(m, user, scope), "you can't change the Vault in {scope}");
-    ensure!(i.r.holds(scope), "this device doesn't hold {scope}");
-    let mut items = i.views.get(&scope.to_string()).map(|(_, s)| s.items.clone()).unwrap_or_default();
-    crate::vault::apply(&mut items, &data, user, now_ms(), |a| !m.apps.get(a).is_some_and(|a| a.erased))?;
-    Ok(members::node("item", data))
-}
-
-/// A call's change to the Vault, by `app` for its caller: an item it makes (switched on for it, or with `same`, an
-/// item of that type whose field matches, all its secret fields given anew), one it's switched on for that it
-/// changes (its hosts only with every secret field given anew), or one it lets go of (`release`), deleted once no
-/// app uses it.
-fn vault_entry(i: &Install, app: &str, me: &Caller, scopes: &[Scope], id: &str, scope: Option<String>, mut data: Value, same: Option<String>, release: bool) -> Result<(Scope, Content)> {
-    ensure!(crate::entry::is_id(id), "an item's id is 16 hex characters");
-    let fields_given = |it: &crate::vault::Item, data: &Value| it.fields.iter().filter(|(_, f)| f.secret).all(|(n, _)| data["fields"][n]["value"].is_string());
-    crate::vault::generate(&mut data);
-    let obj = data.as_object_mut().context("an item is an object")?;
-    for key in ["id", "app", "apps", "deleted", "request"] {
-        obj.remove(key);
-    }
-    let held = |s: &Scope| i.views.get(&s.to_string()).and_then(|(_, st)| st.items.get(id));
-    let found = scopes.iter().find_map(|s| held(s).map(|it| (s.clone(), it)));
-    let (scope, data) = match found {
-        Some((scope, it)) if release => {
-            ensure!(it.apps.contains(app), "{app} isn't switched on for that item");
-            let mut apps = it.apps.clone();
-            apps.remove(app);
-            (scope, if apps.is_empty() { json!({ "id": id, "deleted": true }) } else { json!({ "id": id, "apps": apps }) })
-        }
-        Some((scope, it)) => {
-            let matched = same.as_deref().is_some_and(|f| it.kind == data["type"].as_str().unwrap_or(&it.kind) && it.fields.get(f).is_some_and(|x| !x.secret && data["fields"][f]["value"].as_str() == Some(x.value.as_str())));
-            ensure!(it.apps.contains(app) || (matched && fields_given(it, &data)), "{app} isn't switched on for that item");
-            ensure!(data["hosts"].is_null() || fields_given(it, &data), "an app changes an item's hosts only with every secret field given anew");
-            let mut apps = it.apps.clone();
-            apps.insert(app.to_string());
-            data["id"] = json!(id);
-            data["apps"] = json!(apps);
-            (scope, data)
-        }
-        None => {
-            ensure!(!release, "no such item");
-            let scope = match scope.as_deref() {
-                None | Some("user") => Scope::User(me.user.clone()),
-                Some(s) => Scope::parse(s)?,
-            };
-            ensure!(scopes.contains(&scope), "the call didn't name {scope}");
-            data["id"] = json!(id);
-            data["apps"] = json!([app]);
-            data["app"] = json!(app);
-            (scope, data)
-        }
-    };
-    Ok((scope.clone(), item_entry(i, &me.user, &scope, data)?))
 }
 
 /// A built-in app's bundle: its `app.js` as the module, and every file of its folder as its source. One with npm

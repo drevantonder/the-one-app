@@ -5,8 +5,8 @@
 // what it reads from the install's log in the bucket (src/log.rs), and each app's latest deploy from the bucket too,
 // through the URL signer's URLs, keeping what it read sealed in its Durable Object's storage, so a wake fetches only
 // what's newer; it runs an app in an isolate of its own (Worker Loader, src/runtime/shim.js as its `ctx`) and writes
-// what a call wrote as one step (src/db.rs). An app's requests go out through the vault, which fills in the Vault's
-// items, so no secret reaches this node.
+// what a call wrote as one step (src/db.rs). An app's requests go out from here, filled in with the Vault's items it's
+// switched on for, read as any node reads them: each scope's `vault` database, opened with the keys handed for it.
 //
 // Calls of apps that keep to their own data run here when the install's order (src/rank.rs, set in Devices) puts this
 // node before every machine, or the machines are far. Everything else goes first to the install's nodes on machines:
@@ -19,13 +19,13 @@
 // send it as `/v1/call` here, and asks devices for calls; its connections to them live as long as it does, and it ends
 // itself once nobody has asked for a while, since iroh's timers would keep it awake, and billed, for good.
 //
-// Bindings: AUTH, VAULT and SIGNER (the kernel's services), LOADER (Worker Loader), NODE (this Worker's `Node`, where
+// Bindings: AUTH and SIGNER (the kernel's services), LOADER (Worker Loader), NODE (this Worker's `Node`, where
 // every request runs), NODE_KEY (its endpoint's key, a secret), RELAY (the relay's Durable Object), LOCATION (where the relay is made), MACHINE (a node
 // on a machine: a Workers VPC service; or MACHINE_URL, its address), ADDRESS (the install's) and NAME (its name).
 // `built.js`, made when it's deployed, is the shim; `icons.json` is the icons every device draws.
 
 import { DurableObject, RpcTarget } from "cloudflare:workers";
-import { initSync, verify, open, query, write, close, statements, screen, client_screen, config, prefix, following as after, read_log, groups, scopes_of, install, bundle, opens, refresh, endpoint_of, signed, handoff, needs as needed, endpoint_start, endpoint_deliver, endpoint_ask, endpoint_close } from "./one_serverless.js";
+import { initSync, verify, open, query, write, close, statements, vault_items, vault_fill, vault_schema, screen, client_screen, config, prefix, following as after, read_log, groups, scopes_of, install, bundle, opens, refresh, endpoint_of, signed, handoff, needs as needed, endpoint_start, endpoint_deliver, endpoint_ask, endpoint_close } from "./one_serverless.js";
 import wasm from "./one_serverless_bg.wasm";
 import { shim, compatibilityDate } from "./built.js";
 import icons from "./icons.json";
@@ -72,14 +72,6 @@ async function claimsOf(env, token) {
       if (fresh || !/key the auth service/.test(err.message)) refuse(401, `that sign-in won't do: ${err.message}`);
     }
   }
-}
-
-/// Asks the vault, with the person's access token: for the Vault's items, which it keeps.
-async function vault(env, token, method, path, body) {
-  const r = await env.VAULT.fetch(`https://vault${path}`, { method, headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
-  const out = await r.json().catch(() => ({}));
-  if (!r.ok) refuse(r.status === 403 ? 403 : 502, `the vault said: ${out.error || r.status}`);
-  return out;
 }
 
 /// People's names, by id, as the auth service says them: only names, kept while this isolate lives.
@@ -475,6 +467,18 @@ class Call {
     });
   }
 
+  /// The Vault's items in the scopes the call named: each one's `vault` database (the node's), opened with the keys
+  /// handed for it, as `[[scope, handle]]` (JSON); those it lacks are said with 428, all at once.
+  vault() {
+    this.items ||= (async () => {
+      const kept = handed.get(this.who.hash);
+      const lacks = this.scopes.filter((scope) => !(kept && kept.until > Date.now() && kept.keys.get(`${scope}/node/vault`)));
+      if (lacks.length) await needs(this.env, lacks.map((scope) => ({ scope, app: "node", database: "vault", have: [] })));
+      return Promise.all(this.scopes.map((scope) => withKeys(this.env, this.who, scope, "node", "vault", async (keys) => [scope, await open(this.bucket, prefix(scope, "node", "vault"), keys, vault_schema())])));
+    })();
+    return this.items.then((opened) => JSON.stringify(opened));
+  }
+
   async query(scope, sql, params) {
     const db = await this.db(scope);
     return serially(db, () => JSON.parse(query(db.handle, sql, JSON.stringify(params))));
@@ -493,6 +497,7 @@ class Call {
 
   close() {
     for (const db of this.dbs.values()) db.then((d) => d.own && serially(d, () => close(d.handle)), () => {});
+    this.items?.then((opened) => opened.forEach(([, handle]) => close(handle)), () => {});
   }
 }
 
@@ -503,7 +508,7 @@ class Run {
   }
 
   /// The scope handles an app reaches for this person (src/lib.rs: `install`'s `reach`), or of `named` (`user`,
-  /// `global`, a group's id or `group:<id>`). The vault gives keys only for those they may open.
+  /// `global`, a group's id or `group:<id>`). Its databases open only with the keys its caller hands for them.
   scopes(app, named) {
     if (!named) return app.reach;
     const ids = named.map((s) => (s === "user" ? `user:${this.who.user}` : s === "global" || s.includes(":") ? s : `group:${s}`));
@@ -623,11 +628,30 @@ class Run {
 }
 
 /// What the node does for an app while it runs, as it asks (src/node.rs: `internal`): its databases, other apps'
-/// operations, the Vault's items it's switched on for, and its requests out, which the vault makes.
+/// operations, the Vault's items it's switched on for, and its requests out, filled in from them.
 class ForCall extends RpcTarget {
   constructor(run, app, call, done, depth) {
     super();
     Object.assign(this, { run, app, call, done, depth });
+  }
+
+  /// An app's request out, `{ url, method, headers, body64 }`, made here with its placeholders filled in from the
+  /// call's Vault items (src/lib.rs: `vault_fill`): → `{ status, headers, body64 }`. A redirect goes back to the app,
+  /// so a secret never follows one to another host.
+  async fetch(q) {
+    const host = new URL(q.url).hostname;
+    const bytes = q.body64 ? Uint8Array.from(atob(q.body64.replaceAll("-", "+").replaceAll("_", "/")), (c) => c.charCodeAt(0)) : null;
+    let text = null;
+    try {
+      text = bytes && new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    } catch {}
+    const filled = JSON.parse(vault_fill(await this.call.vault(), this.app.name, this.run.who.user, host, JSON.stringify({ url: q.url, headers: q.headers || {}, body: text })));
+    const r = await fetch(filled.url, { method: q.method, headers: filled.headers, body: text === null ? bytes : filled.body, redirect: "manual" });
+    const got = new Uint8Array(await r.arrayBuffer());
+    let body64 = "";
+    for (let i = 0; i < got.length; i += 0x8000) body64 += String.fromCharCode(...got.subarray(i, i + 0x8000));
+    body64 = btoa(body64).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
+    return { status: r.status, headers: Object.fromEntries(r.headers), body64 };
   }
 
   async ask(path, method, body) {
@@ -650,13 +674,10 @@ class ForCall extends RpcTarget {
           if (!d || d.uses?.sidecars?.length) return Response.json(await machineCall(this.run, q, d));
           return Response.json(await this.run.call({ app: q.app, op: q.op, input: q.input }, this.app.name, this.depth + 1));
         }
-        case "GET vault": {
-          const { items } = await vault(env, who.token, "GET", "/items");
-          const mine = items.filter((it) => (it.apps || []).includes(this.app.name));
-          return Response.json(mine.map(({ id, scope, title, type, domain, hosts, fields, app, time }) => ({ id, scope, title, type, domain, hosts, fields, app, time })));
-        }
+        case "GET vault":
+          return new Response(vault_items(await this.call.vault(), this.app.name, who.user), { headers: { "content-type": "application/json" } });
         case "POST fetch":
-          return Response.json(await vault(env, who.token, "POST", "/fetch", { ...q, app: this.app.name }));
+          return Response.json(await this.fetch(q));
         case "GET catalog":
           return Response.json(await this.run.apps());
         case "GET devices":

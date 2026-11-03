@@ -30,8 +30,7 @@ impl Node {
             if i.r.members.compute(&self.0.id).is_none() {
                 return Ok(None);
             }
-            let Some((_, global)) = i.views.get("global") else { return Ok(None) };
-            let Some(item) = global.items.values().filter(|it| it.kind == TUNNEL && it.apps.contains(members::APP)).max_by_key(|it| it.made) else { return Ok(None) };
+            let Some(item) = i.vault.values().filter(|it| it.kind == TUNNEL && it.apps.contains(members::APP)).max_by_key(|it| it.made) else { return Ok(None) };
             // Secrets stay put: the token goes only to the item's own hosts.
             ensure!(item.hosts.iter().any(|h| h == EDGE), "the Tunnel item's token is for {}, not {EDGE}", item.hosts.join(", "));
             Ok(item.fields.get("token").map(|f| f.value.clone()).filter(|t| !t.is_empty()))
@@ -72,7 +71,7 @@ impl Node {
     pub async fn tunnel_route(&self, me: &Caller, method: &str, body: &Value) -> Result<Value> {
         match method {
             "GET" => {
-                let set = self.with(|i| Ok(i.views.get("global").is_some_and(|(_, g)| g.items.values().any(|it| it.kind == TUNNEL))))?;
+                let set = self.with(|i| Ok(i.vault.values().any(|it| it.kind == TUNNEL)))?;
                 let running = self.0.tunnel.lock().unwrap().is_some() && running(&self.0.dir.join("cloudflared.pid")).is_some();
                 Ok(json!({ "set": set, "running": running, "device": self.device_name() }))
             }

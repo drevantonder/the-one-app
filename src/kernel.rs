@@ -1,4 +1,4 @@
-//! The kernel services (`kernel/`: auth, vault, schedules, the URL signer) as nodes meet them: the formats they agree on
+//! The kernel services (`kernel/`: auth, schedules, the relay, the URL signer) as nodes meet them: the formats they agree on
 //! (`kernel/shared/crypto.js` writes the same ones, and `tests/contracts.rs` checks they do), checking access tokens,
 //! and building and running the services in workerd.
 
@@ -91,7 +91,7 @@ pub fn id_of(secret: &[u8]) -> String {
     B64U.encode(&hkdf(secret, &[], b"one/id"))
 }
 
-/// Seals `plain` under a secret (text, as the vault is given it): nonce ‖ AES-256-GCM.
+/// Seals `plain` under a secret (a passkey's PRF output, a refresh token): nonce ‖ AES-256-GCM.
 pub fn seal_under(secret: &[u8], plain: &[u8]) -> Vec<u8> {
     let nonce: [u8; 12] = rand::random();
     let mut out = nonce.to_vec();
