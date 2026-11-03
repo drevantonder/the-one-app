@@ -220,16 +220,18 @@ The board's rules, which every agent follows and anyone may change with board_ru
       async run(ctx, { topic = "", before: upTo, zoom, scope, format }) {
         const b = board(ctx, scope);
         const about = await find(b, topic);
-        if (format === "json") {
-          const posts = await b.query("select * from (select * from posts where topic = ? order by n desc limit 60) order by n", [topic]);
-          return { topic, description: about.description, posts: posts.map(post), subtopics: await topicSummary(b, topic) };
-        }
+        const json = format === "json";
         const head = topic ? [`${topic}: ${about.description}`] : [];
         if (zoom !== undefined) {
           const s = (await b.query("select * from summaries where topic = ? and first <= ? and last >= ?", [topic, zoom, zoom]))[0];
           if (!s) throw new Error(`no summary in ${label(topic)} covers #${zoom}: read lists the summaries with their numbers`);
           const posts = await b.query("select * from posts where topic = ? and n between ? and ? order by n", [topic, s.first, s.last]);
+          if (json) return { topic, description: about.description, summary: { first: s.first, last: s.last, text: s.text }, posts: posts.map(post) };
           return [...head, `${range(s)}, summarised as: ${s.text}`, ...posts.map((p) => line(p))].join("\n");
+        }
+        if (json) {
+          const posts = await b.query("select * from (select * from posts where topic = ? and n < ? order by n desc limit 60) order by n", [topic, upTo ?? Number.MAX_SAFE_INTEGER]);
+          return { topic, description: about.description, posts: posts.map(post), subtopics: await topicSummary(b, topic) };
         }
         if (upTo !== undefined) {
           const posts = await b.query("select * from (select * from posts where topic = ? and n < ? order by n desc limit ?) order by n", [topic, upTo, RECENT]);
