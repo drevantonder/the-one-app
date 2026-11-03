@@ -4,10 +4,10 @@ import CryptoKit
 import Security
 
 /// Signing in, as every client of the install's auth service does (kernel/web/web.js is the same in a browser): this
-/// app registers itself as an OAuth client, the person signs in with their passkey in the system's sign-in sheet,
-/// and it comes back at `<cli>://signed-in/` with a code that PKCE turns into tokens. The refresh token is kept in the
-/// Keychain, for this device only; access tokens only in memory. The iPhone sends them to the install's address; the
-/// Mac's window, to the Mac's own node.
+/// app registers itself as an OAuth client, the person signs in with their passkey, and it comes back with a code that
+/// PKCE turns into tokens. On the iPhone that's the system's sign-in sheet, back at `<cli>://signed-in/`; on the Mac,
+/// the person's own default browser, where their passkey is, back at a port on this Mac (`Loopback`). The refresh
+/// token is kept in the Keychain, for this device only; access tokens only in memory.
 actor Auth {
     static let shared = Auth()
 
@@ -18,7 +18,17 @@ actor Auth {
 
     private static var defaults: UserDefaults { .standard }
     static let cli = Bundle.main.object(forInfoDictionaryKey: "CLI") as? String ?? "one"
-    private static let redirect = "\(cli)://signed-in/"
+    /// What this app registers as its redirect: the Mac's, a loopback address, for whatever port is free.
+    private static let redirect: String = {
+        #if os(macOS)
+        return "http://127.0.0.1/callback"
+        #else
+        return "\(cli)://signed-in/"
+        #endif
+    }()
+
+    /// The person cancelled signing in.
+    struct Cancelled: Error {}
 
     private var access: String?
     private var until = Date.distantPast
@@ -28,7 +38,10 @@ actor Auth {
     nonisolated static var address: URL? {
         get { defaults.string(forKey: "address").flatMap(URL.init(string:)) }
         set {
-            if newValue?.absoluteString != defaults.string(forKey: "address") { defaults.removeObject(forKey: "client") }
+            if newValue?.absoluteString != defaults.string(forKey: "address") {
+                defaults.removeObject(forKey: "client")
+                defaults.removeObject(forKey: "clientRedirect")
+            }
             defaults.set(newValue?.absoluteString, forKey: "address")
         }
     }
@@ -98,7 +111,7 @@ actor Auth {
 
     /// This app, as a client of the auth service: registered the first time it signs in at an address.
     private func client(_ meta: Meta, name: String) async throws -> String {
-        if let id = Self.defaults.string(forKey: "client") { return id }
+        if let id = Self.defaults.string(forKey: "client"), Self.defaults.string(forKey: "clientRedirect") == Self.redirect { return id }
         var request = URLRequest(url: URL(string: meta.registration_endpoint)!)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -112,18 +125,21 @@ actor Auth {
             throw NodeError(out["error_description"] as? String ?? out["message"] as? String ?? String(localized: "This device couldn’t sign up to sign in."))
         }
         Self.defaults.set(id, forKey: "client")
+        Self.defaults.set(Self.redirect, forKey: "clientRedirect")
         return id
     }
 
-    /// Signs in, in the system's sign-in sheet (`authenticate` opens a URL there and gives where it came back to),
-    /// calling this device `name` among the person's signed-in devices. False if they cancelled.
-    func signIn(name: String, authenticate: @MainActor @Sendable (URL) async throws -> URL) async throws -> Bool {
+    /// Signs in (`authenticate` opens a URL for the person to sign in at, and gives where it came back to; it throws
+    /// `Cancelled` if they gave up), calling this device `name` among the person's signed-in devices, and coming back
+    /// to `redirect` if it isn't the one registered (a loopback address's port). False if they cancelled.
+    func signIn(name: String, redirect: String? = nil, authenticate: @MainActor @Sendable (URL) async throws -> URL) async throws -> Bool {
+        let redirect = redirect ?? Self.redirect
         let meta = try await meta()
         let client = try await client(meta, name: name)
         let verifier = Self.random(32), state = Self.random(16)
         var url = URLComponents(string: meta.authorization_endpoint)!
         url.queryItems = [
-            .init(name: "response_type", value: "code"), .init(name: "client_id", value: client), .init(name: "redirect_uri", value: Self.redirect),
+            .init(name: "response_type", value: "code"), .init(name: "client_id", value: client), .init(name: "redirect_uri", value: redirect),
             .init(name: "scope", value: "openid profile offline_access"), .init(name: "code_challenge", value: Self.b64u(Data(SHA256.hash(data: Data(verifier.utf8))))),
             .init(name: "code_challenge_method", value: "S256"), .init(name: "state", value: state), .init(name: "prompt", value: "consent"),
         ]
@@ -132,6 +148,8 @@ actor Auth {
             back = try await authenticate(url.url!)
         } catch let error as ASWebAuthenticationSessionError where error.code == .canceledLogin {
             return false
+        } catch is Cancelled {
+            return false
         }
         let query = URLComponents(url: back, resolvingAgainstBaseURL: false)?.queryItems ?? []
         let value = { (name: String) in query.first { $0.name == name }?.value }
@@ -139,7 +157,7 @@ actor Auth {
             throw NodeError(error == "access_denied" ? String(localized: "You didn’t let this device in.") : value("error_description") ?? error)
         }
         guard value("state") == state, let code = value("code") else { throw NodeError(String(localized: "That sign-in didn’t start here. Sign in again.")) }
-        try await grant(meta, ["grant_type": "authorization_code", "code": code, "redirect_uri": Self.redirect, "client_id": client, "code_verifier": verifier])
+        try await grant(meta, ["grant_type": "authorization_code", "code": code, "redirect_uri": redirect, "client_id": client, "code_verifier": verifier])
         return true
     }
 

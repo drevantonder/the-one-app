@@ -1,4 +1,3 @@
-import AuthenticationServices
 import ServiceManagement
 import SwiftUI
 
@@ -78,9 +77,9 @@ struct MacApp: App {
     }
 }
 
-/// The Mac's window before and after its person signs in. Signed in, its calls carry their token to this Mac's own
-/// node, which opens their data with keys the vault gives that sign-in, as for every other client; the node itself,
-/// and the sidecars, stay this machine's own programs.
+/// The Mac's window before and after its person signs in. Signed out, it's the sign-in screen and nothing from before.
+/// Signed in, its calls carry their token to this Mac's own node, which opens their data with keys the vault gives
+/// that sign-in, as for every other client; the node itself, and the sidecars, stay this machine's own programs.
 @MainActor @Observable
 final class Mac {
     static let shared = Mac()
@@ -88,26 +87,14 @@ final class Mac {
     let store = Store(node: NodeClient(transport: MacNode(), client: "mac"))
     private(set) var signingIn = false
     var signInError: String?
-    /// Asking as this machine's own program, until its person signs in.
-    private(set) var asMachine = false
+    private var loopback: Loopback?
     private var running: Task<Void, Never>?
 
     init() {
-        let defaults = UserDefaults.standard
-        // A window that showed pages before it could sign in keeps asking as this machine's own program until its
-        // person signs in, rather than an update signing them out.
-        // Read from the Keychain once.
-        let signedIn = Auth.signedIn
-        if defaults.object(forKey: "asMachine") == nil { defaults.set(!signedIn && defaults.object(forKey: "selection") != nil, forKey: "asMachine") }
-        asMachine = defaults.bool(forKey: "asMachine") && !signedIn
-        store.signedIn = signedIn || asMachine
+        store.signedIn = Auth.signedIn
         store.startNode = NodeLauncher.start
         store.preferredDeviceName = Host.current().localizedName
     }
-
-    /// Whether the window still asks as this machine's own program, not signed in. Goes once nodes refuse calls with
-    /// no token (ARCHITECTURE.md).
-    nonisolated static var asMachine: Bool { UserDefaults.standard.bool(forKey: "asMachine") && !Auth.signedIn }
 
     /// Keeps the window in step with the node, as whoever is signed in.
     func run() {
@@ -116,8 +103,9 @@ final class Mac {
     }
 
     /// Signs in at `typed` (an address, or an invite link, whose page makes the person's passkey first), with their
-    /// passkey in the system's sign-in sheet.
-    func signIn(_ typed: String, session: WebAuthenticationSession) async -> URL? {
+    /// passkey in the person's own browser, the default one, where their passkey is kept; the window comes to the front
+    /// when they're back.
+    func signIn(_ typed: String) async -> URL? {
         guard !signingIn else { return nil }
         signingIn = true
         signInError = nil
@@ -125,21 +113,36 @@ final class Mac {
         do {
             if let invite = try Auth.take(typed) { return invite }
             let name = displayName(store.device?.name ?? Host.current().localizedName ?? "Mac")
-            // In a session of its own: the browser keeps nothing, and asks no "wants to use … to sign in" before the passkey.
-            let signedIn = try await Auth.shared.signIn(name: "\(appName) on \(name)") { url in
-                try await session.authenticate(using: url, callback: .customScheme(Auth.cli), preferredBrowserSession: .ephemeral, additionalHeaderFields: [:])
+            let loopback = try Loopback()
+            self.loopback = loopback
+            defer { self.loopback = nil }
+            let signedIn = try await Auth.shared.signIn(name: "\(appName) on \(name)", redirect: loopback.redirect) { url in
+                guard NSWorkspace.shared.open(url) else { throw NodeError(String(localized: "Couldn’t open your browser.")) }
+                guard let back = await loopback.callback(appName: appName) else { throw Auth.Cancelled() }
+                Self.comeToFront()
+                return back
             }
             guard signedIn else { return nil }
         } catch {
             signInError = error.localizedDescription
             return nil
         }
-        UserDefaults.standard.set(false, forKey: "asMachine")
-        asMachine = false
         store.signedIn = true
         store.forget()
         run()
         return nil
+    }
+
+    /// Gives up waiting for the browser.
+    func cancelSignIn() { loopback?.stop() }
+
+    /// The window in front of the browser the person signed in with, which an app in the background can't put there by
+    /// activating itself, but `open` can.
+    private static func comeToFront() {
+        let open = Process()
+        open.executableURL = URL(filePath: "/usr/bin/open")
+        open.arguments = ["-a", Bundle.main.bundlePath]
+        try? open.run()
     }
 
     /// Signs out: the first screen again, with nothing of the person's left in the window.
@@ -151,8 +154,6 @@ final class Mac {
 
     /// The node no longer takes this Mac's sign-in.
     func signedOut(_ why: String?) {
-        UserDefaults.standard.set(false, forKey: "asMachine")
-        asMachine = false
         guard store.signedIn else { return }
         store.signedIn = false
         signInError = why
@@ -172,7 +173,7 @@ struct MacNode: NodeTransport {
     /// The node, as whoever's signed in: none, for what only someone signed in asks.
     private func node(_ path: String) throws -> any NodeTransport {
         if Auth.signedIn { return DeviceNode() }
-        if Mac.asMachine || Self.signedOut.contains(path) { return HTTPNode(base: Self.base) }
+        if Self.signedOut.contains(path) { return HTTPNode(base: Self.base) }
         throw Auth.SignedOut(message: String(localized: "Sign in first."))
     }
 

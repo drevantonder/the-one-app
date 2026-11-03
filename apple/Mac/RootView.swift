@@ -1,4 +1,3 @@
-import AuthenticationServices
 import SwiftUI
 
 struct RootView: View {
@@ -72,7 +71,6 @@ private struct MainView: View {
                     Sidebar().navigationSplitViewColumnWidth(min: 200, ideal: 230, max: 320)
                 }
             }
-            .safeAreaInset(edge: .bottom) { if mac.asMachine { SignInBar() } }
         } detail: {
             if store.install?.joining == true {
                 ContentUnavailableView {
@@ -104,43 +102,6 @@ private struct MainView: View {
     }
 }
 
-/// A window that showed pages before it could sign in, asking its person to: at the address this Mac's node is in.
-private struct SignInBar: View {
-    @Environment(Mac.self) private var mac
-    @Environment(Store.self) private var store
-    @Environment(\.webAuthenticationSession) private var session
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            if !store.sidebarFolded {
-                Text("Sign in with your passkey, as on your other devices.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                if let error = mac.signInError {
-                    Text(error).font(.caption).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
-                }
-            }
-            Button {
-                guard let address = store.install?.settings?["address"] else { return }
-                Task { _ = await mac.signIn(address, session: session) }
-            } label: {
-                if store.sidebarFolded {
-                    Image(systemName: "person.badge.key")
-                } else {
-                    Text("Sign In").frame(maxWidth: .infinity)
-                }
-            }
-            .help("Sign In")
-            .buttonStyle(.borderedProminent)
-            .disabled(mac.signingIn || store.install?.settings?["address"] == nil)
-        }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.bar)
-    }
-}
-
 /// A page's Services, over the page: what it opens (a settings screen, the App Store) opens in the window.
 private struct ServicesSheet: View {
     @Environment(Store.self) private var store
@@ -168,7 +129,6 @@ private struct ServicesSheet: View {
 private struct WelcomeView: View {
     @Environment(Mac.self) private var mac
     @Environment(Store.self) private var store
-    @Environment(\.webAuthenticationSession) private var session
     @Environment(\.openURL) private var openURL
     @State private var address = ""
     @State private var invited = false
@@ -246,8 +206,13 @@ private struct WelcomeView: View {
             .controlSize(.large)
             .keyboardShortcut(.defaultAction)
             .disabled(given.isEmpty || mac.signingIn)
-            Button("Or Connect Your AI") { asking = true }
-                .buttonStyle(.link)
+            if mac.signingIn {
+                Button("Cancel") { mac.cancelSignIn() }
+                    .buttonStyle(.link)
+            } else {
+                Button("Or Connect Your AI") { asking = true }
+                    .buttonStyle(.link)
+            }
         }
     }
 
@@ -270,7 +235,7 @@ private struct WelcomeView: View {
     private func go() {
         guard !given.isEmpty else { return }
         Task {
-            if let invite = await mac.signIn(given, session: session) {
+            if let invite = await mac.signIn(given) {
                 invited = true
                 address = Auth.address.map(Self.shown) ?? ""
                 openURL(invite)
