@@ -12,8 +12,7 @@ use crate::kernel::{Cloudflare, Settings, Uploaded, worker_name};
 pub const SERVICE: &str = "node";
 
 /// The serverless node's Worker's modules: (name, type, bytes), `worker.js` first. `built.js` is the shim each app runs
-/// in (the apps themselves it reads from the bucket, each at its latest deploy); `icons.json` the icons every device
-/// draws.
+/// in (the apps themselves it reads from the bucket, each at its latest deploy).
 pub fn modules() -> Result<Vec<(String, &'static str, Vec<u8>)>> {
     let built = |name: &str| {
         let found = crate::config::SERVERLESS.iter().find(|(n, _)| *n == name).map(|(_, b)| b.to_vec());
@@ -26,7 +25,6 @@ pub fn modules() -> Result<Vec<(String, &'static str, Vec<u8>)>> {
         ("one_serverless.js".into(), "application/javascript+module", built("one_serverless.js")?),
         ("one_serverless_bg.wasm".into(), "application/wasm", built("one_serverless_bg.wasm")?),
         ("built.js".into(), "application/javascript+module", built_js.into_bytes()),
-        ("icons.json".into(), "text/plain", include_bytes!("../vendor/phosphor/icons.json").to_vec()),
     ])
 }
 

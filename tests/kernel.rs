@@ -883,6 +883,13 @@ fn the_gateway_sends_each_path_where_it_belongs_and_nothing_a_node_says_runs_at_
     assert_eq!(headers["x-frame-options"], "SAMEORIGIN", "only the web client's own page frames it");
     let (status, headers, _) = ask("GET", &at("/screen/kit.css"), &[], None);
     assert_eq!((status, headers["content-type"].as_str()), (200, "text/css; charset=utf-8"));
+    assert_eq!(headers["cache-control"], "no-cache", "a file not named by its content is asked about each time");
+    // Named by its content, a file is kept for good, but only once it's that content: a browser keeps no other for a year.
+    let kit = data_encoding::HEXLOWER.encode(&<sha2::Sha256 as sha2::Digest>::digest(include_bytes!("../src/screen/kit.css")));
+    let (_, headers, _) = ask("GET", &at(&format!("/screen/kit.css?v={}", &kit[..16])), &[], None);
+    assert_eq!(headers["cache-control"], "public, max-age=31536000, immutable");
+    let (_, headers, _) = ask("GET", &at("/screen/kit.css?v=0123456789abcdef"), &[], None);
+    assert_eq!(headers["cache-control"], "no-cache", "a name that isn't its content");
     assert_eq!(ask("GET", &at("/nothing.js"), &[], None).0, 404, "a missing file isn't the page");
 
     // Sign-in goes to the auth service, as the install's address; its own routes don't.

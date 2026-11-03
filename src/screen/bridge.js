@@ -23,6 +23,21 @@
       delete waiting[m.oneReply];
       m.error === undefined ? w.ok(m.ok) : w.fail(new Error(m.error));
     });
+    // A still of the screen as it looks, a second after it last changed, for the page holding the frame to show
+    // while this screen next opens: its page without its scripts, at its scroll.
+    let still = 0;
+    const snap = () => {
+      const page = document.documentElement.cloneNode(true);
+      page.querySelectorAll('script, meta[http-equiv="Content-Security-Policy"]').forEach((s) => s.remove());
+      if (scrollY) page.dataset.stillY = Math.round(scrollY);
+      window.parent.postMessage({ oneStill: `<!doctype html>${page.outerHTML}` }, "*");
+    };
+    const later = () => (clearTimeout(still), (still = setTimeout(snap, 1000)));
+    addEventListener("load", () => {
+      new MutationObserver(later).observe(document.documentElement, { childList: true, subtree: true, characterData: true, attributes: true });
+      addEventListener("scroll", later, { passive: true });
+      later();
+    });
     // Links leave the frame for a tab of their own, as a shell sends them to the browser.
     document.addEventListener("click", (e) => {
       const a = e.target.closest?.("a[href]");

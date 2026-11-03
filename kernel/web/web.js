@@ -1,7 +1,8 @@
 // The web client: the Mac app's window, in a browser. It signs in as an OAuth client of the install's auth service
 // (PKCE, and the person's passkey at its sign-in page), keeps its refresh token in this browser, and calls a node's `/v1` on its
 // own origin with the access token; the gateway sends each on. App screens are untrusted: each runs in a sandboxed
-// frame, and this page answers its bridge as the Mac app's web view does, making each call itself. Nothing is cached.
+// frame, and this page answers its bridge as the Mac app's web view does, making each call itself. It draws at once
+// what it showed last (the sidebar, and a still of the screen) and then what the node says now.
 
 // The bridge and kit (src/screen/), loaded after this, give `one`; this page answers it for its own use (`__one.host`).
 window.__one = {};
@@ -15,9 +16,15 @@ window.__one = {};
   // MARK: Signing in
 
   const KEPT = "one.signin";
-  // What the client's own screens keep between visits (one.cache), forgotten with the sign-in.
+  // What the client's own screens keep between visits (one.cache), the window as it was last (LAST), and the screens
+  // it showed (KEPT_SCREENS, `kept`): all forgotten with the sign-in.
   const SCREENS = "one.screens.";
-  const forgetScreens = () => Object.keys(localStorage).filter((k) => k.startsWith(SCREENS)).forEach((k) => localStorage.removeItem(k));
+  const LAST = "one.last.window";
+  const KEPT_SCREENS = "one.screens";
+  const forgetScreens = () => {
+    Object.keys(localStorage).filter((k) => k.startsWith(SCREENS) || k === LAST).forEach((k) => localStorage.removeItem(k));
+    window.caches?.delete(KEPT_SCREENS).catch(() => {});
+  };
   const CLIENT = "one.client";
 
   const auth = {
@@ -179,10 +186,15 @@ window.__one = {};
     }
   }
 
-  /// Phosphor's icons, from the node once, for those the bridge asks for: on this page, and in screens' frames.
+  /// This release's files by their content (`/web.js?v=…`), as the gateway's index.html names them: kept for good.
+  const files = Object.fromEntries((document.querySelector('meta[name="one-files"]')?.content || "").split(" ").filter(Boolean).map((f) => f.split("=")));
+  const asset = (name) => (files[name] ? `/${name}?v=${files[name]}` : `/${name}`);
+
+  /// Phosphor's icons, from the address once (and then the browser's cache), for those the bridge asks for: on this
+  /// page, and in screens' frames.
   let icons;
   async function iconPaths(names = []) {
-    icons ||= api("/v1/icons").catch((err) => ((icons = null), Promise.reject(err)));
+    icons ||= fetch(asset("icons.json")).then((r) => (r.ok ? r.json() : Promise.reject(new Error("No icons.")))).catch((err) => ((icons = null), Promise.reject(err)));
     const all = await icons;
     return Object.fromEntries(names.map((n) => [n, all[n]]));
   }
@@ -190,6 +202,17 @@ window.__one = {};
 
   /// Names a call wherever it's sent, so sent again it runs once.
   const callId = () => Array.from(crypto.getRandomValues(new Uint8Array(8)), (b) => b.toString(16).padStart(2, "0")).join("");
+
+  /// The node's state or apps, asked for once a second at most: the window and its own screens (Home, Settings) ask
+  /// together as it opens, and share the answer.
+  const recent = {};
+  function shared(path) {
+    if (recent[path] && Date.now() - recent[path].at < 1000) return recent[path].answer;
+    const answer = api(path);
+    recent[path] = { at: Date.now(), answer };
+    answer.catch(() => delete recent[path]);
+    return answer;
+  }
 
   /// Runs an app's operation as this person → its result.
   async function call(app, op, input = {}) {
@@ -224,21 +247,48 @@ window.__one = {};
   const servicesOn = (p) => store.apps.filter((a) => isService(a) && scopes(a).includes(p.scope)).sort((a, b) => label(a).localeCompare(label(b)));
   const appBadge = (name, p) => Math.max(0, store.badges[p.scope]?.[name] || 0);
 
-  /// Loads what the sidebar shows: the node's state, then its apps and badges.
-  async function refreshState() {
-    const state = await api("/v1/state");
+  /// The window as it was last, drawn before the node answers: → whether there was one.
+  function lastWindow() {
+    try {
+      const kept = JSON.parse(localStorage.getItem(LAST) || "null");
+      if (!kept?.state?.install) return false;
+      Object.assign(store, kept);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  const keepWindow = () => {
+    try {
+      localStorage.setItem(LAST, JSON.stringify(store));
+    } catch {}
+  };
+
+  /// Loads what the sidebar shows: the node's state and its apps together (its apps only if `apps`, or if who's in
+  /// which group changed), drawn as soon as they're in; then the badges, drawn as they come.
+  async function refreshState({ apps = false } = {}) {
+    const [state, list] = await Promise.all([shared("/v1/state"), apps ? shared("/v1/apps").catch(() => null) : null]);
     const regrouped = JSON.stringify([state.user, state.install?.groups]) !== JSON.stringify([store.state?.user, store.state?.install?.groups]);
-    const first = !store.state;
     store.state = state;
-    if (first || regrouped || !store.apps.length) await refreshApps();
-    else render();
+    if (list) store.apps = list;
+    if (!list && (regrouped || !store.apps.length) && install()) return refreshApps();
+    render();
+    keepWindow();
+    badges();
   }
 
   async function refreshApps() {
     if (!install()) return render();
-    store.apps = await api("/v1/apps");
-    await Promise.all(pages().map(async (p) => (store.badges[p.scope] = await api("/v1/badges", { query: { scope: p.scope } }).catch(() => ({})))));
+    store.apps = await shared("/v1/apps");
     render();
+    keepWindow();
+    badges();
+  }
+
+  async function badges() {
+    await Promise.all(pages().map(async (p) => (store.badges[p.scope] = await api("/v1/badges", { query: { scope: p.scope } }).catch(() => store.badges[p.scope] || {}))));
+    render();
+    keepWindow();
   }
 
   /// The node's events: what changed, so the window and its screens keep up. EventSource can't send a token, so it's a
@@ -279,6 +329,8 @@ window.__one = {};
   addEventListener("pageshow", (e) => e.persisted && auth.kept() && (refreshState().catch(() => {}), listen()));
 
   async function handle(event) {
+    // What changed is asked for again, never shared from before.
+    for (const path in recent) delete recent[path];
     for (const f of frames) f.frame.contentWindow?.postMessage({ oneEvent: event }, "*");
     if (["devices", "install"].includes(event.type)) await refreshState();
     if (event.type === "changed") {
@@ -411,7 +463,7 @@ window.__one = {};
   function drawDetail() {
     const r = route(), key = JSON.stringify(r);
     if (phone.matches) return drawPhone($(".detail", root), r, key);
-    if (shown === key && frames.some((f) => !f.sheet && f.frame.isConnected)) return;
+    if (shown === key && frames.some((f) => !f.sheet && f.into.isConnected)) return;
     shown = key;
     screen.show($(".detail", root), r);
   }
@@ -438,7 +490,7 @@ window.__one = {};
       document.title = titleOf(r);
       return;
     }
-    if (shown === key && frames.some((f) => !f.sheet && !f.home && f.frame.isConnected)) return;
+    if (shown === key && frames.some((f) => !f.sheet && !f.home && f.into.isConnected)) return;
     shown = key;
     pushed.classList.toggle("entering", pushed.hidden);
     pushed.hidden = false;
@@ -460,24 +512,116 @@ window.__one = {};
   /// person.
   let frames = [];
 
-  /// What a route shows, as its page from the node, in a new frame. → the frame's record.
-  function frameFor(r, into, { sheet } = {}) {
+  /// What this browser keeps of the screens it showed, until it signs out: each route's page as the node last gave it
+  /// (`page`), and its still (`still`), the page as it last looked here without its scripts, which bridge.js sends.
+  const kept = {
+    url: (kind, key) => `/${kind}/${encodeURIComponent(key)}`,
+    async get(kind, key) {
+      try {
+        return (await (await (await caches.open(KEPT_SCREENS)).match(kept.url(kind, key)))?.text()) ?? null;
+      } catch {
+        return null;
+      }
+    },
+    put(kind, key, html) {
+      if (typeof html !== "string" || html.length > 2_000_000) return;
+      window.caches?.open(KEPT_SCREENS).then((c) => c.put(kept.url(kind, key), new Response(html))).catch(() => {});
+    },
+  };
+  /// Two pages the same but for their nonce.
+  const same = (a, b) => a?.replace(/nonce(-|=")[0-9a-f]{32}/g, "") === b?.replace(/nonce(-|=")[0-9a-f]{32}/g, "");
+
+  /// A route's page from the node, asked for once (the one the window opens on as it starts, beside the sidebar's),
+  /// and kept.
+  let asked = null;
+  function screenPage(r) {
+    const key = JSON.stringify(r);
+    if (asked?.key === key) {
+      const { page } = asked;
+      asked = null;
+      return page;
+    }
+    const path = r.kind === "own" ? `/v1/client-screens/${encodeURIComponent(r.name)}` : `/v1/screens/${encodeURIComponent(r.app)}/${encodeURIComponent(r.screen)}`;
+    return api(path, { query: { params: r.params || "{}", scope: r.scope }, raw: true }).then((resp) => resp.text()).then((html) => (kept.put("page", key, html), html));
+  }
+  const ask = (r) => (asked = { key: JSON.stringify(r), page: screenPage(r) }).page.catch(() => {});
+
+  /// A sandboxed frame for a page this window writes in (frame.html takes it).
+  function sandboxed(r) {
     const frame = document.createElement("iframe");
     frame.className = "screen-frame";
     frame.setAttribute("sandbox", "allow-scripts allow-forms");
     frame.setAttribute("referrerpolicy", "no-referrer");
-    frame.src = "/frame.html";
+    frame.src = asset("frame.html");
     frame.title = titleOf(r);
-    const f = { frame, route: r, sheet };
+    return frame;
+  }
+
+  /// What a route shows, in a new frame: its page as kept here if there is one, else as the node gives it now; one
+  /// that's changed since (its app deployed) starts the screen again. → the frame's record. Beside the sidebar, its
+  /// still shows until the screen has drawn and had its calls answered.
+  function frameFor(r, into, { sheet } = {}) {
+    const frame = sandboxed(r);
+    const f = { frame, route: r, sheet, into, key: JSON.stringify(r), busy: 0, quiet: 0 };
     frames.push(f);
-    const path = r.kind === "own" ? `/v1/client-screens/${encodeURIComponent(r.name)}` : `/v1/screens/${encodeURIComponent(r.app)}/${encodeURIComponent(r.screen)}`;
-    into.innerHTML = `<div class="screen-status">${one.loading()}</div>`;
-    api(path, { query: { params: r.params || "{}", scope: r.scope }, raw: true }).then((resp) => resp.text()).then((html) => {
-      f.html = look(html);
+    // A spinner only for a wait that's long enough to notice.
+    into.innerHTML = "";
+    setTimeout(() => f.loaded || f.still || !into.isConnected || $(".screen-status", into) || into.insertAdjacentHTML("afterbegin", `<div class="screen-status">${one.loading()}</div>`), 400);
+    const draw = (page) => {
+      f.page = page;
+      f.html = look(page);
+      if (!into.isConnected) return;
+      if (f.still) frame.style.visibility = "hidden";
       into.append(frame);
-      frame.addEventListener("load", () => setTimeout(() => $(".screen-status", into)?.remove(), 50), { once: true });
-    }, (err) => (into.innerHTML = message("Can’t Open This", esc(one.plain(err).title))));
+      frame.addEventListener("load", () => {
+        f.loaded = true;
+        $(".screen-status", into)?.remove();
+        // A screen that asks nothing shows in place of its still soon after it loads.
+        if (f.still) setTimeout(() => watch(f), 1500);
+      }, { once: true });
+    };
+    const fresh = screenPage(r);
+    Promise.all([kept.get("page", f.key), sheet ? null : kept.get("still", f.key)]).then(([page, still]) => {
+      if (f.html) return;
+      if (still) showStill(f, still);
+      if (page) draw(page);
+    });
+    fresh.then((page) => {
+      if (!f.html) return draw(page);
+      if (same(page, f.page)) return;
+      f.page = page;
+      f.html = look(page);
+      frame.src = asset("frame.html");
+    }, (err) => f.html || ((f.loaded = true), (into.innerHTML = message("Can’t Open This", esc(one.plain(err).title)))));
     return f;
+  }
+
+  // MARK: Stills
+
+  /// A screen's still, in a frame of its own as sandboxed as the screen's, answering nothing but its frame's ask for it.
+  function showStill(f, html) {
+    if (!f.into.isConnected) return;
+    const frame = sandboxed(f.route);
+    frame.classList.add("screen-still");
+    frame.setAttribute("aria-hidden", "true");
+    const scrolled = `<script>addEventListener("load", () => scrollTo(0, Number(document.documentElement.dataset.stillY) || 0))</script>`;
+    f.still = { frame, html: look(html.replace("</head>", `${scrolled}</head>`)) };
+    $(".screen-status", f.into)?.remove();
+    f.into.prepend(frame);
+  }
+
+  /// The screen showing in place of its still, once it's had its calls answered (and nothing more asked for a moment),
+  /// or after a few seconds whatever it's waiting on.
+  function watch(f, until = Date.now() + 4000) {
+    if (!f.still || f.watched) return;
+    f.watched = true;
+    const check = () => {
+      if ((f.busy || Date.now() - f.quiet < 50) && Date.now() < until) return void setTimeout(check, 20);
+      f.frame.style.visibility = "";
+      f.still.frame.remove();
+      f.still = null;
+    };
+    check();
   }
 
   function titleOf(r) {
@@ -562,15 +706,22 @@ window.__one = {};
   /// The bridge's messages (src/screen/bridge.js), from the screens' frames only, each acting as its screen's app; and
   /// the client's own screens', as the person, which no app's may.
   addEventListener("message", async (e) => {
+    const still = frames.find((x) => x.still?.frame.contentWindow === e.source)?.still;
+    if (still && e.data?.oneFrame) return void still.frame.contentWindow.postMessage({ oneScreen: still.html }, "*");
     const f = frames.find((x) => x.frame.contentWindow === e.source);
     if (!f) return;
     const r = f.route, mine = r.kind === "own";
     if (e.data?.oneFrame) return void f.frame.contentWindow.postMessage({ oneScreen: f.html }, "*");
     if (typeof e.data?.oneSheets === "number") return void shade(f, e.data.oneSheets > 0);
+    if (e.data?.oneStill !== undefined) return void (f.sheet || kept.put("still", f.key, e.data.oneStill));
     const { one: m, id } = e.data || {};
     if (!m || typeof m !== "object") return;
-    const reply = (ok) => f.frame.contentWindow?.postMessage({ oneReply: id, ok: ok ?? null }, "*");
-    const fail = (err) => f.frame.contentWindow?.postMessage({ oneReply: id, error: String(err?.message || err) }, "*");
+    // What it's waiting on: its still shows until it's been answered.
+    f.busy++;
+    watch(f);
+    const answered = () => ((f.busy = Math.max(0, f.busy - 1)), (f.quiet = Date.now()));
+    const reply = (ok) => (answered(), f.frame.contentWindow?.postMessage({ oneReply: id, ok: ok ?? null }, "*"));
+    const fail = (err) => (answered(), f.frame.contentWindow?.postMessage({ oneReply: id, error: String(err?.message || err) }, "*"));
     try {
       if (["api", "signOut", "appearance", "device", "request", "cache"].includes(m.type) && !mine) return fail("Only Settings can do that.");
       switch (m.type) {
@@ -762,6 +913,7 @@ window.__one = {};
     const method = String(m.method || "GET").toUpperCase();
     const body = method === "GET" ? undefined : m.body ?? {};
     if (url.pathname === "/v1/call" && body && typeof body === "object") body.client = "web";
+    if (method === "GET" && !url.search && ["/v1/state", "/v1/apps"].includes(url.pathname)) return shared(url.pathname);
     return api(url.pathname + url.search, { method, body });
   }
 
@@ -832,26 +984,31 @@ window.__one = {};
       }
     }
     if (!auth.kept()) return showSignedOut();
-    root.innerHTML = `<div class="starting">${one.loading("Starting")}</div>`;
+    navigator.serviceWorker?.register("/sw.js").catch(() => {});
+    // `/vault?id=…&scope=…`: an agent's link to a request for an item, answered over You.
+    let request = null;
+    if (location.pathname === "/vault") {
+      const q = new URLSearchParams(location.search);
+      request = { scope: q.get("scope"), id: q.get("id") };
+      history.replaceState(null, "", "/");
+    }
+    // Everything the window opens on, asked for at once: its screen, beside the node's state and apps; meanwhile the
+    // window as it was last.
+    ask(route());
+    if (lastWindow()) render();
+    else root.innerHTML = `<div class="starting">${one.loading("Starting")}</div>`;
     for (let misses = 1; ; misses++) {
       try {
-        await refreshState();
+        await refreshState({ apps: true });
         break;
       } catch (err) {
         if (err.signedOut) return showSignedOut();
-        showUnreachable(err instanceof NodeError ? err.message : "Your devices aren’t answering.");
+        // What it showed last stays, as a screen whose node is restarting does.
+        if (!$(".window", root)) showUnreachable(err instanceof NodeError ? err.message : "Your devices aren’t answering.");
         await sleep(retryWait(misses));
       }
     }
-    // `/vault?id=…&scope=…`: an agent's link to a request for an item, answered over You.
-    let ask = null;
-    if (location.pathname === "/vault") {
-      const q = new URLSearchParams(location.search);
-      ask = { kind: "vault", scope: q.get("scope"), id: q.get("id") };
-      history.replaceState(null, "", "/");
-    }
-    render();
-    if (ask?.id && ask.scope) openSheet(own("request", { scope: ask.scope, id: ask.id }));
+    if (request?.id && request.scope) openSheet(own("request", { scope: request.scope, id: request.id }));
     listen();
   }
 

@@ -449,9 +449,26 @@ impl Settings {
             crate::config::KERNEL.iter().filter_map(|(path, bytes)| Some((path.strip_prefix("web/")?.to_string(), bytes.to_vec()))).collect();
         // The page says whose it is before anyone signs in: the white label's name.
         let attr = |v: &str| v.replace('&', "&amp;").replace('"', "&quot;").replace('<', "&lt;");
+        files.push(("icons.json".into(), include_bytes!("../../vendor/phosphor/icons.json").to_vec()));
+        // Each file the page loads is named by its content (`?v=`, which the gateway checks), so a browser keeps it for
+        // good and asks again only once it changes: those it names itself, and those web.js asks for (`one-files`).
+        let named = |path: &str, bytes: &[u8]| {
+            use sha2::Digest;
+            format!("/{path}?v={}", &data_encoding::HEXLOWER.encode(&sha2::Sha256::digest(bytes))[..16])
+        };
+        let names: Vec<(String, String)> = files.iter().filter(|(path, _)| path != "index.html" && path != "sw.js").map(|(path, bytes)| (path.clone(), named(path, bytes))).collect();
         if let Some((_, page)) = files.iter_mut().find(|(path, _)| path == "index.html") {
-            let label = format!("<title>{}</title>\n<meta name=\"application-name\" content=\"{}\">", attr(crate::config::NAME), attr(crate::config::NAME));
-            *page = String::from_utf8_lossy(page).replacen("<title></title>", &label, 1).into_bytes();
+            let mut text = String::from_utf8_lossy(page).into_owned();
+            for (path, name) in &names {
+                text = text.replace(&format!("=\"/{path}\""), &format!("=\"{name}\""));
+            }
+            let asked = names.iter().filter(|(path, _)| ["frame.html", "icons.json"].contains(&path.as_str())).map(|(path, name)| format!("{path}={}", &name[name.len() - 16..])).collect::<Vec<_>>().join(" ");
+            let label = format!(
+                "<title>{}</title>\n<meta name=\"application-name\" content=\"{}\">\n<meta name=\"one-files\" content=\"{asked}\">",
+                attr(crate::config::NAME),
+                attr(crate::config::NAME)
+            );
+            *page = text.replacen("<title></title>", &label, 1).into_bytes();
         }
         if !self.android.is_empty() {
             let links = json!([{

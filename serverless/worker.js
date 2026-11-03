@@ -13,13 +13,12 @@
 //
 // Bindings: AUTH and VAULT (the kernel's services), LOADER (Worker Loader), MACHINE (a node on a machine: a Workers
 // VPC service; or MACHINE_URL, its address), ADDRESS (the install's) and NAME (its name). `built.js`, made when it's
-// deployed, is the shim; `icons.json` is the icons every device draws.
+// deployed, is the shim.
 
 import { RpcTarget } from "cloudflare:workers";
 import { initSync, verify, open, query, write, close, statements, screen, client_screen, config, prefix, following as after, read_log, groups, scopes_of, install, bundle } from "./one_serverless.js";
 import wasm from "./one_serverless_bg.wasm";
 import { shim, compatibilityDate } from "./built.js";
-import icons from "./icons.json";
 
 initSync({ module: wasm });
 const CONFIG = JSON.parse(config());
@@ -588,7 +587,6 @@ function quietEvents() {
 async function route(request, env, ctx) {
   const url = new URL(request.url);
   const path = url.pathname;
-  if (request.method === "GET" && path === "/v1/icons") return new Response(icons, { headers: { "content-type": "application/json", "cache-control": "max-age=86400" } });
   if (request.method === "POST" && path === "/v1/call") {
     const req = await request.clone().json().catch(() => refuse(400, "the body isn't JSON"));
     if (req.sidecar || req.device) return (await fromMachine(request, env, 120_000)) || refuse(503, needsDevice(null, req.app));

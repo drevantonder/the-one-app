@@ -72,6 +72,16 @@ async function toWeb(request, env, url) {
   headers.set("x-frame-options", "SAMEORIGIN");
   const type = TYPES[path.split(".").pop().toLowerCase()];
   if (resp.ok && type) headers.set("content-type", type);
+  // A file named by its content (`?v=`, the start of its SHA-256, as index.html names it) is kept for good, by the
+  // browser and Cloudflare's edge, once it's checked to be that content; anything else is asked about each time.
+  const v = url.searchParams.get("v");
+  if (v && resp.ok && request.method === "GET") {
+    const body = await resp.arrayBuffer();
+    const named = (await sha256(body)).startsWith(v) && v.length >= 12;
+    headers.set("cache-control", named ? "public, max-age=31536000, immutable" : "no-cache");
+    return new Response(body, { status: resp.status, headers });
+  }
+  headers.set("cache-control", "no-cache");
   return new Response(resp.body, { status: resp.status, headers });
 }
 
@@ -92,7 +102,7 @@ const PROVE_WITHIN = 30_000;
 const UNPROVEN_PER_ADDRESS = 8;
 
 const hex = (bytes) => [...new Uint8Array(bytes)].map((b) => b.toString(16).padStart(2, "0")).join("");
-const sha256 = async (text) => hex(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text)));
+const sha256 = async (data) => hex(await crypto.subtle.digest("SHA-256", typeof data === "string" ? new TextEncoder().encode(data) : data));
 
 export class Relay {
   constructor(ctx, env) {
