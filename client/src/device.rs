@@ -5,7 +5,8 @@
 //! kernel/web/device.js is the same in a browser.
 //!
 //! It trusts no node, nor the relay, for who's who: it reads `global`'s entries from the bucket itself, opens them with
-//! the epochs sealed to it, and replays them by the node's own rules (`one::members`). It asks only endpoints those list
+//! the epochs sealed to it, and replays them by the node's own rules (`crate::members`, as browsers and the MCP
+//! Worker's devices do). It asks only endpoints those list
 //! as compute that run its person's things, seals what it hands each to the seal key they list for it, takes a 428 only
 //! from the node that answered, naming that key, and hands only what that 428 named, for that kind of request.
 
@@ -213,19 +214,18 @@ impl Device {
             log_keys.insert(*n, one::kernel::database_key(&app, one::log::NAME));
         }
         let read = one::log::open(&bucket, &log_keys, &one::log::prefix("global"), "global").await.map_err(failed)?;
-        let genesis = read.entries.iter().find(|e| e.content.app == members::APP && e.content.kind == "genesis").map(Entry::hash).ok_or_else(|| failed("Your One App's beginning isn't there."))?;
+        // Replayed as every client device replays them (crate::members), of the install whose genesis it kept.
         let pinned = self.dir.join("genesis");
-        match std::fs::read_to_string(&pinned) {
-            Ok(had) if had.trim() != genesis.to_hex() => return Err(failed("This isn't the One App this device joined.")),
-            Ok(_) => {}
-            Err(_) => {
-                let _ = std::fs::create_dir_all(&self.dir);
-                let _ = std::fs::write(&pinned, genesis.to_hex());
-            }
+        let kept = std::fs::read_to_string(&pinned).ok().and_then(|had| Hash::from_hex(had.trim()).ok());
+        let mut global = crate::members::Global::new(kept);
+        global.add_entries(read.entries).map_err(|_| failed("This isn't the One App this device joined."))?;
+        let m = global.members().map_err(failed)?;
+        if kept.is_none()
+            && let Some(root) = global.root()
+        {
+            let _ = std::fs::create_dir_all(&self.dir);
+            let _ = std::fs::write(&pinned, root.to_hex());
         }
-        let member_entries: Vec<Entry> = read.entries.iter().filter(|e| members::is_member_entry(e)).cloned().collect();
-        let known = Members::replay(Some(genesis), &member_entries, &Default::default());
-        let (m, _) = members::replay(&known, &member_entries, &read.entries, |_, _, _| {});
         // Every epoch it was sealed must be the one the entries made.
         for (n, key) in &epochs {
             if m.epoch_hashes.get(&(Scope::Global, *n)) != Some(&keys::epoch_hash(key)) {
