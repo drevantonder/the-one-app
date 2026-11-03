@@ -109,6 +109,7 @@ const PAGE = `
   }
 
   function draw() {
+    if (none) return;
     if (!devices.length) {
       grid.innerHTML = \`<div class="empty" style="grid-column:1/-1">None yet. Agents make one when they need a browser.</div>\`;
       return;
@@ -152,6 +153,7 @@ const PAGE = `
     }
   }
 
+  let none = false; // none of their devices runs it
   let listed = ""; // the list's hash: it's sent only when it changed
   async function refresh() {
     try {
@@ -163,7 +165,8 @@ const PAGE = `
       }
     } catch (e) {
       listed = "";
-      grid.innerHTML = \`<div class="empty error" style="grid-column:1/-1">\${one.esc(one.plain(e).title)}</div>\`;
+      // Tried again every few seconds, so no button; with none of their devices running it, that says so instead.
+      if (!none) grid.innerHTML = \`<div style="grid-column:1/-1">\${one.problem({ title: one.plain(e).title, text: one.plain(e).next })}</div>\`;
       return;
     }
     pictures();
@@ -179,8 +182,9 @@ const PAGE = `
   setInterval(tick, 5000);
   document.addEventListener("visibilitychange", tick);
   addEventListener("scroll", pictures, { passive: true });
-  one.call("_running").then(({ devices, needs }) => {
-    if (!devices.length) grid.innerHTML = \`<div class="empty" style="grid-column:1/-1">\${one.esc(needs)}</div>\`;
+  one.call("_running").then(({ devices }) => {
+    if (!devices.length && (none = true)) grid.innerHTML = \`<div style="grid-column:1/-1">\${one.problem({ title: "None of your devices runs Agent Devices.", text: "It needs a Mac, or a Linux device with Podman.", warn: true,
+      action: { label: "Open App Store", run: () => one.open("app", { app: "agent-devices" }, "apps") } })}</div>\`;
   });
 </script>`;
 
@@ -505,7 +509,7 @@ export default {
       reads: true,
       description: "Which of your devices it runs on, for the page to say when none does.",
       input: { type: "object", properties: {} },
-      run: async (ctx) => ({ devices: await running(ctx), needs: NEEDS }),
+      run: async (ctx) => ({ devices: await running(ctx) }),
     },
   },
 

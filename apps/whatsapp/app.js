@@ -176,7 +176,7 @@ export default {
       reads: true,
       description: "Which of your devices it runs on, for the screens to say when none does.",
       input: { type: "object", properties: {} },
-      run: async (ctx) => ({ devices: await running(ctx), needs: NEEDS }),
+      run: async (ctx) => ({ devices: await running(ctx) }),
     },
   },
 
@@ -199,7 +199,7 @@ export default {
 <div id="list"></div>
 <div id="ask"></div>
 <div class="card" id="connect" hidden><input id="phone" type="tel" placeholder="Its number, for a code to type instead (optional)"><button class="primary" id="start">Add account</button><div id="err" class="error small"></div></div>
-<div class="card" id="needs" hidden></div>
+<div id="needs" hidden></div>
 <script>
 // Each account is a phone linked to one of your devices, as WhatsApp Desktop is linked.
 const list = document.getElementById("list"), connect = document.getElementById("connect"), form = connect.innerHTML;
@@ -275,8 +275,10 @@ one.on("changed", () => draw(true));
 // The accounts and whether any device runs WhatsApp come together, so the form shows once, or not at all.
 Promise.all([one.call("_running").catch(() => null), draw(true)]).then(([r]) => {
   if (r && !r.devices.length) {
+    // None of their devices has it: what to do, on the App Store's WhatsApp page, which says where it can go.
     const n = document.getElementById("needs");
-    n.textContent = one.plain(r.needs).title;
+    n.innerHTML = one.problem({ title: "WhatsApp isn't on any of your devices yet.", text: "Add it to one in the App Store, then link your phone here.", warn: true,
+      action: { label: "Open App Store", run: () => one.open("app", { app: "whatsapp" }, "apps") } });
     n.hidden = false;
     return;
   }

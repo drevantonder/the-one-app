@@ -135,7 +135,7 @@ export default {
       reads: true,
       description: "Which of your devices it runs on, for the screens to say when none does.",
       input: { type: "object", properties: {} },
-      run: async (ctx) => ({ devices: await running(ctx), needs: NEEDS }),
+      run: async (ctx) => ({ devices: await running(ctx) }),
     },
   },
 
@@ -155,7 +155,7 @@ export default {
 </style>
 <div id="list"></div>
 <div class="card" id="connect"><button class="primary" id="start">Add account</button><div id="err" class="error small"></div></div>
-<div class="card" id="needs" hidden></div>
+<div id="needs" hidden></div>
 <script>
 // Messenger's accounts are browser profiles (Vault items of type Browser profile): adding one picks a profile, or makes one, and opens
 // messenger.com in it to sign in.
@@ -245,12 +245,15 @@ document.getElementById("start").onclick = pick;
 one.on("changed", () => draw(true));
 const loaded = draw(true);
 if (one.params.add) document.getElementById("start").click();
-one.call("_running").then(({ devices, needs }) => {
+// With nowhere to sign in, Add account goes: what's missing shows instead, with the way to add it.
+one.call("_running").then(({ devices }) => {
   if (devices.length) return;
+  connect.hidden = true;
   const n = document.getElementById("needs");
-  n.textContent = one.plain(needs).title;
+  n.innerHTML = one.problem({ title: "Messenger needs Agent Devices.", text: "Add Agent Devices to one of your devices in the App Store, then sign in here.", warn: true,
+    action: { label: "Open App Store", run: () => one.open("app", { app: "agent-devices" }, "apps") } });
   n.hidden = false;
-});
+}, () => {});
 </script>`,
     },
   },
