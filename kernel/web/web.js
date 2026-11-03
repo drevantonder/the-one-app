@@ -332,8 +332,8 @@ window.__one = {};
     const sections = pages().map((p) => `<section>${head(own("pages", { scope: p.scope }), p.title)}` +
       appsOn(p).filter((a) => !settingsItems().some((i) => i.app === a.name)).map((a) => row({ kind: "screen", app: a.name, screen: "main", params: "{}", scope: p.scope }, one.appIcon(a, 20), label(a), appBadge(a.name, p))).join("") +
       row(own("services", { scope: p.scope }), folder(servicesOn(p), 20), "Services") + `</section>`).join("");
-    // One with a url (Passkeys) opens it in a new tab.
-    const items = settingsItems().map((item) => item.url
+    // One with another site's url opens it in a new tab; one here (Passkeys) shows beside the sidebar.
+    const items = settingsItems().map((item) => item.url && !here(item.url)
       ? `<a class="nav-row" href="${esc(item.url)}" target="_blank" rel="noopener">${settingIcon(item, 20)}<span class="nav-label">${esc(item.title)}</span></a>` : row(item.app ? { kind: "screen", app: item.app, screen: "main", params: "{}" } : { kind: "own", name: item.name, params: "{}" }, settingIcon(item, 20), item.title, item.badge)).join("");
     $(".sidebar", root).innerHTML = `<div class="nav-pages">${sections}<section>${head(own("pages", { scope: "settings" }), "Settings")}${items}</section></div>`;
   }
@@ -409,6 +409,9 @@ window.__one = {};
       document.title = title;
       // A page shows its own large title.
       detail.innerHTML = bar(r.kind === "own" && r.name === "pages" ? "" : title) + `<div class="screen"></div>`;
+      // A Settings item that's a page of this site (Passkeys) is that page, framed: it's the kernel's, not a node's.
+      const item = r.kind === "own" && settingsItems().find((i) => i.name === r.name && i.url && here(i.url));
+      if (item) return void ($(".screen", detail).innerHTML = `<iframe class="screen-frame" src="${esc(item.url)}" title="${esc(title)}" allow="publickey-credentials-get; publickey-credentials-create"></iframe>`);
       frameFor(r, $(".screen", detail));
     },
   };
@@ -515,6 +518,8 @@ window.__one = {};
           return reply(null);
         case "link": {
           const url = new URL(String(m.url), location.href);
+          const item = settingAt(url.href);
+          if (item) { go(own(item.name)); return reply(null); }
           if (["http:", "https:", "mailto:", "tel:"].includes(url.protocol)) window.open(url.href, "_blank", "noopener,noreferrer");
           return reply(null);
         }
@@ -620,6 +625,10 @@ window.__one = {};
 
   /// What Settings shows this person, in order, as the node says (`settings_items`).
   const settingsItems = () => store.state?.settings_items || [];
+  /// Whether a url is this site's: a page the kernel serves, shown in place rather than in a new tab.
+  const here = (url) => new URL(url, location.href).origin === location.origin;
+  /// The Settings item whose url is `url` on this site, if one is.
+  const settingAt = (url) => settingsItems().find((i) => i.url && here(i.url) && new URL(i.url, location.href).pathname === new URL(url, location.href).pathname);
   const settingTitle = (name) => settingsItems().find((i) => i.name === name)?.title || "Settings";
 
   /// An item's icon: its symbol on its colour, as an app's tile.

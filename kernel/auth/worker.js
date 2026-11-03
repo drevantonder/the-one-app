@@ -264,7 +264,7 @@ export class Auth extends DurableObject {
       if (path === "/invite/about" && request.method === "POST") return json(await this.inviteAbout(await request.json()));
       if (tried) return new Response("not found", { status: 404 });
       if (path === "/invite/keys" && request.method === "POST") return json(await this.inviteKeys(request, await request.json()));
-      if (path === "/passkeys" && request.method === "GET") return html(passkeysPage(look));
+      if (path === "/passkeys" && request.method === "GET") return html(passkeysPage(look), { framed: true });
       if (path === "/passkeys/add" && request.method === "POST") return json(await this.addPasskey(request, await request.json()));
       return new Response("not found", { status: 404 });
     } catch (err) {
@@ -577,8 +577,9 @@ function fresh(session) {
   return Date.now() - new Date(session.session.createdAt).getTime() < FRESH;
 }
 
-function html(text) {
-  return new Response(text, { headers: { "content-type": "text/html; charset=utf-8", "content-security-policy": "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; frame-ancestors 'none'" } });
+/// A page, framed by nothing, or with `framed`, only by this site's own (the web client shows Passkeys beside its sidebar).
+function html(text, { framed = false } = {}) {
+  return new Response(text, { headers: { "content-type": "text/html; charset=utf-8", "content-security-policy": `default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; frame-ancestors ${framed ? "'self'" : "'none'"}` } });
 }
 
 export default {

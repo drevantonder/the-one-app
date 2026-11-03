@@ -23,6 +23,8 @@ const style = `${kit}
   .list .button { width: auto; font-size: 15px; padding: 6px 12px; margin: 0; background: var(--bg); }
   .error { color: var(--danger); min-height: 1.4em; margin: 8px 0 0; }
   [hidden] { display: none !important; }
+  .framed body { min-height: 0; place-items: start center; padding-top: 24px; }
+  .framed .mark, .framed h1 { display: none; }
 `;
 
 /// What a passkey without PRF is told, here and by the auth service.
@@ -258,11 +260,13 @@ export function passkeysPage(look) {
     <button class="button primary" id="signin" hidden>Sign In with a Passkey</button>
     <section id="mine" hidden>
       <div class="list" id="list"></div>
-      <p class="callout" id="suggest" hidden>Add a second passkey, on another device or a security key. If you lose every passkey, only the install's recovery key gets you back in, with the help of whoever holds it.</p>
+      <p class="callout" id="suggest" hidden>Add a second passkey on another device or a security key. Lose them all, and only whoever holds the recovery key can get you back in.</p>
       <button class="button primary" id="add">Add a Passkey</button>
       <p class="note">${escape(WORKS)} Adding one asks first for a passkey you have, then makes the new one.</p>
     </section>`;
   const script = `
+    // In the web client, beside its sidebar, whose bar already says Passkeys.
+    if (window.top !== window) document.documentElement.classList.add("framed");
     const esc = (t) => String(t).replace(/[&<>"']/g, (c) => "&#" + c.charCodeAt(0) + ";");
     const when = (d) => new Date(d).toLocaleDateString(undefined, { day: "numeric", month: "long", year: "numeric" });
     async function show() {
