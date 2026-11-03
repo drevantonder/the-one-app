@@ -194,13 +194,14 @@ func (ds *devices) listHere(ctx context.Context) ([]listed, error) {
 	return append(out, ds.listVMs(ctx, me, lent)...), nil
 }
 
-// listAll is the agent devices on every device, this one's first.
-func (ds *devices) listAll(ctx context.Context) (map[string]any, error) {
+// listAll is the agent devices on every device, this one's first: with keep,
+// as each of them last knew it.
+func (ds *devices) listAll(ctx context.Context, keep bool) (map[string]any, error) {
 	all, err := ds.listHere(ctx)
 	if err != nil {
 		return nil, err
 	}
-	got, failed := ds.everywhere(ctx, "list", nil)
+	got, failed := ds.everywhere(ctx, "list", map[string]any{"kept": keep})
 	for _, s := range slices.Sorted(maps.Keys(got)) {
 		var r struct{ Devices []listed }
 		if err := json.Unmarshal(got[s], &r); err != nil {

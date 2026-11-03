@@ -763,17 +763,11 @@ func (ds *devices) runKinds(ctx context.Context, op, name string, here bool, in 
 		}
 		return fmt.Sprintf("%s\nThe link works for %d minutes, on the person's own devices.", url, m), true, nil
 	case "screen":
-		if !k.running(ctx, v) {
-			return nil, true, fmt.Errorf("%s is stopped: start it first", v.Name)
-		}
-		if err := ds.awake(ctx, v); err != nil {
-			return nil, true, err
-		}
 		width := 640
 		if w, ok := in["width"].(float64); ok {
 			width = min(max(int(w), 160), 1920)
 		}
-		r, err := ds.screenVM(ctx, v, width)
+		r, err := ds.screenNow(ctx, v.Name, width)
 		return r, true, err
 	case "tools":
 		return vmTools(k), true, nil

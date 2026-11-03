@@ -7,9 +7,9 @@
 
 /// Runs one of the agent-devices sidecar's operations, wherever it runs for the caller. When none of their devices
 /// runs it, says what's needed instead of how the call failed.
-async function sidecar(ctx, op, input) {
+async function sidecar(ctx, op, input, on) {
   try {
-    return await ctx.sidecars["agent-devices"][op](input);
+    return await ctx.sidecars["agent-devices"][op](input, on ? { device: on } : undefined);
   } catch (err) {
     if (String(err.message).includes("no device runs agent-devices for you")) throw new Error(NEEDS);
     throw err;
@@ -117,16 +117,31 @@ const PAGE = `
     if (c) one.open("device", at(c));
   });
 
-  // A picture of each running device with a screen.
-  async function pictures() {
-    await Promise.all(devices.filter((c) => !paused(c) && !screenless(c)).map(async (c) => {
+  // A picture of each running device with a screen that's in view, each drawn as it comes, and asked for again every
+  // 20s: the sidecar keeps the last one and takes the next in the background, and sends it only when it changed.
+  const hashes = {}, asked = {}, retried = {};
+  const seen = (k) => {
+    const el = [...grid.children].find((t) => t.dataset.k === k);
+    if (!el) return false;
+    const r = el.getBoundingClientRect();
+    return r.bottom > 0 && r.top < innerHeight;
+  };
+  function pictures() {
+    for (const c of devices) {
       const k = key(c);
-      try {
-        const r = await one.call("_screen", { ...at(c), width: phone(c) ? 240 : 480 });
+      if (paused(c) || screenless(c) || Date.now() - (asked[k] || 0) < 20000 || !seen(k)) continue;
+      asked[k] = Date.now();
+      one.call("_screen", { ...at(c), width: phone(c) ? 160 : 480, have: hashes[k] || "" }).then((r) => {
+        // One kept from a while ago: the next, taken now, is asked for soon.
+        if (r.age > 20 && !retried[k]) [retried[k], asked[k]] = [true, Date.now() - 16000];
+        if (r.same) return;
         const img = (r.content || []).find((x) => x.type === "image");
-        if (img) pics[k] = \`data:\${img.mimeType};base64,\${img.data}\`;
-      } catch {}
-    }));
+        if (!img) return;
+        pics[k] = \`data:\${img.mimeType};base64,\${img.data}\`;
+        hashes[k] = r.hash;
+        draw();
+      }).catch(() => {});
+    }
   }
 
   async function refresh() {
@@ -137,8 +152,7 @@ const PAGE = `
       return;
     }
     draw();
-    await pictures();
-    draw();
+    pictures();
   }
 
   let busy = false;
@@ -150,6 +164,7 @@ const PAGE = `
   tick();
   setInterval(tick, 5000);
   document.addEventListener("visibilitychange", tick);
+  addEventListener("scroll", pictures, { passive: true });
   one.call("_running").then(({ devices, needs }) => {
     if (!devices.length) grid.innerHTML = \`<div class="empty" style="grid-column:1/-1">\${one.esc(needs)}</div>\`;
   });
@@ -431,13 +446,14 @@ export default {
       reads: true,
       description: "The agent devices on all of your devices: the device each is on and its kind, whether it's running, paused or stopped, its size, the memory and CPU it uses now, who has borrowed it and what for, and of, for a throwaway copy, the lasting device it's a copy of.",
       input: { type: "object", properties: { here: { type: "boolean", description: "only the ones on this device" } } },
-      run: (ctx, input) => sidecar(ctx, "list", input),
+      // The page's: as the sidecars last knew it, asked again in the background, since it asks every few seconds.
+      run: (ctx, input) => sidecar(ctx, "list", { ...input, kept: true }),
     },
     _screen: {
       reads: true,
-      description: "For the page: a small picture of a device.",
+      description: "For the page: a small picture of a device, the one the device it's on last took, or none if it's the one the page has (have, its hash).",
       input: { type: "object", additionalProperties: true },
-      run: (ctx, input) => sidecar(ctx, "screen", input),
+      run: (ctx, input) => sidecar(ctx, "screen", { ...input, kept: true }, input.on),
     },
     _view: {
       reads: true,

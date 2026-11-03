@@ -40,10 +40,13 @@ type devices struct {
 	kick   chan struct{}        // tend the pool now
 
 	backupMu sync.Mutex
+
+	keptHere, keptAll kept // the list, for the page
+	pics              pictures
 }
 
 func newDevices(dir, node string) *devices {
-	ds := &devices{dir: dir, node: node, cache: filepath.Join(dir, "tools.json"), conns: map[string]*conn{}, held: map[string]*profile{}, used: map[string]time.Time{}, kick: make(chan struct{}, 1)}
+	ds := &devices{dir: dir, node: node, cache: filepath.Join(dir, "tools.json"), conns: map[string]*conn{}, keptHere: kept{fresh: 2 * time.Second, stale: 24 * time.Hour}, keptAll: kept{fresh: 2 * time.Second, stale: 24 * time.Hour}, held: map[string]*profile{}, used: map[string]time.Time{}, kick: make(chan struct{}, 1)}
 	if b, err := os.ReadFile(ds.cache); err == nil {
 		json.Unmarshal(b, &ds.tools)
 	}
@@ -296,6 +299,28 @@ func (ds *devices) run(ctx context.Context, op string, raw json.RawMessage) (any
 			}
 		}
 	}
+	// What the page asks for, kept: it asks again soon, and has a fresh one then.
+	keep, _ := in["kept"].(bool)
+	delete(in, "kept")
+	if slices.Contains(changes, op) {
+		ds.keptHere.forget()
+		ds.keptAll.forget()
+		if name != "" {
+			ds.forgetPictures(name)
+		}
+	}
+	if op == "list" && keep {
+		return ds.listKept(here)
+	}
+	if op == "screen" && keep && name != "" {
+		have, _ := in["have"].(string)
+		delete(in, "have")
+		width := 640
+		if w, ok := in["width"].(float64); ok {
+			width = min(max(int(w), 160), 1920)
+		}
+		return ds.screenKept(name, width, have, func(ctx context.Context) (any, error) { return ds.screenNow(ctx, name, width) })
+	}
 	if r, done, err := ds.runKinds(ctx, op, name, here, in); done {
 		return r, err
 	}
@@ -305,7 +330,7 @@ func (ds *devices) run(ctx context.Context, op string, raw json.RawMessage) (any
 			all, err := ds.listHere(ctx)
 			return map[string]any{"devices": all}, err
 		}
-		return ds.listAll(ctx)
+		return ds.listAll(ctx, false)
 	case "create":
 		sz, err := sizeNamed(text("size"))
 		if err != nil {
@@ -392,15 +417,11 @@ func (ds *devices) run(ctx context.Context, op string, raw json.RawMessage) (any
 		}
 		return fmt.Sprintf("%s\nThe link works for %d minutes, on the person's own devices.", url, minutes), nil
 	case "screen":
-		d, err := ds.running(ctx, name)
-		if err != nil {
-			return nil, err
-		}
 		width := 640
 		if w, ok := in["width"].(float64); ok {
 			width = min(max(int(w), 160), 1920)
 		}
-		return ds.screen(ctx, d, width)
+		return ds.screenNow(ctx, name, width)
 	case "tools":
 		return ds.list(ctx, name, in["name"])
 	case "refresh_tools":
@@ -669,6 +690,24 @@ func gist(s string) string {
 		s = s[:i+1]
 	}
 	return s
+}
+
+// screenNow is a picture of the device named, of any kind, taken now.
+func (ds *devices) screenNow(ctx context.Context, name string, width int) (any, error) {
+	if v := ds.vmNamed(name); v != nil {
+		if !v.kind().running(ctx, v) {
+			return nil, fmt.Errorf("%s is stopped: start it first", v.Name)
+		}
+		if err := ds.awake(ctx, v); err != nil {
+			return nil, err
+		}
+		return ds.screenVM(ctx, v, width)
+	}
+	d, err := ds.running(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	return ds.screen(ctx, d, width)
 }
 
 // screen is a small JPEG of the device.
