@@ -224,13 +224,11 @@ impl Node {
         (keys, session.until)
     }
 
-    /// The keys a token's calls were handed here, sealed to another device (`to`, its seal key) for a call this one
-    /// passes on to it, until the token expires.
-    pub(super) fn hand_on(&self, token: &str, to: &[u8; 32]) -> Option<String> {
-        let kept = self.0.sessions.kept.lock().unwrap();
-        let session = kept.get(&hash(token)).filter(|s| s.live(now_ms()))?;
-        let keys = session.keys.iter().flat_map(|((scope, app, database), by)| by.iter().map(move |(epoch, key)| crate::keys::Handed { scope: scope.clone(), epoch: *epoch, app: app.clone(), database: database.clone(), key: *key })).collect();
-        crate::keys::seal_handoff(to, &crate::keys::Handoff { for_: crate::keys::token_id(token), until: session.until, keys }).ok()
+    /// The keys of `scopes` a sign-in's calls were handed here, sealed to another device (`to`, its seal key) for a
+    /// call this one passes on to it, until they're kept here.
+    pub(super) fn hand_on(&self, token: &str, to: &[u8; 32], scopes: &[Scope]) -> Option<String> {
+        let (keys, until) = self.passing_on(token, scopes);
+        (until > 0).then(|| crate::keys::seal_handoff(to, &crate::keys::Handoff { for_: crate::keys::token_id(token), until, keys }).ok()).flatten()
     }
 
     /// The keys a token caller was handed for a database, by epoch.

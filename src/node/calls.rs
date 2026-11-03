@@ -159,10 +159,11 @@ impl Node {
             request["me"]["key"] = json!(hex(&self.0.id));
             request["me"]["agent"] = json!(me.agent);
         }
+        // A sign-in's keys go on only of the scopes the call reaches that the device runs.
         if let Some(token) = token
             && !service
             && let Some(seal) = self.with(|i| Ok(i.r.members.seal_key(&device)))?
-            && let Some(keys) = self.hand_on(token, &seal)
+            && let Some(keys) = self.with(|i| Ok(call_scopes(i, &self.resolve(req.clone()), &me.user)?.into_iter().filter(|s| i.r.members.runs_for(&device, s)).collect::<Vec<_>>())).map(|scopes| self.hand_on(token, &seal, &scopes))?
         {
             request["keys"] = json!(keys);
         }
