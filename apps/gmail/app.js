@@ -162,7 +162,7 @@ async function finishSignIn(ctx, given) {
     fields: { email: { value: email }, refresh_token: { value: tok.refresh_token, secret: true }, scopes: { value: tok.scope || SCOPES }, client_id: { value: client.fields.client_id.value } },
   });
   tokens.set(`${ctx.user.id}/${email}`, { value: tok.access_token, expires: Date.now() + (tok.expires_in || 3600) * 1000 });
-  return `Signed in as ${email}.`;
+  return { signed_in: true, account: email };
 }
 
 const signInSchema = { user: "create table pending (verifier text not null, client text);" };
@@ -170,7 +170,7 @@ const signInSchema = { user: "create table pending (verifier text not null, clie
 const signInOps = {
   accounts: {
     reads: true,
-    description: "The Google accounts signed in here, the default first: each { account, ok }, with why when ok is false and it needs signing in again.",
+    description: `The Google accounts ${TITLE} can use, the default first: [{ account, ok }], with why when ok is false (${APP}_sign_in with that account fixes it). Every other operation's account takes one of these.`,
     input: { type: "object", properties: {} },
     async run(ctx) {
       return Promise.all((await accounts(ctx)).map(async (account) => {
@@ -179,25 +179,29 @@ const signInOps = {
     },
   },
   sign_in: {
-    description: "Sign in to a Google account, or another one, or with account, allow this app on one: returns a link to open in a browser; then pass the address the browser ends up on as code (here or to finish_sign_in).",
+    reads: false,
+    description: `Start signing a Google account in to ${TITLE}, or allowing ${TITLE} on one already signed in to another Google app: gives { url, then }. The person opens url and signs in; then give the address their browser ends on to ${APP}_finish_sign_in.`,
     input: { type: "object", properties: {
-      code: { type: "string", description: "the address the browser was sent to after signing in, to finish here instead" },
-      account: { type: "string", description: "the account's address, to suggest it to Google" },
+      account: { type: "string", description: "the account's address, like someone@gmail.com, to suggest it to Google; for one that needs signing in again, as accounts lists it" },
     } },
-    async run(ctx, { code, account }) {
+    async run(ctx, { account }) {
       if (!ctx.user) throw new Error("this device doesn't keep your data: use one of your own devices");
-      if (code) return finishSignIn(ctx, code);
-      return `Open this link in a browser on any device and sign in. The browser then fails to load a 127.0.0.1 page: copy that page's whole address and pass it to ${APP}_finish_sign_in.\n\n${await startSignIn(ctx, account)}`;
+      return {
+        url: await startSignIn(ctx, account),
+        then: `The person opens url and signs in. Their browser then fails to load a 127.0.0.1 page: give that page's whole address to ${APP}_finish_sign_in.`,
+      };
     },
   },
   finish_sign_in: {
-    description: "Finish signing in: the address the browser ended up on after sign_in's link (or just its code). Answers { signed_in: false, why } when Google didn't sign in.",
-    input: { type: "object", required: ["code"], properties: { code: { type: "string", description: "the address, or its code" } } },
+    reads: false,
+    description: `Finish signing in, with the address the browser ended on after ${APP}_sign_in's url. Gives { signed_in: true, account }, or { signed_in: false, why } when Google didn't sign in.`,
+    input: { type: "object", required: ["code"], properties: { code: { type: "string", description: "the whole address the browser ended on, like http://127.0.0.1:4747/hooks/…/oauth?code=…, or just its code" } } },
     run: (ctx, { code }) => finishSignIn(ctx, code),
   },
   sign_out: {
-    description: "Sign a Google account out of this app; it stays signed in to the other Google apps that use it.",
-    input: { type: "object", required: ["account"], properties: { account: { type: "string", description: "the account's address, or a part of it only it has" } } },
+    reads: false,
+    description: `Sign a Google account out of ${TITLE}; it stays signed in to the other Google apps that use it, and ${APP}_sign_in signs it in again.`,
+    input: { type: "object", required: ["account"], properties: { account: { type: "string", description: `the account's address, or a part of it only it has, as ${APP}_accounts lists them` } } },
     async run(ctx, { account: name }) {
       const email = await account(ctx, name);
       const item = (await accountItems(ctx)).find((i) => i.fields.email.value === email);
@@ -210,7 +214,8 @@ const signInOps = {
 
 
 /// Calls Gmail's API as `email`: a path under users/me, or a whole URL.
-async function api(ctx, email, method, path, { query, json, raw, type } = {}) {
+/// `missing` is what to say when what the path names isn't there, as Gmail answers 404 or "Invalid id value".
+async function api(ctx, email, method, path, { query, json, raw, type, missing } = {}) {
   const q = query ? new URLSearchParams() : null;
   for (const [k, v] of Object.entries(query || {})) {
     for (const one of Array.isArray(v) ? v : [v]) if (one !== undefined && one !== null && one !== "") q.append(k, String(one));
@@ -226,6 +231,7 @@ async function api(ctx, email, method, path, { query, json, raw, type } = {}) {
   if (!r.ok) {
     let message = text.slice(0, 300) || r.statusText;
     try { message = JSON.parse(text).error?.message || message; } catch {}
+    if (missing && (r.status === 404 || /invalid id value/i.test(message))) throw new Error(missing);
     throw new Error(`Gmail: ${message}`);
   }
   return text ? JSON.parse(text) : null;
@@ -235,12 +241,8 @@ async function api(ctx, email, method, path, { query, json, raw, type } = {}) {
 
 const header = (p, name) => (p?.headers || []).find((h) => h.name.toLowerCase() === name.toLowerCase())?.value || "";
 
-function when(m) {
-  const t = new Date(Number(m.internalDate));
-  const s = t.toUTCString(); // "Sat, 31 Oct 2026 14:23:51 GMT"
-  const [day, date, month, year, time] = s.replace(",", "").split(" ");
-  return `${t.getUTCFullYear() === new Date().getUTCFullYear() ? `${day} ${Number(date)} ${month}` : `${Number(date)} ${month} ${year}`} ${time.slice(0, 5)} UTC`;
-}
+/// When Gmail got it, in ISO 8601 to the minute: 2026-10-31T14:23Z.
+const when = (m) => `${new Date(Number(m.internalDate)).toISOString().slice(0, 16)}Z`;
 
 function decode(data, charset) {
   const bytes = fromB64(data || "");
@@ -458,7 +460,7 @@ async function compose(ctx, email, input) {
   };
   if (input.reply_to) {
     const m = await api(ctx, email, "GET", `messages/${encodeURIComponent(String(input.reply_to))}`,
-      { query: { format: "metadata", metadataHeaders: ["From", "Reply-To", "Subject", "Message-ID", "References"] } });
+      { query: { format: "metadata", metadataHeaders: ["From", "Reply-To", "Subject", "Message-ID", "References"] }, missing: noMessage(input.reply_to) });
     d.thread = m.threadId;
     const id = header(m.payload, "Message-ID");
     d.inReplyTo = id;
@@ -471,35 +473,40 @@ async function compose(ctx, email, input) {
 
 /// Sends or saves the message through Gmail's upload endpoint, which takes messages up to 35 MB, with the thread
 /// (and draft) it belongs to as metadata.
-async function upload(ctx, email, method, path, d, meta) {
+async function upload(ctx, email, method, path, d, meta, missing) {
   const b = boundary("upload");
   const raw = `--${b}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(meta)}\r\n--${b}\r\nContent-Type: message/rfc822\r\n\r\n${rfc822(d)}\r\n--${b}--\r\n`;
-  return api(ctx, email, method, UPLOAD + path, { query: { uploadType: "multipart" }, raw, type: `multipart/related; boundary=${b}` });
+  return api(ctx, email, method, UPLOAD + path, { query: { uploadType: "multipart" }, raw, type: `multipart/related; boundary=${b}`, missing });
 }
 
 // ---- the app ----
 
 const str = (description) => ({ type: "string", description });
 const ids = (description) => ({ type: "array", items: { type: "string" }, description });
-const accountInput = str("which account: its address or a part of it only it has; default the first, as gmail_accounts lists them");
+const accountInput = str("which account: its address or a part of it only it has, as gmail_accounts lists them; default the first");
 const withAccount = (properties, required) => ({ type: "object", properties: { ...properties, account: accountInput }, ...(required ? { required } : {}) });
 const people = (what) => ({
   type: "array", items: { type: "string" },
-  description: `${what}: addresses, each "a@example.org" or "Name <a@example.org>" (or { name, email })`,
+  description: `${what}: addresses, each "a@example.org" or "Name <a@example.org>"`,
 });
+const maxResults = (usual, most) => ({ type: "integer", description: `at most this many; default ${usual}, at most ${most}` });
+const pageToken = (op) => str(`the next page: the token the last ${op} ended with ("More: give pageToken …"), with the same other inputs`);
 const writing = {
   to: people("who it's to; a reply goes to the sender unless given"), cc: people("copied to"), bcc: people("copied to, unseen"),
-  subject: str("the subject; a reply keeps the original's unless given"),
-  body: str("the text of the email"),
+  subject: str("the subject; a reply keeps the original's (with Re:) unless given"),
+  body: str("the email's text, as plain text"),
   html: str("the email as HTML; sent with body (or, without it, the HTML made plain) as its text, so mail apps show the one they prefer"),
-  reply_to: str("the id of a message to reply to, keeping the reply in its thread"),
+  reply_to: str("a message's id, from gmail_search or gmail_read, to reply to it: the reply goes in its thread"),
   attachments: {
-    type: "array", description: `files to attach, up to ${MOST_FILES} and 25 MB in all: each { name, type, base64 }, or { name, type, blob } with a kept file's hash (as file put prints it)`,
-    items: { type: "object", format: "file", required: ["name"], properties: { name: str("the file's name"), type: str("its MIME type; guessed from the name if left out"), base64: str("its bytes"), blob: str("or a blob's hash") } },
+    type: "array", description: `files to attach, up to ${MOST_FILES} and 25 MB in all`,
+    items: { type: "object", format: "file", required: ["name"], properties: { name: str("the file's name, like receipt.pdf"), type: str("its MIME type, like application/pdf; guessed from the name if left out"), base64: str("its bytes, in base64"), blob: str("or a kept file's hash, as file put prints it") } },
   },
 };
 const list = (v) => (v == null ? [] : (Array.isArray(v) ? v : [v]).flatMap((s) => String(s).split(",")).map((s) => s.trim()).filter(Boolean));
 const need = (v, what) => { if (!String(v ?? "").trim()) throw new Error(`give ${what}`); return String(v).trim(); };
+const noMessage = (id) => `no message ${id}: message ids come from gmail_search`;
+const noDraft = (id) => `no draft ${id}: draft ids come from gmail_drafts`;
+const more = (token) => (token ? `\n\nMore: give pageToken ${token}` : "");
 
 export default {
   name: "gmail",
@@ -508,7 +515,7 @@ export default {
   color: "#ea4335",
   description: "Your Gmail accounts, for you and your agents: search, read, label, draft and send",
   instructions: "Gmail is the person's Gmail accounts. gmail_search finds messages with Gmail's search syntax " +
-    "(from:, is:unread, in:inbox, newer_than:2d, ...); gmail_read reads one and gmail_thread a whole conversation; gmail_attachment gets one of a message's files. " +
+    "(q: from:, is:unread, in:inbox, newer_than:2d, ...); gmail_read reads one and gmail_thread a whole conversation; gmail_attachment gets one of a message's files. " +
     "gmail_label archives (remove INBOX), marks read (remove UNREAD), stars or labels messages. Write with gmail_draft and let the person send it, unless they asked you to send: " +
     "gmail_send and gmail_send_draft send real email to real people. With several accounts, each operation takes account; gmail_accounts lists them.",
   vault: VAULT,
@@ -527,15 +534,16 @@ export default {
     },
     search: {
       reads: true,
-      description: "Messages matching a Gmail search, newest first: id, date, sender, subject, labels and a snippet. With no query, all mail but spam and trash.",
+      description: "Find messages (Gmail's messages.list), newest first, as text: each message's id, when it came (ISO 8601, UTC), sender, subject, label names and a snippet; with no q, all mail but spam and trash. Read one with gmail_read, its conversation with gmail_thread. A long list ends with More: give pageToken <token>.",
       input: withAccount({
-        query: str("a Gmail search, as in Gmail's search box, e.g. in:inbox is:unread from:someone@example.com"),
-        limit: { type: "integer", description: "at most this many; default 20, at most 100" }, page: str("the page token the previous search gave, for the next page"),
+        q: str("a search as in Gmail's search box, like in:inbox is:unread from:someone@example.com newer_than:7d"),
+        labelIds: ids("only messages with all these labels: label ids, as gmail_labels lists them, like INBOX or Label_12"),
+        maxResults: maxResults(20, 100), pageToken: pageToken("search"),
       }),
-      async run(ctx, { account: a, query, limit, page }) {
+      async run(ctx, { account: a, q, labelIds, maxResults, pageToken }) {
         const email = await account(ctx, a);
-        const r = await api(ctx, email, "GET", "messages", { query: { maxResults: Math.min(Number(limit) || 20, 100), q: query, pageToken: page } });
-        if (!r.messages?.length) return "Nothing found.";
+        const r = await api(ctx, email, "GET", "messages", { query: { maxResults: Math.min(Number(maxResults) || 20, 100), q, labelIds: list(labelIds), pageToken } });
+        if (!r.messages?.length) return pageToken ? "No more." : "Nothing found.";
         const [names, ms] = await Promise.all([labelNames(ctx, email), metadata(ctx, email, r.messages)]);
         const out = ms.map((m) => {
           let s = `${m.id}  ${when(m)}  ${header(m.payload, "From")}\n  ${header(m.payload, "Subject")}`;
@@ -544,29 +552,30 @@ export default {
           if (m.snippet) s += `\n  ${snippet(m.snippet)}`;
           return s;
         });
-        return out.join("\n") + (r.nextPageToken ? `\n\nMore: give page ${r.nextPageToken}` : "");
+        return out.join("\n") + more(r.nextPageToken);
       },
     },
     read: {
       reads: true,
-      description: "One message: its headers, labels, attachments and plain-text body.",
-      input: withAccount({ id: str("the message's id, as search gives it") }, ["id"]),
+      description: "One message in full: its headers, when it came, labels, attachments (numbered, for gmail_attachment) and its text. For the replies around it, gmail_thread gives the whole conversation.",
+      input: withAccount({ id: str("the message's id, from gmail_search") }, ["id"]),
       async run(ctx, { account: a, id }) {
         const email = await account(ctx, a);
-        const [m, names] = await Promise.all([api(ctx, email, "GET", `messages/${encodeURIComponent(need(id, "id"))}`, { query: { format: "full" } }), labelNames(ctx, email)]);
+        id = need(id, "id: a message's id, from gmail_search");
+        const [m, names] = await Promise.all([api(ctx, email, "GET", `messages/${encodeURIComponent(id)}`, { query: { format: "full" }, missing: noMessage(id) }), labelNames(ctx, email)]);
         return show(m, names);
       },
     },
     thread: {
       reads: true,
-      description: "A whole conversation, oldest first, each message as read gives it.",
-      input: withAccount({ id: str("the thread's id, or the id of any message in it") }, ["id"]),
+      description: "A whole conversation, oldest first, each message as gmail_read gives it. Use it to see a message with its replies; gmail_read gives just the one.",
+      input: withAccount({ id: str("the thread's id, or the id of any message in it, from gmail_search") }, ["id"]),
       async run(ctx, { account: a, id }) {
         const email = await account(ctx, a);
-        id = need(id, "id");
+        id = need(id, "id: a message's id, from gmail_search");
         let t;
         try {
-          t = await api(ctx, email, "GET", `threads/${encodeURIComponent(id)}`, { query: { format: "full" } });
+          t = await api(ctx, email, "GET", `threads/${encodeURIComponent(id)}`, { query: { format: "full" }, missing: noMessage(id) });
         } catch (err) { // or a message's id, whose thread this is
           const m = await api(ctx, email, "GET", `messages/${encodeURIComponent(id)}`, { query: { format: "minimal" } }).catch(() => null);
           if (!m || m.threadId === id) throw err;
@@ -578,18 +587,19 @@ export default {
     },
     attachment: {
       reads: true,
-      description: "One of a message's attachments, as a file: { name, type, size, base64 }, which MCP gives back as a file id other tools take, and the CLI saves with --out.",
+      description: "One of a message's attachments, as a file: { name, type, size, base64 }. MCP gives it back as a file id other tools take; the CLI saves it with --out.",
       input: withAccount({
-        id: str("the message's id"), name: str("the attachment's file name; or give number"),
-        number: { type: "integer", description: "which attachment, as read numbers them (1 is the first); the first when neither is given" },
+        id: str("the message's id, from gmail_search"), name: str("the attachment's file name, or a part of it, as gmail_read lists them; or give number"),
+        number: { type: "integer", description: "which attachment, as gmail_read numbers them (1 is the first); the first when neither is given" },
       }, ["id"]),
       async run(ctx, { account: a, id, name, number }) {
         const email = await account(ctx, a);
-        const m = await api(ctx, email, "GET", `messages/${encodeURIComponent(need(id, "id"))}`, { query: { format: "full" } });
+        id = need(id, "id: a message's id, from gmail_search");
+        const m = await api(ctx, email, "GET", `messages/${encodeURIComponent(id)}`, { query: { format: "full" }, missing: noMessage(id) });
         const all = attachments(m.payload);
-        if (!all.length) throw new Error("that message has no attachments");
+        if (!all.length) throw new Error(`message ${id} has no attachments`);
         const f = name ? all.find((x) => x.name === name) || all.find((x) => x.name.toLowerCase().includes(String(name).toLowerCase())) : all[(Number(number) || 1) - 1];
-        if (!f) throw new Error(`no such attachment; it has: ${all.map((x, i) => `${i + 1}. ${x.name}`).join(", ")}`);
+        if (!f) throw new Error(`no attachment ${name ? `"${name}"` : number} on message ${id}; it has: ${all.map((x, i) => `${i + 1}. ${x.name}`).join(", ")}`);
         const data = f.id ? (await api(ctx, email, "GET", `messages/${encodeURIComponent(m.id)}/attachments/${encodeURIComponent(f.id)}`)).data : f.data;
         const bytes = fromB64(data || "");
         return { name: f.name, type: f.type, size: bytes.length, base64: toB64(bytes) };
@@ -597,7 +607,7 @@ export default {
     },
     labels: {
       reads: true,
-      description: "The account's labels, Gmail's own first.",
+      description: "The account's labels, Gmail's own (INBOX, UNREAD, STARRED, ...) first, then the person's: each its name, and its id where that differs. gmail_label and gmail_search's labelIds take either.",
       input: withAccount({}),
       async run(ctx, { account: a }) {
         const { labels = [] } = await api(ctx, await account(ctx, a), "GET", "labels");
@@ -606,89 +616,108 @@ export default {
       },
     },
     label: {
-      description: "Add labels to and remove labels from messages. Archive: remove INBOX. Mark read: remove UNREAD. Star: add STARRED.",
-      input: withAccount({ ids: ids("the messages' ids"), add: ids("label names or ids to add"), remove: ids("label names or ids to remove") }, ["ids"]),
-      async run(ctx, { account: a, ids: given, id, add, remove }) {
+      reads: false,
+      description: "Add labels to and remove labels from messages (Gmail's messages.batchModify). Archive: remove INBOX. Mark read: remove UNREAD. Star: add STARRED. Says what changed.",
+      input: withAccount({
+        ids: ids("the messages' ids, from gmail_search"),
+        addLabelIds: ids("labels to add: ids or names, as gmail_labels lists them, like STARRED or Receipts"),
+        removeLabelIds: ids("labels to remove: ids or names, like INBOX or UNREAD"),
+      }, ["ids"]),
+      async run(ctx, { account: a, ids: given, addLabelIds: add, removeLabelIds: remove }) {
         const email = await account(ctx, a);
-        const which = list([id, ...list(given)].filter(Boolean));
-        if (!which.length || list(add).length + list(remove).length === 0) throw new Error("give ids, and add or remove");
+        const which = list(given);
+        if (!which.length) throw new Error("give ids: messages' ids, from gmail_search");
+        if (list(add).length + list(remove).length === 0) throw new Error("give addLabelIds or removeLabelIds: label ids or names, as gmail_labels lists them");
         const { labels = [] } = await api(ctx, email, "GET", "labels");
         const resolve = (names) => list(names).map((g) => {
           const l = labels.find((l) => l.id === g || l.name.toLowerCase() === g.toLowerCase());
           if (!l) throw new Error(`no label "${g}": gmail_labels lists them`);
-          return l.id;
+          return l;
         });
-        await api(ctx, email, "POST", "messages/batchModify", { json: { ids: which, addLabelIds: resolve(add), removeLabelIds: resolve(remove) } });
-        return `Changed the labels of ${which.length} messages.`;
+        const [adding, removing] = [resolve(add), resolve(remove)];
+        await api(ctx, email, "POST", "messages/batchModify", {
+          json: { ids: which, addLabelIds: adding.map((l) => l.id), removeLabelIds: removing.map((l) => l.id) },
+          missing: `no message among ${which.join(", ")}: message ids come from gmail_search`,
+        });
+        const did = [adding.length && `added ${adding.map((l) => l.name).join(", ")}`, removing.length && `removed ${removing.map((l) => l.name).join(", ")}`].filter(Boolean).join(" and ");
+        return `${did[0].toUpperCase()}${did.slice(1)} on ${which.length === 1 ? "1 message" : `${which.length} messages`}.`;
       },
     },
     trash: {
-      description: "Move messages to the trash, where Gmail deletes them after 30 days.",
-      input: withAccount({ ids: ids("the messages' ids") }, ["ids"]),
-      async run(ctx, { account: a, ids: given, id }) {
+      reads: false,
+      description: "Move messages to the trash. They stay there 30 days, where the person can take them out again in Gmail.",
+      input: withAccount({ ids: ids("the messages' ids, from gmail_search") }, ["ids"]),
+      async run(ctx, { account: a, ids: given }) {
         const email = await account(ctx, a);
-        const which = list([id, ...list(given)].filter(Boolean));
-        if (!which.length) throw new Error("give ids");
+        const which = list(given);
+        if (!which.length) throw new Error("give ids: messages' ids, from gmail_search");
         for (const [i, one] of which.entries()) {
-          try { await api(ctx, email, "POST", `messages/${encodeURIComponent(one)}/trash`); } catch (e) { throw new Error(`trashed ${i} of ${which.length}, then: ${e.message}`); }
+          try { await api(ctx, email, "POST", `messages/${encodeURIComponent(one)}/trash`, { missing: noMessage(one) }); } catch (e) { throw new Error(i ? `trashed ${i} of ${which.length}, then ${e.message}` : e.message); }
         }
-        return `Moved ${which.length} messages to the trash.`;
+        return `Moved ${which.length === 1 ? "1 message" : `${which.length} messages`} to the trash.`;
       },
     },
     drafts: {
       reads: true,
-      description: "The account's drafts, newest first: draft id, date, recipients and subject.",
-      input: withAccount({ limit: { type: "integer", description: "at most this many; default 20" }, page: str("the page token the previous call gave") }),
-      async run(ctx, { account: a, limit, page }) {
+      description: "The account's drafts (Gmail's drafts.list), newest first, as text: each draft's id, when it was saved (ISO 8601, UTC), who it's to and its subject. A long list ends with More: give pageToken <token>.",
+      input: withAccount({ maxResults: maxResults(20, 100), pageToken: pageToken("drafts") }),
+      async run(ctx, { account: a, maxResults, pageToken }) {
         const email = await account(ctx, a);
-        const r = await api(ctx, email, "GET", "drafts", { query: { maxResults: Math.min(Number(limit) || 20, 100), pageToken: page } });
-        if (!r.drafts?.length) return "No drafts.";
+        const r = await api(ctx, email, "GET", "drafts", { query: { maxResults: Math.min(Number(maxResults) || 20, 100), pageToken } });
+        if (!r.drafts?.length) return pageToken ? "No more." : "No drafts.";
         const ms = await metadata(ctx, email, r.drafts.map((d) => d.message));
         const out = ms.map((m, i) => `${r.drafts[i].id}  ${when(m)}  to ${header(m.payload, "To") || "nobody yet"}\n  ${header(m.payload, "Subject") || "(no subject)"}`);
-        return out.join("\n") + (r.nextPageToken ? `\n\nMore: give page ${r.nextPageToken}` : "");
+        return out.join("\n") + more(r.nextPageToken);
       },
     },
     draft: {
-      description: "Save a draft (text, HTML or both, with files if given), or replace one, for the person to review and send. Answers the draft's id and its message's id.",
-      input: withAccount({ ...writing, id: str("a draft's id, to replace that draft") }),
+      reads: false,
+      description: "Save an email as a draft (text, HTML or both, with files if given) for the person to check and send, or replace a draft. Use it rather than gmail_send unless the person asked you to send. Gives the draft's id.",
+      input: withAccount({ ...writing, id: str("a draft's id, from gmail_drafts, to replace that draft") }),
       async run(ctx, input) {
         const email = await account(ctx, input.account);
         const d = await compose(ctx, email, input);
         const message = d.thread ? { threadId: d.thread } : {};
         if (input.id) {
-          const saved = await upload(ctx, email, "PUT", `drafts/${encodeURIComponent(String(input.id))}`, d, { id: String(input.id), message });
-          return `Updated draft ${saved.id} (message ${saved.message?.id}).`;
+          const id = String(input.id);
+          const saved = await upload(ctx, email, "PUT", `drafts/${encodeURIComponent(id)}`, d, { id, message }, noDraft(id));
+          return `Replaced draft ${saved.id} (message ${saved.message?.id}).`;
         }
         const saved = await upload(ctx, email, "POST", "drafts", d, { message });
         return `Saved draft ${saved.id} (message ${saved.message?.id}).`;
       },
     },
     send_draft: {
+      reads: false,
       confirm: true,
-      description: "Send a draft as it is. This sends real email to real people.",
-      input: withAccount({ id: str("the draft's id") }, ["id"]),
+      description: "Send a draft as it is. This sends real email to real people: only when the person asked to send this one.",
+      input: withAccount({ id: str("the draft's id, from gmail_drafts or gmail_draft") }, ["id"]),
       async run(ctx, { account: a, id }) {
-        const sent = await api(ctx, await account(ctx, a), "POST", "drafts/send", { json: { id: need(id, "id") } });
+        id = need(id, "id: a draft's id, from gmail_drafts");
+        const sent = await api(ctx, await account(ctx, a), "POST", "drafts/send", { json: { id }, missing: noDraft(id) });
         return `Sent, as message ${sent.id}.`;
       },
     },
     delete_draft: {
+      reads: false,
       confirm: true,
-      description: "Delete a draft for good.",
-      input: withAccount({ id: str("the draft's id") }, ["id"]),
+      description: "Delete a draft for good: it doesn't go to the trash.",
+      input: withAccount({ id: str("the draft's id, from gmail_drafts") }, ["id"]),
       async run(ctx, { account: a, id }) {
-        await api(ctx, await account(ctx, a), "DELETE", `drafts/${encodeURIComponent(need(id, "id"))}`);
-        return "Deleted the draft.";
+        id = need(id, "id: a draft's id, from gmail_drafts");
+        await api(ctx, await account(ctx, a), "DELETE", `drafts/${encodeURIComponent(id)}`, { missing: noDraft(id) });
+        return `Deleted draft ${id}.`;
       },
     },
     send: {
+      reads: false,
       confirm: true,
-      description: "Send an email (text, HTML or both, with files if given), or a reply. This sends real email to real people: send only what the person asked to send.",
+      description: "Send an email (text, HTML or both, with files if given), or a reply. This sends real email to real people: only what the person asked to send; otherwise gmail_draft. Gives the sent message's id.",
       input: withAccount(writing),
       async run(ctx, input) {
         const email = await account(ctx, input.account);
         const d = await compose(ctx, email, input);
-        if (!d.to.length && !d.cc.length && !d.bcc.length) throw new Error("give to");
+        if (!d.to.length && !d.cc.length && !d.bcc.length) throw new Error("give to: who it's to, or reply_to a message");
         const sent = await upload(ctx, email, "POST", "messages/send", d, d.thread ? { threadId: d.thread } : {});
         return `Sent, as message ${sent.id}.`;
       },
@@ -773,8 +802,7 @@ async function start(account, b) {
   busy(b, true);
   let link;
   try {
-    const r = await one.call("sign_in", account ? { account } : {});
-    link = typeof r === "string" ? r.split("\\n").pop() : r.url;
+    link = (await one.call("sign_in", account ? { account } : {})).url;
   } catch (e) {
     // No Google sign-in yet: the person picks one from their Vault, or makes one, then it goes on.
     if (/Choose a Google sign-in/.test(e.message) && one.vault) {

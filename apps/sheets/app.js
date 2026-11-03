@@ -140,7 +140,7 @@ async function finishSignIn(ctx, given) {
     fields: { email: { value: email }, refresh_token: { value: tok.refresh_token, secret: true }, scopes: { value: tok.scope || SCOPES }, client_id: { value: client.fields.client_id.value } },
   });
   tokens.set(`${ctx.user.id}/${email}`, { value: tok.access_token, expires: Date.now() + (tok.expires_in || 3600) * 1000 });
-  return `Signed in as ${email}.`;
+  return { signed_in: true, account: email };
 }
 
 const signInSchema = { user: "create table pending (verifier text not null, client text);" };
@@ -148,7 +148,7 @@ const signInSchema = { user: "create table pending (verifier text not null, clie
 const signInOps = {
   accounts: {
     reads: true,
-    description: "The Google accounts signed in here, the default first: each { account, ok }, with why when ok is false and it needs signing in again.",
+    description: `The Google accounts ${TITLE} can use, the default first: [{ account, ok }], with why when ok is false (${APP}_sign_in with that account fixes it). Every other operation's account takes one of these.`,
     input: { type: "object", properties: {} },
     async run(ctx) {
       return Promise.all((await accounts(ctx)).map(async (account) => {
@@ -157,25 +157,29 @@ const signInOps = {
     },
   },
   sign_in: {
-    description: "Sign in to a Google account, or another one, or with account, allow this app on one: returns a link to open in a browser; then pass the address the browser ends up on as code (here or to finish_sign_in).",
+    reads: false,
+    description: `Start signing a Google account in to ${TITLE}, or allowing ${TITLE} on one already signed in to another Google app: gives { url, then }. The person opens url and signs in; then give the address their browser ends on to ${APP}_finish_sign_in.`,
     input: { type: "object", properties: {
-      code: { type: "string", description: "the address the browser was sent to after signing in, to finish here instead" },
-      account: { type: "string", description: "the account's address, to suggest it to Google" },
+      account: { type: "string", description: "the account's address, like someone@gmail.com, to suggest it to Google; for one that needs signing in again, as accounts lists it" },
     } },
-    async run(ctx, { code, account }) {
+    async run(ctx, { account }) {
       if (!ctx.user) throw new Error("this device doesn't keep your data: use one of your own devices");
-      if (code) return finishSignIn(ctx, code);
-      return `Open this link in a browser on any device and sign in. The browser then fails to load a 127.0.0.1 page: copy that page's whole address and pass it to ${APP}_finish_sign_in.\n\n${await startSignIn(ctx, account)}`;
+      return {
+        url: await startSignIn(ctx, account),
+        then: `The person opens url and signs in. Their browser then fails to load a 127.0.0.1 page: give that page's whole address to ${APP}_finish_sign_in.`,
+      };
     },
   },
   finish_sign_in: {
-    description: "Finish signing in: the address the browser ended up on after sign_in's link (or just its code). Answers { signed_in: false, why } when Google didn't sign in.",
-    input: { type: "object", required: ["code"], properties: { code: { type: "string", description: "the address, or its code" } } },
+    reads: false,
+    description: `Finish signing in, with the address the browser ended on after ${APP}_sign_in's url. Gives { signed_in: true, account }, or { signed_in: false, why } when Google didn't sign in.`,
+    input: { type: "object", required: ["code"], properties: { code: { type: "string", description: "the whole address the browser ended on, like http://127.0.0.1:4747/hooks/…/oauth?code=…, or just its code" } } },
     run: (ctx, { code }) => finishSignIn(ctx, code),
   },
   sign_out: {
-    description: "Sign a Google account out of this app; it stays signed in to the other Google apps that use it.",
-    input: { type: "object", required: ["account"], properties: { account: { type: "string", description: "the account's address, or a part of it only it has" } } },
+    reads: false,
+    description: `Sign a Google account out of ${TITLE}; it stays signed in to the other Google apps that use it, and ${APP}_sign_in signs it in again.`,
+    input: { type: "object", required: ["account"], properties: { account: { type: "string", description: `the account's address, or a part of it only it has, as ${APP}_accounts lists them` } } },
     async run(ctx, { account: name }) {
       const email = await account(ctx, name);
       const item = (await accountItems(ctx)).find((i) => i.fields.email.value === email);
@@ -188,11 +192,12 @@ const signInOps = {
 
 
 const str = (description) => ({ type: "string", description });
-const accountInput = str(`which account: its address or a part of it only it has; default the first, as ${APP}_accounts lists them`);
+const accountInput = str(`which account: its address or a part of it only it has, as ${APP}_accounts lists them; default the first`);
 const withAccount = (properties, required) => ({ type: "object", properties: { ...properties, account: accountInput }, ...(required ? { required } : {}) });
 
-/// Calls Google's API as `email`.
-async function api(ctx, email, method, path, { query, json } = {}) {
+/// Calls Google's API as `email`. `missing` is what to say when what the path names isn't there, or the account can't
+/// open it; `hint` what to add to what Google says about an input it can't take.
+async function api(ctx, email, method, path, { query, json, missing, hint } = {}) {
   const q = new URLSearchParams();
   for (const [k, v] of Object.entries(query || {})) if (v !== undefined && v !== null && v !== "") q.append(k, String(v));
   const r = await fetch(API + path + ([...q].length ? `?${q}` : ""), {
@@ -205,6 +210,9 @@ async function api(ctx, email, method, path, { query, json } = {}) {
   if (!r.ok) {
     let message = text.slice(0, 300) || r.statusText;
     try { message = JSON.parse(text).error?.message || message; } catch {}
+    if (missing && r.status === 404) throw new Error(missing);
+    if (missing && r.status === 403) throw new Error(`${email} can't open it (${message.replace(/\.$/, "")}): use the account it's shared with (${APP}_accounts lists them), or ask its owner to share it`);
+    if (hint && r.status === 400) throw new Error(`${TITLE}: ${message.replace(/\.$/, "")}: ${hint}`);
     throw new Error(`${TITLE}: ${message}`);
   }
   return text ? JSON.parse(text) : null;
@@ -216,17 +224,19 @@ async function api(ctx, email, method, path, { query, json } = {}) {
 /// A spreadsheet's id, given it or its address.
 const sheetId = (v) => {
   const s = String(v || "").trim();
-  if (!s) throw new Error("give spreadsheet: its id or address");
+  if (!s) throw new Error("give spreadsheetId: the spreadsheet's id or address");
   return /\/d\/([a-zA-Z0-9_-]+)/.exec(s)?.[1] || s;
 };
 const ss = (v) => `spreadsheets/${encodeURIComponent(sheetId(v))}`;
-const sheetInput = str("the spreadsheet's id, or its address (docs.google.com/spreadsheets/d/…)");
-const rowsInput = { type: "array", items: { type: "array", items: {} }, description: "rows, each an array of values; text is read as if typed, so =SUM(A1:A3) is a formula and 3/11 a date" };
+const sheetInput = str("the spreadsheet's id, or its address, like https://docs.google.com/spreadsheets/d/1AbC…/edit; drive_files_list finds spreadsheets (q mimeType = 'application/vnd.google-apps.spreadsheet' and name contains '…')");
+const valuesInput = { type: "array", items: { type: "array", items: {} }, description: "rows, each an array of values, like [[\"Date\", \"Amount\"], [\"2026-11-03\", 42]]; text is read as if typed (valueInputOption USER_ENTERED), so =SUM(A1:A3) is a formula and 3/11 a date" };
+const noSheet = (v) => `no spreadsheet ${sheetId(v)}: give its id or its address (docs.google.com/spreadsheets/d/…); drive_files_list finds spreadsheets`;
+const RANGE_HINT = `ranges are A1 notation, like Budget!A1:F20, Budget!A:C or Budget; ${APP}_spreadsheet lists the sheets`;
 
-/// The range asked for, or the whole first tab.
+/// The range asked for, or the whole first sheet.
 async function rangeOr(ctx, email, spreadsheet, range) {
   if (range) return String(range);
-  const s = await api(ctx, email, "GET", ss(spreadsheet), { query: { fields: "sheets.properties.title" } });
+  const s = await api(ctx, email, "GET", ss(spreadsheet), { query: { fields: "sheets.properties.title" }, missing: noSheet(spreadsheet) });
   return `'${s.sheets[0].properties.title.replace(/'/g, "''")}'`;
 }
 
@@ -236,7 +246,7 @@ export default {
   icon: "table",
   color: "#34a853",
   description: "Your Google Sheets: read ranges, add rows, change cells and make spreadsheets",
-  instructions: `Sheets is the person's Google Sheets. ${APP}_spreadsheet lists a spreadsheet's tabs; ${APP}_read reads a range (A1 notation, like Budget!A1:F20; the first tab when left out). ${APP}_append adds rows after a table, ${APP}_update writes over a range and ${APP}_create makes a spreadsheet: change only what the person asked. Spreadsheets are given by id or address. With several accounts, each operation takes account.`,
+  instructions: `Sheets is the person's Google Sheets. ${APP}_spreadsheet lists a spreadsheet's sheets (tabs); ${APP}_read reads a range (A1 notation, like Budget!A1:F20; the first sheet when left out). ${APP}_append adds rows after a table, ${APP}_update writes over a range and ${APP}_create makes a spreadsheet: change only what the person asked. Spreadsheets are given as spreadsheetId, an id or address. With several accounts, each operation takes account.`,
   vault: VAULT,
   schema: signInSchema,
 
@@ -244,60 +254,63 @@ export default {
     ...signInOps,
     spreadsheet: {
       reads: true,
-      description: "A spreadsheet's title, address and tabs (each with its size).",
-      input: withAccount({ spreadsheet: sheetInput }, ["spreadsheet"]),
-      async run(ctx, { account: a, spreadsheet }) {
-        const s = await api(ctx, await account(ctx, a), "GET", ss(spreadsheet), { query: { fields: "spreadsheetId,spreadsheetUrl,properties(title,timeZone,locale),sheets.properties(sheetId,title,index,gridProperties)" } });
+      description: "A spreadsheet's title, address, time zone and sheets (tabs), each with its size (Sheets' spreadsheets.get, trimmed): { id, title, url, time_zone, sheets: [{ title, id, rows, columns }] }. Sheet titles are what ranges start with.",
+      input: withAccount({ spreadsheetId: sheetInput }, ["spreadsheetId"]),
+      async run(ctx, { account: a, spreadsheetId: spreadsheet }) {
+        const s = await api(ctx, await account(ctx, a), "GET", ss(spreadsheet), { query: { fields: "spreadsheetId,spreadsheetUrl,properties(title,timeZone,locale),sheets.properties(sheetId,title,index,gridProperties)" }, missing: noSheet(spreadsheet) });
         return {
           id: s.spreadsheetId, title: s.properties.title, url: s.spreadsheetUrl, time_zone: s.properties.timeZone,
-          tabs: s.sheets.map(({ properties: p }) => ({ title: p.title, id: p.sheetId, rows: p.gridProperties?.rowCount, columns: p.gridProperties?.columnCount })),
+          sheets: s.sheets.map(({ properties: p }) => ({ title: p.title, id: p.sheetId, rows: p.gridProperties?.rowCount, columns: p.gridProperties?.columnCount })),
         };
       },
     },
     read: {
       reads: true,
-      description: "The values in a range, as rows (as shown, unless formulas is set), with the range they came from.",
+      description: "The values in a range (Sheets' values.get): { range, values }, values a row per array, with the range they came from. Over limit rows, it says how many more.",
       input: withAccount({
-        spreadsheet: sheetInput, range: str("A1 notation, like Budget!A1:F20 or Budget; the whole first tab when left out"),
-        formulas: { type: "boolean", description: "give formulas rather than what they show" },
-        limit: { type: "integer", description: "at most this many rows; default 500" },
-      }, ["spreadsheet"]),
-      async run(ctx, { account: a, spreadsheet, range, formulas, limit }) {
+        spreadsheetId: sheetInput, range: str("A1 notation, like Budget!A1:F20, Budget!A:C or Budget; the whole first sheet when left out"),
+        valueRenderOption: { type: "string", enum: ["FORMATTED_VALUE", "UNFORMATTED_VALUE", "FORMULA"], description: "FORMATTED_VALUE: as shown (the default); UNFORMATTED_VALUE: numbers unformatted; FORMULA: formulas, like =SUM(B2:B9)" },
+        limit: { type: "integer", description: "at most this many rows; default 500 (the rest are left out, and more says how many)" },
+      }, ["spreadsheetId"]),
+      async run(ctx, { account: a, spreadsheetId: spreadsheet, range, valueRenderOption, limit }) {
         const email = await account(ctx, a);
         const r = await api(ctx, email, "GET", `${ss(spreadsheet)}/values/${encodeURIComponent(await rangeOr(ctx, email, spreadsheet, range))}`,
-          { query: { valueRenderOption: formulas ? "FORMULA" : "FORMATTED_VALUE" } });
+          { query: { valueRenderOption: valueRenderOption || "FORMATTED_VALUE" }, missing: noSheet(spreadsheet), hint: RANGE_HINT });
         const rows = r.values || [];
         const most = Number(limit) || 500;
-        return { range: r.range, rows: rows.slice(0, most), ...(rows.length > most ? { more: `${rows.length - most} more rows: read a smaller range` } : {}) };
+        return { range: r.range, values: rows.slice(0, most), ...(rows.length > most ? { more: `${rows.length - most} more ${rows.length - most === 1 ? "row" : "rows"}: read a smaller range, like one starting at row ${most + 1}` } : {}) };
       },
     },
     append: {
-      description: "Add rows after the table in a range (or the first tab). This changes the person's spreadsheet: do it only when they asked.",
-      input: withAccount({ spreadsheet: sheetInput, range: str("the table's range or tab, like Expenses or Expenses!A:E; the first tab when left out"), rows: rowsInput }, ["spreadsheet", "rows"]),
-      async run(ctx, { account: a, spreadsheet, range, rows }) {
+      reads: false,
+      description: "Add rows after the table in a range (or the first sheet) (Sheets' values.append); says where they went. This changes the person's spreadsheet: do it only when they asked.",
+      input: withAccount({ spreadsheetId: sheetInput, range: str("the table's range or sheet, like Expenses or Expenses!A:E; the first sheet when left out"), values: valuesInput }, ["spreadsheetId", "values"]),
+      async run(ctx, { account: a, spreadsheetId: spreadsheet, range, values: rows }) {
         const email = await account(ctx, a);
         const r = await api(ctx, email, "POST", `${ss(spreadsheet)}/values/${encodeURIComponent(await rangeOr(ctx, email, spreadsheet, range))}:append`,
-          { query: { valueInputOption: "USER_ENTERED", insertDataOption: "INSERT_ROWS" }, json: { values: rows } });
+          { query: { valueInputOption: "USER_ENTERED", insertDataOption: "INSERT_ROWS" }, json: { values: rows }, missing: noSheet(spreadsheet), hint: RANGE_HINT });
         return `Added ${r.updates?.updatedRows ?? rows.length} rows at ${r.updates?.updatedRange}.`;
       },
     },
     update: {
+      reads: false,
       confirm: true,
-      description: "Write rows over a range, from its top-left cell, replacing what was there. Do it only when the person asked.",
-      input: withAccount({ spreadsheet: sheetInput, range: str("where to write, like Budget!B2 or Budget!B2:D5"), rows: rowsInput }, ["spreadsheet", "range", "rows"]),
-      async run(ctx, { account: a, spreadsheet, range, rows }) {
+      description: "Write rows over a range, from its top-left cell, replacing what was there (Sheets' values.update); says which cells changed. Do it only when the person asked.",
+      input: withAccount({ spreadsheetId: sheetInput, range: str("where to write, in A1 notation, like Budget!B2 or Budget!B2:D5"), values: valuesInput }, ["spreadsheetId", "range", "values"]),
+      async run(ctx, { account: a, spreadsheetId: spreadsheet, range, values: rows }) {
         const r = await api(ctx, await account(ctx, a), "PUT", `${ss(spreadsheet)}/values/${encodeURIComponent(String(range))}`,
-          { query: { valueInputOption: "USER_ENTERED" }, json: { values: rows } });
+          { query: { valueInputOption: "USER_ENTERED" }, json: { values: rows }, missing: noSheet(spreadsheet), hint: RANGE_HINT });
         return `Wrote ${r.updatedCells} cells in ${r.updatedRange}.`;
       },
     },
     create: {
-      description: "Make a spreadsheet in the person's Drive, with tabs and first rows if given. Answers its id and address.",
+      reads: false,
+      description: "Make a spreadsheet in the person's Drive (in My Drive; Sheets' spreadsheets.create), with sheets and first rows if given. Gives { id, title, url }.",
       input: withAccount({
-        title: str("its title"), tabs: { type: "array", items: { type: "string" }, description: "its tabs' names; default one, Sheet1" },
-        rows: { ...rowsInput, description: "rows to put in the first tab, from A1" },
+        title: str("its title, like Budget 2026"), sheets: { type: "array", items: { type: "string" }, description: "its sheets' (tabs') titles, like [\"Income\", \"Expenses\"]; default one, Sheet1" },
+        values: { ...valuesInput, description: `rows to put in the first sheet, from A1, ${valuesInput.description.slice(6)}` },
       }, ["title"]),
-      async run(ctx, { account: a, title, tabs, rows }) {
+      async run(ctx, { account: a, title, sheets: tabs, values: rows }) {
         const email = await account(ctx, a);
         const s = await api(ctx, email, "POST", "spreadsheets", { json: { properties: { title }, ...(tabs?.length ? { sheets: tabs.map((t) => ({ properties: { title: t } })) } : {}) } });
         if (rows?.length) {
@@ -387,8 +400,7 @@ async function start(account, b) {
   busy(b, true);
   let link;
   try {
-    const r = await one.call("sign_in", account ? { account } : {});
-    link = typeof r === "string" ? r.split("\\n").pop() : r.url;
+    link = (await one.call("sign_in", account ? { account } : {})).url;
   } catch (e) {
     // No Google sign-in yet: the person picks one from their Vault, or makes one, then it goes on.
     if (/Choose a Google sign-in/.test(e.message) && one.vault) {

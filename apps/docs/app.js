@@ -140,7 +140,7 @@ async function finishSignIn(ctx, given) {
     fields: { email: { value: email }, refresh_token: { value: tok.refresh_token, secret: true }, scopes: { value: tok.scope || SCOPES }, client_id: { value: client.fields.client_id.value } },
   });
   tokens.set(`${ctx.user.id}/${email}`, { value: tok.access_token, expires: Date.now() + (tok.expires_in || 3600) * 1000 });
-  return `Signed in as ${email}.`;
+  return { signed_in: true, account: email };
 }
 
 const signInSchema = { user: "create table pending (verifier text not null, client text);" };
@@ -148,7 +148,7 @@ const signInSchema = { user: "create table pending (verifier text not null, clie
 const signInOps = {
   accounts: {
     reads: true,
-    description: "The Google accounts signed in here, the default first: each { account, ok }, with why when ok is false and it needs signing in again.",
+    description: `The Google accounts ${TITLE} can use, the default first: [{ account, ok }], with why when ok is false (${APP}_sign_in with that account fixes it). Every other operation's account takes one of these.`,
     input: { type: "object", properties: {} },
     async run(ctx) {
       return Promise.all((await accounts(ctx)).map(async (account) => {
@@ -157,25 +157,29 @@ const signInOps = {
     },
   },
   sign_in: {
-    description: "Sign in to a Google account, or another one, or with account, allow this app on one: returns a link to open in a browser; then pass the address the browser ends up on as code (here or to finish_sign_in).",
+    reads: false,
+    description: `Start signing a Google account in to ${TITLE}, or allowing ${TITLE} on one already signed in to another Google app: gives { url, then }. The person opens url and signs in; then give the address their browser ends on to ${APP}_finish_sign_in.`,
     input: { type: "object", properties: {
-      code: { type: "string", description: "the address the browser was sent to after signing in, to finish here instead" },
-      account: { type: "string", description: "the account's address, to suggest it to Google" },
+      account: { type: "string", description: "the account's address, like someone@gmail.com, to suggest it to Google; for one that needs signing in again, as accounts lists it" },
     } },
-    async run(ctx, { code, account }) {
+    async run(ctx, { account }) {
       if (!ctx.user) throw new Error("this device doesn't keep your data: use one of your own devices");
-      if (code) return finishSignIn(ctx, code);
-      return `Open this link in a browser on any device and sign in. The browser then fails to load a 127.0.0.1 page: copy that page's whole address and pass it to ${APP}_finish_sign_in.\n\n${await startSignIn(ctx, account)}`;
+      return {
+        url: await startSignIn(ctx, account),
+        then: `The person opens url and signs in. Their browser then fails to load a 127.0.0.1 page: give that page's whole address to ${APP}_finish_sign_in.`,
+      };
     },
   },
   finish_sign_in: {
-    description: "Finish signing in: the address the browser ended up on after sign_in's link (or just its code). Answers { signed_in: false, why } when Google didn't sign in.",
-    input: { type: "object", required: ["code"], properties: { code: { type: "string", description: "the address, or its code" } } },
+    reads: false,
+    description: `Finish signing in, with the address the browser ended on after ${APP}_sign_in's url. Gives { signed_in: true, account }, or { signed_in: false, why } when Google didn't sign in.`,
+    input: { type: "object", required: ["code"], properties: { code: { type: "string", description: "the whole address the browser ended on, like http://127.0.0.1:4747/hooks/…/oauth?code=…, or just its code" } } },
     run: (ctx, { code }) => finishSignIn(ctx, code),
   },
   sign_out: {
-    description: "Sign a Google account out of this app; it stays signed in to the other Google apps that use it.",
-    input: { type: "object", required: ["account"], properties: { account: { type: "string", description: "the account's address, or a part of it only it has" } } },
+    reads: false,
+    description: `Sign a Google account out of ${TITLE}; it stays signed in to the other Google apps that use it, and ${APP}_sign_in signs it in again.`,
+    input: { type: "object", required: ["account"], properties: { account: { type: "string", description: `the account's address, or a part of it only it has, as ${APP}_accounts lists them` } } },
     async run(ctx, { account: name }) {
       const email = await account(ctx, name);
       const item = (await accountItems(ctx)).find((i) => i.fields.email.value === email);
@@ -188,11 +192,12 @@ const signInOps = {
 
 
 const str = (description) => ({ type: "string", description });
-const accountInput = str(`which account: its address or a part of it only it has; default the first, as ${APP}_accounts lists them`);
+const accountInput = str(`which account: its address or a part of it only it has, as ${APP}_accounts lists them; default the first`);
 const withAccount = (properties, required) => ({ type: "object", properties: { ...properties, account: accountInput }, ...(required ? { required } : {}) });
 
-/// Calls Google's API as `email`.
-async function api(ctx, email, method, path, { query, json } = {}) {
+/// Calls Google's API as `email`. `missing` is what to say when what the path names isn't there, or the account can't
+/// open it; `hint` what to add to what Google says about an input it can't take.
+async function api(ctx, email, method, path, { query, json, missing, hint } = {}) {
   const q = new URLSearchParams();
   for (const [k, v] of Object.entries(query || {})) if (v !== undefined && v !== null && v !== "") q.append(k, String(v));
   const r = await fetch(API + path + ([...q].length ? `?${q}` : ""), {
@@ -205,6 +210,9 @@ async function api(ctx, email, method, path, { query, json } = {}) {
   if (!r.ok) {
     let message = text.slice(0, 300) || r.statusText;
     try { message = JSON.parse(text).error?.message || message; } catch {}
+    if (missing && r.status === 404) throw new Error(missing);
+    if (missing && r.status === 403) throw new Error(`${email} can't open it (${message.replace(/\.$/, "")}): use the account it's shared with (${APP}_accounts lists them), or ask its owner to share it`);
+    if (hint && r.status === 400) throw new Error(`${TITLE}: ${message.replace(/\.$/, "")}: ${hint}`);
     throw new Error(`${TITLE}: ${message}`);
   }
   return text ? JSON.parse(text) : null;
@@ -216,10 +224,11 @@ async function api(ctx, email, method, path, { query, json } = {}) {
 /// A document's id, given it or its address.
 const docId = (v) => {
   const s = String(v || "").trim();
-  if (!s) throw new Error("give document: its id or address");
+  if (!s) throw new Error("give documentId: the document's id or address");
   return /\/d\/([a-zA-Z0-9_-]+)/.exec(s)?.[1] || s;
 };
-const docInput = str("the document's id, or its address (docs.google.com/document/d/…)");
+const docInput = str("the document's id, or its address, like https://docs.google.com/document/d/1AbC…/edit; drive_files_list finds documents (q mimeType = 'application/vnd.google-apps.document' and name contains '…')");
+const noDoc = (v) => `no document ${docId(v)}: give its id or its address (docs.google.com/document/d/…); drive_files_list finds documents`;
 
 const ORDERED = /DECIMAL|ALPHA|ROMAN|ZERO/;
 
@@ -298,7 +307,7 @@ export default {
   icon: "file-text",
   color: "#4285f4",
   description: "Your Google Docs: read them as markdown or text, make them, and add or replace text",
-  instructions: `Docs is the person's Google Docs. ${APP}_read reads a document as markdown (or text). ${APP}_create makes one, ${APP}_append adds text at its end, and ${APP}_replace replaces every match of some text: change only what the person asked. Documents are given by id or address. With several accounts, each operation takes account.`,
+  instructions: `Docs is the person's Google Docs. ${APP}_read reads a document as markdown (or text). ${APP}_create makes one, ${APP}_append adds text at its end, and ${APP}_replace replaces every match of some text: change only what the person asked. Documents are given as documentId, an id or address. With several accounts, each operation takes account.`,
   vault: VAULT,
   schema: signInSchema,
 
@@ -306,17 +315,18 @@ export default {
     ...signInOps,
     read: {
       reads: true,
-      description: "A document's title, address and text, as markdown (headings, lists, tables, bold, italic, links) or plain text.",
-      input: withAccount({ document: docInput, format: str("markdown (the default) or text") }, ["document"]),
-      async run(ctx, { account: a, document, format }) {
-        const d = await api(ctx, await account(ctx, a), "GET", `documents/${encodeURIComponent(docId(document))}`);
+      description: "A document (Docs' documents.get) as text: its title, address and body, as markdown (headings, lists, tables, bold, italic, links) or plain text.",
+      input: withAccount({ documentId: docInput, format: { type: "string", enum: ["markdown", "text"], description: "markdown (the default) or text" } }, ["documentId"]),
+      async run(ctx, { account: a, documentId: document, format }) {
+        const d = await api(ctx, await account(ctx, a), "GET", `documents/${encodeURIComponent(docId(document))}`, { missing: noDoc(document) });
         const text = render(d, format !== "text");
         return `${d.title}\nhttps://docs.google.com/document/d/${d.documentId}/edit\n\n${text}`;
       },
     },
     create: {
-      description: "Make a document in the person's Drive, with text if given. Answers its id and address.",
-      input: withAccount({ title: str("its title"), text: str("its text, as plain text") }, ["title"]),
+      reads: false,
+      description: "Make a document in the person's Drive (in My Drive; Docs' documents.create), with text if given. Gives { id, title, url }.",
+      input: withAccount({ title: str("its title, like Meeting notes 2026-11-03"), text: str("its first text, as plain text: markdown stays as typed") }, ["title"]),
       async run(ctx, { account: a, title, text }) {
         const email = await account(ctx, a);
         const d = await api(ctx, email, "POST", "documents", { json: { title } });
@@ -325,27 +335,29 @@ export default {
       },
     },
     append: {
-      description: "Add text at the end of a document, as a new paragraph. This changes the person's document: do it only when they asked.",
-      input: withAccount({ document: docInput, text: str("the text, as plain text") }, ["document", "text"]),
-      async run(ctx, { account: a, document, text }) {
+      reads: false,
+      description: "Add text at the end of a document, as a new paragraph (a batchUpdate insertText). This changes the person's document: do it only when they asked.",
+      input: withAccount({ documentId: docInput, text: str("the text, as plain text: markdown stays as typed") }, ["documentId", "text"]),
+      async run(ctx, { account: a, documentId: document, text }) {
         const id = encodeURIComponent(docId(document));
-        await api(ctx, await account(ctx, a), "POST", `documents/${id}:batchUpdate`, { json: { requests: [{ insertText: { text: `\n${text}`, endOfSegmentLocation: {} } }] } });
-        return "Added it at the end.";
+        await api(ctx, await account(ctx, a), "POST", `documents/${id}:batchUpdate`, { json: { requests: [{ insertText: { text: `\n${text}`, endOfSegmentLocation: {} } }] }, missing: noDoc(document) });
+        return `Added it at the end of https://docs.google.com/document/d/${docId(document)}/edit`;
       },
     },
     replace: {
+      reads: false,
       confirm: true,
-      description: "Replace every match of some text in a document. Do it only when the person asked.",
+      description: "Replace every match of some text in a document (a batchUpdate replaceAllText); says how many changed. Do it only when the person asked.",
       input: withAccount({
-        document: docInput, find: str("the text to find"), replace: str("what to put instead (empty removes it)"),
-        match_case: { type: "boolean", description: "match capitals exactly (default false)" },
-      }, ["document", "find"]),
-      async run(ctx, { account: a, document, find, replace = "", match_case }) {
+        documentId: docInput, find: str("the text to find, exactly as docs_read gives it as text"), replace: str("what to put instead, as plain text (empty removes it)"),
+        matchCase: { type: "boolean", description: "match capitals exactly (default false)" },
+      }, ["documentId", "find"]),
+      async run(ctx, { account: a, documentId: document, find, replace = "", matchCase }) {
         const id = encodeURIComponent(docId(document));
         const r = await api(ctx, await account(ctx, a), "POST", `documents/${id}:batchUpdate`,
-          { json: { requests: [{ replaceAllText: { containsText: { text: find, matchCase: !!match_case }, replaceText: replace } }] } });
+          { json: { requests: [{ replaceAllText: { containsText: { text: find, matchCase: !!matchCase }, replaceText: replace } }] }, missing: noDoc(document) });
         const n = r.replies?.[0]?.replaceAllText?.occurrencesChanged || 0;
-        return n ? `Replaced ${n} matches.` : "Found no match: nothing changed.";
+        return n ? `Replaced ${n === 1 ? "1 match" : `${n} matches`}.` : `Found no "${find}": nothing changed. docs_read with format text shows what's there.`;
       },
     },
   },
@@ -428,8 +440,7 @@ async function start(account, b) {
   busy(b, true);
   let link;
   try {
-    const r = await one.call("sign_in", account ? { account } : {});
-    link = typeof r === "string" ? r.split("\\n").pop() : r.url;
+    link = (await one.call("sign_in", account ? { account } : {})).url;
   } catch (e) {
     // No Google sign-in yet: the person picks one from their Vault, or makes one, then it goes on.
     if (/Choose a Google sign-in/.test(e.message) && one.vault) {

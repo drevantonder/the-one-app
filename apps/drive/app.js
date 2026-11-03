@@ -1,12 +1,12 @@
 // Google Drive for apps: your own Drive accounts, signed in once. Each account's refresh token is a secret field of
 // its Google account item in the Vault, which the node fills in only for Google's token address, so no app or agent
-// ever reads it; signing in is the same in every Google app. Other apps use it as ctx.apps.drive.<op>, Drive's own API by another name (files_get, files_list, files_create,
-// files_upload, files_update, generate_ids).
+// ever reads it; signing in is the same in every Google app. Its operations are Drive's own API (v3) by its own names
+// (files_get, files_list, files_create, files_upload, files_update, generate_ids), which agents and other apps
+// (ctx.apps.drive.<op>) already know.
 
 const OAUTH = "oauth2.googleapis.com";
 const SCOPES = "openid email https://www.googleapis.com/auth/drive";
 const API = "https://www.googleapis.com/drive/v3";
-// Where Google sends the browser after sign-in. Nothing answers there: the person copies the address it fails to load.
 const APP = "drive";
 const TITLE = "Google Drive";
 // Where Google sends the browser back: the node on the person's device, at the port this install's nodes answer on.
@@ -16,7 +16,8 @@ const b64url = (bytes) => btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-"
 
 /// What Drive said, with its status: callers tell a missing file (404) from a refused one.
 export class DriveError extends Error {}
-const needsConnecting = () => new DriveError("Drive needs connecting: sign in to Google Drive again (drive_sign_in).");
+// "needs connecting" is how apps that save to Drive tell this from other errors.
+const needsConnecting = () => new DriveError(`Drive needs connecting: sign in to a Google account first; ${APP}_sign_in signs one in`);
 
 // The Vault keeps what signing in needs, the same for every Google app: one "Google sign-in" item, the OAuth client
 // (its id, and its secret), and a "Google account" item for each account (its address, its refresh token and the
@@ -145,7 +146,7 @@ async function finishSignIn(ctx, given) {
     fields: { email: { value: email }, refresh_token: { value: tok.refresh_token, secret: true }, scopes: { value: tok.scope || SCOPES }, client_id: { value: client.fields.client_id.value } },
   });
   tokens.set(`${ctx.user.id}/${email}`, { value: tok.access_token, expires: Date.now() + (tok.expires_in || 3600) * 1000 });
-  return `Signed in as ${email}.`;
+  return { signed_in: true, account: email };
 }
 
 const signInSchema = { user: "create table pending (verifier text not null, client text);" };
@@ -153,7 +154,7 @@ const signInSchema = { user: "create table pending (verifier text not null, clie
 const signInOps = {
   accounts: {
     reads: true,
-    description: "The Google accounts signed in here, the default first: each { account, ok }, with why when ok is false and it needs signing in again.",
+    description: `The Google accounts ${TITLE} can use, the default first: [{ account, ok }], with why when ok is false (${APP}_sign_in with that account fixes it). Every other operation's account takes one of these.`,
     input: { type: "object", properties: {} },
     async run(ctx) {
       return Promise.all((await accounts(ctx)).map(async (account) => {
@@ -162,25 +163,29 @@ const signInOps = {
     },
   },
   sign_in: {
-    description: "Sign in to a Google account, or another one, or with account, allow this app on one: returns a link to open in a browser; then pass the address the browser ends up on as code (here or to finish_sign_in).",
+    reads: false,
+    description: `Start signing a Google account in to ${TITLE}, or allowing ${TITLE} on one already signed in to another Google app: gives { url, then }. The person opens url and signs in; then give the address their browser ends on to ${APP}_finish_sign_in.`,
     input: { type: "object", properties: {
-      code: { type: "string", description: "the address the browser was sent to after signing in, to finish here instead" },
-      account: { type: "string", description: "the account's address, to suggest it to Google" },
+      account: { type: "string", description: "the account's address, like someone@gmail.com, to suggest it to Google; for one that needs signing in again, as accounts lists it" },
     } },
-    async run(ctx, { code, account }) {
+    async run(ctx, { account }) {
       if (!ctx.user) throw new Error("this device doesn't keep your data: use one of your own devices");
-      if (code) return finishSignIn(ctx, code);
-      return `Open this link in a browser on any device and sign in. The browser then fails to load a 127.0.0.1 page: copy that page's whole address and pass it to ${APP}_finish_sign_in.\n\n${await startSignIn(ctx, account)}`;
+      return {
+        url: await startSignIn(ctx, account),
+        then: `The person opens url and signs in. Their browser then fails to load a 127.0.0.1 page: give that page's whole address to ${APP}_finish_sign_in.`,
+      };
     },
   },
   finish_sign_in: {
-    description: "Finish signing in: the address the browser ended up on after sign_in's link (or just its code). Answers { signed_in: false, why } when Google didn't sign in.",
-    input: { type: "object", required: ["code"], properties: { code: { type: "string", description: "the address, or its code" } } },
+    reads: false,
+    description: `Finish signing in, with the address the browser ended on after ${APP}_sign_in's url. Gives { signed_in: true, account }, or { signed_in: false, why } when Google didn't sign in.`,
+    input: { type: "object", required: ["code"], properties: { code: { type: "string", description: "the whole address the browser ended on, like http://127.0.0.1:4747/hooks/…/oauth?code=…, or just its code" } } },
     run: (ctx, { code }) => finishSignIn(ctx, code),
   },
   sign_out: {
-    description: "Sign a Google account out of this app; it stays signed in to the other Google apps that use it.",
-    input: { type: "object", required: ["account"], properties: { account: { type: "string", description: "the account's address, or a part of it only it has" } } },
+    reads: false,
+    description: `Sign a Google account out of ${TITLE}; it stays signed in to the other Google apps that use it, and ${APP}_sign_in signs it in again.`,
+    input: { type: "object", required: ["account"], properties: { account: { type: "string", description: `the account's address, or a part of it only it has, as ${APP}_accounts lists them` } } },
     async run(ctx, { account: name }) {
       const email = await account(ctx, name);
       const item = (await accountItems(ctx)).find((i) => i.fields.email.value === email);
@@ -192,83 +197,133 @@ const signInOps = {
 };
 
 
-async function api(ctx, email, method, path, { query, json, raw, type } = {}) {
-  const acc = { email: await account(ctx, email).catch(() => { throw needsConnecting(); }) };
-  const access = await token(ctx, acc.email).catch((e) => { throw new DriveError(e.message); });
-  const q = query ? `?${new URLSearchParams(Object.entries(query).filter(([, v]) => v !== undefined && v !== null).map(([k, v]) => [k, String(v)]))}` : "";
+/// Calls Drive's API as the account named (the first when none is); `missing` is what to say to a 404, `hint` what
+/// to add to a 400. Errors keep Drive's status first ("Drive 404: …"), as apps that save to Drive tell them apart by it.
+async function api(ctx, name, method, path, { query, json, raw, type, missing, hint } = {}) {
+  if (!(await accounts(ctx)).length) throw needsConnecting();
+  const email = await account(ctx, name);
+  const access = await token(ctx, email).catch((e) => { throw new DriveError(e.message); });
+  const q = query ? `?${new URLSearchParams(Object.entries(query).filter(([, v]) => v !== undefined && v !== null && v !== "").map(([k, v]) => [k, String(v)]))}` : "";
   const r = await fetch(`${path.startsWith("http") ? "" : API}${path}${q}`, {
     method,
     headers: { authorization: `Bearer ${access}`, ...(json ? { "content-type": "application/json" } : type ? { "content-type": type } : {}) },
     body: json ? JSON.stringify(json) : raw,
   });
   const text = await r.text();
-  if (r.status === 401) { tokens.delete(`${ctx.user.id}/${acc.email}`); throw needsConnecting(); }
+  if (r.status === 401) { tokens.delete(`${ctx.user.id}/${email}`); throw needsConnecting(); }
   if (!r.ok) {
     let message = text.slice(0, 200);
     try { message = JSON.parse(text).error?.message || message; } catch {}
+    if (r.status === 404 && missing) message = missing;
+    else if (r.status === 400 && hint) message = `${message.replace(/\.$/, "")}: ${hint}`;
     throw new DriveError(`Drive ${r.status}: ${message}`);
   }
   return text ? JSON.parse(text) : null;
 }
 
 const fromB64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
-const accountInput = { type: "string", description: "which Drive account, by address; the first when left out" };
+const str = (description) => ({ type: "string", description });
+const accountInput = str(`which account: its address or a part of it only it has, as ${APP}_accounts lists them; default the first`);
+const withAccount = (properties, required) => ({ type: "object", properties: { ...properties, account: accountInput }, ...(required ? { required } : {}) });
+const noFile = (id) => `no file ${id}, or not one this account can see: file ids come from drive_files_list (root is My Drive)`;
+const FIELDS_HINT = "fields is Drive's field list, like id,name,mimeType,parents,modifiedTime,webViewLink";
+
+// What each operation gives when fields is left out: what an agent uses, without Drive's kind on everything.
+const FILE = "id,name,mimeType,parents,modifiedTime,size,webViewLink,trashed";
+const LIST = "nextPageToken,files(id,name,mimeType,parents,modifiedTime,webViewLink)";
+const MADE = "id,name,mimeType,parents,webViewLink";
+
+const fileId = str("a file's or folder's id, from drive_files_list (or the part after /d/ or /folders/ in its address); root is My Drive");
+const fields = (usual) => str(`which fields to give back, in Drive's field syntax, like id,name,parents,appProperties; default ${usual}`);
+const metadataInput = (what) => ({
+  type: "object",
+  description: `${what}, as Drive's File resource: name (like "Budget 2026.pdf"), parents (folder ids, like ["root"]), mimeType (application/vnd.google-apps.folder for a folder), description, appProperties (your app's own key-value pairs), id (one from drive_generate_ids, so a retry never makes two)`,
+});
 
 export default {
   name: "drive",
   title: "Google Drive",
   icon: "google-drive-logo",
   color: "#fbbc04",
-  description: "Your Google Drive: find, read, upload and move files",
-  instructions: "Google Drive is your own Drive accounts. drive_accounts lists them; drive_sign_in connects one (a link to open, then drive_finish_sign_in with the address the browser ends up on). The files_* operations are Drive's own API (v3): files_get, files_list (q is Drive's search), files_create, files_upload, files_update (addParents and removeParents move a file), generate_ids.",
+  description: "Your Google Drive: find, upload, rename and move files",
+  instructions: "Google Drive is the person's Drive accounts, through Drive's own API (v3), by its names: files_list finds files with Drive's q search (name contains 'budget' and trashed = false), files_get gives one, files_create makes a folder, files_upload uploads a file, files_update renames, moves (addParents, removeParents) or trashes one, generate_ids gives ids to make files with safely. Results give the fields asked for; fields asks for more. With several accounts, each operation takes account.",
   vault: VAULT,
   schema: signInSchema,
 
   ops: {
     ...signInOps,
-    // Drive's sign-in answers { url }, as apps that save to Drive take it.
-    sign_in: { ...signInOps.sign_in, async run(ctx, input) {
-      if (!ctx.user) throw new Error("this device doesn't keep your data: use one of your own devices");
-      return input.code ? finishSignIn(ctx, input.code) : { url: await startSignIn(ctx, input.account) };
-    } },
     files_get: {
-      description: "A file's or folder's metadata (fields like id,name,parents,mimeType,trashed). fileId root is My Drive.",
-      input: { type: "object", required: ["fileId"], properties: { fileId: { type: "string" }, fields: { type: "string" }, account: accountInput } },
-      run: (ctx, { fileId, fields, account: a }) => api(ctx, a, "GET", `/files/${encodeURIComponent(fileId)}`, { query: { fields, supportsAllDrives: true } }),
+      reads: true,
+      description: `One file's or folder's metadata, as Drive's files.get gives it: by default ${FILE} (webViewLink opens it; size is in bytes; times are ISO 8601). Its contents: Google Docs and Sheets read them; other files aren't read here.`,
+      input: withAccount({ fileId, fields: fields(FILE) }, ["fileId"]),
+      run: (ctx, { fileId, fields, account: a }) => api(ctx, a, "GET", `/files/${encodeURIComponent(fileId)}`, { query: { fields: fields || FILE, supportsAllDrives: true }, missing: noFile(fileId), hint: FIELDS_HINT }),
     },
     files_list: {
-      description: "Files matching Drive's search q (like 'root' in parents and trashed = false), with fields, orderBy, pageSize and pageToken.",
-      input: { type: "object", properties: { q: { type: "string" }, fields: { type: "string" }, orderBy: { type: "string" }, pageSize: { type: "number" }, pageToken: { type: "string" }, account: accountInput } },
-      run: (ctx, { account: a, ...query }) => api(ctx, a, "GET", "/files", { query }),
+      reads: true,
+      description: `Find files and folders with Drive's search (files.list): { files: [${LIST.slice(LIST.indexOf("(") + 1, -1)}], nextPageToken } by default. When nextPageToken is there, give it as pageToken, with the same q, for the rest.`,
+      input: withAccount({
+        q: str("Drive's search query, like name contains 'budget' and trashed = false, or 'FOLDER_ID' in parents and trashed = false, or mimeType = 'application/vnd.google-apps.folder', or fullText contains 'invoice', or modifiedTime > '2026-10-01T00:00:00'; default every file, trashed ones too"),
+        fields: fields(LIST),
+        orderBy: str("how to sort, like modifiedTime desc, or folder,name, or name; keys: createdTime, folder, modifiedByMeTime, modifiedTime, name, quotaBytesUsed, recency, sharedWithMeTime, starred, viewedByMeTime"),
+        pageSize: { type: "integer", description: "at most this many files, 1 to 1000; default 100" },
+        pageToken: str("the nextPageToken the last files_list gave, with the same q, for the next page"),
+      }),
+      run: (ctx, { account: a, fields, ...query }) => api(ctx, a, "GET", "/files", {
+        query: { ...query, fields: fields || LIST },
+        hint: "q is Drive's search syntax, like name contains 'budget' and trashed = false, with values in single quotes; orderBy is like modifiedTime desc; " + FIELDS_HINT,
+      }),
     },
     files_create: {
-      description: "Make a file without content, like a folder (mimeType application/vnd.google-apps.folder): body is its metadata (id from generate_ids, name, parents, appProperties).",
-      input: { type: "object", required: ["body"], properties: { body: { type: "object" }, fields: { type: "string" }, account: accountInput } },
-      run: (ctx, { body, fields, account: a }) => api(ctx, a, "POST", "/files", { json: body, query: { fields } }),
+      reads: false,
+      description: `Make a file with no content, like a folder (files.create): body is its metadata. Gives ${MADE} by default. To upload a file's bytes, files_upload.`,
+      input: withAccount({ body: metadataInput("the new file's metadata, like { name: \"Receipts\", mimeType: \"application/vnd.google-apps.folder\", parents: [\"root\"] }"), fields: fields(MADE) }, ["body"]),
+      run: (ctx, { body, fields, account: a }) => api(ctx, a, "POST", "/files", { json: body, query: { fields: fields || MADE, supportsAllDrives: true }, missing: "no folder among body.parents: folder ids come from drive_files_list (root is My Drive)", hint: FIELDS_HINT }),
     },
     files_upload: {
-      description: "Upload a file: metadata (id, name, parents, appProperties), its type, and its bytes as data (base64) or blob (a kept file's hash, as file put prints it).",
-      input: { type: "object", required: ["metadata", "type"], properties: { metadata: { type: "object" }, type: { type: "string" }, data: { type: "string" }, blob: { type: "string" }, fields: { type: "string" }, account: accountInput } },
-      async run(ctx, { metadata, type, data, blob, fields, account: a }) {
-        const bytes = blob ? await ctx.blob.get(blob) : fromB64(data || "");
+      reads: false,
+      description: `Upload a file (files.create with its bytes): metadata names it and says where it goes. Gives ${MADE} by default.`,
+      input: withAccount({
+        metadata: metadataInput("the new file's metadata, like { name: \"receipt.pdf\", parents: [\"FOLDER_ID\"] }; name defaults to file's"),
+        file: { type: "object", format: "file", description: "the file to upload, like one gmail_attachment gave back" },
+        type: str("its MIME type, like application/pdf; default file's, or metadata's mimeType"),
+        data: str("or its bytes, in base64"), blob: str("or a kept file's hash, as file put prints it"),
+        fields: fields(MADE),
+      }, ["metadata"]),
+      async run(ctx, { metadata = {}, file, type, data, blob, fields, account: a }) {
+        if (!file && !blob && data == null) throw new Error("give file (or data, base64, or blob): what to upload");
+        const bytes = blob ? await ctx.blob.get(blob) : fromB64(file ? file.base64 : data);
+        type = type || file?.type || metadata.mimeType;
+        if (!type) throw new Error("give type: the file's MIME type, like application/pdf");
+        const meta = { ...metadata, name: metadata.name || file?.name, mimeType: metadata.mimeType || type };
         const boundary = "one-drive-upload";
-        const head = new TextEncoder().encode(`--${boundary}\r\ncontent-type: application/json; charset=utf-8\r\n\r\n${JSON.stringify({ ...metadata, mimeType: metadata.mimeType || type })}\r\n--${boundary}\r\ncontent-type: ${type}\r\n\r\n`);
+        const head = new TextEncoder().encode(`--${boundary}\r\ncontent-type: application/json; charset=utf-8\r\n\r\n${JSON.stringify(meta)}\r\n--${boundary}\r\ncontent-type: ${type}\r\n\r\n`);
         const tail = new TextEncoder().encode(`\r\n--${boundary}--\r\n`);
         const body = new Uint8Array(head.length + bytes.length + tail.length);
         body.set(head); body.set(bytes, head.length); body.set(tail, head.length + bytes.length);
-        return api(ctx, a, "POST", "https://www.googleapis.com/upload/drive/v3/files", { raw: body, type: `multipart/related; boundary=${boundary}`, query: { uploadType: "multipart", fields } });
+        return api(ctx, a, "POST", "https://www.googleapis.com/upload/drive/v3/files", {
+          raw: body, type: `multipart/related; boundary=${boundary}`, query: { uploadType: "multipart", fields: fields || MADE, supportsAllDrives: true },
+          missing: "no folder among metadata.parents: folder ids come from drive_files_list (root is My Drive)", hint: FIELDS_HINT,
+        });
       },
     },
     files_update: {
-      description: "Change a file's metadata (body: name, appProperties) and move it (addParents, removeParents: folder ids). Its id and links stay.",
-      input: { type: "object", required: ["fileId"], properties: { fileId: { type: "string" }, body: { type: "object" }, addParents: { type: "string" }, removeParents: { type: "string" }, fields: { type: "string" }, account: accountInput } },
+      reads: false,
+      description: `Rename, move or trash a file or folder (files.update); its id and links stay. Gives ${MADE} by default. Moving: addParents the new folder, removeParents the old one (its parents, from files_get).`,
+      input: withAccount({
+        fileId,
+        body: { type: "object", description: "what changes, as Drive's File resource, like { name: \"Budget 2026.pdf\" }, { trashed: true } (to the trash, where it stays 30 days) or { trashed: false } (back out), description, appProperties" },
+        addParents: str("folder ids to put it in, comma-separated, from drive_files_list (root is My Drive)"),
+        removeParents: str("folder ids to take it out of, comma-separated, as files_get gives its parents"),
+        fields: fields(MADE),
+      }, ["fileId"]),
       run: (ctx, { fileId, body = {}, addParents, removeParents, fields, account: a }) =>
-        api(ctx, a, "PATCH", `/files/${encodeURIComponent(fileId)}`, { json: body, query: { addParents, removeParents, fields } }),
+        api(ctx, a, "PATCH", `/files/${encodeURIComponent(fileId)}`, { json: body, query: { addParents, removeParents, fields: fields || MADE, supportsAllDrives: true }, missing: noFile(fileId), hint: FIELDS_HINT }),
     },
     generate_ids: {
-      description: "Ids for files not made yet, so making one twice (a retry) never makes two.",
-      input: { type: "object", required: ["count"], properties: { count: { type: "number" }, account: accountInput } },
-      run: (ctx, { count, account: a }) => api(ctx, a, "GET", "/files/generateIds", { query: { count, space: "drive", type: "files" } }),
+      reads: true,
+      description: "Ids for files not made yet ({ ids }), to give files_create or files_upload as metadata's id: making one twice with the same id (a retry) never makes two.",
+      input: withAccount({ count: { type: "integer", description: "how many, 1 to 1000" } }, ["count"]),
+      run: async (ctx, { count, account: a }) => ({ ids: (await api(ctx, a, "GET", "/files/generateIds", { query: { count, space: "drive", type: "files" } })).ids }),
     },
   },
 
@@ -350,8 +405,7 @@ async function start(account, b) {
   busy(b, true);
   let link;
   try {
-    const r = await one.call("sign_in", account ? { account } : {});
-    link = typeof r === "string" ? r.split("\\n").pop() : r.url;
+    link = (await one.call("sign_in", account ? { account } : {})).url;
   } catch (e) {
     // No Google sign-in yet: the person picks one from their Vault, or makes one, then it goes on.
     if (/Choose a Google sign-in/.test(e.message) && one.vault) {
