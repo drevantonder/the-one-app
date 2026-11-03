@@ -202,7 +202,7 @@ impl Device {
     /// → the nodes it may ask, with their seal keys. The install's genesis is kept the first time, and must be the same
     /// after.
     async fn read_members(&self) -> Result<HashMap<[u8; 32], [u8; 32]>, Error> {
-        let bucket = Signed { address: self.address.clone(), secret: self.key.to_bytes() };
+        let bucket = Signed::new(self.address.clone(), self.key.to_bytes());
         let me = self.key();
         let mut epochs: BTreeMap<u32, [u8; 32]> = BTreeMap::new();
         let mut n = 1;
@@ -603,14 +603,13 @@ fn error(out: &Value) -> Option<String> {
 async fn http(method: &str, url: &str, token: Option<&str>, body: Option<Value>) -> Result<(u16, Value), Error> {
     let (method, url, token) = (method.to_string(), url.to_string(), token.map(str::to_string));
     tokio::task::spawn_blocking(move || {
-        let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).timeout_global(Some(std::time::Duration::from_secs(20))).build().into();
         let mut request = ureq::http::Request::builder().method(method.as_str()).uri(&url);
         if let Some(token) = token {
             request = request.header("authorization", format!("Bearer {token}"));
         }
         let response = match body {
-            Some(body) => agent.run(request.header("content-type", "application/json").body(keys::canonical(&body)).map_err(failed)?),
-            None => agent.run(request.body(()).map_err(failed)?),
+            Some(body) => crate::bucket::AGENT.run(request.header("content-type", "application/json").body(keys::canonical(&body)).map_err(failed)?),
+            None => crate::bucket::AGENT.run(request.body(()).map_err(failed)?),
         };
         let mut response = response.map_err(|e| failed(format!("Couldn't reach your One App: {e}")))?;
         let status = response.status().as_u16();
