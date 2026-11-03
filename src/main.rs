@@ -948,19 +948,25 @@ fn deployed_said(done: &str, here: bool) -> String {
 fn command_help(words: &[String]) -> Option<String> {
     let first = words.first().filter(|w| *w != "-h")?;
     let text = every_command();
-    let mut out = String::new();
-    let mut taking = false;
-    for line in text.lines() {
-        if line.starts_with(&format!("  {CLI} {first}")) {
-            taking = true;
-        } else if !line.starts_with("        ") {
-            taking = false;
+    // The lines for the most words given that have any: vault set's, else every vault line.
+    let lines = |prefix: &str| {
+        let mut out = String::new();
+        let mut taking = false;
+        for line in text.lines() {
+            if let Some(rest) = line.strip_prefix(&format!("  {CLI} {prefix}")) {
+                taking = rest.is_empty() || rest.starts_with(' ');
+            } else if !line.starts_with("        ") {
+                taking = false;
+            }
+            if taking {
+                out.push_str(line);
+                out.push('\n');
+            }
         }
-        if taking {
-            out.push_str(line);
-            out.push('\n');
-        }
-    }
+        out
+    };
+    let commands: Vec<&String> = words.iter().take_while(|w| !w.starts_with('-')).collect();
+    let out = (1..=commands.len()).rev().map(|n| lines(&commands[..n].iter().map(|w| w.as_str()).collect::<Vec<_>>().join(" "))).find(|o| !o.is_empty()).unwrap_or_default();
     let app = get("/v1/apps").ok().and_then(|a| a.as_array().cloned()).unwrap_or_default().iter().any(|a| a["name"] == first.as_str());
     match (app, out.is_empty()) {
         (true, _) if words.len() > 1 => None,
