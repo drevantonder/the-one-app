@@ -544,7 +544,9 @@ impl Node {
     /// which it checks itself. → what it offers, and whom it serves.
     pub(super) async fn hello_service(&self, to: Key) -> Result<Option<(Value, Vec<String>)>> {
         // Only the member entries: a service needs who's who, not what anyone's apps wrote.
-        let entries: Vec<Entry> = self.with(|i| Ok(i.r.store.scope("global")?))?.into_iter().filter(members::is_member_entry).collect();
+        // And only those by an endpoint the install listed: a service passes over the rest, so counting them would leave it
+        // behind for good.
+        let entries: Vec<Entry> = self.with(|i| Ok(i.r.store.scope("global")?.into_iter().filter(|e| members::is_member_entry(e) && i.r.members.machines.contains_key(&e.author())).collect()))?;
         let hello = json!({ "entries": entries.len() });
         let mut answer = self.send(&to, "hello", &hello, true, CONNECT).await?;
         if answer["behind"] == true {
