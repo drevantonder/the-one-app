@@ -168,15 +168,16 @@ class Store(private val application: android.app.Application, val signIn: SignIn
         if (running?.isActive == true) return
         running = scope.launch {
             var misses = 1
+            val started = System.currentTimeMillis()
             while (true) {
                 try {
                     refreshState()
                     break
                 } catch (e: NodeError) {
                     if (e.signedOut) return@launch signedOut(e.message)
-                    unreachable(e.message)
+                    unreachable(e.message, misses, started)
                 } catch (e: Exception) {
-                    unreachable("Your devices aren’t answering.")
+                    unreachable("Your devices aren’t answering.", misses, started)
                 }
                 delay(retryWait(misses++))
             }
@@ -186,9 +187,10 @@ class Store(private val application: android.app.Application, val signIn: SignIn
         }
     }
 
-    private fun unreachable(message: String?) {
+    /** Can't Reach Your Devices, once it's more than a blip: a second miss, or 3 seconds of them. */
+    private fun unreachable(message: String?, misses: Int, started: Long) {
         failure = message
-        if (state == null) phase = Phase.Unreachable
+        if (state == null && (misses >= 2 || System.currentTimeMillis() - started >= 3000)) phase = Phase.Unreachable
     }
 
     /** Back to the first screen, saying `why` when the install turned this phone away rather than the person signing out. */

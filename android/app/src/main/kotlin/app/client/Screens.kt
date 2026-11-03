@@ -19,6 +19,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
@@ -71,6 +73,8 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -170,9 +174,15 @@ fun Shell(store: Store) {
         // Every page side by side then Settings, to swipe between, opened at the page asked for. Its dots sit at its
         // bottom, above the gesture bar.
         Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.systemBars)) {
-            if (store.phase == Store.Phase.Ready && store.install != null) {
-                key(store.opened) { ScreenView(store, Route.Own("pages", obj("swipe" to true, "scope" to store.page).toString())) }
-            } else Starting(store)
+            // Made once the first frame is up, while the node's still answering, so it's there the moment it has;
+            // hidden till then.
+            var made by remember { mutableStateOf(false) }
+            LaunchedEffect(Unit) { withFrameNanos {}; made = true }
+            val ready = store.phase == Store.Phase.Ready && store.install != null
+            if (made && (store.state == null || store.install != null)) Box(Modifier.fillMaxSize().alpha(if (ready) 1f else 0f)) {
+                key(store.opened) { ScreenView(store, Route.Own("pages", obj("swipe" to true, "scope" to store.page).toString()), ready = ready) }
+            }
+            if (!ready) Starting(store)
         }
         BackHandler(enabled = store.path.isNotEmpty()) { store.path.removeAt(store.path.lastIndex) }
         AnimatedContent(
@@ -192,10 +202,18 @@ fun Shell(store: Store) {
 @Composable
 private fun Starting(store: Store) {
     val p = LocalPalette.current
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+    // Over the pages while they're hidden, so nothing there is touched.
+    Box(Modifier.fillMaxSize().background(p.background).pointerInput(Unit) {
+        awaitPointerEventScope { while (true) awaitPointerEvent().changes.forEach { it.consume() } }
+    }, contentAlignment = Alignment.Center) {
         if (store.phase == Store.Phase.Unreachable) Unavailable("Can’t Reach Your Devices", (store.failure ?: "") + "\nTrying again…")
         else if (store.state != null && store.install == null) Unavailable("Not Set Up Yet", "Set it up on one of your computers first.")
-        else CircularProgressIndicator(color = p.secondary)
+        else {
+            // Only if it's slow: most starts are quicker than a spinner would be worth.
+            var slow by remember { mutableStateOf(false) }
+            LaunchedEffect(Unit) { delay(400); slow = true }
+            if (slow) CircularProgressIndicator(color = p.secondary)
+        }
     }
 }
 
@@ -261,7 +279,7 @@ private fun SheetView(store: Store, sheet: Sheet) {
 
 /** A screen's page in its web view, with the menus and alerts it asks for. */
 @Composable
-private fun ScreenView(store: Store, route: Route, sheet: Sheet? = null, pushed: Pushed? = null, setTitle: (String?) -> Unit = {}) {
+private fun ScreenView(store: Store, route: Route, sheet: Sheet? = null, pushed: Pushed? = null, ready: Boolean = true, setTitle: (String?) -> Unit = {}) {
     val context = LocalContext.current
     val palette = LocalPalette.current
     // Drawn again in this app's light or dark, once it changes: a web view takes the scheme its theme says.
@@ -270,18 +288,31 @@ private fun ScreenView(store: Store, route: Route, sheet: Sheet? = null, pushed:
     val accent = store.config?.accent ?: BuildConfig.ACCENT
     val bridge = remember(route, dark) { Bridge(context, store, route, sheet, pushed, setTitle) }
     DisposableEffect(bridge) { onDispose { bridge.close() } }
+    // Made before the node answered (the pages), it asks again once it has, if it couldn't then.
+    LaunchedEffect(bridge, ready) { if (ready) bridge.again() }
+    // Faded in as it first draws, not popped in.
+    val shown by animateFloatAsState(if (loaded) 1f else 0f, tween(150), label = "shown")
+    // The bar saying it's offline only for longer than a blip.
+    val offline = bridge.offline
+    var late by remember(bridge) { mutableStateOf(false) }
+    LaunchedEffect(bridge, offline != null) {
+        late = false
+        if (offline != null) {
+            delay(1500)
+            late = true
+        }
+    }
 
     key(dark) { Box(Modifier.fillMaxSize()) {
         AndroidView(
-            // Below the bar saying it's offline, while it is.
-            modifier = Modifier.fillMaxSize().padding(top = if (bridge.offline != null) 64.dp else 0.dp).alpha(if (loaded) 1f else 0f),
+            modifier = Modifier.fillMaxSize().alpha(shown),
             factory = { ctx ->
                 val themed = android.view.ContextThemeWrapper(ctx, if (dark) android.R.style.Theme_DeviceDefault else android.R.style.Theme_DeviceDefault_Light)
                 bridge.make(themed, shim(accent, dark, Scanner.available(ctx), ctx.resources.configuration.fontScale)) { loaded = true }.also { bridge.load() }
             },
         )
         bridge.failure?.let { Unavailable("Can’t Open This", it) }
-        bridge.offline?.let { Offline(it, bridge::tryNow) }
+        if (late) offline?.let { Offline(it, bridge::tryNow) }
         if (!loaded && bridge.failure == null) {
             var slow by remember { mutableStateOf(false) }
             LaunchedEffect(Unit) { delay(400); slow = true }
@@ -439,6 +470,13 @@ private class Bridge(val context: Context, val store: Store, val route: Route, v
         }
     }
 
+    /** Loads it again if it couldn't be, with no copy to show. */
+    fun again() {
+        if (failure == null) return
+        failure = null
+        load()
+    }
+
     fun tryNow() {
         val o = offline ?: return
         offline = Offline(o.kept, null)
@@ -501,6 +539,8 @@ private class Bridge(val context: Context, val store: Store, val route: Route, v
                 return WebResourceResponse("application/octet-stream", null, bytes.inputStream())
             }
 
+            // Shown once it's drawn its first frame, not once its every image has loaded.
+            override fun onPageCommitVisible(view: WebView, url: String?) = loaded()
             override fun onPageFinished(view: WebView, url: String?) = loaded()
         }
         // `<input type=file>`: the phone's own picker.

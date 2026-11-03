@@ -65,6 +65,11 @@ class MainActivity : ComponentActivity() {
             }
         }
         if (savedInstanceState == null) intent?.data?.let(::open)
+        // The web view's engine, started once the first frame's up, so the first screen opened doesn't wait for it.
+        android.os.Looper.myQueue().addIdleHandler {
+            runCatching { android.webkit.WebView(applicationContext).destroy() }
+            false
+        }
     }
 
     private var started = false
