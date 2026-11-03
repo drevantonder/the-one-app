@@ -45,25 +45,38 @@ const STREAMS: u32 = 32;
 /// How long reaching a node may take.
 const CONNECT: Duration = Duration::from_secs(10);
 
-/// The install a service is in: its address, where its relay and sign-in are, and the hash of its first entry, which
-/// its member entries are replayed from.
+/// The install a service is in: its address, where its relay and sign-in are, the hash of its first entry, which its
+/// member entries are replayed from, the person whose service it is to be, and the one-time secret their device minted
+/// for it (`one sidecars install-link`), which proves to that device that its request is this service's.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Install {
     pub address: String,
     pub root: String,
+    pub user: String,
+    pub secret: String,
 }
 
 impl Install {
-    /// From what `one sidecars install-link` prints on a device of the install: `<address>#<root>`.
+    /// From what `one sidecars install-link` prints on its person's device: `<address>#<root>/<user>/<secret>`.
     pub fn parse(link: &str) -> Result<Install> {
-        let (address, root) = link.trim().rsplit_once('#').context("that's your One App's address and its first entry: <address>#<hash>, as one sidecars install-link prints it")?;
+        let said = "that's what one sidecars install-link prints on one of your devices: <address>#<hash>/<you>/<secret>";
+        let (address, rest) = link.trim().rsplit_once('#').context(said)?;
+        let mut parts = rest.split('/');
+        let (Some(root), Some(user), Some(secret), None) = (parts.next(), parts.next(), parts.next(), parts.next()) else { bail!("{said}") };
         Hash::from_hex(root).context("after the # is the hash of your One App's first entry")?;
+        ensure!(crate::entry::is_id(user), "{said}");
+        ensure!(unhex(secret).is_ok(), "{said}");
         ensure!(address.starts_with("http://") || address.starts_with("https://"), "before the # is your One App's address");
-        Ok(Install { address: address.trim_end_matches('/').to_string(), root: root.to_string() })
+        Ok(Install { address: address.trim_end_matches('/').to_string(), root: root.to_string(), user: user.to_string(), secret: secret.to_string() })
     }
 
     pub fn link(&self) -> String {
-        format!("{}#{}", self.address, self.root)
+        format!("{}#{}/{}/{}", self.address, self.root, self.user, self.secret)
+    }
+
+    /// The same install for the same person, whatever secret each carries.
+    fn same(&self, other: &Install) -> bool {
+        (&self.address, &self.root, &self.user) == (&other.address, &other.root, &other.user)
     }
 }
 
@@ -88,6 +101,8 @@ struct Inner {
     /// A connection to each node it asks for calls.
     conns: Mutex<HashMap<Key, Connection>>,
     strangers: AtomicUsize,
+    /// The install's sign-in service, whose keys check a sign-in a node passes on to a service that serves everyone.
+    issuer: crate::kernel::Issuer,
 }
 
 /// Where a service keeps its key, its install and what it knows of it.
@@ -124,9 +139,10 @@ impl Service {
         let install_file = dir.join("install.json");
         let kept: Option<Install> = std::fs::read(&install_file).ok().map(|b| serde_json::from_slice(&b)).transpose()?;
         let install = match (kept, install) {
-            (Some(kept), Some(given)) if kept != given => bail!("{name} here is in another One App already ({}): remove {} to move it", kept.address, dir.display()),
-            (Some(kept), _) => kept,
-            (None, Some(given)) => {
+            (Some(kept), Some(given)) if !kept.same(&given) => bail!("{name} here is someone else's, or in another One App ({}): remove {} to move it", kept.address, dir.display()),
+            (Some(kept), None) => kept,
+            // A new link, from the same person, for a new request once the last one's secret ran out.
+            (_, Some(given)) => {
                 write_private(&install_file, &serde_json::to_vec_pretty(&given)?)?;
                 given
             }
@@ -141,6 +157,7 @@ impl Service {
             }
         };
         let root = Hash::from_hex(&install.root)?;
+        let install_address = install.address.clone();
         let entries = std::fs::read(dir.join("entries")).ok().and_then(|b| crate::entry::unpack(&b).ok()).unwrap_or_default();
         let members = replay(root, &entries);
         Ok(Service(Arc::new(Inner {
@@ -155,6 +172,7 @@ impl Service {
             endpoint: Mutex::new(None),
             conns: Mutex::new(HashMap::new()),
             strangers: AtomicUsize::new(0),
+            issuer: crate::kernel::Issuer::new(&install_address),
         })))
     }
 
@@ -191,7 +209,8 @@ impl Service {
     }
 
     fn owner_in(&self, m: &Members) -> Option<String> {
-        m.service(&self.key()).filter(|s| s.service.as_deref() == Some(self.0.name.as_str())).map(|s| s.user.clone())
+        // Only a listing as the person whose link it was given counts: nobody else can make it theirs.
+        m.service(&self.key()).filter(|s| s.service.as_deref() == Some(self.0.name.as_str()) && s.user == self.0.install.user).map(|s| s.user.clone())
     }
 
     /// Starts it: its endpoint, through the install's relay (which lets it in once it's approved), asking to be
@@ -261,8 +280,10 @@ impl Service {
                 }
                 return;
             }
-            if asked.is_none_or(|a| a.elapsed() > Duration::from_secs(10 * 60)) {
-                match self.leave_request().await {
+            // Once the program offering it has said what it is, so the request says whether it serves everyone.
+            let registered = !self.0.sidecars.describe().is_empty();
+            if registered && asked.is_none_or(|a| a.elapsed() > Duration::from_secs(10 * 60)) {
+                match self.request_approval().await {
                     Ok(()) => {
                         let code = self.code();
                         let _ = write_private(&self.0.dir.join("code"), code.as_bytes());
@@ -280,10 +301,17 @@ impl Service {
         }
     }
 
-    async fn leave_request(&self) -> Result<()> {
+    /// Leaves its request to be approved at auth, with its install link's enrollment and proof.
+    pub async fn request_approval(&self) -> Result<()> {
         let me = self.endpoint();
         let path = "/api/auth/devices/requests";
-        let fields = json!({ "route": format!("POST {path}"), "key": hex(&me.key), "seal": hex(&me.seal), "name": self.0.machine, "service": self.0.name });
+        let install = &self.0.install;
+        let secret = unhex(&install.secret)?;
+        let fields = json!({
+            "route": format!("POST {path}"), "key": hex(&me.key), "seal": hex(&me.seal), "name": self.0.machine, "service": self.0.name,
+            "shared": self.0.sidecars.serves_everyone(&self.0.name), "user": install.user,
+            "enrollment": hex(&crate::keys::sha256(&secret)), "proof": crate::keys::service_proof(&secret, &me),
+        });
         let body = crate::keys::signed_request(&self.0.key, "one/auth", fields, now_ms());
         let url = format!("{}{path}", self.0.install.address);
         tokio::task::spawn_blocking(move || {
@@ -342,7 +370,7 @@ impl Service {
         let body = &msg["body"];
         match msg["kind"].as_str() {
             Some("hello") => self.hello(remote, body["entries"].as_u64().unwrap_or(0) as usize),
-            Some("entries") => match self.take_entries(body["pack"].as_str().unwrap_or("")) {
+            Some("entries") => match self.take_entries(&remote, body["pack"].as_str().unwrap_or("")) {
                 Ok(()) => json!({ "ok": true }),
                 Err(err) => json!({ "error": format!("{err:#}") }),
             },
@@ -370,26 +398,25 @@ impl Service {
         describe["runs"] = json!("service");
         let known = self.0.known.lock().unwrap();
         let m = &known.1;
-        let users: Vec<&String> = match (m.service(&self.key()), self.0.sidecars.serves_everyone(&self.0.name)) {
-            (_, true) => m.users.keys().filter(|u| m.user(u).is_some()).collect(),
-            (Some(me), false) => vec![&me.user],
-            (None, false) => Vec::new(),
-        };
+        // Whom it serves is what its listing says, not what the program offering it claims.
+        let users: Vec<&String> = m.users.keys().filter(|u| m.service_serves(&self.key(), u)).collect();
         json!({ "describe": describe, "users": users })
     }
 
-    /// Takes `global`'s entries a node brought, if there are more than it has and they're the install's: each signed,
-    /// its member entries replayed from its first entry.
-    fn take_entries(&self, pack: &str) -> Result<()> {
+    /// Takes `global`'s member entries a node of the install brought (anyone's, while it knows of no node yet, since
+    /// they must replay from the install's first entry): added to those it has, never in place of any, each signed,
+    /// replayed from the first entry; those signed by no endpoint the install ever listed are passed over.
+    fn take_entries(&self, remote: &Key, pack: &str) -> Result<()> {
         let bytes = data_encoding::BASE64.decode(pack.as_bytes()).map_err(|_| anyhow!("the entries aren't base64"))?;
-        let entries = crate::entry::unpack(&bytes)?;
+        let given = crate::entry::unpack(&bytes)?;
         let root = Hash::from_hex(&self.0.install.root)?;
-        let members = replay(root, &entries);
-        ensure!(!members.users.is_empty(), "those aren't your One App's entries");
         let mut known = self.0.known.lock().unwrap();
-        if entries.len() <= known.0.len() {
-            return Ok(());
-        }
+        ensure!(known.1.computes().next().is_none() || known.1.compute(remote).is_some(), "only your One App's devices bring its entries");
+        let (entries, members) = match merged(root, &known.0, given) {
+            Some(merged) => merged,
+            None => return Ok(()),
+        };
+        ensure!(!members.users.is_empty(), "those aren't your One App's entries");
         write_private(&self.0.dir.join("entries"), &crate::entry::pack(&entries.iter().collect::<Vec<_>>()))?;
         *known = (entries, members);
         Ok(())
@@ -408,11 +435,15 @@ impl Service {
             (Some(Ok(key)), Some(user)) => (key, user.to_string()),
             _ => return json!({ "error": "who's asking?" }),
         };
-        let everyone = self.0.sidecars.serves_everyone(&self.0.name);
+        // A sign-in a node passed on counts only once this service has checked it's that person's itself.
+        let signed_in = match me["token"].as_str() {
+            Some(token) => self.signed_in(token, &user).await,
+            None => false,
+        };
         let caller = {
             let known = self.0.known.lock().unwrap();
             let m = &known.1;
-            if let Err(err) = may_call(m, &self.key(), &remote, &key, &user, everyone) {
+            if let Err(err) = may_call(m, &self.key(), &remote, &key, &user, signed_in) {
                 return json!({ "error": format!("{err:#}") });
             }
             let person = m.user(&user);
@@ -434,14 +465,23 @@ impl Service {
         }
     }
 
-    /// Asks a node of its person's to run a call, as them: the first that answers, of those that run their calls.
-    pub async fn ask_node(&self, mut call: Value) -> Result<Value> {
+    /// Whether `token` is an access token the install's sign-in service signed for `user`, unexpired.
+    async fn signed_in(&self, token: &str, user: &str) -> bool {
+        let (service, token) = (self.clone(), token.to_string());
+        let claims = tokio::task::spawn_blocking(move || service.0.issuer.verify(&token, now_ms())).await;
+        matches!(claims, Ok(Ok(c)) if c.sub == user)
+    }
+
+    /// Asks a node of its person's own to run a call, as them: the first that answers. A service asks only for its own
+    /// app, in its person's own scope (`limited`), which their node runs with its own keys until grants land.
+    pub async fn ask_node(&self, call: Value) -> Result<Value> {
         let owner = self.owner().context("this service isn't approved yet")?;
+        let mut call = limited(&self.0.name, &call)?;
         call["me"] = json!({ "key": hex(&self.key()), "user": owner });
         let nodes: Vec<Key> = {
             let known = self.0.known.lock().unwrap();
             let m = &known.1;
-            m.computes().filter(|c| m.serves(&c.key, &owner)).map(|c| c.key).collect()
+            m.computes().filter(|c| c.user == owner && m.runs_for(&c.key, &crate::entry::Scope::User(owner.clone()))).map(|c| c.key).collect()
         };
         let mut why = Vec::new();
         for node in nodes {
@@ -500,16 +540,48 @@ impl Service {
     }
 }
 
-/// Whether a node, `remote`, may ask this service (`me`) for a call by `user` from their device `key`: it's a compute
-/// endpoint of the install that runs their calls, `key` is their own device or such a node, and this service serves
-/// them, as its own person's, or everyone's (`everyone`).
-pub fn may_call(m: &Members, me: &Key, remote: &Key, key: &Key, user: &str, everyone: bool) -> Result<()> {
+/// Whether a node, `remote`, may ask this service (`me`) for a call by `user` from their device `key`: this service
+/// serves them (its own person, or everyone, as its listing says), and the node is one of their own, calling for its
+/// own person; or, for a service that serves everyone, a node that runs their calls bringing their sign-in, which this
+/// service checked (`signed_in`). A node of someone else's, an admin's too, never calls as them otherwise.
+pub fn may_call(m: &Members, me: &Key, remote: &Key, key: &Key, user: &str, signed_in: bool) -> Result<()> {
     let service = m.service(me).context("this service isn't one of your One App's yet")?;
-    ensure!(m.compute(remote).is_some(), "only your One App's devices are answered");
-    let theirs = m.client(key).is_some_and(|c| c.user == user) || m.serves(key, user);
-    ensure!(m.serves(remote, user) && theirs, "{} doesn't run that person's calls", short(remote));
-    ensure!(service.user == user || (everyone && m.user(user).is_some()), "{} serves only its own person", service.service.as_deref().unwrap_or("this service"));
+    let node = m.compute(remote).context("only your One App's devices are answered")?;
+    ensure!(m.service_serves(me, user), "{} serves only its own person", service.service.as_deref().unwrap_or("this service"));
+    let own = node.user == user && (*key == *remote || m.client(key).is_some_and(|c| c.user == user));
+    ensure!(own || (service.shared && signed_in && m.serves(remote, user)), "{} may not call as that person", short(remote));
     Ok(())
+}
+
+/// What a service may ask its person's node to run: only its own app (`name`), on no device named, in its person's
+/// own scope, calling no other app; until grants land, that app's database there is all it reaches. → the call.
+pub fn limited(name: &str, call: &Value) -> Result<Value> {
+    ensure!(call["app"] == name && (call["sidecar"].is_null() || call["sidecar"] == name), "a service asks only for its own app, {name}");
+    ensure!(call["device"].is_null(), "a service can't name a device to run its calls");
+    let scopes_ok = match &call["scopes"] {
+        Value::Null => true,
+        Value::Array(s) => s.iter().all(|s| s == "user"),
+        _ => false,
+    };
+    ensure!(scopes_ok, "a service's calls reach only its person's own scope");
+    Ok(json!({ "app": name, "sidecar": call["sidecar"], "op": call["op"], "input": call["input"], "scopes": ["user"] }))
+}
+
+/// `known` with `given`'s member entries added, if any are new: → them, replayed from the install's first entry, with
+/// those signed by no endpoint it ever listed passed over (junk anyone could sign counts for nothing, and isn't kept).
+fn merged(root: Hash, known: &[Entry], given: Vec<Entry>) -> Option<(Vec<Entry>, Members)> {
+    let mut all: HashMap<String, Entry> = known.iter().map(|e| (e.hash().to_hex(), e.clone())).collect();
+    let before = all.len();
+    for e in given.into_iter().filter(members::is_member_entry) {
+        all.entry(e.hash().to_hex()).or_insert(e);
+    }
+    if all.len() == before {
+        return None;
+    }
+    let entries: Vec<Entry> = all.into_values().collect();
+    let members = replay(root, &entries);
+    let entries: Vec<Entry> = entries.into_iter().filter(|e| members.machines.contains_key(&e.author())).collect();
+    Some((entries, members))
 }
 
 fn replay(root: Hash, entries: &[Entry]) -> Members {
@@ -535,7 +607,7 @@ fn refused(code: StatusCode, why: impl std::fmt::Display) -> Response {
 /// Whether a request is the program's on this machine: it sends the token in the service's folder.
 fn ours(s: &Service, headers: &HeaderMap) -> Result<(), Response> {
     match headers.get(crate::api::LOCAL_TOKEN_HEADER).and_then(|v| v.to_str().ok()) {
-        Some(t) if t == s.0.token => Ok(()),
+        Some(t) if crate::keys::same_secret(t.as_bytes(), s.0.token.as_bytes()) => Ok(()),
         _ => Err(refused(StatusCode::UNAUTHORIZED, "send the local token in the service's folder")),
     }
 }
@@ -594,8 +666,7 @@ async fn call(State(s): State<Service>, headers: HeaderMap, Json(body): Json<Val
     if let Err(r) = ours(&s, &headers) {
         return r;
     }
-    let call = json!({ "app": body["app"], "sidecar": body["sidecar"], "op": body["op"], "input": body["input"], "device": body["device"], "scopes": body["scopes"] });
-    match s.ask_node(call).await {
+    match s.ask_node(body).await {
         Ok(answer) if answer.get("error").is_some() => refused(StatusCode::BAD_REQUEST, answer["error"].as_str().unwrap_or("failed")),
         Ok(answer) => Json(json!({ "ok": answer["ok"] })).into_response(),
         Err(err) => refused(StatusCode::BAD_GATEWAY, format!("{err:#}")),
@@ -682,32 +753,103 @@ mod tests {
         e
     }
 
-    #[test]
-    fn a_service_answers_only_nodes_that_run_its_persons_calls() {
+    /// Andre's install: his Mac (an admin's, so it runs global and serves Sam there), Sam's box (his own), Andre's
+    /// WhatsApp on linux, Andre's push sender shared with everyone, Sam's notes; and a service an admin's device
+    /// lists as Sam's, which counts for nothing. → its entries, members and keys.
+    fn install() -> (Vec<Entry>, Members, [SigningKey; 7]) {
         let key = || SigningKey::from_bytes(&rand::random());
-        let (mac, sams, service, stranger) = (key(), key(), key(), key());
-        let id = |k: &SigningKey| *k.verifying_key().as_bytes();
-        let (andre, sam) = ("a000000000000000", "b000000000000000");
+        let keys = [key(), key(), key(), key(), key(), key(), key()];
+        let [mac, sams, whatsapp, push, notes, taken, _stranger] = &keys;
         let mut prev = None;
-        let genesis = entry(&mac, andre, &mut prev, members::genesis("Home", andre, "Andre", &Endpoint::of(&mac), "mac", &[Kind::Client, Kind::Compute], &id(&key()), &"e".repeat(64)));
+        let genesis = entry(mac, ANDRE, &mut prev, members::genesis("Home", ANDRE, "Andre", &Endpoint::of(mac), "mac", &[Kind::Client, Kind::Compute], &id(&key()), &"e".repeat(64)));
         let mut entries = vec![
             genesis.clone(),
-            entry(&mac, andre, &mut prev, members::device(&Endpoint::of(&sams), sam, "sam's box", &[Kind::Client, Kind::Compute], Some(("Sam", Role::Member)))),
-            entry(&mac, andre, &mut prev, members::service(&Endpoint::of(&service), andre, "linux", "whatsapp")),
+            entry(mac, ANDRE, &mut prev, members::device(&Endpoint::of(sams), SAM, "sam's box", &[Kind::Client, Kind::Compute], Some(("Sam", Role::Member)))),
+            entry(mac, ANDRE, &mut prev, members::service(&Endpoint::of(whatsapp), ANDRE, "linux", "whatsapp", false)),
+            entry(mac, ANDRE, &mut prev, members::service(&Endpoint::of(push), ANDRE, "linux", "push", true)),
+            entry(mac, ANDRE, &mut prev, members::service(&Endpoint::of(taken), SAM, "sam's mac", "imessage", false)),
         ];
-        // Sam's box runs his own scope once his own device lists it, not on an admin's say.
-        let ext = Ext { log: "global".into(), time: 1, user: sam.into(), epoch: 0, previous: vec![entries.last().unwrap().hash()] };
-        entries.push(Entry::create(&sams, ext, None, members::device(&Endpoint::of(&sams), sam, "sam's box", &[Kind::Client, Kind::Compute], None)));
+        // Sam's box runs his own scope once his own device lists it, not on an admin's say; and lists his notes.
+        let mut sams_prev = None;
+        let ext = |prev: &Hash| Ext { log: "global".into(), time: 1, user: SAM.into(), epoch: 0, previous: vec![*prev] };
+        let last = entries.last().unwrap().hash();
+        let e = Entry::create(sams, ext(&last), sams_prev, members::device(&Endpoint::of(sams), SAM, "sam's box", &[Kind::Client, Kind::Compute], None));
+        sams_prev = Some(e.head());
+        entries.push(e);
+        let last = entries.last().unwrap().hash();
+        entries.push(Entry::create(sams, ext(&last), sams_prev, members::service(&Endpoint::of(notes), SAM, "sam's box", "notes", false)));
         let m = replay(genesis.hash(), &entries);
-        assert_eq!(m.service(&id(&service)).map(|s| s.user.as_str()), Some(andre));
-        let may = |node: &SigningKey, user: &str, everyone: bool| may_call(&m, &id(&service), &id(node), &id(node), user, everyone);
-        may(&mac, andre, false).unwrap();
-        let other = may(&sams, sam, false).unwrap_err();
+        (entries, m, keys)
+    }
+
+    const ANDRE: &str = "a000000000000000";
+    const SAM: &str = "b000000000000000";
+
+    fn id(k: &SigningKey) -> Key {
+        *k.verifying_key().as_bytes()
+    }
+
+    #[test]
+    fn a_service_answers_only_its_persons_own_nodes_or_their_checked_sign_in() {
+        let (entries, m, [mac, sams, whatsapp, push, notes, taken, stranger]) = install();
+        let may = |service: &SigningKey, node: &SigningKey, user: &str, signed_in: bool| may_call(&m, &id(service), &id(node), &id(node), user, signed_in);
+        may(&whatsapp, &mac, ANDRE, false).unwrap();
+        let other = may(&whatsapp, &sams, SAM, false).unwrap_err();
         assert!(format!("{other:#}").contains("serves only its own person"), "{other:#}");
-        assert!(may(&sams, andre, false).is_err(), "a node that doesn't run Andre's calls can't call as him");
-        assert!(may(&stranger, andre, false).is_err(), "a stranger is refused");
-        may(&sams, sam, true).unwrap();
+        assert!(may(&whatsapp, &sams, ANDRE, false).is_err(), "Sam's node can't call as Andre");
+        assert!(may(&whatsapp, &stranger, ANDRE, false).is_err(), "a stranger is refused");
+        // An admin's node, which runs Sam's calls in global, never calls Sam's own service as him, even with a sign-in.
+        may(&notes, &sams, SAM, false).unwrap();
+        assert!(m.serves(&id(&mac), SAM));
+        assert!(may(&notes, &mac, SAM, false).is_err(), "an admin's node can't call a member's service as them");
+        assert!(may(&notes, &mac, SAM, true).is_err(), "a service that's only Sam's answers only Sam's own nodes");
+        // A shared one answers each person's own node, and a node that runs their calls only with their sign-in.
+        may(&push, &sams, SAM, false).unwrap();
+        assert!(may(&push, &mac, SAM, false).is_err(), "Andre's node can't call as Sam unasked");
+        may(&push, &mac, SAM, true).unwrap();
+        // Whom a service serves is its listing's say.
+        assert!(m.service_serves(&id(&push), SAM) && !m.service_serves(&id(&whatsapp), SAM));
+        // An admin's device can't list a service as someone else's.
+        assert!(m.service(&id(&taken)).is_none(), "only Sam's own device lists his services");
         // Entries that aren't the install's say nothing.
         assert!(replay(Hash::from_bytes(rand::random()), &entries).users.is_empty());
+    }
+
+    #[test]
+    fn a_service_asks_only_for_its_own_app_in_its_persons_scope() {
+        let ok = limited("whatsapp", &json!({ "app": "whatsapp", "op": "write", "input": { "a": 1 } })).unwrap();
+        assert_eq!(ok, json!({ "app": "whatsapp", "sidecar": null, "op": "write", "input": { "a": 1 }, "scopes": ["user"] }));
+        limited("whatsapp", &json!({ "app": "whatsapp", "sidecar": "whatsapp", "op": "status", "scopes": ["user"] })).unwrap();
+        for call in [
+            json!({ "app": "board", "op": "post" }),
+            json!({ "app": "whatsapp", "sidecar": "shell", "op": "run" }),
+            json!({ "app": "shell", "sidecar": "shell", "op": "run" }),
+            json!({ "app": "whatsapp", "op": "status", "device": "mac" }),
+            json!({ "app": "whatsapp", "op": "read", "scopes": ["global"] }),
+            json!({ "app": "whatsapp", "op": "read", "scopes": "user" }),
+        ] {
+            assert!(limited("whatsapp", &call).is_err(), "{call}");
+        }
+    }
+
+    #[test]
+    fn entries_brought_add_to_those_known_and_never_replace_them() {
+        let (entries, m, [mac, ..]) = install();
+        let root = entries[0].hash();
+        let (known, _) = merged(root, &[], entries.clone()).unwrap();
+        assert_eq!(known.len(), entries.len());
+        // A pack with fewer, or the same, adds nothing and drops nothing.
+        assert!(merged(root, &known, entries[..2].to_vec()).is_none());
+        // A longer pack of junk signed by keys the install never listed is passed over, and what's known stays.
+        let junk: Vec<Entry> = (0..20)
+            .map(|_| {
+                let k = SigningKey::from_bytes(&rand::random());
+                entry(&k, ANDRE, &mut None, members::device(&Endpoint::of(&k), ANDRE, "junk", &[Kind::Client], None))
+            })
+            .collect();
+        let (after, members) = merged(root, &known, junk).unwrap();
+        assert_eq!(after.len(), known.len(), "junk isn't kept");
+        assert_eq!(members.machines.len(), m.machines.len());
+        assert!(members.compute(&id(&mac)).is_some());
     }
 }

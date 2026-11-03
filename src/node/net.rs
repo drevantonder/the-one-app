@@ -462,7 +462,8 @@ impl Node {
     /// offers once it lists this device as one that may call it; until then, that it's behind, and is sent them all,
     /// which it checks itself. → what it offers, and whom it serves.
     pub(super) async fn hello_service(&self, to: Key) -> Result<Option<(Value, Vec<String>)>> {
-        let entries: Vec<Entry> = self.with(|i| Ok(i.r.store.scope("global")?))?;
+        // Only the member entries: a service needs who's who, not what anyone's apps wrote.
+        let entries: Vec<Entry> = self.with(|i| Ok(i.r.store.scope("global")?))?.into_iter().filter(members::is_member_entry).collect();
         let hello = json!({ "entries": entries.len() });
         let mut answer = self.send(&to, "hello", &hello, true, CONNECT).await?;
         if answer["behind"] == true {

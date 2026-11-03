@@ -69,6 +69,12 @@ pub fn client_of(token: &str) -> Option<Key> {
     data_encoding::HEXLOWER.decode(token.strip_prefix(CLIENT)?.as_bytes()).ok()?.try_into().ok()
 }
 
+/// Whether `token` is an access token the install's sign-in service signed, which another device can check: not a
+/// client device's or a scheduled run's.
+pub(super) fn is_sign_in(token: &str) -> bool {
+    !token.starts_with(CLIENT) && !token.starts_with("run.")
+}
+
 fn hash(token: &str) -> [u8; 32] {
     use sha2::Digest;
     sha2::Sha256::digest(token.as_bytes()).into()

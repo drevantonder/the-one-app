@@ -110,6 +110,7 @@ pub fn routes() -> Router<Node> {
         .route("/v1/invite", post(invite))
         .route("/v1/invite-link", post(invite_link))
         .route("/v1/devices/requests", get(device_requests))
+        .route("/v1/services/install-link", post(install_link))
         .route("/v1/devices/approve", post(approve))
         .route("/v1/accept", post(accept))
         .route("/v1/member", post(member))
@@ -749,6 +750,11 @@ async fn invite_link(State(node): State<Node>, me: Me, Json(body): Json<Value>) 
     let role = if body["admin"] == true { Role::Admin } else { Role::Member };
     let (link, until) = node.invite_someone(&me.caller, text(&body, "name")?, role).await?;
     Ok(Json(json!({ "link": link, "until": until })))
+}
+
+/// A service's install link, for this machine's person, from this machine alone (`Node::install_link`): → `{ link }`.
+async fn install_link(State(node): State<Node>) -> Reply {
+    Ok(Json(json!({ "link": node.install_link(&local(&node)?).await? })))
 }
 
 /// The requests to join this device's person may approve (`Node::device_requests`).

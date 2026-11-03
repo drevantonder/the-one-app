@@ -165,9 +165,16 @@ impl Node {
         }
     }
 
-    /// The service endpoint offering `service` on the device called `name` (or by key prefix), if there's one.
-    pub(super) fn find_service(&self, service: &str, name: &str) -> Option<Key> {
-        let found: Vec<Key> = self.with(|i| Ok(i.r.members.services(service).filter(|m| m.name.eq_ignore_ascii_case(name) || hex(&m.key).starts_with(name)).map(|m| m.key).collect())).ok()?;
+    /// The service endpoint offering `service` on the device called `name` (or by key prefix) that serves `user`, if
+    /// there's one: only `user`'s own (`own`), or one its person shares with everyone.
+    pub(super) fn find_service(&self, service: &str, name: &str, user: &str, own: bool) -> Option<Key> {
+        let found: Vec<Key> = self
+            .with(|i| {
+                let m = &i.r.members;
+                let serves = |s: &members::Machine| if own { s.user == user } else { s.user != user && m.service_serves(&s.key, user) };
+                Ok(m.services(service).filter(|s| serves(s) && !name.is_empty() && (s.name.eq_ignore_ascii_case(name) || hex(&s.key).starts_with(name))).map(|s| s.key).collect())
+            })
+            .ok()?;
         match found.as_slice() {
             [one] => Some(*one),
             _ => None,
