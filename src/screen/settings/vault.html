@@ -83,7 +83,18 @@
     const el = document.getElementById("pages");
     if (pages.length < 2) return void (el.innerHTML = "");
     el.innerHTML = `<div class="segmented">${pages.map((p) => `<button data-scope="${esc(p.scope)}" class="${p.scope === scope ? "on" : ""}">${esc(p.title)}</button>`).join("")}</div>`;
-    el.querySelectorAll("button").forEach((b) => (b.onclick = () => ((scope = b.dataset.scope), drawPages(), load())));
+    el.querySelectorAll("button").forEach((b) => (b.onclick = () => b.dataset.scope !== scope && show(b.dataset.scope)));
+  }
+  // Another page's items: chosen at once, its list dimmed (grey shapes if it's slow) until only its items come.
+  function show(s) {
+    scope = s;
+    drawPages();
+    one.render("#list", async () => {
+      const list = await listItems(s);
+      if (s !== scope) return;
+      items = list;
+      drawList();
+    }, { fresh: true });
   }
 
   function matches(item) {
@@ -128,12 +139,13 @@
   async function remove(item) {
     if (item.account) {
       const known = new Set([item.title, ...item.fields.filter((f) => !f.secret).map((f) => f.value)]);
-      for (const name of [...new Set([...item.apps, item.app].filter(Boolean))].sort()) {
+      // Every app at once.
+      await Promise.all([...new Set([...item.apps, item.app].filter(Boolean))].map(async (name) => {
         const a = app(name);
-        if (!has(a, "accounts") || !has(a, "sign_out")) continue;
+        if (!has(a, "accounts") || !has(a, "sign_out")) return;
         const account = (await call(name, "accounts", {})).find((x) => known.has(x.account));
         if (account) await call(name, "sign_out", { account: account.account });
-      }
+      }));
       // Signing out may have let go of it already.
       if (!(await listItems(item.scope)).some((i) => i.id === item.id)) return;
     }
@@ -159,18 +171,18 @@
     const f = following[item.id];
     const wanting = usedBy(item);
     const hostsShown = !item.hosts.length || !item.hosts.every(app);
-    const fieldRow = (field) => `<div class="row plain field" data-field="${esc(field.name)}"><span class="label">${esc(fieldLabel(field.name))}</span>` +
+    const fieldRow = (field) => `<div class="row plain field${field.secret ? "" : " go"}" data-field="${esc(field.name)}"><span class="label">${esc(fieldLabel(field.name))}</span>` +
       (field.secret ? `<span class="value">••••••••</span><button class="button plain" data-replace>Replace</button>`
         : `<span class="value">${esc(field.value)}</span>${one.copyButton(field.value || "", { label: "" })}`) + "</div>";
     sheet.body.innerHTML = `<div class="hero">${icon(item, 72)}<div class="name">${esc(item.title)}</div>` +
       (item.scope_name ? `<div class="muted">${esc(item.scope_name)}</div>` : "") + `<button class="button plain" data-rename>Rename</button></div>` +
       (acts.length ? `<div class="list">${f
-        ? (f.screen || f.url ? `<div class="row plain action-row" data-again>Open Again</div>` : "") + `<div class="row plain action-row" data-finish>${esc(f.title)}</div>`
-        : acts.map((a, n) => `<div class="row plain action-row" data-act="${n}">${esc(a.title)}</div>`).join("")}</div>` : "") +
-      `<div class="list">${shown(item).map(fieldRow).join("")}<div class="row plain action-row" data-add-field>${one.icon("plus")} Add Field</div></div>` +
+        ? (f.screen || f.url ? `<div class="row plain go action-row" data-again>Open Again</div>` : "") + `<div class="row plain go action-row" data-finish>${esc(f.title)}</div>`
+        : acts.map((a, n) => `<div class="row plain go action-row" data-act="${n}">${esc(a.title)}</div>`).join("")}</div>` : "") +
+      `<div class="list">${shown(item).map(fieldRow).join("")}<div class="row plain go action-row" data-add-field>${one.icon("plus")} Add Field</div></div>` +
       (hostsShown ? `<h2 class="section">Sent only to</h2><div class="list"><div class="row plain"><input class="input" data-hosts placeholder="api.example.com" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="url" value="${esc(item.hosts.join(", "))}"></div></div>` : "") +
       (wanting.length ? `<h2 class="section">Used by</h2><div class="list">${wanting.map((a) => `<label class="row plain">${one.appIcon(app(a) || { name: a }, 28)}<div class="main"><div class="title"><span>${esc(label(a))}</span></div></div><input type="checkbox" class="switch" data-app="${esc(a)}"${item.apps.includes(a) ? " checked" : ""}></label>`).join("")}</div>` : "") +
-      `<div class="list"><div class="row plain danger-row" data-delete>${item.account ? "Sign Out" : "Delete Item"}</div></div><div data-ask></div><div class="error small" data-error></div>`;
+      `<div class="list"><div class="row plain go danger-row" data-delete>${item.account ? "Sign Out" : "Delete Item"}</div></div><div data-ask></div><div class="error small" data-error></div>`;
     const err = sheet.body.querySelector("[data-error]");
     const $ = (sel) => sheet.body.querySelector(sel);
 
@@ -272,7 +284,7 @@
       r.outerHTML = `<div class="row plain"><input class="input" data-new-name placeholder="Name" autocapitalize="none" autocorrect="off" spellcheck="false" aria-label="Name"></div>` +
         `<div class="row plain"><input class="input" data-new-value type="password" placeholder="Value" autocomplete="off" aria-label="Value"></div>` +
         `<label class="row plain"><div class="main">Secret</div><input type="checkbox" class="switch" data-new-secret checked></label>` +
-        `<div class="row plain action-row" data-new-save>Save Field</div>`;
+        `<div class="row plain go action-row" data-new-save>Save Field</div>`;
       const [name, value, secret] = ["[data-new-name]", "[data-new-value]", "[data-new-secret]"].map($);
       name.focus();
       secret.onchange = () => (value.type = secret.checked ? "password" : "text");
@@ -289,9 +301,12 @@
       hosts.onkeydown = (e) => e.key === "Enter" && hosts.blur();
       hosts.onchange = put;
     }
-    sheet.body.querySelectorAll("[data-app]").forEach((box) => (box.onchange = () => {
-      box.disabled = true;
-      save({ apps: [...item.apps.filter((a) => a !== box.dataset.app), ...(box.checked ? [box.dataset.app] : [])] });
+    // A switch shows its new place at once; one that couldn't change goes back.
+    sheet.body.querySelectorAll("[data-app]").forEach((box) => (box.onchange = async () => {
+      box.setAttribute("aria-busy", "true");
+      const on = box.checked;
+      if (!(await save({ apps: [...item.apps.filter((a) => a !== box.dataset.app), ...(on ? [box.dataset.app] : [])] }))) box.checked = !on;
+      box.removeAttribute("aria-busy");
     }));
     $("[data-delete]").onclick = () => {
       $("[data-ask]").scrollIntoView({ behavior: "smooth", block: "center" });
@@ -312,8 +327,8 @@
     const made = makers();
     if (!made.length) return newItem();
     const sheet = one.sheet({ title: "New", done: "Cancel" });
-    sheet.body.innerHTML = `<div class="list"><div class="row plain" data-n="-1">${one.appIcon({ name: "Item", icon: "key", color: "#8e8e93" }, 30)}<div class="main"><div class="title"><span>Item</span></div></div><div class="chev">›</div></div>` +
-      made.map((m, n) => `<div class="row plain" data-n="${n}">${one.appIcon(app(m.app) || { name: m.app }, 30)}<div class="main"><div class="title"><span>${esc(m.type)}</span></div></div><div class="chev">›</div></div>`).join("") + "</div>";
+    sheet.body.innerHTML = `<div class="list"><div class="row plain go" data-n="-1">${one.appIcon({ name: "Item", icon: "key", color: "#8e8e93" }, 30)}<div class="main"><div class="title"><span>Item</span></div></div><div class="chev">›</div></div>` +
+      made.map((m, n) => `<div class="row plain go" data-n="${n}">${one.appIcon(app(m.app) || { name: m.app }, 30)}<div class="main"><div class="title"><span>${esc(m.type)}</span></div></div><div class="chev">›</div></div>`).join("") + "</div>";
     sheet.body.querySelectorAll("[data-n]").forEach((r) => (r.onclick = () => {
       sheet.close();
       const n = Number(r.dataset.n);
@@ -331,7 +346,7 @@
     sheet.body.innerHTML = `<div class="list"><div class="row plain"><input class="input" data-title placeholder="Title" aria-label="Title"></div></div>` +
       (pages.length > 1 ? `<div class="segmented" data-pages>${pages.map((p) => `<button data-scope="${esc(p.scope)}" class="${p.scope === page ? "on" : ""}">${esc(p.title)}</button>`).join("")}</div>` : "") +
       `<div data-fields>${fieldRows(true)}</div>` +
-      `<div class="list"><div class="row plain action-row" data-more>${one.icon("plus")} Add Field</div></div>` +
+      `<div class="list"><div class="row plain go action-row" data-more>${one.icon("plus")} Add Field</div></div>` +
       `<h2 class="section">Sent only to</h2><div class="list"><div class="row plain"><input class="input" data-hosts placeholder="api.example.com" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="url"></div></div>` +
       `<div class="error small" data-error></div>`;
     const $ = (sel) => sheet.body.querySelector(sel);
