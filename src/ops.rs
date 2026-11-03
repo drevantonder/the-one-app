@@ -38,6 +38,54 @@ pub fn node_app(app: &str) -> bool {
     ["vault", "backups", "groups", "widgets"].contains(&app)
 }
 
+/// Whether `--json` was given: what an operation gives back is printed as JSON.
+pub static JSON: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn json() -> bool {
+    JSON.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Why a command failed, when its exit code says more than 1: what was typed is wrong (2), or it was refused (3).
+#[derive(Debug)]
+pub enum Failed {
+    Typed(String),
+    Refused(String),
+}
+
+impl std::fmt::Display for Failed {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Failed::Typed(m) | Failed::Refused(m) => f.write_str(m),
+        }
+    }
+}
+
+impl std::error::Error for Failed {}
+
+/// A command's exit code for what went wrong: 2 what was typed is wrong, 3 refused (it needs --confirm, the person
+/// isn't allowed, or isn't signed in), 1 anything else.
+pub fn exit_code(err: &anyhow::Error) -> i32 {
+    match err.downcast_ref::<Failed>() {
+        Some(Failed::Typed(_)) => 2,
+        Some(Failed::Refused(_)) => 3,
+        None => {
+            let said = format!("{err:#}").to_lowercase();
+            match ["not allowed", "aren't allowed", "isn't allowed", "sign in first", "sign in to", "signed in first"].iter().any(|r| said.contains(r)) {
+                true => 3,
+                false => 1,
+            }
+        }
+    }
+}
+
+/// `err`, as what was typed being wrong.
+fn typed(err: anyhow::Error) -> anyhow::Error {
+    match err.downcast::<Failed>() {
+        Ok(f) => f.into(),
+        Err(e) => Failed::Typed(format!("{e:#}")).into(),
+    }
+}
+
 /// `<CLI> <app> <op> [words] [--input value]...`: runs it and prints what it gives back.
 pub fn run(app: &str, op: &str, args: &[String]) -> Result<()> {
     let (mut words, mut flags) = split(args);
@@ -45,7 +93,7 @@ pub fn run(app: &str, op: &str, args: &[String]) -> Result<()> {
     // so a command inside a `while read` loop doesn't eat the loop's input.
     let asked = words.last().is_some_and(|w| w == "-") && words.pop().is_some();
     let spec = find(app, op);
-    let Some((a, o)) = &spec else { bail!("{}", unknown(app, Some(op), true)?) };
+    let Some((a, o)) = &spec else { return Err(Failed::Typed(unknown(app, Some(op), true)?).into()) };
     if flags.contains_key("help") || flags.contains_key("h") {
         print!("{}", help(a, o));
         return Ok(());
@@ -58,19 +106,21 @@ pub fn run(app: &str, op: &str, args: &[String]) -> Result<()> {
     let files: Vec<String> = flags.remove("file").unwrap_or_default().into_iter().flatten().collect();
     let schema = o["input"].clone();
     let places = places(o);
-    let mut input = input(&schema, &places, words, flags, &files)?;
+    let mut input = input(&schema, &places, words, flags, &files).map_err(typed)?;
     let missing = missing(&schema, &input);
     if !missing.is_empty() || asked {
-        from_stdin(&schema, &missing, &mut input)?;
+        from_stdin(&schema, &missing, &mut input).map_err(typed)?;
         let missing = self::missing(&schema, &input);
-        ensure!(
-            missing.is_empty(),
-            "missing {}: give {} as flags, or pipe the inputs as JSON: {CLI} {app} {op} < input.json. See {CLI} {app} {op} --help.",
-            missing.join(", "),
-            if missing.len() == 1 { "it" } else { "them" }
-        );
+        if !missing.is_empty() {
+            return Err(Failed::Typed(format!(
+                "missing {}: give {} as flags, or pipe the inputs as JSON: {CLI} {app} {op} < input.json. See {CLI} {app} {op} --help.",
+                missing.join(", "),
+                if missing.len() == 1 { "it" } else { "them" }
+            ))
+            .into());
+        }
     }
-    check(&o["input"], &Value::Object(input.clone()))?;
+    check(&o["input"], &Value::Object(input.clone())).map_err(typed)?;
     if o["confirm"] == true {
         agreed(confirmed, &format!("{CLI} {app} {op}"))?;
     }
@@ -80,9 +130,16 @@ pub fn run(app: &str, op: &str, args: &[String]) -> Result<()> {
     };
     let mut r = match call {
         Ok(r) => r,
-        Err(e) => bail!("{}", in_cli_words(&format!("{e:#}"))),
+        Err(e) => {
+            let said = in_cli_words(&format!("{e:#}"));
+            return Err(match e.downcast::<Failed>() {
+                Ok(Failed::Refused(_)) => Failed::Refused(said).into(),
+                Ok(Failed::Typed(_)) => Failed::Typed(said).into(),
+                Err(_) => anyhow::anyhow!(said),
+            });
+        }
     };
-    if let Some(none) = none_said(a, op, &r["ok"], true) {
+    if let Some(none) = none_said(a, op, &r["ok"], true).filter(|_| !json()) {
         println!("{none}");
         return Ok(());
     }
@@ -203,12 +260,14 @@ pub fn agreed(confirmed: bool, command: &str) -> Result<()> {
 /// Asks at a terminal; elsewhere (piped, or an agent) it fails with `otherwise`.
 fn ask(question: &str, otherwise: &str) -> Result<()> {
     if !(std::io::stdin().is_terminal() && std::io::stderr().is_terminal()) {
-        bail!("{otherwise}");
+        return Err(Failed::Refused(otherwise.to_string()).into());
     }
     eprint!("{question} [y/N] ");
     let mut answer = String::new();
     std::io::stdin().read_line(&mut answer)?;
-    ensure!(matches!(answer.trim(), "y" | "Y" | "yes" | "Yes"), "stopped; nothing changed");
+    if !matches!(answer.trim(), "y" | "Y" | "yes" | "Yes") {
+        return Err(Failed::Refused("stopped; nothing changed".into()).into());
+    }
     Ok(())
 }
 
@@ -474,7 +533,7 @@ pub fn as_file(v: &Value) -> Option<(String, String, Vec<u8>)> {
 /// paths printed, anything else as JSON. With `out`, a result that isn't a file is saved there instead.
 fn show(app: &str, op: &str, ok: &Value, out: Option<&str>) -> Result<()> {
     let mut out = out.map(std::path::PathBuf::from);
-    let mut save = |i: usize, name: &str, ty: &str, bytes: &[u8]| -> Result<()> {
+    let mut save = |i: usize, name: &str, ty: &str, bytes: &[u8]| -> Result<String> {
         let path = match out.take() {
             Some(p) => p,
             None => {
@@ -484,28 +543,44 @@ fn show(app: &str, op: &str, ok: &Value, out: Option<&str>) -> Result<()> {
             }
         };
         std::fs::write(&path, bytes).with_context(|| format!("write {}", path.display()))?;
-        println!("{}", path.display());
-        Ok(())
+        Ok(path.display().to_string())
     };
     if let Some(content) = ok["content"].as_array() {
+        let mut shown = Vec::new();
         for (i, c) in content.iter().enumerate() {
             match (c["type"].as_str(), as_file(c)) {
-                (Some("image" | "audio"), Some((name, ty, bytes))) => save(i, &name, &ty, &bytes)?,
+                (Some("image" | "audio"), Some((name, ty, bytes))) => shown.push(json!({ "file": save(i, &name, &ty, &bytes)?, "type": ty })),
                 (Some("resource"), _) if c["resource"]["blob"].is_string() => {
                     let r = &c["resource"];
                     let bytes = data_encoding::BASE64.decode(r["blob"].as_str().unwrap_or("").as_bytes())?;
                     let name = r["uri"].as_str().and_then(|u| u.rsplit('/').next()).unwrap_or("");
-                    save(i, name, r["mimeType"].as_str().unwrap_or(""), &bytes)?;
+                    shown.push(json!({ "file": save(i, name, r["mimeType"].as_str().unwrap_or(""), &bytes)?, "type": r["mimeType"] }));
                 }
-                _ => println!("{}", c["text"].as_str().or(c["resource"]["text"].as_str()).unwrap_or("")),
+                _ => shown.push(json!({ "text": c["text"].as_str().or(c["resource"]["text"].as_str()).unwrap_or("") })),
             }
+        }
+        for s in &shown {
+            match (json(), s["text"].as_str()) {
+                (true, _) => {}
+                (false, Some(text)) => println!("{text}"),
+                (false, None) => println!("{}", s["file"].as_str().unwrap_or("")),
+            }
+        }
+        if json() {
+            println!("{}", Value::Array(shown));
         }
         return Ok(());
     }
     if let Some((name, ty, bytes)) = as_file(ok) {
-        return save(0, &name, &ty, &bytes);
+        let path = save(0, &name, &ty, &bytes)?;
+        match json() {
+            true => println!("{}", json!({ "file": path, "name": name, "type": ty, "size": bytes.len() })),
+            false => println!("{path}"),
+        }
+        return Ok(());
     }
     let text = match ok {
+        _ if json() => serde_json::to_string(ok)?,
         Value::String(s) => s.clone(),
         Value::Null => return Ok(()),
         // Laid out for a person at a terminal; compact for an agent's shell or a pipe.

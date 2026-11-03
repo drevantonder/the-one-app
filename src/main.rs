@@ -13,11 +13,10 @@ mod ops;
 mod try_install;
 mod update;
 
-fn help() -> String {
+/// Every built-in command, with what it takes: `help all` prints it, and `<command> --help` its lines.
+fn every_command() -> String {
     format!(
-        "{NAME}: your machines, and your team's, as one place for apps and agents.
-
-Usage:
+        "Usage:
   {CLI} serve                          run this machine as one of your devices
   {CLI} status                         this device, its install, its users, groups and devices
   {CLI} sign-in [--address <url>]      sign this machine in, as you: approve its code by signing in on any of
@@ -161,6 +160,7 @@ Usage:
   {CLI} run <file>                     run a short script that calls operations, as tools.<app>.<op>({{ ... }}) (- reads
                                        it from stdin), and print what it returns; {CLI} search gives each call
   {CLI} mcp [--code]                   serve MCP over stdio, for agents: every tool, or with --code, search and execute
+  {CLI} help [all]                     what to start with; with all, this
 
 {NAME} holds one install. For another context, run that context's own app.",
         hosted = one::sidecars::hosted().iter().map(|h| h.name).collect::<Vec<_>>().join(", ")
@@ -169,9 +169,42 @@ Usage:
 
 /// The built-in commands, by their first word, as the full list says them.
 fn commands() -> Vec<String> {
-    let mut out: Vec<String> = help().lines().filter_map(|l| l.strip_prefix(&format!("  {CLI} "))).filter_map(|l| l.split_whitespace().next()).filter(|w| w.chars().all(|c| c.is_ascii_lowercase() || c == '-')).map(String::from).collect();
+    let mut out: Vec<String> = every_command().lines().filter_map(|l| l.strip_prefix(&format!("  {CLI} "))).filter_map(|l| l.split_whitespace().next()).filter(|w| w.chars().all(|c| c.is_ascii_lowercase() || c == '-')).map(String::from).collect();
     out.dedup();
     out
+}
+
+/// What `help` and the bare command say: what an agent needs to start, and where the rest is.
+fn help() -> String {
+    let apps = get("/v1/apps").ok().and_then(|a| a.as_array().cloned()).unwrap_or_default();
+    let names: Vec<&str> = apps.iter().filter(|a| a["ops"].as_array().is_some_and(|o| !o.is_empty())).filter_map(|a| a["name"].as_str()).collect();
+    let yours = match names.is_empty() {
+        true => String::new(),
+        false => format!("\nYour apps: {}.\n", names.join(", ")),
+    };
+    format!(
+        "{NAME}: your machines, and your team's, as one place for apps and agents.
+
+  {CLI} search <words>        the operations for a task in every app, each with how to call it
+  {CLI} <app>                 an app's operations and its guide
+  {CLI} <app> <op> --help     what an operation takes
+  {CLI} <app> <op> [words] [--input value]
+                             run one, like {CLI} board post ideas \"hi there\"
+  {CLI} run <file>            a script that calls several operations; {CLI} search gives each call
+  {CLI} skills                the guides agents load
+  {CLI} status                who you are, and your devices
+  {CLI} mcp [--code]          MCP over stdio, for agents
+{yours}
+An operation's words fill its main inputs in order, a list repeats its flag, and inputs not given are read as JSON
+from stdin. --file <input>=<path> gives a file, --out <path> saves what comes back, --device <name> runs it there,
+and --confirm goes ahead with what sends or can't be undone, once the person agreed. --json prints what comes back
+as JSON.
+
+Exit codes: 0 done, 2 what was typed is wrong, 3 refused (needs --confirm, not allowed, or not signed in), 1 anything
+else. Data goes to stdout, messages to stderr.
+
+{CLI} help all lists every command; {CLI} <command> --help says what one takes."
+    )
 }
 
 /// `settings` with the keys of the install's devices, as the node on this machine knows them, and when its log last
@@ -192,11 +225,17 @@ fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if let Err(err) = run(args) {
         eprintln!("{CLI}: {err:#}");
-        std::process::exit(1);
+        std::process::exit(ops::exit_code(&err));
     }
 }
 
 fn run(args: Vec<String>) -> Result<()> {
+    // --json is everyone's, wherever it's typed: what an operation gives back, as JSON.
+    let end = args.iter().position(|a| a == "--").unwrap_or(args.len());
+    if args[..end].iter().any(|a| a == "--json") {
+        ops::JSON.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+    let args: Vec<String> = args.iter().enumerate().filter(|(i, a)| *i >= end || *a != "--json").map(|(_, a)| a.clone()).collect();
     if args.first().map(String::as_str) == Some("try") {
         return try_install::try_install(&args[1..]);
     }
@@ -217,6 +256,11 @@ fn run(args: Vec<String>) -> Result<()> {
             println!("{}", help());
             println!("\n{}", connection());
         }
+        ["help", "all"] => println!("{}", every_command()),
+        ["help", rest @ ..] => match command_help(&rest.iter().map(|w| w.to_string()).collect::<Vec<_>>()) {
+            Some(text) => print!("{text}"),
+            None => bail!("{}", ops::unknown(rest[0], None, true)?),
+        },
         ["serve"] => {
             usual_path();
             IN_NODE.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -800,7 +844,7 @@ fn run(args: Vec<String>) -> Result<()> {
             }
             std::fs::write(file, resp.body_mut().with_config().limit(1 << 30).read_to_vec()?)?;
         }
-        ["version"] if flags.contains_key("json") => println!("{}", json!({ "commit": one::config::BUILD, "target": one::config::TARGET, "committed": one::config::COMMITTED })),
+        ["version"] if ops::json() => println!("{}", json!({ "commit": one::config::BUILD, "target": one::config::TARGET, "committed": one::config::COMMITTED })),
         ["version"] => println!("{} {} ({})", NAME, one::config::BUILD, one::config::TARGET),
         ["rename", name @ ..] if !name.is_empty() => {
             post("/v1/name", json!({ "name": name.join(" ") }))?;
@@ -872,11 +916,11 @@ fn deploy(dir: &std::path::Path, flags: &Map<String, Value>) -> Result<()> {
     Ok(())
 }
 
-/// A built-in command's help, for --help after it: help()'s lines for it, or all of help() when none are. None for an
-/// app's operation, and for an app that isn't a built-in command too, whose help is their own.
+/// A built-in command's help, for --help after it: every_command()'s lines for it, or help() when none are. None for
+/// an app's operation, and for an app that isn't a built-in command too, whose help is their own.
 fn command_help(words: &[String]) -> Option<String> {
     let first = words.first().filter(|w| *w != "-h")?;
-    let text = help();
+    let text = every_command();
     let mut out = String::new();
     let mut taking = false;
     for line in text.lines() {
@@ -894,7 +938,7 @@ fn command_help(words: &[String]) -> Option<String> {
     match (app, out.is_empty()) {
         (true, _) if words.len() > 1 => None,
         (true, true) => None,
-        (false, true) => Some(format!("{text}\n")),
+        (false, true) => Some(format!("{}\n", help())),
         (_, false) => Some(format!("Usage:\n{out}")),
     }
 }
@@ -903,7 +947,7 @@ fn command_help(words: &[String]) -> Option<String> {
 /// commands run here, as the person, so `--device` among them.
 fn takes_only(flags: &Map<String, Value>, takes: &[&str]) -> Result<()> {
     match flags.keys().find(|k| !takes.contains(&k.as_str())) {
-        Some(other) => bail!("--{other} isn't an input of this (see {CLI} help)"),
+        Some(other) => Err(ops::Failed::Typed(format!("--{other} isn't an input of this: see --help")).into()),
         None => Ok(()),
     }
 }
@@ -953,9 +997,14 @@ fn agent() -> ureq::Agent {
 
 fn request(resp: Result<ureq::http::Response<ureq::Body>, ureq::Error>) -> Result<Value> {
     let mut resp = resp.with_context(|| format!("{NAME} isn't running here: start it with {CLI} serve"))?;
+    let refused = matches!(resp.status().as_u16(), 401 | 403);
     let body: Value = resp.body_mut().read_json()?;
     if let Some(err) = body.get("error") {
-        bail!("{}", err.as_str().unwrap_or("failed"));
+        let err = err.as_str().unwrap_or("failed").to_string();
+        return Err(match refused {
+            true => ops::Failed::Refused(err).into(),
+            false => anyhow::anyhow!(err),
+        });
     }
     Ok(body)
 }
