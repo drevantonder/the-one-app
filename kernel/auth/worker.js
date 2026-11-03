@@ -362,7 +362,7 @@ export class Auth extends DurableObject {
   }
 
   /// A device signed in asks to join: `{ key, seal, name, proof? }`, its endpoint keys (hex), its name, and for a
-  /// newcomer's first device, `keys::invite_proof` of its invite's secret and key, kept with that invite for the
+  /// newcomer's first device, `keys::invite_proof` of its invite's secret, key and seal key, kept with that invite for the
   /// inviting admin's device to check. → until when it waits.
   async ask(request) {
     const user = (await this.person(request)) || refuse(401, "Sign in first.");

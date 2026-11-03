@@ -52,11 +52,11 @@ export async function passkeyKeysOf(prf) {
 
 /// What this browser asks auth to let it in with: its keys and name, and for someone new, proof of their invite.
 export async function joinAsk(keys, name, invite) {
-  return { key: keys.key, seal: keys.seal, name, ...(invite ? { proof: await inviteProof(text.encode(invite), hex.decode(keys.key)) } : {}) };
+  return { key: keys.key, seal: keys.seal, name, ...(invite ? { proof: await inviteProof(text.encode(invite), hex.decode(keys.key), hex.decode(keys.seal)) } : {}) };
 }
 
 /// The code this browser shows to be approved: its key's, as 4 and 4.
-export const codeOf = async (key) => (await joinCode(hex.decode(key))).replace(/^(.{4})/, "$1 ");
+export const codeOf = async (key, seal) => (await joinCode(hex.decode(key), hex.decode(seal))).replace(/^(.{4})/, "$1 ");
 
 // MARK: Who opens what
 
@@ -258,7 +258,7 @@ export class Device {
     const own = (await answer(await this.bearer("/api/auth/devices/requests"))).requests || [];
     const invited = st.install.role === "admin" ? (await this.authSigned("GET", "/api/auth/devices/requests").catch(() => ({}))).requests || [] : [];
     const all = [...own, ...invited].filter((r, i, a) => r.key !== this.me.key && a.findIndex((x) => x.key === r.key) === i);
-    return Promise.all(all.map(async (r) => ({ ...r, code: await codeOf(r.key), mine: r.user === this.user })));
+    return Promise.all(all.map(async (r) => ({ ...r, code: await codeOf(r.key, r.seal), mine: r.user === this.user })));
   }
 
   /// Lets in a device that asked: lists it (and for a newcomer, them), seals it the epochs it may open, lets it onto the
@@ -270,7 +270,7 @@ export class Device {
     let newUser = null;
     if (r.user !== this.user) {
       const invite = await get(`invite:${r.user}`);
-      if (!invite || !r.proof || r.proof !== (await inviteProof(text.encode(invite.secret), hex.decode(r.key)))) throw new Error("That device didn’t come from an invite made here.");
+      if (!invite || !r.proof || r.proof !== (await inviteProof(text.encode(invite.secret), hex.decode(r.key), hex.decode(r.seal)))) throw new Error("That device didn’t come from an invite made here.");
       newUser = { name: invite.name || r.person, role: "member" };
     }
     await this.write("global", members.device({ key: r.key, seal: r.seal, user: r.user, name: r.name, newUser }), as);

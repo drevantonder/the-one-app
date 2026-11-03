@@ -120,6 +120,13 @@ pub struct DeviceRequest {
     pub proof: Option<String>,
 }
 
+impl DeviceRequest {
+    /// The device that asks: its key and seal key, which its join code and proof cover both of.
+    pub fn endpoint(&self) -> Result<crate::keys::Endpoint> {
+        Ok(crate::keys::Endpoint { key: crate::keys::unhex(&self.key)?, seal: crate::keys::unhex(&self.seal)? })
+    }
+}
+
 /// An invite this device's person made, kept in their own scope so any of their devices approves its newcomer.
 #[derive(Clone, Debug)]
 pub struct Invited {
@@ -241,11 +248,11 @@ impl Node {
         let invites = if caller.user == self.user()? { self.invites().await? } else { BTreeMap::new() };
         let mut out = Vec::new();
         for r in asked {
-            let Ok(key) = crate::keys::unhex(&r.key) else { continue };
+            let Ok(device) = r.endpoint() else { continue };
             match (&r.proof, invites.get(&r.user)) {
                 (None, _) if r.user == caller.user => out.push(json!({ "device": r.name, "person": r.person, "yours": true })),
-                (Some(proof), Some(i)) if *proof == crate::keys::invite_proof(i.secret.as_bytes(), &key) => {
-                    out.push(json!({ "device": r.name, "person": i.name, "code": crate::keys::join_code(&key), "role": i.role }))
+                (Some(proof), Some(i)) if *proof == crate::keys::invite_proof(i.secret.as_bytes(), &device) => {
+                    out.push(json!({ "device": r.name, "person": i.name, "code": crate::keys::join_code(&device), "role": i.role }))
                 }
                 _ => {}
             }
@@ -260,7 +267,7 @@ impl Node {
         ensure!(code.len() == 8, "a code is the 8 letters and digits the new device shows");
         let asked: Value = self.ask_auth("GET", "/api/auth/devices/requests", json!({})).await?;
         let asked: Vec<DeviceRequest> = serde_json::from_value(asked["requests"].clone()).context("auth's requests aren't requests")?;
-        let r = asked.into_iter().find(|r| crate::keys::unhex(&r.key).is_ok_and(|k| crate::keys::join_code(&k) == code)).context("no device is waiting with that code: it waits 15 minutes after it asks")?;
+        let r = asked.into_iter().find(|r| r.endpoint().is_ok_and(|d| crate::keys::join_code(&d) == code)).context("no device is waiting with that code: it waits 15 minutes after it asks")?;
         let invite = match &r.proof {
             Some(_) if caller.user == self.user()? => self.invites().await?.remove(&r.user),
             _ => None,
@@ -285,11 +292,11 @@ impl Node {
     /// theirs: their device makes its first epoch), and tells the relay to let it in. A newcomer's request counts only with
     /// the proof their invite's secret makes with its key. → what it was sealed, and what it wasn't.
     pub async fn approve_request(&self, caller: &Caller, r: &DeviceRequest, invite: Option<&Invited>) -> Result<Value> {
-        let endpoint = crate::keys::Endpoint { key: crate::keys::unhex(&r.key)?, seal: crate::keys::unhex(&r.seal)? };
+        let endpoint = r.endpoint()?;
         let listed = match invite {
             Some(i) => {
                 let proof = r.proof.as_deref().context("a newcomer's device brings their invite's proof")?;
-                ensure!(proof == crate::keys::invite_proof(i.secret.as_bytes(), &endpoint.key), "that device's proof isn't from {}'s invite", i.name);
+                ensure!(proof == crate::keys::invite_proof(i.secret.as_bytes(), &endpoint), "that device's proof isn't from {}'s invite", i.name);
                 ensure!(r.user == i.user, "that device isn't {}'s", i.name);
                 members::device(&endpoint, &r.user, &r.name, &[members::Kind::Client], Some((&i.name, i.role)))
             }

@@ -194,15 +194,15 @@ pub struct Need {
 // Devices joining.
 
 /// The code a new device shows, which a device of its person types or scans to approve it: the first 8 base32
-/// characters of the sha256 of its key, so whoever passes on its request can't swap the key.
-pub fn join_code(key: &[u8; 32]) -> String {
-    BASE32_NOPAD.encode(&sha256(key))[..8].to_string()
+/// characters of the sha256 of its key and seal key, so whoever passes on its request can swap neither.
+pub fn join_code(device: &Endpoint) -> String {
+    BASE32_NOPAD.encode(&sha256(&[device.key, device.seal].concat()))[..8].to_string()
 }
 
 /// A newcomer's proof that their invite's secret was theirs: HKDF-SHA256(secret, "one/invite\0" ‖ their device's
-/// key), hex.
-pub fn invite_proof(secret: &[u8], key: &[u8; 32]) -> String {
-    HEXLOWER.encode(&hkdf(secret, &[&b"one/invite\0"[..], key].concat()))
+/// key ‖ its seal key), hex.
+pub fn invite_proof(secret: &[u8], device: &Endpoint) -> String {
+    HEXLOWER.encode(&hkdf(secret, &[&b"one/invite\0"[..], &device.key, &device.seal].concat()))
 }
 
 /// A passkey's device keys, from its PRF output: (the Ed25519 seed it signs with, the X25519 secret sealed to).

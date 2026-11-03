@@ -302,17 +302,18 @@ export async function openHandoff(pair, sealed) {
 
 const BASE32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 
-/// The code a new device shows: the first 8 base32 characters of the sha256 of its key.
-export async function joinCode(key) {
-  const h = await sha256(bytes(key));
+/// The code a new device shows: the first 8 base32 characters of the sha256 of its key and seal key.
+export async function joinCode(key, seal) {
+  const h = await sha256(concat(bytes(key), bytes(seal)));
   let bits = "";
   for (const b of h.slice(0, 5)) bits += b.toString(2).padStart(8, "0");
   return Array.from({ length: 8 }, (_, i) => BASE32[parseInt(bits.slice(i * 5, i * 5 + 5), 2)]).join("");
 }
 
-/// A newcomer's proof that their invite's secret was theirs: HKDF-SHA256(secret, "one/invite\0" ‖ their key), hex.
-export async function inviteProof(secret, key) {
-  return hex.encode(await hkdf(secret, concat(text.encode("one/invite\0"), bytes(key))));
+/// A newcomer's proof that their invite's secret was theirs: HKDF-SHA256(secret, "one/invite\0" ‖ their key ‖ their
+/// seal key), hex.
+export async function inviteProof(secret, key, seal) {
+  return hex.encode(await hkdf(secret, concat(text.encode("one/invite\0"), bytes(key), bytes(seal))));
 }
 
 /// A passkey's device keys from its PRF output: `{ sign: Ed25519 seed, seal: X25519 secret }`.

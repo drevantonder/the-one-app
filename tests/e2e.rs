@@ -536,10 +536,10 @@ async fn only_a_persons_own_device_or_their_inviter_lets_a_device_in() {
     let secret = "the-invites-secret";
     let sam = Invited { secret: secret.into(), name: "Sam".into(), user: one::entry::new_id(), role: one::members::Role::Member, until: u64::MAX };
     let sams = new_key();
-    let wrong = one::keys::invite_proof(b"another-secret", &sams.verifying_key().to_bytes());
+    let wrong = one::keys::invite_proof(b"another-secret", &one::keys::Endpoint::of(&sams));
     assert!(a.approve_request(&me, &asks(&sams, &sam.user, Some(wrong)), Some(&sam)).await.is_err());
     assert!(!a.is_user(&sam.user), "a request whose proof doesn't match lets no one in");
-    let right = one::keys::invite_proof(secret.as_bytes(), &sams.verifying_key().to_bytes());
+    let right = one::keys::invite_proof(secret.as_bytes(), &one::keys::Endpoint::of(&sams));
     a.approve_request(&me, &asks(&sams, &sam.user, Some(right)), Some(&sam)).await.unwrap();
     assert!(a.is_user(&sam.user));
     assert_eq!(opens(&sams, &global).await, vec![1]);

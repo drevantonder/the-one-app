@@ -607,7 +607,7 @@ fn a_person_sees_only_their_own_join_requests_and_the_installs_devices_see_them_
     let asks = |browser: &mut Browser, secret: &str| {
         let (key, hex) = endpoint();
         let seal = data_encoding::HEXLOWER.encode(&one::keys::Endpoint::of(&key).seal);
-        let proof = one::keys::invite_proof(secret.as_bytes(), &key.verifying_key().to_bytes());
+        let proof = one::keys::invite_proof(secret.as_bytes(), &one::keys::Endpoint::of(&key));
         let (status, out) = browser.post("/api/auth/devices/requests", json!({ "key": hex, "seal": seal, "name": "Chrome on Mac", "proof": proof }));
         assert_eq!(status, 200, "{out}");
         hex

@@ -811,7 +811,7 @@ window.__one = {};
     const invite = sessionStorage.getItem("one.invite");
     const ask = async () => answer(await bearer("/api/auth/devices/requests", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(await joinAsk(keys, browserName(), invite)) }));
     await ask();
-    await showJoin(await codeOf(keys.key), !!invite);
+    await showJoin(await codeOf(keys.key, keys.seal), !!invite);
     for (let n = 1; ; n++) {
       await new Promise((r) => setTimeout(r, 2000));
       await refreshState().catch(() => {});

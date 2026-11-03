@@ -44,8 +44,8 @@ const ops = {
       tokenId: await tokenId(token),
       epochHash: await epochHash(b64u.decode(key)),
       twin: hex.encode(twinPublic(hex.decode(pair.key))),
-      joinCode: await joinCode(hex.decode(pair.key)),
-      proof: await inviteProof(b64u.decode(secret), hex.decode(pair.key)),
+      joinCode: await joinCode(hex.decode(pair.key), hex.decode(pair.seal)),
+      proof: await inviteProof(b64u.decode(secret), hex.decode(pair.key), hex.decode(pair.seal)),
       passkey: { sign: hex.encode(await ed25519Public(pk.sign)), seal: b64u.encode(pk.seal), sealPublic: hex.encode(await x25519Public(pk.seal)) },
     };
   },

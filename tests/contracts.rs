@@ -441,6 +441,7 @@ fn the_kernel_and_nodes_agree_on_keys_and_seals() {
         let epoch_key: [u8; 32] = rand::random();
         let sealed = keys::seal(3, &epoch_key, "global/board/main/1", b"a step");
         let device = ed25519_dalek::SigningKey::from_bytes(&rand::random()).verifying_key().to_bytes();
+        let device_seal: [u8; 32] = rand::random();
         let prf: [u8; 32] = rand::random();
         let (my_secret, my_public) = kernel::twin(&rand::random());
         let out = js(json!({
@@ -448,7 +449,7 @@ fn the_kernel_and_nodes_agree_on_keys_and_seals() {
             "request": request, "now": 1_000_000 + keys::FRESH, "epoch": 4, "key": B64U.encode(&epoch_key),
             "name": "global/board/main/1", "plain": B64U.encode(b"from js"), "sealed": B64U.encode(&sealed),
             "to": B64U.encode(&kernel::twin_public(&node.verifying_key().to_bytes()).unwrap()), "handoff": handoff,
-            "pair": { "secret": B64U.encode(&my_secret), "public": B64U.encode(&my_public), "sealed": keys::seal_handoff(&my_public, &handoff).unwrap(), "key": data_encoding::HEXLOWER.encode(&device) },
+            "pair": { "secret": B64U.encode(&my_secret), "public": B64U.encode(&my_public), "sealed": keys::seal_handoff(&my_public, &handoff).unwrap(), "key": data_encoding::HEXLOWER.encode(&device), "seal": data_encoding::HEXLOWER.encode(&device_seal) },
             "token": "a token", "secret": B64U.encode(b"an invite's secret"), "prf": B64U.encode(&prf),
         }));
         assert_eq!(out["canonical"].as_str().unwrap().as_bytes(), keys::canonical(&fields), "canonical JSON");
@@ -463,9 +464,9 @@ fn the_kernel_and_nodes_agree_on_keys_and_seals() {
         assert_eq!(out["handedBack"], serde_json::to_value(&handoff).unwrap(), "JavaScript opens one Rust sealed");
         assert_eq!(out["tokenId"], keys::token_id("a token"));
         assert_eq!(out["epochHash"], keys::epoch_hash(&epoch_key), "an epoch key's hash");
-        assert_eq!(out["joinCode"], keys::join_code(&device));
+        assert_eq!(out["joinCode"], keys::join_code(&keys::Endpoint { key: device, seal: device_seal }));
         assert_eq!(out["twin"], data_encoding::HEXLOWER.encode(&kernel::twin_public(&device).unwrap()), "an Ed25519 key's twin to seal to");
-        assert_eq!(out["proof"], keys::invite_proof(b"an invite's secret", &device));
+        assert_eq!(out["proof"], keys::invite_proof(b"an invite's secret", &keys::Endpoint { key: device, seal: device_seal }));
         let (passkey, seal_secret) = keys::passkey_keys(&prf);
         assert_eq!(out["passkey"]["sign"], data_encoding::HEXLOWER.encode(passkey.verifying_key().as_bytes()), "a passkey's signing key");
         assert_eq!(b(&out["passkey"]["seal"]), seal_secret, "and the secret sealed to");
