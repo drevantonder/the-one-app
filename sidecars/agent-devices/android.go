@@ -192,6 +192,11 @@ func (a androidEmulator) start(ctx context.Context, v *vm) error {
 			emulator = append(emulator, "-dns-server", strings.Join(dns, ","))
 		}
 	}
+	// Its own runtime folder, for a netsimd (its radios) of its own: one an emulator in another network started is
+	// unreachable here, and a phone that waits for it never starts.
+	run := filepath.Join(dataDir, "android-"+v.Name+".run")
+	os.MkdirAll(run, 0o700)
+	emulator = append([]string{"env", "XDG_RUNTIME_DIR=" + run}, emulator...)
 	name, args := outliving(emulator[0], emulator[1:]...)
 	cmd := exec.Command(name, args...)
 	cmd.Env = append(os.Environ(), "ANDROID_HOME="+sdk(), "ANDROID_SDK_ROOT="+sdk())
@@ -269,6 +274,7 @@ func (a androidEmulator) remove(ctx context.Context, v *vm) error {
 	}
 	os.Remove(filepath.Join(avdHome(), v.ID+".ini"))
 	os.Remove(filepath.Join(dataDir, "android-"+v.Name+".log"))
+	os.RemoveAll(filepath.Join(dataDir, "android-"+v.Name+".run"))
 	return nil
 }
 
