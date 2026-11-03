@@ -4,7 +4,7 @@
 // a call needs, which it hands the node with the call (`x-one-keys`). What it opens stays in this page's memory, as keys
 // that can't be read back, and goes with it. What changes who can do what it signs itself (members.js).
 
-import { b64u, databaseKey, ed25519Public, epochHash, hex, hkdfKey, inviteProof, joinCode, openAppKey, openSealed, passkeyKeys, random, sealAppKey, sealHandoff, sealTo, sha256, signEntry, signedRequest, tokenId, twinPublic, x25519Public } from "../shared/crypto.js";
+import { b64u, databaseKey, ed25519Public, epochHash, hex, hkdfKey, inviteProof, joinCode, openAppKey, openSealed, passkeyKeys, random, sealAppKey, sealHandoff, sealTo, sha256, signEntry, signedRequest, twinPublic, x25519Public } from "../shared/crypto.js";
 import { get, put } from "./kept.js";
 import { members } from "./members.js";
 
@@ -86,8 +86,7 @@ export class Device {
     this.appKeys = new Map();
     /// Databases' keys, by `scope app database n`: bytes, as a node is handed them.
     this.dbKeys = new Map();
-    /// The node's key to seal handoffs to, and what each kind of request needed (`one.needs`, which names no key).
-    this.node = null;
+    /// What each kind of request needed the last time, and the node that said so (`one.needs`, which names no key).
     this.needs = JSON.parse(localStorage.getItem("one.needs") || "{}");
   }
 
@@ -189,26 +188,35 @@ export class Device {
     return at === "/v1/call" ? `call ${body?.app || ""}` : at.replace(/^\/v1\/screens\/([^/]+)\/.*/, "/v1/screens/$1");
   }
 
-  /// The `x-one-keys` a request goes with: the keys it needed before, sealed to the node, for this browser's key when
-  /// it reaches the node itself (`token` null), or for `token` through the address, until `until`.
-  async handoff(route, token, until) {
-    const needs = this.needs[route];
-    if (!needs?.length) return null;
-    this.node ||= (await this.api("/v1/endpoint", { bare: true })).seal;
-    const keys = [];
-    for (const n of needs) keys.push({ ...n, key: b64u.encode(await this.databaseKey(n)) });
-    return sealHandoff(hex.decode(this.node), { for: token ? await tokenId(token) : this.me.key, until, keys });
+  /// The app a kind of request runs, if it names one: an app's call, or its screens.
+  static appOf(route) {
+    const m = /^call (.+)$/.exec(route) || /^\/v1\/screens\/([^/]+)$/.exec(route);
+    return m ? decodeURIComponent(m[1]) : null;
   }
 
-  /// A node's 428: what the request needed, remembered for next time (each kind of request keeps its last 64), and the
-  /// node to seal them to. Throws if this browser can't open them.
-  async learn(route, answer) {
-    this.node = answer.seal || this.node;
-    const had = this.needs[route] || [];
-    const same = (a, b) => a.scope === b.scope && a.app === b.app && a.database === b.database && a.epoch === b.epoch;
-    const now = [...(answer.need || []), ...had.filter((h) => !(answer.need || []).some((n) => same(n, h)))].slice(0, 64);
-    for (const n of answer.need || []) await this.databaseKey(n);
-    this.needs[route] = now;
+  /// The `x-one-keys` a request goes with: what its kind of request needed the last time, sealed to the node that said
+  /// so (to its key's twin, as every node's seal key is), for this browser's key, until `until`. A node that didn't say
+  /// so can't open it.
+  async handoff(route, until) {
+    const last = this.needs[route];
+    if (!last?.node || !last.need?.length) return null;
+    const keys = [];
+    for (const n of last.need) keys.push({ ...n, key: b64u.encode(await this.databaseKey(n)) });
+    return sealHandoff(twinPublic(hex.decode(last.node)), { for: this.me.key, until, keys });
+  }
+
+  /// A node's 428, believed only from `node`, the one that answered it as its connection proved: it must name itself
+  /// and its own seal key, and a request that runs one app may need only that app's databases (and the Vault's of a
+  /// scope, which fills in its items). What it needed is all this kind of request hands next time, and only to it.
+  /// Throws if it asks for more, or this browser can't open it.
+  async learn(route, answer, node) {
+    const need = Array.isArray(answer.need) ? answer.need : [];
+    if (!node || answer.to !== node) throw new Error("A device that didn’t answer asked for keys, so none were given.");
+    if (answer.seal && answer.seal !== hex.encode(twinPublic(hex.decode(node)))) throw new Error("A device asked for keys sealed to another, so none were given.");
+    const app = Device.appOf(route);
+    if (need.length > 64 || (app && need.some((n) => n.app !== app && !(n.app === "node" && n.database === "vault")))) throw new Error("A device asked for keys that request doesn’t use, so none were given.");
+    for (const n of need) await this.databaseKey(n);
+    this.needs[route] = { node, need };
     try { localStorage.setItem("one.needs", JSON.stringify(this.needs)); } catch {}
   }
 

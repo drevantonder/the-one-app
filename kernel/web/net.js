@@ -28,7 +28,8 @@ function received(m) {
     const headers = new Headers();
     for (let i = 0; i + 1 < m.headers.length; i += 2) headers.append(m.headers[i], m.headers[i + 1]);
     const empty = m.status === 204 || m.status === 304;
-    w.resolve(new Response(empty ? null : stream, { status: m.status, headers }));
+    // And which node answered, as its connection proved, the one its 428 may be believed from.
+    w.resolve(Object.assign(new Response(empty ? null : stream, { status: m.status, headers }), { node: m.node }));
   } else if (m.part) {
     w.body?.enqueue(m.part);
   } else if (m.done) {
@@ -139,7 +140,7 @@ export const net = {
   },
 
   /// A request to the node: method, path with its query, headers (`{ name: value }`), body bytes or none, and an
-  /// AbortSignal. → a Response, its body streamed as it comes.
+  /// AbortSignal. → a Response, its body streamed as it comes, and `node`, the key of the node that answered.
   fetch(method, path, headers = {}, body, signal) {
     const bytes = body === undefined ? undefined : body instanceof Uint8Array ? body : new TextEncoder().encode(body);
     const buffer = bytes && bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);

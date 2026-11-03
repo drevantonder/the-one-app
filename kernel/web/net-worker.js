@@ -113,7 +113,7 @@ export function server(version) {
             if (!s) throw new Error("This browser isn't one of your devices yet.");
             const r = await s.client.fetch(m.method, m.path, m.headers, new Uint8Array(m.body || []));
             reading.set(id, r);
-            post({ id, status: r.status, headers: r.headers });
+            post({ id, node: r.node, status: r.status, headers: r.headers });
             try {
               for (let part; (part = await r.chunk()); ) post({ id, part }, [part.buffer]);
               post({ id, done: true });

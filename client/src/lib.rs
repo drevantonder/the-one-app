@@ -74,6 +74,8 @@ pub struct Request {
 
 /// A node's response, its body read as it comes.
 pub struct Response {
+    /// The node that answered, as its connection proved: the one a 428 may be believed from, and keys sealed to.
+    pub node: [u8; 32],
     pub status: u16,
     pub headers: Vec<(String, String)>,
     pub body: Body,
@@ -275,7 +277,7 @@ impl Client {
         };
         sending.await.map_err(|e| (sent(e), reused))?;
         let (status, headers, body) = read_response(&mut recv, req.method == "HEAD").await.map_err(|e| (e, reused))?;
-        Ok(Response { status, headers, body: Body { recv: Some(recv), ..body } })
+        Ok(Response { node: *conn.remote_id().as_bytes(), status, headers, body: Body { recv: Some(recv), ..body } })
     }
 }
 

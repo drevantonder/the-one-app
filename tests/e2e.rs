@@ -683,7 +683,9 @@ async fn client_devices_ask_their_node_over_iroh_as_their_person() {
     let vouch = |by: &ed25519_dalek::SigningKey, endpoint: &ed25519_dalek::SigningKey, until: u64| one::keys::certify(by, endpoint.verifying_key().as_bytes(), until, one::node::now_ms());
     let cert = vouch(&mine, &session, one::node::now_ms() + 600_000);
     let browser = one_client::Client::start(session.to_bytes(), Some(cert.clone()), &k.address, &[a.id()]).await.unwrap();
-    let (status, state) = json(browser.fetch(get("/v1/state")).await.unwrap()).await;
+    let answered = browser.fetch(get("/v1/state")).await.unwrap();
+    assert_eq!(answered.node, a.id(), "a response names the node that answered, which a 428 is believed from");
+    let (status, state) = json(answered).await;
     assert_eq!((status, state["me"]["user"].as_str()), (200, a.user().ok().as_deref()), "{state}");
     let spoofed = |r: one_client::Request| one_client::Request { headers: [r.headers.clone(), vec![(one::api::ENDPOINT_HEADER.into(), vouch(&sams_key, &session, one::node::now_ms() + 60_000))]].concat(), ..r };
     let (status, said) = json(browser.fetch(spoofed(hi(asked.clone(), Vec::new()))).await.unwrap()).await;

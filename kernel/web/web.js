@@ -163,7 +163,8 @@ window.__one = {};
     for (let tries = 0, needed = false; ; tries++) {
       const headers = direct ? {} : { authorization: `Bearer ${token}` };
       if (body !== undefined) headers["content-type"] = "application/json";
-      const keys = device && (await device.handoff(route, token, auth.kept()?.until || Date.now() + 60_000));
+      // Keys go only to a node this browser reaches itself, which its connection proves.
+      const keys = direct && device && (await device.handoff(route, auth.kept()?.until || Date.now() + 60_000));
       if (keys) headers["x-one-keys"] = keys;
       const sent = body === undefined ? undefined : JSON.stringify(body);
       const r = direct ? await net.fetch(method, url.pathname + url.search, headers, sent, signal) : await fetch(url, { method, headers, body: sent, signal });
@@ -173,9 +174,9 @@ window.__one = {};
       }
       if (r.status === 401) throw Object.assign(new NodeError("Signed out."), { signedOut: true });
       if (r.status === 403 && !auth.person()) throw Object.assign(new NodeError("Not approved yet."), { status: 403 });
-      if (r.status === 428 && device && !needed) {
+      if (r.status === 428 && direct && device && !needed) {
         needed = true;
-        await device.learn(route, await r.json());
+        await device.learn(route, await r.json(), r.node);
         continue;
       }
       if (raw && r.ok) return r;

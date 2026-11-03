@@ -48,7 +48,7 @@ impl Client {
         let headers = headers.chunks(2).map(|h| (h[0].clone(), h.get(1).cloned().unwrap_or_default())).collect();
         let response = self.0.fetch(crate::Request { method, path, headers, body }).await.map_err(js)?;
         let headers = response.headers.into_iter().flat_map(|(n, v)| [n, v]).collect();
-        Ok(Response { status: response.status, headers, body: std::rc::Rc::new(std::cell::RefCell::new(Some(response.body))) })
+        Ok(Response { node: data_encoding::HEXLOWER.encode(&response.node), status: response.status, headers, body: std::rc::Rc::new(std::cell::RefCell::new(Some(response.body))) })
     }
 
     pub async fn reconnect(&self) {
@@ -62,6 +62,7 @@ impl Client {
 
 #[wasm_bindgen]
 pub struct Response {
+    node: String,
     status: u16,
     headers: Vec<String>,
     /// Taken out while a part is awaited, as a method awaiting can't hold `&mut self` (wasm-bindgen would refuse a
@@ -71,6 +72,12 @@ pub struct Response {
 
 #[wasm_bindgen]
 impl Response {
+    /// The node that answered, hex, as its connection proved.
+    #[wasm_bindgen(getter)]
+    pub fn node(&self) -> String {
+        self.node.clone()
+    }
+
     #[wasm_bindgen(getter)]
     pub fn status(&self) -> u16 {
         self.status
