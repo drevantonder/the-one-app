@@ -146,7 +146,7 @@ pub fn stopped() -> bool {
 
 /// Starts the program at the node's path, `args` and all, to take over `listener`, and waits until it's ready. Then
 /// this node is to stop taking connections, finish what it's answering, and exit.
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 pub async fn hand_over(listener: i32, args: &[String]) -> Result<()> {
     use std::os::fd::AsRawFd;
     use std::os::unix::process::CommandExt;
@@ -195,11 +195,12 @@ pub async fn hand_over(listener: i32, args: &[String]) -> Result<()> {
     Ok(())
 }
 
-#[cfg(not(unix))]
+#[cfg(not(target_os = "linux"))]
 pub async fn hand_over(_listener: i32, _args: &[String]) -> Result<()> {
     bail!("only a node on Linux takes over from another")
 }
 
+#[cfg(target_os = "linux")]
 /// Waits until systemd takes the node taking over as the service's main process, as it said it is: this one exiting
 /// before then would stop the service, the new one with it.
 async fn main_moved() -> Result<()> {
