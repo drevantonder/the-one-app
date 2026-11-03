@@ -38,7 +38,7 @@
   :root[data-raised] { --bg: #222222; --card: #3a3a3a; }
 }
 @supports (color: AccentColor) { :root { --tint: AccentColor; } }
-* { box-sizing: border-box; }
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 html, body { margin: 0; background: var(--bg); color: var(--text); }
 body { padding: 8px 16px calc(96px + env(safe-area-inset-bottom)); max-width: 760px; margin: 0 auto; }
 a { color: var(--tint); text-decoration: none; }
@@ -55,7 +55,10 @@ h2.section { font-size: 13px; font-weight: 400; text-transform: none; color: var
 .row { display: flex; gap: 12px; align-items: center; padding: 11px 16px; position: relative; color: inherit; cursor: default; }
 .row + .row::before { content: ""; position: absolute; top: 0; left: 64px; right: 0; border-top: 0.5px solid var(--line); }
 .row.plain + .row.plain::before { left: 16px; }
-.row:active { background: var(--fill); }
+/* A row that does something when tapped darkens while it's pressed: a link, a button, .go, [data-tap], or a row that
+   isn't .plain (information) or .still (its button is what's tapped). Not while its own control is what's pressed. */
+:is(a, button, .go, [data-tap], [onclick]).row:not(.still):active,.row:not(.plain, .still, label):active { background: var(--fill); }
+.row:active:has(:is(button, select, input, .copy, .pick):active) { background: none; }
 .row .main { flex: 1; min-width: 0; }
 .row .title { font-weight: 500; display: flex; justify-content: space-between; gap: 8px; }
 .row .title > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -99,6 +102,8 @@ h2.section { font-size: 13px; font-weight: 400; text-transform: none; color: var
 .segmented { display: flex; padding: 2px; gap: 2px; border-radius: 9px; background: var(--fill); margin: 8px 0 12px; }
 .segmented button { flex: 1; font: inherit; font-size: 13px; font-weight: 500; padding: 6px 10px; border: 0; border-radius: 7px; background: none; color: var(--text); }
 .segmented button.on { background: var(--raised); font-weight: 600; box-shadow: 0 3px 8px rgba(0, 0, 0, 0.12), 0 3px 1px rgba(0, 0, 0, 0.04); }
+.segmented button:not(.on):active { background: color-mix(in srgb, var(--text) 7%, transparent); }
+.segmented button:active { opacity: 0.75; }
 
 /* An on/off switch, as iOS draws one: <input type="checkbox" class="switch">. */
 .switch { appearance: none; -webkit-appearance: none; flex: none; width: 51px; height: 31px; margin: 0; border-radius: 16px; background: var(--faint); position: relative; cursor: pointer; transition: background 0.2s; }
@@ -106,6 +111,11 @@ h2.section { font-size: 13px; font-weight: 400; text-transform: none; color: var
 .switch:checked { background: var(--tint); }
 .switch:checked::after { transform: translateX(20px); }
 .switch:disabled { opacity: 0.5; }
+/* Pressed, its knob stretches toward where it goes, as iOS's does; waiting on what it changed (aria-busy), it stays as
+   it was set and can't be changed again. */
+.switch:active::after { width: 33px; }
+.switch:checked:active::after { transform: translateX(14px); }
+.switch[aria-busy="true"] { pointer-events: none; }
 
 /* An empty screen or list (one.empty): one grey line, and a button only for an obvious first step. */
 .empty { text-align: center; color: var(--muted); padding: 48px 24px; }
@@ -162,7 +172,11 @@ h2.section { font-size: 13px; font-weight: 400; text-transform: none; color: var
 .problem-action { font: inherit; font-weight: 600; color: var(--tint); background: none; border: 0; padding: 0; margin-top: 10px; cursor: pointer; }
 
 .copy { font: inherit; font-size: 13px; display: inline-flex; align-items: center; gap: 4px; padding: 4px 8px; border-radius: 7px; border: 0; background: none; color: var(--muted); cursor: pointer; }
-.copy:hover { background: var(--line); }
+.copy:hover, .copy:active { background: var(--line); }
+/* Pressed looks for the rest that's tapped: a choice (a picture, a check), a ⋯ button, a menu, a problem's action. */
+button.choice:active, .more:active, .pick:active, .problem-action:active, .tool:active { opacity: 0.6; }
+/* A list that's being replaced (one.render's `fresh`): dimmed, and not tapped, until it's there. */
+.waiting { opacity: 0.45; pointer-events: none; transition: opacity 0.15s; }
 .copy.copied { color: var(--text); }
 
 .confirm { background: var(--card); border-radius: var(--radius); padding: 16px; margin: 8px 0; }

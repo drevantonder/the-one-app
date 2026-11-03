@@ -24,7 +24,33 @@
   // A button for what the kit draws, `action` `{ label, run }`: run when it's tapped.
   const runs = [];
   const button = (action, cls = "button") => `<button class="${cls}" data-run="${runs.push(action.run) - 1}">${esc(action.label)}</button>`;
-  document.addEventListener("click", (e) => runs[e.target.closest?.(".empty [data-run], .problem [data-run]")?.dataset.run]?.());
+  // One that waits on what it runs says so in itself until it's done.
+  document.addEventListener("click", async (e) => {
+    const b = e.target.closest?.(".empty [data-run], .problem [data-run]");
+    const waiting = b && !b.disabled && runs[b.dataset.run]?.();
+    if (!waiting?.then) return;
+    const back = one.busy(b);
+    await waiting.catch(() => {});
+    back();
+  });
+
+  // A button busy with what a tap started: disabled at once, with a small spinner before `label` (what it says
+  // already, if none), so a tap is seen before its answer comes. Returns what puts it back, for when it fails or what
+  // it shows stays.
+  one.busy = (b, label) => {
+    const was = b.innerHTML, off = b.disabled;
+    b.disabled = true;
+    b.setAttribute("aria-busy", "true");
+    b.innerHTML = `<span class="spinner small" aria-hidden="true"></span>${esc(label ?? b.textContent.trim())}`;
+    return () => {
+      b.innerHTML = was;
+      b.disabled = off;
+      b.removeAttribute("aria-busy");
+    };
+  };
+
+  // Pressed looks (:active) show on a phone's touch too: iOS gives them only to a page that listens for touches.
+  document.addEventListener("touchstart", () => {}, { passive: true });
 
   // An empty screen or list: one grey line (`html`, escaped by its caller), and a button only when there's an obvious
   // first step.
@@ -69,12 +95,18 @@
   // Draws `fn()`'s HTML into `el`. The first time, if it takes longer than `wait` ms, grey shapes stand where it will
   // be (`skeleton`: rows of a list, "text" or "cards", or false for a spinner saying `loading`); a fast load shows
   // nothing in between, so nothing flashes. If it fails, the problem, with Try Again. Later draws (on "changed") replace
-  // what's there only once they're ready, and keep the scroll where it was.
-  one.render = async (el, fn, { loading = "Loading", wait = 100, skeleton = 4 } = {}) => {
+  // what's there only once they're ready, and keep the scroll where it was. `fresh` is a draw of something else
+  // (another page's items): what's there dims at once, and grey shapes take its place if it's slow.
+  one.render = async (el, fn, { loading = "Loading", wait = 100, skeleton = 4, fresh = false } = {}) => {
     if (typeof el === "string") el = document.querySelector(el);
     const turn = (el.__turn = (el.__turn || 0) + 1);
     const waiting = () => (skeleton === false ? one.loading(loading) : one.skeleton(skeleton, loading));
-    const slow = el.__drawn ? null : setTimeout(() => turn === el.__turn && (el.innerHTML = waiting()), wait);
+    if (fresh && el.__drawn) {
+      el.__drawn = false;
+      el.__html = null;
+      el.classList.add("waiting");
+    }
+    const slow = el.__drawn ? null : setTimeout(() => turn === el.__turn && ((el.innerHTML = waiting()), el.classList.remove("waiting")), wait);
     try {
       const html = await fn();
       if (turn !== el.__turn) return;
@@ -99,6 +131,7 @@
       } } });
     } finally {
       clearTimeout(slow);
+      if (turn === el.__turn) el.classList.remove("waiting");
     }
   };
 
@@ -138,8 +171,7 @@
       };
       yes.onclick = async () => {
         one.tap(danger ? "medium" : "selection");
-        yes.disabled = true;
-        yes.innerHTML = `<span class="spinner small" aria-hidden="true"></span>${esc(action)}`;
+        const back = one.busy(yes);
         try {
           await run?.();
           el.innerHTML = "";
@@ -147,8 +179,7 @@
         } catch (err) {
           const p = one.plain(err);
           el.querySelector(".confirm-error").textContent = `${p.title} ${p.safe}`;
-          yes.disabled = false;
-          yes.textContent = action;
+          back();
         }
       };
     });
