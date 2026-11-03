@@ -68,7 +68,11 @@ impl Node {
         // A folder on another machine isn't here: it's this install's bucket only if it says so. S3 is reached through
         // the URL signer, which this device can ask once it knows the install's address.
         let here = |f: &BTreeMap<String, String>| Place::from_fields(f).ok().and_then(|p| p.get(INSTALL_OBJECT).ok().flatten()).is_some_and(|r| r == reply.root.as_bytes());
-        let bucket = reply.bucket.filter(|f| f.contains_key("endpoint") || here(f));
+        let mut bucket = reply.bucket.filter(|f| f.contains_key("endpoint") || here(f));
+        // Its address is in the log, read from the bucket through it: until then, it's the one the code names.
+        if let Some(f) = bucket.as_mut().filter(|f| f.contains_key("endpoint")) {
+            f.insert("address".into(), code.address.clone());
+        }
         if bucket.is_none() {
             tracing::warn!("this device can't reach the install's bucket: it keeps no app's data until the install moves to S3-compatible storage");
         }

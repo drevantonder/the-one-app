@@ -32,11 +32,13 @@ impl Node {
 
     /// The install's bucket from the fields this device keeps of it: a folder here, or S3 through the URL signer at the
     /// install's address, signing with this device's key.
+    /// A device that joined keeps the address it joined at with them (`address`), until it has read the install's.
     pub(super) fn install_place(&self, fields: &BTreeMap<String, String>) -> Result<Place> {
         let node = Arc::downgrade(&self.0);
+        let joined = fields.get("address").cloned();
         let address: crate::bucket::Address = Arc::new(move || {
             let node = Node(node.upgrade().context("this device stopped")?);
-            node.with(|i| i.r.members.settings.get("address").cloned().context("your One App has no address yet, where its bucket is reached: an admin sets one with kernel use"))
+            node.with(|i| Ok(i.r.members.settings.get("address").cloned()))?.or_else(|| joined.clone()).context("your One App has no address yet, where its bucket is reached: an admin sets one with kernel use")
         });
         Place::install(fields, address, ed25519_dalek::SigningKey::from_bytes(self.0.key.as_bytes()))
     }
@@ -83,7 +85,7 @@ impl Node {
 
     /// Follows the install's `storage` setting, when this device keeps its data anywhere else: in the background.
     pub(super) fn follow_storage(&self) {
-        let wanted = self.with(|i| Ok(storage_setting(&i.r.members)?.filter(|f| i.bucket.as_ref().is_none_or(|(_, now)| now != f))));
+        let wanted = self.with(|i| Ok(storage_setting(&i.r.members)?.filter(|f| i.bucket.as_ref().is_none_or(|(_, now)| now.iter().filter(|(k, _)| k.as_str() != "address").ne(f.iter())))));
         let fields = match wanted {
             Ok(Some(fields)) => fields,
             Ok(None) => return,
