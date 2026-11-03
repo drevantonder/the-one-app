@@ -3,6 +3,20 @@
 use super::*;
 
 impl Node {
+    /// What people call `app`, for what they read: its title, or its sidecar's, else its name.
+    pub(super) async fn title(&self, app: &str) -> String {
+        match self.0.apps.title(app).await {
+            Some(title) => title,
+            None => self.sidecar_title(app),
+        }
+    }
+
+    /// What people call the sidecar `name`: its title, else its name.
+    pub(super) fn sidecar_title(&self, name: &str) -> String {
+        let built_in = self.0.built_in_sidecars.iter().find(|b| b.name == name).and_then(|b| (b.describe)()["title"].as_str().map(str::to_string));
+        built_in.or_else(|| self.0.sidecars.title(name)).unwrap_or_else(|| name.to_string())
+    }
+
     pub(super) fn deployed(&self, app: &str) -> bool {
         self.with(|i| Ok(i.r.members.apps.get(app).is_some_and(|a| a.bundle.is_some()))).unwrap_or(false)
     }
@@ -15,7 +29,8 @@ impl Node {
     /// Deletes an app (`deleted`), restores it (`restored`) or erases it for good (`erased`), for someone acting for
     /// its owner. A deleted app stops running and leaves every page, but keeps its data until it's erased.
     pub async fn retire(&self, caller: &Caller, app: &str, how: &str) -> Result<()> {
-        let (_, content) = self.with(|i| check_append(i, app, Append::Retire { app: app.into(), how: how.into() }, &[], caller))?;
+        let title = self.title(app).await;
+        let (_, content) = self.with(|i| check_append(i, app, Append::Retire { app: app.into(), how: how.into() }, &[], caller, &title))?;
         self.member_content(caller, content).await?;
         if how == "erased" {
             self.destroy_keys(app).await?;

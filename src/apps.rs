@@ -260,6 +260,16 @@ impl Apps {
         }
         Ok(d)
     }
+
+    /// `app`'s title, if it runs here and declares one.
+    pub async fn title(&self, app: &str) -> Option<String> {
+        let cached = self.0.described.lock().unwrap().get(app).map(|d| d["title"].as_str().map(str::to_string));
+        let title = match cached {
+            Some(t) => t,
+            None => self.describe(app).await.ok()?["title"].as_str().map(str::to_string),
+        };
+        title.filter(|t| !t.trim().is_empty())
+    }
 }
 
 impl Runtime {

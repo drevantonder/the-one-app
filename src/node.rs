@@ -921,12 +921,13 @@ fn node_me(node: &Node, m: &Members, caller: &Caller) -> Me {
     }
 }
 
-/// Checks one of a call's appends: into a scope it named, which the caller may write.
-fn check_append(i: &Install, app: &str, append: Append, scopes: &[Scope], me: &Caller) -> Result<(Scope, Content)> {
+/// Checks one of a call's appends: into a scope it named, which the caller may write. `title` is what people call
+/// the app a switch, retire or source names.
+fn check_append(i: &Install, app: &str, append: Append, scopes: &[Scope], me: &Caller, title: &str) -> Result<(Scope, Content)> {
     Ok(match append {
         Append::Switch { app, schedule, scope, on } => {
             let scope = if scope == "user" { Scope::User(me.user.clone()) } else { Scope::parse(&scope)? };
-            (scope.clone(), switch_entry(i, &me.user, &scope, &app, &schedule, on)?)
+            (scope.clone(), switch_entry(i, &me.user, &scope, &app, title, &schedule, on)?)
         }
         Append::Forget { scope, blob } => {
             let scope = Scope::parse(&scope)?;
@@ -937,13 +938,13 @@ fn check_append(i: &Install, app: &str, append: Append, scopes: &[Scope], me: &C
         Append::Retire { app: name, how } => {
             let m = &i.r.members;
             let a = m.apps.get(&name).with_context(|| format!("no app named {name}"))?;
-            ensure!(m.acts_for(&me.user, &a.owner), "only someone acting for {name}'s owner deletes, restores or erases it");
+            ensure!(m.acts_for(&me.user, &a.owner), "Only {title}'s owners can delete, restore or erase it.");
             let mut data = json!({ "name": name, "owner": a.owner.to_string() });
             match how.as_str() {
                 "deleted" => data["deleted"] = json!(true),
                 "restored" => data["deleted"] = json!(false),
                 "erased" if a.deleted.is_some() => data["erased"] = json!(true),
-                "erased" => bail!("delete {name} before erasing it"),
+                "erased" => bail!("Delete {title} before erasing it."),
                 other => bail!("an app is deleted, restored or erased, not {other}"),
             }
             (Scope::Global, members::node("app", data))
@@ -951,7 +952,7 @@ fn check_append(i: &Install, app: &str, append: Append, scopes: &[Scope], me: &C
         Append::Source { app: name, link } => {
             let m = &i.r.members;
             let a = m.apps.get(&name).filter(|a| !a.erased).with_context(|| format!("no app named {name}"))?;
-            ensure!(m.acts_for(&me.user, &a.owner), "only someone acting for {name}'s owner sets its source link");
+            ensure!(m.acts_for(&me.user, &a.owner), "Only {title}'s owners can set where its code is kept.");
             let link = members::source_link(&json!(link))?;
             (Scope::Global, members::node("app", json!({ "name": name, "owner": a.owner.to_string(), "source": link })))
         }
@@ -982,10 +983,10 @@ fn scope_name(i: &Install, scope: &str) -> String {
 }
 
 /// A `schedule` entry `user` may write in `scope`, switching a schedule of `app` there on or off.
-fn switch_entry(i: &Install, user: &str, scope: &Scope, app: &str, schedule: &str, on: bool) -> Result<Content> {
+fn switch_entry(i: &Install, user: &str, scope: &Scope, app: &str, title: &str, schedule: &str, on: bool) -> Result<Content> {
     let name = scope_name(i, &scope.to_string());
     ensure!(members::manages_scope(&i.r.members, user, scope), "You can't switch schedules in {name}.");
-    ensure!(i.views.get(&scope.to_string()).is_some_and(|(_, s)| s.installed.contains(app)), "{app} isn't on {name}.");
+    ensure!(i.views.get(&scope.to_string()).is_some_and(|(_, s)| s.installed.contains(app)), "{title} isn't on {name}.");
     ensure!(i.r.holds(scope), "This device can't open {name} yet.");
     Ok(members::node("schedule", json!({ "app": app, "schedule": schedule, "on": on })))
 }

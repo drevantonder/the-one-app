@@ -59,7 +59,7 @@ impl Node {
             let m = &i.r.members;
             Ok(m.sidecars.get(&(self.0.id, name.to_string())).filter(|d| d.removed()).map(|d| {
                 let by = m.users.get(&d.by).map(|u| u.name.as_str()).unwrap_or("an owner");
-                format!("{name} was removed from {} by {by}; an owner of it installs it again", self.device_name())
+                format!("{} was removed from {} by {by}; an owner of it installs it again", self.sidecar_title(name), self.device_name())
             }))
         })
         .ok()

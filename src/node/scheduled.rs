@@ -115,10 +115,11 @@ impl Node {
         let slot: u64 = run.run.rsplit_once('/').and_then(|(_, s)| s.parse().ok()).context("that isn't a run of a schedule's slot")?;
         let schedule = self.0.apps.describe(&run.app).await.ok().and_then(|d| Schedule::all(&d).into_iter().filter_map(Result::ok).find(|s| s.name == run.schedule));
         let schedule = schedule.with_context(|| format!("{}'s latest deploy has no schedule {}", run.app, run.schedule))?;
+        let title = self.title(&run.app).await;
         self.with(|i| {
             let name = scope_name(i, &run.scope);
             let state = i.views.get(&scope.to_string()).map(|(_, s)| s).with_context(|| format!("This device can't open {name} yet."))?;
-            ensure!(state.installed.contains(&run.app), "{} isn't on {name}.", run.app);
+            ensure!(state.installed.contains(&run.app), "{title} isn't on {name}.");
             ensure!(runs_as(&i.r.members, state, &scope, &run.app, &run.schedule).as_deref() == Some(me.user.as_str()), "{} doesn't run as you in {name} any more.", run.schedule);
             Ok(())
         })?;
@@ -269,7 +270,8 @@ impl Node {
 
     /// Switches one of an app's schedules on or off in `scope`, for `caller`; switching one on makes it run as them.
     pub async fn switch_schedule(&self, caller: &Caller, app: &str, schedule: &str, scope: &Scope, on: bool) -> Result<()> {
-        let content = self.with(|i| switch_entry(i, &caller.user, scope, app, schedule, on))?;
+        let title = self.title(app).await;
+        let content = self.with(|i| switch_entry(i, &caller.user, scope, app, &title, schedule, on))?;
         if on {
             self.may_schedule(caller, &[app]).await?;
         }

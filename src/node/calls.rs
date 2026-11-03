@@ -171,7 +171,8 @@ impl Node {
                 other => other.map(Reply::Ok),
             };
         }
-        let prepared = self.with(|i| prepare(self, i, req, me));
+        let title = self.title(&req.app).await;
+        let prepared = self.with(|i| prepare(self, i, req, me, &title));
         let (ctx, scopes) = match prepared? {
             Ok(p) => p,
             Err(why) => return Ok(Reply::Elsewhere(why)),
@@ -185,7 +186,7 @@ impl Node {
             return Ok(Reply::Elsewhere(format!("it doesn't have {}'s latest version yet", req.app)));
         }
         if self.deleted(&req.app) {
-            return Ok(Reply::Error(format!("{} was deleted: its owners can restore it from Recently Deleted in the App Store", req.app)));
+            return Ok(Reply::Error(format!("{title} was deleted: its owners can restore it from Recently Deleted in the App Store")));
         }
         if let Some(why) = self.stopped(&req.app) {
             self.record(&req.app, req, me, Some(&why));
@@ -377,7 +378,11 @@ impl Node {
         }
         let mut writes = Vec::new();
         for append in appends {
-            writes.push(self.with(|i| check_append(i, app, append, scopes, me))?);
+            let title = match &append {
+                Append::Switch { app, .. } | Append::Retire { app, .. } | Append::Source { app, .. } => self.title(app).await,
+                _ => String::new(),
+            };
+            writes.push(self.with(|i| check_append(i, app, append, scopes, me, &title))?);
         }
         self.may_schedule(me, &scheduling.iter().map(String::as_str).collect::<Vec<_>>()).await?;
         let wrote = !statements.is_empty();
@@ -431,7 +436,7 @@ impl Node {
     pub(super) async fn run_sidecar(&self, app: &str, op: &str, input: Value, me: &Caller, from: Option<String>) -> Result<Value> {
         let everyone = self.0.sidecars.serves_everyone(app) && self.with(|i| Ok(i.r.members.serves(&self.0.id, &me.user)))?;
         let user = if everyone { me.user.clone() } else { self.user()? };
-        ensure!(me.user == user, "{app} runs only for {}'s own user", self.device_name());
+        ensure!(me.user == user, "{} runs only for {}'s own user", self.sidecar_title(app), self.device_name());
         let caller = self.me_for(me)?;
         // An app's call has the fields of the items it's switched on for filled in, a secret one only for a sidecar
         // named among its item's hosts, and blotted out of the answer.
@@ -542,7 +547,7 @@ impl Node {
         };
         if tripped {
             let what = if kind == "call" { "called other apps" } else { "ran its schedules" };
-            let why = format!("{app} {what} more than {RATE_LIMIT} times in a minute on {}, so it was stopped there: is it looping? It runs again once it's deployed again, or in {} minutes.", self.device_name(), STOPPED_FOR / 60_000);
+            let why = format!("{} {what} more than {RATE_LIMIT} times in a minute on {}, so it was stopped there: is it looping? It runs again once it's deployed again, or in {} minutes.", self.title(app).await, self.device_name(), STOPPED_FOR / 60_000);
             let bundle = self.with(|i| Ok(i.r.members.apps.get(app).and_then(|a| a.bundle.clone()))).ok().flatten();
             self.0.guard.lock().unwrap().stopped.insert(app.to_string(), (why.clone(), now_ms() + STOPPED_FOR, bundle));
             tracing::warn!("{why}");
@@ -759,7 +764,7 @@ impl Node {
 }
 
 /// Checks a call may run here, and makes its context; or says why it should run elsewhere.
-fn prepare(node: &Node, i: &Install, req: &CallRequest, me: &Caller) -> Result<std::result::Result<(Context, Vec<Scope>), String>> {
+fn prepare(node: &Node, i: &Install, req: &CallRequest, me: &Caller, title: &str) -> Result<std::result::Result<(Context, Vec<Scope>), String>> {
     let m = &i.r.members;
     let here = node.0.id;
     if !m.serves(&here, &me.user) {
@@ -772,14 +777,14 @@ fn prepare(node: &Node, i: &Install, req: &CallRequest, me: &Caller) -> Result<s
             let mut out = Vec::new();
             for s in named {
                 let s = if s == "user" { Scope::User(me.user.clone()) } else { Scope::parse(s)? };
-                ensure!(reach.contains(&s), "{} can't reach {} for you", req.app, scope_name(i, &s.to_string()));
+                ensure!(reach.contains(&s), "{title} can't reach {} for you", scope_name(i, &s.to_string()));
                 out.push(s);
             }
             out
         }
     };
     if reach.is_empty() {
-        bail!("{} isn't on your pages: add it first", req.app);
+        bail!("{title} isn't on your pages: add it first");
     }
     if let Some(s) = scopes.iter().find(|s| !i.r.holds(s)) {
         return Ok(Err(format!("it can't open {} yet", scope_name(i, &s.to_string()))));

@@ -129,6 +129,11 @@ impl Sidecars {
         fresh.then_some(p)
     }
 
+    /// A registered sidecar's title, if it gives one.
+    pub fn title(&self, app: &str) -> Option<String> {
+        self.get(app)?.describe["title"].as_str().filter(|t| !t.trim().is_empty()).map(str::to_string)
+    }
+
     pub fn has(&self, app: &str) -> bool {
         self.get(app).is_some()
     }
@@ -155,11 +160,12 @@ impl Sidecars {
             p = self.get(app);
         }
         let p = p.ok_or_else(|| anyhow!("{app} isn't running on this device"))?;
+        let title = p.describe["title"].as_str().filter(|t| !t.trim().is_empty()).unwrap_or(app).to_string();
         let id = self.next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let (tx, rx) = oneshot::channel();
         p.replies.lock().unwrap().insert(id, (tx, caller.clone()));
-        p.calls.send(Call { id, op: op.into(), input, caller, from }).map_err(|_| anyhow!("{app} stopped"))?;
-        let reply = tokio::time::timeout(Duration::from_secs(600), rx).await.map_err(|_| anyhow!("{app} didn't answer"))??;
+        p.calls.send(Call { id, op: op.into(), input, caller, from }).map_err(|_| anyhow!("{title} stopped"))?;
+        let reply = tokio::time::timeout(Duration::from_secs(600), rx).await.map_err(|_| anyhow!("{title} didn't answer"))??;
         if let Some(why) = reply.get("elsewhere") {
             return Err(Elsewhere(why.as_str().unwrap_or("it can't run here").into()).into());
         }
