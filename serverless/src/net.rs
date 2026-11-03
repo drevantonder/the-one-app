@@ -1,8 +1,10 @@
 //! The serverless node's iroh endpoint (`Node` in worker.js, a Durable Object): the endpoint of its own key, as every
 //! node is, with no socket. The relay hands it the datagrams sent to its key, by RPC (`deliver`), and passes on what it
-//! sends, so to every other endpoint it's one more behind the relay. It speaks what nodes speak (src/node/net.rs): an
-//! ask is a stream, its answer the same stream back. Its connections live as long as the object, which ends itself
-//! once nobody asks (worker.js), so it holds nothing while asleep.
+//! sends, so to every other endpoint it's one more behind the relay. It speaks what nodes speak (src/node/net.rs): to
+//! client devices, HTTP/1.1 on a stream of its own per request (`<cli>/http/1`), answered by `worker.js` as a node's
+//! local API answers; to nodes on machines, an ask on a stream, its answer the same stream back (`<cli>/1`). Its
+//! connections live as long as the object, which ends itself once nobody asks (worker.js), so it holds nothing while
+//! asleep.
 
 use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
@@ -23,8 +25,10 @@ use wasm_bindgen_futures::JsFuture;
 
 /// This transport's kind of address: an endpoint's key, reached through the relay that hands this one its datagrams.
 const THROUGH_RELAY: u64 = 0x6f6e;
-/// The most an ask another endpoint sends may carry: a call and its input. A Worker has 128 MB.
+/// The most a client's request may carry: a call and its input. A Worker has 128 MB.
 const ASK_LIMIT: usize = 4 << 20;
+/// The most a request's head may be.
+const HEAD_LIMIT: usize = 64 << 10;
 /// The most the answer to an ask this node sends may carry.
 const ANSWER_LIMIT: usize = 16 << 20;
 /// How many streams another endpoint may have open on a connection at once.
@@ -37,6 +41,11 @@ const INBOX_MOST: usize = 4096;
 
 fn alpn() -> Vec<u8> {
     format!("{}/1", one::config::CLI).into_bytes()
+}
+
+/// What client devices speak to nodes.
+fn http_alpn() -> Vec<u8> {
+    format!("{}/http/1", one::config::CLI).into_bytes()
 }
 
 fn through_relay(key: &[u8]) -> CustomAddr {
@@ -82,8 +91,8 @@ impl Net {
 
 thread_local! {
     /// The object's `send(dst, segment size, contents)`, which passes datagrams this endpoint sends to the relay, and its
-    /// `asked(key, message)`, which answers an ask: the object now running, as one that ended may leave the endpoint in
-    /// the isolate for the next.
+    /// `asked(key, method, path, headers, body)`, which answers a client's request: the object now running, as one that
+    /// ended may leave the endpoint in the isolate for the next.
     static SEND: RefCell<Option<Function>> = const { RefCell::new(None) };
     static ASKED: RefCell<Option<Function>> = const { RefCell::new(None) };
 }
@@ -158,9 +167,9 @@ fn thrown(err: impl std::fmt::Display) -> JsError {
     JsError::new(&err.to_string())
 }
 
-/// Starts the endpoint of the key `seed`: datagrams it sends go to `send(dst, segment size, contents)`, and each ask
-/// an endpoint opens a stream for goes to `asked(key (hex), message)`, a promise of the answer (a string, or null for
-/// a notice). → its key, hex.
+/// Starts the endpoint of the key `seed`: datagrams it sends go to `send(dst, segment size, contents)`, and each request
+/// a client device opens a stream for goes to `asked(key (hex), method, path, headers (names and values, one after the
+/// other), body (bytes))`, a promise of `{ status, headers, body }`, the same. → its key, hex.
 #[wasm_bindgen]
 pub async fn endpoint_start(seed: Vec<u8>, send: Function, asked: Function) -> Result<String, JsError> {
     SEND.with(|s| *s.borrow_mut() = Some(send));
@@ -173,7 +182,7 @@ pub async fn endpoint_start(seed: Vec<u8>, send: Function, asked: Function) -> R
     let transport = QuicTransportConfig::builder().max_concurrent_bidi_streams(STREAMS.into()).max_concurrent_uni_streams(0u32.into()).build();
     let endpoint = Endpoint::builder(presets::Minimal)
         .secret_key(key)
-        .alpns(vec![alpn()])
+        .alpns(vec![http_alpn()])
         .transport_config(transport)
         .relay_mode(RelayMode::Disabled)
         .add_custom_transport(Arc::new(Relayed { me: me.clone(), addrs: n0_watcher::Watchable::new(vec![me]) }))
@@ -196,11 +205,9 @@ pub async fn endpoint_start(seed: Vec<u8>, send: Function, asked: Function) -> R
                     Ok(accepting) => accepting.await.ok(),
                     Err(_) => None,
                 };
+                // A client's connection is only ever its requests': what this node asks machines goes on its own.
                 if let Some(conn) = accepted {
                     let remote = *conn.remote_id().as_bytes();
-                    if !net.conns.borrow().get(&remote).is_some_and(|c| c.close_reason().is_none()) {
-                        net.keep(remote, &conn);
-                    }
                     answer(&net, conn, remote).await;
                 }
                 net.incoming.set(net.incoming.get() - 1);
@@ -210,7 +217,7 @@ pub async fn endpoint_start(seed: Vec<u8>, send: Function, asked: Function) -> R
     Ok(id)
 }
 
-/// Answers each ask on a connection another endpoint opened, each on its own stream, a few at once.
+/// Answers each request on a connection a client device opened, each on its own stream, a few at once.
 async fn answer(net: &Net, conn: Connection, remote: [u8; 32]) {
     let remote = data_encoding::HEXLOWER.encode(&remote);
     while let Ok((mut send, mut recv)) = conn.accept_bi().await {
@@ -223,16 +230,94 @@ async fn answer(net: &Net, conn: Connection, remote: [u8; 32]) {
         let (remote, asks) = (remote.clone(), net.asks.clone());
         wasm_bindgen_futures::spawn_local(async move {
             let _done = Done(asks);
-            let Ok(message) = recv.read_to_end(ASK_LIMIT).await else { return };
-            let Some(asked) = ASKED.with(|a| a.borrow().clone()) else { return };
-            let Ok(promise) = asked.call2(&JsValue::NULL, &remote.into(), &String::from_utf8_lossy(&message).as_ref().into()) else { return };
-            let answer = JsFuture::from(Promise::from(promise)).await.ok().and_then(|a| a.as_string());
-            if let Some(answer) = answer {
-                let _ = send.write_all(answer.as_bytes()).await;
-            }
+            let response = match request(&mut recv).await {
+                Ok((method, path, headers, body)) => respond(&remote, &method, &path, &headers, &body).await,
+                Err(why) => reply(400, &[("content-type".into(), "application/json".into())], json(&why).as_bytes()),
+            };
+            let _ = send.write_all(&response).await;
             let _ = send.finish();
         });
     }
+}
+
+/// A request read off a stream: its method, path, headers and body (as long as its length says, and no longer than
+/// `ASK_LIMIT`).
+async fn request(recv: &mut iroh::endpoint::RecvStream) -> Result<(String, String, Vec<(String, String)>, Vec<u8>), String> {
+    let mut buf = Vec::new();
+    loop {
+        let mut list = [httparse::EMPTY_HEADER; 64];
+        let mut parsed = httparse::Request::new(&mut list);
+        match parsed.parse(&buf).map_err(|e| format!("that isn't a request: {e}"))? {
+            httparse::Status::Complete(len) => {
+                let headers: Vec<(String, String)> = parsed.headers.iter().map(|h| (h.name.to_ascii_lowercase(), String::from_utf8_lossy(h.value).into_owned())).collect();
+                let length: usize = headers.iter().find(|h| h.0 == "content-length").map_or(Ok(0), |h| h.1.trim().parse()).map_err(|_| "a request's length is a number".to_string())?;
+                if length > ASK_LIMIT {
+                    return Err(format!("a request sends at most {} MiB", ASK_LIMIT >> 20));
+                }
+                let (method, path) = (parsed.method.unwrap_or("").to_string(), parsed.path.unwrap_or("").to_string());
+                let mut body = buf.split_off(len);
+                while body.len() < length {
+                    match recv.read_chunk(length - body.len()).await.map_err(|e| e.to_string())? {
+                        Some(chunk) => body.extend_from_slice(&chunk),
+                        None => return Err("the request ended early".into()),
+                    }
+                }
+                body.truncate(length);
+                return Ok((method, path, headers, body));
+            }
+            httparse::Status::Partial if buf.len() > HEAD_LIMIT => return Err("the request's head is too long".into()),
+            httparse::Status::Partial => match recv.read_chunk(HEAD_LIMIT).await.map_err(|e| e.to_string())? {
+                Some(chunk) => buf.extend_from_slice(&chunk),
+                None => return Err("the stream ended before a request".into()),
+            },
+        }
+    }
+}
+
+/// What `worker.js` answers a request, as an HTTP/1.1 response.
+async fn respond(remote: &str, method: &str, path: &str, headers: &[(String, String)], body: &[u8]) -> Vec<u8> {
+    let failed = |why: String| reply(503, &[("content-type".into(), "application/json".into())], json(&why).as_bytes());
+    let Some(asked) = ASKED.with(|a| a.borrow().clone()) else { return failed("the serverless node isn't started".into()) };
+    let flat = js_sys::Array::new();
+    for (name, value) in headers {
+        flat.push(&name.into());
+        flat.push(&value.into());
+    }
+    let args = js_sys::Array::of5(&remote.into(), &method.into(), &path.into(), &flat, &Uint8Array::from(body));
+    let promise = match asked.apply(&JsValue::NULL, &args) {
+        Ok(p) => Promise::from(p),
+        Err(err) => return failed(format!("{err:?}")),
+    };
+    let out = match JsFuture::from(promise).await {
+        Ok(out) => out,
+        Err(err) => return failed(js_sys::Error::from(err).message().into()),
+    };
+    let get = |k: &str| js_sys::Reflect::get(&out, &k.into()).unwrap_or(JsValue::UNDEFINED);
+    let status = get("status").as_f64().unwrap_or(500.0) as u16;
+    let list: Vec<String> = js_sys::Array::from(&get("headers")).iter().filter_map(|v| v.as_string()).collect();
+    let headers: Vec<(String, String)> = list.chunks(2).filter(|p| p.len() == 2).map(|p| (p[0].clone(), p[1].clone())).collect();
+    reply(status, &headers, &Uint8Array::new(&get("body")).to_vec())
+}
+
+/// An HTTP/1.1 response: nothing a header says can start another.
+fn reply(status: u16, headers: &[(String, String)], body: &[u8]) -> Vec<u8> {
+    let mut head = format!("HTTP/1.1 {status} {}\r\n", if status < 400 { "OK" } else { "Refused" });
+    for (name, value) in headers {
+        let framing = ["content-length", "transfer-encoding", "connection"].contains(&name.to_ascii_lowercase().as_str());
+        if framing || name.bytes().chain(value.bytes()).any(|b| b == b'\r' || b == b'\n' || b == 0) {
+            continue;
+        }
+        head.push_str(&format!("{name}: {value}\r\n"));
+    }
+    head.push_str(&format!("content-length: {}\r\n\r\n", body.len()));
+    let mut out = head.into_bytes();
+    out.extend_from_slice(body);
+    out
+}
+
+/// `{ "error": why }`.
+fn json(why: &str) -> String {
+    serde_json::json!({ "error": why }).to_string()
 }
 
 /// Counts an ask as answered once it's dropped, however it ended.

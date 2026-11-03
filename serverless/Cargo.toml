@@ -29,6 +29,8 @@ js-sys = "0.3"
 iroh = { version = "=1.4.1", default-features = false, features = ["tls-ring", "unstable-custom-transports"] }
 iroh-base = { version = "=1.4.1", default-features = false, features = ["key", "relay"] }
 n0-future = "0.3"
+# Client devices ask it as they ask any node, HTTP/1.1 on a stream (src/net.rs), whose requests it reads.
+httparse = "1"
 # The MCP Worker's devices (src/clients.rs, kernel/mcp/) ask nodes as every client does, with no socket.
 one-client = { path = "../client", features = ["relayed"] }
 n0-watcher = "1"

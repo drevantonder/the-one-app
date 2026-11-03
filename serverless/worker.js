@@ -1,35 +1,35 @@
-// The serverless node: a node of the install on Cloudflare Workers, which the gateway sends `/v1/` to by
-// service binding. It holds no keys. Each request brings its person's access token, checked as every node checks one
-// (src/lib.rs, which is the machine node's own Rust), and the keys of the databases its call reaches, sealed to this
-// node (`x-one-keys`); one that lacks some is answered 428 with what it needs, as a node on a machine answers. Who can do
-// what it reads from the install's log in the bucket (src/log.rs), and each app's latest deploy from the bucket too,
+// The serverless node: a node of the install on Cloudflare Workers, which client devices ask over iroh as they ask
+// any node, last in Where Things Run's order: when none of their person's machines answers. It holds no keys. Each
+// request is from the device its connection proved (or the device that vouched for that session's key, as nodes take
+// one: `x-one-endpoint`), says whose it is (`x-one-user`), which the install's entries must list that device as, and
+// brings the keys of the databases its call reaches, sealed to this node for that device (`x-one-keys`); one that lacks
+// some is answered 428 with what it needs, as a node on a machine answers. Who can do what it reads from the install's
+// log in the bucket (src/log.rs, src/lib.rs, which is the machine node's own Rust), and each app's latest deploy from the bucket too,
 // through the URL signer's URLs, keeping what it read sealed in its Durable Object's storage, so a wake fetches only
 // what's newer; it runs an app in an isolate of its own (Worker Loader, src/runtime/shim.js as its `ctx`) and writes
 // what a call wrote as one step (src/db.rs). An app's requests go out from here, filled in with the Vault's items it's
 // switched on for, read as any node reads them: each scope's `vault` database, opened with the keys handed for it.
 //
-// Calls of apps that keep to their own data run here when the install's order (src/rank.rs, set in Devices) puts this
-// node before every machine, or the machines are far. Everything else goes first to the install's nodes on machines:
-// calls over iroh, from this node's own endpoint, to a node that runs every scope the call reaches for its person, with
-// only that call's keys, sealed to it, and never the sign-in's token; the rest as the gateway sent it (`MACHINE`). When
-// none answers, this node answers what it can (the install's state, apps, widgets, badges, and any app with no sidecar)
-// and says plainly that the rest needs a device that's off.
+// It answers what it can itself (the install's state, apps, widgets, badges, screens, and the calls of apps that keep
+// to their own data). A call of an app that needs a machine goes on to the install's nodes on machines over iroh, from
+// this node's own endpoint, to a node that runs every scope the call reaches for its person, with only that call's
+// keys, sealed to it; with none answering, and for anything else only a machine has, it says plainly that it needs a
+// device that's off.
 //
 // Its Durable Objects are of one class, `Node`, in two parts. Each person's requests run in an object of their own
 // (`user:<id>`), which alone holds what they handed and what it opened with it: their databases, the entries it read,
 // their apps' isolates and its own copy of what it read from the bucket, so nothing one person's call opened is ever
 // another's. The object `node` is this node as an iroh endpoint (src/net.rs), of its own key, with no socket, which
-// the relay wakes with the datagrams sent to it and which sends its own back through the relay; it passes each ask it
-// gets to the asker's person's object, and asks devices for calls for them, its connections living as long as it does.
+// the relay wakes with the datagrams sent to it and which sends its own back through the relay; it passes each request
+// it gets to the asker's person's object, and asks devices for calls for them, its connections living as long as it does.
 // It ends itself once nobody has asked for a while, since iroh's timers would keep it awake, and billed, for good.
 //
-// Bindings: AUTH and SIGNER (the kernel's services), LOADER (Worker Loader), NODE (this Worker's `Node`),
-// NODE_KEY (its endpoint's key, a secret), RELAY (the relay's `ServerlessNode` entrypoint), LOCATION (where objects are made),
-// MACHINE (a node on a machine: a Workers VPC service; or MACHINE_URL, its address), ADDRESS (the install's) and NAME
-// (its name). `built.js`, made when it's deployed, is the shim.
+// Bindings: SIGNER (the URL signer), LOADER (Worker Loader), NODE (this Worker's `Node`), NODE_KEY (its endpoint's
+// key, a secret), RELAY (the relay's `ServerlessNode` entrypoint), LOCATION (where objects are made), ADDRESS (the
+// install's) and NAME (its name). `built.js`, made when it's deployed, is the shim.
 
 import { DurableObject, RpcTarget } from "cloudflare:workers";
-import { initSync, verify, open, opens, refresh, query, write, close, statements, vault_items, vault_fill, vault_schema, screen, client_screen, config, prefix, following as after, read_log, groups, scopes_of, epochs as epochsOf, runners, forward, install, bundle, endpoint_of, signed, handoff, needs as needed, endpoint_start, endpoint_deliver, endpoint_ask, endpoint_close } from "./one_serverless.js";
+import { initSync, check_certificate, open, opens, refresh, query, write, close, statements, vault_items, vault_fill, vault_schema, screen, client_screen, config, prefix, following as after, read_log, groups, scopes_of, epochs as epochsOf, runners, forward, install, bundle, endpoint_of, signed, handoff, epoch_name, app_key_name, needs as needed, endpoint_start, endpoint_deliver, endpoint_ask, endpoint_close } from "./one_serverless.js";
 import wasm from "./one_serverless_bg.wasm";
 import { shim, compatibilityDate } from "./built.js";
 
@@ -54,66 +54,19 @@ const kindOf = (scope) => (scope === "global" ? "global" : scope.startsWith("gro
 /// What a person reads when something needs a device and none is on.
 const OFF = "none of your devices is on right now";
 
-/// The most a request's body may carry, and how many of each thing a person's object keeps at once: sign-ins, and the
-/// databases each handed keys of.
+/// The most a request's body may carry, and how many of each thing a person's object keeps at once: devices asking, and
+/// the databases each handed keys of.
 const BODY_MOST = 4 << 20;
 const SIGN_INS_MOST = 64;
 const DATABASES_MOST = 512;
 
-/// The header an ask over iroh is marked with as it's passed to a person's object: it runs there, or not at all, since
-/// whoever asked tried the machines. Taken off whatever the gateway sends.
-const ASKED = "x-one-asked";
-
-// Who asked.
-
-/// The auth service's public keys, kept five minutes or until a token names one that isn't among them.
-let jwks = null;
-let jwksAt = 0;
-
-async function claimsOf(env, token) {
-  const iss = `${env.ADDRESS}/api/auth`;
-  for (const fresh of [false, true]) {
-    if (fresh || !jwks || jwksAt < Date.now() - 300_000) {
-      const r = await env.AUTH.fetch(`${iss}/jwks`);
-      if (!r.ok) refuse(503, "the auth service didn't give its keys");
-      jwks = await r.text();
-      jwksAt = Date.now();
-    }
-    try {
-      return JSON.parse(verify(token, jwks, iss, Date.now()));
-    } catch (err) {
-      if (fresh || !/key the auth service/.test(err.message)) refuse(401, `that sign-in won't do: ${err.message}`);
-    }
-  }
-}
-
-const tokenOf = (request) => {
-  const auth = request.headers.get("authorization") || "";
-  return auth.toLowerCase().startsWith("bearer ") && auth.slice(7).trim() ? auth.slice(7).trim() : null;
-};
-
-/// Sign-ins checked in this isolate before their request goes to its person's object, by a hash of their token.
-const checked = new Map();
-
-/// Whom an access token is for, as the auth service at the install's address signed it, checked once and kept in
-/// `kept` (by a hash of the token) until it expires: → `{ hash, token, user, client, clientName, until }`.
-async function signIn(env, token, kept) {
-  const hash = btoa(String.fromCharCode(...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token)))));
-  const now = Date.now();
-  const was = kept.get(hash);
-  if (was && now < was.until) return was;
-  const claims = await claimsOf(env, token);
-  const aud = Array.isArray(claims.aud) ? claims.aud : [claims.aud];
-  // A remote MCP client's token is for the MCP Worker (`<address>/mcp`), whose device it is, and never a sign-in here.
-  if (!aud.includes(env.ADDRESS)) refuse(401, `that sign-in isn't for ${env.ADDRESS}`);
-  const who = { hash, token, user: claims.sub, client: claims.azp, clientName: claims.azp || "", until: claims.exp * 1000 };
-  if (kept.size >= SIGN_INS_MOST * 16) {
-    for (const [h, s] of kept) if (s.until <= now) kept.delete(h);
-    while (kept.size >= SIGN_INS_MOST * 16) kept.delete(kept.keys().next().value);
-  }
-  kept.set(hash, who);
-  return who;
-}
+/// Who a client's request is from, as the endpoint object proved it and passes it to a person's object: `{ device,
+/// until }`. Only the endpoint object sets it: nothing else reaches a person's object.
+const FROM = "x-one-from";
+/// Whose a request says it is: the person's object it goes to, which checks the install lists its device as theirs.
+const USER = "x-one-user";
+/// How long the keys a request hands are kept, at most: they come again with the next.
+const HANDED_FOR = 3_600_000;
 
 /// A person's object.
 const personOf = (env, user) => env.NODE.get(env.NODE.idFromName(`user:${user}`), near(env));
@@ -338,9 +291,7 @@ class Person {
     const { env, ctx } = object;
     Object.assign(this, { env, ctx, object, owner: null });
     this.bucket = new Bucket(env, new Sealed(ctx.storage.sql));
-    /// Sign-ins it checked, by a hash of their token, until they expire.
-    this.signedIn = new Map();
-    /// The keys handed for each sign-in's calls (`x-one-keys`), by the same hash: `{ until, keys }`, `keys` a
+    /// The keys handed for each device's requests (`x-one-keys`), by its key: `{ until, keys }`, `keys` a
     /// database's (`<scope>/<app>/<database>`) keys by epoch, base64url. Forgotten when they expire, or its person loses
     /// the scope.
     this.handed = new Map();
@@ -350,37 +301,31 @@ class Person {
     /// reaches it again: `{ handle, keys, queue, used, users }`. A call uses one only if it was handed exactly the keys
     /// it was opened with.
     this.kept = new Map();
-    /// Each deploy's module, by bundle; what each app's latest deploy says it is; its person's name.
+    /// Each deploy's module, by bundle; what each app's latest deploy says it is.
     this.modules = new Map();
     this.described = new Map();
-    this.name = null;
   }
 
-  /// Whom a request is for: an access token for this object's person. The keys it hands are kept once it's checked.
-  async whom(request) {
-    const token = tokenOf(request) || refuse(403, "sign in first: a serverless node takes only sign-ins");
-    const who = await signIn(this.env, token, this.signedIn);
-    if (!this.env.NODE.idFromName(`user:${who.user}`).equals(this.ctx.id)) refuse(403, "that sign-in is someone else's");
-    this.owner ||= who.user;
-    if (this.name === null) this.name = await this.nameOf(token);
+  /// Whom a request is from: the device the endpoint object proved, for this object's person, until when its word
+  /// lasts (a session's certificate's). The keys it hands are kept for that device; whether the install lists it as
+  /// theirs is checked as soon as the install's entries are read (`installFor`), before anything else of theirs is.
+  whom(request) {
+    const from = JSON.parse(request.headers.get(FROM) || "null");
+    const user = request.headers.get(USER) || "";
+    if (!from?.device || !this.env.NODE.idFromName(`user:${user}`).equals(this.ctx.id)) refuse(403, "that request is someone else's");
+    this.owner ||= user;
+    const who = { hash: from.device, device: from.device, user, clientName: "", until: Math.min(from.until ?? Infinity, Date.now() + HANDED_FOR) };
     const sealed = request.headers.get("x-one-keys");
     if (sealed) this.take(who, sealed);
-    return { ...who, name: this.name };
+    return who;
   }
 
-  /// Its person's name, as the auth service says it.
-  async nameOf(token) {
-    const r = await this.env.AUTH.fetch(`${this.env.ADDRESS}/api/auth/oauth2/userinfo`, { headers: { authorization: `Bearer ${token}` } });
-    const info = r.ok ? await r.json().catch(() => ({})) : {};
-    return info.name || "";
-  }
-
-  /// Keeps the keys a caller handed with a sign-in's calls, no longer than its token lasts, and starts fetching what
-  /// they open. Keys sealed to another node, or for another sign-in, are left.
+  /// Keeps the keys a device handed with its requests, no longer than its word lasts, and starts fetching what they
+  /// open. Keys sealed to another node, or for another device, are left.
   take(who, sealed) {
     let opened;
     try {
-      opened = JSON.parse(handoff(this.env.NODE_KEY, who.token, sealed, Date.now(), who.until));
+      opened = JSON.parse(handoff(this.env.NODE_KEY, who.device, sealed, Date.now(), who.until));
     } catch {
       return;
     }
@@ -418,17 +363,24 @@ class Person {
     return JSON.parse(epochsOf(this.owner, JSON.stringify(scopes)));
   }
 
-  /// Says with 428 what a sign-in needs, of `wants` (`{ scope, app, database, have, missing? }`), sealed to this node:
-  /// its caller sends the call again with them.
-  async needs(wants) {
+  /// Says with 428 what a device (`who`) needs, of `wants` (`{ scope, app, database, have, missing? }`), sealed to
+  /// this node: its caller sends the call again with them.
+  async needs(wants, who) {
     const epochs = this.logsRead.has("global") ? this.epochs([...new Set(wants.map((w) => w.scope))]) : {};
     const need = JSON.parse(await needed(this.bucket, JSON.stringify(wants), JSON.stringify(epochs)));
     for (const w of wants) if (w.missing && !need.some((n) => n.scope === w.scope && n.app === w.app && n.database === w.database && n.epoch === w.missing)) need.push({ scope: w.scope, epoch: w.missing, app: w.app, database: w.database });
-    this.lacking(need);
+    this.lacking(need, who);
   }
 
-  /// Says with 428 that a sign-in lacks `need` (`[{ scope, epoch, app, database }]`), keys sealed to this node.
-  lacking(need) {
+  /// Says with 428 that a device (`who`) lacks `need` (`[{ scope, epoch, app, database }]`), keys sealed to this node,
+  /// with the logs' keys it handed, which every request here reads: a client hands a kind of request what its last 428
+  /// said, and no more.
+  lacking(need, who) {
+    for (const [id, byEpoch] of this.handed.get(who.hash)?.keys || []) {
+      const [scope, app, database] = id.split("/");
+      if (app !== "node" || database !== "log") continue;
+      for (const epoch of Object.keys(byEpoch).map(Number)) if (!need.some((n) => n.scope === scope && n.app === app && n.database === database && n.epoch === epoch)) need.push({ scope, epoch, app, database });
+    }
     const me = JSON.parse(endpoint_of(this.env.NODE_KEY));
     const list = need.map((n) => `${n.scope}'s ${n.app}/${n.database} in epoch ${n.epoch}`).join(", ");
     throw Object.assign(new Refused(428, `it needs keys it wasn't handed: ${list}`), { said: { need, to: me.key, seal: me.seal } });
@@ -437,13 +389,13 @@ class Person {
   /// Runs `f` with a database's keys (JSON); one that stops at an epoch it wasn't handed says so with 428.
   async withKeys(who, scope, app, database, f) {
     const handed = this.keysOf(who, scope, app, database);
-    if (!handed) return this.needs([{ scope, app, database, have: [] }]);
+    if (!handed) return this.needs([{ scope, app, database, have: [] }], who);
     const keys = JSON.stringify(handed);
     try {
       return await f(keys);
     } catch (err) {
       if (err.missing === undefined) throw err;
-      return this.needs([{ scope, app, database, have: Object.keys(handed).map(Number), missing: err.missing }]);
+      return this.needs([{ scope, app, database, have: Object.keys(handed).map(Number), missing: err.missing }], who);
     }
   }
 
@@ -460,30 +412,33 @@ class Person {
     })));
   }
 
-  /// Forgets what a sign-in was handed for scopes its person may no longer use, as soon as the install's log says so,
-  /// and the sign-in itself once they're out of the install. Someone who hasn't joined yet is refused, as machines
-  /// refuse them.
+  /// Refuses a device the install's log doesn't list as its person's, forgetting what it handed, and forgets what a
+  /// device was handed for scopes its person may no longer use, as soon as the log says so.
   forgetLost(who) {
-    const { scopes, joined, removed } = JSON.parse(scopes_of(this.owner, who.user));
-    if (removed || !joined) {
-      this.signedIn.delete(who.hash);
+    const { scopes, joined, removed, device, runs } = JSON.parse(scopes_of(this.owner, who.user, who.device));
+    if (removed || !joined || device == null) {
       this.handed.delete(who.hash);
-      refuse(403, removed ? "You were removed: an admin adds you back." : "you haven't joined yet: the person who invited you approves this device with the code it shows");
+      refuse(403, removed ? "You were removed: an admin adds you back." : "this isn't one of your devices: approve it on one that is");
     }
+    who.clientName = device;
     const may = new Set(scopes);
     const kept = this.handed.get(who.hash);
     if (kept) for (const id of kept.keys.keys()) if (!may.has(id.split("/")[0])) kept.keys.delete(id);
+    return runs;
   }
 
   /// The install as a request's person sees it (src/lib.rs: `install`): `{ state, apps, me, epochs }`, from the
-  /// entries of Everyone's, their own and the groups' they handed the keys of.
+  /// entries of Everyone's, their own and the groups' they handed the keys of. Their device is checked first.
   async installFor(who) {
-    const mine = ["global", `user:${who.user}`];
     await this.readLogs(who, ["global"]);
-    this.forgetLost(who);
-    await this.readLogs(who, [mine[1]]);
-    const theirs = JSON.parse(groups(this.owner, who.user)).filter((g) => this.handed.get(who.hash)?.keys.has(`${g}/node/log`)).map((g) => this.readLogs(who, [g]).then(() => g, () => null));
-    const read = [...mine, ...(await Promise.all(theirs)).filter(Boolean)];
+    const runs = this.forgetLost(who);
+    // Their own log's keys are asked for only if they chose this node to run their own things; it and their groups'
+    // are read whenever they're handed.
+    const own = `user:${who.user}`;
+    if (runs.includes(own) && !this.keysOf(who, own, "node", "log")) await this.needs([{ scope: own, app: "node", database: "log", have: [] }], who);
+    const handed = (s) => this.handed.get(who.hash)?.keys.has(`${s}/node/log`);
+    const theirs = [own, ...JSON.parse(groups(this.owner, who.user))].filter(handed).map((s) => this.readLogs(who, [s]).then(() => s, () => null));
+    const read = ["global", ...(await Promise.all(theirs)).filter(Boolean)];
     const view = JSON.parse(install(this.owner, who.user, who.clientName, JSON.stringify(read), Date.now()));
     this.bucket.sealed.forgetErased(view.erased || []);
     view.epochs = this.epochs(read);
@@ -559,7 +514,7 @@ class Person {
     return (req.scopes || ["user"]).map((s) => (s === "user" ? `user:${who.user}` : s === "global" || String(s).includes(":") ? String(s) : `group:${s}`));
   }
 
-  /// The keys a sign-in handed this node for `app` in `scopes`, and for any `more` (`{ scope, app, database, epoch }`)
+  /// The keys a device handed this node for `app` in `scopes`, and for any `more` (`{ scope, app, database, epoch }`)
   /// of those scopes: `[{ scope, epoch, app, database, key }]`, what's passed on with a call.
   handedFor(who, scopes, app, more = []) {
     const kept = this.handed.get(who.hash);
@@ -578,7 +533,7 @@ class Person {
 
   /// Asks the install's nodes on machines that run every scope `call` reaches for its person (`runners`), in Where
   /// Things Run's order until one is reached, to run it as them, with only the keys of those scopes they handed this
-  /// node, sealed to that node, never their token: → its answer, `{ ok }` or what failed as `/v1/call` says it; or null
+  /// node, sealed to that node: → its answer, `{ ok }` or what failed as `/v1/call` says it; or null
   /// if none was reached. Keys it says it needs that this node holds go with the call again; the rest are its caller's
   /// to hand this node, with 428.
   async onMachine(who, view, req, wait) {
@@ -596,13 +551,12 @@ class Person {
         console.log(JSON.stringify({ machine: "off", why: r.unreached }));
         return null;
       }
-      if (r.connect) machineRtt = r.connect;
       const out = JSON.parse(r.answer);
       if (!out.need) return out;
       const theirs = out.need.filter((n) => scopes.includes(n.scope));
       const holds = (n) => this.keysOf(who, n.scope, n.app, n.database)?.[n.epoch] !== undefined;
       const lacking = theirs.filter((n) => !holds(n));
-      if (lacking.length) this.lacking(lacking);
+      if (lacking.length) this.lacking(lacking, who);
       const fresh = theirs.filter((n) => !more.some((m) => m.scope === n.scope && m.app === n.app && m.database === n.database && m.epoch === n.epoch));
       if (!fresh.length || theirs.length < out.need.length) return { error: out.error };
       more = [...more, ...fresh];
@@ -637,7 +591,7 @@ class Call {
     return serially(db, () => {
       const current = writes ? this.person.epochs([scope])[scope] : then;
       if (!opens(db.handle, keys, current)) {
-        if (!Object.hasOwn(JSON.parse(keys), current)) this.person.lacking([{ scope, epoch: current, app: this.app.name, database: "main" }]);
+        if (!Object.hasOwn(JSON.parse(keys), current)) this.person.lacking([{ scope, epoch: current, app: this.app.name, database: "main" }], this.who);
         refuse(503, "its database was closed while it ran: try again");
       }
       return f(db.handle);
@@ -650,7 +604,7 @@ class Call {
     const p = this.person;
     this.items ||= (async () => {
       const lacks = this.scopes.filter((scope) => !p.keysOf(this.who, scope, "node", "vault"));
-      if (lacks.length) await p.needs(lacks.map((scope) => ({ scope, app: "node", database: "vault", have: [] })));
+      if (lacks.length) await p.needs(lacks.map((scope) => ({ scope, app: "node", database: "vault", have: [] })), this.who);
       const current = (scope) => this.view.epochs[scope] ?? p.epochs([scope])[scope];
       return Promise.all(this.scopes.map((scope) => p.withKeys(this.who, scope, "node", "vault", async (keys) => [scope, await open(p.owner, p.bucket, prefix(scope, "node", "vault"), keys, current(scope), vault_schema())])));
     })();
@@ -734,7 +688,7 @@ class Run {
     const scopes = this.scopes(app, req.scopes);
     // The keys of every database it may open, asked for at once, before it runs, unless each has its scope's current.
     const lacking = scopes.filter((h) => !Object.hasOwn(p.keysOf(this.who, h.id, app.name, "main") || {}, this.view.epochs[h.id] ?? 1));
-    if (lacking.length) await p.needs(lacking.map((h) => ({ scope: h.id, app: app.name, database: "main", have: Object.keys(p.keysOf(this.who, h.id, app.name, "main") || {}).map(Number) })));
+    if (lacking.length) await p.needs(lacking.map((h) => ({ scope: h.id, app: app.name, database: "main", have: Object.keys(p.keysOf(this.who, h.id, app.name, "main") || {}).map(Number) })), this.who);
     return { ok: await this.run(app, "call", { op: req.op, input: req.input ?? {} }, scopes, from, depth) };
   }
 
@@ -914,104 +868,45 @@ const near = (env) => (env.LOCATION ? { locationHint: env.LOCATION } : {});
 
 // Requests.
 
-/// Until when a node on a machine didn't answer through the tunnel, so requests meanwhile don't wait for it again.
-let machineOffUntil = 0;
-
-/// A machine whose round trip is longer than this is far (src/node.rs's FAR): this node, near the person asking, runs
-/// what it can rather than wait on it.
-const FAR = 250;
-/// How long the last connection made to a machine's node took: one round trip, through the relay.
-let machineRtt = 0;
-
-const PLACES = { first: 0, needed: 1, last: 2 };
-
-/// Whether an app's call this node could run goes to a machine first: one is not far, and comes at this node's place
-/// in the install's order or before it (at the same place a machine costs less).
-function machineFirst(view) {
-  if (machineRtt > FAR) return false;
-  const mine = PLACES[view.state.install.serverless?.use] ?? PLACES.needed;
-  return view.state.install.devices.some((s) => (PLACES[s.use] ?? PLACES.first) <= mine);
-}
-
-/// Sends a request on to the install's node on a machine, as the gateway sent it here: its answer, or null when none
-/// answers within `wait` (an answer that has begun may stream for as long as it takes).
-async function fromMachine(request, env, wait = 15_000) {
-  if ((!env.MACHINE && !env.MACHINE_URL) || Date.now() < machineOffUntil) return null;
-  const url = new URL(request.url);
-  const abort = new AbortController();
-  const timer = setTimeout(() => abort.abort(), wait);
-  try {
-    // Through a Cloudflare Tunnel the host is only what the node sees: the gateway's, as it sent it here.
-    const sent = new Request(request, { signal: abort.signal });
-    const r = env.MACHINE ? await env.MACHINE.fetch(`http://${url.host}${url.pathname}${url.search}`, sent) : await fetch(`${env.MACHINE_URL}${url.pathname}${url.search}`, sent);
-    // A node's own failures are JSON; the tunnel's, when no node is behind it, aren't.
-    if (r.status >= 500 && !(r.headers.get("content-type") || "").includes("json")) throw new Error(`the tunnel said ${r.status}`);
-    return r;
-  } catch (err) {
-    console.log(JSON.stringify({ machine: "off", why: String(err?.message ?? err) }));
-    machineOffUntil = Date.now() + 30_000;
-    return null;
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-/// While no device is on, the events a shell listens for: none, kept open a minute, so it asks again then.
-function quietEvents() {
-  const enc = new TextEncoder();
-  let tick;
-  const body = new ReadableStream({
-    start(c) {
-      c.enqueue(enc.encode(": no device is on\n\n"));
-      tick = setInterval(() => c.enqueue(enc.encode(":\n\n")), 15_000);
-      setTimeout(() => (clearInterval(tick), c.close()), 55_000);
-    },
-    cancel: () => clearInterval(tick),
-  });
-  return new Response(body, { headers: { "content-type": "text/event-stream", "cache-control": "no-store" } });
-}
-
-/// Answers a request in its person's object. One `asked` over iroh runs here, or not at all: whoever asked tried the
-/// machines.
+/// Answers a request in its person's object.
 async function route(p, request) {
   const url = new URL(request.url);
   const path = url.pathname;
-  const asked = request.headers.get(ASKED) === "1";
   if (request.method === "POST" && path === "/v1/call") {
-    const who = await p.whom(request);
+    const who = p.whom(request);
     const req = await bodyOf(request);
     if (typeof req !== "object" || req === null || Array.isArray(req)) refuse(400, "a call is an object");
     const run = new Run(p, who, await p.installFor(who));
     const app = !req.sidecar && !req.device && deployed(run.view, req.app);
     const d = app && (await p.describe(who, app));
-    // An app that keeps to its own data runs here, unless a machine comes first; the rest on a machine when one answers.
-    if (d && plain(d) && (asked || !machineFirst(run.view))) return json(await run.call(req));
-    const r = !asked && (await p.onMachine(who, run.view, req, 120_000));
+    // An app that keeps to its own data runs here; the rest on a machine, when one answers.
+    if (d && plain(d)) return json(await run.call(req));
+    const r = await p.onMachine(who, run.view, req, 120_000);
     if (r) return json(r, r.ok !== undefined ? 200 : 400);
     if (!d || d.uses?.sidecars?.length) refuse(503, needsDevice(d, req.app));
     return json(await run.call(req));
   }
   const screenAt = path.match(/^\/v1\/screens\/([a-z0-9-]+)\/([A-Za-z0-9_-]+)$/);
   if (request.method === "GET" && screenAt) {
-    const who = await p.whom(request);
+    const who = p.whom(request);
     const view = await p.installFor(who);
     const app = deployed(view, screenAt[1]);
     const d = app && (await p.describe(who, app));
-    const params = JSON.parse(url.searchParams.get("params") || "{}");
-    if (d && plain(d) && !machineFirst(view)) return screenOf(p, who, view, app, screenAt[2], params, url.searchParams.get("scope"));
-    const r = await fromMachine(request, p.env);
-    if (r) return r;
     if (!d || d.uses?.sidecars?.length) refuse(503, needsDevice(d, screenAt[1]));
-    return screenOf(p, who, view, app, screenAt[2], params, url.searchParams.get("scope"));
+    return screenOf(p, who, view, app, screenAt[2], JSON.parse(url.searchParams.get("params") || "{}"), url.searchParams.get("scope"));
   }
-  // The rest is a machine's when one answers; while none does, this node answers what it can.
-  const r = await fromMachine(request, p.env, path === "/v1/events" ? 5_000 : 8_000);
-  if (r) return r;
+  // A scope's keys, as sealed in the bucket, where every endpoint the relay lets in may read them anyway.
+  if (request.method === "GET" && path === "/v1/keys") {
+    p.whom(request);
+    return json(await sealedKeys(p.bucket, url.searchParams.get("scope") || "", url.searchParams.get("to"), url.searchParams.get("app")));
+  }
   const own = request.method === "GET" && path.startsWith("/v1/client-screens/");
   if (own || (request.method === "GET" && ["/v1/state", "/v1/apps", "/v1/widgets", "/v1/badges", "/v1/events"].includes(path))) {
-    const who = await p.whom(request);
-    if (path === "/v1/events") return quietEvents();
+    const who = p.whom(request);
     const run = new Run(p, who, await p.installFor(who));
+    // Nothing here changes but what devices write, which they'll say once one is on: no events, so the client asks again
+    // in a while, and this node sleeps meanwhile.
+    if (path === "/v1/events") return new Response(null, { status: 204 });
     if (own) {
       const name = decodeURIComponent(path.slice("/v1/client-screens/".length));
       const params = JSON.parse(url.searchParams.get("params") || "{}");
@@ -1027,6 +922,29 @@ async function route(p, request) {
   refuse(503, `That needs one of your devices, and ${OFF}.`);
 }
 
+/// A scope's keys as a node gives them (src/node/devices.rs: `sealed_keys`): each epoch sealed to `to` (an endpoint's
+/// key, or `recovery`) → `{ epoch, sealed }`, or an app's key in each epoch → `{ sealed }`, by epoch, base64url. Its
+/// epochs are those sealed to the recovery key, every one of them, numbered from 1.
+async function sealedKeys(bucket, scope, to, app) {
+  if (!to === !app) refuse(400, "give to (an endpoint's key, or recovery) or app");
+  if (!/^(global|(user|group):[A-Za-z0-9_-]{1,64})$/.test(scope)) refuse(400, "that isn't a scope");
+  if (to ? !/^([0-9a-f]{64}|recovery)$/.test(to) : !/^[a-z0-9]+(-[a-z0-9]+)*$/.test(app)) refuse(400, to ? "to is an endpoint's key, or recovery" : "that isn't an app's name");
+  let newest = 0;
+  while (newest < 1024 && (await bucket.get(epoch_name(scope, newest + 1, "recovery")))) newest++;
+  const sealed = {};
+  await Promise.all(Array.from({ length: newest }, (_, i) => i + 1).map(async (n) => {
+    const o = await bucket.get(to ? epoch_name(scope, n, to) : app_key_name(scope, app, n));
+    if (o) sealed[n] = b64u(o.bytes);
+  }));
+  return to ? { epoch: newest, sealed } : { sealed };
+}
+
+const b64u = (bytes) => {
+  let s = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(s).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
+};
+
 /// A failure, as the API says it.
 function failure(err) {
   if (err instanceof Refused) return json({ error: err.message, ...err.said }, err.status);
@@ -1034,25 +952,23 @@ function failure(err) {
   return json({ error: String(err?.message ?? err) }, 400);
 }
 
-/// A request the gateway sent, or an ask over iroh (`asked`): its sign-in checked before anything it sends is read,
-/// then answered in its person's object. One with no sign-in is a machine's, through the Tunnel, if it isn't a call.
-async function toPerson(request, env, asked = false) {
-  const url = new URL(request.url);
-  const headers = new Headers(request.headers);
-  headers.delete(ASKED);
-  if (asked) headers.set(ASKED, "1");
-  request = new Request(request, { headers });
-  const token = tokenOf(request);
-  if (!token) {
-    const r = !asked && url.pathname !== "/v1/call" && !url.pathname.startsWith("/v1/screens/") && (await fromMachine(request, env));
-    return r || refuse(403, "sign in first: a serverless node takes only sign-ins");
+/// Who a client's request over iroh is from: the device `remote` (hex) is, or, for a session's key, the device its
+/// certificate (`x-one-endpoint`) says vouched for it, until then. → `{ device, until }`.
+function fromOf(remote, headers) {
+  const certificate = headers.get("x-one-endpoint");
+  if (!certificate) return { device: remote, until: null };
+  let session;
+  try {
+    session = JSON.parse(check_certificate(certificate, Date.now()));
+  } catch (err) {
+    refuse(403, `that certificate won't do: ${err.message}`);
   }
-  const who = await signIn(env, token, checked);
-  return personOf(env, who.user).fetch(request);
+  if (session.endpoint !== remote) refuse(403, "that certificate is for another endpoint");
+  return { device: session.by, until: session.until };
 }
 
 export default {
-  fetch: (request, env) => toPerson(request, env).catch(failure),
+  fetch: () => json({ error: "the serverless node is asked over iroh, as any node is" }, 404),
 };
 
 /// A Durable Object of the serverless node: a person's (`user:<id>`), where their requests run, or the node's
@@ -1067,7 +983,7 @@ export class Node extends DurableObject {
     this.last = Date.now();
   }
 
-  /// A request of its person's, which the Worker checked is theirs and checks again here.
+  /// A request of its person's, from the endpoint object, which proved who asked.
   async fetch(request) {
     if (this.isEndpoint) return json({ error: "the serverless node's endpoint answers only asks over iroh" }, 400);
     this.person ||= new Person(this);
@@ -1107,7 +1023,7 @@ export class Node extends DurableObject {
           this.ctx.waitUntil(this.sent);
         });
       };
-      this.started = endpoint_start(unhex(this.env.NODE_KEY), send, (remote, message) => this.asked(remote, message)).then((key) => {
+      this.started = endpoint_start(unhex(this.env.NODE_KEY), send, (...asked) => this.asked(...asked)).then((key) => {
         console.log(JSON.stringify({ woke: key.slice(0, 8), ms: Date.now() - began }));
         return key;
       });
@@ -1154,23 +1070,26 @@ export class Node extends DurableObject {
     }
   }
 
-  /// What another endpoint asks it on a stream: a call, run in its person's object as `/v1/call` there runs it. A
-  /// notice needs no answer: this node keeps nothing a notice would change.
-  async asked(remote, text) {
+  /// A client device's request over iroh (`remote` its key, hex; `headers` names and values, one after the other):
+  /// answered in its person's object, as `x-one-user` names them, with who asked as the connection proved it.
+  /// → `{ status, headers, body }`.
+  async asked(remote, method, path, headers, body) {
     this.asking++;
     this.awake();
     try {
-      const msg = JSON.parse(text);
-      if (msg.kind === "notice") return null;
-      if (msg.kind !== "ask" || !msg.body?.call) return JSON.stringify({ error: "the serverless node answers calls" });
-      const { me, keys, ...call } = msg.body.call;
-      const headers = { "content-type": "application/json" };
-      if (me?.token) headers.authorization = `Bearer ${me.token}`;
-      if (keys) headers["x-one-keys"] = keys;
-      const request = new Request(`${this.env.ADDRESS}/v1/call`, { method: "POST", headers, body: JSON.stringify(call) });
-      return await (await toPerson(request, this.env, true).catch(failure)).text();
-    } catch (err) {
-      return JSON.stringify({ error: String(err?.message ?? err) });
+      const h = new Headers();
+      for (let i = 0; i + 1 < headers.length; i += 2) h.append(headers[i], headers[i + 1]);
+      const r = await (async () => {
+        const user = h.get(USER) || "";
+        if (!/^[A-Za-z0-9_-]{1,64}$/.test(user)) refuse(400, `say whose request it is (${USER})`);
+        h.set(FROM, JSON.stringify(fromOf(remote, h)));
+        h.delete("x-one-endpoint");
+        h.delete("authorization");
+        if (body.length > BODY_MOST) refuse(413, "that's more than a request may carry");
+        const request = new Request(`${this.env.ADDRESS}${path.startsWith("/") ? path : `/${path}`}`, { method, headers: h, body: ["GET", "HEAD"].includes(method) ? null : body });
+        return personOf(this.env, user).fetch(request);
+      })().catch(failure);
+      return { status: r.status, headers: [...r.headers].flat(), body: new Uint8Array(await r.arrayBuffer()) };
     } finally {
       this.asking--;
       this.awake();

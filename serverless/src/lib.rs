@@ -1,7 +1,7 @@
 //! The serverless node's Rust: the machine node's own code, as WebAssembly on Workers. `worker.js` answers requests
-//! and runs apps; this checks access tokens, opens the keys callers hand it, signs what it asks the URL signer, and
+//! and runs apps; this checks who asks, opens the keys callers hand it, signs what it asks the URL signer, and
 //! reads and writes apps' databases in the bucket (`src/db.rs`), through the presigned URLs `worker.js` gets. It holds
-//! no keys but those handed it for a sign-in's calls.
+//! no keys but those handed it for a device's requests.
 
 mod clients;
 mod net;
@@ -102,13 +102,13 @@ pub fn signed(seed: &str, domain: &str, fields: &str, at: f64) -> Result<String,
 /// The most keys one handoff may carry: a call's databases in each epoch since their newest copies.
 const HANDED_MOST: usize = 256;
 
-/// The keys a caller handed this node with `token`'s calls (`x-one-keys`), kept no longer than the token lasts
-/// (`exp`, milliseconds): → `{ until, keys: [{ scope, epoch, app, database, key }] }`.
+/// The keys the device `device` (hex) handed this node with its requests (`x-one-keys`), kept no longer than its word
+/// lasts (`exp`, milliseconds): → `{ until, keys: [{ scope, epoch, app, database, key }] }`.
 #[wasm_bindgen]
-pub fn handoff(seed: &str, token: &str, sealed: &str, now: f64, exp: f64) -> Result<String, JsError> {
+pub fn handoff(seed: &str, device: &str, sealed: &str, now: f64, exp: f64) -> Result<String, JsError> {
     let handoff = one::keys::open_handoff(&one::keys::seal_secret(&signing_key(seed).map_err(thrown)?), sealed).map_err(thrown)?;
-    if handoff.for_ != one::keys::token_id(token) {
-        return Err(JsError::new("the keys handed are for another sign-in"));
+    if handoff.for_ != device {
+        return Err(JsError::new("the keys handed are for another device"));
     }
     if handoff.until <= now as u64 {
         return Err(JsError::new("the keys handed have expired"));
@@ -194,13 +194,25 @@ fn put(handle: u32, db: (String, Db)) {
     OPEN.with(|o| o.borrow_mut().1.insert(handle, db));
 }
 
-/// An access token's claims, as JSON, if a key in `jwks` (JSON) signed it, `iss` issued it and it's unexpired at
-/// `now` (milliseconds).
+/// Where epoch `n` of `scope` is kept sealed to `to` (an endpoint's key, hex, or `recovery`) in the bucket.
 #[wasm_bindgen]
-pub fn verify(token: &str, jwks: &str, iss: &str, now: f64) -> Result<String, JsError> {
-    let jwks: Value = serde_json::from_str(jwks)?;
-    let claims = one::kernel::verify(token, &jwks, iss, now as u64).map_err(thrown)?;
-    Ok(json!({ "sub": claims.sub, "azp": claims.azp, "aud": claims.aud, "exp": claims.exp, "scope": claims.scope }).to_string())
+pub fn epoch_name(scope: &str, n: u32, to: &str) -> String {
+    one::keys::epoch_name(scope, n, to)
+}
+
+/// Where `app`'s key in epoch `n` of `scope` is kept sealed under that epoch in the bucket.
+#[wasm_bindgen]
+pub fn app_key_name(scope: &str, app: &str, n: u32) -> String {
+    one::keys::app_key_name(scope, app, n)
+}
+
+/// A session's certificate (`x-one-endpoint`, `keys::certify`'s), checked at `now` (milliseconds): `{ by, endpoint,
+/// until }`, `by` the device that vouched for `endpoint` (hex). Whether `by` is a device of the install is the caller's
+/// to check.
+#[wasm_bindgen]
+pub fn check_certificate(certificate: &str, now: f64) -> Result<String, JsError> {
+    let s = one::keys::check_certificate(certificate, now as u64).map_err(thrown)?;
+    Ok(json!({ "by": one::entry::hex(&s.by), "endpoint": one::entry::hex(&s.endpoint), "until": s.until }).to_string())
 }
 
 /// Opens a database at `prefix` for `owner`'s object with the keys handed (`usable`, under the scope's `current`
@@ -508,13 +520,17 @@ pub fn groups(owner: &str, user: &str) -> Result<String, JsError> {
     Ok(json!(groups).to_string())
 }
 
-/// The scopes `user` may use, as the install's log says, whether they're a person of it, and whether they were removed
-/// from it: `{ scopes, joined, removed }`.
+/// The scopes `user` may use, as the install's log says, whether they're a person of it, whether they were removed
+/// from it, the name of `device` (hex) if it's a client device of theirs, else null, and the scopes of theirs this node
+/// runs (a person's own only as their own device chose): `{ scopes, joined, removed, device, runs }`.
 #[wasm_bindgen]
-pub fn scopes_of(owner: &str, user: &str) -> Result<String, JsError> {
+pub fn scopes_of(owner: &str, user: &str, device: &str) -> Result<String, JsError> {
+    let key = one::keys::unhex(device).ok();
     let out = replayed(owner, &["global".into()], |m, _| {
         let scopes: Vec<String> = m.scopes().into_iter().filter(|s| m.may_use(user, s)).map(|s| s.to_string()).collect();
-        json!({ "scopes": scopes, "joined": m.user(user).is_some(), "removed": m.removed_user(user) })
+        let device = key.and_then(|k| m.client(&k)).filter(|d| d.user == user).map(|d| d.name.clone());
+        let runs: Vec<&String> = scopes.iter().filter(|s| m.serverless().zip(Scope::parse(s).ok()).is_some_and(|(k, s)| m.runs_for(&k, &s))).collect();
+        json!({ "scopes": scopes, "joined": m.user(user).is_some(), "removed": m.removed_user(user), "device": device, "runs": runs })
     })
     .map_err(thrown)?;
     Ok(out.to_string())

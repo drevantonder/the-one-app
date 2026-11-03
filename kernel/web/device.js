@@ -67,11 +67,12 @@ const runsAll = (k, node, scopes) => !!k?.runs_for[node] && scopes.every((s) => 
 // MARK: The device
 
 export class Device {
-  /// `me`: this browser's keys; `state()`: the node's /v1/state as last read, for what it shows; `api(path, opts)`: a
-  /// /v1 request as this person; `bearer(path, init)`: one to the address with the access token; `replay(user, given)`:
-  /// `global`'s entries this browser kept and those `given` (a pack), checked and replayed by one-client (net.global).
-  constructor(me, { state, api, bearer, replay }) {
-    Object.assign(this, { me, state, api, bearer, replay });
+  /// `me`: this browser's keys; `user`: its person; `state()`: the node's /v1/state as last read, for what it shows;
+  /// `api(path, opts)`: a /v1 request as this person; `bearer(path, init)`: one to the address with the access token;
+  /// `replay(user, given)`: `global`'s entries this browser kept and those `given` (a pack), checked and replayed by
+  /// one-client (net.global).
+  constructor(me, { user, state, api, bearer, replay }) {
+    Object.assign(this, { me, user, state, api, bearer, replay });
     /// The members as last checked (`checked`): what it seals and hands by.
     this.known = null;
     /// Each scope's epochs this browser opened: n → an HKDF key, its bytes gone.
@@ -86,18 +87,18 @@ export class Device {
     this.renewing = new Set();
   }
 
-  get user() {
-    return this.state().user.id;
-  }
-
   /// The members as the install's signed entries say them, checked here: as last checked, or with what's new from a
   /// node if `fresh` (before it changes who opens what) or never. The first time, the install's first entry is kept,
-  /// and an install that starts with any other refused.
+  /// and an install that starts with any other refused. While no node gives the entries (the serverless node doesn't),
+  /// it goes on with those it checked last, unless it's `fresh`.
   async checked(fresh = false) {
     if (fresh || !this.known) {
       const kept = await get(`global:${this.user}`);
-      const r = await this.api(`/v1/entries/global?have=${kept?.have || ""}`, { raw: true });
-      const k = r.status === 204 && kept ? kept.members : await this.replay(this.user, r.status === 204 ? undefined : new Uint8Array(await r.arrayBuffer()));
+      const r = await this.api(`/v1/entries/global?have=${kept?.have || ""}`, { raw: true }).catch((err) => {
+        if (fresh || !kept) throw err;
+        return null;
+      });
+      const k = !r || (r.status === 204 && kept) ? kept.members : await this.replay(this.user, r.status === 204 ? undefined : new Uint8Array(await r.arrayBuffer()));
       if (!k.roles.global?.[this.user]) throw new Error("Your One App's entries don't list you, so this browser didn't use them.");
       this.known = k;
     }
@@ -167,8 +168,9 @@ export class Device {
     let k = await this.checked();
     if (k.runs[this.user] == null || !k.epochs[mine]) k = await this.checked(true);
     if (k.runs[this.user] == null) {
+      // Machines only: the serverless node is no one's, and runs anyone's when no machine answers.
       const whose = (key) => k.devices.find((d) => d.key === key)?.user;
-      const on = Object.keys(k.runs_for).filter((key) => whose(key) !== this.user && k.runs_for[key].includes("global"));
+      const on = Object.keys(k.runs_for).filter((key) => whose(key) && whose(key) !== this.user && k.runs_for[key].includes("global"));
       if (on.length) await this.write("global", members.runs({ on }));
     }
     if (!k.epochs[mine]) await this.newEpoch(mine, 1);
@@ -277,7 +279,8 @@ export class Device {
 
   /// A node's 428, believed only from `node`, the one that answered it as its connection proved: it must name itself
   /// and the seal key the install's entries list for it, run every scope it needs keys of, as they say, and a request
-  /// that runs one app may need only that app's databases (and the Vault's of a scope, which fills in its items). What
+  /// that runs one app may need only that app's databases (and a scope's Vault, which fills in its items, and its log,
+  /// which the serverless node reads who's who from). What
   /// it needed is all this kind of request hands next time, and only to it. Throws if it asks for more, or this browser
   /// can't open it.
   async learn(route, answer, node) {
@@ -290,7 +293,7 @@ export class Device {
     const seal = k.devices.find((d) => d.key === node)?.seal;
     if (!seal || (answer.seal && answer.seal !== seal)) throw new Error("A device asked for keys sealed to another, so none were given.");
     const app = Device.appOf(route);
-    if (need.length > 64 || (app && need.some((n) => n.app !== app && !(n.app === "node" && n.database === "vault")))) throw new Error("A device asked for keys that request doesn’t use, so none were given.");
+    if (need.length > 64 || (app && need.some((n) => n.app !== app && !(n.app === "node" && ["vault", "log"].includes(n.database))))) throw new Error("A device asked for keys that request doesn’t use, so none were given.");
     for (const n of need) await this.databaseKey(n);
     this.needs[route] = { node, seal, need };
     try { localStorage.setItem("one.needs", JSON.stringify(this.needs)); } catch {}
@@ -325,11 +328,11 @@ export class Device {
     if (!r.ok) throw new Error((await r.json().catch(() => null))?.error || "Your One App's network didn't take that.");
   }
 
-  /// One of auth's routes, signed by this browser: a GET's or DELETE's request in `x-one-request`.
-  async authSigned(method, path, fields = {}) {
+  /// One of auth's routes, signed by this browser: a GET's or DELETE's request in `x-one-request`, `query` after it.
+  async authSigned(method, path, fields = {}, query = "") {
     const request = await this.signed("one/auth", { route: `${method} ${path}`, ...fields });
     const init = method === "POST" ? { method, headers: { "content-type": "application/json" }, body: JSON.stringify(request) } : { method, headers: { "x-one-request": b64u.encode(text.encode(JSON.stringify(request))) } };
-    return answer(await fetch(path, init));
+    return answer(await fetch(path + query, init));
   }
 
   // Devices joining.
@@ -359,8 +362,9 @@ export class Device {
     await this.write("global", members.device({ key: r.key, seal: r.seal, user: r.user, name: r.name, newUser }), as);
     await this.sealTo(r, newUser ? ["global"] : scopesOf(k, r.user), as);
     await this.tell({ add: r.key, role: "client", ...(!newUser && k.roles.global?.[this.user] === "admin" ? { admin: true } : {}) }, as);
-    if (newUser) await this.authSigned("DELETE", `/api/auth/devices/requests/${r.key}`).catch(() => {});
-    else await this.bearer(`/api/auth/devices/requests/${r.key}`, { method: "DELETE" }).catch(() => {});
+    // Marked approved, for the device waiting on it to see.
+    if (newUser) await this.authSigned("DELETE", `/api/auth/devices/requests/${r.key}`, {}, "?approved").catch(() => {});
+    else await this.bearer(`/api/auth/devices/requests/${r.key}?approved`, { method: "DELETE" }).catch(() => {});
   }
 
   /// Seals each epoch of `scopes` that `as` opens to a device (`{ key, seal }`), but those it has.

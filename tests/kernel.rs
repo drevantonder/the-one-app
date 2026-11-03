@@ -1147,9 +1147,23 @@ mod relay {
     }
 
     /// What `key` tells the relay: `fields`, signed as devices sign requests.
+    /// When to sign what's told the relay: now, but each at a millisecond of its own, as the relay takes each `(by, at)`
+    /// once, and a test tells it faster than a person would.
+    fn at() -> u64 {
+        use std::sync::atomic::{AtomicU64, Ordering::SeqCst};
+        static LAST: AtomicU64 = AtomicU64::new(0);
+        loop {
+            let last = LAST.load(SeqCst);
+            let at = super::now().max(last + 1);
+            if LAST.compare_exchange(last, at, SeqCst, SeqCst).is_ok() {
+                return at;
+            }
+        }
+    }
+
     fn tell(address: &str, key: &SecretKey, fields: Value) -> u16 {
         let key = ed25519_dalek::SigningKey::from_bytes(&key.to_bytes());
-        let request = one::keys::signed_request(&key, "one/relay", fields, super::now());
+        let request = one::keys::signed_request(&key, "one/relay", fields, at());
         super::post(&format!("{address}/relay/tell"), &[], request).0
     }
 
@@ -1187,17 +1201,18 @@ mod relay {
         data_encoding::HEXLOWER.encode(&rand::random::<[u8; 32]>())
     }
 
-    /// Asks on a stream of its own, as nodes ask each other (src/node/net.rs): → the answer on it.
-    async fn ask(conn: &iroh::endpoint::Connection, msg: &Value) -> anyhow::Result<Value> {
-        let (mut send, mut recv) = conn.open_bi().await?;
-        send.write_all(msg.to_string().as_bytes()).await?;
-        send.finish()?;
-        Ok(serde_json::from_slice(&recv.read_to_end(1 << 20).await?)?)
+    /// Asks a node `GET /v1/state` as a client device of `user`'s, handing no keys: → its status and JSON.
+    async fn state_as(client: &one_client::Client, user: &str) -> Result<(u16, Value), one_client::Error> {
+        let asked = one_client::Request { method: "GET".into(), path: "/v1/state".into(), headers: vec![("x-one-user".into(), user.into())], body: vec![] };
+        let r = client.fetch(asked).await?;
+        let status = r.status;
+        Ok((status, serde_json::from_slice(&r.body.bytes().await?).unwrap_or(Value::Null)))
     }
 
     /// The serverless node is an iroh endpoint with no socket: the relay hands it what's sent to its key, by RPC to its
     /// Durable Object, which runs iroh as WebAssembly with a transport of its own, and passes on what it sends. Native
-    /// iroh, iroh in WebAssembly and the relay must agree on every packet for an ask to be answered at all. Since iroh
+    /// iroh, iroh in WebAssembly and the relay must agree on every packet for a request to be answered at all; it's
+    /// asked as client devices ask any node, and answers as one does, saying with 428 the keys it needs. Since iroh
     /// keeps it awake for good, it ends itself once nobody has asked for a while, its connections with it.
     #[test]
     fn the_serverless_node_answers_through_the_relay_and_ends_itself_when_idle() {
@@ -1206,32 +1221,28 @@ mod relay {
         let idle = 2_000;
         let k = super::Kernel::with_serverless(vec![hex(&first)], modules, idle);
         let address = k.address.replace("localhost", "127.0.0.1");
-        let node: iroh::PublicKey = k.settings.serverless_endpoint().unwrap().parse().unwrap();
-        let alpn = format!("{}/1", one::config::CLI).into_bytes();
+        let node = k.settings.serverless_endpoint().unwrap();
+        let key: [u8; 32] = data_encoding::HEXLOWER.decode(node.as_bytes()).unwrap().try_into().unwrap();
+        let someone = one::entry::new_id();
         let runtime = tokio::runtime::Runtime::new().unwrap();
         runtime.block_on(async {
-            let a = online(&address, &first, None).await.expect("the install's first device isn't let in");
-            let at = EndpointAddr::new(node).with_relay_url(address.parse().unwrap());
-            // A call asked as nodes ask: it runs as `/v1/call` runs there, which takes only a sign-in's.
-            let call = json!({ "kind": "ask", "body": { "call": { "app": "board", "op": "read", "input": {}, "me": {} } } });
-            let said = |answer: &Value| answer["error"].as_str().is_some_and(|e| e.contains("sign in"));
+            let client = one_client::Client::start(first.to_bytes(), None, &address, &[key]).await.expect("the install's first device isn't let in");
+            // A request as a node takes it: it needs the logs' keys of whose it says it is, sealed to it.
+            let said = |(status, answer): &(u16, Value)| *status == 428 && answer["to"] == node.as_str() && answer["need"].as_array().is_some_and(|n| n.iter().any(|n| n["scope"] == "global"));
             let woke = std::time::Instant::now();
-            let conn = a.connect(at.clone(), &alpn).await.expect("the serverless node wasn't reached");
-            let connected = woke.elapsed();
-            let answer = ask(&conn, &call).await.unwrap();
-            assert!(said(&answer), "the serverless node didn't answer as /v1/call does: {answer}");
+            let answer = state_as(&client, &someone).await.expect("the serverless node wasn't reached");
+            assert!(said(&answer), "the serverless node didn't answer as a node does: {answer:?}");
             let first_answer = woke.elapsed();
             let asked = std::time::Instant::now();
-            assert!(said(&ask(&conn, &call).await.unwrap()));
-            eprintln!("serverless node: woken and connected in {connected:?}, first answer in {first_answer:?}, then a round trip in {:?}", asked.elapsed());
+            assert!(said(&state_as(&client, &someone).await.unwrap()));
+            eprintln!("serverless node: woken, connected and answered in {first_answer:?}, then a round trip in {:?}", asked.elapsed());
+            let (status, _) = state_as(&client, "no one!").await.unwrap();
+            assert_eq!(status, 400, "a request says whose it is, as a person's id");
 
-            // Once idle, it ends: the connection goes with it, and the next call wakes it again on a new one.
+            // Once idle, it ends, its connections with it; the next request wakes it again on a new one.
             tokio::time::sleep(Duration::from_millis(idle + 3_000)).await;
-            let stale = tokio::time::timeout(Duration::from_secs(5), ask(&conn, &call)).await;
-            assert!(!matches!(stale, Ok(Ok(_))), "the serverless node didn't end itself once idle");
-            let conn = a.connect(at, &alpn).await.expect("the serverless node didn't wake again");
-            assert!(said(&ask(&conn, &call).await.unwrap()));
-            a.close().await;
+            assert!(said(&state_as(&client, &someone).await.unwrap()), "the serverless node didn't wake again");
+            client.close().await;
         });
     }
 
@@ -1537,13 +1548,13 @@ mod relay {
             assert_eq!(tell(&address, &first, json!({ "remove": hex(&first) })), 403, "the last admin was taken out");
             assert_eq!(tell(&address, &first, json!({ "add": hex(&first), "role": "client" })), 403, "the last admin was made a member");
             assert_eq!(tell(&address, &stranger, json!({ "add": hex(&stranger), "role": "client" })), 403, "a stranger told the relay");
-            let request = one::keys::signed_request(&ed25519_dalek::SigningKey::from_bytes(&first.to_bytes()), "one/relay", json!({ "add": hex(&stranger), "role": "client" }), super::now());
+            let request = one::keys::signed_request(&ed25519_dalek::SigningKey::from_bytes(&first.to_bytes()), "one/relay", json!({ "add": hex(&stranger), "role": "client" }), at());
             let mut forged = request.clone();
             forged["add"] = json!(hex(&SecretKey::generate()));
             assert_eq!(super::post(&format!("{address}/relay/tell"), &[], forged).0, 403, "a changed tell was taken");
             assert_eq!(super::post(&format!("{address}/relay/tell"), &[], request.clone()).0, 204);
             assert_eq!(super::post(&format!("{address}/relay/tell"), &[], request).0, 403, "a tell was taken twice");
-            let big = one::keys::signed_request(&ed25519_dalek::SigningKey::from_bytes(&first.to_bytes()), "one/relay", json!({ "add": hex(&phone), "role": "client", "pad": "x".repeat(5000) }), super::now());
+            let big = one::keys::signed_request(&ed25519_dalek::SigningKey::from_bytes(&first.to_bytes()), "one/relay", json!({ "add": hex(&phone), "role": "client", "pad": "x".repeat(5000) }), at());
             assert_eq!(super::post(&format!("{address}/relay/tell"), &[], big).0, 403, "a big tell was read");
             assert_eq!(tell(&address, &stranger, json!({ "remove": hex(&stranger) })), 204);
             assert!(online(&address, &stranger, None).await.is_none(), "a key taken out reached the relay");
@@ -1612,7 +1623,7 @@ mod relay {
         let certify = |by: &SecretKey, endpoint: &SecretKey, until: u64| one::keys::certify(&signer(by), endpoint.public().as_bytes(), until, super::now());
         let computes = |body: Value| super::post(&format!("{address}/relay/computes"), &[], body);
         // What a session asks the computes with: a request its own key signs, with its certificate.
-        let ask = |session: &SecretKey, cert: &str| one::keys::signed_request(&signer(session), "one/relay", json!({ "computes": true, "certificate": cert }), super::now());
+        let ask = |session: &SecretKey, cert: &str| one::keys::signed_request(&signer(session), "one/relay", json!({ "computes": true, "certificate": cert }), at());
         let runtime = tokio::runtime::Runtime::new().unwrap();
         runtime.block_on(async {
             let a = online(&address, &first, None).await.expect("the install's first device isn't let in");
@@ -1624,7 +1635,7 @@ mod relay {
             let s = online(&address, &session, Some(&cert)).await.expect("a session its device vouched for isn't let in");
             assert!(reaches(&address, &s, &a).await, "a session's endpoint doesn't reach the install's devices");
             // Its first nodes to ask: the computes, for it or a device on the list, and no one else.
-            let asked = one::keys::signed_request(&signer(&phone), "one/relay", json!({ "computes": true }), super::now());
+            let asked = one::keys::signed_request(&signer(&phone), "one/relay", json!({ "computes": true }), at());
             let by_session = ask(&session, &cert);
             for body in [by_session.clone(), asked.clone()] {
                 let (status, said) = computes(body);
@@ -1640,7 +1651,7 @@ mod relay {
             let late = one::keys::signed_request(&signer(&session), "one/relay", json!({ "computes": true, "certificate": cert }), super::now() - 120_000);
             assert_eq!(computes(late).0, 400);
             let stranger = SecretKey::generate();
-            assert_eq!(computes(one::keys::signed_request(&signer(&stranger), "one/relay", json!({ "computes": true }), super::now())).0, 403, "a stranger was told the computes");
+            assert_eq!(computes(one::keys::signed_request(&signer(&stranger), "one/relay", json!({ "computes": true }), at())).0, 403, "a stranger was told the computes");
             assert_eq!(computes(ask(&session, &certify(&stranger, &session, super::now() + 60_000))).0, 403);
 
             // Only a client vouches for a session: a compute or a service, admin or not, doesn't.

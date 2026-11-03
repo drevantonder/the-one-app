@@ -128,11 +128,12 @@ export const net = {
   has,
 
   /// Starts `user`'s session (again, once this browser was just let in): → whether this browser is their device, so
-  /// it reaches their nodes itself.
-  start(user, again = false) {
+  /// it reaches their nodes itself. `as` is another device of theirs to ask as instead (`{ key, sign }`, a listed
+  /// passkey's, while it lets this browser in).
+  start(user, again = false, as = undefined) {
     if (!net.has) return Promise.resolve(false);
     if (!starting || starting.user !== user || again) {
-      const ready = ask({ op: "start", user, again }).then((m) => m.device);
+      const ready = ask({ op: "start", user, again, as }).then((m) => m.device);
       starting = { user, ready };
       ready.catch(() => starting?.ready === ready && (starting = null));
     }

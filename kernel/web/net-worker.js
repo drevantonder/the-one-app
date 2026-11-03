@@ -90,11 +90,13 @@ export function server(version) {
   let session = null;
   let renewal = null;
 
-  /// A session for `user`: a key of its own, vouched for by this browser's device key, and the nodes to ask.
-  async function begin(user) {
+  /// A session for `user`: a key of its own, vouched for by this browser's device key (or `as`, another device of
+  /// theirs: `{ key, sign }`), and the nodes to ask.
+  async function begin(user, as) {
     const [{ certify, ed25519Public, hex, proveSocket, signedRequest, signingKey, FRESH, SESSION }, { getAll, put }] = await code;
     // In one read: the device's key, the nodes it asked before and who runs what, as it replayed it.
-    const [device, nodes, members] = await getAll([`device:${user}`, `nodes:${user}`, `global:${user}`]);
+    const [mine, nodes, members] = await getAll([`device:${user}`, `nodes:${user}`, `global:${user}`]);
+    const device = as || mine;
     if (!device) return null;
     const known = await theirs(user, nodes || [], members || null);
     const secret = crypto.getRandomValues(new Uint8Array(32));
@@ -140,7 +142,7 @@ export function server(version) {
     }
     secret.fill(0);
     clearTimeout(renewal);
-    renewal = setTimeout(() => renew(user, client, endpoint, socket), until - RENEW - Date.now());
+    if (!as) renewal = setTimeout(() => renew(user, client, endpoint, socket), until - RENEW - Date.now());
     return { client, endpoint, socket, certificate };
   }
 
@@ -158,11 +160,11 @@ export function server(version) {
     renewal = setTimeout(() => renew(user, client, endpoint, socket), until - RENEW - Date.now());
   }
 
-  /// The session for `user`, started once; started again if `again` (this browser was just let in).
-  function started(user, again) {
+  /// The session for `user`, started once; started again if `again` (this browser was just let in), as `as` if given.
+  function started(user, again, as) {
     if (!session || session.user !== user || again) {
       const old = session;
-      const mine = (session = { user, ready: begin(user) });
+      const mine = (session = { user, ready: begin(user, as) });
       old?.ready.then((s) => s?.client.close()).catch(() => {});
       // A start that failed is tried again by the next.
       mine.ready.catch(() => session === mine && (session = null));
@@ -178,7 +180,7 @@ export function server(version) {
       try {
         switch (m.op) {
           case "start": {
-            const s = await started(m.user, m.again);
+            const s = await started(m.user, m.again, m.as);
             return post({ id, device: !!s });
           }
           case "nodes": {

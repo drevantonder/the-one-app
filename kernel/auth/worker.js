@@ -12,7 +12,8 @@
 // with Google makes someone only with an invite for that Google account's email.
 //
 // A device signed in leaves a request to join here (`/api/auth/devices/requests`): its endpoint keys, which a device of
-// its person (or, for a newcomer's first, the inviting admin's) finds by its join code and approves. A service (`one
+// its person (or, for a newcomer's first, the inviting admin's) finds by its join code and approves, then clears with
+// `?approved`, which keeps it, marked, for the new device to see while it waits (it asks no node until it's in). A service (`one
 // sidecars serve`), which nobody signs in on, leaves one signed with its own key instead, naming the service and the
 // enrollment its install link carried: a device of its person's made that link and told auth the hash of its secret
 // (`/api/auth/services/enrollments`), and only that device is shown the request, which it checks the proof of itself.
@@ -131,8 +132,10 @@ export class Auth extends DurableObject {
     // Invites, by their secret's hash, and `by`, the endpoint that made one; kept once used, for the requests of the
     // device its person joined with.
     sql.exec("create table if not exists invites (id text primary key, name text not null, user text not null unique, email text, until integer not null, by text not null, used integer)");
-    // Devices' requests to join, by their key: `invite` is the invite of a newcomer's first device, with its `proof`.
-    sql.exec("create table if not exists requests (key text primary key, seal text not null, name text not null, user text not null, proof text, invite text, made integer not null)");
+    // Devices' requests to join, by their key: `invite` is the invite of a newcomer's first device, with its `proof`;
+    // `approved`, when a device said it let it in.
+    sql.exec("create table if not exists requests (key text primary key, seal text not null, name text not null, user text not null, proof text, invite text, made integer not null, approved integer)");
+    if (!sql.exec("pragma table_info(requests)").toArray().some((c) => c.name === "approved")) sql.exec("alter table requests add column approved integer");
     // Install links' enrollments: the hash of each one's secret, whose service it's for, the device that made it (`by`),
     // and the one service key that used it.
     sql.exec("drop table if exists services");
@@ -311,7 +314,7 @@ export class Auth extends DurableObject {
     if (path === "/api/auth/devices/requests" && method === "GET") return json(await this.requests(request));
     const one = path.match(/^\/api\/auth\/devices\/requests\/([0-9a-f]{64})$/);
     if (one && method === "GET") return json(await this.request(request, one[1]));
-    if (one && method === "DELETE") return json(await this.unask(request, one[1]));
+    if (one && method === "DELETE") return json(await this.unask(request, one[1], url.searchParams.has("approved")));
     return null;
   }
 
@@ -418,7 +421,7 @@ export class Auth extends DurableObject {
       if (!invite) refuse(400, "Only a newcomer's first device brings an invite's proof.");
     }
     const made = Date.now();
-    sql.exec("insert or replace into requests (key, seal, name, user, proof, invite, made) values (?, ?, ?, ?, ?, ?, ?)", key, seal, name.trim(), user, proof ?? null, invite?.id ?? null, made);
+    sql.exec("insert or replace into requests (key, seal, name, user, proof, invite, made, approved) values (?, ?, ?, ?, ?, ?, ?, null)", key, seal, name.trim(), user, proof ?? null, invite?.id ?? null, made);
     return { until: made + REQUEST };
   }
 
@@ -471,12 +474,12 @@ export class Auth extends DurableObject {
     return { key: r.key, seal: r.seal, name: r.name, user: r.user, person: "", service: r.service, shared: r.shared === 1, enrollment: r.enrollment, proof: r.proof, made: r.made, until: r.made + REQUEST };
   }
 
-  /// Requests to join, as they're shown: with the person's name.
+  /// Requests to join, as they're shown: with the person's name, and whether one was approved.
   shown(rows) {
     const sql = this.ctx.storage.sql;
     return rows.map((r) => {
       const person = sql.exec("select name from user where id = ?", r.user).toArray()[0]?.name || "";
-      return { key: r.key, seal: r.seal, name: r.name, user: r.user, person, ...(r.proof ? { proof: r.proof } : {}), made: r.made, until: r.made + REQUEST };
+      return { key: r.key, seal: r.seal, name: r.name, user: r.user, person, ...(r.proof ? { proof: r.proof } : {}), ...(r.approved ? { approved: true } : {}), made: r.made, until: r.made + REQUEST };
     });
   }
 
@@ -489,10 +492,10 @@ export class Auth extends DurableObject {
     const signed = await this.signed(request);
     if (signed) {
       const services = sql.exec("select * from service_requests where by = ? order by made", signed.by).toArray().map((r) => this.shownService(r));
-      return { requests: [...this.shown(sql.exec("select * from requests order by made").toArray()), ...services] };
+      return { requests: [...this.shown(sql.exec("select * from requests where approved is null order by made").toArray()), ...services] };
     }
     const user = (await this.person(request)) || refuse(401, "Sign in first.");
-    return { requests: this.shown(sql.exec("select * from requests where user = ? order by made", user).toArray()) };
+    return { requests: this.shown(sql.exec("select * from requests where user = ? and approved is null order by made", user).toArray()) };
   }
 
   /// A request by its device's key, if the asker may see it: its person, or one of the install's devices.
@@ -516,9 +519,13 @@ export class Auth extends DurableObject {
     return row.service ? row : this.shown([row])[0];
   }
 
-  /// Forgets a request, approved or refused.
-  async unask(request, key) {
-    await this.mayTouch(request, key);
+  /// Forgets a request, refused; or one `approved`, marked so until it would have expired, for its device to see.
+  async unask(request, key, approved) {
+    const row = await this.mayTouch(request, key);
+    if (approved && !row.service && !row.approved) {
+      this.ctx.storage.sql.exec("update requests set approved = ? where key = ?", Date.now(), key);
+      return {};
+    }
     this.ctx.storage.sql.exec("delete from requests where key = ?", key);
     const sql = this.ctx.storage.sql;
     const [service] = sql.exec("select enrollment from service_requests where key = ?", key).toArray();

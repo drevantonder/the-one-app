@@ -47,8 +47,11 @@ fn failed(message: impl std::fmt::Display) -> Error {
 /// The install as this device read and checked it itself.
 struct Known {
     members: Members,
-    /// The nodes it may ask, by key: their seal keys.
+    /// Its person.
+    user: String,
+    /// The nodes it may ask, by key: their seal keys; and the serverless node, asked last, if the install has one.
     nodes: HashMap<[u8; 32], [u8; 32]>,
+    serverless: Option<[u8; 32]>,
     /// When it was read.
     at: u64,
 }
@@ -234,18 +237,28 @@ impl Device {
             self.epochs.lock().unwrap().insert(("global".into(), *n), *key);
         }
         let user = m.machine(&self.me.key).map(|d| d.user.clone()).ok_or_else(|| failed("This device isn't listed yet."))?;
-        let nodes: HashMap<[u8; 32], [u8; 32]> = m.computes().filter(|c| m.serves(&c.key, &user)).map(|c| (c.key, c.seal)).collect();
-        *self.known.lock().unwrap() = Some(Known { members: m, nodes: nodes.clone(), at: now() });
+        let mut nodes: HashMap<[u8; 32], [u8; 32]> = m.computes().filter(|c| m.serves(&c.key, &user)).map(|c| (c.key, c.seal)).collect();
+        // The serverless node, as an admin's setting names it, runs anyone's calls: its seal key is its key's twin.
+        let serverless = m.settings.get("serverless").and_then(|k| keys::unhex(k).ok());
+        if let Some(key) = serverless
+            && let Ok(seal) = one::kernel::twin_public(&key)
+        {
+            nodes.insert(key, seal);
+        }
+        *self.known.lock().unwrap() = Some(Known { members: m, user, nodes: nodes.clone(), serverless, at: now() });
         Ok(nodes)
     }
 
-    /// `nodes`, in the order things run on them as last said, those it wasn't told of last.
+    /// `nodes`, in the order things run on them as last said, those it wasn't told of after, and the serverless node
+    /// last of all.
     fn ordered(&self, nodes: &HashMap<[u8; 32], [u8; 32]>) -> Vec<[u8; 32]> {
         let order = self.order.lock().unwrap().clone();
-        let mut out: Vec<[u8; 32]> = order.iter().filter(|k| nodes.contains_key(*k)).copied().collect();
-        let mut rest: Vec<[u8; 32]> = nodes.keys().filter(|k| !out.contains(k)).copied().collect();
+        let last = self.known.lock().unwrap().as_ref().and_then(|k| k.serverless);
+        let mut out: Vec<[u8; 32]> = order.iter().filter(|k| nodes.contains_key(*k) && Some(**k) != last).copied().collect();
+        let mut rest: Vec<[u8; 32]> = nodes.keys().filter(|k| !out.contains(k) && Some(**k) != last).copied().collect();
         rest.sort();
         out.extend(rest);
+        out.extend(last.filter(|k| nodes.contains_key(k)));
         out
     }
 
@@ -284,14 +297,15 @@ impl Device {
     // Requests.
 
     /// A request to its install's nodes as its person, with the keys it needed last time; one a node needs others for
-    /// (428) is sent again once with them. `/v1/state` is read for the order things run in.
+    /// (428) is sent again with them, a few times, as a node may find what it needs as it goes (the serverless node,
+    /// its logs' keys first, then a call's). `/v1/state` is read for the order things run in.
     pub async fn fetch(&self, method: &str, path: &str, headers: Vec<(String, String)>, body: Vec<u8>) -> Result<Response, Error> {
         let route = route(path, &body);
-        for tries in 0..2 {
+        for tries in 0..4 {
             let handed = self.handed(&route).await;
             let request = Request { method: method.into(), path: path.into(), headers: headers.clone(), body: body.clone() };
             let response = self.send(request, &handed).await?;
-            if response.status == 428 && tries == 0 {
+            if response.status == 428 && tries < 3 {
                 let node = response.node;
                 let answer: Value = serde_json::from_slice(&response.body.bytes().await?).unwrap_or_default();
                 self.learn(&route, &node, &answer).await?;
@@ -307,10 +321,12 @@ impl Device {
         Err(failed("Your device needed keys it didn't name. Try again."))
     }
 
-    /// A request with keys `handed`, each node's sealed to the seal key its entries list.
-    async fn send(&self, request: Request, handed: &[Handed]) -> Result<Response, Error> {
+    /// A request with keys `handed`, each node's sealed to the seal key its entries list, saying whose it is
+    /// (`x-one-user`), which a node checks against this device's key.
+    async fn send(&self, mut request: Request, handed: &[Handed]) -> Result<Response, Error> {
         let client = self.client.lock().await.clone().ok_or_else(|| failed("This device hasn't been let in yet."))?;
-        let seals = self.known.lock().unwrap().as_ref().map(|k| k.nodes.clone()).unwrap_or_default();
+        let (seals, user) = self.known.lock().unwrap().as_ref().map(|k| (k.nodes.clone(), k.user.clone())).unwrap_or_default();
+        request.headers.push(("x-one-user".into(), user));
         let me = self.key();
         client
             .fetch_with(request, |node| {
@@ -554,7 +570,7 @@ mod tests {
     async fn keys_go_only_to_listed_nodes_as_their_428_names() {
         let device = Device::new(new_secret(), "http://127.0.0.1:1", &std::env::temp_dir().join(format!("one-client-{}", hex(&new_secret()))).display().to_string());
         let (node, seal, other) = ([1; 32], [2; 32], [3; 32]);
-        *device.known.lock().unwrap() = Some(Known { members: Members::default(), nodes: HashMap::from([(node, seal)]), at: now() });
+        *device.known.lock().unwrap() = Some(Known { members: Members::default(), user: String::new(), nodes: HashMap::from([(node, seal)]), serverless: None, at: now() });
         let need = |n: usize| (0..n).map(|i| json!({ "scope": "global", "epoch": 1, "app": "board", "database": format!("d{i}") })).collect::<Vec<_>>();
         let answer = |to: &[u8; 32], seal: &[u8; 32], n: usize| json!({ "to": hex(to), "seal": hex(seal), "need": need(n) });
         let refused = async |from: &[u8; 32], a: Value| device.learn("call board", from, &a).await.is_err();

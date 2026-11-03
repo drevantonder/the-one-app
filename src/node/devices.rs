@@ -194,12 +194,13 @@ impl Node {
     }
 
     /// Asks the install's auth service something as this device, signed with its key (`one/auth`): a POST's body is
-    /// the signed request, a GET's or DELETE's is in `x-one-request`. → its answer.
+    /// the signed request, a GET's or DELETE's is in `x-one-request`; it's signed for `path` without its query. → its
+    /// answer.
     async fn ask_auth(&self, method: &'static str, path: &str, fields: Value) -> Result<Value> {
         let (address, key, path) = (self.address()?, self.signing_key(), path.to_string());
         tokio::task::spawn_blocking(move || {
             let mut fields = fields;
-            fields["route"] = json!(format!("{method} {path}"));
+            fields["route"] = json!(format!("{method} {}", path.split('?').next().unwrap_or_default()));
             let signed = crate::keys::signed_request(&key, "one/auth", fields, now_ms());
             let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).timeout_global(Some(Duration::from_secs(30))).build().into();
             let url = format!("{address}{path}");
@@ -366,8 +367,9 @@ impl Node {
                 Err(err) => not.push(json!({ "scope": scope.to_string(), "why": format!("{err:#}") })),
             }
         }
-        if let Err(err) = self.ask_auth("DELETE", &format!("/api/auth/devices/requests/{}", r.key), json!({})).await {
-            tracing::warn!("forgetting an approved request at auth: {err:#}");
+        // Marked approved, for the device waiting on it to see.
+        if let Err(err) = self.ask_auth("DELETE", &format!("/api/auth/devices/requests/{}?approved", r.key), json!({})).await {
+            tracing::warn!("marking a request approved at auth: {err:#}");
         }
         Ok(json!({ "device": r.name, "person": person, "recovery": true, "sealed": sealed, "not_sealed": not, "relay": relay }))
     }
@@ -429,8 +431,9 @@ impl Node {
             return Ok(json!({ "device": r.name, "person": who, "new": invite.is_some() }));
         }
         let approved = self.approve_request(caller, &r, invite.as_ref()).await?;
-        if let Err(err) = self.ask_auth("DELETE", &format!("/api/auth/devices/requests/{}", r.key), json!({})).await {
-            tracing::warn!("forgetting an approved request at auth: {err:#}");
+        // Marked approved, for the device waiting on it to see.
+        if let Err(err) = self.ask_auth("DELETE", &format!("/api/auth/devices/requests/{}?approved", r.key), json!({})).await {
+            tracing::warn!("marking a request approved at auth: {err:#}");
         }
         if invite.is_some() {
             self.keep_invite(&r.user, None).await?;

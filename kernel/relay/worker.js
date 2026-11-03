@@ -26,7 +26,7 @@
 //
 // `POST /relay/computes` answers a request signed by a key on the list, or by a session's key with its certificate
 // (`one/relay`, `{ computes: true, certificate? }`, each `(by, at)` taken once, as a tell is), with the compute
-// endpoints' keys, in no order: a new client's first nodes to ask. 403 is only for a key that isn't let in; a request
+// endpoints' keys, the serverless node's among them, in no order: a new client's first nodes to ask. 403 is only for a key that isn't let in; a request
 // that's wrong, or signed by a clock that's off, is 400, so a client keeps the nodes it knows.
 //
 // What a device tells it is `POST /relay/tell`, its body a request signed by a key on the list (`signedRequest` in
@@ -277,7 +277,8 @@ export class Relay extends DurableObject {
   computes(by, { at, session } = {}) {
     if (at !== undefined && !this.take(by, at)) return "that request was taken already";
     if (session !== undefined ? !is(this.key(session), "client") : !this.key(by)) return null;
-    return this.sql.exec("SELECT key FROM keys WHERE ' ' || role || ' ' LIKE '% compute %'").toArray().map((r) => r.key);
+    const keys = this.sql.exec("SELECT key FROM keys WHERE ' ' || role || ' ' LIKE '% compute %'").toArray().map((r) => r.key);
+    return this.env.BOUND ? [...keys, this.env.BOUND] : keys;
   }
 
   /// Takes a signed request, `(by, at)`, once: → whether it wasn't taken before.

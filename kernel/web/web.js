@@ -7,7 +7,7 @@
 // The bridge and kit (src/screen/), loaded after this, give `one`; this page answers it for its own use (`__one.host`).
 // This browser is a device of its person (device.js): it signs what changes who can do what, and hands each call the
 // keys it needs.
-import { answer, browserKeys, browserName, codeOf, Device, joinAsk } from "./device.js";
+import { answer, browserKeys, browserName, codeOf, Device, joinAsk, passkeyKeysOf } from "./device.js";
 import { members } from "./members.js";
 import { net } from "./net.js";
 import { qrSvg } from "./qr.js";
@@ -123,7 +123,7 @@ window.__one = {};
       return navigator.locks ? navigator.locks.request("one.refresh", refresh) : refresh();
     },
 
-    /// Who the access token says this is (its `sub`), for a browser whose person isn't in yet.
+    /// Who the access token says this is (its `sub`).
     user() {
       try {
         return JSON.parse(atob(auth.kept().access.split(".")[1].replaceAll("-", "+").replaceAll("_", "/"))).sub || null;
@@ -131,8 +131,6 @@ window.__one = {};
         return null;
       }
     },
-    /// Whether the node has said who this is: once it has, a 403 is a refusal, not someone not yet let in.
-    person: () => !!store.state?.user,
 
     async signOut() {
       const kept = auth.kept();
@@ -161,50 +159,37 @@ window.__one = {};
   /// a quarter second, doubling, up to five. A node restarting for an update is back within a moment.
   const retryWait = (n) => (n === 0 ? 0 : Math.min(5000, 125 << Math.min(n, 6)));
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-  /// No node answered: the gateway, or Cloudflare before it, couldn't reach one, so nothing ran.
-  const unanswered = (status) => [502, 503, 530].includes(status);
 
-  /// A request to the node, as this person: JSON in and out, or with `raw` the response itself. Once this browser is
-  /// one of their devices, it asks their nodes itself, over iroh (net.js); until then, through the address, with its
-  /// access token. As a device, it goes with the keys it needed last time; a node that needs others says so (428), and
-  /// it goes again once with them. Asked again for a few seconds while no node answers, as one restarting doesn't; a
-  /// call carries an id, so it runs once however often it's sent.
+  /// A request to the node, as this person: JSON in and out, or with `raw` the response itself. Only a browser that's
+  /// one of their devices asks, of their nodes, itself, over iroh (net.js), saying whose it is (`x-one-user`), which a
+  /// node checks against the device its connection proves. It goes with the keys it needed last time; a node that needs
+  /// others says so (428), and it goes again once with them. Asked again for a few seconds while no node answers, as
+  /// one restarting doesn't; a call carries an id, so it runs once however often it's sent.
   async function api(path, { method = "GET", body, query, raw, signal } = {}) {
     const url = new URL(path, location.origin);
     for (const [k, v] of Object.entries(query || {})) if (v != null) url.searchParams.set(k, typeof v === "string" ? v : JSON.stringify(v));
     if (url.pathname === "/v1/call" && body && typeof body === "object" && !body.id) body = { ...body, id: callId() };
     const route = Device.route(url.pathname, body);
     const user = auth.user();
-    const direct = !!user && (await net.start(user).catch(() => false));
-    let token = direct ? null : await auth.token();
-    for (let renewed = false, needed = false, misses = 0; ; ) {
-      const headers = direct ? {} : { authorization: `Bearer ${token}` };
+    if (!user || !(await net.start(user).catch(() => false))) throw Object.assign(new NodeError("This browser hasn't been approved yet."), { status: 403 });
+    for (let needed = 0, misses = 0; ; ) {
+      const headers = { "x-one-user": user };
       if (body !== undefined) headers["content-type"] = "application/json";
       // Keys go only to a node this browser reaches itself, which its connection proves.
-      const keys = direct && device && (await device.handoff(route, auth.kept()?.until || Date.now() + 60_000));
+      const keys = device && (await device.handoff(route, auth.kept()?.until || Date.now() + 60_000));
       if (keys) headers["x-one-keys"] = keys;
       const sent = body === undefined ? undefined : JSON.stringify(body);
       let r;
       try {
-        r = direct ? await net.fetch(method, url.pathname + url.search, headers, sent, signal) : await fetch(url, { method, headers, body: sent, signal });
+        r = await net.fetch(method, url.pathname + url.search, headers, sent, signal);
       } catch (err) {
         if (signal?.aborted || misses >= 5) throw err;
         await sleep(retryWait(misses++));
         continue;
       }
-      if (unanswered(r.status) && misses < 5) {
-        await sleep(retryWait(misses++));
-        continue;
-      }
-      if (r.status === 401 && !renewed) {
-        renewed = true;
-        token = await auth.token(token);
-        continue;
-      }
-      if (r.status === 401) throw Object.assign(new NodeError("Signed out."), { signedOut: true });
-      if (r.status === 403 && !auth.person()) throw Object.assign(new NodeError("Not approved yet."), { status: 403 });
-      if (r.status === 428 && direct && device && !needed) {
-        needed = true;
+      // A node may find what it needs as it goes: the serverless node, its logs' keys first, then a call's.
+      if (r.status === 428 && device && needed < 3) {
+        needed++;
         await device.learn(route, await r.json(), r.node);
         continue;
       }
@@ -305,8 +290,10 @@ window.__one = {};
   /// which group changed), drawn as soon as they're in; then the badges, drawn as they come.
   async function refreshState({ apps = false } = {}) {
     const [state, list] = await Promise.all([shared("/v1/state"), apps && !joining ? shared("/v1/apps").catch(() => null) : null]);
-    // The nodes this browser asks itself, in the order things run on them.
+    // The nodes this browser asks itself, in the order things run on them, and the serverless node last.
     const nodes = (state.install?.devices || []).filter((d) => d.serves_me).sort((a, b) => a.order - b.order).map((d) => d.key);
+    const last = state.install?.serverless?.key;
+    if (last && !nodes.includes(last)) nodes.push(last);
     if (state.user && nodes.length) net.nodes(state.user.id, nodes);
     const regrouped = JSON.stringify([state.user, state.install?.groups]) !== JSON.stringify([store.state?.user, store.state?.install?.groups]);
     store.state = state;
@@ -333,9 +320,8 @@ window.__one = {};
     keepWindow();
   }
 
-  /// The node's events: what changed, so the window and its screens keep up. EventSource can't send a token, so it's a
-  /// fetch that streams, only while the page shows: a page the browser keeps for Back would hold its connection, and
-  /// over HTTP/1.1 a browser opens six to an address, so after a few visits the next page waited for one to close.
+  /// The node's events: what changed, so the window and its screens keep up, only while the page shows. A node with
+  /// none to say (the serverless node, while no machine is on) answers 204, and it asks again in a minute.
   let events = null;
   async function listen() {
     const mine = (events = new AbortController());
@@ -343,6 +329,10 @@ window.__one = {};
       const started = Date.now();
       try {
         const r = await api("/v1/events", { raw: true, signal: mine.signal });
+        if (r.status === 204) {
+          await sleep(60_000);
+          continue;
+        }
         const reader = r.body.pipeThrough(new TextDecoderStream()).getReader();
         let buffer = "";
         for (;;) {
@@ -1088,46 +1078,57 @@ window.__one = {};
     root.innerHTML = message("Can’t Reach Your Devices", esc(text), `<div class="unavailable-text">Trying again…</div>`);
   }
 
-  /// Makes this browser a device of its person: listed already, or let in by a passkey of theirs that's listed, or
-  /// by one of their devices (or, for someone new, their inviter's), which it asks and waits for, showing its code.
+  /// Makes this browser a device of its person, before anything is asked of a node: one already, or let in by a passkey
+  /// of theirs that's listed, or by one of their devices (or, for someone new, their inviter's), which it asks at
+  /// auth and waits for there, showing its code. → its keys.
   async function join(user) {
     const keys = await browserKeys(user);
-    const listed = () => [...(install()?.devices || []), ...(install()?.clients || [])].some((e) => e.key === keys.key);
-    // Once it's in: their own things' first key and where they run, made by the first of their devices.
-    const made = async () => {
-      device = new Device(keys, { state: () => store.state, api, bearer, replay: net.global });
-      await device.load();
-      await device.settleOwn().catch((err) => console.warn("making this person's own keys:", err));
-      await refreshState().catch(() => {});
-      return device;
-    };
-    if (listed()) return made();
-    const prf = sessionStorage.getItem("one.prf"), credential = sessionStorage.getItem("one.prf.credential");
-    if (prf && install()?.clients.some((c) => c.passkey === credential && c.user === user)) {
-      try {
-        await new Device(keys, { state: () => store.state, api, bearer, replay: net.global }).approveByPasskey(Uint8Array.from(atob(prf.replaceAll("-", "+").replaceAll("_", "/")), (c) => c.charCodeAt(0)));
-        await refreshState();
-        if (listed()) return await net.start(user, true).catch(() => {}), made();
-      } catch (err) {
-        console.warn("the passkey didn't let this browser in:", err);
-      }
-    }
+    if (await net.start(user).catch(() => false)) return keys;
+    if (await byPasskey(user, keys)) return keys;
     const invite = sessionStorage.getItem("one.invite");
     const ask = async () => answer(await bearer("/api/auth/devices/requests", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(await joinAsk(keys, browserName(), invite)) }));
     await ask();
     await showJoin(await codeOf(keys.key, keys.seal), !!invite);
-    for (let n = 1; ; n++) {
-      await new Promise((r) => setTimeout(r, 2000));
-      await refreshState().catch(() => {});
-      if (listed()) break;
-      // Asked again once it stopped waiting (15 minutes), or was turned down.
-      if (n % 10 === 0 && (await bearer(`/api/auth/devices/requests/${keys.key}`)).status === 404) await ask().catch(() => {});
+    // Auth says once it was approved; then the relay lets it in. One gone from auth (approved and cleared, refused, or
+    // waited 15 minutes) is asked again, unless it's in.
+    for (;;) {
+      await sleep(2000);
+      const r = await bearer(`/api/auth/devices/requests/${keys.key}`).catch(() => null);
+      if (r?.status === 401) throw Object.assign(new NodeError("Signed out."), { signedOut: true });
+      const gone = r?.status === 404;
+      const approved = gone || (r?.ok && (await r.json().catch(() => ({}))).approved);
+      if (approved && (await net.start(user, true).catch(() => false))) break;
+      if (gone) await ask().catch(() => {});
     }
     sessionStorage.removeItem("one.invite");
     root.innerHTML = "";
-    // Let in, it reaches its nodes itself from now on.
-    await net.start(user, true).catch(() => {});
-    return made();
+    return keys;
+  }
+
+  /// Lets this browser in by a passkey its person listed, whose PRF output this tab has from signing in: it asks as that
+  /// passkey's device, which approves this browser. → whether it's in.
+  async function byPasskey(user, keys) {
+    const prf = sessionStorage.getItem("one.prf");
+    if (!prf) return false;
+    const bytes = Uint8Array.from(atob(prf.replaceAll("-", "+").replaceAll("_", "/")), (c) => c.charCodeAt(0));
+    try {
+      const pk = await passkeyKeysOf(bytes);
+      if (!(await net.start(user, true, { key: pk.key, sign: pk.sign }))) return false;
+      await refreshState();
+      await new Device(keys, { user, state: () => store.state, api, bearer, replay: net.global }).approveByPasskey(bytes);
+      return await net.start(user, true);
+    } catch (err) {
+      console.warn("the passkey didn't let this browser in:", err);
+      return false;
+    } finally {
+      store.state = null;
+    }
+  }
+
+  /// Once it's in: its person's own things' first key and where they run, made by the first of their devices.
+  async function settle() {
+    await device.settleOwn().catch((err) => console.warn("making this person's own keys:", err));
+    await refreshState().catch(() => {});
   }
 
   /// "Approve This Browser": its code, and the code as a QR, a link that opens Approve on a phone that scans it.
@@ -1169,31 +1170,30 @@ window.__one = {};
     if (lastWindow()) render();
     else root.innerHTML = `<div class="starting">${one.loading("Starting")}</div>`;
     joining = true;
+    const user = auth.user();
+    try {
+      // A device from the start, as a node may need the keys it hands (the serverless node, even for the state).
+      device = new Device(await join(user), { user, state: () => store.state, api, bearer, replay: net.global });
+      await device.load();
+    } catch (err) {
+      if (err.signedOut) return showSignedOut();
+      return void (root.innerHTML = message("Can’t Approve This Browser", esc(err.message)));
+    }
     // A device that takes the request and never answers (asleep, stuck) is one that can't be reached, while it's still asked.
     const away = setTimeout(() => $(".window", root) || showUnreachable(UNANSWERED), 15000);
-    // Someone new isn't anyone a node answers until their first device is let in.
-    let newcomer = null;
     for (let misses = 1; ; misses++) {
       try {
         await refreshState();
         break;
       } catch (err) {
         if (err.signedOut) return clearTimeout(away), showSignedOut();
-        if (err.status === 403 && (newcomer = auth.user())) break;
         // What it showed last stays, as a screen whose node is restarting does.
         if (!$(".window", root)) showUnreachable(err instanceof NodeError ? err.message : UNANSWERED);
         await sleep(retryWait(misses));
       }
     }
     clearTimeout(away);
-    if (newcomer || (install() && me())) {
-      try {
-        await join(newcomer || me().id);
-      } catch (err) {
-        if (err.signedOut) return showSignedOut();
-        return void (root.innerHTML = message("Can’t Approve This Browser", esc(err.message)));
-      }
-    }
+    if (install() && me()) await settle();
     joining = false;
     joined.done();
     await refreshApps().catch(() => {});
