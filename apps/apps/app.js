@@ -220,13 +220,13 @@ export default {
             from: a.from || null, forks: a.forks || [], deploys: a.deploys, installed: a.installed || [],
             installed_names: (a.installed || []).map(name), uses: a.uses || { apps: [], sidecars: [] },
             built_in: !!a.built_in, added, up_to_date: a.built_in && added ? a.bundle === a.built_in : null,
-            source: a.source || null, mine: mine(ctx, a.owner), deleted: a.deleted || null, service: services[all.indexOf(a)],
+            source: a.source || null, mine: mine(ctx, a.owner), deleted: a.deleted || null, service: services[all.indexOf(a)], accounts: a.accounts ?? null,
           };
         }));
         apps.sort((a, b) => a.title.localeCompare(b.title));
         if (full) return { apps, places: places(ctx), admin: ctx.me.role === "admin" };
         const line = (a) => `${a.title} (${a.name}): ${a.deleted ? `deleted ${new Date(a.deleted.time).toISOString().slice(0, 10)}${a.mine ? "" : `, ${a.owner_name}'s`}` : a.installed_names.length ? `added for ${a.installed_names.join(", ")}` : "not added"}`
-          + `${a.service ? ", a service" : ""}${a.up_to_date === false ? ", an update waiting" : ""}. ${a.tagline || a.description || ""}`.trimEnd();
+          + `${a.service ? ", a service" : ""}${a.installed_names.length && a.accounts === 0 ? `, no account signed in yet (${a.name}_sign_in)` : ""}${a.up_to_date === false ? ", an update waiting" : ""}. ${a.tagline || a.description || ""}`.trimEnd();
         if (gone) return apps.length ? [...apps.map(line), "", "apps_restore brings back one you own; apps_erase deletes it for good."].join("\n") : "Nothing is in Recently Deleted.";
         const deleted = every.filter((a) => a.deleted).length;
         return [
@@ -241,9 +241,9 @@ export default {
       description: "Install an app, and the apps it uses, in a place: user (you), a group you're an admin of (by its name) or global (everyone; admins only). It shows on that place's page.",
       input: { type: "object", required: ["app", "scope"], properties: { app: APP, scope: placeInput } },
       async run(ctx, { app, scope }) {
-        await find(ctx, app);
+        const a = await find(ctx, app);
         ctx.install(app, placeOf(ctx, scope));
-        return `Added ${app}.`;
+        return `Added ${a.title || app}.`;
       },
     },
     remove: {

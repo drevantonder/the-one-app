@@ -913,6 +913,7 @@ fn publish(path: &std::path::Path, flags: &Map<String, Value>, key: &ssh_key::Pr
 /// Deploys the app in `dir`: builds it with its source into a bundle, makes the app if the install hasn't one by that
 /// name, and deploys it, saying whether this device runs it yet.
 fn deploy(dir: &std::path::Path, flags: &Map<String, Value>) -> Result<()> {
+    anyhow::ensure!(dir.is_dir(), "no folder {} in {}: give the app's folder", dir.display(), std::env::current_dir().map(|d| d.display().to_string()).unwrap_or_default());
     let name = match flags.get("name").and_then(Value::as_str) {
         Some(name) => name.to_string(),
         None => dir.canonicalize()?.file_name().context("which app?")?.to_string_lossy().to_string(),
@@ -1621,14 +1622,14 @@ fn item_line(it: &Value) -> String {
     }).collect();
     let list = |v: &Value| v.as_array().into_iter().flatten().filter_map(Value::as_str).collect::<Vec<_>>().join(", ");
     format!(
-        "{}  {}{}  [{}]  {}{}  used by: {}",
+        "{}  {}{}  [{}]  {}{}{}",
         it["id"].as_str().unwrap_or(""),
         it["title"].as_str().unwrap_or(""),
         it["type"].as_str().filter(|t| !t.is_empty()).map(|t| format!(" ({t})")).unwrap_or_default(),
         it["scope_name"].as_str().unwrap_or(""),
         fields.join(", "),
         Some(list(&it["hosts"])).filter(|h| !h.is_empty()).map(|h| format!("  → {h}")).unwrap_or_default(),
-        list(&it["apps"]),
+        Some(list(&it["apps"])).filter(|a| !a.is_empty()).map(|a| format!("  used by: {a}")).unwrap_or_default(),
     )
 }
 

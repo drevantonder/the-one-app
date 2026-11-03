@@ -134,6 +134,13 @@ impl Node {
                     }
                 }
             }
+            // For an app whose sign-ins keep accounts in the Vault, how many the viewer has: none means a sign-in comes first.
+            if mine && let Some(needs) = info["vault"].as_object() {
+                let accounts: Vec<Vec<String>> = needs.values().filter(|d| d["accounts"] == true).map(|d| d["fields"].as_object().map(|f| f.keys().cloned().collect()).unwrap_or_default()).collect();
+                if !accounts.is_empty() {
+                    info["accounts"] = json!(self.accounts_of(viewer, &name, &accounts)?);
+                }
+            }
             out.push(info);
         }
         out.extend(missing);
@@ -147,6 +154,20 @@ impl Node {
             }
         }
         Ok(out)
+    }
+
+    /// How many of `viewer`'s items, in the scopes they may use, are accounts `app`'s sign-in made: with all the fields
+    /// of one of `needs`.
+    fn accounts_of(&self, viewer: &Caller, app: &str, needs: &[Vec<String>]) -> Result<usize> {
+        self.with(|i| {
+            let m = &i.r.members;
+            Ok(i.views
+                .iter()
+                .filter(|(log, _)| Scope::parse(log).is_ok_and(|s| m.may_use(&viewer.user, &s)))
+                .flat_map(|(_, (_, s))| s.items.values())
+                .filter(|it| it.app.as_deref() == Some(app) && needs.iter().any(|fields| fields.iter().all(|f| it.fields.contains_key(f))))
+                .count())
+        })
     }
 
     /// The logo of `domain`, the site `app` connects to, as a data URL, once this device has fetched it. Fetches it
