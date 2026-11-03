@@ -499,7 +499,6 @@ impl Node {
             self.member_content(caller, listed).await?;
         }
         let admin = self.with(|i| Ok(i.r.members.is_admin(&r.user)))?;
-        self.tell_relay(json!({ "add": r.key, "admin": admin, "role": "client" }));
         if invite.is_some_and(|i| i.role == Role::Admin)
             && let Err(err) = self.ask_auth("POST", "/api/auth/people/admin", json!({ "user": r.user, "admin": true })).await
         {
@@ -515,6 +514,12 @@ impl Node {
                 Ok(()) => sealed.push(scope.to_string()),
                 Err(err) => not.push(json!({ "scope": scope.to_string(), "why": format!("{err:#}") })),
             }
+        }
+        // Last, and waited for where there's a relay (at the install's address): until it lets the device in, the device
+        // reaches nothing and keeps waiting. Approving it again finishes this, as it's listed already.
+        if self.address().is_ok() {
+            let told = self.tell_relay_now(json!({ "add": r.key, "admin": admin, "role": "client" })).await;
+            told.with_context(|| format!("{} is let in, but your One App's network didn't take it yet: approve it again", r.name))?;
         }
         Ok(json!({ "device": r.name, "sealed": sealed, "not_sealed": not }))
     }
