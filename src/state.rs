@@ -5,7 +5,7 @@
 use serde_json::{Map, Value, json};
 
 use crate::entry::hex;
-use crate::members::{Machine, Members, Role};
+use crate::members::{Kind, Machine, Members, Role};
 use crate::rank;
 
 /// What the node answering knows that the members don't.
@@ -99,8 +99,10 @@ fn install(m: &Members, me: &str, settings: &Map<String, Value>, here: &Here) ->
     for (place, n) in by_order.into_iter().enumerate() {
         devices[n]["order"] = json!(place);
     }
+    // Devices that also run calls are listed with the devices.
     let clients: Vec<Value> = m
         .clients()
+        .filter(|c| !c.is(Kind::Compute))
         .map(|c| {
             let mut client = json!({ "key": hex(&c.key), "name": c.name, "user": c.user, "roles": c.roles, "passkey": c.passkey, "me": false });
             client.as_object_mut().unwrap().extend((here.client_now)(c));
