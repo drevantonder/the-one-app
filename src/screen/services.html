@@ -101,9 +101,10 @@
   /// none, its sign-in.
   async function addAccount(a, p) {
     const signIn = home.settings(a, p, true);
-    const keeps = Object.values(a.vault || {}).some((need) => need.accounts);
-    const items = keeps ? await one.api("GET", "/v1/vault").catch(() => []) : [];
-    const there = items.filter((i) => (i.wanted_by || []).includes(a.name) && !(i.apps || []).includes(a.name));
+    // Only its accounts: not what it needs besides (Google's apps' sign-in client).
+    const types = Object.values(a.vault || {}).filter((need) => need.accounts).map((need) => need.type);
+    const items = types.length ? await one.api("GET", "/v1/vault").catch(() => []) : [];
+    const there = items.filter((i) => types.includes(i.type) && (i.wanted_by || []).includes(a.name) && !(i.apps || []).includes(a.name));
     if (!there.length) return signIn();
     const pick = there.map((i) => ({ title: i.title, run: () => change(async () => {
       await one.api("POST", "/v1/vault", { scope: i.scope, id: i.id, apps: [...i.apps, a.name] });
