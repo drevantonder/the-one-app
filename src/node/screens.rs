@@ -178,8 +178,7 @@ impl Node {
             }
             Ok(members::node("arrange", data))
         })?;
-        let by = (caller.key != self.0.id).then_some(caller.key);
-        self.append_as(&scope, &caller.user, by, content).await?;
+        self.append_as(&scope, &caller.user, content).await?;
         Ok(())
     }
 

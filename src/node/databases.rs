@@ -123,7 +123,7 @@ impl Node {
         let (may, recovery, to) = self.with(|i| {
             let m = &i.r.members;
             let mut to: Vec<(Key, [u8; 32])> = vec![(me.key, me.seal)];
-            to.extend(m.devices().filter(|d| d.key != me.key && m.holds(&d.key, scope)).filter_map(|d| Some((d.key, m.seal_key(&d.key)?))));
+            to.extend(m.computes().filter(|d| d.key != me.key && m.runs_for(&d.key, scope)).filter_map(|d| Some((d.key, m.seal_key(&d.key)?))));
             Ok((m.role_in(&i.user, scope) == Some(Role::Admin), m.recovery, to))
         })?;
         if !may {
@@ -177,7 +177,7 @@ impl Node {
         let bucket = self.bucket()?;
         let to = self.with(|i| {
             let m = &i.r.members;
-            Ok(m.devices().filter(|d| d.key != self.0.id && m.holds(&d.key, scope)).filter_map(|d| Some((d.key, m.seal_key(&d.key)?))).collect::<Vec<_>>())
+            Ok(m.computes().filter(|d| d.key != self.0.id && m.runs_for(&d.key, scope)).filter_map(|d| Some((d.key, m.seal_key(&d.key)?))).collect::<Vec<_>>())
         })?;
         for (device, seal) in to {
             let name = crate::keys::epoch_name(&scope.to_string(), n, &hex(&device));

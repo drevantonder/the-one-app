@@ -1,14 +1,15 @@
-//! Members: users, groups, devices and clients, ACLs and trust, apps and deploys, made by replaying `global`'s
-//! node entries; and which entries count. Pure: entries in, members out.
+//! Members: users, groups, the endpoints of each (devices people use, compute that runs calls, services), epochs,
+//! grants, apps and deploys, made by replaying `global`'s node entries in causal order; and which entries count: a
+//! member entry only when one of its user's own devices signed it, a scope's other entries also when a compute
+//! endpoint that runs that scope's calls did. Pure: entries in, members out.
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::{Context, Result, bail, ensure};
-use p2panda_core::Hash;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::entry::{Content, Entry, Key, Order, Scope, hex, is_id, unhex};
+use crate::entry::{Content, Entry, Hash, Key, Scope, hex, is_id, unhex};
 
 /// The node's own entries. Apps never see them.
 pub const APP: &str = "node";
@@ -22,25 +23,22 @@ pub enum Role {
     Member,
 }
 
-/// Who may own or use a device, or own an app.
+/// Who owns an app.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Principal {
     User(String),
     Group(String),
-    /// The install's admins, as an app's owner.
+    /// The install's admins.
     Admins,
-    /// The install itself, as a device's owner or user: every user.
-    Install,
 }
 
 impl Principal {
     pub fn parse(s: &str) -> Result<Principal> {
         Ok(match s.split_once(':') {
-            None if s == "install" => Principal::Install,
             None if s == "admins" => Principal::Admins,
             Some(("user", id)) if is_id(id) => Principal::User(id.into()),
             Some(("group", id)) if is_id(id) => Principal::Group(id.into()),
-            _ => bail!("{s} isn't user:<id>, group:<id>, admins or install"),
+            _ => bail!("{s} isn't user:<id>, group:<id> or admins"),
         })
     }
 }
@@ -51,7 +49,6 @@ impl std::fmt::Display for Principal {
             Principal::User(id) => write!(f, "user:{id}"),
             Principal::Group(id) => write!(f, "group:{id}"),
             Principal::Admins => write!(f, "admins"),
-            Principal::Install => write!(f, "install"),
         }
     }
 }
@@ -64,14 +61,34 @@ pub struct User {
     pub removed: bool,
 }
 
+/// What an endpoint does: a client is what a person and their agents use, and signs for them; compute runs apps'
+/// calls; a service offers a device's abilities.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "lowercase")]
+pub enum Kind {
+    Client,
+    Compute,
+    Service,
+}
+
+/// An endpoint of the install, listed by a `device` entry (or the genesis): its key, the key things are sealed to,
+/// whose it is, and what it does.
 #[derive(Clone, Debug)]
 pub struct Machine {
     pub key: Key,
+    pub seal: Key,
     pub user: String,
     pub name: String,
-    /// A device runs the node; a client (a phone) only asks one.
-    pub device: bool,
+    pub roles: BTreeSet<Kind>,
+    /// A passkey listed as a device: its credential id.
+    pub passkey: Option<String>,
     pub removed: bool,
+}
+
+impl Machine {
+    pub fn is(&self, kind: Kind) -> bool {
+        self.roles.contains(&kind)
+    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -80,12 +97,6 @@ pub struct Group {
     pub name: String,
     pub members: BTreeMap<String, Role>,
     pub invited: BTreeMap<String, Role>,
-}
-
-#[derive(Clone, Debug)]
-pub struct Acl {
-    pub owners: Vec<Principal>,
-    pub users: Vec<Principal>,
 }
 
 #[derive(Clone, Debug)]
@@ -133,21 +144,30 @@ pub struct Members {
     pub users: BTreeMap<String, User>,
     pub machines: BTreeMap<Key, Machine>,
     pub groups: BTreeMap<String, Group>,
-    pub acls: BTreeMap<Key, Acl>,
-    /// (user, device) for each `trust` not since undone by `untrust`.
-    pub trusted: BTreeSet<(String, Key)>,
     /// The install's settings its admins set: each name's latest value. The rest are the white label's defaults.
     pub settings: BTreeMap<String, String>,
     pub apps: BTreeMap<String, App>,
     /// The latest `sidecar` entry of each sidecar on each device: (device, sidecar).
     pub sidecars: BTreeMap<(Key, String), SidecarInstall>,
-    /// When the install's devices last changed, by the newest genesis, admit or remove: the relay's list is as of then.
+    /// When the install's devices last changed, by the newest genesis, device or remove: the relay's list is as of then.
     pub devices_at: u64,
     /// Each scope's current epoch, by its newest `epoch` entry that counts (src/keys.rs).
     pub epochs: BTreeMap<Scope, Epoch>,
+    /// Standing work: until when (milliseconds) each endpoint may hold an app's keys in a scope, by (endpoint, scope,
+    /// app), as the latest `grant` of each said; one with `until: 0` is gone.
+    pub grants: BTreeMap<(Key, Scope, String), Grant>,
 }
 
-/// A scope's epoch: its number, and the endpoints it was sealed to (`keys::epoch_name`), besides the recovery key.
+/// A grant of standing work: who gave it, and until when.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Grant {
+    pub by: String,
+    pub until: u64,
+}
+
+/// A scope's epoch: its number, and the endpoints it was first sealed to (`keys::epoch_name`), besides the recovery key.
+/// A new one starts only when a person or device is removed; one added is sealed the current one by the device that
+/// approves it, so who may open a scope comes from roles and devices, not from `to`.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Epoch {
     pub n: u32,
@@ -190,9 +210,14 @@ impl Members {
         self.epochs.get(scope).map_or(0, |e| e.n)
     }
 
-    /// The key things are sealed to for an endpoint of the install.
+    /// The key things are sealed to for an endpoint of the install, as it's listed.
     pub fn seal_key(&self, key: &Key) -> Option<[u8; 32]> {
-        self.machine(key).and_then(|_| crate::kernel::twin_public(key).ok())
+        self.machine(key).map(|m| m.seal)
+    }
+
+    /// The grants of standing work in force at `now`: (endpoint, scope, app) each.
+    pub fn grants_at(&self, now: u64) -> impl Iterator<Item = &(Key, Scope, String)> {
+        self.grants.iter().filter(move |(_, g)| g.until > now).map(|(k, _)| k)
     }
 
     // Who is who.
@@ -210,24 +235,27 @@ impl Members {
         self.user(user).is_some_and(|u| u.role == Role::Admin)
     }
 
+    /// An endpoint of the install: listed, not removed, and its person not removed.
     pub fn machine(&self, key: &Key) -> Option<&Machine> {
         self.machines.get(key).filter(|m| !m.removed && self.user(&m.user).is_some())
     }
 
-    pub fn device(&self, key: &Key) -> Option<&Machine> {
-        self.machine(key).filter(|m| m.device)
-    }
-
+    /// One of the person's own devices, which signs for them.
     pub fn client(&self, key: &Key) -> Option<&Machine> {
-        self.machine(key).filter(|m| !m.device)
+        self.machine(key).filter(|m| m.is(Kind::Client))
     }
 
-    pub fn devices(&self) -> impl Iterator<Item = &Machine> {
-        self.machines.values().filter(|m| m.device && self.machine(&m.key).is_some())
+    /// An endpoint that runs apps' calls: a node.
+    pub fn compute(&self, key: &Key) -> Option<&Machine> {
+        self.machine(key).filter(|m| m.is(Kind::Compute))
+    }
+
+    pub fn computes(&self) -> impl Iterator<Item = &Machine> {
+        self.machines.values().filter(|m| m.is(Kind::Compute) && self.machine(&m.key).is_some())
     }
 
     pub fn clients(&self) -> impl Iterator<Item = &Machine> {
-        self.machines.values().filter(|m| !m.device && self.machine(&m.key).is_some())
+        self.machines.values().filter(|m| m.is(Kind::Client) && self.machine(&m.key).is_some())
     }
 
     /// A user's role in a group, if they're in it.
@@ -273,12 +301,12 @@ impl Members {
     }
 
     /// Whether `user` acts for `owner`: a user for themselves, a group's admins for the group, the install's
-    /// admins for `admins` and `install`.
+    /// admins for `admins`.
     pub fn acts_for(&self, user: &str, owner: &Principal) -> bool {
         match owner {
             Principal::User(u) => u == user && self.user(user).is_some(),
             Principal::Group(g) => self.group_role(user, g) == Some(Role::Admin),
-            Principal::Admins | Principal::Install => self.is_admin(user),
+            Principal::Admins => self.is_admin(user),
         }
     }
 
@@ -287,73 +315,28 @@ impl Members {
         self.groups.contains_key(group) && (self.group_role(user, group) == Some(Role::Admin) || self.is_admin(user))
     }
 
-    // Devices.
+    // Endpoints.
 
-    pub fn owners(&self, device: &Key) -> Vec<Principal> {
-        match self.acls.get(device) {
-            Some(acl) => acl.owners.clone(),
-            None => self.machines.get(device).map(|m| vec![Principal::User(m.user.clone())]).unwrap_or_default(),
+    /// Whether `user` looks after an endpoint: its person, or an admin.
+    pub fn looks_after(&self, user: &str, key: &Key) -> bool {
+        self.machine(key).is_some_and(|m| m.user == user) || self.is_admin(user)
+    }
+
+    /// Whether a scope's calls run on `endpoint`: a compute endpoint its owners trust, which is one listed as a device
+    /// of the scope's person, for a user's own scope; of an admin of the group or of the install, for a group's; of an
+    /// admin of the install, for `global`.
+    pub fn runs_for(&self, endpoint: &Key, scope: &Scope) -> bool {
+        let Some(m) = self.compute(endpoint) else { return false };
+        match scope {
+            Scope::User(u) => m.user == *u,
+            Scope::Group(g) => self.manages(&m.user, g),
+            Scope::Global => self.is_admin(&m.user),
         }
     }
 
-    /// A device's users, its owners among them.
-    pub fn users_of(&self, device: &Key) -> Vec<Principal> {
-        let mut users = match self.acls.get(device) {
-            Some(acl) => acl.users.clone(),
-            None => self.owners(device),
-        };
-        for o in self.owners(device) {
-            if !users.contains(&o) {
-                users.push(o);
-            }
-        }
-        users
-    }
-
-    fn includes(&self, principals: &[Principal], user: &str) -> bool {
-        self.user(user).is_some()
-            && principals.iter().any(|p| match p {
-                Principal::User(u) => u == user,
-                Principal::Group(g) => self.group_role(user, g).is_some(),
-                Principal::Install => true,
-                Principal::Admins => self.is_admin(user),
-            })
-    }
-
-    /// Owned by `install`: holds everything and serves everyone in its users.
-    pub fn privileged(&self, device: &Key) -> bool {
-        self.device(device).is_some() && self.owners(device).contains(&Principal::Install)
-    }
-
-    /// Whether `user` trusts `device`: everyone trusts a privileged device; otherwise a user of it trusts it if they're
-    /// directly one of its owners or wrote `trust`.
-    pub fn trusts(&self, user: &str, device: &Key) -> bool {
-        if self.device(device).is_none() || self.user(user).is_none() {
-            return false;
-        }
-        self.privileged(device)
-            || (self.includes(&self.users_of(device), user)
-                && (self.owners(device).contains(&Principal::User(user.into())) || self.trusted.contains(&(user.to_string(), *device))))
-    }
-
-    /// Whether `device` runs calls as `user`: a device that user trusts and is a user of.
-    pub fn serves(&self, device: &Key, user: &str) -> bool {
-        self.trusts(user, device) && self.includes(&self.users_of(device), user)
-    }
-
-    /// Whether `device` holds `scope`: `global`, every scope its owners can read, and the scope of each user who trusts it.
-    pub fn holds(&self, device: &Key, scope: &Scope) -> bool {
-        if self.device(device).is_none() {
-            return false;
-        }
-        let reads = |owner: &Principal| match (owner, scope) {
-            (_, Scope::Global) | (Principal::Install, _) => true,
-            (Principal::User(u), Scope::User(v)) => u == v,
-            (Principal::User(u), Scope::Group(g)) => self.group_role(u, g).is_some(),
-            (Principal::Group(g), Scope::Group(h)) => g == h,
-            _ => false,
-        };
-        self.owners(device).iter().any(reads) || matches!(scope, Scope::User(u) if self.trusts(u, device))
+    /// Whether `endpoint` runs any of the calls of `user`: a compute endpoint that runs some scope they use.
+    pub fn serves(&self, endpoint: &Key, user: &str) -> bool {
+        self.user(user).is_some() && self.scopes().iter().any(|s| self.may_use(user, s) && self.runs_for(endpoint, s))
     }
 
     /// Every scope there is: `global`, each user's (removed ones too: removing deletes nothing) and each group's.
@@ -364,21 +347,17 @@ impl Members {
         out
     }
 
-    /// Whether an entry counts at this point in replay, by the rules every entry follows. A node entry's own kind
-    /// rules are checked as it's applied (`apply`), or, for one in a user or group scope, by `counts_in_scope`.
+    /// Whether an entry counts at this point in replay, by who signed it: one of its user's own devices, or for any
+    /// but a member entry, a compute endpoint that runs the scope's calls (the call it ran for was the user's); its
+    /// user may use the scope, and it names no epoch the scope hasn't reached. A node entry's own kind rules are
+    /// checked as it's applied (`apply`), or, for one in a user or group scope, by `apply_in_scope`.
     pub fn counts(&self, e: &Entry) -> bool {
         let scope = e.scope();
+        if !self.may_use(e.user(), &scope) || e.epoch() > self.epoch(&scope) {
+            return false;
+        }
         let author = e.author();
-        if !self.holds(&author, &scope) || !self.trusts(e.user(), &author) {
-            return false;
-        }
-        if !self.may_use(e.user(), &scope) {
-            return false;
-        }
-        match e.by() {
-            None => true,
-            Some(by) => self.client(&by).is_some_and(|c| c.user == e.user()) || self.trusts(e.user(), &by),
-        }
+        self.client(&author).is_some_and(|c| c.user == e.user()) || (!is_member_entry(e) && self.runs_for(&author, &scope))
     }
 
     /// Applies a node entry of `global`.
@@ -386,7 +365,7 @@ impl Members {
         ensure!(e.content.app == APP && e.log() == "global", "not a member entry");
         let w = e.user().to_string();
         let author = e.author();
-        let data = &signed_before_devices(&e.content.kind, &e.content.data);
+        let data = &e.content.data;
         let text = |key: &str| data[key].as_str().map(str::to_string).with_context(|| format!("no {key}"));
         let key_of = |key: &str| -> Result<Key> { unhex(&text(key)?) };
         let id_of = |key: &str| -> Result<String> {
@@ -400,56 +379,29 @@ impl Members {
                 ensure!(self.root == Some(e.hash()) && self.users.is_empty(), "not this install's genesis");
                 let user = id_of("user")?;
                 ensure!(user == w, "genesis is written as its first user");
+                let device = &data["device"];
+                let machine = listed(device, &user)?;
+                ensure!(machine.key == author && machine.is(Kind::Client), "genesis is signed by the first device it lists, a client");
                 self.name = text("name")?;
-                self.recovery = data["recovery"].as_str().and_then(|k| unhex(k).ok());
+                self.recovery = Some(key_of("recovery")?);
                 self.users.insert(user.clone(), User { id: user.clone(), name: text("user_name")?, role: Role::Admin, removed: false });
-                self.machines.insert(author, Machine { key: author, user, name: text("device_name")?, device: true, removed: false });
+                self.machines.insert(author, machine);
                 self.devices_at = e.time();
             }
-            "admit" => {
-                let key = key_of("key")?;
+            "device" => {
                 let user = id_of("user")?;
-                let device = match text("as")?.as_str() {
-                    "device" => true,
-                    "client" => false,
-                    other => bail!("can't admit as {other}"),
-                };
-                ensure!(!self.machines.contains_key(&key), "that key was already admitted");
+                let machine = listed(data, &user)?;
+                ensure!(!self.machines.contains_key(&machine.key), "that key is listed already");
                 match self.users.get(&user) {
-                    Some(u) => ensure!(!u.removed && (w == user || self.is_admin(&w)), "only a user or an admin admits that user's machines"),
+                    Some(u) => ensure!(!u.removed && (w == user || (self.is_admin(&w) && !machine.is(Kind::Client))), "only a person's own device lists their devices; an admin's lists compute and services"),
                     None => {
-                        ensure!(self.is_admin(&w), "only admins add users");
+                        ensure!(self.is_admin(&w), "only admins add people");
                         let role = role_of("role")?;
                         self.users.insert(user.clone(), User { id: user.clone(), name: text("user_name")?, role, removed: false });
                     }
                 }
-                self.machines.insert(key, Machine { key, user, name: text("name")?, device, removed: false });
-                if device {
-                    self.devices_at = self.devices_at.max(e.time());
-                }
-            }
-            "acl" => {
-                let device = key_of("device")?;
-                ensure!(self.device(&device).is_some(), "no such device");
-                ensure!(self.owners(&device).iter().any(|o| self.acts_for(&w, o)), "only someone acting for an owner changes a device's ACL");
-                let list = |key: &str| -> Result<Vec<Principal>> {
-                    data[key].as_array().context("no list")?.iter().map(|p| Principal::parse(p.as_str().unwrap_or(""))).collect()
-                };
-                let (owners, users) = (list("owners")?, list("users")?);
-                ensure!(!owners.is_empty(), "a device needs an owner");
-                ensure!(!owners.contains(&Principal::Admins) && !users.contains(&Principal::Admins), "devices are owned by users, groups or the install");
-                ensure!(!owners.contains(&Principal::Install) || self.is_admin(&w), "only admins make the install an owner");
-                self.acls.insert(device, Acl { owners, users });
-            }
-            "trust" => {
-                let device = key_of("device")?;
-                ensure!(self.device(&device).is_some(), "no such device");
-                self.trusted.insert((w, device));
-            }
-            "untrust" => {
-                let device = key_of("device")?;
-                ensure!(!self.privileged(&device), "nobody untrusts a privileged device");
-                self.trusted.remove(&(w, device));
+                self.machines.insert(machine.key, machine);
+                self.devices_at = self.devices_at.max(e.time());
             }
             "role" => {
                 ensure!(self.is_admin(&w), "admins only");
@@ -463,14 +415,42 @@ impl Members {
                     self.users.get_mut(&user).context("no such user")?.removed = true;
                 } else {
                     let key = key_of("key")?;
-                    let m = self.machine(&key).context("no such key")?;
-                    let allowed = self.is_admin(&w)
-                        || (m.device && self.owners(&key).iter().any(|o| self.acts_for(&w, o)))
-                        || (!m.device && m.user == w);
-                    ensure!(allowed, "not allowed to remove that key");
+                    ensure!(self.machine(&key).is_some(), "no such key");
+                    ensure!(self.looks_after(&w, &key), "only its person or an admin removes a device");
                     self.machines.get_mut(&key).unwrap().removed = true;
                 }
                 self.devices_at = self.devices_at.max(e.time());
+            }
+            "epoch" => {
+                let scope = Scope::parse(&text("scope")?)?;
+                let allowed = match &scope {
+                    Scope::Global => self.is_admin(&w),
+                    Scope::Group(g) => self.manages(&w, g),
+                    Scope::User(u) => *u == w,
+                };
+                ensure!(allowed, "only the scope's admins start its new epoch");
+                let n = data["n"].as_u64().context("no n")?;
+                ensure!(n == self.epoch(&scope) as u64 + 1, "an epoch follows the one before it");
+                let to = data["to"].as_array().context("no to")?.iter().map(|k| unhex(k.as_str().unwrap_or(""))).collect::<Result<Vec<_>>>()?;
+                ensure!(to.iter().all(|k| self.machine(k).is_some()), "an epoch is sealed only to the install's endpoints");
+                self.epochs.insert(scope, Epoch { n: n as u32, to });
+            }
+            "grant" => {
+                let endpoint = key_of("endpoint")?;
+                let scope = Scope::parse(&text("scope")?)?;
+                let app = text("app")?;
+                let until = data["until"].as_u64().context("no until")?;
+                let allowed = match &scope {
+                    Scope::User(u) => *u == w,
+                    Scope::Group(g) => self.group_role(&w, g) == Some(Role::Admin),
+                    Scope::Global => self.is_admin(&w),
+                };
+                ensure!(allowed, "only the scope's person, or its group's admins, grant standing work in it");
+                ensure!(until == 0 || self.machine(&endpoint).is_some(), "no such endpoint");
+                match until {
+                    0 => drop(self.grants.remove(&(endpoint, scope, app))),
+                    until => drop(self.grants.insert((endpoint, scope, app), Grant { by: w, until })),
+                }
             }
             "group" => {
                 let group = id_of("group")?;
@@ -511,8 +491,8 @@ impl Members {
                 let name = text("name")?;
                 ensure!(!name.trim().is_empty(), "no name");
                 if let Ok(key) = key_of("key") {
-                    let m = self.machine(&key).context("no such key")?;
-                    ensure!(m.user == w || self.is_admin(&w), "not allowed to rename that");
+                    ensure!(self.machine(&key).is_some(), "no such key");
+                    ensure!(self.looks_after(&w, &key), "not allowed to rename that");
                     self.machines.get_mut(&key).unwrap().name = name;
                 } else if let Ok(user) = id_of("user") {
                     ensure!(user == w || self.is_admin(&w), "not allowed to rename that user");
@@ -540,7 +520,6 @@ impl Members {
                 let name = text("name")?;
                 ensure!(valid_app_name(&name), "app names are lowercase words joined by -");
                 let owner = Principal::parse(&text("owner")?)?;
-                ensure!(!matches!(owner, Principal::Install), "apps are owned by users, groups or admins");
                 ensure!(self.acts_for(&w, &owner), "only someone acting for an app's owner makes it");
                 match self.apps.get_mut(&name) {
                     Some(app) => {
@@ -582,8 +561,8 @@ impl Members {
                 let device = key_of("device")?;
                 let name = text("name")?;
                 ensure!(valid_app_name(&name), "sidecar names are lowercase words joined by -");
-                ensure!(self.device(&device).is_some(), "no such device");
-                ensure!(self.owners(&device).iter().any(|o| self.acts_for(&w, o)), "only someone acting for one of a device's owners installs or removes its sidecars");
+                ensure!(self.machine(&device).is_some(), "no such device");
+                ensure!(self.looks_after(&w, &device), "only a device's person or an admin installs or removes its sidecars");
                 let blob = data["blob"].as_str().map(str::to_string);
                 ensure!(blob.as_ref().is_none_or(|b| e.content.blobs.contains(b)), "a sidecar names its executable among its blobs");
                 self.sidecars.insert((device, name), SidecarInstall { blob, local: data["local"] == true, by: w, time: e.time() });
@@ -595,28 +574,22 @@ impl Members {
     }
 }
 
-/// An entry's data as its kind says it now. Entries signed before devices were called devices say `server` where they
-/// now say `device` (`server_name`, `as: "server"`), and a signed entry can't be rewritten, so they're read this way.
-fn signed_before_devices(kind: &str, data: &Value) -> Value {
-    let mut data = data.clone();
-    let Some(map) = data.as_object_mut() else { return data };
-    match kind {
-        "genesis" => {
-            if let Some(name) = map.remove("server_name") {
-                map.entry("device_name").or_insert(name);
-            }
-        }
-        "admit" if map.get("as").and_then(Value::as_str) == Some("server") => {
-            map.insert("as".into(), "device".into());
-        }
-        "acl" | "trust" | "untrust" | "sidecar" => {
-            if let Some(key) = map.remove("server") {
-                map.entry("device").or_insert(key);
-            }
-        }
-        _ => {}
-    }
-    data
+/// An endpoint as a `device` entry (or the genesis's `device`) lists it, for `user`.
+fn listed(data: &Value, user: &str) -> Result<Machine> {
+    let text = |key: &str| data[key].as_str().with_context(|| format!("no {key}"));
+    let roles: BTreeSet<Kind> = serde_json::from_value(data["roles"].clone()).context("roles are client, compute or service")?;
+    ensure!(!roles.is_empty(), "an endpoint does something: client, compute or service");
+    let name = text("name")?.trim().to_string();
+    ensure!(!name.is_empty(), "an endpoint has a name");
+    Ok(Machine {
+        key: unhex(text("key")?)?,
+        seal: unhex(text("seal")?)?,
+        user: user.to_string(),
+        name,
+        roles,
+        passkey: data["passkey"].as_str().map(str::to_string),
+        removed: false,
+    })
 }
 
 /// An app's source link as an `app` entry gives it: a web address, or empty (or null) for none.
@@ -891,66 +864,54 @@ fn answered(state: &mut ScopeState, data: &Value, id: &str, w: &str, time: u64) 
     }
 }
 
-/// The members as they were just before `order`.
-pub fn at(root: Option<Hash>, member_entries: &[Entry], order: &Order) -> Members {
-    let mut m = Members::new(root);
-    for e in member_entries.iter().take_while(|e| &e.order() < order) {
-        m.step(e);
-    }
-    m
-}
-
 // Building node entries.
 
 pub fn node(kind: &str, data: Value) -> Content {
     Content::new(APP, kind, data)
 }
 
-pub fn genesis(name: &str, user: &str, user_name: &str, device_name: &str, recovery: &Key) -> Content {
-    node("genesis", json!({ "name": name, "user": user, "user_name": user_name, "device_name": device_name, "recovery": hex(recovery) }))
+/// The install's first entry: its name, its first person, the first device (signing it) and the recovery key.
+pub fn genesis(name: &str, user: &str, user_name: &str, device: &crate::keys::Endpoint, device_name: &str, roles: &[Kind], recovery: &Key) -> Content {
+    let device = json!({ "key": hex(&device.key), "seal": hex(&device.seal), "name": device_name, "roles": roles });
+    node("genesis", json!({ "name": name, "user": user, "user_name": user_name, "device": device, "recovery": hex(recovery) }))
 }
 
-pub fn admit(key: &Key, user: &str, name: &str, device: bool, new_user: Option<(&str, Role)>) -> Content {
-    let mut data = json!({ "key": hex(key), "user": user, "name": name, "as": if device { "device" } else { "client" } });
+/// Lists an endpoint as `user`'s, and with `new_user` lets them in, by an admin's device.
+pub fn device(endpoint: &crate::keys::Endpoint, user: &str, name: &str, roles: &[Kind], new_user: Option<(&str, Role)>) -> Content {
+    let mut data = json!({ "key": hex(&endpoint.key), "seal": hex(&endpoint.seal), "user": user, "name": name, "roles": roles });
     if let Some((user_name, role)) = new_user {
         data["user_name"] = json!(user_name);
         data["role"] = json!(role);
     }
-    node("admit", data)
-}
-
-pub fn acl(device: &Key, owners: &[Principal], users: &[Principal]) -> Content {
-    let list = |ps: &[Principal]| ps.iter().map(|p| p.to_string()).collect::<Vec<_>>();
-    node("acl", json!({ "device": hex(device), "owners": list(owners), "users": list(users) }))
-}
-
-pub fn trust(device: &Key, trust: bool) -> Content {
-    node(if trust { "trust" } else { "untrust" }, json!({ "device": hex(device) }))
+    node("device", data)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::entry::Ext;
-    use p2panda_core::SigningKey;
+    use crate::entry::{Ext, Head, causal};
+    use crate::keys::Endpoint;
+    use ed25519_dalek::SigningKey;
 
-    struct Srv {
+    /// An endpoint writing entries, each after everything `read` holds.
+    struct Dev {
         key: SigningKey,
-        last: BTreeMap<String, crate::entry::Head>,
-        time: u64,
+        last: BTreeMap<String, Head>,
     }
 
-    impl Srv {
+    impl Dev {
         fn new(seed: u8) -> Self {
-            Srv { key: SigningKey::from([seed; 32]), last: BTreeMap::new(), time: 0 }
+            Dev { key: SigningKey::from_bytes(&[seed; 32]), last: BTreeMap::new() }
         }
         fn id(&self) -> Key {
-            *self.key.verifying_key().as_bytes()
+            self.key.verifying_key().to_bytes()
         }
-        fn write(&mut self, log: &str, user: &str, content: Content) -> Entry {
-            self.time += 10;
-            let ext = Ext { log: log.into(), time: self.time, user: user.into(), by: None };
-            let e = Entry::create(&self.key, ext, self.last.get(log).copied(), content);
+        fn endpoint(&self) -> Endpoint {
+            Endpoint::of(&self.key)
+        }
+        fn write(&mut self, log: &str, user: &str, content: Content, read: &[Entry]) -> Entry {
+            let previous = read.iter().filter(|e| e.author() != self.id()).map(Entry::hash).collect();
+            let e = Entry::create(&self.key, Ext { log: log.into(), time: 0, user: user.into(), epoch: 0, previous }, self.last.get(log).copied(), content);
             self.last.insert(log.into(), e.head());
             e
         }
@@ -958,68 +919,108 @@ mod tests {
 
     const ANDRE: &str = "a000000000000001";
     const BOB: &str = "b000000000000002";
+    const BOTH: &[Kind] = &[Kind::Client, Kind::Compute];
 
-    fn setup() -> (Srv, Vec<Entry>) {
-        let mut s = Srv::new(1);
-        let g = s.write("global", ANDRE, genesis("Home", ANDRE, "Andre", "mac", &[7; 32]));
-        (s, vec![g])
+    fn setup() -> (Dev, Vec<Entry>) {
+        let mut mac = Dev::new(1);
+        let g = mac.write("global", ANDRE, genesis("Home", ANDRE, "Andre", &mac.endpoint(), "mac", BOTH, &[7; 32]), &[]);
+        (mac, vec![g])
     }
 
     fn members(entries: &[Entry]) -> Members {
-        let mut sorted = entries.to_vec();
-        sorted.sort_by_key(Entry::order);
+        let sorted = causal(entries.to_vec(), &Default::default());
         Members::replay(Some(entries[0].hash()), &sorted)
+    }
+
+    /// Writes `content` as `user` from `dev` after everything in `entries`, and keeps it there.
+    fn add(entries: &mut Vec<Entry>, dev: &mut Dev, user: &str, content: Content) -> Entry {
+        let e = dev.write("global", user, content, &entries.clone());
+        entries.push(e.clone());
+        e
     }
 
     #[test]
     fn only_this_installs_genesis_counts() {
-        let mut other = Srv::new(2);
-        let fake = other.write("global", ANDRE, genesis("Home", ANDRE, "x", "y", &[7; 32]));
+        let mut other = Dev::new(2);
+        let fake = other.write("global", ANDRE, genesis("Home", ANDRE, "x", &other.endpoint(), "y", BOTH, &[7; 32]), &[]);
         let (_, entries) = setup();
         let m = Members::replay(Some(entries[0].hash()), &[fake]);
         assert!(m.users.is_empty());
-        assert_eq!(members(&entries).users.len(), 1);
-    }
-
-    #[test]
-    fn an_entry_counts_once_its_authors_admit_arrives_and_not_after_removal() {
-        let (mut mac, mut entries) = setup();
-        let mut bobs = Srv::new(3);
-        bobs.time = 100;
-        let early = bobs.write("global", BOB, Content::new("board", "post", json!({})));
-        let root = Some(entries[0].hash());
-        let count = |members: &[Entry], e: &Entry| {
-            let mut sorted = members.to_vec();
-            sorted.sort_by_key(Entry::order);
-            let mut n = 0;
-            replay(root, &sorted, std::slice::from_ref(e), |_, _, _| n += 1);
-            n
-        };
-        assert_eq!(count(&entries, &early), 0);
-        entries.push(mac.write("global", ANDRE, admit(&bobs.id(), BOB, "bob's", true, Some(("Bob", Role::Member)))));
-        assert_eq!(count(&entries, &early), 1, "its admit sorts before it");
-        mac.time = 500;
-        entries.push(mac.write("global", ANDRE, node("remove", json!({ "key": hex(&bobs.id()) }))));
-        bobs.time = 600;
-        let late = bobs.write("global", BOB, Content::new("board", "post", json!({})));
-        assert_eq!(count(&entries, &early), 1, "what it wrote before removal still counts");
-        assert_eq!(count(&entries, &late), 0);
-    }
-
-    #[test]
-    fn entries_signed_before_devices_were_called_devices_still_say_who_holds_what() {
-        let mut mac = Srv::new(1);
-        let g = mac.write("global", ANDRE, node("genesis", json!({ "name": "Home", "user": ANDRE, "user_name": "Andre", "server_name": "mac", "recovery": hex(&[7; 32]) })));
-        let linux = Srv::new(2);
-        let mut entries = vec![g];
-        let old = |kind: &str, data: Value| node(kind, data);
-        entries.push(mac.write("global", ANDRE, old("admit", json!({ "key": hex(&linux.id()), "user": ANDRE, "name": "linux", "as": "server" }))));
-        entries.push(mac.write("global", ANDRE, old("acl", json!({ "server": hex(&linux.id()), "owners": ["install"], "users": ["install"] }))));
-        entries.push(mac.write("global", ANDRE, old("sidecar", json!({ "server": hex(&linux.id()), "name": "whatsapp" }))));
         let m = members(&entries);
-        assert_eq!(m.device(&mac.id()).map(|d| d.name.as_str()), Some("mac"));
-        assert_eq!(m.device(&linux.id()).map(|d| d.name.as_str()), Some("linux"));
-        assert!(m.privileged(&linux.id()));
-        assert!(m.sidecars.contains_key(&(linux.id(), "whatsapp".to_string())));
+        assert_eq!(m.users.len(), 1);
+        assert_eq!(m.seal_key(&entries[0].author()), Some(Dev::new(1).endpoint().seal), "the seal key it was listed with");
+    }
+
+    #[test]
+    fn a_member_entry_counts_only_when_signed_by_a_device_of_its_user() {
+        let (mut mac, mut entries) = setup();
+        let mut bobs = Dev::new(3);
+        let mut linux = Dev::new(4);
+        add(&mut entries, &mut mac, ANDRE, device(&bobs.endpoint(), BOB, "bob's phone", &[Kind::Client], Some(("Bob", Role::Member))));
+        add(&mut entries, &mut mac, ANDRE, device(&linux.endpoint(), ANDRE, "linux", &[Kind::Compute], None));
+        // Andre's device can't sign as Bob, Bob's can't as Andre, and a compute endpoint signs no member entry.
+        add(&mut entries, &mut mac, BOB, node("rename", json!({ "user": BOB, "name": "Bobby" })));
+        add(&mut entries, &mut bobs, ANDRE, node("setting", json!({ "name": "a", "value": "1" })));
+        add(&mut entries, &mut linux, ANDRE, node("setting", json!({ "name": "b", "value": "1" })));
+        let m = members(&entries);
+        assert_eq!(m.users[BOB].name, "Bob");
+        assert!(m.settings.is_empty());
+        // Bob's own device renames him; it can't list a device for Andre, nor Andre's list a client for Bob.
+        add(&mut entries, &mut bobs, BOB, node("rename", json!({ "user": BOB, "name": "Bobby" })));
+        add(&mut entries, &mut bobs, BOB, device(&Dev::new(5).endpoint(), ANDRE, "x", &[Kind::Client], None));
+        add(&mut entries, &mut mac, ANDRE, device(&Dev::new(6).endpoint(), BOB, "y", &[Kind::Client], None));
+        let m = members(&entries);
+        assert_eq!(m.users[BOB].name, "Bobby");
+        assert!(m.machine(&Dev::new(5).id()).is_none() && m.machine(&Dev::new(6).id()).is_none());
+        // The compute endpoint runs Andre's scope and the install's, not Bob's.
+        assert!(m.runs_for(&linux.id(), &Scope::User(ANDRE.into())) && m.runs_for(&linux.id(), &Scope::Global));
+        assert!(!m.runs_for(&linux.id(), &Scope::User(BOB.into())) && !m.runs_for(&bobs.id(), &Scope::User(BOB.into())));
+    }
+
+    #[test]
+    fn a_removed_devices_later_entries_dont_count() {
+        let (mut mac, mut entries) = setup();
+        let mut laptop = Dev::new(3);
+        add(&mut entries, &mut mac, ANDRE, device(&laptop.endpoint(), ANDRE, "laptop", &[Kind::Client], None));
+        add(&mut entries, &mut laptop, ANDRE, node("setting", json!({ "name": "before", "value": "1" })));
+        add(&mut entries, &mut mac, ANDRE, node("remove", json!({ "key": hex(&laptop.id()) })));
+        add(&mut entries, &mut laptop, ANDRE, node("setting", json!({ "name": "after", "value": "1" })));
+        let m = members(&entries);
+        assert!(m.settings.contains_key("before"), "what it wrote before still counts");
+        assert!(!m.settings.contains_key("after"));
+        assert!(m.machine(&laptop.id()).is_none());
+    }
+
+    #[test]
+    fn a_new_epoch_counts_only_from_the_scopes_admins() {
+        let (mut mac, mut entries) = setup();
+        let mut bobs = Dev::new(3);
+        add(&mut entries, &mut mac, ANDRE, device(&bobs.endpoint(), BOB, "bob's phone", &[Kind::Client], Some(("Bob", Role::Member))));
+        let to = json!([hex(&mac.id())]);
+        add(&mut entries, &mut bobs, BOB, node("epoch", json!({ "scope": "global", "n": 1, "to": to })));
+        add(&mut entries, &mut bobs, BOB, node("epoch", json!({ "scope": format!("user:{ANDRE}"), "n": 1, "to": to })));
+        assert!(members(&entries).epochs.is_empty(), "not Bob's to start");
+        add(&mut entries, &mut mac, ANDRE, node("epoch", json!({ "scope": "global", "n": 2, "to": to })));
+        assert_eq!(members(&entries).epoch(&Scope::Global), 0, "epochs go one at a time");
+        add(&mut entries, &mut mac, ANDRE, node("epoch", json!({ "scope": "global", "n": 1, "to": to })));
+        let bob = hex(&bobs.id());
+        add(&mut entries, &mut bobs, BOB, node("epoch", json!({ "scope": format!("user:{BOB}"), "n": 1, "to": [bob] })));
+        let m = members(&entries);
+        assert_eq!(m.epochs[&Scope::Global], Epoch { n: 1, to: vec![mac.id()] });
+        assert_eq!(m.epoch(&Scope::User(BOB.into())), 1, "a person's own scope is theirs");
+        assert_eq!(m.epoch(&Scope::User(ANDRE.into())), 0);
+    }
+
+    #[test]
+    fn a_nodes_scope_entries_count_where_it_runs_the_scopes_calls() {
+        let (mut mac, mut entries) = setup();
+        let mut linux = Dev::new(4);
+        add(&mut entries, &mut mac, ANDRE, device(&linux.endpoint(), ANDRE, "linux", &[Kind::Compute], None));
+        add(&mut entries, &mut mac, ANDRE, device(&Dev::new(3).endpoint(), BOB, "bob's phone", &[Kind::Client], Some(("Bob", Role::Member))));
+        let m = members(&entries);
+        let mine = linux.write(&format!("user:{ANDRE}"), ANDRE, node("keep", json!({})), &entries);
+        let bobs = linux.write(&format!("user:{BOB}"), BOB, node("keep", json!({})), &entries);
+        assert!(m.counts(&mine));
+        assert!(!m.counts(&bobs), "linux doesn't run Bob's");
     }
 }

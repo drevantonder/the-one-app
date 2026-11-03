@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context as _, Result, anyhow, bail, ensure};
-use p2panda_core::{Hash, SigningKey};
+use ed25519_dalek::SigningKey;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::sync::broadcast;
@@ -16,7 +16,7 @@ use crate::apps::{Apps, Context, Me, ScopeHandle};
 use crate::call::Append;
 use crate::bucket::{Copied, Place};
 use crate::db::Db;
-use crate::entry::{Content, Entry, Key, Order, Scope, hex, new_id, short, unhex};
+use crate::entry::{Content, Entry, Hash, Key, Order, Scope, hex, new_id, short, unhex};
 use crate::members::{self, Members, Principal, Role, ScopeState};
 use crate::rank;
 use crate::release::{self, Release};
@@ -169,6 +169,9 @@ struct Pairing {
     /// Milliseconds since 1970 after which it no longer works.
     until: u64,
 }
+
+/// What a machine's node is: the device its person's CLI, MCP and Mac app sign with, and compute.
+pub const MACHINE: &[members::Kind] = &[members::Kind::Client, members::Kind::Compute];
 
 const PAIRING_LIFE: u64 = 7 * 86_400_000;
 
@@ -572,7 +575,7 @@ impl Node {
 
     /// An install made before it kept its data in a bucket, with no device but this one: it keeps it in a folder here.
     fn keep_alone_here(&self) -> Result<()> {
-        let alone = self.with(|i| Ok(i.bucket.is_none() && i.r.members.devices().all(|s| s.key == self.0.id)))?;
+        let alone = self.with(|i| Ok(i.bucket.is_none() && i.r.members.computes().all(|s| s.key == self.0.id)))?;
         if !alone {
             return Ok(());
         }
@@ -611,10 +614,11 @@ impl Node {
         self.ensure_no_install()?;
         ensure!(!name.trim().is_empty() && !user_name.trim().is_empty(), "give the install a name, and yourself one");
         let user = new_id();
-        let recovery = SigningKey::generate();
-        let genesis = members::genesis(name.trim(), &user, user_name.trim(), &self.device_name(), recovery.verifying_key().as_bytes());
-        let time = now_ms();
-        let entry = Entry::create(&self.0.key, crate::entry::Ext { log: "global".into(), time, user: user.clone(), by: None }, None, genesis);
+        let recovery = SigningKey::from_bytes(&rand::random());
+        let me = crate::keys::Endpoint::of(&self.0.key);
+        let genesis = members::genesis(name.trim(), &user, user_name.trim(), &me, &self.device_name(), MACHINE, recovery.verifying_key().as_bytes());
+        let ext = crate::entry::Ext { log: "global".into(), time: now_ms(), user: user.clone(), epoch: 0, previous: Vec::new() };
+        let entry = Entry::create(&self.0.key, ext, None, genesis);
         // Until it's moved to S3-compatible storage, the install's bucket is a folder here.
         let bucket: BTreeMap<String, String> = [("path".to_string(), self.install_dir().join("bucket").display().to_string())].into();
         Place::from_fields(&bucket)?.create(INSTALL_OBJECT, entry.hash().to_hex().as_bytes())?;
@@ -635,17 +639,17 @@ impl Node {
         self.write_epoch_entries().await;
         self.settle().await?;
         self.emit(Event::Install);
-        Ok(hex(recovery.as_bytes()))
+        Ok(hex(&recovery.to_bytes()))
     }
 
     /// Writes an entry as this device's local user.
     pub async fn append(&self, scope: &Scope, content: Content) -> Result<Entry> {
         let user = self.user()?;
-        self.append_as(scope, &user, None, content).await
+        self.append_as(scope, &user, content).await
     }
 
-    /// Writes an entry to this device's log of `scope`, as `user`, for `by` if it ran for someone else.
-    async fn append_as(&self, scope: &Scope, user: &str, by: Option<Key>, content: Content) -> Result<Entry> {
+    /// Writes an entry to this device's log of `scope`, signed by this device, as `user`.
+    async fn append_as(&self, scope: &Scope, user: &str, content: Content) -> Result<Entry> {
         let _write = self.0.writes.lock().await;
         // What's in the bucket first, so the entry comes after all of it.
         self.read_log_now(scope).await?;
@@ -657,16 +661,71 @@ impl Node {
                 self.0.unshared.lock().unwrap().push((scope.clone(), blob.clone()));
             }
         }
-        let entry = self.with(|i| i.r.make(scope, user, by, content, now_ms()))?;
-        // One of a scope's node entries that its replay would skip is never written: it would say it was done.
-        if *scope != Scope::Global && entry.content.app == members::APP {
-            self.with(|i| members::applies_in_scope(&i.r.members, &i.views.get(&scope.to_string()).map(|(_, s)| s.clone()).unwrap_or_default(), &entry))?;
-        }
+        let entry = self.with(|i| i.r.make(scope, user, content, now_ms()))?;
+        // An entry that wouldn't count is never written: it would say it was done.
+        self.with(|i| i.r.check(&entry))?;
+        self.check_in_scope(&entry)?;
         self.put_entry(scope, &entry).await?;
         let handled = self.with(|i| i.r.add_own(&entry))?;
         self.after(handled).await?;
         self.ping(scope, None);
         Ok(entry)
+    }
+
+    /// One of a scope's node entries that its replay would skip is never written: it would say it was done.
+    fn check_in_scope(&self, entry: &Entry) -> Result<()> {
+        if entry.log() != "global" && entry.content.app == members::APP {
+            self.with(|i| members::applies_in_scope(&i.r.members, &i.views.get(entry.log()).map(|(_, s)| s.clone()).unwrap_or_default(), entry))?;
+        }
+        Ok(())
+    }
+
+    /// What a device signing an entry in `scope` for `caller` needs (`src/entry.rs`): the scope's `epoch`, the
+    /// `previous` it follows (every log's end there, and in `global`), and each log's end there by author (`logs`, its
+    /// own log's the backlink).
+    pub async fn entry_heads(&self, caller: &Caller, scope: &Scope) -> Result<Value> {
+        self.read_log(scope).await?;
+        self.with(|i| {
+            ensure!(i.r.members.may_use(&caller.user, scope) && i.r.holds(scope), "this device doesn't hold {scope} for you");
+            let log = scope.to_string();
+            let mut previous = i.r.store.heads(&log, None)?;
+            if *scope != Scope::Global {
+                previous.extend(i.r.store.heads("global", None)?);
+            }
+            let mut logs = serde_json::Map::new();
+            for (author, _, next) in i.r.store.frontier()?.into_iter().filter(|(_, l, _)| *l == log) {
+                if let Some(e) = i.r.store.last(&author, &log)? {
+                    logs.insert(hex(&author), json!({ "seq": e.seq(), "hash": e.hash().to_hex(), "next": next }));
+                }
+            }
+            Ok(json!({ "epoch": i.r.members.epoch(scope), "previous": previous.iter().map(Hash::to_hex).collect::<Vec<_>>(), "logs": logs }))
+        })
+    }
+
+    /// Writes entries `caller`'s own device signed (a browser's, say), each once it's checked: it follows what this
+    /// device holds, and counts.
+    pub async fn put_signed(&self, caller: &Caller, entries: Vec<Entry>) -> Result<()> {
+        for entry in entries {
+            ensure!(entry.user() == caller.user, "entry {} isn't written as you", entry.id());
+            let scope = entry.scope();
+            let before = self.with(|i| Ok(i.r.members.roles()))?;
+            {
+                let _write = self.0.writes.lock().await;
+                self.read_log_now(&scope).await?;
+                for blob in &entry.content.blobs {
+                    self.share_blob(&scope, blob, false).await.with_context(|| format!("blob {} isn't here: put it first", &blob[..12.min(blob.len())]))?;
+                }
+                self.with(|i| i.r.check_signed(&entry))?;
+                self.check_in_scope(&entry)?;
+                self.put_entry(&scope, &entry).await?;
+                let handled = self.with(|i| i.r.receive(vec![entry.clone()]))?;
+                self.after(handled).await?;
+            }
+            self.ping(&scope, None);
+            let after = self.with(|i| Ok(i.r.members.roles()))?;
+            self.tell_vault(caller, members::roles_changed(&before, &after)).await?;
+        }
+        Ok(())
     }
 
     /// Passes on new entries, follows what changed in the members, and brings each scope's state up to date.
@@ -677,7 +736,7 @@ impl Node {
         self.with(|i| {
             if handled.members {
                 let m = &i.r.members;
-                i.peers.retain(|peer, _| m.device(peer).is_some());
+                i.peers.retain(|peer, _| m.compute(peer).is_some());
             }
             for log in &handled.dropped {
                 i.views.remove(log);
@@ -732,7 +791,7 @@ impl Node {
     async fn settle(&self) -> Result<()> {
         let Ok((wanted, author)) = self.with(|i| {
             let wanted: BTreeMap<String, String> = i.r.members.apps.values().filter(|a| !a.erased).filter_map(|a| Some((a.name.clone(), a.bundle.clone()?))).collect();
-            Ok((wanted, i.r.members.device(&self.0.id).is_some()))
+            Ok((wanted, i.r.members.compute(&self.0.id).is_some()))
         }) else {
             return Ok(());
         };
@@ -770,8 +829,8 @@ impl Node {
     /// from the bucket since it woke.
     pub fn ready(&self) -> bool {
         self.with(|i| {
-            let alone = i.r.members.devices().all(|s| s.key == self.0.id);
-            Ok(i.r.members.device(&self.0.id).is_some() && (i.read || alone))
+            let alone = i.r.members.computes().all(|s| s.key == self.0.id);
+            Ok(i.r.members.compute(&self.0.id).is_some() && (i.read || alone))
         })
         .unwrap_or(false)
     }
@@ -939,11 +998,11 @@ fn check_append(i: &Install, app: &str, append: Append, scopes: &[Scope], me: &C
 }
 
 /// The `sidecar` entry that removes a sidecar from a device, found by name or key prefix, or with `installed` lets it
-/// register there again; for someone acting for one of the device's owners.
+/// register there again; for the device's person or an admin.
 fn sidecar_entry(m: &Members, user: &str, device: &str, name: &str, installed: bool) -> Result<Content> {
-    let found: Vec<&members::Machine> = m.devices().filter(|s| s.name.eq_ignore_ascii_case(device) || (!device.is_empty() && hex(&s.key).starts_with(device))).collect();
+    let found: Vec<&members::Machine> = m.machines.values().filter(|s| m.machine(&s.key).is_some()).filter(|s| s.name.eq_ignore_ascii_case(device) || (!device.is_empty() && hex(&s.key).starts_with(device))).collect();
     let [s] = found.as_slice() else { bail!("no one device called {device}") };
-    ensure!(m.owners(&s.key).iter().any(|o| m.acts_for(user, o)), "only someone acting for one of {}'s owners installs or removes its sidecars", s.name);
+    ensure!(m.looks_after(user, &s.key), "only {}'s person or an admin installs or removes its sidecars", s.name);
     Ok(members::node("sidecar", json!({ "device": hex(&s.key), "name": name, "blob": null, "local": installed })))
 }
 

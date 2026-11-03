@@ -275,15 +275,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
 
 [[package]]
-name = "cbor-core"
-version = "0.10.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e9f70473b5194d5f6e3c271dc6d0f63f6b17cc5d004af959e9ed0be8c1dadcdb"
-dependencies = [
- "serde",
-]
-
-[[package]]
 name = "cc"
 version = "1.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -807,7 +798,6 @@ version = "2.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "115531babc129696a58c64a4fef0a8bf9e9698629fb97e9e40767d235cfbcd53"
 dependencies = [
- "pkcs8 0.10.2",
  "signature 2.2.0",
 ]
 
@@ -830,11 +820,8 @@ checksum = "70e796c081cee67dc755e1a36a0a172b897fab85fc3f6bc48307991f64e4eca9"
 dependencies = [
  "curve25519-dalek 4.1.3",
  "ed25519 2.2.3",
- "rand_core 0.6.4",
- "serde",
  "sha2 0.10.9",
  "subtle",
- "zeroize",
 ]
 
 [[package]]
@@ -1242,15 +1229,6 @@ name = "heck"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
-
-[[package]]
-name = "hex"
-version = "0.4.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
-dependencies = [
- "serde",
-]
 
 [[package]]
 name = "hkdf"
@@ -2560,7 +2538,6 @@ dependencies = [
  "jiff",
  "jsonc-parser",
  "libc",
- "p2panda-core",
  "rand 0.8.8",
  "ring",
  "rusqlite",
@@ -2588,7 +2565,6 @@ dependencies = [
  "data-encoding",
  "js-sys",
  "one",
- "p2panda-core",
  "serde_json",
  "sqlite-wasm-rs",
  "wasm-bindgen",
@@ -2617,22 +2593,6 @@ dependencies = [
  "elliptic-curve",
  "primeorder",
  "sha2 0.10.9",
-]
-
-[[package]]
-name = "p2panda-core"
-version = "0.7.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a3d46f52382b5e1352454fca91d846e23354f9189c913fd0d4a4b2ba57f13d61"
-dependencies = [
- "blake3",
- "cbor-core",
- "ed25519-dalek 2.2.0",
- "hex",
- "rand 0.8.8",
- "serde",
- "serde_bytes",
- "thiserror 2.0.21",
 ]
 
 [[package]]

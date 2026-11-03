@@ -1,13 +1,12 @@
-//! Every log of every scope this device holds, kept in SQLite exactly as the entries arrived, and how far it has read
-//! each scope's entries in the bucket.
+//! Every log of every scope this device holds, kept in SQLite exactly as the entries arrived, in causal order, and how
+//! far it has read each scope's entries in the bucket.
 
 use std::path::Path;
 
-use anyhow::{Result, ensure};
-use p2panda_core::Hash;
+use anyhow::{Result, bail, ensure};
 use rusqlite::{Connection, OptionalExtension, params};
 
-use crate::entry::{Entry, Head, Key};
+use crate::entry::{Entry, Hash, Head, Key};
 
 /// Entries other than the node's backup runs and keys, which change nothing a backup needs to send at once.
 const NOT_BACKUPS: &str = "not (json_extract(cast(body as text), '$.app') = 'node' and json_extract(cast(body as text), '$.kind') in ('backup', 'backup-key', 'backup-alert'))";
@@ -18,6 +17,14 @@ pub struct Store {
 
 /// For each log: (author, log, next seq the holder lacks).
 pub type Frontier = Vec<(Key, String, u32)>;
+
+/// What adding an entry found.
+enum Added {
+    New(Entry),
+    Known,
+    /// What it follows hasn't arrived yet.
+    Waits,
+}
 
 impl Store {
     pub fn open(path: &Path) -> Result<Self> {
@@ -33,48 +40,110 @@ impl Store {
             "pragma journal_mode = wal;
              create table if not exists entries (
                author blob not null, log text not null, seq integer not null,
-               time integer not null, header blob not null, body blob not null,
+               hash blob not null unique, depth integer not null, time integer not null,
+               header blob not null, signature blob not null, body blob not null,
                primary key (author, log, seq));
-             create index if not exists entries_order on entries (log, time, author, seq);
+             create index if not exists entries_order on entries (log, depth, hash);
+             -- Entries that follow one this device doesn't have yet, kept until it does.
+             create table if not exists waiting (hash blob primary key, log text not null, header blob not null, signature blob not null, body blob not null);
              -- The end of each of this device's own logs, kept when a scope is deleted, so a log it holds again
              -- goes on from where it was and never has two entries with one seq.
-             create table if not exists heads (log text primary key, seq integer not null, hash blob not null, time integer not null);
+             create table if not exists heads (log text primary key, seq integer not null, hash blob not null);
              -- The last position of each scope's entries in the bucket this device has read.
              create table if not exists positions (log text primary key, at integer not null);",
         )?;
         Ok(Store { db })
     }
 
-    /// Adds an entry if it is new and follows its log. Returns whether it was new.
-    pub fn insert(&self, entry: &Entry) -> Result<bool> {
-        if self.has(&entry.author(), entry.log(), entry.seq())? {
-            return Ok(false);
+    /// Adds entries as they arrive, each once everything it follows is here (those that came before and waited too):
+    /// → the entries new to this device, in the order they were added, each with its depth. One that doesn't follow
+    /// its log is dropped; one that follows what hasn't arrived waits.
+    pub fn take(&self, entries: Vec<Entry>) -> Result<Vec<Entry>> {
+        let mut pending = self.waiting()?;
+        let had = pending.len();
+        pending.extend(entries);
+        let mut added = Vec::new();
+        loop {
+            let mut left = Vec::new();
+            let before = pending.len();
+            for e in pending {
+                match self.add(&e) {
+                    Ok(Added::New(e)) => added.push(e),
+                    Ok(Added::Known) => {}
+                    Ok(Added::Waits) => left.push(e),
+                    Err(err) => tracing::debug!("dropped entry {}: {err:#}", e.id()),
+                }
+            }
+            pending = left;
+            if pending.is_empty() || pending.len() == before {
+                break;
+            }
         }
-        let prev = match entry.seq() {
-            0 => None,
-            n => self.get(&entry.author(), entry.log(), n - 1)?.map(|e| e.head()),
-        };
-        entry.follows(prev)?;
-        self.put(entry)?;
-        Ok(true)
+        if had > 0 || !pending.is_empty() {
+            self.db.execute("delete from waiting", [])?;
+            for e in &pending {
+                let (h, s, b) = e.encode();
+                self.db.execute("insert or ignore into waiting values (?, ?, ?, ?, ?)", params![e.hash().as_bytes().to_vec(), e.log(), h, s, b])?;
+            }
+        }
+        Ok(added)
+    }
+
+    fn waiting(&self) -> Result<Vec<Entry>> {
+        let mut stmt = self.db.prepare("select header, signature, body from waiting")?;
+        let rows = stmt.query_map([], |r| Ok((r.get::<_, Vec<u8>>(0)?, r.get::<_, Vec<u8>>(1)?, r.get::<_, Vec<u8>>(2)?)))?;
+        rows.map(|r| {
+            let (h, s, b) = r?;
+            Entry::decode_trusted(&h, &s, &b, 0)
+        })
+        .collect()
+    }
+
+    /// Adds an entry if it's new and everything it follows is here.
+    fn add(&self, entry: &Entry) -> Result<Added> {
+        if self.has(&entry.author(), entry.log(), entry.seq())? {
+            return Ok(Added::Known);
+        }
+        if entry.seq() > 0 {
+            match self.get(&entry.author(), entry.log(), entry.seq() - 1)? {
+                Some(prev) => entry.follows(Some(prev.head()))?,
+                None => return Ok(Added::Waits),
+            }
+        }
+        let mut depth = 0;
+        for hash in entry.follows_all() {
+            let found: Option<(String, u64)> = self.db.query_row("select log, depth from entries where hash = ?", [hash.as_bytes().to_vec()], |r| Ok((r.get(0)?, r.get::<_, i64>(1)? as u64))).optional()?;
+            match found {
+                Some((log, d)) => {
+                    ensure!(log == entry.log() || log == "global", "it follows an entry of another scope");
+                    depth = depth.max(d + 1);
+                }
+                None => return Ok(Added::Waits),
+            }
+        }
+        let mut e = entry.clone();
+        e.depth = depth;
+        self.put(&e)?;
+        Ok(Added::New(e))
     }
 
     /// Adds an entry this device just wrote after `head`, the end of its log, which it may no longer hold.
-    pub fn insert_own(&self, entry: &Entry, head: Option<Head>) -> Result<()> {
+    pub fn insert_own(&self, entry: &Entry, head: Option<Head>) -> Result<Entry> {
         entry.follows(head)?;
-        self.put(entry)?;
-        self.db.execute(
-            "insert or replace into heads values (?, ?, ?, ?)",
-            params![entry.log(), entry.seq(), entry.hash().as_bytes().to_vec(), entry.time() as i64],
-        )?;
-        Ok(())
+        let e = match self.add(entry)? {
+            Added::New(e) => e,
+            Added::Known => bail!("this device wrote entry {} of {} already", entry.seq(), entry.log()),
+            Added::Waits => bail!("this device doesn't hold what entry {} of {} follows", entry.seq(), entry.log()),
+        };
+        self.db.execute("insert or replace into heads values (?, ?, ?)", params![e.log(), e.seq(), e.hash().as_bytes().to_vec()])?;
+        Ok(e)
     }
 
     fn put(&self, entry: &Entry) -> Result<()> {
-        let (header, body) = entry.encode();
+        let (header, signature, body) = entry.encode();
         self.db.execute(
-            "insert into entries values (?, ?, ?, ?, ?, ?)",
-            params![entry.author(), entry.log(), entry.seq(), entry.time() as i64, header, body],
+            "insert into entries values (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            params![entry.author(), entry.log(), entry.seq(), entry.hash().as_bytes().to_vec(), entry.depth as i64, entry.time() as i64, header, signature, body],
         )?;
         Ok(())
     }
@@ -82,23 +151,23 @@ impl Store {
     /// The end of this device's own log for `log`, whether or not it holds the entries.
     pub fn own_head(&self, author: &Key, log: &str) -> Result<Option<Head>> {
         let held = self.last(author, log)?.map(|e| e.head());
-        let row = self
-            .db
-            .query_row("select seq, hash, time from heads where log = ?", [log], |r| Ok((r.get::<_, u32>(0)?, r.get::<_, Vec<u8>>(1)?, r.get::<_, i64>(2)?)))
-            .optional()?;
+        let row = self.db.query_row("select seq, hash from heads where log = ?", [log], |r| Ok((r.get::<_, u32>(0)?, r.get::<_, Vec<u8>>(1)?))).optional()?;
         let kept = match row {
-            Some((seq, hash, time)) => {
-                let hash: [u8; 32] = hash.try_into().map_err(|_| anyhow::anyhow!("bad head"))?;
-                Some((seq, Hash::from_bytes(hash), time as u64))
-            }
+            Some((seq, hash)) => Some((seq, Hash::from_bytes(hash.try_into().map_err(|_| anyhow::anyhow!("bad head"))?))),
             None => None,
         };
         Ok(held.into_iter().chain(kept).max_by_key(|h| h.0))
     }
 
-    /// Whether `entry` can't be added yet because the one before it in its log hasn't arrived.
-    pub fn lacks_predecessor(&self, entry: &Entry) -> Result<bool> {
-        Ok(entry.seq() > 0 && !self.has(&entry.author(), entry.log(), entry.seq() - 1)?)
+    /// The newest entry of each author's log of `log`, but `except`'s: what an entry `except` writes there next follows.
+    pub fn heads(&self, log: &str, except: Option<&Key>) -> Result<Vec<Hash>> {
+        let mut stmt = self.db.prepare("select author, hash from entries e where log = ?1 and seq = (select max(seq) from entries where author = e.author and log = ?1)")?;
+        let rows: Vec<(Key, Vec<u8>)> = stmt.query_map([log], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<_, _>>()?;
+        Ok(rows.into_iter().filter(|(a, _)| Some(a) != except).filter_map(|(_, h)| Some(Hash::from_bytes(h.try_into().ok()?))).collect())
+    }
+
+    pub fn has_hash(&self, hash: &Hash) -> Result<bool> {
+        Ok(self.db.query_row("select 1 from entries where hash = ?", [hash.as_bytes().to_vec()], |_| Ok(())).optional()?.is_some())
     }
 
     pub fn has(&self, author: &Key, log: &str, seq: u32) -> Result<bool> {
@@ -106,15 +175,7 @@ impl Store {
     }
 
     pub fn get(&self, author: &Key, log: &str, seq: u32) -> Result<Option<Entry>> {
-        let row = self
-            .db
-            .query_row(
-                "select header, body from entries where author = ? and log = ? and seq = ?",
-                params![author, log, seq],
-                |r| Ok((r.get::<_, Vec<u8>>(0)?, r.get::<_, Vec<u8>>(1)?)),
-            )
-            .optional()?;
-        row.map(|(h, b)| Entry::decode_trusted(&h, &b)).transpose()
+        Ok(self.query("select header, signature, body, depth from entries where author = ? and log = ? and seq = ?", params![author, log, seq])?.pop())
     }
 
     pub fn last(&self, author: &Key, log: &str) -> Result<Option<Entry>> {
@@ -147,22 +208,22 @@ impl Store {
 
     fn query(&self, sql: &str, params: impl rusqlite::Params) -> Result<Vec<Entry>> {
         let mut stmt = self.db.prepare(sql)?;
-        let rows = stmt.query_map(params, |r| Ok((r.get::<_, Vec<u8>>(0)?, r.get::<_, Vec<u8>>(1)?)))?;
+        let rows = stmt.query_map(params, |r| Ok((r.get::<_, Vec<u8>>(0)?, r.get::<_, Vec<u8>>(1)?, r.get::<_, Vec<u8>>(2)?, r.get::<_, i64>(3)?)))?;
         rows.map(|r| {
-            let (h, b) = r?;
-            Entry::decode_trusted(&h, &b)
+            let (h, s, b, d) = r?;
+            Entry::decode_trusted(&h, &s, &b, d as u64)
         })
         .collect()
     }
 
     /// A scope's entries, in replay order.
     pub fn scope(&self, log: &str) -> Result<Vec<Entry>> {
-        self.query("select header, body from entries where log = ? order by time, author, log, seq", [log])
+        self.query("select header, signature, body, depth from entries where log = ? order by depth, hash", [log])
     }
 
     /// Every entry, in replay order.
     pub fn ordered(&self) -> Result<Vec<Entry>> {
-        self.query("select header, body from entries order by time, author, log, seq", [])
+        self.query("select header, signature, body, depth from entries order by depth, hash", [])
     }
 
     /// The scopes this device has entries in.
@@ -175,6 +236,7 @@ impl Store {
     pub fn delete(&self, log: &str) -> Result<()> {
         ensure!(log != "global", "every device holds global");
         self.db.execute("delete from entries where log = ?", [log])?;
+        self.db.execute("delete from waiting where log = ?", [log])?;
         self.db.execute("delete from positions where log = ?", [log])?;
         Ok(())
     }
@@ -200,12 +262,6 @@ impl Store {
     pub fn first_change(&self, log: &str, time: u64) -> Result<Option<u64>> {
         let t: Option<i64> = self.db.query_row(&format!("select min(time) from entries where log = ? and time > ? and {NOT_BACKUPS}"), params![log, time as i64], |r| r.get(0))?;
         Ok(t.map(|t| t as u64))
-    }
-
-    pub fn max_time(&self) -> Result<u64> {
-        let t: Option<i64> = self.db.query_row("select max(time) from entries", [], |r| r.get(0))?;
-        let h: Option<i64> = self.db.query_row("select max(time) from heads", [], |r| r.get(0))?;
-        Ok(t.max(h).unwrap_or(0) as u64)
     }
 
     pub fn count(&self) -> Result<u64> {

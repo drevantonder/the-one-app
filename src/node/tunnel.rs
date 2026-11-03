@@ -27,7 +27,7 @@ impl Node {
     /// this device has left the install.
     pub(super) fn follow_tunnel(&self) {
         let wanted = self.with(|i| {
-            if i.r.members.device(&self.0.id).is_none() {
+            if i.r.members.compute(&self.0.id).is_none() {
                 return Ok(None);
             }
             let Some((_, global)) = i.views.get("global") else { return Ok(None) };

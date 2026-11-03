@@ -1,6 +1,6 @@
 // The kernel's formats, for tests/contracts.rs to check against the Rust that reads them: POST { op, ... } → result.
 import { next, when } from "../schedules/worker.js";
-import { b64u, canonical, checkRequest, databaseKey, ed25519Public, epochOf, hex, idOf, inviteProof, joinCode, keyPair, open, openAppKey, openHandoff, openSealed, openUnder, passkeyKeys, seal, sealAppKey, sealHandoff, sealTo, sealUnder, signedRequest, tokenId } from "../shared/crypto.js";
+import { b64u, canonical, checkEntry, checkRequest, databaseKey, ed25519Public, epochOf, hex, idOf, inviteProof, joinCode, keyPair, open, openAppKey, openHandoff, openSealed, openUnder, passkeyKeys, seal, sealAppKey, sealHandoff, sealTo, sealUnder, signEntry, signedRequest, tokenId } from "../shared/crypto.js";
 
 const ops = {
   async next({ spec, now }) {
@@ -45,6 +45,14 @@ const ops = {
       proof: await inviteProof(b64u.decode(secret), hex.decode(pair.key)),
       passkey: { sign: hex.encode(await ed25519Public(pk.sign)), seal: b64u.encode(pk.seal) },
     };
+  },
+  /// An entry signed with `seed`, and one Rust signed, checked: → the one signed, as POST /v1/entries takes it.
+  async entries({ seed, fields, body, entry }) {
+    const signed = await signEntry(b64u.decode(seed), await ed25519Public(b64u.decode(seed)), fields, body);
+    const checked = await checkEntry({ header: b64u.decode(entry.header), signature: b64u.decode(entry.signature), body: b64u.decode(entry.body) }).then((e) => ({ hash: e.hash, user: e.user, kind: e.content.kind }), (err) => ({ error: String(err) }));
+    const tampered = await checkEntry({ header: b64u.decode(entry.header), signature: b64u.decode(entry.signature), body: new TextEncoder().encode("{}") }).then(() => "checked", (err) => String(err));
+    const b = (v) => b64u.encode(v);
+    return { signed: { header: b(signed.header), signature: b(signed.signature), body: b(signed.body) }, hash: signed.hash, checked, tampered };
   },
   async openUnder({ secret, sealed }) {
     return { plain: b64u.encode(await openUnder(secret, b64u.decode(sealed))) };

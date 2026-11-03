@@ -455,26 +455,17 @@ pub fn restore(place: &Place, install: &str, scope: &str, keys: &[[u8; 32]]) -> 
     Ok(Restored { snapshot, entries, blobs })
 }
 
-/// Puts restored entries in a store, each log in order, so every chain is checked as sync checks it.
+/// Puts restored entries in a store as sync does, each once everything it follows is there, so every chain is checked.
 pub fn import(store: &crate::store::Store, entries: &[Entry]) -> Result<usize> {
-    let mut sorted: Vec<&Entry> = entries.iter().collect();
-    sorted.sort_by_key(|e| (e.author(), e.log().to_string(), e.seq()));
-    let mut added = 0;
-    for e in sorted {
-        if store.insert(e).with_context(|| format!("entry {} of {}", e.id(), e.log()))? {
-            added += 1;
-        }
-    }
-    Ok(added)
+    Ok(store.take(entries.to_vec())?.len())
 }
 
 /// Restores every scope `keys` opens from a place into a throwaway store, checking every signature, chain and blob,
 /// then says what came back: each scope's entries and blobs, and by name the people, apps and Vault items; and how
 /// much the install's backup takes there.
-pub fn check(place: &Place, install: &str, keys: &BTreeMap<String, Vec<[u8; 32]>>, root: Option<p2panda_core::Hash>) -> Result<serde_json::Value> {
+pub fn check(place: &Place, install: &str, keys: &BTreeMap<String, Vec<[u8; 32]>>, root: Option<crate::entry::Hash>) -> Result<serde_json::Value> {
     let store = crate::store::Store::memory()?;
     let mut scopes = Vec::new();
-    let mut all = Vec::new();
     for (scope, keys) in keys {
         if snapshots(place, install, scope)?.is_empty() {
             continue;
@@ -482,10 +473,9 @@ pub fn check(place: &Place, install: &str, keys: &BTreeMap<String, Vec<[u8; 32]>
         let r = restore(place, install, scope, keys)?;
         let added = import(&store, &r.entries)?;
         scopes.push(serde_json::json!({ "scope": scope, "time": r.snapshot.time, "entries": added, "blobs": r.blobs.len(), "databases": r.snapshot.databases.len() }));
-        all.extend(r.entries);
     }
     ensure!(!scopes.is_empty(), "nothing backed up there yet");
-    all.sort_by_key(|e| e.order());
+    let all = store.ordered()?;
     let root = root.or_else(|| all.iter().find(|e| e.content.app == crate::members::APP && e.content.kind == "genesis").map(|e| e.hash()));
     let member_entries: Vec<Entry> = all.iter().filter(|e| crate::members::is_member_entry(e)).cloned().collect();
     let m = crate::members::Members::replay(root, &member_entries);
@@ -510,7 +500,7 @@ pub fn check(place: &Place, install: &str, keys: &BTreeMap<String, Vec<[u8; 32]>
 mod tests {
     use super::*;
     use crate::entry::{Content, Ext};
-    use p2panda_core::SigningKey;
+    use ed25519_dalek::SigningKey;
     use serde_json::json;
 
     fn entries(key: &SigningKey, log: &str, n: u32, blob: Option<&str>) -> Vec<Entry> {
@@ -520,7 +510,7 @@ mod tests {
             if let Some(b) = blob {
                 content.blobs.push(b.to_string());
             }
-            let ext = Ext { log: log.into(), time: 1000 + i as u64, user: "0123456789abcdef".into(), by: None };
+            let ext = Ext { log: log.into(), time: 1000 + i as u64, user: "0123456789abcdef".into(), epoch: 0, previous: Vec::new() };
             out.push(Entry::create(key, ext, out.last().map(|e| e.head()), content));
         }
         out
@@ -531,8 +521,8 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("backups-prune-{}", hex(&rand::random())));
         let place = Place::Folder(dir.clone());
         let install = "0123456789abcdef";
-        let recovery = SigningKey::generate();
-        let device = SigningKey::generate();
+        let recovery = SigningKey::from_bytes(&rand::random());
+        let device = SigningKey::from_bytes(&rand::random());
         let key: [u8; 32] = rand::random();
         let blob = |b: &[u8]| (blake3::hash(b).to_hex().to_string(), b.to_vec());
         let (release1, release2, repo) = (blob(b"release 1"), blob(b"release 2"), blob(b"a repo's pack"));
@@ -609,7 +599,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("backups-copy-{}", hex(&rand::random())));
         let (place, bucket) = (Place::Folder(dir.join("place")), Place::Folder(dir.join("bucket")));
         let install = "0123456789abcdef";
-        let (recovery, device) = (SigningKey::generate(), SigningKey::generate());
+        let (recovery, device) = (SigningKey::from_bytes(&rand::random()), SigningKey::from_bytes(&rand::random()));
         let key: [u8; 32] = rand::random();
         let all = entries(&device, "global", 2, None);
         let prefix = "global/board/main";

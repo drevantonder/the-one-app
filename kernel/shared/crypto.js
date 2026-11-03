@@ -194,6 +194,31 @@ export async function checkRequest(domain, request, now = Date.now()) {
   return { by: fields.by, fields };
 }
 
+/// An entry (src/entry.rs), signed by an endpoint (`key`, its public half `by`): `fields` `{ log, seq, backlink,
+/// previous, time, user, epoch }` (hashes hex, `backlink` null for a log's first) and `body`, its content's JSON.
+/// → `{ header, signature, body }`, each bytes, as `POST /v1/entries` takes them (base64url), and its `hash` (hex).
+export async function signEntry(key, by, fields, body) {
+  body = bytes(body);
+  const { log, seq, backlink = null, previous = [], time, user, epoch } = fields;
+  const header = { v: 1, author: hex.encode(by), log, seq, backlink, previous: [...new Set(previous)].sort(), time, user, epoch, body: hex.encode(await sha256(body)), size: body.length };
+  const raw = canonical(header);
+  return { header: raw, signature: await sign(key, "one/entry", header), body, hash: hex.encode(await sha256(raw)) };
+}
+
+/// Checks an entry as Rust does (`Entry::decode`): → its header's fields, `hash` and `content`, or throws.
+export async function checkEntry({ header, signature, body }) {
+  header = bytes(header);
+  body = bytes(body);
+  const h = JSON.parse(new TextDecoder().decode(header));
+  if (hex.encode(canonical(h)) !== hex.encode(header)) throw new Error("its header isn't canonical JSON");
+  if (h.v !== 1) throw new Error("not an entry this device reads");
+  if (!Array.isArray(h.previous) || h.previous.some((p, i) => i > 0 && !(h.previous[i - 1] < p))) throw new Error("previous isn't in order");
+  if ((h.seq === 0) !== (h.backlink === null)) throw new Error("only an entry that starts its log has no backlink");
+  if (h.size !== body.length || h.body !== hex.encode(await sha256(body))) throw new Error("its body isn't the one it names");
+  if (!(await verify(hex.decode(h.author), "one/entry", h, signature))) throw new Error("its signature is wrong");
+  return { ...h, hash: hex.encode(await sha256(header)), content: JSON.parse(new TextDecoder().decode(body)) };
+}
+
 /// A scope's folder in the bucket: `user:<id>` is written `user-<id>`.
 const folder = (scope) => scope.replace(":", "-");
 

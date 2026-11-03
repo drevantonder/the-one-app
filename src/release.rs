@@ -127,7 +127,7 @@ pub struct Running {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use p2panda_core::SigningKey;
+    use ed25519_dalek::SigningKey;
     use ssh_key::private::Ed25519Keypair;
 
     fn key(seed: u8) -> PrivateKey {
@@ -144,10 +144,10 @@ mod tests {
 
     /// One device publishing each release in turn.
     fn entries(releases: &[Release]) -> Vec<Entry> {
-        let device = SigningKey::from([1; 32]);
+        let device = SigningKey::from_bytes(&[1; 32]);
         let mut out: Vec<Entry> = Vec::new();
         for (i, r) in releases.iter().enumerate() {
-            let ext = crate::entry::Ext { log: "global".into(), time: i as u64 + 1, user: "a000000000000001".into(), by: None };
+            let ext = crate::entry::Ext { log: "global".into(), time: i as u64 + 1, user: "a000000000000001".into(), epoch: 0, previous: Vec::new() };
             let prev = out.last().map(Entry::head);
             out.push(Entry::create(&device, ext, prev, content(r)));
         }

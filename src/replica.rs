@@ -1,15 +1,12 @@
 //! What one device holds and knows: the entries of each scope it holds, as the install's bucket has them, and the
 //! members `global`'s add up to. No clock or I/O: `node.rs` reads and writes the bucket.
 
-use anyhow::{Result, ensure};
-use p2panda_core::{Hash, SigningKey};
+use anyhow::{Context, Result, ensure};
+use ed25519_dalek::SigningKey;
 
-use crate::entry::{Content, Entry, Ext, Key, Scope};
+use crate::entry::{Content, Entry, Ext, Hash, Key, Scope};
 use crate::members::{self, Members};
 use crate::store::Store;
-
-/// Entries timed further ahead than this are refused: a wrong clock mustn't drag everyone's forward.
-pub const FUTURE: u64 = 3_600_000;
 
 /// What one device holds and knows: its store, and the members its `global` adds up to.
 pub struct Replica {
@@ -42,55 +39,80 @@ pub struct Handled {
 
 impl Replica {
     pub fn new(key: SigningKey, store: Store, root: Option<Hash>) -> Result<Replica> {
-        let id = *key.verifying_key().as_bytes();
-        let mut member_entries: Vec<Entry> = store.scope("global")?.into_iter().filter(members::is_member_entry).collect();
-        member_entries.sort_by_key(Entry::order);
+        let id = key.verifying_key().to_bytes();
+        let member_entries: Vec<Entry> = store.scope("global")?.into_iter().filter(members::is_member_entry).collect();
         let members = Members::replay(root, &member_entries);
         Ok(Replica { key, id, store, root, members, member_entries, stale: false })
     }
 
-    /// Whether this device holds `scope`. Until it sees itself admitted it holds only `global`.
+    /// Whether this device holds `scope`: `global`, and each scope whose calls it runs (`Members::runs_for`). Until it
+    /// sees itself listed it holds only `global`.
     pub fn holds(&self, scope: &Scope) -> bool {
-        *scope == Scope::Global || self.members.holds(&self.id, scope)
+        *scope == Scope::Global || self.members.runs_for(&self.id, scope)
     }
 
     fn holds_log(&self, log: &str) -> bool {
         Scope::parse(log).is_ok_and(|s| self.holds(&s))
     }
 
-    /// Makes an entry for this device's log of `scope`, timed after everything it has seen, to write to the bucket.
-    pub fn make(&self, scope: &Scope, user: &str, by: Option<Key>, content: Content, now: u64) -> Result<Entry> {
+    /// Makes an entry for this device's log of `scope`, after everything it holds there and in `global`, to write
+    /// to the bucket.
+    pub fn make(&self, scope: &Scope, user: &str, content: Content, now: u64) -> Result<Entry> {
         ensure!(self.holds(scope), "this device doesn't hold {scope}");
         let log = scope.to_string();
         let head = self.store.own_head(&self.id, &log)?;
         let held = self.store.last(&self.id, &log)?.map(|e| e.seq());
         // A device that holds a scope again writes there only once it has its own log back, so no seq is written twice.
         ensure!(head.map(|h| h.0) == held, "this device is still getting its own entries in {scope} back");
-        let time = now.max(self.store.max_time()? + 1);
-        Ok(Entry::create(&self.key, Ext { log, time, user: user.into(), by }, head, content))
+        let mut previous = self.store.heads(&log, Some(&self.id))?;
+        if *scope != Scope::Global {
+            previous.extend(self.store.heads("global", None)?);
+        }
+        let ext = Ext { log, time: now, user: user.into(), epoch: self.members.epoch(scope), previous };
+        Ok(Entry::create(&self.key, ext, head, content))
     }
 
     /// Keeps an entry this device made, once the bucket has it.
     pub fn add_own(&mut self, entry: &Entry) -> Result<Handled> {
         let head = self.store.own_head(&self.id, entry.log())?;
-        self.store.insert_own(entry, head)?;
+        let entry = self.store.insert_own(entry, head)?;
         let mut handled = Handled::default();
-        if members::is_member_entry(entry) {
+        if members::is_member_entry(&entry) {
             let before = self.members.clone();
             self.add_member_entry(entry.clone());
             self.refresh(&before, &mut handled)?;
         }
-        handled.new.push(entry.clone());
+        handled.new.push(entry);
         Ok(handled)
     }
 
-    /// Adds one of `global`'s node entries: replayed onto the members if it's the newest, else replayed with all.
-    /// Whether one of `global`'s node entries would count if this device wrote it now.
-    pub fn would_count(&self, user: &str, by: Option<Key>, content: Content, now: u64) -> Result<bool> {
-        let head = self.store.own_head(&self.id, "global")?;
-        let time = now.max(self.store.max_time()? + 1);
-        let entry = Entry::create(&self.key, Ext { log: "global".into(), time, user: user.into(), by }, head, content);
-        Ok(self.members.clone().step(&entry))
+    /// Whether an entry would count, written now: why not, if it wouldn't. A member entry only when one of its
+    /// user's own devices signs it.
+    pub fn check(&self, entry: &Entry) -> Result<()> {
+        let signer = self.members.machine(&entry.author()).map_or("that device".to_string(), |m| m.name.clone());
+        if members::is_member_entry(entry) {
+            ensure!(self.members.client(&entry.author()).is_some_and(|c| c.user == entry.user()), "{signer} isn't one of your devices, so it can't sign that for you: sign it on one of yours");
+            ensure!(self.members.clone().step(entry), "that changes nothing: you may not {} that", entry.content.kind);
+        } else if entry.content.kind != "genesis" {
+            ensure!(self.members.counts(entry), "{signer} can't write in {} for you", entry.log());
+        }
+        Ok(())
+    }
+
+    /// Whether an entry another device signed can be added now: it's new, this device holds everything it follows, and
+    /// it would count.
+    pub fn check_signed(&self, entry: &Entry) -> Result<()> {
+        ensure!(self.holds(&entry.scope()), "this device doesn't hold {}", entry.log());
+        ensure!(!self.store.has(&entry.author(), entry.log(), entry.seq())?, "entry {} is here already", entry.id());
+        let prev = match entry.seq() {
+            0 => None,
+            n => Some(self.store.get(&entry.author(), entry.log(), n - 1)?.context("it doesn't follow its device's last entry here")?.head()),
+        };
+        entry.follows(prev)?;
+        for hash in entry.previous() {
+            ensure!(self.store.has_hash(hash)?, "it follows an entry this device doesn't have");
+        }
+        self.check(entry)
     }
 
     fn add_member_entry(&mut self, entry: Entry) {
@@ -118,7 +140,7 @@ impl Replica {
             }
         }
         let (me, m) = (self.id, &self.members);
-        handled.gained |= m.scopes().iter().any(|s| m.holds(&me, s) && !before.holds(&me, s));
+        handled.gained |= m.scopes().iter().any(|s| m.runs_for(&me, s) && !before.runs_for(&me, s));
         let after = m.roles();
         for ((user, scope), (_, invited)) in before.roles() {
             if !invited && !after.get(&(user.clone(), scope)).is_some_and(|(_, invited)| !invited) && !handled.lost.contains(&user) {
@@ -128,41 +150,33 @@ impl Replica {
         Ok(())
     }
 
-    /// Takes entries as the bucket gives them, at time `now`: each checked (signature, body, chain), in scopes this
-    /// device holds; `global`'s first, since they decide which other scopes it holds.
-    pub fn receive(&mut self, mut entries: Vec<Entry>, now: u64) -> Result<Handled> {
+    /// Takes entries as the bucket gives them: each checked (signature, body, chain) and kept once everything it
+    /// follows is here, in scopes this device holds; `global`'s first, since they decide which other scopes it holds.
+    pub fn receive(&mut self, mut entries: Vec<Entry>) -> Result<Handled> {
         let mut handled = Handled::default();
-        entries.retain(|e| e.time() <= now.saturating_add(FUTURE));
-        entries.sort_by_key(|e| e.log() != "global");
-        let mut before = None;
-        for entry in entries {
-            if entry.log() != "global" && !handled.members {
-                // Replay the members once, after the batch's `global` entries and before the rest.
-                if let Some(before) = &before {
-                    self.refresh(before, &mut handled)?;
-                }
-            }
-            if !self.holds_log(entry.log()) {
-                continue;
-            }
-            match self.store.insert(&entry) {
-                Ok(true) => {
-                    if members::is_member_entry(&entry) {
-                        before.get_or_insert_with(|| self.members.clone());
-                        self.add_member_entry(entry.clone());
-                    }
-                    handled.new.push(entry);
-                }
-                Ok(false) => {}
-                Err(err) => tracing::debug!("dropped entry: {err:#}"),
-            }
-        }
-        if let Some(before) = &before {
-            if !handled.members {
-                self.refresh(before, &mut handled)?;
-            }
-            handled.new.retain(|e| self.holds_log(e.log()));
-        }
+        entries.retain(|e| self.holds_log(e.log()));
+        let (global, rest): (Vec<Entry>, Vec<Entry>) = entries.into_iter().partition(|e| e.log() == "global");
+        self.took(global, &mut handled)?;
+        let rest = rest.into_iter().filter(|e| self.holds_log(e.log())).collect();
+        self.took(rest, &mut handled)?;
+        handled.new.retain(|e| self.holds_log(e.log()));
         Ok(handled)
+    }
+
+    /// Keeps entries, with any that waited for them, and follows the members if they changed.
+    fn took(&mut self, entries: Vec<Entry>, handled: &mut Handled) -> Result<()> {
+        let before = self.members.clone();
+        let mut changed = false;
+        for entry in self.store.take(entries)? {
+            if members::is_member_entry(&entry) {
+                self.add_member_entry(entry.clone());
+                changed = true;
+            }
+            handled.new.push(entry);
+        }
+        if changed {
+            self.refresh(&before, handled)?;
+        }
+        Ok(())
     }
 }

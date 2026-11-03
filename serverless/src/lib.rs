@@ -10,9 +10,8 @@ use js_sys::{Function, Promise, Reflect, Uint8Array};
 use one::bucket::{Bucket, Failed, Object, Trouble};
 use one::call::Append;
 use one::db::Db;
-use one::entry::{Entry, Scope};
+use one::entry::{Entry, Hash, Scope, causal};
 use one::members::{self, Members, ScopeState};
-use p2panda_core::Hash;
 use serde_json::{Value, json};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
@@ -194,8 +193,8 @@ pub fn following(name: &str, n: u32) -> String {
 
 // Who can do what: each scope's entries (`src/log.rs`), and what they add up to (`src/members.rs`).
 
-/// A scope's entries this isolate read: the key they were read with, the last step read, and the entries in replay
-/// order.
+/// A scope's entries this isolate read: the key they were read with, the last step read, and the entries (in replay
+/// order for `global`; another scope's are put in order with `global`'s when replayed, as they follow them).
 struct Log {
     key: [u8; 32],
     at: u64,
@@ -226,8 +225,8 @@ pub async fn read_log(bucket: JsValue, scope: String, key: String) -> Result<(),
     let prefix = one::log::prefix(&scope);
     let from = LOGS.with(|l| l.borrow().get(&scope).filter(|l| l.key == key).map(|l| l.at));
     let Some(from) = from else {
-        let (at, mut entries) = one::log::open(&bucket, &[(1, key)].into(), &prefix, &scope).await.map_err(thrown)?;
-        entries.sort_by_key(Entry::order);
+        let (at, entries) = one::log::open(&bucket, &[(1, key)].into(), &prefix, &scope).await.map_err(thrown)?;
+        let entries = if scope == "global" { causal(entries, &HashMap::new()) } else { entries };
         LOGS.with(|l| l.borrow_mut().insert(scope, Log { key, at, entries }));
         return Ok(());
     };
@@ -237,7 +236,9 @@ pub async fn read_log(bucket: JsValue, scope: String, key: String) -> Result<(),
             let fresh: Vec<Entry> = new.into_iter().filter(|e| !log.entries.iter().any(|k| k.author() == e.author() && k.seq() == e.seq())).collect();
             if !fresh.is_empty() {
                 log.entries.extend(fresh);
-                log.entries.sort_by_key(Entry::order);
+                if scope == "global" {
+                    log.entries = causal(std::mem::take(&mut log.entries), &HashMap::new());
+                }
             }
             log.at = log.at.max(at);
         }
@@ -265,7 +266,11 @@ fn replayed<R>(scopes: &[String], f: impl FnOnce(&Members, &BTreeMap<String, Sco
                 let Some(log) = logs.get(scope) else { continue };
                 let at = (global.at, log.at);
                 if r.get(scope).is_none_or(|x| x.at != at) {
-                    let (members, state) = members::replay(root, &member_entries, &log.entries, |_, _, _| {});
+                    let entries = match scope.as_str() {
+                        "global" => log.entries.clone(),
+                        _ => causal(log.entries.clone(), &global.entries.iter().map(|e| (e.hash(), e.depth)).collect()),
+                    };
+                    let (members, state) = members::replay(root, &member_entries, &entries, |_, _, _| {});
                     r.insert(scope.clone(), Replayed { at, members, state });
                 }
                 let x = &r[scope];

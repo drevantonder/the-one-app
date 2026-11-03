@@ -935,12 +935,13 @@ fn a_sign_in_uses_settings_as_its_person_and_only_with_their_rights() {
         tokio::spawn(one::api::serve(listener, app));
         (node, api)
     });
-    // Andre made the install; Sam is a member. The device is the install's, so both use it; it takes sign-ins made
-    // at the install's address.
+    // Andre made the install, on this device, his; Sam is a member, with a phone of his own. The device takes sign-ins
+    // made at the install's address.
     let (andre, sam) = (node.user().unwrap(), one::entry::new_id());
+    let phone = ed25519_dalek::SigningKey::from_bytes(&rand::random());
+    let sams_phone = one::keys::Endpoint::of(&phone);
     rt.block_on(async {
-        node.member("admit", json!({ "key": one::entry::hex(&rand::random()), "user": sam, "as": "client", "name": "Sam's phone", "user_name": "Sam", "role": "member" })).await.unwrap();
-        node.member("acl", json!({ "device": one::entry::hex(&node.id()), "owners": ["install"], "users": ["install"] })).await.unwrap();
+        node.member("device", json!({ "key": one::entry::hex(&sams_phone.key), "seal": one::entry::hex(&sams_phone.seal), "user": sam, "roles": ["client"], "name": "Sam's phone", "user_name": "Sam", "role": "member" })).await.unwrap();
         node.member("setting", json!({ "name": "address", "value": v.auth })).await.unwrap();
         node.member("setting", json!({ "name": "kernel_vault", "value": v.url })).await.unwrap();
     });
@@ -951,6 +952,16 @@ fn a_sign_in_uses_settings_as_its_person_and_only_with_their_rights() {
     let state = |token: &str| ask(token, "GET", "/v1/state", Value::Null).1;
     let items = |token: &str| state(token)["settings_items"].as_array().unwrap().iter().map(|i| i["name"].as_str().unwrap().to_string()).collect::<Vec<_>>();
     let refused = |(status, body): (u16, Value)| status == 400 && body["error"].as_str().is_some_and(|e| !e.is_empty());
+    // What Sam's phone signs, after what the device holds, and the device writes (`POST /v1/entries`).
+    let signs = |kind: &str, data: Value| {
+        let (_, heads) = ask(&sams, "GET", "/v1/entries?scope=global", Value::Null);
+        let own = &heads["logs"][one::entry::hex(&sams_phone.key)];
+        let backlink = own["hash"].as_str().map(|h| (own["seq"].as_u64().unwrap() as u32, one::entry::Hash::from_hex(h).unwrap()));
+        let previous = heads["previous"].as_array().unwrap().iter().map(|h| one::entry::Hash::from_hex(h.as_str().unwrap()).unwrap()).filter(|h| backlink.is_none_or(|b| b.1 != *h)).collect();
+        let ext = one::entry::Ext { log: "global".into(), time: 0, user: sam.clone(), epoch: heads["epoch"].as_u64().unwrap() as u32, previous };
+        let entry = one::entry::Entry::create(&phone, ext, backlink, one::members::node(kind, data));
+        ask(&sams, "POST", "/v1/entries", json!([entry.to_json()]))
+    };
 
     // Settings shows each their own: Passkeys first, at the install's address (no try install has it, so it's seen only
     // here); only admins see Users, General and Backups.
@@ -973,17 +984,23 @@ fn a_sign_in_uses_settings_as_its_person_and_only_with_their_rights() {
     assert_eq!(ask(&andres, "POST", "/v1/settings", setting).0, 200);
     assert_eq!(state(&andres)["install"]["settings"]["push"], "push");
 
-    // A group Sam makes is his, not this device's person's; its members change only as its admins and invitees say.
-    let (status, made) = ask(&sams, "POST", "/v1/group", json!({ "name": "Sam's" }));
-    assert_eq!(status, 200, "{made}");
-    let group = made["group"].as_str().unwrap().to_string();
+    // What only a person's own device signs, this device, Andre's, can't sign for Sam: his phone does. A group he makes
+    // is his; its members change only as its admins and invitees say.
+    let (status, said) = ask(&sams, "POST", "/v1/group", json!({ "name": "Sam's" }));
+    assert!(status == 400 && said["error"].as_str().unwrap().contains("isn't one of your devices"), "{said}");
+    let group = one::entry::new_id();
+    assert_eq!(signs("group", json!({ "group": group, "name": "Sam's" })).0, 200);
     let members = || state(&sams)["install"]["groups"].as_array().unwrap().iter().find(|g| g["id"] == group.as_str()).unwrap()["members"].clone();
     assert_eq!(members(), json!([{ "user": sam, "role": "admin" }]));
-    assert!(refused(ask(&sams, "POST", "/v1/accept", json!({ "group": group }))), "nobody accepts an invite they weren't sent");
-    assert_eq!(ask(&sams, "POST", "/v1/invite", json!({ "group": group, "user": andre })).0, 200);
+    assert!(refused(signs("accept", json!({ "group": group }))), "nobody accepts an invite they weren't sent");
+    assert!(refused(ask(&andres, "POST", "/v1/accept", json!({ "group": group }))), "Andre neither");
+    assert!(refused(signs("setting", json!({ "name": "made_here", "value": "Sam's" }))), "nor does Sam's phone sign what only admins may");
+    assert_eq!(signs("invite", json!({ "group": group, "user": andre, "role": "member" })).0, 200);
     assert!(state(&andres)["settings_items"].as_array().unwrap().iter().any(|i| i["name"] == "requests" && i["badge"] == 1), "his invite waits in Requests");
     assert_eq!(ask(&andres, "POST", "/v1/accept", json!({ "group": group })).0, 200);
     assert_eq!(members().as_array().unwrap().len(), 2);
+    assert_eq!(signs("member", json!({ "group": group, "user": andre, "role": null })).0, 200);
+    assert_eq!(members().as_array().unwrap().len(), 1);
 
     // What only this machine's own programs do, no sign-in from elsewhere (through the gateway) does: renaming the
     // device, say.
@@ -1018,13 +1035,9 @@ fn a_sign_in_uses_settings_as_its_person_and_only_with_their_rights() {
     let key = || B64U.encode(&rand::random::<[u8; 32]>());
     v.internal("scope-key", json!({ "scope": "global", "key": key(), "people": [andre, sam], "admins": [andre] }));
     assert!(opens(&sams, "global"));
-    assert_eq!(ask(&sams, "POST", "/v1/member", json!({ "group": group, "user": andre, "role": null })).0, 200);
-    assert!(opens(&andres, "global"));
-    // Sam invites him back as an admin.
-    assert_eq!(ask(&sams, "POST", "/v1/invite", json!({ "group": group, "user": andre, "role": "admin" })).0, 200);
-    assert_eq!(ask(&andres, "POST", "/v1/accept", json!({ "group": group })).0, 200);
     assert_eq!(ask(&andres, "POST", "/v1/remove", json!({ "user": sam })).0, 200);
     assert!(!opens(&sams, "global") && opens(&andres, "global"));
+    assert!(refused(ask(&sams, "GET", "/v1/entries?scope=global", Value::Null)), "and a removed person's phone signs nothing here");
     // An admin who makes himself a member is one at the vault no more, at once.
     assert_eq!(ask(&andres, "POST", "/v1/role", json!({ "user": andre, "role": "member" })).0, 200);
     let err = vault.invite(&andres, "Kim").err().expect("he's no admin there").to_string();

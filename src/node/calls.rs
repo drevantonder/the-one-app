@@ -95,7 +95,7 @@ impl Node {
         self.with(|i| {
             let m = &i.r.members;
             let mut devices: Vec<Key> = if req.sidecar.is_none() {
-                m.devices().map(|s| s.key).filter(|s| m.serves(s, &me.user)).collect()
+                m.computes().map(|s| s.key).filter(|s| m.serves(s, &me.user)).collect()
             } else {
                 let mut s: Vec<Key> = i.peers.iter().filter(|(k, _)| i.online(k)).filter(|(_, s)| s.sidecars.iter().any(|d| d.0 == req.app && d.1.contains(&me.user))).map(|(k, _)| *k).collect();
                 if here && (me.user == i.user || (self.0.sidecars.serves_everyone(&req.app) && i.r.members.serves(&self.0.id, &me.user))) {
@@ -400,9 +400,8 @@ impl Node {
                 writes.extend(self.install_entries(me, &app, &scope, installed).await?);
             }
         }
-        let by = (me.key != self.0.id).then_some(me.key);
         for (scope, content) in writes {
-            self.append_as(&scope, &me.user, by, content).await?;
+            self.append_as(&scope, &me.user, content).await?;
         }
         if schedules_changed && self.schedules_service().is_some() && me.token.is_some() {
             self.sync_schedules_later(me);
@@ -471,8 +470,7 @@ impl Node {
             }
         }
         if !answer.blobs.is_empty() {
-            let by = (me.key != self.0.id).then_some(me.key);
-            self.append_as(&scope, &user, by, Content { blobs: answer.blobs, ..members::node("keep", json!({})) }).await?;
+            self.append_as(&scope, &user, Content { blobs: answer.blobs, ..members::node("keep", json!({})) }).await?;
         }
         Ok(answer.ok)
     }
@@ -481,7 +479,7 @@ impl Node {
     pub(super) async fn node_op(&self, op: &str, input: &Value, me: &Caller) -> Result<Value> {
         match op {
             // Another device's hints, which only a device of the install gives.
-            "hello" | "changed" if self.with(|i| Ok(i.r.members.device(&me.key).is_some()))? => {
+            "hello" | "changed" if self.with(|i| Ok(i.r.members.compute(&me.key).is_some()))? => {
                 if op == "hello" {
                     let sidecars: Vec<Sidecar> = serde_json::from_value(input["sidecars"].clone()).unwrap_or_default();
                     let load = serde_json::from_value(input["load"].clone()).ok();
@@ -732,21 +730,21 @@ impl Node {
             Ok(req) => req,
             Err(err) => return Reply::Error(format!("{err:#}")),
         };
-        // Only a device says an app made a call (whose items fill it in), and how deep it is.
-        if !self.with(|i| Ok(i.r.members.trusts(&me.user, &remote))).unwrap_or(false) {
+        // Only a node that runs the user's calls says an app made a call (whose items fill it in), and how deep it is.
+        if !self.with(|i| Ok(i.r.members.serves(&remote, &me.user))).unwrap_or(false) {
             (req.from, req.depth) = (None, 0);
         }
         self.run(&req, &me).await
     }
 
-    /// A call is taken only as a user from one of their clients or a device they trust.
+    /// A call is taken only as a user from one of their devices, or a node that runs their calls, passed on by either.
     pub(super) fn check_caller(&self, remote: Key, request: &Value) -> Result<Caller> {
         let key = unhex(request["me"]["key"].as_str().context("who's asking?")?)?;
         let user = request["me"]["user"].as_str().context("who's asking?")?.to_string();
         self.with(|i| {
             let m = &i.r.members;
-            let mine = |k: &Key| m.client(k).is_some_and(|c| c.user == user) || m.trusts(&user, k);
-            ensure!(mine(&key) && (remote == key || m.trusts(&user, &remote)), "{} may not call as that user", short(&remote));
+            let mine = |k: &Key| m.client(k).is_some_and(|c| c.user == user) || m.serves(k, &user);
+            ensure!(mine(&key) && (remote == key || m.serves(&remote, &user)), "{} may not call as that user", short(&remote));
             Ok(())
         })?;
         let agent = request["me"]["agent"].as_str().map(str::to_string);

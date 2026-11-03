@@ -70,7 +70,7 @@ fn problems(i: &Install, now: u64) -> Result<Vec<Problem>> {
         for log in i.r.store.logs()? {
             let Ok(scope) = Scope::parse(&log) else { continue };
             let backer = match &p.place {
-                Ok(Place::Folder(_)) => p.device.filter(|k| m.holds(k, &scope)),
+                Ok(Place::Folder(_)) => p.device.filter(|k| m.runs_for(k, &scope)),
                 _ => line(m, &scope, &p.id).first().copied(),
             };
             let Some(backer) = backer.filter(|_| i.r.holds(&scope)) else { continue };
@@ -127,26 +127,21 @@ fn places(state: &ScopeState) -> Vec<PlaceItem> {
         .collect()
 }
 
-/// The devices that back up a scope to an S3 place, in the order they take it: privileged devices first, then the
-/// scope's user's own, then the rest, each group in an order the place and scope pick. Every device works it out alike.
+/// The devices that back up a scope to an S3 place, in the order they take it: those that run its calls, in an order
+/// the place and scope pick. Every device works it out alike.
 fn line(m: &Members, scope: &Scope, place: &str) -> Vec<Key> {
-    let user = match scope {
-        Scope::User(u) => Some(Principal::User(u.clone())),
-        _ => None,
-    };
-    let mut devices: Vec<(bool, bool, [u8; 32], Key)> = m
-        .devices()
-        .filter(|s| m.holds(&s.key, scope))
+    let mut devices: Vec<([u8; 32], Key)> = m
+        .computes()
+        .filter(|s| m.runs_for(&s.key, scope))
         .map(|s| {
-            let own = user.as_ref().is_some_and(|u| m.owners(&s.key).contains(u));
             let mut h = blake3::Hasher::new();
             h.update(&s.key);
             h.update(format!("{scope}/backups/{place}").as_bytes());
-            (!m.privileged(&s.key), !own, *h.finalize().as_bytes(), s.key)
+            (*h.finalize().as_bytes(), s.key)
         })
         .collect();
     devices.sort();
-    devices.into_iter().map(|s| s.3).collect()
+    devices.into_iter().map(|s| s.1).collect()
 }
 
 /// One scope to back up to one place in a run.

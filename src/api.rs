@@ -81,8 +81,7 @@ pub fn routes() -> Router<Node> {
         .route("/v1/remove", post(remove))
         .route("/v1/role", post(role))
         .route("/v1/settings", post(settings))
-        .route("/v1/acl", post(acl))
-        .route("/v1/trust", post(trust))
+        .route("/v1/entries", get(heads).post(entries))
         .route("/v1/use", post(use_))
         .route("/v1/group", post(group))
         .route("/v1/invite", post(invite))
@@ -159,7 +158,7 @@ pub const SIGNED_IN: &[&str] = &[
     "/v1/remove",
     "/v1/role",
     "/v1/settings",
-    "/v1/trust",
+    "/v1/entries",
     "/v1/use",
     "/v1/group",
     "/v1/invite",
@@ -590,33 +589,21 @@ async fn settings(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> 
     done()
 }
 
-/// `{ device, owners, users }`: owners and users are `user:<id>`, `group:<id>`, `install`, or a user's or group's name.
-async fn acl(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
-    let device = node.find_device(text(&body, "device")?)?;
-    let principals = |key: &str| -> Result<Vec<String>, Error> {
-        body[key]
-            .as_array()
-            .ok_or_else(|| anyhow::anyhow!("give {key}"))?
-            .iter()
-            .map(|p| {
-                let p = p.as_str().unwrap_or("");
-                Ok(match crate::members::Principal::parse(p) {
-                    Ok(p) => p.to_string(),
-                    Err(_) => match node.find_user(p) {
-                        Ok(u) => format!("user:{u}"),
-                        Err(_) => format!("group:{}", node.find_group(p)?),
-                    },
-                })
-            })
-            .collect()
+/// `?scope=`: what a device signing an entry there needs: `{ epoch, previous, logs }` (`Node::entry_heads`).
+async fn heads(State(node): State<Node>, me: Me, axum::extract::Query(q): axum::extract::Query<std::collections::HashMap<String, String>>) -> Reply {
+    let scope = match q.get("scope").map(String::as_str) {
+        None | Some("user") => crate::entry::Scope::User(me.caller.user.clone()),
+        Some(s) => crate::entry::Scope::parse(s)?,
     };
-    node.member("acl", json!({ "device": hex(&device), "owners": principals("owners")?, "users": principals("users")? })).await?;
-    done()
+    Ok(Json(node.entry_heads(&me.caller, &scope).await?))
 }
 
-async fn trust(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
-    let device = node.find_device(text(&body, "device")?)?;
-    node.member_as(&me.caller, if body["trust"] == false { "untrust" } else { "trust" }, json!({ "device": hex(&device) })).await?;
+/// `[{ header, signature, body }]` (each base64url): entries the caller's own device signed, which this device checks
+/// count and writes (`src/entry.rs`).
+async fn entries(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
+    let list = body.as_array().ok_or_else(|| anyhow::anyhow!("give a list of entries"))?;
+    let entries = list.iter().map(crate::entry::Entry::from_json).collect::<anyhow::Result<Vec<_>>>()?;
+    node.put_signed(&me.caller, entries).await?;
     done()
 }
 

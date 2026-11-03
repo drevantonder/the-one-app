@@ -14,7 +14,7 @@ impl Node {
         let user = user.map(|u| self.find_user(u)).transpose()?;
         self.with(|i| {
             let m = &i.r.members;
-            ensure!(m.device(&self.0.id).is_some(), "this device isn't in the install yet");
+            ensure!(m.compute(&self.0.id).is_some(), "this device isn't in the install yet");
             ensure!(user.as_ref().is_none_or(|u| *u == asker.user) || m.is_admin(&asker.user), "only admins pair other people's machines");
             ensure!(m.serves(&self.0.id, &asker.user), "{} doesn't serve you", self.device_name());
             Ok(())
@@ -87,8 +87,12 @@ impl Node {
         let user = pairing.admits.clone().unwrap_or_else(|| pairing.user.clone());
         let (root, bucket) = self.with(|i| Ok((i.r.root.map(|r| r.to_hex()).context("no install")?, i.bucket.as_ref().map(|(_, f)| f.clone()))))?;
         let by = pairing.by.as_deref().map(unhex).transpose()?;
-        let admit = members::admit(&key, &user, &request.name, true, None);
-        self.member_as(&Caller { key: by.unwrap_or(self.0.id), user: pairing.user.clone(), agent: None, token: None }, "admit", admit.data).await.context("this device can no longer admit that machine")?;
+        let endpoint = crate::keys::Endpoint { key, seal: crate::kernel::twin_public(&key)? };
+        // A machine of the person's own is their device too; an admin lists another person's as compute, which that
+        // person makes their device from one of theirs.
+        let roles = if user == pairing.user { MACHINE } else { &[members::Kind::Compute][..] };
+        let listed = members::device(&endpoint, &user, &request.name, roles, None);
+        self.member_content(&Caller { key: by.unwrap_or(self.0.id), user: pairing.user.clone(), agent: None, token: None }, listed).await.context("this device can no longer admit that machine")?;
         self.tell_relay(json!({ "add": hex(&key) }));
         Ok(JoinReply { root, user, bucket })
     }

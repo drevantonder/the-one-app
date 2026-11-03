@@ -19,8 +19,8 @@
   .code span { font: 15px var(--mono); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: all; -webkit-user-select: all; }
 </style>
 <script>
-  // This person's devices, the shared ones they may use, and which hold their data: naming this device, the build it
-  // runs and signing out of it, trusting one, removing one, and pairing another with a code.
+  // This person's devices, the shared ones they may use, and which run their own data: naming this device, the build
+  // it runs and signing out of it, removing one, and pairing another with a code.
   let state, device;
   let error = "";
 
@@ -28,7 +28,7 @@
   const shown = (name) => (name.endsWith(".local") ? name.slice(0, -6) : name);
   const list = (names) => (names.length < 2 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`);
   const userName = (id) => state.install?.users.find((u) => u.id === id)?.name || "someone";
-  const groupOf = (id) => state.install?.groups.find((g) => g.id === id);
+  const holds = (s) => (s.runs_for || []).includes(`user:${me()}`);
   const icon = (name) => {
     const n = name.toLowerCase();
     if (n.includes("iphone") || n.includes("phone") || n.includes("android")) return "device-mobile";
@@ -37,16 +37,7 @@
     if (n.includes("imac") || n.includes("mac") || n.includes("windows") || n.includes("pc")) return "desktop";
     return "hard-drives";
   };
-  const holds = (s) => s.privileged || s.owners.includes(`user:${me()}`) || (s.trusted_by || []).includes(me());
-  // Whether they may choose to trust it: they may use it, but don't run it, and it isn't privileged.
-  const mayTrust = (s) => !s.privileged && !s.owners.includes(`user:${me()}`) &&
-    s.users.some((p) => p === `user:${me()}` || p === "install" || (p.startsWith("group:") && groupOf(p.slice(6))?.role));
-  const runBy = (s) => {
-    if (s.privileged) return "Keeps everyone’s data";
-    const owners = s.owners.filter((o) => o !== `user:${me()}`).map((o) =>
-      o === "install" ? "everyone" : o.startsWith("group:") ? groupOf(o.slice(6))?.name || "a group" : userName(o.slice(5)));
-    return owners.length ? `Run by ${list(owners)}` : "";
-  };
+  const runBy = (s) => (s.user === me() ? "" : `${userName(s.user)}’s`);
   const status = (on) => `<span class="status"><span class="dot${on ? " on" : ""}"></span>${on ? "Online" : "Offline"}</span>`;
   const subs = (...lines) => lines.filter(Boolean).map((l) => `<div class="sub">${one.esc(l)}</div>`).join("");
 
@@ -58,9 +49,7 @@
 
   const deviceRow = (s) => {
     const online = !!s.online;
-    const trailing = mayTrust(s)
-      ? `<input type="checkbox" class="switch" aria-label="Trust ${one.esc(shown(s.name))} to keep your data"${(s.trusted_by || []).includes(me()) ? " checked" : ""} data-trust="${one.esc(s.key)}">`
-      : status(online);
+    const trailing = status(online);
     return row({ key: s.key, name: s.name, online, lines: [s.me ? "This device" : runBy(s)], trailing, removable: s.user === me() && !s.me });
   };
   // Where things run first: every device, and Cloudflare, Use First, When Needed or Last Resort, cheaper kinds first
@@ -140,7 +129,6 @@
   document.addEventListener("change", (e) => {
     const t = e.target;
     if (t.id === "name") rename(t);
-    else if (t.dataset.trust) trust(t.dataset.trust, t);
     else if (t.dataset.place) place(t.dataset.place, t.value, t);
   });
   document.addEventListener("click", (e) => {
@@ -155,11 +143,6 @@
     const here = [...(state.install?.devices || []), ...(state.install?.clients || [])].find((m) => m.me);
     if (!name || name === here?.name) return void (input.value = here?.name || "");
     act(() => one.api("POST", "/v1/name", { name }));
-  }
-
-  function trust(device, input) {
-    one.tap();
-    act(() => one.api("POST", "/v1/trust", { device, trust: input.checked }));
   }
 
   function place(device, use, select) {

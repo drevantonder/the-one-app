@@ -195,8 +195,7 @@ impl Node {
             ensure!(caller.agent.is_none() || had || !wants, "only the person lets agents use an item: ask them with vault_request, leaving out app, and they pick or make it");
             item_entry(i, &caller.user, scope, data)
         })?;
-        let by = (caller.key != self.0.id).then_some(caller.key);
-        self.append_as(scope, &caller.user, by, content).await?;
+        self.append_as(scope, &caller.user, content).await?;
         Ok(id)
     }
 
@@ -235,8 +234,7 @@ impl Node {
             ensure!(i.r.members.apps.get(app).is_some_and(|a| !a.erased) || app == members::APP || app == crate::agents::NAME, "no app named {app}");
             Ok(())
         })?;
-        let by = (caller.key != self.0.id).then_some(caller.key);
-        self.append_as(scope, &caller.user, by, members::node("vault-request", data)).await?;
+        self.append_as(scope, &caller.user, members::node("vault-request", data)).await?;
         // At the install's address (where its kernel signs people in) the web client opens it in any browser; an
         // install without one has only its apps to.
         let web = self.with(|i| Ok(crate::state::settings(&i.r.members).remove("address")))?;
@@ -283,8 +281,7 @@ impl Node {
             };
             item_entry(i, &caller.user, scope, data)
         })?;
-        let by = (caller.key != self.0.id).then_some(caller.key);
-        self.append_as(scope, &caller.user, by, content).await?;
+        self.append_as(scope, &caller.user, content).await?;
         Ok(())
     }
 

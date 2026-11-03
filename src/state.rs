@@ -5,7 +5,7 @@
 use serde_json::{Map, Value, json};
 
 use crate::entry::hex;
-use crate::members::{Machine, Members, Principal, Role};
+use crate::members::{Machine, Members, Role};
 use crate::rank;
 
 /// What the node answering knows that the members don't.
@@ -70,10 +70,9 @@ pub fn state(m: Option<&Members>, user: &str, here: Here) -> Value {
 }
 
 fn install(m: &Members, me: &str, settings: &Map<String, Value>, here: &Here) -> Value {
-    let list = |ps: Vec<Principal>| ps.iter().map(|p| p.to_string()).collect::<Vec<_>>();
     let set = rank::set(&m.settings);
     let mut devices: Vec<Value> = m
-        .devices()
+        .computes()
         .map(|s| {
             let mut now = (here.device_now)(s);
             // A device that hasn't said what it is, as one that's always on.
@@ -81,9 +80,8 @@ fn install(m: &Members, me: &str, settings: &Map<String, Value>, here: &Here) ->
             let mut device = json!({
                 "kind": kind, "use": rank::place(&set, &hex(&s.key), &kind), "far": false,
                 "key": hex(&s.key), "name": s.name, "user": s.user, "me": false, "here": false, "online": false,
-                "owners": list(m.owners(&s.key)), "users": list(m.users_of(&s.key)), "privileged": m.privileged(&s.key),
-                "trusted_by": m.users.keys().filter(|u| m.trusts(u, &s.key)).collect::<Vec<_>>(),
-                "serves_me": m.serves(&s.key, me),
+                "roles": s.roles, "serves_me": m.serves(&s.key, me),
+                "runs_for": m.scopes().iter().filter(|scope| m.runs_for(&s.key, scope)).map(|scope| scope.to_string()).collect::<Vec<_>>(),
                 "build": null, "target": null, "sidecars": [], "installed_sidecars": [],
                 "removed_sidecars": m.sidecars.iter().filter(|((k, _), d)| *k == s.key && d.removed()).map(|((_, name), d)| json!({ "name": name, "by": m.users.get(&d.by).map(|u| &u.name), "time": d.time })).collect::<Vec<_>>(),
                 "load": null,
@@ -104,7 +102,7 @@ fn install(m: &Members, me: &str, settings: &Map<String, Value>, here: &Here) ->
     let clients: Vec<Value> = m
         .clients()
         .map(|c| {
-            let mut client = json!({ "key": hex(&c.key), "name": c.name, "user": c.user, "me": false });
+            let mut client = json!({ "key": hex(&c.key), "name": c.name, "user": c.user, "roles": c.roles, "passkey": c.passkey, "me": false });
             client.as_object_mut().unwrap().extend((here.client_now)(c));
             client
         })
@@ -123,6 +121,8 @@ fn install(m: &Members, me: &str, settings: &Map<String, Value>, here: &Here) ->
         "name": m.name, "root": m.root.map(|r| r.to_hex()), "user": me, "role": m.user(me).map(|u| u.role),
         "member": here.member,
         "users": users, "groups": groups, "devices": devices, "devices_at": m.devices_at, "clients": clients,
+        // Standing work this person granted: which endpoint keeps which app running in which scope, until when.
+        "grants": m.grants.iter().filter(|(_, g)| g.by == me).map(|((k, s, a), g)| json!({ "endpoint": hex(k), "scope": s.to_string(), "app": a, "until": g.until })).collect::<Vec<_>>(),
         "entries": here.entries, "settings": settings,
         // The serverless node, once an admin deployed one (`serverless deploy` sets `serverless`).
         "serverless": settings.contains_key("serverless").then(|| json!({ "use": rank::place(&set, rank::CLOUDFLARE, rank::CLOUDFLARE) })),
@@ -160,13 +160,8 @@ fn settings_items(m: &Members, user: &str, items_asked: usize, backups: bool, st
         item
     };
     let invites = m.groups.values().filter(|g| g.invited.contains_key(user)).count();
-    let offers = m
-        .devices()
-        .filter(|s| !m.privileged(&s.key) && !m.owners(&s.key).contains(&Principal::User(user.into())) && !m.trusts(user, &s.key))
-        .filter(|s| m.users_of(&s.key).iter().any(|p| matches!(p, Principal::User(u) if u == user) || matches!(p, Principal::Group(g) if m.group_role(user, g).is_some())))
-        .count();
     let mut out: Vec<Value> = passkeys.map(|url| with(item("passkeys", "Passkeys", "key", "#8e8e93"), "url", json!(url))).into_iter().collect();
-    let requests = invites + offers + items_asked;
+    let requests = invites + items_asked;
     if requests > 0 {
         out.push(with(item("requests", "Requests", "tray", "#ff2d55"), "badge", json!(requests)));
     }

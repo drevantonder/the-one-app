@@ -42,8 +42,9 @@ impl Node {
         ensure!(!name.trim().is_empty(), "your sign-in doesn't say your name: sign in again");
         // A key no machine holds, the same on every device, so two letting the same person in at once add them once.
         let key: Key = <sha2::Sha256 as sha2::Digest>::digest(format!("{}/sign-in\0{user}", crate::config::CLI)).into();
-        let admit = members::admit(&key, user, &format!("{name}'s sign-in"), false, Some((name.trim(), Role::Member)));
-        self.member_as(&Caller { key: self.0.id, user: me, agent: None, token: None }, "admit", admit.data).await
+        let endpoint = crate::keys::Endpoint { key, seal: key };
+        let listed = members::device(&endpoint, user, &format!("{name}'s sign-in"), &[members::Kind::Client], Some((name.trim(), Role::Member)));
+        self.member_content(&Caller { key: self.0.id, user: me, agent: None, token: None }, listed).await
     }
 
     /// Sets one of the install's settings, for an admin; `None` puts back the white label's default.
@@ -60,7 +61,7 @@ impl Node {
         let value = self.with(|i| {
             let m = &i.r.members;
             let kind = |k: &Key| if *k == self.0.id { here.clone() } else { i.peers.get(k).and_then(|p| p.load.as_ref()).map(|l| l.kind.clone()).unwrap_or_default() };
-            let mut now: Vec<(String, String)> = m.devices().map(|s| (hex(&s.key), kind(&s.key))).collect();
+            let mut now: Vec<(String, String)> = m.computes().map(|s| (hex(&s.key), kind(&s.key))).collect();
             if m.settings.contains_key("serverless") {
                 now.push((rank::CLOUDFLARE.into(), rank::CLOUDFLARE.into()));
             }
@@ -101,9 +102,9 @@ impl Node {
             let Some(i) = install.as_ref() else { return serde_json::Map::new() };
             let m = &i.r.members;
             let session = i.peers.get(&s.key).filter(|_| i.online(&s.key));
-            // The containers on a device are its owners' business.
+            // The containers on a device are its person's business.
             let load = if s.key == self.0.id { Some(crate::load::current()) } else { session.and_then(|s| s.load.clone()) }.map(|mut l| {
-                if !m.owners(&s.key).iter().any(|o| m.acts_for(me, o)) {
+                if m.machine(&s.key).is_none_or(|d| d.user != *me) {
                     l.containers.clear();
                 }
                 l
@@ -135,7 +136,7 @@ impl Node {
             },
             client: (sign_in.is_none() && viewer.key != self.0.id).then(|| json!({ "key": hex(&viewer.key), "name": viewer_name })),
             device: json!({ "key": hex(&self.0.id), "name": self.device_name(), "ready": ready, "guide": crate::skills::address() }),
-            member: install.as_ref().is_some_and(|i| i.r.members.device(&self.0.id).is_some()),
+            member: install.as_ref().is_some_and(|i| i.r.members.compute(&self.0.id).is_some()),
             entries: install.as_ref().map(|i| i.r.store.count().unwrap_or(0) as u64).unwrap_or(0),
             waiting,
             arrangements: json!(arrangements),
@@ -158,13 +159,11 @@ impl Node {
         self.member_content(caller, members::node(kind, data)).await
     }
 
+    /// Signs one of `global`'s node entries with this device, for `caller`: it counts only if this device is theirs
+    /// (on this machine, the CLI, MCP and the Mac app), and one that wouldn't count is refused, not written.
     pub(super) async fn member_content(&self, caller: &Caller, content: Content) -> Result<()> {
-        let by = (caller.key != self.0.id).then_some(caller.key);
-        // One that wouldn't count would change nothing anywhere: refuse it instead.
-        let counts = self.with(|i| i.r.would_count(&caller.user, by, content.clone(), now_ms()))?;
-        ensure!(counts, "you aren't allowed to change that, so nothing changed");
         let before = self.with(|i| Ok(i.r.members.roles()))?;
-        self.append_as(&Scope::Global, &caller.user, by, content).await?;
+        self.append_as(&Scope::Global, &caller.user, content).await?;
         let after = self.with(|i| Ok(i.r.members.roles()))?;
         self.tell_vault(caller, members::roles_changed(&before, &after)).await
     }
@@ -243,8 +242,8 @@ impl Node {
 
     /// Finds a device of the install by name or key prefix.
     pub fn find_device(&self, name: &str) -> Result<Key> {
-        let found: Vec<Key> = self.with(|i| Ok(i.r.members.devices().filter(|m| m.name.eq_ignore_ascii_case(name) || hex(&m.key).starts_with(name)).map(|m| m.key).collect()))?;
-        let names = || self.with(|i| Ok(i.r.members.devices().map(|m| m.name.clone()).collect::<Vec<_>>().join(", "))).unwrap_or_default();
+        let found: Vec<Key> = self.with(|i| Ok(i.r.members.computes().filter(|m| m.name.eq_ignore_ascii_case(name) || hex(&m.key).starts_with(name)).map(|m| m.key).collect()))?;
+        let names = || self.with(|i| Ok(i.r.members.computes().map(|m| m.name.clone()).collect::<Vec<_>>().join(", "))).unwrap_or_default();
         match found.as_slice() {
             [one] => Ok(*one),
             [] => bail!("no device called {name}: your devices are {}", names()),

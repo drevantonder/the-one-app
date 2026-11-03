@@ -57,7 +57,7 @@ fn relay(address: &str, ticket: Option<&str>) -> Result<(RelayUrl, RelayMap)> {
 impl Node {
     /// Keeps this device's endpoint, once it's a device of an install with an address.
     pub(super) fn follow_net(&self) {
-        let wanted = self.with(|i| Ok(i.r.members.device(&self.0.id).and(i.r.members.settings.get("address").cloned()))).ok().flatten();
+        let wanted = self.with(|i| Ok(i.r.members.compute(&self.0.id).and(i.r.members.settings.get("address").cloned()))).ok().flatten();
         let mut task = self.0.net.task.lock().unwrap();
         if task.as_ref().map(|(a, _)| a) == wanted.as_ref() {
             return;
@@ -167,7 +167,7 @@ impl Node {
     }
 
     fn is_device(&self, key: &Key) -> bool {
-        self.with(|i| Ok(i.r.members.device(key).is_some())).unwrap_or(false)
+        self.with(|i| Ok(i.r.members.compute(key).is_some())).unwrap_or(false)
     }
 
     fn conn_slot(&self, to: &Key) -> Arc<tokio::sync::Mutex<Option<Connection>>> {

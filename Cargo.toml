@@ -32,9 +32,8 @@ ed25519-dalek = "3"
 hkdf = "0.13"
 rand = "0.8"
 blake3 = "1"
-# Entries are p2panda operations, packed in CBOR in the bucket (src/entry.rs); the serverless node reads them too.
+# Entries are packed in CBOR in the bucket (src/entry.rs); the serverless node reads them too.
 ciborium = "0.2"
-p2panda-core = "0.7"
 # `serialize` makes and reads an app database's copy in memory (src/db.rs).
 rusqlite = { version = "0.41", features = ["bundled", "limits", "serialize"] }
 serde = { version = "1", features = ["derive"] }

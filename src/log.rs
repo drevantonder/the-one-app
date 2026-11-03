@@ -125,16 +125,16 @@ mod tests {
     use super::*;
     use crate::bucket::Memory;
     use crate::entry::{Content, Ext};
-    use p2panda_core::SigningKey;
+    use ed25519_dalek::SigningKey;
 
     #[test]
     fn a_reader_from_the_newest_copy_gets_every_entry_once() {
         tokio::runtime::Builder::new_current_thread().build().unwrap().block_on(async {
-            let (bucket, key, device) = (Memory::default(), Keys::from([(1, [7u8; 32])]), SigningKey::from([1u8; 32]));
+            let (bucket, key, device) = (Memory::default(), Keys::from([(1, [7u8; 32])]), SigningKey::from_bytes(&[1u8; 32]));
             let prefix = prefix("global");
             let (mut written, mut head) = (Vec::new(), None);
             for n in 1..=COPY_EVERY + 20 {
-                let ext = Ext { log: "global".into(), time: n, user: "a000000000000001".into(), by: None };
+                let ext = Ext { log: "global".into(), time: n, user: "a000000000000001".into(), epoch: 0, previous: Vec::new() };
                 let entry = Entry::create(&device, ext, head, Content::new("node", "setting", serde_json::json!({ "name": "n", "value": n.to_string() })));
                 head = Some(entry.head());
                 let name = step_name(&prefix, n);

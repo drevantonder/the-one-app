@@ -225,8 +225,7 @@ impl Node {
         let content = self.with(|i| switch_entry(i, &caller.user, scope, app, schedule, on))?;
         let kernel = self.schedules_service().is_some();
         ensure!(!kernel || caller.token.is_some(), "sign in first ({} sign-in): schedules here run from your One App's kernel, with what your sign-in lets them use", crate::config::CLI);
-        let by = (caller.key != self.0.id).then_some(caller.key);
-        self.append_as(scope, &caller.user, by, content).await?;
+        self.append_as(scope, &caller.user, content).await?;
         if kernel {
             self.sync_schedules(caller).await.context("it's switched, but the schedules service didn't take it")?;
         }

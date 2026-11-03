@@ -243,9 +243,8 @@ impl Node {
 
     /// Installs (or uninstalls) `app` in `scope` for `caller`, and what it uses.
     pub async fn install(&self, caller: &Caller, app: &str, scope: &Scope, installed: bool) -> Result<()> {
-        let by = (caller.key != self.0.id).then_some(caller.key);
         for (scope, content) in self.install_entries(caller, app, scope, installed).await? {
-            self.append_as(&scope, &caller.user, by, content).await?;
+            self.append_as(&scope, &caller.user, content).await?;
         }
         if self.schedules_service().is_some() && caller.token.is_some() {
             self.sync_schedules_later(caller);

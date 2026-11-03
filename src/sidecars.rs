@@ -134,7 +134,7 @@ impl Sidecars {
     }
 
     /// Whether a registered sidecar serves every user its device serves (`serves: "everyone"` in its description), not only
-    /// its device's local user: a push sender on a privileged device, say.
+    /// its device's local user: a push sender on an admin's device, say.
     pub fn serves_everyone(&self, app: &str) -> bool {
         self.get(app).is_some_and(|p| p.describe["serves"] == "everyone")
     }

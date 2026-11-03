@@ -117,22 +117,17 @@ struct GroupInfo: Codable, Sendable, Equatable, Identifiable {
 struct Device: Codable, Sendable, Equatable, Identifiable {
     var key: String
     var name: String
-    /// The user it was admitted for.
+    /// The person it's listed as a device of.
     var user: String
     var online: Bool?
-    /// `user:<id>`, `group:<id>` or `install`.
-    var owners: [String]
-    var users: [String]
-    var privileged: Bool?
-    /// The users who trust it, and so whose data it holds.
-    var trusted_by: [String]?
+    /// The scopes whose calls it runs (`user:<id>`, `group:<id>`, `global`).
+    var runs_for: [String]?
     var target: String?
     /// The commit its node was built from.
     var build: String?
 
     var id: String { key }
     var isOnline: Bool { online == true }
-    var isPrivileged: Bool { privileged == true }
 }
 
 struct ClientInfo: Codable, Sendable, Equatable, Identifiable {

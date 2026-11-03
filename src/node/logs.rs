@@ -54,7 +54,7 @@ impl Node {
             return Ok(false);
         }
         let handled = self.with(|i| {
-            let handled = i.r.receive(entries, now_ms())?;
+            let handled = i.r.receive(entries)?;
             i.r.store.set_position(&log, at)?;
             Ok(handled)
         })?;
@@ -107,7 +107,7 @@ impl Node {
     pub(super) fn ping(&self, scope: &Scope, wrote: Option<(&str, &str, u64)>) {
         let Ok(devices) = self.with(|i| {
             let m = &i.r.members;
-            Ok(m.devices().filter(|s| s.key != self.0.id && m.holds(&s.key, scope)).map(|s| s.key).collect::<Vec<_>>())
+            Ok(m.computes().filter(|s| s.key != self.0.id && m.runs_for(&s.key, scope)).map(|s| s.key).collect::<Vec<_>>())
         }) else {
             return;
         };
@@ -166,7 +166,7 @@ impl Node {
     /// to answer is how far it is.
     pub(super) fn say_hello(&self) {
         let Ok((devices, me, sidecars)) = self.with(|i| {
-            let devices: Vec<Key> = i.r.members.devices().map(|s| s.key).filter(|k| *k != self.0.id).collect();
+            let devices: Vec<Key> = i.r.members.computes().map(|s| s.key).filter(|k| *k != self.0.id).collect();
             Ok((devices, Caller { key: self.0.id, user: i.user.clone(), agent: None, token: None }, self.sidecars_here(i)))
         }) else {
             return;

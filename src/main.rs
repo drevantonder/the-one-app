@@ -35,9 +35,6 @@ Usage:
   {CLI} group invite <group> <user> [--admin]
   {CLI} group accept <group>
   {CLI} group remove <group> <user>    or leave it, giving yourself
-  {CLI} acl <device> --owners a,b --users c,d
-                                       who owns and uses a device: user or group names, or install
-  {CLI} trust <device> | untrust <device>
   {CLI} apps                           every app and its operations
   {CLI} deploy <dir> [--name <app>] [--owner <owner>]
                                        build the app in <dir> (app.ts or app.js, and its npm packages) with Bun and
@@ -321,18 +318,6 @@ fn run(args: Vec<String>) -> Result<()> {
         ["group", "remove", group, user] => {
             post("/v1/member", json!({ "group": group, "user": user, "role": null }))?;
             println!("{user} is no longer in {group}.");
-        }
-        ["acl", device] => {
-            let list = |key: &str| flags.get(key).and_then(Value::as_str).map(|s| s.split(',').map(str::trim).collect::<Vec<_>>());
-            let owners = list("owners").context("give --owners")?;
-            let users = list("users").unwrap_or_else(|| owners.clone());
-            post("/v1/acl", json!({ "device": device, "owners": owners, "users": users }))?;
-            println!("{device}'s ACL is set.");
-        }
-        ["trust", device] | ["untrust", device] => {
-            let trust = positional[0] == "trust";
-            post("/v1/trust", json!({ "device": device, "trust": trust }))?;
-            println!("You {} {device}.", if trust { "trust" } else { "no longer trust" });
         }
         ["deploy", app] if flags.contains_key("version") => {
             let version = flags["version"].as_str().context("give --version <hash>")?;
@@ -1030,11 +1015,9 @@ fn status(state: &Value) {
     for s in i["devices"].as_array().into_iter().flatten() {
         let dot = if s["online"] == true { "●" } else { "○" };
         let here = if s["here"] == true { " (this one)" } else { "" };
-        let owners: Vec<String> = s["owners"].as_array().into_iter().flatten().filter_map(|o| o.as_str()).map(|o| o.strip_prefix("user:").map(name).unwrap_or(o.into())).collect();
-        let privileged = if s["privileged"] == true { ", privileged" } else { "" };
-        let serves = if s["serves_me"] == true { "" } else { ", not yours" };
+        let serves = if s["serves_me"] == true { "" } else { ", doesn't run yours" };
         let build = s["build"].as_str().map(|b| format!("  {b}")).unwrap_or_default();
-        println!("  {dot} {}{here}  owned by {}{privileged}{serves}{build}", s["name"].as_str().unwrap_or(""), owners.join(", "));
+        println!("  {dot} {}{here}  {}'s{serves}{build}", s["name"].as_str().unwrap_or(""), name(s["user"].as_str().unwrap_or("")));
     }
     let clients = i["clients"].as_array().cloned().unwrap_or_default();
     if !clients.is_empty() {

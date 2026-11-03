@@ -470,6 +470,25 @@ fn the_kernel_and_nodes_agree_on_keys_and_seals() {
         assert_eq!(to, kernel::twin_public(&node.verifying_key().to_bytes()).unwrap(), "a Rust endpoint seals to its key's twin");
     }
 
+    // Entries (src/entry.rs): signed alike from the same key and fields, and each checks the other's.
+    {
+        use one::entry::{Content, Entry, Ext, Hash};
+        let seed: [u8; 32] = rand::random();
+        let key = ed25519_dalek::SigningKey::from_bytes(&seed);
+        let (backlink, p1, p2) = (Hash::from_bytes(rand::random()), Hash::from_bytes(rand::random()), Hash::from_bytes(rand::random()));
+        let content = Content::new("node", "group", json!({ "group": "0123456789abcdef", "name": "Café \"Ü\"\n" }));
+        let ext = Ext { log: "user:0123456789abcdef".into(), time: 1_700_000_000_123, user: "0123456789abcdef".into(), epoch: 2, previous: vec![p2, p1] };
+        let rust = Entry::create(&key, ext, Some((0, backlink)), content);
+        let fields = json!({ "log": "user:0123456789abcdef", "seq": 1, "backlink": backlink.to_hex(), "previous": [p2.to_hex(), p1.to_hex()], "time": 1_700_000_000_123u64, "user": "0123456789abcdef", "epoch": 2 });
+        let out = js(json!({ "op": "entries", "seed": B64U.encode(&seed), "fields": fields, "body": String::from_utf8(rust.body.clone()).unwrap(), "entry": rust.to_json() }));
+        assert_eq!(out["signed"], rust.to_json(), "the same entry signed the same");
+        assert_eq!(out["hash"], json!(rust.hash().to_hex()), "and hashed the same");
+        let from_js = Entry::from_json(&out["signed"]).expect("Rust checks an entry JavaScript signed");
+        assert_eq!((from_js.hash(), from_js.previous().to_vec()), (rust.hash(), vec![p1.min(p2), p1.max(p2)]));
+        assert_eq!(out["checked"], json!({ "hash": rust.hash().to_hex(), "user": "0123456789abcdef", "kind": "group" }), "JavaScript checks one Rust signed");
+        assert_ne!(out["tampered"], json!("checked"), "but not with another body");
+    }
+
     // The schedules service and the node agree when a schedule runs next, across daylight saving's changes too.
     let specs = [
         json!({ "op": "x", "at": "09:00", "tz": "Australia/Melbourne" }),
