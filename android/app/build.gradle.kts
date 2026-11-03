@@ -118,7 +118,6 @@ android {
         buildConfigField("String", "ACCENT", quoted(field("accent")))
         // A white label with one install signs in there; otherwise the first screen asks where.
         buildConfigField("String", "ADDRESS", quoted(field("address")))
-        buildConfigField("String", "COMMIT", quoted(commit))
         manifestPlaceholders["scheme"] = cli
         resValue("string", "app_name", field("name"))
     }

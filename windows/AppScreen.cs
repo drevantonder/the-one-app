@@ -347,13 +347,8 @@ public sealed class AppScreen : Grid
                     Reply(id, Appearance.Chosen);
                     return;
                 case "device":
-                    {
-                        var store = Store.Shared;
-                        var device = store.Install?.Devices.FirstOrDefault(s => s.Key == store.State?.Device?.Key);
-                        var build = $"{WhiteLabel.Name}, app {WhiteLabel.Commit}" + (device?.Build is { } b ? $"\n{device.Name} runs {b}" : "");
-                        Reply(id, new JsonObject { ["name"] = Environment.MachineName, ["build"] = build, ["signOut"] = true });
-                        return;
-                    }
+                    Reply(id, new JsonObject { ["name"] = Environment.MachineName, ["signOut"] = true });
+                    return;
                 case "request":
                     Reply(id, await Asked(Route.Request(Text(m, "scope") ?? "", Text(m, "id") ?? "")));
                     return;

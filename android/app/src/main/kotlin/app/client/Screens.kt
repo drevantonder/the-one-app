@@ -653,11 +653,7 @@ private class Bridge(val context: Context, val store: Store, val route: Route, v
                 str(m, "value")?.let { v -> Appearance.entries.firstOrNull { it.name.equals(v, ignoreCase = true) }?.let(store::choose) }
                 return JsonPrimitive(store.appearance.name.lowercase())
             }
-            "device" -> {
-                val device = store.install?.devices?.firstOrNull { it.key == store.state?.host?.key }
-                val build = "${store.config?.name ?: BuildConfig.NAME}, app ${BuildConfig.COMMIT}" + (device?.build?.let { "\n${device.name} runs $it" } ?: "")
-                return obj("name" to SignIn.deviceName(context), "build" to build, "signOut" to true)
-            }
+            "device" -> return obj("name" to SignIn.deviceName(context), "signOut" to true)
             else -> throw NodeError("Unknown message")
         }
     }

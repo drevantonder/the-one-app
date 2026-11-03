@@ -161,7 +161,7 @@
     // screen). `api` asks the node's /v1 API as the person looking ("POST", "/v1/group", { name }) and gives its JSON,
     // failing with its `error`. `signOut` signs this client out. `appearance` gives this client's ("automatic",
     // "light" or "dark"), first setting it to `value` if given. `device` is this client:
-    // `{ name ("mac", "Chrome on Mac"), build, signOut (whether it can sign out) }`.
+    // `{ name ("mac", "Chrome on Mac"), signOut (whether it can sign out) }`.
     api: (method, path, body) => host({ type: "api", method, path, body }),
     // Opens the client's own Vault sheet for a request already made (as an agent's link does): true once it's
     // answered with an item, false if declined or closed.

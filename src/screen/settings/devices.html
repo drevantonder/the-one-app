@@ -11,7 +11,6 @@
   .action-row .i { width: 22px; height: 22px; }
   a.row { cursor: pointer; }
   #page h2.section:first-of-type { margin-top: 8px; }
-  .footer.build { white-space: pre-line; }
   .row.out { justify-content: center; color: var(--danger); font: inherit; border: 0; background: none; width: 100%; }
   .pair { display: flex; flex-direction: column; align-items: center; gap: 16px; text-align: center; padding: 8px 0 4px; }
   .code { display: flex; align-items: center; gap: 8px; max-width: 100%; padding: 4px 4px 4px 12px; border-radius: 999px; background: var(--code-bg); }
@@ -19,8 +18,8 @@
   .code span { font: 15px var(--mono); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: all; -webkit-user-select: all; }
 </style>
 <script>
-  // This person's devices, the shared ones they may use, and which hold their data: naming this device, the build it
-  // runs and signing out of it, trusting one, removing one, and pairing another with a code.
+  // This person's devices, the shared ones they may use, and which hold their data: naming this device and
+  // signing out of it, trusting one, removing one, and pairing another with a code.
   let state, device;
   let error = "";
 
@@ -102,7 +101,6 @@
         (here ? `<label class="row plain"><input class="field" id="name" aria-label="This device’s name" value="${one.esc(here.name)}" autocomplete="off" spellcheck="false" enterkeyhint="done"></label>`
           : `<div class="row plain"><div class="main"><div class="title"><span>${one.esc(device.name)}</span></div></div></div>`) +
         (device.signOut ? `<button class="row plain out" data-out>Sign Out</button>` : "") + "</div>";
-      if (device.build) html += `<p class="footer build">${one.esc(device.build)}</p>`;
     }
     html += '<h2 class="section">Your Devices</h2><div class="list">' + mine.map(deviceRow).join("") + clients.filter((c) => c.user === me()).map(clientRow).join("") +
       `<a class="row plain action-row" data-pair>${one.icon("desktop")}<span>Pair a Computer</span></a></div><div id="ask"></div>`;

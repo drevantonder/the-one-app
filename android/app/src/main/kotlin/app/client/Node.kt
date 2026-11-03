@@ -37,7 +37,6 @@ data class Config(
 data class NodeState(
     val config: Config,
     @SerialName("me") val machine: Machine,
-    @SerialName("device") val host: Machine? = null,
     val user: Person? = null,
     val install: Install? = null,
 )
@@ -58,7 +57,6 @@ data class Person(
 data class Install(
     val name: String,
     val groups: List<GroupInfo>,
-    val devices: List<Device>,
 )
 
 @Serializable
@@ -71,13 +69,6 @@ data class GroupInfo(
 @Serializable
 data class GroupMember(
     val user: String,
-)
-
-@Serializable
-data class Device(
-    val key: String,
-    val name: String,
-    val build: String? = null,
 )
 
 /** An app as `GET /v1/apps` describes it: what names its screens and draws its icon on the home screen's widgets. */

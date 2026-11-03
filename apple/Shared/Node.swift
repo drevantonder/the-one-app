@@ -127,8 +127,6 @@ struct Device: Codable, Sendable, Equatable, Identifiable {
     /// The users who trust it, and so whose data it holds.
     var trusted_by: [String]?
     var target: String?
-    /// The commit its node was built from.
-    var build: String?
 
     var id: String { key }
     var isOnline: Bool { online == true }
