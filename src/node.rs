@@ -786,7 +786,12 @@ impl Node {
     /// caller holds: what a client device replays itself to know who's who (one-client's `members`), never taking it
     /// from a node. None if there's nothing new.
     pub async fn global_entries(&self, caller: &Caller, have: &HashMap<Key, u32>) -> Result<Option<Vec<u8>>> {
-        self.read_log(&Scope::Global).await?;
+        // Those it holds while its newest epoch is on its way: the device that just made it asks before sealing it.
+        if let Err(err) = self.read_log(&Scope::Global).await
+            && !err.is::<databases::NotGiven>()
+        {
+            return Err(err);
+        }
         self.with(|i| {
             ensure!(i.r.members.may_use(&caller.user, &Scope::Global), "you aren't one of this install's people");
             let new: Vec<Entry> = i.r.store.scope("global")?.into_iter().filter(|e| have.get(&e.author()).is_none_or(|n| e.seq() >= *n)).collect();
