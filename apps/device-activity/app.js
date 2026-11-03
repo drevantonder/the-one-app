@@ -127,7 +127,7 @@ export default {
 .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px 24px; margin-top: 12px; }
 .stat .label { display: flex; justify-content: space-between; gap: 8px; white-space: nowrap; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
 .stat .label b { color: var(--text); font-weight: 600; }
-.bar { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
+.bar { height: 6px; border-radius: 3px; background: var(--fill); overflow: hidden; }
 .bar i { display: block; height: 100%; border-radius: 3px; }
 .spark { width: 100%; height: 28px; display: block; }
 .guests { margin: 12px -16px -14px; border-top: .5px solid var(--line); }
@@ -144,7 +144,7 @@ const GB = 1e9, GiB = 2 ** 30;
 const size = (b, g = GB) => b >= 10 * g ? Math.round(b / g) + " GB" : b >= g ? (b / g).toFixed(1) + " GB" : Math.round(b / (g / 1000)) + " MB";
 const mem = (b) => size(b, GiB);
 const pct = (s) => s && s.total ? Math.round(s.used * 100 / s.total) : null;
-const tone = (p) => p >= 85 ? "#ff3b30" : p >= 70 ? "#ff9500" : "#34c759";
+const tone = (p) => p >= 85 ? "var(--danger)" : p >= 70 ? "var(--warn)" : "var(--text)";
 const bar = (s) => s && s.total ? \`<div class="bar"><i style="width:\${pct(s)}%;background:\${tone(pct(s))}"></i></div>\` : "";
 function spark(xs, color) {
   if (!xs.length) return '<div class="bar"></div>';
@@ -159,8 +159,8 @@ function card(d, guests) {
   let stats = "";
   if (d.online) {
     if (d.memory) stats += stat("Memory", d.memory.total ? mem(d.memory.used) + " of " + mem(d.memory.total) : mem(d.memory.used), bar(d.memory));
-    if (d.cpu.length) stats += stat("CPU", d.cpu[d.cpu.length - 1] + "%", spark(d.cpu, "#0a84ff"));
-    if (d.gpu.length) stats += stat("GPU", d.gpu[d.gpu.length - 1] + "%", spark(d.gpu, "#bf5af2"));
+    if (d.cpu.length) stats += stat("CPU", d.cpu[d.cpu.length - 1] + "%", spark(d.cpu, "var(--text)"));
+    if (d.gpu.length) stats += stat("GPU", d.gpu[d.gpu.length - 1] + "%", spark(d.gpu, "var(--muted)"));
     if (d.disk) stats += stat("Disk", size(d.disk.total - d.disk.used) + " free", bar(d.disk));
   }
   const rows = guests.map((g) => \`<div class="guest"><span class="n">\${one.esc(g.name)}</span><span class="k">\${g.kind === "podman" ? "podman" : "container"}</span>\${bar(g.memory)}<span class="m">\${g.memory ? mem(g.memory.used) : ""}</span></div>\`).join("");
@@ -177,7 +177,7 @@ const show = () => one.render("#list", async () => {
     for (let j = i + 1; j < devices.length && devices[j].host === d.name; j++) if (devices[j].kind) guests.push(devices[j]);
     html += card(d, guests);
   }
-  return html || '<div class="empty">No devices yet</div>';
+  return html || one.empty("No devices yet.");
 });
 show();
 setInterval(show, 5000);

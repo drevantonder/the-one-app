@@ -7,9 +7,9 @@ let view = markdown ? "preview" : "code";
 async function show() {
   const d = await one.call("file", { repo: P.repo, ref: P.ref, path: P.path });
   let body;
-  if (d.submodule) body = one.empty({ icon: "folder-dashed", title: "This is a submodule.", text: `It points at commit <code>${short(d.submodule)}</code> of another repo.` });
-  else if (d.binary) body = one.empty({ icon: "file", title: "Binary files cannot be previewed.", text: one.size(d.size) });
-  else if (d.too_big) body = one.empty({ icon: "file", title: "This file is too big to preview.", text: `It's ${one.size(d.size)}. Clone the repo to read it.` });
+  if (d.submodule) body = one.empty(`This is a submodule of commit <code>${short(d.submodule)}</code> of another repo.`);
+  else if (d.binary) body = one.empty(`This binary file (${one.size(d.size)}) can't be previewed.`);
+  else if (d.too_big) body = one.empty(`This file is too big to preview (${one.size(d.size)}). Clone the repo to read it.`);
   else body = `${markdown ? `<div class="segmented narrow"><button data-view="preview">Preview</button><button data-view="code">Code</button></div>` : ""}<div id="file"></div>`;
   setTimeout(() => d.text !== undefined && paint(d), 0);
   return `${pathBar(d, { file: true })}<div class="code-box">${commitCard(d.latest, { ...d, path: P.path })}</div>${body}`;

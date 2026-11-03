@@ -126,13 +126,12 @@ export default {
       title: "Messenger",
       html: `
 <style>
-  .card { background: var(--card); border-radius: 12px; padding: 14px 16px; margin: 12px 0; }
+  .card { background: var(--card); border-radius: var(--radius); padding: 14px 16px; margin: 12px 0; }
   button.primary { font: inherit; font-weight: 600; color: white; background: var(--tint); border: 0; border-radius: 10px; padding: 11px 16px; }
   button.plain { font: inherit; color: var(--tint); background: none; border: 0; padding: 4px 0; }
   input, select { width: 100%; box-sizing: border-box; font: inherit; padding: 11px 14px; border-radius: 10px; border: 0.5px solid var(--line); background: var(--bg); color: var(--text); margin: 8px 0; }
   ol { padding-left: 20px; margin: 8px 0; }
-  .dot { width: 9px; height: 9px; border-radius: 50%; background: #34c759; flex: none; margin-right: 12px; }
-  .dot.warn { background: #ff9f0a; }
+  .sub.warn { color: var(--warn); }
 </style>
 <div id="list"></div>
 <div class="card" id="connect"></div>
@@ -142,7 +141,7 @@ export default {
 async function show() {
   const accounts = await one.call("accounts");
   document.getElementById("list").innerHTML = accounts.length
-    ? '<h2 class="section">Browser profiles</h2><div class="list">' + accounts.map((a, i) => \`<div class="row plain"><span class="dot\${a.ok ? "" : " warn"}"></span><div class="main"><div class="title">\${one.esc(a.account)}</div><div class="sub">\${one.esc(a.ok ? (i ? "Linked" : "Linked · used first") : one.plain(a.why || "Needs signing in again").title)}</div></div><button class="plain" data-out="\${one.esc(a.account)}">Sign out</button></div>\`).join("") + "</div>"
+    ? '<h2 class="section">Browser profiles</h2><div class="list">' + accounts.map((a, i) => \`<div class="row plain"><div class="main"><div class="title">\${one.esc(a.account)}</div><div class="sub\${a.ok ? "" : " warn"}">\${one.esc(a.ok ? (i ? "" : "Used first") : one.plain(a.why || "Needs signing in again").title)}</div></div><button class="plain" data-out="\${one.esc(a.account)}">Sign out</button></div>\`).join("") + "</div>"
     : '<p class="muted">Link Messenger to a browser profile signed in to messenger.com, and your agents can read your chats and, when you ask, send.</p>';
   for (const b of document.querySelectorAll("[data-out]")) b.onclick = async () => { await one.call("sign_out", { account: b.dataset.out }); show(); };
   const c = document.getElementById("connect");

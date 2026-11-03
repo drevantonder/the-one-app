@@ -1,11 +1,9 @@
 <div id="page"></div>
 <style>
-  .tile { width: 34px; height: 34px; display: grid; place-items: center; flex: none; color: var(--tint); }
+  .tile { width: 34px; height: 34px; display: grid; place-items: center; flex: none; color: var(--text); }
   .tile .i { width: 26px; height: 26px; }
   .tile.off { color: var(--faint); }
-  .status { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 15px; flex: none; }
-  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); }
-  .dot.on { background: var(--ok); }
+  .status { color: var(--muted); font-size: 15px; flex: none; }
   .field { flex: 1; min-width: 0; font: inherit; border: 0; outline: none; background: none; color: var(--text); padding: 0; }
   .action-row { color: var(--tint); cursor: pointer; }
   .action-row .i { width: 22px; height: 22px; }
@@ -13,7 +11,7 @@
   #page h2.section:first-of-type { margin-top: 8px; }
   .row.out { justify-content: center; color: var(--danger); font: inherit; border: 0; background: none; width: 100%; }
   .pair { display: flex; flex-direction: column; align-items: center; gap: 16px; text-align: center; padding: 8px 0 4px; }
-  .code { display: flex; align-items: center; gap: 8px; max-width: 100%; padding: 4px 4px 4px 12px; border-radius: 999px; background: var(--code-bg); }
+  .code { display: flex; align-items: center; gap: 8px; max-width: 100%; padding: 4px 4px 4px 12px; border-radius: 999px; background: var(--fill); }
   .pair code { font: 0.92em var(--mono); }
   .code span { font: 15px var(--mono); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: all; -webkit-user-select: all; }
 </style>
@@ -46,7 +44,8 @@
       o === "install" ? "everyone" : o.startsWith("group:") ? groupOf(o.slice(6))?.name || "a group" : userName(o.slice(5)));
     return owners.length ? `Run by ${list(owners)}` : "";
   };
-  const status = (on) => `<span class="status"><span class="dot${on ? " on" : ""}"></span>${on ? "Online" : "Offline"}</span>`;
+  // Online is how it should be, so it says nothing.
+  const status = (on) => (on ? "" : `<span class="status">Offline</span>`);
   const subs = (...lines) => lines.filter(Boolean).map((l) => `<div class="sub">${one.esc(l)}</div>`).join("");
 
   // A row is tapped to remove it, unless it's the device looking.
@@ -191,7 +190,7 @@
           <div class="code"><span>${one.esc(code)}</span>${one.copyButton(code)}</div>
           <div class="small muted">On the other computer, choose Join with a Pairing Code, or run <code>${one.esc(one.config.cli)} join</code> with the code. It works once, for seven days.</div></div>`;
       },
-      (err) => (body.innerHTML = one.banner(err, { retry: false })),
+      (err) => (body.innerHTML = one.problem({ title: one.plain(err).title })),
     );
   }
 

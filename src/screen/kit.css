@@ -55,11 +55,9 @@ h2.section { font-size: 13px; font-weight: 400; text-transform: none; color: var
 .row { display: flex; gap: 12px; align-items: center; padding: 11px 16px; position: relative; color: inherit; cursor: default; }
 .row + .row::before { content: ""; position: absolute; top: 0; left: 64px; right: 0; border-top: 0.5px solid var(--line); }
 .row.plain + .row.plain::before { left: 16px; }
-.row:active { background: var(--line); }
+.row:active { background: var(--fill); }
 .row .main { flex: 1; min-width: 0; }
-.row .title { font-weight: 600; display: flex; justify-content: space-between; gap: 8px; }
-/* A plain row is a setting or a fact, as in iOS's Settings: its title in the regular weight. */
-.row.plain .title { font-weight: 400; }
+.row .title { font-weight: 500; display: flex; justify-content: space-between; gap: 8px; }
 .row .title > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .row .title .when { font-weight: 400; color: var(--muted); font-size: 15px; white-space: nowrap; }
 /* A row says one line under its title, cut short with an ellipsis: the rest goes on the item's own page. .wrap lets
@@ -70,14 +68,14 @@ h2.section { font-size: 13px; font-weight: 400; text-transform: none; color: var
 .row.dim .main, .row.dim .app-icon { opacity: 0.4; }
 .row .note { color: var(--muted); font-size: 15px; white-space: nowrap; flex: none; }
 
-.icon { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; flex: none; font-weight: 600; font-size: 15px; color: white; background: var(--tint); }
+.icon { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; flex: none; font-weight: 600; font-size: 15px; color: white; background: var(--muted); }
 .icon.grey { background: var(--faint); color: var(--text); }
 /* An app's icon, from one.appIcon: a shell draws its tile in; a browser shows its picture, or its first letter. */
-.app-icon { --size: 36px; --tile: var(--tint); width: var(--size); height: var(--size); border-radius: calc(var(--size) * 0.225); display: grid; place-items: center; flex: none; font-weight: 600; font-size: calc(var(--size) * 0.42); color: white; background: linear-gradient(color-mix(in srgb, var(--tile) 80%, white), var(--tile)); background-size: cover; }
+.app-icon { --size: 36px; --tile: var(--muted); width: var(--size); height: var(--size); border-radius: calc(var(--size) * 0.225); display: grid; place-items: center; flex: none; font-weight: 600; font-size: calc(var(--size) * 0.42); color: white; background: linear-gradient(color-mix(in srgb, var(--tile) 80%, white), var(--tile)); background-size: cover; }
 .app-icon.drawn { color: transparent; }
 /* A logo drawn on white in a browser gets the hairline edge a shell gives it. */
-.app-icon.logo { background-color: #fff; background-size: 80%; background-repeat: no-repeat; background-position: center; box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.12); }
-.search { width: 100%; font: inherit; padding: 8px 12px; margin: 4px 0 4px; border-radius: 10px; border: 0; background: var(--line); color: var(--text); outline: none; }
+.app-icon.logo { background-color: #fff; background-size: 80%; background-repeat: no-repeat; background-position: center; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08); }
+.search { width: 100%; font: inherit; padding: 8px 12px; margin: 4px 0 4px; border-radius: 10px; border: 0; background: var(--fill); color: var(--text); outline: none; }
 .avatar { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; flex: none; font-size: 13px; font-weight: 600; color: white; }
 
 .feed { display: flex; flex-direction: column; gap: 18px; padding-top: 8px; }
@@ -97,19 +95,20 @@ h2.section { font-size: 13px; font-weight: 400; text-transform: none; color: var
 .composer .error { color: var(--danger); font-size: 13px; max-width: 760px; margin: 0 auto 6px; padding: 0 6px; }
 
 /* A segmented control, for an app's own pickers (which scope, which view): buttons in a .segmented, the chosen one .on. */
-.segmented { display: flex; padding: 2px; gap: 2px; border-radius: 9px; background: var(--line); margin: 8px 0 12px; }
+.segmented { display: flex; padding: 2px; gap: 2px; border-radius: 9px; background: var(--fill); margin: 8px 0 12px; }
 .segmented button { flex: 1; font: inherit; font-size: 13px; font-weight: 500; padding: 6px 10px; border: 0; border-radius: 7px; background: none; color: var(--text); }
-.segmented button.on { background: var(--card); font-weight: 600; box-shadow: 0 3px 8px rgba(0, 0, 0, 0.12), 0 3px 1px rgba(0, 0, 0, 0.04); }
-@media (prefers-color-scheme: dark) { .segmented button.on { background: #636366; } }
+.segmented button.on { background: var(--raised); font-weight: 600; box-shadow: 0 3px 8px rgba(0, 0, 0, 0.12), 0 3px 1px rgba(0, 0, 0, 0.04); }
 
 /* An on/off switch, as iOS draws one: <input type="checkbox" class="switch">. */
-.switch { appearance: none; -webkit-appearance: none; flex: none; width: 51px; height: 31px; margin: 0; border-radius: 16px; background: var(--line); position: relative; cursor: pointer; transition: background 0.2s; }
+.switch { appearance: none; -webkit-appearance: none; flex: none; width: 51px; height: 31px; margin: 0; border-radius: 16px; background: var(--faint); position: relative; cursor: pointer; transition: background 0.2s; }
 .switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 27px; height: 27px; border-radius: 50%; background: #fff; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2); transition: transform 0.2s; }
 .switch:checked { background: var(--tint); }
 .switch:checked::after { transform: translateX(20px); }
 .switch:disabled { opacity: 0.5; }
 
+/* An empty screen or list (one.empty): one grey line, and a button only for an obvious first step. */
 .empty { text-align: center; color: var(--muted); padding: 48px 24px; }
+.empty .button { margin-top: 14px; }
 .error { color: var(--danger); }
 
 /* The kit's pieces (kit.js, markdown.js, code.js): each styled only where a screen uses it. */
@@ -117,19 +116,19 @@ h2.section { font-size: 13px; font-weight: 400; text-transform: none; color: var
 @media (prefers-color-scheme: dark) { :root { --code-bg: rgba(118, 118, 128, 0.24); --ok: #30d158; } }
 .i { width: 1.1em; height: 1.1em; flex: none; vertical-align: -0.18em; }
 
-.button { font: inherit; font-size: 15px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 7px 14px; border-radius: 10px; border: 0; background: var(--line); color: var(--tint); cursor: pointer; white-space: nowrap; }
+.button { font: inherit; font-size: 15px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 7px 14px; border-radius: 10px; border: 0; background: var(--fill); color: var(--tint); cursor: pointer; white-space: nowrap; }
 .button.primary { background: var(--tint); color: white; }
 .button.danger { background: var(--danger); color: white; }
 .button.plain { background: none; }
 /* The App Store's GET: a small capsule, tinted, its word in bold. .filled for the one that matters most. */
-.button.capsule { font-size: 15px; font-weight: 700; min-width: 76px; padding: 5px 16px; border-radius: 999px; background: var(--code-bg); color: var(--tint); }
+.button.capsule { font-size: 15px; font-weight: 700; min-width: 76px; padding: 5px 16px; border-radius: 999px; background: var(--fill); color: var(--tint); }
 .button.capsule.filled { background: var(--tint); color: white; }
 .button:disabled { opacity: 0.6; }
 .button:active { opacity: 0.7; }
 
 /* A button that opens a menu, as a row's role: <label class="pick">its text<select>…</select></label>, the system's own
    menu over it, unseen, so the button is as wide as what it says. */
-.pick { position: relative; flex: none; display: inline-flex; align-items: center; gap: 5px; font-size: 15px; padding: 4px 10px; border-radius: 8px; background: var(--code-bg); color: var(--tint); cursor: pointer; white-space: nowrap; }
+.pick { position: relative; flex: none; display: inline-flex; align-items: center; gap: 5px; font-size: 15px; padding: 4px 10px; border-radius: 8px; background: var(--fill); color: var(--tint); cursor: pointer; white-space: nowrap; }
 .pick::after { content: ""; width: 8px; height: 12px; background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 14'%3E%3Cpath d='M1 5l4-4 4 4M1 9l4 4 4-4' fill='none' stroke='%238e8e93' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat center / contain; }
 .pick select { position: absolute; inset: 0; width: 100%; opacity: 0; font: inherit; cursor: pointer; }
 
@@ -138,31 +137,27 @@ h2.section { font-size: 13px; font-weight: 400; text-transform: none; color: var
 @keyframes spin { to { transform: rotate(360deg); } }
 .loading { display: flex; gap: 10px; align-items: center; justify-content: center; color: var(--muted); font-size: 15px; padding: 48px 16px; }
 
-.empty-state { display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; padding: 40px 24px; color: var(--muted); }
-.empty-icon { width: 56px; height: 56px; border-radius: 50%; display: grid; place-items: center; background: var(--line); margin-bottom: 6px; }
-.empty-icon .i { width: 26px; height: 26px; }
-.empty-title { font-weight: 600; color: var(--text); }
-.empty-text { font-size: 15px; max-width: 34em; }
-.empty-state .button { margin-top: 10px; }
-
-.banner { display: flex; gap: 12px; align-items: flex-start; padding: 12px 14px; margin: 8px 0; border-radius: var(--radius); background: color-mix(in srgb, var(--danger) 10%, var(--card)); border: 0.5px solid color-mix(in srgb, var(--danger) 35%, transparent); }
-.banner-icon { color: var(--danger); width: 22px; height: 22px; margin-top: 1px; }
-.banner-text { flex: 1; display: flex; flex-direction: column; gap: 2px; font-size: 15px; }
-.banner-text span { color: var(--muted); }
-.banner .button { align-self: center; }
+/* A problem, on the thing it's about (one.problem): its symbol, title, one sentence, and the action that fixes it. */
+.problem { display: flex; gap: 12px; padding: 16px; margin: 8px 0; border-radius: var(--radius); background: var(--card); text-align: left; }
+.problem-icon { color: var(--danger); width: 24px; height: 24px; margin-top: 1px; }
+.problem.warn .problem-icon { color: var(--warn); }
+.problem-main { flex: 1; min-width: 0; }
+.problem-title { font-weight: 600; }
+.problem-text { color: var(--muted); font-size: 15px; margin-top: 3px; }
+.problem-action { font: inherit; font-weight: 600; color: var(--tint); background: none; border: 0; padding: 0; margin-top: 10px; cursor: pointer; }
 
 .copy { font: inherit; font-size: 13px; display: inline-flex; align-items: center; gap: 4px; padding: 4px 8px; border-radius: 7px; border: 0; background: none; color: var(--muted); cursor: pointer; }
 .copy:hover { background: var(--line); }
-.copy.copied { color: var(--ok); }
+.copy.copied { color: var(--text); }
 
-.confirm { background: var(--card); border-radius: var(--radius); padding: 14px 16px; margin: 8px 0; border: 0.5px solid var(--line); }
+.confirm { background: var(--card); border-radius: var(--radius); padding: 16px; margin: 8px 0; }
 .confirm-title { font-weight: 600; }
 .confirm-detail { color: var(--muted); font-size: 15px; margin-top: 4px; }
 .confirm-error { color: var(--danger); font-size: 13px; margin-top: 6px; }
 .confirm-error:empty { display: none; }
 .confirm-buttons { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
 
-.search { display: flex; align-items: center; gap: 6px; padding: 0 8px; height: 36px; border-radius: 10px; background: var(--code-bg); color: var(--muted); }
+.search { display: flex; align-items: center; gap: 6px; padding: 0 8px; height: 36px; border-radius: 10px; background: var(--fill); color: var(--muted); }
 .search input { flex: 1; min-width: 0; font: inherit; font-size: 16px; border: 0; outline: none; background: none; color: var(--text); padding: 0; }
 .search input::-webkit-search-cancel-button { display: none; }
 .search .clear { border: 0; background: var(--faint); color: var(--card); width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; padding: 0; cursor: pointer; }
@@ -218,7 +213,7 @@ h2.section { font-size: 13px; font-weight: 400; text-transform: none; color: var
 }
 
 /* The code viewer. */
-.viewer { background: var(--card); border-radius: var(--radius); overflow: hidden; border: 0.5px solid var(--line); }
+.viewer { background: var(--card); border-radius: 14px; overflow: hidden; }
 .viewer-bar { display: flex; align-items: center; gap: 8px; padding: 6px 8px 6px 14px; border-bottom: 0.5px solid var(--line); font: 12px var(--mono); color: var(--muted); flex-wrap: wrap; }
 .viewer-info { flex: 1; white-space: nowrap; }
 .viewer-tools { display: flex; align-items: center; gap: 2px; margin-left: auto; }

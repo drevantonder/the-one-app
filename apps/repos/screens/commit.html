@@ -45,7 +45,7 @@ function sideBySide(f) {
 }
 
 function body(f, k) {
-  if (f.failed) return `<div class="file-note">${one.banner(f.failed, { retry: false })}<button class="button" onclick="load(${k}, true)">Try again</button></div>`;
+  if (f.failed) return `<div class="file-note">${one.problem({ title: one.plain(f.failed).title, action: { label: "Try Again", run: () => load(k, true) } })}</div>`;
   if (f.binary) return `<div class="file-note muted">Binary file not shown.</div>`;
   if (f.too_big) return `<div class="file-note muted">This file is too big to diff here.</div>`;
   if (f.large && !f.hunks) return `<div class="file-note"><span>Large diff, ${(f.additions + f.deletions).toLocaleString()} lines.</span><button class="button" onclick="load(${k}, true)">Load diff</button></div>`;
@@ -117,7 +117,7 @@ async function show() {
       <div class="segmented narrow" role="group" aria-label="Diff layout"><button data-split="0" class="${split ? "" : "on"}">Unified</button><button data-split="1" class="${split ? "on" : ""}">Split</button></div>
     </div>
     ${d.files.length ? `<div class="list changed">${d.files.map((f, k) => `<a class="row plain" onclick="document.getElementById('f${k}').scrollIntoView({ behavior: 'smooth' })">
-        ${one.icon(f.status === "added" ? "file" : f.status === "deleted" ? "x" : "git-diff", `row-icon ${f.status}`)}<div class="main"><div class="title"><span class="changed-path">${esc(f.path)}</span>${counts(f)}</div></div></a>`).join("")}</div>` : one.empty({ icon: "git-diff", title: "This commit changes no files." })}
+        ${one.icon(f.status === "added" ? "file" : f.status === "deleted" ? "x" : "git-diff", `row-icon ${f.status}`)}<div class="main"><div class="title"><span class="changed-path">${esc(f.path)}</span>${counts(f)}</div></div></a>`).join("")}</div>` : one.empty("This commit changes no files.")}
     ${d.files.map((f, k) => file(d, f, k)).join("")}`;
 }
 

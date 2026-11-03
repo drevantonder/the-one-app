@@ -34,9 +34,6 @@
     padding: calc(var(--size) * 0.13); border-radius: calc(var(--size) * 0.225); background: rgba(128, 128, 128, 0.22); box-shadow: inset 0 0 0 0.5px rgba(128, 128, 128, 0.3); align-content: start; }
   .folder > i { border-radius: calc(var(--mini) * 0.25); background: rgba(128, 128, 128, 0.18); }
   .folder .app-icon { --size: var(--mini) !important; width: var(--mini); height: var(--mini); font-size: 0; }
-  .empty-page { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 28px; margin-bottom: 20px; border-radius: 24px; background: var(--card); text-align: center; }
-  .empty-page b { font-size: 17px; }
-  .empty-page .button { margin-top: 6px; }
 
   /* Held: what a finger is on swells a little, as on the Home Screen, before it lifts or its menu opens. */
   .cell, .tile { transition: scale 0.25s ease; }
@@ -70,7 +67,7 @@
   .options { position: fixed; z-index: 30; inset: 0; display: grid; place-items: center; background: rgba(0, 0, 0, 0.3); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
     opacity: 0; transition: opacity 0.2s; perspective: 900px; }
   .options.on { opacity: 1; }
-  .options .back { width: min(380px, calc(100vw - 40px)); background: var(--card); border-radius: 22px; overflow: hidden; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
+  .options .back { width: min(380px, calc(100vw - 40px)); background: var(--card); border-radius: 28px; overflow: hidden; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
     transform: rotateY(-90deg); transition: transform 0.35s cubic-bezier(0.3, 1.3, 0.5, 1); }
   .options.on .back { transform: none; }
   .options .head { display: flex; align-items: center; gap: 10px; padding: 0 16px; height: 56px; font-weight: 600; }
@@ -270,7 +267,7 @@
       body.append(el);
       show();
     }
-    if (!body.children.length) body.innerHTML = one.empty({ icon: "squares-four", title: "No Widgets", text: `No app on ${esc(p.title)} has a widget.` });
+    if (!body.children.length) body.innerHTML = one.empty(`No app on ${esc(p.title)} has a widget.`);
   }
 
   /// While arranging, Edit's menu: Add Widget…, and the apps taken off the page, to put back.
@@ -685,10 +682,9 @@
     // In a window, the header has Edit Home Page; while arranging, Edit's menu and Done, as a Mac's toolbar does.
     el.innerHTML = (swipe ? "" : `<div class="header"><div><h1>${esc(p.title)}</h1>${p.subtitle ? `<div class="subtitle">${esc(p.subtitle)}</div>` : ""}</div>` +
         `<button class="edit" data-menu>Edit</button><button class="edit" data-done>Edit Home Page</button></div>`) +
-      (empty ? `<div class="empty-page"><b>Nothing here yet</b><div class="muted">${arrange ? `Apps you add ${p.scope === "user" ? "for yourself" : `to ${esc(p.title)}`} show up here.` : `When its admins add apps to ${esc(p.title)}, they show up here.`}</div>` +
-        `${arrange && home.store() ? `<button class="button primary" data-store>Open the App Store</button>` : ""}</div>` : "") +
+      (empty ? one.empty(arrange ? `Apps you add ${p.scope === "user" ? "for yourself" : `to ${esc(p.title)}`} show up here.` : `When its admins add apps to ${esc(p.title)}, they show up here.`,
+        arrange && home.store() ? { label: "Open the App Store", run: home.openStore } : null) : "") +
       `<div class="grid"></div>`;
-    el.querySelector("[data-store]")?.addEventListener("click", home.openStore);
     el.querySelector(".header [data-done]")?.addEventListener("click", () => edit(!editing));
     el.querySelector(".header [data-menu]")?.addEventListener("click", (e) => editMenu(p, e.currentTarget));
     const list = home.items(p).map((item) => {
@@ -790,7 +786,7 @@
       const scope = el.dataset.scope;
       if (scope === SETTINGS) drawSettings(el);
       else if (home.page(scope)) drawPage(el, home.page(scope));
-      else el.innerHTML = one.empty({ icon: "eye-slash", title: "Nothing Here", text: "This device can't open this page. Sign out and in again to choose it." });
+      else el.innerHTML = one.empty("This device can't open this page. Sign out and in again to choose it.");
     }
     drawEditBar();
     if (swipe) drawDots();

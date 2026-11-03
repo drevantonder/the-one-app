@@ -112,7 +112,7 @@ code { font: 0.88em var(--mono); }
 .diff-file.folded .diff-body { display: none; }
 .diff-file.folded header { border-bottom: 0; }
 .file-note { display: flex; align-items: center; justify-content: center; gap: 12px; padding: 16px; font-size: 14px; flex-wrap: wrap; }
-.file-note .banner { margin: 0; }
+.file-note .problem { margin: 0; }
 .diff-scroll { overflow-x: auto; }
 .diff { border-collapse: collapse; width: 100%; font: 12px/1.55 var(--mono); tab-size: 4; }
 .diff td { padding: 0; vertical-align: top; }

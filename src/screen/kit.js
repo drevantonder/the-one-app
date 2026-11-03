@@ -7,15 +7,21 @@
   one.loading = (label = "Loading") =>
     `<div class="loading" role="status" aria-live="polite"><span class="spinner" aria-hidden="true"></span><span>${esc(label)}</span></div>`;
 
-  // An empty list: an icon, a title, a line of text and a button, each but the title optional. `action.run` is what
-  // the button does.
+  // A button for what the kit draws, `action` `{ label, run }`: run when it's tapped.
   const runs = [];
-  one.empty = ({ icon = "tray", title, text, action } = {}) =>
-    `<div class="empty-state"><div class="empty-icon">${one.icon(icon)}</div><div class="empty-title">${esc(title)}</div>` +
-    (text ? `<div class="empty-text">${text}</div>` : "") +
-    (action ? `<button class="button" data-run="${runs.push(action.run) - 1}">${esc(action.label)}</button>` : "") +
-    "</div>";
-  document.addEventListener("click", (e) => runs[e.target.closest?.(".empty-state [data-run]")?.dataset.run]?.());
+  const button = (action, cls = "button") => `<button class="${cls}" data-run="${runs.push(action.run) - 1}">${esc(action.label)}</button>`;
+  document.addEventListener("click", (e) => runs[e.target.closest?.(".empty [data-run], .problem [data-run]")?.dataset.run]?.());
+
+  // An empty screen or list: one grey line (`html`, escaped by its caller), and a button only when there's an obvious
+  // first step.
+  one.empty = (html, action) => `<div class="empty">${html}${action ? `<div>${button(action)}</div>` : ""}</div>`;
+
+  // A problem, shown on the thing it's about: a symbol, a short title, one sentence, and the action that fixes it.
+  // `warn` for what can wait; otherwise it's red.
+  one.problem = ({ title, text = "", action, warn = false }) =>
+    `<div class="problem${warn ? " warn" : ""}" role="alert">${one.icon("warning-circle-fill", "problem-icon")}<div class="problem-main">` +
+    `<div class="problem-title">${esc(title)}</div>${text ? `<div class="problem-text">${esc(text)}</div>` : ""}` +
+    (action ? button(action, "problem-action") : "") + "</div></div>";
 
   // Errors and statuses are written for people and agents at once: what happened and what to do, in people's words,
   // then after a colon or in brackets what an agent needs (a tool to call, an id, a code). A sentence with any of
@@ -46,18 +52,8 @@
     return { title: said, safe: "Nothing was lost.", next: "", missing };
   };
 
-  // A failure as a banner, with Try again unless `retry` is false (one.render wires the button). It says what was safe
-  // only when given `safe`: a screen that failed to load lost nothing.
-  one.banner = (err, { safe, next, retry = true } = {}) => {
-    const p = one.plain(err);
-    const more = [safe, next ?? p.next].filter(Boolean).join(" ");
-    return `<div class="banner" role="alert">${one.icon("warning-circle", "banner-icon")}<div class="banner-text"><strong>${esc(p.title)}</strong>` +
-      (more ? `<span>${esc(more)}</span>` : "") +
-      (retry ? '<button class="button" data-retry>Try again</button>' : "") + "</div>";
-  };
-
-  // Draws `fn()`'s HTML into `el`: with a labelled spinner the first time, if it's slow (`wait` ms), and a banner with
-  // Try again if it fails. Later draws (on "changed") replace what's there only once they're ready.
+  // Draws `fn()`'s HTML into `el`: with a labelled spinner the first time, if it's slow (`wait` ms), and the problem,
+  // with Try Again, if it fails. Later draws (on "changed") replace what's there only once they're ready.
   one.render = async (el, fn, { loading = "Loading", wait = 120 } = {}) => {
     if (typeof el === "string") el = document.querySelector(el);
     const turn = (el.__turn = (el.__turn || 0) + 1);
@@ -71,13 +67,12 @@
       if (turn !== el.__turn) return;
       const p = one.plain(err);
       if (p.missing) return void (el.innerHTML = one.notFound({ title: p.title }));
-      el.innerHTML = one.banner(err);
-      el.__drawn = false;
-      el.querySelector("[data-retry]").onclick = () => {
+      el.innerHTML = one.problem({ title: p.title, text: p.next, action: { label: "Try Again", run: () => {
         one.tap();
         el.innerHTML = one.loading(loading);
         one.render(el, fn, { loading });
-      };
+      } } });
+      el.__drawn = false;
     } finally {
       clearTimeout(slow);
     }
@@ -228,5 +223,5 @@
 
   // For a page that isn't there: a friendly note and a way home.
   one.notFound = ({ title = "This page isn't here.", text = "The link may be old or mistyped.", home = "Go to Home" } = {}) =>
-    one.empty({ icon: "question", title, text: esc(text), action: { label: home, run: () => one.open("main") } });
+    one.empty(esc(`${title} ${text}`), { label: home, run: () => one.open("main") });
 })();

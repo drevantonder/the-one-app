@@ -89,10 +89,10 @@ async function show() {
       + (d.yours ? '<button class="button capsule" onclick="restore(this)">Restore</button>' : "") + danger(d);
   if (d.file) return one.open("file", { repo: d.repo, ref: refOf(d), path: at });
   if (d.empty)
-    return head(d) + one.empty({ icon: "code", title: "No code yet.", text: `${where}, push some:<br><code>git push ${esc(address(d.repo))} main</code>` }) + danger(d);
+    return head(d) + one.empty(`No code yet. ${where}, push some:<br><code>git push ${esc(address(d.repo))} main</code>`) + danger(d);
   const list = d.entries.length
     ? `<div class="list files">${at ? `<a class="row plain entry up" onclick="${go("repo", { repo: d.repo, ref: refOf(d), path: at.split("/").slice(0, -1).join("/") })}">${one.icon("folder", "entry-icon")}<span class="entry-name">..</span></a>` : ""}${d.entries.map((e) => entry(d, e)).join("")}</div>`
-    : one.empty({ icon: "folder", title: "This folder is empty." });
+    : one.empty("This folder is empty.");
   setTimeout(() => wide() && fill(d), 0);
   return `${head(d)}${pathBar(d)}<div class="code-box">${commitCard(d.latest, d)}${list}</div>${readme(d)}${more(d)}${danger(d)}`;
 }

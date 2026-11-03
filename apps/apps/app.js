@@ -375,7 +375,7 @@ const section = (title, list) => list.length ? '<h2 class="section">' + one.esc(
 
 function html() {
   const found = data.apps.filter((a) => !!a.service === (tab === "services") && (!query || [a.title, a.name, a.tagline || "", a.description || ""].some((t) => t.toLowerCase().includes(query))));
-  if (!found.length) return one.empty({ icon: "magnifying-glass", title: "No Results", text: query ? one.esc("Nothing matches “" + query + "”.") : "" });
+  if (!found.length) return one.empty(query ? one.esc("Nothing matches “" + query + "”.") : "No results.");
   return section("Built In", found.filter((a) => a.built_in && !a.deleted)) + section(MADE_HERE, found.filter((a) => !a.built_in && !a.deleted)) + section("Recently Deleted", found.filter((a) => a.deleted));
 }
 function draw() {
@@ -624,7 +624,7 @@ one.render("#activity", async () => {
   if (!one.params.app) return one.notFound();
   const h = await one.call("health", { app: one.params.app });
   const html = sections.map((s) => s(h)).join("");
-  return html || one.empty({ icon: "clock-counter-clockwise", title: "Nothing yet" });
+  return html || one.empty("Nothing yet.");
 });
 </script>`,
     },
