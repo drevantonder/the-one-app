@@ -199,6 +199,9 @@ function context(ask, body, appends, later) {
     },
     /// Every app in the install, as `GET /v1/apps` gives them to the caller.
     catalog: async () => (await ask("catalog")).json(),
+    /// The schedules the caller may switch, of the apps they may use, that are on and failed their last run, each as
+    /// `catalog` gives an app's `schedules`, with its `app`.
+    failing: async () => (await ask("failing")).json(),
     /// The install's devices, as `GET /v1/state` gives them to the caller: online or not, and each one's load.
     devices: async () => (await ask("devices")).json(),
     /// Where things run first (src/rank.rs): `{ order, admin }`, every device and the serverless node (key "cloudflare")

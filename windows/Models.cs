@@ -12,14 +12,11 @@ public sealed class Config
 {
     [JsonPropertyName("name")] public required string Name { get; init; }
     [JsonPropertyName("cli")] public required string Cli { get; init; }
-    [JsonPropertyName("accent")] public required string Accent { get; init; }
 }
 
 public sealed class NodeState
 {
     [JsonPropertyName("config")] public required Config Config { get; init; }
-    /// The node, to say which build it runs.
-    [JsonPropertyName("device")] public Machine? Device { get; init; }
     [JsonPropertyName("user")] public Person? User { get; init; }
     [JsonPropertyName("install")] public Install? Install { get; init; }
     /// What this app's sign-in opens: some scopes and apps, or (null) all of them.
@@ -49,12 +46,6 @@ public sealed class SignedIn
     [JsonPropertyName("apps")] public List<string>? Apps { get; init; }
 }
 
-public sealed class Machine
-{
-    [JsonPropertyName("key")] public required string Key { get; init; }
-    [JsonPropertyName("name")] public required string Name { get; init; }
-}
-
 public sealed class Person
 {
     [JsonPropertyName("id")] public required string Id { get; init; }
@@ -65,7 +56,6 @@ public sealed class Install
 {
     [JsonPropertyName("name")] public required string Name { get; init; }
     [JsonPropertyName("groups")] public required List<GroupInfo> Groups { get; init; }
-    [JsonPropertyName("devices")] public required List<Device> Devices { get; init; }
 }
 
 public sealed class GroupInfo
@@ -78,13 +68,6 @@ public sealed class GroupInfo
 public sealed class GroupMember
 {
     [JsonPropertyName("user")] public required string User { get; init; }
-}
-
-public sealed class Device
-{
-    [JsonPropertyName("key")] public required string Key { get; init; }
-    [JsonPropertyName("name")] public required string Name { get; init; }
-    [JsonPropertyName("build")] public string? Build { get; init; }
 }
 
 public sealed class AppInfo

@@ -38,7 +38,10 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -57,7 +60,24 @@ import androidx.core.graphics.PathParser
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
-// The Apple apps' calm look, on Android: their grouped greys and white cards, their type sizes, the install's accent.
+// The One App's look, on Android: the kit's colours, the iPhone's type sizes, and the phone's own tint.
+
+/** The kit's colours (src/screen/kit.css), light then dark: tests/contracts.rs holds them to it. */
+object Kit {
+    val bg = 0xffffff to 0x141414
+    val card = 0xf4f4f4 to 0x222222
+    val raised = 0xffffff to 0x3a3a3a
+    val fill = 0xececec to 0x2b2b2b
+    val line = 0xe6e6e6 to 0x2f2f2f
+    val text = 0x111111 to 0xf2f2f2
+    val muted = 0x6b6b6b to 0x9b9b9b
+    val faint = 0xc8c8c8 to 0x4d4d4d
+    val warn = 0xb45309 to 0xfbbf24
+    val danger = 0xdc2626 to 0xf87171
+    val badge = 0xff3b30 to 0xff3b30
+}
+
+private fun Pair<Int, Int>.of(dark: Boolean) = Color(0xFF000000.toInt() or (if (dark) second else first))
 
 /** The system colours a page is drawn in, light or dark, as the iPhone's are. */
 @Immutable
@@ -70,30 +90,36 @@ data class Palette(
     val tertiary: Color,
     val separator: Color,
     val fill: Color,
-    val accent: Color,
+    val tint: Color,
 ) {
     val green = if (dark) Color(0xFF30D158) else Color(0xFF34C759)
-    val orange = if (dark) Color(0xFFFF9F0A) else Color(0xFFFF9500)
-    val red = if (dark) Color(0xFFFF453A) else Color(0xFFFF3B30)
+    val orange = Kit.warn.of(dark)
+    val red = Kit.danger.of(dark)
     val blue = Color(0xFF0A9EDC)
     val purple = Color(0xFFA550D9)
+    /** A sheet's background, as the kit's `data-raised` has it. */
+    val raised = if (dark) card else background
 }
 
-val LocalPalette = staticCompositionLocalOf { palette(false, BuildConfig.ACCENT) }
+val LocalPalette = staticCompositionLocalOf { palette(false, Color(0xFF007AFF)) }
 
-fun palette(dark: Boolean, accent: String) = if (dark) Palette(
-    dark = true, background = Color.Black, card = Color(0xFF1C1C1E), label = Color.White, secondary = Color(0x99EBEBF5),
-    tertiary = Color(0x4DEBEBF5), separator = Color(0x5C545458), fill = Color(0x3D767680), accent = accentColor(accent, true),
-) else Palette(
-    dark = false, background = Color(0xFFF2F2F7), card = Color.White, label = Color.Black, secondary = Color(0x993C3C43),
-    tertiary = Color(0x4D3C3C43), separator = Color(0x4A3C3C43), fill = Color(0x1F787880), accent = accentColor(accent, false),
+fun palette(dark: Boolean, tint: Color) = Palette(
+    dark = dark, background = Kit.bg.of(dark), card = Kit.card.of(dark), label = Kit.text.of(dark), secondary = Kit.muted.of(dark),
+    tertiary = Kit.faint.of(dark), separator = Kit.line.of(dark), fill = Kit.fill.of(dark), tint = tint,
 )
 
-/** An accent from hex, lifted a little in dark mode so it keeps its contrast there, yet still carries white text. */
-fun accentColor(hex: String, dark: Boolean): Color {
+/** The phone's tint (tint.xml in res), in light or dark, whatever the phone itself is in. */
+fun tint(context: Context, dark: Boolean): Color {
+    val config = android.content.res.Configuration(context.resources.configuration)
+    config.uiMode = (config.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK.inv()) or
+        if (dark) android.content.res.Configuration.UI_MODE_NIGHT_YES else android.content.res.Configuration.UI_MODE_NIGHT_NO
+    return Color(context.createConfigurationContext(config).getColor(R.color.tint))
+}
+
+/** A colour from `#rrggbb`. */
+fun hexColor(hex: String): Color {
     val v = hex.trimStart('#').toLongOrNull(16) ?: 0x808080
-    val rgb = listOf(16, 8, 0).map { ((v shr it) and 0xFF) / 255f }.map { if (dark) it + (1 - it) * 0.2f else it }
-    return Color(rgb[0], rgb[1], rgb[2])
+    return Color(((v shr 16) and 0xFF).toInt(), ((v shr 8) and 0xFF).toInt(), (v and 0xFF).toInt())
 }
 
 /** The iPhone's text styles, in Android's units. */
@@ -113,19 +139,19 @@ object Type {
 enum class Appearance(val title: String) { Automatic("Automatic"), Light("Light"), Dark("Dark") }
 
 @Composable
-fun Theme(accent: String, appearance: Appearance, content: @Composable () -> Unit) {
+fun Theme(appearance: Appearance, content: @Composable () -> Unit) {
     val dark = when (appearance) {
         Appearance.Automatic -> isSystemInDarkTheme()
         Appearance.Light -> false
         Appearance.Dark -> true
     }
-    val p = palette(dark, accent)
+    val p = palette(dark, tint(LocalContext.current, dark))
     val base = if (dark) darkColorScheme() else lightColorScheme()
     val scheme = base.copy(
-        primary = p.accent, onPrimary = Color.White, secondary = p.accent, background = p.background, onBackground = p.label,
+        primary = p.tint, onPrimary = Color.White, secondary = p.tint, background = p.background, onBackground = p.label,
         surface = p.card, onSurface = p.label, onSurfaceVariant = p.secondary, surfaceVariant = p.fill, surfaceContainer = p.card,
         surfaceContainerLow = p.background, surfaceContainerHigh = p.card, surfaceContainerHighest = p.fill, surfaceTint = Color.Transparent,
-        outline = p.separator, outlineVariant = p.separator, error = p.red, primaryContainer = p.accent.copy(alpha = 0.16f), onPrimaryContainer = p.accent,
+        outline = p.separator, outlineVariant = p.separator, error = p.red, primaryContainer = p.tint.copy(alpha = 0.16f), onPrimaryContainer = p.tint,
     )
     CompositionLocalProvider(LocalPalette provides p) {
         MaterialTheme(colorScheme = scheme, typography = MaterialTheme.typography.copy(bodyLarge = Type.body, bodyMedium = Type.subheadline), content = content)
@@ -137,16 +163,26 @@ fun Theme(accent: String, appearance: Appearance, content: @Composable () -> Uni
 /** Phosphor's icons (vendor/phosphor), which apps name for their tiles, screens and widgets, so every device draws the
  *  same ones: each a path on a 256-point grid, drawn filled. `git-branch` is the regular one, `git-branch-fill` filled. */
 object Glyphs {
-    private var all: Map<String, String> = emptyMap()
+    /** Read on a thread of its own (1 MB of JSON): until then icons draw as nothing, and once it is, they draw again. */
+    private var all by mutableStateOf<Map<String, String>>(emptyMap())
     private val paths = LruCache<String, Path>(200)
 
+    /** Reads them, here and now: for what draws off the main thread. */
+    @Synchronized
     fun load(context: Context) {
         if (all.isNotEmpty()) return
         val text = context.assets.open("icons.json").bufferedReader().readText()
         all = (json.parseToJsonElement(text) as JsonObject).mapValues { it.value.jsonPrimitive.content }
     }
 
+    /** Reads them in the background, for the app's own screens. */
+    fun loadSoon(context: Context) {
+        if (all.isEmpty()) Thread { runCatching { load(context.applicationContext) } }.start()
+    }
+
     fun has(name: String?) = name != null && all.containsKey(name)
+
+    val ready get() = all.isNotEmpty()
 
     /** An icon's path data, as screens draw it. */
     fun data(name: String) = all[name]
@@ -180,7 +216,7 @@ private val tiles = LruCache<String, Bitmap>(80)
 /** An app's icon tile as the iPhone's Home Screen draws one, `px` pixels across: a finished app icon edge to edge, a
  *  logo inset on white, or its icon filled (or first letter) in white on its colour. */
 fun tileBitmap(look: TileLook, px: Int, title: String = look.seed): Bitmap {
-    val key = "${look.icon}|${look.seed}|${look.color}|${look.image?.length}|${look.image?.hashCode()}|${look.imageKind}|$px|$title"
+    val key = "${look.icon}|${look.seed}|${look.color}|${look.image?.length}|${look.image?.hashCode()}|${look.imageKind}|$px|$title|${Glyphs.ready}"
     tiles.get(key)?.let { return it }
     val bitmap = Bitmap.createBitmap(px, px, Bitmap.Config.ARGB_8888)
     val canvas = Canvas(bitmap)
@@ -200,7 +236,7 @@ fun tileBitmap(look: TileLook, px: Int, title: String = look.seed): Bitmap {
         val (w, h) = if (clear) picture.width * fit to picture.height * fit else s to s
         canvas.drawBitmap(picture, null, RectF((s - w) / 2, (s - h) / 2, (s + w) / 2, (s + h) / 2), paint)
     } else {
-        val base = accentColor(look.color ?: colors[steadyHash(look.seed) % colors.size], false)
+        val base = hexColor(look.color ?: colors[steadyHash(look.seed) % colors.size])
         val top = Color(minOf(1f, base.red * 1.12f + 0.04f), minOf(1f, base.green * 1.12f + 0.04f), minOf(1f, base.blue * 1.12f + 0.04f))
         paint.shader = LinearGradient(0f, 0f, 0f, s, top.toArgb(), base.toArgb(), Shader.TileMode.CLAMP)
         canvas.drawRect(0f, 0f, s, s, paint)
@@ -235,29 +271,29 @@ private fun clearCorners(b: Bitmap): Boolean =
 @Composable
 fun AppTile(look: TileLook, size: Dp, title: String = look.seed) {
     val px = with(LocalDensity.current) { size.roundToPx() }
-    val bitmap = remember(look, px, title) { tileBitmap(look, px, title).asImageBitmap() }
+    val bitmap = remember(look, px, title, Glyphs.ready) { tileBitmap(look, px, title).asImageBitmap() }
     Image(bitmap, contentDescription = null, modifier = Modifier.size(size).shadow(size * 0.06f, RoundedCornerShape(size * 0.225f), clip = false))
 }
 
-/** A Phosphor icon by name, filled in `color`; a dot if there's none by that name. */
+/** A Phosphor icon by name, filled in `color`; a dot if there's none by that name, and nothing until they're read. */
 @Composable
 fun Symbol(name: String, color: Color, size: Dp, modifier: Modifier = Modifier) {
-    Glyphs.load(LocalContext.current)
-    val path = remember(name) { Glyphs.path(name)?.asComposePath() }
+    val ready = Glyphs.has(name)
+    val path = remember(name, ready) { Glyphs.path(name)?.asComposePath() }
     if (path != null) {
         androidx.compose.foundation.Canvas(modifier.size(size)) {
             scale(this.size.width / 256f, pivot = Offset.Zero) { drawPath(path, color) }
         }
-    } else {
+    } else if (Glyphs.ready) {
         Box(modifier.size(size), contentAlignment = Alignment.Center) { Box(Modifier.size(size / 3).background(color, CircleShape)) }
-    }
+    } else Spacer(modifier.size(size))
 }
 
-/** A large accent button, as the iPhone's prominent ones. */
+/** A large tinted button, as the iPhone's prominent ones. */
 @Composable
 fun Prominent(text: String, modifier: Modifier = Modifier, enabled: Boolean = true, onClick: () -> Unit) {
     val p = LocalPalette.current
-    Button(onClick, modifier, enabled = enabled, colors = ButtonDefaults.buttonColors(containerColor = p.accent, contentColor = Color.White), shape = CircleShape) {
+    Button(onClick, modifier, enabled = enabled, colors = ButtonDefaults.buttonColors(containerColor = p.tint, contentColor = Color.White), shape = CircleShape) {
         Text(text, style = Type.body, fontWeight = FontWeight.SemiBold)
     }
 }

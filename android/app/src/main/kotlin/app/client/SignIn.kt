@@ -9,6 +9,7 @@ import android.util.Base64
 import androidx.browser.customtabs.CustomTabsClient
 import androidx.browser.customtabs.CustomTabsIntent
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -64,8 +65,8 @@ class SignIn(private val context: Context) {
 
     /** The auth service's endpoints, as it says them. */
     private suspend fun meta(): Meta {
-        val r = http("GET", "${address ?: throw NodeError("Give your install’s address first.")}/.well-known/oauth-authorization-server")
-        if (r.status != 200) throw NodeError("The sign-in service isn’t answering.")
+        val r = http("GET", "${address ?: throw NodeError("Enter the address first.")}/.well-known/oauth-authorization-server")
+        if (r.status != 200) throw NodeError("Can’t reach that address. Check it, and that you’re online.")
         return json.decodeFromString(r.text)
     }
 
@@ -185,6 +186,29 @@ class SignIn(private val context: Context) {
 class Reply(val status: Int, val bytes: ByteArray, val type: String?) {
     val text get() = String(bytes)
 }
+
+/** How long to wait before asking again the `misses`th time running (from 0) after the node didn't answer, in ms: at
+ *  once, then a quarter second, doubling, up to five. A node restarting for an update is back within a moment. */
+fun retryWait(misses: Int): Long = if (misses == 0) 0 else minOf(5000L, 125L shl minOf(misses, 6))
+
+/** `send`, again for a few seconds while nothing answers or the gateway reaches no node, so nothing ran; never one
+ *  that timed out, which may have. */
+suspend fun retried(send: suspend () -> Reply): Reply {
+    for (misses in 0..4) {
+        try {
+            val r = send()
+            if (r.status !in setOf(502, 503, 530)) return r
+        } catch (e: java.net.ConnectException) {
+        } catch (e: java.net.UnknownHostException) {
+        } catch (e: java.net.NoRouteToHostException) {
+        }
+        delay(retryWait(misses))
+    }
+    return send()
+}
+
+/** Names a call wherever it's sent, so sent again it runs once. */
+fun callId(): String = ByteArray(8).also { SecureRandom().nextBytes(it) }.joinToString("") { "%02x".format(it) }
 
 /** One HTTP request, off the main thread. */
 suspend fun http(method: String, url: String, body: ByteArray? = null, type: String? = null, headers: Map<String, String> = emptyMap(), timeout: Int = 30_000): Reply =

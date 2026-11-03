@@ -1,6 +1,6 @@
 #!/bin/bash
 # Builds the iPhone app and installs it: on the booted simulator (or $SIMULATOR), or with `device`, signed with
-# your team, on the connected iPhone (or $DEVICE). CONFIG=path/to/config.toml builds another white label. SCREENS=1
+# your team, on the connected iPhone (or $DEVICE), or with `device <dir>` kept in dir for an update to install. CONFIG=path/to/config.toml builds another white label. SCREENS=1
 # builds Screens instead, beside it: the iPhone app with every client's screens as its home.
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -16,7 +16,10 @@ if [ "${1:-}" = device ]; then
 	build=(xcodebuild -project Shells.xcodeproj -scheme $scheme -configuration Release -destination generic/platform=iOS
 		-derivedDataPath build/derived -allowProvisioningUpdates build -quiet)
 	if [ -n "${SSH_CONNECTION:-}" ]; then session "${build[@]}"; else "${build[@]}"; fi
-	device=${DEVICE:-$(xcrun devicectl list devices | grep physical | grep iPhone | grep -v unavailable | grep -Eo '[0-9A-F]{8}-[0-9A-F]{16}' | head -1)}
+	if [ -n "${2:-}" ]; then rm -rf "$2" && mkdir -p "$2" && ditto "build/derived/Build/Products/Release-iphoneos/$name.app" "$2/$name.app"; exit; fi
+	# The paired iPhone, as an update's job finds it (src/update.rs), over USB or the network.
+	devices=$(mktemp) && xcrun devicectl list devices --json-output "$devices" >/dev/null
+	device=${DEVICE:-$(jq -r '[.result.devices[] | select(.hardwareProperties.reality == "physical" and .hardwareProperties.deviceType == "iPhone" and .connectionProperties.pairingState == "paired")][0].identifier // empty' "$devices")}
 	xcrun devicectl device install app --device "$device" "build/derived/Build/Products/Release-iphoneos/$name.app"
 	xcrun devicectl device process launch --device "$device" "$id" || true
 else

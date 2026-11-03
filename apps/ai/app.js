@@ -18,7 +18,7 @@ async function settings(ctx) {
   return out;
 }
 
-/// Errors that mean a limit stopped the call: Claims and others tell the person when to try again.
+/// Errors that mean a limit stopped the call: apps tell the person when to try again.
 const limit = (when) => new Error(when === "day" ? "AI limit: day. Today's AI is used up; more tomorrow." : "AI limit: minute. Try again in a minute.");
 
 async function gemini(ctx, s, body) {
@@ -55,39 +55,46 @@ export default {
 
   ops: {
     settings: {
-      description: "Which AI answers: provider (local or gemini), local_device (the device with the local models), and the models for reading and deciding.",
+      reads: true,
+      description: "Which AI answers ai_read and ai_decide for you: { provider, local_device, read_model, decide_model, gemini_model }, your own settings over everyone's, over the defaults. provider is local (models on local_device, or any of your devices when it's null) or gemini.",
       input: { type: "object", properties: {} },
       run: (ctx) => settings(ctx),
     },
     set: {
-      description: "Change which AI answers, for you (or, with scope global, for everyone: admins). provider is local or gemini (Gemini needs a Gemini key in the Vault: vault_request with app ai and need gemini).",
+      reads: false,
+      description: "Change which AI answers ai_read and ai_decide, for you, or with scope global for everyone (admins only): only the settings given change. Gemini needs a Gemini key in the Vault first: vault_request with app ai and need gemini. Says Saved.",
       input: {
         type: "object",
         properties: {
-          provider: { type: "string", enum: ["local", "gemini"] },
-          local_device: { type: "string", description: "the device whose local models answer, by name" },
-          read_model: { type: "string" }, decide_model: { type: "string" }, gemini_model: { type: "string" },
-          scope: { type: "string", description: "user (the default) or global" },
+          provider: { type: "string", enum: ["local", "gemini"], description: "local, the models on your devices, or gemini, Google's, which reads PDFs too" },
+          local_device: { type: "string", description: "the device whose local models answer, by its name as models_accounts lists them" },
+          read_model: { type: "string", description: "the local model ai_read uses, as models_here lists them; default gemma4:12b" },
+          decide_model: { type: "string", description: "the local decision model ai_decide uses, as models_here lists them; default clef-flash" },
+          gemini_model: { type: "string", description: "the Gemini model ai_read uses with provider gemini, as Google names it; default gemini-3.5-flash-lite" },
+          scope: { type: "string", enum: ["user", "global"], description: "user, for you (the default), or global, for everyone" },
         },
       },
       async run(ctx, input) {
         const s = input.scope === "global" ? ctx.global : ctx.user;
-        if (!s) throw new Error(`ai isn't installed for ${input.scope || "you"}`);
-        if (input.scope === "global" && s.role !== "admin") throw new Error("only admins change everyone's AI");
-        if (input.provider && !["local", "gemini"].includes(input.provider)) throw new Error("provider is local or gemini");
+        if (!s) throw new Error(input.scope === "global" ? "AI isn't added for everyone: an admin adds it with apps_add, app ai and scope global" : "AI isn't added for you: apps_add with app ai and scope user adds it");
+        if (input.scope === "global" && s.role !== "admin") throw new Error("only admins change everyone's AI: leave out scope to change your own");
+        if (input.provider && !["local", "gemini"].includes(input.provider)) throw new Error(`provider is local or gemini, not ${JSON.stringify(input.provider)}`);
         for (const key of Object.keys(DEFAULTS)) if (input[key] !== undefined) s.exec("insert or replace into settings values (?, ?)", [key, JSON.stringify(input[key])]);
         return "Saved.";
       },
     },
     read: {
-      description: "Read files (photos or PDFs, base64) with a prompt and answer the model's text. system sets its instructions; max_tokens caps the answer; json_schema asks for JSON that matches it. Answers { text, provider, cut } (cut: the answer hit max_tokens). Fails with \"AI limit: minute|day\" when a limit stops it.",
+      reads: true,
+      description: "Read photos or PDFs with a prompt, with the AI ai_settings names, for text out of a receipt, a form or a scan. Gives { text, provider, cut }: the answer, which AI gave it, and cut when it hit max_tokens. Local models read photos only. Fails with \"AI limit: minute\" or \"AI limit: day\" when a limit stops it: try again then. For a question with no file, models_chat.",
       input: {
         type: "object",
         required: ["prompt"],
         properties: {
-          prompt: { type: "string" }, system: { type: "string" },
-          files: { type: "array", items: { type: "object", description: "{ type, data }: a MIME type and base64 bytes" } },
-          max_tokens: { type: "number" }, json_schema: { type: "object" },
+          prompt: { type: "string", description: "what to do with the files, like \"The total and date of this receipt\"" },
+          system: { type: "string", description: "instructions it follows throughout, like \"Answer only with JSON.\"" },
+          files: { type: "array", items: { type: "object", description: "{ type, data }: a MIME type (image/jpeg, image/png, application/pdf) and the file's bytes in base64" }, description: "the photos or PDFs to read, as { type, data }" },
+          max_tokens: { type: "number", description: "the longest answer, in tokens; default 8192" },
+          json_schema: { type: "object", description: "a JSON schema the answer's text must match, like { type: \"object\", properties: { total: { type: \"number\" } } }" },
         },
       },
       async run(ctx, { prompt, system, files = [], max_tokens = 8192, json_schema }) {
@@ -119,11 +126,16 @@ export default {
       },
     },
     decide: {
-      description: "Ask a decision model questions about something: state is named fields; questions are named, each { type: choice, instructions, criteria: { option: description } } (or noul, score); images are [{ content_type, base64 }] (or base64 strings). Answers { answers: { name: { choice, probabilities, confidence } }, usage }.",
+      reads: true,
+      description: "Ask the decision model ai_settings names typed questions about something, for fast labels and scores rather than prose. Each question is a choice (one of criteria), noul (yes or no) or score (one of levels, lowest first). Gives { answers: { <question>: { choice, probabilities, confidence } }, usage }. To pick the model yourself, models_decide.",
       input: {
         type: "object",
         required: ["questions"],
-        properties: { state: { type: "object" }, questions: { type: "object" }, images: { type: "array", items: { type: "object" } } },
+        properties: {
+          state: { type: "object", description: "what to decide about, as named fields: { subject: \"...\", body: \"...\" }" },
+          questions: { type: "object", description: "named questions, each { type: choice, noul or score, instructions, criteria: { option: what it means } for choice, levels: [lowest, ..., highest] for score }" },
+          images: { type: "array", items: { type: "object" }, description: "images as { content_type, base64 } (or base64 strings), which state names as image 1, image 2..." },
+        },
       },
       async run(ctx, { state = {}, questions, images }) {
         const s = await settings(ctx);

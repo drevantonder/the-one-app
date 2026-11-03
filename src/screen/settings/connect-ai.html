@@ -1,0 +1,18 @@
+<div class="large-title">Connect Your AI</div>
+<div id="ask"></div>
+<style>
+  .lede { color: var(--muted); margin: 0 4px 12px; }
+  .prompt { display: block; padding: 14px 16px; }
+  .prompt p { margin: 0 0 10px; user-select: text; -webkit-user-select: text; overflow-wrap: anywhere; }
+  .prompt .copy { font-size: 15px; font-weight: 600; color: var(--tint); padding: 4px 0; }
+  .prompt .copy:hover { background: none; opacity: 0.7; }
+  .prompt .copy.copied { color: var(--text); }
+</style>
+<script>
+  one.largeTitle("Connect Your AI");
+  one.render("#ask", async () => {
+    // What to paste into an AI so it connects itself, as the node says.
+    const text = (await one.api("GET", "/v1/state")).agent_prompt;
+    return `<p class="lede">Claude, ChatGPT or another can use your apps as you.</p><div class="list"><div class="row prompt"><p>${one.esc(text)}</p>${one.copyButton(text)}</div></div>`;
+  }, { skeleton: "text" });
+</script>

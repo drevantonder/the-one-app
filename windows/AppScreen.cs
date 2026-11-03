@@ -29,7 +29,8 @@ public sealed class AppScreen : Grid
     readonly Action<string> retitle;
     /// The sheet it's in, if it's in one.
     readonly Sheet? sheet;
-    readonly WebView2 web = new() { DefaultBackgroundColor = Colors.Transparent, Opacity = 0 };
+    // Faded in as it first draws, not popped in.
+    readonly WebView2 web = new() { DefaultBackgroundColor = Colors.Transparent, Opacity = 0, OpacityTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(150) } };
     readonly string origin;
     string? html;
 
@@ -47,7 +48,10 @@ public sealed class AppScreen : Grid
         var name = new string((route.App ?? "").ToLowerInvariant().Select(c => char.IsAsciiLetterOrDigit(c) || c == '-' ? c : '-').ToArray()).Trim('-');
         origin = Own ? "https://own.localhost" : $"https://{(name.Length == 0 ? "app" : name)}.screen.localhost";
         Children.Add(web);
-        Children.Add(new ProgressRing { IsActive = true, Width = 28, Height = 28, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center });
+        // A spinner only if it's slow: most screens are quicker than one would be worth.
+        var ring = new ProgressRing { IsActive = true, Width = 28, Height = 28, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, Visibility = Visibility.Collapsed };
+        Children.Add(ring);
+        _ = Task.Delay(400).ContinueWith(_ => ring.Visibility = Visibility.Visible, TaskScheduler.FromCurrentSynchronizationContext());
         // Node events reach the screen as the bridge's `one.__event`, while it's in the window.
         Loaded += async (_, _) =>
         {
@@ -77,13 +81,18 @@ public sealed class AppScreen : Grid
     {
         if (web.CoreWebView2 == null) return;
         web.CoreWebView2.Profile.PreferredColorScheme = Scheme;
-        _ = web.CoreWebView2.ExecuteScriptAsync($"document.documentElement.style.zoom = '{Zoom}'");
+        _ = web.CoreWebView2.ExecuteScriptAsync($"document.documentElement.style.zoom = '{Zoom}'; " +
+            $"document.getElementById('one-tint') && (document.getElementById('one-tint').textContent = {System.Text.Json.JsonSerializer.Serialize(TintCss)})");
     }
 
     async Task Start()
     {
-        if (web.CoreWebView2 != null || !await Fetch()) return;
-        await web.EnsureCoreWebView2Async();
+        if (web.CoreWebView2 != null || starting) return;
+        starting = true;
+        // Its web view made while its page is fetched, not after: in the browser all screens share (App.Web).
+        var making = Make();
+        if (!await Fetch()) return;
+        await making;
         var core = web.CoreWebView2!;
         var settings = core.Settings;
         settings.AreHostObjectsAllowed = false;
@@ -127,7 +136,9 @@ public sealed class AppScreen : Grid
         core.Navigate($"{origin}/");
     }
 
-    bool shown;
+    bool shown, starting;
+
+    async Task Make() => await web.EnsureCoreWebView2Async(await App.Web);
 
     // MARK: Offline
 
@@ -164,7 +175,7 @@ public sealed class AppScreen : Grid
                 (html, kept) = copy;
             }
             misses++;
-            _ = Again(TimeSpan.FromSeconds(Math.Min(30, 1 << Math.Min(misses, 5))));
+            _ = Again(Node.RetryWait(misses));
             return true;
         }
     }
@@ -184,7 +195,7 @@ public sealed class AppScreen : Grid
         }
     }
 
-    /// The bar over a screen shown as it last looked: since when, and when it's asked again (`next`), with Try Now;
+    /// The bar over a screen shown as it last looked: since when, with Try Now while it waits to ask again (`next`);
     /// asking now, if `next` is null; gone once the node answers.
     void Offline(DateTime? next)
     {
@@ -193,19 +204,18 @@ public sealed class AppScreen : Grid
             if (offline != null) Children.Remove(offline);
             offline = null;
             ticking?.Stop();
-            web.Margin = new Thickness(0);
             return;
         }
-        // Below the bar, while it's there.
-        web.Margin = new Thickness(0, 64, 0, 0);
+        // Over the screen, and only once it's more than a blip.
         if (offline == null)
         {
-            offline = new InfoBar { IsOpen = true, IsClosable = false, Severity = InfoBarSeverity.Informational, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(12, 8, 12, 0) };
+            var bar = offline = new InfoBar { IsOpen = false, IsClosable = false, Severity = InfoBarSeverity.Informational, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(12, 8, 12, 0) };
+            _ = Task.Delay(1500).ContinueWith(_ => bar.IsOpen = true, TaskScheduler.FromCurrentSynchronizationContext());
             var now = new Button { Content = "Try Now" };
             now.Click += (_, _) => waiting?.Cancel();
             offline.ActionButton = now;
             Children.Add(offline);
-            ticking = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+            ticking = new DispatcherTimer { Interval = TimeSpan.FromSeconds(30) };
             ticking.Tick += (_, _) => Say();
             ticking.Start();
         }
@@ -214,8 +224,8 @@ public sealed class AppScreen : Grid
         {
             if (offline == null) return;
             var ago = DateTime.Now - since;
-            var when = ago.TotalMinutes < 1 ? "just now" : ago.TotalHours < 1 ? $"{(int)ago.TotalMinutes} min ago" : ago.TotalDays < 1 ? $"{(int)ago.TotalHours} hr ago" : since.ToString("d MMM");
-            offline.Message = $"Offline: this is how it looked {when}. " + (next is { } n ? $"Reconnecting in {Math.Max(1, (int)Math.Ceiling((n - DateTime.Now).TotalSeconds))}s" : "Reconnecting…");
+            var when = ago.TotalMinutes < 1 ? null : ago.TotalHours < 1 ? $"{(int)ago.TotalMinutes} min ago" : ago.TotalDays < 1 ? $"{(int)ago.TotalHours} hr ago" : since.ToString("d MMM");
+            offline.Message = (when == null ? "Offline" : $"Offline · from {when}") + (next == null ? " · Trying again…" : "");
         }
         Say();
     }
@@ -265,28 +275,23 @@ public sealed class AppScreen : Grid
     /// Accessibility > Text size).
     static string Zoom => (14.0 / 17 * new Windows.UI.ViewManagement.UISettings().TextScaleFactor).ToString(System.Globalization.CultureInfo.InvariantCulture);
 
-    /// What makes a screen sit in the window as its own: the window's backdrop shows through, the install's accent in
-    /// light and dark, and on a computer, Windows' size of text (a page's widgets keep their own size).
-    static string Fitted()
-    {
-        var accent = Store.Shared.Config?.Accent ?? WhiteLabel.Accent;
-        string Css(bool dark)
-        {
-            var c = Look.Hex(accent, dark);
-            return $"rgb({c.R}, {c.G}, {c.B})";
-        }
-        return $$"""
-            document.addEventListener("DOMContentLoaded", () => {
-              const style = document.createElement("style");
-              style.textContent = `
-                html, body { background: transparent !important; }
-                :root:root { --accent: {{Css(false)}}; --bg: transparent; --card: rgba(0, 0, 0, 0.04); }
-                @media (prefers-color-scheme: dark) { :root:root { --accent: {{Css(true)}}; --card: rgba(255, 255, 255, 0.05); } }`;
-              document.head.appendChild(style);
-              document.documentElement.style.zoom = "{{Zoom}}";
-            });
-            """;
-    }
+    /// The person's tint in light and dark (Tint.cs), as the screen's `--tint`.
+    static string TintCss => $$"""
+        :root:root { --tint: {{Tint.Css(false)}}; }
+        @media (prefers-color-scheme: dark) { :root:root { --tint: {{Tint.Css(true)}}; } }
+        """;
+
+    /// What makes a screen sit in the window as its own: the person's tint, and on a computer, Windows' size of text
+    /// (a page's widgets keep their own size). It draws its own page colour, beside the sidebar's Mica.
+    static string Fitted() => $$"""
+        document.addEventListener("DOMContentLoaded", () => {
+          const style = document.createElement("style");
+          style.id = "one-tint";
+          style.textContent = {{System.Text.Json.JsonSerializer.Serialize(TintCss)}};
+          document.head.appendChild(style);
+          document.documentElement.style.zoom = "{{Zoom}}";
+        });
+        """;
 
     static void Outside(string uri)
     {
@@ -347,13 +352,8 @@ public sealed class AppScreen : Grid
                     Reply(id, Appearance.Chosen);
                     return;
                 case "device":
-                    {
-                        var store = Store.Shared;
-                        var device = store.Install?.Devices.FirstOrDefault(s => s.Key == store.State?.Device?.Key);
-                        var build = $"{WhiteLabel.Name}, app {WhiteLabel.Commit}" + (device?.Build is { } b ? $"\n{device.Name} runs {b}" : "");
-                        Reply(id, new JsonObject { ["name"] = Environment.MachineName, ["build"] = build, ["signOut"] = true });
-                        return;
-                    }
+                    Reply(id, new JsonObject { ["name"] = Environment.MachineName, ["signOut"] = true });
+                    return;
                 case "request":
                     Reply(id, await Asked(Route.Request(Text(m, "scope") ?? "", Text(m, "id") ?? "")));
                     return;
@@ -421,7 +421,7 @@ public sealed class AppScreen : Grid
                         if (Own) throw new Exception("Settings has no app to ask for.");
                         var scope = route.Scope ?? "user";
                         var asked = await Node.RequestItem(scope, route.App!, Text(m, "need") ?? "") ?? throw new Exception("The Vault didn’t take the request");
-                        Reply(id, await Asked(Route.Request(scope, asked)));
+                        Reply(id, await Asked(Route.Request(asked.Scope, asked.Id)));
                         return;
                     }
                 case "scan":

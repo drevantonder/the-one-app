@@ -31,6 +31,27 @@ function actsFor(e, owner) {
   return false;
 }
 
+/// Times in what an operation gives, ms since 1970 here, as ISO 8601.
+function iso(v) {
+  if (Array.isArray(v)) return v.map(iso);
+  if (!v || typeof v !== "object") return v;
+  return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, typeof x === "number" && ["time", "created", "updated", "committed"].includes(k) ? new Date(x).toISOString() : iso(x)]));
+}
+
+const OWNER = { type: "string", description: "who owns it: omit for you, admins, or a group you're an admin of as group:<id>, from groups_list" };
+const REPO = { type: "string", description: "a repo's name, from repos_list, like notes" };
+const REF = { type: "string", description: "a branch, like main, or a commit's sha, from repos_branches or repos_log; default main, else the first branch" };
+const PATH = { type: "string", description: "a path in the repo, like src/app.js or docs; omit for the whole repo" };
+const SHA = { type: "string", description: "a commit's sha, full or its first 7 characters, from repos_log" };
+
+/// The repo named, or an error naming those there are.
+async function named(ctx, name) {
+  const r = await live(global(ctx), name);
+  if (r) return r;
+  const all = (await global(ctx).query("select name from repos where deleted is null order by name")).map((r) => r.name);
+  throw new Error(`no repo ${name}: ${all.length ? `there's ${all.join(", ")}` : "there are none yet; repos_create makes one"}`);
+}
+
 const randomId = () => [...crypto.getRandomValues(new Uint8Array(8))].map((x) => x.toString(16).padStart(2, "0")).join("");
 
 /// Writes a new repo, or a fork of `from` with its branches and history as they are now.
@@ -63,7 +84,7 @@ async function live(g, name) {
 /// A repo the caller acts for the owner of, to delete, restore or erase.
 async function owned(ctx, name) {
   const r = await repoOf(global(ctx), name);
-  if (!r) throw new Error(`no repo ${name}`);
+  if (!r) await named(ctx, name);
   if (!actsFor(asWriter(ctx), r.owner)) throw new Error(`only ${ownerName(ctx, r.owner)} deletes, restores or erases ${name}`);
   return r;
 }
@@ -112,7 +133,7 @@ export default {
   ops: {
     list: {
       reads: true,
-      description: "Every repo: its owner, where it was forked from, its default branch (main, or else its first), how many branches it has, and when it last moved. Deleted ones say when, and wait in Recently Deleted.",
+      description: "Every repo, the latest moved first: its name, its owner's name, where it was forked from, its default branch (main, or else its first), how many branches it has, and when it last moved. Deleted ones say when, and wait in Recently Deleted for repos_restore.",
       input: { type: "object", properties: {} },
       async run(ctx) {
         const repos = await global(ctx).query(
@@ -123,94 +144,96 @@ export default {
                   (select max(time) from branches b where b.repo = r.name) as updated
              from repos r order by coalesce(updated, r.created) desc`,
         );
-        return repos.map((r) => ({ ...r, deleted: deletedOf(r), deleted_by: undefined, owner_name: ownerName(ctx, r.owner), yours: actsFor(asWriter(ctx), r.owner) }));
+        return iso(repos.map((r) => ({ ...r, deleted: deletedOf(r), deleted_by: undefined, owner_name: ownerName(ctx, r.owner), yours: actsFor(asWriter(ctx), r.owner) })));
       },
     },
     get: {
       reads: true,
-      description: "A repo: its address for git on this computer, its owner, branches with their heads, forks, and the packs that hold its objects, oldest first.",
-      input: { type: "object", required: ["repo"], properties: { repo: { type: "string" } } },
+      description: "A repo: its address for git clone and push on this computer, its owner, its branches with their heads, its forks, its last 30 pushes, and the packs that hold its objects, oldest first.",
+      input: { type: "object", required: ["repo"], properties: { repo: REPO } },
       async run(ctx, { repo }) {
         const g = global(ctx);
-        const r = await live(g, repo);
-        if (!r) throw new Error(`no repo ${repo}`);
+        const r = await named(ctx, repo);
         const branches = await g.query("select branch, head, user, name, time from branches where repo = ? order by branch", [repo]);
         const packs = (await g.query("select hash from packs where repo = ? order by time, hash", [repo])).map((p) => p.hash);
         const forks = (await g.query(`select name from repos where "from" = ? order by name`, [repo])).map((f) => f.name);
         const pushes = await g.query("select * from pushes where repo = ? order by time desc limit 30", [repo]);
-        return { ...r, address: address(ctx, repo), owner_name: ownerName(ctx, r.owner), branches, packs, forks, pushes };
+        return iso({ ...r, address: address(ctx, repo), owner_name: ownerName(ctx, r.owner), branches, packs, forks, pushes });
       },
     },
     tree: {
       reads: true,
-      description: "A folder of a repo at a branch or commit (main if none): its files and folders, its README, the latest commit, and the repo's forks.",
-      input: { type: "object", required: ["repo"], properties: { repo: { type: "string" }, ref: { type: "string" }, path: { type: "string" } } },
+      description: "A folder of a repo at a branch or commit: its files and folders, its README, the latest commit, and the repo's forks. repos_file reads a file.",
+      input: { type: "object", required: ["repo"], properties: { repo: REPO, ref: REF, path: { type: "string", description: "a folder's path, like src; omit for the top" } } },
       async run(ctx, input) {
         const r = await repoOf(global(ctx), input.repo);
+        if (!r) await named(ctx, input.repo);
         const yours = !!r && actsFor(asWriter(ctx), r.owner);
         // A deleted one shows only that it was, for its owners to restore or erase.
-        if (r?.deleted) return { repo: r.name, owner: r.owner, owner_name: ownerName(ctx, r.owner), yours, deleted: deletedOf(r), branches: [], entries: [] };
+        if (r?.deleted) return iso({ repo: r.name, owner: r.owner, owner_name: ownerName(ctx, r.owner), yours, deleted: deletedOf(r), branches: [], entries: [] });
         const t = await browse.tree(ctx, global(ctx), input);
         const forks = (await global(ctx).query(`select name from repos where "from" = ? and deleted is null order by name`, [input.repo])).map((f) => f.name);
-        return { ...t, owner_name: ownerName(ctx, t.owner), yours, forks };
+        return iso({ ...t, owner_name: ownerName(ctx, t.owner), yours, forks });
       },
     },
     file: {
       reads: true,
-      description: "A file of a repo at a branch or commit: its text, or whether it's binary or too big to show.",
-      input: { type: "object", required: ["repo", "path"], properties: { repo: { type: "string" }, ref: { type: "string" }, path: { type: "string" } } },
-      run: (ctx, input) => browse.file(ctx, global(ctx), input),
+      description: "A file of a repo at a branch or commit: its text, or whether it's binary or too big to show (then git clone it).",
+      input: { type: "object", required: ["repo", "path"], properties: { repo: REPO, ref: REF, path: { type: "string", description: "the file's path, from repos_tree, like src/app.js" } } },
+      run: async (ctx, input) => (await named(ctx, input.repo), iso(await browse.file(ctx, global(ctx), input))),
     },
     log: {
       reads: true,
-      description: "A repo's history, newest first, 25 commits a page (page 0 is the newest), of the whole repo or of one path.",
-      input: { type: "object", required: ["repo"], properties: { repo: { type: "string" }, ref: { type: "string" }, path: { type: "string" }, page: { type: "integer" } } },
-      run: (ctx, input) => browse.log(ctx, global(ctx), input),
+      description: "A repo's history, as git log gives it: newest first, 25 commits a page, of the whole repo or of one path, each with its sha, subject, author and time; more says whether there's another page.",
+      input: { type: "object", required: ["repo"], properties: { repo: REPO, ref: REF, path: PATH, page: { type: "integer", description: "which 25: 0 (the default) for the newest, 1 for the 25 before them, and on while more is true" } } },
+      run: async (ctx, input) => (await named(ctx, input.repo), iso(await browse.log(ctx, global(ctx), input))),
     },
     commit: {
       reads: true,
-      description: "A commit: its message, author, parents, and each file it changed with +/- counts and diff hunks (big diffs are left for diff).",
-      input: { type: "object", required: ["repo", "sha"], properties: { repo: { type: "string" }, sha: { type: "string" } } },
-      run: (ctx, input) => browse.commit(ctx, global(ctx), input),
+      description: "A commit: its message, author, time, parents, and each file it changed with +/- counts and diff hunks (a big file's diff is left for repos_diff).",
+      input: { type: "object", required: ["repo", "sha"], properties: { repo: REPO, sha: SHA } },
+      run: async (ctx, input) => (await named(ctx, input.repo), iso(await browse.commit(ctx, global(ctx), input))),
     },
     diff: {
       reads: true,
-      description: "One file's whole diff in a commit.",
-      input: { type: "object", required: ["repo", "sha", "path"], properties: { repo: { type: "string" }, sha: { type: "string" }, path: { type: "string" } } },
-      run: (ctx, input) => browse.diff(ctx, global(ctx), input),
+      description: "One file's whole diff in a commit, against its first parent, as hunks with + and - lines: for a file repos_commit left out as too big.",
+      input: { type: "object", required: ["repo", "sha", "path"], properties: { repo: REPO, sha: SHA, path: { type: "string", description: "the file's path, from repos_commit's files, like src/app.js" } } },
+      run: async (ctx, input) => (await named(ctx, input.repo), browse.diff(ctx, global(ctx), input)),
     },
     latest: {
       reads: true,
-      description: "The last commit that changed each entry of a folder, by name.",
-      input: { type: "object", required: ["repo"], properties: { repo: { type: "string" }, ref: { type: "string" }, path: { type: "string" } } },
-      run: (ctx, input) => browse.latest(ctx, global(ctx), input),
+      description: "The last commit that changed each entry of a folder, by the entry's name: its sha, subject, author and time.",
+      input: { type: "object", required: ["repo"], properties: { repo: REPO, ref: REF, path: { type: "string", description: "a folder's path, like src; omit for the top" } } },
+      run: async (ctx, input) => (await named(ctx, input.repo), iso(await browse.latest(ctx, global(ctx), input))),
     },
     branches: {
       reads: true,
-      description: "A repo's branches, each with its head commit's subject and author.",
-      input: { type: "object", required: ["repo"], properties: { repo: { type: "string" } } },
-      run: (ctx, input) => browse.branches(ctx, global(ctx), input),
+      description: "A repo's branches, each with its head commit's sha, subject, author and time, and who pushed it when.",
+      input: { type: "object", required: ["repo"], properties: { repo: REPO } },
+      run: async (ctx, input) => (await named(ctx, input.repo), iso(await browse.branches(ctx, global(ctx), input))),
     },
     create: {
-      description: "Create a repo, owned by you (the default), a group you're an admin of (group:<id>), or admins.",
-      input: { type: "object", required: ["name"], properties: { name: { type: "string" }, owner: { type: "string" } } },
+      reads: false,
+      description: "Create an empty repo, owned by you (the default), a group you're an admin of, or admins, and give the git push that fills it. Pushing to a name that isn't a repo yet makes one too.",
+      input: { type: "object", required: ["name"], properties: { name: { type: "string", description: "lowercase letters, digits, ., _ and -, like notes" }, owner: OWNER } },
       async run(ctx, { name, owner }) {
         const g = global(ctx);
         owner ||= `user:${ctx.me.user}`;
         if (!NAME.test(name || "")) throw new Error("repo names are lowercase letters, digits, ., _ and -");
         if (await repoOf(g, name)) throw new Error(`${name} already exists`);
-        if (!actsFor(asWriter(ctx), owner)) throw new Error(`you don't act for ${owner}`);
+        if (!actsFor(asWriter(ctx), owner)) throw new Error(`you don't act for ${owner}: give user:<your id>, admins, or a group you're an admin of`);
         newRepo(ctx, g, { name, owner });
         return address(ctx, name) ? `Created ${name}: git push ${address(ctx, name)} main` : `Created ${name}.`;
       },
     },
     fork: {
+      reads: false,
       description: "Fork a repo as a new one of yours, to push changes you'd suggest to its owner: its branches as they are now, and its history.",
-      input: { type: "object", required: ["repo", "name"], properties: { repo: { type: "string" }, name: { type: "string" }, owner: { type: "string" } } },
+      input: { type: "object", required: ["repo", "name"], properties: { repo: REPO, name: { type: "string", description: "the fork's name: lowercase letters, digits, ., _ and -, like notes-andre" }, owner: OWNER } },
       async run(ctx, { repo, name, owner }) {
         const g = global(ctx);
         owner ||= `user:${ctx.me.user}`;
-        if (!(await live(g, repo))) throw new Error(`no repo ${repo}`);
+        await named(ctx, repo);
         if (!NAME.test(name || "")) throw new Error("repo names are lowercase letters, digits, ., _ and -");
         if (await repoOf(g, name)) throw new Error(`${name} already exists`);
         if (!actsFor(asWriter(ctx), owner)) throw new Error(`you don't act for ${owner}`);
@@ -219,9 +242,10 @@ export default {
       },
     },
     delete: {
+      reads: false,
       confirm: true,
-      description: "Delete a repo you own: no one can read, clone or push to it, and it waits in Recently Deleted, where its owners restore it or erase it for good.",
-      input: { type: "object", required: ["repo"], properties: { repo: { type: "string" } } },
+      description: "Delete a repo you own: no one can read, clone or push to it, and it waits in Recently Deleted, where its owners restore it (repos_restore) or erase it for good.",
+      input: { type: "object", required: ["repo"], properties: { repo: REPO } },
       async run(ctx, { repo }) {
         const r = await owned(ctx, repo);
         if (r.deleted) throw new Error(`${repo} is already in Recently Deleted`);
@@ -230,8 +254,9 @@ export default {
       },
     },
     restore: {
+      reads: false,
       description: "Restore a repo you own from Recently Deleted, as it was.",
-      input: { type: "object", required: ["repo"], properties: { repo: { type: "string" } } },
+      input: { type: "object", required: ["repo"], properties: { repo: { type: "string", description: "a deleted repo's name, from repos_list" } } },
       async run(ctx, { repo }) {
         const r = await owned(ctx, repo);
         if (!r.deleted) throw new Error(`${repo} isn't deleted`);
@@ -240,9 +265,10 @@ export default {
       },
     },
     erase: {
+      reads: false,
       confirm: true,
       description: "Erase a deleted repo you own for good: its branches, history and the packs no other repo shares are gone, and its name is free again.",
-      input: { type: "object", required: ["repo"], properties: { repo: { type: "string" } } },
+      input: { type: "object", required: ["repo"], properties: { repo: { type: "string", description: "a deleted repo's name, from repos_list" } } },
       async run(ctx, { repo }) {
         const g = global(ctx);
         const r = await owned(ctx, repo);
@@ -257,6 +283,7 @@ export default {
       },
     },
     _http: {
+      reads: false,
       description: "Git over HTTP, as the node passes it on: clone, fetch and push with stock git.",
       input: { type: "object", required: ["method", "path"], properties: { method: { type: "string" }, path: { type: "string" }, query: { type: "string" }, body: { type: ["string", "null"] } } },
       run: (ctx, input) => http.serve(ctx, global(ctx), git, input),

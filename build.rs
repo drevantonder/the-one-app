@@ -7,11 +7,10 @@ fn main() {
     let config: toml::Table = text.parse().expect("parse config file");
     let get = |key: &str| config.get(key).unwrap_or_else(|| panic!("config file lacks {key}")).clone();
     let out = format!(
-        "pub const NAME: &str = {:?};\npub const CLI: &str = {:?};\npub const PORT: u16 = {};\npub const ACCENT: &str = {:?};\npub const REPO: &str = {:?};\n",
+        "pub const NAME: &str = {:?};\npub const CLI: &str = {:?};\npub const PORT: u16 = {};\npub const REPO: &str = {:?};\n",
         get("name").as_str().unwrap(),
         get("cli").as_str().unwrap(),
         get("port").as_integer().unwrap(),
-        get("accent").as_str().unwrap(),
         // The GitHub repo releases come from; a white label without one isn't released.
         config.get("repo").and_then(|r| r.as_str()).unwrap_or(""),
     );
@@ -55,6 +54,11 @@ fn main() {
     let relay_location = optional("relay_location");
     assert!(["", "wnam", "enam", "sam", "weur", "eeur", "apac", "oc", "afr", "me"].contains(&relay_location.as_str()), "relay_location is one of Cloudflare's location hints");
     let out = format!("{out}pub const RELAY_LOCATION: &str = {relay_location:?};\n");
+    // What a person joins, in their words: "your One App"; a workplace's (one with a join_domain) is shared, "the PTC App".
+    // apple/project.sh, android/app/build.gradle.kts and windows/build.sh say the same.
+    let name = get("name").as_str().unwrap().to_string();
+    let yours = if optional("join_domain").is_empty() { format!("your {}", name.trim_start_matches("The ")) } else { name.replacen("The ", "the ", 1) };
+    let out = format!("{out}pub const YOURS: &str = {yours:?};\n");
     // The install settings an install has until its admins set them (`setting` entries).
     let mut settings = String::new();
     for (name, value) in config.get("settings").and_then(|s| s.as_table()).into_iter().flatten() {
@@ -155,10 +159,22 @@ fn main() {
         None => commit,
     };
     let commit = if dirty { format!("{commit}+dirty") } else { commit };
-    // Rebuild when HEAD moves; in a worktree .git is a file, so ask git where HEAD lives.
-    for what in ["HEAD", "refs/heads", "index"] {
-        if let Ok(o) = std::process::Command::new("git").args(["rev-parse", "--git-path", what]).output() {
-            println!("cargo:rerun-if-changed={}", String::from_utf8_lossy(&o.stdout).trim());
+    // Rebuild when HEAD moves: HEAD itself, or the branch it's on, never all of refs/heads, which every worktree shares,
+    // so another's commit would rebuild this one. In a worktree .git is a file, so ask git where they live; a branch
+    // whose ref is packed has no file of its own until its next commit.
+    let git_out = |args: &[&str]| {
+        let o = std::process::Command::new("git").args(args).output().ok().filter(|o| o.status.success())?;
+        Some(String::from_utf8_lossy(&o.stdout).trim().to_string())
+    };
+    // The index too, for "+dirty", in a release build only: `git status` rewrites it (T3 runs it all the time), and a
+    // test build isn't published.
+    let branch = git_out(&["symbolic-ref", "-q", "HEAD"]);
+    let index = (std::env::var("PROFILE").as_deref() == Ok("release")).then_some("index");
+    for what in ["HEAD"].into_iter().chain(index).chain(branch.as_deref()) {
+        let Some(path) = git_out(&["rev-parse", "--git-path", what]) else { continue };
+        let path = if std::path::Path::new(&path).exists() { Some(path) } else { git_out(&["rev-parse", "--git-path", "packed-refs"]) };
+        if let Some(path) = path {
+            println!("cargo:rerun-if-changed={path}");
         }
     }
     // When that commit (or the config's, if later) was made, so releases only ever move devices forward.

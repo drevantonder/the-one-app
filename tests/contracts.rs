@@ -317,13 +317,13 @@ async fn the_apps_decode_what_the_node_sends() {
     assert!(structs["VaultItem"].iter().any(|f| f.key == "scope_name" && !f.required) && structs["VaultItem"].iter().any(|f| f.key == "title" && f.required));
     assert!(structs["NodeState"].iter().any(|f| f.key == "me" && f.required), "CodingKeys rename fields");
     let classes = kotlin_classes(&read("android/app/src/main/kotlin/app/client/Node.kt"));
-    for name in ["NodeState", "Install", "Device", "AppInfo", "WidgetInfo", "WidgetNode"] {
+    for name in ["NodeState", "Install", "AppInfo", "WidgetInfo", "WidgetNode"] {
         assert!(classes.get(name).is_some_and(|f| !f.is_empty()), "the test reads Kotlin's {name}: {:?}", classes.keys());
     }
     assert!(classes["NodeState"].iter().any(|f| f.key == "me" && f.required), "@SerialName renames fields");
     assert!(classes["AppInfo"].iter().any(|f| f.key == "screens" && f.ty == "[AppScreenInfo]" && !f.required), "{:?}", classes["AppInfo"]);
     let windows_classes = csharp_classes(&read("windows/Models.cs"));
-    for name in ["NodeState", "Install", "Device", "AppInfo", "WidgetInfo", "SettingsItem"] {
+    for name in ["NodeState", "Install", "AppInfo", "WidgetInfo", "SettingsItem"] {
         assert!(windows_classes.get(name).is_some_and(|f| !f.is_empty()), "the test reads C#'s {name}: {:?}", windows_classes.keys());
     }
     assert!(windows_classes["NodeState"].iter().any(|f| f.key == "settings_items" && f.ty == "[SettingsItem]" && !f.required), "{:?}", windows_classes["NodeState"]);
@@ -680,6 +680,17 @@ fn the_address_lists_the_android_app_by_its_package() {
     assert_eq!(one::kernel::android_package(), format!("app.{}.android", one::config::CLI));
 }
 
+/// The Mac and iPhone ask a person's AI to connect itself in the words the node does, before there's a node to ask.
+#[test]
+fn the_apple_apps_ask_an_ai_to_connect_as_the_node_does() {
+    let swift = read("apple/Shared/Views/ConnectYourAIView.swift");
+    let as_swift = |text: String| text.replace('"', "\\\"").replace(one::config::YOURS, "\\(yours)").replace(one::config::CLI, "\\(cli)");
+    for (rust, base) in [(one::state::agent_prompt(Some("BASE"), None), "\\(base)"), (one::state::agent_prompt(None, None), "")] {
+        let said = format!("return \"{}\"", as_swift(rust).replace("BASE", base));
+        assert!(swift.contains(&said), "apple/Shared/Views/ConnectYourAIView.swift's agentPrompt doesn't say {said}: change it or src/state.rs's agent_prompt");
+    }
+}
+
 /// Every message a screen sends its host (`messages`, in src/screen/bridge.js) is one each host names, answering it
 /// or refusing it: the web client's page and a chat's view, which answer frames, and the shells' web views.
 #[test]
@@ -727,15 +738,16 @@ fn the_gateway_names_the_windows_app_as_windows_does() {
 /// in a browser.
 #[test]
 fn an_apps_widget_runs_nothing_on_the_clients_own_screens() {
-    let chrome = one::deploy::chrome().expect("this test draws screens in Chrome or Chromium: none was found (CHROME=<path> names one)");
+    one::deploy::chrome().expect("this test draws screens in Chrome or Chromium: none was found (CHROME=<path> names one)");
     let dir = crate::temp("screens");
     // What each page says once it's drawn, as its title.
     let title = |name: &str, body: &str, own: bool| -> String {
         let page = one::screen::page(&json!({ "screen": "test", "params": {}, "me": null, "config": { "name": "Test" } }), body, own);
         let path = dir.join(format!("{name}.html"));
         std::fs::write(&path, page).unwrap();
-        let out = std::process::Command::new(&chrome)
-            .args(["--headless=new", "--disable-gpu", "--no-first-run", "--no-default-browser-check", "--virtual-time-budget=5000", "--dump-dom"])
+        let out = one::deploy::chrome()
+            .unwrap()
+            .args(["--virtual-time-budget=5000", "--dump-dom"])
             .arg(format!("--user-data-dir={}", dir.join("profile").display()))
             .arg(format!("file://{}", path.display()))
             .output()
@@ -801,4 +813,109 @@ fn every_program_on_a_machine_sends_its_node_the_token_where_it_looks() {
             assert!(source.contains(&format!("\"{name}\"")), "{language} doesn't name {name} as the node does");
         }
     }
+}
+
+/// Every `#rrggbb` or `0xrrggbb` in `text`, in order, lowercased.
+fn hexes(text: &str) -> Vec<String> {
+    let b = text.as_bytes();
+    let mut out = vec![];
+    for i in 0..b.len() {
+        let start = if b[i] == b'#' { i + 1 } else if b[i..].starts_with(b"0x") { i + 2 } else { continue };
+        let run = b[start..].iter().take_while(|c| c.is_ascii_hexdigit()).count();
+        if run == 6 && (i == 0 || !b[i - 1].is_ascii_alphanumeric()) {
+            out.push(text[start..start + 6].to_ascii_lowercase());
+        }
+    }
+    out
+}
+
+/// The light and dark values `name` is given in `block`: the first two colours after `name =` or `name:`.
+fn token(block: &str, name: &str) -> Option<(String, String)> {
+    let mut from = 0;
+    while let Some(at) = block[from..].find(name).map(|i| i + from) {
+        from = at + name.len();
+        let before = block[..at].chars().next_back().unwrap_or(' ');
+        let rest = block[from..].trim_start();
+        if (before.is_alphanumeric() || before == '_') || !(rest.starts_with('=') || rest.starts_with(':')) {
+            continue;
+        }
+        let line = rest.lines().next().unwrap_or("");
+        let found = hexes(line);
+        return Some((found.first()?.clone(), found.get(1).or(found.first())?.clone()));
+    }
+    None
+}
+
+#[test]
+fn every_client_draws_in_the_kits_colours() {
+    // The one list: kit.css's light :root, then its dark one; a colour the dark doesn't change is the same in both.
+    let kit = read("src/screen/kit.css");
+    let block = |start: &str| {
+        let s = &kit[kit.find(start).unwrap_or_else(|| panic!("kit.css has no {start}"))..];
+        s[..s.find('}').unwrap()].to_string()
+    };
+    let (light, dark) = (block(":root {\n  color-scheme"), block("@media (prefers-color-scheme: dark) {\n  :root {"));
+    let mut tokens = BTreeMap::new();
+    for line in light.lines() {
+        let Some((name, value)) = line.trim().strip_prefix("--").and_then(|l| l.split_once(':')) else { continue };
+        let Some(l) = hexes(value).pop() else { continue };
+        if name == "tint" {
+            continue; // the platform's own
+        }
+        let d = token(&dark, &format!("--{name}")).map_or(l.clone(), |(d, _)| d);
+        tokens.insert(name.to_string(), (l, d));
+    }
+    assert!(tokens.len() >= 11, "kit.css's colours weren't found: {tokens:?}");
+
+    // Each other place's own copy: the lines after the comment that names this test, up to a blank line.
+    let all: Vec<&str> = tokens.keys().map(String::as_str).collect();
+    let places: &[(&str, &str, &[&str])] = &[
+        ("src/mcp_view.html", "--", &["text", "muted", "line", "card", "fill", "warn", "danger"]),
+        ("android/app/src/main/kotlin/app/client/Style.kt", "", &all),
+        ("apple/Shared/Views/Style.swift", "", &all),
+        ("windows/Look.cs", "", &all),
+    ];
+    let mut problems = vec![];
+    for (path, prefix, names) in places {
+        let src = read(path);
+        let Some(at) = src.find("tests/contracts.rs") else {
+            problems.push(format!("{path}: no colours marked as held by tests/contracts.rs"));
+            continue;
+        };
+        let after = &src[at..];
+        let block = &after[..after.find("\n\n").unwrap_or(after.len())];
+        for name in *names {
+            let want = &tokens[*name];
+            match token(block, &format!("{prefix}{name}")) {
+                Some(got) if &got == want => {}
+                got => problems.push(format!("{path}: {name} is {got:?}, kit.css has {want:?}")),
+            }
+        }
+    }
+    // The browser's bar, on the web client and the sign-in pages, is the page's colour.
+    for path in ["kernel/web/index.html", "kernel/auth/pages.js"] {
+        let src = read(path);
+        for (scheme, want) in [("light", &tokens["bg"].0), ("dark", &tokens["bg"].1)] {
+            let got = src.lines().find(|l| l.contains("theme-color") && l.contains(&format!("prefers-color-scheme: {scheme}"))).map(hexes);
+            if got.as_deref() != Some(&[want.clone()][..]) {
+                problems.push(format!("{path}: its {scheme} theme-color is {got:?}, kit.css's page is {want}"));
+            }
+        }
+    }
+    // What Android draws before the app does (its window as it opens, a widget's preview) is in them too.
+    for (path, dark) in [("android/app/src/main/res/values/colors.xml", false), ("android/app/src/main/res/values-night/colors.xml", true)] {
+        let src = read(path);
+        for (name, kit) in [("page", "bg"), ("card", "card"), ("fill", "fill")] {
+            let want = if dark { &tokens[kit].1 } else { &tokens[kit].0 };
+            let got = src.lines().find(|l| l.contains(&format!(r#"name="{name}""#))).map(hexes);
+            if got.as_deref() != Some(&[want.clone()][..]) {
+                problems.push(format!("{path}: its {name} is {got:?}, kit.css's {kit} is {want}"));
+            }
+        }
+    }
+    // The web client's window draws in the kit's own variables, so it has no colours of its own to drift.
+    if let Some(hex) = hexes(&read("kernel/web/web.css")).first() {
+        problems.push(format!("kernel/web/web.css: #{hex} is its own colour; use the kit's variables"));
+    }
+    assert!(problems.is_empty(), "{}", problems.join("\n"));
 }

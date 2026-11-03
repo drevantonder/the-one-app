@@ -14,6 +14,8 @@ async function sidecar(ctx, op, input) {
 
 const NEEDS = "Contacts runs on a Mac with The One App open, and none of yours is online with it.";
 
+const CARD = "{ id, name, nickname, organization, job, phones, emails, addresses, birthday, urls }, each only when the card has it";
+
 export default {
   name: "contacts",
   title: "Contacts",
@@ -28,32 +30,43 @@ export default {
   ops: {
     accounts: {
       reads: true,
-      description: "The Macs it runs on: each { account, ok }, the device’s name, ok while it’s online.",
+      description: "The Macs Contacts runs on: each { account, ok }, account the Mac's name, ok while it's online.",
       input: { type: "object", properties: {} },
       run: async (ctx) => (await ctx.devices()).filter((s) => (s.sidecars || []).includes("contacts")).map((s) => ({ account: s.name, ok: s.online })),
     },
     sign_out: {
+      reads: false,
       confirm: true,
-      description: "Stop using Contacts on one of your devices: removes it from that device, for one of its owners.",
-      input: { type: "object", required: ["account"], properties: { account: { type: "string", description: "the device, by name" } } },
+      description: "Stop using Contacts on one of your Macs: removes it from that Mac, for one of its owners. The contacts themselves stay as they are.",
+      input: { type: "object", required: ["account"], properties: { account: { type: "string", description: "the Mac's name, as contacts_accounts lists it" } } },
       run: (ctx, { account }) => {
         ctx.sidecar("contacts", account, false);
         return `Contacts is removed from ${account}.`;
       },
     },
     search: {
-      description: "Find contacts by name, email address or phone number.",
-      input: {"properties": {"limit": {"description": "at most this many; default 25", "type": "integer"}, "query": {"description": "a name or part of one, an email address, or a phone number", "type": "string"}}, "required": ["query"], "type": "object"},
+      reads: true,
+      description: `Find people in the person's contacts by name, email address or phone number, for someone's number or address before writing to them. Gives each ${CARD}, by name.`,
+      input: {
+        type: "object",
+        required: ["query"],
+        properties: {
+          query: { type: "string", description: "a name or part of one (Sam, Sam Lee), an email address, or a phone number in any format" },
+          limit: { type: "integer", description: "at most this many, by name; default 25" },
+        },
+      },
       run: (ctx, input) => sidecar(ctx, "search", input),
     },
     get: {
-      description: "One contact, by the id search gives.",
-      input: {"properties": {"id": {"description": "the contact's id", "type": "string"}}, "required": ["id"], "type": "object"},
+      reads: true,
+      description: `One contact's card, by its id from contacts_search: ${CARD}. Use it to look again at someone already found; contacts_search gives the same cards.`,
+      input: { type: "object", required: ["id"], properties: { id: { type: "string", description: "the contact's id, as contacts_search gives it" } } },
       run: (ctx, input) => sidecar(ctx, "get", input),
     },
     me: {
-      description: "The person's own contact card.",
-      input: {"properties": {}, "type": "object"},
+      reads: true,
+      description: `The person's own card, the one Contacts marks as theirs: ${CARD}. Use it for their own name, number or address.`,
+      input: { type: "object", properties: {} },
       run: (ctx, input) => sidecar(ctx, "me", input),
     },
   },

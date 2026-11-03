@@ -12,7 +12,7 @@ struct PagesWidget: Widget {
     var body: some WidgetConfiguration {
         AppIntentConfiguration(kind: "widget", intent: ChooseWidget.self, provider: Provider()) { entry in
             EntryView(entry: entry)
-                .containerBackground(.fill.tertiary, for: .widget)
+                .containerBackground(Kit.bg, for: .widget)
         }
         .configurationDisplayName(appName)
         .description("A widget from one of your pages.")
@@ -68,7 +68,9 @@ struct WidgetChoices: EntityQuery {
 struct Entry: TimelineEntry {
     var date = Date.now
     var widget: WidgetCache.Item?
-    /// The widget chosen, if it's gone: its id.
+    /// When the app last had it from your devices.
+    var fetched: Date?
+    /// The widget chosen, if it's gone: its title.
     var missing: String?
     var signedOut = false
 }
@@ -102,19 +104,15 @@ struct Provider: AppIntentTimelineProvider {
         let cache = WidgetCache.load()
         if cache?.signedOut == true { return Entry(signedOut: true) }
         let items = cache?.widgets ?? []
-        guard let chosen = configuration.widget?.id else { return Entry(widget: items.first) }
-        if let item = items.first(where: { $0.id == chosen }) { return Entry(widget: item) }
-        return items.isEmpty ? Entry() : Entry(missing: chosen)
+        guard let choice = configuration.widget else { return Entry(widget: items.first, fetched: cache?.fetched) }
+        if let item = items.first(where: { $0.id == choice.id }) { return Entry(widget: item, fetched: cache?.fetched) }
+        return items.isEmpty ? Entry() : Entry(missing: choice.title.isEmpty ? String(localized: "This widget") : choice.title)
     }
 }
 
 struct EntryView: View {
     var entry: Entry
     @Environment(\.widgetFamily) private var family
-
-    private var accent: Color {
-        Color(accentHex: Bundle.main.object(forInfoDictionaryKey: "Accent") as? String ?? "")
-    }
 
     /// The page size drawn at this family: the same tree the app's pages show at that size.
     private var size: String {
@@ -136,25 +134,30 @@ struct EntryView: View {
                     Broken(title: widget.title, text: "This widget stopped working. Open \(appName) to see why.")
                 } else {
                     let tree = widget.tree(size)
+                    // Over an hour old, it's dimmed and says when it's from.
+                    let old = entry.fetched.flatMap { entry.date.timeIntervalSince($0) > 3600 ? $0 : nil }
                     VStack(alignment: .leading, spacing: 6) {
                         if family != .accessoryRectangular, tree.header != false {
-                            Text(widget.title)
-                                .font(.caption2.weight(.medium))
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
+                            WidgetLabel(title: widget.title, icon: widget.icon, image: widget.image, imageKind: widget.imageKind)
                         }
                         WidgetTree(node: tree, now: entry.date)
                             .font(.footnote)
                             .environment(\.widgetHost, host)
-                            .tint(accent)
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                            .opacity(old == nil ? 1 : 0.5)
+                        if let old, family != .accessoryRectangular {
+                            Text("Updated \(RelativeDateTimeFormatter().localizedString(for: old, relativeTo: entry.date))")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 }
             }
             .widgetURL((widget.tree(size).link ?? .screen("main", params: nil)).url(app: host.app, scope: host.scope))
         } else if let missing = entry.missing {
-            Broken(title: appName, text: "\(missing.split(separator: "/").last.map(String.init) ?? missing) isn’t on your pages any more. Touch and hold to choose another.")
+            Broken(title: appName, text: "\(missing) isn’t on your pages any more. Touch and hold to choose another.")
         } else if family == .accessoryInline {
             Text(appName)
         } else {
@@ -180,7 +183,7 @@ private struct Broken: View {
         VStack(alignment: .leading, spacing: 6) {
             Label(title, systemImage: "exclamationmark.triangle.fill")
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(.orange)
+                .foregroundStyle(Kit.warn)
                 .lineLimit(1)
             Text(text)
                 .font(.footnote)

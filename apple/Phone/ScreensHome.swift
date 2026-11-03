@@ -15,12 +15,12 @@ struct ScreensHome: View {
             AppScreen(route: ScreenRoute(app: "", screen: "pages", params: pages), settings: true)
                 .id(store.current)
                 .ignoresSafeArea(edges: .bottom)
-                .background(Color(.systemGroupedBackground))
+                .groupedBackground()
                 .toolbar(.hidden, for: .navigationBar)
                 .navigationDestination(for: Route.self) { route in
                     RouteView(route: route) { store.path.append($0) }
                         .navigationBarTitleDisplayMode(.inline)
-                        .background(Color(.systemGroupedBackground))
+                        .groupedBackground()
                 }
                 .overlay {
                     if store.state == nil, case .unreachable(let message) = store.phase {
@@ -29,7 +29,7 @@ struct ScreensHome: View {
                         } description: {
                             Text(message)
                         } actions: {
-                            Text("It keeps trying.").foregroundStyle(.secondary)
+                            Text("Trying again…").foregroundStyle(.secondary)
                         }
                         .background(.regularMaterial)
                     }

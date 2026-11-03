@@ -2,58 +2,98 @@
   .lists { display: flex; flex-direction: column; gap: 24px; }
   .head { display: flex; align-items: center; gap: 12px; padding: 0 4px 8px; }
   .head b { flex: 1; font-size: 20px; }
-  .more { width: 28px; height: 28px; border: 0; border-radius: 14px; background: var(--line); color: var(--accent); display: grid; place-items: center; font-size: 18px; cursor: pointer; }
+  .more { width: 28px; height: 28px; border: 0; border-radius: 14px; background: var(--fill); color: var(--tint); display: grid; place-items: center; font-size: 18px; cursor: pointer; }
   button.row { width: 100%; border: 0; background: none; font: inherit; color: inherit; text-align: left; cursor: pointer; }
   button.row.still { cursor: default; }
-  .status { width: 10px; height: 10px; border-radius: 50%; flex: none; }
-  .status.ok { background: #34c759; }
-  .status.off { background: #ff9f0a; }
-  .row.add { color: var(--accent); }
+  .row.add { color: var(--tint); }
   .plus { width: 22px; text-align: center; font-size: 22px; font-weight: 300; flex: none; }
-  .warn { color: #ff9f0a; }
+  .warn { color: var(--warn); }
+  .sub.warn { display: flex; align-items: center; gap: 5px; white-space: normal; }
 </style>
 <div id="services"></div>
 <script>
-  // A page's Services: a section per app that keeps accounts, its accounts each with a dot saying whether it's signed
-  // in, then Add Account; then the rest, a row each opening its page in the App Store; then Add a Service.
+  // A page's Services: a section per app that keeps accounts, its accounts (one that needs signing in again says so),
+  // then Add Account; then the rest, a row each opening its page in the App Store; then Add a Service. It
+  // shows as soon as the apps are known, each app's accounts filling in its own section as they come.
   const scope = one.params?.scope || "user";
   const esc = one.esc;
+  const el = document.getElementById("services");
   const accounts = {};
   const stale = new Set();
   one.title("Services");
 
-  function draw() {
-    const p = home.page(scope), el = document.getElementById("services");
-    if (!p) return void (el.innerHTML = one.empty({ icon: "eye-slash", title: "Nothing Here", text: "This device was let into none of this page." }));
+  // Only what this screen shows: the person's pages and the apps on them, not the widgets Home draws.
+  async function load() {
+    [home.data.state, home.data.apps] = await Promise.all([one.api("GET", "/v1/state"), one.api("GET", "/v1/apps")]);
+  }
+
+  // An app's account rows, each marked as its own so they're replaced alone when they come. Waiting, one grey line in a
+  // row as tall as an account's.
+  function rows(a, p) {
+    const list = accounts[a.name], signIn = home.settings(a, p, true), of = `data-of="${esc(a.name)}"`;
+    if (list === undefined) return `<div class="row plain" ${of} role="status" aria-label="Loading"><div class="main"><div class="title"><span class="sk-line" style="width:45%;align-self:center"></span>&#8203;</div></div></div>`;
+    if (list instanceof Error) return `<div class="row plain warn" ${of}>${esc(one.plain(list).title)}</div>`;
+    // An app with no sign-in of its own, like Calendar, gets its accounts from a device: with none, what it needs,
+    // opening its App Store page, which says where it can go.
+    if (!list.length) return !signIn && a.needs && home.inStore(a) ? `<button class="row plain muted" ${of} data-open="${esc(a.name)}"><div class="main">${esc(a.needs)}</div><span class="chev">›</span></button>`
+      : `<div class="row plain muted" ${of}>No accounts yet</div>`;
+    return list.map((x) => `<div class="row plain" ${of}><div class="main"><div class="title"><span>${esc(x.account)}</span></div>` +
+      `${x.ok ? "" : `<div class="sub warn">${one.icon("warning-circle-fill")}${esc(one.plain(x.why || "Needs signing in again").title)}</div>`}</div>${x.ok || !signIn ? "" : `<button class="button plain" data-signin="${esc(a.name)}">Sign In</button>`}</div>`).join("");
+  }
+
+  function page() {
+    const p = home.page(scope);
+    if (!p) return one.empty("This device can't open this page. Sign out and in again to choose it.");
     const all = home.servicesOn(p), withAccounts = all.filter((a) => (a.ops || []).some((o) => o.name === "accounts")), others = all.filter((a) => !withAccounts.includes(a));
     const sections = withAccounts.map((a) => {
-      const list = accounts[a.name], signIn = home.settings(a, p, true);
-      const rows = list === undefined ? `<div class="row plain muted"><span class="spinner small"></span>Loading…</div>`
-        : list instanceof Error ? `<div class="row plain warn">${esc(list.message)}</div>`
-        : !list.length ? `<div class="row plain muted">No accounts yet</div>`
-        : list.map((x) => `<div class="row plain"><span class="status ${x.ok ? "ok" : "off"}" title="${x.ok ? "Signed in" : "Needs signing in again"}"></span><div class="main"><div class="title"><span>${esc(x.account)}</span></div>` +
-          `${x.ok ? "" : `<div class="sub wrap">${esc(x.why || "Needs signing in again")}</div>`}</div>${x.ok || !signIn ? "" : `<button class="button plain" data-signin="${esc(a.name)}">Sign In</button>`}</div>`).join("");
-      const add = signIn ? `<button class="row plain add" data-add="${esc(a.name)}"><span class="plus">+</span>Add Account</button>` : "";
-      return `<div><div class="head">${one.appIcon(a, 32)}<b>${esc(home.label(a))}</b><button class="more" data-more="${esc(a.name)}" aria-label="More for ${esc(home.label(a))}">${one.icon("dots-three-outline-fill")}</button></div><div class="list">${rows}${add}</div></div>`;
+      const add = home.settings(a, p, true) ? `<button class="row plain add" data-add="${esc(a.name)}"><span class="plus">+</span>Add Account</button>` : "";
+      return `<div><div class="head">${one.appIcon(a, 32)}<b>${esc(home.label(a))}</b><button class="more" data-more="${esc(a.name)}" aria-label="More for ${esc(home.label(a))}">${one.icon("dots-three-outline-fill")}</button></div><div class="list" data-list="${esc(a.name)}">${rows(a, p)}${add}</div></div>`;
     }).join("");
     const rest = others.length ? `<div class="list">${others.map((a) => {
       const opens = home.inStore(a) || home.settings(a, p);
       return `<button class="row${opens ? "" : " still"}" data-open="${esc(a.name)}">${one.appIcon(a, 36)}<div class="main"><div class="title"><span>${esc(home.label(a))}</span></div>${a.description ? `<div class="sub">${esc(a.description)}</div>` : ""}</div>${opens ? `<span class="chev">›</span>` : ""}</button>`;
     }).join("")}</div>` : "";
     const addService = home.canArrange(p.scope) && home.addService() ? `<div class="list"><button class="row plain add" data-add-service><span class="plus">+</span>Add a Service</button></div>` : "";
-    el.innerHTML = `<div class="lists">${sections}${rest}${all.length ? "" : one.empty({ icon: "plugs-connected", title: "No Services", text: "Services give your apps and agents your email, calendar, chats and files." })}${addService}</div>`;
-    const app = (b, key) => home.app(b.dataset[key]);
-    el.querySelectorAll("[data-add]").forEach((b) => (b.onclick = () => addAccount(app(b, "add"), p)));
-    el.querySelectorAll("[data-signin]").forEach((b) => (b.onclick = home.settings(app(b, "signin"), p, true)));
-    el.querySelectorAll("[data-open]").forEach((b) => { const opens = home.inStore(app(b, "open")) || home.settings(app(b, "open"), p); if (opens) b.onclick = opens; });
-    el.querySelectorAll("[data-more]").forEach((b) => (b.onclick = () => home.menu(home.actions(app(b, "more"), p), b)));
-    el.querySelector("[data-add-service]")?.addEventListener("click", home.addService());
-    // Each app's accounts, listed once; a change to the app lists them again.
-    for (const a of withAccounts) {
+    setTimeout(() => listAccounts(p, withAccounts));
+    return `<div class="lists">${sections}${rest}${all.length ? "" : one.empty("Services give your apps and agents your email, calendar, chats and files.")}${addService}</div>`;
+  }
+  const draw = () => (el.innerHTML = page());
+
+  // Each app's accounts, asked for all at once and listed once; a change to the app lists them again. Each answer
+  // replaces only its own app's rows.
+  function listAccounts(p, apps) {
+    for (const a of apps) {
       if (accounts[a.name] !== undefined && !stale.has(a.name)) continue;
       stale.delete(a.name);
-      home.call(a.name, "accounts").then((list) => (Array.isArray(list) ? list : Promise.reject(new Error(`${home.label(a)} doesn't list its accounts yet.`))))
-        .catch((err) => err).then((out) => { accounts[a.name] = out; draw(); });
+      home.call(a.name, "accounts").then((list) => (Array.isArray(list) ? list : [])).catch((err) => err).then((out) => {
+        accounts[a.name] = out;
+        const list = el.querySelector(`[data-list="${CSS.escape(a.name)}"]`);
+        if (!list) return;
+        list.querySelectorAll("[data-of]").forEach((r) => r.remove());
+        list.insertAdjacentHTML("afterbegin", rows(a, p));
+      });
+    }
+  }
+
+  el.addEventListener("click", (e) => {
+    const p = home.page(scope), b = e.target.closest("button");
+    if (!p || !b) return;
+    const d = b.dataset, a = home.app(d.add || d.signin || d.open || d.more);
+    if (d.add) addAccount(a, p);
+    else if (d.signin) home.settings(a, p, true)?.();
+    else if (d.open) (home.inStore(a) || home.settings(a, p))?.();
+    else if (d.more) home.menu(home.actions(a, p), b);
+    else if ("addService" in d) home.addService()?.();
+  });
+
+  /// Runs a change, then shows what it changed; says what went wrong if it failed.
+  async function change(work) {
+    try {
+      await work();
+      await load();
+      draw();
+    } catch (err) {
+      home.failed(err);
     }
   }
 
@@ -61,26 +101,29 @@
   /// none, its sign-in.
   async function addAccount(a, p) {
     const signIn = home.settings(a, p, true);
-    const keeps = Object.values(a.vault || {}).some((need) => need.accounts);
-    const items = keeps ? await one.api("GET", "/v1/vault").catch(() => []) : [];
-    const there = items.filter((i) => (i.wanted_by || []).includes(a.name) && !(i.apps || []).includes(a.name));
+    // Only its accounts: not what it needs besides (Google's apps' sign-in client).
+    const types = Object.values(a.vault || {}).filter((need) => need.accounts).map((need) => need.type);
+    const items = types.length ? await one.api("GET", "/v1/vault").catch(() => []) : [];
+    const there = items.filter((i) => types.includes(i.type) && (i.wanted_by || []).includes(a.name) && !(i.apps || []).includes(a.name));
     if (!there.length) return signIn();
-    const pick = there.map((i) => ({ title: i.title, run: () => home.change(async () => {
+    const pick = there.map((i) => ({ title: i.title, run: () => change(async () => {
       await one.api("POST", "/v1/vault", { scope: i.scope, id: i.id, apps: [...i.apps, a.name] });
       stale.add(a.name);
     }) }));
     home.menu([...pick, { title: "Sign In to Another Account", run: signIn }], document.querySelector(`[data-add="${CSS.escape(a.name)}"]`));
   }
 
-  // An app's own change (a sign-in finished on its settings screen) lists its accounts again.
-  one.on("changed", (e) => (e.type === "changed" ? e.apps?.length ? e.apps : Object.keys(accounts) : []).forEach((n) => stale.add(n)));
-  let watching = false;
+  // An app's own change (a sign-in finished on its settings screen) lists its accounts again; a change to the apps or
+  // the pages draws the screen again a moment later, so a burst of them draws it once.
+  let soon;
+  one.on("changed", (e) => {
+    (e.type === "changed" ? e.apps?.length ? e.apps : Object.keys(accounts) : []).forEach((n) => stale.add(n));
+    if (!["changed", "devices", "install"].includes(e.type)) return;
+    clearTimeout(soon);
+    soon = setTimeout(() => load().then(draw).catch(() => {}), 250);
+  });
   one.render("#services", async () => {
-    await home.load();
-    setTimeout(() => {
-      draw();
-      if (!watching) home.watch(draw), (watching = true);
-    });
-    return undefined;
+    await load();
+    return page();
   });
 </script>

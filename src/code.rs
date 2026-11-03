@@ -170,7 +170,7 @@ pub fn search_tool(mode: Mode) -> Value {
             "query": { "type": "string", "description": "a few words for the task, or an app's name" },
             "limit": { "type": "integer", "description": "how many operations, 8 if not given" },
         } },
-        "annotations": { "readOnlyHint": true },
+        "annotations": one::skills::hints(true, false),
     })
 }
 
@@ -184,7 +184,7 @@ pub fn code_tools(all: Vec<Value>) -> Vec<Value> {
     [vec![search_tool(Mode::Code), execute_tool()], all.into_iter().filter(direct).collect()].concat()
 }
 
-/// A script's limits, as the old PTC App's were: ten minutes, a hundred calls and 60 KB back.
+/// A script's limits: ten minutes, a hundred calls and 60 KB back.
 const LIMITS: (u64, u64, u64) = (600_000, 100, 60_000);
 
 /// MCP's `execute` tool.
@@ -193,6 +193,7 @@ pub fn execute_tool() -> Value {
         "name": "execute",
         "description": format!("Run a short script that calls operations, and get back what it returns. It's JavaScript without imports, timers or network: call operations as `await tools.<app>.<op>({{ ... }})` (search gives each exact call), use plain JavaScript between them, and `return` what you want back; console.log lines come back too. Calls run as the person, as any tool does: what sends or can't be undone needs `confirm: true` in its input, given once the person agreed. Up to {} calls, {} minutes and {} KB back.", LIMITS.1, LIMITS.0 / 60_000, LIMITS.2 / 1000),
         "inputSchema": { "type": "object", "required": ["code"], "properties": { "code": { "type": "string", "description": "the script" } } },
+        "annotations": one::skills::hints(false, false),
     })
 }
 
@@ -270,11 +271,11 @@ pub fn execute(script: &str, agent: Option<&str>, client: &str) -> Result<Value>
         let Ok(msg) = serde_json::from_str::<Value>(&line?) else { continue };
         if let Some(id) = msg.get("call") {
             let (app, op) = (msg["app"].as_str().unwrap_or(""), msg["op"].as_str().unwrap_or(""));
-            let spec = apps.iter().find(|a| a["name"] == app).and_then(|a| a["ops"].as_array()?.iter().find(|o| o["name"] == op)).cloned();
+            let spec = apps.iter().find(|a| a["name"] == app).and_then(|a| Some((a.clone(), a["ops"].as_array()?.iter().find(|o| o["name"] == op)?.clone())));
             let input = msg["input"].clone();
             let answer = (|| {
                 let spec = spec.with_context(|| format!("no operation {app}_{op}"))?;
-                crate::ops::check(&spec["input"], &input, "input")?;
+                anyhow::ensure!(input.is_object() || input.is_null(), "an operation's input is an object, not {input}");
                 crate::dispatch(&format!("{app}_{op}"), input.as_object().cloned().unwrap_or_default(), agent, client, Some(spec))
             })();
             let reply = match answer {

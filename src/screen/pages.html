@@ -1,7 +1,6 @@
 <style>
   html, body { height: 100%; }
-  body { padding: 0; max-width: none; overflow: hidden; --w-card: var(--card); }
-  @media (prefers-color-scheme: dark) { body { --w-card: var(--card); } }
+  body { padding: 0; max-width: none; overflow: hidden; }
   /* A home screen: touching and holding it offers what it does, never selecting its words. */
   #pages { height: 100%; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
   /* Side by side, a page each: swipe between them, scroll within one. */
@@ -15,7 +14,7 @@
   .header .subtitle { font-size: 15px; color: var(--muted); margin-top: 2px; }
   .header .edit[data-done] { font-weight: 600; }
   .header .edit[hidden] { display: none; }
-  .header .edit { flex: none; margin-top: 6px; border: 0; background: none; font: inherit; font-size: 15px; color: var(--accent); cursor: pointer; display: flex; align-items: center; gap: 5px; }
+  .header .edit { flex: none; margin-top: 6px; border: 0; background: none; font: inherit; font-size: 15px; color: var(--tint); cursor: pointer; display: flex; align-items: center; gap: 5px; }
   .grid { display: grid; position: relative; }
   .cell { position: relative; display: grid; min-width: 0; min-height: 0; }
   .cell > .w-card { min-height: 0; }
@@ -26,18 +25,22 @@
   .tile-icon > .app-icon, .tile-icon > .folder, .tile-icon > .avatar { --size: var(--icon, 60px) !important; width: var(--icon, 60px); height: var(--icon, 60px); }
   .tile-icon > .avatar { font-size: calc(var(--icon, 60px) * 0.4); }
   .tile-name { font-size: 13px; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .badge { position: absolute; top: -7px; right: -7px; min-width: 24px; height: 24px; padding: 0 7px; border-radius: 12px; background: #ff3b30; color: white; font-size: 14px; font-weight: 600; line-height: 24px; text-align: center; font-variant-numeric: tabular-nums; }
+  .badge { position: absolute; top: -7px; right: -7px; min-width: 24px; height: 24px; padding: 0 7px; border-radius: 12px; background: var(--badge); color: white; font-size: 14px; font-weight: 600; line-height: 24px; text-align: center; font-variant-numeric: tabular-nums; }
   /* Where a window draws screens at its smaller text (a zoom on the page), a widget keeps its own size. */
   .widget { zoom: var(--unzoom, 1); }
   .widget.opens { cursor: pointer; }
+  .widget.opens:active { background-image: linear-gradient(rgba(128, 128, 128, 0.14), rgba(128, 128, 128, 0.14)); }
+  /* A widget still to come: a grey card in its place, at its size. Dimmed while its new options are drawn. */
+  .widget.waiting { animation: breathe 1.6s ease-in-out infinite; }
+  .cell > .widget { transition: opacity 0.2s; }
+  .cell.refreshing > .widget { opacity: 0.5; }
+  .header .edit:active { opacity: 0.5; }
+  @media (prefers-reduced-motion: reduce) { .widget.waiting { animation: none; } }
   /* A page's Services folder: its services' icons, nine at most, small, on frosted glass. */
   .folder { --size: 60px; --mini: calc(var(--size) * 0.62 / 3); flex: none; display: grid; grid-template-columns: repeat(3, var(--mini)); grid-auto-rows: var(--mini); gap: calc(var(--size) * 0.06);
     padding: calc(var(--size) * 0.13); border-radius: calc(var(--size) * 0.225); background: rgba(128, 128, 128, 0.22); box-shadow: inset 0 0 0 0.5px rgba(128, 128, 128, 0.3); align-content: start; }
   .folder > i { border-radius: calc(var(--mini) * 0.25); background: rgba(128, 128, 128, 0.18); }
   .folder .app-icon { --size: var(--mini) !important; width: var(--mini); height: var(--mini); font-size: 0; }
-  .empty-page { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 28px; margin-bottom: 20px; border-radius: 24px; background: var(--card); text-align: center; }
-  .empty-page b { font-size: 17px; }
-  .empty-page .button { margin-top: 6px; }
 
   /* Held: what a finger is on swells a little, as on the Home Screen, before it lifts or its menu opens. */
   .cell, .tile { transition: scale 0.25s ease; }
@@ -64,24 +67,21 @@
   .edit-bar { position: fixed; z-index: 10; top: calc(10px + env(safe-area-inset-top)); left: 16px; right: 16px; display: flex; justify-content: space-between; pointer-events: none; }
   .edit-bar button { pointer-events: auto; height: 36px; padding: 0 16px; border: 0; border-radius: 18px; font: inherit; font-size: 15px; font-weight: 600; cursor: pointer; color: var(--text);
     background: color-mix(in srgb, var(--card) 85%, transparent); -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px); box-shadow: 0 2px 10px rgba(0, 0, 0, 0.12), 0 0 0 0.5px var(--line); }
-  .edit-bar .done { background: var(--accent); color: white; }
+  .edit-bar .done { background: var(--tint); color: white; }
+  .edit-bar button:active { background-image: linear-gradient(rgba(128, 128, 128, 0.2), rgba(128, 128, 128, 0.2)); }
   .editing.swipe .one-page { padding-top: calc(60px + env(safe-area-inset-top)); }
 
   /* A widget's options, turned round to face its person, the rest of the page dimmed. */
   .options { position: fixed; z-index: 30; inset: 0; display: grid; place-items: center; background: rgba(0, 0, 0, 0.3); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
     opacity: 0; transition: opacity 0.2s; perspective: 900px; }
   .options.on { opacity: 1; }
-  .options .back { width: min(380px, calc(100vw - 40px)); background: var(--card); border-radius: 22px; overflow: hidden; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
+  .options .back { width: min(380px, calc(100vw - 40px)); background: var(--card); border-radius: 28px; overflow: hidden; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
     transform: rotateY(-90deg); transition: transform 0.35s cubic-bezier(0.3, 1.3, 0.5, 1); }
   .options.on .back { transform: none; }
   .options .head { display: flex; align-items: center; gap: 10px; padding: 0 16px; height: 56px; font-weight: 600; }
   .options .head .app-icon { --size: 28px; width: 28px; height: 28px; }
   .options label { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 50px; padding: 0 16px; border-top: 0.5px solid var(--line); }
-  .options select { font: inherit; color: var(--accent); background: none; border: 0; text-align: right; max-width: 60%; }
-  .switch { appearance: none; -webkit-appearance: none; flex: none; width: 51px; height: 31px; border-radius: 16px; background: var(--line); position: relative; margin: 0; cursor: pointer; transition: background 0.2s; }
-  .switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 27px; height: 27px; border-radius: 50%; background: white; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2); transition: transform 0.2s; }
-  .switch:checked { background: #34c759; }
-  .switch:checked::after { transform: translateX(20px); }
+  .options select { font: inherit; color: var(--tint); background: none; border: 0; text-align: right; max-width: 60%; }
 
   /* Your pages, in an order of your own: groups' move and hide; yours and everyone's stay. */
   .pages-sheet .back { padding-bottom: 8px; }
@@ -90,7 +90,7 @@
   .pages-sheet .row-page .title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .pages-sheet .row-page.moving { position: relative; z-index: 2; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2); }
   .pages-sheet .foot { font-size: 13px; color: var(--muted); padding: 8px 16px 4px; }
-  .pages-sheet .head button { margin-left: auto; border: 0; background: none; font: inherit; font-weight: 600; color: var(--accent); cursor: pointer; }
+  .pages-sheet .head button { margin-left: auto; border: 0; background: none; font: inherit; font-weight: 600; color: var(--tint); cursor: pointer; }
 
   /* Under the pages: the one shown's name, then a dot for each, with a cog for Settings. Slide along it to change page. */
   .dots { position: fixed; left: 0; right: 0; bottom: calc(10px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; align-items: center; gap: 6px; pointer-events: none; }
@@ -98,19 +98,21 @@
   .capsule { pointer-events: auto; display: flex; align-items: center; height: 44px; border-radius: 22px; background: color-mix(in srgb, var(--card) 92%, transparent); touch-action: none;
     -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px); box-shadow: 0 4px 16px rgba(0, 0, 0, 0.14), 0 0 0 0.5px var(--line); transition: scale 0.2s; }
   .capsule.sliding { scale: 1.08; }
+  .dots.plain .capsule { background: none; box-shadow: none; -webkit-backdrop-filter: none; backdrop-filter: none; }
   .capsule button { height: 44px; border: 0; background: none; display: flex; align-items: center; gap: 6px; color: var(--faint); cursor: pointer; -webkit-tap-highlight-color: transparent; }
+  .capsule:not(.sliding) button:active { opacity: 0.55; }
   .capsule .marks { padding: 0 6px 0 18px; }
   .capsule .marks i { display: block; width: 7px; height: 7px; border-radius: 4px; background: var(--faint); transition: width 0.2s; }
   .capsule .marks i.on { width: 16px; background: var(--text); }
   .capsule .cog { position: relative; padding: 0 18px 0 6px; font-size: 18px; }
   .capsule .cog.on { color: var(--text); }
-  .capsule .cog.attention::after { content: ""; position: absolute; top: 11px; right: 14px; width: 7px; height: 7px; border-radius: 4px; background: var(--danger); }
+  .capsule .cog.attention::after { content: ""; position: absolute; top: 11px; right: 14px; width: 7px; height: 7px; border-radius: 4px; background: var(--badge); }
   /* Add Widget: each widget once, at the size chosen, as it would look on the page. */
   .adding { padding: 14px 0 18px; border-bottom: 0.5px solid var(--line); }
   .adding:last-child { border-bottom: 0; }
   .adding-head { display: flex; align-items: center; gap: 10px; }
   .adding-head .app-icon { --size: 28px !important; width: 28px; height: 28px; }
-  .adding-preview { --w-card: var(--card); display: flex; justify-content: center; margin: 4px 0 14px; pointer-events: none; }
+  .adding-preview { display: flex; justify-content: center; margin: 4px 0 14px; pointer-events: none; }
   .adding-preview .w-card { box-sizing: border-box; }
   .adding .button { width: 100%; }
   @media (prefers-reduced-motion: reduce) { .editing .cell { animation: none; } }
@@ -119,11 +121,12 @@
 <script>
   // Your pages, as a home screen: each a grid of the widgets you put there and its apps' icons, then its Services
   // folder; Settings is a page of its items. With `scope`, that page alone (a window whose sidebar picks it; "settings"
-  // for Settings); with `swipe`, every page side by side then Settings, opened at `scope`, to swipe between (a phone).
+  // for Settings); with `swipe`, every page side by side then Settings, opened at `scope`, to swipe between (a phone),
+  // under a frosted pill of dots, or with `switcher: "sheet"` (Android's) plain dots that list every page in a sheet.
   // Touch and hold, or right-click, for what an icon or widget offers: its sizes, its settings, taking it off, and
   // arranging the page, where everything jiggles and drags anywhere. Holding something and moving starts arranging
   // with it in hand; holding empty space starts it too.
-  const { scope: chosen, swipe } = one.params || {};
+  const { scope: chosen, swipe, switcher } = one.params || {};
   const SETTINGS = "settings";
   const CELLS = { small: [2, 2], medium: [4, 2], large: [4, 4], xl: [8, 4] };
   const NAMES = { small: "Small", medium: "Medium", large: "Large", xl: "Extra Large" };
@@ -134,6 +137,8 @@
   // Whether the shell lifts what a finger holds itself (the iPhone's), and answers its own `contextmenu`.
   const lifts = !!window.__oneLifts;
   let editing = false;
+  // The widgets (by id) whose new options are being drawn.
+  const refreshing = new Set();
 
   const folder = (apps) => `<span class="folder">${apps.length ? apps.slice(0, 9).map((a) => one.appIcon(a, 15)).join("") : "<i></i>".repeat(9)}</span>`;
   const badge = (n) => (n > 0 ? `<span class="badge">${n > 99 ? "99+" : n}</span>` : "");
@@ -154,9 +159,9 @@
       try {
         await home.call(app, op, input);
       } catch (err) {
-        return err.message;
+        return one.plain(err).title;
       }
-      await home.loadWidgets();
+      await home.loadWidgets([p.scope]);
       draw();
     },
     follow(link, w) {
@@ -190,15 +195,27 @@
     return item;
   }
 
+  /// A widget still to come (or that couldn't be read): a grey card where it goes, at its size, to move or remove.
+  function pending(kept, p) {
+    const size = CELLS[kept.size] ? kept.size : "medium", key = `widget:${kept.id}`;
+    const el = document.createElement("div");
+    el.className = "cell";
+    el.innerHTML = `<div class="w-card widget waiting" aria-hidden="true"></div>`;
+    const menu = home.canArrange(p.scope) ? (e) => home.menu([{ ...editHomePage, section: true }, { title: "Remove Widget", icon: "minus-circle", danger: true, section: true, run: () => remove(p, { key }) }], e) : undefined;
+    return { el, span: CELLS[size], pending: true, kept, key, size, name: home.label(home.app(kept.app)) || kept.widget, menu };
+  }
+
   /// What touching and holding a widget offers, as the Home Screen's: its sizes in a row, then Edit Widget (its
   /// options), Edit Home Page, Copy What Went Wrong if it broke, and Remove Widget.
   function widgetActions(w, kept, p, size, columns) {
-    const sizes = home.supported(w).filter((s) => CELLS[s][0] <= columns);
+    // On a page they can't arrange, only what's there: no sizes, options or removing.
+    const arrange = home.canArrange(p.scope);
+    const sizes = arrange ? home.supported(w).filter((s) => CELLS[s][0] <= columns) : [];
     const out = sizes.length > 1 ? sizes.map((s) => ({ title: NAMES[s], icon: SHAPES[s], row: true, checked: s === size, run: () => s !== size && resize(p, kept, s) })) : [];
-    if ((w.options || []).length) out.push({ title: "Edit Widget", icon: "info", section: out.length > 0, run: () => options(w, kept, p) });
-    out.push({ ...editHomePage, section: !out.length || out.at(-1).row });
+    if (arrange && (w.options || []).length) out.push({ title: "Edit Widget", icon: "info", section: out.length > 0, run: () => options(w, kept, p) });
+    if (arrange) out.push({ ...editHomePage, section: !out.length || out.at(-1).row });
     if (w.error) out.push({ title: "Copy What Went Wrong", icon: "copy", run: () => one.copy(w.error) });
-    out.push({ title: "Remove Widget", icon: "minus-circle", danger: true, section: true, run: () => remove(p, { key: `widget:${kept.id}` }) });
+    if (arrange) out.push({ title: "Remove Widget", icon: "minus-circle", danger: true, section: true, run: () => remove(p, { key: `widget:${kept.id}` }) });
     return out;
   }
 
@@ -208,18 +225,21 @@
   const hiddenOf = (p) => home.data.state.arrangements?.[p.scope]?.hidden || [];
   const keyOf = (kept) => (kept.widget ? `widget:${kept.id}` : `app:${kept.app}`);
 
-  /// Keeps a page as `items` (each as the page keeps it), with `hidden` the apps taken off it, then draws it again.
+  /// Keeps a page as `items` (each as the page keeps it), with `hidden` the apps taken off it, drawn at once; if it
+  /// can't be kept, the page goes back to how it was. With `reload`, its widgets are read again after.
   async function save(p, items, hidden = hiddenOf(p), { reload = false } = {}) {
-    const state = home.data.state;
-    const was = state.arrangements?.[p.scope] || {};
-    const next = { ...was, items, hidden };
-    state.arrangements = { ...(state.arrangements || {}), [p.scope]: next };
+    const state = home.data.state, before = state.arrangements;
+    const was = before?.[p.scope] || {};
+    state.arrangements = { ...(before || {}), [p.scope]: { ...was, items, hidden } };
+    const after = state.arrangements;
     draw();
     try {
       await one.api("POST", "/v1/arrange", { page: p.scope, items, hidden, ...(was.pages ? { pages: was.pages } : {}) });
-      if (reload) await home.loadWidgets(), draw();
+      if (reload) await home.loadWidgets([p.scope]), draw();
       keep();
     } catch (err) {
+      // Unless something newer was drawn meanwhile.
+      if (home.data.state.arrangements === after) home.data.state.arrangements = before, draw();
       home.failed(err);
     }
   }
@@ -235,7 +255,7 @@
   }
 
   /// Adding one of a page's widgets, where it offers one (only `a`'s, for an app's menu).
-  const addActions = (p, a) => (home.widgetsOn(p).some((w) => !a || w.app === a.name) ? [{ title: "Add Widget…", icon: "plus-square", run: () => addWidget(p, a) }] : []);
+  const addActions = (p, a) => (home.canArrange(p.scope) && home.widgetsOn(p).some((w) => !a || w.app === a.name) ? [{ title: "Add Widget…", icon: "plus-square", run: () => addWidget(p, a) }] : []);
 
   /// Adds one of a page's widgets (only `only`'s, if given), in a sheet: each widget once, as it would look on the
   /// page at the size chosen, with Add Widget, which puts it at the page's end.
@@ -275,7 +295,7 @@
       body.append(el);
       show();
     }
-    if (!body.children.length) body.innerHTML = one.empty({ icon: "squares-four", title: "No Widgets", text: `No app on ${esc(p.title)} has a widget.` });
+    if (!body.children.length) body.innerHTML = one.empty(`No app on ${esc(p.title)} has a widget.`);
   }
 
   /// While arranging, Edit's menu: Add Widget…, and the apps taken off the page, to put back.
@@ -316,7 +336,10 @@
       setTimeout(() => card.remove(), 250);
       const options = Object.keys(changed).length ? changed : undefined;
       if (JSON.stringify(options) === JSON.stringify(kept.options)) return;
-      save(p, keptOf(p).map((k) => (k.widget && k.id === kept.id ? { ...k, options } : k)), hiddenOf(p), { reload: true });
+      // Dimmed until it's drawn with them.
+      refreshing.add(kept.id);
+      save(p, keptOf(p).map((k) => (k.widget && k.id === kept.id ? { ...k, options } : k)), hiddenOf(p), { reload: true })
+        .finally(() => { refreshing.delete(kept.id); draw(); });
     };
     card.addEventListener("click", (e) => e.target === card && close());
     addEventListener("keydown", function esc(e) { if (e.key === "Escape") removeEventListener("keydown", esc), close(); });
@@ -383,11 +406,15 @@
       const order = [...list.children].map((r) => r.dataset.scope);
       const pages = { order, hidden: order.filter((s) => hidden.has(s)) };
       if (JSON.stringify(pages) === JSON.stringify({ order: kept.order, hidden: kept.hidden })) return;
-      const state = home.data.state, mine = state.arrangements?.user;
+      const state = home.data.state, before = state.arrangements, mine = before?.user;
       const items = mine?.items || keptOf(home.page("user") || { scope: "user" });
-      state.arrangements = { ...(state.arrangements || {}), user: { ...(mine || {}), items, hidden: mine?.hidden || [], pages } };
+      state.arrangements = { ...(before || {}), user: { ...(mine || {}), items, hidden: mine?.hidden || [], pages } };
+      const after = state.arrangements;
       draw();
-      one.api("POST", "/v1/arrange", { page: "user", items, hidden: mine?.hidden || [], pages }).then(keep, home.failed);
+      one.api("POST", "/v1/arrange", { page: "user", items, hidden: mine?.hidden || [], pages }).then(keep, (err) => {
+        if (home.data.state.arrangements === after) home.data.state.arrangements = before, draw();
+        home.failed(err);
+      });
     };
     card.querySelector("[data-done]").onclick = close;
     card.addEventListener("click", (e) => e.target === card && close());
@@ -417,7 +444,7 @@
 
   /// While arranging, each item's − badge, and a widget's corner, to resize it.
   function decorate(item, p) {
-    if (!item.key) return;
+    if (!item.key || !home.canArrange(p.scope)) return;
     const x = document.createElement("button");
     x.className = "remove";
     x.setAttribute("aria-label", `Remove ${item.name}`);
@@ -480,6 +507,8 @@
     if (!scope || scope === SETTINGS || !home.page(scope)) return;
     const found = itemAt(e.target);
     if (found && !found.item.key && !found.item.menu) return;
+    // On a page they can't arrange, a hold only opens what's held's menu.
+    if (!home.canArrange(scope) && !found?.item.menu) return;
     // Arranging, an item moves as soon as it's moved.
     if (editing) {
       if (found?.item.key) held = { ...found, x: e.clientX, y: e.clientY, id: e.pointerId, ready: true };
@@ -542,7 +571,7 @@
       if (far > 8) clearTimeout(held.timer), (held = null);
       return;
     }
-    if (held.page || far < (editing ? 4 : 10)) return;
+    if (held.page || far < (editing ? 4 : 10) || !home.canArrange(held.p?.scope)) return;
     const { item, p, id, x: x0, y: y0 } = held;
     held = null;
     item.el.classList.remove("held");
@@ -580,7 +609,7 @@
       return found.item.menu(e);
     }
     const scope = e.target.closest(".one-page")?.dataset.scope;
-    if (scope && scope !== SETTINGS && home.page(scope)) home.menu([...addActions(home.page(scope)), editHomePage], e);
+    if (scope && scope !== SETTINGS && home.page(scope)) home.menu([...addActions(home.page(scope)), ...(home.canArrange(scope) ? [editHomePage] : [])], e);
   };
 
   // The iPhone's shell: a finger that moves what it lifted carries it, the menu gone, as on the Home Screen.
@@ -588,7 +617,7 @@
     if (phase === "start" && !drag) {
       const el = document.querySelector("[data-one-lifted]") || document.elementFromPoint(x, y);
       const found = el && itemAt(el);
-      if (!found?.item.key || !found.p) return false;
+      if (!found?.item.key || !found.p || !home.canArrange(found.p.scope)) return false;
       el.style?.removeProperty("visibility");
       el.removeAttribute?.("data-one-lifted");
       edit(true);
@@ -683,53 +712,91 @@
 
   // MARK: Pages
 
+  /// A page's parts, made once and then changed in place: its header (alone in a window), what it says when it has
+  /// nothing, and its grid.
+  function parts(el, header) {
+    if (!el.__grid) {
+      el.innerHTML = (swipe ? "" : `<div class="header"></div>`) + `<div class="nothing"></div><div class="grid"></div>`;
+      el.__grid = el.querySelector(".grid");
+    }
+    const head = el.querySelector(".header"), html = header();
+    if (head && head.__html !== html) head.innerHTML = head.__html = html;
+    return { head, nothing: el.querySelector(".nothing"), grid: el.__grid };
+  }
+
   /// A page: its title (alone in a window), then one grid, as a home screen's.
   function drawPage(el, p) {
-    const empty = !home.appsOn(p).length && !home.widgetsOn(p).length;
+    const empty = !home.appsOn(p).length && !home.widgetsOn(p).length && !home.waiting(p);
     const arrange = home.canArrange(p.scope);
     // In a window, the header has Edit Home Page; while arranging, Edit's menu and Done, as a Mac's toolbar does.
-    el.innerHTML = (swipe ? "" : `<div class="header"><div><h1>${esc(p.title)}</h1>${p.subtitle ? `<div class="subtitle">${esc(p.subtitle)}</div>` : ""}</div>` +
-        `<button class="edit" data-menu>Edit</button><button class="edit" data-done>Edit Home Page</button></div>`) +
-      (empty ? `<div class="empty-page"><b>Nothing here yet</b><div class="muted">${arrange ? `Apps you add ${p.scope === "user" ? "for yourself" : `to ${esc(p.title)}`} show up here.` : `When its admins add apps to ${esc(p.title)}, they show up here.`}</div>` +
-        `${arrange && home.store() ? `<button class="button primary" data-store>Open the App Store</button>` : ""}</div>` : "") +
-      `<div class="grid"></div>`;
-    el.querySelector("[data-store]")?.addEventListener("click", home.openStore);
-    el.querySelector(".header [data-done]")?.addEventListener("click", () => edit(!editing));
-    el.querySelector(".header [data-menu]")?.addEventListener("click", (e) => editMenu(p, e.currentTarget));
-    const list = home.items(p).map((item) => {
-      if (item.widget) return widget(item.widget, item.kept, p);
-      const a = item.app;
-      return tile(home.label(a), one.appIcon(a, 60), home.badge(a.name, p), home.open(a, p), (e) => home.menu([{ ...editHomePage, section: true }, ...addActions(p, a), ...home.actions(a, p)], e),
-        { key: `app:${a.name}`, kept: { app: a.name } });
-    });
-    list.push(tile("Services", folder(home.servicesOn(p)), 0, () => one.open("services", { scope: p.scope }, undefined, { sheet: true }), (e) => home.menu([editHomePage], e)));
-    for (const i of list) {
-      if (editing) decorate(i, p);
-      mark(i);
+    const { head, nothing, grid } = parts(el, () => `<div><h1>${esc(p.title)}</h1>${p.subtitle ? `<div class="subtitle">${esc(p.subtitle)}</div>` : ""}</div>` +
+      (arrange ? `<button class="edit" data-menu>Edit</button><button class="edit" data-done>Edit Home Page</button>` : ""));
+    if (head && !head.__wired) {
+      head.__wired = true;
+      head.addEventListener("click", (e) => {
+        if (e.target.closest("[data-done]")) edit(!editing);
+        else if (e.target.closest("[data-menu]")) editMenu(home.page(p.scope), e.target.closest("[data-menu]"));
+      });
     }
-    lay(el.querySelector(".grid"), list);
+    const said = empty ? `${arrange} ${!!home.store()} ${p.title}` : "";
+    if (nothing.__said !== said) {
+      nothing.__said = said;
+      nothing.innerHTML = empty ? one.empty(arrange ? `Apps you add ${p.scope === "user" ? "for yourself" : `to ${esc(p.title)}`} show up here.` : `When its admins add apps to ${esc(p.title)}, they show up here.`,
+        arrange && home.store() ? { label: "Open the App Store", run: home.openStore } : null) : "";
+    }
+    // Each item with what it's drawn from (`sig`), so only those that changed are made again.
+    const list = home.items(p).map((item) => {
+      if (item.pending) return { slot: `widget:${item.kept.id}`, sig: JSON.stringify(["pending", item.kept]), make: () => pending(item.kept, p) };
+      if (item.widget) {
+        const a = home.app(item.widget.app);
+        return { slot: `widget:${item.kept.id}`, sig: JSON.stringify([item.widget, item.kept, home.label(a), !!a && home.hasScreens(a)]), make: () => widget(item.widget, item.kept, p) };
+      }
+      const a = item.app;
+      return {
+        slot: `app:${a.name}`, sig: JSON.stringify([a, home.badge(a.name, p)]),
+        make: () => tile(home.label(a), one.appIcon(a, 60), home.badge(a.name, p), home.open(a, p), (e) => home.menu([...(arrange ? [{ ...editHomePage, section: true }] : []), ...addActions(home.page(p.scope) || p, a), ...home.actions(a, home.page(p.scope) || p)], e),
+          { key: `app:${a.name}`, kept: { app: a.name } }),
+      };
+    });
+    const services = home.servicesOn(p);
+    list.push({ slot: "services", sig: JSON.stringify(services.map((a) => [a.name, a.icon, a.color, a.title])), make: () => tile("Services", folder(services), 0, () => one.open("services", { scope: p.scope }, undefined, { sheet: true }), arrange ? (e) => home.menu([editHomePage], e) : undefined) });
+    lay(grid, list, p);
+    for (const i of grid.__items) if (i.kept?.id) i.el.classList.toggle("refreshing", refreshing.has(i.kept.id));
   }
 
   /// Settings, as a page: its items' icons.
   function drawSettings(el) {
-    el.innerHTML = (swipe ? "" : `<div class="header"><div><h1>Settings</h1><div class="subtitle">${esc(home.install()?.name || "")}</div></div></div>`) + `<div class="grid"></div>`;
-    const list = (home.data.state.settings_items || []).map((item) => {
-      const icon = one.appIcon({ name: item.name, title: item.title, icon: item.icon, color: item.color }, 60);
-      // An item with an app (the App Store) opens that app; one with a url (Passkeys), the browser.
-      return tile(item.title, icon, item.badge || 0, () => (item.url ? one.link(item.url) : item.app ? one.open("main", {}, item.app) : one.open(item.name)));
+    const { grid } = parts(el, () => `<div><h1>Settings</h1><div class="subtitle">${esc(home.install()?.name || "")}</div></div>`);
+    lay(grid, (home.data.state.settings_items || []).map((item) => ({
+      slot: `settings:${item.name}`, sig: JSON.stringify(item),
+      make: () => {
+        const icon = one.appIcon({ name: item.name, title: item.title, icon: item.icon, color: item.color }, 60);
+        // An item with an app (the App Store) opens that app; one with a url (Passkeys), the browser.
+        return tile(item.title, icon, item.badge || 0, () => (item.url ? one.link(item.url) : item.app ? one.open("main", {}, item.app) : one.open(item.name)));
+      },
+    })));
+  }
+
+  /// Puts a grid's items in place, keeping each that's drawn from what it was drawn from before, and leaving it in the
+  /// page: so its images don't load again, and its jiggle, focus and switches carry on. Then lays them out.
+  function lay(grid, list, p) {
+    const was = new Map((grid.__items || []).map((i) => [i.slot, i]));
+    grid.__items = list.map((s) => {
+      const old = was.get(s.slot);
+      if (old && old.sig === s.sig) return old;
+      const item = Object.assign(s.make(), { slot: s.slot, sig: s.sig });
+      if (editing && p && !item.el.querySelector(":scope > .remove")) decorate(item, p);
+      mark(item);
+      return item;
     });
-    lay(el.querySelector(".grid"), list);
+    grid.__items.forEach((i, n) => { if (grid.children[n] !== i.el) grid.insertBefore(i.el, grid.children[n] || null); });
+    while (grid.children.length > grid.__items.length) grid.lastChild.remove();
+    fit(grid);
   }
 
   /// Lays a grid out as a home screen does: square cells an icon wide, four across a phone, as many as fit wider;
   /// each item in the first place it fits, row by row, widgets starting on an even column; a widget wider than there's
   /// room for is large.
-  function lay(grid, list) {
-    grid.__items = list;
-    grid.replaceChildren(...list.map((i) => i.el));
-    fit(grid);
-  }
-
   function fit(grid) {
     document.documentElement.style.setProperty("--unzoom", 1 / (parseFloat(getComputedStyle(document.documentElement).zoom) || 1));
     const width = grid.clientWidth;
@@ -745,8 +812,8 @@
     const taken = [];
     for (const item of grid.__items) {
       let [w, h] = item.span;
-      if (item.widget && w > columns) {
-        item.refit("large");
+      if ((item.widget || item.pending) && w > columns) {
+        item.refit?.("large");
         [w, h] = CELLS.large;
       }
       for (let y = 0; ; y++) {
@@ -795,7 +862,7 @@
       const scope = el.dataset.scope;
       if (scope === SETTINGS) drawSettings(el);
       else if (home.page(scope)) drawPage(el, home.page(scope));
-      else el.innerHTML = one.empty({ icon: "eye-slash", title: "Nothing Here", text: "This device was let into none of this page. Sign out in Settings and sign in again to choose it." });
+      else (el.__grid = null), (el.innerHTML = one.empty("This device can't open this page. Sign out and in again to choose it."));
     }
     drawEditBar();
     if (swipe) drawDots();
@@ -826,6 +893,7 @@
     const attention = (home.data.state.settings_items || []).some((i) => i.badge);
     if (dots.dataset.scopes !== scopes.join(" ")) {
       dots.dataset.scopes = scopes.join(" ");
+      dots.classList.toggle("plain", switcher === "sheet");
       dots.innerHTML = `<div class="name"></div><div class="capsule"><button class="marks">${scopes.slice(0, -1).map(() => "<i></i>").join("")}</button>` +
         `<button class="cog" aria-label="Settings">${one.icon("gear-six-fill")}</button></div>`;
       wireDots(dots, scopes);
@@ -840,12 +908,22 @@
 
   function wireDots(dots, scopes) {
     const capsule = dots.querySelector(".capsule");
-    dots.querySelector(".marks").onclick = (e) => !quiet() && home.menu([
+    // Android's: every page and Settings, with its red dot when it needs you, in a sheet.
+    const sheet = () => {
+      const attention = (home.data.state.settings_items || []).some((i) => i.badge);
+      const icon = (s) => (s === "user" ? "user" : s === "global" ? "house" : "users");
+      home.menu([
+        ...scopes.slice(0, -1).map((s) => ({ title: titleOf(s), icon: icon(s), checked: s === at, run: () => go(s) })),
+        { title: "Settings", icon: "gear-six", checked: at === SETTINGS, section: true, dot: attention, run: () => go(SETTINGS) },
+        { title: "Edit Pages…", icon: "list-bullets", section: true, run: editPages },
+      ], capsule, { sheet: "Pages" });
+    };
+    dots.querySelector(".marks").onclick = (e) => !quiet() && (switcher === "sheet" ? sheet() : home.menu([
       ...scopes.map((s) => ({ title: titleOf(s), checked: s === at, run: () => go(s) })),
       { title: "Edit Pages…", icon: "list-bullets", section: true, run: editPages },
-      ...(at !== SETTINGS ? [editHomePage] : []),
-    ], capsule);
-    dots.querySelector(".cog").onclick = () => !quiet() && go(SETTINGS);
+      ...(at !== SETTINGS && home.canArrange(at) ? [editHomePage] : []),
+    ], capsule));
+    dots.querySelector(".cog").onclick = () => !quiet() && (switcher === "sheet" ? sheet() : go(SETTINGS));
     slide(capsule);
   }
 
@@ -887,21 +965,29 @@
 
   /// What was drawn last, kept by the shell, so the next time the pages open they're drawn at once, then brought up to
   /// date.
-  const keep = () => one.cache("pages", { state: home.data.state, apps: home.data.apps, widgets: home.data.widgets, badges: home.data.badges }).catch(() => {});
+  let keeping;
+  const keep = () => {
+    clearTimeout(keeping);
+    keeping = setTimeout(() => one.cache("pages", { state: home.data.state, apps: home.data.apps, widgets: home.data.widgets, badges: home.data.badges }).catch(() => {}), 500);
+  };
 
   one.title("");
   let watching = false;
-  /// Reads everything, draws it, and keeps it for next time; then keeps up with what changes.
-  async function refresh() {
-    await home.load();
-    draw();
-    keep();
-    if (!watching) home.watch(() => { draw(); keep(); }), (watching = true);
+  /// Reads everything, drawing it as it comes, and keeps it for next time; then keeps up with what changes. Done once
+  /// the pages are drawn: each page's widgets come after, a grey card in each one's place until they do.
+  function refresh() {
+    return new Promise((drawn, failed) => {
+      home.load(() => { draw(); drawn(); }).then(() => {
+        draw();
+        keep();
+        if (!watching) home.watch(() => { draw(); keep(); }), (watching = true);
+      }, failed);
+    });
   }
   (async () => {
     const kept = await one.cache("pages").catch(() => null);
-    // Nothing kept (the first time on this device): a spinner only if reading takes a while.
-    if (!kept?.state) return one.render(root, async () => void (await refresh()), { wait: 800 });
+    // Nothing kept (the first time on this device): grey tiles only if reading takes a while.
+    if (!kept?.state) return one.render(root, async () => void (await refresh()), { skeleton: "cards", wait: 300 });
     // Drawn from what was kept, at once, then from what's read: offline, it stays as it was, trying again.
     Object.assign(home.data, kept);
     root.__drawn = true;

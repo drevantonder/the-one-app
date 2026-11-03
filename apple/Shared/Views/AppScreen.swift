@@ -12,53 +12,59 @@ struct AppScreen: View {
     /// For a screen in a sheet: closes it, with what the screen gave `one.close`.
     var dismiss: ((Any?) -> Void)?
     @State private var title: String?
-    @State private var loaded = false
-    @State private var slow = false
+    @State private var loaded: Bool
     @State private var failure: String?
     /// When the node couldn't be reached, so the screen shows its last copy, until it answers again.
     @State private var offline: Offline?
     /// Bumped by Try Now, for the web view to try the node again at once.
     @State private var tries = 0
 
+    init(route: ScreenRoute, settings: Bool = false, dismiss: ((Any?) -> Void)? = nil) {
+        self.route = route
+        self.settings = settings
+        self.dismiss = dismiss
+        // Back to a screen left a moment ago: it's there at once, as it was.
+        let kept = dismiss == nil ? KeptScreens.peek(.init(route: route, settings: settings)) : nil
+        _loaded = State(initialValue: kept != nil)
+        _title = State(initialValue: kept?.title)
+    }
+
     var body: some View {
         ScreenWebView(route: route, settings: settings, dismiss: dismiss, store: store, title: $title, loaded: $loaded, failure: $failure, offline: $offline, tries: tries)
             .opacity(loaded ? 1 : 0)
-            .safeAreaInset(edge: .top, spacing: 0) {
+            .animation(.easeOut(duration: 0.15), value: loaded)
+            // Over the screen, so nothing moves; and only once it has lasted, so a blip shows nothing.
+            .overlay(alignment: .top) {
                 if let offline {
-                    TimelineView(.periodic(from: .now, by: 1)) { context in
-                        HStack(spacing: 10) {
-                            Label("Offline: this is how it looked \(offline.kept.formatted(.relative(presentation: .named, unitsStyle: .wide))).", systemImage: "wifi.slash")
-                                .foregroundStyle(.secondary)
-                            if let next = offline.next {
-                                Text("Reconnecting in \(max(1, Int(next.timeIntervalSince(context.date).rounded(.up))))s")
-                                    .foregroundStyle(.tertiary)
-                                    .monospacedDigit()
-                                Button("Try Now") { tries += 1 }
-                                    .buttonStyle(.borderless)
-                            } else {
-                                ProgressView().controlSize(.small)
-                                Text("Reconnecting…").foregroundStyle(.tertiary)
+                    Later(.milliseconds(1500)) {
+                        TimelineView(.periodic(from: .now, by: 30)) { context in
+                            HStack(spacing: 10) {
+                                Label(context.date.timeIntervalSince(offline.kept) < 60 ? "Offline" : "Offline · from \(offline.kept.formatted(.relative(presentation: .named, unitsStyle: .wide)))", systemImage: "wifi.slash")
+                                    .foregroundStyle(.secondary)
+                                if offline.next != nil {
+                                    Button("Try Now") { tries += 1 }
+                                        .buttonStyle(.borderless)
+                                } else {
+                                    ProgressView().controlSize(.small)
+                                    Text("Trying again…").foregroundStyle(.tertiary)
+                                }
                             }
                         }
+                        .font(.footnote.weight(.medium))
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 7)
+                        .glassEffect(.regular, in: .capsule)
+                        .padding(.vertical, 6)
+                        .animation(.default, value: offline.next == nil)
                     }
-                    .font(.footnote.weight(.medium))
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 7)
-                    .glassEffect(.regular, in: .capsule)
-                    .padding(.vertical, 6)
-                    .animation(.default, value: offline.next == nil)
                 }
             }
             .overlay {
                 if let failure {
                     ContentUnavailableView("Can’t Open This", systemImage: "exclamationmark.triangle", description: Text(failure))
-                } else if !loaded && slow {
-                    ProgressView()
+                } else if !loaded {
+                    Later(.milliseconds(400)) { ProgressView() }
                 }
-            }
-            .task {
-                try? await Task.sleep(for: .milliseconds(400))
-                slow = true
             }
             #if os(macOS)
             // Content fades out under the toolbar, as a native scroll view's does.
@@ -98,19 +104,25 @@ private struct ScreenWebView: Representable {
     var tries: Int
     @Environment(\.dynamicTypeSize) private var typeSize
 
-    func makeCoordinator() -> Coordinator { Coordinator(view: self) }
+    func makeCoordinator() -> Coordinator {
+        if dismiss == nil, let kept = KeptScreens.take(.init(route: route, settings: settings)) {
+            kept.view = self
+            return kept
+        }
+        return Coordinator(view: self)
+    }
 
     #if os(macOS)
     func makeNSView(context: Context) -> WKWebView { make(context) }
     func updateNSView(_ web: WKWebView, context: Context) { update(context) }
-    static func dismantleNSView(_ web: WKWebView, coordinator: Coordinator) { coordinator.stop() }
+    static func dismantleNSView(_ web: WKWebView, coordinator: Coordinator) { coordinator.leave(web) }
     #else
     func makeUIView(context: Context) -> WKWebView { make(context) }
     func updateUIView(_ web: WKWebView, context: Context) {
         update(context)
         web.evaluateJavaScript(zoomScript)
     }
-    static func dismantleUIView(_ web: WKWebView, coordinator: Coordinator) { coordinator.stop() }
+    static func dismantleUIView(_ web: WKWebView, coordinator: Coordinator) { coordinator.leave(web) }
     #endif
 
     private func update(_ context: Context) {
@@ -120,6 +132,7 @@ private struct ScreenWebView: Representable {
     }
 
     private func make(_ context: Context) -> WKWebView {
+        if let web = context.coordinator.resume() { return web }
         let config = WKWebViewConfiguration()
         config.userContentController.addScriptMessageHandler(context.coordinator, contentWorld: .page, name: "one")
         config.userContentController.addUserScript(WKUserScript(source: look, injectionTime: .atDocumentStart, forMainFrameOnly: true))
@@ -172,17 +185,16 @@ private struct ScreenWebView: Representable {
     }
     #endif
 
-    /// What makes a page sit in the shell as its own: the shell's background shows through, its accent is the
-    /// shell's in light and dark, and nothing zooms.
+    /// What makes a page sit in the shell as its own: the shell's background shows through, its tint is the
+    /// system's in light and dark, and nothing zooms.
     private var look: String {
-        let accent = store.config?.accent ?? Bundle.main.object(forInfoDictionaryKey: "Accent") as? String ?? ""
-        return """
+        """
         const style = document.createElement("style");
         style.textContent = `
           html, body { background: transparent !important; }
           html { -webkit-tap-highlight-color: transparent; -webkit-touch-callout: none; }
-          :root:root { --accent: \(accentCSS(accent, dark: false)); }
-          @media (prefers-color-scheme: dark) { :root:root { --accent: \(accentCSS(accent, dark: true)); } }
+          :root:root { --tint: \(tintCSS(dark: false)); }
+          @media (prefers-color-scheme: dark) { :root:root { --tint: \(tintCSS(dark: true)); } }
         \(Self.platformCSS)`;
         document.documentElement.appendChild(style);
         \(raised)
@@ -206,8 +218,6 @@ private struct ScreenWebView: Representable {
     #if os(macOS)
     private static let platformCSS = """
       html { zoom: calc(13 / 17); }
-      :root:root { --bg: transparent; --card: rgba(0, 0, 0, 0.04); }
-      @media (prefers-color-scheme: dark) { :root:root { --card: rgba(255, 255, 255, 0.05); } }
     """
     #else
     private static let platformCSS = ""
@@ -233,7 +243,7 @@ private struct ScreenWebView: Representable {
             web?.evaluateJavaScript("window.one && one.__event(\(json))")
         }
 
-        /// The node's tries since it last answered, for the wait before the next: 2, 4, 8, 16, then every 30 seconds.
+        /// The node's tries since it last answered, for the wait before the next (`Retry.wait`): a quarter second, doubling, up to five.
         private var misses = 0
         private var loading: Task<Void, Never>?
 
@@ -241,13 +251,17 @@ private struct ScreenWebView: Representable {
             self.web = web
             let route = view.route, settings = view.settings, node = view.store.node
             loading?.cancel()
+            // The page as the node last gave it shows at once while the node is asked, which replaces it only if it's
+            // changed since (its app deployed).
+            let copy = view.offline == nil ? ScreenCache.last(for: route)?.html : nil
+            if let copy { web.loadHTMLString(copy, baseURL: nil) }
             loading = Task { [weak self] in
                 do {
                     let page = try await settings ? node.settingsPage(route.screen, params: route.params) : node.page(app: route.app, screen: route.screen, params: route.params, scope: route.scope)
                     guard let self, !Task.isCancelled else { return }
                     // No base: a screen is an app's code, never at the node's address, where it would ask as this
                     // machine's own programs.
-                    web.loadHTMLString(page, baseURL: nil)
+                    if copy.map({ ScreenCache.same($0, page) }) != true { web.loadHTMLString(page, baseURL: nil) }
                     ScreenCache.keep(page, for: route)
                     misses = 0
                     view.offline = nil
@@ -258,15 +272,15 @@ private struct ScreenWebView: Representable {
                     let kept: Date
                     if let offline = view.offline {
                         kept = offline.kept
-                    } else if let copy = ScreenCache.last(for: route) {
-                        web.loadHTMLString(copy.html, baseURL: nil)
-                        kept = copy.time
+                    } else if let last = ScreenCache.last(for: route) {
+                        if copy == nil { web.loadHTMLString(last.html, baseURL: nil) }
+                        kept = last.time
                     } else {
                         view.failure = error.localizedDescription
                         return
                     }
                     misses += 1
-                    let wait = Double(min(30, 1 << min(misses, 5)))
+                    let wait = Retry.wait(misses)
                     view.offline = Offline(kept: kept, next: .now + wait)
                     try? await Task.sleep(for: .seconds(wait))
                     guard !Task.isCancelled else { return }
@@ -282,6 +296,25 @@ private struct ScreenWebView: Representable {
         }
 
         func stop() { loading?.cancel() }
+
+        /// The screen's title, as the page last set it.
+        private(set) var title: String?
+        /// Its web view while it's kept, between being taken back and shown.
+        var held: WKWebView?
+
+        /// Gone from view: a screen that showed is kept a while, unless it's a sheet's, which is closed for good.
+        func leave(_ web: WKWebView) {
+            stop()
+            if view.dismiss == nil, shown { KeptScreens.keep(.init(route: view.route, settings: view.settings), web, self) }
+        }
+
+        /// Shown again: its web view, asking the node again if it last couldn't.
+        func resume() -> WKWebView? {
+            guard let web = held else { return nil }
+            held = nil
+            if misses > 0 { load(into: web) }
+            return web
+        }
 
         #if os(iOS)
         private var host: UIView? { web }
@@ -321,9 +354,9 @@ private struct ScreenWebView: Representable {
                 return (UserDefaults.standard.string(forKey: "appearance").flatMap(Appearance.init(rawValue:))?.rawValue ?? Appearance.automatic.rawValue, nil)
             case "device":
                 #if os(iOS)
-                return (["name": UIDevice.current.name, "build": store.build, "signOut": true], nil)
+                return (["name": UIDevice.current.name, "signOut": true], nil)
                 #else
-                return (["name": displayName(store.device?.name ?? store.state?.machine.name ?? ""), "build": store.build, "signOut": Auth.signedIn], nil)
+                return (["name": displayName(store.device?.name ?? store.state?.machine.name ?? ""), "signOut": Auth.signedIn], nil)
                 #endif
             case "request":
                 do {
@@ -401,15 +434,16 @@ private struct ScreenWebView: Representable {
                 // Asks for what the app declares, in the Vault's sheet.
                 let scope = route.scope ?? "user"
                 do {
-                    guard let id = try await store.node.requestItem(scope: scope, app: route.app, need: body["need"] as? String ?? "") else {
+                    guard let asked = try await store.node.requestItem(scope: scope, app: route.app, need: body["need"] as? String ?? "") else {
                         return (nil, "The Vault didn’t take the request")
                     }
-                    return (try await store.ask(scope: scope, id: id), nil)
+                    return (try await store.ask(scope: asked.scope, id: asked.id), nil)
                 } catch {
                     return (nil, error.localizedDescription)
                 }
             case "title":
-                view.title = body["text"] as? String
+                title = body["text"] as? String
+                view.title = title
                 return (nil, nil)
             case "icons":
                 let names = body["names"] as? [String] ?? []
@@ -549,6 +583,51 @@ private struct ScreenWebView: Representable {
     }
 }
 
+/// The last few screens left, by route, so going back to one shows it at once, as it was: the node's events keep
+/// them up to date meanwhile.
+@MainActor
+private enum KeptScreens {
+    struct Key: Hashable {
+        var route: ScreenRoute
+        var settings: Bool
+    }
+
+    private static var kept: [(key: Key, web: WKWebView, coordinator: ScreenWebView.Coordinator)] = []
+
+    static func peek(_ key: Key) -> ScreenWebView.Coordinator? { kept.first { $0.key == key }?.coordinator }
+
+    static func take(_ key: Key) -> ScreenWebView.Coordinator? {
+        guard let at = kept.firstIndex(where: { $0.key == key }) else { return nil }
+        let entry = kept.remove(at: at)
+        entry.coordinator.held = entry.web
+        return entry.coordinator
+    }
+
+    static func keep(_ key: Key, _ web: WKWebView, _ coordinator: ScreenWebView.Coordinator) {
+        kept.removeAll { $0.key == key }
+        kept.append((key, web, coordinator))
+        if kept.count > 4 { kept.removeFirst() }
+    }
+
+    static func forget() { kept = [] }
+}
+
+/// Signed out: no screen of theirs is kept.
+@MainActor
+func forgetKeptScreens() { KeptScreens.forget() }
+
+/// Starts WebKit before the first screen opens, so that opens sooner: an empty page in a web view no one sees.
+@MainActor
+enum WarmWebKit {
+    private static var web: WKWebView?
+
+    static func start() {
+        guard web == nil else { return }
+        web = WKWebView(frame: .zero)
+        web?.loadHTMLString("", baseURL: nil)
+    }
+}
+
 /// What a shell shows for a route: a page, an app's screen, Settings or one of its screens, or a page's Services.
 struct RouteView: View {
     @Environment(Store.self) private var store
@@ -556,6 +635,10 @@ struct RouteView: View {
     var open: (Route) -> Void
 
     var body: some View {
+        content.frame(maxWidth: .infinity, maxHeight: .infinity).groupedBackground()
+    }
+
+    @ViewBuilder private var content: some View {
         switch route {
         case .page(let scope):
             if let page = store.page(scope) { PageView(page: page, open: open) }
@@ -624,16 +707,10 @@ extension Store {
         let host = state?.host ?? state?.machine
         return install?.devices.first { $0.key == host?.key }
     }
-
-    /// This app's build and the node's, for telling which build a device runs.
-    var build: String {
-        let app = "\(config?.name ?? appName), app \(Bundle.main.infoDictionary?["BuildCommit"] as? String ?? "")"
-        guard let build = device?.build else { return app }
-        return "\(app)\n\(displayName(device?.name ?? "")) runs \(build)"
-    }
 }
 
-/// The last copy of each screen this device drew, by route, for when the node can't be reached.
+/// The last copy of each screen this device drew, by route: shown at once while the node is asked, and while it can't be
+/// reached.
 /// A screen shown from its last copy: when that was kept, and when the node is next asked for it (nil while it's being asked).
 struct Offline {
     var kept: Date
@@ -654,6 +731,11 @@ enum ScreenCache {
 
     static func keep(_ html: String, for route: ScreenRoute) {
         try? Data(html.utf8).write(to: file(route), options: .atomic)
+    }
+
+    /// Two pages the same but for their nonce.
+    static func same(_ a: String, _ b: String) -> Bool {
+        a.replacing(/nonce(-|=")[0-9a-f]{32}/, with: "") == b.replacing(/nonce(-|=")[0-9a-f]{32}/, with: "")
     }
 
     static func last(for route: ScreenRoute) -> (html: String, time: Date)? {
@@ -714,7 +796,7 @@ private struct ScreenSheetView: View {
         NavigationStack {
             screen
                 .navigationBarTitleDisplayMode(.inline)
-                .background(Color(.systemGroupedBackground))
+                .groupedBackground()
                 .toolbar {
                     if case .setting("request", _) = sheet.route {
                         ToolbarItem(placement: .cancellationAction) { Button("Cancel") { store.dismiss(sheet) } }
@@ -723,6 +805,7 @@ private struct ScreenSheetView: View {
                     }
                 }
         }
+        .environment(\.raised, true)
         .screenSheets(from: level + 1)
     }
 

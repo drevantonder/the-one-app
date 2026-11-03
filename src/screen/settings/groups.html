@@ -2,11 +2,11 @@
 <style>
   .tile { width: 34px; height: 34px; border-radius: 8px; display: grid; place-items: center; flex: none; color: white; background: #34c759; }
   .tile .i { width: 20px; height: 20px; }
-  .action-row { color: var(--accent); cursor: pointer; }
+  .action-row { color: var(--tint); cursor: pointer; }
   .danger-row { color: var(--danger); cursor: pointer; }
   .action-row.off, .danger-row.off { opacity: 0.4; pointer-events: none; }
   .field { flex: 1; min-width: 0; font: inherit; border: 0; outline: none; background: none; color: var(--text); padding: 0; }
-  .add { color: var(--accent); width: 24px; height: 24px; }
+  .add { color: var(--tint); width: 24px; height: 24px; }
   #page h2.section:first-child { margin-top: 8px; }
 </style>
 <script>
@@ -26,7 +26,7 @@
   const roleName = (r) => (r === "admin" ? "Admin" : "Member");
   const footer = (text, bad) => (text ? `<p class="footer${bad ? " error" : ""}">${one.esc(text)}</p>` : "");
   const person = (id, name, trailing, sub = "") =>
-    `<div class="row">${one.avatar(id, name)}<div class="main"><div class="title"><span>${one.esc(name)}</span></div>${sub ? `<div class="sub">${one.esc(sub)}</div>` : ""}</div>${trailing}</div>`;
+    `<div class="row still">${one.avatar(id, name)}<div class="main"><div class="title"><span>${one.esc(name)}${id === state.user?.id ? " (you)" : ""}</span></div>${sub ? `<div class="sub">${one.esc(sub)}</div>` : ""}</div>${trailing}</div>`;
 
   async function load() {
     state = await one.api("GET", "/v1/state");
@@ -41,12 +41,12 @@
     one.largeTitle("Groups");
     let html = '<div class="large-title">Groups</div>';
     if (invited.length) {
-      html += '<h2 class="section">Invited</h2><div class="list">' + invited.map((g) => `<div class="row"><div class="tile">${one.icon("users-three-fill")}</div>
+      html += '<h2 class="section">Invited</h2><div class="list">' + invited.map((g) => `<div class="row still"><div class="tile">${one.icon("users-three-fill")}</div>
         <div class="main"><div class="title"><span>${one.esc(g.name)}</span></div><div class="sub">${one.esc(names(g.members))}</div></div>
         <button class="button capsule filled" data-accept="${one.esc(g.id)}">Join</button></div>`).join("") + "</div>";
     }
     if (!mine.length && !invited.length) {
-      return html + one.empty({ icon: "users-three", title: "No Groups", text: "A group shares its apps and data, on a page of its own.", action: { label: "New Group", run: () => create() } }) + footer(error, true);
+      return html + one.empty("A group shares its apps and data, on a page of its own.", { label: "New Group", run: () => create() }) + footer(error, true);
     }
     if (mine.length) {
       html += (invited.length ? '<h2 class="section">Yours</h2>' : "") + '<div class="list">' + mine.map((g) => `<a class="row" data-group="${one.esc(g.id)}"><div class="tile">${one.icon("users-three-fill")}</div>
@@ -74,7 +74,7 @@
             <option value="admin"${role === "admin" ? " selected" : ""}>Admin</option><option value="member"${role === "member" ? " selected" : ""}>Member</option>
             <option disabled>──────</option><option value="">${one.esc(leave)}</option></select></label>`
         : `<span class="note">${roleName(role)}</span>`;
-      return person(m.user, userName(m.user) + (m.user === me ? " (you)" : ""), trailing);
+      return person(m.user, userName(m.user), trailing);
     });
     let html = `<div class="large-title">${one.esc(g.name)}</div><h2 class="section">Members</h2><div class="list">${rows.join("")}</div>`;
     html += error ? footer(error, true) : !admin ? footer("Only its admins change who's in it.") : admins.length === 1 ? footer("Make someone else an admin before you step down.") : "";
@@ -110,14 +110,17 @@
     draw();
   }
 
+  // Joining says so in its button until the group shows among theirs.
   async function accept(id, button) {
-    button.disabled = true;
+    if (button.disabled) return;
+    const back = one.busy(button);
     error = "";
     try {
       await one.api("POST", "/v1/accept", { group: id });
       one.tap("success");
     } catch (e) {
       error = one.plain(e).title;
+      back();
     }
     draw();
   }
@@ -131,7 +134,7 @@
     name.oninput = () => (go.disabled = !name.value.trim());
     name.onkeydown = (e) => e.key === "Enter" && !go.disabled && go.click();
     go.onclick = async () => {
-      go.disabled = true;
+      const back = one.busy(go);
       try {
         const made = await one.api("POST", "/v1/group", { name: name.value.trim() });
         sheet.close();
@@ -140,6 +143,7 @@
       } catch (e) {
         note.className = "footer error";
         note.textContent = one.plain(e).title;
+        back();
         go.disabled = false;
       }
     };
@@ -158,19 +162,25 @@
     const show = (note = "") => {
       matches = others.filter((u) => u.name.toLowerCase().includes(query.trim().toLowerCase()));
       const rows = matches.map((u) => `<a class="row" data-user="${one.esc(u.id)}">${one.avatar(u.id, u.name)}<div class="main"><div class="title"><span>${one.esc(u.name)}</span></div>
-        ${u.role === "admin" ? `<div class="sub">Admin of your ${one.esc(one.config.name.replace(/^The /, ""))}</div>` : ""}</div>${one.icon("plus-circle-fill", "add")}</a>`);
+        ${u.role === "admin" ? `<div class="sub">Admin of ${one.esc(one.config.yours)}</div>` : ""}</div>${one.icon("plus-circle-fill", "add")}</a>`);
       people.innerHTML = (rows.length ? `<div class="list">${rows.join("")}</div>` : others.length ? `<div class="list"><div class="row plain muted">No one called “${one.esc(query.trim())}”.</div></div>` : "")
         + (note ? footer(note, true) : footer(others.length ? "They join once they accept." : "Everyone is in this group already."));
     };
+    // Shown among the invited at once, as the sheet goes; taken out again, with why, if it fails.
     const send = async (user) => {
+      const invite = { user, role };
+      error = "";
+      g.invited.push(invite);
+      one.tap("success");
+      sheet.close();
+      one.render("#page", async () => groupPage());
       try {
         await one.api("POST", "/v1/invite", { group, user, role });
-        one.tap("success");
-        sheet.close();
-        draw();
       } catch (e) {
-        show(one.plain(e).title);
+        g.invited.splice(g.invited.indexOf(invite), 1);
+        error = one.plain(e).title;
       }
+      draw();
     };
     sheet.body.querySelector("#as").onclick = (e) => {
       const b = e.target.closest("button");

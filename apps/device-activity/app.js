@@ -43,15 +43,14 @@ async function devices(ctx) {
   return out;
 }
 
-/// One line of a device's load: "RAM 41% (12.2 of 32 GB) · CPU 12% · GPU 3% · disk 8%".
-function line(d) {
-  if (!d.online) return "offline";
-  const parts = [];
-  if (d.memory) parts.push(d.kind ? `RAM ${mem(d.memory.used)}` : `RAM ${pct(d.memory)}% (${mem(d.memory.used)} of ${mem(d.memory.total)})`);
-  if (last(d.cpu) != null) parts.push(`CPU ${last(d.cpu)}%`);
-  if (last(d.gpu) != null) parts.push(`GPU ${last(d.gpu)}%`);
-  if (d.disk) parts.push(`disk ${pct(d.disk)}% (${size(d.disk.total - d.disk.used)} free)`);
-  return parts.join(" · ") || "online";
+/// A device's load in words: { memory: "23 GB of 30 GB (76%)", cpu: "72%", gpu: "0%", disk: "212 GB free of 250 GB" }.
+function said(d) {
+  const out = {};
+  if (d.memory) out.memory = d.kind ? `${mem(d.memory.used)} in use` : `${mem(d.memory.used)} of ${mem(d.memory.total)} (${pct(d.memory)}%)`;
+  if (last(d.cpu) != null) out.cpu = `${last(d.cpu)}%`;
+  if (last(d.gpu) != null) out.gpu = `${last(d.gpu)}%`;
+  if (d.disk) out.disk = `${size(d.disk.total - d.disk.used)} free of ${size(d.disk.total)} (${pct(d.disk)}% used)`;
+  return out;
 }
 
 export default {
@@ -60,42 +59,63 @@ export default {
   icon: "monitor",
   color: "#30b0c7",
   description: "How busy each device is",
-  instructions: "Your One App runs each thing on the first device in its order that can run it, is on and has room: Use First, then When Needed, then Last Resort (Cloudflare among them, once there is one), a device far from the others only when it's nearer. device-activity_order shows that order; device-activity_use moves a device, for an admin, only when the person asks. device-activity_list shows every one of your devices, online or not, with its memory (as Activity Monitor counts it on a Mac), CPU and GPU (percent busy, a sample every 5 seconds over the last two minutes, oldest first) and disk, and the containers each hosts under it. Use it to pick a device with room for a desktop, a model or a build.",
+  instructions: "Your One App runs each thing on the first device in its order that can run it, is on and has room: Use First, then When Needed, then Last Resort (Cloudflare among them, once there is one), a device far from the others only when it's nearer. device-activity_order shows that order; device-activity_use moves a device, for an admin, only when the person asks. device-activity_list shows every one of your devices, online or not, with its memory (as Activity Monitor counts it on a Mac), CPU, GPU and disk, and the containers each hosts after it. Use it to pick a device with room for a desktop, a model or a build.",
 
   ops: {
     order: {
-      description: "Where things run first: every device, and Cloudflare once there is one, in the order calls, sidecars and new agent devices go to them, each with its place (first: Use First, needed: When Needed, last: Last Resort) and what it is.",
+      description: "Where things run first: every device, and Cloudflare once there is one, in the order calls, services and new agent devices go to them, each with its use (first, needed or last, as device-activity_use takes it), that place's name and what kind of device it is; and whether you're an admin, who may change it.",
       input: { type: "object", properties: {} },
       reads: true,
       async run(ctx) {
         const { order, admin } = await ctx.order();
-        return { order, admin, text: order.map((d) => `${PLACES[d.use]}: ${d.name} (${TYPES[d.kind] || d.kind}${d.online ? "" : ", offline"})`).join("\n") };
+        return { order: order.map((d) => ({ name: d.name, use: d.use, place: PLACES[d.use], kind: TYPES[d.kind] || d.kind, online: !!d.online })), admin: !!admin };
       },
     },
     use: {
-      description: "Move a device, or Cloudflare, to Use First, When Needed or Last Resort, for an admin. Only when the person asks.",
+      reads: false,
+      description: "Move a device, or Cloudflare, to Use First, When Needed or Last Resort in where things run first, for an admin, only when the person asks. Gives the new order.",
       input: {
         type: "object",
         properties: {
-          name: { type: "string", description: "the device's name, or Cloudflare" },
+          name: { type: "string", description: "a device's name, from device-activity_order, or Cloudflare" },
           place: { type: "string", enum: ["first", "needed", "last"], description: "first: Use First; needed: When Needed; last: Last Resort" },
         },
         required: ["name", "place"],
       },
       async run(ctx, { name, place }) {
-        const { order } = await ctx.order(name, place);
-        return { order, text: `${name} is now ${PLACES[place]}.` };
+        const known = (await ctx.order()).order;
+        const d = known.find((d) => [d.name, d.key].some((n) => String(n || "").toLowerCase() === String(name).toLowerCase()));
+        if (!d) throw new Error(`no device called ${name}: there's ${known.map((d) => d.name).join(", ")}`);
+        const { order } = await ctx.order(d.key || d.name, place);
+        return { order: order.map((d) => ({ name: d.name, use: d.use, place: PLACES[d.use] })), text: `${d.name} is now ${PLACES[place]}.` };
       },
     },
     list: {
-      description: "List every device, online or not, with its memory, disk (bytes), CPU and GPU (percent busy now; with history, every 5 s over two minutes, oldest first), and each one's containers under it (host).",
-      input: { type: "object", properties: { history: { type: "boolean", description: "CPU and GPU every 5 s over two minutes" } } },
+      description: "Every one of your devices, online or not, and how busy each is now: memory, CPU, GPU and disk, like \"23 GB of 30 GB (76%)\". Containers a device hosts follow it, with host naming it. Use it to pick a device with room for a desktop, a model or a build.",
+      input: { type: "object", properties: { history: { type: "boolean", description: "also each device's CPU and GPU, percent busy every 5 seconds over the last two minutes, oldest first" } } },
       reads: true,
       async run(ctx, { history } = {}) {
-        const now = (samples) => (samples?.length ? samples[samples.length - 1] : null);
         const list = await devices(ctx);
-        return { devices: history ? list : list.map((d) => ({ ...d, cpu: now(d.cpu), gpu: now(d.gpu) })), text: list.map((d) => `${d.host ? "  " : ""}${d.name}${d.kind ? ` (${d.kind})` : ""}: ${line(d)}`).join("\n") };
+        const build = usual(list);
+        return {
+          devices: list.map((d) => ({
+            name: d.name,
+            ...(d.kind ? { kind: d.kind } : d.os ? { os: d.os } : {}),
+            host: d.host,
+            here: d.here,
+            online: d.online,
+            ...(d.online ? said(d) : {}),
+            ...(d.online && d.build && build && d.build !== build ? { update: "not updated yet" } : {}),
+            ...(history && d.online && !d.kind ? { cpu_history: d.cpu, gpu_history: d.gpu.length ? d.gpu : undefined } : {}),
+          })),
+        };
       },
+    },
+    _list: {
+      description: "For the screen: every device with its load as numbers, CPU and GPU every 5 s over two minutes.",
+      input: { type: "object", properties: {} },
+      reads: true,
+      run: (ctx) => devices(ctx).then((devices) => ({ devices })),
     },
   },
 
@@ -127,7 +147,7 @@ export default {
 .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px 24px; margin-top: 12px; }
 .stat .label { display: flex; justify-content: space-between; gap: 8px; white-space: nowrap; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
 .stat .label b { color: var(--text); font-weight: 600; }
-.bar { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
+.bar { height: 6px; border-radius: 3px; background: var(--fill); overflow: hidden; }
 .bar i { display: block; height: 100%; border-radius: 3px; }
 .spark { width: 100%; height: 28px; display: block; }
 .guests { margin: 12px -16px -14px; border-top: .5px solid var(--line); }
@@ -144,7 +164,7 @@ const GB = 1e9, GiB = 2 ** 30;
 const size = (b, g = GB) => b >= 10 * g ? Math.round(b / g) + " GB" : b >= g ? (b / g).toFixed(1) + " GB" : Math.round(b / (g / 1000)) + " MB";
 const mem = (b) => size(b, GiB);
 const pct = (s) => s && s.total ? Math.round(s.used * 100 / s.total) : null;
-const tone = (p) => p >= 85 ? "#ff3b30" : p >= 70 ? "#ff9500" : "#34c759";
+const tone = (p) => p >= 85 ? "var(--danger)" : p >= 70 ? "var(--warn)" : "var(--text)";
 const bar = (s) => s && s.total ? \`<div class="bar"><i style="width:\${pct(s)}%;background:\${tone(pct(s))}"></i></div>\` : "";
 function spark(xs, color) {
   if (!xs.length) return '<div class="bar"></div>';
@@ -159,28 +179,58 @@ function card(d, guests) {
   let stats = "";
   if (d.online) {
     if (d.memory) stats += stat("Memory", d.memory.total ? mem(d.memory.used) + " of " + mem(d.memory.total) : mem(d.memory.used), bar(d.memory));
-    if (d.cpu.length) stats += stat("CPU", d.cpu[d.cpu.length - 1] + "%", spark(d.cpu, "#0a84ff"));
-    if (d.gpu.length) stats += stat("GPU", d.gpu[d.gpu.length - 1] + "%", spark(d.gpu, "#bf5af2"));
+    if (d.cpu.length) stats += stat("CPU", d.cpu[d.cpu.length - 1] + "%", spark(d.cpu, "var(--text)"));
+    if (d.gpu.length) stats += stat("GPU", d.gpu[d.gpu.length - 1] + "%", spark(d.gpu, "var(--muted)"));
     if (d.disk) stats += stat("Disk", size(d.disk.total - d.disk.used) + " free", bar(d.disk));
   }
   const rows = guests.map((g) => \`<div class="guest"><span class="n">\${one.esc(g.name)}</span><span class="k">\${g.kind === "podman" ? "podman" : "container"}</span>\${bar(g.memory)}<span class="m">\${g.memory ? mem(g.memory.used) : ""}</span></div>\`).join("");
   return \`<div class="dev\${d.online ? "" : " off"}\${d.host ? " sub" : ""}"><header><h3>\${one.esc(d.name)}</h3><span class="os">\${d.online ? sub : "Offline"}</span></header>
     \${stats ? '<div class="stats">' + stats + "</div>" : ""}\${rows ? '<div class="guests">' + rows + "</div>" : ""}</div>\`;
 }
-const show = () => one.render("#list", async () => {
-  const { devices } = await one.call("list", { history: true });
-  let html = "";
+async function html() {
+  const { devices } = await one.call("_list", {});
+  let out = "";
   for (let i = 0; i < devices.length; i++) {
     const d = devices[i];
     if (d.kind) continue;
     const guests = [];
     for (let j = i + 1; j < devices.length && devices[j].host === d.name; j++) if (devices[j].kind) guests.push(devices[j]);
-    html += card(d, guests);
+    out += card(d, guests);
   }
-  return html || '<div class="empty">No devices yet</div>';
-});
-show();
-setInterval(show, 5000);
+  return out || one.empty("No devices yet.");
+}
+// Brings \`a\` to look like \`b\`, changing only what differs, so a poll moves the numbers and bars without redrawing the cards.
+function morph(a, b) {
+  const as = [...a.childNodes], bs = [...b.childNodes];
+  if (as.length !== bs.length) return a.replaceChildren(...bs);
+  as.forEach((x, i) => {
+    const y = bs[i];
+    if (x.nodeType !== y.nodeType || x.nodeName !== y.nodeName) return x.replaceWith(y);
+    if (x.nodeType !== 1) return void (x.data !== y.data && (x.data = y.data));
+    for (const { name, value } of [...y.attributes]) if (x.getAttribute(name) !== value) x.setAttribute(name, value);
+    for (const { name } of [...x.attributes]) if (!y.hasAttribute(name)) x.removeAttribute(name);
+    morph(x, y);
+  });
+}
+const list = document.getElementById("list");
+let busy = false;
+// One poll at a time, and only while the screen can be seen; one that fails keeps what's there.
+async function poll() {
+  if (busy || document.visibilityState === "hidden") return;
+  busy = true;
+  try {
+    if (!list.__drawn) return await one.render(list, html);
+    const t = document.createElement("div");
+    t.innerHTML = await html();
+    morph(list, t);
+  } catch {
+  } finally {
+    busy = false;
+  }
+}
+poll();
+setInterval(poll, 5000);
+document.addEventListener("visibilitychange", poll);
 </script>`,
     },
   },

@@ -40,6 +40,16 @@ fn running(dir: &Path) -> Option<String> {
 
 pub fn try_install(rest: &[String]) -> Result<()> {
     let (dir, checkout) = folder();
+    // Help, and nothing started: try's own, or a built-in command's. An app's operation's needs the try install's apps.
+    let help = rest.iter().any(|a| a == "--help" || a == "-h");
+    match rest.first().map(String::as_str) {
+        Some("--help" | "-h" | "help") | Some("stop" | "client" | "sign-in") if help || rest[0] == "help" => {
+            println!("{}", usage());
+            return Ok(());
+        }
+        Some(cmd) if help && crate::commands().iter().any(|c| c == cmd) => return crate::run(rest.to_vec()),
+        _ => {}
+    }
     match rest.first().map(String::as_str) {
         Some("stop") => {
             give_back(&dir);
@@ -67,6 +77,16 @@ pub fn try_install(rest: &[String]) -> Result<()> {
     // and its kernel's settings are its own kernel's.
     unsafe { std::env::set_var(addr_var(), &addr) };
     unsafe { std::env::set_var(format!("{}_HOME", CLI.to_uppercase()), &dir) };
+    if rest.first().map(String::as_str) == Some("sign-in") {
+        // As its person, with no passkey: the try install's kernel asks for none.
+        let address = get("/v1/state")?["install"]["settings"]["address"].as_str().context("the try install has no address")?.to_string();
+        let started = one::sign_in::start(&address)?;
+        one::sign_in::approve_on_try(&started)?;
+        one::sign_in::finish(started)?;
+        let me = get("/v1/state")?["user"]["name"].as_str().unwrap_or("you").to_string();
+        println!("Signed in as {me}. {CLI} try and {CLI} try mcp act as them until {CLI} try sign-out.");
+        return Ok(());
+    }
     if !rest.is_empty() {
         return crate::run(rest.to_vec());
     }
@@ -78,13 +98,10 @@ pub fn try_install(rest: &[String]) -> Result<()> {
 starts with, and {me} as its admin, who signs in at {address} with no passkey. Its folder is {}, with its
 recovery key; its kernel's settings are in {}.
 
-  {CLI} try <command>        any command, in it: {CLI} try status, {CLI} try apps, {CLI} try board post hello
-  {CLI} try mcp              its MCP server, for an agent: claude mcp add {CLI}-try -- {CLI} try mcp
-  {CLI} try client <kind>    a signed-in client of this checkout's build: web, android or windows
-  {CLI} try client <kind> --as sam    the same, as someone else, invited by you with Add Someone's link
-  {CLI} try stop             stop and delete it, and give back its devices; {CLI} try then starts a new one",
+{}",
         dir.display(),
-        kernel.display()
+        kernel.display(),
+        usage()
     );
     Ok(())
 }
@@ -105,6 +122,21 @@ fn serverless(dir: &Path) -> Result<()> {
     crate::request(try_agent(dir).post(format!("http://{addr}/v1/settings")).send_json(json!({ "name": "serverless", "value": key })))?;
     println!("The try install's serverless node runs beside its kernel, its endpoint {}; {} sends /v1/ to it.", &key[..8], settings.address);
     Ok(())
+}
+
+/// What `try` takes.
+fn usage() -> String {
+    format!(
+        "Usage:
+  {CLI} try                  start this checkout's try install, if it isn't running, and say where it is
+  {CLI} try <command>        any command, in it: {CLI} try status, {CLI} try apps, {CLI} try board post hello
+  {CLI} try mcp              its MCP server, for an agent: claude mcp add {CLI}-try -- {CLI} try mcp
+  {CLI} try sign-in          sign its CLI in as its person, with no browser
+  {CLI} try serverless deploy    run its serverless node beside its kernel, as Cloudflare would
+  {CLI} try client <kind>    a signed-in client of this checkout's build: web, android or windows
+  {CLI} try client <kind> --as sam    the same, as someone else, invited by you with Add Someone's link
+  {CLI} try stop             stop and delete it, and give back its devices; {CLI} try then starts a new one"
+    )
 }
 
 /// The try install's kernel's settings, with its secrets, read as the kernel's own tools read them.
@@ -319,7 +351,15 @@ pub fn stop_others(home: &Path) {
 pub async fn bucket(home: PathBuf) -> Result<()> {
     use axum::http::{HeaderMap, Method, StatusCode, Uri};
     let Ok(at) = std::fs::read_to_string(home.join("bucket-addr")) else { return Ok(()) };
-    let listener = tokio::net::TcpListener::bind(at.trim()).await?;
+    // A node taking over from another waits for the one before to let the port go.
+    let mut tries = 0;
+    let listener = loop {
+        match tokio::net::TcpListener::bind(at.trim()).await {
+            Err(err) if err.kind() == std::io::ErrorKind::AddrInUse && tries < 600 => tries += 1,
+            bound => break bound?,
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    };
     let place = one::bucket::Place::Folder(home.join("install").join("bucket"));
     let answer = move |method: Method, uri: Uri, headers: HeaderMap, body: axum::body::Bytes| {
         let place = place.clone();
@@ -422,10 +462,29 @@ fn devices(dir: &Path) -> serde_json::Map<String, Value> {
     std::fs::read(dir.join("devices.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
 }
 
-/// One of this machine's install's Agent Devices' operations (not the try install's, which has none).
+/// One of this machine's install's Agent Devices' operations (not the try install's, which has none). When the node
+/// restarts during it (an update), or its sidecar is still coming back, it's asked again once they answer.
 fn agent_devices(op: &str, input: Value) -> Result<Value> {
-    let out = post("/v1/call", json!({ "app": "agent-devices", "op": op, "input": input, "client": "one try" }))?;
-    Ok(out["ok"].clone())
+    Ok(again(|| post("/v1/call", json!({ "app": "agent-devices", "op": op, "input": input, "client": "one try" })))?["ok"].clone())
+}
+
+/// What `ask` gives, asking again for up to 3 minutes while this machine's node or a sidecar of its restarts.
+fn again(ask: impl Fn() -> Result<Value>) -> Result<Value> {
+    let start = Instant::now();
+    loop {
+        match ask() {
+            Err(err) if start.elapsed() < Duration::from_secs(180) && restarting(&format!("{err:#}")) => {
+                eprintln!("{NAME} is restarting here; asking again once it's back…");
+                std::thread::sleep(Duration::from_secs(5));
+            }
+            out => return out,
+        }
+    }
+}
+
+/// Whether an error is the node or a sidecar of it restarting, not the call failing.
+fn restarting(err: &str) -> bool {
+    ["isn't running here", "isn't running on this device", "no device runs agent-devices", "none of yours runs it"].iter().any(|s| err.contains(s))
 }
 
 /// A command run on a device, and what it said.
@@ -570,16 +629,13 @@ fn browser(dir: &Path, settings: &one::kernel::Settings, person: Option<&str>) -
         Some(port) => port,
         None => {
             let log = format!("{}.log", web.file_name().unwrap().to_string_lossy());
-            let chrome = one::deploy::chrome().context("the web client needs Chrome or Chromium on this machine: none was found (CHROME=<path> names one)")?;
+            let mut chrome = one::deploy::chrome().context("the web client needs Chrome or Chromium on this machine: none was found (CHROME=<path> names one)")?;
             let port = std::net::TcpListener::bind("127.0.0.1:0")?.local_addr()?.port();
             spawn(
                 dir,
-                std::process::Command::new(chrome).args([
-                    "--headless=new",
+                chrome.args([
                     &format!("--remote-debugging-port={port}"),
                     &format!("--user-data-dir={}", web.join("profile").display()),
-                    "--no-first-run",
-                    "--no-default-browser-check",
                     "--window-size=1280,860",
                     "--hide-scrollbars",
                     &settings.address,
@@ -602,14 +658,24 @@ fn browser(dir: &Path, settings: &one::kernel::Settings, person: Option<&str>) -
 /// which reaches the try install's address at the same address; this checkout's build installed there, and signed in.
 fn device_client(dir: &Path, checkout: &Path, settings: &one::kernel::Settings, kind: &str, person: Option<&str>) -> Result<()> {
     let mut borrowed = devices(dir);
-    let listed = post("/v1/call", json!({ "app": "computer", "op": "list", "input": {}, "client": "one try" })).map(|l| l["ok"].clone()).unwrap_or_default();
-    let still = |name: &str| listed["devices"].as_array().into_iter().flatten().any(|d| d["name"] == name);
-    let device = match borrowed.get(kind).and_then(Value::as_str).filter(|d| still(d)) {
-        Some(device) => device.to_string(),
+    let what = format!("one try client {kind}, for {}", checkout.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default());
+    let listed = || again(|| post("/v1/call", json!({ "app": "computer", "op": "list", "input": {}, "client": "one try" }))).map(|l| l["ok"]["devices"].clone()).unwrap_or_default();
+    // A copy borrowed for this checkout's try install that it lost track of (the node restarted as it was lent) is
+    // taken, not left beside a second one.
+    let ours = |listed: &Value| listed.as_array().into_iter().flatten().find(|d| d["borrowed"]["for"] == what.as_str()).and_then(|d| d["name"].as_str()).map(String::from);
+    let now = listed();
+    let still = |name: &str| now.as_array().into_iter().flatten().any(|d| d["name"] == name);
+    let device = match borrowed.get(kind).and_then(Value::as_str).filter(|d| still(d)).map(String::from).or_else(|| ours(&now)) {
+        Some(device) => device,
         None => {
             eprintln!("Borrowing a copy of your {kind} device…");
-            let what = format!("one try client {kind}, for {}", checkout.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default());
-            let got = agent_devices("borrow", json!({ "kind": kind, "copy": true, "for": what }))?;
+            let got = match agent_devices("borrow", json!({ "kind": kind, "copy": true, "for": what })) {
+                Ok(got) => got,
+                Err(err) => match ours(&listed()) {
+                    Some(device) => json!({ "device": device }),
+                    None => return Err(err),
+                },
+            };
             let device = got["device"].as_str().context("Agent Devices lent no device")?.to_string();
             borrowed.insert(kind.into(), json!(device));
             std::fs::write(dir.join("devices.json"), serde_json::to_vec(&borrowed)?)?;
@@ -668,6 +734,8 @@ fn android(dir: &Path, checkout: &Path, device: &str, settings: &one::kernel::Se
     let apk = checkout.join("android").join(apk.lines().last().unwrap_or_default());
     let package = format!("app.{CLI}.android");
     agent_devices("install", json!({ "device": device, "app": apk.display().to_string() }))?;
+    // The launcher keeps drawing home-screen widgets from the APK it replaced ("Can't load widget") until it restarts.
+    on_device(device, "am force-stop com.google.android.apps.nexuslauncher")?;
     let signed_in = dir.join(format!("signed-in-{device}"));
     let first = settings.try_person.as_ref().map(|(_, name)| name.as_str()).unwrap_or_default();
     let who = person.unwrap_or(first);

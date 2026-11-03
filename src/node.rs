@@ -305,7 +305,7 @@ pub struct Inner {
     bundles: Mutex<BTreeMap<String, String>>,
     /// The bundle of each app this release has built in, kept as a blob: any install may add them.
     built_in: BTreeMap<String, String>,
-    /// Each bundle's `icon.png` as a data URL, once read, or none.
+    /// Each bundle's `icon.png`, its finished app icon, as a data URL, once read, or none.
     images: Mutex<HashMap<String, Option<String>>>,
     /// The logos of the sites apps and sidecars connect to.
     logos: crate::logos::Logos,
@@ -369,7 +369,14 @@ pub struct Inner {
     sessions: sessions::Sessions,
     /// This device's iroh endpoint.
     net: net::Net,
+    /// How many times its deploys were settled (`settle`), the first once its apps are loaded.
+    settled: tokio::sync::watch::Sender<u64>,
+    /// Held while settling, so one that read the members before a change can't load its apps after one that read it.
+    settling: tokio::sync::Mutex<()>,
 }
+
+/// Set once this process's node is handing over to the next: it opens nothing only one of them may hold.
+static HANDING_OVER: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// Loop guards: an app that calls other apps, or runs its schedules, more than `RATE_LIMIT` times a minute on this
 /// device is stopped here for `STOPPED_FOR`, or until it's deployed again.
@@ -426,7 +433,7 @@ impl Node {
         let key = SigningKey::from(secret);
         let id = *key.verifying_key().as_bytes();
         let outbound = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
-        let apps = Apps::start(dir.join("runtime"), outbound.local_addr()?.port()).await?;
+        let apps = Apps::start(dir.join(crate::handoff::runtime()), outbound.local_addr()?.port()).await?;
         let (events, _) = broadcast::channel(256);
         let mut built_in = BTreeMap::new();
         for (app, files) in crate::config::BUILT_IN {
@@ -481,6 +488,8 @@ impl Node {
             forgotten: Mutex::new(()),
             sessions: Default::default(),
             net: Default::default(),
+            settled: tokio::sync::watch::channel(0).0,
+            settling: tokio::sync::Mutex::new(()),
         }));
         let outbound_router = crate::outbound::router(node.clone());
         tokio::spawn(async move {
@@ -516,6 +525,7 @@ impl Node {
                 if let Err(err) = worker.settle().await {
                     tracing::warn!("{err:#}");
                 }
+                worker.0.settled.send_modify(|n| *n += 1);
                 worker.0.changed.notified().await;
             }
         });
@@ -529,6 +539,33 @@ impl Node {
 
     pub fn id(&self) -> Key {
         self.0.id
+    }
+
+    /// Waits until its apps are loaded and each has answered once, so a node taking over answers its first calls warm.
+    pub async fn warm(&self) {
+        let mut settled = self.0.settled.subscribe();
+        let _ = tokio::time::timeout(Duration::from_secs(60), settled.wait_for(|n| *n > 0)).await;
+        let mut asked = tokio::task::JoinSet::new();
+        for app in self.0.apps.names() {
+            let apps = self.0.apps.clone();
+            asked.spawn(async move { apps.describe(&app).await });
+        }
+        let _ = tokio::time::timeout(Duration::from_secs(30), asked.join_all()).await;
+    }
+
+    /// Whether this node is handing over to the next: then it keeps its endpoint only until the next one is ready
+    /// (`handed_over`), never binding it again; and if the next one didn't start, it keeps it as before.
+    pub fn handing_over(&self, handing: bool) {
+        HANDING_OVER.store(handing, std::sync::atomic::Ordering::SeqCst);
+        if !handing {
+            self.follow_net();
+        }
+    }
+
+    /// The next node is ready, with an endpoint of this device's key of its own: this one closes its own, so the relay
+    /// and other devices reach only that one.
+    pub fn handed_over(&self) {
+        self.close_net();
     }
 
     /// What this machine's own programs send to say they are (`api::LOCAL_TOKEN`).
@@ -613,13 +650,14 @@ impl Node {
         self.0.name.lock().unwrap().clone()
     }
 
-    /// Creates this device's install, with its local user as the first admin, and deploys the config's apps in
+    /// Creates this device's install, with its local user as the first admin, and installs the config's apps in
     /// `global`. Returns the recovery key's secret, given only this once.
     pub async fn create(&self, name: &str, user_name: &str) -> Result<String> {
         self.create_with(name, user_name, crate::config::STARTERS).await
     }
 
-    /// Creates the install, starting with these built-in apps.
+    /// Creates the install, with every built-in app added (owned by admins), so anyone may add one to their own page,
+    /// and these installed in `global`.
     pub async fn create_with(&self, name: &str, user_name: &str, apps: &[&str]) -> Result<String> {
         self.ensure_no_install()?;
         ensure!(!name.trim().is_empty() && !user_name.trim().is_empty(), "give the install a name, and yourself one");
@@ -650,6 +688,9 @@ impl Node {
             Ok(())
         })?;
         let me = Caller { key: self.0.id, user, agent: None, token: None };
+        for (app, _) in crate::config::BUILT_IN {
+            self.bring_in(&me, app).await?;
+        }
         for app in apps {
             self.bring_in(&me, app).await?;
             self.append(&Scope::Global, members::node("install", json!({ "app": app }))).await?;
@@ -828,6 +869,7 @@ impl Node {
     /// Brings this device in line with the members: runs each app's latest deploy, fetching bundles it lacks, and
     /// says which build it runs.
     async fn settle(&self) -> Result<()> {
+        let _settling = self.0.settling.lock().await;
         let Ok((wanted, author)) = self.with(|i| {
             let wanted: BTreeMap<String, String> = i.r.members.apps.values().filter(|a| !a.erased).filter_map(|a| Some((a.name.clone(), a.bundle.clone()?))).collect();
             Ok((wanted, i.r.members.compute(&self.0.id).is_some()))
@@ -990,12 +1032,13 @@ fn node_me(node: &Node, m: &Members, caller: &Caller) -> Me {
     }
 }
 
-/// Checks one of a call's appends: into a scope it named, which the caller may write.
-fn check_append(i: &Install, append: Append, scopes: &[Scope], me: &Caller) -> Result<(Scope, Content)> {
+/// Checks one of a call's appends: into a scope it named, which the caller may write. `title` is what people call
+/// the app a switch, retire or source names.
+fn check_append(i: &Install, append: Append, scopes: &[Scope], me: &Caller, title: &str) -> Result<(Scope, Content)> {
     Ok(match append {
         Append::Switch { app, schedule, scope, on } => {
             let scope = if scope == "user" { Scope::User(me.user.clone()) } else { Scope::parse(&scope)? };
-            (scope.clone(), switch_entry(i, &me.user, &scope, &app, &schedule, on)?)
+            (scope.clone(), switch_entry(i, &me.user, &scope, &app, title, &schedule, on)?)
         }
         Append::Forget { scope, blob } => {
             let scope = Scope::parse(&scope)?;
@@ -1006,13 +1049,13 @@ fn check_append(i: &Install, append: Append, scopes: &[Scope], me: &Caller) -> R
         Append::Retire { app: name, how } => {
             let m = &i.r.members;
             let a = m.apps.get(&name).with_context(|| format!("no app named {name}"))?;
-            ensure!(m.acts_for(&me.user, &a.owner), "only someone acting for {name}'s owner deletes, restores or erases it");
+            ensure!(m.acts_for(&me.user, &a.owner), "Only {title}'s owners can delete, restore or erase it.");
             let mut data = json!({ "name": name, "owner": a.owner.to_string() });
             match how.as_str() {
                 "deleted" => data["deleted"] = json!(true),
                 "restored" => data["deleted"] = json!(false),
                 "erased" if a.deleted.is_some() => data["erased"] = json!(true),
-                "erased" => bail!("delete {name} before erasing it"),
+                "erased" => bail!("Delete {title} before erasing it."),
                 other => bail!("an app is deleted, restored or erased, not {other}"),
             }
             (Scope::Global, members::node("app", data))
@@ -1020,7 +1063,7 @@ fn check_append(i: &Install, append: Append, scopes: &[Scope], me: &Caller) -> R
         Append::Source { app: name, link } => {
             let m = &i.r.members;
             let a = m.apps.get(&name).filter(|a| !a.erased).with_context(|| format!("no app named {name}"))?;
-            ensure!(m.acts_for(&me.user, &a.owner), "only someone acting for {name}'s owner sets its source link");
+            ensure!(m.acts_for(&me.user, &a.owner), "Only {title}'s owners can set where its code is kept.");
             let link = members::source_link(&json!(link))?;
             (Scope::Global, members::node("app", json!({ "name": name, "owner": a.owner.to_string(), "source": link })))
         }
@@ -1038,11 +1081,23 @@ fn sidecar_entry(m: &Members, user: &str, device: &str, name: &str, installed: b
     Ok(members::node("sidecar", json!({ "device": hex(&s.key), "name": name, "blob": null, "local": installed })))
 }
 
+/// A scope as people call it: Everyone, a person's name, or a group's.
+fn scope_name(i: &Install, scope: &str) -> String {
+    let m = &i.r.members;
+    match Scope::parse(scope) {
+        Ok(Scope::Global) => "Everyone".to_string(),
+        Ok(Scope::User(u)) => m.user(&u).map(|u| u.name.clone()).unwrap_or(u),
+        Ok(Scope::Group(g)) => m.groups.get(&g).map(|g| g.name.clone()).unwrap_or(g),
+        Err(_) => scope.to_string(),
+    }
+}
+
 /// A `schedule` entry `user` may write in `scope`, switching a schedule of `app` there on or off.
-fn switch_entry(i: &Install, user: &str, scope: &Scope, app: &str, schedule: &str, on: bool) -> Result<Content> {
-    ensure!(members::manages_scope(&i.r.members, user, scope), "you can't switch schedules in {scope}");
-    ensure!(i.views.get(&scope.to_string()).is_some_and(|(_, s)| s.installed.contains(app)), "{app} isn't installed in {scope}");
-    ensure!(i.r.holds(scope), "this device doesn't hold {scope}");
+fn switch_entry(i: &Install, user: &str, scope: &Scope, app: &str, title: &str, schedule: &str, on: bool) -> Result<Content> {
+    let name = scope_name(i, &scope.to_string());
+    ensure!(members::manages_scope(&i.r.members, user, scope), "You can't switch schedules in {name}.");
+    ensure!(i.views.get(&scope.to_string()).is_some_and(|(_, s)| s.installed.contains(app)), "{title} isn't on {name}.");
+    ensure!(i.r.holds(scope), "This device can't open {name} yet.");
     Ok(members::node("schedule", json!({ "app": app, "schedule": schedule, "on": on })))
 }
 

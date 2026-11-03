@@ -57,15 +57,19 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge(SystemBarStyle.auto(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT))
         super.onCreate(savedInstanceState)
-        Glyphs.load(this)
         val store = store
         if (store.phase != Store.Phase.SignedOut) store.run()
         setContent {
-            Theme(store.config?.accent ?: BuildConfig.ACCENT, store.appearance) {
+            Theme(store.appearance) {
                 Root(store)
             }
         }
         if (savedInstanceState == null) intent?.data?.let(::open)
+        // The web view's engine, started once the first frame's up, so the first screen opened doesn't wait for it.
+        android.os.Looper.myQueue().addIdleHandler {
+            runCatching { android.webkit.WebView(applicationContext).destroy() }
+            false
+        }
     }
 
     private var started = false
@@ -104,6 +108,7 @@ class ClientApp : android.app.Application() {
     override fun onCreate() {
         super.onCreate()
         ScreenCache.dir = java.io.File(cacheDir, "screens")
+        Glyphs.loadSoon(this)
         app.client.widget.HomeWidgets.start(this)
     }
 }
@@ -164,7 +169,7 @@ private fun Welcome(store: Store) {
             } catch (e: NodeError) {
                 MainActivity.welcomeError = e.message
             } catch (e: Exception) {
-                MainActivity.welcomeError = "Can’t reach $at."
+                MainActivity.welcomeError = "Can’t reach that address. Check it, and that you’re online."
             }
             busy = false
         }
@@ -200,7 +205,7 @@ private fun Welcome(store: Store) {
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Go, autoCorrectEnabled = false),
                     keyboardActions = KeyboardActions(onGo = { signIn() }),
                     colors = TextFieldDefaults.colors(focusedContainerColor = p.card, unfocusedContainerColor = p.card, focusedIndicatorColor = Color.Transparent,
-                        unfocusedIndicatorColor = Color.Transparent, cursorColor = p.accent),
+                        unfocusedIndicatorColor = Color.Transparent, cursorColor = p.tint),
                 )
             }
         }
@@ -212,7 +217,7 @@ private fun Welcome(store: Store) {
         Prominent(if (invited || address.isEmpty() || !address.contains("/invite#")) "Sign In" else "Open Invite", Modifier.fillMaxWidth().height(56.dp), enabled = !busy && (fixed || address.isNotBlank())) { signIn() }
         Box(Modifier.height(48.dp), contentAlignment = Alignment.Center) {
             if (busy) CircularProgressIndicator(Modifier.size(20.dp), color = p.secondary, strokeWidth = 2.dp)
-            else if (invited) TextButton({ invited = false }) { Text("Use Another Address", color = p.accent) }
+            else if (invited) TextButton({ invited = false }) { Text("Use Another Address", color = p.tint) }
         }
     }
 }

@@ -6,6 +6,8 @@
 /// page's nonce, and its policy refuses every other, inline event handlers too.
 pub fn page(context: &serde_json::Value, body: &str, own: bool) -> String {
     let mut context = context.clone();
+    // What a person joins, in their words: "your One App", or a workplace's, "the PTC App".
+    context["config"]["yours"] = crate::config::YOURS.into();
     // The domain whose people join by signing in with Google, for Users to say so.
     if crate::config::SIGN_IN == "google" {
         context["config"]["join_domain"] = crate::config::JOIN_DOMAIN.into();
@@ -23,9 +25,8 @@ pub fn page(context: &serde_json::Value, body: &str, own: bool) -> String {
     };
     format!(
         "<!doctype html><html><head><meta charset=\"utf-8\">{policy}<meta name=\"viewport\" content=\"width=device-width,initial-scale=1,viewport-fit=cover\">\
-         <style>{kit}:root{{--accent:{accent}}}</style>{script}window.__one={context};{bridge}</script></head><body>{body}</body></html>",
+         <style>{kit}</style>{script}window.__one={context};{bridge}</script></head><body>{body}</body></html>",
         kit = include_str!("screen/kit.css"),
-        accent = crate::config::ACCENT,
         bridge = concat!(include_str!("screen/bridge.js"), include_str!("screen/kit.js"), include_str!("screen/code.js"), include_str!("screen/markdown.js")),
     )
 }
@@ -45,7 +46,7 @@ const CLIENT_SCREENS: &[(&str, &str)] = &[
     ("general", include_str!("screen/settings/general.html")),
     ("backups", include_str!("screen/settings/backups.html")),
     ("devices", include_str!("screen/settings/devices.html")),
-    ("agents", include_str!("screen/settings/agents.html")),
+    ("connect-ai", include_str!("screen/settings/connect-ai.html")),
 ];
 
 /// A client's own screen's HTML, or a note that it isn't there.

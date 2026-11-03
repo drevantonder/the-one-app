@@ -25,23 +25,43 @@ pub fn bun() -> Result<PathBuf> {
     crate::apps::pinned(&format!("bun-{BUN}"), "bun", &url, integrity)
 }
 
-/// Chrome or Chromium on this machine, for drawing screens (one try's web client, the tests): CHROME's, the usual ones, or
-/// Playwright's.
-pub fn chrome() -> Option<PathBuf> {
-    if let Some(path) = std::env::var_os("CHROME") {
-        return Some(path.into());
-    }
-    let named = ["google-chrome", "google-chrome-stable", "chromium", "chromium-browser"].iter().find_map(|name| {
-        std::env::split_paths(&std::env::var_os("PATH")?).map(|d| d.join(name)).find(|p| p.is_file())
-    });
-    let mac = PathBuf::from("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome");
-    let playwright = || -> Option<PathBuf> {
+/// A browser with no window on this machine, for drawing screens (one try's web client, the tests), started as lean as
+/// it still works: CHROME's, Playwright's headless shell (a third of Chrome's memory), the usual Chromes, or
+/// Playwright's Chromium. Each app's frame keeps a process of its own, as in people's browsers, which the headless shell
+/// doesn't do by itself and one try's script needs to reach the frames.
+pub fn chrome() -> Option<std::process::Command> {
+    let playwright = |prefix: &str, names: &[&str]| -> Option<PathBuf> {
         let dir = PathBuf::from(std::env::var_os("HOME")?).join(".cache/ms-playwright");
-        let mut found: Vec<PathBuf> = std::fs::read_dir(dir).ok()?.flatten().map(|e| e.path()).filter(|p| p.file_name().is_some_and(|n| n.to_string_lossy().starts_with("chromium-"))).collect();
+        let mut found: Vec<PathBuf> = std::fs::read_dir(dir).ok()?.flatten().map(|e| e.path()).filter(|p| p.file_name().is_some_and(|n| n.to_string_lossy().starts_with(prefix))).collect();
         found.sort();
-        found.into_iter().rev().flat_map(|p| [p.join("chrome-linux64/chrome"), p.join("chrome-linux/chrome")]).find(|p| p.is_file())
+        found.into_iter().rev().flat_map(|p| names.iter().map(move |n| p.join(n))).find(|p| p.is_file())
     };
-    named.or_else(|| mac.is_file().then_some(mac)).or_else(playwright)
+    let named = || {
+        ["google-chrome", "google-chrome-stable", "chromium", "chromium-browser"]
+            .iter()
+            .find_map(|name| std::env::split_paths(&std::env::var_os("PATH")?).map(|d| d.join(name)).find(|p| p.is_file()))
+    };
+    let mac = PathBuf::from("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome");
+    let path = std::env::var_os("CHROME")
+        .map(PathBuf::from)
+        .or_else(|| playwright("chromium_headless_shell-", &["chrome-headless-shell-linux64/chrome-headless-shell", "chrome-linux/headless_shell"]))
+        .or_else(named)
+        .or_else(|| mac.is_file().then_some(mac))
+        .or_else(|| playwright("chromium-", &["chrome-linux64/chrome", "chrome-linux/chrome"]))?;
+    let mut command = std::process::Command::new(path);
+    command.args([
+        "--headless=new",
+        "--site-per-process",
+        "--disable-gpu",
+        "--disable-features=SpareRendererForSitePerProcess,BackForwardCache",
+        "--disable-background-networking",
+        "--disable-component-update",
+        "--disable-breakpad",
+        "--mute-audio",
+        "--no-first-run",
+        "--no-default-browser-check",
+    ]);
+    Some(command)
 }
 
 /// Builds the app in `dir` into a bundle: `app.js`, the ES module Bun makes from its entry and npm packages, and

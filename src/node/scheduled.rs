@@ -18,6 +18,20 @@ impl Node {
         .flatten()
     }
 
+    /// Refuses, before anything is written, what would make a schedule of one of `apps` run as `me` on a One App whose
+    /// schedules run from its kernel, when `me` isn't signed in: the schedules service takes a schedule only with a
+    /// sign-in's token, so it would show on and never run.
+    pub(super) async fn may_schedule(&self, me: &Caller, apps: &[&str]) -> Result<()> {
+        if self.schedules_service().is_none() || me.token.as_deref().is_some_and(|t| !t.starts_with("run.")) {
+            return Ok(());
+        }
+        let declared = self.declared().await;
+        if let Some((app, _)) = declared.iter().find(|(a, list)| apps.contains(&a.as_str()) && list.iter().any(Result::is_ok)) {
+            bail!("sign in first ({} sign-in): {app}'s schedules run only for someone signed in", crate::config::CLI);
+        }
+        Ok(())
+    }
+
     /// Brings what `me` has let run at the schedules service in line with the schedules that run as them here, in the
     /// background: after they install an app, or switch one of its schedules.
     pub(super) fn sync_schedules_later(&self, me: &Caller) {
@@ -101,10 +115,12 @@ impl Node {
         let slot: u64 = run.run.rsplit_once('/').and_then(|(_, s)| s.parse().ok()).context("that isn't a run of a schedule's slot")?;
         let schedule = self.0.apps.describe(&run.app).await.ok().and_then(|d| Schedule::all(&d).into_iter().filter_map(Result::ok).find(|s| s.name == run.schedule));
         let schedule = schedule.with_context(|| format!("{}'s latest deploy has no schedule {}", run.app, run.schedule))?;
+        let title = self.title(&run.app).await;
         self.with(|i| {
-            let state = i.views.get(&scope.to_string()).map(|(_, s)| s).with_context(|| format!("this device doesn't hold {scope}"))?;
-            ensure!(state.installed.contains(&run.app), "{} isn't installed in {scope}", run.app);
-            ensure!(runs_as(&i.r.members, state, &scope, &run.app, &run.schedule).as_deref() == Some(me.user.as_str()), "{} doesn't run as you in {scope} any more", run.schedule);
+            let name = scope_name(i, &run.scope);
+            let state = i.views.get(&scope.to_string()).map(|(_, s)| s).with_context(|| format!("This device can't open {name} yet."))?;
+            ensure!(state.installed.contains(&run.app), "{title} isn't on {name}.");
+            ensure!(runs_as(&i.r.members, state, &scope, &run.app, &run.schedule).as_deref() == Some(me.user.as_str()), "{} doesn't run as you in {name} any more.", run.schedule);
             Ok(())
         })?;
         let lease = format!("{}/{}/slots/{}/{}/{slot}", crate::bucket::folder(&scope.to_string()), members::APP, run.app, schedule.name);
@@ -145,6 +161,38 @@ impl Node {
             }
         }
         out
+    }
+
+    /// The schedules `viewer` may switch, of the apps they may use, that are on and failed their last run, each as
+    /// `schedules_of` gives it with its `app`. Only an app with a failed last run where `viewer` manages it is
+    /// described, so it's cheap when nothing fails.
+    pub async fn failing_schedules(&self, viewer: &Caller) -> Result<Vec<Value>> {
+        let apps: Vec<String> = self.with(|i| {
+            let m = &i.r.members;
+            Ok(m.apps
+                .values()
+                .filter(|a| !a.erased && a.deleted.is_none())
+                .filter(|a| {
+                    reachable(i, &a.name, &viewer.user).iter().any(|scope| {
+                        let installed = i.views.get(&scope.to_string()).is_some_and(|(_, s)| s.installed.contains(&a.name));
+                        let failed = i.status.get(&scope.to_string()).is_some_and(|st| st.runs.iter().any(|((app, _), runs)| app == &a.name && runs.last().is_some_and(|r| !r.ok)));
+                        installed && failed && members::manages_scope(m, &viewer.user, scope)
+                    })
+                })
+                .map(|a| a.name.clone())
+                .collect())
+        })?;
+        let mut out = Vec::new();
+        for app in apps.into_iter().filter(|a| self.0.apps.has(a)) {
+            let Ok(d) = self.0.apps.describe(&app).await else { continue };
+            for mut s in self.schedules_of(viewer, &app, &Schedule::all(&d))?.0 {
+                if s["on"] == true && s["may_switch"] == true && s["last"]["ok"] == false {
+                    s["app"] = json!(app);
+                    out.push(s);
+                }
+            }
+        }
+        Ok(out)
     }
 
     /// An app's schedules where it's installed for `viewer` and this device holds the scope: what each runs and when,
@@ -222,11 +270,13 @@ impl Node {
 
     /// Switches one of an app's schedules on or off in `scope`, for `caller`; switching one on makes it run as them.
     pub async fn switch_schedule(&self, caller: &Caller, app: &str, schedule: &str, scope: &Scope, on: bool) -> Result<()> {
-        let content = self.with(|i| switch_entry(i, &caller.user, scope, app, schedule, on))?;
-        let kernel = self.schedules_service().is_some();
-        ensure!(!kernel || caller.token.is_some(), "sign in first ({} sign-in): schedules here run from your One App's kernel, with what your sign-in lets them use", crate::config::CLI);
+        let title = self.title(app).await;
+        let content = self.with(|i| switch_entry(i, &caller.user, scope, app, &title, schedule, on))?;
+        if on {
+            self.may_schedule(caller, &[app]).await?;
+        }
         self.append_as(scope, &caller.user, content).await?;
-        if kernel {
+        if self.schedules_service().is_some() && caller.token.is_some() {
             self.sync_schedules(caller).await.context("it's switched, but the schedules service didn't take it")?;
         }
         Ok(())

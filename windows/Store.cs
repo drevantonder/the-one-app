@@ -130,8 +130,9 @@ public sealed class Store
     /// Follows the node's events until signed out: what changed, so the window and the open screens keep up.
     public async Task Listen(Action signedOut, CancellationToken cancel)
     {
-        while (!cancel.IsCancellationRequested)
+        for (var misses = 0; !cancel.IsCancellationRequested; misses++)
         {
+            var started = DateTime.Now;
             try
             {
                 await Node.Events(e => _ = Handle(e), cancel);
@@ -142,7 +143,10 @@ public sealed class Store
                 return;
             }
             catch { }
-            try { await Task.Delay(3000, cancel); } catch { return; }
+            // At once after a stream that ran a while and ended (its node handing over to a new build), then waiting
+            // longer each miss.
+            if (DateTime.Now - started > TimeSpan.FromSeconds(10)) misses = 0;
+            try { await Task.Delay(Node.RetryWait(misses), cancel); } catch { return; }
         }
     }
 

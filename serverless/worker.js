@@ -22,13 +22,12 @@
 // Bindings: AUTH and SIGNER (the kernel's services), LOADER (Worker Loader), NODE (this Worker's `Node`, where
 // every request runs), NODE_KEY (its endpoint's key, a secret), RELAY (the relay's Durable Object), LOCATION (where the relay is made), MACHINE (a node
 // on a machine: a Workers VPC service; or MACHINE_URL, its address), ADDRESS (the install's) and NAME (its name).
-// `built.js`, made when it's deployed, is the shim; `icons.json` is the icons every device draws.
+// `built.js`, made when it's deployed, is the shim.
 
 import { DurableObject, RpcTarget } from "cloudflare:workers";
 import { initSync, verify, open, query, write, close, statements, vault_items, vault_fill, vault_schema, screen, client_screen, config, prefix, following as after, read_log, groups, scopes_of, install, bundle, opens, refresh, endpoint_of, signed, handoff, needs as needed, endpoint_start, endpoint_deliver, endpoint_ask, endpoint_close } from "./one_serverless.js";
 import wasm from "./one_serverless_bg.wasm";
 import { shim, compatibilityDate } from "./built.js";
-import icons from "./icons.json";
 
 initSync({ module: wasm });
 const CONFIG = JSON.parse(config());
@@ -803,7 +802,6 @@ function quietEvents() {
 async function route(request, env, ctx, asked = false) {
   const url = new URL(request.url);
   const path = url.pathname;
-  if (request.method === "GET" && path === "/v1/icons") return new Response(icons, { headers: { "content-type": "application/json", "cache-control": "max-age=86400" } });
   if (request.method === "POST" && path === "/v1/call") {
     const req = await request.json().catch(() => refuse(400, "the body isn't JSON"));
     const who = await whom(request, env);

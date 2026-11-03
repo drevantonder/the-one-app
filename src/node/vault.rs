@@ -240,8 +240,8 @@ impl Node {
     async fn write_item(&self, me: &Caller, scope: &Scope, mut change: impl FnMut(&Items) -> Result<Value>) -> Result<String> {
         let erased: BTreeSet<String> = self.with(|i| {
             let m = &i.r.members;
-            ensure!(members::manages_scope(m, &me.user, scope), "you can't change the Vault in {scope}");
-            ensure!(i.r.holds(scope), "this device doesn't hold {scope}");
+            ensure!(members::manages_scope(m, &me.user, scope), "Only its admins change {}’s Vault.", scope_name(i, &scope.to_string()));
+            ensure!(i.r.holds(scope), "This device can’t open {} yet.", scope_name(i, &scope.to_string()));
             Ok(m.apps.iter().filter(|(_, a)| a.erased).map(|(n, _)| n.clone()).collect())
         })?;
         let (db, bucket) = self.vault_db(me, scope).await?;
@@ -340,7 +340,11 @@ impl Node {
 
     /// Asks a person for an item `app` may use, in `scope`, for `caller` (an agent, or an app's page), who never sees
     /// its secret fields: what `app` declares as `need`, or `ask`'s `{ title, fields, hosts }`. → `{ id, link, scope }`.
+    /// From a page whose Vault they can't change (a member on Everyone's), it's asked in their own, which the app's calls
+    /// for them read first.
     pub async fn request_item(&self, caller: &Caller, scope: &Scope, app: &str, need: Option<&str>, ask: &Value, why: &str) -> Result<Value> {
+        let own = Scope::User(caller.user.clone());
+        let scope = if self.with(|i| Ok(members::manages_scope(&i.r.members, &caller.user, scope)))? { scope } else { &own };
         let mut data = match need {
             Some(_) if app == crate::agents::NAME => bail!(
                 "Not asked: need names what an app declares it needs, like app gmail, need client. For an item you use yourself, leave out need and give title, fields and hosts, and why for the person"
@@ -359,17 +363,21 @@ impl Node {
                     );
                 }
                 let fields: serde_json::Map<String, Value> = d["fields"].as_object().into_iter().flatten().map(|(n, f)| (n.clone(), json!({ "secret": f["secret"] == true }))).collect();
-                json!({ "title": d["title"], "fields": fields, "hosts": d["hosts"], "need": need })
+                // Where to find it, as the app says, when the asker gave no reason of their own.
+                let why = if why.is_empty() { d["why"].as_str().unwrap_or("") } else { why };
+                json!({ "title": d["title"], "fields": fields, "hosts": d["hosts"], "need": need, "why": why })
             }
             _ => json!({ "title": ask["title"], "fields": ask["fields"], "hosts": ask["hosts"], "need": need }),
         };
         let id = new_id();
         data["id"] = json!(id);
         data["app"] = json!(app);
-        data["why"] = json!(why);
+        if data["why"].as_str().unwrap_or("").is_empty() {
+            data["why"] = json!(why);
+        }
         data["agent"] = json!(caller.agent);
         self.with(|i| {
-            ensure!(members::manages_scope(&i.r.members, &caller.user, scope), "you can't change the Vault in {scope}");
+            ensure!(members::manages_scope(&i.r.members, &caller.user, scope), "Only its admins change {}’s Vault.", scope_name(i, &scope.to_string()));
             ensure!(i.r.members.apps.get(app).is_some_and(|a| !a.erased) || app == members::APP || app == crate::agents::NAME, "no app named {app}");
             Ok(())
         })?;
@@ -391,7 +399,7 @@ impl Node {
             let state = &i.views.get(&scope.to_string()).with_context(|| format!("no request {id} in {scope}"))?.1;
             let r = state.requests.get(id).with_context(|| format!("no request {id} in {scope}"))?;
             ensure!(r.answer.is_none(), "that request was already answered");
-            ensure!(members::manages_scope(&i.r.members, &caller.user, scope), "you can't change the Vault in {scope}");
+            ensure!(members::manages_scope(&i.r.members, &caller.user, scope), "Only its admins change {}’s Vault.", scope_name(i, &scope.to_string()));
             Ok(r.clone())
         })?;
         if answer["declined"] == true {

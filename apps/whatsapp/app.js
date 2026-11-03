@@ -3,17 +3,25 @@
 // what people and agents use, and a connector.
 
 /// Runs one of the whatsapp sidecar's operations, wherever it runs for the caller. When none of their devices runs it,
-/// says what's needed instead of how the call failed.
+/// says what's needed instead of how the call failed; when a chat isn't found, where to find it.
 async function sidecar(ctx, op, input) {
   try {
     return await ctx.sidecars.whatsapp[op](input);
   } catch (err) {
-    if (String(err.message).includes("no device runs whatsapp for you")) throw new Error(NEEDS);
+    const why = String(err.message);
+    if (why.includes("no device runs whatsapp for you")) throw new Error(NEEDS);
+    if (why.startsWith("no chat called ")) throw new Error(`${why}: whatsapp_chats lists the chats; anyone else by their phone number with its country code`);
+    if (why.includes("matches several chats")) throw new Error(`${why}. Give more of the name, or a phone number with its country code`);
     throw err;
   }
 }
 
-const NEEDS = "WhatsApp isn't on any of your devices yet, so there's no phone to link: whoever owns a device installs it there, and the App Store's WhatsApp page shows where. Then whatsapp_sign_in links your phone.";
+const NEEDS = "WhatsApp isn't on any of your devices yet. Add it in the App Store: whoever owns a device installs it there, and the App Store's WhatsApp page shows where. Then whatsapp_sign_in links your phone.";
+
+const ACCOUNT = { type: "string", description: "which WhatsApp account: its number, as whatsapp_accounts lists them; default the first linked here" };
+const CHAT = "the chat: its name as whatsapp_chats gives it, or a part of it only one chat has; or a phone number with its country code (+61 400 000 000), or a JID (61400000000@s.whatsapp.net)";
+const LIMIT = { type: "integer", description: "at most this many; default 30" };
+const LINES = "one a line, \"[3 Nov 2026 09:00] Sam: text\", times in the time zone of the device it's linked on, and You for the person";
 
 /// The caller's online devices that run the sidecar, by name.
 async function running(ctx) {
@@ -47,19 +55,18 @@ export default {
   title: "WhatsApp",
   icon: "whatsapp-logo",
   color: "#25d366",
-  domain: "whatsapp.com",
   description: "Your WhatsApp chats, for your agents: read, search and send",
   connector: true,
   needs: "Needs a device of yours to link your phone to",
-  instructions: "WhatsApp is the person's WhatsApp accounts, each a phone linked to one of their devices, as WhatsApp Desktop is linked; calls find the device. whatsapp_accounts lists them; the others take account, the first by default. whatsapp_chats lists recent chats; whatsapp_read reads one, newest last; whatsapp_search finds messages. whatsapp_send sends a real message to a real person: send only what the user asked to send, to whom they asked. Reading never tells WhatsApp a message was read. whatsapp_move moves a link to another of their devices; whatsapp_sign_out unlinks one and deletes its messages, only when the user asks.",
+  instructions: "WhatsApp is the person's WhatsApp accounts, each a phone linked to one of their devices, as WhatsApp Desktop is linked; calls find the device. whatsapp_accounts lists them; the others take account, the first by default. whatsapp_chats lists recent chats; whatsapp_read reads one, newest last; whatsapp_search finds messages. Each list pages back with limit and skip. whatsapp_send sends a real message to a real person: send only what the user asked to send, to whom they asked. Reading never tells WhatsApp a message was read. whatsapp_move moves a link to another of their devices; whatsapp_sign_out unlinks one and deletes its messages, only when the user asks.",
   uses: { sidecars: ["whatsapp"] },
   vault: VAULT,
 
   ops: {
     accounts: {
       reads: true,
-      description: "The WhatsApp accounts linked on any of your devices, this one's first: each { account, ok, device }, with why when ok is false.",
-      input: {"properties": {}, "type": "object"},
+      description: "The WhatsApp accounts linked on any of your devices, this one's first: each { account, ok, device }, account its number and device where it's linked, with why when ok is false. Give account to the others to pick one.",
+      input: { type: "object", properties: {} },
       // A connector lists no accounts, rather than failing, where no device runs its sidecar; its settings say why.
       async run(ctx, input) {
         const devices = await running(ctx);
@@ -71,48 +78,87 @@ export default {
     },
     status: {
       reads: true,
-      description: "Which accounts are linked and connected here, and how many messages each keeps; or on which of your devices WhatsApp is linked.",
-      input: {"properties": {}, "type": "object"},
+      description: "Whether WhatsApp is linked and connected on this device, as which number, and how many messages it keeps here; or on which of your devices it's linked instead. For why chats are missing; whatsapp_accounts lists every account.",
+      input: { type: "object", properties: {} },
       run: (ctx, input) => sidecar(ctx, "status", input),
     },
     sign_in: {
-      description: "Link a WhatsApp account here, or another one, as WhatsApp Desktop is linked: returns a QR code to scan on the phone (WhatsApp > Settings > Linked devices > Link a device) and, given phone, a code to type there instead (Link with phone number instead), for when the QR code is on the phone itself.",
-      input: {"properties": {"phone": {"description": "the account's number with its country code, e.g. +61 400 000 000, for a code to type on the phone", "type": "string"}}, "type": "object"},
+      reads: false,
+      description: "For the person: link a WhatsApp account to this device, as WhatsApp Desktop is linked. Gives a QR code to scan on their phone (WhatsApp > Settings > Linked devices > Link a device) and, given phone, a code to type there instead (Link with phone number instead), for when the QR code shows on the phone itself. Chats arrive over the next few minutes.",
+      input: { type: "object", properties: { phone: { type: "string", description: "the account's number with its country code, like +61 400 000 000, for a code to type on the phone" } } },
       run: (ctx, input) => sidecar(ctx, "sign_in", input),
     },
     chats: {
       reads: true,
-      description: "Recent WhatsApp chats, most recent first: who, when, the last message, and how many are unread.",
-      input: {"properties": {"account": {"description": "which account: its number, as whatsapp_accounts lists them; default the first linked here", "type": "string"}, "limit": {"description": "at most this many; default 30", "type": "integer"}, "skip": {"description": "skip this many of the most recent, to page back", "type": "integer"}, "unread": {"description": "only unread chats", "type": "boolean"}}, "type": "object"},
+      description: "Recent WhatsApp chats, most recent first, to see what's new or find a chat to read: one a line, \"Sam (2 unread), 09:00: You: last message\", the time in the time zone of the device it's linked on. Page back with skip.",
+      input: {
+        type: "object",
+        properties: {
+          account: ACCOUNT,
+          unread: { type: "boolean", description: "only chats with unread messages" },
+          limit: LIMIT,
+          skip: { type: "integer", description: "leave out this many of the most recent, to page back: 30 for the second page of 30" },
+        },
+      },
       run: (ctx, input) => sidecar(ctx, "chats", input),
     },
     read: {
       reads: true,
-      description: "A WhatsApp chat's messages, newest last. Page back with skip. WhatsApp isn't told they were read: the sender sees no blue ticks, and the chat stays unread on the phone.",
-      input: {"properties": {"account": {"description": "which account: its number, as whatsapp_accounts lists them; default the first linked here", "type": "string"}, "chat": {"description": "the chat's name, a part of it only one chat has, a phone number, or a JID", "type": "string"}, "limit": {"description": "this many; default 30", "type": "integer"}, "skip": {"description": "skip this many of the newest, to read further back", "type": "integer"}}, "required": ["chat"], "type": "object"},
+      description: `One WhatsApp chat's messages, newest last, ${LINES}. WhatsApp isn't told they were read: the sender sees no blue ticks, and the chat stays unread on the phone. Page back with skip.`,
+      input: {
+        type: "object",
+        required: ["chat"],
+        properties: {
+          account: ACCOUNT,
+          chat: { type: "string", description: CHAT },
+          limit: LIMIT,
+          skip: { type: "integer", description: "leave out this many of the newest, to read further back: 30 for the 30 before the latest 30" },
+        },
+      },
       run: (ctx, input) => sidecar(ctx, "read", input),
     },
     search: {
       reads: true,
-      description: "WhatsApp messages containing some text, across chats or in one, newest last.",
-      input: {"properties": {"account": {"description": "which account: its number, as whatsapp_accounts lists them; default the first linked here", "type": "string"}, "chat": {"description": "only in this chat", "type": "string"}, "limit": {"description": "at most this many; default 30", "type": "integer"}, "query": {"description": "text to look for, case-insensitive", "type": "string"}, "skip": {"description": "skip this many of the newest matches, to page back", "type": "integer"}}, "required": ["query"], "type": "object"},
+      description: "WhatsApp messages containing some text, across every chat or in one, newest last: to find something said when you don't know which chat. One a line, \"[3 Nov 2026 09:00] Sam in Family: text\", the chat only when it isn't Sam's own and \"You to Sam\" for the person's, times in the time zone of the device it's linked on. Page back with skip.",
+      input: {
+        type: "object",
+        required: ["query"],
+        properties: {
+          account: ACCOUNT,
+          query: { type: "string", description: "text to look for, any case" },
+          chat: { type: "string", description: `only in this chat: ${CHAT}` },
+          limit: LIMIT,
+          skip: { type: "integer", description: "leave out this many of the newest matches, to page back" },
+        },
+      },
       run: (ctx, input) => sidecar(ctx, "search", input),
     },
     send: {
+      reads: false,
       confirm: true,
-      description: "Send a WhatsApp message, as the linked account, to a chat, a contact or a phone number. This sends a real message to a real person.",
-      input: {"properties": {"account": {"description": "which account: its number, as whatsapp_accounts lists them; default the first linked here", "type": "string"}, "chat": {"description": "the chat's name, a part of it only one chat has, a contact's exact name, a phone number with its country code, or a JID", "type": "string"}, "text": {"description": "the message", "type": "string"}}, "required": ["chat", "text"], "type": "object"},
+      description: "Send a WhatsApp message, as the linked account, to a chat, a contact or a phone number. It sends a real message to a real person and can't be taken back: only what the person asked to send, to whom they asked. Says to whom it went.",
+      input: {
+        type: "object",
+        required: ["chat", "text"],
+        properties: {
+          account: ACCOUNT,
+          chat: { type: "string", description: `${CHAT}; or a contact's exact name, for someone with no chat yet` },
+          text: { type: "string", description: "the message, exactly as the person approved it" },
+        },
+      },
       run: (ctx, input) => sidecar(ctx, "send", input),
     },
     move: {
-      description: "Move a WhatsApp link, with its kept messages, from the device it's on to another of yours that runs WhatsApp, without linking again: the phone's Linked devices list doesn't change. It's deleted here once the other device has it.",
-      input: {"properties": {"account": {"description": "which account: its number, as whatsapp_accounts lists them; default the first linked here", "type": "string"}, "to": {"description": "the device to move it to, by name", "type": "string"}}, "required": ["to"], "type": "object"},
+      reads: false,
+      description: "Move a WhatsApp link, with its kept messages, from the device it's on to another of yours that runs WhatsApp, without linking again: the phone's Linked devices list doesn't change. It's deleted from the first device once the other has it. Says where it went.",
+      input: { type: "object", required: ["to"], properties: { account: ACCOUNT, to: { type: "string", description: "the device to move it to, by its name as whatsapp_status or the App Store's WhatsApp page shows" } } },
       run: (ctx, input) => sidecar(ctx, "move", input),
     },
     sign_out: {
+      reads: false,
       confirm: true,
-      description: "Unlink a WhatsApp account: removes this device from its linked devices and deletes the messages kept here. Destructive: linking again needs the phone, and the deleted messages don't come back. Only when the user asks to sign out.",
-      input: {"properties": {"account": {"description": "the account's number; needed when several are linked here", "type": "string"}}, "type": "object"},
+      description: "Unlink a WhatsApp account: removes this device from the phone's linked devices and deletes the messages kept here. It can't be undone: linking again needs the phone, and the deleted messages don't come back. Only when the person asks to sign out.",
+      input: { type: "object", properties: { account: { type: "string", description: "the account's number, as whatsapp_accounts lists them; needed when several are linked here" } } },
       async run(ctx, input) {
         const out = await sidecar(ctx, "sign_out", input);
         const devices = await running(ctx);
@@ -130,7 +176,7 @@ export default {
       reads: true,
       description: "Which of your devices it runs on, for the screens to say when none does.",
       input: { type: "object", properties: {} },
-      run: async (ctx) => ({ devices: await running(ctx), needs: NEEDS }),
+      run: async (ctx) => ({ devices: await running(ctx) }),
     },
   },
 
@@ -139,44 +185,67 @@ export default {
       title: "WhatsApp",
       html: `
 <style>
-  .card { background: var(--card); border-radius: 12px; padding: 14px 16px; margin: 12px 0; }
-  button.primary { font: inherit; font-weight: 600; color: white; background: var(--accent); border: 0; border-radius: 10px; padding: 11px 16px; }
-  button.plain { font: inherit; color: var(--accent); background: none; border: 0; padding: 4px 0; }
+  .card { background: var(--card); border-radius: var(--radius); padding: 14px 16px; margin: 12px 0; }
+  button.primary { font: inherit; font-weight: 600; color: white; background: var(--tint); border: 0; border-radius: 10px; padding: 11px 16px; }
+  button.plain { font: inherit; color: var(--tint); background: none; border: 0; padding: 4px 0; }
+  button:disabled { opacity: 0.6; }
+  button .spinner { display: inline-block; vertical-align: -2px; margin-right: 6px; }
   input { width: 100%; box-sizing: border-box; font: inherit; padding: 11px 14px; border-radius: 10px; border: 0.5px solid var(--line); background: var(--bg); color: var(--text); margin: 8px 0; }
   ol { padding-left: 20px; margin: 8px 0; }
-  .dot { width: 9px; height: 9px; border-radius: 50%; background: #34c759; flex: none; margin-right: 12px; }
-  .dot.warn { background: #ff9f0a; }
+  .sub.warn { color: var(--warn); }
   #qr { display: block; width: 220px; height: 220px; margin: 10px auto; background: white; border-radius: 8px; image-rendering: pixelated; }
   .code { font: 600 24px ui-monospace, monospace; letter-spacing: 2px; text-align: center; margin: 8px 0; }
 </style>
 <div id="list"></div>
-<div class="card" id="connect"></div>
+<div id="ask"></div>
+<div class="card" id="connect" hidden><input id="phone" type="tel" placeholder="Its number, for a code to type instead (optional)"><button class="primary" id="start">Add account</button><div id="err" class="error small"></div></div>
+<div id="needs" hidden></div>
 <script>
 // Each account is a phone linked to one of your devices, as WhatsApp Desktop is linked.
-let shown = 0;
-async function show() {
-  const accounts = await one.call("accounts");
-  shown = accounts.length;
-  document.getElementById("list").innerHTML = accounts.length
-    ? '<h2 class="section">Accounts</h2><div class="list">' + accounts.map((a, i) => \`<div class="row plain"><span class="dot\${a.ok ? "" : " warn"}"></span><div class="main"><div class="title">\${one.esc(a.account)}</div><div class="sub">\${one.esc(a.ok ? \`Linked on \${a.device}\${i ? "" : " · used first"}\` : a.why || "Needs linking again")}</div></div><button class="plain" data-out="\${one.esc(a.account)}">Sign out</button></div>\`).join("") + "</div>"
-    : '<p class="muted">Link WhatsApp, and your agents can read your chats and, when you ask, send.</p>';
-  for (const b of document.querySelectorAll("[data-out]")) b.onclick = async () => {
-    await one.confirm("#connect", { title: \`Sign out of \${b.dataset.out}?\`, detail: "This device is unlinked from it, and the messages kept for it are deleted. Linking again needs the phone.",
-      action: "Sign Out", danger: true, run: () => one.call("sign_out", { account: b.dataset.out }) });
-    show();
-  };
-  const c = document.getElementById("connect");
-  c.innerHTML = '<input id="phone" type="tel" placeholder="Its number, for a code to type instead (optional)"><button class="primary" id="start">Add account</button><div id="err" class="error small"></div>';
+const list = document.getElementById("list"), connect = document.getElementById("connect"), form = connect.innerHTML;
+let accounts = [], asked = 0;
+// Signed out here and maybe not yet on the device, so a redraw meanwhile doesn't bring them back.
+const leaving = new Set();
+function draw(fetch) {
+  return one.render(list, async () => {
+    if (fetch) {
+      const n = ++asked, got = await one.call("accounts");
+      if (n === asked) accounts = got;
+    }
+    const all = accounts.filter((a) => !leaving.has(a.account));
+    return all.length
+      ? '<h2 class="section">Accounts</h2><div class="list">' + all.map((a, i) => \`<div class="row plain"><div class="main"><div class="title">\${one.esc(a.account)}</div><div class="sub\${a.ok ? "" : " warn"}">\${one.esc(a.ok ? \`Linked on \${a.device}\${i ? "" : " · used first"}\` : one.plain(a.why || "Needs linking again").title)}</div></div><button class="plain" data-out="\${one.esc(a.account)}">Sign out</button></div>\`).join("") + "</div>"
+      : '<p class="muted">Link WhatsApp, and your agents can read your chats and, when you ask, send.</p>';
+  }, { skeleton: 1 });
+}
+list.onclick = (e) => {
+  const account = e.target.closest("[data-out]")?.dataset.out;
+  if (!account) return;
+  one.confirm("#ask", { title: \`Sign out of \${account}?\`, detail: "This device is unlinked from it, and the messages kept for it are deleted. Linking again needs the phone.",
+    action: "Sign Out", danger: true, run: async () => {
+      leaving.add(account);
+      draw(false);
+      try {
+        await one.call("sign_out", { account });
+        accounts = accounts.filter((a) => a.account !== account);
+      } finally {
+        leaving.delete(account);
+        draw(true);
+      }
+    } });
+};
+function ready() {
+  connect.innerHTML = form;
   document.getElementById("start").onclick = start;
 }
 
 async function start(e) {
-  const phone = document.getElementById("phone").value.trim();
-  e.target.disabled = true;
-  e.target.textContent = "Asking WhatsApp…";
+  const b = e.currentTarget, phone = document.getElementById("phone").value.trim();
+  b.disabled = true;
+  b.innerHTML = '<span class="spinner small" aria-hidden="true"></span>Asking WhatsApp…';
   try { await one.call("sign_in", phone ? { phone } : {}); }
-  catch (err) { document.getElementById("err").textContent = err.message; e.target.disabled = false; e.target.textContent = "Add account"; return; }
-  document.getElementById("connect").innerHTML = \`<ol><li>On the phone, open WhatsApp › Settings › Linked devices › Link a device.</li>
+  catch (err) { document.getElementById("err").textContent = one.plain(err).title; b.disabled = false; b.textContent = "Add account"; return; }
+  connect.innerHTML = \`<ol><li>On the phone, open WhatsApp › Settings › Linked devices › Link a device.</li>
     <li>Scan this code\${phone ? ", or tap Link with phone number instead and type the code under it" : ""}.</li></ol>
     <img id="qr" alt=""><div class="code" id="code"></div><div class="small muted" id="note">The code changes every 20 seconds. WhatsApp then sends recent chats, which takes a few minutes.</div>\`;
   watch();
@@ -184,33 +253,37 @@ async function start(e) {
 
 // Shows the current codes until the phone links, or the codes run out.
 async function watch() {
+  const had = accounts.length;
   for (let i = 0; i < 90; i++) {
     const p = await one.call("_pairing").catch(() => ({}));
     if (!p.qr) {
-      const accounts = await one.call("accounts").catch(() => []);
-      if (accounts.length > shown) return show();
+      const now = await one.call("accounts").catch(() => []);
+      if (now.length > had) return draw(true).then(ready);
       document.getElementById("note").textContent = "The codes ran out before the phone linked.";
       document.getElementById("qr").hidden = true;
-      return setTimeout(show, 3000);
+      return setTimeout(() => draw(true).then(ready), 3000);
     }
     document.getElementById("qr").src = p.qr;
     document.getElementById("code").textContent = p.code || "";
     await new Promise((r) => setTimeout(r, 2000));
   }
-  show();
+  draw(true).then(ready);
 }
 
-one.on("changed", show);
-show().then(() => { if (one.params.add) document.getElementById("phone").focus(); });
-</script>
-<div class="card" id="needs" hidden></div>
-<script>
-one.call("_running").then(({ devices, needs }) => {
-  if (devices.length) return;
-  const n = document.getElementById("needs");
-  n.textContent = needs;
-  n.hidden = false;
-  document.getElementById("connect").hidden = true; 
+document.getElementById("start").onclick = start;
+one.on("changed", () => draw(true));
+// The accounts and whether any device runs WhatsApp come together, so the form shows once, or not at all.
+Promise.all([one.call("_running").catch(() => null), draw(true)]).then(([r]) => {
+  if (r && !r.devices.length) {
+    // None of their devices has it: what to do, on the App Store's WhatsApp page, which says where it can go.
+    const n = document.getElementById("needs");
+    n.innerHTML = one.problem({ title: "WhatsApp isn't on any of your devices yet.", text: "Add it to one in the App Store, then link your phone here.", warn: true,
+      action: { label: "Open App Store", run: () => one.open("app", { app: "whatsapp" }, "apps") } });
+    n.hidden = false;
+    return;
+  }
+  connect.hidden = false;
+  if (one.params.add) document.getElementById("phone").focus();
 });
 </script>`,
     },

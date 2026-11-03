@@ -131,7 +131,7 @@ func (ds *devices) backupsAll(ctx context.Context, device string) ([]backupRecor
 // from the blob, fetched from whichever device has it.
 func (ds *devices) restore(ctx context.Context, name string, rec backupRecord, sz size) (device, error) {
 	if _, err := find(ctx, name); err == nil {
-		return device{}, fmt.Errorf("device %s already exists", name)
+		return device{}, fmt.Errorf("device %s already exists: give as another name for the restored one", name)
 	}
 	var resp *http.Response
 	// Another device serves the blob once the entry naming it reaches it,

@@ -29,6 +29,41 @@ public static class WidgetCache
         public JsonElement Tree(string size) => Sizes?.TryGetValue(size, out var t) == true ? t : Root;
     }
 
+    /// Every page's widgets as last read, and when (UTC), kept on disk so the board's are drawn at once, before
+    /// they're read again.
+    public sealed record Kept(List<Item> Items, DateTime At);
+
+    static string File => System.IO.Path.Combine(WhiteLabel.Folder, "Widgets.json");
+
+    public static Kept? Last()
+    {
+        try { return JsonSerializer.Deserialize<Kept>(System.IO.File.ReadAllText(File)); }
+        catch { return null; }
+    }
+
+    public static void Keep(List<Item> items, DateTime at)
+    {
+        try
+        {
+            System.IO.Directory.CreateDirectory(WhiteLabel.Folder);
+            System.IO.File.WriteAllText(File, JsonSerializer.Serialize(new Kept(items, at)));
+        }
+        catch { }
+    }
+
+    public static void Forget()
+    {
+        try { System.IO.File.Delete(File); } catch { }
+    }
+
+    /// "Updated 2 hr ago", once what's shown was read over an hour ago (it's read every few minutes it can be).
+    public static string? Updated(DateTime at)
+    {
+        var ago = DateTime.UtcNow - at;
+        if (at == default || ago < TimeSpan.FromHours(1)) return null;
+        return ago.TotalDays < 1 ? $"Updated {(int)ago.TotalHours} hr ago" : $"Updated {at.ToLocalTime():d MMM}";
+    }
+
     /// The store's widgets, page by page, as the iPhone lists them; each opens its app's main screen if it has one.
     public static List<Item> Of(Store store) =>
         store.Pages().SelectMany(p => store.WidgetsOn(p).Select(w => new Item(w.App, w.Widget, p.Scope, p.Title, w.Title ?? store.App(w.App)?.Label ?? w.Widget, w.Error, w.Root, w.Sizes, store.App(w.App)?.HasScreens == true))).ToList();
@@ -92,6 +127,8 @@ public sealed partial class Widgets : IWidgetProvider, IWidgetProvider2
         {
             try
             {
+                // What they showed last, to draw at once.
+                if (Auth.Shared.SignedIn && WidgetCache.Last() is { } last) (items, readAt) = (last.Items, last.At);
                 // Those pinned before it started, as they were left; the board's calls come only once it's registered.
                 foreach (var info in WidgetManager.GetDefault().GetWidgetInfos())
                     pinned.TryAdd(info.WidgetContext.Id, Pinned.Of(info.WidgetContext, info.CustomState));
@@ -173,11 +210,17 @@ public sealed partial class Widgets : IWidgetProvider, IWidgetProvider2
                 Draw(id, p);
                 break;
             case "run":
+                // Drawn as done at once (a toggle switched, a button greyed), then as its operation leaves it; back as it
+                // was if it didn't work.
+                var (app, op) = (data?["app"]?.GetValue<string>() ?? "", data?["op"]?.GetValue<string>() ?? "");
+                var which = WidgetCard.Which(app, op, data?["input"] as JsonObject);
+                WidgetCard.Doing[which] = data?["input"]?["on"] is JsonValue on && on.TryGetValue<bool>(out var to) ? to : true;
+                DrawAll();
                 _ = Task.Run(async () =>
                 {
                     try
                     {
-                        await Node.Call(data?["app"]?.GetValue<string>() ?? "", data?["op"]?.GetValue<string>() ?? "", data?["input"]?.DeepClone());
+                        await Node.Call(app, op, data?["input"]?.DeepClone());
                         p.Problem = null;
                     }
                     catch (SignedOutException)
@@ -189,6 +232,7 @@ public sealed partial class Widgets : IWidgetProvider, IWidgetProvider2
                         p.Problem = $"Couldn’t do that: {e.Message}";
                     }
                     await Read(TimeSpan.Zero);
+                    WidgetCard.Doing.TryRemove(which, out _);
                     DrawAll();
                 });
                 break;
@@ -260,6 +304,7 @@ public sealed partial class Widgets : IWidgetProvider, IWidgetProvider2
             items = WidgetCache.Of(Store.Shared);
             readAt = DateTime.UtcNow;
             away = null;
+            WidgetCache.Keep(items, readAt);
         }
         catch (SignedOutException)
         {
@@ -284,11 +329,11 @@ public sealed partial class Widgets : IWidgetProvider, IWidgetProvider2
     {
         // Signed out in the window since they were read: none of the person's widgets are drawn again.
         if (!Auth.Shared.SignedIn) (items, away) = (null, "signed out");
-        Send(id, p, items, Store.Shared.Config?.Accent ?? WhiteLabel.Accent, away);
+        Send(id, p, items, away, readAt);
     }
 
     /// What a pinned widget shows, sent to the board.
-    static void Send(string id, Pinned p, List<WidgetCache.Item>? list, string accent, string? why)
+    static void Send(string id, Pinned p, List<WidgetCache.Item>? list, string? why, DateTime at)
     {
         (string template, string data) card;
         // One never chosen shows the first, as the iPhone's does.
@@ -300,7 +345,7 @@ public sealed partial class Widgets : IWidgetProvider, IWidgetProvider2
         else if (p.Choosing)
             card = WidgetCard.Chooser(list, p.Chosen);
         else if (item != null)
-            card = Drawn(item, p.Size, accent, p.Problem);
+            card = Drawn(item, p.Size, p.Problem, WidgetCache.Updated(at));
         else if (p.Chosen != null && list.Count > 0)
             card = WidgetCard.Saying($"{p.Title ?? "This widget"} isn’t on your pages any more. Choose another with Customize, in this widget’s menu.");
         else
@@ -317,24 +362,30 @@ public sealed partial class Widgets : IWidgetProvider, IWidgetProvider2
     }
 
     /// A widget's card; one this can't draw says so, as a widget that stopped working does.
-    static (string template, string data) Drawn(WidgetCache.Item item, string size, string accent, string? problem)
+    static (string template, string data) Drawn(WidgetCache.Item item, string size, string? problem, string? updated)
     {
-        try { return WidgetCard.Of(item, size, accent, problem); }
+        try { return WidgetCard.Of(item, size, problem, updated); }
         catch (Exception e)
         {
             App.Problem(e);
-            return WidgetCard.Of(item with { Error = e.Message }, size, accent, problem);
+            return WidgetCard.Of(item with { Error = e.Message }, size, problem, null);
         }
     }
 
     /// From the window, once it has read its widgets again: the pinned ones drawn with them, as the board has them.
-    public static void Changed(List<WidgetCache.Item> list, string accent)
+    public static void Changed(List<WidgetCache.Item> list)
     {
-        if (list.Count > 0) Each(p => !p.Choosing, (id, p) => Send(id, p, list, accent, null));
+        if (list.Count == 0) return;
+        WidgetCache.Keep(list, DateTime.UtcNow);
+        Each(p => !p.Choosing, (id, p) => Send(id, p, list, null, DateTime.UtcNow));
     }
 
     /// From the window, as the person signs out: every pinned widget says to sign in, at once.
-    public static void SignedOut() => Each(_ => true, (id, p) => Send(id, p, null, WhiteLabel.Accent, "signed out"));
+    public static void SignedOut()
+    {
+        WidgetCache.Forget();
+        Each(_ => true, (id, p) => Send(id, p, null, "signed out", default));
+    }
 
     static void Each(Func<Pinned, bool> which, Action<string, Pinned> send)
     {

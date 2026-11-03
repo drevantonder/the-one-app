@@ -8,6 +8,7 @@ struct PhoneApp: App {
     @State private var phone = Phone.shared
 
     init() {
+        Icons.load()
         // A home-screen widget's button or toggle starts the app in the background, if it isn't running, to run it.
         WidgetActions.run = { app, op, input, _ in
             let phone = Phone.shared
@@ -23,10 +24,14 @@ struct PhoneApp: App {
             PhoneRoot()
                 .environment(phone)
                 .environment(phone.store)
-                .tint(phone.accent)
                 .task {
                     delegate.phone = phone
                     await phone.start()
+                }
+                .task {
+                    // Once the first frame is up.
+                    try? await Task.sleep(for: .milliseconds(300))
+                    WarmWebKit.start()
                 }
                 .onOpenURL { phone.open($0) }
                 .onChange(of: phone.store.config?.push, initial: true) { Task { await phone.setUpPush() } }
@@ -52,11 +57,6 @@ final class Phone {
     private var running: Task<Void, Never>?
     /// This launch's APNs token, once registered with the push driver.
     var pushToken: String?
-
-    /// The accent: the build's until a device sends its own.
-    var accent: Color {
-        Color(accentHex: store.config?.accent ?? Bundle.main.object(forInfoDictionaryKey: "Accent") as? String ?? "")
-    }
 
     /// In the simulator, NODE_URL points the app at a device's local API instead of signing in.
     nonisolated static var nodeURL: URL? {
@@ -150,7 +150,8 @@ final class Phone {
         if url.host() == "open", let app = value("app") {
             let scope = value("scope"), screen = value("screen") ?? "main"
             if screen == "main", store.app(app)?.hasScreens == false { return }
-            if let scope, store.pages.contains(where: { $0.scope == scope }) { store.current = scope }
+            // Its page, or once the pages come if they haven't yet (one that isn't there then turns to the person's own).
+            if let scope, store.pages.isEmpty || store.pages.contains(where: { $0.scope == scope }) { store.current = scope }
             store.path = [.screen(ScreenRoute(app: app, screen: screen, params: value("params") ?? "{}", scope: scope))]
         }
     }

@@ -3,67 +3,135 @@
 (() => {
   const esc = one.esc;
 
-  // A spinner that says what it waits for, to people and to screen readers.
+  // A spinner that says what it waits for, to people and to screen readers: for an action, not a screen's first draw.
   one.loading = (label = "Loading") =>
     `<div class="loading" role="status" aria-live="polite"><span class="spinner" aria-hidden="true"></span><span>${esc(label)}</span></div>`;
 
-  // An empty list: an icon, a title, a line of text and a button, each but the title optional. `action.run` is what
-  // the button does.
+  // Grey shapes where what's loading will be, so the screen looks ready and doesn't jump when it comes: `rows` rows
+  // of a list (the kit's .list), "text" for lines of text, or "cards" for tiles. Screen readers hear `label`.
+  one.skeleton = (shape = 4, label = "Loading") => {
+    const line = (w, cls = "") => `<span class="sk-line${cls}" style="width:${w}%"></span>`;
+    const widths = [62, 48, 70, 55, 40, 66, 52, 58];
+    const inner = shape === "text"
+      ? `<div class="sk-text">${[92, 100, 84, 96, 60].map((w) => line(w)).join("")}</div>`
+      : shape === "cards"
+      ? `<div class="sk-cards">${'<span class="sk-card"></span>'.repeat(4)}</div>`
+      : `<div class="list">${widths.slice(0, Math.max(1, Math.min(+shape || 4, 8))).map((w) =>
+          `<div class="row"><span class="sk-dot"></span><div class="main">${line(w)}${line(w - 18, " sub")}</div></div>`).join("")}</div>`;
+    return `<div class="skeleton" role="status" aria-live="polite" aria-label="${esc(label)}">${inner}</div>`;
+  };
+
+  // A button for what the kit draws, `action` `{ label, run }`: run when it's tapped.
   const runs = [];
-  one.empty = ({ icon = "tray", title, text, action } = {}) =>
-    `<div class="empty-state"><div class="empty-icon">${one.icon(icon)}</div><div class="empty-title">${esc(title)}</div>` +
-    (text ? `<div class="empty-text">${text}</div>` : "") +
-    (action ? `<button class="button" data-run="${runs.push(action.run) - 1}">${esc(action.label)}</button>` : "") +
-    "</div>";
-  document.addEventListener("click", (e) => runs[e.target.closest?.(".empty-state [data-run]")?.dataset.run]?.());
+  const button = (action, cls = "button") => `<button class="${cls}" data-run="${runs.push(action.run) - 1}">${esc(action.label)}</button>`;
+  // One that waits on what it runs says so in itself until it's done.
+  document.addEventListener("click", async (e) => {
+    const b = e.target.closest?.(".empty [data-run], .problem [data-run]");
+    const waiting = b && !b.disabled && runs[b.dataset.run]?.();
+    if (!waiting?.then) return;
+    const back = one.busy(b);
+    await waiting.catch(() => {});
+    back();
+  });
 
-  // What a failure means for someone: what happened, in plain words, what is safe, and what to do next.
-  one.plain = (err) => {
+  // A button busy with what a tap started: disabled at once, with a small spinner before `label` (what it says
+  // already, if none), so a tap is seen before its answer comes. Returns what puts it back, for when it fails or what
+  // it shows stays.
+  one.busy = (b, label) => {
+    const was = b.innerHTML, off = b.disabled;
+    b.disabled = true;
+    b.setAttribute("aria-busy", "true");
+    b.innerHTML = `<span class="spinner small" aria-hidden="true"></span>${esc(label ?? b.textContent.trim())}`;
+    return () => {
+      b.innerHTML = was;
+      b.disabled = off;
+      b.removeAttribute("aria-busy");
+    };
+  };
+
+  // Pressed looks (:active) show on a phone's touch too: iOS gives them only to a page that listens for touches.
+  document.addEventListener("touchstart", () => {}, { passive: true });
+
+  // An empty screen or list: one grey line (`html`, escaped by its caller), and a button only when there's an obvious
+  // first step.
+  one.empty = (html, action) => `<div class="empty">${html}${action ? `<div>${button(action)}</div>` : ""}</div>`;
+
+  // A problem, shown on the thing it's about: a symbol, a short title, one sentence, and the action that fixes it.
+  // `warn` for what can wait; otherwise it's red.
+  one.problem = ({ title, text = "", action, warn = false }) =>
+    `<div class="problem${warn ? " warn" : ""}" role="alert">${one.icon("warning-circle-fill", "problem-icon")}<div class="problem-main">` +
+    `<div class="problem-title">${esc(title)}</div>${text ? `<div class="problem-text">${esc(text)}</div>` : ""}` +
+    (action ? button(action, "problem-action") : "") + "</div></div>";
+
+  // Errors and statuses are written for people and agents at once: what happened and what to do, in people's words,
+  // then after a colon or in brackets what an agent needs (a tool to call, an id, a code). A sentence with any of
+  // those is for agents only.
+  const forAgents = /\b[a-z][a-z0-9-]*_[a-z0-9_]+\b|\b(user|group):[0-9a-f]{6,}|\b(kernel|node|sidecar|deploy|scope|token|provider|workerd|bucket|lease|ctx)s?\b|\b(an|the|this|that) install\b|install's|[\w.-]*\/[\w.-]+\/|\b[1-5]\d\d\b/i;
+
+  // What a failure means for someone: what happened, in plain words, whether anything was lost, and what to do next.
+  // `app` is the title of the app that failed, where a screen knows it.
+  one.plain = (err, { app } = {}) => {
     let msg = String(err?.message ?? err ?? "").replace(/^(Uncaught )?\w*Error:\s*/, "").trim();
+    while (/\([^()]*\)/.test(msg)) msg = msg.replace(/\s*\([^()]*\)/g, "");
     if (/failed to fetch|load failed|networkerror|not connected|offline|unreachable|no route|connection (refused|reset|lost)/i.test(msg))
-      return { title: "Couldn't reach your device.", safe: "Nothing was lost.", next: "Check your connection, then try again." };
-    if (/timed? ?out|took too long/i.test(msg))
-      return { title: "Your device took too long to answer.", safe: "Nothing was lost.", next: "Try again in a moment." };
-    if (!msg || msg.length > 200 || /something went wrong|internal (server )?error|unexpected|\b5\d\d\b|undefined|null|is not a function|\[object/i.test(msg))
-      return { title: "This app could not complete your request.", safe: "Nothing was lost.", next: "Try again in a moment." };
-    msg = msg[0].toUpperCase() + msg.slice(1);
+      return { title: "Couldn't reach your devices.", safe: "Nothing was lost.", next: "Check your connection." };
+    if (/timed? ?out|took too long|took longer than/i.test(msg))
+      return { title: app ? `${app} took too long, so it stopped.` : "That took too long, so it stopped.", safe: "Nothing was lost.", next: "" };
+    if (/may already be done/i.test(msg)) return { title: "This may already be done.", safe: "", next: "Check before trying again." };
+    // The leading sentences before any colon that are for people; none if the first is for agents.
+    const parts = [];
+    for (const part of msg.split(/:\s/)[0].split(/(?<=[.!?])\s+|;\s+/)) {
+      if (!part || forAgents.test(part)) break;
+      parts.push(part);
+    }
+    const said = parts.map((s) => (/^\S*@/.test(s) ? s : s[0].toUpperCase() + s.slice(1)).replace(/([^.!?])$/, "$1.")).join(" ");
+    if (!said || said.length > 200 || /something went wrong|internal (server )?error|unexpected|undefined|null|is not a function|\[object/i.test(said))
+      return { title: "That didn't work.", safe: "Nothing was lost.", next: "" };
     // Something that isn't there won't be there on a second try: say so, and offer the way home instead.
-    const missing = /\b(not found|no such|doesn't exist|isn't here|there's no)\b/i.test(msg);
-    return { title: /[.!?]$/.test(msg) ? msg : msg + ".", safe: "Nothing was lost.", next: "Try again in a moment.", missing };
+    const missing = /\b(not found|no such|no \w+ named|doesn't exist|isn't here|there's no)\b/i.test(msg);
+    return { title: said, safe: "Nothing was lost.", next: "", missing };
   };
 
-  // A failure as a banner, with Try again unless `retry` is false (one.render wires the button).
-  one.banner = (err, { safe, next, retry = true } = {}) => {
-    const p = one.plain(err);
-    return `<div class="banner" role="alert">${one.icon("warning-circle", "banner-icon")}<div class="banner-text"><strong>${esc(p.title)}</strong>` +
-      `<span>${esc(safe ?? p.safe)} ${esc(next ?? p.next)}</span></div>` +
-      (retry ? '<button class="button" data-retry>Try again</button>' : "") + "</div>";
-  };
-
-  // Draws `fn()`'s HTML into `el`: with a labelled spinner the first time, if it's slow (`wait` ms), and a banner with
-  // Try again if it fails. Later draws (on "changed") replace what's there only once they're ready.
-  one.render = async (el, fn, { loading = "Loading", wait = 120 } = {}) => {
+  // Draws `fn()`'s HTML into `el`. The first time, if it takes longer than `wait` ms, grey shapes stand where it will
+  // be (`skeleton`: rows of a list, "text" or "cards", or false for a spinner saying `loading`); a fast load shows
+  // nothing in between, so nothing flashes. If it fails, the problem, with Try Again. Later draws (on "changed") replace
+  // what's there only once they're ready, and keep the scroll where it was. `fresh` is a draw of something else
+  // (another page's items): what's there dims at once, and grey shapes take its place if it's slow.
+  one.render = async (el, fn, { loading = "Loading", wait = 100, skeleton = 4, fresh = false } = {}) => {
     if (typeof el === "string") el = document.querySelector(el);
     const turn = (el.__turn = (el.__turn || 0) + 1);
-    const slow = el.__drawn ? null : setTimeout(() => turn === el.__turn && (el.innerHTML = one.loading(loading)), wait);
+    const waiting = () => (skeleton === false ? one.loading(loading) : one.skeleton(skeleton, loading));
+    if (fresh && el.__drawn) {
+      el.__drawn = false;
+      el.__html = null;
+      el.classList.add("waiting");
+    }
+    const slow = el.__drawn ? null : setTimeout(() => turn === el.__turn && ((el.innerHTML = waiting()), el.classList.remove("waiting")), wait);
     try {
       const html = await fn();
       if (turn !== el.__turn) return;
-      if (html !== undefined) el.innerHTML = html;
+      if (html !== undefined && html !== el.__html) {
+        const y = scrollY;
+        el.innerHTML = el.__html = html;
+        if (el.__drawn && scrollY !== y) scrollTo(scrollX, y);
+      }
       el.__drawn = true;
     } catch (err) {
       if (turn !== el.__turn) return;
       const p = one.plain(err);
-      if (p.missing) return void (el.innerHTML = one.notFound({ title: p.title }));
-      el.innerHTML = one.banner(err);
+      // A redraw that fails leaves what's there, which was right a moment ago; the next change tries again.
+      if (el.__drawn && !p.missing) return;
+      el.__html = null;
       el.__drawn = false;
-      el.querySelector("[data-retry]").onclick = () => {
+      if (p.missing) return void (el.innerHTML = one.notFound({ title: p.title }));
+      el.innerHTML = one.problem({ title: p.title, text: p.next, action: { label: "Try Again", run: () => {
         one.tap();
-        el.innerHTML = one.loading(loading);
-        one.render(el, fn, { loading });
-      };
+        el.innerHTML = waiting();
+        one.render(el, fn, { loading, wait, skeleton });
+      } } });
     } finally {
       clearTimeout(slow);
+      if (turn === el.__turn) el.classList.remove("waiting");
     }
   };
 
@@ -103,8 +171,7 @@
       };
       yes.onclick = async () => {
         one.tap(danger ? "medium" : "selection");
-        yes.disabled = true;
-        yes.innerHTML = `<span class="spinner small" aria-hidden="true"></span>${esc(action)}`;
+        const back = one.busy(yes);
         try {
           await run?.();
           el.innerHTML = "";
@@ -112,8 +179,7 @@
         } catch (err) {
           const p = one.plain(err);
           el.querySelector(".confirm-error").textContent = `${p.title} ${p.safe}`;
-          yes.disabled = false;
-          yes.textContent = action;
+          back();
         }
       };
     });
@@ -146,13 +212,16 @@
 
   // A large title at the top of a screen, as iOS draws one: the shell's own title stays empty while it shows, and is
   // its text once it scrolls away, so the name shows once. The screen's `.large-title` is followed as it redraws, so
-  // calling it once is enough; put what it returns first, or draw a `.large-title` of its own.
+  // calling it once is enough; put what it returns first, or draw a `.large-title` of its own. A shell whose bar always
+  // shows the title (Android's, `__oneShell.bar`) hides it and takes the text.
   let titled = false;
   one.largeTitle = (text) => {
+    const follows = window.IntersectionObserver && !window.__oneShell?.bar;
+    if (window.__oneShell?.bar) one.title(text);
     if (!titled) {
       titled = true;
-      one.title(window.IntersectionObserver ? "" : text);
-      if (window.IntersectionObserver) {
+      one.title(follows ? "" : text);
+      if (follows) {
         let el = null;
         const seen = new IntersectionObserver((all) => {
           const e = all.filter((x) => x.target === el).pop();
@@ -176,6 +245,14 @@
     '<div class="list info">' + pairs.filter(([, v]) => v != null && v !== "").map(([label, value]) =>
       `<div class="row plain"><span class="label">${esc(label)}</span><span class="value">${esc(value)}</span></div>`).join("") + "</div>";
 
+  // A screen in a frame tells the page holding it how many sheets it has open, so that page dims the rest of its
+  // window too, as a sheet dims a Mac window; a click there comes back as `oneSheetsClose`, closing the top one. A
+  // hint, not one of the bridge's messages: a page that doesn't know it shows the sheet as before.
+  const sheets = [];
+  const framed = window.parent !== window && !window.webkit?.messageHandlers?.one && !window.__oneShell;
+  const tell = () => framed && window.parent.postMessage({ oneSheets: sheets.length }, "*");
+  if (framed) addEventListener("message", (e) => e.source === window.parent && e.data?.oneSheetsClose && sheets.at(-1)?.());
+
   // A sheet that slides up over the screen, with `title` and Done: `html` is what's in it. Returns its body, to draw
   // into again, and `close`; `onClose` runs once it's gone (Done, a tap outside it, Escape).
   one.sheet = ({ title = "", html = "", done = "Done", onClose } = {}) => {
@@ -193,12 +270,16 @@
     const close = () => {
       if (closed) return;
       closed = true;
+      sheets.splice(sheets.indexOf(close), 1);
+      tell();
       document.removeEventListener("keydown", key);
       back.classList.remove("open");
       document.body.style.overflow = was;
       setTimeout(() => back.remove(), 300);
       onClose?.();
     };
+    sheets.push(close);
+    tell();
     const key = (e) => e.key === "Escape" && close();
     document.addEventListener("keydown", key);
     back.addEventListener("click", (e) => e.target === back && close());
@@ -212,5 +293,5 @@
 
   // For a page that isn't there: a friendly note and a way home.
   one.notFound = ({ title = "This page isn't here.", text = "The link may be old or mistyped.", home = "Go to Home" } = {}) =>
-    one.empty({ icon: "question", title, text: esc(text), action: { label: home, run: () => one.open("main") } });
+    one.empty(esc(`${title} ${text}`), { label: home, run: () => one.open("main") });
 })();

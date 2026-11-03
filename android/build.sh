@@ -8,7 +8,8 @@ set -eu
 if [ -n "${CONFIG:-}" ]; then CONFIG="$(cd "$(dirname "$CONFIG")" && pwd)/$(basename "$CONFIG")"; export CONFIG; fi
 cd "$(dirname "$0")"
 export ANDROID_HOME="${ANDROID_HOME:-$HOME/Android/Sdk}"
-./gradlew --quiet assembleRelease
+# No daemon: one left idle holds GBs on machines many agents share, and a warm one built no faster there.
+./gradlew --quiet --no-daemon assembleRelease
 config="${CONFIG:-../config.toml}"
 cli=$(sed -n '/^\[/q; s/^cli *= *"\([^"]*\)".*/\1/p' "$config")
 mkdir -p build

@@ -35,15 +35,15 @@ func TestSavesLeaveOutOnlyChromesCaches(t *testing.T) {
 	files := map[string]bool{ // kept?
 		".cache/x":                                       false,
 		"projects/Cache/notes":                           true,
-		at + "PTC/Local State":                           true,
-		at + "PTC/SingletonLock":                         false,
-		at + "PTC/GPUPersistentCache/GPUCache/x":         false,
-		at + "PTC/Default/Cookies":                       true,
-		at + "PTC/Default/Cache/Cache_Data/x":            false,
-		at + "PTC/Default/Code Cache/js/x":               false,
-		at + "PTC/Default/Service Worker/CacheStorage/x": false,
-		at + "PTC/Default/Service Worker/ScriptCache/x":  true,
-		at + "PTC/Default/Extensions/id/1.0_0/Cache/x":   true,
+		at + "Work/Local State":                           true,
+		at + "Work/SingletonLock":                         false,
+		at + "Work/GPUPersistentCache/GPUCache/x":         false,
+		at + "Work/Default/Cookies":                       true,
+		at + "Work/Default/Cache/Cache_Data/x":            false,
+		at + "Work/Default/Code Cache/js/x":               false,
+		at + "Work/Default/Service Worker/CacheStorage/x": false,
+		at + "Work/Default/Service Worker/ScriptCache/x":  true,
+		at + "Work/Default/Extensions/id/1.0_0/Cache/x":   true,
 	}
 	for f := range files {
 		os.MkdirAll(filepath.Join(dir, filepath.Dir(f)), 0o755)
@@ -57,13 +57,13 @@ func TestSavesLeaveOutOnlyChromesCaches(t *testing.T) {
 		return strings.Fields(strings.ReplaceAll(string(out), " ", "_"))
 	}
 	backup := kept(dir, excludes("./"+at+"*", "./.cache"))
-	save := kept(filepath.Join(dir, at, "PTC"), excludes("."))
+	save := kept(filepath.Join(dir, at, "Work"), excludes("."))
 	for f, keep := range files {
 		in := "./" + strings.ReplaceAll(f, " ", "_")
 		if slices.Contains(backup, in) != keep {
 			t.Errorf("backup kept %s: %v", f, !keep)
 		}
-		if p, ok := strings.CutPrefix(in, "./"+at+"PTC/"); ok && slices.Contains(save, "./"+p) != keep {
+		if p, ok := strings.CutPrefix(in, "./"+at+"Work/"); ok && slices.Contains(save, "./"+p) != keep {
 			t.Errorf("save kept %s: %v", f, !keep)
 		}
 	}

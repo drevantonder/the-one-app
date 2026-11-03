@@ -6,22 +6,34 @@
 <!-- The MCP Apps view `one mcp` serves (src/mcp_apps.rs): widgets drawn from their trees, or an
      app's screen in a frame whose bridge this page answers through the chat client. -->
 <style>
-  :root { color-scheme: light dark; --fg: light-dark(#1c1c1e, #f2f2f7); --muted: light-dark(#6e6e73, #98989d); --line: light-dark(#e5e5ea, #38383a);
-    --card: light-dark(#ffffff, #1c1c1e); --fill: light-dark(#e9e9ee, #2c2c2e); --accent: #9e6e06; --good: #34c759; --warn: #ff9f0a; --bad: #ff3b30;
+  /* The kit's colours (src/screen/kit.css), light and dark: tests/contracts.rs holds them to it. */
+  :root { color-scheme: light dark; --text: light-dark(#111111, #f2f2f2); --muted: light-dark(#6b6b6b, #9b9b9b); --line: light-dark(#e6e6e6, #2f2f2f);
+    --card: light-dark(#f4f4f4, #222222); --fill: light-dark(#ececec, #2b2b2b); --warn: light-dark(#b45309, #fbbf24); --danger: light-dark(#dc2626, #f87171);
+    --tint: #007aff;
     font: 15px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
-  body { margin: 0; padding: 4px; color: var(--fg); background: transparent; }
+  @supports (color: AccentColor) { :root { --tint: AccentColor; } }
+  body { margin: 0; padding: 4px; color: var(--text); background: transparent; }
   .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
-  .cards .w-card { --w-card: var(--card); --w-muted: var(--muted); box-shadow: 0 0 0 1px var(--line); border-radius: 16px; padding: 14px; font-size: 14px; }
+  .cards .w-card { padding: 14px; font-size: 14px; }
   iframe { border: 0; width: 100%; display: block; min-height: 120px; }
   .empty { color: var(--muted); padding: 12px; }
+  /* What's coming: a grey card where it will be. A screen shows it until it says how tall it is, then grows to it. */
+  .ph { height: 160px; border-radius: 22px; background: var(--card); animation: breathe 1.6s ease-in-out infinite; }
+  @keyframes breathe { 50% { opacity: .55; } }
+  @media (prefers-reduced-motion: reduce) { .ph { animation: none; } }
+  .frame { position: relative; }
+  .frame > .ph { position: absolute; inset: 0; height: auto; }
+  .frame > iframe { height: 160px; opacity: 0; transition: height .2s ease, opacity .2s; }
+  .frame.ready > iframe { opacity: 1; }
 </style>
 </head>
 <body>
-<div id="out" class="empty">Loading…</div>
+<div id="out"><div class="ph" role="status" aria-label="Loading"></div></div>
 <script>/*widgets.js*/</script>
 <script>
 (() => {
-  let next = 1, frame = null, shown = null;
+  // `args`: what the tool was called with, so a widget drawn again comes from the same page.
+  let next = 1, frame = null, shown = null, args = {};
   const pending = new Map(), out = document.getElementById("out");
   const post = (msg) => parent.postMessage({ jsonrpc: "2.0", ...msg }, "*");
   const request = (method, params) => new Promise((resolve, reject) => { const id = next++; pending.set(id, { resolve, reject }); post({ id, method, params }); });
@@ -43,6 +55,7 @@
       if (p) { pending.delete(m.id); m.error ? p.reject(new Error(m.error.message)) : p.resolve(m.result); }
       return;
     }
+    if (m.method === "ui/notifications/tool-input") args = m.params?.arguments || {};
     if (m.method === "ui/notifications/tool-result") show(m.params);
     if (m.method === "ui/notifications/host-context-changed") theme(m.params);
     if (m.method === "ui/resource-teardown" && m.id !== undefined) post({ id: m.id, result: {} });
@@ -63,38 +76,64 @@
     size();
   }
 
-  const card = (w) => oneWidgets.card(w, { run: act, follow });
+  const card = (w) => Object.assign(oneWidgets.card(w, { run: act, follow }), { __w: w });
+  const cardOf = (w) => [...out.children].find((el) => el.__w === w);
 
-  // A button or toggle: runs the app's operation as the person, then draws the widgets again; → the error's text.
-  async function act(app, op, input) {
+  // A button or toggle: runs the app's operation as the person, then draws its widget again, the others left as they
+  // are; → the error's text.
+  async function act(app, op, input, w) {
     try {
       await call(`${app}_${op}`, input);
-      const one = shown?.widgets?.length === 1 ? shown.widgets[0] : null;
-      show({ structuredContent: await call("widgets_show", { app: one?.app, widget: one?.widget }) });
+      const fresh = (await call("widgets_show", { app: w.app, widget: w.widget, ...(args.scope ? { scope: args.scope } : {}) }))?.widgets?.[0];
+      const el = cardOf(w), i = shown?.widgets?.indexOf(w) ?? -1;
+      if (!fresh || !el || i < 0) return;
+      shown.widgets[i] = fresh;
+      el.replaceWith(card(fresh));
+      size();
     } catch (err) {
       return err.message;
     }
   }
 
-  // A link: a web page through the chat, or one of the app's screens, opened here.
+  // A link: a web page through the chat, or one of the app's screens, opened here, its card dimmed meanwhile.
   async function follow(link, w) {
     if (typeof link === "string") return request("ui/open-link", { url: link }).catch(() => {});
-    show({ structuredContent: await call("screens_open", { app: w.app, screen: link.screen, params: link.params || {} }) });
+    const el = cardOf(w);
+    el?.classList.add("w-wait");
+    try {
+      show({ structuredContent: await call("screens_open", { app: w.app, screen: link.screen, params: link.params || {}, ...(args.scope ? { scope: args.scope } : {}) }) });
+    } catch (err) {
+      el?.classList.remove("w-wait");
+      if (el) el.title = err.message;
+    }
   }
 
   // An app's screen, in a frame whose `one` bridge posts here (src/screen/bridge.js): its calls go to the app's tools
   // through the chat.
   function screen(s) {
-    const shim = `<script>new ResizeObserver(() => parent.postMessage({ oneHeight: document.documentElement.scrollHeight }, "*")).observe(document.documentElement);<\/script>`;
+    // Its height is what it draws, not the frame's, so an empty page says it's empty.
+    const shim = `<script>new ResizeObserver(() => parent.postMessage({ oneHeight: Math.ceil(document.documentElement.getBoundingClientRect().height) }, "*")).observe(document.documentElement);<\/script>`;
+    const box = Object.assign(document.createElement("div"), { className: "frame", innerHTML: `<div class="ph" role="status" aria-label="Loading"></div>` });
     frame = document.createElement("iframe");
     frame.srcdoc = s.html.replace("<head>", "<head>" + shim);
+    box.append(frame);
+    // Shown once it draws something, or a moment after it loads if it draws little.
+    frame.onload = () => setTimeout(() => ready(box), 2000);
     out.className = "";
-    out.replaceChildren(frame);
+    out.replaceChildren(box);
     size();
   }
 
+  function ready(box) {
+    box.classList.add("ready");
+    box.querySelector(".ph")?.remove();
+  }
+
   async function fromScreen(m) {
-    if (m?.oneHeight) { frame.style.height = m.oneHeight + "px"; return size(); }
+    if (m?.oneHeight !== undefined) {
+      if (m.oneHeight > 40) frame.style.height = m.oneHeight + "px", ready(frame.parentElement);
+      return size();
+    }
     if (!m?.one) return;
     const reply = (ok, error) => frame.contentWindow.postMessage({ oneReply: m.id, ok, error }, "*");
     const msg = m.one;

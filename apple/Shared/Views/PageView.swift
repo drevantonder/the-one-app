@@ -49,7 +49,7 @@ struct PageView: View {
                 #if os(macOS)
                 PageHeader(title: page.title, subtitle: page.subtitle)
                 #endif
-                if store.apps(on: page).isEmpty && store.widgets(on: page).isEmpty {
+                if store.apps(on: page).isEmpty && store.widgets(on: page).isEmpty && store.loaded(page) {
                     EmptyPage(page: page, open: open)
                 }
                 if width > 0 {
@@ -363,12 +363,14 @@ private struct PageWidget: View {
 
     var body: some View {
         let app = store.app(widget.app)
-        WidgetCard(widget: widget, app: app, size: size)
-            .environment(\.widgetHost, host)
-            .allowsHitTesting(!editing)
-            .contentShape(.rect(cornerRadius: 22, style: .continuous))
-            .onTapGesture { if !editing { follow(widget.tree(size).link) } }
-            .modifier(ContextMenu(enabled: !editing, menu: { menu }, preview: {
+        Button { if !editing { follow(widget.tree(size).link) } } label: {
+            WidgetCard(widget: widget, app: app, size: size)
+                .environment(\.widgetHost, host)
+                .contentShape(.rect(cornerRadius: 28, style: .continuous))
+        }
+        .buttonStyle(PressedCard())
+        .allowsHitTesting(!editing)
+        .modifier(ContextMenu(enabled: !editing, menu: { menu }, preview: {
                 WidgetCard(widget: widget, app: app, size: size)
                     .frame(width: grid.span(WidgetSize.cells(size).w), height: grid.span(WidgetSize.cells(size).h))
             }))
@@ -408,6 +410,16 @@ private struct PageWidget: View {
             return
         }
         if case .url(let url) = link { openURL(url) } else if let route = store.route(for: link, app: widget.app, scope: page.scope) { open(route) }
+    }
+}
+
+/// A card that gives a little under a finger or click, as the Home Screen's widgets do.
+struct PressedCard: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.97 : 1)
+            .opacity(configuration.isPressed ? 0.85 : 1)
+            .animation(.spring(duration: 0.2), value: configuration.isPressed)
     }
 }
 
@@ -454,16 +466,13 @@ struct WidgetCard: View {
         let tree = widget.tree(size)
         VStack(alignment: .leading, spacing: 6) {
             if tree.header != false || widget.error != nil {
-                Text(widget.title ?? app?.label ?? widget.widget)
-                    .font(.caption2.weight(.medium))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                WidgetLabel(title: widget.title ?? app?.label ?? widget.widget, icon: app?.icon, image: app?.image, imageKind: app?.imageKind)
             }
             if let error = widget.error {
                 VStack(alignment: .leading, spacing: 4) {
                     Label("This widget stopped working.", systemImage: "exclamationmark.triangle.fill")
                         .font(.subheadline.weight(.medium))
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(Kit.warn)
                     Text(NodeError(error).message)
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -484,16 +493,8 @@ struct WidgetCard: View {
         .padding(16)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .clipped()
-        .background(widgetBackground, in: .rect(cornerRadius: 22, style: .continuous))
-        .contentShape(.rect(cornerRadius: 22, style: .continuous))
-    }
-
-    private var widgetBackground: some ShapeStyle {
-        #if os(macOS)
-        AnyShapeStyle(.fill.quaternary)
-        #else
-        AnyShapeStyle(Color(.secondarySystemGroupedBackground))
-        #endif
+        .groupedContainer(radius: 28)
+        .contentShape(.rect(cornerRadius: 28, style: .continuous))
     }
 }
 
@@ -542,7 +543,7 @@ private struct EmptyPage: View {
             Text("Nothing here yet")
                 .font(.headline)
             Text(store.canArrange(page.scope)
-                 ? "Apps you add to \(page.title) show up here."
+                 ? page.scope == "user" ? "Apps you add for yourself show up here." : "Apps you add to \(page.title) show up here."
                  : "When its admins add apps to \(page.title), they show up here.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)

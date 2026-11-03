@@ -113,6 +113,8 @@ final class Store {
     private(set) var apps: [AppInfo] = []
     /// Each page's widgets, rendered for its scope.
     private(set) var widgets: [String: [WidgetInfo]] = [:]
+    /// When every page's widgets last came from the node.
+    private(set) var widgetsFetched: Date?
     /// Each page's apps' badges, by scope then app.
     private(set) var badges: [String: [String: Int]] = [:]
     /// The Mac's sidebar selection: the page, screen or view at the bottom of `path`. It's kept, so the app opens
@@ -158,6 +160,7 @@ final class Store {
     /// Forgets everything it showed, and what it kept of the person's on this device: they signed out.
     func forget() {
         ScreenCache.forget()
+        forgetKeptScreens()
         ScreenFile.forget()
         URLCache.shared.removeAllCachedResponses()
         WKWebsiteDataStore.default().removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), modifiedSince: .distantPast) {}
@@ -180,8 +183,6 @@ final class Store {
     var install: Install? { state?.install }
     var me: Person? { state?.user }
     var isAdmin: Bool { me?.admin == true }
-    /// What to paste into an agent to connect it, as the node says.
-    var askYourAgent: String { state?.agentPrompt ?? agentPrompt(address: nil) }
 
     func app(_ name: String) -> AppInfo? { apps.first { $0.name == name } }
     /// What a person calls an app that uses an item: its label, or Backups for the node's own (a place to back up to).
@@ -410,6 +411,9 @@ final class Store {
     /// The pages whose widgets came from their device, the last time they were asked for.
     private var loadedWidgets = Set<String>()
 
+    /// Whether a page's apps and widgets have come from its device, so an empty one really is.
+    func loaded(_ page: Page) -> Bool { loadedWidgets.contains(page.scope) }
+
     private func keepWidgetsShownBefore() {
         guard showedPagesBefore, state?.arrangements != nil else { return }
         let defaults = UserDefaults.standard
@@ -513,13 +517,19 @@ final class Store {
     // MARK: Connection
 
     func run() async {
+        var misses = 0
         while !Task.isCancelled {
+            let started = Date.now
             if await connect() {
                 do {
                     for try await event in node.events() { await handle(event) }
                 } catch {}
             }
-            try? await Task.sleep(for: .seconds(phase == .ready ? 1 : 3))
+            // At once after a stream that ran a while and ended (its node handing over to a new build), then waiting
+            // longer each miss.
+            if Date.now.timeIntervalSince(started) > 10 { misses = 0 }
+            try? await Task.sleep(for: .seconds(Retry.wait(misses)))
+            misses += 1
         }
     }
 
@@ -552,6 +562,9 @@ final class Store {
     }
 
     func refreshState() async throws {
+        // The first time, the apps are asked for beside the state, not after it.
+        let node = node
+        let early: Task<[AppInfo]?, Never>? = self.state == nil && signedIn ? Task { try? await node.apps() } : nil
         let state = try await node.state()
         let first = self.state == nil
         let arrived = self.state?.install?.joining != false && state.install?.joining == false
@@ -560,7 +573,7 @@ final class Store {
         arrangements = (state.arrangements ?? [:]).merging(unsaved) { $1 }
         phase = .ready
         if first, signedIn { await renameIfHostname() }
-        if first || arrived || apps.isEmpty || regrouped { await refreshApps() }
+        if first || arrived || apps.isEmpty || regrouped { await refreshApps(early: await early?.value) }
     }
 
     private func handle(_ event: NodeEvent) async {
@@ -608,10 +621,10 @@ final class Store {
 
     // MARK: Apps
 
-    func refreshApps() async {
+    func refreshApps(early: [AppInfo]? = nil) async {
         guard install != nil, signedIn else { return }
         do {
-            let apps = try await node.apps()
+            let apps = if let early { early } else { try await node.apps() }
             if apps != self.apps { self.apps = apps }
             // A node that just started lists its deployed apps before it can describe them.
             if apps.contains(where: { ($0.deploys ?? 0) > 0 && $0.title == nil }) { throw NodeError("starting") }
@@ -621,10 +634,13 @@ final class Store {
                 await refreshApps()
             }
         }
+        #if os(macOS)
+        // Unless a link already chose where the window opens.
         if selection == nil {
             let kept = UserDefaults.standard.data(forKey: "selection").flatMap { try? JSONDecoder().decode(Route.self, from: $0) }
             selection = kept.flatMap(stillThere) ?? .page("user")
         }
+        #endif
         await refreshWidgets()
     }
 
@@ -632,18 +648,23 @@ final class Store {
         guard let install, !install.joining, signedIn else { return }
         let node = node
         var fresh: [String: [WidgetInfo]] = [:]
+        var answered = true
         await withTaskGroup(of: (String, [WidgetInfo]?).self) { tasks in
             for page in allPages { tasks.addTask { (page.scope, try? await node.widgets(scope: page.scope)) } }
             for await (scope, widgets) in tasks {
                 fresh[scope] = widgets ?? self.widgets[scope] ?? []
-                if widgets != nil { loadedWidgets.insert(scope) }
+                if widgets != nil { loadedWidgets.insert(scope) } else { answered = false }
             }
         }
         if fresh != widgets { widgets = fresh }
+        if answered { widgetsFetched = .now }
         keepWidgetsShownBefore()
         scheduleRedraw()
         var counts: [String: [String: Int]] = [:]
-        for page in allPages { counts[page.scope] = (try? await node.badges(scope: page.scope)) ?? [:] }
+        await withTaskGroup(of: (String, [String: Int]).self) { tasks in
+            for page in allPages { tasks.addTask { (page.scope, (try? await node.badges(scope: page.scope)) ?? [:]) } }
+            for await (scope, count) in tasks { counts[scope] = count }
+        }
         if counts != badges { badges = counts }
     }
 

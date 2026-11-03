@@ -129,6 +129,11 @@ impl Sidecars {
         fresh.then_some(p)
     }
 
+    /// A registered sidecar's title, if it gives one.
+    pub fn title(&self, app: &str) -> Option<String> {
+        self.get(app)?.describe["title"].as_str().filter(|t| !t.trim().is_empty()).map(str::to_string)
+    }
+
     pub fn has(&self, app: &str) -> bool {
         self.get(app).is_some()
     }
@@ -147,12 +152,20 @@ impl Sidecars {
     /// Hands a call to the sidecar and waits for its reply: `{ ok, blobs? }` or `{ error }`. A blob it names, the
     /// caller's scope keeps, so the devices that hold the scope can fetch it.
     pub async fn call(&self, app: &str, op: &str, input: Value, caller: Me, from: Option<String>) -> Result<Answer> {
-        let p = self.get(app).ok_or_else(|| anyhow!("{app} isn't running on this device"))?;
+        // A node that just started, an update's, waits a moment for its sidecars to register again with it.
+        let mut p = self.get(app);
+        let until = Instant::now() + Duration::from_secs(5);
+        while p.is_none() && crate::handoff::since_start().is_some_and(|s| s < Duration::from_secs(15)) && Instant::now() < until {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            p = self.get(app);
+        }
+        let p = p.ok_or_else(|| anyhow!("{app} isn't running on this device"))?;
+        let title = p.describe["title"].as_str().filter(|t| !t.trim().is_empty()).unwrap_or(app).to_string();
         let id = self.next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let (tx, rx) = oneshot::channel();
         p.replies.lock().unwrap().insert(id, (tx, caller.clone()));
-        p.calls.send(Call { id, op: op.into(), input, caller, from }).map_err(|_| anyhow!("{app} stopped"))?;
-        let reply = tokio::time::timeout(Duration::from_secs(600), rx).await.map_err(|_| anyhow!("{app} didn't answer"))??;
+        p.calls.send(Call { id, op: op.into(), input, caller, from }).map_err(|_| anyhow!("{title} stopped"))?;
+        let reply = tokio::time::timeout(Duration::from_secs(600), rx).await.map_err(|_| anyhow!("{title} didn't answer"))??;
         if let Some(why) = reply.get("elsewhere") {
             return Err(Elsewhere(why.as_str().unwrap_or("it can't run here").into()).into());
         }
@@ -168,7 +181,11 @@ impl Sidecars {
         let p = self.by_app.lock().unwrap().get(app).cloned().ok_or_else(|| anyhow!("register {app} first"))?;
         *p.seen.lock().unwrap() = Instant::now();
         let mut rx = p.waiting.lock().await;
-        let call = tokio::time::timeout(Duration::from_secs(25), rx.recv()).await.ok().flatten();
+        // Ended as the node hands over, so the sidecar asks the new one.
+        let call = tokio::select! {
+            call = tokio::time::timeout(Duration::from_secs(25), rx.recv()) => call.ok().flatten(),
+            _ = crate::handoff::stopping() => None,
+        };
         *p.seen.lock().unwrap() = Instant::now();
         Ok(call)
     }

@@ -15,6 +15,8 @@ async function sidecar(ctx, op, input) {
 
 const NEEDS = "Models runs on your devices, and none of them is online.";
 
+const IMAGES = "images (JPEG, PNG or WebP) as base64 strings, shown to the model with the prompt";
+
 export default {
   name: "models",
   title: "Models",
@@ -29,14 +31,15 @@ export default {
   ops: {
     accounts: {
       reads: true,
-      description: "The devices it runs on: each { account, ok }, the device’s name, ok while it’s online.",
+      description: "The devices Models runs on: each { account, ok }, account the device's name, ok while it's online. models_here lists the models on each.",
       input: { type: "object", properties: {} },
       run: async (ctx) => (await ctx.devices()).filter((s) => (s.sidecars || []).includes("models")).map((s) => ({ account: s.name, ok: s.online })),
     },
     sign_out: {
+      reads: false,
       confirm: true,
-      description: "Stop using Models on one of your devices: removes it from that device, for one of its owners.",
-      input: { type: "object", required: ["account"], properties: { account: { type: "string", description: "the device, by name" } } },
+      description: "Stop using Models on one of your devices: removes it from that device, for one of its owners. The models stay on its disk.",
+      input: { type: "object", required: ["account"], properties: { account: { type: "string", description: "the device's name, as models_accounts lists it" } } },
       run: (ctx, { account }) => {
         ctx.sidecar("models", account, false);
         return `Models is removed from ${account}.`;
@@ -44,20 +47,42 @@ export default {
     },
     here: {
       reads: true,
-      description: "This device's local models, and whether each is loaded; give device \"all\" for every device's.",
-      input: {"properties": {}, "type": "object"},
+      description: "The local models on this device, or with device \"all\" on every device: each { name, size, family, parameters, loaded }, as Ollama gives them (size in bytes, parameters like 12.2B), loaded when it's in memory and answers at once. Use a name as model in models_chat or models_decide.",
+      input: { type: "object", properties: {} },
       run: (ctx, input) => sidecar(ctx, "here", input),
     },
     chat: {
       reads: true,
-      description: "Ask a local model and get its answer, on whichever of your devices has it (or the device given). Give prompt, or messages as [{role, content}]; system sets its instructions; format \"json\" or a JSON schema makes it answer in JSON.",
-      input: {"properties": {"format": {"description": "\"json\", or a JSON schema the answer must match"}, "images": {"description": "images (JPEG, PNG or WebP) in base64, shown with the prompt", "items": {"type": "string"}, "type": "array"}, "messages": {"items": {"type": "object"}, "type": "array"}, "model": {"description": "a model's name as here lists it", "type": "string"}, "options": {"description": "Ollama's options, like { temperature: 0, num_predict: 1024 }", "type": "object"}, "prompt": {"type": "string"}, "system": {"type": "string"}, "think": {"description": "whether a thinking model reasons first", "type": "boolean"}}, "required": ["model"], "type": "object"},
+      description: "Ask a local model and get its answer as text, on whichever of your devices has it (or the device given): for private or bulk work instead of a hosted model. Give prompt for one question, or messages for a conversation; format makes it answer in JSON.",
+      input: {
+        type: "object",
+        required: ["model"],
+        properties: {
+          model: { type: "string", description: "a model's name, as models_here lists them, like gemma4:12b" },
+          prompt: { type: "string", description: "the question or task, as the person's message; given with messages, it comes after them" },
+          messages: { type: "array", items: { type: "object" }, description: "the conversation so far, oldest first, each { role: user or assistant, content: text, images }" },
+          system: { type: "string", description: "instructions the model follows throughout, like \"Answer in one sentence.\"" },
+          images: { type: "array", items: { type: "string" }, description: IMAGES },
+          format: { description: "\"json\" for any JSON, or a JSON schema the answer must match" },
+          think: { type: "boolean", description: "whether a thinking model reasons before it answers; slower, often better" },
+          options: { type: "object", description: "Ollama's options, like { temperature: 0, num_predict: 1024 }" },
+        },
+      },
       run: (ctx, input) => sidecar(ctx, "chat", input),
     },
     decide: {
       reads: true,
-      description: "Ask a decision model (a model with the decision capability, like clef-flash) questions about something and get typed answers with probabilities: choice (one of criteria, an object of option: description), noul (yes/no) or score (levels, lowest first). Answers { answers: { name: { choice, probabilities, confidence } }, usage }.",
-      input: {"properties": {"images": {"description": "images in base64 (or [{ content_type, base64 }]), named in state as image 1, 2...", "type": "array"}, "model": {"description": "a decision model, like clef-flash", "type": "string"}, "questions": {"description": "named questions, each { type, instructions, criteria | levels }", "type": "object"}, "state": {"description": "what to decide about: named fields", "type": "object"}}, "required": ["model", "questions"], "type": "object"},
+      description: "Ask a decision model (one with the decision capability, like clef-flash) typed questions about something, for fast labels and scores rather than prose. Each question is a choice (one of criteria), noul (yes or no) or score (one of levels, lowest first). Gives { answers: { <question>: { choice, probabilities, confidence } }, usage }.",
+      input: {
+        type: "object",
+        required: ["model", "questions"],
+        properties: {
+          model: { type: "string", description: "a decision model's name, as models_here lists them, like clef-flash" },
+          state: { type: "object", description: "what to decide about, as named fields: { subject: \"...\", body: \"...\" }" },
+          questions: { type: "object", description: "named questions, each { type: choice, noul or score, instructions, criteria: { option: what it means } for choice, levels: [lowest, ..., highest] for score }" },
+          images: { type: "array", description: "images as base64 strings (or { content_type, base64 }), which state names as image 1, image 2..." },
+        },
+      },
       run: (ctx, input) => sidecar(ctx, "decide", input),
     },
   },

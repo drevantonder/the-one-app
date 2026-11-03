@@ -3,6 +3,20 @@
 use super::*;
 
 impl Node {
+    /// What people call `app`, for what they read: its title, or its sidecar's, else its name.
+    pub(super) async fn title(&self, app: &str) -> String {
+        match self.0.apps.title(app).await {
+            Some(title) => title,
+            None => self.sidecar_title(app),
+        }
+    }
+
+    /// What people call the sidecar `name`: its title, else its name.
+    pub(super) fn sidecar_title(&self, name: &str) -> String {
+        let built_in = self.0.built_in_sidecars.iter().find(|b| b.name == name).and_then(|b| (b.describe)()["title"].as_str().map(str::to_string));
+        built_in.or_else(|| self.0.sidecars.title(name)).unwrap_or_else(|| name.to_string())
+    }
+
     pub(super) fn deployed(&self, app: &str) -> bool {
         self.with(|i| Ok(i.r.members.apps.get(app).is_some_and(|a| a.bundle.is_some()))).unwrap_or(false)
     }
@@ -15,7 +29,8 @@ impl Node {
     /// Deletes an app (`deleted`), restores it (`restored`) or erases it for good (`erased`), for someone acting for
     /// its owner. A deleted app stops running and leaves every page, but keeps its data until it's erased.
     pub async fn retire(&self, caller: &Caller, app: &str, how: &str) -> Result<()> {
-        let (_, content) = self.with(|i| check_append(i, Append::Retire { app: app.into(), how: how.into() }, &[], caller))?;
+        let title = self.title(app).await;
+        let (_, content) = self.with(|i| check_append(i, Append::Retire { app: app.into(), how: how.into() }, &[], caller, &title))?;
         self.member_content(caller, content).await?;
         if how == "erased" {
             self.destroy_keys(app).await?;
@@ -124,14 +139,11 @@ impl Node {
         out.extend(missing);
         for info in &mut out {
             if let Some(image) = info["bundle"].as_str().or(info["built_in"].as_str()).and_then(|b| self.image(b)) {
-                info["image"] = json!(image);
+                (info["image"], info["image_kind"]) = (json!(image), json!("icon"));
             } else if let (Some(domain), Some(name)) = (info["domain"].as_str(), info["name"].as_str()) {
                 if let Some((image, kind)) = self.logo(domain, name) {
                     (info["image"], info["image_kind"]) = (json!(image), json!(kind));
                 }
-            } else if let Some((image, kind)) = info["name"].as_str().and_then(|n| self.sidecar_image(n)) {
-                // An app over a sidecar of its name shows the picture the sidecar gives (a Mac app's icon).
-                (info["image"], info["image_kind"]) = (image, kind);
             }
         }
         Ok(out)
@@ -161,7 +173,8 @@ impl Node {
         url
     }
 
-    /// The picture a bundle's app shows on its tile instead of its symbol: `icon.png` in its folder, as a data URL.
+    /// The picture a bundle's app shows on its tile instead of its symbol: `icon.png` in its folder, a finished app icon
+    /// (an external brand's own), as a data URL.
     /// Only from bundles this device has.
     pub(super) fn image(&self, bundle: &str) -> Option<String> {
         if let Some(image) = self.0.images.lock().unwrap().get(bundle) {
@@ -227,8 +240,9 @@ impl Node {
         }
         self.with(|i| {
             let m = &i.r.members;
-            ensure!(members::manages_scope(m, &caller.user, scope), "you can't install apps in {scope}");
-            ensure!(i.r.holds(scope), "this device doesn't hold {scope}");
+            let named = scope_name(i, &scope.to_string());
+            ensure!(members::manages_scope(m, &caller.user, scope), "You can't add apps to {named}.");
+            ensure!(i.r.holds(scope), "This device can't open {named} yet.");
             let here = i.views.get(&scope.to_string()).map(|(_, s)| s.installed.clone()).unwrap_or_default();
             let mut out = Vec::new();
             for (n, name) in wanted.iter().enumerate().rev() {
@@ -243,7 +257,9 @@ impl Node {
 
     /// Installs (or uninstalls) `app` in `scope` for `caller`, and what it uses.
     pub async fn install(&self, caller: &Caller, app: &str, scope: &Scope, installed: bool) -> Result<()> {
-        for (scope, content) in self.install_entries(caller, app, scope, installed).await? {
+        let entries = self.install_entries(caller, app, scope, installed).await?;
+        self.may_schedule(caller, &installing(&entries)).await?;
+        for (scope, content) in entries {
             self.append_as(&scope, &caller.user, content).await?;
         }
         if self.schedules_service().is_some() && caller.token.is_some() {
@@ -302,4 +318,9 @@ fn built_in_source(app: &str) -> Option<String> {
     let repo = crate::config::REPO;
     let commit = crate::config::BUILD.split(['-', '+']).next().filter(|c| !crate::config::BUILD.contains('+') && c.len() >= 7 && c.bytes().all(|b| b.is_ascii_hexdigit()));
     (!repo.is_empty()).then(|| format!("https://github.com/{repo}/tree/{}/apps/{app}", commit.unwrap_or("main")))
+}
+
+/// The apps install entries install.
+pub(super) fn installing(entries: &[(Scope, Content)]) -> Vec<&str> {
+    entries.iter().filter(|(_, c)| c.kind == "install").filter_map(|(_, c)| c.data["app"].as_str()).collect()
 }

@@ -8,13 +8,16 @@ struct MacApp: App {
     private var store: Store { mac.store }
 
     init() {
-        SingleCopy.claim()
-        Mac.shared.run()
-        Sidecars.start()
-        WidgetItems.shared.start(Mac.shared.store)
+        Icons.load()
+        // The window shows at once; the rest waits for an older copy to quit.
+        SingleCopy.claim {
+            Mac.shared.run()
+            Sidecars.start()
+            WidgetItems.shared.start(Mac.shared.store)
+        }
         if !UserDefaults.standard.bool(forKey: "loginItemSet") {
             UserDefaults.standard.set(true, forKey: "loginItemSet")
-            try? SMAppService.mainApp.register()
+            Task.detached(priority: .utility) { try? SMAppService.mainApp.register() }
         }
     }
 
@@ -44,7 +47,6 @@ struct MacApp: App {
             RootView()
                 .environment(mac)
                 .environment(store)
-                .tint(accent)
                 .frame(minWidth: 760, minHeight: 500)
                 .onOpenURL { if !store.open($0) { open($0) } }
                 // Every app's badge and the requests on the Dock icon, as Mail counts unread mail.
@@ -69,15 +71,10 @@ struct MacApp: App {
         MenuBarExtra {
             MenuPanel()
                 .environment(store)
-                .tint(accent)
         } label: {
             MenuBarMark(store: store)
         }
         .menuBarExtraStyle(.window)
-    }
-
-    private var accent: Color {
-        store.config.map { Color(accentHex: $0.accent) } ?? .accentColor
     }
 }
 
@@ -99,9 +96,11 @@ final class Mac {
         let defaults = UserDefaults.standard
         // A window that showed pages before it could sign in keeps asking as this machine's own program until its
         // person signs in, rather than an update signing them out.
-        if defaults.object(forKey: "asMachine") == nil { defaults.set(!Auth.signedIn && defaults.object(forKey: "selection") != nil, forKey: "asMachine") }
-        asMachine = Self.asMachine
-        store.signedIn = Auth.signedIn || asMachine
+        // Read from the Keychain once.
+        let signedIn = Auth.signedIn
+        if defaults.object(forKey: "asMachine") == nil { defaults.set(!signedIn && defaults.object(forKey: "selection") != nil, forKey: "asMachine") }
+        asMachine = defaults.bool(forKey: "asMachine") && !signedIn
+        store.signedIn = signedIn || asMachine
         store.startNode = NodeLauncher.start
         store.preferredDeviceName = Host.current().localizedName
     }
@@ -237,11 +236,13 @@ enum NodeLauncher {
 /// Only one copy of the app runs. A copy that starts while others run asks them to quit (after an update, the new
 /// one is the one to keep) and stops any that won't; but a copy outside ~/Applications, such as one an update left
 /// half staged, defers to the one there and quits itself.
+@MainActor
 enum SingleCopy {
-    static func claim() {
+    /// Runs `then` once no other copy does.
+    static func claim(then: @escaping @MainActor () -> Void) {
         let me = NSRunningApplication.current
         let others = NSRunningApplication.runningApplications(withBundleIdentifier: Bundle.main.bundleIdentifier ?? "").filter { $0 != me }
-        guard !others.isEmpty else { return }
+        guard !others.isEmpty else { return then() }
         let home = FileManager.default.homeDirectoryForCurrentUser.appending(path: "Applications").standardizedFileURL.path
         let atHome = { (url: URL?) in url?.deletingLastPathComponent().standardizedFileURL.path == home }
         if !atHome(Bundle.main.bundleURL), let keeper = others.first(where: { atHome($0.bundleURL) }) {
@@ -249,10 +250,13 @@ enum SingleCopy {
             exit(0)
         }
         others.forEach { $0.terminate() }
-        let deadline = Date.now.addingTimeInterval(5)
-        while others.contains(where: { !$0.isTerminated }), Date.now < deadline {
-            RunLoop.current.run(until: .now.addingTimeInterval(0.1))
+        Task {
+            let deadline = Date.now.addingTimeInterval(5)
+            while others.contains(where: { !$0.isTerminated }), Date.now < deadline {
+                try? await Task.sleep(for: .milliseconds(100))
+            }
+            others.filter { !$0.isTerminated }.forEach { $0.forceTerminate() }
+            then()
         }
-        others.filter { !$0.isTerminated }.forEach { $0.forceTerminate() }
     }
 }

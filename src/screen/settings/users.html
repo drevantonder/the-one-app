@@ -1,9 +1,9 @@
 <div id="page"></div>
 <style>
-  .action-row { color: var(--accent); cursor: pointer; }
+  .action-row { color: var(--tint); cursor: pointer; }
   .field { flex: 1; min-width: 0; font: inherit; border: 0; outline: none; background: none; color: var(--text); padding: 0; }
   .made { display: flex; flex-direction: column; align-items: center; gap: 16px; text-align: center; padding: 8px 0 4px; }
-  .link { display: flex; align-items: center; gap: 8px; max-width: 100%; padding: 4px 4px 4px 12px; border-radius: 999px; background: var(--code-bg); }
+  .link { display: flex; align-items: center; gap: 8px; max-width: 100%; padding: 4px 4px 4px 12px; border-radius: 999px; background: var(--fill); }
   .link span { font: 15px var(--mono); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: all; -webkit-user-select: all; }
 </style>
 <script>
@@ -11,8 +11,7 @@
   // someone new, with an invite link (or, where people sign in with Google, how they join). The last admin's role
   // can't change.
   let state;
-  // What a person joins, in their words: "your One App".
-  const ours = `your ${one.config.name.replace(/^The /, "")}`;
+  const yours = one.config.yours;
   // Roles changed but not yet taken in, shown at once: null for someone being removed.
   const pending = {};
   let error = "";
@@ -30,14 +29,14 @@
         : `<label class="pick">${role === "admin" ? "Admin" : "Member"}<select aria-label="${one.esc(u.name)}'s role" data-user="${one.esc(u.id)}">
             <option value="admin"${role === "admin" ? " selected" : ""}>Admin</option><option value="member"${role === "member" ? " selected" : ""}>Member</option>
             <option disabled>──────</option><option value="">Remove ${one.esc(u.name)}</option></select></label>`;
-      return `<div class="row">${one.avatar(u.id, u.name)}<div class="main"><div class="title"><span>${one.esc(u.name)}${u.id === me ? " (you)" : ""}</span></div></div>${trailing}</div>`;
+      return `<div class="row still">${one.avatar(u.id, u.name)}<div class="main"><div class="title"><span>${one.esc(u.name)}${u.id === me ? " (you)" : ""}</span></div></div>${trailing}</div>`;
     });
     let html = `<div class="large-title">Users</div><div class="list">${rows.join("")}</div><div id="confirm"></div>`;
     html += error ? `<p class="footer error">${one.esc(error)}</p>` : "";
     if (admin && one.config.join_domain) {
       const address = state.install?.settings?.address;
       const at = address ? ` at <b>${one.esc(address.replace(/^https?:\/\//, ""))}</b>` : "";
-      html += `<h2 class="section">Add Someone</h2><p class="footer">Anyone with a Google account at ${one.esc(one.config.join_domain)} joins ${one.esc(ours)} by signing in with Google${at}.</p>`;
+      html += `<h2 class="section">Add Someone</h2><p class="footer">Anyone with a Google account at ${one.esc(one.config.join_domain)} joins ${one.esc(yours)} by signing in with Google${at}.</p>`;
     } else if (admin) {
       html += '<div class="list" style="margin-top:20px"><a class="row plain action-row" data-add>Add Someone…</a></div>';
     }
@@ -60,7 +59,7 @@
     error = "";
     const u = state.install.users.find((x) => x.id === user);
     if (role === null) {
-      const sure = await one.confirm("#confirm", { title: `Remove ${u.name} from ${ours}?`, detail: "Their devices stop reaching it.", action: "Remove", danger: true });
+      const sure = await one.confirm("#confirm", { title: `Remove ${u.name} from ${yours}?`, detail: "Their devices stop reaching it.", action: "Remove", danger: true });
       if (!sure) return void (select.value = u.role);
     }
     pending[user] = role;
@@ -83,7 +82,7 @@
     name.oninput = () => (go.disabled = !name.value.trim());
     name.onkeydown = (e) => e.key === "Enter" && !go.disabled && go.click();
     go.onclick = async () => {
-      go.disabled = true;
+      const back = one.busy(go);
       try {
         const who = name.value.trim();
         const { link, until } = await one.api("POST", "/v1/invite-link", { name: who });
@@ -95,6 +94,7 @@
       } catch (e) {
         note.className = "footer error";
         note.textContent = one.plain(e).title;
+        back();
         go.disabled = false;
       }
     };

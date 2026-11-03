@@ -5,42 +5,57 @@ import AppKit
 import UIKit
 #endif
 
-/// An accent as red, green and blue, lifted a little in dark mode so it keeps its contrast there,
-/// yet still carries white text.
-func accentRGB(_ hex: String, dark: Bool) -> (CGFloat, CGFloat, CGFloat) {
+/// A colour given as hex (an app's tile colour) as red, green and blue, lifted a little in dark mode so it keeps its
+/// contrast there, yet still carries white text.
+func hexRGB(_ hex: String, dark: Bool) -> (CGFloat, CGFloat, CGFloat) {
     let value = UInt32(hex.trimmingCharacters(in: CharacterSet(charactersIn: "#")), radix: 16) ?? 0x808080
     let rgb = [16, 8, 0].map { CGFloat((value >> $0) & 0xFF) / 255 }.map { dark ? $0 + (1 - $0) * 0.2 : $0 }
     return (rgb[0], rgb[1], rgb[2])
 }
 
-/// The same, as CSS.
-func accentCSS(_ hex: String, dark: Bool) -> String {
-    let (r, g, b) = accentRGB(hex, dark: dark)
-    return "rgb(\(Int(r * 255)), \(Int(g * 255)), \(Int(b * 255)))"
-}
-
-extension Color {
-    init(accentHex hex: String) {
-        #if canImport(AppKit)
-        self.init(nsColor: NSColor(name: nil) { appearance in
-            let (r, g, b) = accentRGB(hex, dark: appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua)
-            return NSColor(srgbRed: r, green: g, blue: b, alpha: 1)
-        })
-        #else
-        self.init(uiColor: UIColor { traits in
-            let (r, g, b) = accentRGB(hex, dark: traits.userInterfaceStyle == .dark)
-            return UIColor(red: r, green: g, blue: b, alpha: 1)
-        })
-        #endif
+/// The tint, what a person taps, as CSS for the screens: the system's blue on an iPhone, the accent colour the person
+/// chose in System Settings on a Mac. Native views get it by setting none.
+func tintCSS(dark: Bool) -> String {
+    #if canImport(AppKit)
+    var color = NSColor(srgbRed: 0, green: 0.478, blue: 1, alpha: 1)
+    NSAppearance(named: dark ? .darkAqua : .aqua)?.performAsCurrentDrawingAppearance {
+        if let accent = NSColor.controlAccentColor.usingColorSpace(.sRGB) { color = accent }
     }
+    #else
+    let color = UIColor.systemBlue.resolvedColor(with: UITraitCollection(userInterfaceStyle: dark ? .dark : .light))
+    #endif
+    var (r, g, b, a) = (CGFloat(0), CGFloat(0), CGFloat(0), CGFloat(0))
+    color.getRed(&r, green: &g, blue: &b, alpha: &a)
+    return "rgb(\(Int(r * 255)), \(Int(g * 255)), \(Int(b * 255)))"
 }
 
 /// Phosphor's icons (vendor/phosphor), which apps name for their tiles, screens and widgets, so every shell draws the
 /// same ones: each a path on a 256-point grid, drawn filled. `git-branch` is the regular one, `git-branch-fill` filled.
+/// The app reads all 1.2 MB of them once, off the main thread as it starts (`load`); home-screen widgets read only the
+/// ones their widgets draw, which the app leaves in its group (`keep`).
 enum Icons {
-    static let paths: [String: String] = Bundle.main.url(forResource: "icons", withExtension: "json")
-        .flatMap { try? Data(contentsOf: $0) }
-        .flatMap { try? JSONDecoder().decode([String: String].self, from: $0) } ?? [:]
+    static let paths: [String: String] = file.flatMap { try? Data(contentsOf: $0) }
+        .flatMap { (try? JSONSerialization.jsonObject(with: $0)) as? [String: String] } ?? [:]
+
+    #if WIDGET
+    private static var file: URL? { group?.appending(path: "icons.json") }
+    #else
+    private static var file: URL? { Bundle.main.url(forResource: "icons", withExtension: "json") }
+
+    static func load() { Task.detached(priority: .utility) { _ = paths } }
+
+    /// Leaves `names`' icons where the home-screen widgets read them.
+    static func keep(_ names: some Sequence<String>) {
+        guard let file = group?.appending(path: "icons.json") else { return }
+        let subset = Dictionary(names.compactMap { name in paths[name].map { (name, $0) } }) { a, _ in a }
+        try? JSONSerialization.data(withJSONObject: subset).write(to: file, options: .atomic)
+    }
+    #endif
+
+    private static var group: URL? {
+        guard let group = Bundle.main.object(forInfoDictionaryKey: "AppGroup") as? String else { return nil }
+        return FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: group)
+    }
 
     static func shape(_ name: String?) -> SVGShape? {
         name.flatMap { paths[$0] }.map { SVGShape($0, box: 256) }
@@ -59,6 +74,31 @@ struct Glyph: View {
     }
 }
 
+/// Shows only once it has been there for `delay`, fading in: a spinner or a problem, so a short wait or blip shows
+/// nothing. It keeps its place meanwhile, so nothing moves when it shows.
+struct Later<Content: View>: View {
+    var delay: Duration
+    @ViewBuilder var content: Content
+    @State private var due = false
+
+    init(_ delay: Duration, @ViewBuilder content: () -> Content) {
+        self.delay = delay
+        self.content = content()
+    }
+
+    var body: some View {
+        content
+            .opacity(due ? 1 : 0)
+            .allowsHitTesting(due)
+            .accessibilityHidden(!due)
+            .animation(.easeIn(duration: 0.2), value: due)
+            .task {
+                try? await Task.sleep(for: delay)
+                due = true
+            }
+    }
+}
+
 func displayName(_ name: String) -> String {
     name.hasSuffix(".local") ? String(name.dropLast(6)) : name
 }
@@ -73,15 +113,15 @@ func steadyHash(_ text: String) -> Int {
     text.unicodeScalars.reduce(5381) { ($0 &* 33 &+ Int($1.value)) & 0x7FFF_FFFF }
 }
 
-/// An app's icon tile, as a phone's Home Screen draws one: a finished app icon edge to edge in its own shape, a logo
-/// (`icon.png` in its folder, a site's favicon) on white, or its icon filled (else its first letter) in white on its
+/// An app's icon tile, as a phone's Home Screen draws one: a finished app icon (`icon.png` in its folder) edge to edge
+/// in its own shape, a logo (a site's favicon) on white, or its icon filled (else its first letter) in white on its
 /// colour, the one it declares or else one picked by its name, so apps side by side differ.
 struct AppTile: View {
     var icon: String?
     var seed: String
     var color: String? = nil
     var image: String? = nil
-    /// `icon` when `image` is a finished app icon (a Mac app's, a site's apple-touch-icon); else it's a logo.
+    /// `icon` when `image` is a finished app icon (`icon.png`, a Mac app's, a site's apple-touch-icon); else it's a logo.
     var imageKind: String? = nil
     var size: CGFloat
 
@@ -106,7 +146,7 @@ struct AppTile: View {
                     .clipShape(shape)
                     .overlay { shape.strokeBorder(.black.opacity(0.1), lineWidth: 0.5) }
             } else {
-                let (r, g, b) = accentRGB(color ?? Self.colors[steadyHash(seed) % Self.colors.count], dark: false)
+                let (r, g, b) = hexRGB(color ?? Self.colors[steadyHash(seed) % Self.colors.count], dark: false)
                 shape.fill(Color(red: r, green: g, blue: b).gradient)
                     .overlay {
                         Group {
@@ -170,23 +210,70 @@ typealias PlatformImage = NSImage
 typealias PlatformImage = UIImage
 #endif
 
-/// The system's grouped background, behind a page's grouped containers.
-extension View {
-    func groupedBackground() -> some View {
+/// The kit's colours (src/screen/kit.css), light then dark: tests/contracts.rs holds them to it.
+enum Kit {
+    static let bg = Color(light: 0xffffff, dark: 0x141414)
+    static let card = Color(light: 0xf4f4f4, dark: 0x222222)
+    static let raised = Color(light: 0xffffff, dark: 0x3a3a3a)
+    static let fill = Color(light: 0xececec, dark: 0x2b2b2b)
+    static let line = Color(light: 0xe6e6e6, dark: 0x2f2f2f)
+    static let text = Color(light: 0x111111, dark: 0xf2f2f2)
+    static let muted = Color(light: 0x6b6b6b, dark: 0x9b9b9b)
+    static let faint = Color(light: 0xc8c8c8, dark: 0x4d4d4d)
+    static let warn = Color(light: 0xb45309, dark: 0xfbbf24)
+    static let danger = Color(light: 0xdc2626, dark: 0xf87171)
+    static let badge = Color(light: 0xff3b30, dark: 0xff3b30)
+}
+
+extension Color {
+    init(light: UInt32, dark: UInt32) {
+        func rgb(_ v: UInt32) -> (CGFloat, CGFloat, CGFloat) { (CGFloat(v >> 16 & 0xFF) / 255, CGFloat(v >> 8 & 0xFF) / 255, CGFloat(v & 0xFF) / 255) }
         #if os(macOS)
-        self
+        self.init(nsColor: NSColor(name: nil) { appearance in
+            let (r, g, b) = rgb(appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? dark : light)
+            return NSColor(srgbRed: r, green: g, blue: b, alpha: 1)
+        })
         #else
-        background(Color(.systemGroupedBackground))
+        self.init(uiColor: UIColor { traits in
+            let (r, g, b) = rgb(traits.userInterfaceStyle == .dark ? dark : light)
+            return UIColor(red: r, green: g, blue: b, alpha: 1)
+        })
         #endif
     }
+}
 
-    /// A grouped container, as a list's inset section draws one.
-    func groupedContainer() -> some View {
-        #if os(macOS)
-        background(.fill.quaternary, in: .rect(cornerRadius: 12, style: .continuous))
-        #else
-        background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 24, style: .continuous))
-        #endif
+extension EnvironmentValues {
+    /// In a sheet, which is raised: in the dark its page is a card's grey and its cards a step lighter, as the kit's
+    /// `data-raised`.
+    @Entry var raised = false
+}
+
+/// The page's background, or a card's, a step lighter in a sheet in the dark.
+private struct KitBackground: ViewModifier {
+    var card: Bool
+    var radius: CGFloat
+    @Environment(\.raised) private var raised
+    @Environment(\.colorScheme) private var scheme
+
+    func body(content: Content) -> some View {
+        let up = raised && scheme == .dark
+        if card {
+            content.background(up ? Kit.raised : Kit.card, in: .rect(cornerRadius: radius, style: .continuous))
+        } else {
+            content.background(up ? Kit.card : Kit.bg)
+        }
+    }
+}
+
+extension View {
+    /// The page's background, behind its cards.
+    func groupedBackground() -> some View {
+        modifier(KitBackground(card: false, radius: 0))
+    }
+
+    /// A card, with rows inside; a widget's is rounder.
+    func groupedContainer(radius: CGFloat = 26) -> some View {
+        modifier(KitBackground(card: true, radius: radius))
     }
 }
 

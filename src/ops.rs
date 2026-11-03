@@ -28,7 +28,7 @@ pub fn find(app: &str, op: &str) -> Option<(Value, Value)> {
 
 /// The node's own tools, as apps: what search lists, which run here rather than as an app's call; and widgets_show,
 /// which MCP has too (src/mcp_apps.rs), as text here.
-fn node_apps() -> [Value; 5] {
+pub fn node_apps() -> [Value; 5] {
     let widgets = crate::mcp_apps::tools().into_iter().filter(|t| t["name"] == "widgets_show").collect();
     [one::skills::vault_app(), one::skills::backups_app(), one::skills::groups_app(), one::skills::devices_app(), one::skills::node_app("widgets", "Widgets", "Your widgets, as text", "", widgets)]
 }
@@ -38,11 +38,62 @@ pub fn node_app(app: &str) -> bool {
     ["vault", "backups", "groups", "devices", "widgets"].contains(&app)
 }
 
+/// Whether `--json` was given: what an operation gives back is printed as JSON.
+pub static JSON: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn json() -> bool {
+    JSON.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Why a command failed, when its exit code says more than 1: what was typed is wrong (2), or it was refused (3).
+#[derive(Debug)]
+pub enum Failed {
+    Typed(String),
+    Refused(String),
+}
+
+impl std::fmt::Display for Failed {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Failed::Typed(m) | Failed::Refused(m) => f.write_str(m),
+        }
+    }
+}
+
+impl std::error::Error for Failed {}
+
+/// A command's exit code for what went wrong: 2 what was typed is wrong, 3 refused (it needs --confirm, the person
+/// isn't allowed, or isn't signed in), 1 anything else.
+pub fn exit_code(err: &anyhow::Error) -> i32 {
+    match err.downcast_ref::<Failed>() {
+        Some(Failed::Typed(_)) => 2,
+        Some(Failed::Refused(_)) => 3,
+        None => {
+            let said = format!("{err:#}").to_lowercase();
+            match ["not allowed", "aren't allowed", "isn't allowed", "sign in first", "sign in to", "signed in first"].iter().any(|r| said.contains(r)) {
+                true => 3,
+                false => 1,
+            }
+        }
+    }
+}
+
+/// `err`, as what was typed being wrong.
+fn typed(err: anyhow::Error) -> anyhow::Error {
+    match err.downcast::<Failed>() {
+        Ok(f) => f.into(),
+        Err(e) => Failed::Typed(format!("{e:#}")).into(),
+    }
+}
+
 /// `<CLI> <app> <op> [words] [--input value]...`: runs it and prints what it gives back.
 pub fn run(app: &str, op: &str, args: &[String]) -> Result<()> {
-    let (words, mut flags) = split(args);
+    let (mut words, mut flags) = split(args);
+    // A last word `-` asks for inputs from stdin even when none is missing; otherwise stdin is read only when one is,
+    // so a command inside a `while read` loop doesn't eat the loop's input.
+    let asked = words.last().is_some_and(|w| w == "-") && words.pop().is_some();
     let spec = find(app, op);
-    let Some((a, o)) = &spec else { bail!("{}", unknown(app, op)) };
+    let Some((a, o)) = &spec else { return Err(Failed::Typed(unknown(app, Some(op), true)?).into()) };
     if flags.contains_key("help") || flags.contains_key("h") {
         print!("{}", help(a, o));
         return Ok(());
@@ -55,36 +106,46 @@ pub fn run(app: &str, op: &str, args: &[String]) -> Result<()> {
     let files: Vec<String> = flags.remove("file").unwrap_or_default().into_iter().flatten().collect();
     let schema = o["input"].clone();
     let places = places(o);
-    let mut input = input(&schema, &places, words, flags, &files)?;
+    let mut input = input(&schema, &places, words, flags, &files).map_err(typed)?;
     let missing = missing(&schema, &input);
     // An input given as - reads stdin itself (a key from a file, say), so it's left for it.
     let dash = input.values().any(|v| v == "-");
-    if !dash && (!missing.is_empty() || stdin_ready()) {
-        from_stdin(&schema, &missing, &mut input)?;
+    if !dash && (!missing.is_empty() || asked) {
+        from_stdin(&schema, &missing, &mut input).map_err(typed)?;
         let missing = self::missing(&schema, &input);
-        ensure!(
-            missing.is_empty(),
-            "missing {}: give {} as flags, or pipe the inputs as JSON: {CLI} {app} {op} < input.json. See {CLI} {app} {op} --help.",
-            missing.join(", "),
-            if missing.len() == 1 { "it" } else { "them" }
-        );
+        if !missing.is_empty() {
+            return Err(Failed::Typed(format!(
+                "missing {}: give {} as flags, or pipe the inputs as JSON: {CLI} {app} {op} < input.json. See {CLI} {app} {op} --help.",
+                missing.join(", "),
+                if missing.len() == 1 { "it" } else { "them" }
+            ))
+            .into());
+        }
     }
-    if o["confirm"] == true && !confirmed {
-        ask(&format!("{CLI} {app} {op} sends or can't be undone. Go ahead?"), &format!("{CLI} {app} {op} sends or can't be undone, and the person hasn't agreed to it: ask them, and give --confirm only if they say yes to this very action"))?;
+    check(&o["input"], &Value::Object(input.clone())).map_err(typed)?;
+    if o["confirm"] == true {
+        agreed(confirmed, &format!("{CLI} {app} {op}"))?;
     }
     // The node's own tools take the person's yes as an input.
     if confirmed && node_app(app) {
         input.insert("confirm".into(), json!(true));
     }
     let call = match node_app(app) {
-        true => crate::dispatch(&format!("{app}_{op}"), input, agent_from_env().as_deref(), "cli", Some(o.clone())).map(|ok| json!({ "ok": ok })),
+        true => crate::dispatch(&format!("{app}_{op}"), input, agent_from_env().as_deref(), "cli", Some((a.clone(), o.clone()))).map(|ok| json!({ "ok": ok })),
         false => post("/v1/call", json!({ "device": device, "scopes": scopes, "app": app, "op": op, "input": input, "agent": agent_from_env(), "client": "cli" })),
     };
     let mut r = match call {
         Ok(r) => r,
-        Err(e) => bail!("{}", in_cli_words(&format!("{e:#}"))),
+        Err(e) => {
+            let said = in_cli_words(&format!("{e:#}"));
+            return Err(match e.downcast::<Failed>() {
+                Ok(Failed::Refused(_)) => Failed::Refused(said).into(),
+                Ok(Failed::Typed(_)) => Failed::Typed(said).into(),
+                Err(_) => anyhow::anyhow!(said),
+            });
+        }
     };
-    if let Some(none) = none_said(a, op, &r["ok"], true) {
+    if let Some(none) = none_said(a, op, &r["ok"], true).filter(|_| !json()) {
         println!("{none}");
         return Ok(());
     }
@@ -151,39 +212,68 @@ pub fn none_said(app: &Value, op: &str, ok: &Value, cli: bool) -> Option<String>
     })
 }
 
-/// What to say for an app or operation nobody here lists.
-fn unknown(app: &str, op: &str) -> String {
-    let mut apps = get("/v1/apps").ok().and_then(|a| a.as_array().cloned()).unwrap_or_default();
+/// What to say for an app or operation nobody here lists, with the nearest names: `gmail has no operation serch:
+/// did you mean search?`, `no app gmial: did you mean gmail?`. On the command line, built-in commands are names too.
+pub fn unknown(app: &str, op: Option<&str>, cli: bool) -> Result<String> {
+    let mut apps = get("/v1/apps")?.as_array().cloned().unwrap_or_default();
     apps.extend(node_apps());
-    if apps.iter().any(|a| a["name"] == app) {
-        return format!("{app} has no operation {op}; {CLI} {app} lists them");
+    let ops_of = |a: &Value| -> Vec<String> { a["ops"].as_array().into_iter().flatten().filter_map(|o| o["name"].as_str()).filter(|o| !o.starts_with('_')).map(String::from).collect() };
+    if let Some(a) = apps.iter().find(|a| a["name"] == app) {
+        let (op, ops) = (op.unwrap_or(""), ops_of(a));
+        let guess = nearest(op, &ops.iter().map(String::as_str).collect::<Vec<_>>()).first().map(|n| format!(": did you mean {n}?")).unwrap_or_else(|| ".".into());
+        return Ok(format!("{app} has no operation {op}{guess} Its operations: {}", ops.join(", ")));
     }
     // A tool's name as a command, one repos_create notes: the command is one repos create notes.
     let tool = app.match_indices('_').find_map(|(i, _)| {
         let (a, o) = (&app[..i], &app[i + 1..]);
-        apps.iter().find(|x| x["name"] == a)?["ops"].as_array()?.iter().any(|x| x["name"] == o).then(|| format!("{a} {o}"))
+        apps.iter().find(|x| x["name"] == a).is_some_and(|x| ops_of(x).iter().any(|x| x == o)).then(|| format!("{a} {o}"))
     });
-    if let Some(command) = tool {
-        return format!("no app {app}: did you mean {CLI} {command} {op}?");
+    if let Some(command) = tool.filter(|_| cli) {
+        return Ok(format!("no app {app}: did you mean {CLI} {command}{}?", op.map(|o| format!(" {o}")).unwrap_or_default()));
     }
     // One the App Store has that isn't added where the caller sees it.
     let listed = post("/v1/call", json!({ "app": "apps", "op": "list", "input": {}, "client": "cli" })).ok();
     let line = listed.as_ref().and_then(|l| l["ok"].as_str()).and_then(|l| l.lines().find(|l| l.contains(&format!(" ({app}): not added"))).map(String::from));
-    match line.as_deref().and_then(|l| l.split_once(&format!(" ({app})"))) {
-        Some((title, _)) => format!("{title} isn't added yet: {CLI} apps add {app} user adds it for you, or {CLI} apps add {app} global for everyone"),
-        None => format!("no app {app}; {CLI} apps lists them"),
+    if let Some((title, _)) = line.as_deref().and_then(|l| l.split_once(&format!(" ({app})"))) {
+        return Ok(match cli {
+            true => format!("{title} isn't added yet: {CLI} apps add {app} user adds it for you, or {CLI} apps add {app} global for everyone"),
+            false => format!("{title} isn't added yet: apps_add with app {app} and scope user adds it for the person, or global for everyone"),
+        });
     }
+    let mut names: Vec<String> = apps.iter().filter_map(|a| a["name"].as_str()).map(String::from).collect();
+    // And the App Store's, added or not: `Gmail (gmail): not added. …`.
+    let store = listed.as_ref().and_then(|l| l["ok"].as_str()).unwrap_or("");
+    names.extend(store.lines().filter_map(|l| l.split_once(" (")?.1.split_once("): ").map(|(n, _)| n.to_string())).filter(|n| !names.contains(n)).collect::<Vec<_>>());
+    let commands = if cli { crate::commands() } else { Vec::new() };
+    let all: Vec<&str> = names.iter().chain(&commands).map(String::as_str).collect();
+    Ok(match nearest(app, &all).first() {
+        Some(n) if commands.contains(n) && !names.contains(n) => format!("no command {app}: did you mean {CLI} {n}? {CLI} help says the rest"),
+        Some(n) => format!("no app {app}: did you mean {n}?"),
+        None if cli => format!("no command or app {app}: {CLI} help says the commands, {CLI} search <words> finds operations"),
+        None => format!("no app {app}: search finds the tools for a task"),
+    })
+}
+
+/// Goes ahead with `command`, which sends or can't be undone, given --confirm; else asks at a terminal, and elsewhere
+/// (an agent, or piped) refuses.
+pub fn agreed(confirmed: bool, command: &str) -> Result<()> {
+    if confirmed {
+        return Ok(());
+    }
+    ask(&format!("{command} sends or can't be undone. Go ahead?"), &format!("{command} sends or can't be undone, and the person hasn't agreed to it: ask them, and give --confirm only if they say yes to this very action"))
 }
 
 /// Asks at a terminal; elsewhere (piped, or an agent) it fails with `otherwise`.
 fn ask(question: &str, otherwise: &str) -> Result<()> {
     if !(std::io::stdin().is_terminal() && std::io::stderr().is_terminal()) {
-        bail!("{otherwise}");
+        return Err(Failed::Refused(otherwise.to_string()).into());
     }
     eprint!("{question} [y/N] ");
     let mut answer = String::new();
     std::io::stdin().read_line(&mut answer)?;
-    ensure!(matches!(answer.trim(), "y" | "Y" | "yes" | "Yes"), "stopped; nothing changed");
+    if !matches!(answer.trim(), "y" | "Y" | "yes" | "Yes") {
+        return Err(Failed::Refused("stopped; nothing changed".into()).into());
+    }
     Ok(())
 }
 
@@ -323,14 +413,14 @@ fn value(flag: &str, values: &[Option<String>], prop: Option<&Value>) -> Result<
         };
         Ok(match ty {
             Some("string") => json!(v),
-            Some("integer") => json!(v.parse::<i64>().with_context(|| format!("--{} takes a whole number, not {v}", kebab(flag)))?),
-            Some("number") => json!(v.parse::<f64>().with_context(|| format!("--{} takes a number, not {v}", kebab(flag)))?),
+            Some("integer") => json!(v.parse::<i64>().ok().with_context(|| format!("--{} takes a whole number, not {v}", kebab(flag)))?),
+            Some("number") => json!(v.parse::<f64>().ok().with_context(|| format!("--{} takes a number, not {v}", kebab(flag)))?),
             Some("boolean") => match v.as_str() {
                 "true" | "yes" | "1" => json!(true),
                 "false" | "no" | "0" => json!(false),
                 _ => bail!("--{} is true or false, not {v}", kebab(flag)),
             },
-            Some("object") => serde_json::from_str(v).with_context(|| format!("--{} takes a JSON object", kebab(flag)))?,
+            Some("object") => serde_json::from_str(v).ok().filter(Value::is_object).with_context(|| format!("--{} takes a JSON object, like '{{\"a\": 1}}'", kebab(flag)))?,
             // Untyped: JSON if it is, else text.
             _ => serde_json::from_str(v).ok().filter(|v: &Value| !v.is_string()).unwrap_or_else(|| json!(v)),
         })
@@ -371,13 +461,6 @@ fn from_stdin(schema: &Value, missing: &[String], input: &mut Map<String, Value>
         _ => bail!("what's piped isn't a JSON object of inputs"),
     }
     Ok(())
-}
-
-/// Whether stdin holds something to read now: a file, or a pipe written to within a moment. Read only then when no
-/// input is missing, since an agent's shell may leave stdin open and empty, which mustn't hold up every command.
-fn stdin_ready() -> bool {
-    let mut fd = libc::pollfd { fd: 0, events: libc::POLLIN, revents: 0 };
-    !std::io::stdin().is_terminal() && unsafe { libc::poll(&mut fd, 1, 100) } > 0 && fd.revents & libc::POLLIN != 0
 }
 
 /// What's piped to stdin, or None when nothing comes: an agent's shell may leave stdin open and empty, so wait only
@@ -456,7 +539,7 @@ pub fn as_file(v: &Value) -> Option<(String, String, Vec<u8>)> {
 /// paths printed, anything else as JSON. With `out`, a result that isn't a file is saved there instead.
 fn show(app: &str, op: &str, ok: &Value, out: Option<&str>) -> Result<()> {
     let mut out = out.map(std::path::PathBuf::from);
-    let mut save = |i: usize, name: &str, ty: &str, bytes: &[u8]| -> Result<()> {
+    let mut save = |i: usize, name: &str, ty: &str, bytes: &[u8]| -> Result<String> {
         let path = match out.take() {
             Some(p) => p,
             None => {
@@ -466,28 +549,44 @@ fn show(app: &str, op: &str, ok: &Value, out: Option<&str>) -> Result<()> {
             }
         };
         std::fs::write(&path, bytes).with_context(|| format!("write {}", path.display()))?;
-        println!("{}", path.display());
-        Ok(())
+        Ok(path.display().to_string())
     };
     if let Some(content) = ok["content"].as_array() {
+        let mut shown = Vec::new();
         for (i, c) in content.iter().enumerate() {
             match (c["type"].as_str(), as_file(c)) {
-                (Some("image" | "audio"), Some((name, ty, bytes))) => save(i, &name, &ty, &bytes)?,
+                (Some("image" | "audio"), Some((name, ty, bytes))) => shown.push(json!({ "file": save(i, &name, &ty, &bytes)?, "type": ty })),
                 (Some("resource"), _) if c["resource"]["blob"].is_string() => {
                     let r = &c["resource"];
                     let bytes = data_encoding::BASE64.decode(r["blob"].as_str().unwrap_or("").as_bytes())?;
                     let name = r["uri"].as_str().and_then(|u| u.rsplit('/').next()).unwrap_or("");
-                    save(i, name, r["mimeType"].as_str().unwrap_or(""), &bytes)?;
+                    shown.push(json!({ "file": save(i, name, r["mimeType"].as_str().unwrap_or(""), &bytes)?, "type": r["mimeType"] }));
                 }
-                _ => println!("{}", c["text"].as_str().or(c["resource"]["text"].as_str()).unwrap_or("")),
+                _ => shown.push(json!({ "text": c["text"].as_str().or(c["resource"]["text"].as_str()).unwrap_or("") })),
             }
+        }
+        for s in &shown {
+            match (json(), s["text"].as_str()) {
+                (true, _) => {}
+                (false, Some(text)) => println!("{text}"),
+                (false, None) => println!("{}", s["file"].as_str().unwrap_or("")),
+            }
+        }
+        if json() {
+            println!("{}", Value::Array(shown));
         }
         return Ok(());
     }
     if let Some((name, ty, bytes)) = as_file(ok) {
-        return save(0, &name, &ty, &bytes);
+        let path = save(0, &name, &ty, &bytes)?;
+        match json() {
+            true => println!("{}", json!({ "file": path, "name": name, "type": ty, "size": bytes.len() })),
+            false => println!("{path}"),
+        }
+        return Ok(());
     }
     let text = match ok {
+        _ if json() => serde_json::to_string(ok)?,
         Value::String(s) => s.clone(),
         Value::Null => return Ok(()),
         // Laid out for a person at a terminal; compact for an agent's shell or a pipe.
@@ -568,6 +667,7 @@ pub fn help(app: &Value, op: &Value) -> String {
         rows.push(("--device <name>".into(), about.into()));
     }
     rows.push(("--out <path>".into(), "save what it gives back there".into()));
+    rows.push(("--json".into(), "print what it gives back as JSON".into()));
     if op["confirm"] == true {
         rows.push(("--confirm".into(), "go ahead without asking: it can't be undone".into()));
     }
@@ -585,7 +685,7 @@ pub fn help(app: &Value, op: &Value) -> String {
         _ => "",
     });
     if !props.is_empty() {
-        text.push_str(&format!("Inputs not given are read as JSON from stdin: {CLI} {a} {o} < input.json\n"));
+        text.push_str(&format!("Required inputs not given are read as JSON from stdin: {CLI} {a} {o} < input.json; a last word - reads stdin anyway: {CLI} {a} {o} - < input.json\n"));
     }
     text
 }
@@ -606,7 +706,7 @@ pub fn list(apps: &[Value]) -> Vec<String> {
         .flat_map(|a| {
             let name = a["name"].as_str().unwrap_or("").to_string();
             a["ops"].as_array().cloned().unwrap_or_default().into_iter().filter(|o| !o["name"].as_str().unwrap_or("").starts_with('_')).map(move |o| {
-                let mark = if o["confirm"] == true { " (can't be undone)" } else { "" };
+                let mark = if o["confirm"] == true { " (needs --confirm)" } else { "" };
                 (format!("{CLI} {name} {}", o["name"].as_str().unwrap_or("")), format!("{}{mark}", first_sentence(o["description"].as_str().unwrap_or(""))))
             })
         })
@@ -634,7 +734,9 @@ pub fn mcp_schema(app: &Value, op: &Value) -> Value {
         schema = json!({ "type": "object", "properties": {} });
     }
     if !schema["properties"].is_object() {
+        // One that lists no inputs takes any, as it did before it was listed with device or confirm.
         schema["properties"] = json!({});
+        schema["additionalProperties"] = json!(true);
     }
     for prop in schema["properties"].as_object_mut().into_iter().flat_map(|p| p.values_mut()) {
         if takes_file(prop).is_some() {
@@ -646,16 +748,21 @@ pub fn mcp_schema(app: &Value, op: &Value) -> Value {
         schema["properties"]["device"] = json!({ "type": "string", "description": "which of your devices, by name, or all for every one; default is this one" });
     }
     if op["confirm"] == true {
-        schema["properties"]["confirm"] = json!({ "type": "boolean", "description": "true once the person has agreed: this can't be undone" });
+        schema["properties"]["confirm"] = one::skills::confirm_input();
     }
     schema
 }
 
-/// Checks `v` against an input schema, as code mode's interpreter doesn't: types, choices, required inputs, and no
-/// inputs an operation doesn't take. `at` names it in what's wrong.
-pub fn check(schema: &Value, v: &Value, at: &str) -> Result<()> {
+/// Checks an operation's input against its schema before anything runs: types, choices, required inputs, and no
+/// inputs it doesn't take. What's wrong names the input (`limit takes a whole number, not "many"`).
+pub fn check(schema: &Value, input: &Value) -> Result<()> {
+    check_at(schema, input, "")
+}
+
+fn check_at(schema: &Value, v: &Value, at: &str) -> Result<()> {
+    let named = if at.is_empty() { "the input" } else { at };
     if let Some(choices) = schema["enum"].as_array() {
-        ensure!(choices.contains(v), "{at} is one of {}, not {v}", choices.iter().map(|c| c.to_string()).collect::<Vec<_>>().join(", "));
+        ensure!(choices.contains(v), "{named} is one of {}, not {v}", choices.iter().map(|c| c.to_string()).collect::<Vec<_>>().join(", "));
     }
     let types: Vec<&str> = match &schema["type"] {
         Value::String(t) => vec![t.as_str()],
@@ -674,24 +781,36 @@ pub fn check(schema: &Value, v: &Value, at: &str) -> Result<()> {
     };
     if !types.is_empty() && !types.iter().any(|t| is(t)) {
         let want = types.iter().map(|t| match *t { "string" => "text", "integer" => "a whole number", "number" => "a number", "boolean" => "true or false", "array" => "a list", "object" => "an object", t => t }).collect::<Vec<_>>().join(" or ");
-        bail!("{at} takes {want}, not {v}");
+        bail!("{named} takes {want}, not {v}");
     }
     if let (Some(items), Some(list)) = (schema.get("items"), v.as_array()) {
         for (i, x) in list.iter().enumerate() {
-            check(items, x, &format!("{at}[{i}]"))?;
+            check_at(items, x, &format!("{named}[{i}]"))?;
         }
     }
-    if let (Some(props), Some(o)) = (schema["properties"].as_object(), v.as_object()) {
+    if let Some(o) = v.as_object() {
+        let props = schema["properties"].as_object().cloned().unwrap_or_default();
+        let inner = |k: &str| if at.is_empty() { k.to_string() } else { format!("{at}.{k}") };
         for r in required(schema) {
-            ensure!(o.get(&r).is_some_and(|x| !x.is_null()), "{at} needs {r}");
+            if o.get(&r).is_none_or(Value::is_null) {
+                let about = props.get(&r).and_then(|p| p["description"].as_str()).map(|d| format!(": {d}")).unwrap_or_default();
+                bail!("missing {}{about}", inner(&r));
+            }
         }
         for (k, x) in o {
             match props.get(k) {
                 Some(_) if x.is_null() => {}
-                Some(p) => check(p, x, &format!("{at}.{k}"))?,
-                // An operation's own inputs are all listed; deeper objects may hold more, unless they say not.
-                None if (at == "input" && !props.is_empty()) || schema["additionalProperties"] == false => {
-                    bail!("{at} has no {k}: it takes {}", props.keys().cloned().collect::<Vec<_>>().join(", "))
+                Some(p) => check_at(p, x, &inner(k))?,
+                // An operation's own inputs are all listed, unless it says it takes any; deeper objects may hold more,
+                // unless they say not.
+                None if (at.is_empty() && !takes(schema, k)) || schema["additionalProperties"] == false => {
+                    let names: Vec<&str> = props.keys().map(String::as_str).collect();
+                    let near = nearest(k, &names);
+                    match (names.is_empty(), near.first()) {
+                        (true, _) => bail!("{} isn't an input: this takes none", inner(k)),
+                        (_, Some(n)) => bail!("{} isn't an input: did you mean {n}? It takes {}", inner(k), names.join(", ")),
+                        (_, None) => bail!("{} isn't an input: it takes {}", inner(k), names.join(", ")),
+                    }
                 }
                 None => {}
             }
@@ -700,16 +819,40 @@ pub fn check(schema: &Value, v: &Value, at: &str) -> Result<()> {
     Ok(())
 }
 
-/// An MCP tool's hints: whether it only reads, and whether it can't be undone.
+/// The few of `names` nearest to `word`, nearest first: a typo's fix, by edit distance (a swap of two letters is one
+/// edit), within one edit for a short word and up to three for a long one.
+pub fn nearest(word: &str, names: &[&str]) -> Vec<String> {
+    let w: Vec<char> = word.to_lowercase().chars().collect();
+    let most = match w.len() { 0..=3 => 1, 4..=6 => 2, _ => 3 };
+    let mut found: Vec<(usize, &str)> = names.iter().map(|n| (distance(&w, &n.to_lowercase().chars().collect::<Vec<_>>()), *n)).filter(|(d, _)| *d <= most).collect();
+    found.sort();
+    found.into_iter().take(3).map(|(_, n)| n.to_string()).collect()
+}
+
+/// Edits from `a` to `b`: a letter added, taken out, changed, or two side by side swapped.
+fn distance(a: &[char], b: &[char]) -> usize {
+    let mut d = vec![vec![0usize; b.len() + 1]; a.len() + 1];
+    for (i, row) in d.iter_mut().enumerate() {
+        row[0] = i;
+    }
+    for j in 0..=b.len() {
+        d[0][j] = j;
+    }
+    for i in 1..=a.len() {
+        for j in 1..=b.len() {
+            let cost = usize::from(a[i - 1] != b[j - 1]);
+            d[i][j] = (d[i - 1][j] + 1).min(d[i][j - 1] + 1).min(d[i - 1][j - 1] + cost);
+            if i > 1 && j > 1 && a[i - 1] == b[j - 2] && a[i - 2] == b[j - 1] {
+                d[i][j] = d[i][j].min(d[i - 2][j - 2] + 1);
+            }
+        }
+    }
+    d[a.len()][b.len()]
+}
+
+/// An operation's MCP hints, from what it says: `reads`, and `confirm`.
 pub fn mcp_annotations(op: &Value) -> Value {
-    let mut a = json!({});
-    if op["reads"] == true {
-        a["readOnlyHint"] = json!(true);
-    }
-    if op["confirm"] == true {
-        a["destructiveHint"] = json!(true);
-    }
-    a
+    one::skills::hints(op["reads"] == true, op["confirm"] == true)
 }
 
 /// Brings an agent's file inputs to what apps take, `{ name, type, size, base64 }`: from base64, a file id (a blob
@@ -799,6 +942,61 @@ fn on_the_internet(ip: std::net::IpAddr) -> bool {
     }
 }
 
+/// What an MCP result gives an agent to read, at most: about 10,000 tokens, below where harnesses warn.
+pub const BUDGET: usize = 40_000;
+
+/// Cuts a result's text to the budget, ending with a line that says how much isn't shown and how to ask for less: the
+/// operation's inputs that narrow it, by name. Images aren't text, and stay.
+pub fn within_budget(content: &mut Value, op: Option<&Value>) {
+    let Some(items) = content.as_array_mut() else { return };
+    let total: usize = items.iter().filter_map(|c| c["text"].as_str()).map(|t| t.chars().count()).sum();
+    if total <= BUDGET {
+        return;
+    }
+    let mut left = BUDGET;
+    for c in items.iter_mut() {
+        let Some(text) = c["text"].as_str() else { continue };
+        let n = text.chars().count();
+        if n <= left {
+            left -= n;
+            continue;
+        }
+        let mut cut: String = text.chars().take(left).collect();
+        // At the end of a line, when one ends near the cut.
+        if let Some(i) = cut.rfind('\n').filter(|i| cut.len() - i < 2_000) {
+            cut.truncate(i);
+        }
+        left = 0;
+        c["text"] = json!(cut);
+    }
+    let shown: usize = items.iter().filter_map(|c| c["text"].as_str()).map(|t| t.chars().count()).sum();
+    let narrows = ["limit", "query", "q", "search", "filter", "fields", "since", "after", "before", "start", "end", "range", "topic", "path"];
+    let names: Vec<&str> = op.and_then(|o| o["input"]["properties"].as_object()).into_iter().flatten().map(|(k, _)| k.as_str()).filter(|k| narrows.iter().any(|n| k.eq_ignore_ascii_case(n) || k.to_lowercase().starts_with(&format!("{n}_")) || k.to_lowercase().starts_with("max"))).collect();
+    let ask = match names.as_slice() {
+        [] => "Ask for less with a narrower call.".to_string(),
+        [one] => format!("Ask for less with {one}."),
+        [rest @ .., last] => format!("Ask for less with {} or {last}.", rest.join(", ")),
+    };
+    let line = format!("\n\n[Shown: the first {} of {} characters. {ask}]", group(shown), group(total));
+    match items.iter_mut().rev().find(|c| c["text"].is_string()) {
+        Some(c) => c["text"] = json!(format!("{}{line}", c["text"].as_str().unwrap_or(""))),
+        None => items.push(json!({ "type": "text", "text": line.trim_start() })),
+    }
+}
+
+/// A count as a person writes it: 40,000.
+fn group(n: usize) -> String {
+    let s = n.to_string();
+    let mut out = String::new();
+    for (i, c) in s.chars().enumerate() {
+        if i > 0 && (s.len() - i) % 3 == 0 {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
+}
+
 /// A result as MCP content: text, or JSON with each file in it kept as a file this device serves, given back as a
 /// reference (name, type, size, its id and a link), with images also shown.
 pub fn mcp_content(ok: &Value) -> Value {
@@ -808,6 +1006,7 @@ pub fn mcp_content(ok: &Value) -> Value {
     let mut shown = Vec::new();
     let mut ok = ok.clone();
     keep_files(&mut ok, &mut shown, 0);
+    no_pictures(&mut ok);
     let text = match &ok {
         Value::String(s) => s.clone(),
         other => serde_json::to_string(other).unwrap_or_default(),
@@ -815,6 +1014,22 @@ pub fn mcp_content(ok: &Value) -> Value {
     let mut content = vec![json!({ "type": "text", "text": text })];
     content.extend(shown);
     json!(content)
+}
+
+/// Takes pictures given as `data:` URLs out of a result, to any depth: an agent reads them as a wall of base64, and
+/// screens, which draw them, ask the node themselves.
+fn no_pictures(v: &mut Value) {
+    match v {
+        Value::Array(items) => {
+            items.retain(|i| !i.as_str().is_some_and(|s| s.starts_with("data:image/")));
+            items.iter_mut().for_each(no_pictures);
+        }
+        Value::Object(map) => {
+            map.retain(|_, i| !i.as_str().is_some_and(|s| s.starts_with("data:image/")));
+            map.values_mut().for_each(no_pictures);
+        }
+        _ => {}
+    }
 }
 
 /// Replaces each file in `v` (to a few levels deep) with a reference to a blob that holds it.

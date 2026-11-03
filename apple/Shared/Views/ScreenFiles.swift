@@ -104,7 +104,7 @@ enum ShellFiles {
     /// The document camera: finds each page's edges and straightens it, several in a row. Each page as a JPEG; none if
     /// the person cancels.
     static func scan(from view: UIView?) async throws -> [ScreenFile] {
-        guard canScan else { throw NodeError("This device can’t scan documents.") }
+        guard canScan else { throw NodeError("This device can’t scan documents. Choose the files instead.") }
         return try await withCheckedThrowingContinuation { done in
             let camera = VNDocumentCameraViewController()
             let delegate = Scanner { result in
@@ -164,7 +164,7 @@ enum ShellFiles {
     static var canScan: Bool { false }
 
     static func scan(from view: NSView?) async throws -> [ScreenFile] {
-        throw NodeError("Scanning documents needs an iPhone, iPad or Android phone. Choose the files instead.")
+        throw NodeError("Scanning documents needs the iPhone, iPad or Android app. Choose the files instead.")
     }
     #endif
 }

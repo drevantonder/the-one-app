@@ -129,6 +129,8 @@ impl Node {
     /// (on this machine, the CLI, MCP and the Mac app), and one that wouldn't count is refused, not written.
     pub async fn member_content(&self, caller: &Caller, content: Content) -> Result<()> {
         self.append_as(&Scope::Global, &caller.user, content).await?;
+        // A deploy, or an app added, runs here before it's done: its screens and calls answer at once.
+        self.settle().await?;
         Ok(())
     }
 

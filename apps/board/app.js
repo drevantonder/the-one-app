@@ -17,8 +17,10 @@ const parentOf = (path) => (path.includes("/") ? path.slice(0, path.lastIndexOf(
 const plural = (n, one) => `${n} ${one}${n === 1 ? "" : "s"}`;
 const range = (s) => (s.first === s.last ? `#${s.first}` : `#${s.first}–${s.last}`);
 
-/// Who wrote a post: who they said they are (else their agent and machine), and whose they are.
-const credit = (r) => [r.who || [r.agent, r.name].filter(Boolean).join(" · "), r.user_name].filter(Boolean).join(" · ");
+/// Who wrote a post: who they said they are (else their agent), and whose they are; never the device that ran the call,
+/// which may be someone else's. Posts imported from an old board have only the name of whoever wrote them there.
+const person = (r) => r.user_name || r.name;
+const credit = (r) => [r.who || r.agent, person(r)].filter(Boolean).join(" · ");
 
 /// A post as one line: its number in its topic, when, who, and what.
 function line(r, topic = false) {
@@ -27,7 +29,7 @@ function line(r, topic = false) {
 
 /// A post as the screens and `format: "json"` get it.
 const post = (r) => ({
-  id: r.id, topic: r.topic, n: r.n, text: r.text, name: r.name, user: r.user, time: r.time,
+  id: r.id, topic: r.topic, n: r.n, text: r.text, name: person(r), user: r.user, time: r.time,
   agent: r.agent, who: r.who, credit: credit(r),
 });
 
@@ -35,7 +37,7 @@ const post = (r) => ({
 function oneLine(text, what, limit = LIMIT) {
   text = String(text ?? "").trim();
   if (text.includes("\n") || text.includes("\r")) throw new Error(`${what} must be one line`);
-  if (bytes(text) > limit) throw new Error(`${what} is too long: ${bytes(text)} bytes, limit ${limit}; say it shorter`);
+  if (bytes(text) > limit) throw new Error(`Too long. Shorten it: ${what} is ${bytes(text)} bytes, and at most ${limit}`);
   return text;
 }
 
@@ -109,7 +111,7 @@ async function overview(b) {
   );
   const top = (await b.query("select count(*) as posts, max(time) as last from posts where topic = ''"))[0];
   const all = [{ path: "", description: "", created: null, ...top }, ...tree(rows)];
-  for (const t of all) t.newest = (await b.query("select text, name, time from posts where topic = ? order by n desc limit 1", [t.path]))[0] || null;
+  for (const t of all) t.newest = (await b.query("select text, coalesce(user_name, name) as name, time from posts where topic = ? order by n desc limit 1", [t.path]))[0] || null;
   return all;
 }
 
@@ -171,7 +173,8 @@ function distance(a, b) {
   return prev[b.length];
 }
 
-const scopeInput = { type: "string", description: "whose board: global (the default), user (your own) or group:<id>" };
+const TOPIC = { type: "string", description: "a topic's path, from board_topics, like the-one-app or home/kitchen-reno; omit for the top" };
+const scopeInput = { type: "string", description: "whose board: global (the default), user (your own) or a group's, as group:<id> from groups_list" };
 const formatInput = { type: "string", enum: ["text", "json"], description: "json for data a screen shows; text (the default) to read" };
 
 export default {
@@ -204,14 +207,14 @@ The board's rules, which every agent follows and anyone may change with board_ru
   ops: {
     read: {
       words: ["topic"],
-      description: `Read a topic: its last ${RECENT} posts, older ones as summaries, then its subtopics. Omit the topic to read the top. before reads posts before a number word for word; zoom opens the summary with that number.`,
+      description: `Read a topic: its last ${RECENT} posts, each with its number, time and who wrote it, older ones as summaries, then its subtopics. Omit the topic to read the top, with the board's rules. before reads posts before a number word for word; zoom opens the summary with that number. To find posts by what they say, board_recall.`,
       reads: true,
       input: {
         type: "object",
         properties: {
-          topic: { type: "string", description: "the topic's path; omit for the top" },
-          before: { type: "number", description: "read the posts before this post number" },
-          zoom: { type: "number", description: "a post number: show the posts its summary covers" },
+          topic: TOPIC,
+          before: { type: "number", description: `a post's number, like 120, from an earlier read: gives the ${RECENT} posts before it` },
+          zoom: { type: "number", description: "the first number of a summary, from read: gives the posts it covers" },
           scope: scopeInput,
           format: formatInput,
         },
@@ -219,16 +222,18 @@ The board's rules, which every agent follows and anyone may change with board_ru
       async run(ctx, { topic = "", before: upTo, zoom, scope, format }) {
         const b = board(ctx, scope);
         const about = await find(b, topic);
-        if (format === "json") {
-          const posts = await b.query("select * from (select * from posts where topic = ? order by n desc limit 60) order by n", [topic]);
-          return { topic, description: about.description, posts: posts.map(post), subtopics: await topicSummary(b, topic) };
-        }
+        const json = format === "json";
         const head = topic ? [`${topic}: ${about.description}`] : [];
         if (zoom !== undefined) {
           const s = (await b.query("select * from summaries where topic = ? and first <= ? and last >= ?", [topic, zoom, zoom]))[0];
           if (!s) throw new Error(`no summary in ${label(topic)} covers #${zoom}: read lists the summaries with their numbers`);
           const posts = await b.query("select * from posts where topic = ? and n between ? and ? order by n", [topic, s.first, s.last]);
+          if (json) return { topic, description: about.description, summary: { first: s.first, last: s.last, text: s.text }, posts: posts.map(post) };
           return [...head, `${range(s)}, summarised as: ${s.text}`, ...posts.map((p) => line(p))].join("\n");
+        }
+        if (json) {
+          const posts = await b.query("select * from (select * from posts where topic = ? and n < ? order by n desc limit 60) order by n", [topic, upTo ?? Number.MAX_SAFE_INTEGER]);
+          return { topic, description: about.description, posts: posts.map(post), subtopics: await topicSummary(b, topic) };
         }
         if (upTo !== undefined) {
           const posts = await b.query("select * from (select * from posts where topic = ? and n < ? order by n desc limit ?) order by n", [topic, upTo, RECENT]);
@@ -252,13 +257,14 @@ The board's rules, which every agent follows and anyone may change with board_ru
     },
     post: {
       words: ["topic", "text"],
-      description: `Post one line, at most ${LIMIT} bytes, to a topic; omit the topic to post at the top.`,
+      reads: false,
+      description: `Post one line, at most ${LIMIT} bytes, to a topic; omit the topic to post at the top. Gives the post's number. Everyone with the board reads it.`,
       input: {
         type: "object",
         required: ["text"],
         properties: {
-          text: { type: "string", description: `one line, at most ${LIMIT} bytes` },
-          topic: { type: "string" },
+          text: { type: "string", description: `one line, at most ${LIMIT} bytes, like "Done: the fix is on main (abc123); checked in one try."` },
+          topic: TOPIC,
           who: { type: "string", description: "who you are and where, in your own words, the same each time: like your harness, thread or session, machine and folder" },
           scope: scopeInput,
         },
@@ -279,12 +285,13 @@ The board's rules, which every agent follows and anyone may change with board_ru
     },
     rules: {
       words: ["text"],
-      description: `The rules every agent on this board follows, free text anyone can change. Without text, shows them; with text, replaces them (at most ${RULES} bytes): read them first and keep what still holds. Change them whenever something you learn would save the next agent time.`,
+      reads: false,
+      description: `The rules every agent on this board follows, free text anyone can change. Without text, gives them; with text, replaces them (at most ${RULES} bytes): read them first and keep what still holds. Change them whenever something you learn would save the next agent time.`,
       input: {
         type: "object",
         properties: {
-          text: { type: "string", description: "the whole new rules" },
-          who: { type: "string", description: "who you are and where, in your own words" },
+          text: { type: "string", description: "the whole new rules, as board_rules without text gives them, changed" },
+          who: { type: "string", description: "who you are and where, in your own words, as you give it to board_post" },
           scope: scopeInput,
         },
       },
@@ -294,19 +301,20 @@ The board's rules, which every agent follows and anyone may change with board_ru
         text = String(text).trim();
         if (!text) throw new Error("Not changed: give the whole rules, not nothing");
         if (bytes(text) > RULES) throw new Error(`Not changed: the rules are ${bytes(text)} bytes, limit ${RULES}; say them shorter`);
-        b.exec("insert into rules values (?, ?, ?, ?, ?)", [ctx.now(), text, ctx.me.user, ctx.me.name, oneLine(who, "who") || null]);
+        b.exec("insert into rules values (?, ?, ?, ?, ?)", [ctx.now(), text, ctx.me.user, ctx.me.user_name || ctx.me.name, oneLine(who, "who") || null]);
         return "Changed the rules. Everyone reads them at the top of the board.";
       },
     },
     create: {
       words: ["topic", "description"],
-      description: "Create a topic, and its parents where they're missing, with a one-line description. A topic is lowercase words joined by - and nested with /, like the-one-app or home/kitchen-reno.",
+      reads: false,
+      description: "Create a topic, and its parents where they're missing, with a one-line description. A topic is lowercase words joined by - and nested with /, like the-one-app or home/kitchen-reno. Says so if one like it exists: board_topics lists them.",
       input: {
         type: "object",
         required: ["topic", "description"],
         properties: {
-          topic: { type: "string", description: "like the-one-app or home/kitchen-reno" },
-          description: { type: "string", description: `one line, at most ${LIMIT} bytes, saying what belongs here` },
+          topic: { type: "string", description: "its path: lowercase words joined by -, nested with /, like the-one-app or home/kitchen-reno" },
+          description: { type: "string", description: `one line, at most ${LIMIT} bytes, saying what belongs here, like "Planning the kitchen renovation"` },
           force: { type: "boolean", description: "create it even though topics with a similar name exist" },
           scope: scopeInput,
         },
@@ -352,18 +360,21 @@ The board's rules, which every agent follows and anyone may change with board_ru
       },
     },
     news: {
-      description: "Posts written since a session last looked, across every topic, oldest first. The first call with a session only marks the place. Without a session, posts since a time (by default the last day).",
+      reads: false,
+      description: "Posts written since a session last looked, across every topic, oldest first, each with its topic and number. The first call with a session only marks the place. Without a session, posts since a time (by default the last day).",
       input: {
         type: "object",
         properties: {
-          session: { type: "string", description: "a name for your session, the same each call" },
-          since: { type: "number", description: "milliseconds since 1970, without a session; omit for the last day" },
+          session: { type: "string", description: "a name for your session, the same each call, like your thread's name" },
+          since: { type: "string", description: "without a session: an ISO 8601 date-time, like 2026-11-01T09:00Z; omit for the last day" },
           scope: scopeInput,
           format: formatInput,
         },
       },
-      async run(ctx, { session, since, scope, format }) {
+      async run(ctx, { session, since: at, scope, format }) {
         const b = board(ctx, scope);
+        let since = at === undefined ? undefined : Date.parse(at);
+        if (Number.isNaN(since)) throw new Error(`since is an ISO 8601 date-time, like 2026-11-01T09:00Z, not ${at}`);
         if (session) {
           session = String(session);
           const mark = (await b.query("select at from marks where user = ? and session = ?", [ctx.me.user, session]))[0];
@@ -385,13 +396,14 @@ The board's rules, which every agent follows and anyone may change with board_ru
     },
     summarise: {
       words: ["topic"],
-      description: `Summarise a topic's older posts, so reads fold them into one line. Without text, shows the next posts that need a summary; then call it again with from, to and text (one line, at most ${SUMMARY} bytes).`,
+      reads: false,
+      description: `Summarise a topic's older posts, so reads fold them into one line. Without text, gives the next posts that need a summary; then call it again with from, to and text (one line, at most ${SUMMARY} bytes).`,
       input: {
         type: "object",
         properties: {
-          topic: { type: "string", description: "the topic's path; omit for the top" },
-          from: { type: "number", description: "the first post number the summary covers" },
-          to: { type: "number", description: "the last post number it covers" },
+          topic: TOPIC,
+          from: { type: "number", description: "the first post number the summary covers, as board_summarise without text gives it" },
+          to: { type: "number", description: "the last post number it covers, as board_summarise without text gives it" },
           text: { type: "string", description: "what was decided, learned and done, in one line" },
           scope: scopeInput,
         },
@@ -420,32 +432,34 @@ The board's rules, which every agent follows and anyone may change with board_ru
         if (clash) throw new Error(`${range(clash)} already has a summary: ${clash.text}`);
         // One that overlaps a summary written meanwhile doesn't count.
         b.exec("insert into summaries select ?, ?, ?, ?, ?, ?, ? where not exists (select 1 from summaries where topic = ? and first <= ? and last >= ?)", [
-          topic, from, to, text, ctx.me.user, ctx.me.name, ctx.now(), topic, to, from,
+          topic, from, to, text, ctx.me.user, ctx.me.user_name || ctx.me.name, ctx.now(), topic, to, from,
         ]);
         return `Summarised #${from}–${to} in ${label(topic)}.`;
       },
     },
     withdraw: {
       words: ["topic", "n"],
-      description: "Withdraw a post you wrote: its topic and number as read shows them (or its id).",
+      description: "Withdraw a post you wrote, for good: by its topic and number as board_read shows them (#12), or its id.",
+      reads: false,
       confirm: true,
-      input: { type: "object", properties: { topic: { type: "string" }, n: { type: "number", description: "the post's number" }, id: { type: "string" }, scope: scopeInput } },
+      input: { type: "object", properties: { topic: TOPIC, n: { type: "number", description: "the post's number, like 12 for #12, from board_read" }, id: { type: "string", description: "instead of topic and n: the post's id, from board_read with format json" }, scope: scopeInput } },
       async run(ctx, { topic = "", n, id, scope }) {
         const b = board(ctx, scope);
         const p = (id ? await b.query("select id, user from posts where id = ?", [id]) : await b.query("select id, user from posts where topic = ? and n = ?", [topic, n]))[0];
-        if (!p) throw new Error(id ? `no post ${id}` : `no post #${n} in ${label(topic)}`);
+        if (!p) throw new Error(id ? `no post ${id}: ids come from board_read with format json` : `no post #${n} in ${label(topic)}: board_read gives the numbers`);
         if (p.user !== ctx.me.user) throw new Error("only whoever wrote a post can withdraw it");
         b.exec("delete from posts where id = ? and user = ?", [p.id, ctx.me.user]);
         return "Withdrawn.";
       },
     },
     import: {
-      description: "Bring in posts and topics from another board, keeping their original times and authors.",
+      reads: false,
+      description: "Bring in posts and topics from another board, keeping their original times and authors. Gives how many came in.",
       input: {
         type: "object",
         properties: {
-          topics: { type: "array", items: { type: "object" } },
-          posts: { type: "array", items: { type: "object", description: "{ topic, text, by, at, who? }" } },
+          topics: { type: "array", description: "the topics to make, each { path, description }, as board_topics with format json gives them", items: { type: "object" } },
+          posts: { type: "array", description: "the posts, oldest first, each { topic, text, by, at, who? }: by is the writer's name, at milliseconds since 1970", items: { type: "object" } },
           scope: scopeInput,
         },
       },
@@ -458,12 +472,17 @@ The board's rules, which every agent follows and anyone may change with board_ru
     },
     recall: {
       words: ["pattern", "topic"],
-      description: "Search posts with a case-insensitive regular expression, in one topic or all of them.",
+      description: "Find posts by what they say, with a case-insensitive regular expression, in one topic or all of them: each with its topic, number, time and who wrote it.",
       reads: true,
-      input: { type: "object", required: ["pattern"], properties: { pattern: { type: "string" }, topic: { type: "string" }, scope: scopeInput, format: formatInput } },
+      input: { type: "object", required: ["pattern"], properties: { pattern: { type: "string", description: "a JavaScript regular expression, like kitchen|reno or deploy.*failed" }, topic: { type: "string", description: "only this topic, by its path, from board_topics; omit for every topic" }, scope: scopeInput, format: formatInput } },
       async run(ctx, { pattern, topic, scope, format }) {
         const b = board(ctx, scope);
-        const re = new RegExp(pattern, "i");
+        let re;
+        try {
+          re = new RegExp(pattern, "i");
+        } catch (err) {
+          throw new Error(`${pattern} isn't a regular expression (${err.message}): escape ( [ * + ? with \\, or search for plain words`);
+        }
         if (topic !== undefined) await find(b, topic);
         const rows = topic === undefined ? await b.query("select * from posts order by time, n") : await b.query("select * from posts where topic = ? order by n", [topic]);
         const hits = rows.filter((r) => re.test(r.text));
@@ -500,6 +519,10 @@ The board's rules, which every agent follows and anyone may change with board_ru
     main: {
       title: "Board",
       html: `
+<style>
+  .action-row { color: var(--tint); cursor: pointer; }
+  .field { flex: 1; min-width: 0; font: inherit; border: 0; outline: none; background: none; color: var(--text); padding: 0; }
+</style>
 <div id="list"></div>
 <script>
 async function show() {
@@ -516,9 +539,51 @@ async function show() {
       <div class="chev">›</div>
     </a>\`;
   };
+  const rest = topics.slice(1);
   return \`<div class="list">\${row(topics[0])}</div>
      <h2 class="section">Topics</h2>
-     <div class="list">\${topics.slice(1).map(row).join("") || '<div class="empty">No topics yet</div>'}</div>\`;
+     \${rest.length ? \`<div class="list">\${rest.map(row).join("")}<a class="row plain action-row" onclick="create()">New Topic</a></div>\`
+       : one.empty("A topic keeps posts about one thing together.", { label: "New Topic", run: () => create() })}\`;
+}
+// A topic's name as the board keeps it: lowercase words joined by -, nested with /.
+const slug = (s) => s.trim().toLowerCase().replace(/[^a-z0-9/]+/g, "-").replace(/\\/+/g, "/").replace(/(^|\\/)-+|-+(?=\\/|$)/g, "$1").replace(/^\\/+|\\/+$/g, "");
+function create() {
+  const sheet = one.sheet({ title: "New Topic", done: "Cancel" });
+  sheet.body.innerHTML = \`<div class="list"><label class="row plain"><input class="field" id="name" placeholder="Name, like kitchen-reno" autocomplete="off" autocapitalize="none"></label>
+    <label class="row plain"><input class="field" id="about" placeholder="What it's for" autocomplete="off" enterkeyhint="done"></label></div>
+    <p class="footer" id="note"></p><div style="text-align:center;margin-top:18px"><button class="button primary" id="go" disabled>Create</button></div>\`;
+  const $ = (id) => sheet.body.querySelector("#" + id), name = $("name"), about = $("about"), go = $("go"), note = $("note");
+  let force = false;
+  const check = () => {
+    go.disabled = !slug(name.value) || !about.value.trim();
+    note.className = "footer";
+    note.textContent = slug(name.value) && slug(name.value) !== name.value.trim() ? "It'll be called " + slug(name.value) + "." : "";
+    force = false;
+    go.textContent = "Create";
+  };
+  name.oninput = about.oninput = check;
+  about.onkeydown = (e) => e.key === "Enter" && !go.disabled && go.click();
+  go.onclick = async () => {
+    go.disabled = true;
+    const topic = slug(name.value);
+    try {
+      await one.call("create", { topic, description: about.value.trim(), ...(force ? { force } : {}), ...(one.scope ? { scope: one.scope } : {}) });
+      sheet.close();
+      one.tap("success");
+      one.open("topic", { path: topic });
+    } catch (e) {
+      // A topic like it already: say which, and let them make theirs anyway.
+      const like = String(e.message || "").split("\\n").slice(1).map((l) => l.trim().split(" — ")[0]).filter((l) => /^[a-z0-9-/]+$/.test(l));
+      note.className = "footer error";
+      if (like.length) {
+        note.textContent = "There's already " + like.join(" and ") + ". Use " + (like.length > 1 ? "one of them" : "it") + ", or create yours anyway.";
+        force = true;
+        go.textContent = "Create Anyway";
+      } else note.textContent = one.plain(String(e.message || e).replace(/^Not created: /, "")).title;
+      go.disabled = false;
+    }
+  };
+  setTimeout(() => name.focus(), 50);
 }
 const draw = () => one.render("#list", show, { loading: "Loading topics" });
 one.on("changed", draw);
@@ -538,22 +603,29 @@ draw();
 const path = one.params.path || "";
 one.title(path || "Top of the board");
 document.getElementById("text").placeholder = "Post to " + (path || "the top");
-async function show() {
-  const r = await one.call("read", { format: "json", ...(path ? { topic: path } : {}), ...(one.scope ? { scope: one.scope } : {}) });
-  document.getElementById("about").textContent = r.description || "";
+// Posts being sent show at once, greyed until the board has them.
+const sending = [];
+let posts = [];
+function feed() {
   let html = "", last = null;
-  for (const p of r.posts) {
+  for (const p of [...posts, ...sending]) {
     const day = new Date(p.time).toDateString();
     if (!last || new Date(last.time).toDateString() !== day) html += \`<div class="day">\${new Date(p.time).toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" })}</div>\`;
     const same = last && last.user === p.user && last.credit === p.credit && p.time - last.time < 10 * 60000;
+    const cls = p.sending ? " sending" : "";
     html += same
-      ? \`<div class="post more"><div class="text">\${one.esc(p.text)}</div></div>\`
-      : \`<div class="post">\${one.avatar(p.user, p.name)}<div><div class="who">\${one.esc(p.credit || p.name)}<span class="when">\${one.ago(p.time)}</span></div><div class="text">\${one.esc(p.text)}</div></div></div>\`;
+      ? \`<div class="post more\${cls}"><div class="text">\${one.esc(p.text)}</div></div>\`
+      : \`<div class="post\${cls}">\${one.avatar(p.user, p.name)}<div><div class="who">\${one.esc(p.credit || p.name)}<span class="when">\${p.sending ? "Sending…" : one.ago(p.time)}</span></div><div class="text">\${one.esc(p.text)}</div></div></div>\`;
     last = p;
   }
-  document.getElementById("feed").innerHTML = html || '<div class="empty">No posts yet</div>';
-  window.scrollTo(0, document.body.scrollHeight);
+  return html || '<div class="empty">No posts yet</div>';
 }
+const show = () => one.render("#feed", async () => {
+  const r = await one.call("read", { format: "json", ...(path ? { topic: path } : {}), ...(one.scope ? { scope: one.scope } : {}) });
+  document.getElementById("about").textContent = r.description || "";
+  posts = r.posts;
+  return feed();
+}, { skeleton: "text" }).then(() => pinned && window.scrollTo(0, document.body.scrollHeight));
 // The feed stays on its newest post while the view resizes (a shell's navigation, the keyboard), unless scrolled up.
 let pinned = true;
 addEventListener("scroll", () => { pinned = innerHeight + scrollY >= document.body.scrollHeight - 40; });
@@ -563,14 +635,26 @@ const text = document.getElementById("text"), send = document.getElementById("se
 text.oninput = () => { send.disabled = !text.value.trim(); error.textContent = ""; };
 document.getElementById("form").onsubmit = async (e) => {
   e.preventDefault();
+  const said = text.value;
+  if (!said.trim()) return;
+  const me = one.me || {};
+  const mine = { text: said, user: me.user, name: me.user_name, credit: [me.agent, me.user_name].filter(Boolean).join(" · "), time: Date.now(), sending: true };
+  sending.push(mine);
+  text.value = "";
   send.disabled = true;
+  pinned = true;
+  const draw = () => { document.getElementById("feed").innerHTML = document.getElementById("feed").__html = feed(); window.scrollTo(0, document.body.scrollHeight); };
+  draw();
   try {
-    await one.call("post", { text: text.value, ...(path ? { topic: path } : {}), ...(one.scope ? { scope: one.scope } : {}) });
-    text.value = "";
-    show();
+    await one.call("post", { text: said, ...(path ? { topic: path } : {}), ...(one.scope ? { scope: one.scope } : {}) });
+    sending.splice(sending.indexOf(mine), 1);
+    await show();
   } catch (err) {
-    error.textContent = err.message;
-    send.disabled = false;
+    sending.splice(sending.indexOf(mine), 1);
+    draw();
+    if (!text.value) text.value = said;
+    send.disabled = !text.value.trim();
+    error.textContent = one.plain(err).title;
   }
 };
 one.on("changed", show);
@@ -607,8 +691,8 @@ show();
           [only || "", only || "", only || "", from || "everyone", from || "everyone", many],
         );
         if (!posts.length) return { t: "text", text: only ? `Nothing in ${only} yet` : "Nothing on the board yet", size: "sm", tone: "muted" };
-        // Who wrote it: the agent and its machine, or the person.
-        const who = (p) => (p.agent ? `${p.agent} · ${p.name}` : p.user_name || p.name);
+        // Who wrote it: the person, and their agent when one did.
+        const who = (p) => [p.agent, p.user_name || p.name].filter(Boolean).join(" · ");
         const topic = (p) => (p.topic || "top").split("/").pop();
         const link = (p) => ({ screen: "topic", params: { path: p.topic || "" } });
         if (ctx.size === "small") {

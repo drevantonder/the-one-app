@@ -53,7 +53,56 @@ pub struct FromClient(pub crate::entry::Key);
 
 /// Serves the local API on `listener`, knowing each request's peer, which `from_this_machine` checks.
 pub async fn serve(listener: tokio::net::TcpListener, router: Router) -> std::io::Result<()> {
-    axum::serve(listener, router.into_make_service_with_connect_info::<std::net::SocketAddr>()).await
+    serve_until(listener, router, std::future::pending()).await
+}
+
+/// `serve`, until `stop`: then it takes no more connections, and returns once those it has are answered, or after
+/// `handoff::drain_within`. As a node hands over, it stops taking connections at once, leaving them to the next, and
+/// its answers say to close theirs for five seconds before it closes those left, so clients that keep one (the
+/// gateway's, through the tunnel, whose closing reaches it late) don't send on a closed one.
+pub async fn serve_until(listener: tokio::net::TcpListener, router: Router, stop: impl std::future::Future<Output = ()> + Send + 'static) -> std::io::Result<()> {
+    let (stopped, after) = tokio::sync::oneshot::channel::<()>();
+    let router = router.layer(axum::middleware::map_response(|mut resp: Response| async move {
+        if crate::handoff::stopped() {
+            resp.headers_mut().insert(axum::http::header::CONNECTION, axum::http::HeaderValue::from_static("close"));
+        }
+        resp
+    }));
+    // Tapped only so its connections still say their peer.
+    let listener = axum::serve::ListenerExt::tap_io(UntilHandover(listener), |_| {});
+    let serving = axum::serve(listener, router.into_make_service_with_connect_info::<std::net::SocketAddr>()).with_graceful_shutdown(async move {
+        stop.await;
+        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+        let _ = stopped.send(());
+    });
+    let serving = std::future::IntoFuture::into_future(serving);
+    let deadline = async {
+        let _ = after.await;
+        tokio::time::sleep(crate::handoff::drain_within()).await;
+    };
+    tokio::select! {
+        served = serving => served,
+        _ = deadline => Ok(()),
+    }
+}
+
+/// A listener that stops taking connections once the node hands over, for the next one to take.
+struct UntilHandover(tokio::net::TcpListener);
+
+impl axum::serve::Listener for UntilHandover {
+    type Io = tokio::net::TcpStream;
+    type Addr = std::net::SocketAddr;
+
+    async fn accept(&mut self) -> (Self::Io, Self::Addr) {
+        tokio::select! {
+            accepted = axum::serve::Listener::accept(&mut self.0) => accepted,
+            _ = crate::handoff::stopping() => std::future::pending().await,
+        }
+    }
+
+    fn local_addr(&self) -> std::io::Result<Self::Addr> {
+        self.0.local_addr()
+    }
 }
 
 /// An HTTP client for this machine's programs, asking the node as one (`as_this_machine`).
@@ -95,7 +144,6 @@ pub fn routes() -> Router<Node> {
         .route("/v1/call", post(call).layer(axum::extract::DefaultBodyLimit::max(64 << 20)))
         .route("/v1/widgets", get(widgets))
         .route("/v1/badges", get(badges))
-        .route("/v1/icons", get(icons))
         .route("/v1/create", post(create))
         .route("/v1/pair", post(pair))
         .route("/v1/join", post(join))
@@ -165,7 +213,6 @@ pub const SIGNED_IN: &[&str] = &[
     "/v1/call",
     "/v1/widgets",
     "/v1/badges",
-    "/v1/icons",
     "/v1/screens/{app}/{screen}",
     "/v1/client-screens/{name}",
     "/v1/blobs/{hash}",
@@ -223,13 +270,6 @@ async fn skill_file(State(node): State<Node>, Path((name, path)): Path<(String, 
         Some(text) => markdown(text),
         None => (StatusCode::NOT_FOUND, "no such skill or file").into_response(),
     }
-}
-
-/// Phosphor's icons, which apps name for their tiles, screens and widgets (vendor/phosphor): each as its path on a
-/// 256-point grid, drawn filled. They change only with a release.
-async fn icons() -> Response {
-    let headers = [(axum::http::header::CONTENT_TYPE, "application/json"), (axum::http::header::CACHE_CONTROL, "max-age=86400")];
-    (headers, include_str!("../vendor/phosphor/icons.json")).into_response()
 }
 
 /// The local API's port.
@@ -600,10 +640,9 @@ async fn arrange(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> R
     done()
 }
 
-async fn schedule(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
-    let me = local(&node)?;
-    let scope = node.scope_for(&me, body["scope"].as_str().unwrap_or("user"))?;
-    node.switch_schedule(&me, text(&body, "app")?, text(&body, "schedule")?, &scope, body["on"] != false).await?;
+async fn schedule(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
+    let scope = node.scope_for(&me.caller, body["scope"].as_str().unwrap_or("user"))?;
+    node.switch_schedule(&me.caller, text(&body, "app")?, text(&body, "schedule")?, &scope, body["on"] != false).await?;
     done()
 }
 
@@ -976,5 +1015,7 @@ async fn events(State(node): State<Node>) -> Sse<impl tokio_stream::Stream<Item 
     let stream = BroadcastStream::new(node.subscribe())
         .filter_map(|e| e.ok())
         .map(|e| Ok(SseEvent::default().json_data(e).unwrap_or_default()));
+    // Ended as the node hands over, so its client asks the new one.
+    let stream = futures_util::StreamExt::take_until(stream, Box::pin(crate::handoff::stopping()));
     Sse::new(stream).keep_alive(KeepAlive::default())
 }

@@ -26,7 +26,9 @@ impl Node {
     /// or says to go elsewhere.
     pub(super) async fn route(&self, req: CallRequest, me: Caller) -> Result<Value> {
         let mut req = self.resolve(req);
-        req.id.get_or_insert_with(new_id);
+        // A client's own id, so a call it sends again runs once, names its lease in the bucket: only a short word.
+        let id = req.id.get_or_insert_with(new_id);
+        ensure!(id.len() <= 64 && !id.is_empty() && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_'), "a call's id is up to 64 letters, digits, - and _");
         if req.device.as_deref() == Some("all") {
             return self.everywhere(req, me).await;
         }
@@ -53,9 +55,9 @@ impl Node {
             }
         }
         if why.is_empty() {
-            bail!("no device runs {} for you", req.app);
+            bail!("None of your devices can do this: no device runs {} for you", req.app);
         }
-        bail!("no device could run it ({})", why.join("; "))
+        bail!("None of your devices can do this now. Try again soon. ({})", why.join("; "))
     }
 
     /// Runs a sidecar's call on every device that runs it for the caller, one at a time: `{ <device>: answer }`, or
@@ -76,7 +78,7 @@ impl Node {
             };
             out.insert(self.name_of(&device), answer);
         }
-        ensure!(!out.is_empty(), "no device runs {} for you", req.app);
+        ensure!(!out.is_empty(), "None of your devices can do this: no device runs {} for you", req.app);
         Ok(Value::Object(out))
     }
 
@@ -189,7 +191,8 @@ impl Node {
                 other => other.map(Reply::Ok),
             };
         }
-        let prepared = self.with(|i| prepare(self, i, req, me));
+        let title = self.title(&req.app).await;
+        let prepared = self.with(|i| prepare(self, i, req, me, &title));
         let (ctx, scopes) = match prepared? {
             Ok(p) => p,
             Err(why) => return Ok(Reply::Elsewhere(why)),
@@ -200,10 +203,10 @@ impl Node {
         let deployed_here = self.0.bundles.lock().unwrap().get(&req.app).cloned();
         let latest = self.with(|i| Ok(i.r.members.apps.get(&req.app).and_then(|a| a.bundle.clone())))?;
         if deployed_here.is_none() || deployed_here != latest {
-            return Ok(Reply::Elsewhere(format!("it doesn't have {}'s latest deploy yet", req.app)));
+            return Ok(Reply::Elsewhere(format!("it doesn't have {}'s latest version yet", req.app)));
         }
         if self.deleted(&req.app) {
-            return Ok(Reply::Error(format!("{} was deleted: its owners can restore it from Recently Deleted in the App Store", req.app)));
+            return Ok(Reply::Error(format!("{title} was deleted: its owners can restore it from Recently Deleted in the App Store")));
         }
         if let Some(why) = self.stopped(&req.app) {
             self.record(&req.app, req, me, Some(&why));
@@ -221,7 +224,7 @@ impl Node {
             let reads = self.0.apps.describe(&req.app).await?["ops"].as_array().into_iter().flatten().any(|o| o["name"] == req.op.as_str() && o["reads"] == true);
             let lease = format!("{}/{}/calls/{id}", crate::bucket::folder(&scope.to_string()), req.app);
             if !reads && !crate::bucket::Bucket::create(&self.bucket()?, &lease, hex(&self.0.id).as_bytes()).await? {
-                return Ok(Reply::Error("it ran on another device already, whose answer was lost: look before trying again".into()));
+                return Ok(Reply::Error("This may already be done: it ran on another device, whose answer was lost. Check before trying again.".into()));
             }
         }
         let mut ctx = ctx;
@@ -370,6 +373,13 @@ impl Node {
             }
         }
         let schedules_changed = appends.iter().any(|a| matches!(a, Append::Install { .. } | Append::Switch { .. }));
+        let scheduling: Vec<String> = appends
+            .iter()
+            .filter_map(|a| match a {
+                Append::Switch { app, on: true, .. } | Append::Install { app, installed: true, .. } => Some(app.clone()),
+                _ => None,
+            })
+            .collect();
         let (installs, appends): (Vec<_>, Vec<_>) = appends.into_iter().partition(|a| matches!(a, Append::Install { .. }));
         let (execs, appends): (Vec<_>, Vec<_>) = appends.into_iter().partition(|a| matches!(a, Append::Exec { .. }));
         let (items, appends): (Vec<_>, Vec<_>) = appends.into_iter().partition(|a| matches!(a, Append::Vault { .. }));
@@ -391,8 +401,13 @@ impl Node {
         }
         let mut writes = Vec::new();
         for append in appends {
-            writes.push(self.with(|i| check_append(i, append, scopes, me))?);
+            let title = match &append {
+                Append::Switch { app, .. } | Append::Retire { app, .. } | Append::Source { app, .. } => self.title(app).await,
+                _ => String::new(),
+            };
+            writes.push(self.with(|i| check_append(i, append, scopes, me, &title))?);
         }
+        self.may_schedule(me, &scheduling.iter().map(String::as_str).collect::<Vec<_>>()).await?;
         let wrote = !statements.is_empty();
         for (scope, list, kept) in statements {
             let (db, bucket) = self.call_database(me, &scope, app, DATABASE, None).await?;
@@ -448,7 +463,7 @@ impl Node {
     pub(super) async fn run_sidecar(&self, app: &str, op: &str, input: Value, me: &Caller, from: Option<String>) -> Result<Value> {
         let everyone = self.0.sidecars.serves_everyone(app) && self.with(|i| Ok(i.r.members.serves(&self.0.id, &me.user)))?;
         let user = if everyone { me.user.clone() } else { self.user()? };
-        ensure!(me.user == user, "{app} runs only for {}'s own user", self.device_name());
+        ensure!(me.user == user, "{} runs only for {}'s own user", self.sidecar_title(app), self.device_name());
         let caller = self.me_for(me)?;
         // An app's call has the fields of the items it's switched on for filled in, a secret one only for a sidecar
         // named among its item's hosts, and blotted out of the answer.
@@ -560,7 +575,7 @@ impl Node {
         };
         if tripped {
             let what = if kind == "call" { "called other apps" } else { "ran its schedules" };
-            let why = format!("{app} {what} more than {RATE_LIMIT} times in a minute on {}, so it was stopped there: is it looping? It runs again once it's deployed again, or in {} minutes.", self.device_name(), STOPPED_FOR / 60_000);
+            let why = format!("{} {what} more than {RATE_LIMIT} times in a minute on {}, so it was stopped there: is it looping? It runs again once it's deployed again, or in {} minutes.", self.title(app).await, self.device_name(), STOPPED_FOR / 60_000);
             let bundle = self.with(|i| Ok(i.r.members.apps.get(app).and_then(|a| a.bundle.clone()))).ok().flatten();
             self.0.guard.lock().unwrap().stopped.insert(app.to_string(), (why.clone(), now_ms() + STOPPED_FOR, bundle));
             tracing::warn!("{why}");
@@ -702,6 +717,7 @@ impl Node {
                 ok(json!({}))
             }
             ("GET", "/catalog") => ok(json!(self.catalog(&grant.caller, true).await?)),
+            ("GET", "/failing") => ok(json!(self.failing_schedules(&grant.caller).await?)),
             // A push to the caller's phones, from this app: the install delivers it through the sidecar its `push`
             // setting names, wherever that runs (the device with Apple's push key); with push off, it isn't sent.
             ("POST", "/notify") => {
@@ -825,7 +841,7 @@ impl Node {
 }
 
 /// Checks a call may run here, and makes its context; or says why it should run elsewhere.
-fn prepare(node: &Node, i: &Install, req: &CallRequest, me: &Caller) -> Result<std::result::Result<(Context, Vec<Scope>), String>> {
+fn prepare(node: &Node, i: &Install, req: &CallRequest, me: &Caller, title: &str) -> Result<std::result::Result<(Context, Vec<Scope>), String>> {
     let m = &i.r.members;
     let here = node.0.id;
     if !m.serves(&here, &me.user) {
@@ -838,17 +854,17 @@ fn prepare(node: &Node, i: &Install, req: &CallRequest, me: &Caller) -> Result<s
             let mut out = Vec::new();
             for s in named {
                 let s = if s == "user" { Scope::User(me.user.clone()) } else { Scope::parse(s)? };
-                ensure!(reach.contains(&s), "{} can't reach {s} for you", req.app);
+                ensure!(reach.contains(&s), "{title} can't reach {} for you", scope_name(i, &s.to_string()));
                 out.push(s);
             }
             out
         }
     };
     if reach.is_empty() {
-        bail!("{} isn't installed for you", req.app);
+        bail!("{title} isn't on your pages: add it first");
     }
     if let Some(s) = scopes.iter().find(|s| !i.r.holds(s)) {
-        return Ok(Err(format!("{} doesn't hold {s}", node.device_name())));
+        return Ok(Err(format!("it can't open {} yet", scope_name(i, &s.to_string()))));
     }
     let ctx = Context { me: node_me(node, m, me), now: now_ms(), scopes: handles(m, &scopes, &me.user), read_only: false, token: String::new(), from: None };
     Ok(Ok((ctx, scopes)))

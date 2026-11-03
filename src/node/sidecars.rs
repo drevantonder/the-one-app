@@ -59,7 +59,7 @@ impl Node {
             let m = &i.r.members;
             Ok(m.sidecars.get(&(self.0.id, name.to_string())).filter(|d| d.removed()).map(|d| {
                 let by = m.users.get(&d.by).map(|u| u.name.as_str()).unwrap_or("an owner");
-                format!("{name} was removed from {} by {by}; an owner of it installs it again", self.device_name())
+                format!("{} was removed from {} by {by}; an owner of it installs it again", self.sidecar_title(name), self.device_name())
             }))
         })
         .ok()
@@ -68,17 +68,6 @@ impl Node {
 
     pub(super) fn runs_sidecar_here(&self, app: &str) -> bool {
         (self.0.built_in_sidecars.iter().any(|n| n.name == app) || self.0.sidecars.has(app)) && self.removed_here(app).is_none()
-    }
-
-    /// The picture a sidecar called `name` gives, here or on a device this one is connected to, and its kind.
-    pub(super) fn sidecar_image(&self, name: &str) -> Option<(Value, Value)> {
-        self.with(|i| {
-            let here = self.sidecars_here(i).into_iter().map(|d| d.2);
-            let there = i.peers.iter().filter(|(k, _)| i.online(k)).flat_map(|(_, s)| s.sidecars.iter().map(|d| d.2.clone()));
-            Ok(here.chain(there).find(|d| d["name"] == name && d["image"].is_string()).map(|d| (d["image"].clone(), d["image_kind"].clone())))
-        })
-        .ok()
-        .flatten()
     }
 
     /// Every entry a built-in sidecar has in the local user's scope, oldest first.

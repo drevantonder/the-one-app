@@ -29,7 +29,6 @@ val json = Json { ignoreUnknownKeys = true; explicitNulls = false; coerceInputVa
 data class Config(
     val name: String,
     val cli: String,
-    val accent: String,
 )
 
 /** `GET /v1/state`: who this is, and the install. */
@@ -37,7 +36,6 @@ data class Config(
 data class NodeState(
     val config: Config,
     @SerialName("me") val machine: Machine,
-    @SerialName("device") val host: Machine? = null,
     val user: Person? = null,
     val install: Install? = null,
 )
@@ -58,7 +56,6 @@ data class Person(
 data class Install(
     val name: String,
     val groups: List<GroupInfo>,
-    val devices: List<Device>,
 )
 
 @Serializable
@@ -73,13 +70,6 @@ data class GroupMember(
     val user: String,
 )
 
-@Serializable
-data class Device(
-    val key: String,
-    val name: String,
-    val build: String? = null,
-)
-
 /** An app as `GET /v1/apps` describes it: what names its screens and draws its icon on the home screen's widgets. */
 @Serializable
 data class AppInfo(
@@ -87,6 +77,9 @@ data class AppInfo(
     val title: String? = null,
     val icon: String? = null,
     val color: String? = null,
+    /** An external brand's logo or app icon (a data URL), drawn in place of a glyph: `image_kind` "icon" fills the tile. */
+    val image: String? = null,
+    @SerialName("image_kind") val imageKind: String? = null,
     val screens: List<AppScreenInfo>? = null,
     /** The scopes it's installed in that this person may use: `user:<id>`, `group:<id>`, `global`. */
     val installed: List<String>? = null,

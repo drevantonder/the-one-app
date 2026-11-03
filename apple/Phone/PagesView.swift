@@ -24,13 +24,17 @@ struct PagesView: View {
                 }
                 .scrollTargetLayout()
             }
+            // Made again when the pages first come, at the page a link may have turned to before them: else it stays
+            // where Settings was alone, the first page now, its dots still saying Settings.
+            .id(store.pages.isEmpty)
             .scrollTargetBehavior(.paging)
             .scrollIndicators(.hidden)
             .scrollPosition(id: $position)
             .scrollClipDisabled()
             .onChange(of: position) { if let position, position != settingsID, position != store.current { store.current = position } }
             .onChange(of: store.current, initial: true) { if position != store.current { withAnimation(.snappy) { position = store.current } } }
-            .safeAreaBar(edge: .bottom) { BottomBar(position: $position).padding(.bottom, 2) }
+            // Hidden till the pages come, not a flash of Settings' name.
+            .safeAreaBar(edge: .bottom) { BottomBar(position: $position).padding(.bottom, 2).opacity(store.pages.isEmpty ? 0 : 1) }
             // As on the Home Screen, Edit and Done take the status bar's place, either side of the Dynamic Island.
             .overlay(alignment: .top) {
                 if store.editing && position != settingsID { EditBar(page: store.page(store.current)).padding(.top, 14).ignoresSafeArea(edges: .top) }
@@ -41,39 +45,50 @@ struct PagesView: View {
             .navigationDestination(for: Route.self) { route in
                 RouteView(route: route, open: open)
                     .navigationBarTitleDisplayMode(.inline)
-                    .background(Color(.systemGroupedBackground))
             }
             .overlay {
                 if store.install?.joining == true {
                     ProgressView("Joining…").padding(24).background(.regularMaterial, in: .rect(cornerRadius: 18))
-                } else if store.state == nil, case .unreachable(let message) = store.phase {
-                    ContentUnavailableView {
-                        Label("Can’t Reach Your Devices", systemImage: "bolt.horizontal.circle")
-                    } description: {
-                        Text(message)
-                    } actions: {
-                        Text("It keeps trying.").foregroundStyle(.secondary)
-                    }
-                    .background(.regularMaterial)
                 } else if store.state == nil {
-                    ProgressView()
+                    // A spinner only after a moment; can't reach only once it's been trying a while, not a first miss.
+                    Later(.milliseconds(400)) { ProgressView() }
+                    Later(.seconds(3)) {
+                        if case .unreachable(let message) = store.phase {
+                            ContentUnavailableView {
+                                Label("Can’t Reach Your Devices", systemImage: "bolt.horizontal.circle")
+                            } description: {
+                                Text(message)
+                            } actions: {
+                                Text("Trying again…").foregroundStyle(.secondary)
+                            }
+                            .background(.regularMaterial)
+                        }
+                    }
                 }
             }
         }
         .screenSheets()
         .sheet(item: $store.sheet) { sheet in
-            switch sheet {
-            case .pages: PagesEditor()
-            case .addWidget(let scope): AddWidgetSheet(scope: scope)
-            case .pair, .join, .services: EmptyView()
-            case .vault(let scope, let id): VaultRequestSheet(scope: scope, id: id)
-            case .ask(let ask): VaultRequestSheet(scope: ask.scope, id: "", ask: ask)
+            Group {
+                switch sheet {
+                case .pages: PagesEditor()
+                case .addWidget(let scope): AddWidgetSheet(scope: scope)
+                case .pair, .join, .services: EmptyView()
+                case .vault(let scope, let id): VaultRequestSheet(scope: scope, id: id)
+                case .ask(let ask): VaultRequestSheet(scope: ask.scope, id: "", ask: ask)
+                }
             }
+            .environment(\.raised, true)
         }
         .onChange(of: store.pages) {
             if store.current != settingsID, !store.pages.contains(where: { $0.scope == store.current }) { store.current = "user" }
         }
         .onChange(of: store.widgets, initial: true) { Task { await store.saveForHomeScreen() } }
+        // The same widgets, fetched again: the home screen's stop saying they're old, without redrawing at every fetch.
+        .onChange(of: store.widgetsFetched) {
+            guard let fetched = store.widgetsFetched, fetched.timeIntervalSince(WidgetCache.load()?.fetched ?? .distantPast) > 600 else { return }
+            Task { await store.saveForHomeScreen() }
+        }
         .onChange(of: scenePhase) {
             if scenePhase == .active { Task { try? await store.refreshState(); await store.refreshApps() } }
             if scenePhase == .background { store.editing = false }
@@ -186,14 +201,16 @@ extension Store {
         let items = pages.flatMap { page in
             widgets(on: page).map { w in
                 WidgetCache.Item(app: w.app, widget: w.widget, scope: page.scope, page: page.title, title: w.title ?? app(w.app)?.label ?? w.widget,
-                                 icon: app(w.app)?.icon ?? "", error: w.error, root: w.root, sizes: w.sizes)
+                                 icon: app(w.app)?.icon ?? "", image: app(w.app)?.image, imageKind: app(w.app)?.imageKind, error: w.error, root: w.root, sizes: w.sizes)
             }
         }
         // Signed in again with no widgets, the home screen's stop saying to sign in.
         guard Phone.nodeURL != nil || Auth.signedIn, !items.isEmpty || WidgetCache.load()?.signedOut == true else { return }
-        WidgetCache(install: install?.name, widgets: items).save()
+        let trees = items.flatMap { [$0.root] + ($0.sizes ?? [:]).values }
+        Icons.keep(Set(items.map(\.icon) + trees.flatMap(\.iconNames)))
+        WidgetCache(install: install?.name, widgets: items, fetched: widgetsFetched).save()
         WidgetCenter.shared.reloadAllTimelines()
-        let images = items.flatMap { [$0.root] + ($0.sizes ?? [:]).values }.flatMap(\.imageURLs)
+        let images = trees.flatMap(\.imageURLs)
         if !images.isEmpty {
             await WidgetImages.save(images)
             WidgetCenter.shared.reloadAllTimelines()

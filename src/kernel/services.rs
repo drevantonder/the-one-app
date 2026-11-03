@@ -409,7 +409,7 @@ impl Settings {
                 plain("RELAY", "service:relay".into());
                 plain("ADDRESS", self.address.clone());
                 plain("NAME", self.name.clone());
-                plain("ACCENT", crate::config::ACCENT.into());
+                plain("YOURS", crate::config::YOURS.into());
                 if let Some((id, name)) = &self.try_person {
                     plain("SIGN_IN", "try".into());
                     plain("TRY_USER", id.clone());
@@ -425,6 +425,9 @@ impl Settings {
             _ => {
                 plain("AUTH", "service:auth".into());
                 plain("ISSUER", issuer);
+                if self.try_person.is_some() {
+                    plain("SIGN_IN", "try".into());
+                }
             }
         }
         if service == "auth" {
@@ -462,8 +465,8 @@ pub fn served_with(settings: &Settings, modules: Vec<Vec<u8>>, web: &Path, serve
             bindings: settings.bindings(name).into_iter().filter(|(_, v, _)| mcp || !v.starts_with("service:mcp") && !v.starts_with("object:mcp:")).map(|(n, v, _)| (n, v)).collect(),
             assets: (*name == "gateway").then(|| web.to_path_buf()),
             // The gateway's node may be on this machine or its private network, as a node behind a tunnel is; a try
-            // install's URL signer reaches its bucket on this machine.
-            outbound: (*name == "gateway" || *name == "signer" && settings.try_person.is_some()).then(|| NEARBY.to_string()),
+            // install's URL signer reaches its bucket on this machine, and its schedules its node.
+            outbound: (*name == "gateway" || matches!(*name, "signer" | "schedules") && settings.try_person.is_some()).then(|| NEARBY.to_string()),
         })
         .chain(node)
         .collect()
@@ -487,17 +490,35 @@ pub fn android_package() -> String {
 }
 
 impl Settings {
-    /// The files the address serves itself: the web client's, as this release has them, and Android's App Links file
+    /// The files the address serves itself: the web client's, as this release has them, Android's App Links file
     /// (`.well-known/assetlinks.json`) and Windows' web links file (`.well-known/windows-app-web-link`), which let the
-    /// apps open links to the address.
+    /// apps open links to the address, and the guide to connecting an AI (`llms.txt`).
     pub fn web(&self) -> Vec<(String, Vec<u8>)> {
         let mut files: Vec<(String, Vec<u8>)> =
             crate::config::KERNEL.iter().filter_map(|(path, bytes)| Some((path.strip_prefix("web/")?.to_string(), bytes.to_vec()))).collect();
-        // The page says whose it is before anyone signs in: the white label's name and accent.
+        // The page says whose it is before anyone signs in: the white label's name.
         let attr = |v: &str| v.replace('&', "&amp;").replace('"', "&quot;").replace('<', "&lt;");
+        files.push(("icons.json".into(), include_bytes!("../../vendor/phosphor/icons.json").to_vec()));
+        // Each file the page loads is named by its content (`?v=`, which the gateway checks), so a browser keeps it for
+        // good and asks again only once it changes: those it names itself, and those web.js asks for (`one-files`).
+        let named = |path: &str, bytes: &[u8]| {
+            use sha2::Digest;
+            format!("/{path}?v={}", &data_encoding::HEXLOWER.encode(&sha2::Sha256::digest(bytes))[..16])
+        };
+        // net.js keeps its own path: web.js imports it as ./net.js, and a second URL would be a second copy of it.
+        let names: Vec<(String, String)> = files.iter().filter(|(path, _)| !["index.html", "sw.js", "net.js"].contains(&path.as_str())).map(|(path, bytes)| (path.clone(), named(path, bytes))).collect();
         if let Some((_, page)) = files.iter_mut().find(|(path, _)| path == "index.html") {
-            let label = format!("<title>{}</title>\n<meta name=\"application-name\" content=\"{}\">\n<meta name=\"theme-color\" content=\"{}\">", attr(crate::config::NAME), attr(crate::config::NAME), attr(crate::config::ACCENT));
-            *page = String::from_utf8_lossy(page).replacen("<title></title>", &label, 1).into_bytes();
+            let mut text = String::from_utf8_lossy(page).into_owned();
+            for (path, name) in &names {
+                text = text.replace(&format!("=\"/{path}\""), &format!("=\"{name}\""));
+            }
+            let asked = names.iter().filter(|(path, _)| ["frame.html", "icons.json"].contains(&path.as_str())).map(|(path, name)| format!("{path}={}", &name[name.len() - 16..])).collect::<Vec<_>>().join(" ");
+            let label = format!(
+                "<title>{}</title>\n<meta name=\"application-name\" content=\"{}\">\n<meta name=\"one-files\" content=\"{asked}\">",
+                attr(crate::config::NAME),
+                attr(crate::config::NAME)
+            );
+            *page = text.replacen("<title></title>", &label, 1).into_bytes();
         }
         // The client that reaches nodes over iroh, at a path named by its build, which the page says (net.js).
         if let Some(version) = client_version() {
@@ -516,6 +537,8 @@ impl Settings {
             files.push((".well-known/assetlinks.json".into(), links.to_string().into_bytes()));
         }
         files.push((".well-known/windows-app-web-link".into(), windows_links()));
+        // How an AI connects itself, for anyone who has the address: never what apps the install has.
+        files.push(("llms.txt".into(), crate::skills::guide(Some(&self.address)).into_bytes()));
         files
     }
 }

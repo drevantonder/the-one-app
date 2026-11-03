@@ -81,6 +81,9 @@ pub fn relay(address: &str, ticket: Option<&str>) -> Result<(RelayUrl, RelayMap)
 impl Node {
     /// Keeps this device's endpoint, once it's a device of an install with an address.
     pub(super) fn follow_net(&self) {
+        if super::HANDING_OVER.load(std::sync::atomic::Ordering::SeqCst) {
+            return;
+        }
         self.tell_removed();
         let wanted = self.with(|i| Ok(i.r.members.compute(&self.0.id).and(i.r.members.settings.get("address").cloned()))).ok().flatten();
         let mut task = self.0.net.task.lock().unwrap();
@@ -97,6 +100,17 @@ impl Node {
         if let Some(address) = wanted {
             *task = Some((address.clone(), tokio::spawn(self.clone().keep_net(address))));
         }
+    }
+
+    /// Closes this device's endpoint, for good: the node taking over from this one has its own.
+    pub(super) fn close_net(&self) {
+        if let Some((_, old)) = self.0.net.task.lock().unwrap().take() {
+            old.abort();
+        }
+        if let Some((_, endpoint)) = self.0.net.endpoint.lock().unwrap().take() {
+            tokio::spawn(async move { endpoint.close().await });
+        }
+        self.0.net.conns.lock().unwrap().clear();
     }
 
     /// Where this device's endpoint is reached now: its key, its relay and the addresses it's bound to, once it has one.

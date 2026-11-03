@@ -17,8 +17,8 @@ const PLATFORMS: [&str; 3] = ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux
 
 /// Builds the tip of main and has every device run it; with a tag, also publishes it on GitHub.
 /// An update sends out only what changed since the last one here: apps by their deploy, the Mac app by each Mac building
-/// it in the background, and the node by building it, which every Linux device then takes, and which deploys the kernel
-/// (and the serverless node with it) from the device with the kernel's settings. Beside it runs `after-update` in this
+/// it at once, then the iPhone app for the iPhone it reaches, and the node by building it, which every Linux device then
+/// takes, and which deploys the kernel (and the serverless node with it) from the device with the kernel's settings. Beside it runs `after-update` in this
 /// device's home, if there is one: what else is built from main here, like another white label's update.
 pub fn run(tag: Option<&str>) -> Result<()> {
     ensure!(!REPO.is_empty(), "this white label names no repo, so it has nothing to update from");
@@ -55,10 +55,30 @@ pub fn run(tag: Option<&str>) -> Result<()> {
 
     let sends = parts.node || parts.mac || !parts.apps.is_empty();
     let after = if sends && tag.is_none() { after_update()? } else { None };
-    retire_gone(&src, &parts.apps)?;
+    // The Macs start first, since their builds take longest: an update's in the background, and a release's with what it
+    // publishes, which it waits for.
+    let mut missed = false;
+    let mut started = Vec::new();
+    if tag.is_some() {
+        for mac in &macs {
+            let name = mac["name"].as_str().unwrap_or("");
+            if mac["online"] != true {
+                println!("  {name}: offline; run this again when it's back");
+                continue;
+            }
+            match shell(mac, &mac_job(&commit, config_commit.as_deref()), 60) {
+                Ok(r) if r["exit"] == 0 => started.push((mac.clone(), Instant::now())),
+                Ok(r) => println!("  {name}: couldn't start its build: {}", r["stderr"].as_str().unwrap_or("").trim()),
+                Err(err) => println!("  {name}: couldn't start its build: {err:#}"),
+            }
+        }
+    } else {
+        missed = follow(&macs, &commit, config_commit.as_deref());
+    }
+    let moved = retire_gone(&src, &parts)?;
     if !parts.node {
         deploy_apps(&src, &parts.apps)?;
-        let missed = follow(&macs, &commit, config_commit.as_deref());
+        add_where(&moved);
         if !sends {
             println!("Nothing to send out: what changed since the last update here isn't in any build.");
         }
@@ -79,26 +99,6 @@ pub fn run(tag: Option<&str>) -> Result<()> {
     build.env("CLIENT", client(&src, &config).context("couldn't build the web client's WebAssembly, so nothing was sent out")?);
     run_quiet(&mut build)?;
 
-    // An update's Macs build in the background, and a release's build it with what it publishes, which it waits for.
-    let mut missed = false;
-    let mut started = Vec::new();
-    if tag.is_some() {
-        for mac in &macs {
-            let name = mac["name"].as_str().unwrap_or("");
-            if mac["online"] != true {
-                println!("  {name}: offline; run this again when it's back");
-                continue;
-            }
-            match shell(mac, &mac_job(&commit, config_commit.as_deref()), 60) {
-                Ok(r) if r["exit"] == 0 => started.push((mac.clone(), Instant::now())),
-                Ok(r) => println!("  {name}: couldn't start its build: {}", r["stderr"].as_str().unwrap_or("").trim()),
-                Err(err) => println!("  {name}: couldn't start its build: {err:#}"),
-            }
-        }
-    } else {
-        missed = follow(&macs, &commit, config_commit.as_deref());
-    }
-
     let binary = src.join("target/release").join(env!("CARGO_BIN_NAME"));
     // The build devices say they run: main's commit, and a white label's config's.
     let version: Value = serde_json::from_slice(&Command::new(&binary).args(["version", "--json"]).output()?.stdout).context("ask the new build what it is")?;
@@ -117,6 +117,7 @@ pub fn run(tag: Option<&str>) -> Result<()> {
         failed = true;
         println!("  couldn't deploy the new versions of the built-in apps: {err:#}");
     }
+    add_where(&moved);
     let kernel_failed = deploy_kernel(&linux, short);
 
     let Some(tag) = tag else {
@@ -183,11 +184,13 @@ struct Parts {
     mac: bool,
     /// Built-in apps, by name, each deployed on its own.
     apps: Vec<String>,
+    /// Built-in apps renamed: (old name, new name).
+    renamed: Vec<(String, String)>,
 }
 
 impl Parts {
     fn everything() -> Parts {
-        Parts { node: true, mac: true, apps: Vec::new() }
+        Parts { node: true, mac: true, ..Default::default() }
     }
 
     /// What changed from the commit `last` says (and its config's) to `this`'s.
@@ -196,10 +199,24 @@ impl Parts {
         if was_config != now_config {
             return Parts::everything();
         }
-        match git(src, &["diff", "--name-only", was, now]) {
-            Ok(files) => Parts::of(files.lines()),
-            Err(_) => Parts::everything(),
+        // Without renames, so a renamed app's old folder is in it too.
+        let (Ok(files), Ok(renames)) = (git(src, &["diff", "--name-status", "--no-renames", was, now]), git(src, &["diff", "--name-status", "-M", "--diff-filter=R", was, now, "--", "apps/*/app.js"])) else {
+            return Parts::everything();
+        };
+        let mut parts = Parts::of(files.lines().filter_map(|l| l.split_once('\t')).map(|(_, f)| f));
+        // A new built-in app is in the node's next build, which adds it.
+        if files.lines().any(|l| l.strip_prefix("A\tapps/").is_some_and(|f| f.ends_with("/app.js") && f.matches('/').count() == 1)) {
+            (parts.node, parts.mac) = (true, true);
         }
+        let app = |f: &str| f.split('/').nth(1).unwrap_or("").to_string();
+        parts.renamed = renames
+            .lines()
+            .filter_map(|l| {
+                let mut f = l.split('\t').skip(1);
+                Some((app(f.next()?), app(f.next()?)))
+            })
+            .collect();
+        parts
     }
 
     /// What changing `files` (paths in the repo) has to send out. Anything not known to be outside the node is in it.
@@ -242,18 +259,39 @@ fn run_quiet(cmd: &mut Command) -> Result<()> {
     Ok(())
 }
 
-/// Deletes the built-in apps named whose folder is gone from `src`, renamed or removed, where the install still has
+/// Deletes the built-in apps changed whose folder is gone from `src`, renamed or removed, where the install still has
 /// them: they'd stay as apps no release ships. They wait in Recently Deleted, where an admin could restore one.
-fn retire_gone(src: &Path, names: &[String]) -> Result<()> {
+/// Gives each renamed one's new name, with where the old one was installed.
+fn retire_gone(src: &Path, parts: &Parts) -> Result<Vec<(String, Vec<String>)>> {
+    let mut moved = Vec::new();
     for app in get("/v1/apps")?.as_array().into_iter().flatten() {
-        let Some(name) = app["name"].as_str().filter(|n| names.iter().any(|m| m == n)) else { continue };
+        let Some(name) = app["name"].as_str().filter(|n| parts.apps.iter().any(|m| m == n)) else { continue };
         let built_in = app["owner"] == "admins" && app["from"].is_null();
         if built_in && app["deleted"].is_null() && !src.join("apps").join(name).join("app.js").is_file() {
             post("/v1/retire", json!({ "app": name, "how": "deleted" }))?;
-            println!("Deleted {name}: its folder is gone from apps/, so no release ships it");
+            match parts.renamed.iter().find(|(old, _)| old == name) {
+                Some((_, new)) => {
+                    println!("Deleted {name}: it's {new} now");
+                    let scopes = app["installed"].as_array().into_iter().flatten().filter_map(|s| s.as_str().map(str::to_string)).collect();
+                    moved.push((new.clone(), scopes));
+                }
+                None => println!("Deleted {name}: its folder is gone from apps/, so no release ships it"),
+            }
         }
     }
-    Ok(())
+    Ok(moved)
+}
+
+/// Adds each renamed built-in app where its old name was installed.
+fn add_where(moved: &[(String, Vec<String>)]) {
+    for (app, scopes) in moved {
+        for scope in scopes {
+            match post("/v1/install", json!({ "app": app, "scope": scope, "installed": true })) {
+                Ok(_) => println!("Added {app} to {scope}, where its old name was"),
+                Err(err) => println!("  couldn't add {app} to {scope}: {err:#}"),
+            }
+        }
+    }
 }
 
 /// Deploys the built-in apps named, as they are in `src`, where the install has them.
@@ -279,7 +317,8 @@ fn deploy_apps(src: &Path, names: &[String]) -> Result<()> {
     Ok(())
 }
 
-/// Has each Mac build `commit`'s app in the background, after what it's building now. True if a Mac was missed.
+/// Has each Mac build `commit`'s app now, instead of anything older it's building, then the iPhone app, for the iPhone it
+/// reaches; says what its last builds did. True if a Mac was missed.
 fn follow(macs: &[Value], commit: &str, config_commit: Option<&str>) -> bool {
     let mut missed = false;
     for mac in macs {
@@ -291,12 +330,10 @@ fn follow(macs: &[Value], commit: &str, config_commit: Option<&str>) -> bool {
         }
         match shell(mac, &mac_follow(commit, config_commit), 60) {
             Ok(r) if r["exit"] == 0 => {
-                let out = r["stdout"].as_str().unwrap_or("");
-                if let Some((was, log)) = out.split_once("failed ").and_then(|(_, rest)| rest.split_once('\n')) {
-                    println!("  {name}: its last build, of {}, failed:\n{}", &was[..was.len().min(12)], log.trim_end());
+                // Its report, with logs indented under what they're of.
+                for line in r["stdout"].as_str().unwrap_or("").lines() {
+                    if line.starts_with(' ') { println!("  {line}") } else { println!("  {name}: {line}") }
                 }
-                let now = if out.contains("building") { ", after the build it's on," } else { "" };
-                println!("  {name}: builds {}{now} once ten minutes pass with no newer update, and runs it then", &commit[..12]);
             }
             Ok(r) => {
                 missed = true;
@@ -638,33 +675,89 @@ JOB
     )
 }
 
-/// Shell for a Mac: has it build `commit`'s app next, and install it, in a job in its logged-in session that keeps
-/// building what it's wanted to until it's built the last; says "building" if that job was already running, and how
-/// its last build failed if it did, once.
+/// Shell for a Mac: has it build `commit`'s app now, and install it, then the iPhone app, if what that's made of changed,
+/// for the iPhone, all in one job in its logged-in session: a newer update stops the build it's on and builds that
+/// instead. It installs the iPhone app whenever the phone is reachable, and keeps trying until it is. Says how its last
+/// builds failed, once, and what the iPhone has.
 fn mac_follow(commit: &str, config_commit: Option<&str>) -> String {
+    let short = &commit[..commit.len().min(12)];
     format!(
         r#"set -e
 c="$HOME/Library/Caches/{CLI}"; label=app.{CLI}.update
 mkdir -p "$c"; cd "$c"
 echo "{commit} {config}" > want
-if [ -f failed ]; then printf 'failed %s\n' "$(cat failed)"; tail -n 25 update.log; rm -f failed; fi
+if [ -f failed ]; then echo "its build of $(cut -c1-12 failed) failed:"; sed 's/^/    /' failed.log; rm -f failed; fi
+if [ -f phone.failed ]; then echo "its iPhone build of $(cut -c1-12 phone.failed) failed:"; sed 's/^/    /' phone.failed.log; rm -f phone.failed; fi
+if [ -s phone.built ]; then
+	b=$(cut -c1-12 phone.built)
+	if [ "$(cat phone.built)" = "$(cat phone.installed 2>/dev/null)" ]; then echo "iPhone: installed $b"; else echo "iPhone: not reachable, will install $b when it is"; fi
+fi
+echo "builds {short} now, instead of anything older, then the iPhone app if it changed"
 pid=$(launchctl list | awk -v l="$label" '$3 == l {{ print $1 }}')
-if [ -n "$pid" ] && [ "$pid" != "-" ]; then echo building; exit 0; fi
+if [ -n "$pid" ] && [ "$pid" != "-" ]; then exit 0; fi
 cat > build.sh <<'JOB'
 set -e
 c="$HOME/Library/Caches/{CLI}"
 {checkout}
 CONFIG="$config" apple/build.sh
 JOB
-cat > follow.sh <<'JOB'
+cat > phone.sh <<'JOB'
+set -e
 c="$HOME/Library/Caches/{CLI}"
-while want=$(cat "$c/want") && [ "$want" != "$(cat "$c/built" 2>/dev/null)" ]; do
-	# Pushes come in bursts: it builds the last of them, once none has come for ten minutes, at the background's priority,
-	# so the Mac stays quick to use.
-	sleep 600
-	[ "$want" = "$(cat "$c/want")" ] || continue
-	# launchd runs this in the login shell, zsh on a Mac, which doesn't split "$want" into its commit and config.
-	if taskpolicy -b /bin/sh "$c/build.sh" "${{want%% *}}" "${{want#* }}" > "$c/update.log" 2>&1; then echo "$want" > "$c/built"; else echo "$want" > "$c/failed"; exit 1; fi
+{checkout}
+# Only what the iPhone app is made of: the node isn't in it, and each install closes the app on the phone.
+last=$(cat "$c/phone.built" 2>/dev/null || true)
+if [ "${{last#* }}" = "${{2:-}}" ] && git diff --quiet "${{last%% *}}" "$1" -- apple ':!apple/Mac' vendor/phosphor {CONFIG_FILE} 2>/dev/null; then exit 3; fi
+CONFIG="$config" apple/build-phone.sh device "$c/phone"
+JOB
+cat > follow.sh <<'JOB'
+# launchd runs this in the login shell, zsh on a Mac; the job control it uses is bash's.
+[ -n "$BASH_VERSION" ] || exec /bin/bash "$0" "$@"
+c="$HOME/Library/Caches/{CLI}"
+# Each build in a process group of its own, which a newer update stops (apple/build.sh's install ignores that).
+set -m
+want() {{ cat "$c/want"; }}
+# Runs a build at a lower priority, so the Mac stays quick to use, and stops it for a newer update's (sets stopped).
+run() {{
+	stopped=
+	nice -n 10 /bin/sh "$@" & pid=$!
+	while kill -0 $pid 2>/dev/null; do
+		sleep 2
+		if [ "$(want)" != "$want" ]; then stopped=1; kill -TERM -- -$pid 2>/dev/null; break; fi
+	done
+	wait $pid
+}}
+# The paired iPhone devicectl reaches, unlocked; the kept iPhone app is installed on it, not opened: if it's in use,
+# installing replaces it all the same, so it's left for the person to open.
+install() {{
+	xcrun devicectl list devices --json-output "$c/devices.json" > /dev/null 2>&1 || return 1
+	phone=$(jq -r '[.result.devices[] | select(.hardwareProperties.reality == "physical" and .hardwareProperties.deviceType == "iPhone" and .connectionProperties.pairingState == "paired")][0].identifier // empty' "$c/devices.json")
+	[ -n "$phone" ] && xcrun devicectl device install app --device "$phone" "$c"/phone/*.app
+}}
+while :; do
+	want=$(want)
+	if [ "$want" != "$(cat "$c/tried" 2>/dev/null)" ]; then
+		# zsh doesn't split "$want" into its commit and config: this is bash.
+		set -- ${{want%% *}} "${{want#* }}"
+		run "$c/build.sh" "$1" "$2" > "$c/update.log" 2>&1; status=$?
+		[ -z "$stopped" ] || continue
+		if [ $status = 0 ]; then echo "$want" > "$c/built"; else
+			tail -n 25 "$c/update.log" > "$c/failed.log"; echo "$want" | tee "$c/failed" > "$c/tried"; continue
+		fi
+		# 3: nothing the iPhone app is made of changed.
+		run "$c/phone.sh" "$1" "$2" > "$c/phone.log" 2>&1; status=$?
+		[ -z "$stopped" ] || continue
+		case $status in
+		0) echo "$want" > "$c/phone.built" ;;
+		3) ;;
+		*) tail -n 25 "$c/phone.log" > "$c/phone.failed.log"; echo "$want" > "$c/phone.failed" ;;
+		esac
+		echo "$want" > "$c/tried"
+	fi
+	[ -s "$c/phone.built" ] && [ "$(cat "$c/phone.built")" != "$(cat "$c/phone.installed" 2>/dev/null)" ] || exit 0
+	if install >> "$c/phone.log" 2>&1; then cp "$c/phone.built" "$c/phone.installed"; continue; fi
+	# Away or locked: try again in a minute, or build a newer update at once.
+	for _ in $(seq 30); do sleep 2; [ "$(want)" = "$want" ] || break; done
 done
 JOB
 {start}"#,
@@ -747,7 +840,7 @@ fn a_change_sends_out_only_what_it_touched() {
     assert_eq!(Parts::of(["README.md", "docs/a.md", "tests/e2e.rs", "android/x", "windows/App.cs", "kernel/test/tests.js"]), Parts::default());
     assert_eq!(Parts::of(["apps/board/app.js", "apps/board/screen.html", "apps/vault/app.js"]), Parts { apps: vec!["board".into(), "vault".into()], ..Default::default() });
     assert_eq!(Parts::of(["apple/Mac/App.swift"]), Parts { mac: true, ..Default::default() });
-    assert_eq!(Parts::of(["src/node.rs", "apps/board/app.js"]), Parts { node: true, mac: true, apps: vec!["board".into()] });
+    assert_eq!(Parts::of(["src/node.rs", "apps/board/app.js"]), Parts { node: true, mac: true, apps: vec!["board".into()], ..Default::default() });
     assert_eq!(Parts::of(["kernel/signer/worker.js", "serverless/worker.js"]), Parts { node: true, ..Default::default() });
     assert_eq!(Parts::of(["Cargo.lock"]), Parts::everything());
 }

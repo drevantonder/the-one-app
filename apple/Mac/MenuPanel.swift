@@ -25,7 +25,7 @@ struct MenuPanel: View {
                 ForEach(install.devices.filter { $0.user == store.me?.id }) { device in
                     HStack(spacing: 8) {
                         Circle()
-                            .fill(device.isOnline ? AnyShapeStyle(.green) : AnyShapeStyle(.quaternary))
+                            .fill(device.isOnline ? Kit.text : Kit.faint)
                             .frame(width: 7, height: 7)
                         Text(displayName(device.name))
                         Spacer()
@@ -55,9 +55,15 @@ struct MenuPanel: View {
                 }
                 Divider().padding(.vertical, 6).padding(.horizontal, 14)
             } else {
-                Text(store.state == nil ? "Starting…" : store.install == nil ? "Not set up yet" : "Signed out")
-                    .foregroundStyle(.secondary)
-                    .padding(14)
+                Group {
+                    if store.state == nil {
+                        Later(.milliseconds(400)) { Text("Starting…") }
+                    } else {
+                        Text(store.install == nil ? "Not set up yet" : "Signed out")
+                    }
+                }
+                .foregroundStyle(.secondary)
+                .padding(14)
                 Divider().padding(.horizontal, 14)
             }
 
@@ -173,7 +179,7 @@ private struct PanelWidget: View {
             if widget.error != nil {
                 Label("This widget stopped working.", systemImage: "exclamationmark.triangle.fill")
                     .font(.callout)
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(Kit.warn)
             } else {
                 TimelineView(.everyMinute) { context in
                     WidgetTree(node: widget.tree("medium"), now: context.date)

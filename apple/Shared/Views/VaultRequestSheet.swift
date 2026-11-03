@@ -97,7 +97,7 @@ struct VaultRequestSheet: View {
                 } else if let error {
                     ContentUnavailableView("Can’t Find This Request", systemImage: "lock.slash", description: Text(error))
                 } else {
-                    ProgressView().frame(maxWidth: .infinity)
+                    Later(.milliseconds(400)) { ProgressView() }.frame(maxWidth: .infinity)
                 }
             }
             .formStyle(.grouped)
@@ -181,7 +181,7 @@ struct VaultRequestSheet: View {
                 picked = request.matches?.first?.id
                 title = request.label
             } else {
-                error = String(localized: "It isn’t for you, or it’s from another install.")
+                error = String(localized: "This request isn’t for you.")
             }
         } catch { self.error = error.localizedDescription }
     }

@@ -30,8 +30,8 @@ targets:
         CLI: ${CONFIG_CLI}
         Yours: ${CONFIG_YOURS}
         NodePort: "${CONFIG_PORT}"
-        Accent: ${CONFIG_ACCENT}
         BuildCommit: ${BUILD_COMMIT}
+        CFBundleVersion: "${BUILD_NUMBER}"
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
         # <cli>://signed-in/: back from signing in; <cli>://vault?id=…&scope=…: an agent's request for a Vault item.
@@ -69,16 +69,18 @@ targets:
       path: build/Phone-Info.plist
       properties:
         CFBundleDisplayName: ${CONFIG_NAME}
-        Accent: ${CONFIG_ACCENT}
         CLI: ${CONFIG_CLI}
         Yours: ${CONFIG_YOURS}
         BuildCommit: ${BUILD_COMMIT}
+        CFBundleVersion: "${BUILD_NUMBER}"
         AppGroup: group.app.${CONFIG_CLI}.phone
         # <cli>://signed-in/: back from signing in; <cli>://vault?id=…&scope=…: an agent's request for a Vault item.
         CFBundleURLTypes:
           - CFBundleURLName: app.${CONFIG_CLI}.join
             CFBundleURLSchemes:
               - ${CONFIG_CLI}
+        # Asked for the first time an app scans a document (Shared/Views/ScreenFiles.swift).
+        NSCameraUsageDescription: Scan documents for your apps.
         UILaunchScreen: {}
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         UISupportedInterfaceOrientations~ipad: [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
@@ -102,10 +104,12 @@ targets:
       path: build/Screens-Info.plist
       properties:
         CFBundleDisplayName: Screens
-        Accent: ${CONFIG_ACCENT}
         CLI: ${CONFIG_CLI}
         Yours: ${CONFIG_YOURS}
         BuildCommit: ${BUILD_COMMIT}
+        CFBundleVersion: "${BUILD_NUMBER}"
+        # Asked for the first time an app scans a document (Shared/Views/ScreenFiles.swift).
+        NSCameraUsageDescription: Scan documents for your apps.
         UILaunchScreen: {}
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         UISupportedInterfaceOrientations~ipad: [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
@@ -113,7 +117,7 @@ targets:
   Widgets:
     type: app-extension
     platform: iOS
-    sources: [Widget, Shared/Views/Style.swift, Shared/Views/WidgetTree.swift, Shared/Views/SVGPath.swift, build/Artwork.xcassets, {path: ../vendor/phosphor/icons.json, buildPhase: resources}]
+    sources: [Widget, Shared/Views/Style.swift, Shared/Views/WidgetTree.swift, Shared/Views/SVGPath.swift, build/Artwork.xcassets]
     settings:
       base:
         PRODUCT_NAME: Widgets
@@ -130,8 +134,9 @@ targets:
     info:
       path: build/Widgets-Info.plist
       properties:
+        # An extension carries its app's build number.
+        CFBundleVersion: "${BUILD_NUMBER}"
         CFBundleDisplayName: ${CONFIG_NAME}
-        Accent: ${CONFIG_ACCENT}
         CLI: ${CONFIG_CLI}
         AppGroup: group.app.${CONFIG_CLI}.phone
         NSExtension:

@@ -1,7 +1,8 @@
 // The web client: the Mac app's window, in a browser. It signs in as an OAuth client of the install's auth service
 // (PKCE, and the person's passkey at its sign-in page), keeps its refresh token in this browser, and calls a node's `/v1` on its
 // own origin with the access token; the gateway sends each on. App screens are untrusted: each runs in a sandboxed
-// frame, and this page answers its bridge as the Mac app's web view does, making each call itself. Nothing is cached.
+// frame, and this page answers its bridge as the Mac app's web view does, making each call itself. It draws at once
+// what it showed last (the sidebar, and a still of the screen) and then what the node says now.
 
 // The bridge and kit (src/screen/), loaded after this, give `one`; this page answers it for its own use (`__one.host`).
 // This browser is a device of its person (device.js): it signs what changes who can do what, and hands each call the
@@ -22,9 +23,15 @@ window.__one = {};
   // MARK: Signing in
 
   const KEPT = "one.signin";
-  // What the client's own screens keep between visits (one.cache), forgotten with the sign-in.
+  // What the client's own screens keep between visits (one.cache), the window as it was last (LAST), and the screens
+  // it showed (KEPT_SCREENS, `kept`): all forgotten with the sign-in.
   const SCREENS = "one.screens.";
-  const forgetScreens = () => Object.keys(localStorage).filter((k) => k.startsWith(SCREENS)).forEach((k) => localStorage.removeItem(k));
+  const LAST = "one.last.window";
+  const KEPT_SCREENS = "one.screens";
+  const forgetScreens = () => {
+    Object.keys(localStorage).filter((k) => k.startsWith(SCREENS) || k === LAST).forEach((k) => localStorage.removeItem(k));
+    window.caches?.delete(KEPT_SCREENS).catch(() => {});
+  };
   const CLIENT = "one.client";
 
   const auth = {
@@ -34,7 +41,7 @@ window.__one = {};
     /// The auth service's endpoints, as it says them.
     async meta() {
       const r = await fetch("/.well-known/oauth-authorization-server");
-      if (!r.ok) throw new Error("The sign-in service isn't answering.");
+      if (!r.ok) throw new Error("The sign-in service isn’t answering. Try again in a moment.");
       return r.json();
     },
 
@@ -145,30 +152,52 @@ window.__one = {};
   // MARK: The node
 
   class NodeError extends Error {}
+  const UNANSWERED = "Your devices aren’t answering. Make sure one of them is on and online.";
 
   /// This browser as its person's device, once it's listed as one (`join`): null until then.
   let device = null;
 
+  /// How long to wait before asking again the `n`th time running (from 0) after the node didn't answer: at once, then
+  /// a quarter second, doubling, up to five. A node restarting for an update is back within a moment.
+  const retryWait = (n) => (n === 0 ? 0 : Math.min(5000, 125 << Math.min(n, 6)));
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  /// No node answered: the gateway, or Cloudflare before it, couldn't reach one, so nothing ran.
+  const unanswered = (status) => [502, 503, 530].includes(status);
+
   /// A request to the node, as this person: JSON in and out, or with `raw` the response itself. Once this browser is
   /// one of their devices, it asks their nodes itself, over iroh (net.js); until then, through the address, with its
   /// access token. As a device, it goes with the keys it needed last time; a node that needs others says so (428), and
-  /// it goes again once with them.
+  /// it goes again once with them. Asked again for a few seconds while no node answers, as one restarting doesn't; a
+  /// call carries an id, so it runs once however often it's sent.
   async function api(path, { method = "GET", body, query, raw, signal } = {}) {
     const url = new URL(path, location.origin);
     for (const [k, v] of Object.entries(query || {})) if (v != null) url.searchParams.set(k, typeof v === "string" ? v : JSON.stringify(v));
+    if (url.pathname === "/v1/call" && body && typeof body === "object" && !body.id) body = { ...body, id: callId() };
     const route = Device.route(url.pathname, body);
     const user = auth.user();
     const direct = !!user && (await net.start(user).catch(() => false));
     let token = direct ? null : await auth.token();
-    for (let tries = 0, needed = false; ; tries++) {
+    for (let renewed = false, needed = false, misses = 0; ; ) {
       const headers = direct ? {} : { authorization: `Bearer ${token}` };
       if (body !== undefined) headers["content-type"] = "application/json";
       // Keys go only to a node this browser reaches itself, which its connection proves.
       const keys = direct && device && (await device.handoff(route, auth.kept()?.until || Date.now() + 60_000));
       if (keys) headers["x-one-keys"] = keys;
       const sent = body === undefined ? undefined : JSON.stringify(body);
-      const r = direct ? await net.fetch(method, url.pathname + url.search, headers, sent, signal) : await fetch(url, { method, headers, body: sent, signal });
-      if (r.status === 401 && tries === 0) {
+      let r;
+      try {
+        r = direct ? await net.fetch(method, url.pathname + url.search, headers, sent, signal) : await fetch(url, { method, headers, body: sent, signal });
+      } catch (err) {
+        if (signal?.aborted || misses >= 5) throw err;
+        await sleep(retryWait(misses++));
+        continue;
+      }
+      if (unanswered(r.status) && misses < 5) {
+        await sleep(retryWait(misses++));
+        continue;
+      }
+      if (r.status === 401 && !renewed) {
+        renewed = true;
         token = await auth.token(token);
         continue;
       }
@@ -181,7 +210,7 @@ window.__one = {};
       }
       if (raw && r.ok) return r;
       const out = await r.json().catch(() => null);
-      if (!r.ok || out?.error) throw Object.assign(new NodeError(out?.error || (r.status >= 500 ? "Your device isn't answering." : "That didn't work. Try again.")), { status: r.status });
+      if (!r.ok || out?.error) throw Object.assign(new NodeError(out?.error || (r.status >= 500 ? UNANSWERED : "That didn’t work. Try again.")), { status: r.status });
       return out;
     }
   }
@@ -191,14 +220,33 @@ window.__one = {};
     return fetch(path, { ...init, headers: { ...init.headers, authorization: `Bearer ${await auth.token()}` } });
   }
 
-  /// Phosphor's icons, from the node once, for those the bridge asks for: on this page, and in screens' frames.
+  /// This release's files by their content (`/web.js?v=…`), as the gateway's index.html names them: kept for good.
+  const files = Object.fromEntries((document.querySelector('meta[name="one-files"]')?.content || "").split(" ").filter(Boolean).map((f) => f.split("=")));
+  const asset = (name) => (files[name] ? `/${name}?v=${files[name]}` : `/${name}`);
+
+  /// Phosphor's icons, from the address once (and then the browser's cache), for those the bridge asks for: on this
+  /// page, and in screens' frames.
   let icons;
   async function iconPaths(names = []) {
-    icons ||= api("/v1/icons").catch((err) => ((icons = null), Promise.reject(err)));
+    icons ||= fetch(asset("icons.json")).then((r) => (r.ok ? r.json() : Promise.reject(new Error("No icons.")))).catch((err) => ((icons = null), Promise.reject(err)));
     const all = await icons;
     return Object.fromEntries(names.map((n) => [n, all[n]]));
   }
   window.__one.host = async (m) => (m.type === "copy" ? navigator.clipboard.writeText(m.text) : m.type === "icons" ? iconPaths(m.names) : null);
+
+  /// Names a call wherever it's sent, so sent again it runs once.
+  const callId = () => Array.from(crypto.getRandomValues(new Uint8Array(8)), (b) => b.toString(16).padStart(2, "0")).join("");
+
+  /// The node's state or apps, asked for once a second at most: the window and its own screens (Home, Settings) ask
+  /// together as it opens, and share the answer.
+  const recent = {};
+  function shared(path) {
+    if (recent[path] && Date.now() - recent[path].at < 1000) return recent[path].answer;
+    const answer = api(path);
+    recent[path] = { at: Date.now(), answer };
+    answer.catch(() => delete recent[path]);
+    return answer;
+  }
 
   /// Runs an app's operation as this person → its result.
   async function call(app, op, input = {}) {
@@ -212,8 +260,8 @@ window.__one = {};
 
   const me = () => store.state?.user;
   const install = () => store.state?.install;
-  // The white label's name and accent, as the gateway's index.html says them, until the install's state does.
-  const whiteLabel = { name: document.querySelector('meta[name="application-name"]')?.content || "", accent: document.querySelector('meta[name="theme-color"]')?.content || "" };
+  // The white label's name, as the gateway's index.html says it, until the install's state does.
+  const whiteLabel = { name: document.querySelector('meta[name="application-name"]')?.content || "" };
   const config = () => store.state?.config || whiteLabel;
   const app = (name) => store.apps.find((a) => a.name === name);
   const label = (a) => a?.title || a?.name || "";
@@ -233,26 +281,53 @@ window.__one = {};
   const servicesOn = (p) => store.apps.filter((a) => isService(a) && scopes(a).includes(p.scope)).sort((a, b) => label(a).localeCompare(label(b)));
   const appBadge = (name, p) => Math.max(0, store.badges[p.scope]?.[name] || 0);
 
-  /// Loads what the sidebar shows: the node's state, then its apps and badges.
-  async function refreshState() {
-    const state = await api("/v1/state");
+  /// The window as it was last, drawn before the node answers: → whether there was one.
+  function lastWindow() {
+    try {
+      const kept = JSON.parse(localStorage.getItem(LAST) || "null");
+      if (!kept?.state?.install) return false;
+      Object.assign(store, kept);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  const keepWindow = () => {
+    try {
+      localStorage.setItem(LAST, JSON.stringify(store));
+    } catch {}
+  };
+
+  /// Loads what the sidebar shows: the node's state and its apps together (its apps only if `apps`, or if who's in
+  /// which group changed), drawn as soon as they're in; then the badges, drawn as they come.
+  async function refreshState({ apps = false } = {}) {
+    const [state, list] = await Promise.all([shared("/v1/state"), apps && !joining ? shared("/v1/apps").catch(() => null) : null]);
     // The nodes this browser asks itself, in the order things run on them.
     const nodes = (state.install?.devices || []).filter((d) => d.serves_me).sort((a, b) => a.order - b.order).map((d) => d.key);
     if (state.user && nodes.length) net.nodes(state.user.id, nodes);
     const regrouped = JSON.stringify([state.user, state.install?.groups]) !== JSON.stringify([store.state?.user, store.state?.install?.groups]);
-    const first = !store.state;
     store.state = state;
     // While it's being let in, its apps wait: they need the keys it's about to get.
     if (joining) return;
-    if (first || regrouped || !store.apps.length) await refreshApps();
-    else render();
+    if (list) store.apps = list;
+    if (!list && (regrouped || !store.apps.length) && install()) return refreshApps();
+    render();
+    keepWindow();
+    badges();
   }
 
   async function refreshApps() {
     if (!install()) return render();
-    store.apps = await api("/v1/apps");
-    await Promise.all(pages().map(async (p) => (store.badges[p.scope] = await api("/v1/badges", { query: { scope: p.scope } }).catch(() => ({})))));
+    store.apps = await shared("/v1/apps");
     render();
+    keepWindow();
+    badges();
+  }
+
+  async function badges() {
+    await Promise.all(pages().map(async (p) => (store.badges[p.scope] = await api("/v1/badges", { query: { scope: p.scope } }).catch(() => store.badges[p.scope] || {}))));
+    render();
+    keepWindow();
   }
 
   /// The node's events: what changed, so the window and its screens keep up. EventSource can't send a token, so it's a
@@ -261,7 +336,8 @@ window.__one = {};
   let events = null;
   async function listen() {
     const mine = (events = new AbortController());
-    while (!mine.signal.aborted) {
+    for (let misses = 0; !mine.signal.aborted; ) {
+      const started = Date.now();
       try {
         const r = await api("/v1/events", { raw: true, signal: mine.signal });
         const reader = r.body.pipeThrough(new TextDecoderStream()).getReader();
@@ -281,7 +357,10 @@ window.__one = {};
       } catch (err) {
         if (err.signedOut) return showSignedOut();
       }
-      if (!mine.signal.aborted) await new Promise((r) => setTimeout(r, 3000));
+      // At once after a stream that ran a while and ended (its node handing over to a new build), then waiting longer
+      // each miss.
+      if (Date.now() - started > 10_000) misses = 0;
+      if (!mine.signal.aborted) await sleep(retryWait(misses++));
     }
   }
   addEventListener("pagehide", () => events?.abort());
@@ -289,6 +368,8 @@ window.__one = {};
   addEventListener("pageshow", (e) => e.persisted && auth.kept() && (refreshState().catch(() => {}), listen()));
 
   async function handle(event) {
+    // What changed is asked for again, never shared from before.
+    for (const path in recent) delete recent[path];
     for (const f of frames) f.frame.contentWindow?.postMessage({ oneEvent: event }, "*");
     if (["devices", "install"].includes(event.type)) await refreshState();
     if (event.type === "changed") {
@@ -327,17 +408,46 @@ window.__one = {};
     return `/app/${encodeURIComponent(r.app)}/${encodeURIComponent(r.screen || "main")}${q.size ? `?${q}` : ""}`;
   }
 
-  /// Goes somewhere: a sidebar row replaces where the window is; what a screen opens is pushed on top, so Back
-  /// returns to it.
-  function go(r, { pushed = false } = {}) {
+  /// A phone's width has no sidebar, as the iPhone and Android apps have none: the pages fill the window, swiped
+  /// between, and every screen opened from them is pushed over them, with Back.
+  const phone = matchMedia("(max-width: 700px)");
+  const isPage = (r) => r.kind === "own" && r.name === "pages";
+  /// The page a screen is under, for Back on a phone when nothing in this tab came before it: a page's Services and apps
+  /// under that page, Settings' screens and apps under Settings.
+  function under(r) {
+    const params = JSON.parse(r.params || "{}");
+    if (r.kind === "own") return own("pages", { scope: r.name === "services" ? params.scope || "user" : r.name === "request" ? "user" : "settings" });
+    return own("pages", { scope: r.scope || (settingsItems().some((i) => i.app === r.app) ? "settings" : "user") });
+  }
+
+  /// Goes somewhere: a sidebar row replaces where the window is; what a screen opens deeper than the sidebar is pushed
+  /// on top, so Back returns to it. On a phone, all but a page is pushed.
+  function go(r, { pushed = phone.matches && !isPage(r) } = {}) {
     // Pushed on a screen, the sidebar keeps what it had selected, and the bar offers Back.
     const state = pushed ? { back: true, selection: history.state?.selection || location.pathname + location.search } : null;
     history.pushState(state, "", href(r));
+    // A phone's pages open again at the one gone to.
+    if (phone.matches && isPage(r)) home = null;
+    render();
+  }
+  /// Back: to what came before in this tab, or on a phone opened straight at a screen, to the page it's under.
+  function back() {
+    if (history.state?.back) return history.back();
+    history.replaceState(null, "", href(under(route())));
     render();
   }
   /// The sidebar row selected: where the window is, or what a pushed screen was opened from.
   const selection = () => history.state?.selection || location.pathname + location.search;
   addEventListener("popstate", () => render());
+  // Between a phone's width and a computer's, the window is drawn again as the other.
+  phone.addEventListener("change", () => {
+    shown = "";
+    home = null;
+    frames = frames.filter((f) => f.sheet);
+    const detail = $(".detail", root);
+    if (detail) detail.innerHTML = "";
+    render();
+  });
 
   // MARK: Drawing
 
@@ -345,10 +455,17 @@ window.__one = {};
 
   /// While this browser waits to be approved, the window isn't drawn: its join screen is.
   let joining = false;
+  /// Settled once this browser has been let in as its person's device, or needn't be: what screens ask waits for it,
+  /// since only a device hands a node the keys it needs.
+  const joined = (() => {
+    let done;
+    const p = new Promise((r) => (done = r));
+    return Object.assign(p, { done });
+  })();
 
   function render() {
     if (!store.state || joining) return;
-    if (!install()) return void (root.innerHTML = message("Nothing Here Yet", `This device isn't set up yet. Set it up from the ${esc(config().name || "app")} app on one of your devices.`));
+    if (!install()) return void (root.innerHTML = message("Not Set Up Yet", "Set it up on one of your computers first."));
     if (!$(".window", root)) root.innerHTML = `<div class="window"><nav class="sidebar"></nav><main class="detail"></main></div>`;
     drawSidebar();
     drawDetail();
@@ -374,15 +491,15 @@ window.__one = {};
     const sections = pages().map((p) => `<section>${head(own("pages", { scope: p.scope }), p.title)}` +
       appsOn(p).filter((a) => !settingsItems().some((i) => i.app === a.name)).map((a) => row({ kind: "screen", app: a.name, screen: "main", params: "{}", scope: p.scope }, one.appIcon(a, 20), label(a), appBadge(a.name, p))).join("") +
       row(own("services", { scope: p.scope }), folder(servicesOn(p), 20), "Services") + `</section>`).join("");
-    // One with a url (Passkeys) opens it in a new tab.
-    const items = settingsItems().map((item) => item.url
+    // One with another site's url opens it in a new tab; one here (Passkeys) shows beside the sidebar.
+    const items = settingsItems().map((item) => item.url && !here(item.url)
       ? `<a class="nav-row" href="${esc(item.url)}" target="_blank" rel="noopener">${settingIcon(item, 20)}<span class="nav-label">${esc(item.title)}</span></a>` : row(item.app ? { kind: "screen", app: item.app, screen: "main", params: "{}" } : { kind: "own", name: item.name, params: "{}" }, settingIcon(item, 20), item.title, item.badge)).join("");
     $(".sidebar", root).innerHTML = `<div class="nav-pages">${sections}<section>${head(own("pages", { scope: "settings" }), "Settings")}${items}</section></div>`;
   }
 
   // Links are real links, for a new tab or a copied address; a plain click goes in place.
   document.addEventListener("click", (e) => {
-    if (e.target.closest?.("[data-back]")) return history.back();
+    if (e.target.closest?.("[data-back]")) return back();
     const a = e.target.closest?.("[data-go]");
     if (!a || e.metaKey || e.ctrlKey || e.shiftKey || e.button) return;
     e.preventDefault();
@@ -394,14 +511,46 @@ window.__one = {};
   /// What's beside the sidebar: the screen where the window is, kept as it is while the rest redraws around it.
   function drawDetail() {
     const r = route(), key = JSON.stringify(r);
-    if (shown === key && frames.some((f) => !f.sheet && f.frame.isConnected)) return;
+    if (phone.matches) return drawPhone($(".detail", root), r, key);
+    if (shown === key && frames.some((f) => !f.sheet && f.into.isConnected)) return;
     shown = key;
     screen.show($(".detail", root), r);
   }
 
-  /// The detail's bar: its title, as a Mac window's toolbar, with Back when a screen was pushed.
+  /// A phone's window: every page side by side then Settings, to swipe between with their dots (pages.html, as the
+  /// phones have them), kept under what's pushed over them so Back finds them as they were.
+  let home = null;
+  function drawPhone(detail, r, key) {
+    if (!home?.layer.isConnected) {
+      frames = frames.filter((f) => f.sheet);
+      detail.innerHTML = `<div class="home"></div><div class="pushed" hidden></div>`;
+      const layer = $(".home", detail), at = isPage(r) ? r : under(r);
+      home = { layer, f: frameFor(own("pages", { swipe: true, scope: JSON.parse(at.params).scope || "user" }), layer) };
+      home.f.home = true;
+      shown = "";
+    }
+    const pushed = $(".pushed", detail);
+    if (isPage(r)) {
+      shown = key;
+      frames = frames.filter((f) => f.sheet || f.home);
+      pushed.hidden = true;
+      pushed.innerHTML = "";
+      home.layer.inert = false;
+      document.title = titleOf(r);
+      return;
+    }
+    if (shown === key && frames.some((f) => !f.sheet && !f.home && f.into.isConnected)) return;
+    shown = key;
+    pushed.classList.toggle("entering", pushed.hidden);
+    pushed.hidden = false;
+    home.layer.inert = true;
+    screen.show(pushed, r);
+  }
+
+  /// The detail's bar: its title, as a Mac window's toolbar, with Back when a screen was pushed, and on a phone under
+  /// every page.
   function bar(title) {
-    const back = history.state?.back ? `<button class="back" data-back aria-label="Back">‹</button>` : "";
+    const back = history.state?.back || (phone.matches && !isPage(route())) ? `<button class="back" data-back aria-label="Back">‹</button>` : "";
     return `<header class="bar">${back}<div class="bar-titles"><div class="bar-title">${esc(title)}</div></div></header>`;
   }
 
@@ -412,24 +561,116 @@ window.__one = {};
   /// person.
   let frames = [];
 
-  /// What a route shows, as its page from the node, in a new frame. → the frame's record.
-  function frameFor(r, into, { sheet } = {}) {
+  /// What this browser keeps of the screens it showed, until it signs out: each route's page as the node last gave it
+  /// (`page`), and its still (`still`), the page as it last looked here without its scripts, which bridge.js sends.
+  const kept = {
+    url: (kind, key) => `/${kind}/${encodeURIComponent(key)}`,
+    async get(kind, key) {
+      try {
+        return (await (await (await caches.open(KEPT_SCREENS)).match(kept.url(kind, key)))?.text()) ?? null;
+      } catch {
+        return null;
+      }
+    },
+    put(kind, key, html) {
+      if (typeof html !== "string" || html.length > 2_000_000) return;
+      window.caches?.open(KEPT_SCREENS).then((c) => c.put(kept.url(kind, key), new Response(html))).catch(() => {});
+    },
+  };
+  /// Two pages the same but for their nonce.
+  const same = (a, b) => a?.replace(/nonce(-|=")[0-9a-f]{32}/g, "") === b?.replace(/nonce(-|=")[0-9a-f]{32}/g, "");
+
+  /// A route's page from the node, asked for once (the one the window opens on as it starts, beside the sidebar's),
+  /// and kept.
+  let asked = null;
+  function screenPage(r) {
+    const key = JSON.stringify(r);
+    if (asked?.key === key) {
+      const { page } = asked;
+      asked = null;
+      return page;
+    }
+    const path = r.kind === "own" ? `/v1/client-screens/${encodeURIComponent(r.name)}` : `/v1/screens/${encodeURIComponent(r.app)}/${encodeURIComponent(r.screen)}`;
+    return joined.then(() => api(path, { query: { params: r.params || "{}", scope: r.scope }, raw: true }).then((resp) => resp.text()).then((html) => (kept.put("page", key, html), html)));
+  }
+  const ask = (r) => (asked = { key: JSON.stringify(r), page: screenPage(r) }).page.catch(() => {});
+
+  /// A sandboxed frame for a page this window writes in (frame.html takes it).
+  function sandboxed(r) {
     const frame = document.createElement("iframe");
     frame.className = "screen-frame";
     frame.setAttribute("sandbox", "allow-scripts allow-forms");
     frame.setAttribute("referrerpolicy", "no-referrer");
-    frame.src = "/frame.html";
+    frame.src = asset("frame.html");
     frame.title = titleOf(r);
-    const f = { frame, route: r, sheet };
+    return frame;
+  }
+
+  /// What a route shows, in a new frame: its page as kept here if there is one, else as the node gives it now; one
+  /// that's changed since (its app deployed) starts the screen again. → the frame's record. Beside the sidebar, its
+  /// still shows until the screen has drawn and had its calls answered.
+  function frameFor(r, into, { sheet } = {}) {
+    const frame = sandboxed(r);
+    const f = { frame, route: r, sheet, into, key: JSON.stringify(r), busy: 0, quiet: 0 };
     frames.push(f);
-    const path = r.kind === "own" ? `/v1/client-screens/${encodeURIComponent(r.name)}` : `/v1/screens/${encodeURIComponent(r.app)}/${encodeURIComponent(r.screen)}`;
-    into.innerHTML = `<div class="screen-status">${one.loading()}</div>`;
-    api(path, { query: { params: r.params || "{}", scope: r.scope }, raw: true }).then((resp) => resp.text()).then((html) => {
-      f.html = look(html);
+    // A spinner only for a wait that's long enough to notice.
+    into.innerHTML = "";
+    setTimeout(() => f.loaded || f.still || !into.isConnected || $(".screen-status", into) || into.insertAdjacentHTML("afterbegin", `<div class="screen-status">${one.loading()}</div>`), 400);
+    const draw = (page) => {
+      f.page = page;
+      f.html = look(page);
+      if (!into.isConnected) return;
+      if (f.still) frame.style.visibility = "hidden";
       into.append(frame);
-      frame.addEventListener("load", () => setTimeout(() => $(".screen-status", into)?.remove(), 50), { once: true });
-    }, (err) => (into.innerHTML = message("Can’t Open This", esc(err.message))));
+      frame.addEventListener("load", () => {
+        f.loaded = true;
+        $(".screen-status", into)?.remove();
+        // A screen that asks nothing shows in place of its still soon after it loads.
+        if (f.still) setTimeout(() => watch(f), 1500);
+      }, { once: true });
+    };
+    const fresh = screenPage(r);
+    Promise.all([kept.get("page", f.key), sheet ? null : kept.get("still", f.key)]).then(([page, still]) => {
+      if (f.html) return;
+      if (still) showStill(f, still);
+      if (page) draw(page);
+    });
+    fresh.then((page) => {
+      if (!f.html) return draw(page);
+      if (same(page, f.page)) return;
+      f.page = page;
+      f.html = look(page);
+      frame.src = asset("frame.html");
+    }, (err) => f.html || ((f.loaded = true), (into.innerHTML = message("Can’t Open This", esc(one.plain(err).title)))));
     return f;
+  }
+
+  // MARK: Stills
+
+  /// A screen's still, in a frame of its own as sandboxed as the screen's, answering nothing but its frame's ask for it.
+  function showStill(f, html) {
+    if (!f.into.isConnected) return;
+    const frame = sandboxed(f.route);
+    frame.classList.add("screen-still");
+    frame.setAttribute("aria-hidden", "true");
+    const scrolled = `<script>addEventListener("load", () => scrollTo(0, Number(document.documentElement.dataset.stillY) || 0))</script>`;
+    f.still = { frame, html: look(html.replace("</head>", `${scrolled}</head>`)) };
+    $(".screen-status", f.into)?.remove();
+    f.into.prepend(frame);
+  }
+
+  /// The screen showing in place of its still, once it's had its calls answered (and nothing more asked for a moment),
+  /// or after a few seconds whatever it's waiting on.
+  function watch(f, until = Date.now() + 4000) {
+    if (!f.still || f.watched) return;
+    f.watched = true;
+    const check = () => {
+      if ((f.busy || Date.now() - f.quiet < 50) && Date.now() < until) return void setTimeout(check, 20);
+      f.frame.style.visibility = "";
+      f.still.frame.remove();
+      f.still = null;
+    };
+    check();
   }
 
   function titleOf(r) {
@@ -446,14 +687,44 @@ window.__one = {};
 
   const screen = {
     show(detail, r) {
-      frames = frames.filter((f) => f.sheet);
+      frames = frames.filter((f) => f.sheet || f.home);
       const title = titleOf(r);
       document.title = title;
       // A page shows its own large title.
       detail.innerHTML = bar(r.kind === "own" && r.name === "pages" ? "" : title) + `<div class="screen"></div>`;
+      // A Settings item that's a page of this site (Passkeys) is that page, framed: it's the kernel's, not a node's.
+      const item = r.kind === "own" && settingsItems().find((i) => i.name === r.name && i.url && here(i.url));
+      if (item) return void ($(".screen", detail).innerHTML = `<iframe class="screen-frame" src="${esc(item.url)}" title="${esc(title)}" allow="publickey-credentials-get; publickey-credentials-create"></iframe>`);
       frameFor(r, $(".screen", detail));
     },
   };
+
+  /// A sheet a screen opens in its frame dims the rest of the window too, as a sheet dims a Mac window: the same shade
+  /// as the sheet's own, around the frame. A click on it, or Escape, closes the sheet, as one on its backdrop does.
+  let shaded = null;
+  function shade(f, on) {
+    const el = $(".shade") || Object.assign(document.createElement("div"), { className: "shade" });
+    if (!on) {
+      if (shaded === f) (shaded = null), el.classList.remove("open");
+      return;
+    }
+    // Over the sheets already open (the frame's own, if it's in one), under any opened after it (an alert).
+    if (shaded !== f) document.body.append(el);
+    shaded = f;
+    place();
+    void el.offsetHeight;
+    el.classList.add("open");
+  }
+  function place() {
+    const el = $(".shade");
+    if (!shaded || !el) return;
+    if (!shaded.frame.isConnected) return shade(shaded, false);
+    const { left: l, top: t, right: r, bottom: b } = shaded.frame.getBoundingClientRect();
+    el.style.clipPath = `polygon(evenodd, 0 0, 100% 0, 100% 100%, 0 100%, 0 0, ${l}px ${t}px, ${r}px ${t}px, ${r}px ${b}px, ${l}px ${b}px, ${l}px ${t}px)`;
+  }
+  addEventListener("resize", place);
+  addEventListener("click", (e) => e.target.classList?.contains("shade") && shaded?.frame.contentWindow?.postMessage({ oneSheetsClose: true }, "*"));
+  addEventListener("keydown", (e) => e.key === "Escape" && shaded && $(".shade.open") && !$(".shade.open ~ .sheet-backdrop.open") && shaded.frame.contentWindow?.postMessage({ oneSheetsClose: true }, "*"));
 
   /// A screen over the window, in a sheet: → what it gave `one.close` once it's gone, else null.
   function openSheet(r) {
@@ -467,33 +738,40 @@ window.__one = {};
     });
   }
 
-  /// What makes a screen sit in the window as its own: the window's background shows through, the install's accent,
-  /// and on a computer the Mac app's size of text.
+  /// What makes a screen sit in the window as its own: the window's background shows through, and on a
+  /// computer the Mac app's size of text.
   function look(html) {
-    const accent = /^#[0-9a-f]{3,8}$/i.test(config().accent || "") ? config().accent : "";
     // This window's appearance, kept in step (see `scheme`); with the nonce of a page that runs only its own scripts
     // (the client's own screens), as one of them.
     const nonce = html.match(/^<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="script-src 'nonce-([0-9a-f]+)'/)?.[1];
     const looks = `<script${nonce ? ` nonce="${nonce}"` : ""}>(() => { const scheme = (${scheme})(); let now = ${JSON.stringify(appearance())}; const apply = () => scheme(document, now);
       addEventListener("DOMContentLoaded", apply); addEventListener("load", apply);
       addEventListener("message", (e) => { if (e.source === parent && e.data?.oneScheme) apply(now = e.data.oneScheme); }); })()</script>`;
-    const style = `<style>html, body { background: transparent !important; }${accent ? ` :root:root { --accent: ${accent}; }` : ""}
-      @media (pointer: fine) { html { zoom: calc(13 / 17); } :root:root { --bg: transparent; --card: rgba(0, 0, 0, 0.04); } }
-      @media (pointer: fine) and (prefers-color-scheme: dark) { :root:root { --card: rgba(255, 255, 255, 0.05); } }</style>`;
+    const style = `<style>html, body { background: transparent !important; }
+      @media (pointer: fine) { html { zoom: calc(13 / 17); } :root:root { --bg: transparent; } }</style>`;
     return html.includes("</head>") ? html.replace("</head>", `${style}${looks}</head>`) : style + looks + html;
   }
 
   /// The bridge's messages (src/screen/bridge.js), from the screens' frames only, each acting as its screen's app; and
   /// the client's own screens', as the person, which no app's may.
   addEventListener("message", async (e) => {
+    const still = frames.find((x) => x.still?.frame.contentWindow === e.source)?.still;
+    if (still && e.data?.oneFrame) return void still.frame.contentWindow.postMessage({ oneScreen: still.html }, "*");
     const f = frames.find((x) => x.frame.contentWindow === e.source);
     if (!f) return;
     const r = f.route, mine = r.kind === "own";
     if (e.data?.oneFrame) return void f.frame.contentWindow.postMessage({ oneScreen: f.html }, "*");
+    if (typeof e.data?.oneSheets === "number") return void shade(f, e.data.oneSheets > 0);
+    if (e.data?.oneStill !== undefined) return void (f.sheet || kept.put("still", f.key, e.data.oneStill));
     const { one: m, id } = e.data || {};
     if (!m || typeof m !== "object") return;
-    const reply = (ok) => f.frame.contentWindow?.postMessage({ oneReply: id, ok: ok ?? null }, "*");
-    const fail = (err) => f.frame.contentWindow?.postMessage({ oneReply: id, error: String(err?.message || err) }, "*");
+    // What it's waiting on: its still shows until it's been answered.
+    f.busy++;
+    watch(f);
+    await joined;
+    const answered = () => ((f.busy = Math.max(0, f.busy - 1)), (f.quiet = Date.now()));
+    const reply = (ok) => (answered(), f.frame.contentWindow?.postMessage({ oneReply: id, ok: ok ?? null }, "*"));
+    const fail = (err) => (answered(), f.frame.contentWindow?.postMessage({ oneReply: id, error: String(err?.message || err) }, "*"));
     try {
       if (["api", "signOut", "appearance", "device", "request", "cache"].includes(m.type) && !mine) return fail("Only Settings can do that.");
       switch (m.type) {
@@ -507,14 +785,15 @@ window.__one = {};
             : { kind: "screen", app: r.app, screen: String(m.screen || "main"), params, scope: m.scope || r.scope };
           if (m.sheet) return reply(await openSheet(to));
           reply(null);
-          // From a sheet, the sheet goes and it opens where the window is.
+          // From a sheet, the sheet goes and it opens where the window is. What the sidebar lists (an app on a page,
+          // Backups in Settings) opens as if picked there, with no Back; only what's deeper than it is pushed.
           f.sheet?.close(null);
-          return go(to, { pushed: true });
+          return go(to, { pushed: phone.matches ? !isPage(to) : ![...document.querySelectorAll(".sidebar [data-go]")].some((a) => a.getAttribute("href") === href(to)) });
         }
         case "close":
           reply(null);
           if (f.sheet) return f.sheet.close(m.value);
-          if (history.state?.back) history.back();
+          if (history.state?.back || (phone.matches && !isPage(route()))) back();
           return;
         case "api":
           return reply(await clientApi(m));
@@ -525,7 +804,7 @@ window.__one = {};
           if (m.value != null) setAppearance(String(m.value));
           return reply(appearance());
         case "device":
-          return reply({ name: browserName(), build: deviceBuild(), signOut: true, keys: !!device });
+          return reply({ name: browserName(), signOut: true, keys: !!device });
         case "request":
           return reply((await openSheet(own("request", { scope: String(m.scope || ""), id: String(m.id || "") }))) === true);
         case "vault": {
@@ -533,13 +812,14 @@ window.__one = {};
           const scope = r.scope || "user";
           const out = await api("/v1/vault/request", { method: "POST", body: { scope, app: r.app, need: String(m.need || "") } });
           if (!out?.id) throw new Error("The Vault didn’t take the request");
-          return reply((await openSheet(own("request", { scope, id: out.id }))) === true);
+          return reply((await openSheet(own("request", { scope: out.scope, id: out.id }))) === true);
         }
         case "title": {
           // Empty while the screen shows its own large title, as the Mac app's bar is.
           const title = String(m.text ?? "");
           if (f.sheet) f.sheet.title.textContent = title || titleOf(r);
-          else {
+          // A phone's pages have no bar: what's pushed over them has its own.
+          else if (!f.home) {
             const el = $(".detail .bar-title", root);
             if (el) el.textContent = title;
             document.title = title || titleOf(r);
@@ -558,6 +838,8 @@ window.__one = {};
           return reply(null);
         case "link": {
           const url = new URL(String(m.url), location.href);
+          const item = settingAt(url.href);
+          if (item) { go(own(item.name)); return reply(null); }
           if (["http:", "https:", "mailto:", "tel:"].includes(url.protocol)) window.open(url.href, "_blank", "noopener,noreferrer");
           return reply(null);
         }
@@ -663,6 +945,10 @@ window.__one = {};
 
   /// What Settings shows this person, in order, as the node says (`settings_items`).
   const settingsItems = () => store.state?.settings_items || [];
+  /// Whether a url is this site's: a page the kernel serves, shown in place rather than in a new tab.
+  const here = (url) => new URL(url, location.href).origin === location.origin;
+  /// The Settings item whose url is `url` on this site, if one is.
+  const settingAt = (url) => settingsItems().find((i) => i.url && here(i.url) && new URL(i.url, location.href).pathname === new URL(url, location.href).pathname);
   const settingTitle = (name) => settingsItems().find((i) => i.name === name)?.title || "Settings";
 
   /// An item's icon: its symbol on its colour, as an app's tile.
@@ -674,7 +960,7 @@ window.__one = {};
   /// changes who can do what, and letting devices in, this browser does itself (`signs`).
   async function clientApi(m) {
     const url = new URL(String(m.path || ""), location.origin);
-    if (url.origin !== location.origin || !url.pathname.startsWith("/v1/")) throw new Error("That isn't your device's.");
+    if (url.origin !== location.origin || !url.pathname.startsWith("/v1/")) throw new Error("That isn’t on your devices.");
     const method = String(m.method || "GET").toUpperCase();
     const body = method === "GET" ? undefined : m.body ?? {};
     if (url.pathname === "/v1/call" && body && typeof body === "object") body.client = "web";
@@ -685,6 +971,7 @@ window.__one = {};
       await refreshState().catch(() => {});
       return out ?? {};
     }
+    if (method === "GET" && !url.search && ["/v1/state", "/v1/apps"].includes(url.pathname)) return shared(url.pathname);
     return api(url.pathname + url.search, { method, body });
   }
 
@@ -737,12 +1024,6 @@ window.__one = {};
     const prf = sessionStorage.getItem("one.prf"), credential = sessionStorage.getItem("one.prf.credential");
     if (!prf || !credential || install()?.clients.some((c) => c.passkey === credential)) return null;
     return { prf: Uint8Array.from(atob(prf.replaceAll("-", "+").replaceAll("_", "/")), (c) => c.charCodeAt(0)), credential };
-  }
-
-  /// "linux runs 3157ba4": what the device that answers runs, for telling builds apart.
-  function deviceBuild() {
-    const s = install()?.devices.find((x) => x.key === store.state?.device?.key);
-    return s?.build ? `${s.name} runs ${s.build}` : null;
   }
 
   // MARK: Appearance
@@ -798,8 +1079,7 @@ window.__one = {};
   }
 
   function showUnreachable(text) {
-    const name = config().name;
-    root.innerHTML = message(`Can’t Reach ${name}`, esc(text), `<div class="unavailable-text">It keeps trying.</div>`);
+    root.innerHTML = message("Can’t Reach Your Devices", esc(text), `<div class="unavailable-text">Trying again…</div>`);
   }
 
   /// Makes this browser a device of its person: listed already, or let in by a passkey of theirs that's listed, or
@@ -856,7 +1136,6 @@ window.__one = {};
   }
 
   async function start() {
-    if (/^#[0-9a-f]{3,8}$/i.test(whiteLabel.accent)) document.documentElement.style.setProperty("--accent", whiteLabel.accent);
     schemed(document, appearance());
     // A new device's QR: Approve, with its code.
     if (location.pathname === "/approve") history.replaceState(null, "", href(own("devices", { approve: location.hash.slice(1) })));
@@ -869,21 +1148,37 @@ window.__one = {};
       }
     }
     if (!auth.kept()) return showSignedOut();
-    root.innerHTML = `<div class="starting">${one.loading("Starting")}</div>`;
+    navigator.serviceWorker?.register("/sw.js").catch(() => {});
+    // `/vault?id=…&scope=…`: an agent's link to a request for an item, answered over You.
+    let request = null;
+    if (location.pathname === "/vault") {
+      const q = new URLSearchParams(location.search);
+      request = { scope: q.get("scope"), id: q.get("id") };
+      history.replaceState(null, "", "/");
+    }
+    // Everything the window opens on, asked for at once: its screen, beside the node's state and apps; meanwhile the
+    // window as it was last. Its screens' asks wait until this browser is its person's device (`joined`).
+    ask(route());
+    if (lastWindow()) render();
+    else root.innerHTML = `<div class="starting">${one.loading("Starting")}</div>`;
     joining = true;
+    // A device that takes the request and never answers (asleep, stuck) is one that can't be reached, while it's still asked.
+    const away = setTimeout(() => $(".window", root) || showUnreachable(UNANSWERED), 15000);
     // Someone new isn't anyone a node answers until their first device is let in.
     let newcomer = null;
-    for (let wait = 1000; ; wait = Math.min(wait * 2, 15_000)) {
+    for (let misses = 1; ; misses++) {
       try {
         await refreshState();
         break;
       } catch (err) {
-        if (err.signedOut) return showSignedOut();
+        if (err.signedOut) return clearTimeout(away), showSignedOut();
         if (err.status === 403 && (newcomer = auth.user())) break;
-        showUnreachable(err.message);
-        await new Promise((r) => setTimeout(r, wait));
+        // What it showed last stays, as a screen whose node is restarting does.
+        if (!$(".window", root)) showUnreachable(err instanceof NodeError ? err.message : UNANSWERED);
+        await sleep(retryWait(misses));
       }
     }
+    clearTimeout(away);
     if (newcomer || (install() && me())) {
       try {
         await join(newcomer || me().id);
@@ -893,16 +1188,9 @@ window.__one = {};
       }
     }
     joining = false;
+    joined.done();
     await refreshApps().catch(() => {});
-    // `/vault?id=…&scope=…`: an agent's link to a request for an item, answered over You.
-    let ask = null;
-    if (location.pathname === "/vault") {
-      const q = new URLSearchParams(location.search);
-      ask = { kind: "vault", scope: q.get("scope"), id: q.get("id") };
-      history.replaceState(null, "", "/");
-    }
-    render();
-    if (ask?.id && ask.scope) openSheet(own("request", { scope: ask.scope, id: ask.id }));
+    if (request?.id && request.scope) openSheet(own("request", { scope: request.scope, id: request.id }));
     listen();
   }
 

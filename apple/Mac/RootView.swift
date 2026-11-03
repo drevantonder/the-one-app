@@ -9,19 +9,22 @@ struct RootView: View {
         @Bindable var store = store
         Group {
             if store.state == nil {
-                if case .unreachable(let message) = store.phase {
-                    ContentUnavailableView {
-                        Label("Can’t Reach \(appName)", systemImage: "bolt.horizontal.circle")
-                    } description: {
-                        Text(message)
-                    } actions: {
-                        Text("It keeps trying.").foregroundStyle(.secondary)
+                // Nothing at all for a quick start.
+                Later(.milliseconds(400)) {
+                    if case .unreachable(let message) = store.phase {
+                        ContentUnavailableView {
+                            Label("Can’t Reach \(appName)", systemImage: "bolt.horizontal.circle")
+                        } description: {
+                            Text(message)
+                        } actions: {
+                            Text("Trying again…").foregroundStyle(.secondary)
+                        }
+                    } else {
+                        ProgressView("Starting \(appName)…")
+                            .controlSize(.small)
                     }
-                } else {
-                    ProgressView("Starting \(appName)…")
-                        .controlSize(.small)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if store.install == nil || !store.signedIn {
                 WelcomeView()
             } else {
@@ -29,15 +32,23 @@ struct RootView: View {
             }
         }
         .sheet(item: $store.sheet) { sheet in
-            switch sheet {
-            case .pair: PairSheet()
-            case .join: JoinSheet()
-            case .pages: PagesEditor()
-            case .vault(let scope, let id): VaultRequestSheet(scope: scope, id: id)
-            case .ask(let ask): VaultRequestSheet(scope: ask.scope, id: "", ask: ask)
-            case .addWidget(let scope): AddWidgetSheet(scope: scope)
-            case .services(let scope): ServicesSheet(scope: scope)
+            Group {
+                switch sheet {
+                case .pair: PairSheet()
+                case .join: JoinSheet()
+                case .pages: PagesEditor()
+                case .vault(let scope, let id): VaultRequestSheet(scope: scope, id: id)
+                case .ask(let ask): VaultRequestSheet(scope: ask.scope, id: "", ask: ask)
+                case .addWidget(let scope): AddWidgetSheet(scope: scope)
+                case .services(let scope): ServicesSheet(scope: scope)
+                }
             }
+            .environment(\.raised, true)
+        }
+        .task {
+            // Once the first frame is up.
+            try? await Task.sleep(for: .milliseconds(300))
+            WarmWebKit.start()
         }
         .onChange(of: appearance, initial: true) {
             NSApp.appearance = Appearance(rawValue: appearance)?.scheme.map { NSAppearance(named: $0 == .dark ? .darkAqua : .aqua)! }
@@ -64,7 +75,7 @@ private struct MainView: View {
                 ContentUnavailableView {
                     Label("Joining…", systemImage: "arrow.trianglehead.2.clockwise")
                 } description: {
-                    Text("This device is taking in what it keeps from the device it paired with.")
+                    Text("Getting everything from your other device…")
                 }
             } else {
                 @Bindable var store = store
@@ -191,7 +202,7 @@ private struct WelcomeView: View {
         .padding(40)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .animation(.snappy, value: mac.signInError)
-        .sheet(isPresented: $asking) { AskYourAgentSheet(prompt: agentPrompt(address: given.isEmpty ? nil : given)) }
+        .sheet(isPresented: $asking) { ConnectYourAISheet(prompt: agentPrompt(address: given.isEmpty ? nil : given)) }
         .onAppear {
             // The address this Mac's node is in, unless the person gave another.
             let known = Auth.address ?? store.install?.settings?["address"].flatMap(URL.init(string:))
@@ -232,7 +243,7 @@ private struct WelcomeView: View {
             .controlSize(.large)
             .keyboardShortcut(.defaultAction)
             .disabled(given.isEmpty || mac.signingIn)
-            Button("Or Ask Your Agent") { asking = true }
+            Button("Or Connect Your AI") { asking = true }
                 .buttonStyle(.link)
         }
     }
@@ -247,7 +258,7 @@ private struct WelcomeView: View {
             Button("Join with a Pairing Code…") { store.sheet = .join }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
-            Button("Or Ask Your Agent") { asking = true }
+            Button("Or Connect Your AI") { asking = true }
                 .buttonStyle(.link)
         }
     }

@@ -3,7 +3,6 @@ import Foundation
 struct Config: Codable, Sendable, Equatable {
     var name: String
     var cli: String
-    var accent: String
     /// The app the App Store opens: the install's `store` setting.
     var store: String?
     /// The driver phones register their push tokens with: the install's `push` setting, empty when push is off.
@@ -123,8 +122,6 @@ struct Device: Codable, Sendable, Equatable, Identifiable {
     /// The scopes whose calls it runs (`user:<id>`, `group:<id>`, `global`).
     var runs_for: [String]?
     var target: String?
-    /// The commit its node was built from.
-    var build: String?
 
     var id: String { key }
     var isOnline: Bool { online == true }
@@ -235,7 +232,37 @@ enum LocalToken {
         if let token = try? String(contentsOf: home.appending(path: "local-token"), encoding: .utf8) {
             request.setValue(token.trimmingCharacters(in: .whitespacesAndNewlines), forHTTPHeaderField: "x-one-local-token")
         }
+        #elseif targetEnvironment(simulator)
+        // A simulator shares its Mac's files: NODE_URL's node at 127.0.0.1 is that Mac's, and so is its token.
+        let env = ProcessInfo.processInfo.environment
+        if let mac = env["SIMULATOR_HOST_HOME"],
+           let token = try? String(contentsOf: URL(filePath: mac).appending(path: ".local/share/\(Auth.cli)/local-token"), encoding: .utf8) {
+            request.setValue(token.trimmingCharacters(in: .whitespacesAndNewlines), forHTTPHeaderField: "x-one-local-token")
+        }
         #endif
+    }
+}
+
+/// Asking again while no node answers, as one restarting for an update doesn't for a moment: at once, then a quarter
+/// second, doubling, up to five.
+enum Retry {
+    /// How long to wait before asking again the `misses`th time running (from 0), in seconds.
+    static func wait(_ misses: Int) -> Double {
+        misses == 0 ? 0 : min(5, 0.125 * Double(1 << min(misses, 6)))
+    }
+
+    /// Sends `request`, again for a few seconds while nothing answers or the gateway reaches no node, so nothing ran;
+    /// never one that timed out, which may have.
+    static func send(_ request: URLRequest) async throws -> (Data, URLResponse) {
+        for misses in 0... {
+            do {
+                let (data, response) = try await URLSession.shared.data(for: request)
+                guard misses < 5, [502, 503, 530].contains((response as? HTTPURLResponse)?.statusCode ?? 0) else { return (data, response) }
+            } catch let error as URLError where misses < 5 && [.cannotConnectToHost, .networkConnectionLost, .cannotFindHost, .notConnectedToInternet].contains(error.code) {
+            }
+            try await Task.sleep(for: .seconds(wait(misses)))
+        }
+        fatalError()
     }
 }
 
@@ -247,7 +274,7 @@ struct HTTPNode: NodeTransport {
     private var here: Bool { base.host() == "127.0.0.1" }
 
     var unreachable: String {
-        here ? "The node isn't answering on \(base.host() ?? ""):\(base.port ?? 0)." : String(localized: "Your devices aren’t answering.")
+        String(localized: here ? "It isn’t running on this Mac." : "Your devices aren’t answering.")
     }
 
     /// A request as the person signed in, if they are: a refused token is renewed once. To this Mac's own node, it's
@@ -274,17 +301,17 @@ struct HTTPNode: NodeTransport {
             plain.httpBody = body
         }
         var (request, token) = try await signed(plain)
-        var (data, response) = try await URLSession.shared.data(for: request)
+        var (data, response) = try await Retry.send(request)
         if let auth, (response as? HTTPURLResponse)?.statusCode == 401 {
             request.setValue("Bearer \(try await auth.token(stale: token))", forHTTPHeaderField: "Authorization")
-            (data, response) = try await URLSession.shared.data(for: request)
+            (data, response) = try await Retry.send(request)
         }
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         if status != 200 {
             struct Failure: Decodable { var error: String? }
             let error = (try? JSONDecoder().decode(Failure.self, from: data))?.error
             if auth != nil, status == 401 { throw Auth.SignedOut(message: error ?? String(localized: "Sign in again.")) }
-            throw NodeError(error ?? (!here && status >= 500 ? String(localized: "Your devices aren’t answering.") : "The node answered \(status)"))
+            throw NodeError(error ?? (!here && status >= 500 ? String(localized: "Your devices aren’t answering.") : String(localized: "That didn’t work. Try again.")))
         }
         return data
     }
@@ -476,10 +503,16 @@ struct NodeClient: Sendable {
     /// Runs an app's operation for an app screen: its input and result are JSON, whatever their shape.
     func call(app: String, op: String, input: Data, timeout: TimeInterval = 15) async throws -> Data {
         let input = try JSONSerialization.jsonObject(with: input, options: .fragmentsAllowed)
-        let data = try await transport.send("POST", "v1/call", body: try json(["app": app, "op": op, "input": input, "client": client]), timeout: timeout)
+        // Its id makes it run once, however often it's sent.
+        let data = try await transport.send("POST", "v1/call", body: try json(["id": Self.callID(), "app": app, "op": op, "input": input, "client": client]), timeout: timeout)
         let reply = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
         if let error = reply["error"] as? String { throw NodeError(error) }
         return try JSONSerialization.data(withJSONObject: reply["ok"] ?? NSNull(), options: .fragmentsAllowed)
+    }
+
+    /// Names a call wherever it's sent, so sent again it runs once.
+    static func callID() -> String {
+        (0..<8).map { _ in String(format: "%02x", UInt8.random(in: 0...255)) }.joined()
     }
 
     func page(app: String, screen: String, params: String, scope: String?) async throws -> String {
@@ -494,9 +527,10 @@ struct NodeClient: Sendable {
     /// request's do (a device that a phone asks matches bare paths). → its JSON reply.
     func api(_ method: String, _ path: String, body: Any?) async throws -> Any {
         var parts = URLComponents(string: path)
-        guard let bare = parts?.path, bare.hasPrefix("/v1/"), !bare.contains("..") else { throw NodeError("That isn't your device's.") }
+        guard let bare = parts?.path, bare.hasPrefix("/v1/"), !bare.contains("..") else { throw NodeError("That isn’t on your devices.") }
         var fields = body as? [String: Any] ?? [:]
         for item in parts?.queryItems ?? [] { fields[item.name] = item.value ?? "" }
+        if bare == "/v1/call", fields["id"] == nil { fields["id"] = Self.callID() }
         parts?.queryItems = nil
         let method = method.uppercased()
         let sent: Any? = method == "GET" ? (fields.isEmpty ? nil : fields) : (body is [String: Any] || body == nil ? fields : body)
@@ -548,9 +582,12 @@ struct NodeClient: Sendable {
         return try await post("v1/vault", body)["id"] as? String
     }
 
-    /// Asks this user for an item an app's need names, for an app screen's `one.vault(need)` → the request's id.
-    func requestItem(scope: String, app: String, need: String) async throws -> String? {
-        try await post("v1/vault/request", ["scope": scope, "app": app, "need": need])["id"] as? String
+    /// Asks this user for an item an app's need names, for an app screen's `one.vault(need)` → the request's id, and
+    /// the scope it's in (their own, where they can't change the page's).
+    func requestItem(scope: String, app: String, need: String) async throws -> (id: String, scope: String)? {
+        let out = try await post("v1/vault/request", ["scope": scope, "app": app, "need": need])
+        guard let id = out["id"] as? String, let scope = out["scope"] as? String else { return nil }
+        return (id, scope)
     }
 
     /// Requests for an item this user may answer, newest first: all, or one scope's, or one.
@@ -573,21 +610,19 @@ struct NodeClient: Sendable {
 
 }
 
-/// A failed join, said as what went wrong and what to do next, with the node's own words for whoever needs them.
+/// A failed join, said as what went wrong and what to do next.
 func joinFailure(_ error: Error) -> String {
-    let raw = NodeError(error.localizedDescription).message
-    let lower = raw.lowercased()
-    let next: String
+    let lower = NodeError(error.localizedDescription).message.lowercased()
     if lower.contains("already used") || lower.contains("expired") || lower.contains("refused") {
-        next = String(localized: "That pairing code has been used or has run out: each works once, for a few minutes. Make a new one on your other device, then try again.")
+        return String(localized: "That pairing code was used or has expired. Make a new one on your other device.")
     } else if lower.contains("already belongs") {
-        next = String(localized: "This device is already in an install. Remove it there first, or install the other context’s own app.")
+        let name = appName.hasPrefix("The ") ? String(appName.dropFirst(4)) : appName
+        return String(localized: "This device is already in another \(name). Remove it there first.")
     } else if lower.contains("decode") || lower.contains("invalid") || lower.contains("base") || lower.contains("parse") || lower.contains("bad") {
-        next = String(localized: "That isn’t a whole pairing code. Copy it again, all of it.")
+        return String(localized: "That isn’t a whole pairing code. Copy it again, all of it.")
     } else if lower.contains("timed out") || lower.contains("timeout") || lower.contains("connect") || lower.contains("unreachable") || lower.contains("no route") || lower.contains("network") {
-        next = String(localized: "Couldn’t reach the device that made the code. Check that it’s on and online (and so is this one), then try again.")
+        return String(localized: "Couldn’t reach the device that made the code. Check both are online, then try again.")
     } else {
-        next = String(localized: "Couldn’t join. Make a new pairing code on your other device and try again.")
+        return String(localized: "Couldn’t join. Make a new pairing code on your other device and try again.")
     }
-    return "\(next)\n(\(raw))"
 }

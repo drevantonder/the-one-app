@@ -13,7 +13,6 @@ name=$(field name) cli=$(field cli)
 # What a person calls the install where they read: a workplace's white label, which its people join with their work
 # email (join_domain), is shared, "the PTC App"; anyone else's is "your One App".
 if [ -n "$(field join_domain)" ]; then yours=${name/#The /the }; else yours="your ${name#The }"; fi
-commit=$(git -C "$root" rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
 
 stage=$(mktemp -d)/$cli
 trap 'rm -rf "$(dirname "$stage")"' EXIT
@@ -47,10 +46,8 @@ public static class WhiteLabel
     public const string Cli = $(quote "$cli");
     /// What a person calls the install: "your One App", or a workplace's, "the PTC App".
     public const string Yours = $(quote "$yours");
-    public const string Accent = $(quote "$(field accent)");
     /// The install's address, for a white label with one install; empty, the person gives it.
     public const string Address = $(quote "$(field address)");
-    public const string Commit = $(quote "$commit");
     /// The COM class the Widgets board starts this program as, for its widgets (Package.appxmanifest).
     public const string WidgetClass = "$widgets";
     /// Where this app keeps what it keeps on this computer.

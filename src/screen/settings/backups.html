@@ -1,20 +1,15 @@
 <style>
-  .status { display: flex; gap: 12px; align-items: flex-start; padding: 14px 16px; }
-  .status .badge { width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; flex: none; color: var(--c); background: color-mix(in srgb, var(--c) 15%, transparent); }
-  .status .badge .i { width: 20px; height: 20px; }
-  .status .headline { font-size: 20px; font-weight: 600; }
-  .status .main > div + div { margin-top: 3px; }
-  .status .button { margin-top: 12px; }
   .place { width: 30px; height: 30px; border-radius: 7px; display: grid; place-items: center; flex: none; color: white; background: var(--c); }
   .place .i { width: 16px; height: 16px; }
   .row.go { cursor: pointer; }
   .row .sub.error { color: var(--danger); white-space: normal; }
+  .row .sub.warn { color: var(--warn); display: flex; align-items: center; gap: 5px; }
   .field input { flex: 1; min-width: 0; font: inherit; text-align: right; border: 0; outline: none; background: none; color: var(--text); padding: 0; }
   .field input::placeholder { color: var(--faint); }
-  .ok { color: var(--ok); }
-  .choice .check { color: var(--accent); visibility: hidden; }
+  .choice .check { color: var(--tint); visibility: hidden; }
   .choice.on .check { visibility: visible; }
   .actions { margin-top: 18px; text-align: right; }
+  .row[aria-disabled] { pointer-events: none; color: var(--muted); }
 </style>
 <div class="large-title">Backups</div>
 <div id="backups"></div>
@@ -48,42 +43,48 @@
     const failing = places.filter((p) => p.problem).sort((a, b) => a.problem.since - b.problem.since)[0];
     const problem = failing?.problem;
     const newest = places.map((p) => p.last).filter(Boolean).sort((a, b) => b.time - a.time)[0];
-    let lines;
-    if (problem) {
-      const head = failing.last ? `Not backed up to ${failing.title} since ${one.ago(failing.last.time, { long: true })}` : `Not backed up to ${failing.title} yet`;
-      lines = [`<div class="headline">${one.esc(head)}</div>`, `<div class="error">${one.esc(problem.text)}</div>`, `<div class="error">${one.esc(problem.fix)}</div>`];
-    } else if (newest) lines = [`<div class="headline">Backed up ${one.esc(one.ago(newest.time, { long: true }))}</div>`];
-    else if (!places.length) lines = ['<div class="headline">Not backed up</div>'];
-    else lines = ['<div class="headline">Backing up…</div>'];
-    const [icon, color] = problem ? ["exclamation-mark", "var(--danger)"] : newest ? ["check", "var(--ok)"] : ["hard-drive", "var(--muted)"];
-    const button = places.length ? `<button class="button" id="now"${Date.now() - asked < 10000 ? " disabled" : ""}>${problem ? "Try Again" : "Back Up Now"}</button>` : "";
+    const waiting = Date.now() - asked < 10000;
+    // Fine says nothing: a problem shows on top, with what fixes it, and its place's row says what's wrong in a few
+    // words; otherwise each place says when it last backed up. The last backup is worth saying once it's missed a run.
+    const missed = failing?.last && Date.now() - failing.last.time >= 3600000;
+    const top = problem
+      ? one.problem({ title: `Couldn't back up to ${failing.title}`,
+          text: [missed && `Last backed up ${one.ago(failing.last.time, { long: true })}.`, problem.fix].filter(Boolean).join(" "), action: waiting ? null : { label: "Back Up Now", run: backUpNow } })
+      : !places.length ? one.empty("Nothing is backed up yet.", admin ? { label: "Add Place…", run: addPlace } : null) : "";
     const snapshots = (backups.snapshots || []).slice(0, 8);
-    return `<div class="list"><div class="status"><span class="badge" style="--c:${color}">${one.icon(icon)}</span><div class="main">${lines.join("")}${button}</div></div></div>
+    return `${top}
       ${error ? `<p class="footer error">${one.esc(error)}</p>` : ""}
-      <h2 class="section">Places</h2>
-      <div class="list"${places.length || admin ? "" : " hidden"}>${places.map((p, n) => `<div class="row go" data-place="${n}">${placeIcon(p.kind)}<div class="main">
-          <div class="title" style="font-weight:400"><span>${one.esc(p.title)}</span>${p.last && !p.problem ? `<span class="when">${one.esc(when(p.last.time))}</span>` : ""}</div>
-          ${p.problem ? `<div class="sub error">${one.esc(p.problem.text)}</div>` : `<div class="sub">${one.esc(p.kind === "folder" ? `Disk on ${name(p.device)}` : `Off-site · ${p.where}`)}</div>`}
+      ${places.length ? `<h2 class="section">Places</h2>
+      <div class="list">${places.map((p, n) => `<div class="row go" data-place="${n}">${placeIcon(p.kind)}<div class="main">
+          <div class="title"><span>${one.esc(p.title)}</span></div>
+          ${p.problem ? `<div class="sub warn">${one.icon("warning-circle-fill")}${one.esc(p.problem.status)}</div>`
+            : `<div class="sub">${one.esc(p.last ? `Backed up ${one.ago(p.last.time, { long: true })}` : p.kind === "folder" ? `Disk on ${name(p.device)}` : `Off-site · ${p.where}`)}</div>`}
         </div><span class="chev">${one.icon("caret-right")}</span></div>`).join("")}
-        ${admin ? `<div class="row plain go" id="add"><div class="main"><div class="title"><span style="color:var(--accent)">Add Place…</span></div></div></div>` : ""}</div>
+        ${places.length && !problem ? waiting ? backingUp : `<div class="row plain go" id="now"><div class="main"><div class="title"><span style="color:var(--tint)">Back Up Now</span></div></div></div>` : ""}
+        ${admin ? `<div class="row plain go" id="add"><div class="main"><div class="title"><span style="color:var(--tint)">Add Place…</span></div></div></div>` : ""}</div>` : ""}
       <p class="footer">${admin ? "" : "Only admins add and remove places. "}Encrypted before it leaves.</p>
       ${snapshots.length ? `<h2 class="section">Snapshots</h2><div class="list">${snapshots.map((s, n) => `<div class="row plain go" data-snapshot="${n}"><div class="main"><div class="title"><span>${one.esc(when(s.time, true))}</span></div></div><span class="chev">${one.icon("caret-right")}</span></div>`).join("")}</div>` : ""}`;
   });
 
+  // Backing up, said in the row Back Up Now was, from the tap until the places say how it went.
+  const backingUp = `<div class="row plain" id="backing-up" role="status"><div class="main"><div class="title"><span class="muted" style="display:flex;align-items:center;gap:8px"><span class="spinner small"></span>Backing Up…</span></div></div></div>`;
+  async function backUpNow() {
+    asked = Date.now();
+    error = "";
+    document.getElementById("now")?.replaceWith(Object.assign(document.createElement("div"), { innerHTML: backingUp }).firstChild);
+    try {
+      await one.api("POST", "/v1/backups/now", {});
+    } catch (err) {
+      error = one.plain(err).title;
+      asked = 0;
+    }
+    setTimeout(draw, 10000);
+    return draw();
+  }
+
   document.addEventListener("click", async (e) => {
     if (e.target.closest(".sheet")) return;
-    if (e.target.closest("#now")) {
-      asked = Date.now();
-      error = "";
-      e.target.closest("#now").disabled = true;
-      try {
-        await one.api("POST", "/v1/backups/now", {});
-      } catch (err) {
-        error = one.plain(err).title;
-      }
-      setTimeout(draw, 10000);
-      return draw();
-    }
+    if (e.target.closest("#now")) return backUpNow();
     if (e.target.closest("#add")) return addPlace();
     const place = e.target.closest("[data-place]");
     if (place) return openPlace(backups.places[place.dataset.place]);
@@ -92,16 +93,22 @@
   });
 
   // A place's own page: what's wrong and its fix, where it is, its last backup, its item in the Vault, and stopping.
-  async function openPlace(p) {
+  // It opens at once with what's known; Edit in Vault shows once the Vault says it has the place's item.
+  function openPlace(p) {
     const sheet = one.sheet({ title: p.title, onClose: draw });
-    const item = await one.api("GET", "/v1/vault?scope=global").then((items) => items.find((it) => it.id === p.id)).catch(() => null);
     const where = p.kind === "folder" ? [["Folder", p.where], ["Disk on", name(p.device)]] : [["Bucket", p.where], ["Endpoint", p.endpoint]];
-    sheet.body.innerHTML = `${p.problem ? `<div class="list"><div class="row plain"><div class="main"><div class="sub wrap error">${one.esc(p.problem.text)}</div><div class="sub wrap" style="color:var(--text)">${one.esc(p.problem.fix)}</div></div></div></div>` : ""}
+    sheet.body.innerHTML = `${p.problem ? one.problem({ title: one.plain(p.problem.text).title, text: p.problem.fix }) : ""}
       <div style="margin-top:18px">${one.info([...where, ["Last backup", p.last && `${when(p.last.time, true)}, ${name(p.last.device)}`]])}</div>
-      ${item ? `<div class="list" style="margin-top:18px"><div class="row plain go" id="vault"><div class="main"><div class="title"><span>Edit in Vault</span></div></div><span class="chev">${one.icon("caret-right")}</span></div></div>` : ""}
+      <div class="list" style="margin-top:18px" id="in-vault"><div class="row plain go" id="vault" aria-disabled="true"><div class="main"><div class="title"><span>Edit in Vault</span></div></div><span class="spinner small muted" aria-hidden="true"></span></div></div>
       ${admin ? `<div class="list" style="margin-top:18px"><div class="row plain go" id="stop"><div class="main"><div class="title"><span class="error">Stop Backing Up Here</span></div></div></div></div>` : ""}
       <div id="confirm"></div>`;
-    sheet.body.querySelector("#vault")?.addEventListener("click", () => one.open("vault", { scope: "global", id: p.id }));
+    one.api("GET", "/v1/vault?scope=global").then((items) => items.some((it) => it.id === p.id)).catch(() => false).then((there) => {
+      const row = sheet.body.querySelector("#vault");
+      if (!there) return sheet.body.querySelector("#in-vault").remove();
+      row.removeAttribute("aria-disabled");
+      row.querySelector(".spinner").outerHTML = `<span class="chev">${one.icon("caret-right")}</span>`;
+      row.addEventListener("click", () => one.open("vault", { scope: "global", id: p.id }));
+    });
     sheet.body.querySelector("#stop")?.addEventListener("click", async () => {
       const stopped = await one.confirm(sheet.body.querySelector("#confirm"), {
         title: `Stop backing up to ${p.title}?`, detail: "What's there now stays there.", action: "Stop Backing Up", danger: true,
@@ -136,7 +143,7 @@
              <p class="footer">Use a key that reaches only this bucket. It stays in the Vault.</p>`
           : `<h2 class="section">A Disk on ${one.esc(name(backups.here))}</h2><div class="list">${disks.map((d) => `<div class="row plain go choice${v.path === d.path ? " on" : ""}" data-disk="${one.esc(d.path)}" data-name="${one.esc(d.name)}"><span class="place" style="--c:#8e8e93">${one.icon("hard-drive-fill")}</span><div class="main"><div class="title"><span>${one.esc(d.name)}</span></div><div class="sub">${one.esc(`Plugged into ${name(backups.here)} · ${size(d.free)} free`)}</div></div><span class="check">${one.icon("check")}</span></div>`).join("")}${field("path", "Folder", "/Volumes/…")}</div>
              <p class="footer">It's backed up while it's plugged in.</p>`}
-        ${tried.length ? `<h2 class="section">Tried It</h2><div class="list">${tried.map((t) => `<div class="row plain"><div class="main"><div class="title"><span>${one.esc(t.step)}</span><span class="${t.error ? "error" : "ok"}">${one.icon(t.error ? "x" : "check")}</span></div>${t.error ? `<div class="sub wrap error">${one.esc(t.error)}</div>` : ""}</div></div>`).join("")}</div>
+        ${tried.length ? `<h2 class="section">Tried It</h2><div class="list">${tried.map((t) => `<div class="row plain"><div class="main"><div class="title"><span>${one.esc(t.step)}</span><span class="${t.error ? "error" : ""}">${one.icon(t.error ? "x" : "check")}</span></div>${t.error ? `<div class="sub wrap error">${one.esc(one.plain(t.error).title)}</div>` : ""}</div></div>`).join("")}</div>
           ${added ? '<p class="footer">The first backup has started. After that, every hour that something changes.</p>' : ""}` : ""}
         ${problem ? `<p class="footer error">${one.esc(problem)}</p>` : ""}
         ${added ? "" : `<div class="actions"><button class="button primary" id="add-it"${ready() && !busy ? "" : " disabled"}>${busy ? '<span class="spinner small"></span>' : ""}Add</button></div>`}`;

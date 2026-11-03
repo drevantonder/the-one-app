@@ -40,7 +40,7 @@ object Scanner {
     }
 
     suspend fun scan(activity: ComponentActivity): JsonArray {
-        if (!available(activity)) throw NodeError("This phone can’t scan documents. Choose the files instead.")
+        if (!available(activity)) throw NodeError("This device can’t scan documents. Choose the files instead.")
         val options = GmsDocumentScannerOptions.Builder()
             .setScannerMode(GmsDocumentScannerOptions.SCANNER_MODE_FULL)
             .setResultFormats(GmsDocumentScannerOptions.RESULT_FORMAT_JPEG)
@@ -49,7 +49,7 @@ object Scanner {
         val start = suspendCancellableCoroutine { done ->
             GmsDocumentScanning.getClient(options).getStartScanIntent(activity)
                 .addOnSuccessListener { done.resume(it) }
-                .addOnFailureListener { done.resumeWithException(NodeError("The document scanner didn’t start: ${it.message}")) }
+                .addOnFailureListener { done.resumeWithException(NodeError("Couldn’t open the scanner. Choose the files instead.")) }
         }
         val result = suspendCancellableCoroutine<ActivityResult> { done ->
             lateinit var launcher: ActivityResultLauncher<IntentSenderRequest>

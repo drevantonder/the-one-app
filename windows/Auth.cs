@@ -133,7 +133,7 @@ public sealed class Auth
         }
         catch
         {
-            throw new Exception($"The sign-in service at {Address} isn’t answering.");
+            throw new Exception("Can’t reach that address. Check it, and that you’re online.");
         }
     }
 

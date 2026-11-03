@@ -355,6 +355,9 @@ func (ds *devices) giveBackVM(ctx context.Context, v *vm, why string) error {
 // idleBorrowed, as a Linux device's.
 const idleLasting = time.Hour
 
+// A borrowed copy left stopped this long without a call is given back: a call starts it again before then.
+const idleStoppedCopy = 2 * time.Minute
+
 // A device nobody has borrowed, called or watched for idlePause is paused, and after idleStop shut down: each holds
 // cores and gigabytes while it runs.
 const (
@@ -374,6 +377,10 @@ func (ds *devices) tendVMs(ctx context.Context) {
 		limit := idleBorrowed
 		if v.Of == "" && !strings.HasPrefix(v.Name, poolPrefix) {
 			limit = idleLasting
+		} else if v.state(ctx) == "stopped" {
+			// A throwaway copy that stopped (its emulator killed for memory, or a reinstall mid-boot) holds its disk
+			// and its loan for nothing: its borrower borrows another.
+			limit = idleStoppedCopy
 		}
 		if ds.idle(name) < limit {
 			continue
@@ -763,17 +770,11 @@ func (ds *devices) runKinds(ctx context.Context, op, name string, here bool, in 
 		}
 		return fmt.Sprintf("%s\nThe link works for %d minutes, on the person's own devices.", url, m), true, nil
 	case "screen":
-		if !k.running(ctx, v) {
-			return nil, true, fmt.Errorf("%s is stopped: start it first", v.Name)
-		}
-		if err := ds.awake(ctx, v); err != nil {
-			return nil, true, err
-		}
 		width := 640
 		if w, ok := in["width"].(float64); ok {
 			width = min(max(int(w), 160), 1920)
 		}
-		r, err := ds.screenVM(ctx, v, width)
+		r, err := ds.screenNow(ctx, v.Name, width)
 		return r, true, err
 	case "tools":
 		return vmTools(k), true, nil

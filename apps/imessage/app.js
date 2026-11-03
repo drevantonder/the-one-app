@@ -2,17 +2,25 @@
 // this app is what people and agents use, wherever they are.
 
 /// Runs one of the imessage sidecar's operations, wherever it runs for the caller. When none of their devices runs it,
-/// says what's needed instead of how the call failed.
+/// says what's needed instead of how the call failed; when a chat isn't found, where to find it.
 async function sidecar(ctx, op, input) {
   try {
     return await ctx.sidecars.imessage[op](input);
   } catch (err) {
-    if (String(err.message).includes("no device runs imessage for you")) throw new Error(NEEDS);
+    const why = String(err.message);
+    if (why.includes("no device runs imessage for you")) throw new Error(NEEDS);
+    if (/^no chat (called|with) /.test(why)) throw new Error(`${why}: imessage_chats lists the chats; anyone else by their phone number with its country code, or email address`);
+    if (why.includes("matches several chats")) throw new Error(`${why}. Give more of the name, or the chat's id from imessage_chats`);
     throw err;
   }
 }
 
 const NEEDS = "iMessage runs on a Mac with The One App open, and none of yours is online with it.";
+
+const CHAT = "the chat: its name as imessage_chats gives it, a part of the name only one chat has, or its id; or a phone number with its country code (+61 400 000 000) or an email address";
+const SINCE = { type: "string", description: "only messages after this: an ISO 8601 date (2026-11-01) or date-time (2026-11-01T09:00), in the Mac's time zone without an offset" };
+const LIMIT = { type: "integer", description: "at most this many; default 30" };
+const MESSAGE = "{ time, from, text, attachments }, time ISO 8601 in the Mac's time zone, from the sender's name from Contacts (or their number), or me for the person, and attachments the files' names";
 
 export default {
   name: "imessage",
@@ -22,44 +30,82 @@ export default {
   description: "Messages on your Mac, for your apps and agents",
   connector: true,
   needs: "Needs a Mac",
-  instructions: "iMessage is the person's Messages on their Mac, iMessage and SMS. imessage_chats lists recent chats; imessage_read reads one, newest last; imessage_search finds messages. imessage_send sends a real message to a real person: send only what the user asked to send, to whom they asked. Reading never marks a message read.",
+  instructions: "iMessage is the person's Messages on their Mac, iMessage and SMS. imessage_chats lists recent chats; imessage_read reads one, newest last; imessage_search finds messages. Each list pages back with limit and skip. imessage_send sends a real message to a real person: send only what the user asked to send, to whom they asked. Reading never marks a message read.",
   uses: { sidecars: ["imessage"] },
 
   ops: {
     accounts: {
       reads: true,
-      description: "The Macs it runs on: each { account, ok }, the device’s name, ok while it’s online.",
+      description: "The Macs iMessage runs on: each { account, ok }, account the Mac's name, ok while it's online.",
       input: { type: "object", properties: {} },
       run: async (ctx) => (await ctx.devices()).filter((s) => (s.sidecars || []).includes("imessage")).map((s) => ({ account: s.name, ok: s.online })),
     },
     sign_out: {
+      reads: false,
       confirm: true,
-      description: "Stop using iMessage on one of your devices: removes it from that device, for one of its owners.",
-      input: { type: "object", required: ["account"], properties: { account: { type: "string", description: "the device, by name" } } },
+      description: "Stop using iMessage on one of your Macs: removes it from that Mac, for one of its owners. The messages themselves stay as they are.",
+      input: { type: "object", required: ["account"], properties: { account: { type: "string", description: "the Mac's name, as imessage_accounts lists it" } } },
       run: (ctx, { account }) => {
         ctx.sidecar("imessage", account, false);
         return `iMessage is removed from ${account}.`;
       },
     },
     chats: {
-      description: "Recent chats, most recent first: who, when, the last message, and how many are unread.",
-      input: {"properties": {"limit": {"description": "at most this many; default 30", "type": "integer"}, "skip": {"description": "skip this many of the most recent, to page back", "type": "integer"}, "unread": {"description": "only chats with unread messages", "type": "boolean"}}, "type": "object"},
+      reads: true,
+      description: "Recent chats, most recent first, to see what's new or find a chat to read: each { chat, id, with, last, from, text, unread }, chat its name, id for imessage_read, with the people in a group, and last (an ISO 8601 time), from and text its last message. Page back with skip.",
+      input: {
+        type: "object",
+        properties: {
+          unread: { type: "boolean", description: "only chats with unread messages" },
+          limit: LIMIT,
+          skip: { type: "integer", description: "leave out this many of the most recent, to page back: 30 for the second page of 30" },
+        },
+      },
       run: (ctx, input) => sidecar(ctx, "chats", input),
     },
     read: {
-      description: "A chat's messages, newest last. Page back with skip.",
-      input: {"properties": {"chat": {"description": "the chat's name, a part of it only one chat has, a phone number or email address, or an id chats gives", "type": "string"}, "limit": {"description": "this many; default 30", "type": "integer"}, "since": {"description": "only messages after this: an ISO 8601 date or date-time", "type": "string"}, "skip": {"description": "skip this many of the newest, to read further back", "type": "integer"}}, "required": ["chat"], "type": "object"},
+      reads: true,
+      description: `One chat's messages, newest last, without marking them read: each ${MESSAGE}. Page back with skip.`,
+      input: {
+        type: "object",
+        required: ["chat"],
+        properties: {
+          chat: { type: "string", description: CHAT },
+          since: SINCE,
+          limit: LIMIT,
+          skip: { type: "integer", description: "leave out this many of the newest, to read further back: 30 for the 30 before the latest 30" },
+        },
+      },
       run: (ctx, input) => sidecar(ctx, "read", input),
     },
     search: {
-      description: "Messages containing some text, across chats or in one, newest last.",
-      input: {"properties": {"chat": {"description": "only in this chat", "type": "string"}, "limit": {"description": "at most this many; default 30", "type": "integer"}, "query": {"description": "text to look for, case-insensitive", "type": "string"}, "since": {"description": "only messages after this: an ISO 8601 date or date-time", "type": "string"}, "skip": {"description": "skip this many of the newest matches, to page back", "type": "integer"}}, "required": ["query"], "type": "object"},
+      reads: true,
+      description: `Messages containing some text, across every chat or in one, newest last: to find something said when you don't know which chat. Each is as imessage_read gives them, with chat, its chat's name. Page back with skip.`,
+      input: {
+        type: "object",
+        required: ["query"],
+        properties: {
+          query: { type: "string", description: "text to look for, any case" },
+          chat: { type: "string", description: `only in this chat: ${CHAT}` },
+          since: SINCE,
+          limit: LIMIT,
+          skip: { type: "integer", description: "leave out this many of the newest matches, to page back" },
+        },
+      },
       run: (ctx, input) => sidecar(ctx, "search", input),
     },
     send: {
+      reads: false,
       confirm: true,
-      description: "Send an iMessage from the person's account, to a phone number, an email address or a chat. This sends a real message to a real person.",
-      input: {"properties": {"text": {"description": "the message", "type": "string"}, "to": {"description": "a phone number with its country code, an email address, or a chat as chats names it", "type": "string"}}, "required": ["to", "text"], "type": "object"},
+      description: "Send an iMessage from the person's account to a chat, a phone number or an email address. It sends a real message to a real person and can't be taken back: only what the person asked to send, to whom they asked. Says to whom it went.",
+      input: {
+        type: "object",
+        required: ["to", "text"],
+        properties: {
+          to: { type: "string", description: "a phone number with its country code (+61 400 000 000), an email address, or a chat: its name or id as imessage_chats gives it" },
+          text: { type: "string", description: "the message, exactly as the person approved it" },
+        },
+      },
       run: (ctx, input) => sidecar(ctx, "send", input),
     },
   },

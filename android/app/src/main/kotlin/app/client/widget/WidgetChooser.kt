@@ -55,11 +55,11 @@ class WidgetChooser : ComponentActivity() {
         setResult(RESULT_CANCELED, done)
         if (widgetId == AppWidgetManager.INVALID_APPWIDGET_ID) return finish()
         HomeWidgets.start(this)
-        Glyphs.load(this)
+        Glyphs.loadSoon(this)
         setContent {
             val shown by HomeWidgets.shown.collectAsState()
             LaunchedEffect(Unit) { HomeWidgets.refresh() }
-            Theme(shown.kept?.accent ?: BuildConfig.ACCENT, Appearance.Automatic) {
+            Theme(Appearance.Automatic) {
                 Chooser(shown, widgetId) { w ->
                     HomeWidgets.choose(widgetId, w.id, w.title)
                     setResult(RESULT_OK, done)
@@ -81,7 +81,7 @@ private fun Chooser(shown: HomeWidgets.Shown, widgetId: Int, choose: (KeptWidget
             Spacer(Modifier.height(4.dp))
             Text("Pick which of your pages’ widgets this shows.", style = Type.subheadline, color = p.secondary)
         }
-        if (!shown.signedIn) return@Column Unavailable("Not Signed In", "Sign in to ${BuildConfig.NAME} to see your pages’ widgets.")
+        if (!shown.signedIn) return@Column Unavailable("Not Signed In", "Sign in to ${BuildConfig.NAME} to see your pages.")
         if (widgets.isEmpty()) return@Column Unavailable("No Widgets Yet", "Open ${BuildConfig.NAME} to see your pages, and their widgets show up here.")
         val pages = widgets.groupBy { it.scope }
         LazyColumn(Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -97,9 +97,9 @@ private fun Chooser(shown: HomeWidgets.Shown, widgetId: Int, choose: (KeptWidget
                                 Modifier.fillMaxWidth().clickable { choose(w) }.padding(horizontal = 16.dp, vertical = 13.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                Box(Modifier.padding(end = 14.dp)) { AppTile(TileLook(w.icon, w.app, w.color), 30.dp, w.title) }
+                                Box(Modifier.padding(end = 14.dp)) { AppTile(TileLook(w.icon, w.app, w.color, w.image, w.imageKind), 30.dp, w.title) }
                                 Text(w.title, Modifier.weight(1f), style = Type.body, color = p.label, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                if (w.id == chosen) Symbol("check", p.accent, 18.dp)
+                                if (w.id == chosen) Symbol("check", p.tint, 18.dp)
                             }
                         }
                     }

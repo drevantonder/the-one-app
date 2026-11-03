@@ -252,8 +252,8 @@ export class Auth extends DurableObject {
         return new Response(meta.body, { status: meta.status, headers: { "content-type": "application/json", "access-control-allow-origin": "*" } });
       }
       const name = this.auth.options.appName;
-      // What its pages look like: the white label's name and accent.
-      const look = { name, accent: this.env.ACCENT };
+      // What its pages say: the white label's name, and what a person joins ("your One App").
+      const look = { name, yours: this.env.YOURS };
       const google = this.env.SIGN_IN === "google" ? this.env.JOIN_DOMAIN : null;
       const tried = this.env.SIGN_IN === "try";
       if (path === "/sign-in" && request.method === "GET") return html(tried ? tryPage({ ...look, person: this.env.TRY_NAME }) : signInPage({ ...look, google }));
@@ -267,7 +267,7 @@ export class Auth extends DurableObject {
       if (path === "/invite" && request.method === "GET") return html(invitePage({ ...look, tried, google }));
       if (path === "/invite/about" && request.method === "POST") return json(await this.inviteAbout(await request.json()));
       if (path === "/invite/google" && request.method === "POST" && google) return await this.joinWithGoogle(request, await request.json());
-      if (path === "/passkeys" && request.method === "GET" && !tried) return html(passkeysPage(look));
+      if (path === "/passkeys" && request.method === "GET" && !tried) return html(passkeysPage(look), { framed: true });
       return new Response("not found", { status: 404 });
     } catch (err) {
       // Our own refusals have a numeric status; Better Auth's say theirs in statusCode.
@@ -697,8 +697,9 @@ function fresh(session) {
   return Date.now() - new Date(session.session.createdAt).getTime() < FRESH;
 }
 
-function html(text) {
-  return new Response(text, { headers: { "content-type": "text/html; charset=utf-8", "content-security-policy": "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; frame-ancestors 'none'" } });
+/// A page, framed by nothing, or with `framed`, only by this site's own (the web client shows Passkeys beside its sidebar).
+function html(text, { framed = false } = {}) {
+  return new Response(text, { headers: { "content-type": "text/html; charset=utf-8", "content-security-policy": `default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; frame-ancestors ${framed ? "'self'" : "'none'"}` } });
 }
 
 export default {

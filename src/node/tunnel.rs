@@ -1,6 +1,8 @@
 //! The install's Cloudflare Tunnel, which the kernel's gateway reaches nodes through with no public address
 //! (`kernel set node-url cloudflare:<id>`): an admin keeps its token as a Tunnel item in Everyone's Vault, and every
-//! device of the install runs a connector for it, so Cloudflare sends each request to whichever is up.
+//! device of the install runs a connector for it, so Cloudflare sends each request to whichever is up. A Mac leaves it
+//! to the others while one that isn't a Mac is online: Cloudflare spreads requests evenly over connectors, and a
+//! laptop's (asleep, on Wi-Fi, building an update) held a quarter of them for seconds while servers answered in ms.
 
 use sha2::Digest;
 
@@ -28,6 +30,10 @@ impl Node {
     pub(super) fn follow_tunnel(&self) {
         let wanted = self.with(|i| {
             if i.r.members.compute(&self.0.id).is_none() {
+                return Ok(None);
+            }
+            let mac = |target: &str| target.contains("apple");
+            if mac(crate::config::TARGET) && i.r.members.computes().any(|d| d.key != self.0.id && i.online(&d.key) && i.builds.get(&d.key).is_some_and(|b| !b.target.is_empty() && !mac(&b.target))) {
                 return Ok(None);
             }
             let Some(item) = i.vault.values().filter(|it| it.kind == TUNNEL && it.apps.contains(members::APP)).max_by_key(|it| it.made) else { return Ok(None) };
@@ -84,9 +90,21 @@ impl Node {
 }
 
 /// Runs a connector for the tunnel `token` is for until the task is aborted, starting it again whenever it stops,
-/// with its pid and log in the node's folder `dir`.
+/// with its pid and log in the node's folder `dir`. One the node before this one left running for the same token (it
+/// updated itself) is kept, so the install's address never loses this device.
 async fn connect(token: String, dir: PathBuf) {
     let pid = dir.join("cloudflared.pid");
+    // Which token the connector there runs for, by its hash.
+    let for_token = dir.join("cloudflared.token");
+    let hash = data_encoding::HEXLOWER.encode(&sha2::Sha256::digest(token.as_bytes()));
+    if let Some(id) = running(&pid).filter(|_| std::fs::read_to_string(&for_token).is_ok_and(|h| h.trim() == hash)) {
+        tracing::info!("this device keeps the connector for the install's tunnel it ran before (pid {id})");
+        let kept = Kept(id.parse().unwrap_or(0));
+        while unsafe { libc::kill(kept.0, 0) } == 0 {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
+        tracing::warn!("this device's tunnel connector stopped: starting it again");
+    }
     let mut wait = Duration::from_secs(5);
     loop {
         stop_previous(&pid);
@@ -99,10 +117,13 @@ async fn connect(token: String, dir: PathBuf) {
                 .stdin(std::process::Stdio::null())
                 .stdout(std::process::Stdio::null())
                 .stderr(std::fs::File::create(dir.join("cloudflared.log"))?)
-                .kill_on_drop(true)
                 .spawn()?;
+            // Stopped with SIGTERM, so it takes its connections off Cloudflare's list before it goes: one killed
+            // outright leaves them there, and Cloudflare sends requests to them for seconds.
+            let _stop = Kept(child.id().map_or(0, |id| id as i32));
             if let Some(id) = child.id() {
                 std::fs::write(&pid, id.to_string())?;
+                std::fs::write(&for_token, &hash)?;
             }
             tracing::info!("this device runs a connector for the install's tunnel");
             let started = Instant::now();
@@ -118,6 +139,17 @@ async fn connect(token: String, dir: PathBuf) {
         }
         tokio::time::sleep(wait).await;
         wait = (wait * 2).min(Duration::from_secs(600));
+    }
+}
+
+/// A connector kept from the node before, stopped with the task keeping it, as one it started is.
+struct Kept(i32);
+
+impl Drop for Kept {
+    fn drop(&mut self) {
+        if self.0 > 0 {
+            unsafe { libc::kill(self.0, libc::SIGTERM) };
+        }
     }
 }
 

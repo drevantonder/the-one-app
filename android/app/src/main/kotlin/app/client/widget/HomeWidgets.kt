@@ -28,7 +28,9 @@ import app.client.json
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
@@ -45,8 +47,9 @@ import java.util.concurrent.TimeUnit
 /** Every page's widgets as the app last saw them. */
 @Serializable
 data class Kept(
-    val accent: String? = null,
     val widgets: List<KeptWidget> = emptyList(),
+    /** When they were fetched, in ms. */
+    val at: Long = 0,
 )
 
 /** A widget on one of the pages, its tree at each size as `GET /v1/widgets` gave it. */
@@ -58,6 +61,8 @@ data class KeptWidget(
     val title: String,
     val icon: String? = null,
     val color: String? = null,
+    val image: String? = null,
+    val imageKind: String? = null,
     /** Whether its app has a screen to open. */
     val opens: Boolean = false,
     val app: String,
@@ -71,7 +76,13 @@ data class KeptWidget(
 
 object HomeWidgets {
     /** What every home-screen widget draws from. */
-    data class Shown(val kept: Kept? = null, val choices: Map<Int, String> = emptyMap(), val signedIn: Boolean = false)
+    data class Shown(
+        val kept: Kept? = null,
+        val choices: Map<Int, String> = emptyMap(),
+        val signedIn: Boolean = false,
+        /** Buttons and toggles tapped whose operations aren't done: each toggle's value, as it's drawn till then. */
+        val doing: Map<String, Boolean> = emptyMap(),
+    )
 
     val shown = MutableStateFlow(Shown())
     private lateinit var app: Application
@@ -83,9 +94,17 @@ object HomeWidgets {
     fun start(context: Application) {
         if (::app.isInitialized) return
         app = context
-        val kept = runCatching { json.decodeFromString(Kept.serializer(), file.readText()) }.getOrNull()
-        shown.value = Shown(kept, choices(), store.signIn.signedIn)
+        shown.value = Shown(null, choices(), store.signIn.signedIn)
+        // Read in the background, not as the app opens; unless something newer came first, or it signed out.
+        scope.launch {
+            val kept = runCatching { json.decodeFromString(Kept.serializer(), file.readText()) }.getOrNull()
+            if (kept != null) shown.update { if (it.kept == null && it.signedIn) it.copy(kept = kept) else it }
+            read.complete(Unit)
+        }
     }
+
+    /** Done once what was kept is read, for the home screen, which draws once. */
+    val read = CompletableDeferred<Unit>()
 
     fun start(context: Context) = start(context.applicationContext as Application)
 
@@ -100,6 +119,18 @@ object HomeWidgets {
     }
 
     fun title(widgetId: Int): String? = prefs.getString("title.$widgetId", null)
+
+    /** A button or toggle tapped: drawn so at once. */
+    suspend fun doing(which: String, on: Boolean) {
+        shown.update { it.copy(doing = it.doing + (which to on)) }
+        runCatching { HomeWidget().updateAll(app) }
+    }
+
+    /** Its operation done, or not: drawn from what the widgets say. */
+    fun done(which: String) {
+        shown.update { it.copy(doing = it.doing - which) }
+        redraw()
+    }
 
     fun forget(widgetIds: IntArray) {
         prefs.edit().apply { widgetIds.forEach { remove("choice.$it"); remove("title.$it") } }.apply()
@@ -116,17 +147,21 @@ object HomeWidgets {
             array.mapNotNull { e ->
                 val w = runCatching { json.decodeFromJsonElement(WidgetInfo.serializer(), e) }.getOrNull() ?: return@mapNotNull null
                 val a = store.app(w.app)?.takeIf { it.scopes.contains(p.scope) } ?: return@mapNotNull null
-                KeptWidget(p.scope, p.title, w.title ?: a.label, a.icon, a.color, a.hasScreens, w.app, w.widget, e)
+                KeptWidget(p.scope, p.title, w.title ?: a.label, a.icon, a.color, a.image, a.imageKind, a.hasScreens, w.app, w.widget, e)
             }
         }
         // A refresh that saw nothing keeps what was: the home screen goes blank only for a reason.
         if (widgets.isEmpty()) return
-        val kept = Kept(store.config?.accent, widgets)
+        val now = System.currentTimeMillis()
+        val kept = Kept(widgets, now)
         val signedIn = store.signIn.signedIn
-        if (kept == shown.value.kept && signedIn == shown.value.signedIn) return
-        shown.value = shown.value.copy(kept = kept, signedIn = signedIn)
+        val was = shown.value
+        // The same as before, only newer: kept so, and redrawn only if they said they were old.
+        val same = kept.copy(at = 0) == was.kept?.copy(at = 0) && signedIn == was.signedIn
+        shown.value = was.copy(kept = kept, signedIn = signedIn)
         scope.launch {
             runCatching { file.writeText(json.encodeToString(Kept.serializer(), kept)) }
+            if (same && now - was.kept!!.at < 3_600_000) return@launch
             redraw()
             if (saveImages(store, widgets)) redraw()
         }
@@ -159,8 +194,10 @@ object HomeWidgets {
             store.refreshWidgets(always = true)
         } catch (e: NodeError) {
             // Signed out while the app was away: the app forgets what it kept too, not only the widgets.
-            if (e.signedOut) withContext(Dispatchers.Main) { store.signedOut(e.message) }
+            if (e.signedOut) withContext(Dispatchers.Main) { store.signedOut(e.message) } else redraw()
         } catch (_: Exception) {
+            // Drawn again, to say how old what they show is.
+            redraw()
         }
     }
 

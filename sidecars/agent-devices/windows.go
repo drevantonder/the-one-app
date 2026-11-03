@@ -3,10 +3,15 @@ package main
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"image"
 	_ "image/png"
+	"io"
+	"log"
 	"net"
 	"os"
 	"os/exec"
@@ -26,6 +31,11 @@ import (
 // but none of this machine's own 127.0.0.1, where QEMU's own would put it at 10.0.2.2 for any program in Windows to
 // reach what only this machine's programs use; only its SSH comes in. A copy is a disk on top of a lasting device's base: a copy of its
 // disk taken when it's copied, kept for the next copy until the lasting device next stops.
+//
+// Stopping one keeps what it was doing (its memory and devices, as QEMU migrates them, the TPM's state too) in its
+// folder, beside the disk as it was then, and starting it carries on from there in seconds, not a boot of a minute
+// or more; a copy of a stopped device starts from its base's. Its disk is on AHCI, not NVMe, which QEMU can't
+// migrate.
 type windowsQEMU struct{}
 
 const (
@@ -76,7 +86,8 @@ func (w windowsQEMU) make(ctx context.Context, v *vm, from *vm) error {
 	}
 	v.Dir = filepath.Join(dataDir, "windows", v.Name)
 	v.Display = v.Port - 22220 + 10
-	v.CPUs, v.GB = 4, 4
+	// The size of the device it copies, which its saved state is for.
+	v.CPUs, v.GB = from.CPUs, from.GB
 	if err := os.MkdirAll(v.Dir, 0o700); err != nil {
 		return err
 	}
@@ -96,6 +107,10 @@ func (w windowsQEMU) make(ctx context.Context, v *vm, from *vm) error {
 			return err
 		}
 	}
+	// It starts from the base's saved state, if it has one: a link, which its start removes, leaving the base's.
+	if id, err := os.ReadFile(winFile(from, "base-state.id")); err == nil && os.Link(winFile(from, "base-state"), winFile(v, "state")) == nil {
+		os.WriteFile(winFile(v, "state.id"), id, 0o600)
+	}
 	return nil
 }
 
@@ -108,6 +123,8 @@ func (w windowsQEMU) base(ctx context.Context, from *vm) (string, error) {
 	}
 	tmp := base + ".part"
 	os.Remove(tmp)
+	os.Remove(winFile(from, "base-state"))
+	os.Remove(winFile(from, "base-state.id"))
 	if w.running(ctx, from) {
 		if _, err := monitor(from, "drive_backup -f d0 "+tmp+" qcow2"); err != nil {
 			return "", err
@@ -129,8 +146,14 @@ func (w windowsQEMU) base(ctx context.Context, from *vm) (string, error) {
 		if _, err := os.Stat(tmp); err != nil {
 			return "", fmt.Errorf("copying %s's disk failed", from.Name)
 		}
-	} else if _, err := run(ctx, "cp", "--reflink=auto", winFile(from, "disk.qcow2"), tmp); err != nil {
-		return "", err
+	} else {
+		if _, err := run(ctx, "cp", "--reflink=auto", winFile(from, "disk.qcow2"), tmp); err != nil {
+			return "", err
+		}
+		// Stopped, its saved state goes with this disk.
+		if id, err := os.ReadFile(winFile(from, "state.id")); err == nil && os.Link(winFile(from, "state"), winFile(from, "base-state")) == nil {
+			os.WriteFile(winFile(from, "base-state.id"), id, 0o600)
+		}
 	}
 	os.RemoveAll(winFile(from, "base-tpm"))
 	if _, err := run(ctx, "cp", winFile(from, "OVMF_VARS.fd"), winFile(from, "base-vars.fd")); err != nil {
@@ -152,7 +175,147 @@ func (windowsQEMU) running(_ context.Context, v *vm) bool {
 	return pid > 0 && syscall.Kill(pid, 0) == nil
 }
 
+// start carries on from where it was stopped, or boots it if it can't.
 func (w windowsQEMU) start(ctx context.Context, v *vm) error {
+	if err := w.carryOn(ctx, v); err == nil {
+		return nil
+	} else if !errors.Is(err, errNoState) {
+		log.Printf("%s didn't carry on where it stopped, so it boots: %v", v.Name, err)
+	}
+	if err := w.launch(ctx, v, ""); err != nil {
+		return err
+	}
+	// Ready once it answers over SSH: it signs in by itself.
+	if err := w.answers(ctx, v, 4*time.Minute, 5*time.Second); err != nil {
+		return fmt.Errorf("%s started but didn't answer in 4 minutes: look at it with screen", v.Name)
+	}
+	return nil
+}
+
+var errNoState = errors.New("no saved state")
+
+// carryOn starts it from its saved state, which goes once loaded: Windows changes its disk from then on.
+func (w windowsQEMU) carryOn(ctx context.Context, v *vm) error {
+	state := winFile(v, "state")
+	if _, err := os.Stat(state); err != nil {
+		return errNoState
+	}
+	defer w.forget(v)
+	id, _ := os.ReadFile(winFile(v, "state.id"))
+	if want := w.machine(ctx, v); want == "" || string(id) != want {
+		return errors.New("it was saved by another QEMU, or at another size")
+	}
+	if err := w.launch(ctx, v, state); err != nil {
+		w.halt(v)
+		return err
+	}
+	for start := time.Now(); ; time.Sleep(100 * time.Millisecond) {
+		status, err := monitor(v, "info status")
+		if err != nil || !w.running(ctx, v) {
+			w.halt(v)
+			return fmt.Errorf("loading its state: %v", err)
+		}
+		if !strings.Contains(status, "inmigrate") {
+			break
+		}
+		if time.Since(start) > 2*time.Minute {
+			w.halt(v)
+			return errors.New("loading its state took over 2 minutes")
+		}
+	}
+	w.forget(v)
+	if _, err := monitor(v, "cont"); err != nil {
+		w.halt(v)
+		return err
+	}
+	// Its SSH server answering is enough: a command over SSH takes seconds more, Windows starting PowerShell.
+	if err := w.greets(ctx, v, time.Minute); err != nil {
+		w.halt(v)
+		return errors.New("it carried on but its SSH didn't answer in a minute")
+	}
+	go w.setClock(v)
+	return nil
+}
+
+// greets waits for its SSH server's greeting.
+func (windowsQEMU) greets(ctx context.Context, v *vm, limit time.Duration) error {
+	ctx, cancel := context.WithTimeout(ctx, limit)
+	defer cancel()
+	for {
+		if c, err := net.DialTimeout("tcp", "127.0.0.1:"+strconv.Itoa(v.Port), time.Second); err == nil {
+			c.SetDeadline(time.Now().Add(2 * time.Second))
+			b := make([]byte, 4)
+			_, err = io.ReadFull(c, b)
+			c.Close()
+			if err == nil && string(b) == "SSH-" {
+				return nil
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+}
+
+// forget deletes its saved state.
+func (windowsQEMU) forget(v *vm) {
+	os.Remove(winFile(v, "state"))
+	os.Remove(winFile(v, "state.id"))
+}
+
+// answers waits for it to answer over SSH.
+func (w windowsQEMU) answers(ctx context.Context, v *vm, limit, every time.Duration) error {
+	ctx, cancel := context.WithTimeout(ctx, limit)
+	defer cancel()
+	for {
+		if _, err := w.ssh(ctx, v, "echo ready"); err == nil {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(every):
+		}
+	}
+}
+
+// setClock sets Windows' clock to this machine's: one carrying on from a pause or a saved state is behind by as long
+// as it was stopped. It takes seconds, which nothing waits for: the time goes once PowerShell asks for it.
+func (w windowsQEMU) setClock(v *vm) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	script := "[Console]::Out.WriteLine('time?'); [Console]::Out.Flush(); " +
+		"Set-Date -Date ([DateTimeOffset]::FromUnixTimeMilliseconds([long]@($input)[0]).LocalDateTime) | Out-Null"
+	var utf16 []byte
+	for _, r := range script {
+		utf16 = append(utf16, byte(r), byte(r>>8))
+	}
+	cmd := exec.CommandContext(ctx, "ssh", append(w.sshArgs(v, "-p"), windowsUser+"@127.0.0.1",
+		"powershell -NoProfile -NonInteractive -EncodedCommand "+base64.StdEncoding.EncodeToString(utf16))...)
+	in, _ := cmd.StdinPipe()
+	out, _ := cmd.StdoutPipe()
+	err := cmd.Start()
+	if err == nil {
+		line, rerr := bufio.NewReader(out).ReadString('\n')
+		if strings.TrimSpace(line) == "time?" {
+			fmt.Fprintf(in, "%d\n", time.Now().UnixMilli())
+		} else {
+			err = fmt.Errorf("it said %q: %v", line, rerr)
+		}
+		in.Close()
+		if werr := cmd.Wait(); err == nil {
+			err = werr
+		}
+	}
+	if err != nil {
+		log.Printf("setting %s's clock: %v", v.Name, err)
+	}
+}
+
+// launch starts its TPM, its network and QEMU, booting it, or with incoming, loading that saved state and waiting.
+func (w windowsQEMU) launch(ctx context.Context, v *vm, incoming string) error {
 	os.MkdirAll(winFile(v, "tpm"), 0o700)
 	if _, err := runOutliving(ctx, "swtpm", "socket", "--tpm2", "--tpmstate", "dir="+winFile(v, "tpm"), "--ctrl", "type=unixio,path="+winFile(v, "tpm/sock"),
 		"--terminate", "--daemon", "--log", "file="+winFile(v, "tpm/log")); err != nil {
@@ -174,41 +337,105 @@ func (w windowsQEMU) start(ctx context.Context, v *vm) error {
 	if _, err := runOutliving(ctx, "passt", args...); err != nil {
 		return err
 	}
-	cpus, gb := max(v.CPUs, 2), max(v.GB, 4)
-	_, err := runOutliving(ctx, "qemu-system-x86_64", "-name", "agent-devices-"+v.Name, "-daemonize", "-pidfile", winFile(v, "qemu.pid"),
-		"-machine", "q35,smm=on,accel=kvm", "-global", "driver=cfi.pflash01,property=secure,value=on",
-		"-cpu", "host,hv_relaxed,hv_vapic,hv_spinlocks=0x1fff,hv_time", "-smp", fmt.Sprintf("%d,sockets=1,cores=%d,threads=1", cpus, cpus), "-m", fmt.Sprintf("%dG", gb),
-		"-drive", "if=pflash,format=raw,unit=0,file="+ovmfCode+",readonly=on",
-		"-drive", "if=pflash,format=raw,unit=1,file="+winFile(v, "OVMF_VARS.fd"),
-		"-chardev", "socket,id=chrtpm,path="+winFile(v, "tpm/sock"), "-tpmdev", "emulator,id=tpm0,chardev=chrtpm", "-device", "tpm-crb,tpmdev=tpm0",
-		"-drive", "file="+winFile(v, "disk.qcow2")+",if=none,id=d0,discard=unmap", "-device", "nvme,drive=d0,serial=one,bootindex=0",
-		"-netdev", "stream,id=n0,server=off,addr.type=unix,addr.path="+sock, "-device", "e1000e,netdev=n0",
-		"-device", "qemu-xhci", "-device", "usb-tablet", "-vga", "std", "-rtc", "base=utc,clock=host",
-		"-audio", "none", "-display", "none", "-vnc", "unix:"+winFile(v, "vnc.sock"), "-monitor", "unix:"+winFile(v, "monitor.sock")+",server,nowait")
-	if err != nil {
-		return err
+	qemu := append([]string{"-name", "agent-devices-" + v.Name, "-daemonize", "-pidfile", winFile(v, "qemu.pid")}, w.hardware(v)...)
+	if incoming != "" {
+		qemu = append(qemu, "-incoming", "file:"+incoming, "-S")
 	}
-	// Ready once it answers over SSH: it signs in by itself.
-	ctx, cancel := context.WithTimeout(ctx, 4*time.Minute)
-	defer cancel()
-	for {
-		if _, err := w.ssh(ctx, v, "echo ready"); err == nil {
-			return nil
+	_, err := runOutliving(ctx, "qemu-system-x86_64", qemu...)
+	return err
+}
+
+// hardware is the machine QEMU makes for it, which a saved state must be for.
+func (windowsQEMU) hardware(v *vm) []string {
+	cpus, gb := max(v.CPUs, 2), max(v.GB, 4)
+	return []string{"-machine", "q35,smm=on,accel=kvm", "-global", "driver=cfi.pflash01,property=secure,value=on",
+		"-cpu", "host,hv_relaxed,hv_vapic,hv_spinlocks=0x1fff,hv_time", "-smp", fmt.Sprintf("%d,sockets=1,cores=%d,threads=1", cpus, cpus), "-m", fmt.Sprintf("%dG", gb),
+		"-drive", "if=pflash,format=raw,unit=0,file=" + ovmfCode + ",readonly=on",
+		"-drive", "if=pflash,format=raw,unit=1,file=" + winFile(v, "OVMF_VARS.fd"),
+		"-chardev", "socket,id=chrtpm,path=" + winFile(v, "tpm/sock"), "-tpmdev", "emulator,id=tpm0,chardev=chrtpm", "-device", "tpm-crb,tpmdev=tpm0",
+		"-drive", "file=" + winFile(v, "disk.qcow2") + ",if=none,id=d0,discard=unmap", "-device", "ide-hd,drive=d0,bus=ide.0,serial=one,bootindex=0",
+		"-netdev", "stream,id=n0,server=off,addr.type=unix,addr.path=" + winFile(v, "passt.sock"), "-device", "e1000e,netdev=n0",
+		"-device", "qemu-xhci", "-device", "usb-tablet", "-vga", "std", "-rtc", "base=utc,clock=host",
+		"-audio", "none", "-display", "none", "-vnc", "unix:" + winFile(v, "vnc.sock"), "-monitor", "unix:" + winFile(v, "monitor.sock") + ",server,nowait"}
+}
+
+// machine names QEMU's version and the machine it makes for v, wherever its folder is: a saved state loads only into
+// the same.
+func (w windowsQEMU) machine(ctx context.Context, v *vm) string {
+	version, err := run(ctx, "qemu-system-x86_64", "--version")
+	if err != nil {
+		return ""
+	}
+	version, _, _ = strings.Cut(version, "\n")
+	h := sha256.Sum256([]byte(version + "\x00" + strings.ReplaceAll(strings.Join(w.hardware(v), "\x00"), v.Dir, "")))
+	return hex.EncodeToString(h[:])
+}
+
+// halt ends its QEMU at once, which ends its TPM and network.
+func (w windowsQEMU) halt(v *vm) {
+	monitor(v, "quit")
+	for range 50 {
+		if !w.running(context.Background(), v) {
+			return
 		}
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("%s started but didn't answer in 4 minutes: look at it with screen", v.Name)
-		case <-time.After(5 * time.Second):
-		}
+		time.Sleep(100 * time.Millisecond)
 	}
 }
 
-// stop shuts Windows down, as its power button would, and pulls the plug if it hasn't in 3 minutes. Its base is
-// taken again at the next copy.
+// save keeps what it's doing in its folder, for its next start to carry on from, and ends it.
+func (w windowsQEMU) save(ctx context.Context, v *vm) error {
+	part := winFile(v, "state.part")
+	os.Remove(part)
+	if _, err := monitor(v, "stop"); err != nil {
+		return err
+	}
+	fail := func(err error) error {
+		monitor(v, "migrate_cancel")
+		monitor(v, "cont")
+		os.Remove(part)
+		return err
+	}
+	monitor(v, "migrate_set_parameter max-bandwidth 100G")
+	if _, err := monitor(v, "migrate -d file:"+part); err != nil {
+		return fail(err)
+	}
+	for start := time.Now(); ; time.Sleep(200 * time.Millisecond) {
+		out, err := monitor(v, "info migrate")
+		if err != nil {
+			return fail(err)
+		}
+		if strings.Contains(out, "Migration status: completed") {
+			break
+		}
+		if !strings.Contains(out, "Migration status: active") && !strings.Contains(out, "Migration status: setup") || time.Since(start) > 3*time.Minute {
+			return fail(fmt.Errorf("saving it: %s", out))
+		}
+	}
+	if err := os.WriteFile(winFile(v, "state.id"), []byte(w.machine(ctx, v)), 0o600); err != nil {
+		return fail(err)
+	}
+	if err := os.Rename(part, winFile(v, "state")); err != nil {
+		return fail(err)
+	}
+	w.halt(v)
+	return nil
+}
+
+// stop keeps what it's doing and ends it, or if that fails, shuts Windows down, as its power button would, and pulls
+// the plug if it hasn't in 3 minutes. Its base is taken again at the next copy.
 func (w windowsQEMU) stop(ctx context.Context, v *vm) error {
 	if !w.running(ctx, v) {
 		return nil
 	}
+	if v.Of == "" {
+		os.Remove(winFile(v, "base.qcow2"))
+	}
+	err := w.save(ctx, v)
+	if err == nil {
+		return nil
+	}
+	log.Printf("%s shuts down, as saving what it's doing failed: %v", v.Name, err)
+	w.forget(v)
 	monitor(v, "system_powerdown")
 	for range 90 {
 		if !w.running(ctx, v) {
@@ -219,9 +446,6 @@ func (w windowsQEMU) stop(ctx context.Context, v *vm) error {
 	if w.running(ctx, v) {
 		monitor(v, "quit")
 	}
-	if v.Of == "" {
-		os.Remove(winFile(v, "base.qcow2"))
-	}
 	return nil
 }
 
@@ -230,9 +454,12 @@ func (windowsQEMU) pause(_ context.Context, v *vm) error {
 	return err
 }
 
-func (windowsQEMU) resume(_ context.Context, v *vm) error {
-	_, err := monitor(v, "cont")
-	return err
+func (w windowsQEMU) resume(ctx context.Context, v *vm) error {
+	if _, err := monitor(v, "cont"); err != nil {
+		return err
+	}
+	go w.setClock(v)
+	return nil
 }
 
 func (w windowsQEMU) remove(ctx context.Context, v *vm) error {

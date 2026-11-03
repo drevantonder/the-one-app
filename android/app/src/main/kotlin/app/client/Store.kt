@@ -15,6 +15,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -121,9 +122,11 @@ class Store(private val application: android.app.Application, val signIn: SignIn
     /** A request to the node, as this person: JSON in, the reply's bytes out. A refused token is renewed once. */
     suspend fun api(path: String, method: String = "GET", body: JsonElement? = null, query: Map<String, String?> = emptyMap()): ByteArray {
         val url = url(path, query)
+        // Its id makes a call run once, however often it's sent.
+        val body = if (path == "/v1/call" && body is JsonObject && "id" !in body) JsonObject(body + ("id" to JsonPrimitive(callId()))) else body
         var token = signIn.token()
         for (tries in 0..1) {
-            val r = http(method, url, body?.toString()?.toByteArray(), "application/json", mapOf("authorization" to "Bearer $token"))
+            val r = retried { http(method, url, body?.toString()?.toByteArray(), "application/json", mapOf("authorization" to "Bearer $token")) }
             if (r.status == 401 && tries == 0) {
                 token = signIn.token(stale = token)
                 continue
@@ -131,7 +134,7 @@ class Store(private val application: android.app.Application, val signIn: SignIn
             val error = runCatching { (json.parseToJsonElement(r.text) as? JsonObject)?.get("error")?.let { (it as? JsonPrimitive)?.content } }.getOrNull()
             if (r.status == 401) throw NodeError(error ?: "Sign in again.", signedOut = true)
             if (r.status !in 200..299 || error != null) {
-                throw NodeError(error ?: if (r.status >= 500) "Your devices aren’t answering." else "It didn’t work (${r.status}).")
+                throw NodeError(error ?: if (r.status >= 500) "Your devices aren’t answering." else "That didn’t work. Try again.")
             }
             return r.bytes
         }
@@ -165,19 +168,19 @@ class Store(private val application: android.app.Application, val signIn: SignIn
     fun run() {
         if (running?.isActive == true) return
         running = scope.launch {
-            var wait = 1000L
+            var misses = 1
+            val started = System.currentTimeMillis()
             while (true) {
                 try {
                     refreshState()
                     break
                 } catch (e: NodeError) {
                     if (e.signedOut) return@launch signedOut(e.message)
-                    unreachable(e.message)
+                    unreachable(e.message, misses, started)
                 } catch (e: Exception) {
-                    unreachable("Can’t reach ${signIn.address}.")
+                    unreachable("Your devices aren’t answering.", misses, started)
                 }
-                delay(wait)
-                wait = minOf(wait * 2, 15_000)
+                delay(retryWait(misses++))
             }
             phase = Phase.Ready
             launch { runCatching { refreshWidgets() } }
@@ -185,9 +188,10 @@ class Store(private val application: android.app.Application, val signIn: SignIn
         }
     }
 
-    private fun unreachable(message: String?) {
+    /** Can't Reach Your Devices, once it's more than a blip: a second miss, or 3 seconds of them. */
+    private fun unreachable(message: String?, misses: Int, started: Long) {
         failure = message
-        if (state == null) phase = Phase.Unreachable
+        if (state == null && (misses >= 2 || System.currentTimeMillis() - started >= 3000)) phase = Phase.Unreachable
     }
 
     /** Back to the first screen, saying `why` when the install turned this phone away rather than the person signing out. */
@@ -217,18 +221,20 @@ class Store(private val application: android.app.Application, val signIn: SignIn
         app.client.widget.HomeWidgets.signedOut()
     }
 
-    suspend fun refreshState() {
+    suspend fun refreshState(): Unit = coroutineScope {
+        // The first time, the apps are asked for beside the state, not after it.
+        val early = if (state == null) async { runCatching { get<List<AppInfo>>("/v1/apps") }.getOrNull() } else null
         val next: NodeState = get("/v1/state")
         val regrouped = (next.user to next.install?.groups) != (state?.user to state?.install?.groups)
         val first = state == null
         state = next
         failure = null
-        if (first || regrouped || apps.isEmpty()) refreshApps()
+        if (first || regrouped || apps.isEmpty()) refreshApps(early?.await())
     }
 
-    suspend fun refreshApps() {
+    suspend fun refreshApps(early: List<AppInfo>? = null) {
         if (state?.install == null) return
-        apps = get("/v1/apps")
+        apps = early ?: get("/v1/apps")
     }
 
     /** Every page's widgets, for the home screen's, while any is there (or `always`, as one is chosen). */
@@ -242,7 +248,9 @@ class Store(private val application: android.app.Application, val signIn: SignIn
 
     /** The node's events: what changed, for every open screen, and for the home screen's widgets. */
     private suspend fun listen() {
+        var misses = 0
         while (true) {
+            val started = System.currentTimeMillis()
             try {
                 val token = signIn.token()
                 withContext(Dispatchers.IO) {
@@ -268,7 +276,10 @@ class Store(private val application: android.app.Application, val signIn: SignIn
                 if (e.signedOut) return signedOut(e.message)
             } catch (_: Exception) {
             }
-            delay(3000)
+            // At once after a stream that ran a while and ended (its node handing over to a new build), then waiting
+            // longer each miss.
+            if (System.currentTimeMillis() - started > 10_000) misses = 0
+            delay(retryWait(misses++))
         }
     }
 

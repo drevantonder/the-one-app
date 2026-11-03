@@ -13,11 +13,10 @@ mod ops;
 mod try_install;
 mod update;
 
-fn help() -> String {
+/// Every built-in command, with what it takes: `help all` prints it, and `<command> --help` its lines.
+fn every_command() -> String {
     format!(
-        "{NAME}: your machines, and your team's, as one place for apps and agents.
-
-Usage:
+        "Usage:
   {CLI} serve                          run this machine as one of your devices
   {CLI} status                         this device, its install, its users, groups and devices
   {CLI} sign-in [--address <url>]      sign this machine in, as you: approve its code by signing in on any of
@@ -138,7 +137,8 @@ Usage:
   {CLI} <app> <op> [words] [--input value]
                                        run an operation, e.g. {CLI} board post ideas \"hi there\"; --help says what
                                        it takes. Words fill its main inputs in order (--help shows which), lists
-                                       repeat a flag, inputs not given are read as JSON from stdin, --file
+                                       repeat a flag, required inputs not given are read as JSON from stdin
+                                       (a last word - reads it anyway), --file
                                        <input>=<path> gives a file and --out <path> saves what it gives back.
                                        --device <name> runs it on that device
   {CLI} try [<command>]                a new install for this checkout, on this machine beside yours, with only what
@@ -158,9 +158,50 @@ Usage:
   {CLI} run <file>                     run a short script that calls operations, as tools.<app>.<op>({{ ... }}) (- reads
                                        it from stdin), and print what it returns; {CLI} search gives each call
   {CLI} mcp [--code]                   serve MCP over stdio, for agents: every tool, or with --code, search and execute
+  {CLI} help [all]                     what to start with; with all, this
 
 {NAME} holds one install. For another context, run that context's own app.",
         hosted = one::sidecars::hosted().iter().map(|h| h.name).collect::<Vec<_>>().join(", ")
+    )
+}
+
+/// The built-in commands, by their first word, as the full list says them.
+fn commands() -> Vec<String> {
+    let mut out: Vec<String> = every_command().lines().filter_map(|l| l.strip_prefix(&format!("  {CLI} "))).filter_map(|l| l.split_whitespace().next()).filter(|w| w.chars().all(|c| c.is_ascii_lowercase() || c == '-')).map(String::from).collect();
+    out.dedup();
+    out
+}
+
+/// What `help` and the bare command say: what an agent needs to start, and where the rest is.
+fn help() -> String {
+    let apps = get("/v1/apps").ok().and_then(|a| a.as_array().cloned()).unwrap_or_default();
+    let names: Vec<&str> = apps.iter().filter(|a| a["ops"].as_array().is_some_and(|o| !o.is_empty())).filter_map(|a| a["name"].as_str()).collect();
+    let yours = match names.is_empty() {
+        true => String::new(),
+        false => format!("\nYour apps: {}.\n", names.join(", ")),
+    };
+    format!(
+        "{NAME}: your machines, and your team's, as one place for apps and agents.
+
+  {CLI} search <words>        the operations for a task in every app, each with how to call it
+  {CLI} <app>                 an app's operations and its guide
+  {CLI} <app> <op> --help     what an operation takes
+  {CLI} <app> <op> [words] [--input value]
+                             run one, like {CLI} board post ideas \"hi there\"
+  {CLI} run <file>            a script that calls several operations; {CLI} search gives each call
+  {CLI} skills                the guides agents load
+  {CLI} status                who you are, and your devices
+  {CLI} mcp [--code]          MCP over stdio, for agents
+{yours}
+An operation's words fill its main inputs in order, a list repeats its flag, and inputs not given are read as JSON
+from stdin. --file <input>=<path> gives a file, --out <path> saves what comes back, --device <name> runs it there,
+and --confirm goes ahead with what sends or can't be undone, once the person agreed. --json prints what comes back
+as JSON.
+
+Exit codes: 0 done, 2 what was typed is wrong, 3 refused (needs --confirm, not allowed, or not signed in), 1 anything
+else. Data goes to stdout, messages to stderr.
+
+{CLI} help all lists every command; {CLI} <command> --help says what one takes."
     )
 }
 
@@ -184,11 +225,17 @@ fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if let Err(err) = run(args) {
         eprintln!("{CLI}: {err:#}");
-        std::process::exit(1);
+        std::process::exit(ops::exit_code(&err));
     }
 }
 
 fn run(args: Vec<String>) -> Result<()> {
+    // --json is everyone's, wherever it's typed: what an operation gives back, as JSON.
+    let end = args.iter().position(|a| a == "--").unwrap_or(args.len());
+    if args[..end].iter().any(|a| a == "--json") {
+        ops::JSON.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+    let args: Vec<String> = args.iter().enumerate().filter(|(i, a)| *i >= end || *a != "--json").map(|(_, a)| a.clone()).collect();
     if args.first().map(String::as_str) == Some("try") {
         return try_install::try_install(&args[1..]);
     }
@@ -209,10 +256,15 @@ fn run(args: Vec<String>) -> Result<()> {
             println!("{}", help());
             println!("\n{}", connection());
         }
+        ["help", "all"] => println!("{}", every_command()),
+        ["help", rest @ ..] => match command_help(&rest.iter().map(|w| w.to_string()).collect::<Vec<_>>()) {
+            Some(text) => print!("{text}"),
+            None => bail!("{}", ops::unknown(rest[0], None, true)?),
+        },
         ["serve"] => {
             usual_path();
             IN_NODE.store(true, std::sync::atomic::Ordering::Relaxed);
-            serve(flags.contains_key("try"))?
+            serve(flags.contains_key("try"), &args)?
         }
         ["sign-in"] => sign_in(&flags)?,
         ["sign-out"] => match one::sign_in::sign_out()? {
@@ -275,7 +327,7 @@ fn run(args: Vec<String>) -> Result<()> {
         }
         ["pair"] => {
             let r = post("/v1/pair", json!({ "user": flags.get("user") }))?;
-            println!("On the other machine, run:\n\n  {CLI} join {}\n\nThe pairing code works once, for a week.", r["code"].as_str().unwrap_or(""));
+            println!("On the other machine, run:\n\n  {CLI} join {}\n\nThe pairing code works once, for seven days.", r["code"].as_str().unwrap_or(""));
         }
         ["join", code] => {
             post("/v1/join", json!({ "code": code }))?;
@@ -563,6 +615,7 @@ fn run(args: Vec<String>) -> Result<()> {
         }
         ["backups", "place", "remove", place] => {
             takes_only(&flags, &["confirm"])?;
+            ops::agreed(flags.contains_key("confirm"), &format!("{CLI} backups place remove"))?;
             let places = get("/v1/backups")?["places"].as_array().cloned().unwrap_or_default();
             let p = places.iter().find(|p| p["id"] == *place || p["title"] == *place).with_context(|| format!("no place {place}; {CLI} backups lists them"))?;
             post("/v1/backups/place", json!({ "id": p["id"], "deleted": true }))?;
@@ -623,6 +676,7 @@ fn run(args: Vec<String>) -> Result<()> {
         }
         ["vault", "remove", item] | ["vault", "remove", item, _] => {
             takes_only(&flags, &["scope", "confirm"])?;
+            ops::agreed(flags.contains_key("confirm"), &format!("{CLI} vault remove"))?;
             let scope = flags.get("scope").and_then(Value::as_str).unwrap_or("user");
             println!("{}", vault_remove(scope, item, positional.get(3).map(String::as_str))?);
         }
@@ -764,7 +818,7 @@ fn run(args: Vec<String>) -> Result<()> {
             }
             std::fs::write(file, resp.body_mut().with_config().limit(1 << 30).read_to_vec()?)?;
         }
-        ["version"] if flags.contains_key("json") => println!("{}", json!({ "commit": one::config::BUILD, "target": one::config::TARGET, "committed": one::config::COMMITTED })),
+        ["version"] if ops::json() => println!("{}", json!({ "commit": one::config::BUILD, "target": one::config::TARGET, "committed": one::config::COMMITTED })),
         ["version"] => println!("{} {} ({})", NAME, one::config::BUILD, one::config::TARGET),
         ["rename", name @ ..] if !name.is_empty() => {
             post("/v1/name", json!({ "name": name.join(" ") }))?;
@@ -772,14 +826,7 @@ fn run(args: Vec<String>) -> Result<()> {
         }
         [app] if !app.starts_with('-') => {
             let apps = get("/v1/apps")?;
-            let tool = |a: &&Value| app.strip_prefix(&format!("{}_", a["name"].as_str().unwrap_or("-"))).filter(|op| a["ops"].as_array().into_iter().flatten().any(|o| o["name"] == *op)).map(|op| format!("{} {op}", a["name"].as_str().unwrap_or("")));
-            let found = match apps.as_array().into_iter().flatten().find(|a| a["name"] == *app) {
-                Some(found) => found,
-                None => match apps.as_array().into_iter().flatten().find_map(|a| tool(&a)) {
-                    Some(command) => bail!("no command {app}: did you mean {CLI} {command}?"),
-                    None => bail!("no command or app {app}; {CLI} help lists the commands, {CLI} apps the apps"),
-                },
-            };
+            let Some(found) = apps.as_array().into_iter().flatten().find(|a| a["name"] == *app) else { bail!("{}", ops::unknown(app, None, true)?) };
             println!("{} ({app})", found["title"].as_str().unwrap_or(app));
             if let Some(i) = found["instructions"].as_str().filter(|i| !i.is_empty()) {
                 println!("\n{i}\n");
@@ -792,7 +839,7 @@ fn run(args: Vec<String>) -> Result<()> {
             let at = |word: &str, from: usize| args.iter().skip(from).position(|a| a == word).map(|i| i + from + 1).unwrap_or(from);
             ops::run(app, op, &args[at(op, at(app, 0))..])?
         }
-        _ => bail!("unknown command; {CLI} help lists them"),
+        [first, ..] => bail!("{}", ops::unknown(first, None, true)?),
     }
     Ok(())
 }
@@ -843,11 +890,11 @@ fn deploy(dir: &std::path::Path, flags: &Map<String, Value>) -> Result<()> {
     Ok(())
 }
 
-/// A built-in command's help, for --help after it: help()'s lines for it, or all of help() when none are. None for an
-/// app's operation, and for an app that isn't a built-in command too, whose help is their own.
+/// A built-in command's help, for --help after it: every_command()'s lines for it, or help() when none are. None for
+/// an app's operation, and for an app that isn't a built-in command too, whose help is their own.
 fn command_help(words: &[String]) -> Option<String> {
     let first = words.first().filter(|w| *w != "-h")?;
-    let text = help();
+    let text = every_command();
     let mut out = String::new();
     let mut taking = false;
     for line in text.lines() {
@@ -865,7 +912,7 @@ fn command_help(words: &[String]) -> Option<String> {
     match (app, out.is_empty()) {
         (true, _) if words.len() > 1 => None,
         (true, true) => None,
-        (false, true) => Some(format!("{text}\n")),
+        (false, true) => Some(format!("{}\n", help())),
         (_, false) => Some(format!("Usage:\n{out}")),
     }
 }
@@ -874,7 +921,7 @@ fn command_help(words: &[String]) -> Option<String> {
 /// commands run here, as the person, so `--device` among them.
 fn takes_only(flags: &Map<String, Value>, takes: &[&str]) -> Result<()> {
     match flags.keys().find(|k| !takes.contains(&k.as_str())) {
-        Some(other) => bail!("--{other} isn't an input of this (see {CLI} help)"),
+        Some(other) => Err(ops::Failed::Typed(format!("--{other} isn't an input of this: see --help")).into()),
         None => Ok(()),
     }
 }
@@ -924,12 +971,17 @@ fn agent() -> ureq::Agent {
 
 fn request(resp: Result<ureq::http::Response<ureq::Body>, ureq::Error>) -> Result<Value> {
     let mut resp = resp.with_context(|| format!("{NAME} isn't running here: start it with {CLI} serve"))?;
+    let refused = matches!(resp.status().as_u16(), 401 | 403);
     let body: Value = resp.body_mut().read_json()?;
     if let Some(err) = body.get("error") {
         if body.get("need").is_some() {
             NEEDED.with(|n| *n.borrow_mut() = Some(body.clone()));
         }
-        bail!("{}", err.as_str().unwrap_or("failed"));
+        let err = err.as_str().unwrap_or("failed").to_string();
+        return Err(match refused {
+            true => ops::Failed::Refused(err).into(),
+            false => anyhow::anyhow!(err),
+        });
     }
     Ok(body)
 }
@@ -1118,7 +1170,7 @@ const TRY_IDLE: std::time::Duration = std::time::Duration::from_secs(60 * 60);
 static ASKED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 #[tokio::main]
-async fn serve(is_try: bool) -> Result<()> {
+async fn serve(is_try: bool, args: &[String]) -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "one=info,warn".into()))
         .init();
@@ -1133,13 +1185,21 @@ async fn serve(is_try: bool) -> Result<()> {
     let dir = one::home();
     // A new install's first start makes its home.
     std::fs::create_dir_all(&dir).with_context(|| format!("make {}", dir.display()))?;
-    let listener = listen(&dir).await?;
-    std::fs::write(dir.join("pid"), std::process::id().to_string())?;
+    // Taking over from the node before, an update's, with its socket: it answers until this one is warm.
+    let handed = one::handoff::handed(args)?;
+    let listener = match &handed {
+        Some(h) => tokio::net::TcpListener::from_std(h.listener.try_clone()?)?,
+        None => listen(&dir).await?,
+    };
     let node = Node::start(&dir, one::sidecars::built_in()).await?;
+    if handed.is_some() {
+        node.warm().await;
+    }
+    std::fs::write(dir.join("pid"), std::process::id().to_string())?;
     tracing::info!("{NAME} node {} serving {} from {}", &one::entry::hex(&node.id())[..8], addr(), dir.display());
     tokio::spawn(api::serve_guide(node.clone()));
     api::serve_mcp(axum::routing::post(mcp_http));
-    let mut routes = api::guarded(api::routes(), node);
+    let mut routes = api::guarded(api::routes(), node.clone());
     if is_try {
         let home = dir.clone();
         tokio::spawn(async move {
@@ -1165,10 +1225,68 @@ async fn serve(is_try: bool) -> Result<()> {
             unsafe { libc::kill(0, libc::SIGTERM) };
         });
     }
-    let http = api::serve(listener, routes);
+    // Asked to restart (an update, or SIGHUP): the program now at this one's path takes over, and this one stops
+    // taking connections, finishes what it's answering, and exits.
+    let fd = raw_fd(&listener);
+    let (drained, drain) = tokio::sync::oneshot::channel::<()>();
+    let restarting = {
+        let (node, args) = (node.clone(), args.to_vec());
+        async move {
+            loop {
+                one::handoff::wanted().await;
+                tracing::info!("handing over to {}", std::env::current_exe().map(|e| e.display().to_string().trim_end_matches(" (deleted)").to_string()).unwrap_or_default());
+                node.handing_over(true);
+                match one::handoff::hand_over(fd, &args).await {
+                    Ok(()) => return node.handed_over(),
+                    Err(err) if one::handoff::supervised() => {
+                        // Its supervisor starts the new build, as before nodes handed over.
+                        tracing::warn!("couldn't hand over ({err:#}): exiting, to be started again");
+                        std::process::exit(0);
+                    }
+                    Err(err) => {
+                        tracing::warn!("couldn't hand over, so this build keeps running: {err:#}");
+                        node.handing_over(false);
+                    }
+                }
+            }
+        }
+    };
+    #[cfg(unix)]
+    tokio::spawn(async {
+        let Ok(mut hup) = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::hangup()) else { return };
+        while hup.recv().await.is_some() {
+            one::handoff::restart();
+        }
+    });
+    tokio::spawn(async move {
+        restarting.await;
+        let _ = drained.send(());
+    });
+    let http = api::serve_until(listener, routes, async {
+        let _ = drain.await;
+    });
+    one::handoff::able();
+    match handed {
+        Some(h) => h.ready(),
+        None => one::handoff::notify("READY=1"),
+    }
+    tracing::info!("{NAME} node {} answering", &one::entry::hex(&node.id())[..8]);
     let served = http.await;
     one::apps::stop_all();
+    if one::handoff::stopped() {
+        std::process::exit(0);
+    }
     Ok(served?)
+}
+
+#[cfg(unix)]
+fn raw_fd(listener: &tokio::net::TcpListener) -> i32 {
+    std::os::fd::AsRawFd::as_raw_fd(listener)
+}
+
+#[cfg(not(unix))]
+fn raw_fd(_listener: &tokio::net::TcpListener) -> i32 {
+    -1
 }
 
 /// When the node is asked to stop: Ctrl-C, or SIGTERM from its supervisor, an update or a node replacing it, each
@@ -1323,8 +1441,7 @@ fn mcp_answer(msg: &Value, agent: &mut Option<String>, mode: Mode) -> Option<Val
             t.extend(mcp_apps::tools());
             json!({ "tools": t })
         }),
-        "tools/call" => Ok(mcp_apps::call(msg["params"]["name"].as_str().unwrap_or(""), &msg["params"]["arguments"])
-            .unwrap_or_else(|| call_tool(&msg["params"], agent.as_deref(), mode))),
+        "tools/call" => Ok(call_tool(&msg["params"], agent.as_deref(), mode)),
         // Apps' widgets and screens, as MCP Apps (src/mcp_apps.rs).
         "resources/list" => Ok(json!({ "resources": mcp_apps::resources() })),
         "resources/read" => match msg["params"]["uri"].as_str().unwrap_or("") {
@@ -1423,6 +1540,23 @@ fn item_line(it: &Value) -> String {
         Some(list(&it["hosts"])).filter(|h| !h.is_empty()).map(|h| format!("  → {h}")).unwrap_or_default(),
         list(&it["apps"]),
     )
+}
+
+/// An item as an agent reads it: names, not scope ids or pictures, and when it last changed, in ISO 8601.
+fn item_said(it: &Value) -> Value {
+    let mut out = json!({
+        "id": it["id"], "title": it["title"], "page": it["scope_name"], "fields": it["fields"], "hosts": it["hosts"], "apps": it["apps"], "wanted_by": it["wanted_by"],
+        "changed": it["time"].as_i64().and_then(|ms| jiff::Timestamp::from_second(ms / 1000).ok()).map(|t| t.to_string()), "by": it["user"],
+    });
+    for k in ["type", "domain", "app"] {
+        if let Some(v) = it[k].as_str().filter(|v| !v.is_empty()) {
+            out[k] = json!(v);
+        }
+    }
+    if it["account"] == true {
+        out["account"] = json!(true);
+    }
+    out
 }
 
 /// The item `name` (its id or title) names in `scope`, if there's one.
@@ -1719,7 +1853,7 @@ fn vault_tool(op: &str, input: &Map<String, Value>, agent: Option<&str>) -> Resu
     let scope = input.get("scope").and_then(Value::as_str).unwrap_or("user");
     let text = |k: &str| input.get(k).and_then(Value::as_str).with_context(|| format!("give {k}"));
     match op {
-        "list" => get(&format!("/v1/vault?scope={scope}")),
+        "list" => Ok(json!(get(&format!("/v1/vault?scope={scope}"))?.as_array().into_iter().flatten().map(item_said).collect::<Vec<_>>())),
         "set" => {
             let hosts = input.get("hosts").and_then(Value::as_array).map(|h| h.iter().filter_map(Value::as_str).map(str::to_string).collect());
             Ok(json!(vault_set(scope, text("item")?, text("field")?, text("value")?, input.get("secret").and_then(Value::as_bool), hosts, input.get("app").and_then(Value::as_str), agent)?))
@@ -1756,21 +1890,39 @@ fn tools() -> Result<Vec<Value>, Value> {
         let name = app["name"].as_str().unwrap_or("");
         // Operations starting with `_` are for the node, such as a sidecar's `_screen`.
         for op in app["ops"].as_array().into_iter().flatten().filter(|op| !op["name"].as_str().unwrap_or("").starts_with('_')) {
-            let mut tool = json!({ "name": format!("{name}_{}", op["name"].as_str().unwrap_or("")), "description": op["description"], "inputSchema": ops::mcp_schema(app, op) });
-            let hints = ops::mcp_annotations(op);
-            if hints.as_object().is_some_and(|h| !h.is_empty()) {
-                tool["annotations"] = hints;
-            }
-            tools.push(tool);
+            tools.push(json!({ "name": format!("{name}_{}", op["name"].as_str().unwrap_or("")), "description": op["description"], "inputSchema": ops::mcp_schema(app, op), "annotations": ops::mcp_annotations(op) }));
         }
     }
     Ok(tools)
 }
 
+/// A tool's answer, within the budget an agent reads (ops::BUDGET).
 fn call_tool(params: &Value, agent: Option<&str>, mode: Mode) -> Value {
+    let mut out = answer_tool(params, agent, mode);
+    let name = params["name"].as_str().unwrap_or("");
+    let chars: usize = out["content"].as_array().into_iter().flatten().filter_map(|c| c["text"].as_str()).map(str::len).sum();
+    if chars > ops::BUDGET {
+        let op = match name {
+            "search" => Some(code::search_tool(mode)["inputSchema"].clone()).map(|input| json!({ "input": input })),
+            _ => name.split_once('_').and_then(|(a, o)| ops::find(a, o)).map(|(_, o)| o),
+        };
+        ops::within_budget(&mut out["content"], op.as_ref());
+    }
+    out
+}
+
+fn answer_tool(params: &Value, agent: Option<&str>, mode: Mode) -> Value {
     let name = params["name"].as_str().unwrap_or("");
     let input = params["arguments"].as_object().cloned().unwrap_or_default();
     let failed = |text: String| json!({ "isError": true, "content": [{ "type": "text", "text": text }] });
+    // This server's own tools, checked as apps' are, in dispatch.
+    let own = [code::search_tool(mode), code::execute_tool()].into_iter().chain(mcp_apps::tools()).find(|t| t["name"] == name);
+    if let Some(Err(e)) = own.map(|t| ops::check(&t["inputSchema"], &Value::Object(input.clone()))) {
+        return failed(format!("{e:#}"));
+    }
+    if let Some(out) = mcp_apps::call(name, &Value::Object(input.clone())) {
+        return out;
+    }
     match name {
         "search" => {
             let limit = input.get("limit").and_then(Value::as_u64).unwrap_or(8) as usize;
@@ -1794,14 +1946,36 @@ fn call_tool(params: &Value, agent: Option<&str>, mode: Mode) -> Value {
     }
 }
 
+/// What to say for a tool nobody here lists: an app's operations when the app is right, else the nearest tools.
+fn unknown_tool(name: &str) -> Result<String> {
+    if let Some((app, op)) = name.split_once('_')
+        && get("/v1/apps")?.as_array().into_iter().flatten().chain(&ops::node_apps()).any(|a| a["name"] == app)
+    {
+        return ops::unknown(app, Some(op), false);
+    }
+    let tools = tools().map_err(|e| anyhow::anyhow!("{}", e["message"].as_str().unwrap_or("")))?;
+    let names: Vec<&str> = tools.iter().filter_map(|t| t["name"].as_str()).collect();
+    match ops::nearest(name, &names).as_slice() {
+        [] => match name.split_once('_') {
+            Some((app, op)) => ops::unknown(app, Some(op), false),
+            None => Ok(format!("no tool {name}: search finds the tools for a task")),
+        },
+        near => Ok(format!("no tool {name}: did you mean {}?", near.join(" or "))),
+    }
+}
+
 /// Runs one tool as the person, an app's operation or the Vault's, for MCP or a code mode script: what can't be undone
 /// only with confirm: true. `spec` is the operation, when the caller has it already.
-fn dispatch(name: &str, mut input: Map<String, Value>, agent: Option<&str>, client: &str, spec: Option<Value>) -> Result<Value> {
-    let (app, op) = name.split_once('_').with_context(|| format!("no tool {name}"))?;
-    let spec = spec.or_else(|| ops::find(app, op).map(|(_, spec)| spec));
+fn dispatch(name: &str, mut input: Map<String, Value>, agent: Option<&str>, client: &str, spec: Option<(Value, Value)>) -> Result<Value> {
+    let Some((app, op)) = name.split_once('_') else { bail!("{}", unknown_tool(name)?) };
+    let Some((a, spec)) = spec.or_else(|| ops::find(app, op)) else { bail!("{}", unknown_tool(name)?) };
+    // Checked as MCP lists it, before anything runs: a wrong input says what's wrong, never runs as something else.
+    ops::check(&ops::mcp_schema(&a, &spec), &Value::Object(input.clone()))?;
+    let spec = Some(spec);
     let device = if ops::node_app(app) || spec.as_ref().is_some_and(ops::own_device) { None } else { input.remove("device") };
-    if let Some(other) = spec.as_ref().and_then(|spec| input.keys().find(|k| *k != "confirm" && !ops::takes(&spec["input"], k))) {
-        anyhow::bail!("{other} isn't an input of {name}: see its inputSchema");
+    let confirmed = input.remove("confirm") == Some(json!(true));
+    if let Some(spec) = &spec {
+        anyhow::ensure!(spec["confirm"] != true || confirmed, "{name} sends or can't be undone, and the person hasn't agreed to it: ask them, and give confirm: true only if they say yes to this very action");
     }
     if app == "vault" {
         return vault_tool(op, &input, agent);
@@ -1820,9 +1994,7 @@ fn dispatch(name: &str, mut input: Map<String, Value>, agent: Option<&str>, clie
         anyhow::ensure!(out["isError"] != true, "{}", out["content"][0]["text"].as_str().unwrap_or(""));
         return Ok(out);
     }
-    let confirmed = input.remove("confirm") == Some(json!(true));
     if let Some(spec) = spec {
-        anyhow::ensure!(spec["confirm"] != true || confirmed, "{name} sends or can't be undone, and the person hasn't agreed to it: ask them, and give confirm: true only if they say yes to this very action");
         ops::mcp_files(&spec, &mut input)?;
     }
     Ok(post("/v1/call", json!({ "device": device, "app": app, "op": op, "input": input, "agent": agent, "client": client }))?["ok"].take())
