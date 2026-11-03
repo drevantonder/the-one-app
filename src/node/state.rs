@@ -12,18 +12,6 @@ impl Node {
         })
     }
 
-    /// A link that lets someone new, called `name`, join: it works once, for a few days. Its secret is made here and
-    /// signed for with this device's key, as an admin's device's, for `caller`, an admin: → (the link, until when).
-    pub async fn invite_link(&self, caller: &Caller, name: &str) -> Result<(String, u64)> {
-        ensure!(crate::config::SIGN_IN != "google", "people here sign in with Google, so their invite names their email: {} kernel invite <name> --email <email>", crate::config::CLI);
-        let manages = self.with(|i| Ok(members::manages_scope(&i.r.members, &caller.user, &Scope::Global)))?;
-        ensure!(manages, "only admins invite someone");
-        let (address, _) = self.kernel()?;
-        let (key, name) = (ed25519_dalek::SigningKey::from_bytes(self.0.key.as_bytes()), name.to_string());
-        let invite = tokio::task::spawn_blocking(move || crate::kernel::invite(address.trim_end_matches('/'), &key, &name, None, None)).await??;
-        Ok((invite.link, invite.until))
-    }
-
     /// Whether `user` is a person of the install.
     pub fn is_user(&self, user: &str) -> bool {
         self.with(|i| Ok(i.r.members.user(user).is_some())).unwrap_or(false)

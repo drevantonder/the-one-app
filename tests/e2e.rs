@@ -487,3 +487,58 @@ async fn epochs_are_sealed_only_to_the_scopes_endpoints() {
     let again = a.seal_key(&me, &global, 1, Some(&one::entry::hex(&a.id())), None, &sealed).await.unwrap_err();
     assert!(format!("{again:#}").contains("already"), "what's sealed is never replaced: {again:#}");
 }
+
+/// A device is approved only by its person's own device, or a newcomer's by the admin whose invite their proof was made
+/// with; a device removed opens no epoch made after.
+#[tokio::test(flavor = "multi_thread")]
+async fn only_a_persons_own_device_or_their_inviter_lets_a_device_in() {
+    use one::node::{DeviceRequest, Invited};
+    let dir = temp("approve");
+    std::fs::write(dir.join("device.json"), json!({ "secret": one::entry::hex(&rand::random()), "name": "mac" }).to_string()).unwrap();
+    let a = Node::start(&dir, one::sidecars::built_in()).await.unwrap();
+    a.create("Home", "Andre").await.unwrap();
+    let me = one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None, token: None };
+    eventually("the board to run", async || a.call(board("post", json!({ "text": "hi" }))).await.is_ok()).await;
+    let global = one::entry::Scope::Global;
+    let new_key = || ed25519_dalek::SigningKey::from_bytes(&rand::random());
+    let asks = |key: &ed25519_dalek::SigningKey, user: &str, proof: Option<String>| {
+        let e = one::keys::Endpoint::of(key);
+        DeviceRequest { key: one::entry::hex(&e.key), seal: one::entry::hex(&e.seal), name: "Chrome".into(), user: user.into(), person: String::new(), proof }
+    };
+    let opens = async |key: &ed25519_dalek::SigningKey, scope: &one::entry::Scope| -> Vec<u32> {
+        let got = a.sealed_keys(&me, scope, Some(&one::entry::hex(&key.verifying_key().to_bytes())), None).await.unwrap();
+        let sealed = got["sealed"].as_object().unwrap();
+        sealed.iter().filter(|(_, v)| one::kernel::open_sealed(&one::keys::seal_secret(key), &data_encoding::BASE64URL_NOPAD.decode(v.as_str().unwrap().as_bytes()).unwrap()).is_ok()).map(|(n, _)| n.parse().unwrap()).collect()
+    };
+
+    // Andre's new laptop, approved from his machine, opens global.
+    let laptop = new_key();
+    a.approve_request(&me, &asks(&laptop, &me.user, None), None).await.unwrap();
+    assert_eq!(opens(&laptop, &global).await, vec![1]);
+
+    // Sam is let in only with the proof of the secret Andre's invite made.
+    let secret = "the-invites-secret";
+    let sam = Invited { secret: secret.into(), name: "Sam".into(), user: one::entry::new_id(), role: one::members::Role::Member, until: u64::MAX };
+    let sams = new_key();
+    let wrong = one::keys::invite_proof(b"another-secret", &sams.verifying_key().to_bytes());
+    assert!(a.approve_request(&me, &asks(&sams, &sam.user, Some(wrong)), Some(&sam)).await.is_err());
+    assert!(!a.is_user(&sam.user), "a request whose proof doesn't match lets no one in");
+    let right = one::keys::invite_proof(secret.as_bytes(), &sams.verifying_key().to_bytes());
+    a.approve_request(&me, &asks(&sams, &sam.user, Some(right)), Some(&sam)).await.unwrap();
+    assert!(a.is_user(&sam.user));
+    assert_eq!(opens(&sams, &global).await, vec![1]);
+
+    // Sam's next device is his to approve, not Andre's.
+    let refused = a.approve_request(&me, &asks(&new_key(), &sam.user, None), None).await.unwrap_err();
+    assert!(format!("{refused:#}").contains("one of their own devices"), "{refused:#}");
+
+    // The laptop, removed, opens no epoch made after; Andre's machine and Sam's device do, and the board goes on.
+    let removed = a.remove_device(&me, &one::entry::hex(&laptop.verifying_key().to_bytes())).await.unwrap();
+    assert!(removed["new_epochs"].as_array().unwrap().iter().any(|e| e["scope"] == "global" && e["epoch"] == 2), "{removed}");
+    assert_eq!(opens(&laptop, &global).await, vec![1]);
+    for f in walk(&dir).into_iter().filter(|p| p.to_string_lossy().contains("/_epochs/2/")) {
+        assert!(one::kernel::open_sealed(&one::keys::seal_secret(&laptop), &std::fs::read(&f).unwrap()).is_err(), "{} opens for the removed laptop", f.display());
+    }
+    assert_eq!(opens(&sams, &global).await, vec![1, 2]);
+    a.call(board("post", json!({ "text": "after" }))).await.unwrap();
+}

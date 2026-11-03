@@ -141,6 +141,7 @@ pub fn deeper(apps: &[Value]) -> Vec<Skill> {
     skills.push(app_skill(&vault_app()));
     skills.push(app_skill(&backups_app()));
     skills.push(app_skill(&groups_app()));
+    skills.push(app_skill(&devices_app()));
     skills.extend(apps.iter().filter(|a| a["instructions"].as_str().is_some_and(|i| !i.trim().is_empty()) && a["ops"].as_array().is_some_and(|o| !o.is_empty())).map(app_skill));
     skills
 }
@@ -246,6 +247,24 @@ pub fn groups_app() -> Value {
 /// The groups' MCP tools.
 pub fn groups_tools() -> Vec<Value> {
     vec![json!({ "name": "groups_list", "description": "Every group: who's in it, as admin or member, and who's invited but hasn't joined yet.", "inputSchema": { "type": "object", "properties": {} }, "annotations": { "readOnlyHint": true } })]
+}
+
+const DEVICES_GUIDE: &str = "A new device signs in, then shows a code of 8 letters and digits. devices_approve with that code, run on one of the person's own devices, lets it in once they say yes: it gets the keys to what they use. devices_invite makes a link for someone new to join; their first device is approved the same way, from any of the inviting admin's devices. devices_remove takes a device out, and what it could open gets new keys.";
+
+/// The devices' tools as an app's operations.
+pub fn devices_app() -> Value {
+    node_app("devices", "Devices", "Let a new device in, take one out, and invite someone", DEVICES_GUIDE, devices_tools())
+}
+
+/// The devices' MCP tools, which run on this machine as its person.
+pub fn devices_tools() -> Vec<Value> {
+    let confirm = json!({ "type": "boolean", "description": "true once the person has said yes to this very device" });
+    vec![
+        json!({ "name": "devices_requests", "description": "Devices waiting to join that you may approve: your own new devices, and the first device of each person you invited.", "inputSchema": { "type": "object", "properties": {} }, "annotations": { "readOnlyHint": true } }),
+        json!({ "name": "devices_approve", "description": "Approve the new device showing this code. Without confirm, says whose device it is; with confirm: true, lets it in.", "inputSchema": { "type": "object", "properties": { "code": { "type": "string", "description": "the 8 letters and digits the new device shows" }, "confirm": confirm }, "required": ["code"] } }),
+        json!({ "name": "devices_remove", "description": "Take a device out, by its name: it opens nothing made after.", "inputSchema": { "type": "object", "properties": { "device": { "type": "string" } }, "required": ["device"] }, "annotations": { "destructiveHint": true } }),
+        json!({ "name": "devices_invite", "description": "A link for someone new to join, once, for a few days. Give it to them yourself; it sends nothing.", "inputSchema": { "type": "object", "properties": { "name": { "type": "string", "description": "their name" }, "admin": { "type": "boolean", "description": "make them an admin" } }, "required": ["name"] } }),
+    ]
 }
 
 /// The node's own tools, shown as an app's operations are, to search, scripts and skills.

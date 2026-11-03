@@ -15,7 +15,6 @@ use serde_json::{Value, json};
 use tokio_stream::StreamExt;
 use tokio_stream::wrappers::BroadcastStream;
 
-use crate::entry::hex;
 use crate::members::Role;
 use crate::node::{CallRequest, Caller, Node};
 
@@ -87,6 +86,8 @@ pub fn routes() -> Router<Node> {
         .route("/v1/group", post(group))
         .route("/v1/invite", post(invite))
         .route("/v1/invite-link", post(invite_link))
+        .route("/v1/devices/requests", get(device_requests))
+        .route("/v1/devices/approve", post(approve))
         .route("/v1/accept", post(accept))
         .route("/v1/member", post(member))
         .route("/v1/app", post(app))
@@ -612,11 +613,11 @@ async fn name(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
     done()
 }
 
-/// `{ key }` (a device or client, by name or key) or `{ user }`.
+/// `{ key }` (a device, by name or key: `Node::remove_device`) or `{ user }`.
 async fn remove(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
     match body["user"].as_str() {
         Some(user) => node.member_as(&me.caller, "remove", json!({ "user": node.find_user(user)? })).await?,
-        None => node.member_as(&me.caller, "remove", json!({ "key": hex(&node.find_machine(text(&body, "key")?)?) })).await?,
+        None => return Ok(Json(node.remove_device(&me.caller, text(&body, "key")?).await?)),
     }
     done()
 }
@@ -669,10 +670,24 @@ async fn invite(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Re
     done()
 }
 
-/// `{ name }`: a link that lets someone new join, for an admin signed in: → `{ link, until }`.
+/// `{ name, admin? }`: a link that lets someone new join, for this device's person, an admin (`Node::invite_someone`):
+/// → `{ link, until }`.
 async fn invite_link(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
-    let (link, until) = node.invite_link(&me.caller, text(&body, "name")?).await?;
+    only(&body, &["name", "admin"])?;
+    let role = if body["admin"] == true { Role::Admin } else { Role::Member };
+    let (link, until) = node.invite_someone(&me.caller, text(&body, "name")?, role).await?;
     Ok(Json(json!({ "link": link, "until": until })))
+}
+
+/// The requests to join this device's person may approve (`Node::device_requests`).
+async fn device_requests(State(node): State<Node>) -> Reply {
+    Ok(Json(json!(node.device_requests(&local(&node)?).await?)))
+}
+
+/// `{ code, confirm? }`: approves the device showing `code` (`Node::approve`).
+async fn approve(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
+    only(&body, &["code", "confirm"])?;
+    Ok(Json(node.approve(&local(&node)?, text(&body, "code")?, body["confirm"] == true).await?))
 }
 
 async fn accept(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {

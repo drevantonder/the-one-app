@@ -27,7 +27,7 @@ Usage:
   {CLI} pair [--user <name>]           a pairing code for another of your machines (or, for admins, someone else's)
   {CLI} join <code>                    join an install with a pairing code
   {CLI} rename <name>                  rename this device
-  {CLI} remove <device> | --user <user>
+  {CLI} remove --user <user>
   {CLI} role <user> admin|member       (admins)
   {CLI} settings [<name> <value>|--default]   the install's settings (admins set them)
   {CLI} groups                         every group: who's in it, as admin or member, and who's invited
@@ -78,12 +78,12 @@ Usage:
                                        --address says, for good: passkeys belong to it), or at its workers.dev address;
                                        and the serverless node with it, once serverless deploy put it there; beside a
                                        node of the install, whose devices its relay takes, unless --new
-  {CLI} kernel invite <name> [--user <id>] [--email <email>]
+  {CLI} kernel invite <name> [--admin] [--user <id>] [--email <email>]
                                        a link that lets someone join, once and for a few days, as who they'll be in the
-                                       install (--user, or this machine's person if they're called that; else new),
-                                       made here and signed with this machine's key, an admin's device's; where people
-                                       sign in with Google, --email is the account they sign up with. Nobody joins
-                                       uninvited, the first person too
+                                       install (--user, or this machine's person if they're called that; else someone
+                                       new, as devices invite does), signed with this machine's key, an admin's
+                                       device's; where people sign in with Google, --email is the account they sign up
+                                       with. Nobody joins uninvited, the first person too
   {CLI} serverless deploy [--account <id>]
                                        put the install's serverless node in the kernel's Cloudflare account (a node as
                                        a Worker, with the API token in CLOUDFLARE_API_TOKEN) and send the address's
@@ -272,10 +272,6 @@ fn run(args: Vec<String>) -> Result<()> {
             post("/v1/join", json!({ "code": code }))?;
             println!("Joined. Syncing now; {CLI} status shows progress.");
         }
-        ["remove", key] => {
-            post("/v1/remove", json!({ "key": key }))?;
-            println!("Removed {key}.");
-        }
         ["remove"] if flags.contains_key("user") => {
             post("/v1/remove", json!({ "user": flags["user"] }))?;
             println!("Removed them.");
@@ -446,11 +442,17 @@ fn run(args: Vec<String>) -> Result<()> {
                 Some(user) => Some(user.to_string()),
                 None => get("/v1/state").ok().filter(|s| s["user"]["name"].as_str().is_some_and(|n| n.eq_ignore_ascii_case(name))).and_then(|s| s["user"]["id"].as_str().map(str::to_string)),
             };
-            let key = one::node::device_key(&one::home())?;
-            let invite = one::kernel::invite(&settings.address, &key, name, user.as_deref(), flags.get("email").and_then(Value::as_str))?;
-            let days = one::kernel::INVITE_DAYS;
-            let how = if one::config::SIGN_IN == "google" { "they sign in with Google and join" } else { "they make their passkey and join" };
-            println!("Send {name} this link. It works once, for {days} days: opening it, {how}.\n\n  {}", invite.link);
+            let email = flags.get("email").and_then(Value::as_str);
+            // Someone new is invited by this machine's node, which keeps the secret for their first device's approval.
+            if user.is_none() && email.is_none() {
+                println!("{}", invited_said(name, &post("/v1/invite-link", json!({ "name": name, "admin": flags.contains_key("admin") }))?));
+            } else {
+                let key = one::node::device_key(&one::home())?;
+                let invite = one::kernel::invite(&settings.address, &key, name, user.as_deref(), email)?;
+                let days = one::kernel::INVITE_DAYS;
+                let how = if one::config::SIGN_IN == "google" { "they sign in with Google and join" } else { "they make their passkey and join" };
+                println!("Send {name} this link. It works once, for {days} days: opening it, {how}.\n\n  {}", invite.link);
+            }
         }
         ["kernel", "set", name, value] => {
             let mut settings = one::kernel::Settings::load()?;
@@ -1593,6 +1595,51 @@ fn backups_tool(op: &str, input: &Map<String, Value>, agent: Option<&str>) -> Re
     }
 }
 
+/// The devices' tools, as this machine's person.
+fn devices_tool(op: &str, input: &Map<String, Value>) -> Result<Value> {
+    let text = |k: &str| input.get(k).and_then(Value::as_str).with_context(|| format!("give {k}"));
+    match op {
+        "requests" => get("/v1/devices/requests"),
+        "approve" => post("/v1/devices/approve", json!({ "code": text("code")?, "confirm": input.get("confirm") == Some(&json!(true)) })).map(|r| json!(approved_said(&r))),
+        "remove" => {
+            anyhow::ensure!(input.get("confirm") == Some(&json!(true)), "devices_remove can't be undone, and the person hasn't agreed to it: ask them, and give confirm: true only if they say yes to this very device");
+            post("/v1/remove", json!({ "key": text("device")? })).map(|r| json!(removed_said(&r)))
+        }
+        "invite" => post("/v1/invite-link", json!({ "name": text("name")?, "admin": input.get("admin") == Some(&json!(true)) })).map(|r| json!(invited_said(text("name").unwrap_or(""), &r))),
+        other => anyhow::bail!("no tool devices_{other}"),
+    }
+}
+
+/// What approving said, in words: whose device it is, or what it was given.
+fn approved_said(r: &Value) -> String {
+    let s = |k: &str| r[k].as_str().unwrap_or("").to_string();
+    if r.get("sealed").is_none() {
+        let new = if r["new"] == true { ", who you invited" } else { "" };
+        return format!("{} is {}'s device{new}. Approve it only if they say it's theirs.", s("device"), s("person"));
+    }
+    let mut out = format!("{} is in.", s("device"));
+    for n in r["not_sealed"].as_array().into_iter().flatten() {
+        out.push_str(&format!(" It wasn't given {}'s keys: {}.", n["scope"].as_str().unwrap_or(""), n["why"].as_str().unwrap_or("")));
+    }
+    out
+}
+
+/// What removing said, in words.
+fn removed_said(r: &Value) -> String {
+    let mut out = format!("Removed {}.", r["removed"].as_str().unwrap_or("it"));
+    let left: Vec<&str> = r["not_renewed"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
+    if !left.is_empty() {
+        out.push_str(&format!(" These get new keys when one of their admins' devices is next on: {}.", left.join(", ")));
+    }
+    out
+}
+
+/// An invite's link, in words.
+fn invited_said(name: &str, r: &Value) -> String {
+    let days = one::kernel::INVITE_DAYS;
+    format!("Send {name} this link. It works once, for {days} days: opening it, they join. Then approve their device with its code.\n\n  {}", r["link"].as_str().unwrap_or(""))
+}
+
 fn vault_tool(op: &str, input: &Map<String, Value>, agent: Option<&str>) -> Result<Value> {
     let scope = input.get("scope").and_then(Value::as_str).unwrap_or("user");
     let text = |k: &str| input.get(k).and_then(Value::as_str).with_context(|| format!("give {k}"));
@@ -1628,6 +1675,7 @@ fn tools() -> Result<Vec<Value>, Value> {
     // Backups are this machine's to run: a sign-in from elsewhere can't.
     if !signed_in() {
         tools.extend(one::backups::tools());
+        tools.extend(one::skills::devices_tools());
     }
     for app in apps.as_array().into_iter().flatten() {
         let name = app["name"].as_str().unwrap_or("");
@@ -1685,6 +1733,9 @@ fn dispatch(name: &str, mut input: Map<String, Value>, agent: Option<&str>, clie
     }
     if app == "backups" {
         return backups_tool(op, &input, agent);
+    }
+    if app == "devices" {
+        return devices_tool(op, &input);
     }
     if name == "groups_list" {
         return Ok(json!(groups_said(&get("/v1/state")?)));

@@ -27,7 +27,7 @@ impl Node {
         crate::keys::Endpoint::of(&self.signing_key())
     }
 
-    fn signing_key(&self) -> ed25519_dalek::SigningKey {
+    pub(super) fn signing_key(&self) -> ed25519_dalek::SigningKey {
         ed25519_dalek::SigningKey::from_bytes(self.0.key.as_bytes())
     }
 

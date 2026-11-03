@@ -38,6 +38,7 @@ mod scheduled;
 mod screens;
 mod sessions;
 pub use databases::NotGiven;
+pub use devices::{DeviceRequest, Invited};
 pub use sessions::Needs;
 mod sidecars;
 mod state;

@@ -594,7 +594,7 @@ fn an_admin_signs_in_only_with_a_passkey() {
 }
 
 #[test]
-fn a_person_sees_only_their_own_join_requests_and_an_inviter_only_its_invites() {
+fn a_person_sees_only_their_own_join_requests_and_the_installs_devices_see_them_all() {
     let ((a, a_hex), (b, b_hex)) = (endpoint(), endpoint());
     let k = Kernel::for_devices(vec![a_hex, b_hex]);
     let ((kim_secret, _), (lee_secret, _)) = (invited(&k, &a, "Kim", None), invited(&k, &b, "Lee", None));
@@ -621,13 +621,16 @@ fn a_person_sees_only_their_own_join_requests_and_an_inviter_only_its_invites() 
         let (status, _, body) = ask(method, &format!("{requests}{path}"), &[("x-one-request", &header(&request))], None);
         (status, serde_json::from_str::<Value>(&body).unwrap_or(Value::Null))
     };
-    assert_eq!(keys(&by(&a, "GET", "").1), vec![kim_device.clone()], "the inviting device sees its invites' requests");
-    assert_eq!(keys(&by(&b, "GET", "").1), vec![lee_device.clone()]);
+    // The install's devices see every one: what they write in approving one counts only from the right person's device.
+    assert_eq!(keys(&by(&a, "GET", "").1), vec![kim_device.clone(), lee_device.clone()]);
+    assert_eq!(keys(&by(&b, "GET", "").1), vec![kim_device.clone(), lee_device.clone()]);
+    let (stranger, _) = endpoint();
+    assert_eq!(by(&stranger, "GET", "").0, 403, "a device that isn't the install's sees none");
 
-    // Nobody else sees or removes one: not another person, nor another inviting device.
+    // No other person sees or removes one.
     assert_eq!(lees.get(&format!("/api/auth/devices/requests/{kim_device}")).0, 404);
     assert_eq!(lees.send("DELETE", &format!("/api/auth/devices/requests/{kim_device}"), None, None).0, 404);
-    assert_eq!(by(&b, "DELETE", &format!("/{kim_device}")).0, 404);
+    assert_eq!(by(&stranger, "DELETE", &format!("/{kim_device}")).0, 403);
     let (status, out) = lees.post("/api/auth/devices/requests", json!({ "key": kim_device, "seal": kim_device, "name": "Not Kim's" }));
     assert_eq!(status, 409, "someone else's device's request was taken over: {out}");
     assert_eq!(k.browser().post("/api/auth/devices/requests", json!({ "key": lee_device, "seal": lee_device, "name": "Nobody's" })).0, 401);

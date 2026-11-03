@@ -28,14 +28,14 @@ pub fn find(app: &str, op: &str) -> Option<(Value, Value)> {
 
 /// The node's own tools, as apps: what search lists, which run here rather than as an app's call; and widgets_show,
 /// which MCP has too (src/mcp_apps.rs), as text here.
-fn node_apps() -> [Value; 4] {
+fn node_apps() -> [Value; 5] {
     let widgets = crate::mcp_apps::tools().into_iter().filter(|t| t["name"] == "widgets_show").collect();
-    [one::skills::vault_app(), one::skills::backups_app(), one::skills::groups_app(), one::skills::node_app("widgets", "Widgets", "Your widgets, as text", "", widgets)]
+    [one::skills::vault_app(), one::skills::backups_app(), one::skills::groups_app(), one::skills::devices_app(), one::skills::node_app("widgets", "Widgets", "Your widgets, as text", "", widgets)]
 }
 
 /// Whether an app is one of the node's own tools, which run here, as the person: never on another device.
 pub fn node_app(app: &str) -> bool {
-    ["vault", "backups", "groups", "widgets"].contains(&app)
+    ["vault", "backups", "groups", "devices", "widgets"].contains(&app)
 }
 
 /// `<CLI> <app> <op> [words] [--input value]...`: runs it and prints what it gives back.
@@ -69,6 +69,10 @@ pub fn run(app: &str, op: &str, args: &[String]) -> Result<()> {
     }
     if o["confirm"] == true && !confirmed {
         ask(&format!("{CLI} {app} {op} sends or can't be undone. Go ahead?"), &format!("{CLI} {app} {op} sends or can't be undone, and the person hasn't agreed to it: ask them, and give --confirm only if they say yes to this very action"))?;
+    }
+    // The node's own tools take the person's yes as an input.
+    if confirmed && node_app(app) {
+        input.insert("confirm".into(), json!(true));
     }
     let call = match node_app(app) {
         true => crate::dispatch(&format!("{app}_{op}"), input, agent_from_env().as_deref(), "cli", Some(o.clone())).map(|ok| json!({ "ok": ok })),

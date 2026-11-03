@@ -393,24 +393,25 @@ export class Auth extends DurableObject {
     });
   }
 
-  /// Requests waiting: the signed-in person's own devices', or, for an inviting device's signed request, those its
-  /// invites' people made with their proof.
+  /// Requests waiting: the signed-in person's own devices', or, for a signed request from one of the install's
+  /// devices, every one: a device approves only its own person's, or a newcomer's whose invite its person keeps, as
+  /// the entries it writes count only then.
   async requests(request) {
     this.expire();
     const sql = this.ctx.storage.sql;
     const signed = await this.signed(request);
-    if (signed) return { requests: this.shown(sql.exec("select r.* from requests r join invites i on r.invite = i.id where i.by = ? order by r.made", signed.by).toArray()) };
+    if (signed) return { requests: this.shown(sql.exec("select * from requests order by made").toArray()) };
     const user = (await this.person(request)) || refuse(401, "Sign in first.");
     return { requests: this.shown(sql.exec("select * from requests where user = ? order by made", user).toArray()) };
   }
 
-  /// A request by its device's key, if the asker may see it: its person, or the device that invited them.
+  /// A request by its device's key, if the asker may see it: its person, or one of the install's devices.
   async mayTouch(request, key) {
     this.expire();
     const sql = this.ctx.storage.sql;
-    const [row] = sql.exec("select r.*, i.by from requests r left join invites i on r.invite = i.id where r.key = ?", key).toArray();
+    const [row] = sql.exec("select * from requests where key = ?", key).toArray();
     const signed = await this.signed(request);
-    const ok = row && (signed ? row.by === signed.by : row.user === ((await this.person(request)) || refuse(401, "Sign in first.")));
+    const ok = row && (signed || row.user === ((await this.person(request)) || refuse(401, "Sign in first.")));
     if (!ok) refuse(404, "No request waits with that key: it was approved, refused or waited too long.");
     return row;
   }
