@@ -141,7 +141,9 @@
     alert: ({ title = "", text = "", action, danger = false }) => host({ type: "alert", title, text, ...(action ? { action, danger } : {}) }).then((ok) => !!ok),
     // Opens a web page's address in the browser.
     link: (url) => host({ type: "link", url: String(url) }),
-    title: (text) => host({ type: "title", text }),
+    // The bar's title; empty while the screen shows its own heading, when `name` is still what the screen is called,
+    // for the shell's path, Back and window name.
+    title: (text, name) => host({ type: "title", text, ...(name ? { name: String(name) } : {}) }),
     // Files, as `{ name, type, base64 }` or `{ name, type, blob }`: save (or share) one, or show it (Quick Look,
     // Preview, a tab).
     save: (file) => host({ type: "save", file }),

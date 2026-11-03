@@ -588,7 +588,10 @@ function link(x) {
 // one answers; until then it shows what it showed before.
 const got = {};
 let watched = null;
-const titled = new IntersectionObserver(([e]) => one.title(e.isIntersecting ? "" : data?.apps.find((x) => x.name === name)?.title || ""));
+const titled = new IntersectionObserver(([e]) => {
+  const title = data?.apps.find((x) => x.name === name)?.title || "";
+  one.title(e.isIntersecting ? "" : title, title);
+});
 function paint() {
   if (!got.list) return;
   const el = document.getElementById("app");

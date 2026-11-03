@@ -600,21 +600,21 @@ public sealed class MainWindow : Window
     }
 
     /// A screen under a bar with its title, which the screen may change; a page shows its own large title, so its bar
-    /// has none.
+    /// has none. The path names it by what the screen says it's called, which it gives while its bar's title is empty.
     readonly System.Runtime.CompilerServices.ConditionalWeakTable<FrameworkElement, string> titles = new();
 
     FrameworkElement Screen(Route r)
     {
         var title = new TextBlock { FontSize = 14, FontWeight = FontWeights.SemiBold, Margin = new Thickness(20, 6, 20, 6), Height = 22 };
         var grid = new Grid();
-        void Retitle(string text)
+        void Retitle(string text, string? name)
         {
             title.Text = text;
             title.Visibility = text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
-            titles.AddOrUpdate(grid, text);
+            titles.AddOrUpdate(grid, text.Length > 0 ? text : name ?? "");
             if (pushed.Count > 0) DrawPath();
         }
-        Retitle(r.Own && r.Screen == "pages" ? "" : TitleOf(r));
+        Retitle(r.Own && r.Screen == "pages" ? "" : TitleOf(r), null);
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         grid.Children.Add(title);

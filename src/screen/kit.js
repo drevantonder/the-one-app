@@ -220,12 +220,12 @@
     if (window.__oneShell?.bar) one.title(text);
     if (!titled) {
       titled = true;
-      one.title(follows ? "" : text);
+      one.title(follows ? "" : text, text);
       if (follows) {
         let el = null;
         const seen = new IntersectionObserver((all) => {
           const e = all.filter((x) => x.target === el).pop();
-          if (e) one.title(e.isIntersecting ? "" : el.textContent);
+          if (e) one.title(e.isIntersecting ? "" : el.textContent, el.textContent);
         });
         const follow = () => {
           const now = document.querySelector(".large-title");

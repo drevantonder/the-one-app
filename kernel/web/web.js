@@ -760,14 +760,15 @@ window.__one = {};
           return reply((await openSheet(own("request", { scope: out.scope, id: out.id }))) === true);
         }
         case "title": {
-          // Empty while the screen shows its own large title, as the Mac app's bar is.
+          // Empty while the screen shows its own large title, as the Mac app's bar is; the tab is named by what the
+          // screen says it's called.
           const title = String(m.text ?? "");
           if (f.sheet) f.sheet.title.textContent = title || titleOf(r);
           // A phone's pages have no bar: what's pushed over them has its own.
           else if (!f.home) {
             const el = $(".detail .bar-title", root);
             if (el) el.textContent = title;
-            document.title = title || titleOf(r);
+            document.title = title || String(m.name || "") || titleOf(r);
           }
           return reply(null);
         }

@@ -26,7 +26,7 @@ namespace One;
 public sealed class AppScreen : Grid
 {
     readonly Route route;
-    readonly Action<string> retitle;
+    readonly Action<string, string?> retitle;
     /// The sheet it's in, if it's in one.
     readonly Sheet? sheet;
     // Faded in as it first draws, not popped in.
@@ -38,8 +38,9 @@ public sealed class AppScreen : Grid
     public static event Action? Restyled;
     public static void Restyle() => Restyled?.Invoke();
 
-    /// `retitle` sets its bar's title (empty while the screen shows its own); in a sheet, the sheet's.
-    public AppScreen(Route route, Action<string> retitle, Sheet? sheet = null)
+    /// `retitle` sets its bar's title (empty while the screen shows its own) and what the screen is called; in a
+    /// sheet, the sheet's title.
+    public AppScreen(Route route, Action<string, string?> retitle, Sheet? sheet = null)
     {
         this.route = route;
         this.retitle = retitle;
@@ -400,7 +401,7 @@ public sealed class AppScreen : Grid
                     return;
                 case "title":
                     if (sheet != null) sheet.Retitle(Text(m, "text") ?? "");
-                    else retitle(Text(m, "text") ?? "");
+                    else retitle(Text(m, "text") ?? "", Text(m, "name"));
                     Reply(id, null);
                     return;
                 case "menu":
