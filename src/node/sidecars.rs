@@ -70,15 +70,24 @@ impl Node {
         (self.0.built_in_sidecars.iter().any(|n| n.name == app) || self.0.sidecars.has(app)) && self.removed_here(app).is_none()
     }
 
-    /// The picture a sidecar called `name` gives, here or on a device this one is connected to, and its kind.
+    /// The picture a sidecar called `name` gives, here or on a device this one is connected to, and its kind; while
+    /// none of those runs it, the one it gave when last seen.
     pub(super) fn sidecar_image(&self, name: &str) -> Option<(Value, Value)> {
-        self.with(|i| {
-            let here = self.sidecars_here(i).into_iter().map(|d| d.2);
-            let there = i.peers.iter().filter(|(k, _)| i.online(k)).flat_map(|(_, s)| s.sidecars.iter().map(|d| d.2.clone()));
-            Ok(here.chain(there).find(|d| d["name"] == name && d["image"].is_string()).map(|d| (d["image"].clone(), d["image_kind"].clone())))
-        })
-        .ok()
-        .flatten()
+        let now = self
+            .with(|i| {
+                let here = self.sidecars_here(i).into_iter().map(|d| d.2);
+                let there = i.peers.iter().filter(|(k, _)| i.online(k)).flat_map(|(_, s)| s.sidecars.iter().map(|d| d.2.clone()));
+                Ok(here.chain(there).find(|d| d["name"] == name && d["image"].is_string()).map(|d| (d["image"].clone(), d["image_kind"].clone())))
+            })
+            .ok()
+            .flatten();
+        match now {
+            Some((image, kind)) => {
+                self.0.logos.keep_picture(name, image.as_str().unwrap_or_default(), kind.as_str().unwrap_or("logo"));
+                Some((image, kind))
+            }
+            None => self.0.logos.picture(name).map(|(image, kind)| (json!(image), json!(kind))),
+        }
     }
 
     /// Every entry a built-in sidecar has in the local user's scope, oldest first.

@@ -23,6 +23,9 @@ pub struct Logos {
     known: Mutex<BTreeMap<String, Known>>,
     fetching: Mutex<HashSet<String>>,
     urls: Mutex<HashMap<String, String>>,
+    /// The picture each sidecar last gave (a Mac app's icon) and its kind, by name, kept in `sidecar-pictures.json`, so
+    /// its app keeps it while the device giving it is away.
+    pictures: Mutex<BTreeMap<String, (String, String)>>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -42,7 +45,28 @@ impl Logos {
     pub fn open(dir: &Path) -> Logos {
         let path = dir.join("logos.json");
         let known = std::fs::read(&path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
-        Logos { path, known: Mutex::new(known), fetching: Mutex::default(), urls: Mutex::default() }
+        let pictures = std::fs::read(dir.join("sidecar-pictures.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+        Logos { path, known: Mutex::new(known), fetching: Mutex::default(), urls: Mutex::default(), pictures: Mutex::new(pictures) }
+    }
+
+    /// The picture a sidecar called `name` gave when last seen, and its kind.
+    pub fn picture(&self, name: &str) -> Option<(String, String)> {
+        self.pictures.lock().unwrap().get(name).cloned()
+    }
+
+    /// Keeps the picture a sidecar called `name` gives now.
+    pub fn keep_picture(&self, name: &str, image: &str, kind: &str) {
+        let mut pictures = self.pictures.lock().unwrap();
+        let new = (image.to_string(), kind.to_string());
+        if pictures.get(name) == Some(&new) {
+            return;
+        }
+        pictures.insert(name.to_string(), new);
+        let path = self.path.with_file_name("sidecar-pictures.json");
+        let tmp = path.with_extension("part");
+        if std::fs::write(&tmp, serde_json::to_vec(&*pictures).unwrap_or_default()).is_ok() {
+            let _ = std::fs::rename(&tmp, &path);
+        }
     }
 
     /// `domain`'s logo as a data URL and its kind (`icon` or `logo`), if this device has it, and whether it's time to
