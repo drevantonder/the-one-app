@@ -14,7 +14,7 @@ use std::task::{Context, Poll, Waker};
 use std::time::Duration;
 
 use iroh::endpoint::transports::{CustomEndpoint, CustomSender, CustomTransport, RecvInfo, Transmit};
-use iroh::endpoint::{Connection, presets};
+use iroh::endpoint::{Connection, QuicTransportConfig, presets};
 use iroh::{Endpoint, EndpointAddr, PublicKey, RelayMode, SecretKey, TransportAddr};
 use iroh_base::CustomAddr;
 use js_sys::{Function, Promise, Uint8Array};
@@ -23,8 +23,17 @@ use wasm_bindgen_futures::JsFuture;
 
 /// This transport's kind of address: an endpoint's key, reached through the relay that hands this one its datagrams.
 const THROUGH_RELAY: u64 = 0x6f6e;
-/// The most an ask or its answer may carry, as nodes on machines take.
-const MESSAGE_LIMIT: usize = 64 << 20;
+/// The most an ask another endpoint sends may carry: a call and its input. A Worker has 128 MB.
+const ASK_LIMIT: usize = 4 << 20;
+/// The most the answer to an ask this node sends may carry.
+const ANSWER_LIMIT: usize = 16 << 20;
+/// How many streams another endpoint may have open on a connection at once.
+const STREAMS: u32 = 8;
+/// How many connections others may have open to it at once, and how many of their asks it reads at once.
+const CONNECTIONS: usize = 32;
+const ASKS: usize = 16;
+/// How many datagrams the relay may hand it before iroh reads them: more are dropped, as a full socket drops them.
+const INBOX_MOST: usize = 4096;
 
 fn alpn() -> Vec<u8> {
     format!("{}/1", one::config::CLI).into_bytes()
@@ -51,6 +60,24 @@ thread_local! {
 struct Net {
     endpoint: Endpoint,
     conns: Rc<RefCell<HashMap<[u8; 32], Connection>>>,
+    /// Connections others opened that are open now, and their asks being read or answered now.
+    incoming: Rc<std::cell::Cell<usize>>,
+    asks: Rc<std::cell::Cell<usize>>,
+}
+
+impl Net {
+    /// Keeps `conn` as the one to `remote` until it closes, then forgets it, unless another replaced it.
+    fn keep(&self, remote: [u8; 32], conn: &Connection) {
+        self.conns.borrow_mut().insert(remote, conn.clone());
+        let (conns, conn) = (self.conns.clone(), conn.clone());
+        wasm_bindgen_futures::spawn_local(async move {
+            conn.closed().await;
+            let mut conns = conns.borrow_mut();
+            if conns.get(&remote).is_some_and(|c| c.stable_id() == conn.stable_id()) {
+                conns.remove(&remote);
+            }
+        });
+    }
 }
 
 thread_local! {
@@ -143,43 +170,60 @@ pub async fn endpoint_start(seed: Vec<u8>, send: Function, asked: Function) -> R
     }
     let key = SecretKey::from_bytes(&seed.try_into().map_err(|_| JsError::new("the endpoint's key is 32 bytes"))?);
     let me = through_relay(key.public().as_bytes());
+    let transport = QuicTransportConfig::builder().max_concurrent_bidi_streams(STREAMS.into()).max_concurrent_uni_streams(0u32.into()).build();
     let endpoint = Endpoint::builder(presets::Minimal)
         .secret_key(key)
         .alpns(vec![alpn()])
+        .transport_config(transport)
         .relay_mode(RelayMode::Disabled)
         .add_custom_transport(Arc::new(Relayed { me: me.clone(), addrs: n0_watcher::Watchable::new(vec![me]) }))
         .bind()
         .await
         .map_err(thrown)?;
-    let net = Net { endpoint: endpoint.clone(), conns: Default::default() };
+    let net = Net { endpoint: endpoint.clone(), conns: Default::default(), incoming: Default::default(), asks: Default::default() };
     NET.with(|n| *n.borrow_mut() = Some(net.clone()));
     let id = data_encoding::HEXLOWER.encode(endpoint.id().as_bytes());
     wasm_bindgen_futures::spawn_local(async move {
         while let Some(incoming) = endpoint.accept().await {
+            if net.incoming.get() >= CONNECTIONS {
+                incoming.refuse();
+                continue;
+            }
             let net = net.clone();
+            net.incoming.set(net.incoming.get() + 1);
             wasm_bindgen_futures::spawn_local(async move {
-                let Ok(Ok(conn)) = (match incoming.accept() {
-                    Ok(accepting) => Ok(accepting.await),
-                    Err(err) => Err(err),
-                }) else {
-                    return;
+                let accepted = match incoming.accept() {
+                    Ok(accepting) => accepting.await.ok(),
+                    Err(_) => None,
                 };
-                let remote = *conn.remote_id().as_bytes();
-                net.conns.borrow_mut().entry(remote).or_insert_with(|| conn.clone());
-                answer(conn, remote).await;
+                if let Some(conn) = accepted {
+                    let remote = *conn.remote_id().as_bytes();
+                    if !net.conns.borrow().get(&remote).is_some_and(|c| c.close_reason().is_none()) {
+                        net.keep(remote, &conn);
+                    }
+                    answer(&net, conn, remote).await;
+                }
+                net.incoming.set(net.incoming.get() - 1);
             });
         }
     });
     Ok(id)
 }
 
-/// Answers each ask on a connection another endpoint opened, each on its own stream.
-async fn answer(conn: Connection, remote: [u8; 32]) {
+/// Answers each ask on a connection another endpoint opened, each on its own stream, a few at once.
+async fn answer(net: &Net, conn: Connection, remote: [u8; 32]) {
     let remote = data_encoding::HEXLOWER.encode(&remote);
     while let Ok((mut send, mut recv)) = conn.accept_bi().await {
-        let remote = remote.clone();
+        if net.asks.get() >= ASKS {
+            let _ = recv.stop(1u32.into());
+            let _ = send.reset(1u32.into());
+            continue;
+        }
+        net.asks.set(net.asks.get() + 1);
+        let (remote, asks) = (remote.clone(), net.asks.clone());
         wasm_bindgen_futures::spawn_local(async move {
-            let Ok(message) = recv.read_to_end(MESSAGE_LIMIT).await else { return };
+            let _done = Done(asks);
+            let Ok(message) = recv.read_to_end(ASK_LIMIT).await else { return };
             let Some(asked) = ASKED.with(|a| a.borrow().clone()) else { return };
             let Ok(promise) = asked.call2(&JsValue::NULL, &remote.into(), &String::from_utf8_lossy(&message).as_ref().into()) else { return };
             let answer = JsFuture::from(Promise::from(promise)).await.ok().and_then(|a| a.as_string());
@@ -188,6 +232,15 @@ async fn answer(conn: Connection, remote: [u8; 32]) {
             }
             let _ = send.finish();
         });
+    }
+}
+
+/// Counts an ask as answered once it's dropped, however it ended.
+struct Done(Rc<std::cell::Cell<usize>>);
+
+impl Drop for Done {
+    fn drop(&mut self) {
+        self.0.set(self.0.get() - 1);
     }
 }
 
@@ -208,6 +261,9 @@ pub fn endpoint_deliver(src: &[u8], segment_size: u32, contents: &[u8]) {
     let mut inbox = INBOX.lock().unwrap();
     let step = if segment_size == 0 { contents.len() } else { segment_size as usize };
     for chunk in contents.chunks(step.max(1)) {
+        if inbox.packets.len() >= INBOX_MOST {
+            break;
+        }
         inbox.packets.push_back((from.clone(), chunk.to_vec()));
     }
     if let Some(waker) = inbox.waker.take() {
@@ -244,7 +300,7 @@ pub async fn endpoint_ask(to: String, message: String, connect_ms: u32, limit_ms
                 };
                 made = js_sys::Date::now() - started;
                 fresh = true;
-                net.conns.borrow_mut().insert(key, conn.clone());
+                net.keep(key, &conn);
                 conn
             }
         };
@@ -260,7 +316,7 @@ pub async fn endpoint_ask(to: String, message: String, connect_ms: u32, limit_ms
         anyhow::Ok(())
     };
     sent.await.map_err(|e| unreached(format!("couldn't be reached: {e}")))?;
-    let answer = match n0_future::time::timeout(Duration::from_millis(limit_ms.into()), recv.read_to_end(MESSAGE_LIMIT)).await {
+    let answer = match n0_future::time::timeout(Duration::from_millis(limit_ms.into()), recv.read_to_end(ANSWER_LIMIT)).await {
         Ok(Ok(answer)) => answer,
         Ok(Err(err)) => return Err(js_sys::Error::new(&format!("its answer didn't come: {err}")).into()),
         Err(_) => return Err(js_sys::Error::new("it didn't answer in time").into()),
