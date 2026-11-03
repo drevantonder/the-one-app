@@ -3,16 +3,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<!-- The MCP Apps view `one mcp` serves (src/mcp_apps.rs): widgets drawn from their trees, or an
-     app's screen in a frame whose bridge this page answers through the chat client. -->
+<!-- The MCP Apps view `one mcp` serves (src/mcp_apps.rs): widgets drawn from their trees, and apps' screens, each in a
+     sandboxed frame whose bridge this page answers through the chat client, as the web client answers it, with the same
+     kit and the same menus, alerts, sheets and files (src/screen/host.js). src/mcp_apps.rs writes those files in. -->
+<style>/*kit.css*/</style>
 <style>
-  /* The kit's colours (src/screen/kit.css), light and dark: tests/contracts.rs holds them to it. */
-  :root { color-scheme: light dark; --text: light-dark(#111111, #f2f2f2); --muted: light-dark(#6b6b6b, #9b9b9b); --line: light-dark(#e6e6e6, #2f2f2f);
-    --card: light-dark(#f4f4f4, #222222); --fill: light-dark(#ececec, #2b2b2b); --warn: light-dark(#b45309, #fbbf24); --danger: light-dark(#dc2626, #f87171);
-    --tint: #007aff;
-    font: 15px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
-  @supports (color: AccentColor) { :root { --tint: AccentColor; } }
-  body { margin: 0; padding: 4px; color: var(--text); background: transparent; }
+  html, body { background: transparent; }
+  body { padding: 4px; max-width: none; }
   .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
   .cards .w-card { padding: 14px; font-size: 14px; }
   iframe { border: 0; width: 100%; display: block; min-height: 120px; }
@@ -25,15 +22,26 @@
   .frame > .ph { position: absolute; inset: 0; height: auto; }
   .frame > iframe { height: 160px; opacity: 0; transition: height .2s ease, opacity .2s; }
   .frame.ready > iframe { opacity: 1; }
+  /* Back, over what was opened from what's under it, with its title. */
+  .nav { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; min-height: 32px; margin-bottom: 4px; }
+  .nav .back { justify-self: start; display: flex; align-items: center; gap: 2px; border: 0; background: none; padding: 4px 6px 4px 0; font: inherit; color: var(--tint); cursor: pointer; }
+  .nav .title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .screen-sheet { max-width: 480px; }
+  /* A sheet or menu needs room: the view is tall enough for one while it's open. */
+  body.over { min-height: 560px; }
 </style>
 </head>
 <body>
 <div id="out"><div class="ph" role="status" aria-label="Loading"></div></div>
+<script>window.__one = { host: (m) => window.__oneView(m) };</script>
+<script>/*bridge.js*/</script>
+<script>/*kit.js*/</script>
+<script>/*host.js*/</script>
 <script>/*widgets.js*/</script>
 <script>
 (() => {
   // `args`: what the tool was called with, so a widget drawn again comes from the same page.
-  let next = 1, frame = null, shown = null, args = {};
+  let next = 1, args = {}, appearance = "automatic";
   const pending = new Map(), out = document.getElementById("out");
   const post = (msg) => parent.postMessage({ jsonrpc: "2.0", ...msg }, "*");
   const request = (method, params) => new Promise((resolve, reject) => { const id = next++; pending.set(id, { resolve, reject }); post({ id, method, params }); });
@@ -45,10 +53,20 @@
     const text = (r.content || []).map((c) => c.text || "").join("");
     try { return JSON.parse(text); } catch { return text; }
   };
+  const looks = oneHost.scheme();
+
+  // What's shown: tools' results, widgets or an app's screen, each opened from the one under it; the top one drawn.
+  const stack = [];
+  const top = () => stack.at(-1);
+
+  // This page's own bridge (the kit's icons, a widget's copy).
+  const icons = async (names) => (await call("screens_icons", { names: (Array.isArray(names) ? names : []).map(String) }))?.paths || {};
+  window.__oneView = (m) => (m.type === "icons" ? icons(m.names) : m.type === "copy" ? navigator.clipboard.writeText(String(m.text ?? "")) : Promise.resolve(null));
 
   window.addEventListener("message", (e) => {
     const m = e.data;
-    if (frame && e.source === frame.contentWindow) return fromScreen(m);
+    const frame = [...document.querySelectorAll("iframe")].find((f) => f.contentWindow === e.source);
+    if (frame) return fromScreen(frame.__screen, m);
     if (e.source !== parent || !m || m.jsonrpc !== "2.0") return;
     if (m.method === undefined) {
       const p = pending.get(m.id);
@@ -56,28 +74,59 @@
       return;
     }
     if (m.method === "ui/notifications/tool-input") args = m.params?.arguments || {};
-    if (m.method === "ui/notifications/tool-result") show(m.params);
+    if (m.method === "ui/notifications/tool-result") (stack.length = 0), show(m.params);
     if (m.method === "ui/notifications/host-context-changed") theme(m.params);
     if (m.method === "ui/resource-teardown" && m.id !== undefined) post({ id: m.id, result: {} });
   });
 
+  // The chat's light or dark, here and in every screen's frame.
   function theme(ctx) {
-    if (ctx?.theme) document.documentElement.style.colorScheme = ctx.theme;
+    if (!ctx?.theme) return;
+    appearance = ["light", "dark"].includes(ctx.theme) ? ctx.theme : "automatic";
+    looks(document, appearance);
+    document.querySelectorAll("iframe").forEach((f) => f.contentWindow?.postMessage({ oneScheme: appearance }, "*"));
   }
 
+  // A tool's result, over what's shown; text where there's nothing to draw.
   function show(result) {
     const s = result?.structuredContent;
-    if (!s) { out.className = "empty"; out.textContent = (result?.content || []).map((c) => c.text || "").join("\n"); return size(); }
-    shown = s;
-    if (s.html !== undefined) return screen(s);
-    out.className = "cards";
-    out.replaceChildren(...(s.widgets || []).map(card));
-    if (!(s.widgets || []).length) { out.className = "empty"; out.textContent = "No widgets."; }
+    if (!s) {
+      stack.length = 0;
+      out.className = "empty";
+      out.textContent = (result?.content || []).map((c) => c.text || "").join("\n");
+      return size();
+    }
+    stack.push(s);
+    draw();
+  }
+
+  function draw() {
+    const s = top();
+    out.className = "";
+    let body;
+    if (s.html !== undefined) body = mount(s);
+    else if (!(s.widgets || []).length) body = Object.assign(document.createElement("div"), { className: "empty", textContent: "No widgets." });
+    else (body = Object.assign(document.createElement("div"), { className: "cards" })).replaceChildren(...s.widgets.map(card));
+    out.replaceChildren(...(stack.length > 1 ? [bar(s)] : []), body);
     size();
   }
 
+  function bar(s) {
+    const el = Object.assign(document.createElement("div"), { className: "nav" });
+    el.innerHTML = `<button class="back">${one.icon("caret-left")}Back</button><div class="title"></div><span></span>`;
+    el.querySelector(".title").textContent = s.title || "";
+    el.querySelector(".back").onclick = back;
+    return el;
+  }
+
+  function back() {
+    if (stack.length < 2) return;
+    stack.pop();
+    draw();
+  }
+
   const card = (w) => Object.assign(oneWidgets.card(w, { run: act, follow }), { __w: w });
-  const cardOf = (w) => [...out.children].find((el) => el.__w === w);
+  const cardOf = (w) => [...out.querySelectorAll(".cards > *")].find((el) => el.__w === w);
 
   // A button or toggle: runs the app's operation as the person, then draws its widget again, the others left as they
   // are; → the error's text.
@@ -85,9 +134,9 @@
     try {
       await call(`${app}_${op}`, input);
       const fresh = (await call("widgets_show", { app: w.app, widget: w.widget, ...(args.scope ? { scope: args.scope } : {}) }))?.widgets?.[0];
-      const el = cardOf(w), i = shown?.widgets?.indexOf(w) ?? -1;
+      const s = top(), el = cardOf(w), i = s?.widgets?.indexOf(w) ?? -1;
       if (!fresh || !el || i < 0) return;
-      shown.widgets[i] = fresh;
+      s.widgets[i] = fresh;
       el.replaceWith(card(fresh));
       size();
     } catch (err) {
@@ -95,7 +144,7 @@
     }
   }
 
-  // A link: a web page through the chat, or one of the app's screens, opened here, its card dimmed meanwhile.
+  // A link: a web page through the chat, or one of the app's screens, opened over the widgets, its card dimmed meanwhile.
   async function follow(link, w) {
     if (typeof link === "string") return request("ui/open-link", { url: link }).catch(() => {});
     const el = cardOf(w);
@@ -108,20 +157,20 @@
     }
   }
 
-  // An app's screen, in a frame whose `one` bridge posts here (src/screen/bridge.js): its calls go to the app's tools
-  // through the chat.
-  function screen(s) {
+  // An app's screen, in a sandboxed frame of its own, so it reaches nothing here and acts only as its app, through
+  // its bridge (src/screen/bridge.js): `sheet` when it's in one.
+  function mount(s, sheet) {
     // Its height is what it draws, not the frame's, so an empty page says it's empty.
     const shim = `<script>new ResizeObserver(() => parent.postMessage({ oneHeight: Math.ceil(document.documentElement.getBoundingClientRect().height) }, "*")).observe(document.documentElement);<\/script>`;
     const box = Object.assign(document.createElement("div"), { className: "frame", innerHTML: `<div class="ph" role="status" aria-label="Loading"></div>` });
-    frame = document.createElement("iframe");
-    frame.srcdoc = s.html.replace("<head>", "<head>" + shim);
+    const frame = document.createElement("iframe");
+    frame.setAttribute("sandbox", "allow-scripts allow-forms");
+    frame.__screen = { s, sheet, frame };
+    frame.srcdoc = oneHost.look(s.html, appearance, !!sheet).replace("<head>", "<head>" + shim);
     box.append(frame);
     // Shown once it draws something, or a moment after it loads if it draws little.
     frame.onload = () => setTimeout(() => ready(box), 2000);
-    out.className = "";
-    out.replaceChildren(box);
-    size();
+    return box;
   }
 
   function ready(box) {
@@ -129,26 +178,75 @@
     box.querySelector(".ph")?.remove();
   }
 
-  async function fromScreen(m) {
+  // A screen opened in a sheet over this one → what it gave `one.close` once it's gone, else null.
+  function sheet(s) {
+    return new Promise((done) => {
+      let value = null;
+      const handle = one.sheet({ title: s.title || "", onClose: () => done(value) });
+      const el = handle.body.closest(".sheet");
+      el.classList.add("screen-sheet");
+      handle.body.append(mount(s, { close: (v) => { value = v ?? null; handle.close(); }, title: el.querySelector(".sheet-title") }));
+    });
+  }
+
+  // What the app's `vault` declares as `need`, asked for as an agent asks: the person picks or makes the item on their
+  // own device, from the link → true once it's set.
+  async function vault(s, need) {
+    const said = String(await call("vault_request", { app: s.app, need, ...(s.scope ? { scope: s.scope } : {}) }));
+    const link = said.match(/https?:\/\/\S+/)?.[0], id = said.match(/with id (\S+)/)?.[1];
+    if (!link || !id) throw new Error(said);
+    await request("ui/open-link", { url: link });
+    for (const until = Date.now() + 10 * 60_000; Date.now() < until;) {
+      await new Promise((r) => setTimeout(r, 2000));
+      const state = (await call("vault_status", { id }))?.state;
+      if (state && state !== "waiting") return state === "set";
+    }
+    return false;
+  }
+
+  // The bridge's messages from a screen's frame, each acting as the screen's app.
+  async function fromScreen(screen, m) {
+    if (!screen) return;
+    const { s, frame } = screen;
     if (m?.oneHeight !== undefined) {
       if (m.oneHeight > 40) frame.style.height = m.oneHeight + "px", ready(frame.parentElement);
       return size();
     }
     if (!m?.one) return;
-    const reply = (ok, error) => frame.contentWindow.postMessage({ oneReply: m.id, ok, error }, "*");
+    const reply = (ok, error) => frame.contentWindow?.postMessage({ oneReply: m.id, ok: ok ?? null, error }, "*");
     const msg = m.one;
     try {
       switch (msg.type) {
-        case "call": return reply(await call(`${shown.app}_${msg.op}`, msg.input || {}));
-        // Another screen of the app takes this one's place: a chat has no stack of screens, or sheets.
-        case "open": return show({ structuredContent: await call("screens_open", { app: msg.app || shown.app, screen: msg.screen, params: msg.params || {} }) });
-        case "copy": await navigator.clipboard.writeText(msg.text); return reply(null);
-        case "link": await request("ui/open-link", { url: msg.url }); return reply(null);
-        case "alert": return reply(msg.action ? confirm([msg.title, msg.text].filter(Boolean).join("\n\n")) : null);
-        case "close": case "title": case "icon": case "haptic": case "cache": return reply(null);
-        case "menu": case "save": case "preview": case "scan": case "vault": case "icons":
-          return reply(undefined, "Open this in the app to do that.");
-        case "request": case "api": case "signOut": case "appearance": case "device":
+        case "call": return reply(await call(`${s.app}_${msg.op}`, msg.input || {}));
+        case "open": {
+          const scope = msg.scope || s.scope;
+          const to = await call("screens_open", { app: msg.app || s.app, screen: msg.screen || "main", params: msg.params || {}, ...(scope ? { scope } : {}) });
+          if (msg.sheet) return reply(await sheet(to));
+          reply(null);
+          // From a sheet, the sheet goes and it opens where the view is.
+          screen.sheet?.close(null);
+          return show({ structuredContent: to });
+        }
+        case "close":
+          reply(null);
+          return screen.sheet ? screen.sheet.close(msg.value) : back();
+        case "title":
+          s.title = String(msg.text ?? "");
+          if (screen.sheet) screen.sheet.title.textContent = s.title;
+          else if (top() === s) out.querySelector(".nav .title")?.replaceChildren(s.title);
+          return reply(null);
+        case "menu": return reply(await oneHost.menu(frame, msg));
+        case "alert": return reply(await oneHost.alert(msg));
+        case "save": case "preview":
+          await oneHost.file(msg.type, msg.file || {}, () => Promise.reject(new Error("Open this in the app to get this file.")));
+          return reply(null);
+        case "copy": await navigator.clipboard.writeText(String(msg.text ?? "")); return reply(null);
+        case "link": await request("ui/open-link", { url: String(msg.url) }); return reply(null);
+        case "vault": return reply(await vault(s, String(msg.need || "")));
+        case "icons": return reply(await icons(msg.names));
+        case "scan": return reply(undefined, "Scanning documents needs the iPhone, iPad or Android app. Choose the files instead.");
+        case "icon": case "haptic": return reply(null);
+        case "request": case "api": case "signOut": case "appearance": case "device": case "cache":
           return reply(undefined, "Only Settings can do that.");
         default: return reply(undefined, "Unknown message");
       }
@@ -157,8 +255,13 @@
     }
   }
 
+  // A sheet or menu open makes room for itself (body.over).
+  new MutationObserver(() => document.body.classList.toggle("over", !!document.querySelector(".sheet-backdrop, .menu-backdrop")))
+    .observe(document.body, { childList: true });
+
   function size() {
-    requestAnimationFrame(() => notify("ui/notifications/size-changed", { width: document.documentElement.scrollWidth, height: document.documentElement.scrollHeight }));
+    // What it draws, not the frame it's in (scrollHeight), so it shrinks again once a sheet's gone.
+    requestAnimationFrame(() => notify("ui/notifications/size-changed", { width: document.documentElement.scrollWidth, height: Math.ceil(document.documentElement.getBoundingClientRect().height) }));
   }
   new ResizeObserver(size).observe(document.body);
 

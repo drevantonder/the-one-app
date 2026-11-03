@@ -46,30 +46,10 @@ a { color: inherit; }
 .bar-end { margin-left: auto; }
 .scroll { flex: 1; overflow-y: auto; min-height: 0; }
 
-/* A small menu, as a ⋯ button's, over a backdrop that takes a click anywhere else. */
-.menu-backdrop { position: fixed; inset: 0; z-index: 59; }
-.menu { outline: none; position: fixed; z-index: 60; min-width: 200px; padding: 5px; border-radius: 10px; background: var(--card); box-shadow: 0 8px 28px rgba(0, 0, 0, 0.25), 0 0 0 0.5px var(--line); }
-.menu-item { display: block; width: 100%; text-align: left; border: 0; background: none; font: inherit; font-size: 13px; color: var(--text); padding: 5px 10px; border-radius: 5px; cursor: pointer; }
-.menu-item:hover { background: var(--tint); color: white; }
-.menu-item.danger { color: var(--danger); }
-.menu-item.danger:hover { background: var(--danger); color: white; }
-.menu-check { display: inline-block; width: 16px; }
-.menu-item { display: flex; align-items: center; gap: 8px; }
-.menu-title { flex: 1; }
-.menu-icon { width: 15px; height: 15px; flex: none; opacity: 0.85; }
-.menu-line { height: 0.5px; margin: 5px 8px; background: var(--line); }
-.menu-row { display: flex; gap: 4px; padding: 2px 2px 6px; margin-bottom: 4px; border-bottom: 0.5px solid var(--line); }
-.menu-choice { flex: 1; height: 34px; display: grid; place-items: center; border: 0; border-radius: 7px; background: none; color: var(--text); cursor: pointer; font: inherit; font-size: 12px; }
-.menu-choice .menu-icon { width: 18px; height: 18px; }
-.menu-choice:hover { background: var(--line); }
-.menu-choice.on { background: var(--tint); color: white; }
-
 /* Sheets: the kit's, as wide as the Mac app's; a screen in one fills it. */
 .sheet { font-size: 14px; }
 .screen-sheet { max-width: 480px; height: min(620px, 88vh); display: flex; flex-direction: column; padding-bottom: 0; overflow: hidden; }
 .screen-sheet .sheet-body { flex: 1; min-height: 0; }
-.sheet-text { margin: 4px 4px 16px; color: var(--muted); }
-.sheet-actions { display: flex; justify-content: flex-end; gap: 8px; padding-bottom: 8px; }
 /* The rest of the window, around a screen with a sheet open in it (web.js's shade): its backdrop's shade. */
 .shade { position: fixed; inset: 0; z-index: 50; background: rgba(0, 0, 0, 0.32); opacity: 0; pointer-events: none; transition: opacity 0.25s; }
 .shade.open { opacity: 1; pointer-events: auto; }

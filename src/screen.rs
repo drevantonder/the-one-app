@@ -1,6 +1,10 @@
 //! A screen's page, as every node serves it, an app's or a client's own: the design kit and the bridge (`src/screen/`), what the
 //! screen is told (`window.__one`), and the screen's own HTML.
 
+/// Phosphor's icons, each name's path on a 256-point grid (vendor/phosphor), for the web pages that draw screens: the
+/// web client's, at the address, and a chat's view, by `screens_icons`.
+pub const ICONS: &[u8] = include_bytes!("../vendor/phosphor/icons.json");
+
 /// The kit and the bridge, in the order a page has them: each path under `src/screen/` and its text.
 const KIT: &[(&str, &str)] = &[
     ("kit.css", include_str!("screen/kit.css")),

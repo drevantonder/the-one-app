@@ -653,7 +653,7 @@ window.__one = {};
     setTimeout(() => f.loaded || f.still || !into.isConnected || $(".screen-status", into) || into.insertAdjacentHTML("afterbegin", `<div class="screen-status">${one.loading()}</div>`), 400);
     const draw = (page) => {
       f.page = page;
-      f.html = look(page, !!sheet);
+      f.html = oneHost.look(page, appearance(), !!sheet);
       if (!into.isConnected) return;
       if (f.still) frame.style.visibility = "hidden";
       into.append(frame);
@@ -674,7 +674,7 @@ window.__one = {};
       if (!f.html) return draw(page);
       if (same(page, f.page)) return;
       f.page = page;
-      f.html = look(page, !!sheet);
+      f.html = oneHost.look(page, appearance(), !!sheet);
       frame.src = asset("frame.html");
     }, (err) => f.html || ((f.loaded = true), (into.innerHTML = message("Can’t Open This", one.plain(err).title))));
     return f;
@@ -689,7 +689,7 @@ window.__one = {};
     frame.classList.add("screen-still");
     frame.setAttribute("aria-hidden", "true");
     const scrolled = `<script>addEventListener("load", () => scrollTo(0, Number(document.documentElement.dataset.stillY) || 0))</script>`;
-    f.still = { frame, html: look(html.replace("</head>", `${scrolled}</head>`)) };
+    f.still = { frame, html: oneHost.look(html.replace("</head>", `${scrolled}</head>`), appearance()) };
     $(".screen-status", f.into)?.remove();
     f.into.prepend(frame);
   }
@@ -773,20 +773,6 @@ window.__one = {};
     });
   }
 
-  /// What makes a screen sit in the window as its own: the window's background shows through, and on a
-  /// computer the Mac app's size of text. In a sheet (`raised`), its cards are a step lighter, as on a phone's.
-  function look(html, raised = false) {
-    // This window's appearance, kept in step (see `scheme`); with the nonce of a page that runs only its own scripts
-    // (the client's own screens), as one of them.
-    const nonce = html.match(/^<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="script-src 'nonce-([0-9a-f]+)'/)?.[1];
-    const looks = `<script${nonce ? ` nonce="${nonce}"` : ""}>(() => { ${raised ? 'document.documentElement.setAttribute("data-raised", "");' : ""} const scheme = (${scheme})(); let now = ${JSON.stringify(appearance())}; const apply = () => scheme(document, now);
-      addEventListener("DOMContentLoaded", apply); addEventListener("load", apply);
-      addEventListener("message", (e) => { if (e.source === parent && e.data?.oneScheme) apply(now = e.data.oneScheme); }); })()</script>`;
-    const style = `<style>html, body { background: transparent !important; }
-      @media (pointer: fine) { html { zoom: calc(13 / 17); } :root:root { --bg: transparent; } }</style>`;
-    return html.includes("</head>") ? html.replace("</head>", `${style}${looks}</head>`) : style + looks + html;
-  }
-
   /// The bridge's messages (src/screen/bridge.js), from the screens' frames only, each acting as its screen's app; and
   /// the client's own screens', as the person, which no app's may.
   addEventListener("message", async (e) => {
@@ -865,11 +851,11 @@ window.__one = {};
           return reply(null);
         }
         case "menu":
-          return reply(await menu(f.frame, m));
+          return reply(await oneHost.menu(f.frame, m));
         case "alert":
-          return reply(await alertSheet(m));
+          return reply(await oneHost.alert(m));
         case "save": case "preview":
-          await file(m.type, m.file || {});
+          await oneHost.file(m.type, m.file || {}, async (id) => (await api(`/v1/blobs/${encodeURIComponent(id)}`, { raw: true })).blob());
           return reply(null);
         case "copy":
           await navigator.clipboard.writeText(String(m.text ?? ""));
@@ -902,82 +888,6 @@ window.__one = {};
       fail(err);
     }
   });
-
-  /// `one.menu`: a small menu at its point in the screen's frame, or beside the element it's for (`rect`) → the index
-  /// chosen, or null once it's closed by a click elsewhere or Escape. Its `row` items lead, side by side as their icons;
-  /// a `section` starts after a line.
-  function menu(frame, m) {
-    return new Promise((done) => {
-      document.querySelector(".menu-backdrop")?.click();
-      const entries = Array.isArray(m.items) ? m.items : [];
-      if (!entries.length) return done(null);
-      // Over everything, screens' frames too, so a click anywhere else closes it.
-      const back = document.createElement("div");
-      back.className = "menu-backdrop";
-      const el = document.createElement("div");
-      el.className = "menu";
-      el.tabIndex = -1;
-      const icon = (e) => (e.icon ? one.icon(String(e.icon), "menu-icon") : "");
-      const checks = entries.some((e) => e.checked && !e.row);
-      const row = entries.map((e, i) => [e, i]).filter(([e]) => e.row);
-      el.innerHTML = (row.length ? `<div class="menu-row">${row.map(([e, i]) => `<button class="menu-choice${e.checked ? " on" : ""}" data-i="${i}" title="${esc(e.title)}" aria-label="${esc(e.title)}">${icon(e) || esc(e.title)}</button>`).join("")}</div>` : "") +
-        entries.map((e, i) => (e.row ? "" : `${e.section && i > row.length ? '<div class="menu-line"></div>' : ""}<button class="menu-item${e.danger ? " danger" : ""}" data-i="${i}">` +
-          `${checks ? `<span class="menu-check">${e.checked ? "✓" : ""}</span>` : ""}<span class="menu-title">${esc(e.title)}</span>${icon(e)}</button>`)).join("");
-      back.append(el);
-      document.body.append(back);
-      // Its point in the frame, in the window: beside its element, opening away from the edge it's near.
-      const box = frame.getBoundingClientRect();
-      const r = Array.isArray(m.rect) && m.rect.length === 4 ? m.rect.map(Number) : null;
-      let x = box.left + Number(m.x || 0), y = box.top + Number(m.y || 0);
-      if (r) {
-        const top = box.top + r[1], bottom = top + r[3];
-        x = box.left + r[0] + r[2] / 2 - el.offsetWidth / 2;
-        y = bottom + el.offsetHeight + 8 > innerHeight && top - el.offsetHeight - 6 > 0 ? top - el.offsetHeight - 6 : bottom + 6;
-      }
-      el.style.top = `${Math.max(8, Math.min(y, innerHeight - el.offsetHeight - 8))}px`;
-      el.style.left = `${Math.max(8, Math.min(x, innerWidth - el.offsetWidth - 8))}px`;
-      const close = (i) => { back.remove(); done(i); };
-      back.addEventListener("mousedown", (e) => e.target === back && close(null));
-      back.addEventListener("click", (e) => e.target === back && close(null));
-      back.addEventListener("contextmenu", (e) => { e.preventDefault(); close(null); });
-      el.addEventListener("keydown", (e) => e.key === "Escape" && close(null));
-      el.focus();
-      el.querySelectorAll("[data-i]").forEach((b) => (b.onclick = () => close(Number(b.dataset.i))));
-    });
-  }
-
-  /// `one.alert`: its title and text, then OK; or Cancel and its action → whether that was chosen.
-  function alertSheet(m) {
-    return new Promise((done) => {
-      let chose = false;
-      const { body, close } = one.sheet({ title: String(m.title || ""), done: m.action ? "Cancel" : "OK", onClose: () => done(chose) });
-      body.innerHTML = (m.text ? `<p class="sheet-text">${esc(m.text)}</p>` : "") +
-        (m.action ? `<div class="sheet-actions"><button class="button ${m.danger ? "danger" : "primary"}" data-yes>${esc(m.action)}</button></div>` : "");
-      const yes = $("[data-yes]", body);
-      if (yes) yes.onclick = () => { chose = true; close(); };
-    });
-  }
-
-  /// `one.save` and `one.preview`: a download, or a tab showing it. Only what can't run script shows in a tab, as
-  /// this origin's: anything else is saved.
-  async function file(how, f) {
-    let blob;
-    if (f.base64) {
-      const bytes = Uint8Array.from(atob(f.base64), (c) => c.charCodeAt(0));
-      blob = new Blob([bytes], { type: "application/octet-stream" });
-    } else if (f.blob || f.file) {
-      blob = await (await api(`/v1/blobs/${encodeURIComponent(f.blob || f.file)}`, { raw: true })).blob();
-    } else throw new Error("No file to show.");
-    const type = String(f.type || "");
-    const viewable = /^(image\/(png|jpeg|gif|webp|avif)|application\/pdf|text\/plain|audio\/|video\/)/.test(type);
-    const url = URL.createObjectURL(new Blob([blob], { type: viewable ? type : "application/octet-stream" }));
-    setTimeout(() => URL.revokeObjectURL(url), 60_000);
-    if (how === "preview" && viewable) return void window.open(url, "_blank", "noopener");
-    const a = Object.assign(document.createElement("a"), { href: url, download: f.name || "file" });
-    document.body.append(a);
-    a.click();
-    a.remove();
-  }
 
   // MARK: Settings
 
@@ -1077,28 +987,7 @@ window.__one = {};
     for (const f of frames) f.frame.contentWindow?.postMessage({ oneScheme: appearance() }, "*");
   }
 
-  /// Light or dark whatever the system says: a document's rules for the other are switched off and its own on, and
-  /// "automatic" puts them back. Its source also runs in screens' frames (`look`), so it keeps to itself.
-  function scheme() {
-    const kept = new Map();
-    return (doc, value) => {
-      doc.documentElement.style.colorScheme = value === "automatic" ? "" : value;
-      const walk = (rules) => {
-        for (const rule of rules) {
-          if (rule.media && /prefers-color-scheme/.test(kept.get(rule) ?? rule.media.mediaText)) {
-            if (!kept.has(rule)) kept.set(rule, rule.media.mediaText);
-            rule.media.mediaText = value === "automatic" ? kept.get(rule)
-              : kept.get(rule).replace(/\(\s*prefers-color-scheme\s*:\s*(light|dark)\s*\)/g, (_, s) => (s === value ? "(min-width: 0px)" : "(max-width: 0px) and (min-width: 1px)"));
-          }
-          if (rule.cssRules) walk(rule.cssRules);
-        }
-      };
-      for (const sheet of doc.styleSheets) {
-        try { walk(sheet.cssRules); } catch {}
-      }
-    };
-  }
-  const schemed = scheme();
+  const schemed = oneHost.scheme();
 
   // MARK: Starting
 

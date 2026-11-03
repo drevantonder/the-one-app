@@ -856,7 +856,6 @@ fn every_client_draws_in_the_kits_colours() {
     // Each other place's own copy: the lines after the comment that names this test, up to a blank line.
     let all: Vec<&str> = tokens.keys().map(String::as_str).collect();
     let places: &[(&str, &str, &[&str])] = &[
-        ("src/mcp_view.html", "--", &["text", "muted", "line", "card", "fill", "warn", "danger"]),
         ("android/app/src/main/kotlin/app/client/Style.kt", "", &all),
         ("apple/Shared/Views/Style.swift", "", &all),
         ("windows/Look.cs", "", &all),

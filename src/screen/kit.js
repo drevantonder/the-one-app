@@ -249,7 +249,7 @@
   // window too, as a sheet dims a Mac window; a click there comes back as `oneSheetsClose`, closing the top one. A
   // hint, not one of the bridge's messages: a page that doesn't know it shows the sheet as before.
   const sheets = [];
-  const framed = window.parent !== window && !window.webkit?.messageHandlers?.one && !window.__oneShell;
+  const framed = window.parent !== window && !window.webkit?.messageHandlers?.one && !window.__oneShell && !window.__one?.host;
   const tell = () => framed && window.parent.postMessage({ oneSheets: sheets.length }, "*");
   if (framed) addEventListener("message", (e) => e.source === window.parent && e.data?.oneSheetsClose && sheets.at(-1)?.());
 

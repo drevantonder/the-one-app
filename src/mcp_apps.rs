@@ -1,5 +1,6 @@
 //! Apps' widgets and screens as MCP Apps, so chat clients that support them draw them inline: one `ui://` view, and
-//! two tools that fill it, `widgets_show` and `screens_open`. Clients without MCP Apps get text from both.
+//! two tools that fill it, `widgets_show` and `screens_open` (and `screens_icons`, which only the view calls). Clients
+//! without MCP Apps get text from both.
 
 use serde_json::{Value, json};
 
@@ -26,7 +27,18 @@ pub fn read(uri: &str) -> Result<Value, Value> {
     if uri != view_uri() {
         return Err(json!({ "code": -32002, "message": format!("no resource {uri}") }));
     }
-    Ok(json!({ "contents": [{ "uri": uri, "mimeType": MIME, "text": include_str!("mcp_view.html").replace("/*widgets.js*/", include_str!("screen/widgets.js")), "_meta": { "ui": { "prefersBorder": true } } }] }))
+    // The kit and what web pages draw for screens, as the web client has them (src/screen/).
+    let mut view = include_str!("mcp_view.html").to_string();
+    for (name, text) in [
+        ("kit.css", include_str!("screen/kit.css")),
+        ("bridge.js", include_str!("screen/bridge.js")),
+        ("kit.js", include_str!("screen/kit.js")),
+        ("host.js", include_str!("screen/host.js")),
+        ("widgets.js", include_str!("screen/widgets.js")),
+    ] {
+        view = view.replacen(&format!("/*{name}*/"), text, 1);
+    }
+    Ok(json!({ "contents": [{ "uri": uri, "mimeType": MIME, "text": view, "_meta": { "ui": { "prefersBorder": true } } }] }))
 }
 
 pub fn tools() -> Vec<Value> {
@@ -55,6 +67,16 @@ pub fn tools() -> Vec<Value> {
             "annotations": one::skills::hints(true, false),
             "_meta": ui,
         }),
+        // Only the view calls it, for the icons a screen or widget draws.
+        json!({
+            "name": "screens_icons",
+            "description": "For the view that draws screens and widgets in a chat, not for you: icons' paths by their names.",
+            "inputSchema": { "type": "object", "required": ["names"], "properties": {
+                "names": { "type": "array", "items": { "type": "string" }, "description": "Phosphor icons' names, like git-branch" },
+            } },
+            "annotations": one::skills::hints(true, false),
+            "_meta": { "ui": { "visibility": ["app"] } },
+        }),
     ]
 }
 
@@ -63,6 +85,7 @@ pub fn call(name: &str, input: &Value) -> Option<Value> {
     let result = match name {
         "widgets_show" => widgets(input),
         "screens_open" => screen(input),
+        "screens_icons" => icons(input),
         _ => return None,
     };
     Some(result.unwrap_or_else(|e| json!({ "isError": true, "content": [{ "type": "text", "text": format!("{e:#}") }] })))
@@ -102,8 +125,15 @@ fn screen(input: &Value) -> anyhow::Result<Value> {
     anyhow::ensure!(resp.status().is_success(), "{}", html.trim());
     Ok(json!({
         "content": [{ "type": "text", "text": format!("Opened {app}'s {screen} screen for the person.") }],
-        "structuredContent": { "app": app, "screen": screen, "html": html },
+        "structuredContent": { "app": app, "screen": screen, "scope": input["scope"], "html": html },
     }))
+}
+
+fn icons(input: &Value) -> anyhow::Result<Value> {
+    static ALL: std::sync::LazyLock<serde_json::Map<String, Value>> = std::sync::LazyLock::new(|| serde_json::from_slice(one::screen::ICONS).unwrap_or_default());
+    let paths: serde_json::Map<String, Value> =
+        input["names"].as_array().into_iter().flatten().filter_map(Value::as_str).take(500).map(|n| (n.to_string(), ALL.get(n).cloned().unwrap_or_else(|| "".into()))).collect();
+    Ok(json!({ "content": [{ "type": "text", "text": format!("{} icons.", paths.len()) }], "structuredContent": { "paths": paths } }))
 }
 
 fn urlencode(s: &str) -> String {

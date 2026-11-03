@@ -579,7 +579,7 @@ impl Settings {
             crate::config::KERNEL.iter().filter_map(|(path, bytes)| Some((path.strip_prefix("web/")?.to_string(), bytes.to_vec()))).collect();
         // The page says whose it is before anyone signs in: the white label's name.
         let attr = |v: &str| v.replace('&', "&amp;").replace('"', "&quot;").replace('<', "&lt;");
-        files.push(("icons.json".into(), include_bytes!("../../vendor/phosphor/icons.json").to_vec()));
+        files.push(("icons.json".into(), crate::screen::ICONS.to_vec()));
         // Each file the page loads is named by its content (`?v=`, which the gateway checks), so a browser keeps it for
         // good and asks again only once it changes: those it names itself, and those web.js asks for (`one-files`).
         let named = |path: &str, bytes: &[u8]| {

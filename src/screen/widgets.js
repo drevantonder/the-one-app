@@ -191,7 +191,7 @@ window.oneWidgets = (() => {
       case "dot": el = tone(node("span", "w-dot")); break;
       case "icon": {
         const size = num(n.w) || 16;
-        // A named icon is Phosphor's, drawn where the bridge is (the web client); a chat draws only paths and badges.
+        // A named icon is Phosphor's, drawn where the bridge is (the web client, a chat's view).
         if (n.name && window.one?.icon) {
           el = node("span");
           el.innerHTML = one.icon(String(n.name));

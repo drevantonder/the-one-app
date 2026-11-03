@@ -7,7 +7,8 @@
   const handlers = { changed: [] };
   // Either answers each message with a promise of its reply.
   const shell = window.webkit?.messageHandlers?.one || (window.__oneShell?.postMessage ? window.__oneShell : null);
-  const framed = !shell && window.parent !== window;
+  // A page that answers its own (`__one.host`: the web client's, a chat's view) isn't framed, even in a chat's frame.
+  const framed = !shell && !ctx.host && window.parent !== window;
 
   // Framed: each message goes up as `{ one: message, id }`, answered with `{ oneReply: id, ok }` or `{ oneReply: id,
   // error }`; node events come down as `{ oneEvent: event }`. Only the page holding the frame is listened to.
