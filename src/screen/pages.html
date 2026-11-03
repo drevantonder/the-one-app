@@ -149,7 +149,7 @@
       try {
         await home.call(app, op, input);
       } catch (err) {
-        return err.message;
+        return one.plain(err).title;
       }
       await home.loadWidgets();
       draw();
@@ -790,7 +790,7 @@
       const scope = el.dataset.scope;
       if (scope === SETTINGS) drawSettings(el);
       else if (home.page(scope)) drawPage(el, home.page(scope));
-      else el.innerHTML = one.empty({ icon: "eye-slash", title: "Nothing Here", text: "This device was let into none of this page. Sign out in Settings and sign in again to choose it." });
+      else el.innerHTML = one.empty({ icon: "eye-slash", title: "Nothing Here", text: "This device can't open this page. Sign out and in again to choose it." });
     }
     drawEditBar();
     if (swipe) drawDots();

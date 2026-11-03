@@ -17,26 +17,42 @@
     "</div>";
   document.addEventListener("click", (e) => runs[e.target.closest?.(".empty-state [data-run]")?.dataset.run]?.());
 
-  // What a failure means for someone: what happened, in plain words, what is safe, and what to do next.
-  one.plain = (err) => {
+  // Errors and statuses are written for people and agents at once: what happened and what to do, in people's words,
+  // then after a colon or in brackets what an agent needs (a tool to call, an id, a code). A sentence with any of
+  // those is for agents only.
+  const forAgents = /\b[a-z][a-z0-9-]*_[a-z0-9_]+\b|\b(user|group):[0-9a-f]{6,}|\b(kernel|node|sidecar|deploy|scope|token|provider|workerd|bucket|lease|ctx)s?\b|\b(an|the|this|that) install\b|install's|[\w.-]*\/[\w.-]+\/|\b[1-5]\d\d\b/i;
+
+  // What a failure means for someone: what happened, in plain words, whether anything was lost, and what to do next.
+  // `app` is the title of the app that failed, where a screen knows it.
+  one.plain = (err, { app } = {}) => {
     let msg = String(err?.message ?? err ?? "").replace(/^(Uncaught )?\w*Error:\s*/, "").trim();
+    while (/\([^()]*\)/.test(msg)) msg = msg.replace(/\s*\([^()]*\)/g, "");
     if (/failed to fetch|load failed|networkerror|not connected|offline|unreachable|no route|connection (refused|reset|lost)/i.test(msg))
-      return { title: "Couldn't reach your devices.", safe: "Nothing was lost.", next: "Check your connection, then try again." };
-    if (/timed? ?out|took too long/i.test(msg))
-      return { title: "Your device took too long to answer.", safe: "Nothing was lost.", next: "Try again in a moment." };
-    if (!msg || msg.length > 200 || /something went wrong|internal (server )?error|unexpected|\b5\d\d\b|undefined|null|is not a function|\[object/i.test(msg))
-      return { title: "This app could not complete your request.", safe: "Nothing was lost.", next: "Try again in a moment." };
-    msg = msg[0].toUpperCase() + msg.slice(1);
+      return { title: "Couldn't reach your devices.", safe: "Nothing was lost.", next: "Check your connection." };
+    if (/timed? ?out|took too long|took longer than/i.test(msg))
+      return { title: app ? `${app} took too long, so it stopped.` : "That took too long, so it stopped.", safe: "Nothing was lost.", next: "" };
+    if (/may already be done/i.test(msg)) return { title: "This may already be done.", safe: "", next: "Check before trying again." };
+    // The leading sentences before any colon that are for people; none if the first is for agents.
+    const parts = [];
+    for (const part of msg.split(/:\s/)[0].split(/(?<=[.!?])\s+|;\s+/)) {
+      if (!part || forAgents.test(part)) break;
+      parts.push(part);
+    }
+    const said = parts.map((s) => (/^\S*@/.test(s) ? s : s[0].toUpperCase() + s.slice(1)).replace(/([^.!?])$/, "$1.")).join(" ");
+    if (!said || said.length > 200 || /something went wrong|internal (server )?error|unexpected|undefined|null|is not a function|\[object/i.test(said))
+      return { title: "That didn't work.", safe: "Nothing was lost.", next: "" };
     // Something that isn't there won't be there on a second try: say so, and offer the way home instead.
     const missing = /\b(not found|no such|no \w+ named|doesn't exist|isn't here|there's no)\b/i.test(msg);
-    return { title: /[.!?]$/.test(msg) ? msg : msg + ".", safe: "Nothing was lost.", next: "Try again in a moment.", missing };
+    return { title: said, safe: "Nothing was lost.", next: "", missing };
   };
 
-  // A failure as a banner, with Try again unless `retry` is false (one.render wires the button).
+  // A failure as a banner, with Try again unless `retry` is false (one.render wires the button). It says what was safe
+  // only when given `safe`: a screen that failed to load lost nothing.
   one.banner = (err, { safe, next, retry = true } = {}) => {
     const p = one.plain(err);
+    const more = [safe, next ?? p.next].filter(Boolean).join(" ");
     return `<div class="banner" role="alert">${one.icon("warning-circle", "banner-icon")}<div class="banner-text"><strong>${esc(p.title)}</strong>` +
-      `<span>${esc(safe ?? p.safe)} ${esc(next ?? p.next)}</span></div>` +
+      (more ? `<span>${esc(more)}</span>` : "") +
       (retry ? '<button class="button" data-retry>Try again</button>' : "") + "</div>";
   };
 

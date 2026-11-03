@@ -13,7 +13,7 @@ async function sidecar(ctx, op, input) {
   }
 }
 
-const NEEDS = "WhatsApp isn't on any of your devices yet, so there's no phone to link: whoever owns a device installs it there, and the App Store's WhatsApp page shows where. Then whatsapp_sign_in links your phone.";
+const NEEDS = "WhatsApp isn't on any of your devices yet. Add it in the App Store: whoever owns a device installs it there, and the App Store's WhatsApp page shows where. Then whatsapp_sign_in links your phone.";
 
 /// The caller's online devices that run the sidecar, by name.
 async function running(ctx) {
@@ -158,7 +158,7 @@ async function show() {
   const accounts = await one.call("accounts");
   shown = accounts.length;
   document.getElementById("list").innerHTML = accounts.length
-    ? '<h2 class="section">Accounts</h2><div class="list">' + accounts.map((a, i) => \`<div class="row plain"><span class="dot\${a.ok ? "" : " warn"}"></span><div class="main"><div class="title">\${one.esc(a.account)}</div><div class="sub">\${one.esc(a.ok ? \`Linked on \${a.device}\${i ? "" : " · used first"}\` : a.why || "Needs linking again")}</div></div><button class="plain" data-out="\${one.esc(a.account)}">Sign out</button></div>\`).join("") + "</div>"
+    ? '<h2 class="section">Accounts</h2><div class="list">' + accounts.map((a, i) => \`<div class="row plain"><span class="dot\${a.ok ? "" : " warn"}"></span><div class="main"><div class="title">\${one.esc(a.account)}</div><div class="sub">\${one.esc(a.ok ? \`Linked on \${a.device}\${i ? "" : " · used first"}\` : one.plain(a.why || "Needs linking again").title)}</div></div><button class="plain" data-out="\${one.esc(a.account)}">Sign out</button></div>\`).join("") + "</div>"
     : '<p class="muted">Link WhatsApp, and your agents can read your chats and, when you ask, send.</p>';
   for (const b of document.querySelectorAll("[data-out]")) b.onclick = async () => {
     await one.confirm("#connect", { title: \`Sign out of \${b.dataset.out}?\`, detail: "This device is unlinked from it, and the messages kept for it are deleted. Linking again needs the phone.",
@@ -175,7 +175,7 @@ async function start(e) {
   e.target.disabled = true;
   e.target.textContent = "Asking WhatsApp…";
   try { await one.call("sign_in", phone ? { phone } : {}); }
-  catch (err) { document.getElementById("err").textContent = err.message; e.target.disabled = false; e.target.textContent = "Add account"; return; }
+  catch (err) { document.getElementById("err").textContent = one.plain(err).title; e.target.disabled = false; e.target.textContent = "Add account"; return; }
   document.getElementById("connect").innerHTML = \`<ol><li>On the phone, open WhatsApp › Settings › Linked devices › Link a device.</li>
     <li>Scan this code\${phone ? ", or tap Link with phone number instead and type the code under it" : ""}.</li></ol>
     <img id="qr" alt=""><div class="code" id="code"></div><div class="small muted" id="note">The code changes every 20 seconds. WhatsApp then sends recent chats, which takes a few minutes.</div>\`;
@@ -208,7 +208,7 @@ show().then(() => { if (one.params.add) document.getElementById("phone").focus()
 one.call("_running").then(({ devices, needs }) => {
   if (devices.length) return;
   const n = document.getElementById("needs");
-  n.textContent = needs;
+  n.textContent = one.plain(needs).title;
   n.hidden = false;
   document.getElementById("connect").hidden = true; 
 });

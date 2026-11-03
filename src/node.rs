@@ -938,19 +938,32 @@ fn sidecar_entry(m: &Members, user: &str, device: &str, name: &str, installed: b
     Ok(members::node("sidecar", json!({ "device": hex(&s.key), "name": name, "blob": null, "local": installed })))
 }
 
+/// A scope as people call it: Everyone, a person's name, or a group's.
+fn scope_name(i: &Install, scope: &str) -> String {
+    let m = &i.r.members;
+    match Scope::parse(scope) {
+        Ok(Scope::Global) => "Everyone".to_string(),
+        Ok(Scope::User(u)) => m.user(&u).map(|u| u.name.clone()).unwrap_or(u),
+        Ok(Scope::Group(g)) => m.groups.get(&g).map(|g| g.name.clone()).unwrap_or(g),
+        Err(_) => scope.to_string(),
+    }
+}
+
 /// A `schedule` entry `user` may write in `scope`, switching a schedule of `app` there on or off.
 fn switch_entry(i: &Install, user: &str, scope: &Scope, app: &str, schedule: &str, on: bool) -> Result<Content> {
-    ensure!(members::manages_scope(&i.r.members, user, scope), "you can't switch schedules in {scope}");
-    ensure!(i.views.get(&scope.to_string()).is_some_and(|(_, s)| s.installed.contains(app)), "{app} isn't installed in {scope}");
-    ensure!(i.r.holds(scope), "this device doesn't hold {scope}");
+    let name = scope_name(i, &scope.to_string());
+    ensure!(members::manages_scope(&i.r.members, user, scope), "You can't switch schedules in {name}.");
+    ensure!(i.views.get(&scope.to_string()).is_some_and(|(_, s)| s.installed.contains(app)), "{app} isn't on {name}.");
+    ensure!(i.r.holds(scope), "This device can't open {name} yet.");
     Ok(members::node("schedule", json!({ "app": app, "schedule": schedule, "on": on })))
 }
 
 /// An `item` entry `user` may write in `scope`, checked as replaying it will check it.
 fn item_entry(i: &Install, user: &str, scope: &Scope, data: Value) -> Result<Content> {
     let m = &i.r.members;
-    ensure!(members::manages_scope(m, user, scope), "you can't change the Vault in {scope}");
-    ensure!(i.r.holds(scope), "this device doesn't hold {scope}");
+    let name = scope_name(i, &scope.to_string());
+    ensure!(members::manages_scope(m, user, scope), "You can't change {name}'s Vault.");
+    ensure!(i.r.holds(scope), "This device can't open {name} yet.");
     let mut items = i.views.get(&scope.to_string()).map(|(_, s)| s.items.clone()).unwrap_or_default();
     crate::vault::apply(&mut items, &data, user, now_ms(), |a| !m.apps.get(a).is_some_and(|a| a.erased))?;
     Ok(members::node("item", data))

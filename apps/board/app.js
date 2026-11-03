@@ -35,7 +35,7 @@ const post = (r) => ({
 function oneLine(text, what, limit = LIMIT) {
   text = String(text ?? "").trim();
   if (text.includes("\n") || text.includes("\r")) throw new Error(`${what} must be one line`);
-  if (bytes(text) > limit) throw new Error(`${what} is too long: ${bytes(text)} bytes, limit ${limit}; say it shorter`);
+  if (bytes(text) > limit) throw new Error(`Too long. Shorten it: ${what} is ${bytes(text)} bytes, and at most ${limit}`);
   return text;
 }
 
@@ -569,7 +569,7 @@ document.getElementById("form").onsubmit = async (e) => {
     text.value = "";
     show();
   } catch (err) {
-    error.textContent = err.message;
+    error.textContent = one.plain(err).title;
     send.disabled = false;
   }
 };

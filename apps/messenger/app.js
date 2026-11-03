@@ -13,7 +13,7 @@ async function sidecar(ctx, op, input) {
   }
 }
 
-const NEEDS = "Messenger needs Agent Devices, and none of your devices runs it yet: whoever owns a device installs it there, and the App Store's Agent Devices page shows where. Then messenger_sign_in signs in.";
+const NEEDS = "Messenger needs Agent Devices on one of your devices. Add it in the App Store: whoever owns a device installs it there, and the App Store's Agent Devices page shows where. Then messenger_sign_in signs in.";
 
 /// The caller's online devices that run the sidecar, by name.
 async function running(ctx) {
@@ -48,7 +48,7 @@ export default {
   description: "Your Messenger chats, for your agents: read, search and send",
   connector: true,
   needs: "Needs Agent Devices on one of your devices",
-  instructions: "Messenger is the person's Facebook Messenger, read through messenger.com in an agent device's browser. Each account is a browser profile signed in to it (Personal, PTC), as messenger_accounts lists them; the others take account, the first by default. messenger_chats lists recent chats, messenger_read reads one, messenger_search finds messages. Each takes some seconds: a browser does the reading. If Messenger isn't signed in, messenger_sign_in gives the person a link to sign in; never sign in for them. messenger_send sends a real message to a real person: only when the person asked, with the exact text they approved.",
+  instructions: "Messenger is the person's Facebook Messenger, read through messenger.com in an agent device's browser. Each account is a browser profile signed in to it (Personal, Work), as messenger_accounts lists them; the others take account, the first by default. messenger_chats lists recent chats, messenger_read reads one, messenger_search finds messages. Each takes some seconds: a browser does the reading. If Messenger isn't signed in, messenger_sign_in gives the person a link to sign in; never sign in for them. messenger_send sends a real message to a real person: only when the person asked, with the exact text they approved.",
   uses: { sidecars: ["messenger"] },
   vault: VAULT,
 
@@ -90,7 +90,7 @@ export default {
     },
     sign_in: {
       description: "For the person: links Messenger to a browser profile (made if new) and gives a link to messenger.com in it, to sign in there themselves. The default profile's again when none is given.",
-      input: {"properties": {"profile": {"description": "the browser profile, like Personal or PTC; agent-devices_profiles lists them", "type": "string"}}, "type": "object"},
+      input: {"properties": {"profile": {"description": "the browser profile, like Personal or Work; agent-devices_profiles lists them", "type": "string"}}, "type": "object"},
       run: (ctx, input) => sidecar(ctx, "sign_in", input),
     },
     sign_out: {
@@ -142,7 +142,7 @@ export default {
 async function show() {
   const accounts = await one.call("accounts");
   document.getElementById("list").innerHTML = accounts.length
-    ? '<h2 class="section">Browser profiles</h2><div class="list">' + accounts.map((a, i) => \`<div class="row plain"><span class="dot\${a.ok ? "" : " warn"}"></span><div class="main"><div class="title">\${one.esc(a.account)}</div><div class="sub">\${one.esc(a.ok ? (i ? "Linked" : "Linked · used first") : a.why || "Needs signing in again")}</div></div><button class="plain" data-out="\${one.esc(a.account)}">Sign out</button></div>\`).join("") + "</div>"
+    ? '<h2 class="section">Browser profiles</h2><div class="list">' + accounts.map((a, i) => \`<div class="row plain"><span class="dot\${a.ok ? "" : " warn"}"></span><div class="main"><div class="title">\${one.esc(a.account)}</div><div class="sub">\${one.esc(a.ok ? (i ? "Linked" : "Linked · used first") : one.plain(a.why || "Needs signing in again").title)}</div></div><button class="plain" data-out="\${one.esc(a.account)}">Sign out</button></div>\`).join("") + "</div>"
     : '<p class="muted">Link Messenger to a browser profile signed in to messenger.com, and your agents can read your chats and, when you ask, send.</p>';
   for (const b of document.querySelectorAll("[data-out]")) b.onclick = async () => { await one.call("sign_out", { account: b.dataset.out }); show(); };
   const c = document.getElementById("connect");
@@ -156,9 +156,9 @@ async function pick(accounts) {
   let profiles = [];
   try { profiles = ((await one.call("_profiles")) || []).map((p) => p.profile); } catch {}
   const free = [...new Set(profiles)].filter((p) => !accounts.some((a) => a.account === p));
-  c.innerHTML = \`<div class="small muted">Which browser profile? Each has its own sign-ins, like Personal or PTC.</div>
+  c.innerHTML = \`<div class="small muted">Which browser profile? Each has its own sign-ins, like Personal or Work.</div>
     <select id="profile">\${free.map((p) => \`<option>\${one.esc(p)}</option>\`).join("")}<option value="">New profile…</option></select>
-    <input id="name" placeholder="Its name, like Personal or PTC" autocapitalize="words" autocorrect="off" \${free.length ? "hidden" : ""}>
+    <input id="name" placeholder="Its name, like Personal or Work" autocapitalize="words" autocorrect="off" \${free.length ? "hidden" : ""}>
     <button class="primary" id="go">Sign in to Messenger</button><div id="err" class="error small"></div>\`;
   const select = document.getElementById("profile"), name = document.getElementById("name");
   select.onchange = () => (name.hidden = !!select.value);
@@ -168,7 +168,7 @@ async function pick(accounts) {
     e.target.disabled = true;
     e.target.textContent = "Opening a device…";
     try { signingIn(await one.call("sign_in", { profile })); }
-    catch (err) { document.getElementById("err").textContent = err.message; e.target.disabled = false; e.target.textContent = "Sign in to Messenger"; }
+    catch (err) { document.getElementById("err").textContent = one.plain(err).title; e.target.disabled = false; e.target.textContent = "Sign in to Messenger"; }
   };
 }
 
@@ -181,7 +181,7 @@ function signingIn(r) {
     e.target.disabled = true;
     e.target.textContent = "Saving…";
     try { await one.call("_save", { profile: r.profile }); show(); }
-    catch (err) { document.getElementById("err").textContent = err.message; e.target.disabled = false; e.target.textContent = "Done"; }
+    catch (err) { document.getElementById("err").textContent = one.plain(err).title; e.target.disabled = false; e.target.textContent = "Done"; }
   };
 }
 
@@ -193,7 +193,7 @@ show().then(() => { if (one.params.add) document.getElementById("start").click()
 one.call("_running").then(({ devices, needs }) => {
   if (devices.length) return;
   const n = document.getElementById("needs");
-  n.textContent = needs;
+  n.textContent = one.plain(needs).title;
   n.hidden = false;
   
 });

@@ -24,15 +24,15 @@
 
   function draw() {
     const p = home.page(scope), el = document.getElementById("services");
-    if (!p) return void (el.innerHTML = one.empty({ icon: "eye-slash", title: "Nothing Here", text: "This device was let into none of this page." }));
+    if (!p) return void (el.innerHTML = one.empty({ icon: "eye-slash", title: "Nothing Here", text: "This device can't open this page. Sign out and in again to choose it." }));
     const all = home.servicesOn(p), withAccounts = all.filter((a) => (a.ops || []).some((o) => o.name === "accounts")), others = all.filter((a) => !withAccounts.includes(a));
     const sections = withAccounts.map((a) => {
       const list = accounts[a.name], signIn = home.settings(a, p, true);
       const rows = list === undefined ? `<div class="row plain muted"><span class="spinner small"></span>Loading…</div>`
-        : list instanceof Error ? `<div class="row plain warn">${esc(list.message)}</div>`
+        : list instanceof Error ? `<div class="row plain warn">${esc(one.plain(list).title)}</div>`
         : !list.length ? `<div class="row plain muted">No accounts yet</div>`
         : list.map((x) => `<div class="row plain"><span class="status ${x.ok ? "ok" : "off"}" title="${x.ok ? "Signed in" : "Needs signing in again"}"></span><div class="main"><div class="title"><span>${esc(x.account)}</span></div>` +
-          `${x.ok ? "" : `<div class="sub wrap">${esc(x.why || "Needs signing in again")}</div>`}</div>${x.ok || !signIn ? "" : `<button class="button plain" data-signin="${esc(a.name)}">Sign In</button>`}</div>`).join("");
+          `${x.ok ? "" : `<div class="sub wrap">${esc(one.plain(x.why || "Needs signing in again").title)}</div>`}</div>${x.ok || !signIn ? "" : `<button class="button plain" data-signin="${esc(a.name)}">Sign In</button>`}</div>`).join("");
       const add = signIn ? `<button class="row plain add" data-add="${esc(a.name)}"><span class="plus">+</span>Add Account</button>` : "";
       return `<div><div class="head">${one.appIcon(a, 32)}<b>${esc(home.label(a))}</b><button class="more" data-more="${esc(a.name)}" aria-label="More for ${esc(home.label(a))}">${one.icon("dots-three-outline-fill")}</button></div><div class="list">${rows}${add}</div></div>`;
     }).join("");
@@ -52,7 +52,7 @@
     for (const a of withAccounts) {
       if (accounts[a.name] !== undefined && !stale.has(a.name)) continue;
       stale.delete(a.name);
-      home.call(a.name, "accounts").then((list) => (Array.isArray(list) ? list : Promise.reject(new Error(`${home.label(a)} doesn't list its accounts yet.`))))
+      home.call(a.name, "accounts").then((list) => (Array.isArray(list) ? list : []))
         .catch((err) => err).then((out) => { accounts[a.name] = out; draw(); });
     }
   }

@@ -107,7 +107,7 @@ async function renew(ctx, acct) {
     body: form({ grant_type: "refresh_token", refresh_token: `{{${acct.id}:refresh_token}}`, client_id: acct.client_id, client_secret: acct.has_secret ? `{{${acct.id}:client_secret}}` : null, resource: acct.resource }),
   });
   const tok = await r.json().catch(() => ({}));
-  if (!r.ok || !tok.access_token) throw new Error(`${acct.name}'s sign-in no longer works (${tok.error_description || tok.error || r.status}): sign_in with account ${acct.name} signs it in again`);
+  if (!r.ok || !tok.access_token) throw new Error(`Needs signing in again (${acct.name}: ${tok.error_description || tok.error || r.status}): sign_in with account ${acct.name} signs it in again`);
   ctx.vault.update(acct.id, { fields: { access_token: { value: tok.access_token }, ...(tok.refresh_token ? { refresh_token: { value: tok.refresh_token } } : {}) } });
   return tok.access_token;
 }

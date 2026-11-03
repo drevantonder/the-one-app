@@ -227,8 +227,9 @@ impl Node {
         }
         self.with(|i| {
             let m = &i.r.members;
-            ensure!(members::manages_scope(m, &caller.user, scope), "you can't install apps in {scope}");
-            ensure!(i.r.holds(scope), "this device doesn't hold {scope}");
+            let named = scope_name(i, &scope.to_string());
+            ensure!(members::manages_scope(m, &caller.user, scope), "You can't add apps to {named}.");
+            ensure!(i.r.holds(scope), "This device can't open {named} yet.");
             let here = i.views.get(&scope.to_string()).map(|(_, s)| s.installed.clone()).unwrap_or_default();
             let mut out = Vec::new();
             for (n, name) in wanted.iter().enumerate().rev() {

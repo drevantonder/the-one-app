@@ -35,7 +35,7 @@ async function googleClient(ctx, id) {
   const all = (await ctx.vault.items()).filter((i) => i.fields.client_id?.value && i.fields.client_secret);
   return all.find((i) => i.fields.client_id.value === id) || all.find((i) => i.scope.startsWith("user:")) || all[0] || null;
 }
-const noClient = () => new Error(`${TITLE} has no Google sign-in yet: choose one on its settings page, or ask the person for it with vault_request (app ${APP}, need client)`);
+const noClient = () => new Error(`Choose a Google sign-in from your Vault first: ${TITLE} has none yet; it's chosen on its settings page, or ask the person for it with vault_request (app ${APP}, need client)`);
 
 /// The Google accounts this app is switched on for, the first signed in first.
 async function accountItems(ctx) {
@@ -50,7 +50,7 @@ async function accounts(ctx) {
 /// The account named, by its address or a part of it only it has; the first signed in when none is named.
 async function account(ctx, name) {
   const all = await accounts(ctx);
-  if (!all.length) throw new Error(`no Google account is signed in: ${APP}_sign_in signs one in`);
+  if (!all.length) throw new Error(`Sign in to a Google account first: ${APP}_sign_in signs one in`);
   if (!name) return all[0];
   const n = String(name).toLowerCase();
   const found = all.find((e) => e.toLowerCase() === n) || (all.filter((e) => e.toLowerCase().includes(n)).length === 1 && all.find((e) => e.toLowerCase().includes(n)));
@@ -64,8 +64,8 @@ const allowed = (item) => !item.fields.scopes || SCOPES.split(" ").every((s) => 
 const tokens = new Map(); // `${user}/${email}` → { value, expires }, for this runtime only
 async function token(ctx, email) {
   const item = (await accountItems(ctx)).find((i) => i.fields.email.value === email);
-  if (!item) throw new Error(`${email} isn't signed in to ${TITLE}: ${APP}_sign_in signs it in`);
-  if (!allowed(item)) throw new Error(`${email} hasn't allowed ${TITLE} yet: sign in to it again (${APP}_sign_in with account)`);
+  if (!item) throw new Error(`Sign in to ${email} first: ${APP}_sign_in signs it in`);
+  if (!allowed(item)) throw new Error(`Needs signing in again, to allow ${TITLE}: ${APP}_sign_in with account ${email} signs it in`);
   const key = `${ctx.user.id}/${email}`;
   const t = tokens.get(key);
   if (t && t.expires > Date.now() + 60_000) return t.value;
@@ -77,7 +77,7 @@ async function token(ctx, email) {
     body: `grant_type=refresh_token&client_id=${encodeURIComponent(client.fields.client_id.value)}&client_secret={{${client.id}:client_secret}}&refresh_token={{${item.id}:refresh_token}}`,
   });
   const body = await r.json().catch(() => ({}));
-  if (!r.ok || !body.access_token) throw new Error(`${email}'s sign-in no longer works (${body.error_description || body.error || r.status}): ${APP}_sign_in signs it in again`);
+  if (!r.ok || !body.access_token) throw new Error(`Needs signing in again (${email}: ${body.error_description || body.error || r.status}): ${APP}_sign_in signs it in again`);
   tokens.set(key, { value: body.access_token, expires: Date.now() + (body.expires_in || 3600) * 1000 });
   return body.access_token;
 }
@@ -116,12 +116,12 @@ function emailOf(idToken) {
 
 async function finishSignIn(ctx, given) {
   const [p] = await ctx.user.query("select verifier, client from pending");
-  if (!p) throw new Error(`no sign-in is waiting for that address: ${APP}_sign_in starts one`);
+  if (!p) throw new Error(`Start signing in again: no sign-in is waiting for that address; ${APP}_sign_in starts one`);
   const s = String(given || "").trim();
   const refused = s.match(/[?&]error=([^&#]+)/)?.[1];
-  if (refused) return failed(ctx, `Google didn't sign you in (${decodeURIComponent(refused)}). Start again with ${APP}_sign_in.`);
+  if (refused) return failed(ctx, `Google didn't sign you in (${decodeURIComponent(refused)}). Try again: ${APP}_sign_in starts again.`);
   const code = s.includes("code=") ? new URL(s.startsWith("http") ? s : `http://x/?${s.split("?").pop()}`).searchParams.get("code") : s;
-  if (!code) throw new Error("that address has no code: copy the whole address the browser ended up on");
+  if (!code) throw new Error("That address has no code. Copy the whole address the browser ended up on.");
   const client = (await ctx.vault.items()).find((i) => i.id === p.client && i.fields.client_secret) || await googleClient(ctx);
   if (!client) throw noClient();
   const r = await fetch(`https://${OAUTH}/token`, {
@@ -130,10 +130,10 @@ async function finishSignIn(ctx, given) {
     body: `grant_type=authorization_code&code=${encodeURIComponent(code)}&client_id=${encodeURIComponent(client.fields.client_id.value)}&client_secret={{${client.id}:client_secret}}&redirect_uri=${encodeURIComponent(redirect(ctx))}&code_verifier=${encodeURIComponent(p.verifier)}`,
   });
   const tok = await r.json().catch(() => ({}));
-  if (!r.ok) return failed(ctx, `Sign-in failed: ${tok.error_description || tok.error || r.status}. Start again with ${APP}_sign_in.`);
-  if (!tok.refresh_token) return failed(ctx, "Google didn't give a refresh token, so the sign-in wouldn't last; start again.");
+  if (!r.ok) return failed(ctx, `Google didn't sign you in (${tok.error_description || tok.error || r.status}). Try again: ${APP}_sign_in starts again.`);
+  if (!tok.refresh_token) return failed(ctx, "Google didn't sign you in. Try again: it gave no refresh_token, so the sign-in wouldn't last.");
   const email = emailOf(tok.id_token);
-  if (!email) return failed(ctx, "Google didn't say which account signed in; start again.");
+  if (!email) return failed(ctx, "Google didn't say which account signed in. Try again.");
   ctx.user.exec("delete from pending");
   const id = await ctx.vault.create({
     title: email, type: "Google account", domain: "google.com", hosts: [OAUTH], same: "email",
@@ -335,7 +335,7 @@ function settingsScreen(title, blurb) {
 async function show() {
   const accounts = await one.call("accounts");
   document.getElementById("list").innerHTML = accounts.length
-    ? '<h2 class="section">Accounts</h2><div class="list">' + accounts.map((a, i) => \`<div class="row plain"><span class="dot\${a.ok ? "" : " warn"}"></span><div class="main"><div class="title">\${one.esc(a.account)}</div><div class="sub">\${one.esc(a.ok ? (i ? "Signed in" : "Signed in · used first") : a.why || "Needs signing in again")}</div></div>\${a.ok ? "" : \`<button class="plain" data-in="\${one.esc(a.account)}">Sign in</button>\`}<button class="plain" data-out="\${one.esc(a.account)}">Sign out</button></div>\`).join("") + "</div>"
+    ? '<h2 class="section">Accounts</h2><div class="list">' + accounts.map((a, i) => \`<div class="row plain"><span class="dot\${a.ok ? "" : " warn"}"></span><div class="main"><div class="title">\${one.esc(a.account)}</div><div class="sub">\${one.esc(a.ok ? (i ? "Signed in" : "Signed in · used first") : one.plain(a.why || "Needs signing in again").title)}</div></div>\${a.ok ? "" : \`<button class="plain" data-in="\${one.esc(a.account)}">Sign in</button>\`}<button class="plain" data-out="\${one.esc(a.account)}">Sign out</button></div>\`).join("") + "</div>"
     : '<p class="muted">${blurb}</p>';
   for (const b of document.querySelectorAll("[data-out]")) b.onclick = async () => { await one.call("sign_out", { account: b.dataset.out }); show(); };
   for (const b of document.querySelectorAll("[data-in]")) b.onclick = () => start(b.dataset.in);
@@ -351,17 +351,17 @@ async function start(account) {
     link = typeof r === "string" ? r.split("\\n").pop() : r.url;
   } catch (e) {
     // No Google sign-in yet: the person picks one from their Vault, or makes one, then it goes on.
-    if (/no Google sign-in/.test(e.message) && one.vault) {
+    if (/Choose a Google sign-in/.test(e.message) && one.vault) {
       try { if (await one.vault("client")) return start(account); } catch (err) { e = err; }
     }
-    document.getElementById("err").textContent = e.message;
+    document.getElementById("err").textContent = one.plain(e).title;
     return;
   }
   c.innerHTML = \`<ol><li><a href="\${one.esc(link)}">Sign in to Google</a> and allow ${title}.</li><li>The browser then goes to a page that doesn't load. Copy its whole address and paste it here.</li></ol>
     <input id="code" placeholder="http://127.0.0.1:…/hooks/…/oauth?code=…" autocapitalize="none" autocorrect="off"><button class="primary" id="finish">Sign In</button><div id="err" class="error small"></div>\`;
   document.getElementById("finish").onclick = async () => {
     try { const r = await one.call("finish_sign_in", { code: document.getElementById("code").value }); if (r?.signed_in === false) throw new Error(r.why); show(); }
-    catch (e) { document.getElementById("err").textContent = e.message; }
+    catch (e) { document.getElementById("err").textContent = one.plain(e).title; }
   };
 }
 one.on("changed", show);

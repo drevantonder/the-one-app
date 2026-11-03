@@ -454,9 +454,9 @@ const sections = [
     const row = (s) => {
       let line;
       if (s.invalid) line = '<span class="error">' + one.esc(s.invalid) + "</span>";
-      else if (s.last && !s.last.ok) line = '<span class="error">Failed ' + ago(s.last.time) + ": " + one.esc(s.last.error || "") + "</span>";
+      else if (s.last && !s.last.ok) line = '<span class="error">Failed ' + ago(s.last.time) + ": " + one.esc(one.plain(s.last.error).title) + "</span>";
       else if (s.on && s.runs_as) line = one.esc(cap(s.when)) + (places ? " · " + one.esc(s.scope_name) : "") + (s.next ? " · next " + soon(s.next) : "");
-      else if (s.on) line = "Nobody can run it: switch it on to run it as you";
+      else if (s.on) line = "Off. Switch it on to run it as you.";
       else line = one.esc(cap(s.when)) + (s.switched ? " · off since " + ago(s.switched.time) : "");
       const toggle = !s.invalid ? \`<input type="checkbox" class="switch"\${s.on && s.runs_as ? " checked" : ""}\${s.may_switch ? "" : " disabled"} onchange='switchIt(this, \${JSON.stringify({ schedule: s.name, scope: s.scope })})'>\` : "";
       return \`<div class="row plain"><div class="main"><div class="title"><span>\${one.esc(s.description || s.name)}</span></div><div class="sub">\${line}</div></div>\${toggle}</div>\`;
@@ -551,10 +551,10 @@ async function retire(button, op) {
     button.disabled = true;
     return go().catch((err) => { document.getElementById("error").textContent = one.plain(err).title; show(); });
   }
-  const erase = op === "erase";
+  const erase = op === "erase", title = data.apps.find((x) => x.name === name)?.title || name;
   document.getElementById("ask").scrollIntoView({ behavior: "smooth", block: "center" });
   await one.confirm("#ask", {
-    title: erase ? "Erase " + name + " for good?" : "Delete " + name + "?",
+    title: erase ? "Erase " + title + " for good?" : "Delete " + title + "?",
     detail: erase ? "Its name can't be used again." : "You can restore it from Recently Deleted.",
     action: erase ? "Erase" : "Delete", danger: true, run: go,
   });

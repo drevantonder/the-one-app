@@ -1,6 +1,6 @@
 // Widgets drawn from their trees (`GET /v1/widgets`), in a web page: the pages screen (pages.html) and `one mcp`'s view
 // in chats. The Apple shells draw the same trees natively (apple/Shared/Views/WidgetTree.swift). Nodes it doesn't know
-// draw nothing. Its styles come with it. `host` is what buttons, toggles and links act through: `run(app, op, input)` → the error's text if it
+// draw nothing. Its styles come with it. `host` is what buttons, toggles and links act through: `run(app, op, input)` → the error's text for people if it
 // failed, and `follow(link, widget)` for a web page's address or `{ screen, params }`. A tree is the app's, so nothing in
 // it is ever markup: what's drawn is text, a number (`num`), or one of the names here.
 window.oneWidgets = (() => {
@@ -66,7 +66,9 @@ window.oneWidgets = (() => {
     const el = node("div", "w-card");
     if (tree?.header !== false || w.error) el.append(node("div", "w-title", w.title || w.widget));
     if (w.error) {
-      el.append(node("div", "w-broken", "This widget stopped working."), node("div", "w-why", w.error));
+      // Its error in people's words where the kit is here to say them (not in a chat's view, which has no kit).
+      const why = window.one?.plain?.(w.error).title;
+      el.append(node("div", "w-broken", "This widget stopped working."), ...(why && why !== "That didn't work." ? [node("div", "w-why", why)] : []));
       return el;
     }
     const body = node("div", "w-body");

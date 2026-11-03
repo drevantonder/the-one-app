@@ -52,9 +52,9 @@ impl Node {
             }
         }
         if why.is_empty() {
-            bail!("no device runs {} for you", req.app);
+            bail!("None of your devices can do this: no device runs {} for you", req.app);
         }
-        bail!("no device could run it ({})", why.join("; "))
+        bail!("None of your devices can do this now. Try again soon. ({})", why.join("; "))
     }
 
     /// Runs a sidecar's call on every device that runs it for the caller, one at a time: `{ <device>: answer }`, or
@@ -75,7 +75,7 @@ impl Node {
             };
             out.insert(self.name_of(&device), answer);
         }
-        ensure!(!out.is_empty(), "no device runs {} for you", req.app);
+        ensure!(!out.is_empty(), "None of your devices can do this: no device runs {} for you", req.app);
         Ok(Value::Object(out))
     }
 
@@ -180,7 +180,7 @@ impl Node {
         let deployed_here = self.0.bundles.lock().unwrap().get(&req.app).cloned();
         let latest = self.with(|i| Ok(i.r.members.apps.get(&req.app).and_then(|a| a.bundle.clone())))?;
         if deployed_here.is_none() || deployed_here != latest {
-            return Ok(Reply::Elsewhere(format!("it doesn't have {}'s latest deploy yet", req.app)));
+            return Ok(Reply::Elsewhere(format!("it doesn't have {}'s latest version yet", req.app)));
         }
         if self.deleted(&req.app) {
             return Ok(Reply::Error(format!("{} was deleted: its owners can restore it from Recently Deleted in the App Store", req.app)));
@@ -199,7 +199,7 @@ impl Node {
             let reads = self.0.apps.describe(&req.app).await?["ops"].as_array().into_iter().flatten().any(|o| o["name"] == req.op.as_str() && o["reads"] == true);
             let lease = format!("{}/{}/calls/{id}", crate::bucket::folder(&scope.to_string()), req.app);
             if !reads && !crate::bucket::Bucket::create(&self.call_bucket(me)?, &lease, hex(&self.0.id).as_bytes()).await? {
-                return Ok(Reply::Error("it ran on another device already, whose answer was lost: look before trying again".into()));
+                return Ok(Reply::Error("This may already be done: it ran on another device, whose answer was lost. Check before trying again.".into()));
             }
         }
         let mut ctx = ctx;
@@ -762,17 +762,17 @@ fn prepare(node: &Node, i: &Install, req: &CallRequest, me: &Caller) -> Result<s
             let mut out = Vec::new();
             for s in named {
                 let s = if s == "user" { Scope::User(me.user.clone()) } else { Scope::parse(s)? };
-                ensure!(reach.contains(&s), "{} can't reach {s} for you", req.app);
+                ensure!(reach.contains(&s), "{} can't reach {} for you", req.app, scope_name(i, &s.to_string()));
                 out.push(s);
             }
             out
         }
     };
     if reach.is_empty() {
-        bail!("{} isn't installed for you", req.app);
+        bail!("{} isn't on your pages: add it first", req.app);
     }
     if let Some(s) = scopes.iter().find(|s| !i.r.holds(s)) {
-        return Ok(Err(format!("{} doesn't hold {s}", node.device_name())));
+        return Ok(Err(format!("it can't open {} yet", scope_name(i, &s.to_string()))));
     }
     let ctx = Context { me: node_me(node, m, me), now: now_ms(), scopes: handles(m, &scopes, &me.user), read_only: false, token: String::new(), from: None };
     Ok(Ok((ctx, scopes)))

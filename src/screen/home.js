@@ -11,7 +11,7 @@ window.home = (() => {
   const hasScreens = (a) => has(a, "main");
   const isService = (a) => !hasScreens(a) && !(a.widgets || []).length;
   const scopes = (a) => (a.installed || []).map((s) => (s.startsWith("user:") ? "user" : s));
-  const userName = (id) => (id === me()?.id ? "You" : install()?.users.find((u) => u.id === id)?.name || String(id).slice(0, 6));
+  const userName = (id) => (id === me()?.id ? "You" : install()?.users.find((u) => u.id === id)?.name || "Someone");
   // People by name, you last, as "you".
   const named = (ids) => ids.slice().sort((a, b) => (a === me()?.id) - (b === me()?.id) || userName(a).localeCompare(userName(b)))
     .map((id) => (id === me()?.id ? "you" : userName(id)));
@@ -142,7 +142,7 @@ window.home = (() => {
   }
 
   /// Says what went wrong, in the shell's own alert.
-  const failed = (err) => one.alert({ title: "Couldn’t Do That", text: err?.message || String(err) });
+  const failed = (err) => one.alert({ title: "Couldn’t Do That", text: one.plain(err).title });
 
   /// Runs a change, then takes in what it changed; says what went wrong if it failed.
   async function change(work) {
@@ -168,7 +168,7 @@ window.home = (() => {
         run: async () => {
           const sure = await one.alert({
             title: `Delete ${label(a)}?`, action: "Delete App", danger: true,
-            text: `${label(a)} leaves every page, for everyone, and stops running. It waits in the App Store’s Recently Deleted, with its data, until its owners erase it.`,
+            text: `${label(a)} leaves every page, for everyone. Restore it from Recently Deleted in the App Store.`,
           });
           if (sure) change(() => one.api("POST", "/v1/retire", { app: a.name, how: "deleted" }));
         },

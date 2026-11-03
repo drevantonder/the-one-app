@@ -285,7 +285,7 @@ impl Runtime {
                     return Ok(());
                 }
             }
-            ensure!(started.elapsed() < Duration::from_secs(60), "the app runtime didn't start; see {}", self.dir.join("workerd.log").display());
+            ensure!(started.elapsed() < Duration::from_secs(60), "Apps couldn't start on this device: see {}", self.dir.join("workerd.log").display());
             std::thread::sleep(Duration::from_millis(50));
         }
     }

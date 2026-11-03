@@ -386,7 +386,7 @@ window.__one = {};
       f.html = look(html);
       into.append(frame);
       frame.addEventListener("load", () => setTimeout(() => $(".screen-status", into)?.remove(), 50), { once: true });
-    }, (err) => (into.innerHTML = message("Can’t Open This", esc(err.message))));
+    }, (err) => (into.innerHTML = message("Can’t Open This", esc(one.plain(err).title))));
     return f;
   }
 
