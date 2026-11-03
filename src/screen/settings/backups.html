@@ -9,6 +9,7 @@
   .choice .check { color: var(--tint); visibility: hidden; }
   .choice.on .check { visibility: visible; }
   .actions { margin-top: 18px; text-align: right; }
+  .row[aria-disabled] { pointer-events: none; color: var(--muted); }
 </style>
 <div class="large-title">Backups</div>
 <div id="backups"></div>
@@ -59,19 +60,23 @@
           ${p.problem ? `<div class="sub warn">${one.icon("warning-circle-fill")}${one.esc(p.problem.status)}</div>`
             : `<div class="sub">${one.esc(p.last ? `Backed up ${one.ago(p.last.time, { long: true })}` : p.kind === "folder" ? `Disk on ${name(p.device)}` : `Off-site · ${p.where}`)}</div>`}
         </div><span class="chev">${one.icon("caret-right")}</span></div>`).join("")}
-        ${places.length && !problem && !waiting ? `<div class="row plain go" id="now"><div class="main"><div class="title"><span style="color:var(--tint)">Back Up Now</span></div></div></div>` : ""}
+        ${places.length && !problem ? waiting ? backingUp : `<div class="row plain go" id="now"><div class="main"><div class="title"><span style="color:var(--tint)">Back Up Now</span></div></div></div>` : ""}
         ${admin ? `<div class="row plain go" id="add"><div class="main"><div class="title"><span style="color:var(--tint)">Add Place…</span></div></div></div>` : ""}</div>` : ""}
       <p class="footer">${admin ? "" : "Only admins add and remove places. "}Encrypted before it leaves.</p>
       ${snapshots.length ? `<h2 class="section">Snapshots</h2><div class="list">${snapshots.map((s, n) => `<div class="row plain go" data-snapshot="${n}"><div class="main"><div class="title"><span>${one.esc(when(s.time, true))}</span></div></div><span class="chev">${one.icon("caret-right")}</span></div>`).join("")}</div>` : ""}`;
   });
 
+  // Backing up, said in the row Back Up Now was, from the tap until the places say how it went.
+  const backingUp = `<div class="row plain" id="backing-up" role="status"><div class="main"><div class="title"><span class="muted" style="display:flex;align-items:center;gap:8px"><span class="spinner small"></span>Backing Up…</span></div></div></div>`;
   async function backUpNow() {
     asked = Date.now();
     error = "";
+    document.getElementById("now")?.replaceWith(Object.assign(document.createElement("div"), { innerHTML: backingUp }).firstChild);
     try {
       await one.api("POST", "/v1/backups/now", {});
     } catch (err) {
       error = one.plain(err).title;
+      asked = 0;
     }
     setTimeout(draw, 10000);
     return draw();
@@ -88,16 +93,22 @@
   });
 
   // A place's own page: what's wrong and its fix, where it is, its last backup, its item in the Vault, and stopping.
-  async function openPlace(p) {
+  // It opens at once with what's known; Edit in Vault shows once the Vault says it has the place's item.
+  function openPlace(p) {
     const sheet = one.sheet({ title: p.title, onClose: draw });
-    const item = await one.api("GET", "/v1/vault?scope=global").then((items) => items.find((it) => it.id === p.id)).catch(() => null);
     const where = p.kind === "folder" ? [["Folder", p.where], ["Disk on", name(p.device)]] : [["Bucket", p.where], ["Endpoint", p.endpoint]];
     sheet.body.innerHTML = `${p.problem ? one.problem({ title: one.plain(p.problem.text).title, text: p.problem.fix }) : ""}
       <div style="margin-top:18px">${one.info([...where, ["Last backup", p.last && `${when(p.last.time, true)}, ${name(p.last.device)}`]])}</div>
-      ${item ? `<div class="list" style="margin-top:18px"><div class="row plain go" id="vault"><div class="main"><div class="title"><span>Edit in Vault</span></div></div><span class="chev">${one.icon("caret-right")}</span></div></div>` : ""}
+      <div class="list" style="margin-top:18px" id="in-vault"><div class="row plain go" id="vault" aria-disabled="true"><div class="main"><div class="title"><span>Edit in Vault</span></div></div><span class="spinner small muted" aria-hidden="true"></span></div></div>
       ${admin ? `<div class="list" style="margin-top:18px"><div class="row plain go" id="stop"><div class="main"><div class="title"><span class="error">Stop Backing Up Here</span></div></div></div></div>` : ""}
       <div id="confirm"></div>`;
-    sheet.body.querySelector("#vault")?.addEventListener("click", () => one.open("vault", { scope: "global", id: p.id }));
+    one.api("GET", "/v1/vault?scope=global").then((items) => items.some((it) => it.id === p.id)).catch(() => false).then((there) => {
+      const row = sheet.body.querySelector("#vault");
+      if (!there) return sheet.body.querySelector("#in-vault").remove();
+      row.removeAttribute("aria-disabled");
+      row.querySelector(".spinner").outerHTML = `<span class="chev">${one.icon("caret-right")}</span>`;
+      row.addEventListener("click", () => one.open("vault", { scope: "global", id: p.id }));
+    });
     sheet.body.querySelector("#stop")?.addEventListener("click", async () => {
       const stopped = await one.confirm(sheet.body.querySelector("#confirm"), {
         title: `Stop backing up to ${p.title}?`, detail: "What's there now stays there.", action: "Stop Backing Up", danger: true,

@@ -51,23 +51,21 @@
   const wanted = [{ name: "key", label: "Key", secret: true, file: true }, { name: "team_id", label: "Team ID" }, { name: "key_id", label: "Key ID" }, { name: "topic", label: "App ID" }];
   const hosts = ["api.push.apple.com", "api.sandbox.push.apple.com"];
 
-  async function askKey() {
+  // The sheet opens at once, its items grey until the Vault says which it has.
+  function askKey() {
     const app = push();
-    const items = (await one.api("GET", "/v1/vault?scope=global"))
-      .filter((it) => wanted.every((w) => (it.fields || []).some((f) => f.name === w.name)))
-      .sort((a, b) => (b.apps || []).includes(app) - (a.apps || []).includes(app));
-    let picked = items[0]?.id ?? null;
+    let items = null, picked = null;
     const values = {}, files = {};
     let title = "Apple Notifications Key", problem = "";
     const sheet = one.sheet({ title: "Vault", done: "Cancel", onClose: draw });
     const choice = (id, icon, text) =>
       `<div class="row plain go choice${picked === id ? " on" : ""}" data-pick="${one.esc(id ?? "")}">${icon}<div class="main"><div class="title"><span>${one.esc(text)}</span></div></div><span class="check">${one.icon("check")}</span></div>`;
-    const ready = () => picked !== null || wanted.every((w) => values[w.name]);
+    const ready = () => items !== null && (picked !== null || wanted.every((w) => values[w.name]));
     const paint = () => {
       sheet.body.innerHTML = `<div class="list"><div class="row plain"><div class="main"><div class="title"><span>Apple Notifications Key</span></div><div class="sub wrap">Phones get notifications through Apple with it.</div></div></div></div>
         <p class="footer">Kept in Everyone’s Vault</p>
-        <div class="list" style="margin-top:18px">${items.map((it) => choice(it.id, one.icon("key"), it.title)).join("")}${choice(null, one.icon("plus-circle-fill"), "New Item")}</div>
-        ${picked === null ? `<div class="list" style="margin-top:18px">
+        ${items === null ? `<div style="margin-top:18px">${one.skeleton(2)}</div>` : `<div class="list" style="margin-top:18px">${items.map((it) => choice(it.id, one.icon("key"), it.title)).join("")}${choice(null, one.icon("plus-circle-fill"), "New Item")}</div>`}
+        ${items !== null && picked === null ?`<div class="list" style="margin-top:18px">
           <label class="row plain field"><span>Title</span><input data-new="title" value="${one.esc(title)}"></label>
           ${wanted.map((w) => w.file
             ? `<label class="row plain field go"><span>${w.label}</span><span class="value">${one.esc(files[w.name] || "Choose File…")}</span><input type="file" data-file="${w.name}" hidden></label>`
@@ -77,6 +75,14 @@
         <div style="margin-top:18px;text-align:right"><button class="button primary" id="save"${ready() ? "" : " disabled"}>Save</button></div>`;
     };
     paint();
+    one.api("GET", "/v1/vault?scope=global").then((all) => {
+      items = all.filter((it) => wanted.every((w) => (it.fields || []).some((f) => f.name === w.name)))
+        .sort((a, b) => (b.apps || []).includes(app) - (a.apps || []).includes(app));
+      picked = items[0]?.id ?? null;
+    }, (err) => {
+      items = [];
+      problem = one.plain(err).title;
+    }).then(paint);
     sheet.body.addEventListener("click", (e) => {
       const row = e.target.closest("[data-pick]");
       if (!row) return;
@@ -99,8 +105,8 @@
     });
     sheet.body.addEventListener("click", async (e) => {
       const save = e.target.closest("#save");
-      if (!save || !ready()) return;
-      save.disabled = true;
+      if (!save || !ready() || save.disabled) return;
+      const back = one.busy(save);
       problem = "";
       try {
         if (picked !== null) {
@@ -112,6 +118,7 @@
         }
         sheet.close();
       } catch (err) {
+        back();
         problem = one.plain(err).title;
         paint();
       }

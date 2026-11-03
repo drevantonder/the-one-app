@@ -28,8 +28,12 @@
     const b = e.target.closest("[data-v]");
     if (!b) return;
     one.tap();
+    // Checked at once; then as the device says it is.
+    draw(b.dataset.v);
     draw(await one.appearance(b.dataset.v));
   });
   one.largeTitle("Appearance");
+  // The pictures at once, the check once the device says which.
+  draw(null);
   one.appearance().then(draw);
 </script>
