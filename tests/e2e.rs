@@ -801,11 +801,12 @@ async fn a_node_reaches_a_service_through_the_relay_and_a_stranger_does_not() {
     assert_eq!(answer["error"], "only your One App's devices are answered", "{answer}");
 }
 
-/// The serverless node passes a call on to a node on a machine with no access token, only the person it's for and the
-/// keys of its databases they handed it, sealed to that node for the serverless node's own key: the node runs it on
-/// those keys alone, never its own, even for its own person, and takes no keys sealed for anyone else.
+/// The serverless node, or another node, passes a call on with no access token, only the person it's for, the scopes
+/// it names and the keys of those it was handed, sealed to the node for the sender's own key: the node runs it on those
+/// keys alone, never its own, even for its own person, takes no keys sealed for anyone else or of a scope the call
+/// doesn't name, and from a node on a machine, runs it only if that node runs every scope it names.
 #[tokio::test(flavor = "multi_thread")]
-async fn a_call_the_serverless_node_passes_on_runs_on_the_keys_it_handed_alone() {
+async fn a_call_passed_on_runs_on_the_keys_handed_for_its_sender_alone() {
     let a = start("passed-on").await;
     a.create("Passed On", "Andre").await.unwrap();
     deploy_module(&a, "hi", r#"export default { name: "hi", ops: { hi: { description: "", input: {}, run: (ctx, input) => ({ hi: input.name }) } } };"#).await;
@@ -847,8 +848,9 @@ async fn a_call_the_serverless_node_passes_on_runs_on_the_keys_it_handed_alone()
         serde_json::from_slice(&recv.read_to_end(1 << 20).await.unwrap()).unwrap()
     };
     let seal = one::kernel::twin_public(&a.id()).unwrap();
-    let sealed = |for_: &str| one::keys::seal_handoff(&seal, &one::keys::Handoff { for_: for_.into(), until: one::node::now_ms() + 3_600_000, keys: vec![handed.clone()] }).unwrap();
-    let hi = json!({ "app": "hi", "op": "hi", "input": { "name": "passed on" } });
+    let sealed_with = |for_: &str, keys: Vec<one::keys::Handed>| one::keys::seal_handoff(&seal, &one::keys::Handoff { for_: for_.into(), until: one::node::now_ms() + 3_600_000, keys }).unwrap();
+    let sealed = |for_: &str| sealed_with(for_, vec![handed.clone()]);
+    let hi = json!({ "app": "hi", "op": "hi", "input": { "name": "passed on" }, "scopes": [scope] });
     let with = |me: Value, keys: Option<String>| {
         let mut c = hi.clone();
         c["me"] = me;
@@ -859,15 +861,49 @@ async fn a_call_the_serverless_node_passes_on_runs_on_the_keys_it_handed_alone()
     };
     let andre = json!({ "user": me.user, "client": "web" });
 
-    let need = ask(with(andre.clone(), None)).await;
+    let bare = ask(with(andre.clone(), None)).await;
+    assert!(bare["error"].as_str().is_some_and(|e| e.contains("keys")), "a call passed on brings the keys it was handed: {bare}");
+    let need = ask(with(andre.clone(), Some(sealed_with(&serverless_hex, Vec::new())))).await;
     assert_eq!(need["to"].as_str(), Some(one::entry::hex(&a.id()).as_str()), "its own person's call, passed on, isn't run on the node's own keys: {need}");
-    let posing = ask(with(json!({ "user": me.user, "token": a.local_token() }), None)).await;
+    let posing = ask(with(json!({ "user": me.user, "token": a.local_token() }), Some(sealed_with(&serverless_hex, Vec::new())))).await;
     assert!(posing["need"].is_array(), "a token it shows changes nothing: {posing}");
     let other = ask(with(andre.clone(), Some(sealed(&one::keys::token_id("someone's token"))))).await;
-    assert!(other["error"].as_str().is_some_and(|e| e.contains("another sign-in")), "keys for anyone but the serverless node are refused: {other}");
+    assert!(other["error"].as_str().is_some_and(|e| e.contains("another node")), "keys for anyone but the serverless node are refused: {other}");
+    let mut unnamed = with(andre.clone(), Some(sealed(&serverless_hex)));
+    unnamed["scopes"] = json!(["global"]);
+    let unnamed = ask(unnamed).await;
+    assert!(unnamed["error"].as_str().is_some_and(|e| e.contains("doesn't name")), "keys of a scope the call doesn't name are refused: {unnamed}");
     let ran = ask(with(andre.clone(), Some(sealed(&serverless_hex)))).await;
     assert_eq!(ran["ok"], json!({ "hi": "passed on" }), "{ran}");
     let stranger = ask(with(json!({ "user": one::entry::new_id() }), Some(sealed(&serverless_hex)))).await;
     assert!(stranger["error"].as_str().is_some_and(|e| e.contains("joined")), "{stranger}");
+    endpoint.close().await;
+
+    // Another node of Andre's, linux, passing on a call it was handed keys for (a client device's, or the serverless
+    // node's): only with them sealed for its own key, and only in scopes it runs, which Sam's own isn't.
+    let linux = ed25519_dalek::SigningKey::from_bytes(&rand::random());
+    let linux_hex = one::entry::hex(&linux.verifying_key().to_bytes());
+    a.member_content(&me, one::members::device(&one::keys::Endpoint::of(&linux), &me.user, "linux", &[one::members::Kind::Compute], None)).await.unwrap();
+    let (sam, sams_phone) = (one::entry::new_id(), ed25519_dalek::SigningKey::from_bytes(&rand::random()));
+    a.member_content(&me, one::members::device(&one::keys::Endpoint::of(&sams_phone), &sam, "sam's phone", &[one::members::Kind::Client], Some(("Sam", one::members::Role::Member)))).await.unwrap();
+    let endpoint = iroh::Endpoint::builder(iroh::endpoint::presets::Minimal).secret_key(iroh::SecretKey::from_bytes(&linux.to_bytes())).relay_mode(iroh::RelayMode::Disabled).bind().await.unwrap();
+    let conn = endpoint.connect(a.endpoint_addr().unwrap(), format!("{}/1", one::config::CLI).as_bytes()).await.unwrap();
+    let ask = async |call: Value| -> Value {
+        let (mut send, mut recv) = conn.open_bi().await.unwrap();
+        send.write_all(json!({ "kind": "ask", "body": { "call": call } }).to_string().as_bytes()).await.unwrap();
+        send.finish().unwrap();
+        serde_json::from_slice(&recv.read_to_end(1 << 20).await.unwrap()).unwrap()
+    };
+    let as_linux = json!({ "user": me.user, "key": linux_hex, "client": "web" });
+    let bare = ask(with(as_linux.clone(), None)).await;
+    assert!(bare["error"].as_str().is_some_and(|e| e.contains("may not call")), "a call another node passes on with no sign-in and no keys is refused: {bare}");
+    let theirs = ask(with(as_linux.clone(), Some(sealed(&serverless_hex)))).await;
+    assert!(theirs["error"].as_str().is_some_and(|e| e.contains("another node")), "keys handed for another sender are refused: {theirs}");
+    let mut sams = with(json!({ "user": sam, "key": linux_hex }), Some(sealed_with(&linux_hex, Vec::new())));
+    sams["scopes"] = json!([format!("user:{sam}")]);
+    let sams = ask(sams).await;
+    assert!(sams["error"].as_str().is_some_and(|e| e.contains("doesn't run every scope")), "a scope the sender doesn't run is refused: {sams}");
+    let ran = ask(with(as_linux.clone(), Some(sealed(&linux_hex)))).await;
+    assert_eq!(ran["ok"], json!({ "hi": "passed on" }), "{ran}");
     endpoint.close().await;
 }

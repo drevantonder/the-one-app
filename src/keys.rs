@@ -226,20 +226,21 @@ pub fn open_handoff(secret: &[u8; 32], sealed: &str) -> Result<Handoff> {
     serde_json::from_slice(&plain).context("the keys handed aren't a handoff")
 }
 
-/// What the serverless node asks a node on a machine to run a sign-in's call there with (`src/node/net.rs`): the call,
-/// the person it's for, and the keys of the scopes it reaches that the serverless node was handed, sealed to that
-/// node's `seal` key for calls from the serverless node's own endpoint (`from`), until `until`. Never the sign-in's
-/// token, which whoever runs the node could use as them; nor keys of a scope the call doesn't reach.
+/// What a node with no sign-in to pass on (the serverless node, or a machine's passing on a call it was handed keys
+/// for) asks another node to run a call with (`src/node/net.rs`): the call, naming `scopes`, the scopes it reaches,
+/// the person it's for, and the keys of those scopes it was handed, sealed to that node's `seal` key for calls from
+/// its own endpoint (`from`), until `until`. Never a sign-in's token, which whoever runs the node could use as them;
+/// nor keys of a scope the call doesn't name. The other node runs it on those keys alone, and only if `from` may run
+/// every one of `scopes`.
 pub fn forwarded(call: &Value, user: &str, client: &str, from: &[u8; 32], seal: &[u8; 32], until: u64, keys: Vec<Handed>, scopes: &[String]) -> Result<Value> {
     let mut call = call.as_object().cloned().unwrap_or_default();
     for k in ["me", "keys", "token"] {
         call.remove(k);
     }
     call.insert("me".into(), json!({ "user": user, "client": client }));
+    call.insert("scopes".into(), json!(scopes));
     let keys: Vec<Handed> = keys.into_iter().filter(|k| scopes.contains(&k.scope)).collect();
-    if !keys.is_empty() {
-        call.insert("keys".into(), seal_handoff(seal, &Handoff { for_: HEXLOWER.encode(from), until, keys })?.into());
-    }
+    call.insert("keys".into(), seal_handoff(seal, &Handoff { for_: HEXLOWER.encode(from), until, keys })?.into());
     Ok(json!({ "kind": "ask", "body": { "call": call } }))
 }
 

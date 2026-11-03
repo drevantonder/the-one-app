@@ -624,9 +624,9 @@ async fn call_for(node: &Node, me: Me, body: Value) -> anyhow::Result<Value> {
 
 /// A call the serverless node passes on over iroh (src/node/net.rs): its person's, as `me.user` says, run with the keys
 /// of its databases they handed the serverless node, which it hands this device (`keys`, sealed to it for the
-/// serverless node's key, `node::serverless_token`), and never this device's own: no access token comes with it, so
-/// none of theirs reaches a node on a machine, whose owner could use it as them. → `{ ok }`, or what failed as the API
-/// says it.
+/// serverless node's key, `node::passed_token`) for the scopes the call names alone, and never this device's own: no
+/// access token comes with it, so none of theirs reaches a node on a machine, whose owner could use it as them.
+/// → `{ ok }`, or what failed as the API says it.
 pub(crate) async fn call_from_serverless(node: &Node, remote: crate::entry::Key, mut call: Value) -> Value {
     let (me, keys) = match call.as_object_mut() {
         Some(c) => (c.remove("me").unwrap_or_default(), c.remove("keys")),
@@ -635,10 +635,8 @@ pub(crate) async fn call_from_serverless(node: &Node, remote: crate::entry::Key,
     let ran = async {
         let user = me["user"].as_str().filter(|u| !u.is_empty()).ok_or_else(|| anyhow::anyhow!("whose call is it?"))?.to_string();
         anyhow::ensure!(node.is_user(&user), NotJoined);
-        let token = crate::node::serverless_token(&remote, &user);
-        if let Some(handed) = keys.as_ref().and_then(Value::as_str) {
-            node.hand(&token, &user, handed)?;
-        }
+        let handed = keys.as_ref().and_then(Value::as_str).ok_or_else(|| anyhow::anyhow!("a call passed on brings the keys it was handed"))?;
+        let token = node.take_passed(&remote, &user, &call, handed, false)?;
         let client = me["client"].as_str().unwrap_or_default().to_string();
         call_for(node, Me { caller: Caller { key: node.id(), user, agent: None, token: Some(token) }, sign_in: Some(client) }, call).await
     };

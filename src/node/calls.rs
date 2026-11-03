@@ -138,13 +138,25 @@ impl Node {
 
     /// Asks another device to run a call: a sign-in's with the keys its caller handed this device, sealed to that one.
     pub(super) async fn ask_device(&self, device: Key, req: &CallRequest, me: &Caller) -> Result<Reply> {
-        // A client device's own calls are kept by its key, which proves nothing to another device, and a service runs
-        // nothing as a sign-in: either is passed on with none.
-        // A service that serves everyone is passed a sign-in, which it checks itself; never keys.
+        // A sign-in's token goes along, with the keys it was handed: to a service only if it serves everyone, which
+        // checks it itself, and never keys. A call handed keys with no sign-in passes on its keys alone (below).
         let service = self.is_service(&device);
         let shared = self.with(|i| Ok(i.r.members.service(&device).is_some_and(|s| s.shared)))?;
-        let token = me.token.as_ref().filter(|t| !t.starts_with(sessions::CLIENT) && (!service || (shared && sessions::is_sign_in(t))));
+        let token = me.token.as_ref().filter(|t| !sessions::unsigned(t) && (!service || (shared && sessions::is_sign_in(t))));
         let mut request = json!({ "app": req.app, "sidecar": req.sidecar, "op": req.op, "input": req.input, "scopes": req.scopes, "depth": req.depth, "from": req.from, "client": req.client, "me": { "key": hex(&me.key), "user": me.user, "agent": me.agent, "token": token } });
+        // Keys handed here with no sign-in (a client device's, or with a call passed on) go on to another node sealed
+        // to it for this node's key, of the scopes the call reaches alone, which it runs on them alone.
+        if let Some(unsigned) = me.token.as_ref().filter(|t| sessions::unsigned(t))
+            && !service
+        {
+            let scopes = self.with(|i| call_scopes(i, &self.resolve(req.clone()), &me.user))?;
+            let (keys, until) = self.passing_on(unsigned, &scopes);
+            let seal = self.with(|i| Ok(i.r.members.seal_key(&device)))?.context("that device has no key to seal to")?;
+            let named: Vec<String> = scopes.iter().map(Scope::to_string).collect();
+            request = crate::keys::forwarded(&request, &me.user, req.client.as_deref().unwrap_or(""), &self.0.id, &seal, until, keys, &named)?["body"]["call"].take();
+            request["me"]["key"] = json!(hex(&self.0.id));
+            request["me"]["agent"] = json!(me.agent);
+        }
         if let Some(token) = token
             && !service
             && let Some(seal) = self.with(|i| Ok(i.r.members.seal_key(&device)))?
@@ -783,14 +795,18 @@ impl Node {
 
     async fn accept(&self, remote: Key, request: &Value) -> Result<(CallRequest, Caller)> {
         let mut me = self.check_caller(remote, request)?;
+        let passed = request["me"]["token"].is_null() && request["keys"].is_string();
         if let Some(token) = request["me"]["token"].as_str() {
             me.token = Some(self.token_of(token, &me.user).await.context("the sign-in it came with isn't its caller's, or has expired")?);
             if let Some(keys) = request["keys"].as_str() {
                 self.hand(token, &me.user, keys)?;
             }
+        } else if let Some(keys) = request["keys"].as_str() {
+            // Passed on with no sign-in: run on the keys it was handed alone, never this device's own.
+            me.token = Some(self.take_passed(&remote, &me.user, request, keys, true)?);
         }
         let mut req: CallRequest = serde_json::from_value(request.clone())?;
-        let (own, serves) = self.with(|i| Ok((i.r.members.client(&remote).is_some_and(|c| c.user == me.user), i.r.members.serves(&remote, &me.user))))?;
+        let (own, serves) = self.with(|i| Ok((!passed && i.r.members.client(&remote).is_some_and(|c| c.user == me.user), i.r.members.serves(&remote, &me.user))))?;
         // Only a node that runs the user's calls says an app made a call (whose items fill it in), and how deep it is.
         if !serves {
             (req.from, req.depth) = (None, 0);
@@ -815,6 +831,25 @@ impl Node {
         Ok((req, me))
     }
 
+    /// The keys a call `from` another node passed on for `user` with no sign-in was handed (`sealed`): sealed here for
+    /// `from`'s key, of the scopes the call names alone, every one of which `user` may use and, for a node on a machine
+    /// (`machine`), `from` runs. → what its keys are kept by.
+    pub(crate) fn take_passed(&self, from: &Key, user: &str, call: &Value, sealed: &str, machine: bool) -> Result<String> {
+        let named = call["scopes"].as_array().context("a call passed on names its scopes")?;
+        let scopes: Vec<Scope> = named.iter().map(|s| match s.as_str() {
+            Some("user") => Ok(Scope::User(user.to_string())),
+            Some(s) => Scope::parse(s),
+            None => bail!("a scope is its name"),
+        }).collect::<Result<_>>()?;
+        self.with(|i| {
+            let m = &i.r.members;
+            ensure!(scopes.iter().all(|s| m.may_use(user, s)), "that call reaches a scope its person may not use");
+            ensure!(!machine || scopes.iter().all(|s| m.runs_for(from, s)), "{} doesn't run every scope that call names", short(from));
+            Ok(())
+        })?;
+        self.hand_passed(from, user, sealed, &scopes)
+    }
+
     /// Who a call another device passed on is for: with a sign-in's token, someone that device's node serves or whose
     /// client it is; with none, only the person whose client device `remote` is, asking itself. The node's own hints
     /// (`hello`, `changed`) come from any compute endpoint of the install, as itself; a person's service asks as them, as itself.
@@ -822,6 +857,8 @@ impl Node {
         let key = unhex(request["me"]["key"].as_str().context("who's asking?")?)?;
         let user = request["me"]["user"].as_str().context("who's asking?")?.to_string();
         let token = request["me"]["token"].as_str().is_some();
+        // Passed on by another node with no sign-in, the keys it was handed with it, which `take_passed` checks.
+        let passed = !token && request["keys"].is_string();
         let hint = request["app"] == members::APP && matches!(request["op"].as_str(), Some("hello" | "changed"));
         self.with(|i| {
             let m = &i.r.members;
@@ -830,6 +867,7 @@ impl Node {
             let allowed = match () {
                 _ if hint => remote == key && m.compute(&remote).is_some(),
                 _ if token => client || m.serves(&remote, &user),
+                _ if passed => remote == key && m.compute(&remote).is_some(),
                 _ => (client || service) && remote == key,
             };
             ensure!(allowed, "{} may not call as that user", short(&remote));
@@ -837,6 +875,17 @@ impl Node {
         })?;
         let agent = request["me"]["agent"].as_str().map(str::to_string);
         Ok(Caller { key, user, agent, token: None })
+    }
+}
+
+/// The scopes a call reaches for `user`: those it names, or every one its app reaches; a sidecar's, those it names or
+/// its person's own.
+fn call_scopes(i: &Install, req: &CallRequest, user: &str) -> Result<Vec<Scope>> {
+    let named = |s: &String| if s == "user" { Ok(Scope::User(user.to_string())) } else { Scope::parse(s) };
+    match (&req.scopes, &req.sidecar) {
+        (Some(named_), _) => named_.iter().map(named).collect(),
+        (None, Some(_)) => Ok(vec![Scope::User(user.to_string())]),
+        (None, None) => Ok(reachable(i, &req.app, user)),
     }
 }
 
