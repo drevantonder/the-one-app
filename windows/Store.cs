@@ -95,15 +95,17 @@ public sealed class Store
 
     // MARK: Loading
 
-    /// Loads the node's state, then its apps, widgets and badges if who this is or their groups changed.
+    /// Loads the node's state, and its apps if who this is or their groups changed (the first time, beside the state),
+    /// then their widgets and badges, which nothing waits for.
     public async Task RefreshState()
     {
+        var early = State == null ? Node.Apps().ContinueWith<List<AppInfo>?>(t => t.IsCompletedSuccessfully ? t.Result : null) : null;
         var state = await Node.State();
         var regrouped = JsonSerializer.Serialize(new object?[] { state.User?.Id, state.Install?.Groups.Select(g => g.Id + g.Members.Count) })
             != JsonSerializer.Serialize(new object?[] { State?.User?.Id, State?.Install?.Groups.Select(g => g.Id + g.Members.Count) });
         var first = State == null;
         State = state;
-        if (first || regrouped || AppList.Count == 0) await RefreshApps();
+        if (first || regrouped || AppList.Count == 0) await RefreshApps(early);
         else Changed?.Invoke();
     }
 
@@ -111,17 +113,28 @@ public sealed class Store
     public async Task RefreshAll()
     {
         State = await Node.State();
-        await RefreshApps();
+        await RefreshApps(read: true);
     }
 
-    public async Task RefreshApps()
+    /// Loads its apps (as `early` asked for them, if it did), then their widgets and badges, waiting for those only if
+    /// `read`.
+    public async Task RefreshApps(Task<List<AppInfo>?>? early = null, bool read = false)
     {
         if (Install == null) return;
-        AppList = await Node.Apps();
+        AppList = (early == null ? null : await early) ?? await Node.Apps();
+        Changed?.Invoke();
+        var reading = ReadWidgets();
+        if (read) await reading;
+    }
+
+    async Task ReadWidgets()
+    {
         await Task.WhenAll(Pages().Select(async p =>
         {
-            try { WidgetsOf[p.Scope] = await Node.Widgets(p.Scope); } catch { }
-            try { BadgesOf[p.Scope] = await Node.Badges(p.Scope); } catch { BadgesOf[p.Scope] = []; }
+            var widgets = Node.Widgets(p.Scope);
+            var badges = Node.Badges(p.Scope);
+            try { WidgetsOf[p.Scope] = await widgets; } catch { }
+            try { BadgesOf[p.Scope] = await badges; } catch { BadgesOf[p.Scope] = []; }
         }));
         Changed?.Invoke();
         WidgetsRead?.Invoke();

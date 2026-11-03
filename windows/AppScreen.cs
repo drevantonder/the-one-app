@@ -82,7 +82,13 @@ public sealed class AppScreen : Grid
 
     async Task Start()
     {
-        if (web.CoreWebView2 != null || !await Fetch()) return;
+        if (web.CoreWebView2 != null) return;
+        // An app's screen shows its page as the node last gave it at once, while the node is asked and the web view
+        // starts; the node's page replaces it only if it's changed since (its app deployed).
+        var copy = Own ? null : ScreenCopies.Last(route)?.html;
+        var fetching = Fetch();
+        if (copy == null && !await fetching) return;
+        if (copy != null && !fetching.IsCompleted) html = copy;
         await web.EnsureCoreWebView2Async();
         var core = web.CoreWebView2!;
         var settings = core.Settings;
@@ -125,9 +131,16 @@ public sealed class AppScreen : Grid
             await Answer(e.WebMessageAsJson);
         };
         core.Navigate($"{origin}/");
+        if (copy != null && await fetching && kept == null && html != served)
+        {
+            shown = false;
+            core.Navigate($"{origin}/");
+        }
     }
 
     bool shown;
+    /// The page the screen's address last answered with.
+    string? served;
 
     // MARK: Offline
 
@@ -229,6 +242,7 @@ public sealed class AppScreen : Grid
         var env = web.CoreWebView2.Environment;
         if (path == "/" && html != null)
         {
+            served = html;
             var bytes = new MemoryStream(Encoding.UTF8.GetBytes(html));
             e.Response = env.CreateWebResourceResponse(bytes.AsRandomAccessStream(), 200, "OK", "Content-Type: text/html; charset=utf-8");
         }
@@ -596,8 +610,8 @@ public sealed class AppScreen : Grid
     }
 }
 
-/// The last copy of each app screen this computer showed, which stands in while the node can't be reached; gone once
-/// the person signs out.
+/// The last copy of each app screen this computer showed: shown at once while the node is asked, and while it can't be
+/// reached; gone once the person signs out.
 static class ScreenCopies
 {
     static string Dir => Path.Combine(WhiteLabel.Folder, "Screen copies");
