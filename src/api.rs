@@ -280,6 +280,9 @@ async fn only_this_machine(State(node): State<Node>, mut req: axum::extract::Req
             return refuse(req, (StatusCode::FORBIDDEN, Json(json!({ "error": "only a scheduled run asks that, and it asks nothing else" }))).into_response()).await;
         }
         return match signed_in(&node, token.clone()).await {
+            // This machine's own programs, signed in as its node's own person, are this device's own client: they
+            // use its keys, as when not signed in.
+            Ok(me) if from_this_machine(&node, &req) && node.user().is_ok_and(|u| u == me.caller.user) && !token.starts_with("run.") => next.run(req).await,
             Ok(me) => {
                 // The keys its caller hands this device for the token's calls, sealed to it.
                 if let Some(handed) = req.headers().get(KEYS_HEADER).and_then(|h| h.to_str().ok())
