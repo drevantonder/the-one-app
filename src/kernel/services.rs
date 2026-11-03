@@ -139,6 +139,25 @@ CLOUDFLARE_API_TOKEN=
 SERVERLESS_KEY=
 ";
 
+/// Keeps `value` in a new item of 1Password's `vault`, titled `title`, handed to `op` on its standard input so no
+/// command line shows it: → the item's id.
+fn in_1password(vault: &str, title: &str, value: &str) -> Result<String> {
+    use std::io::Write;
+    let template = json!({ "title": title, "category": "PASSWORD", "fields": [{ "id": "password", "type": "CONCEALED", "purpose": "PASSWORD", "label": "password", "value": value }] });
+    let mut op = std::process::Command::new("op")
+        .args(["item", "create", "--vault", vault, "--format", "json", "-"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .context("the kernel's other secrets are in 1Password, and op (1Password's CLI) isn't here to keep this one there")?;
+    op.stdin.take().unwrap().write_all(template.to_string().as_bytes())?;
+    let out = op.wait_with_output()?;
+    ensure!(out.status.success(), "1Password didn't keep it: {}", String::from_utf8_lossy(&out.stderr).trim());
+    let item: Value = serde_json::from_slice(&out.stdout).context("op said something other than the item it made")?;
+    Ok(item["id"].as_str().context("op didn't say the item's id")?.to_string())
+}
+
 /// The Varlock `kernel` reads secrets with, and each platform's download of it with the download's sha256, as its
 /// release's checksums.txt says.
 const VARLOCK: &str = "1.24.0";
@@ -303,14 +322,20 @@ impl Settings {
         write_private(&path, &String::from_utf8(serde_json::to_vec_pretty(self)?)?)
     }
 
-    /// Sets a secret's value in `.env.local`, unless it's a reference to 1Password, where it changes instead.
+    /// Sets a secret's value in `.env.local`, unless it's a reference to 1Password, where it changes instead. A new
+    /// one, where the others are references, is kept in 1Password too, in their vault, and referenced as they are.
     pub fn set_secret(&self, name: &str, value: &str) -> Result<()> {
         let text = std::fs::read_to_string(local()).unwrap_or_default();
         let mut lines: Vec<String> = text.lines().filter(|l| !l.starts_with(&format!("{name}="))).map(str::to_string).collect();
         if let Some(line) = text.lines().find(|l| l.starts_with(&format!("{name}="))) {
             ensure!(!line.contains("op("), "{name} is kept in 1Password: change it there ({})", line.trim_start_matches(&format!("{name}=")));
         }
-        lines.push(format!("{name}={}", quoted(value)));
+        let vault = text.split("op(op://").nth(1).and_then(|rest| rest.split('/').next()).filter(|v| !v.is_empty());
+        let kept = match vault {
+            Some(vault) => format!("op(op://{vault}/{}/password)", in_1password(vault, &format!("{} kernel {name}", self.name), value)?),
+            None => quoted(value),
+        };
+        lines.push(format!("{name}={kept}"));
         write_private(&local(), &(lines.join("\n") + "\n"))
     }
 
