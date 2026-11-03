@@ -288,8 +288,8 @@ window.__one = {};
     return `/app/${encodeURIComponent(r.app)}/${encodeURIComponent(r.screen || "main")}${q.size ? `?${q}` : ""}`;
   }
 
-  /// Goes somewhere: a sidebar row replaces where the window is; what a screen opens is pushed on top, so Back
-  /// returns to it.
+  /// Goes somewhere: a sidebar row replaces where the window is; what a screen opens deeper than the sidebar is pushed
+  /// on top, so Back returns to it.
   function go(r, { pushed = false } = {}) {
     // Pushed on a screen, the sidebar keeps what it had selected, and the bar offers Back.
     const state = pushed ? { back: true, selection: history.state?.selection || location.pathname + location.search } : null;
@@ -463,9 +463,10 @@ window.__one = {};
             : { kind: "screen", app: r.app, screen: String(m.screen || "main"), params, scope: m.scope || r.scope };
           if (m.sheet) return reply(await openSheet(to));
           reply(null);
-          // From a sheet, the sheet goes and it opens where the window is.
+          // From a sheet, the sheet goes and it opens where the window is. What the sidebar lists (an app on a page,
+          // Backups in Settings) opens as if picked there, with no Back; only what's deeper than it is pushed.
           f.sheet?.close(null);
-          return go(to, { pushed: true });
+          return go(to, { pushed: ![...document.querySelectorAll(".sidebar [data-go]")].some((a) => a.getAttribute("href") === href(to)) });
         }
         case "close":
           reply(null);
