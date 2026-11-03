@@ -46,10 +46,11 @@ pub const KEYS_HEADER: &str = "x-one-keys";
 /// A session's endpoint's certificate (`keys::certify`), on each request it sends over iroh: who it asks as.
 pub const ENDPOINT_HEADER: &str = "x-one-endpoint";
 
-/// A request a client device sent over iroh (src/node/net.rs), with the key its connection proved it holds: only the
-/// node puts this on a request, as an extension, which nothing a client sends can set.
+/// A request a client device sent over iroh (src/node/net.rs), with the key its connection proved it holds (or the
+/// device that vouched for a session's endpoint), and until when what it hands counts (that session's certificate's
+/// `until`): only the node puts this on a request, as an extension, which nothing a client sends can set.
 #[derive(Clone, Copy)]
-pub struct FromClient(pub crate::entry::Key);
+pub struct FromClient(pub crate::entry::Key, pub u64);
 
 /// Serves the local API on `listener`, knowing each request's peer, which `from_this_machine` checks.
 pub async fn serve(listener: tokio::net::TcpListener, router: Router) -> std::io::Result<()> {
@@ -336,8 +337,8 @@ fn tailnet_address() -> Option<std::net::Ipv4Addr> {
 /// instead, for what `SIGNED_IN` lists.
 async fn only_this_machine(State(node): State<Node>, mut req: axum::extract::Request, next: axum::middleware::Next) -> Response {
     let path = req.extensions().get::<axum::extract::MatchedPath>().map(|p| p.as_str().to_string()).unwrap_or_default();
-    if let Some(FromClient(key)) = req.extensions().get::<FromClient>().copied() {
-        return from_client(&node, key, &path, req, next).await;
+    if let Some(FromClient(key, until)) = req.extensions().get::<FromClient>().copied() {
+        return from_client(&node, key, until, &path, req, next).await;
     }
     let token = req.headers().get(axum::http::header::AUTHORIZATION).and_then(|a| a.to_str().ok()).and_then(|a| a.strip_prefix("Bearer ")).map(|t| t.trim().to_string());
     // This machine's own MCP, answering a client device's request (`mcp_http`), asks as that device.
@@ -345,7 +346,7 @@ async fn only_this_machine(State(node): State<Node>, mut req: axum::extract::Req
         if !from_this_machine(&node, &req) {
             return refuse(req, (StatusCode::UNAUTHORIZED, Json(json!({ "error": "that isn't a sign-in" }))).into_response()).await;
         }
-        return from_client(&node, key, &path, req, next).await;
+        return from_client(&node, key, u64::MAX, &path, req, next).await;
     }
     if let Some(token) = token {
         // This machine's own programs (its CLI and MCP, signed in) may ask anything; from elsewhere, only `SIGNED_IN`.
@@ -363,7 +364,7 @@ async fn only_this_machine(State(node): State<Node>, mut req: axum::extract::Req
             Ok(me) => {
                 // The keys its caller hands this device for the token's calls, sealed to it.
                 if let Some(handed) = req.headers().get(KEYS_HEADER).and_then(|h| h.to_str().ok())
-                    && let Err(err) = node.hand(&token, &me.caller.user, handed)
+                    && let Err(err) = node.hand(&token, &me.caller.user, handed, u64::MAX)
                 {
                     return refuse(req, (StatusCode::BAD_REQUEST, Json(json!({ "error": format!("{err:#}") }))).into_response()).await;
                 }
@@ -381,8 +382,8 @@ async fn only_this_machine(State(node): State<Node>, mut req: axum::extract::Req
 }
 
 /// A client device's request over iroh is its person's, as a sign-in's is, for what `SIGNED_IN` lists and MCP: the
-/// device must still be one of the install's, and the keys it hands are for its key.
-async fn from_client(node: &Node, key: crate::entry::Key, path: &str, mut req: axum::extract::Request, next: axum::middleware::Next) -> Response {
+/// device must still be one of the install's, and the keys it hands are for its key, kept no longer than `until`.
+async fn from_client(node: &Node, key: crate::entry::Key, until: u64, path: &str, mut req: axum::extract::Request, next: axum::middleware::Next) -> Response {
     if !(SIGNED_IN.contains(&path) || path == "/mcp") || path == "/v1/kernel/run" {
         return refuse(req, (StatusCode::FORBIDDEN, Json(json!({ "error": "only this machine's own programs may use this" }))).into_response()).await;
     }
@@ -391,7 +392,7 @@ async fn from_client(node: &Node, key: crate::entry::Key, path: &str, mut req: a
     };
     let token = crate::node::client_token(&key);
     if let Some(handed) = req.headers().get(KEYS_HEADER).and_then(|h| h.to_str().ok())
-        && let Err(err) = node.hand(&token, &user, handed)
+        && let Err(err) = node.hand(&token, &user, handed, until)
     {
         return refuse(req, (StatusCode::BAD_REQUEST, Json(json!({ "error": format!("{err:#}") }))).into_response()).await;
     }

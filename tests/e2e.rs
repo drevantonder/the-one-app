@@ -309,14 +309,16 @@ async fn apps_use_only_the_items_they_are_switched_on_for() {
         let epoch: [u8; 32] = one::kernel::open_sealed(&one::keys::seal_secret(&device), &bucket.get(&one::keys::epoch_name(&n.scope, n.epoch, &to)).unwrap().unwrap()).unwrap().try_into().unwrap();
         // An app's key in an epoch is made by the first device to need it, as a client does.
         let name = one::keys::app_key_name(&n.scope, &n.app, n.epoch);
-        bucket.create(&name, &one::kernel::seal_app_key(&epoch, &n.app, &rand::random())).unwrap();
+        if bucket.get(&name).unwrap().is_none() {
+            bucket.create(&name, &one::kernel::seal_app_key(&epoch, &n.app, &rand::random())).unwrap();
+        }
         let app = one::kernel::open_app_key(&epoch, &n.app, &bucket.get(&name).unwrap().unwrap()).unwrap();
         one::keys::Handed { key: one::kernel::database_key(&app, &n.database), scope: n.scope.clone(), epoch: n.epoch, app: n.app.clone(), database: n.database.clone() }
     };
     let hand = |keys: Vec<one::keys::Handed>| {
         let until = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u64 + 600_000;
         let handoff = one::keys::Handoff { for_: one::keys::token_id("a sign-in"), until, keys };
-        a.hand("a sign-in", &me.user, &one::keys::seal_handoff(&a.endpoint().seal, &handoff).unwrap()).unwrap();
+        a.hand("a sign-in", &me.user, &one::keys::seal_handoff(&a.endpoint().seal, &handoff).unwrap(), u64::MAX).unwrap();
     };
     hand(need.iter().filter(|n| !vault(n)).map(key_of).collect());
     let still = needs(a.call_as(send("two", "{{token}}"), who.clone()).await.unwrap_err());
@@ -325,6 +327,16 @@ async fn apps_use_only_the_items_they_are_switched_on_for() {
     assert_eq!(a.call_as(send("two", "{{token}}"), who.clone()).await.unwrap()["authorization"], "k");
     hand(needs(a.call_as(send("one", "{{token}}"), who.clone()).await.unwrap_err()).iter().map(key_of).collect());
     assert_eq!(a.call_as(send("one", "{{token}}"), who.clone()).await.unwrap()["authorization"], "{{token}}", "still only for the app switched on");
+
+    // Kept no longer than its caller's own word lasts (a session's certificate's until), whatever the handoff says.
+    let brief = one::node::Caller { token: Some("a brief sign-in".into()), ..me.clone() };
+    let keys = needs(a.call_as(send("two", "{{token}}"), brief.clone()).await.unwrap_err()).iter().map(key_of).collect();
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u64;
+    let handoff = one::keys::Handoff { for_: one::keys::token_id("a brief sign-in"), until: now + 600_000, keys };
+    a.hand("a brief sign-in", &me.user, &one::keys::seal_handoff(&a.endpoint().seal, &handoff).unwrap(), now + 1_500).unwrap();
+    assert_eq!(a.call_as(send("two", "{{token}}"), brief.clone()).await.unwrap()["authorization"], "k");
+    tokio::time::sleep(std::time::Duration::from_millis(1_600)).await;
+    assert!(!needs(a.call_as(send("two", "{{token}}"), brief).await.unwrap_err()).is_empty(), "keys were kept past their caller's until");
 
     // The item is sealed wherever it's kept: no file of the device or its bucket has it in the clear.
     a.set_item(&me, &mine, json!({ "id": made, "fields": { "token": { "value": "s3cret-in-the-vault", "secret": true } } })).await.unwrap();

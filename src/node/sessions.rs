@@ -140,8 +140,9 @@ impl Node {
 
     /// Keeps the keys a caller handed this device with a call (`x-one-keys`) for `token`'s calls, as `user`'s: only
     /// if they were sealed to it, for that token (`for`: its sha256, or a client device's or the serverless node's
-    /// key), and not yet expired.
-    pub fn hand(&self, token: &str, user: &str, sealed: &str) -> Result<()> {
+    /// key), and not yet expired; and no longer than `most`, until when its caller's own word lasts (a session's
+    /// certificate's).
+    pub fn hand(&self, token: &str, user: &str, sealed: &str, most: u64) -> Result<()> {
         let handoff = crate::keys::open_handoff(&self.seal_secret(), sealed)?;
         ensure!(handoff.for_ == handoff_for(token), "the keys handed are for another sign-in");
         let now = now_ms();
@@ -151,7 +152,8 @@ impl Node {
         let until = match token.starts_with(CLIENT) || token.starts_with(PASSED) {
             true => handoff.until.min(now + CLIENT_KEYS),
             false => handoff.until.min(self.token_expiry(token).unwrap_or(u64::MAX)),
-        };
+        }
+        .min(most);
         ensure!(until > now, "the keys handed have expired");
         // Only epochs an entry made are kept: a key for one beyond is junk, or for one this device hasn't read yet,
         // which a call that needs it asks for again.
@@ -209,7 +211,7 @@ impl Node {
         let named: Vec<String> = scopes.iter().map(Scope::to_string).collect();
         ensure!(handoff.keys.iter().all(|k| named.contains(&k.scope)), "the keys handed are of a scope the call doesn't name");
         let token = passed_token(from, user);
-        self.hand(&token, user, sealed)?;
+        self.hand(&token, user, sealed, u64::MAX)?;
         Ok(token)
     }
 

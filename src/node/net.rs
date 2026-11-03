@@ -273,13 +273,13 @@ impl Node {
                 }
                 let certificate = req.headers_mut().remove(crate::api::ENDPOINT_HEADER);
                 let who = if listed {
-                    Ok(remote)
+                    Ok((remote, u64::MAX))
                 } else {
                     node.vouched(&remote, certificate.as_ref().and_then(|c| c.to_str().ok()), &vouched)
                 };
                 match who {
-                    Ok(key) => {
-                        req.extensions_mut().insert(crate::api::FromClient(key));
+                    Ok((key, until)) => {
+                        req.extensions_mut().insert(crate::api::FromClient(key, until));
                         // What it sends is read in a while and up to a size, but a blob's, which streams.
                         if !req.uri().path().starts_with("/v1/blobs/") {
                             let (parts, body) = req.into_parts();
@@ -358,8 +358,9 @@ impl Node {
     }
 
     /// The device a session's endpoint `remote` asks as: the one its certificate names, if it's for `remote`, unexpired,
-    /// and by a client device the install still lists. `kept` is the last checked, so a connection checks one signature.
-    fn vouched(&self, remote: &Key, certificate: Option<&str>, kept: &Mutex<Option<(String, crate::keys::Session)>>) -> Result<Key> {
+    /// and by a client device the install still lists, with its `until`. `kept` is the last checked, so a connection
+    /// checks one signature.
+    fn vouched(&self, remote: &Key, certificate: Option<&str>, kept: &Mutex<Option<(String, crate::keys::Session)>>) -> Result<(Key, u64)> {
         let certificate = certificate.context("that key isn't one of your One App's devices, and no device vouched for it")?;
         let now = now_ms();
         let mut kept = kept.lock().unwrap();
@@ -374,7 +375,7 @@ impl Node {
         };
         ensure!(session.until > now, "that session has ended");
         ensure!(self.client(&session.by).is_some(), "the device that vouched for this endpoint isn't one of your One App's");
-        Ok(session.by)
+        Ok((session.by, session.until))
     }
 
     /// A computer that isn't the install's: → its one ask to join answered, then the connection closed.

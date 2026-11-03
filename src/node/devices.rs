@@ -322,7 +322,7 @@ impl Node {
             Ok(Entry::create(recovery, ext, head, members::device(&endpoint, &r.user, &r.name, &[members::Kind::Client], None)))
         })?;
         self.put_checked(vec![entry]).await?;
-        let relay = self.tell_relay_as(recovery.clone(), json!({ "add": r.key })).await.err().map(|err| format!("{err:#}"));
+        let relay = self.tell_relay_as(recovery.clone(), json!({ "add": r.key, "role": "client" })).await.err().map(|err| format!("{err:#}"));
         let scopes: Vec<Scope> = self.with(|i| Ok(i.r.members.scopes().into_iter().filter(|s| i.r.members.may_use(&r.user, s)).collect()))?;
         let (mut sealed, mut not) = (Vec::new(), Vec::new());
         for scope in scopes {

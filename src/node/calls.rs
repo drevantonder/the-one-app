@@ -815,7 +815,7 @@ impl Node {
         if let Some(token) = request["me"]["token"].as_str() {
             me.token = Some(self.token_of(token, &me.user).await.context("the sign-in it came with isn't its caller's, or has expired")?);
             if let Some(keys) = request["keys"].as_str() {
-                self.hand(token, &me.user, keys)?;
+                self.hand(token, &me.user, keys, u64::MAX)?;
             }
         } else if let Some(keys) = request["keys"].as_str() {
             // Passed on with no sign-in: run on the keys it was handed alone, never this device's own.

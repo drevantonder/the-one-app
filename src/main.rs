@@ -1374,7 +1374,7 @@ fn mcp(mode: Mode) -> Result<()> {
 async fn mcp_http(client: Option<axum::Extension<api::FromClient>>, headers: axum::http::HeaderMap, body: String) -> axum::response::Response {
     use axum::response::IntoResponse;
     let token = match client {
-        Some(axum::Extension(api::FromClient(key))) => Some(one::node::client_token(&key)),
+        Some(axum::Extension(api::FromClient(key, _))) => Some(one::node::client_token(&key)),
         None => headers.get("authorization").and_then(|a| a.to_str().ok()).and_then(|a| a.strip_prefix("Bearer ")).map(|t| t.trim().to_string()),
     };
     let mut agent = headers.get("mcp-session-id").and_then(|s| s.to_str().ok()).and_then(|s| s.split_once('.')).and_then(|(_, name)| data_encoding::BASE64URL_NOPAD.decode(name.as_bytes()).ok()).and_then(|n| String::from_utf8(n).ok());
