@@ -12,6 +12,10 @@ publish = false
 [lib]
 doctest = false
 
+[features]
+# A client with no socket, in a Worker's Durable Object (src/relayed.rs): the MCP Worker's devices.
+relayed = ["iroh/unstable-custom-transports", "dep:iroh-base", "dep:n0-watcher", "dep:noq-udp"]
+
 [dependencies]
 # A client reaches nodes over iroh, as they reach each other (src/node/net.rs): only ring's TLS, no n0 discovery or
 # metrics. Pinned with the node's, since the relay runs iroh-relay's own code of this version.
@@ -22,6 +26,10 @@ n0-future = "0.3"
 httparse = "1"
 data-encoding = "2"
 tokio = { version = "1", default-features = false, features = ["sync"] }
+# A transport of its own, as the serverless node's (src/relayed.rs): iroh's custom transports, at the node's iroh.
+iroh-base = { version = "=1.4.1", default-features = false, features = ["key", "relay"], optional = true }
+n0-watcher = { version = "1", optional = true }
+noq-udp = { version = "1.4", optional = true }
 
 # In browsers: how the page's JavaScript calls it (src/wasm.rs).
 [target.'cfg(target_family = "wasm")'.dependencies]

@@ -13,6 +13,8 @@ use iroh::endpoint::{Connection, RecvStream, presets};
 use iroh::{Endpoint, EndpointAddr, PublicKey, RelayConfig, RelayMap, RelayMode, RelayUrl, SecretKey, Watcher as _};
 use n0_future::time::{Duration, timeout};
 
+#[cfg(feature = "relayed")]
+pub mod relayed;
 #[cfg(target_family = "wasm")]
 mod wasm;
 
@@ -76,7 +78,7 @@ pub struct Client(Arc<Inner>);
 
 struct Inner {
     secret: SecretKey,
-    relay: (RelayUrl, RelayMap),
+    way: Way,
     /// The nodes to ask, in the order things run on them: the first that answers is asked.
     nodes: Mutex<Vec<PublicKey>>,
     /// The endpoint, made again after the network was lost.
@@ -93,13 +95,21 @@ impl Client {
         // A Worker has no UDP, so the relay serves no QUIC address discovery.
         let mut config = RelayConfig::from(url.clone());
         config.quic = None;
-        let client = Client(Arc::new(Inner {
-            secret: SecretKey::from_bytes(&secret),
-            relay: (url, config.into()),
-            nodes: Mutex::default(),
-            endpoint: tokio::sync::Mutex::default(),
-            conns: Mutex::default(),
-        }));
+        Client::with(secret, Way::Relay(url, config.into()), nodes).await
+    }
+
+    /// The client of the device whose key is `secret` in a Worker, with no socket: what it sends goes to `send`, and
+    /// what the relay hands it for its key to the inbox this gives (`relayed`). It asks `nodes` as `start`'s does.
+    #[cfg(feature = "relayed")]
+    pub async fn relayed(secret: [u8; 32], send: relayed::Send, nodes: &[[u8; 32]]) -> Result<(Client, relayed::Inbox), Error> {
+        let inbox = relayed::Inbox::default();
+        let public = *SecretKey::from_bytes(&secret).public().as_bytes();
+        let way = Way::Custom(Arc::new(relayed::Relayed::new(&public, inbox.clone(), send)));
+        Ok((Client::with(secret, way, nodes).await?, inbox))
+    }
+
+    async fn with(secret: [u8; 32], way: Way, nodes: &[[u8; 32]]) -> Result<Client, Error> {
+        let client = Client(Arc::new(Inner { secret: SecretKey::from_bytes(&secret), way, nodes: Mutex::default(), endpoint: tokio::sync::Mutex::default(), conns: Mutex::default() }));
         client.endpoint().await?;
         client.set_nodes(nodes)?;
         Ok(client)
@@ -178,6 +188,9 @@ impl Client {
 
     /// Whether this device's endpoint is connected to the relay.
     async fn on_relay(&self) -> bool {
+        if !matches!(self.0.way, Way::Relay(..)) {
+            return true;
+        }
         self.0.endpoint.lock().await.as_ref().is_some_and(|e| e.home_relay_status().get().iter().any(|r| r.is_connected()))
     }
 
@@ -186,12 +199,13 @@ impl Client {
         if let Some(endpoint) = held.as_ref().filter(|e| !e.is_closed()) {
             return Ok(endpoint.clone());
         }
-        let endpoint = Endpoint::builder(presets::Minimal)
-            .secret_key(self.0.secret.clone())
-            .relay_mode(RelayMode::Custom(self.0.relay.1.clone()))
-            .bind()
-            .await
-            .map_err(unsent)?;
+        let builder = Endpoint::builder(presets::Minimal).secret_key(self.0.secret.clone());
+        let builder = match &self.0.way {
+            Way::Relay(_, map) => builder.relay_mode(RelayMode::Custom(map.clone())),
+            #[cfg(feature = "relayed")]
+            Way::Custom(transport) => builder.relay_mode(RelayMode::Disabled).add_custom_transport(transport.clone()),
+        };
+        let endpoint = builder.bind().await.map_err(unsent)?;
         *held = Some(endpoint.clone());
         Ok(endpoint)
     }
@@ -204,7 +218,11 @@ impl Client {
             return Ok((conn.clone(), true));
         }
         let endpoint = self.endpoint().await?;
-        let addr = EndpointAddr::new(*node).with_relay_url(self.0.relay.0.clone());
+        let addr = match &self.0.way {
+            Way::Relay(url, _) => EndpointAddr::new(*node).with_relay_url(url.clone()),
+            #[cfg(feature = "relayed")]
+            Way::Custom(_) => EndpointAddr::from_parts(*node, [iroh::TransportAddr::Custom(relayed::through_relay(node.as_bytes()))]),
+        };
         let conn = match timeout(CONNECT, endpoint.connect(addr, &alpn())).await {
             Ok(Ok(conn)) => conn,
             Ok(Err(err)) => return Err(unsent(format!("the node couldn't be reached: {err}"))),
@@ -228,6 +246,14 @@ impl Client {
         let (status, headers, body) = read_response(&mut recv, req.method == "HEAD").await.map_err(|e| (e, reused))?;
         Ok(Response { status, headers, body: Body { recv: Some(recv), ..body } })
     }
+}
+
+/// How a client reaches nodes: through the relay at the install's address, or (in a Worker) a transport that passes
+/// its datagrams to that relay by RPC.
+enum Way {
+    Relay(RelayUrl, RelayMap),
+    #[cfg(feature = "relayed")]
+    Custom(Arc<relayed::Relayed>),
 }
 
 /// A request's head, checked: nothing in it can start another header or request.
