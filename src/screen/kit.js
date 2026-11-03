@@ -211,6 +211,14 @@
     '<div class="list info">' + pairs.filter(([, v]) => v != null && v !== "").map(([label, value]) =>
       `<div class="row plain"><span class="label">${esc(label)}</span><span class="value">${esc(value)}</span></div>`).join("") + "</div>";
 
+  // A screen in a frame tells the page holding it how many sheets it has open, so that page dims the rest of its
+  // window too, as a sheet dims a Mac window; a click there comes back as `oneSheetsClose`, closing the top one. A
+  // hint, not one of the bridge's messages: a page that doesn't know it shows the sheet as before.
+  const sheets = [];
+  const framed = window.parent !== window && !window.webkit?.messageHandlers?.one && !window.__oneShell;
+  const tell = () => framed && window.parent.postMessage({ oneSheets: sheets.length }, "*");
+  if (framed) addEventListener("message", (e) => e.source === window.parent && e.data?.oneSheetsClose && sheets.at(-1)?.());
+
   // A sheet that slides up over the screen, with `title` and Done: `html` is what's in it. Returns its body, to draw
   // into again, and `close`; `onClose` runs once it's gone (Done, a tap outside it, Escape).
   one.sheet = ({ title = "", html = "", done = "Done", onClose } = {}) => {
@@ -228,12 +236,16 @@
     const close = () => {
       if (closed) return;
       closed = true;
+      sheets.splice(sheets.indexOf(close), 1);
+      tell();
       document.removeEventListener("keydown", key);
       back.classList.remove("open");
       document.body.style.overflow = was;
       setTimeout(() => back.remove(), 300);
       onClose?.();
     };
+    sheets.push(close);
+    tell();
     const key = (e) => e.key === "Escape" && close();
     document.addEventListener("keydown", key);
     back.addEventListener("click", (e) => e.target === back && close());

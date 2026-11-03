@@ -445,6 +445,33 @@ window.__one = {};
     },
   };
 
+  /// A sheet a screen opens in its frame dims the rest of the window too, as a sheet dims a Mac window: the same shade
+  /// as the sheet's own, around the frame. A click on it, or Escape, closes the sheet, as one on its backdrop does.
+  let shaded = null;
+  function shade(f, on) {
+    const el = $(".shade") || Object.assign(document.createElement("div"), { className: "shade" });
+    if (!on) {
+      if (shaded === f) (shaded = null), el.classList.remove("open");
+      return;
+    }
+    // Over the sheets already open (the frame's own, if it's in one), under any opened after it (an alert).
+    if (shaded !== f) document.body.append(el);
+    shaded = f;
+    place();
+    void el.offsetHeight;
+    el.classList.add("open");
+  }
+  function place() {
+    const el = $(".shade");
+    if (!shaded || !el) return;
+    if (!shaded.frame.isConnected) return shade(shaded, false);
+    const { left: l, top: t, right: r, bottom: b } = shaded.frame.getBoundingClientRect();
+    el.style.clipPath = `polygon(evenodd, 0 0, 100% 0, 100% 100%, 0 100%, 0 0, ${l}px ${t}px, ${r}px ${t}px, ${r}px ${b}px, ${l}px ${b}px, ${l}px ${t}px)`;
+  }
+  addEventListener("resize", place);
+  addEventListener("click", (e) => e.target.classList?.contains("shade") && shaded?.frame.contentWindow?.postMessage({ oneSheetsClose: true }, "*"));
+  addEventListener("keydown", (e) => e.key === "Escape" && shaded && $(".shade.open") && !$(".shade.open ~ .sheet-backdrop.open") && shaded.frame.contentWindow?.postMessage({ oneSheetsClose: true }, "*"));
+
   /// A screen over the window, in a sheet: → what it gave `one.close` once it's gone, else null.
   function openSheet(r) {
     return new Promise((done) => {
@@ -478,6 +505,7 @@ window.__one = {};
     if (!f) return;
     const r = f.route, mine = r.kind === "own";
     if (e.data?.oneFrame) return void f.frame.contentWindow.postMessage({ oneScreen: f.html }, "*");
+    if (typeof e.data?.oneSheets === "number") return void shade(f, e.data.oneSheets > 0);
     const { one: m, id } = e.data || {};
     if (!m || typeof m !== "object") return;
     const reply = (ok) => f.frame.contentWindow?.postMessage({ oneReply: id, ok: ok ?? null }, "*");
