@@ -920,7 +920,7 @@ fn a_sign_in_uses_settings_as_its_person_and_only_with_their_rights() {
 
     // Someone removed signs nothing here.
     assert_eq!(ask(&andres, "POST", "/v1/remove", json!({ "user": sam })).0, 200);
-    assert!(refused(ask(&sams, "GET", "/v1/entries?scope=global", Value::Null)), "a removed person's phone signs nothing here");
+    assert_eq!(ask(&sams, "GET", "/v1/entries?scope=global", Value::Null).0, 403, "a removed person is signed in no more, though their token hasn't expired");
     let _ = std::fs::remove_dir_all(&dir);
 }
 

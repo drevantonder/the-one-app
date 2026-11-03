@@ -565,7 +565,12 @@ async fn epochs_are_sealed_only_to_the_scopes_endpoints() {
     let stranger = one::keys::Endpoint::of(&ed25519_dalek::SigningKey::from_bytes(&rand::random()));
     let sealed = data_encoding::BASE64URL_NOPAD.encode(&one::kernel::seal_to(&stranger.seal, &[1; 32]).unwrap());
     let refused = a.seal_key(&me, &global, 1, Some(&one::entry::hex(&stranger.key)), None, &sealed).await.unwrap_err();
-    assert!(format!("{refused:#}").contains("isn't one of the install's"), "{refused:#}");
+    assert!(format!("{refused:#}").contains("only to client devices"), "{refused:#}");
+    // Nor to a node, which is handed a call's keys and holds none.
+    let node = one::keys::Endpoint::of(&ed25519_dalek::SigningKey::from_bytes(&rand::random()));
+    a.append(&global, one::members::device(&node, &me.user, "linux", &[one::members::Kind::Compute], None)).await.unwrap();
+    let refused = a.seal_key(&me, &global, 1, Some(&one::entry::hex(&node.key)), None, &sealed).await.unwrap_err();
+    assert!(format!("{refused:#}").contains("only to client devices"), "{refused:#}");
     let again = a.seal_key(&me, &global, 1, Some(&one::entry::hex(&a.id())), None, &sealed).await.unwrap_err();
     assert!(format!("{again:#}").contains("already"), "what's sealed is never replaced: {again:#}");
 }

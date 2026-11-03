@@ -82,9 +82,10 @@ impl Node {
                         "recovery" => ensure!(starts_epochs(m, &caller.user, scope), "only {scope}'s admins seal its keys to the recovery key"),
                         to => {
                             let key = crate::keys::unhex(to)?;
-                            let listed = m.machine(&key).context("that endpoint isn't one of the install's")?;
+                            // A scope's epochs are its people's client devices' alone: a node is handed a call's keys,
+                            // and a service holds none, reading nothing and asking its person's node to write.
+                            let listed = m.client(&key).context("a scope's keys are sealed only to client devices and the recovery key")?;
                             ensure!(m.may_use(&listed.user, scope), "that endpoint's person doesn't use {scope}");
-                            // A service holds no keys: it reads nothing, and asks its person's node to write.
                             ensure!(m.service(&key).is_none(), "a service is sealed no keys");
                         }
                     }

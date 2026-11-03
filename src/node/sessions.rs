@@ -172,32 +172,6 @@ impl Node {
         Ok(())
     }
 
-    /// The keys `need` names (each a database's in one epoch, as a 428 says them), handed to another node, sealed to
-    /// `seal`, for this device's own person's calls there with `token`, until it expires. `seal` must be that of
-    /// a node that runs each scope named (the serverless node's own scope only as its person chose): no one else is
-    /// handed a key.
-    pub async fn hand_keys(&self, me: &Caller, seal: &[u8; 32], token: &str, need: &[Need]) -> Result<String> {
-        ensure!(me.user == self.user()?, "{} hands only its own person's keys", self.device_name());
-        let issuer = self.issuer()?;
-        let asked = token.to_string();
-        let claims = tokio::task::spawn_blocking(move || issuer.verify(&asked, now_ms())).await??;
-        ensure!(claims.sub == me.user, "that sign-in is someone else's");
-        let serverless = self.with(|i| Ok(i.r.members.serverless()))?.filter(|k| crate::kernel::twin_public(k).ok().as_ref() == Some(seal));
-        let to = self.with(|i| Ok(i.r.members.computes().find(|m| m.seal == *seal).map(|m| m.key)))?.or(serverless);
-        let to = to.context("that isn't a node of your One App's to hand keys to")?;
-        let mut keys = Vec::new();
-        for n in need {
-            let scope = Scope::parse(&n.scope)?;
-            ensure!(self.with(|i| Ok(i.r.members.may_use(&me.user, &scope)))?, "you may not use {scope}");
-            // The serverless node too, which runs a person's own scope only once their own device chose it.
-            ensure!(self.with(|i| Ok(i.r.members.runs_for(&to, &scope)))?, "that node doesn't run {scope}");
-            if let Some(key) = self.database_keys(&scope, &n.app, &n.database, false).await?.get(&n.epoch) {
-                keys.push(crate::keys::Handed { scope: n.scope.clone(), epoch: n.epoch, app: n.app.clone(), database: n.database.clone(), key: *key });
-            }
-        }
-        crate::keys::seal_handoff(seal, &crate::keys::Handoff { for_: crate::keys::token_id(token), until: claims.exp * 1000, keys })
-    }
-
     /// When an access token expires, if the install's auth service signed it: milliseconds.
     fn token_expiry(&self, token: &str) -> Option<u64> {
         let claims = self.issuer().ok()?.verify(token, now_ms()).ok()?;

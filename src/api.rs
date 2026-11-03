@@ -171,7 +171,6 @@ pub fn routes() -> Router<Node> {
         .route("/skills/{name}/{*path}", get(skill_file))
         .route("/v1/state", get(state))
         .route("/v1/endpoint", get(endpoint))
-        .route("/v1/hand", post(hand))
         .route("/v1/keys", get(keys_get).post(keys_post))
         .route("/v1/apps", get(apps))
         .route("/v1/call", post(call).layer(axum::extract::DefaultBodyLimit::max(64 << 20)))
@@ -562,8 +561,14 @@ async fn signed_in(node: &Node, token: String) -> anyhow::Result<Me> {
     use sha2::Digest;
     let now = crate::node::now_ms();
     let hash: [u8; 32] = sha2::Sha256::digest(token.as_bytes()).into();
-    if let Some((me, _)) = SIGNED_INS.lock().unwrap().get(&hash).filter(|(_, until)| now < *until) {
-        return Ok(me.clone());
+    let kept = SIGNED_INS.lock().unwrap().get(&hash).filter(|(_, until)| now < *until).map(|(me, _)| me.clone());
+    if let Some(me) = kept {
+        // Someone removed since is signed in no more, whatever their token says.
+        if node.is_user(&me.caller.user) {
+            return Ok(me);
+        }
+        SIGNED_INS.lock().unwrap().remove(&hash);
+        anyhow::bail!(NotJoined);
     }
     let address = node.kernel()?;
     let issuer = node.issuer()?;
@@ -603,18 +608,6 @@ fn text<'a>(body: &'a Value, key: &str) -> Result<&'a str, Error> {
 /// This device as an endpoint, `{ key, seal }` (hex): what a caller seals the keys it hands a call to (`x-one-keys`).
 async fn endpoint(State(node): State<Node>) -> Json<Value> {
     Json(json!(node.endpoint()))
-}
-
-/// `{ seal, token, need }`: what this machine's own programs hand another node for their person's calls there with
-/// `token` (`x-one-keys`): the keys a 428's `need` names, each in its epoch, sealed to its `seal` key, the serverless
-/// node's or a node's that runs those scopes. → `{ keys }`.
-async fn hand(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
-    only(&body, &["seal", "token", "need"])?;
-    let seal = crate::keys::unhex(text(&body, "seal")?)?;
-    let mut need: Vec<crate::keys::Need> = serde_json::from_value(body["need"].clone())?;
-    need.sort();
-    need.dedup();
-    Ok(Json(json!({ "keys": node.hand_keys(&me.caller, &seal, text(&body, "token")?, &need).await? })))
 }
 
 /// `?scope=&to=<endpoint key>` or `?scope=&app=`: a scope's keys, sealed (`Node::sealed_keys`).
