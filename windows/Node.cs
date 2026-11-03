@@ -157,9 +157,9 @@ public static class Node
     /// the page's).
     public static async Task<(string Id, string Scope)?> RequestItem(string scope, string app, string need)
     {
-        var out = await Post("/v1/vault/request", new JsonObject { ["scope"] = scope, ["app"] = app, ["need"] = need });
-        var id = out?["id"]?.GetValue<string>();
-        return id == null ? null : (id, out?["scope"]?.GetValue<string>() ?? scope);
+        var asked = await Post("/v1/vault/request", new JsonObject { ["scope"] = scope, ["app"] = app, ["need"] = need });
+        var id = asked?["id"]?.GetValue<string>();
+        return id == null ? null : (id, asked?["scope"]?.GetValue<string>() ?? scope);
     }
 
     /// The node's events, as they come, until `cancel`: what changed, so the window and the open screen keep up.
