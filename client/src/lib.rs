@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex};
 
 use iroh::endpoint::{Connection, RecvStream, presets};
 use iroh::{Endpoint, EndpointAddr, PublicKey, RelayConfig, RelayMap, RelayMode, RelayUrl, SecretKey, Watcher as _};
-use n0_future::time::{Duration, timeout};
+use n0_future::time::{Duration, Instant, timeout};
 
 pub mod members;
 #[cfg(feature = "relayed")]
@@ -34,8 +34,17 @@ mod config {
     include!(concat!(env!("OUT_DIR"), "/config.rs"));
 }
 
-/// How long reaching a node may take.
-const CONNECT: Duration = Duration::from_secs(10);
+/// How long a request waits to reach a node before it asks the next (the last it waits for as long as `PATIENT`): a
+/// node that doesn't answer is given up on quickly.
+const CONNECT: Duration = Duration::from_secs(2);
+/// How long a node that isn't being asked for a request (one given up on, tried again in the background, or the first
+/// connected to) has to be reached.
+const PATIENT: Duration = Duration::from_secs(10);
+/// How long a connected node has to start answering a GET or HEAD, before its connection is taken as gone quiet. (Other
+/// requests may run as long as they need: that one is for the connection's own idle timeout.)
+const ANSWER: Duration = Duration::from_secs(5);
+/// How long a node that didn't answer is skipped, before the next request tries it again in the background.
+const SKIP: Duration = Duration::from_secs(10);
 /// The most a response's head may be.
 const HEAD_LIMIT: usize = 64 << 10;
 /// How much of a body is read at once.
@@ -104,6 +113,14 @@ struct Inner {
     endpoint: tokio::sync::Mutex<Option<Endpoint>>,
     /// A connection to each node asked, held while it's being opened.
     conns: Mutex<HashMap<PublicKey, Arc<tokio::sync::Mutex<Option<Connection>>>>>,
+    /// The nodes that didn't answer, and when: asked after the others, until one is reached again.
+    down: Mutex<HashMap<PublicKey, Down>>,
+}
+
+struct Down {
+    since: Instant,
+    /// Whether a connection to it is being tried in the background.
+    probing: bool,
 }
 
 impl Client {
@@ -136,6 +153,7 @@ impl Client {
             nodes: Mutex::default(),
             endpoint: tokio::sync::Mutex::default(),
             conns: Mutex::default(),
+            down: Mutex::default(),
         }));
         client.endpoint().await?;
         client.set_nodes(nodes)?;
@@ -157,15 +175,52 @@ impl Client {
     /// The nodes to ask, in the order things run on them, as the install's state says; the first is connected to now.
     pub fn set_nodes(&self, nodes: &[[u8; 32]]) -> Result<(), Error> {
         let nodes = nodes.iter().map(PublicKey::from_bytes).collect::<Result<Vec<_>, _>>().map_err(|_| unsent("a node's key isn't a key"))?;
-        let first = nodes.first().copied();
-        *self.0.nodes.lock().unwrap() = nodes;
-        if let Some(first) = first {
+        *self.0.nodes.lock().unwrap() = nodes.clone();
+        if let Some(first) = self.in_order(&nodes).first().copied().filter(|n| !self.is_down(n)) {
             let client = self.clone();
             n0_future::task::spawn(async move {
-                let _ = client.conn(&first, false).await;
+                let _ = client.conn(&first, false, PATIENT).await;
             });
         }
         Ok(())
+    }
+
+    /// `nodes` with those that didn't answer last; and any of them that's been skipped a while tried in the background.
+    fn in_order(&self, nodes: &[PublicKey]) -> Vec<PublicKey> {
+        let mut retry = Vec::new();
+        let mut down = self.0.down.lock().unwrap();
+        for (node, d) in down.iter_mut() {
+            if !d.probing && d.since.elapsed() >= SKIP && nodes.contains(node) {
+                d.probing = true;
+                retry.push(*node);
+            }
+        }
+        let (mut up, later): (Vec<_>, Vec<_>) = nodes.iter().partition(|n| !down.contains_key(*n));
+        drop(down);
+        for node in retry {
+            let client = self.clone();
+            n0_future::task::spawn(async move {
+                let _ = client.conn(&node, true, PATIENT).await;
+                if let Some(d) = client.0.down.lock().unwrap().get_mut(&node) {
+                    d.probing = false;
+                }
+            });
+        }
+        up.extend(later);
+        up.into_iter().copied().collect()
+    }
+
+    fn is_down(&self, node: &PublicKey) -> bool {
+        self.0.down.lock().unwrap().contains_key(node)
+    }
+
+    /// `node` didn't answer: the others are asked first, for a while.
+    fn give_up(&self, node: &PublicKey) {
+        // Its connection is no good to the next try.
+        self.0.conns.lock().unwrap().remove(node);
+        let mut down = self.0.down.lock().unwrap();
+        let d = down.entry(*node).or_insert(Down { since: Instant::now(), probing: false });
+        d.since = Instant::now();
     }
 
     /// Starts again with a fresh endpoint: after the network comes back, which an endpoint that lost it waits out its
@@ -173,6 +228,7 @@ impl Client {
     pub async fn reconnect(&self) {
         let old = self.0.endpoint.lock().await.take();
         self.0.conns.lock().unwrap().clear();
+        self.0.down.lock().unwrap().clear();
         if let Some(old) = old {
             // The relay keeps the newest connection of a key, so the new one needn't wait for the old to close.
             n0_future::task::spawn(async move { old.close().await });
@@ -191,7 +247,8 @@ impl Client {
         }
     }
 
-    /// Asks the first node that answers. A request that never reached one is tried on the next; one whose connection
+    /// Asks the first node that answers, giving up on one within seconds (`CONNECT`, `ANSWER`) and asking the others
+    /// first for a while (`SKIP`) after one that didn't. A request that never reached one is tried on the next; one whose connection
     /// was lost, again once (after a fresh endpoint, if this device lost the relay), unless it may have reached the
     /// node and isn't a GET or HEAD.
     pub async fn fetch(&self, req: Request) -> Result<Response, Error> {
@@ -203,14 +260,17 @@ impl Client {
         let certificate = self.0.certificate.lock().unwrap().clone();
         let again = matches!(req.method.as_str(), "GET" | "HEAD");
         let nodes = self.0.nodes.lock().unwrap().clone();
+        let nodes = self.in_order(&nodes);
         let mut why = unsent("there's no node to ask");
-        for key in &nodes {
+        for (at, key) in nodes.iter().enumerate() {
+            // The last has no other to give way to: it's given the time to be reached, and to answer.
+            let last = at + 1 == nodes.len();
             let mut headers = req.headers.clone();
             headers.extend(node(key.as_bytes()));
             let head = head(&req.method, &req.path, &headers, req.body.len(), certificate.as_deref())?;
             let node = key;
             for fresh in [false, true] {
-                let (err, reused) = match self.exchange(node, &head, &req, fresh).await {
+                let (err, reused) = match self.exchange(node, &head, &req, fresh, last).await {
                     Ok(response) => return Ok(response),
                     Err(e) => e,
                 };
@@ -220,8 +280,8 @@ impl Client {
                 why = err;
                 if !self.on_relay().await {
                     self.reconnect().await;
-                } else if !reused {
-                    // A node this device couldn't reach while on the relay: the next.
+                } else if !reused || self.is_down(node) {
+                    // A node this device couldn't reach while on the relay, or that went quiet: the next.
                     break;
                 }
             }
@@ -259,32 +319,54 @@ impl Client {
         Ok(endpoint)
     }
 
-    /// A connection to `node`: the one open (and true), or a new one (`fresh`, or if that one closed).
-    async fn conn(&self, node: &PublicKey, fresh: bool) -> Result<(Connection, bool), Error> {
-        let slot = self.0.conns.lock().unwrap().entry(*node).or_default().clone();
-        let mut held = slot.lock().await;
-        if let Some(conn) = held.as_ref().filter(|c| !fresh && c.close_reason().is_none()) {
-            return Ok((conn.clone(), true));
+    /// A connection to `node`: the one open (and true), or a new one (`fresh`, or if that one closed), within `limit`
+    /// (which includes waiting for another to open it).
+    async fn conn(&self, node: &PublicKey, fresh: bool, limit: Duration) -> Result<(Connection, bool), Error> {
+        let opening = async {
+            let slot = self.0.conns.lock().unwrap().entry(*node).or_default().clone();
+            let mut held = slot.lock().await;
+            if let Some(conn) = held.as_ref().filter(|c| !fresh && c.close_reason().is_none()) {
+                return Ok((conn.clone(), true));
+            }
+            let endpoint = self.endpoint().await?;
+            let addr = match &self.0.way {
+                Way::Relay(url, _) => EndpointAddr::new(*node).with_relay_url(url.clone()),
+                #[cfg(feature = "relayed")]
+                Way::Custom(_) => EndpointAddr::from_parts(*node, [iroh::TransportAddr::Custom(relayed::through_relay(node.as_bytes()))]),
+            };
+            let conn = endpoint.connect(addr, &alpn()).await.map_err(|err| unsent(format!("the node couldn't be reached: {err}")))?;
+            *held = Some(conn.clone());
+            Ok((conn, false))
+        };
+        match timeout(limit, opening).await {
+            Ok(Ok(opened)) => {
+                if !opened.1 {
+                    self.0.down.lock().unwrap().remove(node);
+                }
+                Ok(opened)
+            }
+            Ok(Err(err)) => {
+                self.give_up(node);
+                Err(err)
+            }
+            Err(_) => {
+                self.give_up(node);
+                Err(unsent("the node isn't connected"))
+            }
         }
-        let endpoint = self.endpoint().await?;
-        let addr = match &self.0.way {
-            Way::Relay(url, _) => EndpointAddr::new(*node).with_relay_url(url.clone()),
-            #[cfg(feature = "relayed")]
-            Way::Custom(_) => EndpointAddr::from_parts(*node, [iroh::TransportAddr::Custom(relayed::through_relay(node.as_bytes()))]),
-        };
-        let conn = match timeout(CONNECT, endpoint.connect(addr, &alpn())).await {
-            Ok(Ok(conn)) => conn,
-            Ok(Err(err)) => return Err(unsent(format!("the node couldn't be reached: {err}"))),
-            Err(_) => return Err(unsent("the node isn't connected")),
-        };
-        *held = Some(conn.clone());
-        Ok((conn, false))
     }
 
     /// One request on a stream of its own: → the response, or why not and whether the connection was one already open.
-    async fn exchange(&self, node: &PublicKey, head: &[u8], req: &Request, fresh: bool) -> Result<Response, (Error, bool)> {
-        let (conn, reused) = self.conn(node, fresh).await.map_err(|e| (e, false))?;
-        let (mut send, mut recv) = conn.open_bi().await.map_err(|e| (unsent(e), reused))?;
+    async fn exchange(&self, node: &PublicKey, head: &[u8], req: &Request, fresh: bool, last: bool) -> Result<Response, (Error, bool)> {
+        let (conn, reused) = self.conn(node, fresh, if last { PATIENT } else { CONNECT }).await.map_err(|e| (e, false))?;
+        // A connection gone quiet takes no more streams once its peer's allowance is used: nothing was sent.
+        let (mut send, mut recv) = match timeout(ANSWER, conn.open_bi()).await {
+            Ok(opened) => opened.map_err(|e| (unsent(e), reused))?,
+            Err(_) => {
+                self.give_up(node);
+                return Err((unsent("the node isn't taking requests"), reused));
+            }
+        };
         let sending = async {
             send.write_all(head).await?;
             send.write_all(&req.body).await?;
@@ -292,7 +374,19 @@ impl Client {
             Ok::<_, Box<dyn std::error::Error + Send + Sync>>(())
         };
         sending.await.map_err(|e| (sent(e), reused))?;
-        let (status, headers, body) = read_response(&mut recv, req.method == "HEAD").await.map_err(|e| (e, reused))?;
+        let head_only = req.method == "HEAD";
+        let (status, headers, body) = if !last && matches!(req.method.as_str(), "GET" | "HEAD") {
+            match timeout(ANSWER, read_response(&mut recv, head_only)).await {
+                Ok(read) => read,
+                Err(_) => {
+                    self.give_up(node);
+                    Err(sent("the node didn't answer"))
+                }
+            }
+        } else {
+            read_response(&mut recv, head_only).await
+        }
+        .map_err(|e| (e, reused))?;
         Ok(Response { node: *conn.remote_id().as_bytes(), status, headers, body: Body { recv: Some(recv), ..body } })
     }
 }
