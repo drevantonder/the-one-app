@@ -40,6 +40,16 @@ fn running(dir: &Path) -> Option<String> {
 
 pub fn try_install(rest: &[String]) -> Result<()> {
     let (dir, checkout) = folder();
+    // Help, and nothing started: try's own, or a built-in command's. An app's operation's needs the try install's apps.
+    let help = rest.iter().any(|a| a == "--help" || a == "-h");
+    match rest.first().map(String::as_str) {
+        Some("--help" | "-h" | "help") | Some("stop" | "client" | "sign-in") if help || rest[0] == "help" => {
+            println!("{}", usage());
+            return Ok(());
+        }
+        Some(cmd) if help && crate::commands().iter().any(|c| c == cmd) => return crate::run(rest.to_vec()),
+        _ => {}
+    }
     match rest.first().map(String::as_str) {
         Some("stop") => {
             give_back(&dir);
@@ -85,15 +95,26 @@ pub fn try_install(rest: &[String]) -> Result<()> {
 starts with, and {me} as its admin, who signs in at {address} with no passkey. Its folder is {}, with its
 recovery key; its kernel's settings are in {}.
 
-  {CLI} try <command>        any command, in it: {CLI} try status, {CLI} try apps, {CLI} try board post hello
-  {CLI} try mcp              its MCP server, for an agent: claude mcp add {CLI}-try -- {CLI} try mcp
-  {CLI} try client <kind>    a signed-in client of this checkout's build: web, android or windows
-  {CLI} try client <kind> --as sam    the same, as someone else, invited by you with Add Someone's link
-  {CLI} try stop             stop and delete it, and give back its devices; {CLI} try then starts a new one",
+{}",
         dir.display(),
-        kernel.display()
+        kernel.display(),
+        usage()
     );
     Ok(())
+}
+
+/// What `try` takes.
+fn usage() -> String {
+    format!(
+        "Usage:
+  {CLI} try                  start this checkout's try install, if it isn't running, and say where it is
+  {CLI} try <command>        any command, in it: {CLI} try status, {CLI} try apps, {CLI} try board post hello
+  {CLI} try mcp              its MCP server, for an agent: claude mcp add {CLI}-try -- {CLI} try mcp
+  {CLI} try sign-in          sign its CLI in as its person, with no browser
+  {CLI} try client <kind>    a signed-in client of this checkout's build: web, android or windows
+  {CLI} try client <kind> --as sam    the same, as someone else, invited by you with Add Someone's link
+  {CLI} try stop             stop and delete it, and give back its devices; {CLI} try then starts a new one"
+    )
 }
 
 /// The try install's kernel's settings, with its secrets, read as the kernel's own tools read them.
