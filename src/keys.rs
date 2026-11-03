@@ -226,6 +226,23 @@ pub fn open_handoff(secret: &[u8; 32], sealed: &str) -> Result<Handoff> {
     serde_json::from_slice(&plain).context("the keys handed aren't a handoff")
 }
 
+/// What the serverless node asks a node on a machine to run a sign-in's call there with (`src/node/net.rs`): the call,
+/// the person it's for, and the keys of the scopes it reaches that the serverless node was handed, sealed to that
+/// node's `seal` key for calls from the serverless node's own endpoint (`from`), until `until`. Never the sign-in's
+/// token, which whoever runs the node could use as them; nor keys of a scope the call doesn't reach.
+pub fn forwarded(call: &Value, user: &str, client: &str, from: &[u8; 32], seal: &[u8; 32], until: u64, keys: Vec<Handed>, scopes: &[String]) -> Result<Value> {
+    let mut call = call.as_object().cloned().unwrap_or_default();
+    for k in ["me", "keys", "token"] {
+        call.remove(k);
+    }
+    call.insert("me".into(), json!({ "user": user, "client": client }));
+    let keys: Vec<Handed> = keys.into_iter().filter(|k| scopes.contains(&k.scope)).collect();
+    if !keys.is_empty() {
+        call.insert("keys".into(), seal_handoff(seal, &Handoff { for_: HEXLOWER.encode(from), until, keys })?.into());
+    }
+    Ok(json!({ "kind": "ask", "body": { "call": call } }))
+}
+
 /// A key a call lacked, which its caller hands it when it sends the call again: what a node answers with 428.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Need {
@@ -344,5 +361,18 @@ mod tests {
         let sealed = seal_handoff(&Endpoint::of(&node).seal, &handoff).unwrap();
         assert_eq!(open_handoff(&seal_secret(&node), &sealed).unwrap(), handoff);
         assert!(open_handoff(&seal_secret(&other), &sealed).is_err());
+    }
+
+    #[test]
+    fn a_call_passed_on_carries_no_token_and_only_its_scopes_keys() {
+        let (serverless, machine) = (SigningKey::from_bytes(&rand::random()), SigningKey::from_bytes(&rand::random()));
+        let key = |scope: &str| Handed { scope: scope.into(), epoch: 1, app: "notes".into(), database: "main".into(), key: rand::random() };
+        let call = json!({ "app": "notes", "op": "add", "input": {}, "me": { "token": "secret-token" }, "token": "secret-token" });
+        let asked = forwarded(&call, "u1", "web", &serverless.verifying_key().to_bytes(), &Endpoint::of(&machine).seal, 99, vec![key("user:u1"), key("group:g")], &["user:u1".into()]).unwrap();
+        assert!(!asked.to_string().contains("secret-token"), "{asked}");
+        assert_eq!(asked["body"]["call"]["me"], json!({ "user": "u1", "client": "web" }));
+        let handoff = open_handoff(&seal_secret(&machine), asked["body"]["call"]["keys"].as_str().unwrap()).unwrap();
+        assert_eq!((handoff.for_, handoff.until), (HEXLOWER.encode(&serverless.verifying_key().to_bytes()), 99), "for the serverless node's endpoint alone");
+        assert_eq!(handoff.keys.iter().map(|k| k.scope.as_str()).collect::<Vec<_>>(), ["user:u1"], "not a scope the call doesn't reach");
     }
 }

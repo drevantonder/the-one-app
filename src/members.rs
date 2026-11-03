@@ -433,6 +433,15 @@ impl Members {
         self.user(user).is_some() && self.scopes().iter().any(|s| self.may_use(user, s) && self.runs_for(endpoint, s))
     }
 
+    /// The compute endpoints a call of `user`'s that reaches `scopes` may be passed on to: each runs every one of those
+    /// scopes, all of which `user` may use, so none is handed a call, or its keys, that isn't theirs to run.
+    pub fn runners(&self, user: &str, scopes: &[Scope]) -> Vec<&Machine> {
+        if self.user(user).is_none() || !scopes.iter().all(|s| self.may_use(user, s)) {
+            return Vec::new();
+        }
+        self.computes().filter(|m| self.serves(&m.key, user) && scopes.iter().all(|s| self.runs_for(&m.key, s))).collect()
+    }
+
     /// Every scope there is: `global`, each user's (removed ones too: removing deletes nothing) and each group's.
     pub fn scopes(&self) -> Vec<Scope> {
         let mut out = vec![Scope::Global];
@@ -1380,5 +1389,23 @@ mod tests {
         entries.push(other.write("global", BOB, device(&Dev::new(10).endpoint(), BOB, "x", &[Kind::Client], None), &entries));
         assert!(members(&entries).machine(&Dev::new(10).id()).is_none());
         let _ = &mut mac;
+    }
+
+    #[test]
+    fn a_call_is_passed_on_only_to_nodes_that_run_all_its_scopes() {
+        let (mut mac, mut entries) = setup();
+        let linux = Dev::new(4);
+        add(&mut entries, &mut mac, ANDRE, device(&linux.endpoint(), ANDRE, "linux", &[Kind::Compute], None));
+        add(&mut entries, &mut mac, ANDRE, device(&Dev::new(3).endpoint(), BOB, "bob's phone", &[Kind::Client], Some(("Bob", Role::Member))));
+        let m = members(&entries);
+        let keys = |user: &str, scopes: &[Scope]| m.runners(user, scopes).iter().map(|r| r.key).collect::<BTreeSet<_>>();
+        let both = BTreeSet::from([mac.id(), linux.id()]);
+        let (andre, bob) = (Scope::User(ANDRE.into()), Scope::User(BOB.into()));
+        assert_eq!(keys(ANDRE, &[andre.clone()]), both);
+        assert_eq!(keys(BOB, &[Scope::Global]), both, "global runs on the admin's nodes");
+        assert!(keys(BOB, &[bob.clone()]).is_empty(), "Andre's nodes don't run Bob's own scope");
+        assert!(keys(BOB, &[Scope::Global, bob]).is_empty(), "nor a call that reaches it");
+        assert!(keys(BOB, &[andre]).is_empty(), "nor Andre's, which Bob may not use");
+        assert!(keys("stranger", &[Scope::Global]).is_empty());
     }
 }

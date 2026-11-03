@@ -206,8 +206,8 @@ impl Node {
         }
     }
 
-    /// The install's serverless node, which asks only for calls, each a sign-in's, by its token: as `/v1/call` takes
-    /// one through the gateway.
+    /// The install's serverless node, which asks only for calls, each its person's, with the keys they handed it for
+    /// them, sealed to this device: as a client device's call over iroh is taken.
     async fn take_serverless(&self, conn: Connection) {
         let remote = *conn.remote_id().as_bytes();
         while let Ok((mut send, mut recv)) = conn.accept_bi().await {
@@ -221,7 +221,7 @@ impl Node {
                     Err(err) => return tracing::debug!("what the serverless node sent: {err:#}"),
                 };
                 let answer = match msg["kind"].as_str() {
-                    Some("ask") => crate::api::call_signed_in(&node, msg["body"]["call"].clone()).await,
+                    Some("ask") => crate::api::call_from_serverless(&node, remote, msg["body"]["call"].clone()).await,
                     _ => json!({ "error": "the serverless node only asks for calls" }),
                 };
                 if let Err(err) = async { send.write_all(answer.to_string().as_bytes()).await?; send.finish()?; anyhow::Ok(()) }.await {
