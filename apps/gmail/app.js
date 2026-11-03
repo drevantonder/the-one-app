@@ -815,7 +815,12 @@ async function start(account, b) {
       try { if (await one.vault("client")) return start(account, b); } catch (err) { e = err; }
     }
     busy(b, false, b?.id === "start" ? label() : b?.textContent);
-    if (/Ask .* to set up/.test(e.message) && b) b.disabled = true;
+    const ask = /Ask (.+?) to set up (.+?)(?::|$)/.exec(e.message);
+    if (ask) {
+      connect.className = "";
+      connect.innerHTML = one.problem({ title: ask[2] + " isn't set up", text: "Ask " + ask[1] + " to set it up. It's done once for everyone." });
+      return;
+    }
     document.getElementById("err").textContent = one.plain(e).title;
     return;
   }
