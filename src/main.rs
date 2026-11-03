@@ -140,7 +140,8 @@ Usage:
   {CLI} <app> <op> [words] [--input value]
                                        run an operation, e.g. {CLI} board post ideas \"hi there\"; --help says what
                                        it takes. Words fill its main inputs in order (--help shows which), lists
-                                       repeat a flag, inputs not given are read as JSON from stdin, --file
+                                       repeat a flag, required inputs not given are read as JSON from stdin
+                                       (a last word - reads it anyway), --file
                                        <input>=<path> gives a file and --out <path> saves what it gives back.
                                        --device <name> runs it on that device
   {CLI} try [<command>]                a new install for this checkout, on this machine beside yours, with only what

@@ -40,7 +40,10 @@ pub fn node_app(app: &str) -> bool {
 
 /// `<CLI> <app> <op> [words] [--input value]...`: runs it and prints what it gives back.
 pub fn run(app: &str, op: &str, args: &[String]) -> Result<()> {
-    let (words, mut flags) = split(args);
+    let (mut words, mut flags) = split(args);
+    // A last word `-` asks for inputs from stdin even when none is missing; otherwise stdin is read only when one is,
+    // so a command inside a `while read` loop doesn't eat the loop's input.
+    let asked = words.last().is_some_and(|w| w == "-") && words.pop().is_some();
     let spec = find(app, op);
     let Some((a, o)) = &spec else { bail!("{}", unknown(app, op)) };
     if flags.contains_key("help") || flags.contains_key("h") {
@@ -57,7 +60,7 @@ pub fn run(app: &str, op: &str, args: &[String]) -> Result<()> {
     let places = places(o);
     let mut input = input(&schema, &places, words, flags, &files)?;
     let missing = missing(&schema, &input);
-    if !missing.is_empty() || stdin_ready() {
+    if !missing.is_empty() || asked {
         from_stdin(&schema, &missing, &mut input)?;
         let missing = self::missing(&schema, &input);
         ensure!(
@@ -367,13 +370,6 @@ fn from_stdin(schema: &Value, missing: &[String], input: &mut Map<String, Value>
     Ok(())
 }
 
-/// Whether stdin holds something to read now: a file, or a pipe written to within a moment. Read only then when no
-/// input is missing, since an agent's shell may leave stdin open and empty, which mustn't hold up every command.
-fn stdin_ready() -> bool {
-    let mut fd = libc::pollfd { fd: 0, events: libc::POLLIN, revents: 0 };
-    !std::io::stdin().is_terminal() && unsafe { libc::poll(&mut fd, 1, 100) } > 0 && fd.revents & libc::POLLIN != 0
-}
-
 /// What's piped to stdin, or None when nothing comes: an agent's shell may leave stdin open and empty, so wait only
 /// a little for the first byte.
 fn piped() -> Option<String> {
@@ -579,7 +575,7 @@ pub fn help(app: &Value, op: &Value) -> String {
         _ => "",
     });
     if !props.is_empty() {
-        text.push_str(&format!("Inputs not given are read as JSON from stdin: {CLI} {a} {o} < input.json\n"));
+        text.push_str(&format!("Required inputs not given are read as JSON from stdin: {CLI} {a} {o} < input.json; a last word - reads stdin anyway: {CLI} {a} {o} - < input.json\n"));
     }
     text
 }
