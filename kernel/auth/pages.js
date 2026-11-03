@@ -95,14 +95,11 @@ const acts = `
   }
 `;
 
-/// A page of `look`'s, the white label's `{ name, accent }`.
-const page = (look, title, body, script) => {
-  const accent = /^#[0-9a-f]{3,8}$/i.test(look.accent || "") ? look.accent : "#007aff";
-  // The accent is the brand's, for the browser's own bar only: what a person taps is the kit's tint.
-  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="theme-color" content="${accent}"><title>${escape(title)}</title><style>${style}</style></head>
+/// A page, its colours for the browser's bar the kit's page colour (tests/contracts.rs).
+const page = (title, body, script) => `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#141414"><title>${escape(title)}</title><style>${style}</style></head>
 <body><main><img class="mark" src="/logo.png" alt="">${body}<p class="error"></p></main><script>${webauthn}${script}</script></body></html>`;
-};
 
 /// Which passkeys work, in plain words, for the pages that make or ask for one.
 const WORKS = "Passkeys saved in iCloud Keychain, Google Password Manager or a security key work, on a current system.";
@@ -138,7 +135,7 @@ export function signInPage(look) {
         location.href = client_id ? (await api("/sign-in/accept", { oauth_query, prf, credential })).url : "/";
       } catch (err) { quietly(err); }
     };`;
-  return page(look, `Sign in to ${name}`, body, script);
+  return page(`Sign in to ${name}`, body, script);
 }
 
 function googlePage(look) {
@@ -176,7 +173,7 @@ function googlePage(look) {
         location.href = out.url;
       } catch (err) { say(err.message); }
     };`;
-  return page(look, `Sign in to ${name}`, body, script);
+  return page(`Sign in to ${name}`, body, script);
 }
 
 /// Signing in on a try install (`one try`), with no passkey, straight on, so a client being tested signs in with nobody
@@ -203,7 +200,7 @@ export function tryPage(look) {
     };
     document.getElementById("go").onclick = go;
     go();`;
-  return page(look, `Sign in to ${name}`, body, script);
+  return page(`Sign in to ${name}`, body, script);
 }
 
 /// Joining with an invite link: making a first passkey, or on a try install (`tried`), with nothing to make.
@@ -250,7 +247,7 @@ export function invitePage(look) {
         document.getElementById("done").hidden = false;
       } catch (err) { quietly(err); }
     };`;
-  return page(look, `Join ${name}`, body, script);
+  return page(`Join ${name}`, body, script);
 }
 
 export function passkeysPage(look) {
@@ -308,7 +305,7 @@ export function passkeysPage(look) {
       if (!id || !confirm("Remove this passkey? It won't sign you in or unlock your data again.")) return;
       try { await api("/api/auth/passkey/delete-passkey", { id }); await show(); } catch (err) { say(err.message); }
     };`;
-  return page(look, `Passkeys`, body, script);
+  return page(`Passkeys`, body, script);
 }
 
 /// Signing in with a code another device shows (the CLI on one with no screen): typing it here goes on to signing in with a
@@ -319,7 +316,7 @@ export function codePage(look) {
     const body = done
       ? `<h1>You're signed in</h1><p>Go back to where you got the code: it carries on by itself.</p>`
       : `<h1>That didn't sign in</h1><p>Start signing in again where you got the code.</p>`;
-    return page(look, `Sign in to ${name}`, body, "");
+    return page(`Sign in to ${name}`, body, "");
   }
   const body = `
     <h1>Sign in with a code</h1>
@@ -333,5 +330,5 @@ export function codePage(look) {
       e.preventDefault();
       location.href = "/sign-in/code?c=" + encodeURIComponent(document.getElementById("code").value);
     };`;
-  return page(look, `Sign in to ${name}`, body, script);
+  return page(`Sign in to ${name}`, body, script);
 }

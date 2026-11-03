@@ -241,8 +241,8 @@ export class Auth extends DurableObject {
         return new Response(meta.body, { status: meta.status, headers: { "content-type": "application/json", "access-control-allow-origin": "*" } });
       }
       const name = this.auth.options.appName;
-      // What its pages look like: the white label's name, what a person joins ("your One App"), and accent.
-      const look = { name, yours: this.env.YOURS, accent: this.env.ACCENT };
+      // What its pages say: the white label's name, and what a person joins ("your One App").
+      const look = { name, yours: this.env.YOURS };
       if (path === "/.well-known/oauth-protected-resource" || path === "/.well-known/oauth-protected-resource/mcp") return this.protectedResource(path, name);
       const google = this.env.SIGN_IN === "google" ? this.env.JOIN_DOMAIN : null;
       const tried = this.env.SIGN_IN === "try";

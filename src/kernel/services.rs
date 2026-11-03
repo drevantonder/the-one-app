@@ -360,7 +360,6 @@ impl Settings {
                 plain("VAULT", "service:vault".into());
                 plain("ADDRESS", self.address.clone());
                 plain("NAME", self.name.clone());
-                plain("ACCENT", crate::config::ACCENT.into());
                 plain("YOURS", crate::config::YOURS.into());
                 if let Some((id, name)) = &self.try_person {
                     plain("SIGN_IN", "try".into());
@@ -445,10 +444,10 @@ impl Settings {
     pub fn web(&self) -> Vec<(String, Vec<u8>)> {
         let mut files: Vec<(String, Vec<u8>)> =
             crate::config::KERNEL.iter().filter_map(|(path, bytes)| Some((path.strip_prefix("web/")?.to_string(), bytes.to_vec()))).collect();
-        // The page says whose it is before anyone signs in: the white label's name and accent.
+        // The page says whose it is before anyone signs in: the white label's name.
         let attr = |v: &str| v.replace('&', "&amp;").replace('"', "&quot;").replace('<', "&lt;");
         if let Some((_, page)) = files.iter_mut().find(|(path, _)| path == "index.html") {
-            let label = format!("<title>{}</title>\n<meta name=\"application-name\" content=\"{}\">\n<meta name=\"theme-color\" content=\"{}\">", attr(crate::config::NAME), attr(crate::config::NAME), attr(crate::config::ACCENT));
+            let label = format!("<title>{}</title>\n<meta name=\"application-name\" content=\"{}\">", attr(crate::config::NAME), attr(crate::config::NAME));
             *page = String::from_utf8_lossy(page).replacen("<title></title>", &label, 1).into_bytes();
         }
         if !self.android.is_empty() {

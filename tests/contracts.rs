@@ -744,6 +744,16 @@ fn every_client_draws_in_the_kits_colours() {
             }
         }
     }
+    // The browser's bar, on the web client and the sign-in pages, is the page's colour.
+    for path in ["kernel/web/index.html", "kernel/auth/pages.js"] {
+        let src = read(path);
+        for (scheme, want) in [("light", &tokens["bg"].0), ("dark", &tokens["bg"].1)] {
+            let got = src.lines().find(|l| l.contains("theme-color") && l.contains(&format!("prefers-color-scheme: {scheme}"))).map(hexes);
+            if got.as_deref() != Some(&[want.clone()][..]) {
+                problems.push(format!("{path}: its {scheme} theme-color is {got:?}, kit.css's page is {want}"));
+            }
+        }
+    }
     // The web client's window draws in the kit's own variables, so it has no colours of its own to drift.
     if let Some(hex) = hexes(&read("kernel/web/web.css")).first() {
         problems.push(format!("kernel/web/web.css: #{hex} is its own colour; use the kit's variables"));
