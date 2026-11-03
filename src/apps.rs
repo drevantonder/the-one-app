@@ -286,19 +286,56 @@ impl Runtime {
         agent.get(format!("{}/ready", self.base)).call().is_ok()
     }
 
-    /// Waits until the runtime answers with the config of `generation`.
+    /// Waits until the runtime answers with the config of `generation`, or fails at once with `Broken` when an app's
+    /// code doesn't start (workerd then starts again and again, saying so in its log).
     fn wait_ready(&self, generation: u64) -> Result<()> {
         let started = Instant::now();
+        let log = self.dir.join("workerd.log");
+        let from = std::fs::metadata(&log).map(|m| m.len()).unwrap_or(0);
+        // A runtime that keeps failing to start leaves its port's connections unanswered: ask for a moment only.
+        let agent: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(2))).build().into();
         loop {
-            if let Ok(mut r) = ureq::get(format!("{}/ready", self.base)).call() {
+            if let Ok(mut r) = agent.get(format!("{}/ready", self.base)).call() {
                 if r.body_mut().read_to_string().is_ok_and(|g| g.trim() == generation.to_string()) {
                     return Ok(());
                 }
             }
-            ensure!(started.elapsed() < Duration::from_secs(60), "Apps couldn't start on this device: see {}", self.dir.join("workerd.log").display());
+            if let Some(broken) = broken_since(&log, from) {
+                return Err(broken.into());
+            }
+            ensure!(started.elapsed() < Duration::from_secs(60), "Apps couldn't start on this device: see {}", log.display());
             std::thread::sleep(Duration::from_millis(50));
         }
     }
+}
+
+/// An app whose code doesn't start: the runtime can't run with it.
+#[derive(Debug)]
+pub struct Broken {
+    pub app: String,
+    pub error: String,
+}
+
+impl std::fmt::Display for Broken {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} doesn't start: {}", self.app, self.error)
+    }
+}
+
+impl std::error::Error for Broken {}
+
+/// The first app the runtime's log says didn't start, after `from` bytes: workerd writes `service app-<name>: Uncaught
+/// <error>`.
+fn broken_since(log: &Path, from: u64) -> Option<Broken> {
+    use std::io::{Read, Seek};
+    let mut file = std::fs::File::open(log).ok()?;
+    file.seek(std::io::SeekFrom::Start(from)).ok()?;
+    let mut text = String::new();
+    file.take(1 << 20).read_to_string(&mut text).ok()?;
+    text.lines().find_map(|line| {
+        let (app, error) = line.strip_prefix("service app-")?.split_once(": Uncaught ")?;
+        Some(Broken { app: app.to_string(), error: error.trim().to_string() })
+    })
 }
 
 /// Set once this process is stopping, under `RUNNING`'s lock: no workerd starts again.

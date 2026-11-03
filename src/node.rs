@@ -369,6 +369,8 @@ pub struct Inner {
     forgotten: Mutex<()>,
     /// What the vault gave this device for the sign-ins its calls came with.
     sessions: sessions::Sessions,
+    /// Apps whose deploy doesn't start here, by the bundle that didn't: left out until they're deployed again.
+    broken: Mutex<BTreeMap<String, String>>,
     /// The keys of the apps this device keeps running for their people.
     standing: standing::Standing,
     /// This device's iroh endpoint.
@@ -491,6 +493,7 @@ impl Node {
             unshared: Mutex::new(Vec::new()),
             forgotten: Mutex::new(()),
             sessions: Default::default(),
+            broken: Default::default(),
             standing: Default::default(),
             net: Default::default(),
             settled: tokio::sync::watch::channel(0).0,
@@ -921,7 +924,8 @@ impl Node {
             return Ok(());
         }
         let mut modules = Vec::new();
-        for (app, bundle) in &wanted {
+        let broken = self.0.broken.lock().unwrap().clone();
+        for (app, bundle) in wanted.iter().filter(|(a, b)| broken.get(*a) != Some(*b)) {
             match self.blob(bundle).await.and_then(|b| crate::bundle::module(&b)) {
                 Ok(module) => modules.push((app.clone(), module)),
                 Err(err) => tracing::warn!("{app}'s deploy: {err:#}"),
@@ -934,7 +938,17 @@ impl Node {
         if !changed.is_empty() || modules.len() != self.0.apps.names().len() {
             // Writes wait for the new deploys, so what's written next runs on them.
             let _write = self.0.writes.lock().await;
-            self.0.apps.load(modules.clone()).await?;
+            // An app whose code doesn't start is left out, so the rest run.
+            while let Err(err) = self.0.apps.load(modules.clone()).await {
+                let Some(broken) = err.downcast_ref::<crate::apps::Broken>() else { return Err(err) };
+                tracing::warn!("{broken}: it's left out until it's deployed again");
+                if let Some(bundle) = wanted.get(&broken.app) {
+                    self.0.broken.lock().unwrap().insert(broken.app.clone(), bundle.clone());
+                }
+                let before = modules.len();
+                modules.retain(|(a, _)| *a != broken.app);
+                ensure!(modules.len() < before, "{err:#}");
+            }
             *self.0.bundles.lock().unwrap() = modules.iter().map(|(a, _)| (a.clone(), wanted[a].clone())).collect();
             // Read again, so each is brought to its new deploy's schema.
             self.0.dbs.lock().unwrap().retain(|(_, db), _| !changed.iter().any(|app| db.starts_with(&format!("{app}/"))));
