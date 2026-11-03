@@ -1,5 +1,5 @@
 // AI Usage: every AI plan's limits, and whether the pace lasts to reset. Reads the providers' own numbers
-// (the codexbar CLI where it's installed, Claude's own endpoint else), keeps snapshots, and says in the providers'
+// (every Claude account in claude-swap where it's installed, the codexbar CLI, Claude's own endpoint else), keeps snapshots, and says in the providers'
 // own words how much is left and what the pace does: deficit or reserve, what was expected, and whether it lasts.
 // Agents read it through Agent Hooks; people get the tiles and the meter.
 
@@ -89,14 +89,38 @@ function paceFrom(used, resetsAt, windowMins, prev, now) {
     if (burn > 0) {
       const eta = (100 - used) / burn;
       willLast = now + eta >= resetsAt;
-      const mins = Math.round(eta / 60000);
-      tail = willLast ? "Lasts until reset" : mins < 120 ? `Projected empty in ${mins} min` : mins < 2880 ? `Projected empty in ${Math.round(mins / 60)}h ${mins % 60}m` : `Runs out in ${Math.round(mins / 1440)}d`;
+      tail = willLast ? "Lasts until reset" : emptyIn(eta);
     }
   }
   const head = delta > 0 ? `${trimNum(delta)}% in deficit` : `${trimNum(-delta)}% in reserve`;
   return { summary: `${head} | Expected ${exp}% used | ${tail}`, willLast, delta };
 }
 const trimNum = (v) => String(Math.round(v * 10) / 10);
+const emptyIn = (eta) => {
+  const mins = Math.max(0, Math.round(eta / 60000));
+  return mins < 120 ? `Projected empty in ${mins} min` : mins < 2880 ? `Projected empty in ${Math.floor(mins / 60)}h ${mins % 60}m` : `Runs out in ${Math.round(mins / 1440)}d`;
+};
+
+/// A pace from claude-swap's own expected and projected numbers, in the same words.
+function paceOfCswap(w, now) {
+  if (w?.pct == null || w.expectedPct == null) return null;
+  const used = w.pct, exp = Math.round(w.expectedPct);
+  const delta = Math.round((used - w.expectedPct) * 10) / 10;
+  if (used >= 100) return { summary: `Out now | Expected ${exp}% used | Back at reset`, willLast: false, delta };
+  if (Math.abs(delta) < 3) return { summary: `On pace | Expected ${exp}% used | Lasts until reset`, willLast: true, delta };
+  const willLast = w.willLastToReset !== false;
+  const empty = ms(w.projectedExhaustionAt);
+  const tail = willLast ? "Lasts until reset" : empty != null ? emptyIn(empty - now) : "Ahead of even pace";
+  const head = delta > 0 ? `${trimNum(delta)}% in deficit` : `${trimNum(-delta)}% in reserve`;
+  return { summary: `${head} | Expected ${exp}% used | ${tail}`, willLast, delta };
+}
+
+/// Who an account is, as a person tells them apart: its alias, else its team and email.
+function accountName(a) {
+  if (a.alias) return String(a.alias);
+  const org = String(a.organizationName || "");
+  return !org || /'s Organization$/.test(org) ? String(a.email || "") : `${org} · ${a.email || ""}`;
+}
 
 /// Which pool to spend: the cooler weekly one. Names come from the scoped rows.
 function steer(models) {
@@ -119,15 +143,17 @@ function steer(models) {
   return `${head}any model fine`;
 }
 
-/// The newest snapshot per provider on this device, oldest first.
+/// The newest read of a provider on this device: one snapshot per account.
 async function latest(b, provider, device) {
-  const rows = await b.query("select * from snapshots where provider = ? and (device = ? or ? is null) order by at desc limit 1", [provider, device, device]);
-  return rows[0] ? { ...rows[0], models: JSON.parse(rows[0].models || "[]"), pace: JSON.parse(rows[0].pace || "{}") } : null;
+  const top = await b.query("select at from snapshots where provider = ? and (device = ? or ? is null) order by at desc limit 1", [provider, device, device]);
+  if (!top[0]) return [];
+  const rows = await b.query("select * from snapshots where provider = ? and (device = ? or ? is null) and at = ? order by active desc, weekly_used", [provider, device, device, top[0].at]);
+  return rows.map((r) => ({ ...r, active: !!r.active, models: JSON.parse(r.models || "[]"), pace: JSON.parse(r.pace || "{}") }));
 }
 
-/// The one before, sharing the session window, for the burn rate.
-async function previous(b, provider, device, at, resetsAt) {
-  const rows = await b.query("select at, session_used, weekly_used, session_resets from snapshots where provider = ? and (device = ? or ? is null) and at < ? order by at desc limit 5", [provider, device, device, at]);
+/// The one before for the same account, sharing the session window, for the burn rate.
+async function previous(b, provider, device, account, at, resetsAt) {
+  const rows = await b.query("select at, session_used, weekly_used, session_resets from snapshots where provider = ? and (device = ? or ? is null) and account is ? and at < ? order by at desc limit 5", [provider, device, device, account, at]);
   return rows.map((r) => ({ at: r.at, used: r.session_used, resets: r.session_resets })).find((r) => r.resets === resetsAt) || null;
 }
 
@@ -177,6 +203,22 @@ function fromCodexbar(j, now) {
   };
 }
 
+/// claude-swap's accounts into our windows, one read per account. It keeps no secrets in this output.
+function fromCswap(j) {
+  const win = (w) => ({ used: int(w?.pct), resetsAt: ms(w?.resetsAt), resetText: null, pace: null, raw: w });
+  return (j.accounts || []).map((a) => {
+    const u = a.usage || {};
+    const out = {
+      source: "cswap", confidence: "quota",
+      session: win(u.fiveHour), weekly: win(u.sevenDay), monthly: { used: null, resetsAt: null },
+      models: (u.scoped || []).map((m) => ({ name: String(m.name || "pool"), used: int(m.pct), resetsAt: ms(m.resetsAt) })),
+      plan: null, account: accountName(a), active: !!a.active,
+      notes: a.usageStatus && a.usageStatus !== "ok" ? [`usage ${a.usageStatus}`] : [], extra: null,
+    };
+    return out;
+  });
+}
+
 /// Claude straight from its own endpoint. The token is never logged or kept.
 async function fromClaude(ctx, b, device, now) {
   let creds;
@@ -211,40 +253,54 @@ async function fromClaude(ctx, b, device, now) {
   return out;
 }
 
-/// Fresh numbers, or the last ones with their age when fetching fails. Estimated rows never forecast.
+/// Fresh numbers, one per account, or the last ones with their age when fetching fails. Estimated rows never forecast.
 async function refresh(ctx, b, id, device, now) {
   const P = PROVIDERS[id];
   b.exec("delete from snapshots where session_used is null and weekly_used is null and monthly_used is null");
   const snap = await latest(b, id, device);
-  if (snap && now - snap.at < FRESH) return { ...snap, cached: true, now };
-  const fail = async (problem) => {
-    if (snap) return { ...snap, cached: true, stale: problem, now };
-    return { provider: id, error: problem, now };
-  };
+  if (snap.length && now - snap[0].at < FRESH) return snap.map((r) => ({ ...r, cached: true, now }));
+  const fail = (problem) => (snap.length ? snap.map((r) => ({ ...r, cached: true, stale: problem, now })) : [{ provider: id, error: problem, now }]);
+  const probe = (n, args, err) => `for b in ${n} "$HOME/.local/bin/${n}" /opt/homebrew/bin/${n}; do out=$("$b" ${args} ${err}); if [ -n "$out" ]; then echo "$out"; break; fi; done`;
   try {
-    let out = null;
-    try {
-      const args = `usage --provider ${P.codexbar} --format json --no-color`;
-      const probe = `for b in codexbar "$HOME/.local/bin/codexbar" /opt/homebrew/bin/codexbar; do out=$("$b" ${args} 2>&1); if [ -n "$out" ]; then echo "$out"; break; fi; done`;
-      const r = await side(ctx, { command: probe, timeout: 25 }, device);
-      const parsed = JSON.parse(String(r?.stdout || ""));
-      const first = Array.isArray(parsed) ? parsed[0] : parsed;
-      if (!first || first.error) throw new Error(first?.error?.message || "no codexbar");
-      out = fromCodexbar(first, now);
-      if (out.session.used == null && out.weekly.used == null && out.monthly.used == null) throw new Error("no usable windows");
-    } catch (e) {
-      if (id !== "claude") throw e;
-      out = await fromClaude(ctx, b, device, now);
+    let outs = null;
+    if (id === "claude") {
+      try {
+        const r = await side(ctx, { command: probe("cswap", "list --json", "2>/dev/null"), timeout: 60 }, device);
+        outs = fromCswap(JSON.parse(String(r?.stdout || ""))).filter((o) => o.session.used != null || o.weekly.used != null);
+        if (!outs.length) outs = null;
+      } catch {
+        outs = null;
+      }
     }
-    if (out.confidence !== "estimated") {
-      const prev = await previous(b, id, device, now, out.session.resetsAt);
-      if (!out.session.pace) out.session.pace = paceFrom(out.session.used, out.session.resetsAt, P.sessionMins, prev && { at: prev.at, used: prev.used }, now);
-      const wprev = null;
-      if (!out.weekly.pace) out.weekly.pace = paceFrom(out.weekly.used, out.weekly.resetsAt, P.weeklyMins, wprev, now);
+    if (!outs) {
+      try {
+        const r = await side(ctx, { command: probe("codexbar", `usage --provider ${P.codexbar} --format json --no-color`, "2>&1"), timeout: 25 }, device);
+        const parsed = JSON.parse(String(r?.stdout || ""));
+        const first = Array.isArray(parsed) ? parsed[0] : parsed;
+        if (!first || first.error) throw new Error(first?.error?.message || "no codexbar");
+        const out = fromCodexbar(first, now);
+        if (out.session.used == null && out.weekly.used == null && out.monthly.used == null) throw new Error("no usable windows");
+        outs = [out];
+      } catch (e) {
+        if (id !== "claude") throw e;
+        outs = [await fromClaude(ctx, b, device, now)];
+      }
     }
-    b.exec("insert into snapshots values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", [id, device, now, out.source, out.confidence, out.session.used, out.session.resetsAt, out.weekly.used, out.weekly.resetsAt, out.monthly.used, out.monthly.resetsAt, JSON.stringify(out.models), JSON.stringify({ session: out.session.pace, weekly: out.weekly.pace }), (out.notes || [])[0] || null, out.account || null]);
+    const results = [];
+    for (const out of outs) {
+      if (out.confidence !== "estimated") {
+        if (!out.session.pace) out.session.pace = paceOfCswap(out.session.raw, now);
+        if (!out.weekly.pace) out.weekly.pace = paceOfCswap(out.weekly.raw, now);
+        const prev = await previous(b, id, device, out.account || null, now, out.session.resetsAt);
+        if (!out.session.pace) out.session.pace = paceFrom(out.session.used, out.session.resetsAt, P.sessionMins, prev && { at: prev.at, used: prev.used }, now);
+        if (!out.weekly.pace) out.weekly.pace = paceFrom(out.weekly.used, out.weekly.resetsAt, P.weeklyMins, null, now);
+      }
+      const active = out.active || outs.length === 1 ? 1 : 0;
+      b.exec("insert into snapshots values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", [id, device, now, out.source, out.confidence, out.session.used, out.session.resetsAt, out.weekly.used, out.weekly.resetsAt, out.monthly.used, out.monthly.resetsAt, JSON.stringify(out.models), JSON.stringify({ session: out.session.pace, weekly: out.weekly.pace }), (out.notes || [])[0] || null, out.account || null, active]);
+      results.push({ provider: id, device, at: now, source: out.source, confidence: out.confidence, session_used: out.session.used, session_resets: out.session.resetsAt, session_resetText: out.session.resetText, weekly_used: out.weekly.used, weekly_resets: out.weekly.resetsAt, weekly_resetText: out.weekly.resetText, monthly_used: out.monthly.used, monthly_resets: out.monthly.resetsAt, models: out.models, pace: { session: out.session.pace, weekly: out.weekly.pace }, plan: out.plan, account: out.account || null, active: !!active, extra: out.extra, notes: out.notes || [], cached: false, now });
+    }
     b.exec("delete from snapshots where at < ?", [PRUNE()]);
-    return { provider: id, device, at: now, source: out.source, confidence: out.confidence, session_used: out.session.used, session_resets: out.session.resetsAt, session_resetText: out.session.resetText, weekly_used: out.weekly.used, weekly_resets: out.weekly.resetsAt, weekly_resetText: out.weekly.resetText, monthly_used: out.monthly.used, monthly_resets: out.monthly.resetsAt, models: out.models, pace: { session: out.session.pace, weekly: out.weekly.pace }, plan: out.plan, account: out.account || null, extra: out.extra, notes: out.notes || [], cached: false, now };
+    return results.sort((x, y) => y.active - x.active || (x.weekly_used ?? 0) - (y.weekly_used ?? 0));
   } catch (err) {
     return fail(String(err?.message || err).slice(0, 120));
   }
@@ -253,13 +309,18 @@ async function refresh(ctx, b, id, device, now) {
 function windowText(label, w, now) {
   if (w.used == null) return null;
   const left = 100 - w.used;
-  const lines = [`${label}: ${left}% left`, w.pace?.summary ? `Pace: ${w.pace.summary}` : null, w.resetText || `Resets ${resets(w.resetsAt, now)}`];
+  const lines = [`${label}: ${left}% left`, w.pace?.summary ? `Pace: ${w.pace.summary}` : null, w.resetText || (w.resetsAt != null ? `Resets ${resets(w.resetsAt, now)}` : null)];
   return lines.filter(Boolean).join("\n");
 }
 
 function section(p, now) {
   if (p.error) return [`== ${PROVIDERS[p.provider].title} ==`, `Unavailable: ${p.error}`].join("\n");
-  const head = `== ${PROVIDERS[p.provider].title} (${p.source}) ==`;
+  if (p.source === "cswap" && !p.active) {
+    const left = (label, u) => (u == null ? null : `${label} ${100 - u}% left`);
+    const out = p.weekly_used >= 100 ? `back ${resets(p.weekly_resets, now)}` : p.weekly_resets ? `weekly resets ${resets(p.weekly_resets, now)}` : null;
+    return `${PROVIDERS[p.provider].title}: ${p.account}: ${[left("session", p.session_used), left("weekly", p.weekly_used), out].filter(Boolean).join(", ")}`;
+  }
+  const head = p.source === "cswap" ? `== ${PROVIDERS[p.provider].title}: ${p.account}${p.active ? ", in use" : ""} ==` : `== ${PROVIDERS[p.provider].title} (${p.source}) ==`;
   const est = p.confidence === "estimated" ? "~estimated from this device only, no pace" : null;
   const rows = [
     windowText("Session", { used: p.session_used, resetsAt: p.session_resets, resetText: p.session_resetText, pace: p.pace?.session }, now),
@@ -269,7 +330,7 @@ function section(p, now) {
     steer(p.models) || null,
     ...((p.notes && p.notes.length ? p.notes : p.note ? [p.note] : []).map((n) => `Note: ${n}`)),
     p.plan ? `Plan: ${p.plan}` : null,
-    p.account ? `Account: ${p.account}` : null,
+    p.account && p.source !== "cswap" ? `Account: ${p.account}` : null,
     `Updated ${ago(p.at, now)} on ${p.device || "this device"}${p.stale ? ` (${p.stale}, showing last)` : ""}`,
   ].filter(Boolean);
   return [head, est, ...rows].filter(Boolean).join("\n");
@@ -298,13 +359,14 @@ export default {
     create table snapshots (provider text not null, device text not null, at integer not null, source text not null, confidence text not null, session_used real, session_resets integer, weekly_used real, weekly_resets integer, monthly_used real, monthly_resets integer, models text, pace text);
     create index snapshots_provider on snapshots (provider, device, at);`,
     `alter table snapshots add column note text;`,
-    `alter table snapshots add column account text;`]])),
+    `alter table snapshots add column account text;`,
+    `alter table snapshots add column active integer;`]])),
 
   ops: {
     status: {
       words: ["provider", "format"],
       reads: false,
-      description: "Every AI plan's limits (or one provider's): what's left, the pace, and whether it lasts to reset, in the providers' own words, plus which pool to spend. Fresh when older than 5 minutes, else the last read with its age.",
+      description: "Every AI plan's limits (or one provider's), each Claude account apart: what's left, the pace, and whether it lasts to reset, in the providers' own words, plus which pool to spend. Fresh when older than 5 minutes, else the last read with its age.",
       input: {
         type: "object",
         properties: {
@@ -319,12 +381,12 @@ export default {
         const now = ctx.now();
         const dev = await here(ctx, device);
         const ids = provider === "all" ? Object.keys(PROVIDERS) : [provider];
-        const all = await Promise.all(ids.map((id) => refresh(ctx, b, id, dev, now)));
+        const all = (await Promise.all(ids.map((id) => refresh(ctx, b, id, dev, now)))).flat();
         if (format === "json") {
           return {
             device: dev, at: now,
             providers: all.map((p) => ({
-              id: p.provider, title: PROVIDERS[p.provider].title, plan: p.plan || null, source: p.source || null,
+              id: p.provider, title: PROVIDERS[p.provider].title, account: p.source === "cswap" ? p.account : null, active: !!p.active, plan: p.plan || null, source: p.source || null,
               device: p.device || dev, updatedAgo: p.at ? ago(p.at, now) : null, estimated: p.confidence === "estimated",
               error: p.error || null, stale: p.stale || null,
               session: p.error ? null : { used: p.session_used, left: p.session_used == null ? null : 100 - p.session_used, resets: p.session_resets ? resets(p.session_resets, now) : null, countdown: p.session_resets ? countdown(p.session_resets, now) : null, pace: p.pace?.session?.summary || null, willLast: p.pace?.session?.willLast ?? null },
@@ -341,7 +403,7 @@ export default {
     },
     warn: {
       reads: false,
-      description: "Silent unless a window is nearly out (under 20% session, 15% weekly) or outruns its reset: then its rows and which pool to spend. For every-prompt hooks; reads the last snapshots, never fetches.",
+      description: "Silent unless a window is nearly out (under 20% session, 15% weekly) or outruns its reset, on every Claude account at once: then its rows and which pool to spend. For every-prompt hooks; reads the last snapshots, never fetches.",
       input: {
         type: "object",
         properties: { device: { type: "string", description: "whose numbers: a device's name; omit for this device" } },
@@ -353,14 +415,16 @@ export default {
         const dev = await here(ctx, device);
         const out = [];
         for (const id of Object.keys(PROVIDERS)) {
-          const p = await latest(b, id, dev);
-          if (!p || !tripped({ ...p, pace: p.pace })) continue;
-          const t = tripped({ ...p, pace: p.pace });
+          const reads = await latest(b, id, dev);
+          // With several accounts, claude-swap moves to one with room: only all of them nearly out is news.
+          if (!reads.length || reads.some((r) => !r.error && !tripped(r))) continue;
+          const p = reads[0];
+          const t = tripped(p);
           const rows = [];
           if (t.out) rows.push(windowText("Session", { used: p.session_used, resetsAt: p.session_resets, pace: p.pace?.session }, now));
           if (t.outW) rows.push(windowText("Weekly", { used: p.weekly_used, resetsAt: p.weekly_resets, pace: p.pace?.weekly }, now));
           rows.push(steer(p.models) || null);
-          out.push([`== ${PROVIDERS[id].title} ==`, ...rows.filter(Boolean)].join("\n"));
+          out.push([`== ${PROVIDERS[id].title}${reads.length > 1 ? `: all ${reads.length} accounts nearly out` : ""} ==`, ...rows.filter(Boolean)].join("\n"));
         }
         return out.join("\n\n");
       },
@@ -395,7 +459,8 @@ function win(label, w) {
     <div class="row sub"><span>\${w.pace ? one.esc(w.pace) : ""}</span><span>\${w.countdown ? "Resets " + one.esc(w.countdown) : ""}</span></div></div>\`;
 }
 function tile(p) {
-  const head = \`<header><h3>\${one.esc(p.title)}</h3><span class="sub">\${one.esc([p.plan, p.device, p.updatedAgo ? "updated " + p.updatedAgo : ""].filter(Boolean).join(" · "))}</span></header>\`;
+  const head = \`<header><h3>\${one.esc(p.title)}</h3><span class="sub">\${one.esc([p.plan, p.device, p.updatedAgo ? "updated " + p.updatedAgo : ""].filter(Boolean).join(" · "))}</span></header>\`
+    + (p.account ? \`<div class="sub">\${one.esc(p.account)}\${p.active ? " · in use" : ""}</div>\` : "");
   if (p.error) return \`<div class="tile">\${head}<div class="err">\${one.esc(p.error)}</div></div>\`;
   const models = (p.models || []).map((m) => \`<div class="win"><div class="row"><span>\${one.esc(m.name)}</span><b>\${m.used}% used</b></div>\${bar(m.used)}</div>\`).join("");
   const steer = p.steer ? \`<div class="steer">\${one.esc(p.steer)}</div>\` : "";
@@ -427,11 +492,12 @@ one.render("#list", show);
         const dev = await here(ctx, null);
         const rows = [];
         for (const id of Object.keys(PROVIDERS)) {
-          const p = await latest(b, id, dev);
-          if (!p || p.error) continue;
-          const used = p.session_used ?? p.weekly_used;
-          if (used == null) continue;
-          rows.push({ name: PROVIDERS[id].title, used });
+          const reads = await latest(b, id, dev);
+          for (const p of reads) {
+            const used = p.session_used ?? p.weekly_used;
+            if (used == null) continue;
+            rows.push({ name: reads.length > 1 && p.account ? `${PROVIDERS[id].title} · ${p.account}` : PROVIDERS[id].title, used });
+          }
         }
         if (!rows.length) return { t: "text", text: "No readings yet", tone: "muted" };
         const show = ctx.size === "small" ? rows.slice(0, 1) : rows;
