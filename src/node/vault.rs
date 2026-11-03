@@ -202,7 +202,11 @@ impl Node {
 
     /// Asks a person for an item `app` may use, in `scope`, for `caller` (an agent, or an app's page), who never sees
     /// its secret fields: what `app` declares as `need`, or `ask`'s `{ title, fields, hosts }`. → `{ id, link, scope }`.
+    /// From a page whose Vault they can't change (a member on Everyone's), it's asked in their own, which the app's calls
+    /// for them read first.
     pub async fn request_item(&self, caller: &Caller, scope: &Scope, app: &str, need: Option<&str>, ask: &Value, why: &str) -> Result<Value> {
+        let own = Scope::User(caller.user.clone());
+        let scope = if self.with(|i| Ok(members::manages_scope(&i.r.members, &caller.user, scope)))? { scope } else { &own };
         let mut data = match need {
             Some(_) if app == crate::agents::NAME => bail!(
                 "Not asked: need names what an app declares it needs, like app gmail, need client. For an item you use yourself, leave out need and give title, fields and hosts, and why for the person"
@@ -235,7 +239,7 @@ impl Node {
         }
         data["agent"] = json!(caller.agent);
         self.with(|i| {
-            ensure!(members::manages_scope(&i.r.members, &caller.user, scope), "you can't change the Vault in {scope}");
+            ensure!(members::manages_scope(&i.r.members, &caller.user, scope), "Only its admins change {}’s Vault.", scope_name(i, &scope.to_string()));
             ensure!(i.r.members.apps.get(app).is_some_and(|a| !a.erased) || app == members::APP || app == crate::agents::NAME, "no app named {app}");
             Ok(())
         })?;
@@ -259,7 +263,7 @@ impl Node {
             let r = state.requests.get(id).with_context(|| format!("no request {id} in {scope}"))?;
             ensure!(r.answer.is_none(), "that request was already answered");
             if answer["declined"] == true {
-                ensure!(members::manages_scope(&i.r.members, &caller.user, scope), "you can't change the Vault in {scope}");
+                ensure!(members::manages_scope(&i.r.members, &caller.user, scope), "Only its admins change {}’s Vault.", scope_name(i, &scope.to_string()));
                 return Ok(members::node("vault-request", json!({ "id": id, "declined": true })));
             }
             let data = match answer["item"].as_str() {

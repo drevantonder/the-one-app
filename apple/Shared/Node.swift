@@ -587,9 +587,12 @@ struct NodeClient: Sendable {
         return try await post("v1/vault", body)["id"] as? String
     }
 
-    /// Asks this user for an item an app's need names, for an app screen's `one.vault(need)` → the request's id.
-    func requestItem(scope: String, app: String, need: String) async throws -> String? {
-        try await post("v1/vault/request", ["scope": scope, "app": app, "need": need])["id"] as? String
+    /// Asks this user for an item an app's need names, for an app screen's `one.vault(need)` → the request's id, and
+    /// the scope it's in (their own, where they can't change the page's).
+    func requestItem(scope: String, app: String, need: String) async throws -> (id: String, scope: String)? {
+        let out = try await post("v1/vault/request", ["scope": scope, "app": app, "need": need])
+        guard let id = out["id"] as? String, let scope = out["scope"] as? String else { return nil }
+        return (id, scope)
     }
 
     /// Requests for an item this user may answer, newest first: all, or one scope's, or one.

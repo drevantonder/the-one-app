@@ -430,10 +430,10 @@ private struct ScreenWebView: Representable {
                 // Asks for what the app declares, in the Vault's sheet.
                 let scope = route.scope ?? "user"
                 do {
-                    guard let id = try await store.node.requestItem(scope: scope, app: route.app, need: body["need"] as? String ?? "") else {
+                    guard let asked = try await store.node.requestItem(scope: scope, app: route.app, need: body["need"] as? String ?? "") else {
                         return (nil, "The Vault didn’t take the request")
                     }
-                    return (try await store.ask(scope: scope, id: id), nil)
+                    return (try await store.ask(scope: asked.scope, id: asked.id), nil)
                 } catch {
                     return (nil, error.localizedDescription)
                 }

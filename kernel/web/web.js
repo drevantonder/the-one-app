@@ -763,7 +763,7 @@ window.__one = {};
           const scope = r.scope || "user";
           const out = await api("/v1/vault/request", { method: "POST", body: { scope, app: r.app, need: String(m.need || "") } });
           if (!out?.id) throw new Error("The Vault didn’t take the request");
-          return reply((await openSheet(own("request", { scope, id: out.id }))) === true);
+          return reply((await openSheet(own("request", { scope: out.scope, id: out.id }))) === true);
         }
         case "title": {
           // Empty while the screen shows its own large title, as the Mac app's bar is.

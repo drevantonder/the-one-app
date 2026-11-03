@@ -416,7 +416,7 @@ public sealed class AppScreen : Grid
                         if (Own) throw new Exception("Settings has no app to ask for.");
                         var scope = route.Scope ?? "user";
                         var asked = await Node.RequestItem(scope, route.App!, Text(m, "need") ?? "") ?? throw new Exception("The Vault didn’t take the request");
-                        Reply(id, await Asked(Route.Request(scope, asked)));
+                        Reply(id, await Asked(Route.Request(asked.Scope, asked.Id)));
                         return;
                     }
                 case "scan":

@@ -676,7 +676,7 @@ private class Bridge(val context: Context, val store: Store, val route: Route, v
                 val scope = app.scope ?: "user"
                 val out = store.post("/v1/vault/request", obj("scope" to scope, "app" to app.app, "need" to (str(m, "need") ?: ""))) as? JsonObject
                 val id = (out?.get("id") as? JsonPrimitive)?.contentOrNull ?: throw NodeError("The Vault didn’t take the request")
-                return JsonPrimitive(request(scope, id))
+                return JsonPrimitive(request((out?.get("scope") as? JsonPrimitive)?.contentOrNull ?: scope, id))
             }
             "request" -> return JsonPrimitive(request(str(m, "scope") ?: "", str(m, "id") ?: ""))
             "icons" -> {

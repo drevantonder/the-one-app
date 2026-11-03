@@ -153,9 +153,14 @@ public static class Node
         return await r.Content.ReadAsByteArrayAsync();
     }
 
-    /// Asks for an item an app declares → the request's id.
-    public static async Task<string?> RequestItem(string scope, string app, string need) =>
-        (await Post("/v1/vault/request", new JsonObject { ["scope"] = scope, ["app"] = app, ["need"] = need }))?["id"]?.GetValue<string>();
+    /// Asks for an item an app declares → the request's id, and the scope it's in (their own, where they can't change
+    /// the page's).
+    public static async Task<(string Id, string Scope)?> RequestItem(string scope, string app, string need)
+    {
+        var out = await Post("/v1/vault/request", new JsonObject { ["scope"] = scope, ["app"] = app, ["need"] = need });
+        var id = out?["id"]?.GetValue<string>();
+        return id == null ? null : (id, out?["scope"]?.GetValue<string>() ?? scope);
+    }
 
     /// The node's events, as they come, until `cancel`: what changed, so the window and the open screen keep up.
     public static async Task Events(Action<JsonNode> each, CancellationToken cancel)
