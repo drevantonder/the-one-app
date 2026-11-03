@@ -58,7 +58,10 @@ async fn out(node: Node, req: Request) -> Result<Response> {
     };
     let fill = |text: &str| -> Result<String> {
         match &lookup {
-            Some(l) => crate::vault::fill(text, &host, |name| l.get(name)),
+            Some(l) => {
+                l.refuse_shut(text)?;
+                crate::vault::fill(text, &host, |name| l.get(name))
+            }
             None => Ok(text.to_string()),
         }
     };

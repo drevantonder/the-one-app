@@ -215,6 +215,7 @@ pub fn routes() -> Router<Node> {
         .route("/v1/vault/request", post(vault_post))
         .route("/v1/vault/answer", post(vault_post))
         .route("/v1/vault/fetch", post(vault_post))
+        .route("/v1/vault/grant", post(vault_post))
         .route("/v1/node-release", post(release))
         .route("/v1/blobs", post(put_blob).layer(axum::extract::DefaultBodyLimit::max(1 << 30)))
         .route("/v1/blobs/{hash}", get(blob))

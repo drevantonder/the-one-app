@@ -54,6 +54,9 @@ fn every_command() -> String {
                                        read from stdin (a line typed, or a whole file); for a person's value, vault
                                        request asks them instead
   {CLI} vault use <item> <app> [--off] switch an app on (or off) for an item; only the person lets agents use one
+  {CLI} vault grant <device> [--off] [--scope s]
+                                       let a machine open a Vault's secrets and fill them in (or no longer); only
+                                       its admins say, and nobody else, not even its people, reads a secret back
   {CLI} vault fetch <url> [--method M] [--headers <json object>] [--body text]
                                        make a request with {{{{field}}}} filled in from the items the person lets
                                        agents use, a secret field only for its item's sites: you get the answer,
@@ -672,6 +675,11 @@ fn run(args: Vec<String>) -> Result<()> {
             takes_only(&flags, &["scope", "off"])?;
             let scope = flags.get("scope").and_then(Value::as_str).unwrap_or("user");
             println!("{}", vault_use(scope, item, app, !flags.contains_key("off"), agent_from_env().as_deref())?);
+        }
+        ["vault", "grant", device] => {
+            takes_only(&flags, &["scope", "off"])?;
+            let scope = flags.get("scope").and_then(Value::as_str).unwrap_or("user");
+            println!("{}", post("/v1/vault/grant", json!({ "scope": scope, "device": device, "on": !flags.contains_key("off") }))?["said"].as_str().unwrap_or(""));
         }
         ["vault", "fetch", url] => {
             takes_only(&flags, &["method", "headers", "body"])?;
@@ -1876,6 +1884,7 @@ fn vault_tool(op: &str, input: &Map<String, Value>, agent: Option<&str>) -> Resu
             Ok(json!(vault_set(scope, text("item")?, text("field")?, text("value")?, input.get("secret").and_then(Value::as_bool), hosts, input.get("app").and_then(Value::as_str), agent)?))
         }
         "use" => Ok(json!(vault_use(scope, text("item")?, text("app")?, input.get("on") != Some(&json!(false)), agent)?)),
+        "grant" => Ok(post("/v1/vault/grant", json!({ "scope": scope, "device": text("device")?, "on": input.get("on") != Some(&json!(false)) }))?["said"].clone()),
         "fetch" => post("/v1/vault/fetch", json!({ "url": text("url")?, "method": input.get("method"), "headers": input.get("headers"), "body": input.get("body"), "agent": agent })),
         "remove" => Ok(json!(vault_remove(scope, text("item")?, input.get("field").and_then(Value::as_str))?)),
         "request" => {

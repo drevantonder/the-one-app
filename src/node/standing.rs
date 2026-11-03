@@ -30,6 +30,8 @@ fn grant_of(token: &str) -> Option<(Scope, &str)> {
 pub(super) struct Standing {
     /// The app keys grants sealed to this device, by (scope, app), each by epoch: kept while the grant is in force.
     keys: Mutex<HashMap<(Scope, String), crate::db::Keys>>,
+    /// The Vault secret keys sealed to this machine, by scope and number, each the one its `vault` entry names.
+    pub(super) vault: Mutex<HashMap<(Scope, u32), [u8; 32]>>,
     /// The grants this device is renewing now.
     renewing: Mutex<std::collections::HashSet<(Key, Scope, String)>>,
 }

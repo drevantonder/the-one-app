@@ -189,7 +189,7 @@ pub fn back_up(job: Job, blob: impl Fn(&str) -> Option<Vec<u8>>) -> Result<Optio
 }
 
 /// Copies what a scope's folder in the install's bucket has that the place lacks, into `<install>/bucket/`, laid out
-/// as the bucket is: each epoch's key sealed to the recovery key, each app's key in each epoch (sealed under it), and
+/// as the bucket is: each epoch's key and Vault key sealed to the recovery key, each app's key in each epoch (sealed under it), and
 /// each database's new steps and newest copy (sealed as they are), past what `snap` says it has.
 fn copy_bucket(bucket: &Place, place: &Place, install: &str, scope: &str, snap: &mut Snapshot) -> Result<()> {
     let folder = folder(scope);
@@ -204,6 +204,10 @@ fn copy_bucket(bucket: &Place, place: &Place, install: &str, scope: &str, snap: 
     };
     for n in bucket.list(&format!("{folder}/_epochs"))? {
         copy(&format!("{folder}/_epochs/{n}/recovery"), true)?;
+    }
+    // And each of its Vault's keys, sealed to the recovery key, so what's sealed in its items comes back with it.
+    for n in bucket.list(&format!("{folder}/_vault"))? {
+        copy(&format!("{folder}/_vault/{n}/recovery"), true)?;
     }
     for app in bucket.list(&folder)?.into_iter().filter(|a| crate::members::valid_app_name(a) || a == crate::members::APP) {
         for n in bucket.list(&format!("{folder}/{app}/_key"))? {

@@ -166,6 +166,12 @@ pub struct Members {
     /// Standing work: until when (milliseconds) each endpoint may hold an app's keys in a scope, by (endpoint, scope,
     /// app), as the latest `grant` of each said; one with `until: 0` is gone.
     pub grants: BTreeMap<(Key, Scope, String), Grant>,
+    /// Each scope's Vault key, by its newest `vault` entry that counts: items' secrets are sealed to its public half,
+    /// which only the machines it lists open.
+    pub vaults: BTreeMap<Scope, VaultKey>,
+    /// Each Vault key's public half, by scope and number: a machine takes a secret key from the bucket as key n only
+    /// if it's this one's.
+    pub vault_publics: BTreeMap<(Scope, u32), [u8; 32]>,
     /// Where each person's own things run besides their own machines, as their latest `runs` said from one of their
     /// own devices: the install's other compute endpoints that run their own scope (`runs_for`).
     pub runs: BTreeMap<String, BTreeSet<Key>>,
@@ -214,6 +220,15 @@ pub struct Grant {
     pub by: String,
     pub until: u64,
     pub hashes: BTreeMap<u32, String>,
+}
+
+/// A scope's Vault key: its number, its X25519 public half, and the machines its secret half is sealed to
+/// (`keys::vault_key_name`), besides the recovery key. A new one whenever who's granted changes.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct VaultKey {
+    pub n: u32,
+    pub public: [u8; 32],
+    pub to: Vec<Key>,
 }
 
 /// A scope's epoch: its number, the endpoints it was first sealed to (`keys::epoch_name`), besides the recovery key,
@@ -311,6 +326,11 @@ impl Members {
     /// listed, by someone who may still grant there.
     pub fn grants_at(&self, now: u64) -> impl Iterator<Item = (&(Key, Scope, String), &Grant)> {
         self.grants.iter().filter(move |((k, s, _), g)| g.until > now && self.machine(k).is_some() && self.grants_in(&g.by, s))
+    }
+
+    /// Whether `endpoint` is granted `scope`'s Vault now: its newest `vault` entry lists it, and it's still listed.
+    pub fn opens_vault(&self, endpoint: &Key, scope: &Scope) -> bool {
+        self.vaults.get(scope).is_some_and(|v| v.to.contains(endpoint)) && self.machine(endpoint).is_some()
     }
 
     /// Whether `user` may grant standing work in a scope: their own, a group's they're an admin of, or `global` as an
@@ -644,6 +664,18 @@ impl Members {
                     0 => drop(self.grants.remove(&(endpoint, scope, app))),
                     until => drop(self.grants.insert((endpoint, scope, app), Grant { by: w, until, hashes })),
                 }
+            }
+            "vault" => {
+                // Who opens a scope's Vault is its admins' to say, never a member's who can only add to it.
+                let scope = Scope::parse(&text("scope")?)?;
+                ensure!(self.grants_in(&w, &scope), "only the scope's person, or its admins, say which machines open its Vault");
+                let n = data["n"].as_u64().context("no n")?;
+                ensure!(n == self.vaults.get(&scope).map_or(0, |v| v.n) as u64 + 1, "a Vault key follows the one before it");
+                let public = key_of("public")?;
+                let to = data["to"].as_array().context("no to")?.iter().map(|k| unhex(k.as_str().unwrap_or(""))).collect::<Result<Vec<_>>>()?;
+                ensure!(to.iter().all(|k| self.compute(k).is_some() || self.serverless() == Some(*k)), "a Vault opens only on the install's machines that run things");
+                self.vault_publics.insert((scope.clone(), n as u32), public);
+                self.vaults.insert(scope, VaultKey { n: n as u32, public, to });
             }
             "group" => {
                 let group = id_of("group")?;
@@ -1122,6 +1154,11 @@ pub fn epoch(scope: &Scope, n: u32, to: &[Key], hash: &str) -> Content {
     node("epoch", json!({ "scope": scope.to_string(), "n": n, "to": to.iter().map(hex).collect::<Vec<_>>(), "hash": hash }))
 }
 
+/// A scope's Vault key `n`, its public half `public`, sealed to the machines `to`.
+pub fn vault(scope: &Scope, n: u32, public: &[u8; 32], to: &[Key]) -> Content {
+    node("vault", json!({ "scope": scope.to_string(), "n": n, "public": hex(public), "to": to.iter().map(hex).collect::<Vec<_>>() }))
+}
+
 /// Where its writer's own things run besides their own machines: the install's others that run their own scope.
 pub fn runs(on: &[Key]) -> Content {
     node("runs", json!({ "on": on.iter().map(hex).collect::<Vec<_>>() }))
@@ -1515,6 +1552,39 @@ mod tests {
         assert!(keys(BOB, &[Scope::Global, bob]).is_empty(), "nor a call that reaches it");
         assert!(keys(BOB, &[andre]).is_empty(), "nor Andre's, which Bob may not use");
         assert!(keys("stranger", &[Scope::Global]).is_empty());
+    }
+
+    #[test]
+    fn only_a_scopes_admins_say_which_machines_open_its_vault() {
+        let (mut mac, mut entries) = setup();
+        let (mut bobs, linux) = (Dev::new(3), Dev::new(4));
+        add(&mut entries, &mut mac, ANDRE, device(&linux.endpoint(), ANDRE, "linux", &[Kind::Compute], None));
+        add(&mut entries, &mut mac, ANDRE, device(&bobs.endpoint(), BOB, "bob's phone", &[Kind::Client], Some(("Bob", Role::Member))));
+        let (andre, bob, macs, bobs_id) = (Scope::User(ANDRE.into()), Scope::User(BOB.into()), mac.id(), bobs.id());
+        // A member of everyone's can add to its Vault, never say who opens it, nor open someone else's own.
+        add(&mut entries, &mut bobs, BOB, vault(&Scope::Global, 1, &[9; 32], &[linux.id()]));
+        add(&mut entries, &mut bobs, BOB, vault(&andre, 1, &[9; 32], &[linux.id()]));
+        let m = members(&entries);
+        assert!(!m.opens_vault(&linux.id(), &Scope::Global) && !m.opens_vault(&linux.id(), &andre), "only a scope's admins grant its Vault");
+        // A Vault opens only on a machine that runs things: not a person's phone.
+        add(&mut entries, &mut bobs, BOB, vault(&bob, 1, &[9; 32], &[bobs_id]));
+        assert!(members(&entries).vaults.get(&bob).is_none(), "not on a client device");
+        add(&mut entries, &mut bobs, BOB, vault(&bob, 1, &[9; 32], &[linux.id()]));
+        add(&mut entries, &mut mac, ANDRE, vault(&Scope::Global, 1, &[8; 32], &[linux.id()]));
+        let m = members(&entries);
+        assert!(m.opens_vault(&linux.id(), &bob) && m.opens_vault(&linux.id(), &Scope::Global));
+        assert!(!m.opens_vault(&macs, &Scope::Global), "only the machines it names");
+        // A new key follows the one before; one that skips or repeats a number doesn't count.
+        add(&mut entries, &mut mac, ANDRE, vault(&Scope::Global, 1, &[7; 32], &[macs]));
+        add(&mut entries, &mut mac, ANDRE, vault(&Scope::Global, 3, &[7; 32], &[macs]));
+        assert_eq!(members(&entries).vaults[&Scope::Global].public, [8; 32]);
+        add(&mut entries, &mut mac, ANDRE, vault(&Scope::Global, 2, &[6; 32], &[]));
+        let m = members(&entries);
+        assert!(!m.opens_vault(&linux.id(), &Scope::Global), "a new key with no machines: no machine opens what's sealed to it");
+        // A machine removed opens nothing more.
+        add(&mut entries, &mut bobs, BOB, node("remove", json!({ "key": hex(&linux.id()), "seq": null })));
+        add(&mut entries, &mut mac, ANDRE, node("remove", json!({ "key": hex(&linux.id()), "seq": null })));
+        assert!(!members(&entries).opens_vault(&linux.id(), &bob));
     }
 
     #[test]

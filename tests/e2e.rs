@@ -347,6 +347,21 @@ async fn apps_use_only_the_items_they_are_switched_on_for() {
     }
     // Nothing a person or app reads says it.
     assert!(!json!([a.vault(&me, None).await.unwrap(), a.call(call("two", "items", json!({}))).await.unwrap(), a.state()]).to_string().contains("s3cret-in-the-vault"));
+
+    // Its secrets open only on a machine its scope's admins grant the Vault: not with the scope's own keys, which this
+    // device's person holds, so neither they nor a member who set an item reads it back.
+    a.vault_grant(&me, &mine, "vault", false).await.unwrap();
+    let shut = a.call(send("two", "{{token}}")).await.unwrap_err();
+    assert!(format!("{shut:#}").contains("opened only by the machines"), "{shut:#}");
+    // Set where no machine opens it, it's sealed all the same; and nobody who can't open one changes where it goes.
+    a.set_item(&me, &mine, json!({ "title": "Another", "fields": { "key": { "value": "set-but-never-read", "secret": true } }, "hosts": ["127.0.0.1"], "apps": ["two"] })).await.unwrap();
+    let moved = a.set_item(&me, &mine, json!({ "id": made, "hosts": ["evil.example.com"] })).await.unwrap_err();
+    assert!(format!("{moved:#}").contains("Only a machine that opens"), "{moved:#}");
+    let moved = a.set_item(&me, &mine, json!({ "id": made, "apps": ["one", "two"] })).await.unwrap_err();
+    assert!(format!("{moved:#}").contains("Only a machine that opens"), "nor which apps use it: {moved:#}");
+    a.vault_grant(&me, &mine, "vault", true).await.unwrap();
+    assert_eq!(a.call(send("two", "{{token}}")).await.unwrap()["authorization"], "s3cret-in-the-vault", "granted again, it opens what it opened before");
+    assert_eq!(a.call(send("one", "{{token}}")).await.unwrap()["authorization"], "{{token}}", "still only for the app switched on");
 }
 
 /// A device whose key is still in server.json, from before devices were called devices, never quietly becomes a new one.

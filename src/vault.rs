@@ -1,9 +1,11 @@
 //! The Vault: items, each in one scope, with named fields (secret ones set, never read back), the hosts its secret
 //! fields go to, and the apps switched on for it. A scope's items are rows of the node's database `vault` there,
-//! sealed under the scope's epoch like any data, so a node reads them only with that database's key: its own person's,
-//! or one a caller hands a call (`x-one-keys`), never the whole log's. Apps write `{{<item id>:field}}` (or
-//! `{{field}}`) where a field goes, and the node fills it in on the way out: into a web request to one of its hosts,
-//! or into the input of a call to a sidecar whose name is one of them.
+//! sealed under the scope's epoch like any data; and in each, its secret fields' values, its hosts and its apps are
+//! sealed again to the scope's Vault key (`Sealed`), whose secret half only the machines its admins grant hold
+//! (`keys::vault_key_name`). So a member who opens the scope adds an item and never reads one back, and nobody who
+//! can't open an item changes where it goes or who uses it. Apps write `{{<item id>:field}}` (or `{{field}}`) where a
+//! field goes, and a granted machine fills it in on the way out: into a web request to one of its hosts, or into the
+//! input of a call to a sidecar whose name is one of them.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -38,6 +40,39 @@ pub struct Item {
     pub user: String,
     pub time: u64,
     pub made: u64,
+    /// Its secret fields' values, hosts and apps, sealed to the scope's Vault key `n`: what counts of them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sealed: Option<Sealed>,
+    /// Whether this machine opened it, or it has nothing sealed: only then are its secrets, hosts and apps its own.
+    #[serde(skip)]
+    pub opened: bool,
+}
+
+/// What's sealed of an item: the number of the scope's Vault key it's sealed to, and `keys`'s `seal_to` of its
+/// `Secrets` to that key's public half, base64url.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Sealed {
+    pub n: u32,
+    pub sealed: String,
+}
+
+/// What an item's box holds: its id (so it opens as no other item), its secret fields' values, its hosts and apps.
+#[derive(Serialize, Deserialize)]
+struct Secrets {
+    id: String,
+    values: BTreeMap<String, String>,
+    hosts: Vec<String>,
+    apps: BTreeSet<String>,
+}
+
+/// How a write seals what it changes: with the Vault secret keys this machine holds, by number (only if it's granted
+/// now), and the scope's newest public key, if it has one.
+pub struct Sealing<'a> {
+    pub keys: Option<&'a BTreeMap<u32, [u8; 32]>>,
+    pub public: Option<(u32, [u8; 32])>,
+    /// The scope's name and the machines that open its Vault, as a person reads them.
+    pub scope: &'a str,
+    pub machines: &'a str,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -117,17 +152,91 @@ pub fn load(conn: &Connection) -> Result<Items> {
     let mut out = Items::new();
     for row in crate::db::query(conn, "select id, item from items", &[])? {
         let (Some(id), Some(item)) = (row["id"].as_str(), row["item"].as_str()) else { continue };
-        out.insert(id.to_string(), serde_json::from_str(item).context("an item that isn't one")?);
+        let mut item: Item = serde_json::from_str(item).context("an item that isn't one")?;
+        item.opened = !item.fields.values().any(|f| f.secret);
+        out.insert(id.to_string(), item);
     }
     Ok(out)
 }
 
-/// Applies a change (as `apply`) to a scope's database, inside a write: → the item's id.
-pub fn change(conn: &Connection, data: &Value, user: &str, time: u64, known: impl Fn(&str) -> bool) -> Result<String> {
+/// Opens each item sealed to a Vault key in `keys`: its secret fields' values, hosts and apps become the sealed ones.
+/// One that doesn't open, or opens as another item, stays shut.
+pub fn open_all(items: &mut Items, keys: &BTreeMap<u32, [u8; 32]>) {
+    for (id, item) in items.iter_mut() {
+        let Some(sealed) = &item.sealed else { continue };
+        let Some(key) = keys.get(&sealed.n) else { continue };
+        let opened = data_encoding::BASE64URL_NOPAD.decode(sealed.sealed.as_bytes()).ok().and_then(|b| crate::kernel::open_sealed(key, &b).ok()).and_then(|b| serde_json::from_slice::<Secrets>(&b).ok());
+        let Some(s) = opened.filter(|s| s.id == *id) else {
+            tracing::warn!("{:?}'s secrets didn't open with {}'s Vault key {}", item.title, id, sealed.n);
+            continue;
+        };
+        for (name, f) in item.fields.iter_mut().filter(|(_, f)| f.secret) {
+            f.value = s.values.get(name).cloned().unwrap_or_default();
+        }
+        (item.hosts, item.apps, item.opened) = (s.hosts, s.apps, true);
+    }
+}
+
+/// Seals an item's secrets, hosts and apps to the Vault key `n` (`public`).
+fn seal_item(id: &str, item: &mut Item, n: u32, public: &[u8; 32]) -> Result<()> {
+    let values = item.fields.iter().filter(|(_, f)| f.secret).map(|(n, f)| (n.clone(), f.value.clone())).collect();
+    let s = Secrets { id: id.to_string(), values, hosts: item.hosts.clone(), apps: item.apps.clone() };
+    item.sealed = Some(Sealed { n, sealed: data_encoding::BASE64URL_NOPAD.encode(&crate::kernel::seal_to(public, &serde_json::to_vec(&s)?)?) });
+    Ok(())
+}
+
+/// An item as its row keeps it: its secret fields' values only in its box.
+fn row(item: &Item) -> Result<String> {
+    let mut item = item.clone();
+    for f in item.fields.values_mut().filter(|f| f.secret) {
+        f.value = String::new();
+    }
+    Ok(serde_json::to_string(&item)?)
+}
+
+/// Applies a change (as `apply`) to a scope's database, inside a write, sealing what it changes (`sealing`): →
+/// the item's id. An item with secret fields is sealed anew, to the scope's newest Vault key, only once every secret
+/// value is known: given in this change, or opened here. Otherwise only its title, type, domain and plain fields
+/// change, so nobody who can't open it changes where it goes or who uses it. A machine granted the newest key seals
+/// each item it opened under an older one to it too.
+pub fn change(conn: &Connection, data: &Value, user: &str, time: u64, known: impl Fn(&str) -> bool, sealing: &Sealing) -> Result<String> {
     let mut items = load(conn)?;
+    if let Some(keys) = sealing.keys {
+        open_all(&mut items, keys);
+    }
+    let before = items.get(data["id"].as_str().unwrap_or("")).cloned();
     let id = apply(&mut items, data, user, time, known)?;
+    let given = |name: &str| data["fields"][name]["value"].is_string();
+    if let Some(item) = items.get_mut(&id) {
+        let secrets: Vec<String> = item.fields.iter().filter(|(_, f)| f.secret).map(|(n, _)| n.clone()).collect();
+        let open = before.as_ref().is_some_and(|b| b.opened);
+        // Each secret value: given now, or there before and known here (opened, or a plain field made secret).
+        let all_known = secrets.iter().all(|n| given(n) || before.as_ref().and_then(|b| b.fields.get(n)).is_some_and(|f| open || !f.secret));
+        match (secrets.is_empty(), all_known) {
+            (true, _) => (item.sealed, item.opened) = (None, true),
+            (false, true) => {
+                let (n, public) = sealing.public.with_context(|| format!("No machine opens {}’s Vault yet, so nothing secret can be kept there: its admins grant one with one vault grant <machine>.", sealing.scope))?;
+                seal_item(&id, item, n, &public)?;
+                item.opened = true;
+            }
+            (false, false) => {
+                // Shut here: its box stays as it was, and what's sealed in it with it.
+                let b = before.as_ref().context("a secret field's value is given when it's made")?;
+                let moved = !data["hosts"].is_null() || !data["apps"].is_null() || secrets.len() != b.fields.values().filter(|f| f.secret).count();
+                ensure!(!moved, "Only a machine that opens {}’s Vault ({}) changes where {} is sent, which apps use it, or its secret fields, unless every secret field is given again.", sealing.scope, sealing.machines, b.title);
+                (item.sealed, item.hosts, item.apps) = (b.sealed.clone(), b.hosts.clone(), b.apps.clone());
+            }
+        }
+    }
+    // Sealed anew to the newest key, each this machine opened under an older one.
+    if let (Some(_), Some((n, public))) = (sealing.keys, sealing.public) {
+        for (other, item) in items.iter_mut().filter(|(i, it)| **i != id && it.opened && it.sealed.as_ref().is_some_and(|s| s.n < n)) {
+            seal_item(other, item, n, &public)?;
+            crate::db::execute(conn, "insert or replace into items values (?, ?)", &[json!(other), json!(row(item)?)])?;
+        }
+    }
     match items.get(&id) {
-        Some(item) => crate::db::execute(conn, "insert or replace into items values (?, ?)", &[json!(id), json!(serde_json::to_string(item)?)])?,
+        Some(item) => crate::db::execute(conn, "insert or replace into items values (?, ?)", &[json!(id), json!(row(item)?)])?,
         None => crate::db::execute(conn, "delete from items where id = ?", &[json!(id)])?,
     };
     Ok(id)
@@ -146,20 +255,39 @@ impl Lookup {
         self.scopes.iter().filter(move |(s, _)| s == scope).flat_map(|(_, items)| items.iter())
     }
 
-    fn oldest(&self, scope: &Scope, field: &str) -> Option<(Vec<String>, String)> {
+    fn oldest<'a>(&'a self, scope: &Scope, field: &'a str) -> Option<(&'a Item, &'a str)> {
         let found = self.items(scope).filter(|(_, i)| i.apps.contains(&self.app) && i.fields.contains_key(field)).min_by_key(|(_, i)| i.made)?;
-        filled(found.1, field)
+        Some((found.1, field))
     }
 
-    /// What a placeholder names, as (hosts, value; no hosts for a plain field): `<item id>:field` of an item in any of
-    /// the scopes, `field` of the oldest item that has it in the user's own scope, else in `global`, or
-    /// `<group id>/field` in that group's; always of an item the app is switched on for.
-    pub fn get(&self, name: &str) -> Option<(Vec<String>, String)> {
+    /// The item and field a placeholder names: `<item id>:field` of an item in any of the scopes, `field` of the
+    /// oldest item that has it in the user's own scope, else in `global`, or `<group id>/field` in that group's;
+    /// always of an item the app is switched on for.
+    fn resolve<'a>(&'a self, name: &'a str) -> Option<(&'a Item, &'a str)> {
         match (name.split_once(':'), name.split_once('/')) {
-            (Some((id, field)), _) => self.scopes.iter().find_map(|(_, items)| items.get(id)).filter(|it| it.apps.contains(&self.app)).and_then(|it| filled(it, field)),
+            (Some((id, field)), _) => self.scopes.iter().find_map(|(_, items)| items.get(id)).filter(|it| it.apps.contains(&self.app)).map(|it| (it, field)),
             (None, Some((group, field))) => self.oldest(&Scope::Group(group.to_string()), field),
             (None, None) => self.oldest(&Scope::User(self.user.clone()), name).or_else(|| self.oldest(&Scope::Global, name)),
         }
+    }
+
+    /// What a placeholder names (`resolve`), as (hosts, value; no hosts for a plain field), if it's opened here.
+    pub fn get(&self, name: &str) -> Option<(Vec<String>, String)> {
+        self.resolve(name).and_then(|(it, field)| filled(it, field))
+    }
+
+    /// Refuses `text` if a placeholder in it names a secret field this machine can't open: it isn't granted the
+    /// item's scope's Vault, so it can't fill it in.
+    pub fn refuse_shut(&self, text: &str) -> Result<()> {
+        for name in placeholders(text) {
+            if let Some((it, field)) = self.resolve(name)
+                && it.fields.get(field).is_some_and(|f| f.secret)
+                && !it.opened
+            {
+                bail!("{name} is opened only by the machines its scope's admins grant its Vault (one vault grant), and this isn't one");
+            }
+        }
+        Ok(())
     }
 
     /// The items the app is switched on for, as its calls see them (`ctx.vault.items()`): the user's own first, then
@@ -183,7 +311,7 @@ impl Lookup {
 
 /// What a placeholder gives: the field's value, and the hosts it may go to (none for a plain field: anywhere).
 pub fn filled(item: &Item, field: &str) -> Option<(Vec<String>, String)> {
-    let f = item.fields.get(field)?;
+    let f = item.fields.get(field).filter(|f| !f.secret || item.opened)?;
     Some((if f.secret { item.hosts.clone() } else { Vec::new() }, f.value.clone()))
 }
 
@@ -224,6 +352,21 @@ pub fn fill(text: &str, host: &str, lookup: impl Fn(&str) -> Option<(Vec<String>
     }
     out.push_str(rest);
     Ok(out)
+}
+
+/// The names of the placeholders in `text`.
+fn placeholders(text: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut rest = text;
+    while let Some(start) = rest.find("{{") {
+        let after = &rest[start + 2..];
+        let Some(end) = after.find("}}") else { break };
+        if placeholder(&after[..end]) {
+            out.push(&after[..end]);
+        }
+        rest = &after[end + 2..];
+    }
+    out
 }
 
 /// Fills every text in `value` as `fill` fills one, for a call to a sidecar (`host` is its name).
@@ -285,11 +428,12 @@ pub fn tools() -> Vec<Value> {
     web["openWorldHint"] = json!(true);
     vec![
         json!({ "name": "vault_list", "description": "The Vault's items you may change: title, type, fields (a secret one never with its value), the sites they're sent to (hosts), the apps switched on for each (apps) and those that want it (wanted_by), and app when an app's sign-in keeps it.", "inputSchema": { "type": "object", "properties": { "scope": scope } }, "annotations": hints(true, false) }),
-        json!({ "name": "vault_set", "description": "Set a field of an item, making the item if no item has that title. An app puts {{<item id>:<field>}} in a request and your device fills it in, a secret field only for the item's hosts; nobody reads a secret back. When the person has the value, use vault_request instead: never ask them to paste it into the chat.", "inputSchema": { "type": "object", "required": ["item", "field", "value"], "properties": { "item": item, "field": { "type": "string", "description": "the field's name, like token or password" }, "value": { "type": "string", "description": "the field's value" }, "secret": { "type": "boolean", "description": "never shown again; true for keys, passwords and tokens" }, "hosts": { "type": "array", "items": { "type": "string" }, "description": "host names its secret fields are sent to, like api.example.com" }, "app": { "type": "string", "description": "an app to switch on for it" }, "scope": scope } }, "annotations": hints(false, false) }),
+        json!({ "name": "vault_set", "description": "Set a field of an item, making the item if no item has that title. An app puts {{<item id>:<field>}} in a request and a machine that opens the Vault fills it in, a secret field only for the item's hosts; nobody reads a secret back, not you either. When the person has the value, use vault_request instead: never ask them to paste it into the chat.", "inputSchema": { "type": "object", "required": ["item", "field", "value"], "properties": { "item": item, "field": { "type": "string", "description": "the field's name, like token or password" }, "value": { "type": "string", "description": "the field's value" }, "secret": { "type": "boolean", "description": "never shown again; true for keys, passwords and tokens" }, "hosts": { "type": "array", "items": { "type": "string" }, "description": "host names its secret fields are sent to, like api.example.com" }, "app": { "type": "string", "description": "an app to switch on for it" }, "scope": scope } }, "annotations": hints(false, false) }),
         json!({ "name": "vault_use", "description": "Switch an app on (or off) for an item, so its calls may use the item's fields. Only the person switches agents on (for vault_fetch): ask them with vault_request.", "inputSchema": { "type": "object", "required": ["item", "app"], "properties": { "item": item, "app": { "type": "string", "description": "the app's name, like gmail" }, "on": { "type": "boolean", "description": "false switches it off" }, "scope": scope } }, "annotations": hints(false, false) }),
+        json!({ "name": "vault_grant", "description": "Let a machine of your One App open a Vault's secrets and fill them into requests (or, with on false, no longer). Only the Vault's admins say which: the person for their own, a group's admins, the install's for everyone's. Nobody else reads a secret back, not even on their own device.", "inputSchema": { "type": "object", "required": ["device"], "properties": { "device": { "type": "string", "description": "the machine's name" }, "on": { "type": "boolean", "description": "false: it no longer opens it" }, "scope": scope } }, "annotations": hints(false, false) }),
         json!({ "name": "vault_remove", "annotations": hints(false, true), "description": "Delete an item, or with field, one of its fields.", "inputSchema": { "type": "object", "required": ["item"], "properties": { "item": item, "field": { "type": "string", "description": "only this field, by name; the whole item when not given" }, "scope": scope, "confirm": confirm_input() } } }),
         json!({ "name": "vault_request", "description": "Ask the person for an item an app may use, instead of handling its values yourself: need names what the app declares (its vault), or give title, fields and hosts. Returns a link to give them; it opens a sheet where they pick one of their items or make one (and their Settings lists it). You never see a secret. Tell the person; check vault_status when they say they've done it.", "inputSchema": { "type": "object", "properties": { "app": { "type": "string", "description": "the app that will use it; leave it out for one you use yourself with vault_fetch" }, "need": { "type": "string", "description": "what the app declares it needs, by name, like client for gmail; leave it out and give title, fields and hosts for anything else" }, "title": { "type": "string", "description": "the item's title, for one no app declares" }, "fields": { "type": "object", "description": "field name → { secret: true|false }", "additionalProperties": { "type": "object", "properties": { "secret": { "type": "boolean" } } } }, "hosts": { "type": "array", "items": { "type": "string" }, "description": "host names its secret fields are sent to, like api.example.com" }, "why": { "type": "string", "description": "one line the person sees: what it's for and where to find it" }, "scope": scope } }, "annotations": hints(false, false) }),
-        json!({ "name": "vault_fetch", "description": "Make an HTTP request with your person's Vault items filled in, without seeing them: write {{<field>}} (or {{<item id>:<field>}}) where a value goes, in url, headers or body, and your device fills it in from the items they let agents use, a secret field only for its item's sites. You get { status, headers, body }; a secret the site echoes back is blotted out. To get an item, ask with vault_request, leaving out app.", "inputSchema": { "type": "object", "required": ["url"], "properties": { "url": { "type": "string", "description": "the URL, with {{<field>}} where a value goes" }, "method": { "type": "string", "description": "GET by default, POST with a body" }, "headers": { "type": "object", "additionalProperties": { "type": "string" }, "description": "like { \"authorization\": \"Bearer {{token}}\" }" }, "body": { "type": "string", "description": "the request's body, with {{<field>}} where a value goes" } } }, "annotations": web }),
+        json!({ "name": "vault_fetch", "description": "Make an HTTP request with your person's Vault items filled in, without seeing them: write {{<field>}} (or {{<item id>:<field>}}) where a value goes, in url, headers or body, and a machine that opens the Vault fills it in from the items they let agents use, a secret field only for its item's sites. You get { status, headers, body }; a secret the site echoes back is blotted out. To get an item, ask with vault_request, leaving out app.", "inputSchema": { "type": "object", "required": ["url"], "properties": { "url": { "type": "string", "description": "the URL, with {{<field>}} where a value goes" }, "method": { "type": "string", "description": "GET by default, POST with a body" }, "headers": { "type": "object", "additionalProperties": { "type": "string" }, "description": "like { \"authorization\": \"Bearer {{token}}\" }" }, "body": { "type": "string", "description": "the request's body, with {{<field>}} where a value goes" } } }, "annotations": web }),
         json!({ "name": "vault_status", "description": "How a request for an item went: waiting, set, declined or expired, and who answered. Never a value.", "inputSchema": { "type": "object", "required": ["id"], "properties": { "id": { "type": "string", "description": "the request's id, from vault_request" } } }, "annotations": hints(true, false) }),
     ]
 }
@@ -307,4 +451,53 @@ fn fills_fields_only_for_their_hosts() {
     assert!(fill("Bearer {{token}}", "evil.example.com", lookup).is_err(), "never to another host");
     assert_eq!(fill("{{0123456789abcdef:user}}", "evil.example.com", lookup).unwrap(), "andre", "a plain field goes anywhere");
     assert_eq!(fill("{{nope}} {{ not one }} {{", "evil.example.com", lookup).unwrap(), "{{nope}} {{ not one }} {{");
+}
+
+#[test]
+fn secrets_hosts_and_apps_open_only_with_the_vault_key() {
+    let conn = Connection::open_in_memory().unwrap();
+    conn.execute(SCHEMA, []).unwrap();
+    let secret: [u8; 32] = rand::random();
+    let keys = BTreeMap::from([(1, secret)]);
+    let public = Some((1, crate::kernel::public_of(&secret)));
+    let member = Sealing { keys: None, public, scope: "Everyone's", machines: "linux" };
+    let granted = Sealing { keys: Some(&keys), public, scope: "Everyone's", machines: "linux" };
+    let id = "0123456789abcdef";
+    // A member adds an item: sealed to the Vault key, so the row they can read has no secret.
+    let made = json!({ "id": id, "title": "Key", "fields": { "user": { "value": "andre" }, "token": { "value": "s3cret", "secret": true } }, "hosts": ["api.example.com"], "apps": ["two"] });
+    change(&conn, &made, "bob", 1, |_| true, &member).unwrap();
+    let rows = crate::db::query(&conn, "select item from items", &[]).unwrap();
+    assert!(!rows[0]["item"].as_str().unwrap().contains("s3cret"), "the row has it only sealed");
+    let shut = load(&conn).unwrap();
+    let lookup = Lookup { app: "two".into(), user: "bob".into(), scopes: vec![(Scope::Global, shut.clone())] };
+    assert_eq!(lookup.get("token"), None, "not opened without the Vault key");
+    assert!(lookup.refuse_shut("Bearer {{token}}").is_err() && lookup.get("user").is_some(), "a plain field still fills");
+    // Nobody who can't open it changes where it goes or which apps use it, though its title is anyone's to change.
+    assert!(change(&conn, &json!({ "id": id, "hosts": ["evil.example.com"] }), "bob", 2, |_| true, &member).is_err());
+    assert!(change(&conn, &json!({ "id": id, "apps": ["evil"] }), "bob", 2, |_| true, &member).is_err());
+    change(&conn, &json!({ "id": id, "title": "Key, renamed" }), "bob", 2, |_| true, &member).unwrap();
+    // Nor by rewriting its row: what's sealed counts.
+    let mut row: Value = serde_json::from_str(crate::db::query(&conn, "select item from items", &[]).unwrap()[0]["item"].as_str().unwrap()).unwrap();
+    (row["hosts"], row["apps"]) = (json!(["evil.example.com"]), json!(["evil"]));
+    crate::db::execute(&conn, "update items set item = ?", &[json!(row.to_string())]).unwrap();
+    let mut opened = load(&conn).unwrap();
+    open_all(&mut opened, &keys);
+    let it = &opened[id];
+    assert_eq!((it.hosts.clone(), it.apps.iter().cloned().collect::<Vec<_>>(), it.title.as_str()), (vec!["api.example.com".to_string()], vec!["two".to_string()], "Key, renamed"));
+    let lookup = Lookup { app: "two".into(), user: "bob".into(), scopes: vec![(Scope::Global, opened.clone())] };
+    assert_eq!(fill("Bearer {{token}}", "api.example.com", |n| lookup.get(n)).unwrap(), "Bearer s3cret");
+    assert!(fill("{{token}}", "evil.example.com", |n| lookup.get(n)).is_err(), "only to its hosts");
+    // Another item's box passed off as this one's doesn't open.
+    let other = "fedcba9876543210";
+    change(&conn, &json!({ "id": other, "title": "Other", "fields": { "token": { "value": "x", "secret": true } }, "hosts": ["evil.example.com"] }), "bob", 3, |_| true, &member).unwrap();
+    let mut items = load(&conn).unwrap();
+    let theirs = items[other].sealed.clone();
+    items.get_mut(id).unwrap().sealed = theirs;
+    open_all(&mut items, &keys);
+    assert!(!items[id].opened, "a box opens only as its own item");
+    // A granted machine changes its hosts and apps, since it opens it.
+    change(&conn, &json!({ "id": id, "hosts": ["api2.example.com"], "apps": ["two", "three"] }), "andre", 4, |_| true, &granted).unwrap();
+    let mut items = load(&conn).unwrap();
+    open_all(&mut items, &keys);
+    assert_eq!((items[id].hosts.clone(), items[id].fields["token"].value.as_str()), (vec!["api2.example.com".to_string()], "s3cret"));
 }

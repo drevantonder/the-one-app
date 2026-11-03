@@ -7,6 +7,8 @@
 //! <folder>/_epochs/<n>/recovery             and to the install's recovery key
 //! <folder>/<app>/_key/<n>                    the app's key in epoch n, sealed under epoch n's key (`kernel::seal_app_key`)
 //! <folder>/<app>/_grants/<endpoint>/<n>      and sealed to an endpoint a `grant` keeps it running on (`kernel::seal_to`)
+//! <folder>/_vault/<n>/<endpoint key hex>     the scope's Vault secret key n, sealed to a machine its `vault` entry grants
+//! <folder>/_vault/<n>/recovery               and to the install's recovery key
 //! ```
 //!
 //! An endpoint is known by its Ed25519 key, which signs, and things are sealed to its X25519 key: for one in Rust, its
@@ -168,6 +170,12 @@ pub fn app_key_name(scope: &str, app: &str, n: u32) -> String {
 /// `grant`, for standing work): its key in hex.
 pub fn grant_name(scope: &str, app: &str, endpoint: &str, n: u32) -> String {
     format!("{}/{app}/_grants/{endpoint}/{n}", crate::bucket::folder(scope))
+}
+
+/// Where a scope's Vault secret key `n` is kept sealed to `to`: a machine's key granted it, or `recovery`. Its public
+/// half is in the scope's `vault` entry, and what's sealed to that opens only on those machines.
+pub fn vault_key_name(scope: &str, n: u32, to: &str) -> String {
+    format!("{}/_vault/{n}/{to}", crate::bucket::folder(scope))
 }
 
 /// Seals an object under an epoch's key (or a key from it) and its name: epoch (u32, big-endian) ‖ nonce ‖

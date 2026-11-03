@@ -1,6 +1,8 @@
-//! The Vault: its items in each scope, the node's database `vault` there (`src/vault.rs`), requests for one, and
-//! filling them into apps' and sidecars' requests. A caller's items open only as its other data does: with this
-//! device's own keys for its own person, else with the keys the caller hands (`x-one-keys`), that database's alone.
+//! The Vault: its items in each scope, the node's database `vault` there (`src/vault.rs`), requests for one, which
+//! machines open each scope's (`vault grant`), and filling them into apps' and sidecars' requests. A caller's items
+//! open as its other data does: with this device's own keys for its own person, else with the keys the caller hands
+//! (`x-one-keys`), that database's alone; and their secrets, hosts and apps only on a machine its admins granted the
+//! scope's Vault key, which nobody hands.
 
 use std::collections::BTreeSet;
 
@@ -19,11 +21,98 @@ impl Node {
         Ok((db, bucket))
     }
 
-    /// A scope's items, as `me` opens them.
+    /// A scope's items, as `me` opens them: their secrets too, if this machine opens the scope's Vault.
     pub(super) async fn items(&self, me: &Caller, scope: &Scope) -> Result<Items> {
+        let keys = self.vault_secrets(scope).await?;
         let (db, _) = self.vault_db(me, scope).await?;
         let db = db.lock().await;
-        crate::vault::load(db.connection())
+        let mut items = crate::vault::load(db.connection())?;
+        if let Some(keys) = &keys {
+            crate::vault::open_all(&mut items, keys);
+        }
+        Ok(items)
+    }
+
+    /// The Vault secret keys of `scope` this machine holds, by number, if it's granted the scope's Vault now: each
+    /// sealed to it in the bucket whose public half is the one its `vault` entry names. None if it isn't granted.
+    pub(super) async fn vault_secrets(&self, scope: &Scope) -> Result<Option<BTreeMap<u32, [u8; 32]>>> {
+        let publics: Vec<(u32, [u8; 32])> = self.with(|i| {
+            let m = &i.r.members;
+            Ok(match m.opens_vault(&self.0.id, scope) {
+                true => m.vault_publics.iter().filter(|((s, _), _)| s == scope).map(|((_, n), p)| (*n, *p)).collect(),
+                false => Vec::new(),
+            })
+        })?;
+        if publics.is_empty() {
+            return Ok(None);
+        }
+        let (secret, me) = (self.seal_secret(), hex(&self.0.id));
+        let mut out = BTreeMap::new();
+        for (n, public) in publics {
+            if let Some(key) = self.0.standing.vault.lock().unwrap().get(&(scope.clone(), n)) {
+                out.insert(n, *key);
+                continue;
+            }
+            let name = crate::keys::vault_key_name(&scope.to_string(), n, &me);
+            let Some(o) = crate::bucket::Bucket::get(&self.bucket()?, &name).await? else { continue };
+            match crate::kernel::open_sealed(&secret, &o.bytes).ok().and_then(|k| <[u8; 32]>::try_from(k).ok()).filter(|k| crate::kernel::public_of(k) == public) {
+                Some(key) => {
+                    self.0.standing.vault.lock().unwrap().insert((scope.clone(), n), key);
+                    out.insert(n, key);
+                }
+                None => tracing::warn!("{name} isn't the Vault key its entry names: passed over"),
+            }
+        }
+        Ok(Some(out))
+    }
+
+    /// Says which machines open `scope`'s Vault: `device` added to them (`on`) or taken off, as this device's person,
+    /// who must be the scope's admin. Always a new key pair, sealed to each machine and the install's recovery key,
+    /// its public half in a `vault` entry; what's sealed to the old one is sealed to the new by a machine granted both,
+    /// at its next write there. → what it did, in words.
+    pub async fn vault_grant(&self, me: &Caller, scope: &Scope, device: &str, on: bool) -> Result<Value> {
+        ensure!(me.user == self.user()?, "{} grants only for its own person", self.device_name());
+        let endpoint = self.find_device(device)?;
+        let (mine, may, current, recovery) = self.with(|i| {
+            let m = &i.r.members;
+            Ok((m.client(&self.0.id).is_some(), m.grants_in(&i.user, scope), m.vaults.get(scope).cloned().unwrap_or_default(), m.recovery))
+        })?;
+        ensure!(mine, "{} isn't one of its person's own devices, which are what grant", self.device_name());
+        ensure!(may, "only {scope}'s person, or its admins, say which machines open its Vault");
+        let mut to: Vec<Key> = current.to.iter().copied().filter(|k| *k != endpoint).collect();
+        if on {
+            to.push(endpoint);
+        }
+        self.new_vault_key(scope, current.n + 1, &to, &recovery.context("the install has no recovery key to seal its Vault to")?).await?;
+        // Sealed to the new key here, if this machine opens it: a write that changes nothing else.
+        if to.contains(&self.0.id) && self.vault_secrets(scope).await?.is_some_and(|k| k.len() > 1) {
+            if let Err(err) = self.write_item(me, scope, |items| Ok(items.iter().next().map(|(id, _)| json!({ "id": id })).unwrap_or(Value::Null))).await {
+                tracing::debug!("sealing {scope}'s Vault to its new key: {err:#}");
+            }
+        }
+        let name = self.name_of(&endpoint);
+        Ok(json!({ "said": match on {
+            true => format!("{name} opens this Vault now, and fills its items into requests to their sites."),
+            false => format!("{name} no longer opens this Vault: what's set from now on is sealed to a key it doesn't have."),
+        } }))
+    }
+
+    /// Makes `scope`'s Vault key `n`, for the machines `to`: its `vault` entry first (which, first in causal order,
+    /// makes it), then its secret half sealed to each of them and to the recovery key.
+    pub(super) async fn new_vault_key(&self, scope: &Scope, n: u32, to: &[Key], recovery: &Key) -> Result<()> {
+        let secret: [u8; 32] = rand::random();
+        let public = crate::kernel::public_of(&secret);
+        self.append(&Scope::Global, members::vault(scope, n, &public, to)).await?;
+        ensure!(self.with(|i| Ok(i.r.members.vault_publics.get(&(scope.clone(), n)) == Some(&public)))?, "another device made {scope}'s Vault key {n} just now");
+        let (bucket, name) = (self.bucket()?, scope.to_string());
+        let seals: Vec<(String, [u8; 32])> = self.with(|i| Ok(to.iter().filter_map(|k| i.r.members.seal_key(k).map(|s| (hex(k), s))).collect()))?;
+        for (at, seal) in std::iter::once(("recovery".to_string(), crate::kernel::twin_public(recovery)?)).chain(seals) {
+            crate::db::created(&bucket, &crate::keys::vault_key_name(&name, n, &at), &crate::kernel::seal_to(&seal, &secret)?).await?;
+        }
+        if to.contains(&self.0.id) {
+            self.0.standing.vault.lock().unwrap().insert((scope.clone(), n), secret);
+        }
+        Ok(())
     }
 
     /// `scopes`' items for `me`. A sign-in lacking any of their keys is told them all at once (428); this device's own
@@ -116,6 +205,7 @@ impl Node {
         let me = self.own_caller()?;
         ensure!(asked.user == me.user, "{} fills in only its own person's items", self.device_name());
         let lookup = self.lookup(&me, sidecar, &self.usable_scopes(&me.user)?).await?;
+        lookup.refuse_shut(text)?;
         crate::vault::fill(text, host, |name| lookup.get(name))
     }
 
@@ -144,6 +234,7 @@ impl Node {
                 found
             })
         };
+        lookup.refuse_shut(&req.to_string())?;
         let filled = fill(url)?;
         let mut headers = Vec::new();
         for (name, value) in req["headers"].as_object().into_iter().flatten() {
@@ -235,22 +326,35 @@ impl Node {
     }
 
     /// Changes an item in `scope` for `me`: `change` gives the change (`crate::vault::apply`) from the scope's items as
-    /// they are inside the write, so two devices changing one at once lose nothing. → the item's id. Only someone who
-    /// manages the scope's Vault changes it, and never to switch on an erased app.
+    /// they are inside the write, so two devices changing one at once lose nothing (Null: none). → the item's id.
+    /// Anyone who may use the scope adds an item, sealing its secrets to the scope's Vault key, and changes those they
+    /// set last; only someone who manages the scope's Vault changes another's, and never to switch on an erased app.
     async fn write_item(&self, me: &Caller, scope: &Scope, mut change: impl FnMut(&Items) -> Result<Value>) -> Result<String> {
-        let erased: BTreeSet<String> = self.with(|i| {
+        let (erased, manages, public, machines) = self.with(|i| {
             let m = &i.r.members;
-            ensure!(members::manages_scope(m, &me.user, scope), "Only its admins change {}’s Vault.", scope_name(i, &scope.to_string()));
+            ensure!(m.may_use(&me.user, scope), "You don’t use {}.", scope_name(i, &scope.to_string()));
             ensure!(i.r.holds(scope), "This device can’t open {} yet.", scope_name(i, &scope.to_string()));
-            Ok(m.apps.iter().filter(|(_, a)| a.erased).map(|(n, _)| n.clone()).collect())
+            let v = m.vaults.get(scope);
+            let machines: Vec<String> = v.map(|v| v.to.iter().filter(|k| m.machine(k).is_some()).map(|k| m.machines[k].name.clone()).collect()).unwrap_or_default();
+            Ok((m.apps.iter().filter(|(_, a)| a.erased).map(|(n, _)| n.clone()).collect::<BTreeSet<String>>(), members::manages_scope(m, &me.user, scope), v.map(|v| (v.n, v.public)), machines.join(", ")))
         })?;
+        let keys = self.vault_secrets(scope).await?;
+        let scope_said = self.with(|i| Ok(scope_name(i, &scope.to_string())))?;
+        let sealing = crate::vault::Sealing { keys: keys.as_ref(), public, scope: &scope_said, machines: if machines.is_empty() { "none yet" } else { &machines } };
         let (db, bucket) = self.vault_db(me, scope).await?;
         let mut db = db.lock().await;
         let (at, now) = (db.at(), now_ms());
         let id = db
             .write(&bucket, |c| {
-                let data = change(&crate::vault::load(c)?)?;
-                crate::vault::change(c, &data, &me.user, now, |a| !erased.contains(a))
+                let mut items = crate::vault::load(c)?;
+                if let Some(keys) = sealing.keys {
+                    crate::vault::open_all(&mut items, keys);
+                }
+                let data = change(&items)?;
+                let Some(id) = data["id"].as_str() else { return Ok(String::new()) };
+                ensure!(manages || items.get(id).is_none_or(|it| it.user == me.user), "Only its admins change an item someone else set in {scope_said}’s Vault.");
+                // Who set an item last is whoever changes it, even when nothing else does.
+                crate::vault::change(c, &data, &me.user, now, |a| !erased.contains(a), &sealing)
             })
             .await?;
         if db.at() > at {
@@ -517,6 +621,10 @@ impl Node {
                 json!({})
             }
             ("POST", "/v1/vault/fetch") => self.vault_fetch(me, body).await?,
+            ("POST", "/v1/vault/grant") => {
+                let scope = scope(Some("user"))?.unwrap();
+                self.vault_grant(me, &scope, body["device"].as_str().context("give device")?, body["on"] != false).await?
+            }
             _ => return Ok(None),
         }))
     }

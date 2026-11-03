@@ -730,6 +730,10 @@ impl Node {
             i.read = true;
             Ok(())
         })?;
+        // Its Vault and its first person's own open on this machine, so a new install fills items with no other step.
+        for scope in [Scope::Global, Scope::User(user.clone())] {
+            self.new_vault_key(&scope, 1, &[self.0.id], recovery.verifying_key().as_bytes()).await?;
+        }
         let me = Caller { key: self.0.id, user, agent: None, token: None };
         for (app, _) in crate::config::BUILT_IN {
             self.bring_in(&me, app).await?;

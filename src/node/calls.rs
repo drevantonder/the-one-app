@@ -488,6 +488,7 @@ impl Node {
         if let Some(from) = from.as_ref().filter(|_| input.to_string().contains("{{")) {
             let scopes = self.with(|i| Ok(reachable(i, from, &me.user).into_iter().filter(|s| i.r.holds(s)).collect::<Vec<_>>()))?;
             let lookup = self.lookup(me, from, &scopes).await?;
+            lookup.refuse_shut(&input.to_string())?;
             crate::vault::fill_value(&mut input, app, &|name| {
                 let found = lookup.get(name);
                 if let Some((hosts, value)) = &found {
