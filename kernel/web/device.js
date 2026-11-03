@@ -382,8 +382,9 @@ export class Device {
     await this.renew(scopesOf(k, it.user), [key]);
   }
 
-  /// Takes a person out, for an admin: each of their devices off the network first, then them, then each scope they
-  /// could open but their own (everyone's and their groups') gets a new epoch they don't have. Their own stays as it is.
+  /// Takes a person out, for an admin: each of their devices off the network first, then them (with the last of each of
+  /// their devices' entries it had seen), then each scope they could open but their own (everyone's and their groups')
+  /// gets a new epoch they don't have. Their own stays as it is.
   async removePerson(user) {
     const k = await this.checked(true);
     if (user === this.user) throw new Error("You can’t remove yourself. Another admin can.");
@@ -393,7 +394,13 @@ export class Device {
         if (!/isn.t|not/.test(err.message)) throw err;
       });
     }
-    await this.write("global", members.removeUser({ user }));
+    // The last of each of their devices' entries this browser checked, from which on none counts.
+    const have = (await get(`global:${this.user}`))?.have.split(",") || [];
+    const seqs = Object.fromEntries(theirs.map((key) => {
+      const next = have.find((h) => h.startsWith(`${key}.`))?.split(".")[1];
+      return [key, next ? Number(next) - 1 : null];
+    }));
+    await this.write("global", members.removeUser({ user, seqs }));
     await this.renew(scopesOf(k, user).filter((s) => s !== `user:${user}`), theirs);
   }
 

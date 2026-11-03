@@ -7,7 +7,8 @@ export const members = {
   device: ({ key, seal, user, name, roles = ["client"], newUser }) => node("device", { key, seal, user, name, roles, ...(newUser ? { user_name: newUser.name, role: newUser.role } : {}) }),
   passkey: ({ key, seal, user, name, credential }) => node("device", { key, seal, user, name, roles: ["client"], passkey: credential }),
   role: ({ user, role }) => node("role", { user, role }),
-  removeUser: ({ user }) => node("remove", { user }),
+  /// `seqs`: the last of each of their devices' entries in `global` the remover holds (null for none), by key.
+  removeUser: ({ user, seqs }) => node("remove", { user, seqs }),
   removeDevice: ({ key, seq = null }) => node("remove", { key, seq }),
   setting: ({ name, value = null }) => node("setting", { name, value }),
   group: ({ group, name }) => node("group", { group, name }),

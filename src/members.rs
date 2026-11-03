@@ -195,6 +195,14 @@ fn merge(cuts: &mut Cuts, more: &Cuts) -> bool {
     changed
 }
 
+/// The first seq of a device's in `global` that doesn't count, from the last its remover had seen (null for none).
+fn first_not(seq: &Value) -> Result<u32> {
+    Ok(match seq {
+        Value::Null => 0,
+        seq => u32::try_from(seq.as_u64().context("a seq is a device's last in global, or null")?)?.checked_add(1).context("seq is too big")?,
+    })
+}
+
 /// A grant of standing work: who gave it, until when, and the hash (`keys::epoch_hash`) of the app's key in each epoch
 /// it sealed to the endpoint (`keys::grant_name`), so the endpoint takes from the bucket only those.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -557,18 +565,23 @@ impl Members {
             "remove" => {
                 if let Ok(user) = id_of("user") {
                     ensure!(self.is_admin(&w), "admins only");
+                    // The last of each of their devices' entries in `global` its remover had seen: those after never
+                    // count, wherever they sort, so a device of theirs that hadn't read its removal can't write one that
+                    // sorts before it. A device its remover hadn't seen at all keeps none.
+                    let seqs = data["seqs"].as_object().context("a person's removal says the last of each of their devices' entries its remover had seen (seqs)")?;
+                    let mut cut = Cuts::new();
+                    for d in self.machines.values().filter(|d| d.user == user) {
+                        cut.insert((d.key, "global".to_string()), first_not(seqs.get(&hex(&d.key)).unwrap_or(&Value::Null))?);
+                    }
+                    merge(&mut self.cuts, &cut);
                     self.users.get_mut(&user).context("no such user")?.removed = true;
                 } else {
                     let key = key_of("key")?;
                     ensure!(self.machine(&key).is_some(), "no such key");
                     ensure!(self.looks_after(&w, &key), "only its person or an admin removes a device");
                     // The last of its entries in `global` its remover had seen: those after never count, wherever they sort.
-                    let first_not = match &data["seq"] {
-                        Value::Null => 0,
-                        seq => u32::try_from(seq.as_u64().context("seq is the device's last seq in global, or null")?)?.checked_add(1).context("seq is too big")?,
-                    };
                     ensure!(data.get("seq").is_some(), "a device's removal says the last of its entries its remover had seen (seq)");
-                    merge(&mut self.cuts, &BTreeMap::from([((key, "global".to_string()), first_not)]));
+                    merge(&mut self.cuts, &BTreeMap::from([((key, "global".to_string()), first_not(&data["seq"])?)]));
                     self.machines.get_mut(&key).unwrap().removed = true;
                 }
                 self.devices_at = self.devices_at.max(e.time());
@@ -1038,8 +1051,11 @@ pub fn role(user: &str, role: Role) -> Content {
     node("role", json!({ "user": user, "role": role }))
 }
 
-pub fn remove_user(user: &str) -> Content {
-    node("remove", json!({ "user": user }))
+/// Takes a person out: `seqs` is the last entry in `global` the remover holds of each of their devices (none if it has
+/// none), and their later ones don't count.
+pub fn remove_user(user: &str, seqs: &BTreeMap<Key, Option<u32>>) -> Content {
+    let seqs: serde_json::Map<String, Value> = seqs.iter().map(|(k, seq)| (hex(k), json!(seq))).collect();
+    node("remove", json!({ "user": user, "seqs": seqs }))
 }
 
 /// Takes a device out: `seq` is its last entry in `global` that the remover holds (none if it has none), and its later
@@ -1362,7 +1378,7 @@ mod tests {
         let recovery = Dev::new(9);
         let (mut mac, _, mut bobs, mut entries) = with_bob(&recovery);
         let (mac_id, bob_id) = (mac.id(), bobs.id());
-        add(&mut entries, &mut mac, ANDRE, remove_user(BOB));
+        add(&mut entries, &mut mac, ANDRE, remove_user(BOB, &[(bob_id, None)].into()));
         // A new epoch of everyone's can't be sealed to Bob's phone, and what his phone writes after doesn't count.
         add(&mut entries, &mut mac, ANDRE, epoch(&Scope::Global, 2, &[mac_id, bob_id], &"c".repeat(64)));
         add(&mut entries, &mut bobs, BOB, node("rename", json!({ "user": BOB, "name": "Bobby" })));
@@ -1373,6 +1389,33 @@ mod tests {
         add(&mut entries, &mut mac, ANDRE, epoch(&Scope::Global, 2, &[mac_id], &"c".repeat(64)));
         assert_eq!(members(&entries).epoch(&Scope::Global), 2, "sealed to those left, it does");
         assert!(members(&entries).scopes().contains(&Scope::User(BOB.into())), "their own scope is kept");
+    }
+
+    #[test]
+    fn a_removed_admins_devices_write_nothing_that_counts_after_what_their_remover_had_seen() {
+        const MAL: &str = "c000000000000003";
+        let (mut mac, mut entries) = setup();
+        let (mut laptop, eve, stranger) = (Dev::new(5), Dev::new(6), Dev::new(8));
+        add(&mut entries, &mut mac, ANDRE, device(&laptop.endpoint(), MAL, "mal's laptop", &[Kind::Client], Some(("Mal", Role::Admin))));
+        let before = add(&mut entries, &mut laptop, MAL, node("setting", json!({ "name": "before", "value": "1" })));
+        let read = entries.clone();
+        let removed = add(&mut entries, &mut mac, ANDRE, remove_user(MAL, &[(laptop.id(), Some(before.seq()))].into()));
+        // Mal's laptop, never having read its removal, writes after only what it had read: it sorts before the removal.
+        let admin = laptop.write("global", MAL, device(&eve.endpoint(), "e000000000000005", "eve's", &[Kind::Client], Some(("Eve", Role::Admin))), &read);
+        let recovery = laptop.write("global", MAL, node("recovery", json!({ "key": hex(&stranger.id()) })), &read);
+        entries.extend([admin.clone(), recovery.clone()]);
+        let sorted = causal(entries.clone(), &Default::default());
+        let at = |h: Hash| sorted.iter().position(|e| e.hash() == h).unwrap();
+        assert!(at(admin.hash()) < at(removed.hash()) || at(recovery.hash()) < at(removed.hash()), "one sorts before the removal");
+        let m = members(&entries);
+        assert!(m.settings.contains_key("before"), "what its remover had seen still counts");
+        assert!(m.machine(&eve.id()).is_none() && m.user("e000000000000005").is_none(), "the admin device it wrote doesn't count");
+        assert_eq!(m.recovery, Some([7; 32]), "nor its recovery key");
+        assert!(m.machine(&laptop.id()).is_none() && m.user(MAL).is_none());
+        // A removal that doesn't say what its remover had seen of their devices doesn't count.
+        add(&mut entries, &mut mac, ANDRE, device(&Dev::new(10).endpoint(), "d000000000000004", "dan's", &[Kind::Client], Some(("Dan", Role::Member))));
+        add(&mut entries, &mut mac, ANDRE, node("remove", json!({ "user": "d000000000000004" })));
+        assert!(members(&entries).user("d000000000000004").is_some());
     }
 
     #[test]

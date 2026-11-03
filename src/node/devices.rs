@@ -561,7 +561,7 @@ impl Node {
     }
 
     /// Removes a person, for an admin: the relay told to let each of their devices in no more first, then their `remove`
-    /// entry, and a new epoch of each scope they could open but their own (`global`, and each group they were in),
+    /// entry, saying the last entry of each of their devices it had seen (none after counts), and a new epoch of each scope they could open but their own (`global`, and each group they were in),
     /// sealed to every client left that opens it and the recovery key. Their own scope is kept as it is: removing deletes
     /// nothing. → what was done.
     pub async fn remove_person(&self, caller: &Caller, user: &str) -> Result<Value> {
@@ -583,7 +583,9 @@ impl Node {
                 relay.push(format!("{err:#}"));
             }
         }
-        self.member_content(caller, members::remove_user(&user)).await?;
+        // The last of each of their devices' entries in `global` this device had seen: those after never count.
+        let seqs = self.with(|i| keys.iter().map(|k| Ok((*k, i.r.store.last(k, "global")?.map(|e| e.seq())))).collect::<Result<BTreeMap<_, _>>>())?;
+        self.member_content(caller, members::remove_user(&user, &seqs)).await?;
         let (renewed, left) = self.renew(caller, scopes).await;
         Ok(json!({ "removed": name, "new_epochs": renewed, "not_renewed": left, "relay": (!relay.is_empty()).then(|| relay.join("; ")) }))
     }
