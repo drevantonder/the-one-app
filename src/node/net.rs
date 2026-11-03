@@ -546,12 +546,25 @@ impl Node {
         // Only the member entries: a service needs who's who, not what anyone's apps wrote.
         // And only those by an endpoint the install listed: a service passes over the rest, so counting them would leave it
         // behind for good.
-        let entries: Vec<Entry> = self.with(|i| Ok(i.r.store.scope("global")?.into_iter().filter(|e| members::is_member_entry(e) && i.r.members.machines.contains_key(&e.author())).collect()))?;
+        let (entries, depths): (Vec<Entry>, Value) = self.with(|i| {
+            let all = i.r.store.scope("global")?;
+            let depth: std::collections::HashMap<_, _> = all.iter().map(|e| (e.hash(), e.depth)).collect();
+            let entries: Vec<Entry> = all.into_iter().filter(|e| members::is_member_entry(e) && i.r.members.machines.contains_key(&e.author())).collect();
+            // It sees only those, so it orders them by how deep the entries they follow, which it isn't sent, are.
+            let sent: std::collections::HashSet<_> = entries.iter().map(Entry::hash).collect();
+            let mut depths = serde_json::Map::new();
+            for f in entries.iter().flat_map(Entry::follows_all).filter(|f| !sent.contains(f)) {
+                if let Some(d) = depth.get(&f) {
+                    depths.insert(f.to_hex(), json!(d));
+                }
+            }
+            Ok((entries, Value::Object(depths)))
+        })?;
         let hello = json!({ "entries": entries.len() });
         let mut answer = self.send(&to, "hello", &hello, true, CONNECT).await?;
         if answer["behind"] == true {
             let pack = data_encoding::BASE64.encode(&crate::entry::pack(&entries.iter().collect::<Vec<_>>()));
-            let taken = self.send(&to, "entries", &json!({ "pack": pack }), true, CONNECT).await?;
+            let taken = self.send(&to, "entries", &json!({ "pack": pack, "depths": depths }), true, CONNECT).await?;
             if let Some(err) = taken["error"].as_str() {
                 bail!("{} didn't take the install's entries: {err}", short(&to));
             }

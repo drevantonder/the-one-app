@@ -105,6 +105,9 @@ struct Inner {
     install: Install,
     /// `global`'s entries, as the nodes brought them, and what its member entries add up to.
     known: Mutex<(Vec<Entry>, Members)>,
+    /// The depths in `global`'s replay order of the entries its member entries follow that nodes didn't bring: a service
+    /// is brought only member entries, and orders them as the nodes do with these.
+    depths: Mutex<HashMap<Hash, u64>>,
     /// Where the program offering it registers and waits for calls.
     sidecars: Sidecars,
     /// What that program sends to say it's on this machine.
@@ -171,7 +174,8 @@ impl Service {
         let root = Hash::from_hex(&install.root)?;
         let install_address = install.address.clone();
         let entries = std::fs::read(dir.join("entries")).ok().and_then(|b| crate::entry::unpack(&b).ok()).unwrap_or_default();
-        let members = replay(root, &entries);
+        let depths: HashMap<Hash, u64> = std::fs::read(dir.join("depths")).ok().and_then(|b| serde_json::from_slice::<HashMap<String, u64>>(&b).ok()).map(|m| m.into_iter().filter_map(|(h, d)| Some((Hash::from_hex(&h).ok()?, d))).collect()).unwrap_or_default();
+        let (entries, members) = placed(root, entries, &depths);
         Ok(Service(Arc::new(Inner {
             name: name.to_string(),
             dir: dir.to_path_buf(),
@@ -179,6 +183,7 @@ impl Service {
             machine: hostname(),
             install,
             known: Mutex::new((entries, members)),
+            depths: Mutex::new(depths),
             sidecars: Sidecars::default(),
             token,
             endpoint: Mutex::new(None),
@@ -394,7 +399,7 @@ impl Service {
         let body = &msg["body"];
         match msg["kind"].as_str() {
             Some("hello") => self.hello(remote, body["entries"].as_u64().unwrap_or(0) as usize),
-            Some("entries") => match self.take_entries(&remote, body["pack"].as_str().unwrap_or("")) {
+            Some("entries") => match self.take_entries(&remote, body["pack"].as_str().unwrap_or(""), &body["depths"]) {
                 Ok(()) => json!({ "ok": true }),
                 Err(err) => json!({ "error": format!("{err:#}") }),
             },
@@ -430,19 +435,32 @@ impl Service {
     /// Takes `global`'s member entries a node of the install brought (anyone's, while it knows of no node yet, since
     /// they must replay from the install's first entry): added to those it has, never in place of any, each signed,
     /// replayed from the first entry; those signed by no endpoint the install ever listed are passed over.
-    fn take_entries(&self, remote: &Key, pack: &str) -> Result<()> {
+    fn take_entries(&self, remote: &Key, pack: &str, depths: &Value) -> Result<()> {
         let bytes = data_encoding::BASE64.decode(pack.as_bytes()).map_err(|_| anyhow!("the entries aren't base64"))?;
         let given = crate::entry::unpack(&bytes)?;
         let root = Hash::from_hex(&self.0.install.root)?;
         let mut known = self.0.known.lock().unwrap();
         ensure!(known.1.computes().next().is_none() || known.1.compute(remote).is_some(), "only your One App's devices bring its entries");
-        let (entries, members) = match merged(root, &known.0, given) {
+        let mut depths_known = self.0.depths.lock().unwrap();
+        let mut grown = depths_known.clone();
+        for (hash, depth) in depths.as_object().into_iter().flatten() {
+            if let (Ok(hash), Some(depth)) = (Hash::from_hex(hash), depth.as_u64()) {
+                grown.insert(hash, depth);
+            }
+        }
+        let more_depths = grown.len() > depths_known.len();
+        let (entries, members) = match merged(root, &known.0, given, &grown) {
             Some(merged) => merged,
+            // Only more depths: what was known may order better with them.
+            None if more_depths => placed(root, known.0.clone(), &grown),
             None => return Ok(()),
         };
         ensure!(!members.users.is_empty(), "those aren't your One App's entries");
         write_private(&self.0.dir.join("entries"), &crate::entry::pack(&entries.iter().collect::<Vec<_>>()))?;
+        let text: HashMap<String, u64> = grown.iter().map(|(h, d)| (h.to_hex(), *d)).collect();
+        write_private(&self.0.dir.join("depths"), &serde_json::to_vec(&text)?)?;
         *known = (entries, members);
+        *depths_known = grown;
         Ok(())
     }
 
@@ -593,7 +611,8 @@ pub fn limited(name: &str, call: &Value) -> Result<Value> {
 
 /// `known` with `given`'s member entries added, if any are new: → them, replayed from the install's first entry, with
 /// those signed by no endpoint it ever listed passed over (junk anyone could sign counts for nothing, and isn't kept).
-fn merged(root: Hash, known: &[Entry], given: Vec<Entry>) -> Option<(Vec<Entry>, Members)> {
+/// `depths` are those of the entries they follow that nodes don't bring.
+fn merged(root: Hash, known: &[Entry], given: Vec<Entry>, depths: &HashMap<Hash, u64>) -> Option<(Vec<Entry>, Members)> {
     let mut all: HashMap<String, Entry> = known.iter().map(|e| (e.hash().to_hex(), e.clone())).collect();
     let before = all.len();
     for e in given.into_iter().filter(members::is_member_entry) {
@@ -602,16 +621,16 @@ fn merged(root: Hash, known: &[Entry], given: Vec<Entry>) -> Option<(Vec<Entry>,
     if all.len() == before {
         return None;
     }
-    let entries: Vec<Entry> = all.into_values().collect();
-    let members = replay(root, &entries);
-    let entries: Vec<Entry> = entries.into_iter().filter(|e| members.machines.contains_key(&e.author())).collect();
-    Some((entries, members))
+    Some(placed(root, all.into_values().collect(), depths))
 }
 
-fn replay(root: Hash, entries: &[Entry]) -> Members {
-    let ordered = crate::entry::causal(entries.to_vec(), &HashMap::new());
-    let member_entries: Vec<Entry> = ordered.into_iter().filter(members::is_member_entry).collect();
-    Members::replay(Some(root), &member_entries, &Default::default())
+/// `entries` in the nodes' replay order, those that can be placed in it and are signed by an endpoint the install
+/// listed, and what they add up to.
+fn placed(root: Hash, entries: Vec<Entry>, depths: &HashMap<Hash, u64>) -> (Vec<Entry>, Members) {
+    let ordered = crate::entry::causal(entries, depths);
+    let member_entries: Vec<Entry> = ordered.iter().filter(|e| members::is_member_entry(e)).cloned().collect();
+    let members = Members::replay(Some(root), &member_entries, &Default::default());
+    (ordered.into_iter().filter(|e| members.machines.contains_key(&e.author())).collect(), members)
 }
 
 fn now_ms() -> u64 {
@@ -802,7 +821,7 @@ mod tests {
         entries.push(e);
         let last = entries.last().unwrap().hash();
         entries.push(Entry::create(sams, ext(&last), sams_prev, members::service(&Endpoint::of(notes), SAM, "sam's box", "notes", false)));
-        let m = replay(genesis.hash(), &entries);
+        let m = placed(genesis.hash(), entries.clone(), &HashMap::new()).1;
         (entries, m, keys)
     }
 
@@ -836,7 +855,7 @@ mod tests {
         // An admin's device can't list a service as someone else's.
         assert!(m.service(&id(&taken)).is_none(), "only Sam's own device lists his services");
         // Entries that aren't the install's say nothing.
-        assert!(replay(Hash::from_bytes(rand::random()), &entries).users.is_empty());
+        assert!(placed(Hash::from_bytes(rand::random()), entries.clone(), &HashMap::new()).1.users.is_empty());
     }
 
     #[test]
@@ -860,10 +879,10 @@ mod tests {
     fn entries_brought_add_to_those_known_and_never_replace_them() {
         let (entries, m, [mac, ..]) = install();
         let root = entries[0].hash();
-        let (known, _) = merged(root, &[], entries.clone()).unwrap();
+        let (known, _) = merged(root, &[], entries.clone(), &HashMap::new()).unwrap();
         assert_eq!(known.len(), entries.len());
         // A pack with fewer, or the same, adds nothing and drops nothing.
-        assert!(merged(root, &known, entries[..2].to_vec()).is_none());
+        assert!(merged(root, &known, entries[..2].to_vec(), &HashMap::new()).is_none());
         // A longer pack of junk signed by keys the install never listed is passed over, and what's known stays.
         let junk: Vec<Entry> = (0..20)
             .map(|_| {
@@ -871,9 +890,10 @@ mod tests {
                 entry(&k, ANDRE, &mut None, members::device(&Endpoint::of(&k), ANDRE, "junk", &[Kind::Client], None))
             })
             .collect();
-        let (after, members) = merged(root, &known, junk).unwrap();
+        let (after, members) = merged(root, &known, junk, &HashMap::new()).unwrap();
         assert_eq!(after.len(), known.len(), "junk isn't kept");
         assert_eq!(members.machines.len(), m.machines.len());
         assert!(members.compute(&id(&mac)).is_some());
     }
 }
+
