@@ -29,7 +29,6 @@ val json = Json { ignoreUnknownKeys = true; explicitNulls = false; coerceInputVa
 data class Config(
     val name: String,
     val cli: String,
-    val accent: String,
 )
 
 /** `GET /v1/state`: who this is, and the install. */
@@ -78,6 +77,9 @@ data class AppInfo(
     val title: String? = null,
     val icon: String? = null,
     val color: String? = null,
+    /** An external brand's logo or app icon (a data URL), drawn in place of a glyph: `image_kind` "icon" fills the tile. */
+    val image: String? = null,
+    @SerialName("image_kind") val imageKind: String? = null,
     val screens: List<AppScreenInfo>? = null,
     /** The scopes it's installed in that this person may use: `user:<id>`, `group:<id>`, `global`. */
     val installed: List<String>? = null,

@@ -65,6 +65,7 @@ import app.client.WidgetNode
 import app.client.json
 import app.client.number
 import app.client.palette
+import app.client.tint
 import app.client.text
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -151,10 +152,10 @@ class RunOperation : ActionCallback {
     }
 }
 
-/** The colours of the app's pages, for light and dark, as the home screen picks them with the phone. */
-private class Colors(accent: String) {
-    val light = palette(false, accent)
-    val dark = palette(true, accent)
+/** The colours of the app's pages, for light and dark, as the home screen picks them with the phone, and its tint. */
+private class Colors(context: Context) {
+    val light = palette(false, tint(context, false))
+    val dark = palette(true, tint(context, true))
 
     fun of(alpha: Float = 1f, pick: (Palette) -> Color): ColorProvider =
         androidx.glance.color.ColorProvider(day = pick(light).let { it.copy(alpha = it.alpha * alpha) }, night = pick(dark).let { it.copy(alpha = it.alpha * alpha) })
@@ -163,7 +164,7 @@ private class Colors(accent: String) {
     fun tone(tone: String?, alpha: Float = 1f, otherwise: (Palette) -> Color): ColorProvider = of(alpha) { p ->
         when (tone) {
             "muted" -> p.secondary
-            "accent" -> p.accent
+            "accent" -> p.tint
             "good" -> p.green
             "warn" -> p.orange
             "bad" -> p.red
@@ -207,7 +208,7 @@ private fun follow(w: KeptWidget, link: JsonElement?): Action {
 private fun Body(widgetId: Int, shown: HomeWidgets.Shown) {
     val context = LocalContext.current
     val kept = shown.kept
-    val colors = Colors(kept?.accent ?: BuildConfig.ACCENT)
+    val colors = Colors(context)
     val chosen = shown.choices[widgetId]
     val widget = if (chosen == null) kept?.widgets?.firstOrNull() else kept?.widgets?.firstOrNull { it.id == chosen }
     val app = opening(Uri.Builder().scheme(BuildConfig.CLI).authority("open").build())
@@ -245,8 +246,14 @@ private fun Drawn(context: Context, w: KeptWidget, colors: Colors, at: Long, doi
     val c = Ctx(w, colors, Masks(context.resources.displayMetrics.density), width, now, doing = doing)
     val old = updated(at, now)
     Column(GlanceModifier.fillMaxSize().clickable(follow(w, tree.link))) {
+        // Whose it is, quietly: its app's tile (a brand's own logo) and the widget's name, small and muted.
         if (tree.header != false) {
-            Text(w.title, style = TextStyle(color = colors.of { it.secondary }, fontSize = 11.sp, fontWeight = FontWeight.Medium), maxLines = 1)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                val px = (14 * context.resources.displayMetrics.density).toInt()
+                Image(ImageProvider(app.client.tileBitmap(app.client.TileLook(w.icon, w.app, w.color, w.image, w.imageKind), px, w.title)), null, GlanceModifier.size(14.dp))
+                Spacer(GlanceModifier.width(6.dp))
+                Text(w.title, style = TextStyle(color = colors.of { it.secondary }, fontSize = 11.sp, fontWeight = FontWeight.Medium), maxLines = 1)
+            }
             Spacer(GlanceModifier.height(6.dp))
         }
         // At the top, as the app's pages draw it; a column takes the height, for what grows in it.
@@ -426,7 +433,7 @@ private fun Ring(n: WidgetNode, c: Ctx, modifier: GlanceModifier) {
     val size = (n.w ?: 46.0).toFloat()
     Box(modifier.size(size.dp), contentAlignment = Alignment.Center) {
         Mask(c.masks.ring(size, 1f, full = true), c.color(0.25f / 0.6f) { it.secondary }, GlanceModifier.size(size.dp))
-        Mask(c.masks.ring(size, f, full = false), c.tone(n.tone, { it.accent }), GlanceModifier.size(size.dp))
+        Mask(c.masks.ring(size, f, full = false), c.tone(n.tone, { it.tint }), GlanceModifier.size(size.dp))
         if (n.label != "") {
             Text(n.label ?: "${Math.round(f * 100)}%", style = TextStyle(color = c.color { it.label }, fontSize = 11.sp, fontWeight = FontWeight.Medium), maxLines = 1)
         }
@@ -445,7 +452,7 @@ private fun Bar(n: WidgetNode, c: Ctx, modifier: GlanceModifier) {
         }
         Box(m) {
             Mask(c.masks.bar(width, 6f, 1f), c.color(0.25f / 0.6f) { it.secondary }, m, ContentScale.FillBounds)
-            Mask(c.masks.bar(width, 6f, f), c.tone(n.tone, { it.accent }), m, ContentScale.FillBounds)
+            Mask(c.masks.bar(width, 6f, f), c.tone(n.tone, { it.tint }), m, ContentScale.FillBounds)
         }
     }
 }
@@ -456,7 +463,7 @@ private fun Spark(n: WidgetNode, c: Ctx, modifier: GlanceModifier) {
     val width = (n.w?.toFloat() ?: c.width).coerceAtLeast(8f)
     val height = (n.h ?: 28.0).toFloat()
     val m = if (n.w != null) GlanceModifier.size(width.dp, height.dp) else GlanceModifier.fillMaxWidth().height(height.dp)
-    val color = c.tone(n.tone, { it.accent })
+    val color = c.tone(n.tone, { it.tint })
     Box(modifier.then(m)) {
         if (values.isEmpty()) {
             Mask(c.masks.spark(values, n.max, width, height, area = false), c.color { it.secondary }, m, ContentScale.FillBounds)
@@ -474,7 +481,7 @@ private fun Chart(n: WidgetNode, c: Ctx, modifier: GlanceModifier) {
     val height = ((n.h ?: 80.0) - if (labels.isEmpty()) 0.0 else 16.0).toFloat()
     Column(modifier.fillMaxWidth()) {
         if (values.isNotEmpty()) {
-            Mask(c.masks.chart(values, n.kind == "line", c.width, height), c.tone(n.tone, { it.accent }), GlanceModifier.fillMaxWidth().height(height.dp), ContentScale.FillBounds)
+            Mask(c.masks.chart(values, n.kind == "line", c.width, height), c.tone(n.tone, { it.tint }), GlanceModifier.fillMaxWidth().height(height.dp), ContentScale.FillBounds)
         } else Spacer(GlanceModifier.height(height.dp))
         if (labels.isNotEmpty()) {
             val style = TextStyle(color = c.color { it.secondary }, fontSize = 11.sp, textAlign = TextAlign.Center)
@@ -515,7 +522,7 @@ private fun Item(n: WidgetNode, c: Ctx, modifier: GlanceModifier) {
     val link = n.link
     Row((if (link != null) modifier.clickable(follow(c.widget, link)) else modifier).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         n.icon?.let {
-            Mask(c.masks.glyph(it, 18f), c.tone(n.tone, { p -> p.accent }), GlanceModifier.size(18.dp))
+            Mask(c.masks.glyph(it, 18f), c.tone(n.tone, { p -> p.tint }), GlanceModifier.size(18.dp))
             Spacer(GlanceModifier.width(12.dp))
         }
         Column(GlanceModifier.defaultWeight()) {
@@ -558,7 +565,7 @@ private fun decode(bytes: ByteArray, most: Int): Bitmap? {
 private fun Icon(n: WidgetNode, c: Ctx, modifier: GlanceModifier) {
     val path = n.path
     val size = n.w?.toFloat() ?: if (path != null) 22f else fontSize(n.size)
-    val color = c.tone(n.tone, { if (path == null) it.accent else it.label })
+    val color = c.tone(n.tone, { if (path == null) it.tint else it.label })
     val shape = if (path != null) c.masks.svg(path, size, stroke = true) else c.masks.glyph(n.name ?: "", size)
     val badge = n.badge
     if (badge == null) return Mask(shape, color, modifier.size(size.dp))
@@ -587,8 +594,8 @@ private fun which(n: WidgetNode, c: Ctx) = "${c.widget.id}|${n.op}|${n.input}|${
 @Composable
 private fun Button(n: WidgetNode, ctx: Ctx, modifier: GlanceModifier) {
     val c = if (which(n, ctx) in ctx.doing) ctx.copy(alpha = ctx.alpha * 0.5f) else ctx
-    val tint = c.tone(n.tone, { it.accent })
-    val m = modifier.cornerRadius(15.dp).background(c.tone(n.tone, { it.accent }, 0.15f)).let { if (n.op != null) it.clickable(run(n, c)) else it }
+    val tint = c.tone(n.tone, { it.tint })
+    val m = modifier.cornerRadius(15.dp).background(c.tone(n.tone, { it.tint }, 0.15f)).let { if (n.op != null) it.clickable(run(n, c)) else it }
     Row(m.height(30.dp).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
         n.icon?.let {
             Mask(c.masks.glyph(it, 15f), tint, GlanceModifier.size(15.dp))
@@ -606,7 +613,7 @@ private fun Toggle(n: WidgetNode, c: Ctx, modifier: GlanceModifier) {
     Row(m.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(n.label ?: "", GlanceModifier.defaultWeight(), style = TextStyle(color = c.color { it.label }, fontSize = 13.sp), maxLines = 1)
         Box(GlanceModifier.size(40.dp, 24.dp), contentAlignment = if (on) Alignment.CenterEnd else Alignment.CenterStart) {
-            Mask(c.masks.bar(40f, 24f, 1f), if (on) c.color { it.accent } else c.color { if (it.dark) Color(0xFF39393D) else Color(0xFFDCDCE1) }, GlanceModifier.size(40.dp, 24.dp))
+            Mask(c.masks.bar(40f, 24f, 1f), if (on) c.color { it.tint } else c.color { if (it.dark) Color(0xFF39393D) else Color(0xFFDCDCE1) }, GlanceModifier.size(40.dp, 24.dp))
             Box(GlanceModifier.padding(horizontal = 2.dp)) {
                 Mask(c.masks.circle(20f), c.color { Color.White }, GlanceModifier.size(20.dp))
             }

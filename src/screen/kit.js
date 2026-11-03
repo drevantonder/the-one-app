@@ -212,13 +212,16 @@
 
   // A large title at the top of a screen, as iOS draws one: the shell's own title stays empty while it shows, and is
   // its text once it scrolls away, so the name shows once. The screen's `.large-title` is followed as it redraws, so
-  // calling it once is enough; put what it returns first, or draw a `.large-title` of its own.
+  // calling it once is enough; put what it returns first, or draw a `.large-title` of its own. A shell whose bar always
+  // shows the title (Android's, `__oneShell.bar`) hides it and takes the text.
   let titled = false;
   one.largeTitle = (text) => {
+    const follows = window.IntersectionObserver && !window.__oneShell?.bar;
+    if (window.__oneShell?.bar) one.title(text);
     if (!titled) {
       titled = true;
-      one.title(window.IntersectionObserver ? "" : text);
-      if (window.IntersectionObserver) {
+      one.title(follows ? "" : text);
+      if (follows) {
         let el = null;
         const seen = new IntersectionObserver((all) => {
           const e = all.filter((x) => x.target === el).pop();

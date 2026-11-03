@@ -47,7 +47,6 @@ import java.util.concurrent.TimeUnit
 /** Every page's widgets as the app last saw them. */
 @Serializable
 data class Kept(
-    val accent: String? = null,
     val widgets: List<KeptWidget> = emptyList(),
     /** When they were fetched, in ms. */
     val at: Long = 0,
@@ -62,6 +61,8 @@ data class KeptWidget(
     val title: String,
     val icon: String? = null,
     val color: String? = null,
+    val image: String? = null,
+    val imageKind: String? = null,
     /** Whether its app has a screen to open. */
     val opens: Boolean = false,
     val app: String,
@@ -146,13 +147,13 @@ object HomeWidgets {
             array.mapNotNull { e ->
                 val w = runCatching { json.decodeFromJsonElement(WidgetInfo.serializer(), e) }.getOrNull() ?: return@mapNotNull null
                 val a = store.app(w.app)?.takeIf { it.scopes.contains(p.scope) } ?: return@mapNotNull null
-                KeptWidget(p.scope, p.title, w.title ?: a.label, a.icon, a.color, a.hasScreens, w.app, w.widget, e)
+                KeptWidget(p.scope, p.title, w.title ?: a.label, a.icon, a.color, a.image, a.imageKind, a.hasScreens, w.app, w.widget, e)
             }
         }
         // A refresh that saw nothing keeps what was: the home screen goes blank only for a reason.
         if (widgets.isEmpty()) return
         val now = System.currentTimeMillis()
-        val kept = Kept(store.config?.accent, widgets, now)
+        val kept = Kept(widgets, now)
         val signedIn = store.signIn.signedIn
         val was = shown.value
         // The same as before, only newer: kept so, and redrawn only if they said they were old.

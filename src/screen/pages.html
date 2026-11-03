@@ -98,6 +98,7 @@
   .capsule { pointer-events: auto; display: flex; align-items: center; height: 44px; border-radius: 22px; background: color-mix(in srgb, var(--card) 92%, transparent); touch-action: none;
     -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px); box-shadow: 0 4px 16px rgba(0, 0, 0, 0.14), 0 0 0 0.5px var(--line); transition: scale 0.2s; }
   .capsule.sliding { scale: 1.08; }
+  .dots.plain .capsule { background: none; box-shadow: none; -webkit-backdrop-filter: none; backdrop-filter: none; }
   .capsule button { height: 44px; border: 0; background: none; display: flex; align-items: center; gap: 6px; color: var(--faint); cursor: pointer; -webkit-tap-highlight-color: transparent; }
   .capsule:not(.sliding) button:active { opacity: 0.55; }
   .capsule .marks { padding: 0 6px 0 18px; }
@@ -120,11 +121,12 @@
 <script>
   // Your pages, as a home screen: each a grid of the widgets you put there and its apps' icons, then its Services
   // folder; Settings is a page of its items. With `scope`, that page alone (a window whose sidebar picks it; "settings"
-  // for Settings); with `swipe`, every page side by side then Settings, opened at `scope`, to swipe between (a phone).
+  // for Settings); with `swipe`, every page side by side then Settings, opened at `scope`, to swipe between (a phone),
+  // under a frosted pill of dots, or with `switcher: "sheet"` (Android's) plain dots that list every page in a sheet.
   // Touch and hold, or right-click, for what an icon or widget offers: its sizes, its settings, taking it off, and
   // arranging the page, where everything jiggles and drags anywhere. Holding something and moving starts arranging
   // with it in hand; holding empty space starts it too.
-  const { scope: chosen, swipe } = one.params || {};
+  const { scope: chosen, swipe, switcher } = one.params || {};
   const SETTINGS = "settings";
   const CELLS = { small: [2, 2], medium: [4, 2], large: [4, 4], xl: [8, 4] };
   const NAMES = { small: "Small", medium: "Medium", large: "Large", xl: "Extra Large" };
@@ -887,6 +889,7 @@
     const attention = (home.data.state.settings_items || []).some((i) => i.badge);
     if (dots.dataset.scopes !== scopes.join(" ")) {
       dots.dataset.scopes = scopes.join(" ");
+      dots.classList.toggle("plain", switcher === "sheet");
       dots.innerHTML = `<div class="name"></div><div class="capsule"><button class="marks">${scopes.slice(0, -1).map(() => "<i></i>").join("")}</button>` +
         `<button class="cog" aria-label="Settings">${one.icon("gear-six-fill")}</button></div>`;
       wireDots(dots, scopes);
@@ -901,12 +904,22 @@
 
   function wireDots(dots, scopes) {
     const capsule = dots.querySelector(".capsule");
-    dots.querySelector(".marks").onclick = (e) => !quiet() && home.menu([
+    // Android's: every page and Settings, with its red dot when it needs you, in a sheet.
+    const sheet = () => {
+      const attention = (home.data.state.settings_items || []).some((i) => i.badge);
+      const icon = (s) => (s === "user" ? "user" : s === "global" ? "house" : "users");
+      home.menu([
+        ...scopes.slice(0, -1).map((s) => ({ title: titleOf(s), icon: icon(s), checked: s === at, run: () => go(s) })),
+        { title: "Settings", icon: "gear-six", checked: at === SETTINGS, section: true, dot: attention, run: () => go(SETTINGS) },
+        { title: "Edit Pages…", icon: "list-bullets", section: true, run: editPages },
+      ], capsule, { sheet: "Pages" });
+    };
+    dots.querySelector(".marks").onclick = (e) => !quiet() && (switcher === "sheet" ? sheet() : home.menu([
       ...scopes.map((s) => ({ title: titleOf(s), checked: s === at, run: () => go(s) })),
       { title: "Edit Pages…", icon: "list-bullets", section: true, run: editPages },
       ...(at !== SETTINGS ? [editHomePage] : []),
-    ], capsule);
-    dots.querySelector(".cog").onclick = () => !quiet() && go(SETTINGS);
+    ], capsule));
+    dots.querySelector(".cog").onclick = () => !quiet() && (switcher === "sheet" ? sheet() : go(SETTINGS));
     slide(capsule);
   }
 

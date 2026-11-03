@@ -115,7 +115,6 @@ android {
         buildConfigField("String", "NAME", quoted(field("name")))
         buildConfigField("String", "CLI", quoted(cli))
         buildConfigField("String", "YOURS", quoted(yours))
-        buildConfigField("String", "ACCENT", quoted(field("accent")))
         // A white label with one install signs in there; otherwise the first screen asks where.
         buildConfigField("String", "ADDRESS", quoted(field("address")))
         manifestPlaceholders["scheme"] = cli

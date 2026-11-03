@@ -49,6 +49,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -59,7 +60,7 @@ import androidx.core.graphics.PathParser
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
-// The One App's look, on Android: the kit's colours, the iPhone's type sizes, the install's accent.
+// The One App's look, on Android: the kit's colours, the iPhone's type sizes, and the phone's own tint.
 
 /** The kit's colours (src/screen/kit.css), light then dark: tests/contracts.rs holds them to it. */
 object Kit {
@@ -89,27 +90,36 @@ data class Palette(
     val tertiary: Color,
     val separator: Color,
     val fill: Color,
-    val accent: Color,
+    val tint: Color,
 ) {
     val green = if (dark) Color(0xFF30D158) else Color(0xFF34C759)
     val orange = Kit.warn.of(dark)
     val red = Kit.danger.of(dark)
     val blue = Color(0xFF0A9EDC)
     val purple = Color(0xFFA550D9)
+    /** A sheet's background, as the kit's `data-raised` has it. */
+    val raised = if (dark) card else background
 }
 
-val LocalPalette = staticCompositionLocalOf { palette(false, BuildConfig.ACCENT) }
+val LocalPalette = staticCompositionLocalOf { palette(false, Color(0xFF007AFF)) }
 
-fun palette(dark: Boolean, accent: String) = Palette(
+fun palette(dark: Boolean, tint: Color) = Palette(
     dark = dark, background = Kit.bg.of(dark), card = Kit.card.of(dark), label = Kit.text.of(dark), secondary = Kit.muted.of(dark),
-    tertiary = Kit.faint.of(dark), separator = Kit.line.of(dark), fill = Kit.fill.of(dark), accent = accentColor(accent, dark),
+    tertiary = Kit.faint.of(dark), separator = Kit.line.of(dark), fill = Kit.fill.of(dark), tint = tint,
 )
 
-/** An accent from hex, lifted a little in dark mode so it keeps its contrast there, yet still carries white text. */
-fun accentColor(hex: String, dark: Boolean): Color {
+/** The phone's tint (tint.xml in res), in light or dark, whatever the phone itself is in. */
+fun tint(context: Context, dark: Boolean): Color {
+    val config = android.content.res.Configuration(context.resources.configuration)
+    config.uiMode = (config.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK.inv()) or
+        if (dark) android.content.res.Configuration.UI_MODE_NIGHT_YES else android.content.res.Configuration.UI_MODE_NIGHT_NO
+    return Color(context.createConfigurationContext(config).getColor(R.color.tint))
+}
+
+/** A colour from `#rrggbb`. */
+fun hexColor(hex: String): Color {
     val v = hex.trimStart('#').toLongOrNull(16) ?: 0x808080
-    val rgb = listOf(16, 8, 0).map { ((v shr it) and 0xFF) / 255f }.map { if (dark) it + (1 - it) * 0.2f else it }
-    return Color(rgb[0], rgb[1], rgb[2])
+    return Color(((v shr 16) and 0xFF).toInt(), ((v shr 8) and 0xFF).toInt(), (v and 0xFF).toInt())
 }
 
 /** The iPhone's text styles, in Android's units. */
@@ -129,19 +139,19 @@ object Type {
 enum class Appearance(val title: String) { Automatic("Automatic"), Light("Light"), Dark("Dark") }
 
 @Composable
-fun Theme(accent: String, appearance: Appearance, content: @Composable () -> Unit) {
+fun Theme(appearance: Appearance, content: @Composable () -> Unit) {
     val dark = when (appearance) {
         Appearance.Automatic -> isSystemInDarkTheme()
         Appearance.Light -> false
         Appearance.Dark -> true
     }
-    val p = palette(dark, accent)
+    val p = palette(dark, tint(LocalContext.current, dark))
     val base = if (dark) darkColorScheme() else lightColorScheme()
     val scheme = base.copy(
-        primary = p.accent, onPrimary = Color.White, secondary = p.accent, background = p.background, onBackground = p.label,
+        primary = p.tint, onPrimary = Color.White, secondary = p.tint, background = p.background, onBackground = p.label,
         surface = p.card, onSurface = p.label, onSurfaceVariant = p.secondary, surfaceVariant = p.fill, surfaceContainer = p.card,
         surfaceContainerLow = p.background, surfaceContainerHigh = p.card, surfaceContainerHighest = p.fill, surfaceTint = Color.Transparent,
-        outline = p.separator, outlineVariant = p.separator, error = p.red, primaryContainer = p.accent.copy(alpha = 0.16f), onPrimaryContainer = p.accent,
+        outline = p.separator, outlineVariant = p.separator, error = p.red, primaryContainer = p.tint.copy(alpha = 0.16f), onPrimaryContainer = p.tint,
     )
     CompositionLocalProvider(LocalPalette provides p) {
         MaterialTheme(colorScheme = scheme, typography = MaterialTheme.typography.copy(bodyLarge = Type.body, bodyMedium = Type.subheadline), content = content)
@@ -226,7 +236,7 @@ fun tileBitmap(look: TileLook, px: Int, title: String = look.seed): Bitmap {
         val (w, h) = if (clear) picture.width * fit to picture.height * fit else s to s
         canvas.drawBitmap(picture, null, RectF((s - w) / 2, (s - h) / 2, (s + w) / 2, (s + h) / 2), paint)
     } else {
-        val base = accentColor(look.color ?: colors[steadyHash(look.seed) % colors.size], false)
+        val base = hexColor(look.color ?: colors[steadyHash(look.seed) % colors.size])
         val top = Color(minOf(1f, base.red * 1.12f + 0.04f), minOf(1f, base.green * 1.12f + 0.04f), minOf(1f, base.blue * 1.12f + 0.04f))
         paint.shader = LinearGradient(0f, 0f, 0f, s, top.toArgb(), base.toArgb(), Shader.TileMode.CLAMP)
         canvas.drawRect(0f, 0f, s, s, paint)
@@ -279,11 +289,11 @@ fun Symbol(name: String, color: Color, size: Dp, modifier: Modifier = Modifier) 
     } else Spacer(modifier.size(size))
 }
 
-/** A large accent button, as the iPhone's prominent ones. */
+/** A large tinted button, as the iPhone's prominent ones. */
 @Composable
 fun Prominent(text: String, modifier: Modifier = Modifier, enabled: Boolean = true, onClick: () -> Unit) {
     val p = LocalPalette.current
-    Button(onClick, modifier, enabled = enabled, colors = ButtonDefaults.buttonColors(containerColor = p.accent, contentColor = Color.White), shape = CircleShape) {
+    Button(onClick, modifier, enabled = enabled, colors = ButtonDefaults.buttonColors(containerColor = p.tint, contentColor = Color.White), shape = CircleShape) {
         Text(text, style = Type.body, fontWeight = FontWeight.SemiBold)
     }
 }

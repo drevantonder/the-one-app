@@ -108,16 +108,18 @@
     // icon's name, which a shell draws, or shows as its own symbol for it; items with `row`, first, are choices side by
     // side (a widget's sizes), shown by their icons; `section` starts a group of its own. A menu for an element comes
     // from it (`rect`, its bounds), opening away from the edge it's near; a shell without that opens at the point:
-    // the element's bottom middle, or its top in the lower half of the page.
-    menu: (items, at) => {
+    // the element's bottom middle, or its top in the lower half of the page. With `sheet` (its heading), a shell that
+    // has them lists the items in a sheet from the bottom instead (Android's pages), each item's `dot` a red dot for
+    // what needs the person.
+    menu: (items, at, { sheet } = {}) => {
       let rect;
       if (at instanceof Element) {
         const r = at.getBoundingClientRect();
         rect = [r.left, r.top, r.width, r.height].map(Math.round);
         at = { x: (r.left + r.right) / 2, y: r.top > innerHeight / 2 ? r.top : r.bottom };
       }
-      const item = (i) => ({ title: String(i.title), danger: !!i.danger, checked: !!i.checked, ...(i.icon ? { icon: String(i.icon) } : {}), ...(i.row ? { row: true } : {}), ...(i.section ? { section: true } : {}) });
-      return host({ type: "menu", items: items.map(item), x: Math.round(at?.x || 0), y: Math.round(at?.y || 0), ...(rect ? { rect } : {}) });
+      const item = (i) => ({ title: String(i.title), danger: !!i.danger, checked: !!i.checked, ...(i.icon ? { icon: String(i.icon) } : {}), ...(i.row ? { row: true } : {}), ...(i.section ? { section: true } : {}), ...(i.dot ? { dot: true } : {}) });
+      return host({ type: "menu", items: items.map(item), x: Math.round(at?.x || 0), y: Math.round(at?.y || 0), ...(rect ? { rect } : {}), ...(sheet ? { sheet: String(sheet) } : {}) });
     },
     // The shell's own alert: `title` and `text`, then OK; with `action` (its button's name; `danger` if it can't be
     // undone), Cancel and that → whether it was chosen.

@@ -30,6 +30,9 @@ import androidx.compose.foundation.background
 import androidx.compose.ui.graphics.Color
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Row
@@ -126,8 +129,8 @@ import kotlin.coroutines.resume
 private const val ORIGIN = "https://screen.invalid"
 
 /** Before the page's scripts: the bridge's way out (`__oneShell.postMessage`, src/screen/bridge.js), one JSON message
- *  each way with an id, and the look that makes the page sit in the app as its own. */
-private fun shim(accent: String, dark: Boolean, scan: Boolean, zoom: Float) = """
+ *  each way with an id, and the look that makes the page sit in the app as its own: the phone's tint for what's tapped. */
+private fun shim(tint: Color, raised: Boolean, scan: Boolean, zoom: Float) = """
 (() => {
   const port = window.oneShell;
   if (!port) return;
@@ -139,7 +142,7 @@ private fun shim(accent: String, dark: Boolean, scan: Boolean, zoom: Float) = ""
     delete waiting[r.id];
     "error" in r ? w.fail(new Error(r.error)) : w.ok(r.ok ?? null);
   };
-  window.__oneShell = { scan: $scan, postMessage: (message) => new Promise((ok, fail) => {
+  window.__oneShell = { scan: $scan, bar: true, postMessage: (message) => new Promise((ok, fail) => {
     const id = ++asked;
     waiting[id] = { ok, fail };
     port.postMessage(JSON.stringify({ id, message }));
@@ -147,8 +150,10 @@ private fun shim(accent: String, dark: Boolean, scan: Boolean, zoom: Float) = ""
   const style = document.createElement("style");
   style.textContent = `html, body { background: transparent !important; }
     html { -webkit-tap-highlight-color: transparent; -webkit-touch-callout: none; }
-    :root:root { --accent: ${css(accent, dark)}; }`;
+    :root:root { --tint: ${css(tint)}; }
+    .large-title { display: none !important; }`;
   document.documentElement.appendChild(style);
+  if ($raised) document.documentElement.setAttribute("data-raised", "");
   addEventListener("DOMContentLoaded", () => document.querySelector('meta[name="viewport"]')?.setAttribute("content", "width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover"));
   // The kit is sized for the phone's usual text: at a larger or smaller font size, the page is zoomed to it, as an
   // iPhone's follows Dynamic Type, though never to less than the 320 CSS pixels wide phone layouts are made for.
@@ -162,7 +167,7 @@ private fun shim(accent: String, dark: Boolean, scan: Boolean, zoom: Float) = ""
 })();
 """
 
-private fun css(accent: String, dark: Boolean) = accentColor(accent, dark).let { "rgb(${(it.red * 255).toInt()}, ${(it.green * 255).toInt()}, ${(it.blue * 255).toInt()})" }
+private fun css(c: Color) = c.let { "rgb(${(it.red * 255).toInt()}, ${(it.green * 255).toInt()}, ${(it.blue * 255).toInt()})" }
 
 // MARK: Where the app is
 
@@ -180,7 +185,7 @@ fun Shell(store: Store) {
             LaunchedEffect(Unit) { withFrameNanos {}; made = true }
             val ready = store.phase == Store.Phase.Ready && store.install != null
             if (made && (store.state == null || store.install != null)) Box(Modifier.fillMaxSize().alpha(if (ready) 1f else 0f)) {
-                key(store.opened) { ScreenView(store, Route.Own("pages", obj("swipe" to true, "scope" to store.page).toString()), ready = ready) }
+                key(store.opened) { ScreenView(store, Route.Own("pages", obj("swipe" to true, "switcher" to "sheet", "scope" to store.page).toString()), ready = ready) }
             }
             if (!ready) Starting(store)
         }
@@ -217,20 +222,20 @@ private fun Starting(store: Store) {
     }
 }
 
-/** A pushed screen: its bar, with Back and its title, over the screen. */
+/** A pushed screen: a top app bar, ← then its title beside it, over the screen; the system's back gesture goes back too. */
 @Composable
 private fun PushedView(store: Store, pushed: Pushed) {
     val p = LocalPalette.current
     var title by remember(pushed) { mutableStateOf<String?>(null) }
     Column(Modifier.fillMaxSize().background(p.background)) {
         Spacer(Modifier.windowInsetsTopHeight(WindowInsets.statusBars))
-        Box(Modifier.fillMaxWidth().height(48.dp)) {
-            IconButton({ store.path.remove(pushed) }, Modifier.align(Alignment.CenterStart)) {
-                Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back", tint = p.accent)
+        Row(Modifier.fillMaxWidth().height(64.dp).padding(start = 4.dp, end = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconButton({ store.path.remove(pushed) }) {
+                Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back", tint = p.label)
             }
             Text(
-                title ?: store.title(pushed.route), style = Type.headline, color = p.label, maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center,
-                modifier = Modifier.align(Alignment.Center).padding(horizontal = 56.dp),
+                title ?: store.title(pushed.route), style = Type.title2, fontWeight = FontWeight.Normal, color = p.label, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(start = 4.dp),
             )
         }
         // Above the gesture bar, and the keyboard while it's up.
@@ -260,7 +265,7 @@ private fun SheetView(store: Store, sheet: Sheet) {
     // Below the status bar, the page under it showing above.
     ModalBottomSheet(
         onDismissRequest = ::gone, modifier = Modifier.windowInsetsPadding(WindowInsets.statusBars).padding(top = 12.dp), sheetState = state,
-        sheetGesturesEnabled = false, dragHandle = null, containerColor = p.background,
+        sheetGesturesEnabled = false, dragHandle = null, containerColor = p.raised,
     ) {
         Box(Modifier.fillMaxWidth().height(52.dp)) {
             Text(
@@ -268,7 +273,7 @@ private fun SheetView(store: Store, sheet: Sheet) {
                 textAlign = TextAlign.Center, modifier = Modifier.align(Alignment.Center).padding(horizontal = 90.dp),
             )
             TextButton({ sheet.close(null) }, Modifier.align(Alignment.CenterEnd).padding(end = 8.dp)) {
-                Text(if ((sheet.route as? Route.Own)?.name == "request") "Cancel" else "Done", style = Type.body, fontWeight = FontWeight.SemiBold, color = p.accent)
+                Text(if ((sheet.route as? Route.Own)?.name == "request") "Cancel" else "Done", style = Type.body, fontWeight = FontWeight.SemiBold, color = p.tint)
             }
         }
         Box(Modifier.fillMaxSize().imePadding()) { ScreenView(store, sheet.route, sheet = sheet) { title = it } }
@@ -285,7 +290,6 @@ private fun ScreenView(store: Store, route: Route, sheet: Sheet? = null, pushed:
     // Drawn again in this app's light or dark, once it changes: a web view takes the scheme its theme says.
     val dark = palette.dark
     var loaded by remember(route, dark) { mutableStateOf(false) }
-    val accent = store.config?.accent ?: BuildConfig.ACCENT
     val bridge = remember(route, dark) { Bridge(context, store, route, sheet, pushed, setTitle) }
     DisposableEffect(bridge) { onDispose { bridge.close() } }
     // Made before the node answered (the pages), it asks again once it has, if it couldn't then.
@@ -308,7 +312,7 @@ private fun ScreenView(store: Store, route: Route, sheet: Sheet? = null, pushed:
             modifier = Modifier.fillMaxSize().alpha(shown),
             factory = { ctx ->
                 val themed = android.view.ContextThemeWrapper(ctx, if (dark) android.R.style.Theme_DeviceDefault else android.R.style.Theme_DeviceDefault_Light)
-                bridge.make(themed, shim(accent, dark, Scanner.available(ctx), ctx.resources.configuration.fontScale)) { loaded = true }.also { bridge.load() }
+                bridge.make(themed, shim(palette.tint, sheet != null, Scanner.available(ctx), ctx.resources.configuration.fontScale)) { loaded = true }.also { bridge.load() }
             },
         )
         bridge.failure?.let { Unavailable("Can’t Open This", it) }
@@ -344,7 +348,7 @@ private fun BoxScope.Offline(offline: Bridge.Offline, tryNow: () -> Unit) {
         Text(if (ago == null) "Offline" else "Offline · from ${ago.replaceFirstChar { it.lowercase() }}", style = Type.footnote, fontWeight = FontWeight.Medium, color = p.secondary, modifier = Modifier.weight(1f, fill = false))
         val next = offline.next
         if (next != null) {
-            TextButton(tryNow) { Text("Try Now", style = Type.footnote, fontWeight = FontWeight.SemiBold, color = p.accent) }
+            TextButton(tryNow) { Text("Try Now", style = Type.footnote, fontWeight = FontWeight.SemiBold, color = p.tint) }
         } else {
             CircularProgressIndicator(Modifier.size(14.dp), color = p.secondary, strokeWidth = 2.dp)
             Text("Trying again…", style = Type.footnote, color = p.tertiary, modifier = Modifier.padding(end = 12.dp, top = 14.dp, bottom = 14.dp))
@@ -354,11 +358,37 @@ private fun BoxScope.Offline(offline: Bridge.Offline, tryNow: () -> Unit) {
 
 /** `one.menu`: the items at the point the page asked for, or from the element it's for (`rect`: x, y, width,
  *  height), opening away from the edge it's near (CSS pixels are dp, at the scale screens are drawn). */
-private class MenuAsk(val items: List<MenuItem>, val x: Int, val y: Int, val rect: List<Int>?, val chose: CompletableDeferred<Int?> = CompletableDeferred())
-private data class MenuItem(val title: String, val danger: Boolean, val checked: Boolean, val icon: String?, val row: Boolean, val section: Boolean)
+private class MenuAsk(val items: List<MenuItem>, val x: Int, val y: Int, val rect: List<Int>?, val sheet: String?, val chose: CompletableDeferred<Int?> = CompletableDeferred())
+private data class MenuItem(val title: String, val danger: Boolean, val checked: Boolean, val icon: String?, val row: Boolean, val section: Boolean, val dot: Boolean)
+
+/** A menu with a heading, in a sheet from the bottom (the pages', from their dots): each item a row with its icon, the
+ *  one it's at filled in, a red dot on what needs the person. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun MenuSheet(ask: MenuAsk) {
+    val p = LocalPalette.current
+    ModalBottomSheet(onDismissRequest = { ask.chose.complete(null) }, containerColor = p.raised) {
+        Column(Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, bottom = 12.dp)) {
+            Text(ask.sheet ?: "", style = Type.footnote, fontWeight = FontWeight.Medium, color = p.secondary, modifier = Modifier.padding(start = 12.dp, bottom = 6.dp))
+            ask.items.forEachIndexed { i, item ->
+                if (item.section && i > 0) HorizontalDivider(color = p.separator, modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp))
+                Row(
+                    Modifier.fillMaxWidth().height(48.dp).clip(RoundedCornerShape(24.dp)).background(if (item.checked) p.fill else Color.Transparent)
+                        .clickable { ask.chose.complete(i) }.padding(horizontal = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp),
+                ) {
+                    item.icon?.let { Symbol(it, if (item.danger) p.red else p.label, 20.dp) }
+                    Text(item.title, style = Type.body, fontWeight = if (item.checked) FontWeight.SemiBold else FontWeight.Medium, color = if (item.danger) p.red else p.label, modifier = Modifier.weight(1f))
+                    if (item.dot) Box(Modifier.size(8.dp).background(p.red, CircleShape))
+                }
+            }
+        }
+    }
+}
 
 @Composable
 private fun Menu(ask: MenuAsk) {
+    if (ask.sheet != null) return MenuSheet(ask)
     val p = LocalPalette.current
     val marks = ask.items.any { it.checked && !it.row }
     val row = ask.items.withIndex().filter { it.value.row }
@@ -369,7 +399,7 @@ private fun Menu(ask: MenuAsk) {
             if (row.isNotEmpty()) {
                 Row(Modifier.padding(horizontal = 8.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     row.forEach { (i, item) ->
-                        IconButton({ ask.chose.complete(i) }, Modifier.size(52.dp, 40.dp).background(if (item.checked) p.accent else p.fill, RoundedCornerShape(10.dp))) {
+                        IconButton({ ask.chose.complete(i) }, Modifier.size(52.dp, 40.dp).background(if (item.checked) p.tint else p.fill, RoundedCornerShape(10.dp))) {
                             if (item.icon != null) Symbol(item.icon, if (item.checked) Color.White else p.label, 20.dp)
                             else Text(item.title.take(1), color = if (item.checked) Color.White else p.label)
                         }
@@ -403,9 +433,9 @@ private fun Alert(ask: AlertAsk) {
         title = ask.title.takeIf { it.isNotEmpty() }?.let { { Text(it) } },
         text = ask.text.takeIf { it.isNotEmpty() }?.let { { Text(it) } },
         confirmButton = {
-            TextButton({ ask.chose.complete(ask.action != null) }) { Text(ask.action ?: "OK", color = if (ask.danger) p.red else p.accent, fontWeight = FontWeight.SemiBold) }
+            TextButton({ ask.chose.complete(ask.action != null) }) { Text(ask.action ?: "OK", color = if (ask.danger) p.red else p.tint, fontWeight = FontWeight.SemiBold) }
         },
-        dismissButton = ask.action?.let { { TextButton({ ask.chose.complete(false) }) { Text("Cancel", color = p.accent) } } },
+        dismissButton = ask.action?.let { { TextButton({ ask.chose.complete(false) }) { Text("Cancel", color = p.tint) } } },
     )
 }
 
@@ -610,12 +640,12 @@ private class Bridge(val context: Context, val store: Store, val route: Route, v
             "menu" -> {
                 val flag = { o: JsonObject, k: String -> (o[k] as? JsonPrimitive)?.booleanOrNull == true }
                 val items = (m["items"] as? JsonArray)?.mapNotNull { it as? JsonObject }?.map {
-                    MenuItem(str(it, "title") ?: "", flag(it, "danger"), flag(it, "checked"), str(it, "icon")?.ifEmpty { null }, flag(it, "row"), flag(it, "section"))
+                    MenuItem(str(it, "title") ?: "", flag(it, "danger"), flag(it, "checked"), str(it, "icon")?.ifEmpty { null }, flag(it, "row"), flag(it, "section"), flag(it, "dot"))
                 }.orEmpty()
                 if (items.isEmpty()) return JsonNull
                 val number = { k: String -> (m[k] as? JsonPrimitive)?.doubleOrNull?.toInt() ?: 0 }
                 val rect = (m["rect"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.doubleOrNull?.toInt() }?.takeIf { it.size == 4 }
-                val ask = MenuAsk(items, number("x"), number("y"), rect)
+                val ask = MenuAsk(items, number("x"), number("y"), rect, str(m, "sheet")?.ifEmpty { null })
                 menu?.chose?.complete(null)
                 menu = ask
                 val chose = try { ask.chose.await() } finally { if (menu == ask) menu = null }

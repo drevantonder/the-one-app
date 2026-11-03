@@ -59,7 +59,7 @@ class WidgetChooser : ComponentActivity() {
         setContent {
             val shown by HomeWidgets.shown.collectAsState()
             LaunchedEffect(Unit) { HomeWidgets.refresh() }
-            Theme(shown.kept?.accent ?: BuildConfig.ACCENT, Appearance.Automatic) {
+            Theme(Appearance.Automatic) {
                 Chooser(shown, widgetId) { w ->
                     HomeWidgets.choose(widgetId, w.id, w.title)
                     setResult(RESULT_OK, done)
@@ -97,9 +97,9 @@ private fun Chooser(shown: HomeWidgets.Shown, widgetId: Int, choose: (KeptWidget
                                 Modifier.fillMaxWidth().clickable { choose(w) }.padding(horizontal = 16.dp, vertical = 13.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                Box(Modifier.padding(end = 14.dp)) { AppTile(TileLook(w.icon, w.app, w.color), 30.dp, w.title) }
+                                Box(Modifier.padding(end = 14.dp)) { AppTile(TileLook(w.icon, w.app, w.color, w.image, w.imageKind), 30.dp, w.title) }
                                 Text(w.title, Modifier.weight(1f), style = Type.body, color = p.label, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                if (w.id == chosen) Symbol("check", p.accent, 18.dp)
+                                if (w.id == chosen) Symbol("check", p.tint, 18.dp)
                             }
                         }
                     }
