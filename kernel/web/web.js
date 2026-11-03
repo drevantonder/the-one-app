@@ -317,17 +317,46 @@ window.__one = {};
     return `/app/${encodeURIComponent(r.app)}/${encodeURIComponent(r.screen || "main")}${q.size ? `?${q}` : ""}`;
   }
 
+  /// A phone's width has no sidebar, as the iPhone and Android apps have none: the pages fill the window, swiped
+  /// between, and every screen opened from them is pushed over them, with Back.
+  const phone = matchMedia("(max-width: 700px)");
+  const isPage = (r) => r.kind === "own" && r.name === "pages";
+  /// The page a screen is under, for Back on a phone when nothing in this tab came before it: a page's Services and apps
+  /// under that page, Settings' screens and apps under Settings.
+  function under(r) {
+    const params = JSON.parse(r.params || "{}");
+    if (r.kind === "own") return own("pages", { scope: r.name === "services" ? params.scope || "user" : r.name === "request" ? "user" : "settings" });
+    return own("pages", { scope: r.scope || (settingsItems().some((i) => i.app === r.app) ? "settings" : "user") });
+  }
+
   /// Goes somewhere: a sidebar row replaces where the window is; what a screen opens deeper than the sidebar is pushed
-  /// on top, so Back returns to it.
-  function go(r, { pushed = false } = {}) {
+  /// on top, so Back returns to it. On a phone, all but a page is pushed.
+  function go(r, { pushed = phone.matches && !isPage(r) } = {}) {
     // Pushed on a screen, the sidebar keeps what it had selected, and the bar offers Back.
     const state = pushed ? { back: true, selection: history.state?.selection || location.pathname + location.search } : null;
     history.pushState(state, "", href(r));
+    // A phone's pages open again at the one gone to.
+    if (phone.matches && isPage(r)) home = null;
+    render();
+  }
+  /// Back: to what came before in this tab, or on a phone opened straight at a screen, to the page it's under.
+  function back() {
+    if (history.state?.back) return history.back();
+    history.replaceState(null, "", href(under(route())));
     render();
   }
   /// The sidebar row selected: where the window is, or what a pushed screen was opened from.
   const selection = () => history.state?.selection || location.pathname + location.search;
   addEventListener("popstate", () => render());
+  // Between a phone's width and a computer's, the window is drawn again as the other.
+  phone.addEventListener("change", () => {
+    shown = "";
+    home = null;
+    frames = frames.filter((f) => f.sheet);
+    const detail = $(".detail", root);
+    if (detail) detail.innerHTML = "";
+    render();
+  });
 
   // MARK: Drawing
 
@@ -369,7 +398,7 @@ window.__one = {};
 
   // Links are real links, for a new tab or a copied address; a plain click goes in place.
   document.addEventListener("click", (e) => {
-    if (e.target.closest?.("[data-back]")) return history.back();
+    if (e.target.closest?.("[data-back]")) return back();
     const a = e.target.closest?.("[data-go]");
     if (!a || e.metaKey || e.ctrlKey || e.shiftKey || e.button) return;
     e.preventDefault();
@@ -381,14 +410,46 @@ window.__one = {};
   /// What's beside the sidebar: the screen where the window is, kept as it is while the rest redraws around it.
   function drawDetail() {
     const r = route(), key = JSON.stringify(r);
+    if (phone.matches) return drawPhone($(".detail", root), r, key);
     if (shown === key && frames.some((f) => !f.sheet && f.frame.isConnected)) return;
     shown = key;
     screen.show($(".detail", root), r);
   }
 
-  /// The detail's bar: its title, as a Mac window's toolbar, with Back when a screen was pushed.
+  /// A phone's window: every page side by side then Settings, to swipe between with their dots (pages.html, as the
+  /// phones have them), kept under what's pushed over them so Back finds them as they were.
+  let home = null;
+  function drawPhone(detail, r, key) {
+    if (!home?.layer.isConnected) {
+      frames = frames.filter((f) => f.sheet);
+      detail.innerHTML = `<div class="home"></div><div class="pushed" hidden></div>`;
+      const layer = $(".home", detail), at = isPage(r) ? r : under(r);
+      home = { layer, f: frameFor(own("pages", { swipe: true, scope: JSON.parse(at.params).scope || "user" }), layer) };
+      home.f.home = true;
+      shown = "";
+    }
+    const pushed = $(".pushed", detail);
+    if (isPage(r)) {
+      shown = key;
+      frames = frames.filter((f) => f.sheet || f.home);
+      pushed.hidden = true;
+      pushed.innerHTML = "";
+      home.layer.inert = false;
+      document.title = titleOf(r);
+      return;
+    }
+    if (shown === key && frames.some((f) => !f.sheet && !f.home && f.frame.isConnected)) return;
+    shown = key;
+    pushed.classList.toggle("entering", pushed.hidden);
+    pushed.hidden = false;
+    home.layer.inert = true;
+    screen.show(pushed, r);
+  }
+
+  /// The detail's bar: its title, as a Mac window's toolbar, with Back when a screen was pushed, and on a phone under
+  /// every page.
   function bar(title) {
-    const back = history.state?.back ? `<button class="back" data-back aria-label="Back">‹</button>` : "";
+    const back = history.state?.back || (phone.matches && !isPage(route())) ? `<button class="back" data-back aria-label="Back">‹</button>` : "";
     return `<header class="bar">${back}<div class="bar-titles"><div class="bar-title">${esc(title)}</div></div></header>`;
   }
 
@@ -433,7 +494,7 @@ window.__one = {};
 
   const screen = {
     show(detail, r) {
-      frames = frames.filter((f) => f.sheet);
+      frames = frames.filter((f) => f.sheet || f.home);
       const title = titleOf(r);
       document.title = title;
       // A page shows its own large title.
@@ -526,12 +587,12 @@ window.__one = {};
           // From a sheet, the sheet goes and it opens where the window is. What the sidebar lists (an app on a page,
           // Backups in Settings) opens as if picked there, with no Back; only what's deeper than it is pushed.
           f.sheet?.close(null);
-          return go(to, { pushed: ![...document.querySelectorAll(".sidebar [data-go]")].some((a) => a.getAttribute("href") === href(to)) });
+          return go(to, { pushed: phone.matches ? !isPage(to) : ![...document.querySelectorAll(".sidebar [data-go]")].some((a) => a.getAttribute("href") === href(to)) });
         }
         case "close":
           reply(null);
           if (f.sheet) return f.sheet.close(m.value);
-          if (history.state?.back) history.back();
+          if (history.state?.back || (phone.matches && !isPage(route()))) back();
           return;
         case "api":
           return reply(await clientApi(m));
@@ -556,7 +617,8 @@ window.__one = {};
           // Empty while the screen shows its own large title, as the Mac app's bar is.
           const title = String(m.text ?? "");
           if (f.sheet) f.sheet.title.textContent = title || titleOf(r);
-          else {
+          // A phone's pages have no bar: what's pushed over them has its own.
+          else if (!f.home) {
             const el = $(".detail .bar-title", root);
             if (el) el.textContent = title;
             document.title = title || titleOf(r);

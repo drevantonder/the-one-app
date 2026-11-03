@@ -87,12 +87,18 @@ a { color: inherit; }
 .unavailable-title { font-size: 17px; font-weight: 600; }
 .unavailable-text { color: var(--muted); font-size: 13px; max-width: 440px; }
 
-/* Narrow, the sidebar folds to its apps' icons, each where it was, as the Mac's does (⌘\). */
+/* A phone's width: no sidebar, as the phones have none. The pages fill the window, and what's opened from them is
+   pushed over them, with Back. */
 @media (max-width: 700px) {
-  .window { grid-template-columns: 60px 1fr; }
-  .nav-pages { padding: 10px 6px; }
-  .nav-row { justify-content: center; padding: 0; }
-  .nav-label, .nav-count { display: none; }
-  .nav-head { font-size: 9px; text-align: center; padding: 4px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .bar { padding: 0 14px; }
+  .window { grid-template-columns: 1fr; }
+  .sidebar { display: none; }
+  .detail { position: relative; }
+  .home, .pushed { position: absolute; left: 0; right: 0; top: env(safe-area-inset-top); bottom: env(safe-area-inset-bottom); }
+  .pushed { display: flex; flex-direction: column; z-index: 1; background: var(--window); }
+  .pushed[hidden] { display: none; }
+  .pushed.entering { animation: pushed 0.25s ease-out; }
+  .bar { height: 48px; padding: 0 14px; gap: 8px; }
+  .back { width: 36px; height: 36px; font-size: 32px; line-height: 30px; }
 }
+@keyframes pushed { from { transform: translateX(30%); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .pushed.entering { animation: none; } }
