@@ -170,7 +170,7 @@ pub fn search_tool(mode: Mode) -> Value {
             "query": { "type": "string", "description": "a few words for the task, or an app's name" },
             "limit": { "type": "integer", "description": "how many operations, 8 if not given" },
         } },
-        "annotations": { "readOnlyHint": true },
+        "annotations": one::skills::hints(true, false),
     })
 }
 
@@ -193,6 +193,7 @@ pub fn execute_tool() -> Value {
         "name": "execute",
         "description": format!("Run a short script that calls operations, and get back what it returns. It's JavaScript without imports, timers or network: call operations as `await tools.<app>.<op>({{ ... }})` (search gives each exact call), use plain JavaScript between them, and `return` what you want back; console.log lines come back too. Calls run as the person, as any tool does: what sends or can't be undone needs `confirm: true` in its input, given once the person agreed. Up to {} calls, {} minutes and {} KB back.", LIMITS.1, LIMITS.0 / 60_000, LIMITS.2 / 1000),
         "inputSchema": { "type": "object", "required": ["code"], "properties": { "code": { "type": "string", "description": "the script" } } },
+        "annotations": one::skills::hints(false, false),
     })
 }
 

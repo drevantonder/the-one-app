@@ -70,8 +70,8 @@ pub fn run(app: &str, op: &str, args: &[String]) -> Result<()> {
             if missing.len() == 1 { "it" } else { "them" }
         );
     }
-    if o["confirm"] == true && !confirmed {
-        ask(&format!("{CLI} {app} {op} sends or can't be undone. Go ahead?"), &format!("{CLI} {app} {op} sends or can't be undone, and the person hasn't agreed to it: ask them, and give --confirm only if they say yes to this very action"))?;
+    if o["confirm"] == true {
+        agreed(confirmed, &format!("{CLI} {app} {op}"))?;
     }
     let call = match node_app(app) {
         true => crate::dispatch(&format!("{app}_{op}"), input, agent_from_env().as_deref(), "cli", Some(o.clone())).map(|ok| json!({ "ok": ok })),
@@ -170,6 +170,15 @@ fn unknown(app: &str, op: &str) -> String {
         Some((title, _)) => format!("{title} isn't added yet: {CLI} apps add {app} user adds it for you, or {CLI} apps add {app} global for everyone"),
         None => format!("no app {app}; {CLI} apps lists them"),
     }
+}
+
+/// Goes ahead with `command`, which sends or can't be undone, given --confirm; else asks at a terminal, and elsewhere
+/// (an agent, or piped) refuses.
+pub fn agreed(confirmed: bool, command: &str) -> Result<()> {
+    if confirmed {
+        return Ok(());
+    }
+    ask(&format!("{command} sends or can't be undone. Go ahead?"), &format!("{command} sends or can't be undone, and the person hasn't agreed to it: ask them, and give --confirm only if they say yes to this very action"))
 }
 
 /// Asks at a terminal; elsewhere (piped, or an agent) it fails with `otherwise`.
@@ -636,7 +645,7 @@ pub fn mcp_schema(app: &Value, op: &Value) -> Value {
         schema["properties"]["device"] = json!({ "type": "string", "description": "which of your devices, by name, or all for every one; default is this one" });
     }
     if op["confirm"] == true {
-        schema["properties"]["confirm"] = json!({ "type": "boolean", "description": "true once the person has agreed: this can't be undone" });
+        schema["properties"]["confirm"] = one::skills::confirm_input();
     }
     schema
 }
@@ -690,16 +699,9 @@ pub fn check(schema: &Value, v: &Value, at: &str) -> Result<()> {
     Ok(())
 }
 
-/// An MCP tool's hints: whether it only reads, and whether it can't be undone.
+/// An operation's MCP hints, from what it says: `reads`, and `confirm`.
 pub fn mcp_annotations(op: &Value) -> Value {
-    let mut a = json!({});
-    if op["reads"] == true {
-        a["readOnlyHint"] = json!(true);
-    }
-    if op["confirm"] == true {
-        a["destructiveHint"] = json!(true);
-    }
-    a
+    one::skills::hints(op["reads"] == true, op["confirm"] == true)
 }
 
 /// Brings an agent's file inputs to what apps take, `{ name, type, size, base64 }`: from base64, a file id (a blob

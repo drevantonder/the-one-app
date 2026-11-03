@@ -28,7 +28,7 @@ pub fn describe() -> Value {
         "title": "Push", "description": "Sends notifications to your phone", "icon": "bell-ringing", "serves": "everyone",
         "instructions": "Push sends a notification to your own phones through Apple's push service: push_send with a title and a body. An app pushes with ctx.sidecars.push.send, and tapping its push opens its screen. It says whether APNs accepted it, never whether anyone saw it.",
         "ops": [
-            { "name": "send", "description": "Push a notification to your phones: { title, body, screen?, params? }; from an app, tapping it opens that app's screen (main unless given). Says how many APNs accepted.",
+            { "name": "send", "reads": false, "description": "Push a notification to your phones: { title, body, screen?, params? }; from an app, tapping it opens that app's screen (main unless given). Says how many APNs accepted.",
               "input": { "type": "object", "required": ["title"], "properties": {
                 "title": { "type": "string" },
                 "body": { "type": "string" },
@@ -39,11 +39,11 @@ pub fn describe() -> Value {
                 "devices": { "type": "array", "items": { "type": "object" }, "description": "only these devices, [{ token, platform, env }], not your registered phones" },
                 "link": { "type": "object", "description": "{ app, screen, params }, as app, screen and params" },
               }}},
-            { "name": "register", "description": "A phone registers for push: its APNs device token (hex), platform ios, env sandbox or production, and a name.",
+            { "name": "register", "reads": false, "description": "A phone registers for push: its APNs device token (hex), platform ios, env sandbox or production, and a name.",
               "input": { "type": "object", "required": ["token"], "properties": {
                 "token": { "type": "string" }, "platform": { "type": "string" }, "env": { "type": "string" }, "name": { "type": "string" },
               }}},
-            { "name": "unregister", "description": "A phone stops getting pushes.",
+            { "name": "unregister", "reads": false, "description": "A phone stops getting pushes.",
               "input": { "type": "object", "required": ["token"], "properties": { "token": { "type": "string" } }}},
             { "name": "devices", "reads": true, "description": "Your phones registered for push here.", "input": { "type": "object", "properties": {} }},
             { "name": "status", "reads": true, "description": "Whether push is set up here: the APNs team, key id and app it sends for, never the key.", "input": { "type": "object", "properties": {} }},

@@ -261,7 +261,18 @@ pub fn groups_app() -> Value {
 
 /// The groups' MCP tools.
 pub fn groups_tools() -> Vec<Value> {
-    vec![json!({ "name": "groups_list", "description": "Every group: who's in it, as admin or member, and who's invited but hasn't joined yet.", "inputSchema": { "type": "object", "properties": {} }, "annotations": { "readOnlyHint": true } })]
+    vec![json!({ "name": "groups_list", "description": "Every group: who's in it, as admin or member, and who's invited but hasn't joined yet.", "inputSchema": { "type": "object", "properties": {} }, "annotations": hints(true, false) })]
+}
+
+/// An MCP tool's hints, all three always, since a client takes one left out as the worst: whether it only reads (so it
+/// can run beside others and be asked again), and whether it sends or can't be undone (an operation's `confirm`).
+pub fn hints(reads: bool, confirm: bool) -> Value {
+    json!({ "readOnlyHint": reads, "destructiveHint": confirm && !reads, "idempotentHint": reads })
+}
+
+/// The input that says the person agreed, on what sends or can't be undone.
+pub fn confirm_input() -> Value {
+    json!({ "type": "boolean", "description": "true once the person agreed to this very action: it sends or can't be undone" })
 }
 
 /// The node's own tools, shown as an app's operations are, to search, scripts and skills.
@@ -270,11 +281,7 @@ pub fn node_app(name: &str, title: &str, description: &str, guide: &str, tools: 
         "name": name, "title": title, "description": description, "instructions": guide,
         "ops": tools.into_iter().map(|t| {
             let confirm = t["annotations"]["destructiveHint"] == true;
-            let mut input = t["inputSchema"].clone();
-            if confirm {
-                input["properties"]["confirm"] = json!({ "type": "boolean", "description": "true once the person has agreed: this can't be undone" });
-            }
-            json!({ "name": t["name"].as_str().unwrap_or("").trim_start_matches(&format!("{name}_")), "description": t["description"], "input": input, "reads": t["annotations"]["readOnlyHint"] == true, "confirm": confirm })
+            json!({ "name": t["name"].as_str().unwrap_or("").trim_start_matches(&format!("{name}_")), "description": t["description"], "input": t["inputSchema"], "reads": t["annotations"]["readOnlyHint"] == true, "confirm": confirm })
         }).collect::<Vec<_>>(),
     })
 }

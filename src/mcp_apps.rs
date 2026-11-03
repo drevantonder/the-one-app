@@ -40,7 +40,7 @@ pub fn tools() -> Vec<Value> {
                 "widget": { "type": "string", "description": "only the widget of this name" },
                 "scope": { "type": "string", "description": "whose page: user (theirs), group:<id> or global; every page by default" },
             } },
-            "annotations": { "readOnlyHint": true },
+            "annotations": one::skills::hints(true, false),
             "_meta": ui,
         }),
         json!({
@@ -52,7 +52,7 @@ pub fn tools() -> Vec<Value> {
                 "params": { "type": "object", "description": "what the screen is opened with" },
                 "scope": { "type": "string", "description": "the page it's opened from: user, group:<id> or global" },
             } },
-            "annotations": { "readOnlyHint": true },
+            "annotations": one::skills::hints(true, false),
             "_meta": ui,
         }),
     ]

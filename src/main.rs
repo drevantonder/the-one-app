@@ -600,6 +600,7 @@ fn run(args: Vec<String>) -> Result<()> {
         }
         ["backups", "place", "remove", place] => {
             takes_only(&flags, &["confirm"])?;
+            ops::agreed(flags.contains_key("confirm"), &format!("{CLI} backups place remove"))?;
             let places = get("/v1/backups")?["places"].as_array().cloned().unwrap_or_default();
             let p = places.iter().find(|p| p["id"] == *place || p["title"] == *place).with_context(|| format!("no place {place}; {CLI} backups lists them"))?;
             post("/v1/backups/place", json!({ "id": p["id"], "deleted": true }))?;
@@ -660,6 +661,7 @@ fn run(args: Vec<String>) -> Result<()> {
         }
         ["vault", "remove", item] | ["vault", "remove", item, _] => {
             takes_only(&flags, &["scope", "confirm"])?;
+            ops::agreed(flags.contains_key("confirm"), &format!("{CLI} vault remove"))?;
             let scope = flags.get("scope").and_then(Value::as_str).unwrap_or("user");
             println!("{}", vault_remove(scope, item, positional.get(3).map(String::as_str))?);
         }
@@ -1744,12 +1746,7 @@ fn tools() -> Result<Vec<Value>, Value> {
         let name = app["name"].as_str().unwrap_or("");
         // Operations starting with `_` are for the node, such as a sidecar's `_screen`.
         for op in app["ops"].as_array().into_iter().flatten().filter(|op| !op["name"].as_str().unwrap_or("").starts_with('_')) {
-            let mut tool = json!({ "name": format!("{name}_{}", op["name"].as_str().unwrap_or("")), "description": op["description"], "inputSchema": ops::mcp_schema(app, op) });
-            let hints = ops::mcp_annotations(op);
-            if hints.as_object().is_some_and(|h| !h.is_empty()) {
-                tool["annotations"] = hints;
-            }
-            tools.push(tool);
+            tools.push(json!({ "name": format!("{name}_{}", op["name"].as_str().unwrap_or("")), "description": op["description"], "inputSchema": ops::mcp_schema(app, op), "annotations": ops::mcp_annotations(op) }));
         }
     }
     Ok(tools)
@@ -1791,6 +1788,10 @@ fn dispatch(name: &str, mut input: Map<String, Value>, agent: Option<&str>, clie
     if let Some(other) = spec.as_ref().and_then(|spec| input.keys().find(|k| *k != "confirm" && !ops::takes(&spec["input"], k))) {
         anyhow::bail!("{other} isn't an input of {name}: see its inputSchema");
     }
+    let confirmed = input.remove("confirm") == Some(json!(true));
+    if let Some(spec) = &spec {
+        anyhow::ensure!(spec["confirm"] != true || confirmed, "{name} sends or can't be undone, and the person hasn't agreed to it: ask them, and give confirm: true only if they say yes to this very action");
+    }
     if app == "vault" {
         return vault_tool(op, &input, agent);
     }
@@ -1805,9 +1806,7 @@ fn dispatch(name: &str, mut input: Map<String, Value>, agent: Option<&str>, clie
         anyhow::ensure!(out["isError"] != true, "{}", out["content"][0]["text"].as_str().unwrap_or(""));
         return Ok(out);
     }
-    let confirmed = input.remove("confirm") == Some(json!(true));
     if let Some(spec) = spec {
-        anyhow::ensure!(spec["confirm"] != true || confirmed, "{name} sends or can't be undone, and the person hasn't agreed to it: ask them, and give confirm: true only if they say yes to this very action");
         ops::mcp_files(&spec, &mut input)?;
     }
     Ok(post("/v1/call", json!({ "device": device, "app": app, "op": op, "input": input, "agent": agent, "client": client }))?["ok"].take())
