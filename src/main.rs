@@ -167,6 +167,13 @@ Usage:
     )
 }
 
+/// The built-in commands, by their first word, as the full list says them.
+fn commands() -> Vec<String> {
+    let mut out: Vec<String> = help().lines().filter_map(|l| l.strip_prefix(&format!("  {CLI} "))).filter_map(|l| l.split_whitespace().next()).filter(|w| w.chars().all(|c| c.is_ascii_lowercase() || c == '-')).map(String::from).collect();
+    out.dedup();
+    out
+}
+
 /// `settings` with the keys of the install's devices, as the node on this machine knows them, and when its log last
 /// changed them, for the relay to take only them; none when no node answers here, which `needed` refuses, since that
 /// relay would take no one.
@@ -801,14 +808,7 @@ fn run(args: Vec<String>) -> Result<()> {
         }
         [app] if !app.starts_with('-') => {
             let apps = get("/v1/apps")?;
-            let tool = |a: &&Value| app.strip_prefix(&format!("{}_", a["name"].as_str().unwrap_or("-"))).filter(|op| a["ops"].as_array().into_iter().flatten().any(|o| o["name"] == *op)).map(|op| format!("{} {op}", a["name"].as_str().unwrap_or("")));
-            let found = match apps.as_array().into_iter().flatten().find(|a| a["name"] == *app) {
-                Some(found) => found,
-                None => match apps.as_array().into_iter().flatten().find_map(|a| tool(&a)) {
-                    Some(command) => bail!("no command {app}: did you mean {CLI} {command}?"),
-                    None => bail!("no command or app {app}; {CLI} help lists the commands, {CLI} apps the apps"),
-                },
-            };
+            let Some(found) = apps.as_array().into_iter().flatten().find(|a| a["name"] == *app) else { bail!("{}", ops::unknown(app, None, true)?) };
             println!("{} ({app})", found["title"].as_str().unwrap_or(app));
             if let Some(i) = found["instructions"].as_str().filter(|i| !i.is_empty()) {
                 println!("\n{i}\n");
@@ -821,7 +821,7 @@ fn run(args: Vec<String>) -> Result<()> {
             let at = |word: &str, from: usize| args.iter().skip(from).position(|a| a == word).map(|i| i + from + 1).unwrap_or(from);
             ops::run(app, op, &args[at(op, at(app, 0))..])?
         }
-        _ => bail!("unknown command; {CLI} help lists them"),
+        [first, ..] => bail!("{}", ops::unknown(first, None, true)?),
     }
     Ok(())
 }
@@ -1786,18 +1786,32 @@ fn call_tool(params: &Value, agent: Option<&str>, mode: Mode) -> Value {
     }
 }
 
+/// What to say for a tool nobody here lists: an app's operations when the app is right, else the nearest tools.
+fn unknown_tool(name: &str) -> Result<String> {
+    if let Some((app, op)) = name.split_once('_')
+        && get("/v1/apps")?.as_array().into_iter().flatten().chain(&ops::node_apps()).any(|a| a["name"] == app)
+    {
+        return ops::unknown(app, Some(op), false);
+    }
+    let tools = tools().map_err(|e| anyhow::anyhow!("{}", e["message"].as_str().unwrap_or("")))?;
+    let names: Vec<&str> = tools.iter().filter_map(|t| t["name"].as_str()).collect();
+    match ops::nearest(name, &names).as_slice() {
+        [] => match name.split_once('_') {
+            Some((app, op)) => ops::unknown(app, Some(op), false),
+            None => Ok(format!("no tool {name}: search finds the tools for a task")),
+        },
+        near => Ok(format!("no tool {name}: did you mean {}?", near.join(" or "))),
+    }
+}
+
 /// Runs one tool as the person, an app's operation or the Vault's, for MCP or a code mode script: what can't be undone
 /// only with confirm: true. `spec` is the operation, when the caller has it already.
 fn dispatch(name: &str, mut input: Map<String, Value>, agent: Option<&str>, client: &str, spec: Option<(Value, Value)>) -> Result<Value> {
-    let (app, op) = name.split_once('_').with_context(|| format!("no tool {name}"))?;
-    let (a, spec) = match spec.or_else(|| ops::find(app, op)) {
-        Some((a, spec)) => (a, Some(spec)),
-        None => (Value::Null, None),
-    };
+    let Some((app, op)) = name.split_once('_') else { bail!("{}", unknown_tool(name)?) };
+    let Some((a, spec)) = spec.or_else(|| ops::find(app, op)) else { bail!("{}", unknown_tool(name)?) };
     // Checked as MCP lists it, before anything runs: a wrong input says what's wrong, never runs as something else.
-    if let Some(spec) = &spec {
-        ops::check(&ops::mcp_schema(&a, spec), &Value::Object(input.clone()))?;
-    }
+    ops::check(&ops::mcp_schema(&a, &spec), &Value::Object(input.clone()))?;
+    let spec = Some(spec);
     let device = if ops::node_app(app) || spec.as_ref().is_some_and(ops::own_device) { None } else { input.remove("device") };
     let confirmed = input.remove("confirm") == Some(json!(true));
     if let Some(spec) = &spec {

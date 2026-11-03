@@ -28,7 +28,7 @@ pub fn find(app: &str, op: &str) -> Option<(Value, Value)> {
 
 /// The node's own tools, as apps: what search lists, which run here rather than as an app's call; and widgets_show,
 /// which MCP has too (src/mcp_apps.rs), as text here.
-fn node_apps() -> [Value; 4] {
+pub fn node_apps() -> [Value; 4] {
     let widgets = crate::mcp_apps::tools().into_iter().filter(|t| t["name"] == "widgets_show").collect();
     [one::skills::vault_app(), one::skills::backups_app(), one::skills::groups_app(), one::skills::node_app("widgets", "Widgets", "Your widgets, as text", "", widgets)]
 }
@@ -45,7 +45,7 @@ pub fn run(app: &str, op: &str, args: &[String]) -> Result<()> {
     // so a command inside a `while read` loop doesn't eat the loop's input.
     let asked = words.last().is_some_and(|w| w == "-") && words.pop().is_some();
     let spec = find(app, op);
-    let Some((a, o)) = &spec else { bail!("{}", unknown(app, op)) };
+    let Some((a, o)) = &spec else { bail!("{}", unknown(app, Some(op), true)?) };
     if flags.contains_key("help") || flags.contains_key("h") {
         print!("{}", help(a, o));
         return Ok(());
@@ -149,28 +149,46 @@ pub fn none_said(app: &Value, op: &str, ok: &Value, cli: bool) -> Option<String>
     })
 }
 
-/// What to say for an app or operation nobody here lists.
-fn unknown(app: &str, op: &str) -> String {
-    let mut apps = get("/v1/apps").ok().and_then(|a| a.as_array().cloned()).unwrap_or_default();
+/// What to say for an app or operation nobody here lists, with the nearest names: `gmail has no operation serch:
+/// did you mean search?`, `no app gmial: did you mean gmail?`. On the command line, built-in commands are names too.
+pub fn unknown(app: &str, op: Option<&str>, cli: bool) -> Result<String> {
+    let mut apps = get("/v1/apps")?.as_array().cloned().unwrap_or_default();
     apps.extend(node_apps());
-    if apps.iter().any(|a| a["name"] == app) {
-        return format!("{app} has no operation {op}; {CLI} {app} lists them");
+    let ops_of = |a: &Value| -> Vec<String> { a["ops"].as_array().into_iter().flatten().filter_map(|o| o["name"].as_str()).filter(|o| !o.starts_with('_')).map(String::from).collect() };
+    if let Some(a) = apps.iter().find(|a| a["name"] == app) {
+        let (op, ops) = (op.unwrap_or(""), ops_of(a));
+        let guess = nearest(op, &ops.iter().map(String::as_str).collect::<Vec<_>>()).first().map(|n| format!(": did you mean {n}?")).unwrap_or_else(|| ".".into());
+        return Ok(format!("{app} has no operation {op}{guess} Its operations: {}", ops.join(", ")));
     }
     // A tool's name as a command, one repos_create notes: the command is one repos create notes.
     let tool = app.match_indices('_').find_map(|(i, _)| {
         let (a, o) = (&app[..i], &app[i + 1..]);
-        apps.iter().find(|x| x["name"] == a)?["ops"].as_array()?.iter().any(|x| x["name"] == o).then(|| format!("{a} {o}"))
+        apps.iter().find(|x| x["name"] == a).is_some_and(|x| ops_of(x).iter().any(|x| x == o)).then(|| format!("{a} {o}"))
     });
-    if let Some(command) = tool {
-        return format!("no app {app}: did you mean {CLI} {command} {op}?");
+    if let Some(command) = tool.filter(|_| cli) {
+        return Ok(format!("no app {app}: did you mean {CLI} {command}{}?", op.map(|o| format!(" {o}")).unwrap_or_default()));
     }
     // One the App Store has that isn't added where the caller sees it.
     let listed = post("/v1/call", json!({ "app": "apps", "op": "list", "input": {}, "client": "cli" })).ok();
     let line = listed.as_ref().and_then(|l| l["ok"].as_str()).and_then(|l| l.lines().find(|l| l.contains(&format!(" ({app}): not added"))).map(String::from));
-    match line.as_deref().and_then(|l| l.split_once(&format!(" ({app})"))) {
-        Some((title, _)) => format!("{title} isn't added yet: {CLI} apps add {app} user adds it for you, or {CLI} apps add {app} global for everyone"),
-        None => format!("no app {app}; {CLI} apps lists them"),
+    if let Some((title, _)) = line.as_deref().and_then(|l| l.split_once(&format!(" ({app})"))) {
+        return Ok(match cli {
+            true => format!("{title} isn't added yet: {CLI} apps add {app} user adds it for you, or {CLI} apps add {app} global for everyone"),
+            false => format!("{title} isn't added yet: apps_add with app {app} and scope user adds it for the person, or global for everyone"),
+        });
     }
+    let mut names: Vec<String> = apps.iter().filter_map(|a| a["name"].as_str()).map(String::from).collect();
+    // And the App Store's, added or not: `Gmail (gmail): not added. …`.
+    let store = listed.as_ref().and_then(|l| l["ok"].as_str()).unwrap_or("");
+    names.extend(store.lines().filter_map(|l| l.split_once(" (")?.1.split_once("): ").map(|(n, _)| n.to_string())).filter(|n| !names.contains(n)).collect::<Vec<_>>());
+    let commands = if cli { crate::commands() } else { Vec::new() };
+    let all: Vec<&str> = names.iter().chain(&commands).map(String::as_str).collect();
+    Ok(match nearest(app, &all).first() {
+        Some(n) if commands.contains(n) && !names.contains(n) => format!("no command {app}: did you mean {CLI} {n}? {CLI} help says the rest"),
+        Some(n) => format!("no app {app}: did you mean {n}?"),
+        None if cli => format!("no command or app {app}: {CLI} help says the commands, {CLI} search <words> finds operations"),
+        None => format!("no app {app}: search finds the tools for a task"),
+    })
 }
 
 /// Goes ahead with `command`, which sends or can't be undone, given --confirm; else asks at a terminal, and elsewhere
