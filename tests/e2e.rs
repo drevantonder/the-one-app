@@ -215,6 +215,12 @@ async fn agents_ask_for_items_and_never_see_them() {
     a.answer_request(&me, &mine, again, &json!({ "item": item })).await.unwrap();
     assert_eq!(a.vault(&me, Some(&mine)).await.unwrap()[0]["apps"], json!(["board", "other"]));
 
+    // An agent's request with a placeholder it may not fill is never sent, rather than sent as it is.
+    let site = format!("http://127.0.0.1:{}/", echo().await);
+    for (placeholder, why) in [(format!("{{{{{item}:key}}}}"), "agents may not use Example key yet"), ("{{key}}".to_string(), "no item agents may use has a field key"), ("{{0123456789abcdef:key}}".to_string(), "no item 0123456789abcdef")] {
+        let err = a.vault_fetch(&me, &json!({ "url": site, "headers": { "authorization": placeholder } })).await.unwrap_err().to_string();
+        assert!(err.starts_with("Not sent: ") && err.contains(why), "{err}");
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]

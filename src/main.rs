@@ -1616,9 +1616,21 @@ fn vault_set(scope: &str, item: &str, field: &str, value: &str, secret: Option<b
         }
     };
     let id = post("/v1/vault", data)?["id"].as_str().unwrap_or("").to_string();
-    Ok(match made {
-        true => format!("Made {item} ({id}) in {scope}, with {field}."),
+    let vault = match scope {
+        "user" => "your Vault".to_string(),
+        "global" => "Everyone's Vault".to_string(),
+        group => format!("{group}'s Vault"),
+    };
+    let done = match made {
+        true => format!("Made {item} ({id}) in {vault}, with {field}."),
         false => format!("Set {item}'s {field}."),
+    };
+    // Whether an agent may use it now, since only the person lets agents use an item.
+    let agents = found.as_ref().is_some_and(|it| it["apps"].as_array().is_some_and(|a| a.iter().any(|a| a == one::agents::NAME))) || app == Some(one::agents::NAME);
+    Ok(match (agents, app) {
+        (true, _) => format!("{done} Agents use it with vault_fetch, as {{{{{id}:{field}}}}}."),
+        (false, None) => format!("{done} Agents may not use it yet: vault_request, leaving out app, asks the person to let you, and they pick it."),
+        (false, Some(_)) => done,
     })
 }
 

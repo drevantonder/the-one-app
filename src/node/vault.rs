@@ -58,13 +58,14 @@ impl Node {
         ensure!(!crate::outbound::own_port(self, &host, port), "that's this device's own port");
         ensure!(!self.names_app(&host), "{host} is an app's name, not a site's");
         let used = std::sync::Mutex::new(Vec::<String>::new());
+        let missing = std::sync::Mutex::new(Vec::<String>::new());
         let fill = |text: &str| {
             crate::vault::fill(text, &host, |name| {
                 let found = self.vault_for(crate::agents::NAME, &caller.user, name);
-                if let Some((hosts, value)) = &found {
-                    if !hosts.is_empty() {
-                        used.lock().unwrap().push(value.clone());
-                    }
+                match &found {
+                    Some((hosts, value)) if !hosts.is_empty() => used.lock().unwrap().push(value.clone()),
+                    Some(_) => {}
+                    None => missing.lock().unwrap().push(name.to_string()),
                 }
                 found
             })
@@ -79,6 +80,10 @@ impl Node {
             Value::String(text) => fill(text)?.into_bytes(),
             other => fill(&other.to_string())?.into_bytes(),
         };
+        // A placeholder left as it is would go to the site as it is: say why it wasn't filled instead, sending nothing.
+        if let Some(name) = missing.into_inner().unwrap().first() {
+            bail!("Not sent: {}", self.why_unfilled(&caller.user, name));
+        }
         let method = req["method"].as_str().unwrap_or(if body.is_empty() { "GET" } else { "POST" }).to_uppercase();
         let (status, headers, bytes) = tokio::task::spawn_blocking(move || crate::outbound::send(&method, &filled, headers, body)).await??;
         let secrets = used.into_inner().unwrap();
@@ -96,6 +101,33 @@ impl Node {
             out["cut"] = json!(format!("only the first {SHOWN} of {} bytes", bytes.len()));
         }
         Ok(out)
+    }
+
+    /// Why an agent's placeholder `name` found nothing for `user`, and what to do, in a sentence.
+    fn why_unfilled(&self, user: &str, name: &str) -> String {
+        let ask = "vault_request, leaving out app, asks the person to let you";
+        let found = self
+            .with(|i| {
+                let m = &i.r.members;
+                Ok(match name.split_once(':') {
+                    Some((id, field)) => Some((id, field, i.views.iter().filter(|(log, _)| Scope::parse(log).is_ok_and(|s| m.may_use(user, &s))).find_map(|(_, (_, s))| s.items.get(id).cloned()))),
+                    None => None,
+                })
+            })
+            .ok()
+            .flatten();
+        match found {
+            Some((id, _, None)) => format!("no item {id} is in a Vault you may use: vault_list shows them, and {ask} use one"),
+            Some((_, _, Some(it))) if !it.apps.contains(crate::agents::NAME) => format!("agents may not use {} yet: {ask}", it.title),
+            Some((_, field, Some(it))) => {
+                let fields: Vec<&str> = it.fields.keys().map(String::as_str).collect();
+                format!("{} has no field {field}; it has {}", it.title, fields.join(", "))
+            }
+            None => {
+                let field = name.rsplit('/').next().unwrap_or(name);
+                format!("no item agents may use has a field {field}: vault_request, leaving out app, asks the person for one")
+            }
+        }
     }
 
     /// The items `app` is switched on for in the scopes `user` may use, as its calls see them (`ctx.vault.items()`):
