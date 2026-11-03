@@ -232,15 +232,14 @@ enum NodeLauncher {
     static func start() async throws {
         let agent = SMAppService.agent(plistName: "\(label).plist")
         if agent.status == .enabled {
-            let kick = Process()
-            kick.executableURL = URL(filePath: "/bin/launchctl")
-            kick.arguments = ["kickstart", "gui/\(getuid())/\(label)"]
-            try? kick.run()
-            return
+            if await kickstarted() { return }
+            // Enabled, yet launchd won't run it, as once the app's been rebuilt since it was registered: register it
+            // again, which records this build.
+            try? await agent.unregister()
         }
         do {
             try agent.register()
-            if agent.status == .enabled { return }
+            if agent.status == .enabled, await kickstarted() { return }
         } catch {}
         guard child?.isRunning != true else { return }
         let process = Process()
@@ -248,6 +247,29 @@ enum NodeLauncher {
         process.arguments = ["serve"]
         try process.run()
         child = process
+    }
+
+    /// Asks launchd to run the node's agent now: → whether it's running within a few seconds.
+    private static func kickstarted() async -> Bool {
+        _ = launchctl(["kickstart", "gui/\(getuid())/\(label)"])
+        for _ in 0..<10 {
+            if launchctl(["print", "gui/\(getuid())/\(label)"]).contains("state = running") { return true }
+            try? await Task.sleep(for: .milliseconds(300))
+        }
+        return false
+    }
+
+    private static func launchctl(_ arguments: [String]) -> String {
+        let process = Process()
+        let out = Pipe()
+        process.executableURL = URL(filePath: "/bin/launchctl")
+        process.arguments = arguments
+        process.standardOutput = out
+        process.standardError = Pipe()
+        guard (try? process.run()) != nil else { return "" }
+        let said = out.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        return String(decoding: said, as: UTF8.self)
     }
 }
 
