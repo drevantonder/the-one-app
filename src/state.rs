@@ -135,6 +135,8 @@ fn install(m: &Members, me: &str, settings: &Map<String, Value>, here: &Here) ->
         "runs": m.runs.get(me).map(|on| on.iter().map(hex).collect::<Vec<_>>()),
         // When the install's recovery key last let a device in, and whose.
         "recovery_used": m.recovery_used.as_ref().map(|(time, user)| json!({ "time": time, "user": user })),
+        // When the install's recovery key was set.
+        "recovery_set": m.recovery_set,
         "member": here.member,
         "users": users, "groups": groups, "devices": devices, "devices_at": m.devices_at, "clients": clients,
         // Standing work in the scopes this person may grant it in: which endpoint keeps which app running in which
@@ -142,7 +144,7 @@ fn install(m: &Members, me: &str, settings: &Map<String, Value>, here: &Here) ->
         "grants": m.grants.iter().filter(|((k, s, _), g)| m.grants_in(me, s) && m.machine(k).is_some() && m.grants_in(&g.by, s)).map(|((k, s, a), g)| json!({ "endpoint": hex(k), "scope": s.to_string(), "app": a, "until": g.until, "by": g.by, "keys": g.hashes })).collect::<Vec<_>>(),
         "entries": here.entries, "settings": settings,
         // The serverless node, once an admin deployed one (`serverless deploy` sets `serverless`).
-        "serverless": settings.contains_key("serverless").then(|| json!({ "use": rank::place(&set, rank::CLOUDFLARE, rank::CLOUDFLARE) })),
+        "serverless": m.serverless().map(|key| json!({ "use": rank::place(&set, rank::CLOUDFLARE, rank::CLOUDFLARE), "key": hex(&key), "runs_for": m.scopes().iter().filter(|s| m.runs_for(&key, s)).map(crate::entry::Scope::to_string).collect::<Vec<_>>() })),
     })
 }
 

@@ -171,6 +171,8 @@ pub struct Members {
     pub runs: BTreeMap<String, BTreeSet<Key>>,
     /// When the install's recovery key last let a device in (a `device` entry it signed), and whose.
     pub recovery_used: Option<(u64, String)>,
+    /// When the install's recovery key was set: by the genesis, or by a `recovery` entry the one before it signed.
+    pub recovery_set: u64,
     /// Where each endpoint's entries stop counting, by (endpoint, log): the first seq that doesn't, wherever it sorts.
     /// A removed device's in `global` after the last its remover had seen (`remove`'s `seq`), and a device's in a log
     /// it forked from the fork on (`Store::forks`).
@@ -441,12 +443,25 @@ impl Members {
     /// could), or another of the install's their own device chose (`runs`); of an admin of the group or of the install, for a group's; of an admin of
     /// the install, for `global`.
     pub fn runs_for(&self, endpoint: &Key, scope: &Scope) -> bool {
-        let Some(m) = self.compute(endpoint) else { return false };
+        let Some(m) = self.compute(endpoint) else {
+            // The serverless node, as an admin's setting names it: `global` and groups as any admin's machine, and a
+            // person's own scope only once their own device chose it (`runs`), as any other.
+            return self.serverless() == Some(*endpoint)
+                && match scope {
+                    Scope::User(u) => self.runs.get(u).is_some_and(|on| on.contains(endpoint)),
+                    Scope::Group(_) | Scope::Global => true,
+                };
+        };
         match scope {
             Scope::User(u) => (m.user == *u && m.by == *u) || self.runs.get(u).is_some_and(|on| on.contains(endpoint)),
             Scope::Group(g) => self.manages(&m.user, g),
             Scope::Global => self.is_admin(&m.user),
         }
+    }
+
+    /// The serverless node's endpoint, as an admin's `serverless` setting names it.
+    pub fn serverless(&self) -> Option<Key> {
+        self.settings.get("serverless").and_then(|k| unhex(k).ok())
     }
 
     /// Whether `endpoint` runs any of the calls of `user`: a compute endpoint that runs some scope they use.
@@ -481,9 +496,10 @@ impl Members {
             return false;
         }
         let author = e.author();
-        // The install's recovery key, kept offline by an admin, only lets a device of someone's in, as an admin's would.
+        // The install's recovery key, kept offline by an admin, only lets a device of someone's in, as an admin's would,
+        // and hands over to the next recovery key.
         if self.recovery == Some(author) {
-            return is_member_entry(e) && e.content.kind == "device";
+            return is_member_entry(e) && ["device", "recovery"].contains(&e.content.kind.as_str());
         }
         self.client(&author).is_some_and(|c| c.user == e.user()) || (!is_member_entry(e) && self.runs_for(&author, &scope))
     }
@@ -513,6 +529,7 @@ impl Members {
                 let hash = epoch_hash_of(&data["epoch"])?;
                 self.name = text("name")?;
                 self.recovery = Some(key_of("recovery")?);
+                self.recovery_set = e.time();
                 self.users.insert(user.clone(), User { id: user.clone(), name: text("user_name")?, role: Role::Admin, removed: false });
                 self.machines.insert(author, machine);
                 self.devices_at = e.time();
@@ -605,7 +622,7 @@ impl Members {
             "runs" => {
                 // Only from the person's own device (`counts`), for their own scope: an admin can't say where it runs.
                 let on = data["on"].as_array().context("on is a list of endpoints' keys")?.iter().map(|k| unhex(k.as_str().unwrap_or(""))).collect::<Result<BTreeSet<_>>>()?;
-                ensure!(on.iter().all(|k| self.compute(k).is_some()), "only the install's machines that run things run someone's own");
+                ensure!(on.iter().all(|k| self.compute(k).is_some() || self.serverless() == Some(*k)), "only the install's machines that run things, and its serverless node, run someone's own");
                 self.runs.insert(w, on);
             }
             "grant" => {
@@ -687,8 +704,13 @@ impl Members {
                 };
             }
             "recovery" => {
-                ensure!(self.is_admin(&w), "admins only");
-                self.recovery = Some(key_of("key")?);
+                // Only the recovery key itself hands over to a new one: no admin's device can, since every epoch is
+                // sealed to it, own scopes too.
+                ensure!(self.recovery == Some(author), "only the install's recovery key changes it");
+                let key = key_of("key")?;
+                ensure!(Some(key) != self.recovery && !self.machines.contains_key(&key), "a new recovery key is a key of its own");
+                self.recovery = Some(key);
+                self.recovery_set = e.time();
             }
             "app" => {
                 let name = text("name")?;
@@ -1374,6 +1396,24 @@ mod tests {
     }
 
     #[test]
+    fn the_serverless_node_runs_a_persons_own_scope_only_as_their_own_device_chose() {
+        let recovery = Dev::new(9);
+        let (mut mac, _, mut bobs, mut entries) = with_bob(&recovery);
+        let cloud = Dev::new(12).id();
+        add(&mut entries, &mut mac, ANDRE, setting("serverless", Some(&hex(&cloud))));
+        let (bob, andre) = (Scope::User(BOB.into()), Scope::User(ANDRE.into()));
+        let m = members(&entries);
+        assert!(m.runs_for(&cloud, &Scope::Global), "everyone's, as its admins set it");
+        assert!(!m.runs_for(&cloud, &bob) && !m.runs_for(&cloud, &andre), "no one's own by an admin's say, the admin's either");
+        add(&mut entries, &mut mac, ANDRE, runs(&[cloud]));
+        add(&mut entries, &mut mac, BOB, runs(&[cloud]));
+        let m = members(&entries);
+        assert!(m.runs_for(&cloud, &andre) && !m.runs_for(&cloud, &bob), "Andre chose it for his own; his device can't for Bob");
+        add(&mut entries, &mut bobs, BOB, runs(&[cloud]));
+        assert!(members(&entries).runs_for(&cloud, &bob));
+    }
+
+    #[test]
     fn a_removed_persons_devices_get_no_new_epoch_and_their_entries_stop() {
         let recovery = Dev::new(9);
         let (mut mac, _, mut bobs, mut entries) = with_bob(&recovery);
@@ -1446,7 +1486,15 @@ mod tests {
         let mut other = Dev::new(8);
         entries.push(other.write("global", BOB, device(&Dev::new(10).endpoint(), BOB, "x", &[Kind::Client], None), &entries));
         assert!(members(&entries).machine(&Dev::new(10).id()).is_none());
-        let _ = &mut mac;
+        // Only the recovery key hands over to a new one: an admin's device can't, and the old key counts no more.
+        add(&mut entries, &mut mac, ANDRE, node("recovery", json!({ "key": hex(&other.id()) })));
+        assert_eq!(members(&entries).recovery, Some(recovery.id()), "not by an admin's device");
+        let e = recovery.write("global", ANDRE, node("recovery", json!({ "key": hex(&other.id()) })), &entries);
+        entries.push(e.clone());
+        let m = members(&entries);
+        assert_eq!((m.recovery, m.recovery_set), (Some(other.id()), e.time()));
+        entries.push(recovery.write("global", BOB, device(&Dev::new(11).endpoint(), BOB, "y", &[Kind::Client], None), &entries));
+        assert!(members(&entries).machine(&Dev::new(11).id()).is_none(), "the old recovery key lets nobody in");
     }
 
     #[test]

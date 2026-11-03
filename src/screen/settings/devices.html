@@ -43,7 +43,7 @@
     if (n.includes("imac") || n.includes("mac") || n.includes("windows") || n.includes("pc")) return "desktop";
     return "hard-drives";
   };
-  const runBy = (s) => (s.user === me() ? "" : `${userName(s.user)}’s`);
+  const runBy = (s) => (!s.user || s.user === me() ? "" : `${userName(s.user)}’s`);
   // Online is how it should be, so it says nothing.
   const status = (on) => (on ? "" : `<span class="status">Offline</span>`);
   const subs = (...lines) => lines.filter(Boolean).map((l) => `<div class="sub">${one.esc(l)}</div>`).join("");
@@ -127,7 +127,11 @@
 
   // Where their own things run: the machines that run things, each with a switch. Their own machines always do; the
   // rest only as their own device says (`runs`), which only they change.
-  const machines = () => (state.install?.devices || []).filter((s) => (s.roles || []).includes("compute"));
+  const machines = () => {
+    const all = (state.install?.devices || []).filter((s) => (s.roles || []).includes("compute"));
+    const cloud = state.install?.serverless;
+    return cloud?.key ? [...all, { key: cloud.key, name: "Cloudflare", runs_for: cloud.runs_for, roles: ["compute"] }] : all;
+  };
   const always = (s) => holds(s) && s.user === me() && !(state.install?.runs || []).includes(s.key);
   const runsSection = () => {
     const all = machines();
@@ -169,9 +173,11 @@
     if (others.length) html += '<h2 class="section">Shared Devices</h2><div class="list">' + others.map(deviceRow).join("") + "</div>";
     html += orderSection();
     html += runsSection();
+    const day = (t) => new Date(t).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+    if (state.install?.recovery_set) html += `<p class="footer">Recovery key set ${one.esc(day(state.install.recovery_set))}.</p>`;
     if (state.install?.recovery_used) {
-      const r = state.install.recovery_used, when = new Date(r.time).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
-      html += `<p class="footer">The recovery key last let in a device of ${one.esc(r.user === me() ? "yours" : `${userName(r.user)}’s`)}, ${one.esc(when)}.</p>`;
+      const r = state.install.recovery_used;
+      html += `<p class="footer">The recovery key last let in a device of ${one.esc(r.user === me() ? "yours" : `${userName(r.user)}’s`)}, ${one.esc(day(r.time))}.</p>`;
     }
     if (error) html += `<p class="footer error">${one.esc(error)}</p>`;
     return html;

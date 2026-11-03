@@ -12,7 +12,7 @@ use std::collections::{BTreeMap, HashMap};
 use anyhow::{Result, bail, ensure};
 use serde_json::{Map, Value, json};
 
-use one::entry::{Entry, Hash, Key, Scope, causal, hex, pack, unhex, unpack};
+use one::entry::{Entry, Hash, Key, Scope, causal, hex, pack, unpack};
 use one::members::{Cuts, Members, is_member_entry};
 
 /// `global`'s entries a device holds, checked, and the install they're of.
@@ -103,8 +103,8 @@ impl Global {
 ///   admin's `serverless` setting names it (its seal key its key's twin), as `{ key, seal, roles: ["compute"] }`
 /// - `openers`: each scope's client devices of the people who may use it, `{ key, seal }`: what its epochs are sealed to
 /// - `roles`: each scope's people and their role in it (`admin` in their own): who may use it, and start its epochs
-/// - `runs_for`: each compute endpoint's scopes whose calls it runs, every one for the serverless node: the only nodes
-///   handed a scope's keys
+/// - `runs_for`: each compute endpoint's scopes whose calls it runs, the serverless node's too (a person's own only as
+///   their own device chose): the only nodes handed a scope's keys
 /// - `runs`: where each person's own things run besides their own machines, as their own device chose
 /// - `epochs`: each scope's newest epoch `n` and every epoch's hash, which a key must match to be used
 pub fn view(m: &Members) -> Value {
@@ -127,11 +127,11 @@ pub fn view(m: &Members) -> Value {
         roles.insert(s.to_string(), json!(people));
     }
     let mut runs_for: Map<String, Value> = m.computes().map(|c| (hex(&c.key), json!(scopes.iter().filter(|s| m.runs_for(&c.key, s)).map(Scope::to_string).collect::<Vec<_>>()))).collect();
-    if let Some(key) = m.settings.get("serverless").and_then(|k| unhex(k).ok())
+    if let Some(key) = m.serverless()
         && let Ok(seal) = one::kernel::twin_public(&key)
     {
         devices.push(json!({ "key": hex(&key), "seal": hex(&seal), "roles": ["compute"] }));
-        runs_for.insert(hex(&key), json!(scopes.iter().map(Scope::to_string).collect::<Vec<_>>()));
+        runs_for.insert(hex(&key), json!(scopes.iter().filter(|s| m.runs_for(&key, s)).map(Scope::to_string).collect::<Vec<_>>()));
     }
     let epochs: Map<String, Value> = m
         .epochs
