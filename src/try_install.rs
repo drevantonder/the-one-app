@@ -646,6 +646,8 @@ fn android(dir: &Path, checkout: &Path, device: &str, settings: &one::kernel::Se
     let apk = checkout.join("android").join(apk.lines().last().unwrap_or_default());
     let package = format!("app.{CLI}.android");
     agent_devices("install", json!({ "device": device, "app": apk.display().to_string() }))?;
+    // The launcher keeps drawing home-screen widgets from the APK it replaced ("Can't load widget") until it restarts.
+    on_device(device, "am force-stop com.google.android.apps.nexuslauncher")?;
     let signed_in = dir.join(format!("signed-in-{device}"));
     let first = settings.try_person.as_ref().map(|(_, name)| name.as_str()).unwrap_or_default();
     let who = person.unwrap_or(first);
