@@ -352,6 +352,7 @@ export default {
       },
     },
     remove_from: {
+      reads: false,
       confirm: true,
       description: "Remove a service from a device you own: it stops running there, and goes on running on your other devices that have it. What it keeps on that device stays, and install_on puts it back.",
       input: { type: "object", required: ["app", "device"], properties: { app: { type: "string", description: "a service's name, from apps_list with service true" }, device: { type: "string", description: "a device's name, from apps_devices' remove" } } },

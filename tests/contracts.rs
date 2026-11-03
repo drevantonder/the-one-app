@@ -783,3 +783,22 @@ fn every_client_draws_in_the_kits_colours() {
     }
     assert!(problems.is_empty(), "{}", problems.join("\n"));
 }
+
+/// Every built-in app's operation says whether it only reads (`reads: true` or `reads: false`), as the core's do
+/// (src/sidecars.rs): MCP clients run read-only tools side by side and ask before the rest, and code mode refuses
+/// what can't be undone, so a missing one is a write passed off as nothing, or a read treated as one.
+#[test]
+fn every_built_in_apps_operation_says_whether_it_only_reads() {
+    let apps: Vec<String> = std::fs::read_dir("apps").unwrap().filter_map(|e| Some(e.ok()?.path().join("app.js"))).filter(|p| p.is_file()).map(|p| std::fs::canonicalize(p).unwrap().display().to_string()).collect();
+    assert!(apps.len() > 10, "the test reads apps/*/app.js: {apps:?}");
+    let script = r#"const bad = [];
+        for (const p of process.argv.slice(1)) {
+          const app = (await import(p)).default;
+          for (const [name, op] of Object.entries(app.ops || {})) if (!name.startsWith("_") && typeof op.reads !== "boolean") bad.push(`${app.name}_${name}`);
+        }
+        console.log(JSON.stringify(bad));"#;
+    let out = std::process::Command::new(one::deploy::bun().unwrap()).arg("-e").arg(script).args(&apps).output().unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let bad: Vec<String> = serde_json::from_slice(&out.stdout).unwrap();
+    assert!(bad.is_empty(), "these say neither reads: true nor reads: false: {bad:?}");
+}
