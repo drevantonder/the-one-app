@@ -218,7 +218,8 @@
       const d = new Date(ms);
       return s < 7 * 86400 ? d.toLocaleDateString(undefined, { weekday: "short" }) : d.toLocaleDateString(undefined, { day: "numeric", month: "short" });
     },
-    // An app's icon, `{ name, title, icon, color, image, image_kind }` as catalog() gives it: the shells' tile, drawn in
+    // An app's icon, `{ name, title, icon, color, image, image_kind }` as catalog() gives it (`image` a data URL, or the
+    // address's `/v1/images/<name>` as a window's list names it): the shells' tile, drawn in
     // by the shell; elsewhere its picture, or the filled one of its icon (else its first letter) on its colour.
     // `image_kind` "icon" is a finished app icon, drawn edge to edge; otherwise the picture is a logo, inset on white.
     // An app's picture and colour are its own, so only a picture's address (as a CSS string) and a colour's hex reach
@@ -226,7 +227,7 @@
     appIcon(app, size = 36) {
       size = Number(size) || 36;
       const letter = String(app.title || app.name || "?")[0].toUpperCase();
-      const image = /^(https:|data:image\/)/.test(app.image || "") ? String(app.image) : "", color = /^#[0-9a-f]{3,8}$/i.test(app.color || "") ? app.color : "";
+      const image = /^(https:|data:image\/|\/v1\/images\/[0-9a-f]+$)/.test(app.image || "") ? String(app.image) : "", color = /^#[0-9a-f]{3,8}$/i.test(app.color || "") ? app.color : "";
       const face = app.icon && !shell ? glyph(`${app.icon}-fill`, "", letter).replace("<svg ", `<svg width="${Math.round(size * 0.5)}" height="${Math.round(size * 0.5)}" `) : one.esc(letter);
       const look = image && !shell ? `;background-image:url(${JSON.stringify(image)})` : color ? `;--tile:${color}` : "";
       const logo = image && !shell && app.image_kind !== "icon" ? " logo" : "";

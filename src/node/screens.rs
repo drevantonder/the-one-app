@@ -134,7 +134,7 @@ impl Node {
 
     /// An app screen as a whole page: the app's HTML with the design kit, the bridge, and who's looking.
     /// `scope` is the page a shell opened it from, a hint the app may follow or not.
-    pub async fn screen(&self, viewer: Caller, app: &str, name: &str, params: Value, scope: Option<&str>) -> Result<String> {
+    pub async fn screen(&self, viewer: Caller, app: &str, name: &str, params: Value, scope: Option<&str>, linked: bool) -> Result<String> {
         let deployed = self.with(|i| Ok(i.r.members.apps.get(app).is_some_and(|a| a.bundle.is_some())))?;
         let body = match deployed {
             // A screen the app doesn't have (an old or mistyped link) is a page that says so.
@@ -147,21 +147,21 @@ impl Node {
                 body.as_str().context("the screen isn't text")?.to_string()
             }
         };
-        self.page(&viewer, json!({ "app": app, "screen": name, "params": params, "scope": scope }), &body, false)
+        self.page(&viewer, json!({ "app": app, "screen": name, "params": params, "scope": scope }), &body, false, linked)
     }
 
     /// A client's own screen (`crate::screen::client_screen`) as a whole page, like an app's but no app's.
-    pub fn client_screen(&self, viewer: Caller, name: &str, params: Value) -> Result<String> {
-        self.page(&viewer, json!({ "screen": name, "params": params }), crate::screen::client_screen(name), true)
+    pub fn client_screen(&self, viewer: Caller, name: &str, params: Value, linked: bool) -> Result<String> {
+        self.page(&viewer, json!({ "screen": name, "params": params }), crate::screen::client_screen(name), true, linked)
     }
 
     /// A screen's page: its body with the design kit, the bridge, and `window.__one`, which is `context` and who's
     /// looking.
-    pub(super) fn page(&self, viewer: &Caller, mut context: Value, body: &str, own: bool) -> Result<String> {
+    pub(super) fn page(&self, viewer: &Caller, mut context: Value, body: &str, own: bool, linked: bool) -> Result<String> {
         context["me"] = json!(self.me_for(viewer)?);
         let api = format!("http://localhost:{}", crate::api::port());
         context["config"] = json!({ "name": crate::config::NAME, "cli": crate::config::CLI, "api": api, "made_here": crate::config::MADE_HERE });
-        Ok(crate::screen::page(&context, body, own))
+        Ok(crate::screen::page(&context, body, own, linked))
     }
 
     /// Arranges a page for `caller` alone: the order of its apps and widgets, which widgets, their sizes and options,

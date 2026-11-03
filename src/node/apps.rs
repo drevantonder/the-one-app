@@ -69,6 +69,58 @@ impl Node {
         Ok(out)
     }
 
+    /// `apps`, as a window draws them: what shows each one and where (no operations, schemas or instructions, which
+    /// whoever needs them asks the whole list for), its picture named (`/v1/images/<name>`) rather than in it, so the
+    /// list is small and each picture is kept for good where it's shown.
+    pub async fn apps_drawn(&self, viewer: &Caller) -> Result<Vec<Value>> {
+        const DRAWN: &[&str] = &["name", "title", "icon", "color", "domain", "image", "image_kind", "installed", "deleted", "screens", "widgets", "owner"];
+        let mut out = Vec::new();
+        for app in self.apps(viewer).await? {
+            let Value::Object(mut app) = app else { continue };
+            app.retain(|k, _| DRAWN.contains(&k.as_str()));
+            if let Some(Value::String(image)) = app.get_mut("image")
+                && image.starts_with("data:")
+            {
+                *image = self.name_image(std::mem::take(image));
+            }
+            out.push(Value::Object(app));
+        }
+        Ok(out)
+    }
+
+    /// A picture's address by its content: `/v1/images/<name>`, which `named_image` gives back.
+    fn name_image(&self, data_url: String) -> String {
+        use sha2::Digest;
+        let name = data_encoding::HEXLOWER.encode(&sha2::Sha256::digest(data_url.as_bytes())[..16]);
+        let url = format!("/v1/images/{name}");
+        self.0.named_images.lock().unwrap().insert(name, data_url);
+        url
+    }
+
+    /// The picture `apps_drawn` named `name`, as its type and bytes: looked for again in this machine's person's apps
+    /// if this node didn't name it (it's newer than the list that did, or another node made that list).
+    pub async fn named_image(&self, name: &str) -> Option<(String, Vec<u8>)> {
+        let found = || self.0.named_images.lock().unwrap().get(name).cloned();
+        let url = match found() {
+            Some(url) => url,
+            None => {
+                // Anyone can ask for a name, so the list is made again for one at most every ten seconds.
+                static LAST: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+                let now = now_ms();
+                if now.saturating_sub(LAST.load(std::sync::atomic::Ordering::Relaxed)) < 10_000 {
+                    return None;
+                }
+                LAST.store(now, std::sync::atomic::Ordering::Relaxed);
+                let me = Caller { key: self.id(), user: self.user().ok()?, agent: None, token: None };
+                self.apps_drawn(&me).await.ok()?;
+                found()?
+            }
+        };
+        let (head, data) = url.strip_prefix("data:")?.split_once(',')?;
+        let kind = head.strip_suffix(";base64")?;
+        Some((kind.to_string(), data_encoding::BASE64.decode(data.as_bytes()).ok()?))
+    }
+
     /// Every app in the install: owner, `from`, forks, deploys, the scopes `viewer` may use it's installed in, its
     /// title and icon, and for one built in, the bundle this release has of it; for those installed for them, what it
     /// does (operations, widgets, screens, instructions). With `not_added`, also the built-in apps the install hasn't

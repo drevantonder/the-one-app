@@ -1,5 +1,5 @@
 // What the web client asks for first, started as its page arrives, before its styles and web.js: an access token, the
-// node's state and apps, and the page of the screen the window opens on, so they come in while web.js does. The
+// node's state and its apps as the window draws them (`APPS`), and the page of the screen the window opens on, so they come in while web.js does. The
 // gateway's index.html has it inline, with its hash in the page's policy; web.js takes what it started (`take`), and
 // uses its token, places and kept pages, so each is said once.
 window.__oneStart = (() => {
@@ -71,11 +71,13 @@ window.__oneStart = (() => {
   const isPage = (r) => r.kind === "own" && r.name === "pages";
   const swiped = (r) => own("pages", { swipe: true, scope: JSON.parse(r.params).scope || "user" });
 
-  /// Where a route's page is on the node, as the path and query the window asks it with.
+  /// Where a route's page is on the node, as the path and query the window asks it with: its kit and bridge linked, as
+  /// this page has them already (web.js writes them in).
   function address(r) {
     const url = new URL(r.kind === "own" ? `/v1/client-screens/${encodeURIComponent(r.name)}` : `/v1/screens/${encodeURIComponent(r.app)}/${encodeURIComponent(r.screen)}`, location.origin);
     url.searchParams.set("params", r.params || "{}");
     if (r.scope != null) url.searchParams.set("scope", r.scope);
+    url.searchParams.set("linked", "true");
     return url.pathname + url.search;
   }
 
@@ -103,11 +105,13 @@ window.__oneStart = (() => {
   /// The window's first asks, by path and query, until web.js takes them: none without a sign-in, nor where the page
   /// does something else first (finishing a sign-in, a Vault request).
   const asked = new Map();
+  /// The apps as the window draws them: what shows each, its picture by address.
+  const APPS = "/v1/apps?light=true";
   const send = (path, headers = {}) => token().then((t) => fetch(path, { headers: { authorization: `Bearer ${t}`, ...headers } }));
   const ask = (path, answer) => (answer.catch(() => {}), asked.set(path, answer));
   if (read(SIGNIN)?.refresh && !["/callback", "/vault"].includes(location.pathname)) {
     ask("/v1/state", send("/v1/state"));
-    ask("/v1/apps", send("/v1/apps"));
+    ask(APPS, send(APPS));
     // Asked as having the page kept here, if it is: unchanged, the node answers 304, and the kept one shows.
     const r = phone.matches && isPage(route()) ? swiped(route()) : route();
     const path = address(r);
@@ -120,5 +124,5 @@ window.__oneStart = (() => {
     return answer;
   };
 
-  return { meta, grant, token, own, route, phone, isPage, swiped, address, kept, take };
+  return { meta, grant, token, own, route, phone, isPage, swiped, address, kept, take, APPS };
 })();

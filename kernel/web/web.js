@@ -254,7 +254,7 @@ window.__one = {};
   /// Loads what the sidebar shows: the node's state and its apps together (its apps only if `apps`, or if who's in
   /// which group changed), drawn as soon as they're in; then the badges, drawn as they come.
   async function refreshState({ apps = false } = {}) {
-    const [state, list] = await Promise.all([shared("/v1/state"), apps ? shared("/v1/apps").catch(() => null) : null]);
+    const [state, list] = await Promise.all([shared("/v1/state"), apps ? shared(first.APPS).catch(() => null) : null]);
     const regrouped = JSON.stringify([state.user, state.install?.groups]) !== JSON.stringify([store.state?.user, store.state?.install?.groups]);
     store.state = state;
     if (list) store.apps = list;
@@ -266,7 +266,7 @@ window.__one = {};
 
   async function refreshApps() {
     if (!install()) return render();
-    store.apps = await shared("/v1/apps");
+    store.apps = await shared(first.APPS);
     render();
     keepWindow();
     badges();
@@ -532,6 +532,19 @@ window.__one = {};
   }
   const ask = (r) => (asked = { key: JSON.stringify(r), page: screenPage(r) }).page.catch(() => {});
 
+  /// A page with its kit and bridge, which the node linked (`linked`, src/screen.rs), written in from this window's
+  /// cache, where its own page put them: a sandboxed frame has a cache of its own, so it would download them again.
+  const KIT = /<link rel="stylesheet" href="(\/screen\/[a-z]+\.css\?v=[0-9a-f]+)">|<script( nonce="[0-9a-f]+")? src="(\/screen\/[a-z]+\.js\?v=[0-9a-f]+)"><\/script>/g;
+  const kitFiles = {};
+  const kitFile = (url) =>
+    (kitFiles[url] ||= fetch(url)
+      .then((r) => (r.ok ? r.text() : Promise.reject(new Error(UNANSWERED))))
+      .catch((err) => (delete kitFiles[url], Promise.reject(err))));
+  async function withKit(page) {
+    const texts = Object.fromEntries(await Promise.all([...page.matchAll(KIT)].map(async (m) => [m[1] || m[3], await kitFile(m[1] || m[3])])));
+    return page.replace(KIT, (_, css, nonce = "", js) => (css ? `<style>${texts[css]}</style>` : `<script${nonce}>${texts[js]}</script>`));
+  }
+
   /// A sandboxed frame for a page this window writes in (frame.html takes it).
   function sandboxed(r) {
     const frame = document.createElement("iframe");
@@ -556,24 +569,31 @@ window.__one = {};
     // The frame loads while its page is on its way, and shows once it's written in (`write`).
     frame.style.visibility = "hidden";
     into.append(frame);
+    const failed = (err) => f.html || ((f.loaded = true), (into.innerHTML = message("Can’t Open This", esc(one.plain(err).title))));
     const draw = (page) => {
       f.page = page;
-      f.html = look(page);
-      if (f.waiting) write(f);
+      withKit(page).then((html) => {
+        if (f.page !== page) return;
+        f.html = look(html);
+        if (f.waiting) write(f);
+      }, failed);
     };
     const fresh = screenPage(r);
     Promise.all([kept.get("page", f.key), sheet ? null : kept.get("still", f.key)]).then(([page, still]) => {
-      if (f.html) return;
+      if (f.page) return;
       if (still) showStill(f, still.text);
       if (page) draw(renonce(page.text));
     });
     fresh.then((page) => {
-      if (!f.html) return draw(page);
+      if (!f.page) return draw(page);
       if (same(page, f.page)) return;
       f.page = page;
-      f.html = look(page);
-      frame.src = asset("frame.html");
-    }, (err) => f.html || ((f.loaded = true), (into.innerHTML = message("Can’t Open This", esc(one.plain(err).title)))));
+      withKit(page).then((html) => {
+        if (f.page !== page) return;
+        f.html = look(html);
+        frame.src = asset("frame.html");
+      }, failed);
+    }, failed);
     return f;
   }
 

@@ -606,7 +606,7 @@ fn an_apps_widget_runs_nothing_on_the_clients_own_screens() {
     let dir = crate::temp("screens");
     // What each page says once it's drawn, as its title.
     let title = |name: &str, body: &str, own: bool| -> String {
-        let page = one::screen::page(&json!({ "screen": "test", "params": {}, "me": null, "config": { "name": "Test" } }), body, own);
+        let page = one::screen::page(&json!({ "screen": "test", "params": {}, "me": null, "config": { "name": "Test" } }), body, own, false);
         let path = dir.join(format!("{name}.html"));
         std::fs::write(&path, page).unwrap();
         let out = one::deploy::chrome()

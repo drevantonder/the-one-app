@@ -116,6 +116,7 @@ pub fn routes() -> Router<Node> {
         .route("/skills/{name}/{*path}", get(skill_file))
         .route("/v1/state", get(state))
         .route("/v1/apps", get(apps))
+        .route("/v1/images/{name}", get(image))
         .route("/v1/call", post(call).layer(axum::extract::DefaultBodyLimit::max(64 << 20)))
         .route("/v1/widgets", get(widgets))
         .route("/v1/badges", get(badges))
@@ -307,6 +308,10 @@ fn tailnet_address() -> Option<std::net::Ipv4Addr> {
 /// instead, for what `SIGNED_IN` lists.
 async fn only_this_machine(State(node): State<Node>, mut req: axum::extract::Request, next: axum::middleware::Next) -> Response {
     let path = req.extensions().get::<axum::extract::MatchedPath>().map(|p| p.as_str().to_string()).unwrap_or_default();
+    // A picture named by its content is anyone's who has its name.
+    if path == "/v1/images/{name}" {
+        return next.run(req).await;
+    }
     let token = req.headers().get(axum::http::header::AUTHORIZATION).and_then(|a| a.to_str().ok()).and_then(|a| a.strip_prefix("Bearer ")).map(|t| t.trim().to_string());
     if let Some(token) = token {
         // This machine's own programs (its CLI and MCP, signed in) may ask anything; from elsewhere, only `SIGNED_IN`.
@@ -521,10 +526,27 @@ async fn state(State(node): State<Node>, signed_in: Option<axum::Extension<Me>>)
     })
 }
 
-async fn apps(State(node): State<Node>, me: Me, headers: axum::http::HeaderMap) -> Result<Response, Error> {
-    let body = serde_json::to_string(&node.apps(&me.caller).await?)?;
+#[derive(Deserialize)]
+struct AppsQuery {
+    /// As a window draws them (`Node::apps_drawn`).
+    light: Option<bool>,
+}
+
+async fn apps(State(node): State<Node>, me: Me, headers: axum::http::HeaderMap, Query(q): Query<AppsQuery>) -> Result<Response, Error> {
+    let apps = if q.light == Some(true) { node.apps_drawn(&me.caller).await? } else { node.apps(&me.caller).await? };
+    let body = serde_json::to_string(&apps)?;
     let tag = crate::screen::tag(&body);
     Ok(tagged(&headers, tag, ([(axum::http::header::CONTENT_TYPE, "application/json")], body)))
+}
+
+/// A picture a window's app list names (`Node::apps_drawn`), for anyone who has its name, which is its content's:
+/// kept for good, since it can't change.
+async fn image(State(node): State<Node>, Path(name): Path<String>) -> Response {
+    let found = if name.len() == 32 && name.bytes().all(|b| b.is_ascii_hexdigit()) { node.named_image(&name).await } else { None };
+    match found {
+        Some((kind, bytes)) => ([(axum::http::header::CONTENT_TYPE, kind), (axum::http::header::CACHE_CONTROL, "public, max-age=31536000, immutable".into())], bytes).into_response(),
+        None => (StatusCode::NOT_FOUND, [(axum::http::header::CACHE_CONTROL, "no-store")]).into_response(),
+    }
 }
 
 /// `{ name, device?, installed? }`: removes a sidecar from a device (this one by default), or with `installed` lets it
@@ -860,12 +882,14 @@ async fn fill(State(node): State<Node>, Path((app, id)): Path<(String, u64)>, Js
 struct ScreenQuery {
     params: Option<String>,
     scope: Option<String>,
+    /// The kit and bridge as the address's files (`crate::screen::page`), for the web client, which has them.
+    linked: Option<bool>,
 }
 
 /// An app screen as a page, for shells' web views and the web client's frames.
 async fn screen(State(node): State<Node>, me: Me, headers: axum::http::HeaderMap, Path((app, name)): Path<(String, String)>, Query(q): Query<ScreenQuery>) -> Result<Response, Error> {
     let params: Value = q.params.as_deref().map(serde_json::from_str).transpose()?.unwrap_or(json!({}));
-    let html = node.screen(me.caller, &app, &name, params, q.scope.as_deref()).await?;
+    let html = node.screen(me.caller, &app, &name, params, q.scope.as_deref(), q.linked == Some(true)).await?;
     Ok(page(&headers, html))
 }
 
@@ -886,7 +910,7 @@ fn tagged(headers: &axum::http::HeaderMap, tag: String, answer: impl IntoRespons
 /// A client's own screen as a page (see `Node::client_screen`).
 async fn client_screen(State(node): State<Node>, me: Me, headers: axum::http::HeaderMap, Path(name): Path<String>, Query(q): Query<ScreenQuery>) -> Result<Response, Error> {
     let params: Value = q.params.as_deref().map(serde_json::from_str).transpose()?.unwrap_or(json!({}));
-    Ok(page(&headers, node.client_screen(me.caller, &name, params)?))
+    Ok(page(&headers, node.client_screen(me.caller, &name, params, q.linked == Some(true))?))
 }
 
 async fn events(State(node): State<Node>) -> Sse<impl tokio_stream::Stream<Item = Result<SseEvent, Infallible>>> {
