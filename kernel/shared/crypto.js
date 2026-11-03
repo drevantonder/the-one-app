@@ -216,14 +216,48 @@ export async function signedRequest(key, by, domain, fields, at = Date.now()) {
 
 /// Checks a signed request at `now`: → `{ by, fields }`, or throws.
 export async function checkRequest(domain, request, now = Date.now()) {
+  const checked = await checkSigned(domain, request);
+  if (Math.abs(checked.fields.at - now) > FRESH) throw new Error("it was signed too long ago, or the clock that signed it is wrong");
+  return checked;
+}
+
+/// A signed request's signature, whenever it was signed: → `{ by, fields }`, or throws.
+async function checkSigned(domain, request) {
   if (!request || typeof request !== "object") throw new Error("not a request");
   const { sig, ...fields } = request;
   if (typeof sig !== "string") throw new Error("it isn't signed");
   const by = hex.decode(String(fields.by));
   if (by.length !== 32) throw new Error("not a key: 64 hex characters");
-  if (!Number.isSafeInteger(fields.at) || Math.abs(fields.at - now) > FRESH) throw new Error("it was signed too long ago, or the clock that signed it is wrong");
+  if (!Number.isSafeInteger(fields.at)) throw new Error("it doesn't say when it was signed");
   if (!(await verify(by, domain, fields, b64u.decode(sig)))) throw new Error("its signature is wrong");
   return { by: fields.by, fields };
+}
+
+/// What a device signs to vouch for an endpoint of a session of its own, and for how long at most (ms).
+export const ENDPOINT = "one/endpoint";
+export const SESSION = 24 * 3_600_000;
+
+/// A device's word (`key`, its public half `by`) that `endpoint` (bytes) is its own until `until`: base64url JSON, as
+/// the relay and nodes take it (keys::certify).
+export async function certify(key, by, endpoint, until, at = Date.now()) {
+  return b64u.encode(canonical(await signedRequest(key, by, ENDPOINT, { endpoint: hex.encode(endpoint), until }, at)));
+}
+
+/// Checks a certificate at `now`: → `{ by, endpoint, until }` (keys hex), or throws (keys::check_certificate).
+export async function checkCertificate(certificate, now = Date.now()) {
+  let request;
+  try {
+    request = JSON.parse(new TextDecoder().decode(b64u.decode(String(certificate).trim())));
+  } catch {
+    throw new Error("a certificate is base64url JSON");
+  }
+  const { by, fields } = await checkSigned(ENDPOINT, request);
+  if (typeof fields.endpoint !== "string" || !/^[0-9a-f]{64}$/.test(fields.endpoint)) throw new Error("not a key: 64 hex characters");
+  if (!Number.isSafeInteger(fields.until)) throw new Error("a certificate says until when");
+  if (fields.at > now + FRESH) throw new Error("it was signed in the future, or the clock that signed it is wrong");
+  if (fields.until <= now) throw new Error("that session has ended");
+  if (fields.until > fields.at + SESSION) throw new Error("a session lasts a day at most");
+  return { by, endpoint: fields.endpoint, until: fields.until };
 }
 
 /// An entry (src/entry.rs), signed by an endpoint (`key`, its public half `by`): `fields` `{ log, seq, backlink,

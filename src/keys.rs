@@ -90,14 +90,58 @@ pub fn signed_request(key: &SigningKey, domain: &str, mut fields: Value, at: u64
 
 /// Checks a signed request at `now`: → who signed it, and the fields without `sig`.
 pub fn check_request(domain: &str, request: &Value, now: u64) -> Result<([u8; 32], Value)> {
+    let (by, fields, at) = check_signed(domain, request)?;
+    ensure!(at.abs_diff(now) <= FRESH, "it was signed too long ago, or the clock that signed it is wrong");
+    Ok((by, fields))
+}
+
+/// A signed request's signature, whenever it was signed: → who signed it, the fields without `sig`, and `at`.
+fn check_signed(domain: &str, request: &Value) -> Result<([u8; 32], Value, u64)> {
     let mut fields = request.clone();
     let sig = fields.as_object_mut().context("not a request")?.remove("sig").context("it isn't signed")?;
     let sig = B64U.decode(sig.as_str().unwrap_or("").as_bytes()).map_err(|_| anyhow!("its signature isn't base64url"))?;
     let by = unhex(fields["by"].as_str().unwrap_or(""))?;
     let at = fields["at"].as_u64().context("it doesn't say when it was signed")?;
-    ensure!(at.abs_diff(now) <= FRESH, "it was signed too long ago, or the clock that signed it is wrong");
     verify(&by, domain, &fields, &sig)?;
-    Ok((by, fields))
+    Ok((by, fields, at))
+}
+
+// Session endpoints.
+
+/// What a device signs to vouch for an endpoint of a session of its own.
+pub const ENDPOINT: &str = "one/endpoint";
+/// The longest a session's endpoint is vouched for, in milliseconds.
+pub const SESSION: u64 = 24 * 3_600_000;
+
+/// A device's word that `endpoint` is its own until `until` (ms, at most `SESSION` after `at`): a signed request,
+/// as base64url JSON, the way the relay (iroh's auth token) and nodes (`x-one-endpoint`) take it. A browser's device
+/// key can't be read out of WebCrypto, and iroh signs with raw bytes, so its endpoint is a key of the session's, and
+/// this certificate is how the relay and nodes take that endpoint as the device.
+pub fn certify(device: &SigningKey, endpoint: &[u8; 32], until: u64, at: u64) -> String {
+    let request = signed_request(device, ENDPOINT, json!({ "endpoint": HEXLOWER.encode(endpoint), "until": until }), at);
+    B64U.encode(&canonical(&request))
+}
+
+/// A session's endpoint, as its device vouched for it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Session {
+    /// The device that signed it.
+    pub by: [u8; 32],
+    pub endpoint: [u8; 32],
+    pub until: u64,
+}
+
+/// Checks a certificate (`certify`'s) at `now`: signed, not yet expired, for no longer than `SESSION`, and not signed in
+/// the future. Who signed it is for the caller to check: it counts only if they're a device of the install.
+pub fn check_certificate(certificate: &str, now: u64) -> Result<Session> {
+    let request: Value = B64U.decode(certificate.trim().as_bytes()).ok().and_then(|b| serde_json::from_slice(&b).ok()).context("a certificate is base64url JSON")?;
+    let (by, fields, at) = check_signed(ENDPOINT, &request)?;
+    let endpoint = unhex(fields["endpoint"].as_str().unwrap_or(""))?;
+    let until = fields["until"].as_u64().context("a certificate says until when")?;
+    ensure!(at <= now + FRESH, "it was signed in the future, or the clock that signed it is wrong");
+    ensure!(until > now, "that session has ended");
+    ensure!(until <= at + SESSION, "a session lasts a day at most");
+    Ok(Session { by, endpoint, until })
 }
 
 // Epochs.
@@ -253,6 +297,21 @@ mod tests {
         let mut changed = req.clone();
         changed["read"] = json!(["a/c"]);
         assert!(check_request("one/urls", &changed, 1_000_000).is_err(), "nothing in it changes");
+    }
+
+    #[test]
+    fn a_certificate_vouches_for_one_endpoint_for_a_day_at_most() {
+        let device = SigningKey::from_bytes(&rand::random());
+        let endpoint: [u8; 32] = rand::random();
+        let at = 1_000_000_000;
+        let cert = certify(&device, &endpoint, at + SESSION, at);
+        let session = check_certificate(&cert, at + SESSION - 1).unwrap();
+        assert_eq!(session, Session { by: device.verifying_key().to_bytes(), endpoint, until: at + SESSION });
+        assert!(check_certificate(&cert, at + SESSION).is_err(), "ended");
+        assert!(check_certificate(&cert, at - FRESH - 1).is_err(), "signed in the future");
+        assert!(check_certificate(&certify(&device, &endpoint, at + SESSION + 1, at), at).is_err(), "longer than a day");
+        let request = signed_request(&device, "one/relay", json!({ "endpoint": HEXLOWER.encode(&endpoint), "until": at + 1 }), at);
+        assert!(check_certificate(&B64U.encode(&canonical(&request)), at).is_err(), "only for its domain");
     }
 
     #[test]

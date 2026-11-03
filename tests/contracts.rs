@@ -472,6 +472,34 @@ fn the_kernel_and_nodes_agree_on_keys_and_seals() {
         assert_eq!(b(&out["passkey"]["seal"]), seal_secret, "and the secret sealed to");
         assert_eq!(out["passkey"]["sealPublic"], data_encoding::HEXLOWER.encode(&kernel::public_of(&seal_secret)), "and its public half");
         assert_eq!(to, kernel::twin_public(&node.verifying_key().to_bytes()).unwrap(), "a Rust endpoint seals to its key's twin");
+
+        // A session endpoint's certificate: made the same, and each takes and refuses the same ones.
+        let endpoint: [u8; 32] = rand::random();
+        let at = 1_700_000_000_000u64;
+        let made = keys::certify(&signer, &endpoint, at + keys::SESSION, at);
+        let other = keys::signed_request(&signer, "one/relay", json!({ "endpoint": data_encoding::HEXLOWER.encode(&endpoint), "until": at + 1 }), at);
+        let mut tampered: Value = serde_json::from_slice(&B64U.decode(made.as_bytes()).unwrap()).unwrap();
+        tampered["until"] = json!(at + 2);
+        let check = [
+            made.clone(),
+            keys::certify(&signer, &endpoint, at + keys::SESSION + 1, at),
+            keys::certify(&signer, &endpoint, at + 10, at),
+            keys::certify(&signer, &endpoint, at + keys::SESSION, at + keys::FRESH + 200),
+            B64U.encode(&keys::canonical(&other)),
+            B64U.encode(&keys::canonical(&tampered)),
+            "not base64url!".into(),
+        ];
+        let now = at + 100;
+        let out = js(json!({ "op": "certificates", "seed": B64U.encode(&seed), "endpoint": data_encoding::HEXLOWER.encode(&endpoint), "until": at + keys::SESSION, "at": at, "check": check, "now": now }));
+        assert_eq!(out["made"], json!(made), "the same certificate made the same");
+        for (cert, js) in check.iter().zip(out["checked"].as_array().unwrap()) {
+            let rust = keys::check_certificate(cert, now);
+            assert_eq!(js.get("error").is_none(), rust.is_ok(), "{cert}: Rust {rust:?}, JavaScript {js}");
+            if let Ok(s) = rust {
+                assert_eq!(js, &json!({ "by": data_encoding::HEXLOWER.encode(&s.by), "endpoint": data_encoding::HEXLOWER.encode(&s.endpoint), "until": s.until }));
+            }
+        }
+        assert!(out["checked"].as_array().unwrap().iter().skip(1).all(|c| c.get("error").is_some()), "only the first is good");
     }
 
     // Entries (src/entry.rs): signed alike from the same key and fields, and each checks the other's.
