@@ -892,7 +892,7 @@ try {{
     }}
     Start-Process explorer.exe "shell:AppsFolder\$((Get-AppxPackage -Name '{file}').PackageFamilyName)!App"
   }}
-  $until = (Get-Date).AddSeconds(120)
+  $until = (Get-Date).AddSeconds(300)
   $pressed = $false
   $said = $false
   while ($true) {{
@@ -944,7 +944,7 @@ Start-ScheduledTask -TaskName one-try-sign-in"#
     let start = Instant::now();
     let mut approved = false;
     loop {
-        anyhow::ensure!(start.elapsed() < Duration::from_secs(240), "the Windows app didn't sign in: look at it with {CLI} computer screen --device {device}");
+        anyhow::ensure!(start.elapsed() < Duration::from_secs(420), "the Windows app didn't sign in: look at it with {CLI} computer screen --device {device}");
         std::thread::sleep(Duration::from_secs(3));
         match on_device(device, r#"$log = "$env:TEMP\one-try-sign-in.log"; if (Test-Path $log) { Get-Content $log }"#)?.trim() {
             "signed in" => break,
