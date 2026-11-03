@@ -628,7 +628,13 @@ async fn client_devices_ask_their_node_over_iroh_as_their_person() {
     a.approve_request(&me, &phone, None).await.unwrap();
     a.member("device", json!({ "key": one::entry::hex(&listed(&sams).key), "seal": one::entry::hex(&listed(&sams).seal), "user": sam, "name": "sam's phone", "roles": ["client"], "user_name": "Sam", "role": "member" })).await.unwrap();
     // The relay lets in the install's endpoints, as each device that approves another tells it.
-    let k = tokio::task::block_in_place(|| crate::kernel::Kernel::for_devices([a.id(), mine.verifying_key().to_bytes(), sams.verifying_key().to_bytes()].iter().map(one::entry::hex).collect()));
+    let k = tokio::task::block_in_place(|| crate::kernel::Kernel::for_devices([a.id(), mine.verifying_key().to_bytes()].iter().map(one::entry::hex).collect()));
+    // The install's first devices are machines: Andre's phone says it's a client, as only a client vouches for a
+    // session, and lets Sam's in as one.
+    for (key, admin) in [(&mine, true), (&sams, false)] {
+        let tell = one::keys::signed_request(&mine, "one/relay", json!({ "add": one::entry::hex(&key.verifying_key().to_bytes()), "role": "client", "admin": admin }), one::node::now_ms());
+        assert_eq!(tokio::task::block_in_place(|| crate::kernel::post(&format!("{}/relay/tell", k.address), &[], tell)).0, 204);
+    }
     a.set_setting(&me, "address", Some(&k.address)).await.unwrap();
     eventually("a's endpoint", async || a.endpoint_addr().is_some_and(|e| e.relay_urls().next().is_some())).await;
 

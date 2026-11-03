@@ -10,17 +10,25 @@
 // devices tell it, and nothing else changes it. A computer joining with a pairing code a device made gets in too, by
 // the ticket it shows as iroh's relay auth token, until the code expires, and reaches only that device until it's
 // added. A session's endpoint gets in too (a browser's: its device key can't be read out of WebCrypto, and iroh signs
-// with raw bytes), by the certificate it shows as its auth token (keys::certify), signed by a key on the list, naming
-// the key it proves, until then: it reaches every endpoint as the key that signed it would, until its certificate's
-// `until` or that key is taken out. The URL signer asks it, by `allowed(key)`.
+// with raw bytes), by the certificate it shows as its auth token (keys::certify), signed by a client's key on the list,
+// naming the key it proves, until then: it reaches every endpoint as the key that signed it would, until its
+// certificate's `until` or that key is taken out or made something else. The URL signer asks it, by `allowed(key)`.
 //
-// `POST /relay/computes` answers a key on the list (a request it signed, `one/relay`, `{ computes: true }`) or a
-// session (`{ certificate }`) with the compute endpoints' keys, in no order: a new client's first nodes to ask.
+// A browser's WebSocket can't set a header, so its certificate is `?token=` in the relay's URL, where logs may keep
+// it. iroh shows the same token at every reconnect, so it can't be a proof made for each; but a certificate alone
+// gets nothing: the relay lets in only the endpoint that proves the key it names, and answers computes only to a
+// request that key signed.
+//
+// `POST /relay/computes` answers a request signed by a key on the list, or by a session's key with its certificate
+// (`one/relay`, `{ computes: true, certificate? }`, each `(by, at)` taken once, as a tell is), with the compute
+// endpoints' keys, in no order: a new client's first nodes to ask. 403 is only for a key that isn't let in; a request
+// that's wrong, or signed by a clock that's off, is 400, so a client keeps the nodes it knows.
 //
 // What a device tells it is `POST /relay/tell`, its body a request signed by a key on the list (`signedRequest` in
 // shared/crypto.js, domain `one/relay`, each `(by, at)` taken once) with one of:
-// - `{ add, role, admin? }`: a key (hex) to let in, and what it is; one already in is changed only by an admin, and an
-//   admin's added only by one.
+// - `{ add, role, admin? }`: a key (hex) to let in, and what it is: a client by any key on the list, a compute or a
+//   service only by an admin's or a compute's (nodes add the computers they pair and their people's services), and an
+//   admin only by an admin's; one already in is changed only by an admin's, keeping who let it in.
 // - `{ remove }`: a key to take out, by an admin, the key that let it in, or itself, with the keys it let in that aren't
 //   admins', and theirs, and the pairing codes they made; never the last admin. A pairing code's computer is taken out
 //   the same way, by its code's maker too.
@@ -119,20 +127,27 @@ export default class extends WorkerEntrypoint {
     }
   }
 
-  /// The compute endpoints' keys, for a key on the list or a session's endpoint.
+  /// The compute endpoints' keys, for a request signed by a key on the list or a session's endpoint.
   async computes(request) {
+    let asked;
     try {
       if (request.method !== "POST") throw new Error("ask for the computes with a POST");
       const body = await request.arrayBuffer();
       if (body.byteLength > TELL_BYTES) throw new Error("that's too big");
-      const asked = JSON.parse(new TextDecoder().decode(body));
-      const by = asked?.certificate !== undefined ? (await checkCertificate(asked.certificate)).by : asked?.computes === true ? (await checkRequest(TELL, asked)).by : null;
-      if (!by) throw new Error("ask with a request your device signed, or your session's certificate");
-      const computes = await this.relay().computes(by);
-      return computes ? Response.json({ computes }) : refuse(403, "the relay takes only your One App's devices");
+      const { by, fields } = await checkRequest(TELL, JSON.parse(new TextDecoder().decode(body)));
+      if (fields.computes !== true) throw new Error("ask with { computes: true }, signed");
+      asked = { by, at: fields.at };
+      if (fields.certificate !== undefined) {
+        const session = await checkCertificate(fields.certificate);
+        if (session.endpoint !== by) throw new Error("sign with the key your certificate names");
+        asked.session = session.by;
+      }
     } catch (e) {
-      return refuse(403, String(e.message || e));
+      return refuse(400, String(e.message || e));
     }
+    const said = await this.relay().computes(asked.by, asked);
+    if (Array.isArray(said)) return Response.json({ computes: said });
+    return said === null ? refuse(403, "the relay takes only your One App's devices") : refuse(400, said);
   }
 
   /// Whether `key` (hex) is one of the install's endpoints: `{ admin }` if it is, for the URL signer, by its binding.
@@ -198,10 +213,21 @@ export class Relay extends DurableObject {
     return it ? { admin: it.admin === 1 } : null;
   }
 
-  /// The compute endpoints' keys, if `by` is on the list: null if it isn't.
-  computes(by) {
-    if (!this.key(by)) return null;
+  /// The compute endpoints' keys, if `by` is on the list, or is a session's a client on it vouched for (`session`);
+  /// null if neither. A request's (`at`) is taken once: → why not, if it was taken already.
+  computes(by, { at, session } = {}) {
+    if (at !== undefined && !this.take(by, at)) return "that request was taken already";
+    if (session !== undefined ? this.key(session)?.role !== "client" : !this.key(by)) return null;
     return this.sql.exec("SELECT key FROM keys WHERE role = 'compute'").toArray().map((r) => r.key);
+  }
+
+  /// Takes a signed request, `(by, at)`, once: → whether it wasn't taken before.
+  take(by, at) {
+    const now = Date.now();
+    this.sql.exec("DELETE FROM tells WHERE at < ? OR at > ?", now - 2 * FRESH, now + 2 * FRESH);
+    if (this.sql.exec("SELECT 1 FROM tells WHERE by = ? AND at = ?", by, at).toArray().length) return false;
+    this.sql.exec("INSERT INTO tells VALUES (?, ?)", by, at);
+    return true;
   }
 
   async fetch(request) {
@@ -408,8 +434,9 @@ export class Relay extends DurableObject {
       id = null;
     }
     let attachment = id && this.key(id) ? { id } : null;
-    // A session's endpoint: the key its certificate names, signed by a key on the list.
-    if (id && !attachment && said.session?.endpoint === id && this.key(said.session.by) && said.session.until > Date.now()) {
+    // A session's endpoint: the key its certificate names, signed by a client's key on the list. Checked here, not when
+    // it connects, so that tells no one who's on the list either.
+    if (id && !attachment && said.session?.endpoint === id && this.key(said.session.by)?.role === "client" && said.session.until > Date.now()) {
       attachment = { id, by: said.session.by, until: said.session.until };
       await this.wake(said.session.until);
     }
@@ -477,9 +504,7 @@ export class Relay extends DurableObject {
     const now = Date.now();
     const by = this.key(told.by);
     if (!by) return "only your One App's devices tell the relay";
-    this.sql.exec("DELETE FROM tells WHERE at < ? OR at > ?", now - 2 * FRESH, now + 2 * FRESH);
-    if (this.sql.exec("SELECT 1 FROM tells WHERE by = ? AND at = ?", told.by, told.at).toArray().length) return "that tell was taken already";
-    this.sql.exec("INSERT INTO tells VALUES (?, ?)", told.by, told.at);
+    if (!this.take(told.by, told.at)) return "that tell was taken already";
     const admin = by.admin === 1;
     if (told.add !== undefined) {
       if (!isKey(told.add)) return "add is a key, in hex";
@@ -491,7 +516,10 @@ export class Relay extends DurableObject {
         if (!admin) return "that key is in already: only an admin's device changes it";
         if (it.admin === 1 && !wants && this.admins() === 1) return "that's the last admin's key";
         this.sql.exec("UPDATE keys SET admin = ?, role = ? WHERE key = ?", wants ? 1 : 0, told.role, told.add);
+        // A key that's no longer a client vouches for no session.
+        if (told.role !== "client") this.endSessionsOf(told.add);
       } else {
+        if (told.role !== "client" && !admin && by.role !== "compute") return "only an admin's device or a compute adds a compute or a service";
         this.sql.exec("INSERT INTO keys VALUES (?, ?, ?, ?)", told.add, told.by, wants ? 1 : 0, told.role);
       }
       // A pairing code's computer, added, is one of the install's: it reaches every endpoint now.
@@ -551,11 +579,15 @@ export class Relay extends DurableObject {
       for (const { key: joined } of this.sql.exec("SELECT key FROM pairings WHERE by = ? AND key IS NOT NULL", k).toArray()) this.end(joined, "taken out");
       this.sql.exec("DELETE FROM pairings WHERE by = ?", k);
       this.end(k, "taken out");
-      // And the sessions it vouched for.
-      for (const ws of this.ctx.getWebSockets()) {
-        const said = ws.deserializeAttachment();
-        if (said?.by === k) this.end(said.id, "taken out");
-      }
+      this.endSessionsOf(k);
+    }
+  }
+
+  /// Closes the sockets of the sessions `key` vouched for.
+  endSessionsOf(key) {
+    for (const ws of this.ctx.getWebSockets()) {
+      const said = ws.deserializeAttachment();
+      if (said?.by === key) this.end(said.id, "taken out");
     }
   }
 

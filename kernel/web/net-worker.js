@@ -27,16 +27,18 @@ export function server(version) {
 
   /// A session for `user`: a key of its own, vouched for by this browser's device key, and the nodes to ask.
   async function begin(user) {
-    const [{ certify, ed25519Public, hex, SESSION }, { get, put }] = await code;
+    const [{ certify, ed25519Public, hex, signedRequest, FRESH, SESSION }, { get, put }] = await code;
     const device = await get(`device:${user}`);
     if (!device) return null;
     const secret = crypto.getRandomValues(new Uint8Array(32));
     const endpoint = await ed25519Public(secret);
-    const until = Date.now() + SESSION;
+    // A minute short of a day, as no certificate lasts longer than a day from when the relay or a node checks it.
+    const until = Date.now() + SESSION - FRESH;
     const certificate = await certify(device.sign, hex.decode(device.key), endpoint, until);
+    const request = JSON.stringify(await signedRequest(secret, endpoint, "one/relay", { computes: true, certificate }));
     // The computes, a new client's first nodes, which say whether this browser is let in at all: waited for only the
     // first time; after that, the nodes it asked before are asked at once, and the computes only checked beside them.
-    const computes = fetch("/relay/computes", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ certificate }) }).then(async (asked) => {
+    const computes = fetch("/relay/computes", { method: "POST", headers: { "content-type": "application/json" }, body: request }).then(async (asked) => {
       // Not let in: this browser isn't one of its person's devices (yet, or any more).
       if (asked.status === 403) return null;
       if (!asked.ok) throw new Error("Your One App's network isn't answering.");
@@ -68,10 +70,10 @@ export function server(version) {
 
   /// A new certificate for the session's endpoint before its last ends.
   async function renew(user, client, endpoint) {
-    const [{ certify, hex, SESSION }, { get }] = await code;
+    const [{ certify, hex, FRESH, SESSION }, { get }] = await code;
     const device = await get(`device:${user}`);
     if (!device) return;
-    const until = Date.now() + SESSION;
+    const until = Date.now() + SESSION - FRESH;
     await client.certify(await certify(device.sign, hex.decode(device.key), endpoint, until));
     renewal = setTimeout(() => renew(user, client, endpoint), until - RENEW - Date.now());
   }

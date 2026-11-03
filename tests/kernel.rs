@@ -84,7 +84,7 @@ fn run(services: Vec<Served>) -> Running {
     Running { child, dir }
 }
 
-fn post(url: &str, headers: &[(&str, &str)], body: Value) -> (u16, Value) {
+pub(crate) fn post(url: &str, headers: &[(&str, &str)], body: Value) -> (u16, Value) {
     let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).build().into();
     let mut req = agent.post(url);
     for (k, v) in headers {
@@ -1391,6 +1391,18 @@ mod relay {
             assert_eq!(tell(&address, &stranger, json!({ "remove": hex(&stranger) })), 204);
             assert!(online(&address, &stranger, None).await.is_none(), "a key taken out reached the relay");
 
+            // A client adds only clients: a compute or a service only an admin's device or a compute adds, and a key's
+            // role, once it's in, only an admin's changes.
+            for role in ["compute", "service"] {
+                assert_eq!(tell(&address, &phone, json!({ "add": hex(&SecretKey::generate()), "role": role })), 403, "a client added a {role}");
+            }
+            let machine = SecretKey::generate();
+            assert_eq!(tell(&address, &first, json!({ "add": hex(&machine), "role": "compute" })), 204);
+            assert_eq!(tell(&address, &machine, json!({ "add": hex(&SecretKey::generate()), "role": "compute" })), 204, "a compute didn't add the computer it paired");
+            assert_eq!(tell(&address, &machine, json!({ "add": hex(&SecretKey::generate()), "role": "service" })), 204, "a compute didn't add its person's service");
+            assert_eq!(tell(&address, &phone, json!({ "add": hex(&machine), "role": "client" })), 403, "a client changed a compute's role");
+            assert_eq!(tell(&address, &machine, json!({ "add": hex(&phone), "role": "compute" })), 403, "a compute made a client a compute");
+
             // A pairing code lets in one computer, which reaches only the device that made it until it's added.
             let code = ticket();
             assert_eq!(tell(&address, &first, json!({ "pairing": { "hash": sha256(&code), "until": super::now() + 600_000 } })), 204);
@@ -1442,6 +1454,8 @@ mod relay {
         let signer = |k: &SecretKey| ed25519_dalek::SigningKey::from_bytes(&k.to_bytes());
         let certify = |by: &SecretKey, endpoint: &SecretKey, until: u64| one::keys::certify(&signer(by), endpoint.public().as_bytes(), until, super::now());
         let computes = |body: Value| super::post(&format!("{address}/relay/computes"), &[], body);
+        // What a session asks the computes with: a request its own key signs, with its certificate.
+        let ask = |session: &SecretKey, cert: &str| one::keys::signed_request(&signer(session), "one/relay", json!({ "computes": true, "certificate": cert }), super::now());
         let runtime = tokio::runtime::Runtime::new().unwrap();
         runtime.block_on(async {
             let a = online(&address, &first, None).await.expect("the install's first device isn't let in");
@@ -1454,13 +1468,33 @@ mod relay {
             assert!(reaches(&address, &s, &a).await, "a session's endpoint doesn't reach the install's devices");
             // Its first nodes to ask: the computes, for it or a device on the list, and no one else.
             let asked = one::keys::signed_request(&signer(&phone), "one/relay", json!({ "computes": true }), super::now());
-            for body in [json!({ "certificate": cert }), asked] {
+            let by_session = ask(&session, &cert);
+            for body in [by_session.clone(), asked.clone()] {
                 let (status, said) = computes(body);
                 assert_eq!((status, said), (200, json!({ "computes": [hex(&first)] })));
             }
+            // Each request is taken once; a certificate alone, or one signed by a key it doesn't name, gets nothing; a
+            // clock that's off isn't told it's out (403), so it keeps the nodes it knows.
+            for replayed in [by_session, asked] {
+                assert_eq!(computes(replayed).0, 400, "a computes request was taken twice");
+            }
+            assert_eq!(computes(json!({ "certificate": cert })).0, 400, "a certificate alone was told the computes");
+            assert_eq!(computes(ask(&SecretKey::generate(), &cert)).0, 400, "someone else's key asked with a session's certificate");
+            let late = one::keys::signed_request(&signer(&session), "one/relay", json!({ "computes": true, "certificate": cert }), super::now() - 120_000);
+            assert_eq!(computes(late).0, 400);
             let stranger = SecretKey::generate();
             assert_eq!(computes(one::keys::signed_request(&signer(&stranger), "one/relay", json!({ "computes": true }), super::now())).0, 403, "a stranger was told the computes");
-            assert_eq!(computes(json!({ "certificate": certify(&stranger, &session, super::now() + 60_000) })).0, 403);
+            assert_eq!(computes(ask(&session, &certify(&stranger, &session, super::now() + 60_000))).0, 403);
+
+            // Only a client vouches for a session: a compute or a service, admin or not, doesn't.
+            let service = SecretKey::generate();
+            assert_eq!(tell(&address, &first, json!({ "add": hex(&service), "role": "service" })), 204);
+            for by in [&first, &service] {
+                let other = SecretKey::generate();
+                let vouched = certify(by, &other, super::now() + 60_000);
+                assert!(online(&address, &other, Some(&vouched)).await.is_none(), "a session a compute or service vouched for got in");
+                assert_eq!(computes(ask(&other, &vouched)).0, 403, "a session a compute or service vouched for was told the computes");
+            }
 
             // Nothing for another endpoint, by a key not on the list, or once it has ended.
             assert!(online(&address, &SecretKey::generate(), Some(&cert)).await.is_none(), "a certificate let in an endpoint it doesn't name");
@@ -1477,7 +1511,7 @@ mod relay {
             assert!(!reaches(&address, &s, &a).await, "a removed device's session still reached the relay");
             s.close().await;
             assert!(online(&address, &session, Some(&cert)).await.is_none(), "a removed device's session got in again");
-            assert_eq!(computes(json!({ "certificate": cert })).0, 403, "a removed device's session was told the computes");
+            assert_eq!(computes(ask(&session, &cert)).0, 403, "a removed device's session was told the computes");
             a.close().await;
         });
     }
