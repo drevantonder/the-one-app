@@ -532,7 +532,7 @@ async function show() {
   const [list, code, health, where] = await Promise.all([one.call("list", { full: true }), one.call("code", { app: name }).catch(() => null), one.call("health", { app: name }).catch(() => null), one.call("devices", { app: name }).catch(() => null)]);
   data = list;
   const a = list.apps.find((x) => x.name === name);
-  if (!a) return (document.getElementById("app").innerHTML = one.notFound({ title: name + " was erased.", text: "It's gone from every list.", home: "Back to the App Store" }));
+  if (!a) return (document.getElementById("app").innerHTML = one.notFound({ title: "This app isn't here.", text: "It may have been erased, or the link is old.", home: "Back to the App Store" }));
   document.getElementById("app").innerHTML = sections.map((s) => s({ a, apps: list.apps, places: list.places, admin: list.admin, code, health, where })).join("");
   new IntersectionObserver(([e]) => one.title(e.isIntersecting ? "" : a.title)).observe(document.querySelector(".hero h1"));
   document.querySelector("[data-add]")?.addEventListener("click", () => addTo(name, data));
@@ -621,6 +621,7 @@ const sections = [
   },
 ];
 one.render("#activity", async () => {
+  if (!one.params.app) return one.notFound();
   const h = await one.call("health", { app: one.params.app });
   const html = sections.map((s) => s(h)).join("");
   return html || one.empty({ icon: "clock-counter-clockwise", title: "Nothing yet" });
@@ -634,9 +635,9 @@ one.render("#activity", async () => {
 <div id="code"></div>
 <script>
 const name = one.params.app;
-one.title(one.params.dir.replace(/\\/$/, "").split("/").pop() || "Code");
+one.title((one.params.dir || "").replace(/\\/$/, "").split("/").pop() || "Code");
 ${folder}
-one.render("#code", async () => folder((await one.call("code", { app: name })).files, one.params.dir), { loading: "Loading code" });
+one.render("#code", async () => !name ? one.notFound() : folder((await one.call("code", { app: name })).files, one.params.dir), { loading: "Loading code" });
 </script>`,
     },
     file: {
@@ -644,8 +645,9 @@ one.render("#code", async () => folder((await one.call("code", { app: name })).f
       html: `
 <div id="code" style="margin-top: 8px"></div>
 <script>
-one.title(one.params.path.split("/").pop());
+one.title((one.params.path || "").split("/").pop() || "Code");
 one.render("#code", async () => {
+  if (!one.params.app || !one.params.path) return one.notFound();
   const f = await one.call("code", { app: one.params.app, path: one.params.path });
   setTimeout(() => one.code("#code", f.text, { path: f.path }));
   return "";

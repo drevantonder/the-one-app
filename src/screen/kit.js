@@ -28,7 +28,7 @@
       return { title: "This app could not complete your request.", safe: "Nothing was lost.", next: "Try again in a moment." };
     msg = msg[0].toUpperCase() + msg.slice(1);
     // Something that isn't there won't be there on a second try: say so, and offer the way home instead.
-    const missing = /\b(not found|no such|doesn't exist|isn't here|there's no)\b/i.test(msg);
+    const missing = /\b(not found|no such|no \w+ named|doesn't exist|isn't here|there's no)\b/i.test(msg);
     return { title: /[.!?]$/.test(msg) ? msg : msg + ".", safe: "Nothing was lost.", next: "Try again in a moment.", missing };
   };
 
