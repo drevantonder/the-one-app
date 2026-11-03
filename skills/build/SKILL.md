@@ -12,7 +12,7 @@ An app is a folder with one JavaScript module, `app.js` (or `app.ts`): its opera
 3. Make a folder and write `app.js`. Its operations are for agents, which read them cold, so:
    - Every operation says `reads: true` or `reads: false`. What sends to a person or can't be undone also says `confirm: true`.
    - Its description says what it does, when to use it rather than its neighbour, and what comes back, in a sentence or two. Every input says what it takes, with its format (`an ISO 8601 date-time, 2026-11-01T09:00`) and where to get it (`a message's id, from gmail search`).
-   - The same words as every other app: `list`, `get`, `search`, `create`, `update`, `delete`, `send`; `title`, `start`, `end`; `limit` and `cursor` for paging, where a long list ends with `next`, the cursor for the rest.
+   - The same words as every other app: `list`, `get`, `search`, `create`, `update`, `delete`, `send`; `title`, `start`, `end`; `limit` and `cursor` for paging, where a long list ends with `next`, the cursor for the rest. An operation that is a service's own API (Drive's files.list) keeps that API's names and paging, since agents already know them: give agents its primitives to combine, not a reshaped version.
    - It gives back meaning: names next to ids, times in ISO 8601, sizes as `37 GB of 250 GB`, no images or fields nobody reads.
    - An error says what was wrong and the fix: `no event 123: ids come from calendar events`.
 
