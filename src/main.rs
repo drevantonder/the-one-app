@@ -309,7 +309,8 @@ fn run(args: Vec<String>) -> Result<()> {
         }
         ["search", words @ ..] if !words.is_empty() => {
             let limit = flags.get("limit").and_then(|l| l.as_str().and_then(|l| l.parse().ok()).or(l.as_u64().map(|l| l as usize))).unwrap_or(8);
-            println!("{}", code::search(&code::catalog()?, &words.join(" "), limit, code::For::Cli));
+            let (apps, addable) = code::catalogs()?;
+            println!("{}", code::search(&apps, &addable, &words.join(" "), limit, code::For::Cli));
         }
         ["status"] => status(&get("/v1/state")?),
         ["apps"] => {
@@ -1914,8 +1915,8 @@ fn answer_tool(params: &Value, agent: Option<&str>, mode: Mode) -> Value {
     match name {
         "search" => {
             let limit = input.get("limit").and_then(Value::as_u64).unwrap_or(8) as usize;
-            match code::catalog() {
-                Ok(apps) => json!({ "content": [{ "type": "text", "text": code::search(&apps, input.get("query").and_then(Value::as_str).unwrap_or(""), limit, code::For::Mcp(mode)) }] }),
+            match code::catalogs() {
+                Ok((apps, addable)) => json!({ "content": [{ "type": "text", "text": code::search(&apps, &addable, input.get("query").and_then(Value::as_str).unwrap_or(""), limit, code::For::Mcp(mode)) }] }),
                 Err(e) => failed(format!("{e:#}")),
             }
         }

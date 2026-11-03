@@ -23,7 +23,14 @@ pub enum For {
 /// Every app installed for this user that has operations, as `GET /v1/apps` gives them, with each operation's input as
 /// MCP takes it (files explained, `device` and `confirm` where they apply), and the Vault's tools as an app.
 pub fn catalog() -> Result<Vec<Value>> {
+    Ok(catalogs()?.0)
+}
+
+/// What a search looks through: `catalog`'s apps, then the apps the person could add, which have no operations for
+/// them yet: those not added where they are, nor deleted.
+pub fn catalogs() -> Result<(Vec<Value>, Vec<Value>)> {
     let mut apps = vec![one::skills::vault_app(), one::skills::backups_app(), one::skills::groups_app()];
+    let mut addable = Vec::new();
     for mut app in get("/v1/apps")?.as_array().cloned().unwrap_or_default() {
         let ops: Vec<Value> = app["ops"]
             .as_array()
@@ -39,22 +46,25 @@ pub fn catalog() -> Result<Vec<Value>> {
         if !ops.is_empty() {
             app["ops"] = json!(ops);
             apps.push(app);
+        } else if app["ops"].is_null() && app["deleted"].is_null() && app["title"].is_string() {
+            addable.push(app);
         }
     }
-    Ok(apps)
+    Ok((apps, addable))
 }
 
 /// Words a search ignores.
 const FILLER: &[&str] = &[
     "a", "an", "the", "my", "me", "i", "to", "for", "of", "in", "on", "at", "and", "or", "with", "from", "it", "is", "are", "all", "some", "how", "do", "can", "what", "this", "that",
-    "please", "using", "use",
+    "please", "using", "use", "here", "there", "else", "which", "any", "your", "you", "be", "was", "has", "have", "just", "also",
 ];
 
 /// A word as a search compares it: lower case, without a plural's or a verb's ending.
 fn stem(word: &str) -> String {
     let w = word.to_lowercase();
     for end in ["ing", "es", "s", "ed"] {
-        if w.len() > end.len() + 3
+        // A plural's s even on a short word: keys is key, apps is app.
+        if w.len() > end.len() + if end == "s" { 2 } else { 3 }
             && let Some(s) = w.strip_suffix(end)
         {
             return s.to_string();
@@ -64,18 +74,33 @@ fn stem(word: &str) -> String {
 }
 
 fn words(text: &str) -> Vec<String> {
-    text.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty() && !FILLER.contains(&w.to_lowercase().as_str())).map(stem).collect()
+    // A letter alone is what's left of what's or app's.
+    text.split(|c: char| !c.is_alphanumeric()).filter(|w| w.len() > 1 && !FILLER.contains(&w.to_lowercase().as_str())).map(stem).collect()
 }
 
-/// How well an operation matches: its name counts most, then its app's, its description, and its app's guide.
-fn score(app: &Value, op: &Value, query: &[String]) -> u32 {
+/// Whether `w`, a query's word, is in `list`: either may be the other's stem (devices is devic, device is device).
+fn has(list: &[String], w: &str) -> bool {
+    list.iter().any(|x| x == w || (w.len() > 3 && x.starts_with(w)) || (x.len() > 3 && w.starts_with(x.as_str())))
+}
+
+/// How well an operation matches, how many of the query's words its name, its app's (or what the app is for) or its
+/// description has, and whether its name has one: its name counts most, then its app's, its description, and its
+/// app's guide, which alone never makes a match.
+fn score(app: &Value, op: &Value, query: &[String]) -> (u32, usize, bool) {
     let name = words(op["name"].as_str().unwrap_or(""));
-    let app_name = words(&format!("{} {}", app["name"].as_str().unwrap_or(""), app["title"].as_str().unwrap_or("")));
+    let app_name = words(&format!("{} {} {}", app["name"].as_str().unwrap_or(""), app["title"].as_str().unwrap_or(""), app["description"].as_str().unwrap_or("")));
     let about = words(op["description"].as_str().unwrap_or(""));
     let guide = words(&format!("{} {}", app["description"].as_str().unwrap_or(""), app["instructions"].as_str().unwrap_or("")));
-    // Either may be the other's stem: devices is devic, device is device.
-    let has = |list: &[String], w: &str| list.iter().any(|x| x == w || (w.len() > 3 && x.starts_with(w)) || (x.len() > 3 && w.starts_with(x.as_str())));
-    query.iter().map(|w| if has(&name, w) { 6 } else { 0 } + if has(&app_name, w) { 4 } else { 0 } + if has(&about, w) { 2 } else { 0 } + if has(&guide, w) { 1 } else { 0 }).sum()
+    let score = query.iter().map(|w| if has(&name, w) { 6 } else { 0 } + if has(&app_name, w) { 4 } else { 0 } + if has(&about, w) { 2 } else { 0 } + if has(&guide, w) { 1 } else { 0 }).sum();
+    (score, query.iter().filter(|w| has(&name, w) || has(&app_name, w) || has(&about, w)).count(), query.iter().any(|w| has(&name, w)))
+}
+
+/// How well an app the person could add matches, by its name and what it says it's for, as `score` does.
+fn score_app(app: &Value, query: &[String]) -> (u32, usize) {
+    let name = words(&format!("{} {}", app["name"].as_str().unwrap_or(""), app["title"].as_str().unwrap_or("")));
+    let about = words(&format!("{} {}", app["description"].as_str().unwrap_or(""), app["tagline"].as_str().unwrap_or("")));
+    let score = query.iter().map(|w| if has(&name, w) { 4 } else { 0 } + if has(&about, w) { 2 } else { 0 }).sum();
+    (score, query.iter().filter(|w| has(&name, w) || has(&about, w)).count())
 }
 
 /// The exact way to call an operation, for whoever asked.
@@ -114,28 +139,61 @@ fn call(app: &Value, op: &Value, how: For) -> String {
 }
 
 /// The operations that best match `query`, best first, each with how to call it and what it does, then the guide of
-/// each app they're in.
-pub fn search(apps: &[Value], query: &str, limit: usize, how: For) -> String {
+/// each app they're in; and the apps the person could add (`addable`) that match as well. A match is one whose name,
+/// app or description has most of the query's words, and as many as the best: fewer is a guess, not an answer.
+pub fn search(apps: &[Value], addable: &[Value], query: &str, limit: usize, how: For) -> String {
     // What people call the devices their One App runs on.
     let query: Vec<String> = words(query).into_iter().map(|w| if matches!(w.as_str(), "server" | "machine" | "box") { "device".into() } else { w }).collect();
-    let mut found: Vec<(u32, usize, &Value, &Value)> = Vec::new();
+    let enough = |covers: usize| covers > 0 && covers * 2 > query.len().max(1);
+    let mut found: Vec<(u32, usize, usize, &Value, &Value)> = Vec::new();
+    let mut named = Vec::new();
     for (i, app) in apps.iter().enumerate() {
         for op in app["ops"].as_array().into_iter().flatten() {
-            let s = score(app, op, &query);
-            if s > 0 {
-                found.push((s, i, app, op));
+            let (s, covers, by_name) = score(app, op, &query);
+            if enough(covers) {
+                found.push((s, covers, i, app, op));
+                named.push(by_name);
             }
         }
     }
-    found.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
+    // Those that have as many of the words as the best, or one fewer with one in their name, best first.
+    let best = found.iter().map(|f| f.1).max().unwrap_or(0);
+    let mut named = named.into_iter();
+    found.retain(|f| named.next().is_some_and(|by_name| f.1 == best || (by_name && f.1 + 1 == best)));
+    found.sort_by(|a, b| b.0.cmp(&a.0).then(a.2.cmp(&b.2)));
     found.truncate(limit.max(1));
+    // The apps to add are offered when they match at least as well as what's here; when nothing here does, any that
+    // has one of the words, since all there is of them is a line on what they're for.
+    let fits = |c: usize| match found.is_empty() {
+        true => c > 0,
+        false => enough(c) && c >= best,
+    };
+    let mut could: Vec<(u32, &Value)> = addable.iter().filter_map(|a| Some(score_app(a, &query)).filter(|(_, c)| fits(*c)).map(|(s, _)| (s, a))).collect();
+    could.sort_by(|a, b| b.0.cmp(&a.0));
+    could.truncate(5);
+    let add = |app: &Value| {
+        let name = app["name"].as_str().unwrap_or("");
+        let how = match how {
+            For::Cli => format!("{CLI} apps add {name} user"),
+            For::Mcp(Mode::All) => format!("apps_add {{ app: \"{name}\", scope: \"user\" }}"),
+            For::Mcp(Mode::Code) => format!("tools.apps.add({{ app: \"{name}\", scope: \"user\" }})"),
+        };
+        format!("- {} ({name}): {}. {how} adds it for the person.", app["title"].as_str().unwrap_or(name), app["description"].as_str().unwrap_or("").trim().trim_end_matches('.'))
+    };
+    let adds = match could.is_empty() {
+        true => String::new(),
+        false => format!("Not added yet, and may do it:\n{}", could.iter().map(|(_, a)| add(a)).collect::<Vec<_>>().join("\n")),
+    };
     if found.is_empty() {
+        if !adds.is_empty() {
+            return format!("Nothing added does that.\n\n{adds}");
+        }
         let names: Vec<&str> = apps.iter().filter_map(|a| a["name"].as_str()).collect();
-        return format!("Nothing matches. Try other words, or an app's name: {}. {} shows the apps you can add.", names.join(", "), if matches!(how, For::Cli) { format!("{CLI} apps list") } else { "apps_list".into() });
+        return format!("Nothing matches. Try other words, or an app's name: {}. If no app does it yet, make one: load the skill {}-build.", names.join(", "), one::skills::server_name());
     }
     let mut text = String::new();
     let mut shown: Vec<&Value> = Vec::new();
-    for (_, _, app, op) in &found {
+    for (_, _, _, app, op) in &found {
         let mark = match (op["reads"] == true, op["confirm"] == true) {
             (true, _) => " It only reads.",
             (_, true) => match how {
@@ -153,6 +211,9 @@ pub fn search(apps: &[Value], query: &str, limit: usize, how: For) -> String {
         if let Some(i) = app["instructions"].as_str().filter(|i| !i.is_empty()) {
             text.push_str(&format!("## {} ({})\n\n{}\n\n", app["title"].as_str().unwrap_or(""), app["name"].as_str().unwrap_or(""), i.trim()));
         }
+    }
+    if !adds.is_empty() {
+        text.push_str(&adds);
     }
     text.trim_end().to_string()
 }
