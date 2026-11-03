@@ -90,6 +90,11 @@ impl Node {
             for (_, (_, ask)) in self.0.relay.asks.lock().unwrap().drain() {
                 let _ = ask.send(Err(anyhow!("the connection to the relay closed")));
             }
+            // The node taking over from this one has its own now.
+            if HANDING_OVER.load(std::sync::atomic::Ordering::SeqCst) {
+                self.0.relay.task.lock().unwrap().take();
+                return;
+            }
             if opened.elapsed() > SILENT {
                 wait = Duration::from_secs(1);
             }

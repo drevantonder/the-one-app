@@ -1201,8 +1201,8 @@ async fn serve(is_try: bool, args: &[String]) -> Result<()> {
         async move {
             loop {
                 one::handoff::wanted().await;
-                tracing::info!("handing over to {}", std::env::current_exe().map(|e| e.display().to_string()).unwrap_or_default());
-                node.hand_over();
+                tracing::info!("handing over to {}", std::env::current_exe().map(|e| e.display().to_string().trim_end_matches(" (deleted)").to_string()).unwrap_or_default());
+                node.handing_over(true);
                 match one::handoff::hand_over(fd, &args).await {
                     Ok(()) => return,
                     Err(err) if one::handoff::supervised() => {
@@ -1210,7 +1210,10 @@ async fn serve(is_try: bool, args: &[String]) -> Result<()> {
                         tracing::warn!("couldn't hand over ({err:#}): exiting, to be started again");
                         std::process::exit(0);
                     }
-                    Err(err) => tracing::warn!("couldn't hand over, so this build keeps running: {err:#}"),
+                    Err(err) => {
+                        tracing::warn!("couldn't hand over, so this build keeps running: {err:#}");
+                        node.handing_over(false);
+                    }
                 }
             }
         }

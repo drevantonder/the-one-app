@@ -40,8 +40,8 @@ pub async fn serve(listener: tokio::net::TcpListener, router: Router) -> std::io
 
 /// `serve`, until `stop`: then it takes no more connections, and returns once those it has are answered, or after
 /// `handoff::drain_within`. As a node hands over, it stops taking connections at once, leaving them to the next, and
-/// its answers say to close theirs for a second before it closes those left, so clients that keep one don't send on a
-/// closed one.
+/// its answers say to close theirs for five seconds before it closes those left, so clients that keep one (the
+/// gateway's, through the tunnel, whose closing reaches it late) don't send on a closed one.
 pub async fn serve_until(listener: tokio::net::TcpListener, router: Router, stop: impl std::future::Future<Output = ()> + Send + 'static) -> std::io::Result<()> {
     let (stopped, after) = tokio::sync::oneshot::channel::<()>();
     let router = router.layer(axum::middleware::map_response(|mut resp: Response| async move {
@@ -54,7 +54,7 @@ pub async fn serve_until(listener: tokio::net::TcpListener, router: Router, stop
     let listener = axum::serve::ListenerExt::tap_io(UntilHandover(listener), |_| {});
     let serving = axum::serve(listener, router.into_make_service_with_connect_info::<std::net::SocketAddr>()).with_graceful_shutdown(async move {
         stop.await;
-        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
         let _ = stopped.send(());
     });
     let serving = std::future::IntoFuture::into_future(serving);

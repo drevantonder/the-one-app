@@ -533,12 +533,12 @@ impl Node {
         let _ = tokio::time::timeout(Duration::from_secs(30), asked.join_all()).await;
     }
 
-    /// Lets go of what only one of a device's nodes may hold, as this one hands over to the next: its socket to the
-    /// relay, which the next one opens.
-    pub fn hand_over(&self) {
-        HANDING_OVER.store(true, std::sync::atomic::Ordering::SeqCst);
-        if let Some((_, task)) = self.0.relay.task.lock().unwrap().take() {
-            task.abort();
+    /// Whether this node is handing over to the next: then it keeps its socket to the relay only until the next one's
+    /// replaces it, never opening it again; and if the next one didn't start, it keeps it as before.
+    pub fn handing_over(&self, handing: bool) {
+        HANDING_OVER.store(handing, std::sync::atomic::Ordering::SeqCst);
+        if !handing {
+            self.follow_relay();
         }
     }
 
