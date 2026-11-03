@@ -130,11 +130,18 @@ impl Node {
         req
     }
 
-    /// Asks another device to run a call.
+    /// Asks another device to run a call: a sign-in's with the keys its caller handed this device, sealed to that one.
     pub(super) async fn ask_device(&self, device: Key, req: &CallRequest, me: &Caller) -> Result<Reply> {
-        // A service runs nothing as a sign-in: it isn't given one's token.
-        let token = if self.is_service(&device) { None } else { me.token.as_ref() };
-        let request = json!({ "app": req.app, "sidecar": req.sidecar, "op": req.op, "input": req.input, "scopes": req.scopes, "depth": req.depth, "from": req.from, "client": req.client, "me": { "key": hex(&me.key), "user": me.user, "agent": me.agent, "token": token } });
+        // A client device's own calls are kept by its key, which proves nothing to another device, and a service runs
+        // nothing as a sign-in: either is passed on with none.
+        let token = me.token.as_ref().filter(|t| !t.starts_with(sessions::CLIENT) && !self.is_service(&device));
+        let mut request = json!({ "app": req.app, "sidecar": req.sidecar, "op": req.op, "input": req.input, "scopes": req.scopes, "depth": req.depth, "from": req.from, "client": req.client, "me": { "key": hex(&me.key), "user": me.user, "agent": me.agent, "token": token } });
+        if let Some(token) = token
+            && let Some(seal) = self.with(|i| Ok(i.r.members.seal_key(&device)))?
+            && let Some(keys) = self.hand_on(token, &seal)
+        {
+            request["keys"] = json!(keys);
+        }
         let reply = self.ask(device, request, self.limit(req).await + Duration::from_secs(5)).await?;
         Ok(Reply::from_json(reply))
     }
@@ -391,7 +398,7 @@ impl Node {
             let (db, bucket) = self.call_database(me, &scope, app, DATABASE, None).await?;
             let mut db = db.lock().await;
             let at = db.at();
-            db.write(&bucket, |c| crate::db::statements(c, &list)).await?;
+            self.write_in(&scope, &mut db, &bucket, |c| crate::db::statements(c, &list)).await?;
             if db.at() > at {
                 self.ping(&scope, Some((app, DATABASE, db.at())));
             }
@@ -471,7 +478,7 @@ impl Node {
             let (db, bucket) = self.call_database(me, &scope, app, SIDECAR_DATABASE, Some(vec![crate::sidecars::RECORDS.into()])).await?;
             let (time, by, device) = (now_ms(), caller.user_name.clone(), caller.name.clone());
             let mut db = db.lock().await;
-            db.write(&bucket, |c| {
+            self.write_in(&scope, &mut db, &bucket, |c| {
                 for (kind, data) in &answer.records {
                     let row = [json!(kind), json!(data.to_string()), json!(time), json!(by), json!(device)];
                     crate::db::execute(c, "insert into records (kind, data, time, by, device) values (?, ?, ?, ?, ?)", &row)?;
@@ -729,25 +736,15 @@ impl Node {
         })
     }
 
-    /// Runs a call another device, `remote`, asked for.
+    /// Runs a call another device, `remote`, asked for. A sign-in's runs only if its token is its caller's, with the
+    /// keys handed with it, never this device's own: from a node, only in scopes that node runs. One with no token runs
+    /// only from a client device of its caller, as that device's own: only then are this device's keys used, and only
+    /// for its own person, whose device that is.
     pub(super) async fn accept_call(&self, remote: Key, request: &Value) -> Reply {
-        let mut me = match self.check_caller(remote, request) {
-            Ok(me) => me,
-            Err(err) => return Reply::Error(format!("{err:#}")),
-        };
-        // A sign-in's token goes along with its call: one that isn't the caller's is taken as none.
-        if let Some(token) = request["me"]["token"].as_str() {
-            me.token = self.token_of(token, &me.user).await;
+        match self.accept(remote, request).await {
+            Ok((req, me)) => self.run(&req, &me).await,
+            Err(err) => Reply::Error(format!("{err:#}")),
         }
-        let mut req: CallRequest = match serde_json::from_value(request.clone()) {
-            Ok(req) => req,
-            Err(err) => return Reply::Error(format!("{err:#}")),
-        };
-        // Only a node that runs the user's calls says an app made a call (whose items fill it in), and how deep it is.
-        if !self.with(|i| Ok(i.r.members.serves(&remote, &me.user))).unwrap_or(false) {
-            (req.from, req.depth) = (None, 0);
-        }
-        self.run(&req, &me).await
     }
 
     /// Runs a call one of the install's services asked for, as its person, wherever it runs: a service writes nothing
@@ -768,16 +765,58 @@ impl Node {
         }
     }
 
-    /// A call is taken only as a user from one of their devices, or a node that runs their calls, passed on by either;
-    /// or from one of their services, as it.
+    async fn accept(&self, remote: Key, request: &Value) -> Result<(CallRequest, Caller)> {
+        let mut me = self.check_caller(remote, request)?;
+        if let Some(token) = request["me"]["token"].as_str() {
+            me.token = Some(self.token_of(token, &me.user).await.context("the sign-in it came with isn't its caller's, or has expired")?);
+            if let Some(keys) = request["keys"].as_str() {
+                self.hand(token, &me.user, keys)?;
+            }
+        }
+        let mut req: CallRequest = serde_json::from_value(request.clone())?;
+        let (own, serves) = self.with(|i| Ok((i.r.members.client(&remote).is_some_and(|c| c.user == me.user), i.r.members.serves(&remote, &me.user))))?;
+        // Only a node that runs the user's calls says an app made a call (whose items fill it in), and how deep it is.
+        if !serves {
+            (req.from, req.depth) = (None, 0);
+        }
+        // A sidecar that runs as this device's own person (Shell, say) runs only for a device of theirs, never for a
+        // sign-in a node passes on.
+        let resolved = self.resolve(req.clone());
+        ensure!(own || resolved.sidecar.is_none() || self.0.sidecars.serves_everyone(&resolved.app), "{} runs only for its person's own devices", resolved.app);
+        if !own && req.sidecar.is_none() && req.app != members::APP {
+            let req = self.resolve(req.clone());
+            let named = req.scopes.clone();
+            self.with(|i| {
+                let scopes: Vec<Scope> = match &named {
+                    None => reachable(i, &req.app, &me.user),
+                    Some(named) => named.iter().map(|s| if s == "user" { Ok(Scope::User(me.user.clone())) } else { Scope::parse(s) }).collect::<Result<_>>()?,
+                };
+                let m = &i.r.members;
+                ensure!(scopes.iter().all(|s| m.runs_for(&remote, s)), "{} doesn't run every scope that call reaches", short(&remote));
+                Ok(())
+            })?;
+        }
+        Ok((req, me))
+    }
+
+    /// Who a call another device passed on is for: with a sign-in's token, someone that device's node serves or whose
+    /// client it is; with none, only the person whose client device `remote` is, asking itself. The node's own hints
+    /// (`hello`, `changed`) come from any compute endpoint of the install, as itself; a person's service asks as them, as itself.
     pub(super) fn check_caller(&self, remote: Key, request: &Value) -> Result<Caller> {
         let key = unhex(request["me"]["key"].as_str().context("who's asking?")?)?;
         let user = request["me"]["user"].as_str().context("who's asking?")?.to_string();
+        let token = request["me"]["token"].as_str().is_some();
+        let hint = request["app"] == members::APP && matches!(request["op"].as_str(), Some("hello" | "changed"));
         self.with(|i| {
             let m = &i.r.members;
-            let theirs = m.service(&remote).is_some_and(|s| s.user == user) && remote == key;
-            let mine = |k: &Key| m.client(k).is_some_and(|c| c.user == user) || m.serves(k, &user);
-            ensure!(theirs || (mine(&key) && (remote == key || m.serves(&remote, &user))), "{} may not call as that user", short(&remote));
+            let client = m.client(&remote).is_some_and(|c| c.user == user);
+            let service = m.service(&remote).is_some_and(|s| s.user == user);
+            let allowed = match () {
+                _ if hint => remote == key && m.compute(&remote).is_some(),
+                _ if token => client || m.serves(&remote, &user),
+                _ => (client || service) && remote == key,
+            };
+            ensure!(allowed, "{} may not call as that user", short(&remote));
             Ok(())
         })?;
         let agent = request["me"]["agent"].as_str().map(str::to_string);

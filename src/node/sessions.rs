@@ -62,7 +62,7 @@ pub fn client_token(key: &Key) -> String {
     format!("{CLIENT}{}", hex(key))
 }
 
-const CLIENT: &str = "client.";
+pub(super) const CLIENT: &str = "client.";
 
 /// The client device a token `client_token` made is for.
 pub fn client_of(token: &str) -> Option<Key> {
@@ -87,12 +87,8 @@ impl Node {
     }
 
     /// A token another device passed on with a call as `user`'s, if it is theirs: an access token the install's auth
-    /// service signed for them, or a scheduled run's, which only the vault can say whose it is (and it opens nothing
-    /// but that person's).
+    /// service signed for them, not yet expired.
     pub(super) async fn token_of(&self, token: &str, user: &str) -> Option<String> {
-        if token.starts_with("run.") {
-            return Some(token.to_string());
-        }
         let issuer = self.issuer().ok()?;
         let asked = token.to_string();
         let claims = tokio::task::spawn_blocking(move || issuer.verify(&asked, now_ms())).await.ok()?.ok()?;
@@ -111,13 +107,23 @@ impl Node {
         let for_ = token.strip_prefix(CLIENT).map_or_else(|| crate::keys::token_id(token), str::to_string);
         ensure!(handoff.for_ == for_, "the keys handed are for another sign-in");
         let now = now_ms();
-        ensure!(handoff.until > now, "the keys handed have expired");
+        // Kept no longer than a sign-in's token lasts, whatever the handoff says (one that doesn't check brings no call
+        // here to use them); a client device's, as it says.
+        let until = match token.starts_with(CLIENT) {
+            true => handoff.until,
+            false => handoff.until.min(self.token_expiry(token).unwrap_or(u64::MAX)),
+        };
+        ensure!(until > now, "the keys handed have expired");
+        // Only epochs an entry made are kept: a key for one beyond is junk, or for one this device hasn't read yet,
+        // which a call that needs it asks for again.
+        let newest: HashMap<String, u32> = self.with(|i| Ok(handoff.keys.iter().filter_map(|k| Some((k.scope.clone(), i.r.members.epoch(&Scope::parse(&k.scope).ok()?)))).collect()))?;
+        let keys: Vec<crate::keys::Handed> = handoff.keys.into_iter().filter(|k| newest.get(&k.scope).is_some_and(|n| k.epoch >= 1 && k.epoch <= *n)).collect();
         let mut kept = self.0.sessions.kept.lock().unwrap();
         kept.retain(|_, s| s.live(now));
         let session = kept.entry(hash(token)).or_default();
         session.user = user.to_string();
-        session.until = session.until.max(handoff.until);
-        for k in handoff.keys {
+        session.until = session.until.max(until);
+        for k in keys {
             session.keys.entry((k.scope, k.app, k.database)).or_default().insert(k.epoch, k.key);
         }
         Ok(())
@@ -139,6 +145,21 @@ impl Node {
             }
         }
         crate::keys::seal_handoff(seal, &crate::keys::Handoff { for_: crate::keys::token_id(token), until: claims.exp * 1000, keys })
+    }
+
+    /// When an access token expires, if the install's auth service signed it: milliseconds.
+    fn token_expiry(&self, token: &str) -> Option<u64> {
+        let claims = self.issuer().ok()?.verify(token, now_ms()).ok()?;
+        Some(claims.exp.saturating_mul(1000))
+    }
+
+    /// The keys a token's calls were handed here, sealed to another device (`to`, its seal key) for a call this one
+    /// passes on to it, until the token expires.
+    pub(super) fn hand_on(&self, token: &str, to: &[u8; 32]) -> Option<String> {
+        let kept = self.0.sessions.kept.lock().unwrap();
+        let session = kept.get(&hash(token)).filter(|s| s.live(now_ms()))?;
+        let keys = session.keys.iter().flat_map(|((scope, app, database), by)| by.iter().map(move |(epoch, key)| crate::keys::Handed { scope: scope.clone(), epoch: *epoch, app: app.clone(), database: database.clone(), key: *key })).collect();
+        crate::keys::seal_handoff(to, &crate::keys::Handoff { for_: crate::keys::token_id(token), until: session.until, keys }).ok()
     }
 
     /// The keys a token caller was handed for a database, by epoch.
