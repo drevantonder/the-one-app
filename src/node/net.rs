@@ -31,6 +31,10 @@ const CLIENT_BODY: usize = 4 << 20;
 const CLIENT_BODY_TIME: Duration = Duration::from_secs(60);
 /// How long a client device's connection stays open with nothing asked on it.
 const CLIENT_IDLE: Duration = Duration::from_secs(10 * 60);
+/// How many connections of keys the install doesn't list (a session's endpoint, until its device's certificate is
+/// checked; or a stranger) may be waiting at once, and how long one may take to show that certificate.
+const UNLISTED: usize = 32;
+const UNLISTED_WITHIN: Duration = Duration::from_secs(10);
 
 /// This device's endpoint, and its connections to other devices.
 #[derive(Default)]
@@ -47,6 +51,23 @@ pub(super) struct Net {
     removed: Mutex<std::collections::HashSet<Key>>,
     /// The connections each client device has open to this one's local API.
     clients: Mutex<HashMap<Key, Vec<Connection>>>,
+    /// How many connections of keys the install doesn't list are waiting to show a certificate.
+    unlisted: std::sync::atomic::AtomicUsize,
+}
+
+/// A client's connection in `Net::clients`, taken out once it's done with.
+struct Held(Node, Key, Connection);
+
+impl Drop for Held {
+    fn drop(&mut self) {
+        let mut clients = self.0.0.net.clients.lock().unwrap();
+        if let Some(open) = clients.get_mut(&self.1) {
+            open.retain(|c| c.stable_id() != self.2.stable_id() && c.close_reason().is_none());
+            if open.is_empty() {
+                clients.remove(&self.1);
+            }
+        }
+    }
 }
 
 /// Why an ask never reached the device.
@@ -258,17 +279,40 @@ impl Node {
     async fn take_client(&self, conn: Connection) {
         let remote = *conn.remote_id().as_bytes();
         let listed = self.client(&remote).is_some();
+        // One the install doesn't list waits its turn among a few, and shows its device's certificate soon or is let go.
+        if !listed {
+            use std::sync::atomic::Ordering::SeqCst;
+            if self.0.net.unlisted.fetch_add(1, SeqCst) >= UNLISTED {
+                self.0.net.unlisted.fetch_sub(1, SeqCst);
+                return conn.close(2u32.into(), b"too many connections");
+            }
+        }
         {
             let mut clients = self.0.net.clients.lock().unwrap();
             let open = clients.entry(remote).or_default();
             open.retain(|c| c.close_reason().is_none());
             if open.len() >= CLIENT_CONNS {
+                drop(clients);
+                if !listed {
+                    self.0.net.unlisted.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+                }
                 return conn.close(2u32.into(), b"too many connections");
             }
             open.push(conn.clone());
         }
+        let _held = Held(self.clone(), remote, conn.clone());
         // The certificate checked last, and the session it vouched for: one check a connection, unless it's renewed.
         let vouched: Arc<Mutex<Option<(String, crate::keys::Session)>>> = Arc::default();
+        if !listed {
+            let (node, waiting, shown) = (self.clone(), conn.clone(), vouched.clone());
+            tokio::spawn(async move {
+                tokio::time::sleep(UNLISTED_WITHIN).await;
+                node.0.net.unlisted.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+                if shown.lock().unwrap().is_none() {
+                    waiting.close(1u32.into(), b"not a device of this install");
+                }
+            });
+        }
         let (node, closing) = (self.clone(), conn.clone());
         let api = crate::api::router(self.clone()).layer(axum::middleware::from_fn(move |mut req: axum::extract::Request, next: axum::middleware::Next| {
             let (node, closing, vouched) = (node.clone(), closing.clone(), vouched.clone());
