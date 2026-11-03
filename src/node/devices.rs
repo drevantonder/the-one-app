@@ -521,7 +521,16 @@ impl Node {
             let told = self.tell_relay_now(json!({ "add": r.key, "admin": admin, "role": "client" })).await;
             told.with_context(|| format!("{} is let in, but your One App's network didn't take it yet: approve it again", r.name))?;
         }
-        Ok(json!({ "device": r.name, "sealed": sealed, "not_sealed": not }))
+        // Re-adding a device replaces the one it was (signed out, or set up again), never a second of the same name.
+        let before: Vec<Key> = self.with(|i| Ok(i.r.members.clients().filter(|c| c.user == r.user && c.name == r.name && c.key != endpoint.key).map(|c| c.key).collect()))?;
+        let mut replaced = Vec::new();
+        for old in before {
+            match self.remove_device(caller, &hex(&old)).await {
+                Ok(_) => replaced.push(crate::entry::short(&old)),
+                Err(err) => tracing::warn!("replacing {}'s earlier {}: {err:#}", r.name, crate::entry::short(&old)),
+            }
+        }
+        Ok(json!({ "device": r.name, "sealed": sealed, "not_sealed": not, "replaced": replaced }))
     }
 
     /// An install link for a service of `caller`'s, this device's own person (`one sidecars install-link`): the
