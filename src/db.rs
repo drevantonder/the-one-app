@@ -87,6 +87,8 @@ impl Db {
             let bytes = open(&key, &name, &sealed.bytes)?;
             conn.deserialize_read_exact("main", &bytes[..], bytes.len(), false)?;
         }
+        // After the copy, which SQLite reads in by attaching it.
+        confine(&mut conn)?;
         let mut db = Db { prefix: prefix.into(), key, conn, at: copy, copy };
         db.catch_up(bucket).await?;
         ensure!(db.at >= at, "{prefix}/newest says step {at} was written, but it's missing");
@@ -293,6 +295,31 @@ pub async fn hint(bucket: &impl Bucket, prefix: &str, at: u64, copy: u64) -> Res
 pub fn newest(bytes: &[u8]) -> Result<(u64, u64)> {
     let v: Value = serde_json::from_slice(bytes)?;
     Ok((v["at"].as_u64().unwrap_or(0), v["copy"].as_u64().unwrap_or(0)))
+}
+
+/// Keeps an app's SQL inside its own database: every statement it gives (queries, writes and schema changes, which run on
+/// every device that reads the database) runs here, and SQLite lets SQL open other files (`attach`, `vacuum into`),
+/// load code (`load_extension`), and turn off what keeps a database whole (pragmas). So no database can be attached,
+/// which `vacuum into` needs too, and only pragmas that read the schema or set what an app's own data needs are allowed.
+fn confine(conn: &mut Connection) -> Result<()> {
+    use rusqlite::hooks::{AuthAction, Authorization};
+    use rusqlite::limits::Limit;
+    const PRAGMAS: &[&str] = &[
+        "user_version", "application_id", "foreign_keys", "defer_foreign_keys", "recursive_triggers", "table_info",
+        "table_xinfo", "table_list", "index_list", "index_info", "index_xinfo", "foreign_key_list", "foreign_key_check",
+        "integrity_check", "quick_check", "optimize", "data_version", "page_count", "freelist_count",
+    ];
+    conn.set_limit(Limit::SQLITE_LIMIT_ATTACHED, 0)?;
+    conn.set_db_config(rusqlite::config::DbConfig::SQLITE_DBCONFIG_DEFENSIVE, true)?;
+    conn.authorizer(Some(|ctx: rusqlite::hooks::AuthContext<'_>| match ctx.action {
+        AuthAction::Attach { .. } | AuthAction::Detach { .. } => Authorization::Deny,
+        AuthAction::Pragma { pragma_name, .. } if !PRAGMAS.contains(&pragma_name.to_ascii_lowercase().as_str()) => Authorization::Deny,
+        AuthAction::Function { function_name } if ["load_extension", "fts3_tokenizer"].contains(&function_name.to_ascii_lowercase().as_str()) => {
+            Authorization::Deny
+        }
+        _ => Authorization::Allow,
+    }))?;
+    Ok(())
 }
 
 /// Reads with a statement that only reads.
@@ -511,6 +538,36 @@ mod tests {
             objects.insert("p/000000000003".into(), second);
             drop(objects);
             assert!(Db::open(&bucket, "p", key).await.is_err());
+        });
+    }
+
+    #[test]
+    fn an_apps_sql_reaches_no_file_but_its_database() {
+        rt().block_on(async {
+            let bucket = Memory::default();
+            let key = rand::random();
+            let mut db = Db::open(&bucket, "p", key).await.unwrap();
+            db.migrate(&bucket, &[SCHEMA.into()]).await.unwrap();
+            let file = std::env::temp_dir().join(format!("attached-{}.db", rand::random::<u64>()));
+            let file = file.to_str().unwrap();
+            let attach = format!("attach database '{file}' as x");
+            assert!(db.query(&attach, &[]).is_err(), "a query");
+            let wrote = db.write(&bucket, |c| statements(c, &[(format!("{attach}; create table x.t (a)"), vec![], None)])).await;
+            assert!(wrote.is_err(), "a write");
+            for sql in ["pragma writable_schema = 1", "pragma temp_store_directory = '/tmp'", "select load_extension('x')"] {
+                assert!(db.query(sql, &[]).is_err() && execute(db.connection(), sql, &[]).is_err(), "{sql}");
+            }
+            // A schema step runs on every device that reads the database, outside any transaction: written straight to
+            // the bucket, as a hostile app's would be, it fails there rather than reaching the file.
+            for sql in [format!("{attach}; create table x.t (a)"), format!("vacuum into '{file}'")] {
+                let name = step_name("p", 2);
+                let step = [b"s".as_slice(), &serde_json::to_vec(&json!({ "version": 2, "sql": sql })).unwrap()].concat();
+                bucket.objects.lock().unwrap().insert(name.clone(), seal(&key, &name, &step));
+                assert!(Db::open(&bucket, "p", key).await.is_err(), "{sql}");
+                bucket.objects.lock().unwrap().remove(&name);
+            }
+            assert!(!std::path::Path::new(file).exists());
+            assert_eq!(db.version().unwrap(), 1, "and its own schema still changes");
         });
     }
 
