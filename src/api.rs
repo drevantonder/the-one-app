@@ -102,6 +102,7 @@ pub fn routes() -> Router<Node> {
         .route("/v1/settings", post(settings))
         .route("/v1/entries", get(heads).post(entries))
         .route("/v1/use", post(use_))
+        .route("/v1/runs", post(runs))
         .route("/v1/group", post(group))
         .route("/v1/invite", post(invite))
         .route("/v1/invite-link", post(invite_link))
@@ -181,6 +182,7 @@ pub const SIGNED_IN: &[&str] = &[
     "/v1/settings",
     "/v1/entries",
     "/v1/use",
+    "/v1/runs",
     "/v1/group",
     "/v1/invite",
     "/v1/invite-link",
@@ -536,15 +538,17 @@ async fn endpoint(State(node): State<Node>) -> Json<Value> {
 }
 
 /// `{ seal, token, need }`: what this machine's own programs hand another node for their person's calls there with
-/// `token` (`x-one-keys`): the keys a 428's `need` names, each in its epoch, sealed to its `seal` key, the serverless
-/// node's or a node's that runs those scopes. → `{ keys }`.
+/// `token` (`x-one-keys`), the keys of the databases a 428's `need` names, sealed to its `seal` key. → `{ keys }`.
 async fn hand(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
-    only(&body, &["seal", "token", "need"])?;
     let seal = crate::keys::unhex(text(&body, "seal")?)?;
-    let mut need: Vec<crate::keys::Need> = serde_json::from_value(body["need"].clone())?;
-    need.sort();
-    need.dedup();
-    Ok(Json(json!({ "keys": node.hand_keys(&me.caller, &seal, text(&body, "token")?, &need).await? })))
+    let mut want: Vec<(crate::entry::Scope, String, String)> = Vec::new();
+    for n in body["need"].as_array().into_iter().flatten() {
+        let w = (crate::entry::Scope::parse(n["scope"].as_str().unwrap_or(""))?, text(n, "app")?.to_string(), text(n, "database")?.to_string());
+        if !want.contains(&w) {
+            want.push(w);
+        }
+    }
+    Ok(Json(json!({ "keys": node.hand_keys(&me.caller, &seal, text(&body, "token")?, &want).await? })))
 }
 
 /// `?scope=&to=<endpoint key>` or `?scope=&app=`: a scope's keys, sealed (`Node::sealed_keys`).
@@ -616,25 +620,23 @@ async fn call_for(node: &Node, me: Me, body: Value) -> anyhow::Result<Value> {
     Ok(json!({ "ok": node.call_as(req, me.caller).await? }))
 }
 
-/// A call the serverless node passes on over iroh (src/node/net.rs): its person's, as `me.user` says, run with the keys
-/// of its databases they handed the serverless node, which it hands this device (`keys`, sealed to it for the
-/// serverless node's key, `node::serverless_token`), and never this device's own: no access token comes with it, so
-/// none of theirs reaches a node on a machine, whose owner could use it as them. → `{ ok }`, or what failed as the API
-/// says it.
-pub(crate) async fn call_from_serverless(node: &Node, remote: crate::entry::Key, mut call: Value) -> Value {
+/// A call the serverless node passes on over iroh (src/node/net.rs), as `/v1/call` takes one through the gateway: its
+/// person's, by the access token it carries in `me`, with the keys they hand this device (`keys`, as `x-one-keys`, unless
+/// they were sealed to another).
+/// → `{ ok }`, or what failed as the API says it.
+pub(crate) async fn call_signed_in(node: &Node, mut call: Value) -> Value {
     let (me, keys) = match call.as_object_mut() {
         Some(c) => (c.remove("me").unwrap_or_default(), c.remove("keys")),
         None => (Value::Null, None),
     };
     let ran = async {
-        let user = me["user"].as_str().filter(|u| !u.is_empty()).ok_or_else(|| anyhow::anyhow!("whose call is it?"))?.to_string();
-        anyhow::ensure!(node.is_user(&user), NotJoined);
-        let token = crate::node::serverless_token(&remote, &user);
+        let token = me["token"].as_str().filter(|t| !t.is_empty()).ok_or_else(|| anyhow::anyhow!("sign in first"))?;
+        let me = signed_in(node, token.to_string()).await?;
+        // Keys sealed to the node that passed the call on are its, not this one's: this one says what it needs.
         if let Some(handed) = keys.as_ref().and_then(Value::as_str) {
-            node.hand(&token, &user, handed)?;
+            let _ = node.hand(token, &me.caller.user, handed);
         }
-        let client = me["client"].as_str().unwrap_or_default().to_string();
-        call_for(node, Me { caller: Caller { key: node.id(), user, agent: None, token: Some(token) }, sign_in: Some(client) }, call).await
+        call_for(node, me, call).await
     };
     ran.await.unwrap_or_else(|err| failed(&err))
 }
@@ -672,13 +674,12 @@ async fn name(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
     done()
 }
 
-/// `{ key }` (a device, by name or key: `Node::remove_device`) or `{ user }`.
+/// `{ key }` (a device, by name or key: `Node::remove_device`) or `{ user }` (a person: `Node::remove_person`).
 async fn remove(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
     match body["user"].as_str() {
-        Some(user) => node.member_as(&me.caller, "remove", json!({ "user": node.find_user(user)? })).await?,
-        None => return Ok(Json(node.remove_device(&me.caller, text(&body, "key")?).await?)),
+        Some(user) => Ok(Json(node.remove_person(&me.caller, user).await?)),
+        None => Ok(Json(node.remove_device(&me.caller, text(&body, "key")?).await?)),
     }
-    done()
 }
 
 async fn role(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
@@ -708,6 +709,15 @@ async fn entries(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> R
     let list = body.as_array().ok_or_else(|| anyhow::anyhow!("give a list of entries"))?;
     let entries = list.iter().map(crate::entry::Entry::from_json).collect::<anyhow::Result<Vec<_>>>()?;
     node.put_signed(&me.caller, entries).await?;
+    done()
+}
+
+/// `{ on: [device] }` (names or keys): the install's machines that run the caller's own things besides their own, as
+/// their own device says.
+async fn runs(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
+    only(&body, &["on"])?;
+    let on = body["on"].as_array().ok_or_else(|| anyhow::anyhow!("on is a list of machines"))?.iter().map(|d| node.find_machine(d.as_str().unwrap_or(""))).collect::<anyhow::Result<Vec<_>>>()?;
+    node.member_content(&me.caller, crate::members::runs(&on)).await?;
     done()
 }
 
@@ -744,9 +754,17 @@ async fn device_requests(State(node): State<Node>) -> Reply {
 }
 
 /// `{ code, confirm? }`: approves the device showing `code` (`Node::approve`).
+/// `{ code, confirm?, recovery? }`: lets in the device showing `code`, as this machine's person, or with `recovery`,
+/// the install's recovery key (hex), read from a file here by the CLI and never kept.
 async fn approve(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
-    only(&body, &["code", "confirm"])?;
-    Ok(Json(node.approve(&local(&node)?, text(&body, "code")?, body["confirm"] == true).await?))
+    only(&body, &["code", "confirm", "recovery"])?;
+    let (code, confirm) = (text(&body, "code")?, body["confirm"] == true);
+    if let Some(recovery) = body["recovery"].as_str() {
+        let secret: [u8; 32] = crate::keys::unhex(recovery.trim()).map_err(|_| anyhow::anyhow!("a recovery key is 64 hex characters"))?;
+        let key = ed25519_dalek::SigningKey::from_bytes(&secret);
+        return Ok(Json(node.approve_with_recovery(&local(&node)?, code, &key, confirm).await?));
+    }
+    Ok(Json(node.approve(&local(&node)?, code, confirm).await?))
 }
 
 async fn accept(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {

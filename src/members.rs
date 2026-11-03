@@ -163,6 +163,11 @@ pub struct Members {
     /// Standing work: until when (milliseconds) each endpoint may hold an app's keys in a scope, by (endpoint, scope,
     /// app), as the latest `grant` of each said; one with `until: 0` is gone.
     pub grants: BTreeMap<(Key, Scope, String), Grant>,
+    /// Where each person's own things run besides their own machines, as their latest `runs` said from one of their
+    /// own devices: the install's other compute endpoints that run their own scope (`runs_for`).
+    pub runs: BTreeMap<String, BTreeSet<Key>>,
+    /// When the install's recovery key last let a device in (a `device` entry it signed), and whose.
+    pub recovery_used: Option<(u64, String)>,
     /// Where each endpoint's entries stop counting, by (endpoint, log): the first seq that doesn't, wherever it sorts.
     /// A removed device's in `global` after the last its remover had seen (`remove`'s `seq`), and a device's in a log
     /// it forked from the fork on (`Store::forks`).
@@ -402,14 +407,14 @@ impl Members {
         self.machine(key).is_some_and(|m| m.user == user) || self.is_admin(user)
     }
 
-    /// Whether a scope's calls run on `endpoint`: a compute endpoint its owners trust, which is one of the scope's
-    /// person's that they listed from one of their own devices, for a user's own scope (one an admin listed for them
-    /// runs only what that admin's could); of an admin of the group or of the install, for a group's; of an admin of
+    /// Whether a scope's calls run on `endpoint`: a compute endpoint its owners trust, which for a user's own scope is
+    /// one of their own machines they listed themselves (one an admin listed for them runs only what that admin's
+    /// could), or another of the install's their own device chose (`runs`); of an admin of the group or of the install, for a group's; of an admin of
     /// the install, for `global`.
     pub fn runs_for(&self, endpoint: &Key, scope: &Scope) -> bool {
         let Some(m) = self.compute(endpoint) else { return false };
         match scope {
-            Scope::User(u) => m.user == *u && m.by == *u,
+            Scope::User(u) => (m.user == *u && m.by == *u) || self.runs.get(u).is_some_and(|on| on.contains(endpoint)),
             Scope::Group(g) => self.manages(&m.user, g),
             Scope::Global => self.is_admin(&m.user),
         }
@@ -418,15 +423,6 @@ impl Members {
     /// Whether `endpoint` runs any of the calls of `user`: a compute endpoint that runs some scope they use.
     pub fn serves(&self, endpoint: &Key, user: &str) -> bool {
         self.user(user).is_some() && self.scopes().iter().any(|s| self.may_use(user, s) && self.runs_for(endpoint, s))
-    }
-
-    /// The compute endpoints a call of `user`'s that reaches `scopes` may be passed on to: each runs every one of those
-    /// scopes, all of which `user` may use, so none is handed a call, or its keys, that isn't theirs to run.
-    pub fn runners(&self, user: &str, scopes: &[Scope]) -> Vec<&Machine> {
-        if self.user(user).is_none() || !scopes.iter().all(|s| self.may_use(user, s)) {
-            return Vec::new();
-        }
-        self.computes().filter(|m| self.serves(&m.key, user) && scopes.iter().all(|s| self.runs_for(&m.key, s))).collect()
     }
 
     /// Every scope there is: `global`, each user's (removed ones too: removing deletes nothing) and each group's.
@@ -447,6 +443,10 @@ impl Members {
             return false;
         }
         let author = e.author();
+        // The install's recovery key, kept offline by an admin, only lets a device of someone's in, as an admin's would.
+        if self.recovery == Some(author) {
+            return is_member_entry(e) && e.content.kind == "device";
+        }
         self.client(&author).is_some_and(|c| c.user == e.user()) || (!is_member_entry(e) && self.runs_for(&author, &scope))
     }
 
@@ -481,6 +481,17 @@ impl Members {
                 // `global`'s first epoch, made with the install, before anything is sealed under it.
                 self.epoch_hashes.insert((Scope::Global, 1), hash.clone());
                 self.epochs.insert(Scope::Global, Epoch { n: 1, to: vec![author], hash });
+            }
+            "device" if self.recovery == Some(author) => {
+                // A person who lost every device let back in with the recovery key: a new client of someone already in.
+                let user = id_of("user")?;
+                let machine = listed(data, &user)?;
+                ensure!(user == w && self.user(&user).is_some(), "the recovery key lets in a device of someone already in");
+                ensure!(machine.roles == BTreeSet::from([Kind::Client]) && machine.passkey.is_none(), "the recovery key lets in a device people use");
+                ensure!(!self.machines.contains_key(&machine.key), "that key is listed already");
+                self.machines.insert(machine.key, machine);
+                self.devices_at = self.devices_at.max(e.time());
+                self.recovery_used = Some((e.time(), user));
             }
             "device" => {
                 let user = id_of("user")?;
@@ -545,6 +556,12 @@ impl Members {
                 let hash = epoch_hash_of(&data["hash"])?;
                 self.epoch_hashes.insert((scope.clone(), n as u32), hash.clone());
                 self.epochs.insert(scope, Epoch { n: n as u32, to, hash });
+            }
+            "runs" => {
+                // Only from the person's own device (`counts`), for their own scope: an admin can't say where it runs.
+                let on = data["on"].as_array().context("on is a list of endpoints' keys")?.iter().map(|k| unhex(k.as_str().unwrap_or(""))).collect::<Result<BTreeSet<_>>>()?;
+                ensure!(on.iter().all(|k| self.compute(k).is_some()), "only the install's machines that run things run someone's own");
+                self.runs.insert(w, on);
             }
             "grant" => {
                 let endpoint = key_of("endpoint")?;
@@ -1031,6 +1048,11 @@ pub fn epoch(scope: &Scope, n: u32, to: &[Key], hash: &str) -> Content {
     node("epoch", json!({ "scope": scope.to_string(), "n": n, "to": to.iter().map(hex).collect::<Vec<_>>(), "hash": hash }))
 }
 
+/// Where its writer's own things run besides their own machines: the install's others that run their own scope.
+pub fn runs(on: &[Key]) -> Content {
+    node("runs", json!({ "on": on.iter().map(hex).collect::<Vec<_>>() }))
+}
+
 /// Standing work: `endpoint` keeps `app` running in `scope` until `until`, or no longer with 0.
 pub fn grant(endpoint: &Key, scope: &Scope, app: &str, until: u64) -> Content {
     node("grant", json!({ "endpoint": hex(endpoint), "scope": scope.to_string(), "app": app, "until": until }))
@@ -1253,21 +1275,94 @@ mod tests {
         assert!(!m.counts(&bobs), "linux doesn't run Bob's");
     }
 
-    #[test]
-    fn a_call_is_passed_on_only_to_nodes_that_run_all_its_scopes() {
-        let (mut mac, mut entries) = setup();
-        let linux = Dev::new(4);
+    /// An install whose recovery key is `recovery`'s, with Andre's mac and linux (compute), and Bob in with his phone.
+    fn with_bob(recovery: &Dev) -> (Dev, Dev, Dev, Vec<Entry>) {
+        let (mut mac, mut linux, bobs) = (Dev::new(1), Dev::new(4), Dev::new(3));
+        let g = mac.write("global", ANDRE, genesis("Home", ANDRE, "Andre", &mac.endpoint(), "mac", BOTH, &recovery.id(), &H.repeat(64)), &[]);
+        let mut entries = vec![g];
         add(&mut entries, &mut mac, ANDRE, device(&linux.endpoint(), ANDRE, "linux", &[Kind::Compute], None));
-        add(&mut entries, &mut mac, ANDRE, device(&Dev::new(3).endpoint(), BOB, "bob's phone", &[Kind::Client], Some(("Bob", Role::Member))));
+        add(&mut entries, &mut mac, ANDRE, device(&bobs.endpoint(), BOB, "bob's phone", &[Kind::Client], Some(("Bob", Role::Member))));
+        let _ = &mut linux;
+        (mac, linux, bobs, entries)
+    }
+
+    #[test]
+    fn only_a_persons_own_device_makes_their_scopes_keys_and_says_where_it_runs() {
+        let recovery = Dev::new(9);
+        let (mut mac, linux, mut bobs, mut entries) = with_bob(&recovery);
+        let bob = Scope::User(BOB.into());
+        let (mac_id, bob_id) = (mac.id(), bobs.id());
+        // Nothing runs Bob's own things until his device says: then the install's machine he chose does.
+        assert!(!members(&entries).runs_for(&linux.id(), &bob));
+        add(&mut entries, &mut mac, ANDRE, runs(&[linux.id()]));
+        add(&mut entries, &mut mac, BOB, runs(&[linux.id()]));
+        assert!(!members(&entries).runs_for(&linux.id(), &bob), "an admin's device can't say where Bob's things run");
+        add(&mut entries, &mut bobs, BOB, runs(&[linux.id()]));
         let m = members(&entries);
-        let keys = |user: &str, scopes: &[Scope]| m.runners(user, scopes).iter().map(|r| r.key).collect::<BTreeSet<_>>();
-        let both = BTreeSet::from([mac.id(), linux.id()]);
-        let (andre, bob) = (Scope::User(ANDRE.into()), Scope::User(BOB.into()));
-        assert_eq!(keys(ANDRE, &[andre.clone()]), both);
-        assert_eq!(keys(BOB, &[Scope::Global]), both, "global runs on the admin's nodes");
-        assert!(keys(BOB, &[bob.clone()]).is_empty(), "Andre's nodes don't run Bob's own scope");
-        assert!(keys(BOB, &[Scope::Global, bob]).is_empty(), "nor a call that reaches it");
-        assert!(keys(BOB, &[andre]).is_empty(), "nor Andre's, which Bob may not use");
-        assert!(keys("stranger", &[Scope::Global]).is_empty());
+        assert!(m.runs_for(&linux.id(), &bob) && m.serves(&linux.id(), BOB));
+        assert!(m.runs_for(&linux.id(), &Scope::User(ANDRE.into())), "Andre's says nothing of his own: his machines run it");
+        // Only machines that run things: his phone isn't one.
+        add(&mut entries, &mut bobs, BOB, runs(&[linux.id(), bob_id]));
+        assert!(members(&entries).runs_for(&linux.id(), &bob), "a list naming what can't run things doesn't count");
+        add(&mut entries, &mut bobs, BOB, runs(&[]));
+        assert!(!members(&entries).runs_for(&linux.id(), &bob), "nothing runs them now");
+        // His scope's keys: an admin's device can't make them, his own can, sealed only to his devices.
+        add(&mut entries, &mut mac, ANDRE, epoch(&bob, 1, &[mac_id], &H.repeat(64)));
+        add(&mut entries, &mut mac, BOB, epoch(&bob, 1, &[mac_id], &H.repeat(64)));
+        assert_eq!(members(&entries).epoch(&bob), 0);
+        add(&mut entries, &mut bobs, BOB, epoch(&bob, 1, &[bob_id], &"b".repeat(64)));
+        let m = members(&entries);
+        assert_eq!(m.epoch_hash(&bob, 1), Some("b".repeat(64).as_str()));
+        let opens: Vec<Key> = m.clients().filter(|d| m.may_use(&d.user, &bob)).map(|d| d.key).collect();
+        assert_eq!(opens, vec![bobs.id()], "only Bob's own devices open it");
+    }
+
+    #[test]
+    fn a_removed_persons_devices_get_no_new_epoch_and_their_entries_stop() {
+        let recovery = Dev::new(9);
+        let (mut mac, _, mut bobs, mut entries) = with_bob(&recovery);
+        let (mac_id, bob_id) = (mac.id(), bobs.id());
+        add(&mut entries, &mut mac, ANDRE, remove_user(BOB));
+        // A new epoch of everyone's can't be sealed to Bob's phone, and what his phone writes after doesn't count.
+        add(&mut entries, &mut mac, ANDRE, epoch(&Scope::Global, 2, &[mac_id, bob_id], &"c".repeat(64)));
+        add(&mut entries, &mut bobs, BOB, node("rename", json!({ "user": BOB, "name": "Bobby" })));
+        let m = members(&entries);
+        assert_eq!(m.epoch(&Scope::Global), 1, "an epoch sealed to a removed person's device doesn't count");
+        assert!(m.client(&bobs.id()).is_none() && m.clients().all(|c| c.user != BOB));
+        assert_eq!(m.users[BOB].name, "Bob");
+        add(&mut entries, &mut mac, ANDRE, epoch(&Scope::Global, 2, &[mac_id], &"c".repeat(64)));
+        assert_eq!(members(&entries).epoch(&Scope::Global), 2, "sealed to those left, it does");
+        assert!(members(&entries).scopes().contains(&Scope::User(BOB.into())), "their own scope is kept");
+    }
+
+    #[test]
+    fn the_recovery_key_lets_someones_device_in_as_an_admins_approval_and_is_listed() {
+        let mut recovery = Dev::new(9);
+        let (mut mac, _, _, mut entries) = with_bob(&recovery);
+        let laptop = Dev::new(5);
+        assert!(members(&entries).recovery_used.is_none());
+        let e = recovery.write("global", BOB, device(&laptop.endpoint(), BOB, "bob's laptop", &[Kind::Client], None), &entries);
+        entries.push(e.clone());
+        let m = members(&entries);
+        assert_eq!(m.client(&laptop.id()).map(|c| c.user.as_str()), Some(BOB), "it counts as an admin's approval");
+        assert_eq!(m.recovery_used, Some((e.time(), BOB.to_string())), "and it's listed");
+        // Only a device people use, of someone already in; and nothing else.
+        for (user, content) in [
+            (BOB, device(&Dev::new(6).endpoint(), BOB, "box", &[Kind::Compute], None)),
+            ("c000000000000003", device(&Dev::new(7).endpoint(), "c000000000000003", "new", &[Kind::Client], Some(("Cy", Role::Admin)))),
+            (ANDRE, node("setting", json!({ "name": "a", "value": "1" }))),
+            (ANDRE, role(BOB, Role::Admin)),
+        ] {
+            let e = recovery.write("global", user, content, &entries);
+            entries.push(e);
+        }
+        let m = members(&entries);
+        assert!(m.machine(&Dev::new(6).id()).is_none() && m.machine(&Dev::new(7).id()).is_none());
+        assert!(m.settings.is_empty() && m.users[BOB].role == Role::Member && m.user("c000000000000003").is_none());
+        // A key that isn't the install's recovery key lets nobody in.
+        let mut other = Dev::new(8);
+        entries.push(other.write("global", BOB, device(&Dev::new(10).endpoint(), BOB, "x", &[Kind::Client], None), &entries));
+        assert!(members(&entries).machine(&Dev::new(10).id()).is_none());
+        let _ = &mut mac;
     }
 }

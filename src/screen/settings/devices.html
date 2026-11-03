@@ -22,7 +22,7 @@
   .code span { font: 15px var(--mono); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: all; -webkit-user-select: all; }
 </style>
 <script>
-  // This person's devices, the shared ones they may use, and which run their own data: naming this device, the build
+  // This person's devices, the shared ones they may use, and which run their own things: naming this device, the build
   // it runs and signing out of it, removing one, pairing a computer with a code, and, where this device holds its own
   // keys (`device.keys`), approving a new device by the code it shows, listing a passkey to get back in with, and what
   // their devices keep running for them.
@@ -92,6 +92,21 @@
       `<button class="button plain small" data-grant='${one.esc(JSON.stringify(g))}'>Remove</button></div>`;
   };
 
+  // Where their own things run: the machines that run things, each with a switch. Their own machines always do; the
+  // rest only as their own device says (`runs`), which only they change.
+  const machines = () => (state.install?.devices || []).filter((s) => (s.roles || []).includes("compute"));
+  const always = (s) => holds(s) && s.user === me() && !(state.install?.runs || []).includes(s.key);
+  const runsSection = () => {
+    const all = machines();
+    if (!all.length) return "";
+    const on = all.filter(holds).map((s) => shown(s.name));
+    const said = on.length ? `Your things run on ${list(on)}.` : "Nothing runs your things now. Turn on a machine below, or your apps can’t open what’s yours.";
+    const rows = all.map((s) => `<label class="row plain"><div class="main"><div class="title"><span>${one.esc(shown(s.name))}</span></div>${subs(always(s) ? "Yours, so it always does" : runBy(s))}</div>` +
+      `<input type="checkbox" class="switch" data-runs="${one.esc(s.key)}" aria-label="Run your things on ${one.esc(shown(s.name))}"${holds(s) ? " checked" : ""}${always(s) || !device.keys ? " disabled" : ""}></label>`).join("");
+    return `<h2 class="section">Where Your Things Run</h2><div class="list"><div class="row plain"><div class="main">${one.esc(said)}</div></div>${rows}</div>` +
+      '<p class="footer">These open your own things when you use them, with the keys your device hands them, and keep none.</p>';
+  };
+
   const clientRow = (c) =>
     row({ key: c.key, name: c.name, online: true, lines: [c.me ? "This device" : "Signed in"], trailing: "", removable: !c.me });
 
@@ -120,11 +135,10 @@
     }
     if (others.length) html += '<h2 class="section">Shared Devices</h2><div class="list">' + others.map(deviceRow).join("") + "</div>";
     html += orderSection();
-    const holding = devices.filter(holds).map((s) => shown(s.name));
-    // Said only where it isn't every device there is.
-    if (devices.length > 1 || holding.length !== devices.length) {
-      html += `<h2 class="section">Where Your Data Lives</h2><div class="list"><div class="row plain"><div class="main">${one.esc(list(holding))}</div></div></div>`;
-      html += error ? "" : '<p class="footer">Only these keep your own data.</p>';
+    html += runsSection();
+    if (state.install?.recovery_used) {
+      const r = state.install.recovery_used, when = new Date(r.time).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+      html += `<p class="footer">The recovery key last let in a device of ${one.esc(r.user === me() ? "yours" : `${userName(r.user)}’s`)}, ${one.esc(when)}.</p>`;
     }
     if (error) html += `<p class="footer error">${one.esc(error)}</p>`;
     return html;
@@ -157,6 +171,7 @@
     const t = e.target;
     if (t.id === "name") rename(t);
     else if (t.dataset.place) place(t.dataset.place, t.value, t);
+    else if (t.dataset.runs) runs(t.dataset.runs, t.checked);
   });
   document.addEventListener("click", (e) => {
     const t = e.target.closest?.("[data-remove], [data-pair], [data-out], [data-passkey], [data-grant]");
@@ -201,6 +216,15 @@
     const here = [...(state.install?.devices || []), ...(state.install?.clients || [])].find((m) => m.me);
     if (!name || name === here?.name) return void (input.value = here?.name || "");
     act(() => one.api("POST", "/v1/name", { name }));
+  }
+
+  /// Turns a machine on or off for their own things: the list their device says, with it or without it.
+  function runs(key, on) {
+    one.tap();
+    const now = new Set((state.install?.runs || []).filter((k) => machines().some((s) => s.key === k)));
+    if (on) now.add(key);
+    else now.delete(key);
+    act(() => one.api("POST", "/v1/runs", { on: [...now] }));
   }
 
   function place(device, use, select) {

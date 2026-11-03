@@ -102,16 +102,6 @@ pub async fn start(bucket: &impl Bucket, prefix: &str, keys: &Keys) -> Result<Op
     }
 }
 
-/// The keys a node uses, of those a caller handed it, for a database of a scope whose current epoch is `current`, as
-/// the install's signed `epoch` entries say: none above it (one a member made up would leave the database where nobody
-/// else can follow), and `current`'s among them, the one it writes under. A key with the right number but the wrong
-/// bytes only fails to open what's under its epoch, so a database opened with handed keys is shared only with calls
-/// handed the same keys.
-pub fn handed(mut keys: Keys, current: u32) -> std::result::Result<Keys, Missing> {
-    keys.retain(|n, _| *n <= current);
-    if keys.contains_key(&current) { Ok(keys) } else { Err(Missing { epoch: current }) }
-}
-
 /// An app's key in epoch `n` of a scope, from its copy in the bucket (`keys::app_key_name`), sealed under that epoch's
 /// key. The first to need it makes it, at random, unless `make` is false (an epoch nothing was written under yet,
 /// where a reader has nothing to open): whichever is written first is the key.
@@ -718,29 +708,6 @@ mod tests {
             let two_only = Db::open(&bucket, "p", keys(&[(2, two)])).await.unwrap();
             assert_eq!(notes(&two_only)[..3], ["before", "after", "later"]);
             assert!(two_only.opens_for(&keys(&[(2, two)])) && !new.opens_for(&keys(&[(2, two)])), "a call given epoch 2 alone doesn't use what epoch 1 opened");
-        });
-    }
-
-    #[test]
-    fn handed_keys_write_only_under_the_scopes_current_epoch() {
-        rt().block_on(async {
-            let bucket = Memory::default();
-            let (one, garbage): ([u8; 32], [u8; 32]) = (rand::random(), rand::random());
-            let given = handed(keys(&[(1, one), (999, garbage)]), 1).unwrap();
-            assert_eq!(given, keys(&[(1, one)]), "an epoch the entries haven't reached is dropped");
-            assert_eq!(handed(keys(&[(1, one)]), 2).unwrap_err(), Missing { epoch: 2 }, "the current epoch's key is needed to write");
-            let mut db = Db::open(&bucket, "p", given).await.unwrap();
-            db.migrate(&bucket, &[SCHEMA.into()]).await.unwrap();
-            note(&mut db, &bucket, "mine").await;
-            for n in 1..=db.at() {
-                assert_eq!(crate::keys::epoch_of(&bucket.get(&step_name("p", n)).await.unwrap().unwrap().bytes).unwrap(), 1);
-            }
-            let theirs = Db::open(&bucket, "p", keys(&[(1, one)])).await.unwrap();
-            assert_eq!(notes(&theirs), ["mine"], "everyone else reads it");
-            // The right epoch with the wrong bytes opens nothing, and is never taken for the right keys.
-            let wrong = Db::open(&bucket, "p", keys(&[(1, garbage)])).await.unwrap();
-            assert_eq!(wrong.version().unwrap(), 0);
-            assert_ne!(wrong.keys(), theirs.keys());
         });
     }
 

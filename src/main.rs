@@ -27,7 +27,6 @@ Usage:
   {CLI} pair [--user <name>]           a pairing code for another of your machines (or, for admins, someone else's)
   {CLI} join <code>                    join an install with a pairing code
   {CLI} rename <name>                  rename this device
-  {CLI} remove --user <user>
   {CLI} role <user> admin|member       (admins)
   {CLI} settings [<name> <value>|--default]   the install's settings (admins set them)
   {CLI} groups                         every group: who's in it, as admin or member, and who's invited
@@ -165,13 +164,15 @@ Usage:
     )
 }
 
-/// `settings` with the keys of the install's devices, as the node on this machine knows them, and when its log last
-/// changed them, for the relay to take only them; none when no node answers here, which `needed` refuses, since that
+/// `settings` with the keys of the install's devices and its recovery key, as the node on this machine knows them, and
+/// when its log last changed them, for the relay to take only them; none when no node answers here, which `needed` refuses, since that
 /// relay would take no one.
 fn devices_here(settings: one::kernel::Settings, needed: bool) -> Result<one::kernel::Settings> {
     let state = get("/v1/state").unwrap_or_default();
-    let devices: Vec<String> = state["install"]["devices"].as_array().into_iter().flatten().filter_map(|d| d["key"].as_str().map(str::to_string)).filter(|k| k.len() == 64).collect();
+    let mut devices: Vec<String> = state["install"]["devices"].as_array().into_iter().flatten().filter_map(|d| d["key"].as_str().map(str::to_string)).filter(|k| k.len() == 64).collect();
     anyhow::ensure!(!needed || !devices.is_empty(), "no node of your One App answers on this machine, so its relay would take none of its devices: run this where one does, or with --new for a new install, whose relay takes devices once this runs again beside one");
+    // The install's recovery key too, as an admin's: what it lets in, the relay takes.
+    devices.extend(state["install"]["recovery"].as_str().map(str::to_string));
     Ok(one::kernel::Settings { devices, ..settings })
 }
 
@@ -279,10 +280,6 @@ fn run(args: Vec<String>) -> Result<()> {
         ["join", code] => {
             post("/v1/join", json!({ "code": code }))?;
             println!("Joined. Syncing now; {CLI} status shows progress.");
-        }
-        ["remove"] if flags.contains_key("user") => {
-            post("/v1/remove", json!({ "user": flags["user"] }))?;
-            println!("Removed them.");
         }
         ["settings"] => {
             let state = get("/v1/state")?;
@@ -1631,18 +1628,46 @@ fn backups_tool(op: &str, input: &Map<String, Value>, agent: Option<&str>) -> Re
 }
 
 /// The devices' tools, as this machine's person.
-fn devices_tool(op: &str, input: &Map<String, Value>) -> Result<Value> {
+fn devices_tool(op: &str, input: &Map<String, Value>, client: &str) -> Result<Value> {
     let text = |k: &str| input.get(k).and_then(Value::as_str).with_context(|| format!("give {k}"));
     match op {
         "requests" => get("/v1/devices/requests"),
-        "approve" => post("/v1/devices/approve", json!({ "code": text("code")?, "confirm": input.get("confirm") == Some(&json!(true)) })).map(|r| json!(approved_said(&r))),
+        "approve" => {
+            let mut body = json!({ "code": text("code")?, "confirm": input.get("confirm") == Some(&json!(true)) });
+            if let Some(at) = input.get("recovery_key").and_then(Value::as_str) {
+                body["recovery"] = json!(recovery_key_from(at, client)?);
+            }
+            post("/v1/devices/approve", body).map(|r| json!(approved_said(&r)))
+        }
         "remove" => {
-            anyhow::ensure!(input.get("confirm") == Some(&json!(true)), "devices_remove can't be undone, and the person hasn't agreed to it: ask them, and give confirm: true only if they say yes to this very device");
-            post("/v1/remove", json!({ "key": text("device")? })).map(|r| json!(removed_said(&r)))
+            let what = match (input.get("device").and_then(Value::as_str), input.get("user").and_then(Value::as_str)) {
+                (Some(device), None) => json!({ "key": device }),
+                (None, Some(user)) => json!({ "user": user }),
+                _ => anyhow::bail!("give device (one device) or user (a person, with all their devices)"),
+            };
+            anyhow::ensure!(input.get("confirm") == Some(&json!(true)), "devices_remove can't be undone, and the person hasn't agreed to it: ask them, and give confirm: true only if they say yes to this very device or person");
+            post("/v1/remove", what).map(|r| json!(removed_said(&r)))
         }
         "invite" => post("/v1/invite-link", json!({ "name": text("name")?, "admin": input.get("admin") == Some(&json!(true)) })).map(|r| json!(invited_said(text("name").unwrap_or(""), &r))),
         other => anyhow::bail!("no tool devices_{other}"),
     }
+}
+
+/// The install's recovery key, from the file at `at` on this machine, or stdin for `-` on the command line: never
+/// typed into a chat, and never printed.
+fn recovery_key_from(at: &str, client: &str) -> Result<String> {
+    let looks_like_key = |t: &str| t.len() == 64 && t.bytes().all(|b| b.is_ascii_hexdigit());
+    anyhow::ensure!(!looks_like_key(at.trim()), "give the file the recovery key is in, never the key itself");
+    let text = match at {
+        "-" => {
+            anyhow::ensure!(client == "cli", "- reads the recovery key from stdin on the command line: give a file's path instead");
+            std::io::read_to_string(std::io::stdin())?
+        }
+        path => std::fs::read_to_string(path).with_context(|| format!("couldn't read {path}"))?,
+    };
+    let key = text.trim().to_ascii_lowercase();
+    anyhow::ensure!(looks_like_key(&key), "that file doesn't hold a recovery key: 64 hex characters");
+    Ok(key)
 }
 
 /// What approving said, in words: whose device it is, or what it was given.
@@ -1654,11 +1679,20 @@ fn approved_said(r: &Value) -> String {
             None => format!("{service} on {} wants to be yours. Approve it only if that's the code it shows.", s("device")),
         };
     }
+    if r.get("sealed").is_none() && r["recovery"] == true {
+        return format!("{} is {}'s device. Approve it with the recovery key only if they lost all their devices and say it's theirs.", s("device"), s("person"));
+    }
     if r.get("sealed").is_none() {
         let new = if r["new"] == true { ", who you invited" } else { "" };
         return format!("{} is {}'s device{new}. Approve it only if they say it's theirs.", s("device"), s("person"));
     }
     let mut out = format!("{} is in.", s("device"));
+    if r["recovery"] == true {
+        out = format!("{} is in, let in with the recovery key: {} can open what they could before.", s("device"), s("person"));
+    }
+    if let Some(relay) = r["relay"].as_str() {
+        out.push_str(&format!(" The network didn't take it yet: {relay}."));
+    }
     for n in r["not_sealed"].as_array().into_iter().flatten() {
         out.push_str(&format!(" It wasn't given {}'s keys: {}.", n["scope"].as_str().unwrap_or(""), n["why"].as_str().unwrap_or("")));
     }
@@ -1776,7 +1810,7 @@ fn dispatch(name: &str, mut input: Map<String, Value>, agent: Option<&str>, clie
         return backups_tool(op, &input, agent);
     }
     if app == "devices" {
-        return devices_tool(op, &input);
+        return devices_tool(op, &input, client);
     }
     if name == "groups_list" {
         return Ok(json!(groups_said(&get("/v1/state")?)));

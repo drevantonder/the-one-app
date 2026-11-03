@@ -40,7 +40,7 @@ mod sessions;
 pub use databases::NotGiven;
 pub use devices::{DeviceRequest, Invited};
 pub use net::{alpn, relay, service_alpn};
-pub use sessions::{Needs, client_of, client_token, serverless_token};
+pub use sessions::{Needs, client_of, client_token};
 mod sidecars;
 mod state;
 mod status;
@@ -733,8 +733,15 @@ impl Node {
     /// Writes entries `caller`'s own device signed (a browser's, say), each once it's checked: it follows what this
     /// device holds, and counts.
     pub async fn put_signed(&self, caller: &Caller, entries: Vec<Entry>) -> Result<()> {
-        for entry in entries {
+        for entry in &entries {
             ensure!(entry.user() == caller.user, "entry {} isn't written as you", entry.id());
+        }
+        self.put_checked(entries).await
+    }
+
+    /// Writes entries another key signed, each once it's checked: it follows what this device holds, and counts.
+    pub(super) async fn put_checked(&self, entries: Vec<Entry>) -> Result<()> {
+        for entry in entries {
             let scope = entry.scope();
             self.first_epoch(&scope).await?;
             {
@@ -793,6 +800,7 @@ impl Node {
             self.0.changed.notify_one();
             self.emit(Event::Devices);
             self.seal_epochs();
+            self.settle_own();
         }
         if handled.members || handled.new.iter().any(|e| e.log() == "global" && e.content.app == members::APP) {
             self.follow_storage();

@@ -131,6 +131,10 @@ fn install(m: &Members, me: &str, settings: &Map<String, Value>, here: &Here) ->
             let hashes: Map<String, Value> = m.epoch_hashes.range((s.clone(), 0)..=(s.clone(), u32::MAX)).map(|((_, n), h)| (n.to_string(), json!(h))).collect();
             (s.to_string(), json!({ "n": e.n, "hashes": hashes }))
         }).collect::<Map<String, Value>>(),
+        // Where the viewer's own things run, as their own device chose: the machines' keys, or null if it hasn't yet.
+        "runs": m.runs.get(me).map(|on| on.iter().map(hex).collect::<Vec<_>>()),
+        // When the install's recovery key last let a device in, and whose.
+        "recovery_used": m.recovery_used.as_ref().map(|(time, user)| json!({ "time": time, "user": user })),
         "member": here.member,
         "users": users, "groups": groups, "devices": devices, "devices_at": m.devices_at, "clients": clients,
         // Standing work this person granted: which endpoint keeps which app running in which scope, until when.

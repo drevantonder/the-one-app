@@ -142,21 +142,35 @@ export class Device {
     return all.get(n);
   }
 
-  /// Starts a scope's epoch `n`: a random key, sealed to the recovery key (first, which takes `n`), then to each client
-  /// device of the people who may open it but `except`, then written as an `epoch` entry naming its hash, before it's
-  /// used.
-  async newEpoch(scope, n, { except } = {}) {
+  /// Starts a scope's epoch `n`: a random key, written first as an `epoch` entry naming its hash (which, first in
+  /// causal order, makes it), then sealed to the recovery key and each client device of the people who may open it but
+  /// those in `except` (keys being taken out), before it's used.
+  async newEpoch(scope, n, { except = [] } = {}) {
     const st = this.state();
-    const key = random(32);
     if (!st.install.recovery) throw new Error("Your One App has no recovery key to keep its keys with.");
-    await this.api("/v1/keys", { method: "POST", body: { scope, n, to: "recovery", sealed: b64u.encode(await sealTo(twinPublic(hex.decode(st.install.recovery)), key)) } });
-    const to = openers(st, scope).filter((e) => e.key !== except);
+    const key = random(32);
+    const hash = await epochHash(key);
+    const to = openers(st, scope).filter((e) => !except.includes(e.key));
     if (!to.some((e) => e.key === this.me.key)) to.push({ key: this.me.key, seal: this.me.seal });
+    await this.write("global", members.epoch({ scope, n, to: to.map((e) => e.key), hash }));
+    const now = await this.api("/v1/state");
+    if (now.install.epochs?.[scope]?.hashes?.[n] !== hash) throw new Error("Another device made new keys for this just now. Try again.");
+    await this.api("/v1/keys", { method: "POST", body: { scope, n, to: "recovery", sealed: b64u.encode(await sealTo(twinPublic(hex.decode(st.install.recovery)), key)) } });
     for (const e of to) await this.api("/v1/keys", { method: "POST", body: { scope, n, to: e.key, sealed: b64u.encode(await sealTo(hex.decode(e.seal), key)) } });
-    await this.write("global", members.epoch({ scope, n, to: to.map((e) => e.key), hash: await epochHash(key) }));
     const all = this.epochs.get(scope) || new Map();
     all.set(n, await hkdfKey(key));
     this.epochs.set(scope, all);
+  }
+
+  /// This person's own things, once their device is in: where they run besides their own machines, if their devices
+  /// never said (the machines that run everyone's, chosen without asking), and their own first key, if it isn't made.
+  async settleOwn() {
+    const st = this.state(), mine = `user:${this.user}`;
+    if (st.install.runs == null) {
+      const on = st.install.devices.filter((d) => d.user !== this.user && (d.runs_for || []).includes("global")).map((d) => d.key);
+      if (on.length) await this.write("global", members.runs({ on }));
+    }
+    if (!st.install.epochs?.[mine]) await this.newEpoch(mine, 1);
   }
 
   /// An app's key in epoch `n` of a scope: the one sealed under the epoch, or a new one if it has none yet.
@@ -304,9 +318,29 @@ export class Device {
     });
     const seq = (await this.api("/v1/entries?scope=global")).logs?.[key]?.seq ?? null;
     await this.write("global", members.removeDevice({ key, seq }));
-    for (const scope of scopesOf(st, it.user).filter((s) => starts(st, s))) {
+    await this.renew(scopesOf(st, it.user), [key]);
+  }
+
+  /// Takes a person out, for an admin: each of their devices off the network first, then them, then each scope they
+  /// could open but their own (everyone's and their groups') gets a new epoch they don't have. Their own stays as it is.
+  async removePerson(user) {
+    const st = this.state();
+    if (user === this.user) throw new Error("You can’t remove yourself. Another admin can.");
+    const theirs = [...st.install.devices, ...st.install.clients].filter((e) => e.user === user).map((e) => e.key);
+    for (const key of theirs) {
+      await this.tell({ remove: key }).catch((err) => {
+        if (!/isn.t|not/.test(err.message)) throw err;
+      });
+    }
+    await this.write("global", members.removeUser({ user }));
+    await this.renew(scopesOf(st, user).filter((s) => s !== `user:${user}`), theirs);
+  }
+
+  /// A new epoch of each scope this person may start one of, sealed to none of `except`.
+  async renew(scopes, except) {
+    for (const scope of scopes.filter((s) => starts(this.state(), s))) {
       const newest = (await this.api(`/v1/keys?scope=${encodeURIComponent(scope)}&to=${this.me.key}`)).epoch || 0;
-      if (newest) await this.newEpoch(scope, newest + 1, { except: key });
+      if (newest) await this.newEpoch(scope, newest + 1, { except });
     }
   }
 

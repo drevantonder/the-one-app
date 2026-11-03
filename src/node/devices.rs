@@ -182,7 +182,12 @@ impl Node {
 
     /// Tells the relay something now, signed by this device (`one/relay`), as `tell_relay` does in the background.
     async fn tell_relay_now(&self, fields: Value) -> Result<()> {
-        let (address, key) = (self.address()?, self.signing_key());
+        self.tell_relay_as(self.signing_key(), fields).await
+    }
+
+    /// Tells the relay something now, signed by `key`: this device's, or the install's recovery key.
+    async fn tell_relay_as(&self, key: ed25519_dalek::SigningKey, fields: Value) -> Result<()> {
+        let address = self.address()?;
         tokio::task::spawn_blocking(move || {
             let body = crate::keys::signed_request(&key, "one/relay", fields, now_ms());
             let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).timeout_global(Some(Duration::from_secs(15))).build().into();
@@ -264,6 +269,75 @@ impl Node {
             }
         }
         Ok(out)
+    }
+
+    /// Lets back in someone who lost every device, with the install's recovery key, on this machine (never one asked
+    /// over the network): the device whose join code is `code`, theirs, is listed by an entry the recovery key signs
+    /// (which counts as an admin's approval, and is listed as its use), sealed each epoch of each scope they may open
+    /// (opened through the recovery key's copy), and let onto the network by the recovery key. Without `confirm`, says
+    /// whose it is. → what it is, or what was done.
+    pub async fn approve_with_recovery(&self, caller: &Caller, code: &str, recovery: &ed25519_dalek::SigningKey, confirm: bool) -> Result<Value> {
+        ensure!(caller.token.is_none() && caller.key == self.0.id, "the recovery key is used only on the machine it's kept on");
+        let at = recovery.verifying_key().to_bytes();
+        ensure!(self.with(|i| Ok(i.r.members.recovery == Some(at)))?, "that isn't your One App's recovery key");
+        let code = code_of(code);
+        ensure!(code.len() == 8, "a code is the 8 letters and digits the new device shows");
+        let asked: Value = self.ask_auth("GET", "/api/auth/devices/requests", json!({})).await?;
+        let asked: Vec<DeviceRequest> = serde_json::from_value(asked["requests"].clone()).context("auth's requests aren't requests")?;
+        let r = asked.into_iter().find(|r| r.endpoint().is_ok_and(|d| crate::keys::join_code(&d) == code)).context("no device is waiting with that code: it waits 15 minutes after it asks")?;
+        ensure!(r.service.is_none() && r.proof.is_none(), "the recovery key lets in a device of someone already in your One App");
+        let person = self.with(|i| Ok(i.r.members.user(&r.user).map(|u| u.name.clone())))?.context("the recovery key lets in a device of someone already in your One App")?;
+        if !confirm {
+            return Ok(json!({ "device": r.name, "person": person, "recovery": true }));
+        }
+        let endpoint = r.endpoint()?;
+        self.read_log_now(&Scope::Global).await?;
+        let entry = self.with(|i| {
+            let head = i.r.store.last(&at, "global")?.map(|e| e.head());
+            let ext = crate::entry::Ext { log: "global".into(), time: now_ms(), user: r.user.clone(), epoch: i.r.members.epoch(&Scope::Global), previous: i.r.store.heads("global", Some(&at))? };
+            Ok(Entry::create(recovery, ext, head, members::device(&endpoint, &r.user, &r.name, &[members::Kind::Client], None)))
+        })?;
+        self.put_checked(vec![entry]).await?;
+        let relay = self.tell_relay_as(recovery.clone(), json!({ "add": r.key })).await.err().map(|err| format!("{err:#}"));
+        let scopes: Vec<Scope> = self.with(|i| Ok(i.r.members.scopes().into_iter().filter(|s| i.r.members.may_use(&r.user, s)).collect()))?;
+        let (mut sealed, mut not) = (Vec::new(), Vec::new());
+        for scope in scopes {
+            match self.seal_from_recovery(&scope, recovery, &endpoint).await {
+                Ok(0) => {}
+                Ok(_) => sealed.push(scope.to_string()),
+                Err(err) => not.push(json!({ "scope": scope.to_string(), "why": format!("{err:#}") })),
+            }
+        }
+        if let Err(err) = self.ask_auth("DELETE", &format!("/api/auth/devices/requests/{}", r.key), json!({})).await {
+            tracing::warn!("forgetting an approved request at auth: {err:#}");
+        }
+        Ok(json!({ "device": r.name, "person": person, "recovery": true, "sealed": sealed, "not_sealed": not, "relay": relay }))
+    }
+
+    /// Seals each epoch of `scope` its entries made, opened through the recovery key's copy, to `to` where it isn't yet.
+    /// → how many it opened.
+    async fn seal_from_recovery(&self, scope: &Scope, recovery: &ed25519_dalek::SigningKey, to: &crate::keys::Endpoint) -> Result<usize> {
+        let (bucket, name) = (self.bucket()?, scope.to_string());
+        let hashes: BTreeMap<u32, String> = self.with(|i| Ok(i.r.members.epoch_hashes.range((scope.clone(), 0)..=(scope.clone(), u32::MAX)).map(|((_, n), h)| (*n, h.clone())).collect()))?;
+        let secret = crate::keys::seal_secret(recovery);
+        let mut opened = 0;
+        for (n, hash) in hashes {
+            let Some(o) = Bucket::get(&bucket, &crate::keys::epoch_name(&name, n, "recovery")).await? else {
+                tracing::warn!("{scope}'s epoch {n} isn't sealed to the recovery key");
+                continue;
+            };
+            let key = crate::kernel::open_sealed(&secret, &o.bytes).ok().and_then(|k| <[u8; 32]>::try_from(k).ok()).filter(|k| crate::keys::epoch_hash(k) == hash);
+            let Some(key) = key else {
+                tracing::warn!("{scope}'s epoch {n} sealed to the recovery key isn't the key its entry made: passed over");
+                continue;
+            };
+            let at = crate::keys::epoch_name(&name, n, &hex(&to.key));
+            if Bucket::get(&bucket, &at).await?.is_none() {
+                crate::db::created(&bucket, &at, &crate::kernel::seal_to(&to.seal, &key)?).await?;
+            }
+            opened += 1;
+        }
+        Ok(opened)
     }
 
     /// Approves the device whose join code is `code`, for `caller`: with `confirm`, lets it in
@@ -397,10 +471,43 @@ impl Node {
         // The last of its entries in `global` this device had seen: those after never count, wherever they sort.
         let seq = self.with(|i| Ok(i.r.store.last(&key, "global")?.map(|e| e.seq())))?;
         self.member_as(caller, "remove", json!({ "key": hex(&key), "seq": seq })).await?;
+        let (renewed, left) = self.renew(caller, scopes).await;
+        Ok(json!({ "removed": gone, "new_epochs": renewed, "not_renewed": left, "relay": relay }))
+    }
+
+    /// Removes a person, for an admin: the relay told to let each of their devices in no more first, then their `remove`
+    /// entry, and a new epoch of each scope they could open but their own (`global`, and each group they were in),
+    /// sealed to every client left that opens it and the recovery key. Their own scope is kept as it is: removing deletes
+    /// nothing. → what was done.
+    pub async fn remove_person(&self, caller: &Caller, user: &str) -> Result<Value> {
+        let user = self.find_user(user)?;
+        let (name, keys, scopes) = self.with(|i| {
+            let m = &i.r.members;
+            ensure!(m.is_admin(&caller.user), "only admins remove someone");
+            ensure!(user != caller.user, "you can't remove yourself: another admin can");
+            let name = m.user(&user).context("no such person")?.name.clone();
+            let keys: Vec<Key> = m.machines.values().filter(|d| d.user == user && m.machine(&d.key).is_some()).map(|d| d.key).collect();
+            let mut scopes = vec![Scope::Global];
+            scopes.extend(m.groups_of(&user).into_keys().map(Scope::Group));
+            Ok((name, keys, scopes))
+        })?;
+        ensure!(!keys.contains(&self.0.id), "this device is {name}'s: remove them from another");
+        let mut relay = Vec::new();
+        for key in &keys {
+            if let Err(err) = self.tell_relay_now(json!({ "remove": hex(key) })).await {
+                relay.push(format!("{err:#}"));
+            }
+        }
+        self.member_content(caller, members::remove_user(&user)).await?;
+        let (renewed, left) = self.renew(caller, scopes).await;
+        Ok(json!({ "removed": name, "new_epochs": renewed, "not_renewed": left, "relay": (!relay.is_empty()).then(|| relay.join("; ")) }))
+    }
+
+    /// A new epoch of each scope, where `caller` may start one: → those made, and those left to one of their admins.
+    async fn renew(&self, caller: &Caller, scopes: Vec<Scope>) -> (Vec<Value>, Vec<String>) {
         let (mut renewed, mut left) = (Vec::new(), Vec::new());
         for scope in scopes {
-            let starts = self.with(|i| Ok(starts_epochs(&i.r.members, &caller.user, &scope)))?;
-            if !starts {
+            if !self.with(|i| Ok(starts_epochs(&i.r.members, &caller.user, &scope))).unwrap_or(false) {
                 left.push(self.whose(&scope));
                 continue;
             }
@@ -409,7 +516,37 @@ impl Node {
                 Err(err) => left.push(format!("{} ({err:#})", self.whose(&scope))),
             }
         }
-        Ok(json!({ "removed": gone, "new_epochs": renewed, "not_renewed": left, "relay": relay }))
+        (renewed, left)
+    }
+
+    /// What a person's first device does once it's in, here for a machine (kernel/web/device.js for a browser): where
+    /// their own things run besides their own machines, if their devices never said (the install's machines that run
+    /// everyone's, chosen without asking), and their own scope's first epoch, if it isn't made.
+    pub(super) fn settle_own(&self) {
+        let node = self.clone();
+        tokio::spawn(async move {
+            let todo = node.with(|i| {
+                let m = &i.r.members;
+                let me = i.user.clone();
+                if m.client(&node.0.id).is_none_or(|c| c.user != me) || m.epoch(&Scope::User(me.clone())) > 0 {
+                    return Ok(None);
+                }
+                let on: Vec<Key> = match m.runs.contains_key(&me) {
+                    true => Vec::new(),
+                    false => m.computes().filter(|c| c.user != me && m.runs_for(&c.key, &Scope::Global)).map(|c| c.key).collect(),
+                };
+                Ok(Some((me, on)))
+            });
+            let Ok(Some((me, on))) = todo else { return };
+            if !on.is_empty()
+                && let Err(err) = node.member_content(&Caller { key: node.0.id, user: me.clone(), agent: None, token: None }, members::runs(&on)).await
+            {
+                tracing::warn!("saying where {me}'s things run: {err:#}");
+            }
+            if let Err(err) = node.epoch_keys(&Scope::User(me.clone()), true).await {
+                tracing::warn!("making {me}'s own keys: {err:#}");
+            }
+        });
     }
 
     /// A scope as a person reads it: "Sam's own", "Work's", or "everyone's".
@@ -425,26 +562,26 @@ impl Node {
         .unwrap_or_default()
     }
 
-    /// A scope's next epoch: a random key sealed to the recovery key (first, which says it's made) and to every client
-    /// device of someone who uses the scope, then its `epoch` entry naming its hash, before anything uses it. → its
-    /// number.
+    /// A scope's next epoch: its `epoch` entry first, naming its key's hash (which, first in causal order, makes it),
+    /// then the key sealed to the recovery key and to every client device of someone who uses the scope, before
+    /// anything uses it. → its number.
     pub(super) async fn new_epoch(&self, caller: &Caller, scope: &Scope) -> Result<u32> {
         let newest = self.newest_epoch(scope).await?;
         ensure!(newest >= 1, "{scope} has no keys yet");
         let n = newest + 1;
-        let (recovery, to) = self.with(|i| {
-            let m = &i.r.members;
-            let to: Vec<(Key, [u8; 32])> = m.clients().filter(|d| m.may_use(&d.user, scope)).map(|d| (d.key, d.seal)).collect();
-            Ok((m.recovery, to))
-        })?;
+        let (recovery, to) = self.with(|i| Ok((i.r.members.recovery, super::databases::clients_of(&i.r.members, scope))))?;
         let recovery = recovery.context("the install has no recovery key to seal its keys to")?;
         let (bucket, name) = (self.bucket()?, scope.to_string());
         let key: [u8; 32] = rand::random();
-        ensure!(crate::db::created(&bucket, &crate::keys::epoch_name(&name, n, "recovery"), &crate::kernel::seal_to(&crate::kernel::twin_public(&recovery)?, &key)?).await?, "another device started {scope}'s epoch {n} just now");
+        let hash = crate::keys::epoch_hash(&key);
+        self.member_content(caller, members::epoch(scope, n, &to.iter().map(|(k, _)| *k).collect::<Vec<_>>(), &hash)).await?;
+        ensure!(self.with(|i| Ok(i.r.members.epoch_hash(scope, n) == Some(hash.as_str())))?, "another device started {scope}'s epoch {n} just now");
+        if !crate::db::created(&bucket, &crate::keys::epoch_name(&name, n, "recovery"), &crate::kernel::seal_to(&crate::kernel::twin_public(&recovery)?, &key)?).await? {
+            tracing::warn!("{scope}'s epoch {n} was sealed to the recovery key already, not with its key: the recovery key won't open it");
+        }
         for (device, seal) in &to {
             crate::db::created(&bucket, &crate::keys::epoch_name(&name, n, &hex(device)), &crate::kernel::seal_to(seal, &key)?).await?;
         }
-        self.member_as(caller, "epoch", json!({ "scope": name, "n": n, "to": to.iter().map(|(k, _)| hex(k)).collect::<Vec<_>>(), "hash": crate::keys::epoch_hash(&key) })).await?;
         self.forget_epochs(scope);
         Ok(n)
     }

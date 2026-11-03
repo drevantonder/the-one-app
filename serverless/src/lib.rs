@@ -99,13 +99,10 @@ pub fn signed(seed: &str, domain: &str, fields: &str, at: f64) -> Result<String,
     Ok(one::keys::signed_request(&signing_key(seed).map_err(thrown)?, domain, serde_json::from_str(fields)?, at as u64).to_string())
 }
 
-/// The most keys one handoff may carry: a call's databases in each epoch since their newest copies.
-const HANDED_MOST: usize = 256;
-
-/// The keys a caller handed this node with `token`'s calls (`x-one-keys`), kept no longer than the token lasts
-/// (`exp`, milliseconds): → `{ until, keys: [{ scope, epoch, app, database, key }] }`.
+/// The keys a caller handed this node with `token`'s calls (`x-one-keys`): → `{ until, keys: [{ scope, epoch, app,
+/// database, key }] }`.
 #[wasm_bindgen]
-pub fn handoff(seed: &str, token: &str, sealed: &str, now: f64, exp: f64) -> Result<String, JsError> {
+pub fn handoff(seed: &str, token: &str, sealed: &str, now: f64) -> Result<String, JsError> {
     let handoff = one::keys::open_handoff(&one::keys::seal_secret(&signing_key(seed).map_err(thrown)?), sealed).map_err(thrown)?;
     if handoff.for_ != one::keys::token_id(token) {
         return Err(JsError::new("the keys handed are for another sign-in"));
@@ -113,30 +110,29 @@ pub fn handoff(seed: &str, token: &str, sealed: &str, now: f64, exp: f64) -> Res
     if handoff.until <= now as u64 {
         return Err(JsError::new("the keys handed have expired"));
     }
-    if handoff.keys.len() > HANDED_MOST {
-        return Err(JsError::new("too many keys handed at once"));
-    }
-    Ok(json!({ "until": handoff.until.min(exp as u64), "keys": handoff.keys }).to_string())
+    Ok(json!({ "until": handoff.until, "keys": handoff.keys }).to_string())
 }
 
 /// What a sign-in needs for `wants` (JSON, `[{ scope, app, database, have: [epoch] }]`) that it wasn't handed, as a node
 /// on a machine says it (src/node/sessions.rs): every epoch from the one the database's newest copy is under to the
-/// scope's current one, as the install's signed entries say (`epochs`, JSON `{ <scope>: n }`), never what the bucket
-/// holds, where any endpoint can put a name. → `[{ scope, epoch, app, database }]`.
+/// scope's newest. → `[{ scope, epoch, app, database }]`.
 #[wasm_bindgen]
-pub async fn needs(bucket: JsValue, wants: String, epochs: String) -> Result<String, JsError> {
+pub async fn needs(bucket: JsValue, wants: String) -> Result<String, JsError> {
     let bucket = Js(bucket);
     let wants: Vec<Value> = serde_json::from_str(&wants)?;
-    let epochs: BTreeMap<String, u32> = serde_json::from_str(&epochs)?;
     let mut need = Vec::new();
     for w in wants {
         let (scope, app, database) = (w["scope"].as_str().unwrap_or(""), w["app"].as_str().unwrap_or(""), w["database"].as_str().unwrap_or(""));
         let have: Vec<u32> = serde_json::from_value(w["have"].clone()).unwrap_or_default();
-        let newest = epochs.get(scope).copied().unwrap_or(1).max(1);
-        let hint = match bucket.get(&one::db::newest_name(&prefix_of(scope, app, database).map_err(thrown)?)).await.map_err(thrown)? {
+        let prefix = format!("{}/{app}/{database}", one::bucket::folder(scope));
+        let hint = match bucket.get(&one::db::newest_name(&prefix)).await.map_err(thrown)? {
             Some(o) => Some(one::db::newest(&o.bytes)),
             None => None,
         };
+        let mut newest = hint.map(|(_, _, e)| e).unwrap_or(0).max(have.iter().copied().max().unwrap_or(0)).max(1);
+        while bucket.get(&one::keys::epoch_name(scope, newest + 1, "recovery")).await.map_err(thrown)?.is_some() {
+            newest += 1;
+        }
         let oldest = match hint {
             Some((_, 0, _)) => 1,
             Some((_, _, epoch)) => epoch.clamp(1, newest),
@@ -147,50 +143,16 @@ pub async fn needs(bucket: JsValue, wants: String, epochs: String) -> Result<Str
     Ok(Value::from(need).to_string())
 }
 
-/// The keys of a database a call uses, of those handed (`keys_of`), for a scope whose current epoch is `current`
-/// (`one::db::handed`): a `missing` error names the epoch it lacks.
-fn usable(keys: &str, current: u32) -> Result<one::db::Keys, JsValue> {
-    one::db::handed(keys_of(keys).map_err(failed)?, current.max(1)).map_err(|m| failed(m.into()))
-}
-
-/// How many people's databases and entries one isolate keeps, the least lately used going first: each person's are
-/// their Durable Object's, and several may share an isolate, which outlives them.
-const OWNERS_MOST: usize = 16;
-
 thread_local! {
-    /// The databases calls running in this isolate have open, by handle, each with whose object opened it.
-    static OPEN: RefCell<(u32, HashMap<u32, (String, Db)>)> = RefCell::new((0, HashMap::new()));
-    /// When each person's object last used what this isolate keeps for it, to forget the least lately used.
-    static OWNERS: RefCell<(u64, HashMap<String, u64>)> = RefCell::new((0, HashMap::new()));
+    /// The databases calls running in this isolate have open, by handle.
+    static OPEN: RefCell<(u32, HashMap<u32, Db>)> = RefCell::new((0, HashMap::new()));
 }
 
-/// Notes that `owner`'s object is using what this isolate keeps for it, forgetting the least lately used owner's
-/// databases and entries once there are too many.
-fn touch(owner: &str) {
-    let gone = OWNERS.with(|o| {
-        let mut o = o.borrow_mut();
-        o.0 += 1;
-        let now = o.0;
-        o.1.insert(owner.to_string(), now);
-        if o.1.len() <= OWNERS_MOST {
-            return None;
-        }
-        let oldest = o.1.iter().min_by_key(|(_, at)| **at).map(|(k, _)| k.clone())?;
-        o.1.remove(&oldest);
-        Some(oldest)
-    });
-    if let Some(gone) = gone {
-        OPEN.with(|o| o.borrow_mut().1.retain(|_, (by, _)| *by != gone));
-        LOGS.with(|l| l.borrow_mut().retain(|(by, _), _| *by != gone));
-        REPLAYED.with(|r| r.borrow_mut().retain(|(by, _), _| *by != gone));
-    }
-}
-
-fn take(handle: u32) -> Result<(String, Db)> {
+fn take(handle: u32) -> Result<Db> {
     OPEN.with(|o| o.borrow_mut().1.remove(&handle)).context("that database isn't open")
 }
 
-fn put(handle: u32, db: (String, Db)) {
+fn put(handle: u32, db: Db) {
     OPEN.with(|o| o.borrow_mut().1.insert(handle, db));
 }
 
@@ -203,14 +165,12 @@ pub fn verify(token: &str, jwks: &str, iss: &str, now: f64) -> Result<String, Js
     Ok(json!({ "sub": claims.sub, "azp": claims.azp, "aud": claims.aud, "exp": claims.exp, "scope": claims.scope }).to_string())
 }
 
-/// Opens a database at `prefix` for `owner`'s object with the keys handed (`usable`, under the scope's `current`
-/// epoch) and brings it to `migrations` (JSON, its app's schema for the scope's kind): → a handle for `query`, `write`
-/// and `close`.
+/// Opens a database at `prefix` with its keys (`keys_of`, handed by the caller) and brings it to `migrations` (JSON,
+/// its app's schema for the scope's kind): → a handle for `query`, `write` and `close`.
 #[wasm_bindgen]
-pub async fn open(owner: String, bucket: JsValue, prefix: String, keys: String, current: u32, migrations: String) -> Result<u32, JsValue> {
-    touch(&owner);
+pub async fn open(bucket: JsValue, prefix: String, keys: String, migrations: String) -> Result<u32, JsValue> {
     let bucket = Js(bucket);
-    let keys = usable(&keys, current)?;
+    let keys = keys_of(&keys).map_err(failed)?;
     let migrations: Vec<String> = serde_json::from_str(&migrations).map_err(|e| failed(e.into()))?;
     let mut db = Db::open(&bucket, &prefix, keys).await.map_err(failed)?;
     db.migrate(&bucket, &migrations).await.map_err(failed)?;
@@ -219,32 +179,31 @@ pub async fn open(owner: String, bucket: JsValue, prefix: String, keys: String, 
         o.0 += 1;
         o.0
     });
-    put(handle, (owner, db));
+    put(handle, db);
     Ok(handle)
 }
 
-/// Whether an open database was opened with exactly the keys a call was handed (`usable`): only then may the call use
-/// it, since a key it holds that the call wasn't handed may open what the call mustn't read, and one the call was
-/// handed that it lacks may be a wrong key, which mustn't change what others read. False once it's been closed.
+/// Whether an open database's keys agree with `keys` (`keys_of`): whether a sign-in that handed them may use it.
 #[wasm_bindgen]
-pub fn opens(handle: u32, keys: &str, current: u32) -> bool {
-    let Ok(keys) = usable(keys, current) else { return false };
-    OPEN.with(|o| o.borrow().1.get(&handle).is_some_and(|(_, db)| *db.keys() == keys))
+pub fn opens(handle: u32, keys: &str) -> bool {
+    let Ok(keys) = keys_of(keys) else { return false };
+    OPEN.with(|o| o.borrow().1.get(&handle).is_some_and(|db| db.opens_for(&keys)))
 }
 
-/// Brings an open database up to what the bucket has, and to `migrations`, with the keys it was opened with.
+/// Brings an open database up to what the bucket has, with `keys` too, and to `migrations`.
 #[wasm_bindgen]
-pub async fn refresh(handle: u32, bucket: JsValue, migrations: String) -> Result<(), JsValue> {
+pub async fn refresh(handle: u32, bucket: JsValue, keys: String, migrations: String) -> Result<(), JsValue> {
     let bucket = Js(bucket);
+    let keys = keys_of(&keys).map_err(failed)?;
     let migrations: Vec<String> = serde_json::from_str(&migrations).map_err(|e| failed(e.into()))?;
-    let (owner, mut db) = take(handle).map_err(failed)?;
-    touch(&owner);
+    let mut db = take(handle).map_err(failed)?;
+    db.add_keys(&keys);
     let done = async {
         db.catch_up(&bucket).await?;
         db.migrate(&bucket, &migrations).await
     }
     .await;
-    put(handle, (owner, db));
+    put(handle, db);
     done.map_err(failed)
 }
 
@@ -254,7 +213,7 @@ pub fn query(handle: u32, sql: &str, params: &str) -> Result<String, JsError> {
     let params: Vec<Value> = serde_json::from_str(params)?;
     OPEN.with(|o| {
         let o = o.borrow();
-        let (_, db) = o.1.get(&handle).context("that database isn't open").map_err(thrown)?;
+        let db = o.1.get(&handle).context("that database isn't open").map_err(thrown)?;
         Ok(Value::from(db.query(sql, &params).map_err(thrown)?).to_string())
     })
 }
@@ -264,11 +223,11 @@ pub fn query(handle: u32, sql: &str, params: &str) -> Result<String, JsError> {
 #[wasm_bindgen]
 pub async fn write(handle: u32, bucket: JsValue, statements: String) -> Result<f64, JsError> {
     let list: Vec<(String, Vec<Value>, Option<String>)> = serde_json::from_str(&statements)?;
-    let (owner, mut db) = take(handle).map_err(thrown)?;
+    let mut db = take(handle).map_err(thrown)?;
     let at = db.at();
     let wrote = db.write(&Js(bucket), |c| one::db::statements(c, &list)).await;
     let step = if db.at() > at { db.at() as f64 } else { 0.0 };
-    put(handle, (owner, db));
+    put(handle, db);
     wrote.map_err(thrown)?;
     Ok(step)
 }
@@ -315,7 +274,7 @@ fn lookup(opened: &str, app: &str, user: &str) -> Result<one::vault::Lookup, JsE
     let opened: Vec<(String, u32)> = serde_json::from_str(opened)?;
     let mut scopes = Vec::new();
     for (scope, handle) in opened {
-        let items = OPEN.with(|o| o.borrow().1.get(&handle).context("that database isn't open").and_then(|(_, db)| one::vault::load(db.connection()))).map_err(thrown)?;
+        let items = OPEN.with(|o| o.borrow().1.get(&handle).context("that database isn't open").and_then(|db| one::vault::load(db.connection()))).map_err(thrown)?;
         scopes.push((Scope::parse(&scope).map_err(thrown)?, items));
     }
     Ok(one::vault::Lookup { app: app.into(), user: user.into(), scopes })
@@ -364,18 +323,10 @@ pub fn config() -> String {
     json!({ "name": one::config::NAME, "cli": one::config::CLI, "accent": one::config::ACCENT, "port": one::config::PORT, "made_here": one::config::MADE_HERE }).to_string()
 }
 
-/// Where an app's database of a scope is in the bucket (`src/db.rs`): only of a scope there can be, and an app and
-/// database whose names are only letters, digits and dashes.
-fn prefix_of(scope: &str, app: &str, database: &str) -> Result<String> {
-    let scope = Scope::parse(scope)?.to_string();
-    let plain = |s: &str| !s.is_empty() && s.len() <= 64 && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
-    anyhow::ensure!(plain(app) && plain(database), "{app}/{database} isn't an app's database");
-    Ok(format!("{}/{app}/{database}", one::bucket::folder(&scope)))
-}
-
+/// Where an app's database of a scope is in the bucket (`src/db.rs`).
 #[wasm_bindgen]
-pub fn prefix(scope: &str, app: &str, database: &str) -> Result<String, JsError> {
-    prefix_of(scope, app, database).map_err(thrown)
+pub fn prefix(scope: &str, app: &str, database: &str) -> String {
+    format!("{}/{app}/{database}", one::bucket::folder(scope))
 }
 
 /// The names of the `n` steps after `name`, if it's a database's step, as JSON: what's read next.
@@ -388,18 +339,15 @@ pub fn following(name: &str, n: u32) -> String {
 
 // Who can do what: each scope's entries (`src/log.rs`), and what they add up to (`src/members.rs`).
 
-/// A scope's entries this isolate read for one person's object: the keys they were read with, the last step read, the
-/// entries (in replay order for `global`; another scope's are put in order with `global`'s when replayed, as they
-/// follow them), and which reading of them this is.
+/// A scope's entries this isolate read: the key they were read with, the last step read, and the entries (in replay
+/// order for `global`; another scope's are put in order with `global`'s when replayed, as they follow them).
 struct Log {
     keys: one::db::Keys,
     at: u64,
     entries: Vec<Entry>,
-    read: u64,
 }
 
-/// What a scope's entries add up to, as of the readings of them and of `global`'s: `global`'s members, and the
-/// scope's state.
+/// What a scope's entries add up to, as of the steps they were read to: `global`'s members, and the scope's state.
 struct Replayed {
     at: (u64, u64),
     members: Members,
@@ -407,52 +355,40 @@ struct Replayed {
 }
 
 thread_local! {
-    /// Each scope's entries this isolate read, by whose object read them and the scope. A request uses them only if it
-    /// was handed exactly the keys they were read with: a key that opened nothing passes over what's under its epoch,
-    /// and what was read that way is only ever shown to whoever handed it.
-    static LOGS: RefCell<HashMap<(String, String), Log>> = RefCell::new(HashMap::new());
-    /// Each scope's replay, by owner and scope, while its readings and `global`'s are the same.
-    static REPLAYED: RefCell<HashMap<(String, String), Replayed>> = RefCell::new(HashMap::new());
-    /// Readings of entries, counted.
-    static READINGS: RefCell<u64> = const { RefCell::new(0) };
+    /// Each scope's entries this isolate read, by scope. A request uses them only once it brings the same key, so
+    /// they're only ever shown to someone who may open the scope.
+    static LOGS: RefCell<HashMap<String, Log>> = RefCell::new(HashMap::new());
+    /// Each scope's replay, by scope, while its steps and `global`'s are the same.
+    static REPLAYED: RefCell<HashMap<String, Replayed>> = RefCell::new(HashMap::new());
 }
 
-fn reading() -> u64 {
-    READINGS.with(|r| {
-        *r.borrow_mut() += 1;
-        *r.borrow()
-    })
-}
-
-/// Reads a scope's entries for `owner`'s object, with the keys of its log a caller handed, up to its newest step: from
-/// the newest copy the first time, or when the keys differ from those last read with, and after that only the steps
-/// since.
+/// Reads a scope's entries (with the key of its log, from the vault) up to its newest step: from the newest copy the
+/// first time, and after that only the steps since. Requests reading at once each add what they read.
 #[wasm_bindgen]
-pub async fn read_log(owner: String, bucket: JsValue, scope: String, keys: String) -> Result<(), JsValue> {
-    touch(&owner);
+pub async fn read_log(bucket: JsValue, scope: String, keys: String) -> Result<(), JsValue> {
     let bucket = Js(bucket);
     let keys = keys_of(&keys).map_err(failed)?;
-    Scope::parse(&scope).map_err(failed)?;
     let prefix = one::log::prefix(&scope);
-    let id = (owner, scope.clone());
-    let from = LOGS.with(|l| l.borrow().get(&id).filter(|l| l.keys == keys).map(|l| l.at));
+    // What was read with keys that agree with these, sharing an epoch: only the scope's people have them.
+    let same = |l: &Log| l.keys.iter().all(|(n, k)| keys.get(n).is_none_or(|x| x == k)) && keys.keys().any(|n| l.keys.contains_key(n));
+    let from = LOGS.with(|l| l.borrow().get(&scope).filter(|l| same(l)).map(|l| l.at));
     let Some(from) = from else {
         let one::log::Read { at, entries, .. } = one::log::open(&bucket, &keys, &prefix, &scope).await.map_err(failed)?;
         let entries = if scope == "global" { causal(entries, &HashMap::new()) } else { entries };
-        LOGS.with(|l| l.borrow_mut().insert(id, Log { keys, at, entries, read: reading() }));
+        LOGS.with(|l| l.borrow_mut().insert(scope, Log { keys, at, entries }));
         return Ok(());
     };
     let one::log::Read { at, entries: new, .. } = one::log::read(&bucket, &keys, &prefix, &scope, from, 0).await.map_err(failed)?;
     LOGS.with(|l| {
-        if let Some(log) = l.borrow_mut().get_mut(&id).filter(|l| l.keys == keys) {
+        if let Some(log) = l.borrow_mut().get_mut(&scope).filter(|l| same(l)) {
             let fresh: Vec<Entry> = new.into_iter().filter(|e| !log.entries.iter().any(|k| k.author() == e.author() && k.seq() == e.seq())).collect();
             if !fresh.is_empty() {
                 log.entries.extend(fresh);
                 if scope == "global" {
                     log.entries = causal(std::mem::take(&mut log.entries), &HashMap::new());
                 }
-                log.read = reading();
             }
+            log.keys.extend(keys.clone());
             log.at = log.at.max(at);
         }
     });
@@ -464,13 +400,11 @@ fn root(global: &[Entry]) -> Option<Hash> {
     global.iter().find(|e| e.content.app == members::APP && e.content.kind == "genesis").map(Entry::hash)
 }
 
-/// `global`'s members and each of `scopes`' state, from the entries `owner`'s object read (`read_log`).
-fn replayed<R>(owner: &str, scopes: &[String], f: impl FnOnce(&Members, &BTreeMap<String, ScopeState>) -> R) -> Result<R> {
-    touch(owner);
+/// `global`'s members and each of `scopes`' state, from the entries this isolate read (`read_log`, this request).
+fn replayed<R>(scopes: &[String], f: impl FnOnce(&Members, &BTreeMap<String, ScopeState>) -> R) -> Result<R> {
     LOGS.with(|logs| {
         let logs = logs.borrow();
-        let log_of = |scope: &str| logs.get(&(owner.to_string(), scope.to_string()));
-        let global = log_of("global").context("read global's entries first")?;
+        let global = logs.get("global").context("read global's entries first")?;
         let member_entries: Vec<Entry> = global.entries.iter().filter(|e| members::is_member_entry(e)).cloned().collect();
         let root = root(&global.entries);
         // The serverless node keeps no fork's evidence: its members are replayed from the entries alone.
@@ -480,18 +414,17 @@ fn replayed<R>(owner: &str, scopes: &[String], f: impl FnOnce(&Members, &BTreeMa
             let mut states = BTreeMap::new();
             let mut m = None;
             for scope in scopes {
-                let Some(log) = log_of(scope) else { continue };
-                let at = (global.read, log.read);
-                let id = (owner.to_string(), scope.clone());
-                if r.get(&id).is_none_or(|x| x.at != at) {
+                let Some(log) = logs.get(scope) else { continue };
+                let at = (global.at, log.at);
+                if r.get(scope).is_none_or(|x| x.at != at) {
                     let entries = match scope.as_str() {
                         "global" => log.entries.clone(),
                         _ => causal(log.entries.clone(), &global.entries.iter().map(|e| (e.hash(), e.depth)).collect()),
                     };
                     let (members, state) = members::replay(&known, &member_entries, &entries, |_, _, _| {});
-                    r.insert(id.clone(), Replayed { at, members, state });
+                    r.insert(scope.clone(), Replayed { at, members, state });
                 }
-                let x = &r[&id];
+                let x = &r[scope];
                 m.get_or_insert_with(|| x.members.clone());
                 states.insert(scope.clone(), x.state.clone());
             }
@@ -503,67 +436,31 @@ fn replayed<R>(owner: &str, scopes: &[String], f: impl FnOnce(&Members, &BTreeMa
 
 /// The groups `user` is in, as scopes: whose entries to read next.
 #[wasm_bindgen]
-pub fn groups(owner: &str, user: &str) -> Result<String, JsError> {
-    let groups = replayed(owner, &["global".into()], |m, _| m.groups_of(user).into_keys().map(|g| format!("group:{g}")).collect::<Vec<_>>()).map_err(thrown)?;
+pub fn groups(user: &str) -> Result<String, JsError> {
+    let groups = replayed(&["global".into()], |m, _| m.groups_of(user).into_keys().map(|g| format!("group:{g}")).collect::<Vec<_>>()).map_err(thrown)?;
     Ok(json!(groups).to_string())
 }
 
-/// The scopes `user` may use, as the install's log says, whether they're a person of it, and whether they were removed
-/// from it: `{ scopes, joined, removed }`.
+/// The scopes `user` may use, as the install's log says, and whether they were removed from it: `{ scopes, removed }`.
 #[wasm_bindgen]
-pub fn scopes_of(owner: &str, user: &str) -> Result<String, JsError> {
-    let out = replayed(owner, &["global".into()], |m, _| {
+pub fn scopes_of(user: &str) -> Result<String, JsError> {
+    let out = replayed(&["global".into()], |m, _| {
         let scopes: Vec<String> = m.scopes().into_iter().filter(|s| m.may_use(user, s)).map(|s| s.to_string()).collect();
-        json!({ "scopes": scopes, "joined": m.user(user).is_some(), "removed": m.removed_user(user) })
+        json!({ "scopes": scopes, "removed": m.removed_user(user) })
     })
     .map_err(thrown)?;
     Ok(out.to_string())
 }
 
-/// Each of `scopes`' (JSON) current epoch, as the install's signed `epoch` entries say, 1 for one with none yet:
-/// `{ <scope>: n }`, all a node writes under.
-#[wasm_bindgen]
-pub fn epochs(owner: &str, scopes: &str) -> Result<String, JsError> {
-    let scopes: Vec<String> = serde_json::from_str(scopes)?;
-    let out = replayed(owner, &["global".into()], |m, _| {
-        scopes.iter().filter_map(|s| Some((s.clone(), Value::from(m.epoch(&Scope::parse(s).ok()?).max(1))))).collect::<serde_json::Map<_, _>>()
-    })
-    .map_err(thrown)?;
-    Ok(Value::Object(out).to_string())
-}
-
-/// The nodes on machines a call of `user`'s reaching `scopes` (JSON) may be passed on to (`Members::runners`), each
-/// `{ key, seal }` in hex.
-#[wasm_bindgen]
-pub fn runners(owner: &str, user: &str, scopes: &str) -> Result<String, JsError> {
-    let scopes = serde_json::from_str::<Vec<String>>(scopes)?.iter().map(|s| Scope::parse(s)).collect::<Result<Vec<_>>>().map_err(thrown)?;
-    let out = replayed(owner, &["global".into()], |m, _| {
-        m.runners(user, &scopes).iter().map(|r| json!({ "key": one::entry::hex(&r.key), "seal": one::entry::hex(&r.seal) })).collect::<Vec<_>>()
-    })
-    .map_err(thrown)?;
-    Ok(Value::from(out).to_string())
-}
-
-/// What this node (its key, `seed`) asks a node on a machine to run `user`'s call (JSON) with, handing it `keys` (JSON,
-/// `[{ scope, epoch, app, database, key }]`) of the call's `scopes` (JSON) sealed to its `seal` key until `until`
-/// (`keys::forwarded`): the message, as JSON.
-#[wasm_bindgen]
-pub fn forward(seed: &str, user: &str, client: &str, call: &str, seal: &str, until: f64, keys: &str, scopes: &str) -> Result<String, JsError> {
-    let from = signing_key(seed).map_err(thrown)?.verifying_key().to_bytes();
-    let seal = one::keys::unhex(seal).map_err(thrown)?;
-    let asked = one::keys::forwarded(&serde_json::from_str(call)?, user, client, &from, &seal, until as u64, serde_json::from_str(keys)?, &serde_json::from_str::<Vec<String>>(scopes)?).map_err(thrown)?;
-    Ok(asked.to_string())
-}
-
-/// The install as `user` sees it, from the entries of `scopes` (JSON) `owner`'s object read: `{ state, apps, me, erased }`.
+/// The install as `user` sees it, from the entries of `scopes` (JSON) this isolate read: `{ state, apps, me }`.
 /// `state` is `GET /v1/state`'s, for a node that knows of no device being on; `apps` is `GET /v1/apps`'s from the
 /// members alone, each with `reach`, the scopes it reaches for `user` (what its widgets and calls are given), for
-/// `worker.js` to add what each app says it does; `me` is what an app is told of who it runs for; `erased`, the apps
-/// erased, whose copies it forgets. `client` names the sign-in's client.
+/// `worker.js` to add what each app says it does; `me` is what an app is told of who it runs for. `client` names the
+/// sign-in's client.
 #[wasm_bindgen]
-pub fn install(owner: &str, user: &str, client: &str, scopes: &str, now: f64) -> Result<String, JsError> {
+pub fn install(user: &str, client: &str, scopes: &str, now: f64) -> Result<String, JsError> {
     let scopes: Vec<String> = serde_json::from_str(scopes)?;
-    let out = replayed(owner, &scopes, |m, states| view(m, states, user, client, now as u64)).map_err(thrown)?;
+    let out = replayed(&scopes, |m, states| view(m, states, user, client, now as u64)).map_err(thrown)?;
     Ok(out.to_string())
 }
 
@@ -636,8 +533,7 @@ fn view(m: &Members, states: &BTreeMap<String, ScopeState>, me: &str, client: &s
         })
         .collect();
     let me_ = json!({ "key": "", "user": me, "name": client, "role": m.user(me).map(|u| u.role), "user_name": user_name, "agent": null });
-    let erased: Vec<&String> = m.apps.values().filter(|a| a.erased).map(|a| &a.name).collect();
-    json!({ "state": state, "apps": apps, "me": me_, "erased": erased })
+    json!({ "state": state, "apps": apps, "me": me_ })
 }
 
 /// A deploy's bundle from the bucket (`bucket::blob_name`), opened with the keys of the node's `blobs` database in

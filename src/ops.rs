@@ -57,7 +57,9 @@ pub fn run(app: &str, op: &str, args: &[String]) -> Result<()> {
     let places = places(o);
     let mut input = input(&schema, &places, words, flags, &files)?;
     let missing = missing(&schema, &input);
-    if !missing.is_empty() || stdin_ready() {
+    // An input given as - reads stdin itself (a key from a file, say), so it's left for it.
+    let dash = input.values().any(|v| v == "-");
+    if !dash && (!missing.is_empty() || stdin_ready()) {
         from_stdin(&schema, &missing, &mut input)?;
         let missing = self::missing(&schema, &input);
         ensure!(

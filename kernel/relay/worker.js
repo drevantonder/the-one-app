@@ -51,8 +51,6 @@ const PAIRINGS_PER_DEVICE = 8;
 /// How often a sender is told that an endpoint it sends to isn't here, and how many such it remembers.
 const GONE_EVERY = 5_000;
 const GONE_KEPT = 1024;
-/// The most datagrams for the serverless node gathered in one turn before they're handed to it.
-const FOR_NODE_MOST = 1024;
 
 const hex = (bytes) => [...new Uint8Array(bytes)].map((b) => b.toString(16).padStart(2, "0")).join("");
 const unhex = (s) => Uint8Array.from(s.match(/../g) || [], (h) => parseInt(h, 16));
@@ -255,10 +253,7 @@ export class Relay extends DurableObject {
     } catch {
       return;
     }
-    this.forNode ||= [];
-    // As a full socket does, it drops what comes faster than it's handed on.
-    if (this.forNode.length >= FOR_NODE_MOST) return;
-    this.forNode.push([src, (d[0] << 8) | d[1], d.slice(2)]);
+    (this.forNode ||= []).push([src, (d[0] << 8) | d[1], d.slice(2)]);
     if (this.forNode.length > 1) return;
     queueMicrotask(() => {
       const batch = this.forNode;

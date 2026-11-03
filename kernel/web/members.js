@@ -17,6 +17,7 @@ export const members = {
   rename: ({ what, id, name }) => node("rename", { [what]: id, name }),
   epoch: ({ scope, n, to, hash }) => node("epoch", { scope, n, to, hash }),
   grant: ({ endpoint, scope, app, until }) => node("grant", { endpoint, scope, app, until }),
+  runs: ({ on }) => node("runs", { on }),
   retire({ app, owner, how }) {
     const change = { deleted: { deleted: true }, restored: { deleted: false }, erased: { erased: true } }[how];
     if (!change) throw new Error(`an app is deleted, restored or erased, not ${how}`);

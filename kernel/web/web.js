@@ -686,7 +686,9 @@ window.__one = {};
   /// same path would do, built here (members.js), never by a node.
   const signs = {
     "POST /v1/role": (b) => write(members.role({ user: b.user, role: b.role })),
-    "POST /v1/remove": (b) => (b.user ? write(members.removeUser({ user: b.user })) : device.remove(String(b.key || ""))),
+    "POST /v1/remove": (b) => (b.user ? device.removePerson(String(b.user)) : device.remove(String(b.key || ""))),
+    // Where this person's own things run besides their own machines: their device's say, nobody else's.
+    "POST /v1/runs": (b) => write(members.runs({ on: (b.on || []).map(String) })),
     "POST /v1/settings": (b) => write(members.setting({ name: b.name, value: b.value ?? null })),
     "POST /v1/group": async (b) => {
       const name = String(b.name || "").trim();
@@ -796,7 +798,13 @@ window.__one = {};
   async function join(user) {
     const keys = await browserKeys(user);
     const listed = () => [...(install()?.devices || []), ...(install()?.clients || [])].some((e) => e.key === keys.key);
-    const made = () => (device = new Device(keys, { state: () => store.state, api, bearer }));
+    // Once it's in: their own things' first key and where they run, made by the first of their devices.
+    const made = async () => {
+      device = new Device(keys, { state: () => store.state, api, bearer });
+      await device.settleOwn().catch((err) => console.warn("making this person's own keys:", err));
+      await refreshState().catch(() => {});
+      return device;
+    };
     if (listed()) return made();
     const prf = sessionStorage.getItem("one.prf"), credential = sessionStorage.getItem("one.prf.credential");
     if (prf && install()?.clients.some((c) => c.passkey === credential && c.user === user)) {

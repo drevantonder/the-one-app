@@ -127,7 +127,7 @@ impl Node {
 
     /// Signs one of `global`'s node entries with this device, for `caller`: it counts only if this device is theirs
     /// (on this machine, the CLI, MCP and the Mac app), and one that wouldn't count is refused, not written.
-    pub(super) async fn member_content(&self, caller: &Caller, content: Content) -> Result<()> {
+    pub async fn member_content(&self, caller: &Caller, content: Content) -> Result<()> {
         self.append_as(&Scope::Global, &caller.user, content).await?;
         Ok(())
     }
