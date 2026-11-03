@@ -1,11 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"image"
 	"strings"
 	"sync"
 	"time"
@@ -56,6 +58,13 @@ func (k *latest) ask(ask func(context.Context) (any, error), gen int) (any, time
 	return v, now, err
 }
 
+// now is the answer it has, or nil.
+func (k *latest) now() any {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	return k.val
+}
+
 func (k *latest) forget() {
 	k.mu.Lock()
 	k.val, k.at = nil, time.Time{}
@@ -88,7 +97,8 @@ type pictures struct {
 // screenLatest is a device's picture, kept for a little while: a page watching it
 // asks again every so often, and gets the one taken in the background since. Its
 // hash says which it is: given the one it has (have), it's told it's the same
-// rather than sent it again.
+// rather than sent it again. A picture that's hardly changed (a phone's clock)
+// counts as the same.
 func (ds *devices) screenLatest(name string, width int, have string, take func(context.Context) (any, error)) (any, error) {
 	ds.pics.mu.Lock()
 	if ds.pics.by == nil {
@@ -105,6 +115,9 @@ func (ds *devices) screenLatest(name string, width int, have string, take func(c
 		r, err := take(ctx)
 		if err != nil {
 			return nil, err
+		}
+		if was, ok := k.now().(map[string]any); ok && alike(was["picture"], r) {
+			return was, nil
 		}
 		b, _ := json.Marshal(r)
 		sum := sha256.Sum256(b)
@@ -136,4 +149,50 @@ func (ds *devices) forgetPictures(name string) {
 			delete(ds.pics.by, key)
 		}
 	}
+}
+
+// alike reports whether two pictures differ in under 1 pixel in 200.
+func alike(a, b any) bool {
+	x, y := pictureIn(a), pictureIn(b)
+	if x == nil || y == nil || x.Bounds() != y.Bounds() {
+		return false
+	}
+	r, differ := x.Bounds(), 0
+	for py := r.Min.Y; py < r.Max.Y; py++ {
+		for px := r.Min.X; px < r.Max.X; px++ {
+			r1, g1, b1, _ := x.At(px, py).RGBA()
+			r2, g2, b2, _ := y.At(px, py).RGBA()
+			if d := absDiff(r1, r2) + absDiff(g1, g2) + absDiff(b1, b2); d > 24<<8 {
+				differ++
+			}
+		}
+	}
+	return differ*200 < r.Dx()*r.Dy()
+}
+
+func absDiff(a, b uint32) uint32 {
+	if a > b {
+		return a - b
+	}
+	return b - a
+}
+
+// pictureIn is the image in a screen's answer, or nil.
+func pictureIn(v any) image.Image {
+	m, _ := v.(map[string]any)
+	items, _ := m["content"].([]map[string]any)
+	for _, c := range items {
+		if d, ok := c["data"].(string); ok && c["type"] == "image" {
+			raw, err := base64.StdEncoding.DecodeString(d)
+			if err != nil {
+				return nil
+			}
+			img, _, err := image.Decode(bytes.NewReader(raw))
+			if err != nil {
+				return nil
+			}
+			return img
+		}
+	}
+	return nil
 }
