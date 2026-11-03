@@ -222,6 +222,10 @@ fn copy_bucket(bucket: &Place, place: &Place, install: &str, scope: &str, snap: 
                 copied = newest_copy;
                 at = at.max(newest_copy);
             }
+            // And the step at the copy's position, without which a reader doesn't start from it (`db::start`).
+            if copied > 0 {
+                copy(&crate::db::step_name(&prefix, copied), true)?;
+            }
             while copy(&crate::db::step_name(&prefix, at + 1), false)? {
                 at += 1;
             }
@@ -379,7 +383,8 @@ pub fn prune(place: &Place, install: &str, scopes: &BTreeMap<String, [u8; 32]>, 
         }
         for (database, floor) in floors.into_iter().filter(|(_, f)| *f > 0) {
             let prefix = format!("{install}/bucket/{dir}/{database}");
-            let steps = place.objects(&prefix)?.into_iter().filter(|o| o.0.parse::<u64>().is_ok_and(|n| n <= floor));
+            // The step at the copy's position stays with it: a reader starts from a copy only beside its step.
+            let steps = place.objects(&prefix)?.into_iter().filter(|o| o.0.parse::<u64>().is_ok_and(|n| n < floor));
             let copies = place.objects(&format!("{prefix}/copy"))?.into_iter().filter(|o| o.0.parse::<u64>().is_ok_and(|n| n < floor));
             for (name, size) in steps.map(|o| (format!("{prefix}/{}", o.0), o.2)).chain(copies.map(|o| (format!("{prefix}/copy/{}", o.0), o.2))).collect::<Vec<_>>() {
                 place.delete(&name)?;
