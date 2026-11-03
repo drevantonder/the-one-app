@@ -24,7 +24,7 @@
   .tile-icon { position: relative; display: block; line-height: 0; }
   .tile-icon > .app-icon, .tile-icon > .folder, .tile-icon > .avatar { --size: var(--icon, 60px) !important; width: var(--icon, 60px); height: var(--icon, 60px); }
   .tile-icon > .avatar { font-size: calc(var(--icon, 60px) * 0.4); }
-  .tile-name { font-size: 13px; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tile-name { font-size: 13px; max-width: 100%; text-align: center; line-height: 1.2; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
   .badge { position: absolute; top: -7px; right: -7px; min-width: 24px; height: 24px; padding: 0 7px; border-radius: 12px; background: var(--badge); color: white; font-size: 14px; font-weight: 600; line-height: 24px; text-align: center; font-variant-numeric: tabular-nums; }
   /* Where a window draws screens at its smaller text (a zoom on the page), a widget keeps its own size. */
   .widget { zoom: var(--unzoom, 1); }
