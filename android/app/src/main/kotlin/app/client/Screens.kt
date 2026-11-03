@@ -234,7 +234,7 @@ private fun Approve(store: Store) {
         Spacer(Modifier.height(12.dp))
         Text(
             if (store.signIn.invite != null) "Whoever invited you approves it. Show them this code."
-            else "Open ${BuildConfig.NAME} on a device you already use, then Settings › Devices › Approve.",
+            else "Approve it in Settings › Devices on another of your devices.",
             style = Type.body, color = p.secondary, textAlign = TextAlign.Center,
         )
         Spacer(Modifier.height(28.dp))

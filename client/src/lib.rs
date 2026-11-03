@@ -62,6 +62,8 @@ fn alpn() -> Vec<u8> {
 #[derive(Debug)]
 pub struct Error {
     pub sent: bool,
+    /// The install doesn't list this device (yet, or any more): what an app shows is its own screen to approve it.
+    pub not_let_in: bool,
     message: String,
 }
 
@@ -74,11 +76,16 @@ impl std::fmt::Display for Error {
 impl std::error::Error for Error {}
 
 fn unsent(message: impl std::fmt::Display) -> Error {
-    Error { sent: false, message: message.to_string() }
+    Error { sent: false, not_let_in: false, message: message.to_string() }
+}
+
+#[cfg(not(target_family = "wasm"))]
+fn not_let_in(message: impl std::fmt::Display) -> Error {
+    Error { not_let_in: true, ..unsent(message) }
 }
 
 fn sent(message: impl std::fmt::Display) -> Error {
-    Error { sent: true, message: message.to_string() }
+    Error { sent: true, not_let_in: false, message: message.to_string() }
 }
 
 /// A request to a node's local API: `path` with its query, from `/`.

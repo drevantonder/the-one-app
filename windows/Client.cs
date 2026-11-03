@@ -19,6 +19,7 @@ public static class Client
 {
     static ThisDevice? device;
     static string? deviceFor;
+    static string? deviceName;
     static readonly SemaphoreSlim gate = new(1, 1);
 
     /// The Credential Locker's name for this app's device keys.
@@ -38,7 +39,7 @@ public static class Client
             var made = await Off(() => new ThisDevice(Secret(name), address, Path.Combine(WhiteLabel.Folder, "client", name)));
             var old = device;
             if (old != null) await Off(() => { old.Disconnect(); return 0; });
-            (device, deviceFor) = (made, id);
+            (device, deviceFor, deviceName) = (made, id, name);
             return made;
         }
         finally
@@ -76,7 +77,43 @@ public static class Client
     {
         var d = await Current();
         var headers = new[] { body != null ? new Header("content-type", "application/json") : null, accept != null ? new Header("accept", accept) : null }.OfType<Header>().ToArray();
-        return await Off(() => d.Fetch(method, path, headers, body ?? []));
+        try
+        {
+            return await Off(() => d.Fetch(method, path, headers, body ?? []));
+        }
+        catch (NotLetInException)
+        {
+            var removed = await Off(d.Removed);
+            // Taken out, its key and sign-in go; never in, it asks again: either way the window says so, not a screen.
+            if (removed) await TakenOut();
+            Lost?.Invoke(removed);
+            throw removed ? new SignedOutException(Removed) : new NotLetInException();
+        }
+    }
+
+    public const string Removed = "This computer was removed. Sign in again.";
+
+    /// This computer isn't one of the install's: taken out (true), or not yet in (false). The window starts again at its
+    /// sign-in, or its approval screen.
+    public static event Action<bool>? Lost;
+
+    /// Its key goes with its sign-in: a key the install removed can't be let in again, so the next sign-in makes a new one.
+    static async Task TakenOut()
+    {
+        if (deviceName is { } name)
+        {
+            try { var vault = new PasswordVault(); vault.Remove(vault.Retrieve(Locker, name)); } catch { }
+        }
+        await Close();
+    }
+
+    /// Whether it was in, and the install took it out, which ends its sign-in too.
+    public static async Task<bool> RemovedNow()
+    {
+        var d = await Current();
+        var removed = await Off(d.Removed);
+        if (removed) await TakenOut();
+        return removed;
     }
 
     /// Signed out: its connections close. Its key stays, so signing in again as the same person needs no approval.
@@ -92,6 +129,7 @@ public static class Client
     {
         try { return work(); }
         catch (OneException.Failed e) { throw new NodeException(e.reason); }
+        catch (OneException.NotLetIn) { throw new NotLetInException(); }
     });
 
     /// The key kept for `name`, made the first time.

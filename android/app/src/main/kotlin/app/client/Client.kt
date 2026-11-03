@@ -57,7 +57,23 @@ class Client(private val context: Context, private val signIn: SignIn) {
             if (body != null) add(Header("content-type", "application/json"))
             if (accept != null) add(Header("accept", accept))
         }
-        return io { d.fetch(method, path, headers, body ?: ByteArray(0)) }
+        return try {
+            io { d.fetch(method, path, headers, body ?: ByteArray(0)) }
+        } catch (_: NotLetIn) {
+            throw lost()
+        }
+    }
+
+    /** What it means that this phone isn't one of the install's: [NotLetIn], `removed` if it was and was taken out, which
+     *  ends its sign-in (its key goes with it). */
+    suspend fun lost(): NotLetIn {
+        val d = device()
+        val removed = io { d.removed() }
+        if (removed) {
+            deviceFor?.let { signIn.forgetDeviceSecret(it) }
+            close()
+        }
+        return NotLetIn(removed)
     }
 
     /** A fresh connection, once the network's back. */
@@ -79,8 +95,14 @@ suspend fun <T> io(work: () -> T): T = withContext(Dispatchers.IO) {
         work()
     } catch (e: OneException.Failed) {
         throw NodeError(e.reason)
+    } catch (_: OneException.NotLetIn) {
+        throw NotLetIn(false)
     }
 }
+
+/** This phone isn't one of the install's: not yet (`removed` false) or no more. Not an app's problem: the app shows its
+ *  own approval screen (`Store.Phase.Joining`), or, once removed, the sign-in. */
+class NotLetIn(val removed: Boolean) : Exception("This phone hasn’t been let in yet.")
 
 /** A response's body, whole. */
 suspend fun Response.read(): ByteArray = io { bytes() }

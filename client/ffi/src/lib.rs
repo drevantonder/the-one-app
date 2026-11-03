@@ -18,12 +18,16 @@ fn run<T>(work: impl Future<Output = T>) -> T {
 #[derive(Debug, uniffi::Error)]
 pub enum OneError {
     Failed { reason: String, sent: bool },
+    /// The install doesn't list this device, yet or any more: the app shows its own screen to approve it, or its sign-in.
+    NotLetIn,
 }
 
 impl std::fmt::Display for OneError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let OneError::Failed { reason, .. } = self;
-        f.write_str(reason)
+        match self {
+            OneError::Failed { reason, .. } => f.write_str(reason),
+            OneError::NotLetIn => f.write_str("This device hasn't been let in yet."),
+        }
     }
 }
 
@@ -31,6 +35,9 @@ impl std::error::Error for OneError {}
 
 impl From<one_client::Error> for OneError {
     fn from(e: one_client::Error) -> Self {
+        if e.not_let_in {
+            return OneError::NotLetIn;
+        }
         OneError::Failed { reason: e.to_string(), sent: e.sent }
     }
 }
@@ -83,6 +90,11 @@ impl ThisDevice {
     /// Whether it's been let in yet; asking again, if its request waited too long.
     pub fn wait(&self, token: String) -> Result<bool, OneError> {
         Ok(run(self.0.wait(&token))?)
+    }
+
+    /// Whether the install took this device out: it was in once, and isn't listed now.
+    pub fn removed(&self) -> bool {
+        self.0.removed()
     }
 
     /// Reaches its nodes, if it's been let in: false if it hasn't.

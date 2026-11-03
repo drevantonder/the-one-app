@@ -538,13 +538,31 @@ final class Store {
         }
     }
 
+    /// This device isn't let in yet: the window is its approval screen, showing `code`, and not an app's screen or page,
+    /// which would only say it can't reach anything. Once approved it opens on the person's own page.
+    private func waitToBeApproved(code: String) {
+        phase = .joining(code)
+        sheet = nil
+        path = []
+        current = "user"
+        editing = false
+        #if os(macOS)
+        selection = nil
+        #else
+        screenSheets = []
+        #endif
+    }
+
     /// Whether the node answered.
     private func connect() async -> Bool {
         let failure: Error
         do {
-            try await node.transport.join { self.phase = .joining($0) }
+            try await node.transport.join { self.waitToBeApproved(code: $0) }
             try await refreshState()
             return true
+        } catch is NotLetIn {
+            // Not an unreachable node: the device was taken out of, or isn't yet in, the install, so it joins again.
+            return false
         } catch {
             failure = error
         }

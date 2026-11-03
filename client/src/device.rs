@@ -13,6 +13,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use std::sync::Mutex;
+use std::time::Duration;
 
 use ed25519_dalek::SigningKey;
 use one::entry::{Entry, Ext, Hash, Scope, hex};
@@ -22,7 +23,7 @@ use data_encoding::BASE64URL_NOPAD as B64U;
 use serde_json::{Value, json};
 
 use crate::bucket::Signed;
-use crate::{Body, Client, Error, Request, Response, unsent};
+use crate::{Body, Client, Error, Request, Response, not_let_in, unsent};
 
 /// How long a node keeps the keys a request handed it.
 const HANDED_FOR: u64 = 3_600_000;
@@ -42,6 +43,11 @@ pub(crate) fn now() -> u64 {
 
 fn failed(message: impl std::fmt::Display) -> Error {
     unsent(message)
+}
+
+/// What a request says when this device isn't one of the install's (yet, or any more).
+fn refused() -> Error {
+    not_let_in("This device hasn't been let in yet.")
 }
 
 /// The install as this device read and checked it itself.
@@ -169,6 +175,11 @@ impl Device {
         let client = Client::start(self.key.to_bytes(), None, &self.address, &nodes).await?;
         *held = Some(client);
         drop(held);
+        // Kept, so a device the install no longer lists is known as one that was in, to its person's sign-in, not to approve.
+        if !self.dir.join("joined").exists() {
+            let _ = std::fs::create_dir_all(&self.dir);
+            let _ = std::fs::write(self.dir.join("joined"), b"");
+        }
         self.settle_own().await?;
         Ok(true)
     }
@@ -288,10 +299,17 @@ impl Device {
         }
     }
 
+    /// Closes its connections, until it's asked again: when its person signs out, which also forgets it was in.
     pub async fn close(&self) {
+        let _ = std::fs::remove_file(self.dir.join("joined"));
         if let Some(client) = self.client.lock().await.take() {
             client.close().await;
         }
+    }
+
+    /// Whether the install took this device out: it was in, and isn't listed now.
+    pub fn removed(&self) -> bool {
+        self.dir.join("joined").exists()
     }
 
     // Requests.
@@ -300,6 +318,41 @@ impl Device {
     /// (428) is sent again with them, a few times, as a node may find what it needs as it goes (the serverless node,
     /// its logs' keys first, then a call's). `/v1/state` is read for the order things run in.
     pub async fn fetch(&self, method: &str, path: &str, headers: Vec<(String, String)>, body: Vec<u8>) -> Result<Response, Error> {
+        // Asked before it joined, or after it was taken out: it's in only if the relay lets it, else its own screen says so.
+        let joined = self.client.lock().await.is_some();
+        if !joined && !self.connect().await? {
+            return Err(refused());
+        }
+        let err = match n0_future::future::or(self.request(method, path, headers, body), self.watch()).await {
+            Ok(response) => return Ok(response),
+            Err(err) => err,
+        };
+        // A request that failed may be one a device taken out can't make: the relay says who's on its network, so it's
+        // asked. Out, this device starts over at joining, where nothing but its approval or sign-in is shown.
+        if err.not_let_in || matches!(self.computes().await, Ok(None)) {
+            if let Some(client) = self.client.lock().await.take() {
+                client.close().await;
+            }
+            *self.known.lock().unwrap() = None;
+            return Err(refused());
+        }
+        Err(err)
+    }
+
+    /// Never answers while the relay lets this device in; once it doesn't, it's `refused`. A request that's slow may be
+    /// one a device taken out can't be answered, which would otherwise wait out every node's time.
+    async fn watch(&self) -> Result<Response, Error> {
+        let mut wait = 3;
+        loop {
+            n0_future::time::sleep(Duration::from_secs(wait)).await;
+            if matches!(self.computes().await, Ok(None)) {
+                return Err(refused());
+            }
+            wait = 5;
+        }
+    }
+
+    async fn request(&self, method: &str, path: &str, headers: Vec<(String, String)>, body: Vec<u8>) -> Result<Response, Error> {
         let route = route(path, &body);
         for tries in 0..4 {
             let handed = self.handed(&route).await;
@@ -310,6 +363,13 @@ impl Device {
                 let answer: Value = serde_json::from_slice(&response.body.bytes().await?).unwrap_or_default();
                 self.learn(&route, &node, &answer).await?;
                 continue;
+            }
+            if response.status == 403 {
+                let bytes = response.body.bytes().await?;
+                if serde_json::from_slice::<Value>(&bytes).is_ok_and(|v| v["code"] == "not_let_in") {
+                    return Err(refused());
+                }
+                return Ok(Response { status: 403, headers: response.headers, node: response.node, body: Body::whole(bytes) });
             }
             if response.status == 200 && path.split('?').next() == Some("/v1/state") {
                 let bytes = response.body.bytes().await?;
@@ -324,7 +384,7 @@ impl Device {
     /// A request with keys `handed`, each node's sealed to the seal key its entries list, saying whose it is
     /// (`x-one-user`), which a node checks against this device's key.
     async fn send(&self, mut request: Request, handed: &[Handed]) -> Result<Response, Error> {
-        let client = self.client.lock().await.clone().ok_or_else(|| failed("This device hasn't been let in yet."))?;
+        let client = self.client.lock().await.clone().ok_or_else(refused)?;
         let (seals, user) = self.known.lock().unwrap().as_ref().map(|k| (k.nodes.clone(), k.user.clone())).unwrap_or_default();
         request.headers.push(("x-one-user".into(), user));
         let me = self.key();

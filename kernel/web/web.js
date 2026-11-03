@@ -7,6 +7,7 @@
 // The bridge and kit (src/screen/), loaded after this, give `one`; this page answers it for its own use (`__one.host`).
 // This browser is a device of its person (device.js): it signs what changes who can do what, and hands each call the
 // keys it needs.
+import { del } from "./kept.js";
 import { answer, browserKeys, browserName, codeOf, Device, joinAsk, passkeyKeysOf } from "./device.js";
 import { members } from "./members.js";
 import { net } from "./net.js";
@@ -132,7 +133,8 @@ window.__one = {};
       }
     },
 
-    async signOut() {
+    /// Signs out, back at the sign-in screen, which says `why` if given.
+    async signOut(why) {
       const kept = auth.kept();
       localStorage.removeItem(KEPT);
       forgetScreens();
@@ -143,6 +145,7 @@ window.__one = {};
           await fetch(meta.revocation_endpoint, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ token: kept.refresh, token_type_hint: "refresh_token", client_id: client }) });
         }
       } catch {}
+      if (why) return showSignedOut(why);
       location.href = "/";
     },
   };
@@ -180,12 +183,17 @@ window.__one = {};
       if (keys) headers["x-one-keys"] = keys;
       const sent = body === undefined ? undefined : JSON.stringify(body);
       let r;
+      const watch = watching();
       try {
-        r = await net.fetch(method, url.pathname + url.search, headers, sent, signal);
+        r = await Promise.race([net.fetch(method, url.pathname + url.search, headers, sent, signal), watch.out]);
       } catch (err) {
-        if (signal?.aborted || misses >= 5) throw err;
+        if (err.removed || signal?.aborted || misses >= 5) throw err;
+        // A request that fails may be one a browser taken out of its person's devices can't make.
+        if (await takenOut()) throw gone();
         await sleep(retryWait(misses++));
         continue;
+      } finally {
+        watch.stop();
       }
       // A node may find what it needs as it goes: the serverless node, its logs' keys first, then a call's.
       if (r.status === 428 && device && needed < 3) {
@@ -198,6 +206,41 @@ window.__one = {};
       if (!r.ok || out?.error) throw Object.assign(new NodeError(out?.error || (r.status >= 500 ? UNANSWERED : "That didn’t work. Try again.")), { status: r.status });
       return out;
     }
+  }
+
+  const REMOVED = "This device was removed. Sign in again.";
+  let removed = false;
+
+  /// Whether this browser isn't one of its person's devices any more, as the relay says, which a browser's requests can
+  /// wait on for a long time without an answer. It's signed out then, not an app's problem: the sign-in says why.
+  async function takenOut() {
+    if (removed) return true;
+    if (await net.still().catch(() => true)) return false;
+    removed = true;
+    events?.abort();
+    // Its key goes with it: a removed key can't be let in again, so signing in makes a new one.
+    const user = auth.user();
+    if (user) await Promise.all([del(`device:${user}`), del(`nodes:${user}`)]).catch(() => {});
+    await auth.signOut(REMOVED);
+    return true;
+  }
+
+  const gone = () => Object.assign(new NodeError(REMOVED), { signedOut: true, removed: true });
+
+  /// Fails, once this browser is taken out, while a request it waits on is still going: asked after a few seconds, then
+  /// every few more. `stop` once the request has answered.
+  function watching() {
+    let done = false;
+    const out = new Promise((_, fail) => {
+      (async () => {
+        for (let wait = 3000; !done; wait = 5000) {
+          await sleep(wait);
+          if (!done && (await takenOut())) fail(gone());
+        }
+      })();
+    });
+    out.catch(() => {});
+    return { out, stop: () => (done = true) };
   }
 
   /// A request to the address that isn't a node's, with the access token: auth's own routes.
@@ -348,7 +391,7 @@ window.__one = {};
           }
         }
       } catch (err) {
-        if (err.signedOut) return showSignedOut();
+        if (err.signedOut) return err.removed ? undefined : showSignedOut();
       }
       // At once after a stream that ran a while and ended (its node handing over to a new build), then waiting longer
       // each miss.
@@ -1133,11 +1176,10 @@ window.__one = {};
 
   /// "Approve This Device": its code, and the code as a QR, a link that opens Approve on a phone that scans it.
   async function showJoin(code, invited) {
-    const name = config().name;
     document.title = "Approve This Device";
     const link = `${location.origin}/approve#${code.replace(" ", "")}`;
     root.innerHTML = `<div class="welcome join"><h1>Approve This Device</h1>` +
-      `<p class="join-text">${invited ? "Whoever invited you approves it. Show them this code." : `Open ${esc(name)} on a device you already use, then Settings › Devices › Approve.`}</p>` +
+      `<p class="join-text">${invited ? "Whoever invited you approves it. Show them this code." : "Approve it in Settings › Devices on another of your devices."}</p>` +
       `<div class="join-code" aria-label="Code">${esc(code)}</div><div class="join-qr">${qrSvg(link)}</div>` +
       `<p class="join-note">Or scan this with that device.</p><button class="button" data-out>Sign Out</button></div>`;
     $("[data-out]", root).onclick = () => auth.signOut();
@@ -1176,7 +1218,7 @@ window.__one = {};
       device = new Device(await join(user), { user, state: () => store.state, api, bearer, replay: net.global });
       await device.load();
     } catch (err) {
-      if (err.signedOut) return showSignedOut();
+      if (err.signedOut) return err.removed ? undefined : showSignedOut();
       return void (root.innerHTML = message("Can’t Approve This Device", err.message));
     }
     // A device that takes the request and never answers (asleep, stuck) is one that can't be reached, while it's still asked.
@@ -1186,7 +1228,7 @@ window.__one = {};
         await refreshState();
         break;
       } catch (err) {
-        if (err.signedOut) return clearTimeout(away), showSignedOut();
+        if (err.signedOut) return clearTimeout(away), err.removed ? undefined : showSignedOut();
         // What it showed last stays, as a screen whose node is restarting does.
         if (!$(".window", root)) showUnreachable(err instanceof NodeError ? err.message : UNANSWERED);
         await sleep(retryWait(misses));

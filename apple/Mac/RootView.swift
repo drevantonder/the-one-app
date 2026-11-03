@@ -8,12 +8,13 @@ struct RootView: View {
     var body: some View {
         @Bindable var store = store
         Group {
-            if store.state == nil {
+            if case .joining(let code) = store.phase {
+                // Not let in yet: this, and no app's screen or page, whatever the window showed last.
+                ApproveView(code: code) { Task { await Mac.shared.signOut() } }
+            } else if store.state == nil {
                 // Nothing at all for a quick start.
                 Later(.milliseconds(400)) {
-                    if case .joining(let code) = store.phase {
-                        ApproveView(code: code) { Task { await Mac.shared.signOut() } }
-                    } else if case .unreachable(let message) = store.phase {
+                    if case .unreachable(let message) = store.phase {
                         ContentUnavailableView {
                             Label("Can’t Reach \(appName)", systemImage: "bolt.horizontal.circle")
                         } description: {

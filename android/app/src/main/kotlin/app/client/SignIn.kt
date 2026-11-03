@@ -70,6 +70,11 @@ class SignIn(private val context: Context) {
         return secret
     }
 
+    /** `id`'s device key goes: a key the install removed can't be let in again, so the next sign-in makes a new one. */
+    fun forgetDeviceSecret(id: String) {
+        prefs.edit().remove("device:" + b64u(MessageDigest.getInstance("SHA-256").digest(id.toByteArray()))).commit()
+    }
+
     @Serializable
     private data class Meta(
         val authorization_endpoint: String,

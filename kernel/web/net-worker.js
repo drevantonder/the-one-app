@@ -143,7 +143,13 @@ export function server(version) {
     secret.fill(0);
     clearTimeout(renewal);
     if (!as) renewal = setTimeout(() => renew(user, client, endpoint, socket), until - RENEW - Date.now());
-    return { client, endpoint, socket, certificate };
+    const made = { client, endpoint, socket, certificate };
+    // Whether the relay still lets it in: it says who's on its network, and a device taken out isn't.
+    made.still = async () => {
+      const asked = JSON.stringify(await signedRequest(key, endpoint, "one/relay", { computes: true, certificate: made.certificate }));
+      return (await fetch("/relay/computes", { method: "POST", headers: { "content-type": "application/json" }, body: asked })).status !== 403;
+    };
+    return made;
   }
 
   /// A new certificate for the session's endpoint before its last ends.
@@ -182,6 +188,10 @@ export function server(version) {
           case "start": {
             const s = await started(m.user, m.again, m.as);
             return post({ id, device: !!s });
+          }
+          case "still": {
+            const s = await session?.ready;
+            return post({ id, device: s ? await s.still() : false });
           }
           case "nodes": {
             const nodes = await theirs(m.user, m.nodes);

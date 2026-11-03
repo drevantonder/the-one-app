@@ -15,6 +15,10 @@ namespace One;
 
 public sealed class NodeException(string message) : Exception(message);
 
+/// This computer isn't one of the install's, yet or any more: not an app's problem, so the window shows its approval
+/// screen, or its sign-in.
+public sealed class NotLetInException() : Exception("This computer hasn’t been let in yet.");
+
 public static class Node
 {
     public static readonly JsonSerializerOptions Json = new() { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull };

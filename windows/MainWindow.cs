@@ -118,7 +118,9 @@ public sealed class MainWindow : Window
             _ = System.Threading.Tasks.Task.Run(() => Widgets.Changed(list));
         };
         Closed += (_, _) => listening?.Cancel();
-        _ = Start();
+        Client.Lost += removed => DispatcherQueue.TryEnqueue(() => Lost(removed));
+        restarting = true;
+        _ = Start().ContinueWith(_ => restarting = false);
     }
 
     readonly Windows.UI.ViewManagement.UISettings texts = new();
@@ -276,6 +278,27 @@ public sealed class MainWindow : Window
 
     // MARK: Starting
 
+    bool restarting;
+
+    /// This computer isn't one of the install's: taken out, it's the sign-in; not yet in, it starts again at its approval
+    /// screen, whatever the window showed, and comes back to the person's own page once approved.
+    void Lost(bool removed)
+    {
+        if (removed)
+        {
+            listening?.Cancel();
+            Welcome(Client.Removed);
+            return;
+        }
+        if (restarting) return;
+        restarting = true;
+        listening?.Cancel();
+        Sheet.CloseAll();
+        pushed.Clear();
+        selection = Route.PageOf("user");
+        _ = Start().ContinueWith(_ => restarting = false);
+    }
+
     async Task Start()
     {
         _ = Shell.Claim(Auth.Shared.Address);
@@ -302,10 +325,15 @@ public sealed class MainWindow : Window
                 await Store.Shared.RefreshState();
                 break;
             }
-            catch (SignedOutException)
+            catch (SignedOutException e)
             {
-                Welcome(null);
+                Welcome(e.Message == Client.Removed ? e.Message : null);
                 return;
+            }
+            catch (NotLetInException)
+            {
+                // Asked before it was let in: it joins again.
+                continue;
             }
             catch (Exception e)
             {
@@ -338,10 +366,11 @@ public sealed class MainWindow : Window
     async Task Join()
     {
         if (await Client.Connect()) return;
+        if (await Client.RemovedNow()) throw new SignedOutException(Client.Removed);
         var code = await Client.Ask();
         var panel = new StackPanel { Spacing = 14, MaxWidth = 460 };
         panel.Children.Add(new TextBlock { Text = "Approve This Computer", FontSize = 28, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Center, TextAlignment = TextAlignment.Center });
-        panel.Children.Add(Look.Text(Auth.Shared.Invite != null ? "Whoever invited you approves it. Show them this code." : $"Open {WhiteLabel.Name} on a device you already use, then Settings › Devices › Approve.", 14, Look.Secondary, wrap: true));
+        panel.Children.Add(Look.Text(Auth.Shared.Invite != null ? "Whoever invited you approves it. Show them this code." : "Approve it in Settings › Devices on another of your devices.", 14, Look.Secondary, wrap: true));
         panel.Children.Add(new TextBlock { Text = code, FontSize = 40, FontFamily = new Microsoft.UI.Xaml.Media.FontFamily("Cascadia Mono, Consolas"), CharacterSpacing = 200, IsTextSelectionEnabled = true, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 14, 0, 0) });
         var signOut = new Button { Content = "Sign Out", HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 24, 0, 0) };
         signOut.Click += async (_, _) => await SignOut();

@@ -58,6 +58,8 @@ class Sheet(val route: Route) {
 /** A page: a scope this person may read (theirs, a group's, everyone's), as the home screen's widgets name it. */
 data class Page(val scope: String, val title: String)
 
+private const val REMOVED = "This phone was removed. Sign in again."
+
 /** The node as this person sees it, reached over iroh as this phone's own device (Client), and where the app is: the
  *  pages, what's pushed over them, and the sheets over everything. */
 class Store(private val application: android.app.Application, val signIn: SignIn, private val prefs: android.content.SharedPreferences) {
@@ -126,7 +128,12 @@ class Store(private val application: android.app.Application, val signIn: SignIn
     suspend fun api(path: String, method: String = "GET", body: JsonElement? = null, query: Map<String, String?> = emptyMap()): ByteArray {
         // Its id makes a call run once, however often it's sent.
         val body = if (path == "/v1/call" && body is JsonObject && "id" !in body) JsonObject(body + ("id" to JsonPrimitive(callId()))) else body
-        val r = client.fetch(method, url(path, query), body?.toString()?.toByteArray())
+        val r = try {
+            client.fetch(method, url(path, query), body?.toString()?.toByteArray())
+        } catch (e: NotLetIn) {
+            lostAccess(e.removed)
+            throw e
+        }
         val bytes = r.read()
         val status = r.status().toInt()
         val error = runCatching { (json.parseToJsonElement(String(bytes)) as? JsonObject)?.get("error")?.let { (it as? JsonPrimitive)?.content } }.getOrNull()
@@ -145,12 +152,27 @@ class Store(private val application: android.app.Application, val signIn: SignIn
      *  their devices (or, for someone new, their inviter's) to approve it. */
     private suspend fun join() {
         if (client.connect()) return
+        // Taken out of the install, it's signed out; never in, it asks, and the app is its approval screen, not a page
+        // or an app's screen, which would only say it can't reach anything, until one of their devices approves it.
+        if (client.lost().removed) throw NodeError(REMOVED, signedOut = true)
         code = client.ask()
         phase = Phase.Joining
+        openPage("user")
         while (!client.waited()) delay(2000)
         signIn.invite = null
         code = null
+        // Then the person's own page, as it opens, drawn new.
+        openPage("user")
         phase = Phase.Starting
+    }
+
+    /** This phone isn't one of the install's: it starts again at joining. */
+    private fun lostAccess(removed: Boolean) {
+        if (removed) return signedOut(REMOVED)
+        if (phase == Phase.Joining) return
+        running?.cancel()
+        running = null
+        run()
     }
 
     suspend inline fun <reified T> get(path: String, query: Map<String, String?> = emptyMap()): T = json.decodeFromString(String(api(path, query = query)))
@@ -186,6 +208,8 @@ class Store(private val application: android.app.Application, val signIn: SignIn
                 } catch (e: NodeError) {
                     if (e.signedOut) return@launch signedOut(e.message)
                     unreachable(e.message, misses, started)
+                } catch (_: NotLetIn) {
+                    // Starts again at joining, by `lostAccess`.
                 } catch (e: Exception) {
                     unreachable("Your devices aren’t answering.", misses, started)
                 }
@@ -310,6 +334,8 @@ class Store(private val application: android.app.Application, val signIn: SignIn
                 }
             } catch (e: NodeError) {
                 if (e.signedOut) return signedOut(e.message)
+            } catch (e: NotLetIn) {
+                return lostAccess(e.removed)
             } catch (_: Exception) {
             }
             // At once after a stream that ran a while and ended (its node handing over to a new build), then waiting

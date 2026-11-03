@@ -47,7 +47,7 @@ struct PagesView: View {
                     .navigationBarTitleDisplayMode(.inline)
             }
             .overlay {
-                if store.state == nil, case .joining(let code) = store.phase {
+                if case .joining(let code) = store.phase {
                     ApproveView(code: code) { Task { await Phone.shared.signOut() } }.background(Color(.systemBackground))
                 } else if store.install?.joining == true {
                     ProgressView("Joining…").padding(24).background(.regularMaterial, in: .rect(cornerRadius: 18))

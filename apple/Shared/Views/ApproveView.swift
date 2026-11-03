@@ -10,7 +10,7 @@ struct ApproveView: View {
         VStack(spacing: 14) {
             Spacer()
             Text("Approve This \(Self.kind)").font(.title.bold()).multilineTextAlignment(.center)
-            Text(Auth.invite != nil ? "Whoever invited you approves it. Show them this code." : "Open \(appName) on a device you already use, then Settings › Devices › Approve.")
+            Text(Auth.invite != nil ? "Whoever invited you approves it. Show them this code." : "Approve it in Settings › Devices on another of your devices.")
                 .foregroundStyle(.secondary).multilineTextAlignment(.center)
             Text(code).font(.system(size: 40, weight: .semibold, design: .monospaced)).kerning(4).textSelection(.enabled).padding(.top, 14)
             Spacer()

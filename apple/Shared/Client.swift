@@ -46,11 +46,26 @@ actor DeviceClient {
         return try await off { try device.wait(token: token) }
     }
 
-    /// A request to the person's nodes' API (`/v1/…`).
+    /// A request to the person's nodes' API (`/v1/…`). Once this device isn't one of the install's, `lost`.
     func fetch(_ method: String, _ path: String, body: Data?, accept: String? = nil) async throws -> Response {
         let device = try await current()
         let headers = [body.map { _ in Header(name: "content-type", value: "application/json") }, accept.map { Header(name: "accept", value: $0) }].compactMap { $0 }
-        return try await off { try device.fetch(method: method, path: path, headers: headers, body: body ?? Data()) }
+        do {
+            return try await off { try device.fetch(method: method, path: path, headers: headers, body: body ?? Data()) }
+        } catch is NotLetIn {
+            throw await lost(device)
+        }
+    }
+
+    /// What it means that this device isn't one of the install's: if it was, it's been taken out, which is the sign-in's
+    /// to say, as it signs out; if it never was, it's waiting to be approved, which its approval screen says.
+    func lost(_ known: ThisDevice? = nil) async -> Error {
+        let device: ThisDevice
+        if let known { device = known } else if let made = try? await current() { device = made } else { return NotLetIn() }
+        guard (try? await off { device.removed() }) == true else { return NotLetIn() }
+        if let deviceFor { Keychain.forget(deviceFor) }
+        await close()
+        return Auth.SignedOut(message: String(localized: "This device was taken out. Sign in again."))
     }
 
     /// Signed out: its connections close. Its key stays, so signing in again as the same person needs no approval.
@@ -80,6 +95,11 @@ actor DeviceClient {
             [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: "\(Auth.cli) device", kSecAttrAccount as String: id]
         }
 
+        /// `id`'s key goes: a key the install removed can't be let in again, so the next sign-in makes a new one.
+        static func forget(_ id: String) {
+            SecItemDelete(query(id) as CFDictionary)
+        }
+
         /// `id`'s key, made the first time.
         static func secret(_ id: String) -> Data {
             var out: CFTypeRef?
@@ -98,6 +118,12 @@ actor DeviceClient {
     }
 }
 
+/// This device isn't one of the install's: not yet, or no more. Not an app's problem: the window shows its own
+/// approval screen (`Store.Phase.joining`), or the sign-in.
+struct NotLetIn: LocalizedError {
+    var errorDescription: String? { String(localized: "This device hasn’t been let in yet.") }
+}
+
 /// Runs a call into the library, which waits for its answer, off the caller's thread; its failure in a person's words.
 func off<T: Sendable>(_ work: @escaping @Sendable () throws -> T) async throws -> T {
     try await withCheckedThrowingContinuation { done in
@@ -106,6 +132,8 @@ func off<T: Sendable>(_ work: @escaping @Sendable () throws -> T) async throws -
                 done.resume(returning: try work())
             } catch let OneError.Failed(reason, _) {
                 done.resume(throwing: NodeError(reason))
+            } catch OneError.NotLetIn {
+                done.resume(throwing: NotLetIn())
             } catch {
                 done.resume(throwing: error)
             }
@@ -190,6 +218,8 @@ struct DeviceNode: NodeTransport {
     /// their devices (or, for someone new, their inviter's) to approve it; `approve`, if given, tries first.
     func join(name: String, showing: @MainActor @Sendable (String) -> Void, approve: (@Sendable (String) async -> Void)? = nil) async throws {
         if try await DeviceClient.shared.connect() { return }
+        let lost = await DeviceClient.shared.lost()
+        if lost is Auth.SignedOut { throw lost }
         let code = try await DeviceClient.shared.ask(name: name)
         await showing(code)
         await approve?(code)

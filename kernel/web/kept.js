@@ -25,3 +25,4 @@ export const getAll = (ids) =>
     return { get result() { return asked.map((a) => a.result); } };
   });
 export const put = (id, v) => kept("readwrite", (s) => s.put(v, id));
+export const del = (id) => kept("readwrite", (s) => s.delete(id));

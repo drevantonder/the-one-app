@@ -175,6 +175,11 @@ export const net = {
     return (await ask({ op: "global", user, given: buffer }, buffer ? [buffer] : [])).members;
   },
 
+  /// Whether the relay still lets this browser in, as one of its person's devices: false once it's taken out.
+  still() {
+    return net.has ? ask({ op: "still" }).then((m) => m.device) : Promise.resolve(true);
+  },
+
   /// A fresh endpoint, after the network came back.
   reconnect() {
     if (net.has) send({ op: "reconnect" });
