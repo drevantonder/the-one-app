@@ -86,6 +86,15 @@ const PAGE = `
   .switch { transform: scale(0.78); transform-origin: right center; }
   .sub { color: var(--muted); font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-height: 1.3em; }
   .sub.bad { color: var(--danger); }
+  .sub.warn { color: var(--warn); display: flex; align-items: center; gap: 5px; }
+  .sub .link { color: var(--tint); cursor: pointer; }
+  .perm-icon { width: 32px; height: 32px; border-radius: 8px; display: grid; place-items: center; flex: none; color: #fff; }
+  .perm-icon .i { width: 18px; height: 18px; }
+  .perm-lead { color: var(--muted); font-size: 15px; margin: 2px 4px 14px; line-height: 1.4; }
+  .perm-status { font-size: 14px; font-weight: 500; flex: none; display: inline-flex; align-items: center; gap: 4px; }
+  .perm-status.warn { color: var(--warn); font-weight: 600; }
+  .perm-status.muted { color: var(--muted); }
+  .step-num { width: 24px; height: 24px; border-radius: 50%; background: var(--fill); color: var(--muted); font-size: 13px; font-weight: 600; display: grid; place-items: center; flex: none; }
 </style>
 <div class="grid" id="grid"></div>
 <div id="sessions-section" hidden>
@@ -104,23 +113,90 @@ const PAGE = `
   const laptop = '<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="4" y="5" width="16" height="11" rx="1.5"/><path d="M2 19h20"/></svg>';
 
   // A device: its picture while an agent uses it, its name with a switch, and one short line when there's something to say.
+  // macOS asks that screen capture can't happen without Screen Recording, so a device missing it doesn't answer
+  // capture calls: its switch stays off and its tile says so.
   function view(d) {
-    const allowed = d.permissions ? d.permissions.accessibility && d.permissions.screen_recording : true;
-    const line = notes[d.device] || (d.why ? "Not answering"
+    const permGate = d.permissions && d.kind === "mac";
+    const missing = permGate && (!d.permissions.accessibility || !d.permissions.screen_recording);
+    const warn = missing || asking.has(d.device) || d.asking;
+    const lineHtml = notes[d.device] || (d.why ? "Not answering"
       : asking.has(d.device) || d.asking ? "Asking on the device…"
       : !d.on ? (d.missing || "")
       : d.using ? \`\${d.using.agent} is using it\`
-      : allowed ? "" : "Allow it in System Settings on the device");
-    return { src: (d.on && d.using && pics[d.device]) || "", line, bad: !!notes[d.device], on: !!d.on,
-      off: !!(d.why || d.missing || asking.has(d.device)), title: d.title || d.device };
+      : "");
+    let html;
+    if (missing) {
+      const which = !d.permissions.accessibility ? "Accessibility off" : "Screen Recording off";
+      html = \`\${one.icon("warning-circle-fill")}<span>\${which} · <a class="link" data-fix="\${one.esc(d.device)}">Fix</a></span>\`;
+    } else {
+      html = one.esc(lineHtml);
+    }
+    return { src: (d.on && d.using && pics[d.device]) || "", lineHtml: html, warn: warn || missing, bad: !!notes[d.device], on: !!d.on,
+      off: !!(d.why || d.missing || asking.has(d.device) || missing), title: d.title || d.device };
   }
 
   function tile(d) {
     const v = view(d);
     return \`<div data-tile="\${one.esc(d.device)}"><div class="pic">\${v.src ? \`<img src="\${v.src}" alt="">\` : laptop}</div><div class="head"><div class="name">\${one.esc(v.title)}</div>\` +
       \`<input type="checkbox" class="switch" data-device="\${one.esc(d.device)}" aria-label="Let agents use it"\${v.on ? " checked" : ""}\${v.off ? " disabled" : ""}></div>\` +
-      \`<div class="sub\${v.bad ? " bad" : ""}">\${one.esc(v.line)}</div></div>\`;
+      \`<div class="sub\${v.bad ? " bad" : ""}\${v.warn ? " warn" : ""}">\${v.lineHtml}</div></div>\`;
   }
+
+  function showFix(d) {
+    const a11y = !!d.permissions?.accessibility;
+    const sr = !!d.permissions?.screen_recording;
+    const name = d.title || d.device;
+    one.sheet({
+      title: name,
+      html: \`
+        <p class="perm-lead">macOS requires two permissions before agents can view or control this Mac.</p>
+        <div class="list">
+          <div class="row">
+            <span class="perm-icon" style="background:#007aff">\${one.icon("cursor-click-fill")}</span>
+            <div class="main">
+              <div class="title"><span>Accessibility</span></div>
+              <div class="sub">Clicks, typing and window control</div>
+            </div>
+            \${a11y ? \`<span class="perm-status muted">\${one.icon("check")}</span>\` : \`<span class="perm-status warn">\${one.icon("warning-circle-fill")}Off</span>\`}
+          </div>
+          <div class="row">
+            <span class="perm-icon" style="background:#5e5ce6">\${one.icon("desktop")}</span>
+            <div class="main">
+              <div class="title"><span>Screen Recording</span></div>
+              <div class="sub">Lets agents see what’s on screen</div>
+            </div>
+            \${sr ? \`<span class="perm-status muted">\${one.icon("check")}</span>\` : \`<span class="perm-status warn">\${one.icon("warning-circle-fill")}Off</span>\`}
+          </div>
+        </div>
+
+        <h2 class="section">How to turn it on</h2>
+        <div class="list">
+          <div class="row">
+            <span class="step-num">1</span>
+            <div class="main">
+              <div class="title"><span>Open System Settings on \${one.esc(name)}</span></div>
+              <div class="sub wrap">Go to <b>Privacy &amp; Security</b> → <b>\${a11y ? "Screen &amp; System Audio Recording" : "Accessibility"}</b>.</div>
+            </div>
+          </div>
+          \${a11y && sr ? "" : \`<div class="row">
+            <span class="step-num">2</span>
+            <div class="main">
+              <div class="title"><span>Turn on The One App</span></div>
+              <div class="sub wrap">Enable the switch next to <b>The One App</b> and approve with Touch ID.</div>
+            </div>
+          </div>\`}
+        </div>
+        <p class="footer">This page updates automatically once permission is granted.</p>
+      \`,
+    });
+  }
+
+  grid.addEventListener("click", (e) => {
+    const f = e.target.closest("[data-fix]");
+    if (!f) return;
+    const d = devs.find((x) => x.device === f.dataset.fix);
+    if (d) showFix(d);
+  });
 
   // Changes only what changed in a tile, so it doesn't flicker and a tap on it isn't lost.
   function patch(d) {
@@ -135,8 +211,9 @@ const PAGE = `
     s.checked = v.on;
     s.disabled = v.off;
     const sub = t.querySelector(".sub");
-    sub.textContent = v.line;
+    sub.innerHTML = v.lineHtml;
     sub.classList.toggle("bad", v.bad);
+    sub.classList.toggle("warn", v.warn);
   }
 
   const html = () => devs.length ? devs.map(tile).join("")

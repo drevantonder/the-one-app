@@ -96,11 +96,14 @@ final class ComputerUse {
         return (try? JSONSerialization.data(withJSONObject: status)) ?? Data("{}".utf8)
     }
 
-    /// Fails unless agents may use this Mac now.
+    /// Fails unless agents may use this Mac now. Screen capture is what an agent sees through, so both permissions
+    /// are required: without Screen Recording, get_desktop_state can't produce a picture.
     func ready() throws {
         guard on else { throw Refusal("Agents can't use \(title): its owner hasn't let them. They can, in \(appName)'s menu on that Mac, or on the Computer Use page.") }
         guard CuaDriver.path != nil else { throw Refusal("Cua Driver isn't installed on \(title): get it from github.com/trycua/cua.") }
-        guard AXIsProcessTrusted() else { throw Refusal("macOS hasn't let \(appName) use Accessibility on \(title) yet: System Settings → Privacy & Security → Accessibility → \(appName) on.") }
+        guard AXIsProcessTrusted(), CGPreflightScreenCaptureAccess() else {
+            throw Refusal("macOS hasn't let \(appName) use everything on \(title) yet: System Settings → Privacy & Security → Accessibility and Screen & System Audio Recording → \(appName) on.")
+        }
     }
 
     /// Asked from another device, or by an agent: the person at this Mac says whether agents may use it. Nobody may
