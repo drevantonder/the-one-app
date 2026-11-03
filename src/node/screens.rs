@@ -2,6 +2,9 @@
 
 use super::*;
 
+/// How long a page waits for an app's badge.
+const BADGE_LIMIT: Duration = Duration::from_secs(5);
+
 impl Node {
     /// Who a caller is, as apps see them.
     pub(super) fn me_for(&self, caller: &Caller) -> Result<Me> {
@@ -82,20 +85,28 @@ impl Node {
     }
 
     /// Each app's badge, the count its icon shows, for `viewer`, as `widgets` reaches scopes; apps with none, or 0,
-    /// are left out.
+    /// are left out, as is one that fails or takes longer than `BADGE_LIMIT`: a page waits for its badges.
     pub async fn badges(&self, viewer: Caller, scope: Option<&str>) -> Result<Value> {
-        let mut out = serde_json::Map::new();
-        for (app, ctx, _granted) in self.page_contexts(&viewer, scope)? {
-            if self.0.apps.describe(&app).await?["badge"] != true {
-                continue;
-            }
-            match self.0.apps.badge(&app, &ctx).await {
-                Ok(n) if n.as_f64().is_some_and(|n| n > 0.0) => drop(out.insert(app, n)),
-                Ok(_) => {}
-                Err(err) => tracing::warn!("{app} badge: {err:#}"),
-            }
+        let mut asked = tokio::task::JoinSet::new();
+        for (app, ctx, granted) in self.page_contexts(&viewer, scope)? {
+            let node = self.clone();
+            asked.spawn(async move {
+                let _granted = granted;
+                let badge = async { if node.0.apps.describe(&app).await?["badge"] == true { node.0.apps.badge(&app, &ctx).await } else { Ok(Value::Null) } };
+                match tokio::time::timeout(BADGE_LIMIT, badge).await {
+                    Ok(Ok(n)) => n.as_f64().is_some_and(|n| n > 0.0).then_some((app, n)),
+                    Ok(Err(err)) => {
+                        tracing::warn!("{app} badge: {err:#}");
+                        None
+                    }
+                    Err(_) => {
+                        tracing::warn!("{app} badge took longer than {}s; left out", BADGE_LIMIT.as_secs());
+                        None
+                    }
+                }
+            });
         }
-        Ok(Value::Object(out))
+        Ok(Value::Object(asked.join_all().await.into_iter().flatten().collect()))
     }
 
     /// The apps a page shows and the context each renders with: with `scope`, those installed there, each reaching
