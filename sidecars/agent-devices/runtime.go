@@ -43,7 +43,7 @@ type device struct {
 
 var validName = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,39}$`)
 
-// validProfile is a browser profile's name, as people name them: Personal, PTC.
+// validProfile is a browser profile's name, as people name them: Personal, Work.
 var validProfile = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]{0,39}$`)
 
 // A containers runs devices' containers.

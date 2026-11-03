@@ -184,7 +184,7 @@ pub fn code_tools(all: Vec<Value>) -> Vec<Value> {
     [vec![search_tool(Mode::Code), execute_tool()], all.into_iter().filter(direct).collect()].concat()
 }
 
-/// A script's limits, as the old PTC App's were: ten minutes, a hundred calls and 60 KB back.
+/// A script's limits: ten minutes, a hundred calls and 60 KB back.
 const LIMITS: (u64, u64, u64) = (600_000, 100, 60_000);
 
 /// MCP's `execute` tool.

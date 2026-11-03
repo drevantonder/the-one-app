@@ -38,7 +38,7 @@ pub fn describe() -> Value {
     json!({
         "title": "Messenger", "description": "Reads and sends your Messenger chats in an agent device's browser",
         "icon": "messenger-logo", "color": "#0866ff", "domain": "messenger.com",
-        "instructions": "Messenger is the person's Facebook Messenger, read through messenger.com in an agent device's browser. Each account is a browser profile signed in to it (Personal, PTC), as messenger_accounts lists them; the others take account, the first by default. messenger_chats lists recent chats, messenger_read reads one, messenger_search finds messages. Each takes some seconds: a browser does the reading. If Messenger isn't signed in, messenger_sign_in gives the person a link to sign in; never sign in for them. messenger_send sends a real message to a real person: only when the person asked, with the exact text they approved.",
+        "instructions": "Messenger is the person's Facebook Messenger, read through messenger.com in an agent device's browser. Each account is a browser profile signed in to it (Personal, Work), as messenger_accounts lists them; the others take account, the first by default. messenger_chats lists recent chats, messenger_read reads one, messenger_search finds messages. Each takes some seconds: a browser does the reading. If Messenger isn't signed in, messenger_sign_in gives the person a link to sign in; never sign in for them. messenger_send sends a real message to a real person: only when the person asked, with the exact text they approved.",
         "ops": [
             { "name": "accounts", "reads": true, "description": "The browser profiles Messenger reads, the default first: each { account, ok }, with why when ok is false and it needs signing in again.",
               "input": { "type": "object", "properties": {} } },
@@ -51,7 +51,7 @@ pub fn describe() -> Value {
             { "name": "send", "confirm": true, "description": "Send a real message, as the person, to a recent chat or to someone by their exact name. It can't be taken back: only when the person asked, with the text they approved.",
               "input": with_account(json!({ "chat": { "type": "string", "description": "the chat's name, or a part of it only one recent chat has; anyone else by their exact name" }, "text": { "type": "string", "description": "the message" } }), &["chat", "text"]) },
             { "name": "sign_in", "description": "For the person: links Messenger to a browser profile (made if new) and gives a link to messenger.com in it, to sign in there themselves. The default profile's again when none is given.",
-              "input": { "type": "object", "properties": { "profile": { "type": "string", "description": "the browser profile, like Personal or PTC; agent-devices_profiles lists them" } } } },
+              "input": { "type": "object", "properties": { "profile": { "type": "string", "description": "the browser profile, like Personal or Work; agent-devices_profiles lists them" } } } },
             { "name": "sign_out", "description": "Stop reading a browser profile's Messenger. The profile, and its sign-ins to other sites, stay.",
               "input": { "type": "object", "required": ["account"], "properties": { "account": account } } },
         ],

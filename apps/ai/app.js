@@ -18,7 +18,7 @@ async function settings(ctx) {
   return out;
 }
 
-/// Errors that mean a limit stopped the call: Claims and others tell the person when to try again.
+/// Errors that mean a limit stopped the call: apps tell the person when to try again.
 const limit = (when) => new Error(when === "day" ? "AI limit: day. Today's AI is used up; more tomorrow." : "AI limit: minute. Try again in a minute.");
 
 async function gemini(ctx, s, body) {

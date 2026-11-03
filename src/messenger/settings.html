@@ -29,9 +29,9 @@ async function pick(accounts) {
   let profiles = [];
   try { profiles = ((await one.call("_profiles")) || []).map((p) => p.profile); } catch {}
   const free = [...new Set(profiles)].filter((p) => !accounts.some((a) => a.account === p));
-  c.innerHTML = `<div class="small muted">Which browser profile? Each has its own sign-ins, like Personal or PTC.</div>
+  c.innerHTML = `<div class="small muted">Which browser profile? Each has its own sign-ins, like Personal or Work.</div>
     <select id="profile">${free.map((p) => `<option>${one.esc(p)}</option>`).join("")}<option value="">New profile…</option></select>
-    <input id="name" placeholder="Its name, like Personal or PTC" autocapitalize="words" autocorrect="off" ${free.length ? "hidden" : ""}>
+    <input id="name" placeholder="Its name, like Personal or Work" autocapitalize="words" autocorrect="off" ${free.length ? "hidden" : ""}>
     <button class="primary" id="go">Sign in to Messenger</button><div id="err" class="error small"></div>`;
   const select = document.getElementById("profile"), name = document.getElementById("name");
   select.onchange = () => (name.hidden = !!select.value);
