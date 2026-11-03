@@ -173,7 +173,7 @@ fn devices_here(settings: one::kernel::Settings, needed: bool) -> Result<one::ke
     let state = get("/v1/state").unwrap_or_default();
     let devices: Vec<String> = state["install"]["devices"].as_array().into_iter().flatten().filter_map(|d| d["key"].as_str().map(str::to_string)).filter(|k| k.len() == 64).collect();
     anyhow::ensure!(!needed || !devices.is_empty(), "no node of your One App answers on this machine, so its relay would take none of its devices: run this where one does, or with --new for a new install, whose relay takes devices once this runs again beside one");
-    Ok(one::kernel::Settings { devices, devices_at: state["install"]["devices_at"].as_u64().unwrap_or(0), ..settings })
+    Ok(one::kernel::Settings { devices, ..settings })
 }
 
 fn addr() -> String {

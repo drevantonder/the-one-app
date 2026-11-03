@@ -64,9 +64,6 @@ pub struct Settings {
     /// the relay starts its list with them, as its admins', when it has none yet.
     #[serde(skip)]
     pub devices: Vec<String>,
-    /// When the install's log last changed its devices (ms), for the old relay, until nodes speak only iroh.
-    #[serde(skip)]
-    pub devices_at: u64,
     /// The secret only the kernel's services share, for asking each other.
     #[serde(default, skip_serializing)]
     pub kernel_secret: String,
@@ -275,7 +272,6 @@ impl Settings {
             google: None,
             cloudflare_token: None,
             devices: vec![],
-            devices_at: 0,
             try_person: None,
         };
         (settings, data_encoding::HEXLOWER.encode(&seed))
@@ -368,12 +364,7 @@ impl Settings {
                 true => ("NODE".into(), format!("service:{}", crate::serverless::SERVICE), false),
                 false => self.machine("NODE"),
             };
-            let mut out = vec![("AUTH".into(), "service:auth".into(), false), ("IROH".into(), "service:relay".into(), false), node];
-            // For the old relay, until nodes speak only iroh.
-            if !self.devices.is_empty() {
-                out.push(("DEVICES".into(), json!({ "keys": self.devices, "at": self.devices_at }).to_string(), false));
-            }
-            return out;
+            return vec![("AUTH".into(), "service:auth".into(), false), ("IROH".into(), "service:relay".into(), false), node];
         }
         // Nor does the relay: only the keys of the install's first devices, which it starts its list with.
         if service == "relay" {
