@@ -387,7 +387,7 @@ fn the_kernel_and_nodes_agree_on_keys_and_seals() {
     use one::kernel;
 
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("kernel");
-    let files = ["shared/crypto.js", "shared/token.js", "schedules/worker.js", "test/formats.js"].map(|p| (p.to_string(), std::fs::read(root.join(p)).unwrap()));
+    let files = ["shared/crypto.js", "shared/token.js", "schedules/worker.js", "web/members.js", "test/formats.js"].map(|p| (p.to_string(), std::fs::read(root.join(p)).unwrap()));
     let dir = crate::temp("formats");
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = listener.local_addr().unwrap().to_string();
@@ -440,7 +440,7 @@ fn the_kernel_and_nodes_agree_on_keys_and_seals() {
         let handoff = keys::Handoff { for_: keys::token_id("a token"), until: 9, keys: vec![keys::Handed { scope: "global".into(), epoch: 2, app: "board".into(), database: "main".into(), key: rand::random() }] };
         let epoch_key: [u8; 32] = rand::random();
         let sealed = keys::seal(3, &epoch_key, "global/board/main/1", b"a step");
-        let device: [u8; 32] = rand::random();
+        let device = ed25519_dalek::SigningKey::from_bytes(&rand::random()).verifying_key().to_bytes();
         let prf: [u8; 32] = rand::random();
         let (my_secret, my_public) = kernel::twin(&rand::random());
         let out = js(json!({
@@ -464,10 +464,12 @@ fn the_kernel_and_nodes_agree_on_keys_and_seals() {
         assert_eq!(out["tokenId"], keys::token_id("a token"));
         assert_eq!(out["epochHash"], keys::epoch_hash(&epoch_key), "an epoch key's hash");
         assert_eq!(out["joinCode"], keys::join_code(&device));
+        assert_eq!(out["twin"], data_encoding::HEXLOWER.encode(&kernel::twin_public(&device).unwrap()), "an Ed25519 key's twin to seal to");
         assert_eq!(out["proof"], keys::invite_proof(b"an invite's secret", &device));
         let (passkey, seal_secret) = keys::passkey_keys(&prf);
         assert_eq!(out["passkey"]["sign"], data_encoding::HEXLOWER.encode(passkey.verifying_key().as_bytes()), "a passkey's signing key");
         assert_eq!(b(&out["passkey"]["seal"]), seal_secret, "and the secret sealed to");
+        assert_eq!(out["passkey"]["sealPublic"], data_encoding::HEXLOWER.encode(&kernel::public_of(&seal_secret)), "and its public half");
         assert_eq!(to, kernel::twin_public(&node.verifying_key().to_bytes()).unwrap(), "a Rust endpoint seals to its key's twin");
     }
 
@@ -488,6 +490,42 @@ fn the_kernel_and_nodes_agree_on_keys_and_seals() {
         assert_eq!((from_js.hash(), from_js.previous().to_vec()), (rust.hash(), vec![p1.min(p2), p1.max(p2)]));
         assert_eq!(out["checked"], json!({ "hash": rust.hash().to_hex(), "user": "0123456789abcdef", "kind": "group" }), "JavaScript checks one Rust signed");
         assert_ne!(out["tampered"], json!("checked"), "but not with another body");
+    }
+
+    // Member entries' content (src/members.rs), as the web client builds what a browser signs (kernel/web/members.js).
+    {
+        use one::entry::Scope;
+        use one::members::{self, Kind, Role};
+        let endpoint = one::keys::Endpoint { key: rand::random(), seal: rand::random() };
+        let (key, seal) = (data_encoding::HEXLOWER.encode(&endpoint.key), data_encoding::HEXLOWER.encode(&endpoint.seal));
+        let (user, group) = ("0123456789abcdef", "fedcba9876543210");
+        let both = [
+            (members::device(&endpoint, user, "Chrome on Mac", &[Kind::Client], None), json!(["device", { "key": key, "seal": seal, "user": user, "name": "Chrome on Mac" }])),
+            (members::device(&endpoint, user, "Sam's Chrome", &[Kind::Client], Some(("Sam", Role::Member))), json!(["device", { "key": key, "seal": seal, "user": user, "name": "Sam's Chrome", "newUser": { "name": "Sam", "role": "member" } }])),
+            (members::passkey(&endpoint, user, "Passkey", "cred-1"), json!(["passkey", { "key": key, "seal": seal, "user": user, "name": "Passkey", "credential": "cred-1" }])),
+            (members::role(user, Role::Admin), json!(["role", { "user": user, "role": "admin" }])),
+            (members::remove_user(user), json!(["removeUser", { "user": user }])),
+            (members::remove_device(&endpoint.key, Some(7)), json!(["removeDevice", { "key": key, "seq": 7 }])),
+            (members::remove_device(&endpoint.key, None), json!(["removeDevice", { "key": key }])),
+            (members::setting("name", Some("Home")), json!(["setting", { "name": "name", "value": "Home" }])),
+            (members::setting("name", None), json!(["setting", { "name": "name" }])),
+            (members::group(group, "Family"), json!(["group", { "group": group, "name": "Family" }])),
+            (members::invite(group, user, Role::Member), json!(["invite", { "group": group, "user": user, "role": "member" }])),
+            (members::accept(group), json!(["accept", { "group": group }])),
+            (members::member(group, user, Some(Role::Admin)), json!(["member", { "group": group, "user": user, "role": "admin" }])),
+            (members::member(group, user, None), json!(["member", { "group": group, "user": user }])),
+            (members::rename("key", &key, "Work Mac"), json!(["rename", { "what": "key", "id": key, "name": "Work Mac" }])),
+            (members::rename("group", group, "Kin"), json!(["rename", { "what": "group", "id": group, "name": "Kin" }])),
+            (members::epoch(&Scope::User(user.into()), 2, &[endpoint.key], &seal), json!(["epoch", { "scope": format!("user:{user}"), "n": 2, "to": [key], "hash": seal }])),
+            (members::grant(&endpoint.key, &Scope::Group(group.into()), "whatsapp", 0), json!(["grant", { "endpoint": key, "scope": format!("group:{group}"), "app": "whatsapp", "until": 0 }])),
+            (members::retire("notes", "admins", "deleted").unwrap(), json!(["retire", { "app": "notes", "owner": "admins", "how": "deleted" }])),
+            (members::retire("notes", "admins", "restored").unwrap(), json!(["retire", { "app": "notes", "owner": "admins", "how": "restored" }])),
+            (members::install("notes", false), json!(["install", { "app": "notes", "installed": false }])),
+        ];
+        let out = js(json!({ "op": "members", "calls": both.iter().map(|(_, call)| call.clone()).collect::<Vec<_>>() }));
+        for ((rust, call), js) in both.iter().zip(out["contents"].as_array().expect("contents")) {
+            assert_eq!(js, &serde_json::to_value(rust).unwrap(), "{call}");
+        }
     }
 
     // The schedules service and the node agree when a schedule runs next, across daylight saving's changes too.

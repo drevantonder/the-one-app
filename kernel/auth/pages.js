@@ -256,6 +256,8 @@ export function invitePage(look) {
     document.getElementById("go").onclick = async () => {
       say();
       try {
+        // Kept in this tab for the web client, whose request to let in this person's first device proves it.
+        sessionStorage.setItem("one.invite", secret);
         // Whoever was signed in here before, the invite is for its person.
         await api("/api/auth/sign-out", {}).catch(() => {});
         if (google) {

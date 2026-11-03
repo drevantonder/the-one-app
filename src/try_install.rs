@@ -497,7 +497,8 @@ fn web(dir: &Path, settings: &one::kernel::Settings, person: Option<&str>) -> Re
         None => {
             let port = browser(dir, settings, None)?;
             let picture = dir.join("web.png");
-            web_script(dir, &["sign-in", &port.to_string(), &settings.address, &picture.display().to_string()])?;
+            let code = web_script(dir, &["sign-in", &port.to_string(), &settings.address, &picture.display().to_string()])?;
+            approve(dir, settings, port, &picture, &code)?;
             (port, picture)
         }
     };
@@ -515,7 +516,7 @@ fn web(dir: &Path, settings: &one::kernel::Settings, person: Option<&str>) -> Re
 
 /// `name`'s web client, signed in: the first time, the try install's machine invites them, as `devices invite` does on
 /// an admin's machine (keeping the secret for their first device's approval), and they open the link in their own
-/// browser, join, and sign in; then their first device asks to join and the machine approves it (`stand_in`). Pictures
+/// browser, join, and sign in; then their browser, their first device, asks to join and the machine approves it. Pictures
 /// of the invite and joining are kept beside theirs. → its DevTools port, and the picture of their first screen.
 fn joined(dir: &Path, settings: &one::kernel::Settings, name: &str) -> Result<(u16, PathBuf)> {
     let folder = web_folder(dir, Some(name));
@@ -523,82 +524,26 @@ fn joined(dir: &Path, settings: &one::kernel::Settings, name: &str) -> Result<(u
     let port = browser(dir, settings, Some(name))?;
     let mut args = vec!["sign-in".to_string(), port.to_string(), settings.address.clone(), picture.display().to_string()];
     let marker = folder.join("joined");
-    let mut secret = None;
     if !marker.exists() {
         eprintln!("Inviting {name}…");
         let node = std::fs::read_to_string(dir.join("addr"))?;
         let invited = crate::request(try_agent(dir).post(format!("http://{}/v1/invite-link", node.trim())).send_json(json!({ "name": name })))?;
-        let link = invited["link"].as_str().context("the try install made no invite link")?.to_string();
-        secret = link.rsplit_once('#').map(|(_, s)| s.to_string());
-        args.push(link);
+        args.push(invited["link"].as_str().context("the try install made no invite link")?.to_string());
     }
-    let token = web_script(dir, &args.iter().map(String::as_str).collect::<Vec<_>>())?;
+    let code = web_script(dir, &args.iter().map(String::as_str).collect::<Vec<_>>())?;
     std::fs::write(&marker, name)?;
-    if let Some(secret) = secret {
-        stand_in(dir, settings, name, &token, &secret).with_context(|| format!("{name}'s first device wasn't let in"))?;
-    }
+    approve(dir, settings, port, &picture, &code).with_context(|| format!("{name}'s browser wasn't let in"))?;
     Ok((port, picture))
 }
 
-/// `name`'s first device, as their web client will be once it holds keys of its own (the Keys web piece), standing in
-/// for it till then: it makes its keys, asks auth to join with their sign-in's `token` and their invite's proof, the
-/// try install's machine approves it by its code, it opens global's epoch sealed to it (`GET /v1/keys`), and it reads
-/// the board through the address with the keys it hands the call (`x-one-keys`), as a browser will.
-fn stand_in(dir: &Path, settings: &one::kernel::Settings, name: &str, token: &str, secret: &str) -> Result<()> {
-    use data_encoding::BASE64URL_NOPAD as B64U;
-    let key = ed25519_dalek::SigningKey::from_bytes(&rand::random());
-    let me = one::keys::Endpoint::of(&key);
-    let hex = one::entry::hex(&me.key);
-    let address = settings.address.trim_end_matches('/');
-    let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).timeout_global(Some(Duration::from_secs(60))).build().into();
-    let bearer = format!("Bearer {token}");
-    let answer = |mut r: ureq::http::Response<ureq::Body>| -> Result<(u16, Value)> { Ok((r.status().as_u16(), r.body_mut().read_json().unwrap_or(Value::Null))) };
-    let asked = json!({ "key": hex, "seal": one::entry::hex(&me.seal), "name": format!("{name}'s first device"), "proof": one::keys::invite_proof(secret.as_bytes(), &me.key) });
-    let (status, out) = answer(agent.post(format!("{address}/api/auth/devices/requests")).header("authorization", &bearer).send_json(&asked)?)?;
-    anyhow::ensure!(status == 200, "auth took no request to join: {out}");
-    let node = std::fs::read_to_string(dir.join("addr"))?;
-    let approved = crate::request(try_agent(dir).post(format!("http://{}/v1/devices/approve", node.trim())).send_json(json!({ "code": one::keys::join_code(&me.key), "confirm": true })))?;
-    anyhow::ensure!(approved["sealed"].as_array().is_some_and(|s| s.iter().any(|s| s == "global")), "the try install's machine didn't give it global's keys: {approved}");
-    let sealed = |query: &str| -> Result<Value> {
-        let (status, out) = answer(agent.get(format!("{address}/v1/keys?{query}")).header("authorization", &bearer).call()?)?;
-        anyhow::ensure!(status == 200, "GET /v1/keys?{query}: {out}");
-        Ok(out)
-    };
-    let bytes = |v: &Value| B64U.decode(v.as_str().unwrap_or("").as_bytes()).map_err(|_| anyhow::anyhow!("not base64url"));
-    let epochs = sealed(&format!("scope=global&to={hex}"))?;
-    let mut keys = std::collections::BTreeMap::new();
-    for (n, s) in epochs["sealed"].as_object().into_iter().flatten() {
-        let key: [u8; 32] = one::kernel::open_sealed(&one::keys::seal_secret(&key), &bytes(s)?)?.try_into().map_err(|_| anyhow::anyhow!("an epoch's key is 32 bytes"))?;
-        keys.insert(n.parse::<u32>()?, key);
+/// A web client that shows a code to be approved (`code`, else none) is approved by the try install's machine, as its
+/// person's device or as the device of the admin who invited them; then its window is pictured.
+fn approve(dir: &Path, settings: &one::kernel::Settings, port: u16, picture: &Path, code: &str) -> Result<()> {
+    if !code.is_empty() {
+        let node = std::fs::read_to_string(dir.join("addr"))?;
+        crate::request(try_agent(dir).post(format!("http://{}/v1/devices/approve", node.trim())).send_json(json!({ "code": code, "confirm": true })))?;
     }
-    anyhow::ensure!(!keys.is_empty(), "no epoch of global opens for it");
-    // The board, read as a browser does: the first call says which keys it needs, and the next hands them.
-    let call = json!({ "app": "board", "op": "news", "input": { "format": "json", "since": 0, "scope": "global" }, "scopes": ["global"] });
-    let (status, need) = answer(agent.post(format!("{address}/v1/call")).header("authorization", &bearer).send_json(&call)?)?;
-    anyhow::ensure!(status == 428, "the board answered {status} before it was handed keys: {need}");
-    let mut handed = Vec::new();
-    for n in need["need"].as_array().into_iter().flatten() {
-        let wanted: one::keys::Need = serde_json::from_value(n.clone())?;
-        let epoch = keys.get(&wanted.epoch).with_context(|| format!("it wasn't sealed global's epoch {}", wanted.epoch))?;
-        let apps = sealed(&format!("scope={}&app={}", wanted.scope, wanted.app))?;
-        let mut app_sealed = apps["sealed"][wanted.epoch.to_string()].clone();
-        // An app's key in an epoch is made by the first device to need it.
-        if app_sealed.is_null() {
-            let made = one::kernel::seal_app_key(epoch, &wanted.app, &rand::random());
-            let kept = json!({ "scope": wanted.scope, "n": wanted.epoch, "app": wanted.app, "sealed": B64U.encode(&made) });
-            let (status, out) = answer(agent.post(format!("{address}/v1/keys")).header("authorization", &bearer).send_json(&kept)?)?;
-            anyhow::ensure!(status == 200, "POST /v1/keys: {out}");
-            app_sealed = out["sealed"].clone();
-        }
-        let app_key = one::kernel::open_app_key(epoch, &wanted.app, &bytes(&app_sealed)?)?;
-        handed.push(one::keys::Handed { key: one::kernel::database_key(&app_key, &wanted.database), scope: wanted.scope, epoch: wanted.epoch, app: wanted.app, database: wanted.database });
-    }
-    let to = one::keys::unhex(need["seal"].as_str().unwrap_or(""))?;
-    let until = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_millis() as u64 + 600_000;
-    let handoff = one::keys::seal_handoff(&to, &one::keys::Handoff { for_: one::keys::token_id(token), until, keys: handed })?;
-    let (status, read) = answer(agent.post(format!("{address}/v1/call")).header("authorization", &bearer).header(one::api::KEYS_HEADER, &handoff).send_json(&call)?)?;
-    anyhow::ensure!(status == 200 && read["ok"].is_array(), "the board didn't read with the keys it was handed ({status}): {read}");
-    eprintln!("{name}'s first device was approved by the try install's machine, opened global's keys and read its board ({} posts).", read["ok"].as_array().map_or(0, Vec::len));
+    web_script(dir, &["picture", &port.to_string(), &settings.address, &picture.display().to_string()])?;
     Ok(())
 }
 

@@ -84,6 +84,11 @@ a { color: inherit; }
 .welcome-mark { width: 120px; height: 120px; }
 .button.big { font-size: 15px; padding: 9px 22px; }
 .welcome-error { max-width: 440px; font-size: 13px; }
+.join h1 { margin-bottom: 4px; }
+.join-text, .join-note { color: var(--muted); font-size: 13px; max-width: 360px; margin: 0; }
+.join-code { font: 600 34px var(--mono, ui-monospace, monospace); letter-spacing: 0.08em; margin: 12px 0 6px; user-select: all; }
+.join-qr svg { width: 184px; height: 184px; display: block; border-radius: 8px; }
+.join .button { margin-top: 14px; }
 .unavailable-title { font-size: 17px; font-weight: 600; }
 .unavailable-text { color: var(--muted); font-size: 13px; max-width: 440px; }
 

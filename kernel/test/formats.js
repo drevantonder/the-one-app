@@ -1,6 +1,7 @@
 // The kernel's formats, for tests/contracts.rs to check against the Rust that reads them: POST { op, ... } → result.
 import { next, when } from "../schedules/worker.js";
-import { b64u, canonical, epochHash, checkEntry, checkRequest, databaseKey, ed25519Public, epochOf, hex, idOf, inviteProof, joinCode, keyPair, open, openAppKey, openHandoff, openSealed, openUnder, passkeyKeys, seal, sealAppKey, sealHandoff, sealTo, sealUnder, signEntry, signedRequest, tokenId } from "../shared/crypto.js";
+import { b64u, canonical, epochHash, checkEntry, checkRequest, databaseKey, ed25519Public, epochOf, hex, idOf, inviteProof, joinCode, keyPair, open, openAppKey, openHandoff, openSealed, openUnder, passkeyKeys, seal, sealAppKey, sealHandoff, sealTo, sealUnder, signEntry, signedRequest, tokenId, twinPublic, x25519Public } from "../shared/crypto.js";
+import { members } from "../web/members.js";
 
 const ops = {
   async next({ spec, now }) {
@@ -42,9 +43,10 @@ const ops = {
       handedBack: await openHandoff({ secret: b64u.decode(pair.secret), public: b64u.decode(pair.public) }, pair.sealed),
       tokenId: await tokenId(token),
       epochHash: await epochHash(b64u.decode(key)),
+      twin: hex.encode(twinPublic(hex.decode(pair.key))),
       joinCode: await joinCode(hex.decode(pair.key)),
       proof: await inviteProof(b64u.decode(secret), hex.decode(pair.key)),
-      passkey: { sign: hex.encode(await ed25519Public(pk.sign)), seal: b64u.encode(pk.seal) },
+      passkey: { sign: hex.encode(await ed25519Public(pk.sign)), seal: b64u.encode(pk.seal), sealPublic: hex.encode(await x25519Public(pk.seal)) },
     };
   },
   /// An entry signed with `seed`, and one Rust signed, checked: → the one signed, as POST /v1/entries takes it.
@@ -54,6 +56,10 @@ const ops = {
     const tampered = await checkEntry({ header: b64u.decode(entry.header), signature: b64u.decode(entry.signature), body: new TextEncoder().encode("{}") }).then(() => "checked", (err) => String(err));
     const b = (v) => b64u.encode(v);
     return { signed: { header: b(signed.header), signature: b(signed.signature), body: b(signed.body) }, hash: signed.hash, checked, tampered };
+  },
+  /// Member entries' content as the web client builds it: `[[builder, args]]` → each content.
+  async members({ calls }) {
+    return { contents: calls.map(([name, args]) => members[name](args)) };
   },
   async openUnder({ secret, sealed }) {
     return { plain: b64u.encode(await openUnder(secret, b64u.decode(sealed))) };

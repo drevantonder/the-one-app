@@ -97,6 +97,8 @@ fn main() {
     let mut kit = Vec::new();
     collect(&screen, &screen, &mut kit);
     files.extend(kit.into_iter().map(|(rel, abs)| (format!("web/screen/{rel}"), abs)));
+    // And the formats devices hold keys in, which the web client imports as ../shared/crypto.js.
+    files.push(("web/shared/crypto.js".into(), kernel.join("shared/crypto.js").to_string_lossy().into()));
     // The white label's logo, which the web client shows where the apps show it.
     let logo = std::path::Path::new(&path).parent().unwrap().join(get("logo").as_str().unwrap());
     println!("cargo:rerun-if-changed={}", logo.display());

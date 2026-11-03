@@ -12,6 +12,9 @@
   a.row { cursor: pointer; }
   #page h2.section:first-of-type { margin-top: 8px; }
   .footer.build { white-space: pre-line; }
+  .list.passkey { margin-top: 20px; }
+  .code-field { font-family: var(--mono); text-transform: uppercase; letter-spacing: 0.06em; }
+  .code-field::placeholder { font-family: var(--font, inherit); text-transform: none; letter-spacing: 0; }
   .row.out { justify-content: center; color: var(--danger); font: inherit; border: 0; background: none; width: 100%; }
   .pair { display: flex; flex-direction: column; align-items: center; gap: 16px; text-align: center; padding: 8px 0 4px; }
   .code { display: flex; align-items: center; gap: 8px; max-width: 100%; padding: 4px 4px 4px 12px; border-radius: 999px; background: var(--code-bg); }
@@ -20,9 +23,13 @@
 </style>
 <script>
   // This person's devices, the shared ones they may use, and which run their own data: naming this device, the build
-  // it runs and signing out of it, removing one, and pairing another with a code.
-  let state, device;
+  // it runs and signing out of it, removing one, pairing a computer with a code, and, where this device holds its own
+  // keys (`device.keys`), approving a new device by the code it shows, listing a passkey to get back in with, and what
+  // their devices keep running for them.
+  let state, device, apps = [], passkey = false;
   let error = "";
+  // A new device's code, from its QR's link (`/approve#CODE`), asked about once.
+  let scanned = one.params?.approve || "";
 
   const me = () => state.user?.id;
   const shown = (name) => (name.endsWith(".local") ? name.slice(0, -6) : name);
@@ -77,6 +84,14 @@
     return html + `<p class="footer">Things run on the first device here that’s on and has room.</p>`;
   };
 
+  // "linux keeps WhatsApp running for you", until it's removed.
+  const grantRow = (g) => {
+    const on = [...(state.install?.devices || []), ...(state.install?.clients || [])].find((d) => d.key === g.endpoint);
+    const title = apps.find((a) => a.name === g.app)?.title || g.app;
+    return `<div class="row plain"><div class="main"><div class="title"><span>${one.esc(shown(on?.name || "A device"))} keeps ${one.esc(title)} running for you</span></div></div>` +
+      `<button class="button plain small" data-grant='${one.esc(JSON.stringify(g))}'>Remove</button></div>`;
+  };
+
   const clientRow = (c) =>
     row({ key: c.key, name: c.name, online: true, lines: [c.me ? "This device" : "Signed in"], trailing: "", removable: !c.me });
 
@@ -95,6 +110,14 @@
     }
     html += '<h2 class="section">Your Devices</h2><div class="list">' + mine.map(deviceRow).join("") + clients.filter((c) => c.user === me()).map(clientRow).join("") +
       `<a class="row plain action-row" data-pair>${one.icon("desktop")}<span>Pair a Computer</span></a></div><div id="ask"></div>`;
+    if (device.keys) {
+      html += '<h2 class="section">Approve a Device</h2><div class="list">' +
+        `<label class="row plain"><input class="field code-field" id="code" placeholder="Code on the new device" aria-label="Code on the new device" autocomplete="off" spellcheck="false" autocapitalize="characters" enterkeyhint="go" maxlength="9"></label></div>` +
+        '<div id="approve"></div><p class="footer">Type the code it shows, or scan its QR code with your phone.</p>';
+      if (passkey) html += `<div class="list passkey"><a class="row plain action-row" data-passkey>${one.icon("key")}<span>Use this passkey to get back in if you lose your devices</span></a></div>`;
+      const grants = (state.install?.grants || []).filter((g) => g.until > Date.now());
+      if (grants.length) html += '<h2 class="section">Kept Running</h2><div class="list">' + grants.map(grantRow).join("") + "</div>";
+    }
     if (others.length) html += '<h2 class="section">Shared Devices</h2><div class="list">' + others.map(deviceRow).join("") + "</div>";
     html += orderSection();
     const holding = devices.filter(holds).map((s) => shown(s.name));
@@ -109,9 +132,13 @@
 
   const draw = () => one.render("#page", async () => {
     [state, device] = await Promise.all([one.api("GET", "/v1/state"), one.device()]);
+    if (device.keys) {
+      passkey = (await one.api("GET", "/v1/devices/passkey").catch(() => ({}))).passkey === true;
+      if ((state.install?.grants || []).length && !apps.length) apps = await one.api("GET", "/v1/apps").catch(() => []);
+    }
     const html = page();
     // Not while they're naming this device or answering a question.
-    if (document.activeElement?.id === "name" || document.querySelector("#ask .confirm")) return;
+    if (["name", "code"].includes(document.activeElement?.id) || document.querySelector("#ask .confirm, #approve .confirm")) return;
     return html;
   });
 
@@ -132,12 +159,43 @@
     else if (t.dataset.place) place(t.dataset.place, t.value, t);
   });
   document.addEventListener("click", (e) => {
-    const t = e.target.closest?.("[data-remove], [data-pair], [data-out]");
+    const t = e.target.closest?.("[data-remove], [data-pair], [data-out], [data-passkey], [data-grant]");
     if (t?.hasAttribute("data-out")) signOut();
+    else if (t?.hasAttribute("data-passkey")) act(() => one.api("POST", "/v1/devices/passkey", {}));
+    else if (t?.dataset.grant) {
+      const g = JSON.parse(t.dataset.grant);
+      act(() => one.api("POST", "/v1/grant", { endpoint: g.endpoint, scope: g.scope, app: g.app }));
+    }
     else if (t?.dataset.remove) remove(t.dataset.remove);
     else if (t) pair();
   });
   document.addEventListener("keydown", (e) => e.target.id === "name" && e.key === "Enter" && e.target.blur());
+  document.addEventListener("keydown", (e) => e.target.id === "code" && e.key === "Enter" && approve(e.target.value));
+  document.addEventListener("input", (e) => e.target.id === "code" && e.target.value.replace(/[^a-z2-7]/gi, "").length === 8 && approve(e.target.value));
+
+  /// Finds the device waiting with this code, shows which it is, and lets it in on Approve.
+  async function approve(typed) {
+    const code = String(typed).toUpperCase().replace(/[^A-Z2-7]/g, "");
+    if (code.length !== 8) return;
+    const ask = document.querySelector("#approve");
+    let r;
+    try {
+      r = await one.api("POST", "/v1/devices/approve", { code });
+    } catch (err) {
+      return void (ask.innerHTML = `<p class="footer error">${one.esc(one.plain(err).title)}</p>`);
+    }
+    one.confirm(ask, {
+      title: `Approve ${r.device}?`,
+      detail: one.esc(r.new ? `${r.person}’s first device. They join ${ours}.` : "It can open everything you can."),
+      action: "Approve",
+      run: () => one.api("POST", "/v1/devices/approve", { code, confirm: true }),
+    }).then((done) => {
+      const field = document.querySelector("#code");
+      if (field) field.value = "";
+      if (done) draw();
+    });
+    ask.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }
   function rename(input) {
     const name = input.value.trim();
     const here = [...(state.install?.devices || []), ...(state.install?.clients || [])].find((m) => m.me);
@@ -155,7 +213,7 @@
     const m = [...state.install.devices, ...state.install.clients].find((x) => x.key === key);
     one.confirm("#ask", {
       title: `Remove ${shown(m.name) || "this device"}?`,
-      detail: "It stops being one of your devices, and can’t reach your data. To use it again, pair it again.",
+      detail: "It loses access to your data. Approve it again to use it.",
       action: "Remove",
       danger: true,
       run: () => one.api("POST", "/v1/remove", { key }),
@@ -182,5 +240,5 @@
   }
 
   one.on("changed", draw);
-  draw();
+  draw().then(() => scanned && (approve(scanned), (scanned = "")));
 </script>

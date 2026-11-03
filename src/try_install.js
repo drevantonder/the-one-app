@@ -1,10 +1,11 @@
 // `one try client web`'s hands (src/try_install.rs), in one of the try install's browsers, over the DevTools protocol.
 // Bun runs it:
 //   sign-in <devtools port> <address> <picture> [invite link]: the web client is opened at the try install's address
-//     and signed in, as a person would, pressing Sign In, the try install's sign-in going straight on; then a picture
-//     of it. With an invite link, its person first opens it and joins, pictured as <picture>-invite and -joined.
-//     Prints its access token.
-const [, port, address, picture, invite] = process.argv.slice(2);
+//     and signed in, as a person would, pressing Sign In, the try install's sign-in going straight on. With an invite
+//     link, its person first opens it and joins, pictured as <picture>-invite and -joined. Prints the code it shows to
+//     be approved (pictured as <picture>-approve), or nothing if it's a device of its person's already.
+//   picture <devtools port> <address> <picture>: once the web client's window is drawn, a picture of it.
+const [command, port, address, picture, invite] = process.argv.slice(2);
 const pages = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
 const page = pages.find((p) => p.type === "page" && p.url.startsWith(address)) || pages.find((p) => p.type === "page");
 if (!page) throw new Error("the browser has no page open");
@@ -36,6 +37,13 @@ const until = async (test, doing) => {
 await send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 860, deviceScaleFactor: 1, mobile: false });
 
 const named = (suffix) => picture.replace(/\.png$/, `-${suffix}.png`);
+if (command === "picture") {
+  await until(`!!document.querySelector(".window")`, "the web client wasn't let in");
+  await sleep(2500);
+  await shoot(picture);
+  ws.close();
+  process.exit(0);
+}
 if (invite) {
   await send("Page.navigate", { url: invite });
   await until(`!!document.querySelector("#go:not([disabled])")`, "the invite page didn't open");
@@ -58,9 +66,10 @@ for (;;) {
   if (at.signIn) await evaluate(`document.querySelector("[data-signin]").click()`);
   else if (at.kept && at.href.startsWith(address) && new URL(at.href).pathname !== "/callback") break;
 }
-// What signing in shows, drawn.
-await sleep(2500);
-await shoot(picture);
-// The sign-in's access token, for its first device's stand-in (try_install.rs's stand_in), never shown.
-console.log(await evaluate(`JSON.parse(localStorage.getItem("one.signin") || "null")?.access || ""`));
+// Its code to be approved, once it shows one; nothing once its window is drawn.
+await until(`!!document.querySelector(".join-code, .window")`, "the web client didn't start");
+await sleep(500);
+const code = await evaluate(`document.querySelector(".join-code")?.textContent.replace(" ", "") || ""`);
+if (code) await shoot(named("approve"));
+console.log(code);
 ws.close();

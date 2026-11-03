@@ -4,6 +4,12 @@
 // frame, and this page answers its bridge as the Mac app's web view does, making each call itself. Nothing is cached.
 
 // The bridge and kit (src/screen/), loaded after this, give `one`; this page answers it for its own use (`__one.host`).
+// This browser is a device of its person (device.js): it signs what changes who can do what, and hands each call the
+// keys it needs.
+import { answer, browserKeys, browserName, codeOf, Device, joinAsk } from "./device.js";
+import { members } from "./members.js";
+import { qrSvg } from "./qr.js";
+
 window.__one = {};
 
 (() => {
@@ -47,7 +53,7 @@ window.__one = {};
         }),
       });
       const out = await r.json().catch(() => ({}));
-      if (!r.ok || !out.client_id) throw new Error(out.error_description || out.message || "This browser couldn't sign up to sign in.");
+      if (!r.ok || !out.client_id) throw new Error(out.error_description || out.message || "Couldn't start signing in. Try again.");
       localStorage.setItem(CLIENT, JSON.stringify({ id: out.client_id, redirect: `${location.origin}/callback` }));
       return out.client_id;
     },
@@ -109,6 +115,17 @@ window.__one = {};
       return navigator.locks ? navigator.locks.request("one.refresh", refresh) : refresh();
     },
 
+    /// Who the access token says this is (its `sub`), for a browser whose person isn't in yet.
+    user() {
+      try {
+        return JSON.parse(atob(auth.kept().access.split(".")[1].replaceAll("-", "+").replaceAll("_", "/"))).sub || null;
+      } catch {
+        return null;
+      }
+    },
+    /// Whether the node has said who this is: once it has, a 403 is a refusal, not someone not yet let in.
+    person: () => !!store.state?.user,
+
     async signOut() {
       const kept = auth.kept();
       localStorage.removeItem(KEPT);
@@ -124,37 +141,48 @@ window.__one = {};
     },
   };
 
-  /// What the person's signed-in clients call this browser: "Chrome on Mac".
-  function browserName() {
-    const ua = navigator.userAgent;
-    const browser = /Edg\//.test(ua) ? "Edge" : /Firefox\//.test(ua) ? "Firefox" : /Chrome\//.test(ua) ? "Chrome" : /Safari\//.test(ua) ? "Safari" : "A browser";
-    const os = /iPhone|iPad/.test(ua) ? "iPhone" : /Mac OS X/.test(ua) ? "Mac" : /Android/.test(ua) ? "Android" : /Windows/.test(ua) ? "Windows" : /Linux/.test(ua) ? "Linux" : "";
-    return os ? `${browser} on ${os}` : browser;
-  }
-
   // MARK: The node
 
   class NodeError extends Error {}
 
-  /// A request to the node, as this person: JSON in and out, or with `raw` the response itself.
+  /// This browser as its person's device, once it's listed as one (`join`): null until then.
+  let device = null;
+
+  /// A request to the node, as this person: JSON in and out, or with `raw` the response itself. Once this browser is a
+  /// device, it goes with the keys it needed last time; a node that needs others says so (428), and it goes again once
+  /// with them.
   async function api(path, { method = "GET", body, query, raw, signal } = {}) {
     const url = new URL(path, location.origin);
     for (const [k, v] of Object.entries(query || {})) if (v != null) url.searchParams.set(k, typeof v === "string" ? v : JSON.stringify(v));
+    const route = Device.route(url.pathname, body);
     let token = await auth.token();
-    for (let tries = 0; ; tries++) {
+    for (let tries = 0, needed = false; ; tries++) {
       const headers = { authorization: `Bearer ${token}` };
       if (body !== undefined) headers["content-type"] = "application/json";
+      const keys = device && (await device.handoff(route, token, auth.kept()?.until || Date.now() + 60_000));
+      if (keys) headers["x-one-keys"] = keys;
       const r = await fetch(url, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), signal });
       if (r.status === 401 && tries === 0) {
         token = await auth.token(token);
         continue;
       }
       if (r.status === 401) throw Object.assign(new NodeError("Signed out."), { signedOut: true });
+      if (r.status === 403 && !auth.person()) throw Object.assign(new NodeError("Not approved yet."), { status: 403 });
+      if (r.status === 428 && device && !needed) {
+        needed = true;
+        await device.learn(route, await r.json());
+        continue;
+      }
       if (raw && r.ok) return r;
       const out = await r.json().catch(() => null);
-      if (!r.ok || out?.error) throw new NodeError(out?.error || (r.status >= 500 ? "Your device isn't answering." : `It didn't work (${r.status}).`));
+      if (!r.ok || out?.error) throw Object.assign(new NodeError(out?.error || (r.status >= 500 ? "Your device isn't answering." : "That didn't work. Try again.")), { status: r.status });
       return out;
     }
+  }
+
+  /// A request to the address that isn't a node's, with the access token: auth's own routes.
+  async function bearer(path, init = {}) {
+    return fetch(path, { ...init, headers: { ...init.headers, authorization: `Bearer ${await auth.token()}` } });
   }
 
   /// Phosphor's icons, from the node once, for those the bridge asks for: on this page, and in screens' frames.
@@ -205,6 +233,8 @@ window.__one = {};
     const regrouped = JSON.stringify([state.user, state.install?.groups]) !== JSON.stringify([store.state?.user, store.state?.install?.groups]);
     const first = !store.state;
     store.state = state;
+    // While it's being let in, its apps wait: they need the keys it's about to get.
+    if (joining) return;
     if (first || regrouped || !store.apps.length) await refreshApps();
     else render();
   }
@@ -304,8 +334,11 @@ window.__one = {};
 
   const root = $("#root");
 
+  /// While this browser waits to be approved, the window isn't drawn: its join screen is.
+  let joining = false;
+
   function render() {
-    if (!store.state) return;
+    if (!store.state || joining) return;
     if (!install()) return void (root.innerHTML = message("Nothing Here Yet", `This device isn't set up yet. Set it up from the ${esc(config().name || "app")} app on one of your devices.`));
     if (!$(".window", root)) root.innerHTML = `<div class="window"><nav class="sidebar"></nav><main class="detail"></main></div>`;
     drawSidebar();
@@ -483,7 +516,7 @@ window.__one = {};
           if (m.value != null) setAppearance(String(m.value));
           return reply(appearance());
         case "device":
-          return reply({ name: browserName(), build: deviceBuild(), signOut: true });
+          return reply({ name: browserName(), build: deviceBuild(), signOut: true, keys: !!device });
         case "request":
           return reply((await openSheet(own("request", { scope: String(m.scope || ""), id: String(m.id || "") }))) === true);
         case "vault": {
@@ -628,14 +661,71 @@ window.__one = {};
     return one.appIcon({ name: item.name, title: item.title, icon: item.icon, color: item.color }, size);
   }
 
-  /// `one.api` for a client's own screen: the node's /v1 at this origin, as this person; nothing else here.
+  /// `one.api` for a client's own screen: the node's /v1 at this origin, as this person; nothing else here. What
+  /// changes who can do what, and letting devices in, this browser does itself (`signs`).
   async function clientApi(m) {
     const url = new URL(String(m.path || ""), location.origin);
     if (url.origin !== location.origin || !url.pathname.startsWith("/v1/")) throw new Error("That isn't your device's.");
     const method = String(m.method || "GET").toUpperCase();
     const body = method === "GET" ? undefined : m.body ?? {};
     if (url.pathname === "/v1/call" && body && typeof body === "object") body.client = "web";
+    const own = signs[`${method} ${url.pathname}`];
+    if (own) {
+      if (!device) throw new Error("This browser hasn't been approved yet.");
+      const out = await own(body || {});
+      await refreshState().catch(() => {});
+      return out ?? {};
+    }
     return api(url.pathname + url.search, { method, body });
+  }
+
+  /// Signs `content` in `log` as this browser, and writes it.
+  const write = (content, log = "global") => device.write(log, content);
+
+  /// What Settings' screens change that this browser signs itself, as its person's device: what a node's route of the
+  /// same path would do, built here (members.js), never by a node.
+  const signs = {
+    "POST /v1/role": (b) => write(members.role({ user: b.user, role: b.role })),
+    "POST /v1/remove": (b) => (b.user ? write(members.removeUser({ user: b.user })) : device.remove(String(b.key || ""))),
+    "POST /v1/settings": (b) => write(members.setting({ name: b.name, value: b.value ?? null })),
+    "POST /v1/group": async (b) => {
+      const name = String(b.name || "").trim();
+      if (!name) throw new Error("Give the group a name.");
+      const group = Array.from(crypto.getRandomValues(new Uint8Array(8)), (x) => x.toString(16).padStart(2, "0")).join("");
+      await write(members.group({ group, name }));
+      return { group };
+    },
+    "POST /v1/invite": (b) => write(members.invite({ group: b.group, user: b.user, role: b.role || "member" })),
+    "POST /v1/accept": (b) => write(members.accept({ group: b.group })),
+    "POST /v1/member": (b) => write(members.member({ group: b.group, user: b.user, role: b.role ?? null })),
+    "POST /v1/name": (b) => write(members.rename({ what: "key", id: device.me.key, name: String(b.name || "").trim() })),
+    "POST /v1/retire": (b) => write(members.retire({ app: b.app, owner: app(b.app)?.owner, how: b.how })),
+    // An app on everyone's page is a change to who can do what; on yours or a group's, a node writes it.
+    "POST /v1/install": (b) => (b.scope === "global" ? write(members.install({ app: b.app, installed: b.installed !== false })) : api("/v1/install", { method: "POST", body: b })),
+    "POST /v1/invite-link": (b) => device.invite(String(b.name || "")),
+    "POST /v1/grant": (b) => write(members.grant({ endpoint: b.endpoint, scope: b.scope, app: b.app, until: 0 })),
+    "GET /v1/devices/passkey": async () => ({ passkey: !!passkeyToList() }),
+    // As a machine's node answers it: without `confirm`, which device it is; with, it's let in.
+    "POST /v1/devices/approve": async (b) => {
+      const code = String(b.code || "").toUpperCase().replace(/[^A-Z2-7]/g, "");
+      const r = (await device.requests()).find((x) => x.code.replace(" ", "") === code);
+      if (!r) throw new Error("No device is waiting with that code. Check it, or start again on that device.");
+      if (b.confirm !== true) return { device: r.name, person: r.person, new: !r.mine };
+      await device.approve(r);
+    },
+    "POST /v1/devices/passkey": async () => {
+      const p = passkeyToList();
+      if (!p) throw new Error("Sign in with your passkey first.");
+      await device.listPasskey(p.prf, p.credential);
+      sessionStorage.removeItem("one.prf");
+    },
+  };
+
+  /// The passkey this tab signed in with, if it isn't listed yet: its PRF output stays in this tab only.
+  function passkeyToList() {
+    const prf = sessionStorage.getItem("one.prf"), credential = sessionStorage.getItem("one.prf.credential");
+    if (!prf || !credential || install()?.clients.some((c) => c.passkey === credential)) return null;
+    return { prf: Uint8Array.from(atob(prf.replaceAll("-", "+").replaceAll("_", "/")), (c) => c.charCodeAt(0)), credential };
   }
 
   /// "linux runs 3157ba4": what the device that answers runs, for telling builds apart.
@@ -701,9 +791,56 @@ window.__one = {};
     root.innerHTML = message(`Can’t Reach ${name}`, esc(text), `<div class="unavailable-text">It keeps trying.</div>`);
   }
 
+  /// Makes this browser a device of its person: listed already, or let in by a passkey of theirs that's listed, or
+  /// by one of their devices (or, for someone new, their inviter's), which it asks and waits for, showing its code.
+  async function join(user) {
+    const keys = await browserKeys(user);
+    const listed = () => [...(install()?.devices || []), ...(install()?.clients || [])].some((e) => e.key === keys.key);
+    const made = () => (device = new Device(keys, { state: () => store.state, api, bearer }));
+    if (listed()) return made();
+    const prf = sessionStorage.getItem("one.prf"), credential = sessionStorage.getItem("one.prf.credential");
+    if (prf && install()?.clients.some((c) => c.passkey === credential && c.user === user)) {
+      try {
+        await new Device(keys, { state: () => store.state, api, bearer }).approveByPasskey(Uint8Array.from(atob(prf.replaceAll("-", "+").replaceAll("_", "/")), (c) => c.charCodeAt(0)));
+        await refreshState();
+        if (listed()) return made();
+      } catch (err) {
+        console.warn("the passkey didn't let this browser in:", err);
+      }
+    }
+    const invite = sessionStorage.getItem("one.invite");
+    const ask = async () => answer(await bearer("/api/auth/devices/requests", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(await joinAsk(keys, browserName(), invite)) }));
+    await ask();
+    await showJoin(await codeOf(keys.key), !!invite);
+    for (let n = 1; ; n++) {
+      await new Promise((r) => setTimeout(r, 2000));
+      await refreshState().catch(() => {});
+      if (listed()) break;
+      // Asked again once it stopped waiting (15 minutes), or was turned down.
+      if (n % 10 === 0 && (await bearer(`/api/auth/devices/requests/${keys.key}`)).status === 404) await ask().catch(() => {});
+    }
+    sessionStorage.removeItem("one.invite");
+    root.innerHTML = "";
+    return made();
+  }
+
+  /// "Approve This Browser": its code, and the code as a QR, a link that opens Approve on a phone that scans it.
+  async function showJoin(code, invited) {
+    const name = config().name;
+    document.title = "Approve This Browser";
+    const link = `${location.origin}/approve#${code.replace(" ", "")}`;
+    root.innerHTML = `<div class="welcome join"><h1>Approve This Browser</h1>` +
+      `<p class="join-text">${invited ? "Whoever invited you approves it. Show them this code." : `Open ${esc(name)} on a device you already use, then Settings › Devices › Approve.`}</p>` +
+      `<div class="join-code" aria-label="Code">${esc(code)}</div><div class="join-qr">${qrSvg(link)}</div>` +
+      `<p class="join-note">Or scan this with that device.</p><button class="button" data-out>Sign Out</button></div>`;
+    $("[data-out]", root).onclick = () => auth.signOut();
+  }
+
   async function start() {
     if (/^#[0-9a-f]{3,8}$/i.test(whiteLabel.accent)) document.documentElement.style.setProperty("--accent", whiteLabel.accent);
     schemed(document, appearance());
+    // A new device's QR: Approve, with its code.
+    if (location.pathname === "/approve") history.replaceState(null, "", href(own("devices", { approve: location.hash.slice(1) })));
     if (location.pathname === "/callback") {
       try {
         history.replaceState(null, "", await auth.finish());
@@ -714,16 +851,30 @@ window.__one = {};
     }
     if (!auth.kept()) return showSignedOut();
     root.innerHTML = `<div class="starting">${one.loading("Starting")}</div>`;
+    joining = true;
+    // Someone new isn't anyone a node answers until their first device is let in.
+    let newcomer = null;
     for (let wait = 1000; ; wait = Math.min(wait * 2, 15_000)) {
       try {
         await refreshState();
         break;
       } catch (err) {
         if (err.signedOut) return showSignedOut();
+        if (err.status === 403 && (newcomer = auth.user())) break;
         showUnreachable(err.message);
         await new Promise((r) => setTimeout(r, wait));
       }
     }
+    if (newcomer || (install() && me())) {
+      try {
+        await join(newcomer || me().id);
+      } catch (err) {
+        if (err.signedOut) return showSignedOut();
+        return void (root.innerHTML = message("Can’t Approve This Browser", esc(err.message)));
+      }
+    }
+    joining = false;
+    await refreshApps().catch(() => {});
     // `/vault?id=…&scope=…`: an agent's link to a request for an item, answered over You.
     let ask = null;
     if (location.pathname === "/vault") {

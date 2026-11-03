@@ -40,9 +40,17 @@ function concat(...parts) {
   return out;
 }
 
+/// HKDF-SHA256's 32 bytes from `ikm`: bytes, or a non-extractable HKDF CryptoKey (`hkdfKey`) a browser keeps in memory.
 export async function hkdf(ikm, info, salt = new Uint8Array()) {
-  const key = await crypto.subtle.importKey("raw", bytes(ikm), "HKDF", false, ["deriveBits"]);
+  const key = ikm instanceof CryptoKey ? ikm : await crypto.subtle.importKey("raw", bytes(ikm), "HKDF", false, ["deriveBits"]);
   return new Uint8Array(await crypto.subtle.deriveBits({ name: "HKDF", hash: "SHA-256", salt: bytes(salt), info: bytes(info) }, key, 256));
+}
+
+/// A key to derive from, kept without its bytes: they're wiped once it's made.
+export async function hkdfKey(raw) {
+  const key = await crypto.subtle.importKey("raw", raw, "HKDF", false, ["deriveBits"]);
+  raw.fill(0);
+  return key;
 }
 
 export function random(n = 32) {
@@ -162,6 +170,30 @@ export async function ed25519Public(seed) {
   const pkcs8 = concat(new Uint8Array([0x30, 0x2e, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x04, 0x22, 0x04, 0x20]), bytes(seed));
   const key = await crypto.subtle.importKey("pkcs8", pkcs8, { name: "Ed25519" }, true, ["sign"]);
   return b64u.decode((await crypto.subtle.exportKey("jwk", key)).x);
+}
+
+/// The public half of an X25519 secret (a passkey's seal key, say).
+export async function x25519Public(secret) {
+  const pkcs8 = concat(new Uint8Array([0x30, 0x2e, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x6e, 0x04, 0x22, 0x04, 0x20]), bytes(secret));
+  const key = await crypto.subtle.importKey("pkcs8", pkcs8, { name: "X25519" }, true, ["deriveBits"]);
+  return b64u.decode((await crypto.subtle.exportKey("jwk", key)).x);
+}
+
+/// The X25519 key an Ed25519 public key is the twin of (`kernel::twin_public`): what's sealed to a Rust endpoint, or
+/// to the recovery key, is sealed to it. u = (1 + y) / (1 - y) mod 2^255 - 19.
+export function twinPublic(edPublic) {
+  const b = bytes(edPublic), P = (1n << 255n) - 19n;
+  let y = 0n;
+  for (let i = 31; i >= 0; i--) y = (y << 8n) | BigInt(i === 31 ? b[i] & 0x7f : b[i]);
+  const pow = (a, e) => {
+    let r = 1n;
+    for (a %= P; e; e >>= 1n, a = (a * a) % P) if (e & 1n) r = (r * a) % P;
+    return r;
+  };
+  let u = ((1n + y) * pow((1n - y + P) % P, P - 2n)) % P;
+  const out = new Uint8Array(32);
+  for (let i = 0; i < 32; i++, u >>= 8n) out[i] = Number(u & 255n);
+  return out;
 }
 
 export async function sign(key, domain, v) {
