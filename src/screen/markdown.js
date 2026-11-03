@@ -181,7 +181,7 @@
         fontFamily: getComputedStyle(document.body).fontFamily,
         themeVariables: {
           darkMode: dark, fontSize: "14px", background: "transparent",
-          primaryColor: v("--card") || (dark ? "#1c1c1e" : "#fff"), primaryTextColor: v("--text"), primaryBorderColor: v("--accent"),
+          primaryColor: v("--card") || (dark ? "#1c1c1e" : "#fff"), primaryTextColor: v("--text"), primaryBorderColor: v("--tint"),
           secondaryColor: v("--bg"), tertiaryColor: v("--bg"), lineColor: v("--muted"), textColor: v("--text"),
           noteBkgColor: v("--bg"), noteTextColor: v("--text"), noteBorderColor: v("--line"),
         },

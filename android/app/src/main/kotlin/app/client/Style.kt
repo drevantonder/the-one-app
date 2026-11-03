@@ -57,7 +57,24 @@ import androidx.core.graphics.PathParser
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
-// The Apple apps' calm look, on Android: their grouped greys and white cards, their type sizes, the install's accent.
+// The One App's look, on Android: the kit's colours, the iPhone's type sizes, the install's accent.
+
+/** The kit's colours (src/screen/kit.css), light then dark: tests/contracts.rs holds them to it. */
+object Kit {
+    val bg = 0xffffff to 0x141414
+    val card = 0xf4f4f4 to 0x222222
+    val raised = 0xffffff to 0x3a3a3a
+    val fill = 0xececec to 0x2b2b2b
+    val line = 0xe6e6e6 to 0x2f2f2f
+    val text = 0x111111 to 0xf2f2f2
+    val muted = 0x6b6b6b to 0x9b9b9b
+    val faint = 0xc8c8c8 to 0x4d4d4d
+    val warn = 0xb45309 to 0xfbbf24
+    val danger = 0xdc2626 to 0xf87171
+    val badge = 0xff3b30 to 0xff3b30
+}
+
+private fun Pair<Int, Int>.of(dark: Boolean) = Color(0xFF000000.toInt() or (if (dark) second else first))
 
 /** The system colours a page is drawn in, light or dark, as the iPhone's are. */
 @Immutable
@@ -73,20 +90,17 @@ data class Palette(
     val accent: Color,
 ) {
     val green = if (dark) Color(0xFF30D158) else Color(0xFF34C759)
-    val orange = if (dark) Color(0xFFFF9F0A) else Color(0xFFFF9500)
-    val red = if (dark) Color(0xFFFF453A) else Color(0xFFFF3B30)
+    val orange = Kit.warn.of(dark)
+    val red = Kit.danger.of(dark)
     val blue = Color(0xFF0A9EDC)
     val purple = Color(0xFFA550D9)
 }
 
 val LocalPalette = staticCompositionLocalOf { palette(false, BuildConfig.ACCENT) }
 
-fun palette(dark: Boolean, accent: String) = if (dark) Palette(
-    dark = true, background = Color.Black, card = Color(0xFF1C1C1E), label = Color.White, secondary = Color(0x99EBEBF5),
-    tertiary = Color(0x4DEBEBF5), separator = Color(0x5C545458), fill = Color(0x3D767680), accent = accentColor(accent, true),
-) else Palette(
-    dark = false, background = Color(0xFFF2F2F7), card = Color.White, label = Color.Black, secondary = Color(0x993C3C43),
-    tertiary = Color(0x4D3C3C43), separator = Color(0x4A3C3C43), fill = Color(0x1F787880), accent = accentColor(accent, false),
+fun palette(dark: Boolean, accent: String) = Palette(
+    dark = dark, background = Kit.bg.of(dark), card = Kit.card.of(dark), label = Kit.text.of(dark), secondary = Kit.muted.of(dark),
+    tertiary = Kit.faint.of(dark), separator = Kit.line.of(dark), fill = Kit.fill.of(dark), accent = accentColor(accent, dark),
 )
 
 /** An accent from hex, lifted a little in dark mode so it keeps its contrast there, yet still carries white text. */

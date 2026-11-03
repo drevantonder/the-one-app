@@ -5,8 +5,8 @@
 // it is ever markup: what's drawn is text, a number (`num`), or one of the names here.
 window.oneWidgets = (() => {
   const css = `
-  .w-card { display: flex; flex-direction: column; gap: 6px; padding: 16px; border-radius: 22px; background: var(--w-card, rgba(128, 128, 128, 0.12)); overflow: hidden; min-width: 0; font-size: 12px; line-height: 1.3; }
-  .w-card > .w-title { font-size: 11px; font-weight: 500; color: var(--w-muted, #8e8e93); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .w-card { display: flex; flex-direction: column; gap: 6px; padding: 16px; border-radius: 28px; background: var(--card); overflow: hidden; min-width: 0; font-size: 12px; line-height: 1.3; }
+  .w-card > .w-title { font-size: 11px; font-weight: 500; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .w-card .w-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
   .w-col { display: flex; flex-direction: column; gap: var(--gap, 4px); min-width: 0; }
   .w-row { display: flex; align-items: center; gap: var(--gap, 6px); min-width: 0; }
@@ -14,23 +14,24 @@ window.oneWidgets = (() => {
   .w-row > .w-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .w-xl { font-size: 22px; font-weight: 600; } .w-lg { font-size: 15px; font-weight: 600; } .w-sm { font-size: 11px; } .w-xs { font-size: 10px; }
   .w-medium { font-weight: 600; } .w-bold { font-weight: 700; }
-  .w-muted { color: var(--w-muted, #8e8e93); } .w-accent { color: var(--accent); } .w-good { color: #34c759; } .w-warn { color: #ff9f0a; } .w-bad { color: #ff3b30; } .w-blue { color: #0a9edc; } .w-purple { color: #a550d9; }
-  .w-stat b { font-size: 26px; font-weight: 600; font-variant-numeric: tabular-nums; } .w-stat small { color: var(--w-muted, #8e8e93); font-size: 11px; display: block; }
-  .w-bar { height: 6px; border-radius: 3px; background: rgba(128, 128, 128, 0.22); overflow: hidden; } .w-bar > i { display: block; height: 100%; background: var(--tone, var(--accent)); }
+  .w-muted { color: var(--muted); } .w-accent { color: var(--tint); } .w-good { color: var(--text); } .w-warn { color: var(--warn); } .w-bad { color: var(--danger); } .w-blue { color: #0a9edc; } .w-purple { color: #a550d9; }
+  .w-stat b { font-size: 26px; font-weight: 600; font-variant-numeric: tabular-nums; } .w-stat small { color: var(--muted); font-size: 11px; display: block; }
+  .w-bar { height: 6px; border-radius: 3px; background: rgba(128, 128, 128, 0.22); overflow: hidden; } .w-bar > i { display: block; height: 100%; background: var(--tone, var(--text)); }
   .w-list > .w-item { display: flex; align-items: center; gap: 8px; padding: 5px 0; border-top: 0.5px solid rgba(128, 128, 128, 0.25); } .w-list > .w-item:first-child { border-top: 0; }
   .w-item > div { min-width: 0; } .w-item .w-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .w-item .w-sub { font-size: 11px; color: var(--w-muted, #8e8e93); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .w-item .w-end { margin-left: auto; flex: none; color: var(--w-muted, #8e8e93); font-variant-numeric: tabular-nums; }
-  .w-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--tone, #34c759); flex: none; }
+  .w-item .w-sub { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .w-item .w-end { margin-left: auto; flex: none; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .w-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--tone, var(--muted)); flex: none; }
   .w-card hr { border: 0; border-top: 0.5px solid rgba(128, 128, 128, 0.3); margin: 4px 0; width: 100%; }
-  .w-link { color: var(--accent); cursor: pointer; text-decoration: none; }
-  .w-button { font: inherit; border: 0; border-radius: 999px; padding: 4px 11px; background: rgba(128, 128, 128, 0.18); color: var(--tone, var(--accent)); cursor: pointer; }
+  .w-link { color: var(--tint); cursor: pointer; text-decoration: none; }
+  .w-button { font: inherit; border: 0; border-radius: 999px; padding: 4px 11px; background: rgba(128, 128, 128, 0.18); color: var(--tone, var(--tint)); cursor: pointer; }
   .w-button:disabled { opacity: .5; }
   label.w-toggle { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex: 1; }
   .w-linked { cursor: pointer; }
-  .w-broken { color: #ff9f0a; font-weight: 500; font-size: 13px; } .w-why { color: var(--w-muted, #8e8e93); font-size: 11px; overflow-wrap: anywhere; user-select: text; }`;
+  .w-broken { color: var(--warn); font-weight: 500; font-size: 13px; } .w-why { color: var(--muted); font-size: 11px; overflow-wrap: anywhere; user-select: text; }`;
 
   const classes = ["col", "row", "text", "xl", "lg", "sm", "xs", "medium", "bold"];
-  const tones = { muted: "var(--w-muted, #8e8e93)", accent: "var(--accent)", good: "#34c759", warn: "#ff9f0a", bad: "#ff3b30", blue: "#0a9edc", purple: "#a550d9" };
+  // Colour only where it means something (src/screen/kit.css): fine is plain text, warn and bad need you.
+  const tones = { muted: "var(--muted)", accent: "var(--tint)", good: "var(--text)", warn: "var(--warn)", bad: "var(--danger)", blue: "#0a9edc", purple: "#a550d9" };
   // A number from a tree, or `or` where it isn't one.
   const num = (v, or) => (v === null || v === "" || !Number.isFinite(Number(v)) ? or : Number(v));
   const fmt = (v) => typeof v === "number" ? v.toLocaleString(undefined, { maximumFractionDigits: 2 }) : String(v ?? "–");
@@ -107,7 +108,7 @@ window.oneWidgets = (() => {
         const f = Math.max(0, Math.min(1, num(n.value, 0) / (num(n.max) || 1))), r = 18, c = 2 * Math.PI * r;
         el = svg({ viewBox: "0 0 46 46", width: num(n.w) || 46, height: num(n.w) || 46 });
         el.innerHTML = `<circle cx="23" cy="23" r="${r}" fill="none" stroke="rgba(128,128,128,.22)" stroke-width="5"/>
-          <circle cx="23" cy="23" r="${r}" fill="none" stroke="${color || "var(--accent)"}" stroke-width="5" stroke-linecap="round"
+          <circle cx="23" cy="23" r="${r}" fill="none" stroke="${color || "var(--text)"}" stroke-width="5" stroke-linecap="round"
             stroke-dasharray="${c * f} ${c}" transform="rotate(-90 23 23)"/>
           <text x="23" y="27" text-anchor="middle" font-size="10" font-weight="600" fill="currentColor"></text>`;
         el.querySelector("text").textContent = n.label ?? Math.round(f * 100) + "%";
@@ -129,7 +130,7 @@ window.oneWidgets = (() => {
         const h = num(n.h) || (n.t === "spark" ? 28 : 70), wd = (n.t === "spark" && num(n.w)) || 240;
         el = svg({ viewBox: `0 0 ${wd} ${h + (Array.isArray(n.labels) ? 14 : 0)}`, width: n.t === "spark" && num(n.w) ? wd : "100%" });
         if (n.t === "spark") el.setAttribute("preserveAspectRatio", "none");
-        const fill = color || "var(--accent)", step = wd / Math.max(v.length, 1);
+        const fill = color || "var(--text)", step = wd / Math.max(v.length, 1);
         if (n.t === "spark" && !v.length) {
           el.innerHTML = `<line x1="2" y1="${h / 2}" x2="${wd - 2}" y2="${h / 2}" stroke="rgba(128,128,128,.4)" stroke-width="1.5" stroke-dasharray="2 3"/>`;
         } else if (n.t === "spark") {
@@ -144,7 +145,7 @@ window.oneWidgets = (() => {
         }
         labels.forEach((l, i) => {
           const t = document.createElementNS("http://www.w3.org/2000/svg", "text");
-          for (const [k, val] of Object.entries({ x: (i + 0.5) * step, y: h + 12, "text-anchor": "middle", "font-size": "10", fill: "var(--w-muted, #8e8e93)" })) t.setAttribute(k, val);
+          for (const [k, val] of Object.entries({ x: (i + 0.5) * step, y: h + 12, "text-anchor": "middle", "font-size": "10", fill: "var(--muted)" })) t.setAttribute(k, val);
           t.textContent = String(l ?? "");
           el.append(t);
         });

@@ -1,7 +1,6 @@
 <style>
   html, body { height: 100%; }
-  body { padding: 0; max-width: none; overflow: hidden; --w-card: var(--card); }
-  @media (prefers-color-scheme: dark) { body { --w-card: var(--card); } }
+  body { padding: 0; max-width: none; overflow: hidden; }
   /* A home screen: touching and holding it offers what it does, never selecting its words. */
   #pages { height: 100%; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
   /* Side by side, a page each: swipe between them, scroll within one. */
@@ -15,7 +14,7 @@
   .header .subtitle { font-size: 15px; color: var(--muted); margin-top: 2px; }
   .header .edit[data-done] { font-weight: 600; }
   .header .edit[hidden] { display: none; }
-  .header .edit { flex: none; margin-top: 6px; border: 0; background: none; font: inherit; font-size: 15px; color: var(--accent); cursor: pointer; display: flex; align-items: center; gap: 5px; }
+  .header .edit { flex: none; margin-top: 6px; border: 0; background: none; font: inherit; font-size: 15px; color: var(--tint); cursor: pointer; display: flex; align-items: center; gap: 5px; }
   .grid { display: grid; position: relative; }
   .cell { position: relative; display: grid; min-width: 0; min-height: 0; }
   .cell > .w-card { min-height: 0; }
@@ -26,7 +25,7 @@
   .tile-icon > .app-icon, .tile-icon > .folder, .tile-icon > .avatar { --size: var(--icon, 60px) !important; width: var(--icon, 60px); height: var(--icon, 60px); }
   .tile-icon > .avatar { font-size: calc(var(--icon, 60px) * 0.4); }
   .tile-name { font-size: 13px; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .badge { position: absolute; top: -7px; right: -7px; min-width: 24px; height: 24px; padding: 0 7px; border-radius: 12px; background: #ff3b30; color: white; font-size: 14px; font-weight: 600; line-height: 24px; text-align: center; font-variant-numeric: tabular-nums; }
+  .badge { position: absolute; top: -7px; right: -7px; min-width: 24px; height: 24px; padding: 0 7px; border-radius: 12px; background: var(--badge); color: white; font-size: 14px; font-weight: 600; line-height: 24px; text-align: center; font-variant-numeric: tabular-nums; }
   /* Where a window draws screens at its smaller text (a zoom on the page), a widget keeps its own size. */
   .widget { zoom: var(--unzoom, 1); }
   .widget.opens { cursor: pointer; }
@@ -64,7 +63,7 @@
   .edit-bar { position: fixed; z-index: 10; top: calc(10px + env(safe-area-inset-top)); left: 16px; right: 16px; display: flex; justify-content: space-between; pointer-events: none; }
   .edit-bar button { pointer-events: auto; height: 36px; padding: 0 16px; border: 0; border-radius: 18px; font: inherit; font-size: 15px; font-weight: 600; cursor: pointer; color: var(--text);
     background: color-mix(in srgb, var(--card) 85%, transparent); -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px); box-shadow: 0 2px 10px rgba(0, 0, 0, 0.12), 0 0 0 0.5px var(--line); }
-  .edit-bar .done { background: var(--accent); color: white; }
+  .edit-bar .done { background: var(--tint); color: white; }
   .editing.swipe .one-page { padding-top: calc(60px + env(safe-area-inset-top)); }
 
   /* A widget's options, turned round to face its person, the rest of the page dimmed. */
@@ -77,11 +76,7 @@
   .options .head { display: flex; align-items: center; gap: 10px; padding: 0 16px; height: 56px; font-weight: 600; }
   .options .head .app-icon { --size: 28px; width: 28px; height: 28px; }
   .options label { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 50px; padding: 0 16px; border-top: 0.5px solid var(--line); }
-  .options select { font: inherit; color: var(--accent); background: none; border: 0; text-align: right; max-width: 60%; }
-  .switch { appearance: none; -webkit-appearance: none; flex: none; width: 51px; height: 31px; border-radius: 16px; background: var(--line); position: relative; margin: 0; cursor: pointer; transition: background 0.2s; }
-  .switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 27px; height: 27px; border-radius: 50%; background: white; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2); transition: transform 0.2s; }
-  .switch:checked { background: #34c759; }
-  .switch:checked::after { transform: translateX(20px); }
+  .options select { font: inherit; color: var(--tint); background: none; border: 0; text-align: right; max-width: 60%; }
 
   /* Your pages, in an order of your own: groups' move and hide; yours and everyone's stay. */
   .pages-sheet .back { padding-bottom: 8px; }
@@ -90,7 +85,7 @@
   .pages-sheet .row-page .title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .pages-sheet .row-page.moving { position: relative; z-index: 2; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2); }
   .pages-sheet .foot { font-size: 13px; color: var(--muted); padding: 8px 16px 4px; }
-  .pages-sheet .head button { margin-left: auto; border: 0; background: none; font: inherit; font-weight: 600; color: var(--accent); cursor: pointer; }
+  .pages-sheet .head button { margin-left: auto; border: 0; background: none; font: inherit; font-weight: 600; color: var(--tint); cursor: pointer; }
 
   /* Under the pages: the one shown's name, then a dot for each, with a cog for Settings. Slide along it to change page. */
   .dots { position: fixed; left: 0; right: 0; bottom: calc(10px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; align-items: center; gap: 6px; pointer-events: none; }
@@ -104,13 +99,13 @@
   .capsule .marks i.on { width: 16px; background: var(--text); }
   .capsule .cog { position: relative; padding: 0 18px 0 6px; font-size: 18px; }
   .capsule .cog.on { color: var(--text); }
-  .capsule .cog.attention::after { content: ""; position: absolute; top: 11px; right: 14px; width: 7px; height: 7px; border-radius: 4px; background: var(--danger); }
+  .capsule .cog.attention::after { content: ""; position: absolute; top: 11px; right: 14px; width: 7px; height: 7px; border-radius: 4px; background: var(--badge); }
   /* Add Widget: each widget once, at the size chosen, as it would look on the page. */
   .adding { padding: 14px 0 18px; border-bottom: 0.5px solid var(--line); }
   .adding:last-child { border-bottom: 0; }
   .adding-head { display: flex; align-items: center; gap: 10px; }
   .adding-head .app-icon { --size: 28px !important; width: 28px; height: 28px; }
-  .adding-preview { --w-card: var(--card); display: flex; justify-content: center; margin: 4px 0 14px; pointer-events: none; }
+  .adding-preview { display: flex; justify-content: center; margin: 4px 0 14px; pointer-events: none; }
   .adding-preview .w-card { box-sizing: border-box; }
   .adding .button { width: 100%; }
   @media (prefers-reduced-motion: reduce) { .editing .cell { animation: none; } }

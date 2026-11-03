@@ -33,14 +33,32 @@ public static class Look
     public static Color Accent => Hex(Store.Shared.Config?.Accent ?? WhiteLabel.Accent, Dark);
     public static SolidColorBrush AccentBrush => new(Accent);
 
-    // Fluent's text fills, as its light and dark themes have them: its own brushes keep the theme the window started
-    // in when Windows changes it while it's open.
-    public static Brush Primary => new SolidColorBrush(Dark ? Color.FromArgb(0xFF, 255, 255, 255) : Color.FromArgb(0xE4, 0, 0, 0));
-    public static Brush Secondary => new SolidColorBrush(Dark ? Color.FromArgb(0xC5, 255, 255, 255) : Color.FromArgb(0x9E, 0, 0, 0));
-    public static Brush Tertiary => new SolidColorBrush(Dark ? Color.FromArgb(0x87, 255, 255, 255) : Color.FromArgb(0x72, 0, 0, 0));
-    public static Brush Card => Themed("CardBackgroundFillColorDefaultBrush");
-    public static Brush CardStroke => Themed("CardStrokeColorDefaultBrush");
-    public static Brush Critical => Themed("SystemFillColorCriticalBrush");
+    // The kit's colours (src/screen/kit.css), light then dark: tests/contracts.rs holds them to it.
+    public static readonly (uint Light, uint Dark) bg = (0xffffff, 0x141414);
+    public static readonly (uint Light, uint Dark) card = (0xf4f4f4, 0x222222);
+    public static readonly (uint Light, uint Dark) raised = (0xffffff, 0x3a3a3a);
+    public static readonly (uint Light, uint Dark) fill = (0xececec, 0x2b2b2b);
+    public static readonly (uint Light, uint Dark) line = (0xe6e6e6, 0x2f2f2f);
+    public static readonly (uint Light, uint Dark) text = (0x111111, 0xf2f2f2);
+    public static readonly (uint Light, uint Dark) muted = (0x6b6b6b, 0x9b9b9b);
+    public static readonly (uint Light, uint Dark) faint = (0xc8c8c8, 0x4d4d4d);
+    public static readonly (uint Light, uint Dark) warn = (0xb45309, 0xfbbf24);
+    public static readonly (uint Light, uint Dark) danger = (0xdc2626, 0xf87171);
+    public static readonly (uint Light, uint Dark) badge = (0xff3b30, 0xff3b30);
+
+    /// A colour of the kit's, as the window's theme has it: Fluent's own brushes keep the theme the window started in
+    /// when Windows changes it while it's open.
+    static SolidColorBrush Of((uint Light, uint Dark) c)
+    {
+        var v = Dark ? c.Dark : c.Light;
+        return new(Color.FromArgb(255, (byte)(v >> 16 & 0xFF), (byte)(v >> 8 & 0xFF), (byte)(v & 0xFF)));
+    }
+    public static Brush Primary => Of(text);
+    public static Brush Secondary => Of(muted);
+    public static Brush Tertiary => Of(faint);
+    public static Brush Card => Of(card);
+    public static Brush CardStroke => Of(line);
+    public static Brush Critical => Of(danger);
 
     /// A brush of the Fluent styles, as the window's theme (the person's choice, or Windows') has it.
     public static Brush Themed(string key)

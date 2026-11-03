@@ -60,7 +60,7 @@ const PAGE = `
   /* A phone's whole screen, upright in the tile, like a phone. */
   .pic img.phone { position: absolute; top: 8px; left: 50%; transform: translateX(-50%); width: auto; height: calc(100% - 16px); box-sizing: border-box; border: 3px solid #1c1c1e; border-radius: 12px; }
   .tile.paused .pic img { filter: grayscale(0.9) brightness(0.5); }
-  .tile.opens:hover .pic { border-color: var(--accent); }
+  .tile.opens:hover .pic { border-color: var(--tint); }
   .name { font-weight: 600; margin-top: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .sub { color: var(--muted); font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-height: 1.3em; }
 </style>

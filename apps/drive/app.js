@@ -285,8 +285,8 @@ function settingsScreen(title, blurb) {
   return `
 <style>
   .card { background: var(--card); border-radius: 12px; padding: 14px 16px; margin: 12px 0; }
-  button.primary { font: inherit; font-weight: 600; color: white; background: var(--accent); border: 0; border-radius: 10px; padding: 11px 16px; }
-  button.plain { font: inherit; color: var(--accent); background: none; border: 0; padding: 4px 0; margin-left: 12px; }
+  button.primary { font: inherit; font-weight: 600; color: white; background: var(--tint); border: 0; border-radius: 10px; padding: 11px 16px; }
+  button.plain { font: inherit; color: var(--tint); background: none; border: 0; padding: 4px 0; margin-left: 12px; }
   input { width: 100%; box-sizing: border-box; font: inherit; padding: 11px 14px; border-radius: 10px; border: 0.5px solid var(--line); background: var(--bg); color: var(--text); margin: 8px 0; }
   ol { padding-left: 20px; margin: 8px 0; }
   .dot { width: 9px; height: 9px; border-radius: 50%; background: #34c759; flex: none; margin-right: 12px; }

@@ -1,27 +1,47 @@
 /* The design kit every app screen gets: plain HTML styled to sit inside a native shell. */
+/* The One App's colours, the one list (light here, dark below): every client and the MCP view use these values, and
+   tests/contracts.rs holds them to it. Plain neutrals; colour only where it means something: the tint is "tap this",
+   warn and danger "this needs you", badge a count waiting. The tint is the platform's: a shell sets --tint to its own,
+   and a browser's is its AccentColor. */
 :root {
   color-scheme: light dark;
-  --bg: #f2f2f7;
-  --card: #ffffff;
-  --text: #000000;
-  --muted: #6c6c70;
-  --faint: #c6c6c8;
-  --line: rgba(60, 60, 67, 0.18);
-  --danger: #ff3b30;
-  --radius: 12px;
+  --bg: #ffffff;
+  --card: #f4f4f4;
+  --raised: #ffffff;
+  --fill: #ececec;
+  --line: #e6e6e6;
+  --text: #111111;
+  --muted: #6b6b6b;
+  --faint: #c8c8c8;
+  --warn: #b45309;
+  --danger: #dc2626;
+  --badge: #ff3b30;
+  --tint: #007aff;
+  --radius: 26px;
   font: 17px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
   -webkit-text-size-adjust: 100%;
 }
 @media (prefers-color-scheme: dark) {
-  :root { --bg: #000000; --card: #1c1c1e; --text: #ffffff; --muted: #98989f; --faint: #48484a; --line: rgba(84, 84, 88, 0.6); --danger: #ff453a; }
-  /* Raised, as a shell's sheet is (data-raised): its own background is grey, so cards are a step lighter, as the
-     platform's grouped lists are there. */
-  :root[data-raised] { --bg: #1c1c1e; --card: #2c2c2e; --faint: #545458; }
+  :root {
+    --bg: #141414;
+    --card: #222222;
+    --raised: #3a3a3a;
+    --fill: #2b2b2b;
+    --line: #2f2f2f;
+    --text: #f2f2f2;
+    --muted: #9b9b9b;
+    --faint: #4d4d4d;
+    --warn: #fbbf24;
+    --danger: #f87171;
+  }
+  /* Raised, as a shell's sheet is (data-raised): cards a step lighter on it. */
+  :root[data-raised] { --bg: #222222; --card: #3a3a3a; }
 }
+@supports (color: AccentColor) { :root { --tint: AccentColor; } }
 * { box-sizing: border-box; }
 html, body { margin: 0; background: var(--bg); color: var(--text); }
 body { padding: 8px 16px calc(96px + env(safe-area-inset-bottom)); max-width: 760px; margin: 0 auto; }
-a { color: var(--accent); text-decoration: none; }
+a { color: var(--tint); text-decoration: none; }
 .muted { color: var(--muted); }
 .small { font-size: 13px; }
 
@@ -50,10 +70,10 @@ h2.section { font-size: 13px; font-weight: 400; text-transform: none; color: var
 .row.dim .main, .row.dim .app-icon { opacity: 0.4; }
 .row .note { color: var(--muted); font-size: 15px; white-space: nowrap; flex: none; }
 
-.icon { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; flex: none; font-weight: 600; font-size: 15px; color: white; background: var(--accent); }
+.icon { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; flex: none; font-weight: 600; font-size: 15px; color: white; background: var(--tint); }
 .icon.grey { background: var(--faint); color: var(--text); }
 /* An app's icon, from one.appIcon: a shell draws its tile in; a browser shows its picture, or its first letter. */
-.app-icon { --size: 36px; --tile: var(--accent); width: var(--size); height: var(--size); border-radius: calc(var(--size) * 0.225); display: grid; place-items: center; flex: none; font-weight: 600; font-size: calc(var(--size) * 0.42); color: white; background: linear-gradient(color-mix(in srgb, var(--tile) 80%, white), var(--tile)); background-size: cover; }
+.app-icon { --size: 36px; --tile: var(--tint); width: var(--size); height: var(--size); border-radius: calc(var(--size) * 0.225); display: grid; place-items: center; flex: none; font-weight: 600; font-size: calc(var(--size) * 0.42); color: white; background: linear-gradient(color-mix(in srgb, var(--tile) 80%, white), var(--tile)); background-size: cover; }
 .app-icon.drawn { color: transparent; }
 /* A logo drawn on white in a browser gets the hairline edge a shell gives it. */
 .app-icon.logo { background-color: #fff; background-size: 80%; background-repeat: no-repeat; background-position: center; box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.12); }
@@ -71,8 +91,8 @@ h2.section { font-size: 13px; font-weight: 400; text-transform: none; color: var
 .composer { position: fixed; left: 0; right: 0; bottom: 0; padding: 8px 12px calc(8px + env(safe-area-inset-bottom)); background: color-mix(in srgb, var(--bg) 85%, transparent); -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px); }
 .composer form { display: flex; gap: 8px; max-width: 760px; margin: 0 auto; }
 .composer input { flex: 1; min-width: 0; font: inherit; padding: 9px 14px; border-radius: 20px; border: 0.5px solid var(--line); background: var(--card); color: var(--text); outline: none; }
-.composer input:focus { border-color: var(--accent); }
-.composer button { flex: none; width: 36px; height: 36px; border-radius: 50%; border: 0; background: var(--accent); color: white; font-size: 18px; }
+.composer input:focus { border-color: var(--tint); }
+.composer button { flex: none; width: 36px; height: 36px; border-radius: 50%; border: 0; background: var(--tint); color: white; font-size: 18px; }
 .composer button:disabled { background: var(--faint); }
 .composer .error { color: var(--danger); font-size: 13px; max-width: 760px; margin: 0 auto 6px; padding: 0 6px; }
 
@@ -83,9 +103,9 @@ h2.section { font-size: 13px; font-weight: 400; text-transform: none; color: var
 @media (prefers-color-scheme: dark) { .segmented button.on { background: #636366; } }
 
 /* An on/off switch, as iOS draws one: <input type="checkbox" class="switch">. */
-.switch { appearance: none; -webkit-appearance: none; flex: none; width: 51px; height: 31px; margin: 0; border-radius: 16px; background: var(--line); position: relative; transition: background 0.2s; }
+.switch { appearance: none; -webkit-appearance: none; flex: none; width: 51px; height: 31px; margin: 0; border-radius: 16px; background: var(--line); position: relative; cursor: pointer; transition: background 0.2s; }
 .switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 27px; height: 27px; border-radius: 50%; background: #fff; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2); transition: transform 0.2s; }
-.switch:checked { background: #34c759; }
+.switch:checked { background: var(--tint); }
 .switch:checked::after { transform: translateX(20px); }
 .switch:disabled { opacity: 0.5; }
 
@@ -97,19 +117,19 @@ h2.section { font-size: 13px; font-weight: 400; text-transform: none; color: var
 @media (prefers-color-scheme: dark) { :root { --code-bg: rgba(118, 118, 128, 0.24); --ok: #30d158; } }
 .i { width: 1.1em; height: 1.1em; flex: none; vertical-align: -0.18em; }
 
-.button { font: inherit; font-size: 15px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 7px 14px; border-radius: 10px; border: 0; background: var(--line); color: var(--accent); cursor: pointer; white-space: nowrap; }
-.button.primary { background: var(--accent); color: white; }
+.button { font: inherit; font-size: 15px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 7px 14px; border-radius: 10px; border: 0; background: var(--line); color: var(--tint); cursor: pointer; white-space: nowrap; }
+.button.primary { background: var(--tint); color: white; }
 .button.danger { background: var(--danger); color: white; }
 .button.plain { background: none; }
 /* The App Store's GET: a small capsule, tinted, its word in bold. .filled for the one that matters most. */
-.button.capsule { font-size: 15px; font-weight: 700; min-width: 76px; padding: 5px 16px; border-radius: 999px; background: var(--code-bg); color: var(--accent); }
-.button.capsule.filled { background: var(--accent); color: white; }
+.button.capsule { font-size: 15px; font-weight: 700; min-width: 76px; padding: 5px 16px; border-radius: 999px; background: var(--code-bg); color: var(--tint); }
+.button.capsule.filled { background: var(--tint); color: white; }
 .button:disabled { opacity: 0.6; }
 .button:active { opacity: 0.7; }
 
 /* A button that opens a menu, as a row's role: <label class="pick">its text<select>…</select></label>, the system's own
    menu over it, unseen, so the button is as wide as what it says. */
-.pick { position: relative; flex: none; display: inline-flex; align-items: center; gap: 5px; font-size: 15px; padding: 4px 10px; border-radius: 8px; background: var(--code-bg); color: var(--accent); cursor: pointer; white-space: nowrap; }
+.pick { position: relative; flex: none; display: inline-flex; align-items: center; gap: 5px; font-size: 15px; padding: 4px 10px; border-radius: 8px; background: var(--code-bg); color: var(--tint); cursor: pointer; white-space: nowrap; }
 .pick::after { content: ""; width: 8px; height: 12px; background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 14'%3E%3Cpath d='M1 5l4-4 4 4M1 9l4 4 4-4' fill='none' stroke='%238e8e93' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat center / contain; }
 .pick select { position: absolute; inset: 0; width: 100%; opacity: 0; font: inherit; cursor: pointer; }
 
@@ -177,7 +197,7 @@ h2.section { font-size: 13px; font-weight: 400; text-transform: none; color: var
 .md th, .md td { border: 0.5px solid var(--faint); padding: 6px 13px; }
 .md th { font-weight: 600; }
 .md tr:nth-child(2n) td { background: color-mix(in srgb, var(--code-bg) 50%, transparent); }
-.md a { color: var(--accent); }
+.md a { color: var(--tint); }
 .md a:hover { text-decoration: underline; }
 .md img { max-width: 100%; }
 .md-alert { padding: 8px 16px; border-left: 0.25em solid var(--c); --c: #0969da; }
@@ -208,7 +228,7 @@ h2.section { font-size: 13px; font-weight: 400; text-transform: none; color: var
 .viewer-find[data-count]:not([data-count=""])::after { content: attr(data-count); position: absolute; right: 30px; top: 7px; font-size: 11px; color: var(--muted); pointer-events: none; }
 .tool { font: inherit; font-family: -apple-system, system-ui, sans-serif; font-size: 13px; display: inline-flex; align-items: center; gap: 4px; padding: 4px 8px; border-radius: 7px; border: 0; background: none; color: var(--muted); cursor: pointer; }
 .tool:hover { background: var(--line); }
-.tool[aria-pressed="true"] { color: var(--accent); }
+.tool[aria-pressed="true"] { color: var(--tint); }
 .viewer-body { overflow-x: auto; }
 .lines { border-collapse: collapse; font: 12.5px/1.6 var(--mono); width: 100%; tab-size: 4; }
 .lines td { padding: 0; vertical-align: top; }

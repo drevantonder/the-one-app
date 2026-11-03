@@ -1,14 +1,11 @@
 /* The web client's window, as the Mac app's: a sidebar of pages, and what's open beside it. The kit (kit.css) styles
    what's inside: lists, rows, buttons and sheets. */
 :root {
-  --sidebar: #e8e8eb;
-  --window: #f5f5f7;
-  --hover: rgba(0, 0, 0, 0.05);
-  --selected: rgba(0, 0, 0, 0.09);
+  --sidebar: var(--card);
+  --window: var(--bg);
+  --hover: color-mix(in srgb, var(--fill) 60%, transparent);
+  --selected: var(--fill);
   font-size: 13px;
-}
-@media (prefers-color-scheme: dark) {
-  :root { --sidebar: #2c2c2c; --window: #282828; --hover: rgba(255, 255, 255, 0.05); --selected: rgba(255, 255, 255, 0.1); --card: #2c2c2e; }
 }
 html, body { height: 100%; }
 body { padding: 0; max-width: none; margin: 0; background: var(--window); font-size: 13px; overflow: hidden; }
@@ -23,12 +20,12 @@ a { color: inherit; }
 .sidebar section + section { margin-top: 14px; }
 .nav-head { display: block; padding: 4px 8px 6px; font-size: 13px; font-weight: 600; color: var(--muted); text-decoration: none; border-radius: 6px; }
 .nav-head:hover { color: var(--text); }
-.nav-head.selected { color: var(--accent); }
+.nav-head.selected { color: var(--text); }
 .nav-row { display: flex; align-items: center; gap: 9px; height: 32px; padding: 0 10px; border-radius: 8px; text-decoration: none; color: var(--text); font-size: 15px; border: 0; background: none; width: 100%; font-family: inherit; }
 .nav-row:hover { background: var(--hover); }
 .nav-row.selected { background: var(--selected); font-weight: 600; }
 .nav-label { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.nav-count { flex: none; min-width: 18px; padding: 0 6px; border-radius: 9px; background: var(--hover); color: var(--muted); font-size: 11px; font-weight: 600; line-height: 18px; text-align: center; }
+.nav-count { flex: none; min-width: 18px; padding: 0 6px; border-radius: 9px; background: var(--badge); color: white; font-size: 11px; font-weight: 600; line-height: 18px; text-align: center; }
 
 /* A page's Services folder: its services' icons, small, nine to a folder, on frosted glass. */
 .folder { --size: 20px; --mini: calc(var(--size) * 0.62 / 3); width: var(--size); height: var(--size); flex: none; display: grid; grid-template-columns: repeat(3, var(--mini)); grid-auto-rows: var(--mini); gap: calc(var(--size) * 0.06); padding: calc(var(--size) * 0.13); border-radius: calc(var(--size) * 0.225); background: rgba(128, 128, 128, 0.22); box-shadow: inset 0 0 0 0.5px rgba(128, 128, 128, 0.3); align-content: start; }
@@ -52,7 +49,7 @@ a { color: inherit; }
 .menu-backdrop { position: fixed; inset: 0; z-index: 59; }
 .menu { outline: none; position: fixed; z-index: 60; min-width: 200px; padding: 5px; border-radius: 10px; background: var(--card); box-shadow: 0 8px 28px rgba(0, 0, 0, 0.25), 0 0 0 0.5px var(--line); }
 .menu-item { display: block; width: 100%; text-align: left; border: 0; background: none; font: inherit; font-size: 13px; color: var(--text); padding: 5px 10px; border-radius: 5px; cursor: pointer; }
-.menu-item:hover { background: var(--accent); color: white; }
+.menu-item:hover { background: var(--tint); color: white; }
 .menu-item.danger { color: var(--danger); }
 .menu-item.danger:hover { background: var(--danger); color: white; }
 .menu-check { display: inline-block; width: 16px; }
@@ -64,7 +61,7 @@ a { color: inherit; }
 .menu-choice { flex: 1; height: 34px; display: grid; place-items: center; border: 0; border-radius: 7px; background: none; color: var(--text); cursor: pointer; font: inherit; font-size: 12px; }
 .menu-choice .menu-icon { width: 18px; height: 18px; }
 .menu-choice:hover { background: var(--line); }
-.menu-choice.on { background: var(--accent); color: white; }
+.menu-choice.on { background: var(--tint); color: white; }
 
 /* Sheets: the kit's, as wide as the Mac app's; a screen in one fills it. */
 .sheet { --sheet-bg: var(--window); font-size: 14px; }

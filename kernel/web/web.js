@@ -178,8 +178,8 @@ window.__one = {};
 
   const me = () => store.state?.user;
   const install = () => store.state?.install;
-  // The white label's name and accent, as the gateway's index.html says them, until the install's state does.
-  const whiteLabel = { name: document.querySelector('meta[name="application-name"]')?.content || "", accent: document.querySelector('meta[name="theme-color"]')?.content || "" };
+  // The white label's name, as the gateway's index.html says it, until the install's state does.
+  const whiteLabel = { name: document.querySelector('meta[name="application-name"]')?.content || "" };
   const config = () => store.state?.config || whiteLabel;
   const app = (name) => store.apps.find((a) => a.name === name);
   const label = (a) => a?.title || a?.name || "";
@@ -425,19 +425,17 @@ window.__one = {};
     });
   }
 
-  /// What makes a screen sit in the window as its own: the window's background shows through, the install's accent,
-  /// and on a computer the Mac app's size of text.
+  /// What makes a screen sit in the window as its own: the window's background shows through, and on a
+  /// computer the Mac app's size of text.
   function look(html) {
-    const accent = /^#[0-9a-f]{3,8}$/i.test(config().accent || "") ? config().accent : "";
     // This window's appearance, kept in step (see `scheme`); with the nonce of a page that runs only its own scripts
     // (the client's own screens), as one of them.
     const nonce = html.match(/^<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="script-src 'nonce-([0-9a-f]+)'/)?.[1];
     const looks = `<script${nonce ? ` nonce="${nonce}"` : ""}>(() => { const scheme = (${scheme})(); let now = ${JSON.stringify(appearance())}; const apply = () => scheme(document, now);
       addEventListener("DOMContentLoaded", apply); addEventListener("load", apply);
       addEventListener("message", (e) => { if (e.source === parent && e.data?.oneScheme) apply(now = e.data.oneScheme); }); })()</script>`;
-    const style = `<style>html, body { background: transparent !important; }${accent ? ` :root:root { --accent: ${accent}; }` : ""}
-      @media (pointer: fine) { html { zoom: calc(13 / 17); } :root:root { --bg: transparent; --card: rgba(0, 0, 0, 0.04); } }
-      @media (pointer: fine) and (prefers-color-scheme: dark) { :root:root { --card: rgba(255, 255, 255, 0.05); } }</style>`;
+    const style = `<style>html, body { background: transparent !important; }
+      @media (pointer: fine) { html { zoom: calc(13 / 17); } :root:root { --bg: transparent; } }</style>`;
     return html.includes("</head>") ? html.replace("</head>", `${style}${looks}</head>`) : style + looks + html;
   }
 
@@ -695,7 +693,6 @@ window.__one = {};
   }
 
   async function start() {
-    if (/^#[0-9a-f]{3,8}$/i.test(whiteLabel.accent)) document.documentElement.style.setProperty("--accent", whiteLabel.accent);
     schemed(document, appearance());
     if (location.pathname === "/callback") {
       try {

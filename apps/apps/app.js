@@ -410,7 +410,7 @@ show();
   .works .row + .row::before { left: 58px; }
   #error { margin: 8px 4px; }
   .danger-row { color: var(--danger); justify-content: center; }
-  .action-row { color: var(--accent); justify-content: center; }
+  .action-row { color: var(--tint); justify-content: center; }
   .link-field { flex: 1; min-width: 0; font: inherit; border: 0; outline: none; background: none; color: var(--text); padding: 0; }
 </style>
 <div id="app"></div>

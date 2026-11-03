@@ -666,3 +666,87 @@ fn every_program_on_a_machine_sends_its_node_the_token_where_it_looks() {
         }
     }
 }
+
+/// Every `#rrggbb` or `0xrrggbb` in `text`, in order, lowercased.
+fn hexes(text: &str) -> Vec<String> {
+    let b = text.as_bytes();
+    let mut out = vec![];
+    for i in 0..b.len() {
+        let start = if b[i] == b'#' { i + 1 } else if b[i..].starts_with(b"0x") { i + 2 } else { continue };
+        let run = b[start..].iter().take_while(|c| c.is_ascii_hexdigit()).count();
+        if run == 6 && (i == 0 || !b[i - 1].is_ascii_alphanumeric()) {
+            out.push(text[start..start + 6].to_ascii_lowercase());
+        }
+    }
+    out
+}
+
+/// The light and dark values `name` is given in `block`: the first two colours after `name =` or `name:`.
+fn token(block: &str, name: &str) -> Option<(String, String)> {
+    let mut from = 0;
+    while let Some(at) = block[from..].find(name).map(|i| i + from) {
+        from = at + name.len();
+        let before = block[..at].chars().next_back().unwrap_or(' ');
+        let rest = block[from..].trim_start();
+        if (before.is_alphanumeric() || before == '_') || !(rest.starts_with('=') || rest.starts_with(':')) {
+            continue;
+        }
+        let line = rest.lines().next().unwrap_or("");
+        let found = hexes(line);
+        return Some((found.first()?.clone(), found.get(1).or(found.first())?.clone()));
+    }
+    None
+}
+
+#[test]
+fn every_client_draws_in_the_kits_colours() {
+    // The one list: kit.css's light :root, then its dark one; a colour the dark doesn't change is the same in both.
+    let kit = read("src/screen/kit.css");
+    let block = |start: &str| {
+        let s = &kit[kit.find(start).unwrap_or_else(|| panic!("kit.css has no {start}"))..];
+        s[..s.find('}').unwrap()].to_string()
+    };
+    let (light, dark) = (block(":root {\n  color-scheme"), block("@media (prefers-color-scheme: dark) {\n  :root {"));
+    let mut tokens = BTreeMap::new();
+    for line in light.lines() {
+        let Some((name, value)) = line.trim().strip_prefix("--").and_then(|l| l.split_once(':')) else { continue };
+        let Some(l) = hexes(value).pop() else { continue };
+        if name == "tint" {
+            continue; // the platform's own
+        }
+        let d = token(&dark, &format!("--{name}")).map_or(l.clone(), |(d, _)| d);
+        tokens.insert(name.to_string(), (l, d));
+    }
+    assert!(tokens.len() >= 11, "kit.css's colours weren't found: {tokens:?}");
+
+    // Each other place's own copy: the lines after the comment that names this test, up to a blank line.
+    let all: Vec<&str> = tokens.keys().map(String::as_str).collect();
+    let places: &[(&str, &str, &[&str])] = &[
+        ("src/mcp_view.html", "--", &["text", "muted", "line", "card", "fill", "warn", "danger"]),
+        ("android/app/src/main/kotlin/app/client/Style.kt", "", &all),
+        ("apple/Shared/Views/Style.swift", "", &all),
+        ("windows/Look.cs", "", &all),
+    ];
+    let mut problems = vec![];
+    for (path, prefix, names) in places {
+        let src = read(path);
+        let Some(at) = src.find("tests/contracts.rs") else {
+            problems.push(format!("{path}: no colours marked as held by tests/contracts.rs"));
+            continue;
+        };
+        let after = &src[at..];
+        let block = &after[..after.find("\n\n").unwrap_or(after.len())];
+        for name in *names {
+            let want = &tokens[*name];
+            match token(block, &format!("{prefix}{name}")) {
+                Some(got) if &got == want => {}
+                got => problems.push(format!("{path}: {name} is {got:?}, kit.css has {want:?}")),
+            }
+        }
+    }
+    // The web client's window draws in the kit's own variables, so it has no colours of its own to drift.
+    if let Some(hex) = hexes(&read("kernel/web/web.css")).first() {
+        problems.push(format!("kernel/web/web.css: #{hex} is its own colour; use the kit's variables"));
+    }
+    assert!(problems.is_empty(), "{}", problems.join("\n"));
+}

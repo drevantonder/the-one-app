@@ -170,23 +170,51 @@ typealias PlatformImage = NSImage
 typealias PlatformImage = UIImage
 #endif
 
-/// The system's grouped background, behind a page's grouped containers.
+/// The kit's colours (src/screen/kit.css), light then dark: tests/contracts.rs holds them to it.
+enum Kit {
+    static let bg = Color(light: 0xffffff, dark: 0x141414)
+    static let card = Color(light: 0xf4f4f4, dark: 0x222222)
+    static let raised = Color(light: 0xffffff, dark: 0x3a3a3a)
+    static let fill = Color(light: 0xececec, dark: 0x2b2b2b)
+    static let line = Color(light: 0xe6e6e6, dark: 0x2f2f2f)
+    static let text = Color(light: 0x111111, dark: 0xf2f2f2)
+    static let muted = Color(light: 0x6b6b6b, dark: 0x9b9b9b)
+    static let faint = Color(light: 0xc8c8c8, dark: 0x4d4d4d)
+    static let warn = Color(light: 0xb45309, dark: 0xfbbf24)
+    static let danger = Color(light: 0xdc2626, dark: 0xf87171)
+    static let badge = Color(light: 0xff3b30, dark: 0xff3b30)
+}
+
+extension Color {
+    init(light: UInt32, dark: UInt32) {
+        func rgb(_ v: UInt32) -> (CGFloat, CGFloat, CGFloat) { (CGFloat(v >> 16 & 0xFF) / 255, CGFloat(v >> 8 & 0xFF) / 255, CGFloat(v & 0xFF) / 255) }
+        #if os(macOS)
+        self.init(nsColor: NSColor(name: nil) { appearance in
+            let (r, g, b) = rgb(appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? dark : light)
+            return NSColor(srgbRed: r, green: g, blue: b, alpha: 1)
+        })
+        #else
+        self.init(uiColor: UIColor { traits in
+            let (r, g, b) = rgb(traits.userInterfaceStyle == .dark ? dark : light)
+            return UIColor(red: r, green: g, blue: b, alpha: 1)
+        })
+        #endif
+    }
+}
+
+/// The page's background, behind its cards.
 extension View {
     func groupedBackground() -> some View {
         #if os(macOS)
         self
         #else
-        background(Color(.systemGroupedBackground))
+        background(Kit.bg)
         #endif
     }
 
-    /// A grouped container, as a list's inset section draws one.
+    /// A card, with rows inside.
     func groupedContainer() -> some View {
-        #if os(macOS)
-        background(.fill.quaternary, in: .rect(cornerRadius: 12, style: .continuous))
-        #else
-        background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 24, style: .continuous))
-        #endif
+        background(Kit.card, in: .rect(cornerRadius: 26, style: .continuous))
     }
 }
 

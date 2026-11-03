@@ -12,7 +12,7 @@
   .field input { flex: 1; min-width: 0; font: inherit; text-align: right; border: 0; outline: none; background: none; color: var(--text); padding: 0; }
   .field input::placeholder { color: var(--faint); }
   .ok { color: var(--ok); }
-  .choice .check { color: var(--accent); visibility: hidden; }
+  .choice .check { color: var(--tint); visibility: hidden; }
   .choice.on .check { visibility: visible; }
   .actions { margin-top: 18px; text-align: right; }
 </style>
@@ -65,7 +65,7 @@
           <div class="title" style="font-weight:400"><span>${one.esc(p.title)}</span>${p.last && !p.problem ? `<span class="when">${one.esc(when(p.last.time))}</span>` : ""}</div>
           ${p.problem ? `<div class="sub error">${one.esc(p.problem.text)}</div>` : `<div class="sub">${one.esc(p.kind === "folder" ? `Disk on ${name(p.device)}` : `Off-site · ${p.where}`)}</div>`}
         </div><span class="chev">${one.icon("caret-right")}</span></div>`).join("")}
-        ${admin ? `<div class="row plain go" id="add"><div class="main"><div class="title"><span style="color:var(--accent)">Add Place…</span></div></div></div>` : ""}</div>
+        ${admin ? `<div class="row plain go" id="add"><div class="main"><div class="title"><span style="color:var(--tint)">Add Place…</span></div></div></div>` : ""}</div>
       <p class="footer">${admin ? "" : "Only admins add and remove places. "}Encrypted before it leaves.</p>
       ${snapshots.length ? `<h2 class="section">Snapshots</h2><div class="list">${snapshots.map((s, n) => `<div class="row plain go" data-snapshot="${n}"><div class="main"><div class="title"><span>${one.esc(when(s.time, true))}</span></div></div><span class="chev">${one.icon("caret-right")}</span></div>`).join("")}</div>` : ""}`;
   });

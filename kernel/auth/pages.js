@@ -7,11 +7,9 @@ import kit from "../web/screen/kit.css" with { type: "text" };
 const escape = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
 // The look of the web client's welcome: the screens' design kit (src/screen/kit.css, which the kernel is built with),
-// the white label's logo and accent, light or dark with the system. Inline, as the page's policy allows nothing else.
+// the white label's logo, light or dark with the system. Inline, as the page's policy allows nothing else.
 const style = `${kit}
-  :root { --window: #f5f5f7; }
-  @media (prefers-color-scheme: dark) { :root { --window: #282828; --card: #2c2c2e; } }
-  body { max-width: none; min-height: 100vh; padding: 40px 24px; display: grid; place-items: center; background: var(--window); }
+  body { max-width: none; min-height: 100vh; padding: 40px 24px; display: grid; place-items: center; background: var(--bg); }
   main { width: min(380px, 100%); text-align: center; }
   .mark { display: block; width: 88px; height: 88px; margin: 0 auto 18px; }
   h1 { font-size: 26px; font-weight: 600; margin: 0 0 8px; text-wrap: balance; }
@@ -22,7 +20,7 @@ const style = `${kit}
   .note { font-size: 13px; margin: 8px 0 0; }
   .callout { color: var(--text); text-align: left; padding: 12px 16px; border-radius: 12px; background: var(--card); }
   .list { text-align: left; margin: 0 0 22px; }
-  .list .button { width: auto; font-size: 15px; padding: 6px 12px; margin: 0; background: var(--window); }
+  .list .button { width: auto; font-size: 15px; padding: 6px 12px; margin: 0; background: var(--bg); }
   .error { color: var(--danger); min-height: 1.4em; margin: 8px 0 0; }
   [hidden] { display: none !important; }
 `;
@@ -100,8 +98,9 @@ const acts = `
 /// A page of `look`'s, the white label's `{ name, accent }`.
 const page = (look, title, body, script) => {
   const accent = /^#[0-9a-f]{3,8}$/i.test(look.accent || "") ? look.accent : "#007aff";
+  // The accent is the brand's, for the browser's own bar only: what a person taps is the kit's tint.
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="theme-color" content="${accent}"><title>${escape(title)}</title><style>:root { --accent: ${accent}; }${style}</style></head>
+<meta name="theme-color" content="${accent}"><title>${escape(title)}</title><style>${style}</style></head>
 <body><main><img class="mark" src="/logo.png" alt="">${body}<p class="error"></p></main><script>${webauthn}${script}</script></body></html>`;
 };
 
