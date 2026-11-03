@@ -120,26 +120,34 @@ private object Keys {
     val app = ActionParameters.Key<String>("app")
     val op = ActionParameters.Key<String>("op")
     val input = ActionParameters.Key<String>("input")
+    /** Which button or toggle it is, and what a toggle's switched to, to draw it so before its operation's done. */
+    val which = ActionParameters.Key<String>("which")
+    val on = ActionParameters.Key<Boolean>("on")
 }
 
-/** A widget's button or toggle: its operation runs, then every widget redraws. */
+/** A widget's button or toggle: drawn as done at once (a toggle switched, a button dimmed), then its operation runs,
+ *  and every widget redraws from what it did; back as it was if it didn't work. */
 class RunOperation : ActionCallback {
     override suspend fun onAction(context: Context, glanceId: GlanceId, parameters: ActionParameters) {
         HomeWidgets.start(context)
         val app = parameters[Keys.app] ?: return
         val op = parameters[Keys.op] ?: return
         val input = parameters[Keys.input]?.let { runCatching { json.parseToJsonElement(it) }.getOrNull() } ?: JsonObject(emptyMap())
+        val which = parameters[Keys.which]
+        if (which != null) HomeWidgets.doing(which, parameters[Keys.on] ?: true)
         val store = (context.applicationContext as ClientApp).store
         try {
             store.call(app, op, input)
         } catch (e: Exception) {
+            if (which != null) HomeWidgets.done(which)
             withContext(Dispatchers.Main) { Toast.makeText(context, "Couldn’t do that. ${e.message ?: ""}".trim(), Toast.LENGTH_LONG).show() }
-            HomeWidgets.redraw()
+            return
         }
         runCatching {
             if (store.state == null) store.refreshState()
             store.refreshWidgets(always = true)
         }
+        if (which != null) HomeWidgets.done(which)
     }
 }
 
@@ -175,6 +183,8 @@ private data class Ctx(
     val now: Long,
     val inRow: Boolean = false,
     val alpha: Float = 1f,
+    /** What's been tapped and not done yet (HomeWidgets.Shown.doing). */
+    val doing: Map<String, Boolean> = emptyMap(),
 ) {
     fun tone(tone: String?, otherwise: (Palette) -> Color, alpha: Float = 1f) = colors.tone(tone, this.alpha * alpha, otherwise)
     fun color(alpha: Float = 1f, pick: (Palette) -> Color) = colors.of(this.alpha * alpha, pick)
@@ -210,13 +220,13 @@ private fun Body(widgetId: Int, shown: HomeWidgets.Shown) {
             widget == null && chosen != null && !kept?.widgets.isNullOrEmpty() ->
                 Broken(colors, appName, "${HomeWidgets.title(widgetId) ?: "This widget"} isn’t on your pages any more. Touch and hold to choose another.", app)
             widget == null -> Waiting(colors, "Open $appName to see your pages.", app)
-            else -> Drawn(context, widget, colors)
+            else -> Drawn(context, widget, colors, kept?.at ?: 0L, shown.doing)
         }
     }
 }
 
 @Composable
-private fun Drawn(context: Context, w: KeptWidget, colors: Colors) {
+private fun Drawn(context: Context, w: KeptWidget, colors: Colors, at: Long, doing: Map<String, Boolean>) {
     val info = w.decoded()
     val error = info?.error
     if (info == null || error != null) {
@@ -231,7 +241,9 @@ private fun Drawn(context: Context, w: KeptWidget, colors: Colors) {
     val tree = info.tree(name)
     // As wide as the launcher's cells at that size, less the padding.
     val width = if (name == "small") 140f else 320f
-    val c = Ctx(w, colors, Masks(context.resources.displayMetrics.density), width, System.currentTimeMillis())
+    val now = System.currentTimeMillis()
+    val c = Ctx(w, colors, Masks(context.resources.displayMetrics.density), width, now, doing = doing)
+    val old = updated(at, now)
     Column(GlanceModifier.fillMaxSize().clickable(follow(w, tree.link))) {
         if (tree.header != false) {
             Text(w.title, style = TextStyle(color = colors.of { it.secondary }, fontSize = 11.sp, fontWeight = FontWeight.Medium), maxLines = 1)
@@ -241,7 +253,14 @@ private fun Drawn(context: Context, w: KeptWidget, colors: Colors) {
         Box(GlanceModifier.fillMaxWidth().defaultWeight(), contentAlignment = Alignment.TopStart) {
             Node(tree, c, if (tree.t == "col") GlanceModifier.fillMaxSize() else GlanceModifier.fillMaxWidth())
         }
+        if (old != null) Text(old, style = TextStyle(color = colors.of { it.tertiary }, fontSize = 10.sp), maxLines = 1)
     }
+}
+
+/** "Updated 2 h ago", once what a widget shows is over an hour old (it refreshes every 15 minutes it can). */
+private fun updated(at: Long, now: Long): String? {
+    if (at == 0L || now - at < 3_600_000) return null
+    return if (now - at < 86_400_000) "Updated ${ago(at, now)} ago" else "Updated ${ago(at, now)}"
 }
 
 /** A widget that can't be drawn, and what to do about it. */
@@ -557,11 +576,17 @@ private fun Icon(n: WidgetNode, c: Ctx, modifier: GlanceModifier) {
 private fun run(n: WidgetNode, c: Ctx, on: Boolean? = null): Action {
     var input = n.input ?: JsonObject(emptyMap())
     if (on != null) input = JsonObject((input as? JsonObject ?: JsonObject(emptyMap())) + ("on" to JsonPrimitive(on)))
-    return actionRunCallback<RunOperation>(actionParametersOf(Keys.app to c.widget.app, Keys.op to (n.op ?: ""), Keys.input to input.toString()))
+    return actionRunCallback<RunOperation>(
+        actionParametersOf(Keys.app to c.widget.app, Keys.op to (n.op ?: ""), Keys.input to input.toString(), Keys.which to which(n, c), Keys.on to (on ?: true)),
+    )
 }
 
+/** A button or toggle, the same each time it's drawn. */
+private fun which(n: WidgetNode, c: Ctx) = "${c.widget.id}|${n.op}|${n.input}|${n.label ?: n.text}"
+
 @Composable
-private fun Button(n: WidgetNode, c: Ctx, modifier: GlanceModifier) {
+private fun Button(n: WidgetNode, ctx: Ctx, modifier: GlanceModifier) {
+    val c = if (which(n, ctx) in ctx.doing) ctx.copy(alpha = ctx.alpha * 0.5f) else ctx
     val tint = c.tone(n.tone, { it.accent })
     val m = modifier.cornerRadius(15.dp).background(c.tone(n.tone, { it.accent }, 0.15f)).let { if (n.op != null) it.clickable(run(n, c)) else it }
     Row(m.height(30.dp).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -576,7 +601,7 @@ private fun Button(n: WidgetNode, c: Ctx, modifier: GlanceModifier) {
 /** A toggle as the app's pages draw it, which runs its operation with the value it's switched to. */
 @Composable
 private fun Toggle(n: WidgetNode, c: Ctx, modifier: GlanceModifier) {
-    val on = n.on ?: false
+    val on = c.doing[which(n, c)] ?: n.on ?: false
     val m = if (n.op != null) modifier.clickable(run(n, c, !on)) else modifier
     Row(m.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(n.label ?: "", GlanceModifier.defaultWeight(), style = TextStyle(color = c.color { it.label }, fontSize = 13.sp), maxLines = 1)

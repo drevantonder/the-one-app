@@ -49,6 +49,8 @@ import java.util.concurrent.TimeUnit
 data class Kept(
     val accent: String? = null,
     val widgets: List<KeptWidget> = emptyList(),
+    /** When they were fetched, in ms. */
+    val at: Long = 0,
 )
 
 /** A widget on one of the pages, its tree at each size as `GET /v1/widgets` gave it. */
@@ -73,7 +75,13 @@ data class KeptWidget(
 
 object HomeWidgets {
     /** What every home-screen widget draws from. */
-    data class Shown(val kept: Kept? = null, val choices: Map<Int, String> = emptyMap(), val signedIn: Boolean = false)
+    data class Shown(
+        val kept: Kept? = null,
+        val choices: Map<Int, String> = emptyMap(),
+        val signedIn: Boolean = false,
+        /** Buttons and toggles tapped whose operations aren't done: each toggle's value, as it's drawn till then. */
+        val doing: Map<String, Boolean> = emptyMap(),
+    )
 
     val shown = MutableStateFlow(Shown())
     private lateinit var app: Application
@@ -111,6 +119,18 @@ object HomeWidgets {
 
     fun title(widgetId: Int): String? = prefs.getString("title.$widgetId", null)
 
+    /** A button or toggle tapped: drawn so at once. */
+    suspend fun doing(which: String, on: Boolean) {
+        shown.update { it.copy(doing = it.doing + (which to on)) }
+        runCatching { HomeWidget().updateAll(app) }
+    }
+
+    /** Its operation done, or not: drawn from what the widgets say. */
+    fun done(which: String) {
+        shown.update { it.copy(doing = it.doing - which) }
+        redraw()
+    }
+
     fun forget(widgetIds: IntArray) {
         prefs.edit().apply { widgetIds.forEach { remove("choice.$it"); remove("title.$it") } }.apply()
         shown.value = shown.value.copy(choices = choices())
@@ -131,12 +151,16 @@ object HomeWidgets {
         }
         // A refresh that saw nothing keeps what was: the home screen goes blank only for a reason.
         if (widgets.isEmpty()) return
-        val kept = Kept(store.config?.accent, widgets)
+        val now = System.currentTimeMillis()
+        val kept = Kept(store.config?.accent, widgets, now)
         val signedIn = store.signIn.signedIn
-        if (kept == shown.value.kept && signedIn == shown.value.signedIn) return
-        shown.value = shown.value.copy(kept = kept, signedIn = signedIn)
+        val was = shown.value
+        // The same as before, only newer: kept so, and redrawn only if they said they were old.
+        val same = kept.copy(at = 0) == was.kept?.copy(at = 0) && signedIn == was.signedIn
+        shown.value = was.copy(kept = kept, signedIn = signedIn)
         scope.launch {
             runCatching { file.writeText(json.encodeToString(Kept.serializer(), kept)) }
+            if (same && now - was.kept!!.at < 3_600_000) return@launch
             redraw()
             if (saveImages(store, widgets)) redraw()
         }
@@ -169,8 +193,10 @@ object HomeWidgets {
             store.refreshWidgets(always = true)
         } catch (e: NodeError) {
             // Signed out while the app was away: the app forgets what it kept too, not only the widgets.
-            if (e.signedOut) withContext(Dispatchers.Main) { store.signedOut(e.message) }
+            if (e.signedOut) withContext(Dispatchers.Main) { store.signedOut(e.message) } else redraw()
         } catch (_: Exception) {
+            // Drawn again, to say how old what they show is.
+            redraw()
         }
     }
 
