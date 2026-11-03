@@ -493,7 +493,11 @@ impl Node {
                 members::device(&endpoint, &r.user, &r.name, &[members::Kind::Client], None)
             }
         };
-        self.member_content(caller, listed).await?;
+        // Approved before, but its request wasn't marked so (the device still waits on it): what's left is done again.
+        let already = self.with(|i| Ok(i.r.members.client(&endpoint.key).is_some_and(|c| c.user == r.user && c.seal == endpoint.seal)))?;
+        if !already {
+            self.member_content(caller, listed).await?;
+        }
         let admin = self.with(|i| Ok(i.r.members.is_admin(&r.user)))?;
         self.tell_relay(json!({ "add": r.key, "admin": admin, "role": "client" }));
         if invite.is_some_and(|i| i.role == Role::Admin)
