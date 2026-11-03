@@ -1067,3 +1067,102 @@ async fn a_call_passed_on_runs_on_the_keys_handed_for_its_sender_alone() {
     assert_eq!(ran["ok"], json!({ "hi": "passed on" }), "{ran}");
     endpoint.close().await;
 }
+
+/// A node that is also one of its person's own client devices asks their other devices' sidecars as itself, rather
+/// than passing on the key of the client that asked or the keys a call with no sign-in was handed, which the device
+/// holding the sidecar refuses: a sidecar call it passes on for one of their devices runs, and one it makes for a
+/// client of theirs with keys but no sign-in runs — but never for another person's, and never from a node that is
+/// compute alone.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_persons_own_node_asks_their_other_devices_sidecars_as_itself() {
+    let a = start("own-a").await;
+    let b = start("own-b").await;
+    a.create("Home", "Andre").await.unwrap();
+    let _relay = relay(&a).await;
+    b.join(&a.pair().unwrap()).await.unwrap();
+    let me = one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None, token: None };
+    // A private sidecar answers with whom each call is for and what it got; the counter counts those it answers.
+    let fake = async |node: &Node| {
+        let count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        node.register_sidecar("probe", json!({ "title": "Probe", "ops": [{ "name": "check" }] })).await.unwrap();
+        let counting = count.clone();
+        let host = node.clone();
+        tokio::spawn(async move {
+            loop {
+                if let Ok(Some(call)) = host.sidecars().next("probe").await {
+                    counting.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    let _ = host.sidecars().reply("probe", call.id, json!({ "ok": { "user": call.caller.user, "agent": call.caller.agent, "input": call.input } }));
+                }
+            }
+        });
+        count
+    };
+    let got = fake(&b).await;
+    let check = |input: Value, device: &str| CallRequest { app: "probe".into(), sidecar: Some("probe".into()), op: "check".into(), input, device: Some(device.into()), ..Default::default() };
+    eventually("both devices' endpoints", async || a.endpoint_addr().is_some() && b.endpoint_addr().is_some()).await;
+
+    // A sidecar call a passes on for one of Andre's client devices, as an app's ctx.sidecars makes it: a asks as
+    // itself, and the sidecar sees Andre's own device asking, as his agent.
+    let asked = tokio::time::timeout(
+        Duration::from_secs(15),
+        a.call_as(check(json!({ "text": "hello" }), "own-b"), one::node::Caller { key: b.id(), user: me.user.clone(), agent: Some("Devin".into()), token: None }),
+    )
+    .await
+    .expect("a sidecar call passed on for a client of Andre's")
+    .unwrap();
+    assert_eq!(asked, json!({ "user": me.user, "agent": "Devin", "input": { "text": "hello" } }), "{asked}");
+
+    // A client device of Andre's with keys handed and no sign-in: the node asks b's sidecar as itself.
+    let phone = ed25519_dalek::SigningKey::from_bytes(&rand::random());
+    let listed = one::keys::Endpoint::of(&phone);
+    let request = one::node::DeviceRequest { key: one::entry::hex(&listed.key), seal: one::entry::hex(&listed.seal), name: "phone".into(), user: me.user.clone(), person: String::new(), proof: None, service: None, shared: false, enrollment: None };
+    a.approve_request(&me, &request, None).await.unwrap();
+    let asked = tokio::time::timeout(
+        Duration::from_secs(15),
+        a.call_as(check(json!({ "text": "by phone" }), "own-b"), one::node::Caller { key: listed.key, user: me.user.clone(), agent: Some("the phone".into()), token: Some(one::node::client_token(&listed.key)) }),
+    )
+    .await
+    .expect("a sidecar call for a client of Andre's with keys handed")
+    .unwrap();
+    assert_eq!(asked, json!({ "user": me.user, "agent": "the phone", "input": { "text": "by phone" } }), "{asked}");
+
+    // A client of Sam's, a member Andre let in, gets nothing: no other person's calls, even from an admin's node.
+    let sam = one::entry::new_id();
+    let sams = ed25519_dalek::SigningKey::from_bytes(&rand::random());
+    let sams_key = sams.verifying_key().to_bytes();
+    let sams_endpoint = one::keys::Endpoint::of(&sams);
+    a.member("device", json!({ "key": one::entry::hex(&sams_endpoint.key), "seal": one::entry::hex(&sams_endpoint.seal), "user": sam, "name": "sam's phone", "roles": ["client"], "user_name": "Sam", "role": "member" })).await.unwrap();
+    let refused = tokio::time::timeout(
+        Duration::from_secs(15),
+        a.call_as(check(json!({ "text": "sams" }), "own-b"), one::node::Caller { key: sams_key, user: sam.clone(), agent: None, token: Some(one::node::client_token(&sams_key)) }),
+    )
+    .await
+    .expect("a sidecar call for a client of Sam's")
+    .unwrap_err();
+    assert_eq!(got.load(std::sync::atomic::Ordering::Relaxed), 2, "Sam's call reached the sidecar: {refused:#}");
+
+    // A machine that is compute alone may not ask as its person, even sending what the node sends for one it is a
+    // client of: Andre's, listed as compute, asks b's sidecar as Andre over the wire, and is refused like any other
+    // machine that isn't a client of theirs.
+    let compute = ed25519_dalek::SigningKey::from_bytes(&rand::random());
+    let key = compute.verifying_key().to_bytes();
+    a.member_content(&me, one::members::device(&one::keys::Endpoint::of(&compute), &me.user, "own-c", &[one::members::Kind::Compute], None)).await.unwrap();
+    eventually("b to see own-c listed", async || b.state_for(&me)["install"]["devices"].as_array().is_some_and(|d| d.iter().any(|d| d["name"] == "own-c" && d["roles"] == json!(["compute"])))).await;
+    let endpoint = iroh::Endpoint::builder(iroh::endpoint::presets::Minimal).secret_key(iroh::SecretKey::from_bytes(&compute.to_bytes())).relay_mode(iroh::RelayMode::Disabled).bind().await.unwrap();
+    let conn = tokio::time::timeout(Duration::from_secs(15), endpoint.connect(b.endpoint_addr().unwrap(), &one::node::alpn()))
+        .await
+        .expect("a compute-only machine's connection to b")
+        .unwrap();
+    let ask = json!({ "kind": "ask", "body": { "call": { "app": "probe", "sidecar": "probe", "op": "check", "input": { "text": "compute only" }, "me": { "key": one::entry::hex(&key), "user": me.user, "agent": "a node" } } } });
+    let (mut send, mut recv) = conn.open_bi().await.unwrap();
+    send.write_all(ask.to_string().as_bytes()).await.unwrap();
+    send.finish().unwrap();
+    let answer = tokio::time::timeout(Duration::from_secs(15), recv.read_to_end(1 << 20))
+        .await
+        .expect("a compute-only machine's call to b")
+        .unwrap();
+    let answer: Value = serde_json::from_slice(&answer).unwrap();
+    endpoint.close().await;
+    assert!(answer["error"].is_string(), "{answer}");
+    assert_eq!(got.load(std::sync::atomic::Ordering::Relaxed), 2, "a compute-only machine's call reached the sidecar: {answer}");
+}

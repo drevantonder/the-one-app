@@ -149,13 +149,20 @@ impl Node {
         let service = self.is_service(&device);
         let shared = self.with(|i| Ok(i.r.members.service(&device).is_some_and(|s| s.shared)))?;
         let token = me.token.as_ref().filter(|t| !sessions::unsigned(t) && !t.starts_with(standing::GRANT) && (!service || (shared && sessions::is_sign_in(t))));
-        let mut request = json!({ "app": req.app, "sidecar": req.sidecar, "op": req.op, "input": req.input, "scopes": req.scopes, "depth": req.depth, "from": req.from, "client": req.client, "me": { "key": hex(&me.key), "user": me.user, "agent": me.agent, "token": token } });
+        // A node listed as the caller's own client asks sidecars as itself. Forwarding another client's key
+        // (or app database keys) would make the receiving device refuse its own person's call.
+        let as_own_client = req.sidecar.is_some()
+            && me.token.as_ref().is_none_or(|t| sessions::unsigned(t))
+            && self.with(|i| Ok(i.r.members.client(&self.0.id).is_some_and(|c| c.user == me.user)))?;
+        let key = if as_own_client { self.0.id } else { me.key };
+        let mut request = json!({ "app": req.app, "sidecar": req.sidecar, "op": req.op, "input": req.input, "scopes": req.scopes, "depth": req.depth, "from": req.from, "client": req.client, "me": { "key": hex(&key), "user": me.user, "agent": me.agent, "token": token } });
         // Keys handed here with no sign-in (a client device's, or with a call passed on) go on to another node sealed
         // to it for this node's key, of the scopes the call reaches alone, which it runs on them alone: only those the
         // device runs, and only the call's app's.
         let resolved = self.resolve(req.clone());
         if let Some(unsigned) = me.token.as_ref().filter(|t| sessions::unsigned(t))
             && !service
+            && !as_own_client
         {
             let scopes = self.with(|i| call_scopes(i, &resolved, &me.user))?;
             let runs = self.with(|i| Ok(scopes.iter().filter(|s| i.r.members.runs_for(&device, s)).cloned().collect::<Vec<_>>()))?;
