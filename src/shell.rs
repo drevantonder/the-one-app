@@ -17,6 +17,7 @@ pub fn describe() -> Value {
         "instructions": "Run a shell command on one of your own devices with shell_run; give device (a device's name) to choose which. Every command is logged where only you can read it.",
         "ops": [{
             "name": "run",
+            "reads": false,
             "description": "Run a shell command on this device (or the device given) and return its exit code and output. Every command is logged.",
             "input": { "type": "object", "required": ["command"], "properties": {
                 "command": { "type": "string", "description": "run by sh -c" },
