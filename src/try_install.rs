@@ -684,6 +684,10 @@ fn device_client(dir: &Path, checkout: &Path, settings: &one::kernel::Settings, 
     };
     let port = settings.ports[2];
     agent_devices("reach", json!({ "device": device, "port": port }))?;
+    // A native client reads who's who from the bucket itself, at the URLs the signer gives it: the try bucket's port.
+    if let Some(bucket) = std::fs::read_to_string(dir.join("bucket-addr")).ok().and_then(|a| a.trim().rsplit_once(':').and_then(|(_, p)| p.parse::<u16>().ok())) {
+        agent_devices("reach", json!({ "device": device, "port": bucket }))?;
+    }
     // A copy is given back after 15 minutes without a call: a build may take longer.
     let building = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
     let keep = {
