@@ -189,7 +189,7 @@ final class ComputerUse {
     func mirrorStatus() async -> [String: Any] {
         let running = NSWorkspace.shared.runningApplications.contains { $0.bundleIdentifier == "com.apple.iPhoneMirroring" }
         let frame = Mirroring.windowFrame()
-        return ["running": running, "title": frame?.title, "bounds": frame.map { ["x": $0.minX, "y": $0.minY, "w": $0.width, "h": $0.height] }]
+        return ["running": running, "title": frame?.title, "bounds": frame.map { ["x": $0.frame.minX, "y": $0.frame.minY, "w": $0.frame.width, "h": $0.frame.height] } as Any]
     }
 
     /// Open iPhone Mirroring if it isn't already; pairing happens on the phone, not here.
