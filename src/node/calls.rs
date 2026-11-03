@@ -127,10 +127,10 @@ impl Node {
         req
     }
 
-    /// Asks another device to run a call, through the relay.
+    /// Asks another device to run a call.
     pub(super) async fn ask_device(&self, device: Key, req: &CallRequest, me: &Caller) -> Result<Reply> {
         let request = json!({ "app": req.app, "sidecar": req.sidecar, "op": req.op, "input": req.input, "scopes": req.scopes, "depth": req.depth, "from": req.from, "client": req.client, "me": { "key": hex(&me.key), "user": me.user, "agent": me.agent, "token": me.token } });
-        let reply = self.ask_relay(device, json!({ "call": request }), self.limit(req).await + Duration::from_secs(5)).await?;
+        let reply = self.ask(device, request, self.limit(req).await + Duration::from_secs(5)).await?;
         Ok(Reply::from_json(reply))
     }
 

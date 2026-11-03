@@ -49,13 +49,10 @@ getrandom = { version = "0.2", features = ["js"] }
 # What only a node on a machine uses: the rest of the node (src/lib.rs keeps the shared modules apart).
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 axum = "0.8"
-# Devices reach each other through the relay at the install's address (src/node/relay.rs), over one WebSocket each:
-# tokio-tungstenite is that WebSocket, over the rustls ureq already builds, and futures-util (which axum already
-# builds) its Sink and Stream.
-futures-util = { version = "0.3", default-features = false, features = ["sink"] }
-tokio-tungstenite = { version = "0.28", features = ["rustls-tls-webpki-roots"] }
-# Endpoints reach each other with iroh: directly where they can, otherwise through the install's relay (kernel/relay/),
-# which speaks iroh's relay protocol. Pinned, since the relay runs iroh-relay's own code of this version.
+# Devices reach each other over iroh (src/node/net.rs): QUIC between their device keys, direct where a path opens and
+# otherwise through the install's relay, which speaks iroh's relay protocol. Only ring's TLS and the router port mapping
+# (UPnP, NAT-PMP, PCP), with no n0 discovery or metrics. Pinned, since the relay runs iroh-relay's own code of this
+# version.
 iroh = { version = "=1.4.1", default-features = false, features = ["tls-ring", "portmapper"] }
 # Schedules' daily times are in a time zone, daylight saving and all; this reads the system's time zone database.
 jiff = "0.2"
@@ -73,7 +70,7 @@ flate2 = "1"
 jsonc-parser = { version = "0.34", features = ["cst", "serde"] }
 toml_edit = "0.25"
 # Push (src/push.rs) reaches Apple's push service, which speaks only HTTP/2: hyper's (axum already builds hyper; this
-# adds h2) over the rustls tokio-tungstenite already builds, and signs its ES256 tokens with ring, which rustls builds.
+# adds h2) over the rustls ureq and iroh already build, and signs its ES256 tokens with ring, which rustls builds.
 hyper = { version = "1", features = ["client", "http2"] }
 hyper-util = { version = "0.1", features = ["tokio"] }
 http-body-util = "0.1"

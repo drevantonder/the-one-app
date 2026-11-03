@@ -24,7 +24,7 @@ impl Node {
         let secret: [u8; 16] = rand::random();
         let by = (asker.key != self.0.id).then(|| hex(&asker.key));
         self.add_pairing(secret, Pairing { user: asker.user.clone(), by, admits: user, until: now_ms() + PAIRING_LIFE })?;
-        self.tell_relay(json!({ "pairing": relay::ticket_hash(&relay::pairing_ticket(&secret)), "until": now_ms() + PAIRING_LIFE }));
+        self.tell_relay(json!({ "pairing": { "hash": net::ticket_hash(&net::pairing_ticket(&secret)), "until": now_ms() + PAIRING_LIFE } }));
         let code = PairingCode { address, from: self.0.id, secret };
         let mut bytes = Vec::new();
         ciborium::into_writer(&code, &mut bytes)?;
@@ -58,7 +58,7 @@ impl Node {
         let code: PairingCode = ciborium::from_reader(bytes.as_slice()).context("that isn't a pairing code")?;
         self.ensure_no_install()?;
         let request = JoinRequest { secret: code.secret, name: self.device_name(), as_: "device".into() };
-        let reply = self.ask_relay_once(&code.address, &relay::pairing_ticket(&code.secret), code.from, json!({ "join": request })).await.context("couldn't reach the device that made the pairing code")?;
+        let reply = self.ask_to_join(&code.address, &net::pairing_ticket(&code.secret), code.from, serde_json::to_value(&request)?).await.context("couldn't reach the device that made the pairing code")?;
         if let Some(err) = reply.get("error") {
             bail!("{}", err.as_str().unwrap_or("the pairing code was refused"));
         }
@@ -89,7 +89,7 @@ impl Node {
         let by = pairing.by.as_deref().map(unhex).transpose()?;
         let admit = members::admit(&key, &user, &request.name, true, None);
         self.member_as(&Caller { key: by.unwrap_or(self.0.id), user: pairing.user.clone(), agent: None, token: None }, "admit", admit.data).await.context("this device can no longer admit that machine")?;
-        self.tell_relay(json!({ "admitted": hex(&key) }));
+        self.tell_relay(json!({ "add": hex(&key) }));
         Ok(JoinReply { root, user, bucket })
     }
 }

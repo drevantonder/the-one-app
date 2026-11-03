@@ -31,8 +31,8 @@ mod blobs;
 mod calls;
 mod databases;
 mod logs;
+mod net;
 mod pairing;
-mod relay;
 mod releases;
 mod scheduled;
 mod screens;
@@ -349,8 +349,8 @@ pub struct Inner {
     forgotten: Mutex<()>,
     /// What the vault gave this device for the sign-ins its calls came with.
     sessions: sessions::Sessions,
-    /// This device's socket to the relay.
-    relay: relay::Relay,
+    /// This device's iroh endpoint.
+    net: net::Net,
 }
 
 /// Loop guards: an app that calls other apps, or runs its schedules, more than `RATE_LIMIT` times a minute on this
@@ -459,7 +459,7 @@ impl Node {
             unshared: Mutex::new(Vec::new()),
             forgotten: Mutex::new(()),
             sessions: Default::default(),
-            relay: relay::Relay::new(),
+            net: Default::default(),
         }));
         let outbound_router = crate::outbound::router(node.clone());
         tokio::spawn(async move {
@@ -476,7 +476,7 @@ impl Node {
             node.keep_alone_here()?;
             node.follow_storage();
             node.follow_tunnel();
-            node.follow_relay();
+            node.follow_net();
             node.read_all_status();
             let reader = node.clone();
             tokio::spawn(async move {
@@ -699,7 +699,7 @@ impl Node {
         if handled.members || handled.new.iter().any(|e| e.log() == "global" && e.content.app == members::APP) {
             self.follow_storage();
             self.follow_tunnel();
-            self.follow_relay();
+            self.follow_net();
         }
         let forgotten: Vec<(String, String)> = handled.new.iter().filter(|e| e.content.app == members::APP && e.content.kind == "forget").filter_map(|e| Some((e.log().to_string(), e.content.data["blob"].as_str()?.to_string()))).collect();
         self.emit(Event::Changed { apps: Vec::new() });
