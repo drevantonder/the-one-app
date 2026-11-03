@@ -41,12 +41,12 @@ type devices struct {
 
 	backupMu sync.Mutex
 
-	keptHere, keptAll kept // the list, for the page
+	latestHere, latestAll latest // the list, for the page
 	pics              pictures
 }
 
 func newDevices(dir, node string) *devices {
-	ds := &devices{dir: dir, node: node, cache: filepath.Join(dir, "tools.json"), conns: map[string]*conn{}, keptHere: kept{fresh: 2 * time.Second, stale: 24 * time.Hour}, keptAll: kept{fresh: 2 * time.Second, stale: 24 * time.Hour}, held: map[string]*profile{}, used: map[string]time.Time{}, kick: make(chan struct{}, 1)}
+	ds := &devices{dir: dir, node: node, cache: filepath.Join(dir, "tools.json"), conns: map[string]*conn{}, latestHere: latest{fresh: 2 * time.Second, stale: 24 * time.Hour}, latestAll: latest{fresh: 2 * time.Second, stale: 24 * time.Hour}, held: map[string]*profile{}, used: map[string]time.Time{}, kick: make(chan struct{}, 1)}
 	if b, err := os.ReadFile(ds.cache); err == nil {
 		json.Unmarshal(b, &ds.tools)
 	}
@@ -303,14 +303,14 @@ func (ds *devices) run(ctx context.Context, op string, raw json.RawMessage) (any
 	keep, _ := in["kept"].(bool)
 	delete(in, "kept")
 	if slices.Contains(changes, op) {
-		ds.keptHere.forget()
-		ds.keptAll.forget()
+		ds.latestHere.forget()
+		ds.latestAll.forget()
 		if name != "" {
 			ds.forgetPictures(name)
 		}
 	}
 	if op == "list" && keep {
-		return ds.listKept(here)
+		return ds.listLatest(here)
 	}
 	if op == "screen" && keep && name != "" {
 		have, _ := in["have"].(string)
@@ -319,7 +319,7 @@ func (ds *devices) run(ctx context.Context, op string, raw json.RawMessage) (any
 		if w, ok := in["width"].(float64); ok {
 			width = min(max(int(w), 160), 1920)
 		}
-		return ds.screenKept(name, width, have, func(ctx context.Context) (any, error) { return ds.screenNow(ctx, name, width) })
+		return ds.screenLatest(name, width, have, func(ctx context.Context) (any, error) { return ds.screenNow(ctx, name, width) })
 	}
 	if r, done, err := ds.runKinds(ctx, op, name, here, in); done {
 		return r, err

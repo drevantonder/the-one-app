@@ -18,7 +18,7 @@ import (
 // older than fresh. One older than stale, or none yet, is waited for. A change
 // made here forgets the list, so whoever made it sees it.
 
-type kept struct {
+type latest struct {
 	fresh, stale time.Duration
 	mu           sync.Mutex
 	val          any
@@ -27,7 +27,7 @@ type kept struct {
 	asking       bool
 }
 
-func (k *kept) get(ask func(context.Context) (any, error)) (any, time.Time, error) {
+func (k *latest) get(ask func(context.Context) (any, error)) (any, time.Time, error) {
 	k.mu.Lock()
 	v, at, gen := k.val, k.at, k.gen
 	if !at.IsZero() && time.Since(at) < k.stale {
@@ -42,7 +42,7 @@ func (k *kept) get(ask func(context.Context) (any, error)) (any, time.Time, erro
 	return k.ask(ask, gen)
 }
 
-func (k *kept) ask(ask func(context.Context) (any, error), gen int) (any, time.Time, error) {
+func (k *latest) ask(ask func(context.Context) (any, error), gen int) (any, time.Time, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 	v, err := ask(ctx)
@@ -56,7 +56,7 @@ func (k *kept) ask(ask func(context.Context) (any, error), gen int) (any, time.T
 	return v, now, err
 }
 
-func (k *kept) forget() {
+func (k *latest) forget() {
 	k.mu.Lock()
 	k.val, k.at = nil, time.Time{}
 	k.gen++
@@ -66,11 +66,11 @@ func (k *kept) forget() {
 // changes are the operations after which the list isn't what it was.
 var changes = []string{"adopt", "borrow", "give_back", "sign_in", "save_profile", "create", "resize", "start", "stop", "delete", "restore", "move"}
 
-// listKept is list, kept: this device's, or with others, every device's.
-func (ds *devices) listKept(here bool) (any, error) {
-	k, ask := &ds.keptAll, func(ctx context.Context) (any, error) { return ds.listAll(ctx, true) }
+// listLatest is list, kept: this device's, or with others, every device's.
+func (ds *devices) listLatest(here bool) (any, error) {
+	k, ask := &ds.latestAll, func(ctx context.Context) (any, error) { return ds.listAll(ctx, true) }
 	if here {
-		k, ask = &ds.keptHere, func(ctx context.Context) (any, error) {
+		k, ask = &ds.latestHere, func(ctx context.Context) (any, error) {
 			all, err := ds.listHere(ctx)
 			return map[string]any{"devices": all}, err
 		}
@@ -82,22 +82,22 @@ func (ds *devices) listKept(here bool) (any, error) {
 // pictures are the devices' pictures, kept by device and width.
 type pictures struct {
 	mu sync.Mutex
-	by map[string]*kept
+	by map[string]*latest
 }
 
-// screenKept is a device's picture, kept for a little while: a page watching it
+// screenLatest is a device's picture, kept for a little while: a page watching it
 // asks again every so often, and gets the one taken in the background since. Its
 // hash says which it is: given the one it has (have), it's told it's the same
 // rather than sent it again.
-func (ds *devices) screenKept(name string, width int, have string, take func(context.Context) (any, error)) (any, error) {
+func (ds *devices) screenLatest(name string, width int, have string, take func(context.Context) (any, error)) (any, error) {
 	ds.pics.mu.Lock()
 	if ds.pics.by == nil {
-		ds.pics.by = map[string]*kept{}
+		ds.pics.by = map[string]*latest{}
 	}
 	key := fmt.Sprintf("%s/%d", name, width)
 	k := ds.pics.by[key]
 	if k == nil {
-		k = &kept{fresh: 15 * time.Second, stale: 24 * time.Hour}
+		k = &latest{fresh: 15 * time.Second, stale: 24 * time.Hour}
 		ds.pics.by[key] = k
 	}
 	ds.pics.mu.Unlock()
