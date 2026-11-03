@@ -8,6 +8,7 @@ struct PhoneApp: App {
     @State private var phone = Phone.shared
 
     init() {
+        Icons.load()
         // A home-screen widget's button or toggle starts the app in the background, if it isn't running, to run it.
         WidgetActions.run = { app, op, input, _ in
             let phone = Phone.shared
@@ -26,6 +27,11 @@ struct PhoneApp: App {
                 .task {
                     delegate.phone = phone
                     await phone.start()
+                }
+                .task {
+                    // Once the first frame is up.
+                    try? await Task.sleep(for: .milliseconds(300))
+                    WarmWebKit.start()
                 }
                 .onOpenURL { phone.open($0) }
                 .onChange(of: phone.store.config?.push, initial: true) { Task { await phone.setUpPush() } }

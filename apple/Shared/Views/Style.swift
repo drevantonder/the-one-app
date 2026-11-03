@@ -31,10 +31,31 @@ func tintCSS(dark: Bool) -> String {
 
 /// Phosphor's icons (vendor/phosphor), which apps name for their tiles, screens and widgets, so every shell draws the
 /// same ones: each a path on a 256-point grid, drawn filled. `git-branch` is the regular one, `git-branch-fill` filled.
+/// The app reads all 1.2 MB of them once, off the main thread as it starts (`load`); home-screen widgets read only the
+/// ones their widgets draw, which the app leaves in its group (`keep`).
 enum Icons {
-    static let paths: [String: String] = Bundle.main.url(forResource: "icons", withExtension: "json")
-        .flatMap { try? Data(contentsOf: $0) }
-        .flatMap { try? JSONDecoder().decode([String: String].self, from: $0) } ?? [:]
+    static let paths: [String: String] = file.flatMap { try? Data(contentsOf: $0) }
+        .flatMap { (try? JSONSerialization.jsonObject(with: $0)) as? [String: String] } ?? [:]
+
+    #if WIDGET
+    private static var file: URL? { group?.appending(path: "icons.json") }
+    #else
+    private static var file: URL? { Bundle.main.url(forResource: "icons", withExtension: "json") }
+
+    static func load() { Task.detached(priority: .utility) { _ = paths } }
+
+    /// Leaves `names`' icons where the home-screen widgets read them.
+    static func keep(_ names: some Sequence<String>) {
+        guard let file = group?.appending(path: "icons.json") else { return }
+        let subset = Dictionary(names.compactMap { name in paths[name].map { (name, $0) } }) { a, _ in a }
+        try? JSONSerialization.data(withJSONObject: subset).write(to: file, options: .atomic)
+    }
+    #endif
+
+    private static var group: URL? {
+        guard let group = Bundle.main.object(forInfoDictionaryKey: "AppGroup") as? String else { return nil }
+        return FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: group)
+    }
 
     static func shape(_ name: String?) -> SVGShape? {
         name.flatMap { paths[$0] }.map { SVGShape($0, box: 256) }

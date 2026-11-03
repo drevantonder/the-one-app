@@ -158,6 +158,7 @@ final class Store {
     /// Forgets everything it showed, and what it kept of the person's on this device: they signed out.
     func forget() {
         ScreenCache.forget()
+        forgetKeptScreens()
         ScreenFile.forget()
         URLCache.shared.removeAllCachedResponses()
         WKWebsiteDataStore.default().removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), modifiedSince: .distantPast) {}

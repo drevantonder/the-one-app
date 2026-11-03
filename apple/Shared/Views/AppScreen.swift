@@ -12,12 +12,22 @@ struct AppScreen: View {
     /// For a screen in a sheet: closes it, with what the screen gave `one.close`.
     var dismiss: ((Any?) -> Void)?
     @State private var title: String?
-    @State private var loaded = false
+    @State private var loaded: Bool
     @State private var failure: String?
     /// When the node couldn't be reached, so the screen shows its last copy, until it answers again.
     @State private var offline: Offline?
     /// Bumped by Try Now, for the web view to try the node again at once.
     @State private var tries = 0
+
+    init(route: ScreenRoute, settings: Bool = false, dismiss: ((Any?) -> Void)? = nil) {
+        self.route = route
+        self.settings = settings
+        self.dismiss = dismiss
+        // Back to a screen left a moment ago: it's there at once, as it was.
+        let kept = dismiss == nil ? KeptScreens.peek(.init(route: route, settings: settings)) : nil
+        _loaded = State(initialValue: kept != nil)
+        _title = State(initialValue: kept?.title)
+    }
 
     var body: some View {
         ScreenWebView(route: route, settings: settings, dismiss: dismiss, store: store, title: $title, loaded: $loaded, failure: $failure, offline: $offline, tries: tries)
@@ -94,19 +104,25 @@ private struct ScreenWebView: Representable {
     var tries: Int
     @Environment(\.dynamicTypeSize) private var typeSize
 
-    func makeCoordinator() -> Coordinator { Coordinator(view: self) }
+    func makeCoordinator() -> Coordinator {
+        if dismiss == nil, let kept = KeptScreens.take(.init(route: route, settings: settings)) {
+            kept.view = self
+            return kept
+        }
+        return Coordinator(view: self)
+    }
 
     #if os(macOS)
     func makeNSView(context: Context) -> WKWebView { make(context) }
     func updateNSView(_ web: WKWebView, context: Context) { update(context) }
-    static func dismantleNSView(_ web: WKWebView, coordinator: Coordinator) { coordinator.stop() }
+    static func dismantleNSView(_ web: WKWebView, coordinator: Coordinator) { coordinator.leave(web) }
     #else
     func makeUIView(context: Context) -> WKWebView { make(context) }
     func updateUIView(_ web: WKWebView, context: Context) {
         update(context)
         web.evaluateJavaScript(zoomScript)
     }
-    static func dismantleUIView(_ web: WKWebView, coordinator: Coordinator) { coordinator.stop() }
+    static func dismantleUIView(_ web: WKWebView, coordinator: Coordinator) { coordinator.leave(web) }
     #endif
 
     private func update(_ context: Context) {
@@ -116,6 +132,7 @@ private struct ScreenWebView: Representable {
     }
 
     private func make(_ context: Context) -> WKWebView {
+        if let web = context.coordinator.resume() { return web }
         let config = WKWebViewConfiguration()
         config.userContentController.addScriptMessageHandler(context.coordinator, contentWorld: .page, name: "one")
         config.userContentController.addUserScript(WKUserScript(source: look, injectionTime: .atDocumentStart, forMainFrameOnly: true))
@@ -276,6 +293,25 @@ private struct ScreenWebView: Representable {
 
         func stop() { loading?.cancel() }
 
+        /// The screen's title, as the page last set it.
+        private(set) var title: String?
+        /// Its web view while it's kept, between being taken back and shown.
+        var held: WKWebView?
+
+        /// Gone from view: a screen that showed is kept a while, unless it's a sheet's, which is closed for good.
+        func leave(_ web: WKWebView) {
+            stop()
+            if view.dismiss == nil, shown { KeptScreens.keep(.init(route: view.route, settings: view.settings), web, self) }
+        }
+
+        /// Shown again: its web view, asking the node again if it last couldn't.
+        func resume() -> WKWebView? {
+            guard let web = held else { return nil }
+            held = nil
+            if misses > 0 { load(into: web) }
+            return web
+        }
+
         #if os(iOS)
         private var host: UIView? { web }
         #else
@@ -402,7 +438,8 @@ private struct ScreenWebView: Representable {
                     return (nil, error.localizedDescription)
                 }
             case "title":
-                view.title = body["text"] as? String
+                title = body["text"] as? String
+                view.title = title
                 return (nil, nil)
             case "icons":
                 let names = body["names"] as? [String] ?? []
@@ -539,6 +576,51 @@ private struct ScreenWebView: Representable {
             shown = false
             load(into: web)
         }
+    }
+}
+
+/// The last few screens left, by route, so going back to one shows it at once, as it was: the node's events keep
+/// them up to date meanwhile.
+@MainActor
+private enum KeptScreens {
+    struct Key: Hashable {
+        var route: ScreenRoute
+        var settings: Bool
+    }
+
+    private static var kept: [(key: Key, web: WKWebView, coordinator: ScreenWebView.Coordinator)] = []
+
+    static func peek(_ key: Key) -> ScreenWebView.Coordinator? { kept.first { $0.key == key }?.coordinator }
+
+    static func take(_ key: Key) -> ScreenWebView.Coordinator? {
+        guard let at = kept.firstIndex(where: { $0.key == key }) else { return nil }
+        let entry = kept.remove(at: at)
+        entry.coordinator.held = entry.web
+        return entry.coordinator
+    }
+
+    static func keep(_ key: Key, _ web: WKWebView, _ coordinator: ScreenWebView.Coordinator) {
+        kept.removeAll { $0.key == key }
+        kept.append((key, web, coordinator))
+        if kept.count > 4 { kept.removeFirst() }
+    }
+
+    static func forget() { kept = [] }
+}
+
+/// Signed out: no screen of theirs is kept.
+@MainActor
+func forgetKeptScreens() { KeptScreens.forget() }
+
+/// Starts WebKit before the first screen opens, so that opens sooner: an empty page in a web view no one sees.
+@MainActor
+enum WarmWebKit {
+    private static var web: WKWebView?
+
+    static func start() {
+        guard web == nil else { return }
+        web = WKWebView(frame: .zero)
+        web?.loadHTMLString("", baseURL: nil)
     }
 }
 

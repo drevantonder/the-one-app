@@ -195,9 +195,11 @@ extension Store {
         }
         // Signed in again with no widgets, the home screen's stop saying to sign in.
         guard Phone.nodeURL != nil || Auth.signedIn, !items.isEmpty || WidgetCache.load()?.signedOut == true else { return }
+        let trees = items.flatMap { [$0.root] + ($0.sizes ?? [:]).values }
+        Icons.keep(Set(items.map(\.icon) + trees.flatMap(\.iconNames)))
         WidgetCache(install: install?.name, widgets: items).save()
         WidgetCenter.shared.reloadAllTimelines()
-        let images = items.flatMap { [$0.root] + ($0.sizes ?? [:]).values }.flatMap(\.imageURLs)
+        let images = trees.flatMap(\.imageURLs)
         if !images.isEmpty {
             await WidgetImages.save(images)
             WidgetCenter.shared.reloadAllTimelines()

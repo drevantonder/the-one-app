@@ -43,6 +43,11 @@ struct RootView: View {
             }
         }
         .environment(\.raised, true)
+        .task {
+            // Once the first frame is up.
+            try? await Task.sleep(for: .milliseconds(300))
+            WarmWebKit.start()
+        }
         .onChange(of: appearance, initial: true) {
             NSApp.appearance = Appearance(rawValue: appearance)?.scheme.map { NSAppearance(named: $0 == .dark ? .darkAqua : .aqua)! }
         }

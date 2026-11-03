@@ -13,6 +13,19 @@ final class PhoneDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCe
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions options: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         UNUserNotificationCenter.current().delegate = self
+        // The person's Appearance from a window's first frame, not a flash of the other one before SwiftUI's
+        // preferredColorScheme reaches it.
+        NotificationCenter.default.addObserver(forName: UIWindow.didBecomeVisibleNotification, object: nil, queue: nil) { note in
+            let window = note.object as? UIWindow
+            MainActor.assumeIsolated {
+                let chosen = UserDefaults.standard.string(forKey: "appearance").flatMap(Appearance.init(rawValue:)) ?? .automatic
+                window?.overrideUserInterfaceStyle = switch chosen {
+                case .automatic: .unspecified
+                case .light: .light
+                case .dark: .dark
+                }
+            }
+        }
         return true
     }
 

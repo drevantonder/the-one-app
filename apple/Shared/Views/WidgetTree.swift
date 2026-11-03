@@ -293,6 +293,11 @@ struct WidgetNode: Codable, Sendable, Equatable {
         (t == "image" ? [url.flatMap(URL.init(string:))].compactMap { $0 } : []) + (c ?? []).flatMap(\.imageURLs)
     }
 
+    /// The icons it may draw, by name.
+    var iconNames: [String] {
+        [icon, name].compactMap { $0 } + (c ?? []).flatMap(\.iconNames)
+    }
+
     /// When its app wants it rendered again: `next`, kept between a minute and fifteen from now.
     func redraw(after now: Date = .now) -> Date? {
         next.map { Date(timeIntervalSince1970: $0 / 1000) }.map { Swift.min(Swift.max($0, now.addingTimeInterval(60)), now.addingTimeInterval(900)) }
