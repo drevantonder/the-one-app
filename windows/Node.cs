@@ -23,15 +23,28 @@ public static class Node
 
     public static readonly JsonSerializerOptions Json = new() { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull };
 
-    /// A request → its response, once it's ok; with the person's token, refreshed once if it's refused.
+    /// How long to wait before asking again the `misses`th time running (from 0) after the node didn't answer: at once,
+    /// then a quarter second, doubling, up to five. A node restarting for an update is back within a moment.
+    public static TimeSpan RetryWait(int misses) => TimeSpan.FromMilliseconds(misses == 0 ? 0 : Math.Min(5000, 125 << Math.Min(misses, 6)));
+
+    /// No node answered: the gateway, or Cloudflare before it, couldn't reach one, so nothing ran.
+    static bool Unanswered(HttpStatusCode status) => (int)status is 502 or 503 or 530;
+
+    /// Names a call wherever it's sent, so sent again it runs once.
+    static string CallId() => Convert.ToHexStringLower(System.Security.Cryptography.RandomNumberGenerator.GetBytes(8));
+
+    /// A request → its response, once it's ok; with the person's token, refreshed once if it's refused. Sent again for
+    /// a few seconds while nothing answers or no node does, as one restarting doesn't; a call carries an id, so it runs
+    /// once however often it's sent.
     static async Task<HttpResponseMessage> Send(HttpMethod method, string path, Dictionary<string, string?>? query = null, JsonNode? body = null,
         bool stream = false, TimeSpan? timeout = null, CancellationToken cancel = default)
     {
         var url = $"{Auth.Shared.Address}{path}";
         var q = (query ?? []).Where(kv => kv.Value != null).Select(kv => $"{Uri.EscapeDataString(kv.Key)}={Uri.EscapeDataString(kv.Value!)}").ToList();
         if (q.Count > 0) url += "?" + string.Join("&", q);
+        if (path.StartsWith("/v1/call") && body is JsonObject call && call["id"] == null) call["id"] = CallId();
         var token = await Auth.Shared.Token();
-        for (var tries = 0; ; tries++)
+        for (int tries = 0, misses = 0; ; tries++)
         {
             using var request = new HttpRequestMessage(method, url);
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
@@ -43,9 +56,22 @@ public static class Node
             {
                 r = await http.SendAsync(request, stream ? HttpCompletionOption.ResponseHeadersRead : HttpCompletionOption.ResponseContentRead, limit.Token);
             }
+            catch (HttpRequestException) when (!cancel.IsCancellationRequested && misses < 5)
+            {
+                await Task.Delay(RetryWait(misses++), cancel);
+                tries--;
+                continue;
+            }
             catch (Exception) when (!cancel.IsCancellationRequested)
             {
                 throw new NodeException("Your devices aren’t answering.");
+            }
+            if (Unanswered(r.StatusCode) && misses < 5)
+            {
+                r.Dispose();
+                await Task.Delay(RetryWait(misses++), cancel);
+                tries--;
+                continue;
             }
             if (r.StatusCode == HttpStatusCode.Unauthorized && tries == 0)
             {

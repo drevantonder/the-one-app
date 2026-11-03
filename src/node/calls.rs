@@ -26,7 +26,9 @@ impl Node {
     /// or says to go elsewhere.
     pub(super) async fn route(&self, req: CallRequest, me: Caller) -> Result<Value> {
         let mut req = self.resolve(req);
-        req.id.get_or_insert_with(new_id);
+        // A client's own id, so a call it sends again runs once, names its lease in the bucket: only a short word.
+        let id = req.id.get_or_insert_with(new_id);
+        ensure!(id.len() <= 64 && !id.is_empty() && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_'), "a call's id is up to 64 letters, digits, - and _");
         if req.device.as_deref() == Some("all") {
             return self.everywhere(req, me).await;
         }

@@ -253,7 +253,7 @@ public sealed class MainWindow : Window
             Spacing = 12,
             Children = { new ProgressRing { IsActive = true, Width = 24, Height = 24 }, Look.Text($"Starting {WhiteLabel.Name}…", 13, Look.Secondary) },
         });
-        for (var wait = 1000; ; wait = Math.Min(wait * 2, 15_000))
+        for (var misses = 1; ; misses++)
         {
             try
             {
@@ -268,7 +268,7 @@ public sealed class MainWindow : Window
             catch (Exception e)
             {
                 body.Content = Look.Unavailable("Can’t Reach Your Devices", e.Message, Look.Text("Trying again…", 13, Look.Secondary));
-                await Task.Delay(wait);
+                await Task.Delay(Node.RetryWait(misses));
             }
         }
         if (Store.Shared.Install == null)

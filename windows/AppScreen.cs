@@ -164,7 +164,7 @@ public sealed class AppScreen : Grid
                 (html, kept) = copy;
             }
             misses++;
-            _ = Again(TimeSpan.FromSeconds(Math.Min(30, 1 << Math.Min(misses, 5))));
+            _ = Again(Node.RetryWait(misses));
             return true;
         }
     }

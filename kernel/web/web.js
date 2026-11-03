@@ -136,16 +136,38 @@ window.__one = {};
 
   class NodeError extends Error {}
 
-  /// A request to the node, as this person: JSON in and out, or with `raw` the response itself.
+  /// How long to wait before asking again the `n`th time running (from 0) after the node didn't answer: at once, then
+  /// a quarter second, doubling, up to five. A node restarting for an update is back within a moment.
+  const retryWait = (n) => (n === 0 ? 0 : Math.min(5000, 125 << Math.min(n, 6)));
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  /// No node answered: the gateway, or Cloudflare before it, couldn't reach one, so nothing ran.
+  const unanswered = (status) => [502, 503, 530].includes(status);
+
+  /// A request to the node, as this person: JSON in and out, or with `raw` the response itself. Asked again for a few
+  /// seconds while no node answers, as one restarting doesn't; a call carries an id, so it runs once however often
+  /// it's sent.
   async function api(path, { method = "GET", body, query, raw, signal } = {}) {
     const url = new URL(path, location.origin);
     for (const [k, v] of Object.entries(query || {})) if (v != null) url.searchParams.set(k, typeof v === "string" ? v : JSON.stringify(v));
+    if (url.pathname === "/v1/call" && body && typeof body === "object" && !body.id) body = { ...body, id: callId() };
     let token = await auth.token();
-    for (let tries = 0; ; tries++) {
+    for (let renewed = false, misses = 0; ; ) {
       const headers = { authorization: `Bearer ${token}` };
       if (body !== undefined) headers["content-type"] = "application/json";
-      const r = await fetch(url, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), signal });
-      if (r.status === 401 && tries === 0) {
+      let r;
+      try {
+        r = await fetch(url, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), signal });
+      } catch (err) {
+        if (signal?.aborted || misses >= 5) throw err;
+        await sleep(retryWait(misses++));
+        continue;
+      }
+      if (unanswered(r.status) && misses < 5) {
+        await sleep(retryWait(misses++));
+        continue;
+      }
+      if (r.status === 401 && !renewed) {
+        renewed = true;
         token = await auth.token(token);
         continue;
       }
@@ -165,6 +187,9 @@ window.__one = {};
     return Object.fromEntries(names.map((n) => [n, all[n]]));
   }
   window.__one.host = async (m) => (m.type === "copy" ? navigator.clipboard.writeText(m.text) : m.type === "icons" ? iconPaths(m.names) : null);
+
+  /// Names a call wherever it's sent, so sent again it runs once.
+  const callId = () => Array.from(crypto.getRandomValues(new Uint8Array(8)), (b) => b.toString(16).padStart(2, "0")).join("");
 
   /// Runs an app's operation as this person → its result.
   async function call(app, op, input = {}) {
@@ -222,7 +247,8 @@ window.__one = {};
   let events = null;
   async function listen() {
     const mine = (events = new AbortController());
-    while (!mine.signal.aborted) {
+    for (let misses = 0; !mine.signal.aborted; ) {
+      const started = Date.now();
       try {
         const r = await api("/v1/events", { raw: true, signal: mine.signal });
         const reader = r.body.pipeThrough(new TextDecoderStream()).getReader();
@@ -242,7 +268,10 @@ window.__one = {};
       } catch (err) {
         if (err.signedOut) return showSignedOut();
       }
-      if (!mine.signal.aborted) await new Promise((r) => setTimeout(r, 3000));
+      // At once after a stream that ran a while and ended (its node handing over to a new build), then waiting longer
+      // each miss.
+      if (Date.now() - started > 10_000) misses = 0;
+      if (!mine.signal.aborted) await sleep(retryWait(misses++));
     }
   }
   addEventListener("pagehide", () => events?.abort());
@@ -714,14 +743,14 @@ window.__one = {};
     }
     if (!auth.kept()) return showSignedOut();
     root.innerHTML = `<div class="starting">${one.loading("Starting")}</div>`;
-    for (let wait = 1000; ; wait = Math.min(wait * 2, 15_000)) {
+    for (let misses = 1; ; misses++) {
       try {
         await refreshState();
         break;
       } catch (err) {
         if (err.signedOut) return showSignedOut();
         showUnreachable(err instanceof NodeError ? err.message : "Your devices aren’t answering.");
-        await new Promise((r) => setTimeout(r, wait));
+        await sleep(retryWait(misses));
       }
     }
     // `/vault?id=…&scope=…`: an agent's link to a request for an item, answered over You.

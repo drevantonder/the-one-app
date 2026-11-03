@@ -227,7 +227,7 @@ private struct ScreenWebView: Representable {
             web?.evaluateJavaScript("window.one && one.__event(\(json))")
         }
 
-        /// The node's tries since it last answered, for the wait before the next: 2, 4, 8, 16, then every 30 seconds.
+        /// The node's tries since it last answered, for the wait before the next (`Retry.wait`): a quarter second, doubling, up to five.
         private var misses = 0
         private var loading: Task<Void, Never>?
 
@@ -260,7 +260,7 @@ private struct ScreenWebView: Representable {
                         return
                     }
                     misses += 1
-                    let wait = Double(min(30, 1 << min(misses, 5)))
+                    let wait = Retry.wait(misses)
                     view.offline = Offline(kept: kept, next: .now + wait)
                     try? await Task.sleep(for: .seconds(wait))
                     guard !Task.isCancelled else { return }

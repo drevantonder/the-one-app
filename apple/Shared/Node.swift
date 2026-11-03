@@ -248,6 +248,29 @@ enum LocalToken {
     }
 }
 
+/// Asking again while no node answers, as one restarting for an update doesn't for a moment: at once, then a quarter
+/// second, doubling, up to five.
+enum Retry {
+    /// How long to wait before asking again the `misses`th time running (from 0), in seconds.
+    static func wait(_ misses: Int) -> Double {
+        misses == 0 ? 0 : min(5, 0.125 * Double(1 << min(misses, 6)))
+    }
+
+    /// Sends `request`, again for a few seconds while nothing answers or the gateway reaches no node, so nothing ran;
+    /// never one that timed out, which may have.
+    static func send(_ request: URLRequest) async throws -> (Data, URLResponse) {
+        for misses in 0... {
+            do {
+                let (data, response) = try await URLSession.shared.data(for: request)
+                guard misses < 5, [502, 503, 530].contains((response as? HTTPURLResponse)?.statusCode ?? 0) else { return (data, response) }
+            } catch let error as URLError where misses < 5 && [.cannotConnectToHost, .networkConnectionLost, .cannotFindHost, .notConnectedToInternet].contains(error.code) {
+            }
+            try await Task.sleep(for: .seconds(wait(misses)))
+        }
+        fatalError()
+    }
+}
+
 /// The node's HTTP API: this machine's own node, or the install's address; with `auth`, as the person signed in.
 struct HTTPNode: NodeTransport {
     var base: URL
@@ -283,10 +306,10 @@ struct HTTPNode: NodeTransport {
             plain.httpBody = body
         }
         var (request, token) = try await signed(plain)
-        var (data, response) = try await URLSession.shared.data(for: request)
+        var (data, response) = try await Retry.send(request)
         if let auth, (response as? HTTPURLResponse)?.statusCode == 401 {
             request.setValue("Bearer \(try await auth.token(stale: token))", forHTTPHeaderField: "Authorization")
-            (data, response) = try await URLSession.shared.data(for: request)
+            (data, response) = try await Retry.send(request)
         }
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         if status != 200 {
@@ -485,10 +508,16 @@ struct NodeClient: Sendable {
     /// Runs an app's operation for an app screen: its input and result are JSON, whatever their shape.
     func call(app: String, op: String, input: Data, timeout: TimeInterval = 15) async throws -> Data {
         let input = try JSONSerialization.jsonObject(with: input, options: .fragmentsAllowed)
-        let data = try await transport.send("POST", "v1/call", body: try json(["app": app, "op": op, "input": input, "client": client]), timeout: timeout)
+        // Its id makes it run once, however often it's sent.
+        let data = try await transport.send("POST", "v1/call", body: try json(["id": Self.callID(), "app": app, "op": op, "input": input, "client": client]), timeout: timeout)
         let reply = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
         if let error = reply["error"] as? String { throw NodeError(error) }
         return try JSONSerialization.data(withJSONObject: reply["ok"] ?? NSNull(), options: .fragmentsAllowed)
+    }
+
+    /// Names a call wherever it's sent, so sent again it runs once.
+    static func callID() -> String {
+        (0..<8).map { _ in String(format: "%02x", UInt8.random(in: 0...255)) }.joined()
     }
 
     func page(app: String, screen: String, params: String, scope: String?) async throws -> String {
@@ -506,6 +535,7 @@ struct NodeClient: Sendable {
         guard let bare = parts?.path, bare.hasPrefix("/v1/"), !bare.contains("..") else { throw NodeError("That isn’t on your devices.") }
         var fields = body as? [String: Any] ?? [:]
         for item in parts?.queryItems ?? [] { fields[item.name] = item.value ?? "" }
+        if bare == "/v1/call", fields["id"] == nil { fields["id"] = Self.callID() }
         parts?.queryItems = nil
         let method = method.uppercased()
         let sent: Any? = method == "GET" ? (fields.isEmpty ? nil : fields) : (body is [String: Any] || body == nil ? fields : body)

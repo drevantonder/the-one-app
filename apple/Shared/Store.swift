@@ -513,13 +513,19 @@ final class Store {
     // MARK: Connection
 
     func run() async {
+        var misses = 0
         while !Task.isCancelled {
+            let started = Date.now
             if await connect() {
                 do {
                     for try await event in node.events() { await handle(event) }
                 } catch {}
             }
-            try? await Task.sleep(for: .seconds(phase == .ready ? 1 : 3))
+            // At once after a stream that ran a while and ended (its node handing over to a new build), then waiting
+            // longer each miss.
+            if Date.now.timeIntervalSince(started) > 10 { misses = 0 }
+            try? await Task.sleep(for: .seconds(Retry.wait(misses)))
+            misses += 1
         }
     }
 

@@ -425,7 +425,7 @@ private class Bridge(val context: Context, val store: Store, val route: Route, v
                     return@launch
                 }
                 misses++
-                val wait = minOf(30, 1 shl minOf(misses, 5)) * 1000L
+                val wait = retryWait(misses)
                 offline = Offline(kept, System.currentTimeMillis() + wait)
                 delay(wait)
                 offline = Offline(kept, null)

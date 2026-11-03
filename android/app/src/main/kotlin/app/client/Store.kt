@@ -121,9 +121,11 @@ class Store(private val application: android.app.Application, val signIn: SignIn
     /** A request to the node, as this person: JSON in, the reply's bytes out. A refused token is renewed once. */
     suspend fun api(path: String, method: String = "GET", body: JsonElement? = null, query: Map<String, String?> = emptyMap()): ByteArray {
         val url = url(path, query)
+        // Its id makes a call run once, however often it's sent.
+        val body = if (path == "/v1/call" && body is JsonObject && "id" !in body) JsonObject(body + ("id" to JsonPrimitive(callId()))) else body
         var token = signIn.token()
         for (tries in 0..1) {
-            val r = http(method, url, body?.toString()?.toByteArray(), "application/json", mapOf("authorization" to "Bearer $token"))
+            val r = retried { http(method, url, body?.toString()?.toByteArray(), "application/json", mapOf("authorization" to "Bearer $token")) }
             if (r.status == 401 && tries == 0) {
                 token = signIn.token(stale = token)
                 continue
@@ -165,7 +167,7 @@ class Store(private val application: android.app.Application, val signIn: SignIn
     fun run() {
         if (running?.isActive == true) return
         running = scope.launch {
-            var wait = 1000L
+            var misses = 1
             while (true) {
                 try {
                     refreshState()
@@ -176,8 +178,7 @@ class Store(private val application: android.app.Application, val signIn: SignIn
                 } catch (e: Exception) {
                     unreachable("Your devices aren’t answering.")
                 }
-                delay(wait)
-                wait = minOf(wait * 2, 15_000)
+                delay(retryWait(misses++))
             }
             phase = Phase.Ready
             launch { runCatching { refreshWidgets() } }
@@ -242,7 +243,9 @@ class Store(private val application: android.app.Application, val signIn: SignIn
 
     /** The node's events: what changed, for every open screen, and for the home screen's widgets. */
     private suspend fun listen() {
+        var misses = 0
         while (true) {
+            val started = System.currentTimeMillis()
             try {
                 val token = signIn.token()
                 withContext(Dispatchers.IO) {
@@ -268,7 +271,10 @@ class Store(private val application: android.app.Application, val signIn: SignIn
                 if (e.signedOut) return signedOut(e.message)
             } catch (_: Exception) {
             }
-            delay(3000)
+            // At once after a stream that ran a while and ended (its node handing over to a new build), then waiting
+            // longer each miss.
+            if (System.currentTimeMillis() - started > 10_000) misses = 0
+            delay(retryWait(misses++))
         }
     }
 
