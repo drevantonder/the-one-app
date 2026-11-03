@@ -25,12 +25,16 @@ create table alerts (place text primary key, time integer not null);
 alter table runs rename column server to device;
 alter table builds rename column server to device;
 alter table backups rename column server to device;
+", "
+create table checks (place text, device text, time integer, error text, report text not null, primary key (place, device, time));
 "];
 
 /// How many runs of each schedule a scope keeps.
 pub const RUNS_KEPT: usize = 20;
 /// How many backup runs to each place `global` keeps.
 pub const BACKUP_RUNS_KEPT: usize = 100;
+/// How many restore checks of each place `global` keeps.
+pub const CHECKS_KEPT: usize = 20;
 
 /// A scope's rows, as this device last read them.
 #[derive(Clone, Debug, Default)]
@@ -49,6 +53,8 @@ pub struct Status {
     pub covered: BTreeMap<(String, String), (u64, u64)>,
     /// In `global`: when admins were last told of a place's trouble, by place.
     pub alerted: BTreeMap<String, u64>,
+    /// In `global`: the latest restore checks, oldest first.
+    pub checks: Vec<CheckRun>,
 }
 
 /// An app's insights in one scope.
@@ -122,6 +128,16 @@ pub struct BackedUp {
     pub bytes: u64,
 }
 
+/// One device's restore check of one place: what came back (`backups::check`'s report, in short), or what's wrong.
+#[derive(Clone, Debug)]
+pub struct CheckRun {
+    pub place: String,
+    pub device: Key,
+    pub time: u64,
+    pub error: Option<String>,
+    pub report: Value,
+}
+
 /// One change to a scope's rows.
 pub enum Said {
     /// A call of `app` by `user` from `client` (`agent` naming who asked through it), on `day`.
@@ -132,6 +148,7 @@ pub enum Said {
     Build { device: Key, build: String, target: String },
     BackedUp(BackupRun),
     Alerted { place: String },
+    Checked(CheckRun),
 }
 
 impl Node {
@@ -178,6 +195,10 @@ impl Node {
                         ex("delete from backups where place = ? and time not in (select time from backups where place = ? order by time desc limit ?)", &[json!(r.place), json!(r.place), json!(BACKUP_RUNS_KEPT)])
                     }
                     Said::Alerted { place } => ex("insert or replace into alerts values (?, ?)", &[json!(place), json!(now)]),
+                    Said::Checked(r) => {
+                        ex("insert or replace into checks values (?, ?, ?, ?, ?)", &[json!(r.place), json!(hex(&r.device)), json!(r.time), json!(r.error), json!(r.report.to_string())])?;
+                        ex("delete from checks where place = ? and time not in (select time from checks where place = ? order by time desc limit ?)", &[json!(r.place), json!(r.place), json!(CHECKS_KEPT)])
+                    }
                 }
             })
             .await?;
@@ -248,6 +269,15 @@ impl Node {
         }
         for r in rows("select * from alerts")? {
             s.alerted.insert(text(&r["place"]), n(&r["time"]));
+        }
+        for r in rows("select * from checks order by time")? {
+            s.checks.push(CheckRun {
+                place: text(&r["place"]),
+                device: unhex(r["device"].as_str().unwrap_or("")).unwrap_or_default(),
+                time: n(&r["time"]),
+                error: r["error"].as_str().map(str::to_string),
+                report: serde_json::from_str(r["report"].as_str().unwrap_or("null")).unwrap_or_default(),
+            });
         }
         // While it holds the database, so a read that started earlier can't land after this one.
         self.with(|i| {

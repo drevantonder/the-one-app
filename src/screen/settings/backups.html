@@ -50,8 +50,9 @@
     // words; otherwise each place says when it last backed up. The last backup is worth saying once it's missed a run.
     const missed = failing?.last && Date.now() - failing.last.time >= 3600000;
     const top = problem
-      ? one.problem({ title: `Couldn't back up to ${failing.title}`,
-          text: [missed && `Last backed up ${one.ago(failing.last.time, { long: true })}.`, problem.fix].filter(Boolean).join(" "), action: waiting ? null : { label: "Back Up Now", run: backUpNow } })
+      ? one.problem({ title: problem.title || `Couldn't back up to ${failing.title}`,
+          text: [!problem.check && missed && `Last backed up ${one.ago(failing.last.time, { long: true })}.`, problem.fix].filter(Boolean).join(" "),
+          action: problem.check ? { label: "Check Again", run: checkAgain } : waiting ? null : { label: "Back Up Now", run: backUpNow } })
       : !places.length ? one.empty("Nothing is backed up yet.", admin ? { label: "Add Place…", run: addPlace } : null) : "";
     const snapshots = (backups.snapshots || []).slice(0, 8);
     return `${top}
@@ -84,6 +85,17 @@
     return draw();
   }
 
+  // Restores the newest backup of each place again, and says how it went.
+  async function checkAgain() {
+    error = "";
+    try {
+      await one.api("POST", "/v1/backups/check", {});
+    } catch (err) {
+      error = one.plain(err).title;
+    }
+    return draw();
+  }
+
   document.addEventListener("click", async (e) => {
     if (e.target.closest(".sheet")) return;
     if (e.target.closest("#now")) return backUpNow();
@@ -100,7 +112,7 @@
     const sheet = one.sheet({ title: p.title, onClose: draw });
     const where = p.kind === "folder" ? [["Folder", p.where], ["Disk on", name(p.device)]] : [["Bucket", p.where], ["Endpoint", p.endpoint]];
     sheet.body.innerHTML = `${p.problem ? one.problem({ title: one.plain(p.problem.text).title, text: p.problem.fix }) : ""}
-      <div style="margin-top:18px">${one.info([...where, ["Last backup", p.last && `${when(p.last.time, true)}, ${name(p.last.device)}`]])}</div>
+      <div style="margin-top:18px">${one.info([...where, ["Last backup", p.last && `${when(p.last.time, true)}, ${name(p.last.device)}`], ["Restore checked", p.checked && !p.checked.error ? `${when(p.checked.time, true)}, ${name(p.checked.device)}` : null]])}</div>
       <div class="list" style="margin-top:18px" id="in-vault"><div class="row plain go" id="vault" aria-disabled="true"><div class="main"><div class="title"><span>Edit in Vault</span></div></div><span class="spinner small muted" aria-hidden="true"></span></div></div>
       ${admin ? `<div class="list" style="margin-top:18px"><div class="row plain go" id="stop"><div class="main"><div class="title"><span class="error">Stop Backing Up Here</span></div></div></div></div>` : ""}
       <div id="confirm"></div>`;

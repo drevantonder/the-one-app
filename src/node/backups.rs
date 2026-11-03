@@ -2,7 +2,7 @@
 //! each run went, written in `global` so every device shows it. The format and the places are `crate::backups`.
 
 use super::*;
-use super::status::{BackedUp, BackupRun, Said};
+use super::status::{BackedUp, BackupRun, CheckRun, Said};
 use std::collections::BTreeSet;
 
 use crate::backups::{self as b, Snapshot};
@@ -16,12 +16,21 @@ const PRUNE_EVERY: u64 = 24 * 3_600_000;
 const LATE: u64 = 24 * 3_600_000;
 /// How long each device after the first in line waits before telling admins itself, in case those before it are down.
 const STAGGER: u64 = 10 * 60_000;
+/// How often each place's newest backup is restored and checked; and again after one that failed.
+const CHECK_EVERY: u64 = 7 * 24 * 3_600_000;
+const CHECK_AGAIN: u64 = 24 * 3_600_000;
+/// How long a device that just started waits before its checks: by then a run has sent each scope what its places
+/// lack, as this build sends it.
+const CHECK_SETTLE: u64 = 2 * 3_600_000;
 
 /// What's wrong with a place, for admins: what, in a sentence and in a few words for its row, its fix, since when,
 /// and from when it's worth a push.
 #[derive(Clone, Debug)]
 pub struct Problem {
     pub place: String,
+    /// What the box on Backups says: the place couldn't be backed up to, or its restore check failed (`check`).
+    pub title: String,
+    pub check: bool,
     pub text: String,
     pub status: &'static str,
     pub fix: String,
@@ -31,7 +40,7 @@ pub struct Problem {
 
 impl Problem {
     pub fn json(&self) -> Value {
-        json!({ "place": self.place, "text": self.text, "status": self.status, "fix": self.fix, "since": self.since })
+        json!({ "place": self.place, "title": self.title, "check": self.check, "text": self.text, "status": self.status, "fix": self.fix, "since": self.since })
     }
 }
 
@@ -72,7 +81,17 @@ fn problems(i: &Install, now: u64) -> Result<Vec<Problem>> {
                 (None, _) => "It tries again every hour.".to_string(),
             };
             let since = failing.last().map_or(last.time, |r| r.time);
-            out.push(Problem { place: p.id.clone(), text, status, fix, since, push: failing.iter().rev().nth(1).map(|r| r.time) });
+            out.push(Problem { place: p.id.clone(), title: format!("Couldn't back up to {}", p.title), check: false, text, status, fix, since, push: failing.iter().rev().nth(1).map(|r| r.time) });
+            continue;
+        }
+        // A restore check that failed, worth a push at once: what's there can't be counted on.
+        let checks: Vec<&CheckRun> = status.checks.iter().filter(|c| c.place == p.id).collect();
+        let failed: Vec<&&CheckRun> = checks.iter().rev().take_while(|c| c.error.is_some()).collect();
+        if let Some(last) = failed.first() {
+            let since = failed.last().map_or(last.time, |c| c.time);
+            let text = format!("{}'s newest backup didn't restore as it should: {}.", p.title, last.error.as_deref().unwrap_or(""));
+            let fix = "Don't count on it until a check passes. It's checked again tomorrow.".to_string();
+            out.push(Problem { place: p.id.clone(), title: format!("{} didn't pass its restore check", p.title), check: true, text, status: "Restore check failed", fix, since, push: Some(since) });
             continue;
         }
         let mut late: Option<(u64, String)> = None;
@@ -95,7 +114,7 @@ fn problems(i: &Install, now: u64) -> Result<Vec<Problem>> {
                 Some(_) => format!("Check {backer} is on, with the disk plugged in."),
                 None => format!("Check {backer} is on: it backs this up."),
             };
-            out.push(Problem { place: p.id.clone(), text: format!("Nothing has gone to {} for a day.", p.title), status: "Not backed up for a day", fix, since, push: Some(since + LATE) });
+            out.push(Problem { place: p.id.clone(), title: format!("Couldn't back up to {}", p.title), check: false, text: format!("Nothing has gone to {} for a day.", p.title), status: "Not backed up for a day", fix, since, push: Some(since + LATE) });
         }
     }
     Ok(out)
@@ -186,6 +205,7 @@ struct Due {
 impl Node {
     /// Now and then, backs up what's due.
     pub(super) async fn backup_loop(self) {
+        let started = now_ms();
         loop {
             tokio::select! {
                 _ = tokio::time::sleep(TICK) => {}
@@ -195,6 +215,9 @@ impl Node {
             if self.has_install() && self.ready() {
                 if let Err(err) = self.back_up(force).await {
                     tracing::warn!("backups: {err:#}");
+                }
+                if let Err(err) = self.check_due(started).await {
+                    tracing::warn!("checking backups: {err:#}");
                 }
                 if let Err(err) = self.tell_admins().await {
                     tracing::warn!("telling admins about backups: {err:#}");
@@ -226,7 +249,7 @@ impl Node {
         for p in due {
             self.say(&Scope::Global, Said::Alerted { place: p.place.clone() }).await?;
             for admin in &admins {
-                let input = json!({ "title": "Backups", "body": format!("{} {}", p.text, p.fix) });
+                let input = json!({ "title": p.title, "body": format!("{} {}", p.text, p.fix) });
                 let call = CallRequest { app: push.clone(), sidecar: Some(push.clone()), op: "send".into(), input, client: Some("app".into()), ..Default::default() };
                 match Box::pin(self.route(call, Caller { key: me, user: admin.clone(), agent: None, token: None })).await {
                     Ok(sent) => tracing::info!("told {admin} about backups: {sent}"),
@@ -380,11 +403,17 @@ impl Node {
 
     /// The key of the newest epoch of each scope this device holds, by its name, of those it opens.
     async fn held_keys(&self) -> BTreeMap<String, [u8; 32]> {
+        self.held_epochs().await.into_iter().filter_map(|(s, k)| Some((s, *k.last_key_value()?.1))).collect()
+    }
+
+    /// Every epoch's key of each scope this device holds, by its name, of those it opens.
+    async fn held_epochs(&self) -> BTreeMap<String, crate::db::Keys> {
         let scopes = self.with(|i| Ok(i.r.members.scopes().into_iter().filter(|s| i.r.holds(s)).collect::<Vec<_>>())).unwrap_or_default();
         let mut out = BTreeMap::new();
         for scope in scopes {
-            if let Some((_, key)) = self.epoch_keys(&scope, false).await.ok().and_then(|k| k.last_key_value().map(|(n, k)| (*n, *k))) {
-                out.insert(scope.to_string(), key);
+            match self.epoch_keys(&scope, false).await {
+                Ok(keys) if !keys.is_empty() => drop(out.insert(scope.to_string(), keys)),
+                _ => {}
             }
         }
         out
@@ -446,6 +475,7 @@ impl Node {
             let m = &i.r.members;
             let name = |k: &Key| m.machine(k).map(|s| s.name.clone()).unwrap_or_else(|| short(k));
             let runs = i.status.get("global").map(|s| s.backups.clone()).unwrap_or_default();
+            let checks = i.status.get("global").map(|s| s.checks.clone()).unwrap_or_default();
             let problems = problems(i, now_ms())?;
             let mut out = Vec::new();
             for p in places(i) {
@@ -465,6 +495,7 @@ impl Node {
                     "device": p.device.map(|k| name(&k)),
                     "problem": problems.iter().find(|q| q.place == p.id).map(Problem::json),
                     "last": last_ok.map(|r| json!({ "time": r.time, "device": name(&r.device) })),
+                    "checked": checks.iter().rev().find(|c| c.place == p.id).map(|c| json!({ "time": c.time, "device": name(&c.device), "error": c.error })),
                 }));
             }
             let titles: BTreeMap<String, String> = places(i).into_iter().map(|p| (p.id, p.title)).collect();
@@ -579,30 +610,113 @@ impl Node {
         self.set_setting(caller, PINNED, Some(&serde_json::to_string(&now)?)).await
     }
 
-    /// Restores each scope's newest snapshot from each place into a throwaway store, checking every entry and blob,
-    /// and says what came back.
-    pub async fn check_backups(&self) -> Result<Value> {
-        let keys = self.held_keys().await;
-        let (install, places, root) = self.with(|i| {
-            ensure!(i.views.contains_key("global"), "no install");
-            let places: Vec<(String, Place)> = places(i).into_iter().filter_map(|p| Some((p.title, p.place.ok()?))).filter(|(_, p)| p.present()).collect();
-            Ok((i.r.root.map(|r| r.to_hex()[..16].to_string()).unwrap_or_default(), places, i.r.root))
+    /// Restores each place's newest backup that's due its weekly check (`started`: when this device started), on the
+    /// device that checks it: a folder's own device, and for S3 the first in a line of the devices that run `global`,
+    /// each after it once the ones before have had time to. Not before a place's first backup.
+    async fn check_due(&self, started: u64) -> Result<()> {
+        let now = now_ms();
+        if now < started + CHECK_SETTLE {
+            return Ok(());
+        }
+        let me = self.0.id;
+        let due: Vec<String> = self.with(|i| {
+            let m = &i.r.members;
+            let Some(status) = i.status.get("global") else { return Ok(Vec::new()) };
+            Ok(places(i)
+                .into_iter()
+                .filter(|p| status.covered.keys().any(|(place, _)| *place == p.id))
+                .filter(|p| {
+                    let last = status.checks.iter().rev().find(|c| c.place == p.id);
+                    let next = last.map_or(0, |c| c.time + if c.error.is_some() { CHECK_AGAIN } else { CHECK_EVERY });
+                    match p.device {
+                        Some(d) => d == me && now >= next,
+                        None => line(m, &Scope::Global, &format!("{}/check", p.id)).iter().position(|k| *k == me).is_some_and(|at| now >= next && b::takes_over(at, Some(next), 0, now)),
+                    }
+                })
+                .map(|p| p.id)
+                .collect())
         })?;
+        if !due.is_empty() {
+            self.check_places(Some(&due)).await?;
+        }
+        Ok(())
+    }
+
+    /// Restores each scope's newest snapshot from each place into a throwaway store and throwaway databases, checks
+    /// them (`backups::check`, `backups::check_databases`), and says what came back.
+    pub async fn check_backups(&self) -> Result<Value> {
+        self.check_places(None).await
+    }
+
+    /// Checks the places `only` names, or every one this device reaches, and writes how each went in `global`.
+    async fn check_places(&self, only: Option<&[String]>) -> Result<Value> {
+        let epochs = self.held_epochs().await;
+        let (install, places, root, live) = self.with(|i| {
+            ensure!(i.views.contains_key("global"), "no install");
+            let places: Vec<(String, String, Place)> = places(i).into_iter().filter(|p| only.is_none_or(|o| o.contains(&p.id))).filter_map(|p| Some((p.id, p.title, p.place.ok()?))).filter(|(_, _, p)| p.present()).collect();
+            let mut live = BTreeMap::new();
+            for scope in epochs.keys() {
+                live.insert(scope.clone(), i.r.store.scope(scope)?);
+            }
+            Ok((i.r.root.map(|r| r.to_hex()[..16].to_string()).unwrap_or_default(), places, i.r.root, live))
+        })?;
+        let (live, bucket) = (Arc::new(live), self.bucket().ok());
         let mut out = Vec::new();
-        for (title, place) in places {
-            let (install, keys) = (install.clone(), keys.clone());
-            let report = tokio::task::spawn_blocking(move || -> Result<Value> {
-                let keys: BTreeMap<String, Vec<[u8; 32]>> = keys.into_iter().map(|(s, k)| (s, vec![k])).collect();
-                b::check(&place, &install, &keys, root)
-            })
-            .await?;
-            out.push(match report {
-                Ok(mut r) => {
-                    r["place"] = json!(title);
-                    r
+        for (id, title, place) in places {
+            let now = now_ms();
+            let checked = {
+                let keys: BTreeMap<String, Vec<[u8; 32]>> = epochs.iter().map(|(s, k)| (s.clone(), k.values().copied().collect())).collect();
+                let (place, install, live) = (place.clone(), install.clone(), live.clone());
+                tokio::task::spawn_blocking(move || b::check(&b::Check { place: &place, install: &install, keys: &keys, root, live: Some(&live) })).await?
+            };
+            let (mut report, error) = match checked {
+                Ok((mut report, restored)) => {
+                    let mut problems: Vec<Value> = report["problems"].as_array().cloned().unwrap_or_default();
+                    for r in &restored {
+                        let Some(keys) = epochs.get(&r.snapshot.scope) else { continue };
+                        problems.extend(b::check_databases(&place, &install, &r.snapshot, keys, bucket.as_ref()).await.into_iter().map(Value::from));
+                    }
+                    // Each says whose data it's about by its scope; people read their names.
+                    let named: Vec<(String, String)> = self.with(|i| Ok(epochs.keys().map(|s| (s.clone(), scope_name(i, s))).collect()))?;
+                    for p in problems.iter_mut() {
+                        let t = p.as_str().unwrap_or("");
+                        let renamed = named.iter().find(|(s, _)| t.strip_prefix(s.as_str()).is_some_and(|r| r.starts_with([' ', ':']))).map(|(s, n)| format!("{n}{}", &t[s.len()..]));
+                        if let Some(renamed) = renamed {
+                            *p = json!(renamed);
+                        }
+                    }
+                    let error = problems.first().and_then(Value::as_str).map(|first| match problems.len() {
+                        1 => first.to_string(),
+                        n => format!("{first}, and {} more", n - 1),
+                    });
+                    report["problems"] = json!(problems);
+                    let unchecked: Vec<String> = report["unchecked"].as_array().into_iter().flatten().filter_map(Value::as_str).map(str::to_string).collect();
+                    report["unchecked"] = json!(self.with(|i| Ok(unchecked.iter().map(|s| scope_name(i, s)).collect::<Vec<_>>()))?);
+                    for s in report["scopes"].as_array_mut().into_iter().flatten() {
+                        s["name"] = json!(self.with(|i| Ok(scope_name(i, s["scope"].as_str().unwrap_or(""))))?);
+                    }
+                    (report, error)
                 }
-                Err(err) => json!({ "place": title, "error": format!("{err:#}") }),
-            });
+                Err(err) => (json!({}), Some(format!("{err:#}"))),
+            };
+            if let Some(error) = &error {
+                tracing::warn!("restore check of {title}: {error}");
+            }
+            // A check that opened nothing here (this device holds none of the keys) says so, and counts for nothing.
+            if error.is_none() && report["scopes"].as_array().is_none_or(Vec::is_empty) {
+                report["place"] = json!(title);
+                out.push(report);
+                continue;
+            }
+            let kept = json!({ "scopes": report["scopes"], "unchecked": report["unchecked"], "problems": report["problems"].as_array().map(|p| p.iter().take(20).cloned().collect::<Vec<_>>()) });
+            let error500 = error.as_ref().map(|e| e.chars().take(500).collect::<String>());
+            self.say(&Scope::Global, Said::Checked(CheckRun { place: id, device: self.0.id, time: now, error: error500, report: kept })).await?;
+            report["place"] = json!(title);
+            report["databases"] = json!(true);
+            if let Some(error) = error {
+                report["error"] = json!(error);
+            }
+            out.push(report);
         }
         Ok(json!(out))
     }

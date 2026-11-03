@@ -246,7 +246,7 @@ pub fn vault_app() -> Value {
 }
 
 /// How backups' tools are explained, as an app's guide is.
-const BACKUPS_GUIDE: &str = "Each device backs up the data it holds, every hour that something changed, to each place: a folder on a device's disk, or S3-compatible storage. Everything is encrypted before it leaves, with keys only your devices and the recovery key open. To add S3 storage, call backups_add_place with its endpoint and give the person the link: they type the key on their own device. Snapshots are kept hourly for 2 days, daily for a month and monthly for a year. backups_status says how it's going, and what's wrong and its fix if anything is; backups_check restores the newest backup into a throwaway copy and says what came back.";
+const BACKUPS_GUIDE: &str = "Each device backs up the data it holds, every hour that something changed, to each place: a folder on a device's disk, or S3-compatible storage. Everything is encrypted before it leaves, with keys only your devices and the recovery key open. To add S3 storage, call backups_add_place with its endpoint and give the person the link: they type the key on their own device. Snapshots are kept hourly for 2 days, daily for a month and monthly for a year. backups_status says how it's going, and what's wrong and its fix if anything is; Once a week each place's newest backup is restored into a throwaway copy and checked (entries, databases, blobs); a failed check shows on Backups like a failed backup. backups_check runs that check now and says what came back.";
 
 /// Backups' tools as an app's operations.
 pub fn backups_app() -> Value {

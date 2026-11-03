@@ -19,6 +19,7 @@ use aes_gcm::aead::Aead;
 use aes_gcm::{Aes256Gcm, KeyInit};
 use anyhow::{Context, Result, anyhow, ensure};
 use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
 
 use crate::bucket::{Place, folder, scope_of};
 use crate::entry::{Entry, Key, hex, pack, unpack};
@@ -415,7 +416,7 @@ pub fn tools() -> Vec<serde_json::Value> {
         json!({ "name": "backups_now", "description": "Back up now, without waiting for the hour: each device backs up what it holds to each place.", "inputSchema": { "type": "object", "properties": {} }, "annotations": hints(false, false) }),
         json!({ "name": "backups_add_place", "description": "Add S3-compatible storage (Cloudflare R2, Backblaze B2, MinIO…) to back up to. You give the endpoint; the person gets a link to a sheet on their own device where they type the bucket, access key ID and secret key, so you never see the key. backups_status then shows its first backup, or what went wrong.", "inputSchema": { "type": "object", "required": ["endpoint"], "properties": { "endpoint": { "type": "string", "description": "like https://<account id>.r2.cloudflarestorage.com" }, "title": { "type": "string", "description": "what the person calls it, like Cloudflare R2" } } }, "annotations": hints(false, false) }),
         json!({ "name": "backups_remove_place", "description": "Stop backing up to a place. What's already there stays.", "inputSchema": { "type": "object", "required": ["place"], "properties": { "place": { "type": "string", "description": "its title or id, as backups_status lists it" }, "confirm": confirm_input() } }, "annotations": hints(false, true) }),
-        json!({ "name": "backups_check", "description": "Restore each place's newest backup into a throwaway copy, checking every entry's signature and order and every blob's hash, and say what came back: people, apps and Vault items by name.", "inputSchema": { "type": "object", "properties": {} }, "annotations": hints(true, false) }),
+        json!({ "name": "backups_check", "description": "Restore each place's newest backup into a throwaway copy now, as the weekly check does: every entry's signature and order, that they replay to the same people and apps, every database to its newest step as the install has it, and every blob's hash. Says what came back, and what's wrong.", "inputSchema": { "type": "object", "properties": {} }, "annotations": hints(true, false) }),
     ]
 }
 
@@ -470,33 +471,204 @@ pub fn import(store: &crate::store::Store, entries: &[Entry]) -> Result<usize> {
     Ok(store.take(entries.to_vec())?.0.len())
 }
 
-/// Restores every scope `keys` opens from a place into a throwaway store, checking every signature, chain and blob,
-/// then says what came back: each scope's entries, blobs and databases, and by name the people and apps; and how much
-/// the install's backup takes there.
-pub fn check(place: &Place, install: &str, keys: &BTreeMap<String, Vec<[u8; 32]>>, root: Option<crate::entry::Hash>) -> Result<serde_json::Value> {
+/// A restore check, as a device runs one: what it restores, and what it compares that with.
+pub struct Check<'a> {
+    pub place: &'a Place,
+    /// The install's folder in the place.
+    pub install: &'a str,
+    /// The keys that may open each scope's snapshots: its epochs' keys.
+    pub keys: &'a BTreeMap<String, Vec<[u8; 32]>>,
+    pub root: Option<crate::entry::Hash>,
+    /// Each scope's entries as this device holds them: every one a snapshot should hold must be in it.
+    pub live: Option<&'a BTreeMap<String, Vec<Entry>>>,
+}
+
+/// Restores each scope's newest snapshot from a place into a throwaway store, checking every signature, chain and
+/// blob; with `live`, that it holds every entry this device had then, and that its entries replay to the same people,
+/// devices, groups, apps and settings. Says what came back: each scope's entries, blobs and databases, and by name the
+/// people and apps; how much the install's backup takes there; what's wrong (`problems`), and the scopes whose snapshots
+/// none of `keys` opens (`unchecked`); no scopes at all if nothing's there yet. Databases are `check_databases`'.
+pub fn check(c: &Check) -> Result<(Value, Vec<Restored>)> {
+    let (place, install) = (c.place, c.install);
     let store = crate::store::Store::memory()?;
     let mut scopes = Vec::new();
-    for (scope, keys) in keys {
-        if snapshots(place, install, scope)?.is_empty() {
+    let mut problems: Vec<String> = Vec::new();
+    let mut unchecked = Vec::new();
+    let mut restored = Vec::new();
+    let mut expected: Vec<Entry> = Vec::new();
+    for dir in place.list(&format!("{install}/snapshots"))? {
+        let scope = scope_of(&dir);
+        if snapshots(place, install, &scope)?.is_empty() {
             continue;
         }
-        let r = restore(place, install, scope, keys)?;
+        let Some(keys) = c.keys.get(&scope).filter(|k| !k.is_empty()) else {
+            unchecked.push(scope);
+            continue;
+        };
+        let r = match restore(place, install, &scope, keys) {
+            Ok(r) => r,
+            Err(err) => {
+                problems.push(format!("{scope}: {err:#}"));
+                continue;
+            }
+        };
         let added = import(&store, &r.entries)?;
-        scopes.push(serde_json::json!({ "scope": scope, "time": r.snapshot.time, "entries": added, "blobs": r.blobs.len(), "databases": r.snapshot.databases.len() }));
+        if added < r.entries.len() {
+            problems.push(format!("{scope}: {} of its {} entries aren't signed or in order", r.entries.len() - added, r.entries.len()));
+        }
+        if let Some(live) = c.live.and_then(|l| l.get(&scope)) {
+            let had: Vec<&Entry> = live.iter().filter(|e| e.seq() < r.snapshot.frontier.get(&hex(&e.author())).copied().unwrap_or(0)).collect();
+            let backed: BTreeSet<_> = r.entries.iter().map(Entry::hash).collect();
+            let lacks = had.iter().filter(|e| !backed.contains(&e.hash())).count();
+            if lacks > 0 {
+                problems.push(format!("{scope}: it lacks {lacks} of the entries it should hold"));
+            }
+            expected.extend(had.into_iter().cloned());
+        }
+        scopes.push(json!({ "scope": scope, "time": r.snapshot.time, "entries": added, "blobs": r.blobs.len(), "databases": r.snapshot.databases.len() }));
+        restored.push(r);
     }
-    ensure!(!scopes.is_empty(), "nothing backed up there yet");
-    let all = store.ordered()?;
-    let root = root.or_else(|| all.iter().find(|e| e.content.app == crate::members::APP && e.content.kind == "genesis").map(|e| e.hash()));
-    let member_entries: Vec<Entry> = all.iter().filter(|e| crate::members::is_member_entry(e)).cloned().collect();
-    let m = crate::members::Members::replay(root, &member_entries, &store.forks()?);
+    let root = c.root.or_else(|| store.ordered().ok()?.iter().find(|e| e.content.app == crate::members::APP && e.content.kind == "genesis").map(|e| e.hash()));
+    let m = members_of(&store, root)?;
+    // The same entries say the same on every device: the backup's, replayed, are who's who as this device had it.
+    if c.live.is_some() && problems.is_empty() {
+        let here = crate::store::Store::memory()?;
+        here.take(expected)?;
+        if said(&members_of(&here, root)?) != said(&m) {
+            problems.push("its entries don't replay to the people, devices and apps this device had then".into());
+        }
+    }
     let bytes: u64 = place.objects(&format!("{install}/objects"))?.iter().map(|o| o.2).sum();
-    Ok(serde_json::json!({
+    let report = json!({
         "install": m.name,
         "bytes": bytes,
         "scopes": scopes,
         "people": m.users.values().filter(|u| !u.removed).map(|u| u.name.clone()).collect::<Vec<_>>(),
         "apps": m.apps.values().filter(|a| !a.erased && a.bundle.is_some()).map(|a| a.name.clone()).collect::<Vec<_>>(),
-    }))
+        "problems": problems,
+        "unchecked": unchecked,
+    });
+    Ok((report, restored))
+}
+
+/// Who's who, as the member entries in a store replay.
+fn members_of(store: &crate::store::Store, root: Option<crate::entry::Hash>) -> Result<crate::members::Members> {
+    let member_entries: Vec<Entry> = store.ordered()?.into_iter().filter(crate::members::is_member_entry).collect();
+    Ok(crate::members::Members::replay(root, &member_entries, &store.forks()?))
+}
+
+/// What a restore must bring back the same: the install's name, its people, devices, groups, apps and settings, and
+/// each scope's epochs.
+fn said(m: &crate::members::Members) -> Value {
+    json!({
+        "name": m.name,
+        "users": m.users.values().map(|u| (u.id.clone(), u.name.clone(), u.removed)).collect::<Vec<_>>(),
+        "machines": m.machines.keys().map(|k| hex(k)).collect::<Vec<_>>(),
+        "groups": m.groups.keys().collect::<Vec<_>>(),
+        "apps": m.apps.values().map(|a| (a.name.clone(), a.bundle.clone(), a.erased)).collect::<Vec<_>>(),
+        "settings": m.settings,
+        "epochs": m.epoch_hashes.iter().map(|((s, n), h)| format!("{s} {n} {h}")).collect::<Vec<_>>(),
+    })
+}
+
+/// A place's copy of the install's bucket (`<install>/bucket/`), read as the bucket is, so a database restores from it
+/// as from the bucket itself. Nothing writes to it.
+struct Copy<'a> {
+    place: &'a Place,
+    root: String,
+}
+
+impl crate::bucket::Bucket for Copy<'_> {
+    async fn get(&self, name: &str) -> Result<Option<crate::bucket::Object>> {
+        crate::bucket::Bucket::get(self.place, &format!("{}{name}", self.root)).await
+    }
+    async fn create(&self, _: &str, _: &[u8]) -> Result<bool> {
+        anyhow::bail!("a backup is only read")
+    }
+    async fn replace(&self, _: &str, _: &[u8], _: Option<&str>) -> Result<bool> {
+        anyhow::bail!("a backup is only read")
+    }
+    async fn wait(&self, ms: u64) {
+        crate::bucket::Bucket::wait(self.place, ms).await
+    }
+}
+
+/// Checks each of a scope's databases as its snapshot holds them: its copy, the step beside it and every step after,
+/// to the snapshot's last, are in the place, and are the same bytes as the install's bucket has (`live`), or without
+/// it, open with their epoch's key; then it restores from them into a throwaway database, which must reach that step.
+/// `epochs` are the scope's epoch keys. → what's wrong, one line each; nothing when all is well.
+pub async fn check_databases(place: &Place, install: &str, snapshot: &Snapshot, epochs: &crate::db::Keys, live: Option<&impl crate::bucket::Bucket>) -> Vec<String> {
+    use crate::bucket::Bucket;
+    let (scope, folder) = (&snapshot.scope, folder(&snapshot.scope));
+    let copy = Copy { place, root: format!("{install}/bucket/") };
+    let mut out = Vec::new();
+    for (database, (at, copied)) in &snapshot.databases {
+        let Some((app, db)) = database.split_once('/') else { continue };
+        let prefix = format!("{folder}/{app}/{db}");
+        // What a person calls it: the app, or of the node's own, its Vault, its history (entries) or its status rows.
+        let said = match (app, db) {
+            (crate::members::APP, "vault") => "Vault".to_string(),
+            (crate::members::APP, crate::log::NAME) => "history".to_string(),
+            (crate::members::APP, _) => "status".to_string(),
+            (app, "main") => app.to_string(),
+            (app, db) => format!("{app} {db}"),
+        };
+        let mut keys = crate::db::Keys::new();
+        for (n, epoch) in epochs {
+            let Ok(Some(sealed)) = copy.get(&crate::keys::app_key_name(scope, app, *n)).await else { continue };
+            match crate::kernel::open_app_key(epoch, app, &sealed.bytes) {
+                Ok(key) => drop(keys.insert(*n, crate::kernel::database_key(&key, db))),
+                Err(err) => out.push(format!("{scope} {said}: its key in epoch {n}: {err:#}")),
+            }
+        }
+        let copy_of = (*copied > 0).then(|| (format!("its copy at step {copied}"), crate::db::copy_name(&prefix, *copied)));
+        let names = copy_of.into_iter().chain((((*copied).max(1))..=*at).map(|n| (format!("step {n}"), crate::db::step_name(&prefix, n))));
+        let mut wrong = None;
+        for (said_as, name) in names {
+            let problem = match copy.get(&name).await {
+                Err(err) => Some(format!("{err:#}")),
+                Ok(None) => Some("isn't there".to_string()),
+                Ok(Some(o)) => match live {
+                    Some(live) => match live.get(&name).await {
+                        Ok(Some(l)) if l.bytes != o.bytes => Some("isn't what your devices have".to_string()),
+                        Ok(Some(_)) => None,
+                        // Gone from the bucket, or not reached: it must open, at least.
+                        _ => opens(&keys, &name, &o.bytes),
+                    },
+                    None => opens(&keys, &name, &o.bytes),
+                },
+            };
+            if let Some(problem) = problem {
+                wrong = Some(format!("{scope} {said}: {said_as} {problem}"));
+                break;
+            }
+        }
+        if let Some(wrong) = wrong {
+            out.push(wrong);
+            continue;
+        }
+        // The node's log of a scope is entries, which `check` restored; the rest are SQLite.
+        if database == &format!("{}/{}", crate::members::APP, crate::log::NAME) || keys.is_empty() {
+            continue;
+        }
+        match crate::db::Db::open(&copy, &prefix, keys).await {
+            Ok(restored) if restored.at() >= *at => {}
+            Ok(restored) => out.push(format!("{scope} {said}: it restores only to step {} of {at}", restored.at())),
+            Err(err) => out.push(format!("{scope} {said}: it doesn't restore: {err:#}")),
+        }
+    }
+    out
+}
+
+/// What's wrong with a sealed step or copy, if it doesn't open with its epoch's key: nothing, too, when that key isn't
+/// one of `keys`.
+fn opens(keys: &crate::db::Keys, name: &str, sealed: &[u8]) -> Option<String> {
+    let epoch = match crate::keys::epoch_of(sealed) {
+        Ok(e) => e,
+        Err(err) => return Some(format!("{err:#}")),
+    };
+    let key = keys.get(&epoch)?;
+    crate::keys::open(key, name, sealed).err().map(|_| "doesn't open".to_string())
 }
 
 #[cfg(test)]
@@ -646,6 +818,99 @@ mod tests {
         assert!((1..=5).all(|n| !copied(&crate::db::step_name(prefix, n))));
         assert!(copied(&crate::db::copy_name(prefix, 8)) && (9..=10).all(|n| copied(&crate::db::step_name(prefix, n))), "the kept snapshot's copy and steps stay");
         assert_eq!(restore(&place, install, "global", &[key]).unwrap().snapshot.databases["board/main"], (10, 8));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_restore_check_passes_a_whole_backup_and_catches_one_corrupted_or_missing() {
+        let dir = std::env::temp_dir().join(format!("backups-check-{}", hex(&rand::random())));
+        let (place, bucket) = (Place::Folder(dir.join("place")), Place::Folder(dir.join("bucket")));
+        let install = "0123456789abcdef";
+        let (recovery, device) = (SigningKey::from_bytes(&rand::random()), SigningKey::from_bytes(&rand::random()));
+        let epoch: [u8; 32] = rand::random();
+        let blob = b"a deploy's bundle".to_vec();
+        let hash = blake3::hash(&blob).to_hex().to_string();
+        let all = entries(&device, "global", 3, Some(&hash));
+
+        // A database with more steps than one copy holds, so a reader starts from its copy.
+        let prefix = "global/board/main";
+        let app = crate::db::app_key(&bucket, &epoch, "global", "board", 1, true).await.unwrap().unwrap();
+        let keys = crate::db::Keys::from([(1, crate::kernel::database_key(&app, "main"))]);
+        let mut db = crate::db::Db::open(&bucket, prefix, keys).await.unwrap();
+        db.migrate(&bucket, &["create table posts (text text)".to_string()]).await.unwrap();
+        for n in 0..crate::db::COPY_EVERY + 5 {
+            db.write(&bucket, |c| Ok(c.execute("insert into posts values (?)", [format!("post {n}")])?)).await.unwrap();
+        }
+        let at = db.at();
+        let (_, copy, _) = crate::db::newest(&crate::bucket::Bucket::get(&bucket, &crate::db::newest_name(prefix)).await.unwrap().unwrap().bytes);
+        assert!(copy > 0 && copy < at, "it has a copy, and steps after it");
+
+        let job = Job {
+            place: &place,
+            install,
+            scope: "global",
+            key: epoch,
+            sealed: crate::kernel::seal_to(&crate::kernel::twin_public(recovery.verifying_key().as_bytes()).unwrap(), &epoch).unwrap(),
+            device: *device.verifying_key().as_bytes(),
+            now: 1_000_000,
+            previous: None,
+            entries: all.clone(),
+            blobs: [hash.clone()].into(),
+            bucket: Some(&bucket),
+        };
+        back_up(job, |h| (h == hash).then(|| blob.clone())).unwrap().unwrap();
+
+        let keys: BTreeMap<String, Vec<[u8; 32]>> = [("global".to_string(), vec![epoch])].into();
+        let live: BTreeMap<String, Vec<Entry>> = [("global".to_string(), all.clone())].into();
+        let epochs = crate::db::Keys::from([(1, epoch)]);
+        let checked = |live: Option<&BTreeMap<String, Vec<Entry>>>| {
+            let (report, restored) = check(&Check { place: &place, install, keys: &keys, root: None, live }).unwrap();
+            (report["problems"].as_array().unwrap().iter().map(|p| p.as_str().unwrap().to_string()).collect::<Vec<_>>(), restored)
+        };
+        let (problems, restored) = checked(Some(&live));
+        assert_eq!(problems, Vec::<String>::new());
+        let snapshot = restored[0].snapshot.clone();
+        assert_eq!(snapshot.databases["board/main"], (at, copy));
+        assert_eq!(check_databases(&place, install, &snapshot, &epochs, Some(&bucket)).await, Vec::<String>::new(), "every database restores from the backup");
+        assert_eq!(check_databases(&place, install, &snapshot, &epochs, None::<&Place>).await, Vec::<String>::new(), "and opens without the install's bucket");
+
+        // A step that's changed in the backup, then one that's gone: the one its copy starts beside.
+        let name = |n: u64| format!("{install}/bucket/{}", crate::db::step_name(prefix, n));
+        let good = place.get(&name(at)).unwrap().unwrap();
+        let mut bad = good.clone();
+        *bad.last_mut().unwrap() ^= 1;
+        place.put(&name(at), &bad).unwrap();
+        let wrong = check_databases(&place, install, &snapshot, &epochs, Some(&bucket)).await;
+        assert!(wrong.len() == 1 && wrong[0].contains(&format!("global board: step {at} isn't what your devices have")), "{wrong:?}");
+        let wrong = check_databases(&place, install, &snapshot, &epochs, None::<&Place>).await;
+        assert!(wrong.len() == 1 && wrong[0].contains("doesn't open"), "{wrong:?}");
+        place.put(&name(at), &good).unwrap();
+        place.delete(&name(copy)).unwrap();
+        let wrong = check_databases(&place, install, &snapshot, &epochs, Some(&bucket)).await;
+        assert!(wrong.len() == 1 && wrong[0].contains(&format!("global board: step {copy} isn't there")), "{wrong:?}");
+
+        // A blob that's gone, then a pack that's corrupted.
+        let object = |name: &str| format!("{install}/objects/{name}");
+        let blob_object = place.get(&object(&snapshot.blobs[&hash])).unwrap().unwrap();
+        place.delete(&object(&snapshot.blobs[&hash])).unwrap();
+        let (problems, _) = checked(Some(&live));
+        assert!(problems.len() == 1 && problems[0].contains("is missing"), "{problems:?}");
+        place.put(&object(&snapshot.blobs[&hash]), &blob_object).unwrap();
+        let good = place.get(&object(&snapshot.packs[0])).unwrap().unwrap();
+        let mut bad = good.clone();
+        bad[0] ^= 1;
+        place.put(&object(&snapshot.packs[0]), &bad).unwrap();
+        let (problems, _) = checked(Some(&live));
+        assert!(problems.len() == 1 && problems[0].contains("didn't decrypt"), "{problems:?}");
+        place.put(&object(&snapshot.packs[0]), &good).unwrap();
+
+        // And a newest snapshot that says it holds an entry this device had, which it doesn't.
+        let more: BTreeMap<String, Vec<Entry>> = [("global".to_string(), entries(&device, "global", 4, Some(&hash)))].into();
+        let mut said_more = snapshot.clone();
+        said_more.frontier.insert(hex(device.verifying_key().as_bytes()), 4);
+        place.put(&format!("{install}/snapshots/global/{}", snapshot_name(2_000_000, device.verifying_key().as_bytes())), &lock_snapshot(&epoch, &said_more)).unwrap();
+        let (problems, _) = checked(Some(&more));
+        assert!(problems.len() == 1 && problems[0].contains("lacks 1 of the entries"), "{problems:?}");
         std::fs::remove_dir_all(dir).unwrap();
     }
 }

@@ -80,7 +80,7 @@ The map: what lives where, and the few rules the code only shows by keeping them
 
 ## Designed, not built
 
-- Backups' weekly restore check and recovery from nothing: a device restoring with no one left to pair with admits itself with the recovery key's countersignature.
+- Backups' recovery from nothing: a device restoring with no one left to pair with admits itself with the recovery key's countersignature.
 - Sidecars a node starts from a `sidecar` entry's executable, rather than registering themselves.
 - Services each running as their own OS user per scope, and Shell and Computer Use only with a grant for that device and session, approved by the person.
 - Native apps keeping their own sealed copy, for reads with no network; writes while offline, replayed like a rebase, never repeating what went outside.

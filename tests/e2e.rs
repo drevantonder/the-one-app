@@ -417,12 +417,18 @@ async fn backups_go_to_a_folder_encrypted_and_restore_with_the_recovery_key_alon
     let first = shown["places"][0]["last"]["time"].clone();
     eventually("b to see it", async || !b.backups().unwrap()["places"][0]["last"].is_null()).await;
 
+    // The folder's device restores it into a throwaway copy, against what it holds: entries, databases and blobs.
+    let report = a.check_backups().await.unwrap();
+    assert!(report[0]["error"].is_null() && !report[0]["scopes"].as_array().unwrap().is_empty(), "{report}");
+    assert!(a.backups().unwrap()["places"][0]["checked"]["error"].is_null(), "and says it passed");
+
     // From nothing but the disk and the recovery key.
     let place = one::bucket::Place::Folder(dir.clone());
     let install = one::backups::installs(&place).unwrap().remove(0);
     let keys = one::backups::open_keys(&place, &install, &one::entry::unhex(&recovery).unwrap()).unwrap();
     assert!(keys.contains_key("global") && keys.contains_key(&format!("user:{}", me.user)), "{:?}", keys.keys());
-    let checked = one::backups::check(&place, &install, &keys, None).unwrap();
+    let checked = one::backups::check(&one::backups::Check { place: &place, install: &install, keys: &keys, root: None, live: None }).unwrap().0;
+    assert_eq!(checked["problems"], json!([]), "{checked}");
     assert_eq!(checked["install"], "Home");
     assert_eq!(checked["people"], json!(["Andre"]));
     assert!(checked["apps"].as_array().unwrap().contains(&json!("board")), "{checked}");

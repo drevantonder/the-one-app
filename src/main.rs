@@ -1803,21 +1803,37 @@ fn tried_said(r: &Value) -> String {
 
 /// What a check restored, by name.
 fn checked_said(r: &Value) -> String {
-    if let Some(e) = r["error"].as_str() {
+    let problems: Vec<&str> = r["problems"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
+    if let Some(e) = r["error"].as_str().filter(|_| problems.is_empty()) {
         return format!("✗ {}: {e}\n", r["place"].as_str().unwrap_or(""));
     }
+    if !problems.is_empty() {
+        return format!("✗ {}: its newest backup didn't restore as it should:\n{}", r["place"].as_str().unwrap_or(""), problems.iter().map(|p| format!("  ✗ {p}\n")).collect::<String>());
+    }
     let list = |k: &str| r[k].as_array().into_iter().flatten().filter_map(Value::as_str).collect::<Vec<_>>().join(", ");
-    let scopes: Vec<String> = r["scopes"].as_array().into_iter().flatten().map(|s| format!("{} ({} entries, {} blobs, from {})", s["scope"].as_str().unwrap_or(""), s["entries"], s["blobs"], say_time(s["time"].as_u64().unwrap_or(0)))).collect();
-    format!(
-        "{}: {} came back, checked, from {:.1} MB there\n  ✓ every entry signed and in order, every blob as its hash says: {}\n  ✓ people: {}\n  ✓ apps: {}\n  ✓ Vault: {}\n",
-        r["place"].as_str().unwrap_or("A disk"),
+    let place = r["place"].as_str().unwrap_or("A disk");
+    if r["scopes"].as_array().is_none_or(Vec::is_empty) {
+        return match list("unchecked").as_str() {
+            "" => format!("{place}: nothing backed up there yet\n"),
+            unchecked => format!("{place}: not checked here, without their keys: {unchecked}\n"),
+        };
+    }
+    let scopes: Vec<String> = r["scopes"].as_array().into_iter().flatten().map(|s| format!("{} ({} entries, {} blobs, from {})", s["name"].as_str().or(s["scope"].as_str()).unwrap_or(""), s["entries"], s["blobs"], say_time(s["time"].as_u64().unwrap_or(0)))).collect();
+    let mut out = format!(
+        "{}: {} came back, checked, from {:.1} MB there\n  ✓ every entry signed and in order, every blob as its hash says: {}\n",
+        place,
         r["install"].as_str().unwrap_or(""),
         r["bytes"].as_f64().unwrap_or(0.0) / 1e6,
         scopes.join("; "),
-        list("people"),
-        list("apps"),
-        list("vault"),
-    )
+    );
+    if r["databases"] == true {
+        out.push_str("  ✓ every database restores to its newest step, as the install has it\n");
+    }
+    out.push_str(&format!("  ✓ people: {}\n  ✓ apps: {}\n", list("people"), list("apps")));
+    if !list("unchecked").is_empty() {
+        out.push_str(&format!("  – not checked here, without their keys: {}\n", list("unchecked")));
+    }
+    out
 }
 
 /// Checks a backup on a disk with the recovery key alone, here, without a device: every install it holds.
@@ -1829,7 +1845,7 @@ fn check_folder(folder: &str) -> Result<Value> {
     let mut out = Vec::new();
     for install in one::backups::installs(&place)? {
         let keys = one::backups::open_keys(&place, &install, &secret)?;
-        let mut r = one::backups::check(&place, &install, &keys, None)?;
+        let mut r = one::backups::check(&one::backups::Check { place: &place, install: &install, keys: &keys, root: None, live: None })?.0;
         r["place"] = json!(folder);
         out.push(r);
     }
