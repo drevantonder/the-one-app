@@ -1,12 +1,22 @@
 //! Where the install keeps its data: its bucket. It starts as a folder on the device that made the install, which no
 //! other machine reaches; an admin moves it to S3-compatible storage, whose credentials only the kernel's URL signer
-//! holds, with a Storage item in Everyone's Vault that says only where it is, and each device follows: it reaches it
-//! through the URL signer, copies there what it reaches of the old one, and keeps its data there from then on.
+//! holds, with the `storage` setting (an entry only an admin's device writes) that says only where it is, and each
+//! device follows: it reaches it through the URL signer, copies there what it reaches of the old one, and keeps its
+//! data there from then on. A folder is only ever a machine's own choice, never taken from what others write.
 
 use super::*;
 
-/// The Vault item type that says where the install keeps its data.
-pub const STORAGE: &str = "Storage";
+/// The setting that says where the install keeps its data: S3's `endpoint`, `bucket` and `region`, as JSON.
+pub const STORAGE: &str = "storage";
+
+/// The install's bucket as its `storage` setting says, if it has one: S3's address alone, never a folder's path.
+fn storage_setting(m: &Members) -> Result<Option<BTreeMap<String, String>>> {
+    let Some(value) = m.settings.get(STORAGE) else { return Ok(None) };
+    let fields: BTreeMap<String, String> = serde_json::from_str(value).context("the storage setting isn't an S3 address")?;
+    ensure!(fields.keys().all(|k| ["endpoint", "bucket", "region"].contains(&k.as_str())), "the storage setting names only S3's endpoint, bucket and region");
+    ensure!(fields.contains_key("endpoint") && fields.contains_key("bucket"), "the storage setting names S3's endpoint and bucket");
+    Ok(Some(fields))
+}
 
 impl Node {
     /// Where this device keeps the install's data, as a person sees it.
@@ -32,8 +42,8 @@ impl Node {
     }
 
     /// Moves the install's data, for an admin, to S3-compatible storage (`endpoint`, `bucket`, `region`), whose key the
-    /// kernel's URL signer holds: reaches it through the signer first, and makes it the install's Storage item if it
-    /// can.
+    /// kernel's URL signer holds: reaches it through the signer first, and makes it the install's `storage` setting if
+    /// it can.
     pub async fn set_storage(&self, caller: &Caller, body: &Value) -> Result<Value> {
         self.with(|i| {
             ensure!(members::manages_scope(&i.r.members, &caller.user, &Scope::Global), "only admins move the install's data");
@@ -44,9 +54,8 @@ impl Node {
             .filter_map(|k| Some((k.to_string(), body[k].as_str().map(str::trim).filter(|v| !v.is_empty())?.to_string())))
             .collect();
         let place = self.install_place(&fields)?;
-        let Place::S3(s3) = &place else { bail!("the install's data moves to S3-compatible storage, given its endpoint") };
+        let Place::S3(_) = &place else { bail!("the install's data moves to S3-compatible storage, given its endpoint") };
         place.can_hold_an_install()?;
-        let host = s3.endpoint.split("://").nth(1).unwrap_or("").split(['/', ':']).next().unwrap_or("").to_string();
         let reached = {
             let place = place.clone();
             tokio::task::spawn_blocking(move || place.get(INSTALL_OBJECT)).await?
@@ -55,31 +64,26 @@ impl Node {
         if reached.is_err() {
             return Ok(json!({ "tried": steps }));
         }
-        let item_fields: serde_json::Map<String, Value> = fields.iter().map(|(k, v)| (k.clone(), json!({ "value": v, "secret": false }))).collect();
-        let data = json!({ "title": "Storage", "type": STORAGE, "fields": item_fields, "hosts": [host], "apps": [members::APP] });
+        let setting = serde_json::to_string(&fields)?;
         // A device of an install made before its data was in a bucket keeps it there now, with its entries, which
         // takes a while: it runs no calls until it's done.
         if self.bucket().is_err() {
             let (node, caller) = (self.clone(), caller.clone());
             tokio::spawn(async move {
                 let adopted = node.adopt(fields).await;
-                if let Err(err) = adopted.and(node.set_item(&caller, &Scope::Global, data).await.map(|_| ())) {
+                if let Err(err) = adopted.and(node.set_setting(&caller, STORAGE, Some(&setting)).await) {
                     tracing::warn!("moving the install's data: {err:#}");
                 }
             });
             return Ok(json!({ "tried": steps, "moving": true }));
         }
-        let id = self.set_item(caller, &Scope::Global, data).await?;
-        Ok(json!({ "tried": steps, "id": id }))
+        self.set_setting(caller, STORAGE, Some(&setting)).await?;
+        Ok(json!({ "tried": steps, "kept": true }))
     }
 
-    /// Follows the install's newest Storage item, when this device keeps its data anywhere else: in the background.
+    /// Follows the install's `storage` setting, when this device keeps its data anywhere else: in the background.
     pub(super) fn follow_storage(&self) {
-        let wanted = self.with(|i| {
-            let Some(item) = i.vault.values().filter(|it| it.kind == STORAGE && it.apps.contains(members::APP)).max_by_key(|it| it.made) else { return Ok(None) };
-            let fields: BTreeMap<String, String> = item.fields.iter().map(|(n, f)| (n.clone(), f.value.clone())).collect();
-            Ok(Some(fields).filter(|f| i.bucket.as_ref().is_none_or(|(_, now)| now != f)))
-        });
+        let wanted = self.with(|i| Ok(storage_setting(&i.r.members)?.filter(|f| i.bucket.as_ref().is_none_or(|(_, now)| now != f))));
         let fields = match wanted {
             Ok(Some(fields)) => fields,
             Ok(None) => return,

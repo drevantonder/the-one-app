@@ -72,7 +72,7 @@ impl Node {
         if bucket.is_none() {
             tracing::warn!("this device can't reach the install's bucket: it keeps no app's data until the install moves to S3-compatible storage");
         }
-        self.save_install(&InstallFile { root: reply.root, user: reply.user, bucket })?;
+        self.save_install(&InstallFile { root: reply.root, user: reply.user, bucket, folders: BTreeMap::new() })?;
         self.open_install()?;
         let node = self.clone();
         tokio::spawn(async move {

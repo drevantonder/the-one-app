@@ -74,9 +74,9 @@ impl Node {
         tokio::spawn(async move { node.refresh_own_items().await });
     }
 
-    /// Reads `global`'s items with this device's own keys, for what the node itself keeps there (the install's storage,
-    /// its Tunnel, the places it backs up to), and follows them if they changed. A device that doesn't open `global`
-    /// has none.
+    /// Reads `global`'s items with this device's own keys, for the secrets the node itself uses (its Tunnel's token, the
+    /// keys of the places it backs up to), and follows them if they changed: each only as an admin's setting names it,
+    /// since anyone may write an item. A device that doesn't open `global` has none.
     async fn refresh_own_items(&self) {
         let read = async {
             let me = self.own_caller()?;
@@ -433,6 +433,12 @@ impl Node {
         })
         .await?;
         self.append_as(scope, &caller.user, members::node("vault-request", json!({ "id": id, "set": true }))).await?;
+        // A place to back up to counts once an admin's device names it (`pin_place`), as answering does.
+        if r.app == members::APP && r.need.as_deref() == Some(crate::backups::KIND) && *scope == Scope::Global {
+            let item = answer["item"].as_str().unwrap_or(&made).to_string();
+            let fields = self.items(caller, scope).await?.get(&item).map(|it| it.fields.iter().map(|(n, f)| (n.clone(), f.value.clone())).collect());
+            self.pin_place(caller, &item, Some(&fields.context("the place's item wasn't there")?)).await?;
+        }
         Ok(())
     }
 

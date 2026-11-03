@@ -207,7 +207,7 @@ fn start_new(dir: &Path) -> Result<String> {
     crate::request(agent().post(on("/v1/settings")).send_json(json!({ "name": "address", "value": &settings.address })))?;
     // Its data moves to the try bucket, which its node reaches only through the kernel's URL signer from then on.
     let moved = crate::request(agent().post(on("/v1/storage")).send_json(json!({ "endpoint": format!("http://{bucket}"), "bucket": "try" })))?;
-    anyhow::ensure!(moved["id"].is_string(), "the try install's node couldn't reach its bucket through the URL signer: {moved}");
+    anyhow::ensure!(moved["kept"] == true, "the try install's node couldn't reach its bucket through the URL signer: {moved}");
     let started = std::time::Instant::now();
     while crate::request(agent().get(on("/v1/storage")).call())?["kind"] != "s3" {
         anyhow::ensure!(started.elapsed() < Duration::from_secs(30), "the try install's node didn't move to its bucket: node.log says why");

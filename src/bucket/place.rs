@@ -130,7 +130,7 @@ impl Place {
     pub fn put(&self, name: &str, bytes: &[u8]) -> Result<()> {
         match self {
             Place::Folder(dir) => {
-                let file = dir.join(name);
+                let file = within(dir, name)?;
                 let tmp = partial(dir, name, bytes)?;
                 std::fs::rename(&tmp, &file).map_err(|e| disk(dir, e))
             }
@@ -148,7 +148,7 @@ impl Place {
     /// An object with its tag.
     pub fn get_object(&self, name: &str) -> Result<Option<Object>> {
         match self {
-            Place::Folder(dir) => match std::fs::read(dir.join(name)) {
+            Place::Folder(dir) => match std::fs::read(within(dir, name)?) {
                 Ok(bytes) => Ok(Some(Object { tag: tag_of(&bytes), bytes })),
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
                 Err(e) => Err(disk(dir, e)),
@@ -177,7 +177,7 @@ impl Place {
             Place::Folder(dir) => {
                 let tmp = partial(dir, name, bytes)?;
                 // A link, unlike a rename, fails if the name is taken, and the object appears whole.
-                let linked = std::fs::hard_link(&tmp, dir.join(name));
+                let linked = std::fs::hard_link(&tmp, within(dir, name)?);
                 let _ = std::fs::remove_file(&tmp);
                 match linked {
                     Ok(()) => Ok(true),
@@ -209,7 +209,7 @@ impl Place {
 
     pub fn delete(&self, name: &str) -> Result<()> {
         match self {
-            Place::Folder(dir) => match std::fs::remove_file(dir.join(name)) {
+            Place::Folder(dir) => match std::fs::remove_file(within(dir, name)?) {
                 Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(disk(dir, e)),
                 _ => Ok(()),
             },
@@ -223,7 +223,7 @@ impl Place {
     /// The names directly in a folder of the place, sorted.
     pub fn list(&self, folder: &str) -> Result<Vec<String>> {
         let mut out = match self {
-            Place::Folder(dir) => match std::fs::read_dir(dir.join(folder)) {
+            Place::Folder(dir) => match std::fs::read_dir(within(dir, folder.trim_end_matches('/'))?) {
                 Ok(entries) => entries.filter_map(|e| e.ok()?.file_name().into_string().ok()).filter(|n| !n.ends_with(".partial") && !n.starts_with('.')).collect(),
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
                 Err(e) => return Err(disk(dir, e)),
@@ -273,7 +273,7 @@ impl Place {
             Place::Folder(dir) => {
                 let mut out = Vec::new();
                 for name in self.list(folder)? {
-                    let meta = std::fs::metadata(dir.join(folder).join(&name)).map_err(|e| disk(dir, e))?;
+                    let meta = std::fs::metadata(within(dir, &format!("{}/{name}", folder.trim_end_matches('/')))?).map_err(|e| disk(dir, e))?;
                     let written = meta.modified().map_err(|e| disk(dir, e))?.duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
                     out.push((name, written, meta.len()));
                 }
@@ -368,9 +368,20 @@ fn tag_of(bytes: &[u8]) -> String {
     blake3::hash(bytes).to_hex().to_string()
 }
 
+/// Where object `name` is in the folder `dir`: always below it. A name is parts joined by `/`, none empty or starting
+/// with `.`, so none climbs out of the folder or names a hidden file (a home folder's `.ssh`); "" is the folder itself.
+fn within(dir: &std::path::Path, name: &str) -> Result<PathBuf> {
+    if name.is_empty() {
+        return Ok(dir.to_path_buf());
+    }
+    let fine = |part: &str| !part.is_empty() && !part.starts_with('.') && !part.contains(['\\', '\0']);
+    ensure!(name.split('/').all(fine), "{name:?} isn't an object's name: its parts are words, none starting with a dot");
+    Ok(dir.join(name))
+}
+
 /// Writes `bytes` beside where `name` goes, in a file of its own: → its path.
 fn partial(dir: &std::path::Path, name: &str, bytes: &[u8]) -> Result<PathBuf> {
-    let file = dir.join(name);
+    let file = within(dir, name)?;
     std::fs::create_dir_all(file.parent().context("no folder")?).map_err(|e| disk(dir, e))?;
     let tmp = file.with_file_name(format!(".{}.{}.partial", file.file_name().and_then(|n| n.to_str()).unwrap_or(""), hex(&rand::random())));
     let mut f = std::fs::File::create(&tmp).map_err(|e| disk(dir, e))?;
@@ -619,4 +630,16 @@ mod tests {
         std::fs::remove_dir_all(dir).unwrap();
     }
 
+    #[test]
+    fn a_folder_bucket_writes_only_below_its_folder_and_no_hidden_file() {
+        let dir = std::env::temp_dir().join(format!("bucket-names-{}", hex(&rand::random())));
+        let place = Place::Folder(dir.join("bucket"));
+        for name in ["../x", "a/../../x", ".ssh/authorized_keys2", "a/.ssh/authorized_keys", "./x", "a//b", "/etc/x", "a\\..\\x"] {
+            assert!(place.create(name, b"x").is_err() && place.put(name, b"x").is_err() && place.get(name).is_err(), "{name}");
+        }
+        assert!(place.create("global/_epochs/1/recovery", b"x").unwrap());
+        assert_eq!(place.names().unwrap(), ["global/_epochs/1/recovery"]);
+        assert!(!dir.join("x").exists());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 }

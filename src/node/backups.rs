@@ -43,7 +43,7 @@ fn problems(i: &Install, now: u64) -> Result<Vec<Problem>> {
     let status = i.status.get("global").cloned().unwrap_or_default();
     let name = |k: &Key| m.machine(k).map(|s| s.name.clone()).unwrap_or_else(|| short(k));
     let mut out = Vec::new();
-    for p in places(&i.vault) {
+    for p in places(i) {
         let runs: Vec<&BackupRun> = status.backups.iter().filter(|r| r.place == p.id).collect();
         let failing: Vec<&&BackupRun> = runs.iter().rev().take_while(|r| r.error.is_some()).collect();
         if let Some(last) = failing.first() {
@@ -63,7 +63,7 @@ fn problems(i: &Install, now: u64) -> Result<Vec<Problem>> {
             };
             let device = name(&last.device);
             let fix = match (trouble, &p.place) {
-                (_, Err(_)) => "Fix it in the Vault.".to_string(),
+                (_, Err(_)) if p.device.is_none() => "Fix it in the Vault.".to_string(),
                 (Some(crate::bucket::Trouble::Key), _) => "Change its key in the Vault.".to_string(),
                 (Some(crate::bucket::Trouble::Bucket), _) => "Check the bucket's name in the Vault.".to_string(),
                 (Some(crate::bucket::Trouble::Refused), _) => "Give the key permission to write there, or change it in the Vault.".to_string(),
@@ -78,9 +78,9 @@ fn problems(i: &Install, now: u64) -> Result<Vec<Problem>> {
         let mut late: Option<(u64, String)> = None;
         for log in i.r.store.logs()? {
             let Ok(scope) = Scope::parse(&log) else { continue };
-            let backer = match &p.place {
-                Ok(Place::Folder(_)) => p.device.filter(|k| m.runs_for(k, &scope)),
-                _ => line(m, &scope, &p.id).first().copied(),
+            let backer = match p.device {
+                Some(_) => p.device.filter(|k| m.runs_for(k, &scope)),
+                None => line(m, &scope, &p.id).first().copied(),
             };
             let Some(backer) = backer.filter(|_| i.r.holds(&scope)) else { continue };
             let covered = status.covered.get(&(p.id.clone(), log.clone())).map_or(0, |c| c.0);
@@ -91,9 +91,9 @@ fn problems(i: &Install, now: u64) -> Result<Vec<Problem>> {
             }
         }
         if let Some((since, backer)) = late {
-            let fix = match &p.place {
-                Ok(Place::Folder(_)) => format!("Check {backer} is on, with the disk plugged in."),
-                _ => format!("Check {backer} is on: it backs this up."),
+            let fix = match p.device {
+                Some(_) => format!("Check {backer} is on, with the disk plugged in."),
+                None => format!("Check {backer} is on: it backs this up."),
             };
             out.push(Problem { place: p.id.clone(), text: format!("Nothing has gone to {} for a day.", p.title), status: "Not backed up for a day", fix, since, push: Some(since + LATE) });
         }
@@ -106,31 +106,56 @@ struct PlaceItem {
     id: String,
     title: String,
     place: Result<Place>,
-    /// For a folder: the device whose disk it's on.
+    /// For a folder: the device whose disk it's on, and where it is there, as that device said.
     device: Option<Key>,
+    shown: String,
     /// When it was added.
     made: u64,
 }
 
-/// What a place's item says, read from global's items.
-fn places(items: &crate::vault::Items) -> Vec<PlaceItem> {
-    items
+/// The setting that names the S3 places the install backs up to: each item's id, and the hash of its fields
+/// (`place_hash`), as an admin's device wrote it. A Vault item is anyone's to write; this is only admins'.
+const PINNED: &str = "backups";
+
+/// The hash of a place's fields, as `PINNED` names it.
+fn place_hash(fields: &BTreeMap<String, String>) -> String {
+    use sha2::Digest;
+    data_encoding::HEXLOWER.encode(&sha2::Sha256::digest(serde_json::to_vec(fields).unwrap_or_default()))
+}
+
+/// The S3 places `PINNED` names: id → hash.
+fn pinned(m: &Members) -> BTreeMap<String, String> {
+    m.settings.get(PINNED).and_then(|v| serde_json::from_str(v).ok()).unwrap_or_default()
+}
+
+/// What a place's item says, read from global's items. A folder's item names only its device: where the folder is
+/// comes from that device's own file (`Install::folders`), never from an item, which anyone may write. An S3 place
+/// counts only as `PINNED` names it.
+fn places(i: &Install) -> Vec<PlaceItem> {
+    let pinned = pinned(&i.r.members);
+    i.vault
         .iter()
         .filter(|(_, it)| it.apps.contains(members::APP) && it.kind == b::KIND)
+        .filter(|(id, it)| it.fields.contains_key("device") || pinned.get(*id).is_some_and(|h| *h == place_hash(&it.fields.iter().map(|(n, f)| (n.clone(), f.value.clone())).collect())))
         .map(|(id, it)| {
-            let fields: BTreeMap<String, String> = it.fields.iter().map(|(n, f)| (n.clone(), f.value.clone())).collect();
-            let place = Place::from_fields(&fields).and_then(|p| match &p {
-                // Secrets stay put: the key goes only to the item's own hosts.
-                Place::S3(s3) => {
-                    let host = s3.endpoint.split("://").nth(1).unwrap_or("").split(['/', ':']).next().unwrap_or("");
-                    ensure!(it.hosts.iter().any(|h| h == host), "its key is for {}, not {host}", it.hosts.join(", "));
-                    Ok(p)
-                }
-                Place::Folder(_) => Ok(p),
-            });
-            // A folder's item made before devices were called devices names its device `server`.
-            let device = fields.get("device").or(fields.get("server")).and_then(|s| unhex(s).ok());
-            PlaceItem { id: id.clone(), title: it.title.clone(), place, device, made: it.made }
+            let mut fields: BTreeMap<String, String> = it.fields.iter().map(|(n, f)| (n.clone(), f.value.clone())).collect();
+            let device = fields.get("device").and_then(|s| unhex(s).ok());
+            let shown = fields.remove("where").unwrap_or_default();
+            fields.remove("path");
+            let place = match device {
+                Some(d) if d == i.r.id => i.folders.get(id).map(|path| Place::Folder(path.into())).context("this device keeps no folder for it"),
+                Some(_) => Err(anyhow!("a folder on another device")),
+                None => Place::from_fields(&fields).and_then(|p| match &p {
+                    // Secrets stay put: the key goes only to the item's own hosts.
+                    Place::S3(s3) => {
+                        let host = s3.endpoint.split("://").nth(1).unwrap_or("").split(['/', ':']).next().unwrap_or("");
+                        ensure!(it.hosts.iter().any(|h| h == host), "its key is for {}, not {host}", it.hosts.join(", "));
+                        Ok(p)
+                    }
+                    Place::Folder(_) => bail!("a folder is only its own device's"),
+                }),
+            };
+            PlaceItem { id: id.clone(), title: it.title.clone(), place, device, shown, made: it.made }
         })
         .collect()
 }
@@ -244,11 +269,11 @@ impl Node {
             let failed = self.0.backup_failed.lock().unwrap();
             let pruned = self.0.pruned.lock().unwrap();
             let mut plan = Vec::new();
-            for p in places(&i.vault) {
+            for p in places(i) {
                 if !force && failed.get(&p.id).is_some_and(|t| now - t < b::EVERY) {
                     continue;
                 }
-                let folder = matches!(p.place, Ok(Place::Folder(_)));
+                let folder = p.device.is_some();
                 if folder && p.device != Some(me) {
                     continue;
                 }
@@ -422,13 +447,13 @@ impl Node {
             let runs = i.status.get("global").map(|s| s.backups.clone()).unwrap_or_default();
             let problems = problems(i, now_ms())?;
             let mut out = Vec::new();
-            for p in places(&i.vault) {
+            for p in places(i) {
                 let mine: Vec<&BackupRun> = runs.iter().filter(|r| r.place == p.id).collect();
                 let last_ok = mine.iter().rev().find(|r| r.error.is_none());
                 let (kind, place_where, endpoint) = match &p.place {
-                    Ok(Place::Folder(path)) => ("folder", path.display().to_string(), None),
+                    _ if p.device.is_some() => ("folder", p.shown.clone(), None),
                     Ok(Place::S3(s3)) => ("s3", s3.bucket.clone(), Some(s3.endpoint.clone())),
-                    Err(_) => ("s3", String::new(), None),
+                    _ => ("s3", String::new(), None),
                 };
                 out.push(json!({
                     "id": p.id,
@@ -441,7 +466,7 @@ impl Node {
                     "last": last_ok.map(|r| json!({ "time": r.time, "device": name(&r.device) })),
                 }));
             }
-            let titles: BTreeMap<String, String> = places(&i.vault).into_iter().map(|p| (p.id, p.title)).collect();
+            let titles: BTreeMap<String, String> = places(i).into_iter().map(|p| (p.id, p.title)).collect();
             // The install's snapshots, newest first: the runs of each minute, whichever devices and places, as one.
             let mut moments: Vec<(u64, BTreeSet<String>, BTreeSet<String>, BTreeSet<String>)> = Vec::new();
             for r in runs.iter().rev().filter(|r| !r.snapshots.is_empty() && titles.contains_key(&r.place)) {
@@ -495,7 +520,7 @@ impl Node {
         let (title, item_fields, hosts) = match &place {
             Place::Folder(path) => {
                 let title = text("title").unwrap_or_else(|| path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| path.display().to_string()));
-                (title, json!({ "path": { "value": path.display().to_string() }, "device": { "value": hex(&self.0.id) } }), json!([]))
+                (title, json!({ "where": { "value": path.display().to_string() }, "device": { "value": hex(&self.0.id) } }), json!([]))
             }
             Place::S3(s3) => {
                 let host = s3.endpoint.split("://").nth(1).unwrap_or("").split(['/', ':']).next().unwrap_or("").to_string();
@@ -510,6 +535,13 @@ impl Node {
         };
         let data = json!({ "title": title, "type": b::KIND, "fields": item_fields, "hosts": hosts, "apps": [members::APP] });
         let id = self.set_item(caller, &Scope::Global, data).await?;
+        match &place {
+            Place::Folder(path) => self.keep_folder(&id, Some(path))?,
+            Place::S3(_) => {
+                let fields = item_fields.as_object().into_iter().flatten().map(|(n, f)| (n.clone(), f["value"].as_str().unwrap_or("").to_string())).collect();
+                self.pin_place(caller, &id, Some(&fields)).await?;
+            }
+        }
         self.back_up_now();
         Ok(json!({ "tried": steps, "id": id }))
     }
@@ -526,10 +558,24 @@ impl Node {
 
     /// Stops backing up to a place: deletes its item. What's in the place stays there.
     pub async fn remove_place(&self, caller: &Caller, id: &str) -> Result<()> {
-        let known = self.with(|i| Ok(places(&i.vault).iter().any(|p| p.id == id)))?;
+        let known = self.with(|i| Ok(places(i).iter().any(|p| p.id == id)))?;
         ensure!(known, "That place was already removed: there's no place {id}");
         self.set_item(caller, &Scope::Global, json!({ "id": id, "deleted": true })).await?;
+        self.keep_folder(id, None)?;
+        if self.with(|i| Ok(pinned(&i.r.members).contains_key(id)))? {
+            self.pin_place(caller, id, None).await?;
+        }
         Ok(())
+    }
+
+    /// Names an S3 place the install backs up to in `PINNED` (or with `None`, stops naming it), for an admin.
+    pub(super) async fn pin_place(&self, caller: &Caller, id: &str, fields: Option<&BTreeMap<String, String>>) -> Result<()> {
+        let mut now = self.with(|i| Ok(pinned(&i.r.members)))?;
+        match fields {
+            Some(fields) => drop(now.insert(id.to_string(), place_hash(fields))),
+            None => drop(now.remove(id)),
+        }
+        self.set_setting(caller, PINNED, Some(&serde_json::to_string(&now)?)).await
     }
 
     /// Restores each scope's newest snapshot from each place into a throwaway store, checking every entry and blob,
@@ -538,7 +584,7 @@ impl Node {
         let keys = self.held_keys().await;
         let (install, places, root) = self.with(|i| {
             ensure!(i.views.contains_key("global"), "no install");
-            let places: Vec<(String, Place)> = places(&i.vault).into_iter().filter_map(|p| Some((p.title, p.place.ok()?))).filter(|(_, p)| p.present()).collect();
+            let places: Vec<(String, Place)> = places(i).into_iter().filter_map(|p| Some((p.title, p.place.ok()?))).filter(|(_, p)| p.present()).collect();
             Ok((i.r.root.map(|r| r.to_hex()[..16].to_string()).unwrap_or_default(), places, i.r.root))
         })?;
         let mut out = Vec::new();

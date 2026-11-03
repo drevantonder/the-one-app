@@ -577,7 +577,7 @@ fn run(args: Vec<String>) -> Result<()> {
             let bucket = get("bucket").context("give --bucket, the bucket's name: its key is the kernel's (BUCKET, which only the URL signer holds)")?;
             let r = post("/v1/storage", json!({ "endpoint": endpoint, "bucket": bucket, "region": get("region") }))?;
             print!("{}", tried_said(&r));
-            if r["id"].is_string() {
+            if r["kept"] == true {
                 println!("Every device moves the install's data there now.");
             }
             if r["moving"] == true {
@@ -612,6 +612,7 @@ fn run(args: Vec<String>) -> Result<()> {
                 _ => anyhow::bail!("give a folder, or --endpoint for S3-compatible storage"),
             };
             print!("{}", tried_said(&r));
+            println!("{}", if r["id"].is_string() { "Added: the first backup starts now, then every hour that something changes." } else { "Not added." });
         }
         ["backups", "place", "remove", place] => {
             takes_only(&flags, &["confirm"])?;
@@ -1692,10 +1693,6 @@ fn tried_said(r: &Value) -> String {
             Some(e) => out.push_str(&format!("✗ {}: {e}\n", s["step"].as_str().unwrap_or(""))),
         }
     }
-    out.push_str(match r["id"].is_string() {
-        true => "Added: the first backup starts now, then every hour that something changes.\n",
-        false => "Not added.\n",
-    });
     out
 }
 

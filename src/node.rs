@@ -113,6 +113,9 @@ struct InstallFile {
     /// The install's bucket, as a place's fields: a folder's `path`, or S3's. None if this device can't reach it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     bucket: Option<BTreeMap<String, String>>,
+    /// The folders on this device it backs up to, by their place's id: a folder is only ever this device's own choice.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    folders: BTreeMap<String, String>,
 }
 
 /// A sidecar serving on a device: its name, the users it serves, and what it does (its operations), which callers
@@ -141,6 +144,8 @@ struct Install {
     views: HashMap<String, (Order, ScopeState)>,
     /// `global`'s Vault items, as this device last read them with its own keys: what the node itself keeps there.
     vault: crate::vault::Items,
+    /// The folders on this device it backs up to, by their place's id (`InstallFile::folders`).
+    folders: BTreeMap<String, String>,
     /// How long each device took to answer a call lately.
     nearest: HashMap<Key, Duration>,
     /// How far each device is: how long it took to answer this device's last hello.
@@ -635,7 +640,7 @@ impl Node {
         let root: [u8; 32] = data_encoding::HEXLOWER.decode(file.root.as_bytes())?.try_into().map_err(|_| anyhow!("bad root"))?;
         let r = Replica::new(self.0.key.clone(), store, Some(Hash::from_bytes(root)))?;
         let bucket = file.bucket.map(|f| Ok::<_, anyhow::Error>((self.install_place(&f)?, f))).transpose()?;
-        let install = Install { r, user: file.user, bucket, peers: HashMap::new(), builds: HashMap::new(), status: HashMap::new(), views: HashMap::new(), vault: Default::default(), nearest: HashMap::new(), far: HashMap::new(), read: false };
+        let install = Install { r, user: file.user, bucket, folders: file.folders, peers: HashMap::new(), builds: HashMap::new(), status: HashMap::new(), views: HashMap::new(), vault: Default::default(), nearest: HashMap::new(), far: HashMap::new(), read: false };
         *self.0.install.lock().unwrap() = Some(install);
         Ok(())
     }
@@ -655,6 +660,20 @@ impl Node {
         self.save_install(&file)?;
         self.with(|i| {
             i.bucket = Some((place, fields));
+            Ok(())
+        })
+    }
+
+    /// Keeps (or with `None` forgets) the folder on this device that the backup place `id` is.
+    fn keep_folder(&self, id: &str, path: Option<&std::path::Path>) -> Result<()> {
+        let mut file: InstallFile = serde_json::from_slice(&std::fs::read(self.install_dir().join("install.json"))?)?;
+        match path {
+            Some(path) => drop(file.folders.insert(id.to_string(), path.display().to_string())),
+            None => drop(file.folders.remove(id)),
+        }
+        self.save_install(&file)?;
+        self.with(|i| {
+            i.folders = file.folders;
             Ok(())
         })
     }
@@ -692,7 +711,7 @@ impl Node {
         // Until it's moved to S3-compatible storage, the install's bucket is a folder here.
         let bucket: BTreeMap<String, String> = [("path".to_string(), self.install_dir().join("bucket").display().to_string())].into();
         Place::from_fields(&bucket)?.create(INSTALL_OBJECT, entry.hash().to_hex().as_bytes())?;
-        self.save_install(&InstallFile { root: entry.hash().to_hex(), user: user.clone(), bucket: Some(bucket) })?;
+        self.save_install(&InstallFile { root: entry.hash().to_hex(), user: user.clone(), bucket: Some(bucket), folders: BTreeMap::new() })?;
         Store::open(&self.install_dir().join("entries.db"))?.insert_own(&entry, None)?;
         self.open_install()?;
         self.replay_all().await?;

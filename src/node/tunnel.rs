@@ -1,6 +1,7 @@
 //! The install's Cloudflare Tunnel, which the kernel's gateway reaches nodes through with no public address
-//! (`kernel set node-url cloudflare:<id>`): an admin keeps its token as a Tunnel item in Everyone's Vault, and every
-//! device of the install runs a connector for it, so Cloudflare sends each request to whichever is up. A Mac leaves it
+//! (`kernel set node-url cloudflare:<id>`): an admin keeps its token as a Tunnel item in Everyone's Vault and names
+//! it by its hash in the `tunnel` setting (an entry only an admin's device writes, where a Vault item is anyone's to
+//! write), and every device of the install runs a connector for the item that has that token, so Cloudflare sends each request to whichever is up. A Mac leaves it
 //! to the others while one that isn't a Mac is online: Cloudflare spreads requests evenly over connectors, and a
 //! laptop's (asleep, on Wi-Fi, building an update) held a quarter of them for seconds while servers answered in ms.
 
@@ -10,6 +11,14 @@ use super::*;
 
 /// The Vault item type that holds the install's tunnel's token.
 pub const TUNNEL: &str = "Tunnel";
+
+/// The setting that names the install's tunnel's token, by its sha256 (hex).
+const SETTING: &str = "tunnel";
+
+/// A token's hash, as the `tunnel` setting names it.
+fn token_hash(token: &str) -> String {
+    data_encoding::HEXLOWER.encode(&sha2::Sha256::digest(token.as_bytes()))
+}
 
 /// Where a connector takes the token: Cloudflare's tunnel servers, `region1.v2.argotunnel.com` and the like.
 const EDGE: &str = "argotunnel.com";
@@ -25,8 +34,8 @@ const DOWNLOADS: &[(&str, &str, &str)] = &[
 ];
 
 impl Node {
-    /// Keeps this device's connector running for the install's newest Tunnel item, or stops it when there's none or
-    /// this device has left the install.
+    /// Keeps this device's connector running for the token the `tunnel` setting names, from a Tunnel item that has it,
+    /// or stops it when there's none or this device has left the install.
     pub(super) fn follow_tunnel(&self) {
         let wanted = self.with(|i| {
             if i.r.members.compute(&self.0.id).is_none() {
@@ -36,10 +45,10 @@ impl Node {
             if mac(crate::config::TARGET) && i.r.members.computes().any(|d| d.key != self.0.id && i.online(&d.key) && i.builds.get(&d.key).is_some_and(|b| !b.target.is_empty() && !mac(&b.target))) {
                 return Ok(None);
             }
-            let Some(item) = i.vault.values().filter(|it| it.kind == TUNNEL && it.apps.contains(members::APP)).max_by_key(|it| it.made) else { return Ok(None) };
+            let Some(named) = i.r.members.settings.get(SETTING) else { return Ok(None) };
             // Secrets stay put: the token goes only to the item's own hosts.
-            ensure!(item.hosts.iter().any(|h| h == EDGE), "the Tunnel item's token is for {}, not {EDGE}", item.hosts.join(", "));
-            Ok(item.fields.get("token").map(|f| f.value.clone()).filter(|t| !t.is_empty()))
+            let token = i.vault.values().filter(|it| it.kind == TUNNEL && it.hosts.iter().any(|h| h == EDGE)).filter_map(|it| it.fields.get("token")).map(|f| f.value.clone()).find(|t| token_hash(t) == *named);
+            Ok(Some(token.context("no Tunnel item in Everyone's Vault has the token the tunnel setting names")?))
         });
         let wanted = wanted.unwrap_or_else(|err| {
             tracing::warn!("tunnel: {err:#}");
@@ -59,7 +68,8 @@ impl Node {
         }
     }
 
-    /// Keeps the install's tunnel's token, for an admin: every device runs a connector for it from then on.
+    /// Keeps the install's tunnel's token, for an admin, and names it in the `tunnel` setting: every device runs a
+    /// connector for it from then on.
     pub async fn set_tunnel(&self, caller: &Caller, token: &str) -> Result<Value> {
         self.with(|i| {
             ensure!(members::manages_scope(&i.r.members, &caller.user, &Scope::Global), "only admins set the install's tunnel");
@@ -71,13 +81,14 @@ impl Node {
         let fields = json!({ "token": { "value": token, "secret": true } });
         let data = json!({ "title": "Cloudflare Tunnel", "type": TUNNEL, "fields": fields, "hosts": [EDGE], "apps": [members::APP] });
         let id = self.set_item(caller, &Scope::Global, data).await?;
+        self.set_setting(caller, SETTING, Some(&token_hash(token))).await?;
         Ok(json!({ "id": id, "tunnel": tunnel }))
     }
 
     pub async fn tunnel_route(&self, me: &Caller, method: &str, body: &Value) -> Result<Value> {
         match method {
             "GET" => {
-                let set = self.with(|i| Ok(i.vault.values().any(|it| it.kind == TUNNEL)))?;
+                let set = self.with(|i| Ok(i.r.members.settings.contains_key(SETTING)))?;
                 let running = self.0.tunnel.lock().unwrap().is_some() && running(&self.0.dir.join("cloudflared.pid")).is_some();
                 Ok(json!({ "set": set, "running": running, "device": self.device_name() }))
             }
@@ -96,7 +107,7 @@ async fn connect(token: String, dir: PathBuf) {
     let pid = dir.join("cloudflared.pid");
     // Which token the connector there runs for, by its hash.
     let for_token = dir.join("cloudflared.token");
-    let hash = data_encoding::HEXLOWER.encode(&sha2::Sha256::digest(token.as_bytes()));
+    let hash = token_hash(&token);
     if let Some(id) = running(&pid).filter(|_| std::fs::read_to_string(&for_token).is_ok_and(|h| h.trim() == hash)) {
         tracing::info!("this device keeps the connector for the install's tunnel it ran before (pid {id})");
         let kept = Kept(id.parse().unwrap_or(0));
