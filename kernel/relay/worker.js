@@ -13,9 +13,9 @@
 // with raw bytes), by the certificate it shows as its auth token (keys::certify), signed by a client's key on the list,
 // naming the key it proves, until then: it reaches every endpoint as the key that signed it would, until its
 // certificate's `until` or that key is taken out or made something else. With the certificate, `.`, and a request that
-// key signed just now (`proveSocket`, each `(by, at)` taken once), it's taken in at once, with no challenge's round
-// trip; without one, or with one that's stale or taken, it answers the challenge as any key does. The URL signer asks
-// it, by `allowed(key)`.
+// key signed just now (`proveSocket`: within ten seconds, its nonce taken once), it's taken in at once, with no
+// challenge's round trip; without one, or with one that's stale or taken, it answers the challenge as any key does. The
+// URL signer asks it, by `allowed(key)`.
 //
 // A browser's WebSocket can't set a header, so its certificate is `?token=` in the relay's URL, where logs may keep
 // it. iroh shows the same token at every reconnect, so its proof is used once, by the socket the web client opens
@@ -52,7 +52,7 @@
 import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
 import wasm from "./relay_protos_bg.wasm";
 import { initSync, challenge, verify, confirm, deny, from_client, endpoint_gone, datagrams_of, to_client } from "./relay_protos.js";
-import { b64u, checkCertificate, checkRequest, FRESH, SOCKET } from "../shared/crypto.js";
+import { b64u, checkCertificate, checkRequest, FRESH, SOCKET, SOCKET_FRESH } from "../shared/crypto.js";
 
 initSync({ module: wasm });
 
@@ -224,7 +224,7 @@ export class Relay extends DurableObject {
     this.sql.exec(`CREATE TABLE IF NOT EXISTS keys (key TEXT PRIMARY KEY, by TEXT NOT NULL, admin INTEGER NOT NULL, role TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS pairings (hash TEXT PRIMARY KEY, until INTEGER NOT NULL, by TEXT NOT NULL, key TEXT);
       CREATE TABLE IF NOT EXISTS tells (by TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (by, at));
-      CREATE TABLE IF NOT EXISTS sockets (by TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (by, at));
+      CREATE TABLE IF NOT EXISTS proofs (nonce TEXT PRIMARY KEY, at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS bound (key TEXT PRIMARY KEY, name TEXT NOT NULL, until INTEGER NOT NULL, ticket TEXT NOT NULL DEFAULT '');`);
     // A binding made before tickets: none shows one, so each is made again.
     try {
@@ -534,14 +534,15 @@ export class Relay extends DurableObject {
     await this.admit(ws, id, attachment);
   }
 
-  /// Whether `proof` is `endpoint`'s, signed just now for its socket, and not shown before.
+  /// Whether `proof` is `endpoint`'s, signed for its socket within SOCKET_FRESH of now, its nonce never shown before:
+  /// each nonce is kept until no proof of its time would be taken, so a token read from a log is only challenged.
   async proves(proof, endpoint, now) {
     try {
       const { by, fields } = await checkRequest(SOCKET, JSON.parse(new TextDecoder().decode(b64u.decode(proof))), now);
-      if (by !== endpoint) return false;
-      this.sql.exec("DELETE FROM sockets WHERE at < ? OR at > ?", now - 2 * FRESH, now + 2 * FRESH);
-      if (this.sql.exec("SELECT 1 FROM sockets WHERE by = ? AND at = ?", by, fields.at).toArray().length) return false;
-      this.sql.exec("INSERT INTO sockets VALUES (?, ?)", by, fields.at);
+      if (by !== endpoint || Math.abs(fields.at - now) > SOCKET_FRESH || !/^[0-9a-f]{32}$/.test(fields.nonce)) return false;
+      this.sql.exec("DELETE FROM proofs WHERE at < ?", now - 2 * SOCKET_FRESH);
+      if (this.sql.exec("SELECT 1 FROM proofs WHERE nonce = ?", fields.nonce).toArray().length) return false;
+      this.sql.exec("INSERT INTO proofs VALUES (?, ?)", fields.nonce, fields.at);
       return true;
     } catch {
       return false;

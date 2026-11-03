@@ -246,11 +246,14 @@ export async function certify(key, by, endpoint, until, at = Date.now()) {
 /// What a session's endpoint signs to open its relay socket.
 export const SOCKET = "one/socket";
 
+/// How old a session's proof for its relay socket may be, either way: a socket is opened as soon as it's made.
+export const SOCKET_FRESH = 10_000;
+
 /// A session's endpoint's word (its key's seed `secret`, its public half `endpoint`) that it's opening a relay socket
-/// now: base64url JSON, shown after its certificate (`<certificate>.<proof>`), so the relay takes it in with no
-/// challenge's round trip, once.
+/// now, with a nonce of its own: base64url JSON, shown after its certificate (`<certificate>.<proof>`), so the relay
+/// takes it in with no challenge's round trip, once.
 export async function proveSocket(secret, endpoint, at = Date.now()) {
-  return b64u.encode(canonical(await signedRequest(secret, endpoint, SOCKET, {}, at)));
+  return b64u.encode(canonical(await signedRequest(secret, endpoint, SOCKET, { nonce: hex.encode(random(16)) }, at)));
 }
 
 /// Checks a certificate at `now`: → `{ by, endpoint, until }` (keys hex), or throws (keys::check_certificate).

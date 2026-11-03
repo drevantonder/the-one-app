@@ -1633,17 +1633,23 @@ mod relay {
 
             // With its key's proof it's taken in at once, with no challenge, once: shown again, stale, by another key or
             // for another's certificate, it's challenged as any key is (and a stranger's then refused).
-            let proof = |key: &SecretKey, at: u64| data_encoding::BASE64URL_NOPAD.encode(&one::keys::canonical(&one::keys::signed_request(&signer(key), "one/socket", json!({}), at)));
+            let proof = |key: &SecretKey, at: u64| {
+                let nonce = data_encoding::HEXLOWER.encode(&rand::random::<[u8; 16]>());
+                data_encoding::BASE64URL_NOPAD.encode(&one::keys::canonical(&one::keys::signed_request(&signer(key), "one/socket", json!({ "nonce": nonce }), at)))
+            };
             let shown = format!("{cert}.{}", proof(&session, super::now()));
             assert_eq!(first_frame(&address, &shown), CONFIRMED, "a session with its proof was challenged");
             assert_eq!(first_frame(&address, &shown), CHALLENGE, "a proof was taken twice");
-            assert_eq!(first_frame(&address, &format!("{cert}.{}", proof(&session, super::now() - 120_000))), CHALLENGE, "a stale proof was taken");
+            assert_eq!(first_frame(&address, &format!("{cert}.{}", proof(&session, super::now() - 20_000))), CHALLENGE, "a proof older than ten seconds was taken");
             assert_eq!(first_frame(&address, &format!("{cert}.{}", proof(&SecretKey::generate(), super::now()))), CHALLENGE, "another key's proof was taken");
             let theirs = SecretKey::generate();
             let foreign = format!("{}.{}", certify(&stranger, &theirs, super::now() + 60_000), proof(&theirs, super::now()));
             assert_eq!(first_frame(&address, &foreign), CHALLENGE, "a stranger's session was taken in");
             assert!(online(&address, &theirs, Some(&foreign)).await.is_none(), "a stranger's session got in with its proof");
-            let proved = online(&address, &session, Some(&format!("{cert}.{}", proof(&session, super::now())))).await.expect("a session with its proof isn't let in");
+            // Its own session, as one key's newest socket is the one it's reached at, and `s` is still connected.
+            let fresh = SecretKey::generate();
+            let shown = format!("{}.{}", certify(&phone, &fresh, super::now() + 60_000), proof(&fresh, super::now()));
+            let proved = online(&address, &fresh, Some(&shown)).await.expect("a session with its proof isn't let in");
             assert!(reaches(&address, &proved, &a).await, "a session taken in with its proof doesn't reach the install's devices");
             proved.close().await;
 
