@@ -180,7 +180,7 @@ export default {
 
   // The apps whose schedule, where you may switch it, failed its last run.
   async badge(ctx) {
-    return (await ctx.catalog()).filter((a) => (a.schedules || []).some((s) => s.on && s.may_switch && s.last && !s.last.ok)).length;
+    return new Set((await ctx.failing()).map((s) => s.app)).size;
   },
 
   ops: {

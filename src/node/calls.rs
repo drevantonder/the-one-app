@@ -677,6 +677,7 @@ impl Node {
                 ok(json!({}))
             }
             ("GET", "/catalog") => ok(json!(self.catalog(&grant.caller, true).await?)),
+            ("GET", "/failing") => ok(json!(self.failing_schedules(&grant.caller).await?)),
             // A push to the caller's phones, from this app: the install delivers it through the sidecar its `push`
             // setting names, wherever that runs (the device with Apple's push key); with push off, it isn't sent.
             ("POST", "/notify") => {

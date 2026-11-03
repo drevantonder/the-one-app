@@ -147,6 +147,38 @@ impl Node {
         out
     }
 
+    /// The schedules `viewer` may switch, of the apps they may use, that are on and failed their last run, each as
+    /// `schedules_of` gives it with its `app`. Only an app with a failed last run where `viewer` manages it is
+    /// described, so it's cheap when nothing fails.
+    pub async fn failing_schedules(&self, viewer: &Caller) -> Result<Vec<Value>> {
+        let apps: Vec<String> = self.with(|i| {
+            let m = &i.r.members;
+            Ok(m.apps
+                .values()
+                .filter(|a| !a.erased && a.deleted.is_none())
+                .filter(|a| {
+                    reachable(i, &a.name, &viewer.user).iter().any(|scope| {
+                        let installed = i.views.get(&scope.to_string()).is_some_and(|(_, s)| s.installed.contains(&a.name));
+                        let failed = i.status.get(&scope.to_string()).is_some_and(|st| st.runs.iter().any(|((app, _), runs)| app == &a.name && runs.last().is_some_and(|r| !r.ok)));
+                        installed && failed && members::manages_scope(m, &viewer.user, scope)
+                    })
+                })
+                .map(|a| a.name.clone())
+                .collect())
+        })?;
+        let mut out = Vec::new();
+        for app in apps.into_iter().filter(|a| self.0.apps.has(a)) {
+            let Ok(d) = self.0.apps.describe(&app).await else { continue };
+            for mut s in self.schedules_of(viewer, &app, &Schedule::all(&d))?.0 {
+                if s["on"] == true && s["may_switch"] == true && s["last"]["ok"] == false {
+                    s["app"] = json!(app);
+                    out.push(s);
+                }
+            }
+        }
+        Ok(out)
+    }
+
     /// An app's schedules where it's installed for `viewer` and this device holds the scope: what each runs and when,
     /// whether it's on, whom it runs as, when it runs next, its last run, and whether a deploy changed or removed it;
     /// and its runs, newest first.
