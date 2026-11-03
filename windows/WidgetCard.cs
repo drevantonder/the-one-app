@@ -32,7 +32,18 @@ public sealed class WidgetCard
     }
 
     /// The card for one widget at `size`, and its data.
-    public static (string template, string data) Of(WidgetCache.Item w, string size, string? problem)
+    /// Buttons and toggles tapped whose operations aren't done (Which), each toggle with the value it's drawn at till then.
+    public static readonly System.Collections.Concurrent.ConcurrentDictionary<string, bool> Doing = new();
+
+    /// A button or toggle, the same each time it's drawn: its app, operation, and input but the value it switches to.
+    public static string Which(string app, string op, JsonObject? input)
+    {
+        var rest = input?.DeepClone() as JsonObject ?? new JsonObject();
+        rest.Remove("on");
+        return $"{app}|{op}|{rest.ToJsonString()}";
+    }
+
+    public static (string template, string data) Of(WidgetCache.Item w, string size, string? problem, string? updated = null)
     {
         var card = new WidgetCard(w.App, w.Scope);
         var tree = w.Tree(size);
@@ -55,6 +66,7 @@ public sealed class WidgetCard
                 body.Add(root);
             }
         }
+        if (updated != null) body.Add(card.Text(updated, "small", subtle: true));
         var link = tree.ValueKind == JsonValueKind.Object && tree.TryGetProperty("link", out var l) && l.ValueKind != JsonValueKind.Null ? l : default;
         return (Card(body, card.Open(link) ?? (w.Opens ? card.OpenScreen("main", null) : card.OpenPage())).ToJsonString(), card.data.ToJsonString());
     }
@@ -542,6 +554,7 @@ public sealed class WidgetCard
             ["data"] = new JsonObject { ["app"] = app, ["op"] = op, ["input"] = Input(n) },
         };
         if (Str(n, "tone") == "bad") action["style"] = "destructive";
+        if (Doing.ContainsKey(Which(app, op, Input(n) as JsonObject))) action["isEnabled"] = false;
         if (Str(n, "icon") is { } icon && WidgetArt.Has(icon)) action["iconUrl"] = WidgetArt.Glyph(icon, null, Paint(Str(n, "tone"), tint)!, 16);
         return new JsonObject { ["type"] = "ActionSet", ["actions"] = new JsonArray(action) };
     }
@@ -549,7 +562,7 @@ public sealed class WidgetCard
     /// A toggle: its label, and a switch drawn on or off; tapping the row flips it, running its operation with `on`.
     JsonNode Toggle(JsonElement n, Place at)
     {
-        var on = Bool(n, "on") == true;
+        var on = Str(n, "op") is { } doing && Doing.TryGetValue(Which(app, doing, Input(n) as JsonObject), out var to) ? to : Bool(n, "on") == true;
         var row = new JsonObject
         {
             ["type"] = "ColumnSet",
