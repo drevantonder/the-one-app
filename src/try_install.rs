@@ -762,7 +762,7 @@ fn android(dir: &Path, checkout: &Path, device: &str, settings: &one::kernel::Se
     }
     on_device(device, &format!("am force-stop {package}; am start -W -n {package}/app.client.MainActivity"))?;
     let start = Instant::now();
-    let (mut typed, mut pressed) = (false, false);
+    let (mut typed, mut pressed, mut approved) = (false, false, false);
     loop {
         anyhow::ensure!(start.elapsed() < Duration::from_secs(120), "the Android app didn't sign in: look at it with {CLI} computer screen --device {device}");
         std::thread::sleep(Duration::from_secs(2));
@@ -785,19 +785,38 @@ fn android(dir: &Path, checkout: &Path, device: &str, settings: &one::kernel::Se
             on_device(device, &format!("input tap {} {}", button.x, button.y))?;
             continue;
         }
+        // Its code to be let in, which the try install's machine approves, as one of its person's devices.
+        if ours && let Some(code) = nodes.iter().find(|n| is_code(&n.text)).filter(|_| !approved) {
+            approve_code(dir, &code.text)?;
+            approved = true;
+            continue;
+        }
         match find("Sign In").filter(|_| ours) {
             Some(button) => {
                 on_device(device, &format!("input tap {} {}", button.x, button.y))?;
                 pressed = true;
             }
             // Its home, once it signed in here, now or before.
-            None if ours && (pressed || kept) && !nodes.iter().any(|n| n.class == "android.widget.EditText" || n.text.starts_with("Can’t Reach")) => {
+            None if ours && (pressed || kept) && !nodes.iter().any(|n| n.class == "android.widget.EditText" || n.text.starts_with("Can’t Reach") || n.text.starts_with("Approve This")) => {
                 std::fs::write(&signed_in, &here)?;
                 return Ok(());
             }
             None => {}
         }
     }
+}
+
+/// Whether text is the code a new device shows to be approved: "ABCD EFGH".
+fn is_code(text: &str) -> bool {
+    text.len() == 9 && text.char_indices().all(|(i, c)| if i == 4 { c == ' ' } else { c.is_ascii_uppercase() || ('2'..='7').contains(&c) })
+}
+
+/// A native client's code, approved by the try install's machine, as its person's device: then it's let in.
+fn approve_code(dir: &Path, code: &str) -> Result<()> {
+    eprintln!("Approving the device that shows {code}…");
+    let node = std::fs::read_to_string(dir.join("addr"))?;
+    crate::request(try_agent(dir).post(format!("http://{}/v1/devices/approve", node.trim())).send_json(json!({ "code": code.replace(' ', ""), "confirm": true })))?;
+    Ok(())
 }
 
 /// A view on an Android screen, as uiautomator dumps it: its text, class and package, and its middle.
@@ -864,11 +883,15 @@ try {{
   }}
   $until = (Get-Date).AddSeconds(120)
   $pressed = $false
+  $said = $false
   while ($true) {{
     Start-Sleep 1
     $window = Window '{file}'
     if ((Get-Date) -gt $until) {{ throw "it didn't show its pages: $(Texts $window)" }}
     if (-not $window) {{ continue }}
+    # Its code to be let in, said once for the try install's machine to approve.
+    $code = ($window.FindAll($all, [Windows.Automation.Condition]::TrueCondition) | ForEach-Object {{ $_.Current.Name }} | Where-Object {{ $_ -cmatch '^[A-Z2-7]{{4}} [A-Z2-7]{{4}}$' }} | Select-Object -First 1)
+    if ($code -and -not $said) {{ "code $code" | Set-Content $log; $said = $true }}
     if (Find $window $A::NameProperty 'Settings') {{
       # Edge, left on the page it came back to the app from, closes, and the app is in front.
       Get-Process -Name msedge -ErrorAction SilentlyContinue | Where-Object MainWindowHandle -ne 0 | ForEach-Object {{ [void]$_.CloseMainWindow() }}
@@ -908,12 +931,18 @@ Start-ScheduledTask -TaskName one-try-sign-in"#
         ),
     )?;
     let start = Instant::now();
+    let mut approved = false;
     loop {
         anyhow::ensure!(start.elapsed() < Duration::from_secs(240), "the Windows app didn't sign in: look at it with {CLI} computer screen --device {device}");
         std::thread::sleep(Duration::from_secs(3));
         match on_device(device, r#"$log = "$env:TEMP\one-try-sign-in.log"; if (Test-Path $log) { Get-Content $log }"#)?.trim() {
             "signed in" => break,
             "" => {}
+            said if said.starts_with("code ") && !approved => {
+                approve_code(dir, &said[5..])?;
+                approved = true;
+            }
+            said if said.starts_with("code ") => {}
             said => bail!("the Windows app didn't sign in ({said}): look at it with {CLI} computer screen --device {device}"),
         }
     }
