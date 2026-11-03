@@ -57,7 +57,6 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge(SystemBarStyle.auto(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT))
         super.onCreate(savedInstanceState)
-        Glyphs.load(this)
         val store = store
         if (store.phase != Store.Phase.SignedOut) store.run()
         setContent {
@@ -104,6 +103,7 @@ class ClientApp : android.app.Application() {
     override fun onCreate() {
         super.onCreate()
         ScreenCache.dir = java.io.File(cacheDir, "screens")
+        Glyphs.loadSoon(this)
         app.client.widget.HomeWidgets.start(this)
     }
 }

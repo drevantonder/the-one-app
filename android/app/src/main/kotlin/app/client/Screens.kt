@@ -611,9 +611,11 @@ private class Bridge(val context: Context, val store: Store, val route: Route, v
             "request" -> return JsonPrimitive(request(str(m, "scope") ?: "", str(m, "id") ?: ""))
             "icons" -> {
                 val names = (m["names"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull } ?: emptyList()
+                withContext(Dispatchers.IO) { Glyphs.load(context) }
                 return JsonObject(names.mapNotNull { n -> Glyphs.data(n)?.let { n to JsonPrimitive(it) } }.toMap())
             }
             "icon" -> {
+                withContext(Dispatchers.IO) { Glyphs.load(context) }
                 val look = TileLook(str(m, "icon")?.ifEmpty { null }, str(m, "seed") ?: "", str(m, "color")?.ifEmpty { null }, str(m, "image")?.ifEmpty { null }, str(m, "kind"))
                 val size = ((m["size"] as? JsonPrimitive)?.doubleOrNull ?: 36.0) * context.resources.displayMetrics.density
                 return JsonPrimitive(png(tileBitmap(look, size.toInt().coerceIn(8, 512))))

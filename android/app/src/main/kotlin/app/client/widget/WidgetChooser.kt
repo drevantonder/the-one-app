@@ -55,7 +55,7 @@ class WidgetChooser : ComponentActivity() {
         setResult(RESULT_CANCELED, done)
         if (widgetId == AppWidgetManager.INVALID_APPWIDGET_ID) return finish()
         HomeWidgets.start(this)
-        Glyphs.load(this)
+        Glyphs.loadSoon(this)
         setContent {
             val shown by HomeWidgets.shown.collectAsState()
             LaunchedEffect(Unit) { HomeWidgets.refresh() }

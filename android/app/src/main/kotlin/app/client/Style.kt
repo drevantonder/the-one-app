@@ -38,7 +38,10 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -46,7 +49,6 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.toArgb
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -151,16 +153,26 @@ fun Theme(accent: String, appearance: Appearance, content: @Composable () -> Uni
 /** Phosphor's icons (vendor/phosphor), which apps name for their tiles, screens and widgets, so every device draws the
  *  same ones: each a path on a 256-point grid, drawn filled. `git-branch` is the regular one, `git-branch-fill` filled. */
 object Glyphs {
-    private var all: Map<String, String> = emptyMap()
+    /** Read on a thread of its own (1 MB of JSON): until then icons draw as nothing, and once it is, they draw again. */
+    private var all by mutableStateOf<Map<String, String>>(emptyMap())
     private val paths = LruCache<String, Path>(200)
 
+    /** Reads them, here and now: for what draws off the main thread. */
+    @Synchronized
     fun load(context: Context) {
         if (all.isNotEmpty()) return
         val text = context.assets.open("icons.json").bufferedReader().readText()
         all = (json.parseToJsonElement(text) as JsonObject).mapValues { it.value.jsonPrimitive.content }
     }
 
+    /** Reads them in the background, for the app's own screens. */
+    fun loadSoon(context: Context) {
+        if (all.isEmpty()) Thread { runCatching { load(context.applicationContext) } }.start()
+    }
+
     fun has(name: String?) = name != null && all.containsKey(name)
+
+    val ready get() = all.isNotEmpty()
 
     /** An icon's path data, as screens draw it. */
     fun data(name: String) = all[name]
@@ -194,7 +206,7 @@ private val tiles = LruCache<String, Bitmap>(80)
 /** An app's icon tile as the iPhone's Home Screen draws one, `px` pixels across: a finished app icon edge to edge, a
  *  logo inset on white, or its icon filled (or first letter) in white on its colour. */
 fun tileBitmap(look: TileLook, px: Int, title: String = look.seed): Bitmap {
-    val key = "${look.icon}|${look.seed}|${look.color}|${look.image?.length}|${look.image?.hashCode()}|${look.imageKind}|$px|$title"
+    val key = "${look.icon}|${look.seed}|${look.color}|${look.image?.length}|${look.image?.hashCode()}|${look.imageKind}|$px|$title|${Glyphs.ready}"
     tiles.get(key)?.let { return it }
     val bitmap = Bitmap.createBitmap(px, px, Bitmap.Config.ARGB_8888)
     val canvas = Canvas(bitmap)
@@ -249,22 +261,22 @@ private fun clearCorners(b: Bitmap): Boolean =
 @Composable
 fun AppTile(look: TileLook, size: Dp, title: String = look.seed) {
     val px = with(LocalDensity.current) { size.roundToPx() }
-    val bitmap = remember(look, px, title) { tileBitmap(look, px, title).asImageBitmap() }
+    val bitmap = remember(look, px, title, Glyphs.ready) { tileBitmap(look, px, title).asImageBitmap() }
     Image(bitmap, contentDescription = null, modifier = Modifier.size(size).shadow(size * 0.06f, RoundedCornerShape(size * 0.225f), clip = false))
 }
 
-/** A Phosphor icon by name, filled in `color`; a dot if there's none by that name. */
+/** A Phosphor icon by name, filled in `color`; a dot if there's none by that name, and nothing until they're read. */
 @Composable
 fun Symbol(name: String, color: Color, size: Dp, modifier: Modifier = Modifier) {
-    Glyphs.load(LocalContext.current)
-    val path = remember(name) { Glyphs.path(name)?.asComposePath() }
+    val ready = Glyphs.has(name)
+    val path = remember(name, ready) { Glyphs.path(name)?.asComposePath() }
     if (path != null) {
         androidx.compose.foundation.Canvas(modifier.size(size)) {
             scale(this.size.width / 256f, pivot = Offset.Zero) { drawPath(path, color) }
         }
-    } else {
+    } else if (Glyphs.ready) {
         Box(modifier.size(size), contentAlignment = Alignment.Center) { Box(Modifier.size(size / 3).background(color, CircleShape)) }
-    }
+    } else Spacer(modifier.size(size))
 }
 
 /** A large accent button, as the iPhone's prominent ones. */
