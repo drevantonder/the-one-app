@@ -30,7 +30,6 @@ targets:
         CLI: ${CONFIG_CLI}
         Yours: ${CONFIG_YOURS}
         NodePort: "${CONFIG_PORT}"
-        Accent: ${CONFIG_ACCENT}
         BuildCommit: ${BUILD_COMMIT}
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
@@ -69,7 +68,6 @@ targets:
       path: build/Phone-Info.plist
       properties:
         CFBundleDisplayName: ${CONFIG_NAME}
-        Accent: ${CONFIG_ACCENT}
         CLI: ${CONFIG_CLI}
         Yours: ${CONFIG_YOURS}
         BuildCommit: ${BUILD_COMMIT}
@@ -104,7 +102,6 @@ targets:
       path: build/Screens-Info.plist
       properties:
         CFBundleDisplayName: Screens
-        Accent: ${CONFIG_ACCENT}
         CLI: ${CONFIG_CLI}
         Yours: ${CONFIG_YOURS}
         BuildCommit: ${BUILD_COMMIT}
@@ -135,7 +132,6 @@ targets:
       path: build/Widgets-Info.plist
       properties:
         CFBundleDisplayName: ${CONFIG_NAME}
-        Accent: ${CONFIG_ACCENT}
         CLI: ${CONFIG_CLI}
         AppGroup: group.app.${CONFIG_CLI}.phone
         NSExtension:

@@ -39,6 +39,7 @@ struct RootView: View {
             case .services(let scope): ServicesSheet(scope: scope)
             }
         }
+        .environment(\.raised, true)
         .onChange(of: appearance, initial: true) {
             NSApp.appearance = Appearance(rawValue: appearance)?.scheme.map { NSAppearance(named: $0 == .dark ? .darkAqua : .aqua)! }
         }

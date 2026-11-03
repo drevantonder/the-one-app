@@ -51,7 +51,7 @@ struct WelcomeView: View {
                         .onSubmit(signIn)
                         .padding(.horizontal, 16)
                         .padding(.vertical, 13)
-                        .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 14))
+                        .background(Kit.fill, in: .rect(cornerRadius: 14))
                     Text("\(whose)’s address, or the invite link you were sent.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
@@ -63,7 +63,7 @@ struct WelcomeView: View {
             .padding(.horizontal, 24)
         }
         .scrollDismissesKeyboard(.interactively)
-        .background(Color(.systemGroupedBackground))
+        .groupedBackground()
         .safeAreaInset(edge: .bottom) {
             VStack(spacing: 14) {
                 if let error = phone.joinError {

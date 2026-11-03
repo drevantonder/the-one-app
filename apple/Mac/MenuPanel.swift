@@ -25,7 +25,7 @@ struct MenuPanel: View {
                 ForEach(install.devices.filter { $0.user == store.me?.id }) { device in
                     HStack(spacing: 8) {
                         Circle()
-                            .fill(device.isOnline ? AnyShapeStyle(.green) : AnyShapeStyle(.quaternary))
+                            .fill(device.isOnline ? Kit.text : Kit.faint)
                             .frame(width: 7, height: 7)
                         Text(displayName(device.name))
                         Spacer()
@@ -173,7 +173,7 @@ private struct PanelWidget: View {
             if widget.error != nil {
                 Label("This widget stopped working.", systemImage: "exclamationmark.triangle.fill")
                     .font(.callout)
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(Kit.warn)
             } else {
                 TimelineView(.everyMinute) { context in
                     WidgetTree(node: widget.tree("medium"), now: context.date)

@@ -44,7 +44,6 @@ struct MacApp: App {
             RootView()
                 .environment(mac)
                 .environment(store)
-                .tint(accent)
                 .frame(minWidth: 760, minHeight: 500)
                 .onOpenURL { if !store.open($0) { open($0) } }
                 // Every app's badge and the requests on the Dock icon, as Mail counts unread mail.
@@ -69,15 +68,10 @@ struct MacApp: App {
         MenuBarExtra {
             MenuPanel()
                 .environment(store)
-                .tint(accent)
         } label: {
             MenuBarMark(store: store)
         }
         .menuBarExtraStyle(.window)
-    }
-
-    private var accent: Color {
-        store.config.map { Color(accentHex: $0.accent) } ?? .accentColor
     }
 }
 

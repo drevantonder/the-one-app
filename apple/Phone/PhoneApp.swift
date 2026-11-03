@@ -23,7 +23,6 @@ struct PhoneApp: App {
             PhoneRoot()
                 .environment(phone)
                 .environment(phone.store)
-                .tint(phone.accent)
                 .task {
                     delegate.phone = phone
                     await phone.start()
@@ -52,11 +51,6 @@ final class Phone {
     private var running: Task<Void, Never>?
     /// This launch's APNs token, once registered with the push driver.
     var pushToken: String?
-
-    /// The accent: the build's until a device sends its own.
-    var accent: Color {
-        Color(accentHex: store.config?.accent ?? Bundle.main.object(forInfoDictionaryKey: "Accent") as? String ?? "")
-    }
 
     /// In the simulator, NODE_URL points the app at a device's local API instead of signing in.
     nonisolated static var nodeURL: URL? {

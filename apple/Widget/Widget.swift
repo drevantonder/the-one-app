@@ -12,7 +12,7 @@ struct PagesWidget: Widget {
     var body: some WidgetConfiguration {
         AppIntentConfiguration(kind: "widget", intent: ChooseWidget.self, provider: Provider()) { entry in
             EntryView(entry: entry)
-                .containerBackground(.fill.tertiary, for: .widget)
+                .containerBackground(Kit.bg, for: .widget)
         }
         .configurationDisplayName(appName)
         .description("A widget from one of your pages.")
@@ -112,10 +112,6 @@ struct EntryView: View {
     var entry: Entry
     @Environment(\.widgetFamily) private var family
 
-    private var accent: Color {
-        Color(accentHex: Bundle.main.object(forInfoDictionaryKey: "Accent") as? String ?? "")
-    }
-
     /// The page size drawn at this family: the same tree the app's pages show at that size.
     private var size: String {
         switch family {
@@ -138,15 +134,11 @@ struct EntryView: View {
                     let tree = widget.tree(size)
                     VStack(alignment: .leading, spacing: 6) {
                         if family != .accessoryRectangular, tree.header != false {
-                            Text(widget.title)
-                                .font(.caption2.weight(.medium))
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
+                            WidgetLabel(title: widget.title, icon: widget.icon, image: widget.image, imageKind: widget.imageKind)
                         }
                         WidgetTree(node: tree, now: entry.date)
                             .font(.footnote)
                             .environment(\.widgetHost, host)
-                            .tint(accent)
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -180,7 +172,7 @@ private struct Broken: View {
         VStack(alignment: .leading, spacing: 6) {
             Label(title, systemImage: "exclamationmark.triangle.fill")
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(.orange)
+                .foregroundStyle(Kit.warn)
                 .lineLimit(1)
             Text(text)
                 .font(.footnote)

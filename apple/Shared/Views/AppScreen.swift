@@ -169,17 +169,16 @@ private struct ScreenWebView: Representable {
     }
     #endif
 
-    /// What makes a page sit in the shell as its own: the shell's background shows through, its accent is the
-    /// shell's in light and dark, and nothing zooms.
+    /// What makes a page sit in the shell as its own: the shell's background shows through, its tint is the
+    /// system's in light and dark, and nothing zooms.
     private var look: String {
-        let accent = store.config?.accent ?? Bundle.main.object(forInfoDictionaryKey: "Accent") as? String ?? ""
-        return """
+        """
         const style = document.createElement("style");
         style.textContent = `
           html, body { background: transparent !important; }
           html { -webkit-tap-highlight-color: transparent; -webkit-touch-callout: none; }
-          :root:root { --accent: \(accentCSS(accent, dark: false)); }
-          @media (prefers-color-scheme: dark) { :root:root { --accent: \(accentCSS(accent, dark: true)); } }
+          :root:root { --tint: \(tintCSS(dark: false)); }
+          @media (prefers-color-scheme: dark) { :root:root { --tint: \(tintCSS(dark: true)); } }
         \(Self.platformCSS)`;
         document.documentElement.appendChild(style);
         \(raised)
@@ -203,8 +202,6 @@ private struct ScreenWebView: Representable {
     #if os(macOS)
     private static let platformCSS = """
       html { zoom: calc(13 / 17); }
-      :root:root { --bg: transparent; --card: rgba(0, 0, 0, 0.04); }
-      @media (prefers-color-scheme: dark) { :root:root { --card: rgba(255, 255, 255, 0.05); } }
     """
     #else
     private static let platformCSS = ""
@@ -553,6 +550,10 @@ struct RouteView: View {
     var open: (Route) -> Void
 
     var body: some View {
+        content.frame(maxWidth: .infinity, maxHeight: .infinity).groupedBackground()
+    }
+
+    @ViewBuilder private var content: some View {
         switch route {
         case .page(let scope):
             if let page = store.page(scope) { PageView(page: page, open: open) }
@@ -704,7 +705,7 @@ private struct ScreenSheetView: View {
         NavigationStack {
             screen
                 .navigationBarTitleDisplayMode(.inline)
-                .background(Color(.systemGroupedBackground))
+                .groupedBackground()
                 .toolbar {
                     if case .setting("request", _) = sheet.route {
                         ToolbarItem(placement: .cancellationAction) { Button("Cancel") { store.dismiss(sheet) } }
@@ -713,6 +714,7 @@ private struct ScreenSheetView: View {
                     }
                 }
         }
+        .environment(\.raised, true)
         .screenSheets(from: level + 1)
     }
 

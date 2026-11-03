@@ -362,7 +362,7 @@ struct WidgetTree: View {
         case "icon":
             Icon(node: node, font: font)
         case "dot":
-            Circle().fill(toned(node.tone, otherwise: .green)).frame(width: 8, height: 8)
+            Circle().fill(toned(node.tone, otherwise: Kit.muted)).frame(width: 8, height: 8)
         case "link":
             if let link = node.link {
                 Linked(link: link) { Text(node.text ?? "").font(font).foregroundStyle(.tint).lineLimit(node.lines ?? 1) }
@@ -457,11 +457,12 @@ func widgetPoints(_ size: String?) -> CGFloat {
 /// A tone's colour: `muted` is secondary, and with no tone, `otherwise` (the primary colour by default).
 func toned(_ tone: String?, otherwise: some ShapeStyle = .primary) -> AnyShapeStyle {
     switch tone {
-    case "muted": AnyShapeStyle(.secondary)
+    case "muted": AnyShapeStyle(Kit.muted)
     case "accent": AnyShapeStyle(.tint)
-    case "good": AnyShapeStyle(.green)
-    case "warn": AnyShapeStyle(.orange)
-    case "bad": AnyShapeStyle(.red)
+    // Fine is silent: good draws as text.
+    case "good": AnyShapeStyle(Kit.text)
+    case "warn": AnyShapeStyle(Kit.warn)
+    case "bad": AnyShapeStyle(Kit.danger)
     case "blue": AnyShapeStyle(widgetBlue)
     case "purple": AnyShapeStyle(widgetPurple)
     default: AnyShapeStyle(otherwise)
@@ -475,10 +476,10 @@ let widgetPurple = Color(red: 0xa5 / 255, green: 0x50 / 255, blue: 0xd9 / 255)
 /// A tone as a tint: none for the accent, which a tint already is.
 func toneColor(_ tone: String?) -> Color? {
     switch tone {
-    case "muted": .secondary
-    case "good": .green
-    case "warn": .orange
-    case "bad": .red
+    case "muted": Kit.muted
+    case "good": Kit.text
+    case "warn": Kit.warn
+    case "bad": Kit.danger
     case "blue": widgetBlue
     case "purple": widgetPurple
     default: nil
@@ -532,7 +533,7 @@ private struct Ring: View {
         ZStack {
             Circle().stroke(Color.secondary.opacity(0.25), lineWidth: line)
             Circle().trim(from: 0, to: fraction)
-                .stroke(toned(node.tone, otherwise: .tint), style: StrokeStyle(lineWidth: line, lineCap: .round))
+                .stroke(toned(node.tone, otherwise: Kit.text), style: StrokeStyle(lineWidth: line, lineCap: .round))
                 .rotationEffect(.degrees(-90))
             if node.label != "" {
                 Text(node.label ?? "\(Int((fraction * 100).rounded()))%")
@@ -559,7 +560,7 @@ private struct Bar: View {
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
                     Capsule().fill(Color.secondary.opacity(0.25))
-                    Capsule().fill(toned(node.tone, otherwise: .tint)).frame(width: Swift.max(6, geo.size.width * fraction))
+                    Capsule().fill(toned(node.tone, otherwise: Kit.text)).frame(width: Swift.max(6, geo.size.width * fraction))
                 }
             }
             .frame(width: node.w.map { CGFloat($0) }, height: 6)
@@ -595,7 +596,7 @@ private struct Spark: View {
             area.addLine(to: CGPoint(x: size.width, y: size.height))
             area.addLine(to: CGPoint(x: 0, y: size.height))
             area.closeSubpath()
-            let style = toned(node.tone, otherwise: .tint)
+            let style = toned(node.tone, otherwise: Kit.text)
             context.fill(area, with: .style(style.opacity(0.2)))
             context.stroke(line, with: .style(style), style: StrokeStyle(lineWidth: 1.4, lineJoin: .round))
         }
@@ -612,7 +613,7 @@ private struct Icon: View {
     var font: Font?
 
     var body: some View {
-        let style = toned(node.tone, otherwise: node.path == nil ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
+        let style = toned(node.tone)
         if let w = node.w.map({ CGFloat($0) }) ?? (node.path == nil ? nil : 22) {
             ZStack {
                 Group {
@@ -673,7 +674,7 @@ private struct BarsOrLine: View {
                 }
             }
         }
-        .foregroundStyle(toned(node.tone, otherwise: .tint))
+        .foregroundStyle(toned(node.tone, otherwise: Kit.text))
         .frame(height: node.h.map { CGFloat($0) } ?? 80)
     }
 }
@@ -846,5 +847,26 @@ private struct ActionToggle: View {
             Text(error ?? "")
         }
         #endif
+    }
+}
+
+/// A widget's label, small and muted: its app's icon (a brand's own logo, else our glyph) and its name.
+struct WidgetLabel: View {
+    var title: String
+    var icon: String?
+    var image: String?
+    var imageKind: String?
+
+    var body: some View {
+        HStack(spacing: 5) {
+            if image != nil {
+                AppTile(icon: icon, seed: title, image: image, imageKind: imageKind, size: 14)
+            } else {
+                Glyph(name: icon, size: 12)
+            }
+            Text(title).lineLimit(1)
+        }
+        .font(.caption2.weight(.medium))
+        .foregroundStyle(.secondary)
     }
 }

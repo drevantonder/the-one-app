@@ -487,14 +487,6 @@ struct WidgetOptionsCard: View {
             }
             Spacer(minLength: 0)
         }
-        .background(cardBackground, in: .rect(cornerRadius: 22, style: .continuous))
-    }
-
-    private var cardBackground: some ShapeStyle {
-        #if os(macOS)
-        AnyShapeStyle(.background)
-        #else
-        AnyShapeStyle(Color(.secondarySystemGroupedBackground))
-        #endif
+        .groupedContainer(radius: 28)
     }
 }

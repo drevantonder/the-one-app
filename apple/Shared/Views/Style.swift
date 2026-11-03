@@ -5,34 +5,28 @@ import AppKit
 import UIKit
 #endif
 
-/// An accent as red, green and blue, lifted a little in dark mode so it keeps its contrast there,
-/// yet still carries white text.
-func accentRGB(_ hex: String, dark: Bool) -> (CGFloat, CGFloat, CGFloat) {
+/// A colour given as hex (an app's tile colour) as red, green and blue, lifted a little in dark mode so it keeps its
+/// contrast there, yet still carries white text.
+func hexRGB(_ hex: String, dark: Bool) -> (CGFloat, CGFloat, CGFloat) {
     let value = UInt32(hex.trimmingCharacters(in: CharacterSet(charactersIn: "#")), radix: 16) ?? 0x808080
     let rgb = [16, 8, 0].map { CGFloat((value >> $0) & 0xFF) / 255 }.map { dark ? $0 + (1 - $0) * 0.2 : $0 }
     return (rgb[0], rgb[1], rgb[2])
 }
 
-/// The same, as CSS.
-func accentCSS(_ hex: String, dark: Bool) -> String {
-    let (r, g, b) = accentRGB(hex, dark: dark)
-    return "rgb(\(Int(r * 255)), \(Int(g * 255)), \(Int(b * 255)))"
-}
-
-extension Color {
-    init(accentHex hex: String) {
-        #if canImport(AppKit)
-        self.init(nsColor: NSColor(name: nil) { appearance in
-            let (r, g, b) = accentRGB(hex, dark: appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua)
-            return NSColor(srgbRed: r, green: g, blue: b, alpha: 1)
-        })
-        #else
-        self.init(uiColor: UIColor { traits in
-            let (r, g, b) = accentRGB(hex, dark: traits.userInterfaceStyle == .dark)
-            return UIColor(red: r, green: g, blue: b, alpha: 1)
-        })
-        #endif
+/// The tint, what a person taps, as CSS for the screens: the system's blue on an iPhone, the accent colour the person
+/// chose in System Settings on a Mac. Native views get it by setting none.
+func tintCSS(dark: Bool) -> String {
+    #if canImport(AppKit)
+    var color = NSColor(srgbRed: 0, green: 0.478, blue: 1, alpha: 1)
+    NSAppearance(named: dark ? .darkAqua : .aqua)?.performAsCurrentDrawingAppearance {
+        if let accent = NSColor.controlAccentColor.usingColorSpace(.sRGB) { color = accent }
     }
+    #else
+    let color = UIColor.systemBlue.resolvedColor(with: UITraitCollection(userInterfaceStyle: dark ? .dark : .light))
+    #endif
+    var (r, g, b, a) = (CGFloat(0), CGFloat(0), CGFloat(0), CGFloat(0))
+    color.getRed(&r, green: &g, blue: &b, alpha: &a)
+    return "rgb(\(Int(r * 255)), \(Int(g * 255)), \(Int(b * 255)))"
 }
 
 /// Phosphor's icons (vendor/phosphor), which apps name for their tiles, screens and widgets, so every shell draws the
@@ -106,7 +100,7 @@ struct AppTile: View {
                     .clipShape(shape)
                     .overlay { shape.strokeBorder(.black.opacity(0.1), lineWidth: 0.5) }
             } else {
-                let (r, g, b) = accentRGB(color ?? Self.colors[steadyHash(seed) % Self.colors.count], dark: false)
+                let (r, g, b) = hexRGB(color ?? Self.colors[steadyHash(seed) % Self.colors.count], dark: false)
                 shape.fill(Color(red: r, green: g, blue: b).gradient)
                     .overlay {
                         Group {
@@ -202,19 +196,38 @@ extension Color {
     }
 }
 
-/// The page's background, behind its cards.
+extension EnvironmentValues {
+    /// In a sheet, which is raised: in the dark its page is a card's grey and its cards a step lighter, as the kit's
+    /// `data-raised`.
+    @Entry var raised = false
+}
+
+/// The page's background, or a card's, a step lighter in a sheet in the dark.
+private struct KitBackground: ViewModifier {
+    var card: Bool
+    var radius: CGFloat
+    @Environment(\.raised) private var raised
+    @Environment(\.colorScheme) private var scheme
+
+    func body(content: Content) -> some View {
+        let up = raised && scheme == .dark
+        if card {
+            content.background(up ? Kit.raised : Kit.card, in: .rect(cornerRadius: radius, style: .continuous))
+        } else {
+            content.background(up ? Kit.card : Kit.bg)
+        }
+    }
+}
+
 extension View {
+    /// The page's background, behind its cards.
     func groupedBackground() -> some View {
-        #if os(macOS)
-        self
-        #else
-        background(Kit.bg)
-        #endif
+        modifier(KitBackground(card: false, radius: 0))
     }
 
-    /// A card, with rows inside.
-    func groupedContainer() -> some View {
-        background(Kit.card, in: .rect(cornerRadius: 26, style: .continuous))
+    /// A card, with rows inside; a widget's is rounder.
+    func groupedContainer(radius: CGFloat = 26) -> some View {
+        modifier(KitBackground(card: true, radius: radius))
     }
 }
 

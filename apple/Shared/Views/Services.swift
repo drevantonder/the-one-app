@@ -87,9 +87,7 @@ struct FolderTile: View {
         }
         .padding(inset)
         .frame(width: size, height: size, alignment: .topLeading)
-        .background(.regularMaterial, in: shape)
-        .background(Color.secondary.opacity(0.18), in: shape)
-        .overlay(shape.strokeBorder(.separator.opacity(0.5), lineWidth: 0.5))
+        .background(Kit.card, in: shape)
         .accessibilityHidden(true)
     }
 }
@@ -260,7 +258,7 @@ struct ServicesView: View {
         case .failure(let failure):
             Label(failure.message, systemImage: "exclamationmark.triangle.fill")
                 .font(.subheadline)
-                .foregroundStyle(.orange)
+                .foregroundStyle(Kit.warn)
         case .success(let list) where list.isEmpty:
             Text("No accounts yet").foregroundStyle(.secondary)
         case .success(let list):
@@ -283,10 +281,13 @@ struct ServicesView: View {
                 .accessibilityLabel("Sign out of \(account.account)")
                 .transition(.move(edge: .leading).combined(with: .opacity))
             }
+            // Fine is silent: only an account that needs signing in again is marked.
             Circle()
-                .fill(account.ok ? Color.green : Color.orange)
+                .fill(Kit.warn)
                 .frame(width: 9, height: 9)
-                .accessibilityLabel(account.ok ? "Signed in" : "Needs signing in again")
+                .opacity(account.ok ? 0 : 1)
+                .accessibilityHidden(account.ok)
+                .accessibilityLabel("Needs signing in again")
             VStack(alignment: .leading, spacing: 2) {
                 Text(account.account).lineLimit(1).truncationMode(.middle)
                 if !account.ok {

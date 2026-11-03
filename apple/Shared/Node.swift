@@ -3,7 +3,6 @@ import Foundation
 struct Config: Codable, Sendable, Equatable {
     var name: String
     var cli: String
-    var accent: String
     /// The app the App Store opens: the install's `store` setting.
     var store: String?
     /// The driver phones register their push tokens with: the install's `push` setting, empty when push is off.
@@ -236,6 +235,13 @@ enum LocalToken {
         let data = env["XDG_DATA_HOME"].map { URL(filePath: $0) } ?? FileManager.default.homeDirectoryForCurrentUser.appending(path: ".local/share")
         let home = env["\(cli.uppercased())_HOME"].map { URL(filePath: $0) } ?? data.appending(path: cli)
         if let token = try? String(contentsOf: home.appending(path: "local-token"), encoding: .utf8) {
+            request.setValue(token.trimmingCharacters(in: .whitespacesAndNewlines), forHTTPHeaderField: "x-one-local-token")
+        }
+        #elseif targetEnvironment(simulator)
+        // A simulator shares its Mac's files: NODE_URL's node at 127.0.0.1 is that Mac's, and so is its token.
+        let env = ProcessInfo.processInfo.environment
+        if let mac = env["SIMULATOR_HOST_HOME"],
+           let token = try? String(contentsOf: URL(filePath: mac).appending(path: ".local/share/\(Auth.cli)/local-token"), encoding: .utf8) {
             request.setValue(token.trimmingCharacters(in: .whitespacesAndNewlines), forHTTPHeaderField: "x-one-local-token")
         }
         #endif

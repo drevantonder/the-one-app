@@ -14,6 +14,9 @@ struct WidgetCache: Codable {
         var page: String?
         var title: String
         var icon: String
+        /// Its app's picture, a brand's logo or app icon, as a data URL, and `icon` when it's a finished app icon.
+        var image: String?
+        var imageKind: String?
         var error: String?
         var root: WidgetNode
         /// Its tree at each size it draws.

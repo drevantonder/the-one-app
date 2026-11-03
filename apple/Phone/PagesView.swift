@@ -41,7 +41,6 @@ struct PagesView: View {
             .navigationDestination(for: Route.self) { route in
                 RouteView(route: route, open: open)
                     .navigationBarTitleDisplayMode(.inline)
-                    .background(Color(.systemGroupedBackground))
             }
             .overlay {
                 if store.install?.joining == true {
@@ -70,6 +69,7 @@ struct PagesView: View {
             case .ask(let ask): VaultRequestSheet(scope: ask.scope, id: "", ask: ask)
             }
         }
+        .environment(\.raised, true)
         .onChange(of: store.pages) {
             if store.current != settingsID, !store.pages.contains(where: { $0.scope == store.current }) { store.current = "user" }
         }
@@ -186,7 +186,7 @@ extension Store {
         let items = pages.flatMap { page in
             widgets(on: page).map { w in
                 WidgetCache.Item(app: w.app, widget: w.widget, scope: page.scope, page: page.title, title: w.title ?? app(w.app)?.label ?? w.widget,
-                                 icon: app(w.app)?.icon ?? "", error: w.error, root: w.root, sizes: w.sizes)
+                                 icon: app(w.app)?.icon ?? "", image: app(w.app)?.image, imageKind: app(w.app)?.imageKind, error: w.error, root: w.root, sizes: w.sizes)
             }
         }
         // Signed in again with no widgets, the home screen's stop saying to sign in.

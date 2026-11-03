@@ -366,7 +366,7 @@ private struct PageWidget: View {
         WidgetCard(widget: widget, app: app, size: size)
             .environment(\.widgetHost, host)
             .allowsHitTesting(!editing)
-            .contentShape(.rect(cornerRadius: 22, style: .continuous))
+            .contentShape(.rect(cornerRadius: 28, style: .continuous))
             .onTapGesture { if !editing { follow(widget.tree(size).link) } }
             .modifier(ContextMenu(enabled: !editing, menu: { menu }, preview: {
                 WidgetCard(widget: widget, app: app, size: size)
@@ -454,16 +454,13 @@ struct WidgetCard: View {
         let tree = widget.tree(size)
         VStack(alignment: .leading, spacing: 6) {
             if tree.header != false || widget.error != nil {
-                Text(widget.title ?? app?.label ?? widget.widget)
-                    .font(.caption2.weight(.medium))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                WidgetLabel(title: widget.title ?? app?.label ?? widget.widget, icon: app?.icon, image: app?.image, imageKind: app?.imageKind)
             }
             if let error = widget.error {
                 VStack(alignment: .leading, spacing: 4) {
                     Label("This widget stopped working.", systemImage: "exclamationmark.triangle.fill")
                         .font(.subheadline.weight(.medium))
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(Kit.warn)
                     Text(NodeError(error).message)
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -484,16 +481,8 @@ struct WidgetCard: View {
         .padding(16)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .clipped()
-        .background(widgetBackground, in: .rect(cornerRadius: 22, style: .continuous))
-        .contentShape(.rect(cornerRadius: 22, style: .continuous))
-    }
-
-    private var widgetBackground: some ShapeStyle {
-        #if os(macOS)
-        AnyShapeStyle(.fill.quaternary)
-        #else
-        AnyShapeStyle(Color(.secondarySystemGroupedBackground))
-        #endif
+        .groupedContainer(radius: 28)
+        .contentShape(.rect(cornerRadius: 28, style: .continuous))
     }
 }
 
