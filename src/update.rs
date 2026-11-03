@@ -55,6 +55,7 @@ pub fn run(tag: Option<&str>) -> Result<()> {
 
     let sends = parts.node || parts.mac || !parts.apps.is_empty();
     let after = if sends && tag.is_none() { after_update()? } else { None };
+    retire_gone(&src, &parts.apps)?;
     if !parts.node {
         deploy_apps(&src, &parts.apps)?;
         let missed = follow(&macs, &commit, config_commit.as_deref());
@@ -235,6 +236,20 @@ fn run_quiet(cmd: &mut Command) -> Result<()> {
             String::from_utf8_lossy(&out.stdout),
             String::from_utf8_lossy(&out.stderr)
         );
+    }
+    Ok(())
+}
+
+/// Deletes the built-in apps named whose folder is gone from `src`, renamed or removed, where the install still has
+/// them: they'd stay as apps no release ships. They wait in Recently Deleted, where an admin could restore one.
+fn retire_gone(src: &Path, names: &[String]) -> Result<()> {
+    for app in get("/v1/apps")?.as_array().into_iter().flatten() {
+        let Some(name) = app["name"].as_str().filter(|n| names.iter().any(|m| m == n)) else { continue };
+        let built_in = app["owner"] == "admins" && app["from"].is_null();
+        if built_in && app["deleted"].is_null() && !src.join("apps").join(name).join("app.js").is_file() {
+            post("/v1/retire", json!({ "app": name, "how": "deleted" }))?;
+            println!("Deleted {name}: its folder is gone from apps/, so no release ships it");
+        }
     }
     Ok(())
 }
