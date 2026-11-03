@@ -639,7 +639,7 @@ function soon(ms) {
   const m = Math.max(0, Math.round((ms - Date.now()) / 60000));
   return m < 1 ? "now" : m < 60 ? "in " + m + "m" : m < 1440 ? "in " + Math.round(m / 60) + "h" : "in " + Math.round(m / 1440) + "d";
 }
-/// Opens Settings › Devices to choose the device that keeps this app running in `scope`.
+// Opens Settings › Devices to choose the device that keeps this app running in a scope.
 function keepIt(scope) {
   one.open("devices", { keep: name, scope }, "settings");
 }
