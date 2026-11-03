@@ -319,8 +319,10 @@ class Person {
   }
 
   /// Whom a request is from: the device the endpoint object proved, for this object's person, until when its word
-  /// lasts (a session's certificate's). The keys it hands are kept for that device; whether the install lists it as
-  /// theirs is checked as soon as the install's entries are read (`installFor`), before anything else of theirs is.
+  /// lasts (a session's certificate's). Whether the install lists it as theirs is checked as soon as the install's
+  /// entries are read (`installFor`), before anything else of theirs is: until then the keys it hands only read those
+  /// entries, and are kept, and what they open fetched, only once it's checked (`forgetLost`). Keys sealed to another
+  /// node, or for another device, are left.
   whom(request) {
     const from = JSON.parse(request.headers.get(FROM) || "null");
     const user = request.headers.get(USER) || "";
@@ -328,19 +330,17 @@ class Person {
     this.owner ||= user;
     const who = { hash: from.device, device: from.device, user, clientName: "", until: Math.min(from.until ?? Infinity, Date.now() + HANDED_FOR) };
     const sealed = request.headers.get("x-one-keys");
-    if (sealed) this.take(who, sealed);
+    if (sealed) {
+      try {
+        who.offered = JSON.parse(handoff(this.env.NODE_KEY, who.device, sealed, Date.now(), who.until));
+      } catch {}
+    }
     return who;
   }
 
-  /// Keeps the keys a device handed with its requests, no longer than its word lasts, and starts fetching what they
-  /// open. Keys sealed to another node, or for another device, are left.
-  take(who, sealed) {
-    let opened;
-    try {
-      opened = JSON.parse(handoff(this.env.NODE_KEY, who.device, sealed, Date.now(), who.until));
-    } catch {
-      return;
-    }
+  /// Keeps the keys a device handed with its requests (`opened`), no longer than its word lasts, and starts fetching
+  /// what they open.
+  take(who, opened) {
     const now = Date.now();
     if (!this.handed.has(who.hash) && this.handed.size >= SIGN_INS_MOST) {
       for (const [h, s] of this.handed) if (s.until <= now) this.handed.delete(h);
@@ -364,10 +364,16 @@ class Person {
     this.bucket.prefetch(wanted);
   }
 
-  /// A sign-in's keys of `app`'s `database` in `scope`, by epoch, or null.
+  /// A sign-in's keys of `app`'s `database` in `scope`, by epoch, or null. Before its device is checked, of the
+  /// install's own entries, those it hands now too, which check it.
   keysOf(who, scope, app, database) {
     const kept = this.handed.get(who.hash);
-    return (kept && kept.until > Date.now() && kept.keys.get(`${scope}/${app}/${database}`)) || null;
+    const found = (kept && kept.until > Date.now() && kept.keys.get(`${scope}/${app}/${database}`)) || null;
+    const offered = scope === "global" && app === "node" && database === "log" ? (who.offered?.keys || []).filter((k) => k.scope === scope && k.app === app && k.database === database) : [];
+    if (!offered.length) return found;
+    const keys = { ...found };
+    for (const k of offered) keys[k.epoch] = k.key;
+    return keys;
   }
 
   /// Each of `scopes`' current epoch, as the install's signed entries say: `{ <scope>: n }`.
@@ -432,6 +438,8 @@ class Person {
       this.handed.delete(who.hash);
       refuse(403, removed ? "You were removed: an admin adds you back." : "this isn't one of your devices: approve it on one that is");
     }
+    if (who.offered) this.take(who, who.offered);
+    who.offered = null;
     who.clientName = device;
     const may = new Set(scopes);
     const kept = this.handed.get(who.hash);
