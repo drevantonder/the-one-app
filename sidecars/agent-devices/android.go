@@ -109,9 +109,13 @@ func avdDir(name string) (string, error) {
 	return strings.TrimSpace(string(m[1])), nil
 }
 
+// phoneGB is each phone's memory, whatever its AVD says (the SDK's are 4 GB): Android 36 with the Play Store boots
+// in 2, and a machine holding several phones beside builds runs out of memory at 4.
+const phoneGB = 2
+
 func (a androidEmulator) make(ctx context.Context, v *vm, from *vm) error {
 	v.ID = "agent-devices-" + v.Name
-	v.GB = 4
+	v.GB = phoneGB
 	var src string
 	if from != nil {
 		var err error
@@ -174,7 +178,8 @@ func (a androidEmulator) start(ctx context.Context, v *vm) error {
 	}
 	defer log.Close()
 	emulator := []string{filepath.Join(sdk(), "emulator", "emulator"), "-avd", v.ID, "-port", strconv.Itoa(v.Port), "-no-window",
-		"-gpu", "swiftshader_indirect", "-accel", "on", "-no-audio", "-no-boot-anim", "-no-snapshot"}
+		"-gpu", "swiftshader_indirect", "-accel", "on", "-no-audio", "-no-boot-anim", "-no-snapshot",
+		"-memory", strconv.Itoa(phoneGB * 1024)}
 	// The emulator's own network puts this machine's 127.0.0.1 at 10.0.2.2 for any app in the phone, and has no way not
 	// to. On Linux it runs in a network of its own (pasta), reaching the internet as this machine does but none of its
 	// 127.0.0.1, which takes only its console and adb's port in; and asks this machine's resolvers, not its stub. A Mac
