@@ -1,6 +1,6 @@
 // The kernel's formats, for tests/contracts.rs to check against the Rust that reads them: POST { op, ... } → result.
 import { next, when } from "../schedules/worker.js";
-import { b64u, canonical, checkEntry, checkRequest, databaseKey, ed25519Public, epochOf, hex, idOf, inviteProof, joinCode, keyPair, open, openAppKey, openHandoff, openSealed, openUnder, passkeyKeys, seal, sealAppKey, sealHandoff, sealTo, sealUnder, signEntry, signedRequest, tokenId } from "../shared/crypto.js";
+import { b64u, canonical, epochHash, checkEntry, checkRequest, databaseKey, ed25519Public, epochOf, hex, idOf, inviteProof, joinCode, keyPair, open, openAppKey, openHandoff, openSealed, openUnder, passkeyKeys, seal, sealAppKey, sealHandoff, sealTo, sealUnder, signEntry, signedRequest, tokenId } from "../shared/crypto.js";
 
 const ops = {
   async next({ spec, now }) {
@@ -41,6 +41,7 @@ const ops = {
       handoff: await sealHandoff(b64u.decode(to), handoff),
       handedBack: await openHandoff({ secret: b64u.decode(pair.secret), public: b64u.decode(pair.public) }, pair.sealed),
       tokenId: await tokenId(token),
+      epochHash: await epochHash(b64u.decode(key)),
       joinCode: await joinCode(hex.decode(pair.key)),
       proof: await inviteProof(b64u.decode(secret), hex.decode(pair.key)),
       passkey: { sign: hex.encode(await ed25519Public(pk.sign)), seal: b64u.encode(pk.seal) },

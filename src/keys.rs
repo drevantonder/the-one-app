@@ -107,6 +107,12 @@ pub fn epoch_name(scope: &str, n: u32, to: &str) -> String {
     format!("{}/_epochs/{n}/{to}", crate::bucket::folder(scope))
 }
 
+/// What an `epoch` entry says of its key, so a device takes a key from the bucket as epoch n only if it's the one the
+/// signed entry made: HKDF-SHA256(key, "one/epoch-hash"), hex.
+pub fn epoch_hash(key: &[u8; 32]) -> String {
+    HEXLOWER.encode(&hkdf(key, b"one/epoch-hash"))
+}
+
 /// Where an app's key in epoch `n` of a scope is kept, sealed under that epoch's key.
 pub fn app_key_name(scope: &str, app: &str, n: u32) -> String {
     format!("{}/{app}/_key/{n}", crate::bucket::folder(scope))

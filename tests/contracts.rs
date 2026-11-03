@@ -462,6 +462,7 @@ fn the_kernel_and_nodes_agree_on_keys_and_seals() {
         assert_eq!(keys::open_handoff(&keys::seal_secret(&node), out["handoff"].as_str().unwrap()).unwrap(), handoff, "Rust opens a handoff JavaScript sealed");
         assert_eq!(out["handedBack"], serde_json::to_value(&handoff).unwrap(), "JavaScript opens one Rust sealed");
         assert_eq!(out["tokenId"], keys::token_id("a token"));
+        assert_eq!(out["epochHash"], keys::epoch_hash(&epoch_key), "an epoch key's hash");
         assert_eq!(out["joinCode"], keys::join_code(&device));
         assert_eq!(out["proof"], keys::invite_proof(b"an invite's secret", &device));
         let (passkey, seal_secret) = keys::passkey_keys(&prf);

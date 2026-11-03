@@ -225,6 +225,9 @@ const folder = (scope) => scope.replace(":", "-");
 /// Where epoch `n` of a scope is kept sealed to `to` (an endpoint's key, hex, or `recovery`).
 export const epochName = (scope, n, to) => `${folder(scope)}/_epochs/${n}/${to}`;
 
+/// What an `epoch` entry says of its key: HKDF-SHA256(key, "one/epoch-hash"), hex.
+export const epochHash = async (key) => hex.encode(await hkdf(key, "one/epoch-hash"));
+
 /// Where an app's key in epoch `n` is kept, sealed under that epoch's key.
 export const appKeyName = (scope, app, n) => `${folder(scope)}/${app}/_key/${n}`;
 
