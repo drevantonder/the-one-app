@@ -8,35 +8,49 @@ $dotnet = "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe"
 $env:DOTNET_CLI_TELEMETRY_OPTOUT = '1'
 $env:DOTNET_NOLOGO = '1'
 
-# The icon: the config's artwork at Windows' sizes, each a PNG inside one .ico.
+# The icon is drawn on Apple's Mac grid, an 824-pixel tile in a clear 100-pixel margin in 1024: Windows gets that tile,
+# filling its frame, its corners clear.
 Add-Type -AssemblyName System.Drawing
 $source = [System.Drawing.Image]::FromFile("$here\Assets\Icon.png")
-$sizes = 16, 24, 32, 48, 64, 128, 256
-$pngs = foreach ($s in $sizes) {
-  $bitmap = New-Object System.Drawing.Bitmap $s, $s
-  $g = [System.Drawing.Graphics]::FromImage($bitmap)
-  $g.InterpolationMode = 'HighQualityBicubic'
-  $g.DrawImage($source, 0, 0, $s, $s)
-  $g.Dispose()
-  $stream = New-Object System.IO.MemoryStream
-  $bitmap.Save($stream, [System.Drawing.Imaging.ImageFormat]::Png)
-  , $stream.ToArray()
-}
-# The package's own: its tiles, its logo, and the picture the Widgets board's picker shows.
-function Png($size, $file, $inset = 0, $width = $size) {
+$margin = [int](100 * $source.Width / 1024)
+$tile = New-Object System.Drawing.Rectangle $margin, $margin, ($source.Width - 2 * $margin), ($source.Height - 2 * $margin)
+$edges = New-Object System.Drawing.Imaging.ImageAttributes
+$edges.SetWrapMode('TileFlipXY')
+function Draw($size, $inset = 0, $width = $size) {
   $bitmap = New-Object System.Drawing.Bitmap $width, $size
   $g = [System.Drawing.Graphics]::FromImage($bitmap)
   $g.InterpolationMode = 'HighQualityBicubic'
+  $g.PixelOffsetMode = 'HighQuality'
   $s = $size - 2 * $inset
-  $g.DrawImage($source, ($width - $s) / 2, $inset, $s, $s)
+  $g.DrawImage($source, (New-Object System.Drawing.Rectangle ([int](($width - $s) / 2)), $inset, $s, $s), $tile.X, $tile.Y, $tile.Width, $tile.Height, [System.Drawing.GraphicsUnit]::Pixel, $edges)
   $g.Dispose()
+  $bitmap
+}
+function Png($file, $size, $inset = 0, $width = $size) {
+  $bitmap = Draw $size $inset $width
   $bitmap.Save("$here\Assets\$file", [System.Drawing.Imaging.ImageFormat]::Png)
   $bitmap.Dispose()
 }
-Png 150 Tile.png 24
-Png 44 Small.png
-Png 50 Store.png
-Png 300 Widget.png 90 300
+# The window's and the taskbar's: each size a PNG inside one .ico.
+$sizes = 16, 24, 32, 48, 64, 128, 256
+$pngs = foreach ($s in $sizes) {
+  $bitmap = Draw $s
+  $stream = New-Object System.IO.MemoryStream
+  $bitmap.Save($stream, [System.Drawing.Imaging.ImageFormat]::Png)
+  $bitmap.Dispose()
+  , $stream.ToArray()
+}
+# The package's own: its tiles, its logo, and the picture the Widgets board's picker shows. Small.png is the taskbar's
+# and Start's, at each scale and target size Windows asks for, and unplated, so Windows draws no accent-colour square
+# behind it.
+Png Tile.png 150 24
+Png Store.png 50
+Png Widget.png 300 90 300
+Png Small.png 44
+foreach ($scale in 125, 150, 200, 400) { Png "Small.scale-$scale.png" ([int](44 * $scale / 100)) }
+foreach ($s in 16, 24, 32, 48, 256) {
+  foreach ($form in '', '_altform-unplated', '_altform-lightunplated') { Png "Small.targetsize-$s$form.png" $s }
+}
 $source.Dispose()
 $ico = New-Object System.IO.MemoryStream
 $w = New-Object System.IO.BinaryWriter $ico
