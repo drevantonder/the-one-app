@@ -114,6 +114,8 @@ function steer(models) {
   if ((used.opus ?? 0) >= 85 && (used.sonnet ?? 0) >= 85) return `${head}Haiku edits, Sonnet thinking, no Opus`;
   if ((used.opus ?? 0) >= 85) return `${head}Sonnet or Haiku; Opus review-only`;
   if ((used.sonnet ?? 0) >= 85) return `${head}Opus or Haiku; spare Sonnet`;
+  const spare = (models || []).filter((m) => (m.used ?? 0) >= 85 && !/opus|sonnet/i.test(String(m.name || ""))).map((m) => m.name);
+  if (spare.length) return `${head}spare ${spare.join(", ")}; spend the cooler pool`;
   return `${head}any model fine`;
 }
 
@@ -153,6 +155,14 @@ function fromCodexbar(j, now) {
     const m = String(r.value || "").match(/(\d+)% left/);
     if (m && /sonnet|opus/i.test(`${r.label} ${d.title}`)) models.push({ name: /opus/i.test(`${r.label} ${d.title}`) ? "Opus" : "Sonnet", used: 100 - Number(m[1]), resetsAt: null });
   }
+  for (const e of u.extraRateWindows || []) {
+    const w = e.window || {};
+    if (w.usedPercent != null) {
+      const title = String(e.title || e.id || "pool");
+      models.push({ name: /opus/i.test(title) ? "Opus" : /sonnet/i.test(title) ? "Sonnet" : title.replace(/ only$/i, ""), used: int(w.usedPercent), resetsAt: ms(w.resetsAt) });
+    }
+  }
+  const account = j.accountEmail || u.identity?.accountEmail || null;
   const plan = u.identity?.loginMethod ? String(u.identity.loginMethod).replace(/^./, (c) => c.toUpperCase()) : null;
   const notes = [];
   for (const d of u.details || []) for (const r of d.rows || []) if (r.value && /status|note/i.test(String(r.label || ""))) notes.push(String(r.value));
@@ -162,7 +172,7 @@ function fromCodexbar(j, now) {
     session: { ...win(u.primary), pace: u.dataConfidence === "estimated" ? null : pw("primary") },
     weekly: { ...win(u.secondary), pace: u.dataConfidence === "estimated" ? null : pw("secondary") },
     monthly: { ...win(u.tertiary), pace: null },
-    models, plan, notes,
+    models, plan, account, notes,
     extra: null,
   };
 }
@@ -195,7 +205,7 @@ async function fromClaude(ctx, b, device, now) {
       ...(j.seven_day_sonnet ? [{ name: "Sonnet", used: int(j.seven_day_sonnet.utilization), resetsAt: ms(j.seven_day_sonnet.resets_at) }] : []),
       ...(j.seven_day_opus ? [{ name: "Opus", used: int(j.seven_day_opus.utilization), resetsAt: ms(j.seven_day_opus.resets_at) }] : []),
     ],
-    plan: null,
+    plan: null, account: null,
     extra: j.extra_usage ? { used: j.extra_usage.used_credits, limit: j.extra_usage.monthly_limit } : null,
   };
   return out;
@@ -215,7 +225,7 @@ async function refresh(ctx, b, id, device, now) {
     let out = null;
     try {
       const args = `usage --provider ${P.codexbar} --format json --no-color`;
-      const probe = `for b in codexbar ~/.local/bin/codexbar /opt/homebrew/bin/codexbar; do out=$("$b" ${args} 2>&1); if [ -n "$out" ]; then echo "$out"; break; fi; done`;
+      const probe = `for b in codexbar "$HOME/.local/bin/codexbar" /opt/homebrew/bin/codexbar; do out=$("$b" ${args} 2>&1); if [ -n "$out" ]; then echo "$out"; break; fi; done`;
       const r = await side(ctx, { command: probe, timeout: 25 }, device);
       const parsed = JSON.parse(String(r?.stdout || ""));
       const first = Array.isArray(parsed) ? parsed[0] : parsed;
@@ -232,9 +242,9 @@ async function refresh(ctx, b, id, device, now) {
       const wprev = null;
       if (!out.weekly.pace) out.weekly.pace = paceFrom(out.weekly.used, out.weekly.resetsAt, P.weeklyMins, wprev, now);
     }
-    b.exec("insert into snapshots values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", [id, device, now, out.source, out.confidence, out.session.used, out.session.resetsAt, out.weekly.used, out.weekly.resetsAt, out.monthly.used, out.monthly.resetsAt, JSON.stringify(out.models), JSON.stringify({ session: out.session.pace, weekly: out.weekly.pace }), (out.notes || [])[0] || null]);
+    b.exec("insert into snapshots values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", [id, device, now, out.source, out.confidence, out.session.used, out.session.resetsAt, out.weekly.used, out.weekly.resetsAt, out.monthly.used, out.monthly.resetsAt, JSON.stringify(out.models), JSON.stringify({ session: out.session.pace, weekly: out.weekly.pace }), (out.notes || [])[0] || null, out.account || null]);
     b.exec("delete from snapshots where at < ?", [PRUNE()]);
-    return { provider: id, device, at: now, source: out.source, confidence: out.confidence, session_used: out.session.used, session_resets: out.session.resetsAt, session_resetText: out.session.resetText, weekly_used: out.weekly.used, weekly_resets: out.weekly.resetsAt, weekly_resetText: out.weekly.resetText, monthly_used: out.monthly.used, monthly_resets: out.monthly.resetsAt, models: out.models, pace: { session: out.session.pace, weekly: out.weekly.pace }, plan: out.plan, extra: out.extra, notes: out.notes || [], cached: false, now };
+    return { provider: id, device, at: now, source: out.source, confidence: out.confidence, session_used: out.session.used, session_resets: out.session.resetsAt, session_resetText: out.session.resetText, weekly_used: out.weekly.used, weekly_resets: out.weekly.resetsAt, weekly_resetText: out.weekly.resetText, monthly_used: out.monthly.used, monthly_resets: out.monthly.resetsAt, models: out.models, pace: { session: out.session.pace, weekly: out.weekly.pace }, plan: out.plan, account: out.account || null, extra: out.extra, notes: out.notes || [], cached: false, now };
   } catch (err) {
     return fail(String(err?.message || err).slice(0, 120));
   }
@@ -259,6 +269,7 @@ function section(p, now) {
     steer(p.models) || null,
     ...((p.notes && p.notes.length ? p.notes : p.note ? [p.note] : []).map((n) => `Note: ${n}`)),
     p.plan ? `Plan: ${p.plan}` : null,
+    p.account ? `Account: ${p.account}` : null,
     `Updated ${ago(p.at, now)} on ${p.device || "this device"}${p.stale ? ` (${p.stale}, showing last)` : ""}`,
   ].filter(Boolean);
   return [head, est, ...rows].filter(Boolean).join("\n");
@@ -286,7 +297,8 @@ export default {
   schema: Object.fromEntries(["user", "group", "global"].map((kind) => [kind, [`
     create table snapshots (provider text not null, device text not null, at integer not null, source text not null, confidence text not null, session_used real, session_resets integer, weekly_used real, weekly_resets integer, monthly_used real, monthly_resets integer, models text, pace text);
     create index snapshots_provider on snapshots (provider, device, at);`,
-    `alter table snapshots add column note text;`]])),
+    `alter table snapshots add column note text;`,
+    `alter table snapshots add column account text;`]])),
 
   ops: {
     status: {
