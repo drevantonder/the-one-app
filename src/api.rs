@@ -730,7 +730,8 @@ pub(crate) async fn call_from_serverless(node: &Node, remote: crate::entry::Key,
         let handed = keys.as_ref().and_then(Value::as_str).ok_or_else(|| anyhow::anyhow!("a call passed on brings the keys it was handed"))?;
         let token = node.take_passed(&remote, &user, &call, handed, false)?;
         let client = me["client"].as_str().unwrap_or_default().to_string();
-        call_for(node, Me { caller: Caller { key: node.id(), user, agent: None, token: Some(token) }, sign_in: Some(client) }, call).await
+        // As the serverless node's, never this device's own: no service counts it as its person's own node.
+        call_for(node, Me { caller: Caller { key: remote, user, agent: None, token: Some(token) }, sign_in: Some(client) }, call).await
     };
     ran.await.unwrap_or_else(|err| failed(&err))
 }

@@ -86,11 +86,14 @@ impl Node {
     /// near before the far (FAR); then by the install's order (src/rank.rs); this device before another as good; then
     /// the nearest. A sidecar about its own machine runs here first.
     pub(super) fn candidates(&self, req: &CallRequest, me: &Caller) -> Result<Vec<Key>> {
+        let passed = passed(me);
         if let Some(device) = &req.device {
             // A sidecar's call goes to the service offering it on that device, if one serves the caller: their own
-            // first, then the device itself, then one its person shares with everyone.
+            // first (never for a call another node passed on), then the device itself, then one its person shares
+            // with everyone.
             if req.sidecar.is_some() {
-                let found = self.find_service(&req.app, device, &me.user, true).or_else(|| self.find_device(device).ok()).or_else(|| self.find_service(&req.app, device, &me.user, false));
+                let own = (!passed).then(|| self.find_service(&req.app, device, &me.user, true)).flatten();
+                let found = own.or_else(|| self.find_device(device).ok()).or_else(|| self.find_service(&req.app, device, &me.user, false));
                 if let Some(found) = found {
                     return Ok(vec![found]);
                 }
@@ -105,10 +108,10 @@ impl Node {
         self.with(|i| {
             let m = &i.r.members;
             let mut devices: Vec<Key> = if req.sidecar.is_none() {
-                m.computes().map(|s| s.key).filter(|s| m.serves(s, &me.user)).collect()
+                m.runners(&me.user, &call_scopes(i, req, &me.user)?).into_iter().map(|s| s.key).collect()
             } else {
                 let mut s: Vec<Key> = i.peers.iter().filter(|(k, _)| i.online(k)).filter(|(_, s)| s.sidecars.iter().any(|d| d.0 == req.app && d.1.contains(&me.user))).map(|(k, _)| *k).collect();
-                if here && (me.user == i.user || (self.0.sidecars.serves_everyone(&req.app) && i.r.members.serves(&self.0.id, &me.user))) {
+                if here && ((me.user == i.user && !passed) || (self.0.sidecars.serves_everyone(&req.app) && i.r.members.serves(&self.0.id, &me.user))) {
                     s.push(self.0.id);
                 }
                 s
@@ -148,12 +151,15 @@ impl Node {
         let token = me.token.as_ref().filter(|t| !sessions::unsigned(t) && !t.starts_with(standing::GRANT) && (!service || (shared && sessions::is_sign_in(t))));
         let mut request = json!({ "app": req.app, "sidecar": req.sidecar, "op": req.op, "input": req.input, "scopes": req.scopes, "depth": req.depth, "from": req.from, "client": req.client, "me": { "key": hex(&me.key), "user": me.user, "agent": me.agent, "token": token } });
         // Keys handed here with no sign-in (a client device's, or with a call passed on) go on to another node sealed
-        // to it for this node's key, of the scopes the call reaches alone, which it runs on them alone.
+        // to it for this node's key, of the scopes the call reaches alone, which it runs on them alone: only those the
+        // device runs, and only the call's app's.
+        let resolved = self.resolve(req.clone());
         if let Some(unsigned) = me.token.as_ref().filter(|t| sessions::unsigned(t))
             && !service
         {
-            let scopes = self.with(|i| call_scopes(i, &self.resolve(req.clone()), &me.user))?;
-            let (keys, until) = self.passing_on(unsigned, &scopes);
+            let scopes = self.with(|i| call_scopes(i, &resolved, &me.user))?;
+            let runs = self.with(|i| Ok(scopes.iter().filter(|s| i.r.members.runs_for(&device, s)).cloned().collect::<Vec<_>>()))?;
+            let (keys, until) = self.passing_on(unsigned, &runs, &resolved.app);
             let seal = self.with(|i| Ok(i.r.members.seal_key(&device)))?.context("that device has no key to seal to")?;
             let named: Vec<String> = scopes.iter().map(Scope::to_string).collect();
             request = crate::keys::forwarded(&request, &me.user, req.client.as_deref().unwrap_or(""), &self.0.id, &seal, until, keys, &named)?["body"]["call"].take();
@@ -164,7 +170,7 @@ impl Node {
         if let Some(token) = token
             && !service
             && let Some(seal) = self.with(|i| Ok(i.r.members.seal_key(&device)))?
-            && let Some(keys) = self.with(|i| Ok(call_scopes(i, &self.resolve(req.clone()), &me.user)?.into_iter().filter(|s| i.r.members.runs_for(&device, s)).collect::<Vec<_>>())).map(|scopes| self.hand_on(token, &seal, &scopes))?
+            && let Some(keys) = self.with(|i| Ok(call_scopes(i, &resolved, &me.user)?.into_iter().filter(|s| i.r.members.runs_for(&device, s)).collect::<Vec<_>>())).map(|scopes| self.hand_on(token, &seal, &scopes, &resolved.app))?
         {
             request["keys"] = json!(keys);
         }
@@ -210,6 +216,11 @@ impl Node {
         if req.sidecar.is_some() {
             if !self.runs_sidecar_here(&req.app) {
                 return Ok(Reply::Elsewhere(format!("{} doesn't run here", req.app)));
+            }
+            // A sidecar that runs as this device's own person (Shell, say) never runs for a call another node passed
+            // on, from whichever path it came: a hacked node gets only the calls it ran.
+            if passed(me) && !self.0.sidecars.serves_everyone(&req.app) {
+                return Ok(Reply::Error(format!("{} runs only for its person's own devices", req.app)));
             }
             return match self.run_sidecar(&req.app, &req.op, input, me, req.from.clone()).await {
                 Err(err) if err.is::<crate::sidecars::Elsewhere>() => Ok(Reply::Elsewhere(err.to_string())),
@@ -537,7 +548,18 @@ impl Node {
             // Another device's hints, which only a device of the install gives.
             "hello" | "changed" if self.with(|i| Ok(i.r.members.compute(&me.key).is_some()))? => {
                 if op == "hello" {
-                    let sidecars: Vec<Sidecar> = serde_json::from_value(input["sidecars"].clone()).unwrap_or_default();
+                    let mut sidecars: Vec<Sidecar> = serde_json::from_value(input["sidecars"].clone()).unwrap_or_default();
+                    // Whom each serves, no more than the entries allow: that device's own person, and for one that
+                    // serves everyone, those the device serves.
+                    self.with(|i| {
+                        let m = &i.r.members;
+                        let owner = m.compute(&me.key).map(|c| c.user.clone()).unwrap_or_default();
+                        for (_, users, describe) in &mut sidecars {
+                            let everyone = describe["serves"] == "everyone";
+                            users.retain(|u| *u == owner || (everyone && m.serves(&me.key, u)));
+                        }
+                        Ok(())
+                    })?;
                     let load = serde_json::from_value(input["load"].clone()).ok();
                     // The sidecars that came, went or changed there, whose apps shells list again.
                     let (new, changed) = self.with(|i| {
@@ -847,6 +869,7 @@ impl Node {
     /// `from`'s key, of the scopes the call names alone, every one of which `user` may use and, for a node on a machine
     /// (`machine`), `from` runs. → what its keys are kept by.
     pub(crate) fn take_passed(&self, from: &Key, user: &str, call: &Value, sealed: &str, machine: bool) -> Result<String> {
+        let sidecar = serde_json::from_value::<CallRequest>(call.clone()).map(|req| self.resolve(req).sidecar.is_some())?;
         let named = call["scopes"].as_array().context("a call passed on names its scopes")?;
         let scopes: Vec<Scope> = named.iter().map(|s| match s.as_str() {
             Some("user") => Ok(Scope::User(user.to_string())),
@@ -859,7 +882,7 @@ impl Node {
             ensure!(!machine || scopes.iter().all(|s| m.runs_for(from, s)), "{} doesn't run every scope that call names", short(from));
             Ok(())
         })?;
-        self.hand_passed(from, user, sealed, &scopes)
+        self.hand_passed(from, user, sealed, &scopes, sidecar)
     }
 
     /// Who a call another device passed on is for: with a sign-in's token, someone that device's node serves or whose
@@ -888,6 +911,11 @@ impl Node {
         let agent = request["me"]["agent"].as_str().map(str::to_string);
         Ok(Caller { key, user, agent, token: None })
     }
+}
+
+/// Whether a call is one another node passed on: it runs only on what it was handed, never as this device's own person.
+fn passed(me: &Caller) -> bool {
+    me.token.as_deref().is_some_and(sessions::passed)
 }
 
 /// The scopes a call reaches for `user`: those it names, or every one its app reaches; a sidecar's, those it names or

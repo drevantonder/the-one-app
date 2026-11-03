@@ -4,6 +4,8 @@
 //! token caller's data with its own keys: a call that lacks one fails before it writes anything, saying what it needs
 //! (`Needs`, which the API answers with 428), and its caller sends it again with them.
 
+use std::collections::HashSet;
+
 use crate::db::Keys;
 use crate::keys::Need;
 
@@ -31,6 +33,9 @@ pub(super) struct Sessions {
     issuer: Mutex<Option<Arc<crate::kernel::Issuer>>>,
     /// Until when each database a session opened stays open here: then it's forgotten, its keys with it.
     pub opened: Mutex<HashMap<(Scope, String), u64>>,
+    /// The log keys handed here that opened what the bucket holds of their scope at their epoch, each by a hash of
+    /// (scope, epoch, key): not the key, which is kept only while a session that handed it lasts.
+    opened_logs: Mutex<HashSet<[u8; 32]>>,
 }
 
 /// Keys a call needs that it wasn't handed: the API answers 428 with them, and with this device's key and the key to
@@ -67,6 +72,9 @@ pub fn client_token(key: &Key) -> String {
 
 pub(super) const CLIENT: &str = "client.";
 
+/// How many of a log's last steps a key handed for it is checked against, newest first.
+const LOG_CHECKED: usize = 64;
+
 /// The longest keys handed with no sign-in (a client device's, or with a call passed on) are kept here.
 const CLIENT_KEYS: u64 = 3_600_000;
 
@@ -100,6 +108,12 @@ fn handoff_for(token: &str) -> String {
 /// Whether `token` was made here for keys handed with no sign-in: a client device's, or a call another node passed on.
 pub(super) fn unsigned(token: &str) -> bool {
     token.starts_with(CLIENT) || token.starts_with(PASSED)
+}
+
+/// Whether `token` was made here for a call another node passed on: it runs only on what it was handed, and no service
+/// counts it as its person's own.
+pub(super) fn passed(token: &str) -> bool {
+    token.starts_with(PASSED)
 }
 
 /// Whether `token` is an access token the install's sign-in service signed, which another device can check: not a
@@ -161,9 +175,13 @@ impl Node {
             tracing::debug!("keys handed for {user} had run out: left");
             return Ok(());
         }
-        // Only epochs an entry made are kept: a key for one beyond is junk, or for one this device hasn't read yet,
-        // which a call that needs it asks for again.
-        let newest: HashMap<String, u32> = self.with(|i| Ok(handoff.keys.iter().filter_map(|k| Some((k.scope.clone(), i.r.members.epoch(&Scope::parse(&k.scope).ok()?)))).collect()))?;
+        // Only keys of scopes its person may use: one of another's would have this device read and write their data
+        // with it. And only epochs an entry made: a key for one beyond is junk, or for one this device hasn't read
+        // yet, which a call that needs it asks for again.
+        let newest: HashMap<String, u32> = self.with(|i| {
+            let m = &i.r.members;
+            Ok(handoff.keys.iter().filter_map(|k| Scope::parse(&k.scope).ok().filter(|s| m.may_use(user, s)).map(|s| (k.scope.clone(), m.epoch(&s)))).collect())
+        })?;
         let keys: Vec<crate::keys::Handed> = handoff.keys.into_iter().filter(|k| newest.get(&k.scope).is_some_and(|n| k.epoch >= 1 && k.epoch <= *n)).collect();
         let mut kept = self.0.sessions.kept.lock().unwrap();
         kept.retain(|_, s| s.live(now));
@@ -184,10 +202,12 @@ impl Node {
     }
 
     /// Keeps the keys another node, `from`, handed with a call it passed on for `user` with no sign-in: sealed here for
-    /// `from`'s key, and only of `scopes`, those the call names. → what the call's keys are kept by.
-    pub(super) fn hand_passed(&self, from: &Key, user: &str, sealed: &str, scopes: &[Scope]) -> Result<String> {
+    /// `from`'s key, and only of `scopes`, those the call names; a sidecar's call (`sidecar`) only with some, since
+    /// a node's word alone runs no sidecar. → what the call's keys are kept by.
+    pub(super) fn hand_passed(&self, from: &Key, user: &str, sealed: &str, scopes: &[Scope], sidecar: bool) -> Result<String> {
         let handoff = crate::keys::open_handoff(&self.seal_secret(), sealed)?;
         ensure!(handoff.for_ == hex(from), "the keys handed are for another node");
+        ensure!(!sidecar || !handoff.keys.is_empty(), "a sidecar's call passed on comes with the keys its person handed");
         let named: Vec<String> = scopes.iter().map(Scope::to_string).collect();
         ensure!(handoff.keys.iter().all(|k| named.contains(&k.scope)), "the keys handed are of a scope the call doesn't name");
         let token = passed_token(from, user);
@@ -195,19 +215,21 @@ impl Node {
         Ok(token)
     }
 
-    /// The keys a call with no sign-in was handed here, of `scopes` alone, for passing it on, until when they're kept.
-    pub(super) fn passing_on(&self, token: &str, scopes: &[Scope]) -> (Vec<crate::keys::Handed>, u64) {
+    /// The keys a call of `app` was handed here, of `scopes` alone, for passing it on, until when they're kept: its
+    /// app's databases', and the scopes' log and Vault, never another app's.
+    pub(super) fn passing_on(&self, token: &str, scopes: &[Scope], app: &str) -> (Vec<crate::keys::Handed>, u64) {
         let named: Vec<String> = scopes.iter().map(Scope::to_string).collect();
+        let its = |a: &str, database: &str| a == app || (a == members::APP && (database == crate::log::NAME || database == crate::vault::DATABASE));
         let kept = self.0.sessions.kept.lock().unwrap();
         let Some(session) = kept.get(&hash(token)).filter(|s| s.live(now_ms())) else { return (Vec::new(), 0) };
-        let keys = session.keys.iter().filter(|((scope, _, _), _)| named.contains(scope)).flat_map(|((scope, app, database), by)| by.iter().map(move |(epoch, key)| crate::keys::Handed { scope: scope.clone(), epoch: *epoch, app: app.clone(), database: database.clone(), key: *key })).collect();
+        let keys = session.keys.iter().filter(|((scope, a, database), _)| named.contains(scope) && its(a, database)).flat_map(|((scope, app, database), by)| by.iter().map(move |(epoch, key)| crate::keys::Handed { scope: scope.clone(), epoch: *epoch, app: app.clone(), database: database.clone(), key: *key })).collect();
         (keys, session.until)
     }
 
     /// The keys of `scopes` a sign-in's calls were handed here, sealed to another device (`to`, its seal key) for a
-    /// call this one passes on to it, until they're kept here.
-    pub(super) fn hand_on(&self, token: &str, to: &[u8; 32], scopes: &[Scope]) -> Option<String> {
-        let (keys, until) = self.passing_on(token, scopes);
+    /// call of `app` this one passes on to it, until they're kept here.
+    pub(super) fn hand_on(&self, token: &str, to: &[u8; 32], scopes: &[Scope], app: &str) -> Option<String> {
+        let (keys, until) = self.passing_on(token, scopes, app);
         (until > 0).then(|| crate::keys::seal_handoff(to, &crate::keys::Handoff { for_: crate::keys::token_id(token), until, keys }).ok()).flatten()
     }
 
@@ -221,16 +243,89 @@ impl Node {
         kept.get(&hash(token)).filter(|s| s.until > now_ms()).and_then(|s| s.keys.get(&(scope.to_string(), app.to_string(), database.to_string())).cloned()).unwrap_or_default()
     }
 
-    /// The keys of a scope's log that live sessions were handed, if they hold its newest epoch's: what this device
-    /// reads and writes the entries of a scope it runs but doesn't open with, while someone who opens it uses it here.
-    pub(super) fn handed_log(&self, scope: &Scope) -> Result<Keys> {
+    /// The keys of a scope's log that live sessions of people who may use it were handed, if they hold its newest
+    /// epoch's: what this device reads and writes the entries of a scope it runs but doesn't open with, while someone
+    /// who opens it uses it here. Of each epoch, only a key that opens what the bucket holds under it, so nobody's key
+    /// has this device pass over the real entries or write any it can't be read by (`log_opens`).
+    pub(super) async fn handed_log(&self, scope: &Scope) -> Result<Keys> {
         let (now, newest) = (now_ms(), self.with(|i| Ok(i.r.members.epoch(scope)))?);
         let id = (scope.to_string(), members::APP.to_string(), crate::log::NAME.to_string());
+        let handed: Vec<(String, Keys)> = self.0.sessions.kept.lock().unwrap().values().filter(|s| s.live(now)).filter_map(|s| s.keys.get(&id).map(|k| (s.user.clone(), k.clone()))).collect();
+        let mut offered: BTreeMap<u32, Vec<[u8; 32]>> = BTreeMap::new();
+        self.with(|i| {
+            for (_, by) in handed.iter().filter(|(user, _)| i.r.members.may_use(user, scope)) {
+                for (n, k) in by.iter().filter(|(n, _)| **n <= newest) {
+                    let keys = offered.entry(*n).or_default();
+                    if !keys.contains(k) {
+                        keys.push(*k);
+                    }
+                }
+            }
+            Ok(())
+        })?;
         let mut keys = Keys::new();
-        for s in self.0.sessions.kept.lock().unwrap().values().filter(|s| s.live(now)) {
-            keys.extend(s.keys.get(&id).into_iter().flatten().map(|(n, k)| (*n, *k)));
+        for (n, offered) in offered {
+            if let Some(key) = self.log_opens(scope, n, n < newest, &offered).await? {
+                keys.insert(n, key);
+            }
         }
         crate::db::handed(keys, newest).map_err(|_| NotGiven(scope.clone(), self.device_name()).into())
+    }
+
+    /// Which of the keys `offered` for epoch `n` of a scope's log opens what the bucket holds under that epoch: its
+    /// newest copy, or the newest of its last `LOG_CHECKED` steps. With nothing under it there, the one key offered, if
+    /// everyone offered the same; else none. An epoch before the newest (`old`) has nothing more written under it, so
+    /// what it came to holds.
+    async fn log_opens(&self, scope: &Scope, n: u32, old: bool, offered: &[[u8; 32]]) -> Result<Option<[u8; 32]>> {
+        use crate::bucket::Bucket;
+        let checked = |k: &[u8; 32]| -> [u8; 32] {
+            use sha2::Digest;
+            sha2::Sha256::new().chain_update(scope.to_string()).chain_update(n.to_be_bytes()).chain_update(k).finalize().into()
+        };
+        if let Some(k) = offered.iter().find(|k| self.0.sessions.opened_logs.lock().unwrap().contains(&checked(k))) {
+            return Ok(Some(*k));
+        }
+        let bucket = self.bucket()?;
+        let prefix = crate::log::prefix(&scope.to_string());
+        let (at, copy, epoch) = Bucket::get(&bucket, &crate::db::newest_name(&prefix)).await?.map_or((0, 0, 0), |o| crate::db::newest(&o.bytes));
+        let mut sealed = None;
+        if copy > 0 && epoch == n {
+            sealed = Bucket::get(&bucket, &crate::db::copy_name(&prefix, copy)).await?.map(|o| (crate::db::copy_name(&prefix, copy), o.bytes));
+        }
+        // From the last step anyone said is there, or this device read or wrote, on to the last there is.
+        let read = self.with(|i| i.r.store.position(&scope.to_string()))?.0;
+        let mut top = at.max(read).max(self.0.written.lock().unwrap().get(scope).copied().unwrap_or(0));
+        for _ in 0..LOG_CHECKED {
+            match Bucket::get(&bucket, &crate::db::step_name(&prefix, top + 1)).await? {
+                Some(_) => top += 1,
+                None => break,
+            }
+        }
+        for step in (1..=top).rev().take(LOG_CHECKED) {
+            if sealed.is_some() {
+                break;
+            }
+            let name = crate::db::step_name(&prefix, step);
+            let Some(o) = Bucket::get(&bucket, &name).await? else { continue };
+            match crate::keys::epoch_of(&o.bytes) {
+                Ok(e) if e == n => sealed = Some((name, o.bytes)),
+                Ok(e) if e < n => break,
+                _ => {}
+            }
+        }
+        let Some((name, sealed)) = sealed else {
+            let [one] = offered else { return Ok(None) };
+            if old {
+                self.0.sessions.opened_logs.lock().unwrap().insert(checked(one));
+            }
+            return Ok(Some(*one));
+        };
+        let opens = offered.iter().find(|k| crate::keys::open(k, &name, &sealed).is_ok()).copied();
+        match opens {
+            Some(k) => drop(self.0.sessions.opened_logs.lock().unwrap().insert(checked(&k))),
+            None => tracing::warn!("{scope}'s log: no key handed for epoch {n} opens {name}: left"),
+        }
+        Ok(opens)
     }
 
     /// Reads the entries of each scope a token caller uses that this device runs but doesn't open (someone else's own,
@@ -350,5 +445,86 @@ impl Node {
         for id in gone {
             dbs.remove(&id);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    async fn start() -> Node {
+        let shm = std::path::Path::new("/dev/shm");
+        let base = if shm.is_dir() { shm.to_path_buf() } else { std::env::temp_dir() };
+        // Where tests/main.rs's `temp` keeps a run's folders, so its next run removes this one's.
+        let dir = base.join(format!("one-tests-{}", std::process::id())).join(format!("sessions-{}", rand::random::<u64>()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("device.json"), json!({ "secret": hex(&rand::random::<[u8; 32]>()), "name": "a" }).to_string()).unwrap();
+        Node::start(&dir, Vec::new()).await.unwrap()
+    }
+
+    /// Keys handed here count only for scopes their person may use; a log's only if it opens what the bucket holds
+    /// under its epoch; a call's go on only to a node that runs its scopes, and only its app's; and a device's hello
+    /// says it serves no more people than the entries do.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn handed_keys_reach_only_what_their_person_uses() {
+        let a = start().await;
+        a.create("Handed", "Andre").await.unwrap();
+        let andre = a.user().unwrap();
+        let me = Caller { key: a.id(), user: andre.clone(), agent: None, token: None };
+        let mine = Scope::User(andre.clone());
+        let (sam, phone, sams_box) = (crate::entry::new_id(), ed25519_dalek::SigningKey::from_bytes(&rand::random()), ed25519_dalek::SigningKey::from_bytes(&rand::random()));
+        let phone_key = phone.verifying_key().to_bytes();
+        a.member_content(&me, members::device(&crate::keys::Endpoint::of(&phone), &sam, "sam's phone", &[members::Kind::Client], Some(("Sam", members::Role::Member)))).await.unwrap();
+        a.member_content(&me, members::device(&crate::keys::Endpoint::of(&sams_box), &sam, "sam's box", &[members::Kind::Compute], None)).await.unwrap();
+        a.append_as(&mine, &andre, members::node("keep", json!({}))).await.unwrap();
+        let (epoch, key) = a.database_keys(&mine, members::APP, crate::log::NAME, false).await.unwrap().last_key_value().map(|(n, k)| (*n, *k)).unwrap();
+        let bogus: [u8; 32] = rand::random();
+        let log = |k: [u8; 32]| crate::keys::Handed { scope: mine.to_string(), epoch, app: members::APP.into(), database: crate::log::NAME.into(), key: k };
+
+        // Sam's phone hands this node a key of Andre's log: it isn't kept.
+        let sams_token = client_token(&phone_key);
+        let sealed = crate::keys::seal_handoff(&crate::kernel::twin_public(&a.id()).unwrap(), &crate::keys::Handoff { for_: hex(&phone_key), until: now_ms() + 60_000, keys: vec![log(bogus)] }).unwrap();
+        a.hand(&sams_token, &sam, &sealed, u64::MAX).unwrap();
+        assert!(a.0.sessions.kept.lock().unwrap().get(&hash(&sams_token)).is_none_or(|s| s.keys.is_empty()), "a key of a scope its person may not use is left");
+
+        // Of a log's keys sessions hold, only one its person may use, and that opens its step under that epoch.
+        let session = |user: &str, keys: Vec<crate::keys::Handed>| {
+            let mut s = Session { user: user.into(), client: None, until: now_ms() + 60_000, keys: HashMap::new() };
+            for k in keys {
+                s.keys.entry((k.scope, k.app, k.database)).or_default().insert(k.epoch, k.key);
+            }
+            a.0.sessions.kept.lock().unwrap().insert(rand::random(), s);
+        };
+        session(&sam, vec![log(key)]);
+        assert!(a.handed_log(&mine).await.is_err(), "Sam holds the real key, but may not use Andre's scope");
+        session(&andre, vec![log(bogus)]);
+        assert!(a.handed_log(&mine).await.is_err(), "a key that doesn't open the log's step under its epoch is never read or written with");
+        session(&andre, vec![log(key)]);
+        assert_eq!(a.handed_log(&mine).await.unwrap().get(&epoch), Some(&key), "the key that opens it is used, whatever else was handed");
+
+        // A call passed on takes its app's keys, and its scope's log and Vault, never another app's.
+        let passed = passed_token(&rand::random(), &andre);
+        let db = |app: &str, database: &str| crate::keys::Handed { scope: mine.to_string(), epoch, app: app.into(), database: database.into(), key: rand::random() };
+        let mut s = Session { user: andre.clone(), client: None, until: now_ms() + 60_000, keys: HashMap::new() };
+        for k in [db("hi", "main"), db("other", "main"), db(members::APP, crate::log::NAME), db(members::APP, crate::vault::DATABASE)] {
+            s.keys.entry((k.scope, k.app, k.database)).or_default().insert(k.epoch, k.key);
+        }
+        a.0.sessions.kept.lock().unwrap().insert(hash(&passed), s);
+        let mut on: Vec<(String, String)> = a.passing_on(&passed, std::slice::from_ref(&mine), "hi").0.into_iter().map(|k| (k.app, k.database)).collect();
+        on.sort();
+        assert_eq!(on, [("hi".to_string(), "main".to_string()), (members::APP.into(), crate::log::NAME.into()), (members::APP.into(), crate::vault::DATABASE.into())]);
+
+        // This node, an admin's, serves Sam in global, but a call of his own scope goes only to a node that runs it.
+        let sams = Caller { key: phone_key, user: sam.clone(), agent: None, token: Some(sams_token) };
+        let call = CallRequest { app: "board".into(), op: "news".into(), scopes: Some(vec![format!("user:{sam}")]), ..Default::default() };
+        assert!(a.with(|i| Ok(i.r.members.serves(&a.id(), &sam))).unwrap());
+        assert!(!a.candidates(&call, &sams).unwrap().contains(&a.id()), "a node that doesn't run Sam's scope isn't asked to");
+
+        // Sam's box says its Shell serves Andre too, and its push everyone: only what the entries allow is believed.
+        let hello = json!({ "sidecars": [["shell", [andre, sam], {}], ["push", [andre, sam], { "serves": "everyone" }]] });
+        let from_box = Caller { key: sams_box.verifying_key().to_bytes(), user: sam.clone(), agent: None, token: None };
+        a.node_op("hello", &hello, &from_box).await.unwrap();
+        let said = a.with(|i| Ok(i.peers[&from_box.key].sidecars.iter().map(|(n, users, _)| (n.clone(), users.clone())).collect::<Vec<_>>())).unwrap();
+        assert_eq!(said, [("shell".to_string(), vec![sam.clone()]), ("push".to_string(), vec![sam.clone()])]);
     }
 }

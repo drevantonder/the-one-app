@@ -942,12 +942,14 @@ async fn a_node_reaches_a_service_through_the_relay_and_a_stranger_does_not() {
 /// The serverless node, or another node, passes a call on with no access token, only the person it's for, the scopes
 /// it names and the keys of those it was handed, sealed to the node for the sender's own key: the node runs it on those
 /// keys alone, never its own, even for its own person, takes no keys sealed for anyone else or of a scope the call
-/// doesn't name, and from a node on a machine, runs it only if that node runs every scope it names.
+/// doesn't name, and from a node on a machine, runs it only if that node runs every scope it names. It's the sender's
+/// call, never this node's own, so it runs no sidecar that runs as the node's own person, and no service counts it as
+/// theirs.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_call_passed_on_runs_on_the_keys_handed_for_its_sender_alone() {
     let a = start("passed-on").await;
     a.create("Passed On", "Andre").await.unwrap();
-    deploy_module(&a, "hi", r#"export default { name: "hi", ops: { hi: { description: "", input: {}, run: (ctx, input) => ({ hi: input.name }) } } };"#).await;
+    deploy_module(&a, "hi", r#"export default { name: "hi", ops: { hi: { description: "", input: {}, run: (ctx, input) => ({ hi: input.name }) }, who: { description: "", input: {}, run: (ctx) => ({ key: ctx.me.key }) } } };"#).await;
     let me = one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None, token: None };
     let mine_scope = one::entry::Scope::User(me.user.clone());
     a.install(&me, "hi", &mine_scope, true).await.unwrap();
@@ -1013,6 +1015,26 @@ async fn a_call_passed_on_runs_on_the_keys_handed_for_its_sender_alone() {
     assert!(unnamed["error"].as_str().is_some_and(|e| e.contains("doesn't name")), "keys of a scope the call doesn't name are refused: {unnamed}");
     let ran = ask(with(andre.clone(), Some(sealed(&serverless_hex)))).await;
     assert_eq!(ran["ok"], json!({ "hi": "passed on" }), "{ran}");
+    let mut who = with(andre.clone(), Some(sealed(&serverless_hex)));
+    who["op"] = json!("who");
+    let who = ask(who).await;
+    assert_eq!(who["ok"]["key"], json!(serverless_hex), "the serverless node's call, never this node's own, which a service would count as its person's: {who}");
+    // Shell runs as this machine's own person: never for a call passed on, named on this device or not, with keys
+    // or without.
+    let shell = |keys: String, device: Option<&str>| {
+        let mut c = with(andre.clone(), Some(keys));
+        (c["app"], c["sidecar"], c["op"], c["input"]) = (json!("shell"), json!("shell"), json!("run"), json!({ "command": "true" }));
+        if let Some(d) = device {
+            c["device"] = json!(d);
+        }
+        c
+    };
+    let here = ask(shell(sealed(&serverless_hex), Some("passed-on"))).await;
+    assert!(here["error"].as_str().is_some_and(|e| e.contains("runs only for its person's own devices")), "{here}");
+    let anywhere = ask(shell(sealed(&serverless_hex), None)).await;
+    assert!(anywhere["ok"].is_null() && anywhere["error"].as_str().is_some_and(|e| e.contains("no device runs shell")), "{anywhere}");
+    let keyless = ask(shell(sealed_with(&serverless_hex, Vec::new()), Some("passed-on"))).await;
+    assert!(keyless["error"].as_str().is_some_and(|e| e.contains("comes with the keys")), "{keyless}");
     let stranger = ask(with(json!({ "user": one::entry::new_id() }), Some(sealed(&serverless_hex)))).await;
     assert!(stranger["error"].as_str().is_some_and(|e| e.contains("joined")), "{stranger}");
     endpoint.close().await;

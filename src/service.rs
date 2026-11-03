@@ -841,6 +841,8 @@ mod tests {
         assert!(format!("{other:#}").contains("serves only its own person"), "{other:#}");
         assert!(may(&whatsapp, &sams, ANDRE, false).is_err(), "Sam's node can't call as Andre");
         assert!(may(&whatsapp, &stranger, ANDRE, false).is_err(), "a stranger is refused");
+        // A call another node (the serverless node, say) passed on to Andre's own is that node's, never his own node's.
+        assert!(may_call(&m, &id(&whatsapp), &id(&mac), &id(&stranger), ANDRE, false).is_err(), "a call passed on isn't its person's own node's");
         // An admin's node, which runs Sam's calls in global, never calls Sam's own service as him, even with a sign-in.
         may(&notes, &sams, SAM, false).unwrap();
         assert!(m.serves(&id(&mac), SAM));
