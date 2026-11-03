@@ -53,6 +53,31 @@ struct Glyph: View {
     }
 }
 
+/// Shows only once it has been there for `delay`, fading in: a spinner or a problem, so a short wait or blip shows
+/// nothing. It keeps its place meanwhile, so nothing moves when it shows.
+struct Later<Content: View>: View {
+    var delay: Duration
+    @ViewBuilder var content: Content
+    @State private var due = false
+
+    init(_ delay: Duration, @ViewBuilder content: () -> Content) {
+        self.delay = delay
+        self.content = content()
+    }
+
+    var body: some View {
+        content
+            .opacity(due ? 1 : 0)
+            .allowsHitTesting(due)
+            .accessibilityHidden(!due)
+            .animation(.easeIn(duration: 0.2), value: due)
+            .task {
+                try? await Task.sleep(for: delay)
+                due = true
+            }
+    }
+}
+
 func displayName(_ name: String) -> String {
     name.hasSuffix(".local") ? String(name.dropLast(6)) : name
 }

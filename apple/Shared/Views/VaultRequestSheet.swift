@@ -97,7 +97,7 @@ struct VaultRequestSheet: View {
                 } else if let error {
                     ContentUnavailableView("Can’t Find This Request", systemImage: "lock.slash", description: Text(error))
                 } else {
-                    ProgressView().frame(maxWidth: .infinity)
+                    Later(.milliseconds(400)) { ProgressView() }.frame(maxWidth: .infinity)
                 }
             }
             .formStyle(.grouped)

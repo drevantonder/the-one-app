@@ -45,17 +45,21 @@ struct PagesView: View {
             .overlay {
                 if store.install?.joining == true {
                     ProgressView("Joining…").padding(24).background(.regularMaterial, in: .rect(cornerRadius: 18))
-                } else if store.state == nil, case .unreachable(let message) = store.phase {
-                    ContentUnavailableView {
-                        Label("Can’t Reach Your Devices", systemImage: "bolt.horizontal.circle")
-                    } description: {
-                        Text(message)
-                    } actions: {
-                        Text("Trying again…").foregroundStyle(.secondary)
-                    }
-                    .background(.regularMaterial)
                 } else if store.state == nil {
-                    ProgressView()
+                    // A spinner only after a moment; can't reach only once it's been trying a while, not a first miss.
+                    Later(.milliseconds(400)) { ProgressView() }
+                    Later(.seconds(3)) {
+                        if case .unreachable(let message) = store.phase {
+                            ContentUnavailableView {
+                                Label("Can’t Reach Your Devices", systemImage: "bolt.horizontal.circle")
+                            } description: {
+                                Text(message)
+                            } actions: {
+                                Text("Trying again…").foregroundStyle(.secondary)
+                            }
+                            .background(.regularMaterial)
+                        }
+                    }
                 }
             }
         }

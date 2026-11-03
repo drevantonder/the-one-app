@@ -19,7 +19,7 @@ struct PairSheet: View {
             if let error {
                 Label(error, systemImage: "exclamationmark.circle.fill").foregroundStyle(.red)
             } else if code == nil {
-                ProgressView()
+                Later(.milliseconds(400)) { ProgressView() }
             }
             HStack(spacing: 10) {
                 Text(code ?? " ")

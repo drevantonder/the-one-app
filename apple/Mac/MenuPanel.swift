@@ -55,9 +55,15 @@ struct MenuPanel: View {
                 }
                 Divider().padding(.vertical, 6).padding(.horizontal, 14)
             } else {
-                Text(store.state == nil ? "Starting…" : store.install == nil ? "Not set up yet" : "Signed out")
-                    .foregroundStyle(.secondary)
-                    .padding(14)
+                Group {
+                    if store.state == nil {
+                        Later(.milliseconds(400)) { Text("Starting…") }
+                    } else {
+                        Text(store.install == nil ? "Not set up yet" : "Signed out")
+                    }
+                }
+                .foregroundStyle(.secondary)
+                .padding(14)
                 Divider().padding(.horizontal, 14)
             }
 

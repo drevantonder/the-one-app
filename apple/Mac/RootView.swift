@@ -9,19 +9,22 @@ struct RootView: View {
         @Bindable var store = store
         Group {
             if store.state == nil {
-                if case .unreachable(let message) = store.phase {
-                    ContentUnavailableView {
-                        Label("Can’t Reach \(appName)", systemImage: "bolt.horizontal.circle")
-                    } description: {
-                        Text(message)
-                    } actions: {
-                        Text("Trying again…").foregroundStyle(.secondary)
+                // Nothing at all for a quick start.
+                Later(.milliseconds(400)) {
+                    if case .unreachable(let message) = store.phase {
+                        ContentUnavailableView {
+                            Label("Can’t Reach \(appName)", systemImage: "bolt.horizontal.circle")
+                        } description: {
+                            Text(message)
+                        } actions: {
+                            Text("Trying again…").foregroundStyle(.secondary)
+                        }
+                    } else {
+                        ProgressView("Starting \(appName)…")
+                            .controlSize(.small)
                     }
-                } else {
-                    ProgressView("Starting \(appName)…")
-                        .controlSize(.small)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if store.install == nil || !store.signedIn {
                 WelcomeView()
             } else {

@@ -254,7 +254,7 @@ struct ServicesView: View {
     private func accountRows(_ app: AppInfo) -> some View {
         switch accounts[app.name] {
         case nil:
-            HStack { ProgressView().controlSize(.small); Text("Loading…").foregroundStyle(.secondary) }
+            Later(.milliseconds(400)) { HStack { ProgressView().controlSize(.small); Text("Loading…").foregroundStyle(.secondary) } }
         case .failure(let failure):
             Label(failure.message, systemImage: "exclamationmark.triangle.fill")
                 .font(.subheadline)

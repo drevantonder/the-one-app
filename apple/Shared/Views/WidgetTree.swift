@@ -778,6 +778,7 @@ private struct ActionButton: View {
     var node: WidgetNode
     @Environment(\.widgetHost) private var host
     @State private var running = false
+    @State private var slow = false
     @State private var error: String?
 
     var body: some View {
@@ -795,11 +796,15 @@ private struct ActionButton: View {
             guard let run = host.run, let op = node.op, !running else { return }
             running = true
             Task {
+                // Dimmed at once; a spinner only if it takes a moment.
+                let spin = Task { try? await Task.sleep(for: .milliseconds(300)); if !Task.isCancelled { slow = true } }
                 error = await run(op, node.input ?? .object([:]))
+                spin.cancel()
                 running = false
+                slow = false
             }
         } label: {
-            label.opacity(running ? 0 : 1).overlay { if running { ProgressView().controlSize(.small) } }
+            label.opacity(slow ? 0 : running ? 0.5 : 1).overlay { if slow { ProgressView().controlSize(.small) } }
         }
         .buttonStyle(.bordered)
         .controlSize(.small)

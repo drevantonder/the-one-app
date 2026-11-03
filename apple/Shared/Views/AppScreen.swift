@@ -13,7 +13,6 @@ struct AppScreen: View {
     var dismiss: ((Any?) -> Void)?
     @State private var title: String?
     @State private var loaded = false
-    @State private var slow = false
     @State private var failure: String?
     /// When the node couldn't be reached, so the screen shows its last copy, until it answers again.
     @State private var offline: Offline?
@@ -23,39 +22,39 @@ struct AppScreen: View {
     var body: some View {
         ScreenWebView(route: route, settings: settings, dismiss: dismiss, store: store, title: $title, loaded: $loaded, failure: $failure, offline: $offline, tries: tries)
             .opacity(loaded ? 1 : 0)
-            .safeAreaInset(edge: .top, spacing: 0) {
+            .animation(.easeOut(duration: 0.15), value: loaded)
+            // Over the screen, so nothing moves; and only once it has lasted, so a blip shows nothing.
+            .overlay(alignment: .top) {
                 if let offline {
-                    TimelineView(.periodic(from: .now, by: 30)) { context in
-                        HStack(spacing: 10) {
-                            Label(context.date.timeIntervalSince(offline.kept) < 60 ? "Offline" : "Offline · from \(offline.kept.formatted(.relative(presentation: .named, unitsStyle: .wide)))", systemImage: "wifi.slash")
-                                .foregroundStyle(.secondary)
-                            if offline.next != nil {
-                                Button("Try Now") { tries += 1 }
-                                    .buttonStyle(.borderless)
-                            } else {
-                                ProgressView().controlSize(.small)
-                                Text("Trying again…").foregroundStyle(.tertiary)
+                    Later(.milliseconds(1500)) {
+                        TimelineView(.periodic(from: .now, by: 30)) { context in
+                            HStack(spacing: 10) {
+                                Label(context.date.timeIntervalSince(offline.kept) < 60 ? "Offline" : "Offline · from \(offline.kept.formatted(.relative(presentation: .named, unitsStyle: .wide)))", systemImage: "wifi.slash")
+                                    .foregroundStyle(.secondary)
+                                if offline.next != nil {
+                                    Button("Try Now") { tries += 1 }
+                                        .buttonStyle(.borderless)
+                                } else {
+                                    ProgressView().controlSize(.small)
+                                    Text("Trying again…").foregroundStyle(.tertiary)
+                                }
                             }
                         }
+                        .font(.footnote.weight(.medium))
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 7)
+                        .glassEffect(.regular, in: .capsule)
+                        .padding(.vertical, 6)
+                        .animation(.default, value: offline.next == nil)
                     }
-                    .font(.footnote.weight(.medium))
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 7)
-                    .glassEffect(.regular, in: .capsule)
-                    .padding(.vertical, 6)
-                    .animation(.default, value: offline.next == nil)
                 }
             }
             .overlay {
                 if let failure {
                     ContentUnavailableView("Can’t Open This", systemImage: "exclamationmark.triangle", description: Text(failure))
-                } else if !loaded && slow {
-                    ProgressView()
+                } else if !loaded {
+                    Later(.milliseconds(400)) { ProgressView() }
                 }
-            }
-            .task {
-                try? await Task.sleep(for: .milliseconds(400))
-                slow = true
             }
             #if os(macOS)
             // Content fades out under the toolbar, as a native scroll view's does.
