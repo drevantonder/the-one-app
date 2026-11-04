@@ -65,7 +65,7 @@ type kind interface {
 }
 
 // runtimes are every kind but linux, as this machine might run them.
-var runtimes = []kind{windowsQEMU{}, androidEmulator{}, iosSimulator{}}
+var runtimes = []kind{chromeKind{}, windowsQEMU{}, androidEmulator{}, iosSimulator{}}
 
 // A vm is a device of a kind other than linux, as its file in the sidecar's folder says.
 type vm struct {
@@ -113,6 +113,15 @@ func (ds *devices) kindsHere() []map[string]any {
 		out = append(out, map[string]any{"kind": linuxKind, "title": "Linux with a browser", "copies": true, "room": len(spares(all, lent)) > 0 || roomForOne()})
 	}
 	for _, k := range runtimes {
+		if k.name() == chromeName {
+			// Listed even where it can't run, with why: its owner may allow it.
+			if why := ds.chromeWhyNot(context.Background()); why != "" {
+				out = append(out, map[string]any{"kind": k.name(), "title": k.title(), "unavailable": why, "room": false})
+			} else {
+				out = append(out, map[string]any{"kind": k.name(), "title": k.title(), "input": k.limits(), "room": roomFor(chromeGB)})
+			}
+			continue
+		}
 		if k.can() == "" {
 			unborrowed := 0
 			for _, v := range ds.vms() {
@@ -678,10 +687,17 @@ func (ds *devices) runKinds(ctx context.Context, op, name string, here bool, in 
 		if err != nil {
 			return nil, true, err
 		}
+		if k.name() == chromeName && op == "create" {
+			return nil, true, errors.New("chrome devices are only borrowed, each by one agent: borrow one with kind chrome")
+		}
 		if v == nil && !here {
 			if r, done, err := ds.first(ctx, op, k.name(), name, in); done {
 				return r, true, err
 			}
+		}
+		if k.name() == chromeName {
+			r, err := ds.borrowChrome(ctx, in)
+			return r, true, err
 		}
 		if why := k.can(); why != "" {
 			return nil, true, fmt.Errorf("none of your devices runs %s agent devices (here: %s)", k.title(), why)
@@ -730,6 +746,10 @@ func (ds *devices) runKinds(ctx context.Context, op, name string, here bool, in 
 	k := v.kind()
 	if k == nil || k.can() != "" {
 		return nil, true, fmt.Errorf("%s is a %s device, which this machine can't run now", v.Name, v.Kind)
+	}
+	if v.Kind == chromeName && slices.Contains(browsing, op) {
+		r, err := ds.browse(ctx, v, op, in)
+		return r, true, err
 	}
 	minutes := func(def, most int) int {
 		if m, ok := in["minutes"].(float64); ok {

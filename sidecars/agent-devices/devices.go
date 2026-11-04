@@ -42,7 +42,7 @@ type devices struct {
 	backupMu sync.Mutex
 
 	latestHere, latestAll latest // the list, for the page
-	pics              pictures
+	pics                  pictures
 }
 
 func newDevices(dir, node string) *devices {
@@ -61,6 +61,12 @@ func (ds *devices) describe() map[string]any {
 	for _, t := range ds.tools {
 		if slices.Contains(browsing, t.Name) {
 			ops = append(ops, map[string]any{"name": t.Name, "description": t.Description, "input": withDevice(t.InputSchema)})
+		}
+	}
+	// Chrome devices answer them here, with or without a Linux device to read their descriptions from.
+	for _, name := range browsing {
+		if !slices.ContainsFunc(ops, func(op map[string]any) bool { return op["name"] == name }) {
+			ops = append(ops, map[string]any{"name": name, "description": "One of the browser tools, as Computer Use describes it.", "input": withDevice(json.RawMessage(`{"type":"object","additionalProperties":true}`))})
 		}
 	}
 	return map[string]any{"title": "Agent Devices", "description": "Devices your agents use: Linux with a browser, Windows, Android and iPhones", "version": built, "icon": "browsers", "color": "#a2845e", "instructions": instructions, "ops": ops, "widgets": []any{}}
@@ -320,6 +326,9 @@ func (ds *devices) run(ctx context.Context, op string, raw json.RawMessage) (any
 			width = min(max(int(w), 160), 1920)
 		}
 		return ds.screenLatest(name, width, have, func(ctx context.Context) (any, error) { return ds.screenNow(ctx, name, width) })
+	}
+	if op == "chrome" || op == "set_chrome" {
+		return ds.runChrome(ctx, op, here, in)
 	}
 	if r, done, err := ds.runKinds(ctx, op, name, here, in); done {
 		return r, err
@@ -769,7 +778,7 @@ func viewURL(ctx context.Context, d device, minutes int) (string, error) {
 
 // local are the operations that act on this device even when given a
 // device it doesn't have.
-var local = []string{"list", "kinds", "adopt", "create", "borrow", "sign_in", "signing_in", "backups", "restore", "refresh_tools"}
+var local = []string{"list", "kinds", "chrome", "set_chrome", "adopt", "create", "borrow", "sign_in", "signing_in", "backups", "restore", "refresh_tools"}
 
 // reply is a result with blobs the caller's scope keeps, so its devices can fetch them.
 type reply struct {

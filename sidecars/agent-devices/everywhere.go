@@ -257,15 +257,16 @@ func (ds *devices) first(ctx context.Context, op, kind, name string, in map[stri
 	for s, r := range got {
 		var theirs struct {
 			Kinds []struct {
-				Kind       string
-				Room       *bool
-				Unborrowed int
+				Kind        string
+				Room        *bool
+				Unborrowed  int
+				Unavailable string
 			}
 		}
 		json.Unmarshal(r, &theirs)
 		for _, k := range theirs.Kinds {
 			switch {
-			case k.Kind != kind:
+			case k.Kind != kind || k.Unavailable != "":
 			case lend && k.Unborrowed > 0:
 				ready[s] = 0
 			case k.Room == nil || *k.Room: // nil: a device too old to say

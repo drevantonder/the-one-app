@@ -2,7 +2,8 @@
 // running Cua's desktop image (github.com/trycua/cua) with Google Chrome, which
 // keeps its sign-ins, offered to the person's devices through this device's
 // node. The server inside each device speaks MCP; its
-// browser tools become this app's operations.
+// browser tools become this app's operations. Chrome ones (kind chrome, chrome.go) are this machine's own Chrome,
+// whose browser tools this program answers itself (browse.go).
 package main
 
 import (
@@ -33,6 +34,7 @@ type call struct {
 	Input  json.RawMessage `json:"input"`
 	Caller struct {
 		Name string `json:"name"` // the device it came from
+		User string `json:"user"` // the person's id
 	} `json:"caller"`
 }
 
@@ -89,6 +91,7 @@ func serve(node string, d *devices) {
 					}
 				}()
 				ctx := context.WithValue(context.Background(), callerKey{}, c.Caller.Name)
+				ctx = context.WithValue(ctx, callerUserKey{}, c.Caller.User)
 				result, err := d.run(ctx, c.Op, c.Input)
 				answer := map[string]any{"ok": result}
 				if r, ok := result.(reply); ok {
@@ -158,9 +161,9 @@ func num(description string) map[string]any {
 
 var deviceArg = str("which device, by name; default the only one")
 
-var kindArg = str("linux (with a browser; the default), windows, android or iphone: kinds lists what each of your devices runs")
+var kindArg = str("linux (with a browser; the default), chrome (the machine's own Chrome, no container: quicker and lighter, where its owner allows it), windows, android or iphone: kinds lists what each of your devices runs")
 
-const instructions = "Devices for agents on your devices: Linux with a browser, and Windows, Android and iPhones where this machine runs them (kinds). Agents use them through Computer Use (computer_*), and the person sees them on the Agent Devices page."
+const instructions = "Devices for agents on your devices: Linux with a browser, a machine's own Chrome where its owner allows it, and Windows, Android and iPhones where this machine runs them (kinds). Agents use them through Computer Use (computer_*), and the person sees them on the Agent Devices page."
 
 // browsing are the device's tools offered as operations of their own; the
 // rest are reached through use.
@@ -173,8 +176,12 @@ func ownOps() []map[string]any {
 	return []map[string]any{
 		{"name": "list", "description": "The agent devices on every one of your devices: the device each is on, whether it's running, paused or stopped, its size, the memory and CPU it uses now, and who has borrowed it and what for (or that it's the spare kept for borrowing).",
 			"input": object(map[string]any{"here": map[string]any{"type": "boolean", "description": "only those on this device"}})},
-		{"name": "kinds", "description": "The kinds of device each of your devices runs (linux, windows, android, iphone), with what input each takes, whether it has room for another and how many lasting ones nobody has borrowed, and its memory to spare in GB.",
+		{"name": "kinds", "description": "The kinds of device each of your devices runs (linux, chrome, windows, android, iphone), with what input each takes, whether it has room for another and how many lasting ones nobody has borrowed, and its memory to spare in GB. A kind it can't run now (chrome its owner hasn't allowed) has unavailable: why.",
 			"input": object(map[string]any{"here": map[string]any{"type": "boolean", "description": "only those on this device"}})},
+		{"name": "chrome", "description": "Whether each of your devices runs chrome devices (its own Chrome, outside any container): allowed; shared, that it runs calls of a group's, global or someone else's too, where it's off until its owner allows it; chosen, that its owner chose; and can, why it can't (no Chrome installed), or \"\".",
+			"input": object(map[string]any{"here": map[string]any{"type": "boolean", "description": "only this device"}})},
+		{"name": "set_chrome", "description": "Allow chrome devices on one of your devices, or not: only its owner may. It holds whatever the device comes to run.",
+			"input": object(map[string]any{"on": str("which device, by name; default this one"), "allowed": map[string]any{"type": "boolean", "description": "true to allow them"}}, "allowed")},
 		{"name": "adopt", "description": "Make something already on this device a lasting agent device: a Windows VM's folder, an Android Virtual Device, or a simulator.",
 			"input": object(map[string]any{"device": str("its name"), "kind": kindArg, "dir": str("windows: its folder"), "id": str("android: its AVD; iphone: its simulator's UDID"),
 				"port": num("windows: its SSH port here; android: its console port"), "display": num("windows: its VNC display"), "cpus": num("windows: its CPUs"), "gb": num("windows: its memory")}, "device", "kind")},
@@ -185,7 +192,7 @@ func ownOps() []map[string]any {
 			"input": object(map[string]any{"device": str("the device's name"), "command": str("the command")}, "device", "command")},
 		{"name": "reach", "description": "Let a Windows, Android or iPhone device reach a port of this machine's 127.0.0.1 at the same port on its own, until it stops.",
 			"input": object(map[string]any{"device": str("the device's name"), "port": num("the port")}, "device", "port")},
-		{"name": "borrow", "description": "Borrow a device for as long as you need it. Linux (the default): one of your own whose browser starts with a copy of a browser profile, quick, as a spare is kept ready. Other kinds: the person's lasting device, one agent at a time, or a throwaway copy of it. Give it back with give_back when done; a throwaway one is deleted then, or after 15 minutes without a call, with anything in it.",
+		{"name": "borrow", "description": "Borrow a device for as long as you need it. Linux (the default): one of your own whose browser starts with a copy of a browser profile, quick, as a spare is kept ready. Chrome: a machine's own Chrome, started for you with a copy of the profile, in a second; its browser tools are ready at once (browser_prepare gives target_id and tab_id). Other kinds: the person's lasting device, one agent at a time, or a throwaway copy of it. Give it back with give_back when done; a throwaway one is deleted then, or after 15 minutes without a call, with anything in it.",
 			"input": object(map[string]any{"kind": kindArg, "device": str("a lasting device, by name"), "copy": map[string]any{"type": "boolean", "description": "a throwaway copy, not the lasting device"},
 				"for":     str("what you need it for, in a few words, e.g. Reading Messenger; the person sees it"),
 				"profile": prof, "screen": map[string]any{"type": "boolean", "description": "false for a device nobody watches: no view link"},
