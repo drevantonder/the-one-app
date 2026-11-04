@@ -697,11 +697,12 @@ show();
         const topic = (p) => (p.topic || "top").split("/").pop();
         const link = (p) => ({ screen: "topic", params: { path: p.topic || "" } });
         const muted = (text, extra = {}) => ({ t: "text", text, size: "xs", tone: "muted", lines: 1, ...extra });
+        // The post leads, loudest; who, topic and time are one small muted line under it.
         const post = (p, lines, small = false) => ({
           t: "col", gap: 2, link: link(p),
           c: [
-            { t: "row", gap: 5, c: [{ t: "icon", name: p.agent ? "robot" : "user", tone: "muted", w: 11 }, { t: "text", text: who(p), size: "xs", weight: "medium", lines: 1 }, ...(small ? [] : [muted(topic(p))]), { t: "col", grow: true, c: [] }, { t: "time", at: p.time, size: "xs", tone: "muted" }] },
-            { t: "text", text: p.text, size: "sm", lines },
+            { t: "text", text: p.text, size: "sm", weight: "medium", lines },
+            { t: "row", gap: 5, c: [{ t: "icon", name: p.agent ? "robot" : "user", tone: "muted", w: 11 }, muted(small ? who(p) : `${who(p)} · ${topic(p)}`), { t: "col", grow: true, c: [] }, { t: "time", at: p.time, size: "xs", tone: "muted" }] },
           ],
         });
         const activity = (w = 64) => ({ t: "row", gap: 8, c: [muted(`${total} this week`, { weight: "medium" }), { t: "col", grow: true, c: [] }, { t: "spark", values: week, tone: "muted", w, h: 14, alt: "Posts a day this week" }] });
@@ -712,10 +713,11 @@ show();
           return { t: "col", gap: 4, c: [post(p, 3, true), spacer, activity(44)] };
         }
         if (ctx.size === "medium") return { t: "col", gap: 4, c: spread([...posts.map((p) => post(p, 1)), activity()]) };
-        const chart = { t: "chart", values: week, labels: days, tone: "muted", h: ctx.size === "xl" ? 120 : 36, alt: "Posts a day this week" };
+        const chart = { t: "chart", values: week, labels: days, tone: "muted", h: 36, alt: "Posts a day this week" };
         if (ctx.size === "large") return { t: "col", gap: 4, c: spread([...posts.map((p) => post(p, 2)), { t: "col", gap: 4, c: [muted(`${total} posts this week`, { weight: "medium" }), chart] }]) };
-        // Extra large: the posts, and beside them the week.
-        return { t: "row", gap: 24, c: [{ t: "col", grow: true, gap: 4, c: spread(posts.map((p) => post(p, 2))) }, { t: "col", w: 220, gap: 4, c: [muted(`${total} posts this week`, { weight: "medium" }), chart] }] };
+        // Extra large: the rows of medium and large, wider and taller, spread to fill the card (a row at the top of a
+        // tree doesn't take the card's height on every client; a column does).
+        return { t: "col", gap: 4, c: spread([...posts.map((p) => post(p, 2)), activity(160)]) };
       },
     },
   },

@@ -327,11 +327,12 @@ export default {
         const days = week.map((_, i) => new Date(now - (6 - i) * DAY).toLocaleDateString("en-US", { weekday: "narrow" }));
         const link = (c) => ({ screen: "commit", params: { repo: c.repo, sha: c.sha } });
         const muted = (text, extra = {}) => ({ t: "text", text, size: "xs", tone: "muted", lines: 1, ...extra });
+        // The commit leads, loudest; repo, author and time are one small muted line under it.
         const commit = (c, lines, small = false) => ({
           t: "col", gap: 2, link: link(c),
           c: [
-            { t: "row", gap: 5, c: [{ t: "icon", name: "git-commit", tone: "muted", w: 11 }, { t: "text", text: c.repo, size: "xs", weight: "medium", lines: 1 }, ...(small ? [] : [muted(c.author)]), { t: "col", grow: true, c: [] }, { t: "time", at: c.time, size: "xs", tone: "muted" }] },
-            { t: "text", text: c.subject, size: "sm", lines },
+            { t: "text", text: c.subject, size: "sm", weight: "medium", lines },
+            { t: "row", gap: 5, c: [{ t: "icon", name: "git-commit", tone: "muted", w: 11 }, muted(small ? c.repo : `${c.repo} · ${c.author}`), { t: "col", grow: true, c: [] }, { t: "time", at: c.time, size: "xs", tone: "muted" }] },
           ],
         });
         const activity = (w = 64) => ({ t: "row", gap: 8, c: [muted(`${total} this week`, { weight: "medium" }), { t: "col", grow: true, c: [] }, { t: "spark", values: week, tone: "muted", w, h: 14, alt: "Commits a day this week" }] });
@@ -339,10 +340,11 @@ export default {
         const spread = (nodes) => nodes.flatMap((n, i) => (i ? [spacer, n] : [n]));
         if (ctx.size === "small") return { t: "col", gap: 4, c: [commit(commits[0], 3, true), spacer, activity(44)] };
         if (ctx.size === "medium") return { t: "col", gap: 4, c: spread([...commits.map((c) => commit(c, 1)), activity()]) };
-        const chart = { t: "chart", values: week, labels: days, tone: "muted", h: ctx.size === "xl" ? 120 : 36, alt: "Commits a day this week" };
+        const chart = { t: "chart", values: week, labels: days, tone: "muted", h: 36, alt: "Commits a day this week" };
         if (ctx.size === "large") return { t: "col", gap: 4, c: spread([...commits.map((c) => commit(c, 2)), { t: "col", gap: 4, c: [muted(`${total} commits this week`, { weight: "medium" }), chart] }]) };
-        // Extra large: the commits, and beside them the week.
-        return { t: "row", gap: 24, c: [{ t: "col", grow: true, gap: 4, c: spread(commits.map((c) => commit(c, 2))) }, { t: "col", w: 220, gap: 4, c: [muted(`${total} commits this week`, { weight: "medium" }), chart] }] };
+        // Extra large: the rows of medium and large, wider and taller, spread to fill the card (a row at the top of a
+        // tree doesn't take the card's height on every client; a column does).
+        return { t: "col", gap: 4, c: spread([...commits.map((c) => commit(c, 2)), activity(160)]) };
       },
     },
   },

@@ -14,6 +14,8 @@ window.oneWidgets = (() => {
   .w-row { display: flex; align-items: center; gap: var(--gap, 6px); min-width: 0; }
   .w-row > * { min-width: 0; }
   .w-row > .w-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* A time is never cut: the words beside it give way first. */
+  .w-row > .w-time { flex: none; }
   .w-xl { font-size: 22px; font-weight: 600; } .w-lg { font-size: 15px; font-weight: 600; } .w-sm { font-size: 11px; } .w-xs { font-size: 10px; }
   .w-medium { font-weight: 600; } .w-bold { font-weight: 700; }
   .w-muted { color: var(--muted); } .w-accent { color: var(--tint); } .w-good { color: var(--text); } .w-warn { color: var(--warn); } .w-bad { color: var(--danger); }
@@ -114,7 +116,7 @@ window.oneWidgets = (() => {
         el = tone(node("span", cls("text", n.size, n.weight), n.text ?? ""));
         if (num(n.lines)) el.style.cssText += `display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:${Math.round(num(n.lines))};overflow:hidden;`;
         break;
-      case "time": el = tone(node("span", cls("text", n.size), time(n))); break;
+      case "time": el = tone(node("span", cls("text", n.size) + " w-time", time(n))); break;
       case "stat": {
         el = tone(node("div", "w-stat"));
         el.append(node("b", "", fmt(n.value) + (n.unit ? " " + n.unit : "")));
