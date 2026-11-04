@@ -113,7 +113,17 @@ struct Sidebar: View {
             Section(isExpanded: Binding(get: { true }, set: { _ in })) {
                 ForEach(store.settingsItems) { item in
                     Label {
-                        Text(item.title)
+                        // One that opens in the browser (Passkeys) says so, as macOS marks a link that leaves the app.
+                        HStack {
+                            Text(item.title)
+                            if item.url != nil {
+                                Spacer()
+                                Image(systemName: "arrow.up.right")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.tertiary)
+                                    .accessibilityHidden(true)
+                            }
+                        }
                     } icon: {
                         SettingIcon(item: item, size: 20)
                     }
