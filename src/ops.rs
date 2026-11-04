@@ -157,7 +157,7 @@ pub fn run(app: &str, op: &str, args: &[String]) -> Result<()> {
 
 /// What an app says, as the command line says it: each tool it names (`gmail_sign_in`) as its command
 /// (`one gmail sign_in`).
-fn in_cli_words(text: &str) -> String {
+pub fn in_cli_words(text: &str) -> String {
     let mut apps = get("/v1/apps").ok().and_then(|a| a.as_array().cloned()).unwrap_or_default();
     apps.extend(node_apps());
     let command = |word: &str| -> Option<String> {

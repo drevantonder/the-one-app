@@ -243,7 +243,8 @@ fn main() {
     let ran = run(args);
     client_device::end();
     if let Err(err) = ran {
-        eprintln!("{CLI}: {err:#}");
+        // What the node says names its tools (apps_restore); the command line names them as commands.
+        eprintln!("{CLI}: {}", ops::in_cli_words(&format!("{err:#}")));
         std::process::exit(ops::exit_code(&err));
     }
 }
