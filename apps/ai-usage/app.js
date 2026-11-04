@@ -306,34 +306,41 @@ async function refresh(ctx, b, id, device, now) {
   }
 }
 
-function windowText(label, w, now) {
-  if (w.used == null) return null;
-  const left = 100 - w.used;
-  const lines = [`${label}: ${left}% left`, w.pace?.summary ? `Pace: ${w.pace.summary}` : null, w.resetText || (w.resetsAt != null ? `Resets ${resets(w.resetsAt, now)}` : null)];
-  return lines.filter(Boolean).join("\n");
+/// Pace only when it's news: a deficit, or a projection short of reset. Reserve is silent.
+function paceNews(pace) {
+  if (!pace?.summary) return null;
+  const [head, , tail] = pace.summary.split(" | ");
+  if (pace.willLast !== false && !/deficit/.test(head)) return null;
+  return [head.toLowerCase(), /Projected|Runs out/.test(tail || "") ? tail.replace(/^./, (c) => c.toLowerCase()) : null].filter(Boolean).join(", ");
 }
 
-function section(p, now) {
-  if (p.error) return [`== ${PROVIDERS[p.provider].title} ==`, `Unavailable: ${p.error}`].join("\n");
-  if (p.source === "cswap" && !p.active) {
-    const left = (label, u) => (u == null ? null : `${label} ${100 - u}% left`);
-    const out = p.weekly_used >= 100 ? `back ${resets(p.weekly_resets, now)}` : p.weekly_resets ? `weekly resets ${resets(p.weekly_resets, now)}` : null;
-    return `${PROVIDERS[p.provider].title}: ${p.account}: ${[left("session", p.session_used), left("weekly", p.weekly_used), out].filter(Boolean).join(", ")}`;
-  }
-  const head = p.source === "cswap" ? `== ${PROVIDERS[p.provider].title}: ${p.account}${p.active ? ", in use" : ""} ==` : `== ${PROVIDERS[p.provider].title} (${p.source}) ==`;
-  const est = p.confidence === "estimated" ? "~estimated from this device only, no pace" : null;
-  const rows = [
+/// One line per window: "Weekly 35% left, 37% in deficit, runs out in 1d 1h, resets Sun at 11:59 PM".
+function windowText(label, w, now) {
+  if (w.used == null) return null;
+  const reset = w.resetsAt != null ? `resets ${resets(w.resetsAt, now)}` : w.resetText ? w.resetText.replace(/^./, (c) => c.toLowerCase()) : null;
+  return [`${label} ${100 - w.used}% left`, paceNews(w.pace), reset].filter(Boolean).join(", ");
+}
+
+/// One provider's reads as text: the account in use in full, the others on one line.
+function section(reads, now) {
+  const p = reads[0];
+  const title = PROVIDERS[p.provider].title;
+  if (p.error) return `${title}: unavailable, ${p.error}`;
+  const head = [title, p.account && p.source === "cswap" ? `${p.account}${reads.length > 1 ? ", in use" : ""}` : null, p.plan, p.confidence === "estimated" ? "~estimated from this device only" : null].filter(Boolean).join(" · ");
+  const age = p.stale ? `last read ${ago(p.at, now)} (${p.stale})` : now - p.at > FRESH ? `read ${ago(p.at, now)}` : null;
+  const steered = steer(p.models);
+  const others = reads.slice(1).map((o) => `${o.account} ${o.weekly_used >= 100 ? `out, back ${resets(o.weekly_resets, now)}` : `${100 - (o.weekly_used ?? 0)}% weekly left`}`);
+  return [
+    head,
     windowText("Session", { used: p.session_used, resetsAt: p.session_resets, resetText: p.session_resetText, pace: p.pace?.session }, now),
     windowText("Weekly", { used: p.weekly_used, resetsAt: p.weekly_resets, resetText: p.weekly_resetText, pace: p.pace?.weekly }, now),
     p.monthly_used != null ? windowText("Monthly", { used: p.monthly_used, resetsAt: p.monthly_resets }, now) : null,
-    p.extra ? `Extra usage: $${p.extra.used} of $${p.extra.limit} this month` : null,
-    steer(p.models) || null,
-    ...((p.notes && p.notes.length ? p.notes : p.note ? [p.note] : []).map((n) => `Note: ${n}`)),
-    p.plan ? `Plan: ${p.plan}` : null,
-    p.account && p.source !== "cswap" ? `Account: ${p.account}` : null,
-    `Updated ${ago(p.at, now)} on ${p.device || "this device"}${p.stale ? ` (${p.stale}, showing last)` : ""}`,
-  ].filter(Boolean);
-  return [head, est, ...rows].filter(Boolean).join("\n");
+    p.extra ? `Extra usage $${p.extra.used} of $${p.extra.limit} this month` : null,
+    steered && !/any model fine$/.test(steered) ? steered : null,
+    ...(p.notes || []).map((n) => `Note: ${n}`),
+    others.length ? `Other accounts: ${others.join("; ")}` : null,
+    age,
+  ].filter(Boolean).join("\n");
 }
 
 function tripped(p) {
@@ -398,7 +405,7 @@ export default {
             })),
           };
         }
-        return all.map((p) => section(p, now)).join("\n\n");
+        return ids.map((id) => all.filter((p) => p.provider === id)).filter((r) => r.length).map((r) => section(r, now)).join("\n\n");
       },
     },
     warn: {
