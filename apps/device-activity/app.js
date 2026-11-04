@@ -93,7 +93,7 @@ export default {
       },
     },
     list: {
-      description: "Every one of your devices, online or not, and how busy each is now: memory, CPU, GPU and disk, like \"23 GB of 30 GB (76%)\". Containers a device hosts follow it, with host naming it. Use it to pick a device with room for a desktop, a model or a build.",
+      description: "Every one of your devices, online or not, and how busy each is now: memory, CPU, GPU and disk space, like \"23 GB of 30 GB (76%)\". Containers a device hosts follow it, with host naming it. Use it to pick a device with room for a desktop, a model or a build.",
       input: { type: "object", properties: { history: { type: "boolean", description: "also each device's CPU and GPU, percent busy every 5 seconds over the last two minutes, oldest first" } } },
       reads: true,
       async run(ctx, { history } = {}) {
