@@ -59,7 +59,7 @@ impl Node {
         let ready = self.ready();
         let waiting = self.waiting_requests(viewer).unwrap_or(0);
         let arrangements = self.arrangements(&viewer.user);
-        let install = self.0.install.lock().unwrap();
+        let Ok(install) = self.0.install.lock() else { return json!({ "error": "this device couldn't answer that: a bug in it, which its log shows" }) };
         let viewer_name = if viewer.key == self.0.id { self.device_name() } else { install.as_ref().and_then(|i| i.r.members.machine(&viewer.key)).map(|m| m.name.clone()).unwrap_or_default() };
         let backups = install.as_ref().and_then(|i| self.backup_problem(i, &viewer.user));
         let here_sidecars = install.as_ref().map(|i| self.sidecars_here(i)).unwrap_or_default();

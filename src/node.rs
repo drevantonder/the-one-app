@@ -288,6 +288,54 @@ impl Reply {
     }
 }
 
+/// A lock that refuses the thread already holding it. A std `Mutex` asked for again on the thread holding it waits on
+/// itself for good, and every thread asking after that waits on it too: once those are all the runtime's workers, the
+/// node takes no connection and answers nothing, though it still listens. Refused instead, and said where.
+struct Exclusive<T>(Mutex<T>);
+
+thread_local!(static HOLDING: std::cell::RefCell<Vec<usize>> = const { std::cell::RefCell::new(Vec::new()) });
+
+/// What `Exclusive::lock` gives: the value, held until it's dropped.
+struct Held<'a, T>(std::sync::MutexGuard<'a, T>, usize);
+
+impl<T> Exclusive<T> {
+    const fn new(value: T) -> Self {
+        Exclusive(Mutex::new(value))
+    }
+
+    fn lock(&self) -> Result<Held<'_, T>> {
+        let me = self as *const Self as usize;
+        if HOLDING.with_borrow(|h| h.contains(&me)) {
+            let at = std::backtrace::Backtrace::force_capture();
+            tracing::error!("the install was asked for on a thread that holds it, which would stop this node answering: {at}");
+            debug_assert!(false, "the install asked for on a thread that holds it: {at}");
+            bail!("this device couldn't answer that: a bug in it, which its log shows");
+        }
+        let held = Held(self.0.lock().unwrap(), me);
+        HOLDING.with_borrow_mut(|h| h.push(me));
+        Ok(held)
+    }
+}
+
+impl<T> std::ops::Deref for Held<'_, T> {
+    type Target = T;
+    fn deref(&self) -> &T {
+        &self.0
+    }
+}
+
+impl<T> std::ops::DerefMut for Held<'_, T> {
+    fn deref_mut(&mut self) -> &mut T {
+        &mut self.0
+    }
+}
+
+impl<T> Drop for Held<'_, T> {
+    fn drop(&mut self) {
+        HOLDING.with_borrow_mut(|h| h.retain(|l| *l != self.1));
+    }
+}
+
 pub struct Inner {
     dir: PathBuf,
     /// What this machine's own programs send to say they are: `api::LOCAL_TOKEN`, a file only its user reads.
@@ -298,7 +346,7 @@ pub struct Inner {
     apps: Apps,
     built_in_sidecars: Vec<crate::sidecars::BuiltIn>,
     pub sidecars: crate::sidecars::Sidecars,
-    install: Mutex<Option<Install>>,
+    install: Exclusive<Option<Install>>,
     pairings: Mutex<HashMap<[u8; 16], Pairing>>,
     events: broadcast::Sender<Event>,
     /// Held while writing or replaying, so views replay in order.
@@ -461,7 +509,7 @@ impl Node {
             apps,
             built_in_sidecars,
             sidecars: Default::default(),
-            install: Mutex::new(None),
+            install: Exclusive::new(None),
             pairings: Mutex::new(load_pairings(dir)),
             events,
             writes: tokio::sync::Mutex::new(()),
@@ -592,12 +640,12 @@ impl Node {
 
     /// Runs `f` on this device's install.
     fn with<R>(&self, f: impl FnOnce(&mut Install) -> Result<R>) -> Result<R> {
-        let mut install = self.0.install.lock().unwrap();
+        let mut install = self.0.install.lock()?;
         f(install.as_mut().context("this device is in no install yet: create one, or join with a pairing code")?)
     }
 
     pub fn has_install(&self) -> bool {
-        self.0.install.lock().unwrap().is_some()
+        self.0.install.lock().is_ok_and(|i| i.is_some())
     }
 
     /// This device's local user.
@@ -644,7 +692,7 @@ impl Node {
         let r = Replica::new(self.0.key.clone(), store, Some(Hash::from_bytes(root)))?;
         let bucket = file.bucket.map(|f| Ok::<_, anyhow::Error>((self.install_place(&f)?, f))).transpose()?;
         let install = Install { r, user: file.user, bucket, folders: file.folders, peers: HashMap::new(), builds: HashMap::new(), status: HashMap::new(), views: HashMap::new(), vault: Default::default(), nearest: HashMap::new(), far: HashMap::new(), read: false };
-        *self.0.install.lock().unwrap() = Some(install);
+        *self.0.install.lock()? = Some(install);
         Ok(())
     }
 
@@ -1262,4 +1310,31 @@ fn hostname() -> String {
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| "device".into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Exclusive;
+
+    /// The install asked for again on the thread that holds it is refused, where a `Mutex` waits on itself for good
+    /// and the node, once every worker waits behind it, stops answering anything (three machines' nodes, one night).
+    #[test]
+    fn the_install_asked_for_twice_on_one_thread_is_refused() {
+        let (done, finished) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let install = Exclusive::new(0u8);
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let _held = install.lock().unwrap();
+                let _again = install.lock();
+            }));
+            // Let go of, it's taken again (a debug build panics on the second ask, which poisons it).
+            install.0.clear_poison();
+            let _ = done.send(install.lock().is_ok());
+        });
+        assert_eq!(finished.recv_timeout(std::time::Duration::from_secs(10)), Ok(true), "a thread asking twice hung");
+        // Another lock is held beside it.
+        let (one, two) = (Exclusive::new(()), Exclusive::new(()));
+        let _a = one.lock().unwrap();
+        assert!(two.lock().is_ok());
+    }
 }
