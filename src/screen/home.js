@@ -189,10 +189,10 @@ window.home = (() => {
   }
 
   /// Shows a menu of `entries` at `at` (an event's point, or an element), and runs the one chosen.
-  async function menu(entries, at, options) {
+  async function menu(entries, at) {
     if (!entries.length) return;
     if (at instanceof Event) at = { x: at.clientX, y: at.clientY };
-    const i = await one.menu(entries, at, options).catch(() => null);
+    const i = await one.menu(entries, at).catch(() => null);
     if (i != null) entries[i]?.run();
   }
 

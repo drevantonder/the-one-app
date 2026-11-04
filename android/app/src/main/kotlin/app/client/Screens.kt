@@ -30,8 +30,6 @@ import androidx.compose.foundation.background
 import androidx.compose.ui.graphics.Color
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -186,7 +184,7 @@ fun Shell(store: Store) {
             LaunchedEffect(Unit) { withFrameNanos {}; made = true }
             val ready = store.phase == Store.Phase.Ready && store.install != null
             if (made && (store.state == null || store.install != null)) Box(Modifier.fillMaxSize().alpha(if (ready) 1f else 0f)) {
-                key(store.opened) { ScreenView(store, Route.Own("pages", obj("swipe" to true, "switcher" to "sheet", "scope" to store.page).toString()), ready = ready) }
+                key(store.opened) { ScreenView(store, Route.Own("pages", obj("swipe" to true, "scope" to store.page).toString()), ready = ready) }
             }
             if (!ready) Starting(store)
         }
@@ -380,37 +378,11 @@ private fun BoxScope.Offline(offline: Bridge.Offline, tryNow: () -> Unit) {
 
 /** `one.menu`: the items at the point the page asked for, or from the element it's for (`rect`: x, y, width,
  *  height), opening away from the edge it's near (CSS pixels are dp, at the scale screens are drawn). */
-private class MenuAsk(val items: List<MenuItem>, val x: Int, val y: Int, val rect: List<Int>?, val sheet: String?, val chose: CompletableDeferred<Int?> = CompletableDeferred())
-private data class MenuItem(val title: String, val danger: Boolean, val checked: Boolean, val icon: String?, val row: Boolean, val section: Boolean, val dot: Boolean)
-
-/** A menu with a heading, in a sheet from the bottom (the pages', from their dots): each item a row with its icon, the
- *  one it's at filled in, a red dot on what needs the person. */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun MenuSheet(ask: MenuAsk) {
-    val p = LocalPalette.current
-    ModalBottomSheet(onDismissRequest = { ask.chose.complete(null) }, containerColor = p.raised) {
-        Column(Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, bottom = 12.dp)) {
-            Text(ask.sheet ?: "", style = Type.footnote, fontWeight = FontWeight.Medium, color = p.secondary, modifier = Modifier.padding(start = 12.dp, bottom = 6.dp))
-            ask.items.forEachIndexed { i, item ->
-                if (item.section && i > 0) HorizontalDivider(color = p.separator, modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp))
-                Row(
-                    Modifier.fillMaxWidth().height(48.dp).clip(RoundedCornerShape(24.dp)).background(if (item.checked) p.fill else Color.Transparent)
-                        .clickable { ask.chose.complete(i) }.padding(horizontal = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp),
-                ) {
-                    item.icon?.let { Symbol(it, if (item.danger) p.red else p.label, 20.dp) }
-                    Text(item.title, style = Type.body, fontWeight = if (item.checked) FontWeight.SemiBold else FontWeight.Medium, color = if (item.danger) p.red else p.label, modifier = Modifier.weight(1f))
-                    if (item.dot) Box(Modifier.size(8.dp).background(p.red, CircleShape))
-                }
-            }
-        }
-    }
-}
+private class MenuAsk(val items: List<MenuItem>, val x: Int, val y: Int, val rect: List<Int>?, val chose: CompletableDeferred<Int?> = CompletableDeferred())
+private data class MenuItem(val title: String, val danger: Boolean, val checked: Boolean, val icon: String?, val row: Boolean, val section: Boolean)
 
 @Composable
 private fun Menu(ask: MenuAsk) {
-    if (ask.sheet != null) return MenuSheet(ask)
     val p = LocalPalette.current
     val marks = ask.items.any { it.checked && !it.row }
     val row = ask.items.withIndex().filter { it.value.row }
@@ -665,12 +637,12 @@ private class Bridge(val context: Context, val store: Store, val route: Route, v
             "menu" -> {
                 val flag = { o: JsonObject, k: String -> (o[k] as? JsonPrimitive)?.booleanOrNull == true }
                 val items = (m["items"] as? JsonArray)?.mapNotNull { it as? JsonObject }?.map {
-                    MenuItem(str(it, "title") ?: "", flag(it, "danger"), flag(it, "checked"), str(it, "icon")?.ifEmpty { null }, flag(it, "row"), flag(it, "section"), flag(it, "dot"))
+                    MenuItem(str(it, "title") ?: "", flag(it, "danger"), flag(it, "checked"), str(it, "icon")?.ifEmpty { null }, flag(it, "row"), flag(it, "section"))
                 }.orEmpty()
                 if (items.isEmpty()) return JsonNull
                 val number = { k: String -> (m[k] as? JsonPrimitive)?.doubleOrNull?.toInt() ?: 0 }
                 val rect = (m["rect"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.doubleOrNull?.toInt() }?.takeIf { it.size == 4 }
-                val ask = MenuAsk(items, number("x"), number("y"), rect, str(m, "sheet")?.ifEmpty { null })
+                val ask = MenuAsk(items, number("x"), number("y"), rect)
                 menu?.chose?.complete(null)
                 menu = ask
                 val chose = try { ask.chose.await() } finally { if (menu == ask) menu = null }
