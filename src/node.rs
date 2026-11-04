@@ -90,6 +90,8 @@ const CHANGED_SHOWN: u64 = 14 * 86_400_000;
 const INSTALL_OBJECT: &str = "install";
 /// How often a device says hello to the others: which services serve there, and how loaded it is.
 const PRESENCE_EVERY: Duration = Duration::from_secs(15);
+/// How soon an app's deploy that couldn't be fetched is tried again.
+const REFETCH_AFTER: Duration = Duration::from_secs(30);
 /// What an app's own database is called: SQLite's name for a connection's first.
 const DATABASE: &str = "main";
 /// What a built-in service's database of its records is called, under its name.
@@ -459,6 +461,8 @@ pub struct Inner {
     settled: tokio::sync::watch::Sender<u64>,
     /// Held while settling, so one that read the members before a change can't load its apps after one that read it.
     settling: tokio::sync::Mutex<()>,
+    /// Whether the last settling couldn't fetch an app's deploy, so it's tried again soon, not only at the next change.
+    unfetched: std::sync::atomic::AtomicBool,
 }
 
 /// Set once this process's node is handing over to the next: it opens nothing only one of them may hold.
@@ -584,6 +588,7 @@ impl Node {
             net: Default::default(),
             settled: tokio::sync::watch::channel(0).0,
             settling: tokio::sync::Mutex::new(()),
+            unfetched: Default::default(),
         }));
         let outbound_router = crate::outbound::router(node.clone());
         tokio::spawn(async move {
@@ -621,7 +626,10 @@ impl Node {
                     tracing::warn!("{err:#}");
                 }
                 worker.0.settled.send_modify(|n| *n += 1);
-                worker.0.changed.notified().await;
+                match worker.0.unfetched.load(std::sync::atomic::Ordering::Relaxed) {
+                    true => drop(tokio::time::timeout(REFETCH_AFTER, worker.0.changed.notified()).await),
+                    false => worker.0.changed.notified().await,
+                }
             }
         });
         if node.has_install() {
@@ -1040,18 +1048,29 @@ impl Node {
         if !author {
             return Ok(());
         }
-        let mut modules = Vec::new();
+        // Each app's deploy, and the bundle it's of: its newest, or while that can't be fetched yet, the one it ran.
+        let (mut modules, mut used) = (Vec::new(), BTreeMap::new());
+        let mut unfetched = false;
         let broken = self.0.broken.lock().unwrap().clone();
+        let ran = self.0.bundles.lock().unwrap().clone();
         for (app, bundle) in wanted.iter().filter(|(a, b)| broken.get(*a) != Some(*b)) {
-            match self.blob(bundle).await.and_then(|b| crate::bundle::module(&b)) {
-                Ok(module) => modules.push((app.clone(), module)),
-                Err(err) => tracing::warn!("{app}'s deploy: {err:#}"),
+            let mut fetched = self.blob(bundle).await.and_then(|b| crate::bundle::module(&b)).map(|m| (m, bundle));
+            if let Err(err) = &fetched {
+                tracing::warn!("{app}'s deploy: {err:#}: tried again soon");
+                unfetched = true;
+                if let Some(old) = ran.get(app).filter(|old| *old != bundle)
+                    && let Ok(module) = self.blob(old).await.and_then(|b| crate::bundle::module(&b))
+                {
+                    fetched = Ok((module, old));
+                }
+            }
+            if let Ok((module, bundle)) = fetched {
+                modules.push((app.clone(), module));
+                used.insert(app.clone(), bundle.clone());
             }
         }
-        let changed: Vec<String> = {
-            let bundles = self.0.bundles.lock().unwrap();
-            modules.iter().map(|(a, _)| a.clone()).filter(|a| bundles.get(a) != wanted.get(a)).collect()
-        };
+        self.0.unfetched.store(unfetched, std::sync::atomic::Ordering::Relaxed);
+        let changed: Vec<String> = modules.iter().map(|(a, _)| a.clone()).filter(|a| ran.get(a) != used.get(a)).collect();
         if !changed.is_empty() || modules.len() != self.0.apps.names().len() {
             // Writes wait for the new deploys, so what's written next runs on them.
             let _write = self.0.writes.lock().await;
@@ -1059,14 +1078,14 @@ impl Node {
             while let Err(err) = self.0.apps.load(modules.clone()).await {
                 let Some(broken) = err.downcast_ref::<crate::apps::Broken>() else { return Err(err) };
                 tracing::warn!("{broken}: it's left out until it's deployed again");
-                if let Some(bundle) = wanted.get(&broken.app) {
+                if let Some(bundle) = used.get(&broken.app) {
                     self.0.broken.lock().unwrap().insert(broken.app.clone(), bundle.clone());
                 }
                 let before = modules.len();
                 modules.retain(|(a, _)| *a != broken.app);
                 ensure!(modules.len() < before, "{err:#}");
             }
-            *self.0.bundles.lock().unwrap() = modules.iter().map(|(a, _)| (a.clone(), wanted[a].clone())).collect();
+            *self.0.bundles.lock().unwrap() = modules.iter().map(|(a, _)| (a.clone(), used[a].clone())).collect();
             // Read again, so each is brought to its new deploy's schema.
             self.close_dbs(|_, db| changed.iter().any(|app| db.starts_with(&format!("{app}/"))));
             self.emit(Event::Changed { apps: changed });
