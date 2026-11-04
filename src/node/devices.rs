@@ -15,6 +15,26 @@ fn sealed_to(to: &str) -> Result<()> {
     Ok(())
 }
 
+/// A scope's keys that may need making again: its epoch, or its Vault's key pair.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(super) enum Owing {
+    Epoch(Scope),
+    Vault(Scope),
+}
+
+/// What `Node::start_owed_keys` knows between its looks.
+#[derive(Default)]
+pub(super) struct Owed {
+    /// What owed new keys at the last look.
+    seen: BTreeSet<Owing>,
+    /// What it's making new keys of now.
+    starting: BTreeSet<Owing>,
+    /// Keys whose entry lists this device that are sealed to it, by number, known so they're asked of the bucket once.
+    sealed: BTreeSet<(Owing, u32)>,
+    /// Those that weren't, at the last look.
+    unsealed: BTreeSet<(Owing, u32)>,
+}
+
 /// Whether `user` may start a scope's new epoch, as `members` counts an `epoch` entry: an admin of the install for
 /// `global`, of the group for a group's, and the person for their own.
 fn starts_epochs(m: &Members, user: &str, scope: &Scope) -> bool {
@@ -673,36 +693,70 @@ impl Node {
         (renewed, left)
     }
 
-    /// Starts, in the background, each new epoch a scope owes (`Members::owed`) that this device's person starts epochs
-    /// of: one a removal or a stopped grant asked for that the device writing it didn't make (it failed, or went off
-    /// first). Only once a scope has owed one at two looks in a row, so a removal's own new epoch goes first.
-    pub(super) fn start_owed_epochs(&self) {
+    /// Makes, in the background, each scope's keys that are owed, of what this device's person makes them of: a new
+    /// epoch a removal or a stopped grant asked for (`Members::owed`) that the device writing it didn't make (it failed,
+    /// or went off first); or a new epoch or Vault key pair where the newest's entry lists this device but it was never
+    /// sealed to it, as when the device making it stopped between its entry and its seals, so nobody holds it. Only
+    /// once one has been owed at two looks in a row, so a removal's own new epoch, and every seal, goes first.
+    pub(super) fn start_owed_keys(&self) {
         let Ok(me) = self.user() else { return };
-        let owed: BTreeSet<Scope> = self
+        let (mut owed, listed, vaults) = self
             .with(|i| {
                 let m = &i.r.members;
                 if m.client(&self.0.id).is_none_or(|c| c.user != me) {
-                    return Ok(BTreeSet::new());
+                    return Ok(Default::default());
                 }
-                Ok(m.owed.iter().filter(|s| starts_epochs(m, &me, s)).cloned().collect())
+                let owed: BTreeSet<Owing> = m.owed.iter().filter(|s| starts_epochs(m, &me, s)).map(|s| Owing::Epoch(s.clone())).collect();
+                let epochs = m.epochs.iter().filter(|(s, e)| e.to.contains(&self.0.id) && starts_epochs(m, &me, s)).map(|(s, e)| (Owing::Epoch(s.clone()), e.n));
+                let vaults = m.vaults.iter().filter(|(s, v)| v.to.contains(&self.0.id) && m.grants_in(&me, s));
+                let listed: Vec<(Owing, u32)> = epochs.chain(vaults.clone().map(|(s, v)| (Owing::Vault(s.clone()), v.n))).collect();
+                let vaults: BTreeMap<Scope, (u32, Vec<Key>)> = vaults.map(|(s, v)| (s.clone(), (v.n, v.to.clone()))).collect();
+                Ok((owed, listed, (vaults, m.recovery)))
             })
             .unwrap_or_default();
-        let due: Vec<Scope> = {
+        let (due, unsure) = {
             let mut held = self.0.owed.lock().unwrap();
-            let (seen, starting) = &mut *held;
-            let due = owed.intersection(seen).filter(|s| !starting.contains(*s)).cloned().collect::<Vec<_>>();
-            starting.extend(due.iter().cloned());
-            *seen = owed;
-            due
+            owed.extend(held.unsealed.iter().filter(|e| listed.contains(e)).map(|(o, _)| o.clone()));
+            let due = owed.intersection(&held.seen).filter(|o| !held.starting.contains(*o)).cloned().collect::<Vec<_>>();
+            held.starting.extend(due.iter().cloned());
+            held.seen = owed;
+            let unsure: Vec<(Owing, u32)> = listed.into_iter().filter(|e| !held.sealed.contains(e)).collect();
+            (due, unsure)
         };
-        for scope in due {
-            let (node, me) = (self.clone(), Caller { key: self.0.id, user: me.clone(), agent: None, token: None });
+        if !unsure.is_empty() {
+            let node = self.clone();
             tokio::spawn(async move {
-                match node.new_epoch(&me, &scope).await {
-                    Ok(n) => tracing::info!("started {scope}'s epoch {n}, which a removal asked for"),
-                    Err(err) => tracing::warn!("starting {scope}'s new keys, which a removal asked for: {err:#}"),
+                let Ok(bucket) = node.bucket() else { return };
+                let mut unsealed = BTreeSet::new();
+                for (owing, n) in unsure {
+                    let name = match &owing {
+                        Owing::Epoch(s) => crate::keys::epoch_name(&s.to_string(), n, &hex(&node.0.id)),
+                        Owing::Vault(s) => crate::keys::vault_key_name(&s.to_string(), n, &hex(&node.0.id)),
+                    };
+                    match Bucket::get(&bucket, &name).await {
+                        Ok(Some(_)) => drop(node.0.owed.lock().unwrap().sealed.insert((owing, n))),
+                        Ok(None) => drop(unsealed.insert((owing, n))),
+                        Err(_) => {}
+                    }
                 }
-                node.0.owed.lock().unwrap().1.remove(&scope);
+                node.0.owed.lock().unwrap().unsealed = unsealed;
+            });
+        }
+        for owing in due {
+            let (node, me, (vaults, recovery)) = (self.clone(), Caller { key: self.0.id, user: me.clone(), agent: None, token: None }, vaults.clone());
+            tokio::spawn(async move {
+                let made = match &owing {
+                    Owing::Epoch(scope) => node.new_epoch(&me, scope).await.map(|_| ()),
+                    Owing::Vault(scope) => match (vaults.get(scope), recovery) {
+                        (Some((n, to)), Some(recovery)) => node.new_vault_key(scope, n + 1, to, &recovery).await,
+                        _ => Ok(()),
+                    },
+                };
+                match made {
+                    Ok(()) => tracing::info!("made {owing:?}'s new keys, which it owed"),
+                    Err(err) => tracing::warn!("making {owing:?}'s new keys, which it owed: {err:#}"),
+                }
+                node.0.owed.lock().unwrap().starting.remove(&owing);
             });
         }
     }

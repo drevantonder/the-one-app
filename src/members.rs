@@ -176,7 +176,7 @@ pub struct Members {
     pub vault_publics: BTreeMap<(Scope, u32), [u8; 32]>,
     /// Scopes that owe a new epoch: since their newest, someone who held their key lost the right to (a client device
     /// removed by another, a person removed, a member taken out of a group, a grant stopped, or a granted machine
-    /// removed). Any of the scope's admins' devices starts it (`Node::start_owed_epochs`), so a removal whose own new
+    /// removed). Any of the scope's admins' devices starts it (`Node::start_owed_keys`), so a removal whose own new
     /// epoch failed, or whose device went off first, still gets one. A device signing itself out owes none.
     pub owed: BTreeSet<Scope>,
     /// Where each person's own things run besides their own machines, as their latest `runs` said from one of their

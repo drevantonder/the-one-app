@@ -451,8 +451,8 @@ pub struct Inner {
     broken: Mutex<BTreeMap<String, String>>,
     /// The keys of the apps this device keeps running for their people.
     standing: standing::Standing,
-    /// The scopes owing a new epoch at the last look (`Node::start_owed_epochs`), and those it's starting now.
-    owed: Mutex<(BTreeSet<Scope>, BTreeSet<Scope>)>,
+    /// What `Node::start_owed_keys` knows between its looks.
+    owed: Mutex<devices::Owed>,
     /// This device's iroh endpoint.
     net: net::Net,
     /// How many times its deploys were settled (`settle`), the first once its apps are loaded.

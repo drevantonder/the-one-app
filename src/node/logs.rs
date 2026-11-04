@@ -269,7 +269,7 @@ impl Node {
             if self.has_install() {
                 self.say_hello();
                 self.end_expired_grants();
-                self.start_owed_epochs();
+                self.start_owed_keys();
             }
             tokio::time::sleep(PRESENCE_EVERY).await;
         }

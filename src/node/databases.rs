@@ -5,6 +5,8 @@ use super::*;
 
 /// How many times a database is opened again after finding junk or a newer epoch before it gives up.
 const TRIES: usize = 20;
+/// How many epochs in a row `first_global_read` passes that aren't sealed to it before taking the last as the newest.
+const GAPS_PASSED: u32 = 2;
 
 /// A scope this device wasn't given the newest key of: a device of someone who opens it seals it to this one.
 #[derive(Debug)]
@@ -130,8 +132,17 @@ impl Node {
     pub(super) async fn first_global_read(&self) -> Result<(crate::db::Keys, crate::log::Read)> {
         let (bucket, me, secret, root) = (self.bucket()?, hex(&self.0.id), self.seal_secret(), self.with(|i| Ok(i.r.root))?);
         let mut candidates = crate::db::Keys::new();
+        // Past a gap or two: an epoch whose device stopped before sealing it is sealed to nobody, and the next one is.
+        let mut missing = 0;
         for n in 1..=crate::db::EPOCHS_MAX {
-            let Some(o) = crate::bucket::Bucket::get(&bucket, &crate::keys::epoch_name("global", n, &me)).await? else { break };
+            let Some(o) = crate::bucket::Bucket::get(&bucket, &crate::keys::epoch_name("global", n, &me)).await? else {
+                missing += 1;
+                if missing > GAPS_PASSED {
+                    break;
+                }
+                continue;
+            };
+            missing = 0;
             if let Some(key) = crate::kernel::open_sealed(&secret, &o.bytes).ok().and_then(|k| <[u8; 32]>::try_from(k).ok()) {
                 candidates.insert(n, key);
             }
