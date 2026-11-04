@@ -140,58 +140,53 @@ function fromService(a) {
 }
 
 /// Fresh numbers: every machine's AI Usage service reads its providers, and the newest read per account wins, on
-/// whatever machine saw it. Machines' and accounts' failures come back as rows saying why; the last reads stay shown
-/// with their age. `device` limits the read to one machine.
-async function refresh(ctx, b, id, device, now) {
+/// whatever machine saw it. A machine that couldn't answer is a problem only on the reads it gave before, which stay
+/// shown with their age and why; a provider no machine has shows nothing. `ask` is the one read of every machine this
+/// status shares: `{ answers }`, or `{ problem }` when none could be asked.
+async function refresh(b, id, ask, now) {
   const P = PROVIDERS[id];
   b.exec("delete from snapshots where session_used is null and weekly_used is null and monthly_used is null");
   const snap = await latest(b, id);
   const newest = snap.reduce((t, r) => Math.max(t, r.at), 0);
   if (snap.length && now - newest < FRESH) return snap.map((r) => ({ ...r, cached: true, now }));
-  try {
-    const answers = await ctx.sidecars["ai-usage"].usage({}, { device: device || "all" });
-    const errors = [];
-    const reads = [];
-    for (const [machine, answer] of Object.entries(answers || {})) {
-      if (answer?.error) {
-        errors.push({ provider: id, device: machine, error: String(answer.error), now });
-        continue;
-      }
-      for (const a of answer?.accounts || []) {
-        if (a.provider !== id) continue;
-        const out = fromService(a);
-        if (out.session.used == null && out.weekly.used == null && out.monthly.used == null && !a.error) continue;
-        reads.push({ machine, out });
-      }
+  const { answers, problem } = await ask();
+  if (problem) return snap.map((r) => ({ ...r, cached: true, stale: problem, now }));
+  const failed = {};
+  const reads = [];
+  for (const [machine, answer] of Object.entries(answers || {})) {
+    if (answer?.error) {
+      failed[machine] = `${machine}: ${String(answer.error).slice(0, 160)}`;
+      continue;
     }
-    if (!reads.length && errors.length) throw new Error(errors.map((e) => `${e.device}: ${e.error}`).join("; "));
-    const results = [];
-    const seen = new Set();
-    for (const { machine, out } of reads) {
-      // The same account read on two machines: the first answer wins, both were taken now.
-      const key = out.account || out.email || "";
-      if (seen.has(key)) continue;
-      seen.add(key);
-      const prev = await previous(b, id, out.account || out.email, now, out.session.resetsAt);
-      out.session.pace = paceFrom(out.session.used, out.session.resetsAt, P.sessionMins, prev && { at: prev.at, used: prev.used }, now);
-      out.weekly.pace = paceFrom(out.weekly.used, out.weekly.resetsAt, P.weeklyMins, null, now);
-      const active = out.active || reads.length === 1 ? 1 : 0;
-      b.exec("insert into snapshots (provider, device, at, source, confidence, session_used, session_resets, weekly_used, weekly_resets, monthly_used, monthly_resets, models, pace, note, account, active, disabled) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", [id, machine, now, out.source, out.confidence, out.session.used, out.session.resetsAt, out.weekly.used, out.weekly.resetsAt, out.monthly.used, out.monthly.resetsAt, JSON.stringify(out.models), JSON.stringify({ session: out.session.pace, weekly: out.weekly.pace }), (out.notes || [])[0] || null, out.account || null, active, out.disabled ? 1 : 0]);
-      results.push({ provider: id, device: machine, at: now, source: out.source, confidence: out.confidence, session_used: out.session.used, session_resets: out.session.resetsAt, session_resetText: out.session.resetText, weekly_used: out.weekly.used, weekly_resets: out.weekly.resetsAt, weekly_resetText: out.weekly.resetText, monthly_used: out.monthly.used, monthly_resets: out.monthly.resetsAt, models: out.models, pace: { session: out.session.pace, weekly: out.weekly.pace }, plan: out.plan, account: out.account || null, active: !!active, disabled: !!out.disabled, extra: out.extra, notes: out.notes || [], cached: false, now });
+    for (const a of answer?.accounts || []) {
+      if (a.provider !== id) continue;
+      const out = fromService(a);
+      if (out.session.used == null && out.weekly.used == null && out.monthly.used == null && !a.error) continue;
+      reads.push({ machine, out });
     }
-    b.exec("delete from snapshots where at < ?", [PRUNE()]);
-    // Rows that can't be told which account they were (reads from before accounts had labels) go once the service
-    // answers; until then they're better kept than blank.
-    if (reads.length) b.exec("delete from snapshots where provider = ? and account is null and at < ?", [id, now]);
-    // The writes land when this call returns, so the merge happens here: this pass's rows, the last read of each
-    // account it didn't see (a machine off, say), and each machine that couldn't answer at all.
-    const last = (r) => (r.account || "");
-    const kept = snap.filter((r) => !seen.has(last(r))).map((r) => ({ ...r, cached: true, now }));
-    return [...results, ...kept, ...errors].sort((x, y) => (y.active - x.active) || ((x.weekly_used ?? 0) - (y.weekly_used ?? 0)));
-  } catch (err) {
-    const problem = String(err?.message || err).slice(0, 160);
-    return snap.length ? snap.map((r) => ({ ...r, cached: true, stale: problem, now })) : [{ provider: id, error: problem, now }];
   }
+  const results = [];
+  const seen = new Set();
+  for (const { machine, out } of reads) {
+    // The same account read on two machines: the first answer wins, both were taken now.
+    const key = out.account || out.email || "";
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const prev = await previous(b, id, out.account || out.email, now, out.session.resetsAt);
+    out.session.pace = paceFrom(out.session.used, out.session.resetsAt, P.sessionMins, prev && { at: prev.at, used: prev.used }, now);
+    out.weekly.pace = paceFrom(out.weekly.used, out.weekly.resetsAt, P.weeklyMins, null, now);
+    const active = out.active || reads.length === 1 ? 1 : 0;
+    b.exec("insert into snapshots (provider, device, at, source, confidence, session_used, session_resets, weekly_used, weekly_resets, monthly_used, monthly_resets, models, pace, note, account, active, disabled) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", [id, machine, now, out.source, out.confidence, out.session.used, out.session.resetsAt, out.weekly.used, out.weekly.resetsAt, out.monthly.used, out.monthly.resetsAt, JSON.stringify(out.models), JSON.stringify({ session: out.session.pace, weekly: out.weekly.pace }), (out.notes || [])[0] || null, out.account || null, active, out.disabled ? 1 : 0]);
+    results.push({ provider: id, device: machine, at: now, source: out.source, confidence: out.confidence, session_used: out.session.used, session_resets: out.session.resetsAt, session_resetText: out.session.resetText, weekly_used: out.weekly.used, weekly_resets: out.weekly.resetsAt, weekly_resetText: out.weekly.resetText, monthly_used: out.monthly.used, monthly_resets: out.monthly.resetsAt, models: out.models, pace: { session: out.session.pace, weekly: out.weekly.pace }, plan: out.plan, account: out.account || null, active: !!active, disabled: !!out.disabled, extra: out.extra, notes: out.notes || [], cached: false, now });
+  }
+  b.exec("delete from snapshots where at < ?", [PRUNE()]);
+  // Rows that can't be told which account they were (reads from before accounts had labels) go once the service
+  // answers; until then they're better kept than blank.
+  if (reads.length) b.exec("delete from snapshots where provider = ? and account is null and at < ?", [id, now]);
+  // The writes land when this call returns, so the merge happens here: this pass's rows, and the last read of each
+  // account it didn't see (a machine off, say), saying why if its machine couldn't answer.
+  const kept = snap.filter((r) => !seen.has(r.account || "")).map((r) => ({ ...r, cached: true, now, ...(failed[r.device] ? { stale: failed[r.device] } : {}) }));
+  return [...results, ...kept].sort((x, y) => (y.active - x.active) || ((x.weekly_used ?? 0) - (y.weekly_used ?? 0)));
 }
 
 /// Pace only when it's news: a deficit, or a projection short of reset. Reserve is silent.
@@ -225,11 +220,12 @@ function alarm(p, now) {
 function section(reads, now) {
   const p = reads[0];
   const title = PROVIDERS[p.provider].title;
-  if (p.error) return `${title}: unavailable, ${p.error}`;
   const head = [title, p.account ? `${p.account}${reads.length > 1 ? ", in use" : ""}` : null, p.plan, p.device ? `seen on ${p.device}` : null].filter(Boolean).join(" · ");
-  const age = p.stale ? `last read ${ago(p.at, now)} (${p.stale})` : now - p.at > FRESH ? `read ${ago(p.at, now)}` : null;
+  const age = now - p.at > FRESH ? `read ${ago(p.at, now)}` : null;
+  // Why some reads are old, once: a machine that couldn't answer, or no machine asked.
+  const problems = [...new Set(reads.map((r) => r.stale).filter(Boolean))];
   const steered = steer(p.models);
-  const others = reads.slice(1).map((o) => `${o.account} ${o.weekly_used >= 100 ? `out, back ${resets(o.weekly_resets, now)}` : `${100 - (o.weekly_used ?? 0)}% weekly left`}${o.disabled ? ", not in rotation" : ""}`);
+  const others = reads.slice(1).map((o) => `${o.account} ${o.weekly_used >= 100 ? `out, back ${resets(o.weekly_resets, now)}` : `${100 - (o.weekly_used ?? 0)}% weekly left`}${o.disabled ? ", not in rotation" : ""}${o.stale ? `, read ${ago(o.at, now)}` : ""}`);
   return [
     head,
     windowText("Session", { used: p.session_used, resetsAt: p.session_resets, resetText: p.session_resetText, pace: p.pace?.session }, now),
@@ -240,11 +236,11 @@ function section(reads, now) {
     ...(p.notes || []).map((n) => `Note: ${n}`),
     others.length ? `Other accounts: ${others.join("; ")}` : null,
     age,
+    problems.length ? `Couldn't read it now: ${problems.join("; ")}` : null,
   ].filter(Boolean).join("\n");
 }
 
 function tripped(p) {
-  if (p.error) return null;
   const left = (u) => (u == null ? null : 100 - u);
   const sLeft = left(p.session_used), wLeft = left(p.weekly_used);
   const out = sLeft != null && (sLeft < 20 || p.pace?.session?.willLast === false);
@@ -256,7 +252,7 @@ function tripped(p) {
 /// every Claude account at once: their rows and which pool to spend, else nothing. Each is said once, when it starts.
 async function warnings(b, now, since) {
   // With several accounts, claude-swap moves to one with room: only all of them nearly out is news.
-  const low = (reads) => (reads.length && !reads.some((r) => !r.error && !tripped(r)) ? JSON.stringify(tripped(reads[0])) : null);
+  const low = (reads) => (reads.length && !reads.some((r) => !tripped(r)) ? JSON.stringify(tripped(reads[0])) : null);
   const out = [];
   for (const id of Object.keys(PROVIDERS)) {
     const reads = await latest(b, id);
@@ -314,24 +310,31 @@ export default {
         if (!b) throw new Error("your own data is on one of your devices: run it there");
         const now = ctx.now();
         const ids = provider === "all" ? Object.keys(PROVIDERS) : [provider];
-        const all = (await Promise.all(ids.map((id) => refresh(ctx, b, id, device, now)))).flat();
+        // One read of every machine for all the providers it asks, once any of them is older than FRESH.
+        let asked = null;
+        const ask = () => (asked ??= ctx.sidecars["ai-usage"].usage({}, { device: device || "all" }).then((answers) => ({ answers }), (err) => ({ problem: String(err?.message || err).slice(0, 160) })));
+        const all = (await Promise.all(ids.map((id) => refresh(b, id, ask, now)))).flat();
+        // Nothing to show because no machine could be asked is the one problem; nothing because none has a sign-in, none.
+        const problem = !all.length && asked ? (await asked).problem || null : null;
         if (format === "json") {
           return {
-            at: now,
+            at: now, problem,
             marks: Object.fromEntries(ids.map((id) => [id, markOf(id)])),
             providers: all.map((p) => ({
-              id: p.provider, title: PROVIDERS[p.provider].title, account: p.account || null, active: !!p.active, disabled: !!p.disabled, alarm: p.error ? null : alarm(p, now), plan: p.plan || null, source: p.source || null,
+              id: p.provider, title: PROVIDERS[p.provider].title, account: p.account || null, active: !!p.active, disabled: !!p.disabled, alarm: alarm(p, now), plan: p.plan || null, source: p.source || null,
               device: p.device || null, updatedAgo: p.at ? ago(p.at, now) : null,
-              error: p.error || null, stale: p.stale || null,
-              session: p.error ? null : { used: p.session_used, left: p.session_used == null ? null : 100 - p.session_used, resets: p.session_resets ? resets(p.session_resets, now) : null, countdown: p.session_resets ? countdown(p.session_resets, now) : null, pace: p.pace?.session?.summary || null, willLast: p.pace?.session?.willLast ?? null },
-              weekly: p.error ? null : { used: p.weekly_used, left: p.weekly_used == null ? null : 100 - p.weekly_used, resets: p.weekly_resets ? resets(p.weekly_resets, now) : null, countdown: p.weekly_resets ? countdown(p.weekly_resets, now) : null, pace: p.pace?.weekly?.summary || null, willLast: p.pace?.weekly?.willLast ?? null },
-              monthly: p.error || p.monthly_used == null ? null : { used: p.monthly_used, left: 100 - p.monthly_used, resets: p.monthly_resets ? resets(p.monthly_resets, now) : null, countdown: p.monthly_resets ? countdown(p.monthly_resets, now) : null },
+              stale: p.stale || null,
+              session: { used: p.session_used, left: p.session_used == null ? null : 100 - p.session_used, resets: p.session_resets ? resets(p.session_resets, now) : null, countdown: p.session_resets ? countdown(p.session_resets, now) : null, pace: p.pace?.session?.summary || null, willLast: p.pace?.session?.willLast ?? null },
+              weekly: { used: p.weekly_used, left: p.weekly_used == null ? null : 100 - p.weekly_used, resets: p.weekly_resets ? resets(p.weekly_resets, now) : null, countdown: p.weekly_resets ? countdown(p.weekly_resets, now) : null, pace: p.pace?.weekly?.summary || null, willLast: p.pace?.weekly?.willLast ?? null },
+              monthly: p.monthly_used == null ? null : { used: p.monthly_used, left: 100 - p.monthly_used, resets: p.monthly_resets ? resets(p.monthly_resets, now) : null, countdown: p.monthly_resets ? countdown(p.monthly_resets, now) : null },
               models: (p.models || []).map((m) => ({ name: m.name, used: m.used, left: m.used == null ? null : 100 - m.used, countdown: m.resetsAt ? countdown(m.resetsAt, now) : null })),
               extra: p.extra || null,
               steer: steer(p.models),
             })),
           };
         }
+        if (problem) return `Couldn't read your machines' AI plans: ${problem}`;
+        if (!all.length) return "No AI sign-ins on your machines.";
         return ids.map((id) => all.filter((p) => p.provider === id)).filter((r) => r.length).map((r) => section(r, now)).join("\n\n");
       },
     },
@@ -382,7 +385,6 @@ function meter(label, w) {
   return \`<div class="m"><span class="sub">\${one.esc(label)}</span><div class="bar"><i style="width:\${w.used}%;background:\${tone(w.used)}"></i></div><span class="p">\${w.used}%</span><span class="r">\${w.countdown ? "resets " + one.esc(w.countdown) : ""}</span></div>\`;
 }
 function read(p, several) {
-  if (p.error) return \`<div class="problem"><span class="s">⚠︎</span><div><b>Can't read \${one.esc(p.title)} here</b><div class="sub">\${one.esc(p.error)}</div></div></div>\`;
   const [team, email] = (p.account || "").split(" · ");
   const state = p.active && several ? "In use" : p.disabled ? "Not in rotation" : "";
   const name = p.account ? \`<div class="name"><b>\${one.esc(team)}</b><span class="sub">\${state}</span></div><div class="sub mail">\${one.esc(email || "")}</div>\` : "";
@@ -391,15 +393,20 @@ function read(p, several) {
   const alarm = p.alarm ? \`<div class="alarm" style="color:var(--\${p.alarm.tone})">\${one.esc(p.alarm.text)}</div>\` : "";
   return \`<div class="acct">\${name}\${meter("Session", p.session)}\${meter("Weekly", p.weekly)}\${meter("Monthly", p.monthly)}\${models}\${extra}\${alarm}</div>\`;
 }
+const problem = (title, why) => \`<div class="problem"><span class="s">⚠︎</span><div><b>\${one.esc(title)}</b><div class="sub">\${one.esc(why)}</div></div></div>\`;
 function tile(reads, mark) {
-  const p = reads.find((r) => !r.error) || reads[0];
+  const p = reads[0];
   const icon = mark && /^data:image\\/svg\\+xml,/.test(mark.image) ? \`<span class="app-icon drawn\${mark.kind === "icon" ? "" : " logo"}" style="--size:28px;background-image:url(\${one.esc(JSON.stringify(mark.image))})"></span>\` : "";
   const head = \`<header><h3 class="brand">\${icon}\${one.esc(p.title)}</h3><span class="sub">\${one.esc([p.plan, p.device, p.updatedAgo ? "updated " + p.updatedAgo : ""].filter(Boolean).join(" · "))}</span></header>\`;
-  return \`<div class="tile">\${head}\${reads.map((r) => read(r, reads.length > 1)).join("")}</div>\`;
+  // Reads a machine couldn't renew: one problem, on the tile they're in.
+  const stale = [...new Set(reads.map((r) => r.stale).filter(Boolean))];
+  const old = stale.length ? problem(\`Can't read \${p.title} now\`, stale.join("; ")) : "";
+  return \`<div class="tile">\${head}\${reads.map((r) => read(r, reads.length > 1)).join("")}\${old}</div>\`;
 }
 async function show() {
   const r = await one.call("status", { format: "json" });
-  if (!r.providers || !r.providers.length) return one.empty("No providers yet.");
+  if (r.problem) return \`<div class="tile">\${problem("Can't read your AI plans", r.problem)}</div>\`;
+  if (!r.providers || !r.providers.length) return one.empty("No AI sign-ins on your machines.");
   const ids = [...new Set(r.providers.map((p) => p.id))];
   return ids.map((id) => tile(r.providers.filter((p) => p.id === id), (r.marks || {})[id])).join("");
 }

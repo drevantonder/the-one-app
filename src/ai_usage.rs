@@ -84,10 +84,8 @@ pub fn call(_host: &Host, call: &Call) -> Result<Value> {
             "expired": a.expires_at.is_some_and(|at| at < now_ms()),
         })).collect::<Vec<_>>() })),
         "usage" => {
+            // A machine with no sign-ins has none to give: that's no problem.
             let accounts = discover();
-            if accounts.is_empty() {
-                bail!("no AI sign-ins on this machine (Claude Code, claude-swap, Codex or OpenCode Go)");
-            }
             // One thread per account: several providers' asks at once, none held up by another's.
             let readings = std::thread::scope(|s| {
                 let asked: Vec<_> = accounts.iter().map(|a| s.spawn(move || reading(a))).collect();
