@@ -771,8 +771,11 @@ fn run(args: Vec<String>) -> Result<()> {
         }
         ["services"] => {
             let state = get("/v1/state")?;
-            for s in state["install"]["devices"].as_array().into_iter().flatten() {
-                let installed = s["installed_services"].as_array().cloned().unwrap_or_default();
+            let all: Vec<Value> = state["install"]["devices"].as_array().cloned().unwrap_or_default();
+            for s in all.iter().filter(|s| s["service"].is_null()) {
+                let mut installed = s["installed_services"].as_array().cloned().unwrap_or_default();
+                // Its parts with keys of their own, as they say they are.
+                installed.extend(all.iter().filter(|p| p["device"] == s["key"]).flat_map(|p| p["installed_services"].as_array().cloned().unwrap_or_default()));
                 let off = s["off_services"].as_array().cloned().unwrap_or_default();
                 if installed.is_empty() && off.is_empty() {
                     continue;

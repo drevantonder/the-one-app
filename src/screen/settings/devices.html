@@ -91,8 +91,9 @@
     };
     const byKey = new Map();
     for (const d of devices.filter((d) => (d.roles || []).includes("compute"))) byKey.set(d.key, Object.assign(card(d.user, d.name), { node: d }));
-    // A service under the device it's part of.
-    for (const s of devices.filter((d) => d.service)) (byKey.get(s.device) || card(s.user, s.name)).services.push(s);
+    // A service under the device it's part of, while it's switched on there.
+    const off = (s) => (byKey.get(s.device)?.node?.off_services || []).some((o) => o.name === s.service);
+    for (const s of devices.filter((d) => d.service && !off(d))) (byKey.get(s.device) || card(s.user, s.name)).services.push(s);
     for (const c of clients) {
       if (c.passkey || BROWSER.test(c.name)) {
         browsers.push(c);
@@ -105,7 +106,8 @@
     }
     for (const c of cards) {
       const ends = [c.node, ...c.services].filter(Boolean);
-      c.keys = [...ends, ...c.clients].map((e) => e.key);
+      // Its oned last: removing it takes what's part of it, which goes first here, as a browser removes each itself.
+      c.keys = [...c.services, ...c.clients, c.node].filter(Boolean).map((e) => e.key);
       c.me = [...ends, ...c.clients].some((e) => e.me);
       c.online = ends.some((e) => e.online);
       c.runs = ends.length > 0;

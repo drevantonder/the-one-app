@@ -26,7 +26,9 @@ pub fn invoked() -> bool {
 /// This program, run as oned with `args`.
 pub fn command(args: &[&str]) -> std::io::Result<std::process::Command> {
     use std::os::unix::process::CommandExt;
-    let mut command = std::process::Command::new(std::env::current_exe()?);
+    // The path, not the program this process runs: an update may have replaced it.
+    let exe = std::env::current_exe()?.to_string_lossy().trim_end_matches(" (deleted)").to_string();
+    let mut command = std::process::Command::new(exe);
     command.arg0(name()).args(args);
     Ok(command)
 }
