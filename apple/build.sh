@@ -19,6 +19,8 @@ cp "$root/target/release/one" "$app/Contents/MacOS/$CONFIG_CLI"
 ln -sf "$CONFIG_CLI" "$app/Contents/MacOS/${CONFIG_CLI}d"
 mkdir -p "$app/Contents/Resources" && cp build/AppIcon.icns "$app/Contents/Resources/"
 plutil -replace CFBundleIconFile -string AppIcon "$app/Contents/Info.plist"
+# Only this build's launch agent: one an earlier build left would still be registered.
+rm -rf "$app/Contents/Library/LaunchAgents"
 mkdir -p "$app/Contents/Library/LaunchAgents"
 cat > "$app/Contents/Library/LaunchAgents/$label.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>

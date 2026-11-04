@@ -93,6 +93,8 @@ final class Mac {
         store.signedIn = Auth.signedIn
         store.startNode = NodeLauncher.start
         store.preferredDeviceName = Host.current().localizedName
+        // The Mac is a device of its own, its oned running whichever devices the window reaches.
+        Task { try? await NodeLauncher.start() }
     }
 
     /// Keeps the window in step with the node, as whoever is signed in.
