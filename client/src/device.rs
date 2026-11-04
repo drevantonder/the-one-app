@@ -322,6 +322,12 @@ impl Device {
     /// Closes its connections, until it's asked again: when its person signs out, which also forgets it was in.
     pub async fn close(&self) {
         let _ = std::fs::remove_file(self.dir.join("joined"));
+        self.disconnect().await;
+    }
+
+    /// Closes its connections, until it's asked again, still knowing it was in: when a program using it ends, so a
+    /// node isn't left holding a connection it counts against this device.
+    pub async fn disconnect(&self) {
         if let Some(client) = self.client.lock().await.take() {
             client.close().await;
         }

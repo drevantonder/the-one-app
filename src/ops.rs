@@ -897,7 +897,7 @@ fn mcp_file(v: &Value) -> Result<Value> {
         ensure!(bytes.len() <= MCP_FILE_LIMIT, "a file given as base64 is at most 1 MiB; give a file id or URL for a bigger one");
         (bytes, v["type"].as_str().or(v["mimeType"].as_str()).map(str::to_string), name)
     } else if let Some(id) = v["file"].as_str().or(v["blob"].as_str()) {
-        let mut resp = crate::to_node(crate::agent().get(format!("http://{}/v1/blobs/{id}", crate::addr()))).call().with_context(|| format!("{} isn't running here", one::config::NAME))?;
+        let mut resp = crate::to_node(crate::agent().get(format!("http://{}/v1/blobs/{id}", crate::addr()))).call().map_err(crate::unreached)?;
         ensure!(resp.status().is_success(), "no file {id} for you");
         (resp.body_mut().with_config().limit(FILE_LIMIT as u64).read_to_vec()?, v["type"].as_str().map(str::to_string), name)
     } else if let Some(url) = v["url"].as_str() {

@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde_json::{Value, json};
 
 fn read(path: &str) -> String {
-    std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(path)).unwrap_or_else(|e| panic!("{path}: {e}"))
+    std::fs::read_to_string(std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/..")).join(path)).unwrap_or_else(|e| panic!("{path}: {e}"))
 }
 
 /// A word made of letters, digits and `_`, at the start of `text`.
@@ -386,7 +386,7 @@ fn the_kernel_and_nodes_agree_on_keys_and_seals() {
     use data_encoding::BASE64URL_NOPAD as B64U;
     use one::kernel;
 
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("kernel");
+    let root = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/..")).join("kernel");
     let files = ["shared/crypto.js", "shared/token.js", "web/members.js", "test/formats.js"].map(|p| (p.to_string(), std::fs::read(root.join(p)).unwrap()));
     let dir = crate::temp("formats");
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -689,7 +689,7 @@ fn every_client_makes_its_own_screens_from_what_it_ships() {
         assert!(read(path).contains(makes), "{path} doesn't make the client's own screens itself");
     }
     // And none asks a node for one, which nodes answer only for clients built before this.
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let root = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/.."));
     let mut sources = vec![];
     let mut dirs = vec![root.join("kernel/web"), root.join("android/app/src"), root.join("apple"), root.join("windows")];
     while let Some(dir) = dirs.pop() {
@@ -818,7 +818,7 @@ fn an_apps_widget_runs_nothing_on_the_clients_own_screens() {
 #[test]
 fn every_program_on_a_machine_sends_its_node_the_token_where_it_looks() {
     let go = read("sidecars/agent-devices/node.go");
-    for dir in std::fs::read_dir(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("sidecars")).unwrap().flatten().filter(|d| d.path().join("main.go").exists()) {
+    for dir in std::fs::read_dir(std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/..")).join("sidecars")).unwrap().flatten().filter(|d| d.path().join("main.go").exists()) {
         let name = dir.file_name().to_string_lossy().to_string();
         assert_eq!(read(&format!("sidecars/{name}/node.go")), go, "sidecars/{name}/node.go differs from agent-devices'");
         assert!(read(&format!("sidecars/{name}/main.go")).contains("nodeAddr()"), "sidecars/{name} asks the node without its token");
@@ -994,7 +994,7 @@ fn a_client_takes_whos_who_only_from_the_installs_signed_entries() {
 /// what can't be undone, so a missing one is a write passed off as nothing, or a read treated as one.
 #[test]
 fn every_built_in_apps_operation_says_whether_it_only_reads() {
-    let apps: Vec<String> = std::fs::read_dir("apps").unwrap().filter_map(|e| Some(e.ok()?.path().join("app.js"))).filter(|p| p.is_file()).map(|p| std::fs::canonicalize(p).unwrap().display().to_string()).collect();
+    let apps: Vec<String> = std::fs::read_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/../apps")).unwrap().filter_map(|e| Some(e.ok()?.path().join("app.js"))).filter(|p| p.is_file()).map(|p| std::fs::canonicalize(p).unwrap().display().to_string()).collect();
     assert!(apps.len() > 10, "the test reads apps/*/app.js: {apps:?}");
     let script = r#"const bad = [];
         for (const p of process.argv.slice(1)) {

@@ -1,0 +1,44 @@
+# The `one` program: the CLI, MCP and the node it serves (src/main.rs and the modules beside it). A package of its own,
+# not the root's, since it's a client too: on a computer with no node it asks its person's nodes as a device of theirs,
+# through `one-client`, which depends on `one` itself, and Cargo allows no package to depend on its own dependent.
+[package]
+name = "one-cli"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+autotests = false
+
+[[bin]]
+name = "one"
+path = "../src/main.rs"
+doctest = false
+
+# The tests are one binary, here so they can run the program (CARGO_BIN_EXE_one) and `cargo test` builds it.
+[[test]]
+name = "main"
+path = "../tests/main.rs"
+
+[dependencies]
+one = { path = ".." }
+one-client = { path = "../client" }
+anyhow = "1"
+axum = "0.8"
+data-encoding = "2"
+jiff = "0.2"
+libc = "0.2"
+rand = "0.8"
+serde_json = "1"
+sha2 = "0.11"
+ssh-key = { version = "0.6", default-features = false, features = ["std", "ed25519"] }
+tokio = { version = "1", features = ["full", "test-util"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+ureq = { version = "3", features = ["json"] }
+
+[dev-dependencies]
+blake3 = "1"
+ciborium = "0.2"
+ed25519-dalek = "3"
+iroh = { version = "=1.4.1", default-features = false, features = ["tls-ring", "portmapper"] }
+rusqlite = { version = "0.41", features = ["bundled", "hooks", "limits", "serialize"] }

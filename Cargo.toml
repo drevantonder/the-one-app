@@ -1,5 +1,7 @@
 [workspace]
-members = [".", "serverless", "client", "client/ffi"]
+members = [".", "cli", "serverless", "client", "client/ffi"]
+# `cargo build` and `cargo test` here build the program too (cli/), as target/debug/one.
+default-members = [".", "cli"]
 
 [package]
 name = "one"
@@ -7,16 +9,13 @@ version = "0.1.0"
 edition = "2024"
 license = "MIT"
 publish = false
-# The tests are one binary (tests/main.rs), so the crate links into one, not one per file.
+# The program and its tests are cli/'s, which uses this crate.
+autobins = false
 autotests = false
 
 # It has no doctests: rustdoc would build the crate again on every `cargo test` to find none.
 [lib]
 doctest = false
-
-[[test]]
-name = "main"
-path = "tests/main.rs"
 
 # `node`, the node on a machine; without it, only what the serverless node (serverless/) and the native apps' client
 # (client/) share with it: entries, members, logs, databases and keys.
@@ -130,6 +129,3 @@ panic = "abort"
 incremental = false
 strip = false
 
-[dev-dependencies]
-# The tests ask a node as a client device does.
-one-client = { path = "client" }

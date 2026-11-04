@@ -164,8 +164,19 @@ fn changes(input: &Value) -> anyhow::Result<Value> {
         std::thread::sleep(WAIT);
     } else {
         anyhow::ensure!(resp.status().is_success(), "the node's events didn't open ({})", resp.status());
-        // The wait ends the stream, as an error reading it.
-        for line in std::io::BufReader::new(resp.into_body().into_reader()).lines().map_while(Result::ok) {
+        // Read beside the wait, which ends it: as a device, its stream has no timeout of its own, and the thread reading
+        // it ends at its next line (a keep-alive at most 15 seconds on), once nobody listens.
+        let (tx, lines) = std::sync::mpsc::channel();
+        let body = resp.into_body().into_reader();
+        std::thread::spawn(move || {
+            for line in std::io::BufReader::new(body).lines().map_while(Result::ok) {
+                if tx.send(line).is_err() {
+                    break;
+                }
+            }
+        });
+        let until = std::time::Instant::now() + WAIT;
+        while let Ok(line) = lines.recv_timeout(until.saturating_duration_since(std::time::Instant::now())) {
             let Some(event) = line.strip_prefix("data:").and_then(|d| serde_json::from_str::<Value>(d.trim()).ok()) else { continue };
             let named = event["apps"].as_array().map(|a| a.iter().filter_map(Value::as_str).collect::<Vec<_>>()).unwrap_or_default();
             if event["type"] == "changed" && (named.is_empty() || named.iter().any(|a| apps.contains(a))) {

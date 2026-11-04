@@ -2742,7 +2742,6 @@ dependencies = [
  "jsonc-parser",
  "libc",
  "md-5",
- "one-client",
  "rand 0.8.8",
  "ring",
  "rusqlite",
@@ -2759,6 +2758,32 @@ dependencies = [
  "tracing-subscriber",
  "ureq",
  "webpki-roots",
+]
+
+[[package]]
+name = "one-cli"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "blake3",
+ "ciborium",
+ "data-encoding",
+ "ed25519-dalek 3.0.0",
+ "iroh",
+ "jiff",
+ "libc",
+ "one",
+ "one-client",
+ "rand 0.8.8",
+ "rusqlite",
+ "serde_json",
+ "sha2 0.11.1",
+ "ssh-key",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "ureq",
 ]
 
 [[package]]

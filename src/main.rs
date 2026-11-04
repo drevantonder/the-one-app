@@ -7,6 +7,7 @@ use one::skills::Mode;
 use one::{api, node::Node};
 use serde_json::{Map, Value, json};
 
+mod client_device;
 mod code;
 mod mcp_apps;
 mod ops;
@@ -20,8 +21,10 @@ fn every_command() -> String {
   {CLI} serve                          run this machine as one of your devices
   {CLI} status                         this device, and the people, groups and devices in {YOURS}
   {CLI} sign-in [--address <url>]      sign this machine in, as you: approve its code by signing in on any of
-                                       your devices; {CLI} and {CLI} mcp here then act as you
-  {CLI} sign-out                       sign this machine out
+                                       your devices; {CLI} and {CLI} mcp here then act as you. Where {NAME} doesn't
+                                       run, this computer becomes one of your devices, once you approve its next
+                                       code too, and asks your devices for everything
+  {CLI} sign-out                       sign this machine out, and take it out of your devices if it's one
   {CLI} create <name> --as <your name> [--user <id>]
                                        create an install, with you as its first admin (--user: who you were in one
                                        it replaces, so your sign-in is still yours)
@@ -237,7 +240,9 @@ fn addr() -> String {
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    if let Err(err) = run(args) {
+    let ran = run(args);
+    client_device::end();
+    if let Err(err) = ran {
         eprintln!("{CLI}: {err:#}");
         std::process::exit(ops::exit_code(&err));
     }
@@ -281,10 +286,15 @@ fn run(args: Vec<String>) -> Result<()> {
             serve(flags.contains_key("try"), &args)?
         }
         ["sign-in"] => sign_in(&flags)?,
-        ["sign-out"] => match one::sign_in::sign_out()? {
-            true => println!("Signed out: {CLI} on this machine no longer acts as you."),
-            false => println!("This machine isn't signed in."),
-        },
+        ["sign-out"] => {
+            // A device takes itself out of its person's devices first, while its sign-in still says who it is.
+            let device = client_device::sign_out();
+            match one::sign_in::sign_out()? || device {
+                true if device => println!("Signed out: this computer is no longer one of your devices, and {CLI} here no longer acts as you."),
+                true => println!("Signed out: {CLI} on this machine no longer acts as you."),
+                false => println!("This machine isn't signed in."),
+            }
+        }
         ["mcp"] => mcp(if flags.contains_key("code") { Mode::Code } else { Mode::All })?,
         ["run", file] => {
             let script = match *file {
@@ -830,7 +840,7 @@ fn run(args: Vec<String>) -> Result<()> {
             println!("{}", request(agent().post(format!("http://{}/v1/blobs", addr())).send(&bytes[..]))?["blob"].as_str().unwrap_or(""));
         }
         ["file" | "blob", "get", hash, file] => {
-            let mut resp = agent().get(format!("http://{}/v1/blobs/{hash}", addr())).call().with_context(|| format!("{NAME} isn't running here: start it with {CLI} serve"))?;
+            let mut resp = agent().get(format!("http://{}/v1/blobs/{hash}", addr())).call().map_err(unreached)?;
             if !resp.status().is_success() {
                 bail!("{}", resp.body_mut().read_json::<Value>()?["error"].as_str().unwrap_or("failed"));
             }
@@ -980,7 +990,14 @@ fn parse(args: &[String]) -> (Vec<String>, Map<String, Value>) {
 
 /// Whether a device runs here, and which install it's in, for the bare command.
 fn connection() -> String {
-    let Ok(state) = get("/v1/state") else { return format!("{NAME} isn't running here: start it with {CLI} serve.") };
+    let state = match get("/v1/state") {
+        Ok(state) => state,
+        Err(err) if client_device::active() => return format!("This computer is one of your devices, but {err:#}."),
+        Err(_) => return format!("{}.", client_device::not_here()),
+    };
+    if let Some(said) = client_device::said(&state) {
+        return format!("Connected as {said}. {CLI} status shows your devices; {CLI} apps what you can run.");
+    }
     let device = state["device"]["name"].as_str().unwrap_or("this device");
     let i = &state["install"];
     if i.is_null() {
@@ -992,12 +1009,14 @@ fn connection() -> String {
     format!("Connected to {install} as {me}, on {device}{ready}. {CLI} status shows its devices; {CLI} apps what you can run.")
 }
 
+/// An HTTP client for this machine's node, as one of its own programs; or, where none runs and this computer is a
+/// device of its person, for their nodes, over iroh (`client_device::instead`).
 fn agent() -> ureq::Agent {
-    api::agent()
+    ureq::Agent::config_builder().http_status_as_error(false).middleware(client_device::instead).middleware(api::as_this_machine).build().into()
 }
 
 fn request(resp: Result<ureq::http::Response<ureq::Body>, ureq::Error>) -> Result<Value> {
-    let mut resp = resp.with_context(|| format!("{NAME} isn't running here: start it with {CLI} serve"))?;
+    let mut resp = resp.map_err(unreached)?;
     let refused = matches!(resp.status().as_u16(), 401 | 403);
     let body: Value = resp.body_mut().read_json()?;
     if let Some(err) = body.get("error") {
@@ -1011,6 +1030,14 @@ fn request(resp: Result<ureq::http::Response<ureq::Body>, ureq::Error>) -> Resul
         });
     }
     Ok(body)
+}
+
+/// Why a request to this machine's node, or to its person's as their device, got no answer, saying what to do.
+fn unreached(err: ureq::Error) -> anyhow::Error {
+    match client_device::active() {
+        true => anyhow::anyhow!("{err}"),
+        false => anyhow::Error::new(err).context(client_device::not_here()),
+    }
 }
 
 thread_local! {
@@ -1038,6 +1065,8 @@ fn to_node<B>(r: ureq::RequestBuilder<B>) -> ureq::RequestBuilder<B> {
     let token = match SIGNED_IN.with(|t| t.borrow().clone()) {
         Some(token) => Some(token),
         None if IN_NODE.load(std::sync::atomic::Ordering::Relaxed) => None,
+        // A device asks as its own key: its sign-in is only for asking to be let in.
+        None if client_device::active() => None,
         None => one::sign_in::token().unwrap_or_else(|err| {
             static SAID: std::sync::Once = std::sync::Once::new();
             SAID.call_once(|| eprintln!("{err:#}"));
@@ -1054,6 +1083,8 @@ fn to_node<B>(r: ureq::RequestBuilder<B>) -> ureq::RequestBuilder<B> {
 fn sign_in(flags: &Map<String, Value>) -> Result<()> {
     let address = match flags.get("address").and_then(Value::as_str) {
         Some(a) => a.to_string(),
+        // With no node here, it's the address it was signed in at before, or the one given.
+        None if !client_device::node_here() => one::sign_in::kept().map(|k| k.address).with_context(|| format!("{NAME} isn't running on this computer, so it signs in as one of your devices: give {YOURS}'s address, {CLI} sign-in --address https://…"))?,
         None => {
             let state = request(agent().get(format!("http://{}/v1/state", addr())).call())?;
             state["install"]["settings"]["address"].as_str().context(format!("this install has no address to sign in at yet: give one with --address, or an admin sets it with {CLI} kernel use"))?.to_string()
@@ -1066,9 +1097,16 @@ fn sign_in(flags: &Map<String, Value>) -> Result<()> {
         println!("It's open in your browser here.");
     }
     one::sign_in::finish(started)?;
+    if client_device::node_here() {
+        let state = get("/v1/state")?;
+        let me = state["user"]["name"].as_str().unwrap_or("you");
+        println!("Signed in as {me}. {CLI} and {CLI} mcp on this machine act as you until {CLI} sign-out.");
+        return Ok(());
+    }
+    client_device::join(&address)?;
     let state = get("/v1/state")?;
     let me = state["user"]["name"].as_str().unwrap_or("you");
-    println!("Signed in as {me}. {CLI} and {CLI} mcp on this machine act as you until {CLI} sign-out.");
+    println!("\nSigned in as {me}: {} is one of your devices now. {CLI} and {CLI} mcp here act as you, on your devices, until {CLI} sign-out.", one::sign_in::hostname());
     Ok(())
 }
 
@@ -1090,7 +1128,10 @@ fn unsigned_post(path: &str, body: Value) -> Result<Value> {
 
 fn status(state: &Value) {
     let device = &state["device"];
-    println!("{} ({}){}", device["name"].as_str().unwrap_or(""), &device["key"].as_str().unwrap_or("")[..8], if device["ready"] == true { "" } else { ", not ready yet" });
+    match client_device::said(state) {
+        Some(said) => println!("{said}"),
+        None => println!("{} ({}){}", device["name"].as_str().unwrap_or(""), &device["key"].as_str().unwrap_or("")[..8], if device["ready"] == true { "" } else { ", not ready yet" }),
+    }
     let i = &state["install"];
     if i.is_null() {
         println!("\nNot in {YOURS} yet: {CLI} join <code> joins it with a pairing code, or {CLI} create <name> --as <your name> starts a new one.");
@@ -1115,7 +1156,8 @@ fn status(state: &Value) {
     println!("\nDevices");
     for s in i["devices"].as_array().into_iter().flatten() {
         let dot = if s["online"] == true { "●" } else { "○" };
-        let here = if s["here"] == true { " (this one)" } else { "" };
+        // As a device, the node that answered is "here" to itself, not to this computer.
+        let here = if s["here"] == true && client_device::me().is_none() { " (this one)" } else { "" };
         let serves = if s["serves_me"] == true { "" } else { ", doesn't run yours" };
         let build = s["build"].as_str().map(|b| format!("  {b}")).unwrap_or_default();
         // A service endpoint is named for its machine; a person reads it as its service on that machine.
@@ -1131,7 +1173,8 @@ fn status(state: &Value) {
         for c in &clients {
             // A phone keeps no log and holds no sessions: say when it last asked this device, not that it's offline.
             let asked = c["asked"].as_u64().map(|t| format!(", asked here {}", ago(t))).unwrap_or_default();
-            println!("  ▯ {}  {}{asked}", c["name"].as_str().unwrap_or(""), name(c["user"].as_str().unwrap_or("")));
+            let here = if client_device::me().is_some_and(|(_, key)| c["key"] == key) { " (this one)" } else { "" };
+            println!("  ▯ {}{here}  {}{asked}", c["name"].as_str().unwrap_or(""), name(c["user"].as_str().unwrap_or("")));
         }
     }
 }

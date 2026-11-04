@@ -23,10 +23,10 @@ fn files() -> Vec<(String, Vec<u8>)> {
             }
         }
     }
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("kernel");
+    let root = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/..")).join("kernel");
     let mut out = Vec::new();
     walk(&root, &root, &mut out);
-    let screen = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/screen");
+    let screen = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/..")).join("src/screen");
     let mut kit = Vec::new();
     walk(&screen, &screen, &mut kit);
     out.extend(kit.into_iter().map(|(path, bytes)| (format!("web/screen/{path}"), bytes)));
@@ -1029,7 +1029,7 @@ fn the_web_client_imports_each_script_by_its_content() {
 /// send out. Built in a target folder of its own, kept between runs, so this test's cargo never waits on the one running
 /// it: → its modules (`serverless::modules_from`).
 pub(crate) fn serverless_node() -> Vec<(String, &'static str, Vec<u8>)> {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let root = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/.."));
     let target = root.join("target/serverless-test");
     let out = std::process::Command::new(std::env::var("CARGO").unwrap_or_else(|_| "cargo".into()))
         .args(["build", "-q", "--release", "-p", "one-serverless", "--target", "wasm32-unknown-unknown", "--target-dir"])
