@@ -11,17 +11,22 @@ struct AppScreen: View {
     var settings = false
     /// For a screen in a sheet: closes it, with what the screen gave `one.close`.
     var dismiss: ((Any?) -> Void)?
+    /// Developer's panel docked under a Mac's screen: no title or button of its own.
+    var docked = false
     @State private var title: String?
     @State private var loaded: Bool
+    /// When it showed, for Developer's panel to tell which requests were its own.
+    @State private var shown = Date()
     @State private var failure: String?
     /// When the node couldn't be reached, so the screen shows its last copy, until it answers again.
     @State private var offline: Offline?
     /// Bumped by Try Now, for the web view to try the node again at once.
     @State private var tries = 0
 
-    init(route: ScreenRoute, settings: Bool = false, dismiss: ((Any?) -> Void)? = nil) {
+    init(route: ScreenRoute, settings: Bool = false, docked: Bool = false, dismiss: ((Any?) -> Void)? = nil) {
         self.route = route
         self.settings = settings
+        self.docked = docked
         self.dismiss = dismiss
         // Back to a screen left a moment ago: it's there at once, as it was.
         let kept = dismiss == nil ? KeptScreens.peek(.init(route: route, settings: settings)) : nil
@@ -30,6 +35,67 @@ struct AppScreen: View {
     }
 
     var body: some View {
+        if docked {
+            web
+        } else {
+            #if os(macOS)
+            // Developer's panel, in Developer mode and once opened, under the screen: it stays open from screen to screen.
+            GeometryReader { geo in
+                VStack(spacing: 0) {
+                    web
+                    if store.developer && store.devtoolsOpen {
+                        Divider()
+                        AppScreen(route: devtools, settings: true, docked: true) { _ in store.devtoolsOpen = false }
+                            .id(devtools)
+                            .frame(height: min(440, geo.size.height * 0.45))
+                    }
+                }
+            }
+            .wholeTitle(title ?? defaultTitle)
+            .toolbar { developerButton }
+            #else
+            web
+                .wholeTitle(title ?? defaultTitle)
+                .toolbar { developerButton }
+            #endif
+        }
+    }
+
+    /// The bar's </> in Developer mode, on every screen but Developer's own: it docks Developer's panel under a Mac's
+    /// screen, and slides it up over an iPhone's.
+    @ToolbarContentBuilder private var developerButton: some ToolbarContent {
+        if store.developer && !(settings && route.screen == "devtools") {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    #if os(macOS)
+                    store.devtoolsOpen.toggle()
+                    #else
+                    Task { _ = await store.present(.setting("devtools", params: devtools.params)) }
+                    #endif
+                } label: {
+                    Text("</>").font(.system(.body, design: .monospaced).weight(.semibold))
+                }
+                .help("Developer")
+                .accessibilityLabel("Developer")
+            }
+        }
+    }
+
+    /// Developer's panel (src/screen/devtools.html), told the screen in front: an app's screen's app, screen and title, and
+    /// for the client's own, its title and since when it showed.
+    private var devtools: ScreenRoute {
+        let since = Int(shown.timeIntervalSince1970 * 1000)
+        let told = settings ? ["title": devtoolsTitle, "since": since] as [String: Any] : ["app": route.app, "screen": route.screen, "title": defaultTitle]
+        return ScreenRoute(app: "", screen: "devtools", params: Store.params(told))
+    }
+
+    private var devtoolsTitle: String {
+        guard route.screen == "pages" else { return defaultTitle }
+        let scope = (try? JSONSerialization.jsonObject(with: Data(route.params.utf8)) as? [String: Any])?["scope"] as? String
+        return scope == "settings" ? String(localized: "Settings") : scope.flatMap { store.page($0)?.title } ?? ""
+    }
+
+    private var web: some View {
         ScreenWebView(route: route, settings: settings, dismiss: dismiss, store: store, title: $title, loaded: $loaded, failure: $failure, offline: $offline, tries: tries)
             .opacity(loaded ? 1 : 0)
             .animation(.easeOut(duration: 0.15), value: loaded)
@@ -70,17 +136,16 @@ struct AppScreen: View {
             // Content fades out under the toolbar, as a native scroll view's does.
             .mask {
                 VStack(spacing: 0) {
-                    LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom).frame(height: 12)
+                    LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom).frame(height: docked ? 0 : 12)
                     Color.black
                 }
             }
             #endif
-            .wholeTitle(title ?? defaultTitle)
     }
 
     private var defaultTitle: String {
         // A page names itself.
-        if settings { return route.screen == "pages" ? "" : store.settingsItem(route.screen)?.title ?? String(localized: "Settings") }
+        if settings { return route.screen == "devtools" ? String(localized: "Developer") : route.screen == "pages" ? "" : store.settingsItem(route.screen)?.title ?? String(localized: "Settings") }
         let app = store.app(route.app)
         return app?.screens?.first { $0.name == route.screen }?.title ?? app?.label ?? ""
     }
@@ -347,7 +412,9 @@ private struct ScreenWebView: Representable {
             switch type {
             case "developer":
                 do {
-                    return (try await DeviceClient.shared.developer(body["on"] as? Bool), nil)
+                    let on = try await DeviceClient.shared.developer(body["on"] as? Bool)
+                    store.developer = on
+                    return (on, nil)
                 } catch {
                     return (nil, error.localizedDescription)
                 }

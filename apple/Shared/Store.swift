@@ -117,6 +117,12 @@ final class Store {
     /// The iPhone's current page: a scope.
     var current = "user"
     var sheet: Sheet?
+    /// Developer mode, on this device (Settings › Developer): the bar's </> shows only in it.
+    var developer = false
+    /// The Mac's Developer panel, docked under the screen in front: it stays open from screen to screen until closed.
+    var devtoolsOpen = UserDefaults.standard.bool(forKey: "devtoolsOpen") {
+        didSet { UserDefaults.standard.set(devtoolsOpen, forKey: "devtoolsOpen") }
+    }
     #if os(iOS)
     /// Screens slid up over the others, by the bridge's `open` with `sheet`, each over the one before.
     var screenSheets: [ScreenSheet] = []
@@ -389,7 +395,10 @@ final class Store {
         self.state = state
         arrangements = state.arrangements ?? [:]
         phase = .ready
-        if first, signedIn { await renameIfHostname() }
+        if first, signedIn {
+            developer = (try? await DeviceClient.shared.developer(nil)) ?? developer
+            await renameIfHostname()
+        }
         if first || arrived || apps.isEmpty || regrouped { await refreshApps(early: await early?.value) }
     }
 
