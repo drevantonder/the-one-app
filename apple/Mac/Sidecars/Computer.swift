@@ -186,10 +186,11 @@ final class ComputerUse {
     }
 
     /// Whether iPhone Mirroring is open, where it is, and when it started — so Computer Use can show it as a tile.
-    func mirrorStatus() async -> [String: Any] {
+    func mirrorStatus() async -> Data {
         let running = NSWorkspace.shared.runningApplications.contains { $0.bundleIdentifier == "com.apple.iPhoneMirroring" }
         let frame = Mirroring.windowFrame()
-        return ["running": running, "title": frame?.title, "bounds": frame.map { ["x": $0.frame.minX, "y": $0.frame.minY, "w": $0.frame.width, "h": $0.frame.height] } as Any]
+        let status: [String: Any] = ["running": running, "title": frame?.title ?? NSNull(), "bounds": frame.map { ["x": $0.frame.minX, "y": $0.frame.minY, "w": $0.frame.width, "h": $0.frame.height] } ?? NSNull()]
+        return (try? JSONSerialization.data(withJSONObject: status)) ?? Data("{}".utf8)
     }
 
     /// Open iPhone Mirroring if it isn't already; pairing happens on the phone, not here.
