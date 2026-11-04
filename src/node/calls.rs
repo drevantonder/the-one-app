@@ -38,20 +38,43 @@ impl Node {
         let mut why = Vec::new();
         for device in self.candidates(&req, &me)? {
             let started = Instant::now();
+            let name = self.name_of(&device);
+            // Each device tried, for a trace: how long it took, and why the next was tried.
+            let tried = |result: &str, more: Value| {
+                let mut step = json!({ "step": "device", "device": name, "app": req.app, "op": req.op, "result": result });
+                if let (Value::Object(step), Value::Object(more)) = (&mut step, more) {
+                    step.extend(more);
+                }
+                trace::note(step, started.elapsed());
+            };
             let reply = match device == self.0.id {
                 // Keys it lacks are its caller's to hand this device, which they were sealed to: no other runs it.
-                true => Ok(self.run_or_need(&req, &me).await?),
+                true => match self.run_or_need(&req, &me).await {
+                    Ok(reply) => Ok((reply, None)),
+                    Err(need) => {
+                        tried("needs keys", json!({ "here": true }));
+                        return Err(need.into());
+                    }
+                },
                 false => self.ask_device(device, &req, &me).await,
             };
-            let name = self.name_of(&device);
+            let here = device == self.0.id;
             match reply {
-                Ok(Reply::Ok(v)) => {
+                Ok((Reply::Ok(v), theirs)) => {
+                    tried("ran", json!({ "here": here, "trace": theirs }));
                     let _ = self.with(|i| Ok(i.nearest.insert(device, started.elapsed())));
                     return Ok(v);
                 }
-                Ok(Reply::Error(e)) => bail!("{e}"),
-                Ok(Reply::Elsewhere(w)) => why.push(format!("{name}: {w}")),
+                Ok((Reply::Error(e), theirs)) => {
+                    tried("failed", json!({ "here": here, "trace": theirs }));
+                    bail!("{e}")
+                }
+                Ok((Reply::Elsewhere(w), theirs)) => {
+                    tried("elsewhere", json!({ "here": here, "why": w, "trace": theirs }));
+                    why.push(format!("{name}: {w}"))
+                }
                 Err(err) => {
+                    tried(if err.is::<net::NotThere>() { "unreachable" } else if err.to_string() == "timed out" { "no answer" } else { "failed" }, json!({}));
                     let _ = self.with(|i| Ok(i.nearest.insert(device, Duration::MAX)));
                     why.push(format!("{name}: {err:#}"));
                 }
@@ -72,7 +95,7 @@ impl Node {
         for device in self.candidates(&req, &me)? {
             let reply = match device == self.0.id {
                 true => Ok(self.run(&req, &me).await),
-                false => self.ask_device(device, &req, &me).await,
+                false => self.ask_device(device, &req, &me).await.map(|(reply, _)| reply),
             };
             let answer = match reply {
                 Ok(Reply::Ok(v)) => v,
@@ -145,7 +168,8 @@ impl Node {
     }
 
     /// Asks another device to run a call: a sign-in's with the keys its caller handed this device, sealed to that one.
-    pub(super) async fn ask_device(&self, device: Key, req: &CallRequest, me: &Caller) -> Result<Reply> {
+    /// → its reply, and what it did, if this request is being traced.
+    pub(super) async fn ask_device(&self, device: Key, req: &CallRequest, me: &Caller) -> Result<(Reply, Option<Value>)> {
         // A sign-in's token goes along, with the keys it was handed: to a service only if it serves everyone, which
         // checks it itself, and never keys. A call handed keys with no sign-in passes on its keys alone (below), and
         // standing work, kept by its grant here, passes on none.
@@ -185,8 +209,9 @@ impl Node {
         {
             request["keys"] = json!(keys);
         }
-        let reply = self.ask(device, request, self.limit(req).await + Duration::from_secs(5)).await?;
-        Ok(Reply::from_json(reply))
+        let mut reply = self.ask(device, request, self.limit(req).await + Duration::from_secs(5)).await?;
+        let theirs = reply.get_mut("trace").map(Value::take).filter(Value::is_object);
+        Ok((Reply::from_json(reply), theirs))
     }
 
     /// Runs a call here, for `me`, or says why it can't.
@@ -220,7 +245,11 @@ impl Node {
 
     pub(super) async fn run_here(&self, req: &CallRequest, me: &Caller, limit: Duration) -> Result<Reply> {
         let input = if req.input.is_null() { json!({}) } else { req.input.clone() };
+        let reading = Instant::now();
         self.read_callers_logs(me).await?;
+        if reading.elapsed() >= Duration::from_millis(1) {
+            trace::note(json!({ "step": "logs" }), reading.elapsed());
+        }
         if req.app == members::APP {
             return self.node_op(&req.op, &input, me).await.map(Reply::Ok);
         }
@@ -278,8 +307,10 @@ impl Node {
         ctx.from = req.from.clone();
         let granted = self.grant(&req.app, me, &mut ctx, req.depth);
         // Just under the call's own limit, so a call that's stopped is recorded first.
+        let running = Instant::now();
         let ran = tokio::time::timeout(limit - Duration::from_secs(1), async {
             let mut outcome = self.0.apps.call(&req.app, &req.op, input, &ctx, limit).await?;
+            trace::note(json!({ "step": "run", "app": req.app, "op": req.op }), running.elapsed());
             self.write_appends(&req.app, std::mem::take(&mut outcome.appends), &scopes, me, req.from.as_deref()).await?;
             anyhow::Ok(outcome)
         })
@@ -605,7 +636,7 @@ impl Node {
     pub(super) fn grant(&self, app: &str, caller: &Caller, ctx: &mut Context, depth: u32) -> Granted {
         let token = hex(&rand::random::<[u8; 32]>());
         let scopes = ctx.scopes.iter().filter_map(|s| Scope::parse(&s.id).ok()).collect();
-        let grant = Grant { app: app.to_string(), caller: caller.clone(), scopes, read_only: ctx.read_only, puts: Vec::new(), caught_up: Vec::new(), depth, from: ctx.from.clone() };
+        let grant = Grant { app: app.to_string(), caller: caller.clone(), scopes, read_only: ctx.read_only, puts: Vec::new(), caught_up: Vec::new(), depth, from: ctx.from.clone(), trace: trace::current() };
         self.0.grants.lock().unwrap().insert(token.clone(), grant);
         ctx.token = token.clone();
         Granted(self.clone(), token)
@@ -741,14 +772,26 @@ impl Node {
                 let scope = Scope::parse(req["scope"].as_str().unwrap_or(""))?;
                 ensure!(grant.scopes.contains(&scope), "the call didn't name {scope}");
                 let params = req["params"].as_array().cloned().unwrap_or_default();
-                let (db, bucket) = self.call_database(&grant.caller, &scope, &grant.app, DATABASE, None).await?;
-                let mut db = db.lock().await;
-                // Once a call, so it reads one state of the scope throughout.
-                if !grant.caught_up.contains(&scope) {
-                    self.read_ready(&(scope.clone(), format!("{}/{DATABASE}", grant.app)), &mut db, &bucket).await?;
-                    if let Some(g) = self.0.grants.lock().unwrap().get_mut(token) {
-                        g.caught_up.push(scope.clone());
+                let started = Instant::now();
+                // The first read of each scope, traced: where its data came from, and how long getting it took.
+                let first = !grant.caught_up.contains(&scope);
+                let traced = grant.trace.clone().filter(|_| first);
+                let (db, at) = trace::within(traced.clone(), async {
+                    let (db, bucket) = self.call_database(&grant.caller, &scope, &grant.app, DATABASE, None).await?;
+                    let mut db = db.lock_owned().await;
+                    let at = db.at();
+                    // Once a call, so it reads one state of the scope throughout.
+                    if first {
+                        self.read_ready(&(scope.clone(), format!("{}/{DATABASE}", grant.app)), &mut db, &bucket).await?;
+                        if let Some(g) = self.0.grants.lock().unwrap().get_mut(token) {
+                            g.caught_up.push(scope.clone());
+                        }
                     }
+                    anyhow::Ok((db, at))
+                })
+                .await?;
+                if let Some(t) = traced {
+                    t.note(json!({ "step": "data", "app": grant.app, "scope": trace::kind(&scope), "steps": db.at(), "new": db.at() - at }), started.elapsed());
                 }
                 ok(json!({ "ok": db.query(req["sql"].as_str().unwrap_or(""), &params)? }))
             }

@@ -138,8 +138,9 @@ window.oneHost = (() => {
   /// answers them, the web client's and a chat's alike → what it replies; what it throws, it refuses with. `h` is what
   /// each page does its own way: `frame`, the screen's; `call(op, input)`, as its app; `open(m)`, `close(value)` and
   /// `title(text, m)`; `kept(op, input)`, what that call last answered if this page keeps it (`{ answer, at }`, or null); `vault(need)` → whether it's set; `link(url)`; `icons(names)`; `blob(id)`, a file the node
-  /// keeps; `elsewhere()`, on a page that can't give files (a chat's), the screen opened where it can; and `own`, what
-  /// only the client's own screens may do, by message, on a page that has them.
+  /// keeps; `elsewhere()`, on a page that can't give files (a chat's), the screen opened where it can; `traces()`, in
+  /// developer mode, its latest requests' traces (else null); and `own`, what only the client's own screens may do, by
+  /// message, on a page that has them.
   async function answer(m, h) {
     switch (m.type) {
       case "call": return h.call(String(m.op || ""), m.input ?? {});
@@ -161,7 +162,8 @@ window.oneHost = (() => {
       case "icons": return h.icons(Array.isArray(m.names) ? m.names.map(String) : []);
       case "scan": throw new Error("Scanning documents needs the iPhone, iPad or Android app. Choose the files instead.");
       case "icon": case "haptic": return null;
-      case "api": case "signOut": case "appearance": case "device": case "request": case "cache":
+      case "traces": return h.traces ? h.traces() : null;
+      case "api": case "signOut": case "appearance": case "device": case "request": case "cache": case "developer":
         if (!h.own) throw new Error("Only Settings can do that.");
         return h.own[m.type](m);
       default: throw new Error("Unknown message");

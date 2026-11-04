@@ -317,8 +317,8 @@ public sealed class AppScreen : Grid
 
     static string? Text(JsonObject m, string key) => m[key] is JsonValue v && v.TryGetValue<string>(out var s) ? s : null;
 
-    /// The bridge: `{ one: { type, … }, id }`, each of its `messages`. `api`, `signOut`, `appearance`, `device` and
-    /// `request` are this app's own screens' alone. A screen only ever calls its own app, but may open another's screens.
+    /// The bridge: `{ one: { type, … }, id }`, each of its `messages`. `api`, `signOut`, `appearance`, `device`,
+    /// `request`, `cache` and `developer` are this app's own screens' alone. A screen only ever calls its own app, but may open another's screens.
     async Task Answer(string json)
     {
         JsonNode? message;
@@ -328,7 +328,7 @@ public sealed class AppScreen : Grid
         try
         {
             var type = Text(m, "type");
-            if (type is "api" or "signOut" or "appearance" or "device" or "request" or "cache" && !Own)
+            if (type is "api" or "signOut" or "appearance" or "device" or "request" or "cache" or "developer" && !Own)
             {
                 Fail(id, "Only Settings can do that.");
                 return;
@@ -342,6 +342,17 @@ public sealed class AppScreen : Grid
                     Reply(id, null);
                     await Window.SignOut();
                     return;
+                case "developer":
+                    Reply(id, JsonValue.Create(await Client.Developer(m["on"] is JsonValue on && on.TryGetValue<bool>(out var value) ? value : null)));
+                    return;
+                case "traces":
+                    {
+                        // In developer mode, what this computer's requests did, for the screen's panel (kit.js); else nothing.
+                        string? traces = null;
+                        try { traces = await Client.Traces(); } catch { }
+                        Reply(id, traces == null ? null : JsonNode.Parse(traces));
+                        return;
+                    }
                 case "cache":
                     {
                         var file = KeptFile(Text(m, "key") ?? "");

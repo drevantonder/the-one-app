@@ -225,6 +225,21 @@ impl Node {
     pub(super) fn name_of(&self, key: &Key) -> String {
         self.with(|i| Ok(i.r.members.machines.get(key).map(|m| m.name.clone()))).ok().flatten().unwrap_or_else(|| short(key))
     }
+
+    /// The install's compute devices' names by key (hex), and the serverless node's: what a trace's reader calls the
+    /// nodes a client tried.
+    pub fn compute_names(&self) -> Value {
+        self.with(|i| {
+            let m = &i.r.members;
+            let name = |k: &Key| m.machines.get(k).map(|d| d.name.clone()).unwrap_or_else(|| short(k));
+            let mut names: serde_json::Map<String, Value> = m.computes().map(|c| (hex(&c.key), json!(name(&c.key)))).collect();
+            if let Some(key) = m.serverless() {
+                names.insert(hex(&key), json!("the serverless node"));
+            }
+            Ok(Value::Object(names))
+        })
+        .unwrap_or_default()
+    }
 }
 
 /// What a device says of each sidecar serving there, as `GET /v1/state` lists it: what it is, its version (a

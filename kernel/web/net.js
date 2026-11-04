@@ -18,7 +18,7 @@ function received(m) {
   if (!w) return;
   if (m.error !== undefined) {
     waiting.delete(m.id);
-    const err = new Error(m.error);
+    const err = Object.assign(new Error(m.error), { trace: m.trace });
     if (w.body) w.body.error(err);
     else w.reject(err);
   } else if (m.status !== undefined) {
@@ -28,8 +28,9 @@ function received(m) {
     const headers = new Headers();
     for (let i = 0; i + 1 < m.headers.length; i += 2) headers.append(m.headers[i], m.headers[i + 1]);
     const empty = m.status === 204 || m.status === 304;
-    // And which node answered, as its connection proved, the one its 428 may be believed from.
-    w.resolve(Object.assign(new Response(empty ? null : stream, { status: m.status, headers }), { node: m.node }));
+    // And which node answered, as its connection proved, the one its 428 may be believed from; and in developer mode,
+    // the nodes it tried and what the one that answered did (`trace`, JSON).
+    w.resolve(Object.assign(new Response(empty ? null : stream, { status: m.status, headers }), { node: m.node, trace: m.trace }));
   } else if (m.part) {
     w.body?.enqueue(m.part);
   } else if (m.done) {
@@ -133,11 +134,17 @@ export const net = {
   start(user, again = false, as = undefined) {
     if (!net.has) return Promise.resolve(false);
     if (!starting || starting.user !== user || again) {
-      const ready = ask({ op: "start", user, again, as }).then((m) => m.device);
-      starting = { user, ready };
+      const asked = ask({ op: "start", user, again, as });
+      const ready = asked.then((m) => m.device);
+      starting = { user, ready, took: asked.then((m) => m.took || null, () => null) };
       ready.catch(() => starting?.ready === ready && (starting = null));
     }
     return starting.ready;
+  },
+
+  /// How long each part of joining the network took, once it's joined: for developer mode.
+  took() {
+    return starting?.took || Promise.resolve(null);
   },
 
   /// A request to the node: method, path with its query, headers (`{ name: value }`), body bytes or none, and an

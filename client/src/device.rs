@@ -24,7 +24,7 @@ use data_encoding::BASE64URL_NOPAD as B64U;
 use serde_json::{Value, json};
 
 use crate::bucket::Signed;
-use crate::{Body, Client, Error, Request, Response, Sent, not_let_in, unsent};
+use crate::{Body, Client, Error, Request, Response, Sent, TRACE_HEADER, not_let_in, unsent};
 
 /// How long a node keeps the keys a request handed it.
 const HANDED_FOR: u64 = 3_600_000;
@@ -34,6 +34,8 @@ const MOST_NEEDED: usize = 16;
 const REREAD: u64 = 30_000;
 /// How long it waits to ask again a node that doesn't list it yet, each time.
 const BEHIND: [Duration; 2] = [Duration::from_secs(2), Duration::from_secs(4)];
+/// How many requests' traces it keeps, in developer mode, for screens to show.
+const TRACES_KEPT: usize = 100;
 
 /// A new device's key: 32 random bytes, which its app keeps.
 pub fn new_secret() -> [u8; 32] {
@@ -84,6 +86,8 @@ pub struct Device {
     /// What each kind of request needed, by its route (`route`): the last 428's, and the node that sent it (hex), the
     /// only one they're handed to.
     needs: Mutex<BTreeMap<String, (String, Vec<Need>)>>,
+    /// In developer mode, its latest requests' traces, oldest first (`traces`).
+    traces: Mutex<std::collections::VecDeque<Value>>,
 }
 
 impl Device {
@@ -103,7 +107,41 @@ impl Device {
             epochs: Mutex::default(),
             app_keys: Mutex::default(),
             needs: Mutex::new(needs),
+            traces: Mutex::default(),
         }
+    }
+
+    // Developer mode.
+
+    /// Whether this device is in developer mode, which only its own Settings › Developer changes: its requests then
+    /// ask for traces, which its screens show.
+    pub fn developer(&self) -> bool {
+        self.dir.join("developer").exists()
+    }
+
+    /// Turns developer mode on or off, here alone.
+    pub fn set_developer(&self, on: bool) {
+        if on {
+            let _ = std::fs::create_dir_all(&self.dir);
+            let _ = std::fs::write(self.dir.join("developer"), b"");
+        } else {
+            let _ = std::fs::remove_file(self.dir.join("developer"));
+            self.traces.lock().unwrap().clear();
+        }
+    }
+
+    /// Its latest requests' traces, oldest first, as JSON: each what was asked, when, how long it took, the nodes it
+    /// tried and what the one that answered did (src/screen/kit.js draws them). None out of developer mode.
+    pub fn traces(&self) -> Option<String> {
+        self.developer().then(|| Value::Array(self.traces.lock().unwrap().iter().cloned().collect()).to_string())
+    }
+
+    fn keep_trace(&self, trace: Value) {
+        let mut traces = self.traces.lock().unwrap();
+        if traces.len() >= TRACES_KEPT {
+            traces.pop_front();
+        }
+        traces.push_back(trace);
     }
 
     /// Its key, hex: its id.
@@ -374,12 +412,29 @@ impl Device {
     /// its logs' keys first, then a call's). `/v1/state` is read for the order things run in.
     pub async fn fetch(&self, method: &str, path: &str, headers: Vec<(String, String)>, body: impl Into<Sent>) -> Result<Response, Error> {
         let body = body.into();
+        // In developer mode, what it did, from the start.
+        let traced = self.developer().then(|| (now(), std::time::Instant::now(), what(path, body.bytes())));
         // Asked before it joined, or after it was taken out: it's in only if the relay lets it, else its own screen says so.
         let joined = self.client.lock().await.is_some();
         if !joined && !self.connect().await? {
             return Err(refused());
         }
-        let err = match n0_future::future::or(self.request(method, path, headers, body), self.watch()).await {
+        let network = traced.as_ref().map(|t| t.1.elapsed().as_millis() as u64).filter(|ms| *ms > 0);
+        let mut fetches = Vec::new();
+        let asked = self.request(method, path, headers, body, traced.as_ref().map(|_| &mut fetches));
+        let answered = n0_future::future::or(asked, self.watch()).await;
+        if let Some((at, started, mut what)) = traced {
+            what["at"] = json!(at);
+            what["ms"] = json!(started.elapsed().as_millis() as u64);
+            what["network"] = json!(network);
+            what["fetches"] = json!(fetches);
+            match &answered {
+                Ok(response) => what["status"] = json!(response.status),
+                Err(_) => what["failed"] = json!(true),
+            }
+            self.keep_trace(what);
+        }
+        let err = match answered {
             Ok(response) => return Ok(response),
             Err(err) => err,
         };
@@ -409,13 +464,24 @@ impl Device {
         }
     }
 
-    async fn request(&self, method: &str, path: &str, headers: Vec<(String, String)>, body: Sent) -> Result<Response, Error> {
+    /// `fetch`'s request, each send's trace kept in `fetches` if it's asked for one.
+    async fn request(&self, method: &str, path: &str, mut headers: Vec<(String, String)>, body: Sent, mut fetches: Option<&mut Vec<Value>>) -> Result<Response, Error> {
         let route = route(path, body.bytes());
+        if fetches.is_some() {
+            headers.push((TRACE_HEADER.into(), "1".into()));
+        }
         let (mut needed, mut behind) = (0, 0);
         loop {
             let handed = self.handed(&route).await;
             let request = Request { method: method.into(), path: path.into(), headers: headers.clone(), body: body.clone() };
-            let response = self.send(request, handed.as_ref()).await?;
+            let sent = self.send(request, handed.as_ref()).await;
+            if let Some(fetches) = fetches.as_deref_mut() {
+                fetches.push(match &sent {
+                    Ok(response) => response.trace.clone().unwrap_or_default(),
+                    Err(err) => err.trace.clone().unwrap_or_default(),
+                });
+            }
+            let response = sent?;
             if response.status == 428 && needed < 3 {
                 needed += 1;
                 let node = response.node;
@@ -438,12 +504,12 @@ impl Device {
                     }
                     return Err(failed("Your devices haven't caught up with this one yet. Try again in a moment."));
                 }
-                return Ok(Response { status: 403, headers: response.headers, node: response.node, body: Body::whole(bytes) });
+                return Ok(Response { status: 403, headers: response.headers, node: response.node, body: Body::whole(bytes), trace: response.trace });
             }
             if response.status == 200 && path.split('?').next() == Some("/v1/state") {
                 let bytes = response.body.bytes().await?;
                 self.learn_order(&bytes).await;
-                return Ok(Response { status: 200, headers: response.headers, node: response.node, body: Body::whole(bytes) });
+                return Ok(Response { status: 200, headers: response.headers, node: response.node, body: Body::whole(bytes), trace: response.trace });
             }
             return Ok(response);
         }
@@ -692,6 +758,20 @@ fn route(path: &str, body: &[u8]) -> String {
     match at.strip_prefix("/v1/screens/").and_then(|s| s.split('/').next()) {
         Some(app) => format!("/v1/screens/{app}"),
         None => at.to_string(),
+    }
+}
+
+/// What a request asked, as a trace names it: a call's app and operation, a screen's app and name, else its path. Never
+/// its input or query.
+fn what(path: &str, body: &[u8]) -> Value {
+    let at = path.split('?').next().unwrap_or(path);
+    if at == "/v1/call" {
+        let b = serde_json::from_slice::<Value>(body).unwrap_or_default();
+        return json!({ "what": "call", "app": b["app"], "op": b["op"] });
+    }
+    match at.strip_prefix("/v1/screens/").map(|s| s.split('/')) {
+        Some(mut s) => json!({ "what": "page", "app": s.next(), "screen": s.next() }),
+        None => json!({ "what": "request", "path": at }),
     }
 }
 

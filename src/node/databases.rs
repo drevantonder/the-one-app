@@ -239,11 +239,23 @@ impl Node {
     /// never wrong.
     pub(super) async fn read_ready(&self, id: &(Scope, String), db: &mut Db, bucket: &Copied) -> Result<()> {
         if self.0.behind.lock().unwrap().remove(id) {
-            match tokio::time::timeout(BUCKET_WAIT, db.catch_up(bucket)).await {
-                Ok(Ok(_)) => return Ok(()),
-                Ok(Err(err)) => tracing::debug!("{}: reading this device's copy, as the bucket said {err:#}", db.prefix()),
-                Err(_) => tracing::debug!("{}: reading this device's copy, as the bucket didn't answer", db.prefix()),
-            }
+            // A notice said another device wrote it: the bucket is asked first, for what that write was.
+            let started = Instant::now();
+            let result = match tokio::time::timeout(BUCKET_WAIT, db.catch_up(bucket)).await {
+                Ok(Ok(_)) => {
+                    trace::note(json!({ "step": "behind", "result": "caught up" }), started.elapsed());
+                    return Ok(());
+                }
+                Ok(Err(err)) => {
+                    tracing::debug!("{}: reading this device's copy, as the bucket said {err:#}", db.prefix());
+                    "failed"
+                }
+                Err(_) => {
+                    tracing::debug!("{}: reading this device's copy, as the bucket didn't answer", db.prefix());
+                    "no answer"
+                }
+            };
+            trace::note(json!({ "step": "behind", "result": result }), started.elapsed());
         }
         for _ in 0..TRIES {
             match db.catch_up(&bucket.here_only()).await {
@@ -347,6 +359,7 @@ impl Node {
             }
         }
         let prefix = format!("{}/{app}/{database}", crate::bucket::folder(&scope.to_string()));
+        let opening = Instant::now();
         let (mut keys, mut tries) = (keys, 0);
         let mut db = loop {
             tries += 1;
@@ -371,6 +384,7 @@ impl Node {
             }
         };
         db.migrate(&bucket, &schema).await?;
+        trace::note(json!({ "step": "open", "app": app, "steps": db.at() }), opening.elapsed());
         let db = Arc::new(tokio::sync::Mutex::new(db));
         let mut dbs = self.0.dbs.lock().unwrap();
         match dbs.get(&id) {

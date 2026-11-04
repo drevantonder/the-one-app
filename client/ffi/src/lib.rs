@@ -118,6 +118,21 @@ impl ThisDevice {
         Ok(Arc::new(Response { status: response.status, headers, body: Mutex::new(Some(response.body)) }))
     }
 
+    /// Whether this device is in developer mode (Settings › Developer, here alone).
+    pub fn developer(&self) -> bool {
+        self.0.developer()
+    }
+
+    /// Turns developer mode on or off on this device.
+    pub fn set_developer(&self, on: bool) {
+        self.0.set_developer(on)
+    }
+
+    /// Its latest requests' traces, as JSON, for a screen's `traces` message: none out of developer mode.
+    pub fn traces(&self) -> Option<String> {
+        self.0.traces()
+    }
+
     /// Starts again with a fresh connection: when the network comes back.
     pub fn reconnect(&self) {
         run(self.0.reconnect())

@@ -130,7 +130,9 @@ impl<B: Bucket> Bucket for Copied<B> {
         tracing::trace!(target: "bucket", "get {name}");
         // While the data moves, what it moves from is still all of it.
         let moved = self.moved.try_read().ok();
+        let asking = std::time::Instant::now();
         let got = Bucket::get(moved.as_deref().and_then(Option::as_ref).unwrap_or(&self.place), name).await?;
+        crate::node::trace::bucket(asking.elapsed(), got.is_some());
         if let Some(o) = got.as_ref().filter(|_| kept(name)) {
             if let Err(err) = self.here.create(name, &o.bytes) {
                 tracing::debug!("keeping {name}: {err:#}");

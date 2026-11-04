@@ -64,6 +64,18 @@ class Client(private val context: Context, private val signIn: SignIn) {
         }
     }
 
+    /** Developer mode, on this phone alone (Settings › Developer): whether it's on, first turning it on or off. */
+    suspend fun developer(on: Boolean?): Boolean {
+        val d = device()
+        return io {
+            if (on != null) d.setDeveloper(on)
+            d.developer()
+        }
+    }
+
+    /** In developer mode, its latest requests' traces, as JSON, for a screen's `traces`; null out of it. */
+    suspend fun traces(): String? = device().let { d -> io { d.traces() } }
+
     /** What it means that this phone isn't one of the install's: [NotLetIn], `removed` if it was and was taken out, which
      *  ends its sign-in (its key goes with it). */
     suspend fun lost(): NotLetIn {

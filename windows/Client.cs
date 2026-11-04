@@ -72,6 +72,24 @@ public static class Client
         return await Off(() => d.Wait(token));
     }
 
+    /// Developer mode, on this computer alone (Settings › Developer): whether it's on, first turning it on or off.
+    public static async Task<bool> Developer(bool? on)
+    {
+        var d = await Current();
+        return await Off(() =>
+        {
+            if (on is bool value) d.SetDeveloper(value);
+            return d.Developer();
+        });
+    }
+
+    /// In developer mode, its latest requests' traces, as JSON, for a screen's `traces`; null out of it.
+    public static async Task<string?> Traces()
+    {
+        var d = await Current();
+        return await Off(d.Traces);
+    }
+
     /// A request to the person's nodes' API (`/v1/…`), its body JSON, or none.
     internal static async Task<Response> Fetch(string method, string path, byte[]? body = null, string? accept = null)
     {

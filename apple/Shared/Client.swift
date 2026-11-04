@@ -57,6 +57,21 @@ actor DeviceClient {
         }
     }
 
+    /// Developer mode, on this device alone (Settings › Developer): whether it's on, first turning it on or off.
+    func developer(_ on: Bool?) async throws -> Bool {
+        let device = try await current()
+        return try await off {
+            if let on { device.setDeveloper(on: on) }
+            return device.developer()
+        }
+    }
+
+    /// In developer mode, its latest requests' traces, as JSON, for a screen's `traces`; nil out of it.
+    func traces() async throws -> String? {
+        let device = try await current()
+        return try await off { device.traces() }
+    }
+
     /// What it means that this device isn't one of the install's: if it was, it's been taken out, which is the sign-in's
     /// to say, as it signs out; if it never was, it's waiting to be approved, which its approval screen says.
     func lost(_ known: ThisDevice? = nil) async -> Error {

@@ -246,7 +246,29 @@ const LOCAL_PUT: u64 = 1 << 30;
 /// Routes as only this machine's own programs, and people signed in with the kernel for what `SIGNED_IN` lists, may
 /// use them.
 pub fn guarded(routes: Router<Node>, node: Node) -> Router {
-    routes.route_layer(axum::middleware::from_fn_with_state(node.clone(), only_this_machine)).layer(axum::middleware::map_response(sandboxed)).with_state(node)
+    routes
+        .route_layer(axum::middleware::from_fn_with_state(node.clone(), only_this_machine))
+        .layer(axum::middleware::map_response(sandboxed))
+        .layer(axum::middleware::from_fn_with_state(node.clone(), traced))
+        .with_state(node)
+}
+
+/// A request that asks for a trace (`x-one-trace`, a client in developer mode) gets what it did here in the same
+/// header of its answer, as base64 of its JSON (`node::trace`): an older node answers without it.
+async fn traced(State(node): State<Node>, req: axum::extract::Request, next: axum::middleware::Next) -> Response {
+    use crate::node::trace;
+    if !req.headers().contains_key(trace::HEADER) {
+        return next.run(req).await;
+    }
+    let t = trace::Trace::new();
+    let mut resp = trace::within(Some(t.clone()), next.run(req)).await;
+    let mut done = t.done(&node.device_name());
+    done["names"] = node.compute_names();
+    let done = data_encoding::BASE64.encode(done.to_string().as_bytes());
+    if let Ok(value) = done.parse() {
+        resp.headers_mut().insert(trace::HEADER, value);
+    }
+    resp
 }
 
 /// Headers that say a request was passed on from elsewhere, as proxies add them.

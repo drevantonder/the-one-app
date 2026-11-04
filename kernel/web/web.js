@@ -169,15 +169,35 @@ window.__one = {};
   /// node checks against the device its connection proves. It goes with the keys it needed last time; a node that needs
   /// others says so (428), and it goes again once with them. Asked again for a few seconds while no node answers, as
   /// one restarting doesn't; a call carries an id, so it runs once however often it's sent.
-  async function api(path, { method = "GET", body, query, raw, signal } = {}) {
+  async function api(path, { method = "GET", body, query, raw, signal, since } = {}) {
     const url = new URL(path, location.origin);
     for (const [k, v] of Object.entries(query || {})) if (v != null) url.searchParams.set(k, typeof v === "string" ? v : JSON.stringify(v));
     if (url.pathname === "/v1/call" && body && typeof body === "object" && !body.id) body = { ...body, id: callId() };
+    const trace = developer.on() ? developer.start(url.pathname, body, since) : null;
+    try {
+      const out = await sending(url, method, body, raw, signal, trace);
+      if (trace) trace.status = raw ? out.status : 200;
+      return out;
+    } catch (err) {
+      if (trace) trace.failed = true;
+      throw err;
+    } finally {
+      if (trace) developer.keep(trace);
+    }
+  }
+
+  /// `api`'s request, each send's trace kept in `trace` if it has one.
+  async function sending(url, method, body, raw, signal, trace) {
     const route = Device.route(url.pathname, body);
     const user = auth.user();
+    const joining = performance.now();
     if (!user || !(await net.start(user).catch(() => false))) throw Object.assign(new NodeError("This device hasn't been approved yet."), { status: 403 });
+    // How long it waited to join the network, if it did, and what that took.
+    if (trace && performance.now() - joining >= 1) trace.network = Math.round(performance.now() - joining);
+    if (trace && (trace.network || trace.first)) trace.joined = await net.took();
     for (let needed = 0, misses = 0; ; ) {
       const headers = { "x-one-user": user };
+      if (trace) headers["x-one-trace"] = "1";
       if (body !== undefined) headers["content-type"] = "application/json";
       // Keys go only to a node this browser reaches itself, which its connection proves.
       const keys = device && (await device.handoff(route, auth.kept()?.until || Date.now() + 60_000));
@@ -187,7 +207,9 @@ window.__one = {};
       const watch = watching();
       try {
         r = await Promise.race([net.fetch(method, url.pathname + url.search, headers, sent, signal), watch.out]);
+        trace?.fetches.push(developer.parse(r.trace));
       } catch (err) {
+        trace?.fetches.push(developer.parse(err.trace));
         if (err.removed || signal?.aborted || misses >= 5) throw err;
         // A request that fails may be one a browser taken out of its person's devices can't make.
         if (await takenOut()) throw gone();
@@ -199,6 +221,7 @@ window.__one = {};
       // A node may find what it needs as it goes: the serverless node, its logs' keys first, then a call's.
       if (r.status === 428 && device && needed < 3) {
         needed++;
+        if (trace) trace.keys = needed;
         await device.learn(route, await r.json(), r.node);
         continue;
       }
@@ -208,6 +231,49 @@ window.__one = {};
       return out;
     }
   }
+
+  /// Developer mode, on this browser alone (Settings › Developer, for admins): each request asks its nodes for a trace
+  /// (`x-one-trace`), kept here, the latest `KEPT`, for screens to show (`traces`, kit.js's panel).
+  const developer = {
+    KEY: "one.developer",
+    KEPT: 100,
+    kept: [],
+    on: () => localStorage.getItem(developer.KEY) === "1",
+    set(on) {
+      if (on) localStorage.setItem(developer.KEY, "1");
+      else (localStorage.removeItem(developer.KEY), (developer.kept = []));
+    },
+    /// What a request asked, as a trace names it: a call's app and operation, a screen's app and name, else its path.
+    /// Never its input or query. `since` (`{ at, perf, first }`) is when what it's for began, if earlier: a screen's
+    /// page waits for this browser to be let in, and the first screen of a load from the page's start.
+    start(path, body, since) {
+      const what = path === "/v1/call" ? { what: "call", app: body?.app, op: body?.op }
+        : path.startsWith("/v1/screens/") ? { what: "page", app: decodeURIComponent(path.split("/")[3] || ""), screen: decodeURIComponent(path.split("/")[4] || "") }
+        : { what: "request", path };
+      const now = performance.now();
+      return { ...what, at: Math.round(since ? since.at : Date.now()), started: since ? since.perf : now, waited: since ? Math.round(now - since.perf) : 0, first: !!since?.first, keys: 0, fetches: [] };
+    },
+    /// When a screen's page was asked for: the first of this load, from the page's start.
+    firstScreen: true,
+    since() {
+      const first = developer.firstScreen;
+      developer.firstScreen = false;
+      return first ? { at: performance.timeOrigin, perf: 0, first } : { at: Date.now(), perf: performance.now() };
+    },
+    parse: (json) => {
+      try {
+        return json ? JSON.parse(json) : {};
+      } catch {
+        return {};
+      }
+    },
+    keep(trace) {
+      if (trace.started !== undefined) trace.ms = Math.round(performance.now() - trace.started);
+      delete trace.started;
+      developer.kept.push(trace);
+      if (developer.kept.length > developer.KEPT) developer.kept.shift();
+    },
+  };
 
   const REMOVED = "This device was removed. Sign in again.";
   let removed = false;
@@ -644,7 +710,8 @@ window.__one = {};
     }
     if (r.kind === "own") return ownPage(r);
     const path = `/v1/screens/${encodeURIComponent(r.app)}/${encodeURIComponent(r.screen)}`;
-    return joined.then(() => api(path, { query: { params: r.params || "{}", scope: r.scope }, raw: true }).then((resp) => resp.text()).then((html) => (kept.put("page", key, html), html)));
+    const since = developer.on() ? developer.since() : undefined;
+    return joined.then(() => api(path, { query: { params: r.params || "{}", scope: r.scope }, raw: true, since }).then((resp) => resp.text()).then((html) => (kept.put("page", key, html), html)));
   }
 
   /// One of the client's own screens' pages, which act as the person, so never a node's: the address's
@@ -694,7 +761,9 @@ window.__one = {};
     };
     const fresh = screenPage(r);
     // The client's own aren't kept: one kept before they came from its files came from a node.
+    const looking = developer.on() && r.kind !== "own" && { what: "page", app: r.app, screen: r.screen, source: "kept", at: Date.now(), started: performance.now() };
     Promise.all([r.kind === "own" ? null : kept.get("page", f.key), sheet ? null : kept.get("still", f.key)]).then(([page, still]) => {
+      if (looking && page) developer.keep(looking);
       if (f.html) return;
       if (still) showStill(f, still);
       if (page) draw(page);
@@ -884,7 +953,9 @@ window.__one = {};
         },
         icons: iconPaths,
         blob: async (id) => (await api(`/v1/blobs/${encodeURIComponent(id)}`, { raw: true })).blob(),
+        traces: () => (developer.on() ? developer.kept : null),
         own: mine && {
+          developer: (m) => ("on" in m && developer.set(!!m.on), developer.on()),
           api: clientApi,
           signOut: () => (signOut(), null),
           appearance: (m) => (m.value != null && setAppearance(String(m.value)), appearance()),

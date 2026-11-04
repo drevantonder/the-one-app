@@ -52,7 +52,7 @@
   // or refuses it by name. Anything a person touches natively is one of these: menus,
   // alerts, sheets, files, scanning, links.
   const messages = ["call", "open", "close", "title", "menu", "alert", "save", "preview", "copy", "link", "scan", "vault", "request",
-    "icons", "icon", "haptic", "api", "signOut", "appearance", "device", "cache", "kept"];
+    "icons", "icon", "haptic", "api", "signOut", "appearance", "device", "cache", "kept", "traces", "developer"];
 
   async function host(message) {
     if (!messages.includes(message.type)) throw new Error(`No such message: ${message.type}`);
@@ -231,6 +231,11 @@
     // gives what was kept, or null. Forgotten when it signs out.
     cache: (key, value) => host(value === undefined ? { type: "cache", key: String(key) } : { type: "cache", key: String(key), value }),
     appearance: (value) => host({ type: "appearance", value }),
+    // Developer mode, on this client alone: whether it's on, first turning it on or off if `on` is given. Settings'.
+    developer: (on) => host(on === undefined ? { type: "developer" } : { type: "developer", on: !!on }),
+    // In developer mode, this client's latest requests, each with how long it took and where it went (kit.js's
+    // panel draws them): null out of developer mode. A host that doesn't know it refuses it, as one out of it.
+    traces: () => host({ type: "traces" }).catch(() => null),
     device: () => host({ type: "device" }),
     // A Phosphor icon by its name ("magnifying-glass", "check-circle-fill"), at the text's size and colour.
     icon: (name, cls = "") => glyph(name, `i ${cls}`.trim()),

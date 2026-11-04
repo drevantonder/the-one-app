@@ -240,6 +240,12 @@ impl Node {
                     Err(err) => return tracing::debug!("what {} sent: {err:#}", short(&remote)),
                 };
                 let answer = match msg["kind"].as_str() {
+                    Some("ask") if msg["body"]["trace"] == true => {
+                        let t = trace::Trace::new();
+                        let mut answer = trace::within(Some(t.clone()), node.accept_call(remote, &msg["body"]["call"])).await.json();
+                        answer["trace"] = t.done(&node.device_name());
+                        answer
+                    }
                     Some("ask") => node.accept_call(remote, &msg["body"]["call"]).await.json(),
                     Some("notice") => {
                         node.changed_from(&msg["body"]["changed"]);
@@ -622,7 +628,9 @@ impl Node {
     /// Asks another device to run a call, waiting `limit` for its answer. An error that's a `NotThere` means it never
     /// reached that device.
     pub(super) async fn ask(&self, to: Key, call: Value, limit: Duration) -> Result<Value> {
-        self.send(&to, "ask", &json!({ "call": call }), true, limit).await
+        // A traced request asks that device for its own part too, which an older one leaves out.
+        let body = if trace::on() { json!({ "call": call, "trace": true }) } else { json!({ "call": call }) };
+        self.send(&to, "ask", &body, true, limit).await
     }
 
     /// Says hello to a service endpoint, with how many of `global`'s entries this device has: it answers what it

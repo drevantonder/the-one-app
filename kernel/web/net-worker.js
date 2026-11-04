@@ -95,6 +95,11 @@ export function server(version) {
   /// A session for `user`: a key of its own, vouched for by this browser's device key (or `as`, another device of
   /// theirs: `{ key, sign }`), and the nodes to ask.
   async function begin(user, as) {
+    // How long each part of joining the network took, for developer mode: this browser's key, the relay's list of
+    // nodes (only the first time), the client's WebAssembly, and its endpoint.
+    const took = {};
+    let mark = performance.now();
+    const step = (name) => ((took[name] = Math.round(performance.now() - mark)), (mark = performance.now()));
     const [{ certify, ed25519Public, hex, proveSocket, signedRequest, signingKey, untilTaken, FRESH, SESSION }, { getAll, put }] = await code;
     // In one read: the device's key, the nodes it asked before and who runs what, as it replayed it.
     const [mine, nodes, members] = await getAll([`device:${user}`, `nodes:${user}`, `global:${user}`]);
@@ -111,6 +116,7 @@ export function server(version) {
     // The relay's socket, opening while the WebAssembly loads.
     const socket = async (certificate) => early(`${certificate}.${await proveSocket(key, endpoint)}`);
     await socket(certificate);
+    step("key");
     // The relay takes each request once, so one refused as taken already (another process of this device signed in the
     // same millisecond) is signed again.
     const ask = async (certificate) => {
@@ -132,6 +138,7 @@ export function server(version) {
     });
     const order = (computes) => [...known.filter((k) => computes.includes(k)), ...computes.filter((k) => !known.includes(k))];
     const first = known.length ? known : await computes.catch((err) => (opened?.face.close(), Promise.reject(err)));
+    if (!known.length) step("nodes");
     if (!first) {
       opened?.face.close();
       return null;
@@ -139,7 +146,9 @@ export function server(version) {
     // Kept, so the next open asks them at once.
     if (!known.length) put(`nodes:${user}`, first).catch(() => {});
     const { Client } = await glue;
+    step("code");
     const client = await Client.start(secret, certificate, location.origin, known.length ? first : order(first));
+    step("endpoint");
     if (known.length) {
       computes.then(
         (all) => {
@@ -155,7 +164,7 @@ export function server(version) {
     secret.fill(0);
     clearTimeout(renewal);
     if (!as) renewal = setTimeout(() => renew(user, client, endpoint, socket), until - RENEW - Date.now());
-    const made = { client, endpoint, socket, certificate };
+    const made = { client, endpoint, socket, certificate, took };
     // Whether the relay still lets it in: it says who's on its network, and a device taken out isn't.
     made.still = async () => {
       return (await ask(made.certificate)).status !== 403;
@@ -198,7 +207,7 @@ export function server(version) {
         switch (m.op) {
           case "start": {
             const s = await started(m.user, m.again, m.as);
-            return post({ id, device: !!s });
+            return post({ id, device: !!s, took: s?.took });
           }
           case "still": {
             const s = await session?.ready;
@@ -225,7 +234,7 @@ export function server(version) {
             if (!s) throw new Error("This browser isn't one of your devices yet.");
             const r = await s.client.fetch(m.method, m.path, m.headers, new Uint8Array(m.body || []));
             reading.set(id, r);
-            post({ id, node: r.node, status: r.status, headers: r.headers });
+            post({ id, node: r.node, status: r.status, headers: r.headers, trace: r.trace });
             try {
               for (let part; (part = await r.chunk()); ) post({ id, part }, [part.buffer]);
               post({ id, done: true });
@@ -236,7 +245,7 @@ export function server(version) {
           }
         }
       } catch (err) {
-        post({ id, error: String(err?.message || err) });
+        post({ id, error: String(err?.message || err), trace: err?.trace || "" });
       }
     };
   }

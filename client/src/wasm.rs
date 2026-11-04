@@ -43,12 +43,14 @@ impl Client {
         self.0.set_nodes(&nodes).map_err(js)
     }
 
-    /// `headers`: names and values, one after the other.
-    pub async fn fetch(&self, method: String, path: String, headers: Vec<String>, body: Vec<u8>) -> Result<Response, JsError> {
+    /// `headers`: names and values, one after the other. A request with `x-one-trace` has its trace in its response, or
+    /// in what it failed with.
+    pub async fn fetch(&self, method: String, path: String, headers: Vec<String>, body: Vec<u8>) -> Result<Response, Failed> {
         let headers = headers.chunks(2).map(|h| (h[0].clone(), h.get(1).cloned().unwrap_or_default())).collect();
-        let response = self.0.fetch(crate::Request { method, path, headers, body: body.into() }).await.map_err(js)?;
+        let response = self.0.fetch(crate::Request { method, path, headers, body: body.into() }).await.map_err(|e| Failed { message: e.to_string(), trace: traced(e.trace) })?;
         let headers = response.headers.into_iter().flat_map(|(n, v)| [n, v]).collect();
-        Ok(Response { node: data_encoding::HEXLOWER.encode(&response.node), status: response.status, headers, body: std::rc::Rc::new(std::cell::RefCell::new(Some(response.body))) })
+        let trace = traced(response.trace);
+        Ok(Response { node: data_encoding::HEXLOWER.encode(&response.node), status: response.status, headers, trace, body: std::rc::Rc::new(std::cell::RefCell::new(Some(response.body))) })
     }
 
     pub async fn reconnect(&self) {
@@ -60,11 +62,36 @@ impl Client {
     }
 }
 
+fn traced(trace: Option<serde_json::Value>) -> String {
+    trace.map(|t| t.to_string()).unwrap_or_default()
+}
+
+/// Why a request failed, and the nodes it tried, as JSON (empty if it asked for no trace).
+#[wasm_bindgen]
+pub struct Failed {
+    message: String,
+    trace: String,
+}
+
+#[wasm_bindgen]
+impl Failed {
+    #[wasm_bindgen(getter)]
+    pub fn message(&self) -> String {
+        self.message.clone()
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn trace(&self) -> String {
+        self.trace.clone()
+    }
+}
+
 #[wasm_bindgen]
 pub struct Response {
     node: String,
     status: u16,
     headers: Vec<String>,
+    trace: String,
     /// Taken out while a part is awaited, as a method awaiting can't hold `&mut self` (wasm-bindgen would refuse a
     /// second call meanwhile).
     body: std::rc::Rc<std::cell::RefCell<Option<crate::Body>>>,
@@ -81,6 +108,12 @@ impl Response {
     #[wasm_bindgen(getter)]
     pub fn status(&self) -> u16 {
         self.status
+    }
+
+    /// The nodes it tried and what the one that answered did, as JSON: empty if it asked for no trace.
+    #[wasm_bindgen(getter)]
+    pub fn trace(&self) -> String {
+        self.trace.clone()
     }
 
     /// Names and values, one after the other, names lowercase.

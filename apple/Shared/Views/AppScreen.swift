@@ -337,14 +337,24 @@ private struct ScreenWebView: Representable {
         #endif
 
         /// The bridge (src/screen/bridge.js's list), and for Settings screens alone,
-        /// `"api" | "signOut" | "appearance" | "device" | "request"`. A page only ever calls its own app, but may open
+        /// `"api" | "signOut" | "appearance" | "device" | "request" | "cache" | "developer"`. A page only ever calls its own app, but may open
         /// another's screens.
         func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) async -> (Any?, String?) {
             guard let body = message.body as? [String: Any] else { return (nil, "Not a message") }
             let route = view.route, store = view.store
             let type = body["type"] as? String ?? ""
-            if ["api", "signOut", "appearance", "device", "request", "cache"].contains(type) && !view.settings { return (nil, "Only Settings can do that.") }
+            if ["api", "signOut", "appearance", "device", "request", "cache", "developer"].contains(type) && !view.settings { return (nil, "Only Settings can do that.") }
             switch type {
+            case "developer":
+                do {
+                    return (try await DeviceClient.shared.developer(body["on"] as? Bool), nil)
+                } catch {
+                    return (nil, error.localizedDescription)
+                }
+            case "traces":
+                // In developer mode, what this device's requests did, for the screen's panel (kit.js); else nothing.
+                guard let json = try? await DeviceClient.shared.traces() else { return (NSNull(), nil) }
+                return (try? JSONSerialization.jsonObject(with: Data(json.utf8)), nil)
             case "api":
                 do {
                     return (try await store.node.api(body["method"] as? String ?? "GET", body["path"] as? String ?? "", body: body["body"]), nil)

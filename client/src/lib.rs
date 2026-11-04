@@ -59,6 +59,8 @@ const READ: usize = 64 << 10;
 
 /// What a session's endpoint sends its certificate in.
 const ENDPOINT_HEADER: &str = "x-one-endpoint";
+/// What a request in developer mode asks for a trace with, and a node answers its own part in (src/node/trace.rs).
+pub const TRACE_HEADER: &str = "x-one-trace";
 
 /// What this white label's clients speak to its nodes.
 fn alpn() -> Vec<u8> {
@@ -72,6 +74,8 @@ pub struct Error {
     /// The install doesn't list this device (yet, or any more): what an app shows is its own screen to approve it.
     pub not_let_in: bool,
     message: String,
+    /// The nodes it tried, for a request that asked for a trace.
+    pub trace: Option<serde_json::Value>,
 }
 
 impl std::fmt::Display for Error {
@@ -83,7 +87,7 @@ impl std::fmt::Display for Error {
 impl std::error::Error for Error {}
 
 fn unsent(message: impl std::fmt::Display) -> Error {
-    Error { sent: false, not_let_in: false, message: message.to_string() }
+    Error { sent: false, not_let_in: false, message: message.to_string(), trace: None }
 }
 
 #[cfg(not(target_family = "wasm"))]
@@ -92,7 +96,7 @@ fn not_let_in(message: impl std::fmt::Display) -> Error {
 }
 
 fn sent(message: impl std::fmt::Display) -> Error {
-    Error { sent: true, not_let_in: false, message: message.to_string() }
+    Error { sent: true, not_let_in: false, message: message.to_string(), trace: None }
 }
 
 /// A request to a node's local API: `path` with its query, from `/`.
@@ -164,6 +168,9 @@ pub struct Response {
     pub status: u16,
     pub headers: Vec<(String, String)>,
     pub body: Body,
+    /// For a request that asked for one (`TRACE_HEADER`): `{ tries, node }`, each node it tried in order, with how
+    /// long it waited and why it moved on, and what the node that answered did, as it said.
+    pub trace: Option<serde_json::Value>,
 }
 
 /// A client device's way to its install's nodes. Clones share it.
@@ -330,6 +337,16 @@ impl Client {
         let nodes = self.0.nodes.lock().unwrap().clone();
         let nodes = self.in_order(&nodes);
         let mut why = unsent("there's no node to ask");
+        // Asked for a trace: each try, as it went.
+        let traced = req.headers.iter().any(|(n, _)| n.eq_ignore_ascii_case(TRACE_HEADER));
+        let (start, mut tries) = (Instant::now(), Vec::new());
+        let tried = |tries: &mut Vec<serde_json::Value>, key: &PublicKey, began: Instant, result: &str, opened: Option<Duration>| {
+            if traced {
+                let ms = |d: Duration| d.as_millis() as u64;
+                tries.push(serde_json::json!({ "node": data_encoding::HEXLOWER.encode(key.as_bytes()), "at": ms(began - start), "ms": ms(began.elapsed()), "result": result, "connect": opened.map(ms) }));
+            }
+        };
+        let traces = |tries: &mut Vec<serde_json::Value>, node: Option<serde_json::Value>| traced.then(|| serde_json::json!({ "tries": std::mem::take(tries), "node": node }));
         for (at, key) in nodes.iter().enumerate() {
             // The last has no other to give way to: it's given the time to be reached, and to answer.
             let last = at + 1 == nodes.len();
@@ -338,12 +355,19 @@ impl Client {
             let head = head(&req.method, &req.path, &headers, req.body.len()?, certificate.as_deref())?;
             let node = key;
             for fresh in [false, true] {
+                let began = Instant::now();
                 let (err, reused) = match self.exchange(node, &head, &req, fresh, last).await {
-                    Ok(response) => return Ok(response),
+                    Ok((mut response, opened)) => {
+                        tried(&mut tries, node, began, "answered", opened);
+                        let theirs = response.headers.iter().find(|h| h.0 == TRACE_HEADER).and_then(|h| data_encoding::BASE64.decode(h.1.as_bytes()).ok()).and_then(|b| serde_json::from_slice(&b).ok());
+                        response.trace = traces(&mut tries, theirs);
+                        return Ok(response);
+                    }
                     Err(e) => e,
                 };
+                tried(&mut tries, node, began, failure(&err), None);
                 if err.sent && !again {
-                    return Err(err);
+                    return Err(Error { trace: traces(&mut tries, None), ..err });
                 }
                 why = err;
                 if !self.on_relay().await {
@@ -354,7 +378,7 @@ impl Client {
                 }
             }
         }
-        Err(why)
+        Err(Error { trace: traces(&mut tries, None), ..why })
     }
 
     /// Whether this device's endpoint is connected to the relay.
@@ -424,9 +448,12 @@ impl Client {
         }
     }
 
-    /// One request on a stream of its own: → the response, or why not and whether the connection was one already open.
-    async fn exchange(&self, node: &PublicKey, head: &[u8], req: &Request, fresh: bool, last: bool) -> Result<Response, (Error, bool)> {
+    /// One request on a stream of its own: → the response and how long a new connection took to open (none if one was
+    /// open), or why not and whether the connection was one already open.
+    async fn exchange(&self, node: &PublicKey, head: &[u8], req: &Request, fresh: bool, last: bool) -> Result<(Response, Option<Duration>), (Error, bool)> {
+        let connecting = Instant::now();
         let (conn, reused) = self.conn(node, fresh, if last { PATIENT } else { CONNECT }).await.map_err(|e| (e, false))?;
+        let opened = (!reused).then(|| connecting.elapsed());
         // A connection gone quiet takes no more streams once its peer's allowance is used: nothing was sent.
         let (mut send, mut recv) = match timeout(ANSWER, conn.open_bi()).await {
             Ok(opened) => opened.map_err(|e| (unsent(e), reused))?,
@@ -455,7 +482,19 @@ impl Client {
             read_response(&mut recv, head_only).await
         }
         .map_err(|e| (e, reused))?;
-        Ok(Response { node: *conn.remote_id().as_bytes(), status, headers, body: Body { recv: Some(recv), ..body } })
+        Ok((Response { node: *conn.remote_id().as_bytes(), status, headers, body: Body { recv: Some(recv), ..body }, trace: None }, opened))
+    }
+}
+
+/// Why a try at a node failed, as a trace says it: which wait it gave up on.
+fn failure(err: &Error) -> &'static str {
+    match err.message.as_str() {
+        "the node isn't connected" => "no connection",
+        "the node isn't taking requests" => "not taking requests",
+        "the node didn't answer" => "no answer",
+        m if m.starts_with("the node couldn't be reached") => "unreachable",
+        _ if err.sent => "lost",
+        _ => "failed",
     }
 }
 

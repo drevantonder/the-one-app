@@ -347,3 +347,17 @@ async fn only_a_repos_owner_pushes_to_it_or_deletes_it_from_any_device() {
     // Andre does.
     a.call(repos("delete", json!({ "repo": "home" }))).await.unwrap();
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_trace_says_where_a_call_went_and_never_what_it_carried() {
+    use one::node::trace;
+    let a = start("trace-a").await;
+    a.create("Home", "Andre").await.unwrap();
+    eventually("the board to run", async || a.call(board("post", json!({ "text": "a private thought" }))).await.is_ok()).await;
+    let t = trace::Trace::new();
+    let read = trace::within(Some(t.clone()), a.call(board("read", json!({ "format": "json" })))).await.unwrap();
+    assert!(read.to_string().contains("a private thought"), "{read}");
+    let said = t.done(&a.device_name()).to_string();
+    assert!(said.contains(r#""step":"device""#) && said.contains(r#""op":"read""#) && said.contains(r#""step":"run""#), "{said}");
+    assert!(!said.contains("private thought") && !said.contains(&a.user().unwrap()), "a trace holds names and timings alone: {said}");
+}

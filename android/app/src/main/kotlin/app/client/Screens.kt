@@ -613,7 +613,7 @@ private class Bridge(val context: Context, val store: Store, val route: Route, v
     /** Each of the bridge's messages (src/screen/bridge.js's list). */
     private suspend fun answer(m: JsonObject): JsonElement? {
         val type = str(m, "type")
-        if (type in listOf("api", "signOut", "appearance", "device", "request", "cache") && !own) throw NodeError("Only Settings can do that.")
+        if (type in listOf("api", "signOut", "appearance", "device", "request", "cache", "developer") && !own) throw NodeError("Only Settings can do that.")
         when (type) {
             "call" -> {
                 val app = app ?: throw NodeError("Settings has no app to call.")
@@ -708,6 +708,9 @@ private class Bridge(val context: Context, val store: Store, val route: Route, v
                 )
                 return null
             }
+            "developer" -> return JsonPrimitive(store.client.developer((m["on"] as? JsonPrimitive)?.booleanOrNull))
+            // In developer mode, what this phone's requests did, for the screen's panel (kit.js); else nothing.
+            "traces" -> return runCatching { store.client.traces() }.getOrNull()?.let { runCatching { json.parseToJsonElement(it) }.getOrNull() } ?: JsonNull
             "cache" -> {
                 val key = str(m, "key") ?: ""
                 if (!m.containsKey("value")) return store.kept(key)?.let { runCatching { json.parseToJsonElement(it) }.getOrNull() } ?: JsonNull

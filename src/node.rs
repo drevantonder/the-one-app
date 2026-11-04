@@ -47,6 +47,7 @@ pub use standing::GRANT_DAYS;
 mod state;
 mod status;
 mod storage;
+pub mod trace;
 mod vault;
 
 /// How long a call may run before it's stopped.
@@ -469,6 +470,8 @@ pub struct Grant {
     pub depth: u32,
     /// The app whose `ctx.apps` made the call, if one did.
     pub from: Option<String>,
+    /// The trace of the request that made the call, if it asked for one: what its app's reads add to.
+    pub trace: Option<trace::Trace>,
 }
 
 /// Holds a grant for as long as its call runs.

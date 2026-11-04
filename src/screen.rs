@@ -87,6 +87,7 @@ const CLIENT_SCREENS: &[(&str, &str)] = &[
     ("backups", include_str!("screen/settings/backups.html")),
     ("devices", include_str!("screen/settings/devices.html")),
     ("connect-ai", include_str!("screen/settings/connect-ai.html")),
+    ("developer", include_str!("screen/settings/developer.html")),
 ];
 
 /// A client's own screen's HTML, or a note that it isn't there.
