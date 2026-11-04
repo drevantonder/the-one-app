@@ -563,7 +563,7 @@ fn client(dir: &Path, checkout: &Path, settings: &one::kernel::Settings, rest: &
 }
 
 /// For `try client web` from this checkout's own debug build: the web client's WebAssembly built, and this build made
-/// again with it embedded (the kernel serves what its build holds), as `{CLI} update` does for a release but at dev
+/// again with it embedded from target/client, as every build of this checkout does from then on (the kernel serves what its build holds), as `{CLI} update` does for a release but at dev
 /// speed: no release build, and cargo keeps what hasn't changed, so a run with nothing changed does nothing here. The
 /// try install's programs run the old build, so a new one is stopped (it keeps its data) and the command run again as
 /// the new build, which starts it again.
@@ -581,7 +581,12 @@ fn web_client_built(dir: &Path, checkout: &Path, rest: &[String]) -> Result<()> 
     let again = format!("{}_TRY_WEB_CLIENT_EMBEDDED", CLI.to_uppercase());
     anyhow::ensure!(std::env::var_os(&again).is_none(), "{CLI} was built again with the web client and doesn't hold it: build it with CLIENT={}", built.display());
     eprintln!("Building {CLI} again with it (target/debug, not release)…");
-    crate::update::run_quiet(std::process::Command::new("nice").arg(crate::update::cargo()).current_dir(checkout).env("CLIENT", &built).arg("build"))?;
+    // build.rs takes the client from target/client (what `cargo test` does too, so they build the same one) and watches
+    // the files there; the first time, it's watching none, so touching it has it look.
+    if one::config::CLIENT.is_empty() {
+        std::fs::File::options().write(true).open(checkout.join("build.rs"))?.set_modified(std::time::SystemTime::now())?;
+    }
+    crate::update::run_quiet(std::process::Command::new("nice").arg(crate::update::cargo()).current_dir(checkout).env_remove("CLIENT").arg("build"))?;
     stop(dir, false)?;
     use std::os::unix::process::CommandExt;
     Err(std::process::Command::new(&own).arg("try").args(rest).env(&again, "1").exec().into())
