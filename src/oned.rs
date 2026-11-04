@@ -39,15 +39,17 @@ pub fn program(name: &str) -> PathBuf {
     home.join(".local/bin").join(format!("{CLI}-{name}"))
 }
 
-/// The services this device could run as processes of oned's: this program's own, those whose programs are here, and
-/// those with a release for its platform (`released`), which it fetches when one is switched on.
-fn offered(released: &BTreeSet<String>) -> BTreeSet<String> {
+/// The services this device could run as processes of oned's: this program's own, those with a release for its
+/// platform (`released`), which it fetches when one is switched on, and those whose programs are here that ran here
+/// before or are switched on (`on`), not every `<cli>-` program there.
+fn offered(released: &BTreeSet<String>, on: &BTreeMap<String, u64>) -> BTreeSet<String> {
     let mut names: BTreeSet<String> = crate::services::hosted().iter().map(|h| h.name.to_string()).collect();
     let dir = program("x").parent().map(|p| p.to_path_buf()).unwrap_or_default();
     let prefix = format!("{CLI}-");
     for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
         let file = entry.file_name().to_string_lossy().to_string();
-        if let Some(name) = file.strip_prefix(&prefix).filter(|n| crate::members::valid_app_name(n)) {
+        let Some(name) = file.strip_prefix(&prefix).filter(|n| crate::members::valid_app_name(n)) else { continue };
+        if on.contains_key(name) || crate::service::folder(name).is_dir() {
             names.insert(name.to_string());
         }
     }
@@ -165,7 +167,7 @@ pub fn keep_parts(node: Node, runtime: tokio::runtime::Handle) {
             }
             match node.parts_on() {
                 Ok((install, on)) => {
-                    let names = offered(&released.keys().cloned().collect());
+                    let names = offered(&released.keys().cloned().collect(), &on);
                     NOW.lock().unwrap().1 = names.clone();
                     for name in &names {
                         let wanted = on.contains_key(name);
