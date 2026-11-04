@@ -34,7 +34,7 @@
   // priority (an admin's to change), and Rename and Remove for its owner; then Cloudflare, their browsers, and devices
   // waiting to be let in on top, approved by tapping (where this device holds its own keys, `device.keys`). Under them,
   // what their devices keep running for them, and a passkey to get back in with.
-  let state, device, apps = [], passkey = false, waiting = [], seen = {};
+  let state, device, apps = [], passkey = false, waiting = [], seen = {}, seenRead = false;
   let error = "";
   // A new device's code, from its QR's link (`/approve#CODE`), asked about once.
   let scanned = one.params?.approve || "";
@@ -85,7 +85,7 @@
     // This device, as its node says, or by its own key: a browser's, which signs in, or the one asking.
     const mark = (e) => ({ ...e, me: e.me || [device.key, state.me?.key].includes(e.key) });
     const devices = (state.install?.devices || []).map(mark), clients = (state.install?.clients || []).map(mark);
-    const cards = [], browsers = [];
+    const cards = [], browsers = [], stale = [];
     const card = (user, name) => {
       const c = { user, name: shown(name), node: null, services: [], clients: [] };
       cards.push(c);
@@ -99,6 +99,12 @@
     for (const c of clients) {
       if (c.passkey || BROWSER.test(c.name)) {
         browsers.push(c);
+        continue;
+      }
+      // One listed before sign-ins named their device names it itself when its app next runs: one that hasn't been
+      // let in for a week never will, and folds into one row.
+      if (!c.device && !c.me && seenRead && Date.now() - Math.max(seen[c.key] || 0, c.since || 0) > 7 * 86_400_000) {
+        stale.push(c);
         continue;
       }
       // An app's sign-in, under the device it's on: its oned's card, or a phone's own, which a sign-in there again
@@ -128,7 +134,7 @@
     // Theirs, and others' that run their apps: all of those for an admin, who sets where things run.
     const shownCards = cards.filter((c) => c.user === me() || (c.node && (admin() || holds(c.node))));
     shownCards.sort((a, b) => (a.runs ? rank(a.priority) : 2000) - (b.runs ? rank(b.priority) : 2000) || a.name.localeCompare(b.name));
-    return { cards: shownCards, browsers: browsers.filter((b) => b.user === me()) };
+    return { cards: shownCards, browsers: browsers.filter((b) => b.user === me()), stale: stale.filter((c) => c.user === me()) };
   }
 
   // The numbers devices have now, from 1, and the next, to choose from.
@@ -267,13 +273,14 @@
     choose(scheduled(scope).map((a) => pick(a.title || a.name, `data-keep-app="${one.esc(a.name)}"`)), "Apps that run on their own, every so often.");
   }
 
-  let drawn = { cards: [], browsers: [] };
+  let drawn = { cards: [], browsers: [], stale: [] };
   function page() {
     one.largeTitle("Devices");
     drawn = grouped();
     let html = '<div class="large-title">Devices</div>';
     if (waiting.length) html += '<h2 class="section">Waiting for you</h2><div class="devices">' + waiting.map(waitingCard).join("") + "</div>";
     html += '<div id="approve"></div><div class="devices">' + drawn.cards.map(deviceCard).join("") + cloudflareCard() + "</div>";
+    if (drawn.stale.length) html += `<div class="list">${oldSignIns({ old: drawn.stale }, "stale", true)}</div>`;
     html += `<div class="list"><a class="row plain action-row" data-add>${one.icon("plus-circle")}<span>Add a Device</span></a></div>`;
     if (drawn.browsers.length) html += '<h2 class="section">Browsers</h2><div class="list">' + drawn.browsers.map(browserRow).join("") + "</div>";
     // A device that isn't listed yet still signs out.
@@ -305,7 +312,7 @@
       asks.push(
         one.api("GET", "/v1/devices/passkey").then((p) => (passkey = p.passkey === true), () => {}),
         one.api("GET", "/v1/devices/requests").then((w) => (waiting = w.filter((r) => r.code)), () => {}),
-        one.api("GET", "/v1/devices/seen").then((s) => (seen = s || {}), () => {}),
+        one.api("GET", "/v1/devices/seen").then((s) => ((seen = s || {}), (seenRead = true)), () => {}),
       );
     }
     await Promise.all(asks);
@@ -340,7 +347,7 @@
     if (d.let) busy(t, () => one.api("POST", "/v1/devices/approve", { code: d.let, confirm: true }));
     else if (d.refuse) busy(t, () => one.api("POST", "/v1/devices/refuse", { code: d.refuse }));
     else if (d.priority) choosePriority(d.priority, t);
-    else if (d.old) removeOld(drawn.cards[d.old]);
+    else if (d.old) removeOld(d.old === "stale" ? { old: drawn.stale } : drawn.cards[d.old]);
     else if (d.more) menu(d.more, t);
     else if (d.grant) act(() => one.api("POST", "/v1/grant", { ...JSON.parse(d.grant), days: 0 }));
     else if (t.hasAttribute("data-out")) signOut();
@@ -459,7 +466,8 @@
 
   async function removeOld(card) {
     const n = card.old.length;
-    if (!(await one.alert({ title: `Remove ${n} old sign-in${n > 1 ? "s" : ""} of ${card.name}?`, action: "Remove", danger: true }))) return;
+    const of = card.name ? ` of ${card.name}` : "";
+    if (!(await one.alert({ title: `Remove ${n} old sign-in${n > 1 ? "s" : ""}${of}?`, action: "Remove", danger: true }))) return;
     act(async () => {
       for (const c of card.old) await one.api("POST", "/v1/remove", { key: c.key });
     });
