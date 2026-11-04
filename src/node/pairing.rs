@@ -23,7 +23,7 @@ impl Node {
         let joins_as = user.clone().unwrap_or_else(|| asker.user.clone());
         let secret: [u8; 16] = rand::random();
         let by = (asker.key != self.0.id).then(|| hex(&asker.key));
-        self.add_pairing(secret, Pairing { user: asker.user.clone(), by, admits: user, until: now_ms() + PAIRING_LIFE })?;
+        self.add_pairing(secret, Pairing { user: asker.user.clone(), by, admits: user, until: now_ms() + PAIRING_LIFE, tried: None })?;
         self.tell_relay(json!({ "pairing": { "hash": net::ticket_hash(&net::pairing_ticket(&secret)), "until": now_ms() + PAIRING_LIFE } }));
         let code = PairingCode { address, from: self.0.id, secret };
         let mut bytes = Vec::new();
@@ -88,8 +88,32 @@ impl Node {
         Ok(())
     }
 
+    /// Joins a machine with a pairing code: used up once it's in, and kept for that machine alone when its join didn't
+    /// finish, so trying again with the same code finishes it rather than finding it listed already.
     pub(super) async fn admit(&self, key: Key, request: JoinRequest) -> Result<JoinReply> {
-        let pairing = self.take_pairing(&request.secret)?.filter(|p| p.until > now_ms()).context("this pairing code was already used or has expired")?;
+        let mut pairing = self.take_pairing(&request.secret)?.filter(|p| p.until > now_ms()).context("this pairing code was already used or has expired")?;
+        if pairing.tried.as_ref().is_some_and(|t| *t != hex(&key)) {
+            let _ = self.keep_pairing(request.secret, pairing);
+            bail!("this pairing code was already used or has expired");
+        }
+        let admitted = self.admit_with(key, &request, &pairing).await;
+        if admitted.is_err() {
+            // Once it's listed, the code is that machine's to finish with; before, anyone's who has it.
+            if self.with(|i| Ok(i.r.members.machine(&key).is_some()))? {
+                pairing.tried = Some(hex(&key));
+            }
+            let _ = self.keep_pairing(request.secret, pairing);
+        }
+        admitted
+    }
+
+    fn keep_pairing(&self, secret: [u8; 16], pairing: Pairing) -> Result<()> {
+        let mut pairings = self.0.pairings.lock().unwrap();
+        pairings.insert(secret, pairing);
+        self.save_pairings(&pairings)
+    }
+
+    async fn admit_with(&self, key: Key, request: &JoinRequest, pairing: &Pairing) -> Result<JoinReply> {
         // Phones joined as clients before they signed in at your One App's address: only devices join now.
         ensure!(request.as_ == "device", "only computers join with a pairing code: sign in at your One App's address instead");
         let user = pairing.admits.clone().unwrap_or_else(|| pairing.user.clone());
@@ -100,12 +124,15 @@ impl Node {
         // what that admin's listing may (`global`, groups) but never that person's own scope, until a device of theirs
         // lists it again (`Members::runs_for`).
         let roles = if user == pairing.user { MACHINE } else { &[members::Kind::Compute][..] };
-        let listed = members::device(&endpoint, &user, &request.name, roles, None);
-        self.member_content(&Caller { key: by.unwrap_or(self.0.id), user: pairing.user.clone(), agent: None, token: None }, listed).await.context("this device can no longer admit that machine")?;
+        // Listed already by a join with this code that didn't finish: only the relay's left.
+        if !self.with(|i| Ok(i.r.members.machine(&key).is_some_and(|m| m.user == user)))? {
+            let listed = members::device(&endpoint, &user, &request.name, roles, None);
+            self.member_content(&Caller { key: by.unwrap_or(self.0.id), user: pairing.user.clone(), agent: None, token: None }, listed).await.context("this device can no longer admit that machine")?;
+        }
         // Waited for: until the relay lets it in, the machine that joined reaches nothing.
         if self.address().is_ok() {
             let admin = self.with(|i| Ok(i.r.members.is_admin(&user)))?;
-            self.tell_relay_now(json!({ "add": hex(&key), "admin": admin, "role": "compute" })).await.context("your One App's network didn't take this machine: pair it again")?;
+            self.tell_relay_now(json!({ "add": hex(&key), "admin": admin, "role": "compute" })).await.context("your One App's network didn't take this machine: try again with the same code")?;
         }
         Ok(JoinReply { root, user, bucket })
     }

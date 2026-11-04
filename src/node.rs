@@ -187,6 +187,9 @@ struct Pairing {
     admits: Option<String>,
     /// Milliseconds since 1970 after which it no longer works.
     until: u64,
+    /// The machine whose join with it didn't finish (hex), which alone may use it again.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    tried: Option<String>,
 }
 
 /// What a machine's node is: the device its person's CLI, MCP and Mac app sign with, and compute.
