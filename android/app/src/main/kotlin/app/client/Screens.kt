@@ -27,10 +27,14 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.width
 import androidx.compose.ui.graphics.Color
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Row
@@ -74,6 +78,7 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.input.pointer.pointerInput
@@ -84,6 +89,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -182,9 +188,16 @@ fun Shell(store: Store) {
     val wide = LocalConfiguration.current.screenWidthDp >= 600
     val dock = wide && store.developer && store.docked && store.phase == Store.Phase.Ready
     val dev = { route: Route, since: Long -> store.openDeveloper(route, since, wide) }
-    Box(Modifier.fillMaxSize().background(p.background)) {
+    BoxWithConstraints(Modifier.fillMaxSize().background(p.background)) {
+        // Developer's panel: 45% of the window until its top edge is dragged, then as tall as it was left, never under
+        // 120dp nor leaving the screen less than 120dp below the status bar.
+        val statusBar = with(LocalDensity.current) { WindowInsets.statusBars.getTop(this).toDp() }
+        val most = (maxHeight - statusBar - 120.dp).coerceAtLeast(120.dp)
+        var dragged by remember { mutableStateOf<Int?>(null) }
+        val panel = (dragged ?: store.devtoolsHeight.takeIf { it > 0 } ?: (maxHeight.value * 0.45f).toInt()).dp.coerceIn(120.dp, most)
+        val current by rememberUpdatedState(panel)
         Column(Modifier.fillMaxSize()) {
-        Box(Modifier.weight(if (dock) 0.55f else 1f).fillMaxWidth().then(if (dock) Modifier.consumeWindowInsets(WindowInsets.navigationBars) else Modifier)) {
+        Box(Modifier.weight(1f).fillMaxWidth().clipToBounds().then(if (dock) Modifier.consumeWindowInsets(WindowInsets.navigationBars) else Modifier)) {
         // Every page side by side then Settings, to swipe between, opened at the page asked for. Its dots sit at its
         // bottom, above the gesture bar.
         Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.systemBars)) {
@@ -217,8 +230,27 @@ fun Shell(store: Store) {
         if (dock) {
             val front = store.path.lastOrNull()
             val route = if (front != null) store.devtools(front.route, front.since) else store.devtools(Route.Own("pages"), store.shown)
-            Column(Modifier.weight(0.45f).fillMaxWidth().windowInsetsPadding(WindowInsets.navigationBars)) {
-                HorizontalDivider(color = p.separator)
+            val density = LocalDensity.current
+            Column(Modifier.height(panel).fillMaxWidth().windowInsetsPadding(WindowInsets.navigationBars)) {
+                // Its top edge: drag it up or down to make the panel taller or shorter.
+                Box(
+                    Modifier.fillMaxWidth().height(20.dp).semantics { contentDescription = "Resize Developer" }.pointerInput(most) {
+                        var h = 0f
+                        detectVerticalDragGestures(
+                            onDragStart = { h = current.toPx() },
+                            onDragEnd = { dragged?.let { store.resizeDevtools(it) }; dragged = null },
+                            onDragCancel = { dragged?.let { store.resizeDevtools(it) }; dragged = null },
+                        ) { change, dy ->
+                            change.consume()
+                            h = (h - dy).coerceIn(120.dp.toPx(), most.toPx())
+                            dragged = (h / density.density).toInt()
+                        }
+                    },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    HorizontalDivider(color = p.separator, modifier = Modifier.align(Alignment.TopCenter))
+                    Box(Modifier.width(36.dp).height(4.dp).clip(RoundedCornerShape(2.dp)).background(p.separator))
+                }
                 key(route) { ScreenView(store, route, docked = true) }
             }
         }

@@ -111,6 +111,14 @@ class Store(private val application: android.app.Application, val signIn: SignIn
         private set
     /** Whether Developer's panel is docked under the screen in front, on a wide window; a phone's is a sheet. */
     var docked by mutableStateOf(false)
+    /** How tall that panel is, in dp, as its top edge was last dragged (kept on this phone); 0 until it has been. */
+    var devtoolsHeight by mutableStateOf(prefs.getInt("devtools.height", 0))
+        private set
+
+    fun resizeDevtools(dp: Int) {
+        devtoolsHeight = dp
+        prefs.edit().putInt("devtools.height", dp).apply()
+    }
 
     /** Turns Developer mode on or off, or just asks → whether it's on. */
     suspend fun developer(on: Boolean?): Boolean = client.developer(on).also {
