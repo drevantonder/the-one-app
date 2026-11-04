@@ -132,7 +132,7 @@ const acts = `
 /// A page, its colours for the browser's bar the kit's page colour (tests/contracts.rs).
 const page = (title, body, script) => `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
-<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#141414"><title>${escape(title)}</title><style>${style}</style></head>
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#141414"><title>${escape(title)}</title><link rel="icon" href="/logo.png"><style>${style}</style></head>
 <body><main><img class="mark" src="/logo.png" alt="">${body}<div class="problems" role="status"></div></main><script>${webauthn}${script}</script></body></html>`;
 
 /// Which passkeys work, in plain words, for the pages that make or ask for one.
