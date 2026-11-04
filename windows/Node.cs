@@ -73,6 +73,14 @@ public static class Node
         return reply?["ok"]?.DeepClone();
     }
 
+    /// What an app screen's call answered last, if its operation only reads: `{ answer, at }`, for bridge.js's `kept`.
+    public static async Task<JsonNode?> Kept(string app, string op, JsonNode? input)
+    {
+        if (await Client.Kept(app, op, System.Text.Encoding.UTF8.GetBytes((input ?? new JsonObject()).ToJsonString())) is not { } kept) return null;
+        try { return new JsonObject { ["answer"] = JsonNode.Parse(kept.Answer), ["at"] = kept.At }; }
+        catch { return null; }
+    }
+
     /// An app's screen, as its page.
     public static async Task<string> Screen(string app, string screen, string parameters, string? scope)
     {

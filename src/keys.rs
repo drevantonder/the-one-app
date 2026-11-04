@@ -53,6 +53,12 @@ impl Endpoint {
     }
 }
 
+/// What a native app's device seals the last answers of its screens' calls under (client/src/device.rs): its own, from
+/// its key, so no other device (another person's sign-in has its own) opens them.
+pub fn answers_key(key: &SigningKey) -> [u8; 32] {
+    hkdf(&key.to_bytes(), b"one/answers")
+}
+
 /// An endpoint's X25519 secret, for opening what's sealed to it, as `Endpoint::of` lists it.
 pub fn seal_secret(key: &SigningKey) -> [u8; 32] {
     crate::kernel::twin(&key.to_bytes()).0

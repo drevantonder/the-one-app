@@ -194,6 +194,11 @@ struct MacNode: NodeTransport {
         try await signedIn("") { try await $0.page(app: app, screen: screen, params: params, scope: scope) }
     }
 
+    func kept(app: String, op: String, input: Data) async -> (answer: Data, at: Int64)? {
+        guard let node = try? node("") else { return nil }
+        return await node.kept(app: app, op: op, input: input)
+    }
+
     /// Signed out, none: the window is asked again once someone signs in.
     func events() -> AsyncThrowingStream<NodeEvent, Error> {
         guard let node = try? node("") else { return AsyncThrowingStream { _ in } }

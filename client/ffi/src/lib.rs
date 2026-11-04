@@ -65,6 +65,13 @@ pub struct Header {
     pub value: String,
 }
 
+/// A call's last answer (its JSON) and when it was answered (ms since 1970).
+#[derive(uniffi::Record)]
+pub struct KeptAnswer {
+    pub answer: Vec<u8>,
+    pub at: i64,
+}
+
 /// This app as a device of its person: `ThisDevice`, as apps list the install's other devices as `Device`.
 #[derive(uniffi::Object)]
 pub struct ThisDevice(one_client::Device);
@@ -75,7 +82,7 @@ impl ThisDevice {
     #[uniffi::constructor]
     pub fn new(secret: Vec<u8>, address: String, dir: String) -> Result<Arc<ThisDevice>, OneError> {
         let secret: [u8; 32] = secret.try_into().map_err(|_| failed("a device's key is 32 bytes"))?;
-        Ok(Arc::new(ThisDevice(one_client::Device::new(secret, &address, &dir))))
+        Ok(Arc::new(ThisDevice(one_client::Device::new(secret, &address, &dir).keeping())))
     }
 
     /// Its key, hex.
@@ -131,6 +138,13 @@ impl ThisDevice {
     /// Its latest requests' traces, as JSON, for a screen's `traces` message: none out of developer mode.
     pub fn traces(&self) -> Option<String> {
         self.0.traces()
+    }
+
+    /// What an app's call answered last for `input` (JSON), if its operation only reads, for its screen to show at
+    /// once while it asks again (bridge.js's `kept`): kept sealed under this device's key, and forgotten when it signs
+    /// out or is taken out.
+    pub fn kept(&self, app: String, op: String, input: Vec<u8>) -> Option<KeptAnswer> {
+        self.0.kept(&app, &op, &input).map(|(answer, at)| KeptAnswer { answer, at: at as i64 })
     }
 
     /// Starts again with a fresh connection: when the network comes back.

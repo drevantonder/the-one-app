@@ -91,6 +91,14 @@ actor DeviceClient {
         await close()
     }
 
+    /// What an app's call answered last for `input`, if its operation only reads (client/ffi's `kept`), from this
+    /// device alone: its answer's JSON, and when (ms).
+    func kept(app: String, op: String, input: Data) async -> (answer: Data, at: Int64)? {
+        let device: ThisDevice
+        if let made = self.device { device = made } else if let made = try? await current() { device = made } else { return nil }
+        return (try? await off { device.kept(app: app, op: op, input: input).map { ($0.answer, $0.at) } }) ?? nil
+    }
+
     /// Its connections close. Its key stays.
     func close() async {
         if let device { await off { device.disconnect() } }
@@ -196,6 +204,10 @@ struct DeviceNode: NodeTransport {
             throw NodeError(error ?? (status >= 500 ? String(localized: "Your devices aren’t answering.") : String(localized: "That didn’t work. Try again.")))
         }
         return data
+    }
+
+    func kept(app: String, op: String, input: Data) async -> (answer: Data, at: Int64)? {
+        await DeviceClient.shared.kept(app: app, op: op, input: input)
     }
 
     func page(app: String, screen: String, params: String, scope: String?) async throws -> String {

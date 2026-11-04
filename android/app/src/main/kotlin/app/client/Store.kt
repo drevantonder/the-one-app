@@ -183,6 +183,13 @@ class Store(private val application: android.app.Application, val signIn: SignIn
     suspend fun call(app: String, op: String, input: JsonElement = JsonObject(emptyMap())): JsonElement? =
         (post("/v1/call", obj("app" to app, "op" to op, "input" to input, "client" to "android")) as? JsonObject)?.get("ok")
 
+    /** What an app screen's call answered last, if its operation only reads: `{ answer, at }`, for bridge.js's `kept`. */
+    suspend fun kept(app: String, op: String, input: JsonElement): JsonElement? {
+        val kept = client.kept(app, op, input.toString().toByteArray()) ?: return null
+        val answer = runCatching { json.parseToJsonElement(String(kept.answer)) }.getOrNull() ?: return null
+        return obj("answer" to answer, "at" to kept.at)
+    }
+
     /** A screen's page: an app's as the node makes it; the client's own from those built into this app (client/ffi),
      *  never a node's, since they act as the person. */
     suspend fun screen(r: Route): String = when (r) {

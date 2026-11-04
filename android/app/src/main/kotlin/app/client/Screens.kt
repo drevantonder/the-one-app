@@ -615,6 +615,10 @@ private class Bridge(val context: Context, val store: Store, val route: Route, v
         val type = str(m, "type")
         if (type in listOf("api", "signOut", "appearance", "device", "request", "cache", "developer") && !own) throw NodeError("Only Settings can do that.")
         when (type) {
+            "kept" -> {
+                val app = app ?: return null
+                return store.kept(app.app, str(m, "op") ?: "", m["input"] ?: JsonObject(emptyMap()))
+            }
             "call" -> {
                 val app = app ?: throw NodeError("Settings has no app to call.")
                 return store.call(app.app, str(m, "op") ?: "", m["input"] ?: JsonObject(emptyMap()))

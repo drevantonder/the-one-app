@@ -382,6 +382,9 @@ public sealed class AppScreen : Grid
                 case "request":
                     Reply(id, await Asked(Route.Request(Text(m, "scope") ?? "", Text(m, "id") ?? "")));
                     return;
+                case "kept":
+                    Reply(id, Own ? null : await Node.Kept(route.App!, Text(m, "op") ?? "", m["input"]?.DeepClone()));
+                    return;
                 case "call":
                     if (Own) Fail(id, "Settings has no app to call.");
                     else Reply(id, await Node.Call(route.App!, Text(m, "op") ?? "", m["input"]?.DeepClone() ?? new JsonObject()));

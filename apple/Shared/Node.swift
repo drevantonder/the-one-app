@@ -216,10 +216,13 @@ protocol NodeTransport: Sendable {
     var unreachable: String { get }
     /// Lets this app in as its person's device, if it needs to be, showing the code it's approved by meanwhile.
     func join(showing: @MainActor @Sendable (String) -> Void) async throws
+    /// What an app's call answered last, if this transport keeps it: its JSON, and when (ms).
+    func kept(app: String, op: String, input: Data) async -> (answer: Data, at: Int64)?
 }
 
 extension NodeTransport {
     func join(showing: @MainActor @Sendable (String) -> Void) async throws {}
+    func kept(app: String, op: String, input: Data) async -> (answer: Data, at: Int64)? { nil }
 }
 
 /// What this machine's own programs send its node to say they are: the token in the node's home, which only this
@@ -502,6 +505,13 @@ struct NodeClient: Sendable {
         let reply = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
         if let error = reply["error"] as? String { throw NodeError(error) }
         return try JSONSerialization.data(withJSONObject: reply["ok"] ?? NSNull(), options: .fragmentsAllowed)
+    }
+
+    /// What an app screen's call answered last, if its operation only reads: `{ answer, at }`, for bridge.js's `kept`.
+    func kept(app: String, op: String, input: Data) async -> [String: Any]? {
+        guard let kept = await transport.kept(app: app, op: op, input: input),
+              let answer = try? JSONSerialization.jsonObject(with: kept.answer, options: .fragmentsAllowed) else { return nil }
+        return ["answer": answer, "at": kept.at]
     }
 
     /// Names a call wherever it's sent, so sent again it runs once.

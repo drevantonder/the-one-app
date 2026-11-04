@@ -23,6 +23,7 @@ use one::members::{self, Members};
 use data_encoding::BASE64URL_NOPAD as B64U;
 use serde_json::{Value, json};
 
+use crate::answers::Answers;
 use crate::bucket::Signed;
 use crate::{Body, Client, Error, Request, Response, Sent, TRACE_HEADER, not_let_in, unsent};
 
@@ -88,6 +89,9 @@ pub struct Device {
     needs: Mutex<BTreeMap<String, (String, Vec<Need>)>>,
     /// In developer mode, its latest requests' traces, oldest first (`traces`).
     traces: Mutex<std::collections::VecDeque<Value>>,
+    /// The last answer of each call that only reads, for its app's screens (`kept`): a native app's keeps them
+    /// (`keeping`), the CLI's doesn't.
+    answers: Option<Answers>,
 }
 
 impl Device {
@@ -108,7 +112,14 @@ impl Device {
             app_keys: Mutex::default(),
             needs: Mutex::new(needs),
             traces: Mutex::default(),
+            answers: None,
         }
+    }
+
+    /// The same device, keeping the last answer of each call that only reads (`kept`): a native app's.
+    pub fn keeping(mut self) -> Device {
+        self.answers = Some(Answers::new(&self.dir, &self.key));
+        self
     }
 
     // Developer mode.
@@ -371,6 +382,7 @@ impl Device {
     /// Closes its connections, until it's asked again: when its person signs out, which also forgets it was in.
     pub async fn close(&self) {
         let _ = std::fs::remove_file(self.dir.join("joined"));
+        self.forget_answers();
         self.disconnect().await;
     }
 
@@ -446,6 +458,7 @@ impl Device {
                 client.close().await;
             }
             *self.known.lock().unwrap() = None;
+            self.forget_answers();
             return Err(refused());
         }
         Err(err)
@@ -511,6 +524,19 @@ impl Device {
                 self.learn_order(&bytes).await;
                 return Ok(Response { status: 200, headers: response.headers, node: response.node, body: Body::whole(bytes), trace: response.trace });
             }
+            // What a screen's call answered, kept if it only reads, as the whole list of apps says which do.
+            if let Some(answers) = &self.answers
+                && response.status == 200
+                && ((method == "GET" && path == "/v1/apps") || (method == "POST" && path == "/v1/call"))
+            {
+                let bytes = response.body.bytes().await?;
+                if path == "/v1/apps" {
+                    answers.learn(&bytes);
+                } else {
+                    answers.keep(body.bytes(), &bytes);
+                }
+                return Ok(Response { status: 200, headers: response.headers, node: response.node, body: Body::whole(bytes), trace: response.trace });
+            }
             return Ok(response);
         }
     }
@@ -571,6 +597,18 @@ impl Device {
         }
         if let Some(client) = self.client.lock().await.as_ref() {
             let _ = client.set_nodes(&self.ordered(&nodes));
+        }
+    }
+
+    /// What `app`'s `op` answered last for `input` (JSON), if it only reads: its answer's JSON, and when (ms). For a
+    /// screen to show at once while it asks again (bridge.js's `kept`).
+    pub fn kept(&self, app: &str, op: &str, input: &[u8]) -> Option<(Vec<u8>, u64)> {
+        self.answers.as_ref()?.kept(app, op, input)
+    }
+
+    fn forget_answers(&self) {
+        if let Some(answers) = &self.answers {
+            answers.forget();
         }
     }
 

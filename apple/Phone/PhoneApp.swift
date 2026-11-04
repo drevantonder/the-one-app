@@ -193,6 +193,10 @@ struct PhoneNode: NodeTransport {
         node.events()
     }
 
+    func kept(app: String, op: String, input: Data) async -> (answer: Data, at: Int64)? {
+        await node.kept(app: app, op: op, input: input)
+    }
+
     func join(showing: @MainActor @Sendable (String) -> Void) async throws {
         guard Phone.nodeURL == nil else { return }
         let name = await UIDevice.current.name

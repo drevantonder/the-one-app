@@ -24,9 +24,13 @@ pub mod relayed;
 mod wasm;
 
 #[cfg(not(target_family = "wasm"))]
+mod answers;
+#[cfg(not(target_family = "wasm"))]
 mod bucket;
 #[cfg(not(target_family = "wasm"))]
 mod device;
+#[cfg(not(target_family = "wasm"))]
+pub use answers::Answers;
 #[cfg(not(target_family = "wasm"))]
 pub use device::{Device, new_secret};
 

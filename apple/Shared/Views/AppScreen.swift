@@ -388,6 +388,9 @@ private struct ScreenWebView: Representable {
                 } catch {
                     return (nil, error.localizedDescription)
                 }
+            case "kept":
+                guard !view.settings, let input = try? JSONSerialization.data(withJSONObject: body["input"] ?? [:], options: .fragmentsAllowed) else { return (nil, nil) }
+                return (await view.store.node.kept(app: route.app, op: body["op"] as? String ?? "", input: input), nil)
             case "call" where view.settings:
                 return (nil, "Settings has no app to call.")
             case "call":
