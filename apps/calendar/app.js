@@ -40,20 +40,20 @@ export default {
   uses: { services: ["calendar"] },
 
   ops: {
-    accounts: {
+    devices: {
       reads: true,
-      description: "The Macs Calendar runs on: each { account, ok }, account the Mac's name, ok while it's online. Calendar's own accounts (iCloud, Google, Exchange) are in calendar_calendars.",
+      description: "The Macs Calendar runs on: each { device, online }, device the Mac's name. Calendar's own accounts (iCloud, Google, Exchange) are in calendar_calendars.",
       input: { type: "object", properties: {} },
-      run: async (ctx) => (await ctx.devices()).filter((s) => (s.services || []).includes("calendar")).map((s) => ({ account: s.name, ok: s.online })),
+      run: async (ctx) => (await ctx.devices()).filter((s) => (s.services || []).includes("calendar")).map((s) => ({ device: s.name, online: s.online })),
     },
-    sign_out: {
+    remove: {
       reads: false,
       confirm: true,
       description: "Stop using Calendar on one of your Macs: removes it from that Mac, for one of its owners. The calendars themselves stay as they are.",
-      input: { type: "object", required: ["account"], properties: { account: { type: "string", description: "the Mac's name, as calendar_accounts lists it" } } },
-      run: (ctx, { account }) => {
-        ctx.service("calendar", account, false);
-        return `Calendar is removed from ${account}.`;
+      input: { type: "object", required: ["device"], properties: { device: { type: "string", description: "the Mac's name, as calendar_devices lists it" } } },
+      run: (ctx, { device }) => {
+        ctx.service("calendar", device, false);
+        return `Calendar is removed from ${device}.`;
       },
     },
     calendars: {

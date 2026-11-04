@@ -2261,7 +2261,7 @@ fn answer_tool(params: &Value, agent: Option<&str>, mode: Mode) -> Value {
         },
         _ => match dispatch(name, input, agent, "mcp", None) {
             // A script gets an empty list as it is; an agent reading gets it in words.
-            Ok(ok) => match name.strip_suffix("_accounts").filter(|_| ok == json!([])).and_then(|app| ops::find(app, "accounts")).and_then(|(a, _)| ops::none_said(&a, "accounts", &ok, false)) {
+            Ok(ok) => match ["accounts", "devices"].into_iter().find_map(|op| Some((name.strip_suffix(&format!("_{op}"))?, op))).filter(|_| ok == json!([])).and_then(|(app, op)| Some((ops::find(app, op)?.0, op))).and_then(|(a, op)| ops::none_said(&a, op, &ok, false)) {
                 Some(none) => json!({ "content": [{ "type": "text", "text": none }] }),
                 None => json!({ "content": ops::mcp_content(&ok) }),
             },

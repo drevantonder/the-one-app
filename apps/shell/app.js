@@ -24,24 +24,24 @@ export default {
   description: "Run commands on your own devices",
   connector: true,
   needs: "Needs one of your devices",
-  instructions: "Run a shell command on one of your own devices with shell_run; give device (a name from shell_accounts) to choose which, or it runs on the first online one in Device Activity's order. Every command is logged where only you can read it.",
+  instructions: "Run a shell command on one of your own devices with shell_run; give device (a name from shell_devices) to choose which, or it runs on the first online one in Device Activity's order. Every command is logged where only you can read it.",
   uses: { services: ["shell"] },
 
   ops: {
-    accounts: {
+    devices: {
       reads: true,
-      description: "The devices Shell runs on: each { account, ok }, account the device's name, ok while it's online. Give one as device to shell_run.",
+      description: "The devices Shell runs on: each { device, online }, device the device's name. Give one as device to shell_run.",
       input: { type: "object", properties: {} },
-      run: async (ctx) => (await ctx.devices()).filter((s) => (s.services || []).includes("shell")).map((s) => ({ account: s.name, ok: s.online })),
+      run: async (ctx) => (await ctx.devices()).filter((s) => (s.services || []).includes("shell")).map((s) => ({ device: s.name, online: s.online })),
     },
-    sign_out: {
+    remove: {
       reads: false,
       confirm: true,
       description: "Stop using Shell on one of your devices: removes it from that device, for one of its owners, so no command runs there.",
-      input: { type: "object", required: ["account"], properties: { account: { type: "string", description: "the device's name, as shell_accounts lists it" } } },
-      run: (ctx, { account }) => {
-        ctx.service("shell", account, false);
-        return `Shell is removed from ${account}.`;
+      input: { type: "object", required: ["device"], properties: { device: { type: "string", description: "the device's name, as shell_devices lists it" } } },
+      run: (ctx, { device }) => {
+        ctx.service("shell", device, false);
+        return `Shell is removed from ${device}.`;
       },
     },
     run: {

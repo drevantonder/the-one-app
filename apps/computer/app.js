@@ -355,21 +355,21 @@ export default {
 
 
   ops: {
-    accounts: {
+    devices: {
       reads: true,
-      description: "Your devices that run Computer Use, as { account, ok }: account is the device's name, ok whether it's online. computer_list lists the devices agents use on them.",
+      description: "Your devices that run Computer Use, as { device, online }: device is its name. computer_list lists the devices agents use on them.",
       input: { type: "object", properties: {} },
-      run: async (ctx) => (await ctx.devices()).filter((s) => (s.services || []).some((d) => d === "agent-devices" || d === "computer")).map((s) => ({ account: s.name, ok: s.online })),
+      run: async (ctx) => (await ctx.devices()).filter((s) => (s.services || []).some((d) => d === "agent-devices" || d === "computer")).map((s) => ({ device: s.name, online: s.online })),
     },
-    sign_out: {
+    remove: {
       reads: false,
       confirm: true,
       description: "Stop agents using one of your devices or the agent devices on it: removes Computer Use from that device, for one of its owners. Its agent devices and backups stay there, and apps_install_on puts it back.",
-      input: { type: "object", required: ["account"], properties: { account: { type: "string", description: "a device's name, from computer_accounts" } } },
-      run: async (ctx, { account }) => {
+      input: { type: "object", required: ["device"], properties: { device: { type: "string", description: "a device's name, from computer_devices" } } },
+      run: async (ctx, { device }) => {
         const all = await ctx.devices();
-        const there = all.find((s) => s.name.toLowerCase() === String(account).toLowerCase() && (s.services || []).some((d) => d === "agent-devices" || d === "computer"));
-        if (!there) throw new Error(`Computer Use isn't on ${account}: it's on ${all.filter((s) => (s.services || []).some((d) => d === "agent-devices" || d === "computer")).map((s) => s.name).join(", ") || "none of your devices"}`);
+        const there = all.find((s) => s.name.toLowerCase() === String(device).toLowerCase() && (s.services || []).some((d) => d === "agent-devices" || d === "computer"));
+        if (!there) throw new Error(`Computer Use isn't on ${device}: it's on ${all.filter((s) => (s.services || []).some((d) => d === "agent-devices" || d === "computer")).map((s) => s.name).join(", ") || "none of your devices"}`);
         for (const d of ["agent-devices", "computer"]) if ((there.services || []).includes(d)) ctx.service(d, there.name, false);
         return `Computer Use is removed from ${there.name}.`;
       },

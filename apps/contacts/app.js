@@ -29,20 +29,20 @@ export default {
   uses: { services: ["contacts"] },
 
   ops: {
-    accounts: {
+    devices: {
       reads: true,
-      description: "The Macs Contacts runs on: each { account, ok }, account the Mac's name, ok while it's online.",
+      description: "The Macs Contacts runs on: each { device, online }, device the Mac's name.",
       input: { type: "object", properties: {} },
-      run: async (ctx) => (await ctx.devices()).filter((s) => (s.services || []).includes("contacts")).map((s) => ({ account: s.name, ok: s.online })),
+      run: async (ctx) => (await ctx.devices()).filter((s) => (s.services || []).includes("contacts")).map((s) => ({ device: s.name, online: s.online })),
     },
-    sign_out: {
+    remove: {
       reads: false,
       confirm: true,
       description: "Stop using Contacts on one of your Macs: removes it from that Mac, for one of its owners. The contacts themselves stay as they are.",
-      input: { type: "object", required: ["account"], properties: { account: { type: "string", description: "the Mac's name, as contacts_accounts lists it" } } },
-      run: (ctx, { account }) => {
-        ctx.service("contacts", account, false);
-        return `Contacts is removed from ${account}.`;
+      input: { type: "object", required: ["device"], properties: { device: { type: "string", description: "the Mac's name, as contacts_devices lists it" } } },
+      run: (ctx, { device }) => {
+        ctx.service("contacts", device, false);
+        return `Contacts is removed from ${device}.`;
       },
     },
     search: {

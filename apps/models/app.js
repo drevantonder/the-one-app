@@ -31,20 +31,20 @@ export default {
   uses: { services: ["models"] },
 
   ops: {
-    accounts: {
+    devices: {
       reads: true,
-      description: "The devices Models runs on: each { account, ok }, account the device's name, ok while it's online. models_here lists the models on each.",
+      description: "The devices Models runs on: each { device, online }, device the device's name. models_here lists the models on each.",
       input: { type: "object", properties: {} },
-      run: async (ctx) => (await ctx.devices()).filter((s) => (s.services || []).includes("models")).map((s) => ({ account: s.name, ok: s.online })),
+      run: async (ctx) => (await ctx.devices()).filter((s) => (s.services || []).includes("models")).map((s) => ({ device: s.name, online: s.online })),
     },
-    sign_out: {
+    remove: {
       reads: false,
       confirm: true,
       description: "Stop using Models on one of your devices: removes it from that device, for one of its owners. The models stay on its disk.",
-      input: { type: "object", required: ["account"], properties: { account: { type: "string", description: "the device's name, as models_accounts lists it" } } },
-      run: (ctx, { account }) => {
-        ctx.service("models", account, false);
-        return `Models is removed from ${account}.`;
+      input: { type: "object", required: ["device"], properties: { device: { type: "string", description: "the device's name, as models_devices lists it" } } },
+      run: (ctx, { device }) => {
+        ctx.service("models", device, false);
+        return `Models is removed from ${device}.`;
       },
     },
     here: {

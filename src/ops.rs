@@ -191,12 +191,16 @@ pub fn named(app: &str, op: &str, cli: bool) -> String {
     }
 }
 
-/// An empty list of accounts in words, with what to do: screens want the list, a person or agent reading wants this.
+/// An empty list of accounts, or of the devices a service over a device runs on, in words, with what to do: screens
+/// want the list, a person or agent reading wants this.
 pub fn none_said(app: &Value, op: &str, ok: &Value, cli: bool) -> Option<String> {
-    if op != "accounts" || ok.as_array().is_none_or(|a| !a.is_empty()) {
+    if !["accounts", "devices"].contains(&op) || ok.as_array().is_none_or(|a| !a.is_empty()) {
         return None;
     }
     let (name, title) = (app["name"].as_str().unwrap_or(""), app["title"].as_str().unwrap_or(""));
+    if op == "devices" {
+        return Some(format!("{title} isn't on any of your devices yet.{}", app["needs"].as_str().map(|n| format!(" {n}.")).unwrap_or_default()));
+    }
     let signs_in = app["ops"].as_array().into_iter().flatten().any(|o| o["name"] == "sign_in");
     // One that needs a part on a device, with none of yours running it: signing in can't work yet.
     let parts: Vec<&Value> = app["uses"]["services"].as_array().into_iter().flatten().collect();
