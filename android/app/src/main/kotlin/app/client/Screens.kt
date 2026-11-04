@@ -222,21 +222,31 @@ private fun Starting(store: Store) {
     }
 }
 
-/** "Approve This Phone": the code one of the person's devices approves it by (or, for someone new, their inviter's). */
+/** "Waiting for Approval": the code one of the person's devices approves it by (or, for someone new, their inviter's), and
+ * their browser where they're signed in, opened at Approve with this code. */
 @Composable
 private fun Approve(store: Store) {
     val p = LocalPalette.current
+    val context = LocalContext.current
     Column(Modifier.fillMaxSize().padding(horizontal = 28.dp, vertical = 20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         Spacer(Modifier.weight(1f))
-        Text("Approve This Phone", fontSize = 28.sp, lineHeight = 34.sp, fontWeight = FontWeight.Bold, color = p.label, textAlign = TextAlign.Center)
+        Text("Waiting for Approval", fontSize = 28.sp, lineHeight = 34.sp, fontWeight = FontWeight.Bold, color = p.label, textAlign = TextAlign.Center)
         Spacer(Modifier.height(12.dp))
         Text(
             if (store.signIn.invite != null) "Whoever invited you approves it. Show them this code."
-            else "Approve it in Settings › Devices on another of your devices.",
+            else "Your other devices ask you to approve it. It shows this code there too.",
             style = Type.body, color = p.secondary, textAlign = TextAlign.Center,
         )
         Spacer(Modifier.height(28.dp))
         Text(store.code ?: "", fontSize = 40.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 4.sp, color = p.label, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+        val address = store.signIn.address
+        if (store.signIn.invite == null && address != null && store.code != null) {
+            Spacer(Modifier.height(12.dp))
+            TextButton({
+                val link = "${address.trimEnd('/')}/approve#${store.code!!.replace(" ", "")}"
+                runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(link)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+            }) { Text("Approve in Your Browser", color = p.tint) }
+        }
         Spacer(Modifier.weight(1.4f))
         TextButton({ store.signOut() }) { Text("Sign Out", color = p.tint) }
     }

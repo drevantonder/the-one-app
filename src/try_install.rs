@@ -858,7 +858,7 @@ fn android(dir: &Path, checkout: &Path, device: &str, settings: &one::kernel::Se
                 pressed = true;
             }
             // Its home, once it signed in here, now or before.
-            None if ours && (pressed || kept) && !nodes.iter().any(|n| n.class == "android.widget.EditText" || n.text.starts_with("Can’t Reach") || n.text.starts_with("Approve This")) => {
+            None if ours && (pressed || kept) && !nodes.iter().any(|n| n.class == "android.widget.EditText" || n.text.starts_with("Can’t Reach") || n.text.starts_with("Waiting for Approval")) => {
                 std::fs::write(&signed_in, &here)?;
                 return Ok(());
             }

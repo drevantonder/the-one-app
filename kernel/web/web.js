@@ -1126,14 +1126,15 @@ window.__one = {};
     await refreshState().catch(() => {});
   }
 
-  /// "Approve This Device": its code, and the code as a QR, a link that opens Approve on a phone that scans it.
+  /// "Waiting for Approval": its code, and the code as a QR, a link that opens Approve with it in the browser of a
+  /// phone that scans it.
   async function showJoin(code, invited) {
-    document.title = "Approve This Device";
+    document.title = "Waiting for Approval";
     const link = `${location.origin}/approve#${code.replace(" ", "")}`;
-    root.innerHTML = `<div class="welcome join"><h1>Approve This Device</h1>` +
-      `<p class="join-text">${invited ? "Whoever invited you approves it. Show them this code." : "Approve it in Settings › Devices on another of your devices."}</p>` +
+    root.innerHTML = `<div class="welcome join"><h1>Waiting for Approval</h1>` +
+      `<p class="join-text">${invited ? "Whoever invited you approves it. Show them this code." : "Your other devices ask you to approve it. It shows this code there too."}</p>` +
       `<div class="join-code" aria-label="Code">${esc(code)}</div><div class="join-qr">${qrSvg(link)}</div>` +
-      `<p class="join-note">Or scan this with that device.</p><button class="button" data-out>Sign Out</button></div>`;
+      `<p class="join-note">${invited ? "Or they scan this with their phone." : "Or scan this with your phone, to approve it in its browser."}</p><button class="button" data-out>Sign Out</button></div>`;
     $("[data-out]", root).onclick = () => auth.signOut();
   }
 
@@ -1171,7 +1172,7 @@ window.__one = {};
       await device.load();
     } catch (err) {
       if (err.signedOut) return err.removed ? undefined : showSignedOut();
-      return void (root.innerHTML = message("Can’t Approve This Device", err.message));
+      return void (root.innerHTML = message("Can’t Let This Device In", err.message));
     }
     // A device that takes the request and never answers (asleep, stuck) is one that can't be reached, while it's still asked.
     const away = setTimeout(() => $(".window", root) || showUnreachable(UNANSWERED), 15000);

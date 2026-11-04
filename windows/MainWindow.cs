@@ -369,9 +369,16 @@ public sealed class MainWindow : Window
         if (await Client.RemovedNow()) throw new SignedOutException(Client.Removed);
         var code = await Client.Ask();
         var panel = new StackPanel { Spacing = 14, MaxWidth = 460 };
-        panel.Children.Add(new TextBlock { Text = "Approve This Computer", FontSize = 28, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Center, TextAlignment = TextAlignment.Center });
-        panel.Children.Add(Look.Text(Auth.Shared.Invite != null ? "Whoever invited you approves it. Show them this code." : "Approve it in Settings › Devices on another of your devices.", 14, Look.Secondary, wrap: true));
+        panel.Children.Add(new TextBlock { Text = "Waiting for Approval", FontSize = 28, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Center, TextAlignment = TextAlignment.Center });
+        panel.Children.Add(Look.Text(Auth.Shared.Invite != null ? "Whoever invited you approves it. Show them this code." : "Your other devices ask you to approve it. It shows this code there too.", 14, Look.Secondary, wrap: true));
         panel.Children.Add(new TextBlock { Text = code, FontSize = 40, FontFamily = new Microsoft.UI.Xaml.Media.FontFamily("Cascadia Mono, Consolas"), CharacterSpacing = 200, IsTextSelectionEnabled = true, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 14, 0, 0) });
+        // Their browser where they're signed in, at Approve with this code.
+        if (Auth.Shared.Invite == null && Auth.Shared.Address is { } address)
+        {
+            var inBrowser = Look.Link("Approve in Your Browser", () => Shell.Open($"{address.TrimEnd('/')}/approve#{code.Replace(" ", "")}"));
+            inBrowser.HorizontalAlignment = HorizontalAlignment.Center;
+            panel.Children.Add(inBrowser);
+        }
         var signOut = new Button { Content = "Sign Out", HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 24, 0, 0) };
         signOut.Click += async (_, _) => await SignOut();
         panel.Children.Add(signOut);
