@@ -41,12 +41,16 @@ pub fn run(tag: Option<&str>) -> Result<()> {
     let short = short.as_str();
     // Whoever pushed since another update began is in what it sent out, if it got to their commit.
     let this = format!("{commit} {}", config_commit.as_deref().unwrap_or(""));
+    // What the last update here sent everywhere, and, apart, what it sent the Macs: a Mac that was off doesn't hold back
+    // the rest, which would send everything since again each time.
     let done = cache().join("updated");
     let last = std::fs::read_to_string(&done).ok();
+    let mac_done = cache().join("updated-mac");
+    let mac_last = std::fs::read_to_string(&mac_done).ok().or_else(|| last.clone());
     // A service never sent out from here goes out all the same.
     let released = services_released();
     let unreleased = go_services(&src).iter().any(|n| !released.contains_key(n));
-    if tag.is_none() && last.as_deref() == Some(this.as_str()) && !unreleased {
+    if tag.is_none() && last.as_deref() == Some(this.as_str()) && mac_last.as_deref() == Some(this.as_str()) && !unreleased {
         println!("Every device already runs {short}, main's tip: the last update here sent it out.");
         return Ok(());
     }
@@ -54,6 +58,7 @@ pub fn run(tag: Option<&str>) -> Result<()> {
         ensure!(!quiet(Command::new("git").current_dir(&src).args(["rev-parse", "-q", "--verify", &format!("refs/tags/{tag}")])), "{tag} already exists");
     }
     let mut parts = last.as_deref().map_or_else(Parts::everything, |last| Parts::since(&src, last, &this));
+    parts.mac = mac_last.as_deref().map_or_else(Parts::everything, |last| Parts::since(&src, last, &this)).mac;
     // A release sends all of it; the diff still says which apps' folders went and what a rename became.
     if tag.is_some() {
         (parts.node, parts.mac) = (true, true);
@@ -72,7 +77,7 @@ pub fn run(tag: Option<&str>) -> Result<()> {
     let after = if sends && tag.is_none() { after_update()? } else { None };
     // The Macs start first, since their builds take longest: an update's in the background, and a release's with what it
     // publishes, which it waits for.
-    let mut missed = false;
+    let (mut missed, mut missed_macs) = (false, false);
     let mut started = Vec::new();
     if tag.is_some() {
         for mac in &macs {
@@ -88,8 +93,13 @@ pub fn run(tag: Option<&str>) -> Result<()> {
             }
         }
     } else {
-        missed = follow(&macs, &commit, config_commit.as_deref());
+        missed_macs = follow(&macs, &commit, config_commit.as_deref());
     }
+    let mark_macs = |missed_macs: bool| {
+        if !missed_macs {
+            let _ = std::fs::write(&mac_done, &this);
+        }
+    };
     let moved = retire_gone(&src, &parts.renamed)?;
     if !parts.node {
         deploy_apps(&src, &parts.apps)?;
@@ -103,6 +113,7 @@ pub fn run(tag: Option<&str>) -> Result<()> {
         if !missed {
             std::fs::write(&done, &this)?;
         }
+        mark_macs(missed_macs);
         return finish(after);
     }
 
@@ -144,9 +155,8 @@ pub fn run(tag: Option<&str>) -> Result<()> {
         let after = finish(after);
         ensure!(!failed, "not every device runs {short}");
         ensure!(!kernel_failed, "every device runs {short}, but the kernel isn't deployed");
-        if !missed {
-            std::fs::write(&done, &this)?;
-        }
+        std::fs::write(&done, &this)?;
+        mark_macs(missed_macs);
         return after;
     };
     let mut assets = Vec::new();
