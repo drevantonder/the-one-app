@@ -17,6 +17,7 @@ const NEEDS = "Shell runs on your devices, and none of them is online.";
 export default {
   name: "shell",
   title: "Shell",
+  tagline: "Run commands",
   icon: "terminal-window",
   color: "#3a3a3c",
   advanced: true,

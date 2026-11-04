@@ -516,6 +516,7 @@ const more = (token) => (token ? `\n\nMore: give pageToken ${token}` : "");
 export default {
   name: "gmail",
   title: "Gmail",
+  tagline: "Your email",
   icon: "envelope",
   color: "#ea4335",
   description: "Your Gmail accounts, for you and your agents: search, read, label, draft and send",

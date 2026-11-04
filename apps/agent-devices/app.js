@@ -281,6 +281,7 @@ const DEVICE = `
 export default {
   name: "agent-devices",
   title: "Agent Devices",
+  tagline: "Devices for AI",
   icon: "browsers",
   color: "#a2845e",
   advanced: true,

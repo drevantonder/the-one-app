@@ -374,6 +374,7 @@ async function warnings(b, now) {
 export default {
   name: "ai-usage",
   title: "AI Usage",
+  tagline: "AI plan limits",
   icon: "gauge",
   color: "#636366",
   advanced: true,

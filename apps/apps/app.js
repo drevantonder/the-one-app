@@ -188,6 +188,7 @@ function onAPage(a, places) {
 export default {
   name: "apps",
   title: "App Store",
+  tagline: "Find and add apps",
   icon: "squares-four",
   color: "#007aff",
   description: "Every app you can add, and its code",
@@ -226,7 +227,7 @@ export default {
         apps.sort((a, b) => a.advanced - b.advanced || a.title.localeCompare(b.title));
         if (full) return { apps, places: places(ctx), admin: ctx.me.role === "admin" };
         const line = (a) => `${a.title} (${a.name}): ${a.deleted ? `deleted ${new Date(a.deleted.time).toISOString().slice(0, 10)}${a.mine ? "" : `, ${a.owner_name}'s`}` : a.installed_names.length ? `added for ${a.installed_names.join(", ")}` : "not added"}`
-          + `${a.service ? ", a service" : ""}${a.installed_names.length && a.accounts === 0 ? `, no account signed in yet (${a.name}_sign_in)` : ""}${a.up_to_date === false ? ", an update waiting" : ""}. ${a.tagline || a.description || ""}`.trimEnd();
+          + `${a.service ? ", a service" : ""}${a.installed_names.length && a.accounts === 0 ? `, no account signed in yet (${a.name}_sign_in)` : ""}${a.up_to_date === false ? ", an update waiting" : ""}. ${a.description || a.tagline || ""}`.trimEnd();
         if (gone) return apps.length ? [...apps.map(line), "", "apps_restore brings back one you own; apps_erase deletes it for good."].join("\n") : "Nothing is in Recently Deleted.";
         const deleted = every.filter((a) => a.deleted).length;
         return [

@@ -48,6 +48,7 @@ const CHAT = "the chat: its name as messenger_chats gives it, or a part of it on
 export default {
   name: "messenger",
   title: "Messenger",
+  tagline: "Your chats",
   icon: "messenger-logo",
   color: "#0866ff",
   description: "Your Messenger chats, for your agents: read, search and send",

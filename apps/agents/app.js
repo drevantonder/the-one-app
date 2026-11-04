@@ -30,6 +30,7 @@ async function named(ctx, op, input) {
 export default {
   name: "agents",
   title: "AGENTS.md",
+  tagline: "Rules for your AI",
   icon: "brain",
   color: "#ff2d55",
   advanced: true,

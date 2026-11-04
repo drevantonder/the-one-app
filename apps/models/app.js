@@ -20,6 +20,7 @@ const IMAGES = "images (JPEG, PNG or WebP) as base64 strings, shown to the model
 export default {
   name: "models",
   title: "Models",
+  tagline: "AI on your devices",
   icon: "cpu",
   color: "#32ade6",
   advanced: true,

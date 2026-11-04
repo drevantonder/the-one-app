@@ -111,6 +111,7 @@ const address = (ctx, repo) => (ctx.port ? `http://localhost:${ctx.port}/repos/$
 export default {
   name: "repos",
   title: "Repos",
+  tagline: "Shared code",
   icon: "git-branch",
   color: "#5856d6",
   advanced: true,

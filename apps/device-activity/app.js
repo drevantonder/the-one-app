@@ -56,6 +56,7 @@ function said(d) {
 export default {
   name: "device-activity",
   title: "Device Activity",
+  tagline: "Busy or idle",
   icon: "monitor",
   color: "#30b0c7",
   advanced: true,

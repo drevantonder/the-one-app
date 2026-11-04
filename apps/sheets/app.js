@@ -248,6 +248,7 @@ async function rangeOr(ctx, email, spreadsheet, range) {
 export default {
   name: APP,
   title: "Google Sheets",
+  tagline: "Your Google Sheets",
   icon: "table",
   color: "#34a853",
   description: "Your Google Sheets: read ranges, add rows, change cells and make spreadsheets",

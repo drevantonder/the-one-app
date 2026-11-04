@@ -30,6 +30,7 @@ const FIELDS = {
 export default {
   name: "calendar",
   title: "Calendar",
+  tagline: "Your Mac's calendar",
   icon: "calendar",
   color: "#ff3b30",
   description: "Calendar on your Mac, for your apps and agents",

@@ -53,6 +53,7 @@ async function keep(ctx, listed, devices) {
 export default {
   name: "whatsapp",
   title: "WhatsApp",
+  tagline: "Your chats",
   icon: "whatsapp-logo",
   color: "#25d366",
   description: "Your WhatsApp chats, for your agents: read, search and send",

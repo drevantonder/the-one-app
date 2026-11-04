@@ -19,6 +19,7 @@ const CARD = "{ id, name, nickname, organization, job, phones, emails, addresses
 export default {
   name: "contacts",
   title: "Contacts",
+  tagline: "Your Mac's contacts",
   icon: "user-circle",
   color: "#8e8e93",
   description: "Contacts on your Mac, for your apps and agents",

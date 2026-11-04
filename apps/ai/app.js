@@ -43,6 +43,7 @@ async function gemini(ctx, s, body) {
 export default {
   name: "ai",
   title: "AI",
+  tagline: "Reads photos and PDFs",
   icon: "sparkle",
   color: "#af52de",
   advanced: true,

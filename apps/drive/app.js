@@ -248,6 +248,7 @@ const metadataInput = (what) => ({
 export default {
   name: "drive",
   title: "Google Drive",
+  tagline: "Your Drive files",
   icon: "google-drive-logo",
   color: "#fbbc04",
   description: "Your Google Drive: find, upload, rename and move files",

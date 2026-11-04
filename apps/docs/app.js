@@ -309,6 +309,7 @@ function render(doc, md) {
 export default {
   name: APP,
   title: "Google Docs",
+  tagline: "Your Google Docs",
   icon: "file-text",
   color: "#4285f4",
   description: "Your Google Docs: read them as markdown or text, make them, and add or replace text",

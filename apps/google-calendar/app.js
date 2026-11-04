@@ -315,6 +315,7 @@ async function eventBody(ctx, email, input, existing) {
 export default {
   name: APP,
   title: "Google Calendar",
+  tagline: "Your Google events",
   icon: "calendar",
   color: "#4285f4",
   description: "Your Google calendars, from any of your devices: events, and adding and changing them",

@@ -21,6 +21,7 @@ const REMINDER = "{ id, title, list, due, priority, notes, completed }, due a da
 export default {
   name: "reminders",
   title: "Reminders",
+  tagline: "Your reminders",
   icon: "list-checks",
   color: "#007aff",
   description: "Reminders on your Mac, for your apps and agents",

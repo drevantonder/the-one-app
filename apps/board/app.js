@@ -180,6 +180,7 @@ const formatInput = { type: "string", enum: ["text", "json"], description: "json
 export default {
   name: "board",
   title: "Board",
+  tagline: "Short posts",
   icon: "chat-text",
   color: "#ff9500",
   description: "One-line posts in topics, for people and their agents",

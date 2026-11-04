@@ -25,6 +25,7 @@ const MESSAGE = "{ time, from, text, attachments }, time ISO 8601 in the Mac's t
 export default {
   name: "imessage",
   title: "iMessage",
+  tagline: "Your Mac's texts",
   icon: "chat-circle",
   color: "#34c759",
   description: "Messages on your Mac, for your apps and agents",

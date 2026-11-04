@@ -351,6 +351,7 @@ const PAGE = `
 export default {
   name: "computer",
   title: "Computer Use",
+  tagline: "AI uses a device",
   icon: "cursor-click",
   color: "#5e5ce6",
   advanced: true,
