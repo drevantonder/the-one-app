@@ -43,7 +43,10 @@ pub fn run(tag: Option<&str>) -> Result<()> {
     let this = format!("{commit} {}", config_commit.as_deref().unwrap_or(""));
     let done = cache().join("updated");
     let last = std::fs::read_to_string(&done).ok();
-    if tag.is_none() && last.as_deref() == Some(this.as_str()) {
+    // A service never sent out from here goes out all the same.
+    let released = services_released();
+    let unreleased = go_services(&src).iter().any(|n| !released.contains_key(n));
+    if tag.is_none() && last.as_deref() == Some(this.as_str()) && !unreleased {
         println!("Every device already runs {short}, main's tip: the last update here sent it out.");
         return Ok(());
     }
@@ -56,7 +59,6 @@ pub fn run(tag: Option<&str>) -> Result<()> {
         (parts.node, parts.mac) = (true, true);
     }
     // A service's program is sent out when its folder changed, or it never was from here.
-    let released = services_released();
     for name in go_services(&src) {
         if (tag.is_some() || last.is_none() || !released.contains_key(&name)) && !parts.services.contains(&name) {
             parts.services.push(name);
