@@ -41,6 +41,7 @@ function describe() {
       return { name, title: w.title || name, description: w.description || "", size, sizes: w.sizes?.length ? w.sizes : [size], ...(options.length ? { options } : {}) };
     }),
     badge: typeof app.badge === "function",
+    hooks: Object.keys(app.hooks || {}),
     screens: Object.entries(app.screens || {}).map(([name, s]) => ({ name, title: s.title || name })),
     uses: { apps: app.uses?.apps || [], sidecars: app.uses?.sidecars || [] },
     schedules: Object.entries(app.schedules || {}).map(([name, s]) => ({ name, ...s })),

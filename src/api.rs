@@ -222,7 +222,7 @@ pub fn routes() -> Router<Node> {
         .route("/v1/events", get(events))
         .route("/v1/screens/{app}/{screen}", get(screen))
         .route("/v1/client-screens/{name}", get(client_screen))
-        .route("/hooks/{app}/{name}", post(hook))
+        .route("/hooks/prompt", post(prompt))
         .route("/v1/sidecars/{app}", post(register))
         .route("/v1/sidecars/{app}/calls", get(next_call))
         .route("/v1/sidecars/{app}/calls/{id}", post(reply))
@@ -986,13 +986,11 @@ async fn vault_post(State(node): State<Node>, me: Me, uri: axum::http::Uri, Json
     Ok(Json(node.vault_route(&me.caller, "POST", uri.path(), &body).await?.ok_or_else(|| anyhow::anyhow!("no such route"))?))
 }
 
-/// For agent harnesses' hooks: the body is the hook's JSON, the reply is plain text to show the agent.
-async fn hook(State(node): State<Node>, Path((app, name)): Path<(String, String)>, body: String) -> Response {
+/// For agent harnesses' prompt hooks: the body is the hook's JSON, the reply is plain text to show the agent.
+async fn prompt(State(node): State<Node>, body: String) -> Response {
     let event: Value = serde_json::from_str(&body).unwrap_or_default();
-    match node.hook(&app, &name, event).await {
-        Ok(Value::String(text)) => text.into_response(),
-        Ok(Value::Null) => String::new().into_response(),
-        Ok(other) => other.to_string().into_response(),
+    match node.prompt(event).await {
+        Ok(text) => text.into_response(),
         Err(err) => (StatusCode::BAD_REQUEST, format!("{err:#}")).into_response(),
     }
 }

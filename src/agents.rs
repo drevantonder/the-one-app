@@ -301,17 +301,16 @@ fn set_up(records: &[Record]) {
     written.save();
 }
 
-/// Where the board answers a harness's prompt hook with what other agents posted since that session last looked.
-const HOOK_PATH: &str = "/hooks/board/news";
+/// Where the node answers a harness's prompt hook with what every app of this machine's person says with it.
+const HOOK_PATH: &str = "/hooks/prompt";
 
-/// Harnesses without settings hooks but with a way to add a message of their own get an extension that does what the
-/// hook does. OpenCode gets a plugin that puts usage in its instructions; Pi an extension that says it with each
-/// prompt, in full the first time a session speaks. Both run the install's CLI, as the person, where they run.
-const PI_EXTENSION: &str = r#"// Installed by {{name}}'s Board: adds to each prompt what other
-// agents have posted since this session last looked.
+/// Harnesses without settings hooks but with a way to add a message of their own get a plugin that does what the hook
+/// does: Pi an extension that says it with each prompt, OpenCode one that keeps it in the session's instructions.
+const PI_EXTENSION: &str = r#"// Installed by {{name}}: adds to each prompt what your apps say with it, like
+// what other agents have posted since this session last looked.
 import { readFileSync } from "node:fs"
 
-const url = "http://{{addr}}/hooks/board/news"
+const url = "http://{{addr}}/hooks/prompt"
 // Asked as one of this machine's own programs: with the token only its user can read.
 const token = () => readFileSync({{token}}, "utf8").trim()
 
@@ -321,76 +320,33 @@ export default function (pi: any) {
     try {
       const res = await fetch(url, { method: "POST", headers: { connection: "close", "{{header}}": token() }, body: JSON.stringify({ session_id: "pi:" + ctx.sessionManager.getSessionId() }), signal: AbortSignal.timeout(3000) })
       const text = res.ok ? (await res.text()).trim() : ""
-      if (text) return { message: { customType: "{{cli}}-board", content: text, display: true } }
+      if (text) return { message: { customType: "{{cli}}", content: text, display: true } }
     } catch {}
   })
 }
 "#;
 
-/// Agent Hooks for Pi: usage and pace, in full the first time a session speaks, warnings after.
-/// Runs the install's CLI where Pi runs, so it reads that device.
-const HOOKS_EXTENSION: &str = r#"// Installed by {{name}}'s Agent Hooks: usage and pace for the models, in full the
-// first time a session speaks, warnings after.
-import { execFileSync } from "node:child_process"
-
-const clis = ["{{cli}}", `${process.env.HOME}/.local/bin/{{cli}}`, "/opt/homebrew/bin/{{cli}}"]
-function run(args: string[]): string {
-  for (const c of clis) {
-    try {
-      return execFileSync(c, args, { timeout: 15000, stdio: ["ignore", "pipe", "ignore"] }).toString().trim()
-    } catch {}
-  }
-  return ""
-}
-const seen = new Set<string>()
-export default function (pi: any) {
-  pi.on("before_agent_start", async (event: any, ctx: any) => {
-    if (event.messageType !== "user") return
-    try {
-      const id = ctx.sessionManager.getSessionId()
-      const first = !seen.has(id)
-      seen.add(id)
-      const text = run(["agent-hooks", "context", "--format", "text", "--hook_event_name", first ? "SessionStart" : "UserPromptSubmit"])
-      if (text) return { message: { customType: "{{cli}}-usage", content: text, display: !first } }
-    } catch {}
-  })
-}
-"#;
-
-/// Agent Hooks for OpenCode: usage and pace in its instructions, in full once per session, warnings after.
-const OPENCODE_HOOKS: &str = r#"// Installed by {{name}}'s Agent Hooks: usage and pace for the models, in full once
-// per session, warnings after.
+const OPENCODE_PLUGIN: &str = r#"// Installed by {{name}}: keeps in each session's instructions what your apps say with
+// its latest prompt, like what other agents have posted since it last looked.
 import { Plugin } from "@opencode/plugin"
-import { execFileSync } from "node:child_process"
+import { readFileSync } from "node:fs"
 
-const clis = ["{{cli}}", `${process.env.HOME}/.local/bin/{{cli}}`, "/opt/homebrew/bin/{{cli}}"]
-function run(args: string[]): string {
-  for (const c of clis) {
-    try {
-      return execFileSync(c, args, { timeout: 15000, stdio: ["ignore", "pipe", "ignore"] }).toString().trim()
-    } catch {}
-  }
-  return ""
-}
+const url = "http://{{addr}}/hooks/prompt"
+// Asked as one of this machine's own programs: with the token only its user can read.
+const token = () => readFileSync({{token}}, "utf8").trim()
 
 export default Plugin.define({
-  id: "{{cli}}-hooks",
+  id: "{{cli}}",
   async setup(ctx) {
     await ctx.session.hook("prompt", async (event: any) => {
       try {
         const sid = event.sessionID ?? event.sessionId
-        const seen = ((await ctx.storage.get("sessions")) ?? []) as string[]
-        const first = !sid || !seen.includes(sid)
-        const text = run(["agent-hooks", "context", "--format", "text", "--hook_event_name", first ? "SessionStart" : "UserPromptSubmit"])
-        if (!text) {
-          if (sid && !first) await ctx.session.instructions.entry.remove({ sessionID: sid, key: "ai-usage" }).catch(() => {})
-          return
-        }
+        const res = await fetch(url, { method: "POST", headers: { connection: "close", "{{header}}": token() }, body: JSON.stringify({ session_id: "opencode:" + (sid ?? "") }), signal: AbortSignal.timeout(3000) })
+        const text = res.ok ? (await res.text()).trim() : ""
         if (sid) {
-          await ctx.session.instructions.entry.put({ sessionID: sid, key: "ai-usage", value: text })
-          if (first) await ctx.storage.set("sessions", [...seen.filter((s) => s !== sid), sid].slice(-100))
-        } else if (event.prompt && typeof event.prompt.text === "string") {
-          console.warn("one-hooks: no session id on prompt hook; appending usage to the prompt")
+          if (text) await ctx.session.instructions.entry.put({ sessionID: sid, key: "{{cli}}", value: text })
+          else await ctx.session.instructions.entry.remove({ sessionID: sid, key: "{{cli}}" }).catch(() => {})
+        } else if (text && event.prompt && typeof event.prompt.text === "string") {
           event.prompt.text += "\n\n" + text
         }
       } catch {}
@@ -409,7 +365,7 @@ fn mcp_args(harness: &str) -> &'static [&'static str] {
     }
 }
 
-/// Gives each harness installed here the board's prompt hook and this install's MCP server, leaving everything else
+/// Gives each harness installed here the node's prompt hook and this install's MCP server, leaving everything else
 /// in its settings as it was.
 fn harnesses(home: &Path, written: &mut Written) {
     let dir = |var: &str, default: PathBuf| std::env::var_os(var).map(PathBuf::from).unwrap_or(default);
@@ -421,8 +377,8 @@ fn harnesses(home: &Path, written: &mut Written) {
     // Asked as one of this machine's own programs: with the token only its user can read.
     let token = crate::home().join(crate::api::LOCAL_TOKEN);
     let hook = format!("curl -sf --max-time 3 -H \"{}: $(cat '{}')\" --data-binary @- http://{addr}{HOOK_PATH} || true", crate::api::LOCAL_TOKEN_HEADER, token.display());
-    // Another white label's node on this machine has a hook of its own, on its own port.
-    let port = format!(":{}{HOOK_PATH}", addr.rsplit(':').next().unwrap_or_default());
+    // Another white label's node on this machine has a hook of its own, on its own port; the board's before is replaced.
+    let port = format!(":{}/hooks/", addr.rsplit(':').next().unwrap_or_default());
     let server = crate::skills::server_name();
     // A stable path, so harnesses started without the user's PATH (by launchd, say) still find it after an update; but
     // not another program's that has the CLI's name (an older app's, say): then this binary, which updates in place.
@@ -441,9 +397,7 @@ fn harnesses(home: &Path, written: &mut Written) {
     let args = |harness: &str| mcp_args(harness).iter().map(|a| s(a)).collect::<Vec<_>>();
     if claude.is_dir() {
         edit(&claude.join("settings.json"), true, |t| with_hook(t, "UserPromptSubmit", &hook, &port));
-        let usage = format!("{cli} agent-hooks context --format claude -");
-        edit(&claude.join("settings.json"), true, |t| with_hook(t, "SessionStart", &usage, "agent-hooks context"));
-        edit(&claude.join("settings.json"), true, |t| with_hook(t, "UserPromptSubmit", &usage, "agent-hooks context"));
+        edit(&claude.join("settings.json"), false, |t| without_hooks(t, OLD_HOOKS));
         // Claude Code keeps user-scoped MCP servers beside its config folder, or in it if that's moved.
         let file = if std::env::var_os("CLAUDE_CONFIG_DIR").is_some() { claude.join(".claude.json") } else { home.join(".claude.json") };
         let entry = CstInputValue::Object(vec![("type".into(), s("stdio")), ("command".into(), s(&cli)), ("args".into(), CstInputValue::Array(args("claude"))), ("env".into(), CstInputValue::Object(vec![]))]);
@@ -451,15 +405,13 @@ fn harnesses(home: &Path, written: &mut Written) {
     }
     if codex.is_dir() {
         edit(&codex.join("hooks.json"), true, |t| with_hook(t, "UserPromptSubmit", &hook, &port));
-        let usage = format!("{cli} agent-hooks context --format codex -");
-        edit(&codex.join("hooks.json"), true, |t| with_hook(t, "SessionStart", &usage, "agent-hooks context"));
-        edit(&codex.join("hooks.json"), true, |t| with_hook(t, "UserPromptSubmit", &usage, "agent-hooks context"));
+        edit(&codex.join("hooks.json"), false, |t| without_hooks(t, OLD_HOOKS));
         edit(&codex.join("config.toml"), true, |t| with_codex_mcp(t, &server, &cli, mcp_args("codex")));
     }
     let opencode = config.join("opencode");
     if opencode.is_dir() {
         written.remove(&opencode.join("plugins").join(format!("{}-board.js", crate::config::CLI)));
-        written.write(&opencode.join("plugins").join(format!("{}-hooks", crate::config::CLI)).join("index.ts"), &plugin(OPENCODE_HOOKS));
+        written.write(&opencode.join("plugins").join(format!("{}-hooks", crate::config::CLI)).join("index.ts"), &plugin(OPENCODE_PLUGIN));
         let entry = CstInputValue::Object(vec![("type".into(), s("local")), ("command".into(), CstInputValue::Array([vec![s(&cli)], args("opencode")].concat())), ("enabled".into(), true.into())]);
         edit(&json_or_jsonc(&opencode, "opencode"), true, |t| with_mcp(t, "mcp", &server, entry));
     }
@@ -469,8 +421,8 @@ fn harnesses(home: &Path, written: &mut Written) {
         edit(&json_or_jsonc(&amp, "settings"), true, |t| with_mcp(t, "amp.mcpServers", &server, entry));
     }
     if pi.is_dir() {
-        written.write(&pi.join("extensions").join(format!("{}-board.ts", crate::config::CLI)), &plugin(PI_EXTENSION));
-        written.write(&pi.join("extensions").join(format!("{}-hooks.ts", crate::config::CLI)), &plugin(HOOKS_EXTENSION));
+        written.remove(&pi.join("extensions").join(format!("{}-board.ts", crate::config::CLI)));
+        written.write(&pi.join("extensions").join(format!("{}-hooks.ts", crate::config::CLI)), &plugin(PI_EXTENSION));
     }
     git(&addr);
 }
@@ -588,6 +540,37 @@ fn with_hook(text: &str, event: &str, command: &str, ours: &str) -> Result<Optio
         let hook = CstInputValue::Object(vec![("type".into(), "command".into()), ("command".into(), command.into())]);
         groups.append(CstInputValue::Object(vec![("hooks".into(), CstInputValue::Array(vec![hook]))]));
         changed = true;
+    }
+    Ok(changed.then(|| root.to_string()))
+}
+
+/// Hooks this node put in harnesses' settings before (Agent Hooks'), which it takes back out.
+const OLD_HOOKS: &str = " agent-hooks context ";
+
+/// Takes every hook whose command has `ours` in it out of the settings (Claude Code's and Codex's format), and says
+/// what the text becomes if that changes it.
+fn without_hooks(text: &str, ours: &str) -> Result<Option<String>> {
+    let root = parse_json(text)?;
+    let Some(hooks) = root.object_value().unwrap().object_value("hooks") else { return Ok(None) };
+    let mut changed = false;
+    for prop in hooks.properties() {
+        let Some(groups) = prop.value().and_then(|v| v.as_array()) else { continue };
+        for group in groups.elements() {
+            let Some(list) = group.as_object().and_then(|g| g.array_value("hooks")) else { continue };
+            for hook in list.elements() {
+                let command = hook.as_object().and_then(|h| h.get("command")).and_then(|p| p.value()).and_then(|v| v.as_string_lit()).and_then(|s| s.decoded_value().ok());
+                if command.is_some_and(|c| c.contains(ours)) {
+                    hook.remove();
+                    changed = true;
+                }
+            }
+            if changed && list.elements().is_empty() {
+                group.remove();
+            }
+        }
+        if changed && groups.elements().is_empty() {
+            prop.remove();
+        }
     }
     Ok(changed.then(|| root.to_string()))
 }

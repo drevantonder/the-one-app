@@ -352,13 +352,32 @@ function tripped(p) {
   return out || outW ? { out, outW } : null;
 }
 
+/// Which plans are nearly out (under 20% session, 15% weekly) or outrun their reset, on every Claude account at once,
+/// from the last readings: their rows and which pool to spend, else nothing.
+async function warnings(b, now) {
+  const out = [];
+  for (const id of Object.keys(PROVIDERS)) {
+    const reads = await latest(b, id, null);
+    // With several accounts, claude-swap moves to one with room: only all of them nearly out is news.
+    if (!reads.length || reads.some((r) => !r.error && !tripped(r))) continue;
+    const p = reads[0];
+    const t = tripped(p);
+    const rows = [];
+    if (t.out) rows.push(windowText("Session", { used: p.session_used, resetsAt: p.session_resets, pace: p.pace?.session }, now));
+    if (t.outW) rows.push(windowText("Weekly", { used: p.weekly_used, resetsAt: p.weekly_resets, pace: p.pace?.weekly }, now));
+    rows.push(steer(p.models) || null);
+    out.push([`== ${PROVIDERS[id].title}${reads.length > 1 ? `: all ${reads.length} accounts nearly out` : ""} ==`, ...rows.filter(Boolean)].join("\n"));
+  }
+  return out.join("\n\n");
+}
+
 export default {
   name: "ai-usage",
   title: "AI Usage",
   icon: "gauge",
   color: "#636366",
   description: "Every AI plan's limits, and whether the pace lasts to reset",
-  instructions: `Every AI plan's limits in the providers' own words: what's left, the pace against what's expected, and whether it lasts to reset. ai-usage_status is the full read (fresh when older than 5 minutes); ai-usage_warn is silent unless a window is nearly out or outruns its reset, for every-prompt hooks. Estimated rows (marked ~) come from this device only and never forecast.`,
+  instructions: `Every AI plan's limits in the providers' own words: what's left, the pace against what's expected, and whether it lasts to reset. ai-usage_status is the full read (fresh when older than 5 minutes). Agents get the last readings with their first prompt, then a warning when a window is nearly out or outruns its reset. Estimated rows (marked ~) come from this device only and never forecast.`,
 
   uses: { sidecars: ["shell"] },
 
@@ -408,33 +427,17 @@ export default {
         return ids.map((id) => all.filter((p) => p.provider === id)).filter((r) => r.length).map((r) => section(r, now)).join("\n\n");
       },
     },
-    warn: {
-      reads: false,
-      description: "Silent unless a window is nearly out (under 20% session, 15% weekly) or outruns its reset, on every Claude account at once: then its rows and which pool to spend. For every-prompt hooks; reads the last snapshots, never fetches.",
-      input: {
-        type: "object",
-        properties: { device: { type: "string", description: "whose numbers: a device's name; omit for this device" } },
-      },
-      async run(ctx, { device } = {}) {
-        const b = ctx.global || ctx.user || ctx.groups[0];
-        if (!b) return "";
-        const now = ctx.now();
-        const dev = await here(ctx, device);
-        const out = [];
-        for (const id of Object.keys(PROVIDERS)) {
-          const reads = await latest(b, id, dev);
-          // With several accounts, claude-swap moves to one with room: only all of them nearly out is news.
-          if (!reads.length || reads.some((r) => !r.error && !tripped(r))) continue;
-          const p = reads[0];
-          const t = tripped(p);
-          const rows = [];
-          if (t.out) rows.push(windowText("Session", { used: p.session_used, resetsAt: p.session_resets, pace: p.pace?.session }, now));
-          if (t.outW) rows.push(windowText("Weekly", { used: p.weekly_used, resetsAt: p.weekly_resets, pace: p.pace?.weekly }, now));
-          rows.push(steer(p.models) || null);
-          out.push([`== ${PROVIDERS[id].title}${reads.length > 1 ? `: all ${reads.length} accounts nearly out` : ""} ==`, ...rows.filter(Boolean)].join("\n"));
-        }
-        return out.join("\n\n");
-      },
+  },
+
+  hooks: {
+    // With an agent's prompt anywhere: every plan's last reading on its session's first, then only warnings.
+    async prompt(ctx, { since }) {
+      const b = ctx.global || ctx.user || ctx.groups[0];
+      if (!b) return "";
+      const now = ctx.now();
+      if (since !== null) return warnings(b, now);
+      const reads = (await Promise.all(Object.keys(PROVIDERS).map((id) => latest(b, id, null)))).flat();
+      return reads.length ? ["AI usage, for choosing a model:", ...reads.map((p) => section(p, now))].join("\n\n") : "";
     },
   },
 

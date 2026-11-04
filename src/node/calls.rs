@@ -2,6 +2,9 @@
 
 use super::*;
 
+/// How long an app's prompt hook may take before it's left out: the agent's harness waits for them all.
+const PROMPT_LIMIT: Duration = Duration::from_secs(2);
+
 impl Node {
     /// Runs an operation for this device's local user: here, or on the nearest device that can.
     pub async fn call(&self, req: CallRequest) -> Result<Value> {
@@ -657,24 +660,56 @@ impl Node {
         self.0.grants.lock().unwrap().get(token).cloned()
     }
 
-    /// Runs an app's hook for an agent harness on this machine. The node remembers, per
-    /// session, when the hook last ran, and tells the app as `since` (null on a session's first call).
-    pub async fn hook(&self, app: &str, name: &str, event: Value) -> Result<Value> {
+    /// What every app installed for this machine's person says with an agent's prompt here: each app's `prompt` hook,
+    /// asked at once, their answers joined. The node remembers, per app and session, when it last asked, and tells
+    /// the app as `since` (null on a session's first prompt). An app that fails, says nothing or takes longer than
+    /// `PROMPT_LIMIT` (the harness waits for this) is left out.
+    pub async fn prompt(&self, event: Value) -> Result<String> {
         let session = event["session_id"].as_str().unwrap_or("").to_string();
+        let caller = Caller { key: self.0.id, user: self.user()?, agent: None, token: None };
         let path = self.0.dir.join("hooks.json");
         let mut seen: serde_json::Map<String, Value> = std::fs::read(&path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
-        let key = format!("{app}/{name}/{session}");
-        let since = seen.get(&key).cloned().unwrap_or(Value::Null);
         let now = now_ms();
-        let caller = Caller { key: self.0.id, user: self.user()?, agent: None, token: None };
-        let mut ctx = self.read_context(app, &caller)?;
-        let _granted = self.grant(app, &caller, &mut ctx, 0);
-        let out = self.0.apps.hook(app, name, json!({ "event": event, "since": since }), &ctx).await?;
-        seen.insert(key, json!(now));
+        let mut asked = tokio::task::JoinSet::new();
+        for (app, ctx, granted) in self.page_contexts(&caller, None)? {
+            let key = format!("{app}/{session}");
+            let since = seen.get(&key).cloned().unwrap_or(Value::Null);
+            let (node, event) = (self.clone(), event.clone());
+            asked.spawn(async move {
+                let _granted = granted;
+                let has = node.0.apps.describe(&app).await.is_ok_and(|d| d["hooks"].as_array().is_some_and(|h| h.iter().any(|n| n == "prompt")));
+                if !has {
+                    return None;
+                }
+                let said = node.0.apps.hook(&app, "prompt", json!({ "event": event, "since": since }), &ctx);
+                let text = match tokio::time::timeout(PROMPT_LIMIT, said).await {
+                    Ok(Ok(Value::String(text))) => text.trim().to_string(),
+                    Ok(Ok(_)) => String::new(),
+                    Ok(Err(err)) => {
+                        tracing::warn!("{app}'s prompt hook: {err:#}");
+                        return None;
+                    }
+                    Err(_) => {
+                        tracing::warn!("{app}'s prompt hook took longer than {}s; left out", PROMPT_LIMIT.as_secs());
+                        return None;
+                    }
+                };
+                Some((app, key, text))
+            });
+        }
+        let mut said: Vec<(String, String, String)> = asked.join_all().await.into_iter().flatten().collect();
+        said.sort();
+        let mut out = Vec::new();
+        for (_, key, text) in said {
+            seen.insert(key, json!(now));
+            if !text.is_empty() {
+                out.push(text);
+            }
+        }
         let week_ago = now.saturating_sub(7 * 86_400_000);
         seen.retain(|_, t| t.as_u64().is_some_and(|t| t > week_ago));
         std::fs::write(&path, serde_json::to_vec(&seen)?)?;
-        Ok(out)
+        Ok(out.join("\n\n"))
     }
 
     /// What the shim asks the node for a running call (`src/outbound.rs`): `POST /call { app, op, input }` runs an

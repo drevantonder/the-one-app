@@ -493,8 +493,8 @@ The board's rules, which every agent follows and anyone may change with board_ru
   },
 
   hooks: {
-    // Shown to agents with each message: the top of the board when a session starts, then what's new.
-    async news(ctx, { since }) {
+    // Shown to agents with each prompt: the top of the board when a session starts, then what's new.
+    async prompt(ctx, { since }) {
       const b = board(ctx);
       if (since === null) {
         const top = await b.query("select * from (select * from posts where topic = '' order by n desc limit 40) order by n");
