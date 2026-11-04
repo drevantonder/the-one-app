@@ -472,8 +472,10 @@ export class Device {
   async listPasskey(prf, credential) {
     const pk = await passkeyKeysOf(prf);
     await this.write("global", members.passkey({ key: pk.key, seal: pk.seal, user: this.user, name: "Passkey", credential }));
-    await this.sealTo(pk, scopesOf(await this.checked(true), this.user));
-    await this.tell({ add: pk.key, role: "client" });
+    const k = await this.checked(true);
+    await this.sealTo(pk, scopesOf(k, this.user));
+    // An admin's passkey is an admin's device at the relay too, so the devices it lets in are let in as theirs.
+    await this.tell({ add: pk.key, role: "client", ...(k.roles.global?.[this.user] === "admin" ? { admin: true } : {}) });
   }
 
   /// This browser let in by a listed passkey of its person's, which signs for it and opens what's sealed to it.
