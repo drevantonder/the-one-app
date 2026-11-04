@@ -220,11 +220,13 @@ pub fn token() -> Result<Option<String>> {
     Ok(kept.access)
 }
 
-/// Signs this machine out: its refresh token is revoked, and forgotten here.
+/// Signs this machine out: its refresh token is revoked, and forgotten here. Waits for a refresh another process is
+/// making, so what that keeps is what's revoked and forgotten, not kept again after; the lock's file stays, as every
+/// process must lock the same one.
 pub fn sign_out() -> Result<bool> {
+    let _lock = Lock::take()?;
     let Some(kept) = kept() else { return Ok(false) };
     let _ = std::fs::remove_file(path());
-    let _ = std::fs::remove_file(path().with_extension("lock"));
     if let (Some(refresh), Ok(meta)) = (&kept.refresh, meta(&kept.address))
         && let Some(revoke) = meta["revocation_endpoint"].as_str()
     {
