@@ -55,10 +55,18 @@ pub fn run(tag: Option<&str>) -> Result<()> {
     if tag.is_some() {
         (parts.node, parts.mac) = (true, true);
     }
+    // A service's program is sent out when its folder changed, or it never was from here.
+    let released = services_released();
+    for name in go_services(&src) {
+        if (tag.is_some() || last.is_none() || !released.contains_key(&name)) && !parts.services.contains(&name) {
+            parts.services.push(name);
+        }
+    }
+    parts.services.retain(|n| src.join("services").join(n).join("go.mod").is_file());
     let macs: Vec<Value> =
         if parts.mac { devices().into_iter().filter(|d| d["target"].as_str().is_some_and(|t| t.ends_with("-apple-darwin"))).collect() } else { Vec::new() };
 
-    let sends = parts.node || parts.mac || !parts.apps.is_empty();
+    let sends = parts.node || parts.mac || !parts.apps.is_empty() || !parts.services.is_empty();
     let after = if sends && tag.is_none() { after_update()? } else { None };
     // The Macs start first, since their builds take longest: an update's in the background, and a release's with what it
     // publishes, which it waits for.
@@ -84,6 +92,9 @@ pub fn run(tag: Option<&str>) -> Result<()> {
     if !parts.node {
         deploy_apps(&src, &parts.apps)?;
         add_where(&moved);
+        if !parts.services.is_empty() {
+            missed |= !publish_services(&src, &parts.services, &release_key()?, &commit);
+        }
         if !sends {
             println!("Nothing to send out: what changed since the last update here isn't in any build.");
         }
@@ -118,6 +129,8 @@ pub fn run(tag: Option<&str>) -> Result<()> {
     }
     let started_at = Instant::now();
     let mut failed = await_builds(&linux, short, started_at, Duration::from_secs(180));
+    // Once this device's node runs the new build, which publishes them.
+    failed |= !publish_services(&src, &parts.services, &key, &commit);
     if let Err(err) = deploy_built_in() {
         failed = true;
         println!("  couldn't deploy the new versions of the built-in apps: {err:#}");
@@ -191,6 +204,8 @@ struct Parts {
     apps: Vec<String>,
     /// Built-in apps renamed: (old name, new name).
     renamed: Vec<(String, String)>,
+    /// Services in another language (`services/<name>`), each built for every platform and published.
+    services: Vec<String>,
 }
 
 impl Parts {
@@ -243,13 +258,73 @@ impl Parts {
                 Some("serverless") => parts.node = true,
                 // The client is the Macs', and in the node too: its WebAssembly is the web client's, and the serverless node's.
                 Some("client") => (parts.node, parts.mac) = (true, true),
-                Some("docs" | "tests" | "android" | "windows" | "services" | "kernel") => {}
+                Some("services") => {
+                    let service = file.split('/').nth(1).filter(|_| file.matches('/').count() >= 2).unwrap_or("").to_string();
+                    if !service.is_empty() && !parts.services.contains(&service) {
+                        parts.services.push(service);
+                    }
+                }
+                Some("docs" | "tests" | "android" | "windows" | "kernel") => {}
                 None if file.ends_with(".md") || file == "LICENSE" || file == ".gitignore" => {}
                 _ => (parts.node, parts.mac) = (true, true),
             }
         }
         parts
     }
+}
+
+/// The services in another language in `src`: each folder of `services/` with a Go module.
+fn go_services(src: &Path) -> Vec<String> {
+    let mut names: Vec<String> = std::fs::read_dir(src.join("services")).into_iter().flatten().flatten().filter(|e| e.path().join("go.mod").is_file()).map(|e| e.file_name().to_string_lossy().to_string()).collect();
+    names.sort();
+    names
+}
+
+/// Each service's program last published from here, and the commit it was built from.
+fn services_released() -> serde_json::Map<String, Value> {
+    std::fs::read(cache().join("services-released")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
+}
+
+/// Builds each service named for every platform the installer knows, signs it and publishes it, so each device that
+/// runs it takes it (and one that's switched on there fetches it). → false if one wasn't.
+fn publish_services(src: &Path, names: &[String], key: &ssh_key::PrivateKey, commit: &str) -> bool {
+    let mut ok = true;
+    let committed: u64 = git(src, &["log", "-1", "--format=%ct", commit]).ok().and_then(|t| t.trim().parse().ok()).unwrap_or(0);
+    let mut released = services_released();
+    for name in names {
+        let dir = src.join("services").join(name);
+        let each = || -> Result<()> {
+            for target in PLATFORMS {
+                let (os, arch) = match target {
+                    "x86_64-unknown-linux-gnu" => ("linux", "amd64"),
+                    "aarch64-unknown-linux-gnu" => ("linux", "arm64"),
+                    _ => ("darwin", "arm64"),
+                };
+                let out = cache().join("services").join(format!("{name}-{target}"));
+                std::fs::create_dir_all(out.parent().unwrap_or(&out))?;
+                let mut go = Command::new("go");
+                go.current_dir(&dir).env("CGO_ENABLED", "0").env("GOOS", os).env("GOARCH", arch);
+                go.args(["build", "-trimpath", "-ldflags", &format!("-X main.built={}", &commit[..12]), "-o"]).arg(&out).arg(".");
+                run_quiet(&mut go).with_context(|| format!("build it for {target}"))?;
+                let signature = release::sign(key, &std::fs::read(&out)?)?;
+                let body = json!({ "path": out, "service": name, "commit": commit, "target": target, "committed": committed, "signature": signature });
+                post("/v1/service-release", body).with_context(|| format!("publish it for {target}"))?;
+            }
+            Ok(())
+        };
+        match each() {
+            Ok(()) => {
+                println!("Published {name} {}: each device that runs it takes it.", &commit[..12]);
+                released.insert(name.clone(), json!(commit));
+            }
+            Err(err) => {
+                ok = false;
+                println!("  couldn't send out {name}: {err:#}");
+            }
+        }
+    }
+    let _ = std::fs::write(cache().join("services-released"), serde_json::to_vec(&released).unwrap_or_default());
+    ok
 }
 
 /// Runs a command, showing its output only if it fails.

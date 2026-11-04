@@ -11,6 +11,7 @@ impl Node {
     /// Registers a service; the node says so in its hello to the other devices, and to shells when that changes it:
     /// an app of its name shows its picture (a Mac app's icon).
     pub async fn register_service(&self, app: &str, describe: Value) -> Result<()> {
+        self.0.services.offer(app, &describe);
         if let Some(why) = self.removed_here(app) {
             bail!("{why}");
         }
@@ -40,14 +41,34 @@ impl Node {
         m.services.get(&(*device, name.to_string())).is_some_and(|s| !s.on)
     }
 
-    /// The install this device's parts are in, and those switched on here.
-    pub fn parts_on(&self) -> Result<(crate::service::Install, std::collections::BTreeSet<String>)> {
+    /// The install this device's parts are in, and those switched on here, each with when it was: switched on again
+    /// while it's on, it starts afresh.
+    pub fn parts_on(&self) -> Result<(crate::service::Install, BTreeMap<String, u64>)> {
         let address = self.address()?;
         self.with(|i| {
             let root = i.r.root.context("this device isn't in your One App yet")?.to_hex();
-            let on = i.r.members.services.iter().filter(|((k, _), s)| *k == self.0.id && s.on).map(|((_, name), _)| name.clone()).collect();
+            let on = i.r.members.services.iter().filter(|((k, _), s)| *k == self.0.id && s.on).map(|((_, name), s)| (name.clone(), s.time)).collect();
             Ok((crate::service::Install { address: address.clone(), root, user: i.user.clone() }, on))
         })
+    }
+
+    /// What a part of this device is doing changed: its screens and the other devices are told.
+    pub fn parts_changed(&self) {
+        self.emit(Event::Devices);
+        self.say_hello();
+    }
+
+    /// Says hello to this device's part `name`, a service endpoint of its own, which answers once it's up.
+    pub async fn hello_part(&self, name: &str) {
+        let keys: Vec<Key> = self.with(|i| Ok(i.r.members.offering(name).filter(|s| s.device == Some(self.0.id)).map(|s| s.key).collect())).unwrap_or_default();
+        for key in keys {
+            let _ = tokio::time::timeout(Duration::from_secs(3), self.hello_service_now(&key)).await;
+        }
+    }
+
+    /// Whether this device's part `name`, a service endpoint of its own, has answered it since `since`.
+    pub fn part_up(&self, name: &str, since: Instant) -> bool {
+        self.with(|i| Ok(i.r.members.offering(name).any(|s| s.device == Some(self.0.id) && i.peers.get(&s.key).is_some_and(|p| p.seen >= since)))).unwrap_or(false)
     }
 
     /// Whether this device runs apps' calls: unless its person switched its app service off.
@@ -73,6 +94,43 @@ impl Node {
             (d["name"].as_str().unwrap_or("").to_string(), users, d)
         }));
         services
+    }
+
+    /// What this device can run, as its hello says: each part (`apps`, the app service; the services built into it;
+    /// those registered with it, as the Mac app's are, which it offers while switched off too; and those oned runs as
+    /// its processes, its own or fetched from a release when switched on), with whether it's switched on and, while
+    /// it isn't simply on or off, what it's doing (`doing`) or what went wrong (`problem`), and its title if it gives
+    /// one. Devices that don't say this run only what they list as serving.
+    pub(super) fn parts_here(&self, i: &Install) -> Vec<Value> {
+        let m = &i.r.members;
+        let on = |name: &str| !Self::off(m, &self.0.id, name);
+        let mut out: BTreeMap<String, Value> = BTreeMap::new();
+        out.insert(members::APPS_PART.into(), json!({ "name": members::APPS_PART, "on": on(members::APPS_PART) }));
+        for n in &self.0.built_in_services {
+            out.insert(n.name.into(), json!({ "name": n.name, "title": (n.describe)()["title"], "on": on(n.name) }));
+        }
+        for (name, d) in self.0.services.offered() {
+            out.insert(name.clone(), json!({ "name": name, "title": d["title"], "on": on(&name) }));
+        }
+        // A process of oned's is on only by its entry: with none, it's off.
+        let switched = |name: &str| m.services.get(&(self.0.id, name.to_string())).is_some_and(|s| s.on);
+        let (processes, now) = crate::oned::parts();
+        for name in processes {
+            let title = crate::services::hosted().iter().find(|h| h.name == name).map(|h| (h.describe)()["title"].clone()).unwrap_or(Value::Null);
+            out.insert(name.clone(), json!({ "name": name, "title": title, "on": switched(&name) }));
+        }
+        for (name, now) in now {
+            if let (Some(Value::Object(part)), Value::Object(now)) = (out.get_mut(&name), json!(now)) {
+                part.extend(now);
+            }
+        }
+        // The Mac app's, switched on, start once it registers again, within seconds.
+        for (name, _) in self.0.services.offered() {
+            if on(&name) && !self.0.services.has(&name) && let Some(part) = out.get_mut(&name) {
+                part["doing"] = json!("Starting");
+            }
+        }
+        out.into_values().collect()
     }
 
     /// Why a service isn't served here, if its person switched it off.

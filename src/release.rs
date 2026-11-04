@@ -1,4 +1,4 @@
-//! Releases of the node itself.
+//! Releases of the node itself, and of the services in other languages it runs as its parts.
 
 use std::path::{Path, PathBuf};
 
@@ -23,13 +23,20 @@ pub struct Release {
     /// The publisher's signature over the binary, as `ssh-keygen -Y sign -n release` makes it.
     #[serde(default)]
     pub signature: String,
+    /// For a service in another language's release, which (`whatsapp`): its program, not the node.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub service: Option<String>,
 }
 
 /// The namespace release signatures are made in, so nothing else the key signs passes for a release.
 pub const NAMESPACE: &str = "release";
 
+/// A service's release is an entry of its own kind, which a device that doesn't know it ignores.
+pub const SERVICE_KIND: &str = "service-release";
+
 pub fn content(release: &Release) -> Content {
-    Content { blobs: vec![release.blob.clone()], ..Content::new(APP, "node-release", json!(release)) }
+    let kind = if release.service.is_some() { SERVICE_KIND } else { "node-release" };
+    Content { blobs: vec![release.blob.clone()], ..Content::new(APP, kind, json!(release)) }
 }
 
 /// Signs a binary as a release.
@@ -53,11 +60,17 @@ fn signed_by(key: &str, signature: &str) -> bool {
 /// The newest release for `target` signed with `key`, and the device that published it. Any device may publish or pass
 /// on a release: only the signature counts. The newest of any newer ones without it is logged.
 pub fn latest(key: &str, entries: &[Entry], target: &str) -> Option<(Release, Key)> {
-    let releases = entries.iter().rev().filter(|e| e.content.app == APP && e.content.kind == "node-release");
+    latest_of(key, entries, target, None)
+}
+
+/// The same for the service `service` (`None`: the node).
+pub fn latest_of(key: &str, entries: &[Entry], target: &str, service: Option<&str>) -> Option<(Release, Key)> {
+    let kind = if service.is_some() { SERVICE_KIND } else { "node-release" };
+    let releases = entries.iter().rev().filter(|e| e.content.app == APP && e.content.kind == kind);
     let mut logged = false;
     for e in releases {
         let Ok(r) = serde_json::from_value::<Release>(e.content.data.clone()) else { continue };
-        if r.target != target {
+        if r.target != target || r.service.as_deref() != service {
             continue;
         }
         if signed_by(key, &r.signature) {
@@ -139,7 +152,7 @@ mod tests {
     }
 
     fn release(commit: &str, committed: u64, signature: String) -> Release {
-        Release { commit: commit.into(), target: "t".into(), blob: "b".repeat(64), size: 3, committed, signature }
+        Release { commit: commit.into(), target: "t".into(), blob: "b".repeat(64), size: 3, committed, signature, service: None }
     }
 
     /// One device publishing each release in turn.
@@ -164,6 +177,12 @@ mod tests {
         let all = entries(&[good.clone(), unsigned, theirs.clone(), garbled]);
         assert_eq!(latest(&public(&publisher), &all, "t").unwrap().0.commit, "good", "newer releases without its signature don't count");
         assert!(latest(&public(&publisher), &all, "other target").is_none());
+        // A service's release is its program's, never the node's, nor another service's.
+        let whatsapp = Release { service: Some("whatsapp".into()), ..release("whatsapp", 60, sign(&publisher, b"go").unwrap()) };
+        let all = [all, entries(std::slice::from_ref(&whatsapp))].concat();
+        assert_eq!(latest(&public(&publisher), &all, "t").unwrap().0.commit, "good");
+        assert_eq!(latest_of(&public(&publisher), &all, "t", Some("whatsapp")).unwrap().0, whatsapp);
+        assert!(latest_of(&public(&publisher), &all, "t", Some("push")).is_none());
         assert!(verify(&public(&publisher), b"bin", &theirs.signature).is_err());
         assert!(verify(&public(&publisher), b"something else", &good.signature).is_err(), "a signature over another binary");
         assert!(verify(&public(&publisher), b"bin", "").is_err());

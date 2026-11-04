@@ -23,6 +23,8 @@
   .add-way .line span { flex: 1; min-width: 0; font: 13px var(--mono); color: var(--text); overflow-x: auto; white-space: nowrap; user-select: all; -webkit-user-select: all; }
   .add-way .sub { white-space: normal; }
   .action-row { color: var(--tint); cursor: pointer; }
+  /* A part's problem, on its row, inside its device's card. */
+  .devices .list .problem { background: none; margin: 0; padding: 4px 16px 14px 56px; }
   .action-row .i { width: 22px; height: 22px; }
   .list.passkey { margin-top: 20px; }
   .row.out { justify-content: center; color: var(--danger); font: inherit; border: 0; background: none; width: 100%; }
@@ -142,34 +144,63 @@
 
   // A thing a device runs: its app's icon, its name, and a switch for the device's owner.
   const tile = (icon) => `<span class="tile">${one.icon(icon)}</span>`;
-  function thing({ icon, title, sub = "", on = true, mine, off, disabled }) {
+  function thing({ icon, title, sub = "", on = true, mine, part, disabled }) {
     const toggle = mine
-      ? `<input type="checkbox" class="switch" aria-label="${one.esc(title)}"${on ? " checked" : ""}${disabled ? " disabled" : ""}${off ? ` data-off='${one.esc(JSON.stringify(off))}'` : ""}>`
+      ? `<input type="checkbox" class="switch" aria-label="${one.esc(title)}"${on ? " checked" : ""}${disabled ? " disabled" : ""}${part ? ` data-part='${one.esc(JSON.stringify(part))}'` : ""}>`
       : "";
     return `<label class="row plain">${icon}<div class="main"><div class="title"><span>${one.esc(title)}</span></div>${subs(sub)}</div>${toggle}</label>`;
   }
   function serviceRow(c, mine, s) {
     const a = appOf(s.name) || s;
-    return thing({ icon: one.appIcon({ ...a, name: s.name, title: a.title || s.name }, 28), title: a.title || s.name, mine, off: s.off });
+    return thing({ icon: one.appIcon({ ...a, name: s.name, title: a.title || s.name }, 28), title: a.title || s.name, mine, part: s.off, on: true });
+  }
+
+  // A switch flipped here, shown as it will be until its device says so (or a while has passed).
+  let flipped = {};
+  const partTitle = (p) => (p.name === "apps" ? "Runs apps" : appOf(p.name)?.title || p.title || p.name);
+  // What a device can run, as it says: Runs apps first, then its services by name, each with a switch for its person,
+  // and only those on for an admin. While one's being set up, starting or stopping, its row says so; a problem shows
+  // on it, with what fixes it.
+  function partRows(c, mine) {
+    const parts = c.node.parts.map((p) => {
+      const f = flipped[`${c.node.key} ${p.name}`];
+      const late = f && Date.now() - f.at < 30_000 && (f.on !== p.on || (f.again && p.problem && !p.doing));
+      if (late) return { ...p, on: f.on, doing: f.on ? "Starting" : "Stopping", problem: null };
+      return p;
+    });
+    return parts
+      .filter((p) => mine || p.on)
+      .sort((a, b) => (b.name === "apps") - (a.name === "apps") || partTitle(a).localeCompare(partTitle(b)))
+      .map((p) => {
+        const title = partTitle(p), part = { device: c.node.key, name: p.name };
+        const icon = p.name === "apps" ? tile("squares-four") : one.appIcon({ ...(appOf(p.name) || {}), name: p.name, title }, 28);
+        const row = thing({ icon, title, sub: p.on && p.doing ? `${p.doing}…` : "", on: p.on, mine, part });
+        if (!p.on || !p.problem) return row;
+        const action = mine ? { label: "Try Again", run: () => act(() => setPart(part, true, true)) } : null;
+        return row + one.problem({ title: `${title} isn’t running on ${c.name}`, text: p.problem, action });
+      })
+      .join("");
   }
   function deviceCard(c, i) {
     const mine = c.user === me();
     const sub = [c.me ? "This device" : !mine ? `${userName(c.user)}’s` : "", !c.me && (c.runs ? !c.online : c.seen && Date.now() - c.seen > 3_600_000) ? (c.seen ? ago(c.seen) : "Offline") : ""].filter(Boolean).join(" · ");
     let html = `<div class="list"><div class="row still head">${c.icon}<div class="main"><div class="title"><span>${one.esc(c.name)}</span></div>${subs(sub)}</div>` +
       (c.runs ? chip(i, c.priority) : "") + (mine ? more(i, c.name) : "") + "</div>";
-    // Runs apps: what every node does now, shown as it is; turning it on and off comes later.
+    // What it can run, as a device that says so does; one that doesn't yet, Runs apps as it is and its services on.
+    if (Array.isArray(c.node?.parts)) return html + partRows(c, mine) + oldSignIns(c, i, mine) + "</div>";
     if (c.node) html += thing({ icon: tile("squares-four"), title: "Runs apps", mine, disabled: true });
     const services = [
       ...(c.node?.installed_services || []).map((s) => ({ ...s, off: { service: s.name, device: c.node.key } })),
       ...c.services.filter((s) => mine || s.serves_me).map((s) => ({ name: s.service, off: { service: s.service, device: s.device } })),
     ];
     if (mine || admin()) html += services.sort((a, b) => appTitle(a.name).localeCompare(appTitle(b.name))).map((s) => serviceRow(c, mine, s)).join("");
-    if (mine && c.old.length) {
-      html += `<div class="row plain old"><div class="main"><div class="sub">${c.old.length} old sign-in${c.old.length > 1 ? "s" : ""}</div></div>` +
-        `<button class="button plain small" data-old="${i}">Remove</button></div>`;
-    }
-    return html + "</div>";
+    return html + oldSignIns(c, i, mine) + "</div>";
   }
+  const oldSignIns = (c, i, mine) =>
+    mine && c.old.length
+      ? `<div class="row plain old"><div class="main"><div class="sub">${c.old.length} old sign-in${c.old.length > 1 ? "s" : ""}</div></div>` +
+        `<button class="button plain small" data-old="${i}">Remove</button></div>`
+      : "";
   function cloudflareCard() {
     const s = state.install?.serverless;
     if (!s) return "";
@@ -299,7 +330,7 @@
 
   document.addEventListener("change", (e) => {
     const t = e.target;
-    if (t.dataset.off && !t.checked) turnOff(t, JSON.parse(t.dataset.off));
+    if (t.dataset.part) one.tap(), act(() => setPart(JSON.parse(t.dataset.part), t.checked));
   });
   document.addEventListener("click", (e) => {
     if (e.target.closest(".sheet")) return;
@@ -355,15 +386,13 @@
     act(() => one.api("POST", "/v1/settings", { name: "priority", value: JSON.stringify(set) }));
   }
 
-  /// A service switched off on its device, whose oned stops it; asked first.
-  async function turnOff(input, off) {
-    const card = input.closest(".list");
-    const name = card.querySelector(".head .title span")?.textContent || "this device";
-    const title = input.getAttribute("aria-label");
-    const sure = await one.alert({ title: `Turn off ${title} on ${name}?`, action: "Turn Off", danger: true });
-    if (!sure) return void (input.checked = true);
-    input.setAttribute("aria-busy", "true");
-    act(() => one.api("POST", "/v1/service", { device: off.device, name: off.service, on: false }));
+  /// A part of a device switched on or off, which its oned then sets up and starts, or stops: nothing's lost by
+  /// switching one off (a WhatsApp link stays, and runs again when it's back on), so nothing asks first.
+  /// Switched on again while it's on (`again`), it starts afresh, as Try Again does.
+  async function setPart(part, on, again = false) {
+    flipped[`${part.device} ${part.name ?? part.service}`] = { on, again, at: Date.now() };
+    now();
+    await one.api("POST", "/v1/service", { device: part.device, name: part.name ?? part.service, on });
   }
 
   async function menu(which, at) {

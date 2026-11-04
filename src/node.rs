@@ -129,6 +129,8 @@ pub type Service = (String, Vec<String>, Value);
 struct Peer {
     services: Vec<Service>,
     load: Option<crate::load::Load>,
+    /// What it can run, and each part's state (`Node::parts_here`), if it says.
+    parts: Option<Value>,
     seen: Instant,
 }
 

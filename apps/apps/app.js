@@ -86,7 +86,7 @@ async function isService(ctx, a) {
 
 /// Where a service runs, in a few words, and what each of the caller's devices offers for it: "Runs on linux, mac",
 /// or what it needs (its `needs`) when none of their devices runs it; the devices they own it may be installed on (where
-/// an owner removed it) or removed from; and whether they own none, so they ask an owner instead. Its device parts are the
+/// it can run, set up when it's switched on, or an owner removed it) or removed from; and whether they own none, so they ask an owner instead. Its device parts are the
 /// services it uses, by their names.
 async function where(ctx, a) {
   const devices = await ctx.devices();
@@ -94,7 +94,8 @@ async function where(ctx, a) {
   if (!parts.length) return null;
   const owns = (s) => (s.owners || []).some((o) => mine(ctx, o));
   const runs = devices.filter((s) => (s.services || []).some((d) => parts.includes(d)));
-  const removed = devices.filter((s) => !runs.includes(s) && (s.off_services || []).some((d) => parts.includes(d.name)));
+  const can = (s) => (s.parts || []).some((p) => parts.includes(p.name) && !p.on) || (s.off_services || []).some((d) => parts.includes(d.name));
+  const removed = devices.filter((s) => !runs.includes(s) && can(s));
   const line = runs.length ? "Runs on " + runs.map((s) => s.name).join(", ") : a.needs || "Runs on none of your devices";
   return {
     line, runs: runs.map((s) => s.name), needs: a.needs || null,
@@ -342,7 +343,7 @@ export default {
     },
     install_on: {
       reads: false,
-      description: "Install a service on a device you own, where an owner removed it: it runs there again. apps_devices says where it may go.",
+      description: "Install a service on a device you own that can run it: the device sets it up and runs it, as switching it on in Settings › Devices does. apps_devices says where it may go.",
       input: { type: "object", required: ["app", "device"], properties: { app: { type: "string", description: "a service's name, from apps_list with service true" }, device: { type: "string", description: "a device's name, from apps_devices' install" } } },
       async run(ctx, { app, device }) {
         const a = await find(ctx, app);

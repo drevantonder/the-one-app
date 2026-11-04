@@ -39,8 +39,9 @@ pub fn program(name: &str) -> PathBuf {
     home.join(".local/bin").join(format!("{CLI}-{name}"))
 }
 
-/// The services this device could run as processes of oned's: this program's own, and those whose programs are here.
-fn offered() -> BTreeSet<String> {
+/// The services this device could run as processes of oned's: this program's own, those whose programs are here, and
+/// those with a release for its platform (`released`), which it fetches when one is switched on.
+fn offered(released: &BTreeSet<String>) -> BTreeSet<String> {
     let mut names: BTreeSet<String> = crate::services::hosted().iter().map(|h| h.name.to_string()).collect();
     let dir = program("x").parent().map(|p| p.to_path_buf()).unwrap_or_default();
     let prefix = format!("{CLI}-");
@@ -50,7 +51,69 @@ fn offered() -> BTreeSet<String> {
             names.insert(name.to_string());
         }
     }
+    names.extend(released.iter().cloned());
     names
+}
+
+/// What a part that runs as a process of oned's is doing now, while it isn't simply on or off: being set up (its
+/// program fetched), starting or stopping; or what went wrong.
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize)]
+pub struct Now {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub doing: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub problem: Option<String>,
+}
+
+/// Each part's `Now`, and the services oned could run as its processes.
+static NOW: std::sync::Mutex<(BTreeMap<String, Now>, BTreeSet<String>)> = std::sync::Mutex::new((BTreeMap::new(), BTreeSet::new()));
+
+/// The services this device could run as processes of oned's, and what each is doing now, as its hello says.
+pub fn parts() -> (BTreeSet<String>, BTreeMap<String, Now>) {
+    let now = NOW.lock().unwrap();
+    (now.1.clone(), now.0.clone())
+}
+
+/// Says what a part is doing now: changed, its device tells the others at once.
+fn say(node: &Node, runtime: &tokio::runtime::Handle, name: &str, now: Now) {
+    let changed = {
+        let mut all = NOW.lock().unwrap();
+        let was = all.0.get(name).cloned().unwrap_or_default();
+        if now == Now::default() {
+            all.0.remove(name);
+        } else {
+            all.0.insert(name.to_string(), now.clone());
+        }
+        was != now
+    };
+    if changed {
+        let _in = runtime.enter();
+        node.parts_changed();
+    }
+}
+
+/// What's put in a service's folder of the release its program came from: its commit's time and its blob.
+fn taken(name: &str) -> (u64, String) {
+    let kept = std::fs::read_to_string(crate::service::folder(name).join("release")).unwrap_or_default();
+    let (committed, blob) = kept.trim().split_once(' ').unwrap_or(("0", ""));
+    (committed.parse().unwrap_or(0), blob.to_string())
+}
+
+/// Puts `r`'s program, signed with the release key, where oned runs it, in one step so it never starts half of it.
+fn put(node: &Node, runtime: &tokio::runtime::Handle, name: &str, r: &crate::release::Release) -> anyhow::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    let bytes = runtime.block_on(node.service_program(r))?;
+    let path = program(name);
+    std::fs::create_dir_all(path.parent().unwrap_or(&path))?;
+    let new = path.with_extension("new");
+    std::fs::write(&new, bytes)?;
+    std::fs::set_permissions(&new, std::fs::Permissions::from_mode(0o755))?;
+    std::fs::rename(&new, &path)?;
+    let folder = crate::service::folder(name);
+    std::fs::create_dir_all(&folder)?;
+    std::fs::write(folder.join("release"), format!("{} {}", r.committed, r.blob))?;
+    tracing::info!("oned put {name} {} in place", r.commit);
+    Ok(())
 }
 
 /// Where this device keeps what it keeps, once it was asked to erase it (`erase`).
@@ -62,18 +125,31 @@ pub fn erase(dir: &std::path::Path) {
     *ERASING.lock().unwrap() = Some(dir.to_path_buf());
 }
 
-/// Keeps this device's parts that run as processes of their own running as its entries say: started when one is
-/// switched on (and again if it stops), stopped when it's switched off, and listed as this device's once each asks.
-/// In a thread of its own for good, so what it starts is its child for as long as oned runs.
+/// Keeps this device's parts that run as processes of their own running as its entries say: when one is switched on,
+/// its program fetched from the newest release for this platform if it isn't here (and again when a newer one is
+/// published), then started (and again if it stops); stopped when it's switched off; and listed as this device's once
+/// each asks. What each is doing meanwhile, and what went wrong, its hello says (`parts`). In a thread of its own for
+/// good, so what it starts is its child for as long as oned runs.
 pub fn keep_parts(node: Node, runtime: tokio::runtime::Handle) {
     std::thread::spawn(move || {
-        let mut running: BTreeMap<String, std::process::Child> = BTreeMap::new();
+        // Each part running, and when it started.
+        let mut running: BTreeMap<String, (std::process::Child, Instant)> = BTreeMap::new();
         // What each part last asked, and when it was listed for it: asked again later, it's listed again.
         let mut listed: BTreeMap<String, (String, Instant)> = BTreeMap::new();
+        // The newest release of each service's program for this platform, looked at now and then.
+        let mut released: BTreeMap<String, crate::release::Release> = BTreeMap::new();
+        let mut looked: Option<Instant> = None;
+        // Programs being fetched, and when fetching each last failed, to try again a minute on.
+        let fetching = std::sync::Arc::new(std::sync::Mutex::new(BTreeSet::<String>::new()));
+        let failed = std::sync::Arc::new(std::sync::Mutex::new(BTreeMap::<String, Instant>::new()));
+        // When each part stopped by itself lately: one that keeps stopping says so.
+        let mut stops: BTreeMap<String, Vec<Instant>> = BTreeMap::new();
+        // When each part on was switched on: switched on again (Try Again), it starts afresh.
+        let mut switched: BTreeMap<String, u64> = BTreeMap::new();
         loop {
             if let Some(dir) = ERASING.lock().unwrap().clone() {
                 std::thread::sleep(Duration::from_secs(1));
-                for (name, child) in std::mem::take(&mut running) {
+                for (name, (child, _)) in std::mem::take(&mut running) {
                     stop(&name, child);
                 }
                 crate::apps::stop_all();
@@ -83,32 +159,115 @@ pub fn keep_parts(node: Node, runtime: tokio::runtime::Handle) {
                 tracing::warn!("erased {}: stopping", dir.display());
                 std::process::exit(0);
             }
+            if looked.is_none_or(|t| t.elapsed() > Duration::from_secs(60)) {
+                released = node.service_releases();
+                looked = Some(Instant::now());
+            }
             match node.parts_on() {
                 Ok((install, on)) => {
-                    for name in offered() {
-                        let wanted = on.contains(&name);
-                        if wanted && !running.contains_key(&name) {
-                            match start(&install, &name) {
+                    let names = offered(&released.keys().cloned().collect());
+                    NOW.lock().unwrap().1 = names.clone();
+                    for name in &names {
+                        let wanted = on.contains_key(name);
+                        if let Some(at) = on.get(name)
+                            && switched.insert(name.clone(), *at).is_some_and(|was| was != *at)
+                        {
+                            failed.lock().unwrap().remove(name);
+                            stops.remove(name);
+                            say(&node, &runtime, name, Now::default());
+                            if let Some((child, _)) = running.remove(name) {
+                                stop(name, child);
+                            }
+                        }
+                        let hosted = crate::services::hosted().iter().any(|h| h.name == name.as_str());
+                        let here = program(name);
+                        // Its program, fetched: none is here, or a newer release is out than the one here (or than
+                        // one put here by hand, by when it was).
+                        if wanted && !hosted && let Some(r) = released.get(name) {
+                            let (committed, blob) = taken(name);
+                            let had = std::fs::metadata(&here).ok().and_then(|m| m.modified().ok()).map(|t| t.duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs());
+                            let newer = match (had, blob.is_empty()) {
+                                (None, _) => true,
+                                (Some(_), false) => r.blob != blob && r.committed >= committed,
+                                (Some(when), true) => r.committed > when,
+                            };
+                            let lately = failed.lock().unwrap().get(name).is_some_and(|t| t.elapsed() < Duration::from_secs(60));
+                            if newer && !lately && fetching.lock().unwrap().insert(name.clone()) {
+                                // Set up for the first time: shown while it happens. Updated: nothing shows.
+                                if had.is_none() {
+                                    say(&node, &runtime, name, Now { doing: Some("Setting up"), problem: None });
+                                }
+                                let (node, runtime, r, name) = (node.clone(), runtime.clone(), r.clone(), name.clone());
+                                let (fetching, failed) = (fetching.clone(), failed.clone());
+                                std::thread::spawn(move || {
+                                    match put(&node, &runtime, &name, &r) {
+                                        Ok(()) => {
+                                            failed.lock().unwrap().remove(&name);
+                                        }
+                                        Err(err) => {
+                                            tracing::warn!("fetching {name}'s program: {err:#}");
+                                            failed.lock().unwrap().insert(name.clone(), Instant::now());
+                                            if had.is_none() {
+                                                say(&node, &runtime, &name, Now { doing: None, problem: Some(format!("Couldn’t set it up: {err:#}")) });
+                                            }
+                                        }
+                                    }
+                                    fetching.lock().unwrap().remove(&name);
+                                });
+                            }
+                        }
+                        if wanted && !running.contains_key(name) && (hosted || here.exists()) && !fetching.lock().unwrap().contains(name) {
+                            match start(&install, name) {
                                 Ok(child) => {
                                     tracing::info!("oned started {name}");
-                                    running.insert(name, child);
+                                    running.insert(name.clone(), (child, Instant::now()));
+                                    let problem = NOW.lock().unwrap().0.get(name).and_then(|n| n.problem.clone());
+                                    say(&node, &runtime, name, Now { doing: problem.is_none().then_some("Starting"), problem });
                                 }
-                                Err(err) => tracing::warn!("starting {name}: {err:#}"),
+                                Err(err) => say(&node, &runtime, name, Now { doing: None, problem: Some(format!("Couldn’t start it: {err:#}")) }),
                             }
-                        } else if !wanted && let Some(child) = running.remove(&name) {
-                            stop(&name, child);
+                        } else if !wanted && let Some((child, _)) = running.remove(name) {
+                            say(&node, &runtime, name, Now { doing: Some("Stopping"), problem: None });
+                            stop(name, child);
+                            say(&node, &runtime, name, Now::default());
+                        }
+                        if !wanted {
+                            stops.remove(name);
+                            switched.remove(name);
+                            failed.lock().unwrap().remove(name);
+                            say(&node, &runtime, name, Now::default());
                         }
                     }
                 }
                 Err(err) => tracing::debug!("which parts are on: {err:#}"),
             }
-            running.retain(|name, child| match child.try_wait() {
+            running.retain(|name, (child, _)| match child.try_wait() {
                 Ok(None) => true,
                 done => {
                     tracing::warn!("{name} stopped ({done:?}): oned starts it again");
+                    let lately = stops.entry(name.clone()).or_default();
+                    lately.retain(|t| t.elapsed() < Duration::from_secs(300));
+                    lately.push(Instant::now());
+                    if lately.len() >= 3 {
+                        say(&node, &runtime, name, Now { doing: None, problem: Some("It keeps stopping. Its device’s log says why.".into()) });
+                    }
                     false
                 }
             });
+            // Started, it's on once it answers its device; one that doesn't in a minute says so.
+            for (name, (_, started)) in &running {
+                let now = NOW.lock().unwrap().0.get(name).cloned().unwrap_or_default();
+                if now.doing == Some("Starting") && !node.part_up(name, *started) {
+                    runtime.block_on(node.hello_part(name));
+                }
+                if node.part_up(name, *started) {
+                    if now != Now::default() && stops.get(name).is_none_or(|s| s.len() < 3) {
+                        say(&node, &runtime, name, Now::default());
+                    }
+                } else if now.doing == Some("Starting") && started.elapsed() > Duration::from_secs(60) {
+                    say(&node, &runtime, name, Now { doing: None, problem: Some("It started, but doesn’t answer. Its device’s log says why.".into()) });
+                }
+            }
             for name in running.keys() {
                 let Ok(asked) = std::fs::read_to_string(crate::service::folder(name).join("ask")) else { continue };
                 if listed.get(name).is_some_and(|(a, at)| *a == asked && at.elapsed() < Duration::from_secs(60)) {

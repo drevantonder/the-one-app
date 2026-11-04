@@ -109,6 +109,9 @@ struct Registered {
 /// The services registered over the local API.
 pub struct Services {
     by_app: Mutex<HashMap<String, std::sync::Arc<Registered>>>,
+    /// Every service that asked to register lately, switched on here or not, by what it said it is: what this device
+    /// could run (the Mac app's, which it offers while it runs).
+    offered: Mutex<HashMap<String, (Value, Instant)>>,
     next: std::sync::atomic::AtomicU64,
 }
 
@@ -121,6 +124,17 @@ impl Services {
         let p = Registered { describe: describe.clone(), calls, waiting: tokio::sync::Mutex::new(rx), replies: Mutex::new(HashMap::new()), seen: Mutex::new(Instant::now()) };
         let before = self.by_app.lock().unwrap().insert(app.to_string(), std::sync::Arc::new(p));
         before.is_none_or(|p| p.describe != describe || p.seen.lock().unwrap().elapsed() >= GONE_AFTER)
+    }
+
+    /// Notes that `app` asked to register here, switched on or not.
+    pub fn offer(&self, app: &str, describe: &Value) {
+        self.offered.lock().unwrap().insert(app.to_string(), (describe.clone(), Instant::now()));
+    }
+
+    /// The services that asked to register here lately, switched on or not, each as it said it is.
+    pub fn offered(&self) -> Vec<(String, Value)> {
+        let offered = self.offered.lock().unwrap();
+        offered.iter().filter(|(_, (_, at))| at.elapsed() < GONE_AFTER).map(|(n, (d, _))| (n.clone(), d.clone())).collect()
     }
 
     fn get(&self, app: &str) -> Option<std::sync::Arc<Registered>> {

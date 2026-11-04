@@ -1,9 +1,10 @@
 #!/bin/sh
-# Puts a service in another language on a device, here or over ssh, and switches it on there: ./install.sh whatsapp
-# [host]. It's built for the device from its folder here and put at ~/.local/bin/<cli>-<name>, where the device's
-# oned runs it as a part of its own (src/oned.rs), started again on its new build; one this program offers needs
-# none of this: `<cli> services on <name> --device <device>` switches it on. CONFIG=path/to/config.toml puts it there
-# for that white label: its CLI.
+# Puts your checkout's build of a service in another language on a device, here or over ssh, and switches it on there:
+# ./install.sh whatsapp [host], for trying it before it's sent out. It's built for the device from its folder here and
+# put at ~/.local/bin/<cli>-<name>, where the device's oned runs it as a part of its own (src/oned.rs), started again
+# on its new build, until a release of it newer than this build is published (`<cli> update` sends each out). Switching
+# it on needs none of this: oned fetches its newest release. CONFIG=path/to/config.toml puts it there for that white
+# label: its CLI.
 set -eu
 config=${CONFIG:+$(cd "$(dirname "$CONFIG")" && pwd)/$(basename "$CONFIG")}
 cd "$(dirname "$0")"

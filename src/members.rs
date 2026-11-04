@@ -869,7 +869,7 @@ impl Members {
                 ensure!(w == owner, "only a device's person switches what it runs");
                 self.services.insert((device, name), Switch { on: data["on"] == true, by: w, time: e.time() });
             }
-            "install" | "uninstall" | "node-release" => {}
+            "install" | "uninstall" | "node-release" | "service-release" => {}
             other => bail!("unknown kind {other}"),
         }
         Ok(())

@@ -122,7 +122,7 @@ fn every_command() -> String {
                                        the recovery key on stdin, with or without an install here
   {CLI} app delete|restore|erase <app> delete an app you own (to Recently Deleted), restore it, or erase it for good
   {CLI} schedules                      every schedule of the apps installed for you: when, as whom, and how it last went
-  {CLI} services                       the services on each of your devices: version, and who switched them on
+  {CLI} services                       what each of your devices can run, each on or off, and what it's doing
   {CLI} services on|off <name> [--device <name>]
                                        switch a service on or off on a device of yours (here by default), which its
                                        oned starts or stops ({hosted} are in this program; one in another language is
@@ -770,6 +770,18 @@ fn run(args: Vec<String>) -> Result<()> {
                 // Its parts with keys of their own, as they say they are.
                 installed.extend(all.iter().filter(|p| p["device"] == s["key"]).flat_map(|p| p["installed_services"].as_array().cloned().unwrap_or_default()));
                 let off = s["off_services"].as_array().cloned().unwrap_or_default();
+                // What a device that says it can run, each on or off, and what it's doing or what went wrong.
+                if let Some(parts) = s["parts"].as_array() {
+                    println!("{}{}", s["name"].as_str().unwrap_or(""), if s["online"] == true { "" } else { " (offline)" });
+                    for p in parts {
+                        let name = p["name"].as_str().unwrap_or("");
+                        let version = installed.iter().find(|d| d["name"] == name).and_then(|d| d["version"].as_str()).map(|v| format!(" {}", &v[..v.len().min(12)])).unwrap_or_default();
+                        let doing = p["doing"].as_str().map(|d| format!(", {}", d.to_lowercase())).unwrap_or_default();
+                        let problem = p["problem"].as_str().map(|w| format!(": {w}")).unwrap_or_default();
+                        println!("  {name}{version}  {}{doing}{problem}", if p["on"] == true { "on" } else { "off" });
+                    }
+                    continue;
+                }
                 if installed.is_empty() && off.is_empty() {
                     continue;
                 }
@@ -796,7 +808,7 @@ fn run(args: Vec<String>) -> Result<()> {
                 ("off", true) => println!("Apps' calls no longer run {there}."),
                 (_, true) => println!("Apps' calls run {there} again."),
                 ("off", _) => println!("{name} is switched off {there}: its oned stops it."),
-                _ => println!("{name} is switched on {there}: its oned starts it, if it's there (a service in another language is put there by services/install.sh {name} in {NAME}'s code)."),
+                _ => println!("{name} is switched on {there}: its oned sets it up and starts it; {CLI} services says when it's running."),
             }
         }
         ["schedules"] => {
@@ -879,15 +891,17 @@ fn run(args: Vec<String>) -> Result<()> {
 }
 
 /// Publishes the binary at `path` as a release, signed with `key`: this one, or one built for another platform
-/// (--target <triple> --commit <hash> --committed <seconds>).
+/// (--target <triple> --commit <hash> --committed <seconds>), or a service's program (--service <name>, with those).
 fn publish(path: &std::path::Path, flags: &Map<String, Value>, key: &ssh_key::PrivateKey) -> Result<()> {
-    // The binary knows what it is; ask it, unless it's for another platform and can't run here.
-    let version: Value = std::process::Command::new(path)
+    // The binary knows what it is; ask it, unless it's for another platform and can't run here, or a service's.
+    let service = flags.get("service").and_then(Value::as_str);
+    let version: Value = (service.is_none()).then(|| std::process::Command::new(path)
         .args(["version", "--json"])
         .output()
         .ok()
         .filter(|o| o.status.success())
-        .and_then(|o| serde_json::from_slice(&o.stdout).ok())
+        .and_then(|o| serde_json::from_slice(&o.stdout).ok()))
+        .flatten()
         .unwrap_or_default();
     let committed = flags.get("committed").and_then(Value::as_u64).or(version["committed"].as_u64()).context("say when the commit was made with --committed (seconds since 1970)")?;
     let commit = flags.get("commit").and_then(Value::as_str).or(version["commit"].as_str()).context("say which commit this is with --commit")?;
@@ -896,8 +910,12 @@ fn publish(path: &std::path::Path, flags: &Map<String, Value>, key: &ssh_key::Pr
         bail!("that build has uncommitted changes; commit, build again, then publish");
     }
     let signature = one::release::sign(key, &std::fs::read(path)?)?;
-    let r = post("/v1/node-release", json!({ "path": path, "commit": commit, "target": target, "committed": committed, "signature": signature }))?;
-    println!("Published {} for {}. Every device on that platform updates itself now.", r["commit"].as_str().unwrap_or(""), r["target"].as_str().unwrap_or(""));
+    let body = json!({ "path": path, "commit": commit, "target": target, "committed": committed, "signature": signature, "service": service });
+    let r = post(if service.is_some() { "/v1/service-release" } else { "/v1/node-release" }, body)?;
+    match service {
+        Some(service) => println!("Published {service} {} for {}. Every device on that platform that runs it takes it.", r["commit"].as_str().unwrap_or(""), r["target"].as_str().unwrap_or("")),
+        None => println!("Published {} for {}. Every device on that platform updates itself now.", r["commit"].as_str().unwrap_or(""), r["target"].as_str().unwrap_or("")),
+    }
     Ok(())
 }
 

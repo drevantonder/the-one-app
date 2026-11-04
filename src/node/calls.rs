@@ -704,17 +704,19 @@ impl Node {
                         Ok(())
                     })?;
                     let load = serde_json::from_value(input["load"].clone()).ok();
+                    let parts = input["parts"].as_array().map(|_| input["parts"].clone());
                     // The services that came, went or changed there, whose apps shells list again.
                     let (new, changed) = self.with(|i| {
                         let before = i.peers.get(&me.key).map(|p| p.services.clone());
+                        let parts_changed = i.peers.get(&me.key).is_some_and(|p| p.parts != parts);
                         let was = before.as_deref().unwrap_or_default();
                         let missing = |a: &[Service], b: &[Service]| a.iter().filter(|s| !b.contains(s)).map(|s| s.0.clone()).collect::<Vec<_>>();
                         let mut changed = missing(&services, was);
                         changed.extend(missing(was, &services));
                         changed.sort();
                         changed.dedup();
-                        i.peers.insert(me.key, Peer { services, load, seen: Instant::now() });
-                        Ok((before.is_none(), changed))
+                        i.peers.insert(me.key, Peer { services, load, parts, seen: Instant::now() });
+                        Ok((before.is_none() || parts_changed, changed))
                     })?;
                     if new || !changed.is_empty() {
                         self.emit(Event::Devices);

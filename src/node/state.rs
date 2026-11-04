@@ -62,6 +62,7 @@ impl Node {
         let viewer_name = if viewer.key == self.0.id { self.device_name() } else { install.as_ref().and_then(|i| i.r.members.machine(&viewer.key)).map(|m| m.name.clone()).unwrap_or_default() };
         let backups = install.as_ref().and_then(|i| self.backup_problem(i, &viewer.user));
         let here_services = install.as_ref().map(|i| self.services_here(i)).unwrap_or_default();
+        let here_parts = install.as_ref().map(|i| json!(self.parts_here(i))).unwrap_or(Value::Null);
         // Which device is looking, to say "This device": a client device of the viewer's asks as a sign-in.
         let looking = device.or_else(|| {
             let m = &install.as_ref()?.r.members;
@@ -86,6 +87,8 @@ impl Node {
                 "build": i.builds.get(&s.key).map(|r| &r.commit), "target": i.builds.get(&s.key).map(|r| &r.target),
                 "services": services.iter().map(|d| d.0.clone()).collect::<Vec<_>>(),
                 "installed_services": installed_services(m, s, services, i.builds.get(&s.key).map(|r| r.commit.as_str())),
+                // What it can run, its person's and the admins' to see.
+                "parts": if s.user != *me && !m.is_admin(me) { Value::Null } else if s.key == self.0.id { here_parts.clone() } else { session.and_then(|s| s.parts.clone()).unwrap_or(Value::Null) },
                 "load": load,
             });
             match now {

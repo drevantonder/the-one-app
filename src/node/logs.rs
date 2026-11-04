@@ -277,13 +277,14 @@ impl Node {
     /// Says hello to every other device: as now and then, and when this device's services change. How long each takes
     /// to answer is how far it is.
     pub(super) fn say_hello(&self) {
-        let Ok((devices, me, services)) = self.with(|i| {
+        let Ok((devices, me, services, parts)) = self.with(|i| {
             let devices: Vec<Key> = i.r.members.computes().map(|s| s.key).filter(|k| *k != self.0.id).collect();
-            Ok((devices, Caller { key: self.0.id, user: i.user.clone(), agent: None, token: None }, self.services_here(i)))
+            Ok((devices, Caller { key: self.0.id, user: i.user.clone(), agent: None, token: None }, self.services_here(i), self.parts_here(i)))
         }) else {
             return;
         };
-        let req = CallRequest { app: members::APP.into(), op: "hello".into(), input: json!({ "services": services, "load": crate::load::current() }), ..Default::default() };
+        let input = json!({ "services": services, "load": crate::load::current(), "parts": parts });
+        let req = CallRequest { app: members::APP.into(), op: "hello".into(), input, ..Default::default() };
         for device in devices {
             let (node, req, me) = (self.clone(), req.clone(), me.clone());
             tokio::spawn(async move {
@@ -334,7 +335,7 @@ impl Node {
         let services: Vec<Service> = vec![(name.clone(), users, describe)];
         let changed = self.with(|i| {
             i.far.insert(key, asked.elapsed());
-            let before = i.peers.insert(key, Peer { services: services.clone(), load: None, seen: Instant::now() });
+            let before = i.peers.insert(key, Peer { services: services.clone(), load: None, parts: None, seen: Instant::now() });
             Ok(before.is_none_or(|p| p.services != services || p.seen.elapsed() >= 3 * PRESENCE_EVERY))
         });
         if changed.unwrap_or(false) {

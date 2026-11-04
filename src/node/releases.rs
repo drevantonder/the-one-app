@@ -1,15 +1,17 @@
-//! Releases of the node: publishing one, and each device taking the newest it trusts.
+//! Releases of the node and of services in other languages: publishing one, and each device taking the newest it
+//! trusts.
 
 use super::*;
 
 impl Node {
-    /// Publishes `binary` (a build of this node for `target`, with the release key's `signature` over it) as the
-    /// install's newest release.
-    pub async fn publish(&self, binary: &Path, commit: &str, target: &str, committed: u64, signature: &str) -> Result<Release> {
+    /// Publishes `binary` (a build of this node for `target`, or of `service`'s program, with the release key's
+    /// `signature` over it) as the install's newest release of it.
+    pub async fn publish(&self, binary: &Path, service: Option<&str>, commit: &str, target: &str, committed: u64, signature: &str) -> Result<Release> {
+        ensure!(service.is_none_or(crate::members::valid_app_name), "a service's name is lowercase words joined by -");
         let bytes = std::fs::read(binary).with_context(|| format!("read {}", binary.display()))?;
-        release::verify(crate::config::RELEASE_KEY, &bytes, signature).context("no node would take it")?;
+        release::verify(crate::config::RELEASE_KEY, &bytes, signature).context("no device would take it")?;
         let blob = self.put_blob(&bytes)?;
-        let r = Release { commit: commit.into(), target: target.into(), blob, size: bytes.len() as u64, committed, signature: signature.into() };
+        let r = Release { commit: commit.into(), target: target.into(), blob, size: bytes.len() as u64, committed, signature: signature.into(), service: service.map(str::to_string) };
         self.append(&Scope::Global, release::content(&r)).await?;
         Ok(r)
     }
@@ -53,5 +55,28 @@ impl Node {
         };
         release::verify(crate::config::RELEASE_KEY, &bytes, &r.signature)?;
         release::install(r, &bytes)
+    }
+
+    /// The newest release of `service`'s program for this device's platform, signed with the release key.
+    pub fn service_release(&self, service: &str) -> Option<Release> {
+        let (r, _) = self.with(|i| Ok(release::latest_of(crate::config::RELEASE_KEY, &i.r.store.scope("global")?, crate::config::TARGET, Some(service)))).ok()??;
+        Some(r)
+    }
+
+    /// `r`'s program, fetched if it isn't here, once its signature is the release key's.
+    pub async fn service_program(&self, r: &Release) -> Result<Vec<u8>> {
+        let bytes = match std::fs::read(release::blob_path(&self.0.dir, &r.blob)?) {
+            Ok(b) => b,
+            Err(_) => self.blob(&r.blob).await?,
+        };
+        release::verify(crate::config::RELEASE_KEY, &bytes, &r.signature)?;
+        Ok(bytes)
+    }
+
+    /// The newest release of each service's program for this device's platform, signed with the release key.
+    pub fn service_releases(&self) -> BTreeMap<String, Release> {
+        let entries = self.with(|i| i.r.store.scope("global")).unwrap_or_default();
+        let names: std::collections::BTreeSet<String> = entries.iter().filter(|e| e.content.app == release::APP && e.content.kind == release::SERVICE_KIND).filter_map(|e| e.content.data["service"].as_str().map(str::to_string)).collect();
+        names.into_iter().filter_map(|n| Some((n.clone(), release::latest_of(crate::config::RELEASE_KEY, &entries, crate::config::TARGET, Some(&n))?.0))).collect()
     }
 }

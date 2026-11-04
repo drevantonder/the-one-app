@@ -751,20 +751,26 @@ impl Node {
     }
 }
 
+/// Whether an entry is a release of the node's or a service's.
+fn is_release(e: &Entry) -> bool {
+    e.content.app == release::APP && (e.content.kind == "node-release" || e.content.kind == release::SERVICE_KIND)
+}
+
 /// The node's releases' blobs: what a backup needn't keep but the newest of, since releases can be fetched again from
 /// where they're published.
 fn releases(entries: &[Entry]) -> BTreeSet<String> {
-    entries.iter().filter(|e| e.content.app == release::APP && e.content.kind == "node-release").flat_map(|e| e.content.blobs.iter().cloned()).collect()
+    entries.iter().filter(|e| is_release(e)).flat_map(|e| e.content.blobs.iter().cloned()).collect()
 }
 
 /// The blobs a scope's backup keeps: every blob its entries name but those its apps forgot, and of the node's releases
-/// only the newest for each platform, so a white label with no published releases can still recover.
+/// only the newest for each platform (and each service's), so a white label with no published releases can still
+/// recover.
 fn backed_blobs(entries: &[Entry], forgotten: &BTreeSet<String>) -> BTreeSet<String> {
     let mut newest: BTreeMap<String, (u64, String)> = BTreeMap::new();
     let mut out = BTreeSet::new();
     for e in entries {
-        if e.content.app == release::APP && e.content.kind == "node-release" {
-            let target = e.content.data["target"].as_str().unwrap_or("").to_string();
+        if is_release(e) {
+            let target = format!("{} {}", e.content.data["target"].as_str().unwrap_or(""), e.content.data["service"].as_str().unwrap_or(""));
             if let Some(blob) = e.content.blobs.first() {
                 if newest.get(&target).is_none_or(|(t, _)| e.time() > *t) {
                     newest.insert(target, (e.time(), blob.clone()));
