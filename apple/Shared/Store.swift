@@ -123,6 +123,10 @@ final class Store {
     var devtoolsOpen = UserDefaults.standard.bool(forKey: "devtoolsOpen") {
         didSet { UserDefaults.standard.set(devtoolsOpen, forKey: "devtoolsOpen") }
     }
+    /// How tall that panel is once its top edge was dragged, kept for next time and used on every screen; until then it has its own.
+    var devtoolsHeight = UserDefaults.standard.object(forKey: "devtoolsHeight") as? Double {
+        didSet { UserDefaults.standard.set(devtoolsHeight, forKey: "devtoolsHeight") }
+    }
     #if os(iOS)
     /// Screens slid up over the others, by the bridge's `open` with `sheet`, each over the one before.
     var screenSheets: [ScreenSheet] = []

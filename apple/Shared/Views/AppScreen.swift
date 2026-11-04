@@ -22,6 +22,9 @@ struct AppScreen: View {
     @State private var offline: Offline?
     /// Bumped by Try Now, for the web view to try the node again at once.
     @State private var tries = 0
+    /// A Mac's Developer panel's height while its edge is being dragged, and what it was when the drag began.
+    @State private var panelHeight: CGFloat?
+    @State private var dragFrom: CGFloat?
 
     init(route: ScreenRoute, settings: Bool = false, docked: Bool = false, dismiss: ((Any?) -> Void)? = nil) {
         self.route = route
@@ -39,15 +42,35 @@ struct AppScreen: View {
             web
         } else {
             #if os(macOS)
-            // Developer's panel, in Developer mode and once opened, under the screen: it stays open from screen to screen.
+            // Developer's panel, in Developer mode and once opened, under the screen: it stays open from screen to screen,
+            // and its top edge drags it taller or shorter, between 120 pt and the window's less 120 pt.
             GeometryReader { geo in
+                let most = max(120, geo.size.height - 120)
+                let height = min(most, max(120, panelHeight ?? store.devtoolsHeight ?? min(440, geo.size.height * 0.45)))
                 VStack(spacing: 0) {
                     web
                     if store.developer && store.devtoolsOpen {
-                        Divider()
+                        // A row of its own, not over the web views, which would take the mouse.
+                        Color.clear
+                            .frame(height: 8)
+                            .overlay { Divider() }
+                            .contentShape(Rectangle())
+                            .pointerStyle(.rowResize)
+                            .gesture(
+                                DragGesture(minimumDistance: 1, coordinateSpace: .global)
+                                    .onChanged { drag in
+                                        dragFrom = dragFrom ?? height
+                                        panelHeight = min(most, max(120, (dragFrom ?? height) - drag.translation.height))
+                                    }
+                                    .onEnded { _ in
+                                        store.devtoolsHeight = panelHeight ?? height
+                                        panelHeight = nil
+                                        dragFrom = nil
+                                    }
+                            )
                         AppScreen(route: devtools, settings: true, docked: true) { _ in store.devtoolsOpen = false }
                             .id(devtools)
-                            .frame(height: min(440, geo.size.height * 0.45))
+                            .frame(height: height)
                     }
                 }
             }
