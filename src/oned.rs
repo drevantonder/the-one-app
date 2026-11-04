@@ -256,13 +256,17 @@ pub fn keep_parts(node: Node, runtime: tokio::runtime::Handle) {
                     false
                 }
             });
-            // Started, it's on once it answers its device; one that doesn't in a minute says so.
+            // Started, it's on once it answers its device, asked until it does, even once it said what's wrong; one
+            // that doesn't in a minute says so. One that stayed up a minute no longer keeps stopping.
             for (name, (_, started)) in &running {
                 let now = NOW.lock().unwrap().0.get(name).cloned().unwrap_or_default();
-                if now.doing == Some("Starting") && !node.part_up(name, *started) {
+                if !node.part_up(name, *started) {
                     runtime.block_on(node.hello_part(name));
                 }
                 if node.part_up(name, *started) {
+                    if started.elapsed() > Duration::from_secs(60) {
+                        stops.remove(name);
+                    }
                     if now != Now::default() && stops.get(name).is_none_or(|s| s.len() < 3) {
                         say(&node, &runtime, name, Now::default());
                     }

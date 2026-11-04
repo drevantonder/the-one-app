@@ -161,19 +161,29 @@
     return thing({ icon: one.appIcon({ ...a, name: s.name, title: a.title || s.name }, 28), title: a.title || s.name, mine, part: s.off, on: true });
   }
 
-  // A switch flipped here, shown as it will be until its device says so (or a while has passed).
-  let flipped = {};
+  // Each switch flipped here, by device and part: what was asked (`on`, and for Try Again the problem it retries), and
+  // how far it got: `sent`, then `written` once the node wrote it or `failed` with why it couldn't. Shown as asked until
+  // its device says it did, or for `LATE`; then, if it still hasn't, the row says so.
+  const asked = {};
+  // Try Again's restart can come and go between two draws, so the same problem a few seconds on is its answer.
+  const LATE = 30_000, AGAIN = 10_000;
+  /// A part as its row shows it, from what its device says and what was asked here.
+  function partNow(c, p) {
+    const k = `${c.node.key} ${p.name}`, a = asked[k];
+    if (!a) return p;
+    // Its device did it: on or off as asked, and for Try Again, past the problem it retried.
+    if (a.state !== "failed" && p.on === a.on && (!a.again || p.doing || p.problem !== a.again)) return delete asked[k], p;
+    if (a.state === "failed") return p.on === a.on ? (delete asked[k], p) : { ...p, failed: a.error, wanted: a.on };
+    if (a.again && p.on === a.on && a.state === "written" && Date.now() - a.at > AGAIN) return delete asked[k], p;
+    if (Date.now() - a.at < LATE) return { ...p, on: a.on, doing: a.on ? "Starting" : "Stopping", problem: null };
+    return { ...p, on: a.on, doing: null, problem: null, late: true };
+  }
   const partTitle = (p) => (p.name === "apps" ? "Runs apps" : appOf(p.name)?.title || p.title || p.name);
   // What a device can run, as it says: Runs apps first, then its services by name, each with a switch for its person,
   // and only those on for an admin. While one's being set up, starting or stopping, its row says so; a problem shows
   // on it, with what fixes it.
   function partRows(c, mine) {
-    const parts = c.node.parts.map((p) => {
-      const f = flipped[`${c.node.key} ${p.name}`];
-      const late = f && Date.now() - f.at < 30_000 && (f.on !== p.on || (f.again && p.problem && !p.doing));
-      if (late) return { ...p, on: f.on, doing: f.on ? "Starting" : "Stopping", problem: null };
-      return p;
-    });
+    const parts = c.node.parts.map((p) => partNow(c, p));
     return parts
       .filter((p) => mine || p.on)
       .sort((a, b) => (b.name === "apps") - (a.name === "apps") || partTitle(a).localeCompare(partTitle(b)))
@@ -181,9 +191,11 @@
         const title = partTitle(p), part = { device: c.node.key, name: p.name };
         const icon = p.name === "apps" ? tile("squares-four") : one.appIcon({ ...(appOf(p.name) || {}), name: p.name, title }, 28);
         const row = thing({ icon, title, sub: p.on && p.doing ? `${p.doing}…` : "", on: p.on, mine, part });
+        const again = (on, retried) => (mine ? { label: "Try Again", run: () => act(() => setPart(part, on, retried)) } : null);
+        if (p.failed) return row + one.problem({ title: `Couldn’t switch ${title} ${p.wanted ? "on" : "off"}`, text: p.failed, action: again(p.wanted) });
+        if (p.late) return row + one.problem({ title: `${c.name} hasn’t switched ${title} ${p.on ? "on" : "off"} yet`, text: "It does once it hears, so it may be offline.", action: again(p.on) });
         if (!p.on || !p.problem) return row;
-        const action = mine ? { label: "Try Again", run: () => act(() => setPart(part, true, true)) } : null;
-        return row + one.problem({ title: `${title} isn’t running on ${c.name}`, text: p.problem, action });
+        return row + one.problem({ title: `${title} isn’t running on ${c.name}`, text: p.problem, action: again(true, p.problem) });
       })
       .join("");
   }
@@ -395,11 +407,22 @@
 
   /// A part of a device switched on or off, which its oned then sets up and starts, or stops: nothing's lost by
   /// switching one off (a WhatsApp link stays, and runs again when it's back on), so nothing asks first.
-  /// Switched on again while it's on (`again`), it starts afresh, as Try Again does.
-  async function setPart(part, on, again = false) {
-    flipped[`${part.device} ${part.name ?? part.service}`] = { on, again, at: Date.now() };
+  /// Switched on again while it's on (`again`, the problem it had), it starts afresh, as Try Again does. What
+  /// happens to it shows on its row (`partNow`), which is drawn again once it's late.
+  async function setPart(part, on, again = null) {
+    const k = `${part.device} ${part.name ?? part.service}`, at = Date.now();
+    asked[k] = { on, again, at, state: "sent" };
     now();
-    await one.api("POST", "/v1/service", { device: part.device, name: part.name ?? part.service, on });
+    for (const after of again ? [AGAIN, LATE] : [LATE]) setTimeout(() => asked[k]?.at === at && draw(), after + 500);
+    try {
+      await one.api("POST", "/v1/service", { device: part.device, name: part.name ?? part.service, on });
+      if (asked[k]?.at === at) asked[k].state = "written";
+    } catch (err) {
+      if (asked[k]?.at === at) asked[k] = { ...asked[k], state: "failed", error: one.plain(err).title };
+      // A device that doesn't list its parts shows no row for it: the page says it instead.
+      if (part.service) throw err;
+      one.tap("error");
+    }
   }
 
   async function menu(which, at) {

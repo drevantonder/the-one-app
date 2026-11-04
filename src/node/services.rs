@@ -127,8 +127,8 @@ impl Node {
         // A process of oned's is on only by its entry: with none, it's off.
         let switched = |name: &str| m.services.get(&(self.0.id, name.to_string())).is_some_and(|s| s.on);
         let (processes, now) = crate::oned::parts();
-        for name in processes {
-            let title = crate::services::hosted().iter().find(|h| h.name == name).map(|h| (h.describe)()["title"].clone()).unwrap_or(Value::Null);
+        for name in &processes {
+            let title = crate::services::hosted().iter().find(|h| h.name == name.as_str()).map(|h| (h.describe)()["title"].clone()).unwrap_or(Value::Null);
             out.insert(name.clone(), json!({ "name": name, "title": title, "on": switched(&name) }));
         }
         for (name, now) in now {
@@ -136,10 +136,20 @@ impl Node {
                 part.extend(now);
             }
         }
-        // The Mac app's, switched on, start once it registers again, within seconds.
-        for (name, _) in self.0.services.offered() {
-            if on(&name) && !self.0.services.has(&name) && let Some(part) = out.get_mut(&name) {
+        // A registered one (the Mac app's), switched on but not registered now: starting while it registers again,
+        // as it does within seconds of this node or it starting; stopped once it hasn't for a while.
+        let starting = crate::handoff::since_start().is_some_and(|s| s < Duration::from_secs(60));
+        let lately: BTreeSet<String> = self.0.services.offered().into_iter().map(|(name, _)| name).collect();
+        let before = self.offered_before();
+        for (name, part) in out.iter_mut() {
+            let registered = lately.contains(name) || before.contains_key(name);
+            if !registered || processes.contains(name) || !on(name) || self.0.services.has(name) || part.get("problem").is_some_and(|p| !p.is_null()) {
+                continue;
+            }
+            if starting || lately.contains(name) {
                 part["doing"] = json!("Starting");
+            } else {
+                part["problem"] = json!("It stopped, and hasn’t started again. Its device’s log says why.");
             }
         }
         out.into_values().collect()
