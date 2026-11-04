@@ -49,6 +49,12 @@ const VIEW_EVERY = 10_000;
 /// What it keeps of what each tool needed: the most databases a tool's calls are handed, and the most tools kept.
 const NEEDS_MOST = 16;
 const TOOLS_MOST = 128;
+/// How long the relay keeps a device's binding, if it doesn't say, and how long before that ends it's bound again.
+const BOUND = 3_600_000;
+const BIND_AGAIN = 600_000;
+/// How long before auth forgets a request to join it's asked again, and how soon one auth didn't take is.
+const JOIN_EARLY = 60_000;
+const JOIN_AGAIN = 30_000;
 
 const json = (v, status = 200, headers = {}) => Response.json(v, { status, headers });
 const near = (env) => (env.LOCATION ? { locationHint: env.LOCATION } : {});
@@ -115,7 +121,15 @@ async function token(request, env) {
   const client = claims.azp || claims.client_id || asked.get("client_id");
   const grant = asked.get("grant_type");
   const old = grant === "refresh_token" ? asked.get("refresh_token") : null;
-  await deviceOf(env, client, claims.sub).signedIn({ client, user: claims.sub, old, refresh: out.refresh_token, access: out.access_token, until: claims.exp * 1000 });
+  const signedIn = { client, user: claims.sub, old, refresh: out.refresh_token, access: out.access_token, until: claims.exp * 1000 };
+  try {
+    await deviceOf(env, client, claims.sub).signedIn(signedIn);
+  } catch (err) {
+    // Auth rotated the refresh token, but its device's secret isn't sealed under the new one: the client isn't given
+    // tokens that open nothing, and asks again with the old refresh token, which auth answers the same for a minute.
+    console.error(err.stack || err);
+    return json({ error: "temporarily_unavailable", error_description: "Try again in a moment." }, 503, { "cache-control": "no-store", "retry-after": "2" });
+  }
   return json(out, 200, { "cache-control": "no-store", pragma: "no-cache" });
 }
 
@@ -265,6 +279,11 @@ export class Client extends DurableObject {
     this.viewing = Promise.resolve();
     /// What each node was handed for this device's access token: key → `{ until, tools: Set }`.
     this.handed = new Map();
+    /// Its endpoint, while it's awake: `{ key, phase, ready, ticket, until }`, one at a time, `phase` "starting" until
+    /// `ready` (it's bound at the relay, its endpoint started, and it's read who's who), then "running"; none while it's
+    /// asleep. `end` takes it away at once, so what's asked after starts another, and closes it once it's started: a
+    /// start it ends midway stops there.
+    this.run = null;
   }
 
   /// The relay, by its entrypoint for the MCP Worker's devices.
@@ -272,9 +291,10 @@ export class Client extends DurableObject {
     return this.env.RELAY;
   }
 
-  /// A client signed in (`old` null) or refreshed its sign-in: its device's secret, sealed under its new tokens. A
-  /// sign-in, or a refresh whose old token opens nothing, makes a new device and asks auth to let it join; the device it
-  /// replaces is removed once the new one is approved.
+  /// A client signed in (`old` null) or refreshed its sign-in: its device's secret, sealed under its new tokens (auth's
+  /// same answer again, to a refresh whose answer was lost, opens it as it is). A sign-in, or a refresh whose old token
+  /// opens nothing, makes a new device and asks auth to let it join; the device it replaces is removed once the new one
+  /// is approved.
   async signedIn({ client, user, old, refresh, access, until }) {
     await this.ctx.storage.put("name", `${client}\n${user}`);
     if (old && (await this.copies.rotate(old, refresh, access, until))) return;
@@ -290,16 +310,32 @@ export class Client extends DurableObject {
     await this.end();
     const was = await this.ctx.storage.get("device");
     const replaces = [...((await this.ctx.storage.get("replaces")) || []), ...(was?.key ? [was.key] : [])].slice(-4);
-    await this.ctx.storage.delete(["needs", "tools", "order"]);
+    await this.ctx.storage.delete(["needs", "tools", "order", "join"]);
     await this.ctx.storage.delete([...(await this.ctx.storage.list({ prefix: "needs:" })).keys()]);
     await this.ctx.storage.put({ device, replaces });
     await this.copies.start(new Uint8Array([...seed, ...sealSecret]), refresh, access, until);
-    const r = await this.env.AUTH.fetch(`${origin(this.env)}/api/auth/devices/requests`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${access}`, "content-type": "application/json" },
-      body: JSON.stringify({ key: device.key, seal: device.seal, name: device.name }),
-    });
-    if (!r.ok) console.log(JSON.stringify({ join: "refused", status: r.status, why: (await r.text()).slice(0, 200) }));
+    await this.join(device, access);
+  }
+
+  /// A device's stages: asking auth to let it join, waiting there (`join`, until when auth keeps its request), approved
+  /// (the relay lets its key in), and running (`run`). Asks auth, unless it's waiting there: as every client does, one
+  /// auth forgot (after 15 minutes) or didn't take is asked again, so its code always has a request behind it.
+  async join(device, access) {
+    const waiting = await this.ctx.storage.get("join");
+    if (waiting?.key === device.key && waiting.until > Date.now()) return;
+    let until = Date.now() + JOIN_AGAIN;
+    try {
+      const r = await this.env.AUTH.fetch(`${origin(this.env)}/api/auth/devices/requests`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${access}`, "content-type": "application/json" },
+        body: JSON.stringify({ key: device.key, seal: device.seal, name: device.name }),
+      });
+      if (r.ok) until = Math.max(until, Number((await r.json().catch(() => ({}))).until) - JOIN_EARLY || 0);
+      else console.log(JSON.stringify({ join: "refused", status: r.status, why: (await r.text()).slice(0, 200) }));
+    } catch (err) {
+      console.log(JSON.stringify({ join: "unasked", why: String(err?.message ?? err) }));
+    }
+    await this.ctx.storage.put("join", { key: device.key, until });
   }
 
   /// An MCP request with `token`, an access token until `until` (ms): its device answers it, or says why not. →
@@ -313,7 +349,10 @@ export class Client extends DurableObject {
       if (!secret || !device) return { signIn: "this sign-in opens nothing here: sign in again" };
       const me = { seed: secret.slice(0, 32), seal: { secret: secret.slice(32), public: hex.decode(device.seal) }, key: device.key, user: device.user, until };
       const approve = `Approve ${device.name} on one of your devices: in Settings › Devices, enter ${device.code.slice(0, 4)} ${device.code.slice(4)}.`;
-      if (!(await this.approved(device))) return answerAll(body, approve);
+      if (!(await this.approved(device))) {
+        await this.join(device, token);
+        return answerAll(body, approve);
+      }
       let nodes;
       try {
         nodes = await this.start(me);
@@ -339,48 +378,75 @@ export class Client extends DurableObject {
     return this.isApproved;
   }
 
-  /// Its endpoint, started with its key once in the object's life, bound at the relay, knowing who's who: → the nodes
-  /// it asks.
+  /// Its endpoint, started with its key, bound at the relay, knowing who's who, and bound again before its binding
+  /// lapses: → the nodes it asks.
   async start(me) {
-    if (!this.started) {
-      const send = (dst, seg, contents) => {
-        this.out.push([hex.encode(dst), seg, contents]);
-        if (this.out.length > 1) return;
-        queueMicrotask(() => {
-          const items = this.out;
-          this.out = [];
-          if (!this.ticket) return;
-          this.sent = this.relay().fromClient(me.key, this.ticket, items).catch(() => {});
-          this.ctx.waitUntil(this.sent);
-        });
-      };
-      this.started = (async () => {
-        const began = Date.now();
-        await this.unbindStale();
-        const name = await this.ctx.storage.get("name");
-        let bound;
-        await untilTaken(async (at) => {
-          bound = await this.relay().bind(await signedRequest(me.seed, hex.decode(me.key), RELAY, { bind: true }, at), name);
-          return bound?.error;
-        });
-        if (!bound?.ticket) throw new Error(`the relay didn't take its key: ${bound?.error}`);
-        this.ticket = bound.ticket;
-        await this.ctx.storage.put("bound", { key: me.key, ticket: bound.ticket });
-        this.me = me;
-        await device_start(me.seed, [], send);
-        await this.see(me);
-        if (!this.view.listed) throw new Error("this device is not listed as one of your One App's");
-        console.log(JSON.stringify({ started: me.key.slice(0, 8), ms: Date.now() - began, listed: this.view.nodes.size, on: this.order.length }));
-      })();
-      this.started.catch(() => {
-        this.started = null;
-        this.end();
-      });
-    } else if (Date.now() - (this.view?.at || 0) > VIEW_EVERY) {
+    if (this.run && this.run.key !== me.key) await this.end();
+    // One it's closing is closed first, as it's the same endpoint.
+    while (!this.run && this.ending) await this.ending;
+    let run = this.run;
+    if (!run) {
+      run = this.run = { key: me.key, phase: "starting", ticket: null, until: 0 };
+      run.ready = this.begin(run, me);
+      run.ready.catch(() => this.run === run && this.end());
+    } else if (run.phase === "running" && Date.now() - (this.view?.at || 0) > VIEW_EVERY) {
       this.ctx.waitUntil(this.see(me).catch((err) => console.log(JSON.stringify({ view: "unread", why: String(err?.message ?? err) }))));
     }
-    await this.started;
+    await run.ready;
+    if (this.run !== run) throw new Error("it was signed in again meanwhile: ask again");
+    // A busy device outlives its binding, which the relay keeps an hour: bound again before it lapses.
+    if (run.until - Date.now() < BIND_AGAIN) {
+      run.binding ||= this.bind(run, me).finally(() => (run.binding = null));
+      if (run.until - Date.now() < 30_000) await run.binding;
+      else this.ctx.waitUntil(run.binding.catch((err) => console.log(JSON.stringify({ bound: "again failed", why: String(err?.message ?? err) }))));
+    }
     return this.order;
+  }
+
+  /// Starts `run`, unless it's ended meanwhile.
+  async begin(run, me) {
+    const began = Date.now();
+    const ended = () => {
+      if (this.run !== run) throw new Error("it was signed in again meanwhile: ask again");
+    };
+    const send = (dst, seg, contents) => {
+      this.out.push([hex.encode(dst), seg, contents]);
+      if (this.out.length > 1) return;
+      queueMicrotask(() => {
+        const items = this.out;
+        this.out = [];
+        if (!run.ticket) return;
+        this.sent = this.relay().fromClient(run.key, run.ticket, items).catch(() => {});
+        this.ctx.waitUntil(this.sent);
+      });
+    };
+    await this.unbindStale();
+    ended();
+    await this.bind(run, me);
+    ended();
+    await device_start(me.seed, [], send);
+    run.endpoint = true;
+    ended();
+    await this.see(me);
+    ended();
+    if (!this.view.listed) throw new Error("this device is not listed as one of your One App's");
+    run.phase = "running";
+    console.log(JSON.stringify({ started: me.key.slice(0, 8), ms: Date.now() - began, listed: this.view.nodes.size, on: this.order.length }));
+  }
+
+  /// Binds its key to this object at the relay, which hands it what's sent to it, for an hour: again, once bound,
+  /// before that ends, which gives it a new ticket.
+  async bind(run, me) {
+    const name = await this.ctx.storage.get("name");
+    let bound;
+    await untilTaken(async (at) => {
+      bound = await this.relay().bind(await signedRequest(me.seed, hex.decode(me.key), RELAY, { bind: true }, at), name);
+      return bound?.error;
+    });
+    if (!bound?.ticket) throw new Error(`the relay didn't take its key: ${bound?.error}`);
+    run.ticket = bound.ticket;
+    run.until = Number(bound.until) || Date.now() + BOUND - 60_000;
+    await this.ctx.storage.put("bound", { key: run.key, ticket: bound.ticket });
   }
 
   /// Reads who's who from the bucket (what's new, after the first time), one reading at a time, and the nodes it asks
@@ -403,15 +469,15 @@ export class Client extends DurableObject {
     const online = new Set(await this.relay().connected([...nodes.keys()]));
     const kept = ((await this.ctx.storage.get("order")) || []).filter((k) => nodes.has(k));
     this.order = [...kept.filter((k) => online.has(k)), ...[...online].filter((k) => !kept.includes(k))];
-    if (this.me) device_nodes(me.key, this.order);
+    if (this.run?.endpoint && this.run.key === me.key) device_nodes(me.key, this.order);
     return this.order;
   }
 
   /// Reads run priority's order from the install's state, for the nodes it asks: only nodes the entries list are
   /// ever in it, whatever the state says.
   async learnOrder(me) {
-    if (this.learned) return;
-    this.learned = true;
+    if (!this.run || this.run.learned) return;
+    this.run.learned = true;
     try {
       const r = await device_fetch(me.key, "GET", "/v1/state", [], new Uint8Array());
       if (r.status !== 200 || !this.view?.nodes.has(r.node)) return;
@@ -545,11 +611,11 @@ export class Client extends DurableObject {
   /// running (the WebAssembly keeps no other). One for another key is dropped; one for its own while it isn't running
   /// is from a binding it couldn't end, which ends now.
   async deliver(key, batch) {
-    if (this.me?.key === key) {
+    if (this.run?.endpoint && this.run.key === key) {
       for (const [src, seg, contents] of batch) device_deliver(hex.decode(key), hex.decode(src), seg, contents);
       return;
     }
-    if (!this.started) await this.unbindStale(key);
+    if (!this.run) await this.unbindStale(key);
   }
 
   /// Ends a binding at the relay this object made and couldn't end (`key`, if given, only if it's that one's).
@@ -557,7 +623,7 @@ export class Client extends DurableObject {
     const bound = await this.ctx.storage.get("bound");
     if (!bound || (key && bound.key !== key)) return;
     await this.relay().unbind(bound.key, bound.ticket).catch(() => {});
-    await this.ctx.storage.delete("bound");
+    if ((await this.ctx.storage.get("bound"))?.ticket === bound.ticket) await this.ctx.storage.delete("bound");
   }
 
   /// iroh always has a timer pending, which would keep the object awake, and billed: once nobody has asked for `IDLE`,
@@ -581,27 +647,41 @@ export class Client extends DurableObject {
       this.alarmAt = this.last + this.idle();
       return this.ctx.storage.setAlarm(this.alarmAt);
     }
-    if (!this.started && !this.me) return;
+    if (!this.run) return;
     await this.end();
+    // Asked while it closed: it's that request's now, which started another.
+    if (this.asking || this.run) return this.awake();
     this.ctx.abort("idle");
   }
 
-  /// Closes its endpoint and unbinds its key: its key and the keys it opened leave memory with the object.
+  /// Closes its endpoint and unbinds its key, once it's started: its key and the keys it opened leave memory with the
+  /// object. A start waits for it (`ending`).
   async end() {
-    const me = this.me;
-    this.me = this.started = this.view = null;
+    const run = this.run;
+    this.run = this.view = null;
     this.isApproved = false;
     this.handed = new Map();
     this.order = [];
-    if (!me) return;
-    await device_close(me.key);
-    await this.sent;
-    const ticket = this.ticket;
-    this.ticket = null;
-    if (ticket) {
-      await this.relay().unbind(me.key, ticket).catch(() => {});
-      await this.ctx.storage.delete("bound");
+    if (!run) return this.ending;
+    run.phase = "ending";
+    const before = this.ending;
+    const ending = (this.ending = (async () => {
+      await before;
+      await run.ready?.catch(() => {});
+      await run.binding?.catch(() => {});
+      if (run.endpoint) await device_close(run.key);
+      await this.sent;
+      if (run.ticket) {
+        await this.relay().unbind(run.key, run.ticket).catch(() => {});
+        const bound = await this.ctx.storage.get("bound");
+        if (bound?.ticket === run.ticket) await this.ctx.storage.delete("bound");
+      }
+      console.log(JSON.stringify({ sleeps: run.key.slice(0, 8) }));
+    })());
+    try {
+      await ending;
+    } finally {
+      if (this.ending === ending) this.ending = null;
     }
-    console.log(JSON.stringify({ sleeps: me.key.slice(0, 8) }));
   }
 }

@@ -190,7 +190,7 @@ const relay = (env) => env.RELAY.get(env.RELAY.idFromName("relay"), near(env));
 /// What the MCP Worker asks the relay, by its binding: its devices' own bindings, and who's here. Nothing else of the
 /// relay's object, so a hacked MCP Worker tells it nothing and sends as no endpoint but a device it holds the key of.
 export class McpDevices extends WorkerEntrypoint {
-  /// Binds a device's key to its object, by `request` signed with that key: → `{ ticket }`, or `{ error }`.
+  /// Binds a device's key to its object, by `request` signed with that key: → `{ ticket, until }`, or `{ error }`.
   bind(request, name) {
     return relay(this.env).bind(request, name);
   }
@@ -467,7 +467,8 @@ export class Relay extends DurableObject {
   }
 
   /// Binds a key to the MCP Worker's object `name` for an hour: `request` signed by that key (`{ bind: true }`, as a
-  /// tell is), which is on the list. → `{ ticket }`, what sending as it and unbinding it show, or `{ error }`.
+  /// tell is), which is on the list. → `{ ticket, until }`, what sending as it and unbinding it show, and when it lapses
+  /// (ms), or `{ error }`; bound again, it's given a new ticket.
   async bind(request, name) {
     let fields;
     try {
@@ -483,7 +484,7 @@ export class Relay extends DurableObject {
     const ticket = hex(crypto.getRandomValues(new Uint8Array(32)));
     this.sql.exec("INSERT OR REPLACE INTO bound VALUES (?, ?, ?, ?)", fields.by, name, until, ticket);
     this.bound.set(fields.by, { name, until, ticket });
-    return { ticket };
+    return { ticket, until };
   }
 
   /// Unbinds `key`: by the MCP Worker, with its binding's ticket, or here, as it's taken out or its binding lapses.
