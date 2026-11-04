@@ -30,6 +30,9 @@ const PACKAGES: &[(&str, &str, &str)] = &[
 pub const COMPATIBILITY_DATE: &str = "2026-10-01";
 /// How long an app may take to answer.
 const TIME_LIMIT: Duration = Duration::from_secs(30);
+/// How long the runtime may take to start before it's given up on: seconds on a quiet machine, a minute or more on
+/// one whose cores are all busy.
+const START_LIMIT: Duration = Duration::from_secs(300);
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Me {
@@ -289,7 +292,8 @@ impl Runtime {
     }
 
     /// Waits until the runtime answers with the config of `generation`, or fails at once with `Broken` when an app's
-    /// code doesn't start (workerd then starts again and again, saying so in its log).
+    /// code doesn't start (workerd then starts again and again, saying so in its log). Only a runtime that never
+    /// answers runs out the time: one that's slow to start, on a machine whose cores are all busy, is waited for.
     fn wait_ready(&self, generation: u64) -> Result<()> {
         let started = Instant::now();
         let log = self.dir.join("workerd.log");
@@ -305,7 +309,7 @@ impl Runtime {
             if let Some(broken) = broken_since(&log, from) {
                 return Err(broken.into());
             }
-            ensure!(started.elapsed() < Duration::from_secs(60), "Apps couldn't start on this device: see {}", log.display());
+            ensure!(started.elapsed() < START_LIMIT, "Apps couldn't start on this device: see {}", log.display());
             std::thread::sleep(Duration::from_millis(50));
         }
     }

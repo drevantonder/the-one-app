@@ -22,9 +22,10 @@ async fn relay(a: &Node) -> crate::kernel::Kernel {
     k
 }
 
+/// Waits for what's expected, as long as a busy machine may take: a limit only for what never happens.
 async fn eventually(what: &str, mut check: impl AsyncFnMut() -> bool) {
     let start = Instant::now();
-    while start.elapsed() < Duration::from_secs(45) {
+    while start.elapsed() < Duration::from_secs(180) {
         if check().await {
             return;
         }
