@@ -36,11 +36,15 @@ sealed interface Route {
 }
 
 /** A screen pushed over the pages, with Back: each one its own, though two may show the same route. */
-class Pushed(val route: Route)
+class Pushed(val route: Route) {
+    /** When it showed, for Developer's panel. */
+    val since = System.currentTimeMillis()
+}
 
 /** A screen in a sheet over everything, and what it gives whoever opened it once it's gone: what it gave `one.close`,
  *  or null if it was dismissed. */
 class Sheet(val route: Route) {
+    val since = System.currentTimeMillis()
     val done = CompletableDeferred<JsonElement?>()
     /** Set once it's to go, with what it gives. */
     var going by mutableStateOf(false)
@@ -98,10 +102,38 @@ class Store(private val application: android.app.Application, val signIn: SignIn
         private set
     val path = mutableStateListOf<Pushed>()
     val sheets = mutableStateListOf<Sheet>()
+    /** When the pages last showed, for Developer's panel. */
+    var shown = System.currentTimeMillis()
+        private set
+
+    /** Developer mode on this phone (Settings › Developer): every screen's bar has a </> then. */
+    var developer by mutableStateOf(false)
+        private set
+    /** Whether Developer's panel is docked under the screen in front, on a wide window; a phone's is a sheet. */
+    var docked by mutableStateOf(false)
+
+    /** Turns Developer mode on or off, or just asks → whether it's on. */
+    suspend fun developer(on: Boolean?): Boolean = client.developer(on).also {
+        developer = it
+        if (!it) docked = false
+    }
+
+    /** Developer's panel for the screen `route`, which showed at `since`: docked, or closed if it is, on a wide window,
+     *  else in a sheet. It's told the screen's app and title, and for the client's own, since when it showed. */
+    fun openDeveloper(route: Route, since: Long, wide: Boolean) {
+        if (wide) docked = !docked
+        else scope.launch { present(devtools(route, since)) }
+    }
+
+    fun devtools(route: Route, since: Long): Route.Own {
+        val title = if (route is Route.Own && route.name == "pages") "Home" else title(route)
+        return Route.Own("devtools", (if (route is Route.App) obj("app" to route.app, "screen" to route.screen, "title" to title) else obj("title" to title, "since" to since)).toString())
+    }
 
     /** The pages again, at `scope`, with nothing over them. */
     fun openPage(scope: String) {
         page = scope
+        shown = System.currentTimeMillis()
         opened++
         path.clear()
         sheets.forEach { it.close(null) }
@@ -118,6 +150,7 @@ class Store(private val application: android.app.Application, val signIn: SignIn
         is Route.Own -> when (route.name) {
             "services" -> "Services"
             "request" -> "Vault"
+            "devtools" -> "Developer"
             else -> ""
         }
     }
@@ -211,6 +244,7 @@ class Store(private val application: android.app.Application, val signIn: SignIn
             while (true) {
                 try {
                     join()
+                    runCatching { developer = client.developer(null) }
                     refreshState()
                     break
                 } catch (e: NodeError) {
@@ -243,6 +277,8 @@ class Store(private val application: android.app.Application, val signIn: SignIn
         path.clear()
         sheets.forEach { it.close(null) }
         phase = Phase.SignedOut
+        developer = false
+        docked = false
         apps = emptyList()
         code = null
         scope.launch { client.close() }

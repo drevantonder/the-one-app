@@ -37,6 +37,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -81,7 +82,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.shadow
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -174,7 +178,13 @@ private fun css(c: Color) = c.let { "rgb(${(it.red * 255).toInt()}, ${(it.green 
 @Composable
 fun Shell(store: Store) {
     val p = LocalPalette.current
+    // Developer's panel: a sheet on a phone, docked under the screen in front on a wide window (a tablet, a Chromebook).
+    val wide = LocalConfiguration.current.screenWidthDp >= 600
+    val dock = wide && store.developer && store.docked && store.phase == Store.Phase.Ready
+    val dev = { route: Route, since: Long -> store.openDeveloper(route, since, wide) }
     Box(Modifier.fillMaxSize().background(p.background)) {
+        Column(Modifier.fillMaxSize()) {
+        Box(Modifier.weight(if (dock) 0.55f else 1f).fillMaxWidth().then(if (dock) Modifier.consumeWindowInsets(WindowInsets.navigationBars) else Modifier)) {
         // Every page side by side then Settings, to swipe between, opened at the page asked for. Its dots sit at its
         // bottom, above the gesture bar.
         Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.systemBars)) {
@@ -185,6 +195,11 @@ fun Shell(store: Store) {
             val ready = store.phase == Store.Phase.Ready && store.install != null
             if (made && (store.state == null || store.install != null)) Box(Modifier.fillMaxSize().alpha(if (ready) 1f else 0f)) {
                 key(store.opened) { ScreenView(store, Route.Own("pages", obj("swipe" to true, "scope" to store.page).toString()), ready = ready) }
+            }
+            // The pages have no bar of their own: its </> sits at the end of the row their dots are in, clear of the widgets.
+            if (ready && store.developer && store.path.isEmpty()) {
+                val home = Route.Own("pages", obj("swipe" to true, "scope" to store.page).toString())
+                DevButton({ dev(home, store.shown) }, Modifier.align(Alignment.BottomEnd).padding(end = 8.dp, bottom = 6.dp))
             }
             if (!ready) Starting(store)
         }
@@ -197,8 +212,27 @@ fun Shell(store: Store) {
                 else (slideInHorizontally { -it / 6 } + fadeIn()) togetherWith (slideOutHorizontally { it / 3 } + fadeOut())
             },
             label = "pushed",
-        ) { pushed -> if (pushed != null) PushedView(store, pushed) }
-        for (sheet in store.sheets) key(sheet) { SheetView(store, sheet) }
+        ) { pushed -> if (pushed != null) PushedView(store, pushed, dev) }
+        }
+        if (dock) {
+            val front = store.path.lastOrNull()
+            val route = if (front != null) store.devtools(front.route, front.since) else store.devtools(Route.Own("pages"), store.shown)
+            Column(Modifier.weight(0.45f).fillMaxWidth().windowInsetsPadding(WindowInsets.navigationBars)) {
+                HorizontalDivider(color = p.separator)
+                key(route) { ScreenView(store, route, docked = true) }
+            }
+        }
+        }
+        for (sheet in store.sheets) key(sheet) { SheetView(store, sheet, dev) }
+    }
+}
+
+/** The bar's </>, which opens Developer's panel. */
+@Composable
+private fun DevButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val p = LocalPalette.current
+    TextButton(onClick, modifier.semantics { contentDescription = "Developer" }) {
+        Text("</>", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, color = p.tint)
     }
 }
 
@@ -254,7 +288,7 @@ private fun Approve(store: Store) {
 
 /** A pushed screen: a top app bar, ← then its title beside it, over the screen; the system's back gesture goes back too. */
 @Composable
-private fun PushedView(store: Store, pushed: Pushed) {
+private fun PushedView(store: Store, pushed: Pushed, dev: (Route, Long) -> Unit) {
     val p = LocalPalette.current
     var title by remember(pushed) { mutableStateOf<String?>(null) }
     Column(Modifier.fillMaxSize().background(p.background)) {
@@ -265,8 +299,9 @@ private fun PushedView(store: Store, pushed: Pushed) {
             }
             Text(
                 title ?: store.title(pushed.route), style = Type.title2, fontWeight = FontWeight.Normal, color = p.label, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(start = 4.dp),
+                modifier = Modifier.weight(1f).padding(start = 4.dp),
             )
+            if (store.developer) DevButton({ dev(pushed.route, pushed.since) })
         }
         // Above the gesture bar, and the keyboard while it's up.
         Box(Modifier.weight(1f).fillMaxWidth().windowInsetsPadding(WindowInsets.navigationBars.union(WindowInsets.ime))) {
@@ -278,7 +313,7 @@ private fun PushedView(store: Store, pushed: Pushed) {
 /** A screen in a sheet over everything: a bar with its title and Done (Cancel for a request, answered in it or not). */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun SheetView(store: Store, sheet: Sheet) {
+private fun SheetView(store: Store, sheet: Sheet, dev: (Route, Long) -> Unit) {
     val p = LocalPalette.current
     val state = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var title by remember(sheet) { mutableStateOf<String?>(null) }
@@ -302,6 +337,7 @@ private fun SheetView(store: Store, sheet: Sheet) {
                 title?.ifEmpty { null } ?: store.title(sheet.route), style = Type.headline, color = p.label, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 textAlign = TextAlign.Center, modifier = Modifier.align(Alignment.Center).padding(horizontal = 90.dp),
             )
+            if (store.developer && (sheet.route as? Route.Own)?.name != "devtools") DevButton({ dev(sheet.route, sheet.since) }, Modifier.align(Alignment.CenterStart).padding(start = 8.dp))
             TextButton({ sheet.close(null) }, Modifier.align(Alignment.CenterEnd).padding(end = 8.dp)) {
                 Text(if ((sheet.route as? Route.Own)?.name == "request") "Cancel" else "Done", style = Type.body, fontWeight = FontWeight.SemiBold, color = p.tint)
             }
@@ -314,13 +350,13 @@ private fun SheetView(store: Store, sheet: Sheet) {
 
 /** A screen's page in its web view, with the menus and alerts it asks for. */
 @Composable
-private fun ScreenView(store: Store, route: Route, sheet: Sheet? = null, pushed: Pushed? = null, ready: Boolean = true, setTitle: (String?) -> Unit = {}) {
+private fun ScreenView(store: Store, route: Route, sheet: Sheet? = null, pushed: Pushed? = null, docked: Boolean = false, ready: Boolean = true, setTitle: (String?) -> Unit = {}) {
     val context = LocalContext.current
     val palette = LocalPalette.current
     // Drawn again in this app's light or dark, once it changes: a web view takes the scheme its theme says.
     val dark = palette.dark
     var loaded by remember(route, dark) { mutableStateOf(false) }
-    val bridge = remember(route, dark) { Bridge(context, store, route, sheet, pushed, setTitle) }
+    val bridge = remember(route, dark) { Bridge(context, store, route, sheet, pushed, docked, setTitle) }
     DisposableEffect(bridge) { onDispose { bridge.close() } }
     // Made before the node answered (the pages), it asks again once it has, if it couldn't then.
     LaunchedEffect(bridge, ready) { if (ready) bridge.again() }
@@ -446,7 +482,7 @@ private fun Alert(ask: AlertAsk) {
 // MARK: The bridge
 
 /** A screen's web view, and the bridge it answers. */
-private class Bridge(val context: Context, val store: Store, val route: Route, val sheet: Sheet?, val pushed: Pushed?, val setTitle: (String?) -> Unit) {
+private class Bridge(val context: Context, val store: Store, val route: Route, val sheet: Sheet?, val pushed: Pushed?, val docked: Boolean, val setTitle: (String?) -> Unit) {
     /** One of the client's own screens, which act as the person; else an app's, which act only as that app. */
     private val own = route is Route.Own
     private val app = route as? Route.App
@@ -642,6 +678,7 @@ private class Bridge(val context: Context, val store: Store, val route: Route, v
             "close" -> {
                 if (sheet != null) sheet.close(m["value"]?.takeIf { it !is JsonNull })
                 else if (pushed != null) store.path.remove(pushed)
+                else if (docked) store.docked = false
                 return null
             }
             "title" -> {
@@ -712,7 +749,7 @@ private class Bridge(val context: Context, val store: Store, val route: Route, v
                 )
                 return null
             }
-            "developer" -> return JsonPrimitive(store.client.developer((m["on"] as? JsonPrimitive)?.booleanOrNull))
+            "developer" -> return JsonPrimitive(store.developer((m["on"] as? JsonPrimitive)?.booleanOrNull))
             // In developer mode, what this phone's requests did, for the screen's panel (kit.js); else nothing.
             "traces" -> return runCatching { store.client.traces() }.getOrNull()?.let { runCatching { json.parseToJsonElement(it) }.getOrNull() } ?: JsonNull
             "cache" -> {
