@@ -328,6 +328,8 @@ pub fn fields_shown(item: &Item) -> Vec<Value> {
 
 /// Fills each `{{<item id>:field}}`, `{{field}}` or `{{<group id>/field}}` in `text` with what `lookup` finds for
 /// it, as `(hosts, value)`; refuses when a secret field isn't sent to `host`. A placeholder nothing has stays as it is.
+/// `{{rs256 <placeholder> <claims>}}` is a JWT of `claims` (base64url JSON) signed with the PEM private key the
+/// placeholder names, for a site that takes one instead of the key: sent only to the key's hosts, as the key would be.
 pub fn fill(text: &str, host: &str, lookup: impl Fn(&str) -> Option<(Vec<String>, String)>) -> Result<String> {
     let mut out = String::with_capacity(text.len());
     let mut rest = text;
@@ -336,12 +338,22 @@ pub fn fill(text: &str, host: &str, lookup: impl Fn(&str) -> Option<(Vec<String>
         let Some(end) = after.find("}}") else { break };
         out.push_str(&rest[..start]);
         let name = &after[..end];
-        match placeholder(name).then(|| lookup(name)).flatten() {
+        let (key, claims) = match name.strip_prefix("rs256 ").and_then(|r| r.split_once(' ')) {
+            Some((key, claims)) => (key, Some(claims)),
+            None => (name, None),
+        };
+        match placeholder(key).then(|| lookup(key)).flatten() {
             Some((hosts, value)) => {
                 if !hosts.is_empty() && !hosts.iter().any(|h| h == host) {
-                    bail!("{name} is sent only to {}, not {host}", hosts.join(", "));
+                    bail!("{key} is sent only to {}, not {host}", hosts.join(", "));
                 }
-                out.push_str(&value);
+                match claims {
+                    Some(claims) => {
+                        ensure!(!hosts.is_empty(), "{key} isn't secret, so it signs nothing");
+                        out.push_str(&rs256(&value, claims)?);
+                    }
+                    None => out.push_str(&value),
+                }
                 rest = &after[end + 2..];
             }
             None => {
@@ -354,15 +366,36 @@ pub fn fill(text: &str, host: &str, lookup: impl Fn(&str) -> Option<(Vec<String>
     Ok(out)
 }
 
-/// The names of the placeholders in `text`.
+/// A JWT of `claims` (base64url JSON), signed RS256 with `pem`, an RSA private key (PKCS#1 or PKCS#8), on the device
+/// that holds it: never in a browser or the serverless node.
+#[cfg(feature = "node")]
+fn rs256(pem: &str, claims: &str) -> Result<String> {
+    use ring::signature::{RSA_PKCS1_SHA256, RsaKeyPair};
+    ensure!(!claims.is_empty() && claims.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_'), "a JWT's claims go as base64url JSON");
+    let body: String = pem.lines().filter(|l| !l.starts_with("-----")).collect::<Vec<_>>().concat();
+    let der = data_encoding::BASE64.decode(body.trim().as_bytes()).context("that key isn't a PEM private key")?;
+    let key = if pem.contains("BEGIN RSA PRIVATE KEY") { RsaKeyPair::from_der(&der) } else { RsaKeyPair::from_pkcs8(&der) }.map_err(|e| anyhow::anyhow!("that key isn't an RSA private key: {e}"))?;
+    let signing = format!("{}.{claims}", data_encoding::BASE64URL_NOPAD.encode(br#"{"alg":"RS256","typ":"JWT"}"#));
+    let mut sig = vec![0; key.public().modulus_len()];
+    key.sign(&RSA_PKCS1_SHA256, &ring::rand::SystemRandom::new(), signing.as_bytes(), &mut sig).map_err(|_| anyhow::anyhow!("signing with that key failed"))?;
+    Ok(format!("{signing}.{}", data_encoding::BASE64URL_NOPAD.encode(&sig)))
+}
+#[cfg(not(feature = "node"))]
+fn rs256(_: &str, _: &str) -> Result<String> {
+    bail!("a key in the Vault signs only on one of your devices: turn one on, and try again")
+}
+
+/// The names of the placeholders in `text`, a JWT's key's for `rs256 …`.
 fn placeholders(text: &str) -> Vec<&str> {
     let mut out = Vec::new();
     let mut rest = text;
     while let Some(start) = rest.find("{{") {
         let after = &rest[start + 2..];
         let Some(end) = after.find("}}") else { break };
-        if placeholder(&after[..end]) {
-            out.push(&after[..end]);
+        let name = &after[..end];
+        let name = name.strip_prefix("rs256 ").and_then(|r| r.split_once(' ')).map_or(name, |(key, _)| key);
+        if placeholder(name) {
+            out.push(name);
         }
         rest = &after[end + 2..];
     }
@@ -485,4 +518,26 @@ fn secrets_hosts_and_apps_open_only_with_the_vault_key() {
     let mut items = load(&conn).unwrap();
     open_all(&mut items, &keys);
     assert_eq!((items[id].hosts.clone(), items[id].fields["token"].value.as_str()), (vec!["api2.example.com".to_string()], "s3cret"));
+}
+
+#[cfg(feature = "node")]
+#[test]
+fn a_key_signs_a_jwt_only_for_its_hosts_and_the_jwt_carries_no_key() {
+    use ring::signature::{KeyPair, RSA_PKCS1_2048_8192_SHA256, RsaKeyPair, UnparsedPublicKey};
+    // GitHub gives an App's key as PKCS#1; OpenSSL 3 makes PKCS#8 unless told otherwise.
+    for traditional in [true, false] {
+        let out = std::process::Command::new("openssl").arg("genrsa").args(traditional.then_some("-traditional")).arg("2048").output().unwrap();
+        let pem = String::from_utf8(out.stdout).unwrap();
+        let lookup = |n: &str| (n == "0123456789abcdef:private_key").then(|| (vec!["api.github.com".to_string()], pem.clone()));
+        let claims = data_encoding::BASE64URL_NOPAD.encode(br#"{"iss":"1","iat":1,"exp":2}"#);
+        let jwt = fill(&format!("Bearer {{{{rs256 0123456789abcdef:private_key {claims}}}}}"), "api.github.com", lookup).unwrap();
+        let jwt = jwt.strip_prefix("Bearer ").unwrap();
+        let (signed, sig) = jwt.rsplit_once('.').unwrap();
+        assert!(signed.ends_with(&claims) && !jwt.contains("PRIVATE"));
+        let der: String = pem.lines().filter(|l| !l.starts_with("-----")).collect();
+        let der = data_encoding::BASE64.decode(der.as_bytes()).unwrap();
+        let key = if traditional { RsaKeyPair::from_der(&der) } else { RsaKeyPair::from_pkcs8(&der) }.unwrap();
+        UnparsedPublicKey::new(&RSA_PKCS1_2048_8192_SHA256, key.public_key().as_ref()).verify(signed.as_bytes(), &data_encoding::BASE64URL_NOPAD.decode(sig.as_bytes()).unwrap()).unwrap();
+        assert!(fill(&format!("{{{{rs256 0123456789abcdef:private_key {claims}}}}}"), "evil.example.com", lookup).is_err(), "only to its hosts");
+    }
 }
