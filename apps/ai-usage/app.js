@@ -307,6 +307,8 @@ export default {
     `alter table snapshots add column account text;`,
     `alter table snapshots add column active integer;`,
     `alter table snapshots add column disabled integer;`,
+    // An email column a test deploy once added, unused: kept so every database has the same changes in the same order.
+    `alter table snapshots add column email text;`,
     `alter table snapshots add column devices text;`]])),
 
   ops: {
