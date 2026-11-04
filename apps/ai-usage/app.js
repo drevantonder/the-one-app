@@ -117,7 +117,7 @@ async function latest(b, provider, before = null) {
     "select * from snapshots where provider = ? and (at <= ? or ? is null) and at = (select max(at) from snapshots x where x.provider = snapshots.provider and ifnull(x.account, '') = ifnull(snapshots.account, '') and (x.at <= ? or ? is null)) order by active desc, weekly_used",
     [provider, before, before, before, before],
   );
-  return rows.map((r) => ({ ...r, active: !!r.active, disabled: !!r.disabled, models: JSON.parse(r.models || "[]"), pace: JSON.parse(r.pace || "{}") }));
+  return rows.map((r) => ({ ...r, devices: JSON.parse(r.devices || "null") || [r.device], active: !!r.active, disabled: !!r.disabled, models: JSON.parse(r.models || "[]"), pace: JSON.parse(r.pace || "{}") }));
 }
 
 /// The one before for the same account, sharing the session window, for the burn rate.
@@ -156,6 +156,7 @@ async function refresh(b, id, ask, now) {
   const failed = {}; // machine → why it couldn't answer
   const unread = {}; // account → why it couldn't be read
   const reads = [];
+  const has = {}; // account → every machine that keeps its sign-in
   for (const [machine, answer] of Object.entries(answers || {})) {
     if (answer?.error) {
       failed[machine] = `${machine}: ${String(answer.error).slice(0, 160)}`;
@@ -164,6 +165,7 @@ async function refresh(b, id, ask, now) {
     for (const a of answer?.accounts || []) {
       if (a.provider !== id) continue;
       const out = fromService(a);
+      (has[out.account || out.email || ""] ??= []).push(machine);
       // An account it couldn't read now (rate limited, signed out) keeps its last read, saying why.
       if (out.session.used == null && out.weekly.used == null && out.monthly.used == null) {
         if (a.error) unread[out.account || ""] ??= `${machine}: ${String(a.error).slice(0, 160)}`;
@@ -183,16 +185,20 @@ async function refresh(b, id, ask, now) {
     out.session.pace = paceFrom(out.session.used, out.session.resetsAt, P.sessionMins, prev && { at: prev.at, used: prev.used }, now);
     out.weekly.pace = paceFrom(out.weekly.used, out.weekly.resetsAt, P.weeklyMins, null, now);
     const active = out.active || reads.length === 1 ? 1 : 0;
-    b.exec("insert into snapshots (provider, device, at, source, confidence, session_used, session_resets, weekly_used, weekly_resets, monthly_used, monthly_resets, models, pace, note, account, active, disabled) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", [id, machine, now, out.source, out.confidence, out.session.used, out.session.resetsAt, out.weekly.used, out.weekly.resetsAt, out.monthly.used, out.monthly.resetsAt, JSON.stringify(out.models), JSON.stringify({ session: out.session.pace, weekly: out.weekly.pace }), (out.notes || [])[0] || null, out.account || null, active, out.disabled ? 1 : 0]);
-    results.push({ provider: id, device: machine, at: now, source: out.source, confidence: out.confidence, session_used: out.session.used, session_resets: out.session.resetsAt, session_resetText: out.session.resetText, weekly_used: out.weekly.used, weekly_resets: out.weekly.resetsAt, weekly_resetText: out.weekly.resetText, monthly_used: out.monthly.used, monthly_resets: out.monthly.resetsAt, models: out.models, pace: { session: out.session.pace, weekly: out.weekly.pace }, plan: out.plan, account: out.account || null, active: !!active, disabled: !!out.disabled, extra: out.extra, notes: out.notes || [], cached: false, now });
+    const devices = [...new Set(has[key])].sort();
+    b.exec("insert into snapshots (provider, device, devices, at, source, confidence, session_used, session_resets, weekly_used, weekly_resets, monthly_used, monthly_resets, models, pace, note, account, active, disabled) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", [id, machine, JSON.stringify(devices), now, out.source, out.confidence, out.session.used, out.session.resetsAt, out.weekly.used, out.weekly.resetsAt, out.monthly.used, out.monthly.resetsAt, JSON.stringify(out.models), JSON.stringify({ session: out.session.pace, weekly: out.weekly.pace }), (out.notes || [])[0] || null, out.account || null, active, out.disabled ? 1 : 0]);
+    results.push({ provider: id, device: machine, devices, at: now, source: out.source, confidence: out.confidence, session_used: out.session.used, session_resets: out.session.resetsAt, session_resetText: out.session.resetText, weekly_used: out.weekly.used, weekly_resets: out.weekly.resetsAt, weekly_resetText: out.weekly.resetText, monthly_used: out.monthly.used, monthly_resets: out.monthly.resetsAt, models: out.models, pace: { session: out.session.pace, weekly: out.weekly.pace }, plan: out.plan, account: out.account || null, active: !!active, disabled: !!out.disabled, extra: out.extra, notes: out.notes || [], cached: false, now });
   }
   b.exec("delete from snapshots where at < ?", [PRUNE()]);
   // Rows that can't be told which account they were (reads from before accounts had labels) go once the service
   // answers; until then they're better kept than blank.
   if (reads.length) b.exec("delete from snapshots where provider = ? and account is null and at < ?", [id, now]);
+  // An account its machine answered without (signed out there, or renamed) is gone: its reads go with it.
+  const gone = (r) => r.device in (answers || {}) && !failed[r.device] && !unread[r.account || ""];
+  for (const r of snap) if (!seen.has(r.account || "") && gone(r)) b.exec("delete from snapshots where provider = ? and ifnull(account, '') = ?", [id, r.account || ""]);
   // The writes land when this call returns, so the merge happens here: this pass's rows, and the last read of each
   // account it didn't see (a machine off, say), saying why if it or its machine couldn't be read.
-  const kept = snap.filter((r) => !seen.has(r.account || "")).map((r) => {
+  const kept = snap.filter((r) => !seen.has(r.account || "") && !gone(r)).map((r) => {
     const why = unread[r.account || ""] || failed[r.device];
     return { ...r, cached: true, now, ...(why ? { stale: why } : {}) };
   });
@@ -230,7 +236,7 @@ function alarm(p, now) {
 function section(reads, now) {
   const p = reads[0];
   const title = PROVIDERS[p.provider].title;
-  const head = [title, p.account ? `${p.account}${reads.length > 1 ? ", in use" : ""}` : null, p.plan, p.device ? `seen on ${p.device}` : null].filter(Boolean).join(" · ");
+  const head = [title, p.account ? `${p.account}${reads.length > 1 ? ", in use" : ""}` : null, p.plan, p.devices?.length ? `on ${p.devices.join(", ")}` : null].filter(Boolean).join(" · ");
   const age = now - p.at > FRESH ? `read ${ago(p.at, now)}` : null;
   // Why some reads are old, once: a machine that couldn't answer, or no machine asked.
   const problems = [...new Set(reads.map((r) => r.stale).filter(Boolean))];
@@ -300,7 +306,8 @@ export default {
     `alter table snapshots add column note text;`,
     `alter table snapshots add column account text;`,
     `alter table snapshots add column active integer;`,
-    `alter table snapshots add column disabled integer;`]])),
+    `alter table snapshots add column disabled integer;`,
+    `alter table snapshots add column devices text;`]])),
 
   ops: {
     status: {
@@ -332,7 +339,7 @@ export default {
             marks: Object.fromEntries(ids.map((id) => [id, markOf(id)])),
             providers: all.map((p) => ({
               id: p.provider, title: PROVIDERS[p.provider].title, account: p.account || null, active: !!p.active, disabled: !!p.disabled, alarm: alarm(p, now), plan: p.plan || null, source: p.source || null,
-              device: p.device || null, updatedAgo: p.at ? ago(p.at, now) : null,
+              devices: p.devices || [], updatedAgo: p.at ? ago(p.at, now) : null,
               stale: p.stale || null,
               session: { used: p.session_used, left: p.session_used == null ? null : 100 - p.session_used, resets: p.session_resets ? resets(p.session_resets, now) : null, countdown: p.session_resets ? countdown(p.session_resets, now) : null, pace: p.pace?.session?.summary || null, willLast: p.pace?.session?.willLast ?? null },
               weekly: { used: p.weekly_used, left: p.weekly_used == null ? null : 100 - p.weekly_used, resets: p.weekly_resets ? resets(p.weekly_resets, now) : null, countdown: p.weekly_resets ? countdown(p.weekly_resets, now) : null, pace: p.pace?.weekly?.summary || null, willLast: p.pace?.weekly?.willLast ?? null },
@@ -394,10 +401,12 @@ function meter(label, w) {
   if (!w || w.used == null) return "";
   return \`<div class="m"><span class="sub">\${one.esc(label)}</span><div class="bar"><i style="width:\${w.used}%;background:\${tone(w.used)}"></i></div><span class="p">\${w.used}%</span><span class="r">\${w.countdown ? "resets " + one.esc(w.countdown) : ""}</span></div>\`;
 }
+// Which of your devices keep this sign-in.
+const on = (p) => (p.devices || []).length ? "on " + p.devices.join(", ") : "";
 function read(p, several) {
   const [team, email] = (p.account || "").split(" · ");
   const state = p.active && several ? "In use" : p.disabled ? "Not in rotation" : "";
-  const name = p.account ? \`<div class="name"><b>\${one.esc(team)}</b><span class="sub">\${state}</span></div><div class="sub mail">\${one.esc(email || "")}</div>\` : "";
+  const name = p.account ? \`<div class="name"><b>\${one.esc(team)}</b><span class="sub">\${state}</span></div><div class="sub mail">\${one.esc([email, on(p)].filter(Boolean).join(" · "))}</div>\` : "";
   const models = (p.models || []).map((m) => meter(m.name, m)).join("");
   const extra = p.extra ? \`<div class="m"><span class="sub">Extra</span><span></span><span class="p"></span><span class="r">$\${p.extra.used} of $\${p.extra.limit}</span></div>\` : "";
   const alarm = p.alarm ? \`<div class="alarm" style="color:var(--\${p.alarm.tone})">\${one.esc(p.alarm.text)}</div>\` : "";
@@ -407,7 +416,7 @@ const problem = (title, why) => \`<div class="problem"><span class="s">⚠︎</s
 function tile(reads, mark) {
   const p = reads[0];
   const icon = mark && /^data:image\\/svg\\+xml,/.test(mark.image) ? \`<span class="app-icon drawn\${mark.kind === "icon" ? "" : " logo"}" style="--size:28px;background-image:url(\${one.esc(JSON.stringify(mark.image))})"></span>\` : "";
-  const head = \`<header><h3 class="brand">\${icon}\${one.esc(p.title)}</h3><span class="sub">\${one.esc([p.plan, p.device, p.updatedAgo ? "updated " + p.updatedAgo : ""].filter(Boolean).join(" · "))}</span></header>\`;
+  const head = \`<header><h3 class="brand">\${icon}\${one.esc(p.title)}</h3><span class="sub">\${one.esc([p.plan, p.account ? "" : on(p), p.updatedAgo ? "updated " + p.updatedAgo : ""].filter(Boolean).join(" · "))}</span></header>\`;
   // Reads a machine couldn't renew: one problem, on the tile they're in.
   const stale = [...new Set(reads.map((r) => r.stale).filter(Boolean))];
   const old = stale.length ? problem(\`Can't read \${p.title} now\`, stale.join("; ")) : "";
