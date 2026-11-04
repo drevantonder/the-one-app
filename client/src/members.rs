@@ -113,7 +113,7 @@ pub fn view(m: &Members) -> Value {
         .machines
         .values()
         .filter(|d| m.machine(&d.key).is_some())
-        .map(|d| json!({ "key": hex(&d.key), "seal": hex(&d.seal), "user": d.user, "name": d.name, "roles": d.roles, "passkey": d.passkey }))
+        .map(|d| json!({ "key": hex(&d.key), "seal": hex(&d.seal), "user": d.user, "name": d.name, "roles": d.roles, "passkey": d.passkey, "device": d.device.as_ref().map(hex) }))
         .collect();
     let mut openers = Map::new();
     let mut roles = Map::new();

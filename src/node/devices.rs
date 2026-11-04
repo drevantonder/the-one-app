@@ -147,6 +147,9 @@ pub struct DeviceRequest {
     pub person: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub proof: Option<String>,
+    /// For a native app, the device it's on (hex): its oned's key, or an id of the device's own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<String>,
 }
 
 impl DeviceRequest {
@@ -448,7 +451,8 @@ impl Node {
     /// the proof their invite's secret makes with its key. → what it was sealed, and what it wasn't.
     pub async fn approve_request(&self, caller: &Caller, r: &DeviceRequest, invite: Option<&Invited>) -> Result<Value> {
         let endpoint = r.endpoint()?;
-        let listed = match invite {
+        let on = r.device.as_deref().map(crate::keys::unhex).transpose().context("the device it's on is 64 hex characters")?;
+        let mut listed = match invite {
             Some(i) => {
                 let proof = r.proof.as_deref().context("a newcomer's device brings their invite's proof")?;
                 ensure!(proof == crate::keys::invite_proof(i.secret.as_bytes(), &endpoint), "that device's proof isn't from {}'s invite", i.name);
@@ -460,10 +464,28 @@ impl Node {
                 members::device(&endpoint, &r.user, &r.name, &[members::Kind::Client], None)
             }
         };
+        if let Some(on) = &on {
+            listed.data["device"] = json!(hex(on));
+        }
         // Approved before, but its request wasn't marked so (the device still waits on it): what's left is done again.
         let already = self.with(|i| Ok(i.r.members.client(&endpoint.key).is_some_and(|c| c.user == r.user && c.seal == endpoint.seal)))?;
         if !already {
             self.member_content(caller, listed).await?;
+        }
+        // Signed in again on the same device: its sign-in before goes, as signing out would have taken it, so its scopes
+        // keep their keys.
+        if let Some(on) = on {
+            let before: Vec<Key> = self.with(|i| {
+                let m = &i.r.members;
+                Ok(m.clients().filter(|c| c.user == r.user && c.device == Some(on) && c.key != endpoint.key && c.passkey.is_none()).map(|c| c.key).collect())
+            })?;
+            for old in before {
+                if let Err(err) = self.tell_relay_now(json!({ "remove": hex(&old) })).await {
+                    tracing::warn!("taking {}'s sign-in before off the network: {err:#}", r.name);
+                }
+                let seq = self.with(|i| Ok(i.r.store.last(&old, "global")?.map(|e| e.seq())))?;
+                self.member_as(caller, "remove", json!({ "key": hex(&old), "seq": seq })).await?;
+            }
         }
         let admin = self.with(|i| Ok(i.r.members.is_admin(&r.user)))?;
         if invite.is_some_and(|i| i.role == Role::Admin)

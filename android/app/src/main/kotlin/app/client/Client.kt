@@ -26,10 +26,19 @@ class Client(private val context: Context, private val signIn: SignIn) {
         device?.takeIf { deviceFor == id }?.let { return it }
         val folder = File(context.filesDir, "client/" + MessageDigest.getInstance("SHA-256").digest(id.toByteArray()).joinToString("") { "%02x".format(it) }.take(16))
         val made = io { uniffi.one_client_ffi.ThisDevice(signIn.deviceSecret(id), at, folder.path) }
+        made.on(onDevice())
         device?.let { old -> io { old.disconnect() } }
         device = made
         deviceFor = id
         return made
+    }
+
+    /** The phone this app is on, which signing in here again replaces its sign-in under: its Android ID for this app,
+     *  which outlives reinstalling, hashed. */
+    @android.annotation.SuppressLint("HardwareIds")
+    private fun onDevice(): String {
+        val id = android.provider.Settings.Secure.getString(context.contentResolver, android.provider.Settings.Secure.ANDROID_ID) ?: ""
+        return MessageDigest.getInstance("SHA-256").digest("this device $id".toByteArray()).joinToString("") { "%02x".format(it) }
     }
 
     /** Whether this phone is let in yet: it reaches a node as itself. */

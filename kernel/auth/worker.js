@@ -134,6 +134,7 @@ export class Auth extends DurableObject {
     if (!columns.includes("approved")) sql.exec("alter table requests add column approved integer");
     if (!columns.includes("genesis")) sql.exec("alter table requests add column genesis text");
     if (!columns.includes("place")) sql.exec("alter table requests add column place text");
+    if (!columns.includes("device")) sql.exec("alter table requests add column device text");
     // Services asked to join here before oned listed them itself.
     for (const old of ["services", "enrollments", "service_requests", "service_asks"]) sql.exec(`drop table if exists ${old}`);
     // The people who sign in only with a passkey: admins.
@@ -389,16 +390,17 @@ export class Auth extends DurableObject {
     this.ctx.storage.sql.exec("delete from requests where made <= ?", Date.now() - REQUEST);
   }
 
-  /// A device signed in asks to join: `{ key, seal, name, proof? }`, its endpoint keys (hex), its name, and for a
+  /// A device signed in asks to join: `{ key, seal, name, proof?, device? }`, its endpoint keys (hex), its name, for a
   /// newcomer's first device, `keys::invite_proof` of its invite's secret, key and seal key, kept with that invite for the
-  /// inviting admin's device to check. → until when it waits.
+  /// inviting admin's device to check, and for a native app, the device it's on (64 hex). → until when it waits.
   async ask(request) {
     const body = await request.json().catch(() => refuse(400, "the body isn't JSON"));
     const user = (await this.person(request)) || refuse(401, "Sign in first.");
-    const { key, seal, name, proof } = body;
+    const { key, seal, name, proof, device } = body;
     if (!KEY.test(key || "") || !KEY.test(seal || "")) refuse(400, "key and seal are endpoint keys, 64 hex characters each");
     if (typeof name !== "string" || !name.trim() || name.length > 64) refuse(400, "give the device's name, up to 64 characters");
     if (proof != null && !KEY.test(proof)) refuse(400, "a proof is 64 hex characters");
+    if (device != null && !KEY.test(device)) refuse(400, "a device is 64 hex characters");
     this.expire();
     const sql = this.ctx.storage.sql;
     const [had] = sql.exec("select user from requests where key = ?", key).toArray();
@@ -411,7 +413,7 @@ export class Auth extends DurableObject {
     const made = Date.now();
     // Where it asked from, as Cloudflare places it: its city, shown beside its code.
     const place = typeof request.cf?.city === "string" ? request.cf.city.slice(0, 64) : null;
-    sql.exec("insert or replace into requests (key, seal, name, user, proof, invite, made, approved, place) values (?, ?, ?, ?, ?, ?, ?, null, ?)", key, seal, name.trim(), user, proof ?? null, invite?.id ?? null, made, place);
+    sql.exec("insert or replace into requests (key, seal, name, user, proof, invite, made, approved, place, device) values (?, ?, ?, ?, ?, ?, ?, null, ?, ?)", key, seal, name.trim(), user, proof ?? null, invite?.id ?? null, made, place, device ?? null);
     return { until: made + REQUEST };
   }
 
@@ -420,7 +422,7 @@ export class Auth extends DurableObject {
     const sql = this.ctx.storage.sql;
     return rows.map((r) => {
       const person = sql.exec("select name from user where id = ?", r.user).toArray()[0]?.name || "";
-      return { key: r.key, seal: r.seal, name: r.name, user: r.user, person, ...(r.proof ? { proof: r.proof } : {}), ...(r.approved ? { approved: true } : {}), ...(r.genesis ? { genesis: r.genesis } : {}), ...(r.place ? { place: r.place } : {}), made: r.made, until: r.made + REQUEST };
+      return { key: r.key, seal: r.seal, name: r.name, user: r.user, person, ...(r.proof ? { proof: r.proof } : {}), ...(r.approved ? { approved: true } : {}), ...(r.genesis ? { genesis: r.genesis } : {}), ...(r.place ? { place: r.place } : {}), ...(r.device ? { device: r.device } : {}), made: r.made, until: r.made + REQUEST };
     });
   }
 

@@ -452,9 +452,16 @@ export class Device {
       if (!(await this.invitedHere(r))) throw new Error("That device didn’t come from an invite made here.");
       newUser = { name: (await get(`invite:${r.user}`)).name || r.person, role: "member" };
     }
-    await this.write("global", members.device({ key: r.key, seal: r.seal, user: r.user, name: r.name, newUser }), as);
+    await this.write("global", members.device({ key: r.key, seal: r.seal, user: r.user, name: r.name, newUser, device: r.device }), as);
     await this.sealTo(r, newUser ? ["global"] : scopesOf(k, r.user), as);
     await this.tell({ add: r.key, role: "client", ...(!newUser && k.roles.global?.[this.user] === "admin" ? { admin: true } : {}) }, as);
+    // Signed in again on the same device: its sign-in before goes, as signing out would have taken it, so its scopes
+    // keep their keys.
+    for (const old of r.device ? k.devices.filter((d) => d.user === r.user && d.device === r.device && d.key !== r.key && !d.passkey && (d.roles || []).includes("client")) : []) {
+      await this.tell({ remove: old.key }, as).catch(() => {});
+      const next = (await get(`global:${this.user}`))?.have.split(",").find((h) => h.startsWith(`${old.key}.`))?.split(".")[1];
+      await this.write("global", members.removeDevice({ key: old.key, seq: next ? Number(next) - 1 : null }), as);
+    }
     // Marked approved, for the device waiting on it to see, with the install it's in: the only one it then takes.
     const approved = `?approved&genesis=${(await get(`global:${this.user}`))?.root || ""}`;
     if (newUser) await this.authSigned("DELETE", `/api/auth/devices/requests/${r.key}`, {}, approved).catch(() => {});

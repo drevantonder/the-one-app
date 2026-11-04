@@ -97,6 +97,12 @@ impl ThisDevice {
 
     /// Asks to be let in, as the person signed in with `token` (an access token), calling it `name`; someone new
     /// brings their invite's secret.
+    /// Says which device it's on (hex): its oned's key, or an id of the device's own, hashed, that outlives signing
+    /// out. Signing in there again replaces its sign-in.
+    pub fn on(&self, device: String) {
+        self.0.on(&device)
+    }
+
     pub fn ask(&self, token: String, name: String, invite: Option<String>) -> Result<(), OneError> {
         Ok(run(self.0.ask(&token, &name, invite.as_deref()))?)
     }

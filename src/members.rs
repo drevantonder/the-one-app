@@ -620,8 +620,10 @@ impl Members {
                 // A machine an admin listed for someone is listed again by that person's own device to be theirs: then it
                 // runs their own scope too (`runs_for`).
                 if let Some(was) = self.machines.get(&machine.key) {
-                    // Or a service of theirs listed again by their own device, to name the device it's part of.
+                    // Or a service of theirs listed again by their own device, to name the device it's part of; or a sign-in
+                    // that named no device, naming the one it's on.
                     let part = was.is(Kind::Service) && was.roles == machine.roles && was.service == machine.service;
+                    let part = part || (was.is(Kind::Client) && was.roles == machine.roles && was.device.is_none() && machine.device.is_some() && was.passkey == machine.passkey);
                     ensure!(!was.removed && was.user == user && w == user && (was.by != user || part) && was.seal == machine.seal, "that key is listed already");
                     self.machines.insert(machine.key, machine);
                     self.devices_at = self.devices_at.max(e.time());

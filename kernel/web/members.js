@@ -4,7 +4,7 @@
 const node = (kind, data) => ({ app: "node", kind, data });
 
 export const members = {
-  device: ({ key, seal, user, name, roles = ["client"], newUser }) => node("device", { key, seal, user, name, roles, ...(newUser ? { user_name: newUser.name, role: newUser.role } : {}) }),
+  device: ({ key, seal, user, name, roles = ["client"], newUser, device }) => node("device", { key, seal, user, name, roles, ...(newUser ? { user_name: newUser.name, role: newUser.role } : {}), ...(device ? { device } : {}) }),
   passkey: ({ key, seal, user, name, credential }) => node("device", { key, seal, user, name, roles: ["client"], passkey: credential }),
   role: ({ user, role }) => node("role", { user, role }),
   /// `seqs`: the last of each of their devices' entries in `global` the remover holds (null for none), by key.

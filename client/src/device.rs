@@ -82,6 +82,8 @@ pub struct Device {
     order: Mutex<Vec<[u8; 32]>>,
     /// What it asked auth to let it in with, to ask again once that waited too long.
     asked: Mutex<Option<Value>>,
+    /// The device it's on, as its app says (`on`): signing in there again replaces this sign-in.
+    on: Mutex<Option<String>>,
     /// Each scope's epochs opened, by (scope, n), and apps' keys by (scope, app, n).
     epochs: Mutex<HashMap<(String, u32), [u8; 32]>>,
     app_keys: Mutex<HashMap<(String, String, u32), [u8; 32]>>,
@@ -111,12 +113,21 @@ impl Device {
             known: Mutex::default(),
             order: Mutex::default(),
             asked: Mutex::default(),
+            on: Mutex::default(),
             epochs: Mutex::default(),
             app_keys: Mutex::default(),
             needs: Mutex::new(needs),
             learning: Mutex::default(),
             traces: Mutex::default(),
             answers: None,
+        }
+    }
+
+    /// Says which device it's on: that device's oned key (hex), on a machine with one, or an id of the device's own,
+    /// hashed, that outlives signing out. Its request to join names it, and once it's in, its listing does.
+    pub fn on(&self, device: &str) {
+        if keys::unhex(device).is_ok() {
+            *self.on.lock().unwrap() = Some(device.to_string());
         }
     }
 
@@ -180,6 +191,9 @@ impl Device {
     /// secret, its proof).
     pub async fn ask(&self, token: &str, name: &str, invite: Option<&str>) -> Result<(), Error> {
         let mut asked = json!({ "key": self.key(), "seal": hex(&self.me.seal), "name": name });
+        if let Some(on) = self.on.lock().unwrap().clone() {
+            asked["device"] = json!(on);
+        }
         if let Some(invite) = invite.filter(|i| !i.is_empty()) {
             asked["proof"] = json!(keys::invite_proof(invite.as_bytes(), &self.me));
         }
@@ -379,13 +393,22 @@ impl Device {
     /// As a person's first device does: says where their own things run (the machines that run everyone's), if they
     /// haven't, and makes their own scope's first epoch, if it has none.
     async fn settle_own(&self) -> Result<(), Error> {
-        let (user, runs, epoch, on) = {
+        let device = self.on.lock().unwrap().clone();
+        let (user, runs, epoch, on, unnamed) = {
             let known = self.known.lock().unwrap();
             let m = &known.as_ref().expect("read").members;
-            let user = m.machine(&self.me.key).map(|d| d.user.clone()).unwrap_or_default();
+            let me = m.machine(&self.me.key);
+            let user = me.map(|d| d.user.clone()).unwrap_or_default();
             let on: Vec<[u8; 32]> = m.computes().filter(|c| c.user != user && m.runs_for(&c.key, &Scope::Global)).map(|c| c.key).collect();
-            (user.clone(), m.runs.contains_key(&user), m.epoch(&Scope::User(user)), on)
+            // Listed before sign-ins named their device: it lists itself again, naming it.
+            let unnamed = me.filter(|d| d.device.is_none() && d.passkey.is_none()).map(|d| (d.name.clone(), d.roles.iter().copied().collect::<Vec<_>>()));
+            (user.clone(), m.runs.contains_key(&user), m.epoch(&Scope::User(user)), on, unnamed)
         };
+        if let (Some(device), Some((name, roles))) = (device, unnamed) {
+            let mut listed = members::device(&self.me, &user, &name, &roles, None);
+            listed.data["device"] = json!(device);
+            self.write("global", &user, listed).await?;
+        }
         if !runs && !on.is_empty() {
             self.write("global", &user, members::runs(&on)).await?;
         }

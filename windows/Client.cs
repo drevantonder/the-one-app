@@ -25,6 +25,14 @@ public static class Client
     /// The Credential Locker's name for this app's device keys.
     static string Locker => $"{WhiteLabel.Name} device";
 
+    /// The computer this app is on, which signing in here again replaces its sign-in under: Windows' own id for it,
+    /// which outlives reinstalling, hashed.
+    static string? OnDevice()
+    {
+        using var key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Cryptography");
+        return key?.GetValue("MachineGuid") is string id ? Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"this device {id}"))).ToLowerInvariant() : null;
+    }
+
     /// This computer's device for whoever's signed in, at their address.
     static async Task<ThisDevice> Current()
     {
@@ -37,6 +45,7 @@ public static class Client
             if (device != null && deviceFor == id) return device;
             var name = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(id)))[..16].ToLowerInvariant();
             var made = await Off(() => new ThisDevice(Secret(name), address, Path.Combine(WhiteLabel.Folder, "client", name)));
+            if (OnDevice() is { } on) made.On(on);
             var old = device;
             if (old != null) await Off(() => { old.Disconnect(); return 0; });
             (device, deviceFor, deviceName) = (made, id, name);

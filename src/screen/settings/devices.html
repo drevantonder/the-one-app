@@ -77,38 +77,31 @@
   const rank = (p) => (p === "last" ? 1000 : Number(p) || 1);
   const said = (p) => (p === "last" ? "Always last" : `Priority ${p}`);
 
-  // What exists, grouped by the device it's on: a machine's node and the services named for it, the sign-ins of its
-  // apps (several old ones of the same device among them), and each browser on its own.
+  // What exists, grouped by the device it's on, as each says by its key: a machine's oned and its services, the
+  // sign-ins of its apps, and each browser on its own.
   function grouped() {
     // This device, as its node says, or by its own key: a browser's, which signs in, or the one asking.
     const mark = (e) => ({ ...e, me: e.me || [device.key, state.me?.key].includes(e.key) });
     const devices = (state.install?.devices || []).map(mark), clients = (state.install?.clients || []).map(mark);
-    const cards = [], browsers = [], named = new Map();
-    const id = (user, name) => `${user}\n${shown(name).toLowerCase()}`;
+    const cards = [], browsers = [];
     const card = (user, name) => {
       const c = { user, name: shown(name), node: null, services: [], clients: [] };
       cards.push(c);
-      if (!named.has(id(user, name))) named.set(id(user, name), c);
       return c;
     };
     const byKey = new Map();
     for (const d of devices.filter((d) => (d.roles || []).includes("compute"))) byKey.set(d.key, Object.assign(card(d.user, d.name), { node: d }));
     // A service under the device it's part of.
     for (const s of devices.filter((d) => d.service)) (byKey.get(s.device) || card(s.user, s.name)).services.push(s);
-    const app = `${state.config?.name || ""} on `;
     for (const c of clients) {
       if (c.passkey || BROWSER.test(c.name)) {
         browsers.push(c);
         continue;
       }
-      // A computer's app: on that computer, where it's known by its name, or the person's only Mac for a Mac's.
-      const host = c.name.startsWith(app) ? c.name.slice(app.length) : "";
-      let on = host && named.get(id(c.user, host));
-      if (host && !on && osOf("", host) === "apple-logo") {
-        const macs = cards.filter((k) => k.user === c.user && /apple/.test(k.node?.target || ""));
-        if (macs.length === 1) on = macs[0];
-      }
-      (on || named.get(id(c.user, host || c.name)) || card(c.user, host || c.name)).clients.push(c);
+      // An app's sign-in, under the device it's on: its oned's card, or a phone's own, which a sign-in there again
+      // replaces.
+      if (c.device && !byKey.has(c.device)) byKey.set(c.device, card(c.user, c.name));
+      (byKey.get(c.device) || card(c.user, c.name)).clients.push(c);
     }
     for (const c of cards) {
       const ends = [c.node, ...c.services].filter(Boolean);

@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import Security
 
@@ -19,10 +20,29 @@ actor DeviceClient {
         if let device, deviceFor == id { return device }
         let folder = URL.applicationSupportDirectory.appending(path: "client/\(Keychain.name(id))")
         let made = try await off { try ThisDevice(secret: Keychain.secret(id), address: address, dir: folder.path()) }
+        if let on = await Self.on() { made.on(device: on) }
         if let old = device { await off { old.disconnect() } }
         device = made
         deviceFor = id
         return made
+    }
+
+    /// The device this app is on, which signing in here again replaces its sign-in under: on a Mac, its oned's key
+    /// (the Mac as a device); on an iPhone, an id of its own, hashed, kept in this device's Keychain, which outlives
+    /// signing out.
+    private static func on() async -> String? {
+        #if os(macOS)
+        let port = Bundle.main.object(forInfoDictionaryKey: "NodePort") as? String ?? ""
+        guard let url = URL(string: "http://127.0.0.1:\(port)/v1/state") else { return nil }
+        var request = URLRequest(url: url)
+        LocalToken.add(to: &request)
+        guard let (data, _) = try? await URLSession.shared.data(for: request),
+              let state = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let device = state["device"] as? [String: Any] else { return nil }
+        return device["key"] as? String
+        #else
+        return SHA256.hash(data: Keychain.secret("this device")).map { String(format: "%02x", $0) }.joined()
+        #endif
     }
 
     /// Whether it's been let in: it reaches a node as itself.

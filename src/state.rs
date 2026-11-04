@@ -108,7 +108,7 @@ fn install(m: &Members, me: &str, settings: &Map<String, Value>, here: &Here) ->
         .clients()
         .filter(|c| !c.is(Kind::Compute))
         .map(|c| {
-            let mut client = json!({ "key": hex(&c.key), "seal": hex(&c.seal), "name": c.name, "user": c.user, "roles": c.roles, "passkey": c.passkey, "since": c.since, "me": false });
+            let mut client = json!({ "key": hex(&c.key), "seal": hex(&c.seal), "name": c.name, "user": c.user, "roles": c.roles, "passkey": c.passkey, "device": c.device.as_ref().map(hex), "since": c.since, "me": false });
             client.as_object_mut().unwrap().extend((here.client_now)(c));
             client
         })

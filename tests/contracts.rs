@@ -169,6 +169,14 @@ fn the_kernel_and_nodes_agree_on_keys_and_seals() {
         let (user, group) = ("0123456789abcdef", "fedcba9876543210");
         let both = [
             (members::device(&endpoint, user, "Chrome on Mac", &[Kind::Client], None), json!(["device", { "key": key, "seal": seal, "user": user, "name": "Chrome on Mac" }])),
+            (
+                {
+                    let mut c = members::device(&endpoint, user, "phone", &[Kind::Client], None);
+                    c.data["device"] = json!(seal.clone());
+                    c
+                },
+                json!(["device", { "key": key, "seal": seal, "user": user, "name": "phone", "device": seal }]),
+            ),
             (members::device(&endpoint, user, "Sam's Chrome", &[Kind::Client], Some(("Sam", Role::Member))), json!(["device", { "key": key, "seal": seal, "user": user, "name": "Sam's Chrome", "newUser": { "name": "Sam", "role": "member" } }])),
             (members::passkey(&endpoint, user, "Passkey", "cred-1"), json!(["passkey", { "key": key, "seal": seal, "user": user, "name": "Passkey", "credential": "cred-1" }])),
             (members::role(user, Role::Admin), json!(["role", { "user": user, "role": "admin" }])),
