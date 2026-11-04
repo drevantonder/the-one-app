@@ -19,6 +19,7 @@ export default {
   title: "Shell",
   icon: "terminal-window",
   color: "#3a3a3c",
+  advanced: true,
   description: "Run commands on your own devices",
   connector: true,
   needs: "Needs one of your devices",

@@ -353,6 +353,7 @@ export default {
   title: "Computer Use",
   icon: "cursor-click",
   color: "#5e5ce6",
+  advanced: true,
   description: "Devices your agents can use: agent devices with a browser, and your own devices when you let them",
   connector: true,
   needs: "Needs a Linux device with Podman, or a Mac",

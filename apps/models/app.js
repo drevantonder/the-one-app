@@ -22,6 +22,7 @@ export default {
   title: "Models",
   icon: "cpu",
   color: "#32ade6",
+  advanced: true,
   description: "AI models on your own devices",
   connector: true,
   needs: "Needs a device with a GPU",

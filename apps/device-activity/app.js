@@ -58,6 +58,7 @@ export default {
   title: "Device Activity",
   icon: "monitor",
   color: "#30b0c7",
+  advanced: true,
   description: "How busy each device is",
   instructions: "Your One App runs each thing on the first device in its order that can run it, is on and has room: Use First, then When Needed, then Last Resort (Cloudflare among them, once there is one), a device far from the others only when it's nearer. device-activity_order shows that order; device-activity_use moves a device, for an admin, only when the person asks. device-activity_list shows every one of your devices, online or not, with its memory (as Activity Monitor counts it on a Mac), CPU, GPU and disk, and the containers each hosts after it. Use it to pick a device with room for a desktop, a model or a build.",
 

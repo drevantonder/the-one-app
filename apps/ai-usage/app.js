@@ -376,6 +376,7 @@ export default {
   title: "AI Usage",
   icon: "gauge",
   color: "#636366",
+  advanced: true,
   description: "Every AI plan's limits, and whether the pace lasts to reset",
   instructions: `Every AI plan's limits in the providers' own words: what's left, the pace against what's expected, and whether it lasts to reset. ai-usage_status is the full read (fresh when older than 5 minutes). Agents get the last readings with their first prompt, then a warning when a window is nearly out or outruns its reset. Estimated rows (marked ~) come from this device only and never forecast.`,
 

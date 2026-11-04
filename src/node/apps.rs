@@ -173,7 +173,7 @@ impl Node {
                 if let Ok(Value::Object(d)) = self.0.apps.describe(&name).await {
                     // A fork's module may still give its first name; the install's name for it is the one that counts.
                     let declared = Schedule::all(&Value::Object(d.clone()));
-                    for (k, v) in d.into_iter().filter(|(k, _)| k != "name" && k != "schedules" && (mine || matches!(k.as_str(), "title" | "icon" | "color" | "domain" | "tagline" | "description" | "uses" | "connector" | "needs"))) {
+                    for (k, v) in d.into_iter().filter(|(k, _)| k != "name" && k != "schedules" && (mine || matches!(k.as_str(), "title" | "icon" | "color" | "domain" | "tagline" | "description" | "uses" | "connector" | "needs" | "advanced"))) {
                         info[k] = v;
                     }
                     if mine {

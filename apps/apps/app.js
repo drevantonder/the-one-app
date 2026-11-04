@@ -64,14 +64,14 @@ function untar(bytes) {
 
 /// What a built-in app the install hasn't added says about itself: nothing runs it yet, so its code says (the first
 /// `title`, `icon`, `color`, `tagline` and `description` after the line starting `export default` given as plain strings, as the built-in
-/// apps give them before their ops).
+/// apps give them before their ops; `advanced: true` too, which the store lists after the rest).
 async function described(ctx, bundle) {
   const file = untar(await ctx.blob.get(bundle)).find((f) => f.path === "app.js");
   const all = file ? new TextDecoder().decode(file.bytes) : "";
   const code = all.slice(Math.max(0, all.search(/^export default/m)));
   const field = (key) => code.match(new RegExp(`\\b${key}:\\s*"([^"]*)"`))?.[1] || null;
   const parts = code.match(/\buses:\s*\{[^}]*\bsidecars:\s*\[([^\]]*)\]/)?.[1].match(/"[^"]+"/g)?.map((n) => n.slice(1, -1)) || [];
-  return { title: field("title"), icon: field("icon"), color: field("color"), tagline: field("tagline"), description: field("description"), needs: field("needs"), uses: { apps: [], sidecars: parts } };
+  return { title: field("title"), icon: field("icon"), color: field("color"), tagline: field("tagline"), description: field("description"), needs: field("needs"), advanced: /\badvanced:\s*true\b/.test(code), uses: { apps: [], sidecars: parts } };
 }
 
 /// Whether an app is a service: it has no main screen and no widget, so shells keep it in each page's Services folder
@@ -219,11 +219,11 @@ export default {
             owner: a.owner, owner_name: name(a.owner),
             from: a.from || null, forks: a.forks || [], deploys: a.deploys, installed: a.installed || [],
             installed_names: (a.installed || []).map(name), uses: a.uses || { apps: [], sidecars: [] },
-            built_in: !!a.built_in, added, up_to_date: a.built_in && added ? a.bundle === a.built_in : null,
+            advanced: !!(d.advanced || a.advanced), built_in: !!a.built_in, added, up_to_date: a.built_in && added ? a.bundle === a.built_in : null,
             source: a.source || null, mine: mine(ctx, a.owner), deleted: a.deleted || null, service: services[all.indexOf(a)], accounts: a.accounts ?? null,
           };
         }));
-        apps.sort((a, b) => a.title.localeCompare(b.title));
+        apps.sort((a, b) => a.advanced - b.advanced || a.title.localeCompare(b.title));
         if (full) return { apps, places: places(ctx), admin: ctx.me.role === "admin" };
         const line = (a) => `${a.title} (${a.name}): ${a.deleted ? `deleted ${new Date(a.deleted.time).toISOString().slice(0, 10)}${a.mine ? "" : `, ${a.owner_name}'s`}` : a.installed_names.length ? `added for ${a.installed_names.join(", ")}` : "not added"}`
           + `${a.service ? ", a service" : ""}${a.installed_names.length && a.accounts === 0 ? `, no account signed in yet (${a.name}_sign_in)` : ""}${a.up_to_date === false ? ", an update waiting" : ""}. ${a.tagline || a.description || ""}`.trimEnd();
