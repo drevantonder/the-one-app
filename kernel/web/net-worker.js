@@ -238,6 +238,9 @@ export function server(version) {
             const nodes = await theirs(m.user, m.nodes);
             await (await code)[1].put(`nodes:${m.user}`, nodes);
             const s = await session?.ready;
+            // Each one's run priority, where the state said it: those on the same one are raced at once.
+            const ranks = nodes.filter((k) => Number.isInteger(m.ranks?.[k]));
+            if (ranks.length) s?.client.ranks(ranks, ranks.map((k) => m.ranks[k]));
             return s?.client.nodes(nodes);
           }
           case "global":

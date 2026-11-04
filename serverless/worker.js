@@ -1,5 +1,5 @@
 // The serverless node: a node of the install on Cloudflare Workers, which client devices ask over iroh as they ask
-// any node, last in Where Things Run's order: when none of their person's machines answers. It holds no keys. Each
+// any node, last in run priority's order: when none of their person's machines answers. It holds no keys. Each
 // request is from the device its connection proved (or the device that vouched for that session's key, as nodes take
 // one: `x-one-endpoint`), says whose it is (`x-one-user`), which the install's entries must list that device as, and
 // brings the keys of the databases its call reaches, sealed to this node for that device (`x-one-keys`); one that lacks

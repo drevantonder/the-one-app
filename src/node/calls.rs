@@ -237,9 +237,8 @@ impl Node {
             let rank = |k: &Key| {
                 let here = *k == self.0.id;
                 let load = if here { Some(&here_load) } else { i.peers.get(k).and_then(|p| p.load.as_ref()) };
-                let kind = load.map(|l| l.kind.as_str()).unwrap_or("");
                 let far = !here && i.far.get(k).is_some_and(|d| *d > FAR);
-                (!here && !i.online(k), here_first && !here, load.is_some_and(full), far, rank::order(&set, &hex(k), kind), !here, i.nearest.get(k).copied().unwrap_or(Duration::from_secs(1)))
+                (!here && !i.online(k), here_first && !here, load.is_some_and(full), far, rank::priority(&set, &hex(k)), !here, i.nearest.get(k).copied().unwrap_or(Duration::from_secs(1)))
             };
             devices.sort_by_cached_key(rank);
             Ok(devices)
@@ -959,21 +958,22 @@ impl Node {
                 ok(json!({ "ok": Box::pin(self.route(call, grant.caller.clone())).await? }))
             }
             ("GET", "/devices") => ok(self.state_for(&grant.caller)["install"]["devices"].take()),
-            // Where things run first, as the person the call is for: only an admin changes it.
-            ("GET", "/use") => {
+            // Run priority's order, as the person the call is for: only an admin changes it.
+            ("GET", "/order") => {
                 let install = self.state_for(&grant.caller)["install"].take();
-                let mut order: Vec<Value> = install["devices"].as_array().cloned().unwrap_or_default().into_iter().filter(|s| s["service"].is_null()).map(|s| json!({ "name": s["name"], "key": s["key"], "kind": s["kind"], "use": s["use"], "online": s["online"], "here": s["me"] })).collect();
-                if let Some(use_) = install["serverless"]["use"].as_str() {
-                    order.push(json!({ "name": "Cloudflare", "key": rank::CLOUDFLARE, "kind": rank::CLOUDFLARE, "use": use_, "online": true, "here": false }));
+                let mut order: Vec<Value> = install["devices"].as_array().cloned().unwrap_or_default().into_iter().filter(|s| s["service"].is_null()).map(|s| json!({ "name": s["name"], "key": s["key"], "kind": s["kind"], "priority": s["priority"], "online": s["online"], "here": s["me"] })).collect();
+                if let Some(priority) = install["serverless"].get("priority") {
+                    order.push(json!({ "name": "Cloudflare", "key": rank::CLOUDFLARE, "kind": rank::CLOUDFLARE, "priority": priority, "online": true, "here": false }));
                 }
                 let set = self.with(|i| Ok(rank::set(&i.r.members.settings)))?;
-                order.sort_by_cached_key(|s| (rank::order(&set, s["key"].as_str().unwrap_or(""), s["kind"].as_str().unwrap_or("")), s["name"].as_str().unwrap_or("").to_lowercase()));
+                order.sort_by_cached_key(|s| (rank::priority(&set, s["key"].as_str().unwrap_or("")), s["name"].as_str().unwrap_or("").to_lowercase()));
                 ok(json!({ "order": order, "admin": install["role"] == "admin" }))
             }
-            ("POST", "/use") => {
-                ensure!(!grant.read_only, "this call only reads: it can't change where things run");
+            ("POST", "/priority") => {
+                ensure!(!grant.read_only, "this call only reads: it can't change run priority");
                 let req: Value = serde_json::from_slice(&body)?;
-                self.set_use(&grant.caller, req["device"].as_str().unwrap_or(""), req["use"].as_str().unwrap_or("")).await?;
+                let priority = rank::Priority::from_value(&req["priority"]).context("a run priority is a number from 1, or \"last\"")?;
+                self.set_priority(&grant.caller, req["device"].as_str().unwrap_or(""), priority).await?;
                 ok(json!({}))
             }
             _ => bail!("the node has no {method} {path}"),

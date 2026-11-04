@@ -1,5 +1,5 @@
 // Device Activity: every device in the install and how loaded it is (memory, CPU, GPU, disk), with the containers each one
-// hosts listed under it; and where things run first (ctx.order, src/rank.rs), which admins change in Settings > Devices, and agents with device-activity_use. Each device measures itself and says so when it syncs; this app only draws what
+// hosts listed under it; and run priority (ctx.order, src/rank.rs), which admins change in Settings > Devices, and agents with device-activity_priority. Each device measures itself and says so when it syncs; this app only draws what
 // ctx.devices() gives it.
 
 const GB = 1e9;
@@ -7,8 +7,7 @@ const GiB = 2 ** 30;
 
 const os = (s) => (s.target || "").includes("apple") ? "macOS" : (s.target || "").includes("linux") ? "Linux" : (s.target || "").includes("windows") ? "Windows" : "";
 
-/// Where things run first: each place's words, and what each kind of device is called.
-const PLACES = { first: "Use First", needed: "When Needed", last: "Last Resort" };
+/// What each kind of device is called.
 const TYPES = { always_on: "Always on", laptop: "Laptop", cloud: "Cloud server", cloudflare: "On the web, costs a little each time it wakes" };
 const pct = (sp) => (sp && sp.total ? Math.round((sp.used * 100) / sp.total) : null);
 const last = (xs) => (xs && xs.length ? xs[xs.length - 1] : null);
@@ -61,35 +60,36 @@ export default {
   color: "#30b0c7",
   advanced: true,
   description: "How busy each device is",
-  instructions: "Your One App runs each thing on the first device in its order that can run it, is on and has room: Use First, then When Needed, then Last Resort (Cloudflare among them, once there is one), a device far from the others only when it's nearer. device-activity_order shows that order; device-activity_use moves a device, for an admin, only when the person asks. device-activity_list shows every one of your devices, online or not, with its memory (as Activity Monitor counts it on a Mac), CPU, GPU and disk, and the containers each hosts after it. Use it to pick a device with room for a desktop, a model or a build.",
+  instructions: "Your One App runs each thing on the device with the lowest run priority (1 first) that can run it, is on and has room; devices on the same number are equal, and the quickest to answer runs it; Cloudflare, once there is one, is always last unless an admin gave it a number; a device far from the others only when it's nearer. device-activity_order shows that order; device-activity_priority gives a device a number, for an admin, only when the person asks. device-activity_list shows every one of your devices, online or not, with its memory (as Activity Monitor counts it on a Mac), CPU, GPU and disk, and the containers each hosts after it. Use it to pick a device with room for a desktop, a model or a build.",
 
   ops: {
     order: {
-      description: "Where things run first: every device, and Cloudflare once there is one, in the order calls, services and new agent devices go to them, each with its use (first, needed or last, as device-activity_use takes it), that place's name and what kind of device it is; and whether you're an admin, who may change it.",
+      description: "Run priority: every device, and Cloudflare once there is one, in the order calls, services and new agent devices go to them, each with its priority (a number from 1, or \"last\": always last) and what kind of device it is; and whether you're an admin, who may change it.",
       input: { type: "object", properties: {} },
       reads: true,
       async run(ctx) {
         const { order, admin } = await ctx.order();
-        return { order: order.map((d) => ({ name: d.name, use: d.use, place: PLACES[d.use], kind: TYPES[d.kind] || d.kind, online: !!d.online })), admin: !!admin };
+        return { order: order.map((d) => ({ name: d.name, priority: d.priority, kind: TYPES[d.kind] || d.kind, online: !!d.online })), admin: !!admin };
       },
     },
-    use: {
+    priority: {
       reads: false,
-      description: "Move a device, or Cloudflare, to Use First, When Needed or Last Resort in where things run first, for an admin, only when the person asks. Gives the new order.",
+      description: "Give a device, or Cloudflare, a run priority, for an admin, only when the person asks: a number from 1 (devices may share one), or \"last\" to put it after every number. Gives the new order.",
       input: {
         type: "object",
         properties: {
           name: { type: "string", description: "a device's name, from device-activity_order, or Cloudflare" },
-          place: { type: "string", enum: ["first", "needed", "last"], description: "first: Use First; needed: When Needed; last: Last Resort" },
+          priority: { type: ["integer", "string"], description: "a number from 1, or \"last\"" },
         },
-        required: ["name", "place"],
+        required: ["name", "priority"],
       },
-      async run(ctx, { name, place }) {
+      async run(ctx, { name, priority }) {
+        if (!(priority === "last" || (Number.isInteger(priority) && priority >= 1 && priority <= 99))) throw new Error(`a run priority is a number from 1 to 99, or "last", not ${priority}`);
         const known = (await ctx.order()).order;
         const d = known.find((d) => [d.name, d.key].some((n) => String(n || "").toLowerCase() === String(name).toLowerCase()));
         if (!d) throw new Error(`no device called ${name}: there's ${known.map((d) => d.name).join(", ")}`);
-        const { order } = await ctx.order(d.key || d.name, place);
-        return { order: order.map((d) => ({ name: d.name, use: d.use, place: PLACES[d.use] })), text: `${d.name} is now ${PLACES[place]}.` };
+        const { order } = await ctx.order(d.key || d.name, priority);
+        return { order: order.map((d) => ({ name: d.name, priority: d.priority })), text: `${d.name} is now ${priority === "last" ? "always last" : `priority ${priority}`}.` };
       },
     },
     list: {

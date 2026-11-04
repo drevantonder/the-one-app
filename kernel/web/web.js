@@ -458,7 +458,9 @@ window.__one = {};
     const nodes = (state.install?.devices || []).filter((d) => d.serves_me).sort((a, b) => a.order - b.order).map((d) => d.key);
     const last = state.install?.serverless?.key;
     if (last && !nodes.includes(last)) nodes.push(last);
-    if (state.user && nodes.length) net.nodes(state.user.id, nodes);
+    const rank = (p) => (p === "last" ? 0xffffffff : p);
+    const ranks = Object.fromEntries((state.install?.devices || []).filter((d) => d.priority != null).map((d) => [d.key, rank(d.priority)]));
+    if (state.user && nodes.length) net.nodes(state.user.id, nodes, ranks);
     const regrouped = JSON.stringify([state.user, state.install?.groups]) !== JSON.stringify([store.state?.user, store.state?.install?.groups]);
     store.state = state;
     // While it's being let in, its apps wait: they need the keys it's about to get.
@@ -998,7 +1000,7 @@ window.__one = {};
           api: clientApi,
           signOut: () => (signOut(), null),
           appearance: (m) => (m.value != null && setAppearance(String(m.value)), appearance()),
-          device: () => ({ name: browserName(), signOut: true, keys: !!device }),
+          device: () => ({ name: browserName(), signOut: true, keys: !!device, ...(device ? { key: device.me.key } : {}) }),
           request: async (m) => (await openSheet(own("request", { scope: String(m.scope || ""), id: String(m.id || "") }))) === true,
           cache: (m) => {
             const key = SCREENS + String(m.key || "");
@@ -1072,7 +1074,10 @@ window.__one = {};
     "POST /v1/accept": (b) => write(members.accept({ group: b.group })),
     "POST /v1/member": (b) => write(members.member({ group: b.group, user: b.user, role: b.role ?? null })),
     "POST /v1/handle": (b) => write(members.handle({ ...(b.group ? { what: "group", id: String(b.group) } : { what: "user", id: me().id }), handle: String(b.handle || "").trim() })),
-    "POST /v1/name": (b) => write(members.rename({ what: "key", id: device.me.key, name: String(b.name || "").trim() })),
+    // `key`: one of this person's devices; none, this browser.
+    "POST /v1/name": (b) => write(members.rename({ what: "key", id: String(b.key || device.me.key), name: String(b.name || "").trim() })),
+    // A sidecar removed from one of this person's devices (`device`, its key), or with `installed` let register again.
+    "POST /v1/sidecar": (b) => write(members.sidecar({ device: String(b.device || ""), name: String(b.name || ""), installed: b.installed === true })),
     "POST /v1/retire": (b) => write(members.retire({ app: b.app, owner: app(b.app)?.owner, how: b.how })),
     // An app on everyone's page is a change to who can do what; on yours or a group's, a node writes it.
     "POST /v1/install": (b) => (b.scope === "global" ? write(members.install({ app: b.app, installed: b.installed !== false })) : api("/v1/install", { method: "POST", body: b })),
@@ -1083,7 +1088,7 @@ window.__one = {};
     // `{ key: ms }`: when each device was last let onto the install's network.
     "GET /v1/devices/seen": () => device.seen(),
     // As a machine's node answers it, each with its code, which the device asking shows too, to compare.
-    "GET /v1/devices/requests": async () => (await waitingNow()).map((r) => ({ device: r.name, person: r.person, code: r.code, ...(r.mine ? { yours: true } : { new: true }) })),
+    "GET /v1/devices/requests": async () => (await waitingNow()).map((r) => ({ device: r.name, person: r.person, code: r.code, made: r.made, ...(r.place ? { place: r.place } : {}), ...(r.mine ? { yours: true } : { new: true }) })),
     // `{ code }`: one waiting that isn't theirs, turned down, and not asked about again here.
     "POST /v1/devices/refuse": async (b) => {
       const code = String(b.code || "").toUpperCase().replace(/[^A-Z2-7]/g, "");

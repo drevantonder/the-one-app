@@ -18,21 +18,20 @@ impl Node {
         self.member_as(caller, "setting", json!({ "name": name, "value": value })).await
     }
 
-    /// Puts a device, or the serverless node (`cloudflare`), first, when needed or last in the install's order of where
-    /// things run, for an admin: the `use` setting, every other device's place written down as it is now.
-    pub async fn set_use(&self, caller: &Caller, device: &str, place: &str) -> Result<()> {
-        let place = rank::Use::parse(place).context("a place is first, needed or last")?;
-        let id = if device.eq_ignore_ascii_case(rank::CLOUDFLARE) { rank::CLOUDFLARE.to_string() } else { hex(&self.find_device(device)?) };
-        let here = crate::load::current().kind;
-        let value = self.with(|i| {
-            let m = &i.r.members;
-            let kind = |k: &Key| if *k == self.0.id { here.clone() } else { i.peers.get(k).and_then(|p| p.load.as_ref()).map(|l| l.kind.clone()).unwrap_or_default() };
-            let mut now: Vec<(String, String)> = m.computes().map(|s| (hex(&s.key), kind(&s.key))).collect();
-            if m.settings.contains_key("serverless") {
-                now.push((rank::CLOUDFLARE.into(), rank::CLOUDFLARE.into()));
-            }
-            Ok(rank::with(&m.settings, &now, &id, place))
-        })?;
+    /// Gives a device (by name or key: all of its endpoints of that name and person), or the serverless node
+    /// (`cloudflare`), its run priority, for an admin: the `priority` setting, every other kept as set.
+    pub async fn set_priority(&self, caller: &Caller, device: &str, priority: rank::Priority) -> Result<()> {
+        let ids = if device.eq_ignore_ascii_case(rank::CLOUDFLARE) {
+            vec![rank::CLOUDFLARE.to_string()]
+        } else {
+            let key = self.find_device(device)?;
+            self.with(|i| {
+                let m = &i.r.members;
+                let d = m.machine(&key).context("no such device")?;
+                Ok(m.machines.values().filter(|s| m.machine(&s.key).is_some() && s.user == d.user && s.name.eq_ignore_ascii_case(&d.name)).map(|s| hex(&s.key)).collect())
+            })?
+        };
+        let value = self.with(|i| Ok(rank::with(&i.r.members.settings, &ids, priority)))?;
         self.set_setting(caller, rank::SETTING, Some(&value)).await
     }
 
@@ -63,6 +62,11 @@ impl Node {
         let viewer_name = if viewer.key == self.0.id { self.device_name() } else { install.as_ref().and_then(|i| i.r.members.machine(&viewer.key)).map(|m| m.name.clone()).unwrap_or_default() };
         let backups = install.as_ref().and_then(|i| self.backup_problem(i, &viewer.user));
         let here_sidecars = install.as_ref().map(|i| self.sidecars_here(i)).unwrap_or_default();
+        // Which device is looking, to say "This device": a client device of the viewer's asks as a sign-in.
+        let looking = device.or_else(|| {
+            let m = &install.as_ref()?.r.members;
+            m.machine(&viewer.key).filter(|d| viewer.key != self.0.id && d.user == viewer.user && d.is(members::Kind::Client)).map(|_| viewer.key)
+        });
         let me = &viewer.user;
         let device_now = |s: &members::Machine| {
             let Some(i) = install.as_ref() else { return serde_json::Map::new() };
@@ -78,7 +82,7 @@ impl Node {
             let sidecars = if s.key == self.0.id { here_sidecars.as_slice() } else { session.map(|s| s.sidecars.as_slice()).unwrap_or_default() };
             let now = json!({
                 "kind": load.as_ref().map(|l| l.kind.clone()), "far": i.far.get(&s.key).is_some_and(|d| *d > FAR),
-                "me": Some(s.key) == device, "here": s.key == self.0.id, "online": s.key == self.0.id || session.is_some(),
+                "me": Some(s.key) == looking, "here": s.key == self.0.id, "online": s.key == self.0.id || session.is_some(),
                 "build": i.builds.get(&s.key).map(|r| &r.commit), "target": i.builds.get(&s.key).map(|r| &r.target),
                 "sidecars": sidecars.iter().map(|d| d.0.clone()).collect::<Vec<_>>(),
                 "installed_sidecars": installed_sidecars(m, s, sidecars, i.builds.get(&s.key).map(|r| r.commit.as_str())),
@@ -90,7 +94,7 @@ impl Node {
             }
         };
         let client_now = |c: &members::Machine| {
-            match json!({ "me": Some(c.key) == device }) {
+            match json!({ "me": Some(c.key) == looking }) {
                 Value::Object(now) => now,
                 _ => unreachable!(),
             }
@@ -154,6 +158,24 @@ impl Node {
             self.member("rename", json!({ "key": hex(&self.0.id), "name": name })).await?;
         }
         Ok(())
+    }
+
+    /// Renames one of `caller`'s devices, by its key (hex), or with none, this one, for this machine's own programs.
+    pub async fn rename(&self, caller: &Caller, key: Option<&str>, name: &str) -> Result<()> {
+        let name = name.trim();
+        let key = match key {
+            Some(k) => crate::entry::unhex(k).context("a device's key is 64 hex characters")?,
+            None => {
+                ensure!(caller.key == self.0.id, "say which device");
+                self.0.id
+            }
+        };
+        ensure!(!name.is_empty(), "give a name");
+        ensure!(self.with(|i| Ok(i.r.members.looks_after(&caller.user, &key)))?, "only its person or an admin renames a device");
+        if key == self.0.id {
+            return self.rename_device(name).await;
+        }
+        self.member_as(caller, "rename", json!({ "key": hex(&key), "name": name })).await
     }
 
     /// Finds a device of the install by name or key prefix.

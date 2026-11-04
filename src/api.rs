@@ -187,7 +187,6 @@ pub fn routes() -> Router<Node> {
         .route("/v1/settings", post(settings))
         .route("/v1/entries", get(heads).post(entries))
         .route("/v1/entries/global", get(global_entries))
-        .route("/v1/use", post(use_))
         .route("/v1/runs", post(runs))
         .route("/v1/group", post(group))
         .route("/v1/invite", post(invite))
@@ -308,7 +307,8 @@ pub const SIGNED_IN: &[&str] = &[
     "/v1/settings",
     "/v1/entries",
     "/v1/entries/global",
-    "/v1/use",
+    "/v1/name",
+    "/v1/sidecar",
     "/v1/runs",
     "/v1/group",
     "/v1/invite",
@@ -710,11 +710,11 @@ async fn image(State(node): State<Node>, Path(name): Path<String>) -> Response {
     }
 }
 
-/// `{ name, device?, installed? }`: removes a sidecar from a device (this one by default), or with `installed` lets it
-/// register there again.
-async fn sidecar(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
+/// `{ name, device?, installed? }`: removes a sidecar from a device (this one by default, for this machine's own
+/// programs), or with `installed` lets it register there again.
+async fn sidecar(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
     only(&body, &["name", "device", "installed"])?;
-    node.set_sidecar(&local(&node)?, body["device"].as_str(), text(&body, "name")?, body["installed"] == true).await?;
+    node.set_sidecar(&me.caller, body["device"].as_str(), text(&body, "name")?, body["installed"] == true).await?;
     done()
 }
 
@@ -820,8 +820,10 @@ async fn join(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
     done()
 }
 
-async fn name(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
-    node.rename_device(text(&body, "name")?).await?;
+/// `{ name, key? }`: renames one of its person's devices (by its key), or with no key, this one, for this machine's
+/// own programs.
+async fn name(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
+    node.rename(&me.caller, body["key"].as_str(), text(&body, "name")?).await?;
     done()
 }
 
@@ -883,12 +885,6 @@ async fn runs(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Repl
     only(&body, &["on"])?;
     let on = body["on"].as_array().ok_or_else(|| anyhow::anyhow!("on is a list of machines"))?.iter().map(|d| node.find_machine(d.as_str().unwrap_or(""))).collect::<anyhow::Result<Vec<_>>>()?;
     node.member_content(&me.caller, crate::members::runs(&on)).await?;
-    done()
-}
-
-/// `{ device, use }`: puts a device (its name or key, or `cloudflare`) first, needed or last, for an admin.
-async fn use_(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
-    node.set_use(&me.caller, text(&body, "device")?, text(&body, "use")?).await?;
     done()
 }
 

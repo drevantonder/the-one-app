@@ -59,9 +59,9 @@ pub fn mcp_entries() -> String {
 
 /// How to get the command onto a device, for this white label.
 fn install() -> String {
-    match REPO.is_empty() {
-        false => format!("install it with `curl -fsSL https://github.com/{REPO}/releases/latest/download/install.sh | sh`"),
-        true => format!("ask an admin of {YOURS} to set it up there"),
+    match crate::state::install_line() {
+        Some(line) => format!("install it with `{line}`"),
+        None => format!("ask an admin of {YOURS} to set it up there"),
     }
 }
 

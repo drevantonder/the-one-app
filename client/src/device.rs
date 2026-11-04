@@ -622,7 +622,7 @@ impl Device {
         Ok(out)
     }
 
-    /// The order things run in, from the node's `/v1/state`; a node it lists that this device didn't know of has it
+    /// The order things run in, and each node's run priority, from the node's `/v1/state`; a node it lists that this device didn't know of has it
     /// read `global` again (now and then), and only nodes its own reading lists are asked.
     async fn learn_order(&self, bytes: &[u8]) {
         let Ok(state) = serde_json::from_slice::<Value>(bytes) else { return };
@@ -643,7 +643,15 @@ impl Device {
         if stale && let Ok(read) = self.read_members().await {
             nodes = read;
         }
+        // Run priority, where the node says it: a number, or "last".
+        let ranks: Vec<([u8; 32], u32)> = state["install"]["devices"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|d| Some((keys::unhex(d["key"].as_str()?).ok()?, d["priority"].as_u64().map(|n| n as u32).or_else(|| (d["priority"] == "last").then_some(u32::MAX))?)))
+            .collect();
         if let Some(client) = self.client.lock().await.as_ref() {
+            let _ = client.set_ranks(&ranks);
             let _ = client.set_nodes(&self.ordered(&nodes));
         }
     }

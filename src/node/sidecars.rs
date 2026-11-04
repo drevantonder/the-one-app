@@ -26,6 +26,7 @@ impl Node {
     /// Removes a sidecar from a device (this one if none is named), or with `installed` lets it register there again,
     /// for someone acting for one of the device's owners.
     pub async fn set_sidecar(&self, caller: &Caller, device: Option<&str>, name: &str, installed: bool) -> Result<()> {
+        ensure!(device.is_some() || caller.key == self.0.id, "say which device");
         let device = device.map(str::to_string).unwrap_or_else(|| self.device_name());
         let content = self.with(|i| sidecar_entry(&i.r.members, &caller.user, &device, name, installed))?;
         self.member_content(caller, content).await?;

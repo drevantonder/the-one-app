@@ -421,7 +421,7 @@ export default {
     },
     create: {
       reads: false,
-      description: "Create a lasting device and start it, for the person, on the first of their devices in where things run first (device-activity_order) that runs its kind and has room: Linux with a browser of its own (the default), Android or an iPhone. Takes a minute or two. Agents borrow instead.",
+      description: "Create a lasting device and start it, for the person, on the first of their devices in run priority (device-activity_order) that runs its kind and has room: Linux with a browser of its own (the default), Android or an iPhone. Takes a minute or two. Agents borrow instead.",
       input: {"properties": {"device": {"description": "its name: lowercase letters, digits and dashes, like work-browser", "type": "string"}, "kind": kindArg, "size": sizeArg}, "required": ["device"], "type": "object"},
       run: (ctx, input) => sidecar(ctx, "create", input),
     },

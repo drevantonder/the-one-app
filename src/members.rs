@@ -91,6 +91,8 @@ pub struct Machine {
     pub shared: bool,
     /// Who listed it: its person, from one of their own devices, or an admin.
     pub by: String,
+    /// When it was listed, as its entry says (ms).
+    pub since: u64,
     pub removed: bool,
 }
 
@@ -587,7 +589,7 @@ impl Members {
                 let user = id_of("user")?;
                 ensure!(user == w, "genesis is written as its first user");
                 let device = &data["device"];
-                let machine = listed(device, &user)?;
+                let machine = listed(device, &user, e.time())?;
                 ensure!(machine.key == author && machine.is(Kind::Client), "genesis is signed by the first device it lists, a client");
                 let hash = epoch_hash_of(&data["epoch"])?;
                 self.name = text("name")?;
@@ -605,7 +607,7 @@ impl Members {
             "device" if self.recovery == Some(author) => {
                 // A person who lost every device let back in with the recovery key: a new client of someone already in.
                 let user = id_of("user")?;
-                let machine = listed(data, &user)?;
+                let machine = listed(data, &user, e.time())?;
                 ensure!(user == w && self.user(&user).is_some(), "the recovery key lets in a device of someone already in");
                 ensure!(machine.roles == BTreeSet::from([Kind::Client]) && machine.passkey.is_none(), "the recovery key lets in a device people use");
                 ensure!(!self.machines.contains_key(&machine.key), "that key is listed already");
@@ -615,7 +617,7 @@ impl Members {
             }
             "device" => {
                 let user = id_of("user")?;
-                let mut machine = listed(data, &user)?;
+                let mut machine = listed(data, &user, e.time())?;
                 machine.by = w.clone();
                 // A service answers its person's calls as them: only their own device lists one, never an admin's.
                 ensure!(!machine.is(Kind::Service) || w == user, "only a person's own device lists their services");
@@ -884,7 +886,7 @@ fn epoch_hash_of(hash: &Value) -> Result<String> {
 }
 
 /// An endpoint as a `device` entry (or the genesis's `device`) lists it, for `user`.
-fn listed(data: &Value, user: &str) -> Result<Machine> {
+fn listed(data: &Value, user: &str, since: u64) -> Result<Machine> {
     let text = |key: &str| data[key].as_str().with_context(|| format!("no {key}"));
     let roles: BTreeSet<Kind> = serde_json::from_value(data["roles"].clone()).context("roles are client, compute or service")?;
     ensure!(!roles.is_empty(), "an endpoint does something: client, compute or service");
@@ -903,6 +905,7 @@ fn listed(data: &Value, user: &str) -> Result<Machine> {
         shared: service.is_some() && data["shared"] == true,
         service,
         by: user.to_string(),
+        since,
         removed: false,
     })
 }
@@ -1251,6 +1254,11 @@ pub fn epoch(scope: &Scope, n: u32, to: &[Key], hash: &str) -> Content {
 /// A scope's Vault key `n`, its public half `public`, sealed to the machines `to`.
 pub fn vault(scope: &Scope, n: u32, public: &[u8; 32], to: &[Key]) -> Content {
     node("vault", json!({ "scope": scope.to_string(), "n": n, "public": hex(public), "to": to.iter().map(hex).collect::<Vec<_>>() }))
+}
+
+/// A sidecar removed from a device (`installed` false), or let register there again.
+pub fn sidecar(device: &Key, name: &str, installed: bool) -> Content {
+    node("sidecar", json!({ "device": hex(device), "name": name, "blob": null, "local": installed }))
 }
 
 /// Where its writer's own things run besides their own machines: the install's others that run their own scope.

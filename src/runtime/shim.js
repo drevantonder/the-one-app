@@ -226,16 +226,16 @@ function context(ask, body, appends, later) {
     failing: async () => (await ask("failing")).json(),
     /// The install's devices, as `GET /v1/state` gives them to the caller: online or not, and each one's load.
     devices: async () => (await ask("devices")).json(),
-    /// Where things run first (src/rank.rs): `{ order, admin }`, every device and the serverless node (key "cloudflare")
-    /// in the order things go to them, each with its `kind` and its place, `use` ("first", "needed" or "last"), and
-    /// whether the caller is an admin. Given a device (its name or key, or "cloudflare") and a place, puts it there
-    /// first, for an admin.
-    order: async (device, place) => {
+    /// Run priority (src/rank.rs): `{ order, admin }`, every device and the serverless node (key "cloudflare") in the
+    /// order things go to them, each with its `kind` and its `priority` (a number from 1, or "last"), and whether the
+    /// caller is an admin. Given a device (its name or key, or "cloudflare") and a priority, gives it that one first,
+    /// for an admin.
+    order: async (device, priority) => {
       if (device !== undefined) {
-        if (body.read_only) throw new Error("this call only reads: it can't change where things run");
-        await ask("use", { method: "POST", body: JSON.stringify({ device, use: place }) });
+        if (body.read_only) throw new Error("this call only reads: it can't change run priority");
+        await ask("priority", { method: "POST", body: JSON.stringify({ device, priority }) });
       }
-      return (await ask("use")).json();
+      return (await ask("order")).json();
     },
     /// Installs (or with `installed: false`, uninstalls) an app in a scope, with the caller's own rights there.
     install: (name, scope, installed = true) => {

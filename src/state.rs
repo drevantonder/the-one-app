@@ -45,7 +45,7 @@ pub fn state(m: Option<&Members>, user: &str, here: Here) -> Value {
     let address = settings.get("address").and_then(|a| a.as_str()).filter(|a| !a.is_empty());
     let passkeys = address.filter(|_| here.passkeys).map(|a| format!("{}/passkeys", a.trim_end_matches('/')));
     let settings_items = m.map(|m| settings_items(m, user, here.waiting, here.backups.is_some(), settings["store"].as_str().unwrap_or(""), passkeys.as_deref())).unwrap_or_default();
-    let config = json!({ "name": crate::config::NAME, "cli": crate::config::CLI, "store": settings["store"], "push": settings["push"] });
+    let config = json!({ "name": crate::config::NAME, "cli": crate::config::CLI, "store": settings["store"], "push": settings["push"], "install": install_line() });
     let mut state = json!({
         "config": config,
         "me": here.me,
@@ -81,7 +81,7 @@ fn install(m: &Members, me: &str, settings: &Map<String, Value>, here: &Here) ->
             // A device that hasn't said what it is, as one that's always on.
             let kind = now.remove("kind").and_then(|k| k.as_str().filter(|k| !k.is_empty()).map(str::to_string)).unwrap_or_else(|| "always_on".into());
             let mut device = json!({
-                "kind": kind, "use": rank::place(&set, &hex(&s.key), &kind), "far": false,
+                "kind": kind, "priority": rank::priority(&set, &hex(&s.key)).to_value(), "far": false, "since": s.since,
                 "key": hex(&s.key), "seal": hex(&s.seal), "name": s.name, "user": s.user, "me": false, "here": false, "online": false,
                 "roles": s.roles, "service": s.service, "serves_me": m.serves(&s.key, me),
                 "runs_for": m.scopes().iter().filter(|scope| m.runs_for(&s.key, scope)).map(|scope| scope.to_string()).collect::<Vec<_>>(),
@@ -93,11 +93,12 @@ fn install(m: &Members, me: &str, settings: &Map<String, Value>, here: &Here) ->
             device
         })
         .collect();
-    // Each device's place in where things run first, 0 first, for sidecars that pick one themselves.
+    // Each device's place in run priority's order, 0 first, for sidecars that pick one themselves; on the same number,
+    // by name.
     let mut by_order: Vec<usize> = (0..devices.len()).collect();
     by_order.sort_by_cached_key(|&n| {
         let s = &devices[n];
-        (rank::order(&set, s["key"].as_str().unwrap_or(""), s["kind"].as_str().unwrap_or("")), s["name"].as_str().unwrap_or("").to_lowercase())
+        (rank::priority(&set, s["key"].as_str().unwrap_or("")), s["name"].as_str().unwrap_or("").to_lowercase())
     });
     for (place, n) in by_order.into_iter().enumerate() {
         devices[n]["order"] = json!(place);
@@ -107,7 +108,7 @@ fn install(m: &Members, me: &str, settings: &Map<String, Value>, here: &Here) ->
         .clients()
         .filter(|c| !c.is(Kind::Compute))
         .map(|c| {
-            let mut client = json!({ "key": hex(&c.key), "seal": hex(&c.seal), "name": c.name, "user": c.user, "roles": c.roles, "passkey": c.passkey, "me": false });
+            let mut client = json!({ "key": hex(&c.key), "seal": hex(&c.seal), "name": c.name, "user": c.user, "roles": c.roles, "passkey": c.passkey, "since": c.since, "me": false });
             client.as_object_mut().unwrap().extend((here.client_now)(c));
             client
         })
@@ -144,7 +145,7 @@ fn install(m: &Members, me: &str, settings: &Map<String, Value>, here: &Here) ->
         "grants": m.grants.iter().filter(|((k, s, _), g)| m.grants_in(me, s) && m.machine(k).is_some() && m.grants_in(&g.by, s)).map(|((k, s, a), g)| json!({ "endpoint": hex(k), "scope": s.to_string(), "app": a, "until": g.until, "by": g.by, "keys": g.hashes })).collect::<Vec<_>>(),
         "entries": here.entries, "settings": settings,
         // The serverless node, once an admin deployed one (`serverless deploy` sets `serverless`).
-        "serverless": m.serverless().map(|key| json!({ "use": rank::place(&set, rank::CLOUDFLARE, rank::CLOUDFLARE), "key": hex(&key), "runs_for": m.scopes().iter().filter(|s| m.runs_for(&key, s)).map(crate::entry::Scope::to_string).collect::<Vec<_>>() })),
+        "serverless": m.serverless().map(|key| json!({ "priority": rank::priority(&set, rank::CLOUDFLARE).to_value(), "key": hex(&key), "runs_for": m.scopes().iter().filter(|s| m.runs_for(&key, s)).map(crate::entry::Scope::to_string).collect::<Vec<_>>() })),
     })
 }
 
@@ -156,6 +157,12 @@ pub fn settings(m: &Members) -> Map<String, Value> {
         out.entry(key).or_insert(json!(""));
     }
     out
+}
+
+/// The one line that installs this white label's latest release on a machine, if it publishes releases.
+pub fn install_line() -> Option<String> {
+    let repo = crate::config::REPO;
+    (!repo.is_empty()).then(|| format!("curl -fsSL https://github.com/{repo}/releases/latest/download/install.sh | sh"))
 }
 
 /// What to paste into an AI so it connects itself, for Connect Your AI: the guide at the install's address, where it

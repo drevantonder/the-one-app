@@ -178,9 +178,10 @@ export const net = {
     });
   },
 
-  /// The nodes to ask, in the order things run on them, kept for the next session.
-  nodes(user, nodes) {
-    if (net.has) send({ op: "nodes", user, nodes });
+  /// The nodes to ask, in the order things run on them, kept for the next session, and each one's run priority
+  /// (`ranks`, a number by key, the serverless node's past them all).
+  nodes(user, nodes, ranks = {}) {
+    if (net.has) send({ op: "nodes", user, nodes, ranks });
   },
 
   /// `user`'s members as `global`'s entries say them, checked here: those kept and those `given` (a pack a node sent,

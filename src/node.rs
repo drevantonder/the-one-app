@@ -756,8 +756,17 @@ impl Node {
         Ok(())
     }
 
+    /// This device's name: as the install lists it, which another of its person's devices may have changed, when the
+    /// install isn't being read (never waiting on it, so it's asked for anywhere); else as it last was.
     pub fn device_name(&self) -> String {
-        self.0.name.lock().unwrap().clone()
+        let install = self.0.install.0.try_lock().ok();
+        let listed = install.as_ref().and_then(|i| i.as_ref()).and_then(|i| i.r.members.machine(&self.0.id).map(|m| m.name.clone()));
+        drop(install);
+        let mut name = self.0.name.lock().unwrap();
+        if let Some(listed) = listed {
+            *name = listed;
+        }
+        name.clone()
     }
 
     /// Creates this device's install, with its local user as the first admin, and installs the config's apps in
@@ -1230,10 +1239,14 @@ fn check_append(i: &Install, append: Append, scopes: &[Scope], me: &Caller, titl
 /// The `sidecar` entry that removes a sidecar from a device, found by name or key prefix, or with `installed` lets it
 /// register there again; for the device's person or an admin.
 fn sidecar_entry(m: &Members, user: &str, device: &str, name: &str, installed: bool) -> Result<Content> {
-    let found: Vec<&members::Machine> = m.machines.values().filter(|s| m.machine(&s.key).is_some()).filter(|s| s.name.eq_ignore_ascii_case(device) || (!device.is_empty() && hex(&s.key).starts_with(device))).collect();
+    let mut found: Vec<&members::Machine> = m.machines.values().filter(|s| m.machine(&s.key).is_some()).filter(|s| s.name.eq_ignore_ascii_case(device) || (!device.is_empty() && hex(&s.key).starts_with(device))).collect();
+    // A machine's services are named for it: by its name, it's its node.
+    if found.len() > 1 {
+        found.retain(|s| s.is(members::Kind::Compute));
+    }
     let [s] = found.as_slice() else { bail!("no one device called {device}") };
     ensure!(m.looks_after(user, &s.key), "only {}'s person or an admin installs or removes its sidecars", s.name);
-    Ok(members::node("sidecar", json!({ "device": hex(&s.key), "name": name, "blob": null, "local": installed })))
+    Ok(members::sidecar(&s.key, name, installed))
 }
 
 /// A scope as people call it: Everyone, a person's name, or a group's.

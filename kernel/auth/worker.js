@@ -135,11 +135,13 @@ export class Auth extends DurableObject {
     // device its person joined with.
     sql.exec("create table if not exists invites (id text primary key, name text not null, user text not null unique, email text, until integer not null, by text not null, used integer)");
     // Devices' requests to join, by their key: `invite` is the invite of a newcomer's first device, with its `proof`;
-    // `approved`, when a device said it let it in, and `genesis`, the install it said it let it into.
+    // `approved`, when a device said it let it in, and `genesis`, the install it said it let it into; `place`, the city it
+    // asked from.
     sql.exec("create table if not exists requests (key text primary key, seal text not null, name text not null, user text not null, proof text, invite text, made integer not null, approved integer, genesis text)");
     const columns = sql.exec("pragma table_info(requests)").toArray().map((c) => c.name);
     if (!columns.includes("approved")) sql.exec("alter table requests add column approved integer");
     if (!columns.includes("genesis")) sql.exec("alter table requests add column genesis text");
+    if (!columns.includes("place")) sql.exec("alter table requests add column place text");
     // Install links' enrollments: the hash of each one's secret, whose service it's for, the device that made it (`by`),
     // and the one service key that used it.
     sql.exec("drop table if exists services");
@@ -425,7 +427,9 @@ export class Auth extends DurableObject {
       if (!invite) refuse(400, "Only a newcomer's first device brings an invite's proof.");
     }
     const made = Date.now();
-    sql.exec("insert or replace into requests (key, seal, name, user, proof, invite, made, approved) values (?, ?, ?, ?, ?, ?, ?, null)", key, seal, name.trim(), user, proof ?? null, invite?.id ?? null, made);
+    // Where it asked from, as Cloudflare places it: its city, shown beside its code.
+    const place = typeof request.cf?.city === "string" ? request.cf.city.slice(0, 64) : null;
+    sql.exec("insert or replace into requests (key, seal, name, user, proof, invite, made, approved, place) values (?, ?, ?, ?, ?, ?, ?, null, ?)", key, seal, name.trim(), user, proof ?? null, invite?.id ?? null, made, place);
     return { until: made + REQUEST };
   }
 
@@ -483,7 +487,7 @@ export class Auth extends DurableObject {
     const sql = this.ctx.storage.sql;
     return rows.map((r) => {
       const person = sql.exec("select name from user where id = ?", r.user).toArray()[0]?.name || "";
-      return { key: r.key, seal: r.seal, name: r.name, user: r.user, person, ...(r.proof ? { proof: r.proof } : {}), ...(r.approved ? { approved: true } : {}), ...(r.genesis ? { genesis: r.genesis } : {}), made: r.made, until: r.made + REQUEST };
+      return { key: r.key, seal: r.seal, name: r.name, user: r.user, person, ...(r.proof ? { proof: r.proof } : {}), ...(r.approved ? { approved: true } : {}), ...(r.genesis ? { genesis: r.genesis } : {}), ...(r.place ? { place: r.place } : {}), made: r.made, until: r.made + REQUEST };
     });
   }
 

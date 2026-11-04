@@ -1,74 +1,62 @@
-//! Where things run first. Each device, and the serverless node, is Use First, When Needed or Last Resort: what the
-//! install's admins set (the `use` setting, a JSON object of each device's key, or `cloudflare`, to its place), or by
-//! default what that kind of device is. Calls, sidecars' operations and new agent devices go to the first in that
-//! order that can run them, is up and has room, a nearer one only when every one before it is far. Pure: settings and
-//! kinds in, places out; `src/node.rs` and `serverless/` both order by it.
+//! Run priority. Each device, and the serverless node, has a number, 1 first, or is always last: what the install's
+//! admins set (the `priority` setting, a JSON object of each device's key, or `cloudflare`, to its number or "last"),
+//! or by default 1, and the serverless node always last. Calls, sidecars' operations and new agent devices go to the
+//! lowest number that can run them, is up and has room; devices on the same number are equal, and the quickest
+//! runs it; a nearer one only when every one before it is far. Pure: settings in, priorities out; `src/node.rs` and
+//! `serverless/` both order by it.
 
 use std::collections::BTreeMap;
 
-use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
 
-/// The install setting that holds the order.
-pub const SETTING: &str = "use";
+/// The install setting that holds them.
+pub const SETTING: &str = "priority";
 /// The serverless node's name in it.
 pub const CLOUDFLARE: &str = "cloudflare";
+/// The highest number a device may have.
+const MOST: u64 = 99;
 
-/// A device's place, first first.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Use {
-    First,
-    Needed,
+/// A device's run priority, first first.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Priority {
+    Number(u32),
     Last,
 }
 
-impl Use {
-    pub fn parse(s: &str) -> Option<Use> {
-        serde_json::from_value(serde_json::json!(s)).ok()
+impl Priority {
+    /// As the setting holds it: a number from 1, or "last"; anything else isn't one.
+    pub fn from_value(v: &Value) -> Option<Priority> {
+        match v {
+            Value::Number(n) => n.as_u64().filter(|n| (1..=MOST).contains(n)).map(|n| Priority::Number(n as u32)),
+            Value::String(s) if s == "last" => Some(Priority::Last),
+            _ => None,
+        }
+    }
+
+    pub fn to_value(self) -> Value {
+        match self {
+            Priority::Number(n) => json!(n),
+            Priority::Last => json!("last"),
+        }
     }
 }
 
-/// What a device is, as `src/load.rs` tells: `always_on`, `laptop` (it sleeps), `cloud` (rented by the hour) or
-/// `cloudflare` (the serverless node, which costs a little each time it wakes). Anything else counts as `always_on`.
-pub fn default_use(kind: &str) -> Use {
-    match kind {
-        "laptop" | CLOUDFLARE => Use::Needed,
-        "cloud" => Use::Last,
-        _ => Use::First,
+/// What the admins set, by device key (hex) or `cloudflare`; what isn't a priority is skipped.
+pub fn set(settings: &BTreeMap<String, String>) -> BTreeMap<String, Priority> {
+    let parsed: BTreeMap<String, Value> = settings.get(SETTING).and_then(|v| serde_json::from_str(v).ok()).unwrap_or_default();
+    parsed.into_iter().filter_map(|(k, v)| Some((k, Priority::from_value(&v)?))).collect()
+}
+
+/// A device's priority: what was set for it, or 1; the serverless node's, or always last.
+pub fn priority(set: &BTreeMap<String, Priority>, id: &str) -> Priority {
+    set.get(id).copied().unwrap_or(if id == CLOUDFLARE { Priority::Last } else { Priority::Number(1) })
+}
+
+/// The setting's value after `ids` (one device's endpoints, or `cloudflare`) get `to`, every other kept as set.
+pub fn with(settings: &BTreeMap<String, String>, ids: &[String], to: Priority) -> String {
+    let mut out: BTreeMap<String, Value> = set(settings).into_iter().map(|(k, p)| (k, p.to_value())).collect();
+    for id in ids {
+        out.insert(id.clone(), to.to_value());
     }
-}
-
-/// Within a place, the cheaper kind first.
-fn cost(kind: &str) -> u8 {
-    match kind {
-        "laptop" => 1,
-        CLOUDFLARE => 2,
-        "cloud" => 3,
-        _ => 0,
-    }
-}
-
-/// What the admins set, by device key (hex) or `cloudflare`; what isn't a place is skipped.
-pub fn set(settings: &BTreeMap<String, String>) -> BTreeMap<String, Use> {
-    let parsed: BTreeMap<String, String> = settings.get(SETTING).and_then(|v| serde_json::from_str(v).ok()).unwrap_or_default();
-    parsed.into_iter().filter_map(|(k, v)| Some((k, Use::parse(&v)?))).collect()
-}
-
-/// A device's place: what was set for it, or its kind's.
-pub fn place(set: &BTreeMap<String, Use>, id: &str, kind: &str) -> Use {
-    set.get(id).copied().unwrap_or_else(|| default_use(kind))
-}
-
-/// What devices sort by: place, then cost.
-pub fn order(set: &BTreeMap<String, Use>, id: &str, kind: &str) -> (Use, u8) {
-    (place(set, id, kind), cost(kind))
-}
-
-/// The setting's value after one device's place changes, every other device's kept as it is now (`now`, each
-/// device's key and kind, its place written down too, so a node that can't see its kind still knows it).
-pub fn with(settings: &BTreeMap<String, String>, now: &[(String, String)], id: &str, place_: Use) -> String {
-    let had = set(settings);
-    let mut out: BTreeMap<String, Use> = now.iter().map(|(k, kind)| (k.clone(), place(&had, k, kind))).collect();
-    out.insert(id.into(), place_);
     serde_json::to_string(&out).unwrap()
 }

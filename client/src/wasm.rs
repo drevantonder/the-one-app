@@ -44,6 +44,12 @@ impl Client {
         self.0.set_nodes(&nodes).map_err(js)
     }
 
+    /// Each node's run priority, `keys` (hex) beside `ranks`: those on the same one are raced at once.
+    pub fn ranks(&self, keys: Vec<String>, ranks: Vec<u32>) -> Result<(), JsError> {
+        let keys = keys.iter().map(|n| key(n)).collect::<Result<Vec<_>, _>>()?;
+        self.0.set_ranks(&keys.into_iter().zip(ranks).collect::<Vec<_>>()).map_err(js)
+    }
+
     /// The nodes the relay says are on its network now, hex: raced first.
     pub fn online(&self, nodes: Vec<String>) -> Result<(), JsError> {
         let nodes = nodes.iter().map(|n| key(n)).collect::<Result<Vec<_>, _>>()?;

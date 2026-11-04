@@ -33,7 +33,7 @@ pub struct Load {
     /// The containers running here.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub containers: Vec<Guest>,
-    /// What this machine is, for where things run first (src/rank.rs): `laptop`, `cloud` or `always_on`.
+    /// What this machine is, for its icon: `laptop`, `cloud` or `always_on`.
     #[serde(skip_serializing_if = "String::is_empty")]
     pub kind: String,
 }

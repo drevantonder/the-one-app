@@ -384,7 +384,7 @@ export class Client extends DurableObject {
   }
 
   /// Reads who's who from the bucket (what's new, after the first time), one reading at a time, and the nodes it asks
-  /// with it: those the entries list as running its person's calls, that are on the relay now, in Where Things Run's
+  /// with it: those the entries list as running its person's calls, that are on the relay now, in run priority's
   /// order as it last read it.
   see(me) {
     const reading = this.viewing.then(async () => {
@@ -407,7 +407,7 @@ export class Client extends DurableObject {
     return this.order;
   }
 
-  /// Reads Where Things Run's order from the install's state, for the nodes it asks: only nodes the entries list are
+  /// Reads run priority's order from the install's state, for the nodes it asks: only nodes the entries list are
   /// ever in it, whatever the state says.
   async learnOrder(me) {
     if (this.learned) return;

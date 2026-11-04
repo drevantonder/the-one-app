@@ -1,30 +1,37 @@
 <div id="page"></div>
 <style>
-  .tile { width: 34px; height: 34px; display: grid; place-items: center; flex: none; color: var(--text); }
-  .tile .i { width: 26px; height: 26px; }
-  .tile.off { color: var(--faint); }
-  .status { color: var(--muted); font-size: 15px; flex: none; }
-  .field { flex: 1; min-width: 0; font: inherit; border: 0; outline: none; background: none; color: var(--text); padding: 0; }
+  /* A device's type, with its OS's glyph at its corner: nothing behind the glyph. */
+  .device-icon { position: relative; width: 28px; height: 28px; flex: none; color: var(--text); }
+  .device-icon > .i { width: 28px; height: 28px; }
+  .device-icon .os { position: absolute; right: -6px; bottom: -4px; width: 15px; height: 15px; }
+  .device-icon.off { color: var(--muted); }
+  .devices > .list { margin-bottom: 12px; }
+  .devices .head .title { font-weight: 600; }
+  .devices .row.plain + .row.plain::before { left: 56px; }
+  .devices .row.head + .row.plain::before, .devices .row.plain + .row.old::before { left: 16px; }
+  .more { width: 28px; height: 28px; flex: none; border: 0; border-radius: 14px; background: var(--fill); color: var(--tint); display: grid; place-items: center; font-size: 18px; cursor: pointer; }
+  .pick.chip { font: inherit; font-size: 15px; border: 0; }
+  .row .tile { width: 28px; height: 28px; display: grid; place-items: center; flex: none; }
+  .row .tile .i { width: 22px; height: 22px; color: var(--tint); }
+  /* A device waiting to be let in: which it is, its code large, to check against its screen, and the answers. */
+  .waiting-device { padding: 14px 16px 16px; }
+  .waiting-device .head { padding: 0; }
+  .waiting-device .code { font: 600 30px var(--mono); letter-spacing: 0.08em; text-align: center; margin: 14px 0 16px; user-select: all; -webkit-user-select: all; }
+  .waiting-device .answers { display: flex; gap: 10px; }
+  .waiting-device .answers .button { flex: 1; padding: 10px 14px; }
+  .add-way .line { display: flex; align-items: center; gap: 8px; margin-top: 8px; padding: 4px 4px 4px 12px; border-radius: 12px; background: var(--fill); }
+  .add-way .line span { flex: 1; min-width: 0; font: 13px var(--mono); color: var(--text); overflow-x: auto; white-space: nowrap; user-select: all; -webkit-user-select: all; }
+  .add-way .sub { white-space: normal; }
   .action-row { color: var(--tint); cursor: pointer; }
   .action-row .i { width: 22px; height: 22px; }
-  .more { width: 28px; height: 28px; flex: none; border: 0; border-radius: 14px; background: var(--fill); color: var(--tint); display: grid; place-items: center; font-size: 18px; cursor: pointer; }
-  #page h2.section:first-of-type { margin-top: 8px; }
   .list.passkey { margin-top: 20px; }
-  .code-field { font-family: var(--mono); text-transform: uppercase; letter-spacing: 0.06em; }
-  .code-field::placeholder { font-family: var(--font, inherit); text-transform: none; letter-spacing: 0; }
   .row.out { justify-content: center; color: var(--danger); font: inherit; border: 0; background: none; width: 100%; }
-  .pair { display: flex; flex-direction: column; align-items: center; gap: 16px; text-align: center; padding: 8px 0 4px; }
-  .code { display: flex; align-items: center; gap: 8px; max-width: 100%; padding: 4px 4px 4px 12px; border-radius: 999px; background: var(--fill); }
-  .pair code { font: 0.92em var(--mono); }
-  .code span { font: 15px var(--mono); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: all; -webkit-user-select: all; }
-  #page .asking + h2.section { margin-top: 28px; }
-  .asking .confirm-detail b { font: 600 1em var(--mono); letter-spacing: 0.06em; white-space: nowrap; }
 </style>
 <script>
-  // This person's devices, the shared ones they may use, and which run their own things: naming this device and
-  // signing out of it, removing one, pairing a computer with a code, and, where this device holds its own keys
-  // (`device.keys`), approving a new device by the code it shows, listing a passkey to get back in with, and what
-  // their devices keep running for them.
+  // This person's devices as cards, in run priority's order: each with what it runs (Runs apps, its services), its
+  // priority (an admin's to change), and Rename and Remove for its owner; then Cloudflare, their browsers, and devices
+  // waiting to be let in on top, approved by tapping (where this device holds its own keys, `device.keys`). Under them,
+  // what their devices keep running for them, and a passkey to get back in with.
   let state, device, apps = [], passkey = false, waiting = [], seen = {};
   let error = "";
   // A new device's code, from its QR's link (`/approve#CODE`), asked about once.
@@ -33,66 +40,167 @@
   let keepAsked = one.params?.keep ? { app: String(one.params.keep), scope: one.params.scope && String(one.params.scope) } : null;
 
   const me = () => state.user?.id;
-  const shown = (name) => (name.endsWith(".local") ? name.slice(0, -6) : name);
-  const list = (names) => (names.length < 2 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`);
-  const userName = (id) => state.install?.users.find((u) => u.id === id)?.name || "someone";
-  const holds = (s) => (s.runs_for || []).includes(`user:${me()}`);
-  const icon = (name) => {
-    const n = name.toLowerCase();
-    if (n.includes("iphone") || n.includes("phone") || n.includes("android")) return "device-mobile";
-    if (n.includes("ipad") || n.includes("tablet")) return "device-tablet";
-    if (n.includes("macbook") || n.includes("laptop")) return "laptop";
-    if (n.includes("imac") || n.includes("mac") || n.includes("windows") || n.includes("pc")) return "desktop";
-    return "hard-drives";
-  };
-  const runBy = (s) => (!s.user || s.user === me() ? "" : `${userName(s.user)}’s`);
-  // A service endpoint is named for its machine; a person reads it as its service on that machine ("WhatsApp on linux").
-  const deviceName = (s) => (s.service ? `${appTitle(s.service)} on ${shown(s.name)}` : shown(s.name));
-  // Online is how it should be, so it says nothing.
-  const status = (on) => (on ? "" : `<span class="status">Offline</span>`);
-  const subs = (...lines) => lines.filter(Boolean).map((l) => `<div class="sub">${one.esc(l)}</div>`).join("");
-
-  // A row says what a device is; one that may be removed (not the device looking) has its menu, from its … or a right-click.
-  const row = ({ key, name, online, lines, trailing, removable, tile }) =>
-    `<div class="row still"${removable ? ` data-device="${one.esc(key)}"` : ""}>
-      <div class="tile${online ? "" : " off"}">${tile || one.icon(icon(name || "phone"))}</div>
-      <div class="main"><div class="title"><span>${one.esc(shown(name) || "Phone")}</span></div>${subs(...lines)}</div>${trailing}` +
-    (removable ? `<button class="more" data-more aria-label="More for ${one.esc(shown(name) || "Phone")}">${one.icon("dots-three-outline-fill")}</button>` : "") + "</div>";
-
-  const deviceRow = (s) => {
-    const online = !!s.online;
-    const app = s.service && apps.find((a) => a.name === s.service);
-    return row({ key: s.key, name: deviceName(s), tile: app ? one.appIcon(app, 26) : one.icon(icon(s.name)), online, lines: [s.me ? "This device" : runBy(s)], trailing: status(online), removable: s.user === me() && !s.me });
-  };
-  // Where things run first: every device, and Cloudflare, Use First, When Needed or Last Resort, cheaper kinds first
-  // within each (src/rank.rs); an admin moves one with its menu.
-  const PLACES = { first: "Use First", needed: "When Needed", last: "Last Resort" };
-  const KINDS = { always_on: "Always on", laptop: "Laptop, sleeps", cloud: "Cloud server, paid by the hour", cloudflare: "Online, paid per use" };
-  const COST = { laptop: 1, cloudflare: 2, cloud: 3 };
-  const places = () => {
-    const all = (state.install?.devices || []).filter((s) => s.use).map((s) => ({ name: deviceName(s), key: s.key, kind: s.kind, use: s.use, online: !!s.online, here: s.me }));
-    if (state.install?.serverless?.use) all.push({ name: "Cloudflare", key: "cloudflare", kind: "cloudflare", use: state.install.serverless.use, online: true });
-    return all;
-  };
-  const orderRow = (d, admin) => {
-    const trailing = admin
-      ? `<label class="pick">${PLACES[d.use]}<select aria-label="Where ${one.esc(d.name)} comes" data-place="${one.esc(d.key)}">${Object.entries(PLACES).map(([v, t]) => `<option value="${v}"${v === d.use ? " selected" : ""}>${t}</option>`).join("")}</select></label>`
-      : `<span class="note">${PLACES[d.use]}</span>`;
-    return `<div class="row plain"><div class="main"><div class="title"><span>${one.esc(d.name)}</span></div>${subs([KINDS[d.kind], d.here && "This device", !d.online && "Offline"].filter(Boolean).join(" · "))}</div>${trailing}</div>`;
-  };
   const admin = () => state.user?.role === "admin";
-  const orderSection = () => {
-    const all = places();
-    // With one place, there's nothing to put first.
-    if (all.length < 2) return "";
-    const rank = (d) => Object.keys(PLACES).indexOf(d.use) * 10 + (COST[d.kind] || 0);
-    const html = `<h2 class="section">Where Things Run</h2><div class="list">${all.sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name)).map((d) => orderRow(d, true)).join("")}</div>`;
-    return html + `<p class="footer">Things run on the first device here that’s on and has room.</p>`;
+  const yours = one.config.yours;
+  const shown = (name) => (String(name || "").endsWith(".local") ? name.slice(0, -6) : String(name || ""));
+  const userName = (id) => state.install?.users.find((u) => u.id === id)?.name || "someone";
+  const appOf = (name) => apps.find((a) => a.name === name);
+  const appTitle = (name) => appOf(name)?.title || name;
+  const holds = (s) => (s.runs_for || []).includes(`user:${me()}`);
+  const subs = (...lines) => lines.filter(Boolean).map((l) => `<div class="sub">${one.esc(l)}</div>`).join("");
+  // How long ago a device was last on: "5 min ago", "2 h ago", then the day.
+  const ago = (t) => {
+    const s = one.ago(t);
+    return /^\d/.test(s) ? `${s} ago` : s;
   };
+
+  // What a device is, from what it says: its kind and build for a machine, its name for the rest, which our own apps
+  // give ("iPhone", "The One App on Andre’s MacBook Air", "Chrome on Mac").
+  const BROWSER = /^(Chrome|Safari|Firefox|Edge|A browser)( on (.+))?$/;
+  const osOf = (target, name = "") => {
+    if (/apple/.test(target || "") || /\b(iPhone|iPad|Mac|MacBook|iMac)\b/i.test(name)) return "apple-logo";
+    if (/windows/.test(target || "") || /\bWindows\b/i.test(name)) return "windows-logo";
+    if (/android/.test(target || "") || /\b(Android|Pixel|Galaxy)\b/i.test(name)) return "android-logo";
+    if (/linux/.test(target || "") || /\bLinux\b/i.test(name)) return "linux-logo";
+    return "";
+  };
+  const typeOf = (name) => {
+    if (/phone|\b(Android|Pixel|Galaxy)\b/i.test(name)) return "device-mobile";
+    if (/\b(iPad|Tablet)\b/i.test(name)) return "device-tablet";
+    if (/\b(MacBook|Laptop)\b/i.test(name)) return "laptop";
+    return "desktop";
+  };
+  const deviceIcon = (type, os, off) =>
+    `<span class="device-icon${off ? " off" : ""}">${one.icon(type)}${os ? one.icon(os, "os") : ""}</span>`;
+
+  // Run priority: a number from 1, or "last", always after every number.
+  const rank = (p) => (p === "last" ? 1000 : Number(p) || 1);
+  const said = (p) => (p === "last" ? "Always last" : `Priority ${p}`);
+
+  // What exists, grouped by the device it's on: a machine's node and the services named for it, the sign-ins of its
+  // apps (several old ones of the same device among them), and each browser on its own.
+  function grouped() {
+    // This device, as its node says, or by its own key: a browser's, which signs in, or the one asking.
+    const mark = (e) => ({ ...e, me: e.me || [device.key, state.me?.key].includes(e.key) });
+    const devices = (state.install?.devices || []).map(mark), clients = (state.install?.clients || []).map(mark);
+    const cards = [], browsers = [], named = new Map();
+    const id = (user, name) => `${user}\n${shown(name).toLowerCase()}`;
+    const card = (user, name) => {
+      const c = { user, name: shown(name), node: null, services: [], clients: [] };
+      cards.push(c);
+      if (!named.has(id(user, name))) named.set(id(user, name), c);
+      return c;
+    };
+    for (const d of devices.filter((d) => (d.roles || []).includes("compute"))) card(d.user, d.name).node = d;
+    for (const s of devices.filter((d) => d.service)) (named.get(id(s.user, s.name)) || card(s.user, s.name)).services.push(s);
+    const app = `${state.config?.name || ""} on `;
+    for (const c of clients) {
+      if (c.passkey || BROWSER.test(c.name)) {
+        browsers.push(c);
+        continue;
+      }
+      // A computer's app: on that computer, where it's known by its name, or the person's only Mac for a Mac's.
+      const host = c.name.startsWith(app) ? c.name.slice(app.length) : "";
+      let on = host && named.get(id(c.user, host));
+      if (host && !on && osOf("", host) === "apple-logo") {
+        const macs = cards.filter((k) => k.user === c.user && /apple/.test(k.node?.target || ""));
+        if (macs.length === 1) on = macs[0];
+      }
+      (on || named.get(id(c.user, host || c.name)) || card(c.user, host || c.name)).clients.push(c);
+    }
+    for (const c of cards) {
+      const ends = [c.node, ...c.services].filter(Boolean);
+      c.keys = [...ends, ...c.clients].map((e) => e.key);
+      c.me = [...ends, ...c.clients].some((e) => e.me);
+      c.online = ends.some((e) => e.online);
+      c.runs = ends.length > 0;
+      c.priority = c.node?.priority ?? c.services[0]?.priority ?? (c.runs ? 1 : null);
+      // Its sign-in now: this one, else the last seen, else the newest; the rest are old.
+      const now = [...c.clients].sort((a, b) => b.me - a.me || (seen[b.key] || 0) - (seen[a.key] || 0) || (b.since || 0) - (a.since || 0));
+      c.signIn = now[0] || null;
+      c.old = now.slice(1);
+      c.seen = Math.max(0, ...c.keys.map((k) => seen[k] || 0));
+      c.icon = c.node
+        ? deviceIcon(c.node.kind === "laptop" ? "laptop" : /apple|windows/.test(c.node.target || "") ? "desktop" : "hard-drives", osOf(c.node.target, c.name), !c.online)
+        : c.runs
+          ? deviceIcon("hard-drives", "", !c.online)
+          : deviceIcon(typeOf(c.signIn?.name || c.name), osOf("", c.signIn?.name || c.name));
+    }
+    // Theirs, and others' that run their apps: all of those for an admin, who sets where things run.
+    const shownCards = cards.filter((c) => c.user === me() || (c.node && (admin() || holds(c.node))));
+    shownCards.sort((a, b) => (a.runs ? rank(a.priority) : 2000) - (b.runs ? rank(b.priority) : 2000) || a.name.localeCompare(b.name));
+    return { cards: shownCards, browsers: browsers.filter((b) => b.user === me()) };
+  }
+
+  // The numbers devices have now, from 1, and the next, to choose from.
+  function priorities() {
+    const all = [1, ...(state.install?.devices || []).map((d) => d.priority), state.install?.serverless?.priority].filter((p) => p != null && p !== "last").map(Number);
+    return [...new Set([...all, Math.max(...all) + 1])].sort((a, b) => a - b);
+  }
+  const chip = (id, p) =>
+    admin()
+      ? `<button class="pick chip" data-priority="${one.esc(id)}" aria-label="Run priority: ${one.esc(said(p))}">${one.esc(said(p))}</button>`
+      : `<span class="note">${one.esc(said(p))}</span>`;
+  const more = (i, name) => `<button class="more" data-more="${i}" aria-label="More for ${one.esc(name)}">${one.icon("dots-three-outline-fill")}</button>`;
+
+  // A thing a device runs: its app's icon, its name, and a switch for the device's owner.
+  const tile = (icon) => `<span class="tile">${one.icon(icon)}</span>`;
+  function thing({ icon, title, sub = "", on = true, mine, off, disabled }) {
+    const toggle = mine
+      ? `<input type="checkbox" class="switch" aria-label="${one.esc(title)}"${on ? " checked" : ""}${disabled ? " disabled" : ""}${off ? ` data-off='${one.esc(JSON.stringify(off))}'` : ""}>`
+      : "";
+    return `<label class="row plain">${icon}<div class="main"><div class="title"><span>${one.esc(title)}</span></div>${subs(sub)}</div>${toggle}</label>`;
+  }
+  function serviceRow(c, mine, s) {
+    const a = appOf(s.name) || s;
+    return thing({ icon: one.appIcon({ ...a, name: s.name, title: a.title || s.name }, 28), title: a.title || s.name, mine, off: s.off });
+  }
+  function deviceCard(c, i) {
+    const mine = c.user === me();
+    const sub = [c.me ? "This device" : !mine ? `${userName(c.user)}’s` : "", !c.me && (c.runs ? !c.online : c.seen && Date.now() - c.seen > 3_600_000) ? (c.seen ? ago(c.seen) : "Offline") : ""].filter(Boolean).join(" · ");
+    let html = `<div class="list"><div class="row still head">${c.icon}<div class="main"><div class="title"><span>${one.esc(c.name)}</span></div>${subs(sub)}</div>` +
+      (c.runs ? chip(i, c.priority) : "") + (mine ? more(i, c.name) : "") + "</div>";
+    // Runs apps: what every node does now, shown as it is; turning it on and off comes later.
+    if (c.node) html += thing({ icon: tile("squares-four"), title: "Runs apps", mine, disabled: true });
+    const services = [
+      ...(c.node?.installed_sidecars || []).map((s) => ({ ...s, off: { sidecar: s.name, device: c.node.key } })),
+      ...c.services.filter((s) => mine || s.serves_me).map((s) => ({ name: s.service, off: { remove: s.key } })),
+    ];
+    if (mine || admin()) html += services.sort((a, b) => appTitle(a.name).localeCompare(appTitle(b.name))).map((s) => serviceRow(c, mine, s)).join("");
+    if (mine && c.old.length) {
+      html += `<div class="row plain old"><div class="main"><div class="sub">${c.old.length} old sign-in${c.old.length > 1 ? "s" : ""}</div></div>` +
+        `<button class="button plain small" data-old="${i}">Remove</button></div>`;
+    }
+    return html + "</div>";
+  }
+  function cloudflareCard() {
+    const s = state.install?.serverless;
+    if (!s) return "";
+    return `<div class="list"><div class="row still head">${deviceIcon("cloud")}<div class="main"><div class="title"><span>Cloudflare</span></div>` +
+      `${subs("Runs apps · when none of yours answer")}</div>${chip("cloudflare", s.priority ?? "last")}</div></div>`;
+  }
+  // A browser's logo with its OS's glyph, from its name ("Chrome on Mac"); a device's type, from its name, for the rest.
+  const iconByName = (name) => {
+    const [browsing, browser, , on] = name.match(BROWSER) || [];
+    return browsing ? deviceIcon({ Chrome: "google-chrome-logo", Safari: "compass" }[browser] || "browser", osOf("", on || "")) : deviceIcon(typeOf(name), osOf("", name));
+  };
+  function browserRow(b, i) {
+    const sub = b.me ? "This browser" : seen[b.key] && Date.now() - seen[b.key] > 3_600_000 ? ago(seen[b.key]) : "";
+    return `<div class="row still">${b.passkey ? deviceIcon("key") : iconByName(b.name)}<div class="main"><div class="title"><span>${one.esc(b.name)}</span></div>${subs(sub)}</div>${more(`b${i}`, b.name)}</div>`;
+  }
+
+  // A device waiting to be let in: which it is, where and when it asked, its code to check, and the answers.
+  function waitingCard(r) {
+    const code = one.esc(r.code);
+    const sub = [r.yours ? "" : `${r.person}’s first device`, r.place, r.made && ago(r.made)].filter(Boolean).join(" · ");
+    return `<div class="list waiting-device" role="group" aria-label="${one.esc(r.device)} wants to join"><div class="row plain head">${iconByName(r.device)}` +
+      `<div class="main"><div class="title"><span>${one.esc(r.device)}</span></div>${subs(sub)}</div></div><div class="code">${code}</div>` +
+      `<div class="answers"><button class="button" data-refuse="${code}">${r.yours ? "Not Me" : "Not Them"}</button><button class="button primary" data-let="${code}">Approve</button></div></div>`;
+  }
 
   // Standing work: "linux keeps WhatsApp running for you", until when, with Stop. It lasts 30 days, and longer as
   // they use the app.
-  const appTitle = (name) => apps.find((a) => a.name === name)?.title || name;
+  const deviceName = (s) => (s.service ? `${appTitle(s.service)} on ${shown(s.name)}` : shown(s.name));
   const forWhom = (scope) => (scope === `user:${me()}` ? "you" : scope === "global" ? "everyone" : state.install?.groups.find((g) => `group:${g.id}` === scope)?.name || "a group");
   const grantRow = (g) => {
     const on = (state.install?.devices || []).find((d) => d.key === g.endpoint);
@@ -124,75 +232,25 @@
         await one.api("POST", "/v1/grant", { device: t.dataset.keepDevice, app, scope });
         close();
       } catch (err) {
-        body.querySelector("#keep-error").innerHTML = one.banner(err, { retry: false });
+        body.querySelector("#keep-error").innerHTML = one.problem({ title: one.plain(err).title });
       }
     });
     if (app) return devices();
     choose(scheduled(scope).map((a) => pick(a.title || a.name, `data-keep-app="${one.esc(a.name)}"`)), "Apps that run on their own, every so often.");
   }
 
-  // Where their own things run: the machines that run things, each with a switch. Their own machines always do; the
-  // rest only as their own device says (`runs`), which only they change.
-  const machines = () => {
-    const all = (state.install?.devices || []).filter((s) => (s.roles || []).includes("compute"));
-    const cloud = state.install?.serverless;
-    return cloud?.key ? [...all, { key: cloud.key, name: "Cloudflare", runs_for: cloud.runs_for, roles: ["compute"] }] : all;
-  };
-  // Whether this person has a machine of their own: then where things run is theirs to see and choose.
-  const ownsMachine = () => machines().some((s) => s.user === me());
-  const always = (s) => holds(s) && s.user === me() && !(state.install?.runs || []).includes(s.key);
-  const runsSection = () => {
-    const all = machines();
-    const on = all.filter(holds).map((s) => shown(s.name));
-    // Only for someone with a machine of their own, or with nothing running their things.
-    if (!all.length || (on.length && !ownsMachine())) return "";
-    // Nothing running them is a problem, shown on the section; otherwise it says where, in the list's first row.
-    const said = on.length ? `<div class="row plain"><div class="main">${one.esc(`Your things run on ${list(on)}.`)}</div></div>` : "";
-    const none = on.length ? "" : one.problem({ title: "Nothing runs your things", text: "Turn on a machine below, or your apps can’t open what’s yours." });
-    const rows = all.map((s) => `<label class="row plain"><div class="main"><div class="title"><span>${one.esc(shown(s.name))}</span></div>${subs(always(s) ? "Yours, so it always does" : runBy(s))}</div>` +
-      `<input type="checkbox" class="switch" data-runs="${one.esc(s.key)}" aria-label="Run your things on ${one.esc(shown(s.name))}"${holds(s) ? " checked" : ""}${always(s) || !device.keys ? " disabled" : ""}></label>`).join("");
-    return `<h2 class="section">Where Your Things Run</h2>${none}<div class="list">${said}${rows}</div>` +
-      '<p class="footer">A machine opens your things only while you use them.</p>';
-  };
-
-  // A device waiting to be let in, asked about: which it is, the code it shows, to compare, and Approve or not.
-  const asking = (r) => {
-    const code = one.esc(r.code);
-    const [title, detail, no] = r.yours
-      ? [`Your ${r.device} wants to join`, `It shows <b>${code}</b>. Approve it only if it’s yours and shows the same.`, "Not Mine"]
-      : [`${r.person} wants to join`, `Their first device, ${one.esc(r.device)}, shows <b>${code}</b>. They join ${one.esc(yours)}.`, "Not Them"];
-    return `<div class="asking"><div class="confirm" role="group" aria-label="${one.esc(title)}"><div class="confirm-title">${one.esc(title)}</div><div class="confirm-detail">${detail}</div>` +
-      `<div class="confirm-buttons"><button class="button plain" data-refuse="${code}">${no}</button><button class="button primary" data-let="${code}">Approve</button></div></div></div>`;
-  };
-
-  // A device not seen for a day or more says so, for one left behind (a browser whose data was cleared, a phone
-  // that was reset) to be found and removed; one in use says nothing.
-  const DAY = 86_400_000;
-  const lastSeen = (key) => {
-    const days = seen[key] ? Math.floor((Date.now() - seen[key]) / DAY) : 0;
-    return days < 1 ? "" : days === 1 ? "Last seen yesterday" : `Last seen ${days} days ago`;
-  };
-  const clientRow = (c) =>
-    row({ key: c.key, name: c.name, online: true, lines: [c.me ? "This device" : lastSeen(c.key)], trailing: "", removable: !c.me });
-
+  let drawn = { cards: [], browsers: [] };
   function page() {
     one.largeTitle("Devices");
-    const devices = state.install?.devices || [], clients = state.install?.clients || [];
-    const mine = devices.filter((s) => s.user === me()), others = devices.filter((s) => s.user !== me());
-    const here = [...devices, ...clients].find((m) => m.me);
-    let html = '<div class="large-title">Devices</div>' + waiting.map(asking).join("");
-    if (here || device.signOut) {
-      html += '<h2 class="section">This Device</h2><div class="list">' +
-        (here ? `<label class="row plain"><input class="field" id="name" aria-label="This device’s name" value="${one.esc(here.name)}" autocomplete="off" spellcheck="false" enterkeyhint="done"></label>`
-          : `<div class="row plain"><div class="main"><div class="title"><span>${one.esc(device.name)}</span></div></div></div>`) +
-        (device.signOut ? `<button class="row plain out" data-out>Sign Out</button>` : "") + "</div>";
-    }
-    html += '<h2 class="section">Your Devices</h2><div class="list">' + mine.map(deviceRow).join("") + clients.filter((c) => c.user === me()).map(clientRow).join("") +
-      `<a class="row plain action-row" data-pair>${one.icon("desktop")}<span>Pair a Computer</span></a></div><div id="ask"></div>`;
+    drawn = grouped();
+    let html = '<div class="large-title">Devices</div>';
+    if (waiting.length) html += '<h2 class="section">Waiting for you</h2><div class="devices">' + waiting.map(waitingCard).join("") + "</div>";
+    html += '<div id="approve"></div><div class="devices">' + drawn.cards.map(deviceCard).join("") + cloudflareCard() + "</div>";
+    html += `<div class="list"><a class="row plain action-row" data-add>${one.icon("plus-circle")}<span>Add a Device</span></a></div>`;
+    if (drawn.browsers.length) html += '<h2 class="section">Browsers</h2><div class="list">' + drawn.browsers.map(browserRow).join("") + "</div>";
+    // A device that isn't listed yet still signs out.
+    if (device.signOut && ![...drawn.cards, ...drawn.browsers].some((c) => c.me)) html += '<div class="list" style="margin-top:20px"><button class="row plain out" data-out>Sign Out</button></div>';
     if (device.keys) {
-      html += '<h2 class="section">Approve a Device</h2><div class="list">' +
-        `<label class="row plain"><input class="field code-field" id="code" placeholder="Code on the new device" aria-label="Code on the new device" autocomplete="off" spellcheck="false" autocapitalize="characters" enterkeyhint="go" maxlength="9"></label></div>` +
-        '<div id="approve"></div><p class="footer">Type the code it shows, or scan its QR code with your phone.</p>';
       if (passkey) html += `<div class="list passkey"><a class="row plain action-row" data-passkey>${one.icon("key")}<span>Use this passkey to get back in if you lose your devices</span></a></div>`;
       // Only for someone with something kept running, or an app that runs on its own: an app's screen asks for the rest.
       const grants = (state.install?.grants || []).filter((g) => g.until > Date.now());
@@ -202,13 +260,6 @@
           (grants.length ? '<p class="footer">When one stops or runs out, that device can’t open the app’s things any more.</p>' : "");
       }
     }
-    // Others' devices: those that keep something running for them, and for someone with a machine of their own, those
-    // that run their things.
-    const keeps = (s) => (state.install?.grants || []).some((g) => g.endpoint === s.key && g.until > Date.now());
-    const used = others.filter((s) => keeps(s) || (holds(s) && ownsMachine()));
-    if (used.length) html += '<h2 class="section">Shared Devices</h2><div class="list">' + used.map(deviceRow).join("") + "</div>";
-    if (admin()) html += orderSection();
-    html += runsSection();
     const day = (t) => new Date(t).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
     if (admin() && state.install?.recovery_set) html += `<p class="footer">Recovery key set ${one.esc(day(state.install.recovery_set))}.</p>`;
     if (state.install?.recovery_used && (admin() || state.install.recovery_used.user === me())) {
@@ -221,22 +272,22 @@
 
   const draw = () => one.render("#page", async () => {
     [state, device] = await Promise.all([one.api("GET", "/v1/state"), one.device()]);
+    const asks = [!apps.length ? one.api("GET", "/v1/apps").then((a) => (apps = a), () => {}) : null];
     if (device.keys) {
-      [passkey, waiting, seen] = await Promise.all([
-        one.api("GET", "/v1/devices/passkey").then((p) => p.passkey === true, () => false),
-        one.api("GET", "/v1/devices/requests").then((w) => w.filter((r) => r.code), () => waiting),
-        one.api("GET", "/v1/devices/seen").catch(() => seen),
-      ]);
+      asks.push(
+        one.api("GET", "/v1/devices/passkey").then((p) => (passkey = p.passkey === true), () => {}),
+        one.api("GET", "/v1/devices/requests").then((w) => (waiting = w.filter((r) => r.code)), () => {}),
+        one.api("GET", "/v1/devices/seen").then((s) => (seen = s || {}), () => {}),
+      );
     }
-    // App titles name the grants' rows and a service endpoint's ("WhatsApp on linux").
-    if (!apps.length && (device.keys || (state.install?.devices || []).some((s) => s.service))) {
-      apps = await one.api("GET", "/v1/apps").catch(() => []);
-    }
+    await Promise.all(asks);
     const html = page();
-    // Not while they're naming this device or answering a question.
-    if (["name", "code"].includes(document.activeElement?.id) || document.querySelector("#ask .confirm, #approve .confirm")) return;
+    // Not while they're answering a question.
+    if (document.querySelector("#approve .confirm")) return;
     return html;
   });
+  // A change shown at once (the page drawn as it will be), before it's sent; the page is drawn from what's true after.
+  const now = () => one.render("#page", async () => page());
 
   async function act(fn) {
     error = "";
@@ -251,42 +302,156 @@
 
   document.addEventListener("change", (e) => {
     const t = e.target;
-    if (t.id === "name") rename(t);
-    else if (t.dataset.place) place(t.dataset.place, t.value);
-    else if (t.dataset.runs) runs(t.dataset.runs, t.checked);
+    if (t.dataset.off && !t.checked) turnOff(t, JSON.parse(t.dataset.off));
   });
   document.addEventListener("click", (e) => {
     if (e.target.closest(".sheet")) return;
-    const t = e.target.closest?.("[data-more], [data-pair], [data-out], [data-passkey], [data-grant], [data-keep], [data-let], [data-refuse]");
-    if (t?.dataset.let) let_(t);
-    else if (t?.dataset.refuse) busy(t, () => one.api("POST", "/v1/devices/refuse", { code: t.dataset.refuse }));
-    else if (t?.hasAttribute("data-out")) signOut();
-    else if (t?.hasAttribute("data-keep")) keep();
-    else if (t?.hasAttribute("data-passkey")) act(() => one.api("POST", "/v1/devices/passkey", {}));
-    else if (t?.dataset.grant) {
-      act(() => one.api("POST", "/v1/grant", { ...JSON.parse(t.dataset.grant), days: 0 }));
-    }
-    else if (t?.hasAttribute("data-more")) menu(t.closest("[data-device]").dataset.device, t);
-    else if (t) pair();
+    const t = e.target.closest?.("[data-more], [data-add], [data-out], [data-passkey], [data-grant], [data-keep], [data-let], [data-refuse], [data-priority], [data-old]");
+    if (!t) return;
+    const d = t.dataset;
+    if (d.let) busy(t, () => one.api("POST", "/v1/devices/approve", { code: d.let, confirm: true }));
+    else if (d.refuse) busy(t, () => one.api("POST", "/v1/devices/refuse", { code: d.refuse }));
+    else if (d.priority) choosePriority(d.priority, t);
+    else if (d.old) removeOld(drawn.cards[d.old]);
+    else if (d.more) menu(d.more, t);
+    else if (d.grant) act(() => one.api("POST", "/v1/grant", { ...JSON.parse(d.grant), days: 0 }));
+    else if (t.hasAttribute("data-out")) signOut();
+    else if (t.hasAttribute("data-keep")) keep();
+    else if (t.hasAttribute("data-passkey")) act(() => one.api("POST", "/v1/devices/passkey", {}));
+    else if (t.hasAttribute("data-add")) addDevice();
   });
   document.addEventListener("contextmenu", (e) => {
-    const t = e.target.closest?.("[data-device]");
-    if (t) e.preventDefault(), menu(t.dataset.device, e.target.closest("[data-more]") || { x: e.clientX, y: e.clientY });
+    const t = e.target.closest?.(".row.still")?.querySelector("[data-more]");
+    if (t) e.preventDefault(), menu(t.dataset.more, { x: e.clientX, y: e.clientY });
   });
-  document.addEventListener("keydown", (e) => e.target.id === "name" && e.key === "Enter" && e.target.blur());
-  document.addEventListener("keydown", (e) => e.target.id === "code" && e.key === "Enter" && approve(e.target.value));
-  document.addEventListener("input", (e) => e.target.id === "code" && e.target.value.replace(/[^a-z2-7]/gi, "").length === 8 && approve(e.target.value));
 
-  /// What a prompt's button does, with the button busy until it's done.
+  /// What a button does, with it busy until it's done.
   async function busy(b, fn) {
     one.tap();
     one.busy(b);
     await act(fn);
   }
-  const let_ = (b) => busy(b, () => one.api("POST", "/v1/devices/approve", { code: b.dataset.let, confirm: true }));
 
-  /// Finds the device waiting with this code, shows which it is, and lets it in on Approve.
-  async function approve(typed) {
+  /// A device's run priority, from the numbers in use, the next, or Always last; for an admin. Every endpoint of the
+  /// device gets it, written into the install's `priority` setting, the others kept as set.
+  async function choosePriority(which, at) {
+    const card = which === "cloudflare" ? null : drawn.cards[which];
+    const was = card ? card.priority : state.install.serverless?.priority ?? "last";
+    const choices = [...priorities(), "last"];
+    const items = choices.map((p) => ({ title: p === "last" ? "Always last" : String(p), checked: p === was, ...(p === "last" ? { section: true } : {}) }));
+    const i = await one.menu(items, at).catch(() => null);
+    if (i == null || choices[i] === was) return;
+    const to = choices[i];
+    const keys = card ? [card.node, ...card.services].filter(Boolean).map((e) => e.key) : ["cloudflare"];
+    let set = {};
+    try {
+      set = JSON.parse(state.install.settings?.priority || "{}") || {};
+    } catch {}
+    // Only what's still a device of the install, or Cloudflare.
+    const known = new Set([...(state.install.devices || []).map((d) => d.key), "cloudflare"]);
+    set = Object.fromEntries(Object.entries(set).filter(([k]) => known.has(k)));
+    for (const k of keys) set[k] = to;
+    one.tap();
+    for (const d of state.install.devices || []) if (keys.includes(d.key)) d.priority = to;
+    if (!card && state.install.serverless) state.install.serverless.priority = to;
+    now();
+    act(() => one.api("POST", "/v1/settings", { name: "priority", value: JSON.stringify(set) }));
+  }
+
+  /// A service switched off: removed from that device, as removing it there does (a sidecar of its node, or a
+  /// service of its own); asked first, since it's turned on again only by installing it there.
+  async function turnOff(input, off) {
+    const card = input.closest(".list");
+    const name = card.querySelector(".head .title span")?.textContent || "this device";
+    const title = input.getAttribute("aria-label");
+    const sure = await one.alert({ title: `Turn off ${title} on ${name}?`, action: "Turn Off", danger: true });
+    if (!sure) return void (input.checked = true);
+    input.setAttribute("aria-busy", "true");
+    act(() => (off.remove ? one.api("POST", "/v1/remove", { key: off.remove }) : one.api("POST", "/v1/sidecar", { device: off.device, name: off.sidecar, installed: false })));
+  }
+
+  async function menu(which, at) {
+    const browser = which.startsWith("b");
+    const item = browser ? drawn.browsers[which.slice(1)] : drawn.cards[which];
+    if (!item) return;
+    const items = browser ? [] : [{ title: "Rename", icon: "pencil-simple" }];
+    items.push(item.me ? { title: "Sign Out", icon: "sign-out", danger: true } : { title: "Remove…", icon: "minus-circle", danger: true });
+    const i = await one.menu(items, at).catch(() => null);
+    if (i == null) return;
+    if (items[i].title === "Rename") rename(item);
+    else if (item.me) signOut();
+    else remove(item.name, browser ? [item.key] : item.keys);
+  }
+
+  /// Renames a device: its node and the services named for it together, or its app's sign-ins.
+  function rename(card) {
+    const keys = card.runs ? [card.node, ...card.services].filter(Boolean).map((e) => e.key) : card.clients.map((c) => c.key);
+    const sheet = one.sheet({ title: "Rename", done: "Cancel" });
+    sheet.body.innerHTML = `<div class="list"><label class="row plain"><input class="field" id="name" aria-label="Name" autocomplete="off" spellcheck="false" enterkeyhint="done"></label></div>
+      <div id="problem"></div><div style="text-align:center;margin-top:18px"><button class="button primary" id="go" disabled>Save</button></div>`;
+    const input = sheet.body.querySelector("#name"), go = sheet.body.querySelector("#go");
+    input.value = card.name;
+    input.oninput = () => (go.disabled = !input.value.trim() || input.value.trim() === card.name);
+    input.onkeydown = (e) => e.key === "Enter" && !go.disabled && go.click();
+    go.onclick = async () => {
+      const back = one.busy(go);
+      try {
+        for (const key of keys) await one.api("POST", "/v1/name", { key, name: input.value.trim() });
+        sheet.close();
+        one.tap("success");
+        draw();
+      } catch (e) {
+        sheet.body.querySelector("#problem").innerHTML = one.problem({ title: one.plain(e).title });
+        back();
+      }
+    };
+    setTimeout(() => input.focus(), 50);
+  }
+
+  /// Removes a device, everything on it: it opens nothing new.
+  async function remove(name, keys) {
+    if (!(await one.alert({ title: `Remove ${name}?`, action: "Remove", danger: true }))) return;
+    act(async () => {
+      for (const key of keys) await one.api("POST", "/v1/remove", { key });
+    });
+  }
+
+  async function removeOld(card) {
+    const n = card.old.length;
+    if (!(await one.alert({ title: `Remove ${n} old sign-in${n > 1 ? "s" : ""} of ${card.name}?`, action: "Remove", danger: true }))) return;
+    act(async () => {
+      for (const c of card.old) await one.api("POST", "/v1/remove", { key: c.key });
+    });
+  }
+
+  async function signOut() {
+    if (await one.alert({ title: `Sign Out of ${yours} on this device?`, action: "Sign Out", danger: true })) one.signOut();
+  }
+
+  /// The three ways a device joins: an app that signs in and asks to be approved, a server by one line, a browser.
+  function addDevice() {
+    const address = state.install?.settings?.address || "";
+    const { body } = one.sheet({ title: "Add a Device" });
+    const way = (icon, title, sub, extra = "") =>
+      `<div class="row plain add-way"><span class="tile">${one.icon(icon)}</span><div class="main"><div class="title"><span>${one.esc(title)}</span></div><div class="sub">${one.esc(sub)}</div>${extra}</div></div>`;
+    const line = (text) => `<div class="line"><span>${one.esc(text)}</span>${one.copyButton(text, { label: "" })}</div>`;
+    const server = state.config?.install
+      ? way("hard-drives", "A server", "Run this on it. It joins as you, with everything you can see and do.", '<div id="server-line">' + one.loading("Making a code") + "</div>")
+      : "";
+    body.innerHTML = '<div class="list">' +
+      way("device-mobile", "Phone, tablet or computer", `Install ${state.config?.name || "the app"} and sign in. It shows up here to approve.`) +
+      server +
+      (address ? way("browser", "A browser", "Open this and sign in. It shows up here to approve.", line(address)) : "") +
+      "</div>";
+    if (!server) return;
+    one.api("POST", "/v1/pair", {}).then(
+      ({ code }) => (body.querySelector("#server-line").innerHTML = line(`${state.config.install} && ~/.local/bin/${state.config.cli} join ${code}`)),
+      (err) => (body.querySelector("#server-line").innerHTML = one.problem({ title: one.plain(err).title })),
+    );
+  }
+
+  /// A device's code from its QR, not waiting at the top: which device it is, and Approve.
+  async function approveScanned(typed) {
     const code = String(typed).toUpperCase().replace(/[^A-Z2-7]/g, "");
     if (code.length !== 8) return;
     const ask = document.querySelector("#approve");
@@ -301,81 +466,15 @@
       detail: one.esc(r.new ? `${r.person}’s first device. They join ${yours}.` : "It can open everything you can."),
       action: "Approve",
       run: () => one.api("POST", "/v1/devices/approve", { code, confirm: true }),
-    }).then((done) => {
-      const field = document.querySelector("#code");
-      if (field) field.value = "";
-      if (done) draw();
-    });
-    ask.scrollIntoView({ block: "nearest", behavior: "smooth" });
-  }
-  function rename(input) {
-    const name = input.value.trim();
-    const here = [...(state.install?.devices || []), ...(state.install?.clients || [])].find((m) => m.me);
-    if (!name || name === here?.name) return void (input.value = here?.name || "");
-    act(() => one.api("POST", "/v1/name", { name }));
-  }
-
-  // Choosing where things run first shows at once (the page drawn as it will be), then goes to the node; what failed
-  // goes back as it was when the page is drawn again.
-  const now = () => one.render("#page", async () => page());
-
-  /// Turns a machine on or off for their own things: the list their device says, with it or without it.
-  function runs(key, on) {
-    one.tap();
-    const next = new Set((state.install?.runs || []).filter((k) => machines().some((s) => s.key === k)));
-    if (on) next.add(key);
-    else next.delete(key);
-    act(() => one.api("POST", "/v1/runs", { on: [...next] }));
-  }
-
-  function place(device, use) {
-    one.tap();
-    const s = device === "cloudflare" ? state.install.serverless : state.install.devices.find((x) => x.key === device);
-    if (s) s.use = use;
-    now();
-    act(() => one.api("POST", "/v1/use", { device, use }));
-  }
-
-  async function menu(key, at) {
-    const m = [...state.install.devices, ...state.install.clients].find((x) => x.key === key);
-    const i = await one.menu([{ title: `Remove ${deviceName(m) || "This Device"}`, icon: "minus-circle", danger: true }], at).catch(() => null);
-    if (i === 0) remove(key);
-  }
-
-  function remove(key) {
-    const m = [...state.install.devices, ...state.install.clients].find((x) => x.key === key);
-    one.confirm("#ask", {
-      title: `Remove ${deviceName(m) || "this device"}?`,
-      detail: "It loses access to your data. Approve it again to use it.",
-      action: "Remove",
-      danger: true,
-      run: () => one.api("POST", "/v1/remove", { key }),
     }).then((done) => done && draw());
-    document.querySelector("#ask").scrollIntoView({ block: "nearest", behavior: "smooth" });
-  }
-
-  const yours = one.config.yours;
-  async function signOut() {
-    if (await one.alert({ title: `Sign Out of ${yours} on this device?`, action: "Sign Out", danger: true })) one.signOut();
-  }
-
-  function pair() {
-    const { body } = one.sheet({ title: "Pair a Computer", html: one.loading("Making a code") });
-    one.api("POST", "/v1/pair", {}).then(
-      ({ code }) => {
-        body.innerHTML = `<div class="pair"><div class="muted">It joins as you, with everything you can see and do.</div>
-          <div class="code"><span>${one.esc(code)}</span>${one.copyButton(code)}</div>
-          <div class="small muted">On the other computer, choose Join with a Pairing Code, or run <code>${one.esc(one.config.cli)} join</code> with the code. It works once, for seven days.</div></div>`;
-      },
-      (err) => (body.innerHTML = one.problem({ title: one.plain(err).title })),
-    );
+    ask.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }
 
   one.on("changed", draw);
   draw().then(() => {
     // One it already asks about at the top is answered there.
     const same = (r) => r.code.replace(" ", "") === String(scanned).toUpperCase().replace(/[^A-Z2-7]/g, "");
-    if (scanned && !waiting.some(same)) approve(scanned);
+    if (scanned && !waiting.some(same)) approveScanned(scanned);
     scanned = "";
     if (keepAsked && device.keys) keep(keepAsked), (keepAsked = null);
   });

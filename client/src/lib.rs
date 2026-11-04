@@ -198,6 +198,8 @@ struct Inner {
     nodes: Mutex<Vec<PublicKey>>,
     /// The nodes the relay last said are on its network now, if it said: raced first, in that order.
     online: Mutex<Option<HashSet<PublicKey>>>,
+    /// Each node's run priority, where the install's state said it: nodes on the same one are raced at once.
+    ranks: Mutex<HashMap<PublicKey, u32>>,
     /// The endpoint, made again after the network was lost.
     endpoint: tokio::sync::Mutex<Option<Endpoint>>,
     /// A connection to each node raced or asked, held while it's being opened, so one is opened at a time.
@@ -241,6 +243,7 @@ impl Client {
             certificate: Mutex::new(certificate),
             nodes: Mutex::default(),
             online: Mutex::default(),
+            ranks: Mutex::default(),
             endpoint: tokio::sync::Mutex::default(),
             conns: Mutex::default(),
             down: Mutex::default(),
@@ -267,6 +270,14 @@ impl Client {
         let nodes = keys(nodes)?;
         *self.0.nodes.lock().unwrap() = nodes;
         self.warm();
+        Ok(())
+    }
+
+    /// Each node's run priority (a number, the lowest first, as the install's state says it): those on the same one
+    /// are equal, so they're raced at once, and the quickest is asked.
+    pub fn set_ranks(&self, ranks: &[([u8; 32], u32)]) -> Result<(), Error> {
+        let keys = keys(&ranks.iter().map(|r| r.0).collect::<Vec<_>>())?;
+        *self.0.ranks.lock().unwrap() = keys.into_iter().zip(ranks.iter().map(|r| r.1)).collect();
         Ok(())
     }
 
@@ -474,7 +485,9 @@ impl Client {
             }
             return Ok((key, conn, None));
         }
-        let mut queue: VecDeque<(PublicKey, Duration)> = first.iter().map(|k| (*k, STAGGER)).collect();
+        // One on the same run priority as the one before it starts with it.
+        let ranks = self.0.ranks.lock().unwrap().clone();
+        let mut queue: VecDeque<(PublicKey, Duration)> = first.iter().enumerate().map(|(i, k)| (*k, if i > 0 && ranks.get(k).is_some_and(|r| ranks.get(&first[i - 1]) == Some(r)) { Duration::ZERO } else { STAGGER })).collect();
         queue.extend(fallback.iter().enumerate().map(|(i, k)| (*k, if i == 0 { FALLBACK } else { Duration::ZERO })));
         let (sent, mut results) = tokio::sync::mpsc::unbounded_channel();
         let (mut racing, mut started, mut why) = (0, Instant::now(), unsent("there's no node to ask"));
