@@ -251,3 +251,99 @@ async fn a_file_put_from_elsewhere_is_read_only_by_whoever_put_it() {
     a.drop_put(&hash);
     assert!(a.blob_for(&sam, &hash).await.is_err(), "a request's file goes once it's answered");
 }
+
+/// In Repos, only a repo's owner pushes to it and its owners alone delete it: someone else is refused, from a client
+/// device or a sign-in from elsewhere, whose git reaches Repos' `_http` as them.
+#[tokio::test(flavor = "multi_thread")]
+async fn only_a_repos_owner_pushes_to_it_or_deletes_it_from_any_device() {
+    use one::node::{Caller, DeviceRequest, Invited};
+    let a = start("repos-owner").await;
+    a.create("Home", "Andre").await.unwrap();
+    let me = Caller { key: a.id(), user: a.user().unwrap(), agent: None, token: None };
+    let repos = |op: &str, input: Value| CallRequest { app: "repos".into(), op: op.into(), input, ..Default::default() };
+    eventually("Repos to run", async || a.call(repos("list", json!({}))).await.is_ok()).await;
+
+    // A real one-commit pack, as git sends it.
+    let dir = temp("repos-owner-git");
+    let git = |args: &[&str]| {
+        let out = std::process::Command::new("git").args(["-c", "user.name=Andre", "-c", "user.email=andre@example.com"]).args(args).current_dir(&dir).output().unwrap();
+        assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+        out.stdout
+    };
+    git(&["init", "-q"]);
+    std::fs::write(dir.join("README"), "hello\n").unwrap();
+    git(&["add", "README"]);
+    git(&["commit", "-qm", "First"]);
+    let head = String::from_utf8(git(&["rev-parse", "HEAD"])).unwrap().trim().to_string();
+    let mut packing = std::process::Command::new("git").args(["pack-objects", "--stdout", "--revs"]).current_dir(&dir).stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).spawn().unwrap();
+    std::io::Write::write_all(&mut packing.stdin.take().unwrap(), b"HEAD\n").unwrap();
+    let pack = packing.wait_with_output().unwrap().stdout;
+
+    // git's push: one pkt-line per branch moved (old, new, ref), a flush, then the pack.
+    let zero = "0".repeat(40);
+    let push = |commands: &[(&str, &str, &str)], pack: &[u8]| {
+        let mut body = Vec::new();
+        for (i, (old, new, r)) in commands.iter().enumerate() {
+            let line = format!("{old} {new} {r}{}\n", if i == 0 { "\0report-status" } else { "" });
+            body.extend(format!("{:04x}{line}", line.len() + 4).bytes());
+        }
+        body.extend(b"0000");
+        body.extend(pack);
+        body
+    };
+    let http = |body: Option<String>| repos("_http", json!({ "method": "POST", "path": "home.git/git-receive-pack", "query": "", "body": body }));
+    let branches = async || {
+        let got = a.call(repos("get", json!({ "repo": "home" }))).await.unwrap();
+        got["branches"].as_array().unwrap().iter().map(|b| (b["branch"].as_str().unwrap().to_string(), b["head"].as_str().unwrap().to_string())).collect::<Vec<_>>()
+    };
+
+    // Andre's push makes the repo, his.
+    let body = a.put_blob(&push(&[(&zero, &head, "refs/heads/main")], &pack)).unwrap();
+    let told = a.call(http(Some(body))).await.unwrap();
+    assert!(told["text"].as_str().unwrap().contains("ok refs/heads/main"), "{told}");
+    assert_eq!(branches().await, [("main".to_string(), head.clone())]);
+
+    // Sam, a person of the install, with a device of his.
+    let secret = "the-invites-secret";
+    let sam = Invited { secret: secret.into(), name: "Sam".into(), user: one::entry::new_id(), role: one::members::Role::Member, until: u64::MAX };
+    let sams = ed25519_dalek::SigningKey::from_bytes(&rand::random());
+    let e = one::keys::Endpoint::of(&sams);
+    let proof = one::keys::invite_proof(secret.as_bytes(), &e);
+    let asks = DeviceRequest { key: one::entry::hex(&e.key), seal: one::entry::hex(&e.seal), name: "Sam's laptop".into(), user: sam.user.clone(), person: String::new(), proof: Some(proof), service: None, shared: false, enrollment: None };
+    a.approve_request(&me, &asks, Some(&sam)).await.unwrap();
+
+    // Repos' keys in global, as Sam's device opens them and hands them to the node with his calls.
+    let global = one::entry::Scope::Global;
+    let b64 = |v: &Value| data_encoding::BASE64URL_NOPAD.decode(v.as_str().unwrap().as_bytes()).unwrap();
+    let epochs = a.sealed_keys(&me, &global, Some(&one::entry::hex(&e.key)), None).await.unwrap();
+    let apps = a.sealed_keys(&me, &global, None, Some("repos")).await.unwrap();
+    let keys: Vec<one::keys::Handed> = epochs["sealed"].as_object().unwrap().iter().map(|(n, sealed)| {
+        let epoch: [u8; 32] = one::kernel::open_sealed(&one::keys::seal_secret(&sams), &b64(sealed)).unwrap().try_into().unwrap();
+        let app = one::kernel::open_app_key(&epoch, "repos", &b64(&apps["sealed"][n])).unwrap();
+        one::keys::Handed { scope: "global".into(), epoch: n.parse().unwrap(), app: "repos".into(), database: "main".into(), key: one::kernel::database_key(&app, "main") }
+    }).collect();
+
+    let client = Caller { key: e.key, user: sam.user.clone(), agent: None, token: Some(one::node::client_token(&e.key)) };
+    let signed_in = Caller { key: a.id(), user: sam.user.clone(), agent: None, token: Some("Sam's sign-in".into()) };
+    for (sam, handed_for) in [(client, one::entry::hex(&e.key)), (signed_in, one::keys::token_id("Sam's sign-in"))] {
+        let handoff = one::keys::Handoff { for_: handed_for, until: u64::MAX, keys: keys.clone() };
+        a.hand(sam.token.as_deref().unwrap(), &sam.user, &one::keys::seal_handoff(&a.endpoint().seal, &handoff).unwrap(), u64::MAX).unwrap();
+        // Named in global, where Repos keeps everything: Sam's own scope runs only where his own devices chose.
+        let call = |req: CallRequest| a.call_as(a.for_sign_in(CallRequest { scopes: Some(vec!["global".into()]), ..req }).unwrap(), sam.clone());
+
+        // His push, deleting main and making a branch of his at its head, is refused, and nothing moves.
+        let (body, _) = a.put_blob_from(&sam, axum::body::Body::from(push(&[(&head, &zero, "refs/heads/main"), (&zero, &head, "refs/heads/sams")], &[]))).await.unwrap();
+        let told = call(http(Some(body))).await.unwrap();
+        let text = told["text"].as_str().unwrap();
+        assert!(text.contains("ng refs/heads/main ") && text.contains("ng refs/heads/sams ") && !text.contains("ok refs/"), "{told}");
+        assert_eq!(branches().await, [("main".to_string(), head.clone())]);
+
+        // Nor does he delete it.
+        let refused = call(repos("delete", json!({ "repo": "home" }))).await.unwrap_err();
+        assert!(format!("{refused:#}").contains("deletes, restores or erases home"), "{refused:#}");
+        assert!(a.call(repos("get", json!({ "repo": "home" }))).await.unwrap()["deleted"].is_null());
+    }
+
+    // Andre does.
+    a.call(repos("delete", json!({ "repo": "home" }))).await.unwrap();
+}
