@@ -166,24 +166,38 @@ impl Node {
             Ok(())
         })
         .await??;
-        let dir = self.install_dir();
-        let mut file: InstallFile = serde_json::from_slice(&std::fs::read(dir.join("install.json"))?)?;
-        file.bucket = Some(fields.clone());
-        self.save_install(&file)?;
         let logs = self.with(|i| {
-            i.bucket = Some((place, fields));
+            i.bucket = Some((place, fields.clone()));
             i.read = false;
             Ok(i.r.store.logs()?)
         })?;
         let _write = self.0.writes.lock().await;
-        for log in logs {
-            let scope = Scope::parse(&log)?;
-            let entries = self.with(|i| i.r.store.scope(&log))?;
-            for entry in &entries {
-                self.put_entry(&scope, entry).await?;
+        let put = async {
+            for log in logs {
+                let scope = Scope::parse(&log)?;
+                let entries = self.with(|i| i.r.store.scope(&log))?;
+                for entry in &entries {
+                    self.put_entry(&scope, entry).await?;
+                }
+                tracing::info!("put {} of {scope}'s entries in the bucket", entries.len());
             }
-            tracing::info!("put {} of {scope}'s entries in the bucket", entries.len());
+            anyhow::Ok(())
+        };
+        if let Err(err) = put.await {
+            // Back as it was, with no bucket, for moving again to finish.
+            self.with(|i| {
+                i.bucket = None;
+                i.read = true;
+                Ok(())
+            })?;
+            return Err(err);
         }
+        // Kept as this device's bucket only once its entries are there: stopped before, it starts with none again, and
+        // moving again puts what's missing.
+        let dir = self.install_dir();
+        let mut file: InstallFile = serde_json::from_slice(&std::fs::read(dir.join("install.json"))?)?;
+        file.bucket = Some(fields);
+        self.save_install(&file)?;
         self.with(|i| {
             i.read = true;
             Ok(())
