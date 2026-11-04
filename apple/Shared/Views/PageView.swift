@@ -543,7 +543,7 @@ private struct EmptyPage: View {
     var body: some View {
         VStack(spacing: 14) {
             Text(store.canArrange(page.scope)
-                 ? page.scope == "user" ? "Apps you add for yourself show up here." : "Apps you add to \(page.title) show up here."
+                 ? page.scope == "user" ? "No apps yet." : "No apps on \(page.title) yet."
                  : "When its admins add apps to \(page.title), they show up here.")
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)

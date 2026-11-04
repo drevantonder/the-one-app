@@ -741,7 +741,7 @@
     const said = empty ? `${arrange} ${!!home.store()} ${p.title}` : "";
     if (nothing.__said !== said) {
       nothing.__said = said;
-      nothing.innerHTML = empty ? one.empty(arrange ? `Apps you add ${p.scope === "user" ? "for yourself" : `to ${esc(p.title)}`} show up here.` : `When its admins add apps to ${esc(p.title)}, they show up here.`,
+      nothing.innerHTML = empty ? one.empty(arrange ? (p.scope === "user" ? "No apps yet." : `No apps on ${esc(p.title)} yet.`) : `When its admins add apps to ${esc(p.title)}, they show up here.`,
         arrange && home.store() ? { label: "Open the App Store", run: home.openStore } : null) : "";
     }
     // Each item with what it's drawn from (`sig`), so only those that changed are made again.
