@@ -31,7 +31,12 @@ public sealed class Auth
     /// The Credential Locker's name for this app's refresh token.
     static string Locker => $"{WhiteLabel.Name} sign-in";
 
-    readonly SemaphoreSlim refreshing = new(1, 1);
+    /// Where the refresh token is: kept and unused, being swapped for a new one (each works once, so one swap at a
+    /// time, under `swapping` and, beside the Widgets board's process, `Held`), or gone, signed out, until the person
+    /// signs in again.
+    enum State { Idle, Refreshing, SignedOut }
+    volatile State state = State.Idle;
+    readonly SemaphoreSlim swapping = new(1, 1);
     string? access;
     DateTime until;
 
@@ -204,6 +209,7 @@ public sealed class Auth
             if (back.GetValueOrDefault("state") != state || !back.TryGetValue("code", out var code))
                 throw new Exception("That sign-in didn’t start here. Sign in again.");
             await Grant(meta, new() { ["grant_type"] = "authorization_code", ["code"] = code, ["redirect_uri"] = redirect, ["client_id"] = id, ["code_verifier"] = verifier });
+            this.state = State.Idle;
         }
         finally
         {
@@ -266,31 +272,55 @@ public sealed class Auth
     {
         bool Fresh() => access != null && access != stale && until > DateTime.UtcNow.AddMinutes(1);
         if (Fresh()) return access!;
-        await refreshing.WaitAsync();
+        await swapping.WaitAsync();
         // The Widgets board's widgets refresh it in a process of their own: one at a time, each with the token the
         // other kept last.
         try
         {
+            if (state == State.SignedOut) throw new SignedOutException("Signed out.");
             using var held = await Held();
             if (Fresh()) return access!;
             var refresh = Refresh() ?? throw new SignedOutException("Signed out.");
+            state = State.Refreshing;
             var meta = await Meta();
             try
             {
-                await Grant(meta, new() { ["grant_type"] = "refresh_token", ["refresh_token"] = refresh, ["client_id"] = client ?? "" });
+                await Refreshed(meta, new() { ["grant_type"] = "refresh_token", ["refresh_token"] = refresh, ["client_id"] = client ?? "" });
             }
             catch (SignedOutException)
             {
                 Forget();
                 access = null;
+                state = State.SignedOut;
                 throw;
             }
             return access!;
         }
         finally
         {
-            refreshing.Release();
+            if (state == State.Refreshing) state = State.Idle;
+            swapping.Release();
         }
+    }
+
+    /// A refresh token's grant. An answer lost on the way back leaves the token it sent, which the auth service still
+    /// takes for a moment: so it's sent again at once, and only a refusal signs this computer out.
+    async Task Refreshed(JsonNode meta, Dictionary<string, string> fields)
+    {
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            try
+            {
+                await Grant(meta, fields);
+                return;
+            }
+            // No answer: unreachable, or timed out (which HttpClient says by cancelling).
+            catch (Exception e) when (e is HttpRequestException or TaskCanceledException)
+            {
+                await Task.Delay(500 << attempt);
+            }
+        }
+        await Grant(meta, fields);
     }
 
     /// This app's processes' lock on refreshing: a file only one may have open.
@@ -304,11 +334,25 @@ public sealed class Auth
         }
     }
 
+    /// Signs out: the refresh token is revoked, so it opens nothing again, and forgotten here. A refresh on its way, in
+    /// this process or the Widgets board's, finishes first, so what it kept is what's revoked and forgotten, not kept
+    /// again after.
     public async Task SignOut()
     {
-        var refresh = Refresh();
-        Forget();
-        access = null;
+        string? refresh;
+        await swapping.WaitAsync();
+        try
+        {
+            state = State.SignedOut;
+            using var held = await Held();
+            refresh = Refresh();
+            Forget();
+            access = null;
+        }
+        finally
+        {
+            swapping.Release();
+        }
         try
         {
             var meta = await Meta();

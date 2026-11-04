@@ -40,7 +40,11 @@ data class Tokens(val access: String, val refresh: String? = null, val until: Lo
 
 class SignIn(private val context: Context) {
     private val prefs = context.getSharedPreferences("sign-in", Context.MODE_PRIVATE)
-    private val refreshing = Mutex()
+    /** Where the refresh token is: kept and unused, being swapped for a new one (each works once, so one swap at a
+     *  time, under [swapping]), or gone, signed out, until the person signs in again. */
+    private enum class State { Idle, Refreshing, SignedOut }
+    @Volatile private var state = State.Idle
+    private val swapping = Mutex()
 
     /** Where the install is: the build's, if the white label has one, or the one the person gave. */
     var address: String?
@@ -140,6 +144,7 @@ class SignIn(private val context: Context) {
         val meta = meta()
         tokens = grant(meta, mapOf("grant_type" to "authorization_code", "code" to code, "redirect_uri" to redirect,
             "client_id" to (prefs.getString("client", null) ?: ""), "code_verifier" to verifier))
+        this.state = State.Idle
     }
 
     private suspend fun grant(meta: Meta, fields: Map<String, String>): Tokens {
@@ -159,26 +164,49 @@ class SignIn(private val context: Context) {
     suspend fun token(stale: String? = null): String {
         fun fresh(t: Tokens?) = t != null && t.access != stale && t.until > System.currentTimeMillis() + 60_000
         tokens.takeIf(::fresh)?.let { return it.access }
-        return refreshing.withLock {
+        return swapping.withLock {
+            if (state == State.SignedOut) throw NodeError("Sign in again.", signedOut = true)
             val kept = tokens
             if (fresh(kept)) return@withLock kept!!.access
             val refresh = kept?.refresh ?: throw NodeError("Sign in again.", signedOut = true)
+            state = State.Refreshing
             try {
                 val meta = meta()
-                val next = grant(meta, mapOf("grant_type" to "refresh_token", "refresh_token" to refresh, "client_id" to (prefs.getString("client", null) ?: "")))
+                val next = refreshed(meta, mapOf("grant_type" to "refresh_token", "refresh_token" to refresh, "client_id" to (prefs.getString("client", null) ?: "")))
                 tokens = next.copy(refresh = next.refresh ?: refresh)
                 next.access
             } catch (e: NodeError) {
-                if (e.signedOut) tokens = null
+                if (e.signedOut) {
+                    tokens = null
+                    state = State.SignedOut
+                }
                 throw e
+            } finally {
+                if (state == State.Refreshing) state = State.Idle
             }
         }
     }
 
-    /** Signs out: the refresh token is revoked, so it opens nothing again, and forgotten here. */
+    /** A refresh token's grant. An answer lost on the way back leaves the token it sent, which the auth service still
+     *  takes for a moment: so it's sent again at once, and only a refusal signs this phone out. */
+    private suspend fun refreshed(meta: Meta, fields: Map<String, String>): Tokens {
+        for (attempt in 0 until 3) {
+            try {
+                return grant(meta, fields)
+            } catch (_: java.io.IOException) {
+                delay(500L shl attempt)
+            }
+        }
+        return grant(meta, fields)
+    }
+
+    /** Signs out: the refresh token is revoked, so it opens nothing again, and forgotten here. A refresh on its way
+     *  finishes first, so what it kept is what's revoked and forgotten, not kept again after. */
     suspend fun signOut() {
-        val kept = tokens
-        tokens = null
+        val kept = swapping.withLock {
+            state = State.SignedOut
+            tokens.also { tokens = null }
+        }
         runCatching {
             val meta = meta()
             val endpoint = meta.revocation_endpoint

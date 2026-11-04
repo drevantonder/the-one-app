@@ -32,7 +32,10 @@ actor Auth {
 
     private var access: String?
     private var until = Date.distantPast
-    private var refreshing: Task<String, Error>?
+    /// Where the refresh token is: kept and unused, being swapped for a new one (each works once, so one swap at a
+    /// time), or gone, signed out, until the person signs in again.
+    private enum State { case idle, refreshing(Task<String, Error>), signedOut }
+    private var state = State.idle
 
     /// Where the install is: the one the person gave.
     nonisolated static var address: URL? {
@@ -158,6 +161,7 @@ actor Auth {
         }
         guard value("state") == state, let code = value("code") else { throw NodeError(String(localized: "That sign-in didn’t start here. Sign in again.")) }
         try await grant(meta, ["grant_type": "authorization_code", "code": code, "redirect_uri": redirect, "client_id": client, "code_verifier": verifier])
+        state = .idle
         return true
     }
 
@@ -184,26 +188,48 @@ actor Auth {
     /// `stale`: one refresh at a time, since each refresh token works once.
     func token(stale: String? = nil) async throws -> String {
         if let access, access != stale, until > Date().addingTimeInterval(60) { return access }
-        if let refreshing { return try await refreshing.value }
+        switch state {
+        case .signedOut: throw SignedOut(message: String(localized: "Sign in again."))
+        case .refreshing(let task): return try await task.value
+        case .idle: break
+        }
         let task = Task<String, Error> {
             guard let refresh = Keychain.read() else { throw SignedOut(message: String(localized: "Sign in again.")) }
             let meta = try await meta()
-            do {
-                try await grant(meta, ["grant_type": "refresh_token", "refresh_token": refresh, "client_id": Self.defaults.string(forKey: "client") ?? ""])
-            } catch let error as SignedOut {
-                Keychain.write(nil)
-                access = nil
-                throw error
+            let fields = ["grant_type": "refresh_token", "refresh_token": refresh, "client_id": Self.defaults.string(forKey: "client") ?? ""]
+            // An answer lost on the way back leaves the token this one sent, which the auth service still takes for a
+            // moment: so it's sent again at once, and only a refusal signs this device out.
+            var attempt = 0
+            while true {
+                do {
+                    try await grant(meta, fields)
+                    return access ?? ""
+                } catch let error as SignedOut {
+                    Keychain.write(nil)
+                    access = nil
+                    state = .signedOut
+                    throw error
+                } catch is URLError where attempt < 3 {
+                    try await Task.sleep(for: .milliseconds(500 << attempt))
+                    attempt += 1
+                    // Signing out meanwhile: what it revokes is this token, not one a later answer gives.
+                    if case .signedOut = state { throw SignedOut(message: String(localized: "Sign in again.")) }
+                }
             }
-            return access ?? ""
         }
-        refreshing = task
-        defer { refreshing = nil }
+        state = .refreshing(task)
+        defer { if case .refreshing = state { state = .idle } }
         return try await task.value
     }
 
-    /// Signs out: the refresh token is revoked, so it opens nothing again, and forgotten here.
+    /// Signs out: the refresh token is revoked, so it opens nothing again, and forgotten here. A refresh on its way
+    /// finishes first, so what it kept is what's revoked and forgotten, not kept again after.
     func signOut() async {
+        if case .refreshing(let task) = state {
+            state = .signedOut
+            _ = try? await task.value
+        }
+        state = .signedOut
         let refresh = Keychain.read()
         Keychain.write(nil)
         access = nil
