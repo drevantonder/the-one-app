@@ -52,7 +52,7 @@
   // or refuses it by name. Anything a person touches natively is one of these: menus,
   // alerts, sheets, files, scanning, links.
   const messages = ["call", "open", "close", "title", "menu", "alert", "save", "preview", "copy", "link", "scan", "vault", "request",
-    "icons", "icon", "haptic", "api", "signOut", "appearance", "device", "cache"];
+    "icons", "icon", "haptic", "api", "signOut", "appearance", "device", "cache", "kept"];
 
   async function host(message) {
     if (!messages.includes(message.type)) throw new Error(`No such message: ${message.type}`);
@@ -105,13 +105,55 @@
 
   const colors = ["#5e5ce6", "#ff9f0a", "#30b0c7", "#ff375f", "#34c759", "#af52de", "#0a84ff", "#a2845e"];
 
+  // What a call answered last time: the client keeps the last answer of each call that only reads (`reads: true`),
+  // sealed on its device for its person, and gives it (`kept`, with when it was answered) to a screen that asks that
+  // call again. The first time a screen asks a call, it's answered at once with what was kept, while the call goes out
+  // as ever; if its answer differs, the screen is told its app changed, as by a node, and asking again gives it.
+  // Asked again after that, a call goes out, so nothing a screen does after a write is answered from before it. A host
+  // that keeps nothing (an older one, a chat's) refuses `kept`, and every call goes out.
+  const first = new Set();
+  const landed = new Map();
+  // Calls answered from what was kept a while ago, by their key, while their answer is still out: what the note says.
+  const old = new Map();
+  async function call(op, input) {
+    const m = { type: "call", app: ctx.app, op, input };
+    const key = JSON.stringify([op, input]);
+    const got = landed.get(key);
+    landed.clear();
+    if (got && Date.now() - got.at < 10_000) return got.answer;
+    const sent = () => host(m).then((answer) => (old.delete(key) && note(), answer));
+    if (first.has(key)) return sent();
+    first.add(key);
+    const kept = await host({ type: "kept", app: ctx.app, op, input }).catch(() => null);
+    if (!kept || !("answer" in kept)) return sent();
+    const fresh = sent();
+    if (Date.now() - kept.at > 60_000) {
+      old.set(key, kept.at);
+      setTimeout(note, 1500);
+    }
+    fresh.then((answer) => {
+      if (JSON.stringify(answer) === JSON.stringify(kept.answer)) return;
+      landed.set(key, { answer, at: Date.now() });
+      handlers.changed.forEach((f) => f({ type: "changed", apps: [ctx.app] }));
+    }, () => {});
+    return kept.answer;
+  }
+  // How old what shows is, while its fresh answer is late: one grey line at the top, gone once it's in.
+  function note() {
+    let el = document.getElementById("one-kept");
+    if (!old.size) return el?.remove();
+    if (!document.body) return;
+    if (!el) document.body.prepend((el = Object.assign(document.createElement("div"), { id: "one-kept", className: "kept-note" })));
+    el.textContent = `As of ${one.ago(Math.min(...old.values()), { long: true })}`;
+  }
+
   window.one = {
     app: ctx.app, screen: ctx.screen, params: ctx.params, me: ctx.me,
     // The product: its `name` and `cli`, and `made_here`, what an App Store calls the apps made in the install.
     config: ctx.config,
     // The page the shell opened this from ("user", "group:<id>", "global"), or null: a hint, which the app may follow.
     scope: ctx.scope ?? null,
-    call: (op, input = {}) => host({ type: "call", app: ctx.app, op, input }),
+    call: (op, input = {}) => call(op, input),
     // Opens one of this app's screens; or with `app`, another app's (a notification's link, say). `scope` is the page
     // it's opened for (else this screen's). With `sheet`, it slides up over this one, and this resolves once it's gone,
     // to what it gave `close`; otherwise it's pushed on top, with Back.
@@ -173,7 +215,7 @@
     // The shell calls this with node events: an app screen's "changed" is its app's data changing; a Settings
     // screen's, any event, since what it shows is the install's.
     __event(e) {
-      if (!ctx.app || (e.type === "changed" && (e.apps || []).includes(ctx.app))) handlers.changed.forEach((f) => f(e));
+      if (!ctx.app || (e.type === "changed" && (e.apps || []).includes(ctx.app))) landed.clear(), handlers.changed.forEach((f) => f(e));
     },
     // For Settings screens only (no app's: a client answers these for its own Settings screens and refuses an app
     // screen). `api` asks the node's /v1 API as the person looking ("POST", "/v1/group", { name }) and gives its JSON,

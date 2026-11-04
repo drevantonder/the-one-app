@@ -6,6 +6,7 @@
 // The bridge and kit (src/screen/), loaded after this, give `one`; this page answers it for its own use (`__one.host`).
 // This browser is a device of its person (device.js): it signs what changes who can do what, and hands each call the
 // keys it needs.
+import * as answers from "./answers.js";
 import { del, put } from "./kept.js";
 import { answer, browserKeys, browserName, codeOf, Device, joinAsk, passkeyKeysOf } from "./device.js";
 import { members } from "./members.js";
@@ -23,14 +24,15 @@ window.__one = {};
   // MARK: Signing in
 
   const KEPT = "one.signin";
-  // What the client's own screens keep between visits (one.cache), the window as it was last (LAST), and the screens
-  // it showed (KEPT_SCREENS, `kept`): all forgotten with the sign-in.
+  // What the client's own screens keep between visits (one.cache), the window as it was last (LAST), the screens it
+  // showed (KEPT_SCREENS, `kept`) and what their calls answered (answers.js): all forgotten with the sign-in.
   const SCREENS = "one.screens.";
   const LAST = "one.last.window";
   const KEPT_SCREENS = "one.screens";
   const forgetScreens = () => {
     Object.keys(localStorage).filter((k) => k.startsWith(SCREENS) || k === LAST).forEach((k) => localStorage.removeItem(k));
     window.caches?.delete(KEPT_SCREENS).catch(() => {});
+    return answers.forget();
   };
   const CLIENT = "one.client";
 
@@ -136,7 +138,7 @@ window.__one = {};
     async signOut(why) {
       const kept = auth.kept();
       localStorage.removeItem(KEPT);
-      forgetScreens();
+      await forgetScreens();
       try {
         const meta = await auth.meta();
         const client = JSON.parse(localStorage.getItem(CLIENT) || "null")?.id;
@@ -308,6 +310,8 @@ window.__one = {};
   const whiteLabel = { name: document.querySelector('meta[name="application-name"]')?.content || "", cli: document.querySelector('meta[name="one-cli"]')?.content || "" };
   const config = () => store.state?.config || whiteLabel;
   const app = (name) => store.apps.find((a) => a.name === name);
+  /// Whether an app's operation only reads, as its app says: only what such a call answered is kept (answers.js).
+  const reads = (name, op) => !!app(name)?.ops?.some((o) => o.name === op && o.reads === true);
   const label = (a) => a?.title || a?.name || "";
   const hasScreens = (a) => !!a?.screens?.some((s) => s.name === "main");
   const isService = (a) => !hasScreens(a) && !(a.widgets || []).length;
@@ -811,6 +815,12 @@ window.__one = {};
     if (e.data?.oneStill !== undefined) return void (f.sheet || kept.put("still", f.key, e.data.oneStill));
     const { one: m, id } = e.data || {};
     if (!m || typeof m !== "object") return;
+    // What a call answered last time, if it only reads: from this browser, at once, while the window still starts.
+    if (m.type === "kept") {
+      const op = String(m.op || "");
+      const got = !mine && reads(r.app, op) ? await answers.kept(auth.user(), r.app, op, m.input ?? {}).catch(() => null) : null;
+      return void f.frame.contentWindow?.postMessage({ oneReply: id, ok: got }, "*");
+    }
     // What it's waiting on: its still shows until it's been answered.
     f.busy++;
     watch(f);
@@ -821,9 +831,11 @@ window.__one = {};
     try {
       reply(await oneHost.answer(m, {
         frame: f.frame,
-        call: (op, input) => {
+        call: async (op, input) => {
           if (mine) throw new Error("Settings has no app to call.");
-          return call(r.app, op, input);
+          const out = await call(r.app, op, input);
+          if (reads(r.app, op)) answers.keep(auth.user(), r.app, op, input, out).catch(() => {});
+          return out;
         },
         open: (m) => {
           const params = JSON.stringify(m.params || {});

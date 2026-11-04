@@ -50,6 +50,8 @@ a { color: var(--tint); text-decoration: none; }
 h2.section { font-size: 13px; font-weight: 400; text-transform: none; color: var(--muted); margin: 24px 16px 6px; }
 /* At most one short line under a list, where it truly helps. */
 .footer { font-size: 13px; color: var(--muted); margin: 6px 16px 0; }
+/* How old what shows is, while what it was kept from is late (bridge.js): one grey line above it. */
+.kept-note { font-size: 13px; color: var(--muted); text-align: center; margin: 0 16px 8px; }
 /* A screen's own large title, as iOS draws one at the top of a page (one.largeTitle). */
 .large-title { font-size: 34px; font-weight: 700; letter-spacing: 0.01em; margin: 6px 4px 10px; line-height: 1.15; }
 

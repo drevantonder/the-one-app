@@ -137,12 +137,13 @@ window.oneHost = (() => {
   /// The bridge's messages (src/screen/bridge.js) from a screen, answered as every web page that holds screens
   /// answers them, the web client's and a chat's alike → what it replies; what it throws, it refuses with. `h` is what
   /// each page does its own way: `frame`, the screen's; `call(op, input)`, as its app; `open(m)`, `close(value)` and
-  /// `title(text, m)`; `vault(need)` → whether it's set; `link(url)`; `icons(names)`; `blob(id)`, a file the node
+  /// `title(text, m)`; `kept(op, input)`, what that call last answered if this page keeps it (`{ answer, at }`, or null); `vault(need)` → whether it's set; `link(url)`; `icons(names)`; `blob(id)`, a file the node
   /// keeps; `elsewhere()`, on a page that can't give files (a chat's), the screen opened where it can; and `own`, what
   /// only the client's own screens may do, by message, on a page that has them.
   async function answer(m, h) {
     switch (m.type) {
       case "call": return h.call(String(m.op || ""), m.input ?? {});
+      case "kept": return h.kept ? h.kept(String(m.op || ""), m.input ?? {}) : null;
       case "open": return h.open(m);
       case "close": return h.close(m.value);
       case "title": return h.title(String(m.text ?? ""), m);
