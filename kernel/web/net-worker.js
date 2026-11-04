@@ -6,13 +6,17 @@
 // can't be read out of WebCrypto, and iroh signs with raw bytes. The relay and nodes take the endpoint as the device.
 //
 // A tab says `start` with its person; then each `fetch` is answered with its status and headers, its body's parts as
-// they come, and `done` (or `error`); `cancel` stops one. `nodes` gives the order to ask nodes in, which is remembered;
-// `reconnect` starts a fresh endpoint, after the network came back.
+// they come, and `done` (or `error`); `cancel` stops one. A fetch with `keys` is sent to one node, once the client picks
+// it, with the keys the tab seals to that node alone: the worker asks for them (`keysFor`, the node's key) and the tab
+// answers `keys`. `nodes` gives the order to ask nodes in, which is remembered; `reconnect` starts a fresh endpoint,
+// after the network came back.
 
 /// How long before a session's certificate ends it's renewed.
 const RENEW = 3_600_000;
 /// How long a relay socket opened for iroh waits for it to ask, before it's closed.
 const UNTAKEN = 10_000;
+/// How long a tab has to seal a request's keys to the node it's going to, before it's sent without them.
+const SEALING = 10_000;
 
 /// The relay's socket, opened by `early` before iroh asks for one (while its WebAssembly loads, or as a fresh endpoint
 /// is made), for its next ask: iroh's WebSocket is this one, and what came before it listened is kept for it.
@@ -128,16 +132,18 @@ export function server(version) {
       });
       return answer;
     };
-    // The computes, a new client's first nodes, which say whether this browser is let in at all: waited for only the
-    // first time; after that, the nodes it asked before are asked at once, and the computes only checked beside them.
+    // The computes, a new client's first nodes, which say whether this browser is let in at all, and which of them are
+    // on the relay's network now (`online`, raced first): waited for only the first time; after that, the nodes it
+    // asked before are asked at once, and the computes only checked beside them.
     const computes = ask(certificate).then(async (asked) => {
       // Not let in: this browser isn't one of its person's devices (yet, or any more).
       if (asked.status === 403) return null;
       if (!asked.ok) throw new Error("Your One App's network isn't answering.");
-      return theirs(user, (await asked.json()).computes);
+      const said = await asked.json();
+      return { all: await theirs(user, said.computes), online: said.online };
     });
     const order = (computes) => [...known.filter((k) => computes.includes(k)), ...computes.filter((k) => !known.includes(k))];
-    const first = known.length ? known : await computes.catch((err) => (opened?.face.close(), Promise.reject(err)));
+    const first = known.length ? known : (await computes.catch((err) => (opened?.face.close(), Promise.reject(err))))?.all;
     if (!known.length) step("nodes");
     if (!first) {
       opened?.face.close();
@@ -149,25 +155,30 @@ export function server(version) {
     step("code");
     const client = await Client.start(secret, certificate, location.origin, known.length ? first : order(first));
     step("endpoint");
-    if (known.length) {
-      computes.then(
-        (all) => {
-          if (all) return client.nodes(order(all));
-          // Taken out: it forgets its nodes, and the next start finds out it isn't a device.
-          put(`nodes:${user}`, []);
-          client.close();
-          session = null;
-        },
-        () => {},
-      );
-    }
+    computes.then(
+      (c) => {
+        if (c) {
+          if (known.length) client.nodes(order(c.all));
+          if (Array.isArray(c.online)) client.online(c.online);
+          return;
+        }
+        // Taken out: it forgets its nodes, and the next start finds out it isn't a device.
+        put(`nodes:${user}`, []);
+        client.close();
+        session = null;
+      },
+      () => {},
+    );
     secret.fill(0);
     clearTimeout(renewal);
     if (!as) renewal = setTimeout(() => renew(user, client, endpoint, socket), until - RENEW - Date.now());
     const made = { client, endpoint, socket, certificate, took };
     // Whether the relay still lets it in: it says who's on its network, and a device taken out isn't.
     made.still = async () => {
-      return (await ask(made.certificate)).status !== 403;
+      const asked = await ask(made.certificate);
+      const online = asked.ok && (await asked.json().catch(() => null))?.online;
+      if (Array.isArray(online)) client.online(online);
+      return asked.status !== 403;
     };
     return made;
   }
@@ -201,6 +212,16 @@ export function server(version) {
   /// A tab's connection: → what to do with each of its messages; `post(message, transfer)` answers it.
   function connect(post) {
     const reading = new Map();
+    /// Each request's ask for its keys, waiting on the tab.
+    const sealing = new Map();
+    /// The `x-one-keys` the tab seals to `node` for request `id`: null if it has none, or doesn't say in time.
+    const keysFor = (id, node) =>
+      new Promise((resolve) => {
+        const done = (keys) => sealing.get(id) === done && (sealing.delete(id), clearTimeout(late), resolve(keys || null));
+        const late = setTimeout(() => done(null), SEALING);
+        sealing.set(id, done);
+        post({ id, keysFor: node });
+      });
     return async (m) => {
       const { id } = m;
       try {
@@ -229,10 +250,12 @@ export function server(version) {
           }
           case "cancel":
             return reading.get(id)?.cancel();
+          case "keys":
+            return sealing.get(id)?.(m.keys);
           case "fetch": {
             const s = await session?.ready;
             if (!s) throw new Error("This browser isn't one of your devices yet.");
-            const r = await s.client.fetch(m.method, m.path, m.headers, new Uint8Array(m.body || []));
+            const r = await s.client.fetch(m.method, m.path, m.headers, new Uint8Array(m.body || []), m.keys ? (node) => keysFor(id, node) : undefined);
             reading.set(id, r);
             post({ id, node: r.node, status: r.status, headers: r.headers, trace: r.trace });
             try {

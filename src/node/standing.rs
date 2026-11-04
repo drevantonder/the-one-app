@@ -191,7 +191,7 @@ impl Node {
         match self.run_or_need(&req, &me).await {
             Ok(Reply::Ok(v)) => Ok(v),
             Ok(Reply::Error(e) | Reply::Elsewhere(e)) => Err(anyhow!(e)),
-            Err(need) => Err(need.into()),
+            Ok(Reply::Needs(need)) | Err(need) => Err(need.into()),
         }
     }
 

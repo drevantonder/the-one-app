@@ -81,7 +81,7 @@ export class Device {
     this.appKeys = new Map();
     /// Databases' keys, by `scope app database n`: bytes, as a node is handed them.
     this.dbKeys = new Map();
-    /// What each kind of request needed the last time, and the node that said so (`one.needs`, which names no key).
+    /// What each kind of request needed the last time (`one.needs`, which names no key).
     this.needs = JSON.parse(localStorage.getItem("one.needs") || "{}");
     /// The grants this browser is renewing now.
     this.renewing = new Set();
@@ -307,24 +307,26 @@ export class Device {
     return at === "/v1/call" ? `call ${body?.app || ""}` : at.replace(/^\/v1\/screens\/([^/]+)\/.*/, "/v1/screens/$1");
   }
 
-  /// The `x-one-keys` a request goes with: what its kind of request needed the last time, sealed to the node that said
-  /// so (to its key's twin, as every node's seal key is), for this browser's key, until `until`. A node that didn't say
-  /// so can't open it.
+  /// The `x-one-keys` a request goes with, to `node`, the one it's sent to: what its kind of request needed the last
+  /// time, of the scopes the install's entries say that node runs, sealed to the seal key they list for it, for this
+  /// browser's key, until `until`. No other node can open it; null if it runs none of them.
   /// A request sent while another of its kind learns what it needs waits for that first, and goes with it.
-  async handoff(route, until, note = noting) {
+  async handoff(route, until, node, note = noting) {
     await this.learning.get(route)?.done.catch(() => {});
-    const last = this.needs[route];
-    if (!last?.node || !last.seal || !last.need?.length || !runsAll(this.known, last.node, last.need.map((n) => n.scope))) return null;
-    await this.fetchKeys(last.need, note);
-    const keys = await Promise.all(last.need.map(async (n) => ({ ...n, key: b64u.encode(await this.databaseKey(n, note)) })));
-    return sealHandoff(hex.decode(last.seal), { for: this.me.key, until, keys });
+    const need = (this.needs[route]?.need || []).filter((n) => runsAll(this.known, node, [n.scope]));
+    const seal = this.known?.devices.find((d) => d.key === node)?.seal;
+    if (!need.length || !seal) return null;
+    await this.fetchKeys(need, note);
+    const keys = await Promise.all(need.map(async (n) => ({ ...n, key: b64u.encode(await this.databaseKey(n, note)) })));
+    return sealHandoff(hex.decode(seal), { for: this.me.key, until, keys });
   }
 
   /// A node's 428, believed only from `node`, the one that answered it as its connection proved: it must name itself
   /// and the seal key the install's entries list for it, run every scope it needs keys of, as they say, and need only
   /// databases this kind of request uses (`mayHand`). Of each, only epochs from the one its newest copy is under are
   /// handed (`oldestNeeded`): older ones open only its history. What it needed is all this kind of request hands next
-  /// time, and only to it. Throws if it asks for more, or this browser can't open it. Requests of a kind that get the
+  /// time, to whichever node it's sent to, of the scopes that one runs. Throws if it asks for more, or this browser can't
+  /// open it. Requests of a kind that get the
   /// same 428 at once learn from it once, and one sent before another learned goes again with what that learned. `note(step, fetch)` times each thing it asks for (developer mode's traces).
   learn(route, answer, node, note = noting, sentWith = this.needs[route]) {
     // Another of its kind learned since this one was sent (`sentWith`, what it went with): it goes again with that.
@@ -354,7 +356,7 @@ export class Device {
     const handed = hints ? need.filter((n) => n.epoch >= oldestNeeded(hints[prefixOf(n)] ?? null, k.epochs[n.scope]?.n || 0)) : need;
     if (!handed.length) throw new Error("A device asked for older keys than it needs, so none were given.");
     await Promise.all(handed.map((n) => this.databaseKey(n, note)));
-    this.needs[route] = { node, seal, need: handed };
+    this.needs[route] = { need: handed };
     try { localStorage.setItem("one.needs", JSON.stringify(this.needs)); } catch {}
   }
 

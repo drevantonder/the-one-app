@@ -16,6 +16,14 @@ const tab = crypto.getRandomValues(new Uint32Array(2)).join("-");
 function received(m) {
   const w = waiting.get(m.id);
   if (!w) return;
+  // The node the client picked for it: its keys, sealed to that node alone.
+  if (m.keysFor !== undefined) {
+    Promise.resolve()
+      .then(() => w.keys?.(m.keysFor))
+      .catch(() => null)
+      .then((keys) => send({ op: "keys", id: m.id, keys: keys || null }));
+    return;
+  }
   if (m.error !== undefined) {
     waiting.delete(m.id);
     const err = Object.assign(new Error(m.error), { trace: m.trace });
@@ -147,15 +155,17 @@ export const net = {
     return starting?.took || Promise.resolve(null);
   },
 
-  /// A request to the node: method, path with its query, headers (`{ name: value }`), body bytes or none, and an
-  /// AbortSignal. → a Response, its body streamed as it comes, and `node`, the key of the node that answered.
-  fetch(method, path, headers = {}, body, signal) {
+  /// A request to the node: method, path with its query, headers (`{ name: value }`), body bytes or none, an
+  /// AbortSignal, and `keys`, which gives the `x-one-keys` for the one node it's sent to (its key, hex → the header's
+  /// value or null, or a promise of it), asked once the client picks it. → a Response, its body streamed as it comes,
+  /// and `node`, the key of the node that answered.
+  fetch(method, path, headers = {}, body, signal, keys) {
     const bytes = body === undefined ? undefined : body instanceof Uint8Array ? body : new TextEncoder().encode(body);
     const buffer = bytes && bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
     const id = `${tab}:${++n}`;
     return new Promise((resolve, reject) => {
       if (signal?.aborted) return reject(signal.reason);
-      waiting.set(id, { resolve, reject });
+      waiting.set(id, { resolve, reject, keys });
       signal?.addEventListener("abort", () => {
         const w = waiting.get(id);
         if (!w) return;
@@ -164,7 +174,7 @@ export const net = {
         if (w.body) w.body.error(signal.reason);
         else reject(signal.reason);
       });
-      send({ op: "fetch", id, method, path, headers: Object.entries(headers).flat(), body: buffer }, buffer ? [buffer] : []);
+      send({ op: "fetch", id, method, path, headers: Object.entries(headers).flat(), body: buffer, keys: !!keys }, buffer ? [buffer] : []);
     });
   },
 

@@ -40,6 +40,7 @@ mod sessions;
 pub use databases::NotGiven;
 pub use devices::{DeviceRequest, Invited};
 pub use net::{alpn, relay, service_alpn};
+pub use calls::Elsewhere;
 pub use sessions::{Needs, client_token, passed_token};
 mod sidecars;
 mod standing;
@@ -267,6 +268,9 @@ enum Reply {
     Error(String),
     /// It can't run here; try another device.
     Elsewhere(String),
+    /// It lacks keys its caller hands: said as the API says it (`{ error, need, to, seal }`), so the device that passed
+    /// it on can ask for them in turn (428). An older device reads only its `error`.
+    Needs(Needs),
 }
 
 impl Reply {
@@ -275,12 +279,19 @@ impl Reply {
             Reply::Ok(v) => json!({ "ok": v }),
             Reply::Error(e) => json!({ "error": e }),
             Reply::Elsewhere(w) => json!({ "elsewhere": w }),
+            Reply::Needs(n) => json!({ "error": n.to_string(), "need": n.need, "to": n.to, "seal": n.seal }),
         }
     }
 
     fn from_json(v: Value) -> Reply {
         if let Some(w) = v.get("elsewhere") {
             return Reply::Elsewhere(w.as_str().unwrap_or("").into());
+        }
+        if let Ok(need) = serde_json::from_value::<Vec<crate::keys::Need>>(v["need"].clone())
+            && !need.is_empty()
+        {
+            let said = |k: &str| v[k].as_str().unwrap_or("").to_string();
+            return Reply::Needs(Needs { need, to: said("to"), seal: said("seal") });
         }
         match v.get("error") {
             Some(e) => Reply::Error(e.as_str().unwrap_or("failed").into()),

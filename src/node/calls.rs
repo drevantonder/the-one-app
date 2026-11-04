@@ -5,6 +5,22 @@ use super::*;
 /// How long an app's prompt hook may take before it's left out: the agent's harness waits for them all.
 const PROMPT_LIMIT: Duration = Duration::from_secs(2);
 
+/// A call a client device picked this node for that this node can't run: the API answers 421 with the nodes that can,
+/// in the order to ask them (`{ error, elsewhere }`), which the client asks itself, handing each its own keys.
+#[derive(Debug)]
+pub struct Elsewhere {
+    pub why: String,
+    pub nodes: Vec<String>,
+}
+
+impl std::fmt::Display for Elsewhere {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.why)
+    }
+}
+
+impl std::error::Error for Elsewhere {}
+
 impl Node {
     /// Runs an operation for this device's local user: here, or on the nearest device that can.
     pub async fn call(&self, req: CallRequest) -> Result<Value> {
@@ -25,18 +41,53 @@ impl Node {
         Ok(req)
     }
 
-    /// Tries the devices that might run a call, nearest first, one at a time, the next only if one can't be reached
-    /// or says to go elsewhere.
-    pub(super) async fn route(&self, req: CallRequest, me: Caller) -> Result<Value> {
-        let mut req = self.resolve(req);
-        // A client's own id, so a call it sends again runs once, names its lease in the bucket: only a short word.
-        let id = req.id.get_or_insert_with(new_id);
-        ensure!(id.len() <= 64 && !id.is_empty() && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_'), "a call's id is up to 64 letters, digits, - and _");
-        if req.device.as_deref() == Some("all") {
-            return self.everywhere(req, me).await;
+    /// Runs a call for a client device that picks the node it asks itself (`x-one-elsewhere`), as `me`: here if this
+    /// node runs every scope it reaches, whatever the order things run in would pick, as the client raced its way here.
+    /// One it can't run (it doesn't run them all, or isn't ready for that app) is `Elsewhere`, naming those that can,
+    /// which the client asks itself with keys for each, rather than this node passing it on. A sidecar's call, which
+    /// runs where its service is, and one for a named device, go where `route` sends them.
+    pub async fn call_picked(&self, req: CallRequest, me: Caller) -> Result<Value> {
+        let me = Caller { agent: req.agent.clone().or(me.agent), ..me };
+        let req = self.identified(req)?;
+        if req.sidecar.is_some() || req.device.is_some() || req.app == members::APP {
+            return self.route(req, me).await;
         }
-        // A call that names no scopes reaches its caller's own too, when its app is on everyone's or a group's page: if
-        // no device runs their own (they haven't picked one) but one runs the rest, it runs on the rest, with no ctx.user.
+        let req = self.reaching(req, &me)?;
+        let devices = self.candidates(&req, &me)?;
+        ensure!(!devices.is_empty(), "None of your devices can do this: no device runs {} for you", req.app);
+        let others: Vec<String> = devices.iter().filter(|k| **k != self.0.id).map(hex).collect();
+        let started = Instant::now();
+        let name = self.device_name();
+        let tried = |result: &str, why: Option<&str>| trace::note(json!({ "step": "device", "device": name, "app": req.app, "op": req.op, "result": result, "here": true, "why": why }), started.elapsed());
+        if !devices.contains(&self.0.id) {
+            let why = format!("{name} doesn't run everything {} reaches for you", req.app);
+            tried("elsewhere", Some(&why));
+            return Err(Elsewhere { why, nodes: others }.into());
+        }
+        match self.run_or_need(&req, &me).await {
+            Ok(Reply::Ok(v)) => {
+                tried("ran", None);
+                Ok(v)
+            }
+            Ok(Reply::Error(e)) => {
+                tried("failed", None);
+                bail!("{e}")
+            }
+            Ok(Reply::Elsewhere(why)) if !others.is_empty() => {
+                tried("elsewhere", Some(&why));
+                Err(Elsewhere { why, nodes: others }.into())
+            }
+            Ok(Reply::Elsewhere(why)) => bail!("None of your devices can do this now. Try again soon. ({name}: {why})"),
+            Ok(Reply::Needs(need)) | Err(need) => {
+                tried("needs keys", None);
+                Err(need.into())
+            }
+        }
+    }
+
+    /// A call that names no scopes reaches its caller's own too, when its app is on everyone's or a group's page: if no
+    /// device runs their own (they haven't picked one) but one runs the rest, it runs on the rest, with no ctx.user.
+    fn reaching(&self, mut req: CallRequest, me: &Caller) -> Result<CallRequest> {
         if req.scopes.is_none() && req.sidecar.is_none() {
             req.scopes = self.with(|i| {
                 let all = call_scopes(i, &req, &me.user)?;
@@ -47,6 +98,26 @@ impl Node {
                 Ok(without.then(|| rest.iter().map(ToString::to_string).collect()))
             })?;
         }
+        Ok(req)
+    }
+
+    /// A call as it runs: its app's or sidecar's (`resolve`), with its id, the client's own (so a call it sends again
+    /// runs once, as it names its lease in the bucket), or a new one.
+    fn identified(&self, req: CallRequest) -> Result<CallRequest> {
+        let mut req = self.resolve(req);
+        let id = req.id.get_or_insert_with(new_id);
+        ensure!(id.len() <= 64 && !id.is_empty() && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_'), "a call's id is up to 64 letters, digits, - and _");
+        Ok(req)
+    }
+
+    /// Tries the devices that might run a call, nearest first, one at a time, the next only if one can't be reached
+    /// or says to go elsewhere.
+    pub(super) async fn route(&self, req: CallRequest, me: Caller) -> Result<Value> {
+        let req = self.identified(req)?;
+        if req.device.as_deref() == Some("all") {
+            return self.everywhere(req, me).await;
+        }
+        let req = self.reaching(req, &me)?;
         let mut why = Vec::new();
         for device in self.candidates(&req, &me)? {
             let started = Instant::now();
@@ -85,6 +156,12 @@ impl Node {
                     tried("elsewhere", json!({ "here": here, "why": w, "trace": theirs }));
                     why.push(format!("{name}: {w}"))
                 }
+                // The keys it lacks are its caller's to hand this device, which passes on to it those of the scopes
+                // it runs: asked for as this device's own need (428), as if it ran it.
+                Ok((Reply::Needs(need), theirs)) => {
+                    tried("needs keys", json!({ "here": here, "trace": theirs }));
+                    return Err(self.need(need.need).into());
+                }
                 Err(err) => {
                     tried(if err.is::<net::NotThere>() { "unreachable" } else if err.to_string() == "timed out" { "no answer" } else { "failed" }, json!({}));
                     let _ = self.with(|i| Ok(i.nearest.insert(device, Duration::MAX)));
@@ -112,6 +189,7 @@ impl Node {
             let answer = match reply {
                 Ok(Reply::Ok(v)) => v,
                 Ok(Reply::Error(e) | Reply::Elsewhere(e)) => json!({ "error": e }),
+                Ok(Reply::Needs(n)) => json!({ "error": n.to_string() }),
                 Err(err) => json!({ "error": format!("{err:#}") }),
             };
             out.insert(self.name_of(&device), answer);
@@ -226,9 +304,9 @@ impl Node {
         Ok((Reply::from_json(reply), theirs))
     }
 
-    /// Runs a call here, for `me`, or says why it can't.
+    /// Runs a call here, for `me`, or says why it can't, or what keys it lacks.
     pub(super) async fn run(&self, req: &CallRequest, me: &Caller) -> Reply {
-        self.run_or_need(req, me).await.unwrap_or_else(|need| Reply::Error(need.to_string()))
+        self.run_or_need(req, me).await.unwrap_or_else(Reply::Needs)
     }
 
     /// `run`, but a call that lacks keys its caller can hand fails with what it needs.

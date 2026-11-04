@@ -199,16 +199,19 @@ window.__one = {};
       const headers = { "x-one-user": user };
       if (trace) headers["x-one-trace"] = "1";
       if (body !== undefined) headers["content-type"] = "application/json";
-      // Keys go only to a node this browser reaches itself, which its connection proves.
-      const handing = performance.now(), opened = [];
-      const keys = device && (await device.handoff(route, auth.kept()?.until || Date.now() + 60_000, trace ? noting(handing, opened) : undefined));
+      // Keys go only to the one node the request is sent to, which this browser reaches itself, as its connection
+      // proves: sealed to it once the client picks it. One sent while another of its kind learns what it needs goes
+      // with what that learned.
+      await device?.learning.get(route)?.done.catch(() => {});
       const sentWith = device?.needs[route];
-      if (keys) headers["x-one-keys"] = keys;
+      const handing = performance.now(), opened = [];
+      const until = auth.kept()?.until || Date.now() + 60_000;
+      const keys = sentWith?.need?.length ? (node) => device.handoff(route, until, node, trace ? noting(handing, opened) : undefined) : undefined;
       const sent = body === undefined ? undefined : JSON.stringify(body);
       let r;
       const watch = watching();
       try {
-        r = await Promise.race([net.fetch(method, url.pathname + url.search, headers, sent, signal), watch.out]);
+        r = await Promise.race([net.fetch(method, url.pathname + url.search, headers, sent, signal, keys), watch.out]);
         trace?.fetches.push(developer.parse(r.trace));
       } catch (err) {
         trace?.fetches.push(developer.parse(err.trace));

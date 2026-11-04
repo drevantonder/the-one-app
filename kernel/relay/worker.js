@@ -26,7 +26,8 @@
 //
 // `POST /relay/computes` answers a request signed by a key on the list, or by a session's key with its certificate
 // (`one/relay`, `{ computes: true, certificate? }`, each `(by, at)` taken once, as a tell is), with the compute
-// endpoints' keys, the serverless node's among them, in no order: a new client's first nodes to ask. 403 is only for a key that isn't let in; a request
+// endpoints' keys, the serverless node's among them, in no order: a new client's first nodes to ask; and `online`, those
+// of them connected here now, which a client races first. 403 is only for a key that isn't let in; a request
 // that's wrong, or signed by a clock that's off, is 400, so a client keeps the nodes it knows.
 //
 // What a device tells it is `POST /relay/tell`, its body a request signed by a key on the list (`signedRequest` in
@@ -165,6 +166,8 @@ export default class extends WorkerEntrypoint {
       return refuse(400, String(e.message || e));
     }
     const said = await this.relay()[what](asked.by, asked);
+    // Which computes are connected now, which a client races first (an older one reads only `computes`).
+    if (what === "computes" && Array.isArray(said)) return Response.json({ computes: said, online: await this.relay().connected(said) });
     if (said && typeof said === "object") return Response.json({ [what]: said });
     return said === null ? refuse(403, "the relay takes only your One App's devices") : refuse(400, said);
   }

@@ -535,6 +535,9 @@ struct Error(anyhow::Error);
 
 impl IntoResponse for Error {
     fn into_response(self) -> Response {
+        if let Some(e) = self.0.downcast_ref::<crate::node::Elsewhere>() {
+            return (StatusCode::MISDIRECTED_REQUEST, Json(json!({ "error": e.why, "elsewhere": e.nodes }))).into_response();
+        }
         let status = match self.0.downcast_ref::<crate::node::Needs>() {
             Some(_) => StatusCode::PRECONDITION_REQUIRED,
             None => StatusCode::BAD_REQUEST,
@@ -744,18 +747,25 @@ async fn schedule(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> 
     done()
 }
 
-async fn call(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
-    Ok(Json(call_for(&node, me, body).await?))
+/// What a client that picks the node it asks itself says with each request (client/src/lib.rs): a call this node can't
+/// run is answered 421 with the nodes that can (`node::Elsewhere`), not passed on.
+const ELSEWHERE_HEADER: &str = "x-one-elsewhere";
+
+async fn call(State(node): State<Node>, me: Me, headers: axum::http::HeaderMap, Json(body): Json<Value>) -> Reply {
+    Ok(Json(call_for(&node, me, body, headers.contains_key(ELSEWHERE_HEADER)).await?))
 }
 
-/// A call as `/v1/call` takes it, for `me`: → `{ ok }`.
-async fn call_for(node: &Node, me: Me, body: Value) -> anyhow::Result<Value> {
+/// A call as `/v1/call` takes it, for `me`: → `{ ok }`. A client that `picks` its node has it run here, or told where.
+async fn call_for(node: &Node, me: Me, body: Value, picks: bool) -> anyhow::Result<Value> {
     only(&body, &["id", "app", "sidecar", "op", "input", "scopes", "device", "agent", "depth", "from", "client"]).map_err(|e| e.0)?;
     let mut req: CallRequest = serde_json::from_value(body)?;
     // Only the node says an app made a call, and how deep it is.
     (req.from, req.depth) = (None, 0);
     if me.sign_in.is_some() {
         req = node.for_sign_in(req)?;
+    }
+    if picks {
+        return Ok(json!({ "ok": node.call_picked(req, me.caller).await? }));
     }
     Ok(json!({ "ok": node.call_as(req, me.caller).await? }))
 }
@@ -777,7 +787,7 @@ pub(crate) async fn call_from_serverless(node: &Node, remote: crate::entry::Key,
         let token = node.take_passed(&remote, &user, &call, handed, false)?;
         let client = me["client"].as_str().unwrap_or_default().to_string();
         // As the serverless node's, never this device's own: no service counts it as its person's own node.
-        call_for(node, Me { caller: Caller { key: remote, user, agent: None, token: Some(token) }, sign_in: Some(client) }, call).await
+        call_for(node, Me { caller: Caller { key: remote, user, agent: None, token: Some(token) }, sign_in: Some(client) }, call, false).await
     };
     ran.await.unwrap_or_else(|err| failed(&err))
 }

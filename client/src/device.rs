@@ -9,7 +9,8 @@
 //! Worker's devices do). It asks only endpoints those list
 //! as compute that run its person's things, takes a 428 only from the node that answered, naming the seal key they list
 //! for it, and only for scopes they say it runs, databases that kind of request uses (`keys::may_hand`) and epochs
-//! from each one's newest copy (`keys::oldest_needed`), and hands what it named only to that node, sealed to that key.
+//! from each one's newest copy (`keys::oldest_needed`); and hands what it named to the one node each request is sent
+//! to, of the scopes they say that node runs, sealed to the seal key they list for it.
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
@@ -84,8 +85,7 @@ pub struct Device {
     /// Each scope's epochs opened, by (scope, n), and apps' keys by (scope, app, n).
     epochs: Mutex<HashMap<(String, u32), [u8; 32]>>,
     app_keys: Mutex<HashMap<(String, String, u32), [u8; 32]>>,
-    /// What each kind of request needed, by its route (`route`): the last 428's, and the node that sent it (hex), the
-    /// only one they're handed to.
+    /// What each kind of request needed, by its route (`route`): the last 428's, and the node that sent it (hex).
     needs: Mutex<BTreeMap<String, (String, Vec<Need>)>>,
     /// Held while a kind of request learns from a 428, by its route: another of its kind waits for it, and goes with
     /// what it learned.
@@ -235,7 +235,7 @@ impl Device {
             return Ok(true);
         }
         // The relay says who's on its network: until it lets this device in, nothing else will.
-        let Some(relayed) = self.computes().await? else { return Ok(false) };
+        let Some((relayed, online)) = self.computes().await? else { return Ok(false) };
         let nodes = match self.read_members().await {
             Ok(nodes) => nodes,
             // Not sealed global's keys yet: its approval is still being written.
@@ -248,6 +248,9 @@ impl Device {
             return Err(failed("None of your devices runs your things yet."));
         }
         let client = Client::start(self.key.to_bytes(), None, &self.address, &nodes).await?;
+        if let Some(online) = online {
+            client.set_online(&online)?;
+        }
         *held = Some(client);
         drop(held);
         // Kept, with its key, so this key is known as one that was in, to its person's sign-in once the relay takes it
@@ -261,8 +264,8 @@ impl Device {
     }
 
     /// Whether the relay lets this device in: → the compute endpoints on its network, which it says are there, not
-    /// what they may do.
-    async fn computes(&self) -> Result<Option<Vec<[u8; 32]>>, Error> {
+    /// what they may do; and those on it now, if it says (an older relay doesn't).
+    async fn computes(&self) -> Result<Option<(Vec<[u8; 32]>, Option<Vec<[u8; 32]>>)>, Error> {
         let url = format!("{}/relay/computes", self.address);
         // Signed again once if another process of this device signed in the same millisecond, which the relay takes once.
         let mut at = keys::next_at(now());
@@ -279,7 +282,23 @@ impl Device {
         if status != 200 {
             return Err(failed(error(&out).unwrap_or_else(|| format!("Your One App's network answered {status}."))));
         }
-        Ok(Some(out["computes"].as_array().into_iter().flatten().filter_map(|c| keys::unhex(c.as_str().unwrap_or("")).ok()).collect()))
+        let keys = |v: &Value| v.as_array().into_iter().flatten().filter_map(|c| keys::unhex(c.as_str().unwrap_or("")).ok()).collect::<Vec<_>>();
+        Ok(Some((keys(&out["computes"]), out.get("online").map(keys))))
+    }
+
+    /// Whether the relay still lets this device in: false only if it says it doesn't. Who it says is on its network
+    /// now is raced first from then on.
+    async fn let_in(&self) -> bool {
+        match self.computes().await {
+            Ok(None) => false,
+            Ok(Some((_, Some(online)))) => {
+                if let Some(client) = self.client.lock().await.clone() {
+                    let _ = client.set_online(&online);
+                }
+                true
+            }
+            _ => true,
+        }
     }
 
     /// `global`'s entries, read from the bucket and opened with the epochs sealed to this device, checked and replayed:
@@ -457,7 +476,7 @@ impl Device {
         // A request that failed may be one a device taken out can't make: the relay says who's on its network, so it's
         // asked, whatever a node said. Out, this device starts over at joining, where nothing but its approval or sign-in
         // is shown.
-        if matches!(self.computes().await, Ok(None)) {
+        if !self.let_in().await {
             if let Some(client) = self.client.lock().await.take() {
                 client.close().await;
             }
@@ -474,7 +493,7 @@ impl Device {
         let mut wait = 3;
         loop {
             n0_future::time::sleep(Duration::from_secs(wait)).await;
-            if matches!(self.computes().await, Ok(None)) {
+            if !self.let_in().await {
                 return Err(refused());
             }
             wait = 5;
@@ -498,7 +517,7 @@ impl Device {
             let opening = fetches.is_some().then(Notes::new);
             let handed = self.handed(&route, opening.as_ref()).await;
             let request = Request { method: method.into(), path: path.into(), headers: headers.clone(), body: body.clone() };
-            let sent = self.send(request, handed.as_ref()).await;
+            let sent = self.send(request, &handed).await;
             if let Some(fetches) = fetches.as_deref_mut() {
                 let mut fetched = match &sent {
                     Ok(response) => response.trace.clone().unwrap_or_default(),
@@ -529,7 +548,7 @@ impl Device {
                 // A node that doesn't list this device may not have read its approval yet: the relay says if it's out,
                 // else it's asked again in a moment, once it has.
                 if serde_json::from_slice::<Value>(&bytes).is_ok_and(|v| v["code"] == "not_let_in") {
-                    if matches!(self.computes().await, Ok(None)) {
+                    if !self.let_in().await {
                         return Err(refused());
                     }
                     if behind < BEHIND.len() {
@@ -563,21 +582,28 @@ impl Device {
         }
     }
 
-    /// A request saying whose it is (`x-one-user`), which a node checks against this device's key, with keys `handed`
-    /// to the node that asked for them alone, sealed to the seal key its entries list: any other is asked without.
-    async fn send(&self, mut request: Request, handed: Option<&([u8; 32], Vec<Handed>)>) -> Result<Response, Error> {
+    /// A request saying whose it is (`x-one-user`), which a node checks against this device's key, with the keys
+    /// `handed` of the scopes its entries say runs on the node the client sends it to, for that node alone, sealed to
+    /// the seal key they list for it: never to a node it only raced a connection to, nor one it doesn't list.
+    async fn send(&self, mut request: Request, handed: &[Handed]) -> Result<Response, Error> {
         let client = self.client.lock().await.clone().ok_or_else(refused)?;
-        let (seals, user) = self.known.lock().unwrap().as_ref().map(|k| (k.nodes.clone(), k.user.clone())).unwrap_or_default();
+        let user = self.known.lock().unwrap().as_ref().map(|k| k.user.clone()).unwrap_or_default();
         request.headers.push(("x-one-user".into(), user));
         let me = self.key();
-        client
-            .fetch_with(request, |node| {
-                let Some((_, keys)) = handed.filter(|(to, keys)| to == node && !keys.is_empty()) else { return Vec::new() };
-                let Some(seal) = seals.get(node) else { return Vec::new() };
-                let handoff = Handoff { for_: me.clone(), until: now() + HANDED_FOR, keys: keys.clone() };
-                keys::seal_handoff(seal, &handoff).map(|k| vec![("x-one-keys".to_string(), k)]).unwrap_or_default()
-            })
-            .await
+        client.fetch_with(request, |node| std::future::ready(self.sealed_for(node, handed, &me))).await
+    }
+
+    /// `handed`, of the scopes this device's entries say `node` runs, sealed to it (`x-one-keys`): none if it has none
+    /// of them, or isn't listed.
+    fn sealed_for(&self, node: &[u8; 32], handed: &[Handed], me: &str) -> Vec<(String, String)> {
+        let known = self.known.lock().unwrap();
+        let Some((k, seal)) = known.as_ref().and_then(|k| Some((k, k.nodes.get(node)?))) else { return Vec::new() };
+        let keys: Vec<Handed> = handed.iter().filter(|h| Scope::parse(&h.scope).is_ok_and(|s| k.members.runs_for(node, &s))).cloned().collect();
+        if keys.is_empty() {
+            return Vec::new();
+        }
+        let handoff = Handoff { for_: me.to_string(), until: now() + HANDED_FOR, keys };
+        keys::seal_handoff(seal, &handoff).map(|k| vec![("x-one-keys".to_string(), k)]).unwrap_or_default()
     }
 
     /// A request's JSON, without handing keys: what this device asks to open them.
@@ -587,7 +613,7 @@ impl Device {
             headers.push(("content-type".into(), "application/json".into()));
         }
         let body = body.map(|b| keys::canonical(&b)).unwrap_or_default();
-        let response = self.send(Request { method: method.into(), path: path.into(), headers, body: body.into() }, None).await?;
+        let response = self.send(Request { method: method.into(), path: path.into(), headers, body: body.into() }, &[]).await?;
         let status = response.status;
         let out: Value = serde_json::from_slice(&response.body.bytes().await?).unwrap_or_default();
         if status != 200 {
@@ -636,13 +662,10 @@ impl Device {
 
     // Keys.
 
-    /// The keys a kind of request needed last time, opened, and the node that asked for them, which alone is handed
-    /// them: none it can't open, nor of a scope its entries no longer say that node runs.
-    async fn handed(&self, route: &str, notes: Option<&Notes>) -> Option<([u8; 32], Vec<Handed>)> {
-        let (node, needs) = self.needs.lock().unwrap().get(route).cloned()?;
-        let node: [u8; 32] = keys::unhex(&node).ok()?;
-        let runs = |scope: &str| Scope::parse(scope).is_ok_and(|s| self.known.lock().unwrap().as_ref().is_some_and(|k| k.nodes.contains_key(&node) && k.members.runs_for(&node, &s)));
-        let needs: Vec<Need> = needs.into_iter().filter(|n| runs(&n.scope)).collect();
+    /// The keys a kind of request needed last time, opened: none it can't open. Each node it's sent to is handed only
+    /// those of the scopes it runs (`sealed_for`).
+    async fn handed(&self, route: &str, notes: Option<&Notes>) -> Vec<Handed> {
+        let Some((_, needs)) = self.needs.lock().unwrap().get(route).cloned() else { return Vec::new() };
         self.fetch_keys(&needs, notes).await;
         let mut handed = Vec::new();
         for n in needs {
@@ -650,7 +673,7 @@ impl Device {
                 handed.push(Handed { key, scope: n.scope, epoch: n.epoch, app: n.app, database: n.database });
             }
         }
-        Some((node, handed))
+        handed
     }
 
     /// A node's 428, taken only from the node that answered (`node`), naming itself and the seal key its entries list,

@@ -652,6 +652,86 @@ mod relay {
 
     /// A browser's endpoint is a key of its session's, which its device vouches for (keys::certify): the relay lets it
     /// in as that device, only for the key the certificate names, until its `until`, and while the device is listed.
+    /// A client races connections to its nodes and asks the first one up, keeping the others it raced for the next
+    /// request. The keys a request hands are sealed as the node it's sent to is picked, to that one alone: never to a
+    /// node it only raced a connection to (client/src/lib.rs, `fetch_with`).
+    #[test]
+    fn a_request_hands_keys_only_to_the_node_it_is_sent_to() {
+        use std::sync::{Arc, Mutex};
+        let (slow, quick) = (SecretKey::generate(), SecretKey::generate());
+        let k = super::Kernel::for_devices(vec![hex(&slow), hex(&quick)]);
+        let address = k.address.replace("localhost", "127.0.0.1");
+        let secret: [u8; 32] = rand::random();
+        assert_eq!(tell(&address, &slow, json!({ "add": hex(&SecretKey::from_bytes(&secret)), "role": "client" })), 204);
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        runtime.block_on(async {
+            // Each node answers every request, noting the keys it was handed with it (`x-one-keys`); the slow one lets
+            // a connection open only a while after it's asked.
+            let got: Arc<Mutex<Vec<(String, String)>>> = Arc::default();
+            let opened: Arc<Mutex<Vec<String>>> = Arc::default();
+            let serve = |key: &SecretKey, wait: Duration| {
+                let (key, address, got, opened) = (key.clone(), address.clone(), got.clone(), opened.clone());
+                async move {
+                    let alpn = format!("{}/http/1", one::config::CLI).into_bytes();
+                    let relay = RelayConfig::new(address.parse::<RelayUrl>().unwrap(), None);
+                    let ep = Endpoint::builder(presets::Minimal).secret_key(key.clone()).alpns(vec![alpn]).clear_ip_transports().clear_address_lookup().relay_mode(RelayMode::Custom(relay.into())).bind().await.unwrap();
+                    tokio::time::timeout(LET_IN, ep.online()).await.expect("a node isn't let in");
+                    let serving = ep.clone();
+                    tokio::spawn(async move {
+                        while let Some(incoming) = serving.accept().await {
+                            let (key, got, opened) = (hex(&key), got.clone(), opened.clone());
+                            tokio::spawn(async move {
+                                tokio::time::sleep(wait).await;
+                                let conn = incoming.await.ok()?;
+                                opened.lock().unwrap().push(key.clone());
+                                while let Ok((mut send, mut recv)) = conn.accept_bi().await {
+                                    let asked = recv.read_to_end(1 << 16).await.ok()?;
+                                    let asked = String::from_utf8_lossy(&asked).to_string();
+                                    let keys = asked.lines().find_map(|l| l.strip_prefix("x-one-keys: ")).unwrap_or("").to_string();
+                                    got.lock().unwrap().push((key.clone(), keys));
+                                    send.write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 0\r\n\r\n").await.ok()?;
+                                    send.finish().ok()?;
+                                }
+                                Some(())
+                            });
+                        }
+                    });
+                    ep
+                }
+            };
+            let _nodes = (serve(&slow, Duration::from_secs(2)).await, serve(&quick, Duration::ZERO).await);
+            let client = one_client::Client::start(secret, None, &address, &[*slow.public().as_bytes(), *quick.public().as_bytes()]).await.unwrap();
+            let sealed: Arc<Mutex<Vec<String>>> = Arc::default();
+            let ask = || {
+                let request = one_client::Request { method: "GET".into(), path: "/v1/state".into(), headers: Vec::new(), body: Vec::new().into() };
+                client.fetch_with(request, |node| {
+                    let node = data_encoding::HEXLOWER.encode(node);
+                    sealed.lock().unwrap().push(node.clone());
+                    std::future::ready(vec![("x-one-keys".to_string(), format!("sealed to {node}"))])
+                })
+            };
+            // The first in order is slow to connect: the next, raced beside it, is asked, and it alone is handed keys.
+            let answered = ask().await.expect("no node answered");
+            assert_eq!(answered.node, *quick.public().as_bytes(), "the node raced beside the slow one wasn't asked");
+            assert_eq!(*sealed.lock().unwrap(), [hex(&quick)], "keys were sealed to a node the request didn't go to");
+            assert_eq!(*got.lock().unwrap(), [(hex(&quick), format!("sealed to {}", hex(&quick)))]);
+            // The slow one's connection, raced, opens and is kept: the next request goes to it, the first in order, and
+            // only it is handed that request's keys.
+            let up = async {
+                while !opened.lock().unwrap().contains(&hex(&slow)) {
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+            };
+            tokio::time::timeout(LET_IN, up).await.expect("the slow node's raced connection never opened");
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            let answered = ask().await.expect("no node answered");
+            assert_eq!(answered.node, *slow.public().as_bytes(), "the first node in order, connected since, wasn't asked");
+            assert_eq!(*sealed.lock().unwrap(), [hex(&quick), hex(&slow)]);
+            assert_eq!(got.lock().unwrap()[1..], [(hex(&slow), format!("sealed to {}", hex(&slow)))], "keys reached a node they weren't sealed to");
+            client.close().await;
+        });
+    }
+
     #[test]
     fn a_session_endpoint_gets_in_only_as_its_device_vouches() {
         let first = SecretKey::generate();
@@ -676,9 +756,10 @@ mod relay {
             // Its first nodes to ask: the computes, for it or a device on the list, and no one else.
             let asked = one::keys::signed_request(&signer(&phone), "one/relay", json!({ "computes": true }), at());
             let by_session = ask(&session, &cert);
+            // And which of them are on the relay's network now, which a client races first.
             for body in [by_session.clone(), asked.clone()] {
                 let (status, said) = computes(body);
-                assert_eq!((status, said), (200, json!({ "computes": [hex(&first)] })));
+                assert_eq!((status, said), (200, json!({ "computes": [hex(&first)], "online": [hex(&first)] })));
             }
             // Each request is taken once; a certificate alone, or one signed by a key it doesn't name, gets nothing; a
             // clock that's off isn't told it's out (403), so it keeps the nodes it knows.

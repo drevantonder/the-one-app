@@ -192,11 +192,20 @@ impl Node {
     }
 
     /// Keeps the keys a caller handed this device with a call (`x-one-keys`) for `token`'s calls, as `user`'s: only
-    /// if they were sealed to it, for that token (`for`: its sha256, or a client device's or the serverless node's
+    /// if they were sealed to it (any others are left), for that token (`for`: its sha256, or a client device's or the serverless node's
     /// key), and not yet expired; and no longer than `most`, until when its caller's own word lasts (a session's
     /// certificate's).
     pub fn hand(&self, token: &str, user: &str, sealed: &str, most: u64) -> Result<()> {
-        let handoff = crate::keys::open_handoff(&self.seal_secret(), sealed)?;
+        // Keys this device can't open (sealed to another: the node a client asked before, say) are left, never refused:
+        // the call goes on without them and asks for what it needs (428), sealed to this device, which the client
+        // checks against its own entries before handing anything, an older one too. Leaving them gives nothing away.
+        let handoff = match crate::keys::open_handoff(&self.seal_secret(), sealed) {
+            Ok(handoff) => handoff,
+            Err(err) => {
+                tracing::debug!("keys handed for {user} that this device can't open, left: {err:#}");
+                return Ok(());
+            }
+        };
         ensure!(handoff.for_ == handoff_for(token), "the keys handed are for another sign-in");
         let now = now_ms();
         // Kept no longer than a sign-in's token lasts, whatever the handoff says (one that doesn't check brings no call
@@ -419,7 +428,7 @@ impl Node {
         if need.is_empty() { Ok(()) } else { Err(self.need(need).into()) }
     }
 
-    fn need(&self, need: Vec<Need>) -> Needs {
+    pub(super) fn need(&self, need: Vec<Need>) -> Needs {
         let me = self.endpoint();
         Needs { need, to: hex(&me.key), seal: hex(&me.seal) }
     }

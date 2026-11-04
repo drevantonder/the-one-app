@@ -4,6 +4,7 @@
 //! `close`. Keys are hex, headers a flat list of names and values, and a body's parts come as `chunk` is awaited.
 
 use wasm_bindgen::prelude::*;
+use wasm_bindgen_futures::js_sys;
 
 fn js(err: impl std::fmt::Display) -> JsError {
     JsError::new(&err.to_string())
@@ -43,11 +44,28 @@ impl Client {
         self.0.set_nodes(&nodes).map_err(js)
     }
 
-    /// `headers`: names and values, one after the other. A request with `x-one-trace` has its trace in its response, or
-    /// in what it failed with.
-    pub async fn fetch(&self, method: String, path: String, headers: Vec<String>, body: Vec<u8>) -> Result<Response, Failed> {
+    /// The nodes the relay says are on its network now, hex: raced first.
+    pub fn online(&self, nodes: Vec<String>) -> Result<(), JsError> {
+        let nodes = nodes.iter().map(|n| key(n)).collect::<Result<Vec<_>, _>>()?;
+        self.0.set_online(&nodes).map_err(js)
+    }
+
+    /// `headers`: names and values, one after the other. `keys`, if given, is asked for the `x-one-keys` of the one node
+    /// the request is sent to, once it's picked (its key, hex → a promise of the header's value, or none), so keys are
+    /// sealed to no other. A request with `x-one-trace` has its trace in its response, or in what it failed with.
+    pub async fn fetch(&self, method: String, path: String, headers: Vec<String>, body: Vec<u8>, keys: Option<js_sys::Function>) -> Result<Response, Failed> {
         let headers = headers.chunks(2).map(|h| (h[0].clone(), h.get(1).cloned().unwrap_or_default())).collect();
-        let response = self.0.fetch(crate::Request { method, path, headers, body: body.into() }).await.map_err(|e| Failed { message: e.to_string(), trace: traced(e.trace) })?;
+        let sealed = |node: &[u8; 32]| {
+            let (keys, node) = (keys.clone(), data_encoding::HEXLOWER.encode(node));
+            async move {
+                let Some(asked) = keys.and_then(|k| k.call1(&JsValue::NULL, &JsValue::from_str(&node)).ok()) else { return Vec::new() };
+                match wasm_bindgen_futures::JsFuture::from(js_sys::Promise::resolve(&asked)).await.ok().and_then(|v| v.as_string()) {
+                    Some(k) if !k.is_empty() => vec![("x-one-keys".to_string(), k)],
+                    _ => Vec::new(),
+                }
+            }
+        };
+        let response = self.0.fetch_with(crate::Request { method, path, headers, body: body.into() }, sealed).await.map_err(|e| Failed { message: e.to_string(), trace: traced(e.trace) })?;
         let headers = response.headers.into_iter().flat_map(|(n, v)| [n, v]).collect();
         let trace = traced(response.trace);
         Ok(Response { node: data_encoding::HEXLOWER.encode(&response.node), status: response.status, headers, trace, body: std::rc::Rc::new(std::cell::RefCell::new(Some(response.body))) })
