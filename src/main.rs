@@ -272,7 +272,7 @@ fn run(args: Vec<String>) -> Result<()> {
         return try_install::try_install(&args[1..]);
     }
     let (positional, flags) = parse(&args);
-    if !matches!(positional.first().map(String::as_str), Some("serve" | "mcp")) {
+    if positional.first().map(String::as_str) != Some("mcp") {
         // Printing into `| head` ends quietly, as other commands do, instead of panicking.
         unsafe { libc::signal(libc::SIGPIPE, libc::SIG_DFL) };
     }
@@ -293,13 +293,6 @@ fn run(args: Vec<String>) -> Result<()> {
             Some(text) => print!("{text}"),
             None => bail!("{}", ops::unknown(rest[0], None, true)?),
         },
-        // Only as a machine moves to oned: a node built before it hands over to this build with `serve`, and its unit
-        // still says it (ARCHITECTURE.md's Moving a machine to oned).
-        ["serve"] => {
-            usual_path();
-            IN_NODE.store(true, std::sync::atomic::Ordering::Relaxed);
-            serve(flags.contains_key("try"), &args)?
-        }
         ["sign-in"] => sign_in(&flags)?,
         ["sign-out"] => {
             // A device takes itself out of its person's devices first, while its sign-in still says who it is; git

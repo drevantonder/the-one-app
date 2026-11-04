@@ -80,10 +80,6 @@ The map: what lives where, and the few rules the code only shows by keeping them
 - `tests/`: `sim.rs`, many devices writing one database in one bucket over bad links; `e2e.rs`, real nodes; `kernel.rs`, the kernel's services in workerd (and `kernel/test/`); `contracts.rs`, wherever two languages must agree; `agents/`, fresh agents doing everyday tasks.
 - `vendor/phosphor/`: Phosphor's icons, which apps name and every client draws.
 
-## Moving a machine to oned
-
-Until every machine is moved, and then this goes: a node built before oned runs as `<cli> serve`, under the `<cli>` systemd unit or the Mac app's `.node` launch agent, beside services each run by a unit or launch agent of its own (`<cli>-<name>`). An update hands such a node over to oned's build, which still answers to `serve` (the old build hands over with it) and runs as oned. On Linux, `install.sh` run again moves it: `<cli>d` beside `<cli>` and the `<cli>d` unit in place of `<cli>`, with its environment; each `<cli>-<name>` unit stopped and removed, its service turned on, keeping its key and folder (so WhatsApp's link and its listing stay) and the Go program it ran; a copy of this program a unit ran as a service goes. A Mac's app moves itself with its next build (the `.oned` launch agent for the `.node` one); its services' launch agents are moved by hand, as they're only ever ours.
-
 ## Designed, not built
 
 - Backups' recovery from nothing: a device restoring with no one left to pair with admits itself with the recovery key's countersignature.

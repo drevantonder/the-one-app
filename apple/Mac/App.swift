@@ -233,9 +233,6 @@ enum NodeLauncher {
     private static var child: Process?
 
     static func start() async throws {
-        // The node's launch agent before oned: gone, as this one runs in its place.
-        let before = SMAppService.agent(plistName: "\(Bundle.main.bundleIdentifier ?? "").node.plist")
-        if before.status != .notRegistered { try? await before.unregister() }
         let agent = SMAppService.agent(plistName: "\(label).plist")
         if agent.status == .enabled {
             if await kickstarted() { return }

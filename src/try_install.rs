@@ -70,7 +70,7 @@ pub fn try_install(rest: &[String]) -> Result<()> {
             println!("Stopped and deleted this checkout's try install, and gave back its devices. {CLI} try starts a new one.");
             return Ok(());
         }
-        Some(cmd @ ("serve" | "update" | "release" | "publish" | "try")) => bail!("{CLI} {cmd} isn't for the try install"),
+        Some(cmd @ ("update" | "release" | "publish" | "try")) => bail!("{CLI} {cmd} isn't for the try install"),
         Some("kernel") if rest.get(1).map(String::as_str) == Some("serve") => bail!("the try install runs its own kernel"),
         _ => {}
     }

@@ -57,7 +57,7 @@ else
 	data="$HOME/.local/share/$cli"
 	sudo=$([ "$(id -u)" = 0 ] || echo sudo)
 	units=/etc/systemd/system
-	if [ -d /run/systemd/system ]; then $sudo systemctl stop "${cli}d" "$cli" 2>/dev/null || true; fi
+	if [ -d /run/systemd/system ]; then $sudo systemctl stop "${cli}d" 2>/dev/null || true; fi
 	# The old app's data has no device key; keep it aside rather than mistake it for this one's.
 	if [ -d "$data" ] && [ ! -f "$data/device.json" ]; then
 		mv "$data" "$data-previous"
@@ -67,26 +67,8 @@ else
 	ln -sf "$cli" "$HOME/.local/bin/git-remote-$cli"
 	ln -sf "$cli" "$HOME/.local/bin/${cli}d"
 	if [ -d /run/systemd/system ]; then
-		# A machine that ran its node as `$cli serve`, beside a unit per service, moves to ${cli}d (ARCHITECTURE.md's
-		# Moving a machine to oned): the node's environment kept, and each service's unit stopped and gone, the service
-		# turned on in ${cli}d once it answers, with the key and folder it had. A copy of this program a unit ran as a
-		# service goes; a program in another language stays, for ${cli}d to run.
-		env=$(sed -n 's/^Environment=//p' "$units/$cli.service" "$units/${cli}d.service" 2>/dev/null | grep -v '^HOME=' | sort -u || true)
-		parts=
-		for unit in "$units/$cli"-*.service; do
-			[ -f "$unit" ] || continue
-			part=$(basename "$unit" .service)
-			part=${part#"$cli"-}
-			run=$(sed -n 's/^ExecStart=//p' "$unit")
-			$sudo systemctl disable --now "$cli-$part" 2>/dev/null || true
-			$sudo rm -f "$unit"
-			case $run in *" sidecars serve "* | *" services serve "*) [ "${run%% *}" = "$HOME/.local/bin/$cli" ] || rm -f "${run%% *}" ;; esac
-			parts="$parts $part"
-		done
-		if [ -f "$units/$cli.service" ]; then
-			$sudo systemctl disable "$cli" 2>/dev/null || true
-			$sudo rm -f "$units/$cli.service"
-		fi
+		# Its environment (a white label's <CLI>_HOME) as it was, when installed again.
+		env=$(sed -n 's/^Environment=//p' "$units/${cli}d.service" 2>/dev/null | grep -v '^HOME=' || true)
 		# The node answers every client of the install, so it keeps its memory and, outside a container (where it can't
 		# be lowered), is the last thing killed when the machine runs short.
 		oom=""
@@ -114,11 +96,6 @@ WantedBy=multi-user.target
 EOF
 		$sudo systemctl daemon-reload
 		$sudo systemctl enable --now "${cli}d"
-		for part in $parts; do
-			on=
-			for _ in $(seq 60); do "$HOME/.local/bin/$cli" services on "$part" >/dev/null 2>&1 && on=1 && break; sleep 2; done
-			if [ -n "$on" ]; then echo "Moved $part into ${cli}d."; else echo "Couldn't switch $part on in ${cli}d: run $cli services on $part" >&2; fi
-		done
 		echo "Installed ~/.local/bin/$cli, with ${cli}d running as a service."
 	else
 		echo "Installed ~/.local/bin/$cli. This machine has no systemd: run ${cli}d, this device, yourself"
