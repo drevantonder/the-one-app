@@ -2,7 +2,8 @@
 // request where its path says: sign-in to the auth service (with the gateway's host kept, since passkeys belong to
 // it), `/urls` to the URL signer, `/mcp` and what MCP clients read to sign in to the MCP Worker, `/relay` (and iroh's
 // `/ping` and `/generate_204`) to the relay, and everything else to the web client's files. Devices reach the
-// install's nodes over iroh, never through here.
+// install's nodes over iroh, never through here, and so does git: `/repos/…` here is git on a computer without the CLI,
+// told how to get it.
 
 /// Paths the auth service answers: exactly these, or under the ones ending in `/`.
 const AUTH = ["/api/auth/", "/sign-in", "/invite", "/passkeys", "/.well-known/oauth-authorization-server", "/.well-known/openid-configuration"];
@@ -93,12 +94,26 @@ async function toWeb(request, env, url) {
   return send(resp.body);
 }
 
+/// Git at a repo's address, `/repos/<repo>.git`, from a computer whose git doesn't go through the CLI (which reaches the
+/// repo over iroh): what to do, which git shows as the remote's.
+function gitWithoutCli(env, url) {
+  const name = env.NAME || "The One App", cli = env.CLI || "one";
+  const said = [
+    `${url.origin}${url.pathname.replace(/\/(info\/refs|git-[a-z-]+|HEAD|objects\/.*)$/, "")} is a repo in ${env.YOURS || "your One App"}, which git reaches through ${name}'s CLI, ${cli}.`,
+    `Install it on this computer, then run`,
+    `  ${cli} sign-in --address ${url.origin}`,
+    `and try again.`,
+  ];
+  return new Response(said.join("\n") + "\n", { status: 403, headers: { "content-type": "text/plain; charset=utf-8", "x-content-type-options": "nosniff" } });
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     // The relay, iroh's: its WebSockets, its probes, and what devices tell it go to its own Worker (kernel/relay/).
     if (["/relay", "/relay/tell", "/relay/computes", "/relay/seen", "/ping", "/generate_204"].includes(url.pathname)) return env.IROH.fetch(request);
     if (url.pathname === "/urls") return env.SIGNER.fetch(request);
+    if (url.pathname.startsWith("/repos/")) return gitWithoutCli(env, url);
     switch (where(url.pathname)) {
       case "mcp": return env.MCP ? env.MCP.fetch(request) : refuse(503, "this install's MCP isn't set up yet");
       case "auth": return env.AUTH.fetch(request);

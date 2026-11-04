@@ -352,7 +352,8 @@ impl Settings {
     pub fn bindings(&self, service: &str) -> Vec<(String, String, bool)> {
         // The gateway holds no secrets.
         if service == "gateway" {
-            return vec![("AUTH".into(), "service:auth".into(), false), ("IROH".into(), "service:relay".into(), false), ("SIGNER".into(), "service:signer".into(), false), ("MCP".into(), "service:mcp".into(), false)];
+            let named = [("NAME", crate::config::NAME.into()), ("YOURS", crate::config::YOURS.into()), ("CLI", crate::config::CLI.into())].map(|(n, v)| (n.into(), v, false));
+            return [("AUTH".into(), "service:auth".into(), false), ("IROH".into(), "service:relay".into(), false), ("SIGNER".into(), "service:signer".into(), false), ("MCP".into(), "service:mcp".into(), false)].into_iter().chain(named).collect();
         }
         let location = (!crate::config::RELAY_LOCATION.is_empty()).then(|| ("LOCATION".into(), crate::config::RELAY_LOCATION.into(), false));
         // Nor does the relay: only the keys of the install's first devices, which it starts its list with, and the
