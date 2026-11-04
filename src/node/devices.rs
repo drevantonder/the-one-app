@@ -610,7 +610,8 @@ impl Node {
     /// entries, and a new epoch of each scope it could open (as a client:
     /// compute holds no epochs) that `caller` starts epochs of, sealed to every client left that opens it and the
     /// recovery key; databases move to it at their next routine copy. A scope `caller` can't start a new epoch of is
-    /// said: one of its own admins' devices does. A device removing itself (as it signs out) is told off the relay last,
+    /// said: one of its own admins' devices does. A device removing itself (as it signs out) forgets its own keys, so
+    /// its scopes keep theirs (ARCHITECTURE.md), its `remove` entry saying so (`itself`); it's told off the relay last,
     /// since it hears no answer after. → what was done.
     pub async fn remove_device(&self, caller: &Caller, device: &str) -> Result<Value> {
         let key = self.find_machine(device)?;
@@ -638,9 +639,13 @@ impl Node {
         for k in &keys {
             // The last of its entries in `global` this device had seen: those after never count, wherever they sort.
             let seq = self.with(|i| Ok(i.r.store.last(k, "global")?.map(|e| e.seq())))?;
-            self.member_as(caller, "remove", json!({ "key": hex(k), "seq": seq })).await?;
+            let mut said = json!({ "key": hex(k), "seq": seq });
+            if itself {
+                said["itself"] = json!(true);
+            }
+            self.member_as(caller, "remove", said).await?;
         }
-        let (renewed, left) = self.renew(caller, scopes).await;
+        let (renewed, left) = if itself { Default::default() } else { self.renew(caller, scopes).await };
         if itself {
             relay = off_relay().await;
         }

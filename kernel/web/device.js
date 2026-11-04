@@ -501,14 +501,12 @@ export class Device {
 
   /// Takes this browser out of its person's devices, as it signs out, so signing in again makes a new one that
   /// replaces it, never a second. Itself it may (the install lets a device take out its person's, itself among them),
-  /// but nothing it writes after counts, so it goes in this order: a new epoch of each scope it opened that this person
-  /// may move on and another device of theirs still opens (one only the recovery key could open would lock them out),
-  /// sealed to none of it; its `remove` entry, whose seq is its own, so that one counts and none after; then off the
-  /// network, which ends its connection, so nothing is asked after.
+  /// but nothing it writes after counts, so it goes in this order: its `remove` entry, whose seq is its own, so that one
+  /// counts and none after; then off the network, which ends its connection, so nothing is asked after. Its scopes keep
+  /// their keys, as it forgets its own (ARCHITECTURE.md): a device in doubt is removed from another, which makes new ones.
   async leave() {
     const k = await this.checked(true);
     if (!k.devices.some((d) => d.key === this.me.key)) return;
-    await this.renew(scopesOf(k, this.user).filter((s) => openers(k, s).some((e) => e.key !== this.me.key)), [this.me.key]);
     await this.write("global", (seq) => members.removeDevice({ key: this.me.key, seq }));
     await this.tell({ remove: this.me.key });
   }
