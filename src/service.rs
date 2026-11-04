@@ -638,7 +638,7 @@ async fn call(State(s): State<Service>, headers: HeaderMap, Json(body): Json<Val
 
 /// Whether this part should stop: this program's binary was replaced, by an update, so the new oned starts it again;
 /// or the oned that started it is gone.
-fn stop_check() -> Result<impl Fn() -> bool> {
+fn stop_check(parent: u32) -> Result<impl Fn() -> bool> {
     use std::os::unix::fs::MetadataExt;
     // Asked to stop (oned switching it off): it stops what it started first, on a Mac too, where nothing else would.
     extern "C" fn asked(_: libc::c_int) {
@@ -648,7 +648,6 @@ fn stop_check() -> Result<impl Fn() -> bool> {
     unsafe { libc::signal(libc::SIGTERM, asked as *const () as libc::sighandler_t) };
     let exe = std::env::current_exe()?.canonicalize()?;
     let ino = std::fs::metadata(&exe)?.ino();
-    let parent = std::os::unix::process::parent_id();
     Ok(move || ASKED.load(SeqCst) || std::fs::metadata(&exe).map(|m| m.ino()).ok() != Some(ino) || std::os::unix::process::parent_id() != parent)
 }
 
@@ -665,10 +664,15 @@ pub fn run(name: &str) -> Result<()> {
     let _ = tracing_subscriber::fmt().with_writer(std::io::stderr).with_env_filter(filter).try_init();
     let dir = folder(name);
     std::fs::create_dir_all(&dir)?;
+    let parent = std::os::unix::process::parent_id();
     let lock = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(dir.join("lock"))?;
-    // SAFETY: a plain flock on a file this keeps open: held until this process exits.
-    ensure!(unsafe { libc::flock(std::os::fd::AsRawFd::as_raw_fd(&lock), libc::LOCK_EX) } == 0, "lock {}", dir.display());
-    let stop = stop_check()?;
+    // SAFETY: a plain flock on a file this keeps open: held until this process exits. While another holds it, this
+    // waits, unless the oned that started this one goes meanwhile.
+    while unsafe { libc::flock(std::os::fd::AsRawFd::as_raw_fd(&lock), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
+        ensure!(std::os::unix::process::parent_id() == parent, "{name}: the oned that started it stopped");
+        std::thread::sleep(Duration::from_millis(500));
+    }
+    let stop = stop_check(parent)?;
     let program = crate::oned::program(name);
     let hosted = crate::services::hosted().iter().any(|h| h.name == name);
     ensure!(hosted || program.exists(), "{name} isn't a service this program offers, and {} isn't there", program.display());
