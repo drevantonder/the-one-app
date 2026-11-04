@@ -511,18 +511,23 @@ pub fn may_call(m: &Members, me: &Key, remote: &Key, key: &Key, user: &str, sign
     Ok(())
 }
 
-/// What a service may ask its person's node to run: only its own app (`name`), on no device named, in its person's
-/// own scope, calling no other app; until grants land, that app's database there is all it reaches. → the call.
+/// What a service may ask its person's node to run: only its own app (`name`), in its person's own scope, calling no
+/// other app, and naming a device only to reach itself there (Agent Devices listing every device's); until grants
+/// land, that app's database there is all it reaches. → the call.
 pub fn limited(name: &str, call: &Value) -> Result<Value> {
     ensure!(call["app"] == name && (call["service"].is_null() || call["service"] == name), "a service asks only for its own app, {name}");
-    ensure!(call["device"].is_null(), "a service can't name a device to run its calls");
+    ensure!(call["device"].is_null() || (call["service"] == name && call["device"].is_string()), "a service names a device only to reach itself there");
     let scopes_ok = match &call["scopes"] {
         Value::Null => true,
         Value::Array(s) => s.iter().all(|s| s == "user"),
         _ => false,
     };
     ensure!(scopes_ok, "a service's calls reach only its person's own scope");
-    Ok(json!({ "app": name, "service": call["service"], "op": call["op"], "input": call["input"], "scopes": ["user"] }))
+    let mut asked = json!({ "app": name, "service": call["service"], "op": call["op"], "input": call["input"], "scopes": ["user"] });
+    if call["device"].is_string() {
+        asked["device"] = call["device"].clone();
+    }
+    Ok(asked)
 }
 
 /// `known` with `given`'s member entries added, if any are new: → them, replayed from the install's first entry, with

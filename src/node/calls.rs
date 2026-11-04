@@ -999,6 +999,11 @@ impl Node {
     /// itself, and asks for the calls the program it offers makes (`/v1/call` where it's hosted).
     pub(super) async fn accept_service_call(&self, remote: Key, request: &Value) -> Reply {
         match self.accept_service(remote, request) {
+            // Its own service on another of its person's devices: sent there.
+            Ok((req, me)) if req.device.is_some() => match self.route(req, me).await {
+                Ok(ok) => Reply::Ok(ok),
+                Err(err) => Reply::Error(format!("{err:#}")),
+            },
             Ok((req, me)) => self.run(&req, &me).await,
             Err(err) => Reply::Error(format!("{err:#}")),
         }
