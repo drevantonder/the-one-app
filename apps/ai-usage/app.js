@@ -115,11 +115,10 @@ function paceOfCswap(w, now) {
   return { summary: `${head} | Expected ${exp}% used | ${tail}`, willLast, delta };
 }
 
-/// Who an account is, as a person tells them apart: its alias, else its team and email.
+/// Who an account is, as a person tells them apart: its team (Personal for one's own plan) and its email.
 function accountName(a) {
-  if (a.alias) return String(a.alias);
   const org = String(a.organizationName || "");
-  return !org || /'s Organization$/.test(org) ? String(a.email || "") : `${org} · ${a.email || ""}`;
+  return `${!org || /'s Organization$/.test(org) ? "Personal" : org} · ${a.email || ""}`;
 }
 
 /// Which pool to spend: the cooler weekly one. Names come from the scoped rows.
@@ -148,7 +147,7 @@ async function latest(b, provider, device) {
   const top = await b.query("select at from snapshots where provider = ? and (device = ? or ? is null) order by at desc limit 1", [provider, device, device]);
   if (!top[0]) return [];
   const rows = await b.query("select * from snapshots where provider = ? and (device = ? or ? is null) and at = ? order by active desc, weekly_used", [provider, device, device, top[0].at]);
-  return rows.map((r) => ({ ...r, active: !!r.active, models: JSON.parse(r.models || "[]"), pace: JSON.parse(r.pace || "{}") }));
+  return rows.map((r) => ({ ...r, active: !!r.active, disabled: !!r.disabled, models: JSON.parse(r.models || "[]"), pace: JSON.parse(r.pace || "{}") }));
 }
 
 /// The one before for the same account, sharing the session window, for the burn rate.
@@ -212,7 +211,7 @@ function fromCswap(j) {
       source: "cswap", confidence: "quota",
       session: win(u.fiveHour), weekly: win(u.sevenDay), monthly: { used: null, resetsAt: null },
       models: (u.scoped || []).map((m) => ({ name: String(m.name || "pool"), used: int(m.pct), resetsAt: ms(m.resetsAt) })),
-      plan: null, account: accountName(a), active: !!a.active,
+      plan: null, account: accountName(a), active: !!a.active, disabled: !!a.disabled,
       notes: a.usageStatus && a.usageStatus !== "ok" ? [`usage ${a.usageStatus}`] : [], extra: null,
     };
     return out;
@@ -296,8 +295,8 @@ async function refresh(ctx, b, id, device, now) {
         if (!out.weekly.pace) out.weekly.pace = paceFrom(out.weekly.used, out.weekly.resetsAt, P.weeklyMins, null, now);
       }
       const active = out.active || outs.length === 1 ? 1 : 0;
-      b.exec("insert into snapshots values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", [id, device, now, out.source, out.confidence, out.session.used, out.session.resetsAt, out.weekly.used, out.weekly.resetsAt, out.monthly.used, out.monthly.resetsAt, JSON.stringify(out.models), JSON.stringify({ session: out.session.pace, weekly: out.weekly.pace }), (out.notes || [])[0] || null, out.account || null, active]);
-      results.push({ provider: id, device, at: now, source: out.source, confidence: out.confidence, session_used: out.session.used, session_resets: out.session.resetsAt, session_resetText: out.session.resetText, weekly_used: out.weekly.used, weekly_resets: out.weekly.resetsAt, weekly_resetText: out.weekly.resetText, monthly_used: out.monthly.used, monthly_resets: out.monthly.resetsAt, models: out.models, pace: { session: out.session.pace, weekly: out.weekly.pace }, plan: out.plan, account: out.account || null, active: !!active, extra: out.extra, notes: out.notes || [], cached: false, now });
+      b.exec("insert into snapshots (provider, device, at, source, confidence, session_used, session_resets, weekly_used, weekly_resets, monthly_used, monthly_resets, models, pace, note, account, active, disabled) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", [id, device, now, out.source, out.confidence, out.session.used, out.session.resetsAt, out.weekly.used, out.weekly.resetsAt, out.monthly.used, out.monthly.resetsAt, JSON.stringify(out.models), JSON.stringify({ session: out.session.pace, weekly: out.weekly.pace }), (out.notes || [])[0] || null, out.account || null, active, out.disabled ? 1 : 0]);
+      results.push({ provider: id, device, at: now, source: out.source, confidence: out.confidence, session_used: out.session.used, session_resets: out.session.resetsAt, session_resetText: out.session.resetText, weekly_used: out.weekly.used, weekly_resets: out.weekly.resetsAt, weekly_resetText: out.weekly.resetText, monthly_used: out.monthly.used, monthly_resets: out.monthly.resetsAt, models: out.models, pace: { session: out.session.pace, weekly: out.weekly.pace }, plan: out.plan, account: out.account || null, active: !!active, disabled: !!out.disabled, extra: out.extra, notes: out.notes || [], cached: false, now });
     }
     b.exec("delete from snapshots where at < ?", [PRUNE()]);
     return results.sort((x, y) => y.active - x.active || (x.weekly_used ?? 0) - (y.weekly_used ?? 0));
@@ -321,6 +320,18 @@ function windowText(label, w, now) {
   return [`${label} ${100 - w.used}% left`, paceNews(w.pace), reset].filter(Boolean).join(", ");
 }
 
+/// What a person needs to know about a read, if anything: out until its reset, or running out before it.
+function alarm(p, now) {
+  const wins = [["Session", p.session_used, p.session_resets, p.pace?.session], ["Weekly", p.weekly_used, p.weekly_resets, p.pace?.weekly], ["Monthly", p.monthly_used, p.monthly_resets, null]];
+  for (const [label, used, at, pace] of wins) if (used >= 100) return { tone: "danger", text: `Out until ${resets(at, now)}` };
+  for (const [label, used, at, pace] of wins) {
+    if (pace?.willLast !== false) continue;
+    const when = String(pace.summary || "").match(/(?:Projected empty|Runs out) in (.+)$/);
+    return { tone: "warn", text: when ? `${label} runs out in ${when[1]}, before it resets` : `${label} runs out before it resets` };
+  }
+  return null;
+}
+
 /// One provider's reads as text: the account in use in full, the others on one line.
 function section(reads, now) {
   const p = reads[0];
@@ -329,7 +340,7 @@ function section(reads, now) {
   const head = [title, p.account && p.source === "cswap" ? `${p.account}${reads.length > 1 ? ", in use" : ""}` : null, p.plan, p.confidence === "estimated" ? "~estimated from this device only" : null].filter(Boolean).join(" · ");
   const age = p.stale ? `last read ${ago(p.at, now)} (${p.stale})` : now - p.at > FRESH ? `read ${ago(p.at, now)}` : null;
   const steered = steer(p.models);
-  const others = reads.slice(1).map((o) => `${o.account} ${o.weekly_used >= 100 ? `out, back ${resets(o.weekly_resets, now)}` : `${100 - (o.weekly_used ?? 0)}% weekly left`}`);
+  const others = reads.slice(1).map((o) => `${o.account} ${o.weekly_used >= 100 ? `out, back ${resets(o.weekly_resets, now)}` : `${100 - (o.weekly_used ?? 0)}% weekly left`}${o.disabled ? ", not in rotation" : ""}`);
   return [
     head,
     windowText("Session", { used: p.session_used, resetsAt: p.session_resets, resetText: p.session_resetText, pace: p.pace?.session }, now),
@@ -388,7 +399,8 @@ export default {
     create index snapshots_provider on snapshots (provider, device, at);`,
     `alter table snapshots add column note text;`,
     `alter table snapshots add column account text;`,
-    `alter table snapshots add column active integer;`]])),
+    `alter table snapshots add column active integer;`,
+    `alter table snapshots add column disabled integer;`]])),
 
   ops: {
     status: {
@@ -414,13 +426,13 @@ export default {
           return {
             device: dev, at: now,
             providers: all.map((p) => ({
-              id: p.provider, title: PROVIDERS[p.provider].title, account: p.source === "cswap" ? p.account : null, active: !!p.active, plan: p.plan || null, source: p.source || null,
+              id: p.provider, title: PROVIDERS[p.provider].title, account: p.source === "cswap" ? p.account : null, active: !!p.active, disabled: !!p.disabled, alarm: p.error ? null : alarm(p, now), plan: p.plan || null, source: p.source || null,
               device: p.device || dev, updatedAgo: p.at ? ago(p.at, now) : null, estimated: p.confidence === "estimated",
               error: p.error || null, stale: p.stale || null,
               session: p.error ? null : { used: p.session_used, left: p.session_used == null ? null : 100 - p.session_used, resets: p.session_resets ? resets(p.session_resets, now) : null, countdown: p.session_resets ? countdown(p.session_resets, now) : null, pace: p.pace?.session?.summary || null, willLast: p.pace?.session?.willLast ?? null },
               weekly: p.error ? null : { used: p.weekly_used, left: p.weekly_used == null ? null : 100 - p.weekly_used, resets: p.weekly_resets ? resets(p.weekly_resets, now) : null, countdown: p.weekly_resets ? countdown(p.weekly_resets, now) : null, pace: p.pace?.weekly?.summary || null, willLast: p.pace?.weekly?.willLast ?? null },
               monthly: p.error || p.monthly_used == null ? null : { used: p.monthly_used, left: 100 - p.monthly_used, resets: p.monthly_resets ? resets(p.monthly_resets, now) : null, countdown: p.monthly_resets ? countdown(p.monthly_resets, now) : null },
-              models: (p.models || []).map((m) => ({ name: m.name, used: m.used, left: m.used == null ? null : 100 - m.used })),
+              models: (p.models || []).map((m) => ({ name: m.name, used: m.used, left: m.used == null ? null : 100 - m.used, countdown: m.resetsAt ? countdown(m.resetsAt, now) : null })),
               extra: p.extra || null,
               steer: steer(p.models),
             })),
@@ -448,42 +460,53 @@ export default {
       title: "AI Usage",
       html: `
 <style>
-.tile { background: var(--card); border-radius: var(--radius); padding: 14px 16px; margin: 12px 0; }
+.tile { background: var(--card); border-radius: var(--radius); padding: 14px 18px; margin: 12px 0; }
 .tile header { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
 .tile h3 { margin: 0; font-size: 17px; }
-.tile .sub { color: var(--muted); font-size: 13px; }
-.win { margin-top: 12px; }
-.win .row { display: flex; justify-content: space-between; gap: 8px; font-size: 15px; }
-.win .row b { font-weight: 600; }
-.win .pace { color: var(--muted); font-size: 13px; margin-top: 2px; }
-.bar { height: 6px; border-radius: 3px; background: var(--fill); overflow: hidden; margin: 6px 0 2px; }
+.sub { color: var(--muted); font-size: 13px; }
+.acct { padding-top: 12px; margin-top: 12px; border-top: 1px solid var(--fill); }
+.tile header + .acct { border-top: 0; margin-top: 0; }
+.name { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.name b { font-size: 15px; font-weight: 600; }
+.acct .sub.mail { margin: 1px 0 6px; }
+.m { display: grid; grid-template-columns: 64px 1fr 44px 132px; align-items: center; gap: 10px; font-size: 13px; margin: 6px 0; }
+.m .p { text-align: right; font-variant-numeric: tabular-nums; }
+.m .r { color: var(--muted); text-align: right; white-space: nowrap; }
+.bar { height: 5px; border-radius: 3px; background: var(--fill); overflow: hidden; }
 .bar i { display: block; height: 100%; border-radius: 3px; }
-.steer { margin-top: 10px; font-size: 13px; }
-.err { color: var(--muted); font-size: 15px; }
+.alarm { font-size: 13px; margin-top: 4px; }
+.problem { display: flex; gap: 10px; align-items: baseline; padding-top: 10px; }
+.problem .s { color: var(--warn); }
+.problem b { font-size: 15px; }
 </style>
 <div id="list"></div>
 <script>
 const tone = (p) => p == null ? "var(--text)" : p >= 85 ? "var(--danger)" : p >= 70 ? "var(--warn)" : "var(--text)";
-const bar = (used) => used == null ? "" : \`<div class="bar"><i style="width:\${used}%;background:\${tone(used)}"></i></div>\`;
-function win(label, w) {
+function meter(label, w) {
   if (!w || w.used == null) return "";
-  return \`<div class="win"><div class="row"><span>\${label}</span><b>\${w.used}% used</b></div>\${bar(w.used)}
-    <div class="row sub"><span>\${w.pace ? one.esc(w.pace) : ""}</span><span>\${w.countdown ? "Resets " + one.esc(w.countdown) : ""}</span></div></div>\`;
+  return \`<div class="m"><span class="sub">\${one.esc(label)}</span><div class="bar"><i style="width:\${w.used}%;background:\${tone(w.used)}"></i></div><span class="p">\${w.used}%</span><span class="r">\${w.countdown ? "resets " + one.esc(w.countdown) : ""}</span></div>\`;
 }
-function tile(p) {
-  const head = \`<header><h3>\${one.esc(p.title)}</h3><span class="sub">\${one.esc([p.plan, p.device, p.updatedAgo ? "updated " + p.updatedAgo : ""].filter(Boolean).join(" · "))}</span></header>\`
-    + (p.account ? \`<div class="sub">\${one.esc(p.account)}\${p.active ? " · in use" : ""}</div>\` : "");
-  if (p.error) return \`<div class="tile">\${head}<div class="err">\${one.esc(p.error)}</div></div>\`;
-  const models = (p.models || []).map((m) => \`<div class="win"><div class="row"><span>\${one.esc(m.name)}</span><b>\${m.used}% used</b></div>\${bar(m.used)}</div>\`).join("");
-  const steer = p.steer ? \`<div class="steer">\${one.esc(p.steer)}</div>\` : "";
-  const extra = p.extra ? \`<div class="win"><div class="row"><span>Extra usage</span><b>$\${p.extra.used} of $\${p.extra.limit}</b></div></div>\` : "";
-  const est = p.estimated ? \`<div class="pace">~estimated from this device only</div>\` : "";
-  return \`<div class="tile">\${head}\${win("Session", p.session)}\${win("Weekly", p.weekly)}\${win("Monthly", p.monthly)}\${models}\${extra}\${steer}\${est}</div>\`;
+function read(p, several) {
+  if (p.error) return \`<div class="problem"><span class="s">⚠︎</span><div><b>Can't read \${one.esc(p.title)} here</b><div class="sub">\${one.esc(p.error)}</div></div></div>\`;
+  const [team, email] = (p.account || "").split(" · ");
+  const state = p.active && several ? "In use" : p.disabled ? "Not in rotation" : "";
+  const name = p.account ? \`<div class="name"><b>\${one.esc(team)}</b><span class="sub">\${state}</span></div><div class="sub mail">\${one.esc(email || "")}</div>\` : "";
+  const models = (p.models || []).map((m) => meter(m.name, m)).join("");
+  const extra = p.extra ? \`<div class="m"><span class="sub">Extra</span><span></span><span class="p"></span><span class="r">$\${p.extra.used} of $\${p.extra.limit}</span></div>\` : "";
+  const alarm = p.alarm ? \`<div class="alarm" style="color:var(--\${p.alarm.tone})">\${one.esc(p.alarm.text)}</div>\` : "";
+  const est = p.estimated ? \`<div class="sub">~estimated from this device only</div>\` : "";
+  return \`<div class="acct">\${name}\${meter("Session", p.session)}\${meter("Weekly", p.weekly)}\${meter("Monthly", p.monthly)}\${models}\${extra}\${alarm}\${est}</div>\`;
+}
+function tile(reads) {
+  const p = reads.find((r) => !r.error) || reads[0];
+  const head = \`<header><h3>\${one.esc(p.title)}</h3><span class="sub">\${one.esc([p.plan, p.device, p.updatedAgo ? "updated " + p.updatedAgo : ""].filter(Boolean).join(" · "))}</span></header>\`;
+  return \`<div class="tile">\${head}\${reads.map((r) => read(r, reads.length > 1)).join("")}</div>\`;
 }
 async function show() {
   const r = await one.call("status", { format: "json" });
   if (!r.providers || !r.providers.length) return one.empty("No providers yet.");
-  return r.providers.map(tile).join("");
+  const ids = [...new Set(r.providers.map((p) => p.id))];
+  return ids.map((id) => tile(r.providers.filter((p) => p.id === id))).join("");
 }
 one.on("changed", () => one.render("#list", show));
 one.render("#list", show);
@@ -508,7 +531,7 @@ one.render("#list", show);
           for (const p of reads) {
             const used = p.session_used ?? p.weekly_used;
             if (used == null) continue;
-            rows.push({ name: reads.length > 1 && p.account ? `${PROVIDERS[id].title} · ${p.account}` : PROVIDERS[id].title, used });
+            rows.push({ name: reads.length > 1 && p.account ? `${PROVIDERS[id].title} · ${p.account.replace(/ · (.+)@.*$/, " ($1)")}` : PROVIDERS[id].title, used });
           }
         }
         if (!rows.length) return { t: "text", text: "No readings yet", tone: "muted" };
