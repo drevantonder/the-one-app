@@ -371,13 +371,6 @@ pub fn same_secret(a: &[u8], b: &[u8]) -> bool {
     a.len() == b.len() && a.iter().zip(b).fold(0u8, |d, (x, y)| d | (x ^ y)) == 0
 }
 
-/// A service's proof that the enrollment secret `one services install-link` minted on its person's device was given to
-/// it: HKDF-SHA256(secret, "one/service\0" ‖ its key ‖ its seal key), hex. Only that device, which keeps the secret,
-/// checks it, so whoever passes its request on can't swap the keys.
-pub fn service_proof(secret: &[u8], device: &Endpoint) -> String {
-    HEXLOWER.encode(&hkdf(secret, &[&b"one/service\0"[..], &device.key, &device.seal].concat()))
-}
-
 /// A passkey's device keys, from its PRF output: (the Ed25519 seed it signs with, the X25519 secret sealed to).
 pub fn passkey_keys(prf: &[u8]) -> (SigningKey, [u8; 32]) {
     let seed = hkdf(prf, b"one/passkey-device/sign");

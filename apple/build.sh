@@ -1,12 +1,12 @@
 #!/bin/bash
-# Builds the Mac app with this checkout's node inside it, signs it and installs it to ~/Applications; with --release, it
+# Builds the Mac app with this checkout's program inside it, which its launch agent runs as oned, signs it and installs it to ~/Applications; with --release, it
 # also notarizes it. CONFIG=path/to/config.toml builds another white label.
 set -euo pipefail
 cd "$(dirname "$0")"
 CLIENT_TARGETS=aarch64-apple-darwin
 . ./project.sh
 BUNDLE_ID=app.$CONFIG_CLI.mac
-label=$BUNDLE_ID.node
+label=$BUNDLE_ID.oned
 
 (cd "$root" && CONFIG=$config cargo build --release)
 
@@ -15,6 +15,8 @@ xcodebuild -project Shells.xcodeproj -scheme Mac -configuration Release -destina
 app="build/derived/Build/Products/Release/$CONFIG_NAME.app"
 # Cargo names the binary after the package, whatever the white label.
 cp "$root/target/release/one" "$app/Contents/MacOS/$CONFIG_CLI"
+# Run by this name, it's oned, the Mac as a device.
+ln -sf "$CONFIG_CLI" "$app/Contents/MacOS/${CONFIG_CLI}d"
 mkdir -p "$app/Contents/Resources" && cp build/AppIcon.icns "$app/Contents/Resources/"
 plutil -replace CFBundleIconFile -string AppIcon "$app/Contents/Info.plist"
 mkdir -p "$app/Contents/Library/LaunchAgents"
@@ -24,8 +26,8 @@ cat > "$app/Contents/Library/LaunchAgents/$label.plist" <<PLIST
 <plist version="1.0">
 <dict>
   <key>Label</key><string>$label</string>
-  <key>BundleProgram</key><string>Contents/MacOS/$CONFIG_CLI</string>
-  <key>ProgramArguments</key><array><string>$CONFIG_CLI</string><string>serve</string></array>
+  <key>BundleProgram</key><string>Contents/MacOS/${CONFIG_CLI}d</string>
+  <key>ProgramArguments</key><array><string>${CONFIG_CLI}d</string></array>
   <key>AssociatedBundleIdentifiers</key><array><string>$BUNDLE_ID</string></array>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
@@ -66,8 +68,9 @@ trap '' TERM INT
 osascript -e "quit app id \"$BUNDLE_ID\"" 2>/dev/null || true
 for _ in $(seq 20); do pgrep -f "/Contents/MacOS/$CONFIG_NAME\$" >/dev/null || break; sleep 0.5; done
 pkill -f "/Contents/MacOS/$CONFIG_NAME\$" 2>/dev/null && sleep 1 || true
-# A node the app started itself, when its launch agent wasn't on, outlives it: stop it too, so the launch agent's, the
-# new build, is the one that runs.
+# oned the app started itself, when its launch agent wasn't on, outlives it: stop it too, so the launch agent's, the
+# new build, is the one that runs; and a node from before oned (ARCHITECTURE.md's Moving a machine to oned).
+pkill -f "/Contents/MacOS/${CONFIG_CLI}d\$" 2>/dev/null || true
 pkill -f "/Contents/MacOS/$CONFIG_CLI serve\$" 2>/dev/null || true
 dest="$HOME/Applications/$CONFIG_NAME.app"
 rm -rf "$dest"

@@ -1,4 +1,5 @@
-//! Device services, as the node knows them: which run on which device, registering them, and the built-in ones' records.
+//! Device services, as the node knows them: which run on which device, registering them, switching a device's parts on
+//! and off, and the built-in ones' records.
 
 use super::*;
 
@@ -23,23 +24,43 @@ impl Node {
         Ok(())
     }
 
-    /// Removes a service from a device (this one if none is named), or with `installed` lets it register there again,
-    /// for someone acting for one of the device's owners.
-    pub async fn set_service(&self, caller: &Caller, device: Option<&str>, name: &str, installed: bool) -> Result<()> {
+    /// Switches a part of a device's oned (a service, or `apps`, the app service) on or off there (this device if none
+    /// is named), for the device's person: that device's oned starts or stops it.
+    pub async fn set_service(&self, caller: &Caller, device: Option<&str>, name: &str, on: bool) -> Result<()> {
         ensure!(device.is_some() || caller.key == self.0.id, "say which device");
         let device = device.map(str::to_string).unwrap_or_else(|| self.device_name());
-        let content = self.with(|i| service_entry(&i.r.members, &caller.user, &device, name, installed))?;
+        let content = self.with(|i| service_entry(&i.r.members, &caller.user, &device, name, on))?;
         self.member_content(caller, content).await?;
         self.say_hello();
         Ok(())
     }
 
+    /// Whether a part of this device is switched off, by its latest `service` entry.
+    pub(super) fn off(m: &crate::members::Members, device: &Key, name: &str) -> bool {
+        m.services.get(&(*device, name.to_string())).is_some_and(|s| !s.on)
+    }
+
+    /// The install this device's parts are in, and those switched on here.
+    pub fn parts_on(&self) -> Result<(crate::service::Install, std::collections::BTreeSet<String>)> {
+        let address = self.address()?;
+        self.with(|i| {
+            let root = i.r.root.context("this device isn't in your One App yet")?.to_hex();
+            let on = i.r.members.services.iter().filter(|((k, _), s)| *k == self.0.id && s.on).map(|((_, name), _)| name.clone()).collect();
+            Ok((crate::service::Install { address: address.clone(), root, user: i.user.clone() }, on))
+        })
+    }
+
+    /// Whether this device runs apps' calls: unless its person switched its app service off.
+    pub fn runs_apps(&self) -> bool {
+        self.with(|i| Ok(!Self::off(&i.r.members, &self.0.id, crate::members::APPS_PART))).unwrap_or(true)
+    }
+
     /// The services serving on this device, whom each serves, and what each says it is: those built into the node,
-    /// then those registered. A service one of its owners removed from this device isn't served here.
+    /// then those registered. One its person switched off here isn't served.
     pub(super) fn services_here(&self, i: &Install) -> Vec<Service> {
         let m = &i.r.members;
         let everyone: Vec<String> = m.users.keys().filter(|u| m.serves(&self.0.id, u)).cloned().collect();
-        let removed = |name: &str| m.services.get(&(self.0.id, name.to_string())).is_some_and(|d| d.removed());
+        let removed = |name: &str| Self::off(m, &self.0.id, name);
         let built_in = |n: &crate::services::BuiltIn| {
             let mut d = (n.describe)();
             d["name"] = json!(n.name);
@@ -54,14 +75,11 @@ impl Node {
         services
     }
 
-    /// Why a service isn't served here, if one of this device's owners removed it.
+    /// Why a service isn't served here, if its person switched it off.
     pub(super) fn removed_here(&self, name: &str) -> Option<String> {
         self.with(|i| {
             let m = &i.r.members;
-            Ok(m.services.get(&(self.0.id, name.to_string())).filter(|d| d.removed()).map(|d| {
-                let by = m.users.get(&d.by).map(|u| u.name.as_str()).unwrap_or("an owner");
-                format!("{} was removed from {} by {by}; an owner of it installs it again", self.service_title(name), self.device_name())
-            }))
+            Ok(Self::off(m, &self.0.id, name).then(|| format!("{} is switched off on {}; its person switches it on in Settings › Devices", self.service_title(name), self.device_name())))
         })
         .ok()
         .flatten()

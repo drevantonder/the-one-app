@@ -1,102 +1,26 @@
 #!/bin/sh
-# Installs a service as the one-<service> service on a device, here or over ssh: ./install.sh whatsapp [host]. It's a
-# service endpoint of its own (src/service.rs), which needs no node there, only this program: one with a folder here is
-# a Go program, built for the device and started by `one services host`; any other is one this program hosts (`one
-# services serve`). It's yours, in the One App of the device you run this on, by a one-time install link made here, and
-# shows a code that this device approves it with (`one devices approve <code>`), which this prints. On Linux it's a systemd service; on a Mac, a
-# launch agent of the user's. CONFIG=path/to/config.toml installs it as <cli>-<service>, for that white label: its CLI
-# and data folder (the node service's <CLI>_HOME there, if it has one).
+# Puts a service in another language on a device, here or over ssh, and switches it on there: ./install.sh whatsapp
+# [host]. It's built for the device from its folder here and put at ~/.local/bin/<cli>-<name>, where the device's
+# oned runs it as a part of its own (src/oned.rs), started again on its new build; one this program offers needs
+# none of this: `<cli> services on <name> --device <device>` switches it on. CONFIG=path/to/config.toml puts it there
+# for that white label: its CLI.
 set -eu
 config=${CONFIG:+$(cd "$(dirname "$CONFIG")" && pwd)/$(basename "$CONFIG")}
 cd "$(dirname "$0")"
-service=$1 name=one-$1 node=one env= home='$HOME/.local/share/one'
+service=$1 cli=one
 host=${2:-}
 on() { if [ -n "$host" ]; then ssh "$host" "$@" </dev/null; else sh -c "$*"; fi; }
+[ -d "$service" ] || { echo "$service isn't a service in another language here: $cli services on $service switches one of this program's on" >&2; exit 1; }
 if [ -n "$config" ]; then
-	field() { sed -n "/^\[/q; s/^$1 *= *\"\{0,1\}\([^\"]*\)\"\{0,1\} *$/\1/p" "$config"; }
-	cli=$(field cli) name=$(field cli)-$1 node=$(field cli)
-	upper=$(echo "$cli" | tr a-z A-Z)
-	home=$(on "systemctl show -p Environment $cli 2>/dev/null | tr ' ' '\n' | sed -n 's/^${upper}_HOME=//p'")
-	home=${home:-'$HOME'/.local/share/$cli}
-	env="${upper}_HOME=$home"
-	[ ! -d "$service" ] || env="$env $(echo "$service" | tr a-z- A-Z_)_DATA=$home/$service"
+	cli=$(sed -n '/^\[/q; s/^cli *= *"\{0,1\}\([^"]*\)"\{0,1\} *$/\1/p' "$config")
 fi
-# The One App it's for, this device's, and whose: this device's person's, by a one-time secret made here.
-link=$($node services install-link)
+name=$cli-$service
 set -- $(on uname -sm)
 os=$(echo "$1" | tr A-Z a-z)
 case $2 in x86_64) arch=amd64 ;; *) arch=arm64 ;; esac
-# This program, there: copied from here if it isn't, when here is the same kind of machine.
-if ! on "test -x ~/.local/bin/$node"; then
-	[ "$(uname -sm)" = "$*" ] || { echo "$node isn't on ${host:-this device}: install it there first" >&2; exit 1; }
-	on "mkdir -p ~/.local/bin"
-	if [ -n "$host" ]; then scp -q "$(command -v "$node")" "$host:.local/bin/$node"; else cp "$(command -v "$node")" ~/.local/bin/; fi
-fi
-if [ -d "$service" ]; then
-	(cd "$service" && CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -ldflags "-X main.built=$(git rev-parse --short=12 HEAD)$(git diff --quiet HEAD -- . || echo +dirty)" -o "../$name" .)
-	if [ -n "$host" ]; then scp -q "$name" "$host:/tmp/$name"; else cp "$name" "/tmp/$name"; fi
-	rm "$name"
-	run='$HOME/.local/bin/'"$node"' services host '"$service"' $HOME/.local/bin/'"$name"' --install '"$link" install='mv /tmp/$name ~/.local/bin/$name'
-else
-	# A Go program it was before goes.
-	run='$HOME/.local/bin/'"$node"' services serve '"$service"' --install '"$link" install='rm -f ~/.local/bin/$name'
-fi
-# Says the code to approve it with, once it's asked; or that it's approved already.
-code() {
-	for _ in 1 2 3 4 5 6 7 8 9 10; do
-		c=$(on "cat $home/services/$service/code 2>/dev/null" || true)
-		[ -z "$c" ] || { echo "Approve $service here, where its link was made: $node devices approve $c"; return; }
-		sleep 1
-	done
-	echo "$service is running, approved already."
-}
-if [ "$os" = darwin ]; then
-[ -z "$config" ] || { echo "CONFIG installs on Linux only, for now" >&2; exit 1; }
-on "name=$name"'
-set -e
-mkdir -p ~/.local/bin ~/Library/LaunchAgents ~/Library/Logs
-'"$install"'
-plist=~/Library/LaunchAgents/app.one.$name.plist
-cat >$plist <<EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-<key>Label</key><string>app.one.$name</string>
-<key>ProgramArguments</key><array>$(for a in '"$run"'; do echo "<string>$a</string>"; done)</array>
-<key>EnvironmentVariables</key><dict><key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string><key>HOME</key><string>$HOME</string></dict>
-<key>RunAtLoad</key><true/>
-<key>KeepAlive</key><true/>
-<key>StandardErrorPath</key><string>$HOME/Library/Logs/$name.log</string>
-</dict></plist>
-EOF
-launchctl bootout gui/$(id -u)/app.one.$name 2>/dev/null || true
-launchctl bootstrap gui/$(id -u) $plist'
-code
-exit
-fi
-on "name=$name"'
-set -e
-user=$(id -un)
-mkdir -p ~/.local/bin
-'"$install"'
-sudo tee /etc/systemd/system/$name.service >/dev/null <<EOF
-[Unit]
-Description=$name
-
-[Service]
-User=$user
-ExecStart='"$run"'
-Restart=always
-RestartSec=2
-Environment=HOME=$HOME
-$(for e in '"$env"'; do echo "Environment=$e"; done)
-
-[Install]
-WantedBy=multi-user.target
-EOF
-sudo systemctl daemon-reload
-sudo systemctl enable $name
-sudo systemctl restart $name
-sleep 3
-systemctl is-active --quiet $name || { journalctl -u $name -n 5 --no-pager; exit 1; }'
-code
+on "test -x ~/.local/bin/$cli" || { echo "$cli isn't on ${host:-this device}: install it there first" >&2; exit 1; }
+(cd "$service" && CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -ldflags "-X main.built=$(git rev-parse --short=12 HEAD)$(git diff --quiet HEAD -- . || echo +dirty)" -o "../$name" .)
+# Put in place in one step, so oned never starts half of it.
+if [ -n "$host" ]; then scp -q "$name" "$host:.local/bin/$name.new"; else cp "$name" ~/.local/bin/"$name.new"; fi
+rm "$name"
+on "chmod 755 ~/.local/bin/$name.new && mv ~/.local/bin/$name.new ~/.local/bin/$name && ~/.local/bin/$cli services on $service"

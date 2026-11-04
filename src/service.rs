@@ -1,13 +1,12 @@
-//! A service endpoint: a device's abilities (a service) offered over iroh, with no node on its machine. It's an
-//! endpoint of its own key, kept in its folder, and gets in when a person types the code it shows into one of their
-//! devices (`one devices approve`), which lists it as their service offering it and tells the relay to let it in. It
-//! holds no keys and reads no bucket: the nodes that call it bring it `global`'s entries, whose member entries it
-//! replays from the install's first entry (given where it's installed, by its person's own machine, so nothing on the
-//! way can make it another install's) and checks each caller by itself: a compute endpoint of the install that runs
-//! the calls of a person it serves. The program offering it registers over a loopback with the services' API and long-polls for calls,
-//! whether it's this one (`one services serve`, `services::answer_hosted`) or one in another language (`one services
-//! host`, which starts it), so the Go services don't change. A service writes nothing itself: what it asks for is a
-//! call, which a node of its person's runs (`/v1/call` on the loopback).
+//! A service endpoint: a device's abilities (a service) offered over iroh, as a part of its device's oned, a process of
+//! its own (`oned <name>`). It's an endpoint of its own key, kept in its folder, and gets in when its device's oned lists
+//! it as its person's, a part of that device (`Node::list_part`), which tells the relay to let it in. It holds no keys
+//! and reads no bucket: the nodes that call it bring it `global`'s entries, whose member entries it replays from the
+//! install's first entry (given by oned, so nothing on the way can make it another install's) and checks each caller by
+//! itself: a compute endpoint of the install that runs the calls of a person it serves. The program offering it
+//! registers over a loopback with the services' API and long-polls for calls, whether it's this one
+//! (`services::answer_hosted`) or one in another language (`~/.local/bin/<cli>-<name>`, which it starts). A service
+//! writes nothing itself: what it asks for is a call, which a node of its person's runs (`/v1/call` on the loopback).
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -45,38 +44,30 @@ const STREAMS: u32 = 32;
 /// How long reaching a node may take.
 const CONNECT: Duration = Duration::from_secs(10);
 
-/// The install a service is in: its address, where its relay and sign-in are, the hash of its first entry, which its
-/// member entries are replayed from, the person whose service it is to be, and the one-time secret their device minted
-/// for it (`one services install-link`), which proves to that device that its request is this service's.
+/// The install a service is in, as its device's oned gives it: its address, where its relay and sign-in are, the hash
+/// of its first entry, which its member entries are replayed from, and the person whose service it is.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Install {
     pub address: String,
     pub root: String,
     pub user: String,
-    pub secret: String,
 }
 
 impl Install {
-    /// From what `one services install-link` prints on its person's device: `<address>#<root>/<user>/<secret>`.
-    pub fn parse(link: &str) -> Result<Install> {
-        let said = "that's what one services install-link prints on one of your devices: <address>#<hash>/<you>/<secret>";
-        let (address, rest) = link.trim().rsplit_once('#').context(said)?;
-        let mut parts = rest.split('/');
-        let (Some(root), Some(user), Some(secret), None) = (parts.next(), parts.next(), parts.next(), parts.next()) else { bail!("{said}") };
-        Hash::from_hex(root).context("after the # is the hash of your One App's first entry")?;
-        ensure!(crate::entry::is_id(user), "{said}");
-        ensure!(unhex(secret).is_ok(), "{said}");
-        ensure!(address.starts_with("http://") || address.starts_with("https://"), "before the # is your One App's address");
-        Ok(Install { address: address.trim_end_matches('/').to_string(), root: root.to_string(), user: user.to_string(), secret: secret.to_string() })
+    /// Where oned keeps it, in the service's folder.
+    pub fn path(dir: &Path) -> PathBuf {
+        dir.join("install.json")
     }
 
-    pub fn link(&self) -> String {
-        format!("{}#{}/{}/{}", self.address, self.root, self.user, self.secret)
-    }
-
-    /// The same install for the same person, whatever secret each carries.
-    fn same(&self, other: &Install) -> bool {
-        (&self.address, &self.root, &self.user) == (&other.address, &other.root, &other.user)
+    /// Gives it to the service kept in `dir`, the first time: a service is another install's or person's only once
+    /// its folder goes.
+    pub fn give(&self, dir: &Path) -> Result<()> {
+        std::fs::create_dir_all(dir)?;
+        match std::fs::read(Self::path(dir)).ok().map(|b| serde_json::from_slice::<Install>(&b)).transpose()? {
+            Some(kept) => ensure!(kept == *self, "{} is someone else's, or in another One App ({}): remove it to move it", dir.display(), kept.address),
+            None => write_private(&Self::path(dir), &serde_json::to_vec_pretty(self)?)?,
+        }
+        Ok(())
     }
 }
 
@@ -84,24 +75,10 @@ impl Install {
 #[derive(Clone)]
 pub struct Service(Arc<Inner>);
 
-/// Auth's refusal (403) of a service's request: its install link was used or ran out, or the request isn't signed as it should be.
-#[derive(Debug)]
-struct LinkRefused(String);
-
-impl std::fmt::Display for LinkRefused {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
-impl std::error::Error for LinkRefused {}
-
 struct Inner {
     name: String,
     dir: PathBuf,
     key: SigningKey,
-    /// Its machine's name, which its request to join shows.
-    machine: String,
     install: Install,
     /// `global`'s entries, as the nodes brought them, and what its member entries add up to.
     known: Mutex<(Vec<Entry>, Members)>,
@@ -135,9 +112,8 @@ fn write_private(path: &Path, bytes: &[u8]) -> Result<()> {
 }
 
 impl Service {
-    /// The service `name` kept in `dir`: its key (made the first time), and the install it's in, `install` the first
-    /// time, which can't change after.
-    pub fn open(dir: &Path, name: &str, install: Option<Install>) -> Result<Service> {
+    /// The service `name` kept in `dir`: its key (made the first time), and the install oned gave it.
+    pub fn open(dir: &Path, name: &str) -> Result<Service> {
         use std::os::unix::fs::PermissionsExt;
         ensure!(members::valid_app_name(name), "a service's name is lowercase words joined by -");
         std::fs::create_dir_all(dir)?;
@@ -151,18 +127,7 @@ impl Service {
                 key
             }
         };
-        let install_file = dir.join("install.json");
-        let kept: Option<Install> = std::fs::read(&install_file).ok().map(|b| serde_json::from_slice(&b)).transpose()?;
-        let install = match (kept, install) {
-            (Some(kept), Some(given)) if !kept.same(&given) => bail!("{name} here is someone else's, or in another One App ({}): remove {} to move it", kept.address, dir.display()),
-            (Some(kept), None) => kept,
-            // A new link, from the same person, for a new request once the last one's secret ran out.
-            (_, Some(given)) => {
-                write_private(&install_file, &serde_json::to_vec_pretty(&given)?)?;
-                given
-            }
-            (None, None) => bail!("say which One App {name} is for: --install <link>, as one services install-link prints it on one of its devices"),
-        };
+        let install: Install = serde_json::from_slice(&std::fs::read(Install::path(dir)).with_context(|| format!("{name} is started by its device's oned, which says which One App it's in"))?)?;
         let token = match std::fs::read_to_string(dir.join(crate::api::LOCAL_TOKEN)) {
             Ok(t) if !t.trim().is_empty() => t.trim().to_string(),
             _ => {
@@ -180,7 +145,6 @@ impl Service {
             name: name.to_string(),
             dir: dir.to_path_buf(),
             key,
-            machine: hostname(),
             install,
             known: Mutex::new((entries, members)),
             depths: Mutex::new(depths),
@@ -204,11 +168,6 @@ impl Service {
     /// Where its endpoint is reached now, once it's bound.
     pub fn addr(&self) -> Option<EndpointAddr> {
         self.0.endpoint.lock().unwrap().as_ref().map(|e| e.addr())
-    }
-
-    /// The code a person types on one of their devices to make it theirs.
-    pub fn code(&self) -> String {
-        crate::keys::join_code(&self.endpoint())
     }
 
     /// Where the program offering it registers.
@@ -242,7 +201,7 @@ impl Service {
             }
         });
         tokio::spawn(self.clone().keep_endpoint());
-        tokio::spawn(self.clone().ask_to_join());
+        tokio::spawn(self.clone().ask_to_be_listed());
         Ok(at)
     }
 
@@ -284,73 +243,25 @@ impl Service {
             .await?)
     }
 
-    /// Leaves its request to join at the install's sign-in service, signed with its own key, and says the code to
-    /// approve it with; again before it runs out, until a device approves it.
-    async fn ask_to_join(self) {
-        let mut asked: Option<std::time::Instant> = None;
-        let mut asked_for_good = false;
+    /// Asks its device's oned to list it, once the program offering it has said what it is (so whether it serves
+    /// everyone): `ask` in its folder, its endpoint and that, which oned reads and lists, until it's listed as its
+    /// person's and as part of a device (one listed before parts named their device is listed again).
+    async fn ask_to_be_listed(self) {
+        let ask = self.0.dir.join("ask");
         loop {
-            if let Some(owner) = self.owner() {
-                let _ = std::fs::remove_file(self.0.dir.join("code"));
-                if asked.is_some() {
-                    let name = self.0.known.lock().unwrap().1.user(&owner).map(|u| u.name.clone()).unwrap_or(owner);
-                    eprintln!("{} is approved: it answers {name}'s devices.", self.0.name);
-                }
-                return;
-            }
-            // Once the program offering it has said what it is, so the request says whether it serves everyone.
             let registered = !self.0.services.describe().is_empty();
-            if registered && !asked_for_good && asked.is_none_or(|a| a.elapsed() > Duration::from_secs(10 * 60)) {
-                match self.request_approval().await {
-                    Ok(()) => {
-                        let code = self.code();
-                        let _ = write_private(&self.0.dir.join("code"), code.as_bytes());
-                        eprintln!("To make {} on {} yours, approve it on one of your devices: {} devices approve {code}", self.0.name, self.0.machine, crate::config::CLI);
-                        asked = Some(std::time::Instant::now());
-                    }
-                    // Its install link was used (a device approved it, and a node will bring the entries that say so) or ran
-                    // out: asking again with it is no use, so it says what to do once, and waits for a node.
-                    Err(err) if err.downcast_ref::<LinkRefused>().is_some() => {
-                        eprintln!("{} isn't asking again: {err:#} If it was approved, it answers once a node of your One App reaches it.", self.0.name);
-                        asked = Some(std::time::Instant::now());
-                        asked_for_good = true;
-                    }
-                    Err(err) => {
-                        eprintln!("asking your One App to approve {}: {err:#}", self.0.name);
-                        tokio::time::sleep(Duration::from_secs(30)).await;
-                        continue;
-                    }
+            let listed = self.owner().is_some() && self.0.known.lock().unwrap().1.service(&self.key()).is_some_and(|s| s.device.is_some());
+            if listed || !registered {
+                let _ = std::fs::remove_file(&ask);
+            } else if !ask.exists() {
+                let me = self.endpoint();
+                let said = json!({ "key": hex(&me.key), "seal": hex(&me.seal), "shared": self.0.services.serves_everyone(&self.0.name) });
+                if let Err(err) = write_private(&ask, said.to_string().as_bytes()) {
+                    tracing::warn!("asking oned to list {}: {err:#}", self.0.name);
                 }
             }
             tokio::time::sleep(Duration::from_secs(2)).await;
         }
-    }
-
-    /// Leaves its request to be approved at auth, with its install link's enrollment and proof.
-    pub async fn request_approval(&self) -> Result<()> {
-        let me = self.endpoint();
-        let path = "/api/auth/devices/requests";
-        let install = &self.0.install;
-        let secret = unhex(&install.secret)?;
-        let fields = json!({
-            "route": format!("POST {path}"), "key": hex(&me.key), "seal": hex(&me.seal), "name": self.0.machine, "service": self.0.name,
-            "shared": self.0.services.serves_everyone(&self.0.name), "user": install.user,
-            "enrollment": hex(&crate::keys::sha256(&secret)), "proof": crate::keys::service_proof(&secret, &me),
-        });
-        let body = crate::keys::signed_request(&self.0.key, "one/auth", fields, now_ms());
-        let url = format!("{}{path}", self.0.install.address);
-        tokio::task::spawn_blocking(move || {
-            let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).timeout_global(Some(Duration::from_secs(30))).build().into();
-            let mut resp = agent.post(&url).send_json(&body)?;
-            let out: Value = resp.body_mut().read_json().unwrap_or(Value::Null);
-            let said = out["error"].as_str().unwrap_or("the sign-in service didn't answer");
-            if resp.status() == 403 {
-                bail!(LinkRefused(said.to_string()));
-            }
-            ensure!(resp.status().is_success(), "{said}");
-            Ok(())
-        })
-        .await?
     }
 
     /// Answers what a computer asks on a connection it opened: a node of the install anything a node asks a service;
@@ -575,11 +486,12 @@ impl Service {
         let known = self.0.known.lock().unwrap();
         let m = &known.1;
         let devices: Vec<Value> = m.offering(&self.0.name).map(|s| json!({ "key": hex(&s.key), "name": s.name, "online": s.key == self.key(), "services": [self.0.name] })).collect();
-        // The scopes this machine's own node runs, if it has one: a program here may reach what they hold.
-        let here: Vec<&crate::members::Machine> = m.computes().filter(|c| c.name == self.0.machine).collect();
-        let runs_for: Vec<String> = m.scopes().into_iter().filter(|s| here.iter().any(|c| m.runs_for(&c.key, s))).map(|s| s.to_string()).collect();
+        // The scopes its device runs, whose part it is: a program here may reach what they hold.
+        let listed = m.service(&self.key());
+        let device = listed.and_then(|s| s.device);
+        let runs_for: Vec<String> = m.scopes().into_iter().filter(|s| device.is_some_and(|d| m.runs_for(&d, s))).map(|s| s.to_string()).collect();
         json!({
-            "device": { "key": hex(&self.key()), "name": self.0.machine, "runs_for": runs_for },
+            "device": { "key": hex(&self.key()), "name": listed.map(|s| s.name.as_str()).unwrap_or(""), "runs_for": runs_for },
             "user": self.owner_in(m).map(|u| json!({ "id": u, "name": m.user(&u).map(|p| p.name.clone()) })),
             "install": { "name": m.name, "root": self.0.install.root, "devices": devices, "settings": crate::state::settings(m) },
         })
@@ -639,16 +551,6 @@ fn placed(root: Hash, entries: Vec<Entry>, depths: &HashMap<Hash, u64>) -> (Vec<
 
 fn now_ms() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
-}
-
-/// What this machine is called in your One App: its node's name when one is here (which its person may have changed),
-/// else its hostname.
-fn hostname() -> String {
-    let node: Option<Value> = std::fs::read(crate::home().join("device.json")).ok().and_then(|b| serde_json::from_slice(&b).ok());
-    if let Some(name) = node.as_ref().and_then(|n| n["name"].as_str()).filter(|n| !n.trim().is_empty()) {
-        return name.to_string();
-    }
-    std::process::Command::new("hostname").output().ok().map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).filter(|s| !s.is_empty()).unwrap_or_else(|| "device".into())
 }
 
 // The loopback's routes.
@@ -726,67 +628,111 @@ async fn call(State(s): State<Service>, headers: HeaderMap, Json(body): Json<Val
     }
 }
 
-/// Whether this program's binary was replaced, by an update: it stops, for its service manager to start the new one.
-fn replaced_check() -> Result<impl Fn() -> bool> {
+/// Whether this part should stop: this program's binary was replaced, by an update, so the new oned starts it again;
+/// or the oned that started it is gone.
+fn stop_check() -> Result<impl Fn() -> bool> {
     use std::os::unix::fs::MetadataExt;
+    // Asked to stop (oned switching it off): it stops what it started first, on a Mac too, where nothing else would.
+    extern "C" fn asked(_: libc::c_int) {
+        ASKED.store(true, SeqCst);
+    }
+    // SAFETY: the handler only stores to an atomic.
+    unsafe { libc::signal(libc::SIGTERM, asked as *const () as libc::sighandler_t) };
     let exe = std::env::current_exe()?.canonicalize()?;
     let ino = std::fs::metadata(&exe)?.ino();
-    Ok(move || std::fs::metadata(&exe).map(|m| m.ino()).ok() != Some(ino))
+    let parent = std::os::unix::process::parent_id();
+    Ok(move || ASKED.load(SeqCst) || std::fs::metadata(&exe).map(|m| m.ino()).ok() != Some(ino) || std::os::unix::process::parent_id() != parent)
 }
 
-/// Starts the service `name` on a runtime of its own, kept in its folder, in `install` the first time.
-fn started(name: &str, install: Option<&str>) -> Result<(Service, std::net::SocketAddr, tokio::runtime::Runtime)> {
+/// Whether this part was asked to stop.
+static ASKED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// `oned <name>`: the service `name` as a part of this device's oned, which started it, until oned stops or this
+/// program is replaced: this program's own (`services::hosted`), or the program `~/.local/bin/<cli>-<name>`, started
+/// here and again whenever it stops, told where to register (`ONE_ADDR`), where the token it sends is (`ONE_HOME`,
+/// the service's folder) and where its data goes (`<NAME>_DATA`). One runs at a time: a part an update's oned starts
+/// waits for the one before to stop.
+pub fn run(name: &str) -> Result<()> {
     let filter = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "one=info,warn".into());
     let _ = tracing_subscriber::fmt().with_writer(std::io::stderr).with_env_filter(filter).try_init();
-    let install = install.map(Install::parse).transpose()?;
+    let dir = folder(name);
+    std::fs::create_dir_all(&dir)?;
+    let lock = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(dir.join("lock"))?;
+    // SAFETY: a plain flock on a file this keeps open: held until this process exits.
+    ensure!(unsafe { libc::flock(std::os::fd::AsRawFd::as_raw_fd(&lock), libc::LOCK_EX) } == 0, "lock {}", dir.display());
+    let stop = stop_check()?;
+    let program = crate::oned::program(name);
+    let hosted = crate::services::hosted().iter().any(|h| h.name == name);
+    ensure!(hosted || program.exists(), "{name} isn't a service this program offers, and {} isn't there", program.display());
     let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
-    let service = Service::open(&folder(name), name, install)?;
+    let service = Service::open(&dir, name)?;
     let at = runtime.block_on(service.start())?;
-    Ok((service, at, runtime))
-}
-
-/// `one services serve <name>`: a service this program hosts (`services::hosted`), as a service endpoint, until this
-/// program is replaced.
-pub fn serve(name: &str, install: Option<&str>) -> Result<()> {
-    crate::services::hosted().iter().find(|h| h.name == name).ok_or_else(|| anyhow!("{name} isn't a service this program hosts"))?;
-    let replaced = replaced_check()?;
-    let (service, at, _runtime) = started(name, install)?;
     let data = crate::home().join(name);
     std::fs::create_dir_all(&data)?;
-    crate::services::answer_hosted(name, data, at.to_string(), service.token().to_string(), &replaced)?;
-    eprintln!("{name}: this program was replaced, so it stops for the new one");
+    if hosted {
+        crate::services::answer_hosted(name, data, at.to_string(), service.token().to_string(), &stop)?;
+    } else {
+        host(name, &program, &data, at, &service, &stop)?;
+    }
+    eprintln!("{name}: stopping, for oned to start it again");
     Ok(())
 }
 
-/// `one services host <name> <program> [args…]`: a service in another language as a service endpoint, the program
-/// started here and again whenever it stops, told where to register (`ONE_ADDR`) and where the token it sends is
-/// (`ONE_HOME`, the service's folder), until this program is replaced.
-pub fn host(name: &str, program: &[String], install: Option<&str>) -> Result<()> {
-    let (exe, args) = program.split_first().context("say which program offers it")?;
-    let replaced = replaced_check()?;
-    let (service, at, _runtime) = started(name, install)?;
-    while !replaced() {
-        let mut child = std::process::Command::new(exe)
-            .args(args)
-            .env("ONE_ADDR", at.to_string())
-            .env("ONE_HOME", &service.0.dir)
-            .env("ONE_CLI", crate::config::CLI)
-            .spawn()
-            .with_context(|| format!("starting {exe}"))?;
+/// Runs a service's program in another language, started again whenever it stops, until `stop`.
+fn host(name: &str, program: &Path, data: &Path, at: std::net::SocketAddr, service: &Service, stop: &impl Fn() -> bool) -> Result<()> {
+    use std::os::unix::fs::MetadataExt;
+    let data_var = format!("{}_DATA", name.to_uppercase().replace('-', "_"));
+    let built = || std::fs::metadata(program).map(|m| (m.ino(), m.mtime())).ok();
+    while !stop() {
+        let started = built();
+        let mut command = std::process::Command::new(program);
+        command.env("ONE_ADDR", at.to_string()).env("ONE_HOME", &service.0.dir).env("ONE_CLI", crate::config::CLI).env(&data_var, data);
+        #[cfg(target_os = "linux")]
+        {
+            use std::os::unix::process::CommandExt;
+            // It stops with this part, even one killed: two of a service on the same data (WhatsApp's link) mustn't run.
+            // SAFETY: only an async-signal-safe call, between fork and exec.
+            unsafe {
+                command.pre_exec(|| {
+                    if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM) == -1 {
+                        return Err(std::io::Error::last_os_error());
+                    }
+                    Ok(())
+                });
+            }
+        }
+        let mut child = command.spawn().with_context(|| format!("starting {}", program.display()))?;
         loop {
             if let Some(status) = child.try_wait()? {
-                eprintln!("{exe} stopped ({status}): starting it again");
+                eprintln!("{} stopped ({status}): starting it again", program.display());
                 std::thread::sleep(Duration::from_secs(2));
                 break;
             }
-            if replaced() {
-                let _ = child.kill();
-                let _ = child.wait();
+            // Stopped for good, or for its new build, put in its place (`services/install.sh`).
+            let renewed = built() != started;
+            if stop() || renewed {
+                end(&mut child);
+                if renewed {
+                    eprintln!("{}: a new build is there, so it starts again", program.display());
+                }
                 break;
             }
             std::thread::sleep(Duration::from_secs(1));
         }
     }
-    eprintln!("{name}: this program was replaced, so it stops for the new one");
     Ok(())
+}
+
+/// Stops a program: asked, then made to, if it hasn't in ten seconds, so it closes what it keeps (WhatsApp's link).
+fn end(child: &mut std::process::Child) {
+    // SAFETY: a signal to a child of this process, which it hasn't reaped.
+    unsafe { libc::kill(child.id() as i32, libc::SIGTERM) };
+    for _ in 0..100 {
+        if !matches!(child.try_wait(), Ok(None)) {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    let _ = child.kill();
+    let _ = child.wait();
 }

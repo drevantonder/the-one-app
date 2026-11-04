@@ -80,6 +80,8 @@ pub mod serverless;
 #[cfg(feature = "node")]
 pub mod services;
 #[cfg(feature = "node")]
+pub mod oned;
+#[cfg(feature = "node")]
 pub mod service;
 pub mod kernel;
 pub mod keys;

@@ -13,6 +13,8 @@ use crate::entry::{Content, Entry, Hash, Key, Scope, hex, is_id, unhex};
 
 /// The node's own entries. Apps never see them.
 pub const APP: &str = "node";
+/// The app service, as a part of a device's oned its `service` entries switch: running apps' calls.
+pub const APPS_PART: &str = "apps";
 /// Agents' built-in service (`src/agents.rs`), whose Vault requests are theirs: here too for the serverless node.
 pub const AGENTS: &str = "agents";
 
@@ -89,6 +91,9 @@ pub struct Machine {
     /// For a service endpoint, whether it serves everyone its person's listing lets it (a push sender, say), not only
     /// its own person.
     pub shared: bool,
+    /// The device it's part of, when it's one's: for a service, its device's oned; for a native app's sign-in, the
+    /// device it's on (that device's oned, or an id of the device's own).
+    pub device: Option<Key>,
     /// Who listed it: its person, from one of their own devices, or an admin.
     pub by: String,
     /// When it was listed, as its entry says (ms).
@@ -131,22 +136,13 @@ pub struct App {
     pub source: Option<String>,
 }
 
-/// The latest `service` entry for a service on a device: removed there, or let register there again.
+/// The latest `service` entry for a part of a device's oned (a service, or `apps`, the app service): on or off there,
+/// as the device's person switched it.
 #[derive(Clone, Debug)]
-pub struct ServiceInstall {
-    /// Its executable, for its device's node to start *(not built yet)*.
-    pub blob: Option<String>,
-    /// Installed by registering over the local API, as `services/install.sh` does.
-    pub local: bool,
+pub struct Switch {
+    pub on: bool,
     pub by: String,
     pub time: u64,
-}
-
-impl ServiceInstall {
-    /// Removed from its device: it isn't served there until it's installed again.
-    pub fn removed(&self) -> bool {
-        self.blob.is_none() && !self.local
-    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -160,8 +156,8 @@ pub struct Members {
     /// The install's settings its admins set: each name's latest value. The rest are the white label's defaults.
     pub settings: BTreeMap<String, String>,
     pub apps: BTreeMap<String, App>,
-    /// The latest `service` entry of each service on each device: (device, service).
-    pub services: BTreeMap<(Key, String), ServiceInstall>,
+    /// The latest `service` entry of each part on each device: (device, part).
+    pub services: BTreeMap<(Key, String), Switch>,
     /// When the install's devices last changed, by the newest genesis, device or remove: the relay's list is as of then.
     pub devices_at: u64,
     /// Each scope's current epoch, by its newest `epoch` entry that counts (src/keys.rs).
@@ -624,7 +620,9 @@ impl Members {
                 // A machine an admin listed for someone is listed again by that person's own device to be theirs: then it
                 // runs their own scope too (`runs_for`).
                 if let Some(was) = self.machines.get(&machine.key) {
-                    ensure!(!was.removed && was.user == user && w == user && was.by != user && was.seal == machine.seal, "that key is listed already");
+                    // Or a service of theirs listed again by their own device, to name the device it's part of.
+                    let part = was.is(Kind::Service) && was.roles == machine.roles && was.service == machine.service;
+                    ensure!(!was.removed && was.user == user && w == user && (was.by != user || part) && was.seal == machine.seal, "that key is listed already");
                     self.machines.insert(machine.key, machine);
                     self.devices_at = self.devices_at.max(e.time());
                     return Ok(());
@@ -865,11 +863,9 @@ impl Members {
                 let device = key_of("device")?;
                 let name = text("name")?;
                 ensure!(valid_app_name(&name), "service names are lowercase words joined by -");
-                ensure!(self.machine(&device).is_some(), "no such device");
-                ensure!(self.looks_after(&w, &device), "only a device's person or an admin installs or removes its services");
-                let blob = data["blob"].as_str().map(str::to_string);
-                ensure!(blob.as_ref().is_none_or(|b| e.content.blobs.contains(b)), "a service names its executable among its blobs");
-                self.services.insert((device, name), ServiceInstall { blob, local: data["local"] == true, by: w, time: e.time() });
+                let owner = self.machine(&device).context("no such device")?.user.clone();
+                ensure!(w == owner, "only a device's person switches what it runs");
+                self.services.insert((device, name), Switch { on: data["on"] == true, by: w, time: e.time() });
             }
             "install" | "uninstall" | "node-release" => {}
             other => bail!("unknown kind {other}"),
@@ -904,6 +900,7 @@ fn listed(data: &Value, user: &str, since: u64) -> Result<Machine> {
         passkey: data["passkey"].as_str().map(str::to_string),
         shared: service.is_some() && data["shared"] == true,
         service,
+        device: data["device"].as_str().map(unhex).transpose().context("device is the key of the device it's part of")?,
         by: user.to_string(),
         since,
         removed: false,
@@ -1256,9 +1253,9 @@ pub fn vault(scope: &Scope, n: u32, public: &[u8; 32], to: &[Key]) -> Content {
     node("vault", json!({ "scope": scope.to_string(), "n": n, "public": hex(public), "to": to.iter().map(hex).collect::<Vec<_>>() }))
 }
 
-/// A service removed from a device (`installed` false), or let register there again.
-pub fn service(device: &Key, name: &str, installed: bool) -> Content {
-    node("service", json!({ "device": hex(device), "name": name, "blob": null, "local": installed }))
+/// A part of a device's oned (a service, or `apps`, the app service) switched on or off there.
+pub fn service(device: &Key, name: &str, on: bool) -> Content {
+    node("service", json!({ "device": hex(device), "name": name, "on": on }))
 }
 
 /// Where its writer's own things run besides their own machines: the install's others that run their own scope.
@@ -1289,10 +1286,10 @@ pub fn install(app: &str, installed: bool) -> Content {
     node(if installed { "install" } else { "uninstall" }, json!({ "app": app }))
 }
 
-/// Lists a service endpoint offering `service` as `user`'s, by one of their own devices: `shared` if it serves everyone
-/// it may, not only them.
-pub fn service_endpoint(endpoint: &crate::keys::Endpoint, user: &str, name: &str, service: &str, shared: bool) -> Content {
-    let mut data = json!({ "key": hex(&endpoint.key), "seal": hex(&endpoint.seal), "user": user, "name": name, "roles": [Kind::Service], "service": service });
+/// Lists a service endpoint offering `service` as `user`'s, a part of `device`, by that device: `shared` if it serves
+/// everyone it may, not only them.
+pub fn service_endpoint(endpoint: &crate::keys::Endpoint, user: &str, name: &str, service: &str, shared: bool, device: &Key) -> Content {
+    let mut data = json!({ "key": hex(&endpoint.key), "seal": hex(&endpoint.seal), "user": user, "name": name, "roles": [Kind::Service], "service": service, "device": hex(device) });
     if shared {
         data["shared"] = json!(true);
     }
@@ -1363,6 +1360,34 @@ mod tests {
         let m = members(&entries);
         assert_eq!(m.users.len(), 1);
         assert_eq!(m.seal_key(&entries[0].author()), Some(Dev::new(1).endpoint().seal), "the seal key it was listed with");
+    }
+
+    #[test]
+    fn only_a_devices_person_switches_its_parts_and_lists_them_as_its_own() {
+        let (mut mac, mut entries) = setup();
+        let mut bobs = Dev::new(3);
+        let mut linux = Dev::new(4);
+        add(&mut entries, &mut mac, ANDRE, device(&bobs.endpoint(), BOB, "bob's phone", &[Kind::Client], Some(("Bob", Role::Member))));
+        add(&mut entries, &mut mac, ANDRE, device(&linux.endpoint(), ANDRE, "linux", BOTH, None));
+        // Bob, even with Andre's listing, switches nothing on Andre's linux; Andre's own linux does.
+        let (linux_id, bobs_id, mac_id) = (linux.id(), bobs.id(), mac.id());
+        add(&mut entries, &mut bobs, BOB, service(&linux_id, "whatsapp", true));
+        assert!(members(&entries).services.is_empty());
+        add(&mut entries, &mut linux, ANDRE, service(&linux_id, "whatsapp", true));
+        add(&mut entries, &mut mac, ANDRE, service(&linux_id, APPS_PART, false));
+        let m = members(&entries);
+        assert!(m.services[&(linux.id(), "whatsapp".into())].on && !m.services[&(linux.id(), APPS_PART.into())].on);
+        // linux lists its part; it lists it again naming itself, which an old listing lacked; Bob's device can't.
+        let part = Dev::new(8);
+        let listed = |device: &Key| service_endpoint(&part.endpoint(), ANDRE, "linux", "whatsapp", false, device);
+        add(&mut entries, &mut linux, ANDRE, listed(&mac_id));
+        add(&mut entries, &mut linux, ANDRE, listed(&linux_id));
+        add(&mut entries, &mut bobs, BOB, service_endpoint(&part.endpoint(), BOB, "linux", "whatsapp", false, &bobs_id));
+        let m = members(&entries);
+        assert_eq!((m.machines[&part.id()].user.as_str(), m.machines[&part.id()].device), (ANDRE, Some(linux_id)));
+        // Nor is anything but a service listed again by its person.
+        add(&mut entries, &mut mac, ANDRE, device(&linux.endpoint(), ANDRE, "linux", &[Kind::Compute], None));
+        assert_eq!(members(&entries).machines[&linux_id].roles.len(), 2);
     }
 
     #[test]

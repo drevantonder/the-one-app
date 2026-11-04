@@ -223,14 +223,17 @@ struct MacNode: NodeTransport {
     }
 }
 
-/// Keeps this device's node running: a login-persistent launch agent, or a child process if that's refused.
+/// Keeps oned, this Mac as a device, running: a login-persistent launch agent, or a child process if that's refused.
 @MainActor
 enum NodeLauncher {
     static var cli: String { Bundle.main.object(forInfoDictionaryKey: "CLI") as? String ?? "" }
-    static var label: String { "\(Bundle.main.bundleIdentifier ?? "").node" }
+    static var label: String { "\(Bundle.main.bundleIdentifier ?? "").oned" }
     private static var child: Process?
 
     static func start() async throws {
+        // The node's launch agent before oned: gone, as this one runs in its place.
+        let before = SMAppService.agent(plistName: "\(Bundle.main.bundleIdentifier ?? "").node.plist")
+        if before.status != .notRegistered { try? await before.unregister() }
         let agent = SMAppService.agent(plistName: "\(label).plist")
         if agent.status == .enabled {
             if await kickstarted() { return }
@@ -244,8 +247,7 @@ enum NodeLauncher {
         } catch {}
         guard child?.isRunning != true else { return }
         let process = Process()
-        process.executableURL = Bundle.main.bundleURL.appending(path: "Contents/MacOS/\(cli)")
-        process.arguments = ["serve"]
+        process.executableURL = Bundle.main.bundleURL.appending(path: "Contents/MacOS/\(cli)d")
         try process.run()
         child = process
     }

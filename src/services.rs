@@ -205,10 +205,10 @@ impl Services {
     }
 }
 
-/// A service this program hosts as a service endpoint of its own, `<cli> services serve <name>` (src/service.rs), which
-/// `services/install.sh` installs on a device whose owner wants it there, with or without a node. It registers with
-/// its endpoint over a loopback as any hosted service does (`answer_hosted` is the one place it meets its callers),
-/// keeps what it keeps in its folder, and runs only where it's installed, unlike those `built_in`.
+/// A service this program hosts as a service endpoint of its own, a part of oned (`oned <name>`, src/service.rs), on a
+/// device whose person switched it on. It registers with its endpoint over a loopback as any hosted service does
+/// (`answer_hosted` is the one place it meets its callers), keeps what it keeps in its folder, and runs only where
+/// it's switched on, unlike those `built_in`.
 pub struct Hosted {
     pub name: &'static str,
     pub describe: fn() -> Value,

@@ -254,11 +254,10 @@ function context(ask, body, appends, later) {
       if (body.read_only) throw new Error("this call only reads: it runs on data opened for it");
       appends.push({ app_source: name, link: String(link ?? "") });
     },
-    /// Removes a service from a device (by name), or with installed lets it run there again, for someone acting for one
-    /// of the device's owners.
-    service: (name, device, installed = false) => {
+    /// Switches a service on or off on a device (by name), for the device's person.
+    service: (name, device, on = false) => {
       if (body.read_only) throw new Error("this call only reads: it runs on data opened for it");
-      appends.push({ service: name, device, installed });
+      appends.push({ service: name, device, on });
     },
     /// Switches one of an app's schedules on or off in a scope, with the caller's own rights there.
     schedule: (name, schedule, scope, on = true) => {

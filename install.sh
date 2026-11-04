@@ -1,7 +1,7 @@
 #!/bin/sh
-# Installs the latest release for this machine, if its signature is the release key's: on Linux the node, run as a
-# system service; on a Mac the app, with its node inside. Run again to update. `sh install.sh <binary>` installs a
-# binary you built instead.
+# Installs the latest release for this machine, if its signature is the release key's: on Linux the program, with
+# <cli>d, the device, run as a system service; on a Mac the app, which is the Mac's <cli>d. Run again to update.
+# `sh install.sh <binary>` installs a binary you built instead.
 set -eu
 # config.toml's repo, cli and release_key; a test keeps them the same.
 repo=drevantonder/the-one-app
@@ -41,10 +41,10 @@ if [ "$(uname -s)" = Darwin ]; then
 	ln -sf "$HOME/Applications/$app/Contents/MacOS/$cli" "$HOME/.local/bin/$cli"
 	# Git reaches your repos' addresses through it, by this name.
 	ln -sf "$HOME/Applications/$app/Contents/MacOS/$cli" "$HOME/.local/bin/git-remote-$cli"
-	# A node already running keeps the old binary until it restarts.
-	launchctl kickstart -k "gui/$(id -u)/app.$cli.mac.node" 2>/dev/null || true
+	# oned already running keeps the old binary until it restarts.
+	launchctl kickstart -k "gui/$(id -u)/app.$cli.mac.oned" 2>/dev/null || true
 	open "$HOME/Applications/$app"
-	echo "Installed ~/Applications/$app, which runs the node."
+	echo "Installed ~/Applications/$app, which runs ${cli}d."
 else
 	if [ $# -gt 0 ]; then
 		bin=$1 cli=$(basename "$1")
@@ -56,7 +56,8 @@ else
 	name=$("$bin" help | head -1 | cut -d: -f1)
 	data="$HOME/.local/share/$cli"
 	sudo=$([ "$(id -u)" = 0 ] || echo sudo)
-	if [ -d /run/systemd/system ]; then $sudo systemctl stop "$cli" 2>/dev/null || true; fi
+	units=/etc/systemd/system
+	if [ -d /run/systemd/system ]; then $sudo systemctl stop "${cli}d" "$cli" 2>/dev/null || true; fi
 	# The old app's data has no device key; keep it aside rather than mistake it for this one's.
 	if [ -d "$data" ] && [ ! -f "$data/device.json" ]; then
 		mv "$data" "$data-previous"
@@ -64,36 +65,63 @@ else
 	fi
 	install -m 755 "$bin" "$HOME/.local/bin/$cli"
 	ln -sf "$cli" "$HOME/.local/bin/git-remote-$cli"
+	ln -sf "$cli" "$HOME/.local/bin/${cli}d"
 	if [ -d /run/systemd/system ]; then
+		# A machine that ran its node as `$cli serve`, beside a unit per service, moves to ${cli}d (ARCHITECTURE.md's
+		# Moving a machine to oned): the node's environment kept, and each service's unit stopped and gone, the service
+		# turned on in ${cli}d once it answers, with the key and folder it had. A copy of this program a unit ran as a
+		# service goes; a program in another language stays, for ${cli}d to run.
+		env=$(sed -n 's/^Environment=//p' "$units/$cli.service" "$units/${cli}d.service" 2>/dev/null | grep -v '^HOME=' | sort -u || true)
+		parts=
+		for unit in "$units/$cli"-*.service; do
+			[ -f "$unit" ] || continue
+			part=$(basename "$unit" .service)
+			part=${part#"$cli"-}
+			run=$(sed -n 's/^ExecStart=//p' "$unit")
+			$sudo systemctl disable --now "$cli-$part" 2>/dev/null || true
+			$sudo rm -f "$unit"
+			case $run in *" sidecars serve "* | *" services serve "*) [ "${run%% *}" = "$HOME/.local/bin/$cli" ] || rm -f "${run%% *}" ;; esac
+			parts="$parts $part"
+		done
+		if [ -f "$units/$cli.service" ]; then
+			$sudo systemctl disable "$cli" 2>/dev/null || true
+			$sudo rm -f "$units/$cli.service"
+		fi
 		# The node answers every client of the install, so it keeps its memory and, outside a container (where it can't
 		# be lowered), is the last thing killed when the machine runs short.
 		oom=""
 		systemd-detect-virt -cq 2>/dev/null || oom="OOMScoreAdjust=-900"
-		$sudo tee "/etc/systemd/system/$cli.service" >/dev/null <<EOF
+		$sudo tee "$units/${cli}d.service" >/dev/null <<EOF
 [Unit]
-Description=$name node
+Description=$name, this device
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 User=$(id -un)
-ExecStart=$HOME/.local/bin/$cli serve
+ExecStart=$HOME/.local/bin/${cli}d
 Restart=always
 RestartSec=2
-# An update's node takes over from the one before, then tells systemd it's the main process.
+# An update's ${cli}d takes over from the one before, then tells systemd it's the main process.
 NotifyAccess=all
 MemoryLow=768M
 $oom
 Environment=HOME=$HOME
+$(for e in $env; do echo "Environment=$e"; done)
 
 [Install]
 WantedBy=multi-user.target
 EOF
 		$sudo systemctl daemon-reload
-		$sudo systemctl enable --now "$cli"
-		echo "Installed ~/.local/bin/$cli, running as the $cli service."
+		$sudo systemctl enable --now "${cli}d"
+		for part in $parts; do
+			on=
+			for _ in $(seq 60); do "$HOME/.local/bin/$cli" services on "$part" >/dev/null 2>&1 && on=1 && break; sleep 2; done
+			if [ -n "$on" ]; then echo "Moved $part into ${cli}d."; else echo "Couldn't switch $part on in ${cli}d: run $cli services on $part" >&2; fi
+		done
+		echo "Installed ~/.local/bin/$cli, with ${cli}d running as a service."
 	else
-		echo "Installed ~/.local/bin/$cli. This machine has no systemd: run the node with $cli serve"
+		echo "Installed ~/.local/bin/$cli. This machine has no systemd: run ${cli}d, this device, yourself"
 	fi
 fi
 

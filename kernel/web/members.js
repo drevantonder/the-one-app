@@ -21,8 +21,8 @@ export const members = {
   /// `keys`: the hash of the app's key in each epoch sealed to the endpoint, by epoch (`epochHash`).
   grant: ({ endpoint, scope, app, until, keys = {} }) => node("grant", { endpoint, scope, app, until, keys }),
   runs: ({ on }) => node("runs", { on }),
-  /// A service removed from a device (`installed` false), or let register there again.
-  service: ({ device, name, installed = false }) => node("service", { device, name, blob: null, local: !!installed }),
+  /// A part of a device's oned (a service, or `apps`, the app service) switched on or off there.
+  service: ({ device, name, on = false }) => node("service", { device, name, on: !!on }),
   retire({ app, owner, how }) {
     const change = { deleted: { deleted: true }, restored: { deleted: false }, erased: { erased: true } }[how];
     if (!change) throw new Error(`an app is deleted, restored or erased, not ${how}`);

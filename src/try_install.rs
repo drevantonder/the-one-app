@@ -310,7 +310,7 @@ fn spawn_node(dir: &Path, addr: Option<&str>) -> Result<String> {
     };
     let pid = spawn(
         dir,
-        std::process::Command::new(std::env::current_exe()?).args(["serve", "--try"]).env(addr_var(), &addr),
+        one::oned::command(&["--try"])?.env(addr_var(), &addr),
         "node.log",
     )?;
     std::fs::write(dir.join("pid"), pid.to_string())?;

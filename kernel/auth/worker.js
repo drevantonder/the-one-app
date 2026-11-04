@@ -15,10 +15,8 @@
 // its person (or, for a newcomer's first, the inviting admin's) finds by its join code and approves, then clears with
 // `?approved`, which keeps it, marked, for the new device to see while it waits (it asks no node until it's in), with
 // `&genesis=`, the install's first entry's hash as the approving device holds it: the only install the new device then
-// takes, so no node it reaches first can show it another. Set once, with the approval. A service (`one
-// services serve`), which nobody signs in on, leaves one signed with its own key instead, naming the service and the
-// enrollment its install link carried: a device of its person's made that link and told auth the hash of its secret
-// (`/api/auth/services/enrollments`), and only that device is shown the request, which it checks the proof of itself.
+// takes, so no node it reaches first can show it another. Set once, with the approval. A service asks nothing here:
+// its device's oned lists it.
 //
 // What an endpoint signs (`signedRequest` in shared/crypto.js, domain `one/auth`) names its route (`route: "POST
 // /api/auth/invites"`), is taken once, and counts only from one of the install's endpoints, as the relay's list says
@@ -76,12 +74,6 @@ const refuse = (status, message) => {
 const INVITE = 30 * 86_400_000;
 /// How long a device's request to join waits.
 const REQUEST = 15 * 60_000;
-/// How long an install link's enrollment works, at most.
-const ENROLLMENT = 86_400_000;
-/// How many enrollments a device may have out at once.
-const ENROLLMENTS = 8;
-/// How many services' requests one address may leave in ten minutes: anyone may try.
-const SERVICE_ASKS = 10;
 /// How long a sign-in code works.
 const CODE = 10 * 60_000;
 /// How lately someone signed in for a client to be added as them, or a passkey added.
@@ -142,14 +134,8 @@ export class Auth extends DurableObject {
     if (!columns.includes("approved")) sql.exec("alter table requests add column approved integer");
     if (!columns.includes("genesis")) sql.exec("alter table requests add column genesis text");
     if (!columns.includes("place")) sql.exec("alter table requests add column place text");
-    // Install links' enrollments: the hash of each one's secret, whose service it's for, the device that made it (`by`),
-    // and the one service key that used it.
-    sql.exec("drop table if exists services");
-    sql.exec("create table if not exists enrollments (id text primary key, user text not null, by text not null, until integer not null, key text)");
-    // Services' requests to join, by their key, signed by it, each with its enrollment, shown only to its `by`.
-    sql.exec("create table if not exists service_requests (key text primary key, seal text not null, name text not null, service text not null, user text not null, by text not null, enrollment text not null, proof text not null, shared integer not null, made integer not null)");
-    // Services' requests by address, for a few at a time.
-    sql.exec("create table if not exists service_asks (address text not null, at integer not null)");
+    // Services asked to join here before oned listed them itself.
+    for (const old of ["services", "enrollments", "service_requests", "service_asks"]) sql.exec(`drop table if exists ${old}`);
     // The people who sign in only with a passkey: admins.
     sql.exec("create table if not exists passkey_only (user text primary key)");
     // Signed requests taken, until they're too old to take again.
@@ -316,7 +302,6 @@ export class Auth extends DurableObject {
     if (path === "/api/auth/invites" && method === "POST") return json(await this.invite(request));
     if (path === "/api/auth/people/admin" && method === "POST") return json(await this.setAdmin(request));
     if (path === "/api/auth/devices/requests" && method === "POST") return json(await this.ask(request));
-    if (path === "/api/auth/services/enrollments" && method === "POST") return json(await this.enroll(request));
     if (path === "/api/auth/devices/requests" && method === "GET") return json(await this.requests(request));
     const one = path.match(/^\/api\/auth\/devices\/requests\/([0-9a-f]{64})$/);
     if (one && method === "GET") return json(await this.request(request, one[1]));
@@ -402,8 +387,6 @@ export class Auth extends DurableObject {
   /// Forgets requests to join that waited too long.
   expire() {
     this.ctx.storage.sql.exec("delete from requests where made <= ?", Date.now() - REQUEST);
-    this.ctx.storage.sql.exec("delete from service_requests where made <= ?", Date.now() - REQUEST);
-    this.ctx.storage.sql.exec("delete from enrollments where until <= ?", Date.now());
   }
 
   /// A device signed in asks to join: `{ key, seal, name, proof? }`, its endpoint keys (hex), its name, and for a
@@ -411,7 +394,6 @@ export class Auth extends DurableObject {
   /// inviting admin's device to check. → until when it waits.
   async ask(request) {
     const body = await request.json().catch(() => refuse(400, "the body isn't JSON"));
-    if (body?.service != null) return this.askAsService(request, body);
     const user = (await this.person(request)) || refuse(401, "Sign in first.");
     const { key, seal, name, proof } = body;
     if (!KEY.test(key || "") || !KEY.test(seal || "")) refuse(400, "key and seal are endpoint keys, 64 hex characters each");
@@ -433,55 +415,6 @@ export class Auth extends DurableObject {
     return { until: made + REQUEST };
   }
 
-  /// A device of the install makes an install link for a service of its person's (`one services install-link`): `{ id,
-  /// user, until }`, `id` the hash of the link's secret, which it keeps. → {}.
-  async enroll(request) {
-    const signed = (await this.signed(request, await request.json().catch(() => refuse(400, "the body isn't JSON")))) || refuse(401, "Sign it with one of the install's devices.");
-    const { id, user, until } = signed.fields;
-    if (!KEY.test(id || "")) refuse(400, "id is the hash of the link's secret, 64 hex characters");
-    if (typeof user !== "string" || !user || user.length > 64) refuse(400, "say whose service it's for");
-    if (!Number.isSafeInteger(until) || until <= Date.now() || until > Date.now() + ENROLLMENT + 60_000) refuse(400, "an install link works for a day at most");
-    this.expire();
-    const sql = this.ctx.storage.sql;
-    if (sql.exec("select count(*) as n from enrollments where by = ?", signed.by).toArray()[0].n >= ENROLLMENTS) refuse(429, "That device has enough install links out: use one, or wait a day.");
-    sql.exec("insert into enrollments (id, user, by, until) values (?, ?, ?, ?)", id, user, signed.by, until);
-    return {};
-  }
-
-  /// A service asks to join, signed with its own key: `{ key, seal, name, service, shared, user, enrollment, proof }`,
-  /// `name` its machine's, `enrollment` the hash of its install link's secret, which must be out for `user` and not
-  /// used by another service, and `proof` what the device that made it checks. A few at a time from an address.
-  /// → until when it waits.
-  async askAsService(request, body) {
-    const { by, fields } = await checkRequest(DOMAIN, body).catch((err) => refuse(403, `That request isn't signed as it should be: ${err.message}.`));
-    if (fields.route !== `${request.method} ${new URL(request.url).pathname}`) refuse(403, `That request was signed for ${fields.route}.`);
-    const { key, seal, name, service, user, enrollment, proof } = fields;
-    if (key !== by) refuse(403, "A service asks with the key it signs with.");
-    if (!KEY.test(seal || "")) refuse(400, "seal is an endpoint key, 64 hex characters");
-    if (typeof name !== "string" || !name.trim() || name.length > 64) refuse(400, "give the machine's name, up to 64 characters");
-    if (typeof service !== "string" || !/^[a-z0-9]+(-[a-z0-9]+)*$/.test(service) || service.length > 64) refuse(400, "a service's name is lowercase words joined by -");
-    if (!KEY.test(enrollment || "") || !KEY.test(proof || "")) refuse(400, "a service asks with its install link's enrollment and proof");
-    const sql = this.ctx.storage.sql;
-    const address = request.headers.get("cf-connecting-ip") || "";
-    sql.exec("delete from service_asks where at <= ?", Date.now() - 10 * 60_000);
-    if (sql.exec("select count(*) as n from service_asks where address = ?", address).toArray()[0].n >= SERVICE_ASKS) refuse(429, "Too many services asked from there: try again in a few minutes.");
-    sql.exec("insert into service_asks (address, at) values (?, ?)", address, Date.now());
-    this.taken(body.sig);
-    this.expire();
-    const [e] = sql.exec("select * from enrollments where id = ? and user = ? and until > ?", enrollment, user, Date.now()).toArray();
-    if (!e) refuse(403, "That install link isn't one of the install's, or ran out: make another with services install-link.");
-    if (e.key && e.key !== key) refuse(403, "That install link was used by another service: make another with services install-link.");
-    sql.exec("update enrollments set key = ? where id = ?", key, enrollment);
-    const made = Date.now();
-    sql.exec("insert or replace into service_requests (key, seal, name, service, user, by, enrollment, proof, shared, made) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", key, seal, name.trim(), service, user, e.by, enrollment, proof, fields.shared === true ? 1 : 0, made);
-    return { until: made + REQUEST };
-  }
-
-  /// A service's request, as it's shown to the device that made its install link.
-  shownService(r) {
-    return { key: r.key, seal: r.seal, name: r.name, user: r.user, person: "", service: r.service, shared: r.shared === 1, enrollment: r.enrollment, proof: r.proof, made: r.made, until: r.made + REQUEST };
-  }
-
   /// Requests to join, as they're shown: with the person's name, and whether one was approved.
   shown(rows) {
     const sql = this.ctx.storage.sql;
@@ -499,8 +432,7 @@ export class Auth extends DurableObject {
     const sql = this.ctx.storage.sql;
     const signed = await this.signed(request);
     if (signed) {
-      const services = sql.exec("select * from service_requests where by = ? order by made", signed.by).toArray().map((r) => this.shownService(r));
-      return { requests: [...this.shown(sql.exec("select * from requests where approved is null order by made").toArray()), ...services] };
+      return { requests: this.shown(sql.exec("select * from requests where approved is null order by made").toArray()) };
     }
     const user = (await this.person(request)) || refuse(401, "Sign in first.");
     return { requests: this.shown(sql.exec("select * from requests where user = ? and approved is null order by made", user).toArray()) };
@@ -512,10 +444,6 @@ export class Auth extends DurableObject {
     const sql = this.ctx.storage.sql;
     const signed = await this.signed(request);
     const [row] = sql.exec("select * from requests where key = ?", key).toArray();
-    if (!row && signed) {
-      const [service] = sql.exec("select * from service_requests where key = ? and by = ?", key, signed.by).toArray();
-      if (service) return this.shownService(service);
-    }
     const ok = row && (signed || row.user === ((await this.person(request)) || refuse(401, "Sign in first.")));
     if (!ok) refuse(404, "No request waits with that key: it was approved, refused or waited too long.");
     return row;
@@ -524,22 +452,18 @@ export class Auth extends DurableObject {
   /// One request, for its new device to see it still waits.
   async request(request, key) {
     const row = await this.mayTouch(request, key);
-    return row.service ? row : this.shown([row])[0];
+    return this.shown([row])[0];
   }
 
   /// Forgets a request, refused; or one `approved`, marked so until it would have expired, for its device to see, with
   /// the install's `genesis` (hex) it was let into, if the approving device said.
   async unask(request, key, approved, genesis) {
     const row = await this.mayTouch(request, key);
-    if (approved && !row.service && !row.approved) {
+    if (approved && !row.approved) {
       this.ctx.storage.sql.exec("update requests set approved = ?, genesis = ? where key = ?", Date.now(), /^[0-9a-f]{64}$/.test(genesis || "") ? genesis : null, key);
       return {};
     }
     this.ctx.storage.sql.exec("delete from requests where key = ?", key);
-    const sql = this.ctx.storage.sql;
-    const [service] = sql.exec("select enrollment from service_requests where key = ?", key).toArray();
-    if (service) sql.exec("delete from enrollments where id = ?", service.enrollment);
-    sql.exec("delete from service_requests where key = ?", key);
     return {};
   }
 

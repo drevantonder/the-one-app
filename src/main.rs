@@ -19,7 +19,6 @@ mod update;
 fn every_command() -> String {
     format!(
         "Usage:
-  {CLI} serve                          run this machine as one of your devices
   {CLI} status                         this device, and the people, groups and devices in {YOURS}
   {CLI} sign-in [--address <url>]      sign this machine in, as you: approve its code by signing in on any of
                                        your devices; {CLI} and {CLI} mcp here then act as you. Where {NAME} doesn't
@@ -123,21 +122,11 @@ fn every_command() -> String {
                                        the recovery key on stdin, with or without an install here
   {CLI} app delete|restore|erase <app> delete an app you own (to Recently Deleted), restore it, or erase it for good
   {CLI} schedules                      every schedule of the apps installed for you: when, as whom, and how it last went
-  {CLI} services                       the services on each of your devices: version, and who installed them
-  {CLI} services remove|add <name> [--device <name>]
-                                       remove a service from a device you own (here by default), or allow it there
-                                       again; services/install.sh <name> [device] installs one and allows it
-  {CLI} services serve <name> [--install <link>]
-                                       run a service this program hosts ({hosted}) as a service of its own, which
-                                       needs no node here: the first time, --install says which One App it's for (the
-                                       link install-link prints on one of its devices), and it shows a code to approve
-                                       it with ({CLI} devices approve <code> on one of your devices); as the service
-                                       services/install.sh installs
-  {CLI} services host <name> <program> [--install <link>]
-                                       the same for a service in another language: starts the program, which registers
-                                       with it as it would with a node
-  {CLI} services install-link          what --install takes, for a service of yours: your One App's address and a
-                                       one-time secret, good for a day; approve the service on this device
+  {CLI} services                       the services on each of your devices: version, and who switched them on
+  {CLI} services on|off <name> [--device <name>]
+                                       switch a service on or off on a device of yours (here by default), which its
+                                       oned starts or stops ({hosted} are in this program; one in another language is
+                                       put there first by services/install.sh <name> <device>); apps is its app service
   {CLI} devices keep|stop <app> on <device> [--scope user|global|<group>] [--days <n>]
                                        keep an app running on one of your devices (its schedules run there, with that
                                        app's keys alone, for 30 days and longer as you use it), or stop it
@@ -243,6 +232,14 @@ fn addr() -> String {
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    // Run as oned: this device, always on; or one of its parts.
+    if one::oned::invoked() {
+        if let Err(err) = oned(&args) {
+            eprintln!("{}: {err:#}", one::oned::name());
+            std::process::exit(1);
+        }
+        return;
+    }
     // Run by git, for a repo's address.
     if std::env::args_os().next().is_some_and(|me| std::path::Path::new(&me).file_name().is_some_and(|n| *n == *git_remote::helper())) {
         let ran = git_remote::run(&args);
@@ -296,6 +293,8 @@ fn run(args: Vec<String>) -> Result<()> {
             Some(text) => print!("{text}"),
             None => bail!("{}", ops::unknown(rest[0], None, true)?),
         },
+        // Only as a machine moves to oned: a node built before it hands over to this build with `serve`, and its unit
+        // still says it (ARCHITECTURE.md's Moving a machine to oned).
         ["serve"] => {
             usual_path();
             IN_NODE.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -774,8 +773,8 @@ fn run(args: Vec<String>) -> Result<()> {
             let state = get("/v1/state")?;
             for s in state["install"]["devices"].as_array().into_iter().flatten() {
                 let installed = s["installed_services"].as_array().cloned().unwrap_or_default();
-                let removed = s["removed_services"].as_array().cloned().unwrap_or_default();
-                if installed.is_empty() && removed.is_empty() {
+                let off = s["off_services"].as_array().cloned().unwrap_or_default();
+                if installed.is_empty() && off.is_empty() {
                     continue;
                 }
                 println!("{}{}", s["name"].as_str().unwrap_or(""), if s["online"] == true { "" } else { " (offline)" });
@@ -788,32 +787,20 @@ fn run(args: Vec<String>) -> Result<()> {
                     let version = d["version"].as_str().map(|v| format!(" {}", &v[..v.len().min(12)])).unwrap_or_default();
                     println!("  {}{version}  {} ({by})", d["name"].as_str().unwrap_or(""), d["title"].as_str().unwrap_or(""));
                 }
-                for d in &removed {
-                    println!("  {}  removed by {} {}", d["name"].as_str().unwrap_or(""), d["by"].as_str().unwrap_or("an owner"), ago(d["time"].as_u64().unwrap_or(0)));
+                for d in &off {
+                    println!("  {}  switched off {}", d["name"].as_str().unwrap_or(""), ago(d["time"].as_u64().unwrap_or(0)));
                 }
             }
         }
-        ["services", "serve", name] => one::service::serve(name, flags.get("install").and_then(Value::as_str))?,
-        ["services", "host", name, program @ ..] if !program.is_empty() => {
-            let program: Vec<String> = program.iter().map(|p| p.to_string()).collect();
-            one::service::host(name, &program, flags.get("install").and_then(Value::as_str))?
-        }
-        ["services", "install-link"] => println!("{}", post("/v1/services/install-link", json!({}))?["link"].as_str().unwrap_or("")),
-        ["services", how @ ("remove" | "add"), name] => {
+        ["services", how @ ("on" | "off"), name] => {
             let device = flags.get("device").and_then(Value::as_str);
-            post("/v1/service", json!({ "name": name, "device": device, "installed": *how == "add" }))?;
-            let on = device.map(|s| format!("on {s}")).unwrap_or_else(|| "here".into());
-            // Allowing it runs nothing: it serves only where it's installed and running.
-            let state = get("/v1/state")?;
-            let there = state["install"]["devices"].as_array().into_iter().flatten().find(|s| match device {
-                Some(d) => s["name"] == d,
-                None => s["here"] == true,
-            });
-            let runs = there.is_some_and(|s| s["services"].as_array().into_iter().flatten().any(|n| n == *name));
-            match (*how, runs) {
-                ("remove", _) => println!("{name} is removed {on}: it isn't served there until an owner adds it again ({CLI} services add {name})."),
-                (_, true) => println!("{name} runs {on}."),
-                (_, false) => println!("{name} may run {on}, but it isn't installed there: services/install.sh {name} in {NAME}'s code installs it, as the device's owner."),
+            post("/v1/service", json!({ "name": name, "device": device, "on": *how == "on" }))?;
+            let there = device.map(|s| format!("on {s}")).unwrap_or_else(|| "here".into());
+            match (*how, *name == one::members::APPS_PART) {
+                ("off", true) => println!("Apps' calls no longer run {there}."),
+                (_, true) => println!("Apps' calls run {there} again."),
+                ("off", _) => println!("{name} is switched off {there}: its oned stops it."),
+                _ => println!("{name} is switched on {there}: its oned starts it, if it's there (a service in another language is put there by services/install.sh {name} in {NAME}'s code)."),
             }
         }
         ["schedules"] => {
@@ -1315,6 +1302,20 @@ const TRY_IDLE: std::time::Duration = std::time::Duration::from_secs(60 * 60);
 /// When a try install's node was last asked something, in seconds since it started.
 static ASKED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
+/// oned: with no part named, this device, for good (`serve`); with one, that part (`service::run`).
+fn oned(args: &[String]) -> Result<()> {
+    let named: Vec<&String> = args.iter().filter(|a| !a.starts_with("--")).collect();
+    match named.as_slice() {
+        [] => {
+            usual_path();
+            IN_NODE.store(true, std::sync::atomic::Ordering::Relaxed);
+            serve(args.iter().any(|a| a == "--try"), args)
+        }
+        [name] => one::service::run(name),
+        _ => bail!("{} runs this device, or with a service's name, that service, as its oned starts it", one::oned::name()),
+    }
+}
+
 #[tokio::main]
 async fn serve(is_try: bool, args: &[String]) -> Result<()> {
     tracing_subscriber::fmt()
@@ -1338,6 +1339,8 @@ async fn serve(is_try: bool, args: &[String]) -> Result<()> {
         None => listen(&dir).await?,
     };
     let node = Node::start(&dir, one::services::built_in()).await?;
+    // Its parts that run as processes of their own, as its entries switch them.
+    one::oned::keep_parts(node.clone(), tokio::runtime::Handle::current());
     // Git here reaches the install's repos at their address, as on every computer of its person's.
     if !is_try && let Ok(address) = node.address() {
         std::thread::spawn(move || {

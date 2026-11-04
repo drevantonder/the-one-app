@@ -224,7 +224,8 @@ impl Node {
         self.with(|i| {
             let m = &i.r.members;
             let mut devices: Vec<Key> = if req.service.is_none() {
-                m.runners(&me.user, &call_scopes(i, req, &me.user)?).into_iter().map(|s| s.key).collect()
+                // Not one whose person switched its app service off.
+                m.runners(&me.user, &call_scopes(i, req, &me.user)?).into_iter().map(|s| s.key).filter(|k| !Self::off(m, k, members::APPS_PART)).collect()
             } else {
                 let mut s: Vec<Key> = i.peers.iter().filter(|(k, _)| i.online(k)).filter(|(_, s)| s.services.iter().any(|d| d.0 == req.app && d.1.contains(&me.user))).map(|(k, _)| *k).collect();
                 if here && ((me.user == i.user && !passed) || (self.0.services.serves_everyone(&req.app) && i.r.members.serves(&self.0.id, &me.user))) {
@@ -355,6 +356,9 @@ impl Node {
                 Err(err) if err.is::<crate::services::Elsewhere>() => Ok(Reply::Elsewhere(err.to_string())),
                 other => other.map(Reply::Ok),
             };
+        }
+        if !self.runs_apps() {
+            return Ok(Reply::Elsewhere(format!("{} doesn't run apps: its person switched that off", self.device_name())));
         }
         let title = self.title(&req.app).await;
         let prepared = self.with(|i| prepare(self, i, req, me, &title));

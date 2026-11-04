@@ -83,10 +83,10 @@ fn install(m: &Members, me: &str, settings: &Map<String, Value>, here: &Here) ->
             let mut device = json!({
                 "kind": kind, "priority": rank::priority(&set, &hex(&s.key)).to_value(), "far": false, "since": s.since,
                 "key": hex(&s.key), "seal": hex(&s.seal), "name": s.name, "user": s.user, "me": false, "here": false, "online": false,
-                "roles": s.roles, "service": s.service, "serves_me": m.serves(&s.key, me),
+                "roles": s.roles, "service": s.service, "device": s.device.as_ref().map(hex), "serves_me": m.serves(&s.key, me),
                 "runs_for": m.scopes().iter().filter(|scope| m.runs_for(&s.key, scope)).map(|scope| scope.to_string()).collect::<Vec<_>>(),
                 "build": null, "target": null, "services": [], "installed_services": [],
-                "removed_services": m.services.iter().filter(|((k, _), d)| *k == s.key && d.removed()).map(|((_, name), d)| json!({ "name": name, "by": m.users.get(&d.by).map(|u| &u.name), "time": d.time })).collect::<Vec<_>>(),
+                "off_services": m.services.iter().filter(|((k, _), d)| *k == s.key && !d.on).map(|((_, name), d)| json!({ "name": name, "time": d.time })).collect::<Vec<_>>(),
                 "load": null,
             });
             device.as_object_mut().unwrap().extend(now);

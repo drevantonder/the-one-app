@@ -189,6 +189,10 @@ pub async fn hand_over(listener: i32, args: &[String]) -> Result<()> {
     // The path, not the program this process runs: an update replaced it.
     let exe = exe.to_string_lossy().trim_end_matches(" (deleted)").to_string();
     let mut command = std::process::Command::new(&exe);
+    // Started by the name this one was (oned), which says what it is.
+    if let Some(name) = std::env::args_os().next() {
+        command.arg0(name);
+    }
     command.args(args.iter().filter(|a| !a.starts_with(ARG))).arg(format!("{ARG}{listener},{},{next}", write.as_raw_fd()));
     let keep = [listener, write.as_raw_fd()];
     // SAFETY: only async-signal-safe calls, between fork and exec.

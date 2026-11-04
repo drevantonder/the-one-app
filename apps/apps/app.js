@@ -94,7 +94,7 @@ async function where(ctx, a) {
   if (!parts.length) return null;
   const owns = (s) => (s.owners || []).some((o) => mine(ctx, o));
   const runs = devices.filter((s) => (s.services || []).some((d) => parts.includes(d)));
-  const removed = devices.filter((s) => !runs.includes(s) && (s.removed_services || []).some((d) => parts.includes(d.name)));
+  const removed = devices.filter((s) => !runs.includes(s) && (s.off_services || []).some((d) => parts.includes(d.name)));
   const line = runs.length ? "Runs on " + runs.map((s) => s.name).join(", ") : a.needs || "Runs on none of your devices";
   return {
     line, runs: runs.map((s) => s.name), needs: a.needs || null,

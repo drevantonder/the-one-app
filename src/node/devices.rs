@@ -147,16 +147,6 @@ pub struct DeviceRequest {
     pub person: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub proof: Option<String>,
-    /// For a service's request (`one services serve`), signed by its own key and nobody's yet: the service it offers,
-    /// `name` being its machine's.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub service: Option<String>,
-    /// For a service's request: whether it serves everyone, not only its person.
-    #[serde(default)]
-    pub shared: bool,
-    /// For a service's request: the hash of the enrollment secret its link carried, which names it here.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub enrollment: Option<String>,
 }
 
 impl DeviceRequest {
@@ -176,18 +166,6 @@ pub struct Invited {
     pub role: Role,
     pub until: u64,
 }
-
-/// An enrollment secret `one services install-link` minted on this device, for a service to prove its request with
-/// (`keys::service_proof`), until it runs out or a service it named is approved: kept in this device's own folder,
-/// since only this device is shown the requests it names.
-#[derive(Clone, Debug, Deserialize, Serialize)]
-struct Enrollment {
-    secret: String,
-    until: u64,
-}
-
-/// How long an install link's enrollment works.
-const ENROLLMENT: u64 = 86_400_000;
 
 /// Where a person's invites are kept: a database of the node's own, in their scope.
 const INVITES: &str = "invites";
@@ -349,12 +327,6 @@ impl Node {
         for r in asked {
             let Ok(device) = r.endpoint() else { continue };
             match (&r.proof, invites.get(&r.user)) {
-                // A service, only to the person whose install link it was given, as its proof says.
-                _ if r.service.is_some() => {
-                    if r.user == caller.user && self.enrolled(&r).is_ok() {
-                        out.push(json!({ "device": r.name, "service": r.service, "shared": r.shared }));
-                    }
-                }
                 (None, _) if r.user == caller.user => out.push(json!({ "device": r.name, "person": r.person, "yours": true })),
                 (Some(proof), Some(i)) if *proof == crate::keys::invite_proof(i.secret.as_bytes(), &device) => {
                     out.push(json!({ "device": r.name, "person": i.name, "code": crate::keys::join_code(&device), "role": i.role }))
@@ -379,7 +351,7 @@ impl Node {
         let asked: Value = self.ask_auth("GET", "/api/auth/devices/requests", json!({})).await?;
         let asked: Vec<DeviceRequest> = serde_json::from_value(asked["requests"].clone()).context("auth's requests aren't requests")?;
         let r = waiting(asked, &code)?;
-        ensure!(r.service.is_none() && r.proof.is_none(), "the recovery key lets in a device of someone already in your One App");
+        ensure!(r.proof.is_none(), "the recovery key lets in a device of someone already in your One App");
         let person = self.with(|i| Ok(i.r.members.user(&r.user).map(|u| u.name.clone())))?.context("the recovery key lets in a device of someone already in your One App")?;
         if !confirm {
             return Ok(json!({ "device": r.name, "person": person, "recovery": true }));
@@ -450,19 +422,6 @@ impl Node {
         let asked: Value = self.ask_auth("GET", "/api/auth/devices/requests", json!({})).await?;
         let asked: Vec<DeviceRequest> = serde_json::from_value(asked["requests"].clone()).context("auth's requests aren't requests")?;
         let r = waiting(asked, &code)?;
-        if let Some(service) = &r.service {
-            ensure!(r.user == caller.user, "that service is someone else's: they approve it on their own device");
-            let id = self.enrolled(&r)?;
-            if !confirm {
-                return Ok(json!({ "device": r.name, "service": service, "shared": r.shared }));
-            }
-            let approved = self.approve_service(caller, &r).await?;
-            self.keep_enrollment(&id, None)?;
-            if let Err(err) = self.ask_auth("DELETE", &format!("/api/auth/devices/requests/{}", r.key), json!({})).await {
-                tracing::warn!("forgetting an approved request at auth: {err:#}");
-            }
-            return Ok(approved);
-        }
         let invite = match &r.proof {
             Some(_) if caller.user == self.user()? => self.invites().await?.remove(&r.user),
             _ => None,
@@ -532,65 +491,27 @@ impl Node {
         Ok(json!({ "device": r.name, "sealed": sealed, "not_sealed": not }))
     }
 
-    /// An install link for a service of `caller`'s, this device's own person (`one services install-link`): the
-    /// install's address and first entry, who it's for, and a one-time secret minted here, whose hash auth is told
-    /// (signed by this device) so it keeps only a request that names it, and shows it only to this device. → the link.
-    pub async fn install_link(&self, caller: &Caller) -> Result<String> {
+    /// Lists one of this device's parts, the service `service`, as its person's, a part of this device (oned turned it
+    /// on, and it asked with its endpoint and whether it serves everyone), and tells the relay to let it in. It holds no
+    /// keys: the nodes that call it bring it the install's entries, which say who may. A part listed before it named its
+    /// device is listed again, naming it.
+    pub async fn list_part(&self, endpoint: &crate::keys::Endpoint, service: &str, shared: bool) -> Result<()> {
         let user = self.user()?;
-        ensure!(caller.user == user, "make a service's install link on one of your own devices");
-        let root = self.with(|i| Ok(i.r.root.map(|r| r.to_hex())))?.context("this device isn't in your One App yet")?;
-        let secret: [u8; 32] = rand::random();
-        let until = now_ms() + ENROLLMENT;
-        let id = hex(&crate::keys::sha256(&secret));
-        self.ask_auth("POST", "/api/auth/services/enrollments", json!({ "id": id, "user": user, "until": until })).await?;
-        self.keep_enrollment(&id, Some(Enrollment { secret: hex(&secret), until }))?;
-        Ok(crate::service::Install { address: self.address()?, root, user, secret: hex(&secret) }.link())
-    }
-
-    /// The enrollments this device minted that still work, by their hash.
-    fn enrollments(&self) -> BTreeMap<String, Enrollment> {
-        let kept: BTreeMap<String, Enrollment> = std::fs::read(self.0.dir.join("enrollments.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
-        kept.into_iter().filter(|(_, e)| e.until > now_ms()).collect()
-    }
-
-    /// Keeps or forgets (`None`) an enrollment.
-    fn keep_enrollment(&self, id: &str, enrollment: Option<Enrollment>) -> Result<()> {
-        let mut kept = self.enrollments();
-        match enrollment {
-            Some(e) => kept.insert(id.to_string(), e),
-            None => kept.remove(id),
-        };
-        write_private(&self.0.dir.join("enrollments.json"), &serde_json::to_vec(&kept)?)?;
-        Ok(())
-    }
-
-    /// Whether a service's request comes with a proof from an enrollment this device minted: → its hash.
-    fn enrolled(&self, r: &DeviceRequest) -> Result<String> {
-        let id = r.enrollment.clone().context("that service came with no install link")?;
-        let e = self.enrollments().remove(&id).context("that service's install link wasn't made on this device, or ran out: make another with services install-link")?;
-        let proof = crate::keys::service_proof(&crate::keys::unhex(&e.secret)?, &r.endpoint()?);
-        ensure!(r.proof.as_deref().is_some_and(|p| crate::keys::same_secret(p.as_bytes(), proof.as_bytes())), "that service's request doesn't prove it came from your install link");
-        Ok(id)
-    }
-
-    /// Lets a service in as `caller`'s (`one services serve` asked with its own key, and they typed the code it shows):
-    /// lists it as their service endpoint offering it, and tells the relay to let it in. It holds no keys: the nodes
-    /// that call it bring it the install's entries, which say who may. → what it is.
-    pub async fn approve_service(&self, caller: &Caller, r: &DeviceRequest) -> Result<Value> {
-        let service = r.service.as_deref().context("that request isn't a service's")?;
-        ensure!(r.user == caller.user && caller.user == self.user()?, "approve a service on the device of yours that made its install link");
-        self.enrolled(r)?;
-        let endpoint = crate::keys::Endpoint { key: crate::keys::unhex(&r.key)?, seal: crate::keys::unhex(&r.seal)? };
-        // Told first, and an answer that's no is the approver's to see: a service the relay won't let in is never reached.
-        // A service listed already but not let in, by an approval that didn't get so far, is let in now.
-        let listed = self.with(|i| Ok(i.r.members.service(&endpoint.key).is_some()))?;
-        ensure!(listed || self.with(|i| Ok(i.r.members.machines.get(&endpoint.key).is_none()))?, "that key is listed already, and not as a service");
-        if let Err(err) = self.tell_relay_now(json!({ "add": r.key, "admin": false, "role": "service" })).await {
-            // In already, from an approval that didn't get so far, which only an admin's device may change: fine.
-            ensure!(format!("{err:#}").contains("in already"), "your One App's relay won't let that service in: {err:#}");
+        let caller = Caller { key: self.0.id, user: user.clone(), agent: None, token: None };
+        let listed = self.with(|i| {
+            let m = &i.r.members;
+            ensure!(m.service(&endpoint.key).is_some() || m.machines.get(&endpoint.key).is_none(), "that key is listed already, and not as a service");
+            Ok(m.service(&endpoint.key).map(|s| s.device == Some(self.0.id)))
+        })?;
+        if listed.is_none() {
+            // Told first: a service the relay won't let in is never reached.
+            if let Err(err) = self.tell_relay_now(json!({ "add": hex(&endpoint.key), "admin": false, "role": "service" })).await {
+                ensure!(format!("{err:#}").contains("in already"), "your One App's relay won't let {service} in: {err:#}");
+            }
         }
-        if !listed {
-            self.member_content(caller, members::service_endpoint(&endpoint, &caller.user, &r.name, service, r.shared)).await?;
+        if listed != Some(true) {
+            let name = self.device_name();
+            self.member_content(&caller, members::service_endpoint(endpoint, &user, &name, service, shared, &self.0.id)).await?;
         }
         // Its first hello brings it the entries that say it's theirs: as soon as the relay lets it in.
         let (node, key) = (self.clone(), endpoint.key);
@@ -601,9 +522,9 @@ impl Node {
                 }
                 tokio::time::sleep(Duration::from_secs(1)).await;
             }
-            tracing::warn!("service {} was approved but this device hasn't reached it", crate::entry::short(&key));
+            tracing::warn!("service {} was listed but this device hasn't reached it", crate::entry::short(&key));
         });
-        Ok(json!({ "device": r.name, "service": service, "approved": true }))
+        Ok(())
     }
 
     /// Seals each epoch of `scope` this device holds to `to`, where it isn't yet.
@@ -618,29 +539,41 @@ impl Node {
         Ok(())
     }
 
-    /// Removes a device (by name or key), for its person or an admin: the relay told to let it in no more first, so it
-    /// reaches the bucket no more, then its `remove` entry, and a new epoch of each scope it could open (as a client:
+    /// Removes a device (by name or key), and what's part of it (its services, and its apps' sign-ins), for its person or
+    /// an admin: the relay told to let each in no more first, so it reaches the bucket no more, then their `remove`
+    /// entries, and a new epoch of each scope it could open (as a client:
     /// compute holds no epochs) that `caller` starts epochs of, sealed to every client left that opens it and the
     /// recovery key; databases move to it at their next routine copy. A scope `caller` can't start a new epoch of is
     /// said: one of its own admins' devices does. A device removing itself (as it signs out) is told off the relay last,
     /// since it hears no answer after. → what was done.
     pub async fn remove_device(&self, caller: &Caller, device: &str) -> Result<Value> {
         let key = self.find_machine(device)?;
-        let (gone, scopes) = self.with(|i| {
+        let (gone, keys, scopes) = self.with(|i| {
             let m = &i.r.members;
             let d = m.machine(&key).context("no such device")?;
             ensure!(m.looks_after(&caller.user, &key), "only its person or an admin removes a device");
-            let opens = |s: &Scope| d.is(members::Kind::Client) && m.may_use(&d.user, s);
-            Ok((d.name.clone(), m.scopes().into_iter().filter(opens).collect::<Vec<_>>()))
+            let keys: Vec<Key> = std::iter::once(key).chain(m.machines.values().filter(|e| e.device == Some(key) && e.key != key && m.machine(&e.key).is_some()).map(|e| e.key)).collect();
+            let opens = |s: &Scope| keys.iter().filter_map(|k| m.machine(k)).any(|d| d.is(members::Kind::Client) && m.may_use(&d.user, s));
+            Ok((d.name.clone(), keys.clone(), m.scopes().into_iter().filter(opens).collect::<Vec<_>>()))
         })?;
-        ensure!(key != self.0.id, "{gone} is this device: remove it from another of your devices");
+        ensure!(!keys.contains(&self.0.id), "{gone} is this device: remove it from another of your devices");
         // A device taking itself out (signing out) is told last: off the relay, it hears no answer, so everything else is done.
-        let itself = key == caller.key;
-        let off_relay = || async { self.tell_relay_now(json!({ "remove": hex(&key) })).await.err().map(|err| format!("{err:#}")) };
+        let itself = keys.contains(&caller.key);
+        let off_relay = || async {
+            let mut said = Vec::new();
+            for k in &keys {
+                if let Err(err) = self.tell_relay_now(json!({ "remove": hex(k) })).await {
+                    said.push(format!("{err:#}"));
+                }
+            }
+            (!said.is_empty()).then(|| said.join("; "))
+        };
         let mut relay = if itself { None } else { off_relay().await };
-        // The last of its entries in `global` this device had seen: those after never count, wherever they sort.
-        let seq = self.with(|i| Ok(i.r.store.last(&key, "global")?.map(|e| e.seq())))?;
-        self.member_as(caller, "remove", json!({ "key": hex(&key), "seq": seq })).await?;
+        for k in &keys {
+            // The last of its entries in `global` this device had seen: those after never count, wherever they sort.
+            let seq = self.with(|i| Ok(i.r.store.last(k, "global")?.map(|e| e.seq())))?;
+            self.member_as(caller, "remove", json!({ "key": hex(k), "seq": seq })).await?;
+        }
         let (renewed, left) = self.renew(caller, scopes).await;
         if itself {
             relay = off_relay().await;

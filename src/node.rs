@@ -1233,22 +1233,22 @@ fn check_append(i: &Install, append: Append, scopes: &[Scope], me: &Caller, titl
             let link = members::source_link(&json!(link))?;
             (Scope::Global, members::node("app", json!({ "name": name, "owner": a.owner.to_string(), "source": link })))
         }
-        Append::Service { device, name, installed } => (Scope::Global, service_entry(&i.r.members, &me.user, &device, &name, installed)?),
+        Append::Service { device, name, on } => (Scope::Global, service_entry(&i.r.members, &me.user, &device, &name, on)?),
         Append::Install { .. } | Append::Cost { .. } | Append::Exec { .. } | Append::Vault { .. } => bail!("installs, costs, statements and items are written on their own"),
     })
 }
 
-/// The `service` entry that removes a service from a device, found by name or key prefix, or with `installed` lets it
-/// register there again; for the device's person or an admin.
-fn service_entry(m: &Members, user: &str, device: &str, name: &str, installed: bool) -> Result<Content> {
+/// The `service` entry that switches a part of a device's oned on or off, the device found by name or key prefix; for
+/// the device's person.
+fn service_entry(m: &Members, user: &str, device: &str, name: &str, on: bool) -> Result<Content> {
     let mut found: Vec<&members::Machine> = m.machines.values().filter(|s| m.machine(&s.key).is_some()).filter(|s| s.name.eq_ignore_ascii_case(device) || (!device.is_empty() && hex(&s.key).starts_with(device))).collect();
     // A machine's services are named for it: by its name, it's its node.
     if found.len() > 1 {
         found.retain(|s| s.is(members::Kind::Compute));
     }
     let [s] = found.as_slice() else { bail!("no one device called {device}") };
-    ensure!(m.looks_after(user, &s.key), "only {}'s person or an admin installs or removes its services", s.name);
-    Ok(members::service(&s.key, name, installed))
+    ensure!(s.user == user, "only {}'s person switches what it runs", s.name);
+    Ok(members::service(&s.key, name, on))
 }
 
 /// A scope as people call it: Everyone, a person's name, or a group's.

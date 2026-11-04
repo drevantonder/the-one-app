@@ -91,8 +91,10 @@
       if (!named.has(id(user, name))) named.set(id(user, name), c);
       return c;
     };
-    for (const d of devices.filter((d) => (d.roles || []).includes("compute"))) card(d.user, d.name).node = d;
-    for (const s of devices.filter((d) => d.service)) (named.get(id(s.user, s.name)) || card(s.user, s.name)).services.push(s);
+    const byKey = new Map();
+    for (const d of devices.filter((d) => (d.roles || []).includes("compute"))) byKey.set(d.key, Object.assign(card(d.user, d.name), { node: d }));
+    // A service under the device it's part of.
+    for (const s of devices.filter((d) => d.service)) (byKey.get(s.device) || card(s.user, s.name)).services.push(s);
     const app = `${state.config?.name || ""} on `;
     for (const c of clients) {
       if (c.passkey || BROWSER.test(c.name)) {
@@ -164,7 +166,7 @@
     if (c.node) html += thing({ icon: tile("squares-four"), title: "Runs apps", mine, disabled: true });
     const services = [
       ...(c.node?.installed_services || []).map((s) => ({ ...s, off: { service: s.name, device: c.node.key } })),
-      ...c.services.filter((s) => mine || s.serves_me).map((s) => ({ name: s.service, off: { remove: s.key } })),
+      ...c.services.filter((s) => mine || s.serves_me).map((s) => ({ name: s.service, off: { service: s.service, device: s.device } })),
     ];
     if (mine || admin()) html += services.sort((a, b) => appTitle(a.name).localeCompare(appTitle(b.name))).map((s) => serviceRow(c, mine, s)).join("");
     if (mine && c.old.length) {
@@ -358,8 +360,7 @@
     act(() => one.api("POST", "/v1/settings", { name: "priority", value: JSON.stringify(set) }));
   }
 
-  /// A service switched off: removed from that device, as removing it there does (a service of its node, or a
-  /// service of its own); asked first, since it's turned on again only by installing it there.
+  /// A service switched off on its device, whose oned stops it; asked first.
   async function turnOff(input, off) {
     const card = input.closest(".list");
     const name = card.querySelector(".head .title span")?.textContent || "this device";
@@ -367,7 +368,7 @@
     const sure = await one.alert({ title: `Turn off ${title} on ${name}?`, action: "Turn Off", danger: true });
     if (!sure) return void (input.checked = true);
     input.setAttribute("aria-busy", "true");
-    act(() => (off.remove ? one.api("POST", "/v1/remove", { key: off.remove }) : one.api("POST", "/v1/service", { device: off.device, name: off.service, installed: false })));
+    act(() => one.api("POST", "/v1/service", { device: off.device, name: off.service, on: false }));
   }
 
   async function menu(which, at) {

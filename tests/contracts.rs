@@ -195,7 +195,7 @@ fn the_kernel_and_nodes_agree_on_keys_and_seals() {
             (members::runs(&[endpoint.key]), json!(["runs", { "on": [key] }])),
             (members::runs(&[]), json!(["runs", { "on": [] }])),
             (members::service(&endpoint.key, "shell", false), json!(["service", { "device": key, "name": "shell" }])),
-            (members::service(&endpoint.key, "shell", true), json!(["service", { "device": key, "name": "shell", "installed": true }])),
+            (members::service(&endpoint.key, "shell", true), json!(["service", { "device": key, "name": "shell", "on": true }])),
         ];
         let out = js(json!({ "op": "members", "calls": both.iter().map(|(_, call)| call.clone()).collect::<Vec<_>>() }));
         for ((rust, call), js) in both.iter().zip(out["contents"].as_array().expect("contents")) {

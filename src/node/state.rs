@@ -207,7 +207,13 @@ impl Node {
 
     /// Finds a device or client of the install by name or key prefix.
     pub fn find_machine(&self, name: &str) -> Result<Key> {
-        let found: Vec<Key> = self.with(|i| Ok(i.r.members.machines.values().filter(|m| !m.removed && !name.is_empty() && (m.name.eq_ignore_ascii_case(name) || hex(&m.key).starts_with(name))).map(|m| m.key).collect()))?;
+        let found: Vec<Key> = self.with(|i| {
+            let m = &i.r.members;
+            let named: Vec<&members::Machine> = m.machines.values().filter(|m| !m.removed && !name.is_empty() && (m.name.eq_ignore_ascii_case(name) || hex(&m.key).starts_with(name))).collect();
+            // A device, by its name, rather than the parts of it named for it.
+            let part = |d: &members::Machine| d.device.is_some_and(|of| named.iter().any(|n| n.key == of));
+            Ok(named.iter().filter(|d| !part(d)).map(|d| d.key).collect())
+        })?;
         let names = || self.with(|i| Ok(i.r.members.machines.values().filter(|m| !m.removed).map(|m| m.name.clone()).collect::<Vec<_>>().join(", "))).unwrap_or_default();
         match found.as_slice() {
             [one] => Ok(*one),
@@ -278,7 +284,7 @@ fn installed_services(m: &Members, device: &members::Machine, services: &[Servic
         .iter()
         .map(|(name, users, d)| {
             let built_in = d["built_in"] == true;
-            let installed = m.services.get(&(device.key, name.clone())).filter(|i| i.local);
+            let installed = m.services.get(&(device.key, name.clone())).filter(|i| i.on);
             // Registered over the local API, a service counts as installed by the device's local user.
             let by = match installed {
                 Some(i) => name_of(&i.by),
