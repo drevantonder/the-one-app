@@ -1426,7 +1426,7 @@ async fn serve(is_try: bool, args: &[String]) -> Result<()> {
     tokio::spawn(async {
         let Ok(mut hup) = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::hangup()) else { return };
         while hup.recv().await.is_some() {
-            one::handoff::restart();
+            let _ = one::handoff::restart();
         }
     });
     tokio::spawn(async move {

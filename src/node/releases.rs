@@ -3,6 +3,10 @@
 
 use super::*;
 
+/// How long after asking to hand over to a build it installed a node that still runs asks again: longer than a node
+/// taking over takes to warm.
+const HAND_OVER_AGAIN: Duration = Duration::from_secs(150);
+
 impl Node {
     /// Publishes `binary` (a build of this node for `target`, or of `service`'s program, with the release key's
     /// `signature` over it) as the install's newest release of it.
@@ -17,7 +21,8 @@ impl Node {
     }
 
     /// Updates this node whenever a newer build for its platform is published, signed with the release key. A download
-    /// that drops, or a release that fails to install, is tried again, waiting twice as long each time up to ten minutes.
+    /// that drops, or a release that fails to install, is tried again, waiting twice as long each time up to ten minutes;
+    /// and so is handing over to one installed, while this build still runs, until it hands over or a newer one comes.
     pub(super) async fn update_loop(self) {
         let mut wait = Duration::from_secs(2);
         loop {
@@ -30,8 +35,20 @@ impl Node {
                 Ok(exe) => {
                     let _ = std::fs::write(self.0.dir.join("release"), &r.blob);
                     tracing::info!("updated {} to {}; restarting", exe.display(), r.commit);
-                    crate::handoff::restart();
-                    return;
+                    let mut after = HAND_OVER_AGAIN;
+                    loop {
+                        if !crate::handoff::restart() {
+                            tracing::info!("{} hands over to it once it serves", crate::config::BUILD);
+                        }
+                        let _ = tokio::time::timeout(after, self.0.released.notified()).await;
+                        if self.wanted_release().is_some() {
+                            break;
+                        }
+                        tracing::warn!("{} still runs, though {} is installed: handing over again", crate::config::BUILD, r.commit);
+                        after = (after * 2).min(Duration::from_secs(600));
+                    }
+                    wait = Duration::from_secs(2);
+                    continue;
                 }
                 Err(err) => tracing::warn!("couldn't take the release of {}, trying again in {}s: {err:#}", r.commit, wait.as_secs()),
             }
