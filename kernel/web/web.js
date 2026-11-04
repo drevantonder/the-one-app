@@ -718,6 +718,7 @@ window.__one = {};
   /// phone's. It's told the screen's app and title, and for the client's own, since when it showed.
   const devtools = {
     KEY: "one.devtools",
+    HEIGHT: "one.devtools.height",
     since: Date.now(),
     open: () => localStorage.getItem(devtools.KEY) === "1",
     route() {
@@ -730,6 +731,29 @@ window.__one = {};
       else localStorage.setItem(devtools.KEY, "1");
       devtools.draw();
     },
+    /// Its top edge drags it taller or shorter, kept for next time. The screens' frames would take the pointer as it
+    /// moves over them, so they let it pass while it's dragged.
+    resizable(dock) {
+      const edge = Object.assign(document.createElement("div"), { className: "devtools-edge" });
+      edge.setAttribute("role", "separator");
+      edge.setAttribute("aria-orientation", "horizontal");
+      dock.append(edge);
+      edge.addEventListener("pointerdown", (e) => {
+        e.preventDefault();
+        edge.setPointerCapture(e.pointerId);
+        const start = e.clientY, from = dock.offsetHeight, most = dock.parentElement.offsetHeight - 120;
+        document.body.classList.add("dragging");
+        const move = (m) => (dock.style.height = `${Math.round(Math.min(most, Math.max(120, from + start - m.clientY)))}px`);
+        const up = () => {
+          edge.removeEventListener("pointermove", move);
+          document.body.classList.remove("dragging");
+          localStorage.setItem(devtools.HEIGHT, String(dock.offsetHeight));
+        };
+        edge.addEventListener("pointermove", move);
+        edge.addEventListener("pointerup", up, { once: true });
+        edge.addEventListener("pointercancel", up, { once: true });
+      });
+    },
     draw() {
       const detail = $(".detail", root);
       let dock = detail && $(".devtools", detail);
@@ -739,11 +763,16 @@ window.__one = {};
       }
       const r = devtools.route(), key = JSON.stringify(r);
       if (dock?.key === key) return;
-      if (!dock) detail.append((dock = Object.assign(document.createElement("div"), { className: "devtools" })));
+      if (!dock) {
+        detail.append((dock = Object.assign(document.createElement("div"), { className: "devtools" })));
+        const height = Number(localStorage.getItem(devtools.HEIGHT));
+        if (height) dock.style.height = `${height}px`;
+      }
       frames = frames.filter((f) => f !== dock.f);
       dock.key = key;
       dock.f = frameFor(r, dock);
       dock.f.dock = true;
+      devtools.resizable(dock);
     },
   };
   document.addEventListener("click", (e) => e.target.closest?.("[data-devtools]") && devtools.toggle());

@@ -59,6 +59,9 @@ a { color: inherit; }
 .screen-frame { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: transparent; }
 /* Developer's panel, docked under the screen, and the bar's button that opens it. */
 .devtools { flex: none; position: relative; height: min(440px, 50%); border-top: 0.5px solid var(--line); }
+.devtools-edge { position: absolute; z-index: 1; left: 0; right: 0; top: -4px; height: 8px; cursor: ns-resize; }
+body.dragging { cursor: ns-resize; user-select: none; }
+body.dragging iframe { pointer-events: none; }
 .dev-button { margin-left: auto; font: 600 13px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--tint); background: none; border: 0; padding: 4px 6px; border-radius: 6px; cursor: pointer; }
 .screen-status { position: absolute; inset: 0; display: grid; place-items: center; }
 

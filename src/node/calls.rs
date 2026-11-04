@@ -866,7 +866,8 @@ impl Node {
                 // An app may say which device runs it, like the one with a local model.
                 let device = req["device"].as_str().filter(|s| !s.is_empty()).map(str::to_string);
                 let call = CallRequest { app: app.into(), service: service.then(|| app.into()), op: op.into(), input: req["input"].clone(), device, depth: grant.depth + 1, from: Some(grant.app.clone()), client: Some("app".into()), ..Default::default() };
-                ok(json!({ "ok": Box::pin(self.route(call, grant.caller.clone())).await? }))
+                // Part of the call that asked, in its trace: where it went and what that took.
+                ok(json!({ "ok": trace::within(grant.trace.clone(), Box::pin(self.route(call, grant.caller.clone()))).await? }))
             }
             ("POST", "/query") => {
                 let req: Value = serde_json::from_slice(&body)?;
@@ -959,7 +960,8 @@ impl Node {
                 }
                 let input: Value = serde_json::from_slice(&body)?;
                 let call = CallRequest { app: push.clone(), service: Some(push), op: "send".into(), input, depth: grant.depth + 1, from: Some(grant.app.clone()), client: Some("app".into()), ..Default::default() };
-                ok(json!({ "ok": Box::pin(self.route(call, grant.caller.clone())).await? }))
+                // Part of the call that asked, in its trace: where it went and what that took.
+                ok(json!({ "ok": trace::within(grant.trace.clone(), Box::pin(self.route(call, grant.caller.clone()))).await? }))
             }
             ("GET", "/devices") => ok(self.state_for(&grant.caller)["install"]["devices"].take()),
             // Run priority's order, as the person the call is for: only an admin changes it.

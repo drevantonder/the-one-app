@@ -7,7 +7,8 @@
      a kind of work, which only a developer reads: the rest of the kit keeps colour for "tap this" and "this needs you". */
   :root { --net: #6e8fd8; --data: #5fb39a; --app: #e0b25c; --code: #a58bd6; --bucket: #d77f8f; --wait: #6b6f77; }
   body { padding: 0 0 24px; max-width: none; font-variant-numeric: tabular-nums; }
-  .dev-top { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 16px; padding: 0 12px; height: 36px; background: var(--bg); border-bottom: 0.5px solid var(--line); }
+  /* Its own background: a screen's is the window's, see-through, and what scrolls would show through it. */
+  .dev-top { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 16px; padding: 0 12px; height: 36px; background: color-mix(in srgb, var(--card) 88%, transparent); -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px); border-bottom: 0.5px solid var(--line); }
   .dev-tab { height: 36px; display: flex; align-items: center; font-weight: 600; box-shadow: inset 0 -2px var(--tint); }
   .dev-scope { display: flex; margin-left: auto; background: var(--fill); border-radius: 8px; padding: 2px; }
   .dev-scope button { font: inherit; font-size: 13px; border: 0; background: none; color: var(--muted); padding: 2px 10px; border-radius: 6px; cursor: pointer; }
@@ -21,7 +22,6 @@
   .routes { display: block; }
   .routes text { font: 11px -apple-system, system-ui, sans-serif; fill: var(--muted); font-variant-numeric: tabular-nums; }
   .routes .lane { fill: var(--text); font-size: 12px; font-weight: 600; }
-  .routes .quiet { fill: var(--muted); font-weight: 400; font-size: 10px; }
   .routes .on { fill: var(--text); font-weight: 600; }
   .routes .faded { opacity: 0.28; }
   .reqs { margin: 4px 0 0; border-top: 0.5px solid var(--line); }
@@ -88,13 +88,28 @@
       parts.push(["Shown from this device's copy", r.ms || 0]);
       return { marks, parts, end: r.ms || 0 };
     }
-    // What a node did, from `at` on its lane: the devices it passed the call to, and its own steps.
+    // What a node did, from `at` on its lane: the devices it passed the call to, the other apps and services the app
+    // asked while it ran (on this device or another), and its own steps.
     const node = (tr, lane, at) => {
       let listed = 0;
       for (const s of tr?.steps || []) {
-        if (!(s.step === "device" && s.result === "ran" && (s.here || s.device === lane))) listed += s.step === "logs" && s.ms < 5 ? 0 : s.ms || 0;
+        const asked = s.step === "device" && s.app && s.app !== r.app;
+        if (!asked && !(s.step === "device" && s.result === "ran" && (s.here || s.device === lane))) listed += s.step === "logs" && s.ms < 5 ? 0 : s.ms || 0;
         const a = at + (s.at || 0), b = a + (s.ms || 0);
-        if (s.step === "device") {
+        if (asked) {
+          const to = s.here ? lane : s.device || "a device";
+          const warn = s.result !== "ran";
+          if (to === lane) {
+            node(s.trace, lane, a);
+            parts.push([`${s.app} asked on ${lane}${warn ? `: ${SAID[s.result] || s.result}` : ""}`, s.ms || 0, warn]);
+            continue;
+          }
+          const inner = s.trace?.ms || 0, rt = Math.max(0, (s.ms || 0) - inner) / 2;
+          marks.push({ hop: [lane, to], a, b: a + rt, kind: warn ? "warn" : "net" });
+          if (s.trace) node(s.trace, to, a + rt);
+          marks.push({ hop: [to, lane], a: b - rt, b, kind: warn ? "warn" : "net" });
+          parts.push([`${lane} asked ${s.app} on ${to}${warn ? `: ${SAID[s.result] || s.result}` : ""}`, s.ms || 0, warn]);
+        } else if (s.step === "device") {
           const to = s.device || "a device";
           if (s.result === "ran" && (s.here || to === lane)) { node(s.trace, lane, at); continue; }
           const warn = s.result !== "ran" && s.result !== "needs keys";
@@ -107,10 +122,10 @@
           marks.push({ hop: [lane, "Bucket"], a, b: a + (s.ms || 0) / 2, kind: "bucket" }, { hop: ["Bucket", lane], a: a + (s.ms || 0) / 2, b, kind: "bucket" });
           parts.push([s.step === "bucket" ? `${lane} fetched ${s.found} of ${s.asks} from the bucket` : `${lane} asked the bucket first: ${s.result}`, s.ms || 0, s.step === "behind" && s.result !== "caught up"]);
         } else if (s.step === "data" || s.step === "open" || (s.step === "logs" && s.ms >= 5)) {
-          marks.push({ block: lane, a, b, kind: "data", label: "read" });
+          marks.push({ block: lane, a, b, kind: "data" });
           parts.push([s.step === "open" ? `Opened ${s.app}'s data on ${lane}` : s.step === "logs" ? `Read who's who on ${lane}` : `Read ${lane}'s copy${s.new ? `, ${s.new} new steps` : ""}`, s.ms || 0]);
         } else if (s.step === "run") {
-          marks.push({ block: lane, a, b, kind: "app", label: "ran" });
+          marks.push({ block: lane, a, b, kind: "app" });
           parts.push([`${s.app} ran on ${lane}`, s.ms || 0]);
         }
       }
@@ -181,21 +196,20 @@
     // Lanes: this device, each device the burst reached in the order it was first reached, and the bucket last.
     const lanes = ["This device"];
     for (const r of g.rs) for (const m of routes.get(r).marks) for (const l of m.hop || [m.block]) if (l !== "Bucket" && !lanes.includes(l)) lanes.push(l);
-    lanes.push("Bucket");
-    const usedBucket = g.rs.some((r) => routes.get(r).marks.some((m) => m.hop?.includes("Bucket")));
+    // The bucket only when something in the burst asked it.
+    if (g.rs.some((r) => routes.get(r).marks.some((m) => m.hop?.includes("Bucket")))) lanes.push("Bucket");
 
     const W = Math.max(360, document.body.clientWidth), L = 110, R = 54, top = 26, gap = 42;
     const span = Math.max(1, ...g.rs.map((r) => r.at - g.start + routes.get(r).end));
     const x = (t) => L + (t / span) * (W - L - R);
     const y = (lane) => top + 10 + lanes.indexOf(lane) * gap;
-    const H = y("Bucket") + 22;
+    const H = y(lanes.at(-1)) + 22;
     const step = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 30000].find((s) => span / s <= 6) || 60000;
     let svg = "";
     for (let t = 0; t <= span; t += step) svg += `<line x1="${x(t)}" y1="${top - 6}" x2="${x(t)}" y2="${H - 8}" stroke="var(--line)"/><text x="${x(t)}" y="${top - 10}" text-anchor="${t ? "middle" : "start"}">${t ? ms(t) : 0}</text>`;
     for (const l of lanes) {
-      const quiet = l === "Bucket" && !usedBucket;
       svg += `<line x1="${L - 8}" y1="${y(l)}" x2="${W - 6}" y2="${y(l)}" stroke="var(--line)"${l === "Bucket" ? ' stroke-dasharray="2 4"' : ""}/>` +
-        `<text x="12" y="${y(l) + 4}" class="lane"${quiet ? ' style="fill:var(--muted)"' : ""}>${esc(l)}</text>` + (quiet ? `<text x="12" y="${y(l) + 17}" class="quiet">nothing asked</text>` : "");
+        `<text x="12" y="${y(l) + 4}" class="lane">${esc(l)}</text>`;
     }
     // The others first, faded, then the one picked, with its times written on it.
     // Only the longest trip of the one picked is written on it: more would sit on top of each other.
@@ -216,7 +230,6 @@
         } else {
           const w = Math.max(3, x(off + m.b) - x(off + m.a));
           marks += `<rect x="${x(off + m.a)}" y="${y(m.block) - 6}" width="${w}" height="12" rx="3" fill="${c}"/>`;
-          if (on && m.label && w > 34) marks += `<text x="${x(off + m.a) + 3}" y="${y(m.block) + 21}" class="on">${m.label} ${ms(m.b - m.a)}</text>`;
         }
       }
       if (on) marks += `<circle cx="${x(off)}" cy="${y("This device")}" r="4" fill="var(--text)"/><circle cx="${x(off + routes.get(r).end)}" cy="${y("This device")}" r="4" fill="var(--text)"/>`;
@@ -226,10 +239,13 @@
     // What to say: the burst's length, and what took most of the picked request.
     const opening = scope === "screen" && g === groups[0] && p.title;
     const total = g.end - g.start;
-    const biggest = routes.get(sel).parts.reduce((a, b) => (b[1] > a[1] ? b : a), ["", 0]);
+    // About the slowest of the burst, whichever is picked.
+    const slow = g.rs.reduce((a, b) => ((b.ms || 0) > (a.ms || 0) ? b : a));
+    const biggest = routes.get(slow).parts.reduce((a, b) => (b[1] > a[1] ? b : a), ["", 0]);
     let said = opening ? `${esc(p.title)} opened in <b>${ms(total)}</b>. ` : `These took <b>${ms(total)}</b>. `;
-    if (warned(sel)) said += `<span class="warn">${esc(title(sel))} had a problem: ${esc(routes.get(sel).parts.find(([, , w]) => w)[0])}.</span>`;
-    else if (biggest[1] >= 1) said += `The longest part of ${esc(title(sel))}'s ${ms(sel.ms || 0)}: ${esc(biggest[0].replace(/^./, (c) => c.toLowerCase()))}, <b>${ms(biggest[1])}</b>.`;
+    const bad = g.rs.find(warned);
+    if (bad) said += `<span class="warn">${esc(title(bad))} had a problem: ${esc(routes.get(bad).parts.find(([, , w]) => w)[0])}.</span>`;
+    else if (biggest[1] >= 1) said += `The longest part of ${esc(title(slow))}'s ${ms(slow.ms || 0)}: ${esc(biggest[0].replace(/^./, (c) => c.toLowerCase()))}, <b>${ms(biggest[1])}</b>.`;
 
     const row = (r) => {
       const on = r === sel, kind = r.what === "page" ? "code" : "net";
