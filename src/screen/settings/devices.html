@@ -17,13 +17,15 @@
   .code { display: flex; align-items: center; gap: 8px; max-width: 100%; padding: 4px 4px 4px 12px; border-radius: 999px; background: var(--fill); }
   .pair code { font: 0.92em var(--mono); }
   .code span { font: 15px var(--mono); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: all; -webkit-user-select: all; }
+  #page .asking + h2.section { margin-top: 28px; }
+  .asking .confirm-detail b { font: 600 1em var(--mono); letter-spacing: 0.06em; white-space: nowrap; }
 </style>
 <script>
   // This person's devices, the shared ones they may use, and which run their own things: naming this device and
   // signing out of it, removing one, pairing a computer with a code, and, where this device holds its own keys
   // (`device.keys`), approving a new device by the code it shows, listing a passkey to get back in with, and what
   // their devices keep running for them.
-  let state, device, apps = [], passkey = false;
+  let state, device, apps = [], passkey = false, waiting = [];
   let error = "";
   // A new device's code, from its QR's link (`/approve#CODE`), asked about once.
   let scanned = one.params?.approve || "";
@@ -148,6 +150,16 @@
       '<p class="footer">A machine opens your things only while you use them.</p>';
   };
 
+  // A device waiting to be let in, asked about: which it is, the code it shows, to compare, and Approve or not.
+  const asking = (r) => {
+    const code = one.esc(r.code);
+    const [title, detail, no] = r.yours
+      ? [`Your ${r.device} wants to join`, `It shows <b>${code}</b>. Approve it only if it’s yours and shows the same.`, "Not Mine"]
+      : [`${r.person} wants to join`, `Their first device, ${one.esc(r.device)}, shows <b>${code}</b>. They join ${one.esc(yours)}.`, "Not Them"];
+    return `<div class="asking"><div class="confirm" role="group" aria-label="${one.esc(title)}"><div class="confirm-title">${one.esc(title)}</div><div class="confirm-detail">${detail}</div>` +
+      `<div class="confirm-buttons"><button class="button plain" data-refuse="${code}">${no}</button><button class="button primary" data-let="${code}">Approve</button></div></div></div>`;
+  };
+
   const clientRow = (c) =>
     row({ key: c.key, name: c.name, online: true, lines: [c.me ? "This device" : "Signed in"], trailing: "", removable: !c.me });
 
@@ -156,7 +168,7 @@
     const devices = state.install?.devices || [], clients = state.install?.clients || [];
     const mine = devices.filter((s) => s.user === me()), others = devices.filter((s) => s.user !== me());
     const here = [...devices, ...clients].find((m) => m.me);
-    let html = '<div class="large-title">Devices</div>';
+    let html = '<div class="large-title">Devices</div>' + waiting.map(asking).join("");
     if (here || device.signOut) {
       html += '<h2 class="section">This Device</h2><div class="list">' +
         (here ? `<label class="row plain"><input class="field" id="name" aria-label="This device’s name" value="${one.esc(here.name)}" autocomplete="off" spellcheck="false" enterkeyhint="done"></label>`
@@ -191,7 +203,10 @@
   const draw = () => one.render("#page", async () => {
     [state, device] = await Promise.all([one.api("GET", "/v1/state"), one.device()]);
     if (device.keys) {
-      passkey = (await one.api("GET", "/v1/devices/passkey").catch(() => ({}))).passkey === true;
+      [passkey, waiting] = await Promise.all([
+        one.api("GET", "/v1/devices/passkey").then((p) => p.passkey === true, () => false),
+        one.api("GET", "/v1/devices/requests").then((w) => w.filter((r) => r.code), () => waiting),
+      ]);
     }
     // App titles name the grants' rows and a service endpoint's ("WhatsApp on linux").
     if (!apps.length && (device.keys || (state.install?.devices || []).some((s) => s.service))) {
@@ -222,8 +237,10 @@
   });
   document.addEventListener("click", (e) => {
     if (e.target.closest(".sheet")) return;
-    const t = e.target.closest?.("[data-more], [data-pair], [data-out], [data-passkey], [data-grant], [data-keep]");
-    if (t?.hasAttribute("data-out")) signOut();
+    const t = e.target.closest?.("[data-more], [data-pair], [data-out], [data-passkey], [data-grant], [data-keep], [data-let], [data-refuse]");
+    if (t?.dataset.let) let_(t);
+    else if (t?.dataset.refuse) busy(t, () => one.api("POST", "/v1/devices/refuse", { code: t.dataset.refuse }));
+    else if (t?.hasAttribute("data-out")) signOut();
     else if (t?.hasAttribute("data-keep")) keep();
     else if (t?.hasAttribute("data-passkey")) act(() => one.api("POST", "/v1/devices/passkey", {}));
     else if (t?.dataset.grant) {
@@ -239,6 +256,14 @@
   document.addEventListener("keydown", (e) => e.target.id === "name" && e.key === "Enter" && e.target.blur());
   document.addEventListener("keydown", (e) => e.target.id === "code" && e.key === "Enter" && approve(e.target.value));
   document.addEventListener("input", (e) => e.target.id === "code" && e.target.value.replace(/[^a-z2-7]/gi, "").length === 8 && approve(e.target.value));
+
+  /// What a prompt's button does, with the button busy until it's done.
+  async function busy(b, fn) {
+    one.tap();
+    one.busy(b);
+    await act(fn);
+  }
+  const let_ = (b) => busy(b, () => one.api("POST", "/v1/devices/approve", { code: b.dataset.let, confirm: true }));
 
   /// Finds the device waiting with this code, shows which it is, and lets it in on Approve.
   async function approve(typed) {
@@ -328,7 +353,10 @@
 
   one.on("changed", draw);
   draw().then(() => {
-    if (scanned) approve(scanned), (scanned = "");
+    // One it already asks about at the top is answered there.
+    const same = (r) => r.code.replace(" ", "") === String(scanned).toUpperCase().replace(/[^A-Z2-7]/g, "");
+    if (scanned && !waiting.some(same)) approve(scanned);
+    scanned = "";
     if (keepAsked && device.keys) keep(keepAsked), (keepAsked = null);
   });
 </script>

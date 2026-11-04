@@ -895,7 +895,7 @@ window.__one = {};
   // MARK: Settings
 
   /// What Settings shows this person, in order, as the node says (`settings_items`).
-  const settingsItems = () => store.state?.settings_items || [];
+  const settingsItems = () => withWaiting(store.state)?.settings_items || [];
   /// Whether a url is this site's: a page the kernel serves, shown in place rather than in a new tab.
   const here = (url) => new URL(url, location.href).origin === location.origin;
   /// The Settings item whose url is `url` on this site, if one is.
@@ -922,7 +922,8 @@ window.__one = {};
       await refreshState().catch(() => {});
       return out ?? {};
     }
-    if (method === "GET" && !url.search && ["/v1/state", "/v1/apps"].includes(url.pathname)) return shared(url.pathname);
+    if (method === "GET" && !url.search && url.pathname === "/v1/state") return withWaiting(await shared(url.pathname));
+    if (method === "GET" && !url.search && url.pathname === "/v1/apps") return shared(url.pathname);
     return api(url.pathname + url.search, { method, body });
   }
 
@@ -955,6 +956,17 @@ window.__one = {};
     // As a machine's node answers it: `device` by its key; `scope` user (theirs), global or group:<id>; `days`, 0 to stop.
     "POST /v1/grant": (b) => device.grant({ endpoint: String(b.device || ""), app: String(b.app || ""), scope: !b.scope || b.scope === "user" ? `user:${me().id}` : String(b.scope), days: b.days ?? undefined }),
     "GET /v1/devices/passkey": async () => ({ passkey: !!passkeyToList() }),
+    // As a machine's node answers it, each with its code, which the device asking shows too, to compare.
+    "GET /v1/devices/requests": async () => (await waitingNow()).map((r) => ({ device: r.name, person: r.person, code: r.code, ...(r.mine ? { yours: true } : { new: true }) })),
+    // `{ code }`: one waiting that isn't theirs, turned down, and not asked about again here.
+    "POST /v1/devices/refuse": async (b) => {
+      const code = String(b.code || "").toUpperCase().replace(/[^A-Z2-7]/g, "");
+      const r = (await device.requests()).find((x) => x.code.replace(" ", "") === code);
+      if (!r) return;
+      notMine.add(r.key);
+      localStorage.setItem(NOT_MINE, JSON.stringify([...notMine].slice(-50)));
+      await device.refuse(r);
+    },
     // As a machine's node answers it: without `confirm`, which device it is; with, it's let in.
     "POST /v1/devices/approve": async (b) => {
       const code = String(b.code || "").toUpperCase().replace(/[^A-Z2-7]/g, "");
@@ -972,6 +984,49 @@ window.__one = {};
       sessionStorage.removeItem("one.prf");
     },
   };
+
+  // MARK: Devices waiting to be let in
+
+  /// Devices waiting that this browser may let in, as last asked: Settings › Devices has a badge for each, and the
+  /// first time one is seen here, Devices opens to ask about it. Those its person said aren't theirs aren't asked again.
+  let waiting = [];
+  const NOT_MINE = "one.notMine";
+  const notMine = new Set(JSON.parse(localStorage.getItem(NOT_MINE) || "[]"));
+  const seen = new Set();
+  let prompting = false;
+
+  /// Asks auth which devices wait now, and tells the window and its screens if that changed. → them.
+  async function waitingNow() {
+    const now = (await device.requests()).filter((r) => !notMine.has(r.key));
+    const changed = now.map((r) => r.key).join() !== waiting.map((r) => r.key).join();
+    waiting = now;
+    if (changed) {
+      render();
+      for (const f of frames) f.frame.contentWindow?.postMessage({ oneEvent: { type: "devices" } }, "*");
+    }
+    const fresh = now.filter((r) => !seen.has(r.key));
+    fresh.forEach((r) => seen.add(r.key));
+    if (fresh.length && !prompting && !(route().kind === "own" && route().name === "devices")) {
+      prompting = true;
+      openSheet(own("devices")).finally(() => (prompting = false));
+    }
+    return now;
+  }
+
+  /// Every 10 seconds while the page shows.
+  async function watchWaiting() {
+    for (;;) {
+      if (document.visibilityState === "visible") await waitingNow().catch(() => {});
+      await sleep(10_000);
+    }
+  }
+
+  /// The state with a badge on Settings › Devices for each device waiting.
+  function withWaiting(state) {
+    if (!state || !waiting.length) return state;
+    const items = (state.settings_items || []).map((i) => (i.name === "devices" ? { ...i, badge: (i.badge || 0) + waiting.length } : i));
+    return { ...state, settings_items: items };
+  }
 
   /// The passkey this tab signed in with, if it isn't listed yet: its PRF output stays in this tab only.
   function passkeyToList() {
@@ -1138,6 +1193,7 @@ window.__one = {};
     await refreshApps().catch(() => {});
     if (request?.id && request.scope) openSheet(own("request", { scope: request.scope, id: request.id }));
     listen();
+    watchWaiting();
   }
 
   document.addEventListener("DOMContentLoaded", start);

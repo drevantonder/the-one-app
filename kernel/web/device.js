@@ -343,14 +343,26 @@ export class Device {
 
   // Devices joining.
 
-  /// Devices waiting to be let in that this person may approve: their own, and for an admin, those of people they
-  /// invited from this browser. Each with its code.
+  /// Devices waiting to be let in that this browser may approve: its person's own, and for an admin, those of people
+  /// they invited from this browser, whose proof is right. Each with its code.
   async requests() {
-    const st = this.state();
     const own = (await answer(await this.bearer("/api/auth/devices/requests"))).requests || [];
-    const invited = st.install.role === "admin" ? (await this.authSigned("GET", "/api/auth/devices/requests").catch(() => ({}))).requests || [] : [];
+    const invited = this.state()?.user?.role === "admin" ? (await this.authSigned("GET", "/api/auth/devices/requests").catch(() => ({}))).requests || [] : [];
     const all = [...own, ...invited].filter((r, i, a) => !r.service && r.key !== this.me.key && a.findIndex((x) => x.key === r.key) === i);
-    return Promise.all(all.map(async (r) => ({ ...r, code: await codeOf(r.key, r.seal), mine: r.user === this.user })));
+    const ours = await Promise.all(all.map(async (r) => r.user === this.user || (await this.invitedHere(r))));
+    return Promise.all(all.filter((_, i) => ours[i]).map(async (r) => ({ ...r, code: await codeOf(r.key, r.seal), mine: r.user === this.user })));
+  }
+
+  /// Whether a newcomer's device came from an invite made in this browser: its proof is that invite's.
+  async invitedHere(r) {
+    const invite = await get(`invite:${r.user}`);
+    return !!invite && !!r.proof && r.proof === (await inviteProof(text.encode(invite.secret), hex.decode(r.key), hex.decode(r.seal)));
+  }
+
+  /// Turns down a device waiting to be let in: its request is forgotten.
+  async refuse(r) {
+    if (r.mine) await answer(await this.bearer(`/api/auth/devices/requests/${r.key}`, { method: "DELETE" }));
+    else await this.authSigned("DELETE", `/api/auth/devices/requests/${r.key}`);
   }
 
   /// Lets in a device that asked: lists it (and for a newcomer, them), seals it the epochs it may open, lets it onto the
@@ -361,9 +373,8 @@ export class Device {
     if (r.user !== this.user && known) throw new Error("Only their own devices approve one of theirs.");
     let newUser = null;
     if (r.user !== this.user) {
-      const invite = await get(`invite:${r.user}`);
-      if (!invite || !r.proof || r.proof !== (await inviteProof(text.encode(invite.secret), hex.decode(r.key), hex.decode(r.seal)))) throw new Error("That device didn’t come from an invite made here.");
-      newUser = { name: invite.name || r.person, role: "member" };
+      if (!(await this.invitedHere(r))) throw new Error("That device didn’t come from an invite made here.");
+      newUser = { name: (await get(`invite:${r.user}`)).name || r.person, role: "member" };
     }
     await this.write("global", members.device({ key: r.key, seal: r.seal, user: r.user, name: r.name, newUser }), as);
     await this.sealTo(r, newUser ? ["global"] : scopesOf(k, r.user), as);
