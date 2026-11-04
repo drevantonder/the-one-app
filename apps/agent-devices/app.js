@@ -472,7 +472,7 @@ export default {
     },
     adopt: {
       reads: false,
-      description: "For the person: make something already on one of their devices a lasting device: a Windows VM's folder (its disk.qcow2, OVMF_VARS.fd, tpm and monitor.sock), an Android Virtual Device, or an iPhone simulator.",
+      description: "For the person: make something already on one of their devices a lasting device: a Windows VM's folder with its disk, an Android Virtual Device, or an iPhone simulator.",
       input: { type: "object", required: ["device", "kind", "on"], properties: {
         device: { type: "string", description: "its name: lowercase letters, digits and dashes, like windows" }, kind: kindArg, on: { type: "string", description: "one of your devices, by name, where it is" },
         dir: { type: "string", description: "windows: its folder" }, id: { type: "string", description: "android: its AVD's name; iphone: its simulator's UDID" },
