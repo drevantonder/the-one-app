@@ -92,6 +92,9 @@ pub fn try_install(rest: &[String]) -> Result<()> {
         println!("Signed in as {me}. {CLI} try and {CLI} try mcp act as them until {CLI} try sign-out.");
         return Ok(());
     }
+    if rest.first().map(String::as_str) == Some("git") {
+        return git(&dir, &rest[1..]);
+    }
     if !rest.is_empty() {
         return crate::run(rest.to_vec());
     }
@@ -107,6 +110,32 @@ recovery key; its kernel's settings are in {}.
         dir.display(),
         kernel.display()
     );
+    Ok(())
+}
+
+/// `git`, told that the try install's repos (`<its address>/repos/…`) are reached through this build's remote helper, as
+/// git is on a computer signed in to any install: this build's helper is linked in a folder of the try install's, put
+/// first on git's PATH (the one the real install's CLI links is another build, reaching another node).
+fn git(dir: &Path, args: &[String]) -> Result<()> {
+    let address = get("/v1/state")?["install"]["settings"]["address"].as_str().context("the try install has no address")?.trim_end_matches('/').to_string();
+    let bin = dir.join("bin");
+    std::fs::create_dir_all(&bin)?;
+    let link = bin.join(crate::git_remote::helper());
+    let _ = std::fs::remove_file(&link);
+    std::os::unix::fs::symlink(std::env::current_exe()?.canonicalize()?, &link)?;
+    let path = std::env::join_paths(std::iter::once(bin).chain(std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())))?;
+    let config: usize = std::env::var("GIT_CONFIG_COUNT").ok().and_then(|n| n.parse().ok()).unwrap_or(0);
+    let status = std::process::Command::new("git")
+        .args(args)
+        .env("PATH", path)
+        .env("GIT_CONFIG_COUNT", (config + 1).to_string())
+        .env(format!("GIT_CONFIG_KEY_{config}"), format!("url.{CLI}::{address}/repos/.insteadOf"))
+        .env(format!("GIT_CONFIG_VALUE_{config}"), format!("{address}/repos/"))
+        .status()
+        .context("couldn't run git")?;
+    if !status.success() {
+        std::process::exit(status.code().unwrap_or(1));
+    }
     Ok(())
 }
 
@@ -143,6 +172,7 @@ fn usage() -> String {
   {CLI} try <command>        any command, in it: {CLI} try status, {CLI} try apps, {CLI} try board post hello
   {CLI} try mcp              its MCP server, for an agent: claude mcp add {CLI}-try -- {mcp}
   {CLI} try sign-in          sign its CLI in as its person, with no browser
+  {CLI} try git <args>       git, reaching its repos at its address: {CLI} try git clone <address>/repos/<owner>/<repo>.git, then {CLI} try git push in the clone
   {CLI} try serverless deploy    run its serverless node beside its kernel, as Cloudflare would
   {CLI} try client <kind>    a signed-in client of this checkout's build: web, android or windows
   {CLI} try client <kind> --as sam    the same, as someone else, invited by you with Add Someone's link
