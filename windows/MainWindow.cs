@@ -26,7 +26,12 @@ public sealed class MainWindow : Window
     readonly ContentControl body = new() { HorizontalContentAlignment = HorizontalAlignment.Stretch, VerticalContentAlignment = VerticalAlignment.Stretch };
     NavigationView? nav;
     Grid detail = new();
-    CancellationTokenSource? listening;
+    /// Where the window is in signing in: the welcome, starting (asking the node, or joining, showing its code until
+    /// it's approved), or the person's pages, keeping up with the node.
+    enum Phase { SignedOut, Starting, Joining, Ready }
+    Phase phase = Phase.Starting;
+    /// The current Start's: cancelled by whatever starts again or signs out, so no Start before it writes the window.
+    CancellationTokenSource? started;
 
     /// Where the window is, and what screens opened over it, each kept as drawn so Back returns to it as it was.
     Route selection = Route.PageOf("user");
@@ -125,10 +130,9 @@ public sealed class MainWindow : Window
             var list = WidgetCache.Of(Store.Shared);
             _ = System.Threading.Tasks.Task.Run(() => Widgets.Changed(list));
         };
-        Closed += (_, _) => listening?.Cancel();
+        Closed += (_, _) => started?.Cancel();
         Client.Lost += removed => DispatcherQueue.TryEnqueue(() => Lost(removed));
-        restarting = true;
-        _ = Start().ContinueWith(_ => restarting = false);
+        _ = Start();
     }
 
     readonly Windows.UI.ViewManagement.UISettings texts = new();
@@ -292,29 +296,29 @@ public sealed class MainWindow : Window
 
     // MARK: Starting
 
-    bool restarting;
-
     /// This computer isn't one of the install's: taken out, it's the sign-in; not yet in, it starts again at its approval
     /// screen, whatever the window showed, and comes back to the person's own page once approved.
     void Lost(bool removed)
     {
         if (removed)
         {
-            listening?.Cancel();
             Welcome(Client.Removed);
             return;
         }
-        if (restarting) return;
-        restarting = true;
-        listening?.Cancel();
+        // Already starting again, or signed out.
+        if (phase != Phase.Ready) return;
         Sheet.CloseAll();
         pushed.Clear();
         selection = Route.PageOf("user");
-        _ = Start().ContinueWith(_ => restarting = false);
+        _ = Start();
     }
 
     async Task Start()
     {
+        started?.Cancel();
+        var mine = started = new CancellationTokenSource();
+        var stop = mine.Token;
+        phase = Phase.Starting;
         _ = Shell.Claim(Auth.Shared.Address);
         if (Auth.Shared.Address == null || !Auth.Shared.SignedIn)
         {
@@ -335,13 +339,18 @@ public sealed class MainWindow : Window
         {
             try
             {
-                await Join();
+                await Join(stop);
                 await Store.Shared.RefreshState();
+                stop.ThrowIfCancellationRequested();
                 break;
+            }
+            catch (OperationCanceledException) when (stop.IsCancellationRequested)
+            {
+                return;
             }
             catch (SignedOutException e)
             {
-                Welcome(e.Message == Client.Removed ? e.Message : null);
+                if (!stop.IsCancellationRequested) Welcome(e.Message == Client.Removed ? e.Message : null);
                 return;
             }
             catch (NotLetInException)
@@ -351,11 +360,14 @@ public sealed class MainWindow : Window
             }
             catch (Exception e)
             {
+                if (stop.IsCancellationRequested) return;
                 if (misses >= 2 || DateTime.Now - since >= TimeSpan.FromSeconds(3))
                     body.Content = Look.Unavailable("Can’t Reach Your Devices", e.Message, Look.Text("Trying again…", 13, Look.Secondary));
-                await Task.Delay(Node.RetryWait(misses));
+                try { await Task.Delay(Node.RetryWait(misses), stop); }
+                catch (OperationCanceledException) { return; }
             }
         }
+        phase = Phase.Ready;
         if (Store.Shared.Install == null)
         {
             body.Content = Look.Unavailable("Not Set Up Yet", "Set it up on one of your computers first.");
@@ -371,17 +383,19 @@ public sealed class MainWindow : Window
             body.Content = Look.Unavailable("Something Went Wrong", e.Message);
             return;
         }
-        listening = new CancellationTokenSource();
-        _ = Store.Shared.Listen(() => DispatcherQueue.TryEnqueue(() => Welcome(null)), listening.Token);
+        _ = Store.Shared.Listen(() => DispatcherQueue.TryEnqueue(() => { if (!stop.IsCancellationRequested) Welcome(null); }), stop);
     }
 
     /// This computer let in as its person's device: at once if it is, else it asks, shows its code, and waits for one of
     /// their devices (or, for someone new, their inviter's) to approve it.
-    async Task Join()
+    async Task Join(CancellationToken stop)
     {
         if (await Client.Connect()) return;
+        stop.ThrowIfCancellationRequested();
         if (await Client.RemovedNow()) throw new SignedOutException(Client.Removed);
         var code = await Client.Ask();
+        stop.ThrowIfCancellationRequested();
+        phase = Phase.Joining;
         var panel = new StackPanel { Spacing = 14, MaxWidth = 460 };
         panel.Children.Add(new TextBlock { Text = "Waiting for Approval", FontSize = 28, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Center, TextAlignment = TextAlignment.Center });
         panel.Children.Add(Look.Text(Auth.Shared.Invite != null ? "Whoever invited you approves it. Show them this code." : "Your other devices ask you to approve it. It shows this code there too.", 14, Look.Secondary, wrap: true));
@@ -397,7 +411,13 @@ public sealed class MainWindow : Window
         signOut.Click += async (_, _) => await SignOut();
         panel.Children.Add(signOut);
         body.Content = Centered(panel);
-        while (!await Client.Waited()) await Task.Delay(2000);
+        while (!await Client.Waited())
+        {
+            stop.ThrowIfCancellationRequested();
+            await Task.Delay(2000, stop);
+        }
+        stop.ThrowIfCancellationRequested();
+        phase = Phase.Starting;
         Auth.Shared.Invite = null;
         body.Content = Centered(new ProgressRing { IsActive = true, Width = 24, Height = 24 });
     }
@@ -412,7 +432,9 @@ public sealed class MainWindow : Window
     /// Welcome: the install's address (or an invite link) the first time, then Sign In, in the person's browser.
     void Welcome(string? error, bool invited = false)
     {
-        listening?.Cancel();
+        started?.Cancel();
+        started = null;
+        phase = Phase.SignedOut;
         Sheet.CloseAll();
         nav = null;
         DeveloperOn(false);
@@ -540,7 +562,7 @@ public sealed class MainWindow : Window
 
     public async Task SignOut()
     {
-        listening?.Cancel();
+        started?.Cancel();
         await Client.SignOut();
         await Auth.Shared.SignOut();
         pushed.Clear();
