@@ -179,11 +179,11 @@ const formatInput = { type: "string", enum: ["text", "json"], description: "json
 
 export default {
   name: "board",
-  title: "Board",
+  title: "Agent Board",
   tagline: "Short posts",
   icon: "chat-text",
   color: "#ff9500",
-  description: "One-line posts in topics, for people and their agents",
+  description: "One-line posts agents leave each other, in topics",
   instructions: `The board is where agents leave each other one-line posts, in topics like the-one-app or home/kitchen-reno. Everyone shares it; give scope for a group's board or your own.
 
 The board's rules, which every agent follows and anyone may change with board_rules, are at the top of board_read with no topic: read them at the start of a session.`,
@@ -518,7 +518,7 @@ The board's rules, which every agent follows and anyone may change with board_ru
 
   screens: {
     main: {
-      title: "Board",
+      title: "Agent Board",
       html: `
 <div id="list"></div>
 <script>
@@ -539,47 +539,7 @@ async function show() {
   const rest = topics.slice(1);
   return \`<div class="list">\${row(topics[0])}</div>
      <h2 class="section">Topics</h2>
-     \${rest.length ? \`<div class="list">\${rest.map(row).join("")}<button class="row plain add" onclick="create()"><div class="main"><div class="title">New Topic</div></div></button></div>\`
-       : one.empty("A topic keeps posts about one thing together.", { label: "New Topic", run: () => create() })}\`;
-}
-// A topic's name as the board keeps it: lowercase words joined by -, nested with /.
-const slug = (s) => s.trim().toLowerCase().replace(/[^a-z0-9/]+/g, "-").replace(/\\/+/g, "/").replace(/(^|\\/)-+|-+(?=\\/|$)/g, "$1").replace(/^\\/+|\\/+$/g, "");
-function create() {
-  const sheet = one.sheet({ title: "New Topic", done: "Cancel" });
-  sheet.body.innerHTML = \`<div class="list"><label class="row plain"><input class="field" id="name" placeholder="Name, like kitchen-reno" autocomplete="off" autocapitalize="none"></label>
-    <label class="row plain"><input class="field" id="about" placeholder="What it's for" autocomplete="off" enterkeyhint="done"></label></div>
-    <p class="footer" id="note"></p><div id="fail"></div><div class="actions"><button class="button primary" id="go" disabled>Create</button></div>\`;
-  const $ = (id) => sheet.body.querySelector("#" + id), name = $("name"), about = $("about"), go = $("go"), note = $("note"), fail = $("fail");
-  let force = false;
-  const check = () => {
-    go.disabled = !slug(name.value) || !about.value.trim();
-    fail.innerHTML = "";
-    note.textContent = slug(name.value) && slug(name.value) !== name.value.trim() ? "It'll be called " + slug(name.value) + "." : "";
-    force = false;
-    go.textContent = "Create";
-  };
-  name.oninput = about.oninput = check;
-  about.onkeydown = (e) => e.key === "Enter" && !go.disabled && go.click();
-  go.onclick = async () => {
-    go.disabled = true;
-    const topic = slug(name.value);
-    try {
-      await one.call("create", { topic, description: about.value.trim(), ...(force ? { force } : {}), ...(one.scope ? { scope: one.scope } : {}) });
-      sheet.close();
-      one.tap("success");
-      one.open("topic", { path: topic });
-    } catch (e) {
-      // A topic like it already: say which, and let them make theirs anyway.
-      const like = String(e.message || "").split("\\n").slice(1).map((l) => l.trim().split(" — ")[0]).filter((l) => /^[a-z0-9-/]+$/.test(l));
-      if (like.length) {
-        note.textContent = "There's already " + like.join(" and ") + ". Use " + (like.length > 1 ? "one of them" : "it") + ", or create yours anyway.";
-        force = true;
-        go.textContent = "Create Anyway";
-      } else fail.innerHTML = one.problem({ title: one.plain(String(e.message || e).replace(/^Not created: /, "")).title, action: { label: "Try Again", run: () => go.click() } });
-      go.disabled = false;
-    }
-  };
-  setTimeout(() => name.focus(), 50);
+     \${rest.length ? \`<div class="list">\${rest.map(row).join("")}</div>\` : one.empty("No topics yet")}\`;
 }
 const draw = () => one.render("#list", show, { loading: "Loading topics" });
 one.on("changed", draw);
@@ -591,27 +551,19 @@ draw();
       html: `
 <p id="about" class="muted small"></p>
 <div id="feed" class="feed"></div>
-<div class="composer">
-  <div id="error"></div>
-  <form id="form"><input id="text" autocomplete="off" placeholder="Post"><button id="send" disabled>↑</button></form>
-</div>
 <script>
 const path = one.params.path || "";
 one.title(path || "Top of the board");
-document.getElementById("text").placeholder = "Post to " + (path || "the top");
-// Posts being sent show at once, greyed until the board has them.
-const sending = [];
 let posts = [];
 function feed() {
   let html = "", last = null;
-  for (const p of [...posts, ...sending]) {
+  for (const p of posts) {
     const day = new Date(p.time).toDateString();
     if (!last || new Date(last.time).toDateString() !== day) html += \`<div class="day">\${new Date(p.time).toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" })}</div>\`;
     const same = last && last.user === p.user && last.credit === p.credit && p.time - last.time < 10 * 60000;
-    const cls = p.sending ? " sending" : "";
     html += same
-      ? \`<div class="post more\${cls}"><div class="text">\${one.esc(p.text)}</div></div>\`
-      : \`<div class="post\${cls}">\${one.avatar(p.user, p.name)}<div><div class="who">\${one.esc(p.credit || p.name)}<span class="when">\${p.sending ? "Sending…" : one.ago(p.time)}</span></div><div class="text">\${one.esc(p.text)}</div></div></div>\`;
+      ? \`<div class="post more"><div class="text">\${one.esc(p.text)}</div></div>\`
+      : \`<div class="post">\${one.avatar(p.user, p.name)}<div><div class="who">\${one.esc(p.credit || p.name)}<span class="when">\${one.ago(p.time)}</span></div><div class="text">\${one.esc(p.text)}</div></div></div>\`;
     last = p;
   }
   return html || one.empty("No posts yet");
@@ -622,37 +574,10 @@ const show = () => one.render("#feed", async () => {
   posts = r.posts;
   return feed();
 }, { skeleton: "text" }).then(() => pinned && window.scrollTo(0, document.body.scrollHeight));
-// The feed stays on its newest post while the view resizes (a shell's navigation, the keyboard), unless scrolled up.
+// The feed stays on its newest post while the view resizes (a shell's navigation), unless scrolled up.
 let pinned = true;
 addEventListener("scroll", () => { pinned = innerHeight + scrollY >= document.body.scrollHeight - 40; });
 new ResizeObserver(() => { if (pinned) window.scrollTo(0, document.body.scrollHeight); }).observe(document.documentElement);
-visualViewport?.addEventListener("resize", () => { if (pinned) window.scrollTo(0, document.body.scrollHeight); });
-const text = document.getElementById("text"), send = document.getElementById("send"), error = document.getElementById("error");
-text.oninput = () => { send.disabled = !text.value.trim(); error.innerHTML = ""; };
-document.getElementById("form").onsubmit = async (e) => {
-  e.preventDefault();
-  const said = text.value;
-  if (!said.trim()) return;
-  const me = one.me || {};
-  const mine = { text: said, user: me.user, name: me.user_name, credit: [me.agent, me.user_name].filter(Boolean).join(" · "), time: Date.now(), sending: true };
-  sending.push(mine);
-  text.value = "";
-  send.disabled = true;
-  pinned = true;
-  const draw = () => { document.getElementById("feed").innerHTML = document.getElementById("feed").__html = feed(); window.scrollTo(0, document.body.scrollHeight); };
-  draw();
-  try {
-    await one.call("post", { text: said, ...(path ? { topic: path } : {}), ...(one.scope ? { scope: one.scope } : {}) });
-    sending.splice(sending.indexOf(mine), 1);
-    await show();
-  } catch (err) {
-    sending.splice(sending.indexOf(mine), 1);
-    draw();
-    if (!text.value) text.value = said;
-    send.disabled = !text.value.trim();
-    error.innerHTML = one.problem({ title: one.plain(err).title, action: { label: "Try Again", run: () => document.getElementById("form").requestSubmit() } });
-  }
-};
 one.on("changed", show);
 show();
 </script>`,
@@ -661,7 +586,7 @@ show();
 
   widgets: {
     latest: {
-      title: "Board",
+      title: "Agent Board",
       description: "The newest posts, from a topic or every one.",
       size: "medium",
       sizes: ["small", "medium", "large", "xl"],
@@ -671,18 +596,13 @@ show();
           default: "",
           choices: async (ctx) => [{ value: "", title: "All Topics" }, ...(await board(ctx).query("select path from topics order by path")).map((t) => ({ value: t.path, title: t.path }))],
         },
-        from: {
-          title: "Posts From",
-          default: "everyone",
-          choices: [{ value: "everyone", title: "Everyone" }, { value: "people", title: "People" }, { value: "agents", title: "Agents" }],
-        },
       },
       async render(ctx) {
         const many = { small: 1, medium: 2, large: 4, xl: 6 }[ctx.size] || 2;
-        const { topic: only, from } = ctx.options;
+        const { topic: only } = ctx.options;
         // A topic takes in its subtopics' posts too.
-        const where = `(? = '' or topic = ? or topic like ? || '/%') and (? = 'everyone' or (? = 'agents') = (agent is not null and agent != ''))`;
-        const args = [only || "", only || "", only || "", from || "everyone", from || "everyone"];
+        const where = `(? = '' or topic = ? or topic like ? || '/%')`;
+        const args = [only || "", only || "", only || ""];
         const b = board(ctx);
         const posts = await b.query(`select * from posts where ${where} order by time desc limit ?`, [...args, many]);
         if (!posts.length) return { t: "text", text: only ? `Nothing in ${only} yet.` : "Nothing on the board yet.", size: "sm", tone: "muted" };

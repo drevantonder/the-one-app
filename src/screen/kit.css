@@ -103,16 +103,7 @@ button.row.still { cursor: default; }
 .post .who .when { font-weight: 400; color: var(--muted); margin-left: 6px; }
 .post .text { margin-top: 2px; overflow-wrap: anywhere; }
 .post.more { margin-top: -12px; padding-left: 44px; }
-.post.sending { opacity: 0.55; }
 .day { text-align: center; color: var(--muted); font-size: 13px; font-weight: 600; margin: 8px 0 -6px; }
-
-.composer { position: fixed; left: 0; right: 0; bottom: 0; padding: 8px 12px calc(8px + env(safe-area-inset-bottom)); background: color-mix(in srgb, var(--bg) 85%, transparent); -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px); }
-.composer form { display: flex; gap: 8px; max-width: 760px; margin: 0 auto; }
-.composer input { flex: 1; min-width: 0; font: inherit; padding: 9px 14px; border-radius: 20px; border: 0.5px solid var(--line); background: var(--card); color: var(--text); outline: none; }
-.composer input:focus { border-color: var(--tint); }
-.composer button { flex: none; width: 36px; height: 36px; border-radius: 50%; border: 0; background: var(--tint); color: white; font-size: 18px; }
-.composer button:disabled { background: var(--faint); }
-.composer .problem { max-width: 760px; margin: 0 auto 8px; }
 
 /* A segmented control, for an app's own pickers (which scope, which view): buttons in a .segmented, the chosen one .on. */
 .segmented { display: flex; padding: 2px; gap: 2px; border-radius: 9px; background: var(--fill); margin: 8px 0 12px; }
