@@ -87,7 +87,8 @@ async function receive(ctx, g, api, name, hash) {
   // git checks it may push by sending nothing first.
   if (!commands.length) return text("", 200, "application/x-git-receive-pack-result");
   const report = (unpack, lines) => text(pkt(`unpack ${unpack}\n`) + lines.map(pkt).join("") + "0000", 200, "application/x-git-receive-pack-result");
-  const refuse = (why) => report(why.replace(/\n/g, " "), commands.map((c) => `ng ${c.ref} ${why.replace(/\n/g, " ")}\n`));
+  // Refused, each branch with why; the pack too, only if it's the pack that's wrong.
+  const refuse = (why, unpacked = "ok") => report(unpacked, commands.map((c) => `ng ${c.ref} ${why.replace(/\n/g, " ")}\n`));
 
   let r = await api.repoOf(g, name);
   if (r?.deleted) return refuse(`${name} was deleted: its owners restore it from Recently Deleted`);
@@ -106,7 +107,7 @@ async function receive(ctx, g, api, name, hash) {
     try {
       checked = await check(pack);
     } catch (err) {
-      return refuse(err.message);
+      return refuse(err.message, err.message.replace(/\n/g, " "));
     }
     if (checked.entries.length) added = { bytes: pack, ...checked };
   }
