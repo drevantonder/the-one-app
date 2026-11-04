@@ -560,6 +560,7 @@ public sealed class MainWindow : Window
         pane = new Grid();
         pane.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         pane.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        pane.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         pane.Children.Add(detail);
         pane.SizeChanged += (_, _) => FitDock();
         dock = null;
@@ -674,8 +675,18 @@ public sealed class MainWindow : Window
     Route? fronted;
     FrameworkElement? frontView;
     long since = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-    /// Developer's panel's height: 45% of the window's, to 440.
+    /// Developer's panel, and the edge on its top that drags it taller or shorter.
     Border? dockBox;
+    DockEdge? dockEdge;
+    /// Its height, kept on this computer for next time, and used on every screen; none kept is 45% of the window's, to 440.
+    double? dockHeight = KeptDockHeight();
+    static string DockHeightFile => System.IO.Path.Combine(WhiteLabel.Folder, "developer-height");
+
+    static double? KeptDockHeight()
+    {
+        try { return double.TryParse(System.IO.File.ReadAllText(DockHeightFile).Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var h) && h > 0 ? h : null; }
+        catch { return null; }
+    }
 
     async Task ReadDeveloper()
     {
@@ -701,8 +712,7 @@ public sealed class MainWindow : Window
         if (pane == null) return;
         if (!developer || !docked || nav == null)
         {
-            if (dockBox != null) pane.Children.Remove(dockBox);
-            (dock, dockBox, dockRoute) = (null, null, null);
+            RemoveDock();
             return;
         }
         var front = pushed.Count > 0 ? pushed[^1] : (selection, shown);
@@ -711,18 +721,67 @@ public sealed class MainWindow : Window
             ? new JsonObject { ["title"] = title, ["since"] = since }
             : new JsonObject { ["app"] = front.Item1.App, ["screen"] = front.Item1.Screen, ["title"] = title }).ToJsonString());
         if (dockRoute == asked && dockBox != null) return;
-        if (dockBox != null) pane.Children.Remove(dockBox);
+        RemoveDock();
         dockRoute = asked;
         dock = new AppScreen(asked, (_, _) => { });
-        dockBox = new Border { Background = Look.Page, BorderBrush = Look.CardStroke, BorderThickness = new Thickness(1, 1, 0, 0), Child = dock };
-        Grid.SetRow(dockBox, 1);
+        dockBox = new Border { Background = Look.Page, BorderBrush = Look.CardStroke, BorderThickness = new Thickness(1, 0, 0, 0), Child = dock };
+        Grid.SetRow(dockBox, 2);
         pane.Children.Add(dockBox);
+        // The edge is a strip of its own above the panel, as a splitter is, holding the panel's top line; the screens'
+        // WebViews would take the pointer if it lay over them.
+        var edge = dockEdge = new DockEdge { Height = 8 };
+        edge.Children.Add(new Border { Height = 1, VerticalAlignment = VerticalAlignment.Bottom, Background = Look.CardStroke });
+        Grid.SetRow(edge, 1);
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(edge, "Resize Developer");
+        double start = 0, from = 0;
+        edge.PointerPressed += (_, e) =>
+        {
+            if (dockBox == null || pane == null || !edge.CapturePointer(e.Pointer)) return;
+            (start, from) = (e.GetCurrentPoint(pane).Position.Y, dockBox.ActualHeight);
+            edge.Dragging = true;
+            e.Handled = true;
+        };
+        edge.PointerMoved += (_, e) =>
+        {
+            if (!edge.Dragging || pane == null) return;
+            dockHeight = from + start - e.GetCurrentPoint(pane).Position.Y;
+            FitDock();
+        };
+        void drop(Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
+        {
+            if (!edge.Dragging) return;
+            edge.Dragging = false;
+            edge.ReleasePointerCapture(e.Pointer);
+            try
+            {
+                System.IO.Directory.CreateDirectory(WhiteLabel.Folder);
+                System.IO.File.WriteAllText(DockHeightFile, dockBox?.Height.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "");
+            }
+            catch { }
+        }
+        edge.PointerReleased += (_, e) => drop(e);
+        edge.PointerCanceled += (_, e) => drop(e);
+        edge.PointerCaptureLost += (_, _) => edge.Dragging = false;
+        pane.Children.Add(edge);
         FitDock();
     }
 
+    void RemoveDock()
+    {
+        if (pane != null)
+        {
+            if (dockBox != null) pane.Children.Remove(dockBox);
+            if (dockEdge != null) pane.Children.Remove(dockEdge);
+        }
+        (dock, dockBox, dockEdge, dockRoute) = (null, null, null, null);
+    }
+
+    /// Between 120 and the window's height less 120 (and the edge), whatever was kept or dragged to.
     void FitDock()
     {
-        if (dockBox != null && pane != null) dockBox.Height = Math.Min(440, pane.ActualHeight * 0.45);
+        if (dockBox == null || pane == null) return;
+        var most = Math.Max(120, pane.ActualHeight - dockEdge!.Height - 120);
+        dockBox.Height = Math.Clamp(dockHeight ?? Math.Min(440, pane.ActualHeight * 0.45), 120, most);
     }
 
     /// The title bar: the window's name, or once something is pushed, Back and the path to it.
@@ -856,3 +915,14 @@ public sealed class MainWindow : Window
     List<string> drawn = [];
 }
 
+/// The thin strip on the Developer panel's top edge: the resize cursor, and whether it's being dragged.
+sealed class DockEdge : Grid
+{
+    public bool Dragging;
+
+    public DockEdge()
+    {
+        Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+        ProtectedCursor = Microsoft.UI.Input.InputSystemCursor.Create(Microsoft.UI.Input.InputSystemCursorShape.SizeNorthSouth);
+    }
+}
