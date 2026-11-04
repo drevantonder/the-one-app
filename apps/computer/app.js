@@ -153,13 +153,14 @@ const PAGE = `
       \`<div class="sub\${v.bad ? " bad" : ""}\${v.warn ? " warn" : ""}">\${v.lineHtml}</div>\${mirror}</div>\`;
   }
 
-  function showFix(d) {
+  // The sheet a Fix opens, drawn again with each poll so a permission turned on shows here.
+  let fixing = null; // { device, body, drawn }
+
+  function fixHtml(d) {
     const a11y = !!d.permissions?.accessibility;
     const sr = !!d.permissions?.screen_recording;
     const name = d.title || d.device;
-    one.sheet({
-      title: name,
-      html: \`
+    return \`
         <p class="perm-lead">macOS requires two permissions before agents can view or control this Mac.</p>
         <div class="list">
           <div class="row">
@@ -193,13 +194,18 @@ const PAGE = `
             <span class="step-num">2</span>
             <div class="main">
               <div class="title"><span>Turn on The One App</span></div>
-              <div class="sub wrap">Enable the switch next to <b>The One App</b> and approve with Touch ID.</div>
+              <div class="sub wrap">Enable the switch next to <b>The One App</b> and approve with Touch ID\${a11y ? ", then choose <b>Quit &amp; Reopen</b>" : ""}.</div>
             </div>
           </div>\`}
         </div>
         <p class="footer">This page updates automatically once permission is granted.</p>
-      \`,
-    });
+      \`;
+  }
+
+  function showFix(d) {
+    const html = fixHtml(d);
+    const { body } = one.sheet({ title: d.title || d.device, html, onClose: () => (fixing = null) });
+    fixing = { device: d.device, body, drawn: html };
   }
 
   grid.addEventListener("click", (e) => {
@@ -254,6 +260,11 @@ const PAGE = `
     const section = document.getElementById("sessions-section");
     if (section.hidden !== !sessions.length) section.hidden = !sessions.length;
     if (s !== listed) document.getElementById("sessions").innerHTML = listed = s;
+    const f = fixing && devs.find((d) => d.device === fixing.device);
+    if (f && f.permissions) {
+      const h = fixHtml(f);
+      if (h !== fixing.drawn) fixing.body.innerHTML = fixing.drawn = h;
+    }
   }
 
   // Whether this is the newest answer: an older poll that comes back late is dropped.
