@@ -77,7 +77,11 @@ func (ds *devices) machines(ctx context.Context) (here machine, all []machine, e
 	}
 	defer resp.Body.Close()
 	var st struct {
-		Me, Device struct{ Name string }
+		Me     struct{ Name string }
+		Device struct {
+			Name    string
+			RunsFor []string `json:"runs_for"` // as a service, what this machine's own node runs
+		}
 		User       struct{ ID string }
 		Install    struct{ Devices []machine }
 	}
@@ -91,6 +95,9 @@ func (ds *devices) machines(ctx context.Context) (here machine, all []machine, e
 	}
 	here.Name = cmpOr(st.Me.Name, cmpOr(st.Device.Name, here.Name))
 	here.User = cmpOr(here.User, st.User.ID)
+	if here.RunsFor == nil {
+		here.RunsFor = st.Device.RunsFor
+	}
 	return here, st.Install.Devices, nil
 }
 

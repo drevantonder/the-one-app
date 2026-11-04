@@ -575,8 +575,11 @@ impl Service {
         let known = self.0.known.lock().unwrap();
         let m = &known.1;
         let devices: Vec<Value> = m.services(&self.0.name).map(|s| json!({ "key": hex(&s.key), "name": s.name, "online": s.key == self.key(), "sidecars": [self.0.name] })).collect();
+        // The scopes this machine's own node runs, if it has one: a program here may reach what they hold.
+        let here: Vec<&crate::members::Machine> = m.computes().filter(|c| c.name == self.0.machine).collect();
+        let runs_for: Vec<String> = m.scopes().into_iter().filter(|s| here.iter().any(|c| m.runs_for(&c.key, s))).map(|s| s.to_string()).collect();
         json!({
-            "device": { "key": hex(&self.key()), "name": self.0.machine },
+            "device": { "key": hex(&self.key()), "name": self.0.machine, "runs_for": runs_for },
             "user": self.owner_in(m).map(|u| json!({ "id": u, "name": m.user(&u).map(|p| p.name.clone()) })),
             "install": { "name": m.name, "root": self.0.install.root, "devices": devices, "settings": crate::state::settings(m) },
         })
