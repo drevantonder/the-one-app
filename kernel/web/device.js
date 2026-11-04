@@ -384,8 +384,10 @@ export class Device {
     if (newUser) await this.authSigned("DELETE", `/api/auth/devices/requests/${r.key}`, {}, approved).catch(() => {});
     else await this.bearer(`/api/auth/devices/requests/${r.key}${approved}`, { method: "DELETE" }).catch(() => {});
     // Re-adding a device replaces the one it was (signed out, or set up again), never a second of the same name; never
-    // the device approving it, though, which may be called the same ("Chrome on Mac" on two Macs).
-    for (const old of k.devices.filter((d) => d.user === r.user && d.name === r.name && ![r.key, this.me.key, as.key].includes(d.key) && d.roles?.includes("client") && !d.passkey)) {
+    // the device approving it, though, which may be called the same ("Chrome on Mac" on two Macs), and only a client
+    // alone: a node or service of that name (a computer's CLI named as the machine it's on) stays.
+    const alone = (d) => d.roles?.includes("client") && !d.roles.includes("compute") && !d.roles.includes("service");
+    for (const old of k.devices.filter((d) => d.user === r.user && d.name === r.name && ![r.key, this.me.key, as.key].includes(d.key) && alone(d) && !d.passkey)) {
       await this.remove(old.key, as).catch((err) => console.warn(`replacing ${r.name}'s earlier device:`, err));
     }
   }

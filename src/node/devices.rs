@@ -521,8 +521,10 @@ impl Node {
             let told = self.tell_relay_now(json!({ "add": r.key, "admin": admin, "role": "client" })).await;
             told.with_context(|| format!("{} is let in, but your One App's network didn't take it yet: approve it again", r.name))?;
         }
-        // Re-adding a device replaces the one it was (signed out, or set up again), never a second of the same name.
-        let before: Vec<Key> = self.with(|i| Ok(i.r.members.clients().filter(|c| c.user == r.user && c.name == r.name && c.key != endpoint.key).map(|c| c.key).collect()))?;
+        // Re-adding a device replaces the one it was (signed out, or set up again), never a second of the same name; but
+        // only a client alone: a node or service of that name (a computer's CLI named as the machine it's on) stays.
+        let alone = |c: &crate::members::Machine| !c.is(crate::members::Kind::Compute) && !c.is(crate::members::Kind::Service);
+        let before: Vec<Key> = self.with(|i| Ok(i.r.members.clients().filter(|c| c.user == r.user && c.name == r.name && c.key != endpoint.key && alone(c)).map(|c| c.key).collect()))?;
         let mut replaced = Vec::new();
         for old in before {
             match self.remove_device(caller, &hex(&old)).await {
