@@ -80,12 +80,13 @@
       : `<span class="note">${PLACES[d.use]}</span>`;
     return `<div class="row plain"><div class="main"><div class="title"><span>${one.esc(d.name)}</span></div>${subs([KINDS[d.kind], d.here && "This device", !d.online && "Offline"].filter(Boolean).join(" · "))}</div>${trailing}</div>`;
   };
+  const admin = () => state.user?.role === "admin";
   const orderSection = () => {
-    const all = places(), admin = state.user?.role === "admin";
+    const all = places();
     // With one place, there's nothing to put first.
     if (all.length < 2) return "";
     const rank = (d) => Object.keys(PLACES).indexOf(d.use) * 10 + (COST[d.kind] || 0);
-    const html = `<h2 class="section">Where Things Run</h2><div class="list">${all.sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name)).map((d) => orderRow(d, admin)).join("")}</div>`;
+    const html = `<h2 class="section">Where Things Run</h2><div class="list">${all.sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name)).map((d) => orderRow(d, true)).join("")}</div>`;
     return html + `<p class="footer">Things run on the first device here that’s on and has room.</p>`;
   };
 
@@ -100,6 +101,8 @@
       `${subs(`Until ${until}, and longer as ${g.scope === `user:${me()}` ? "you use it" : "it’s used"}`)}</div>` +
       `<button class="button plain small" data-grant='${one.esc(JSON.stringify({ device: g.endpoint, app: g.app, scope: g.scope }))}'>Stop</button></div>`;
   };
+  // The apps that run on their own, every so often, in a scope (their own, unless it's said).
+  const scheduled = (scope = `user:${me()}`) => apps.filter((a) => (a.schedules || []).some((s) => s.scope === scope && !s.removed));
   // The devices that may keep an app running in a scope: those that hold it.
   const keepers = (scope) => (state.install?.devices || []).filter((d) => (d.runs_for || []).includes(scope));
 
@@ -125,8 +128,7 @@
       }
     });
     if (app) return devices();
-    const scheduled = apps.filter((a) => (a.schedules || []).some((s) => s.scope === scope && !s.removed));
-    choose(scheduled.map((a) => pick(a.title || a.name, `data-keep-app="${one.esc(a.name)}"`)), "Apps that run on their own, every so often.");
+    choose(scheduled(scope).map((a) => pick(a.title || a.name, `data-keep-app="${one.esc(a.name)}"`)), "Apps that run on their own, every so often.");
   }
 
   // Where their own things run: the machines that run things, each with a switch. Their own machines always do; the
@@ -136,11 +138,14 @@
     const cloud = state.install?.serverless;
     return cloud?.key ? [...all, { key: cloud.key, name: "Cloudflare", runs_for: cloud.runs_for, roles: ["compute"] }] : all;
   };
+  // Whether this person has a machine of their own: then where things run is theirs to see and choose.
+  const ownsMachine = () => machines().some((s) => s.user === me());
   const always = (s) => holds(s) && s.user === me() && !(state.install?.runs || []).includes(s.key);
   const runsSection = () => {
     const all = machines();
-    if (!all.length) return "";
     const on = all.filter(holds).map((s) => shown(s.name));
+    // Only for someone with a machine of their own, or with nothing running their things.
+    if (!all.length || (on.length && !ownsMachine())) return "";
     // Nothing running them is a problem, shown on the section; otherwise it says where, in the list's first row.
     const said = on.length ? `<div class="row plain"><div class="main">${one.esc(`Your things run on ${list(on)}.`)}</div></div>` : "";
     const none = on.length ? "" : one.problem({ title: "Nothing runs your things", text: "Turn on a machine below, or your apps can’t open what’s yours." });
@@ -182,17 +187,24 @@
         `<label class="row plain"><input class="field code-field" id="code" placeholder="Code on the new device" aria-label="Code on the new device" autocomplete="off" spellcheck="false" autocapitalize="characters" enterkeyhint="go" maxlength="9"></label></div>` +
         '<div id="approve"></div><p class="footer">Type the code it shows, or scan its QR code with your phone.</p>';
       if (passkey) html += `<div class="list passkey"><a class="row plain action-row" data-passkey>${one.icon("key")}<span>Use this passkey to get back in if you lose your devices</span></a></div>`;
+      // Only for someone with something kept running, or an app that runs on its own: an app's screen asks for the rest.
       const grants = (state.install?.grants || []).filter((g) => g.until > Date.now());
-      html += '<h2 class="section">Kept Running</h2><div class="list">' + grants.map(grantRow).join("") +
-        `<a class="row plain action-row" data-keep>${one.icon("arrows-clockwise")}<span>Keep an App Running…</span></a></div>` +
-        (grants.length ? '<p class="footer">When one stops or runs out, that device can’t open the app’s things any more.</p>' : "");
+      if (grants.length || scheduled().length) {
+        html += '<h2 class="section">Kept Running</h2><div class="list">' + grants.map(grantRow).join("") +
+          `<a class="row plain action-row" data-keep>${one.icon("arrows-clockwise")}<span>Keep an App Running…</span></a></div>` +
+          (grants.length ? '<p class="footer">When one stops or runs out, that device can’t open the app’s things any more.</p>' : "");
+      }
     }
-    if (others.length) html += '<h2 class="section">Shared Devices</h2><div class="list">' + others.map(deviceRow).join("") + "</div>";
-    html += orderSection();
+    // Others' devices: those that keep something running for them, and for someone with a machine of their own, those
+    // that run their things.
+    const keeps = (s) => (state.install?.grants || []).some((g) => g.endpoint === s.key && g.until > Date.now());
+    const used = others.filter((s) => keeps(s) || (holds(s) && ownsMachine()));
+    if (used.length) html += '<h2 class="section">Shared Devices</h2><div class="list">' + used.map(deviceRow).join("") + "</div>";
+    if (admin()) html += orderSection();
     html += runsSection();
     const day = (t) => new Date(t).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
-    if (state.install?.recovery_set) html += `<p class="footer">Recovery key set ${one.esc(day(state.install.recovery_set))}.</p>`;
-    if (state.install?.recovery_used) {
+    if (admin() && state.install?.recovery_set) html += `<p class="footer">Recovery key set ${one.esc(day(state.install.recovery_set))}.</p>`;
+    if (state.install?.recovery_used && (admin() || state.install.recovery_used.user === me())) {
       const r = state.install.recovery_used;
       html += `<p class="footer">The recovery key last let in a device of ${one.esc(r.user === me() ? "yours" : `${userName(r.user)}’s`)}, ${one.esc(day(r.time))}.</p>`;
     }
