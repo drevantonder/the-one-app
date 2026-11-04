@@ -35,6 +35,18 @@ impl Node {
         if req.device.as_deref() == Some("all") {
             return self.everywhere(req, me).await;
         }
+        // A call that names no scopes reaches its caller's own too, when its app is on everyone's or a group's page: if
+        // no device runs their own (they haven't picked one) but one runs the rest, it runs on the rest, with no ctx.user.
+        if req.scopes.is_none() && req.sidecar.is_none() {
+            req.scopes = self.with(|i| {
+                let all = call_scopes(i, &req, &me.user)?;
+                let own = Scope::User(me.user.clone());
+                let rest: Vec<Scope> = all.iter().filter(|s| **s != own).cloned().collect();
+                let m = &i.r.members;
+                let without = rest.len() < all.len() && !rest.is_empty() && m.runners(&me.user, &all).is_empty() && !m.runners(&me.user, &rest).is_empty();
+                Ok(without.then(|| rest.iter().map(ToString::to_string).collect()))
+            })?;
+        }
         let mut why = Vec::new();
         for device in self.candidates(&req, &me)? {
             let started = Instant::now();
