@@ -220,7 +220,7 @@ pub struct Caller {
     pub user: String,
     /// The agent that asked through it, by name ("Claude Code"), when one did.
     pub agent: Option<String>,
-    /// The kernel access token it came with, when it's a sign-in's (or a run the schedules service handed in): a call
+    /// The kernel access token it came with, when it's a sign-in's: a call
     /// gets its keys and bucket URLs from the vault with it, and passes it on with the call to another device.
     pub token: Option<String>,
 }
