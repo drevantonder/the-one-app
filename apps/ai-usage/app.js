@@ -436,8 +436,8 @@ export default {
       if (!b) return "";
       const now = ctx.now();
       if (since !== null) return warnings(b, now);
-      const reads = (await Promise.all(Object.keys(PROVIDERS).map((id) => latest(b, id, null)))).flat();
-      return reads.length ? ["AI usage, for choosing a model:", ...reads.map((p) => section(p, now))].join("\n\n") : "";
+      const reads = (await Promise.all(Object.keys(PROVIDERS).map((id) => latest(b, id, null)))).filter((r) => r.length);
+      return reads.length ? ["AI usage, for choosing a model:", ...reads.map((r) => section(r, now))].join("\n\n") : "";
     },
   },
 
