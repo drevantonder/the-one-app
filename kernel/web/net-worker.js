@@ -93,7 +93,8 @@ export function server(version) {
     return members;
   }
 
-  /// The session: its person and its client, once it's started; null if this browser isn't a device of theirs.
+  /// The session: none until a tab starts it (this worker, or this tab leading the others, is new); then its person, and
+  /// `ready`, its client once it's started, or null if this browser isn't a device of theirs.
   let session = null;
   let renewal = null;
 
@@ -163,11 +164,12 @@ export function server(version) {
           if (Array.isArray(c.online)) client.online(c.online);
           return;
         }
-        // Taken out: it forgets its nodes, and the next start finds out it isn't a device. A session started since is
-        // that one's.
+        // Taken out: it forgets its nodes, and the session says it isn't a device. A session started since is that
+        // one's.
         put(`nodes:${user}`, []);
         client.close();
-        session?.ready.then((s) => s?.client === client && (session = null), () => {});
+        const was = session;
+        was?.ready.then((s) => s?.client === client && session === was && (session = { user, ready: Promise.resolve(null) }), () => {});
       },
       () => {},
     );
@@ -239,9 +241,12 @@ export function server(version) {
             const s = await started(m.user, m.again, m.as);
             return post({ id, device: !!s, took: s?.took });
           }
+          // Whether the relay still lets this browser in: null, unknown, while it has no session, as it hasn't started
+          // one or the last failed, which says nothing about whether it's a device.
           case "still": {
-            const s = await session?.ready;
-            return post({ id, device: s ? await s.still() : false });
+            if (!session) return post({ id, device: null });
+            const s = await session.ready.catch(() => undefined);
+            return post({ id, device: s === undefined ? null : s ? await s.still() : false });
           }
           case "nodes": {
             const nodes = await theirs(m.user, m.nodes);

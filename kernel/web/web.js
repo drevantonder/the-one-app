@@ -324,7 +324,8 @@ window.__one = {};
   /// wait on for a long time without an answer. It's signed out then, not an app's problem: the sign-in says why.
   async function takenOut() {
     if (removed) return true;
-    if (await net.still().catch(() => true)) return false;
+    // Only the relay saying so: a client with no session yet (a tab that just took over the others') doesn't know.
+    if ((await net.still().catch(() => null)) !== false) return false;
     removed = true;
     await forgetDevice();
     await auth.signOut(REMOVED);

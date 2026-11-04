@@ -68,6 +68,14 @@ function lost() {
 /// Whether this browser has a client.
 let has = false;
 
+/// A new tab leads the others, its client new, with no session: each tab starts its person's again (`starting` said
+/// the last leader's), before what it asks next.
+function again() {
+  const user = starting?.user;
+  starting = null;
+  if (user) net.start(user).catch(() => {});
+}
+
 if (url && typeof SharedWorker === "function") {
   has = true;
   const worker = started.worker || new SharedWorker(url, { type: "module", name: "one" });
@@ -83,7 +91,7 @@ if (url && typeof SharedWorker === "function") {
   const queued = [];
   channel.onmessage = (e) => {
     const m = e.data;
-    if (m.leader) lost();
+    if (m.leader) (lost(), again());
     else if (m.to === tab) received(m.m);
     else if (m.from && mine) mine(m.from, m.m);
   };
@@ -92,12 +100,12 @@ if (url && typeof SharedWorker === "function") {
     const { server } = await import(url);
     const s = server(new URL(url, location.href).searchParams.get("client"));
     const tabs = new Map();
-    // What this tab asked the leader before is lost with it.
-    if (follows) lost();
     mine = (from, m) => {
       if (!tabs.has(from)) tabs.set(from, s.connect((a) => (from === tab ? received(a) : channel.postMessage({ to: from, m: a }))));
       tabs.get(from)(m);
     };
+    // What this tab asked the leader before is lost with it, and its session: started again here.
+    if (follows) lost(), again();
     channel.postMessage({ leader: tab });
     for (const m of queued.splice(0)) mine(tab, m);
     // Held while this tab lives.
