@@ -1,0 +1,119 @@
+<div id="find"></div>
+<div id="page"></div>
+<script>
+// A repo's issues, as GitHub lists them: Open and Closed, filters, and New Issue.
+one.title("Issues");
+const f = { state: P.state || "open", label: P.label || "", assignee: P.assignee || "", author: P.author || "", q: "" };
+let page = 0, d = null, labels = [], people = null;
+
+function row(i) {
+  const by = i.state === "open"
+    ? `#${i.number} opened ${esc(ago(i.created, { long: true }))} by ${esc(i.author.name)}`
+    : `#${i.number} by ${esc(i.author.name)} was closed ${esc(ago(i.closed, { long: true }))}`;
+  return `<a class="row plain issue-row" onclick="${go("issue", { repo: P.repo, number: i.number })}">
+    ${stateIcon(i)}
+    <div class="main">
+      <div class="issue-title">${esc(i.title)}${i.labels.length ? ` <span class="labels">${i.labels.map(labelChip).join("")}</span>` : ""}</div>
+      <div class="sub">${by}</div>
+    </div>
+    <div class="issue-side">
+      ${i.assignees.length ? `<span class="avatars" title="${esc(i.assignees.map((a) => a.name).join(", "))}">${i.assignees.map(person).join("")}</span>` : ""}
+      ${i.comments ? `<span class="count" aria-label="${plural(i.comments, "comment", "comments")}">${one.icon("chat-circle")}${i.comments}</span>` : ""}
+    </div>
+  </a>`;
+}
+
+// A filter as a menu button: its name, or what it's set to.
+function pick(key, title, choices) {
+  const now = choices.find((c) => c.value === f[key]);
+  return `<label class="pick${f[key] ? " on" : ""}">${esc(f[key] ? now?.title || f[key] : title)}<select data-filter="${key}" aria-label="${esc(title)}">
+    <option value="">${f[key] ? `Any ${title.toLowerCase()}` : title}</option>
+    ${choices.map((c) => `<option value="${esc(c.value)}"${c.value === f[key] ? " selected" : ""}>${esc(c.title)}</option>`).join("")}
+  </select></label>`;
+}
+
+function bar() {
+  const tab = (state, icon, n, word) => `<button data-state="${state}" class="${f.state === state ? "on" : ""}">${one.icon(icon)}${n.toLocaleString()} ${word}</button>`;
+  const ppl = (people || []).map((p) => ({ value: p.handle, title: p.name }));
+  return `<div class="issues-bar">
+    <div class="segmented">${tab("open", "record", d.open_issues, "Open")}${tab("closed", "check", d.closed_issues, "Closed")}</div>
+    <span class="grow"></span>
+    <button class="button primary" data-new>New Issue</button>
+  </div>
+  <div class="issues-bar filters">
+    ${pick("author", "Author", ppl)}
+    ${pick("label", "Label", labels.map((l) => ({ value: l.name, title: l.name })))}
+    ${pick("assignee", "Assignee", [{ value: "none", title: "Assigned to no one" }, ...ppl])}
+    <span class="grow"></span>
+    <button class="button plain small-button" onclick="${go("labels", { repo: P.repo })}">${one.icon("tag")}Labels</button>
+  </div>`;
+}
+
+function list() {
+  const filtered = f.label || f.assignee || f.author || f.q;
+  if (!d.open_issues && !d.closed_issues && !filtered) {
+    document.getElementById("find").hidden = true;
+    return one.empty("No issues yet.", { label: "New Issue", run: newIssue });
+  }
+  document.getElementById("find").hidden = false;
+  const none = filtered ? "No issues match." : f.state === "open" ? "No open issues." : "No closed issues.";
+  return bar() + (d.issues.length ? `<div class="list">${d.issues.map(row).join("")}</div>` : one.empty(none))
+    + (page || d.more ? `<div class="pager">
+      <button class="button" ${page ? 'data-page="-1"' : "disabled"}>Previous</button>
+      <button class="button" ${d.more ? 'data-page="1"' : "disabled"}>Next</button></div>` : "");
+}
+
+async function load() {
+  const input = { repo: P.repo, state: f.state, page };
+  for (const k of ["label", "assignee", "author", "q"]) if (f[k]) input[k] = f[k];
+  [d, labels, people] = await Promise.all([one.call("issues", input), one.call("labels", { repo: P.repo }), people || one.call("_people")]);
+  return list();
+}
+const draw = (fresh = false) => one.render("#page", load, { loading: "Loading issues", fresh });
+
+// A new issue: its title and what it's about; it opens once it's made.
+function newIssue() {
+  const sheet = one.sheet({ title: "New Issue", done: "Cancel" });
+  sheet.body.innerHTML = `<input class="title-input" id="new-title" placeholder="Title" aria-label="Title" maxlength="256">
+    ${markdownField("new-body", { placeholder: "Add a description", rows: 8 })}
+    <div class="form-error" id="new-error"></div>
+    <div class="composer-buttons"><button class="button primary" id="create">Create</button></div>`;
+  const title = sheet.body.querySelector("#new-title");
+  setTimeout(() => title.focus(), 300);
+  sheet.body.querySelector("#create").onclick = async (e) => {
+    if (!title.value.trim()) return title.focus();
+    const back = one.busy(e.target);
+    try {
+      const i = await one.call("open_issue", { repo: P.repo, title: title.value, body: sheet.body.querySelector("#new-body").value });
+      one.tap("success");
+      sheet.close();
+      one.open("issue", { repo: P.repo, number: i.number });
+    } catch (err) {
+      back();
+      sheet.body.querySelector("#new-error").innerHTML = one.problem({ title: one.plain(err).title });
+    }
+  };
+}
+
+document.addEventListener("click", (e) => {
+  const t = e.target.closest?.("#page [data-state], #page [data-new], #page [data-page]");
+  if (!t) return;
+  if ("new" in t.dataset) return newIssue();
+  if (t.dataset.state) {
+    if (f.state === t.dataset.state) return;
+    f.state = t.dataset.state;
+    page = 0;
+  } else page += Number(t.dataset.page);
+  draw(true);
+});
+document.addEventListener("change", (e) => {
+  const s = e.target.closest?.("[data-filter]");
+  if (!s) return;
+  f[s.dataset.filter] = s.value;
+  page = 0;
+  draw(true);
+});
+one.search("#find", { placeholder: "Find an issue", onSearch: (q) => ((f.q = q.trim()), (page = 0), draw(true)) });
+one.on("changed", () => ((people = null), draw()));
+draw();
+</script>

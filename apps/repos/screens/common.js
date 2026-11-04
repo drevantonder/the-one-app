@@ -49,3 +49,31 @@ function commitCard(c, d) {
     <a class="latest-history" onclick="${history}">${one.icon("clock-counter-clockwise")}<span>History</span><span class="chev-row">${one.icon("caret-right")}</span></a>
   </div>`;
 }
+
+// Issues: a label as GitHub draws one, a pill in its colour with its name in black or white, whichever reads.
+function labelChip(l) {
+  const c = /^[0-9a-f]{6}$/i.test(l.color) ? l.color : "ededed";
+  const [r, g, b] = [0, 2, 4].map((i) => parseInt(c.slice(i, i + 2), 16));
+  return `<span class="label" style="background:#${c};color:${0.299 * r + 0.587 * g + 0.114 * b > 150 ? "#1f2328" : "#fff"}">${esc(l.name)}</span>`;
+}
+// An issue's state as its symbol: open, closed as completed, or closed as not planned.
+const stateIcon = (i, cls = "state-icon") => one.icon(i.state === "open" ? "record" : i.state_reason === "not_planned" ? "prohibit" : "check-circle", `${cls} ${i.state}`);
+const person = (p) => `<span class="who-avatar tiny">${one.avatar(p.handle || p.name, p.name)}</span>`;
+
+// A Markdown field with Write and Preview, as GitHub's: `id` names its textarea.
+function markdownField(id, { value = "", placeholder = "", rows = 6 } = {}) {
+  return `<div class="md-field" data-field="${id}">
+    <div class="segmented narrow"><button class="on" data-write>Write</button><button data-preview>Preview</button></div>
+    <textarea id="${id}" class="md-input" rows="${rows}" placeholder="${esc(placeholder)}">${esc(value)}</textarea>
+    <div class="md-preview" hidden></div>
+  </div>`;
+}
+document.addEventListener("click", (e) => {
+  const b = e.target.closest?.(".md-field [data-write], .md-field [data-preview]");
+  if (!b) return;
+  const f = b.closest(".md-field"), preview = "preview" in b.dataset, text = f.querySelector("textarea"), out = f.querySelector(".md-preview");
+  f.querySelectorAll(".segmented button").forEach((x) => x.classList.toggle("on", x === b));
+  if (preview) out.innerHTML = text.value.trim() ? one.markdown(text.value) : '<p class="muted">Nothing to preview.</p>';
+  text.hidden = preview;
+  out.hidden = !preview;
+});

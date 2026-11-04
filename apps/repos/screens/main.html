@@ -13,7 +13,7 @@ function row(r) {
     <div class="icon${r.from ? " grey" : ""}">${one.icon("book")}</div>
     <div class="main">
       <div class="title"><span><span class="owner">${esc(r.owner.handle || "")}/</span>${esc(r.name)}</span></div>
-      <div class="sub">${deleted ? "Deleted " + esc(ago(r.deleted.time, { long: true })) : [r.branch, ago(r.updated || r.created, { long: true }), r.from && "fork of " + r.from].filter(Boolean).map(esc).join(" · ")}</div>
+      <div class="sub">${deleted ? "Deleted " + esc(ago(r.deleted.time, { long: true })) : [r.branch, ago(r.updated || r.created, { long: true }), r.from && "fork of " + r.from, r.open_issues && plural(r.open_issues, "open issue", "open issues")].filter(Boolean).map(esc).join(" · ")}</div>
     </div>
     ${deleted ? (r.yours ? `<button class="button capsule" data-restore="${esc(r.name)}">Restore</button>` : "") : '<div class="chev">›</div>'}
   </a>`;

@@ -254,7 +254,9 @@ async fn a_file_put_from_elsewhere_is_read_only_by_whoever_put_it() {
 
 /// In Repos, a repo's owner and its collaborators push to it, and its owners alone delete it: someone else is refused,
 /// from a client device or a sign-in from elsewhere, whose git reaches Repos' `_http` as them, until its owner adds them
-/// as a collaborator; a group's members push to its repos, and only its admins delete them.
+/// as a collaborator; a group's members push to its repos, and only its admins delete them. In its issues, anyone opens
+/// and comments, and edits and closes their own; only those who push close, label and assign another's, and only its
+/// owners delete one.
 #[tokio::test(flavor = "multi_thread")]
 async fn only_a_repos_owner_and_collaborators_push_to_it_and_only_its_owners_delete_it() {
     use one::node::{Caller, DeviceRequest, Invited};
@@ -349,6 +351,31 @@ async fn only_a_repos_owner_and_collaborators_push_to_it_and_only_its_owners_del
     }
     let [client, signed_in] = <[Caller; 2]>::try_from(both).unwrap();
     let call = |req: CallRequest, sam: &Caller| a.call_as(a.for_sign_in(req).unwrap(), sam.clone());
+
+    // Its issues: Sam opens one and comments, as anyone may, and edits and closes his own; he doesn't close, edit or
+    // delete Andre's, label his own or make a label, which only those who push do, nor delete his own, which only its
+    // owners do.
+    let issue = |op: &str, number: u64, mut input: Value| {
+        (input["repo"], input["number"]) = (json!("andre/home"), json!(number));
+        repos(op, input)
+    };
+    assert_eq!(a.call(repos("open_issue", json!({ "repo": "andre/home", "title": "Andre's" }))).await.unwrap()["number"], 1);
+    assert_eq!(call(repos("open_issue", json!({ "repo": "andre/home", "title": "Sam's" })), &client).await.unwrap()["number"], 2);
+    call(issue("comment", 1, json!({ "body": "Me too" })), &client).await.unwrap();
+    let refused = call(issue("close_issue", 1, json!({})), &client).await.unwrap_err();
+    assert!(format!("{refused:#}").contains("only its author and the owners and collaborators of andre/home close #1"), "{refused:#}");
+    for req in [issue("edit_issue", 1, json!({ "title": "Sam's now" })), issue("edit_issue", 2, json!({ "labels": ["bug"] })), issue("delete_issue", 2, json!({ "confirm": true })), repos("set_label", json!({ "repo": "andre/home", "name": "sams" }))] {
+        let op = req.op.clone();
+        assert!(call(req, &client).await.is_err(), "Sam's {op} is refused");
+    }
+    call(issue("edit_issue", 2, json!({ "title": "Sam's, edited" })), &client).await.unwrap();
+    call(issue("close_issue", 2, json!({ "state_reason": "not_planned" })), &client).await.unwrap();
+    a.call(issue("edit_issue", 1, json!({ "labels": ["bug"], "assignees": ["sam"] }))).await.unwrap();
+    let all = a.call(repos("issues", json!({ "repo": "andre/home", "state": "all" }))).await.unwrap();
+    let [his, andres] = [&all["issues"][0], &all["issues"][1]];
+    assert_eq!((his["title"].as_str(), his["state"].as_str(), his["state_reason"].as_str()), (Some("Sam's, edited"), Some("closed"), Some("not_planned")), "{all}");
+    assert_eq!((andres["labels"][0]["name"].as_str(), andres["assignees"][0]["handle"].as_str(), andres["comments"].as_u64()), (Some("bug"), Some("sam"), Some(1)), "{all}");
+    a.call(issue("delete_issue", 2, json!({ "confirm": true }))).await.unwrap();
     // A push of Sam's: making `branch` at the commit, with its pack, or deleting it: → whether it was taken.
     let sams_push = async |sam: &Caller, repo: &str, branch: &str, deleting: bool| {
         let r = format!("refs/heads/{branch}");

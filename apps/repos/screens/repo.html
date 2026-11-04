@@ -39,7 +39,8 @@ function readme(d) {
 function head(d) {
   if (at) return "";
   const clone = `git clone ${address(d.repo)}`;
-  const box = d.deleted ? "" : `<div class="clone"><code>${esc(clone)}</code>${one.copyButton(clone)}</div><p class="clone-where">${where}</p>`;
+  const box = d.deleted ? "" : `<div class="clone"><code>${esc(clone)}</code>${one.copyButton(clone)}</div><p class="clone-where">${where}</p>
+      <div class="list repo-links"><a class="row plain" onclick="${go("issues", { repo: d.repo })}">${one.icon("record", "row-icon")}<div class="main"><div class="title"><span>Issues</span><span class="when">${d.open_issues ? d.open_issues.toLocaleString() : ""}</span></div></div><div class="chev">›</div></a></div>`;
   return `<div class="repo-head">
       <div class="repo-title"><span class="repo-icon">${one.icon("book")}</span><div>
         <div class="repo-owner">${esc(d.owner.name)}</div><h1>${esc(d.name)}</h1>

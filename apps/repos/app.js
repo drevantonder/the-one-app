@@ -11,6 +11,7 @@
 
 import * as browse from "./browse.js";
 import * as http from "./http.js";
+import * as issues from "./issues.js";
 import css from "./screens/repos.css" with { type: "text" };
 import common from "./screens/common.js" with { type: "text" };
 import mainScreen from "./screens/main.html" with { type: "text" };
@@ -20,6 +21,9 @@ import historyScreen from "./screens/history.html" with { type: "text" };
 import commitScreen from "./screens/commit.html" with { type: "text" };
 import branchesScreen from "./screens/branches.html" with { type: "text" };
 import collaboratorsScreen from "./screens/collaborators.html" with { type: "text" };
+import issuesScreen from "./screens/issues.html" with { type: "text" };
+import issueScreen from "./screens/issue.html" with { type: "text" };
+import labelsScreen from "./screens/labels.html" with { type: "text" };
 
 /// A screen: Repos' styles and shared script, then its own HTML.
 const page = (title, html) => ({ title, html: `<style>${css}</style><script>${common}</script>${html}` });
@@ -31,7 +35,7 @@ const BRANCH = /^(?!\/)(?!.*(\.\.|\/\/|\/$|\.lock$|@\{))[A-Za-z0-9._\/@+-]{1,200
 function iso(v) {
   if (Array.isArray(v)) return v.map(iso);
   if (!v || typeof v !== "object") return v;
-  return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, typeof x === "number" && ["time", "created", "updated", "committed"].includes(k) ? new Date(x).toISOString() : iso(x)]));
+  return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, typeof x === "number" && ["time", "created", "updated", "committed", "closed"].includes(k) ? new Date(x).toISOString() : iso(x)]));
 }
 
 const OWNER = { type: "string", description: "who owns it, by handle: omit for you, or a group you're in, from groups_list" };
@@ -90,6 +94,9 @@ async function live(ctx, repo) {
   return r;
 }
 
+/// A string as an SQL literal, for the schema's own rows.
+const sql = (v) => `'${String(v).replace(/'/g, "''")}'`;
+
 const randomId = () => [...crypto.getRandomValues(new Uint8Array(8))].map((x) => x.toString(16).padStart(2, "0")).join("");
 
 /// Writes a new repo, or a fork of `from` (a row) with its branches and history as they are now.
@@ -99,6 +106,9 @@ function newRepo(ctx, g, { name, owner, from = null }) {
   if (from) {
     g.exec(`insert into branches select ?, branch, head, ?, ?, ? from branches where repo = ?`, [id, ctx.me.user, ctx.me.user_name || ctx.me.name, ctx.now(), from.id]);
     g.exec("insert or ignore into packs select ?, hash, time from packs where repo = ?", [id, from.id]);
+    g.exec("insert into labels select ?, name, color, description from labels where repo = ?", [id, from.id]);
+  } else {
+    for (const l of issues.LABELS) g.exec("insert into labels values (?, ?, ?, ?)", [id, ...l]);
   }
   return id;
 }
@@ -170,7 +180,7 @@ export default {
   color: "#5856d6",
   advanced: true,
   description: "Git hosting for you and your agents: clone, push and suggest changes",
-  instructions: `Repos is git hosting for the person and their agents, as on GitHub. A repo is <owner>/<name>, its owner a person or a group by their handle (groups_list has them), and its address is \`<their One App's address>/repos/<owner>/<name>.git\` (repos_get gives it, and its page shows it), the same on every computer: \`git clone\`, \`git push\` and \`git fetch\` work with it as with any git host on any computer where the CLI is signed in (its sign-in), with or without a node there; pushing to a name that isn't a repo yet makes it, under that owner (you, or a group you're in). Everyone reads and forks every repo. A repo's owner pushes, and its collaborators: a person adds and removes the collaborators of their own repos (repos_add_collaborator), and a group's members are collaborators of its repos, whose admins own them. Anyone else forks it (repos_fork, by default to <you>/<same name>), pushes to the fork, and tells its owner, who fetches from it.`,
+  instructions: `Repos is git hosting for the person and their agents, as on GitHub. A repo is <owner>/<name>, its owner a person or a group by their handle (groups_list has them), and its address is \`<their One App's address>/repos/<owner>/<name>.git\` (repos_get gives it, and its page shows it), the same on every computer: \`git clone\`, \`git push\` and \`git fetch\` work with it as with any git host on any computer where the CLI is signed in (its sign-in), with or without a node there; pushing to a name that isn't a repo yet makes it, under that owner (you, or a group you're in). Everyone reads and forks every repo. A repo's owner pushes, and its collaborators: a person adds and removes the collaborators of their own repos (repos_add_collaborator), and a group's members are collaborators of its repos, whose admins own them. Anyone else forks it (repos_fork, by default to <you>/<same name>), pushes to the fork, and tells its owner, who fetches from it. Each repo has issues, as on GitHub, numbered from #1: anyone opens one (repos_open_issue) and comments (repos_comment); its author edits and closes it, and those who push to the repo close, label and assign any (repos_issues finds them).`,
 
   schema: {
     global: [`
@@ -191,13 +201,28 @@ export default {
       insert into repos_owned select name, case when owner = 'admins' then 'user:' || user else owner end, name, "from", created, user, deleted, deleted_by from repos;
       drop table repos;
       alter table repos_owned rename to repos;
-      create table collaborators (repo text not null, user text not null, by text not null, time integer not null, primary key (repo, user));`],
+      create table collaborators (repo text not null, user text not null, by text not null, time integer not null, primary key (repo, user));`,
+      // Issues, as GitHub's: numbered from 1 in each repo (repos.issues is the last number given, which a deleted
+      // issue's keeps), each with its labels, assignees and comments; and each repo's labels, GitHub's to start with.
+      `alter table repos add column issues integer not null default 0;
+      create table issues (repo text not null, number integer not null, title text not null, body text not null, state text not null,
+                           state_reason text, user text not null, created integer not null, updated integer not null, closed integer,
+                           closed_by text, primary key (repo, number));
+      create table labels (repo text not null, name text not null collate nocase, color text not null, description text not null,
+                           primary key (repo, name));
+      create table issue_labels (repo text not null, number integer not null, label text not null collate nocase, primary key (repo, number, label));
+      create table issue_assignees (repo text not null, number integer not null, user text not null, primary key (repo, number, user));
+      create table comments (id text primary key, repo text not null, number integer not null, user text not null, body text not null,
+                             created integer not null, updated integer not null);
+      create index comments_issue on comments (repo, number, created);
+      insert into labels select r.id, d.column1, d.column2, d.column3 from repos r, (values ${issues.LABELS.map((l) => `(${l.map(sql).join(", ")})`).join(", ")}) d;`,
+    ],
   },
 
   ops: {
     list: {
       reads: true,
-      description: "Every repo, the latest moved first: its <owner>/<name>, its owner's handle and name, where it was forked from, its default branch (main, or else its first), how many branches it has, when it last moved, and whether you push to it. Deleted ones say when, and wait in Recently Deleted for repos_restore.",
+      description: "Every repo, the latest moved first: its <owner>/<name>, its owner's handle and name, where it was forked from, its default branch (main, or else its first), how many branches it has, when it last moved, how many open issues it has, and whether you push to it. Deleted ones say when, and wait in Recently Deleted for repos_restore.",
       input: { type: "object", properties: {} },
       async run(ctx) {
         const g = global(ctx);
@@ -206,7 +231,8 @@ export default {
                   coalesce((select branch from branches b where b.repo = r.id and b.branch = 'main'),
                            (select min(branch) from branches b where b.repo = r.id)) as branch,
                   (select count(*) from branches b where b.repo = r.id) as branches,
-                  (select max(time) from branches b where b.repo = r.id) as updated
+                  (select max(time) from branches b where b.repo = r.id) as updated,
+                  (select count(*) from issues i where i.repo = r.id and i.state = 'open') as open_issues
              from repos r order by coalesce(updated, r.created) desc`,
         );
         const from = await paths(ctx, g, repos.map((r) => r.from));
@@ -214,7 +240,7 @@ export default {
         for (const r of repos) {
           out.push({
             repo: pathOf(ctx, r), name: r.name, owner: who(ctx, r.owner), from: from[r.from] ?? null, branch: r.branch, branches: r.branches,
-            created: r.created, updated: r.updated, deleted: deletedOf(r), yours: owns(ctx, r), push: await mayPush(ctx, g, r),
+            created: r.created, updated: r.updated, open_issues: r.open_issues, deleted: deletedOf(r), yours: owns(ctx, r), push: await mayPush(ctx, g, r),
           });
         }
         return iso(out);
@@ -236,12 +262,13 @@ export default {
     },
     tree: {
       reads: true,
-      description: "A folder of a repo at a branch or commit: its files and folders, its README, the latest commit, and the repo's forks. repos_file reads a file.",
+      description: "A folder of a repo at a branch or commit: its files and folders, its README, the latest commit, the repo's forks and how many open issues it has. repos_file reads a file.",
       input: { type: "object", required: ["repo"], properties: { repo: REPO, ref: REF, path: { type: "string", description: "a folder's path, like src; omit for the top" } } },
       async run(ctx, input) {
         const g = global(ctx);
         const r = (await repoAt(ctx, g, input.repo)) || (await named(ctx, input.repo));
-        const about = { owner: who(ctx, r.owner), yours: owns(ctx, r), push: await mayPush(ctx, g, r), from: (await paths(ctx, g, [r.from]))[r.from] ?? null };
+        const open = (await g.query("select count(*) as n from issues where repo = ? and state = 'open'", [r.id]))[0].n;
+        const about = { owner: who(ctx, r.owner), yours: owns(ctx, r), push: await mayPush(ctx, g, r), from: (await paths(ctx, g, [r.from]))[r.from] ?? null, open_issues: open };
         // A deleted one shows only that it was, for its owners to restore or erase.
         if (r.deleted) return iso({ repo: r.path, name: r.name, ...about, deleted: deletedOf(r), branches: [], entries: [] });
         const t = await browse.tree(ctx, g, { ...input, repo: r });
@@ -400,12 +427,13 @@ export default {
         const packs = await g.query("select hash from packs where repo = ?", [r.id]);
         // Erased, it's gone, and its name is free again; its forks keep their code, no longer forked from it.
         for (const p of packs) await http.forgetUnshared(g, r.id, p.hash);
-        for (const table of ["branches", "packs", "pushes", "collaborators"]) g.exec(`delete from ${table} where repo = ?`, [r.id]);
+        for (const table of ["branches", "packs", "pushes", "collaborators", "issues", "labels", "issue_labels", "issue_assignees", "comments"]) g.exec(`delete from ${table} where repo = ?`, [r.id]);
         g.exec("delete from repos where id = ?", [r.id]);
         g.exec(`update repos set "from" = null where "from" = ?`, [r.id]);
         return `Erased ${r.path}.`;
       },
     },
+    ...issues.ops({ global, named, mayPush, owns, who, byHandle, handles, randomId, iso, REPO }),
     _address: {
       reads: true,
       description: "Where git reaches repos, for the screens: base, <address>/repos/ (null on a node from before it had the address), and the caller's handle.",
@@ -428,6 +456,9 @@ export default {
     commit: page("Commit", commitScreen),
     branches: page("Branches", branchesScreen),
     collaborators: page("Collaborators", collaboratorsScreen),
+    issues: page("Issues", issuesScreen),
+    issue: page("Issue", issueScreen),
+    labels: page("Labels", labelsScreen),
   },
 
   widgets: {

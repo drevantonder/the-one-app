@@ -1,0 +1,216 @@
+<div id="page"></div>
+<div id="ask"></div>
+<script>
+// An issue, as GitHub shows one: its title and state, its body and comments in order, a comment box with Close or
+// Reopen, its assignees and labels (beside it on wide windows, above it on phones), and for its repo's owners, Delete.
+one.title(`#${P.number}`);
+let d = null, people = null, labels = null;
+// What's being written, kept across redraws.
+let draft = "";
+
+const reason = (i) => (i.state_reason === "not_planned" ? "not planned" : "completed");
+
+function head() {
+  const state = d.state === "open" ? "Open" : reason(d) === "not planned" ? "Closed as not planned" : "Closed";
+  return `<div class="issue-head">
+    <div class="issue-title-row"><h1>${esc(d.title)} <span class="muted">#${d.number}</span></h1>${d.can.edit ? '<button class="button small-button" data-edit>Edit</button>' : ""}</div>
+    <div class="issue-state">
+      <span class="state-pill">${stateIcon(d, "")}${state}</span>
+      <span><strong>${esc(d.author.name)}</strong> opened this ${esc(ago(d.created, { long: true }))} · ${plural(d.comments.length, "comment", "comments")}</span>
+    </div>
+  </div>`;
+}
+
+function comment(c, { body = false } = {}) {
+  const menu = !body && (c.yours || d.can.delete) ? `<button class="button plain more" data-more="${esc(c.id)}" aria-label="More">${one.icon("dots-three")}</button>` : "";
+  const edited = !body && c.updated !== c.created ? " · edited" : "";
+  const text = c.body.trim() ? one.markdown(c.body) : '<p class="empty-body">No description provided.</p>';
+  return `<div class="comment" ${body ? "" : `id="c-${esc(c.id)}"`}>
+    <div class="comment-head">${person(c.author)}<span class="grow"><strong>${esc(c.author.name)}</strong> ${body ? "opened" : "commented"} ${esc(ago(c.created, { long: true }))}${edited}</span>${menu}</div>
+    <div class="comment-body">${text}</div>
+  </div>`;
+}
+
+// Closing shows where it happened among the comments, as GitHub's timeline does.
+const closedEvent = () => `<div class="event">${stateIcon(d)}<span><strong>${esc(d.closed_by?.name || "Someone")}</strong> closed this as ${reason(d)} ${esc(ago(d.closed, { long: true }))}</span></div>`;
+
+function timeline() {
+  const out = [comment({ ...d, body: d.body, author: d.author, created: d.created }, { body: true })];
+  let shown = d.state === "open";
+  for (const c of d.comments) {
+    if (!shown && c.created > d.closed) (out.push(closedEvent()), (shown = true));
+    out.push(comment(c));
+  }
+  if (!shown) out.push(closedEvent());
+  return out.join("");
+}
+
+function composer() {
+  const close = d.can.close
+    ? d.state === "open"
+      ? `<button class="button" data-close>${one.icon("check-circle")}<span>${draft.trim() ? "Close with Comment" : "Close Issue"}</span></button>`
+      : `<button class="button" data-reopen>${one.icon("record")}<span>Reopen Issue</span></button>`
+    : "";
+  return `<div class="composer">
+    ${markdownField("reply", { value: draft, placeholder: "Add a comment", rows: 4 })}
+    <div class="form-error" id="reply-error"></div>
+    <div class="composer-buttons">${close}<button class="button primary" data-comment>Comment</button></div>
+  </div>`;
+}
+
+function sidebar() {
+  const gear = d.can.triage ? one.icon("gear-six", "side-gear") : "";
+  const assignees = d.assignees.length ? d.assignees.map((a) => `<span class="side-person">${person(a)}${esc(a.name)}</span>`).join("") : '<span class="muted">No one</span>';
+  const tags = d.labels.length ? `<span class="labels">${d.labels.map(labelChip).join("")}</span>` : '<span class="muted">None yet</span>';
+  const row = (what, title, value) => `<${d.can.triage ? `a class="row plain" data-${what}` : 'div class="row plain"'}><div class="main"><div class="side-head"><span>${title}</span>${gear}</div><div class="side-val">${value}</div></div></${d.can.triage ? "a" : "div"}>`;
+  return `<div class="list">${row("assign", "Assignees", assignees)}${row("label", "Labels", tags)}</div>`;
+}
+
+function show() {
+  const del = d.can.delete ? `<div class="list danger-list"><a class="row plain danger-row" data-delete>Delete Issue</a></div>` : "";
+  return `${head()}<div class="issue-grid"><div class="issue-sidebar">${sidebar()}</div><div class="issue-main">${timeline()}${composer()}${del}</div></div>`;
+}
+
+const load = async () => ((d = await one.call("issue", { repo: P.repo, number: Number(P.number) })), show());
+const draw = () => one.render("#page", load, { loading: "Loading the issue", skeleton: "text" });
+
+// Calls an op, then redraws; a problem shows at `where` (the comment box's, by default).
+async function act(button, op, input, where = "#reply-error") {
+  const back = button && one.busy(button);
+  try {
+    await one.call(op, { repo: P.repo, number: d.number, ...input });
+    one.tap("success");
+    await one.render("#page", load);
+    return true;
+  } catch (err) {
+    back?.();
+    const box = document.querySelector(where);
+    if (box) box.innerHTML = one.problem({ title: one.plain(err).title });
+    return false;
+  }
+}
+
+// What's written goes with the call that sends it, and comes back if it fails.
+async function sending(button, op, input) {
+  const text = document.getElementById("reply").value;
+  draft = "";
+  if (!(await act(button, op, typeof input === "function" ? input(text) : input))) draft = text;
+}
+
+function send(button) {
+  if (!document.getElementById("reply").value.trim()) return document.getElementById("reply").focus();
+  return sending(button, "comment", (text) => ({ body: text }));
+}
+
+async function close(button) {
+  const i = await one.menu([{ title: "Close as completed", icon: "check-circle" }, { title: "Close as not planned", icon: "prohibit" }], button);
+  if (i != null) await sending(button, "close_issue", (text) => ({ state_reason: i ? "not_planned" : "completed", ...(text.trim() ? { comment: text } : {}) }));
+}
+
+const reopen = (button) => sending(button, "reopen_issue", (text) => (text.trim() ? { comment: text } : {}));
+
+// Title and body, in a sheet.
+function edit() {
+  const sheet = one.sheet({ title: `Edit #${d.number}`, done: "Cancel" });
+  sheet.body.innerHTML = `<input class="title-input" id="edit-title" aria-label="Title" maxlength="256" value="${esc(d.title)}">
+    ${markdownField("edit-body", { value: d.body, placeholder: "Add a description", rows: 10 })}
+    <div class="form-error" id="edit-error"></div>
+    <div class="composer-buttons"><button class="button primary" id="save">Save</button></div>`;
+  sheet.body.querySelector("#save").onclick = async (e) => {
+    const title = sheet.body.querySelector("#edit-title").value;
+    if (!title.trim()) return sheet.body.querySelector("#edit-title").focus();
+    if (await act(e.target, "edit_issue", { title, body: sheet.body.querySelector("#edit-body").value }, "#edit-error")) sheet.close();
+  };
+}
+
+// A list to tick in a sheet: each tap changes the issue at once.
+function ticks(title, items, chosen, save) {
+  const sheet = one.sheet({ title, onClose: () => one.render("#page", load) });
+  const on = new Set(chosen);
+  const list = () => {
+    sheet.body.innerHTML = (items.length ? `<div class="list">${items.map((x) => `<a class="row check-row${on.has(x.key) ? " on" : ""}" data-key="${esc(x.key)}">${one.icon("check", "check")}${x.html}</a>`).join("")}</div>` : `<p class="footer">${title === "Labels" ? "This repo has no labels." : "No one to assign."}</p>`)
+      + (title === "Labels" ? `<div class="list" style="margin-top:20px"><a class="row plain add" onclick="${go("labels", { repo: P.repo })}">Edit Labels…</a></div>` : "")
+      + '<div class="form-error" id="tick-error"></div>';
+  };
+  sheet.body.onclick = async (e) => {
+    const r = e.target.closest("[data-key]");
+    if (!r) return;
+    const k = r.dataset.key;
+    on.has(k) ? on.delete(k) : on.add(k);
+    r.classList.toggle("on");
+    try {
+      await one.call("edit_issue", { repo: P.repo, number: d.number, [save]: [...on] });
+    } catch (err) {
+      on.has(k) ? on.delete(k) : on.add(k);
+      list();
+      sheet.body.querySelector("#tick-error").innerHTML = one.problem({ title: one.plain(err).title });
+    }
+  };
+  list();
+}
+
+async function assign() {
+  people ||= await one.call("_people");
+  ticks("Assignees", people.map((p) => ({ key: p.handle, html: `${one.avatar(p.handle, p.name)}<div class="main"><div class="title"><span>${esc(p.name)}</span></div><div class="sub">@${esc(p.handle)}</div></div>` })), d.assignees.map((a) => a.handle), "assignees");
+}
+
+async function label() {
+  labels = await one.call("labels", { repo: P.repo });
+  ticks("Labels", labels.map((l) => ({ key: l.name, html: `<span class="label-dot" style="background:#${esc(l.color)}"></span><div class="main"><div class="title"><span>${esc(l.name)}</span></div>${l.description ? `<div class="sub">${esc(l.description)}</div>` : ""}</div>` })), d.labels.map((l) => l.name), "labels");
+}
+
+// A comment's own menu: Edit for its author, Delete for its author and the repo's owners.
+async function more(button) {
+  const c = d.comments.find((x) => x.id === button.dataset.more);
+  const items = [...(c.yours ? [{ title: "Edit", icon: "pencil-simple" }] : []), { title: "Delete", icon: "trash", danger: true }];
+  const i = await one.menu(items, button);
+  if (i == null) return;
+  if (items[i].title === "Edit") return editComment(c);
+  if (!(await one.alert({ title: "Delete this comment?", text: "It can't be brought back.", action: "Delete", danger: true }))) return;
+  try {
+    await one.call("delete_comment", { repo: P.repo, id: c.id, confirm: true });
+    one.render("#page", load);
+  } catch (err) {
+    document.querySelector("#reply-error").innerHTML = one.problem({ title: one.plain(err).title });
+  }
+}
+
+function editComment(c) {
+  const box = document.querySelector(`#c-${CSS.escape(c.id)} .comment-body`);
+  box.innerHTML = `${markdownField(`edit-${c.id}`, { value: c.body, rows: 5 })}<div class="form-error" id="ce-error"></div>
+    <div class="composer-buttons"><button class="button plain" data-cancel>Cancel</button><button class="button primary" data-update>Update Comment</button></div>`;
+  box.querySelector("[data-cancel]").onclick = () => one.render("#page", load);
+  box.querySelector("[data-update]").onclick = async (e) => {
+    const back = one.busy(e.target);
+    try {
+      await one.call("edit_comment", { repo: P.repo, id: c.id, body: box.querySelector("textarea").value });
+      one.render("#page", load);
+    } catch (err) {
+      back();
+      box.querySelector("#ce-error").innerHTML = one.problem({ title: one.plain(err).title });
+    }
+  };
+}
+
+async function remove() {
+  document.getElementById("ask").scrollIntoView({ behavior: "smooth", block: "center" });
+  await one.confirm("#ask", {
+    title: `Delete #${d.number}?`, detail: "It and its comments are gone for good.", action: "Delete", danger: true,
+    run: async () => {
+      await one.call("delete_issue", { repo: P.repo, number: d.number, confirm: true });
+      one.close();
+    },
+  });
+}
+
+document.addEventListener("input", (e) => e.target.id === "reply" && d && (draft = e.target.value, (document.querySelector("[data-close] span") || {}).textContent = draft.trim() ? "Close with Comment" : "Close Issue"));
+document.addEventListener("click", (e) => {
+  const t = e.target.closest?.("#page [data-comment], #page [data-close], #page [data-reopen], #page [data-edit], #page [data-assign], #page [data-label], #page [data-more], #page [data-delete]");
+  if (!t) return;
+  const k = Object.keys(t.dataset)[0];
+  ({ comment: send, close, reopen, edit, assign, label, more, delete: remove })[k](t);
+});
+// Not while something's being written, which a redraw would take away.
+one.on("changed", () => ((people = null), !document.activeElement?.matches?.("textarea, input") && draw()));
+draw();
+</script>
