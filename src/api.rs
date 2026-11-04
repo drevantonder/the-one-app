@@ -183,6 +183,7 @@ pub fn routes() -> Router<Node> {
         .route("/v1/join", post(join))
         .route("/v1/name", post(name))
         .route("/v1/remove", post(remove))
+        .route("/v1/erase", post(erase))
         .route("/v1/role", post(role))
         .route("/v1/settings", post(settings))
         .route("/v1/entries", get(heads).post(entries))
@@ -302,6 +303,7 @@ pub const SIGNED_IN: &[&str] = &[
     // What Settings' screens ask: each checked as its person.
     "/v1/pair",
     "/v1/remove",
+    "/v1/erase",
     "/v1/role",
     "/v1/settings",
     "/v1/entries",
@@ -832,6 +834,12 @@ async fn remove(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Re
         Some(user) => Ok(Json(node.remove_person(&me.caller, user).await?)),
         None => Ok(Json(node.remove_device(&me.caller, text(&body, "key")?).await?)),
     }
+}
+
+/// `{ key }`: erases what a device keeps, asked of it directly (`Node::erase`), before it's removed.
+async fn erase(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
+    only(&body, &["key"])?;
+    Ok(Json(node.erase(&me.caller, text(&body, "key")?).await?))
 }
 
 async fn role(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {

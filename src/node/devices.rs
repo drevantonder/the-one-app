@@ -561,6 +561,27 @@ impl Node {
         Ok(())
     }
 
+    /// Erases what this device keeps (by name or key), for its person or an admin asking from one of their own devices,
+    /// directly: asked of another device, it says to ask that one, if it's on. Once it has answered, its oned stops its
+    /// parts and deletes its home (its copies of the install's data, the pages it kept, and each service's folder and
+    /// data, WhatsApp's link among them), then stops. Removing it next takes it out. → what's erasing.
+    pub async fn erase(&self, caller: &Caller, device: &str) -> Result<Value> {
+        let key = self.find_machine(device)?;
+        let name = self.with(|i| Ok(i.r.members.machine(&key).map(|d| d.name.clone()).unwrap_or_default()))?;
+        if key != self.0.id {
+            ensure!(self.with(|i| Ok(i.online(&key)))?, "{name} isn't on, so it can't erase what it keeps");
+            return Err(super::calls::Elsewhere { why: format!("only {name} erases what it keeps"), nodes: vec![hex(&key)] }.into());
+        }
+        self.with(|i| {
+            let m = &i.r.members;
+            ensure!(caller.key != self.0.id && m.client(&caller.key).is_some() && m.looks_after(&caller.user, &key), "only {name}'s person or an admin erases it, from another of their devices");
+            Ok(())
+        })?;
+        tracing::warn!("asked to erase what {name} keeps: its oned does, then stops");
+        crate::oned::erase(&self.0.dir);
+        Ok(json!({ "erasing": name }))
+    }
+
     /// Removes a device (by name or key), and what's part of it (its services, and its apps' sign-ins), for its person or
     /// an admin: the relay told to let each in no more first, so it reaches the bucket no more, then their `remove`
     /// entries, and a new epoch of each scope it could open (as a client:

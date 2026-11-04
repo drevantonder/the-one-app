@@ -376,7 +376,7 @@
     if (i == null) return;
     if (items[i].title === "Rename") rename(item);
     else if (item.me) signOut();
-    else remove(item.name, browser ? [item.key] : item.keys);
+    else remove(item.name, browser ? [item.key] : item.keys, !browser && item.node && item.online ? item.node.key : null);
   }
 
   /// Renames a device: its node and the services named for it together, or its app's sign-ins.
@@ -404,12 +404,28 @@
     setTimeout(() => input.focus(), 50);
   }
 
-  /// Removes a device, everything on it: it opens nothing new.
-  async function remove(name, keys) {
-    if (!(await one.alert({ title: `Remove ${name}?`, action: "Remove", danger: true }))) return;
-    act(async () => {
-      for (const key of keys) await one.api("POST", "/v1/remove", { key });
-    });
+  /// Removes a device, everything on it: it opens nothing new. One that runs oned and is on can also erase what it
+  /// keeps first, which it does itself, so only while it's reachable.
+  function remove(name, keys, erasable) {
+    const sheet = one.sheet({ title: `Remove ${name}?`, done: "Cancel" });
+    sheet.body.innerHTML = (erasable
+      ? `<div class="list"><label class="row plain"><input type="checkbox" id="erase"><div class="main"><div class="title"><span>Also erase the data</span></div>` +
+        `<div class="sub" style="white-space:normal">${one.esc(`${name} deletes what it keeps: its copy of your data, the pages it kept, and each service’s data.`)}</div></div></label></div>`
+      : "") + `<div id="problem"></div><div style="text-align:center;margin-top:18px"><button class="button primary danger" id="go">Remove</button></div>`;
+    const go = sheet.body.querySelector("#go");
+    go.onclick = async () => {
+      const back = one.busy(go);
+      try {
+        if (sheet.body.querySelector("#erase")?.checked) await one.api("POST", "/v1/erase", { key: erasable });
+        for (const key of keys) await one.api("POST", "/v1/remove", { key });
+        sheet.close();
+        one.tap("success");
+        draw();
+      } catch (e) {
+        sheet.body.querySelector("#problem").innerHTML = one.problem({ title: one.plain(e).title });
+        back();
+      }
+    };
   }
 
   async function removeOld(card) {

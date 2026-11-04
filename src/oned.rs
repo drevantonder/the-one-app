@@ -53,6 +53,15 @@ fn offered() -> BTreeSet<String> {
     names
 }
 
+/// Where this device keeps what it keeps, once it was asked to erase it (`erase`).
+static ERASING: std::sync::Mutex<Option<PathBuf>> = std::sync::Mutex::new(None);
+
+/// Erases what this device keeps, in its home `dir`, once the request that asked has been answered: its parts stopped,
+/// its apps' runtime stopped, its home deleted, then oned stops, to start again as nobody's.
+pub fn erase(dir: &std::path::Path) {
+    *ERASING.lock().unwrap() = Some(dir.to_path_buf());
+}
+
 /// Keeps this device's parts that run as processes of their own running as its entries say: started when one is
 /// switched on (and again if it stops), stopped when it's switched off, and listed as this device's once each asks.
 /// In a thread of its own for good, so what it starts is its child for as long as oned runs.
@@ -62,6 +71,18 @@ pub fn keep_parts(node: Node, runtime: tokio::runtime::Handle) {
         // What each part last asked, and when it was listed for it: asked again later, it's listed again.
         let mut listed: BTreeMap<String, (String, Instant)> = BTreeMap::new();
         loop {
+            if let Some(dir) = ERASING.lock().unwrap().clone() {
+                std::thread::sleep(Duration::from_secs(1));
+                for (name, child) in std::mem::take(&mut running) {
+                    stop(&name, child);
+                }
+                crate::apps::stop_all();
+                if let Err(err) = std::fs::remove_dir_all(&dir) {
+                    tracing::warn!("erasing {}: {err:#}", dir.display());
+                }
+                tracing::warn!("erased {}: stopping", dir.display());
+                std::process::exit(0);
+            }
             match node.parts_on() {
                 Ok((install, on)) => {
                     for name in offered() {
