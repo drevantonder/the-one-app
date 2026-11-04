@@ -78,25 +78,13 @@ const FOREGROUND = { default: "background", description: "background (the defaul
 const PAGE = `
 <style>
   body { max-width: 1120px; }
-  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(240px, 40vw), 1fr)); gap: 22px 14px; margin-top: 6px; }
-  .pic { aspect-ratio: 16 / 10; border-radius: 10px; overflow: hidden; background: var(--card); border: 0.5px solid var(--line); display: grid; place-items: center; color: var(--faint); }
-  .pic img { width: 100%; height: 100%; object-fit: cover; display: block; }
   .head { display: flex; align-items: center; gap: 8px; margin-top: 8px; min-width: 0; }
-  .name { font-weight: 600; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .head .shot-name { flex: 1; margin-top: 0; }
   .switch { transform: scale(0.78); transform-origin: right center; }
-  .sub { color: var(--muted); font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-height: 1.3em; }
-  .sub.bad { color: var(--danger); }
-  .sub.warn { color: var(--warn); display: flex; align-items: center; gap: 5px; }
-  .sub .link { color: var(--tint); cursor: pointer; }
-  .perm-icon { width: 32px; height: 32px; border-radius: 8px; display: grid; place-items: center; flex: none; color: #fff; }
-  .perm-icon .i { width: 18px; height: 18px; }
   .perm-lead { color: var(--muted); font-size: 15px; margin: 2px 4px 14px; line-height: 1.4; }
-  .perm-status { font-size: 14px; font-weight: 500; flex: none; display: inline-flex; align-items: center; gap: 4px; }
-  .perm-status.warn { color: var(--warn); font-weight: 600; }
-  .perm-status.muted { color: var(--muted); }
   .step-num { width: 24px; height: 24px; border-radius: 50%; background: var(--fill); color: var(--muted); font-size: 13px; font-weight: 600; display: grid; place-items: center; flex: none; }
 </style>
-<div class="grid" id="grid"></div>
+<div class="shots" id="grid"></div>
 <div id="sessions-section" hidden>
 <h2 class="section">Recent Sessions</h2>
 <div class="list" id="sessions"></div>
@@ -118,39 +106,43 @@ const PAGE = `
   function view(d) {
     const permGate = d.permissions && d.kind === "mac";
     const missing = permGate && (!d.permissions.accessibility || !d.permissions.screen_recording);
-    const warn = missing || asking.has(d.device) || d.asking;
-    const lineHtml = notes[d.device] || (d.why ? "Not answering"
-      : asking.has(d.device) || d.asking ? "Asking on the device…"
+    const title = d.title || d.device;
+    // What needs the person is one problem box on its tile; the line under the name is only ever grey.
+    const box = notes[d.device] ? problem(d.device, "note", { title: notes[d.device] })
+      : missing ? problem(d.device, !d.permissions.accessibility ? "accessibility" : "screen", { title: (!d.permissions.accessibility ? "Accessibility" : "Screen Recording") + " is off", text: "Agents can't use " + title + " until it's on.", warn: true, action: { label: "Fix", run: () => { const x = devs.find((y) => y.device === d.device); if (x) showFix(x); } } })
+      : d.why ? problem(d.device, "why", { title: "Not answering", text: "Check that " + title + " is on and online.", warn: true })
+      : "";
+    const line = box ? "" : asking.has(d.device) || d.asking ? "Asking on the device…"
       : !d.on ? (d.missing || "")
       : d.using ? \`\${d.using.agent} is using it\`
-      : "");
-    let html;
-    if (missing) {
-      const which = !d.permissions.accessibility ? "Accessibility off" : "Screen Recording off";
-      html = \`\${one.icon("warning-circle-fill")}<span>\${which} · <a class="link" data-fix="\${one.esc(d.device)}">Fix</a></span>\`;
-    } else {
-      html = one.esc(lineHtml);
-    }
-    return { src: (d.on && d.using && pics[d.device]) || "", lineHtml: html, warn: warn || missing, bad: !!notes[d.device], on: !!d.on,
-      off: !!(d.why || d.missing || asking.has(d.device) || missing), title: d.title || d.device };
+      : "";
+    return { src: (d.on && d.using && pics[d.device]) || "", line, box, on: !!d.on,
+      off: !!(d.why || d.missing || asking.has(d.device) || missing), title };
   }
+  // A problem's box is made once for what it says, so the kit keeps one button for it, not one for every redraw.
+  const boxes = new Map();
+  const problem = (device, kind, p) => {
+    const k = device + "/" + kind + "/" + p.title;
+    if (!boxes.has(k)) boxes.set(k, one.problem(p));
+    return boxes.get(k);
+  };
 
   function tile(d) {
     const v = view(d);
     const mirror = d.kind === "mac" ? \`
-      <div style="margin-top:14px;border-top:0.5px solid var(--line);padding-top:12px" data-mirror>
-        <div class="pic" style="aspect-ratio:9/16;max-width:160px">
+      <div style="margin-top:20px" data-mirror>
+        <div class="shot-pic" style="aspect-ratio:9/16;max-width:160px">
           \${d.mirroring?.running ? \`<img src="\${pics[d.device + ':mirror'] || ""}" alt="">\` : \`<svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="7" y="2.5" width="10" height="19" rx="2"/><path d="M11 18.5h2"/></svg>\`}
         </div>
         <div class="head">
-          <div class="name">iPhone Mirroring</div>
-          \${d.mirroring?.running ? \`<span class="perm-status muted"><span class="i">●</span> Mirroring</span>\` : \`<button class="button" data-open-mirror>\${one.icon("play")} Open</button>\`}
+          <div class="shot-name">iPhone Mirroring</div>
+          \${d.mirroring?.running ? "" : \`<button class="button" data-open-mirror>\${one.icon("play")} Open</button>\`}
         </div>
-        <div class="sub">\${d.mirroring?.running ? "" : "Pair on your iPhone's Settings → General → iPhone Mirroring. Capture stays inside the Mirroring window only."}</div>
+        <div class="shot-sub">\${d.mirroring?.running ? "" : "Pair on your iPhone's Settings → General → iPhone Mirroring. Capture stays inside the Mirroring window only."}</div>
       </div>\` : "";
-    return \`<div data-tile="\${one.esc(d.device)}"><div class="pic">\${v.src ? \`<img src="\${v.src}" alt="">\` : laptop}</div><div class="head"><div class="name">\${one.esc(v.title)}</div>\` +
+    return \`<div data-tile="\${one.esc(d.device)}"><div class="shot-pic">\${v.src ? \`<img src="\${v.src}" alt="">\` : laptop}</div><div class="head"><div class="shot-name">\${one.esc(v.title)}</div>\` +
       \`<input type="checkbox" class="switch" data-device="\${one.esc(d.device)}" aria-label="Let agents use it"\${v.on ? " checked" : ""}\${v.off ? " disabled" : ""}></div>\` +
-      \`<div class="sub\${v.bad ? " bad" : ""}\${v.warn ? " warn" : ""}">\${v.lineHtml}</div>\${mirror}</div>\`;
+      \`<div class="shot-sub">\${one.esc(v.line)}</div><div data-box>\${v.box}</div>\${mirror}</div>\`;
   }
 
   // The sheet a Fix opens, drawn again with each poll so a permission turned on shows here.
@@ -164,20 +156,20 @@ const PAGE = `
         <p class="perm-lead">macOS requires two permissions before agents can view or control this Mac.</p>
         <div class="list">
           <div class="row">
-            <span class="perm-icon" style="background:#007aff">\${one.icon("cursor-click-fill")}</span>
+            <span class="app-icon" style="--size:32px">\${one.icon("cursor-click-fill")}</span>
             <div class="main">
               <div class="title"><span>Accessibility</span></div>
               <div class="sub">Clicks, typing and window control</div>
             </div>
-            \${a11y ? \`<span class="perm-status muted">\${one.icon("check")}</span>\` : \`<span class="perm-status warn">\${one.icon("warning-circle-fill")}Off</span>\`}
+            \${a11y ? "" : \`<span class="note warn">Off</span>\`}
           </div>
           <div class="row">
-            <span class="perm-icon" style="background:#5e5ce6">\${one.icon("desktop")}</span>
+            <span class="app-icon" style="--size:32px">\${one.icon("desktop")}</span>
             <div class="main">
               <div class="title"><span>Screen Recording</span></div>
               <div class="sub">Lets agents see what’s on screen</div>
             </div>
-            \${sr ? \`<span class="perm-status muted">\${one.icon("check")}</span>\` : \`<span class="perm-status warn">\${one.icon("warning-circle-fill")}Off</span>\`}
+            \${sr ? "" : \`<span class="note warn">Off</span>\`}
           </div>
         </div>
 
@@ -209,12 +201,6 @@ const PAGE = `
   }
 
   grid.addEventListener("click", (e) => {
-    const f = e.target.closest("[data-fix]");
-    if (f) {
-      const d = devs.find((x) => x.device === f.dataset.fix);
-      if (d) showFix(d);
-      return;
-    }
     const om = e.target.closest("[data-open-mirror]");
     if (!om) return;
     const t = om.closest("[data-tile]");
@@ -231,18 +217,17 @@ const PAGE = `
   function patch(d) {
     const t = grid.querySelector(\`[data-tile="\${CSS.escape(d.device)}"]\`);
     if (!t) return;
-    const v = view(d), pic = t.querySelector(".pic"), img = pic.querySelector("img");
+    const v = view(d), pic = t.querySelector(".shot-pic"), img = pic.querySelector("img");
     if (v.src && img) { if (img.getAttribute("src") !== v.src) img.src = v.src; }
     else if (v.src) { const i = new Image(); i.alt = ""; i.src = v.src; pic.replaceChildren(i); }
     else if (img) pic.innerHTML = laptop;
-    t.querySelector(".name").textContent = v.title;
+    t.querySelector(".shot-name").textContent = v.title;
     const s = t.querySelector(".switch");
     s.checked = v.on;
     s.disabled = v.off;
-    const sub = t.querySelector(".sub");
-    sub.innerHTML = v.lineHtml;
-    sub.classList.toggle("bad", v.bad);
-    sub.classList.toggle("warn", v.warn);
+    t.querySelector(".shot-sub").textContent = v.line;
+    const box = t.querySelector("[data-box]");
+    if (box.__html !== v.box) box.innerHTML = box.__html = v.box;
   }
 
   const html = () => devs.length ? devs.map(tile).join("")

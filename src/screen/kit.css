@@ -72,6 +72,18 @@ h2.section { font-size: 13px; font-weight: 400; text-transform: none; color: var
 .row .chev { color: var(--faint); font-size: 20px; }
 .row.dim .main, .row.dim .app-icon { opacity: 0.4; }
 .row .note { color: var(--muted); font-size: 15px; white-space: nowrap; flex: none; }
+.row .note.warn { color: var(--warn); }
+/* What needs you, on a row: its symbol, then one line, in warn. */
+.row .sub.warn { color: var(--warn); display: flex; align-items: center; gap: 5px; white-space: normal; }
+/* A row that is a button, and one that adds something: its words in the tint. */
+button.row { width: 100%; border: 0; background: none; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+button.row.still { cursor: default; }
+.row.add { color: var(--tint); }
+/* A text field or menu in a row: <label class="row plain"><input class="field"></label>. */
+.row :is(input, select).field { flex: 1; min-width: 0; font: inherit; border: 0; outline: none; background: none; color: var(--text); padding: 0; }
+.row .field::placeholder { color: var(--faint); }
+/* The buttons that end a form, at its right. */
+.actions { margin-top: 18px; text-align: right; }
 
 .icon { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; flex: none; font-weight: 600; font-size: 15px; color: white; background: var(--muted); }
 .icon.grey { background: var(--faint); color: var(--text); }
@@ -98,7 +110,7 @@ h2.section { font-size: 13px; font-weight: 400; text-transform: none; color: var
 .composer input:focus { border-color: var(--tint); }
 .composer button { flex: none; width: 36px; height: 36px; border-radius: 50%; border: 0; background: var(--tint); color: white; font-size: 18px; }
 .composer button:disabled { background: var(--faint); }
-.composer .error { color: var(--danger); font-size: 13px; max-width: 760px; margin: 0 auto 6px; padding: 0 6px; }
+.composer .problem { max-width: 760px; margin: 0 auto 8px; }
 
 /* A segmented control, for an app's own pickers (which scope, which view): buttons in a .segmented, the chosen one .on. */
 .segmented { display: flex; padding: 2px; gap: 2px; border-radius: 9px; background: var(--fill); margin: 8px 0 12px; }
@@ -119,14 +131,21 @@ h2.section { font-size: 13px; font-weight: 400; text-transform: none; color: var
 .switch:checked:active::after { transform: translateX(14px); }
 .switch[aria-busy="true"] { pointer-events: none; }
 
+/* Devices as pictures, as Agent Devices and Computer Use show them: a grid of each one's screen, name and one line. */
+.shots { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(240px, 40vw), 1fr)); gap: 22px 14px; margin-top: 6px; }
+.shot-pic { aspect-ratio: 16 / 10; border-radius: 14px; overflow: hidden; background: var(--card); display: grid; place-items: center; color: var(--faint); }
+.shot-pic img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.shot-name { font-weight: 500; margin-top: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.shot-sub { color: var(--muted); font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-height: 1.3em; }
+
 /* An empty screen or list (one.empty): one grey line, and a button only for an obvious first step. */
 .empty { text-align: center; color: var(--muted); padding: 48px 24px; }
 .empty .button { margin-top: 14px; }
 .error { color: var(--danger); }
 
 /* The kit's pieces (kit.js, markdown.js, code.js): each styled only where a screen uses it. */
-:root { --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; --code-bg: rgba(118, 118, 128, 0.12); --ok: #34c759; }
-@media (prefers-color-scheme: dark) { :root { --code-bg: rgba(118, 118, 128, 0.24); --ok: #30d158; } }
+:root { --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; --code-bg: rgba(118, 118, 128, 0.12); }
+@media (prefers-color-scheme: dark) { :root { --code-bg: rgba(118, 118, 128, 0.24); } }
 .i { width: 1.1em; height: 1.1em; flex: none; vertical-align: -0.18em; }
 
 .button { font: inherit; font-size: 15px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 7px 14px; border-radius: 10px; border: 0; background: var(--fill); color: var(--tint); cursor: pointer; white-space: nowrap; }

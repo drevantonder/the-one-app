@@ -60,19 +60,14 @@ const named = { type: "string", description: "a browser profile's name, like Per
 const PAGE = `
 <style>
   body { max-width: 1120px; }
-  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(240px, 40vw), 1fr)); gap: 22px 14px; margin-top: 6px; }
   .tile { display: block; color: inherit; text-decoration: none; min-width: 0; }
   .tile.opens { cursor: pointer; }
-  .pic { position: relative; aspect-ratio: 16 / 10; border-radius: 10px; overflow: hidden; background: var(--card); border: 0.5px solid var(--line); display: grid; place-items: center; color: var(--faint); }
-  .pic img { width: 100%; height: 100%; object-fit: cover; display: block; }
   /* A phone's whole screen, upright in the tile, like a phone. */
-  .pic img.phone { position: absolute; top: 8px; left: 50%; transform: translateX(-50%); width: auto; height: calc(100% - 16px); box-sizing: border-box; border: 3px solid #1c1c1e; border-radius: 12px; }
-  .tile.paused .pic img { filter: grayscale(0.9) brightness(0.5); }
-  .tile.opens:hover .pic { border-color: var(--tint); }
-  .name { font-weight: 600; margin-top: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .sub { color: var(--muted); font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-height: 1.3em; }
+  .shot-pic { position: relative; }
+  .shot-pic img.phone { position: absolute; top: 8px; left: 50%; transform: translateX(-50%); width: auto; height: calc(100% - 16px); border-radius: 12px; }
+  .tile.paused .shot-pic img { filter: grayscale(0.9) brightness(0.5); }
 </style>
-<div class="grid" id="grid"><div class="empty" style="grid-column:1/-1">Loading…</div></div>
+<div class="shots" id="grid"><div class="empty" style="grid-column:1/-1">Loading…</div></div>
 <script>
   one.title("Agent Devices");
   const grid = document.getElementById("grid");
@@ -105,7 +100,7 @@ const PAGE = `
     const pic = pics[k] ? \`<img src="\${pics[k]}" alt=""\${phone(c) ? ' class="phone"' : ""}>\` : glyph(screenless(c), c);
     // A phone or Windows opens even when off: it starts for whoever opens it.
     const opens = !screenless(c) && (!paused(c) || c.kind !== "linux");
-    return \`<div class="tile\${paused(c) ? " paused" : ""}\${opens ? " opens" : ""}" data-k="\${one.esc(k)}"><div class="pic">\${pic}</div><div class="name">\${one.esc(name)}</div><div class="sub">\${one.esc(line)}</div></div>\`;
+    return \`<div class="tile\${paused(c) ? " paused" : ""}\${opens ? " opens" : ""}" data-k="\${one.esc(k)}"><div class="shot-pic">\${pic}</div><div class="shot-name">\${one.esc(name)}</div><div class="shot-sub">\${one.esc(line)}</div></div>\`;
   }
 
   function draw() {
@@ -200,6 +195,7 @@ const DEVICE = `
   iframe { position: fixed; left: 0; right: 0; bottom: 0; top: 0; width: 100%; height: 100%; border: 0; background: #000; color-scheme: dark; }
   .bar:not([hidden]) ~ iframe { top: 52px; height: calc(100% - 52px); }
   .empty { margin: 40px 16px; }
+  #note:not(.empty) { margin: 16px; }
 </style>
 <div class="bar" id="bar" hidden><div class="what sub" id="what"></div><button class="button primary" id="done" hidden>Done Signing In</button></div>
 <div class="empty" id="note">Opening…</div>
@@ -213,8 +209,9 @@ const DEVICE = `
     frame?.remove();
     frame = null;
     note.hidden = false;
-    note.className = "empty" + (error ? " error" : "");
-    note.textContent = text;
+    note.className = error ? "" : "empty";
+    if (error) note.innerHTML = one.problem({ title: text, action: { label: "Try Again", run: look } });
+    else note.textContent = text;
   }
 
   function describe(c) {

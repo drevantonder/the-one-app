@@ -520,10 +520,6 @@ The board's rules, which every agent follows and anyone may change with board_ru
     main: {
       title: "Board",
       html: `
-<style>
-  .action-row { color: var(--tint); cursor: pointer; }
-  .field { flex: 1; min-width: 0; font: inherit; border: 0; outline: none; background: none; color: var(--text); padding: 0; }
-</style>
 <div id="list"></div>
 <script>
 async function show() {
@@ -543,7 +539,7 @@ async function show() {
   const rest = topics.slice(1);
   return \`<div class="list">\${row(topics[0])}</div>
      <h2 class="section">Topics</h2>
-     \${rest.length ? \`<div class="list">\${rest.map(row).join("")}<a class="row plain action-row" onclick="create()">New Topic</a></div>\`
+     \${rest.length ? \`<div class="list">\${rest.map(row).join("")}<button class="row plain add" onclick="create()"><div class="main"><div class="title">New Topic</div></div></button></div>\`
        : one.empty("A topic keeps posts about one thing together.", { label: "New Topic", run: () => create() })}\`;
 }
 // A topic's name as the board keeps it: lowercase words joined by -, nested with /.
@@ -552,12 +548,12 @@ function create() {
   const sheet = one.sheet({ title: "New Topic", done: "Cancel" });
   sheet.body.innerHTML = \`<div class="list"><label class="row plain"><input class="field" id="name" placeholder="Name, like kitchen-reno" autocomplete="off" autocapitalize="none"></label>
     <label class="row plain"><input class="field" id="about" placeholder="What it's for" autocomplete="off" enterkeyhint="done"></label></div>
-    <p class="footer" id="note"></p><div style="text-align:center;margin-top:18px"><button class="button primary" id="go" disabled>Create</button></div>\`;
-  const $ = (id) => sheet.body.querySelector("#" + id), name = $("name"), about = $("about"), go = $("go"), note = $("note");
+    <p class="footer" id="note"></p><div id="fail"></div><div class="actions"><button class="button primary" id="go" disabled>Create</button></div>\`;
+  const $ = (id) => sheet.body.querySelector("#" + id), name = $("name"), about = $("about"), go = $("go"), note = $("note"), fail = $("fail");
   let force = false;
   const check = () => {
     go.disabled = !slug(name.value) || !about.value.trim();
-    note.className = "footer";
+    fail.innerHTML = "";
     note.textContent = slug(name.value) && slug(name.value) !== name.value.trim() ? "It'll be called " + slug(name.value) + "." : "";
     force = false;
     go.textContent = "Create";
@@ -575,12 +571,11 @@ function create() {
     } catch (e) {
       // A topic like it already: say which, and let them make theirs anyway.
       const like = String(e.message || "").split("\\n").slice(1).map((l) => l.trim().split(" — ")[0]).filter((l) => /^[a-z0-9-/]+$/.test(l));
-      note.className = "footer error";
       if (like.length) {
         note.textContent = "There's already " + like.join(" and ") + ". Use " + (like.length > 1 ? "one of them" : "it") + ", or create yours anyway.";
         force = true;
         go.textContent = "Create Anyway";
-      } else note.textContent = one.plain(String(e.message || e).replace(/^Not created: /, "")).title;
+      } else fail.innerHTML = one.problem({ title: one.plain(String(e.message || e).replace(/^Not created: /, "")).title, action: { label: "Try Again", run: () => go.click() } });
       go.disabled = false;
     }
   };
@@ -597,7 +592,7 @@ draw();
 <p id="about" class="muted small"></p>
 <div id="feed" class="feed"></div>
 <div class="composer">
-  <div id="error" class="error"></div>
+  <div id="error"></div>
   <form id="form"><input id="text" autocomplete="off" placeholder="Post"><button id="send" disabled>↑</button></form>
 </div>
 <script>
@@ -619,7 +614,7 @@ function feed() {
       : \`<div class="post\${cls}">\${one.avatar(p.user, p.name)}<div><div class="who">\${one.esc(p.credit || p.name)}<span class="when">\${p.sending ? "Sending…" : one.ago(p.time)}</span></div><div class="text">\${one.esc(p.text)}</div></div></div>\`;
     last = p;
   }
-  return html || '<div class="empty">No posts yet</div>';
+  return html || one.empty("No posts yet");
 }
 const show = () => one.render("#feed", async () => {
   const r = await one.call("read", { format: "json", ...(path ? { topic: path } : {}), ...(one.scope ? { scope: one.scope } : {}) });
@@ -633,7 +628,7 @@ addEventListener("scroll", () => { pinned = innerHeight + scrollY >= document.bo
 new ResizeObserver(() => { if (pinned) window.scrollTo(0, document.body.scrollHeight); }).observe(document.documentElement);
 visualViewport?.addEventListener("resize", () => { if (pinned) window.scrollTo(0, document.body.scrollHeight); });
 const text = document.getElementById("text"), send = document.getElementById("send"), error = document.getElementById("error");
-text.oninput = () => { send.disabled = !text.value.trim(); error.textContent = ""; };
+text.oninput = () => { send.disabled = !text.value.trim(); error.innerHTML = ""; };
 document.getElementById("form").onsubmit = async (e) => {
   e.preventDefault();
   const said = text.value;
@@ -655,7 +650,7 @@ document.getElementById("form").onsubmit = async (e) => {
     draw();
     if (!text.value) text.value = said;
     send.disabled = !text.value.trim();
-    error.textContent = one.plain(err).title;
+    error.innerHTML = one.problem({ title: one.plain(err).title, action: { label: "Try Again", run: () => document.getElementById("form").requestSubmit() } });
   }
 };
 one.on("changed", show);

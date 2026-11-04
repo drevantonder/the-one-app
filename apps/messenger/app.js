@@ -144,25 +144,15 @@ export default {
     settings: {
       title: "Messenger",
       html: `
-<style>
-  .card { background: var(--card); border-radius: var(--radius); padding: 14px 16px; margin: 12px 0; }
-  button.primary { font: inherit; font-weight: 600; color: white; background: var(--tint); border: 0; border-radius: 10px; padding: 11px 16px; }
-  button.plain { font: inherit; color: var(--tint); background: none; border: 0; padding: 4px 0; }
-  button:disabled { opacity: 0.6; }
-  button .spinner { display: inline-block; vertical-align: -2px; margin-right: 6px; }
-  input, select { width: 100%; box-sizing: border-box; font: inherit; padding: 11px 14px; border-radius: 10px; border: 0.5px solid var(--line); background: var(--bg); color: var(--text); margin: 8px 0; }
-  ol { padding-left: 20px; margin: 8px 0; }
-  .sub.warn { color: var(--warn); }
-</style>
 <div id="list"></div>
-<div class="card" id="connect"><button class="primary" id="start">Add account</button><div id="err" class="error small"></div></div>
-<div id="needs" hidden></div>
+<div id="connect"></div>
+<div id="needs"></div>
 <script>
 // Messenger's accounts are browser profiles (Vault items of type Browser profile): adding one picks a profile, or makes one, and opens
 // messenger.com in it to sign in.
-const list = document.getElementById("list"), connect = document.getElementById("connect"), form = connect.innerHTML;
-let accounts = [], asked = 0;
-// Asked for as the screen opens, so Add account has them at once.
+const list = document.getElementById("list"), connect = document.getElementById("connect");
+let accounts = [], asked = 0, picking = false, nowhere = false;
+// Asked for as the screen opens, so Add Account has them at once.
 const profiles = () => one.call("_profiles").then((r) => (r || []).map((p) => p.profile), () => []);
 let known = profiles();
 // Signed out here and maybe not yet on the device, so a redraw meanwhile doesn't bring them back.
@@ -174,15 +164,20 @@ function draw(fetch) {
       if (n === asked) accounts = got;
     }
     const all = accounts.filter((a) => !leaving.has(a.account));
-    return all.length
-      ? '<h2 class="section">Browser profiles</h2><div class="list">' + all.map((a, i) => {
-          const why = failed[a.account] || (a.ok ? (i ? "" : "Used first") : one.plain(a.why || "Needs signing in again").title);
-          return \`<div class="row plain"><div class="main"><div class="title">\${one.esc(a.account)}</div><div class="sub\${a.ok && !failed[a.account] ? "" : " warn"}">\${one.esc(why)}</div></div><button class="plain" data-out="\${one.esc(a.account)}">Sign out</button></div>\`;
-        }).join("") + "</div>"
-      : '<p class="muted">Link Messenger to a browser profile signed in to messenger.com, and your agents can read your chats and, when you ask, send.</p>';
+    // With nowhere to sign in, what's missing shows instead (below), with the way to add it.
+    if (!all.length) return nowhere || picking ? "" : one.empty("Link Messenger to a browser profile signed in to messenger.com, and your agents can read your chats and, when you ask, send.", { label: "Add Account", run: () => pick() });
+    const needs = all.filter((a) => !a.ok).map((a) => one.problem({ title: a.account + " needs signing in", text: "Sign it out, then add it again.", warn: true })).join("");
+    return needs + '<h2 class="section">Browser profiles</h2><div class="list">' + all.map((a, i) => {
+      const line = failed[a.account] || (a.ok ? (i ? "" : "Used first") : "Sign in again");
+      const bad = !a.ok || failed[a.account];
+      const sub = line ? \`<div class="sub\${bad ? " warn" : ""}">\${bad ? one.icon("warning-circle-fill") : ""}\${one.esc(line)}</div>\` : "";
+      return \`<div class="row plain"><div class="main"><div class="title">\${one.esc(a.account)}</div>\${sub}</div><button class="button plain" data-out="\${one.esc(a.account)}">Sign Out</button></div>\`;
+    }).join("") + (nowhere || picking ? "" : '<button class="row plain add" id="add"><div class="main"><div class="title">Add Account</div></div></button>') + "</div>";
   }, { skeleton: 1 });
 }
 list.onclick = async (e) => {
+  const add = e.target.closest("#add");
+  if (add) return pick(add);
   const account = e.target.closest("[data-out]")?.dataset.out;
   if (!account) return;
   leaving.add(account);
@@ -197,63 +192,57 @@ list.onclick = async (e) => {
   leaving.delete(account);
   draw(!failed[account]);
 };
-function ready() {
-  connect.innerHTML = form;
-  document.getElementById("start").onclick = pick;
-}
+const stop = () => { picking = false; connect.innerHTML = ""; };
 
 // Picks a profile not linked yet, or names a new one.
-async function pick(e) {
-  const b = e?.currentTarget;
-  if (b) {
-    b.disabled = true;
-    b.innerHTML = '<span class="spinner small" aria-hidden="true"></span>Add account';
-  }
+async function pick(b) {
+  const back = b && one.busy(b);
   const [all] = await Promise.all([known, loaded]);
   known = profiles();
+  back?.();
+  picking = true;
+  draw(false);
   const free = [...new Set(all)].filter((p) => !accounts.some((a) => a.account === p));
-  connect.innerHTML = \`<div class="small muted">Which browser profile? Each has its own sign-ins, like Personal or Work.</div>
-    <select id="profile">\${free.map((p) => \`<option>\${one.esc(p)}</option>\`).join("")}<option value="">New profile…</option></select>
-    <input id="name" placeholder="Its name, like Personal or Work" autocapitalize="words" autocorrect="off" \${free.length ? "hidden" : ""}>
-    <button class="primary" id="go">Sign in to Messenger</button><div id="err" class="error small"></div>\`;
-  const select = document.getElementById("profile"), name = document.getElementById("name");
-  select.onchange = () => (name.hidden = !!select.value);
+  connect.innerHTML = \`<h2 class="section">Browser profile</h2><div class="list">
+      <label class="row plain"><div class="main">Profile</div><select class="field" id="profile" aria-label="Browser profile">\${free.map((p) => \`<option>\${one.esc(p)}</option>\`).join("")}<option value="">New profile…</option></select></label>
+      <label class="row plain" id="named" \${free.length ? 'style="display:none"' : ""}><input class="field" id="name" placeholder="Its name, like Personal or Work" aria-label="Its name" autocapitalize="words" autocorrect="off"></label></div>
+    <p class="footer">Each has its own sign-ins, like Personal or Work.</p>
+    <div class="actions"><button class="button primary" id="go">Sign In to Messenger</button></div><div id="err"></div>\`;
+  const select = document.getElementById("profile"), name = document.getElementById("name"), named = document.getElementById("named");
+  select.onchange = () => (named.style.display = select.value ? "none" : "");
   document.getElementById("go").onclick = async (e) => {
     const profile = select.value || name.value.trim();
     if (!profile) return name.focus();
-    e.target.disabled = true;
-    e.target.innerHTML = '<span class="spinner small" aria-hidden="true"></span>Opening a device…';
+    const back = one.busy(e.currentTarget, "Opening a device…");
     try { signingIn(await one.call("sign_in", { profile })); }
-    catch (err) { document.getElementById("err").textContent = one.plain(err).title; e.target.disabled = false; e.target.textContent = "Sign in to Messenger"; }
+    catch (err) { back(); document.getElementById("err").innerHTML = one.problem({ title: one.plain(err).title, action: { label: "Try Again", run: () => document.getElementById("go").click() } }); }
   };
 }
 
 function signingIn(r) {
-  connect.innerHTML = \`<ol><li><a href="\${one.esc(r.url)}">Open the device</a>: its browser is on messenger.com, in the \${one.esc(r.profile)} profile.</li>
-    <li>Sign in there, and tick Keep me signed in.</li><li>Come back and press Done.</li></ol>
-    <button class="primary" id="done">Done</button><div id="err" class="error small"></div>\`;
+  connect.innerHTML = \`<h2 class="section">Sign In</h2><div class="list">
+      <a class="row" href="\${one.esc(r.url)}"><div class="main"><div class="title">Open the device</div><div class="sub">Its browser is on messenger.com, in the \${one.esc(r.profile)} profile.</div></div><span class="chev">›</span></a>
+      <div class="row plain"><div class="main">Sign in there, and tick Keep me signed in.</div></div></div>
+    <p class="footer">Come back and press Done.</p>
+    <div class="actions"><button class="button primary" id="done">Done</button></div><div id="err"></div>\`;
   document.getElementById("done").onclick = async (e) => {
-    e.target.disabled = true;
-    e.target.innerHTML = '<span class="spinner small" aria-hidden="true"></span>Saving…';
+    const back = one.busy(e.currentTarget, "Saving…");
     try { await one.call("_save", { profile: r.profile }); }
-    catch (err) { document.getElementById("err").textContent = one.plain(err).title; e.target.disabled = false; e.target.textContent = "Done"; return; }
+    catch (err) { back(); document.getElementById("err").innerHTML = one.problem({ title: one.plain(err).title, action: { label: "Try Again", run: () => document.getElementById("done").click() } }); return; }
+    stop();
     await draw(true);
-    ready();
   };
 }
 
-document.getElementById("start").onclick = pick;
 one.on("changed", () => draw(true));
 const loaded = draw(true);
-if (one.params.add) document.getElementById("start").click();
-// With nowhere to sign in, Add account goes: what's missing shows instead, with the way to add it.
+if (one.params.add) loaded.then(() => pick());
 one.call("_running").then(({ devices }) => {
   if (devices.length) return;
-  connect.hidden = true;
-  const n = document.getElementById("needs");
-  n.innerHTML = one.problem({ title: "Messenger needs Agent Devices.", text: "Add Agent Devices to one of your devices in the App Store, then sign in here.", warn: true,
+  nowhere = true;
+  draw(false);
+  document.getElementById("needs").innerHTML = one.problem({ title: "Messenger needs Agent Devices.", text: "Add Agent Devices to one of your devices in the App Store, then sign in here.", warn: true,
     action: { label: "Open App Store", run: () => one.open("app", { app: "agent-devices" }, "apps") } });
-  n.hidden = false;
 }, () => {});
 </script>`,
     },

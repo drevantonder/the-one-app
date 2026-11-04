@@ -186,20 +186,12 @@ export default {
       title: "WhatsApp",
       html: `
 <style>
-  .card { background: var(--card); border-radius: var(--radius); padding: 14px 16px; margin: 12px 0; }
-  button.primary { font: inherit; font-weight: 600; color: white; background: var(--tint); border: 0; border-radius: 10px; padding: 11px 16px; }
-  button.plain { font: inherit; color: var(--tint); background: none; border: 0; padding: 4px 0; }
-  button:disabled { opacity: 0.6; }
-  button .spinner { display: inline-block; vertical-align: -2px; margin-right: 6px; }
-  input { width: 100%; box-sizing: border-box; font: inherit; padding: 11px 14px; border-radius: 10px; border: 0.5px solid var(--line); background: var(--bg); color: var(--text); margin: 8px 0; }
-  ol { padding-left: 20px; margin: 8px 0; }
-  .sub.warn { color: var(--warn); }
-  #qr { display: block; width: 220px; height: 220px; margin: 10px auto; background: white; border-radius: 8px; image-rendering: pixelated; }
+  #qr { display: block; width: 220px; height: 220px; margin: 10px auto; background: white; border-radius: 12px; image-rendering: pixelated; }
   .code { font: 600 24px ui-monospace, monospace; letter-spacing: 2px; text-align: center; margin: 8px 0; }
 </style>
 <div id="list"></div>
 <div id="ask"></div>
-<div class="card" id="connect" hidden><input id="phone" type="tel" placeholder="Its number, for a code to type instead (optional)"><button class="primary" id="start">Add account</button><div id="err" class="error small"></div></div>
+<div id="connect" hidden><div class="list"><label class="row plain"><input class="field" id="phone" type="tel" placeholder="Its number, for a code to type instead (optional)" aria-label="Its number"></label></div><div class="actions"><button class="button primary" id="start">Add Account</button></div><div id="err"></div></div>
 <div id="needs" hidden></div>
 <script>
 // Each account is a phone linked to one of your devices, as WhatsApp Desktop is linked.
@@ -214,9 +206,9 @@ function draw(fetch) {
       if (n === asked) accounts = got;
     }
     const all = accounts.filter((a) => !leaving.has(a.account));
-    return all.length
-      ? '<h2 class="section">Accounts</h2><div class="list">' + all.map((a, i) => \`<div class="row plain"><div class="main"><div class="title">\${one.esc(a.account)}</div><div class="sub\${a.ok ? "" : " warn"}">\${one.esc(a.ok ? \`Linked on \${a.device}\${i ? "" : " · used first"}\` : one.plain(a.why || "Needs linking again").title)}</div></div><button class="plain" data-out="\${one.esc(a.account)}">Sign out</button></div>\`).join("") + "</div>"
-      : '<p class="muted">Link WhatsApp, and your agents can read your chats and, when you ask, send.</p>';
+    if (!all.length) return '<p class="footer">Link WhatsApp, and your agents can read your chats and, when you ask, send.</p>';
+    const needs = all.filter((a) => !a.ok).map((a) => one.problem({ title: a.account + " needs linking again", text: one.plain(a.why || "Needs linking again").title.replace(/^Needs linking again\\.$/, "Link it from the phone again."), warn: true, action: { label: "Link Again", run: () => start() } })).join("");
+    return needs + '<h2 class="section">Accounts</h2><div class="list">' + all.map((a, i) => \`<div class="row plain"><div class="main"><div class="title">\${one.esc(a.account)}</div>\${a.ok ? \`<div class="sub">Linked on \${one.esc(a.device)}\${i ? "" : " · used first"}</div>\` : \`<div class="sub warn">\${one.icon("warning-circle-fill")}Link again</div>\`}</div><button class="button plain" data-out="\${one.esc(a.account)}">Sign Out</button></div>\`).join("") + "</div>";
   }, { skeleton: 1 });
 }
 list.onclick = (e) => {
@@ -237,18 +229,21 @@ list.onclick = (e) => {
 };
 function ready() {
   connect.innerHTML = form;
-  document.getElementById("start").onclick = start;
+  document.getElementById("start").onclick = (e) => start(e.currentTarget);
 }
 
-async function start(e) {
-  const b = e.currentTarget, phone = document.getElementById("phone").value.trim();
-  b.disabled = true;
-  b.innerHTML = '<span class="spinner small" aria-hidden="true"></span>Asking WhatsApp…';
+async function start(b) {
+  const phone = document.getElementById("phone")?.value.trim() || "";
+  const back = b && one.busy(b, "Asking WhatsApp…");
   try { await one.call("sign_in", phone ? { phone } : {}); }
-  catch (err) { document.getElementById("err").textContent = one.plain(err).title; b.disabled = false; b.textContent = "Add account"; return; }
-  connect.innerHTML = \`<ol><li>On the phone, open WhatsApp › Settings › Linked devices › Link a device.</li>
-    <li>Scan this code\${phone ? ", or tap Link with phone number instead and type the code under it" : ""}.</li></ol>
-    <img id="qr" alt=""><div class="code" id="code"></div><div class="small muted" id="note">The code changes every 20 seconds. WhatsApp then sends recent chats, which takes a few minutes.</div>\`;
+  catch (err) {
+    back?.();
+    document.getElementById("err").innerHTML = one.problem({ title: one.plain(err).title, action: { label: "Try Again", run: () => start() } });
+    return;
+  }
+  connect.innerHTML = \`<h2 class="section">Link a Device</h2><div class="list"><div class="row plain"><div class="main">On the phone, open WhatsApp › Settings › Linked devices › Link a device.</div></div>
+    <div class="row plain"><div class="main">Scan this code\${phone ? ", or tap Link with phone number instead and type the code under it" : ""}.</div></div></div>
+    <img id="qr" alt=""><div class="code" id="code"></div><p class="footer" id="note">The code changes every 20 seconds. WhatsApp then sends recent chats, which takes a few minutes.</p>\`;
   watch();
 }
 
@@ -271,7 +266,7 @@ async function watch() {
   draw(true).then(ready);
 }
 
-document.getElementById("start").onclick = start;
+document.getElementById("start").onclick = (e) => start(e.currentTarget);
 one.on("changed", () => draw(true));
 // The accounts and whether any device runs WhatsApp come together, so the form shows once, or not at all.
 Promise.all([one.call("_running").catch(() => null), draw(true)]).then(([r]) => {
@@ -281,6 +276,7 @@ Promise.all([one.call("_running").catch(() => null), draw(true)]).then(([r]) => 
     n.innerHTML = one.problem({ title: "WhatsApp isn't on any of your devices yet.", text: "Add it to one in the App Store, then link your phone here.", warn: true,
       action: { label: "Open App Store", run: () => one.open("app", { app: "whatsapp" }, "apps") } });
     n.hidden = false;
+    list.innerHTML = "";
     return;
   }
   connect.hidden = false;

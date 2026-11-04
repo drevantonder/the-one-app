@@ -144,11 +144,11 @@ export default {
 .dev.off { opacity: .55; }
 .dev.sub { margin-left: 20px; }
 .dev header { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
-.dev h3 { margin: 0; font-size: 17px; }
+.dev h3 { margin: 0; font-size: 17px; font-weight: 500; }
 .dev .os { color: var(--muted); font-size: 13px; }
 .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px 24px; margin-top: 12px; }
 .stat .label { display: flex; justify-content: space-between; gap: 8px; white-space: nowrap; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
-.stat .label b { color: var(--text); font-weight: 600; }
+.stat .label b { color: var(--text); font-weight: 500; }
 .bar { height: 6px; border-radius: 3px; background: var(--fill); overflow: hidden; }
 .bar i { display: block; height: 100%; border-radius: 3px; }
 .spark { width: 100%; height: 28px; display: block; }

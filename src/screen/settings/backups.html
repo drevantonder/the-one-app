@@ -1,12 +1,10 @@
 <style>
   .row.go { cursor: pointer; }
   .row .sub.error { color: var(--danger); white-space: normal; }
-  .row .sub.warn { color: var(--warn); display: flex; align-items: center; gap: 5px; }
   .field input { flex: 1; min-width: 0; font: inherit; text-align: right; border: 0; outline: none; background: none; color: var(--text); padding: 0; }
   .field input::placeholder { color: var(--faint); }
   .choice .check { color: var(--tint); visibility: hidden; }
   .choice.on .check { visibility: visible; }
-  .actions { margin-top: 18px; text-align: right; }
   .row[aria-disabled] { pointer-events: none; color: var(--muted); }
 </style>
 <div class="large-title">Backups</div>

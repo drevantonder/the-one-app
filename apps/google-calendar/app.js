@@ -418,51 +418,40 @@ export default {
 /// Opened with { add: true } (a shell's Add Account), it starts signing in at once.
 function settingsScreen(title, blurb) {
   return `
-<style>
-  .card { background: var(--card); border-radius: var(--radius); padding: 14px 16px; margin: 12px 0; }
-  button.primary { font: inherit; font-weight: 600; color: white; background: var(--tint); border: 0; border-radius: 10px; padding: 11px 16px; }
-  button.plain { font: inherit; color: var(--tint); background: none; border: 0; padding: 4px 0; margin-left: 12px; }
-  button:disabled { opacity: 0.6; }
-  button .spinner { display: inline-block; vertical-align: -2px; margin-right: 6px; }
-  input { width: 100%; box-sizing: border-box; font: inherit; padding: 11px 14px; border-radius: 10px; border: 0.5px solid var(--line); background: var(--bg); color: var(--text); margin: 8px 0; }
-  ol { padding-left: 20px; margin: 8px 0; }
-  .sub.warn { color: var(--warn); }
-</style>
 <div id="list"></div>
-<div class="card" id="connect"><button class="primary" id="start">Sign In to Google</button><div id="err" class="error small"></div></div>
+<div id="connect"></div>
 <script>
 const list = document.getElementById("list"), connect = document.getElementById("connect");
-let accounts = [], asked = 0;
+let accounts = [], asked = 0, signing = false, blocked = null;
 // Signed out here and maybe not yet on the device, so a redraw meanwhile doesn't bring them back.
 const leaving = new Set(), failed = {};
 const shown = () => accounts.filter((a) => !leaving.has(a.account));
-const label = () => (shown().length ? "Add Account" : "Sign In to Google");
-function busy(b, on, text = b?.textContent) {
-  if (!b) return;
-  b.disabled = on;
-  if (on) b.innerHTML = '<span class="spinner small" aria-hidden="true"></span>' + one.esc(text);
-  else b.textContent = text;
-}
 function draw(fetch) {
   return one.render(list, async () => {
     if (fetch) {
       const n = ++asked, got = await one.call("accounts");
       if (n === asked) accounts = got;
     }
-    const s = document.getElementById("start");
-    if (s && !s.disabled) s.textContent = label();
     const all = shown();
-    return all.length
-      ? '<h2 class="section">Accounts</h2><div class="list">' + all.map((a, i) => {
-          const why = failed[a.account] || (a.ok ? (i ? "" : "Used first") : one.plain(a.why || "Needs signing in again").title);
-          return \`<div class="row plain"><div class="main"><div class="title">\${one.esc(a.account)}</div><div class="sub\${a.ok && !failed[a.account] ? "" : " warn"}">\${one.esc(why)}</div></div>\${a.ok ? "" : \`<button class="plain" data-in="\${one.esc(a.account)}">Sign in</button>\`}<button class="plain" data-out="\${one.esc(a.account)}">Sign out</button></div>\`;
-        }).join("") + "</div>"
-      : '<p class="muted">${blurb}</p>';
+    // Not set up for anyone yet, and not this person's to set up: what to do, and no button that can't work.
+    const stuck = blocked ? one.problem({ title: blocked.title, text: blocked.text, warn: true }) : "";
+    if (!all.length) return stuck || (signing ? "" : one.empty("${blurb}", { label: "Sign In to Google", run: () => start() }));
+    // What needs signing in again is a problem box, as Backups shows one, and a warn line on its row.
+    const needs = blocked ? "" : all.filter((a) => !a.ok).map((a) => one.problem({
+      title: a.account + " needs signing in",
+      text: one.plain(a.why || "Needs signing in again").title.replace(/^Needs signing in again\\.$/, "Sign in to Google again to let ${title} in."),
+      warn: true, action: { label: "Sign In", run: () => start(a.account) } })).join("");
+    return stuck + needs + '<h2 class="section">Accounts</h2><div class="list">' + all.map((a, i) => {
+      const line = failed[a.account] || (a.ok ? (i ? "" : "Used first") : "Sign in again");
+      const sub = line ? \`<div class="sub\${a.ok && !failed[a.account] ? "" : " warn"}">\${a.ok && !failed[a.account] ? "" : one.icon("warning-circle-fill")}\${one.esc(line)}</div>\` : "";
+      return \`<div class="row plain"><div class="main"><div class="title">\${one.esc(a.account)}</div>\${sub}</div><button class="button plain" data-out="\${one.esc(a.account)}">Sign Out</button></div>\`;
+    }).join("") + (blocked ? "" : '<button class="row plain add" id="add"><div class="main"><div class="title">Add Account</div></div></button>') + "</div>";
   }, { skeleton: 1 });
 }
 list.onclick = async (e) => {
-  const b = e.target.closest("button");
-  if (b?.dataset.in) return start(b.dataset.in, b);
+  const add = e.target.closest("#add");
+  if (add) return start(undefined, add);
+  const b = e.target.closest("[data-out]");
   const account = b?.dataset.out;
   if (!account) return;
   leaving.add(account);
@@ -477,12 +466,11 @@ list.onclick = async (e) => {
   leaving.delete(account);
   draw(!failed[account]);
 };
-function ready() {
-  connect.innerHTML = '<button class="primary" id="start">' + label() + '</button><div id="err" class="error small"></div>';
-  document.getElementById("start").onclick = (e) => start(undefined, e.currentTarget);
-}
+// A failure for a title: its first sentence, without "Try again." (what the button says).
+const said = (e) => one.plain(e).title.replace(/(\\. Try again)?\\.$/, "");
+const stop = () => { signing = false; connect.innerHTML = ""; };
 async function start(account, b) {
-  busy(b, true);
+  const back = b && one.busy(b);
   let link;
   try {
     link = (await one.call("sign_in", account ? { account } : {})).url;
@@ -492,36 +480,39 @@ async function start(account, b) {
     if (/No Google sign-in/.test(e.message) && one.vault) {
       try { if (await one.vault("client")) return start(account, b); } catch (err) { e = err; }
     }
-    busy(b, false, b?.id === "start" ? label() : b?.textContent);
+    back?.();
     const ask = /Ask (.+?) to set up (.+?)(?::|$)/.exec(e.message);
     if (ask) {
-      connect.className = "";
-      connect.innerHTML = one.problem({ title: ask[2] + " isn't set up", text: "Ask " + ask[1] + " to set it up. It's done once for everyone." });
-      return;
+      blocked = { title: ask[2] + " isn't set up", text: "Ask " + ask[1] + " to set it up. It's done once for everyone." };
+      return draw(false);
     }
-    document.getElementById("err").textContent = one.plain(e).title;
+    connect.innerHTML = one.problem({ title: said(e), action: { label: "Try Again", run: () => start(account) } });
     return;
   }
-  connect.innerHTML = \`<ol><li><a href="\${one.esc(link)}">Sign in to Google</a> and allow ${title}.</li><li>The browser then goes to a page that doesn't load. Copy its whole address and paste it here.</li></ol>
-    <input id="code" placeholder="http://127.0.0.1:…/hooks/…/oauth?code=…" autocapitalize="none" autocorrect="off"><button class="primary" id="finish">Sign In</button><div id="err" class="error small"></div>\`;
+  signing = true;
+  draw(false);
+  connect.innerHTML = \`<h2 class="section">Sign In</h2><div class="list">
+      <a class="row" href="\${one.esc(link)}"><div class="main"><div class="title">Sign in to Google</div><div class="sub">and allow ${title}</div></div><span class="chev">›</span></a>
+      <label class="row plain"><input class="field" id="code" placeholder="Paste the page's address" aria-label="The page's address" autocapitalize="none" autocorrect="off" spellcheck="false"></label></div>
+    <div class="footer">The browser then goes to a page that doesn't load. Copy its whole address and paste it above.</div>
+    <div class="actions"><button class="button primary" id="finish">Sign In</button></div><div id="err"></div>\`;
   const finish = document.getElementById("finish");
   finish.onclick = async () => {
-    busy(finish, true);
+    const back = one.busy(finish);
     try {
       const r = await one.call("finish_sign_in", { code: document.getElementById("code").value });
       if (r?.signed_in === false) throw new Error(r.why);
     } catch (e) {
-      busy(finish, false);
-      document.getElementById("err").textContent = one.plain(e).title;
+      back();
+      document.getElementById("err").innerHTML = one.problem({ title: said(e), action: { label: "Try Again", run: () => start(account) } });
       return;
     }
+    stop();
     await draw(true);
-    ready();
   };
 }
-document.getElementById("start").onclick = (e) => start(undefined, e.currentTarget);
 one.on("changed", () => draw(true));
 draw(true);
-if (one.params.add) start(undefined, document.getElementById("start"));
+if (one.params.add) start();
 </script>`;
 }
