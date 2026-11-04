@@ -245,7 +245,10 @@ export class Auth extends DurableObject {
           resources,
           enforcePerClientResources: false,
           accessTokenExpiresIn: 3600,
-          refreshTokenReuseInterval: 0,
+          // A refresh token used again within a minute of its rotation gets the same answer again (kept sealed under
+          // auth's secret), so an answer lost on the way (a dropped connection, a tab closed, a proxy that failed after
+          // auth rotated) signs no one out; used again after that, it's taken as stolen, and its whole family ends.
+          refreshTokenReuseInterval: 60,
           storeTokens: "hashed",
           // Who a token is for, by name, so a node lets someone new in as who they are.
           customAccessTokenClaims: ({ user }) => (user ? { name: user.name } : {}),

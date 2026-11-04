@@ -2,8 +2,9 @@
 // each copy by its token's id, so the MCP Worker opens it only while the client calls, and with nothing of its own.
 //
 // A sign-in seals it under the client's refresh token and its access token, until each expires. Refresh tokens are
-// single-use (auth takes none twice): a refresh opens the copy under the old one, seals it under the new pair, and
-// deletes the old copy, so the old token opens nothing; nor does a copy whose token has expired. An access token's copy
+// single-use (auth answers one used again only with the same new pair, for a minute, in case that answer was lost): a
+// refresh opens the copy under the old one, seals it under the new pair, and deletes the old copy, so the old token
+// opens nothing; nor does a copy whose token has expired. An access token's copy
 // opens it for each MCP request until that token expires, even if its sign-in is revoked sooner: tokens are checked
 // offline, by auth's signature.
 
@@ -53,9 +54,9 @@ export class Copies {
   }
 
   /// A refresh from `old` to `refresh` and `access`: the secret, sealed under them, the old copy gone. → the secret,
-  /// or null if `old` opens nothing.
+  /// or null if neither `old` nor `refresh` (the same rotation again, auth's lost answer given again) opens it.
   async rotate(old, refresh, access, accessUntil) {
-    const secret = await this.open(old);
+    const secret = (await this.open(old)) || (await this.open(refresh));
     if (!secret) return null;
     await this.keep(secret, refresh, this.now() + REFRESH_LASTS);
     await this.keep(secret, access, accessUntil);
