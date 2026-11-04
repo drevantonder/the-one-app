@@ -528,25 +528,50 @@ one.render("#list", show);
       sizes: ["small", "medium", "large"],
       async render(ctx) {
         const b = ctx.global || ctx.user || ctx.groups[0];
-        if (!b) return { t: "text", text: "No providers yet", tone: "muted" };
+        if (!b) return { t: "text", text: "No plans yet.", size: "sm", tone: "muted" };
         const now = ctx.now();
         const dev = await here(ctx, null);
-        const rows = [];
+        const plans = [];
         for (const id of Object.keys(PROVIDERS)) {
           const reads = await latest(b, id, dev);
           for (const p of reads) {
-            const used = p.session_used ?? p.weekly_used;
-            if (used == null) continue;
-            rows.push({ name: reads.length > 1 && p.account ? `${PROVIDERS[id].title} · ${p.account.replace(/ · (.+)@.*$/, " ($1)")}` : PROVIDERS[id].title, used });
+            if (p.session_used == null && p.weekly_used == null) continue;
+            const account = reads.length > 1 && p.account ? p.account.split(" · ")[0] : "";
+            plans.push({ name: PROVIDERS[id].title, mark: markOf(id).image, account, session: p.session_used, week: p.weekly_used, resets: p.session_resets ?? p.weekly_resets });
           }
         }
-        if (!rows.length) return { t: "text", text: "No readings yet", tone: "muted" };
-        const show = ctx.size === "small" ? rows.slice(0, 1) : rows;
-        const tone = (u) => (u >= 85 ? "bad" : u >= 70 ? "warn" : "good");
-        return {
-          t: "col", header: false, next: Date.now() + 300_000,
-          c: show.map((r) => ({ t: "row", gap: 8, c: [{ t: "col", grow: true, c: [{ t: "text", text: r.name, size: "sm", lines: 1 }] }, { t: "progress", value: r.used / 100, tone: tone(r.used), w: 90, alt: `${r.name} ${r.used}% used` }, { t: "text", text: `${r.used}%`, size: "sm", tone: "muted", lines: 1 }] })),
+        if (!plans.length) return { t: "text", text: "No readings yet.", size: "sm", tone: "muted" };
+        // Few fit a small or medium widget: the plans closest to their limit, in their usual order.
+        const worst = (p) => Math.max(p.session ?? 0, p.week ?? 0);
+        const fit = { small: 3, medium: 4, large: 8 }[ctx.size] || 4;
+        const top = new Set([...plans].sort((a, b) => worst(b) - worst(a)).slice(0, fit));
+        const show = plans.filter((p) => top.has(p));
+        const level = (u) => (u >= 85 ? "bad" : u >= 70 ? "warn" : "good");
+        const cell = (w, n) => ({ t: "col", w, align: "center", c: [n || { t: "col", c: [] }] });
+        const label = (text) => ({ t: "text", text, size: "xs", weight: "medium", tone: "muted", lines: 1 });
+        const ring = (u, w, alt) => (u == null ? null : { t: "gauge", value: u / 100, tone: level(u), w, label: "", alt: `${alt} ${u}% used` });
+        const small = ctx.size === "small", w = small ? 22 : 44, r = small ? 14 : 20;
+        const header = { t: "row", gap: small ? 4 : 6, c: [{ t: "col", grow: true, c: [label("Plans")] }, cell(w, label(small ? "5H" : "SESSION")), cell(w, label(small ? "7D" : "WEEK"))] };
+        const row = (p) => {
+          const name = [p.name, p.account].filter(Boolean).join(" · ");
+          const sub = ctx.size === "large" && p.resets != null ? `Resets ${countdown(p.resets, now)}` : null;
+          return {
+            t: "row", gap: small ? 4 : 6,
+            c: [
+              { t: "image", url: p.mark, w: small ? 16 : 20, h: small ? 16 : 20 },
+              { t: "col", grow: true, gap: 1, c: [{ t: "text", text: small ? p.account.split(" ")[0] || p.name : name, size: "sm", lines: 1 }, ...(sub ? [{ t: "text", text: sub, size: "xs", tone: "muted", lines: 1 }] : [])] },
+              cell(w, ring(p.session, r, `${name} session`)),
+              cell(w, ring(p.week, r, `${name} week`)),
+            ],
+          };
         };
+        const body = [header, ...show.map(row)];
+        // What needs you: a plan nearly out, and when it resets.
+        const out = ctx.size === "large" && show.filter((p) => worst(p) >= 85).sort((a, b) => worst(b) - worst(a))[0];
+        if (out) body.push({ t: "row", gap: 6, c: [{ t: "icon", name: "warning-fill", tone: "bad", size: "xs" }, { t: "text", text: `${[out.name, out.account].filter(Boolean).join(" · ")} is at ${worst(out)}%${out.resets != null ? `, resets ${countdown(out.resets, now)}` : ""}`, size: "xs", tone: "bad", lines: 1 }] });
+        // Rows spread over the widget's height once there are enough of them; a few stay together at the top.
+        const c = body.length < 4 ? [{ t: "col", gap: 8, c: body }, { t: "col", grow: true, gap: 0, c: [] }] : body.flatMap((n, i) => (i ? [{ t: "col", grow: true, gap: 0, c: [] }, n] : [n]));
+        return { t: "col", header: false, next: Date.now() + 300_000, c };
       },
     },
   },

@@ -129,7 +129,7 @@ export default {
       sizes: ["small", "medium", "large", "xl"],
       async render(ctx) {
         const list = await devices(ctx);
-        if (!list.length) return { t: "text", text: "No devices yet", tone: "muted" };
+        if (!list.length) return { t: "text", text: "No devices yet.", size: "sm", tone: "muted" };
         return ctx.size === "small" ? compact(list) : table(list, ctx.size);
       },
     },
@@ -296,8 +296,8 @@ function table(list, size) {
   const details = size !== "medium";
   const latest = usual(list);
   const stats = (d) => d.online
-    ? { t: "row", gap: k.gap, c: [cell(k.ram, ring(d.memory, k.ring)), cell(k.cpu, d.kind ? null : spark(d.cpu, "blue", k.cpu, k.spark, "CPU")),
-        cell(k.gpu, d.kind ? null : spark(d.gpu, "purple", k.gpu, k.spark, "GPU")), cell(k.disk, bar(d.disk, k.disk))] }
+    ? { t: "row", gap: k.gap, c: [cell(k.ram, ring(d.memory, k.ring)), cell(k.cpu, d.kind ? null : spark(d.cpu, "good", k.cpu, k.spark, "CPU")),
+        cell(k.gpu, d.kind ? null : spark(d.gpu, "muted", k.gpu, k.spark, "GPU")), cell(k.disk, bar(d.disk, k.disk))] }
     : null;
   const row = (d) => ({
     t: "row", gap: 10, dim: !d.online,
@@ -312,7 +312,8 @@ function table(list, size) {
     c: [{ t: "col", grow: true, c: [label("Devices")] }, { t: "row", gap: k.gap, c: [cell(k.ram, label("RAM")), cell(k.cpu, label("CPU")), cell(k.gpu, label("GPU")), cell(k.disk, label("DISK"))] }],
   };
   const body = [header, ...rows.map(row)];
-  if (details) body.push(warning(list));
+  const warn = details && warning(list);
+  if (warn) body.push(warn);
   return { t: "col", header: false, next: Date.now() + 60_000, c: spread(body) };
 }
 
@@ -322,7 +323,7 @@ const spread = (nodes) => nodes.length < 4
   ? [{ t: "col", gap: 8, c: nodes }, { t: "col", grow: true, gap: 0, c: [] }]
   : nodes.flatMap((n, i) => (i ? [{ t: "col", grow: true, gap: 0, c: [] }, n] : [n]));
 
-/// What needs looking at: a disk or memory nearly full, or a device offline; or that nothing does.
+/// What needs looking at: a disk or memory nearly full, or a device offline; nothing when nothing does.
 function warning(list) {
   const worst = [];
   for (const d of list) {
@@ -333,22 +334,21 @@ function warning(list) {
     }
   }
   worst.sort((a, b) => b[0] - a[0]);
-  if (!worst.length) return { t: "row", gap: 6, c: [{ t: "icon", name: "check-circle-fill", tone: "good", size: "xs" }, { t: "text", text: "All devices are fine", size: "xs", tone: "muted", lines: 1 }] };
+  if (!worst.length) return null;
   // Nearly full is red, as its bar is; only offline, orange.
   const tone = worst[0][0] === 1 && worst.every((w) => w[0] === 1) ? "warn" : "bad";
   return { t: "row", gap: 6, c: [{ t: "icon", name: "warning-fill", tone, size: "xs" }, { t: "text", text: worst.map((w) => w[1]).join(" · "), size: "xs", tone, lines: 1 }] };
 }
 
-/// A small widget: each device's name cut short, its memory ring, CPU and disk.
+/// A small widget: each online device's name (cut with an ellipsis), its memory ring and its disk.
 function compact(list) {
-  const short = (name) => (name.length > 4 ? name.slice(0, 3) : name);
   const row = (d) => ({
     t: "row", gap: 6, dim: !d.online,
     c: [
-      { t: "col", w: 28, c: [{ t: "text", text: short(d.name), size: "sm", lines: 1 }] },
-      ...(d.online ? [cell(24, ring(d.memory, 15)), cell(26, spark(d.cpu, "blue", 26, 12, "CPU")), cell(26, bar(d.disk, 26))] : []),
+      { t: "col", grow: true, c: [{ t: "text", text: d.name, size: "sm", lines: 1 }] },
+      ...(d.online ? [cell(24, ring(d.memory, 15)), cell(34, bar(d.disk, 34))] : []),
     ],
   });
-  const header = { t: "row", gap: 6, c: [{ t: "col", w: 28, c: [] }, cell(24, label("RAM")), cell(26, label("CPU")), cell(26, label("DISK"))] };
+  const header = { t: "row", gap: 6, c: [{ t: "col", grow: true, c: [label("Devices")] }, cell(24, label("RAM")), cell(34, label("DISK"))] };
   return { t: "col", header: false, next: Date.now() + 60_000, c: spread([header, ...list.filter((d) => !d.kind).slice(0, 5).map(row)]) };
 }

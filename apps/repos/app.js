@@ -316,41 +316,33 @@ export default {
       },
       async render(ctx) {
         if (!ctx.global) return { t: "col", c: [] };
-        const many = { small: 1, medium: 3, large: 6, xl: 6 }[ctx.size] || 3;
-        const commits = await recent(ctx, many, ctx.options.repo);
+        const many = { small: 1, medium: 2, large: 4, xl: 6 }[ctx.size] || 2;
+        const { commits, week } = await recent(ctx, many, ctx.options.repo);
         if (!commits.length) {
           const any = (await ctx.global.query("select 1 from repos where deleted is null limit 1")).length;
-          return { t: "text", text: any ? "No commits yet" : "No repos yet", size: "sm", tone: "muted" };
+          return { t: "text", text: any ? "No commits yet." : "No repos yet.", size: "sm", tone: "muted" };
         }
+        const total = week.reduce((a, n) => a + n, 0);
+        const now = ctx.now(), DAY = 86400000;
+        const days = week.map((_, i) => new Date(now - (6 - i) * DAY).toLocaleDateString("en-US", { weekday: "narrow" }));
         const link = (c) => ({ screen: "commit", params: { repo: c.repo, sha: c.sha } });
-        if (ctx.size === "small") {
-          const c = commits[0];
-          return {
-            t: "col", gap: 3, link: link(c),
-            c: [
-              { t: "row", gap: 4, c: [{ t: "text", text: c.repo, size: "xs", weight: "medium", tone: "accent", lines: 1 }, { t: "time", at: c.time, size: "xs", tone: "muted" }] },
-              { t: "text", text: c.subject, size: "sm", lines: 4 },
-              { t: "col", grow: true, c: [] },
-              { t: "text", text: `${c.author} · ${c.branch}`, size: "xs", tone: "muted", lines: 1 },
-            ],
-          };
-        }
-        return {
-          // Spread out to fill the widget.
-          t: "col", gap: 4,
-          c: commits.flatMap((c, i) => [...(i ? [{ t: "col", grow: true, c: [] }] : []), {
-            t: "col", gap: 2, link: link(c),
-            c: [
-              { t: "row", gap: 5, c: [
-                { t: "text", text: c.repo, size: "xs", weight: "medium", lines: 1 },
-                { t: "text", text: c.author, size: "xs", tone: "accent", lines: 1 },
-                { t: "col", grow: true, c: [] },
-                { t: "time", at: c.time, size: "xs", tone: "muted" },
-              ] },
-              { t: "text", text: c.subject, size: "sm", lines: 1 },
-            ],
-          }]),
-        };
+        const muted = (text, extra = {}) => ({ t: "text", text, size: "xs", tone: "muted", lines: 1, ...extra });
+        const commit = (c, lines, small = false) => ({
+          t: "col", gap: 2, link: link(c),
+          c: [
+            { t: "row", gap: 5, c: [{ t: "icon", name: "git-commit", tone: "muted", w: 11 }, { t: "text", text: c.repo, size: "xs", weight: "medium", lines: 1 }, ...(small ? [] : [muted(c.author)]), { t: "col", grow: true, c: [] }, { t: "time", at: c.time, size: "xs", tone: "muted" }] },
+            { t: "text", text: c.subject, size: "sm", lines },
+          ],
+        });
+        const activity = (w = 64) => ({ t: "row", gap: 8, c: [muted(`${total} this week`, { weight: "medium" }), { t: "col", grow: true, c: [] }, { t: "spark", values: week, tone: "muted", w, h: 14, alt: "Commits a day this week" }] });
+        const spacer = { t: "col", grow: true, gap: 0, c: [] };
+        const spread = (nodes) => nodes.flatMap((n, i) => (i ? [spacer, n] : [n]));
+        if (ctx.size === "small") return { t: "col", gap: 4, c: [commit(commits[0], 3, true), spacer, activity(44)] };
+        if (ctx.size === "medium") return { t: "col", gap: 4, c: spread([...commits.map((c) => commit(c, 1)), activity()]) };
+        const chart = { t: "chart", values: week, labels: days, tone: "muted", h: ctx.size === "xl" ? 120 : 36, alt: "Commits a day this week" };
+        if (ctx.size === "large") return { t: "col", gap: 4, c: spread([...commits.map((c) => commit(c, 2)), { t: "col", gap: 4, c: [muted(`${total} commits this week`, { weight: "medium" }), chart] }]) };
+        // Extra large: the commits, and beside them the week.
+        return { t: "row", gap: 24, c: [{ t: "col", grow: true, gap: 4, c: spread(commits.map((c) => commit(c, 2))) }, { t: "col", w: 220, gap: 4, c: [muted(`${total} commits this week`, { weight: "medium" }), chart] }] };
       },
     },
   },
@@ -379,21 +371,28 @@ const git = {
 };
 
 /// The newest `many` commits across repos' main branches, each with its repo and branch: the branches pushed to last,
-/// and their history, newest first. A repo whose packs can't be read is left out.
+/// and their history, newest first; and commits a day over the last week, oldest first. A repo whose packs can't be
+/// read is left out.
 async function recent(ctx, many, repo = "") {
   const heads = await ctx.global.query(
     "select repo, branch from branches where (? = '' or repo = ?) and repo not in (select name from repos where deleted is not null) order by time desc limit ?",
-    [repo || "", repo || "", many],
+    [repo || "", repo || "", Math.max(many, 8)],
   );
   const all = [];
   for (const { repo, branch } of heads) {
     try {
       const { commits } = await browse.log(ctx, ctx.global, { repo, ref: branch });
-      all.push(...commits.slice(0, many).map((c) => ({ ...c, repo, branch })));
+      all.push(...commits.map((c) => ({ ...c, repo, branch })));
     } catch {}
   }
   // Repos that share history (a fork, or one split out of another) list a commit once.
   const seen = new Set();
   const key = (c) => `${c.time} ${c.subject}`;
-  return all.sort((a, b) => b.time - a.time).filter((c) => !seen.has(key(c)) && seen.add(key(c))).slice(0, many);
+  const unique = all.sort((a, b) => b.time - a.time).filter((c) => !seen.has(key(c)) && seen.add(key(c)));
+  const week = Array(7).fill(0), DAY = 86400000;
+  for (const c of unique) {
+    const d = Math.floor((ctx.now() - c.time) / DAY);
+    if (d >= 0 && d < 7) week[6 - d]++;
+  }
+  return { commits: unique.slice(0, many), week };
 }

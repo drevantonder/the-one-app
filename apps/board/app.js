@@ -678,47 +678,44 @@ show();
         },
       },
       async render(ctx) {
-        const many = { small: 1, medium: 2, large: 5, xl: 5 }[ctx.size] || 2;
+        const many = { small: 1, medium: 2, large: 4, xl: 6 }[ctx.size] || 2;
         const { topic: only, from } = ctx.options;
         // A topic takes in its subtopics' posts too.
-        const posts = await board(ctx).query(
-          `select * from posts where (? = '' or topic = ? or topic like ? || '/%')
-             and (? = 'everyone' or (? = 'agents') = (agent is not null and agent != '')) order by time desc limit ?`,
-          [only || "", only || "", only || "", from || "everyone", from || "everyone", many],
-        );
-        if (!posts.length) return { t: "text", text: only ? `Nothing in ${only} yet` : "Nothing on the board yet", size: "sm", tone: "muted" };
+        const where = `(? = '' or topic = ? or topic like ? || '/%') and (? = 'everyone' or (? = 'agents') = (agent is not null and agent != ''))`;
+        const args = [only || "", only || "", only || "", from || "everyone", from || "everyone"];
+        const b = board(ctx);
+        const posts = await b.query(`select * from posts where ${where} order by time desc limit ?`, [...args, many]);
+        if (!posts.length) return { t: "text", text: only ? `Nothing in ${only} yet.` : "Nothing on the board yet.", size: "sm", tone: "muted" };
+        // Posts a day over the last week, oldest first: how lively it is.
+        const now = ctx.now(), DAY = 86400000;
+        const week = Array(7).fill(0);
+        for (const r of await b.query(`select cast((? - time) / ${DAY} as int) as d, count(*) as n from posts where time > ? and ${where} group by d`, [now, now - 7 * DAY, ...args])) if (r.d >= 0 && r.d < 7) week[6 - r.d] = r.n;
+        const total = week.reduce((a, n) => a + n, 0);
+        const days = week.map((_, i) => new Date(now - (6 - i) * DAY).toLocaleDateString("en-US", { weekday: "narrow" }));
         // Who wrote it: the person, and their agent when one did.
         const who = (p) => [p.agent, p.user_name || p.name].filter(Boolean).join(" · ");
         const topic = (p) => (p.topic || "top").split("/").pop();
         const link = (p) => ({ screen: "topic", params: { path: p.topic || "" } });
+        const muted = (text, extra = {}) => ({ t: "text", text, size: "xs", tone: "muted", lines: 1, ...extra });
+        const post = (p, lines, small = false) => ({
+          t: "col", gap: 2, link: link(p),
+          c: [
+            { t: "row", gap: 5, c: [{ t: "icon", name: p.agent ? "robot" : "user", tone: "muted", w: 11 }, { t: "text", text: who(p), size: "xs", weight: "medium", lines: 1 }, ...(small ? [] : [muted(topic(p))]), { t: "col", grow: true, c: [] }, { t: "time", at: p.time, size: "xs", tone: "muted" }] },
+            { t: "text", text: p.text, size: "sm", lines },
+          ],
+        });
+        const activity = (w = 64) => ({ t: "row", gap: 8, c: [muted(`${total} this week`, { weight: "medium" }), { t: "col", grow: true, c: [] }, { t: "spark", values: week, tone: "muted", w, h: 14, alt: "Posts a day this week" }] });
+        const spacer = { t: "col", grow: true, gap: 0, c: [] };
+        const spread = (nodes) => nodes.flatMap((n, i) => (i ? [spacer, n] : [n]));
         if (ctx.size === "small") {
           const p = posts[0];
-          return {
-            t: "col", gap: 3, link: link(p),
-            c: [
-              { t: "row", gap: 4, c: [{ t: "text", text: topic(p), size: "xs", weight: "medium", tone: "accent" }, { t: "time", at: p.time, size: "xs", tone: "muted" }] },
-              { t: "text", text: p.text, size: "sm", lines: 4 },
-              { t: "col", grow: true, c: [] },
-              { t: "text", text: who(p), size: "xs", tone: "muted", lines: 1 },
-            ],
-          };
+          return { t: "col", gap: 4, c: [post(p, 3, true), spacer, activity(44)] };
         }
-        return {
-          // Spread out to fill the widget.
-          t: "col", gap: 6,
-          c: posts.flatMap((p, i) => [...(i ? [{ t: "col", grow: true, c: [] }] : []), {
-            t: "col", gap: 2, link: link(p),
-            c: [
-              { t: "row", gap: 5, c: [
-                { t: "text", text: who(p), size: "xs", weight: "medium", lines: 1 },
-                { t: "text", text: topic(p), size: "xs", tone: "accent", lines: 1 },
-                { t: "col", grow: true, c: [] },
-                { t: "time", at: p.time, size: "xs", tone: "muted" },
-              ] },
-              { t: "text", text: p.text, size: "sm", lines: 2 },
-            ],
-          }]),
-        };
+        if (ctx.size === "medium") return { t: "col", gap: 4, c: spread([...posts.map((p) => post(p, 1)), activity()]) };
+        const chart = { t: "chart", values: week, labels: days, tone: "muted", h: ctx.size === "xl" ? 120 : 36, alt: "Posts a day this week" };
+        if (ctx.size === "large") return { t: "col", gap: 4, c: spread([...posts.map((p) => post(p, 2)), { t: "col", gap: 4, c: [muted(`${total} posts this week`, { weight: "medium" }), chart] }]) };
+        // Extra large: the posts, and beside them the week.
+        return { t: "row", gap: 24, c: [{ t: "col", grow: true, gap: 4, c: spread(posts.map((p) => post(p, 2))) }, { t: "col", w: 220, gap: 4, c: [muted(`${total} posts this week`, { weight: "medium" }), chart] }] };
       },
     },
   },

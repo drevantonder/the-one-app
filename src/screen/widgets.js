@@ -8,13 +8,15 @@ window.oneWidgets = (() => {
   .w-card { display: flex; flex-direction: column; gap: 6px; padding: 16px; border-radius: 28px; background: var(--card); overflow: hidden; min-width: 0; font-size: 12px; line-height: 1.3; }
   .w-card > .w-title { font-size: 11px; font-weight: 500; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .w-card .w-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  /* A widget's tree fills the card, so the gaps a tree spreads its rows with (grow) have room to open. */
+  .w-card .w-body > .w-col { flex: 1; }
   .w-col { display: flex; flex-direction: column; gap: var(--gap, 4px); min-width: 0; }
   .w-row { display: flex; align-items: center; gap: var(--gap, 6px); min-width: 0; }
   .w-row > * { min-width: 0; }
   .w-row > .w-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .w-xl { font-size: 22px; font-weight: 600; } .w-lg { font-size: 15px; font-weight: 600; } .w-sm { font-size: 11px; } .w-xs { font-size: 10px; }
   .w-medium { font-weight: 600; } .w-bold { font-weight: 700; }
-  .w-muted { color: var(--muted); } .w-accent { color: var(--tint); } .w-good { color: var(--text); } .w-warn { color: var(--warn); } .w-bad { color: var(--danger); } .w-blue { color: #0a9edc; } .w-purple { color: #a550d9; }
+  .w-muted { color: var(--muted); } .w-accent { color: var(--tint); } .w-good { color: var(--text); } .w-warn { color: var(--warn); } .w-bad { color: var(--danger); }
   .w-stat b { font-size: 26px; font-weight: 600; font-variant-numeric: tabular-nums; } .w-stat small { color: var(--muted); font-size: 11px; display: block; }
   .w-bar { height: 6px; border-radius: 3px; background: rgba(128, 128, 128, 0.22); overflow: hidden; } .w-bar > i { display: block; height: 100%; background: var(--tone, var(--text)); }
   .w-list > .w-item { display: flex; align-items: center; gap: 8px; padding: 5px 0; border-top: 0.5px solid rgba(128, 128, 128, 0.25); } .w-list > .w-item:first-child { border-top: 0; }
@@ -44,7 +46,7 @@ window.oneWidgets = (() => {
 
   const classes = ["col", "row", "text", "xl", "lg", "sm", "xs", "medium", "bold"];
   // Colour only where it means something (src/screen/kit.css): fine is plain text, warn and bad need you.
-  const tones = { muted: "var(--muted)", accent: "var(--tint)", good: "var(--text)", warn: "var(--warn)", bad: "var(--danger)", blue: "#0a9edc", purple: "#a550d9" };
+  const tones = { muted: "var(--muted)", accent: "var(--tint)", good: "var(--text)", warn: "var(--warn)", bad: "var(--danger)" };
   // A number from a tree, or `or` where it isn't one.
   const num = (v, or) => (v === null || v === "" || !Number.isFinite(Number(v)) ? or : Number(v));
   const fmt = (v) => typeof v === "number" ? v.toLocaleString(undefined, { maximumFractionDigits: 2 }) : String(v ?? "–");
