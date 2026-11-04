@@ -148,7 +148,7 @@ private struct FolderTile: View {
             if apps.isEmpty {
                 ForEach(0..<9, id: \.self) { _ in
                     RoundedRectangle(cornerRadius: mini * 0.25, style: .continuous)
-                        .fill(.primary.opacity(0.07))
+                        .fill(Color.gray.opacity(0.18))
                         .frame(width: mini, height: mini)
                 }
             } else {
@@ -159,7 +159,8 @@ private struct FolderTile: View {
         }
         .padding(inset)
         .frame(width: size, height: size, alignment: .topLeading)
-        .background(Kit.card, in: shape)
+        .background(Color.gray.opacity(0.22), in: shape)
+        .overlay(shape.strokeBorder(Color.gray.opacity(0.3), lineWidth: 0.5))
         .accessibilityHidden(true)
     }
 }
