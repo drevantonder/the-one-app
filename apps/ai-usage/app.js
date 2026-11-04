@@ -151,7 +151,8 @@ async function refresh(b, id, ask, now) {
   if (snap.length && now - newest < FRESH) return snap.map((r) => ({ ...r, cached: true, now }));
   const { answers, problem } = await ask();
   if (problem) return snap.map((r) => ({ ...r, cached: true, stale: problem, now }));
-  const failed = {};
+  const failed = {}; // machine → why it couldn't answer
+  const unread = {}; // account → why it couldn't be read
   const reads = [];
   for (const [machine, answer] of Object.entries(answers || {})) {
     if (answer?.error) {
@@ -161,7 +162,11 @@ async function refresh(b, id, ask, now) {
     for (const a of answer?.accounts || []) {
       if (a.provider !== id) continue;
       const out = fromService(a);
-      if (out.session.used == null && out.weekly.used == null && out.monthly.used == null && !a.error) continue;
+      // An account it couldn't read now (rate limited, signed out) keeps its last read, saying why.
+      if (out.session.used == null && out.weekly.used == null && out.monthly.used == null) {
+        if (a.error) unread[out.account || ""] ??= `${machine}: ${String(a.error).slice(0, 160)}`;
+        continue;
+      }
       reads.push({ machine, out });
     }
   }
@@ -184,8 +189,11 @@ async function refresh(b, id, ask, now) {
   // answers; until then they're better kept than blank.
   if (reads.length) b.exec("delete from snapshots where provider = ? and account is null and at < ?", [id, now]);
   // The writes land when this call returns, so the merge happens here: this pass's rows, and the last read of each
-  // account it didn't see (a machine off, say), saying why if its machine couldn't answer.
-  const kept = snap.filter((r) => !seen.has(r.account || "")).map((r) => ({ ...r, cached: true, now, ...(failed[r.device] ? { stale: failed[r.device] } : {}) }));
+  // account it didn't see (a machine off, say), saying why if it or its machine couldn't be read.
+  const kept = snap.filter((r) => !seen.has(r.account || "")).map((r) => {
+    const why = unread[r.account || ""] || failed[r.device];
+    return { ...r, cached: true, now, ...(why ? { stale: why } : {}) };
+  });
   return [...results, ...kept].sort((x, y) => (y.active - x.active) || ((x.weekly_used ?? 0) - (y.weekly_used ?? 0)));
 }
 
