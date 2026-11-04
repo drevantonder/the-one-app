@@ -1,3 +1,4 @@
+<div id="top"></div>
 <div id="page"></div>
 <style>
   .action-row { color: var(--tint); cursor: pointer; }
@@ -28,7 +29,13 @@ function show() {
   return html + '<div id="ask"></div>';
 }
 
-const draw = () => one.render("#page", async () => ((d = await one.call("collaborators", { repo: P.repo })), show()), { loading: "Loading" });
+async function load() {
+  let is;
+  [d, is] = await Promise.all([one.call("collaborators", { repo: P.repo }), one.call("issues", { repo: P.repo, page: 0 })]);
+  document.getElementById("top").innerHTML = repoTabs({ ...is, repo: P.repo }, "settings");
+  return show();
+}
+const draw = () => one.render("#page", load, { loading: "Loading" });
 
 // Someone to add, found by name or handle; tapping them adds them.
 function add() {

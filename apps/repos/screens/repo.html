@@ -37,15 +37,17 @@ function readme(d) {
 }
 
 function head(d) {
-  if (at) return "";
-  const clone = `git clone ${address(d.repo)}`;
-  const box = d.deleted ? "" : `<div class="clone"><code>${esc(clone)}</code>${one.copyButton(clone)}</div><p class="clone-where">${where}</p>
-      <div class="list repo-links"><a class="row plain" onclick="${go("issues", { repo: d.repo })}">${one.icon("record", "row-icon")}<div class="main"><div class="title"><span>Issues</span><span class="when">${d.open_issues ? d.open_issues.toLocaleString() : ""}</span></div></div><div class="chev">›</div></a></div>`;
-  return `<div class="repo-head">
-      <div class="repo-title"><span class="repo-icon">${one.icon("book")}</span><div>
-        <div class="repo-owner">${esc(d.owner.name)}</div><h1>${esc(d.name)}</h1>
-        ${d.from ? `<div class="muted small">Forked from <a onclick="${go("repo", { repo: d.from })}">${esc(d.from)}</a></div>` : ""}</div></div>
-      ${box}
+  if (at) return repoTabs(d, "code");
+  const clone = `git clone ${d.clone || address(d.repo)}`;
+  const row = (screen, icon, title, note = "") => `<a class="row plain" onclick="${go(screen, { repo: d.repo })}">${one.icon(icon, "row-icon")}<div class="main"><div class="title"><span>${title}</span><span class="when">${note}</span></div></div><div class="chev">›</div></a>`;
+  // On phones, the GitHub app's rows for what wide windows have as tabs.
+  const rows = d.deleted ? "" : `<div class="list repo-links phone-only">${row("issues", "record", "Issues", d.open_issues ? d.open_issues.toLocaleString() : "")}${d.yours ? row("settings", "gear", "Settings") : ""}</div>`;
+  const box = d.deleted ? "" : `<div class="clone"><code>${esc(clone)}</code>${one.copyButton(clone)}</div>${d.clone ? "" : `<p class="clone-where">${where}</p>`}`;
+  return `${d.deleted ? "" : repoTabs(d, "code")}<div class="repo-head">
+      <div class="repo-title${d.deleted ? "" : " phone-only"}"><span class="repo-icon">${one.icon("book")}</span><div>
+        <div class="repo-owner">${esc(d.owner.name)}</div><h1>${esc(d.name)}</h1></div></div>
+      ${d.from ? `<div class="muted small">Forked from <a onclick="${go("repo", { repo: d.from })}">${esc(d.from)}</a></div>` : ""}
+      ${box}${rows}
     </div>`;
 }
 
@@ -61,25 +63,19 @@ function more(d) {
     </div>`;
 }
 
-// At the bottom of a repo's front page: who pushes to it; and for its owners, Delete Repository, or once it's deleted,
-// Erase Repository.
+// A deleted repo's owners erase it here; a repo that's there is deleted from its Settings.
 function danger(d) {
-  if (at) return "";
-  const who = d.deleted ? "" : `<div class="list repo-links"><a class="row plain" onclick="${go("collaborators", { repo: d.repo })}">${one.icon("users", "row-icon")}<div class="main"><div class="title"><span>Collaborators</span></div></div><div class="chev">›</div></a></div>`;
-  if (!d.yours) return who;
-  return who + `<div class="list danger-list"><a class="row plain danger-row" onclick="retire('${d.deleted ? "erase" : "delete"}')">${d.deleted ? "Erase Repository" : "Delete Repository"}</a></div><div id="ask"></div>`;
+  if (!d.deleted || !d.yours) return "";
+  return `<div class="list danger-list"><a class="row plain danger-row" onclick="retire()">Erase Repository</a></div><div id="ask"></div>`;
 }
 
-async function retire(op) {
-  const erase = op === "erase";
+async function retire() {
   document.getElementById("ask").scrollIntoView({ behavior: "smooth", block: "center" });
   await one.confirm("#ask", {
-    title: erase ? `Erase ${P.repo} for good?` : `Delete ${P.repo}?`,
-    detail: erase ? "Its branches and history are gone, and its name is free again." : "No one can clone or push to it. You can restore it from Recently Deleted.",
-    action: erase ? "Erase" : "Delete", danger: true,
+    title: `Erase ${P.repo} for good?`, detail: "Its branches and history are gone, and its name is free again.", action: "Erase", danger: true,
     run: async () => {
-      await one.call(op, { repo: P.repo, confirm: true });
-      if (erase) history.back();
+      await one.call("erase", { repo: P.repo, confirm: true });
+      history.back();
     },
   });
 }

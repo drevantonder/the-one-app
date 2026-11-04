@@ -129,7 +129,7 @@ export function ops(R) {
   return {
     issues: {
       reads: true,
-      description: "A repo's issues, as GitHub lists them: newest first, 25 a page, open ones unless state says otherwise, each with its number, title, state (and state_reason once closed: completed or not_planned), author, labels, assignees, how many comments it has, and when it was opened, last updated and closed. open_issues and closed_issues count those that match the rest of the filters; more says whether there's another page; push, whether you label, assign and close any of them. repos_issue reads one with its body and comments.",
+      description: "A repo's issues, as GitHub lists them: newest first, 25 a page, open ones unless state says otherwise, each with its number, title, state (and state_reason once closed: completed or not_planned), author, labels, assignees, how many comments it has, and when it was opened, last updated and closed. open_issues and closed_issues count those that match the rest of the filters; more says whether there's another page; push, whether you label, assign and close any of them; yours, whether you own the repo. repos_issue reads one with its body and comments.",
       input: {
         type: "object", required: ["repo"],
         properties: {
@@ -180,6 +180,7 @@ export function ops(R) {
           issues: await shape(ctx, g, r, rows.slice(0, PAGE)),
           more: rows.length > PAGE,
           push: await mayPush(ctx, g, r),
+          yours: owns(ctx, r),
         });
       },
     },

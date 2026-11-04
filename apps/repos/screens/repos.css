@@ -226,3 +226,18 @@ code { font: 0.88em var(--mono); }
   .issue-head h1 { font-size: 22px; }
 }
 .md-field [hidden] { display: none; }
+
+/* GitHub's tab row under a repo's name, on wide windows; phones open each from a row on the repo's page. */
+.repo-top { margin: 4px 0 16px; border-bottom: 0.5px solid var(--line); }
+.repo-path { display: flex; align-items: center; gap: 6px; font-size: 20px; margin: 4px 0 10px; }
+.repo-path .i { width: 18px; height: 18px; color: var(--muted); margin-right: 2px; }
+.repo-path .owner, .repo-path .sep { color: var(--muted); }
+.repo-path a { font-weight: 600; color: var(--text); cursor: pointer; }
+.tabs { display: flex; gap: 4px; overflow-x: auto; }
+.tab { display: inline-flex; align-items: center; gap: 7px; padding: 6px 10px 10px; font-size: 15px; color: var(--muted); cursor: pointer; white-space: nowrap; border-bottom: 2px solid transparent; margin-bottom: -0.5px; }
+.tab .i { width: 16px; height: 16px; }
+.tab:not(.on):hover { color: var(--text); }
+.tab.on { color: var(--text); font-weight: 600; border-bottom-color: var(--text); cursor: default; }
+.tab .counter { font-size: 12px; font-weight: 600; line-height: 18px; min-width: 18px; padding: 0 6px; border-radius: 999px; background: var(--fill); color: var(--text); text-align: center; }
+@media (max-width: 699px) { .repo-top { display: none; } }
+@media (min-width: 700px) { .phone-only { display: none; } }

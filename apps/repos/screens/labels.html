@@ -1,3 +1,4 @@
+<div id="top"></div>
 <div id="page"></div>
 <script>
 // A repo's labels, as GitHub's Labels page: each with its colour, description and open issues; those who push to the
@@ -24,6 +25,7 @@ const load = async () => {
   const [ls, is] = await Promise.all([one.call("labels", { repo: P.repo }), one.call("issues", { repo: P.repo, page: 0 })]);
   labels = ls;
   push = is.push;
+  document.getElementById("top").innerHTML = repoTabs({ ...is, repo: P.repo }, "issues");
   return show();
 };
 const draw = () => one.render("#page", load, { loading: "Loading labels" });

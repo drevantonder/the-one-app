@@ -77,3 +77,20 @@ document.addEventListener("click", (e) => {
   text.hidden = preview;
   out.hidden = !preview;
 });
+
+// A repo's name and GitHub's tab row over its Code, Issues and Settings (Settings for its owners), on wide windows:
+// each tab is its own screen, opened with the repo in its params, so Back and reload return to it. On phones it's
+// hidden, and the repo's page has rows that open them.
+function repoTabs(d, on) {
+  const [owner, name] = d.repo.split("/");
+  const tab = (key, screen, icon, title, extra = "") =>
+    `<a class="tab${on === key ? " on" : ""}"${on === key ? ' aria-current="page"' : ` onclick="${go(screen, { repo: d.repo })}"`}>${one.icon(icon)}<span>${title}</span>${extra}</a>`;
+  return `<div class="repo-top">
+    <div class="repo-path">${one.icon("book")}<span class="owner">${esc(owner)}</span><span class="sep">/</span><a onclick="${on === "code" ? "" : go("repo", { repo: d.repo })}">${esc(name)}</a></div>
+    <nav class="tabs" aria-label="${esc(d.repo)}">
+      ${tab("code", "repo", "code", "Code")}
+      ${tab("issues", "issues", "record", "Issues", d.open_issues ? `<span class="counter">${d.open_issues.toLocaleString()}</span>` : "")}
+      ${d.yours ? tab("settings", "settings", "gear", "Settings") : ""}
+    </nav>
+  </div>`;
+}
