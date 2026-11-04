@@ -267,14 +267,27 @@ impl Node {
             Ok((due, admins, push))
         })?;
         for p in due {
-            self.say(&Scope::Global, Said::Alerted { place: p.place.clone() }).await?;
+            // Said only once an admin was told, so a push that didn't go is tried again, hourly.
+            if self.0.alert_tried.lock().unwrap().get(&p.place).is_some_and(|t| now < t + 3_600_000) {
+                continue;
+            }
+            let mut told = false;
             for admin in &admins {
                 let input = json!({ "title": p.title, "body": format!("{} {}", p.text, p.fix) });
                 let call = CallRequest { app: push.clone(), service: Some(push.clone()), op: "send".into(), input, client: Some("app".into()), ..Default::default() };
                 match Box::pin(self.route(call, Caller { key: me, user: admin.clone(), agent: None, token: None })).await {
-                    Ok(sent) => tracing::info!("told {admin} about backups: {sent}"),
+                    Ok(sent) => {
+                        told = true;
+                        tracing::info!("told {admin} about backups: {sent}");
+                    }
                     Err(err) => tracing::warn!("couldn't tell {admin} about backups: {err:#}"),
                 }
+            }
+            if told {
+                self.0.alert_tried.lock().unwrap().remove(&p.place);
+                self.say(&Scope::Global, Said::Alerted { place: p.place.clone() }).await?;
+            } else {
+                self.0.alert_tried.lock().unwrap().insert(p.place.clone(), now);
             }
         }
         Ok(())
@@ -475,10 +488,14 @@ impl Node {
         .await??;
         let (written, known) = snap;
         self.0.backup_looked.lock().unwrap().insert((place_id.to_string(), d.scope.clone()), now);
+        // With nothing new, what the place holds is said anyway where the runs `global` keeps don't say it yet (they
+        // were cut before each scope's last was kept), so a scope that hasn't changed isn't taken for one a day late.
+        let unsaid = written.is_none() && known.as_ref().is_some_and(|k| self.with(|i| Ok(i.status.get("global").and_then(|s| s.covered.get(&(place_id.to_string(), d.scope.clone()))).is_none_or(|c| c.0 < k.upto))).unwrap_or(false));
+        let said = if unsaid { known.clone() } else { written };
         if let Some(known) = known {
             self.0.backed.lock().unwrap().insert((place_id.to_string(), d.scope.clone()), (known, b::key_id(&key)));
         }
-        Ok(written)
+        Ok(said)
     }
 
     /// Says how a run to a place went, in `global`.

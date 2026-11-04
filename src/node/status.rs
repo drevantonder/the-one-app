@@ -31,7 +31,7 @@ create table checks (place text, device text, time integer, error text, report t
 
 /// How many runs of each schedule a scope keeps.
 pub const RUNS_KEPT: usize = 20;
-/// How many backup runs to each place `global` keeps.
+/// How many backup runs to each place `global` keeps, besides each scope's last that backed it up.
 pub const BACKUP_RUNS_KEPT: usize = 100;
 /// How many restore checks of each place `global` keeps.
 pub const CHECKS_KEPT: usize = 20;
@@ -192,7 +192,13 @@ impl Node {
                             "insert or replace into backups values (?, ?, ?, ?, ?, ?)",
                             &[json!(r.place), json!(hex(&r.device)), json!(r.time), json!(r.error), json!(r.trouble), json!(serde_json::to_string(&r.snapshots)?)],
                         )?;
-                        ex("delete from backups where place = ? and time not in (select time from backups where place = ? order by time desc limit ?)", &[json!(r.place), json!(r.place), json!(BACKUP_RUNS_KEPT)])
+                        // Beyond the newest, each scope's last run that backed it up stays, as what's covered is read from
+                        // them: a scope that hasn't changed would otherwise look a day late once busier ones fill these.
+                        ex(
+                            "delete from backups where place = ? and time not in (select time from backups where place = ? order by time desc limit ?) \
+                             and time not in (select max(b.time) from backups b, json_each(b.snapshots) j where b.place = ? and b.error is null group by json_extract(j.value, '$.scope'))",
+                            &[json!(r.place), json!(r.place), json!(BACKUP_RUNS_KEPT), json!(r.place)],
+                        )
                     }
                     Said::Alerted { place } => ex("insert or replace into alerts values (?, ?)", &[json!(place), json!(now)]),
                     Said::Checked(r) => {
