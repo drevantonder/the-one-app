@@ -161,7 +161,7 @@ actor Auth {
         }
         guard value("state") == state, let code = value("code") else { throw NodeError(String(localized: "That sign-in didn’t start here. Sign in again.")) }
         try await grant(meta, ["grant_type": "authorization_code", "code": code, "redirect_uri": redirect, "client_id": client, "code_verifier": verifier])
-        state = .idle
+        self.state = .idle
         return true
     }
 
