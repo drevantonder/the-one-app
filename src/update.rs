@@ -50,10 +50,11 @@ pub fn run(tag: Option<&str>) -> Result<()> {
     if let Some(tag) = tag {
         ensure!(!quiet(Command::new("git").current_dir(&src).args(["rev-parse", "-q", "--verify", &format!("refs/tags/{tag}")])), "{tag} already exists");
     }
-    let parts = match (tag, last) {
-        (None, Some(last)) => Parts::since(&src, &last, &this),
-        _ => Parts::everything(),
-    };
+    let mut parts = last.as_deref().map_or_else(Parts::everything, |last| Parts::since(&src, last, &this));
+    // A release sends all of it; the diff still says which apps' folders went and what a rename became.
+    if tag.is_some() {
+        (parts.node, parts.mac) = (true, true);
+    }
     let macs: Vec<Value> =
         if parts.mac { devices().into_iter().filter(|d| d["target"].as_str().is_some_and(|t| t.ends_with("-apple-darwin"))).collect() } else { Vec::new() };
 
@@ -79,7 +80,7 @@ pub fn run(tag: Option<&str>) -> Result<()> {
     } else {
         missed = follow(&macs, &commit, config_commit.as_deref());
     }
-    let moved = retire_gone(&src, &parts)?;
+    let moved = retire_gone(&src, &parts.renamed)?;
     if !parts.node {
         deploy_apps(&src, &parts.apps)?;
         add_where(&moved);
@@ -200,9 +201,6 @@ impl Parts {
     /// What changed from the commit `last` says (and its config's) to `this`'s.
     fn since(src: &Path, last: &str, this: &str) -> Parts {
         let (Some((was, was_config)), Some((now, now_config))) = (last.split_once(' '), this.split_once(' ')) else { return Parts::everything() };
-        if was_config != now_config {
-            return Parts::everything();
-        }
         // Without renames, so a renamed app's old folder is in it too.
         let (Ok(files), Ok(renames)) = (git(src, &["diff", "--name-status", "--no-renames", was, now]), git(src, &["diff", "--name-status", "-M", "--diff-filter=R", was, now, "--", "apps/*/app.js"])) else {
             return Parts::everything();
@@ -220,6 +218,10 @@ impl Parts {
                 Some((app(f.next()?), app(f.next()?)))
             })
             .collect();
+        // The config's change sends everything; the apps' diff still says which folders went and what a rename became.
+        if was_config != now_config {
+            (parts.node, parts.mac) = (true, true);
+        }
         parts
     }
 
@@ -265,17 +267,18 @@ pub fn run_quiet(cmd: &mut Command) -> Result<()> {
     Ok(())
 }
 
-/// Deletes the built-in apps changed whose folder is gone from `src`, renamed or removed, where the install still has
-/// them: they'd stay as apps no release ships. They wait in Recently Deleted, where an admin could restore one.
-/// Gives each renamed one's new name, with where the old one was installed.
-fn retire_gone(src: &Path, parts: &Parts) -> Result<Vec<(String, Vec<String>)>> {
+/// Deletes the built-in apps whose folder is gone from `src`, renamed or removed, where the install still has them:
+/// they'd stay as apps no release ships. `built_in` is the bundle the running release ships under a name, which says
+/// it whatever the update sends; `deploys` 0 is one it offers but the install never added. They wait in Recently
+/// Deleted, where an admin could restore one. Gives each renamed one's new name, with where the old one was installed.
+fn retire_gone(src: &Path, renamed: &[(String, String)]) -> Result<Vec<(String, Vec<String>)>> {
     let mut moved = Vec::new();
     for app in get("/v1/apps")?.as_array().into_iter().flatten() {
-        let Some(name) = app["name"].as_str().filter(|n| parts.apps.iter().any(|m| m == n)) else { continue };
-        let built_in = app["owner"] == "admins" && app["from"].is_null();
-        if built_in && app["deleted"].is_null() && !src.join("apps").join(name).join("app.js").is_file() {
+        let had = app["built_in"].is_string() && app["deploys"].as_u64().is_some_and(|n| n > 0);
+        let Some(name) = app["name"].as_str().filter(|_| had) else { continue };
+        if app["deleted"].is_null() && !src.join("apps").join(name).join("app.js").is_file() {
             post("/v1/retire", json!({ "app": name, "how": "deleted" }))?;
-            match parts.renamed.iter().find(|(old, _)| old == name) {
+            match renamed.iter().find(|(old, _)| old == name) {
                 Some((_, new)) => {
                     println!("Deleted {name}: it's {new} now");
                     let scopes = app["installed"].as_array().into_iter().flatten().filter_map(|s| s.as_str().map(str::to_string)).collect();
@@ -870,4 +873,40 @@ fn a_change_sends_out_only_what_it_touched() {
     assert_eq!(Parts::of(["src/node.rs", "apps/board/app.js"]), Parts { node: true, mac: true, apps: vec!["board".into()], ..Default::default() });
     assert_eq!(Parts::of(["kernel/signer/worker.js", "serverless/worker.js"]), Parts { node: true, ..Default::default() });
     assert_eq!(Parts::of(["Cargo.lock"]), Parts::everything());
+}
+
+/// A config change sends everything, but the apps' diff still names the folders that went: a renamed built-in's old
+/// name is retired and its new name goes where the old was.
+#[test]
+fn a_config_change_still_names_the_apps_that_went() -> Result<()> {
+    let dir = std::env::temp_dir().join(format!("one-update-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir)?;
+    let git = |args: &[&str]| {
+        let out = Command::new("git").current_dir(&dir).args(args).output().unwrap();
+        assert!(out.status.success(), "git {}: {}", args.join(" "), String::from_utf8_lossy(&out.stderr));
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    };
+    let commit = |message: &str| {
+        git(&["add", "-A"]);
+        git(&["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", message]);
+        git(&["rev-parse", "HEAD"])
+    };
+    git(&["init", "-q"]);
+    std::fs::create_dir_all(dir.join("apps/old"))?;
+    std::fs::write(dir.join("apps/old/app.js"), "let x = 1")?;
+    let was = commit("one");
+    std::fs::rename(dir.join("apps/old"), dir.join("apps/new"))?;
+    let now = commit("two");
+    let renamed = vec![("old".to_string(), "new".to_string())];
+    let same = Parts::since(&dir, &format!("{was} c"), &format!("{now} c"));
+    assert_eq!(same.renamed, renamed);
+    assert!(same.apps.contains(&"old".to_string()) && same.apps.contains(&"new".to_string()));
+    let changed = Parts::since(&dir, &format!("{was} c"), &format!("{now} d"));
+    assert!(changed.node && changed.mac, "the config's change sends everything");
+    assert_eq!((changed.apps, changed.renamed), (same.apps, same.renamed));
+    let only = Parts::since(&dir, &format!("{now} c"), &format!("{now} d"));
+    assert_eq!(only, Parts { node: true, mac: true, ..Default::default() });
+    std::fs::remove_dir_all(&dir)?;
+    Ok(())
 }
