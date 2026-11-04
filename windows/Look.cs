@@ -33,7 +33,7 @@ public static class Look
     /// The person's own tint (Tint.cs), as the window's theme has it.
     public static SolidColorBrush TintBrush => new(One.Tint.Of(Dark));
 
-    // The kit's colours (src/screen/kit.css), light then dark: tests/contracts.rs holds them to it.
+    // The kit's colours (src/screen/kit.css), light then dark.
     public static readonly (uint Light, uint Dark) bg = (0xffffff, 0x141414);
     public static readonly (uint Light, uint Dark) card = (0xf4f4f4, 0x222222);
     public static readonly (uint Light, uint Dark) raised = (0xffffff, 0x3a3a3a);

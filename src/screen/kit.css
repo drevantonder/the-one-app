@@ -1,6 +1,6 @@
 /* The design kit every app screen gets: plain HTML styled to sit inside a native shell. */
-/* The One App's colours, the one list (light here, dark below): every client and the MCP view use these values, and
-   tests/contracts.rs holds them to it. Plain neutrals; colour only where it means something: the tint is "tap this",
+/* The One App's colours, the one list (light here, dark below): every client and the MCP view copy these values.
+   Plain neutrals; colour only where it means something: the tint is "tap this",
    warn and danger "this needs you", badge a count waiting. The tint is the platform's: a shell sets --tint to its own,
    and a browser's is its AccentColor. */
 :root {

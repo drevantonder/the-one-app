@@ -210,7 +210,7 @@ typealias PlatformImage = NSImage
 typealias PlatformImage = UIImage
 #endif
 
-/// The kit's colours (src/screen/kit.css), light then dark: tests/contracts.rs holds them to it.
+/// The kit's colours (src/screen/kit.css), light then dark.
 enum Kit {
     static let bg = Color(light: 0xffffff, dark: 0x141414)
     static let card = Color(light: 0xf4f4f4, dark: 0x222222)

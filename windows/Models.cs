@@ -1,6 +1,5 @@
-// What the node sends, as this app reads it: what its sidebar lists and the Widgets board draws. Each property is one
-// line, `[JsonPropertyName("key")] public T Name`, so tests/contracts.rs can read them and check them against what a
-// node sends: `required` ones must be there, and each one there must have the type read here.
+// What the node sends, as this app reads it: what its sidebar lists and the Widgets board draws. `required` properties
+// must be there.
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;

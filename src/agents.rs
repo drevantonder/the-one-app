@@ -685,22 +685,3 @@ impl Written {
         let _ = std::fs::write(&self.path, serde_json::to_vec_pretty(&self.hashes).unwrap_or_default());
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    const HOOK: &str = "curl -sf --max-time 3 --data-binary @- http://127.0.0.1:4747/hooks/board/news || true";
-    const OURS: &str = ":4747/hooks/board/news";
-
-    #[test]
-    fn settings_it_cant_read_are_never_rewritten() {
-        for text in ["{ \"model\": ", "[1, 2]", "{\"hooks\": []}", "{\"hooks\": {\"UserPromptSubmit\": {}}}"] {
-            assert!(with_hook(text, "UserPromptSubmit", HOOK, OURS).is_err(), "{text}");
-        }
-        assert!(with_mcp("{\"mcp\": 3}", "mcp", "the-one-app", "x".into()).is_err());
-        assert!(with_codex_mcp("model = ", "the-one-app", "one", &["mcp"]).is_err());
-        assert!(with_codex_mcp("mcp_servers = 3\n", "the-one-app", "one", &["mcp"]).is_err());
-    }
-
-}

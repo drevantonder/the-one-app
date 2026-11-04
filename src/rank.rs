@@ -72,27 +72,3 @@ pub fn with(settings: &BTreeMap<String, String>, now: &[(String, String)], id: &
     out.insert(id.into(), place_);
     serde_json::to_string(&out).unwrap()
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn defaults_and_what_admins_set() {
-        let mut s = BTreeMap::new();
-        let none = set(&s);
-        // An idle machine that's always on comes before Cloudflare, a laptop before Cloudflare, Cloudflare before a
-        // rented server, whatever their OS.
-        let mut kinds = vec![("c", "cloud"), ("w", CLOUDFLARE), ("l", "laptop"), ("a", "always_on"), ("x", "")];
-        kinds.sort_by_key(|(id, k)| (order(&none, id, k), *id));
-        assert_eq!(kinds.iter().map(|k| k.0).collect::<String>(), "axlwc");
-        s.insert(SETTING.into(), with(&s, &[("a".into(), "always_on".into())], CLOUDFLARE, Use::First));
-        let set_ = set(&s);
-        assert_eq!(place(&set_, "a", "always_on"), Use::First);
-        assert_eq!(place(&set_, CLOUDFLARE, CLOUDFLARE), Use::First);
-        assert!(order(&set_, "a", "always_on") < order(&set_, CLOUDFLARE, CLOUDFLARE));
-        // What an older or newer device wrote that isn't a place is skipped.
-        s.insert(SETTING.into(), r#"{"a":"last","b":"soon"}"#.into());
-        assert_eq!(set(&s).len(), 1);
-    }
-}

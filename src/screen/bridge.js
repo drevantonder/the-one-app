@@ -49,7 +49,7 @@
   }
 
   // Every message a screen sends its host, and every host (the shells, the web client, a chat's view) answers each,
-  // or refuses it by name (tests/contracts.rs checks). Anything a person touches natively is one of these: menus,
+  // or refuses it by name. Anything a person touches natively is one of these: menus,
   // alerts, sheets, files, scanning, links.
   const messages = ["call", "open", "close", "title", "menu", "alert", "save", "preview", "copy", "link", "scan", "vault", "request",
     "icons", "icon", "haptic", "api", "signOut", "appearance", "device", "cache"];

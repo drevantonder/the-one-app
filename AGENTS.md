@@ -15,7 +15,7 @@ Your devices, and your team's, as one place for apps and agents. Read `ARCHITECT
 ## Design
 
 - Three layers. Principles, the same everywhere: content first; order from type size and weight, not boxes, outlines or shadows; colour has two jobs, the tint for "tap this" and warn or danger for "this needs you"; fine is silent (no "Connected" or green); a problem shows on the thing itself, as one problem box (symbol, title, one sentence, the action that fixes it); an empty screen is one grey line, with a button only for an obvious first step; one component per job.
-- Our look, the same on every client: plain neutrals, soft rounded cards with rows inside, app icons as gradient tiles, external brands' real logos, red count badges. Its values are `src/screen/kit.css`'s, the one list every client copies and `tests/contracts.rs` holds them to.
+- Our look, the same on every client: plain neutrals, soft rounded cards with rows inside, app icons as gradient tiles, external brands' real logos, red count badges. Its values are `src/screen/kit.css`'s, the one list every client copies.
 - The platform's own: the tint (each client passes its system tint as `--tint`), font, menus, sheets, alerts, Back and window material.
 
 ## Work

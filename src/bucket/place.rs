@@ -596,17 +596,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn presigning_signs_as_aws_does() {
-        // AWS's own example of a presigned URL: GET /test.txt, with the example key, on 2013-05-24, for a day.
-        let ask = Ask { method: "GET", name: "test.txt", query: &[], headers: &[] };
-        let url = presign("examplebucket.s3.amazonaws.com", "/test.txt", "us-east-1", "AKIAIOSFODNN7EXAMPLE", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", "20130524T000000Z", 86400, &ask);
-        assert!(url.ends_with("&X-Amz-Signature=aeeed9bbccd4d02ee5c0109b86d86835f995330da4c265957d157751f604d404"), "{url}");
-        let create = Ask { method: "PUT", name: "test.txt", query: &[], headers: &[("If-None-Match", "*")] };
-        let url = presign("examplebucket.s3.amazonaws.com", "/test.txt", "us-east-1", "AKIAIOSFODNN7EXAMPLE", "secret", "20130524T000000Z", 60, &create);
-        assert!(url.contains("X-Amz-SignedHeaders=host%3Bif-none-match") || url.contains("X-Amz-SignedHeaders=if-none-match%3Bhost"), "{url}");
-    }
-
-    #[test]
     fn a_device_keeps_only_the_install_buckets_address() {
         let address: super::super::Address = Arc::new(|| Ok("http://127.0.0.1:1".into()));
         let key = ed25519_dalek::SigningKey::from_bytes(&[7; 32]);

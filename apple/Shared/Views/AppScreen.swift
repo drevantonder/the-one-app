@@ -336,7 +336,7 @@ private struct ScreenWebView: Representable {
         private var host: NSView? { web }
         #endif
 
-        /// The bridge (src/screen/bridge.js's list; tests/contracts.rs holds this to it), and for Settings screens alone,
+        /// The bridge (src/screen/bridge.js's list), and for Settings screens alone,
         /// `"api" | "signOut" | "appearance" | "device" | "request"`. A page only ever calls its own app, but may open
         /// another's screens.
         func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) async -> (Any?, String?) {

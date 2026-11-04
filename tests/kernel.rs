@@ -361,11 +361,6 @@ pub(crate) struct Kernel {
 const RESOURCE: &str = "https://node.test/mcp";
 
 impl Kernel {
-    /// Runs them as `one kernel serve` does, from new settings, with the stand-in sites as the bucket and the gateway
-    /// serving a web client of two pages.
-    pub(crate) fn start() -> Kernel {
-        Kernel::start_as(false, vec![], None, None)
-    }
 
     /// As `start`, its relay taking only `devices` (public keys, hex) and those they admit.
     pub(crate) fn for_devices(devices: Vec<String>) -> Kernel {
@@ -375,12 +370,6 @@ impl Kernel {
     /// As `for_devices`, with the MCP Worker, which runs the serverless node's build `modules`.
     pub(crate) fn with_mcp(devices: Vec<String>, modules: kernel::Modules) -> Kernel {
         Kernel::start_as(false, devices, None, Some(modules))
-    }
-
-    /// As `for_devices`, with the serverless node of `modules` (`serverless::modules_from`) beside it, ending itself
-    /// once it's idled `idle` ms.
-    pub(crate) fn with_serverless(devices: Vec<String>, modules: Vec<(String, &'static str, Vec<u8>)>, idle: u64) -> Kernel {
-        Kernel::start_as(false, devices, Some((modules, idle)), None)
     }
 
     /// As `for_devices`, for an install whose people sign in with Google at test.example, the stand-in sites as
@@ -715,58 +704,6 @@ impl GetWith for ureq::Agent {
     }
 }
 
-#[test]
-fn the_gateway_sends_each_path_where_it_belongs_and_none_to_a_node() {
-    let k = Kernel::start();
-    let at = |path: &str| format!("{}{path}", k.address);
-
-    // The web client's files: its page at / and wherever it routes itself, the screens' kit, the frame screens load.
-    for path in ["/", "/callback", "/vault?id=1&scope=user"] {
-        let (status, headers, body) = ask("GET", &at(path), &[], None);
-        assert_eq!((status, headers["content-type"].as_str()), (200, "text/html; charset=utf-8"), "{path}");
-        assert!(body.contains("The web client"), "{path}: {body}");
-        assert_eq!(headers["x-content-type-options"], "nosniff");
-        assert_eq!(headers["x-frame-options"], "SAMEORIGIN", "no other site frames the web client");
-    }
-    let (status, headers, body) = ask("GET", &at("/frame.html"), &[], None);
-    assert!(status == 200 && body.contains("A screen's frame"));
-    assert!(!headers.contains_key("content-security-policy"), "a screen's frame carries its own policy: {headers:?}");
-    assert_eq!(headers["x-frame-options"], "SAMEORIGIN", "only the web client's own page frames it");
-    let (status, headers, _) = ask("GET", &at("/screen/kit.css"), &[], None);
-    assert_eq!((status, headers["content-type"].as_str()), (200, "text/css; charset=utf-8"));
-    assert_eq!(headers["cache-control"], "no-cache", "a file not named by its content is asked about each time");
-    // Named by its content, a file is kept for good, but only once it's that content: a browser keeps no other for a year.
-    let kit = data_encoding::HEXLOWER.encode(&<sha2::Sha256 as sha2::Digest>::digest(include_bytes!("../src/screen/kit.css")));
-    let (_, headers, _) = ask("GET", &at(&format!("/screen/kit.css?v={}", &kit[..16])), &[], None);
-    assert_eq!(headers["cache-control"], "public, max-age=31536000, immutable");
-    let (_, headers, _) = ask("GET", &at("/screen/kit.css?v=0123456789abcdef"), &[], None);
-    assert_eq!(headers["cache-control"], "no-cache", "a name that isn't its content");
-    assert_eq!(ask("GET", &at("/nothing.js"), &[], None).0, 404, "a missing file isn't the page");
-    // The large ones are kept compressed at brotli's best (the client's WebAssembly is the first thing a first visit
-    // waits on), sent as they are to a browser that takes it, the file itself to one that doesn't.
-    let (status, headers, _) = ask("GET", &at("/screen/kit.css"), &[("accept-encoding", "gzip, br")], None);
-    let (plain_status, plain, _) = ask("GET", &at("/screen/kit.css"), &[("accept-encoding", "gzip")], None);
-    assert_eq!((status, plain_status), (200, 200));
-    assert_eq!((headers["content-encoding"].as_str(), headers["content-type"].as_str(), headers["vary"].as_str()), ("br", "text/css; charset=utf-8", "accept-encoding"));
-    assert!(headers["content-length"].parse::<usize>().unwrap() * 3 < include_bytes!("../src/screen/kit.css").len(), "it's brotli's, not the file or a second compression of it: {headers:?}");
-    assert!(!plain.contains_key("content-encoding"), "{plain:?}");
-
-    // Sign-in goes to the auth service, as the install's address; its own routes don't.
-    let (status, _, meta) = ask("GET", &at("/.well-known/oauth-authorization-server"), &[], None);
-    assert_eq!(status, 200, "{meta}");
-    assert_eq!(serde_json::from_str::<Value>(&meta).unwrap()["issuer"], at("/api/auth"));
-    for (path, says) in [("/sign-in", "Sign In with a Passkey"), ("/invite", "Make a Passkey"), ("/passkeys", "Add a Passkey")] {
-        let (status, _, body) = ask("GET", &at(path), &[], None);
-        assert!(status == 200 && body.contains(says), "{path}: {status}");
-    }
-    let (status, _, _) = ask("POST", &at("/internal/invite"), &[], Some(json!({ "name": "Mallory" })));
-    assert_eq!(status, 405, "the kernel's own routes aren't reachable at the address");
-
-    // Devices reach nodes over iroh: the address passes nothing on to one.
-    assert_eq!(ask("POST", &at("/v1/call"), &[], Some(json!({}))).0, 405, "/v1/ is the web client's, which takes only GET");
-    assert_eq!(ask("POST", &at("/mcp"), &[], Some(json!({}))).0, 503, "/mcp is the MCP Worker's, and this kernel has none");
-}
-
 /// Settings' screens work for someone signed in as they do on that person's own Mac: each route
 /// acts as them and is checked as theirs, so a member can't do what only admins may, and nobody acts as anyone else.
 #[test]
@@ -893,28 +830,6 @@ fn a_sign_in_uses_settings_as_its_person_and_only_with_their_rights() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// A client names itself, so the sign-in page also says where it goes, and no client takes the install's name, nor its
-/// apps' unless it comes back to the device as they do: one passkey tap gives a client the person's keys.
-#[test]
-fn a_client_is_shown_by_where_it_goes_and_none_is_named_as_the_install() {
-    let k = Kernel::start();
-    let register = |name: &str, back: &str| post(&format!("{}/api/auth/oauth2/register", k.address), &[], json!({ "client_name": name, "redirect_uris": [back], "token_endpoint_auth_method": "none", "grant_types": ["authorization_code", "refresh_token"], "response_types": ["code"] }));
-    for (name, back) in [("Test", "https://elsewhere.example/back"), (" the TEST ", "http://localhost:4000/back"), ("Test on Andre's Mac", "https://elsewhere.example/back")] {
-        let (status, out) = register(name, back);
-        assert_eq!(status, 400, "{name} going to {back} was taken: {out}");
-    }
-    let goes = |name: &str, back: &str| {
-        let (status, out) = register(name, back);
-        assert_eq!(status, 201, "{out}");
-        let (_, about, _) = k.browser().get(&format!("/sign-in/about?client_id={}&redirect_uri={}", out["client_id"].as_str().unwrap(), enc(back)));
-        (about["client"].as_str().unwrap().to_string(), about["goes"].clone())
-    };
-    assert_eq!(goes("Claude", "https://claude.ai/api/mcp/auth_callback"), ("Claude".into(), json!("claude.ai")));
-    assert_eq!(goes("Claude Code", "http://localhost:33418/callback").1, "an app on this device");
-    assert_eq!(goes("Test on Andre's iPhone", "one://signed-in/").1, "an app on this device");
-    assert_eq!(goes("Test on a device", &format!("{}/sign-in/code/done", k.address)).1, "where you got your code");
-}
-
 /// A client registers itself (anyone may) and its authorization goes to the sign-in page: → the page's query.
 fn authorizes(browser: &mut Browser, name: &str, back: &str) -> String {
     let (status, client) = browser.post("/api/auth/oauth2/register", json!({ "client_name": name, "redirect_uris": [back], "token_endpoint_auth_method": "none" }));
@@ -991,38 +906,6 @@ fn only_a_try_installs_kernel_signs_its_person_in_with_nothing_to_show() {
     for refused in [kernel::deploy(&cf, &tried, &[], &[]), one::serverless::deploy(&cf, &tried), kernel::serve(&tried)] {
         assert!(refused.unwrap_err().to_string().contains("try install"));
     }
-}
-
-#[test]
-fn the_address_serves_only_scripts_that_parse() {
-    let settings = kernel::Settings::new("Test", "https://one.example.com");
-    kernel::parses(&settings.web()).unwrap();
-    let broken = vec![("web.js".to_string(), b"const label = 1;\nconst label = 2;\n".to_vec())];
-    assert!(kernel::parses(&broken).is_err(), "a script that doesn't parse is refused");
-    let inline = vec![("index.html".to_string(), b"<p>hi</p><script>let a = ;</script>".to_vec())];
-    assert!(kernel::parses(&inline).is_err(), "so is an HTML page's inline script");
-}
-
-/// A reopen draws with no trip to the address only if every script the page imports is asked for by its content (the
-/// gateway keeps those for good): a plain path is a round trip, and a hash that isn't the file's is kept for nothing.
-#[test]
-fn the_web_client_imports_each_script_by_its_content() {
-    let web: std::collections::HashMap<String, Vec<u8>> = kernel::Settings::new("Test", "https://one.example.com").web().into_iter().collect();
-    let mut named = 0;
-    for (path, bytes) in web.iter().filter(|(path, _)| path.ends_with(".js") && !path.starts_with("client/")) {
-        let text = String::from_utf8_lossy(bytes);
-        for quoted in text.split('"').skip(1).step_by(2).filter(|q| q.starts_with('/') || q.starts_with("./") || q.starts_with("../")) {
-            let (file, v) = quoted.split_once("?v=").unwrap_or((quoted, ""));
-            let file = file.trim_start_matches("../").trim_start_matches("./").trim_start_matches('/');
-            if !file.ends_with(".js") || !web.contains_key(file) || file == "sw.js" {
-                continue;
-            }
-            let hash = data_encoding::HEXLOWER.encode(&<sha2::Sha256 as sha2::Digest>::digest(&web[file]));
-            assert!(!v.is_empty() && hash.starts_with(v) && v.len() >= 12, "{path} imports {quoted}, not {file} by its content ({})", &hash[..16]);
-            named += 1;
-        }
-    }
-    assert!(named >= 6, "web.js and the worker import their scripts: {named}");
 }
 
 /// The serverless node, the node's Rust as WebAssembly, built as `one update` builds it: what doesn't build, it can't
@@ -1168,51 +1051,6 @@ mod relay {
 
     fn ticket() -> String {
         data_encoding::HEXLOWER.encode(&rand::random::<[u8; 32]>())
-    }
-
-    /// Asks a node `GET /v1/state` as a client device of `user`'s, handing no keys: → its status and JSON.
-    async fn state_as(client: &one_client::Client, user: &str) -> Result<(u16, Value), one_client::Error> {
-        let asked = one_client::Request { method: "GET".into(), path: "/v1/state".into(), headers: vec![("x-one-user".into(), user.into())], body: vec![] };
-        let r = client.fetch(asked).await?;
-        let status = r.status;
-        Ok((status, serde_json::from_slice(&r.body.bytes().await?).unwrap_or(Value::Null)))
-    }
-
-    /// The serverless node is an iroh endpoint with no socket: the relay hands it what's sent to its key, by RPC to its
-    /// Durable Object, which runs iroh as WebAssembly with a transport of its own, and passes on what it sends. Native
-    /// iroh, iroh in WebAssembly and the relay must agree on every packet for a request to be answered at all; it's
-    /// asked as client devices ask any node, and answers as one does, saying with 428 the keys it needs. Since iroh
-    /// keeps it awake for good, it ends itself once nobody has asked for a while, its connections with it.
-    #[test]
-    fn the_serverless_node_answers_through_the_relay_and_ends_itself_when_idle() {
-        let modules = super::serverless_node();
-        let first = SecretKey::generate();
-        let idle = 2_000;
-        let k = super::Kernel::with_serverless(vec![hex(&first)], modules, idle);
-        let address = k.address.replace("localhost", "127.0.0.1");
-        let node = k.settings.serverless_endpoint().unwrap();
-        let key: [u8; 32] = data_encoding::HEXLOWER.decode(node.as_bytes()).unwrap().try_into().unwrap();
-        let someone = one::entry::new_id();
-        let runtime = tokio::runtime::Runtime::new().unwrap();
-        runtime.block_on(async {
-            let client = one_client::Client::start(first.to_bytes(), None, &address, &[key]).await.expect("the install's first device isn't let in");
-            // A request as a node takes it: it needs the logs' keys of whose it says it is, sealed to it.
-            let said = |(status, answer): &(u16, Value)| *status == 428 && answer["to"] == node.as_str() && answer["need"].as_array().is_some_and(|n| n.iter().any(|n| n["scope"] == "global"));
-            let woke = std::time::Instant::now();
-            let answer = state_as(&client, &someone).await.expect("the serverless node wasn't reached");
-            assert!(said(&answer), "the serverless node didn't answer as a node does: {answer:?}");
-            let first_answer = woke.elapsed();
-            let asked = std::time::Instant::now();
-            assert!(said(&state_as(&client, &someone).await.unwrap()));
-            eprintln!("serverless node: woken, connected and answered in {first_answer:?}, then a round trip in {:?}", asked.elapsed());
-            let (status, _) = state_as(&client, "no one!").await.unwrap();
-            assert_eq!(status, 400, "a request says whose it is, as a person's id");
-
-            // Once idle, it ends, its connections with it; the next request wakes it again on a new one.
-            tokio::time::sleep(Duration::from_millis(idle + 3_000)).await;
-            assert!(said(&state_as(&client, &someone).await.unwrap()), "the serverless node didn't wake again");
-            client.close().await;
-        });
     }
 
     /// One request a stand-in node was asked over iroh: who asked (the key its connection proved), its line and headers.

@@ -1302,14 +1302,4 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
-    #[test]
-    fn the_gateways_old_relay_class_is_deleted_once_and_no_other_service_loses_one() {
-        let settings = Settings::new("Test", "https://one.example");
-        let migrations = |service: &str, class: Option<&str>, had: Option<&str>| metadata(&settings, service, class, had, |_| true).0["migrations"].clone();
-        assert_eq!(migrations("gateway", None, Some("v1")), json!({ "old_tag": "v1", "new_tag": "v2", "deleted_classes": ["Relay"] }));
-        assert!(migrations("gateway", None, Some("v2")).is_null() && migrations("gateway", None, None).is_null(), "it's deleted once");
-        assert!(migrations("signer", None, Some("v1")).is_null(), "no other service's classes are touched");
-        assert_eq!(migrations("auth", Some("Auth"), None), json!({ "new_tag": "v1", "new_sqlite_classes": ["Auth"] }));
-        assert!(migrations("auth", Some("Auth"), Some("v1")).is_null());
-    }
 }

@@ -610,7 +610,7 @@ private class Bridge(val context: Context, val store: Store, val route: Route, v
         else if (url.scheme in listOf("http", "https", "mailto", "tel")) runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, url).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
     }
 
-    /** Each of the bridge's messages (src/screen/bridge.js's list; tests/contracts.rs holds this to it). */
+    /** Each of the bridge's messages (src/screen/bridge.js's list). */
     private suspend fun answer(m: JsonObject): JsonElement? {
         val type = str(m, "type")
         if (type in listOf("api", "signOut", "appearance", "device", "request", "cache") && !own) throw NodeError("Only Settings can do that.")

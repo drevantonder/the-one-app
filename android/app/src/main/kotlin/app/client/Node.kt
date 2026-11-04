@@ -20,7 +20,7 @@ import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.longOrNull
 
-// What the node sends, as the app reads it (tests/contracts.rs checks these against what it does send). A field
+// What the node sends, as the app reads it. A field
 // with a default may be left out; one without must be there.
 
 val json = Json { ignoreUnknownKeys = true; explicitNulls = false; coerceInputValues = true; isLenient = true }
