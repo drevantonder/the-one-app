@@ -71,6 +71,8 @@ const UNPROVEN_PER_PLACE = 8;
 const UNPROVEN_PER_SITE = 32;
 const UNPROVEN = 256;
 const PAIRING_FOR = 7 * 86_400_000;
+/// How often an endpoint's last time here is noted.
+const HOUR = 3_600_000;
 const PAIRINGS_PER_DEVICE = 8;
 const ROLES = ["client", "compute", "service"];
 /// Whether a key on the list plays `role`.
@@ -120,7 +122,8 @@ export default class extends WorkerEntrypoint {
       return new Response(null, { status: 204, headers });
     }
     if (url.pathname === "/relay/tell") return this.tell(request);
-    if (url.pathname === "/relay/computes") return this.computes(request);
+    if (url.pathname === "/relay/computes") return this.ask(request, "computes");
+    if (url.pathname === "/relay/seen") return this.ask(request, "seen");
     if (url.pathname === "/relay") return this.relay().fetch(request);
     return refuse(404, "not the relay's");
   }
@@ -142,15 +145,16 @@ export default class extends WorkerEntrypoint {
     }
   }
 
-  /// The compute endpoints' keys, for a request signed by a key on the list or a session's endpoint.
-  async computes(request) {
+  /// What the relay tells the install's endpoints (`computes`, or when each was last `seen`), for a request signed by a
+  /// key on the list or a session's endpoint.
+  async ask(request, what) {
     let asked;
     try {
-      if (request.method !== "POST") throw new Error("ask for the computes with a POST");
+      if (request.method !== "POST") throw new Error(`ask for ${what} with a POST`);
       const body = await request.arrayBuffer();
       if (body.byteLength > TELL_BYTES) throw new Error("that's too big");
       const { by, fields } = await checkRequest(TELL, JSON.parse(new TextDecoder().decode(body)));
-      if (fields.computes !== true) throw new Error("ask with { computes: true }, signed");
+      if (fields[what] !== true) throw new Error(`ask with { ${what}: true }, signed`);
       asked = { by, at: fields.at };
       if (fields.certificate !== undefined) {
         const session = await checkCertificate(fields.certificate);
@@ -160,8 +164,8 @@ export default class extends WorkerEntrypoint {
     } catch (e) {
       return refuse(400, String(e.message || e));
     }
-    const said = await this.relay().computes(asked.by, asked);
-    if (Array.isArray(said)) return Response.json({ computes: said });
+    const said = await this.relay()[what](asked.by, asked);
+    if (said && typeof said === "object") return Response.json({ [what]: said });
     return said === null ? refuse(403, "the relay takes only your One App's devices") : refuse(400, said);
   }
 
@@ -232,7 +236,8 @@ export class Relay extends DurableObject {
       CREATE TABLE IF NOT EXISTS pairings (hash TEXT PRIMARY KEY, until INTEGER NOT NULL, by TEXT NOT NULL, key TEXT);
       CREATE TABLE IF NOT EXISTS tells (by TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (by, at));
       CREATE TABLE IF NOT EXISTS proofs (nonce TEXT PRIMARY KEY, at INTEGER NOT NULL);
-      CREATE TABLE IF NOT EXISTS bound (key TEXT PRIMARY KEY, name TEXT NOT NULL, until INTEGER NOT NULL, ticket TEXT NOT NULL DEFAULT '');`);
+      CREATE TABLE IF NOT EXISTS bound (key TEXT PRIMARY KEY, name TEXT NOT NULL, until INTEGER NOT NULL, ticket TEXT NOT NULL DEFAULT '');
+      CREATE TABLE IF NOT EXISTS seen (key TEXT PRIMARY KEY, at INTEGER NOT NULL);`);
     // A binding made before tickets: none shows one, so each is made again.
     try {
       this.sql.exec("ALTER TABLE bound ADD COLUMN ticket TEXT NOT NULL DEFAULT ''");
@@ -275,14 +280,29 @@ export class Relay extends DurableObject {
     return it ? { admin: it.admin === 1 } : null;
   }
 
-  /// The compute endpoints' keys, if `by` is on the list, or is a session's a client on it vouched for (`session`);
-  /// null if neither. A request's (`at`) is taken once: → why not, if it was taken already.
-  computes(by, { at, session } = {}) {
+  /// Whether `by` may be told what the install's endpoints are told: it's on the list, or is a session's a client on it
+  /// vouched for (`session`); null if neither. A request's (`at`) is taken once: → why not, if it was taken already.
+  asks(by, { at, session } = {}) {
     // Who's asking first, as `tell` does, so a stranger's requests are never kept.
     if (session !== undefined ? !is(this.key(session), "client") : !this.key(by)) return null;
     if (at !== undefined && !this.take(by, at)) return "that request was taken already";
+    return true;
+  }
+
+  /// The compute endpoints' keys, for whom `asks` lets ask: → else null or why not.
+  computes(by, asked) {
+    const may = this.asks(by, asked);
+    if (may !== true) return may;
     const keys = this.sql.exec("SELECT key FROM keys WHERE ' ' || role || ' ' LIKE '% compute %'").toArray().map((r) => r.key);
     return this.env.BOUND ? [...keys, this.env.BOUND] : keys;
+  }
+
+  /// When each endpoint on the list was last let in here (ms), a session's as the device that vouched for it, for whom
+  /// `asks` lets ask: → `{ key: at }`, else null or why not.
+  seen(by, asked) {
+    const may = this.asks(by, asked);
+    if (may !== true) return may;
+    return Object.fromEntries(this.sql.exec("SELECT seen.key, seen.at FROM seen JOIN keys ON keys.key = seen.key").toArray().map((r) => [r.key, r.at]));
   }
 
   /// Takes a signed request, `(by, at)`, once: → whether it wasn't taken before.
@@ -574,6 +594,9 @@ export class Relay extends DurableObject {
     ws.serializeAttachment(attachment);
     this.sockets.set(id, ws);
     ws.send(confirm());
+    // When it was last here, as its device (a session's, the one that vouched for it), at most once an hour.
+    const device = attachment.by || id, now = Date.now();
+    if (this.key(device)) this.sql.exec("INSERT INTO seen VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET at = excluded.at WHERE at < ?", device, now, now - HOUR);
   }
 
   /// Closes `key`'s socket, if it has one.

@@ -25,7 +25,7 @@
   // signing out of it, removing one, pairing a computer with a code, and, where this device holds its own keys
   // (`device.keys`), approving a new device by the code it shows, listing a passkey to get back in with, and what
   // their devices keep running for them.
-  let state, device, apps = [], passkey = false, waiting = [];
+  let state, device, apps = [], passkey = false, waiting = [], seen = {};
   let error = "";
   // A new device's code, from its QR's link (`/approve#CODE`), asked about once.
   let scanned = one.params?.approve || "";
@@ -165,8 +165,15 @@
       `<div class="confirm-buttons"><button class="button plain" data-refuse="${code}">${no}</button><button class="button primary" data-let="${code}">Approve</button></div></div></div>`;
   };
 
+  // A device not seen for a day or more says so, for one left behind (a browser whose data was cleared, a phone
+  // that was reset) to be found and removed; one in use says nothing.
+  const DAY = 86_400_000;
+  const lastSeen = (key) => {
+    const days = seen[key] ? Math.floor((Date.now() - seen[key]) / DAY) : 0;
+    return days < 1 ? "" : days === 1 ? "Last seen yesterday" : `Last seen ${days} days ago`;
+  };
   const clientRow = (c) =>
-    row({ key: c.key, name: c.name, online: true, lines: [c.me ? "This device" : "Signed in"], trailing: "", removable: !c.me });
+    row({ key: c.key, name: c.name, online: true, lines: [c.me ? "This device" : lastSeen(c.key)], trailing: "", removable: !c.me });
 
   function page() {
     one.largeTitle("Devices");
@@ -215,9 +222,10 @@
   const draw = () => one.render("#page", async () => {
     [state, device] = await Promise.all([one.api("GET", "/v1/state"), one.device()]);
     if (device.keys) {
-      [passkey, waiting] = await Promise.all([
+      [passkey, waiting, seen] = await Promise.all([
         one.api("GET", "/v1/devices/passkey").then((p) => p.passkey === true, () => false),
         one.api("GET", "/v1/devices/requests").then((w) => w.filter((r) => r.code), () => waiting),
+        one.api("GET", "/v1/devices/seen").catch(() => seen),
       ]);
     }
     // App titles name the grants' rows and a service endpoint's ("WhatsApp on linux").

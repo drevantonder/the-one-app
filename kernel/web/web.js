@@ -957,6 +957,8 @@ window.__one = {};
     // As a machine's node answers it: `device` by its key; `scope` user (theirs), global or group:<id>; `days`, 0 to stop.
     "POST /v1/grant": (b) => device.grant({ endpoint: String(b.device || ""), app: String(b.app || ""), scope: !b.scope || b.scope === "user" ? `user:${me().id}` : String(b.scope), days: b.days ?? undefined }),
     "GET /v1/devices/passkey": async () => ({ passkey: !!passkeyToList() }),
+    // `{ key: ms }`: when each device was last let onto the install's network.
+    "GET /v1/devices/seen": () => device.seen(),
     // As a machine's node answers it, each with its code, which the device asking shows too, to compare.
     "GET /v1/devices/requests": async () => (await waitingNow()).map((r) => ({ device: r.name, person: r.person, code: r.code, ...(r.mine ? { yours: true } : { new: true }) })),
     // `{ code }`: one waiting that isn't theirs, turned down, and not asked about again here.

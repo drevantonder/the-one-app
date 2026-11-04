@@ -334,6 +334,13 @@ export class Device {
     if (!r.ok) throw new Error((await r.json().catch(() => null))?.error || "Your One App's network didn't take that.");
   }
 
+  /// When each of the install's devices was last let onto its network, as the relay says: `{ key: ms }`, or none from a
+  /// relay that doesn't say.
+  async seen() {
+    const r = await fetch("/relay/seen", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(await this.signed("one/relay", { seen: true })) });
+    return r.ok ? (await r.json()).seen || {} : {};
+  }
+
   /// One of auth's routes, signed by this browser: a GET's or DELETE's request in `x-one-request`, `query` after it.
   async authSigned(method, path, fields = {}, query = "") {
     const request = await this.signed("one/auth", { route: `${method} ${path}`, ...fields });

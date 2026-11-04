@@ -97,7 +97,7 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     // The relay, iroh's: its WebSockets, its probes, and what devices tell it go to its own Worker (kernel/relay/).
-    if (["/relay", "/relay/tell", "/relay/computes", "/ping", "/generate_204"].includes(url.pathname)) return env.IROH.fetch(request);
+    if (["/relay", "/relay/tell", "/relay/computes", "/relay/seen", "/ping", "/generate_204"].includes(url.pathname)) return env.IROH.fetch(request);
     if (url.pathname === "/urls") return env.SIGNER.fetch(request);
     switch (where(url.pathname)) {
       case "mcp": return env.MCP ? env.MCP.fetch(request) : refuse(503, "this install's MCP isn't set up yet");

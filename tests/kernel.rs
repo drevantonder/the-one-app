@@ -621,6 +621,16 @@ mod relay {
             assert_eq!(computes(late).0, 400);
             let stranger = SecretKey::generate();
             assert_eq!(computes(one::keys::signed_request(&signer(&stranger), "one/relay", json!({ "computes": true }), at())).0, 403, "a stranger was told the computes");
+            // When each was last here, a session's as the device that vouched for it: told the install's own devices
+            // and their sessions, as the computes are, and no one else.
+            let seen = |by: &SecretKey| super::post(&format!("{address}/relay/seen"), &[], one::keys::signed_request(&signer(by), "one/relay", json!({ "seen": true }), at()));
+            let (status, said) = seen(&phone);
+            assert_eq!(status, 200);
+            for key in [&first, &phone] {
+                assert!(said["seen"][hex(key)].as_u64().is_some_and(|t| t <= super::now()), "{} wasn't seen: {said}", hex(key));
+            }
+            assert!(said["seen"].get(hex(&session)).is_none(), "a session was seen as itself: {said}");
+            assert_eq!(seen(&stranger).0, 403, "a stranger was told who was seen");
             assert_eq!(computes(ask(&session, &certify(&stranger, &session, super::now() + 60_000))).0, 403);
 
             // Only a client vouches for a session: a compute or a service, admin or not, doesn't.
