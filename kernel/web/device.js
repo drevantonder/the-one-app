@@ -446,15 +446,19 @@ export class Device {
   async approve(r, as = this.me) {
     const k = await this.checked(true);
     const known = !!k.roles.global?.[r.user];
-    if (r.user !== this.user && known) throw new Error("Only their own devices approve one of theirs.");
+    // Listed already by an approval that didn't finish (its mark at auth failed): the rest is done again.
+    const listed = k.devices.some((d) => d.key === r.key && d.user === r.user && d.seal === r.seal);
+    if (r.user !== this.user && known && !listed) throw new Error("Only their own devices approve one of theirs.");
     let newUser = null;
     if (r.user !== this.user) {
       if (!(await this.invitedHere(r))) throw new Error("That device didn’t come from an invite made here.");
       newUser = { name: (await get(`invite:${r.user}`)).name || r.person, role: "member" };
     }
-    await this.write("global", members.device({ key: r.key, seal: r.seal, user: r.user, name: r.name, newUser, device: r.device }), as);
+    if (!listed) await this.write("global", members.device({ key: r.key, seal: r.seal, user: r.user, name: r.name, newUser, device: r.device }), as);
     await this.sealTo(r, newUser ? ["global"] : scopesOf(k, r.user), as);
-    await this.tell({ add: r.key, role: "client", ...(!newUser && k.roles.global?.[this.user] === "admin" ? { admin: true } : {}) }, as);
+    await this.tell({ add: r.key, role: "client", ...(!newUser && k.roles.global?.[this.user] === "admin" ? { admin: true } : {}) }, as).catch((err) => {
+      if (!(listed && /in already/.test(err.message))) throw err;
+    });
     // Signed in again on the same device: its sign-in before goes, as signing out would have taken it, so its scopes
     // keep their keys.
     for (const old of r.device ? k.devices.filter((d) => d.user === r.user && d.device === r.device && d.key !== r.key && !d.passkey && (d.roles || []).includes("client")) : []) {

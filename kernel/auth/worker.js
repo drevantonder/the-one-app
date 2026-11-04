@@ -387,7 +387,8 @@ export class Auth extends DurableObject {
 
   /// Forgets requests to join that waited too long.
   expire() {
-    this.ctx.storage.sql.exec("delete from requests where made <= ?", Date.now() - REQUEST);
+    // An approved one is kept as long again from its approval, for its device to see.
+    this.ctx.storage.sql.exec("delete from requests where coalesce(approved, made) <= ?", Date.now() - REQUEST);
   }
 
   /// A device signed in asks to join: `{ key, seal, name, proof?, device? }`, its endpoint keys (hex), its name, for a
@@ -403,8 +404,10 @@ export class Auth extends DurableObject {
     if (device != null && !KEY.test(device)) refuse(400, "a device is 64 hex characters");
     this.expire();
     const sql = this.ctx.storage.sql;
-    const [had] = sql.exec("select user from requests where key = ?", key).toArray();
+    const [had] = sql.exec("select user, seal, approved from requests where key = ?", key).toArray();
     if (had && had.user !== user) refuse(409, "Another person's device asked with that key.");
+    // Asked again once it's approved (it restarted while waiting): still approved, for it to see.
+    if (had?.approved && had.seal === seal) return { until: had.approved + REQUEST };
     let invite = null;
     if (proof != null) {
       [invite] = sql.exec("select id from invites where user = ? and used is not null", user).toArray();
@@ -422,7 +425,7 @@ export class Auth extends DurableObject {
     const sql = this.ctx.storage.sql;
     return rows.map((r) => {
       const person = sql.exec("select name from user where id = ?", r.user).toArray()[0]?.name || "";
-      return { key: r.key, seal: r.seal, name: r.name, user: r.user, person, ...(r.proof ? { proof: r.proof } : {}), ...(r.approved ? { approved: true } : {}), ...(r.genesis ? { genesis: r.genesis } : {}), ...(r.place ? { place: r.place } : {}), ...(r.device ? { device: r.device } : {}), made: r.made, until: r.made + REQUEST };
+      return { key: r.key, seal: r.seal, name: r.name, user: r.user, person, ...(r.proof ? { proof: r.proof } : {}), ...(r.approved ? { approved: true } : {}), ...(r.genesis ? { genesis: r.genesis } : {}), ...(r.place ? { place: r.place } : {}), ...(r.device ? { device: r.device } : {}), made: r.made, until: (r.approved || r.made) + REQUEST };
     });
   }
 
@@ -461,8 +464,9 @@ export class Auth extends DurableObject {
   /// the install's `genesis` (hex) it was let into, if the approving device said.
   async unask(request, key, approved, genesis) {
     const row = await this.mayTouch(request, key);
-    if (approved && !row.approved) {
-      this.ctx.storage.sql.exec("update requests set approved = ?, genesis = ? where key = ?", Date.now(), /^[0-9a-f]{64}$/.test(genesis || "") ? genesis : null, key);
+    // Approved again (a retry, or a second approving device): marked once, never forgotten by it.
+    if (approved) {
+      if (!row.approved) this.ctx.storage.sql.exec("update requests set approved = ?, genesis = ? where key = ?", Date.now(), /^[0-9a-f]{64}$/.test(genesis || "") ? genesis : null, key);
       return {};
     }
     this.ctx.storage.sql.exec("delete from requests where key = ?", key);
