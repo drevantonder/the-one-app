@@ -15,8 +15,8 @@ import (
 
 // podmanRT runs devices as rootless Podman containers, in the user's own
 // systemd instance rather than this service, so restarting it leaves them
-// running; with --restart=always and podman-restart they start again after a
-// reboot.
+// running. They have no restart policy: after a reboot this service starts
+// those that should run (revive), as many as have room.
 type podmanRT struct{}
 
 // newPodman points Podman at the user's runtime directory and systemd, which a
@@ -32,11 +32,6 @@ func newPodman() (containers, error) {
 		}
 		os.Setenv("XDG_RUNTIME_DIR", dir)
 		os.Setenv("DBUS_SESSION_BUS_ADDRESS", "unix:path="+dir+"/bus")
-	}
-	// Containers with --restart=always start again at boot through this. At
-	// boot the user's systemd may not answer yet; revive covers that.
-	if out, err := exec.Command("systemctl", "--user", "enable", "podman-restart.service").CombinedOutput(); err != nil {
-		log.Printf("enabling podman-restart: %v: %s", err, strings.TrimSpace(string(out)))
 	}
 	return podmanRT{}, nil
 }
@@ -80,7 +75,7 @@ func (podmanRT) list(ctx context.Context) ([]device, error) {
 
 func (podmanRT) run(ctx context.Context, d device, sz size, image string) error {
 	c := prefix + d.Name
-	args := append([]string{"run", "--detach", "--name", c, "--restart=always"}, d.labels()...)
+	args := append([]string{"run", "--detach", "--name", c}, d.labels()...)
 	args = append(args, sz.limits()...)
 	_, err := podman(ctx, append(args,
 		"--env", "CUA_ENV_TOKEN="+d.token,
@@ -123,19 +118,21 @@ func (podmanRT) removeImage(ctx context.Context, image string) error {
 }
 
 func (podmanRT) start(ctx context.Context, d device) error {
-	if _, err := podman(ctx, "update", "--restart=always", prefix+d.Name); err != nil {
-		return err
-	}
 	_, err := podman(ctx, "start", prefix+d.Name)
 	return err
 }
 
 func (podmanRT) stop(ctx context.Context, d device) error {
-	if _, err := podman(ctx, "update", "--restart=no", prefix+d.Name); err != nil {
-		return err
-	}
 	_, err := podman(ctx, "stop", "--time", "10", prefix+d.Name)
 	return err
+}
+
+// noRestart takes away a restart policy from before revive started devices, so Podman doesn't start it at boot
+// whether or not it has room.
+func (podmanRT) noRestart(ctx context.Context, d device) {
+	if _, err := podman(ctx, "update", "--restart=no", prefix+d.Name); err != nil {
+		log.Print(err)
+	}
 }
 
 func (podmanRT) restart(ctx context.Context, d device) error {

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"maps"
 	"net/http"
 	"os"
@@ -82,8 +83,8 @@ func (ds *devices) machines(ctx context.Context) (here machine, all []machine, e
 			Name    string
 			RunsFor []string `json:"runs_for"` // as a service, what this machine's own node runs
 		}
-		User       struct{ ID string }
-		Install    struct{ Devices []machine }
+		User    struct{ ID string }
+		Install struct{ Devices []machine }
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&st); err != nil {
 		return here, nil, err
@@ -195,7 +196,43 @@ func (ds *devices) runChrome(ctx context.Context, op string, here bool, in map[s
 	if err := os.WriteFile(chromeFile(), b, 0o600); err != nil {
 		return nil, err
 	}
-	return chromeRow(self), nil
+	row := chromeRow(self)
+	if n := ds.chromeOff(ctx, "Chrome switched off here"); n > 0 {
+		row["given_back"] = n
+	}
+	return row, nil
+}
+
+// chromeOff gives back every chrome device here when chrome devices may not run here now, as when its owner switched
+// them off, or it came to run others' calls with no choice made: how many it gave back.
+func (ds *devices) chromeOff(ctx context.Context, why string) int {
+	var running []*vm
+	for _, v := range ds.vms() {
+		if v.Kind == chromeName {
+			running = append(running, v)
+		}
+	}
+	if len(running) == 0 {
+		return 0
+	}
+	if row, err := ds.chromeHere(ctx); err != nil || row["allowed"] != false {
+		return 0 // allowed, or not known now
+	}
+	n := 0
+	for _, v := range running {
+		var err error
+		if _, lent := ds.loans()[v.Name]; lent {
+			err = ds.giveBackVM(ctx, v, why)
+		} else {
+			err = ds.deleteVM(ctx, v)
+		}
+		if err != nil {
+			log.Printf("giving back %s: %v", v.Name, err)
+			continue
+		}
+		n++
+	}
+	return n
 }
 
 type callerUserKey struct{}

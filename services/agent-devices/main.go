@@ -207,7 +207,7 @@ func ownOps() []map[string]any {
 			"input": object(map[string]any{"device": str("its name: lowercase letters, digits and dashes"), "kind": kindArg, "size": sizeArg}, "device")},
 		{"name": "resize", "description": "Change how much CPU and memory a device may use, at once, without restarting it.",
 			"input": object(map[string]any{"device": str("the device's name"), "size": sizeArg}, "device", "size")},
-		{"name": "start", "description": "Start a stopped (or paused) device. It starts again after the device it's on restarts.", "input": name},
+		{"name": "start", "description": "Start a stopped (or paused) device. It starts again after the device it's on restarts, if that has memory to spare then.", "input": name},
 		{"name": "stop", "description": "Stop a device. Its files and sign-ins stay; it stays stopped until started.", "input": name},
 		{"name": "delete", "description": "Delete a device and everything in it, its sign-ins too. Only when the person asked.", "input": name},
 		{"name": "view", "description": "A link to watch and use a device in a browser, for the person: to solve a challenge, or to see what an agent is doing. Works on their own devices.",

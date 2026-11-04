@@ -52,8 +52,8 @@ type containers interface {
 	// run makes the device's container and home volume from the image,
 	// and starts it.
 	run(ctx context.Context, d device, sz size, image string) error
-	// start starts an agent device, and again after the device it's on restarts; stop
-	// stops it until it's started again.
+	// start starts a device and stop stops it; whether it should be running, which revive applies after a restart,
+	// is lifecycle.go's.
 	start(ctx context.Context, d device) error
 	stop(ctx context.Context, d device) error
 	restart(ctx context.Context, d device) error
@@ -187,6 +187,7 @@ func create(ctx context.Context, name string, sz size, pool, wait bool) (device,
 		remove(context.WithoutCancel(ctx), d)
 		return device{}, err
 	}
+	want(d.Name, true)
 	if !wait {
 		return d, nil
 	}
@@ -202,11 +203,12 @@ func (d device) labels() []string {
 	return l
 }
 
-// start starts an agent device, and again after the device it's on restarts.
+// start starts an agent device, and again after the device it's on restarts, if it has room then.
 func start(ctx context.Context, d device) error {
 	if err := rt.start(ctx, d); err != nil {
 		return err
 	}
+	want(d.Name, true)
 	return ready(ctx, d)
 }
 
@@ -217,7 +219,11 @@ func stop(ctx context.Context, d device) error {
 			return err
 		}
 	}
-	return rt.stop(ctx, d)
+	if err := rt.stop(ctx, d); err != nil {
+		return err
+	}
+	want(d.Name, false)
+	return nil
 }
 
 // remove deletes a device's container and its volumes.
@@ -225,6 +231,7 @@ func remove(ctx context.Context, d device) error {
 	if err := rt.remove(ctx, d); err != nil {
 		return err
 	}
+	unwant(d.Name)
 	if d.port > 0 {
 		tailscale(ctx, "serve", "--https="+strconv.Itoa(d.port), "off")
 	}

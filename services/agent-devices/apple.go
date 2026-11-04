@@ -24,7 +24,7 @@ import (
 // network, which a background service isn't allowed to reach. A small bridge
 // in the device joins the socket to its server, and this serves the socket
 // on 127.0.0.1:<port>. Apple's container can't pause or resize a container,
-// and has no restart policy: revive starts devices not stopped with stop.
+// and has no restart policy: revive starts those that should run.
 type appleRT struct {
 	dir string // sockets, and which devices were stopped
 
@@ -167,7 +167,6 @@ func (a *appleRT) bridge(ctx context.Context, name string) error {
 }
 
 func (a *appleRT) start(ctx context.Context, d device) error {
-	os.Remove(a.stopped(d.Name))
 	if _, err := ctr(ctx, "start", prefix+d.Name); err != nil {
 		return err
 	}
@@ -175,9 +174,6 @@ func (a *appleRT) start(ctx context.Context, d device) error {
 }
 
 func (a *appleRT) stop(ctx context.Context, d device) error {
-	if err := os.WriteFile(a.stopped(d.Name), nil, 0o600); err != nil {
-		return err
-	}
 	_, err := ctr(ctx, "stop", prefix+d.Name)
 	return err
 }

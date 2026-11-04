@@ -297,7 +297,12 @@ func (ds *devices) run(ctx context.Context, op string, raw json.RawMessage) (any
 	here, _ := in["here"].(bool)
 	delete(in, "here")
 	if name != "" && !here && (!slices.Contains(local, op) || op == "borrow") && ds.vmNamed(name) == nil {
-		// An agent device on another of the person's devices: pass the call on to it.
+		// An agent device on another of the person's devices: pass the call on to it. One moved from here is
+		// there, but for deleting it here.
+		if m, ok := moves()[name]; ok && m.Done && op != "delete" {
+			in["device"], in["here"] = name, true
+			return ds.callNode(ctx, m.To, op, in)
+		}
 		if _, err := find(ctx, name); err != nil {
 			if s := ds.located(ctx, name); s != "" {
 				in["device"], in["here"] = name, true
@@ -375,6 +380,9 @@ func (ds *devices) run(ctx context.Context, op string, raw json.RawMessage) (any
 		return fmt.Sprintf("Device %s is now %s.", d.Name, sz), nil
 	case "start":
 		d, err := find(ctx, name)
+		if err == nil {
+			err = ds.mayStart(ctx, d.Name)
+		}
 		if err != nil || d.State != "stopped" {
 			if err == nil && d.State == "paused" {
 				_, err = ds.running(ctx, d.Name)
@@ -411,6 +419,7 @@ func (ds *devices) run(ctx context.Context, op string, raw json.RawMessage) (any
 		if err := remove(ctx, d); err != nil {
 			return nil, err
 		}
+		setMove(d.Name, nil)
 		return fmt.Sprintf("Deleted device %s and everything in it.", d.Name), nil
 	case "view":
 		d, err := ds.running(ctx, name)
@@ -633,14 +642,33 @@ func (ds *devices) run(ctx context.Context, op string, raw json.RawMessage) (any
 			return nil, fmt.Errorf("backing it up: %s", raw)
 		}
 		rec := backed.Backup
+		// Kept before it's restored there, so a stop anywhere from here on leaves it stopped here, asking there.
+		m := move{To: to, At: time.Now().UTC()}
+		if err := setMove(d.Name, &m); err != nil {
+			return nil, fmt.Errorf("not moved: %w", err)
+		}
 		if _, err := ds.callNode(ctx, to, "restore", map[string]any{"device": d.Name, "blob": rec.Blob, "size": rec.Size}); err != nil {
-			return nil, fmt.Errorf("not moved: restoring it on %s: %w", to, err)
+			// Its answer may be what was lost: it's settled by asking there.
+			got, merr := ds.movedAway(context.WithoutCancel(ctx), d.Name)
+			switch {
+			case merr != nil:
+				ds.drop(d.Name)
+				stop(ctx, d)
+				return nil, fmt.Errorf("restoring it on %s failed, but it may be there: it's kept stopped here until %s says (%w)", to, to, err)
+			case !got.Done:
+				return nil, fmt.Errorf("not moved: restoring it on %s: %w", to, err)
+			}
+		} else {
+			m.Done = true
+			if err := setMove(d.Name, &m); err != nil {
+				log.Printf("keeping that %s moved: %v", d.Name, err)
+			}
 		}
 		ds.drop(d.Name)
 		if err := stop(ctx, d); err != nil {
-			return nil, fmt.Errorf("moved to %s, but stopping it here failed: %w", to, err)
+			return nil, fmt.Errorf("moved to %s, but stopping it here failed: it's stopped again shortly: %w", to, err)
 		}
-		return fmt.Sprintf("Moved device %s to %s, where it's running. It's stopped here; delete it here (delete) once it's fine there.", d.Name, to), nil
+		return fmt.Sprintf("Moved device %s to %s, where it's running. It's stopped here, and won't start here again; delete it here (delete) once it's fine there.", d.Name, to), nil
 	}
 	if slices.Contains(browsing, op) {
 		return ds.use(ctx, name, op, in)

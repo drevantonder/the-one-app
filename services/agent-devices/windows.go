@@ -30,7 +30,7 @@ import (
 // account one that trusts this machine's key. Its network is passt's, which reaches the internet as this machine does
 // but none of this machine's own 127.0.0.1, where QEMU's own would put it at 10.0.2.2 for any program in Windows to
 // reach what only this machine's programs use; only its SSH comes in. A copy is a disk on top of a lasting device's base: a copy of its
-// disk taken when it's copied, kept for the next copy until the lasting device next stops.
+// disk taken when it's copied, kept for the next copy until the lasting device next stops, and for each copy on it until it's gone.
 //
 // Stopping one keeps what it was doing (its memory and devices, as QEMU migrates them, the TPM's state too) in its
 // folder, beside the disk as it was then, and starting it carries on from there in seconds, not a boot of a minute
@@ -96,10 +96,11 @@ func (w windowsQEMU) make(ctx context.Context, v *vm, from *vm) error {
 		os.RemoveAll(v.Dir)
 		return err
 	}
+	v.Base = base
 	steps := [][]string{
-		{"qemu-img", "create", "-q", "-f", "qcow2", "-b", base, "-F", "qcow2", winFile(v, "disk.qcow2")},
-		{"cp", winFile(from, "base-vars.fd"), winFile(v, "OVMF_VARS.fd")},
-		{"cp", "-a", winFile(from, "base-tpm"), winFile(v, "tpm")},
+		{"qemu-img", "create", "-q", "-f", "qcow2", "-b", filepath.Join(base, "disk.qcow2"), "-F", "qcow2", winFile(v, "disk.qcow2")},
+		{"cp", filepath.Join(base, "vars.fd"), winFile(v, "OVMF_VARS.fd")},
+		{"cp", "-a", filepath.Join(base, "tpm"), winFile(v, "tpm")},
 	}
 	for _, s := range steps {
 		if _, err := run(ctx, s[0], s[1:]...); err != nil {
@@ -108,62 +109,115 @@ func (w windowsQEMU) make(ctx context.Context, v *vm, from *vm) error {
 		}
 	}
 	// It starts from the base's saved state, if it has one: a link, which its start removes, leaving the base's.
-	if id, err := os.ReadFile(winFile(from, "base-state.id")); err == nil && os.Link(winFile(from, "base-state"), winFile(v, "state")) == nil {
+	if id, err := os.ReadFile(filepath.Join(base, "state.id")); err == nil && os.Link(filepath.Join(base, "state"), winFile(v, "state")) == nil {
 		os.WriteFile(winFile(v, "state.id"), id, 0o600)
 	}
 	return nil
 }
 
-// base is the lasting device's base disk, which copies are made on: taken now if it has none. A running device's
-// is copied by QEMU as it runs, as a sudden power cut would leave it, which a throwaway copy recovers from.
+// A lasting device's bases are what its copies are made on: each a folder in its bases folder, with a copy of its
+// disk, UEFI variables and TPM (and its saved state, if it was stopped), taken when it's first copied and used for
+// each copy after until it next stops. bases/current names the one copies are made on now; another is deleted once
+// no copy is on it (pruneBases), never written again, so a copy's base stays as it was made on.
+func basesOf(from *vm) string { return winFile(from, "bases") }
+
+// base is the lasting device's current base, which copies are made on: taken now if it has none. A running device's
+// disk is copied by QEMU as it runs, as a sudden power cut would leave it, which a throwaway copy recovers from.
 func (w windowsQEMU) base(ctx context.Context, from *vm) (string, error) {
-	base := winFile(from, "base.qcow2")
-	if _, err := os.Stat(base); err == nil {
-		return base, nil
+	bases := basesOf(from)
+	if b, err := os.ReadFile(filepath.Join(bases, "current")); err == nil {
+		dir := filepath.Join(bases, strings.TrimSpace(string(b)))
+		if _, err := os.Stat(filepath.Join(dir, "disk.qcow2")); err == nil {
+			return dir, nil
+		}
 	}
-	tmp := base + ".part"
-	os.Remove(tmp)
-	os.Remove(winFile(from, "base-state"))
-	os.Remove(winFile(from, "base-state.id"))
+	gen := strconv.FormatInt(time.Now().UnixNano(), 36)
+	dir := filepath.Join(bases, gen)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", err
+	}
+	fail := func(err error) (string, error) {
+		os.RemoveAll(dir)
+		return "", err
+	}
+	tmp := filepath.Join(dir, "disk.qcow2.part")
 	if w.running(ctx, from) {
 		if _, err := monitor(from, "drive_backup -f d0 "+tmp+" qcow2"); err != nil {
-			return "", err
+			return fail(err)
 		}
 		for {
 			out, err := monitor(from, "info block-jobs")
 			if err != nil {
-				return "", err
+				return fail(err)
 			}
 			if strings.Contains(out, "No active jobs") {
 				break
 			}
 			select {
 			case <-ctx.Done():
-				return "", ctx.Err()
+				return fail(ctx.Err())
 			case <-time.After(2 * time.Second):
 			}
 		}
 		if _, err := os.Stat(tmp); err != nil {
-			return "", fmt.Errorf("copying %s's disk failed", from.Name)
+			return fail(fmt.Errorf("copying %s's disk failed", from.Name))
 		}
 	} else {
 		if _, err := run(ctx, "cp", "--reflink=auto", winFile(from, "disk.qcow2"), tmp); err != nil {
-			return "", err
+			return fail(err)
 		}
 		// Stopped, its saved state goes with this disk.
-		if id, err := os.ReadFile(winFile(from, "state.id")); err == nil && os.Link(winFile(from, "state"), winFile(from, "base-state")) == nil {
-			os.WriteFile(winFile(from, "base-state.id"), id, 0o600)
+		if id, err := os.ReadFile(winFile(from, "state.id")); err == nil && os.Link(winFile(from, "state"), filepath.Join(dir, "state")) == nil {
+			os.WriteFile(filepath.Join(dir, "state.id"), id, 0o600)
 		}
 	}
-	os.RemoveAll(winFile(from, "base-tpm"))
-	if _, err := run(ctx, "cp", winFile(from, "OVMF_VARS.fd"), winFile(from, "base-vars.fd")); err != nil {
-		return "", err
+	if _, err := run(ctx, "cp", winFile(from, "OVMF_VARS.fd"), filepath.Join(dir, "vars.fd")); err != nil {
+		return fail(err)
 	}
-	if _, err := run(ctx, "cp", "-a", winFile(from, "tpm"), winFile(from, "base-tpm")); err != nil {
-		return "", err
+	if _, err := run(ctx, "cp", "-a", winFile(from, "tpm"), filepath.Join(dir, "tpm")); err != nil {
+		return fail(err)
 	}
-	os.Remove(winFile(from, "base-tpm/sock"))
-	return base, os.Rename(tmp, base)
+	os.Remove(filepath.Join(dir, "tpm", "sock"))
+	if err := os.Rename(tmp, filepath.Join(dir, "disk.qcow2")); err != nil {
+		return fail(err)
+	}
+	if err := os.WriteFile(filepath.Join(bases, "current.part"), []byte(gen), 0o600); err != nil {
+		return fail(err)
+	}
+	if err := os.Rename(filepath.Join(bases, "current.part"), filepath.Join(bases, "current")); err != nil {
+		return fail(err)
+	}
+	return dir, nil
+}
+
+// pruneBases deletes each Windows device's bases that no copy is on and copies aren't made on now: one stopped since
+// it was taken, or one from before bases had folders (base.qcow2 and the rest beside its disk).
+func (ds *devices) pruneBases() {
+	creating.Lock() // no copy is being made on one
+	defer creating.Unlock()
+	all := ds.vms()
+	for _, from := range all {
+		if from.Kind != "windows" || from.Of != "" || from.Dir == "" {
+			continue
+		}
+		on := func(base string) bool {
+			return slices.ContainsFunc(all, func(c *vm) bool { return c.Of == from.Name && c.Base == base })
+		}
+		current, _ := os.ReadFile(filepath.Join(basesOf(from), "current"))
+		dirs, _ := os.ReadDir(basesOf(from))
+		for _, d := range dirs {
+			base := filepath.Join(basesOf(from), d.Name())
+			if d.IsDir() && d.Name() != strings.TrimSpace(string(current)) && !on(base) {
+				log.Printf("deleting a base of %s no copy is on", from.Name)
+				os.RemoveAll(base)
+			}
+		}
+		if _, err := os.Stat(winFile(from, "base.qcow2")); err == nil && !on("") {
+			for _, f := range []string{"base.qcow2", "base.qcow2.part", "base-vars.fd", "base-tpm", "base-state", "base-state.id"} {
+				os.RemoveAll(winFile(from, f))
+			}
+		}
+	}
 }
 
 func (windowsQEMU) running(_ context.Context, v *vm) bool {
@@ -428,7 +482,8 @@ func (w windowsQEMU) stop(ctx context.Context, v *vm) error {
 		return nil
 	}
 	if v.Of == "" {
-		os.Remove(winFile(v, "base.qcow2"))
+		// Copies made from now on are of it as it is next; those made on its current base stay on that.
+		os.Remove(filepath.Join(basesOf(v), "current"))
 	}
 	err := w.save(ctx, v)
 	if err == nil {

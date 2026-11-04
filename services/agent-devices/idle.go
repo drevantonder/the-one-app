@@ -49,6 +49,9 @@ func (ds *devices) running(ctx context.Context, name string) (device, error) {
 	if err != nil {
 		return d, err
 	}
+	if err := ds.mayStart(ctx, d.Name); err != nil {
+		return d, err
+	}
 	switch d.State {
 	case "stopped":
 		return d, fmt.Errorf("device %s is stopped: start it first", d.Name)
@@ -60,36 +63,4 @@ func (ds *devices) running(ctx context.Context, name string) (device, error) {
 	}
 	ds.touch(d.Name)
 	return d, nil
-}
-
-// revive starts devices that should be running but aren't, once Podman
-// answers: after a reboot on Linux, podman-restart does, unless the user's
-// systemd wasn't ready for it; Apple's container has no restart policy.
-func revive(ctx context.Context) {
-	var all []device
-	var err error
-	for i := 0; ; i++ {
-		if all, err = list(ctx); err == nil {
-			break
-		}
-		if i == 60 {
-			log.Printf("not starting devices: %v", err)
-			return
-		}
-		time.Sleep(5 * time.Second)
-	}
-	lims, err := limits(ctx, all)
-	if err != nil {
-		log.Print(err)
-		return
-	}
-	for _, d := range all {
-		if d.State != "stopped" || !lims[d.Name].Restart {
-			continue
-		}
-		log.Printf("starting %s, which should be running", d.Name)
-		if err := rt.start(ctx, d); err != nil {
-			log.Print(err)
-		}
-	}
 }

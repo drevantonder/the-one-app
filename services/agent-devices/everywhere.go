@@ -159,6 +159,7 @@ type listed struct {
 	Borrowed    *loan     `json:"borrowed,omitempty"`
 	Spare       bool      `json:"spare,omitempty"`
 	LastCall    time.Time `json:"last_call,omitzero"`
+	MovedTo     string    `json:"moved_to,omitempty"` // the machine it moved to: it's kept stopped here until deleted
 }
 
 // listHere is the agent devices on this device.
@@ -181,6 +182,7 @@ func (ds *devices) listHere(ctx context.Context) ([]listed, error) {
 	used := maps.Clone(ds.used)
 	ds.poolMu.Unlock()
 	out := []listed{}
+	moved := moves()
 	for _, d := range all {
 		l := listed{Name: d.Name, On: me, Kind: linuxKind, State: d.State, Started: d.Started, Size: lims[d.Name].sizeOf(),
 			CPUs: lims[d.Name].CPUs, MemoryLimit: lims[d.Name].Memory, Memory: use[d.Name].Memory, CPU: use[d.Name].CPU, LastCall: used[d.Name]}
@@ -188,6 +190,9 @@ func (ds *devices) listHere(ctx context.Context) ([]listed, error) {
 			l.Borrowed = &b
 		} else {
 			l.Spare = d.pool
+		}
+		if m, ok := moved[d.Name]; ok {
+			l.MovedTo = m.To
 		}
 		out = append(out, l)
 	}
@@ -231,7 +236,7 @@ func (ds *devices) located(ctx context.Context, name string) string {
 		var theirs struct{ Devices []listed }
 		json.Unmarshal(r, &theirs)
 		for _, d := range theirs.Devices {
-			if d.Name == name {
+			if d.Name == name && d.MovedTo == "" {
 				return s
 			}
 		}

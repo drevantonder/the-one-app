@@ -447,7 +447,7 @@ func (ds *devices) signIn(ctx context.Context, p *profile, url string, minutes i
 // keeps one spare, pauses idle devices and starts again those that should
 // be running, for as long as this runs.
 func (ds *devices) keep(ctx context.Context) {
-	revive(ctx)
+	ds.revive(ctx)
 	for {
 		ds.tend(ctx)
 		select {
@@ -466,6 +466,7 @@ func (ds *devices) tend(ctx context.Context) {
 		return
 	}
 	ds.tendVMs(ctx)
+	ds.tendMoved(ctx, all)
 	here := map[string]bool{}
 	for _, d := range all {
 		here[d.Name] = true

@@ -72,6 +72,7 @@ type vm struct {
 	Name    string    `json:"name"`
 	Kind    string    `json:"kind"`
 	Of      string    `json:"of,omitempty"`      // the lasting device it's a throwaway copy of
+	Base    string    `json:"base,omitempty"`    // windows: the copy's base, a folder of its lasting device's
 	Dir     string    `json:"dir,omitempty"`     // its files
 	Port    int       `json:"port,omitempty"`    // windows: its SSH; android: its console
 	Display int       `json:"display,omitempty"` // windows: its VNC display
@@ -213,7 +214,11 @@ func (ds *devices) awake(ctx context.Context, v *vm) error {
 		}
 		v.Paused = false
 		ds.saveVM(v)
-		return k.start(ctx, v)
+		if err := k.start(ctx, v); err != nil {
+			return err
+		}
+		want(v.Name, true)
+		return nil
 	}
 	if v.Paused {
 		if err := k.resume(ctx, v); err != nil {
@@ -260,6 +265,7 @@ func (ds *devices) deleteVM(ctx context.Context, v *vm) error {
 		return err
 	}
 	ds.forgetVM(v.Name)
+	unwant(v.Name)
 	return nil
 }
 
@@ -360,7 +366,10 @@ func (ds *devices) giveBackVM(ctx context.Context, v *vm, why string) error {
 			return err
 		}
 	} else if v.Kind == "iphone" {
-		v.kind().stop(ctx, v) // a booted simulator holds gigabytes of the Mac's memory
+		// A booted simulator holds gigabytes of the Mac's memory.
+		if v.kind().stop(ctx, v) == nil {
+			want(v.Name, false)
+		}
 	}
 	ds.endLoan(v.Name)
 	log.Printf("%s: %s", v.Name, why)
@@ -385,6 +394,8 @@ const (
 // devices nobody is using.
 func (ds *devices) tendVMs(ctx context.Context) {
 	defer ds.restVMs(ctx)
+	defer ds.pruneBases()
+	ds.chromeOff(ctx, "Chrome isn't allowed here now")
 	for name, l := range ds.loans() {
 		v := ds.vmNamed(name)
 		if v == nil || l.State == loanReturning || l.State == loanPreparing && l.Since.After(ds.started) {
@@ -770,7 +781,11 @@ func (ds *devices) runKinds(ctx context.Context, op, name string, here bool, in 
 	case "stop":
 		v.Paused = false
 		ds.saveVM(v)
-		return fmt.Sprintf("Stopped %s. Its files stay; it stays stopped until started.", v.Name), true, k.stop(ctx, v)
+		if err := k.stop(ctx, v); err != nil {
+			return nil, true, err
+		}
+		want(v.Name, false)
+		return fmt.Sprintf("Stopped %s. Its files stay; it stays stopped until started.", v.Name), true, nil
 	case "delete":
 		if err := ds.deleteVM(ctx, v); err != nil {
 			return nil, true, err
@@ -954,6 +969,8 @@ func (ds *devices) restVMs(ctx context.Context) {
 			log.Printf("stopping %s, idle for %s", v.Name, idleStopVM)
 			if err := k.stop(ctx, v); err != nil {
 				log.Printf("stopping %s: %v", v.Name, err)
+			} else {
+				want(v.Name, false) // it carries on when next called
 			}
 			v.Paused = false
 			ds.saveVM(v)
@@ -964,6 +981,9 @@ func (ds *devices) restVMs(ctx context.Context) {
 				continue
 			}
 			v.Paused = k.running(ctx, v)
+			if !v.Paused {
+				want(v.Name, false) // pausing stopped it, as an iPhone's does
+			}
 			ds.saveVM(v)
 		}
 	}
