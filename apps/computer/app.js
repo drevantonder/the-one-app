@@ -1,14 +1,14 @@
 // Computer Use: the devices agents can use, and the tools they use them with. Agent devices are Linux devices with a
-// browser on the person's devices, which the agent-devices sidecar runs (Podman, or a Mac's containers); the person's own
-// devices are here too once they let agents use them, through the computer sidecar the Mac app hosts. Use,
+// browser on the person's devices, which the agent-devices service runs (Podman, or a Mac's containers); the person's own
+// devices are here too once they let agents use them, through the computer service the Mac app hosts. Use,
 // tools and screen go to a device when one is named; this app keeps who used which device when, as `session`
 // entries in the person's own scope. Agent Devices (apps/agent-devices) is the person's page for them.
 
-/// Runs one of the agent-devices sidecar's operations, wherever it runs for the caller. When none of their devices runs it,
+/// Runs one of the agent-devices service's operations, wherever it runs for the caller. When none of their devices runs it,
 /// says what's needed instead of how the call failed.
-async function sidecar(ctx, op, input) {
+async function service(ctx, op, input) {
   try {
-    return await ctx.sidecars["agent-devices"][op](input);
+    return await ctx.services["agent-devices"][op](input);
   } catch (err) {
     if (String(err.message).includes("no device runs agent-devices for you")) throw new Error(NEEDS);
     throw err;
@@ -17,33 +17,33 @@ async function sidecar(ctx, op, input) {
 
 const NEEDS = "No device of yours lets agents use it yet. Agents use your Mac once you turn on Let Agents Use This Mac in the Mac app's menu bar; agent devices, each with a browser, need Agent Devices on a Linux device with Podman, or a Mac.";
 
-/// The caller's online devices that run the sidecar, by name.
+/// The caller's online devices that run the service, by name.
 async function running(ctx) {
-  return (await ctx.devices()).filter((s) => s.online && (s.sidecars || []).includes("agent-devices")).map((s) => s.name);
+  return (await ctx.devices()).filter((s) => s.online && (s.services || []).includes("agent-devices")).map((s) => s.name);
 }
 
-/// The caller's devices whose computer sidecar serves them, by device name: `{ device, on, title, kind, using,
+/// The caller's devices whose computer service serves them, by device name: `{ device, on, title, kind, using,
 /// permissions, missing }`, or `{ device, why }` for one that didn't answer.
 async function devices(ctx) {
   const mine = (s) => {
-    const d = (s.installed_sidecars || []).find((d) => d.name === "computer");
-    return d ? !d.users || d.users.includes(ctx.me.user_name) : (s.sidecars || []).includes("computer");
+    const d = (s.installed_services || []).find((d) => d.name === "computer");
+    return d ? !d.users || d.users.includes(ctx.me.user_name) : (s.services || []).includes("computer");
   };
   const theirs = (await ctx.devices()).filter((s) => s.online && mine(s));
   return Promise.all(theirs.map(async (s) => {
     try {
-      return { device: s.name, ...(await ctx.sidecars.computer._status({}, { device: s.name })) };
+      return { device: s.name, ...(await ctx.services.computer._status({}, { device: s.name })) };
     } catch (err) {
       return { device: s.name, on: false, why: err.message };
     }
   }));
 }
 
-/// The device of the person's a name means, if it's one: a device of the caller's running the computer sidecar for them.
+/// The device of the person's a name means, if it's one: a device of the caller's running the computer service for them.
 async function device(ctx, name) {
   if (!name) return null;
   const n = String(name).toLowerCase();
-  const s = (await ctx.devices()).find((s) => s.name.toLowerCase() === n && (s.sidecars || []).includes("computer"));
+  const s = (await ctx.devices()).find((s) => s.name.toLowerCase() === n && (s.services || []).includes("computer"));
   return s ? s.name : null;
 }
 
@@ -344,7 +344,7 @@ export default {
   connector: true,
   needs: "Needs a Linux device with Podman, or a Mac",
   instructions: "Computer Use acts on devices: agent devices (Linux with a browser, Windows, Android and iPhones, on the person's own devices) and the person's own devices they let agents use (own: true in computer_list, like their Mac). Agent Devices (agent-devices_*) gets you one and gives it back; Computer Use (computer_*) acts on it.\n\nTo browse, agent-devices_borrow with for (a few words the person sees) gives you a Linux device whose browser starts signed in to a browser profile's sites. Pass its name as device to every call, then:\n1. computer_browser_prepare with allow_launch true and profile {\"mode\":\"isolated_named\",\"name\":<the profile borrow gave>} starts its browser.\n2. computer_use with tool list_windows gives the browser's pid and window_id.\n3. computer_get_browser_state with those gives target_id and tab_id; with those, it reads the page and the refs of what's on it.\n4. computer_browser_navigate, _click, _type, _select and _pointer act on it; on an agent device, click and pointer take input_route \"dom_event\". Read the page again after each.\nA browser idle for 5 minutes closes: prepare it again.\nBorrowed with kind chrome (quicker, where agent-devices_kinds lists it), the device is that browser: borrow gives target_id and tab_id, so skip steps 1 to 3 and read the page with computer_get_browser_state. Give the device back with agent-devices_give_back when done; one left 15 minutes without a call is given back for you.\n\nWhen a site needs the person to sign in, agent-devices_sign_in gives them a link to do it themselves; for a challenge, give them computer_view's link. Never sign in or submit forms for them unless they asked.\n\nAnything else on a device (apps, windows, keyboard and mouse, and Windows, Android and iPhones): computer_tools lists what it takes, computer_use runs one, and computer_screen shows the screen. An iPhone takes no clicks or typing.\n\nOn the person's own device, do only what they asked of it, and never read their messages, mail, browser sessions or files unless they asked. They see in their menu bar while you use it, and can stop you.",
-  uses: { sidecars: ["agent-devices", "computer"] },
+  uses: { services: ["agent-devices", "computer"] },
   labs: {
     mirroring: { title: "iPhone Mirroring", description: "Use your iPhone through a Mac." },
   },
@@ -359,7 +359,7 @@ export default {
       reads: true,
       description: "Your devices that run Computer Use, as { account, ok }: account is the device's name, ok whether it's online. computer_list lists the devices agents use on them.",
       input: { type: "object", properties: {} },
-      run: async (ctx) => (await ctx.devices()).filter((s) => (s.sidecars || []).some((d) => d === "agent-devices" || d === "computer")).map((s) => ({ account: s.name, ok: s.online })),
+      run: async (ctx) => (await ctx.devices()).filter((s) => (s.services || []).some((d) => d === "agent-devices" || d === "computer")).map((s) => ({ account: s.name, ok: s.online })),
     },
     sign_out: {
       reads: false,
@@ -368,9 +368,9 @@ export default {
       input: { type: "object", required: ["account"], properties: { account: { type: "string", description: "a device's name, from computer_accounts" } } },
       run: async (ctx, { account }) => {
         const all = await ctx.devices();
-        const there = all.find((s) => s.name.toLowerCase() === String(account).toLowerCase() && (s.sidecars || []).some((d) => d === "agent-devices" || d === "computer"));
-        if (!there) throw new Error(`Computer Use isn't on ${account}: it's on ${all.filter((s) => (s.sidecars || []).some((d) => d === "agent-devices" || d === "computer")).map((s) => s.name).join(", ") || "none of your devices"}`);
-        for (const d of ["agent-devices", "computer"]) if ((there.sidecars || []).includes(d)) ctx.sidecar(d, there.name, false);
+        const there = all.find((s) => s.name.toLowerCase() === String(account).toLowerCase() && (s.services || []).some((d) => d === "agent-devices" || d === "computer"));
+        if (!there) throw new Error(`Computer Use isn't on ${account}: it's on ${all.filter((s) => (s.services || []).some((d) => d === "agent-devices" || d === "computer")).map((s) => s.name).join(", ") || "none of your devices"}`);
+        for (const d of ["agent-devices", "computer"]) if ((there.services || []).includes(d)) ctx.service(d, there.name, false);
         return `Computer Use is removed from ${there.name}.`;
       },
     },
@@ -379,7 +379,7 @@ export default {
       description: "Every device agents can act on: the agent devices on all of your devices, and your own devices you let agents use (own: true, like your Mac). Each with its kind, the device it's on, whether it's running, paused or stopped, and who has borrowed it and what for. Borrow one with agent-devices_borrow; act on it with computer_screen, computer_use and the browser tools.",
       input: {"properties": {"here": {"description": "only the agent devices on the device you call from", "type": "boolean"}}, "type": "object"},
       run: async (ctx, input) => {
-        const [listed, devs] = await Promise.all([sidecar(ctx, "list", input).catch((err) => err), input.here ? [] : devices(ctx)]);
+        const [listed, devs] = await Promise.all([service(ctx, "list", input).catch((err) => err), input.here ? [] : devices(ctx)]);
         const on = devs.filter((d) => d.on).map(asListed);
         if (listed instanceof Error) {
           if (on.length && listed.message === NEEDS) return { devices: on };
@@ -396,7 +396,7 @@ export default {
       run: async (ctx, input) => {
         const d = await device(ctx, input.device);
         if (d) throw new Error(`${d} is the person's own device: they watch it on the Computer Use page and on the device itself, and stop agents there.`);
-        return sidecar(ctx, "view", input);
+        return service(ctx, "view", input);
       },
     },
     screen: {
@@ -405,8 +405,8 @@ export default {
       input: {"properties": {"device": DEVICE, "width": {"description": "the picture's width in pixels; default 640, at most 1920", "type": "integer"}}, "type": "object"},
       run: async (ctx, input) => {
         const d = await device(ctx, input.device);
-        if (d) return ctx.sidecars.computer._screen({ width: input.width }, { device: d });
-        return sidecar(ctx, "screen", input);
+        if (d) return ctx.services.computer._screen({ width: input.width }, { device: d });
+        return service(ctx, "screen", input);
       },
     },
     tools: {
@@ -415,15 +415,15 @@ export default {
       input: {"properties": {"device": DEVICE, "name": {"description": "a tool's name, from computer_tools without name", "type": "string"}}, "type": "object"},
       run: async (ctx, input) => {
         const d = await device(ctx, input.device);
-        if (d) return ctx.sidecars.computer._tools(input.name ? { name: input.name } : {}, { device: d });
-        return sidecar(ctx, "tools", input);
+        if (d) return ctx.services.computer._tools(input.name ? { name: input.name } : {}, { device: d });
+        return service(ctx, "tools", input);
       },
     },
     refresh_tools: {
       reads: false,
       description: "Read the agent devices' tools again from a running one, as after it was updated, when computer_tools seems out of date.",
       input: {"properties": {}, "type": "object"},
-      run: (ctx, input) => sidecar(ctx, "refresh_tools", input),
+      run: (ctx, input) => service(ctx, "refresh_tools", input),
     },
     use: {
       reads: false,
@@ -431,8 +431,8 @@ export default {
       input: {"properties": {"args": {"description": "the tool's input, as computer_tools with its name describes it, like { \"x\": 120, \"y\": 300 }", "type": "object"}, "device": DEVICE, "tool": {"description": "the tool's name, from computer_tools", "type": "string"}}, "required": ["tool"], "type": "object"},
       run: async (ctx, input) => {
         const d = await device(ctx, input.device);
-        if (!d) return sidecar(ctx, "use", input);
-        const r = await ctx.sidecars.computer._use({ tool: input.tool, args: input.args || {} }, { device: d });
+        if (!d) return service(ctx, "use", input);
+        const r = await ctx.services.computer._use({ tool: input.tool, args: input.args || {} }, { device: d });
         if (r.started) {
           const id = [...crypto.getRandomValues(new Uint8Array(8))].map((x) => x.toString(16).padStart(2, "0")).join("");
           ctx.user.exec("insert or replace into sessions values (?, ?, ?, ?, ?, ?)", [id, d, r.title || null, ctx.me.agent || ctx.me.name, ctx.me.name, ctx.now()]);
@@ -456,7 +456,7 @@ export default {
         "target_id": TARGET,
         "window_id": {"description": "the browser window's id, from computer_use list_windows: with pid, on the first call", "type": "integer"},
       }, "type": "object"},
-      run: (ctx, input) => sidecar(ctx, "get_browser_state", input),
+      run: (ctx, input) => service(ctx, "get_browser_state", input),
     },
     browser_prepare: {
       reads: false,
@@ -471,13 +471,13 @@ export default {
         "strategy": {"additionalProperties": false, "description": "{ kind: \"existing_profile\" } attaches to the browser open at pid and window_id", "properties": {"kind": {"enum": ["existing_profile"], "type": "string"}}, "required": ["kind"], "type": "object"},
         "window_id": {"description": "the browser window's id, from computer_use list_windows; needed with strategy", "type": "integer"},
       }, "required": [], "type": "object"},
-      run: (ctx, input) => sidecar(ctx, "browser_prepare", input),
+      run: (ctx, input) => service(ctx, "browser_prepare", input),
     },
     browser_navigate: {
       reads: false,
       description: "Open a web address in a browser tab. Refs from earlier reads stop working: read the page again with computer_get_browser_state.",
       input: {"additionalProperties": true, "properties": {"device": DEVICE, "session": SESSION, "tab_id": TAB, "target_id": TARGET, "url": {"description": "an http, https or about address, like https://example.com", "type": "string"}}, "required": ["target_id", "tab_id", "url"], "type": "object"},
-      run: (ctx, input) => sidecar(ctx, "browser_navigate", input),
+      run: (ctx, input) => service(ctx, "browser_navigate", input),
     },
     browser_click: {
       reads: false,
@@ -490,7 +490,7 @@ export default {
         "x": {"description": "instead of ref: a point in the tab, in CSS pixels from its left", "type": "number"},
         "y": {"description": "instead of ref: a point in the tab, in CSS pixels from its top", "type": "number"},
       }, "required": ["target_id", "tab_id"], "type": "object"},
-      run: (ctx, input) => sidecar(ctx, "browser_click", input),
+      run: (ctx, input) => service(ctx, "browser_click", input),
     },
     browser_type: {
       reads: false,
@@ -503,7 +503,7 @@ export default {
         "session": SESSION, "tab_id": TAB, "target_id": TARGET,
         "text": {"description": "what to type", "type": "string"},
       }, "required": ["target_id", "tab_id", "ref", "text"], "type": "object"},
-      run: (ctx, input) => sidecar(ctx, "browser_type", input),
+      run: (ctx, input) => service(ctx, "browser_type", input),
     },
     browser_select: {
       reads: false,
@@ -514,7 +514,7 @@ export default {
         "ref": REF, "session": SESSION, "tab_id": TAB, "target_id": TARGET,
         "value": {"description": "instead of label: the option's value", "type": "string"},
       }, "required": ["target_id", "tab_id", "ref"], "type": "object"},
-      run: (ctx, input) => sidecar(ctx, "browser_select", input),
+      run: (ctx, input) => service(ctx, "browser_select", input),
     },
     browser_dialog: {
       reads: false,
@@ -527,7 +527,7 @@ export default {
         "prompt_text": {"description": "what to answer a prompt with, when accepting it", "type": "string"},
         "session": SESSION, "tab_id": TAB, "target_id": TARGET,
       }, "required": ["target_id", "tab_id", "action"], "type": "object"},
-      run: (ctx, input) => sidecar(ctx, "browser_dialog", input),
+      run: (ctx, input) => service(ctx, "browser_dialog", input),
     },
     browser_pointer: {
       reads: false,
@@ -548,7 +548,7 @@ export default {
         "x": {"description": "where to start, in CSS pixels from the tab's left", "type": "number"},
         "y": {"description": "where to start, in CSS pixels from the tab's top", "type": "number"},
       }, "required": ["target_id", "tab_id", "session", "action"], "type": "object"},
-      run: (ctx, input) => sidecar(ctx, "browser_pointer", input),
+      run: (ctx, input) => service(ctx, "browser_pointer", input),
     },
     _devices: {
       description: "The person's devices that agents may use once they let them, each with whether they do and who is using it now, and the recent sessions.",
@@ -565,8 +565,8 @@ export default {
       input: { type: "object", properties: { device: DEVICE } },
       run: async (ctx, input) => {
         const d = await device(ctx, input.device);
-        if (!d) throw new Error(`Agents can't mirror ${input.device} yet: no computer sidecar runs there.`);
-        return ctx.sidecars.computer._mirror_status({}, { device: d });
+        if (!d) throw new Error(`Agents can't mirror ${input.device} yet: no computer service runs there.`);
+        return ctx.services.computer._mirror_status({}, { device: d });
       },
     },
     _mirror_launch: {
@@ -575,8 +575,8 @@ export default {
       input: { type: "object", properties: { device: DEVICE } },
       run: async (ctx, input) => {
         const d = await device(ctx, input.device);
-        if (!d) throw new Error(`Agents can't mirror ${input.device} yet: no computer sidecar runs there.`);
-        return ctx.sidecars.computer._mirror_launch({}, { device: d });
+        if (!d) throw new Error(`Agents can't mirror ${input.device} yet: no computer service runs there.`);
+        return ctx.services.computer._mirror_launch({}, { device: d });
       },
     },
     _mirror_screen: {
@@ -585,8 +585,8 @@ export default {
       input: { type: "object", properties: { device: DEVICE, width: { type: "integer", description: "the picture's width in pixels; default 640, at most 1920" } } },
       run: async (ctx, input) => {
         const d = await device(ctx, input.device);
-        if (!d) throw new Error(`Agents can't mirror ${input.device} yet: no computer sidecar runs there.`);
-        return ctx.sidecars.computer._mirror_screen({ width: input.width }, { device: d });
+        if (!d) throw new Error(`Agents can't mirror ${input.device} yet: no computer service runs there.`);
+        return ctx.services.computer._mirror_screen({ width: input.width }, { device: d });
       },
     },
     _mirror_use: {
@@ -595,8 +595,8 @@ export default {
       input: { type: "object", properties: { device: DEVICE, tool: { type: "string" }, args: { type: "object" } }, required: ["tool"] },
       run: async (ctx, input) => {
         const d = await device(ctx, input.device);
-        if (!d) throw new Error(`Agents can't mirror ${input.device} yet: no computer sidecar runs there.`);
-        const r = await ctx.sidecars.computer._mirror_use({ tool: input.tool, args: input.args || {} }, { device: d });
+        if (!d) throw new Error(`Agents can't mirror ${input.device} yet: no computer service runs there.`);
+        const r = await ctx.services.computer._mirror_use({ tool: input.tool, args: input.args || {} }, { device: d });
         if (r.started) {
           const id = [...crypto.getRandomValues(new Uint8Array(8))].map((x) => x.toString(16).padStart(2, "0")).join("");
           ctx.user.exec("insert or replace into sessions values (?, ?, ?, ?, ?, ?)", [id, d, r.title || "iPhone Mirroring", ctx.me.agent || ctx.me.name, ctx.me.name, ctx.now()]);
@@ -609,8 +609,8 @@ export default {
       input: { type: "object", properties: { device: { type: "string" }, on: { type: "boolean" } }, required: ["device", "on"] },
       run: async (ctx, input) => {
         const d = await device(ctx, input.device);
-        if (!d) throw new Error(`Agents can't use ${input.device} yet: no computer sidecar runs there.`);
-        return ctx.sidecars.computer._allow({ on: !!input.on }, { device: d });
+        if (!d) throw new Error(`Agents can't use ${input.device} yet: no computer service runs there.`);
+        return ctx.services.computer._allow({ on: !!input.on }, { device: d });
       },
     },
   },

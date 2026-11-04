@@ -1,15 +1,15 @@
-// Agent Devices: the devices agents use, on the person's own devices, which the agent-devices sidecar runs: Linux with a
+// Agent Devices: the devices agents use, on the person's own devices, which the agent-devices service runs: Linux with a
 // browser (Podman, or a Mac's containers), with a screen or without one, and Windows, Android and iPhones where a
-// device can run them (the sidecar says which kinds each one can). Its page shows them;
+// device can run them (the service says which kinds each one can). Its page shows them;
 // Computer Use (apps/computer) is what agents use them with. A browser profile a device starts with is a Vault item
-// of type Browser profile: the sidecar keeps it as an encrypted blob, and only it, never this app, holds its key,
+// of type Browser profile: the service keeps it as an encrypted blob, and only it, never this app, holds its key,
 // which the node fills into the calls this app makes ({{<item id>:_profile_key}}).
 
-/// Runs one of the agent-devices sidecar's operations, wherever it runs for the caller. When none of their devices
+/// Runs one of the agent-devices service's operations, wherever it runs for the caller. When none of their devices
 /// runs it, says what's needed instead of how the call failed.
-async function sidecar(ctx, op, input, on) {
+async function service(ctx, op, input, on) {
   try {
-    return await ctx.sidecars["agent-devices"][op](input, on ? { device: on } : undefined);
+    return await ctx.services["agent-devices"][op](input, on ? { device: on } : undefined);
   } catch (err) {
     if (String(err.message).includes("no device runs agent-devices for you")) throw new Error(NEEDS);
     throw err;
@@ -26,9 +26,9 @@ function fnv(s) {
 const NEEDS = "Agent Devices needs a device with Podman, or a Mac, and none of yours runs it.";
 const TYPE = "Browser profile";
 
-/// The caller's online devices that run the sidecar, by name.
+/// The caller's online devices that run the service, by name.
 async function running(ctx) {
-  return (await ctx.devices()).filter((s) => s.online && (s.sidecars || []).includes("agent-devices")).map((s) => s.name);
+  return (await ctx.devices()).filter((s) => s.online && (s.services || []).includes("agent-devices")).map((s) => s.name);
 }
 
 /// The browser profiles: the Vault items of their type this app is switched on for.
@@ -47,7 +47,7 @@ async function profile(ctx, name) {
   throw new Error(`No browser profile ${name}: ${all.length ? `there's ${all.map((i) => i.title).join(", ")}` : "there are none yet"}. The person adds them in the Vault.`);
 }
 
-/// A profile as the sidecar takes it: its key is a placeholder the node fills in, for the sidecar only.
+/// A profile as the service takes it: its key is a placeholder the node fills in, for the service only.
 const given = (p) => ({ item: p.id, name: p.title, key: `{{${p.id}:_profile_key}}`, blob: p.fields._blob?.value || "", salt: p.fields._salt?.value || "" });
 
 const kindArg = { type: "string", enum: ["linux", "chrome", "windows", "android", "iphone"], description: "linux (with a browser, in a container; the default), chrome (Chrome straight on one of your devices: quicker, where its owner allows it), windows, android or iphone: kinds says which of your devices run each" };
@@ -122,7 +122,7 @@ const PAGE = `
   });
 
   // A picture of each running device with a screen that's in view, each drawn as it comes, and asked for again every
-  // 20s: the sidecar keeps the last one and takes the next in the background, and sends it only when it changed.
+  // 20s: the service keeps the last one and takes the next in the background, and sends it only when it changed.
   const hashes = {}, asked = {}, retried = {};
   const seen = (k) => {
     const el = [...grid.children].find((t) => t.dataset.k === k);
@@ -276,7 +276,7 @@ const DEVICE = `
 </script>`;
 
 // Settings: on each of the person's machines running Agent Devices, whether agents may borrow Chrome run straight on it,
-// without a container. The sidecar keeps the switch on each machine, with its default (on where the machine runs only its
+// without a container. The service keeps the switch on each machine, with its default (on where the machine runs only its
 // owner's calls).
 const CHROME_LOGO = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 48 48" width="28" height="28" aria-hidden="true"><defs><linearGradient id="a" x1="3.2173" y1="15" x2="44.7812" y2="15" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#d93025"/><stop offset="1" stop-color="#ea4335"/></linearGradient><linearGradient id="b" x1="20.7219" y1="47.6791" x2="41.5039" y2="11.6837" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#fcc934"/><stop offset="1" stop-color="#fbbc04"/></linearGradient><linearGradient id="c" x1="26.5981" y1="46.5015" x2="5.8161" y2="10.506" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#1e8e3e"/><stop offset="1" stop-color="#34a853"/></linearGradient></defs><circle cx="24" cy="23.9947" r="12" style="fill:#fff"/><path d="M3.2154,36A24,24,0,1,0,12,3.2154,24,24,0,0,0,3.2154,36ZM34.3923,18A12,12,0,1,1,18,13.6077,12,12,0,0,1,34.3923,18Z" style="fill:none"/><path d="M24,12H44.7812a23.9939,23.9939,0,0,0-41.5639.0029L13.6079,30l.0093-.0024A11.9852,11.9852,0,0,1,24,12Z" style="fill:url(#a)"/><circle cx="24" cy="24" r="9.5" style="fill:#1a73e8"/><path d="M34.3913,30.0029,24.0007,48A23.994,23.994,0,0,0,44.78,12.0031H23.9989l-.0025.0093A11.985,11.985,0,0,1,34.3913,30.0029Z" style="fill:url(#b)"/><path d="M13.6086,30.0031,3.218,12.006A23.994,23.994,0,0,0,24.0025,48L34.3931,30.0029l-.0067-.0068a11.9852,11.9852,0,0,1-20.7778.007Z" style="fill:url(#c)"/></svg>`;
 const SETTINGS = `
@@ -319,7 +319,7 @@ export default {
   advanced: true,
   description: "Devices your agents use: Linux with a browser, Windows, Android and iPhones",
   instructions: "Agent Devices are devices, on the person's own devices, that agents borrow (agent-devices_borrow, then agent-devices_give_back) and use through Computer Use (computer_*): Linux with a browser (the default kind), and Windows, Android and iPhone (Simulator) where one of their devices can run them, as agent-devices_kinds says. Borrow a Linux one for browsing: it's yours alone and deleted when given back. Where kinds lists chrome as available, kind chrome is quicker (under a second) and lighter: the device's own Chrome, without a container, whose borrow gives target_id and tab_id for the browser tools at once, with no browser_prepare or list_windows; its owner allows it in Agent Devices' Settings. A Mac's chrome starts without the browser profile. Windows, Android and iPhone devices are the person's lasting ones (by name, like windows or android), borrowed by one agent at a time, who leaves it as they found it; for anything that changes or might break it, borrow a throwaway copy (copy: true), which is made when the lasting one is busy too if there's room. Every kind takes computer_screen, computer_view and computer_use (computer_tools lists what each kind takes), and agent-devices_open, _install and _run. Browser profiles (like Personal or Work) are Vault items of type Browser profile: a borrowed device's browser starts signed in to the sites its profile was signed in to. agent-devices_profiles lists them and the sites each was used on. When a site needs the person to sign in, agent-devices_sign_in with profile and url gives a link for them: they sign in there and it's saved when they're done (agent-devices_save_profile, or in the Vault). Never sign in for them. The rest (create, start, stop, resize, backup, restore, move, delete) is for lasting devices the person keeps.",
-  uses: { sidecars: ["agent-devices"] },
+  uses: { services: ["agent-devices"] },
   // Browser profiles live in the Vault: the person adds one there (add_profile), signs in to sites in it (sign_in, then
   // save_profile), renames and deletes it there.
   vault: {
@@ -347,14 +347,14 @@ export default {
         const other = (input.kind && input.kind !== "linux") || input.device;
         const p = other ? null : await profile(ctx, input.profile);
         const pass = Object.fromEntries(["kind", "device", "copy", "by"].filter((k) => input[k] !== undefined).map((k) => [k, input[k]]));
-        return sidecar(ctx, "borrow", { for: input.for, ...pass, ...(input.screen === false ? { screen: false } : {}), ...(p ? { profile: given(p) } : {}) });
+        return service(ctx, "borrow", { for: input.for, ...pass, ...(input.screen === false ? { screen: false } : {}), ...(p ? { profile: given(p) } : {}) });
       },
     },
     give_back: {
       reads: false,
       description: "Give back a device you borrowed: a Linux or throwaway one is deleted with everything in it, its browser's changes to the profile too; a lasting one stays as it is, for the next agent. A device signing in to a profile saves it first.",
       input: { type: "object", required: ["device"], properties: { device: { type: "string", description: "the name agent-devices_borrow gave" } } },
-      run: (ctx, input) => sidecar(ctx, "give_back", input),
+      run: (ctx, input) => service(ctx, "give_back", input),
     },
     profiles: {
       reads: true,
@@ -373,7 +373,7 @@ export default {
       } },
       run: async (ctx, input) => {
         const p = await profile(ctx, input.item || input.profile || "default");
-        const r = await sidecar(ctx, "sign_in", { profile: given(p), ...(input.url ? { url: input.url } : {}), ...(input.minutes ? { minutes: input.minutes } : {}) });
+        const r = await service(ctx, "sign_in", { profile: given(p), ...(input.url ? { url: input.url } : {}), ...(input.minutes ? { minutes: input.minutes } : {}) });
         return { ...r, screen: { screen: "device", params: { device: r.device, on: r.on } }, then: { op: "save_profile", title: "Done Signing In" } };
       },
     },
@@ -383,7 +383,7 @@ export default {
       input: { type: "object", properties: { profile: named, item: { type: "string", description: "the profile's Vault item, instead of its name" }, device: deviceArg } },
       run: async (ctx, input) => {
         const p = await profile(ctx, input.item || input.profile || "default");
-        return sidecar(ctx, "save_profile", { profile: given(p), ...(input.device ? { device: input.device } : {}) });
+        return service(ctx, "save_profile", { profile: given(p), ...(input.device ? { device: input.device } : {}) });
       },
     },
     add_profile: {
@@ -400,7 +400,7 @@ export default {
     },
     _saved: {
       reads: false,
-      description: "The sidecar's: a browser profile was saved as a new blob, encrypted with a fresh salt, with the sites it was used on.",
+      description: "The service's: a browser profile was saved as a new blob, encrypted with a fresh salt, with the sites it was used on.",
       input: { type: "object", required: ["item", "blob", "salt"], properties: { item: { type: "string" }, blob: { type: "string" }, salt: { type: "string" }, sites: { type: "string" } } },
       run: async (ctx, { item, blob, salt, sites }) => {
         const all = await profiles(ctx);
@@ -423,86 +423,86 @@ export default {
       reads: false,
       description: "Create a lasting device and start it, for the person, on the first of their devices in run priority (device-activity_order) that runs its kind and has room: Linux with a browser of its own (the default), Android or an iPhone. Takes a minute or two. Agents borrow instead.",
       input: {"properties": {"device": {"description": "its name: lowercase letters, digits and dashes, like work-browser", "type": "string"}, "kind": kindArg, "size": sizeArg}, "required": ["device"], "type": "object"},
-      run: (ctx, input) => sidecar(ctx, "create", input),
+      run: (ctx, input) => service(ctx, "create", input),
     },
     resize: {
       reads: false,
       description: "Change how much CPU and memory a lasting device may use, at once, without restarting it.",
       input: {"properties": {"device": deviceArg, "size": sizeArg}, "required": ["device", "size"], "type": "object"},
-      run: (ctx, input) => sidecar(ctx, "resize", input),
+      run: (ctx, input) => service(ctx, "resize", input),
     },
     start: {
       reads: false,
       description: "Start a stopped (or paused) lasting device. It starts again after the device it's on restarts.",
       input: {"properties": {"device": deviceArg}, "required": ["device"], "type": "object"},
-      run: (ctx, input) => sidecar(ctx, "start", input),
+      run: (ctx, input) => service(ctx, "start", input),
     },
     stop: {
       reads: false,
       description: "Stop a lasting device. Its files and sign-ins stay; it stays stopped until agent-devices_start.",
       input: {"properties": {"device": deviceArg}, "required": ["device"], "type": "object"},
-      run: (ctx, input) => sidecar(ctx, "stop", input),
+      run: (ctx, input) => service(ctx, "stop", input),
     },
     delete: {
       reads: false,
       confirm: true,
       description: "Delete a lasting device and everything in it, its sign-ins too, for good (agent-devices_backup first keeps a copy). Only when the person asked. A borrowed one goes with agent-devices_give_back.",
       input: {"properties": {"device": deviceArg}, "required": ["device"], "type": "object"},
-      run: (ctx, input) => sidecar(ctx, "delete", input),
+      run: (ctx, input) => service(ctx, "delete", input),
     },
     backup: {
       reads: false,
       description: "Back up a device's home folder (its files and sign-ins, without caches) where any of your devices can fetch it, keeping the newest 5. agent-devices_restore makes a device from one.",
       input: {"properties": {"device": deviceArg}, "required": ["device"], "type": "object"},
-      run: (ctx, input) => sidecar(ctx, "backup", input),
+      run: (ctx, input) => service(ctx, "backup", input),
     },
     backups: {
       reads: true,
       description: "Backups of agent devices, from all of your devices, newest first: each one's device, when (at, ISO 8601), its bytes, the device's size, and its blob (for agent-devices_restore).",
       input: {"properties": {"device": {"description": "only this agent device's backups, by its name", "type": "string"}, "here": {"description": "only the backups kept on the device you call from", "type": "boolean"}}, "type": "object"},
-      run: (ctx, input) => sidecar(ctx, "backups", input),
+      run: (ctx, input) => service(ctx, "backups", input),
     },
     restore: {
       reads: false,
       description: "Make a new agent device, on the device you call from, from a backup: the newest of the device named, or the one with blob. It never replaces a device that's there: give as for another name.",
       input: {"properties": {"as": {"description": "the new device's name; default the backed-up one's", "type": "string"}, "blob": {"description": "a particular backup's blob, from agent-devices_backups", "type": "string"}, "device": {"description": "the backed-up device's name, from agent-devices_backups", "type": "string"}, "size": sizeArg}, "type": "object"},
-      run: (ctx, input) => sidecar(ctx, "restore", input),
+      run: (ctx, input) => service(ctx, "restore", input),
     },
     move: {
       reads: false,
       description: "Move a lasting device to another of your devices: backs it up, restores it there and stops it here, kept until you delete it. Takes a few minutes.",
       input: {"properties": {"device": deviceArg, "to": {"description": "one of your devices, by name, from agent-devices_kinds", "type": "string"}}, "required": ["device", "to"], "type": "object"},
-      run: (ctx, input) => sidecar(ctx, "move", input),
+      run: (ctx, input) => service(ctx, "move", input),
     },
     kinds: {
       reads: true,
       description: "Which kinds of agent device each of your devices runs (linux, chrome, windows, android, iphone, as agent-devices_borrow's kind takes them; one it can't says why in unavailable): what input each kind takes, whether there's room for another, how many lasting ones nobody has borrowed, and the device's memory to spare (free_gb, in GB).",
       input: { type: "object", properties: {} },
-      run: (ctx, input) => sidecar(ctx, "kinds", input),
+      run: (ctx, input) => service(ctx, "kinds", input),
     },
     open: {
       reads: false,
       description: "Open a web address in a device's browser: Chrome on Linux, Edge on Windows, the default browser on Android and an iPhone. To read and act on the page on Linux, use computer_browser_prepare and computer_get_browser_state.",
       input: { type: "object", required: ["device", "url"], properties: { device: deviceArg, url: { type: "string", description: "the address, like https://example.com" } } },
-      run: (ctx, input) => sidecar(ctx, "open", input),
+      run: (ctx, input) => service(ctx, "open", input),
     },
     install: {
       reads: false,
       description: "Install an app on a device, and say how it went: a file on the device it's on, a URL, or a package's name.",
       input: { type: "object", required: ["device", "app"], properties: { device: deviceArg, app: { type: "string", description: "a file's path on the device it's on, or a URL, to an .apk (Android), .msi, .msix or .exe (Windows), a simulator .app (iPhone) or a .deb (Linux); or a package's name: a winget id like Mozilla.Firefox, an apt package, or an Android package like com.whatsapp (it opens its Play Store page)" } } },
-      run: (ctx, input) => sidecar(ctx, "install", input),
+      run: (ctx, input) => service(ctx, "install", input),
     },
     run: {
       reads: false,
       description: "Run a command on an agent device and give its output. For a command on one of your own devices, shell_run.",
       input: { type: "object", required: ["device", "command"], properties: { device: deviceArg, command: { type: "string", description: "PowerShell on Windows, like Get-Process; a shell command on Android and Linux (as root), like ls /sdcard; on an iPhone, a program in the simulator, as simctl spawn takes it" } } },
-      run: (ctx, input) => sidecar(ctx, "run", input),
+      run: (ctx, input) => service(ctx, "run", input),
     },
     reach: {
       reads: false,
       description: "Let a Windows, Android or iPhone device reach a port on the device it's on, at the same port on its own 127.0.0.1, until it stops: for an app on it to reach a server you run there, like a try install.",
       input: { type: "object", required: ["device", "port"], properties: { device: deviceArg, port: { type: "integer", description: "the port your server listens on, on the device the agent device is on, like 4791" } } },
-      run: (ctx, input) => sidecar(ctx, "reach", input),
+      run: (ctx, input) => service(ctx, "reach", input),
     },
     adopt: {
       reads: false,
@@ -513,15 +513,15 @@ export default {
         port: { type: "integer", description: "windows: its SSH port on the device it's on; android: its console port, like 5554" }, display: { type: "integer", description: "windows: its VNC display" },
         cpus: { type: "integer", description: "windows: CPUs it starts with" }, gb: { type: "integer", description: "windows: memory it starts with, in GB" },
       } },
-      run: (ctx, { on, ...input }) => ctx.sidecars["agent-devices"].adopt({ ...input, here: true }, { device: on }),
+      run: (ctx, { on, ...input }) => ctx.services["agent-devices"].adopt({ ...input, here: true }, { device: on }),
     },
     _list: {
       reads: true,
-      description: "For the page: the agent devices on all of your devices, as the sidecars last knew them: the device each is on, its kind, whether it's running, who has borrowed it and what for. None if it's the one the page has (have, its hash).",
+      description: "For the page: the agent devices on all of your devices, as the services last knew them: the device each is on, its kind, whether it's running, who has borrowed it and what for. None if it's the one the page has (have, its hash).",
       input: { type: "object", properties: { have: { type: "string" } } },
       // Only what the page shows, so it's the same until something it shows changes, and then the page is sent it.
       run: async (ctx, { have }) => {
-        const r = await sidecar(ctx, "list", { kept: true });
+        const r = await service(ctx, "list", { kept: true });
         const devices = (r.devices || []).map(({ name, on, kind, state, borrowed, spare, of }) => ({ name, on, kind, state, borrowed, spare, of }));
         const hash = fnv(JSON.stringify([devices, r.unreachable]));
         return have === hash ? { same: true, hash } : { devices, unreachable: r.unreachable, hash };
@@ -531,20 +531,20 @@ export default {
       reads: true,
       description: "For the page: a small picture of a device, the one the device it's on last took, or none if it's the one the page has (have, its hash).",
       input: { type: "object", additionalProperties: true },
-      run: (ctx, input) => sidecar(ctx, "screen", { ...input, kept: true }, input.on),
+      run: (ctx, input) => service(ctx, "screen", { ...input, kept: true }, input.on),
     },
     _view: {
       reads: true,
       description: "For the page: a link to watch and use a device.",
       input: { type: "object", additionalProperties: true },
-      run: (ctx, input) => sidecar(ctx, "view", input),
+      run: (ctx, input) => service(ctx, "view", input),
     },
     _chrome: {
       reads: true,
       description: "For Settings: each of your devices running Agent Devices, and whether agents may borrow Chrome run straight on it.",
       input: { type: "object", properties: {} },
       run: async (ctx) => {
-        const r = await sidecar(ctx, "chrome", {});
+        const r = await service(ctx, "chrome", {});
         return { devices: (r.devices || []).map(({ on, allowed, can }) => ({ on, allowed, can })).sort((a, b) => a.on.localeCompare(b.on)) };
       },
     },
@@ -552,7 +552,7 @@ export default {
       reads: false,
       description: "For Settings: lets agents borrow Chrome run straight on one of your devices, or stops them.",
       input: { type: "object", required: ["on", "allowed"], properties: { on: { type: "string" }, allowed: { type: "boolean" } } },
-      run: (ctx, { on, allowed }) => sidecar(ctx, "set_chrome", { on, allowed }),
+      run: (ctx, { on, allowed }) => service(ctx, "set_chrome", { on, allowed }),
     },
     _running: {
       reads: true,

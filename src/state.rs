@@ -85,15 +85,15 @@ fn install(m: &Members, me: &str, settings: &Map<String, Value>, here: &Here) ->
                 "key": hex(&s.key), "seal": hex(&s.seal), "name": s.name, "user": s.user, "me": false, "here": false, "online": false,
                 "roles": s.roles, "service": s.service, "serves_me": m.serves(&s.key, me),
                 "runs_for": m.scopes().iter().filter(|scope| m.runs_for(&s.key, scope)).map(|scope| scope.to_string()).collect::<Vec<_>>(),
-                "build": null, "target": null, "sidecars": [], "installed_sidecars": [],
-                "removed_sidecars": m.sidecars.iter().filter(|((k, _), d)| *k == s.key && d.removed()).map(|((_, name), d)| json!({ "name": name, "by": m.users.get(&d.by).map(|u| &u.name), "time": d.time })).collect::<Vec<_>>(),
+                "build": null, "target": null, "services": [], "installed_services": [],
+                "removed_services": m.services.iter().filter(|((k, _), d)| *k == s.key && d.removed()).map(|((_, name), d)| json!({ "name": name, "by": m.users.get(&d.by).map(|u| &u.name), "time": d.time })).collect::<Vec<_>>(),
                 "load": null,
             });
             device.as_object_mut().unwrap().extend(now);
             device
         })
         .collect();
-    // Each device's place in run priority's order, 0 first, for sidecars that pick one themselves; on the same number,
+    // Each device's place in run priority's order, 0 first, for services that pick one themselves; on the same number,
     // by name.
     let mut by_order: Vec<usize> = (0..devices.len()).collect();
     by_order.sort_by_cached_key(|&n| {

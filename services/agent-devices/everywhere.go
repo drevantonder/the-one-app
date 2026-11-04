@@ -17,7 +17,7 @@ import (
 	"time"
 )
 
-// This sidecar reaches the same sidecar on the user's other devices through
+// This service reaches the same service on the user's other devices through
 // its own node's local API, as any app would: list and backups show every
 // device's agent devices, and move restores one on another. Calls passed on carry
 // here: true, so they go no further.
@@ -25,7 +25,7 @@ import (
 // callNode runs op on the device on (by name; "" for wherever the node picks) and
 // returns its result.
 func (ds *devices) callNode(ctx context.Context, on, op string, input map[string]any) (json.RawMessage, error) {
-	req := map[string]any{"app": app, "sidecar": app, "op": op, "input": input}
+	req := map[string]any{"app": app, "service": app, "op": op, "input": input}
 	if on != "" {
 		req["device"] = on
 	}
@@ -91,7 +91,7 @@ func (ds *devices) ordered(ctx context.Context) (me string, all []string, err er
 		Name     string
 		Here     bool
 		Online   bool
-		Sidecars []string
+		Services []string
 		Order    int
 	}
 	var st struct {
@@ -103,7 +103,7 @@ func (ds *devices) ordered(ctx context.Context) (me string, all []string, err er
 	}
 	slices.SortStableFunc(st.Install.Devices, func(a, b host) int { return cmp.Compare(a.Order, b.Order) })
 	for _, s := range st.Install.Devices {
-		if s.Here || s.Online && slices.Contains(s.Sidecars, app) {
+		if s.Here || s.Online && slices.Contains(s.Services, app) {
 			all = append(all, s.Name)
 		}
 	}

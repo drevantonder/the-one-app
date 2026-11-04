@@ -78,7 +78,7 @@ pub mod schedules;
 #[cfg(feature = "node")]
 pub mod serverless;
 #[cfg(feature = "node")]
-pub mod sidecars;
+pub mod services;
 #[cfg(feature = "node")]
 pub mod service;
 pub mod kernel;

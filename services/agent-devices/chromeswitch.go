@@ -16,7 +16,7 @@ import (
 // Whether a machine runs chrome devices is its owner's to say: a chrome device is the machine's own Chrome, outside
 // any container, reaching what the machine reaches. Until they say, it does where the machine runs only its owner's
 // own calls, and doesn't where it runs a group's, global's or another person's too (Where Things Run): their data is
-// on it. What the owner chose is kept in this sidecar's folder, and holds whatever the machine comes to run.
+// on it. What the owner chose is kept in this service's folder, and holds whatever the machine comes to run.
 
 // chromeAllowed is whether a machine runs chrome devices: as its owner chose, or by default only where it runs no one
 // else's calls.

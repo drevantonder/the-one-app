@@ -1,15 +1,15 @@
 #!/bin/sh
-# Installs a sidecar as the one-<sidecar> service on a device, here or over ssh: ./install.sh whatsapp [host]. It's a
+# Installs a service as the one-<service> service on a device, here or over ssh: ./install.sh whatsapp [host]. It's a
 # service endpoint of its own (src/service.rs), which needs no node there, only this program: one with a folder here is
-# a Go program, built for the device and started by `one sidecars host`; any other is one this program hosts (`one
-# sidecars serve`). It's yours, in the One App of the device you run this on, by a one-time install link made here, and
+# a Go program, built for the device and started by `one services host`; any other is one this program hosts (`one
+# services serve`). It's yours, in the One App of the device you run this on, by a one-time install link made here, and
 # shows a code that this device approves it with (`one devices approve <code>`), which this prints. On Linux it's a systemd service; on a Mac, a
-# launch agent of the user's. CONFIG=path/to/config.toml installs it as <cli>-<sidecar>, for that white label: its CLI
+# launch agent of the user's. CONFIG=path/to/config.toml installs it as <cli>-<service>, for that white label: its CLI
 # and data folder (the node service's <CLI>_HOME there, if it has one).
 set -eu
 config=${CONFIG:+$(cd "$(dirname "$CONFIG")" && pwd)/$(basename "$CONFIG")}
 cd "$(dirname "$0")"
-sidecar=$1 name=one-$1 node=one env= home='$HOME/.local/share/one'
+service=$1 name=one-$1 node=one env= home='$HOME/.local/share/one'
 host=${2:-}
 on() { if [ -n "$host" ]; then ssh "$host" "$@" </dev/null; else sh -c "$*"; fi; }
 if [ -n "$config" ]; then
@@ -19,10 +19,10 @@ if [ -n "$config" ]; then
 	home=$(on "systemctl show -p Environment $cli 2>/dev/null | tr ' ' '\n' | sed -n 's/^${upper}_HOME=//p'")
 	home=${home:-'$HOME'/.local/share/$cli}
 	env="${upper}_HOME=$home"
-	[ ! -d "$sidecar" ] || env="$env $(echo "$sidecar" | tr a-z- A-Z_)_DATA=$home/$sidecar"
+	[ ! -d "$service" ] || env="$env $(echo "$service" | tr a-z- A-Z_)_DATA=$home/$service"
 fi
 # The One App it's for, this device's, and whose: this device's person's, by a one-time secret made here.
-link=$($node sidecars install-link)
+link=$($node services install-link)
 set -- $(on uname -sm)
 os=$(echo "$1" | tr A-Z a-z)
 case $2 in x86_64) arch=amd64 ;; *) arch=arm64 ;; esac
@@ -32,23 +32,23 @@ if ! on "test -x ~/.local/bin/$node"; then
 	on "mkdir -p ~/.local/bin"
 	if [ -n "$host" ]; then scp -q "$(command -v "$node")" "$host:.local/bin/$node"; else cp "$(command -v "$node")" ~/.local/bin/; fi
 fi
-if [ -d "$sidecar" ]; then
-	(cd "$sidecar" && CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -ldflags "-X main.built=$(git rev-parse --short=12 HEAD)$(git diff --quiet HEAD -- . || echo +dirty)" -o "../$name" .)
+if [ -d "$service" ]; then
+	(cd "$service" && CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -ldflags "-X main.built=$(git rev-parse --short=12 HEAD)$(git diff --quiet HEAD -- . || echo +dirty)" -o "../$name" .)
 	if [ -n "$host" ]; then scp -q "$name" "$host:/tmp/$name"; else cp "$name" "/tmp/$name"; fi
 	rm "$name"
-	run='$HOME/.local/bin/'"$node"' sidecars host '"$sidecar"' $HOME/.local/bin/'"$name"' --install '"$link" install='mv /tmp/$name ~/.local/bin/$name'
+	run='$HOME/.local/bin/'"$node"' services host '"$service"' $HOME/.local/bin/'"$name"' --install '"$link" install='mv /tmp/$name ~/.local/bin/$name'
 else
 	# A Go program it was before goes.
-	run='$HOME/.local/bin/'"$node"' sidecars serve '"$sidecar"' --install '"$link" install='rm -f ~/.local/bin/$name'
+	run='$HOME/.local/bin/'"$node"' services serve '"$service"' --install '"$link" install='rm -f ~/.local/bin/$name'
 fi
 # Says the code to approve it with, once it's asked; or that it's approved already.
 code() {
 	for _ in 1 2 3 4 5 6 7 8 9 10; do
-		c=$(on "cat $home/services/$sidecar/code 2>/dev/null" || true)
-		[ -z "$c" ] || { echo "Approve $sidecar here, where its link was made: $node devices approve $c"; return; }
+		c=$(on "cat $home/services/$service/code 2>/dev/null" || true)
+		[ -z "$c" ] || { echo "Approve $service here, where its link was made: $node devices approve $c"; return; }
 		sleep 1
 	done
-	echo "$sidecar is running, approved already."
+	echo "$service is running, approved already."
 }
 if [ "$os" = darwin ]; then
 [ -z "$config" ] || { echo "CONFIG installs on Linux only, for now" >&2; exit 1; }

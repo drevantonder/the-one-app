@@ -2,7 +2,7 @@ import Foundation
 import SQLite3
 
 /// iMessage: reads the Messages database (which needs Full Disk Access) and sends through the Messages app.
-struct MessagesApp: Sidecar {
+struct MessagesApp: Service {
     let app = "imessage"
 
     var description: [String: Any] {

@@ -123,20 +123,20 @@ fn every_command() -> String {
                                        the recovery key on stdin, with or without an install here
   {CLI} app delete|restore|erase <app> delete an app you own (to Recently Deleted), restore it, or erase it for good
   {CLI} schedules                      every schedule of the apps installed for you: when, as whom, and how it last went
-  {CLI} sidecars                       the sidecars on each of your devices: version, and who installed them
-  {CLI} sidecars remove|add <name> [--device <name>]
-                                       remove a sidecar from a device you own (here by default), or allow it there
-                                       again; sidecars/install.sh <name> [device] installs one and allows it
-  {CLI} sidecars serve <name> [--install <link>]
-                                       run a sidecar this program hosts ({hosted}) as a service of its own, which
+  {CLI} services                       the services on each of your devices: version, and who installed them
+  {CLI} services remove|add <name> [--device <name>]
+                                       remove a service from a device you own (here by default), or allow it there
+                                       again; services/install.sh <name> [device] installs one and allows it
+  {CLI} services serve <name> [--install <link>]
+                                       run a service this program hosts ({hosted}) as a service of its own, which
                                        needs no node here: the first time, --install says which One App it's for (the
                                        link install-link prints on one of its devices), and it shows a code to approve
                                        it with ({CLI} devices approve <code> on one of your devices); as the service
-                                       sidecars/install.sh installs
-  {CLI} sidecars host <name> <program> [--install <link>]
-                                       the same for a sidecar in another language: starts the program, which registers
+                                       services/install.sh installs
+  {CLI} services host <name> <program> [--install <link>]
+                                       the same for a service in another language: starts the program, which registers
                                        with it as it would with a node
-  {CLI} sidecars install-link          what --install takes, for a service of yours: your One App's address and a
+  {CLI} services install-link          what --install takes, for a service of yours: your One App's address and a
                                        one-time secret, good for a day; approve the service on this device
   {CLI} devices keep|stop <app> on <device> [--scope user|global|<group>] [--days <n>]
                                        keep an app running on one of your devices (its schedules run there, with that
@@ -171,7 +171,7 @@ fn every_command() -> String {
   {CLI} help [all]                     what to start with; with all, this
 
 {NAME} holds one install. For another context, run that context's own app.",
-        hosted = one::sidecars::hosted().iter().map(|h| h.name).collect::<Vec<_>>().join(", ")
+        hosted = one::services::hosted().iter().map(|h| h.name).collect::<Vec<_>>().join(", ")
     )
 }
 
@@ -770,11 +770,11 @@ fn run(args: Vec<String>) -> Result<()> {
             post("/v1/retire", json!({ "app": app, "how": past }))?;
             println!("{app} is {past}{}.", if *how == "delete" { ": it's in the App Store's Recently Deleted until you restore or erase it" } else { "" });
         }
-        ["sidecars"] => {
+        ["services"] => {
             let state = get("/v1/state")?;
             for s in state["install"]["devices"].as_array().into_iter().flatten() {
-                let installed = s["installed_sidecars"].as_array().cloned().unwrap_or_default();
-                let removed = s["removed_sidecars"].as_array().cloned().unwrap_or_default();
+                let installed = s["installed_services"].as_array().cloned().unwrap_or_default();
+                let removed = s["removed_services"].as_array().cloned().unwrap_or_default();
                 if installed.is_empty() && removed.is_empty() {
                     continue;
                 }
@@ -793,15 +793,15 @@ fn run(args: Vec<String>) -> Result<()> {
                 }
             }
         }
-        ["sidecars", "serve", name] => one::service::serve(name, flags.get("install").and_then(Value::as_str))?,
-        ["sidecars", "host", name, program @ ..] if !program.is_empty() => {
+        ["services", "serve", name] => one::service::serve(name, flags.get("install").and_then(Value::as_str))?,
+        ["services", "host", name, program @ ..] if !program.is_empty() => {
             let program: Vec<String> = program.iter().map(|p| p.to_string()).collect();
             one::service::host(name, &program, flags.get("install").and_then(Value::as_str))?
         }
-        ["sidecars", "install-link"] => println!("{}", post("/v1/services/install-link", json!({}))?["link"].as_str().unwrap_or("")),
-        ["sidecars", how @ ("remove" | "add"), name] => {
+        ["services", "install-link"] => println!("{}", post("/v1/services/install-link", json!({}))?["link"].as_str().unwrap_or("")),
+        ["services", how @ ("remove" | "add"), name] => {
             let device = flags.get("device").and_then(Value::as_str);
-            post("/v1/sidecar", json!({ "name": name, "device": device, "installed": *how == "add" }))?;
+            post("/v1/service", json!({ "name": name, "device": device, "installed": *how == "add" }))?;
             let on = device.map(|s| format!("on {s}")).unwrap_or_else(|| "here".into());
             // Allowing it runs nothing: it serves only where it's installed and running.
             let state = get("/v1/state")?;
@@ -809,11 +809,11 @@ fn run(args: Vec<String>) -> Result<()> {
                 Some(d) => s["name"] == d,
                 None => s["here"] == true,
             });
-            let runs = there.is_some_and(|s| s["sidecars"].as_array().into_iter().flatten().any(|n| n == *name));
+            let runs = there.is_some_and(|s| s["services"].as_array().into_iter().flatten().any(|n| n == *name));
             match (*how, runs) {
-                ("remove", _) => println!("{name} is removed {on}: it isn't served there until an owner adds it again ({CLI} sidecars add {name})."),
+                ("remove", _) => println!("{name} is removed {on}: it isn't served there until an owner adds it again ({CLI} services add {name})."),
                 (_, true) => println!("{name} runs {on}."),
-                (_, false) => println!("{name} may run {on}, but it isn't installed there: sidecars/install.sh {name} in {NAME}'s code installs it, as the device's owner."),
+                (_, false) => println!("{name} may run {on}, but it isn't installed there: services/install.sh {name} in {NAME}'s code installs it, as the device's owner."),
             }
         }
         ["schedules"] => {
@@ -1283,7 +1283,7 @@ fn ago(ms: u64) -> String {
 }
 
 /// Puts the usual tool folders on PATH: launchd starts the Mac's node with almost none, and the shell, agents and
-/// sidecars it starts need Homebrew's and the user's own tools.
+/// services it starts need Homebrew's and the user's own tools.
 fn usual_path() {
     let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
     let mut path: Vec<PathBuf> = std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect()).unwrap_or_default();
@@ -1337,7 +1337,7 @@ async fn serve(is_try: bool, args: &[String]) -> Result<()> {
         Some(h) => tokio::net::TcpListener::from_std(h.listener.try_clone()?)?,
         None => listen(&dir).await?,
     };
-    let node = Node::start(&dir, one::sidecars::built_in()).await?;
+    let node = Node::start(&dir, one::services::built_in()).await?;
     // Git here reaches the install's repos at their address, as on every computer of its person's.
     if !is_try && let Ok(address) = node.address() {
         std::thread::spawn(move || {
@@ -1660,7 +1660,7 @@ fn mcp_answer(msg: &Value, agent: &mut Option<String>, mode: Mode, stdio: bool) 
             uri if uri.starts_with("skill://") => skill_resource(uri),
             uri => mcp_apps::read(uri),
         },
-        // Skills over MCP (SEP-2640): the same skills the agents sidecar writes into harnesses' folders.
+        // Skills over MCP (SEP-2640): the same skills the agents service writes into harnesses' folders.
         "skills/list" => Ok(json!({ "resultType": "complete", "skills": skills().iter().map(skill_entry).collect::<Vec<_>>(), "ttlMs": 60_000, "cacheScope": "session" })),
         "skills/get" => {
             let uri = msg["params"]["uri"].as_str().unwrap_or("");
@@ -2197,7 +2197,7 @@ fn tools() -> Result<Vec<Value>, Value> {
     }
     for app in apps.as_array().into_iter().flatten() {
         let name = app["name"].as_str().unwrap_or("");
-        // Operations starting with `_` are for the node, such as a sidecar's `_screen`.
+        // Operations starting with `_` are for the node, such as a service's `_screen`.
         for op in app["ops"].as_array().into_iter().flatten().filter(|op| !op["name"].as_str().unwrap_or("").starts_with('_')) {
             tools.push(json!({ "name": format!("{name}_{}", op["name"].as_str().unwrap_or("")), "description": op["description"], "inputSchema": ops::mcp_schema(app, op), "annotations": ops::mcp_annotations(op) }));
         }

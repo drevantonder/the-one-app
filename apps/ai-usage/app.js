@@ -295,7 +295,7 @@ export default {
   description: "Every AI plan's limits, and whether the pace lasts to reset",
   instructions: `Every AI plan's limits in the providers' own words: what's left, the pace against what's expected, and whether it lasts to reset. ai-usage_status is the full read (fresh when older than 5 minutes), merged from the AI Usage service on every machine that has one. Agents get the last readings with their first prompt, then a warning when a window is nearly out or outruns its reset.`,
 
-  uses: { sidecars: ["ai-usage"] },
+  uses: { services: ["ai-usage"] },
 
   // Fresh readings for agents' prompts, from the device that keeps AI Usage running (one devices keep ai-usage on <it>).
   schedules: { refresh: { op: "status", every: "5m", description: "Reads every plan, so agents' prompts get fresh numbers" } },
@@ -331,7 +331,7 @@ export default {
         const ids = provider === "all" ? Object.keys(PROVIDERS) : [provider];
         // One read of every machine for all the providers it asks, once any of them is older than FRESH.
         let asked = null;
-        const ask = () => (asked ??= ctx.sidecars["ai-usage"].usage({}, { device: device || "all" }).then((answers) => ({ answers }), (err) => ({ problem: String(err?.message || err).slice(0, 160) })));
+        const ask = () => (asked ??= ctx.services["ai-usage"].usage({}, { device: device || "all" }).then((answers) => ({ answers }), (err) => ({ problem: String(err?.message || err).slice(0, 160) })));
         const all = (await Promise.all(ids.map((id) => refresh(b, id, ask, now)))).flat();
         // Nothing to show because no machine could be asked is the one problem; nothing because none has a sign-in, none.
         const problem = !all.length && asked ? (await asked).problem || null : null;

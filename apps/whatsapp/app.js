@@ -1,12 +1,12 @@
 // WhatsApp: the person's WhatsApp accounts, each a phone linked to one of their devices as WhatsApp Desktop is linked.
-// The whatsapp sidecar links the phone and keeps its messages, on each device whose owner installed it; this app is
+// The whatsapp service links the phone and keeps its messages, on each device whose owner installed it; this app is
 // what people and agents use, and a connector.
 
-/// Runs one of the whatsapp sidecar's operations, wherever it runs for the caller. When none of their devices runs it,
+/// Runs one of the whatsapp service's operations, wherever it runs for the caller. When none of their devices runs it,
 /// says what's needed instead of how the call failed; when a chat isn't found, where to find it.
-async function sidecar(ctx, op, input) {
+async function service(ctx, op, input) {
   try {
-    return await ctx.sidecars.whatsapp[op](input);
+    return await ctx.services.whatsapp[op](input);
   } catch (err) {
     const why = String(err.message);
     if (why.includes("no device runs whatsapp for you")) throw new Error(NEEDS);
@@ -23,13 +23,13 @@ const CHAT = "the chat: its name as whatsapp_chats gives it, or a part of it onl
 const LIMIT = { type: "integer", description: "at most this many; default 30" };
 const LINES = "one a line, \"[3 Nov 2026 09:00] Sam: text\", times in the time zone of the device it's linked on, and You for the person";
 
-/// The caller's online devices that run the sidecar, by name.
+/// The caller's online devices that run the service, by name.
 async function running(ctx) {
-  return (await ctx.devices()).filter((s) => s.online && (s.sidecars || []).includes("whatsapp")).map((s) => s.name);
+  return (await ctx.devices()).filter((s) => s.online && (s.services || []).includes("whatsapp")).map((s) => s.name);
 }
 
 // Each account is a Vault item too, so the person's Vault lists it: its number and the device it's linked on, plain,
-// with no secret, since the link itself stays in the sidecar on that device. Linking finishes on the phone after
+// with no secret, since the link itself stays in the service on that device. Linking finishes on the phone after
 // sign_in returns, so listing the accounts makes the items of new ones, and lets go of those whose device, online,
 // no longer has them.
 const TYPE = "WhatsApp account";
@@ -60,7 +60,7 @@ export default {
   connector: true,
   needs: "Needs a device of yours to link your phone to",
   instructions: "WhatsApp is the person's WhatsApp accounts, each a phone linked to one of their devices, as WhatsApp Desktop is linked; calls find the device. whatsapp_accounts lists them; the others take account, the first by default. whatsapp_chats lists recent chats; whatsapp_read reads one, newest last; whatsapp_search finds messages. Each list pages back with limit and skip. whatsapp_send sends a real message to a real person: send only what the user asked to send, to whom they asked. Reading never tells WhatsApp a message was read. whatsapp_move moves a link to another of their devices; whatsapp_sign_out unlinks one and deletes its messages, only when the user asks.",
-  uses: { sidecars: ["whatsapp"] },
+  uses: { services: ["whatsapp"] },
   vault: VAULT,
 
   ops: {
@@ -68,11 +68,11 @@ export default {
       reads: true,
       description: "The WhatsApp accounts linked on any of your devices, this one's first: each { account, ok, device }, account its number and device where it's linked, with why when ok is false. Give account to the others to pick one.",
       input: { type: "object", properties: {} },
-      // A connector lists no accounts, rather than failing, where no device runs its sidecar; its settings say why.
+      // A connector lists no accounts, rather than failing, where no device runs its service; its settings say why.
       async run(ctx, input) {
         const devices = await running(ctx);
         if (!devices.length) return [];
-        const listed = await sidecar(ctx, "accounts", input);
+        const listed = await service(ctx, "accounts", input);
         await keep(ctx, listed, devices).catch(() => {}); // a call that only reads lists them all the same
         return listed;
       },
@@ -81,13 +81,13 @@ export default {
       reads: true,
       description: "Whether WhatsApp is linked and connected on this device, as which number, and how many messages it keeps here; or on which of your devices it's linked instead. For why chats are missing; whatsapp_accounts lists every account.",
       input: { type: "object", properties: {} },
-      run: (ctx, input) => sidecar(ctx, "status", input),
+      run: (ctx, input) => service(ctx, "status", input),
     },
     sign_in: {
       reads: false,
       description: "For the person: link a WhatsApp account to this device, as WhatsApp Desktop is linked. Gives a QR code to scan on their phone (WhatsApp > Settings > Linked devices > Link a device) and, given phone, a code to type there instead (Link with phone number instead), for when the QR code shows on the phone itself. Chats arrive over the next few minutes.",
       input: { type: "object", properties: { phone: { type: "string", description: "the account's number with its country code, like +61 400 000 000, for a code to type on the phone" } } },
-      run: (ctx, input) => sidecar(ctx, "sign_in", input),
+      run: (ctx, input) => service(ctx, "sign_in", input),
     },
     chats: {
       reads: true,
@@ -101,7 +101,7 @@ export default {
           skip: { type: "integer", description: "leave out this many of the most recent, to page back: 30 for the second page of 30" },
         },
       },
-      run: (ctx, input) => sidecar(ctx, "chats", input),
+      run: (ctx, input) => service(ctx, "chats", input),
     },
     read: {
       reads: true,
@@ -116,7 +116,7 @@ export default {
           skip: { type: "integer", description: "leave out this many of the newest, to read further back: 30 for the 30 before the latest 30" },
         },
       },
-      run: (ctx, input) => sidecar(ctx, "read", input),
+      run: (ctx, input) => service(ctx, "read", input),
     },
     search: {
       reads: true,
@@ -132,7 +132,7 @@ export default {
           skip: { type: "integer", description: "leave out this many of the newest matches, to page back" },
         },
       },
-      run: (ctx, input) => sidecar(ctx, "search", input),
+      run: (ctx, input) => service(ctx, "search", input),
     },
     send: {
       reads: false,
@@ -147,13 +147,13 @@ export default {
           text: { type: "string", description: "the message, exactly as the person approved it" },
         },
       },
-      run: (ctx, input) => sidecar(ctx, "send", input),
+      run: (ctx, input) => service(ctx, "send", input),
     },
     move: {
       reads: false,
       description: "Move a WhatsApp link, with its kept messages, from the device it's on to another of yours that runs WhatsApp, without linking again: the phone's Linked devices list doesn't change. It's deleted from the first device once the other has it. Says where it went.",
       input: { type: "object", required: ["to"], properties: { account: ACCOUNT, to: { type: "string", description: "the device to move it to, by its name as whatsapp_status or the App Store's WhatsApp page shows" } } },
-      run: (ctx, input) => sidecar(ctx, "move", input),
+      run: (ctx, input) => service(ctx, "move", input),
     },
     sign_out: {
       reads: false,
@@ -161,9 +161,9 @@ export default {
       description: "Unlink a WhatsApp account: removes this device from the phone's linked devices and deletes the messages kept here. It can't be undone: linking again needs the phone, and the deleted messages don't come back. Only when the person asks to sign out.",
       input: { type: "object", properties: { account: { type: "string", description: "the account's number, as whatsapp_accounts lists them; needed when several are linked here" } } },
       async run(ctx, input) {
-        const out = await sidecar(ctx, "sign_out", input);
+        const out = await service(ctx, "sign_out", input);
         const devices = await running(ctx);
-        await keep(ctx, await sidecar(ctx, "accounts", {}), devices);
+        await keep(ctx, await service(ctx, "accounts", {}), devices);
         return out;
       },
     },
@@ -171,7 +171,7 @@ export default {
       reads: true,
       description: "The QR code and phone code while a phone is linking, for the settings screen.",
       input: { type: "object", properties: {} },
-      run: (ctx, input) => sidecar(ctx, "_pairing", input),
+      run: (ctx, input) => service(ctx, "_pairing", input),
     },
     _running: {
       reads: true,

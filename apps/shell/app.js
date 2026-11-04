@@ -1,11 +1,11 @@
-// Shell: commands run on the person's own devices. The shell sidecar, built into every device's node, runs them for
+// Shell: commands run on the person's own devices. The shell service, built into every device's node, runs them for
 // its local user and logs each where only they can read it; this app is what people and agents use.
 
-/// Runs one of the shell sidecar's operations, wherever it runs for the caller. When none of their devices runs it,
+/// Runs one of the shell service's operations, wherever it runs for the caller. When none of their devices runs it,
 /// says what's needed instead of how the call failed.
-async function sidecar(ctx, op, input) {
+async function service(ctx, op, input) {
   try {
-    return await ctx.sidecars.shell[op](input);
+    return await ctx.services.shell[op](input);
   } catch (err) {
     if (String(err.message).includes("no device runs shell for you")) throw new Error(NEEDS);
     throw err;
@@ -25,14 +25,14 @@ export default {
   connector: true,
   needs: "Needs one of your devices",
   instructions: "Run a shell command on one of your own devices with shell_run; give device (a name from shell_accounts) to choose which, or it runs on the first online one in Device Activity's order. Every command is logged where only you can read it.",
-  uses: { sidecars: ["shell"] },
+  uses: { services: ["shell"] },
 
   ops: {
     accounts: {
       reads: true,
       description: "The devices Shell runs on: each { account, ok }, account the device's name, ok while it's online. Give one as device to shell_run.",
       input: { type: "object", properties: {} },
-      run: async (ctx) => (await ctx.devices()).filter((s) => (s.sidecars || []).includes("shell")).map((s) => ({ account: s.name, ok: s.online })),
+      run: async (ctx) => (await ctx.devices()).filter((s) => (s.services || []).includes("shell")).map((s) => ({ account: s.name, ok: s.online })),
     },
     sign_out: {
       reads: false,
@@ -40,7 +40,7 @@ export default {
       description: "Stop using Shell on one of your devices: removes it from that device, for one of its owners, so no command runs there.",
       input: { type: "object", required: ["account"], properties: { account: { type: "string", description: "the device's name, as shell_accounts lists it" } } },
       run: (ctx, { account }) => {
-        ctx.sidecar("shell", account, false);
+        ctx.service("shell", account, false);
         return `Shell is removed from ${account}.`;
       },
     },
@@ -56,7 +56,7 @@ export default {
           timeout: { type: "integer", description: "seconds to wait before stopping it, 1 to 600; default 60" },
         },
       },
-      run: (ctx, input) => sidecar(ctx, "run", input),
+      run: (ctx, input) => service(ctx, "run", input),
     },
   },
 };

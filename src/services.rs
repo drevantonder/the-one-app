@@ -1,6 +1,6 @@
-//! Device sidecars: native code a device runs beside its node, for what apps can't reach from workerd (a shell, local
-//! models, WhatsApp's linked phone, a Mac's own apps). A sidecar serves its device's users, and the node says so in its
-//! hello to the other devices; an app over it calls it with `ctx.sidecars`. Some are built into the node (Shell, AGENTS.md, Models: `built_in`);
+//! Device services: native code a device runs beside its node, for what apps can't reach from workerd (a shell, local
+//! models, WhatsApp's linked phone, a Mac's own apps). A service serves its device's users, and the node says so in its
+//! hello to the other devices; an app over it calls it with `ctx.services`. Some are built into the node (Shell, AGENTS.md, Models: `built_in`);
 //! the rest are programs that register over the local API and long-poll for calls: this program itself, hosting one
 //! (`Hosted`), or another in whatever language the platform needs (Go for WhatsApp, Swift in the Mac app). The core
 //! never names one: only `built_in` and `hosted` do, for the binary.
@@ -20,7 +20,7 @@ use crate::apps::Me;
 
 pub type Reply = Pin<Box<dyn Future<Output = Result<Answer>> + Send>>;
 
-/// What a sidecar's call gives back: its answer; for a built-in one, records it keeps, each its kind and data; and
+/// What a service's call gives back: its answer; for a built-in one, records it keeps, each its kind and data; and
 /// blobs the caller's scope keeps.
 #[derive(Debug, Default)]
 pub struct Answer {
@@ -35,7 +35,7 @@ impl Answer {
     }
 }
 
-/// What a built-in sidecar kept, in its own database of its device's local user: one thing it did or was told.
+/// What a built-in service kept, in its own database of its device's local user: one thing it did or was told.
 #[derive(Clone, Debug)]
 pub struct Record {
     pub id: String,
@@ -47,10 +47,10 @@ pub struct Record {
     pub device: String,
 }
 
-/// The schema of a built-in sidecar's database.
+/// The schema of a built-in service's database.
 pub const RECORDS: &str = "create table records (n integer primary key, kind text not null, data text not null, time integer not null, by text not null, device text not null)";
 
-/// A sidecar's answer that it can't serve this call here (a model it lacks), so the call goes on to the next device.
+/// A service's answer that it can't serve this call here (a model it lacks), so the call goes on to the next device.
 #[derive(Debug)]
 pub struct Elsewhere(pub String);
 
@@ -62,7 +62,7 @@ impl std::fmt::Display for Elsewhere {
 
 impl std::error::Error for Elsewhere {}
 
-/// A sidecar built into the node.
+/// A service built into the node.
 pub struct BuiltIn {
     pub name: &'static str,
     pub describe: fn() -> Value,
@@ -74,7 +74,7 @@ pub struct BuiltIn {
     pub sync: Option<fn(records: &[Record])>,
 }
 
-/// The sidecars built into this binary: they run on every device, for its local user.
+/// The services built into this binary: they run on every device, for its local user.
 pub fn built_in() -> Vec<BuiltIn> {
     vec![
         BuiltIn { name: "shell", describe: crate::shell::describe, records: false, call: crate::shell::call, sync: None },
@@ -83,7 +83,7 @@ pub fn built_in() -> Vec<BuiltIn> {
     ]
 }
 
-/// A registered sidecar that hasn't asked for calls in this long is gone.
+/// A registered service that hasn't asked for calls in this long is gone.
 const GONE_AFTER: Duration = Duration::from_secs(60);
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -92,7 +92,7 @@ pub struct Call {
     pub op: String,
     pub input: Value,
     pub caller: Me,
-    /// The app whose `ctx.sidecars` made the call, if one did: a push says which app sent it.
+    /// The app whose `ctx.services` made the call, if one did: a push says which app sent it.
     pub from: Option<String>,
 }
 
@@ -106,13 +106,13 @@ struct Registered {
 }
 
 #[derive(Default)]
-/// The sidecars registered over the local API.
-pub struct Sidecars {
+/// The services registered over the local API.
+pub struct Services {
     by_app: Mutex<HashMap<String, std::sync::Arc<Registered>>>,
     next: std::sync::atomic::AtomicU64,
 }
 
-impl Sidecars {
+impl Services {
     /// Registers `app`; whether that changes how it's listed: it wasn't here, had gone, or describes itself differently.
     pub fn register(&self, app: &str, mut describe: Value) -> bool {
         describe["name"] = json!(app);
@@ -129,7 +129,7 @@ impl Sidecars {
         fresh.then_some(p)
     }
 
-    /// A registered sidecar's title, if it gives one.
+    /// A registered service's title, if it gives one.
     pub fn title(&self, app: &str) -> Option<String> {
         self.get(app)?.describe["title"].as_str().filter(|t| !t.trim().is_empty()).map(str::to_string)
     }
@@ -138,7 +138,7 @@ impl Sidecars {
         self.get(app).is_some()
     }
 
-    /// Whether a registered sidecar serves every user its device serves (`serves: "everyone"` in its description), not only
+    /// Whether a registered service serves every user its device serves (`serves: "everyone"` in its description), not only
     /// its device's local user: a push sender on an admin's device, say.
     pub fn serves_everyone(&self, app: &str) -> bool {
         self.get(app).is_some_and(|p| p.describe["serves"] == "everyone")
@@ -149,10 +149,10 @@ impl Sidecars {
         names.iter().filter_map(|n| self.get(n)).map(|p| p.describe.clone()).collect()
     }
 
-    /// Hands a call to the sidecar and waits for its reply: `{ ok, blobs? }` or `{ error }`. A blob it names, the
+    /// Hands a call to the service and waits for its reply: `{ ok, blobs? }` or `{ error }`. A blob it names, the
     /// caller's scope keeps, so the devices that hold the scope can fetch it.
     pub async fn call(&self, app: &str, op: &str, input: Value, caller: Me, from: Option<String>) -> Result<Answer> {
-        // A node that just started, an update's, waits a moment for its sidecars to register again with it.
+        // A node that just started, an update's, waits a moment for its services to register again with it.
         let mut p = self.get(app);
         let until = Instant::now() + Duration::from_secs(5);
         while p.is_none() && crate::handoff::since_start().is_some_and(|s| s < Duration::from_secs(15)) && Instant::now() < until {
@@ -181,7 +181,7 @@ impl Sidecars {
         let p = self.by_app.lock().unwrap().get(app).cloned().ok_or_else(|| anyhow!("register {app} first"))?;
         *p.seen.lock().unwrap() = Instant::now();
         let mut rx = p.waiting.lock().await;
-        // Ended as the node hands over, so the sidecar asks the new one.
+        // Ended as the node hands over, so the service asks the new one.
         let call = tokio::select! {
             call = tokio::time::timeout(Duration::from_secs(25), rx.recv()) => call.ok().flatten(),
             _ = crate::handoff::stopping() => None,
@@ -191,7 +191,7 @@ impl Sidecars {
     }
 
     pub fn reply(&self, app: &str, id: u64, reply: Value) -> Result<()> {
-        let p = self.by_app.lock().unwrap().get(app).cloned().ok_or_else(|| anyhow!("no sidecar {app}"))?;
+        let p = self.by_app.lock().unwrap().get(app).cloned().ok_or_else(|| anyhow!("no service {app}"))?;
         let (tx, _) = p.replies.lock().unwrap().remove(&id).ok_or_else(|| anyhow!("no call {id} waiting"))?;
         let _ = tx.send(reply);
         Ok(())
@@ -205,9 +205,9 @@ impl Sidecars {
     }
 }
 
-/// A sidecar this program hosts as a service endpoint of its own, `<cli> sidecars serve <name>` (src/service.rs), which
-/// `sidecars/install.sh` installs on a device whose owner wants it there, with or without a node. It registers with
-/// its endpoint over a loopback as any hosted sidecar does (`answer_hosted` is the one place it meets its callers),
+/// A service this program hosts as a service endpoint of its own, `<cli> services serve <name>` (src/service.rs), which
+/// `services/install.sh` installs on a device whose owner wants it there, with or without a node. It registers with
+/// its endpoint over a loopback as any hosted service does (`answer_hosted` is the one place it meets its callers),
 /// keeps what it keeps in its folder, and runs only where it's installed, unlike those `built_in`.
 pub struct Hosted {
     pub name: &'static str,
@@ -216,7 +216,7 @@ pub struct Hosted {
     pub call: fn(host: &Host, call: &Call) -> Result<Value>,
 }
 
-/// The sidecars this program hosts.
+/// The services this program hosts.
 pub fn hosted() -> Vec<Hosted> {
     vec![
         Hosted { name: crate::push::NAME, describe: crate::push::describe, call: crate::push::call },
@@ -225,7 +225,7 @@ pub fn hosted() -> Vec<Hosted> {
     ]
 }
 
-/// What a hosted sidecar has: its folder, and its machine's node.
+/// What a hosted service has: its folder, and its machine's node.
 #[derive(Clone)]
 pub struct Host {
     pub name: &'static str,
@@ -250,12 +250,12 @@ impl Host {
 
     /// `text` with the Vault's fields (`{{name}}`) filled in by the node for call `id`, which only `host` may be sent.
     pub fn fill(&self, id: u64, text: &str, host: &str) -> Result<String> {
-        let out = self.post(&format!("/v1/sidecars/{}/calls/{id}/vault", self.name), &json!({ "text": text, "host": host })).map_err(|err| anyhow!("the Vault: {err}"))?;
+        let out = self.post(&format!("/v1/services/{}/calls/{id}/vault", self.name), &json!({ "text": text, "host": host })).map_err(|err| anyhow!("the Vault: {err}"))?;
         Ok(out["text"].as_str().unwrap_or_default().to_string())
     }
 }
 
-/// A call's input as `T`, where none is an empty one and a field that's null is one not given, as Go's sidecars read them.
+/// A call's input as `T`, where none is an empty one and a field that's null is one not given, as Go's services read them.
 pub fn input<T: serde::de::DeserializeOwned + Default>(input: &Value) -> Result<T> {
     fn given(v: &Value) -> Value {
         match v {
@@ -283,11 +283,11 @@ fn answer(resp: Result<ureq::http::Response<ureq::Body>, ureq::Error>) -> Result
     Ok(Some(body))
 }
 
-/// Answers the calls for the hosted sidecar `name`, from the service endpoint at `at` (src/service.rs), on the
+/// Answers the calls for the hosted service `name`, from the service endpoint at `at` (src/service.rs), on the
 /// loopback its local token lets this program in at, until `replaced` says this program was: registers and answers its
-/// calls, registering again whenever it's forgotten (sidecars are kept in memory).
+/// calls, registering again whenever it's forgotten (services are kept in memory).
 pub fn answer_hosted(name: &str, dir: std::path::PathBuf, at: String, token: String, replaced: impl Fn() -> bool) -> Result<()> {
-    let hosted = hosted().into_iter().find(|h| h.name == name).ok_or_else(|| anyhow!("{name} isn't a sidecar this program hosts"))?;
+    let hosted = hosted().into_iter().find(|h| h.name == name).ok_or_else(|| anyhow!("{name} isn't a service this program hosts"))?;
     let as_this_program = move |mut req: ureq::http::Request<ureq::SendBody>, next: ureq::middleware::MiddlewareNext| {
         if let Ok(value) = token.parse() {
             req.headers_mut().insert(crate::api::LOCAL_TOKEN_HEADER, value);
@@ -300,13 +300,13 @@ pub fn answer_hosted(name: &str, dir: std::path::PathBuf, at: String, token: Str
     let mut describe = (hosted.describe)();
     describe["version"] = json!(crate::config::BUILD);
     while !replaced() {
-        if let Err(err) = host.post(&format!("/v1/sidecars/{name}"), &describe) {
+        if let Err(err) = host.post(&format!("/v1/services/{name}"), &describe) {
             eprintln!("registering: {err:#}");
             std::thread::sleep(Duration::from_secs(3));
             continue;
         }
         while !replaced() {
-            let call = match answer(poll.get(format!("{}/v1/sidecars/{name}/calls", host.node)).call()) {
+            let call = match answer(poll.get(format!("{}/v1/services/{name}/calls", host.node)).call()) {
                 Ok(Some(call)) => match serde_json::from_value::<Call>(call) {
                     Ok(call) => call,
                     Err(err) => {
@@ -327,7 +327,7 @@ pub fn answer_hosted(name: &str, dir: std::path::PathBuf, at: String, token: Str
                     Ok(ok) => json!({ "ok": ok }),
                     Err(err) => json!({ "error": format!("{err:#}") }),
                 };
-                if let Err(err) = host.post(&format!("/v1/sidecars/{}/calls/{}", host.name, call.id), &reply) {
+                if let Err(err) = host.post(&format!("/v1/services/{}/calls/{}", host.name, call.id), &reply) {
                     eprintln!("answering {}: {err:#}", call.op);
                 }
             });

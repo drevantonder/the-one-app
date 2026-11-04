@@ -66,7 +66,7 @@
   // Errors and statuses are written for people and agents at once: what happened and what to do, in people's words,
   // then after a colon or in brackets what an agent needs (a tool to call, an id, a code). A sentence with any of
   // those is for agents only.
-  const forAgents = /\b[a-z][a-z0-9-]*_[a-z0-9_]+\b|\b(user|group):[0-9a-f]{6,}|\b(kernel|node|sidecar|deploy|scope|token|provider|workerd|bucket|lease|ctx)s?\b|\b(an|the|this|that) install\b|install's|[\w.-]*\/[\w.-]+\/|\b[1-5]\d\d\b/i;
+  const forAgents = /\b[a-z][a-z0-9-]*_[a-z0-9_]+\b|\b(user|group):[0-9a-f]{6,}|\b(kernel|node|deploy|scope|token|provider|workerd|bucket|lease|ctx)s?\b|\b(an|the|this|that) install\b|install's|[\w.-]*\/[\w.-]+\/|\b[1-5]\d\d\b/i;
 
   // What a failure means for someone: what happened, in plain words, whether anything was lost, and what to do next.
   // `app` is the title of the app that failed, where a screen knows it.

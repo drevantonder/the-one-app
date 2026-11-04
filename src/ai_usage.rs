@@ -1,5 +1,5 @@
-//! AI Usage: the AI plans signed in on this machine, read from the providers themselves. A hosted sidecar
-//! (`sidecars::Hosted`) named as the app is, so a machine's row reads "AI Usage on <it>": the app asks every machine's
+//! AI Usage: the AI plans signed in on this machine, read from the providers themselves. A hosted service
+//! (`services::Hosted`) named as the app is, so a machine's row reads "AI Usage on <it>": the app asks every machine's
 //! service and merges by account. Its accounts are the provider sign-ins kept here: Claude Code's own and every
 //! account claude-swap keeps, Codex's and OpenCode Go's. It asks each provider for that account's numbers and gives
 //! back only those (used %, reset times, per-model windows, plan): a token never leaves it, not to the app, not in a
@@ -12,7 +12,7 @@ use std::time::Duration;
 use anyhow::{Result, anyhow, bail};
 use serde_json::{Value, json};
 
-use crate::sidecars::{Call, Host};
+use crate::services::{Call, Host};
 
 pub const NAME: &str = "ai-usage";
 

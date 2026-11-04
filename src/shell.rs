@@ -9,7 +9,7 @@ use anyhow::bail;
 use serde_json::{Value, json};
 
 use crate::apps::Me;
-use crate::sidecars::{Answer, Record, Reply};
+use crate::services::{Answer, Record, Reply};
 
 pub fn describe() -> Value {
     json!({

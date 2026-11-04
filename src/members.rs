@@ -13,7 +13,7 @@ use crate::entry::{Content, Entry, Hash, Key, Scope, hex, is_id, unhex};
 
 /// The node's own entries. Apps never see them.
 pub const APP: &str = "node";
-/// Agents' built-in sidecar (`src/agents.rs`), whose Vault requests are theirs: here too for the serverless node.
+/// Agents' built-in service (`src/agents.rs`), whose Vault requests are theirs: here too for the serverless node.
 pub const AGENTS: &str = "agents";
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
@@ -131,18 +131,18 @@ pub struct App {
     pub source: Option<String>,
 }
 
-/// The latest `sidecar` entry for a sidecar on a device: removed there, or let register there again.
+/// The latest `service` entry for a service on a device: removed there, or let register there again.
 #[derive(Clone, Debug)]
-pub struct SidecarInstall {
+pub struct ServiceInstall {
     /// Its executable, for its device's node to start *(not built yet)*.
     pub blob: Option<String>,
-    /// Installed by registering over the local API, as `sidecars/install.sh` does.
+    /// Installed by registering over the local API, as `services/install.sh` does.
     pub local: bool,
     pub by: String,
     pub time: u64,
 }
 
-impl SidecarInstall {
+impl ServiceInstall {
     /// Removed from its device: it isn't served there until it's installed again.
     pub fn removed(&self) -> bool {
         self.blob.is_none() && !self.local
@@ -160,8 +160,8 @@ pub struct Members {
     /// The install's settings its admins set: each name's latest value. The rest are the white label's defaults.
     pub settings: BTreeMap<String, String>,
     pub apps: BTreeMap<String, App>,
-    /// The latest `sidecar` entry of each sidecar on each device: (device, sidecar).
-    pub sidecars: BTreeMap<(Key, String), SidecarInstall>,
+    /// The latest `service` entry of each service on each device: (device, service).
+    pub services: BTreeMap<(Key, String), ServiceInstall>,
     /// When the install's devices last changed, by the newest genesis, device or remove: the relay's list is as of then.
     pub devices_at: u64,
     /// Each scope's current epoch, by its newest `epoch` entry that counts (src/keys.rs).
@@ -435,7 +435,7 @@ impl Members {
     }
 
     /// The service endpoints offering `name`.
-    pub fn services<'a>(&'a self, name: &'a str) -> impl Iterator<Item = &'a Machine> {
+    pub fn offering<'a>(&'a self, name: &'a str) -> impl Iterator<Item = &'a Machine> {
         self.machines.values().filter(move |m| m.service.as_deref() == Some(name) && self.service(&m.key).is_some())
     }
 
@@ -861,15 +861,15 @@ impl Members {
                 app.deploys += 1;
                 app.history.push((bundle, e.time(), w.clone()));
             }
-            "sidecar" => {
+            "service" => {
                 let device = key_of("device")?;
                 let name = text("name")?;
-                ensure!(valid_app_name(&name), "sidecar names are lowercase words joined by -");
+                ensure!(valid_app_name(&name), "service names are lowercase words joined by -");
                 ensure!(self.machine(&device).is_some(), "no such device");
-                ensure!(self.looks_after(&w, &device), "only a device's person or an admin installs or removes its sidecars");
+                ensure!(self.looks_after(&w, &device), "only a device's person or an admin installs or removes its services");
                 let blob = data["blob"].as_str().map(str::to_string);
-                ensure!(blob.as_ref().is_none_or(|b| e.content.blobs.contains(b)), "a sidecar names its executable among its blobs");
-                self.sidecars.insert((device, name), SidecarInstall { blob, local: data["local"] == true, by: w, time: e.time() });
+                ensure!(blob.as_ref().is_none_or(|b| e.content.blobs.contains(b)), "a service names its executable among its blobs");
+                self.services.insert((device, name), ServiceInstall { blob, local: data["local"] == true, by: w, time: e.time() });
             }
             "install" | "uninstall" | "node-release" => {}
             other => bail!("unknown kind {other}"),
@@ -1256,9 +1256,9 @@ pub fn vault(scope: &Scope, n: u32, public: &[u8; 32], to: &[Key]) -> Content {
     node("vault", json!({ "scope": scope.to_string(), "n": n, "public": hex(public), "to": to.iter().map(hex).collect::<Vec<_>>() }))
 }
 
-/// A sidecar removed from a device (`installed` false), or let register there again.
-pub fn sidecar(device: &Key, name: &str, installed: bool) -> Content {
-    node("sidecar", json!({ "device": hex(device), "name": name, "blob": null, "local": installed }))
+/// A service removed from a device (`installed` false), or let register there again.
+pub fn service(device: &Key, name: &str, installed: bool) -> Content {
+    node("service", json!({ "device": hex(device), "name": name, "blob": null, "local": installed }))
 }
 
 /// Where its writer's own things run besides their own machines: the install's others that run their own scope.
@@ -1291,7 +1291,7 @@ pub fn install(app: &str, installed: bool) -> Content {
 
 /// Lists a service endpoint offering `service` as `user`'s, by one of their own devices: `shared` if it serves everyone
 /// it may, not only them.
-pub fn service(endpoint: &crate::keys::Endpoint, user: &str, name: &str, service: &str, shared: bool) -> Content {
+pub fn service_endpoint(endpoint: &crate::keys::Endpoint, user: &str, name: &str, service: &str, shared: bool) -> Content {
     let mut data = json!({ "key": hex(&endpoint.key), "seal": hex(&endpoint.seal), "user": user, "name": name, "roles": [Kind::Service], "service": service });
     if shared {
         data["shared"] = json!(true);

@@ -1,12 +1,12 @@
-//! A service endpoint: a device's abilities (a sidecar) offered over iroh, with no node on its machine. It's an
+//! A service endpoint: a device's abilities (a service) offered over iroh, with no node on its machine. It's an
 //! endpoint of its own key, kept in its folder, and gets in when a person types the code it shows into one of their
 //! devices (`one devices approve`), which lists it as their service offering it and tells the relay to let it in. It
 //! holds no keys and reads no bucket: the nodes that call it bring it `global`'s entries, whose member entries it
 //! replays from the install's first entry (given where it's installed, by its person's own machine, so nothing on the
 //! way can make it another install's) and checks each caller by itself: a compute endpoint of the install that runs
-//! the calls of a person it serves. The program offering it registers over a loopback with the sidecars' API and long-polls for calls,
-//! whether it's this one (`one sidecars serve`, `sidecars::answer_hosted`) or one in another language (`one sidecars
-//! host`, which starts it), so the Go sidecars don't change. A service writes nothing itself: what it asks for is a
+//! the calls of a person it serves. The program offering it registers over a loopback with the services' API and long-polls for calls,
+//! whether it's this one (`one services serve`, `services::answer_hosted`) or one in another language (`one services
+//! host`, which starts it), so the Go services don't change. A service writes nothing itself: what it asks for is a
 //! call, which a node of its person's runs (`/v1/call` on the loopback).
 
 use std::collections::HashMap;
@@ -29,7 +29,7 @@ use serde_json::{Value, json};
 
 use crate::entry::{Entry, Hash, Key, hex, short, unhex};
 use crate::members::{self, Members};
-use crate::sidecars::Sidecars;
+use crate::services::Services;
 
 /// The most an ask or its answer may carry, as between nodes.
 const MESSAGE_LIMIT: usize = 64 << 20;
@@ -47,7 +47,7 @@ const CONNECT: Duration = Duration::from_secs(10);
 
 /// The install a service is in: its address, where its relay and sign-in are, the hash of its first entry, which its
 /// member entries are replayed from, the person whose service it is to be, and the one-time secret their device minted
-/// for it (`one sidecars install-link`), which proves to that device that its request is this service's.
+/// for it (`one services install-link`), which proves to that device that its request is this service's.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Install {
     pub address: String,
@@ -57,9 +57,9 @@ pub struct Install {
 }
 
 impl Install {
-    /// From what `one sidecars install-link` prints on its person's device: `<address>#<root>/<user>/<secret>`.
+    /// From what `one services install-link` prints on its person's device: `<address>#<root>/<user>/<secret>`.
     pub fn parse(link: &str) -> Result<Install> {
-        let said = "that's what one sidecars install-link prints on one of your devices: <address>#<hash>/<you>/<secret>";
+        let said = "that's what one services install-link prints on one of your devices: <address>#<hash>/<you>/<secret>";
         let (address, rest) = link.trim().rsplit_once('#').context(said)?;
         let mut parts = rest.split('/');
         let (Some(root), Some(user), Some(secret), None) = (parts.next(), parts.next(), parts.next(), parts.next()) else { bail!("{said}") };
@@ -80,7 +80,7 @@ impl Install {
     }
 }
 
-/// A service endpoint, offering one sidecar.
+/// A service endpoint, offering one service.
 #[derive(Clone)]
 pub struct Service(Arc<Inner>);
 
@@ -109,7 +109,7 @@ struct Inner {
     /// is brought only member entries, and orders them as the nodes do with these.
     depths: Mutex<HashMap<Hash, u64>>,
     /// Where the program offering it registers and waits for calls.
-    sidecars: Sidecars,
+    services: Services,
     /// What that program sends to say it's on this machine.
     token: String,
     endpoint: Mutex<Option<Endpoint>>,
@@ -161,7 +161,7 @@ impl Service {
                 write_private(&install_file, &serde_json::to_vec_pretty(&given)?)?;
                 given
             }
-            (None, None) => bail!("say which One App {name} is for: --install <link>, as one sidecars install-link prints it on one of its devices"),
+            (None, None) => bail!("say which One App {name} is for: --install <link>, as one services install-link prints it on one of its devices"),
         };
         let token = match std::fs::read_to_string(dir.join(crate::api::LOCAL_TOKEN)) {
             Ok(t) if !t.trim().is_empty() => t.trim().to_string(),
@@ -184,7 +184,7 @@ impl Service {
             install,
             known: Mutex::new((entries, members)),
             depths: Mutex::new(depths),
-            sidecars: Sidecars::default(),
+            services: Services::default(),
             token,
             endpoint: Mutex::new(None),
             conns: Mutex::new(HashMap::new()),
@@ -212,8 +212,8 @@ impl Service {
     }
 
     /// Where the program offering it registers.
-    pub fn sidecars(&self) -> &Sidecars {
-        &self.0.sidecars
+    pub fn services(&self) -> &Services {
+        &self.0.services
     }
 
     pub fn token(&self) -> &str {
@@ -299,7 +299,7 @@ impl Service {
                 return;
             }
             // Once the program offering it has said what it is, so the request says whether it serves everyone.
-            let registered = !self.0.sidecars.describe().is_empty();
+            let registered = !self.0.services.describe().is_empty();
             if registered && !asked_for_good && asked.is_none_or(|a| a.elapsed() > Duration::from_secs(10 * 60)) {
                 match self.request_approval().await {
                     Ok(()) => {
@@ -334,7 +334,7 @@ impl Service {
         let secret = unhex(&install.secret)?;
         let fields = json!({
             "route": format!("POST {path}"), "key": hex(&me.key), "seal": hex(&me.seal), "name": self.0.machine, "service": self.0.name,
-            "shared": self.0.sidecars.serves_everyone(&self.0.name), "user": install.user,
+            "shared": self.0.services.serves_everyone(&self.0.name), "user": install.user,
             "enrollment": hex(&crate::keys::sha256(&secret)), "proof": crate::keys::service_proof(&secret, &me),
         });
         let body = crate::keys::signed_request(&self.0.key, "one/auth", fields, now_ms());
@@ -421,7 +421,7 @@ impl Service {
         if !may {
             return json!({ "error": "only your One App's devices are answered" });
         }
-        let Some(mut describe) = self.0.sidecars.describe().into_iter().next() else {
+        let Some(mut describe) = self.0.services.describe().into_iter().next() else {
             return json!({ "error": format!("{} isn't running here yet", self.0.name) });
         };
         describe["runs"] = json!("service");
@@ -501,9 +501,9 @@ impl Service {
         };
         let input = if call["input"].is_null() { json!({}) } else { call["input"].clone() };
         let from = call["from"].as_str().map(str::to_string);
-        match self.0.sidecars.call(&self.0.name, call["op"].as_str().unwrap_or(""), input, caller, from).await {
+        match self.0.services.call(&self.0.name, call["op"].as_str().unwrap_or(""), input, caller, from).await {
             Ok(answer) => json!({ "ok": answer.ok }),
-            Err(err) if err.is::<crate::sidecars::Elsewhere>() => json!({ "elsewhere": err.to_string() }),
+            Err(err) if err.is::<crate::services::Elsewhere>() => json!({ "elsewhere": err.to_string() }),
             Err(err) => json!({ "error": format!("{err:#}") }),
         }
     }
@@ -557,14 +557,14 @@ impl Service {
         Ok(serde_json::from_slice(&answer)?)
     }
 
-    /// The loopback the program offering it registers at, with the local token in its folder: the sidecars' API, its
+    /// The loopback the program offering it registers at, with the local token in its folder: the services' API, its
     /// machine as `/v1/state` says, and `/v1/call`, which a node of its person's runs.
     fn loopback(&self) -> Router {
         Router::new()
-            .route("/v1/sidecars/{app}", post(register))
-            .route("/v1/sidecars/{app}/calls", get(next_call))
-            .route("/v1/sidecars/{app}/calls/{id}", post(reply))
-            .route("/v1/sidecars/{app}/calls/{id}/vault", post(fill))
+            .route("/v1/services/{app}", post(register))
+            .route("/v1/services/{app}/calls", get(next_call))
+            .route("/v1/services/{app}/calls/{id}", post(reply))
+            .route("/v1/services/{app}/calls/{id}/vault", post(fill))
             .route("/v1/state", get(state))
             .route("/v1/call", post(call))
             .with_state(self.clone())
@@ -574,7 +574,7 @@ impl Service {
     fn state(&self) -> Value {
         let known = self.0.known.lock().unwrap();
         let m = &known.1;
-        let devices: Vec<Value> = m.services(&self.0.name).map(|s| json!({ "key": hex(&s.key), "name": s.name, "online": s.key == self.key(), "sidecars": [self.0.name] })).collect();
+        let devices: Vec<Value> = m.offering(&self.0.name).map(|s| json!({ "key": hex(&s.key), "name": s.name, "online": s.key == self.key(), "services": [self.0.name] })).collect();
         // The scopes this machine's own node runs, if it has one: a program here may reach what they hold.
         let here: Vec<&crate::members::Machine> = m.computes().filter(|c| c.name == self.0.machine).collect();
         let runs_for: Vec<String> = m.scopes().into_iter().filter(|s| here.iter().any(|c| m.runs_for(&c.key, s))).map(|s| s.to_string()).collect();
@@ -602,7 +602,7 @@ pub fn may_call(m: &Members, me: &Key, remote: &Key, key: &Key, user: &str, sign
 /// What a service may ask its person's node to run: only its own app (`name`), on no device named, in its person's
 /// own scope, calling no other app; until grants land, that app's database there is all it reaches. → the call.
 pub fn limited(name: &str, call: &Value) -> Result<Value> {
-    ensure!(call["app"] == name && (call["sidecar"].is_null() || call["sidecar"] == name), "a service asks only for its own app, {name}");
+    ensure!(call["app"] == name && (call["service"].is_null() || call["service"] == name), "a service asks only for its own app, {name}");
     ensure!(call["device"].is_null(), "a service can't name a device to run its calls");
     let scopes_ok = match &call["scopes"] {
         Value::Null => true,
@@ -610,7 +610,7 @@ pub fn limited(name: &str, call: &Value) -> Result<Value> {
         _ => false,
     };
     ensure!(scopes_ok, "a service's calls reach only its person's own scope");
-    Ok(json!({ "app": name, "sidecar": call["sidecar"], "op": call["op"], "input": call["input"], "scopes": ["user"] }))
+    Ok(json!({ "app": name, "service": call["service"], "op": call["op"], "input": call["input"], "scopes": ["user"] }))
 }
 
 /// `known` with `given`'s member entries added, if any are new: → them, replayed from the install's first entry, with
@@ -676,7 +676,7 @@ async fn register(State(s): State<Service>, headers: HeaderMap, UrlPath(app): Ur
     if let Err(r) = ours(&s, &headers).and_then(|_| this_one(&s, &app)) {
         return r;
     }
-    s.0.sidecars.register(&app, describe);
+    s.0.services.register(&app, describe);
     Json(json!({})).into_response()
 }
 
@@ -684,7 +684,7 @@ async fn next_call(State(s): State<Service>, headers: HeaderMap, UrlPath(app): U
     if let Err(r) = ours(&s, &headers).and_then(|_| this_one(&s, &app)) {
         return r;
     }
-    match s.0.sidecars.next(&app).await {
+    match s.0.services.next(&app).await {
         Ok(Some(call)) => Json(json!(call)).into_response(),
         Ok(None) => StatusCode::NO_CONTENT.into_response(),
         Err(err) => refused(StatusCode::BAD_REQUEST, format!("{err:#}")),
@@ -695,7 +695,7 @@ async fn reply(State(s): State<Service>, headers: HeaderMap, UrlPath((app, id)):
     if let Err(r) = ours(&s, &headers).and_then(|_| this_one(&s, &app)) {
         return r;
     }
-    match s.0.sidecars.reply(&app, id, body) {
+    match s.0.services.reply(&app, id, body) {
         Ok(()) => Json(json!({})).into_response(),
         Err(err) => refused(StatusCode::BAD_REQUEST, format!("{err:#}")),
     }
@@ -745,20 +745,20 @@ fn started(name: &str, install: Option<&str>) -> Result<(Service, std::net::Sock
     Ok((service, at, runtime))
 }
 
-/// `one sidecars serve <name>`: a sidecar this program hosts (`sidecars::hosted`), as a service endpoint, until this
+/// `one services serve <name>`: a service this program hosts (`services::hosted`), as a service endpoint, until this
 /// program is replaced.
 pub fn serve(name: &str, install: Option<&str>) -> Result<()> {
-    crate::sidecars::hosted().iter().find(|h| h.name == name).ok_or_else(|| anyhow!("{name} isn't a sidecar this program hosts"))?;
+    crate::services::hosted().iter().find(|h| h.name == name).ok_or_else(|| anyhow!("{name} isn't a service this program hosts"))?;
     let replaced = replaced_check()?;
     let (service, at, _runtime) = started(name, install)?;
     let data = crate::home().join(name);
     std::fs::create_dir_all(&data)?;
-    crate::sidecars::answer_hosted(name, data, at.to_string(), service.token().to_string(), &replaced)?;
+    crate::services::answer_hosted(name, data, at.to_string(), service.token().to_string(), &replaced)?;
     eprintln!("{name}: this program was replaced, so it stops for the new one");
     Ok(())
 }
 
-/// `one sidecars host <name> <program> [args…]`: a sidecar in another language as a service endpoint, the program
+/// `one services host <name> <program> [args…]`: a service in another language as a service endpoint, the program
 /// started here and again whenever it stops, told where to register (`ONE_ADDR`) and where the token it sends is
 /// (`ONE_HOME`, the service's folder), until this program is replaced.
 pub fn host(name: &str, program: &[String], install: Option<&str>) -> Result<()> {

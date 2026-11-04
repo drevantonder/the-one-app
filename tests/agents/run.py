@@ -339,7 +339,7 @@ def run_one(inst, prompt, args, n=0):
 
 def sandbox(root):
     """Inside the network and mount namespaces the outer run made: no tailnet, LAN or host ports but Ollama's, and
-    the real home read-only, so an agent (or a shell sidecar it calls) reaches nothing of the person's but the internet."""
+    the real home read-only, so an agent (or a shell service it calls) reaches nothing of the person's but the internet."""
     gw = os.environ["AGX_GW"]
     (root / "resolv.conf").write_text(f"nameserver {gw}\n")
     sh = lambda *a: subprocess.run(a, check=True, capture_output=True)

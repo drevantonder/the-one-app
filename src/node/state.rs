@@ -61,7 +61,7 @@ impl Node {
         let Ok(install) = self.0.install.lock() else { return json!({ "error": "this device couldn't answer that: a bug in it, which its log shows" }) };
         let viewer_name = if viewer.key == self.0.id { self.device_name() } else { install.as_ref().and_then(|i| i.r.members.machine(&viewer.key)).map(|m| m.name.clone()).unwrap_or_default() };
         let backups = install.as_ref().and_then(|i| self.backup_problem(i, &viewer.user));
-        let here_sidecars = install.as_ref().map(|i| self.sidecars_here(i)).unwrap_or_default();
+        let here_services = install.as_ref().map(|i| self.services_here(i)).unwrap_or_default();
         // Which device is looking, to say "This device": a client device of the viewer's asks as a sign-in.
         let looking = device.or_else(|| {
             let m = &install.as_ref()?.r.members;
@@ -79,13 +79,13 @@ impl Node {
                 }
                 l
             });
-            let sidecars = if s.key == self.0.id { here_sidecars.as_slice() } else { session.map(|s| s.sidecars.as_slice()).unwrap_or_default() };
+            let services = if s.key == self.0.id { here_services.as_slice() } else { session.map(|s| s.services.as_slice()).unwrap_or_default() };
             let now = json!({
                 "kind": load.as_ref().map(|l| l.kind.clone()), "far": i.far.get(&s.key).is_some_and(|d| *d > FAR),
                 "me": Some(s.key) == looking, "here": s.key == self.0.id, "online": s.key == self.0.id || session.is_some(),
                 "build": i.builds.get(&s.key).map(|r| &r.commit), "target": i.builds.get(&s.key).map(|r| &r.target),
-                "sidecars": sidecars.iter().map(|d| d.0.clone()).collect::<Vec<_>>(),
-                "installed_sidecars": installed_sidecars(m, s, sidecars, i.builds.get(&s.key).map(|r| r.commit.as_str())),
+                "services": services.iter().map(|d| d.0.clone()).collect::<Vec<_>>(),
+                "installed_services": installed_services(m, s, services, i.builds.get(&s.key).map(|r| r.commit.as_str())),
                 "load": load,
             });
             match now {
@@ -196,7 +196,7 @@ impl Node {
             .with(|i| {
                 let m = &i.r.members;
                 let serves = |s: &members::Machine| if own { s.user == user } else { s.user != user && m.service_serves(&s.key, user) };
-                Ok(m.services(service).filter(|s| serves(s) && !name.is_empty() && (s.name.eq_ignore_ascii_case(name) || hex(&s.key).starts_with(name))).map(|s| s.key).collect())
+                Ok(m.offering(service).filter(|s| serves(s) && !name.is_empty() && (s.name.eq_ignore_ascii_case(name) || hex(&s.key).starts_with(name))).map(|s| s.key).collect())
             })
             .ok()?;
         match found.as_slice() {
@@ -264,22 +264,22 @@ impl Node {
     }
 }
 
-/// What a device says of each sidecar serving there, as `GET /v1/state` lists it: what it is, its version (a
-/// sidecar's own, or for one built into the node, the node's build), whom it serves, and who installed it.
+/// What a device says of each service serving there, as `GET /v1/state` lists it: what it is, its version (a
+/// service's own, or for one built into the node, the node's build), whom it serves, and who installed it.
 /// Whether this node's install is a try install (`one try`), whose kernel beside it signs its person in with no passkey.
 fn tried() -> bool {
     let settings = std::fs::read_to_string(crate::kernel::Settings::path()).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok());
     settings.is_some_and(|s| !s["try_person"].is_null())
 }
 
-fn installed_sidecars(m: &Members, device: &members::Machine, sidecars: &[Sidecar], build: Option<&str>) -> Vec<Value> {
+fn installed_services(m: &Members, device: &members::Machine, services: &[Service], build: Option<&str>) -> Vec<Value> {
     let name_of = |u: &String| m.users.get(u).map(|u| u.name.clone());
-    sidecars
+    services
         .iter()
         .map(|(name, users, d)| {
             let built_in = d["built_in"] == true;
-            let installed = m.sidecars.get(&(device.key, name.clone())).filter(|i| i.local);
-            // Registered over the local API, a sidecar counts as installed by the device's local user.
+            let installed = m.services.get(&(device.key, name.clone())).filter(|i| i.local);
+            // Registered over the local API, a service counts as installed by the device's local user.
             let by = match installed {
                 Some(i) => name_of(&i.by),
                 None if built_in => None,

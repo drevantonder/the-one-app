@@ -1,7 +1,7 @@
 //! What agents are told, as Agent Skills (agentskills.io): a root skill, short enough to load up front, and deeper ones
 //! loaded when needed: one for each app with a guide (its instructions and operations, from the same declarations its
 //! tools come from), the Vault's, and a few areas of their own (`skills/`). One source, every way out: the agents
-//! sidecar writes them into each harness's skills folder, `<cli> mcp` serves them (Skills over MCP, SEP-2640), a
+//! service writes them into each harness's skills folder, `<cli> mcp` serves them (Skills over MCP, SEP-2640), a
 //! device serves the root's body as `/llms.txt` and each skill's files at `/skills/<name>/<path>`, and `<cli> skills`
 //! prints them. MCP's instructions are the root's short version.
 

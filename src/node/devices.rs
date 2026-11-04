@@ -147,7 +147,7 @@ pub struct DeviceRequest {
     pub person: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub proof: Option<String>,
-    /// For a service's request (`one sidecars serve`), signed by its own key and nobody's yet: the service it offers,
+    /// For a service's request (`one services serve`), signed by its own key and nobody's yet: the service it offers,
     /// `name` being its machine's.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub service: Option<String>,
@@ -177,7 +177,7 @@ pub struct Invited {
     pub until: u64,
 }
 
-/// An enrollment secret `one sidecars install-link` minted on this device, for a service to prove its request with
+/// An enrollment secret `one services install-link` minted on this device, for a service to prove its request with
 /// (`keys::service_proof`), until it runs out or a service it named is approved: kept in this device's own folder,
 /// since only this device is shown the requests it names.
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -532,7 +532,7 @@ impl Node {
         Ok(json!({ "device": r.name, "sealed": sealed, "not_sealed": not }))
     }
 
-    /// An install link for a service of `caller`'s, this device's own person (`one sidecars install-link`): the
+    /// An install link for a service of `caller`'s, this device's own person (`one services install-link`): the
     /// install's address and first entry, who it's for, and a one-time secret minted here, whose hash auth is told
     /// (signed by this device) so it keeps only a request that names it, and shows it only to this device. → the link.
     pub async fn install_link(&self, caller: &Caller) -> Result<String> {
@@ -567,13 +567,13 @@ impl Node {
     /// Whether a service's request comes with a proof from an enrollment this device minted: → its hash.
     fn enrolled(&self, r: &DeviceRequest) -> Result<String> {
         let id = r.enrollment.clone().context("that service came with no install link")?;
-        let e = self.enrollments().remove(&id).context("that service's install link wasn't made on this device, or ran out: make another with sidecars install-link")?;
+        let e = self.enrollments().remove(&id).context("that service's install link wasn't made on this device, or ran out: make another with services install-link")?;
         let proof = crate::keys::service_proof(&crate::keys::unhex(&e.secret)?, &r.endpoint()?);
         ensure!(r.proof.as_deref().is_some_and(|p| crate::keys::same_secret(p.as_bytes(), proof.as_bytes())), "that service's request doesn't prove it came from your install link");
         Ok(id)
     }
 
-    /// Lets a service in as `caller`'s (`one sidecars serve` asked with its own key, and they typed the code it shows):
+    /// Lets a service in as `caller`'s (`one services serve` asked with its own key, and they typed the code it shows):
     /// lists it as their service endpoint offering it, and tells the relay to let it in. It holds no keys: the nodes
     /// that call it bring it the install's entries, which say who may. → what it is.
     pub async fn approve_service(&self, caller: &Caller, r: &DeviceRequest) -> Result<Value> {
@@ -590,7 +590,7 @@ impl Node {
             ensure!(format!("{err:#}").contains("in already"), "your One App's relay won't let that service in: {err:#}");
         }
         if !listed {
-            self.member_content(caller, members::service(&endpoint, &caller.user, &r.name, service, r.shared)).await?;
+            self.member_content(caller, members::service_endpoint(&endpoint, &caller.user, &r.name, service, r.shared)).await?;
         }
         // Its first hello brings it the entries that say it's theirs: as soon as the relay lets it in.
         let (node, key) = (self.clone(), endpoint.key);

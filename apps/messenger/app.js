@@ -1,12 +1,12 @@
-// Messenger: the person's Facebook Messenger, read through messenger.com in an agent device's browser. The messenger sidecar
+// Messenger: the person's Facebook Messenger, read through messenger.com in an agent device's browser. The messenger service
 // drives the browser, on each device whose owner installed it; this app is what people and agents use, and a
 // connector: each account is a browser profile signed in to Messenger.
 
-/// Runs one of the messenger sidecar's operations, wherever it runs for the caller. When none of their devices runs it,
+/// Runs one of the messenger service's operations, wherever it runs for the caller. When none of their devices runs it,
 /// says what's needed instead of how the call failed; when a chat isn't found, where to find it.
-async function sidecar(ctx, op, input) {
+async function service(ctx, op, input) {
   try {
-    return await ctx.sidecars.messenger[op](input);
+    return await ctx.services.messenger[op](input);
   } catch (err) {
     const why = String(err.message);
     if (why.includes("no device runs messenger for you")) throw new Error(NEEDS);
@@ -18,9 +18,9 @@ async function sidecar(ctx, op, input) {
 
 const NEEDS = "Messenger needs Agent Devices on one of your devices. Add it in the App Store: whoever owns a device installs it there, and the App Store's Agent Devices page shows where. Then messenger_sign_in signs in.";
 
-/// The caller's online devices that run the sidecar, by name.
+/// The caller's online devices that run the service, by name.
 async function running(ctx) {
-  return (await ctx.devices()).filter((s) => s.online && (s.sidecars || []).includes("messenger")).map((s) => s.name);
+  return (await ctx.devices()).filter((s) => s.online && (s.services || []).includes("messenger")).map((s) => s.name);
 }
 
 // Each account is a Vault item too, so the person's Vault lists it: the browser profile, plain, with no secret, since
@@ -55,7 +55,7 @@ export default {
   connector: true,
   needs: "Needs Agent Devices on one of your devices",
   instructions: "Messenger is the person's Facebook Messenger, read through messenger.com in an agent device's browser. Each account is a browser profile signed in to it (Personal, Work), as messenger_accounts lists them; the others take account, the first by default. messenger_chats lists recent chats, messenger_read reads one, messenger_search finds messages. Each takes some seconds: a browser does the reading. If Messenger isn't signed in, messenger_sign_in gives the person a link to sign in; never sign in for them. messenger_send sends a real message to a real person: only when the person asked, with the exact text they approved.",
-  uses: { sidecars: ["messenger"] },
+  uses: { services: ["messenger"] },
   vault: VAULT,
 
   ops: {
@@ -63,10 +63,10 @@ export default {
       reads: true,
       description: "The browser profiles Messenger reads, the default first: each { account, ok }, account the profile's name, with why when ok is false and it needs signing in again. Give account to the others to pick one.",
       input: { type: "object", properties: {} },
-      // A connector lists no accounts, rather than failing, where no device runs its sidecar; its settings say why.
+      // A connector lists no accounts, rather than failing, where no device runs its service; its settings say why.
       async run(ctx, input) {
         if (!(await running(ctx)).length) return [];
-        const listed = await sidecar(ctx, "accounts", input);
+        const listed = await service(ctx, "accounts", input);
         await keep(ctx, listed).catch(() => {}); // a call that only reads lists them all the same
         return listed;
       },
@@ -75,19 +75,19 @@ export default {
       reads: true,
       description: "The recent Messenger chats messenger.com shows, newest first, to see what's new or find a chat to read: one a line, \"Sam (unread), <time>: last message\", the time as Messenger shows it. Older chats aren't reached.",
       input: { type: "object", properties: { account: ACCOUNT, unread: { type: "boolean", description: "only chats with unread messages" } } },
-      run: (ctx, input) => sidecar(ctx, "chats", input),
+      run: (ctx, input) => service(ctx, "chats", input),
     },
     read: {
       reads: false,
       description: "A recent chat's latest messages, as messenger.com shows them when it opens, newest last: one a line, \"[time] Sam: text\", the time as Messenger shows it. Opening a chat marks it read, so one that was unread is marked unread again afterwards, but the sender may see it as seen.",
       input: { type: "object", required: ["chat"], properties: { account: ACCOUNT, chat: { type: "string", description: CHAT } } },
-      run: (ctx, input) => sidecar(ctx, "read", input),
+      run: (ctx, input) => service(ctx, "read", input),
     },
     search: {
       reads: true,
       description: "Messages containing some words, across every chat, as Messenger's search finds them: to find something said when you don't know which chat. One a line: the chat and the message when it has one match (\"Sam, <time>: text\"), or how many (\"Family: 3 matching messages\"), for messenger_read.",
       input: { type: "object", required: ["query"], properties: { account: ACCOUNT, query: { type: "string", description: "words to find, as you'd type them in Messenger's search" } } },
-      run: (ctx, input) => sidecar(ctx, "search", input),
+      run: (ctx, input) => service(ctx, "search", input),
     },
     send: {
       reads: false,
@@ -102,21 +102,21 @@ export default {
           text: { type: "string", description: "the message, exactly as the person approved it" },
         },
       },
-      run: (ctx, input) => sidecar(ctx, "send", input),
+      run: (ctx, input) => service(ctx, "send", input),
     },
     sign_in: {
       reads: false,
       description: "For the person: links Messenger to a browser profile (made if new) and gives a link to messenger.com in it, for them to sign in there themselves; never sign in for them. Signs the default profile in again when none is given.",
       input: { type: "object", properties: { profile: { type: "string", description: "the browser profile's name, like Personal or Work; agent-devices_profiles lists them" } } },
-      run: (ctx, input) => sidecar(ctx, "sign_in", input),
+      run: (ctx, input) => service(ctx, "sign_in", input),
     },
     sign_out: {
       reads: false,
       description: "Stop reading a browser profile's Messenger. The profile, and its sign-ins to messenger.com and other sites, stay, so messenger_sign_in links it again.",
       input: { type: "object", required: ["account"], properties: { account: { type: "string", description: "the browser profile's name, as messenger_accounts lists them" } } },
       async run(ctx, input) {
-        const out = await sidecar(ctx, "sign_out", input);
-        await keep(ctx, await sidecar(ctx, "accounts", {}));
+        const out = await service(ctx, "sign_out", input);
+        await keep(ctx, await service(ctx, "accounts", {}));
         return out;
       },
     },
@@ -124,13 +124,13 @@ export default {
       reads: true,
       description: "The browser profiles, for the settings screen to pick one.",
       input: { type: "object", properties: {} },
-      run: (ctx, input) => sidecar(ctx, "_profiles", input),
+      run: (ctx, input) => service(ctx, "_profiles", input),
     },
     _save: {
       reads: false,
       description: "The settings screen's Done: saves the browser profile signed in.",
       input: { type: "object", properties: {} },
-      run: (ctx, input) => sidecar(ctx, "_save", input),
+      run: (ctx, input) => service(ctx, "_save", input),
     },
     _running: {
       reads: true,

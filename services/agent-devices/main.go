@@ -1,4 +1,4 @@
-// The Agent Devices sidecar: devices for agents. Linux ones (kind linux) are each a Podman container
+// The Agent Devices service: devices for agents. Linux ones (kind linux) are each a Podman container
 // running Cua's desktop image (github.com/trycua/cua) with Google Chrome, which
 // keeps its sign-ins, offered to the person's devices through this device's
 // node. The server inside each device speaks MCP; its
@@ -25,7 +25,7 @@ import (
 
 const app = "agent-devices"
 
-// dataDir is this sidecar's folder.
+// dataDir is this service's folder.
 var dataDir string
 
 type call struct {
@@ -55,7 +55,7 @@ func main() {
 }
 
 // serve registers with the node and answers its calls, registering again
-// whenever the node forgets (it keeps sidecars in memory) or restarts, and
+// whenever the node forgets (it keeps services in memory) or restarts, and
 // when the devices' tools change, once no call is waiting for an answer:
 // registering again forgets those.
 func serve(node string, d *devices) {
@@ -63,7 +63,7 @@ func serve(node string, d *devices) {
 	var running atomic.Int64
 	for {
 		described, _ := json.Marshal(d.describe())
-		if err := post(node+"/v1/sidecars/"+app, json.RawMessage(described)); err != nil {
+		if err := post(node+"/v1/services/"+app, json.RawMessage(described)); err != nil {
 			log.Printf("registering: %v", err)
 			time.Sleep(3 * time.Second)
 			continue
@@ -87,7 +87,7 @@ func serve(node string, d *devices) {
 				defer func() {
 					if p := recover(); p != nil {
 						log.Printf("%s panicked: %v\n%s", c.Op, p, debug.Stack())
-						post(fmt.Sprintf("%s/v1/sidecars/%s/calls/%d", node, app, c.ID), map[string]any{"error": fmt.Sprint("devices failed: ", p)})
+						post(fmt.Sprintf("%s/v1/services/%s/calls/%d", node, app, c.ID), map[string]any{"error": fmt.Sprint("devices failed: ", p)})
 					}
 				}()
 				ctx := context.WithValue(context.Background(), callerKey{}, c.Caller.Name)
@@ -100,7 +100,7 @@ func serve(node string, d *devices) {
 				if err != nil {
 					answer = map[string]any{"error": err.Error()}
 				}
-				if err := post(fmt.Sprintf("%s/v1/sidecars/%s/calls/%d", node, app, c.ID), answer); err != nil {
+				if err := post(fmt.Sprintf("%s/v1/services/%s/calls/%d", node, app, c.ID), answer); err != nil {
 					log.Printf("answering %s: %v", c.Op, err)
 				}
 			}()
@@ -110,7 +110,7 @@ func serve(node string, d *devices) {
 
 // next waits for the node's next call; nil if there was none.
 func next(client *http.Client, node string) (*call, error) {
-	resp, err := client.Get(node + "/v1/sidecars/" + app + "/calls")
+	resp, err := client.Get(node + "/v1/services/" + app + "/calls")
 	if err != nil {
 		return nil, err
 	}

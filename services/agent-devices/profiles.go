@@ -22,7 +22,7 @@ import (
 // A browser profile is a Vault item of the person's: its profile folder, as a
 // tarball without caches, is a blob encrypted with a key made from the item's
 // secret field and a salt of its own, so each save has a fresh key. The app
-// over this sidecar names the item in its calls, and the node fills in the
+// over this service names the item in its calls, and the node fills in the
 // secret, so only this process ever holds it or the profile; the app records
 // each save on the item (its blob, salt and sites), and nothing here keeps a
 // profile once its device is gone.

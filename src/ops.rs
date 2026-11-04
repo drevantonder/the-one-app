@@ -17,7 +17,7 @@ pub const FILE_LIMIT: usize = 10 << 20;
 /// What MCP takes inline from an agent, which sends base64 in its own output.
 pub const MCP_FILE_LIMIT: usize = 1 << 20;
 
-/// An operation as `GET /v1/apps` describes it, with its app; None when no app or sidecar here lists it.
+/// An operation as `GET /v1/apps` describes it, with its app; None when no app or service here lists it.
 pub fn find(app: &str, op: &str) -> Option<(Value, Value)> {
     let mut apps = get("/v1/apps").ok()?.as_array()?.clone();
     apps.extend(node_apps());
@@ -199,10 +199,10 @@ pub fn none_said(app: &Value, op: &str, ok: &Value, cli: bool) -> Option<String>
     let (name, title) = (app["name"].as_str().unwrap_or(""), app["title"].as_str().unwrap_or(""));
     let signs_in = app["ops"].as_array().into_iter().flatten().any(|o| o["name"] == "sign_in");
     // One that needs a part on a device, with none of yours running it: signing in can't work yet.
-    let parts: Vec<&Value> = app["uses"]["sidecars"].as_array().into_iter().flatten().collect();
+    let parts: Vec<&Value> = app["uses"]["services"].as_array().into_iter().flatten().collect();
     let on_none = || {
         let state = get("/v1/state").unwrap_or_default();
-        !state["install"]["devices"].as_array().into_iter().flatten().any(|d| d["sidecars"].as_array().into_iter().flatten().any(|s| parts.contains(&s)))
+        !state["install"]["devices"].as_array().into_iter().flatten().any(|d| d["services"].as_array().into_iter().flatten().any(|s| parts.contains(&s)))
     };
     Some(match (signs_in, app["needs"].as_str()) {
         (_, Some(needs)) if !parts.is_empty() && on_none() => format!("No {title} accounts: {title} isn't on any of your devices yet. {needs}."),
@@ -729,10 +729,10 @@ fn takes_file(prop: &Value) -> Option<bool> {
 /// How MCP describes a file input to agents.
 pub const MCP_FILE: &str = "a file: { base64, name, type } (up to 1 MiB), { file } (a file id another tool gave back) or { url } (public)";
 
-/// Whether an app's calls run on a device of the person's choosing: it runs on every device, or uses a sidecar (Shell
+/// Whether an app's calls run on a device of the person's choosing: it runs on every device, or uses a service (Shell
 /// on a named device, iMessage on the Mac), so MCP and search offer `device` as the CLI's `--device` does.
 fn runs_on_devices(app: &Value) -> bool {
-    app["runs"] == "here" || app["uses"]["sidecars"].as_array().is_some_and(|s| !s.is_empty())
+    app["runs"] == "here" || app["uses"]["services"].as_array().is_some_and(|s| !s.is_empty())
 }
 
 /// What `device` says it does: which device runs the call, and which when none is given.

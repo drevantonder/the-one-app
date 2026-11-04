@@ -163,7 +163,7 @@
     // Runs apps: what every node does now, shown as it is; turning it on and off comes later.
     if (c.node) html += thing({ icon: tile("squares-four"), title: "Runs apps", mine, disabled: true });
     const services = [
-      ...(c.node?.installed_sidecars || []).map((s) => ({ ...s, off: { sidecar: s.name, device: c.node.key } })),
+      ...(c.node?.installed_services || []).map((s) => ({ ...s, off: { service: s.name, device: c.node.key } })),
       ...c.services.filter((s) => mine || s.serves_me).map((s) => ({ name: s.service, off: { remove: s.key } })),
     ];
     if (mine || admin()) html += services.sort((a, b) => appTitle(a.name).localeCompare(appTitle(b.name))).map((s) => serviceRow(c, mine, s)).join("");
@@ -358,7 +358,7 @@
     act(() => one.api("POST", "/v1/settings", { name: "priority", value: JSON.stringify(set) }));
   }
 
-  /// A service switched off: removed from that device, as removing it there does (a sidecar of its node, or a
+  /// A service switched off: removed from that device, as removing it there does (a service of its node, or a
   /// service of its own); asked first, since it's turned on again only by installing it there.
   async function turnOff(input, off) {
     const card = input.closest(".list");
@@ -367,7 +367,7 @@
     const sure = await one.alert({ title: `Turn off ${title} on ${name}?`, action: "Turn Off", danger: true });
     if (!sure) return void (input.checked = true);
     input.setAttribute("aria-busy", "true");
-    act(() => (off.remove ? one.api("POST", "/v1/remove", { key: off.remove }) : one.api("POST", "/v1/sidecar", { device: off.device, name: off.sidecar, installed: false })));
+    act(() => (off.remove ? one.api("POST", "/v1/remove", { key: off.remove }) : one.api("POST", "/v1/service", { device: off.device, name: off.service, installed: false })));
   }
 
   async function menu(which, at) {

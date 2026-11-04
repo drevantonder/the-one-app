@@ -1,5 +1,5 @@
 //! The Vault: its items in each scope, the node's database `vault` there (`src/vault.rs`), requests for one, which
-//! machines open each scope's (`vault grant`), and filling them into apps' and sidecars' requests. A caller's items
+//! machines open each scope's (`vault grant`), and filling them into apps' and services' requests. A caller's items
 //! open as its other data does: with this device's own keys for its own person, else with the keys the caller hands
 //! (`x-one-keys`), that database's alone; and their secrets, hosts and apps only on a machine its admins granted the
 //! scope's Vault key, which nobody hands.
@@ -136,7 +136,7 @@ impl Node {
         Ok(Lookup { app: app.into(), user: me.user.clone(), scopes: self.items_of(me, scopes).await? })
     }
 
-    /// The scopes `user` may use that this device holds: where an agent's request and a sidecar's are filled from.
+    /// The scopes `user` may use that this device holds: where an agent's request and a service's are filled from.
     fn usable_scopes(&self, user: &str) -> Result<Vec<Scope>> {
         self.with(|i| {
             let m = &i.r.members;
@@ -188,28 +188,28 @@ impl Node {
         }
     }
 
-    /// Whether `host` is the name of an app or sidecar, which an item's hosts name to let its fields into calls to
-    /// that sidecar: never a site's, so a web request to it gets none.
+    /// Whether `host` is the name of an app or service, which an item's hosts name to let its fields into calls to
+    /// that service: never a site's, so a web request to it gets none.
     pub fn names_app(&self, host: &str) -> bool {
-        self.0.built_in_sidecars.iter().any(|n| n.name == host) || self.0.sidecars.has(host) || self.with(|i| Ok(i.r.members.apps.contains_key(host) || i.r.members.sidecars.keys().any(|(_, name)| name == host))).unwrap_or(false)
+        self.0.built_in_services.iter().any(|n| n.name == host) || self.0.services.has(host) || self.with(|i| Ok(i.r.members.apps.contains_key(host) || i.r.members.services.keys().any(|(_, name)| name == host))).unwrap_or(false)
     }
 
-    /// Fills `text` for a sidecar's call while it waits for the sidecar's answer, as its app's requests are filled: from
-    /// the items switched on for the app of the sidecar's name that the call's user may use, a secret field only when
-    /// `host` is one of its item's hosts, and only for this device's own person, whose keys it has. The sidecar then
+    /// Fills `text` for a service's call while it waits for the service's answer, as its app's requests are filled: from
+    /// the items switched on for the app of the service's name that the call's user may use, a secret field only when
+    /// `host` is one of its item's hosts, and only for this device's own person, whose keys it has. The service then
     /// sends it to `host` itself.
-    pub async fn sidecar_fill(&self, sidecar: &str, call: u64, text: &str, host: &str) -> Result<String> {
+    pub async fn service_fill(&self, service: &str, call: u64, text: &str, host: &str) -> Result<String> {
         ensure!(!self.names_app(host), "{host} is an app's name, not a site's");
-        let asked = self.0.sidecars.caller_of(sidecar, call).with_context(|| format!("no call {call} of {sidecar}'s is waiting"))?;
+        let asked = self.0.services.caller_of(service, call).with_context(|| format!("no call {call} of {service}'s is waiting"))?;
         let me = self.own_caller()?;
         ensure!(asked.user == me.user, "{} fills in only its own person's items", self.device_name());
-        let lookup = self.lookup(&me, sidecar, &self.usable_scopes(&me.user)?).await?;
+        let lookup = self.lookup(&me, service, &self.usable_scopes(&me.user)?).await?;
         lookup.refuse_shut(text)?;
         crate::vault::fill(text, host, |name| lookup.get(name))
     }
 
     /// Makes an HTTP request for an agent of `caller`'s (`{ url, method?, headers?, body? }`), as the built-in agents
-    /// sidecar: the fields of the items a person lets agents use are filled in, a secret one only for its item's
+    /// service: the fields of the items a person lets agents use are filled in, a secret one only for its item's
     /// hosts, as an app's requests are. → `{ status, headers, body }`, a secret field's value blotted out wherever the
     /// site echoes it back, so the agent never sees one.
     pub async fn vault_fetch(&self, caller: &Caller, req: &Value) -> Result<Value> {

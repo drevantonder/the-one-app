@@ -527,9 +527,9 @@ class Person {
     return db;
   }
 
-  /// The scopes a call reaches: an app's, as `Run.scopes` gives them; a sidecar's, those it names, or its person's own.
+  /// The scopes a call reaches: an app's, as `Run.scopes` gives them; a service's, those it names, or its person's own.
   callScopes(who, view, req) {
-    const app = !req.sidecar && !req.device && deployed(view, req.app);
+    const app = !req.service && !req.device && deployed(view, req.app);
     if (app) return new Run(this, who, view).scopes(app, req.scopes).map((h) => h.id);
     return (req.scopes || ["user"]).map((s) => (s === "user" ? `user:${who.user}` : s === "global" || String(s).includes(":") ? String(s) : `group:${s}`));
   }
@@ -678,7 +678,7 @@ class Run {
     if (depth > 8) refuse(400, "apps called each other too deep");
     const p = this.person;
     const d = await p.describe(this.who, app);
-    if (d.uses?.sidecars?.length) refuse(503, needsDevice(d, app.name));
+    if (d.uses?.services?.length) refuse(503, needsDevice(d, app.name));
     if (!scopes.length) refuse(403, `${d.title || app.name} isn't on any of your pages`);
     const writes = what === "call";
     const call = new Call(p, this.who, app, scopes.map((h) => h.id), this.view);
@@ -763,7 +763,7 @@ class Run {
     const out = {};
     await Promise.all(this.pages(page).map(async ({ app, scopes }) => {
       const d = await this.person.describe(this.who, app).catch(() => null);
-      if (d?.badge !== true || d.uses?.sidecars?.length) return;
+      if (d?.badge !== true || d.uses?.services?.length) return;
       const n = await this.run(app, "badge", {}, scopes).catch(() => 0);
       if (n > 0) out[app.name] = n;
     }));
@@ -789,10 +789,10 @@ class Run {
 /// An app in the install with a deploy, as `view` has it; or null.
 const deployed = (view, name) => view.apps.find((a) => a.name === name && a.bundle && !a.deleted) || null;
 
-/// Whether an app keeps to its own data: it uses no other app, sidecar or Vault item.
-const plain = (d) => !d.uses?.apps?.length && !d.uses?.sidecars?.length && !d.vault;
+/// Whether an app keeps to its own data: it uses no other app, service or Vault item.
+const plain = (d) => !d.uses?.apps?.length && !d.uses?.services?.length && !d.vault;
 
-/// What a person reads when an app needs a sidecar on a device and none is on.
+/// What a person reads when an app needs a service on a device and none is on.
 const needsDevice = (d, name) => `${d?.title || name} runs on your devices, and ${OFF}`;
 
 /// What the node does for an app while it runs, as it asks (src/node.rs: `internal`): its databases, other apps'
@@ -836,10 +836,10 @@ class ForCall extends RpcTarget {
           this.done();
           return Response.json({});
         case "POST call": {
-          // A sidecar, or an app this node can't run, goes to a node on a machine, when one answers.
+          // A service, or an app this node can't run, goes to a node on a machine, when one answers.
           const callee = deployed(view, q.app);
-          const d = callee && !q.sidecar && !q.device ? await person.describe(who, callee) : null;
-          if (!d || d.uses?.sidecars?.length) return Response.json(await machineCall(this.run, q, d));
+          const d = callee && !q.service && !q.device ? await person.describe(who, callee) : null;
+          if (!d || d.uses?.services?.length) return Response.json(await machineCall(this.run, q, d));
           return Response.json(await this.run.call({ app: q.app, op: q.op, input: q.input }, this.app.name, this.depth + 1));
         }
         case "GET vault":
@@ -859,9 +859,9 @@ class ForCall extends RpcTarget {
   }
 }
 
-/// An app's call that needs a node on a machine (a sidecar's, or one of an app that uses one), as this person.
+/// An app's call that needs a node on a machine (a service's, or one of an app that uses one), as this person.
 async function machineCall(run, q, d) {
-  const call = { app: q.app, op: q.op, input: q.input ?? {}, sidecar: q.sidecar ? q.app : undefined, device: q.device };
+  const call = { app: q.app, op: q.op, input: q.input ?? {}, service: q.service ? q.app : undefined, device: q.device };
   const out = await run.person.onMachine(run.who, run.view, call, 15_000);
   if (!out) refuse(503, needsDevice(d, q.app));
   return answered(out, q.app);
@@ -902,13 +902,13 @@ async function route(p, request) {
     const req = await bodyOf(request);
     if (typeof req !== "object" || req === null || Array.isArray(req)) refuse(400, "a call is an object");
     const run = new Run(p, who, await p.installFor(who));
-    const app = !req.sidecar && !req.device && deployed(run.view, req.app);
+    const app = !req.service && !req.device && deployed(run.view, req.app);
     const d = app && (await p.describe(who, app));
     // An app that keeps to its own data runs here; the rest on a machine, when one answers.
     if (d && plain(d)) return json(await run.call(req));
     const r = await p.onMachine(who, run.view, req, 120_000);
     if (r) return json(r, r.ok !== undefined ? 200 : 400);
-    if (!d || d.uses?.sidecars?.length) refuse(503, needsDevice(d, req.app));
+    if (!d || d.uses?.services?.length) refuse(503, needsDevice(d, req.app));
     return json(await run.call(req));
   }
   const screenAt = path.match(/^\/v1\/screens\/([a-z0-9-]+)\/([A-Za-z0-9_-]+)$/);
@@ -917,7 +917,7 @@ async function route(p, request) {
     const view = await p.installFor(who);
     const app = deployed(view, screenAt[1]);
     const d = app && (await p.describe(who, app));
-    if (!d || d.uses?.sidecars?.length) refuse(503, needsDevice(d, screenAt[1]));
+    if (!d || d.uses?.services?.length) refuse(503, needsDevice(d, screenAt[1]));
     return screenOf(request, p, who, view, app, screenAt[2], JSON.parse(url.searchParams.get("params") || "{}"), url.searchParams.get("scope"));
   }
   // A scope's keys, as sealed in the bucket, where every endpoint the relay lets in may read them anyway.

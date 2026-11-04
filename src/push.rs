@@ -1,6 +1,6 @@
 //! Push: sends notifications to phones through Apple's push service (APNs), for every user its device serves, so an app
 //! or an agent can reach someone who isn't looking. Phones register their tokens with it; a push goes to the caller's
-//! own phones, says which app sent it, and opens that app's screen when tapped. A hosted sidecar (`sidecars::Hosted`) on
+//! own phones, says which app sent it, and opens that app's screen when tapped. A hosted service (`services::Hosted`) on
 //! one device: the white label's APNs key is a Vault item on Everyone switched on for push, which the node fills in for
 //! each call (`load`), and its folder keeps devices.json, the phones registered. It says whether APNs accepted a push,
 //! never whether anyone saw it.
@@ -15,7 +15,7 @@ use ring::signature::{ECDSA_P256_SHA256_FIXED_SIGNING, EcdsaKeyPair};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
-use crate::sidecars::{Call, Host, input};
+use crate::services::{Call, Host, input};
 
 pub const NAME: &str = "push";
 
@@ -26,7 +26,7 @@ const APNS: &str = "api.push.apple.com";
 pub fn describe() -> Value {
     json!({
         "title": "Push", "description": "Sends notifications to your phone", "icon": "bell-ringing", "serves": "everyone",
-        "instructions": "Push sends a notification to your own phones through Apple's push service: push_send with a title and a body. An app pushes with ctx.sidecars.push.send, and tapping its push opens its screen. It says whether APNs accepted it, never whether anyone saw it.",
+        "instructions": "Push sends a notification to your own phones through Apple's push service: push_send with a title and a body. An app pushes with ctx.services.push.send, and tapping its push opens its screen. It says whether APNs accepted it, never whether anyone saw it.",
         "ops": [
             { "name": "send", "reads": false, "description": "Push a notification to your phones: { title, body, screen?, params? }; from an app, tapping it opens that app's screen (main unless given). Says how many APNs accepted.",
               "input": { "type": "object", "required": ["title"], "properties": {
@@ -153,7 +153,7 @@ pub fn call(host: &Host, call: &Call) -> Result<Value> {
     }
 }
 
-/// Whether the install's push setting names this sidecar; an admin turns push off in Settings by emptying it.
+/// Whether the install's push setting names this service; an admin turns push off in Settings by emptying it.
 fn on(host: &Host) -> bool {
     match host.get("/v1/state") {
         Ok(state) => state["install"]["settings"]["push"].as_str().is_none_or(|push| push == NAME),

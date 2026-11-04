@@ -1,4 +1,4 @@
-// Gmail: the person's own Gmail accounts, as a pure app: Google's API and the Vault, no sidecar. Each account's
+// Gmail: the person's own Gmail accounts, as a pure app: Google's API and the Vault, no service. Each account's
 // refresh token is a secret field of its Google account item, which the node fills in only for Google's token
 // address, so no app or agent ever reads it; each call gets a fresh access token with it. Signing in is the same in
 // every Google app: see "accounts and tokens" below.

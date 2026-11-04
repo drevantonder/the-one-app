@@ -139,10 +139,10 @@ impl Node {
         let body = match deployed {
             // A screen the app doesn't have (an old or mistyped link) is a page that says so.
             true => self.0.apps.screen(app, name).await?.unwrap_or_else(|| "<div id=\"missing\"></div><script>missing.innerHTML = one.notFound()</script>".into()),
-            // A sidecar's screen, for now: its `_screen` operation gives the body, wherever the sidecar runs.
+            // A service's screen, for now: its `_screen` operation gives the body, wherever the service runs.
             false => {
                 let input = json!({ "name": name, "params": params });
-                let req = CallRequest { app: app.into(), sidecar: Some(app.into()), op: "_screen".into(), input, ..Default::default() };
+                let req = CallRequest { app: app.into(), service: Some(app.into()), op: "_screen".into(), input, ..Default::default() };
                 let body = self.route(req, viewer.clone()).await?;
                 body.as_str().context("the screen isn't text")?.to_string()
             }

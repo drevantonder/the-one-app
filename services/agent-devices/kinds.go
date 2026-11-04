@@ -67,7 +67,7 @@ type kind interface {
 // runtimes are every kind but linux, as this machine might run them.
 var runtimes = []kind{chromeKind{}, windowsQEMU{}, androidEmulator{}, iosSimulator{}}
 
-// A vm is a device of a kind other than linux, as its file in the sidecar's folder says.
+// A vm is a device of a kind other than linux, as its file in the service's folder says.
 type vm struct {
 	Name    string    `json:"name"`
 	Kind    string    `json:"kind"`
@@ -418,7 +418,7 @@ func connected(ctx context.Context, ports ...int) bool {
 	return false
 }
 
-// screenWatched reports whether something other than this sidecar is connected to a device's screen at socket.
+// screenWatched reports whether something other than this service is connected to a device's screen at socket.
 func screenWatched(ctx context.Context, socket string) bool {
 	out, err := exec.CommandContext(ctx, "ss", "-Hx", "state", "established").Output()
 	return err == nil && strings.Contains(string(out), socket+" ")
@@ -900,7 +900,7 @@ func (ds *devices) runLinux(ctx context.Context, op, name string, input map[stri
 	return out.String(), nil
 }
 
-// outliving is a command run so that it outlives this sidecar: on Linux in a scope of the user's own systemd, as a
+// outliving is a command run so that it outlives this service: on Linux in a scope of the user's own systemd, as a
 // service's restart stops everything in its own; on a Mac, in a session of its own.
 func outliving(name string, args ...string) (string, []string) {
 	if runtime.GOOS == "linux" {
@@ -964,7 +964,7 @@ func (ds *devices) restVMs(ctx context.Context) {
 
 var traffic = map[string]int64{} // each device's bytes through adb at the last look
 
-// inUse reports whether something uses a device without calling this sidecar: an SSH or VNC session into Windows,
+// inUse reports whether something uses a device without calling this service: an SSH or VNC session into Windows,
 // or more than adb's own chatter (512 KB in a look) to a phone.
 func (ds *devices) inUse(ctx context.Context, v *vm) bool {
 	switch v.Kind {

@@ -37,7 +37,7 @@ pub fn serve_mcp(handler: axum::routing::MethodRouter<Node>) {
 }
 
 /// The file in a node's home holding the token its machine's own programs send, in `LOCAL_TOKEN_HEADER`, to say they
-/// are: only the machine's user can read it. The CLI, its MCP, sidecars and the Mac app read it there.
+/// are: only the machine's user can read it. The CLI, its MCP, services and the Mac app read it there.
 pub const LOCAL_TOKEN: &str = "local-token";
 pub const LOCAL_TOKEN_HEADER: &str = "x-one-local-token";
 /// The keys a token caller hands this device for its calls: `keys::seal_handoff`'s.
@@ -204,7 +204,7 @@ pub fn routes() -> Router<Node> {
         .route("/v1/schedule", post(schedule))
         .route("/v1/arrange", post(arrange))
         .route("/v1/retire", post(retire))
-        .route("/v1/sidecar", post(sidecar))
+        .route("/v1/service", post(service))
         .route("/v1/fork", post(fork))
         .route("/v1/source/{app}", get(source))
         .route("/v1/storage", get(storage_get).post(storage_post))
@@ -224,10 +224,10 @@ pub fn routes() -> Router<Node> {
         .route("/v1/screens/{app}/{screen}", get(screen))
         .route("/v1/client-screens/{name}", get(client_screen))
         .route("/hooks/prompt", post(prompt))
-        .route("/v1/sidecars/{app}", post(register))
-        .route("/v1/sidecars/{app}/calls", get(next_call))
-        .route("/v1/sidecars/{app}/calls/{id}", post(reply))
-        .route("/v1/sidecars/{app}/calls/{id}/vault", post(fill))
+        .route("/v1/services/{app}", post(register))
+        .route("/v1/services/{app}/calls", get(next_call))
+        .route("/v1/services/{app}/calls/{id}", post(reply))
+        .route("/v1/services/{app}/calls/{id}/vault", post(fill))
         .route(APP_ROUTE, any(app_http))
 }
 
@@ -308,7 +308,7 @@ pub const SIGNED_IN: &[&str] = &[
     "/v1/entries",
     "/v1/entries/global",
     "/v1/name",
-    "/v1/sidecar",
+    "/v1/service",
     "/v1/runs",
     "/v1/group",
     "/v1/invite",
@@ -642,7 +642,7 @@ async fn signed_in(node: &Node, token: String) -> anyhow::Result<Me> {
 }
 
 /// Refuses a body with anything but `keys`, so a word a route doesn't take (one renamed, say) fails rather than being
-/// passed over: a call or sidecar meant for one device running on another.
+/// passed over: a call or service meant for one device running on another.
 fn only(body: &Value, keys: &[&str]) -> Result<(), Error> {
     match body.as_object().and_then(|o| o.keys().find(|k| !keys.contains(&k.as_str()))) {
         Some(other) => Err(anyhow::anyhow!("{other} isn't something this takes: {}", keys.join(", ")).into()),
@@ -710,11 +710,11 @@ async fn image(State(node): State<Node>, Path(name): Path<String>) -> Response {
     }
 }
 
-/// `{ name, device?, installed? }`: removes a sidecar from a device (this one by default, for this machine's own
+/// `{ name, device?, installed? }`: removes a service from a device (this one by default, for this machine's own
 /// programs), or with `installed` lets it register there again.
-async fn sidecar(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
+async fn service(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
     only(&body, &["name", "device", "installed"])?;
-    node.set_sidecar(&me.caller, body["device"].as_str(), text(&body, "name")?, body["installed"] == true).await?;
+    node.set_service(&me.caller, body["device"].as_str(), text(&body, "name")?, body["installed"] == true).await?;
     done()
 }
 
@@ -757,7 +757,7 @@ async fn call(State(node): State<Node>, me: Me, headers: axum::http::HeaderMap, 
 
 /// A call as `/v1/call` takes it, for `me`: → `{ ok }`. A client that `picks` its node has it run here, or told where.
 async fn call_for(node: &Node, me: Me, body: Value, picks: bool) -> anyhow::Result<Value> {
-    only(&body, &["id", "app", "sidecar", "op", "input", "scopes", "device", "agent", "depth", "from", "client"]).map_err(|e| e.0)?;
+    only(&body, &["id", "app", "service", "op", "input", "scopes", "device", "agent", "depth", "from", "client"]).map_err(|e| e.0)?;
     let mut req: CallRequest = serde_json::from_value(body)?;
     // Only the node says an app made a call, and how deep it is.
     (req.from, req.depth) = (None, 0);
@@ -1127,25 +1127,25 @@ async fn blob(State(node): State<Node>, me: Me, Path(hash): Path<String>) -> Res
 }
 
 async fn register(State(node): State<Node>, Path(app): Path<String>, Json(describe): Json<Value>) -> Reply {
-    node.register_sidecar(&app, describe).await?;
+    node.register_service(&app, describe).await?;
     done()
 }
 
 async fn next_call(State(node): State<Node>, Path(app): Path<String>) -> Result<Response, Error> {
-    Ok(match node.sidecars().next(&app).await? {
+    Ok(match node.services().next(&app).await? {
         Some(call) => Json(json!(call)).into_response(),
         None => StatusCode::NO_CONTENT.into_response(),
     })
 }
 
 async fn reply(State(node): State<Node>, Path((app, id)): Path<(String, u64)>, Json(body): Json<Value>) -> Reply {
-    node.sidecars().reply(&app, id, body)?;
+    node.services().reply(&app, id, body)?;
     done()
 }
 
-/// A sidecar's text filled from the Vault for a call of its that waits, for the host it's going to.
+/// A service's text filled from the Vault for a call of its that waits, for the host it's going to.
 async fn fill(State(node): State<Node>, Path((app, id)): Path<(String, u64)>, Json(body): Json<Value>) -> Reply {
-    let text = node.sidecar_fill(&app, id, text(&body, "text")?, text(&body, "host")?).await?;
+    let text = node.service_fill(&app, id, text(&body, "text")?, text(&body, "host")?).await?;
     Ok(Json(json!({ "text": text })))
 }
 

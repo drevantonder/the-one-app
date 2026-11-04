@@ -304,9 +304,11 @@ const VAULT: &str = "vault";
 const LOG: &str = "log";
 /// The node's database of the blobs a scope's entries name (`bucket::BLOBS`).
 const BLOBS: &str = "blobs";
-/// An app's own databases: its data, and its sidecars' records.
+/// An app's own databases: its data, and its services' records.
 const APP_DATABASE: &str = "main";
-const SIDECAR_DATABASE: &str = "sidecar";
+// Named before services were called services: it holds sealed records (AGENTS.md's history among them), which only
+// clients could copy under a new name.
+const RECORDS_DATABASE: &str = "sidecar";
 
 /// The app a kind of request runs, as clients name kinds to remember what each needed: an app's call (`call <app>`),
 /// or its screens (`/v1/screens/<app>`). None for any other.
@@ -326,7 +328,7 @@ pub fn app_of(route: &str) -> Option<&str> {
 /// never go with a request.
 pub fn may_hand(route: &str, need: &Need) -> bool {
     let node = |of: &[&str]| need.app == crate::members::APP && of.contains(&need.database.as_str());
-    let apps = need.app != crate::members::APP && [APP_DATABASE, SIDECAR_DATABASE].contains(&need.database.as_str());
+    let apps = need.app != crate::members::APP && [APP_DATABASE, RECORDS_DATABASE].contains(&need.database.as_str());
     let code = need.scope == "global" && node(&[BLOBS]);
     match (app_of(route), route) {
         (Some(app), _) => need.app == app || node(&[VAULT, LOG]) || code,
@@ -369,7 +371,7 @@ pub fn same_secret(a: &[u8], b: &[u8]) -> bool {
     a.len() == b.len() && a.iter().zip(b).fold(0u8, |d, (x, y)| d | (x ^ y)) == 0
 }
 
-/// A service's proof that the enrollment secret `one sidecars install-link` minted on its person's device was given to
+/// A service's proof that the enrollment secret `one services install-link` minted on its person's device was given to
 /// it: HKDF-SHA256(secret, "one/service\0" ‖ its key ‖ its seal key), hex. Only that device, which keeps the secret,
 /// checks it, so whoever passes its request on can't swap the keys.
 pub fn service_proof(secret: &[u8], device: &Endpoint) -> String {

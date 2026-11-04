@@ -1,7 +1,7 @@
 @preconcurrency import Contacts
 import Foundation
 
-struct ContactsApp: Sidecar {
+struct ContactsApp: Service {
     let app = "contacts"
     private static let store = Unshared(CNContactStore())
 

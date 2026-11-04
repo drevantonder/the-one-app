@@ -1,7 +1,7 @@
 package main
 
-// Moving the link: this sidecar on the device that holds it hands its
-// database (the link's keys and the messages kept) to the same sidecar on
+// Moving the link: this service on the device that holds it hands its
+// database (the link's keys and the messages kept) to the same service on
 // another of the user's devices, in calls through the nodes, end-to-end
 // encrypted between them. Nothing is written anywhere else, so once the
 // other device has it and this one deletes its copy, there is one copy.
@@ -31,7 +31,7 @@ import (
 // call may carry, even through older nodes (2 MB).
 var partSize = 1 << 20
 
-// holding is what one device's sidecar tells another about its links: the
+// holding is what one device's service tells another about its links: the
 // first, as when there could be only one, and all of them.
 type holding struct {
 	Phone     string    `json:"phone,omitempty"` // the linked number, if linked there
@@ -78,7 +78,7 @@ func (l *link) devices() (devices, error) {
 			Devices []struct {
 				Key, Name string
 				Online    bool
-				Sidecars  []string
+				Services  []string
 			}
 		}
 	}
@@ -91,7 +91,7 @@ func (l *link) devices() (devices, error) {
 	}
 	s := devices{here: state.Device.Name}
 	for _, o := range state.Install.Devices {
-		if o.Key != state.Device.Key && o.Online && slices.Contains(o.Sidecars, app) {
+		if o.Key != state.Device.Key && o.Online && slices.Contains(o.Services, app) {
 			s.others = append(s.others, o.Name)
 		}
 	}

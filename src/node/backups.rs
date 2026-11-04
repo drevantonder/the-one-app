@@ -250,7 +250,7 @@ impl Node {
             self.say(&Scope::Global, Said::Alerted { place: p.place.clone() }).await?;
             for admin in &admins {
                 let input = json!({ "title": p.title, "body": format!("{} {}", p.text, p.fix) });
-                let call = CallRequest { app: push.clone(), sidecar: Some(push.clone()), op: "send".into(), input, client: Some("app".into()), ..Default::default() };
+                let call = CallRequest { app: push.clone(), service: Some(push.clone()), op: "send".into(), input, client: Some("app".into()), ..Default::default() };
                 match Box::pin(self.route(call, Caller { key: me, user: admin.clone(), agent: None, token: None })).await {
                     Ok(sent) => tracing::info!("told {admin} about backups: {sent}"),
                     Err(err) => tracing::warn!("couldn't tell {admin} about backups: {err:#}"),

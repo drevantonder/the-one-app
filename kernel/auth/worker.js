@@ -16,7 +16,7 @@
 // `?approved`, which keeps it, marked, for the new device to see while it waits (it asks no node until it's in), with
 // `&genesis=`, the install's first entry's hash as the approving device holds it: the only install the new device then
 // takes, so no node it reaches first can show it another. Set once, with the approval. A service (`one
-// sidecars serve`), which nobody signs in on, leaves one signed with its own key instead, naming the service and the
+// services serve`), which nobody signs in on, leaves one signed with its own key instead, naming the service and the
 // enrollment its install link carried: a device of its person's made that link and told auth the hash of its secret
 // (`/api/auth/services/enrollments`), and only that device is shown the request, which it checks the proof of itself.
 //
@@ -433,7 +433,7 @@ export class Auth extends DurableObject {
     return { until: made + REQUEST };
   }
 
-  /// A device of the install makes an install link for a service of its person's (`one sidecars install-link`): `{ id,
+  /// A device of the install makes an install link for a service of its person's (`one services install-link`): `{ id,
   /// user, until }`, `id` the hash of the link's secret, which it keeps. → {}.
   async enroll(request) {
     const signed = (await this.signed(request, await request.json().catch(() => refuse(400, "the body isn't JSON")))) || refuse(401, "Sign it with one of the install's devices.");
@@ -469,8 +469,8 @@ export class Auth extends DurableObject {
     this.taken(body.sig);
     this.expire();
     const [e] = sql.exec("select * from enrollments where id = ? and user = ? and until > ?", enrollment, user, Date.now()).toArray();
-    if (!e) refuse(403, "That install link isn't one of the install's, or ran out: make another with sidecars install-link.");
-    if (e.key && e.key !== key) refuse(403, "That install link was used by another service: make another with sidecars install-link.");
+    if (!e) refuse(403, "That install link isn't one of the install's, or ran out: make another with services install-link.");
+    if (e.key && e.key !== key) refuse(403, "That install link was used by another service: make another with services install-link.");
     sql.exec("update enrollments set key = ? where id = ?", key, enrollment);
     const made = Date.now();
     sql.exec("insert or replace into service_requests (key, seal, name, service, user, by, enrollment, proof, shared, made) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", key, seal, name.trim(), service, user, e.by, enrollment, proof, fields.shared === true ? 1 : 0, made);

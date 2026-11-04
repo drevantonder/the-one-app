@@ -44,7 +44,7 @@ extension String {
     var nonEmpty: String? { isEmpty ? nil : self }
 }
 
-struct RemindersApp: Sidecar {
+struct RemindersApp: Service {
     let app = "reminders"
 
     var description: [String: Any] {
@@ -168,7 +168,7 @@ struct RemindersApp: Sidecar {
     }
 }
 
-struct CalendarApp: Sidecar {
+struct CalendarApp: Service {
     let app = "calendar"
 
     var description: [String: Any] {

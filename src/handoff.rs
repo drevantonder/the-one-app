@@ -164,7 +164,7 @@ pub async fn wanted() {
     WANTED.notified().await
 }
 
-/// Waits until this node is stopping for the one taking over: long waits (event streams, sidecars' asks for calls)
+/// Waits until this node is stopping for the one taking over: long waits (event streams, services' asks for calls)
 /// end then, so their clients ask the new one at once.
 pub async fn stopping() {
     let mut rx = STOPPING.subscribe();

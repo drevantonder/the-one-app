@@ -1,11 +1,11 @@
-// Contacts: Contacts on the person's Mac. The contacts sidecar lives in the Mac app, which macOS lets reach Contacts;
+// Contacts: Contacts on the person's Mac. The contacts service lives in the Mac app, which macOS lets reach Contacts;
 // this app is what people and agents use, wherever they are.
 
-/// Runs one of the contacts sidecar's operations, wherever it runs for the caller. When none of their devices runs it,
+/// Runs one of the contacts service's operations, wherever it runs for the caller. When none of their devices runs it,
 /// says what's needed instead of how the call failed.
-async function sidecar(ctx, op, input) {
+async function service(ctx, op, input) {
   try {
-    return await ctx.sidecars.contacts[op](input);
+    return await ctx.services.contacts[op](input);
   } catch (err) {
     if (String(err.message).includes("no device runs contacts for you")) throw new Error(NEEDS);
     throw err;
@@ -26,14 +26,14 @@ export default {
   connector: true,
   needs: "Needs a Mac",
   instructions: "Contacts are the person's Apple Contacts, through their Mac. contacts_search finds people by name, email address or phone number; contacts_me is the person's own card.",
-  uses: { sidecars: ["contacts"] },
+  uses: { services: ["contacts"] },
 
   ops: {
     accounts: {
       reads: true,
       description: "The Macs Contacts runs on: each { account, ok }, account the Mac's name, ok while it's online.",
       input: { type: "object", properties: {} },
-      run: async (ctx) => (await ctx.devices()).filter((s) => (s.sidecars || []).includes("contacts")).map((s) => ({ account: s.name, ok: s.online })),
+      run: async (ctx) => (await ctx.devices()).filter((s) => (s.services || []).includes("contacts")).map((s) => ({ account: s.name, ok: s.online })),
     },
     sign_out: {
       reads: false,
@@ -41,7 +41,7 @@ export default {
       description: "Stop using Contacts on one of your Macs: removes it from that Mac, for one of its owners. The contacts themselves stay as they are.",
       input: { type: "object", required: ["account"], properties: { account: { type: "string", description: "the Mac's name, as contacts_accounts lists it" } } },
       run: (ctx, { account }) => {
-        ctx.sidecar("contacts", account, false);
+        ctx.service("contacts", account, false);
         return `Contacts is removed from ${account}.`;
       },
     },
@@ -56,19 +56,19 @@ export default {
           limit: { type: "integer", description: "at most this many, by name; default 25" },
         },
       },
-      run: (ctx, input) => sidecar(ctx, "search", input),
+      run: (ctx, input) => service(ctx, "search", input),
     },
     get: {
       reads: true,
       description: `One contact's card, by its id from contacts_search: ${CARD}. Use it to look again at someone already found; contacts_search gives the same cards.`,
       input: { type: "object", required: ["id"], properties: { id: { type: "string", description: "the contact's id, as contacts_search gives it" } } },
-      run: (ctx, input) => sidecar(ctx, "get", input),
+      run: (ctx, input) => service(ctx, "get", input),
     },
     me: {
       reads: true,
       description: `The person's own card, the one Contacts marks as theirs: ${CARD}. Use it for their own name, number or address.`,
       input: { type: "object", properties: {} },
-      run: (ctx, input) => sidecar(ctx, "me", input),
+      run: (ctx, input) => service(ctx, "me", input),
     },
   },
 };

@@ -1,4 +1,4 @@
-// The WhatsApp sidecar: links this device to a WhatsApp account, as
+// The WhatsApp service: links this device to a WhatsApp account, as
 // WhatsApp Desktop is linked, keeps the messages it sees, and offers them to
 // the person's devices through this device's node.
 //
@@ -44,11 +44,11 @@ func main() {
 }
 
 // serve registers with the node and answers its calls, registering again
-// whenever the node forgets (it keeps sidecars in memory) or restarts.
+// whenever the node forgets (it keeps services in memory) or restarts.
 func serve(node string, w *whatsapp) {
 	poll := &http.Client{Timeout: 40 * time.Second, Transport: toNode}
 	for {
-		if err := post(node+"/v1/sidecars/"+app, describe); err != nil {
+		if err := post(node+"/v1/services/"+app, describe); err != nil {
 			log.Printf("registering: %v", err)
 			time.Sleep(3 * time.Second)
 			continue
@@ -73,7 +73,7 @@ func serve(node string, w *whatsapp) {
 				case err != nil:
 					reply = map[string]any{"error": err.Error()}
 				}
-				if err := post(fmt.Sprintf("%s/v1/sidecars/%s/calls/%d", node, app, c.ID), reply); err != nil {
+				if err := post(fmt.Sprintf("%s/v1/services/%s/calls/%d", node, app, c.ID), reply); err != nil {
 					log.Printf("answering %s: %v", c.Op, err)
 				}
 			}()
@@ -83,7 +83,7 @@ func serve(node string, w *whatsapp) {
 
 // next waits for the node's next call; nil if there was none.
 func next(client *http.Client, node string) (*call, error) {
-	resp, err := client.Get(node + "/v1/sidecars/" + app + "/calls")
+	resp, err := client.Get(node + "/v1/services/" + app + "/calls")
 	if err != nil {
 		return nil, err
 	}
@@ -139,11 +139,11 @@ func request(client *http.Client, url string, body any) ([]byte, error) {
 	return msg, nil
 }
 
-// callOn runs one of this sidecar's operations on another of the user's
+// callOn runs one of this service's operations on another of the user's
 // devices, through this device's node, and decodes its result into out.
 func callOn(node, device, op string, input, out any) error {
 	body, err := request(&http.Client{Timeout: 28 * time.Second, Transport: toNode}, node+"/v1/call",
-		map[string]any{"app": app, "sidecar": app, "op": op, "input": input, "device": device})
+		map[string]any{"app": app, "service": app, "op": op, "input": input, "device": device})
 	if err != nil {
 		return err
 	}

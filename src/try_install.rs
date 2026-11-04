@@ -534,12 +534,12 @@ fn devices(dir: &Path) -> serde_json::Map<String, Value> {
 }
 
 /// One of this machine's install's Agent Devices' operations (not the try install's, which has none). When the node
-/// restarts during it (an update), or its sidecar is still coming back, it's asked again once they answer.
+/// restarts during it (an update), or its service is still coming back, it's asked again once they answer.
 fn agent_devices(op: &str, input: Value) -> Result<Value> {
     Ok(again(|| post("/v1/call", json!({ "app": "agent-devices", "op": op, "input": input, "client": "one try" })))?["ok"].clone())
 }
 
-/// What `ask` gives, asking again for up to 3 minutes while this machine's node or a sidecar of its restarts.
+/// What `ask` gives, asking again for up to 3 minutes while this machine's node or a service of its restarts.
 fn again(ask: impl Fn() -> Result<Value>) -> Result<Value> {
     let start = Instant::now();
     loop {
@@ -553,7 +553,7 @@ fn again(ask: impl Fn() -> Result<Value>) -> Result<Value> {
     }
 }
 
-/// Whether an error is the node or a sidecar of it restarting, not the call failing.
+/// Whether an error is the node or a service of it restarting, not the call failing.
 fn restarting(err: &str) -> bool {
     ["isn't running here", "isn't running on this device", "no device runs agent-devices", "none of yours runs it"].iter().any(|s| err.contains(s))
 }

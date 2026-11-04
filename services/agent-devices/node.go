@@ -28,7 +28,7 @@ func nodeAddr() string {
 }
 
 // asThisMachine reads the token for each request, so the node may start after
-// the sidecar.
+// the service.
 type asThisMachine struct {
 	addr, token string
 	next        http.RoundTripper

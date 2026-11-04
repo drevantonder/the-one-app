@@ -22,7 +22,7 @@ import (
 )
 
 type devices struct {
-	dir   string // this sidecar's files
+	dir   string // this service's files
 	node  string // its node's local API
 	cache string // the devices' tools, kept for when none is running
 

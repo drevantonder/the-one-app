@@ -5,7 +5,7 @@
 //! (`keys::vault_key_name`). So a member who opens the scope adds an item and never reads one back, and nobody who
 //! can't open an item changes where it goes or who uses it. Apps write `{{<item id>:field}}` (or `{{field}}`) where a
 //! field goes, and a granted machine fills it in on the way out: into a web request to one of its hosts, or into the
-//! input of a call to a sidecar whose name is one of them.
+//! input of a call to a service whose name is one of them.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -402,7 +402,7 @@ fn placeholders(text: &str) -> Vec<&str> {
     out
 }
 
-/// Fills every text in `value` as `fill` fills one, for a call to a sidecar (`host` is its name).
+/// Fills every text in `value` as `fill` fills one, for a call to a service (`host` is its name).
 pub fn fill_value(value: &mut Value, host: &str, lookup: &impl Fn(&str) -> Option<(Vec<String>, String)>) -> Result<()> {
     match value {
         Value::String(text) if text.contains("{{") => *text = fill(text, host, lookup)?,

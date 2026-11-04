@@ -3,18 +3,18 @@
 use super::*;
 
 impl Node {
-    /// What people call `app`, for what they read: its title, or its sidecar's, else its name.
+    /// What people call `app`, for what they read: its title, or its service's, else its name.
     pub(super) async fn title(&self, app: &str) -> String {
         match self.0.apps.title(app).await {
             Some(title) => title,
-            None => self.sidecar_title(app),
+            None => self.service_title(app),
         }
     }
 
-    /// What people call the sidecar `name`: its title, else its name.
-    pub(super) fn sidecar_title(&self, name: &str) -> String {
-        let built_in = self.0.built_in_sidecars.iter().find(|b| b.name == name).and_then(|b| (b.describe)()["title"].as_str().map(str::to_string));
-        built_in.or_else(|| self.0.sidecars.title(name)).unwrap_or_else(|| name.to_string())
+    /// What people call the service `name`: its title, else its name.
+    pub(super) fn service_title(&self, name: &str) -> String {
+        let built_in = self.0.built_in_services.iter().find(|b| b.name == name).and_then(|b| (b.describe)()["title"].as_str().map(str::to_string));
+        built_in.or_else(|| self.0.services.title(name)).unwrap_or_else(|| name.to_string())
     }
 
     pub(super) fn deployed(&self, app: &str) -> bool {
@@ -38,24 +38,24 @@ impl Node {
         Ok(())
     }
 
-    /// Every app in the install, with what each does for `viewer` where it's installed for them; and the sidecars
+    /// Every app in the install, with what each does for `viewer` where it's installed for them; and the services
     /// that serve them.
     pub async fn apps(&self, viewer: &Caller) -> Result<Vec<Value>> {
         let mut out = self.catalog(viewer, false).await?;
-        let mut sidecars = Vec::new();
+        let mut services = Vec::new();
         if viewer.user == self.user()? {
-            sidecars.extend(self.with(|i| Ok(self.sidecars_here(i)))?.into_iter().map(|d| d.2));
+            services.extend(self.with(|i| Ok(self.services_here(i)))?.into_iter().map(|d| d.2));
         }
         let remote = self.with(|i| {
-            let mut d: Vec<Value> = i.peers.iter().filter(|(k, _)| i.online(k)).flat_map(|(_, s)| s.sidecars.iter()).filter(|d| d.1.contains(&viewer.user)).map(|d| d.2.clone()).collect();
+            let mut d: Vec<Value> = i.peers.iter().filter(|(k, _)| i.online(k)).flat_map(|(_, s)| s.services.iter()).filter(|d| d.1.contains(&viewer.user)).map(|d| d.2.clone()).collect();
             d.sort_by_key(|v| v["name"].as_str().unwrap_or("").to_string());
             Ok(d)
         })?;
-        for mut describe in sidecars.into_iter().chain(remote) {
+        for mut describe in services.into_iter().chain(remote) {
             if out.iter().any(|a| a["name"] == describe["name"]) {
                 continue;
             }
-            // A sidecar serves its user, so its screens are on their own page.
+            // A service serves its user, so its screens are on their own page.
             if describe["screens"].as_array().is_some_and(|s| !s.is_empty()) && describe["installed"].is_null() {
                 describe["installed"] = json!([Scope::User(viewer.user.clone()).to_string()]);
             }
@@ -92,8 +92,8 @@ impl Node {
             }
         }
         let mut services: Vec<Value> = self.with(|i| {
-            let here = self.sidecars_here(i).into_iter().map(|d| d.2);
-            Ok(here.chain(i.peers.iter().filter(|(k, _)| i.online(k)).flat_map(|(_, s)| s.sidecars.iter().map(|d| d.2.clone()))).collect())
+            let here = self.services_here(i).into_iter().map(|d| d.2);
+            Ok(here.chain(i.peers.iter().filter(|(k, _)| i.online(k)).flat_map(|(_, s)| s.services.iter().map(|d| d.2.clone()))).collect())
         })?;
         services.sort_by_key(|d| d["title"].as_str().or(d["name"].as_str()).unwrap_or("").to_lowercase());
         services.dedup_by(|a, b| a["name"] == b["name"]);
@@ -299,7 +299,7 @@ impl Node {
         self.member_content(caller, deploy(app, bundle)).await
     }
 
-    /// What an app's latest deploy says it uses: (apps, sidecars). Waits a while for this device to run that deploy.
+    /// What an app's latest deploy says it uses: (apps, services). Waits a while for this device to run that deploy.
     pub(super) async fn uses(&self, app: &str) -> (Vec<String>, Vec<String>) {
         self.runs_latest(app, CALL_LIMIT).await;
         self.uses_here(app).await
@@ -320,11 +320,11 @@ impl Node {
         }
     }
 
-    /// What the deploy of `app` this device runs says it uses: (apps, sidecars).
+    /// What the deploy of `app` this device runs says it uses: (apps, services).
     pub(super) async fn uses_here(&self, app: &str) -> (Vec<String>, Vec<String>) {
         let d = if self.0.apps.has(app) { self.0.apps.describe(app).await.unwrap_or_default() } else { Value::Null };
         let list = |k: &str| d["uses"][k].as_array().into_iter().flatten().filter_map(|v| v.as_str().map(str::to_string)).collect();
-        (list("apps"), list("sidecars"))
+        (list("apps"), list("services"))
     }
 
     /// The entries that install (or uninstall) `app` in `scope` for `caller`, with their own rights there. Installing

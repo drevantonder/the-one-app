@@ -85,7 +85,7 @@ func (w *whatsapp) run(ctx context.Context, op string, raw json.RawMessage) (any
 		return l.signIn(ctx, in.Phone)
 	case "_pairing": // the settings screen's QR code and phone code, while one is pairing
 		return w.pairing(), nil
-	case "_holder": // the sidecar's own, between the user's devices
+	case "_holder": // the service's own, between the user's devices
 		return w.holding(), nil
 	case "_take":
 		l, err := w.spare()

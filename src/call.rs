@@ -17,8 +17,8 @@ pub enum Append {
     Retire { app: String, how: String },
     /// Sets (or with an empty link, clears) where an app's code is kept, with the caller's own rights.
     Source { app: String, link: String },
-    /// Removes a sidecar from a device (or lets it register there again), for someone acting for one of its owners.
-    Sidecar { device: String, name: String, installed: bool },
+    /// Removes a service from a device (or lets it register there again), for someone acting for one of its owners.
+    Service { device: String, name: String, installed: bool },
     /// What the call spent on AI: `{ model, usd, input, output }`, for the insights of the app that called it.
     Cost { data: Value },
     /// Makes, changes or lets go of (`release`) a Vault item: `scope` for one it makes, `same` a plain field by
@@ -41,8 +41,8 @@ pub fn appends(list: &Value) -> Result<Vec<Append>> {
             appends.push(Append::Switch { app: a["app"].as_str().unwrap_or("").into(), schedule: schedule.into(), scope, on: a["on"] != false });
             continue;
         }
-        if let Some(name) = a["sidecar"].as_str() {
-            appends.push(Append::Sidecar { device: a["device"].as_str().unwrap_or("").into(), name: name.into(), installed: a["installed"] == true });
+        if let Some(name) = a["service"].as_str() {
+            appends.push(Append::Service { device: a["device"].as_str().unwrap_or("").into(), name: name.into(), installed: a["installed"] == true });
             continue;
         }
         if let Some(name) = a["retire"].as_str() {

@@ -42,7 +42,7 @@ pub use devices::{DeviceRequest, Invited};
 pub use net::{alpn, relay, service_alpn};
 pub use calls::Elsewhere;
 pub use sessions::{Needs, client_token, passed_token};
-mod sidecars;
+mod services;
 mod standing;
 pub use standing::GRANT_DAYS;
 mod state;
@@ -53,8 +53,8 @@ mod vault;
 
 /// How long a call may run before it's stopped.
 const CALL_LIMIT: Duration = Duration::from_secs(30);
-/// A sidecar's call may take longer, as a browser or a desktop starts: as long as a sidecar is waited for.
-const SIDECAR_LIMIT: Duration = Duration::from_secs(600);
+/// A service's call may take longer, as a browser or a desktop starts: as long as a service is waited for.
+const SERVICE_LIMIT: Duration = Duration::from_secs(600);
 /// How many app-to-app calls deep a call may be: a person's call of A, A's of B, B's of C, C's of D.
 pub const MAX_DEPTH: u32 = 3;
 /// How many calls an app may make of other apps, or runs of its schedules, a minute on one device.
@@ -88,12 +88,14 @@ const REQUEST_LIFE: u64 = 86_400_000;
 const CHANGED_SHOWN: u64 = 14 * 86_400_000;
 /// The object in an install's bucket that says whose it is: the install's genesis.
 const INSTALL_OBJECT: &str = "install";
-/// How often a device says hello to the others: which sidecars serve there, and how loaded it is.
+/// How often a device says hello to the others: which services serve there, and how loaded it is.
 const PRESENCE_EVERY: Duration = Duration::from_secs(15);
 /// What an app's own database is called: SQLite's name for a connection's first.
 const DATABASE: &str = "main";
-/// What a built-in sidecar's database of its records is called, under its name.
-const SIDECAR_DATABASE: &str = "sidecar";
+/// What a built-in service's database of its records is called, under its name.
+// Named before services were called services: it holds sealed records (AGENTS.md's history among them), which only
+// clients could copy under a new name.
+const RECORDS_DATABASE: &str = "sidecar";
 
 pub fn now_ms() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64
@@ -119,13 +121,13 @@ struct InstallFile {
     folders: BTreeMap<String, String>,
 }
 
-/// A sidecar serving on a device: its name, the users it serves, and what it does (its operations), which callers
-/// list until apps wrap sidecars.
-pub type Sidecar = (String, Vec<String>, Value);
+/// A service serving on a device: its name, the users it serves, and what it does (its operations), which callers
+/// list until apps wrap services.
+pub type Service = (String, Vec<String>, Value);
 
-/// Another device, as it last said hello: the sidecars serving there, and how loaded it is.
+/// Another device, as it last said hello: the services serving there, and how loaded it is.
 struct Peer {
-    sidecars: Vec<Sidecar>,
+    services: Vec<Service>,
     load: Option<crate::load::Load>,
     seen: Instant,
 }
@@ -227,18 +229,18 @@ pub struct Caller {
     pub token: Option<String>,
 }
 
-/// An operation to run: of an app, or of a sidecar.
+/// An operation to run: of an app, or of a service.
 #[derive(Clone, Debug, Default, Deserialize)]
 pub struct CallRequest {
     /// Names this call wherever it's tried, so a call that writes runs on one device only: the first to take its lease.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
-    /// The app, or for a sidecar's call, the sidecar (older machines name a sidecar here).
+    /// The app, or for a service's call, the service.
     #[serde(default)]
     pub app: String,
-    /// The sidecar whose operation this is, when it is one: an app and the sidecar it wraps may share a name.
+    /// The service whose operation this is, when it is one: an app and the service it wraps may share a name.
     #[serde(default)]
-    pub sidecar: Option<String>,
+    pub service: Option<String>,
     pub op: String,
     #[serde(default)]
     pub input: Value,
@@ -356,8 +358,8 @@ pub struct Inner {
     id: Key,
     name: Mutex<String>,
     apps: Apps,
-    built_in_sidecars: Vec<crate::sidecars::BuiltIn>,
-    pub sidecars: crate::sidecars::Sidecars,
+    built_in_services: Vec<crate::services::BuiltIn>,
+    pub services: crate::services::Services,
     install: Exclusive<Option<Install>>,
     pairings: Mutex<HashMap<[u8; 16], Pairing>>,
     events: broadcast::Sender<Event>,
@@ -375,7 +377,7 @@ pub struct Inner {
     images: Mutex<HashMap<String, Option<String>>>,
     /// The pictures windows' app lists named (`/v1/images/<name>`), by name: each a data URL.
     named_images: Mutex<HashMap<String, String>>,
-    /// The logos of the sites apps and sidecars connect to.
+    /// The logos of the sites apps and services connect to.
     logos: crate::logos::Logos,
     /// The calls, widgets and hooks running now, by the token their requests carry.
     grants: Mutex<HashMap<String, Grant>>,
@@ -504,8 +506,8 @@ impl std::fmt::Debug for Node {
 }
 
 impl Node {
-    /// Starts this device's node, with the built-in sidecars this build has.
-    pub async fn start(dir: &Path, built_in_sidecars: Vec<crate::sidecars::BuiltIn>) -> Result<Node> {
+    /// Starts this device's node, with the built-in services this build has.
+    pub async fn start(dir: &Path, built_in_services: Vec<crate::services::BuiltIn>) -> Result<Node> {
         std::fs::create_dir_all(dir)?;
         let device = load_device(dir)?;
         let secret = unhex(&device.secret)?;
@@ -525,8 +527,8 @@ impl Node {
             id,
             name: Mutex::new(device.name),
             apps,
-            built_in_sidecars,
-            sidecars: Default::default(),
+            built_in_services,
+            services: Default::default(),
             install: Exclusive::new(None),
             pairings: Mutex::new(load_pairings(dir)),
             events,
@@ -615,8 +617,8 @@ impl Node {
             }
         });
         if node.has_install() {
-            for sidecar in node.0.built_in_sidecars.iter().filter(|n| n.sync.is_some()) {
-                node.sync_built_in(sidecar.name);
+            for service in node.0.built_in_services.iter().filter(|n| n.sync.is_some()) {
+                node.sync_built_in(service.name);
             }
         }
         Ok(node)
@@ -1078,11 +1080,11 @@ impl Node {
         .unwrap_or(false)
     }
 
-    /// Now and then, reads what other devices wrote and said, and syncs built-in sidecars' records.
+    /// Now and then, reads what other devices wrote and said, and syncs built-in services' records.
     async fn tick_loop(self) {
         for tick in 1u64.. {
             tokio::time::sleep(TICK).await;
-            // What other devices wrote and said, every tick; and wrote of a built-in sidecar's records, every minute.
+            // What other devices wrote and said, every tick; and wrote of a built-in service's records, every minute.
             if self.has_install() {
                 if let Err(err) = self.read_logs().await {
                     tracing::debug!("reading the bucket: {err:#}");
@@ -1096,8 +1098,8 @@ impl Node {
                 self.share_unshared().await;
                 self.take_forgotten().await;
                 self.sweep_remote_puts();
-                for sidecar in self.0.built_in_sidecars.iter().filter(|n| n.sync.is_some()) {
-                    self.sync_built_in(sidecar.name);
+                for service in self.0.built_in_services.iter().filter(|n| n.sync.is_some()) {
+                    self.sync_built_in(service.name);
                 }
             }
         }
@@ -1231,22 +1233,22 @@ fn check_append(i: &Install, append: Append, scopes: &[Scope], me: &Caller, titl
             let link = members::source_link(&json!(link))?;
             (Scope::Global, members::node("app", json!({ "name": name, "owner": a.owner.to_string(), "source": link })))
         }
-        Append::Sidecar { device, name, installed } => (Scope::Global, sidecar_entry(&i.r.members, &me.user, &device, &name, installed)?),
+        Append::Service { device, name, installed } => (Scope::Global, service_entry(&i.r.members, &me.user, &device, &name, installed)?),
         Append::Install { .. } | Append::Cost { .. } | Append::Exec { .. } | Append::Vault { .. } => bail!("installs, costs, statements and items are written on their own"),
     })
 }
 
-/// The `sidecar` entry that removes a sidecar from a device, found by name or key prefix, or with `installed` lets it
+/// The `service` entry that removes a service from a device, found by name or key prefix, or with `installed` lets it
 /// register there again; for the device's person or an admin.
-fn sidecar_entry(m: &Members, user: &str, device: &str, name: &str, installed: bool) -> Result<Content> {
+fn service_entry(m: &Members, user: &str, device: &str, name: &str, installed: bool) -> Result<Content> {
     let mut found: Vec<&members::Machine> = m.machines.values().filter(|s| m.machine(&s.key).is_some()).filter(|s| s.name.eq_ignore_ascii_case(device) || (!device.is_empty() && hex(&s.key).starts_with(device))).collect();
     // A machine's services are named for it: by its name, it's its node.
     if found.len() > 1 {
         found.retain(|s| s.is(members::Kind::Compute));
     }
     let [s] = found.as_slice() else { bail!("no one device called {device}") };
-    ensure!(m.looks_after(user, &s.key), "only {}'s person or an admin installs or removes its sidecars", s.name);
-    Ok(members::sidecar(&s.key, name, installed))
+    ensure!(m.looks_after(user, &s.key), "only {}'s person or an admin installs or removes its services", s.name);
+    Ok(members::service(&s.key, name, installed))
 }
 
 /// A scope as people call it: Everyone, a person's name, or a group's.

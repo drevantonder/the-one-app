@@ -1,4 +1,4 @@
-//! Logos from the sites apps and sidecars connect to. A device fetches a `domain`'s logo itself,
+//! Logos from the sites apps and services connect to. A device fetches a `domain`'s logo itself,
 //! keeps it as a blob, and gives it as an app's `image`, so shells draw it offline and devices never ask the site.
 
 use std::collections::{BTreeMap, HashMap, HashSet};

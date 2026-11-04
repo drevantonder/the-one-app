@@ -11,7 +11,7 @@ struct MacApp: App {
         // The window shows at once; the rest waits for an older copy to quit.
         SingleCopy.claim {
             Mac.shared.run()
-            Sidecars.start()
+            Services.start()
             WidgetItems.shared.start(Mac.shared.store)
         }
         if !UserDefaults.standard.bool(forKey: "loginItemSet") {
@@ -78,7 +78,7 @@ struct MacApp: App {
 
 /// The Mac's window before and after its person signs in. Signed out, it's the sign-in screen and nothing from before.
 /// Signed in, its calls carry their token to this Mac's own node, which opens their data with keys the vault gives
-/// that sign-in, as for every other client; the node itself, and the sidecars, stay this machine's own programs.
+/// that sign-in, as for every other client; the node itself, and the services, stay this machine's own programs.
 @MainActor @Observable
 final class Mac {
     static let shared = Mac()

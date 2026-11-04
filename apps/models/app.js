@@ -1,12 +1,12 @@
-// Models: the local AI models on the person's devices. The models sidecar, built into every device's node, asks the
+// Models: the local AI models on the person's devices. The models service, built into every device's node, asks the
 // ones on its machine, and a call goes on to the next device when a model isn't there; this app is what people,
 // agents and other apps use.
 
-/// Runs one of the models sidecar's operations, wherever it runs for the caller. When none of their devices runs it,
+/// Runs one of the models service's operations, wherever it runs for the caller. When none of their devices runs it,
 /// says what's needed instead of how the call failed.
-async function sidecar(ctx, op, input) {
+async function service(ctx, op, input) {
   try {
-    return await ctx.sidecars.models[op](input);
+    return await ctx.services.models[op](input);
   } catch (err) {
     if (String(err.message).includes("no device runs models for you")) throw new Error(NEEDS);
     throw err;
@@ -28,14 +28,14 @@ export default {
   connector: true,
   needs: "Needs a device with a GPU",
   instructions: "Local models run on the device that has them. models_here lists this device's models; give device \"all\" for every device's, and which are loaded. models_chat asks one and returns its answer, on whichever of your devices has it; use it for private or bulk work instead of a hosted model. models_decide asks a decision model (like clef-flash) typed questions and answers with probabilities, fast.",
-  uses: { sidecars: ["models"] },
+  uses: { services: ["models"] },
 
   ops: {
     accounts: {
       reads: true,
       description: "The devices Models runs on: each { account, ok }, account the device's name, ok while it's online. models_here lists the models on each.",
       input: { type: "object", properties: {} },
-      run: async (ctx) => (await ctx.devices()).filter((s) => (s.sidecars || []).includes("models")).map((s) => ({ account: s.name, ok: s.online })),
+      run: async (ctx) => (await ctx.devices()).filter((s) => (s.services || []).includes("models")).map((s) => ({ account: s.name, ok: s.online })),
     },
     sign_out: {
       reads: false,
@@ -43,7 +43,7 @@ export default {
       description: "Stop using Models on one of your devices: removes it from that device, for one of its owners. The models stay on its disk.",
       input: { type: "object", required: ["account"], properties: { account: { type: "string", description: "the device's name, as models_accounts lists it" } } },
       run: (ctx, { account }) => {
-        ctx.sidecar("models", account, false);
+        ctx.service("models", account, false);
         return `Models is removed from ${account}.`;
       },
     },
@@ -51,7 +51,7 @@ export default {
       reads: true,
       description: "The local models on this device, or with device \"all\" on every device: each { name, size, family, parameters, loaded }, as Ollama gives them (size in bytes, parameters like 12.2B), loaded when it's in memory and answers at once. Use a name as model in models_chat or models_decide.",
       input: { type: "object", properties: {} },
-      run: (ctx, input) => sidecar(ctx, "here", input),
+      run: (ctx, input) => service(ctx, "here", input),
     },
     chat: {
       reads: true,
@@ -70,7 +70,7 @@ export default {
           options: { type: "object", description: "Ollama's options, like { temperature: 0, num_predict: 1024 }" },
         },
       },
-      run: (ctx, input) => sidecar(ctx, "chat", input),
+      run: (ctx, input) => service(ctx, "chat", input),
     },
     decide: {
       reads: true,
@@ -85,7 +85,7 @@ export default {
           images: { type: "array", description: "images as base64 strings (or { content_type, base64 }), which state names as image 1, image 2..." },
         },
       },
-      run: (ctx, input) => sidecar(ctx, "decide", input),
+      run: (ctx, input) => service(ctx, "decide", input),
     },
   },
 };

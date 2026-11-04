@@ -70,8 +70,8 @@ async function described(ctx, bundle) {
   const all = file ? new TextDecoder().decode(file.bytes) : "";
   const code = all.slice(Math.max(0, all.search(/^export default/m)));
   const field = (key) => code.match(new RegExp(`\\b${key}:\\s*"([^"]*)"`))?.[1] || null;
-  const parts = code.match(/\buses:\s*\{[^}]*\bsidecars:\s*\[([^\]]*)\]/)?.[1].match(/"[^"]+"/g)?.map((n) => n.slice(1, -1)) || [];
-  return { title: field("title"), icon: field("icon"), color: field("color"), tagline: field("tagline"), description: field("description"), needs: field("needs"), advanced: /\badvanced:\s*true\b/.test(code), uses: { apps: [], sidecars: parts } };
+  const parts = code.match(/\buses:\s*\{[^}]*\bservices:\s*\[([^\]]*)\]/)?.[1].match(/"[^"]+"/g)?.map((n) => n.slice(1, -1)) || [];
+  return { title: field("title"), icon: field("icon"), color: field("color"), tagline: field("tagline"), description: field("description"), needs: field("needs"), advanced: /\badvanced:\s*true\b/.test(code), uses: { apps: [], services: parts } };
 }
 
 /// Whether an app is a service: it has no main screen and no widget, so shells keep it in each page's Services folder
@@ -87,14 +87,14 @@ async function isService(ctx, a) {
 /// Where a service runs, in a few words, and what each of the caller's devices offers for it: "Runs on linux, mac",
 /// or what it needs (its `needs`) when none of their devices runs it; the devices they own it may be installed on (where
 /// an owner removed it) or removed from; and whether they own none, so they ask an owner instead. Its device parts are the
-/// sidecars it uses, by their names.
+/// services it uses, by their names.
 async function where(ctx, a) {
   const devices = await ctx.devices();
-  const parts = a.uses?.sidecars || [];
+  const parts = a.uses?.services || [];
   if (!parts.length) return null;
   const owns = (s) => (s.owners || []).some((o) => mine(ctx, o));
-  const runs = devices.filter((s) => (s.sidecars || []).some((d) => parts.includes(d)));
-  const removed = devices.filter((s) => !runs.includes(s) && (s.removed_sidecars || []).some((d) => parts.includes(d.name)));
+  const runs = devices.filter((s) => (s.services || []).some((d) => parts.includes(d)));
+  const removed = devices.filter((s) => !runs.includes(s) && (s.removed_services || []).some((d) => parts.includes(d.name)));
   const line = runs.length ? "Runs on " + runs.map((s) => s.name).join(", ") : a.needs || "Runs on none of your devices";
   return {
     line, runs: runs.map((s) => s.name), needs: a.needs || null,
@@ -219,7 +219,7 @@ export default {
             tagline: d.tagline || a.tagline || null, description: d.description || a.description || null,
             owner: a.owner, owner_name: name(a.owner),
             from: a.from || null, forks: a.forks || [], deploys: a.deploys, installed: a.installed || [],
-            installed_names: (a.installed || []).map(name), uses: a.uses || { apps: [], sidecars: [] },
+            installed_names: (a.installed || []).map(name), uses: a.uses || { apps: [], services: [] },
             advanced: !!(d.advanced || a.advanced), built_in: !!a.built_in, added, up_to_date: a.built_in && added ? a.bundle === a.built_in : null,
             source: a.source || null, mine: mine(ctx, a.owner), deleted: a.deleted || null, service: services[all.indexOf(a)], accounts: a.accounts ?? null,
           };
@@ -348,7 +348,7 @@ export default {
         const a = await find(ctx, app);
         const all = await ctx.devices();
         if (!all.some((s) => s.name === device)) throw new Error(`no device called ${device}: your devices are ${all.map((s) => s.name).join(", ")}`);
-        for (const part of a.uses?.sidecars || []) ctx.sidecar(part, device, true);
+        for (const part of a.uses?.services || []) ctx.service(part, device, true);
         return `${a.title || app} is installed on ${device}.`;
       },
     },
@@ -362,7 +362,7 @@ export default {
         const all = await ctx.devices();
         const there = all.find((s) => s.name === device);
         if (!there) throw new Error(`no device called ${device}: your devices are ${all.map((s) => s.name).join(", ")}`);
-        for (const part of a.uses?.sidecars || []) if ((there?.sidecars || []).includes(part)) ctx.sidecar(part, device, false);
+        for (const part of a.uses?.services || []) if ((there?.services || []).includes(part)) ctx.service(part, device, false);
         return `${a.title || app} is removed from ${device}.`;
       },
     },

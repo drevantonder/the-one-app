@@ -4,9 +4,9 @@ import ApplicationServices
 /// Lets the person's own agents use this Mac (its apps, keyboard and pointer) once they turn it on, through Cua Driver
 /// (github.com/trycua/cua). It runs as this app's child, embedded, so the Accessibility and Screen Recording
 /// permissions it needs are this app's, granted once, rather than Cua Driver's own. Its tools act in the background
-/// where they can, with an agent cursor of their own, so the person's pointer stays theirs. The node serves a sidecar
+/// where they can, with an agent cursor of their own, so the person's pointer stays theirs. The node serves a service
 /// only to its Mac's local user, so only the owner's agents reach it. Computer Use lists it beside the agent devices.
-struct ComputerApp: Sidecar {
+struct ComputerApp: Service {
     let app = "computer"
 
     var description: [String: Any] {

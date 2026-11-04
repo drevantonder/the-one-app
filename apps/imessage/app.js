@@ -1,11 +1,11 @@
-// iMessage: Messages on the person's Mac. The imessage sidecar lives in the Mac app, which macOS lets reach Messages;
+// iMessage: Messages on the person's Mac. The imessage service lives in the Mac app, which macOS lets reach Messages;
 // this app is what people and agents use, wherever they are.
 
-/// Runs one of the imessage sidecar's operations, wherever it runs for the caller. When none of their devices runs it,
+/// Runs one of the imessage service's operations, wherever it runs for the caller. When none of their devices runs it,
 /// says what's needed instead of how the call failed; when a chat isn't found, where to find it.
-async function sidecar(ctx, op, input) {
+async function service(ctx, op, input) {
   try {
-    return await ctx.sidecars.imessage[op](input);
+    return await ctx.services.imessage[op](input);
   } catch (err) {
     const why = String(err.message);
     if (why.includes("no device runs imessage for you")) throw new Error(NEEDS);
@@ -32,14 +32,14 @@ export default {
   connector: true,
   needs: "Needs a Mac",
   instructions: "iMessage is the person's Messages on their Mac, iMessage and SMS. imessage_chats lists recent chats; imessage_read reads one, newest last; imessage_search finds messages. Each list pages back with limit and skip. imessage_send sends a real message to a real person: send only what the user asked to send, to whom they asked. Reading never marks a message read.",
-  uses: { sidecars: ["imessage"] },
+  uses: { services: ["imessage"] },
 
   ops: {
     accounts: {
       reads: true,
       description: "The Macs iMessage runs on: each { account, ok }, account the Mac's name, ok while it's online.",
       input: { type: "object", properties: {} },
-      run: async (ctx) => (await ctx.devices()).filter((s) => (s.sidecars || []).includes("imessage")).map((s) => ({ account: s.name, ok: s.online })),
+      run: async (ctx) => (await ctx.devices()).filter((s) => (s.services || []).includes("imessage")).map((s) => ({ account: s.name, ok: s.online })),
     },
     sign_out: {
       reads: false,
@@ -47,7 +47,7 @@ export default {
       description: "Stop using iMessage on one of your Macs: removes it from that Mac, for one of its owners. The messages themselves stay as they are.",
       input: { type: "object", required: ["account"], properties: { account: { type: "string", description: "the Mac's name, as imessage_accounts lists it" } } },
       run: (ctx, { account }) => {
-        ctx.sidecar("imessage", account, false);
+        ctx.service("imessage", account, false);
         return `iMessage is removed from ${account}.`;
       },
     },
@@ -62,7 +62,7 @@ export default {
           skip: { type: "integer", description: "leave out this many of the most recent, to page back: 30 for the second page of 30" },
         },
       },
-      run: (ctx, input) => sidecar(ctx, "chats", input),
+      run: (ctx, input) => service(ctx, "chats", input),
     },
     read: {
       reads: true,
@@ -77,7 +77,7 @@ export default {
           skip: { type: "integer", description: "leave out this many of the newest, to read further back: 30 for the 30 before the latest 30" },
         },
       },
-      run: (ctx, input) => sidecar(ctx, "read", input),
+      run: (ctx, input) => service(ctx, "read", input),
     },
     search: {
       reads: true,
@@ -93,7 +93,7 @@ export default {
           skip: { type: "integer", description: "leave out this many of the newest matches, to page back" },
         },
       },
-      run: (ctx, input) => sidecar(ctx, "search", input),
+      run: (ctx, input) => service(ctx, "search", input),
     },
     send: {
       reads: false,
@@ -107,7 +107,7 @@ export default {
           text: { type: "string", description: "the message, exactly as the person approved it" },
         },
       },
-      run: (ctx, input) => sidecar(ctx, "send", input),
+      run: (ctx, input) => service(ctx, "send", input),
     },
   },
 };

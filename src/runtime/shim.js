@@ -46,14 +46,14 @@ function describe() {
     badge: typeof app.badge === "function",
     hooks: Object.keys(app.hooks || {}),
     screens: Object.entries(app.screens || {}).map(([name, s]) => ({ name, title: s.title || name })),
-    uses: { apps: app.uses?.apps || [], sidecars: app.uses?.sidecars || [] },
+    uses: { apps: app.uses?.apps || [], services: app.uses?.services || [] },
     schedules: Object.entries(app.schedules || {}).map(([name, s]) => ({ name, ...s })),
     // Each kind of scope's schema (user, group, global), as the changes that make it, oldest first.
     schema: Object.fromEntries(Object.entries(app.schema || {}).map(([kind, sql]) => [kind, [].concat(sql)])),
   };
 }
 
-/// Asks the node something for the call with `token`: other apps' and sidecars' operations, blobs, the install's apps.
+/// Asks the node something for the call with `token`: other apps' and services' operations, blobs, the install's apps.
 async function askNode(token, path, init = {}) {
   const r = await fetchOut(new Request(`http://one.internal/${path}`, { ...init, headers: { "x-one-call": token } }));
   if (!r.ok) throw new Error(await r.text());
@@ -123,9 +123,9 @@ function context(ask, body, appends, later) {
     },
   });
   const scopes = body.scopes.map(handle);
-  // `ctx.apps.<name>.<op>(input, { device })`, for exactly the apps (or sidecars) the app says it uses; `device` (a
-  // name) runs it there, like a sidecar on the machine that has what it needs.
-  const uses = { apps: app.uses?.apps || [], sidecars: app.uses?.sidecars || [] };
+  // `ctx.apps.<name>.<op>(input, { device })`, for exactly the apps (or services) the app says it uses; `device` (a
+  // name) runs it there, like a service on the machine that has what it needs.
+  const uses = { apps: app.uses?.apps || [], services: app.uses?.services || [] };
   const used = (kind) => new Proxy({}, {
     get(_, name) {
       if (typeof name !== "string" || name === "then") return undefined;
@@ -137,7 +137,7 @@ function context(ask, body, appends, later) {
             // An option it doesn't know (one renamed, say) fails, rather than running the call somewhere else.
             const [unknown] = Object.keys(other);
             if (unknown) throw new Error(`${unknown} isn't an option of ctx.${kind} calls: give device`);
-            return (await (await ask("call", { method: "POST", body: JSON.stringify({ app: name, sidecar: kind === "sidecars", op, input, device }) })).json()).ok;
+            return (await (await ask("call", { method: "POST", body: JSON.stringify({ app: name, service: kind === "services", op, input, device }) })).json()).ok;
           };
         },
       });
@@ -179,7 +179,7 @@ function context(ask, body, appends, later) {
     groups: scopes.filter((s) => s.id.startsWith("group:")),
     group: (id) => find(id.startsWith("group:") ? id : `group:${id}`),
     apps: used("apps"),
-    sidecars: used("sidecars"),
+    services: used("services"),
     blob: {
       put: async (bytes) => (await (await ask("blob", { method: "POST", body: bytes })).json()).blob,
       get: async (hash) => new Uint8Array(await (await ask(`blob/${hash}`)).arrayBuffer()),
@@ -254,11 +254,11 @@ function context(ask, body, appends, later) {
       if (body.read_only) throw new Error("this call only reads: it runs on data opened for it");
       appends.push({ app_source: name, link: String(link ?? "") });
     },
-    /// Removes a sidecar from a device (by name), or with installed lets it run there again, for someone acting for one
+    /// Removes a service from a device (by name), or with installed lets it run there again, for someone acting for one
     /// of the device's owners.
-    sidecar: (name, device, installed = false) => {
+    service: (name, device, installed = false) => {
       if (body.read_only) throw new Error("this call only reads: it runs on data opened for it");
-      appends.push({ sidecar: name, device, installed });
+      appends.push({ service: name, device, installed });
     },
     /// Switches one of an app's schedules on or off in a scope, with the caller's own rights there.
     schedule: (name, schedule, scope, on = true) => {

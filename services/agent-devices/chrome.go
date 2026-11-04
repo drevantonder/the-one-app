@@ -26,7 +26,7 @@ import (
 
 // chrome devices: the machine's own Google Chrome, headless, one for each borrow, with a folder of its own that's
 // deleted when it's given back. No container: it starts in a second and reaches what this machine reaches, so a
-// machine runs them only while its owner allows it (chromeSwitch). This sidecar drives it over its DevTools pipe
+// machine runs them only while its owner allows it (chromeSwitch). This service drives it over its DevTools pipe
 // (--remote-debugging-pipe: no port, nothing else can reach it) and answers the browser tools itself (browse.go).
 // Chrome's own sandbox stays on.
 

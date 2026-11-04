@@ -15,7 +15,7 @@ import (
 
 // The page asks for the list every few seconds and for each running device's
 // picture now and then, and asking the devices takes a while (the other devices'
-// sidecars over the relay, Podman, simctl, adb, a picture taken). So the last
+// services over the relay, Podman, simctl, adb, a picture taken). So the last
 // answer is kept and given at once, and asked again in the background once it's
 // older than fresh. One older than stale, or none yet, is waited for. A change
 // made here forgets the list, so whoever made it sees it.

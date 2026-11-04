@@ -263,7 +263,7 @@ impl Node {
         }
     }
 
-    /// Tells every other device which sidecars serve its local user here and how loaded it is, now and then.
+    /// Tells every other device which services serve its local user here and how loaded it is, now and then.
     pub(super) async fn presence_loop(self) {
         loop {
             if self.has_install() {
@@ -274,16 +274,16 @@ impl Node {
         }
     }
 
-    /// Says hello to every other device: as now and then, and when this device's sidecars change. How long each takes
+    /// Says hello to every other device: as now and then, and when this device's services change. How long each takes
     /// to answer is how far it is.
     pub(super) fn say_hello(&self) {
-        let Ok((devices, me, sidecars)) = self.with(|i| {
+        let Ok((devices, me, services)) = self.with(|i| {
             let devices: Vec<Key> = i.r.members.computes().map(|s| s.key).filter(|k| *k != self.0.id).collect();
-            Ok((devices, Caller { key: self.0.id, user: i.user.clone(), agent: None, token: None }, self.sidecars_here(i)))
+            Ok((devices, Caller { key: self.0.id, user: i.user.clone(), agent: None, token: None }, self.services_here(i)))
         }) else {
             return;
         };
-        let req = CallRequest { app: members::APP.into(), op: "hello".into(), input: json!({ "sidecars": sidecars, "load": crate::load::current() }), ..Default::default() };
+        let req = CallRequest { app: members::APP.into(), op: "hello".into(), input: json!({ "services": services, "load": crate::load::current() }), ..Default::default() };
         for device in devices {
             let (node, req, me) = (self.clone(), req.clone(), me.clone());
             tokio::spawn(async move {
@@ -297,7 +297,7 @@ impl Node {
     }
 
     /// Says hello to each service endpoint of the install, which says what it offers and whom it serves: it's listed
-    /// as a device offering that sidecar, as another device's hello lists those there.
+    /// as a device offering that service, as another device's hello lists those there.
     pub(super) fn hello_services(&self) {
         let Ok(services) = self.with(|i| Ok(i.r.members.machines.values().filter(|m| i.r.members.service(&m.key).is_some()).map(|m| (m.key, m.service.clone().unwrap_or_default())).collect::<Vec<_>>())) else {
             return;
@@ -331,11 +331,11 @@ impl Node {
         // Whom it serves is what its listing says, never what it says of itself.
         let users: Vec<String> = self.with(|i| { let m = &i.r.members; Ok(m.users.keys().filter(|u| m.service_serves(&key, u)).cloned().collect()) }).unwrap_or_default();
         describe["name"] = json!(name);
-        let sidecars: Vec<Sidecar> = vec![(name.clone(), users, describe)];
+        let services: Vec<Service> = vec![(name.clone(), users, describe)];
         let changed = self.with(|i| {
             i.far.insert(key, asked.elapsed());
-            let before = i.peers.insert(key, Peer { sidecars: sidecars.clone(), load: None, seen: Instant::now() });
-            Ok(before.is_none_or(|p| p.sidecars != sidecars || p.seen.elapsed() >= 3 * PRESENCE_EVERY))
+            let before = i.peers.insert(key, Peer { services: services.clone(), load: None, seen: Instant::now() });
+            Ok(before.is_none_or(|p| p.services != services || p.seen.elapsed() >= 3 * PRESENCE_EVERY))
         });
         if changed.unwrap_or(false) {
             self.emit(Event::Changed { apps: vec![name] });

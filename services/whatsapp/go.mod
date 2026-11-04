@@ -1,4 +1,4 @@
-module github.com/drevantonder/the-one-app/sidecars/whatsapp
+module github.com/drevantonder/the-one-app/services/whatsapp
 
 go 1.26.10
 

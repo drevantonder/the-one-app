@@ -1116,8 +1116,8 @@ window.__one = {};
     "POST /v1/handle": (b) => write(members.handle({ ...(b.group ? { what: "group", id: String(b.group) } : { what: "user", id: me().id }), handle: String(b.handle || "").trim() })),
     // `key`: one of this person's devices; none, this browser.
     "POST /v1/name": (b) => write(members.rename({ what: "key", id: String(b.key || device.me.key), name: String(b.name || "").trim() })),
-    // A sidecar removed from one of this person's devices (`device`, its key), or with `installed` let register again.
-    "POST /v1/sidecar": (b) => write(members.sidecar({ device: String(b.device || ""), name: String(b.name || ""), installed: b.installed === true })),
+    // A service removed from one of this person's devices (`device`, its key), or with `installed` let register again.
+    "POST /v1/service": (b) => write(members.service({ device: String(b.device || ""), name: String(b.name || ""), installed: b.installed === true })),
     "POST /v1/retire": (b) => write(members.retire({ app: b.app, owner: app(b.app)?.owner, how: b.how })),
     // An app on everyone's page is a change to who can do what; on yours or a group's, a node writes it.
     "POST /v1/install": (b) => (b.scope === "global" ? write(members.install({ app: b.app, installed: b.installed !== false })) : api("/v1/install", { method: "POST", body: b })),

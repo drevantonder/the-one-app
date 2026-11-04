@@ -1,7 +1,7 @@
 //! Messenger: Facebook Messenger, read and sent through the browser of a device borrowed from Agent Devices, with a copy
 //! of a browser profile signed in to messenger.com: one per account. Messenger has no API for personal accounts and its
-//! chats are end-to-end encrypted, so messenger.com in a browser is the way in. A hosted sidecar
-//! (`sidecars::Hosted`); its folder keeps profiles.json, the profiles it's linked to.
+//! chats are end-to-end encrypted, so messenger.com in a browser is the way in. A hosted service
+//! (`services::Hosted`); its folder keeps profiles.json, the profiles it's linked to.
 
 mod parse;
 
@@ -14,7 +14,7 @@ use anyhow::{Result, anyhow, bail};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::sidecars::{Call, Host};
+use crate::services::{Call, Host};
 use parse::{Chat, MENU, NoChat, Node, pick};
 
 pub const NAME: &str = "messenger";
@@ -176,7 +176,7 @@ struct Input {
 }
 
 pub fn call(host: &Host, call: &Call) -> Result<Value> {
-    let input: Input = crate::sidecars::input(&call.input)?;
+    let input: Input = crate::services::input(&call.input)?;
     match call.op.as_str() {
         "_screen" if input.name == "settings" => return Ok(json!(include_str!("messenger/settings.html"))),
         "_screen" => bail!("Messenger has no screen {:?}", input.name),
@@ -270,11 +270,11 @@ fn sign_out(host: &Host, account: &str) -> Result<Value> {
 }
 
 /// Runs one of Agent Devices' operations: those with a browser profile (whose Vault item only the app's calls may use)
-/// the app's, the rest its sidecar's, wherever it runs.
+/// the app's, the rest its service's, wherever it runs.
 fn devices(host: &Host, op: &str, input: Value) -> Result<Value> {
     let mut call = json!({ "app": "agent-devices", "op": op, "input": input });
     if !["borrow", "give_back", "profiles", "sign_in", "save_profile", "add_profile"].contains(&op) {
-        call["sidecar"] = json!("agent-devices");
+        call["service"] = json!("agent-devices");
     }
     let reply = host.post_within("/v1/call", &call, Duration::from_secs(180)).map_err(|err| anyhow!("agent devices {op}: {err:#}"))?;
     Ok(reply["ok"].clone())

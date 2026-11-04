@@ -1,37 +1,37 @@
 import AppKit
 
-/// A device sidecar the Mac app hosts: a device feature it offers the person's devices through this Mac's node.
+/// A device service the Mac app hosts: a device feature it offers the person's devices through this Mac's node.
 /// Apple's apps are reached from here, not the node, because this app is what macOS grants
 /// privacy permissions to.
-protocol Sidecar: Sendable {
+protocol Service: Sendable {
     var app: String { get }
     var description: [String: Any] { get }
     func run(_ op: String, _ input: Input) async throws -> Any
 }
 
-enum Sidecars {
-    static let all: [any Sidecar] = [RemindersApp(), CalendarApp(), ContactsApp(), MessagesApp(), ComputerApp()]
+enum Services {
+    static let all: [any Service] = [RemindersApp(), CalendarApp(), ContactsApp(), MessagesApp(), ComputerApp()]
 
     static func start() {
         let port = Bundle.main.object(forInfoDictionaryKey: "NodePort") as! String
-        let base = URL(string: "http://127.0.0.1:\(port)/v1/sidecars")!
-        for sidecar in all {
-            Task.detached { await serve(sidecar, at: base.appending(path: sidecar.app)) }
+        let base = URL(string: "http://127.0.0.1:\(port)/v1/services")!
+        for service in all {
+            Task.detached { await serve(service, at: base.appending(path: service.app)) }
         }
     }
 
     /// Registers with the node and answers its calls, registering again whenever the node forgets (it keeps
-    /// sidecars in memory) or restarts.
-    private static func serve(_ sidecar: any Sidecar, at url: URL) async {
+    /// services in memory) or restarts.
+    private static func serve(_ service: any Service, at url: URL) async {
         while true {
             do {
-                try await post(url, sidecar.description)
+                try await post(url, service.description)
                 while true {
                     guard let call = try await next(url) else { continue }
                     Task.detached {
                         var reply: [String: Any]
                         do {
-                            reply = ["ok": try await sidecar.run(call.op, call.input)]
+                            reply = ["ok": try await service.run(call.op, call.input)]
                         } catch {
                             reply = ["error": (error as? Refusal)?.description ?? error.localizedDescription]
                         }
@@ -44,7 +44,7 @@ enum Sidecars {
         }
     }
 
-    /// The sidecars' own connections to the node: each holds one open waiting for calls, and URLSession.shared allows
+    /// The services' own connections to the node: each holds one open waiting for calls, and URLSession.shared allows
     /// six to a host, so sharing it would leave the window's requests queued behind them until they time out.
     private static let session: URLSession = {
         let config = URLSessionConfiguration.ephemeral
@@ -192,7 +192,7 @@ func object(_ fields: [String: Any?]) -> [String: Any] {
     fields.compactMapValues { $0 }
 }
 
-/// A sidecar's description: what it is, the Mac app it reaches (`localApp`, a bundle id) and that app's icon as its
+/// A service's description: what it is, the Mac app it reaches (`localApp`, a bundle id) and that app's icon as its
 /// picture, and the Mac app's build and how it's installed.
 func describe(title: String, icon: String, localApp: String, summary: String, instructions: String, ops: [[String: Any]]) -> [String: Any] {
     var d: [String: Any] = ["title": title, "icon": icon, "local_app": localApp, "description": summary, "instructions": instructions, "ops": ops, "widgets": [Any](),

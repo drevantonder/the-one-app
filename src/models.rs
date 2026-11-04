@@ -6,7 +6,7 @@ use anyhow::{Context, Result, bail, ensure};
 use serde_json::{Value, json};
 
 use crate::apps::Me;
-use crate::sidecars::{Answer, Elsewhere, Record, Reply};
+use crate::services::{Answer, Elsewhere, Record, Reply};
 
 const OLLAMA: &str = "http://127.0.0.1:11434";
 
