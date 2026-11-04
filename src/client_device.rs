@@ -213,11 +213,13 @@ fn not_let_in() -> String {
     }
 }
 
-/// Whether the node lets a client device ask `path`: what someone signed in elsewhere may (`api::SIGNED_IN`), and MCP.
+/// Whether the node lets a client device ask `path`: what someone signed in elsewhere may (`api::SIGNED_IN`), apps'
+/// own requests among it, and MCP.
 fn for_clients(path: &str) -> bool {
     let asked: Vec<&str> = path.split('/').collect();
     path == "/mcp"
-        || one::api::SIGNED_IN.iter().any(|route| {
+        || one::api::app_route(path)
+        || one::api::SIGNED_IN.iter().filter(|r| **r != one::api::APP_ROUTE).any(|route| {
             let route: Vec<&str> = route.split('/').collect();
             route.len() == asked.len() && route.iter().zip(&asked).all(|(r, a)| r == a || (r.starts_with('{') && !a.is_empty()))
         })

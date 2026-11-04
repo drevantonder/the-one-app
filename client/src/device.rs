@@ -652,10 +652,15 @@ impl Device {
     }
 }
 
-/// What a request is, to remember what it needed: an app's call by its app, a screen by its app, anything else by
-/// its path.
+/// What a request is, to remember what it needed: an app's call by its app, as is an app's own request (`/<app>/…`,
+/// its `_http` call), a screen by its app, anything else by its path.
 fn route(path: &str, body: &[u8]) -> String {
     let at = path.split('?').next().unwrap_or(path);
+    if let Some((app, rest)) = at.strip_prefix('/').and_then(|p| p.split_once('/'))
+        && !app.is_empty() && !rest.is_empty() && !matches!(app, "v1" | "mcp" | "hooks" | "skills")
+    {
+        return format!("call {app}");
+    }
     if at == "/v1/call" {
         let app = serde_json::from_slice::<Value>(body).ok().and_then(|b| b["app"].as_str().map(str::to_string)).unwrap_or_default();
         return format!("call {app}");

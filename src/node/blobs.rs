@@ -109,6 +109,93 @@ impl Node {
         })
     }
 
+    /// Keeps what `body` sends as a blob, read as it comes, up to `most` bytes and with at most `IDLE` between its
+    /// parts: → its hash and size. Nothing is kept of one that fails.
+    pub async fn put_blob_streamed(&self, body: axum::body::Body, most: u64) -> Result<(String, u64)> {
+        use futures_util::StreamExt;
+        use std::io::Write;
+        let dir = self.0.dir.join("blobs");
+        std::fs::create_dir_all(&dir)?;
+        let part = dir.join(format!("{}.part", new_id()));
+        let wrote = async {
+            let mut file = std::io::BufWriter::new(std::fs::File::create(&part)?);
+            let mut hasher = blake3::Hasher::new();
+            let mut size = 0u64;
+            let mut stream = body.into_data_stream();
+            loop {
+                let chunk = match tokio::time::timeout(PUT_IDLE, stream.next()).await {
+                    Ok(Some(chunk)) => chunk.map_err(|e| anyhow!("the file didn't arrive whole: {e}"))?,
+                    Ok(None) => break,
+                    Err(_) => bail!("the file stopped arriving for {} s", PUT_IDLE.as_secs()),
+                };
+                size += chunk.len() as u64;
+                ensure!(size <= most, Full(most));
+                hasher.update(&chunk);
+                file.write_all(&chunk)?;
+            }
+            file.into_inner().map_err(|e| e.into_error())?.sync_all()?;
+            Ok((hasher.finalize().to_hex().to_string(), size))
+        };
+        let (hash, size) = match wrote.await {
+            Ok(done) => done,
+            Err(err) => {
+                let _ = std::fs::remove_file(&part);
+                return Err(err);
+            }
+        };
+        let path = release::blob_path(&self.0.dir, &hash)?;
+        match path.exists() {
+            true => std::fs::remove_file(&part)?,
+            false => std::fs::rename(&part, &path)?,
+        }
+        Ok((hash, size))
+    }
+
+    /// Keeps a file someone put from elsewhere (a client device, or a sign-in on another machine), read as it comes,
+    /// which they may then read back: up to `REMOTE_PUT`, and only while what they put that nothing names yet stays
+    /// under `REMOTE_WAITING`, since anyone signed in could fill this machine's disk. One nothing names an hour on is
+    /// deleted (`sweep_remote_puts`). → its hash and size.
+    pub async fn put_blob_from(&self, caller: &Caller, body: axum::body::Body) -> Result<(String, u64)> {
+        let waiting: u64 = self.0.remote_puts.lock().unwrap().iter().filter(|p| p.user == caller.user).map(|p| p.size).sum();
+        let room = REMOTE_WAITING.saturating_sub(waiting);
+        ensure!(room > 0, "you've put {} MiB of files from your other devices that nothing kept yet: wait an hour, when they're cleared, and try again", waiting >> 20);
+        let (hash, size) = self.put_blob_streamed(body, room.min(REMOTE_PUT)).await.map_err(|err| match err.downcast_ref::<Full>() {
+            Some(_) if room < REMOTE_PUT => anyhow!("you've put {} MiB of files from your other devices that nothing kept yet, and this one doesn't fit under {} MiB: wait an hour, when they're cleared, and try again", waiting >> 20, REMOTE_WAITING >> 20),
+            _ => err,
+        })?;
+        self.0.put_by.lock().unwrap().entry(hash.clone()).or_default().insert(caller.user.clone());
+        self.0.remote_puts.lock().unwrap().push(RemotePut { hash: hash.clone(), user: caller.user.clone(), size, at: now_ms() });
+        Ok((hash, size))
+    }
+
+    /// Deletes a file put for one request (an app's `_http` body) once it's answered, unless something names it.
+    pub fn drop_put(&self, hash: &str) {
+        if self.0.built_in.values().any(|b| b == hash) || self.blob_named(hash, |_| true).unwrap_or(true) {
+            return;
+        }
+        self.0.remote_puts.lock().unwrap().retain(|p| p.hash != hash);
+        self.0.put_by.lock().unwrap().remove(hash);
+        if let Ok(path) = release::blob_path(&self.0.dir, hash) {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+
+    /// Deletes the files put from elsewhere an hour ago that nothing names: their room is theirs again.
+    pub(super) fn sweep_remote_puts(&self) {
+        let due = now_ms().saturating_sub(REMOTE_KEPT.as_millis() as u64);
+        let old: Vec<RemotePut> = {
+            let mut puts = self.0.remote_puts.lock().unwrap();
+            let (old, young) = std::mem::take(&mut *puts).into_iter().partition(|p| p.at <= due);
+            *puts = young;
+            old
+        };
+        for put in old {
+            if !self.0.remote_puts.lock().unwrap().iter().any(|p| p.hash == put.hash) {
+                self.drop_put(&put.hash);
+            }
+        }
+    }
+
     /// Keeps `bytes` as a blob a sign-in put, which its person may then read back.
     pub fn put_blob_for(&self, caller: &Caller, bytes: &[u8]) -> Result<String> {
         let hash = self.put_blob(bytes)?;
@@ -223,3 +310,32 @@ impl Node {
         self.blob_named(hash, |s| m.may_use(user, s))
     }
 }
+
+/// The most one file put from elsewhere may be.
+pub const REMOTE_PUT: u64 = 512 << 20;
+/// The most of one person's files put from elsewhere that nothing names yet this machine keeps at once.
+pub const REMOTE_WAITING: u64 = 2 << 30;
+/// How long a file put from elsewhere that nothing names is kept.
+const REMOTE_KEPT: Duration = Duration::from_secs(3600);
+/// How long a file being put may send nothing.
+const PUT_IDLE: Duration = Duration::from_secs(60);
+
+/// A file someone put from elsewhere, until it's an hour old.
+pub(super) struct RemotePut {
+    hash: String,
+    user: String,
+    size: u64,
+    at: u64,
+}
+
+/// A file was bigger than it may be.
+#[derive(Debug)]
+struct Full(u64);
+
+impl std::fmt::Display for Full {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "that's over {} MiB, the most this takes at once", self.0 >> 20)
+    }
+}
+
+impl std::error::Error for Full {}

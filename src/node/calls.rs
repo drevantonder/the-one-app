@@ -770,6 +770,10 @@ impl Node {
                 let hash = self.put_blob(&body)?;
                 if let Some(g) = self.0.grants.lock().unwrap().get_mut(token) {
                     g.puts.push(hash.clone());
+                    // Someone not of this machine's own programs reads back what their call put, as what they put.
+                    if g.caller.token.is_some() {
+                        self.0.put_by.lock().unwrap().entry(hash.clone()).or_default().insert(g.caller.user.clone());
+                    }
                 }
                 ok(json!({ "blob": hash }))
             }

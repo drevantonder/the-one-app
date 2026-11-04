@@ -232,3 +232,22 @@ async fn only_a_persons_own_device_or_their_inviter_lets_a_device_in() {
     assert_eq!(opens(&sams, &global).await, vec![1, 2]);
     a.call(board("post", json!({ "text": "after" }))).await.unwrap();
 }
+
+/// A file put from elsewhere (a client device's, a sign-in's) is read back by whoever put it alone, or by someone who
+/// may use a scope that names it: knowing its hash isn't enough. A file put to answer one request (git's push, to
+/// Repos' `_http`) goes once it's answered, unless something keeps it.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_file_put_from_elsewhere_is_read_only_by_whoever_put_it() {
+    let a = start("put-from").await;
+    a.create("Home", "Andre").await.unwrap();
+    let caller = |user: &str| one::node::Caller { key: a.id(), user: user.into(), agent: None, token: Some(format!("{user}'s")) };
+    let (sam, andre) = (caller("sam"), caller(&a.user().unwrap()));
+    let (hash, size) = a.put_blob_from(&sam, axum::body::Body::from("Sam's file")).await.unwrap();
+    assert_eq!(size, 10);
+    assert_eq!(a.blob_for(&sam, &hash).await.unwrap(), b"Sam's file", "Sam reads back what Sam put");
+    assert!(a.blob_for(&andre, &hash).await.is_err(), "and Andre doesn't, by its hash");
+    let theirs = a.put_blob(b"an attachment of someone else's").unwrap();
+    assert!(a.blob_for(&sam, &theirs).await.is_err(), "nor Sam one nobody gave him");
+    a.drop_put(&hash);
+    assert!(a.blob_for(&sam, &hash).await.is_err(), "a request's file goes once it's answered");
+}

@@ -217,7 +217,7 @@ pub fn routes() -> Router<Node> {
         .route("/v1/vault/fetch", post(vault_post))
         .route("/v1/vault/grant", post(vault_post))
         .route("/v1/node-release", post(release))
-        .route("/v1/blobs", post(put_blob).layer(axum::extract::DefaultBodyLimit::max(1 << 30)))
+        .route("/v1/blobs", post(put_blob))
         .route("/v1/blobs/{hash}", get(blob))
         .route("/v1/events", get(events))
         .route("/v1/screens/{app}/{screen}", get(screen))
@@ -227,8 +227,20 @@ pub fn routes() -> Router<Node> {
         .route("/v1/sidecars/{app}/calls", get(next_call))
         .route("/v1/sidecars/{app}/calls/{id}", post(reply))
         .route("/v1/sidecars/{app}/calls/{id}/vault", post(fill))
-        .route("/{app}/{*path}", any(app_http).layer(axum::extract::DefaultBodyLimit::max(1 << 30)))
+        .route(APP_ROUTE, any(app_http))
 }
+
+/// An app's own requests (`app_http`): how stock git reaches Repos.
+pub const APP_ROUTE: &str = "/{app}/{*path}";
+
+/// Whether `path` is one of an app's own requests (`APP_ROUTE`), not the API's.
+pub fn app_route(path: &str) -> bool {
+    let (app, rest) = path.strip_prefix('/').and_then(|p| p.split_once('/')).unwrap_or_default();
+    !app.is_empty() && !rest.is_empty() && !matches!(app, "v1" | "mcp" | "hooks" | "skills")
+}
+
+/// The most this machine's own programs put in one file.
+const LOCAL_PUT: u64 = 1 << 30;
 
 /// Routes as only this machine's own programs, and people signed in with the kernel for what `SIGNED_IN` lists, may
 /// use them.
@@ -250,7 +262,10 @@ pub const SIGNED_IN: &[&str] = &[
     "/v1/badges",
     "/v1/screens/{app}/{screen}",
     "/v1/client-screens/{name}",
+    "/v1/blobs",
     "/v1/blobs/{hash}",
+    // An app's own requests, run as its operation `_http` for its person, whose checks are the app's: git's, to Repos.
+    APP_ROUTE,
     "/v1/events",
     "/v1/arrange",
     "/v1/install",
@@ -1010,30 +1025,48 @@ async fn release(State(node): State<Node>, Json(req): Json<ReleaseRequest>) -> R
     Ok(Json(json!(r)))
 }
 
-/// A request to `/<app>/<path>`, answered by the app's `_http` operation, run as this machine's person: the body
-/// reaches it as a blob, and it answers `{ status, type, text }`, or `{ status, type, blob }` for bytes it keeps.
-async fn app_http(State(node): State<Node>, Path((app, path)): Path<(String, String)>, req: axum::extract::Request) -> Result<Response, Error> {
+/// A request to `/<app>/<path>`, answered by the app's `_http` operation, run as whoever asked (this machine's person,
+/// a client device's, or a sign-in's), whose checks are the app's own: the body reaches it as a blob, read as it comes
+/// and deleted once it's answered unless something keeps it, and it answers `{ status, type, text }`, or
+/// `{ status, type, blob }` for bytes it keeps.
+async fn app_http(State(node): State<Node>, me: Me, Path((app, path)): Path<(String, String)>, req: axum::extract::Request) -> Result<Response, Error> {
     let method = req.method().to_string();
     let query = req.uri().query().unwrap_or("").to_string();
-    let body = axum::body::to_bytes(req.into_body(), 1 << 30).await?;
-    let body = if body.is_empty() { None } else { Some(node.put_blob(&body)?) };
+    let remote = me.sign_in.is_some();
+    let empty = matches!(method.as_str(), "GET" | "HEAD") || req.headers().get(axum::http::header::CONTENT_LENGTH).is_some_and(|l| l == "0");
+    let body = match (empty, remote) {
+        (true, _) => None,
+        (false, true) => Some(node.put_blob_from(&me.caller, req.into_body()).await?),
+        (false, false) => Some(node.put_blob_streamed(req.into_body(), LOCAL_PUT).await?),
+    };
+    let body = body.and_then(|(hash, size)| (size > 0).then_some(hash));
     let input = json!({ "method": method, "path": path, "query": query, "body": body });
-    let out = node.call(CallRequest { app, op: "_http".into(), input, ..Default::default() }).await?;
+    let mut call = CallRequest { app, op: "_http".into(), input, ..Default::default() };
+    if remote {
+        call = node.for_sign_in(call)?;
+    }
+    let out = node.call_as(call, me.caller.clone()).await;
+    if let Some(hash) = &body {
+        node.drop_put(hash);
+    }
+    let out = out?;
     let status = StatusCode::from_u16(out["status"].as_u64().unwrap_or(200) as u16)?;
     let kind = out["type"].as_str().unwrap_or("text/plain").to_string();
     let bytes = match out["blob"].as_str() {
+        Some(hash) if remote => node.blob_for(&me.caller, hash).await?,
         Some(hash) => node.blob(hash).await?,
         None => out["text"].as_str().unwrap_or("").as_bytes().to_vec(),
     };
     Ok((status, [(axum::http::header::CONTENT_TYPE, kind)], bytes).into_response())
 }
 
-async fn put_blob(State(node): State<Node>, me: Me, body: axum::body::Bytes) -> Reply {
-    let hash = match me.sign_in {
-        Some(_) => node.put_blob_for(&me.caller, &body)?,
-        None => node.put_blob(&body)?,
+/// A file to keep, read as it comes: from elsewhere, within the room `Node::put_blob_from` gives its person.
+async fn put_blob(State(node): State<Node>, me: Me, req: axum::extract::Request) -> Reply {
+    let (hash, size) = match me.sign_in {
+        Some(_) => node.put_blob_from(&me.caller, req.into_body()).await?,
+        None => node.put_blob_streamed(req.into_body(), LOCAL_PUT).await?,
     };
-    Ok(Json(json!({ "blob": hash, "size": body.len() })))
+    Ok(Json(json!({ "blob": hash, "size": size })))
 }
 
 async fn blob(State(node): State<Node>, me: Me, Path(hash): Path<String>) -> Result<Response, Error> {

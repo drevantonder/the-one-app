@@ -369,6 +369,8 @@ pub struct Inner {
     grants: Mutex<HashMap<String, Grant>>,
     /// The blobs sign-ins put here (their files in an MCP answer, say), by hash: for whom, so they may read them back.
     put_by: Mutex<HashMap<String, std::collections::HashSet<String>>>,
+    /// The files put from elsewhere this last hour, which count against their person's room (`put_blob_from`).
+    remote_puts: Mutex<Vec<blobs::RemotePut>>,
     /// The port apps' requests go out through.
     outbound: u16,
     /// What each app did in its last minute, and the apps stopped here for looping.
@@ -522,6 +524,7 @@ impl Node {
             logos: crate::logos::Logos::open(dir),
             grants: Mutex::new(HashMap::new()),
             put_by: Mutex::new(HashMap::new()),
+            remote_puts: Mutex::new(Vec::new()),
             outbound: outbound.local_addr()?.port(),
             guard: Mutex::new(Guard::default()),
             later: Mutex::new(HashMap::new()),
@@ -1066,6 +1069,7 @@ impl Node {
             if tick % 6 == 0 && self.has_install() {
                 self.share_unshared().await;
                 self.take_forgotten().await;
+                self.sweep_remote_puts();
                 for sidecar in self.0.built_in_sidecars.iter().filter(|n| n.sync.is_some()) {
                     self.sync_built_in(sidecar.name);
                 }

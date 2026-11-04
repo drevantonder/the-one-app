@@ -25,7 +25,7 @@ const JOINING: usize = 4;
 const REQUEST_HEAD: Duration = Duration::from_secs(30);
 /// How many connections a client device may have open to this one at once.
 const CLIENT_CONNS: usize = 4;
-/// The most a client device's request may send, but a blob's, which streams.
+/// The most a client device's request may send, but a file's or an app's own request's, which stream to disk.
 const CLIENT_BODY: usize = 4 << 20;
 /// How long a client device's request may take to send its body.
 const CLIENT_BODY_TIME: Duration = Duration::from_secs(60);
@@ -346,8 +346,10 @@ impl Node {
                 match who {
                     Ok((key, until)) => {
                         req.extensions_mut().insert(crate::api::FromClient(key, until));
-                        // What it sends is read in a while and up to a size, but a blob's, which streams.
-                        if !req.uri().path().starts_with("/v1/blobs/") {
+                        // What it sends is read in a while and up to a size, but a file's and an app's own requests',
+                        // which stream to disk within their person's room (`Node::put_blob_from`).
+                        let path = req.uri().path();
+                        if !(path == "/v1/blobs" || path.starts_with("/v1/blobs/") || crate::api::app_route(path)) {
                             let (parts, body) = req.into_parts();
                             let Ok(Ok(bytes)) = tokio::time::timeout(CLIENT_BODY_TIME, axum::body::to_bytes(body, CLIENT_BODY)).await else {
                                 let said = format!("a request sends at most {} MiB, within {} s", CLIENT_BODY >> 20, CLIENT_BODY_TIME.as_secs());
