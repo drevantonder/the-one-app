@@ -638,7 +638,13 @@ fn now_ms() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
 }
 
+/// What this machine is called in your One App: its node's name when one is here (which its person may have changed),
+/// else its hostname.
 fn hostname() -> String {
+    let node: Option<Value> = std::fs::read(crate::home().join("device.json")).ok().and_then(|b| serde_json::from_slice(&b).ok());
+    if let Some(name) = node.as_ref().and_then(|n| n["name"].as_str()).filter(|n| !n.trim().is_empty()) {
+        return name.to_string();
+    }
     std::process::Command::new("hostname").output().ok().map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).filter(|s| !s.is_empty()).unwrap_or_else(|| "device".into())
 }
 
