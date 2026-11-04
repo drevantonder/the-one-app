@@ -112,6 +112,38 @@ pub fn supervised() -> bool {
     !cfg!(target_os = "linux") || unit().is_some()
 }
 
+/// Asks the node, as its own machine's programs do, every 20 seconds; when it hasn't answered three times running, it
+/// says so and exits, for its supervisor to start it again. A node whose every thread is stuck still listens, and what's
+/// asked of it would otherwise wait unanswered, every agent and the CLI with it, until someone restarts it by hand.
+pub fn watch() {
+    if !supervised() {
+        return;
+    }
+    std::thread::spawn(|| {
+        let url = format!("http://{}/v1/state", crate::api::addr());
+        let config = ureq::Agent::config_builder().http_status_as_error(false).timeout_global(Some(Duration::from_secs(10)));
+        let agent: ureq::Agent = config.middleware(crate::api::as_this_machine).build().into();
+        let mut missed = 0;
+        loop {
+            std::thread::sleep(Duration::from_secs(20));
+            if stopped() {
+                return;
+            }
+            match agent.get(&url).call() {
+                Ok(_) => missed = 0,
+                Err(err) => {
+                    missed += 1;
+                    tracing::warn!("this node didn't answer itself ({err})");
+                    if missed == 3 {
+                        tracing::error!("this node stopped answering: exiting, to be started again");
+                        std::process::exit(1);
+                    }
+                }
+            }
+        }
+    });
+}
+
 /// Lets `wanted` hand over from now on, once the node serves.
 pub fn able() {
     ABLE.store(possible(), std::sync::atomic::Ordering::SeqCst);

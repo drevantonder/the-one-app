@@ -1321,6 +1321,7 @@ async fn serve(is_try: bool, args: &[String]) -> Result<()> {
         None => one::handoff::notify("READY=1"),
     }
     tracing::info!("{NAME} node {} answering", &one::entry::hex(&node.id())[..8]);
+    one::handoff::watch();
     let served = http.await;
     one::apps::stop_all();
     if one::handoff::stopped() {
