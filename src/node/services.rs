@@ -3,6 +3,9 @@
 
 use super::*;
 
+/// What registered with this device before, in its home.
+const OFFERED: &str = "offered.json";
+
 impl Node {
     pub fn services(&self) -> &crate::services::Services {
         &self.0.services
@@ -12,6 +15,12 @@ impl Node {
     /// an app of its name shows its picture (a Mac app's icon).
     pub async fn register_service(&self, app: &str, describe: Value) -> Result<()> {
         self.0.services.offer(app, &describe);
+        // Kept, so its switch shows while what offers it (the Mac app) isn't running.
+        let mut kept = self.offered_before();
+        if kept.get(app) != Some(&describe["title"]) {
+            kept.insert(app.to_string(), describe["title"].clone());
+            let _ = std::fs::write(self.0.dir.join(OFFERED), serde_json::to_vec(&kept).unwrap_or_default());
+        }
         if let Some(why) = self.removed_here(app) {
             bail!("{why}");
         }
@@ -109,6 +118,9 @@ impl Node {
         for n in &self.0.built_in_services {
             out.insert(n.name.into(), json!({ "name": n.name, "title": (n.describe)()["title"], "on": on(n.name) }));
         }
+        for (name, title) in self.offered_before() {
+            out.insert(name.clone(), json!({ "name": name, "title": title, "on": on(&name) }));
+        }
         for (name, d) in self.0.services.offered() {
             out.insert(name.clone(), json!({ "name": name, "title": d["title"], "on": on(&name) }));
         }
@@ -131,6 +143,12 @@ impl Node {
             }
         }
         out.into_values().collect()
+    }
+
+    /// The services that registered here before, by their titles: what the device can run while what offers them
+    /// isn't running.
+    fn offered_before(&self) -> BTreeMap<String, Value> {
+        std::fs::read(self.0.dir.join(OFFERED)).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
     }
 
     /// Why a service isn't served here, if its person switched it off.
