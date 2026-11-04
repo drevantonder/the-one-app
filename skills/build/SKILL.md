@@ -25,4 +25,4 @@ An app is a folder with one JavaScript module, `app.js` (or `app.ts`): its opera
 
 ## The details
 
-What a call's `ctx` gives an app, what a screen's bridge and design kit offer, and which widget nodes the shells draw are all in {{name}}'s own code, which is open source: {{code}}. Read it there or in a checkout. It's the only reference, so it's never out of date.
+The files beside this one are {{name}}'s own code, as this build runs it: `ctx.js`, what a call's `ctx` gives an app; `one.js`, the `one` a screen gets; `kit.js`, the design kit's pieces on `one`; `widgets.js`, the widget nodes the shells draw. Over MCP they're this skill's resources (`skill://{{server}}-build/ctx.js`). The rest is open source: {{code}}. The code is the only reference, so it's never out of date.

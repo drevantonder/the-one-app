@@ -1634,7 +1634,8 @@ fn skill_entry(s: &one::skills::Skill) -> Value {
 fn skill_resource(uri: &str) -> Result<Value, Value> {
     let (name, path) = uri.trim_start_matches("skill://").split_once('/').unwrap_or((uri, ""));
     let text = skills().into_iter().find(|s| s.name == name).and_then(|s| s.file(path)).ok_or_else(|| json!({ "code": -32002, "message": format!("no resource {uri}") }))?;
-    Ok(json!({ "contents": [{ "uri": uri, "mimeType": "text/markdown", "text": text }] }))
+    let mime = if path.ends_with(".js") { "text/javascript" } else { "text/markdown" };
+    Ok(json!({ "contents": [{ "uri": uri, "mimeType": mime, "text": text }] }))
 }
 
 /// The agent running this command, if one is: `<CLI>_AGENT`, else what agent harnesses say about themselves.

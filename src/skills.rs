@@ -155,6 +155,14 @@ pub fn deeper(apps: &[Value]) -> Vec<Skill> {
             Skill { name: field("name"), description: field("description"), body: body.trim().to_string(), files: vec![] }
         })
         .collect();
+    // The build skill carries the code that says what an app gets, as it is in this build, so an agent with only MCP
+    // reads it here rather than on the web: what a call's ctx has, a screen's one and its kit, and the widget nodes.
+    if let Some(build) = skills.iter_mut().find(|s| s.name.ends_with("-build")) {
+        build.files = [("ctx.js", include_str!("runtime/shim.js")), ("one.js", include_str!("screen/bridge.js")), ("kit.js", include_str!("screen/kit.js")), ("widgets.js", include_str!("screen/widgets.js"))]
+            .into_iter()
+            .map(|(p, t)| (p.to_string(), t.to_string()))
+            .collect();
+    }
     skills.push(app_skill(&vault_app()));
     skills.push(app_skill(&backups_app()));
     skills.push(app_skill(&groups_app()));
