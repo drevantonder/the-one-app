@@ -16,6 +16,8 @@ let base = "<address>/repos/", mine = "<you>";
 const based = one.call("_address").then((b) => ((base = b?.base || base), (mine = b?.handle || mine)), () => {});
 const address = (repo) => `${base}${repo}.git`;
 const where = `On any computer where you’ve run ${one.config?.cli || "one"} sign-in`;
+// A repo of GitHub's, connected: github.com/<owner>/<name>.
+const isGithub = (repo) => String(repo || "").startsWith("github.com/");
 const plural = (n, one_, many) => `${n.toLocaleString()} ${n === 1 ? one_ : many}`;
 const avatar = (c, cls = "") => `<span class="who-avatar ${cls}">${one.avatar(c.email || c.author, c.author)}</span>`;
 one.haptics();
@@ -82,15 +84,17 @@ document.addEventListener("click", (e) => {
 // each tab is its own screen, opened with the repo in its params, so Back and reload return to it. On phones it's
 // hidden, and the repo's page has rows that open them.
 function repoTabs(d, on) {
-  const [owner, name] = d.repo.split("/");
+  const parts = d.repo.split("/"), name = parts.pop(), owner = parts.join("/");
+  // A GitHub repo's settings are GitHub's own.
+  const settings = d.yours && !isGithub(d.repo);
   const tab = (key, screen, icon, title, extra = "") =>
     `<a class="tab${on === key ? " on" : ""}"${on === key ? ' aria-current="page"' : ` onclick="${go(screen, { repo: d.repo })}"`}>${one.icon(icon)}<span>${title}</span>${extra}</a>`;
   return `<div class="repo-top">
-    <div class="repo-path">${one.icon("book")}<span class="owner">${esc(owner)}</span><span class="sep">/</span><a onclick="${on === "code" ? "" : go("repo", { repo: d.repo })}">${esc(name)}</a></div>
+    <div class="repo-path">${one.icon(isGithub(d.repo) ? "github-logo" : "book")}<span class="owner">${esc(owner)}</span><span class="sep">/</span><a onclick="${on === "code" ? "" : go("repo", { repo: d.repo })}">${esc(name)}</a></div>
     <nav class="tabs" aria-label="${esc(d.repo)}">
       ${tab("code", "repo", "code", "Code")}
       ${tab("issues", "issues", "record", "Issues", d.open_issues ? `<span class="counter">${d.open_issues.toLocaleString()}</span>` : "")}
-      ${d.yours ? tab("settings", "repo_settings", "gear", "Settings") : ""}
+      ${settings ? tab("settings", "repo_settings", "gear", "Settings") : ""}
     </nav>
   </div>`;
 }

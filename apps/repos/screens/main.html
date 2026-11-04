@@ -2,7 +2,8 @@
 <div id="page"></div>
 <script>
 let query = "";
-let repos = null;
+// The install's own repos, and GitHub's (null while they're asked for, or [] with none connected).
+let repos = null, githubs = null, githubTrouble = "";
 // Restored here and maybe not yet on the device, so a redraw meanwhile doesn't put them back under Recently Deleted.
 const restoring = new Set();
 let trouble = "";
@@ -10,27 +11,35 @@ let trouble = "";
 function row(r) {
   const deleted = r.deleted && !restoring.has(r.repo);
   return `<a class="row repo-row" onclick="${go("repo", { repo: r.repo })}">
-    <div class="icon${r.from ? " grey" : ""}">${one.icon("book")}</div>
+    <div class="icon${r.github ? " github" : r.from ? " grey" : ""}">${one.icon(r.github ? "github-logo" : "book")}</div>
     <div class="main">
-      <div class="title"><span><span class="owner">${esc(r.owner.handle || "")}/</span>${esc(r.name)}</span></div>
-      <div class="sub">${deleted ? "Deleted " + esc(ago(r.deleted.time, { long: true })) : [r.branch, ago(r.updated || r.created, { long: true }), r.from && "fork of " + r.from, r.open_issues && plural(r.open_issues, "open issue", "open issues")].filter(Boolean).map(esc).join(" · ")}</div>
+      <div class="title"><span><span class="owner">${esc(r.repo.slice(0, -r.name.length))}</span>${esc(r.name)}</span></div>
+      <div class="sub">${deleted ? "Deleted " + esc(ago(r.deleted.time, { long: true })) : [r.github?.private && "Private", r.branch, ago(r.updated || r.created, { long: true }), r.from && "fork of " + r.from, r.open_issues && plural(r.open_issues, "open issue", "open issues")].filter(Boolean).map(esc).join(" · ")}</div>
     </div>
     ${deleted ? (r.yours ? `<button class="button capsule" data-restore="${esc(r.name)}">Restore</button>` : "") : '<div class="chev">›</div>'}
   </a>`;
 }
 
+// GitHub's, under the install's own: a problem box if GitHub refused, and a grey line while they're asked for.
+function gh(q) {
+  if (githubTrouble) return `<h2 class="section">GitHub</h2>${one.problem({ title: githubTrouble, action: { label: "Settings", run: () => one.open("settings") } })}`;
+  if (githubs === null) return `<h2 class="section">GitHub</h2><p class="footer">Loading GitHub's repos…</p>`;
+  const shown = githubs.filter((r) => !q || r.repo.toLowerCase().includes(q));
+  return shown.length ? `<h2 class="section">GitHub</h2><div class="list">${shown.map(row).join("")}</div>` : "";
+}
+
 function list() {
-  if (!repos.length) {
+  if (!repos.length && !githubs?.length && githubs !== null && !githubTrouble) {
     document.getElementById("find").hidden = true;
     return one.empty(`No repos yet. ${where}, push one:<br><code>git push ${esc(address(`${mine}/<name>`))} main</code>`);
   }
   document.getElementById("find").hidden = false;
   const q = query.toLowerCase();
   const shown = repos.filter((r) => !q || r.repo.includes(q) || (r.from || "").includes(q));
-  if (!shown.length) return one.empty("No repos match.");
+  if (!shown.length && !githubs?.some((r) => !q || r.repo.toLowerCase().includes(q)) && githubs !== null) return one.empty("No repos match.");
   const gone = shown.filter((r) => r.deleted && !restoring.has(r.repo)), here = shown.filter((r) => !gone.includes(r));
   return (trouble ? one.problem({ title: trouble }) : "") + (here.length ? `<div class="list">${here.map(row).join("")}</div>` : "")
-    + (gone.length ? `<h2 class="section">Recently Deleted</h2><div class="list">${gone.map(row).join("")}</div>` : "");
+    + gh(q) + (gone.length ? `<h2 class="section">Recently Deleted</h2><div class="list">${gone.map(row).join("")}</div>` : "");
 }
 
 document.getElementById("page").addEventListener("click", (e) => {
@@ -47,7 +56,15 @@ document.getElementById("page").addEventListener("click", (e) => {
     .finally(() => (restoring.delete(name), one.render("#page", list)));
 }, true);
 one.search("#find", { placeholder: "Find a repo", onSearch: (q) => ((query = q), one.render("#page", list)) });
-const draw = () => one.render("#page", async () => (([repos] = await Promise.all([one.call("list"), based])), list()), { loading: "Loading repos" });
+// GitHub's come as GitHub answers, after the install's own.
+function github() {
+  one.call("list", { source: "github" }).then((r) => ((githubs = r), (githubTrouble = "")), (err) => ((githubs = []), (githubTrouble = one.plain(err).title)))
+    .finally(() => repos && one.render("#page", list));
+}
+const draw = () => {
+  github();
+  one.render("#page", async () => (([repos] = await Promise.all([one.call("list", { source: "one" }), based])), list()), { loading: "Loading repos" });
+};
 one.on("changed", draw);
 draw();
 </script>

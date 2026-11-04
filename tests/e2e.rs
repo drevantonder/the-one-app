@@ -319,13 +319,17 @@ async fn only_a_repos_owner_and_collaborators_push_to_it_and_only_its_owners_del
     // Repos' keys in global, as Sam's device opens them and hands them to the node with his calls.
     let global = one::entry::Scope::Global;
     let b64 = |v: &Value| data_encoding::BASE64URL_NOPAD.decode(v.as_str().unwrap().as_bytes()).unwrap();
+    // Repos' own, and the Vault's, which fills in its items, as a client hands them when the node asks.
     let epochs = a.sealed_keys(&me, &global, Some(&one::entry::hex(&e.key)), None).await.unwrap();
-    let apps = a.sealed_keys(&me, &global, None, Some("repos")).await.unwrap();
-    let keys: Vec<one::keys::Handed> = epochs["sealed"].as_object().unwrap().iter().map(|(n, sealed)| {
-        let epoch: [u8; 32] = one::kernel::open_sealed(&one::keys::seal_secret(&sams), &b64(sealed)).unwrap().try_into().unwrap();
-        let app = one::kernel::open_app_key(&epoch, "repos", &b64(&apps["sealed"][n])).unwrap();
-        one::keys::Handed { scope: "global".into(), epoch: n.parse().unwrap(), app: "repos".into(), database: "main".into(), key: one::kernel::database_key(&app, "main") }
-    }).collect();
+    let mut keys = Vec::new();
+    for (app, database) in [("repos", "main"), (one::members::APP, one::vault::DATABASE)] {
+        let sealed = a.sealed_keys(&me, &global, None, Some(app)).await.unwrap();
+        for (n, epoch) in epochs["sealed"].as_object().unwrap() {
+            let epoch: [u8; 32] = one::kernel::open_sealed(&one::keys::seal_secret(&sams), &b64(epoch)).unwrap().try_into().unwrap();
+            let key = one::kernel::open_app_key(&epoch, app, &b64(&sealed["sealed"][n])).unwrap();
+            keys.push(one::keys::Handed { scope: "global".into(), epoch: n.parse().unwrap(), app: app.into(), database: database.into(), key: one::kernel::database_key(&key, database) });
+        }
+    }
 
     let client = Caller { key: e.key, user: sam.user.clone(), agent: None, token: Some(one::node::client_token(&e.key)) };
     let signed_in = Caller { key: a.id(), user: sam.user.clone(), agent: None, token: Some("Sam's sign-in".into()) };
@@ -410,6 +414,103 @@ async fn only_a_repos_owner_and_collaborators_push_to_it_and_only_its_owners_del
     // Andre deletes his, and the group's as its admin.
     a.call(repos("delete", json!({ "repo": "andre/home" }))).await.unwrap();
     a.call(repos("delete", json!({ "repo": "team/site" }))).await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_groups_github_organization_shows_only_to_its_members_and_a_persons_github_sign_in_only_to_them() {
+    use one::node::{Caller, DeviceRequest, Invited};
+    use std::sync::{Arc, Mutex};
+    let a = start("repos-github").await;
+    a.create("Home", "Andre").await.unwrap();
+    let me = Caller { key: a.id(), user: a.user().unwrap(), agent: None, token: None };
+    let repos = |op: &str, input: Value| CallRequest { app: "repos".into(), op: op.into(), input, ..Default::default() };
+    eventually("Repos to run", async || a.call(repos("list", json!({}))).await.is_ok()).await;
+
+    // GitHub, as far as this needs: Andre's own repo for his token, an organization's for the App's installation,
+    // which it gives a token for with a JWT. Each request's path and Authorization is kept.
+    let seen: Arc<Mutex<Vec<(String, String)>>> = Default::default();
+    let kept = seen.clone();
+    let repo = |full: &str| json!({ "full_name": full, "name": full.split('/').nth(1), "owner": { "login": full.split('/').next() }, "default_branch": "main", "html_url": format!("https://github.com/{full}"), "private": true, "permissions": { "push": true }, "pushed_at": "2026-11-01T00:00:00Z" });
+    let github = axum::Router::new().fallback(move |req: axum::extract::Request| {
+        let kept = kept.clone();
+        async move {
+            let auth = req.headers().get("authorization").and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
+            let path = req.uri().path().to_string();
+            kept.lock().unwrap().push((path.clone(), auth.clone()));
+            let body = match (path.as_str(), auth.as_str()) {
+                ("/api/v3/app/installations/7/access_tokens", jwt) if jwt.starts_with("Bearer ey") && jwt.matches('.').count() == 2 => json!({ "token": "org-token", "expires_at": "2099-01-01T00:00:00Z" }),
+                ("/api/v3/installation/repositories", "Bearer org-token") => json!({ "repositories": [repo("org/site")] }),
+                ("/api/v3/user/repos", "Bearer andre-token") => json!([repo("andre-gh/mine")]),
+                _ => return (axum::http::StatusCode::NOT_FOUND, axum::Json(json!({ "message": "Not Found" }))),
+            };
+            (axum::http::StatusCode::OK, axum::Json(body))
+        }
+    });
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    tokio::spawn(async move { axum::serve(listener, github).await.unwrap() });
+
+    // The install's GitHub App in Everyone's Vault, its key opened on this machine, and Andre's own GitHub sign-in in his.
+    let pem = String::from_utf8(std::process::Command::new("openssl").args(["genrsa", "-traditional", "2048"]).output().unwrap().stdout).unwrap();
+    let global = one::entry::Scope::Global;
+    a.vault_grant(&me, &global, &a.device_name(), true).await.unwrap();
+    a.set_item(&me, &global, json!({ "title": "GitHub App", "type": "GitHub App", "hosts": ["127.0.0.1"], "apps": ["repos"], "fields": {
+        "app_id": { "value": "1" }, "slug": { "value": "app" }, "client_id": { "value": "Iv1" }, "client_secret": { "value": "s", "secret": true },
+        "private_key": { "value": pem, "secret": true }, "web": { "value": base }, "api": { "value": format!("{base}/api/v3") } } })).await.unwrap();
+    a.set_item(&me, &one::entry::Scope::User(me.user.clone()), json!({ "title": "GitHub andre-gh", "type": "GitHub account", "hosts": ["127.0.0.1"], "apps": ["repos"], "fields": {
+        "login": { "value": "andre-gh" }, "access_token": { "value": "andre-token", "secret": true }, "expires": { "value": "0" } } })).await.unwrap();
+
+    // Andre, an admin of Team, connects the organization for it.
+    let group = a.make_group(&me, "Team").await.unwrap();
+    a.call(repos("connect_org", json!({ "group": "team" }))).await.unwrap();
+    a.call(repos("finish_connect_org", json!({ "back": "http://x/back?installation_id=7&setup_action=install" }))).await.unwrap();
+    let names = |list: Value| list.as_array().unwrap().iter().map(|r| r["repo"].as_str().unwrap().to_string()).collect::<Vec<_>>();
+    assert_eq!(names(a.call(repos("list", json!({ "source": "github" }))).await.unwrap()), ["github.com/andre-gh/mine", "github.com/org/site"]);
+
+    // Sam, a person of the install but not in Team, with a device of his that hands its keys with his calls: Repos'
+    // and the Vault's in global.
+    let secret = "the-invites-secret";
+    let sam = Invited { secret: secret.into(), name: "Sam".into(), user: one::entry::new_id(), role: one::members::Role::Member, until: u64::MAX };
+    let sams = ed25519_dalek::SigningKey::from_bytes(&rand::random());
+    let e = one::keys::Endpoint::of(&sams);
+    let proof = one::keys::invite_proof(secret.as_bytes(), &e);
+    let asks = DeviceRequest { key: one::entry::hex(&e.key), seal: one::entry::hex(&e.seal), name: "Sam's laptop".into(), user: sam.user.clone(), person: String::new(), proof: Some(proof), service: None, shared: false, enrollment: None };
+    a.approve_request(&me, &asks, Some(&sam)).await.unwrap();
+    let b64 = |v: &Value| data_encoding::BASE64URL_NOPAD.decode(v.as_str().unwrap().as_bytes()).unwrap();
+    let epochs = a.sealed_keys(&me, &global, Some(&one::entry::hex(&e.key)), None).await.unwrap();
+    let mut keys = Vec::new();
+    for (app, database) in [("repos", "main"), (one::members::APP, one::vault::DATABASE)] {
+        let sealed = a.sealed_keys(&me, &global, None, Some(app)).await.unwrap();
+        for (n, epoch) in epochs["sealed"].as_object().unwrap() {
+            let epoch: [u8; 32] = one::kernel::open_sealed(&one::keys::seal_secret(&sams), &b64(epoch)).unwrap().try_into().unwrap();
+            let key = one::kernel::open_app_key(&epoch, app, &b64(&sealed["sealed"][n])).unwrap();
+            keys.push(one::keys::Handed { scope: "global".into(), epoch: n.parse().unwrap(), app: app.into(), database: database.into(), key: one::kernel::database_key(&key, database) });
+        }
+    }
+    let client = Caller { key: e.key, user: sam.user.clone(), agent: None, token: Some(one::node::client_token(&e.key)) };
+    let handoff = one::keys::Handoff { for_: one::entry::hex(&e.key), until: u64::MAX, keys };
+    a.hand(client.token.as_deref().unwrap(), &sam.user, &one::keys::seal_handoff(&a.endpoint().seal, &handoff).unwrap(), u64::MAX).unwrap();
+    let sams_list = async || {
+        let req = CallRequest { scopes: Some(vec!["global".into()]), ..repos("list", json!({ "source": "github" })) };
+        let before = seen.lock().unwrap().len();
+        let list = a.call_as(a.for_sign_in(req).unwrap(), client.clone()).await.unwrap();
+        (names(list), seen.lock().unwrap()[before..].to_vec())
+    };
+
+    // Not in Team, he sees none of GitHub's repos, and nothing goes to GitHub for him.
+    assert_eq!(sams_list().await, (Vec::<String>::new(), vec![]));
+    let refused = a.call_as(a.for_sign_in(CallRequest { scopes: Some(vec!["global".into()]), ..repos("tree", json!({ "repo": "github.com/andre-gh/mine" })) }).unwrap(), client.clone()).await.unwrap_err();
+    assert!(format!("{refused:#}").contains("Sign in to GitHub first"), "{refused:#}");
+
+    // Once he's in Team, he sees the organization's repo, as its installation, and never Andre's, nor with his token.
+    a.member_as(&me, "invite", json!({ "group": group, "user": sam.user, "role": "member" })).await.unwrap();
+    let heads = a.entry_heads(&client, &global).await.unwrap();
+    let previous = heads["previous"].as_array().unwrap().iter().map(|h| one::entry::Hash::from_hex(h.as_str().unwrap()).unwrap()).collect();
+    let ext = one::entry::Ext { log: "global".into(), time: one::node::now_ms(), user: sam.user.clone(), epoch: heads["epoch"].as_u64().unwrap() as u32, previous };
+    a.put_signed(&client, vec![one::entry::Entry::create(&sams, ext, None, one::members::accept(&group))]).await.unwrap();
+    let (list, sent) = sams_list().await;
+    assert_eq!(list, ["github.com/org/site"]);
+    assert!(!sent.is_empty() && sent.iter().all(|(_, auth)| !auth.contains("andre-token")), "{sent:?}");
 }
 
 #[tokio::test(flavor = "multi_thread")]

@@ -150,7 +150,7 @@ function ticks(title, items, chosen, save) {
 }
 
 async function assign() {
-  people ||= await one.call("_people");
+  people ||= await one.call("_people", { repo: P.repo });
   ticks("Assignees", people.map((p) => ({ key: p.handle, html: `${one.avatar(p.handle, p.name)}<div class="main"><div class="title"><span>${esc(p.name)}</span></div><div class="sub">@${esc(p.handle)}</div></div>` })), d.assignees.map((a) => a.handle), "assignees");
 }
 

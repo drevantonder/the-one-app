@@ -241,3 +241,9 @@ code { font: 0.88em var(--mono); }
 .tab .counter { font-size: 12px; font-weight: 600; line-height: 18px; min-width: 18px; padding: 0 6px; border-radius: 999px; background: var(--fill); color: var(--text); text-align: center; }
 @media (max-width: 699px) { .repo-top { display: none; } }
 @media (min-width: 700px) { .phone-only { display: none; } }
+
+/* A GitHub repo: GitHub's mark, and a link to it there. */
+.on-github { display: inline-flex; align-items: center; gap: 6px; margin: 8px 0 0 12px; font-size: 13px; color: var(--muted); cursor: pointer; }
+.on-github .i { width: 15px; height: 15px; color: var(--text); }
+.repo-row .icon.github { background: #24292f; color: #fff; }
+@media (prefers-color-scheme: dark) { .repo-row .icon.github { background: #f0f6fc; color: #0d1117; } }

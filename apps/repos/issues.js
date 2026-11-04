@@ -435,8 +435,8 @@ export function ops(R) {
     },
     _people: {
       reads: true,
-      description: "Everyone in the install, by handle and name, for the screens' assignee and author pickers.",
-      input: { type: "object", properties: {} },
+      description: "Everyone in the install, by handle and name, for the screens' assignee and author pickers; for a GitHub repo, those GitHub lets its issues be assigned to.",
+      input: { type: "object", properties: { repo: REPO } },
       run: (ctx) => handles(ctx).filter((h) => h.id.startsWith("user:") && !h.removed).map((h) => ({ handle: h.handle, name: h.name })).sort((a, b) => a.name.localeCompare(b.name)),
     },
   };

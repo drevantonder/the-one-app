@@ -1,0 +1,115 @@
+<div id="page"></div>
+<div id="connect"></div>
+<div id="ask"></div>
+<script>
+// Repos' Settings: GitHub, connected. An admin makes the install's GitHub App once; each person signs in to their own
+// GitHub accounts; a group's admins connect an organization for the group. GitHub sends the browser back here with
+// { back: the address it came back to } to finish (to github_app, this screen too, after making the App). Opened with
+// { add: true } (a shell's Add Account), it starts signing in at once.
+one.title("Settings");
+const connect = document.getElementById("connect");
+let d = null, accounts = [], trouble = "";
+
+const row = (title, sub, trailing = "") => `<div class="row plain"><div class="main"><div class="title"><span>${esc(title)}</span></div>${sub ? `<div class="sub">${sub}</div>` : ""}</div>${trailing}</div>`;
+const action = (attr, title) => `<a class="row plain action-row" ${attr}><div class="main"><div class="title"><span>${esc(title)}</span></div></div></a>`;
+
+function show() {
+  let html = trouble ? one.problem({ title: trouble }) : "";
+  if (!d.app) {
+    return html + (d.admin
+      ? one.empty("Connect GitHub, and everyone's GitHub repos show here beside your own.", { label: "Create GitHub App", run: createApp })
+      : one.empty("GitHub isn't connected yet. Your admin connects it once, for everyone."));
+  }
+  const needs = accounts.filter((a) => !a.ok).map((a) => one.problem({ title: `${a.account} needs signing in`, text: one.plain(a.why).title, warn: true, action: { label: "Sign In", run: () => start(a.account) } })).join("");
+  html += needs + `<h2 class="section">GitHub Accounts</h2><div class="list">`
+    + accounts.map((a, i) => row(a.account, a.ok ? (i ? "" : "Used first") : "Sign in again", `<button class="button plain" data-out="${esc(a.account)}">Sign Out</button>`)).join("")
+    + action("data-add", accounts.length ? "Add Account…" : "Connect GitHub…") + `</div>`
+    + `<p class="footer">The repos your GitHub accounts see show in Repos.</p>`;
+  if (d.orgs.length || d.groups.length) {
+    html += `<h2 class="section">Organizations</h2><div class="list">`
+      + d.orgs.map((o) => row(o.org, `For ${esc(o.group || "a group")}`, o.yours ? `<button class="button plain" data-disconnect="${esc(o.org)}">Disconnect</button>` : "")).join("")
+      + (d.groups.length ? action("data-org", "Connect an Organization…") : "") + `</div>`
+      + `<p class="footer">An organization's repos show for everyone in its group.</p>`;
+  }
+  if (d.admin) html += `<p class="footer">GitHub App: <a onclick="one.link(${esc(JSON.stringify(d.app.url))})">${esc(d.app.slug)}</a></p>`;
+  return html;
+}
+
+async function load() {
+  [d, accounts] = await Promise.all([one.call("github"), one.call("accounts")]);
+  return show();
+}
+const draw = () => one.render("#page", load, { loading: "Loading" });
+const fail = (err) => ((trouble = one.plain(err).title), one.render("#page", show));
+
+// A link to GitHub, as a row: the shell opens it in the browser, and GitHub sends the person back here.
+function offer(url, title, sub) {
+  connect.innerHTML = `<h2 class="section">${esc(title)}</h2><div class="list">
+      <a class="row" href="${esc(url)}"><div class="main"><div class="title">Continue to GitHub</div><div class="sub">${esc(sub)}</div></div><span class="chev">›</span></a></div>
+    <div class="footer">GitHub brings you back here when you're done.</div>`;
+}
+
+async function createApp() {
+  try {
+    offer((await one.call("create_github_app")).url, "Create GitHub App", "and create the install's App");
+  } catch (err) { fail(err); }
+}
+async function start(account) {
+  try {
+    offer((await one.call("sign_in", account ? { account } : {})).url, "Connect GitHub", "and let it in");
+  } catch (err) { fail(err); }
+}
+async function connectOrg(at) {
+  const pick = d.groups.length === 1 ? 0 : await one.menu(d.groups.map((g) => ({ title: g.name })), at);
+  if (pick === null) return;
+  try {
+    offer((await one.call("connect_org", { group: d.groups[pick].handle })).url, `Connect an Organization for ${d.groups[pick].name}`, "and install the App on the organization");
+  } catch (err) { fail(err); }
+}
+
+// Back from GitHub: the App made, an organization's install, or a person's sign-in.
+async function finish(back) {
+  connect.innerHTML = one.loading("Finishing");
+  try {
+    const q = new URL(back).searchParams;
+    if (q.get("error")) throw new Error(`GitHub didn't finish (${q.get("error_description") || q.get("error")}). Try again.`);
+    if (one.screen === "github_app") {
+      await one.call("finish_github_app", { code: back });
+    } else if (q.get("installation_id")) {
+      await one.call("finish_connect_org", { back });
+    } else if (q.get("code")) {
+      const r = await one.call("finish_sign_in", { code: back });
+      if (r.signed_in === false) throw new Error(r.why);
+    }
+    trouble = "";
+  } catch (err) {
+    trouble = one.plain(err).title;
+  }
+  connect.innerHTML = "";
+  draw();
+}
+
+document.addEventListener("click", async (e) => {
+  const t = e.target.closest?.("#page [data-add], #page [data-org], #page [data-out], #page [data-disconnect]");
+  if (!t) return;
+  if ("add" in t.dataset) return start();
+  if ("org" in t.dataset) return connectOrg(t);
+  if (t.dataset.out) {
+    const back = one.busy(t);
+    try { await one.call("sign_out", { account: t.dataset.out }); draw(); } catch (err) { back(); fail(err); }
+    return;
+  }
+  const org = t.dataset.disconnect;
+  await one.confirm("#ask", {
+    title: `Disconnect ${org}?`, detail: "Its repos no longer show for its group here. The App stays installed on GitHub until you uninstall it there.", action: "Disconnect", danger: true,
+    run: async () => { await one.call("disconnect_org", { org, confirm: true }); draw(); },
+  });
+});
+one.on("changed", draw);
+draw();
+if (P.back) finish(P.back);
+else if (P.add) start();
+</script>
+<style>
+  .action-row { color: var(--tint); cursor: pointer; }
+</style>

@@ -68,7 +68,7 @@ function list() {
 async function load() {
   const input = { repo: P.repo, state: f.state, page };
   for (const k of ["label", "assignee", "author", "q"]) if (f[k]) input[k] = f[k];
-  [d, labels, people] = await Promise.all([one.call("issues", input), one.call("labels", { repo: P.repo }), people || one.call("_people")]);
+  [d, labels, people] = await Promise.all([one.call("issues", input), one.call("labels", { repo: P.repo }), people || one.call("_people", { repo: P.repo })]);
   // The tab's count is the repo's open issues, whatever the filters.
   if (!filtered()) document.getElementById("top").innerHTML = repoTabs({ ...d, repo: P.repo }, "issues");
   return list();

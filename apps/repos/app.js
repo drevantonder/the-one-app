@@ -8,10 +8,13 @@
 // collaborators, and its admins add others. Owners delete a repo, as apps are: it waits in Recently Deleted, read by no
 // one, until they restore it or erase it, and its packs, for good. Rows name a repo by its id (an older repo's is the
 // name it had before owners had handles) and its owner by user:<id> or group:<id>, never by handle.
+//
+// GitHub's repos show beside them, as github.com/<owner>/<name>, each operation asking GitHub at once (github.js).
 
 import * as browse from "./browse.js";
 import * as http from "./http.js";
 import * as issues from "./issues.js";
+import * as github from "./github.js";
 import css from "./screens/repos.css" with { type: "text" };
 import common from "./screens/common.js" with { type: "text" };
 import mainScreen from "./screens/main.html" with { type: "text" };
@@ -25,6 +28,7 @@ import issuesScreen from "./screens/issues.html" with { type: "text" };
 import issueScreen from "./screens/issue.html" with { type: "text" };
 import labelsScreen from "./screens/labels.html" with { type: "text" };
 import repoSettingsScreen from "./screens/repo-settings.html" with { type: "text" };
+import settingsScreen from "./screens/settings.html" with { type: "text" };
 
 /// A screen: Repos' styles and shared script, then its own HTML.
 const page = (title, html) => ({ title, html: `<style>${css}</style><script>${common}</script>${html}` });
@@ -40,7 +44,7 @@ function iso(v) {
 }
 
 const OWNER = { type: "string", description: "who owns it, by handle: omit for you, or a group you're in, from groups_list" };
-const REPO = { type: "string", description: "a repo as <owner>/<name>, from repos_list, like andre/notes" };
+const REPO = { type: "string", description: "a repo as <owner>/<name>, from repos_list, like andre/notes; or a GitHub one as github.com/<owner>/<name>" };
 const REF = { type: "string", description: "a branch, like main, or a commit's sha, from repos_branches or repos_log; default main, else the first branch" };
 const PATH = { type: "string", description: "a path in the repo, like src/app.js or docs; omit for the whole repo" };
 const SHA = { type: "string", description: "a commit's sha, full or its first 7 characters, from repos_log" };
@@ -173,7 +177,30 @@ const forksOf = async (ctx, g, r) => (await g.query(`select owner, name from rep
 /// A person's or group's handle and name, for what an operation gives.
 const who = (ctx, id) => ({ handle: byId(ctx, id)?.handle ?? null, name: ownerName(ctx, id) });
 
-export default {
+/// The install's own repos, as repos_list gives them.
+async function ownList(ctx) {
+  const g = global(ctx);
+  const repos = await g.query(
+    `select r.id, r.owner, r.name, r."from", r.created, r.deleted, r.deleted_by,
+            coalesce((select branch from branches b where b.repo = r.id and b.branch = 'main'),
+                     (select min(branch) from branches b where b.repo = r.id)) as branch,
+            (select count(*) from branches b where b.repo = r.id) as branches,
+            (select max(time) from branches b where b.repo = r.id) as updated,
+            (select count(*) from issues i where i.repo = r.id and i.state = 'open') as open_issues
+       from repos r order by coalesce(updated, r.created) desc`,
+  );
+  const from = await paths(ctx, g, repos.map((r) => r.from));
+  const out = [];
+  for (const r of repos) {
+    out.push({
+      repo: pathOf(ctx, r), name: r.name, owner: who(ctx, r.owner), from: from[r.from] ?? null, branch: r.branch, branches: r.branches,
+      created: r.created, updated: r.updated, open_issues: r.open_issues, deleted: deletedOf(r), yours: owns(ctx, r), push: await mayPush(ctx, g, r),
+    });
+  }
+  return iso(out);
+}
+
+const app = {
   name: "repos",
   title: "Repos",
   tagline: "Shared code",
@@ -181,7 +208,8 @@ export default {
   color: "#5856d6",
   advanced: true,
   description: "Git hosting for you and your agents: clone, push and suggest changes",
-  instructions: `Repos is git hosting for the person and their agents, as on GitHub. A repo is <owner>/<name>, its owner a person or a group by their handle (groups_list has them), and its address is \`<their One App's address>/repos/<owner>/<name>.git\` (repos_get gives it, and its page shows it), the same on every computer: \`git clone\`, \`git push\` and \`git fetch\` work with it as with any git host on any computer where the CLI is signed in (its sign-in), with or without a node there; pushing to a name that isn't a repo yet makes it, under that owner (you, or a group you're in). Everyone reads and forks every repo. A repo's owner pushes, and its collaborators: a person adds and removes the collaborators of their own repos (repos_add_collaborator), and a group's members are collaborators of its repos, whose admins own them. Anyone else forks it (repos_fork, by default to <you>/<same name>), pushes to the fork, and tells its owner, who fetches from it. Each repo has issues, as on GitHub, numbered from #1: anyone opens one (repos_open_issue) and comments (repos_comment); its author edits and closes it, and those who push to the repo close, label and assign any (repos_issues finds them).`,
+  instructions: `Repos is git hosting for the person and their agents, as on GitHub. A repo is <owner>/<name>, its owner a person or a group by their handle (groups_list has them), and its address is \`<their One App's address>/repos/<owner>/<name>.git\` (repos_get gives it, and its page shows it), the same on every computer: \`git clone\`, \`git push\` and \`git fetch\` work with it as with any git host on any computer where the CLI is signed in (its sign-in), with or without a node there; pushing to a name that isn't a repo yet makes it, under that owner (you, or a group you're in). Everyone reads and forks every repo. A repo's owner pushes, and its collaborators: a person adds and removes the collaborators of their own repos (repos_add_collaborator), and a group's members are collaborators of its repos, whose admins own them. Anyone else forks it (repos_fork, by default to <you>/<same name>), pushes to the fork, and tells its owner, who fetches from it. Each repo has issues, as on GitHub, numbered from #1: anyone opens one (repos_open_issue) and comments (repos_comment); its author edits and closes it, and those who push to the repo close, label and assign any (repos_issues finds them). GitHub's repos show beside them, as github.com/<owner>/<name>: those the person's own GitHub accounts see (repos_accounts, repos_sign_in) and those of GitHub organizations connected for their groups. Reading and the issue operations work on them the same, asking GitHub at once, and what they write goes to GitHub; clone one from GitHub's own address (repos_get gives it).`,
+  vault: github.VAULT,
 
   schema: {
     global: [`
@@ -217,34 +245,20 @@ export default {
                              created integer not null, updated integer not null);
       create index comments_issue on comments (repo, number, created);
       insert into labels select r.id, d.column1, d.column2, d.column3 from repos r, (values ${issues.LABELS.map((l) => `(${l.map(sql).join(", ")})`).join(", ")}) d;`,
+      // GitHub organizations connected for groups (github.js), and what a connection started waits with.
+      github.SCHEMA,
     ],
   },
 
   ops: {
     list: {
       reads: true,
-      description: "Every repo, the latest moved first: its <owner>/<name>, its owner's handle and name, where it was forked from, its default branch (main, or else its first), how many branches it has, when it last moved, how many open issues it has, and whether you push to it. Deleted ones say when, and wait in Recently Deleted for repos_restore.",
-      input: { type: "object", properties: {} },
-      async run(ctx) {
-        const g = global(ctx);
-        const repos = await g.query(
-          `select r.id, r.owner, r.name, r."from", r.created, r.deleted, r.deleted_by,
-                  coalesce((select branch from branches b where b.repo = r.id and b.branch = 'main'),
-                           (select min(branch) from branches b where b.repo = r.id)) as branch,
-                  (select count(*) from branches b where b.repo = r.id) as branches,
-                  (select max(time) from branches b where b.repo = r.id) as updated,
-                  (select count(*) from issues i where i.repo = r.id and i.state = 'open') as open_issues
-             from repos r order by coalesce(updated, r.created) desc`,
-        );
-        const from = await paths(ctx, g, repos.map((r) => r.from));
-        const out = [];
-        for (const r of repos) {
-          out.push({
-            repo: pathOf(ctx, r), name: r.name, owner: who(ctx, r.owner), from: from[r.from] ?? null, branch: r.branch, branches: r.branches,
-            created: r.created, updated: r.updated, open_issues: r.open_issues, deleted: deletedOf(r), yours: owns(ctx, r), push: await mayPush(ctx, g, r),
-          });
-        }
-        return iso(out);
+      description: "Every repo, the latest moved first: its <owner>/<name>, its owner's handle and name, where it was forked from, its default branch (main, or else its first), how many branches it has, when it last moved, how many open issues it has, and whether you push to it. Deleted ones say when, and wait in Recently Deleted for repos_restore. Then GitHub's that you see, as github.com/<owner>/<name>, with github: { url, private, fork }; source github lists only those, and says what GitHub refused.",
+      input: { type: "object", properties: { source: { type: "string", enum: ["one", "github"], description: "one: only this install's own repos; github: only GitHub's; omit for both" } } },
+      async run(ctx, { source } = {}) {
+        if (source === "github") return github.list(ctx);
+        const own = await ownList(ctx);
+        return source === "one" ? own : [...own, ...(await github.list(ctx).catch(() => []))];
       },
     },
     get: {
@@ -435,6 +449,7 @@ export default {
       },
     },
     ...issues.ops({ global, named, mayPush, owns, who, byHandle, handles, randomId, iso, REPO }),
+    ...github.ops({ global }),
     _address: {
       reads: true,
       description: "Where git reaches repos, for the screens: base, <address>/repos/ (null on a node from before it had the address), and the caller's handle.",
@@ -461,6 +476,9 @@ export default {
     issue: page("Issue", issueScreen),
     labels: page("Labels", labelsScreen),
     repo_settings: page("Settings", repoSettingsScreen),
+    settings: page("Settings", settingsScreen),
+    // Where GitHub sends an admin back once the install's GitHub App is made: Settings, finishing that.
+    github_app: page("Settings", settingsScreen),
   },
 
   widgets: {
@@ -512,6 +530,15 @@ export default {
     },
   },
 };
+
+export default app;
+
+// A GitHub repo's operations ask GitHub (github.js); what only the install's own repos do says where to do it.
+for (const [name, op] of Object.entries(app.ops)) {
+  const own = op.run;
+  if (github.run[name]) op.run = (ctx, input = {}) => (github.isGithub(input.repo) ? github.run[name](ctx, input) : own(ctx, input));
+  else if (github.elsewhere[name]) op.run = (ctx, input = {}) => (github.isGithub(input.repo) ? github.refuse(ctx, name, input.repo) : own(ctx, input));
+}
 
 /// What http.js needs of repos: finding one, who may push, making one, and moving a branch.
 const git = {
