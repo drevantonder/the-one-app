@@ -229,27 +229,27 @@ impl Apps {
 
     /// Runs an operation, for at most `limit`: longer for an app that waits on sidecars.
     pub async fn call(&self, app: &str, op: &str, input: Value, ctx: &Context, limit: Duration) -> Result<Outcome> {
-        let reply = self.ask_for(app, "call", json!({ "op": op, "input": input, "me": ctx.me, "now": ctx.now, "scopes": ctx.scopes, "read_only": ctx.read_only, "token": ctx.token, "from": ctx.from, "port": crate::api::port(), "address": ctx.address }), limit).await?;
+        let reply = self.ask_for(app, "call", json!({ "op": op, "input": input, "me": ctx.me, "now": ctx.now, "scopes": ctx.scopes, "read_only": ctx.read_only, "token": ctx.token, "from": ctx.from, "port": crate::api::port(), "address": ctx.address, "handles": ctx.handles }), limit).await?;
         Ok(Outcome { result: reply["ok"].clone(), appends: appends(&reply["appends"])?, later: reply["later"] == true })
     }
 
     pub async fn badge(&self, app: &str, ctx: &Context) -> Result<Value> {
-        Ok(self.ask(app, "badge", json!({ "me": ctx.me, "now": ctx.now, "scopes": ctx.scopes, "read_only": true, "token": ctx.token })).await?["ok"].clone())
+        Ok(self.ask(app, "badge", json!({ "me": ctx.me, "now": ctx.now, "scopes": ctx.scopes, "read_only": true, "token": ctx.token, "handles": ctx.handles })).await?["ok"].clone())
     }
 
     /// A widget's tree at `size` (`small`, `medium`, `large` or `xl`), which its render sees as `ctx.size`, with the
     /// options a person chose for it (`ctx.options`, its own defaults for the rest).
     pub async fn widget(&self, app: &str, name: &str, size: &str, options: &Value, ctx: &Context) -> Result<Value> {
-        Ok(self.ask(app, "widget", json!({ "name": name, "size": size, "options": options, "me": ctx.me, "now": ctx.now, "scopes": ctx.scopes, "read_only": true, "token": ctx.token })).await?["ok"].clone())
+        Ok(self.ask(app, "widget", json!({ "name": name, "size": size, "options": options, "me": ctx.me, "now": ctx.now, "scopes": ctx.scopes, "read_only": true, "token": ctx.token, "handles": ctx.handles })).await?["ok"].clone())
     }
 
     /// A widget's options, each `{ name, title, choices, default }`, with choices the app works out from its data.
     pub async fn widget_options(&self, app: &str, name: &str, ctx: &Context) -> Result<Value> {
-        Ok(self.ask(app, "options", json!({ "name": name, "me": ctx.me, "now": ctx.now, "scopes": ctx.scopes, "read_only": true, "token": ctx.token })).await?["ok"].clone())
+        Ok(self.ask(app, "options", json!({ "name": name, "me": ctx.me, "now": ctx.now, "scopes": ctx.scopes, "read_only": true, "token": ctx.token, "handles": ctx.handles })).await?["ok"].clone())
     }
 
     pub async fn hook(&self, app: &str, name: &str, input: Value, ctx: &Context) -> Result<Value> {
-        Ok(self.ask(app, "hook", json!({ "name": name, "input": input, "me": ctx.me, "now": ctx.now, "scopes": ctx.scopes, "read_only": true, "token": ctx.token })).await?["ok"].clone())
+        Ok(self.ask(app, "hook", json!({ "name": name, "input": input, "me": ctx.me, "now": ctx.now, "scopes": ctx.scopes, "read_only": true, "token": ctx.token, "handles": ctx.handles })).await?["ok"].clone())
     }
 
     /// A screen's HTML, as the app wrote it, or None if the app has no such screen.
