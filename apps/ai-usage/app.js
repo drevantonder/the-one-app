@@ -1,6 +1,7 @@
-// AI Usage: every AI plan's limits, and whether the pace lasts to reset. Reads the providers' own numbers
-// (every Claude account in claude-swap where it's installed, the codexbar CLI, Claude's own endpoint else), keeps snapshots, and says in the providers'
-// own words how much is left and what the pace does: deficit or reserve, what was expected, and whether it lasts.
+// AI Usage: every AI plan's limits, and whether the pace lasts to reset. Each machine's AI Usage service reads its
+// providers' own numbers for every sign-in it keeps (Claude Code's and claude-swap's accounts, Codex's, OpenCode Go's);
+// this asks every machine's and merges by account, keeps snapshots, and says in the providers' own words how much is
+// left and what the pace does: deficit or reserve, what was expected, and whether it lasts.
 // Agents read it through Agent Hooks; people get the tiles and the meter.
 
 const FRESH = 5 * 60 * 1000; // a snapshot counts as now for this long
@@ -10,19 +11,13 @@ const PRUNE = () => Date.now() - KEEP;
 // Each brand's own mark, from its site (claude.ai, developers.openai.com, opencode.ai): a logo is inset on white,
 // an icon is a finished tile drawn edge to edge.
 const PROVIDERS = {
-  claude: { title: "Claude", codexbar: "claude", sessionMins: 300, weeklyMins: 10080, mark: "logo", svg: `<svg width="248" height="248" viewBox="0 0 248 248" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M52.4285 162.873L98.7844 136.879L99.5485 134.602L98.7844 133.334H96.4921L88.7237 132.862L62.2346 132.153L39.3113 131.207L17.0249 130.026L11.4214 128.844L6.2 121.873L6.7094 118.447L11.4214 115.257L18.171 115.847L33.0711 116.911L55.485 118.447L71.6586 119.392L95.728 121.873H99.5485L100.058 120.337L98.7844 119.392L97.7656 118.447L74.5877 102.732L49.4995 86.1905L36.3823 76.62L29.3779 71.7757L25.8121 67.2858L24.2839 57.3608L30.6515 50.2716L39.3113 50.8623L41.4763 51.4531L50.2636 58.1879L68.9842 72.7209L93.4357 90.6804L97.0015 93.6343L98.4374 92.6652L98.6571 91.9801L97.0015 89.2625L83.757 65.2772L69.621 40.8192L63.2534 30.6579L61.5978 24.632C60.9565 22.1032 60.579 20.0111 60.579 17.4246L67.8381 7.49965L71.9133 6.19995L81.7193 7.49965L85.7946 11.0443L91.9074 24.9865L101.714 46.8451L116.996 76.62L121.453 85.4816L123.873 93.6343L124.764 96.1155H126.292V94.6976L127.566 77.9197L129.858 57.3608L132.15 30.8942L132.915 23.4505L136.608 14.4708L143.994 9.62643L149.725 12.344L154.437 19.0788L153.8 23.4505L150.998 41.6463L145.522 70.1215L141.957 89.2625H143.994L146.414 86.7813L156.093 74.0206L172.266 53.698L179.398 45.6635L187.803 36.802L193.152 32.5484H203.34L210.726 43.6549L207.415 55.1159L196.972 68.3492L188.312 79.5739L175.896 96.2095L168.191 109.585L168.882 110.689L170.738 110.53L198.755 104.504L213.91 101.787L231.994 98.7149L240.144 102.496L241.036 106.395L237.852 114.311L218.495 119.037L195.826 123.645L162.07 131.592L161.696 131.893L162.137 132.547L177.36 133.925L183.855 134.279H199.774L229.447 136.524L237.215 141.605L241.8 147.867L241.036 152.711L229.065 158.737L213.019 154.956L175.45 145.977L162.587 142.787H160.805V143.85L171.502 154.366L191.242 172.089L215.82 195.011L217.094 200.682L213.91 205.172L210.599 204.699L188.949 188.394L180.544 181.069L161.696 165.118H160.422V166.772L164.752 173.152L187.803 207.771L188.949 218.405L187.294 221.832L181.308 223.959L174.813 222.777L161.187 203.754L147.305 182.486L136.098 163.345L134.745 164.2L128.075 235.42L125.019 239.082L117.887 241.8L111.902 237.31L108.718 229.984L111.902 215.452L115.722 196.547L118.779 181.541L121.58 162.873L123.291 156.636L123.14 156.219L121.773 156.449L107.699 175.752L86.304 204.699L69.3663 222.777L65.291 224.431L58.2867 220.768L58.9235 214.27L62.8713 208.48L86.304 178.705L100.44 160.155L109.551 149.507L109.462 147.967L108.959 147.924L46.6977 188.512L35.6182 189.93L30.7788 185.44L31.4156 178.115L33.7079 175.752L52.4285 162.873Z" fill="#D97757"/></svg>` },
-  codex: { title: "Codex", codexbar: "codex", sessionMins: 300, weeklyMins: 10080, mark: "logo", svg: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="12" fill="#0080F7"/><path d="M9.94494 9.59163V8.13227C9.94494 8.00935 9.99105 7.91713 10.0985 7.85575L13.0327 6.16599C13.4321 5.93558 13.9083 5.8281 14.3998 5.8281C16.2432 5.8281 17.4108 7.25677 17.4108 8.77751C17.4108 8.885 17.4108 9.00792 17.3953 9.13083L14.3537 7.34884C14.1694 7.24135 13.985 7.24135 13.8007 7.34884L9.94494 9.59163ZM16.7963 15.2755V11.7883C16.7963 11.5732 16.704 11.4196 16.5197 11.3121L12.664 9.0693L13.9236 8.34725C14.0311 8.28587 14.1234 8.28587 14.2308 8.34725L17.165 10.037C18.0099 10.5287 18.5782 11.5732 18.5782 12.587C18.5782 13.7544 17.887 14.8298 16.7963 15.2753V15.2755ZM9.03861 12.2031L7.77896 11.4658C7.67146 11.4045 7.62535 11.3122 7.62535 11.1893V7.8098C7.62535 6.16613 8.88501 4.92176 10.5902 4.92176C11.2354 4.92176 11.8344 5.13689 12.3415 5.52089L9.31526 7.27218C9.13097 7.37968 9.03875 7.53328 9.03875 7.74841V12.2033L9.03861 12.2031ZM11.75 13.77L9.94494 12.7562V10.6056L11.75 9.59178L13.5549 10.6056V12.7562L11.75 13.77ZM12.9098 18.44C12.2645 18.44 11.6655 18.2249 11.1585 17.8409L14.1847 16.0896C14.369 15.9821 14.4612 15.8285 14.4612 15.6134V11.1585L15.7363 11.8958C15.8438 11.9572 15.8899 12.0494 15.8899 12.1723V15.5519C15.8899 17.1955 14.6148 18.44 12.9098 18.44ZM9.26901 15.0144L6.33486 13.3246C5.4899 12.833 4.92161 11.7885 4.92161 10.7746C4.92161 9.59177 5.62824 8.53183 6.71886 8.0863V11.5887C6.71886 11.8039 6.81109 11.9575 6.99538 12.065L10.8359 14.2923L9.57621 15.0144C9.46872 15.0758 9.37649 15.0758 9.26901 15.0144ZM9.10013 17.5337C7.36426 17.5337 6.08919 16.2279 6.08919 14.6149C6.08919 14.492 6.1046 14.3691 6.11988 14.2462L9.1461 15.9975C9.33039 16.105 9.51483 16.105 9.69912 15.9975L13.5549 13.7702V15.2295C13.5549 15.3524 13.5088 15.4446 13.4013 15.506L10.4671 17.1958C10.0677 17.4262 9.59148 17.5337 9.09999 17.5337H9.10013ZM12.9098 19.3616C14.7685 19.3616 16.32 18.0406 16.6735 16.2893C18.3939 15.8438 19.5 14.2308 19.5 12.5872C19.5 11.5118 19.0391 10.4673 18.2096 9.71454C18.2864 9.39192 18.3326 9.0693 18.3326 8.74682C18.3326 6.55014 16.5505 4.90634 14.4921 4.90634C14.0774 4.90634 13.6779 4.96772 13.2785 5.10605C12.5872 4.43011 11.6347 4 10.5902 4C8.7314 4 7.17996 5.32103 6.8265 7.07232C5.10605 7.51786 4 9.13083 4 10.7745C4 11.8498 4.4608 12.8944 5.29035 13.6471C5.21354 13.9697 5.16743 14.2923 5.16743 14.6148C5.16743 16.8114 6.94941 18.4552 9.00792 18.4552C9.42261 18.4552 9.82204 18.3939 10.2215 18.2556C10.9127 18.9315 11.8651 19.3616 12.9098 19.3616Z" fill="white"/></svg>` },
-  opencodego: { title: "OpenCode Go", codexbar: "opencodego", sessionMins: 300, weeklyMins: 10080, mark: "icon", svg: `<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg"><rect width="512" height="512" fill="#131010"></rect><path d="M320 224V352H192V224H320Z" fill="#5A5858"></path><path fill-rule="evenodd" clip-rule="evenodd" d="M384 416H128V96H384V416ZM320 160H192V352H320V160Z" fill="white"></path></svg>` },
+  claude: { title: "Claude", sessionMins: 300, weeklyMins: 10080, mark: "logo", svg: `<svg width="248" height="248" viewBox="0 0 248 248" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M52.4285 162.873L98.7844 136.879L99.5485 134.602L98.7844 133.334H96.4921L88.7237 132.862L62.2346 132.153L39.3113 131.207L17.0249 130.026L11.4214 128.844L6.2 121.873L6.7094 118.447L11.4214 115.257L18.171 115.847L33.0711 116.911L55.485 118.447L71.6586 119.392L95.728 121.873H99.5485L100.058 120.337L98.7844 119.392L97.7656 118.447L74.5877 102.732L49.4995 86.1905L36.3823 76.62L29.3779 71.7757L25.8121 67.2858L24.2839 57.3608L30.6515 50.2716L39.3113 50.8623L41.4763 51.4531L50.2636 58.1879L68.9842 72.7209L93.4357 90.6804L97.0015 93.6343L98.4374 92.6652L98.6571 91.9801L97.0015 89.2625L83.757 65.2772L69.621 40.8192L63.2534 30.6579L61.5978 24.632C60.9565 22.1032 60.579 20.0111 60.579 17.4246L67.8381 7.49965L71.9133 6.19995L81.7193 7.49965L85.7946 11.0443L91.9074 24.9865L101.714 46.8451L116.996 76.62L121.453 85.4816L123.873 93.6343L124.764 96.1155H126.292V94.6976L127.566 77.9197L129.858 57.3608L132.15 30.8942L132.915 23.4505L136.608 14.4708L143.994 9.62643L149.725 12.344L154.437 19.0788L153.8 23.4505L150.998 41.6463L145.522 70.1215L141.957 89.2625H143.994L146.414 86.7813L156.093 74.0206L172.266 53.698L179.398 45.6635L187.803 36.802L193.152 32.5484H203.34L210.726 43.6549L207.415 55.1159L196.972 68.3492L188.312 79.5739L175.896 96.2095L168.191 109.585L168.882 110.689L170.738 110.53L198.755 104.504L213.91 101.787L231.994 98.7149L240.144 102.496L241.036 106.395L237.852 114.311L218.495 119.037L195.826 123.645L162.07 131.592L161.696 131.893L162.137 132.547L177.36 133.925L183.855 134.279H199.774L229.447 136.524L237.215 141.605L241.8 147.867L241.036 152.711L229.065 158.737L213.019 154.956L175.45 145.977L162.587 142.787H160.805V143.85L171.502 154.366L191.242 172.089L215.82 195.011L217.094 200.682L213.91 205.172L210.599 204.699L188.949 188.394L180.544 181.069L161.696 165.118H160.422V166.772L164.752 173.152L187.803 207.771L188.949 218.405L187.294 221.832L181.308 223.959L174.813 222.777L161.187 203.754L147.305 182.486L136.098 163.345L134.745 164.2L128.075 235.42L125.019 239.082L117.887 241.8L111.902 237.31L108.718 229.984L111.902 215.452L115.722 196.547L118.779 181.541L121.58 162.873L123.291 156.636L123.14 156.219L121.773 156.449L107.699 175.752L86.304 204.699L69.3663 222.777L65.291 224.431L58.2867 220.768L58.9235 214.27L62.8713 208.48L86.304 178.705L100.44 160.155L109.551 149.507L109.462 147.967L108.959 147.924L46.6977 188.512L35.6182 189.93L30.7788 185.44L31.4156 178.115L33.7079 175.752L52.4285 162.873Z" fill="#D97757"/></svg>` },
+  codex: { title: "Codex", sessionMins: 300, weeklyMins: 10080, mark: "logo", svg: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="12" fill="#0080F7"/><path d="M9.94494 9.59163V8.13227C9.94494 8.00935 9.99105 7.91713 10.0985 7.85575L13.0327 6.16599C13.4321 5.93558 13.9083 5.8281 14.3998 5.8281C16.2432 5.8281 17.4108 7.25677 17.4108 8.77751C17.4108 8.885 17.4108 9.00792 17.3953 9.13083L14.3537 7.34884C14.1694 7.24135 13.985 7.24135 13.8007 7.34884L9.94494 9.59163ZM16.7963 15.2755V11.7883C16.7963 11.5732 16.704 11.4196 16.5197 11.3121L12.664 9.0693L13.9236 8.34725C14.0311 8.28587 14.1234 8.28587 14.2308 8.34725L17.165 10.037C18.0099 10.5287 18.5782 11.5732 18.5782 12.587C18.5782 13.7544 17.887 14.8298 16.7963 15.2753V15.2755ZM9.03861 12.2031L7.77896 11.4658C7.67146 11.4045 7.62535 11.3122 7.62535 11.1893V7.8098C7.62535 6.16613 8.88501 4.92176 10.5902 4.92176C11.2354 4.92176 11.8344 5.13689 12.3415 5.52089L9.31526 7.27218C9.13097 7.37968 9.03875 7.53328 9.03875 7.74841V12.2033L9.03861 12.2031ZM11.75 13.77L9.94494 12.7562V10.6056L11.75 9.59178L13.5549 10.6056V12.7562L11.75 13.77ZM12.9098 18.44C12.2645 18.44 11.6655 18.2249 11.1585 17.8409L14.1847 16.0896C14.369 15.9821 14.4612 15.8285 14.4612 15.6134V11.1585L15.7363 11.8958C15.8438 11.9572 15.8899 12.0494 15.8899 12.1723V15.5519C15.8899 17.1955 14.6148 18.44 12.9098 18.44ZM9.26901 15.0144L6.33486 13.3246C5.4899 12.833 4.92161 11.7885 4.92161 10.7746C4.92161 9.59177 5.62824 8.53183 6.71886 8.0863V11.5887C6.71886 11.8039 6.81109 11.9575 6.99538 12.065L10.8359 14.2923L9.57621 15.0144C9.46872 15.0758 9.37649 15.0758 9.26901 15.0144ZM9.10013 17.5337C7.36426 17.5337 6.08919 16.2279 6.08919 14.6149C6.08919 14.492 6.1046 14.3691 6.11988 14.2462L9.1461 15.9975C9.33039 16.105 9.51483 16.105 9.69912 15.9975L13.5549 13.7702V15.2295C13.5549 15.3524 13.5088 15.4446 13.4013 15.506L10.4671 17.1958C10.0677 17.4262 9.59148 17.5337 9.09999 17.5337H9.10013ZM12.9098 19.3616C14.7685 19.3616 16.32 18.0406 16.6735 16.2893C18.3939 15.8438 19.5 14.2308 19.5 12.5872C19.5 11.5118 19.0391 10.4673 18.2096 9.71454C18.2864 9.39192 18.3326 9.0693 18.3326 8.74682C18.3326 6.55014 16.5505 4.90634 14.4921 4.90634C14.0774 4.90634 13.6779 4.96772 13.2785 5.10605C12.5872 4.43011 11.6347 4 10.5902 4C8.7314 4 7.17996 5.32103 6.8265 7.07232C5.10605 7.51786 4 9.13083 4 10.7745C4 11.8498 4.4608 12.8944 5.29035 13.6471C5.21354 13.9697 5.16743 14.2923 5.16743 14.6148C5.16743 16.8114 6.94941 18.4552 9.00792 18.4552C9.42261 18.4552 9.82204 18.3939 10.2215 18.2556C10.9127 18.9315 11.8651 19.3616 12.9098 19.3616Z" fill="white"/></svg>` },
+  opencodego: { title: "OpenCode Go", sessionMins: 300, weeklyMins: 10080, mark: "icon", svg: `<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg"><rect width="512" height="512" fill="#131010"></rect><path d="M320 224V352H192V224H320Z" fill="#5A5858"></path><path fill-rule="evenodd" clip-rule="evenodd" d="M384 416H128V96H384V416ZM320 160H192V352H320V160Z" fill="white"></path></svg>` },
 };
 const markOf = (id) => ({ image: "data:image/svg+xml," + encodeURIComponent(PROVIDERS[id].svg), kind: PROVIDERS[id].mark });
 
 const int = (v) => (v == null || Number.isNaN(Number(v)) ? null : Math.round(Number(v)));
-const ms = (v) => {
-  if (v == null) return null;
-  if (typeof v === "number") return v < 1e12 ? v * 1000 : v;
-  const t = Date.parse(v);
-  return Number.isNaN(t) ? null : t;
-};
 const ago = (at, now) => {
   const m = Math.max(0, Math.round((now - at) / 60000));
   if (m < 1) return "just now";
@@ -60,20 +55,6 @@ function countdown(t, now) {
   return d < 14 ? `in ${d}d ${h % 24}h` : `on ${monthDay(t)}`;
 }
 
-/// Which device answers: the one given, else the one running this.
-async function here(ctx, device) {
-  if (device) return device;
-  try {
-    return (await ctx.devices()).find((s) => s.me)?.name || null;
-  } catch {
-    return null;
-  }
-}
-
-function side(ctx, input, device) {
-  return device ? ctx.sidecars.shell.run(input, { device }) : ctx.sidecars.shell.run(input);
-}
-
 /// A pace in the providers' own words, from two snapshots sharing a window reset.
 function paceFrom(used, resetsAt, windowMins, prev, now) {
   if (resetsAt == null || used == null) return null;
@@ -104,24 +85,9 @@ const emptyIn = (eta) => {
   return mins < 120 ? `Projected empty in ${mins} min` : mins < 2880 ? `Projected empty in ${Math.floor(mins / 60)}h ${mins % 60}m` : `Runs out in ${Math.round(mins / 1440)}d`;
 };
 
-/// A pace from claude-swap's own expected and projected numbers, in the same words.
-function paceOfCswap(w, now) {
-  if (w?.pct == null || w.expectedPct == null) return null;
-  const used = w.pct, exp = Math.round(w.expectedPct);
-  const delta = Math.round((used - w.expectedPct) * 10) / 10;
-  if (used >= 100) return { summary: `Out now | Expected ${exp}% used | Back at reset`, willLast: false, delta };
-  if (Math.abs(delta) < 3) return { summary: `On pace | Expected ${exp}% used | Lasts until reset`, willLast: true, delta };
-  const willLast = w.willLastToReset !== false;
-  const empty = ms(w.projectedExhaustionAt);
-  const tail = willLast ? "Lasts until reset" : empty != null ? emptyIn(empty - now) : "Ahead of even pace";
-  const head = delta > 0 ? `${trimNum(delta)}% in deficit` : `${trimNum(-delta)}% in reserve`;
-  return { summary: `${head} | Expected ${exp}% used | ${tail}`, willLast, delta };
-}
-
-/// Who an account is, as a person tells them apart: its team (Personal for one's own plan) and its email.
+/// Who an account is, as a person tells them apart: the label its machine gave (org · email), else its email.
 function accountName(a) {
-  const org = String(a.organizationName || "");
-  return `${!org || /'s Organization$/.test(org) ? "Personal" : org} · ${a.email || ""}`;
+  return a.account || a.email || null;
 }
 
 /// Which pool to spend: the cooler weekly one. Names come from the scoped rows.
@@ -145,166 +111,86 @@ function steer(models) {
   return `${head}any model fine`;
 }
 
-/// The newest read of a provider on this device: one snapshot per account.
-async function latest(b, provider, device, before = null) {
-  const top = await b.query("select at from snapshots where provider = ? and (device = ? or ? is null) and (at <= ? or ? is null) order by at desc limit 1", [provider, device, device, before, before]);
-  if (!top[0]) return [];
-  const rows = await b.query("select * from snapshots where provider = ? and (device = ? or ? is null) and at = ? order by active desc, weekly_used", [provider, device, device, top[0].at]);
+/// Each account's newest read of a provider, whichever machine saw it: one snapshot per account (provider + label).
+async function latest(b, provider, before = null) {
+  const rows = await b.query(
+    "select * from snapshots where provider = ? and (at <= ? or ? is null) and at = (select max(at) from snapshots x where x.provider = snapshots.provider and ifnull(x.account, '') = ifnull(snapshots.account, '') and (x.at <= ? or ? is null)) order by active desc, weekly_used",
+    [provider, before, before, before, before],
+  );
   return rows.map((r) => ({ ...r, active: !!r.active, disabled: !!r.disabled, models: JSON.parse(r.models || "[]"), pace: JSON.parse(r.pace || "{}") }));
 }
 
 /// The one before for the same account, sharing the session window, for the burn rate.
-async function previous(b, provider, device, account, at, resetsAt) {
-  const rows = await b.query("select at, session_used, weekly_used, session_resets from snapshots where provider = ? and (device = ? or ? is null) and account is ? and at < ? order by at desc limit 5", [provider, device, device, account, at]);
+async function previous(b, provider, account, at, resetsAt) {
+  const rows = await b.query("select at, session_used, weekly_used, session_resets from snapshots where provider = ? and ifnull(account, '') is ifnull(?, '') and at < ? order by at desc limit 5", [provider, account, at]);
   return rows.map((r) => ({ at: r.at, used: r.session_used, resets: r.session_resets })).find((r) => r.resets === resetsAt) || null;
 }
 
-/// codexbar's JSON into our windows. Pace summaries are repeated word for word.
-function fromCodexbar(j, now) {
-  const u = j.usage || {};
-  const win = (w) => (w ? { used: int(w.usedPercent), resetsAt: ms(w.resetsAt), resetText: w.resetDescription || null } : { used: null, resetsAt: null, resetText: null });
-  const pw = (w, mins) => {
-    const p = (j.pace || {})[w];
-    if (!p || !p.summary) return null;
-    return { summary: String(p.summary), willLast: p.willLastToReset !== false, delta: p.deltaPercent ?? null };
-  };
-  const models = [];
-  const hunt = (o, depth) => {
-    if (!o || depth > 2) return;
-    for (const [k, v] of Object.entries(o)) {
-      if (v && typeof v === "object" && !Array.isArray(v)) {
-        if (/sonnet|opus/i.test(k) && v.usedPercent != null) models.push({ name: /opus/i.test(k) ? "Opus" : "Sonnet", used: int(v.usedPercent), resetsAt: ms(v.resetsAt) });
-        else hunt(v, depth + 1);
-      }
-    }
-  };
-  hunt(u, 0);
-  for (const d of u.details || []) for (const r of d.rows || []) {
-    const m = String(r.value || "").match(/(\d+)% left/);
-    if (m && /sonnet|opus/i.test(`${r.label} ${d.title}`)) models.push({ name: /opus/i.test(`${r.label} ${d.title}`) ? "Opus" : "Sonnet", used: 100 - Number(m[1]), resetsAt: null });
-  }
-  for (const e of u.extraRateWindows || []) {
-    const w = e.window || {};
-    if (w.usedPercent != null) {
-      const title = String(e.title || e.id || "pool");
-      models.push({ name: /opus/i.test(title) ? "Opus" : /sonnet/i.test(title) ? "Sonnet" : title.replace(/ only$/i, ""), used: int(w.usedPercent), resetsAt: ms(w.resetsAt) });
-    }
-  }
-  const account = j.accountEmail || u.identity?.accountEmail || null;
-  const plan = u.identity?.loginMethod ? String(u.identity.loginMethod).replace(/^./, (c) => c.toUpperCase()) : null;
-  const notes = [];
-  for (const d of u.details || []) for (const r of d.rows || []) if (r.value && /status|note/i.test(String(r.label || ""))) notes.push(String(r.value));
+/// What one machine's AI Usage service answered, into our windows: one read per account it found.
+function fromService(a) {
+  const win = (w) => ({ used: int(w?.used), resetsAt: w?.resetsAt ?? null, resetText: null });
   return {
-    source: `codexbar (${j.source || "auto"})`,
-    confidence: u.dataConfidence === "estimated" ? "estimated" : "quota",
-    session: { ...win(u.primary), pace: u.dataConfidence === "estimated" ? null : pw("primary") },
-    weekly: { ...win(u.secondary), pace: u.dataConfidence === "estimated" ? null : pw("secondary") },
-    monthly: { ...win(u.tertiary), pace: null },
-    models, plan, account, notes,
-    extra: null,
+    source: "service", confidence: "quota",
+    session: win(a.session), weekly: win(a.weekly), monthly: win(a.monthly),
+    models: (a.models || []).map((m) => ({ name: String(m.name || "pool"), used: int(m.used), resetsAt: m.resetsAt ?? null })),
+    plan: a.plan || null, account: accountName(a), email: a.email || null,
+    active: !!a.active, disabled: !!a.disabled,
+    notes: a.error ? [String(a.error)] : [], extra: a.extra || null,
   };
 }
 
-/// claude-swap's accounts into our windows, one read per account. It keeps no secrets in this output.
-function fromCswap(j) {
-  const win = (w) => ({ used: int(w?.pct), resetsAt: ms(w?.resetsAt), resetText: null, pace: null, raw: w });
-  return (j.accounts || []).map((a) => {
-    const u = a.usage || {};
-    const out = {
-      source: "cswap", confidence: "quota",
-      session: win(u.fiveHour), weekly: win(u.sevenDay), monthly: { used: null, resetsAt: null },
-      models: (u.scoped || []).map((m) => ({ name: String(m.name || "pool"), used: int(m.pct), resetsAt: ms(m.resetsAt) })),
-      plan: null, account: accountName(a), active: !!a.active, disabled: !!a.disabled,
-      notes: a.usageStatus && a.usageStatus !== "ok" ? [`usage ${a.usageStatus}`] : [], extra: null,
-    };
-    return out;
-  });
-}
-
-/// Claude straight from its own endpoint. The token is never logged or kept.
-async function fromClaude(ctx, b, device, now) {
-  let creds;
-  try {
-    const r = await side(ctx, { command: "cat ~/.claude/.credentials.json", timeout: 10 }, device);
-    if (r?.exit !== 0) throw new Error("no credentials file");
-    creds = JSON.parse(String(r.stdout || ""));
-  } catch {
-    throw new Error("Claude Code isn't signed in on " + (device || "this device"));
-  }
-  const token = creds?.claudeAiOauth?.accessToken;
-  if (!token) throw new Error("no OAuth token in Claude Code's credentials");
-  const r = await fetch("https://api.anthropic.com/api/oauth/usage", { headers: { Authorization: "Bearer " + token, "anthropic-beta": "oauth-2025-04-20" }, signal: AbortSignal.timeout(20000) });
-  if (r.status === 429) throw new Error("rate limited");
-  if (!r.ok) throw new Error(`usage said ${r.status}`);
-  const j = await r.json();
-  const win = (w) => ({ used: int(w?.utilization), resetsAt: ms(w?.resets_at) });
-  const prev = null;
-  const out = {
-    source: "oauth",
-    confidence: "quota",
-    session: win(j.five_hour),
-    weekly: win(j.seven_day),
-    monthly: { used: null, resetsAt: null },
-    models: [
-      ...(j.seven_day_sonnet ? [{ name: "Sonnet", used: int(j.seven_day_sonnet.utilization), resetsAt: ms(j.seven_day_sonnet.resets_at) }] : []),
-      ...(j.seven_day_opus ? [{ name: "Opus", used: int(j.seven_day_opus.utilization), resetsAt: ms(j.seven_day_opus.resets_at) }] : []),
-    ],
-    plan: null, account: null,
-    extra: j.extra_usage ? { used: j.extra_usage.used_credits, limit: j.extra_usage.monthly_limit } : null,
-  };
-  return out;
-}
-
-/// Fresh numbers, one per account, or the last ones with their age when fetching fails. Estimated rows never forecast.
+/// Fresh numbers: every machine's AI Usage service reads its providers, and the newest read per account wins, on
+/// whatever machine saw it. Machines' and accounts' failures come back as rows saying why; the last reads stay shown
+/// with their age. `device` limits the read to one machine.
 async function refresh(ctx, b, id, device, now) {
   const P = PROVIDERS[id];
   b.exec("delete from snapshots where session_used is null and weekly_used is null and monthly_used is null");
-  const snap = await latest(b, id, device);
-  if (snap.length && now - snap[0].at < FRESH) return snap.map((r) => ({ ...r, cached: true, now }));
-  const fail = (problem) => (snap.length ? snap.map((r) => ({ ...r, cached: true, stale: problem, now })) : [{ provider: id, error: problem, now }]);
-  const probe = (n, args, err) => `for b in ${n} "$HOME/.local/bin/${n}" /opt/homebrew/bin/${n}; do out=$("$b" ${args} ${err}); if [ -n "$out" ]; then echo "$out"; break; fi; done`;
+  const snap = await latest(b, id);
+  const newest = snap.reduce((t, r) => Math.max(t, r.at), 0);
+  if (snap.length && now - newest < FRESH) return snap.map((r) => ({ ...r, cached: true, now }));
   try {
-    let outs = null;
-    if (id === "claude") {
-      try {
-        const r = await side(ctx, { command: probe("cswap", "list --json", "2>/dev/null"), timeout: 60 }, device);
-        outs = fromCswap(JSON.parse(String(r?.stdout || ""))).filter((o) => o.session.used != null || o.weekly.used != null);
-        if (!outs.length) outs = null;
-      } catch {
-        outs = null;
+    const answers = await ctx.sidecars["ai-usage"].usage({}, { device: device || "all" });
+    const errors = [];
+    const reads = [];
+    for (const [machine, answer] of Object.entries(answers || {})) {
+      if (answer?.error) {
+        errors.push({ provider: id, device: machine, error: String(answer.error), now });
+        continue;
+      }
+      for (const a of answer?.accounts || []) {
+        if (a.provider !== id) continue;
+        const out = fromService(a);
+        if (out.session.used == null && out.weekly.used == null && out.monthly.used == null && !a.error) continue;
+        reads.push({ machine, out });
       }
     }
-    if (!outs) {
-      try {
-        const r = await side(ctx, { command: probe("codexbar", `usage --provider ${P.codexbar} --format json --no-color`, "2>&1"), timeout: 25 }, device);
-        const parsed = JSON.parse(String(r?.stdout || ""));
-        const first = Array.isArray(parsed) ? parsed[0] : parsed;
-        if (!first || first.error) throw new Error(first?.error?.message || "no codexbar");
-        const out = fromCodexbar(first, now);
-        if (out.session.used == null && out.weekly.used == null && out.monthly.used == null) throw new Error("no usable windows");
-        outs = [out];
-      } catch (e) {
-        if (id !== "claude") throw e;
-        outs = [await fromClaude(ctx, b, device, now)];
-      }
-    }
+    if (!reads.length && errors.length) throw new Error(errors.map((e) => `${e.device}: ${e.error}`).join("; "));
     const results = [];
-    for (const out of outs) {
-      if (out.confidence !== "estimated") {
-        if (!out.session.pace) out.session.pace = paceOfCswap(out.session.raw, now);
-        if (!out.weekly.pace) out.weekly.pace = paceOfCswap(out.weekly.raw, now);
-        const prev = await previous(b, id, device, out.account || null, now, out.session.resetsAt);
-        if (!out.session.pace) out.session.pace = paceFrom(out.session.used, out.session.resetsAt, P.sessionMins, prev && { at: prev.at, used: prev.used }, now);
-        if (!out.weekly.pace) out.weekly.pace = paceFrom(out.weekly.used, out.weekly.resetsAt, P.weeklyMins, null, now);
-      }
-      const active = out.active || outs.length === 1 ? 1 : 0;
-      b.exec("insert into snapshots (provider, device, at, source, confidence, session_used, session_resets, weekly_used, weekly_resets, monthly_used, monthly_resets, models, pace, note, account, active, disabled) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", [id, device, now, out.source, out.confidence, out.session.used, out.session.resetsAt, out.weekly.used, out.weekly.resetsAt, out.monthly.used, out.monthly.resetsAt, JSON.stringify(out.models), JSON.stringify({ session: out.session.pace, weekly: out.weekly.pace }), (out.notes || [])[0] || null, out.account || null, active, out.disabled ? 1 : 0]);
-      results.push({ provider: id, device, at: now, source: out.source, confidence: out.confidence, session_used: out.session.used, session_resets: out.session.resetsAt, session_resetText: out.session.resetText, weekly_used: out.weekly.used, weekly_resets: out.weekly.resetsAt, weekly_resetText: out.weekly.resetText, monthly_used: out.monthly.used, monthly_resets: out.monthly.resetsAt, models: out.models, pace: { session: out.session.pace, weekly: out.weekly.pace }, plan: out.plan, account: out.account || null, active: !!active, disabled: !!out.disabled, extra: out.extra, notes: out.notes || [], cached: false, now });
+    const seen = new Set();
+    for (const { machine, out } of reads) {
+      // The same account read on two machines: the first answer wins, both were taken now.
+      const key = out.account || out.email || "";
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const prev = await previous(b, id, out.account || out.email, now, out.session.resetsAt);
+      out.session.pace = paceFrom(out.session.used, out.session.resetsAt, P.sessionMins, prev && { at: prev.at, used: prev.used }, now);
+      out.weekly.pace = paceFrom(out.weekly.used, out.weekly.resetsAt, P.weeklyMins, null, now);
+      const active = out.active || reads.length === 1 ? 1 : 0;
+      b.exec("insert into snapshots (provider, device, at, source, confidence, session_used, session_resets, weekly_used, weekly_resets, monthly_used, monthly_resets, models, pace, note, account, active, disabled) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", [id, machine, now, out.source, out.confidence, out.session.used, out.session.resetsAt, out.weekly.used, out.weekly.resetsAt, out.monthly.used, out.monthly.resetsAt, JSON.stringify(out.models), JSON.stringify({ session: out.session.pace, weekly: out.weekly.pace }), (out.notes || [])[0] || null, out.account || null, active, out.disabled ? 1 : 0]);
+      results.push({ provider: id, device: machine, at: now, source: out.source, confidence: out.confidence, session_used: out.session.used, session_resets: out.session.resetsAt, session_resetText: out.session.resetText, weekly_used: out.weekly.used, weekly_resets: out.weekly.resetsAt, weekly_resetText: out.weekly.resetText, monthly_used: out.monthly.used, monthly_resets: out.monthly.resetsAt, models: out.models, pace: { session: out.session.pace, weekly: out.weekly.pace }, plan: out.plan, account: out.account || null, active: !!active, disabled: !!out.disabled, extra: out.extra, notes: out.notes || [], cached: false, now });
     }
     b.exec("delete from snapshots where at < ?", [PRUNE()]);
-    return results.sort((x, y) => y.active - x.active || (x.weekly_used ?? 0) - (y.weekly_used ?? 0));
+    // Rows that can't be told which account they were (reads from before accounts had labels) go once the service
+    // answers; until then they're better kept than blank.
+    if (reads.length) b.exec("delete from snapshots where provider = ? and account is null and at < ?", [id, now]);
+    // The writes land when this call returns, so the merge happens here: this pass's rows, the last read of each
+    // account it didn't see (a machine off, say), and each machine that couldn't answer at all.
+    const last = (r) => (r.account || "");
+    const kept = snap.filter((r) => !seen.has(last(r))).map((r) => ({ ...r, cached: true, now }));
+    return [...results, ...kept, ...errors].sort((x, y) => (y.active - x.active) || ((x.weekly_used ?? 0) - (y.weekly_used ?? 0)));
   } catch (err) {
-    return fail(String(err?.message || err).slice(0, 120));
+    const problem = String(err?.message || err).slice(0, 160);
+    return snap.length ? snap.map((r) => ({ ...r, cached: true, stale: problem, now })) : [{ provider: id, error: problem, now }];
   }
 }
 
@@ -340,7 +226,7 @@ function section(reads, now) {
   const p = reads[0];
   const title = PROVIDERS[p.provider].title;
   if (p.error) return `${title}: unavailable, ${p.error}`;
-  const head = [title, p.account && p.source === "cswap" ? `${p.account}${reads.length > 1 ? ", in use" : ""}` : null, p.plan, p.confidence === "estimated" ? "~estimated from this device only" : null].filter(Boolean).join(" · ");
+  const head = [title, p.account ? `${p.account}${reads.length > 1 ? ", in use" : ""}` : null, p.plan, p.device ? `seen on ${p.device}` : null].filter(Boolean).join(" · ");
   const age = p.stale ? `last read ${ago(p.at, now)} (${p.stale})` : now - p.at > FRESH ? `read ${ago(p.at, now)}` : null;
   const steered = steer(p.models);
   const others = reads.slice(1).map((o) => `${o.account} ${o.weekly_used >= 100 ? `out, back ${resets(o.weekly_resets, now)}` : `${100 - (o.weekly_used ?? 0)}% weekly left`}${o.disabled ? ", not in rotation" : ""}`);
@@ -358,7 +244,7 @@ function section(reads, now) {
 }
 
 function tripped(p) {
-  if (p.error || p.confidence === "estimated") return null;
+  if (p.error) return null;
   const left = (u) => (u == null ? null : 100 - u);
   const sLeft = left(p.session_used), wLeft = left(p.weekly_used);
   const out = sLeft != null && (sLeft < 20 || p.pace?.session?.willLast === false);
@@ -373,8 +259,8 @@ async function warnings(b, now, since) {
   const low = (reads) => (reads.length && !reads.some((r) => !r.error && !tripped(r)) ? JSON.stringify(tripped(reads[0])) : null);
   const out = [];
   for (const id of Object.keys(PROVIDERS)) {
-    const reads = await latest(b, id, null);
-    const was = low(await latest(b, id, null, since));
+    const reads = await latest(b, id);
+    const was = low(await latest(b, id, since));
     if (!low(reads) || low(reads) === was) continue;
     const p = reads[0];
     const t = tripped(p);
@@ -395,9 +281,9 @@ export default {
   color: "#636366",
   advanced: true,
   description: "Every AI plan's limits, and whether the pace lasts to reset",
-  instructions: `Every AI plan's limits in the providers' own words: what's left, the pace against what's expected, and whether it lasts to reset. ai-usage_status is the full read (fresh when older than 5 minutes). Agents get the last readings with their first prompt, then a warning when a window is nearly out or outruns its reset. Estimated rows (marked ~) come from this device only and never forecast.`,
+  instructions: `Every AI plan's limits in the providers' own words: what's left, the pace against what's expected, and whether it lasts to reset. ai-usage_status is the full read (fresh when older than 5 minutes), merged from the AI Usage service on every machine that has one. Agents get the last readings with their first prompt, then a warning when a window is nearly out or outruns its reset.`,
 
-  uses: { sidecars: ["shell"] },
+  uses: { sidecars: ["ai-usage"] },
 
   // Fresh readings for agents' prompts, from the device that keeps AI Usage running (one devices keep ai-usage on <it>).
   schedules: { refresh: { op: "status", every: "5m", description: "Reads every plan, so agents' prompts get fresh numbers" } },
@@ -420,23 +306,22 @@ export default {
         properties: {
           provider: { type: "string", enum: ["all", "claude", "codex", "opencodego"], description: "all (the default) or one" },
           format: { type: "string", enum: ["text", "json"], description: "text (the default) to read, json for screens" },
-          device: { type: "string", description: "whose numbers: a device's name, from shell_accounts; omit for this device" },
+          device: { type: "string", description: "one machine to read, by name; omit for every machine's" },
         },
       },
       async run(ctx, { provider = "all", format = "text", device } = {}) {
-        const b = ctx.global || ctx.user || ctx.groups[0];
-        if (!b) throw new Error("there's no board for you here yet");
+        const b = ctx.user;
+        if (!b) throw new Error("your own data is on one of your devices: run it there");
         const now = ctx.now();
-        const dev = await here(ctx, device);
         const ids = provider === "all" ? Object.keys(PROVIDERS) : [provider];
-        const all = (await Promise.all(ids.map((id) => refresh(ctx, b, id, dev, now)))).flat();
+        const all = (await Promise.all(ids.map((id) => refresh(ctx, b, id, device, now)))).flat();
         if (format === "json") {
           return {
-            device: dev, at: now,
+            at: now,
             marks: Object.fromEntries(ids.map((id) => [id, markOf(id)])),
             providers: all.map((p) => ({
-              id: p.provider, title: PROVIDERS[p.provider].title, account: p.source === "cswap" ? p.account : null, active: !!p.active, disabled: !!p.disabled, alarm: p.error ? null : alarm(p, now), plan: p.plan || null, source: p.source || null,
-              device: p.device || dev, updatedAgo: p.at ? ago(p.at, now) : null, estimated: p.confidence === "estimated",
+              id: p.provider, title: PROVIDERS[p.provider].title, account: p.account || null, active: !!p.active, disabled: !!p.disabled, alarm: p.error ? null : alarm(p, now), plan: p.plan || null, source: p.source || null,
+              device: p.device || null, updatedAgo: p.at ? ago(p.at, now) : null,
               error: p.error || null, stale: p.stale || null,
               session: p.error ? null : { used: p.session_used, left: p.session_used == null ? null : 100 - p.session_used, resets: p.session_resets ? resets(p.session_resets, now) : null, countdown: p.session_resets ? countdown(p.session_resets, now) : null, pace: p.pace?.session?.summary || null, willLast: p.pace?.session?.willLast ?? null },
               weekly: p.error ? null : { used: p.weekly_used, left: p.weekly_used == null ? null : 100 - p.weekly_used, resets: p.weekly_resets ? resets(p.weekly_resets, now) : null, countdown: p.weekly_resets ? countdown(p.weekly_resets, now) : null, pace: p.pace?.weekly?.summary || null, willLast: p.pace?.weekly?.willLast ?? null },
@@ -455,11 +340,11 @@ export default {
   hooks: {
     // With an agent's prompt anywhere: every plan's last reading on its session's first, then a warning when one runs low.
     async prompt(ctx, { since }) {
-      const b = ctx.global || ctx.user || ctx.groups[0];
+      const b = ctx.user;
       if (!b) return "";
       const now = ctx.now();
       if (since !== null) return warnings(b, now, since);
-      const reads = (await Promise.all(Object.keys(PROVIDERS).map((id) => latest(b, id, null)))).filter((r) => r.length);
+      const reads = (await Promise.all(Object.keys(PROVIDERS).map((id) => latest(b, id)))).filter((r) => r.length);
       return reads.length ? ["AI usage, for choosing a model:", ...reads.map((r) => section(r, now))].join("\n\n") : "";
     },
   },
@@ -504,8 +389,7 @@ function read(p, several) {
   const models = (p.models || []).map((m) => meter(m.name, m)).join("");
   const extra = p.extra ? \`<div class="m"><span class="sub">Extra</span><span></span><span class="p"></span><span class="r">$\${p.extra.used} of $\${p.extra.limit}</span></div>\` : "";
   const alarm = p.alarm ? \`<div class="alarm" style="color:var(--\${p.alarm.tone})">\${one.esc(p.alarm.text)}</div>\` : "";
-  const est = p.estimated ? \`<div class="sub">~estimated from this device only</div>\` : "";
-  return \`<div class="acct">\${name}\${meter("Session", p.session)}\${meter("Weekly", p.weekly)}\${meter("Monthly", p.monthly)}\${models}\${extra}\${alarm}\${est}</div>\`;
+  return \`<div class="acct">\${name}\${meter("Session", p.session)}\${meter("Weekly", p.weekly)}\${meter("Monthly", p.monthly)}\${models}\${extra}\${alarm}</div>\`;
 }
 function tile(reads, mark) {
   const p = reads.find((r) => !r.error) || reads[0];
@@ -532,13 +416,12 @@ one.render("#list", show);
       size: "medium",
       sizes: ["small", "medium", "large"],
       async render(ctx) {
-        const b = ctx.global || ctx.user || ctx.groups[0];
+        const b = ctx.user;
         if (!b) return { t: "text", text: "No plans yet.", size: "sm", tone: "muted" };
         const now = ctx.now();
-        const dev = await here(ctx, null);
         const plans = [];
         for (const id of Object.keys(PROVIDERS)) {
-          const reads = await latest(b, id, dev);
+          const reads = await latest(b, id);
           for (const p of reads) {
             if (p.session_used == null && p.weekly_used == null) continue;
             const account = reads.length > 1 && p.account ? p.account.split(" · ")[0] : "";
