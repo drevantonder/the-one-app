@@ -423,6 +423,31 @@ export function mayHand(route, need) {
   return node(["log"]);
 }
 
+/// The most keys a node's 428 may ask one request to hand. As src/keys.rs `MOST_NEEDED`, which says why.
+export const MOST_NEEDED = 64;
+
+/// What a node's 428 (`answer`) asks a request of `route` to hand, from the node that answered (`node`, hex): its
+/// `need`, once each, or null if it asks for anything it mayn't. As src/keys.rs `asked_for`, which says why.
+export function askedFor(route, node, answer) {
+  if (!node || answer?.to !== node || !Array.isArray(answer.need)) return null;
+  const whole = (n) => n && typeof n === "object" && typeof n.scope === "string" && typeof n.app === "string" && typeof n.database === "string" && Number.isInteger(n.epoch) && n.epoch >= 0 && n.epoch <= 0xffffffff;
+  if (!answer.need.every(whole)) return null;
+  const need = [...new Map(answer.need.map(({ scope, epoch, app, database }) => [JSON.stringify([scope, epoch, app, database]), { scope, epoch, app, database }])).values()];
+  return need.length && need.length <= MOST_NEEDED && need.every((n) => mayHand(route, n)) ? need : null;
+}
+
+/// How long a client waits, each time, to ask again a node that doesn't list it yet. As src/keys.rs `BEHIND`.
+export const BEHIND = [2_000, 4_000];
+
+/// What auth said of this device's request to be let in (its status, 0 if it didn't answer, and its JSON): `{ signedOut }`,
+/// `{ approved, genesis? }`, `{ gone }`, or `{}` while it waits. As src/keys.rs `waited`, which says what each means.
+export function waited(status, said) {
+  if (status === 401) return { signedOut: true };
+  if (status === 404) return { gone: true };
+  if (status >= 200 && status < 300 && said?.approved === true) return { approved: true, ...(typeof said.genesis === "string" && /^[0-9a-f]{64}$/.test(said.genesis) ? { genesis: said.genesis } : {}) };
+  return {};
+}
+
 /// The oldest epoch of a database whose key a reader needs, of a scope whose newest is `newest`, from its newest hint
 /// (`hint`, its text, or null if it has none). As src/keys.rs `oldest_needed`, which says why.
 export function oldestNeeded(hint, newest) {

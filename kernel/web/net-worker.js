@@ -11,8 +11,9 @@
 // answers `keys`. `nodes` gives the order to ask nodes in, which is remembered; `reconnect` starts a fresh endpoint,
 // after the network came back.
 
-/// How long before a session's certificate ends it's renewed.
+/// How long before a session's certificate ends it's renewed, and how long after a renewal that failed it's tried again.
 const RENEW = 3_600_000;
+const RENEW_AGAIN = 60_000;
 /// How long a relay socket opened for iroh waits for it to ask, before it's closed.
 const UNTAKEN = 10_000;
 /// How long a tab has to seal a request's keys to the node it's going to, before it's sent without them.
@@ -162,10 +163,11 @@ export function server(version) {
           if (Array.isArray(c.online)) client.online(c.online);
           return;
         }
-        // Taken out: it forgets its nodes, and the next start finds out it isn't a device.
+        // Taken out: it forgets its nodes, and the next start finds out it isn't a device. A session started since is
+        // that one's.
         put(`nodes:${user}`, []);
         client.close();
-        session = null;
+        session?.ready.then((s) => s?.client === client && (session = null), () => {});
       },
       () => {},
     );
@@ -183,18 +185,25 @@ export function server(version) {
     return made;
   }
 
-  /// A new certificate for the session's endpoint before its last ends.
+  /// A new certificate for the session's endpoint before its last ends, while it's the session: one that fails is tried
+  /// again in a minute, so a moment offline doesn't end it.
   async function renew(user, client, endpoint, socket) {
-    const [{ certify, hex, FRESH, SESSION }, { get }] = await code;
-    const device = await get(`device:${user}`);
-    if (!device) return;
-    const until = Date.now() + SESSION - FRESH;
-    const certificate = await certify(device.sign, hex.decode(device.key), endpoint, until);
-    const s = await session?.ready;
-    if (s) s.certificate = certificate;
-    await socket(certificate);
-    await client.certify(certificate);
-    renewal = setTimeout(() => renew(user, client, endpoint, socket), until - RENEW - Date.now());
+    const s = await session?.ready.catch(() => null);
+    if (s?.client !== client) return;
+    try {
+      const [{ certify, hex, FRESH, SESSION }, { get }] = await code;
+      const device = await get(`device:${user}`);
+      if (!device) return;
+      const until = Date.now() + SESSION - FRESH;
+      const certificate = await certify(device.sign, hex.decode(device.key), endpoint, until);
+      await socket(certificate);
+      await client.certify(certificate);
+      s.certificate = certificate;
+      renewal = setTimeout(() => renew(user, client, endpoint, socket), until - RENEW - Date.now());
+    } catch (err) {
+      console.warn("renewing this browser's session:", err);
+      renewal = setTimeout(() => renew(user, client, endpoint, socket), RENEW_AGAIN);
+    }
   }
 
   /// The session for `user`, started once; started again if `again` (this browser was just let in), as `as` if given.

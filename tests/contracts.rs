@@ -246,6 +246,73 @@ fn the_kernel_and_nodes_agree_on_keys_and_seals() {
         assert_eq!(oldest_needed(Some(br#"{"at":9,"copy":7,"epoch":2}"#), 3), 2, "from the epoch its newest copy is under");
     }
 
+    // A client device's way in, the same in a browser (kernel/web) as in a native app and the CLI (one-client): what a
+    // node's 428 may ask it to hand (`keys::asked_for`), what auth's word on its request to be let in means
+    // (`keys::waited`), and how long it waits for a node that doesn't list it yet (`keys::BEHIND`).
+    {
+        use one::keys::{BEHIND, MOST_NEEDED, Need, Waited, asked_for, waited};
+        let node = "ab".repeat(32);
+        let need = |app: &str, database: &str| json!({ "scope": "global", "epoch": 1, "app": app, "database": database });
+        let every = |n: usize| (0..n).map(|i| need(&format!("app{i}"), "main")).collect::<Vec<_>>();
+        let asked: Vec<(&str, Value)> = vec![
+            ("call board", json!({ "to": node, "need": [need("board", "main")] })),
+            ("call board", json!({ "to": node, "need": [need("board", "main"), need("board", "main"), need("node", "log")] })),
+            // The seal key it names isn't read: what's handed is sealed to the one the entries list.
+            ("call board", json!({ "to": node, "seal": "cd".repeat(32), "need": [need("board", "main")] })),
+            ("call board", json!({ "to": "cd".repeat(32), "need": [need("board", "main")] })),
+            ("call board", json!({ "need": [need("board", "main")] })),
+            ("call board", json!({ "to": node, "need": [] })),
+            ("call board", json!({ "to": node, "need": null })),
+            ("call board", json!({ "to": node, "need": [need("notes", "main")] })),
+            ("call board", json!({ "to": node, "need": [need("board", "main"), { "scope": "global", "epoch": "1", "app": "board", "database": "main" }] })),
+            ("call board", json!({ "to": node, "need": [{ "scope": "global", "epoch": -1, "app": "board", "database": "main" }] })),
+            ("/v1/badges", json!({ "to": node, "need": every(MOST_NEEDED) })),
+            ("/v1/badges", json!({ "to": node, "need": every(MOST_NEEDED + 1) })),
+        ];
+        let genesis = "e".repeat(64);
+        let said: Vec<(u16, Value)> = vec![
+            (401, json!({})),
+            (404, json!({})),
+            (200, json!({ "approved": true, "genesis": genesis })),
+            (200, json!({ "approved": true, "genesis": genesis.to_uppercase() })),
+            (200, json!({ "approved": true, "genesis": 7 })),
+            (200, json!({ "approved": true })),
+            (200, json!({ "approved": false })),
+            (200, json!({ "approved": "yes" })),
+            (204, json!({ "approved": true })),
+            (500, json!({ "approved": true })),
+            (0, Value::Null),
+        ];
+        let out = js(json!({
+            "op": "joining",
+            "asked": asked.iter().map(|(route, answer)| json!([route, node, answer])).collect::<Vec<_>>(),
+            "said": said.iter().map(|(status, body)| json!([status, body])).collect::<Vec<_>>(),
+        }));
+        for ((route, answer), js) in asked.iter().zip(out["asked"].as_array().unwrap()) {
+            let js: Option<Vec<Need>> = serde_json::from_value(js.clone()).unwrap();
+            let js = js.map(|mut n| {
+                n.sort();
+                n
+            });
+            assert_eq!(js, asked_for(route, &node, answer), "{route}: {answer}");
+        }
+        assert!(asked_for("call board", &node, &asked[1].1).is_some_and(|n| n.len() == 2), "a key asked for twice is handed once");
+        assert!(asked_for("/v1/badges", &node, &asked[10].1).is_some() && asked_for("/v1/badges", &node, &asked[11].1).is_none());
+        for ((status, body), js) in said.iter().zip(out["said"].as_array().unwrap()) {
+            let rust = match waited(*status, body) {
+                Waited::SignedOut => json!({ "signedOut": true }),
+                Waited::Gone => json!({ "gone": true }),
+                Waited::Approved(Some(genesis)) => json!({ "approved": true, "genesis": genesis }),
+                Waited::Approved(None) => json!({ "approved": true }),
+                Waited::Waiting => json!({}),
+            };
+            assert_eq!(js, &rust, "{status} {body}");
+        }
+        assert_eq!(waited(200, &said[2].1), Waited::Approved(Some(genesis)), "an approval names the install it's in");
+        assert_eq!(out["most"], json!(MOST_NEEDED));
+        assert_eq!(out["behind"], json!(BEHIND));
+    }
+
     let _ = child.kill();
     let _ = child.wait();
     let _ = std::fs::remove_dir_all(&dir);
@@ -338,12 +405,12 @@ async fn what_a_native_app_keeps_of_its_calls_is_its_persons_alone() {
     // Another person's device, in the same folder, opens nothing.
     assert!(Answers::new(&dir, &SigningKey::from_bytes(&sam)).kept("board", "topics", br#"{"format":"json","scope":"user"}"#).is_none());
     // Only a native app's device keeps them; once it starts again, before it's read the apps, it finds them, and once
-    // it signs out (`close`), they're gone.
+    // it signs out, they're gone.
     let cli = Device::new(andre, "https://one.invalid", dir.to_str().unwrap());
     assert!(cli.kept("board", "topics", br#"{"format":"json","scope":"user"}"#).is_none());
     let app = Device::new(andre, "https://one.invalid", dir.to_str().unwrap()).keeping();
     assert!(app.kept("board", "topics", br#"{"format":"json","scope":"user"}"#).is_some());
-    app.close().await;
+    app.sign_out().await;
     assert!(app.kept("board", "topics", br#"{"format":"json","scope":"user"}"#).is_none());
     assert!(!dir.join("answers").exists());
 }

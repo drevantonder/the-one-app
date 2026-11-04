@@ -8,6 +8,7 @@
 // keys it needs.
 import * as answers from "./answers.js";
 import { del, put } from "./kept.js";
+import { BEHIND, waited } from "../shared/crypto.js";
 import { answer, browserKeys, browserName, codeOf, Device, joinAsk, passkeyKeysOf } from "./device.js";
 import { members } from "./members.js";
 import { net } from "./net.js";
@@ -197,7 +198,7 @@ window.__one = {};
     // How long it waited to join the network, if it did, and what that took.
     if (trace && performance.now() - joining >= 1) trace.network = Math.round(performance.now() - joining);
     if (trace && (trace.network || trace.first)) trace.joined = await net.took();
-    for (let needed = 0, misses = 0; ; ) {
+    for (let needed = 0, misses = 0, behind = 0; ; ) {
       const headers = { "x-one-user": user };
       if (trace) headers["x-one-trace"] = "1";
       if (body !== undefined) headers["content-type"] = "application/json";
@@ -228,6 +229,16 @@ window.__one = {};
       }
       // The keys it opened to hand with it, if it asked for any (after a reload, say).
       if (opened.length) trace.fetches.at(-1).handed = handedIn(opened);
+      // A node that doesn't list this browser may not have read its approval yet: the relay says if it's out, else it's
+      // asked again in a moment (`BEHIND`), as every client does.
+      if (r.status === 403 && (await r.clone().json().catch(() => null))?.code === "not_let_in") {
+        if (await takenOut()) throw gone();
+        if (behind < BEHIND.length) {
+          await sleep(BEHIND[behind++]);
+          continue;
+        }
+        throw Object.assign(new NodeError("Your devices haven't caught up with this one yet. Try again in a moment."), { status: 403 });
+      }
       // A node may find what it needs as it goes: the serverless node, its logs' keys first, then a call's.
       if (r.status === 428 && device && needed < 3) {
         needed++;
@@ -320,11 +331,13 @@ window.__one = {};
     return true;
   }
 
-  /// This browser's key goes: a removed key can't be let in again, so signing in makes a new one.
+  /// This browser's key goes: a removed key can't be let in again, so signing in makes a new one. With it, what it kept
+  /// as that device: the nodes it asks, and the install it was let into and its entries, which the next approval names
+  /// again. As a native app's device forgets (one-client's `Device::sign_out`).
   async function forgetDevice() {
     events?.abort();
     const user = auth.user();
-    if (user) await Promise.all([del(`device:${user}`), del(`nodes:${user}`)]).catch(() => {});
+    if (user) await Promise.all([`device:${user}`, `nodes:${user}`, `genesis:${user}`, `global:${user}`].map(del)).catch(() => {});
   }
 
   /// Signs out as a device: out of its person's devices first (`Device.leave`), so signing in again replaces it, then its
@@ -1292,18 +1305,16 @@ window.__one = {};
     await ask();
     await showJoin(await codeOf(keys.key, keys.seal), !!invite);
     // Auth says once it was approved; then the relay lets it in. One gone from auth (approved and cleared, refused, or
-    // waited 15 minutes) is asked again, unless it's in.
+    // waited 15 minutes) is asked again, unless it's in. As every client does (`waited`).
     for (;;) {
       await sleep(2000);
       const r = await bearer(`/api/auth/devices/requests/${keys.key}`).catch(() => null);
-      if (r?.status === 401) throw Object.assign(new NodeError("Signed out."), { signedOut: true });
-      const gone = r?.status === 404;
-      const said = r?.ok ? await r.json().catch(() => ({})) : {};
+      const said = waited(r?.status || 0, r?.ok ? await r.json().catch(() => ({})) : {});
+      if (said.signedOut) throw Object.assign(new NodeError("Signed out."), { signedOut: true });
       // The install it was let into, as the device that approved it said: the only one it then takes.
-      if (said.approved && /^[0-9a-f]{64}$/.test(said.genesis || "")) await put(`genesis:${user}`, said.genesis);
-      const approved = gone || said.approved;
-      if (approved && (await net.start(user, true).catch(() => false))) break;
-      if (gone) await ask().catch(() => {});
+      if (said.genesis) await put(`genesis:${user}`, said.genesis);
+      if ((said.gone || said.approved) && (await net.start(user, true).catch(() => false))) break;
+      if (said.gone) await ask().catch(() => {});
     }
     sessionStorage.removeItem("one.invite");
     root.innerHTML = "";
@@ -1345,7 +1356,7 @@ window.__one = {};
       `<p class="join-text">${invited ? "Whoever invited you approves it. Show them this code." : "Your other devices ask you to approve it. It shows this code there too."}</p>` +
       `<div class="join-code" aria-label="Code">${esc(code)}</div><div class="join-qr">${qrSvg(link)}</div>` +
       `<p class="join-note">${invited ? "Or they scan this with their phone." : "Or scan this with your phone, to approve it in its browser."}</p><button class="button" data-out>Sign Out</button></div>`;
-    $("[data-out]", root).onclick = () => auth.signOut();
+    $("[data-out]", root).onclick = () => signOut();
   }
 
   async function start() {

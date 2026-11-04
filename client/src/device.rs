@@ -19,7 +19,7 @@ use std::time::Duration;
 
 use ed25519_dalek::SigningKey;
 use one::entry::{Entry, Ext, Hash, Scope, hex};
-use one::keys::{self, Endpoint, Handed, Handoff, Need};
+use one::keys::{self, Endpoint, Handed, Handoff, Need, Waited};
 use one::members::{self, Members};
 use data_encoding::BASE64URL_NOPAD as B64U;
 use serde_json::{Value, json};
@@ -30,12 +30,8 @@ use crate::{Body, Client, Error, Request, Response, Sent, TRACE_HEADER, not_let_
 
 /// How long a node keeps the keys a request handed it.
 const HANDED_FOR: u64 = 3_600_000;
-/// The most keys one kind of request is handed: a 428 naming more is refused.
-const MOST_NEEDED: usize = 16;
 /// How often, at most, it reads `global`'s entries again for a node it didn't know.
 const REREAD: u64 = 30_000;
-/// How long it waits to ask again a node that doesn't list it yet, each time.
-const BEHIND: [Duration; 2] = [Duration::from_secs(2), Duration::from_secs(4)];
 /// How many requests' traces it keeps, in developer mode, for screens to show.
 const TRACES_KEPT: usize = 100;
 
@@ -69,6 +65,20 @@ struct Known {
     at: u64,
 }
 
+/// Where a device is with its install, from its sign-in to its sign-out, as a browser goes the same way (kernel/web/web.js:
+/// `join`, `start`, `takenOut` and `signOut`). Whether this key was ever let in here is kept on disk (`joined`), as it
+/// outlives the program: `removed` asks it.
+enum Stage {
+    /// Not reaching its nodes: not let in yet, having asked auth with `asked` if it has since it started (`ask`, then
+    /// `wait`); or let in, and its connections closed until it's asked again (`disconnect`: its app in the background,
+    /// or a program ending).
+    Off { asked: Option<Value> },
+    /// Reaching its nodes as one of its person's devices.
+    In(Client),
+    /// Taken out, as the relay said, or signed out: nothing more is asked as it, and its app forgets its key.
+    Out,
+}
+
 /// A device's way in: its keys, the install it's in, and what it has opened.
 pub struct Device {
     key: SigningKey,
@@ -76,12 +86,12 @@ pub struct Device {
     address: String,
     /// Where it keeps the install's genesis, once it first read it, and what each kind of request needed.
     dir: PathBuf,
-    client: tokio::sync::Mutex<Option<Client>>,
+    /// Held while it connects, so it connects once.
+    stage: tokio::sync::Mutex<Stage>,
+    /// Who's who, as it last read it itself.
     known: Mutex<Option<Known>>,
     /// The order things run in, as the node last said (`/v1/state`): only ever used to sort nodes it knows.
     order: Mutex<Vec<[u8; 32]>>,
-    /// What it asked auth to let it in with, to ask again once that waited too long.
-    asked: Mutex<Option<Value>>,
     /// The device it's on, as its app says (`on`): signing in there again replaces this sign-in.
     on: Mutex<Option<String>>,
     /// Each scope's epochs opened, by (scope, n), and apps' keys by (scope, app, n).
@@ -109,10 +119,9 @@ impl Device {
             key,
             address: address.trim_end_matches('/').to_string(),
             dir: dir.into(),
-            client: tokio::sync::Mutex::default(),
+            stage: tokio::sync::Mutex::new(Stage::Off { asked: None }),
             known: Mutex::default(),
             order: Mutex::default(),
-            asked: Mutex::default(),
             on: Mutex::default(),
             epochs: Mutex::default(),
             app_keys: Mutex::default(),
@@ -197,7 +206,9 @@ impl Device {
         if let Some(invite) = invite.filter(|i| !i.is_empty()) {
             asked["proof"] = json!(keys::invite_proof(invite.as_bytes(), &self.me));
         }
-        *self.asked.lock().unwrap() = Some(asked.clone());
+        if let Stage::Off { asked: kept } = &mut *self.stage.lock().await {
+            *kept = Some(asked.clone());
+        }
         let (status, out) = http("POST", &format!("{}/api/auth/devices/requests", self.address), Some(token), Some(asked)).await?;
         if status != 200 {
             return Err(failed(error(&out).unwrap_or_else(|| format!("Couldn't ask to be let in ({status})."))));
@@ -205,48 +216,55 @@ impl Device {
         Ok(())
     }
 
-    /// Whether it's been let in: it reaches a node as itself. While it waits, a request that waited too long or was
-    /// turned down is asked again. Once approved, the install the device that approved it said it's in (its genesis) is
-    /// the only one it takes, kept before it reads any: none it's shown first can be another.
+    /// Whether it's been let in: it reaches a node as itself. While it waits, what auth says of its request
+    /// (`keys::waited`) is acted on as every client does: once approved, the install the device that approved it said it's
+    /// in (its genesis) is the only one it takes, kept before it reads any, so none it's shown first can be another; one
+    /// gone from auth is asked again unless it's in; a sign-in that's no more fails, to sign in again.
     pub async fn wait(&self, token: &str) -> Result<bool, Error> {
-        let pinned = self.dir.join("genesis");
-        let asked_at = format!("{}/api/auth/devices/requests/{}", self.address, self.key());
-        let mut said = None;
-        if !pinned.exists() {
-            let (status, out) = http("GET", &asked_at, Some(token), None).await?;
-            if status == 200 && out["approved"] != true {
-                return Ok(false);
+        let at = format!("{}/api/auth/devices/requests/{}", self.address, self.key());
+        let (status, said) = http("GET", &at, Some(token), None).await.unwrap_or((0, Value::Null));
+        let gone = match keys::waited(status, &said) {
+            Waited::SignedOut => return Err(failed("Sign in again.")),
+            Waited::Waiting => return Ok(false),
+            Waited::Approved(genesis) => {
+                if let Some(genesis) = genesis {
+                    let _ = std::fs::create_dir_all(&self.dir);
+                    std::fs::write(self.dir.join("genesis"), genesis).map_err(failed)?;
+                }
+                false
             }
-            if let Some(genesis) = out["genesis"].as_str().and_then(|g| Hash::from_hex(g).ok()) {
-                let _ = std::fs::create_dir_all(&self.dir);
-                std::fs::write(&pinned, genesis.to_hex()).map_err(failed)?;
-            }
-            said = Some(status);
-        }
+            Waited::Gone => true,
+        };
         if self.connect().await? {
             return Ok(true);
         }
-        let status = match said {
-            Some(status) => status,
-            None => http("GET", &asked_at, Some(token), None).await?.0,
+        let asked = match &*self.stage.lock().await {
+            Stage::Off { asked } => asked.clone(),
+            _ => None,
         };
-        let asked = self.asked.lock().unwrap().clone();
-        if status == 404
-            && let Some(asked) = asked
-        {
-            let (status, out) = http("POST", &format!("{}/api/auth/devices/requests", self.address), Some(token), Some(asked)).await?;
-            if status == 401 {
-                return Err(failed(error(&out).unwrap_or_else(|| "Sign in again.".into())));
-            }
+        if gone && let Some(asked) = asked {
+            let _ = http("POST", &format!("{}/api/auth/devices/requests", self.address), Some(token), Some(asked)).await;
         }
         Ok(false)
     }
 
-    /// Reaches its install's nodes, if it's been let in: false if not yet. Once in, it's in for good.
+    /// Reaches its install's nodes, if it's been let in: false if not yet. Then, each time, as each start of a browser
+    /// does, it settles its person's own things (`settle_own`), if they aren't: what fails is tried again at the next.
     pub async fn connect(&self) -> Result<bool, Error> {
-        let mut held = self.client.lock().await;
-        if held.is_some() {
-            return Ok(true);
+        if !self.reach().await? {
+            return Ok(false);
+        }
+        let _ = self.settle_own().await;
+        Ok(true)
+    }
+
+    /// Reaches its install's nodes, if it's let in: false if it isn't (yet, or any more).
+    async fn reach(&self) -> Result<bool, Error> {
+        let mut stage = self.stage.lock().await;
+        match &*stage {
+            Stage::In(_) => return Ok(true),
+            Stage::Out => return Ok(false),
+            Stage::Off { .. } => {}
         }
         // The relay says who's on its network: until it lets this device in, nothing else will.
         let Some((relayed, online)) = self.computes().await? else { return Ok(false) };
@@ -265,16 +283,22 @@ impl Device {
         if let Some(online) = online {
             client.set_online(&online)?;
         }
-        *held = Some(client);
-        drop(held);
+        *stage = Stage::In(client);
         // Kept, with its key, so this key is known as one that was in, to its person's sign-in once the relay takes it
         // out, not to approve; a new key in the same folder (signed in again) is one to approve.
         if !self.was_in() {
             let _ = std::fs::create_dir_all(&self.dir);
             let _ = std::fs::write(self.dir.join("joined"), self.key());
         }
-        self.settle_own().await?;
         Ok(true)
+    }
+
+    /// Its client, while it's in.
+    async fn client(&self) -> Option<Client> {
+        match &*self.stage.lock().await {
+            Stage::In(client) => Some(client.clone()),
+            _ => None,
+        }
     }
 
     /// Whether the relay lets this device in: → the compute endpoints on its network, which it says are there, not
@@ -306,7 +330,7 @@ impl Device {
         match self.computes().await {
             Ok(None) => false,
             Ok(Some((_, Some(online)))) => {
-                if let Some(client) = self.client.lock().await.clone() {
+                if let Some(client) = self.client().await {
                     let _ = client.set_online(&online);
                 }
                 true
@@ -391,28 +415,36 @@ impl Device {
     }
 
     /// As a person's first device does: says where their own things run (the machines that run everyone's), if they
-    /// haven't, and makes their own scope's first epoch, if it has none.
+    /// haven't, and makes their own scope's first epoch, if it has none (kernel/web/device.js `settleOwn`). What's to do
+    /// is looked at again in what it reads fresh, as another device of theirs may have done it.
     async fn settle_own(&self) -> Result<(), Error> {
         let device = self.on.lock().unwrap().clone();
-        let (user, runs, epoch, on, unnamed) = {
+        let todo = || -> Result<_, Error> {
             let known = self.known.lock().unwrap();
-            let m = &known.as_ref().expect("read").members;
+            let m = &known.as_ref().ok_or_else(refused)?.members;
             let me = m.machine(&self.me.key);
             let user = me.map(|d| d.user.clone()).unwrap_or_default();
             let on: Vec<[u8; 32]> = m.computes().filter(|c| c.user != user && m.runs_for(&c.key, &Scope::Global)).map(|c| c.key).collect();
+            let on = if m.runs.contains_key(&user) { Vec::new() } else { on };
             // Listed before sign-ins named their device: it lists itself again, naming it.
-            let unnamed = me.filter(|d| d.device.is_none() && d.passkey.is_none()).map(|d| (d.name.clone(), d.roles.iter().copied().collect::<Vec<_>>()));
-            (user.clone(), m.runs.contains_key(&user), m.epoch(&Scope::User(user)), on, unnamed)
+            let unnamed = me.filter(|d| d.device.is_none() && d.passkey.is_none() && device.is_some()).map(|d| (d.name.clone(), d.roles.iter().copied().collect::<Vec<_>>()));
+            let first = m.epoch(&Scope::User(user.clone())) == 0;
+            Ok((!on.is_empty() || unnamed.is_some() || first).then_some((user, on, unnamed, first)))
         };
+        if todo()?.is_none() {
+            return Ok(());
+        }
+        self.read_members().await?;
+        let Some((user, on, unnamed, first)) = todo()? else { return Ok(()) };
         if let (Some(device), Some((name, roles))) = (device, unnamed) {
             let mut listed = members::device(&self.me, &user, &name, &roles, None);
             listed.data["device"] = json!(device);
             self.write("global", &user, listed).await?;
         }
-        if !runs && !on.is_empty() {
+        if !on.is_empty() {
             self.write("global", &user, members::runs(&on)).await?;
         }
-        if epoch == 0 {
+        if first {
             self.first_epoch(&format!("user:{user}"), &user).await?;
         }
         Ok(())
@@ -420,42 +452,66 @@ impl Device {
 
     /// Starts again with a fresh connection, once the network's back.
     pub async fn reconnect(&self) {
-        if let Some(client) = self.client.lock().await.as_ref() {
+        if let Some(client) = self.client().await {
             client.reconnect().await;
         }
     }
 
-    /// Closes its connections, until it's asked again: when its person signs out, which also forgets it was in.
-    pub async fn close(&self) {
-        let _ = std::fs::remove_file(self.dir.join("joined"));
-        self.forget_answers();
-        self.disconnect().await;
-    }
-
-    /// Closes its connections, until it's asked again, still knowing it was in: when a program using it ends, so a
-    /// node isn't left holding a connection it counts against this device.
+    /// Closes its connections, until it's asked again, still knowing it was in: when its app goes to the background or
+    /// a program using it ends, so a node isn't left holding a connection it counts against this device.
     pub async fn disconnect(&self) {
-        if let Some(client) = self.client.lock().await.take() {
+        let mut stage = self.stage.lock().await;
+        if matches!(*stage, Stage::In(_))
+            && let Stage::In(client) = std::mem::replace(&mut *stage, Stage::Off { asked: None })
+        {
             client.close().await;
         }
     }
 
+    /// Out: as the relay said, or signed out. Its connections close, and what it kept as this device goes with them,
+    /// as a browser's does (web.js `forgetDevice` and `signOut`): what each kind of request needed, its calls' answers
+    /// and the install it was let into, which the next approval names again. Whether this key was in stays, for
+    /// `removed` to say.
+    async fn out(&self) {
+        if let Stage::In(client) = std::mem::replace(&mut *self.stage.lock().await, Stage::Out) {
+            client.close().await;
+        }
+        *self.known.lock().unwrap() = None;
+        self.needs.lock().unwrap().clear();
+        for kept in ["needs.json", "genesis"] {
+            let _ = std::fs::remove_file(self.dir.join(kept));
+        }
+        self.forget_answers();
+    }
+
     /// Signs out: this device takes itself out of its person's devices first, by asking their node to (as Settings ›
-    /// Devices does for another), so signing in again makes a new one that replaces it, never a second; then it closes.
-    /// A node that doesn't answer in a few seconds is left: approving the new device replaces it. The app forgets this
-    /// device's key either way, as a removed key can't be let in again.
+    /// Devices does for another), reaching it first if its connections were closed, so signing in again makes a new one
+    /// that replaces it, never a second; then it's out, and forgets it was in. A node that doesn't answer in a few
+    /// seconds is left: approving the new device replaces it. The app forgets this device's key either way, as a
+    /// removed key can't be let in again.
     pub async fn sign_out(&self) {
         if self.was_in() {
-            let _ = n0_future::time::timeout(Duration::from_secs(15), self.json("POST", "/v1/remove", Some(json!({ "key": self.key() })))).await;
+            let leave = async {
+                if self.reach().await? {
+                    self.json("POST", "/v1/remove", Some(json!({ "key": self.key() }))).await?;
+                }
+                Ok::<_, Error>(())
+            };
+            let _ = n0_future::time::timeout(Duration::from_secs(15), leave).await;
         }
-        self.close().await;
+        let _ = std::fs::remove_file(self.dir.join("joined"));
+        self.out().await;
     }
 
     /// Whether the install took this device out: this key was in, and the relay, which alone says who's on the
     /// install's network, lets it in no more. Never a node's word, which may only not have read its approval yet, nor a
-    /// relay that didn't answer: a key taken for out is forgotten, and can't be let in again.
+    /// relay that didn't answer: a key taken for out is forgotten, and can't be let in again. Once out, it's `out`.
     pub async fn removed(&self) -> bool {
-        self.was_in() && matches!(self.computes().await, Ok(None))
+        let removed = self.was_in() && matches!(self.computes().await, Ok(None));
+        if removed {
+            self.out().await;
+        }
+        removed
     }
 
     /// Whether this key was let in on this device once.
@@ -472,9 +528,9 @@ impl Device {
         let body = body.into();
         // In developer mode, what it did, from the start.
         let traced = self.developer().then(|| (now(), std::time::Instant::now(), what(path, body.bytes())));
-        // Asked before it joined, or after it was taken out: it's in only if the relay lets it, else its own screen says so.
-        let joined = self.client.lock().await.is_some();
-        if !joined && !self.connect().await? {
+        // Asked before it joined, or after its connections closed: it's in only if the relay lets it, else its own screen
+        // says so.
+        if self.client().await.is_none() && !self.reach().await? {
             return Err(refused());
         }
         let network = traced.as_ref().map(|t| t.1.elapsed().as_millis() as u64).filter(|ms| *ms > 0);
@@ -500,11 +556,7 @@ impl Device {
         // asked, whatever a node said. Out, this device starts over at joining, where nothing but its approval or sign-in
         // is shown.
         if !self.let_in().await {
-            if let Some(client) = self.client.lock().await.take() {
-                client.close().await;
-            }
-            *self.known.lock().unwrap() = None;
-            self.forget_answers();
+            self.out().await;
             return Err(refused());
         }
         Err(err)
@@ -574,8 +626,8 @@ impl Device {
                     if !self.let_in().await {
                         return Err(refused());
                     }
-                    if behind < BEHIND.len() {
-                        n0_future::time::sleep(BEHIND[behind]).await;
+                    if behind < keys::BEHIND.len() {
+                        n0_future::time::sleep(Duration::from_millis(keys::BEHIND[behind])).await;
                         behind += 1;
                         continue;
                     }
@@ -609,7 +661,7 @@ impl Device {
     /// `handed` of the scopes its entries say runs on the node the client sends it to, for that node alone, sealed to
     /// the seal key they list for it: never to a node it only raced a connection to, nor one it doesn't list.
     async fn send(&self, mut request: Request, handed: &[Handed]) -> Result<Response, Error> {
-        let client = self.client.lock().await.clone().ok_or_else(refused)?;
+        let client = self.client().await.ok_or_else(refused)?;
         let user = self.known.lock().unwrap().as_ref().map(|k| k.user.clone()).unwrap_or_default();
         request.headers.push(("x-one-user".into(), user));
         let me = self.key();
@@ -673,7 +725,7 @@ impl Device {
             .flatten()
             .filter_map(|d| Some((keys::unhex(d["key"].as_str()?).ok()?, d["priority"].as_u64().map(|n| n as u32).or_else(|| (d["priority"] == "last").then_some(u32::MAX))?)))
             .collect();
-        if let Some(client) = self.client.lock().await.as_ref() {
+        if let Some(client) = self.client().await {
             let _ = client.set_ranks(&ranks);
             let _ = client.set_nodes(&self.ordered(&nodes));
         }
@@ -718,17 +770,9 @@ impl Device {
         if self.needs.lock().unwrap().get(route) != sent_with.as_ref() {
             return Ok(());
         }
-        let listed = self.known.lock().unwrap().as_ref().and_then(|k| k.nodes.get(node).copied());
-        let to = keys::unhex(answer["to"].as_str().unwrap_or("")).ok();
-        let seal = keys::unhex(answer["seal"].as_str().unwrap_or("")).ok();
-        if listed.is_none() || to != Some(*node) || seal != listed {
+        let mut need = keys::asked_for(route, &hex(node), answer).ok_or_else(|| failed("A device asked for keys that request doesn't use. Nothing was handed."))?;
+        if self.known.lock().unwrap().as_ref().is_none_or(|k| !k.nodes.contains_key(node)) {
             return Err(failed("A device that isn't one of yours asked for keys. Nothing was handed."));
-        }
-        let mut need: Vec<Need> = serde_json::from_value(answer["need"].clone()).unwrap_or_default();
-        need.sort();
-        need.dedup();
-        if need.is_empty() || need.len() > MOST_NEEDED || !need.iter().all(|n| keys::may_hand(route, n)) {
-            return Err(failed("A device asked for keys that request doesn't use. Nothing was handed."));
         }
         let scopes: Vec<Scope> = need.iter().map(|n| Scope::parse(&n.scope)).collect::<Result<_, _>>().map_err(|_| failed("A device asked for keys of something that isn't. Nothing was handed."))?;
         let runs = |device: &Device| device.known.lock().unwrap().as_ref().is_some_and(|k| scopes.iter().all(|s| k.members.runs_for(node, s)));
@@ -866,26 +910,34 @@ impl Device {
         Err(failed("This device can't open that yet."))
     }
 
-    /// Starts this person's own scope's first epoch, as a newcomer's first device does: a random key, sealed to the
-    /// recovery key (which takes it), to this device and their other devices, then an `epoch` entry naming its hash.
+    /// Starts this person's own scope's first epoch, as a newcomer's first device does, in the order every device does
+    /// (kernel/web/device.js `newEpoch`, src/node/devices.rs `new_epoch`): a random key, its `epoch` entry naming its
+    /// hash written first (which, first in causal order, makes it), then, once the entries say it did, sealed to the
+    /// recovery key, to this device and to their other devices.
     async fn first_epoch(&self, scope: &str, user: &str) -> Result<(), Error> {
-        let (recovery, to) = {
-            let known = self.known.lock().unwrap();
-            let m = &known.as_ref().expect("read").members;
-            let recovery = m.recovery.ok_or_else(|| failed("Your One App has no recovery key to keep its keys with."))?;
-            let mut to = vec![self.me];
-            to.extend(m.clients().filter(|c| c.user == user && c.key != self.me.key && c.seal != c.key).map(|c| Endpoint { key: c.key, seal: c.seal }));
-            (recovery, to)
+        let parsed = Scope::parse(scope).map_err(failed)?;
+        let to = |device: &Device| -> Result<(Option<[u8; 32]>, Vec<Endpoint>), Error> {
+            let known = device.known.lock().unwrap();
+            let m = &known.as_ref().ok_or_else(refused)?.members;
+            let mut to = vec![device.me];
+            to.extend(m.clients().filter(|c| c.user == user && c.key != device.me.key && c.seal != c.key).map(|c| Endpoint { key: c.key, seal: c.seal }));
+            Ok((m.recovery, to))
         };
+        let (recovery, to) = to(self)?;
+        let recovery = recovery.ok_or_else(|| failed("Your One App has no recovery key to keep its keys with."))?;
         let key: [u8; 32] = rand::random();
+        let hash = keys::epoch_hash(&key);
+        self.write("global", user, members::epoch(&parsed, 1, &to.iter().map(|e| e.key).collect::<Vec<_>>(), &hash)).await?;
+        self.read_members().await?;
+        if self.known.lock().unwrap().as_ref().and_then(|k| k.members.epoch_hashes.get(&(parsed.clone(), 1)).cloned()) != Some(hash) {
+            return Err(failed("Another device made new keys for this just now. Try again."));
+        }
         let recovery = one::kernel::twin_public(&recovery).map_err(failed)?;
         let sealed = |to: &[u8; 32]| one::kernel::seal_to(to, &key).map(|s| B64U.encode(&s)).map_err(failed);
         self.json("POST", "/v1/keys", Some(json!({ "scope": scope, "n": 1, "to": "recovery", "sealed": sealed(&recovery)? }))).await?;
         for e in &to {
             self.json("POST", "/v1/keys", Some(json!({ "scope": scope, "n": 1, "to": hex(&e.key), "sealed": sealed(&e.seal)? }))).await?;
         }
-        let parsed = Scope::parse(scope).map_err(failed)?;
-        self.write("global", user, members::epoch(&parsed, 1, &to.iter().map(|e| e.key).collect::<Vec<_>>(), &keys::epoch_hash(&key))).await?;
         self.epochs.lock().unwrap().insert((scope.to_string(), 1), key);
         Ok(())
     }

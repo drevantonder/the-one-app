@@ -1,5 +1,5 @@
 // The kernel's formats, for tests/contracts.rs to check against the Rust that reads them: POST { op, ... } → result.
-import { appOf, b64u, canonical, certify, checkCertificate, epochHash, checkEntry, checkRequest, databaseKey, ed25519Public, epochOf, hex, idOf, inviteProof, joinCode, keyPair, mayHand, oldestNeeded, open, openAppKey, openHandoff, openSealed, openUnder, passkeyKeys, seal, sealAppKey, sealHandoff, sealTo, sealUnder, signEntry, signedRequest, tokenId, twinPublic, x25519Public } from "../shared/crypto.js";
+import { appOf, askedFor, b64u, BEHIND, canonical, certify, checkCertificate, epochHash, checkEntry, checkRequest, databaseKey, ed25519Public, epochOf, hex, idOf, inviteProof, joinCode, keyPair, mayHand, MOST_NEEDED, oldestNeeded, open, openAppKey, openHandoff, openSealed, openUnder, passkeyKeys, seal, sealAppKey, sealHandoff, sealTo, sealUnder, signEntry, signedRequest, tokenId, twinPublic, waited, x25519Public } from "../shared/crypto.js";
 import { members } from "../web/members.js";
 
 const ops = {
@@ -72,6 +72,11 @@ const ops = {
   /// oldest epoch each needs.
   async handed({ hands, hints }) {
     return { hands: hands.map(([route, need]) => mayHand(route, need)), oldest: hints.map(([hint, newest]) => oldestNeeded(hint, newest)), apps: hands.map(([route]) => appOf(route)) };
+  },
+  /// What a client does with a node's 428 and auth's word while it waits to be let in: `[[route, node, answer]]` → what
+  /// each asks it to hand, or null; `[[status, said]]` → what each says.
+  async joining({ asked, said }) {
+    return { asked: asked.map(([route, node, answer]) => askedFor(route, node, answer)), said: said.map(([status, body]) => waited(status, body)), most: MOST_NEEDED, behind: BEHIND };
   },
   async openUnder({ secret, sealed }) {
     return { plain: b64u.encode(await openUnder(secret, b64u.decode(sealed))) };

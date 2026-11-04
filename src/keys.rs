@@ -352,6 +352,56 @@ pub fn oldest_needed(hint: Option<&[u8]>, newest: u32) -> u32 {
     }
 }
 
+/// The most keys a node's 428 may ask one request to hand, once each: a request that reads every app on a page
+/// (`/v1/badges`, `/v1/widgets`, `/mcp`) needs each one's, in each epoch from the oldest it needs. More is a node asking
+/// for everything.
+pub const MOST_NEEDED: usize = 64;
+
+/// What a node's 428 (`answer`) asks a request of `route` to hand: taken only from the node that answered (`node`, hex,
+/// as its connection proved), naming itself; one or more keys, MOST_NEEDED at most, each of a database that kind of
+/// request uses (`may_hand`). None if it asks for anything else. The seal key it names isn't read: what's handed is
+/// sealed to the one the install's entries list for that node. `kernel/shared/crypto.js`'s `askedFor` is the same.
+pub fn asked_for(route: &str, node: &str, answer: &Value) -> Option<Vec<Need>> {
+    if answer["to"].as_str() != Some(node) {
+        return None;
+    }
+    let mut need: Vec<Need> = serde_json::from_value(answer["need"].clone()).ok()?;
+    need.sort();
+    need.dedup();
+    (!need.is_empty() && need.len() <= MOST_NEEDED && need.iter().all(|n| may_hand(route, n))).then_some(need)
+}
+
+/// How long a client waits, each time, to ask again a node that doesn't list it yet (403 `not_let_in`) while the relay
+/// still lets it in: a node may not have read its approval yet. After the last, it says so.
+pub const BEHIND: [u64; 2] = [2_000, 4_000];
+
+/// What auth said of a device's request to be let in (`GET /api/auth/devices/requests/<key>`: its status, 0 if it
+/// didn't answer, and its JSON), which every client acts on the same way (`kernel/shared/crypto.js`'s `waited`).
+#[derive(Debug, PartialEq)]
+pub enum Waited {
+    /// Its sign-in is no more: it signs in again.
+    SignedOut,
+    /// Approved, in the install whose first entry (hex) the device that approved it named, if it named one: the only
+    /// one it then takes. It's in once the relay lets it.
+    Approved(Option<String>),
+    /// Gone from auth (approved and cleared, turned down, or waited too long): it's in if the relay lets it, else it
+    /// asks again.
+    Gone,
+    /// Still waiting, or auth didn't answer.
+    Waiting,
+}
+
+pub fn waited(status: u16, said: &Value) -> Waited {
+    match status {
+        401 => Waited::SignedOut,
+        404 => Waited::Gone,
+        200..=299 if said["approved"] == true => {
+            Waited::Approved(said["genesis"].as_str().filter(|g| g.len() == 64 && g.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))).map(str::to_string))
+        }
+        _ => Waited::Waiting,
+    }
+}
+
 // Devices joining.
 
 /// The code a new device shows, which a device of its person types or scans to approve it: the first 8 base32

@@ -8,7 +8,7 @@
 // (/v1/state): which seal key a device has, who opens a scope, which hash an epoch's key must have, and which nodes may
 // be handed a scope's keys. A hacked node holds no keys, and gets none this way.
 
-import { b64u, databaseKey, ed25519Public, epochHash, hex, hkdfKey, inviteProof, joinCode, mayHand, oldestNeeded, openAppKey, openSealed, passkeyKeys, random, sealAppKey, sealHandoff, sealTo, sha256, signEntry, signedRequest, twinPublic, untilTaken, x25519Public } from "../shared/crypto.js";
+import { askedFor, b64u, databaseKey, ed25519Public, epochHash, hex, hkdfKey, inviteProof, joinCode, oldestNeeded, openAppKey, openSealed, passkeyKeys, random, sealAppKey, sealHandoff, sealTo, sha256, signEntry, signedRequest, twinPublic, untilTaken, x25519Public } from "../shared/crypto.js";
 import { get, put } from "./kept.js";
 import { members } from "./members.js";
 
@@ -321,9 +321,8 @@ export class Device {
     return sealHandoff(hex.decode(seal), { for: this.me.key, until, keys });
   }
 
-  /// A node's 428, believed only from `node`, the one that answered it as its connection proved: it must name itself
-  /// and the seal key the install's entries list for it, run every scope it needs keys of, as they say, and need only
-  /// databases this kind of request uses (`mayHand`). Of each, only epochs from the one its newest copy is under are
+  /// A node's 428, believed only from `node`, the one that answered it as its connection proved: it must ask only what
+  /// `askedFor` lets it, be listed by the install's entries, and run every scope it needs keys of, as they say. Of each, only epochs from the one its newest copy is under are
   /// handed (`oldestNeeded`): older ones open only its history. What it needed is all this kind of request hands next
   /// time, to whichever node it's sent to, of the scopes that one runs. Throws if it asks for more, or this browser can't
   /// open it. Requests of a kind that get the
@@ -342,15 +341,13 @@ export class Device {
   }
 
   async learnNow(route, answer, node, note) {
-    const need = Array.isArray(answer.need) ? answer.need : [];
-    if (!node || answer.to !== node) throw new Error("A device that didn’t answer asked for keys, so none were given.");
+    const need = askedFor(route, node, answer);
+    if (!need) throw new Error("A device asked for keys that request doesn’t use, so none were given.");
     const scopes = need.map((n) => n.scope);
     let k = await this.checked();
     if (!runsAll(k, node, scopes)) k = await note({ step: "members" }, () => this.checked(true));
     if (!runsAll(k, node, scopes)) throw new Error("A device that doesn’t run that asked for its keys, so none were given.");
-    const seal = k.devices.find((d) => d.key === node)?.seal;
-    if (!seal || (answer.seal && answer.seal !== seal)) throw new Error("A device asked for keys sealed to another, so none were given.");
-    if (need.length > 64 || !need.every((n) => mayHand(route, n))) throw new Error("A device asked for keys that request doesn’t use, so none were given.");
+    if (!k.devices.some((d) => d.key === node && d.seal)) throw new Error("A device that isn’t one of yours asked for keys, so none were given.");
     // The keys' own fetching goes at the same time: it only opens what's there, whichever epochs are handed.
     const [hints] = await Promise.all([note({ step: "newest", databases: new Set(need.map(prefixOf)).size }, () => this.hints(need)), this.fetchKeys(need, note)]);
     const handed = hints ? need.filter((n) => n.epoch >= oldestNeeded(hints[prefixOf(n)] ?? null, k.epochs[n.scope]?.n || 0)) : need;

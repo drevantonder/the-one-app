@@ -157,10 +157,7 @@ pub fn sign_out() -> bool {
         forget();
         return false;
     };
-    run(move || async move {
-        let _ = device.connect().await;
-        device.sign_out().await;
-    });
+    run(move || async move { device.sign_out().await });
     forget();
     true
 }
