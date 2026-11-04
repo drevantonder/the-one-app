@@ -50,7 +50,7 @@ async function profile(ctx, name) {
 /// A profile as the sidecar takes it: its key is a placeholder the node fills in, for the sidecar only.
 const given = (p) => ({ item: p.id, name: p.title, key: `{{${p.id}:_profile_key}}`, blob: p.fields._blob?.value || "", salt: p.fields._salt?.value || "" });
 
-const kindArg = { type: "string", enum: ["linux", "windows", "android", "iphone"], description: "linux (with a browser; the default), windows, android or iphone: kinds says which of your devices run each" };
+const kindArg = { type: "string", enum: ["linux", "chrome", "windows", "android", "iphone"], description: "linux (with a browser, in a container; the default), chrome (Chrome straight on one of your devices: quicker, where its owner allows it), windows, android or iphone: kinds says which of your devices run each" };
 const deviceArg = { type: "string", description: "an agent device's name, from computer_list, like pool-745f3e or windows" };
 const sizeArg = { type: "string", enum: ["small", "medium", "large"], description: "small (2 CPUs, 4 GB), medium (4 CPUs, 8 GB) or large (8 CPUs, 16 GB); default small" };
 
@@ -275,6 +275,41 @@ const DEVICE = `
   const timer = setInterval(look, 5000);
 </script>`;
 
+// Settings: on each of the person's machines running Agent Devices, whether agents may borrow Chrome run straight on it,
+// without a container. The sidecar keeps the switch on each machine, with its default (on where the machine runs only its
+// owner's calls).
+const CHROME_LOGO = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 48 48" width="28" height="28" aria-hidden="true"><defs><linearGradient id="a" x1="3.2173" y1="15" x2="44.7812" y2="15" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#d93025"/><stop offset="1" stop-color="#ea4335"/></linearGradient><linearGradient id="b" x1="20.7219" y1="47.6791" x2="41.5039" y2="11.6837" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#fcc934"/><stop offset="1" stop-color="#fbbc04"/></linearGradient><linearGradient id="c" x1="26.5981" y1="46.5015" x2="5.8161" y2="10.506" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#1e8e3e"/><stop offset="1" stop-color="#34a853"/></linearGradient></defs><circle cx="24" cy="23.9947" r="12" style="fill:#fff"/><path d="M3.2154,36A24,24,0,1,0,12,3.2154,24,24,0,0,0,3.2154,36ZM34.3923,18A12,12,0,1,1,18,13.6077,12,12,0,0,1,34.3923,18Z" style="fill:none"/><path d="M24,12H44.7812a23.9939,23.9939,0,0,0-41.5639.0029L13.6079,30l.0093-.0024A11.9852,11.9852,0,0,1,24,12Z" style="fill:url(#a)"/><circle cx="24" cy="24" r="9.5" style="fill:#1a73e8"/><path d="M34.3913,30.0029,24.0007,48A23.994,23.994,0,0,0,44.78,12.0031H23.9989l-.0025.0093A11.985,11.985,0,0,1,34.3913,30.0029Z" style="fill:url(#b)"/><path d="M13.6086,30.0031,3.218,12.006A23.994,23.994,0,0,0,24.0025,48L34.3931,30.0029l-.0067-.0068a11.9852,11.9852,0,0,1-20.7778.007Z" style="fill:url(#c)"/></svg>`;
+const SETTINGS = `
+<style>
+  .head { display: flex; align-items: center; gap: 10px; margin: 18px 4px 4px; }
+  .head b { font-size: 20px; }
+  .say { color: var(--muted); margin: 0 4px 14px; }
+</style>
+<div class="head">${CHROME_LOGO}<b>Google Chrome</b></div>
+<div class="say">Chrome runs without a container. This is fine if you trust the workload.</div>
+<div id="list"><div class="empty">Loading…</div></div>
+<script>
+  let error = "";
+  const draw = () => one.render("#list", async () => {
+    const { devices } = await one.call("_chrome", {});
+    if (!devices.length) return one.empty("None of your devices runs Agent Devices.");
+    const row = (d) => \`<label class="row plain"><div class="main"><div class="title"><span>\${one.esc(d.on)}</span></div>\${d.can ? \`<div class="sub">\${one.esc(d.can)}</div>\` : ""}</div><input type="checkbox" class="switch" data-on="\${one.esc(d.on)}"\${d.allowed ? " checked" : ""}\${d.can ? " disabled" : ""}></label>\`;
+    return \`<div class="list">\${devices.map(row).join("")}</div>\${error ? one.problem({ title: error }) : ""}\`;
+  });
+  document.addEventListener("change", async (e) => {
+    const on = e.target.dataset?.on;
+    if (!on) return;
+    error = "";
+    try {
+      await one.call("_set_chrome", { on, allowed: e.target.checked });
+    } catch (err) {
+      error = one.plain(err).title;
+    }
+    draw();
+  });
+  draw();
+</script>`;
+
 export default {
   name: "agent-devices",
   title: "Agent Devices",
@@ -283,7 +318,7 @@ export default {
   color: "#a2845e",
   advanced: true,
   description: "Devices your agents use: Linux with a browser, Windows, Android and iPhones",
-  instructions: "Agent Devices are devices, on the person's own devices, that agents borrow (agent-devices_borrow, then agent-devices_give_back) and use through Computer Use (computer_*): Linux with a browser (the default kind), and Windows, Android and iPhone (Simulator) where one of their devices can run them, as agent-devices_kinds says. Borrow a Linux one for browsing: it's yours alone and deleted when given back. Windows, Android and iPhone devices are the person's lasting ones (by name, like windows or android), borrowed by one agent at a time, who leaves it as they found it; for anything that changes or might break it, borrow a throwaway copy (copy: true), which is made when the lasting one is busy too if there's room. Every kind takes computer_screen, computer_view and computer_use (computer_tools lists what each kind takes), and agent-devices_open, _install and _run. Browser profiles (like Personal or Work) are Vault items of type Browser profile: a borrowed device's browser starts signed in to the sites its profile was signed in to. agent-devices_profiles lists them and the sites each was used on. When a site needs the person to sign in, agent-devices_sign_in with profile and url gives a link for them: they sign in there and it's saved when they're done (agent-devices_save_profile, or in the Vault). Never sign in for them. The rest (create, start, stop, resize, backup, restore, move, delete) is for lasting devices the person keeps.",
+  instructions: "Agent Devices are devices, on the person's own devices, that agents borrow (agent-devices_borrow, then agent-devices_give_back) and use through Computer Use (computer_*): Linux with a browser (the default kind), and Windows, Android and iPhone (Simulator) where one of their devices can run them, as agent-devices_kinds says. Borrow a Linux one for browsing: it's yours alone and deleted when given back. Where kinds lists chrome as available, kind chrome is quicker (under a second) and lighter: the device's own Chrome, without a container, whose borrow gives target_id and tab_id for the browser tools at once, with no browser_prepare or list_windows; its owner allows it in Agent Devices' Settings. A Mac's chrome starts without the browser profile. Windows, Android and iPhone devices are the person's lasting ones (by name, like windows or android), borrowed by one agent at a time, who leaves it as they found it; for anything that changes or might break it, borrow a throwaway copy (copy: true), which is made when the lasting one is busy too if there's room. Every kind takes computer_screen, computer_view and computer_use (computer_tools lists what each kind takes), and agent-devices_open, _install and _run. Browser profiles (like Personal or Work) are Vault items of type Browser profile: a borrowed device's browser starts signed in to the sites its profile was signed in to. agent-devices_profiles lists them and the sites each was used on. When a site needs the person to sign in, agent-devices_sign_in with profile and url gives a link for them: they sign in there and it's saved when they're done (agent-devices_save_profile, or in the Vault). Never sign in for them. The rest (create, start, stop, resize, backup, restore, move, delete) is for lasting devices the person keeps.",
   uses: { sidecars: ["agent-devices"] },
   // Browser profiles live in the Vault: the person adds one there (add_profile), signs in to sites in it (sign_in, then
   // save_profile), renames and deletes it there.
@@ -441,7 +476,7 @@ export default {
     },
     kinds: {
       reads: true,
-      description: "Which kinds of agent device each of your devices runs (linux, windows, android, iphone, as agent-devices_borrow's kind takes them): what input each kind takes, whether there's room for another, how many lasting ones nobody has borrowed, and the device's memory to spare (free_gb, in GB).",
+      description: "Which kinds of agent device each of your devices runs (linux, chrome, windows, android, iphone, as agent-devices_borrow's kind takes them; one it can't says why in unavailable): what input each kind takes, whether there's room for another, how many lasting ones nobody has borrowed, and the device's memory to spare (free_gb, in GB).",
       input: { type: "object", properties: {} },
       run: (ctx, input) => sidecar(ctx, "kinds", input),
     },
@@ -504,6 +539,21 @@ export default {
       input: { type: "object", additionalProperties: true },
       run: (ctx, input) => sidecar(ctx, "view", input),
     },
+    _chrome: {
+      reads: true,
+      description: "For Settings: each of your devices running Agent Devices, and whether agents may borrow Chrome run straight on it.",
+      input: { type: "object", properties: {} },
+      run: async (ctx) => {
+        const r = await sidecar(ctx, "chrome", {});
+        return { devices: (r.devices || []).map(({ on, allowed, can }) => ({ on, allowed, can })).sort((a, b) => a.on.localeCompare(b.on)) };
+      },
+    },
+    _set_chrome: {
+      reads: false,
+      description: "For Settings: lets agents borrow Chrome run straight on one of your devices, or stops them.",
+      input: { type: "object", required: ["on", "allowed"], properties: { on: { type: "string" }, allowed: { type: "boolean" } } },
+      run: (ctx, { on, allowed }) => sidecar(ctx, "set_chrome", { on, allowed }),
+    },
     _running: {
       reads: true,
       description: "Which of your devices it runs on, for the page to say when none does.",
@@ -520,6 +570,10 @@ export default {
     device: {
       title: "Device",
       html: DEVICE,
+    },
+    settings: {
+      title: "Agent Devices",
+      html: SETTINGS,
     },
   },
 };
