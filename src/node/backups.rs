@@ -117,7 +117,27 @@ fn problems(i: &Install, now: u64) -> Result<Vec<Problem>> {
             out.push(Problem { place: p.id.clone(), title: format!("Couldn't back up to {}", p.title), check: false, text: format!("Nothing has gone to {} for a day.", p.title), status: "Not backed up for a day", fix, since, push: Some(since + LATE) });
         }
     }
+    // A place an admin named whose details changed since, by someone who isn't one: nothing goes there until an admin
+    // saves them, which names them again (`repin_place`), so a member can't send backups somewhere else.
+    let pinned = pinned(m);
+    for (id, it) in i.vault.iter().filter(|(id, it)| it.apps.contains(members::APP) && it.kind == b::KIND && !it.fields.contains_key("device") && pinned.get(*id).is_some_and(|h| *h != item_hash(it))) {
+        out.push(Problem {
+            place: id.clone(),
+            title: format!("Not backing up to {}", it.title),
+            check: false,
+            text: format!("{}'s details were changed, so nothing goes there until an admin checks them.", it.title),
+            status: "Details changed",
+            fix: "An admin opens it in the Vault and saves it.".to_string(),
+            since: it.time,
+            push: Some(it.time),
+        });
+    }
     Ok(out)
+}
+
+/// The hash of an item's fields, as `PINNED` names a place's.
+fn item_hash(it: &crate::vault::Item) -> String {
+    place_hash(&it.fields.iter().map(|(n, f)| (n.clone(), f.value.clone())).collect())
 }
 
 /// A place to back up to, as its Vault item says: one in Everyone that the node is switched on for.
@@ -155,7 +175,7 @@ fn places(i: &Install) -> Vec<PlaceItem> {
     i.vault
         .iter()
         .filter(|(_, it)| it.apps.contains(members::APP) && it.kind == b::KIND)
-        .filter(|(id, it)| it.fields.contains_key("device") || pinned.get(*id).is_some_and(|h| *h == place_hash(&it.fields.iter().map(|(n, f)| (n.clone(), f.value.clone())).collect())))
+        .filter(|(id, it)| it.fields.contains_key("device") || pinned.get(*id).is_some_and(|h| *h == item_hash(it)))
         .map(|(id, it)| {
             let mut fields: BTreeMap<String, String> = it.fields.iter().map(|(n, f)| (n.clone(), f.value.clone())).collect();
             let device = fields.get("device").and_then(|s| unhex(s).ok());
@@ -598,6 +618,21 @@ impl Node {
             self.pin_place(caller, id, None).await?;
         }
         Ok(())
+    }
+
+    /// An item in Everyone just saved by `caller`: when they're an admin and it's an S3 place the install backs up to,
+    /// its details as they are now are the ones it names, so changing its key in the Vault keeps backups going.
+    pub(super) async fn repin_place(&self, caller: &Caller, id: &str) -> Result<()> {
+        let fields = self.with(|i| {
+            let m = &i.r.members;
+            let pinned = pinned(m);
+            let stale = pinned.get(id).zip(i.vault.get(id)).filter(|(h, it)| m.is_admin(&caller.user) && !it.fields.contains_key("device") && **h != item_hash(it));
+            Ok(stale.map(|(_, it)| it.fields.iter().map(|(n, f)| (n.clone(), f.value.clone())).collect::<BTreeMap<_, _>>()))
+        })?;
+        match fields {
+            Some(fields) => self.pin_place(caller, id, Some(&fields)).await,
+            None => Ok(()),
+        }
     }
 
     /// Names an S3 place the install backs up to in `PINNED` (or with `None`, stops naming it), for an admin.

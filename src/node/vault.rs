@@ -404,7 +404,13 @@ impl Node {
             ensure!(caller.agent.is_none() || had || !wants, "only the person lets agents use an item: ask them with vault_request, leaving out app, and they pick or make it");
             Ok(data.clone())
         })
-        .await
+        .await?;
+        if *scope == Scope::Global
+            && let Err(err) = self.repin_place(caller, &id).await
+        {
+            tracing::warn!("naming a place to back up to again, as its details changed: {err:#}");
+        }
+        Ok(id)
     }
 
     /// A call's change to the Vault, by `app` for its caller, over the scopes the call named: an item it makes
