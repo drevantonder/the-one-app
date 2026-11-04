@@ -2,11 +2,13 @@
 // The whatsapp service links the phone and keeps its messages, on each device whose owner installed it; this app is
 // what people and agents use, and a connector.
 
-/// Runs one of the whatsapp service's operations, wherever it runs for the caller. When none of their devices runs it,
-/// says what's needed instead of how the call failed; when a chat isn't found, where to find it.
-async function service(ctx, op, input) {
+/// Runs one of the whatsapp service's operations, wherever it runs for the caller, or on the device `input.device`
+/// names. When none of their devices runs it, says what's needed instead of how the call failed; when a chat isn't
+/// found, where to find it.
+async function service(ctx, op, input = {}) {
+  const { device, ...rest } = input;
   try {
-    return await ctx.services.whatsapp[op](input);
+    return await ctx.services.whatsapp[op](rest, device ? { device } : undefined);
   } catch (err) {
     const why = String(err.message);
     if (why.includes("no device runs whatsapp for you")) throw new Error(NEEDS);
@@ -20,6 +22,7 @@ const NEEDS = "WhatsApp isn't on any of your devices yet. It runs on one that st
 
 const ACCOUNT = { type: "string", description: "which WhatsApp account: its number, as whatsapp_accounts lists them; default the first linked here" };
 const CHAT = "the chat: its name as whatsapp_chats gives it, or a part of it only one chat has; or a phone number with its country code (+61 400 000 000), or a JID (61400000000@s.whatsapp.net)";
+const DEVICE = { type: "string", description: "which of your devices that run WhatsApp to link it on, by name, as apps_devices whatsapp says where it runs; default the nearest. One account may be linked on several" };
 const LIMIT = { type: "integer", description: "at most this many; default 30" };
 const LINES = "one a line, \"[3 Nov 2026 09:00] Sam: text\", times in the time zone of the device it's linked on, and You for the person";
 
@@ -37,16 +40,20 @@ const VAULT = {
   account: { title: TYPE, type: TYPE, domain: "whatsapp.com", accounts: true, fields: { phone: { label: "Number" }, device: { label: "Linked on" } } },
 };
 
-async function keep(ctx, listed, devices) {
+// An account linked on several devices is one item, linked on each of them.
+async function keep(ctx, accounts, devices) {
   if (!ctx.user) return;
   const items = (await ctx.vault.items()).filter((i) => i.type === TYPE && i.scope === ctx.user.id);
+  const on = new Map();
+  for (const a of accounts) on.set(a.account, [...(on.get(a.account) || []), a.device].sort());
+  const listed = [...on].map(([account, where]) => ({ account, device: where.join(", ") }));
   for (const a of listed) {
     const item = items.find((i) => i.fields.phone?.value === a.account);
     if (!item) await ctx.vault.create({ title: a.account, type: TYPE, domain: "whatsapp.com", hosts: [], same: "phone", fields: { phone: { value: a.account }, device: { value: a.device } } });
     else if (item.fields.device?.value !== a.device) ctx.vault.update(item.id, { fields: { device: { value: a.device } } });
   }
   for (const item of items) {
-    if (devices.includes(item.fields.device?.value) && !listed.some((a) => a.account === item.fields.phone?.value)) ctx.vault.release(item.id);
+    if (String(item.fields.device?.value || "").split(", ").every((d) => devices.includes(d)) && !listed.some((a) => a.account === item.fields.phone?.value)) ctx.vault.release(item.id);
   }
 }
 
@@ -86,7 +93,7 @@ export default {
     sign_in: {
       reads: false,
       description: "For the person: link a WhatsApp account to this device, as WhatsApp Desktop is linked. Gives a QR code to scan on their phone (WhatsApp > Settings > Linked devices > Link a device) and, given phone, a code to type there instead (Link with phone number instead), for when the QR code shows on the phone itself. Chats arrive over the next few minutes.",
-      input: { type: "object", properties: { phone: { type: "string", description: "the account's number with its country code, like +61 400 000 000, for a code to type on the phone" } } },
+      input: { type: "object", properties: { phone: { type: "string", description: "the account's number with its country code, like +61 400 000 000, for a code to type on the phone" }, device: DEVICE } },
       run: (ctx, input) => service(ctx, "sign_in", input),
     },
     chats: {
@@ -159,7 +166,7 @@ export default {
       reads: false,
       confirm: true,
       description: "Unlink a WhatsApp account: removes this device from the phone's linked devices and deletes the messages kept here. It can't be undone: linking again needs the phone, and the deleted messages don't come back. Only when the person asks to sign out.",
-      input: { type: "object", properties: { account: { type: "string", description: "the account's number, as whatsapp_accounts lists them; needed when several are linked here" } } },
+      input: { type: "object", properties: { account: { type: "string", description: "the account's number, as whatsapp_accounts lists them; needed when several are linked here" }, device: { type: "string", description: "the device it's linked on, as whatsapp_accounts lists it: for an account linked on several" } } },
       async run(ctx, input) {
         const out = await service(ctx, "sign_out", input);
         const devices = await running(ctx);
@@ -170,7 +177,7 @@ export default {
     _pairing: {
       reads: true,
       description: "The QR code and phone code while a phone is linking, for the settings screen.",
-      input: { type: "object", properties: {} },
+      input: { type: "object", properties: { device: DEVICE } },
       run: (ctx, input) => service(ctx, "_pairing", input),
     },
     _running: {
@@ -191,12 +198,12 @@ export default {
 </style>
 <div id="list"></div>
 <div id="ask"></div>
-<div id="connect" hidden><div class="list"><label class="row plain"><input class="field" id="phone" type="tel" placeholder="Its number, for a code to type instead (optional)" aria-label="Its number"></label></div><div class="actions"><button class="button primary" id="start">Add Account</button></div><div id="err"></div></div>
+<div id="connect" hidden><div class="list"><label class="row plain" id="on-row" hidden><div class="main">Link on</div><select id="on" aria-label="Link on"></select></label><label class="row plain"><input class="field" id="phone" type="tel" placeholder="Its number, for a code to type instead (optional)" aria-label="Its number"></label></div><div class="actions"><button class="button primary" id="start">Add Account</button></div><div id="err"></div></div>
 <div id="needs" hidden></div>
 <script>
 // Each account is a phone linked to one of your devices, as WhatsApp Desktop is linked.
 const list = document.getElementById("list"), connect = document.getElementById("connect"), form = connect.innerHTML;
-let accounts = [], asked = 0;
+let accounts = [], asked = 0, running = [];
 // Signed out here and maybe not yet on the device, so a redraw meanwhile doesn't bring them back.
 const leaving = new Set();
 function draw(fetch) {
@@ -208,18 +215,18 @@ function draw(fetch) {
     const all = accounts.filter((a) => !leaving.has(a.account));
     if (!all.length) return '<p class="footer">Link WhatsApp, and your agents can read your chats and, when you ask, send.</p>';
     const needs = all.filter((a) => !a.ok).map((a) => one.problem({ title: a.account + " needs linking again", text: one.plain(a.why || "Needs linking again").title.replace(/^Needs linking again\\.$/, "Link it from the phone again."), warn: true, action: { label: "Link Again", run: () => start() } })).join("");
-    return needs + '<h2 class="section">Accounts</h2><div class="list">' + all.map((a, i) => \`<div class="row plain"><div class="main"><div class="title">\${one.esc(a.account)}</div>\${a.ok ? \`<div class="sub">Linked on \${one.esc(a.device)}\${i ? "" : " · used first"}</div>\` : \`<div class="sub warn">\${one.icon("warning-circle-fill")}Link again</div>\`}</div><button class="button plain" data-out="\${one.esc(a.account)}">Sign Out</button></div>\`).join("") + "</div>";
+    return needs + '<h2 class="section">Accounts</h2><div class="list">' + all.map((a, i) => \`<div class="row plain"><div class="main"><div class="title">\${one.esc(a.account)}</div>\${a.ok ? \`<div class="sub">Linked on \${one.esc(a.device)}\${i ? "" : " · used first"}</div>\` : \`<div class="sub warn">\${one.icon("warning-circle-fill")}Link again</div>\`}</div><button class="button plain" data-out="\${one.esc(a.account)}" data-on="\${one.esc(a.device)}">Sign Out</button></div>\`).join("") + "</div>";
   }, { skeleton: 1 });
 }
 list.onclick = (e) => {
-  const account = e.target.closest("[data-out]")?.dataset.out;
+  const account = e.target.closest("[data-out]")?.dataset.out, device = e.target.closest("[data-out]")?.dataset.on;
   if (!account) return;
   one.confirm("#ask", { title: \`Sign out of \${account}?\`, detail: "This device is unlinked from it, and the messages kept for it are deleted. Linking again needs the phone.",
     action: "Sign Out", danger: true, run: async () => {
       leaving.add(account);
       draw(false);
       try {
-        await one.call("sign_out", { account });
+        await one.call("sign_out", { account, device });
         accounts = accounts.filter((a) => a.account !== account);
       } finally {
         leaving.delete(account);
@@ -227,15 +234,24 @@ list.onclick = (e) => {
       }
     } });
 };
+// With WhatsApp on several of your devices, which one links it: an account may be linked on each.
+function devices() {
+  const row = document.getElementById("on-row");
+  if (!row) return;
+  document.getElementById("on").innerHTML = running.map((d) => \`<option>\${one.esc(d)}</option>\`).join("");
+  row.hidden = running.length < 2;
+}
 function ready() {
   connect.innerHTML = form;
+  devices();
   document.getElementById("start").onclick = (e) => start(e.currentTarget);
 }
 
 async function start(b) {
   const phone = document.getElementById("phone")?.value.trim() || "";
+  const device = running.length > 1 ? document.getElementById("on")?.value || "" : "";
   const back = b && one.busy(b, "Asking WhatsApp…");
-  try { await one.call("sign_in", phone ? { phone } : {}); }
+  try { await one.call("sign_in", { ...(phone ? { phone } : {}), ...(device ? { device } : {}) }); }
   catch (err) {
     back?.();
     document.getElementById("err").innerHTML = one.problem({ title: one.plain(err).title, action: { label: "Try Again", run: () => start() } });
@@ -244,14 +260,14 @@ async function start(b) {
   connect.innerHTML = \`<h2 class="section">Link a Device</h2><div class="list"><div class="row plain"><div class="main">On the phone, open WhatsApp › Settings › Linked devices › Link a device.</div></div>
     <div class="row plain"><div class="main">Scan this code\${phone ? ", or tap Link with phone number instead and type the code under it" : ""}.</div></div></div>
     <img id="qr" alt=""><div class="code" id="code"></div><p class="footer" id="note">The code changes every 20 seconds. WhatsApp then sends recent chats, which takes a few minutes.</p>\`;
-  watch();
+  watch(device);
 }
 
 // Shows the current codes until the phone links, or the codes run out.
-async function watch() {
+async function watch(device) {
   const had = accounts.length;
   for (let i = 0; i < 90; i++) {
-    const p = await one.call("_pairing").catch(() => ({}));
+    const p = await one.call("_pairing", device ? { device } : {}).catch(() => ({}));
     if (!p.qr) {
       const now = await one.call("accounts").catch(() => []);
       if (now.length > had) return draw(true).then(ready);
@@ -279,6 +295,8 @@ Promise.all([one.call("_running").catch(() => null), draw(true)]).then(([r]) => 
     list.innerHTML = "";
     return;
   }
+  running = r?.devices || [];
+  devices();
   connect.hidden = false;
   if (one.params.add) document.getElementById("phone").focus();
 });
