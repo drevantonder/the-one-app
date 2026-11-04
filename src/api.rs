@@ -436,7 +436,7 @@ async fn from_client(node: &Node, key: crate::entry::Key, until: u64, path: &str
     if !(SIGNED_IN.contains(&path) || path == "/mcp") {
         return refuse(req, (StatusCode::FORBIDDEN, Json(json!({ "error": "only this machine's own programs may use this" }))).into_response()).await;
     }
-    let Some((user, name)) = node.client(&key) else {
+    let Some((user, name)) = node.client_now(&key).await else {
         return refuse(req, (StatusCode::FORBIDDEN, Json(json!({ "error": "this isn't one of your devices: approve it on one that is", "code": "not_let_in" }))).into_response()).await;
     };
     let token = crate::node::client_token(&key);

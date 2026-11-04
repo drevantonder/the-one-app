@@ -78,6 +78,9 @@ const LOG_CHECKED: usize = 64;
 /// The longest keys handed with no sign-in (a client device's, or with a call passed on) are kept here.
 const CLIENT_KEYS: u64 = 3_600_000;
 
+/// How often, at most, `global` is read for a client device this device doesn't list.
+const CATCH_UP_EVERY: std::time::Duration = std::time::Duration::from_secs(3);
+
 /// The client device a token `client_token` made is for.
 fn client_of(token: &str) -> Option<Key> {
     data_encoding::HEXLOWER.decode(token.strip_prefix(CLIENT)?.as_bytes()).ok()?.try_into().ok()
@@ -151,6 +154,29 @@ impl Node {
     /// Whose client device `key` is, and its name: none if it isn't a device of the install, or was removed.
     pub fn client(&self, key: &Key) -> Option<(String, String)> {
         self.with(|i| Ok(i.r.members.client(key).map(|m| (m.user.clone(), m.name.clone())))).ok().flatten()
+    }
+
+    /// `client`, after reading `global`'s newest entries if this device doesn't list `key`: a device just approved on
+    /// another is listed there before this one has read it, and is let in, not refused.
+    pub async fn client_now(&self, key: &Key) -> Option<(String, String)> {
+        if let Some(client) = self.client(key) {
+            return Some(client);
+        }
+        self.catch_up().await;
+        self.client(key)
+    }
+
+    /// Reads `global`'s newest entries, for a client device this device doesn't list: at most once every few seconds,
+    /// whoever asks, since anyone who reaches this device can ask as a key it doesn't know, and one read is everyone's.
+    pub async fn catch_up(&self) {
+        let mut last = self.0.caught_up.lock().await;
+        if last.is_some_and(|at| at.elapsed() < CATCH_UP_EVERY) {
+            return;
+        }
+        *last = Some(std::time::Instant::now());
+        if let Err(err) = self.read_log(&Scope::Global).await {
+            tracing::debug!("reading global for a device it doesn't list: {err:#}");
+        }
     }
 
     /// Keeps the keys a caller handed this device with a call (`x-one-keys`) for `token`'s calls, as `user`'s: only

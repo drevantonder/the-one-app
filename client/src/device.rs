@@ -32,6 +32,8 @@ const HANDED_FOR: u64 = 3_600_000;
 const MOST_NEEDED: usize = 16;
 /// How often, at most, it reads `global`'s entries again for a node it didn't know.
 const REREAD: u64 = 30_000;
+/// How long it waits to ask again a node that doesn't list it yet, each time.
+const BEHIND: [Duration; 2] = [Duration::from_secs(2), Duration::from_secs(4)];
 
 /// A new device's key: 32 random bytes, which its app keeps.
 pub fn new_secret() -> [u8; 32] {
@@ -195,10 +197,11 @@ impl Device {
         let client = Client::start(self.key.to_bytes(), None, &self.address, &nodes).await?;
         *held = Some(client);
         drop(held);
-        // Kept, so a device the install no longer lists is known as one that was in, to its person's sign-in, not to approve.
-        if !self.dir.join("joined").exists() {
+        // Kept, with its key, so this key is known as one that was in, to its person's sign-in once the relay takes it
+        // out, not to approve; a new key in the same folder (signed in again) is one to approve.
+        if !self.was_in() {
             let _ = std::fs::create_dir_all(&self.dir);
-            let _ = std::fs::write(self.dir.join("joined"), b"");
+            let _ = std::fs::write(self.dir.join("joined"), self.key());
         }
         self.settle_own().await?;
         Ok(true)
@@ -216,7 +219,8 @@ impl Device {
             at = keys::next_at(now());
             (status, out) = http("POST", &url, None, Some(keys::signed_request(&self.key, "one/relay", json!({ "computes": true }), at))).await?;
         }
-        if status == 403 || status == 401 {
+        // The relay answers 403 only for a key it doesn't let in.
+        if status == 403 {
             return Ok(None);
         }
         if status != 200 {
@@ -345,15 +349,22 @@ impl Device {
     /// A node that doesn't answer in a few seconds is left: approving the new device replaces it. The app forgets this
     /// device's key either way, as a removed key can't be let in again.
     pub async fn sign_out(&self) {
-        if self.dir.join("joined").exists() {
+        if self.was_in() {
             let _ = n0_future::time::timeout(Duration::from_secs(15), self.json("POST", "/v1/remove", Some(json!({ "key": self.key() })))).await;
         }
         self.close().await;
     }
 
-    /// Whether the install took this device out: it was in, and isn't listed now.
-    pub fn removed(&self) -> bool {
-        self.dir.join("joined").exists()
+    /// Whether the install took this device out: this key was in, and the relay, which alone says who's on the
+    /// install's network, lets it in no more. Never a node's word, which may only not have read its approval yet, nor a
+    /// relay that didn't answer: a key taken for out is forgotten, and can't be let in again.
+    pub async fn removed(&self) -> bool {
+        self.was_in() && matches!(self.computes().await, Ok(None))
+    }
+
+    /// Whether this key was let in on this device once.
+    fn was_in(&self) -> bool {
+        std::fs::read_to_string(self.dir.join("joined")).is_ok_and(|key| key.trim() == self.key())
     }
 
     // Requests.
@@ -373,8 +384,9 @@ impl Device {
             Err(err) => err,
         };
         // A request that failed may be one a device taken out can't make: the relay says who's on its network, so it's
-        // asked. Out, this device starts over at joining, where nothing but its approval or sign-in is shown.
-        if err.not_let_in || matches!(self.computes().await, Ok(None)) {
+        // asked, whatever a node said. Out, this device starts over at joining, where nothing but its approval or sign-in
+        // is shown.
+        if matches!(self.computes().await, Ok(None)) {
             if let Some(client) = self.client.lock().await.take() {
                 client.close().await;
             }
@@ -399,11 +411,13 @@ impl Device {
 
     async fn request(&self, method: &str, path: &str, headers: Vec<(String, String)>, body: Sent) -> Result<Response, Error> {
         let route = route(path, body.bytes());
-        for tries in 0..4 {
+        let (mut needed, mut behind) = (0, 0);
+        loop {
             let handed = self.handed(&route).await;
             let request = Request { method: method.into(), path: path.into(), headers: headers.clone(), body: body.clone() };
             let response = self.send(request, handed.as_ref()).await?;
-            if response.status == 428 && tries < 3 {
+            if response.status == 428 && needed < 3 {
+                needed += 1;
                 let node = response.node;
                 let answer: Value = serde_json::from_slice(&response.body.bytes().await?).unwrap_or_default();
                 self.learn(&route, &node, &answer).await?;
@@ -411,8 +425,18 @@ impl Device {
             }
             if response.status == 403 {
                 let bytes = response.body.bytes().await?;
+                // A node that doesn't list this device may not have read its approval yet: the relay says if it's out,
+                // else it's asked again in a moment, once it has.
                 if serde_json::from_slice::<Value>(&bytes).is_ok_and(|v| v["code"] == "not_let_in") {
-                    return Err(refused());
+                    if matches!(self.computes().await, Ok(None)) {
+                        return Err(refused());
+                    }
+                    if behind < BEHIND.len() {
+                        n0_future::time::sleep(BEHIND[behind]).await;
+                        behind += 1;
+                        continue;
+                    }
+                    return Err(failed("Your devices haven't caught up with this one yet. Try again in a moment."));
                 }
                 return Ok(Response { status: 403, headers: response.headers, node: response.node, body: Body::whole(bytes) });
             }
@@ -423,7 +447,6 @@ impl Device {
             }
             return Ok(response);
         }
-        Err(failed("Your device needed keys it didn't name. Try again."))
     }
 
     /// A request saying whose it is (`x-one-user`), which a node checks against this device's key, with keys `handed`

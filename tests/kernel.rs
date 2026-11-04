@@ -529,6 +529,32 @@ mod relay {
         data_encoding::HEXLOWER.encode(&rand::random::<[u8; 32]>())
     }
 
+    /// A device is taken out (its key forgotten, its person signed out) only when the relay says so: a node that doesn't
+    /// list it, which may not have read its approval yet, says nothing of it, nor does an old key that was in where a
+    /// new one signs in.
+    #[test]
+    fn only_the_relay_says_a_device_was_taken_out() {
+        let first = SecretKey::generate();
+        let k = super::Kernel::for_devices(vec![hex(&first)]);
+        let address = k.address.replace("localhost", "127.0.0.1");
+        let dir = crate::temp("taken-out");
+        let secret: [u8; 32] = rand::random();
+        let phone = SecretKey::from_bytes(&secret);
+        assert_eq!(tell(&address, &first, json!({ "add": hex(&phone), "role": "client" })), 204);
+        // As connecting leaves it, once this key was in.
+        std::fs::write(dir.join("joined"), hex(&phone)).unwrap();
+        let device = one_client::Device::new(secret, &address, dir.to_str().unwrap());
+        let signed_in_again = one_client::Device::new(rand::random(), &address, dir.to_str().unwrap());
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        runtime.block_on(async {
+            assert!(!device.removed().await, "a device the relay lets in was taken for one taken out");
+            assert!(!signed_in_again.removed().await, "a new key where an old one was in was taken for one taken out");
+            assert_eq!(tell(&address, &first, json!({ "remove": hex(&phone) })), 204);
+            assert!(device.removed().await, "a device the relay took out wasn't taken out");
+            assert!(!signed_in_again.removed().await, "a new key was taken out with the old one");
+        });
+    }
+
     #[test]
     fn the_relay_carries_only_the_installs_endpoints() {
         let first = SecretKey::generate();

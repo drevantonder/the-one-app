@@ -408,6 +408,8 @@ pub struct Inner {
     /// The install's recovery keys this device told the relay about since it started: the old ones taken out, the
     /// current one let in as a client (`follow_recovery`).
     recovery_told: Mutex<std::collections::BTreeSet<Key>>,
+    /// When it last read `global` for a client device it didn't list (`Node::catch_up`).
+    caught_up: tokio::sync::Mutex<Option<std::time::Instant>>,
     /// Where the install's data went: every bucket this device has used writes there, after a move (`Copied`).
     moved: Arc<tokio::sync::RwLock<Option<Place>>>,
     /// Held while this device makes a scope's first epoch.
@@ -543,6 +545,7 @@ impl Node {
             sent: Mutex::new(None),
             moving: Mutex::new(false),
             recovery_told: Mutex::new(Default::default()),
+            caught_up: tokio::sync::Mutex::new(None),
             moved: Arc::default(),
             making_keys: tokio::sync::Mutex::new(()),
             junk: Mutex::new(HashMap::new()),

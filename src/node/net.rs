@@ -287,7 +287,9 @@ impl Node {
         let remote = *conn.remote_id().as_bytes();
         let busy = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let listed = self.client(&remote).is_some();
-        // One the install doesn't list waits its turn among a few, and shows its device's certificate soon or is let go.
+        // One the install doesn't list waits its turn among a few, and shows its device's certificate soon, or is found
+        // listed once this device reads `global` again, or is let go.
+        let found = Arc::new(std::sync::atomic::AtomicBool::new(false));
         if !listed {
             use std::sync::atomic::Ordering::SeqCst;
             if self.0.net.unlisted.fetch_add(1, SeqCst) >= UNLISTED {
@@ -320,28 +322,40 @@ impl Node {
         // The certificate checked last, and the session it vouched for: one check a connection, unless it's renewed.
         let vouched: Arc<Mutex<Option<(String, crate::keys::Session)>>> = Arc::default();
         if !listed {
-            let (node, waiting, shown) = (self.clone(), conn.clone(), vouched.clone());
+            let (node, waiting, shown, found) = (self.clone(), conn.clone(), vouched.clone(), found.clone());
             tokio::spawn(async move {
                 tokio::time::sleep(UNLISTED_WITHIN).await;
                 node.0.net.unlisted.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
-                if shown.lock().unwrap().is_none() {
+                if shown.lock().unwrap().is_none() && !found.load(std::sync::atomic::Ordering::SeqCst) {
                     waiting.close(1u32.into(), b"not a device of this install");
                 }
             });
         }
         let (node, closing) = (self.clone(), conn.clone());
         let api = crate::api::router(self.clone()).layer(axum::middleware::from_fn(move |mut req: axum::extract::Request, next: axum::middleware::Next| {
-            let (node, closing, vouched) = (node.clone(), closing.clone(), vouched.clone());
+            let (node, closing, vouched, found) = (node.clone(), closing.clone(), vouched.clone(), found.clone());
             async move {
                 // Who asks is the key the connection proved, or the device that vouched for it, and nothing it says of itself.
                 for header in [axum::http::header::AUTHORIZATION.as_str(), crate::api::LOCAL_TOKEN_HEADER] {
                     req.headers_mut().remove(header);
                 }
                 let certificate = req.headers_mut().remove(crate::api::ENDPOINT_HEADER);
-                let who = if listed {
+                let who = if listed || found.load(std::sync::atomic::Ordering::SeqCst) {
+                    Ok((remote, u64::MAX))
+                } else if certificate.is_none() && node.client_now(&remote).await.is_some() {
+                    // A device approved on another, which this one hadn't read yet: it's who its connection proves.
+                    found.store(true, std::sync::atomic::Ordering::SeqCst);
                     Ok((remote, u64::MAX))
                 } else {
-                    node.vouched(&remote, certificate.as_ref().and_then(|c| c.to_str().ok()), &vouched)
+                    let shown = certificate.as_ref().and_then(|c| c.to_str().ok());
+                    // Its device may be one approved on another, which this one hadn't read yet.
+                    match node.vouched(&remote, shown, &vouched) {
+                        Err(_) if shown.is_some() => {
+                            node.catch_up().await;
+                            node.vouched(&remote, shown, &vouched)
+                        }
+                        who => who,
+                    }
                 };
                 match who {
                     Ok((key, until)) => {

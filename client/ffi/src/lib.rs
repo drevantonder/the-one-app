@@ -99,9 +99,10 @@ impl ThisDevice {
         Ok(run(self.0.wait(&token))?)
     }
 
-    /// Whether the install took this device out: it was in once, and isn't listed now.
+    /// Whether the install took this device out: this key was in, and the install's relay lets it in no more. A node
+    /// that doesn't list it, or a relay that doesn't answer, says nothing of it.
     pub fn removed(&self) -> bool {
-        self.0.removed()
+        run(self.0.removed())
     }
 
     /// Reaches its nodes, if it's been let in: false if it hasn't.

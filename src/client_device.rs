@@ -96,7 +96,8 @@ pub fn join(address: &str, invite: Option<&str>) -> Result<()> {
         return Ok(());
     }
     // One taken out starts over too, as a removed key isn't let in again.
-    if device.removed() {
+    let d = device.clone();
+    if run(move || async move { d.removed().await }) {
         forget();
         device = kept_or_new(address)?;
     }
@@ -209,7 +210,8 @@ pub fn end() {
 
 /// What a refused request says: the install doesn't list this computer, yet or any more.
 fn not_let_in() -> String {
-    match kept().is_some_and(|d| d.removed()) {
+    let removed = kept().is_some_and(|d| run(move || async move { d.removed().await }));
+    match removed {
         true => {
             forget();
             format!("this computer was taken out of your devices: {CLI} sign-in lets it in again")
