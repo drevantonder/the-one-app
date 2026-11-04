@@ -750,7 +750,7 @@ private class Bridge(val context: Context, val store: Store, val route: Route, v
                 return null
             }
             "developer" -> return JsonPrimitive(store.developer((m["on"] as? JsonPrimitive)?.booleanOrNull))
-            // In developer mode, what this phone's requests did, for the screen's panel (kit.js); else nothing.
+            // In developer mode, what this phone's requests did, for Developer's Timing (src/screen/devtools.html); else nothing.
             "traces" -> return runCatching { store.client.traces() }.getOrNull()?.let { runCatching { json.parseToJsonElement(it) }.getOrNull() } ?: JsonNull
             "cache" -> {
                 val key = str(m, "key") ?: ""

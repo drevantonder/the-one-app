@@ -307,16 +307,3 @@ button.choice:active, .more:active, .pick:active, .problem-action:active, .tool:
   .sheet-bar::before { display: none; }
 }
 
-/* Developer mode's pill, at the top of an app's screen, and the panel it opens (kit.js): what the screen did. */
-.trace-pill-bar { display: flex; justify-content: flex-end; margin: 0 0 6px; }
-.trace-pill { font: inherit; font-size: 12px; font-variant-numeric: tabular-nums; color: var(--muted); background: var(--fill); border: 0; border-radius: 10px; padding: 2px 9px; cursor: pointer; }
-.trace-pill.warn { color: var(--warn); }
-.trace-total { font-size: 28px; font-weight: 700; font-variant-numeric: tabular-nums; margin: 4px 4px 12px; }
-.trace-row .title .when { font-variant-numeric: tabular-nums; }
-.trace-track { height: 6px; margin: 6px 0 4px; }
-.trace-bar { display: flex; height: 6px; min-width: 2px; border-radius: 3px; overflow: hidden; }
-.trace-bar .rest { background: var(--muted); }
-.trace-bar .join { background: var(--faint); }
-.trace-bar .warn { background: var(--warn); }
-.trace-parts { font-size: 13px; }
-.trace-parts .warn { color: var(--warn); }

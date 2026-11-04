@@ -419,7 +419,7 @@ private struct ScreenWebView: Representable {
                     return (nil, error.localizedDescription)
                 }
             case "traces":
-                // In developer mode, what this device's requests did, for the screen's panel (kit.js); else nothing.
+                // In developer mode, what this device's requests did, for Developer's Timing (src/screen/devtools.html); else nothing.
                 guard let json = try? await DeviceClient.shared.traces() else { return (NSNull(), nil) }
                 return (try? JSONSerialization.jsonObject(with: Data(json.utf8)), nil)
             case "api":

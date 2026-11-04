@@ -351,7 +351,7 @@ public sealed class AppScreen : Grid
                     }
                 case "traces":
                     {
-                        // In developer mode, what this computer's requests did, for the screen's panel (kit.js); else nothing.
+                        // In developer mode, what this computer's requests did, for Developer's Timing (src/screen/devtools.html); else nothing.
                         string? traces = null;
                         try { traces = await Client.Traces(); } catch { }
                         Reply(id, traces == null ? null : JsonNode.Parse(traces));

@@ -263,7 +263,7 @@ window.__one = {};
   const handedIn = (steps) => ({ ms: Math.max(...steps.map((s) => s.at + s.ms)), steps });
 
   /// Developer mode, on this browser alone (Settings › Developer, for admins): each request asks its nodes for a trace
-  /// (`x-one-trace`), kept here, the latest `KEPT`, for screens to show (`traces`, kit.js's panel).
+  /// (`x-one-trace`), kept here, the latest `KEPT`, for screens to show (`traces`, Developer's Timing).
   const developer = {
     KEY: "one.developer",
     KEPT: 100,

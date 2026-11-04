@@ -1,12 +1,12 @@
 <div class="large-title">Developer</div>
 <div id="mode"></div>
 <script>
-  // Developer mode, on this device alone: each app's page shows how long it took to open, and what it did.
+  // Developer mode, on this device alone: every screen's bar has a </> that opens Developer (src/screen/devtools.html).
   one.largeTitle("Developer");
   one.render("#mode", async () => {
     const on = await one.developer();
     return `<div class="list"><label class="row plain"><div class="main"><div class="title"><span>Developer Mode</span></div></div><input type="checkbox" class="switch" id="on"${on ? " checked" : ""}></label></div>` +
-      `<p class="footer">On this device, each page shows how long it took to open. Tap the time to see what it did.</p>`;
+      `<p class="footer">On this device, the &lt;/&gt; at the top of every screen opens Developer, whose Timing shows what the screen asked for and where the time went.</p>`;
   }, { skeleton: 1 });
   document.addEventListener("change", async (e) => {
     if (e.target.id !== "on") return;
