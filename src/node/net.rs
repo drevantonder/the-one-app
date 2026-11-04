@@ -49,10 +49,17 @@ pub(super) struct Net {
     joining: std::sync::atomic::AtomicUsize,
     /// The removed devices this device told the relay to take out.
     removed: Mutex<std::collections::HashSet<Key>>,
-    /// The connections each client device has open to this one's local API.
-    clients: Mutex<HashMap<Key, Vec<Connection>>>,
+    /// The connections each client device has open to this one's local API, oldest first, each with how many of its
+    /// requests are still being answered.
+    clients: Mutex<HashMap<Key, Vec<(Connection, Arc<std::sync::atomic::AtomicUsize>)>>>,
     /// How many connections of keys the install doesn't list are waiting to show a certificate.
     unlisted: std::sync::atomic::AtomicUsize,
+}
+
+/// Which of a device's connections, oldest first with how many requests each is answering, makes room for a new one:
+/// the oldest answering none. None if all are busy, so a device never holds more than `CLIENT_CONNS` answering at once.
+fn oldest_idle(busy: impl Iterator<Item = usize>) -> Option<usize> {
+    busy.enumerate().find(|(_, busy)| *busy == 0).map(|(i, _)| i)
 }
 
 /// A client's connection in `Net::clients`, taken out once it's done with.
@@ -62,7 +69,7 @@ impl Drop for Held {
     fn drop(&mut self) {
         let mut clients = self.0.0.net.clients.lock().unwrap();
         if let Some(open) = clients.get_mut(&self.1) {
-            open.retain(|c| c.stable_id() != self.2.stable_id() && c.close_reason().is_none());
+            open.retain(|(c, _)| c.stable_id() != self.2.stable_id() && c.close_reason().is_none());
             if open.is_empty() {
                 clients.remove(&self.1);
             }
@@ -278,6 +285,7 @@ impl Node {
     /// closed at the first that doesn't.
     async fn take_client(&self, conn: Connection) {
         let remote = *conn.remote_id().as_bytes();
+        let busy = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let listed = self.client(&remote).is_some();
         // One the install doesn't list waits its turn among a few, and shows its device's certificate soon or is let go.
         if !listed {
@@ -290,15 +298,23 @@ impl Node {
         {
             let mut clients = self.0.net.clients.lock().unwrap();
             let open = clients.entry(remote).or_default();
-            open.retain(|c| c.close_reason().is_none());
+            open.retain(|(c, _)| c.close_reason().is_none());
+            // A device opening another when it has its few already is one whose old one is dead, or a command that
+            // ended without closing it: the oldest not answering anything is let go for it. Only the device's own
+            // are ever let go, so what it may hold stays the same.
             if open.len() >= CLIENT_CONNS {
-                drop(clients);
-                if !listed {
-                    self.0.net.unlisted.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+                match oldest_idle(open.iter().map(|(_, busy)| busy.load(std::sync::atomic::Ordering::SeqCst))) {
+                    Some(oldest) => open.remove(oldest).0.close(0u32.into(), b"replaced by a newer connection from this device"),
+                    None => {
+                        drop(clients);
+                        if !listed {
+                            self.0.net.unlisted.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+                        }
+                        return conn.close(2u32.into(), b"this device has too many things open to this computer at once: let one finish, then try again");
+                    }
                 }
-                return conn.close(2u32.into(), b"too many connections");
             }
-            open.push(conn.clone());
+            open.push((conn.clone(), busy.clone()));
         }
         let _held = Held(self.clone(), remote, conn.clone());
         // The certificate checked last, and the session it vouched for: one check a connection, unless it's renewed.
@@ -350,7 +366,6 @@ impl Node {
             }
         }));
         let service = hyper_util::service::TowerToHyperService::new(api);
-        let busy = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         loop {
             use std::sync::atomic::Ordering::SeqCst;
             let (send, recv) = match tokio::time::timeout(CLIENT_IDLE, conn.accept_bi()).await {
@@ -504,7 +519,7 @@ impl Node {
             })
             .unwrap_or_default();
         for key in gone_clients {
-            for conn in self.0.net.clients.lock().unwrap().remove(&key).unwrap_or_default() {
+            for (conn, _) in self.0.net.clients.lock().unwrap().remove(&key).unwrap_or_default() {
                 conn.close(1u32.into(), b"removed from this install");
             }
         }
@@ -772,5 +787,17 @@ impl tokio::io::AsyncWrite for Stream {
 
     fn poll_shutdown(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<std::io::Result<()>> {
         tokio::io::AsyncWrite::poll_shutdown(std::pin::Pin::new(&mut self.send), cx)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A device at its connections' cap gets a new one by an old idle one going, never by holding more: all busy, it's refused.
+    #[test]
+    fn a_device_at_its_cap_replaces_its_oldest_idle_connection_and_never_exceeds_it() {
+        assert_eq!(oldest_idle([2, 0, 1, 0].into_iter()), Some(1));
+        assert_eq!(oldest_idle([1; CLIENT_CONNS].into_iter()), None);
     }
 }
