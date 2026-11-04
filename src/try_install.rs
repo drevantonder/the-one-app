@@ -103,10 +103,9 @@ pub fn try_install(rest: &[String]) -> Result<()> {
 starts with, and {me} as its admin, who signs in at {address} with no passkey. Its folder is {}, with its
 recovery key; its kernel's settings are in {}.
 
-{}",
+{CLI} try --help lists its commands.",
         dir.display(),
-        kernel.display(),
-        usage()
+        kernel.display()
     );
     Ok(())
 }
