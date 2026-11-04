@@ -343,8 +343,12 @@ public sealed class AppScreen : Grid
                     await Window.SignOut();
                     return;
                 case "developer":
-                    Reply(id, JsonValue.Create(await Client.Developer(m["on"] is JsonValue on && on.TryGetValue<bool>(out var value) ? value : null)));
-                    return;
+                    {
+                        var on = await Client.Developer(m["on"] is JsonValue v && v.TryGetValue<bool>(out var value) ? value : null);
+                        Reply(id, JsonValue.Create(on));
+                        Window.DeveloperOn(on);
+                        return;
+                    }
                 case "traces":
                     {
                         // In developer mode, what this computer's requests did, for the screen's panel (kit.js); else nothing.

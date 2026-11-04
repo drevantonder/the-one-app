@@ -61,6 +61,7 @@ public sealed class MainWindow : Window
         top.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         top.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         top.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        top.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         back.Click += (_, _) => Back();
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(back, "Back");
         path.ItemClicked += (_, e) => BackTo(e.Index);
@@ -69,6 +70,13 @@ public sealed class MainWindow : Window
         top.Children.Add(back);
         top.Children.Add(path);
         top.Children.Add(titleBar);
+        // Developer mode's </>, in the bar of every screen, beside the window's buttons (three of 46, which it keeps clear).
+        Grid.SetColumn(devButton, 3);
+        devButton.Margin = new Thickness(0, 0, 144, 0);
+        devButton.Click += (_, _) => ToggleDock();
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(devButton, "Developer");
+        ToolTipService.SetToolTip(devButton, "Developer");
+        top.Children.Add(devButton);
         root.Children.Add(top);
         SetTitleBar(titleBar);
         logo = bar;
@@ -127,6 +135,12 @@ public sealed class MainWindow : Window
     readonly Button back = new()
     {
         Content = new FontIcon { Glyph = "\uE72B", FontSize = 12 }, Width = 40, Height = 32, Margin = new Thickness(4, 0, 0, 0),
+        Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), BorderThickness = new Thickness(0), Visibility = Visibility.Collapsed,
+    };
+    readonly Button devButton = new()
+    {
+        Content = new TextBlock { Text = "</>", FontFamily = new Microsoft.UI.Xaml.Media.FontFamily("Cascadia Mono, Consolas"), FontSize = 13, FontWeight = FontWeights.SemiBold },
+        Height = 32, Padding = new Thickness(10, 0, 10, 0), VerticalAlignment = VerticalAlignment.Center,
         Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), BorderThickness = new Thickness(0), Visibility = Visibility.Collapsed,
     };
     readonly BreadcrumbBar path = new() { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(6, 0, 0, 0), Visibility = Visibility.Collapsed };
@@ -401,6 +415,8 @@ public sealed class MainWindow : Window
         listening?.Cancel();
         Sheet.CloseAll();
         nav = null;
+        DeveloperOn(false);
+        docked = false;
         Forget();
         Taskbar(0);
         var panel = new StackPanel { Spacing = 14, MaxWidth = 520, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
@@ -541,13 +557,20 @@ public sealed class MainWindow : Window
         pushed.Clear();
         recent.Clear();
         shown = null;
+        pane = new Grid();
+        pane.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        pane.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        pane.Children.Add(detail);
+        pane.SizeChanged += (_, _) => FitDock();
+        dock = null;
+        dockRoute = null;
         // A page this computer wasn't let into opens the first it was.
         if (OnNoPage(selection) && Store.Shared.Pages().FirstOrDefault() is { } first) selection = Route.PageOf(first.Scope);
         nav = new NavigationView
         {
             PaneDisplayMode = NavigationViewPaneDisplayMode.Left, IsSettingsVisible = false, IsPaneToggleButtonVisible = false,
             OpenPaneLength = 250, IsBackButtonVisible = NavigationViewBackButtonVisible.Collapsed, IsTitleBarAutoPaddingEnabled = false,
-            Content = detail, AlwaysShowHeader = false,
+            Content = pane, AlwaysShowHeader = false,
         };
         nav.ItemInvoked += (_, e) =>
         {
@@ -559,6 +582,7 @@ public sealed class MainWindow : Window
         DrawSidebar();
         DrawDetail();
         Opening();
+        _ = ReadDeveloper();
     }
 
     /// Goes somewhere in place of where the window is, as a sidebar row does.
@@ -598,6 +622,13 @@ public sealed class MainWindow : Window
     /// A screen's `one.close`, where it was pushed: back to what's under it.
     public void Back(AppScreen screen)
     {
+        // The Developer panel's `one.close` closes the dock.
+        if (screen == dock)
+        {
+            docked = false;
+            DrawDock();
+            return;
+        }
         if (pushed.Count > 0 && pushed[^1].view == screen.Parent) Back();
     }
 
@@ -625,6 +656,73 @@ public sealed class MainWindow : Window
         foreach (var child in detail.Children.OfType<FrameworkElement>()) child.Visibility = child == view ? Visibility.Visible : Visibility.Collapsed;
         if (!detail.Children.Contains(view)) detail.Children.Add(view);
         DrawPath();
+        var front = pushed.Count > 0 ? pushed[^1].route : selection;
+        if (front != fronted || (pushed.Count > 0 ? pushed[^1].view : shown) != frontView) since = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        (fronted, frontView) = (front, pushed.Count > 0 ? pushed[^1].view : shown);
+        DrawDock();
+    }
+
+    // MARK: Developer
+
+    /// Developer mode (Settings › Developer), on this computer alone: while it's on, the title bar's </> opens Developer
+    /// (src/screen/devtools.html) docked under the screen in front, where it stays from screen to screen until closed
+    /// (its `one.close`). It's told the screen's app, screen and title, and for the window's own, since when it showed.
+    bool developer, docked;
+    Grid? pane;
+    AppScreen? dock;
+    Route? dockRoute;
+    Route? fronted;
+    FrameworkElement? frontView;
+    long since = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+    /// Developer's panel's height: 45% of the window's, to 440.
+    Border? dockBox;
+
+    async Task ReadDeveloper()
+    {
+        try { DeveloperOn(await Client.Developer(null)); } catch { }
+    }
+
+    /// Developer mode turned on or off: the button is there or not, and the panel goes with it.
+    public void DeveloperOn(bool on)
+    {
+        developer = on;
+        devButton.Visibility = on && nav != null ? Visibility.Visible : Visibility.Collapsed;
+        DrawDock();
+    }
+
+    void ToggleDock()
+    {
+        docked = !docked;
+        DrawDock();
+    }
+
+    void DrawDock()
+    {
+        if (pane == null) return;
+        if (!developer || !docked || nav == null)
+        {
+            if (dockBox != null) pane.Children.Remove(dockBox);
+            (dock, dockBox, dockRoute) = (null, null, null);
+            return;
+        }
+        var front = pushed.Count > 0 ? pushed[^1] : (selection, shown);
+        var title = front.Item2 != null && titles.TryGetValue(front.Item2, out var t) && t.Length > 0 ? t : TitleOf(front.Item1);
+        var asked = Route.OwnOf("devtools", (front.Item1.Own
+            ? new JsonObject { ["title"] = title, ["since"] = since }
+            : new JsonObject { ["app"] = front.Item1.App, ["screen"] = front.Item1.Screen, ["title"] = title }).ToJsonString());
+        if (dockRoute == asked && dockBox != null) return;
+        if (dockBox != null) pane.Children.Remove(dockBox);
+        dockRoute = asked;
+        dock = new AppScreen(asked, (_, _) => { });
+        dockBox = new Border { Background = Look.Page, BorderBrush = Look.CardStroke, BorderThickness = new Thickness(1, 1, 0, 0), Child = dock };
+        Grid.SetRow(dockBox, 1);
+        pane.Children.Add(dockBox);
+        FitDock();
+    }
+
+    void FitDock()
+    {
+        if (dockBox != null && pane != null) dockBox.Height = Math.Min(440, pane.ActualHeight * 0.45);
     }
 
     /// The title bar: the window's name, or once something is pushed, Back and the path to it.
@@ -650,6 +748,7 @@ public sealed class MainWindow : Window
                 "pages" => r.Scope == "settings" ? "Settings" : store.PageFor(r.Scope)?.Title ?? "",
                 "services" => "Services",
                 "request" => "Vault",
+                "devtools" => "Developer",
                 _ => store.SettingsItems.FirstOrDefault(i => i.Name == r.Screen)?.Title ?? "Settings",
             };
         var app = store.App(r.App);
