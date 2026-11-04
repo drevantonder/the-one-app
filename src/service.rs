@@ -485,13 +485,16 @@ impl Service {
     fn state(&self) -> Value {
         let known = self.0.known.lock().unwrap();
         let m = &known.1;
-        let devices: Vec<Value> = m.offering(&self.0.name).map(|s| json!({ "key": hex(&s.key), "name": s.name, "online": s.key == self.key(), "services": [self.0.name] })).collect();
+        // Whether another is on, it can't know: asked, one that isn't says so.
+        let devices: Vec<Value> = m.offering(&self.0.name).map(|s| json!({ "key": hex(&s.key), "name": s.name, "here": s.key == self.key(), "online": true, "services": [self.0.name] })).collect();
         // The scopes its device runs, whose part it is: a program here may reach what they hold.
         let listed = m.service(&self.key());
         let device = listed.and_then(|s| s.device);
         let runs_for: Vec<String> = m.scopes().into_iter().filter(|s| device.is_some_and(|d| m.runs_for(&d, s))).map(|s| s.to_string()).collect();
+        let name = listed.map(|s| s.name.as_str()).unwrap_or("");
         json!({
-            "device": { "key": hex(&self.key()), "name": listed.map(|s| s.name.as_str()).unwrap_or(""), "runs_for": runs_for },
+            "device": { "key": hex(&self.key()), "name": name, "runs_for": runs_for },
+            "me": { "key": hex(&self.key()), "name": name },
             "user": self.owner_in(m).map(|u| json!({ "id": u, "name": m.user(&u).map(|p| p.name.clone()) })),
             "install": { "name": m.name, "root": self.0.install.root, "devices": devices, "settings": crate::state::settings(m) },
         })
