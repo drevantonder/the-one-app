@@ -201,7 +201,7 @@ pub fn app_skill(app: &Value) -> Skill {
         guide = out;
     }
     let mut body = format!(
-        "# {title}\n\n{}\n\n## Operations\n\nEach is the command `{CLI} {name} <op>` (`--help` says more) and the MCP tool `{name}_<op>`. Never ask for a password, key or token in the chat: `{CLI} vault request` (vault_request) gives the person a link. What sends or can't be undone takes `confirm: true` (`--confirm`), given only once the person agreed to that very action. Post to the board only when the person asked, or when you changed something.\n",
+        "# {title}\n\n{}\n\n## Operations\n\nEach is the command `{CLI} {name} <op>` (`--help` says more). Over MCP, the same operation is the tool `{name}_<op>` with the same inputs. Never ask for a password, key or token in the chat: `{CLI} vault request` (vault_request) gives the person a link. What sends or can't be undone takes `confirm: true` (`--confirm`), given only once the person agreed to that very action. Post to the board only when the person asked, or when you changed something.\n",
         guide,
     );
     for op in ops {
@@ -210,8 +210,7 @@ pub fn app_skill(app: &Value) -> Skill {
             (_, true) => " Needs `confirm: true`.",
             _ => "",
         };
-        let o = op["name"].as_str().unwrap_or("");
-        body.push_str(&format!("\n- `{}` · `{name}_{o}({})`: {}{mark}", command(name, op), ts(&op["input"]), op["description"].as_str().unwrap_or("").trim()));
+        body.push_str(&format!("\n- `{}`: {}{mark}", command(name, op), op["description"].as_str().unwrap_or("").trim()));
     }
     Skill { name: skill_name(name), description, body, files: vec![] }
 }
