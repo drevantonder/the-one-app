@@ -287,7 +287,7 @@ func (ds *devices) borrowVM(ctx context.Context, k kind, name string, copy bool,
 			if b, ok := lent[v.Name]; !ok {
 				got = v
 				break
-			} else if b.By == l.By {
+			} else if b.State == loanLent && b.By == l.By && l.By != someone {
 				got = v // borrowed again by the same agent: its loan carries on
 				l.Since = b.Since
 				break
@@ -318,16 +318,19 @@ func (ds *devices) borrowVM(ctx context.Context, k kind, name string, copy bool,
 	}
 	if l.Since.IsZero() {
 		l.Since = time.Now().UTC()
+		ds.reserve(got.Name, l)
+	} else if !ds.change(got.Name, func(b *loan) { b.For = l.For }) {
+		return nil, fmt.Errorf("%s is being given back: borrow again", got.Name)
 	}
-	ds.setLoan(got.Name, &l)
 	ds.touch(got.Name)
 	if err := ds.awake(ctx, got); err != nil {
 		if got.Of != "" || got.Name != name && strings.HasPrefix(got.Name, poolPrefix) {
 			ds.deleteVM(context.WithoutCancel(ctx), got)
 		}
-		ds.setLoan(got.Name, nil)
+		ds.endLoan(got.Name)
 		return nil, err
 	}
+	ds.lend(got.Name)
 	return got, nil
 }
 
@@ -348,14 +351,18 @@ func roomFor(gb int) bool {
 
 // giveBackVM ends a loan: a copy, or a device made for the loan, is deleted; a lasting one stays as it is.
 func (ds *devices) giveBackVM(ctx context.Context, v *vm, why string) error {
+	if _, err := ds.returning(v.Name); err != nil {
+		return err
+	}
 	if v.Of != "" || strings.HasPrefix(v.Name, poolPrefix) {
 		if err := ds.deleteVM(ctx, v); err != nil {
+			ds.returnFailed(v.Name)
 			return err
 		}
 	} else if v.Kind == "iphone" {
 		v.kind().stop(ctx, v) // a booted simulator holds gigabytes of the Mac's memory
 	}
-	ds.setLoan(v.Name, nil)
+	ds.endLoan(v.Name)
 	log.Printf("%s: %s", v.Name, why)
 	return nil
 }
@@ -380,7 +387,7 @@ func (ds *devices) tendVMs(ctx context.Context) {
 	defer ds.restVMs(ctx)
 	for name, l := range ds.loans() {
 		v := ds.vmNamed(name)
-		if v == nil {
+		if v == nil || l.State == loanReturning || l.State == loanPreparing && l.Since.After(ds.started) {
 			continue
 		}
 		limit := idleBorrowed
@@ -768,7 +775,7 @@ func (ds *devices) runKinds(ctx context.Context, op, name string, here bool, in 
 		if err := ds.deleteVM(ctx, v); err != nil {
 			return nil, true, err
 		}
-		ds.setLoan(v.Name, nil)
+		ds.endLoan(v.Name)
 		return fmt.Sprintf("Deleted %s and everything in it.", v.Name), true, nil
 	case "give_back":
 		if _, ok := ds.loans()[v.Name]; !ok {

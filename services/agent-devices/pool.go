@@ -36,8 +36,8 @@ const (
 )
 
 // A loan is a borrowed device's: who has it and what for, and the browser
-// profile it started with. Its profile's key is kept only in memory, in held;
-// after a restart, the app gives it again when the profile is saved.
+// profile it started with, with its key, kept only in memory: after a
+// restart, the app gives it again when the profile is saved.
 type loan struct {
 	By        string    `json:"by"`
 	For       string    `json:"for"`
@@ -47,7 +47,26 @@ type loan struct {
 	SigningIn bool      `json:"signing_in,omitempty"`
 	Until     time.Time `json:"until,omitzero"`      // a sign-in's end
 	NoScreen  bool      `json:"no_screen,omitempty"` // made without a screen: nobody watches it
+	State     loanState `json:"state,omitempty"`
+	key       *profile
 }
+
+// A loan's state. It starts preparing, its device chosen and being readied;
+// once ready it's lent, and the borrower's; giving it back, it's returning,
+// until the device is deleted and the loan forgotten, or back to lent if that
+// failed. Each step is one of the methods below, all under poolMu, and each
+// is saved in lent.json, so a restart carries on: a loan preparing when this
+// program stopped never got ready, and is given back.
+type loanState string
+
+const (
+	loanLent      loanState = ""
+	loanPreparing loanState = "preparing"
+	loanReturning loanState = "returning"
+)
+
+// someone borrowed what a caller with no name did, which never carries on another's loan.
+const someone = "someone"
 
 // caches are left out of saved profiles and backups, each a path in a Chrome
 // folder (* is one of its profiles, like Default): they are most of a profile's
@@ -79,17 +98,82 @@ func (ds *devices) loans() map[string]loan {
 	return maps.Clone(ds.lent)
 }
 
-// setLoan records or (with nil) forgets a loan, on disk too, so they outlive
-// this program.
-func (ds *devices) setLoan(name string, l *loan) {
+// reserve starts a loan of the device named, preparing it.
+func (ds *devices) reserve(name string, l loan) {
 	ds.poolMu.Lock()
 	defer ds.poolMu.Unlock()
-	if l == nil {
-		delete(ds.lent, name)
-		delete(ds.held, name)
-	} else {
-		ds.lent[name] = *l
+	l.State = loanPreparing
+	ds.lent[name] = l
+	ds.saveLoans()
+}
+
+// lend makes a loan the borrower's, once its device is ready.
+func (ds *devices) lend(name string) {
+	ds.poolMu.Lock()
+	defer ds.poolMu.Unlock()
+	if l, ok := ds.lent[name]; ok && l.State == loanPreparing {
+		l.State = loanLent
+		ds.lent[name] = l
+		ds.saveLoans()
 	}
+}
+
+// change changes a lent loan, reporting false if it isn't lent.
+func (ds *devices) change(name string, f func(*loan)) bool {
+	ds.poolMu.Lock()
+	defer ds.poolMu.Unlock()
+	l, ok := ds.lent[name]
+	if !ok || l.State != loanLent {
+		return false
+	}
+	f(&l)
+	ds.lent[name] = l
+	ds.saveLoans()
+	return true
+}
+
+// returning starts giving back a loan, preparing or lent: it's the loan as it
+// was, which only one caller gets.
+func (ds *devices) returning(name string) (loan, error) {
+	ds.poolMu.Lock()
+	defer ds.poolMu.Unlock()
+	l, ok := ds.lent[name]
+	switch {
+	case !ok:
+		return l, fmt.Errorf("device %s isn't borrowed", name)
+	case l.State == loanReturning:
+		return l, fmt.Errorf("device %s is being given back already", name)
+	}
+	r := l
+	r.State = loanReturning
+	ds.lent[name] = r
+	ds.saveLoans()
+	return l, nil
+}
+
+// returnFailed makes a loan whose giving back failed lent again.
+func (ds *devices) returnFailed(name string) {
+	ds.poolMu.Lock()
+	defer ds.poolMu.Unlock()
+	if l, ok := ds.lent[name]; ok {
+		l.State = loanLent
+		ds.lent[name] = l
+		ds.saveLoans()
+	}
+}
+
+// endLoan forgets a loan, with its profile's key.
+func (ds *devices) endLoan(name string) {
+	ds.poolMu.Lock()
+	defer ds.poolMu.Unlock()
+	if _, ok := ds.lent[name]; ok {
+		delete(ds.lent, name)
+		ds.saveLoans()
+	}
+}
+
+// saveLoans writes the loans to disk, so they outlive this program; poolMu is held.
+func (ds *devices) saveLoans() {
 	b, _ := json.MarshalIndent(ds.lent, "", "  ")
 	if err := os.WriteFile(filepath.Join(ds.dir, "lent.json"), b, 0o600); err != nil {
 		log.Print(err)
@@ -103,6 +187,15 @@ func (ds *devices) loadLoans() {
 	}
 	if ds.lent == nil {
 		ds.lent = map[string]loan{}
+	}
+	for name, l := range ds.lent {
+		if l.State == loanReturning {
+			l.State = loanLent // given back again, as it would be
+			ds.lent[name] = l
+		}
+	}
+	if b, err := os.ReadFile(filepath.Join(ds.dir, "used.json")); err == nil {
+		json.Unmarshal(b, &ds.used)
 	}
 }
 
@@ -127,6 +220,18 @@ func (ds *devices) idle(name string) time.Duration {
 	return time.Since(t)
 }
 
+// saveUsed keeps each device's last call on disk, so a restart doesn't make
+// every device look just used, forgetting the devices not kept.
+func (ds *devices) saveUsed(kept func(string) bool) {
+	ds.poolMu.Lock()
+	defer ds.poolMu.Unlock()
+	maps.DeleteFunc(ds.used, func(name string, _ time.Time) bool { return !kept(name) })
+	b, _ := json.Marshal(ds.used)
+	if err := os.WriteFile(filepath.Join(ds.dir, "used.json"), b, 0o600); err != nil {
+		log.Print(err)
+	}
+}
+
 func (ds *devices) poke() {
 	select {
 	case ds.kick <- struct{}{}:
@@ -148,10 +253,17 @@ func spares(all []device, lent map[string]loan) []device {
 // borrow lends the spare device, or one made for it, its browser starting
 // with the profile p, if one is given.
 func (ds *devices) borrow(ctx context.Context, l loan, p *profile) (device, error) {
-	if p != nil {
-		l.Profile, l.Item = p.Name, p.Item
-	}
 	ds.take.Lock()
+	return ds.borrowTaken(ctx, l, p)
+}
+
+// borrowTaken is borrow with take held, which it lets go once it has chosen
+// the device. The loan is the borrower's only once the device is ready: on
+// any failure before then it's given back.
+func (ds *devices) borrowTaken(ctx context.Context, l loan, p *profile) (device, error) {
+	if p != nil {
+		l.Profile, l.Item, l.key = p.Name, p.Item, p
+	}
 	all, err := list(ctx)
 	if err != nil {
 		ds.take.Unlock()
@@ -168,44 +280,34 @@ func (ds *devices) borrow(ctx context.Context, l loan, p *profile) (device, erro
 		return device{}, err
 	}
 	l.Since = time.Now().UTC()
-	ds.setLoan(d.Name, &l)
-	ds.hold(d.Name, p)
+	ds.reserve(d.Name, l)
 	ds.touch(d.Name)
 	ds.take.Unlock()
-	log.Printf("%s borrowed %s for %q, profile %q", l.By, d.Name, l.For, l.Profile)
 	ds.poke() // for another spare
+	err = nil
 	if d.State == "paused" {
-		if err := unpause(ctx, d); err != nil {
-			return d, err
-		}
+		err = unpause(ctx, d)
 	}
-	if err := ready(ctx, d); err != nil {
+	if err == nil {
+		err = ready(ctx, d)
+	}
+	if err == nil && p != nil {
+		err = ds.unpack(ctx, d, p)
+	}
+	if err != nil {
+		if e := ds.giveBack(context.WithoutCancel(ctx), d.Name, "couldn't prepare it: "+err.Error()); e != nil {
+			log.Printf("giving back %s: %v", d.Name, e)
+		}
 		return d, err
 	}
-	if p != nil {
-		if err := ds.unpack(ctx, d, p); err != nil {
-			ds.giveBack(context.WithoutCancel(ctx), d.Name, "couldn't prepare it")
-			return d, err
-		}
-	}
+	ds.lend(d.Name)
+	log.Printf("%s borrowed %s for %q, profile %q", l.By, d.Name, l.For, l.Profile)
 	return d, nil
 }
 
-// hold keeps a borrowed device's profile, with its key, while it's lent.
-func (ds *devices) hold(name string, p *profile) {
-	ds.poolMu.Lock()
-	defer ds.poolMu.Unlock()
-	if p == nil {
-		delete(ds.held, name)
-	} else {
-		ds.held[name] = p
-	}
-}
-
-func (ds *devices) heldProfile(name string) *profile {
-	ds.poolMu.Lock()
-	defer ds.poolMu.Unlock()
-	return ds.held[name]
+// holdKey gives a lent device's loan its profile, with its key.
+func (ds *devices) holdKey(name string, p *profile) {
+	ds.change(name, func(l *loan) { l.key = p })
 }
 
 func newPoolName() string {
@@ -234,33 +336,48 @@ func openPage(ctx context.Context, d device, name, url string) error {
 
 func quote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
 
+// A sign-in whose profile can't be saved is given back unsaved this long
+// after its time is up, as when the app never gives its key back after a
+// restart, or its device won't start.
+const signInGrace = 10 * time.Minute
+
 // giveBack deletes a borrowed device; a sign-in's profile is saved first.
 func (ds *devices) giveBack(ctx context.Context, name, why string) error {
 	l, ok := ds.loans()[name]
 	if !ok {
 		return fmt.Errorf("device %s isn't borrowed", name)
 	}
+	late := time.Now().After(l.Until.Add(signInGrace))
+	if l.State == loanLent && l.SigningIn && l.key == nil && !late {
+		// Its key went when this program restarted: the app's save_profile gives it again, and gives the
+		// device back once it's saved.
+		if _, err := ds.callApp(ctx, "save_profile", map[string]any{"item": l.Item}); err != nil {
+			return fmt.Errorf("not given back: saving the %s profile failed: %w", l.Profile, err)
+		}
+		return nil
+	}
+	l, err := ds.returning(name)
+	if err != nil {
+		return err
+	}
 	d, err := find(ctx, name)
 	if err == nil {
-		if p := ds.heldProfile(name); l.SigningIn && p == nil {
-			// Its key went when this program restarted: the app's save_profile gives it again, and gives the
-			// device back once it's saved.
-			if _, err := ds.callApp(ctx, "save_profile", map[string]any{"item": l.Item}); err != nil {
+		if l.State == loanLent && l.SigningIn {
+			if err := ds.saveProfile(ctx, d, l.key); err != nil && !late {
+				ds.returnFailed(name)
 				return fmt.Errorf("not given back: saving the %s profile failed: %w", l.Profile, err)
-			}
-			return nil
-		} else if l.SigningIn {
-			if err := ds.saveProfile(ctx, d, p); err != nil {
-				return fmt.Errorf("not given back: saving the %s profile failed: %w", l.Profile, err)
+			} else if err != nil {
+				log.Printf("%s: giving it back without saving the %s profile: %v", name, l.Profile, err)
 			}
 		}
 		ds.drop(name)
 		if err := remove(ctx, d); err != nil {
+			ds.returnFailed(name)
 			return err
 		}
 	}
 	log.Printf("%s: %s", name, why)
-	ds.setLoan(name, nil)
+	ds.endLoan(name)
 	ds.poke()
 	return nil
 }
@@ -271,8 +388,15 @@ func (ds *devices) saveProfile(ctx context.Context, d device, p *profile) error 
 	if p == nil {
 		return errors.New("its profile's key is gone, as after this device restarted: save it with save_profile")
 	}
-	if d.State == "paused" {
-		unpause(ctx, d)
+	switch d.State {
+	case "paused":
+		if err := unpause(ctx, d); err != nil {
+			return err
+		}
+	case "stopped":
+		if err := start(ctx, d); err != nil {
+			return err
+		}
 	}
 	s, err := ds.pack(ctx, d, p)
 	if err != nil {
@@ -287,24 +411,32 @@ func (ds *devices) saveProfile(ctx context.Context, d device, p *profile) error 
 }
 
 // signIn opens a page in a device on the profile, for the person to sign in
-// to sites in, reusing one already signing in to it.
+// to sites in, reusing one already signing in to it. take is held while it
+// looks for one, so two sign-ins to a profile share one device.
 func (ds *devices) signIn(ctx context.Context, p *profile, url string, minutes int, by string) (device, time.Time, error) {
 	until := time.Now().Add(time.Duration(minutes) * time.Minute).UTC()
+	ds.take.Lock()
 	for name, l := range ds.loans() {
-		if l.SigningIn && l.Item == p.Item {
-			d, err := ds.running(ctx, name)
-			if err != nil {
-				return d, until, err
-			}
-			l.Until, l.Profile = until, p.Name
-			ds.setLoan(name, &l)
-			if ds.heldProfile(name) == nil {
-				ds.hold(name, p)
-			}
-			return d, until, openPage(ctx, d, p.Name, url)
+		if !l.SigningIn || l.Item != p.Item {
+			continue
 		}
+		ds.take.Unlock()
+		if l.State != loanLent {
+			return device{}, until, fmt.Errorf("the %s profile's sign-in is starting or closing: try again in a moment", p.Name)
+		}
+		d, err := ds.running(ctx, name)
+		if err != nil {
+			return d, until, err
+		}
+		ds.change(name, func(l *loan) {
+			l.Until, l.Profile = until, p.Name
+			if l.key == nil {
+				l.key = p
+			}
+		})
+		return d, until, openPage(ctx, d, p.Name, url)
 	}
-	d, err := ds.borrow(ctx, loan{By: by, For: "Signing in to sites", SigningIn: true, Until: until}, p)
+	d, err := ds.borrowTaken(ctx, loan{By: by, For: "Signing in to sites", SigningIn: true, Until: until}, p)
 	if err != nil {
 		return d, until, err
 	}
@@ -338,12 +470,15 @@ func (ds *devices) tend(ctx context.Context) {
 	for _, d := range all {
 		here[d.Name] = true
 	}
+	ds.saveUsed(func(name string) bool { return here[name] || ds.vmNamed(name) != nil })
 	for name, l := range ds.loans() {
-		if ds.vmNamed(name) != nil {
+		if ds.vmNamed(name) != nil || l.State == loanReturning || l.State == loanPreparing && l.Since.After(ds.started) {
 			continue
 		}
 		why := ""
 		switch {
+		case l.State == loanPreparing:
+			why = "never got ready before this program restarted"
 		case !here[name]:
 			why = "gone"
 		case l.SigningIn && time.Now().After(l.Until):

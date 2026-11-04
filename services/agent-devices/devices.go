@@ -32,12 +32,12 @@ type devices struct {
 	connMu sync.Mutex
 	conns  map[string]*conn // by device
 
-	poolMu sync.Mutex
-	lent   map[string]loan      // borrowed devices, by name
-	held   map[string]*profile  // their profiles, with their keys
-	used   map[string]time.Time // each device's last call
-	take   sync.Mutex           // one borrow, or spare made, at a time
-	kick   chan struct{}        // tend the pool now
+	poolMu  sync.Mutex
+	lent    map[string]loan      // borrowed devices, by name
+	used    map[string]time.Time // each device's last call
+	started time.Time            // when this program started
+	take    sync.Mutex           // one borrow, or spare made, at a time
+	kick    chan struct{}        // tend the pool now
 
 	backupMu sync.Mutex
 
@@ -46,7 +46,7 @@ type devices struct {
 }
 
 func newDevices(dir, node string) *devices {
-	ds := &devices{dir: dir, node: node, cache: filepath.Join(dir, "tools.json"), conns: map[string]*conn{}, latestHere: latest{fresh: 2 * time.Second, stale: 24 * time.Hour}, latestAll: latest{fresh: 2 * time.Second, stale: 24 * time.Hour}, held: map[string]*profile{}, used: map[string]time.Time{}, kick: make(chan struct{}, 1)}
+	ds := &devices{dir: dir, node: node, cache: filepath.Join(dir, "tools.json"), conns: map[string]*conn{}, latestHere: latest{fresh: 2 * time.Second, stale: 24 * time.Hour}, latestAll: latest{fresh: 2 * time.Second, stale: 24 * time.Hour}, started: time.Now(), used: map[string]time.Time{}, kick: make(chan struct{}, 1)}
 	if b, err := os.ReadFile(ds.cache); err == nil {
 		json.Unmarshal(b, &ds.tools)
 	}
@@ -400,12 +400,16 @@ func (ds *devices) run(ctx context.Context, op string, raw json.RawMessage) (any
 		if err != nil {
 			return nil, err
 		}
+		if _, ok := ds.loans()[d.Name]; ok {
+			// Given back, which saves a sign-in's profile first.
+			if err := ds.giveBack(ctx, d.Name, "deleted by "+caller(ctx)); err != nil {
+				return nil, err
+			}
+			return fmt.Sprintf("Deleted device %s and everything in it.", d.Name), nil
+		}
 		ds.drop(d.Name)
 		if err := remove(ctx, d); err != nil {
 			return nil, err
-		}
-		if _, ok := ds.loans()[d.Name]; ok {
-			ds.setLoan(d.Name, nil)
 		}
 		return fmt.Sprintf("Deleted device %s and everything in it.", d.Name), nil
 	case "view":
@@ -529,25 +533,26 @@ func (ds *devices) run(ctx context.Context, op string, raw json.RawMessage) (any
 				return nil, fmt.Errorf("nobody is signing in to the %s profile: there's nothing to save", p.Name)
 			}
 		}
-		d, err := ds.running(ctx, name)
-		if err != nil {
-			return nil, err
-		}
-		l, lent := ds.loans()[d.Name]
+		l, lent := ds.loans()[name]
 		if p == nil {
-			p = ds.heldProfile(d.Name)
-		} else if held := ds.heldProfile(d.Name); held != nil && held.Item == p.Item {
-			p.Name = held.Name // the folder it was opened with, if it was renamed since
+			p = l.key
+		} else if l.key != nil && l.key.Item == p.Item {
+			p.Name = l.key.Name // the folder it was opened with, if it was renamed since
 		}
 		if p == nil {
 			return nil, errors.New("which browser profile? the app gives it")
 		}
 		if lent && l.SigningIn && l.Item == p.Item {
-			ds.hold(d.Name, p)
-			if err := ds.giveBack(ctx, d.Name, "signed in"); err != nil {
+			// Given back, which starts it if it's stopped.
+			ds.holdKey(name, p)
+			if err := ds.giveBack(ctx, name, "signed in"); err != nil {
 				return nil, err
 			}
-			return fmt.Sprintf("Saved the %s profile and closed device %s.", p.Name, d.Name), nil
+			return fmt.Sprintf("Saved the %s profile and closed device %s.", p.Name, name), nil
+		}
+		d, err := ds.running(ctx, name)
+		if err != nil {
+			return nil, err
 		}
 		if err := ds.saveProfile(ctx, d, p); err != nil {
 			return nil, err
@@ -791,7 +796,7 @@ type callerKey struct{}
 // caller is the name of the device the call came from.
 func caller(ctx context.Context) string {
 	name, _ := ctx.Value(callerKey{}).(string)
-	return cmpOr(name, "someone")
+	return cmpOr(name, someone)
 }
 
 func bytesText(n int64) string {

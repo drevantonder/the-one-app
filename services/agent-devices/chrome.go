@@ -859,12 +859,11 @@ func (ds *devices) borrowChrome(ctx context.Context, in map[string]any) (any, er
 	if p != nil {
 		l.Profile, l.Item = p.Name, p.Item
 	}
-	ds.setLoan(v.Name, &l)
-	ds.hold(v.Name, p)
+	ds.reserve(v.Name, l)
 	ds.touch(v.Name)
 	fail := func(err error) (any, error) {
 		ds.deleteVM(context.WithoutCancel(ctx), v)
-		ds.setLoan(v.Name, nil)
+		ds.endLoan(v.Name)
 		return nil, err
 	}
 	if p != nil {
@@ -883,6 +882,7 @@ func (ds *devices) borrowChrome(ctx context.Context, in map[string]any) (any, er
 	if err != nil {
 		return fail(err)
 	}
+	ds.lend(v.Name)
 	me, _, _ := ds.hosts(ctx)
 	log.Printf("%s borrowed %s (chrome) for %q, profile %q", l.By, v.Name, l.For, l.Profile)
 	out := map[string]any{"device": v.Name, "on": me, "kind": chromeName, "target_id": targetOf(v), "tab_id": tabID(pg.target)}
