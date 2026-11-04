@@ -29,6 +29,10 @@ type whatsapp struct {
 
 	mu    sync.Mutex
 	links []*link
+
+	inMu     sync.Mutex          // moves arriving here, one part at a time
+	arriving map[string]*arrival // by move
+	moved    map[string]string   // each move's answer here, taken or refused, by move
 }
 
 func openAll(dir, node string) (*whatsapp, error) {
@@ -36,7 +40,7 @@ func openAll(dir, node string) (*whatsapp, error) {
 	if err != nil {
 		return nil, err
 	}
-	w := &whatsapp{node: node, dir: dir, links: []*link{first}}
+	w := &whatsapp{node: node, dir: dir, links: []*link{first}, arriving: map[string]*arrival{}}
 	more, _ := filepath.Glob(filepath.Join(dir, "whatsapp-*.db"))
 	slices.Sort(more)
 	for _, path := range more {
@@ -53,13 +57,15 @@ func openAll(dir, node string) (*whatsapp, error) {
 		}
 		w.links = append(w.links, l)
 	}
+	w.loadMoved()
+	go w.settling()
 	return w, nil
 }
 
 func (w *whatsapp) run(ctx context.Context, op string, raw json.RawMessage) (any, error) {
 	var in struct {
 		Account, Phone, To, Name string
-		From, Data               string // take's
+		From, Move, Data         string // take's and moved's
 		Part, Parts              int
 	}
 	if len(raw) > 0 {
@@ -88,11 +94,9 @@ func (w *whatsapp) run(ctx context.Context, op string, raw json.RawMessage) (any
 	case "_holder": // the service's own, between the user's devices
 		return w.holding(), nil
 	case "_take":
-		l, err := w.spare()
-		if err != nil {
-			return nil, err
-		}
-		return l.take(in.From, in.Part, in.Parts, in.Data)
+		return w.take(in.From, in.Move, in.Part, in.Parts, in.Data)
+	case "_moved":
+		return w.movedHere(in.Move)
 	case "move", "sign_out":
 		l, err := w.pick(in.Account, op == "sign_out")
 		if err != nil {
@@ -100,7 +104,7 @@ func (w *whatsapp) run(ctx context.Context, op string, raw json.RawMessage) (any
 		}
 		var out string
 		if op == "move" {
-			out, err = l.move(in.To)
+			out, err = w.move(l, in.To)
 		} else {
 			out, err = l.signOut(ctx)
 		}
@@ -193,11 +197,11 @@ func (w *whatsapp) drop(l *link) {
 // holding is the first account linked here, as devices told each other when
 // there could be only one, and every account.
 func (w *whatsapp) holding() holding {
-	var h holding
+	h := holding{Moves: true}
 	for _, l := range w.linked() {
 		one := l.holder()
 		if h.Phone == "" {
-			h.Phone, h.Connected = one.Phone, one.Connected
+			h.Phone, h.Connected, h.State = one.Phone, one.Connected, one.State
 		}
 		h.All = append(h.All, one)
 	}
@@ -214,8 +218,13 @@ func (w *whatsapp) accounts() ([]map[string]any, error) {
 	out := []map[string]any{}
 	add := func(h holding, device string) {
 		a := map[string]any{"account": "+" + h.Phone, "ok": h.Connected, "device": device}
-		if !h.Connected {
-			a["why"] = "Not connected on " + device + " right now: it reconnects by itself, unless the phone unlinked it"
+		switch {
+		case h.State == handingOff:
+			a["why"] = "Being moved from " + device + ": it's off until the device it goes to answers"
+		case h.State == replaced:
+			a["why"] = "Stopped on " + device + ": another copy of this link connected elsewhere (whatsapp_status there says more)"
+		case !h.Connected:
+			a["why"] = "Not connected on " + device + " right now: it reconnects by itself"
 		}
 		out = append(out, a)
 	}
@@ -239,6 +248,15 @@ func (w *whatsapp) status() (string, error) {
 		return w.links[0].status()
 	}
 	var lines []string
+	w.mu.Lock()
+	for _, l := range w.links {
+		l.mu.Lock()
+		if l.st.State == unlinked {
+			lines = append(lines, fmt.Sprintf("WhatsApp unlinked an account here %s (from the phone, or WhatsApp itself did), so what it kept here is deleted.", l.st.At.Local().Format("2 Jan 15:04")))
+		}
+		l.mu.Unlock()
+	}
+	w.mu.Unlock()
 	for _, l := range all {
 		line, err := l.status()
 		if err != nil {

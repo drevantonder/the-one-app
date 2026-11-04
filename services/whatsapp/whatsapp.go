@@ -39,6 +39,7 @@ type link struct {
 	client    *whatsmeow.Client
 	qr        string // the current QR code, while pairing
 	code      string // the code to type on the phone instead, while pairing with a number
+	st        linkState
 }
 
 // connect and loggedIn reach WhatsApp; tests replace them, so they never do.
@@ -49,11 +50,11 @@ var (
 
 func open(path, node string) (*link, error) {
 	store.SetOSInfo("The One App", [3]uint32{0, 2, 0})
-	l := &link{node: node, path: path}
+	l := &link{node: node, path: path, st: loadState(path)}
 	if err := l.load(); err != nil {
 		return nil, err
 	}
-	if l.client.Store.ID != nil {
+	if l.client.Store.ID != nil && l.st.connects() {
 		if err := connect(l.client); err != nil {
 			log.Printf("connecting: %v", err)
 		}
@@ -87,8 +88,9 @@ func (l *link) fresh() error {
 	if err != nil {
 		return err
 	}
-	l.client = whatsmeow.NewClient(device, logger{"whatsmeow"})
-	l.client.AddEventHandler(l.handle)
+	c := whatsmeow.NewClient(device, logger{"whatsmeow"})
+	c.AddEventHandler(func(evt any) { l.handle(c, evt) })
+	l.client = c
 	return nil
 }
 
@@ -106,11 +108,12 @@ func (l *link) forget() error {
 	return errors.Join(l.remove(), l.load())
 }
 
-// remove disconnects and deletes the link's database.
+// remove disconnects and deletes the link's database, and its state.
 func (l *link) remove() error {
 	l.unload()
+	l.st = linkState{}
 	var errs []error
-	for _, suffix := range []string{"", "-wal", "-shm"} {
+	for _, suffix := range []string{"", "-wal", "-shm", ".state"} {
 		if err := os.Remove(l.path + suffix); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			errs = append(errs, err)
 		}
@@ -169,7 +172,7 @@ func (l *link) run(ctx context.Context, op string, raw json.RawMessage) (any, er
 
 func (l *link) status() (string, error) {
 	l.mu.Lock()
-	c := l.client
+	c, st := l.client, l.st
 	l.mu.Unlock()
 	var chats, msgs int
 	_ = l.db.QueryRow(`SELECT (SELECT count(*) FROM chats), (SELECT count(*) FROM messages)`).Scan(&chats, &msgs)
@@ -179,13 +182,21 @@ func (l *link) status() (string, error) {
 		return "", err
 	}
 	if c.Store.ID == nil {
+		if st.State == unlinked {
+			kept = fmt.Sprintf("WhatsApp unlinked it here, on %s, %s (from the phone, or WhatsApp itself did), so what it kept here is deleted.", s.here, st.At.Local().Format("2 Jan 15:04"))
+		}
 		if device, phone := l.linkedElsewhere(s); device != "" {
 			return fmt.Sprintf("Not linked here, on %s: WhatsApp is linked on %s, as +%s. %s", s.here, device, phone, kept), nil
 		}
 		return fmt.Sprintf("Not linked here, on %s, nor on any other device of yours that answered: whatsapp_sign_in links it. %s", s.here, kept), nil
 	}
 	state := "connected"
-	if !c.IsConnected() || !c.IsLoggedIn() {
+	switch {
+	case st.State == handingOff:
+		state = fmt.Sprintf("off while it's handed to %s, since %s: it's there or here once %s answers, which this device asks it every minute", st.To, st.At.Local().Format("2 Jan 15:04"), st.To)
+	case st.State == replaced:
+		state = fmt.Sprintf("stopped here %s, when another copy of this link connected, not on one of your devices that answered: whatsapp_sign_out unlinks it, and both copies stop", st.At.Local().Format("2 Jan 15:04"))
+	case !c.IsConnected() || !c.IsLoggedIn():
 		state = "not connected right now (it reconnects by itself)"
 	}
 	return fmt.Sprintf("Linked here, on %s, as +%s, %s. %s", s.here, c.Store.ID.User, state, kept), nil
@@ -222,6 +233,9 @@ func (l *link) signIn(ctx context.Context, number string) (string, error) {
 	defer l.mu.Unlock()
 	if l.client.Store.ID != nil {
 		return fmt.Sprintf("Already linked, as +%s.", l.client.Store.ID.User), nil
+	}
+	if l.st.State == unlinked {
+		l.setState(linkState{})
 	}
 	if l.qr == "" {
 		l.client.Disconnect()
@@ -283,6 +297,9 @@ func (l *link) signOut(ctx context.Context) (string, error) {
 	if l.client.Store.ID == nil {
 		return "", errors.New("WhatsApp isn't linked here")
 	}
+	if l.st.State == handingOff {
+		return "", fmt.Errorf("WhatsApp is being handed to %s: sign it out there once it's there", l.st.To)
+	}
 	if err := l.client.Logout(ctx); err != nil {
 		return "", fmt.Errorf("not signed out, and nothing deleted: %w", err)
 	}
@@ -292,15 +309,17 @@ func (l *link) signOut(ctx context.Context) (string, error) {
 	return "Signed out: this device is no longer one of WhatsApp's linked devices, and the messages it kept are deleted.", nil
 }
 
-func (l *link) handle(evt any) {
+func (l *link) handle(c *whatsmeow.Client, evt any) {
 	ctx := context.Background()
 	switch e := evt.(type) {
 	case *events.PairSuccess:
 		log.Printf("linked as +%s", e.ID.User)
 	case *events.LoggedOut:
-		log.Printf("unlinked by WhatsApp or the phone (%v)", e.Reason)
+		log.Printf("unlinked by WhatsApp or the phone (%v): deleting what it kept", e.Reason)
+		go l.unlinked(c)
 	case *events.StreamReplaced:
 		log.Printf("another copy of this link connected; this one stopped")
+		go l.replaced(c)
 	case *events.TemporaryBan:
 		log.Printf("%v", e)
 	case *events.Message:
@@ -565,6 +584,15 @@ func (l *link) lines(ctx context.Context, ms []stored, withChat bool) string {
 func (l *link) send(ctx context.Context, to, msg string) (string, error) {
 	if strings.TrimSpace(msg) == "" {
 		return "", errors.New("give the text to send")
+	}
+	l.mu.Lock()
+	st := l.st
+	l.mu.Unlock()
+	switch st.State {
+	case handingOff:
+		return "", fmt.Errorf("not sent: WhatsApp is being handed to %s; send once it's there", st.To)
+	case replaced:
+		return "", errors.New("not sent: another copy of this link connected, so it stopped here (whatsapp_status says more)")
 	}
 	c, err := l.find(ctx, to, true)
 	if err != nil {
