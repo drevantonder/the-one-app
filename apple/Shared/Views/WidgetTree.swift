@@ -13,10 +13,6 @@ struct WidgetInfo: Codable, Sendable, Equatable, Identifiable {
     /// Why its render failed, if it did; `root` then says so for shells that don't know this.
     var error: String?
     var root: WidgetNode
-    /// One line on what it shows, for the widget gallery.
-    var description: String?
-    /// What a person may choose for each copy of it they put on a page.
-    var options: [WidgetOption]?
     /// Each copy this user put on the page with options of their own, drawn with them, by its id.
     var placed: [String: Placed]?
     /// The copy of it on a page this is, once a page has placed it.
@@ -38,54 +34,9 @@ struct WidgetInfo: Codable, Sendable, Equatable, Identifiable {
     func tree(_ size: String) -> WidgetNode { sizes?[size] ?? root }
 }
 
-/// One of a widget's options: a choice among values, or, with none and a true or false default, a switch.
-struct WidgetOption: Codable, Sendable, Equatable, Identifiable {
-    struct Choice: Codable, Sendable, Equatable, Hashable {
-        var value: JSONValue
-        var title: String
-    }
-    var name: String
-    var title: String
-    var defaultValue: JSONValue?
-    var choices: [Choice]?
-
-    var id: String { name }
-    var isSwitch: Bool { choices == nil && { if case .bool = defaultValue { true } else { false } }() }
-
-    enum CodingKeys: String, CodingKey { case name, title, defaultValue = "default", choices }
-}
-
-/// The sizes of an iPhone's Home Screen widgets, in its grid's cells: small 2×2, medium 4×2, large 4×4, and xl 8×4,
-/// where a page is wide enough.
+/// The sizes of an iPhone's Home Screen widgets: small, medium, large, and xl where a page is wide enough.
 enum WidgetSize {
     static let all = ["small", "medium", "large", "xl"]
-
-    static func cells(_ size: String) -> (w: Int, h: Int) {
-        switch size {
-        case "small": (2, 2)
-        case "large": (4, 4)
-        case "xl": (8, 4)
-        default: (4, 2)
-        }
-    }
-
-    static func title(_ size: String) -> String {
-        switch size {
-        case "small": String(localized: "Small")
-        case "large": String(localized: "Large")
-        case "xl": String(localized: "Extra Large")
-        default: String(localized: "Medium")
-        }
-    }
-
-    static func symbol(_ size: String) -> String {
-        switch size {
-        case "small": "square"
-        case "large": "square.grid.2x2"
-        case "xl": "rectangle.split.2x1"
-        default: "rectangle"
-        }
-    }
 }
 
 /// Any JSON value: an operation's input, as a widget gives it.

@@ -21,7 +21,7 @@ struct MacApp: App {
     }
 
     /// `<cli>://open?app=…&screen=…&params=…&scope=…` opens an app's screen in the window, as on a phone (a widget's
-    /// link); `<cli>://page?scope=…` a page, its Services folder over it with `folder=services`; `<cli>://settings`, or
+    /// link); `<cli>://page?scope=…` a page, or its Services with `folder=services`; `<cli>://settings`, or
     /// `…/settings/<item>`, opens Settings or one of its screens.
     private func open(_ url: URL) {
         let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
@@ -33,8 +33,7 @@ struct MacApp: App {
             store.selection = .screen(ScreenRoute(app: app, screen: value("screen") ?? "main", params: value("params") ?? "{}", scope: value("scope")))
         } else if url.host() == "page", let scope = value("scope") {
             store.path = []
-            store.selection = .page(scope)
-            if value("folder") == "services" { store.sheet = .services(scope) }
+            store.selection = value("folder") == "services" ? .services(scope) : .page(scope)
         } else if url.host() == "settings" {
             store.path = []
             store.selection = url.pathComponents.dropFirst().first.map { .setting($0) } ?? .settings

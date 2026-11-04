@@ -79,7 +79,8 @@ struct AppScreen: View {
     }
 
     private var defaultTitle: String {
-        if settings { return store.settingsItem(route.screen)?.title ?? String(localized: "Settings") }
+        // A page names itself.
+        if settings { return route.screen == "pages" ? "" : store.settingsItem(route.screen)?.title ?? String(localized: "Settings") }
         let app = store.app(route.app)
         return app?.screens?.first { $0.name == route.screen }?.title ?? app?.label ?? ""
     }
@@ -634,24 +635,30 @@ enum WarmWebKit {
     }
 }
 
-/// What a shell shows for a route: a page, an app's screen, Settings or one of its screens, or a page's Services.
+/// What a shell shows for a route: a page, an app's screen, Settings or one of its screens, or a page's Services. The
+/// client's own screens (src/screen/) draw a page, Settings and Services, the same on every client.
 struct RouteView: View {
     @Environment(Store.self) private var store
     var route: Route
-    var open: (Route) -> Void
 
     var body: some View {
         content.frame(maxWidth: .infinity, maxHeight: .infinity).groupedBackground()
     }
 
+    /// A page alone, by its scope (`settings` for Settings); a Mac's window shows one at a time, picked in its sidebar.
+    private func page(_ scope: String) -> some View {
+        let screen = ScreenRoute(app: "", screen: "pages", params: Store.params(["scope": scope]))
+        return AppScreen(route: screen, settings: true).id(screen)
+    }
+
     @ViewBuilder private var content: some View {
         switch route {
         case .page(let scope):
-            if let page = store.page(scope) { PageView(page: page, open: open) }
+            page(scope)
         case .screen(let screen):
             AppScreen(route: screen).id(screen)
         case .settings:
-            SettingsPage(open: open)
+            page("settings")
         case .setting(let name, let params):
             // An item with an app (the App Store) opens that app.
             if let app = store.settingsItem(name)?.app {
@@ -661,7 +668,8 @@ struct RouteView: View {
                 AppScreen(route: screen, settings: true).id(screen)
             }
         case .services(let scope):
-            if let page = store.page(scope) { ServicesView(page: page, open: open) }
+            let screen = ScreenRoute(app: "", screen: "services", params: Store.params(["scope": scope]))
+            AppScreen(route: screen, settings: true).id(screen)
         }
     }
 }
@@ -670,10 +678,9 @@ extension Store {
     /// A request for a Vault item, in the Vault's sheet: whether it was allowed, once the sheet is gone, or once it's
     /// answered somewhere else (another device, an agent's CLI), which closes the sheet.
     func ask(scope: String, id: String) async throws -> Bool {
-        #if SCREENS
+        #if os(iOS)
         // The request's screen, every client's, which closes once it's answered here or anywhere else.
-        let params = (try? JSONSerialization.data(withJSONObject: ["scope": scope, "id": id])).map { String(decoding: $0, as: UTF8.self) } ?? "{}"
-        _ = await present(.setting("request", params: params))
+        _ = await present(.setting("request", params: Self.params(["scope": scope, "id": id])))
         return try await node.vaultRequests(scope: scope, id: id).first?.state == "set"
         #else
         let sheet = Sheet.vault(scope: scope, id: id)

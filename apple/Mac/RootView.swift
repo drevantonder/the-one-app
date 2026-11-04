@@ -38,11 +38,8 @@ struct RootView: View {
                 switch sheet {
                 case .pair: PairSheet()
                 case .join: JoinSheet()
-                case .pages: PagesEditor()
                 case .vault(let scope, let id): VaultRequestSheet(scope: scope, id: id)
                 case .ask(let ask): VaultRequestSheet(scope: ask.scope, id: "", ask: ask)
-                case .addWidget(let scope): AddWidgetSheet(scope: scope)
-                case .services(let scope): ServicesSheet(scope: scope)
                 }
             }
             .environment(\.raised, true)
@@ -82,45 +79,13 @@ private struct MainView: View {
                 @Bindable var store = store
                 NavigationStack(path: $store.path) {
                     Group {
-                        if let selection = store.selection { RouteView(route: selection, open: open) }
+                        if let selection = store.selection { RouteView(route: selection) }
                     }
-                    .navigationDestination(for: Route.self) { RouteView(route: $0, open: open) }
+                    .navigationDestination(for: Route.self) { RouteView(route: $0) }
                 }
                 .id(store.selection)
             }
         }
-    }
-
-    /// An app, or a Settings screen, opens in place of the page, selected in the sidebar; a page's Services, as a
-    /// sheet over it.
-    private func open(_ route: Route) {
-        switch route {
-        case .screen, .setting: store.selection = route
-        case .services(let scope): store.sheet = .services(scope)
-        default: store.path.append(route)
-        }
-    }
-}
-
-/// A page's Services, over the page: what it opens (a settings screen, the App Store) opens in the window.
-private struct ServicesSheet: View {
-    @Environment(Store.self) private var store
-    @Environment(\.dismiss) private var dismiss
-    var scope: String
-
-    var body: some View {
-        NavigationStack {
-            if let page = store.page(scope) {
-                ServicesView(page: page) { route in
-                    dismiss()
-                    if case .screen = route { store.selection = route } else { store.path.append(route) }
-                }
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }
-                }
-            }
-        }
-        .frame(width: 460, height: 560)
     }
 }
 

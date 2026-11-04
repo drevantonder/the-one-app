@@ -53,10 +53,10 @@ struct SettingsItem: Decodable, Sendable, Equatable, Identifiable {
     var id: String { name }
 }
 
-/// How one person arranged a page: its apps and the widgets they put there, in order, and the
-/// apps they took off it.
+/// How one person arranged a page, which the shared page keeps: its apps and the widgets they put there, in order;
+/// and on their own page, how they ordered their groups' pages and which they hid.
 struct Arrangement: Codable, Sendable, Equatable {
-    struct Item: Codable, Sendable, Equatable, Hashable {
+    struct Item: Codable, Sendable, Equatable {
         var app: String
         /// A widget's name, with the id of this copy of it, its size and the options chosen for it; nil for an icon.
         var widget: String?
@@ -64,8 +64,12 @@ struct Arrangement: Codable, Sendable, Equatable {
         var size: String?
         var options: [String: JSONValue]?
     }
+    struct Pages: Codable, Sendable, Equatable {
+        var order: [String]?
+        var hidden: [String]?
+    }
     var items: [Item]
-    var hidden: [String]?
+    var pages: Pages?
 }
 
 struct Machine: Codable, Sendable, Equatable {
@@ -143,35 +147,25 @@ struct AppInfo: Decodable, Sendable, Equatable, Identifiable {
         var name: String
         var title: String?
     }
-    struct Op: Decodable, Sendable, Equatable {
-        var name: String
-    }
     struct Widget: Decodable, Sendable, Equatable {
         var name: String
     }
     var name: String
     var title: String?
-    /// One line on what it's for.
-    var description: String?
     var icon: String?
     /// Its tile's colour, as hex, if it declares one; and its own picture, as a data URL, if it ships one.
     var color: String?
     var image: String?
     /// `icon` when `image` is a finished app icon, drawn edge to edge; else it's a logo, inset on white.
     var imageKind: String?
-    var owner: String?
-    var instructions: String?
     var screens: [Screen]?
-    var ops: [Op]?
     var widgets: [Widget]?
     /// The scopes it is installed in that the asker may use: `user:<id>`, `group:<id>`, `global`.
     var installed: [String]?
     var deploys: Int?
-    /// What it asks the Vault for, by name.
-    var vault: [String: VaultNeed]?
 
     enum CodingKeys: String, CodingKey {
-        case name, title, description, icon, color, image, imageKind = "image_kind", owner, instructions, screens, ops, widgets, installed, deploys, vault
+        case name, title, icon, color, image, imageKind = "image_kind", screens, widgets, installed, deploys
     }
 
     var id: String { name }
@@ -180,14 +174,16 @@ struct AppInfo: Decodable, Sendable, Equatable, Identifiable {
     var hasScreens: Bool { has(screen: "main") }
     /// A service: nothing to open and no widget, so it goes in a page's Services folder rather than having an icon.
     var isService: Bool { !hasScreens && (widgets ?? []).isEmpty }
-    /// Whether it keeps accounts (a connector: `accounts`, `sign_in`, `sign_out`), which its Services folder lists.
-    var hasAccounts: Bool { has(op: "accounts") }
     func has(screen: String) -> Bool { screens?.contains { $0.name == screen } == true }
-    func has(op: String) -> Bool { ops?.contains { $0.name == op } == true }
-    /// Whether its accounts are Vault items its sign-in makes, so Add Account may offer ones that are there.
-    var keepsAccounts: Bool { vault?.values.contains { $0.accounts == true } == true }
     /// Its pages: the asker's own scope is the page `user`.
     var scopes: [String] { (installed ?? []).map { $0.hasPrefix("user:") ? "user" : $0 } }
+}
+
+extension AppTile {
+    /// `app`'s tile; `seed` names it when it's not known here.
+    init(app: AppInfo?, seed: String, size: CGFloat) {
+        self.init(icon: app?.icon, seed: app?.name ?? seed, color: app?.color, image: app?.image, imageKind: app?.imageKind, size: size)
+    }
 }
 
 struct NodeEvent: Codable, Sendable {
@@ -353,17 +349,6 @@ struct HTTPNode: NodeTransport {
             continuation.onTermination = { _ in task.cancel() }
         }
     }
-}
-
-/// What an app asks the Vault for: a title, the fields it wants, where they're sent, and whether its sign-in makes them.
-struct VaultNeed: Decodable, Sendable, Equatable {
-    var title: String?
-    var accounts: Bool?
-    /// The type of the items it's for; the op that makes a new one (given its title); and the ops a person runs on
-    /// one (given its id as `item`), by name, with each button's title.
-    var type: String?
-    var make: String?
-    var actions: [String: String]?
 }
 
 /// An item of the Vault as `GET /v1/vault` lists it: a secret field never with its value.
@@ -560,23 +545,8 @@ struct NodeClient: Sendable {
 
     // MARK: Apps and the Vault
 
-    func install(app: String, scope: String, _ installed: Bool) async throws {
-        try await post("v1/install", ["app": app, "scope": scope, "installed": installed])
-    }
-
-    /// Deletes an app (`deleted`), restores it (`restored`) or erases it (`erased`), for someone acting for its owner.
-    func retire(app: String, how: String) async throws {
-        try await post("v1/retire", ["app": app, "how": how])
-    }
-
     /// The Vault's items on a page this user manages, or on all of them.
     func vault(scope: String? = nil) async throws -> [VaultItem] { try await get("v1/vault", scope.map { ["scope": $0] } ?? [:]) }
-
-    /// Arranges one of this user's pages, for them alone.
-    func arrange(page: String, _ arrangement: Arrangement) async throws {
-        let items = try JSONSerialization.jsonObject(with: JSONEncoder().encode(arrangement.items))
-        try await post("v1/arrange", ["page": page, "items": items, "hidden": arrangement.hidden ?? []])
-    }
 
     /// Makes an item (no `id`) or changes one: fields as `{ name: { value, secret } }`, `apps`, `hosts`, `deleted`.
     @discardableResult

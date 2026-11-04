@@ -107,12 +107,6 @@ struct Sidebar: View {
                             .contentShape(.rect)
                     }
                     .buttonStyle(.plain)
-                    .contextMenu {
-                        if page.group != nil {
-                            Button("Hide \(page.title)") { store.setHidden(page.scope, true) }
-                        }
-                        Button("Edit Pages…") { store.sheet = .pages }
-                    }
                 }
                 .collapsible(false)
             }
@@ -137,5 +131,45 @@ struct Sidebar: View {
             }
             .collapsible(false)
         }
+    }
+}
+
+/// A page's Services folder, as an iOS folder's icon: its apps' icons, small, nine to a page, on frosted glass;
+/// with none, nine faint empty places, so it reads as an empty folder.
+private struct FolderTile: View {
+    var apps: [AppInfo]
+    var size: CGFloat
+
+    var body: some View {
+        let inset = size * 0.13, gap = size * 0.06
+        let mini = (size - inset * 2 - gap * 2) / 3
+        let shape = RoundedRectangle(cornerRadius: size * 0.225, style: .continuous)
+        LazyVGrid(columns: Array(repeating: GridItem(.fixed(mini), spacing: gap), count: 3), alignment: .leading, spacing: gap) {
+            if apps.isEmpty {
+                ForEach(0..<9, id: \.self) { _ in
+                    RoundedRectangle(cornerRadius: mini * 0.25, style: .continuous)
+                        .fill(.primary.opacity(0.07))
+                        .frame(width: mini, height: mini)
+                }
+            } else {
+                ForEach(apps.prefix(9)) { app in
+                    AppTile(app: app, seed: app.name, size: mini)
+                }
+            }
+        }
+        .padding(inset)
+        .frame(width: size, height: size, alignment: .topLeading)
+        .background(Kit.card, in: shape)
+        .accessibilityHidden(true)
+    }
+}
+
+/// A Settings item's icon: its symbol on its colour, as an app's tile.
+private struct SettingIcon: View {
+    var item: SettingsItem
+    var size: CGFloat
+
+    var body: some View {
+        AppTile(icon: item.icon, seed: item.name, color: item.color, size: size)
     }
 }

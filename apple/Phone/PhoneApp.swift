@@ -213,11 +213,7 @@ struct PhoneRoot: View {
         case .welcome:
             WelcomeView()
         case .joined:
-            #if SCREENS
             ScreensHome()
-            #else
-            PagesView()
-            #endif
         }
     }
 }

@@ -243,37 +243,24 @@ extension Color {
 }
 
 extension EnvironmentValues {
-    /// In a sheet, which is raised: in the dark its page is a card's grey and its cards a step lighter, as the kit's
-    /// `data-raised`.
+    /// In a sheet, which is raised: in the dark its page is a card's grey, as the kit's `data-raised`.
     @Entry var raised = false
 }
 
-/// The page's background, or a card's, a step lighter in a sheet in the dark.
+/// The page's background, a step lighter in a sheet in the dark.
 private struct KitBackground: ViewModifier {
-    var card: Bool
-    var radius: CGFloat
     @Environment(\.raised) private var raised
     @Environment(\.colorScheme) private var scheme
 
     func body(content: Content) -> some View {
-        let up = raised && scheme == .dark
-        if card {
-            content.background(up ? Kit.raised : Kit.card, in: .rect(cornerRadius: radius, style: .continuous))
-        } else {
-            content.background(up ? Kit.card : Kit.bg)
-        }
+        content.background(raised && scheme == .dark ? Kit.card : Kit.bg)
     }
 }
 
 extension View {
     /// The page's background, behind its cards.
     func groupedBackground() -> some View {
-        modifier(KitBackground(card: false, radius: 0))
-    }
-
-    /// A card, with rows inside; a widget's is rounder.
-    func groupedContainer(radius: CGFloat = 26) -> some View {
-        modifier(KitBackground(card: true, radius: radius))
+        modifier(KitBackground())
     }
 }
 

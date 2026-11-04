@@ -62,34 +62,3 @@ struct PairSheet: View {
         copied = true
     }
 }
-
-/// Reordering and hiding group pages, for this user on this device. Their own page and everyone's stay put.
-struct PagesEditor: View {
-    @Environment(Store.self) private var store
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        NavigationStack {
-            List {
-                Section {
-                    ForEach(store.allPages.filter { $0.group != nil }) { page in
-                        Toggle(page.title, isOn: Binding(get: { !store.hiddenPages.contains(page.scope) }, set: { store.setHidden(page.scope, !$0) }))
-                    }
-                    .onMove { store.movePages(from: $0, to: $1) }
-                } footer: {
-                    Text("Drag to reorder; switch one off to hide it.")
-                }
-            }
-            #if os(iOS)
-            .environment(\.editMode, .constant(.active))
-            #endif
-            .navigationTitle("Pages")
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
-            }
-        }
-        #if os(macOS)
-        .frame(width: 360, height: 360)
-        #endif
-    }
-}
