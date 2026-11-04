@@ -302,6 +302,8 @@ pub struct Need {
 /// who there.
 const VAULT: &str = "vault";
 const LOG: &str = "log";
+/// The node's database of the blobs a scope's entries name (`bucket::BLOBS`).
+const BLOBS: &str = "blobs";
 /// An app's own databases: its data, and its sidecars' records.
 const APP_DATABASE: &str = "main";
 const SIDECAR_DATABASE: &str = "sidecar";
@@ -315,14 +317,20 @@ pub fn app_of(route: &str) -> Option<&str> {
 /// Whether a client hands a node the key of `need`'s database with a kind of request (`route`, as `app_of` reads it),
 /// when the node asks (428): only what that kind of request can use. One that runs an app, that app's databases; an
 /// MCP request (`/mcp`), which may run any, or widgets and badges, which run every app's, apps' own databases; and each
-/// of those the node's Vault and log of a scope too (which fill in its items, and say who's who there). The Vault's
+/// of those the node's Vault and log of a scope too (which fill in its items, and say who's who there), and `global`'s
+/// blobs, where apps' deployed code is (a node that keeps nothing, the serverless node, reads it there). The Vault's
 /// routes, its Vault and log; any other, the log alone. `kernel/shared/crypto.js`'s `mayHand` is the same.
+///
+/// `global`'s blobs are those its entries name (deploys' bundles, releases, apps' icons), which everyone in the install
+/// may read already: any of them may add any app, and read its code. Another scope's are its own people's files, and
+/// never go with a request.
 pub fn may_hand(route: &str, need: &Need) -> bool {
     let node = |of: &[&str]| need.app == crate::members::APP && of.contains(&need.database.as_str());
     let apps = need.app != crate::members::APP && [APP_DATABASE, SIDECAR_DATABASE].contains(&need.database.as_str());
+    let code = need.scope == "global" && node(&[BLOBS]);
     match (app_of(route), route) {
-        (Some(app), _) => need.app == app || node(&[VAULT, LOG]),
-        (None, "/mcp" | "/v1/widgets" | "/v1/badges") => apps || node(&[VAULT, LOG]),
+        (Some(app), _) => need.app == app || node(&[VAULT, LOG]) || code,
+        (None, "/mcp" | "/v1/widgets" | "/v1/badges") => apps || node(&[VAULT, LOG]) || code,
         (None, r) if r == "/v1/vault" || r.starts_with("/v1/vault/") => node(&[VAULT, LOG]),
         (None, _) => node(&[LOG]),
     }

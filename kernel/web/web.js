@@ -29,8 +29,10 @@ window.__one = {};
   const SCREENS = "one.screens.";
   const LAST = "one.last.window";
   const KEPT_SCREENS = "one.screens";
+  // What each kind of request needed (device.js), which another sign-in here needn't start from.
+  const NEEDS = "one.needs";
   const forgetScreens = () => {
-    Object.keys(localStorage).filter((k) => k.startsWith(SCREENS) || k === LAST).forEach((k) => localStorage.removeItem(k));
+    Object.keys(localStorage).filter((k) => k.startsWith(SCREENS) || k === LAST || k === NEEDS).forEach((k) => localStorage.removeItem(k));
     window.caches?.delete(KEPT_SCREENS).catch(() => {});
     return answers.forget();
   };

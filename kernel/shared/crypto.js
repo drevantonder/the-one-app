@@ -414,9 +414,11 @@ export function appOf(route) {
 /// why.
 export function mayHand(route, need) {
   const node = (of) => need.app === "node" && of.includes(need.database);
+  // Apps' deployed code, which everyone in the install may read.
+  const code = need.scope === "global" && node(["blobs"]);
   const app = appOf(route);
-  if (app) return need.app === app || node(["vault", "log"]);
-  if (["/mcp", "/v1/widgets", "/v1/badges"].includes(route)) return (need.app !== "node" && ["main", "sidecar"].includes(need.database)) || node(["vault", "log"]);
+  if (app) return need.app === app || node(["vault", "log"]) || code;
+  if (["/mcp", "/v1/widgets", "/v1/badges"].includes(route)) return (need.app !== "node" && ["main", "sidecar"].includes(need.database)) || node(["vault", "log"]) || code;
   if (route === "/v1/vault" || route.startsWith("/v1/vault/")) return node(["vault", "log"]);
   return node(["log"]);
 }

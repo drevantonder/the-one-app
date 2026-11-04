@@ -207,7 +207,10 @@ fn the_kernel_and_nodes_agree_on_keys_and_seals() {
         use one::keys::{Need, app_of, may_hand, oldest_needed};
         let routes = ["call board", "call node", "/v1/screens/board", "/v1/screens/board/main", "/mcp", "/v1/widgets", "/v1/badges", "/v1/vault", "/v1/vault/requests", "/v1/state", "/v1/entries", "/v1/apps", "call "];
         let dbs = [("board", "main"), ("board", "sidecar"), ("notes", "main"), ("board", "other"), ("node", "vault"), ("node", "log"), ("node", "main"), ("node", "blobs")];
-        let hands: Vec<(String, Need)> = routes.iter().flat_map(|r| dbs.iter().map(|(app, database)| (r.to_string(), Need { scope: "user:ab".into(), epoch: 1, app: app.to_string(), database: database.to_string() }))).collect();
+        let mut hands: Vec<(String, Need)> = Vec::new();
+        for (route, scope, (app, database)) in routes.iter().flat_map(|r| ["user:ab", "global"].map(|s| (r, s))).flat_map(|(r, s)| dbs.iter().map(move |d| (r, s, d))) {
+            hands.push((route.to_string(), Need { scope: scope.into(), epoch: 1, app: app.to_string(), database: database.to_string() }));
+        }
         let hints: Vec<(Option<String>, u32)> = [None, Some(r#"{"at":9,"copy":0,"epoch":0}"#), Some(r#"{"at":9,"copy":7,"epoch":2}"#), Some(r#"{"at":9,"copy":7,"epoch":5}"#), Some(r#"{"at":9,"copy":7}"#), Some("not a hint"), Some(r#"{"copy":-1,"epoch":2}"#)]
             .into_iter()
             .flat_map(|h| [0, 1, 3].map(|n| (h.map(str::to_string), n)))
@@ -225,6 +228,11 @@ fn the_kernel_and_nodes_agree_on_keys_and_seals() {
         assert!(may_hand("call board", &need("board", "main")) && !may_hand("call board", &need("notes", "main")));
         assert!(may_hand("/v1/entries", &need("node", "log")) && !may_hand("/v1/entries", &need("board", "main")) && !may_hand("/v1/state", &need("node", "vault")));
         assert!(may_hand("/v1/vault", &need("node", "vault")) && !may_hand("/v1/vault", &need("board", "main")));
+        // Apps' code, `global`'s blobs, goes to a node running an app (the serverless node keeps none); a scope's own
+        // blobs, its people's files, never.
+        let blobs = |scope: &str| Need { scope: scope.into(), epoch: 1, app: "node".into(), database: "blobs".into() };
+        assert!(may_hand("call board", &blobs("global")) && may_hand("/v1/screens/board", &blobs("global")) && may_hand("/v1/badges", &blobs("global")));
+        assert!(!may_hand("call board", &blobs("user:ab")) && !may_hand("/mcp", &blobs("group:cd")) && !may_hand("/v1/state", &blobs("global")));
         assert_eq!(oldest_needed(Some(br#"{"at":9,"copy":7,"epoch":2}"#), 3), 2, "from the epoch its newest copy is under");
     }
 
