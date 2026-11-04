@@ -69,6 +69,44 @@ impl Node {
         Ok(out)
     }
 
+    /// Every lab in the install, for an admin's Settings › Labs (`src/labs.rs`): the core's, then each app's, then each
+    /// service's, each `{ setting, title, description, on }`, an app's or service's with `app` or `service`, its
+    /// `name`, `title`, `icon` and `color`.
+    pub async fn labs(&self, viewer: &Caller) -> Result<Vec<Value>> {
+        let on = self.with(|i| {
+            ensure!(i.r.members.is_admin(&viewer.user), "Only admins change Labs.");
+            Ok(crate::labs::on_keys(&i.r.members))
+        })?;
+        let lab = |setting: String, name: &str, l: &Value| json!({ "title": l["title"].as_str().unwrap_or(name), "description": l["description"].as_str().unwrap_or(""), "on": on.contains(&setting), "setting": setting });
+        let mut out: Vec<Value> = crate::labs::CORE.iter().map(|(name, title, description)| lab(format!("lab.{name}"), name, &json!({ "title": title, "description": description }))).collect();
+        let from = |kind: &str, d: &Value, l: &mut Value| {
+            l[kind] = json!({ "name": d["name"], "title": d["title"].as_str().filter(|t| !t.is_empty()).or(d["name"].as_str()), "icon": d["icon"], "color": d["color"] });
+        };
+        let mut apps = self.catalog(viewer, false).await?;
+        apps.sort_by_key(|a| a["title"].as_str().unwrap_or("").to_lowercase());
+        for a in apps.iter().filter(|a| a["deleted"].is_null()) {
+            for (name, l) in a["labs"].as_object().into_iter().flatten() {
+                let mut l = lab(crate::labs::app_key(a["name"].as_str().unwrap_or(""), name), name, l);
+                from("app", a, &mut l);
+                out.push(l);
+            }
+        }
+        let mut services: Vec<Value> = self.with(|i| {
+            let here = self.sidecars_here(i).into_iter().map(|d| d.2);
+            Ok(here.chain(i.peers.iter().filter(|(k, _)| i.online(k)).flat_map(|(_, s)| s.sidecars.iter().map(|d| d.2.clone()))).collect())
+        })?;
+        services.sort_by_key(|d| d["title"].as_str().or(d["name"].as_str()).unwrap_or("").to_lowercase());
+        services.dedup_by(|a, b| a["name"] == b["name"]);
+        for d in &services {
+            for (name, l) in d["labs"].as_object().into_iter().flatten() {
+                let mut l = lab(format!("lab.service.{}.{name}", d["name"].as_str().unwrap_or("")), name, l);
+                from("service", d, &mut l);
+                out.push(l);
+            }
+        }
+        Ok(out)
+    }
+
     /// `apps`, as a window draws them: what shows each one and where (no operations, schemas or instructions, which
     /// whoever needs them asks the whole list for), its picture named (`/v1/images/<name>`) rather than in it, so the
     /// list is small and each picture is kept for good where it's shown.
@@ -173,8 +211,13 @@ impl Node {
                 if let Ok(Value::Object(d)) = self.0.apps.describe(&name).await {
                     // A fork's module may still give its first name; the install's name for it is the one that counts.
                     let declared = Schedule::all(&Value::Object(d.clone()));
-                    for (k, v) in d.into_iter().filter(|(k, _)| k != "name" && k != "schedules" && (mine || matches!(k.as_str(), "title" | "icon" | "color" | "domain" | "tagline" | "description" | "uses" | "connector" | "needs" | "advanced"))) {
+                    for (k, v) in d.into_iter().filter(|(k, _)| k != "name" && k != "schedules" && (mine || matches!(k.as_str(), "title" | "icon" | "color" | "domain" | "tagline" | "description" | "uses" | "connector" | "needs" | "advanced" | "labs"))) {
                         info[k] = v;
+                    }
+                    // An op of a lab that's off isn't there.
+                    if let Some(ops) = info["ops"].as_array_mut() {
+                        let on = self.with(|i| Ok(crate::labs::on_keys(&i.r.members)))?;
+                        ops.retain(|o| o["lab"].as_str().is_none_or(|lab| on.contains(&crate::labs::app_key(&name, lab))));
                     }
                     if mine {
                         let (list, activity) = self.schedules_of(viewer, &name, &declared)?;

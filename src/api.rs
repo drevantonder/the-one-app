@@ -173,6 +173,7 @@ pub fn routes() -> Router<Node> {
         .route("/v1/endpoint", get(endpoint))
         .route("/v1/keys", get(keys_get).post(keys_post))
         .route("/v1/apps", get(apps))
+        .route("/v1/labs", get(labs))
         .route("/v1/images/{name}", get(image))
         .route("/v1/call", post(call).layer(axum::extract::DefaultBodyLimit::max(64 << 20)))
         .route("/v1/widgets", get(widgets))
@@ -280,6 +281,7 @@ pub const SIGNED_IN: &[&str] = &[
     "/v1/endpoint",
     "/v1/keys",
     "/v1/apps",
+    "/v1/labs",
     "/v1/call",
     "/v1/widgets",
     "/v1/badges",
@@ -688,6 +690,11 @@ async fn apps(State(node): State<Node>, me: Me, headers: axum::http::HeaderMap, 
     let body = serde_json::to_string(&apps)?;
     let tag = crate::screen::tag(&body);
     Ok(tagged(&headers, tag, ([(axum::http::header::CONTENT_TYPE, "application/json")], body)))
+}
+
+/// Every lab, for an admin's Settings › Labs (`Node::labs`).
+async fn labs(State(node): State<Node>, me: Me) -> Reply {
+    Ok(Json(json!(node.labs(&me.caller).await?)))
 }
 
 /// A picture a window's app list names (`Node::apps_drawn`), for anyone who has its name, which is its content's:

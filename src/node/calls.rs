@@ -300,6 +300,14 @@ impl Node {
             self.record(&req.app, req, me, Some(&why));
             return Ok(Reply::Error(why));
         }
+        // An op of a lab that's off isn't there.
+        let described = self.0.apps.describe(&req.app).await?;
+        if let Some(lab) = described["ops"].as_array().into_iter().flatten().find(|o| o["name"] == req.op.as_str()).and_then(|o| o["lab"].as_str())
+            && !self.with(|i| Ok(crate::labs::on(&i.r.members, &crate::labs::app_key(&req.app, lab))))?
+        {
+            let lab_title = described["labs"][lab]["title"].as_str().unwrap_or(lab);
+            return Ok(Reply::Error(format!("{lab_title} is off. An admin can turn it on in Settings › Labs.")));
+        }
         // A sign-in's call that lacks a key of a scope it names fails here, before it runs or writes anything: its
         // app's database's, and the Vault's there too if it says it uses items.
         let mut want: Vec<(Scope, &str, &str)> = scopes.iter().map(|s| (s.clone(), req.app.as_str(), DATABASE)).collect();
@@ -1062,6 +1070,6 @@ fn prepare(node: &Node, i: &Install, req: &CallRequest, me: &Caller, title: &str
     if let Some(s) = scopes.iter().find(|s| !i.r.holds(s)) {
         return Ok(Err(format!("it can't open {} yet", scope_name(i, &s.to_string()))));
     }
-    let ctx = Context { me: node_me(node, m, me), now: now_ms(), scopes: handles(m, &scopes, &me.user), read_only: false, token: String::new(), from: None, address: address(m), handles: m.handles() };
+    let ctx = Context { me: node_me(node, m, me), now: now_ms(), scopes: handles(m, &scopes, &me.user), read_only: false, token: String::new(), from: None, address: address(m), handles: m.handles(), labs: crate::labs::on_keys(m) };
     Ok(Ok((ctx, scopes)))
 }

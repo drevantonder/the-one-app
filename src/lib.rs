@@ -37,6 +37,7 @@ pub mod entry;
 pub mod sign_in;
 #[cfg(feature = "node")]
 pub mod skills;
+pub mod labs;
 pub mod members;
 pub mod rank;
 #[cfg(feature = "node")]

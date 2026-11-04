@@ -34,7 +34,10 @@ function describe() {
     name: app.name, title: app.title, icon: app.icon, color: app.color, domain: app.domain, ...(app.tagline ? { tagline: String(app.tagline) } : {}), description: app.description || "", instructions: app.instructions || "",
     ...(app.connector ? { connector: true } : {}), ...(app.advanced ? { advanced: true } : {}), ...(app.needs ? { needs: String(app.needs) } : {}),
     ...(app.vault && Object.keys(app.vault).length ? { vault: app.vault } : {}),
-    ops: Object.entries(app.ops || {}).map(([name, o]) => ({ name, description: o.description || "", input: o.input || {}, ...(o.reads ? { reads: true } : {}), ...(o.confirm ? { confirm: true } : {}), ...(o.words ? { words: o.words.map(String) } : {}) })),
+    // Features still being built, each off until an admin switches it on in Settings › Labs (src/labs.rs). An op
+    // with `lab` is there only while its lab is on.
+    ...(app.labs && Object.keys(app.labs).length ? { labs: Object.fromEntries(Object.entries(app.labs).map(([name, l]) => [name, { title: String(l.title || name), description: String(l.description || "") }])) } : {}),
+    ops: Object.entries(app.ops || {}).map(([name, o]) => ({ name, description: o.description || "", input: o.input || {}, ...(o.reads ? { reads: true } : {}), ...(o.confirm ? { confirm: true } : {}), ...(o.words ? { words: o.words.map(String) } : {}), ...(o.lab ? { lab: String(o.lab) } : {}) })),
     widgets: Object.entries(app.widgets || {}).map(([name, w]) => {
       const size = w.size || "medium";
       const options = Object.entries(w.options || {}).map(([name, o]) => ({ name, title: o.title || name, default: o.default ?? null }));
@@ -143,6 +146,8 @@ function context(ask, body, appends, later) {
   const find = (id) => scopes.find((s) => s.id === id) || null;
   return {
     me: body.me,
+    /// Each of the app's labs, by name: true while an admin has it switched on in Settings › Labs.
+    labs: Object.fromEntries(Object.keys(app.labs || {}).map((name) => [name, body.labs?.[name] === true])),
     /// The app whose ctx.apps made this call, if one did.
     from: body.from ?? null,
     /// The port this node's local API answers on at 127.0.0.1, the white label's (config.toml) unless it was started

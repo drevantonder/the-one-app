@@ -96,7 +96,7 @@ const PAGE = `
   const asking = new Set(); // devices this page is asking to let agents in
   const pending = new Map(); // by device: the switch's new state, until the device has it
   const notes = {}; // by device: why a switch went back
-  let devs = [], sessions = [], drawn = "", listed = "", asked = 0;
+  let devs = [], sessions = [], mirroring = false, drawn = "", listed = "", asked = 0;
   const host = (s) => String(s || "").split(".")[0];
   const laptop = '<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="4" y="5" width="16" height="11" rx="1.5"/><path d="M2 19h20"/></svg>';
 
@@ -129,7 +129,7 @@ const PAGE = `
 
   function tile(d) {
     const v = view(d);
-    const mirror = d.kind === "mac" ? \`
+    const mirror = mirroring && d.kind === "mac" ? \`
       <div style="margin-top:20px" data-mirror>
         <div class="shot-pic" style="aspect-ratio:9/16;max-width:160px">
           \${d.mirroring?.running ? \`<img src="\${pics[d.device + ':mirror'] || ""}" alt="">\` : \`<svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="7" y="2.5" width="10" height="19" rx="2"/><path d="M11 18.5h2"/></svg>\`}
@@ -256,7 +256,7 @@ const PAGE = `
   async function load() {
     const n = ++asked, r = await one.call("_devices", {});
     if (n !== asked) return false;
-    ({ devices: devs, sessions } = r);
+    ({ devices: devs, sessions, mirroring } = r);
     for (const d of devs) if (pending.has(d.device)) d.on = pending.get(d.device);
     return true;
   }
@@ -345,6 +345,9 @@ export default {
   needs: "Needs a Linux device with Podman, or a Mac",
   instructions: "Computer Use acts on devices: agent devices (Linux with a browser, Windows, Android and iPhones, on the person's own devices) and the person's own devices they let agents use (own: true in computer_list, like their Mac). Agent Devices (agent-devices_*) gets you one and gives it back; Computer Use (computer_*) acts on it.\n\nTo browse, agent-devices_borrow with for (a few words the person sees) gives you a Linux device whose browser starts signed in to a browser profile's sites. Pass its name as device to every call, then:\n1. computer_browser_prepare with allow_launch true and profile {\"mode\":\"isolated_named\",\"name\":<the profile borrow gave>} starts its browser.\n2. computer_use with tool list_windows gives the browser's pid and window_id.\n3. computer_get_browser_state with those gives target_id and tab_id; with those, it reads the page and the refs of what's on it.\n4. computer_browser_navigate, _click, _type, _select and _pointer act on it; on an agent device, click and pointer take input_route \"dom_event\". Read the page again after each.\nA browser idle for 5 minutes closes: prepare it again. Give the device back with agent-devices_give_back when done; one left 15 minutes without a call is given back for you.\n\nWhen a site needs the person to sign in, agent-devices_sign_in gives them a link to do it themselves; for a challenge, give them computer_view's link. Never sign in or submit forms for them unless they asked.\n\nAnything else on a device (apps, windows, keyboard and mouse, and Windows, Android and iPhones): computer_tools lists what it takes, computer_use runs one, and computer_screen shows the screen. An iPhone takes no clicks or typing.\n\nOn the person's own device, do only what they asked of it, and never read their messages, mail, browser sessions or files unless they asked. They see in their menu bar while you use it, and can stop you.",
   uses: { sidecars: ["agent-devices", "computer"] },
+  labs: {
+    mirroring: { title: "iPhone Mirroring", description: "Use your iPhone through a Mac." },
+  },
 
   schema: {
     user: `create table sessions (id text primary key, device text not null, title text, agent text not null, came_from text, time integer not null)`,
@@ -551,11 +554,13 @@ export default {
       description: "The person's devices that agents may use once they let them, each with whether they do and who is using it now, and the recent sessions.",
       input: { type: "object", properties: {} },
       run: async (ctx) => ({
-        devices: await devices(ctx),
+        devices: (await devices(ctx)).map(({ mirroring, ...d }) => (ctx.labs.mirroring ? { ...d, mirroring } : d)),
         sessions: ctx.user ? await ctx.user.query("select * from sessions order by time desc limit 30") : [],
+        mirroring: ctx.labs.mirroring,
       }),
     },
     _mirror_status: {
+      lab: "mirroring",
       description: "Whether iPhone Mirroring is open on a Mac, as { running, title, bounds }.",
       input: { type: "object", properties: { device: DEVICE } },
       run: async (ctx, input) => {
@@ -565,6 +570,7 @@ export default {
       },
     },
     _mirror_launch: {
+      lab: "mirroring",
       description: "Opens iPhone Mirroring on a Mac (pairing happens on the phone).",
       input: { type: "object", properties: { device: DEVICE } },
       run: async (ctx, input) => {
@@ -574,6 +580,7 @@ export default {
       },
     },
     _mirror_screen: {
+      lab: "mirroring",
       description: "A picture of the iPhone Mirroring window as it is now.",
       input: { type: "object", properties: { device: DEVICE, width: { type: "integer", description: "the picture's width in pixels; default 640, at most 1920" } } },
       run: async (ctx, input) => {
@@ -583,6 +590,7 @@ export default {
       },
     },
     _mirror_use: {
+      lab: "mirroring",
       description: "Runs one of a device's tools scoped to the iPhone Mirroring window.",
       input: { type: "object", properties: { device: DEVICE, tool: { type: "string" }, args: { type: "object" } }, required: ["tool"] },
       run: async (ctx, input) => {

@@ -803,7 +803,7 @@ impl Members {
             "setting" => {
                 ensure!(self.is_admin(&w), "admins only");
                 let name = text("name")?;
-                ensure!(!name.is_empty() && name.len() <= 40 && name.bytes().all(|b| b.is_ascii_lowercase() || b == b'_'), "setting names are lowercase words joined by _");
+                ensure!(crate::labs::valid_setting(&name), "setting names are lowercase words joined by _, or a lab's (lab.…)");
                 match &data["value"] {
                     Value::Null => self.settings.remove(&name),
                     value => self.settings.insert(name, value.as_str().context("a setting is text")?.to_string()),
