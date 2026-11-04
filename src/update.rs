@@ -99,7 +99,7 @@ pub fn run(tag: Option<&str>) -> Result<()> {
     let mut build = Command::new(cargo());
     build.current_dir(&src).env("CONFIG", &config).args(["build", "--release"]);
     // Every release carries the serverless node: one without it couldn't deploy the kernel.
-    build.env("SERVERLESS", serverless(&src, &config).context("couldn't build the serverless node, so nothing was sent out")?);
+    build.env("SERVERLESS", serverless(&src, &config, "release").context("couldn't build the serverless node, so nothing was sent out")?);
     // And the web client's way to nodes: one without it couldn't reach them.
     build.env("CLIENT", client(&src, &config).context("couldn't build the web client's WebAssembly, so nothing was sent out")?);
     run_quiet(&mut build)?;
@@ -561,12 +561,19 @@ fn config(src: &Path) -> Result<(PathBuf, Option<String>)> {
 
 /// Builds the serverless node (`serverless/`) into WebAssembly and its JavaScript glue, for the release to carry: → the
 /// folder they're in. It needs Rust's wasm32-unknown-unknown target, a clang that builds for it (SQLite is C), and the
-/// wasm-bindgen of the version it's built with.
-fn serverless(src: &Path, config: &Path) -> Result<PathBuf> {
-    run_quiet(Command::new(cargo()).current_dir(src).env("CONFIG", config).args(["build", "--release", "-p", "one-serverless", "--target", "wasm32-unknown-unknown"]))
+/// wasm-bindgen of the version it's built with. `profile` is cargo's: a release's is `release`, a try install's `dev`.
+pub fn serverless(src: &Path, config: &Path, profile: &str) -> Result<PathBuf> {
+    run_quiet(Command::new(cargo()).current_dir(src).env("CONFIG", config).args(["build", "--profile", profile, "-p", "one-serverless", "--target", "wasm32-unknown-unknown"]))
         .context("build the serverless node (rustup target add wasm32-unknown-unknown)")?;
     let out = src.join("target/serverless");
-    let wasm = src.join("target/wasm32-unknown-unknown/release/one_serverless.wasm");
+    let wasm = src.join("target/wasm32-unknown-unknown").join(if profile == "dev" { "debug" } else { profile }).join("one_serverless.wasm");
+    // Its glue is only made again for a node cargo built again, as the client's is: a build that holds it (`SERVERLESS`)
+    // watches these files, so rewriting them would have that build done again.
+    let modified = |path: &Path| path.metadata().and_then(|m| m.modified()).ok();
+    let glued = out.join("one_serverless_bg.wasm");
+    if modified(&glued).is_some_and(|glued| modified(&wasm).is_some_and(|built| glued > built)) {
+        return Ok(out);
+    }
     run_quiet(Command::new("wasm-bindgen").args(["--target", "web", "--out-dir"]).arg(&out).arg(&wasm)).context("make its glue (cargo install wasm-bindgen-cli, the version in Cargo.lock)")?;
     Ok(out)
 }

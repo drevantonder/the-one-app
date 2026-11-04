@@ -112,17 +112,28 @@ fn main() {
     let out = format!("{out}pub const KERNEL: &[(&str, &[u8])] = &[{}];\n", files.join(", "));
     // The serverless node's WebAssembly and its glue (serverless/), which `update` builds into SERVERLESS where Rust
     // builds for WebAssembly, so a release carries them to devices with no Rust to deploy it from.
+    // With no SERVERLESS, the one in target/serverless, if it's there (`try serverless deploy` builds it, as `try client
+    // web` does the client's), so every build of a checkout is the same one: not the node's own, which holds `one`.
     println!("cargo:rerun-if-env-changed=SERVERLESS");
-    let serverless: Vec<String> = match std::env::var("SERVERLESS") {
-        Ok(dir) => ["one_serverless.js", "one_serverless_bg.wasm"]
+    let names = ["one_serverless.js", "one_serverless_bg.wasm"];
+    let wasm = std::env::var("TARGET").unwrap().starts_with("wasm32");
+    let explicit = std::env::var("SERVERLESS").ok();
+    let dir = explicit.clone().map(std::path::PathBuf::from).unwrap_or_else(|| std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap()).join("target/serverless"));
+    for name in names.iter().filter(|_| explicit.is_some() || !wasm) {
+        if dir.join(name).exists() {
+            println!("cargo:rerun-if-changed={}", dir.join(name).display());
+        }
+    }
+    let serverless: Vec<String> = if explicit.is_some() || (!wasm && names.iter().all(|name| dir.join(name).exists())) {
+        names
             .iter()
             .map(|name| {
-                let path = std::path::Path::new(&dir).join(name);
-                println!("cargo:rerun-if-changed={}", path.display());
+                let path = dir.join(name);
                 format!("({name:?}, include_bytes!({:?}))", std::fs::canonicalize(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display())))
             })
-            .collect(),
-        Err(_) => vec![],
+            .collect()
+    } else {
+        vec![]
     };
     let out = format!("{out}pub const SERVERLESS: &[(&str, &[u8])] = &[{}];\n", serverless.join(", "));
     // And the client's, for browsers (client/src/wasm.rs), in CLIENT, which the address serves the web client. With no

@@ -66,6 +66,9 @@ pub fn try_install(rest: &[String]) -> Result<()> {
     if rest.first().map(String::as_str) == Some("client") && rest.get(1).map(String::as_str) == Some("web") {
         web_client_built(&dir, &checkout, rest)?;
     }
+    if rest.iter().map(String::as_str).eq(["serverless", "deploy"]) {
+        serverless_built(&dir, &checkout, rest)?;
+    }
     let addr = match running(&dir) {
         Some(addr) => addr,
         None => start(&dir)?,
@@ -142,7 +145,7 @@ fn git(dir: &Path, args: &[String]) -> Result<()> {
 /// Runs the try install's serverless node beside its kernel, in its workerd, as `serverless deploy` puts one in
 /// Cloudflare: its devices answer its endpoint.
 fn serverless(dir: &Path) -> Result<()> {
-    anyhow::ensure!(one::serverless::modules().is_ok(), "this build has no serverless node: build it with SERVERLESS set, as {CLI} update does");
+    anyhow::ensure!(one::serverless::modules().is_ok(), "this build has no serverless node: run this checkout's own build, target/debug/{CLI} try serverless deploy, which builds it");
     let mut settings = load_kernel(dir)?;
     if !settings.serverless {
         settings.serverless = true;
@@ -607,15 +610,34 @@ fn web_client_built(dir: &Path, checkout: &Path, rest: &[String]) -> Result<()> 
     if !one::config::CLIENT.is_empty() && one::config::CLIENT.iter().all(|(name, bytes)| held(name, bytes)) {
         return Ok(());
     }
-    let again = format!("{}_TRY_WEB_CLIENT_EMBEDDED", CLI.to_uppercase());
-    anyhow::ensure!(std::env::var_os(&again).is_none(), "{CLI} was built again with the web client and doesn't hold it: build it with CLIENT={}", built.display());
-    eprintln!("Building {CLI} again with it (target/debug, not release)…");
-    // build.rs takes the client from target/client (what `cargo test` does too, so they build the same one) and watches
-    // the files there; the first time, it's watching none, so touching it has it look.
-    if one::config::CLIENT.is_empty() {
-        std::fs::File::options().write(true).open(checkout.join("build.rs"))?.set_modified(std::time::SystemTime::now())?;
+    rebuilt(dir, checkout, rest, &format!("target/debug/{CLI} again with the web client"))
+}
+
+/// For `try serverless deploy` from this checkout's own debug build: the serverless node's WebAssembly built (as a dev
+/// build, not release) into target/serverless, and this build made again with it, as `try client web` does with the
+/// client's, so the two builds agree: every build of this checkout holds both once they're there, and the kernel's
+/// relay (which names the serverless node) starts for any of them.
+fn serverless_built(dir: &Path, checkout: &Path, rest: &[String]) -> Result<()> {
+    let own = checkout.join("target/debug").join(env!("CARGO_BIN_NAME"));
+    if std::env::current_exe().ok().and_then(|e| e.canonicalize().ok()) != own.canonicalize().ok() || one::serverless::modules().is_ok() {
+        return Ok(());
     }
-    crate::update::run_quiet(std::process::Command::new("nice").arg(crate::update::cargo()).current_dir(checkout).env_remove("CLIENT").arg("build"))?;
+    eprintln!("Building the serverless node's WebAssembly (the first time takes minutes; cargo keeps what hasn't changed)…");
+    crate::update::serverless(checkout, &checkout.join(one::config::CONFIG_FILE), "dev")?;
+    rebuilt(dir, checkout, rest, &format!("target/debug/{CLI} again with the serverless node"))
+}
+
+/// Builds this checkout's debug build again, which takes the web client and serverless node from target/ (build.rs, what
+/// `cargo test` does too, so they build the same one) and watches the files there; the first time, it's watching none,
+/// so touching build.rs has it look. The try install's programs run the old build, so they're stopped (it keeps its
+/// data) and the command run again as the new build, which starts them again.
+fn rebuilt(dir: &Path, checkout: &Path, rest: &[String], what: &str) -> Result<()> {
+    let own = checkout.join("target/debug").join(env!("CARGO_BIN_NAME"));
+    let again = format!("{}_TRY_REBUILT", CLI.to_uppercase());
+    anyhow::ensure!(std::env::var_os(&again).is_none(), "{CLI} was built again and doesn't hold what it was built with: {what}");
+    eprintln!("Building {what} (dev profile, not release)…");
+    std::fs::File::options().write(true).open(checkout.join("build.rs"))?.set_modified(std::time::SystemTime::now())?;
+    crate::update::run_quiet(std::process::Command::new("nice").arg(crate::update::cargo()).current_dir(checkout).env_remove("CLIENT").env_remove("SERVERLESS").arg("build"))?;
     stop(dir, false)?;
     use std::os::unix::process::CommandExt;
     Err(std::process::Command::new(&own).arg("try").args(rest).env(&again, "1").exec().into())
