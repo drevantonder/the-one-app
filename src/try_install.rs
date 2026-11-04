@@ -4,7 +4,8 @@
 //! own. Its kernel runs beside it and signs in its first person with no passkey (kernel::Settings::try_person), so a
 //! client of this checkout's build, on a device borrowed for it (`try client`), signs in with nobody there; others join
 //! as anyone does, by an invite link the first makes, and again with no passkey (`try client <kind> --as <name>`). It
-//! keeps its data until `try stop`: left alone it stops, and `try` starts it again as it was.
+//! keeps its data until `try stop`: left alone it stops, and `try` starts it again as it was, as it does when this build
+//! is newer than the one it runs.
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -40,6 +41,16 @@ fn running(dir: &Path) -> Option<String> {
     agent().get(format!("http://{addr}/v1/state")).call().is_ok().then_some(addr)
 }
 
+/// Whether the try install's node started before this build was made: it runs the build it started as, kernel and screens
+/// included, so a new build (`cargo build`) is picked up by starting it again, which keeps its data.
+fn older_build(dir: &Path) -> bool {
+    let modified = |path: &Path| path.metadata().and_then(|m| m.modified()).ok();
+    match (std::env::current_exe().ok().and_then(|exe| modified(&exe)), modified(&dir.join("pid"))) {
+        (Some(built), Some(started)) => built > started,
+        _ => false,
+    }
+}
+
 pub fn try_install(rest: &[String]) -> Result<()> {
     let (dir, checkout) = folder();
     // Help, and nothing started: try's own, or a built-in command's. An app's operation's needs the try install's apps.
@@ -70,7 +81,11 @@ pub fn try_install(rest: &[String]) -> Result<()> {
         serverless_built(&dir, &checkout, rest)?;
     }
     let addr = match running(&dir) {
-        Some(addr) => addr,
+        Some(addr) if !older_build(&dir) => addr,
+        Some(_) => {
+            eprintln!("This build is newer than the one the try install runs: starting it again (it keeps its data)…");
+            start(&dir)?
+        }
         None => start(&dir)?,
     };
     let kernel = dir.join("kernel").join("settings.json");
@@ -171,7 +186,7 @@ fn usage() -> String {
     };
     format!(
         "Usage:
-  {CLI} try                  start this checkout's try install, if it isn't running, and say where it is
+  {CLI} try                  start this checkout's try install, if it isn't running (or runs an older build), and say where it is
   {CLI} try <command>        any command, in it: {CLI} try status, {CLI} try apps, {CLI} try board post hello
   {CLI} try mcp              its MCP server, for an agent: claude mcp add {CLI}-try -- {mcp}
   {CLI} try sign-in          sign its CLI in as its person, with no browser
