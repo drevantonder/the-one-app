@@ -188,6 +188,7 @@ fn settings_items(m: &Members, user: &str, items_asked: usize, backups: bool, st
         out.push(with(item("store", "App Store", "squares-four", "#007aff"), "app", json!(store)));
     }
     out.extend([
+        item("users", "Users", "user-gear", "#30b0c7"),
         item("groups", "Groups", "users-three", "#34c759"),
         item("devices", "Devices", "devices", "#8e8e93"),
         item("connect-ai", "Connect Your AI", "plugs-connected", "#ff2d55"),
@@ -195,7 +196,7 @@ fn settings_items(m: &Members, user: &str, items_asked: usize, backups: bool, st
         item("appearance", "Appearance", "circle-half", "#007aff"),
     ]);
     if me.role == Role::Admin {
-        out.extend([item("users", "Users", "user-gear", "#30b0c7"), item("general", "General", "sliders-horizontal", "#8e8e93")]);
+        out.push(item("general", "General", "sliders-horizontal", "#8e8e93"));
         let backed = item("backups", "Backups", "hard-drives", "#ff9500");
         out.push(if backups { with(backed, "badge", json!(1)) } else { backed });
         out.push(item("labs", "Labs", "flask", "#af52de"));

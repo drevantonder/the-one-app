@@ -7,9 +7,9 @@
   .link span { font: 15px var(--mono); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: all; -webkit-user-select: all; }
 </style>
 <script>
-  // Everyone in the install, for admins: each one's role a button on their row, with Remove there too, and adding
-  // someone new, with an invite link (or, where people sign in with Google, how they join). The last admin's role
-  // can't change.
+  // Everyone in the install, each with their handle, theirs first, which opens a sheet to change it. For admins, each
+  // other one's role a button on their row, with Remove there too, and adding someone new, with an invite link (or,
+  // where people sign in with Google, how they join). The last admin's role can't change.
   let state;
   const yours = one.config.yours;
   // Roles changed but not yet taken in, shown at once: null for someone being removed.
@@ -29,7 +29,8 @@
         : `<label class="pick">${role === "admin" ? "Admin" : "Member"}<select aria-label="${one.esc(u.name)}'s role" data-user="${one.esc(u.id)}">
             <option value="admin"${role === "admin" ? " selected" : ""}>Admin</option><option value="member"${role === "member" ? " selected" : ""}>Member</option>
             <option disabled>──────</option><option value="">Remove ${one.esc(u.name)}</option></select></label>`;
-      return `<div class="row still">${one.avatar(u.id, u.name)}<div class="main"><div class="title"><span>${one.esc(u.name)}${u.id === me ? " (you)" : ""}</span></div>${u.handle ? `<div class="sub">@${one.esc(u.handle)}</div>` : ""}</div>${trailing}</div>`;
+      const main = `${one.avatar(u.id, u.name)}<div class="main"><div class="title"><span>${one.esc(u.name)}${u.id === me ? " (you)" : ""}</span></div>${u.handle ? `<div class="sub">@${one.esc(u.handle)}</div>` : ""}</div>`;
+      return u.id === me && u.handle ? `<a class="row" data-handle>${main}${trailing}<span class="chev">›</span></a>` : `<div class="row still">${main}${trailing}</div>`;
     });
     let html = `<div class="large-title">Users</div><div class="list">${rows.join("")}</div><div id="confirm"></div>`;
     html += error ? one.problem({ title: error }) : "";
@@ -100,8 +101,38 @@
     setTimeout(() => name.focus(), 50);
   }
 
+  // A new handle for them: lowercase as it's typed, saved once it's one.
+  function handle() {
+    const was = state.install.users.find((u) => u.id === state.user?.id)?.handle || "";
+    const sheet = one.sheet({ title: "Handle", done: "Cancel" });
+    sheet.body.innerHTML = `<div class="list"><label class="row plain"><span class="muted">@</span><input class="field" id="handle" autocapitalize="none" autocomplete="off" spellcheck="false" enterkeyhint="done"></label></div>
+      <p class="footer">What apps call you by, like Repos' addresses, which move with it. Lowercase letters, digits and hyphens.</p>
+      <div id="problem"></div><div style="text-align:center;margin-top:18px"><button class="button primary" id="go" disabled>Save</button></div>`;
+    const input = sheet.body.querySelector("#handle"), go = sheet.body.querySelector("#go");
+    input.value = was;
+    const ok = (h) => /^[a-z0-9]+(-[a-z0-9]+)*$/.test(h) && h.length <= 39;
+    input.oninput = () => {
+      input.value = input.value.toLowerCase().replace(/[\s_]/g, "-");
+      go.disabled = !ok(input.value) || input.value === was;
+    };
+    input.onkeydown = (e) => e.key === "Enter" && !go.disabled && go.click();
+    go.onclick = async () => {
+      const back = one.busy(go);
+      try {
+        await one.api("POST", "/v1/handle", { handle: input.value });
+        sheet.close();
+        one.tap("success");
+        draw();
+      } catch (e) {
+        sheet.body.querySelector("#problem").innerHTML = one.problem({ title: one.plain(e).title });
+        back();
+      }
+    };
+    setTimeout(() => input.focus(), 50);
+  }
+
   document.addEventListener("change", (e) => e.target.dataset.user && change(e.target.dataset.user, e.target.value || null, e.target));
-  document.addEventListener("click", (e) => e.target.closest?.("[data-add]") && add());
+  document.addEventListener("click", (e) => (e.target.closest?.("#page [data-handle]") ? handle() : e.target.closest?.("[data-add]") && add()));
 
   one.largeTitle("Users");
   one.on("changed", draw);
