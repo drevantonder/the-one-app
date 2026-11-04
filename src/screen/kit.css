@@ -307,7 +307,8 @@ button.choice:active, .more:active, .pick:active, .problem-action:active, .tool:
 .sheet-bar .button { justify-self: end; padding-right: 0; }
 .sheet .list { margin-top: 6px; }
 @media (prefers-color-scheme: dark) { .sheet { --bg: #222222; --card: #3a3a3a; } }
-@media (min-width: 600px) {
+/* On a wide screen, or any with a mouse (a narrow Mac window too), it's a dialog in the middle, as a desktop's is. */
+@media (min-width: 600px), (hover: hover) and (pointer: fine) {
   .sheet-backdrop { align-items: center; }
   .sheet { border-radius: 14px; transform: translateY(24px) scale(0.98); }
   .sheet-bar::before { display: none; }
