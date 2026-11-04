@@ -410,6 +410,22 @@ impl Node {
         if me.token.is_none() {
             return Ok(());
         }
+        // A caller handed every epoch from the first needs none: the hints, read from the bucket, only say how old the
+        // oldest it needs is, and none is older than the first.
+        let handed_all = |(scope, app, database): &(Scope, &str, &str)| -> Result<bool> {
+            let handed = self.handed(me, scope, app, database);
+            Ok((1..=self.with(|i| Ok(i.r.members.epoch(scope)))?.max(1)).all(|n| handed.contains_key(&n)))
+        };
+        let mut lacking = Vec::new();
+        for w in want {
+            if !handed_all(w)? {
+                lacking.push(w.clone());
+            }
+        }
+        if lacking.is_empty() {
+            return Ok(());
+        }
+        let want = &lacking[..];
         let bucket = self.bucket()?;
         // Each database's newest hint, all at once.
         let hints = futures_util::future::try_join_all(want.iter().map(|(scope, app, database)| {
