@@ -146,8 +146,8 @@ function steer(models) {
 }
 
 /// The newest read of a provider on this device: one snapshot per account.
-async function latest(b, provider, device) {
-  const top = await b.query("select at from snapshots where provider = ? and (device = ? or ? is null) order by at desc limit 1", [provider, device, device]);
+async function latest(b, provider, device, before = null) {
+  const top = await b.query("select at from snapshots where provider = ? and (device = ? or ? is null) and (at <= ? or ? is null) order by at desc limit 1", [provider, device, device, before, before]);
   if (!top[0]) return [];
   const rows = await b.query("select * from snapshots where provider = ? and (device = ? or ? is null) and at = ? order by active desc, weekly_used", [provider, device, device, top[0].at]);
   return rows.map((r) => ({ ...r, active: !!r.active, disabled: !!r.disabled, models: JSON.parse(r.models || "[]"), pace: JSON.parse(r.pace || "{}") }));
@@ -366,14 +366,16 @@ function tripped(p) {
   return out || outW ? { out, outW } : null;
 }
 
-/// Which plans are nearly out (under 20% session, 15% weekly) or outrun their reset, on every Claude account at once,
-/// from the last readings: their rows and which pool to spend, else nothing.
-async function warnings(b, now) {
+/// Which plans have run nearly out (under 20% session, 15% weekly) or begun to outrun their reset since `since`, on
+/// every Claude account at once: their rows and which pool to spend, else nothing. Each is said once, when it starts.
+async function warnings(b, now, since) {
+  // With several accounts, claude-swap moves to one with room: only all of them nearly out is news.
+  const low = (reads) => (reads.length && !reads.some((r) => !r.error && !tripped(r)) ? JSON.stringify(tripped(reads[0])) : null);
   const out = [];
   for (const id of Object.keys(PROVIDERS)) {
     const reads = await latest(b, id, null);
-    // With several accounts, claude-swap moves to one with room: only all of them nearly out is news.
-    if (!reads.length || reads.some((r) => !r.error && !tripped(r))) continue;
+    const was = low(await latest(b, id, null, since));
+    if (!low(reads) || low(reads) === was) continue;
     const p = reads[0];
     const t = tripped(p);
     const rows = [];
@@ -396,6 +398,9 @@ export default {
   instructions: `Every AI plan's limits in the providers' own words: what's left, the pace against what's expected, and whether it lasts to reset. ai-usage_status is the full read (fresh when older than 5 minutes). Agents get the last readings with their first prompt, then a warning when a window is nearly out or outruns its reset. Estimated rows (marked ~) come from this device only and never forecast.`,
 
   uses: { sidecars: ["shell"] },
+
+  // Fresh readings for agents' prompts, from the device that keeps AI Usage running (one devices keep ai-usage on <it>).
+  schedules: { refresh: { op: "status", every: "5m", description: "Reads every plan, so agents' prompts get fresh numbers" } },
 
   schema: Object.fromEntries(["user", "group", "global"].map((kind) => [kind, [`
     create table snapshots (provider text not null, device text not null, at integer not null, source text not null, confidence text not null, session_used real, session_resets integer, weekly_used real, weekly_resets integer, monthly_used real, monthly_resets integer, models text, pace text);
@@ -448,12 +453,12 @@ export default {
   },
 
   hooks: {
-    // With an agent's prompt anywhere: every plan's last reading on its session's first, then only warnings.
+    // With an agent's prompt anywhere: every plan's last reading on its session's first, then a warning when one runs low.
     async prompt(ctx, { since }) {
       const b = ctx.global || ctx.user || ctx.groups[0];
       if (!b) return "";
       const now = ctx.now();
-      if (since !== null) return warnings(b, now);
+      if (since !== null) return warnings(b, now, since);
       const reads = (await Promise.all(Object.keys(PROVIDERS).map((id) => latest(b, id, null)))).filter((r) => r.length);
       return reads.length ? ["AI usage, for choosing a model:", ...reads.map((r) => section(r, now))].join("\n\n") : "";
     },
