@@ -200,7 +200,9 @@ window.__one = {};
       if (trace) headers["x-one-trace"] = "1";
       if (body !== undefined) headers["content-type"] = "application/json";
       // Keys go only to a node this browser reaches itself, which its connection proves.
-      const keys = device && (await device.handoff(route, auth.kept()?.until || Date.now() + 60_000));
+      const handing = performance.now(), opened = [];
+      const keys = device && (await device.handoff(route, auth.kept()?.until || Date.now() + 60_000, trace ? noting(handing, opened) : undefined));
+      const sentWith = device?.needs[route];
       if (keys) headers["x-one-keys"] = keys;
       const sent = body === undefined ? undefined : JSON.stringify(body);
       let r;
@@ -210,6 +212,7 @@ window.__one = {};
         trace?.fetches.push(developer.parse(r.trace));
       } catch (err) {
         trace?.fetches.push(developer.parse(err.trace));
+        if (opened.length) trace.fetches.at(-1).handed = handedIn(opened);
         if (err.removed || signal?.aborted || misses >= 5) throw err;
         // A request that fails may be one a browser taken out of its person's devices can't make.
         if (await takenOut()) throw gone();
@@ -218,11 +221,20 @@ window.__one = {};
       } finally {
         watch.stop();
       }
+      // The keys it opened to hand with it, if it asked for any (after a reload, say).
+      if (opened.length) trace.fetches.at(-1).handed = handedIn(opened);
       // A node may find what it needs as it goes: the serverless node, its logs' keys first, then a call's.
       if (r.status === 428 && device && needed < 3) {
         needed++;
         if (trace) trace.keys = needed;
-        await device.learn(route, await r.json(), r.node);
+        // What this browser did before sending it again, each thing it asked for timed.
+        const learning = performance.now(), steps = [];
+        try {
+          await device.learn(route, await r.json(), r.node, trace ? noting(learning, steps) : undefined, sentWith);
+        } finally {
+          const last = trace?.fetches.at(-1);
+          if (last) last.client = { ms: Math.round(performance.now() - learning), steps };
+        }
         continue;
       }
       if (raw && r.ok) return r;
@@ -231,6 +243,19 @@ window.__one = {};
       return out;
     }
   }
+
+  /// Times each thing `fetch` asks for, from `start`, into `steps` (Device's `note`).
+  const noting = (start, steps) => async (step, fetch) => {
+    const at = performance.now();
+    try {
+      return await fetch();
+    } finally {
+      steps.push({ ...step, at: Math.round(at - start), ms: Math.round(performance.now() - at) });
+    }
+  };
+
+  /// The keys a request opened before it was sent, as its trace says it: how long, and each thing asked for.
+  const handedIn = (steps) => ({ ms: Math.max(...steps.map((s) => s.at + s.ms)), steps });
 
   /// Developer mode, on this browser alone (Settings › Developer, for admins): each request asks its nodes for a trace
   /// (`x-one-trace`), kept here, the latest `KEPT`, for screens to show (`traces`, kit.js's panel).
@@ -245,7 +270,7 @@ window.__one = {};
     },
     /// What a request asked, as a trace names it: a call's app and operation, a screen's app and name, else its path.
     /// Never its input or query. `since` (`{ at, perf, first }`) is when what it's for began, if earlier: a screen's
-    /// page waits for this browser to be let in, and the first screen of a load from the page's start.
+    /// page waits for this browser to be let in, and the screen the window opened on from the page's start.
     start(path, body, since) {
       const what = path === "/v1/call" ? { what: "call", app: body?.app, op: body?.op }
         : path.startsWith("/v1/screens/") ? { what: "page", app: decodeURIComponent(path.split("/")[3] || ""), screen: decodeURIComponent(path.split("/")[4] || "") }
@@ -253,7 +278,8 @@ window.__one = {};
       const now = performance.now();
       return { ...what, at: Math.round(since ? since.at : Date.now()), started: since ? since.perf : now, waited: since ? Math.round(now - since.perf) : 0, first: !!since?.first, keys: 0, fetches: [] };
     },
-    /// When a screen's page was asked for: the first of this load, from the page's start.
+    /// When a screen's page was asked for: the one the window opened on, from the page's start; any other (one asked
+    /// after the client's own, like Settings, where Developer mode is turned on) from when it was asked.
     firstScreen: true,
     since() {
       const first = developer.firstScreen;
@@ -359,11 +385,18 @@ window.__one = {};
 
   /// Runs an app's operation as this person → its result.
   async function call(app, op, input = {}) {
-    const out = (await api("/v1/call", { method: "POST", body: { app, op, input, client: "web" } })).ok;
+    // A call that only reads, asked while the same is under way (a screen that started again as its page changed),
+    // waits for that one's answer rather than running again.
+    const same = reads(app, op) ? JSON.stringify([app, op, input]) : null;
+    if (same && reading.has(same)) return reading.get(same);
+    const asked = api("/v1/call", { method: "POST", body: { app, op, input, client: "web" } }).then((r) => r.ok);
+    if (same) (reading.set(same, asked), asked.catch(() => {}).finally(() => reading.delete(same)));
+    const out = await asked;
     // Using an app keeps the devices keeping it running for this person doing so.
     device?.renewGrants(app);
     return out;
   }
+  const reading = new Map();
 
   // MARK: What the window shows
 
@@ -708,10 +741,11 @@ window.__one = {};
       asked = null;
       return page;
     }
+    // Asked now, whether or not Developer mode is on yet: only the screen the window opened on counts from its start.
+    const since = developer.since();
     if (r.kind === "own") return ownPage(r);
     const path = `/v1/screens/${encodeURIComponent(r.app)}/${encodeURIComponent(r.screen)}`;
-    const since = developer.on() ? developer.since() : undefined;
-    return joined.then(() => api(path, { query: { params: r.params || "{}", scope: r.scope }, raw: true, since }).then((resp) => resp.text()).then((html) => (kept.put("page", key, html), html)));
+    return joined.then(() => api(path, { query: { params: r.params || "{}", scope: r.scope }, raw: true, since: developer.on() ? since : undefined }).then((resp) => resp.text()).then((html) => (kept.put("page", key, html), html)));
   }
 
   /// One of the client's own screens' pages, which act as the person, so never a node's: the address's

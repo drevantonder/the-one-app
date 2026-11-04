@@ -363,6 +363,12 @@
         parts.push([`waited ${time(r.network)} to join the network${joining ? ` (${joining})` : ""}`, false]);
         bar.push([r.network, "join"]);
       }
+      const whose = (scope) => (scope === "everyone" ? "everyone's" : scope === "group" ? "the group's" : "your");
+      // One thing the client asked for as it got a call's keys.
+      const clientStep = (s) => s.step === "members" ? `read who's who again, ${time(s.ms)}`
+        : s.step === "newest" ? `asked where ${s.databases === 1 ? "its data starts" : `${s.databases} databases start`}, ${time(s.ms)}`
+        : s.step === "keys" ? `${whose(s.scope)} ${s.of === "epochs" ? "keys" : `${s.of} key`}, ${time(s.ms)}`
+        : `${s.step}, ${time(s.ms)}`;
       // What a node did: the devices it tried, and where the data came from.
       const node = (t, depth = 0) => {
         if (!t || typeof t !== "object") return;
@@ -387,6 +393,12 @@
       // Asked again: with the keys a node said it needed, or once it had caught up with this device.
       const needed = (f) => (f?.node?.steps || []).some((s) => s.step === "device" && s.result === "needs keys");
       (r.fetches || []).forEach((f, i, all) => {
+        // The keys this device opened to hand with it, if it had to ask for them first.
+        if (f.handed && typeof f.handed === "object") {
+          parts.push([`this device opened the keys it hands in ${time(f.handed.ms)}`, false]);
+          for (const s of f.handed.steps || []) parts.push([clientStep(s), false]);
+          bar.push([f.handed.ms || 0, "join"]);
+        }
         for (const t of f.tries || []) {
           if (t.result === "answered") {
             parts.push([`${i ? (needed(all[i - 1]) ? "again with keys " : "again ") : ""}→ ${name(t.node)}${t.connect ? `, connected in ${time(t.connect)}` : ""}`, false]);
@@ -397,6 +409,12 @@
           }
         }
         node(f.node);
+        // What this device did between a node asking for keys and sending it again: each thing it asked for, timed.
+        if (f.client && typeof f.client === "object") {
+          parts.push([`this device got the keys in ${time(f.client.ms)}`, false]);
+          for (const s of f.client.steps || []) parts.push([clientStep(s), false]);
+          bar.push([f.client.ms || 0, "join"]);
+        }
       });
       if (r.failed) parts.push(["failed", true]);
       const used = bar.reduce((a, [ms]) => a + ms, 0);

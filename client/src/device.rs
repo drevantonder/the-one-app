@@ -87,6 +87,9 @@ pub struct Device {
     /// What each kind of request needed, by its route (`route`): the last 428's, and the node that sent it (hex), the
     /// only one they're handed to.
     needs: Mutex<BTreeMap<String, (String, Vec<Need>)>>,
+    /// Held while a kind of request learns from a 428, by its route: another of its kind waits for it, and goes with
+    /// what it learned.
+    learning: Mutex<HashMap<String, std::sync::Arc<tokio::sync::Mutex<()>>>>,
     /// In developer mode, its latest requests' traces, oldest first (`traces`).
     traces: Mutex<std::collections::VecDeque<Value>>,
     /// The last answer of each call that only reads, for its app's screens (`kept`): a native app's keeps them
@@ -111,6 +114,7 @@ impl Device {
             epochs: Mutex::default(),
             app_keys: Mutex::default(),
             needs: Mutex::new(needs),
+            learning: Mutex::default(),
             traces: Mutex::default(),
             answers: None,
         }
@@ -485,21 +489,39 @@ impl Device {
         }
         let (mut needed, mut behind) = (0, 0);
         loop {
-            let handed = self.handed(&route).await;
+            // Another of its kind learning what it needs: this one waits, and goes with that.
+            let learning = self.learning.lock().unwrap().get(&route).cloned();
+            if let Some(learning) = learning {
+                drop(learning.lock().await);
+            }
+            let sent_with = self.needs.lock().unwrap().get(&route).cloned();
+            let opening = fetches.is_some().then(Notes::new);
+            let handed = self.handed(&route, opening.as_ref()).await;
             let request = Request { method: method.into(), path: path.into(), headers: headers.clone(), body: body.clone() };
             let sent = self.send(request, handed.as_ref()).await;
             if let Some(fetches) = fetches.as_deref_mut() {
-                fetches.push(match &sent {
+                let mut fetched = match &sent {
                     Ok(response) => response.trace.clone().unwrap_or_default(),
                     Err(err) => err.trace.clone().unwrap_or_default(),
-                });
+                };
+                // The keys it opened to hand with it, if it asked for any (after the app started, say).
+                if let Some(opened) = opening.and_then(Notes::opened) {
+                    fetched["handed"] = opened;
+                }
+                fetches.push(fetched);
             }
             let response = sent?;
             if response.status == 428 && needed < 3 {
                 needed += 1;
                 let node = response.node;
                 let answer: Value = serde_json::from_slice(&response.body.bytes().await?).unwrap_or_default();
-                self.learn(&route, &node, &answer).await?;
+                // What it did before sending it again, each thing it asked for timed, in developer mode.
+                let notes = fetches.is_some().then(Notes::new);
+                let learned = self.learn(&route, &node, &answer, sent_with, notes.as_ref()).await;
+                if let (Some(notes), Some(last)) = (notes, fetches.as_deref_mut().and_then(|f| f.last_mut())) {
+                    last["client"] = notes.done();
+                }
+                learned?;
                 continue;
             }
             if response.status == 403 {
@@ -616,12 +638,14 @@ impl Device {
 
     /// The keys a kind of request needed last time, opened, and the node that asked for them, which alone is handed
     /// them: none it can't open, nor of a scope its entries no longer say that node runs.
-    async fn handed(&self, route: &str) -> Option<([u8; 32], Vec<Handed>)> {
+    async fn handed(&self, route: &str, notes: Option<&Notes>) -> Option<([u8; 32], Vec<Handed>)> {
         let (node, needs) = self.needs.lock().unwrap().get(route).cloned()?;
         let node: [u8; 32] = keys::unhex(&node).ok()?;
         let runs = |scope: &str| Scope::parse(scope).is_ok_and(|s| self.known.lock().unwrap().as_ref().is_some_and(|k| k.nodes.contains_key(&node) && k.members.runs_for(&node, &s)));
+        let needs: Vec<Need> = needs.into_iter().filter(|n| runs(&n.scope)).collect();
+        self.fetch_keys(&needs, notes).await;
         let mut handed = Vec::new();
-        for n in needs.into_iter().filter(|n| runs(&n.scope)) {
+        for n in needs {
             if let Ok(key) = self.database_key(&n).await {
                 handed.push(Handed { key, scope: n.scope, epoch: n.epoch, app: n.app, database: n.database });
             }
@@ -632,8 +656,14 @@ impl Device {
     /// A node's 428, taken only from the node that answered (`node`), naming itself and the seal key its entries list,
     /// asking only keys of scopes they say it runs, and of databases that kind of request uses (`keys::may_hand`): what
     /// the request needed, remembered for that kind of request and that node, in place of what it needed before. Fails,
-    /// remembering nothing, if it asks for more, or this device can't open them.
-    async fn learn(&self, route: &str, node: &[u8; 32], answer: &Value) -> Result<(), Error> {
+    /// remembering nothing, if it asks for more, or this device can't open them. One of a kind of request that another
+    /// learned for since it was sent (`sent_with`, what it went with) learns nothing more.
+    async fn learn(&self, route: &str, node: &[u8; 32], answer: &Value, sent_with: Option<(String, Vec<Need>)>, notes: Option<&Notes>) -> Result<(), Error> {
+        let lock = self.learning.lock().unwrap().entry(route.to_string()).or_default().clone();
+        let _learning = lock.lock().await;
+        if self.needs.lock().unwrap().get(route) != sent_with.as_ref() {
+            return Ok(());
+        }
         let listed = self.known.lock().unwrap().as_ref().and_then(|k| k.nodes.get(node).copied());
         let to = keys::unhex(answer["to"].as_str().unwrap_or("")).ok();
         let seal = keys::unhex(answer["seal"].as_str().unwrap_or("")).ok();
@@ -650,7 +680,7 @@ impl Device {
         let runs = |device: &Device| device.known.lock().unwrap().as_ref().is_some_and(|k| scopes.iter().all(|s| k.members.runs_for(node, s)));
         // What it runs may be newer than this device read: read again, now and then, before refusing.
         if !runs(self) && self.known.lock().unwrap().as_ref().is_some_and(|k| now() > k.at + REREAD) {
-            self.read_members().await?;
+            noted(notes, json!({ "step": "members" }), self.read_members()).await?;
         }
         if !runs(self) {
             return Err(failed("A device that doesn't run that asked for its keys. Nothing was handed."));
@@ -659,14 +689,22 @@ impl Device {
         // only its history.
         let bucket = Signed::new(self.address.clone(), self.key.to_bytes());
         let prefix = |n: &Need| format!("{}/{}/{}", one::bucket::folder(&n.scope), n.app, n.database);
-        let mut oldest: BTreeMap<String, u32> = BTreeMap::new();
+        // Each database's newest hint, all at once.
+        let mut each: BTreeMap<String, &Scope> = BTreeMap::new();
         for (n, scope) in need.iter().zip(&scopes) {
-            if oldest.contains_key(&prefix(n)) {
-                continue;
-            }
-            let hint = one::bucket::Bucket::get(&bucket, &one::db::newest_name(&prefix(n))).await.map_err(failed)?;
+            each.entry(prefix(n)).or_insert(scope);
+        }
+        let asked = n0_future::join_all(each.keys().map(|p| {
+            let (bucket, name) = (&bucket, one::db::newest_name(p));
+            async move { one::bucket::Bucket::get(bucket, &name).await }
+        }));
+        // The keys' own fetching goes at the same time: it only opens what's there, whichever epochs are handed.
+        let (hints, ()) = n0_future::future::zip(noted(notes, json!({ "step": "newest", "databases": each.len() }), asked), self.fetch_keys(&need, notes)).await;
+        let mut oldest: BTreeMap<String, u32> = BTreeMap::new();
+        for ((p, scope), hint) in each.iter().zip(hints) {
+            let hint = hint.map_err(failed)?;
             let newest = self.known.lock().unwrap().as_ref().map_or(0, |k| k.members.epoch(scope));
-            oldest.insert(prefix(n), keys::oldest_needed(hint.as_ref().map(|o| &o.bytes[..]), newest));
+            oldest.insert(p.clone(), keys::oldest_needed(hint.as_ref().map(|o| &o.bytes[..]), newest));
         }
         need.retain(|n| n.epoch >= oldest[&prefix(n)]);
         if need.is_empty() {
@@ -682,6 +720,49 @@ impl Device {
             let _ = std::fs::write(self.dir.join("needs.json"), bytes);
         }
         Ok(())
+    }
+
+    /// What `need`'s keys are opened from that this device hasn't opened yet, asked for all at once: each scope's epochs
+    /// sealed to it, and each app's keys in them, one request each. What doesn't open here is left for `database_key`,
+    /// which asks again, one at a time, as it always did.
+    async fn fetch_keys(&self, need: &[Need], notes: Option<&Notes>) {
+        let scopes: std::collections::BTreeSet<&str> = need.iter().filter(|n| !self.epochs.lock().unwrap().contains_key(&(n.scope.clone(), n.epoch))).map(|n| n.scope.as_str()).collect();
+        let apps: std::collections::BTreeSet<(&str, &str)> = need.iter().filter(|n| !self.app_keys.lock().unwrap().contains_key(&(n.scope.clone(), n.app.clone(), n.epoch))).map(|n| (n.scope.as_str(), n.app.as_str())).collect();
+        let asked = |path: String, step: Value| async move { noted(notes, step, self.json("GET", &path, None)).await };
+        let epochs = n0_future::join_all(scopes.iter().map(|scope| asked(format!("/v1/keys?scope={}&to={}", query(scope), self.key()), json!({ "step": "keys", "of": "epochs", "scope": kind(scope) }))));
+        let sealed = n0_future::join_all(apps.iter().map(|(scope, app)| asked(format!("/v1/keys?scope={}&app={}", query(scope), query(app)), json!({ "step": "keys", "of": app, "scope": kind(scope) }))));
+        let (epochs, sealed) = n0_future::future::zip(epochs, sealed).await;
+        for (scope, kept) in scopes.iter().zip(epochs) {
+            if let Ok(kept) = kept {
+                self.open_epochs(scope, &kept);
+            }
+        }
+        for ((scope, app), kept) in apps.iter().zip(sealed) {
+            for (m, sealed) in kept.iter().flat_map(|k| k["sealed"].as_object()).flatten() {
+                let Ok(m) = m.parse::<u32>() else { continue };
+                let Some(epoch) = self.epochs.lock().unwrap().get(&(scope.to_string(), m)).copied() else { continue };
+                let opened = B64U.decode(sealed.as_str().unwrap_or("").trim().as_bytes()).ok().and_then(|b| one::kernel::open_app_key(&epoch, app, &b).ok());
+                if let Some(key) = opened {
+                    self.app_keys.lock().unwrap().insert((scope.to_string(), app.to_string(), m), key);
+                }
+            }
+        }
+    }
+
+    /// Opens each of a scope's epochs in `kept` (what `/v1/keys` gave, sealed to this device) whose hash is the one the
+    /// entries this device read itself gave.
+    fn open_epochs(&self, scope: &str, kept: &Value) {
+        let Ok(parsed) = Scope::parse(scope) else { return };
+        let hashes = self.known.lock().unwrap().as_ref().map(|k| k.members.epoch_hashes.clone()).unwrap_or_default();
+        for (m, sealed) in kept["sealed"].as_object().into_iter().flatten() {
+            let Ok(m) = m.parse::<u32>() else { continue };
+            let opened = B64U.decode(sealed.as_str().unwrap_or("").as_bytes()).ok().and_then(|s| one::kernel::open_sealed(&self.opens(), &s).ok()).and_then(|k| <[u8; 32]>::try_from(k).ok());
+            if let Some(key) = opened
+                && hashes.get(&(parsed.clone(), m)) == Some(&keys::epoch_hash(&key))
+            {
+                self.epochs.lock().unwrap().insert((scope.to_string(), m), key);
+            }
+        }
     }
 
     async fn database_key(&self, n: &Need) -> Result<[u8; 32], Error> {
@@ -717,22 +798,13 @@ impl Device {
         if let Some(key) = self.epochs.lock().unwrap().get(&(scope.to_string(), n)) {
             return Ok(*key);
         }
-        let parsed = Scope::parse(scope).map_err(failed)?;
+        Scope::parse(scope).map_err(failed)?;
         let kept = self.json("GET", &format!("/v1/keys?scope={}&to={}", query(scope), self.key()), None).await?;
         for fresh in [false, true] {
             if fresh {
                 self.read_members().await?;
             }
-            let hashes = self.known.lock().unwrap().as_ref().map(|k| k.members.epoch_hashes.clone()).unwrap_or_default();
-            for (m, sealed) in kept["sealed"].as_object().into_iter().flatten() {
-                let Ok(m) = m.parse::<u32>() else { continue };
-                let opened = B64U.decode(sealed.as_str().unwrap_or("").as_bytes()).ok().and_then(|s| one::kernel::open_sealed(&self.opens(), &s).ok()).and_then(|k| <[u8; 32]>::try_from(k).ok());
-                if let Some(key) = opened
-                    && hashes.get(&(parsed.clone(), m)) == Some(&keys::epoch_hash(&key))
-                {
-                    self.epochs.lock().unwrap().insert((scope.to_string(), m), key);
-                }
-            }
+            self.open_epochs(scope, &kept);
             if let Some(key) = self.epochs.lock().unwrap().get(&(scope.to_string(), n)) {
                 return Ok(*key);
             }
@@ -777,6 +849,51 @@ impl Device {
         let entry = Entry::create(&self.key, ext, prev, content);
         self.json("POST", "/v1/entries", Some(json!([entry.to_json()]))).await?;
         Ok(())
+    }
+}
+
+/// What a request did between a node's 428 and sending it again, each thing it asked for timed (developer mode's
+/// traces): `{ ms, steps }`, as a browser's says it (kernel/web/web.js).
+struct Notes {
+    started: std::time::Instant,
+    steps: Mutex<Vec<Value>>,
+}
+
+impl Notes {
+    fn new() -> Notes {
+        Notes { started: std::time::Instant::now(), steps: Mutex::default() }
+    }
+
+    fn done(self) -> Value {
+        json!({ "ms": self.started.elapsed().as_millis() as u64, "steps": self.steps.into_inner().unwrap() })
+    }
+
+    /// As keys opened before a request was sent: until the last thing asked for was answered, if anything was.
+    fn opened(self) -> Option<Value> {
+        let steps = self.steps.into_inner().unwrap();
+        let ms = steps.iter().map(|s| s["at"].as_u64().unwrap_or(0) + s["ms"].as_u64().unwrap_or(0)).max()?;
+        Some(json!({ "ms": ms, "steps": steps }))
+    }
+}
+
+/// `asked`, timed as `step` in `notes`, if there are any.
+async fn noted<T>(notes: Option<&Notes>, mut step: Value, asked: impl Future<Output = T>) -> T {
+    let at = std::time::Instant::now();
+    let out = asked.await;
+    if let Some(notes) = notes {
+        step["at"] = json!(at.duration_since(notes.started).as_millis() as u64);
+        step["ms"] = json!(at.elapsed().as_millis() as u64);
+        notes.steps.lock().unwrap().push(step);
+    }
+    out
+}
+
+/// A scope as a trace names it: its kind alone, never whose.
+fn kind(scope: &str) -> &'static str {
+    match scope {
+        "global" => "everyone",
+        s if s.starts_with("group:") => "group",
+        _ => "user",
     }
 }
 

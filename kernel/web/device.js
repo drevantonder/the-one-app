@@ -85,6 +85,16 @@ export class Device {
     this.needs = JSON.parse(localStorage.getItem("one.needs") || "{}");
     /// The grants this browser is renewing now.
     this.renewing = new Set();
+    /// What's being fetched now, by what it is, for everything that wants it at once to wait on the one fetch.
+    this.fetching = new Map();
+    /// The 428 each kind of request is learning from now, by its route: `{ asked, done }`.
+    this.learning = new Map();
+  }
+
+  /// `fetch()`, once for everyone who asks for `id` while it's under way.
+  once(id, fetch) {
+    if (!this.fetching.has(id)) this.fetching.set(id, fetch().finally(() => this.fetching.delete(id)));
+    return this.fetching.get(id);
   }
 
   /// The members as the install's signed entries say them, checked here: as last checked, or with what's new from a
@@ -122,24 +132,30 @@ export class Device {
   }
 
   /// A scope's epochs sealed to `as`, as raw keys, opened now (for sealing them to another device), by number.
-  async epochBytes(scope, as = this.me) {
-    const { epoch, sealed } = await this.api(`/v1/keys?scope=${encodeURIComponent(scope)}&to=${as.key}`);
+  async epochBytes(scope, as = this.me, note = noting) {
+    const { epoch, sealed } = await note({ step: "keys", of: "epochs", scope: kindOf(scope) }, () => this.api(`/v1/keys?scope=${encodeURIComponent(scope)}&to=${as.key}`));
     const out = new Map();
     for (const [n, s] of Object.entries(sealed || {})) out.set(Number(n), await this.openEpoch(scope, Number(n), s, as));
     return { newest: epoch || 0, keys: out };
   }
 
-  /// Epoch `n` of a scope, as a key kept in memory: opened once, or made if it's the scope's first and theirs to make.
-  async epoch(scope, n) {
+  /// Epoch `n` of a scope, as a key kept in memory: opened once (all its epochs at once, however many ask), or made if
+  /// it's the scope's first and theirs to make.
+  async epoch(scope, n, note = noting) {
     const had = this.epochs.get(scope)?.get(n);
     if (had) return had;
-    const { newest, keys } = await this.epochBytes(scope);
-    const all = this.epochs.get(scope) || new Map();
-    for (const [m, key] of keys) all.set(m, await hkdfKey(key));
-    this.epochs.set(scope, all);
-    if (!all.has(n) && n === 1 && newest === 0 && starts(await this.checked(true), scope, this.user)) await this.newEpoch(scope, 1);
-    if (!all.has(n)) throw new Error("This device can't open that yet.");
-    return all.get(n);
+    const newest = await this.once(`epochs ${scope}`, async () => {
+      const { newest, keys } = await this.epochBytes(scope, this.me, note);
+      const all = this.epochs.get(scope) || new Map();
+      for (const [m, key] of keys) all.set(m, await hkdfKey(key));
+      this.epochs.set(scope, all);
+      return newest;
+    });
+    // Its first made once, however many ask for it at once.
+    const made = () => this.epochs.get(scope)?.has(n);
+    if (!made() && n === 1 && newest === 0) await this.once(`first ${scope}`, async () => made() || (starts(await this.checked(true), scope, this.user) && (await this.newEpoch(scope, 1))));
+    if (!made()) throw new Error("This device can't open that yet.");
+    return this.epochs.get(scope).get(n);
   }
 
   /// Starts a scope's epoch `n`: a random key, written first as an `epoch` entry naming its hash (which, first in
@@ -177,21 +193,25 @@ export class Device {
   }
 
   /// An app's key in epoch `n` of a scope: the one sealed under the epoch, or a new one if it has none yet.
-  async appKey(scope, app, n) {
+  async appKey(scope, app, n, note = noting) {
     const id = `${scope} ${app}`;
     const had = this.appKeys.get(id)?.get(n);
     if (had) return had;
-    const key = await hkdfKey(await this.appKeyBytes(scope, app, n));
+    const key = await this.once(`app ${id} ${n}`, async () => hkdfKey(await this.appKeyBytes(scope, app, n, note)));
     if (!this.appKeys.has(id)) this.appKeys.set(id, new Map());
     this.appKeys.get(id).set(n, key);
     return key;
   }
 
   /// An app's key in epoch `n` of a scope as its bytes, opened now (for sealing it to a device that keeps the app
-  /// running): the one sealed under the epoch, or a new one if it has none yet.
-  async appKeyBytes(scope, app, n) {
-    const epoch = await this.epoch(scope, n);
-    let sealed = (await this.api(`/v1/keys?scope=${encodeURIComponent(scope)}&app=${encodeURIComponent(app)}`)).sealed?.[n];
+  /// running): the one sealed under the epoch, or a new one if it has none yet. Its epochs' are asked for once, however
+  /// many ask at once.
+  async appKeyBytes(scope, app, n, note = noting) {
+    const [epoch, all] = await Promise.all([
+      this.epoch(scope, n, note),
+      this.once(`sealed ${scope} ${app}`, () => note({ step: "keys", of: app, scope: kindOf(scope) }, () => this.api(`/v1/keys?scope=${encodeURIComponent(scope)}&app=${encodeURIComponent(app)}`))),
+    ]);
+    let sealed = all.sealed?.[n];
     if (!sealed) {
       const made = random(32);
       sealed = (await this.api("/v1/keys", { method: "POST", body: { scope, n, app, sealed: b64u.encode(await sealAppKey(epoch, app, made)) } })).sealed;
@@ -246,9 +266,36 @@ export class Device {
     }
   }
 
-  async databaseKey({ scope, app, database, epoch }) {
+  /// What `need`'s keys are opened from that this browser hasn't opened yet, asked for all at once: each scope's epochs
+  /// sealed to it, and each app's keys in them, one request each. Only what's there is opened; an app's key that isn't
+  /// is left for `appKey`, which makes it.
+  async fetchKeys(need, note = noting) {
+    const scopes = [...new Set(need.filter((n) => !this.epochs.get(n.scope)?.has(n.epoch)).map((n) => n.scope))];
+    const apps = [...new Set(need.filter((n) => !this.appKeys.get(`${n.scope} ${n.app}`)?.has(n.epoch)).map((n) => `${n.scope} ${n.app}`))];
+    const sealed = (id) => {
+      const [scope, app] = id.split(" ");
+      return this.once(`sealed ${id}`, () => note({ step: "keys", of: app, scope: kindOf(scope) }, () => this.api(`/v1/keys?scope=${encodeURIComponent(scope)}&app=${encodeURIComponent(app)}`)));
+    };
+    const [, got] = await Promise.all([
+      Promise.all(scopes.map((scope) => this.epoch(scope, Math.max(...need.filter((n) => n.scope === scope).map((n) => n.epoch)), note).catch(() => {}))),
+      Promise.all(apps.map((id) => sealed(id).catch(() => null))),
+    ]);
+    for (const [i, id] of apps.entries()) {
+      const [scope, app] = id.split(" ");
+      for (const [m, s] of Object.entries(got[i]?.sealed || {})) {
+        const epoch = this.epochs.get(scope)?.get(Number(m));
+        if (!epoch || this.appKeys.get(id)?.has(Number(m))) continue;
+        const key = await Promise.resolve().then(() => openAppKey(epoch, app, b64u.decode(s))).then(hkdfKey, () => null);
+        if (!key) continue;
+        if (!this.appKeys.has(id)) this.appKeys.set(id, new Map());
+        this.appKeys.get(id).set(Number(m), key);
+      }
+    }
+  }
+
+  async databaseKey({ scope, app, database, epoch }, note = noting) {
     const id = `${scope} ${app} ${database} ${epoch}`;
-    if (!this.dbKeys.has(id)) this.dbKeys.set(id, await databaseKey(await this.appKey(scope, app, epoch), database));
+    if (!this.dbKeys.has(id)) this.dbKeys.set(id, await databaseKey(await this.appKey(scope, app, epoch, note), database));
     return this.dbKeys.get(id);
   }
 
@@ -263,11 +310,13 @@ export class Device {
   /// The `x-one-keys` a request goes with: what its kind of request needed the last time, sealed to the node that said
   /// so (to its key's twin, as every node's seal key is), for this browser's key, until `until`. A node that didn't say
   /// so can't open it.
-  async handoff(route, until) {
+  /// A request sent while another of its kind learns what it needs waits for that first, and goes with it.
+  async handoff(route, until, note = noting) {
+    await this.learning.get(route)?.done.catch(() => {});
     const last = this.needs[route];
     if (!last?.node || !last.seal || !last.need?.length || !runsAll(this.known, last.node, last.need.map((n) => n.scope))) return null;
-    const keys = [];
-    for (const n of last.need) keys.push({ ...n, key: b64u.encode(await this.databaseKey(n)) });
+    await this.fetchKeys(last.need, note);
+    const keys = await Promise.all(last.need.map(async (n) => ({ ...n, key: b64u.encode(await this.databaseKey(n, note)) })));
     return sealHandoff(hex.decode(last.seal), { for: this.me.key, until, keys });
   }
 
@@ -275,21 +324,36 @@ export class Device {
   /// and the seal key the install's entries list for it, run every scope it needs keys of, as they say, and need only
   /// databases this kind of request uses (`mayHand`). Of each, only epochs from the one its newest copy is under are
   /// handed (`oldestNeeded`): older ones open only its history. What it needed is all this kind of request hands next
-  /// time, and only to it. Throws if it asks for more, or this browser can't open it.
-  async learn(route, answer, node) {
+  /// time, and only to it. Throws if it asks for more, or this browser can't open it. Requests of a kind that get the
+  /// same 428 at once learn from it once, and one sent before another learned goes again with what that learned. `note(step, fetch)` times each thing it asks for (developer mode's traces).
+  learn(route, answer, node, note = noting, sentWith = this.needs[route]) {
+    // Another of its kind learned since this one was sent (`sentWith`, what it went with): it goes again with that.
+    if (this.needs[route] !== sentWith) return Promise.resolve();
+    const asked = JSON.stringify([node, answer]);
+    const now = this.learning.get(route);
+    if (now?.asked === asked) return now.done;
+    const done = this.learnNow(route, answer, node, note);
+    const it = { asked, done };
+    this.learning.set(route, it);
+    done.catch(() => {}).finally(() => this.learning.get(route) === it && this.learning.delete(route));
+    return done;
+  }
+
+  async learnNow(route, answer, node, note) {
     const need = Array.isArray(answer.need) ? answer.need : [];
     if (!node || answer.to !== node) throw new Error("A device that didn’t answer asked for keys, so none were given.");
     const scopes = need.map((n) => n.scope);
     let k = await this.checked();
-    if (!runsAll(k, node, scopes)) k = await this.checked(true);
+    if (!runsAll(k, node, scopes)) k = await note({ step: "members" }, () => this.checked(true));
     if (!runsAll(k, node, scopes)) throw new Error("A device that doesn’t run that asked for its keys, so none were given.");
     const seal = k.devices.find((d) => d.key === node)?.seal;
     if (!seal || (answer.seal && answer.seal !== seal)) throw new Error("A device asked for keys sealed to another, so none were given.");
     if (need.length > 64 || !need.every((n) => mayHand(route, n))) throw new Error("A device asked for keys that request doesn’t use, so none were given.");
-    const hints = await this.hints(need);
+    // The keys' own fetching goes at the same time: it only opens what's there, whichever epochs are handed.
+    const [hints] = await Promise.all([note({ step: "newest", databases: new Set(need.map(prefixOf)).size }, () => this.hints(need)), this.fetchKeys(need, note)]);
     const handed = hints ? need.filter((n) => n.epoch >= oldestNeeded(hints[prefixOf(n)] ?? null, k.epochs[n.scope]?.n || 0)) : need;
     if (!handed.length) throw new Error("A device asked for older keys than it needs, so none were given.");
-    for (const n of handed) await this.databaseKey(n);
+    await Promise.all(handed.map((n) => this.databaseKey(n, note)));
     this.needs[route] = { node, seal, need: handed };
     try { localStorage.setItem("one.needs", JSON.stringify(this.needs)); } catch {}
   }
@@ -501,6 +565,12 @@ export class Device {
     await this.approve({ key: this.me.key, seal: this.me.seal, user: this.user, name: browserName() }, pk);
   }
 }
+
+/// Runs `fetch`, timing nothing: what `note` is out of developer mode.
+const noting = (_, fetch) => fetch();
+
+/// A scope as a trace names it: its kind alone, never whose (src/node/trace.rs `kind`).
+const kindOf = (scope) => (scope === "global" ? "everyone" : scope.startsWith("group:") ? "group" : "user");
 
 /// Where a database of `need`'s is in the bucket (src/bucket.rs `folder`).
 const prefixOf = (n) => `${n.scope.replace(":", "-")}/${n.app}/${n.database}`;
