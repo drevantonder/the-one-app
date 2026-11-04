@@ -33,6 +33,11 @@ func newPodman() (containers, error) {
 		os.Setenv("XDG_RUNTIME_DIR", dir)
 		os.Setenv("DBUS_SESSION_BUS_ADDRESS", "unix:path="+dir+"/bus")
 	}
+	// Containers made before revive have --restart=always, which Podman can't change, and podman-restart would
+	// start them at boot whether or not there's room: revive does instead.
+	if out, err := exec.Command("systemctl", "--user", "disable", "podman-restart.service").CombinedOutput(); err != nil {
+		log.Printf("disabling podman-restart: %v: %s", err, strings.TrimSpace(string(out)))
+	}
 	return podmanRT{}, nil
 }
 
@@ -127,13 +132,6 @@ func (podmanRT) stop(ctx context.Context, d device) error {
 	return err
 }
 
-// noRestart takes away a restart policy from before revive started devices, so Podman doesn't start it at boot
-// whether or not it has room.
-func (podmanRT) noRestart(ctx context.Context, d device) {
-	if _, err := podman(ctx, "update", "--restart=no", prefix+d.Name); err != nil {
-		log.Print(err)
-	}
-}
 
 func (podmanRT) restart(ctx context.Context, d device) error {
 	_, err := podman(ctx, "restart", "--time", "10", prefix+d.Name)

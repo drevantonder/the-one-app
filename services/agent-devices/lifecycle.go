@@ -212,9 +212,6 @@ func (ds *devices) revive(ctx context.Context) {
 			should = lims[d.Name].Restart
 			want(d.Name, should)
 		}
-		if p, ok := rt.(podmanRT); ok && lims[d.Name].Restart {
-			p.noRestart(ctx, d) // this, not Podman, starts it, once it has room
-		}
 		if _, gone := moved[d.Name]; gone {
 			should = false
 		}
