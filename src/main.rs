@@ -527,6 +527,11 @@ fn run(args: Vec<String>) -> Result<()> {
                 let days = one::kernel::INVITE_DAYS;
                 let how = if one::config::SIGN_IN == "google" { "they sign in with Google and join" } else { "they make their passkey and join" };
                 println!("Send {name} this link. It works once, for {days} days: opening it, {how}.\n\n  {}", invite.link);
+                // Their first device besides this machine: this machine lets it in.
+                let me = get("/v1/state").ok().and_then(|s| s["user"]["id"].as_str().map(str::to_string));
+                if user.is_some() && user == me {
+                    println!("\nIt opens their browser waiting for approval, with a code: approve it here with {CLI} devices approve <code> --confirm.");
+                }
             }
         }
         ["kernel", "set", name, value] => {
