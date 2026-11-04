@@ -4,6 +4,8 @@ use super::*;
 
 /// How long an app's prompt hook may take before it's left out: the agent's harness waits for them all.
 const PROMPT_LIMIT: Duration = Duration::from_secs(2);
+/// How many times a call that writes is tried with one id, each after the one before failed having written nothing.
+const LEASE_TRIES: u32 = 10;
 
 /// A call a client device picked this node for that this node can't run: the API answers 421 with the nodes that can,
 /// in the order to ask them (`{ error, elsewhere }`), which the client asks itself, handing each its own keys.
@@ -397,11 +399,15 @@ impl Node {
         }
         self.needs(me, &want).await?;
         // A call that writes, tried on another device before this one, ran there if it took the lease first.
+        let mut lease = None;
         if let (Some(id), Some(scope)) = (&req.id, scopes.first()) {
             let reads = self.0.apps.describe(&req.app).await?["ops"].as_array().into_iter().flatten().any(|o| o["name"] == req.op.as_str() && o["reads"] == true);
-            let lease = format!("{}/{}/calls/{id}", crate::bucket::folder(&scope.to_string()), req.app);
-            if !reads && !crate::bucket::Bucket::create(&self.bucket()?, &lease, hex(&self.0.id).as_bytes()).await? {
-                return Ok(Reply::Error("This may already be done: it ran on another device, whose answer was lost. Check before trying again.".into()));
+            if !reads {
+                let base = format!("{}/{}/calls/{id}", crate::bucket::folder(&scope.to_string()), req.app);
+                let Some(taken) = self.take_lease(&base).await? else {
+                    return Ok(Reply::Error("This may already be done: it ran on another device, whose answer was lost. Check before trying again.".into()));
+                };
+                lease = Some(taken);
             }
         }
         let mut ctx = ctx;
@@ -409,8 +415,9 @@ impl Node {
         let granted = self.grant(&req.app, me, &mut ctx, req.depth);
         // Just under the call's own limit, so a call that's stopped is recorded first.
         let running = Instant::now();
+        let app_failed = std::sync::atomic::AtomicBool::new(false);
         let ran = tokio::time::timeout(limit - Duration::from_secs(1), async {
-            let mut outcome = self.0.apps.call(&req.app, &req.op, input, &ctx, limit).await?;
+            let mut outcome = self.0.apps.call(&req.app, &req.op, input, &ctx, limit).await.inspect_err(|_| app_failed.store(true, std::sync::atomic::Ordering::Relaxed))?;
             trace::note(json!({ "step": "run", "app": req.app, "op": req.op }), running.elapsed());
             self.write_appends(&req.app, std::mem::take(&mut outcome.appends), &scopes, me, req.from.as_deref()).await?;
             anyhow::Ok(outcome)
@@ -420,6 +427,13 @@ impl Node {
         let outcome = match ran {
             Ok(outcome) => outcome,
             Err(err) => {
+                // The app failed, so it wrote nothing (a call's writes are one transaction): its next try may run. Not
+                // when it was stopped, or failed after, when it may have written.
+                if let Some(lease) = lease.filter(|_| app_failed.load(std::sync::atomic::Ordering::Relaxed))
+                    && let Err(err) = crate::bucket::Bucket::create(&self.bucket()?, &format!("{lease}.failed"), b"").await
+                {
+                    tracing::warn!("saying a call failed, so it may run again: {err:#}");
+                }
                 self.record(&req.app, req, me, Some(&format!("{err:#}")));
                 return Err(err);
             }
@@ -433,6 +447,23 @@ impl Node {
             self.keep_for_later(granted);
         }
         Ok(Reply::Ok(outcome.result))
+    }
+
+    /// Takes a write call's lease, the first try's at `base` and each next one's at `base.<n>`, the next only once the
+    /// one before says it failed (`<lease>.failed`), having written nothing: → its name, or None when one is taken and
+    /// didn't fail, so the call may have run. A device before these took only `base`, so the first try's is that.
+    async fn take_lease(&self, base: &str) -> Result<Option<String>> {
+        let bucket = self.bucket()?;
+        for n in 1..=LEASE_TRIES {
+            let lease = if n == 1 { base.to_string() } else { format!("{base}.{n}") };
+            if crate::bucket::Bucket::create(&bucket, &lease, hex(&self.0.id).as_bytes()).await? {
+                return Ok(Some(lease));
+            }
+            if crate::bucket::Bucket::get(&bucket, &format!("{lease}.failed")).await?.is_none() {
+                return Ok(None);
+            }
+        }
+        Ok(None)
     }
 
     /// Records, for an app's owners, a call that ran here: the first each day by each user from each client
