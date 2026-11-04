@@ -1033,7 +1033,8 @@ export class Node extends DurableObject {
     return this.env.RELAY;
   }
 
-  /// Its endpoint, started once in the object's life: the first packet or ask after it slept waits for this.
+  /// Its endpoint, started once in the object's life, or again once one closing for being idle (`closing`) has: the
+  /// first packet or ask after it slept waits for this.
   start() {
     this.only();
     if (!this.started) {
@@ -1048,11 +1049,13 @@ export class Node extends DurableObject {
           this.ctx.waitUntil(this.sent);
         });
       };
-      this.started = endpoint_start(unhex(this.env.NODE_KEY), send, (...asked) => this.asked(...asked)).then((key) => {
+      const closed = (this.closing || Promise.resolve()).catch(() => {});
+      this.started = closed.then(() => endpoint_start(unhex(this.env.NODE_KEY), send, (...asked) => this.asked(...asked))).then((key) => {
         console.log(JSON.stringify({ woke: key.slice(0, 8), ms: Date.now() - began }));
         return key;
       });
-      this.started.catch(() => (this.started = null));
+      const mine = this.started;
+      mine.catch(() => this.started === mine && (this.started = null));
       this.awake();
     }
     return this.started;
@@ -1143,9 +1146,17 @@ export class Node extends DurableObject {
     if (!this.started) return;
     if (this.asking) return this.arm(Date.now() + this.idle());
     if (Date.now() - this.last < this.idle() - 1_000) return this.arm(this.last + this.idle());
-    // Its connections' ends reach their peers before it does.
-    await endpoint_close();
-    await this.sent;
+    // Its connections' ends reach their peers before it does. What's asked meanwhile starts it again, once it's closed,
+    // and keeps it.
+    const started = this.started;
+    this.started = null;
+    const closing = (this.closing = started.then(() => endpoint_close(), () => {}).then(() => this.sent));
+    try {
+      await closing;
+    } finally {
+      if (this.closing === closing) this.closing = null;
+    }
+    if (this.started || this.asking) return this.awake();
     console.log(JSON.stringify({ sleeps: true }));
     this.ctx.abort("idle");
   }
