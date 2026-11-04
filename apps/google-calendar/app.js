@@ -92,25 +92,32 @@ async function token(ctx, email) {
   return body.access_token;
 }
 
-/// A link to sign in to Google with, `hint` the account to suggest; the verifier waits in this app's own data.
+/// How long a sign-in waits for Google to send the browser back: past it, it's forgotten.
+const WAITS = 30 * 60_000;
+
+/// A link to sign in to Google with, `hint` the account to suggest. Each sign-in waits in this app's own data as a row
+/// of its own, keyed by a random state Google passes back, so two at once (two accounts, devices or agents) each
+/// finish with their own verifier.
 async function startSignIn(ctx, hint) {
   const client = await googleClient(ctx);
   if (!client) throw noClient();
   const verifier = b64url(crypto.getRandomValues(new Uint8Array(32)));
+  const state = b64url(crypto.getRandomValues(new Uint8Array(16)));
   const challenge = b64url(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier))));
-  ctx.user.exec("delete from pending");
-  ctx.user.exec("insert into pending values (?, ?)", [verifier, client.id ?? null]);
+  ctx.user.exec("delete from pending where at < ?", [Date.now() - WAITS]);
+  ctx.user.exec("insert into pending values (?, ?, ?, ?)", [state, verifier, client.id ?? null, Date.now()]);
   const q = new URLSearchParams({
     client_id: client.fields.client_id.value, redirect_uri: redirect(ctx), response_type: "code", scope: SCOPES, access_type: "offline",
-    prompt: "consent", include_granted_scopes: "true", state: `${APP}/settings`, code_challenge: challenge, code_challenge_method: "S256", ...(hint ? { login_hint: hint } : {}),
+    // `<app>/<screen>/<state>`: the install's address opens this app's settings screen, which finishes this sign-in.
+    prompt: "consent", include_granted_scopes: "true", state: `${APP}/settings/${state}`, code_challenge: challenge, code_challenge_method: "S256", ...(hint ? { login_hint: hint } : {}),
   });
   return `https://accounts.google.com/o/oauth2/v2/auth?${q}`;
 }
 
 /// A sign-in that's over without an account: it answers why rather than failing, so its verifier is forgotten, as a
 /// failed call writes nothing.
-function failed(ctx, why) {
-  ctx.user.exec("delete from pending");
+function failed(ctx, state, why) {
+  ctx.user.exec("delete from pending where state = ?", [state]);
   return { signed_in: false, why };
 }
 
@@ -125,12 +132,19 @@ function emailOf(idToken) {
 }
 
 async function finishSignIn(ctx, given) {
-  const [p] = await ctx.user.query("select verifier, client from pending");
-  if (!p) throw new Error(`Start signing in again: no sign-in is waiting for that address; ${APP}_sign_in starts one`);
   const s = String(given || "").trim();
-  const refused = s.match(/[?&]error=([^&#]+)/)?.[1];
-  if (refused) return failed(ctx, `Google didn't sign you in (${decodeURIComponent(refused)}). Try again: ${APP}_sign_in starts again.`);
-  const code = s.includes("code=") ? new URL(s.startsWith("http") ? s : `http://x/?${s.split("?").pop()}`).searchParams.get("code") : s;
+  const params = s.includes("=") ? new URL(s.startsWith("http") ? s : `http://x/?${s.split("?").pop()}`).searchParams : null;
+  // The sign-in Google's state names; a bare code finishes the one sign-in waiting, if only one is.
+  const state = params?.get("state")?.split("/")[2];
+  const waiting = await ctx.user.query("select state, verifier, client from pending where at >= ?", [Date.now() - WAITS]);
+  const p = state ? waiting.find((w) => w.state === state) : waiting.length === 1 ? waiting[0] : null;
+  if (!p) {
+    if (!state && waiting.length > 1) throw new Error("More than one sign-in is waiting: give the whole address the browser came back to, not just its code.");
+    throw new Error(`Start signing in again: no sign-in is waiting for that address; ${APP}_sign_in starts one`);
+  }
+  const refused = params?.get("error");
+  if (refused) return failed(ctx, p.state, `Google didn't sign you in (${refused}). Try again: ${APP}_sign_in starts again.`);
+  const code = params ? params.get("code") : s;
   if (!code) throw new Error("That address has no code. Copy the whole address the browser ended up on.");
   const client = (await ctx.vault.items()).find((i) => i.id === p.client && i.fields.client_secret) || await googleClient(ctx);
   if (!client) throw noClient();
@@ -140,11 +154,11 @@ async function finishSignIn(ctx, given) {
     body: `grant_type=authorization_code&code=${encodeURIComponent(code)}&client_id=${encodeURIComponent(client.fields.client_id.value)}&client_secret={{${client.id}:client_secret}}&redirect_uri=${encodeURIComponent(redirect(ctx))}&code_verifier=${encodeURIComponent(p.verifier)}`,
   });
   const tok = await r.json().catch(() => ({}));
-  if (!r.ok) return failed(ctx, `Google didn't sign you in (${tok.error_description || tok.error || r.status}). Try again: ${APP}_sign_in starts again.`);
-  if (!tok.refresh_token) return failed(ctx, "Google didn't sign you in. Try again: it gave no refresh_token, so the sign-in wouldn't last.");
+  if (!r.ok) return failed(ctx, p.state, `Google didn't sign you in (${tok.error_description || tok.error || r.status}). Try again: ${APP}_sign_in starts again.`);
+  if (!tok.refresh_token) return failed(ctx, p.state, "Google didn't sign you in. Try again: it gave no refresh_token, so the sign-in wouldn't last.");
   const email = emailOf(tok.id_token);
-  if (!email) return failed(ctx, "Google didn't say which account signed in. Try again.");
-  ctx.user.exec("delete from pending");
+  if (!email) return failed(ctx, p.state, "Google didn't say which account signed in. Try again.");
+  ctx.user.exec("delete from pending where state = ?", [p.state]);
   const id = await ctx.vault.create({
     title: email, type: "Google account", domain: "google.com", hosts: [OAUTH], same: "email",
     fields: { email: { value: email }, refresh_token: { value: tok.refresh_token, secret: true }, scopes: { value: tok.scope || SCOPES }, client_id: { value: client.fields.client_id.value } },
@@ -153,7 +167,10 @@ async function finishSignIn(ctx, given) {
   return { signed_in: true, account: email };
 }
 
-const signInSchema = { user: "create table pending (verifier text not null, client text);" };
+const signInSchema = { user: [
+  "create table pending (verifier text not null, client text);",
+  "drop table pending; create table pending (state text primary key, verifier text not null, client text, at integer not null);",
+] };
 
 const signInOps = {
   accounts: {

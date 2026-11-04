@@ -1363,11 +1363,12 @@ window.__one = {};
     schemed(document, appearance());
     // A new device's QR: Approve, with its code.
     if (location.pathname === "/approve") history.replaceState(null, "", href(own("devices", { approve: location.hash.slice(1) })));
-    // `/back?state=<app>/<screen>&…`: where a sign-in at another site sends the person back (an app's `ctx.address`).
+    // `/back?state=<app>/<screen>[/<the app's own>]&…`: where a sign-in at another site sends the person back (an app's
+    // `ctx.address`).
     // It opens that app's screen with the whole address as `params.back`, which finishes it. A browser that isn't
     // signed in here passes it on to the app on this phone or computer, which opens the same screen from `<cli>://open`.
     if (location.pathname === "/back") {
-      const [, app, screen = "main"] = /^([a-z0-9][a-z0-9-]*)(?:\/([a-z0-9_-]+))?$/.exec(new URLSearchParams(location.search).get("state") || "") || [];
+      const [, app, screen = "main"] = /^([a-z0-9][a-z0-9-]*)(?:\/([a-z0-9_-]+)(?:\/[A-Za-z0-9_-]*)?)?$/.exec(new URLSearchParams(location.search).get("state") || "") || [];
       const params = JSON.stringify({ back: location.href });
       if (!app) history.replaceState(null, "", "/");
       else if (auth.kept()) history.replaceState(null, "", href({ kind: "screen", app, screen, params }));
