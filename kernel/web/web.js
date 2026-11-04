@@ -709,8 +709,44 @@ window.__one = {};
   /// every page.
   function bar(title) {
     const back = history.state?.back || (phone.matches && !isPage(route())) ? `<button class="back" data-back aria-label="Back">‹</button>` : "";
-    return `<header class="bar">${back}<div class="bar-titles"><div class="bar-title">${esc(title)}</div></div></header>`;
+    const dev = developer.on() ? `<button class="dev-button" data-devtools aria-label="Developer" title="Developer">&lt;/&gt;</button>` : "";
+    return `<header class="bar">${back}<div class="bar-titles"><div class="bar-title">${esc(title)}</div></div>${dev}</header>`;
   }
+
+  /// Developer, in Developer mode: the bar's </> opens its panel (src/screen/devtools.html) for the screen in front,
+  /// docked under it on a computer's width, where it stays open from screen to screen until closed, and a sheet on a
+  /// phone's. It's told the screen's app and title, and for the client's own, since when it showed.
+  const devtools = {
+    KEY: "one.devtools",
+    since: Date.now(),
+    open: () => localStorage.getItem(devtools.KEY) === "1",
+    route() {
+      const r = route();
+      return own("devtools", r.kind === "screen" ? { app: r.app, screen: r.screen, title: titleOf(r) } : { title: titleOf(r), since: devtools.since });
+    },
+    toggle() {
+      if (phone.matches) return void openSheet(devtools.route());
+      if (devtools.open()) localStorage.removeItem(devtools.KEY);
+      else localStorage.setItem(devtools.KEY, "1");
+      devtools.draw();
+    },
+    draw() {
+      const detail = $(".detail", root);
+      let dock = detail && $(".devtools", detail);
+      if (!detail || phone.matches || !developer.on() || !devtools.open()) {
+        if (dock) (frames = frames.filter((f) => f !== dock.f)), dock.remove();
+        return;
+      }
+      const r = devtools.route(), key = JSON.stringify(r);
+      if (dock?.key === key) return;
+      if (!dock) detail.append((dock = Object.assign(document.createElement("div"), { className: "devtools" })));
+      frames = frames.filter((f) => f !== dock.f);
+      dock.key = key;
+      dock.f = frameFor(r, dock);
+      dock.f.dock = true;
+    },
+  };
+  document.addEventListener("click", (e) => e.target.closest?.("[data-devtools]") && devtools.toggle());
 
   // MARK: Screens
 
@@ -853,6 +889,7 @@ window.__one = {};
       if (r.name === "pages") return params.scope === "settings" ? "Settings" : page(params.scope || "user")?.title || "";
       if (r.name === "services") return "Services";
       if (r.name === "request") return "Vault";
+      if (r.name === "devtools") return "Developer";
       return settingTitle(r.name);
     }
     const a = app(r.app);
@@ -866,6 +903,8 @@ window.__one = {};
       document.title = title;
       // A page shows its own large title.
       detail.innerHTML = bar(r.kind === "own" && r.name === "pages" ? "" : title) + `<div class="screen"></div>`;
+      devtools.since = Date.now();
+      devtools.draw();
       // A Settings item that's a page of this site (Passkeys) is that page, framed: it's the kernel's, not a node's.
       const item = r.kind === "own" && settingsItems().find((i) => i.name === r.name && i.url && here(i.url));
       if (item) return void ($(".screen", detail).innerHTML = `<iframe class="screen-frame" src="${esc(item.url)}" title="${esc(title)}" allow="publickey-credentials-get; publickey-credentials-create"></iframe>`);
@@ -963,6 +1002,7 @@ window.__one = {};
           return null;
         },
         close: (value) => {
+          if (f.dock) return (localStorage.removeItem(devtools.KEY), devtools.draw(), null);
           if (f.sheet) f.sheet.close(value);
           else if (history.state?.back || (phone.matches && !isPage(route()))) back();
           return null;

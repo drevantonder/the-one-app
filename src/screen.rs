@@ -72,7 +72,7 @@ pub fn tag(page: &str) -> String {
 }
 
 /// The clients' own screens, by name, the same on every client: the person's pages, a page's Services, a request for a
-/// Vault item, and Settings' (`settings/`). They act through the bridge's `one.api` as the person looking, which a
+/// Vault item, Settings' (`settings/`), and Developer's panel (`devtools`). They act through the bridge's `one.api` as the person looking, which a
 /// client answers only for these.
 const CLIENT_SCREENS: &[(&str, &str)] = &[
     ("pages", concat!("<script>", include_str!("screen/widgets.js"), include_str!("screen/home.js"), "</script>", include_str!("screen/pages.html"))),
@@ -89,6 +89,7 @@ const CLIENT_SCREENS: &[(&str, &str)] = &[
     ("devices", include_str!("screen/settings/devices.html")),
     ("connect-ai", include_str!("screen/settings/connect-ai.html")),
     ("developer", include_str!("screen/settings/developer.html")),
+    ("devtools", include_str!("screen/devtools.html")),
 ];
 
 /// A client's own screen's HTML, or a note that it isn't there.

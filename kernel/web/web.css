@@ -57,6 +57,9 @@ a { color: inherit; }
 /* An app screen fills what's open, under its bar. */
 .screen { flex: 1; position: relative; min-height: 0; }
 .screen-frame { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: transparent; }
+/* Developer's panel, docked under the screen, and the bar's button that opens it. */
+.devtools { flex: none; position: relative; height: min(440px, 50%); border-top: 0.5px solid var(--line); }
+.dev-button { margin-left: auto; font: 600 13px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--tint); background: none; border: 0; padding: 4px 6px; border-radius: 6px; cursor: pointer; }
 .screen-status { position: absolute; inset: 0; display: grid; place-items: center; }
 
 /* Before the window: signing in, starting, and a device that doesn't answer. */

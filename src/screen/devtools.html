@@ -1,0 +1,268 @@
+<div class="dev-top"><span class="dev-tab" aria-current="page">Timing</span>
+  <div class="dev-scope" role="group"><button data-scope="screen">This Screen</button><button data-scope="all">All Screens</button></div>
+  <button class="dev-close" aria-label="Close" data-close>×</button></div>
+<div id="timing"></div>
+<style>
+  /* Developer: tools for whoever builds the app, docked under a screen (or a sheet on a phone). Its colours each name
+     a kind of work, which only a developer reads: the rest of the kit keeps colour for "tap this" and "this needs you". */
+  :root { --net: #6e8fd8; --data: #5fb39a; --app: #e0b25c; --code: #a58bd6; --bucket: #d77f8f; --wait: #6b6f77; }
+  body { padding: 0 0 24px; max-width: none; font-variant-numeric: tabular-nums; }
+  .dev-top { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 16px; padding: 0 12px; height: 36px; background: var(--bg); border-bottom: 0.5px solid var(--line); }
+  .dev-tab { height: 36px; display: flex; align-items: center; font-weight: 600; box-shadow: inset 0 -2px var(--tint); }
+  .dev-scope { display: flex; margin-left: auto; background: var(--fill); border-radius: 8px; padding: 2px; }
+  .dev-scope button { font: inherit; font-size: 13px; border: 0; background: none; color: var(--muted); padding: 2px 10px; border-radius: 6px; cursor: pointer; }
+  .dev-scope button[aria-pressed="true"] { background: var(--raised); color: var(--text); }
+  /* A sheet has its own Done. */
+  :root[data-raised] .dev-close { display: none; }
+  .dev-close { font: inherit; font-size: 20px; line-height: 1; border: 0; background: none; color: var(--muted); cursor: pointer; padding: 0 2px; }
+  .say { margin: 14px 16px 6px; font-size: 15px; max-width: 70ch; }
+  .say b { font-weight: 650; }
+  .say .warn { color: var(--warn); }
+  .routes { display: block; }
+  .routes text { font: 11px -apple-system, system-ui, sans-serif; fill: var(--muted); font-variant-numeric: tabular-nums; }
+  .routes .lane { fill: var(--text); font-size: 12px; font-weight: 600; }
+  .routes .quiet { fill: var(--muted); font-weight: 400; font-size: 10px; }
+  .routes .on { fill: var(--text); font-weight: 600; }
+  .routes .faded { opacity: 0.28; }
+  .reqs { margin: 4px 0 0; border-top: 0.5px solid var(--line); }
+  .rq { display: grid; grid-template-columns: 12px 1fr auto 64px; gap: 10px; align-items: center; width: 100%; padding: 7px 16px; font: inherit; font-size: 13px; text-align: left; color: var(--muted); background: none; border: 0; border-bottom: 0.5px solid var(--line); cursor: pointer; }
+  .rq[aria-pressed="true"] { color: var(--text); background: color-mix(in srgb, var(--tint) 14%, transparent); }
+  .rq .sw { width: 10px; height: 10px; border-radius: 3px; }
+  .rq .where { color: var(--muted); opacity: 0.75; }
+  .rq .ms { text-align: right; }
+  .rq.warn .ms, .rq.warn .what { color: var(--warn); }
+  .rq code { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .steps { padding: 6px 16px 10px 38px; font-size: 13px; color: var(--muted); border-bottom: 0.5px solid var(--line); }
+  .steps div { display: flex; justify-content: space-between; gap: 12px; padding: 2px 0; }
+  .steps .warn { color: var(--warn); }
+  .burst { margin: 14px 16px 4px; font-size: 12px; color: var(--muted); }
+</style>
+<script>
+  // Timing: what the requests behind a screen did, drawn as Routes: each device a lane, time left to right, and a
+  // request the path it took, from this device down to the one that answered (and any it passed it to) and back.
+  // The traces are this client's (`one.traces`, in developer mode); `params` say which screen is in front: its app
+  // and screen if it's an app's, and since when it showed.
+  const p = one.params || {};
+  const esc = one.esc;
+  let scope = "screen", picked = null, all = [];
+  const ms = (n) => (n >= 1000 ? `${(n / 1000).toFixed(1)} s` : `${Math.max(0, Math.round(n))} ms`);
+  // Requests that start within this long of the last one's end are part of the same burst: opening a screen, say.
+  const BURST = 500;
+
+  const title = (r) => (r.what === "call" ? `${r.app}.${r.op}` : r.what === "page" ? "Page code" : r.path || "");
+  const mine = (r) => (p.app ? r.app === p.app : true) && r.at >= (p.since || 0) - 1000;
+
+  // The device names the traces know, by key: the nodes say theirs, and the install's others.
+  function names(rs) {
+    const out = {};
+    const add = (t) => {
+      if (!t || typeof t !== "object") return;
+      Object.assign(out, t.names || {});
+      for (const s of t.steps || []) add(s.trace);
+    };
+    for (const r of rs) for (const f of r.fetches || []) {
+      add(f.node);
+      const answered = (f.tries || []).find((t) => t.result === "answered");
+      if (answered && f.node?.device) out[answered.node] = f.node.device;
+    }
+    return out;
+  }
+
+  const SAID = { "no connection": "couldn't connect", "not taking requests": "took no requests", "no answer": "didn't answer", unreachable: "unreachable", lost: "lost the connection", failed: "failed", elsewhere: "said elsewhere" };
+
+  // One request as marks on lanes, times from its start: `hop` (from, to, a, b, kind) a line between lanes, `block`
+  // (lane, a, b, kind, label) time spent on one, and `parts` its steps as lines for the list.
+  function route(r, known) {
+    const marks = [], parts = [];
+    const name = (key) => known[key] || `a device (${String(key).slice(0, 6)})`;
+    const me = "This device";
+    let t = 0, used = 0;
+    const wait = (r.waited || 0) + (r.network || 0);
+    if (wait >= 1) {
+      marks.push({ block: me, a: 0, b: wait, kind: "wait" });
+      parts.push([r.waited ? "Waited for this device to be let in" : "Joined the network", wait]);
+      t = used = wait;
+    }
+    if (r.source === "kept") {
+      marks.push({ block: me, a: 0, b: Math.max(r.ms || 0, 2), kind: "code" });
+      parts.push(["Shown from this device's copy", r.ms || 0]);
+      return { marks, parts, end: r.ms || 0 };
+    }
+    // What a node did, from `at` on its lane: the devices it passed the call to, and its own steps.
+    const node = (tr, lane, at) => {
+      let listed = 0;
+      for (const s of tr?.steps || []) {
+        if (!(s.step === "device" && s.result === "ran" && s.here)) listed += s.step === "logs" && s.ms < 5 ? 0 : s.ms || 0;
+        const a = at + (s.at || 0), b = a + (s.ms || 0);
+        if (s.step === "device") {
+          const to = s.device || "a device";
+          if (s.result === "ran" && s.here) { node(s.trace, lane, at); continue; }
+          const warn = s.result !== "ran" && s.result !== "needs keys";
+          const inner = s.trace?.ms || 0, rt = Math.max(0, (s.ms || 0) - inner) / 2;
+          marks.push({ hop: [lane, to], a, b: a + rt, kind: warn ? "warn" : "net" });
+          if (s.trace) node(s.trace, to, a + rt);
+          marks.push({ hop: [to, lane], a: b - rt, b, kind: warn ? "warn" : "net" });
+          parts.push([warn ? `${lane} tried ${to}: ${SAID[s.result] || s.result}` : `${lane} passed it to ${to}`, s.ms || 0, warn]);
+        } else if (s.step === "bucket" || s.step === "behind") {
+          marks.push({ hop: [lane, "Bucket"], a, b: a + (s.ms || 0) / 2, kind: "bucket" }, { hop: ["Bucket", lane], a: a + (s.ms || 0) / 2, b, kind: "bucket" });
+          parts.push([s.step === "bucket" ? `${lane} fetched ${s.found} of ${s.asks} from the bucket` : `${lane} asked the bucket first: ${s.result}`, s.ms || 0, s.step === "behind" && s.result !== "caught up"]);
+        } else if (s.step === "data" || s.step === "open" || (s.step === "logs" && s.ms >= 5)) {
+          marks.push({ block: lane, a, b, kind: "data", label: "read" });
+          parts.push([s.step === "open" ? `Opened ${s.app}'s data on ${lane}` : s.step === "logs" ? `Read who's who on ${lane}` : `Read ${lane}'s copy${s.new ? `, ${s.new} new steps` : ""}`, s.ms || 0]);
+        } else if (s.step === "run") {
+          marks.push({ block: lane, a, b, kind: "app", label: "ran" });
+          parts.push([`${s.app} ran on ${lane}`, s.ms || 0]);
+        }
+      }
+      // What it did that it didn't time on its own: finding the call's app and keys, writing its answer.
+      const rest = (tr?.ms || 0) - listed;
+      if (rest >= 1) parts.push([`Other work on ${lane}`, rest]);
+    };
+    // Each send: the devices it tried, one after another, and what the one that answered did. A node says only how
+    // long it took itself, so the rest is the trip there and back, drawn as half each way.
+    for (const f of r.fetches || []) {
+      const handed = f.handed?.ms || 0;
+      if (handed >= 1) (marks.push({ block: me, a: t, b: t + handed, kind: "wait" }), parts.push(["Opened the keys to hand with it", handed]), (used += handed));
+      const start = t + handed;
+      let end = start;
+      for (const tr of f.tries || []) {
+        const a = start + (tr.at || 0), b = a + (tr.ms || 0), lane = name(tr.node);
+        end = Math.max(end, b);
+        if (tr.connect) (marks.push({ block: me, a, b: a + tr.connect, kind: "wait" }), parts.push([`Connected to ${lane}`, tr.connect]), (used += tr.connect));
+        const from = a + (tr.connect || 0);
+        if (tr.result !== "answered") {
+          marks.push({ hop: [me, lane], a: from, b: from + (b - from) / 2, kind: "warn" }, { hop: [lane, me], a: from + (b - from) / 2, b, kind: "warn" });
+          parts.push([`${lane}: ${SAID[tr.result] || tr.result}, gave up`, tr.ms || 0, true]);
+          used += (tr.ms || 0) - (tr.connect || 0);
+          continue;
+        }
+        const inner = f.node?.ms || 0, rt = Math.max(0, b - from - inner);
+        marks.push({ hop: [me, lane], a: from, b: from + rt / 2, kind: "net", label: rt });
+        node(f.node, lane, from + rt / 2);
+        marks.push({ hop: [lane, me], a: b - rt / 2, b, kind: "net" });
+        parts.push([`There and back to ${lane}`, rt]);
+        used += rt + inner;
+      }
+      t = end;
+      if (f.client?.ms >= 1) (marks.push({ block: me, a: t, b: t + f.client.ms, kind: "wait" }), parts.push(["Found the keys it needed", f.client.ms]), (t += f.client.ms), (used += f.client.ms));
+    }
+    // What this device did that nothing above timed: picking a device to send it to, and reading the answer.
+    if ((r.ms || 0) - used >= 1) parts.push(["Other work on this device", (r.ms || 0) - used]);
+    if (r.failed) parts.push(["Failed", 0, true]);
+    return { marks, parts, end: Math.max(t, r.ms || 0) };
+  }
+
+  // Bursts of requests, each those that overlap or follow within BURST of each other.
+  function bursts(rs) {
+    const out = [];
+    for (const r of rs) {
+      const last = out.at(-1);
+      if (last && r.at <= last.end + BURST) (last.rs.push(r), (last.end = Math.max(last.end, r.at + (r.ms || 0))));
+      else out.push({ rs: [r], start: r.at, end: r.at + (r.ms || 0) });
+    }
+    return out;
+  }
+
+  const COLOUR = { net: "var(--net)", data: "var(--data)", app: "var(--app)", code: "var(--code)", bucket: "var(--bucket)", wait: "var(--wait)", warn: "var(--warn)" };
+
+  function draw() {
+    const rs = all.filter((r) => scope === "all" || mine(r)).sort((a, b) => a.at - b.at);
+    const el = document.getElementById("timing");
+    if (!rs.length) return void (el.innerHTML = one.empty(scope === "all" ? "Nothing asked yet." : "This screen hasn't asked for anything since it opened."));
+    const known = names(all);
+    const routes = new Map(rs.map((r) => [r, route(r, known)]));
+    const warned = (r) => routes.get(r).parts.some(([, , w]) => w);
+    const groups = bursts(rs);
+    // The request picked, else the slowest of the latest burst.
+    const sel = rs.find((r) => r.at === picked?.at && title(r) === picked?.title) || groups.at(-1).rs.reduce((a, b) => ((b.ms || 0) > (a.ms || 0) ? b : a));
+    picked = { at: sel.at, title: title(sel) };
+    const g = groups.find((x) => x.rs.includes(sel));
+
+    // Lanes: this device, each device the burst reached in the order it was first reached, and the bucket last.
+    const lanes = ["This device"];
+    for (const r of g.rs) for (const m of routes.get(r).marks) for (const l of m.hop || [m.block]) if (l !== "Bucket" && !lanes.includes(l)) lanes.push(l);
+    lanes.push("Bucket");
+    const usedBucket = g.rs.some((r) => routes.get(r).marks.some((m) => m.hop?.includes("Bucket")));
+
+    const W = Math.max(360, document.body.clientWidth), L = 110, R = 54, top = 26, gap = 42;
+    const span = Math.max(1, ...g.rs.map((r) => r.at - g.start + routes.get(r).end));
+    const x = (t) => L + (t / span) * (W - L - R);
+    const y = (lane) => top + 10 + lanes.indexOf(lane) * gap;
+    const H = y("Bucket") + 22;
+    const step = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 30000].find((s) => span / s <= 6) || 60000;
+    let svg = "";
+    for (let t = 0; t <= span; t += step) svg += `<line x1="${x(t)}" y1="${top - 6}" x2="${x(t)}" y2="${H - 8}" stroke="var(--line)"/><text x="${x(t)}" y="${top - 10}" text-anchor="${t ? "middle" : "start"}">${t ? ms(t) : 0}</text>`;
+    for (const l of lanes) {
+      const quiet = l === "Bucket" && !usedBucket;
+      svg += `<line x1="${L - 8}" y1="${y(l)}" x2="${W - 6}" y2="${y(l)}" stroke="var(--line)"${l === "Bucket" ? ' stroke-dasharray="2 4"' : ""}/>` +
+        `<text x="12" y="${y(l) + 4}" class="lane"${quiet ? ' style="fill:var(--muted)"' : ""}>${esc(l)}</text>` + (quiet ? `<text x="12" y="${y(l) + 17}" class="quiet">nothing asked</text>` : "");
+    }
+    // The others first, faded, then the one picked, with its times written on it.
+    for (const r of [...g.rs.filter((r) => r !== sel), sel]) {
+      const off = r.at - g.start, on = r === sel;
+      let marks = "";
+      for (const m of routes.get(r).marks) {
+        const c = COLOUR[m.kind];
+        if (m.hop) {
+          const [a, b] = m.hop.map(y);
+          marks += `<line x1="${x(off + m.a)}" y1="${a}" x2="${x(off + m.b)}" y2="${b}" stroke="${c}" stroke-width="${on ? 3.5 : 3}" stroke-linecap="round"/>`;
+          if (on && m.label >= 1) {
+            const mx = (x(off + m.a) + x(off + m.b)) / 2, my = (a + b) / 2;
+            const left = mx > W - 160;
+            marks += `<text x="${left ? mx - 8 : mx + 8}" y="${my}" class="on"${left ? ' text-anchor="end"' : ""}>${ms(m.label)} there and back</text>`;
+          }
+        } else {
+          const w = Math.max(3, x(off + m.b) - x(off + m.a));
+          marks += `<rect x="${x(off + m.a)}" y="${y(m.block) - 6}" width="${w}" height="12" rx="3" fill="${c}"/>`;
+          if (on && m.label && w > 34) marks += `<text x="${x(off + m.a) + 3}" y="${y(m.block) + 21}" class="on">${m.label} ${ms(m.b - m.a)}</text>`;
+        }
+      }
+      if (on) marks += `<circle cx="${x(off)}" cy="${y("This device")}" r="4" fill="var(--text)"/><circle cx="${x(off + routes.get(r).end)}" cy="${y("This device")}" r="4" fill="var(--text)"/>`;
+      svg += `<g${on ? "" : ' class="faded"'}>${marks}</g>`;
+    }
+
+    // What to say: the burst's length, and what took most of the picked request.
+    const opening = scope === "screen" && g === groups[0] && p.title;
+    const total = g.end - g.start;
+    const biggest = routes.get(sel).parts.reduce((a, b) => (b[1] > a[1] ? b : a), ["", 0]);
+    let said = opening ? `${esc(p.title)} opened in <b>${ms(total)}</b>. ` : `These took <b>${ms(total)}</b>. `;
+    if (warned(sel)) said += `<span class="warn">${esc(title(sel))} had a problem: ${esc(routes.get(sel).parts.find(([, , w]) => w)[0])}.</span>`;
+    else if (biggest[1] >= 1) said += `The longest part of ${esc(title(sel))}'s ${ms(sel.ms || 0)}: ${esc(biggest[0].replace(/^./, (c) => c.toLowerCase()))}, <b>${ms(biggest[1])}</b>.`;
+
+    const row = (r) => {
+      const on = r === sel, kind = r.what === "page" ? "code" : "net";
+      const from = r.source === "kept" ? "from this device's copy" : r.fetches?.at(-1)?.node?.device ? `${r.what === "page" ? "from" : "on"} ${r.fetches.at(-1).node.device}` : "";
+      const name = r.what === "call" ? `<code>${esc(title(r))}</code>` : esc(title(r));
+      return `<button class="rq${warned(r) ? " warn" : ""}" aria-pressed="${on}" data-at="${r.at}" data-title="${esc(title(r))}"><span class="sw" style="background:${warned(r) ? COLOUR.warn : COLOUR[kind]}"></span>` +
+        `<span class="what">${name} <span class="where">${esc(from)}</span></span><span class="where">at ${ms(r.at - g.start)}</span><span class="ms">${ms(r.ms || 0)}</span></button>` +
+        (on ? `<div class="steps">${routes.get(r).parts.map(([w, n, warn]) => `<div${warn ? ' class="warn"' : ""}><span>${esc(w)}</span><span>${n ? ms(n) : ""}</span></div>`).join("")}</div>` : "");
+    };
+    const others = groups.filter((x) => x !== g).reverse();
+    el.innerHTML = `<p class="say">${said}</p><svg class="routes" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="Where each request went">${svg}</svg>` +
+      `<div class="reqs">${g.rs.map(row).join("")}</div>` +
+      others.map((o) => `<div class="burst">${new Date(o.start).toLocaleTimeString()}, ${ms(o.end - o.start)}</div><div class="reqs">${o.rs.map(row).join("")}</div>`).join("");
+  }
+
+  async function refresh() {
+    const traces = await one.traces();
+    if (!traces) return void (document.getElementById("timing").innerHTML = one.empty("Turn on Developer Mode in Settings › Developer to see what each screen asked for."));
+    if (traces.length === all.length && traces.at(-1)?.at === all.at(-1)?.at) return;
+    all = traces;
+    draw();
+  }
+
+  document.addEventListener("click", (e) => {
+    const b = e.target.closest("button");
+    if (!b) return;
+    if (b.dataset.close !== undefined) return one.close();
+    if (b.dataset.scope) (scope = b.dataset.scope), (picked = null);
+    else if (b.dataset.at) picked = { at: Number(b.dataset.at), title: b.dataset.title };
+    else return;
+    document.querySelectorAll("[data-scope]").forEach((s) => s.setAttribute("aria-pressed", s.dataset.scope === scope));
+    draw();
+  });
+  document.querySelectorAll("[data-scope]").forEach((s) => s.setAttribute("aria-pressed", s.dataset.scope === scope));
+  refresh();
+  setInterval(refresh, 1000);
+  addEventListener("resize", () => all.length && draw());
+</script>
