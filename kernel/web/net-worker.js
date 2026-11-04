@@ -95,7 +95,7 @@ export function server(version) {
   /// A session for `user`: a key of its own, vouched for by this browser's device key (or `as`, another device of
   /// theirs: `{ key, sign }`), and the nodes to ask.
   async function begin(user, as) {
-    const [{ certify, ed25519Public, hex, proveSocket, signedRequest, signingKey, FRESH, SESSION }, { getAll, put }] = await code;
+    const [{ certify, ed25519Public, hex, proveSocket, signedRequest, signingKey, untilTaken, FRESH, SESSION }, { getAll, put }] = await code;
     // In one read: the device's key, the nodes it asked before and who runs what, as it replayed it.
     const [mine, nodes, members] = await getAll([`device:${user}`, `nodes:${user}`, `global:${user}`]);
     const device = as || mine;
@@ -111,10 +111,20 @@ export function server(version) {
     // The relay's socket, opening while the WebAssembly loads.
     const socket = async (certificate) => early(`${certificate}.${await proveSocket(key, endpoint)}`);
     await socket(certificate);
-    const request = JSON.stringify(await signedRequest(key, endpoint, "one/relay", { computes: true, certificate }));
+    // The relay takes each request once, so one refused as taken already (another process of this device signed in the
+    // same millisecond) is signed again.
+    const ask = async (certificate) => {
+      let answer;
+      await untilTaken(async (at) => {
+        const body = JSON.stringify(await signedRequest(key, endpoint, "one/relay", { computes: true, certificate }, at));
+        answer = await fetch("/relay/computes", { method: "POST", headers: { "content-type": "application/json" }, body });
+        return answer.status === 403 || answer.ok ? "" : (await answer.clone().json().catch(() => null))?.error;
+      });
+      return answer;
+    };
     // The computes, a new client's first nodes, which say whether this browser is let in at all: waited for only the
     // first time; after that, the nodes it asked before are asked at once, and the computes only checked beside them.
-    const computes = fetch("/relay/computes", { method: "POST", headers: { "content-type": "application/json" }, body: request }).then(async (asked) => {
+    const computes = ask(certificate).then(async (asked) => {
       // Not let in: this browser isn't one of its person's devices (yet, or any more).
       if (asked.status === 403) return null;
       if (!asked.ok) throw new Error("Your One App's network isn't answering.");
@@ -148,8 +158,7 @@ export function server(version) {
     const made = { client, endpoint, socket, certificate };
     // Whether the relay still lets it in: it says who's on its network, and a device taken out isn't.
     made.still = async () => {
-      const asked = JSON.stringify(await signedRequest(key, endpoint, "one/relay", { computes: true, certificate: made.certificate }));
-      return (await fetch("/relay/computes", { method: "POST", headers: { "content-type": "application/json" }, body: asked })).status !== 403;
+      return (await ask(made.certificate)).status !== 403;
     };
     return made;
   }

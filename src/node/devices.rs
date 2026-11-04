@@ -257,12 +257,23 @@ impl Node {
     async fn tell_relay_as(&self, key: ed25519_dalek::SigningKey, fields: Value) -> Result<()> {
         let address = self.address()?;
         tokio::task::spawn_blocking(move || {
-            let body = crate::keys::signed_request(&key, "one/relay", fields, now_ms());
             let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).timeout_global(Some(Duration::from_secs(15))).build().into();
-            let mut resp = agent.post(format!("{address}/relay/tell")).send_json(&body)?;
-            let out: Value = resp.body_mut().read_json().unwrap_or(Value::Null);
-            ensure!(resp.status().is_success(), "the relay said: {}", out["error"].as_str().unwrap_or("no"));
-            Ok(())
+            // Signed again once if another process of this device signed in the same millisecond, which the relay takes once.
+            let mut again = true;
+            loop {
+                let at = crate::keys::next_at(now_ms());
+                let body = crate::keys::signed_request(&key, "one/relay", fields.clone(), at);
+                let mut resp = agent.post(format!("{address}/relay/tell")).send_json(&body)?;
+                let out: Value = resp.body_mut().read_json().unwrap_or(Value::Null);
+                let said = out["error"].as_str().unwrap_or("no");
+                if !resp.status().is_success() && again && crate::keys::taken_already(said) {
+                    again = false;
+                    std::thread::sleep(crate::keys::again_in(at));
+                    continue;
+                }
+                ensure!(resp.status().is_success(), "the relay said: {said}");
+                return Ok(());
+            }
         })
         .await?
     }

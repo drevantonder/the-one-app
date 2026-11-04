@@ -30,7 +30,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { initSync, device_start, device_deliver, device_fetch, device_nodes, device_close, device_view, device_keys, following } from "./one_serverless.js";
 import wasm from "./one_serverless_bg.wasm";
-import { b64u, ed25519Public, hex, joinCode, mayHand, random, sealHandoff, signedRequest } from "../shared/crypto.js";
+import { b64u, ed25519Public, hex, joinCode, mayHand, random, sealHandoff, signedRequest, untilTaken } from "../shared/crypto.js";
 import { Issuer, bearer } from "../shared/token.js";
 import { Copies } from "./copies.js";
 
@@ -358,7 +358,11 @@ export class Client extends DurableObject {
         const began = Date.now();
         await this.unbindStale();
         const name = await this.ctx.storage.get("name");
-        const bound = await this.relay().bind(await signedRequest(me.seed, hex.decode(me.key), RELAY, { bind: true }), name);
+        let bound;
+        await untilTaken(async (at) => {
+          bound = await this.relay().bind(await signedRequest(me.seed, hex.decode(me.key), RELAY, { bind: true }, at), name);
+          return bound?.error;
+        });
         if (!bound?.ticket) throw new Error(`the relay didn't take its key: ${bound?.error}`);
         this.ticket = bound.ticket;
         await this.ctx.storage.put("bound", { key: me.key, ticket: bound.ticket });

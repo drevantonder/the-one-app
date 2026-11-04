@@ -208,8 +208,25 @@ export async function verify(publicKey, domain, v, signature) {
 /// How old a signed request may be, in milliseconds, either way.
 export const FRESH = 60_000;
 
+let lastAt = 0;
+
+/// When to sign what the relay takes once by its `at`: now, or one more than the last this page or Worker signed.
+export function nextAt() {
+  lastAt = Math.max(Date.now(), lastAt + 1);
+  return lastAt;
+}
+
+/// Signs and sends again, once, a request that was taken already (another process of this device signed in the same
+/// millisecond): `send(at)` signs with `at` and → the problem it was refused with, or nothing.
+export async function untilTaken(send) {
+  const said = await send(nextAt());
+  if (!/taken already/.test(said || "")) return said;
+  await new Promise((done) => setTimeout(done, 2 + Math.floor(Math.random() * 23)));
+  return send(nextAt());
+}
+
 /// A request signed by an endpoint (`key`, its public half `by`): the fields, with `at`, `by` (hex) and `sig`.
-export async function signedRequest(key, by, domain, fields, at = Date.now()) {
+export async function signedRequest(key, by, domain, fields, at = nextAt()) {
   const out = { ...fields, at, by: hex.encode(by) };
   return { ...out, sig: b64u.encode(await sign(key, domain, out)) };
 }

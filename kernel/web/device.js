@@ -8,7 +8,7 @@
 // (/v1/state): which seal key a device has, who opens a scope, which hash an epoch's key must have, and which nodes may
 // be handed a scope's keys. A hacked node holds no keys, and gets none this way.
 
-import { b64u, databaseKey, ed25519Public, epochHash, hex, hkdfKey, inviteProof, joinCode, mayHand, oldestNeeded, openAppKey, openSealed, passkeyKeys, random, sealAppKey, sealHandoff, sealTo, sha256, signEntry, signedRequest, twinPublic, x25519Public } from "../shared/crypto.js";
+import { b64u, databaseKey, ed25519Public, epochHash, hex, hkdfKey, inviteProof, joinCode, mayHand, oldestNeeded, openAppKey, openSealed, passkeyKeys, random, sealAppKey, sealHandoff, sealTo, sha256, signEntry, signedRequest, twinPublic, untilTaken, x25519Public } from "../shared/crypto.js";
 import { get, put } from "./kept.js";
 import { members } from "./members.js";
 
@@ -330,8 +330,11 @@ export class Device {
 
   /// Tells the relay to let a key in (`{ add, admin? }`) or take one out (`{ remove }`), signed by `as`.
   async tell(fields, as = this.me) {
-    const r = await fetch("/relay/tell", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(await this.signed("one/relay", fields, as)) });
-    if (!r.ok) throw new Error((await r.json().catch(() => null))?.error || "Your One App's network didn't take that.");
+    const said = await untilTaken(async (at) => {
+      const r = await fetch("/relay/tell", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(await signedRequest(as.sign, hex.decode(as.key), "one/relay", fields, at)) });
+      return r.ok ? "" : (await r.json().catch(() => null))?.error || "Your One App's network didn't take that.";
+    });
+    if (said) throw new Error(said);
   }
 
   /// When each of the install's devices was last let onto its network, as the relay says: `{ key: ms }`, or none from a

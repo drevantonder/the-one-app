@@ -207,8 +207,15 @@ impl Device {
     /// Whether the relay lets this device in: → the compute endpoints on its network, which it says are there, not
     /// what they may do.
     async fn computes(&self) -> Result<Option<Vec<[u8; 32]>>, Error> {
-        let asked = keys::signed_request(&self.key, "one/relay", json!({ "computes": true }), now());
-        let (status, out) = http("POST", &format!("{}/relay/computes", self.address), None, Some(asked)).await?;
+        let url = format!("{}/relay/computes", self.address);
+        // Signed again once if another process of this device signed in the same millisecond, which the relay takes once.
+        let mut at = keys::next_at(now());
+        let (mut status, mut out) = http("POST", &url, None, Some(keys::signed_request(&self.key, "one/relay", json!({ "computes": true }), at))).await?;
+        if error(&out).is_some_and(|e| keys::taken_already(&e)) {
+            tokio::time::sleep(keys::again_in(at)).await;
+            at = keys::next_at(now());
+            (status, out) = http("POST", &url, None, Some(keys::signed_request(&self.key, "one/relay", json!({ "computes": true }), at))).await?;
+        }
         if status == 403 || status == 401 {
             return Ok(None);
         }

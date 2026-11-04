@@ -708,11 +708,25 @@ impl Node {
         tokio::spawn(async move {
             let mut wait = Duration::from_secs(1);
             for _ in 0..5 {
-                let body = crate::keys::signed_request(&key, "one/relay", fields.clone(), now_ms());
+                let at = crate::keys::next_at(now_ms());
+                let body = crate::keys::signed_request(&key, "one/relay", fields.clone(), at);
                 let url = url.clone();
-                match tokio::task::spawn_blocking(move || ureq::post(&url).send_json(&body).map(drop)).await {
-                    Ok(Ok(())) => return,
-                    Ok(Err(ureq::Error::StatusCode(code))) if code < 500 => return tracing::debug!("the relay refused what this device told it ({code})"),
+                let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).build().into();
+                let sent = tokio::task::spawn_blocking(move || {
+                    let mut resp = agent.post(&url).send_json(&body)?;
+                    let said: Value = resp.body_mut().read_json().unwrap_or(Value::Null);
+                    anyhow::Ok((resp.status().as_u16(), said["error"].as_str().unwrap_or("").to_string()))
+                })
+                .await;
+                match sent {
+                    Ok(Ok((code, _))) if code < 300 => return,
+                    // Another process of this device signed in the same millisecond: again at once, with a new `at`.
+                    Ok(Ok((_, said))) if crate::keys::taken_already(&said) => {
+                        tokio::time::sleep(crate::keys::again_in(at)).await;
+                        continue;
+                    }
+                    Ok(Ok((code, _))) if code < 500 => return tracing::debug!("the relay refused what this device told it ({code})"),
+                    Ok(Ok(_)) => tracing::debug!("telling the relay: it had a problem"),
                     Ok(Err(err)) => tracing::debug!("telling the relay: {err}"),
                     Err(err) => tracing::debug!("telling the relay: {err}"),
                 }

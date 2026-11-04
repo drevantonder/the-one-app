@@ -91,6 +91,29 @@ pub fn signed_request(key: &SigningKey, domain: &str, mut fields: Value, at: u64
     fields
 }
 
+/// When to sign a request that something takes once by its `at` (the relay): `now` (milliseconds), or one more than
+/// the last this process signed, so two of its requests in one millisecond are never the same.
+pub fn next_at(now: u64) -> u64 {
+    static LAST: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let last = LAST.fetch_max(now, std::sync::atomic::Ordering::SeqCst);
+    if last < now {
+        return now;
+    }
+    LAST.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1
+}
+
+/// Whether the relay refused a request because another with the same `at` from the same key came first, which signing
+/// it again a moment later cures: two processes of one device signing in one millisecond.
+pub fn taken_already(said: &str) -> bool {
+    said.contains("taken already")
+}
+
+/// How long to wait before signing again a request (signed `at`) that was taken already: a few milliseconds that
+/// differ between processes, so the two don't land on the same one again.
+pub fn again_in(at: u64) -> std::time::Duration {
+    std::time::Duration::from_millis(2 + (at ^ u64::from(std::process::id())) % 23)
+}
+
 /// Checks a signed request at `now`: → who signed it, and the fields without `sig`.
 pub fn check_request(domain: &str, request: &Value, now: u64) -> Result<([u8; 32], Value)> {
     let (by, fields, at) = check_signed(domain, request)?;
