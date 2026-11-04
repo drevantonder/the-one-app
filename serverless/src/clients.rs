@@ -139,7 +139,7 @@ pub async fn device_fetch(me: String, method: String, path: String, headers: Vec
     let me = key(&me).map_err(JsValue::from)?;
     let client = running(&me).ok_or_else(|| failed("that device isn't running".into(), false))?;
     let headers = headers.chunks(2).map(|h| (h[0].clone(), h.get(1).cloned().unwrap_or_default())).collect();
-    let response = client.fetch(one_client::Request { method, path, headers, body }).await.map_err(|e| failed(e.to_string(), e.sent))?;
+    let response = client.fetch(one_client::Request { method, path, headers, body: body.into() }).await.map_err(|e| failed(e.to_string(), e.sent))?;
     let node = data_encoding::HEXLOWER.encode(&response.node);
     let body = response.body.bytes_within(ANSWER_MOST).await.map_err(|e| failed(e.to_string(), true))?;
     let out = js_sys::Object::new();

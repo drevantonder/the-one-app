@@ -100,7 +100,61 @@ pub struct Request {
     pub method: String,
     pub path: String,
     pub headers: Vec<(String, String)>,
-    pub body: Vec<u8>,
+    pub body: Sent,
+}
+
+/// What a request sends: bytes, or natively a file, streamed from disk and read again for each try, so a big body (a
+/// git push's pack) is never held whole.
+#[derive(Clone)]
+pub enum Sent {
+    Bytes(Vec<u8>),
+    #[cfg(not(target_family = "wasm"))]
+    File(std::path::PathBuf),
+}
+
+impl From<Vec<u8>> for Sent {
+    fn from(bytes: Vec<u8>) -> Sent {
+        Sent::Bytes(bytes)
+    }
+}
+
+impl Sent {
+    fn len(&self) -> Result<u64, Error> {
+        match self {
+            Sent::Bytes(bytes) => Ok(bytes.len() as u64),
+            #[cfg(not(target_family = "wasm"))]
+            Sent::File(path) => Ok(std::fs::metadata(path).map_err(|e| unsent(format!("the file to send: {e}")))?.len()),
+        }
+    }
+
+    /// The bytes, if it's bytes.
+    pub fn bytes(&self) -> &[u8] {
+        match self {
+            Sent::Bytes(bytes) => bytes,
+            #[cfg(not(target_family = "wasm"))]
+            Sent::File(_) => &[],
+        }
+    }
+
+    /// Writes it all to `send`, read as it goes.
+    async fn write(&self, send: &mut iroh::endpoint::SendStream) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        match self {
+            Sent::Bytes(bytes) => send.write_all(bytes).await?,
+            #[cfg(not(target_family = "wasm"))]
+            Sent::File(path) => {
+                use std::io::Read;
+                let (mut file, mut part) = (std::fs::File::open(path)?, vec![0; READ]);
+                loop {
+                    let n = file.read(&mut part)?;
+                    if n == 0 {
+                        break;
+                    }
+                    send.write_all(&part[..n]).await?;
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 /// A node's response, its body read as it comes.
@@ -281,7 +335,7 @@ impl Client {
             let last = at + 1 == nodes.len();
             let mut headers = req.headers.clone();
             headers.extend(node(key.as_bytes()));
-            let head = head(&req.method, &req.path, &headers, req.body.len(), certificate.as_deref())?;
+            let head = head(&req.method, &req.path, &headers, req.body.len()?, certificate.as_deref())?;
             let node = key;
             for fresh in [false, true] {
                 let (err, reused) = match self.exchange(node, &head, &req, fresh, last).await {
@@ -383,7 +437,7 @@ impl Client {
         };
         let sending = async {
             send.write_all(head).await?;
-            send.write_all(&req.body).await?;
+            req.body.write(&mut send).await?;
             send.finish()?;
             Ok::<_, Box<dyn std::error::Error + Send + Sync>>(())
         };
@@ -414,7 +468,7 @@ enum Way {
 }
 
 /// A request's head, checked: nothing in it can start another header or request. A session's certificate goes with it.
-fn head(method: &str, path: &str, headers: &[(String, String)], len: usize, certificate: Option<&str>) -> Result<Vec<u8>, Error> {
+fn head(method: &str, path: &str, headers: &[(String, String)], len: u64, certificate: Option<&str>) -> Result<Vec<u8>, Error> {
     let token = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&b));
     if !token(method) {
         return Err(unsent("that isn't a method"));

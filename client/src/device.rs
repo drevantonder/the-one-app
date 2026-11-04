@@ -24,7 +24,7 @@ use data_encoding::BASE64URL_NOPAD as B64U;
 use serde_json::{Value, json};
 
 use crate::bucket::Signed;
-use crate::{Body, Client, Error, Request, Response, not_let_in, unsent};
+use crate::{Body, Client, Error, Request, Response, Sent, not_let_in, unsent};
 
 /// How long a node keeps the keys a request handed it.
 const HANDED_FOR: u64 = 3_600_000;
@@ -361,7 +361,8 @@ impl Device {
     /// A request to its install's nodes as its person, with the keys it needed last time; one a node needs others for
     /// (428) is sent again with them, a few times, as a node may find what it needs as it goes (the serverless node,
     /// its logs' keys first, then a call's). `/v1/state` is read for the order things run in.
-    pub async fn fetch(&self, method: &str, path: &str, headers: Vec<(String, String)>, body: Vec<u8>) -> Result<Response, Error> {
+    pub async fn fetch(&self, method: &str, path: &str, headers: Vec<(String, String)>, body: impl Into<Sent>) -> Result<Response, Error> {
+        let body = body.into();
         // Asked before it joined, or after it was taken out: it's in only if the relay lets it, else its own screen says so.
         let joined = self.client.lock().await.is_some();
         if !joined && !self.connect().await? {
@@ -396,8 +397,8 @@ impl Device {
         }
     }
 
-    async fn request(&self, method: &str, path: &str, headers: Vec<(String, String)>, body: Vec<u8>) -> Result<Response, Error> {
-        let route = route(path, &body);
+    async fn request(&self, method: &str, path: &str, headers: Vec<(String, String)>, body: Sent) -> Result<Response, Error> {
+        let route = route(path, body.bytes());
         for tries in 0..4 {
             let handed = self.handed(&route).await;
             let request = Request { method: method.into(), path: path.into(), headers: headers.clone(), body: body.clone() };
@@ -449,7 +450,7 @@ impl Device {
             headers.push(("content-type".into(), "application/json".into()));
         }
         let body = body.map(|b| keys::canonical(&b)).unwrap_or_default();
-        let response = self.send(Request { method: method.into(), path: path.into(), headers, body }, None).await?;
+        let response = self.send(Request { method: method.into(), path: path.into(), headers, body: body.into() }, None).await?;
         let status = response.status;
         let out: Value = serde_json::from_slice(&response.body.bytes().await?).unwrap_or_default();
         if status != 200 {

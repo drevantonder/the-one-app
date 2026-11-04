@@ -837,8 +837,8 @@ fn run(args: Vec<String>) -> Result<()> {
         }
         // `blob`: what `update` scripts made by builds before `file` call.
         ["file" | "blob", "put", file] => {
-            let bytes = std::fs::read(file).with_context(|| format!("read {file}"))?;
-            println!("{}", request(agent().post(format!("http://{}/v1/blobs", addr())).send(&bytes[..]))?["blob"].as_str().unwrap_or(""));
+            let read = std::fs::File::open(file).with_context(|| format!("read {file}"))?;
+            println!("{}", request(agent().post(format!("http://{}/v1/blobs", addr())).send(read))?["blob"].as_str().unwrap_or(""));
         }
         ["file" | "blob", "get", hash, file] => {
             let mut resp = agent().get(format!("http://{}/v1/blobs/{hash}", addr())).call().map_err(unreached)?;

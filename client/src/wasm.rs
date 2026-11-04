@@ -46,7 +46,7 @@ impl Client {
     /// `headers`: names and values, one after the other.
     pub async fn fetch(&self, method: String, path: String, headers: Vec<String>, body: Vec<u8>) -> Result<Response, JsError> {
         let headers = headers.chunks(2).map(|h| (h[0].clone(), h.get(1).cloned().unwrap_or_default())).collect();
-        let response = self.0.fetch(crate::Request { method, path, headers, body }).await.map_err(js)?;
+        let response = self.0.fetch(crate::Request { method, path, headers, body: body.into() }).await.map_err(js)?;
         let headers = response.headers.into_iter().flat_map(|(n, v)| [n, v]).collect();
         Ok(Response { node: data_encoding::HEXLOWER.encode(&response.node), status: response.status, headers, body: std::rc::Rc::new(std::cell::RefCell::new(Some(response.body))) })
     }

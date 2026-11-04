@@ -231,7 +231,8 @@ fn answer(status: u16, error: String) -> Result<ureq::http::Response<ureq::Body>
 }
 
 /// A ureq middleware: what's asked of this machine's node goes to its person's nodes over iroh instead, as this
-/// device, while it's one and no node runs here. Its body is read whole before it's sent; the answer's as it comes.
+/// device, while it's one and no node runs here. Its body is read before it's sent (to disk past `IN_MEMORY`, as a
+/// node may ask for it again with the keys it needs), and streamed from there; the answer's read as it comes.
 pub fn instead(req: ureq::http::Request<ureq::SendBody>, next: ureq::middleware::MiddlewareNext) -> Result<ureq::http::Response<ureq::Body>, ureq::Error> {
     if !req.uri().authority().is_some_and(|a| a.as_str() == one::api::addr()) || !active() {
         return next.handle(req);
@@ -242,8 +243,7 @@ pub fn instead(req: ureq::http::Request<ureq::SendBody>, next: ureq::middleware:
         return answer(403, needs_node(req.uri().path()));
     }
     let (parts, body) = req.into_parts();
-    let mut sent = Vec::new();
-    body.into_reader().read_to_end(&mut sent)?;
+    let sent = Spooled::read(body.into_reader())?;
     // Never this machine's own token, nor a sign-in's: the device's key is who it asks as.
     let headers: Vec<(String, String)> = parts
         .headers
@@ -257,7 +257,8 @@ pub fn instead(req: ureq::http::Request<ureq::SendBody>, next: ureq::middleware:
         Err(err) => return Err(ureq::Error::Io(std::io::Error::other(format!("couldn't reach your devices: {err}")))),
     }
     let method = parts.method.to_string();
-    let response = match run(move || async move { device.fetch(&method, &path, headers, sent).await }) {
+    let body = sent.sent();
+    let response = match run(move || async move { device.fetch(&method, &path, headers, body).await }) {
         Ok(response) => response,
         Err(err) if err.not_let_in => return answer(403, not_let_in()),
         Err(err) => return Err(ureq::Error::Io(std::io::Error::other(format!("couldn't reach your devices: {err}")))),
@@ -275,6 +276,49 @@ pub fn instead(req: ureq::http::Request<ureq::SendBody>, next: ureq::middleware:
         built = built.header(name, value);
     }
     Ok(built.body(body.reader(Streamed { body: Mutex::new(Some(response.body)), part: Vec::new(), at: 0 }))?)
+}
+
+/// The most of a request's body kept in memory: a bigger one (a git push's pack, a file) goes to disk, and streams to
+/// the node from there, as only files and apps' own requests may be bigger (`CLIENT_BODY` in src/node/net.rs).
+const IN_MEMORY: usize = 4 << 20;
+
+/// A request's body, read: in memory, or past `IN_MEMORY`, in a file only this user reads, deleted once it's sent.
+enum Spooled {
+    Bytes(Vec<u8>),
+    File(PathBuf),
+}
+
+impl Spooled {
+    fn read(mut body: impl Read) -> std::io::Result<Spooled> {
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut sent = Vec::new();
+        (&mut body).take(IN_MEMORY as u64 + 1).read_to_end(&mut sent)?;
+        if sent.len() <= IN_MEMORY {
+            return Ok(Spooled::Bytes(sent));
+        }
+        let path = std::env::temp_dir().join(format!("{CLI}-sending-{}", one::entry::hex(&rand::random::<[u8; 32]>())));
+        let spooled = Spooled::File(path.clone());
+        let mut file = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&path)?;
+        file.write_all(&sent)?;
+        std::io::copy(&mut body, &mut file)?;
+        Ok(spooled)
+    }
+
+    fn sent(&self) -> one_client::Sent {
+        match self {
+            Spooled::Bytes(bytes) => one_client::Sent::Bytes(bytes.clone()),
+            Spooled::File(path) => one_client::Sent::File(path.clone()),
+        }
+    }
+}
+
+impl Drop for Spooled {
+    fn drop(&mut self) {
+        if let Spooled::File(path) = self {
+            let _ = std::fs::remove_file(path);
+        }
+    }
 }
 
 /// A node's answer's body, read as it comes.
