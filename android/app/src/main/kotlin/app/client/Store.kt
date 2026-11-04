@@ -15,6 +15,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.delay
@@ -84,6 +85,11 @@ class Store(private val application: android.app.Application, val signIn: SignIn
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    /** The signed-in person's work: what keeps up with the node, and each event's and widget's refresh. Signing out
+     *  cancels it and starts another, and what writes the person's things here (the window, the apps, the widgets)
+     *  checks it's still the one it began in, so nothing of theirs comes back after. */
+    private var session = session()
+    private fun session() = CoroutineScope(SupervisorJob(scope.coroutineContext[Job]) + Dispatchers.Main)
     var phase by mutableStateOf(if (signIn.signedIn) Phase.Starting else Phase.SignedOut)
     var failure by mutableStateOf<String?>(null)
     var state by mutableStateOf<NodeState?>(null)
@@ -246,7 +252,7 @@ class Store(private val application: android.app.Application, val signIn: SignIn
     fun run() {
         if (running?.isActive == true) return
         drawKept()
-        running = scope.launch {
+        running = session.launch {
             var misses = 1
             val started = System.currentTimeMillis()
             while (true) {
@@ -279,8 +285,12 @@ class Store(private val application: android.app.Application, val signIn: SignIn
 
     /** Back to the first screen, saying `why` when the install turned this phone away rather than the person signing out. */
     fun signedOut(why: String? = null) {
+        // Already signed out: what was still on its way as it did, which finds itself signed out, says nothing.
+        if (phase == Phase.SignedOut && why != null) return
         MainActivity.welcomeError = why
-        running?.cancel()
+        session.cancel()
+        session = session()
+        running = null
         state = null
         path.clear()
         sheets.forEach { it.close(null) }
@@ -316,10 +326,17 @@ class Store(private val application: android.app.Application, val signIn: SignIn
     private fun keptFile(name: String) = java.io.File(application.cacheDir, "window").apply { mkdirs() }.resolve(name)
 
     private suspend inline fun <reified T> kept(name: String, path: String): T {
+        val began = session
         val text = String(api(path))
         val value: T = json.decodeFromString(text)
+        current(began)
         withContext(Dispatchers.IO) { runCatching { keptFile(name).writeText(text) } }
         return value
+    }
+
+    /** Stops what began in `began` once its person has signed out, before it writes anything of theirs. */
+    private fun current(began: CoroutineScope) {
+        if (began !== session) throw kotlinx.coroutines.CancellationException("signed out")
     }
 
     private fun drawKept() {
@@ -335,9 +352,11 @@ class Store(private val application: android.app.Application, val signIn: SignIn
     private var answered = false
 
     suspend fun refreshState(): Unit = coroutineScope {
+        val began = session
         // The first time, the apps are asked for beside the state, not after it.
         val early = if (!answered) async { runCatching { kept<List<AppInfo>>("apps", "/v1/apps") }.getOrNull() } else null
         val next: NodeState = kept("state", "/v1/state")
+        current(began)
         val regrouped = (next.user to next.install?.groups) != (state?.user to state?.install?.groups)
         val first = !answered
         answered = true
@@ -348,15 +367,20 @@ class Store(private val application: android.app.Application, val signIn: SignIn
 
     suspend fun refreshApps(early: List<AppInfo>? = null) {
         if (state?.install == null) return
-        apps = early ?: kept("apps", "/v1/apps")
+        val began = session
+        val next = early ?: kept("apps", "/v1/apps")
+        current(began)
+        apps = next
     }
 
     /** Every page's widgets, for the home screen's, while any is there (or `always`, as one is chosen). */
     suspend fun refreshWidgets(always: Boolean = false) {
         if (!always && !app.client.widget.HomeWidgets.placed()) return
-        val raw = pages.map { p ->
-            scope.async { runCatching { p.scope to String(api("/v1/widgets", query = mapOf("scope" to p.scope))) }.getOrNull() }
-        }.awaitAll().filterNotNull().toMap()
+        val began = session
+        val raw = coroutineScope {
+            pages.map { p -> async { runCatching { p.scope to String(api("/v1/widgets", query = mapOf("scope" to p.scope))) }.getOrNull() } }.awaitAll()
+        }.filterNotNull().toMap()
+        current(began)
         app.client.widget.HomeWidgets.saw(this, raw)
     }
 
@@ -378,7 +402,7 @@ class Store(private val application: android.app.Application, val signIn: SignIn
                             if (!line.startsWith("data:")) continue
                             val data = line.removePrefix("data:").trim()
                             events.tryEmit(data)
-                            runCatching { json.decodeFromString<NodeEvent>(data) }.getOrNull()?.let { e -> scope.launch { runCatching { handle(e) } } }
+                            runCatching { json.decodeFromString<NodeEvent>(data) }.getOrNull()?.let { e -> session.launch { runCatching { handle(e) } } }
                         }
                     }
                 } finally {
@@ -401,7 +425,7 @@ class Store(private val application: android.app.Application, val signIn: SignIn
      *  home screen's widgets, as the iPhone reads it all again once it's active. */
     fun resumed() {
         if (phase != Phase.Ready) return
-        scope.launch {
+        session.launch {
             runCatching { refreshState() }
             events.tryEmit("""{"type":"install"}""")
             runCatching { refreshWidgets() }
@@ -441,6 +465,9 @@ class Store(private val application: android.app.Application, val signIn: SignIn
     }
 
     fun signOut() {
+        // Nothing of the person's goes on meanwhile: what's on its way would find itself signed out.
+        session.cancel()
+        session = session()
         scope.launch {
             client.signOut()
             signIn.signOut()

@@ -476,15 +476,13 @@ struct NodeClient: Sendable {
         return (try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
     }
 
-    func state() async throws -> NodeState { try await kept("state", "v1/state", timeout: 2) }
-    func apps() async throws -> [AppInfo] { try await kept("apps", "v1/apps") }
+    /// The node's state and apps, each with the answer as it came, for the window to keep (`KeptWindow`).
+    func state() async throws -> (NodeState, Data) { try await answer("v1/state", timeout: 2) }
+    func apps() async throws -> ([AppInfo], Data) { try await answer("v1/apps") }
 
-    /// A `GET` whose answer is also kept as the window's (`KeptWindow`), to draw the next time the app opens.
-    private func kept<T: Decodable>(_ name: String, _ path: String, timeout: TimeInterval = 10) async throws -> T {
+    private func answer<T: Decodable>(_ path: String, timeout: TimeInterval = 10) async throws -> (T, Data) {
         let data = try await transport.send("GET", path, body: nil, timeout: timeout)
-        let value = try JSONDecoder().decode(T.self, from: data)
-        KeptWindow.keep(name, data)
-        return value
+        return (try JSONDecoder().decode(T.self, from: data), data)
     }
 
     /// The widgets, rendered for a page's scope.

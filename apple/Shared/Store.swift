@@ -136,8 +136,26 @@ final class Store {
         self.node = node
     }
 
+    /// Counted up as the person signs out (`forget`): what began before it writes nothing of theirs after, here or in
+    /// the window kept for next time.
+    private var session = 0
+
+    /// Throws once the person who was signed in at `began` signed out.
+    private func current(_ began: Int) throws {
+        if began != session { throw CancellationError() }
+    }
+
+    /// The node's answer, kept as the window's (`KeptWindow`) to draw the next time the app opens, if its person is
+    /// still signed in.
+    private func kept<T>(_ name: String, _ answer: (T, Data), since began: Int) throws -> T {
+        try current(began)
+        KeptWindow.keep(name, answer.1)
+        return answer.0
+    }
+
     /// Forgets everything it showed, and what it kept of the person's on this device: they signed out.
     func forget() {
+        session += 1
         KeptWindow.forget()
         answered = false
         ScreenCache.forget()
@@ -341,6 +359,9 @@ final class Store {
         } catch is NotLetIn {
             // Not an unreachable node: the device was taken out of, or isn't yet in, the install, so it joins again.
             return false
+        } catch is CancellationError {
+            // Its person signed out meanwhile.
+            return false
         } catch {
             failure = error
         }
@@ -389,9 +410,13 @@ final class Store {
 
     func refreshState() async throws {
         // The first time, the apps are asked for beside the state, not after it.
-        let node = node
-        let early: Task<[AppInfo]?, Never>? = !answered && signedIn ? Task { try? await node.apps() } : nil
-        let state = try await node.state()
+        let node = node, began = session
+        let early: Task<[AppInfo]?, Never>? = !answered && signedIn ? Task {
+            guard let answer = try? await node.apps() else { return nil }
+            return try? self.kept("apps", answer, since: began)
+        } : nil
+        let answer = try await node.state()
+        let state = try kept("state", answer, since: began)
         let first = !answered
         answered = true
         let arrived = self.state?.install?.joining != false && state.install?.joining == false
@@ -400,10 +425,16 @@ final class Store {
         arrangements = state.arrangements ?? [:]
         phase = .ready
         if first, signedIn {
-            developer = (try? await DeviceClient.shared.developer(nil)) ?? developer
+            let developer = (try? await DeviceClient.shared.developer(nil)) ?? developer
+            try current(began)
+            self.developer = developer
             await renameIfHostname()
         }
-        if first || arrived || apps.isEmpty || regrouped { await refreshApps(early: await early?.value) }
+        if first || arrived || apps.isEmpty || regrouped {
+            let early = await early?.value
+            try current(began)
+            await refreshApps(early: early)
+        }
     }
 
     private func handle(_ event: NodeEvent) async {
@@ -453,15 +484,18 @@ final class Store {
 
     func refreshApps(early: [AppInfo]? = nil) async {
         guard install != nil, signedIn else { return }
+        let began = session
         do {
-            let apps = if let early { early } else { try await node.apps() }
+            let apps = if let early { early } else { try kept("apps", try await node.apps(), since: began) }
             if apps != self.apps { self.apps = apps }
             // A node that just started lists its deployed apps before it can describe them.
             if apps.contains(where: { ($0.deploys ?? 0) > 0 && $0.title == nil }) { throw NodeError("starting") }
+        } catch is CancellationError {
+            return
         } catch {
             Task {
                 try? await Task.sleep(for: .seconds(2))
-                await refreshApps()
+                if began == session { await refreshApps() }
             }
         }
         openWhereItWas()
@@ -470,7 +504,7 @@ final class Store {
 
     func refreshWidgets() async {
         guard let install, !install.joining, signedIn else { return }
-        let node = node
+        let node = node, began = session
         var fresh: [String: [WidgetInfo]] = [:]
         var answered = true
         await withTaskGroup(of: (String, [WidgetInfo]?).self) { tasks in
@@ -480,6 +514,7 @@ final class Store {
                 if widgets == nil { answered = false }
             }
         }
+        guard began == session else { return }
         if fresh != widgets {
             widgets = fresh
             if let data = try? JSONEncoder().encode(fresh) { KeptWindow.keep("widgets", data) }
@@ -491,6 +526,7 @@ final class Store {
             for page in allPages { tasks.addTask { (page.scope, (try? await node.badges(scope: page.scope)) ?? [:]) } }
             for await (scope, count) in tasks { counts[scope] = count }
         }
+        guard began == session else { return }
         if counts != badges { badges = counts }
     }
 
