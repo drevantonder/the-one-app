@@ -229,7 +229,8 @@ window.__one = {};
   }
 
   /// Signs out as a device: out of its person's devices first (`Device.leave`), so signing in again replaces it, then its
-  /// key goes. One that can't get out in a few seconds (no node answering) goes anyway: approving the new one replaces it.
+  /// key goes. One that can't get out in a few seconds (no node answering) goes anyway, and stays listed, last seen when
+  /// it signed out, until it's removed in Settings › Devices.
   async function signOut() {
     if (device) await Promise.race([device.leave(), sleep(20_000)]).catch((err) => console.warn("leaving your devices:", err));
     await forgetDevice();
