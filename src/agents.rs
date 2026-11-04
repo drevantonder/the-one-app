@@ -427,7 +427,7 @@ fn harnesses(home: &Path, written: &mut Written) {
     git(&addr);
 }
 
-/// Git reaches Repos at the node (`git clone http://localhost:<port>/repos/<repo>.git`) as one of this machine's own
+/// Git reaches Repos at the node (`git clone http://localhost:<port>/repos/<owner>/<repo>.git`) as one of this machine's own
 /// programs: the person's git config includes one of the node's, which only they can read, sending its token there.
 fn git(addr: &str) {
     let Some(token) = crate::api::local_token(&crate::home()) else { return };

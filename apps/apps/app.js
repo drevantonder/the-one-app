@@ -294,7 +294,7 @@ export default {
     },
     source: {
       reads: false,
-      description: "Set where an app you own keeps its code, shown on its page as Source: a web address: GitHub, any git host or page, or a repo's address in Repos (http://localhost:<port>/repos/<repo>.git). An empty link clears it. Built-in apps start with their folder in the open-source repo; forks start with none.",
+      description: "Set where an app you own keeps its code, shown on its page as Source: a web address: GitHub, any git host or page, or a repo's address in Repos (<your One App's address>/repos/<owner>/<repo>.git). An empty link clears it. Built-in apps start with their folder in the open-source repo; forks start with none.",
       input: { type: "object", required: ["app", "link"], properties: { app: APP, link: { type: "string", description: "https://…, or a repo's address in Repos; empty for none" } } },
       async run(ctx, { app, link }) {
         const a = await find(ctx, app);

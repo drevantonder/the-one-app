@@ -1,7 +1,7 @@
 <div id="page"></div>
 <script>
 const at = P.path || "";
-one.title(at ? at.split("/").pop() : P.repo);
+one.title(at ? at.split("/").pop() : P.repo.split("/").pop());
 
 const icons = { tree: "folder", blob: "file", commit: "folder-dashed" };
 // Each row's last commit, as last fetched: kept across redraws, so the columns don't blank while it's fetched again.
@@ -42,7 +42,7 @@ function head(d) {
   const box = d.deleted ? "" : `<div class="clone"><code>${esc(clone)}</code>${one.copyButton(clone)}</div><p class="clone-where">${where}</p>`;
   return `<div class="repo-head">
       <div class="repo-title"><span class="repo-icon">${one.icon("book")}</span><div>
-        <div class="repo-owner">${esc(d.owner_name)}</div><h1>${esc(d.repo)}</h1>
+        <div class="repo-owner">${esc(d.owner.name)}</div><h1>${esc(d.name)}</h1>
         ${d.from ? `<div class="muted small">Forked from <a onclick="${go("repo", { repo: d.from })}">${esc(d.from)}</a></div>` : ""}</div></div>
       ${box}
     </div>`;
@@ -60,10 +60,13 @@ function more(d) {
     </div>`;
 }
 
-// At the bottom of a repo's front page, for its owners: Delete Repository, or once it's deleted, Erase Repository.
+// At the bottom of a repo's front page: who pushes to it; and for its owners, Delete Repository, or once it's deleted,
+// Erase Repository.
 function danger(d) {
-  if (at || !d.yours) return "";
-  return `<div class="list danger-list"><a class="row plain danger-row" onclick="retire('${d.deleted ? "erase" : "delete"}')">${d.deleted ? "Erase Repository" : "Delete Repository"}</a></div><div id="ask"></div>`;
+  if (at) return "";
+  const who = d.deleted ? "" : `<div class="list repo-links"><a class="row plain" onclick="${go("collaborators", { repo: d.repo })}">${one.icon("users", "row-icon")}<div class="main"><div class="title"><span>Collaborators</span></div></div><div class="chev">›</div></a></div>`;
+  if (!d.yours) return who;
+  return who + `<div class="list danger-list"><a class="row plain danger-row" onclick="retire('${d.deleted ? "erase" : "delete"}')">${d.deleted ? "Erase Repository" : "Delete Repository"}</a></div><div id="ask"></div>`;
 }
 
 async function retire(op) {
@@ -93,7 +96,7 @@ async function show() {
       + (d.yours ? '<button class="button capsule" onclick="restore(this)">Restore</button>' : "") + danger(d);
   if (d.file) return one.open("file", { repo: d.repo, ref: refOf(d), path: at });
   if (d.empty)
-    return head(d) + one.empty(`No code yet. ${where}, push some:<br><code>git push ${esc(address(d.repo))} main</code>`) + danger(d);
+    return head(d) + one.empty(d.push ? `No code yet. ${where}, push some:<br><code>git push ${esc(address(d.repo))} main</code>` : "No code yet.") + danger(d);
   const list = d.entries.length
     ? `<div class="list files">${at ? `<a class="row plain entry up" onclick="${go("repo", { repo: d.repo, ref: refOf(d), path: at.split("/").slice(0, -1).join("/") })}">${one.icon("folder", "entry-icon")}<span class="entry-name">..</span></a>` : ""}${d.entries.map((e) => entry(d, e)).join("")}</div>`
     : one.empty("This folder is empty.");

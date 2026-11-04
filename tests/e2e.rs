@@ -252,14 +252,16 @@ async fn a_file_put_from_elsewhere_is_read_only_by_whoever_put_it() {
     assert!(a.blob_for(&sam, &hash).await.is_err(), "a request's file goes once it's answered");
 }
 
-/// In Repos, only a repo's owner pushes to it and its owners alone delete it: someone else is refused, from a client
-/// device or a sign-in from elsewhere, whose git reaches Repos' `_http` as them.
+/// In Repos, a repo's owner and its collaborators push to it, and its owners alone delete it: someone else is refused,
+/// from a client device or a sign-in from elsewhere, whose git reaches Repos' `_http` as them, until its owner adds them
+/// as a collaborator; a group's members push to its repos, and only its admins delete them.
 #[tokio::test(flavor = "multi_thread")]
-async fn only_a_repos_owner_pushes_to_it_or_deletes_it_from_any_device() {
+async fn only_a_repos_owner_and_collaborators_push_to_it_and_only_its_owners_delete_it() {
     use one::node::{Caller, DeviceRequest, Invited};
     let a = start("repos-owner").await;
     a.create("Home", "Andre").await.unwrap();
     let me = Caller { key: a.id(), user: a.user().unwrap(), agent: None, token: None };
+    // Naming no scopes, as git's requests don't: Sam's own runs nowhere, as he picked nowhere, so his run without it.
     let repos = |op: &str, input: Value| CallRequest { app: "repos".into(), op: op.into(), input, ..Default::default() };
     eventually("Repos to run", async || a.call(repos("list", json!({}))).await.is_ok()).await;
 
@@ -291,17 +293,17 @@ async fn only_a_repos_owner_pushes_to_it_or_deletes_it_from_any_device() {
         body.extend(pack);
         body
     };
-    let http = |body: Option<String>| repos("_http", json!({ "method": "POST", "path": "home.git/git-receive-pack", "query": "", "body": body }));
-    let branches = async || {
-        let got = a.call(repos("get", json!({ "repo": "home" }))).await.unwrap();
+    let http = |repo: &str, body: Option<String>| repos("_http", json!({ "method": "POST", "path": format!("{repo}.git/git-receive-pack"), "query": "", "body": body }));
+    let branches = async |repo: &str| {
+        let got = a.call(repos("get", json!({ "repo": repo }))).await.unwrap();
         got["branches"].as_array().unwrap().iter().map(|b| (b["branch"].as_str().unwrap().to_string(), b["head"].as_str().unwrap().to_string())).collect::<Vec<_>>()
     };
 
-    // Andre's push makes the repo, his.
+    // Andre's push makes the repo, his, at his handle.
     let body = a.put_blob(&push(&[(&zero, &head, "refs/heads/main")], &pack)).unwrap();
-    let told = a.call(http(Some(body))).await.unwrap();
+    let told = a.call(http("andre/home", Some(body))).await.unwrap();
     assert!(told["text"].as_str().unwrap().contains("ok refs/heads/main"), "{told}");
-    assert_eq!(branches().await, [("main".to_string(), head.clone())]);
+    assert_eq!(branches("andre/home").await, [("main".to_string(), head.clone())]);
 
     // Sam, a person of the install, with a device of his.
     let secret = "the-invites-secret";
@@ -325,27 +327,62 @@ async fn only_a_repos_owner_pushes_to_it_or_deletes_it_from_any_device() {
 
     let client = Caller { key: e.key, user: sam.user.clone(), agent: None, token: Some(one::node::client_token(&e.key)) };
     let signed_in = Caller { key: a.id(), user: sam.user.clone(), agent: None, token: Some("Sam's sign-in".into()) };
+    let mut both = Vec::new();
     for (sam, handed_for) in [(client, one::entry::hex(&e.key)), (signed_in, one::keys::token_id("Sam's sign-in"))] {
         let handoff = one::keys::Handoff { for_: handed_for, until: u64::MAX, keys: keys.clone() };
         a.hand(sam.token.as_deref().unwrap(), &sam.user, &one::keys::seal_handoff(&a.endpoint().seal, &handoff).unwrap(), u64::MAX).unwrap();
-        // Named in global, where Repos keeps everything: Sam's own scope runs only where his own devices chose.
-        let call = |req: CallRequest| a.call_as(a.for_sign_in(CallRequest { scopes: Some(vec!["global".into()]), ..req }).unwrap(), sam.clone());
+        let call = |req: CallRequest| a.call_as(a.for_sign_in(req).unwrap(), sam.clone());
 
         // His push, deleting main and making a branch of his at its head, is refused, and nothing moves.
         let (body, _) = a.put_blob_from(&sam, axum::body::Body::from(push(&[(&head, &zero, "refs/heads/main"), (&zero, &head, "refs/heads/sams")], &[]))).await.unwrap();
-        let told = call(http(Some(body))).await.unwrap();
+        let told = call(http("andre/home", Some(body))).await.unwrap();
         let text = told["text"].as_str().unwrap();
         assert!(text.contains("ng refs/heads/main ") && text.contains("ng refs/heads/sams ") && !text.contains("ok refs/"), "{told}");
-        assert_eq!(branches().await, [("main".to_string(), head.clone())]);
+        assert_eq!(branches("andre/home").await, [("main".to_string(), head.clone())]);
 
-        // Nor does he delete it.
-        let refused = call(repos("delete", json!({ "repo": "home" }))).await.unwrap_err();
-        assert!(format!("{refused:#}").contains("deletes, restores or erases home"), "{refused:#}");
-        assert!(a.call(repos("get", json!({ "repo": "home" }))).await.unwrap()["deleted"].is_null());
+        // Nor does he delete it, nor make himself a collaborator.
+        let refused = call(repos("delete", json!({ "repo": "andre/home" }))).await.unwrap_err();
+        assert!(format!("{refused:#}").contains("only Andre manage andre/home"), "{refused:#}");
+        assert!(call(repos("add_collaborator", json!({ "repo": "andre/home", "user": "sam", "confirm": true }))).await.is_err());
+        assert!(a.call(repos("get", json!({ "repo": "andre/home" }))).await.unwrap()["deleted"].is_null());
+        both.push(sam);
     }
+    let [client, signed_in] = <[Caller; 2]>::try_from(both).unwrap();
+    let call = |req: CallRequest, sam: &Caller| a.call_as(a.for_sign_in(req).unwrap(), sam.clone());
+    // A push of Sam's: making `branch` at the commit, with its pack, or deleting it: → whether it was taken.
+    let sams_push = async |sam: &Caller, repo: &str, branch: &str, deleting: bool| {
+        let r = format!("refs/heads/{branch}");
+        let line = if deleting { (head.as_str(), zero.as_str(), r.as_str()) } else { (zero.as_str(), head.as_str(), r.as_str()) };
+        let (body, _) = a.put_blob_from(sam, axum::body::Body::from(push(&[line], if deleting { &[] } else { &pack }))).await.unwrap();
+        // A call reaches the groups he's in too, whose keys his device would hand; this one hands global's alone.
+        let told = call(CallRequest { scopes: repo.starts_with("team/").then(|| vec!["global".into()]), ..http(repo, Some(body)) }, sam).await.unwrap();
+        told["text"].as_str().unwrap().contains(&format!("ok {r}"))
+    };
 
-    // Andre does.
-    a.call(repos("delete", json!({ "repo": "home" }))).await.unwrap();
+    // Once Andre adds him as a collaborator, Sam pushes, from either; he still doesn't delete it. Taken out, he's refused.
+    a.call(repos("add_collaborator", json!({ "repo": "andre/home", "user": "sam", "confirm": true }))).await.unwrap();
+    assert!(sams_push(&client, "andre/home", "sams", false).await);
+    assert!(sams_push(&signed_in, "andre/home", "sams", true).await);
+    assert!(call(repos("delete", json!({ "repo": "andre/home" })), &client).await.is_err());
+    a.call(repos("remove_collaborator", json!({ "repo": "andre/home", "user": "sam", "confirm": true }))).await.unwrap();
+    assert!(!sams_push(&client, "andre/home", "sams", false).await);
+
+    // A group's repo: its admins own it. Sam pushes to it only once he's in the group, and doesn't delete it.
+    let group = a.make_group(&me, "Team").await.unwrap();
+    a.call(repos("create", json!({ "name": "site", "owner": "team" }))).await.unwrap();
+    assert!(!sams_push(&client, "team/site", "sams", false).await);
+    a.member_as(&me, "invite", json!({ "group": group, "user": sam.user, "role": "member" })).await.unwrap();
+    let heads = a.entry_heads(&client, &global).await.unwrap();
+    let previous = heads["previous"].as_array().unwrap().iter().map(|h| one::entry::Hash::from_hex(h.as_str().unwrap()).unwrap()).collect();
+    let ext = one::entry::Ext { log: "global".into(), time: one::node::now_ms(), user: sam.user.clone(), epoch: heads["epoch"].as_u64().unwrap() as u32, previous };
+    a.put_signed(&client, vec![one::entry::Entry::create(&sams, ext, None, one::members::accept(&group))]).await.unwrap();
+    assert!(sams_push(&client, "team/site", "sams", false).await, "a member of the group pushes to its repo");
+    let refused = call(CallRequest { scopes: Some(vec!["global".into()]), ..repos("delete", json!({ "repo": "team/site" })) }, &client).await.unwrap_err();
+    assert!(format!("{refused:#}").contains("only Team's admins manage team/site"), "{refused:#}");
+
+    // Andre deletes his, and the group's as its admin.
+    a.call(repos("delete", json!({ "repo": "andre/home" }))).await.unwrap();
+    a.call(repos("delete", json!({ "repo": "team/site" }))).await.unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread")]

@@ -9,10 +9,11 @@ const wide = () => matchMedia("(min-width: 700px)").matches;
 const go = (screen, params) => esc(`one.open(${JSON.stringify(screen)}, ${JSON.stringify(params)})`);
 // The ref to keep using: the branch if there is one, else the commit.
 const refOf = (d) => d.branch || d.sha;
-// Where git reaches a repo, the same on every computer: <address>/repos/<repo>.git, once `based` has it. Git goes
-// through the CLI there, so on a phone or in a browser this says where to run it.
-let base = "<address>/repos/";
-const based = one.call("_address").then((b) => b && (base = b), () => {});
+// Where git reaches a repo, the same on every computer: <address>/repos/<owner>/<repo>.git, once `based` has it; and
+// the person's handle, for a repo of theirs. Git goes through the CLI there, so on a phone or in a browser this says
+// where to run it.
+let base = "<address>/repos/", mine = "<you>";
+const based = one.call("_address").then((b) => ((base = b?.base || base), (mine = b?.handle || mine)), () => {});
 const address = (repo) => `${base}${repo}.git`;
 const where = `On any computer where you’ve run ${one.config?.cli || "one"} sign-in`;
 const plural = (n, one_, many) => `${n.toLocaleString()} ${n === 1 ? one_ : many}`;

@@ -1,4 +1,4 @@
-//! Git and your One App's repos, at one address on every computer, `<address>/repos/<repo>.git`. Git is told
+//! Git and your One App's repos, at one address on every computer, `<address>/repos/<owner>/<repo>.git`. Git is told
 //! (`url.<CLI>::<address>/repos/.insteadOf`) to reach it as `<CLI>::<address>/repos/…`, so it runs this program as
 //! `git-remote-<CLI>`, its remote helper. That runs git's own HTTP transport (`git remote-http`) for the address, with
 //! this program as its proxy while it runs: what git asks goes where every command's request goes, to this machine's
@@ -22,7 +22,7 @@ pub fn helper() -> String {
 /// Run as git's remote helper, `git-remote-<CLI> <remote> <url>`: → the exit code of git's HTTP transport.
 pub fn run(args: &[String]) -> Result<i32> {
     let [remote, url] = args else { bail!("{} is git's, for {CLI}:: addresses: git clone <your repo's address>", helper()) };
-    let (address, path) = url.split_once("/repos/").map(|(a, p)| (a.trim_end_matches('/'), p)).with_context(|| format!("{url} isn't a repo's address in {NAME}, which is <address>/repos/<repo>.git"))?;
+    let (address, path) = url.split_once("/repos/").map(|(a, p)| (a.trim_end_matches('/'), p)).with_context(|| format!("{url} isn't a repo's address in {NAME}, which is <address>/repos/<owner>/<repo>.git"))?;
     let ours = here(address)?;
     if ours != address {
         bail!("this computer is in {YOURS} at {ours}, not at {address}: {CLI} sign-in --address {address}, then try again");

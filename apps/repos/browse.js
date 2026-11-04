@@ -13,19 +13,17 @@ const SHA = /^[0-9a-f]{40}$/;
 const natural = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
 const utf8 = new TextDecoder();
 
-/// The repo, its objects, and which commit `ref` (a branch, or a commit hash) names: main if none is given.
-export async function open(ctx, g, repo, ref) {
-  const r = (await g.query("select * from repos where name = ?", [repo]))[0];
-  if (!r) throw new Error(`There's no repo called ${repo}`);
-  if (r.deleted) throw new Error(`${repo} was deleted: its owners restore it from Recently Deleted`);
-  const branches = await g.query("select branch, head, name, time from branches where repo = ? order by branch", [repo]);
-  const packs = (await g.query("select hash from packs where repo = ? order by time, hash", [repo])).map((p) => p.hash);
+/// The repo (a row of repos, live, with its `path`, <owner>/<name>), its objects, and which commit `ref` (a branch, or
+/// a commit hash) names: main if none is given.
+export async function open(ctx, g, r, ref) {
+  const branches = await g.query("select branch, head, name, time from branches where repo = ? order by branch", [r.id]);
+  const packs = (await g.query("select hash from packs where repo = ? order by time, hash", [r.id])).map((p) => p.hash);
   const o = await objects(ctx, packs);
   if (!branches.length) return { r, o, branches, ref: null, sha: null };
   ref ||= branches.find((b) => b.branch === "main")?.branch || branches[0].branch;
   const b = branches.find((x) => x.branch === ref);
   const sha = b ? b.head : SHA.test(ref) && o.has(ref) ? ref : null;
-  if (!sha) throw new Error(`There's no branch or commit ${ref} in ${repo}`);
+  if (!sha) throw new Error(`There's no branch or commit ${ref} in ${r.path}`);
   return { r, o, branches, ref, sha, branch: b ? ref : null };
 }
 
@@ -57,10 +55,10 @@ const binary = (bytes) => bytes.subarray(0, 8000).includes(0);
 /// A folder: its entries (folders first, in natural order), its README, and the commit it's read at.
 export async function tree(ctx, g, { repo, ref, path = "" }) {
   const { r, o, branches, ref: name, sha, branch } = await open(ctx, g, repo, ref);
-  const info = { repo: r.name, owner: r.owner, from: r.from, branches: branches.map((b) => b.branch), ref: name, branch, path };
+  const info = { repo: r.path, branches: branches.map((b) => b.branch), ref: name, branch, path };
   if (!sha) return { ...info, empty: true, entries: [] };
   const here = at(o, sha, path);
-  if (!here) throw new Error(`There's no ${path} in ${repo} at ${branch || sha.slice(0, 7)}`);
+  if (!here) throw new Error(`There's no ${path} in ${repo.path} at ${branch || sha.slice(0, 7)}`);
   if (here.type !== "tree") return { ...info, commit: summary(o.commit(sha)), file: true };
   const entries = sorted(o.tree(here.sha)).map((e) => ({ name: e.name, type: e.type, mode: e.mode, sha: e.sha }));
   const rm = entries.filter((e) => e.type === "blob" && README.test(e.name)).sort((a, b) => /\.md$/i.test(b.name) - /\.md$/i.test(a.name))[0];
@@ -75,10 +73,10 @@ export async function tree(ctx, g, { repo, ref, path = "" }) {
 /// A file at a commit: its text, or why it isn't shown.
 export async function file(ctx, g, { repo, ref, path }) {
   const { o, ref: name, sha, branch, branches } = await open(ctx, g, repo, ref);
-  if (!sha) throw new Error(`${repo} has no code yet`);
+  if (!sha) throw new Error(`${repo.path} has no code yet`);
   const e = at(o, sha, path || "");
-  if (!e || e.type === "tree") throw new Error(`There's no file ${path} in ${repo}`);
-  const info = { repo, ref: name, branch, sha, path, branches: branches.map((b) => b.branch), mode: e.mode, latest: summary(o.commit(last(o, sha, path) || sha)) };
+  if (!e || e.type === "tree") throw new Error(`There's no file ${path} in ${repo.path}`);
+  const info = { repo: repo.path, ref: name, branch, sha, path, branches: branches.map((b) => b.branch), mode: e.mode, latest: summary(o.commit(last(o, sha, path) || sha)) };
   if (e.type === "commit") return { ...info, submodule: e.sha, size: 0 };
   const bytes = o.blob(e.sha);
   if (binary(bytes)) return { ...info, size: bytes.length, binary: true };
@@ -125,14 +123,14 @@ function last(o, sha, path) {
 /// History: 25 commits a page, newest first, of the whole repo or of `path`.
 export async function log(ctx, g, { repo, ref, path = "", page = 0 }) {
   const { o, ref: name, branch, sha } = await open(ctx, g, repo, ref);
-  if (!sha) return { repo, ref: name, branch, path, page, commits: [], more: false };
+  if (!sha) return { repo: repo.path, ref: name, branch, path, page, commits: [], more: false };
   const commits = [];
   let scanned = 0;
   for (const c of walk(o, [sha], (c) => (scanned++, touches(o, c, path)))) {
     commits.push(c);
     if (commits.length > (page + 1) * PAGE || scanned > 5000) break;
   }
-  return { repo, ref: name, branch, sha, path, page, commits: commits.slice(page * PAGE, (page + 1) * PAGE).map(summary), more: commits.length > (page + 1) * PAGE };
+  return { repo: repo.path, ref: name, branch, sha, path, page, commits: commits.slice(page * PAGE, (page + 1) * PAGE).map(summary), more: commits.length > (page + 1) * PAGE };
 }
 
 /// The last commit that changed each entry of a folder, for wide windows; it looks back 300 commits at most.
@@ -235,7 +233,7 @@ export async function commit(ctx, g, { repo, sha }) {
     } else budget -= lines;
     return { ...row(r), ...d };
   });
-  return { repo, ...summary(c), files: out };
+  return { repo: repo.path, ...summary(c), files: out };
 }
 
 /// One file's diff in a commit, however big.

@@ -3,6 +3,7 @@ body { max-width: 1012px; }
 code { font: 0.88em var(--mono); }
 .row-icon { width: 20px; height: 20px; color: var(--muted); }
 .repo-row .icon .i { width: 18px; height: 18px; }
+.repo-row .owner { color: var(--muted); }
 .who-avatar .avatar { width: 24px; height: 24px; font-size: 10px; }
 .who-avatar.small .avatar { width: 22px; height: 22px; font-size: 9px; }
 .who-avatar.tiny .avatar { width: 16px; height: 16px; font-size: 7px; }

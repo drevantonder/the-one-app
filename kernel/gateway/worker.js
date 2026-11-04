@@ -94,7 +94,7 @@ async function toWeb(request, env, url) {
   return send(resp.body);
 }
 
-/// Git at a repo's address, `/repos/<repo>.git`, from a computer whose git doesn't go through the CLI (which reaches the
+/// Git at a repo's address, `/repos/<owner>/<repo>.git`, from a computer whose git doesn't go through the CLI (which reaches the
 /// repo over iroh): what to do, which git shows as the remote's.
 function gitWithoutCli(env, url) {
   const name = env.NAME || "The One App", cli = env.CLI || "one";

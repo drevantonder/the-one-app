@@ -1,4 +1,5 @@
-// Git over HTTP, as the node's local API passes it on (`/repos/<repo>.git/...`), so stock git clones, fetches and pushes.
+// Git over HTTP, as the node's local API passes it on (`/repos/<owner>/<repo>.git/...`), so stock git clones, fetches and
+// pushes.
 //
 // Fetching is git's "dumb" protocol: the branches, the list of packs, and each pack and its index are files git
 // downloads, so nothing is worked out per fetch. Pushing is the smart protocol's receive-pack, asking for whole packs
@@ -21,25 +22,26 @@ const pkt = (line) => (enc.encode(line).length + 4).toString(16).padStart(4, "0"
 const text = (body, status = 200, type = "text/plain") => ({ status, type, text: body });
 const missing = (why = "not found") => text(why, 404);
 
-/// Answers a request for `path` (`<repo>.git/<file>`). `api` is what app.js knows about repos and who may push.
+/// Answers a request for `path` (`<owner>/<repo>.git/<file>`). `api` is what app.js knows about repos and who may push.
 export async function serve(ctx, g, api, { method, path, query, body }) {
-  const m = /^([^/]+?)(?:\.git)?\/(.+)$/.exec(path || "");
-  if (!m) return missing();
-  const [, name, file] = m;
+  const m = /^([^/]+)\/([^/]+?)(?:\.git)?\/(.+)$/.exec(path || "");
+  if (!m || m[1].endsWith(".git")) return missing(`A repo's address is <your One App's address>/repos/<owner>/<repo>.git, its owner a person's or group's handle: repos_list has them`);
+  const [, owner, name, file] = m;
   const service = new URLSearchParams(query || "").get("service");
-  if (method === "POST" && file === "git-receive-pack") return receive(ctx, g, api, name, body);
+  const found = await api.find(ctx, g, owner, name);
+  if (method === "POST" && file === "git-receive-pack") return receive(ctx, g, api, owner, name, found, body);
   if (method !== "GET") return missing();
-  if (file === "info/refs" && service === "git-receive-pack") return advertise(g, api, name);
-  const r = await api.repoOf(g, name);
-  if (!r) return missing(`There's no repo called ${name}`);
-  if (r.deleted) return missing(`${name} was deleted: its owners restore it from Recently Deleted`);
-  const branches = await g.query("select branch, head from branches where repo = ? order by branch", [name]);
+  if (file === "info/refs" && service === "git-receive-pack") return advertise(g, found.r);
+  const r = found.r;
+  if (!r) return missing(found.why || `There's no repo ${owner}/${name}`);
+  if (r.deleted) return missing(`${r.path} was deleted: its owners restore it from Recently Deleted`);
+  const branches = await g.query("select branch, head from branches where repo = ? order by branch", [r.id]);
   if (file === "info/refs") return text(branches.map((b) => `${b.head}\trefs/heads/${b.branch}\n`).join(""));
   if (file === "HEAD") return text(`ref: refs/heads/${api.defaultBranch(branches.map((b) => b.branch)) || "main"}\n`);
-  if (file === "objects/info/packs") return text((await indexed(ctx, g, name)).map((p) => `P pack-${p.name}.pack\n`).join("") + "\n");
+  if (file === "objects/info/packs") return text((await indexed(ctx, g, r.id)).map((p) => `P pack-${p.name}.pack\n`).join("") + "\n");
   const want = /^objects\/pack\/pack-([0-9a-f]{40})\.(pack|idx)$/.exec(file);
   if (want) {
-    const p = (await indexed(ctx, g, name)).find((p) => p.name === want[1]);
+    const p = (await indexed(ctx, g, r.id)).find((p) => p.name === want[1]);
     if (!p) return missing();
     return { status: 200, type: "application/octet-stream", blob: want[2] === "pack" ? p.pack : p.idx };
   }
@@ -47,7 +49,8 @@ export async function serve(ctx, g, api, { method, path, query, body }) {
   return missing();
 }
 
-/// A repo's packs, oldest first, each with its name and index; a pack kept before indexes were is indexed now.
+/// The packs of the repo with id `repo`, oldest first, each with its name and index; a pack kept before indexes were is
+/// indexed now.
 async function indexed(ctx, g, repo) {
   const rows = await g.query(
     "select p.hash as pack, i.name, i.idx, i.size from packs p left join indexes i on i.pack = p.hash where p.repo = ? order by p.time, p.hash",
@@ -63,16 +66,15 @@ async function indexed(ctx, g, repo) {
 }
 
 /// What git asks before it pushes: the branches, and what this end can do.
-async function advertise(g, api, name) {
-  const r = await api.repoOf(g, name);
-  const branches = r && !r.deleted ? await g.query("select branch, head from branches where repo = ? order by branch", [name]) : [];
+async function advertise(g, r) {
+  const branches = r && !r.deleted ? await g.query("select branch, head from branches where repo = ? order by branch", [r.id]) : [];
   const refs = branches.length ? branches.map((b, i) => pkt(`${b.head} refs/heads/${b.branch}${i ? "" : "\0" + CAPS}\n`)) : [pkt(`${ZERO} capabilities^{}\0${CAPS}\n`)];
   return text(pkt("# service=git-receive-pack\n") + "0000" + refs.join("") + "0000", 200, "application/x-git-receive-pack-advertisement");
 }
 
 /// A push: which branches move from what to what, then the pack that holds what's new. Each branch is told ok or why
 /// not; a pack that can't be read refuses them all.
-async function receive(ctx, g, api, name, hash) {
+async function receive(ctx, g, api, owner, name, found, hash) {
   const bytes = hash ? await ctx.blob.get(hash) : new Uint8Array();
   const commands = [];
   let at = 0;
@@ -90,16 +92,17 @@ async function receive(ctx, g, api, name, hash) {
   // Refused, each branch with why; the pack too, only if it's the pack that's wrong.
   const refuse = (why, unpacked = "ok") => report(unpacked, commands.map((c) => `ng ${c.ref} ${why.replace(/\n/g, " ")}\n`));
 
-  let r = await api.repoOf(g, name);
-  if (r?.deleted) return refuse(`${name} was deleted: its owners restore it from Recently Deleted`);
-  if (r && !api.mayPush(ctx, r)) return refuse(`${name} is ${api.ownerName(ctx, r.owner)}'s: fork it (repos fork ${name} <a name of yours>) and push there`);
+  let r = found.r;
+  if (found.why) return refuse(found.why);
+  if (r?.deleted) return refuse(`${r.path} was deleted: its owners restore it from Recently Deleted`);
+  if (r && !(await api.mayPush(ctx, g, r))) return refuse(`only ${api.ownerName(ctx, r.owner)} and its collaborators push to ${r.path}: fork it (repos fork ${r.path}), push to your fork, and tell them`);
   if (!r) {
-    const why = api.newRepo(ctx, g, name);
-    if (why) return refuse(why);
-    r = { name };
+    const made = api.newRepo(ctx, g, owner, name);
+    if (made.why) return refuse(made.why);
+    r = made.r;
   }
 
-  const kept = (await g.query("select hash from packs where repo = ? order by time, hash", [name])).map((p) => p.hash);
+  const kept = (await g.query("select hash from packs where repo = ? order by time, hash", [r.id])).map((p) => p.hash);
   let added = null;
   if (at < bytes.length) {
     const pack = bytes.subarray(at);
@@ -113,7 +116,7 @@ async function receive(ctx, g, api, name, hash) {
   }
   const have = await objects(ctx, kept);
   const fresh = new Set(added?.entries.map((e) => e.sha));
-  const branches = new Map((await g.query("select branch, head from branches where repo = ?", [name])).map((b) => [b.branch, b.head]));
+  const branches = new Map((await g.query("select branch, head from branches where repo = ?", [r.id])).map((b) => [b.branch, b.head]));
   const lines = [];
   for (const { old, head, ref } of commands) {
     const branch = ref.startsWith("refs/heads/") ? ref.slice(11) : null;
@@ -122,15 +125,15 @@ async function receive(ctx, g, api, name, hash) {
       : head !== ZERO && !fresh.has(head) && !have.has(head) ? `the push doesn't hold ${head.slice(0, 12)}`
       : null;
     if (why) { lines.push(`ng ${ref} ${why}\n`); continue; }
-    api.moveBranch(ctx, g, name, branch, old === ZERO ? null : old, head === ZERO ? null : head);
+    api.moveBranch(ctx, g, r.id, branch, old === ZERO ? null : old, head === ZERO ? null : head);
     branches.set(branch, head);
     lines.push(`ok ${ref}\n`);
   }
-  if (added && lines.some((l) => l.startsWith("ok "))) await keep(ctx, g, name, added);
+  if (added && lines.some((l) => l.startsWith("ok "))) await keep(ctx, g, r.id, added);
   return report("ok", lines);
 }
 
-/// Keeps a pushed pack for `repo`, then merges its newest packs while each is smaller than twice the ones after it.
+/// Keeps a pushed pack for the repo with id `repo`, then merges its newest packs while each is smaller than twice the ones after it.
 async function keep(ctx, g, repo, pack) {
   const rows = await indexed(ctx, g, repo);
   let newest = [{ bytes: pack.bytes, name: pack.name, entries: pack.entries, size: pack.bytes.length }];

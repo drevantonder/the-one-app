@@ -1,0 +1,84 @@
+<div id="page"></div>
+<style>
+  .action-row { color: var(--tint); cursor: pointer; }
+  .remove { color: var(--danger); }
+  .add { color: var(--tint); width: 24px; height: 24px; }
+</style>
+<script>
+// Who pushes to a repo: its owner, a group's members, and the collaborators its owners added, whom they add and remove.
+one.title("Collaborators");
+let d;
+let trouble = "";
+
+const person = (p, trailing = "") =>
+  `<div class="row still">${one.avatar(p.handle || p.name, p.name)}<div class="main"><div class="title"><span>${esc(p.name)}</span></div>${p.handle ? `<div class="sub">@${esc(p.handle)}</div>` : ""}</div>${trailing}</div>`;
+
+function show() {
+  let html = trouble ? one.problem({ title: trouble }) : "";
+  html += `<h2 class="section">Owner</h2><div class="list">${person(d.owner)}</div>`;
+  if (d.group) {
+    html += `<h2 class="section">Members of ${esc(d.owner.name)}</h2><div class="list">${d.members.map((m) => person(m, `<span class="note">${m.role === "admin" ? "Admin" : "Member"}</span>`)).join("")}</div>`;
+    html += `<p class="footer">Its admins own it, and its members push to it.</p>`;
+  }
+  html += `<h2 class="section">Collaborators</h2>`;
+  html += d.collaborators.length
+    ? `<div class="list">${d.collaborators.map((c) => person(c, d.yours ? `<button class="button plain remove" data-remove="${esc(c.handle)}" aria-label="Remove ${esc(c.name)}">Remove</button>` : "")).join("")}</div>`
+    : `<p class="footer">No one else pushes to it.</p>`;
+  if (d.yours) html += `<div class="list" style="margin-top:20px"><a class="row plain action-row" data-add>Add Collaborator…</a></div>`;
+  return html + '<div id="ask"></div>';
+}
+
+const draw = () => one.render("#page", async () => ((d = await one.call("collaborators", { repo: P.repo })), show()), { loading: "Loading" });
+
+// Someone to add, found by name or handle; tapping them adds them.
+function add() {
+  let query = "";
+  const sheet = one.sheet({ title: "Add Collaborator", done: "Cancel" });
+  sheet.body.innerHTML = `<div id="find"></div><div id="people"></div>`;
+  const people = sheet.body.querySelector("#people");
+  const list = () => {
+    const q = query.trim().toLowerCase();
+    const found = d.people.filter((p) => !q || p.name.toLowerCase().includes(q) || p.handle.includes(q));
+    people.innerHTML = !d.people.length ? `<p class="footer">Everyone pushes to it already.</p>`
+      : found.length ? `<div class="list">${found.map((p) => `<a class="row" data-handle="${esc(p.handle)}">${one.avatar(p.handle, p.name)}<div class="main"><div class="title"><span>${esc(p.name)}</span></div><div class="sub">@${esc(p.handle)}</div></div>${one.icon("plus-circle-fill", "add")}</a>`).join("")}</div>`
+      : `<p class="footer">No one called “${esc(query.trim())}”.</p>`;
+    people.insertAdjacentHTML("beforeend", `<p class="footer">They push to ${esc(d.repo)} once you add them.</p><div id="problem"></div>`);
+  };
+  people.onclick = async (e) => {
+    const r = e.target.closest("[data-handle]");
+    if (!r) return;
+    try {
+      await one.call("add_collaborator", { repo: P.repo, user: r.dataset.handle, confirm: true });
+      sheet.close();
+      one.tap("success");
+      trouble = "";
+      draw();
+    } catch (err) {
+      sheet.body.querySelector("#problem").innerHTML = one.problem({ title: one.plain(err).title });
+    }
+  };
+  one.search(sheet.body.querySelector("#find"), { placeholder: "Find people", delay: 0, onSearch: (q) => ((query = q), list()) });
+  list();
+}
+
+// Removing someone, once the owner says so.
+async function remove(handle) {
+  const c = d.collaborators.find((x) => x.handle === handle);
+  await one.confirm("#ask", {
+    title: `Remove ${c.name}?`, detail: `They stop pushing to ${d.repo}.`, action: "Remove", danger: true,
+    run: async () => {
+      await one.call("remove_collaborator", { repo: P.repo, user: handle, confirm: true });
+      draw();
+    },
+  });
+}
+
+document.addEventListener("click", (e) => {
+  const t = e.target.closest?.("#page [data-add], #page [data-remove]");
+  if (!t) return;
+  if ("add" in t.dataset) add();
+  else remove(t.dataset.remove);
+});
+one.on("changed", draw);
+draw();
+</script>

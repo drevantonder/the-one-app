@@ -21,7 +21,7 @@ An app is a folder with one JavaScript module, `app.js` (or `app.ts`): its opera
 5. Deploy: `{{cli}} deploy <folder>`, or the `deploy` tool with each file's text, builds it, npm packages and all, and makes the app if it's new, owned by you. To try it out first where no one else sees it, put `try` before each command (`{{cli}} try deploy <folder>`): a separate one on this machine, with only you in it, which `{{cli}} try stop` deletes.
 6. Put it on a page: `{{cli}} install <app>` (the `apps_add` tool, scope `user`) for your own, `--scope <group>` for a group's, `--scope global` (admins) for everyone's.
 7. Check it: `{{cli}} <app> <op> --help`, then run each operation, and open its screens and widgets in the app on the person's Mac or phone. If something's wrong, `{{cli}} deploys <app>` lists its versions and `{{cli}} deploy <app> --version <hash>` (`deploy` with `version`) puts one back.
-8. Keep its code wherever you like (Repos, `git push {{cli}}://<repo> main`, or GitHub or any git host), and link the app to it: `{{cli}} apps source <app> <link>`. Its page shows it as Source.
+8. Keep its code wherever you like (Repos, `git push <your One App's address>/repos/<your handle>/<repo>.git main`, or GitHub or any git host), and link the app to it: `{{cli}} apps source <app> <link>`. Its page shows it as Source.
 
 ## The details
 

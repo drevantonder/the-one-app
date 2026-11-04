@@ -2,9 +2,12 @@
 // pushes over HTTP through the node's local API (http.js), and a repo's packs are blobs. No git runs here: pages read
 // the packs themselves (browse.js, git.js).
 //
-// A repo has an owner (user:<id>, group:<id> or admins), and only someone acting for it pushes; anyone else forks it
-// and pushes to their fork. Its owners delete it, as apps are: it waits in Recently Deleted, read by no one, until they
-// restore it or erase it, and its packs, for good.
+// As on GitHub, a repo is <owner>/<name>, its owner a person or a group, by their handle (ctx.handles), so a handle's
+// change moves its repos' addresses. Everyone reads and forks every repo. Its owner pushes, and its collaborators: a
+// person's repo is theirs, and they add and remove collaborators; a group's is its admins', its members are its
+// collaborators, and its admins add others. Owners delete a repo, as apps are: it waits in Recently Deleted, read by no
+// one, until they restore it or erase it, and its packs, for good. Rows name a repo by its id (an older repo's is the
+// name it had before owners had handles) and its owner by user:<id> or group:<id>, never by handle.
 
 import * as browse from "./browse.js";
 import * as http from "./http.js";
@@ -16,20 +19,13 @@ import fileScreen from "./screens/file.html" with { type: "text" };
 import historyScreen from "./screens/history.html" with { type: "text" };
 import commitScreen from "./screens/commit.html" with { type: "text" };
 import branchesScreen from "./screens/branches.html" with { type: "text" };
+import collaboratorsScreen from "./screens/collaborators.html" with { type: "text" };
 
 /// A screen: Repos' styles and shared script, then its own HTML.
 const page = (title, html) => ({ title, html: `<style>${css}</style><script>${common}</script>${html}` });
 
 const NAME = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 const BRANCH = /^(?!\/)(?!.*(\.\.|\/\/|\/$|\.lock$|@\{))[A-Za-z0-9._\/@+-]{1,200}$/;
-
-/// Whether the writer of `e` acts for `owner`: themselves, a group they're an admin of, or admins.
-function actsFor(e, owner) {
-  if (owner === `user:${e.user}`) return true;
-  if (owner === "admins") return e.role === "admin";
-  if (owner.startsWith("group:")) return e.groups?.[owner.slice(6)] === "admin";
-  return false;
-}
 
 /// Times in what an operation gives, ms since 1970 here, as ISO 8601.
 function iso(v) {
@@ -38,54 +34,105 @@ function iso(v) {
   return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, typeof x === "number" && ["time", "created", "updated", "committed"].includes(k) ? new Date(x).toISOString() : iso(x)]));
 }
 
-const OWNER = { type: "string", description: "who owns it: omit for you, admins, or a group you're an admin of as group:<id>, from groups_list" };
-const REPO = { type: "string", description: "a repo's name, from repos_list, like notes" };
+const OWNER = { type: "string", description: "who owns it, by handle: omit for you, or a group you're in, from groups_list" };
+const REPO = { type: "string", description: "a repo as <owner>/<name>, from repos_list, like andre/notes" };
 const REF = { type: "string", description: "a branch, like main, or a commit's sha, from repos_branches or repos_log; default main, else the first branch" };
 const PATH = { type: "string", description: "a path in the repo, like src/app.js or docs; omit for the whole repo" };
 const SHA = { type: "string", description: "a commit's sha, full or its first 7 characters, from repos_log" };
+const USER = { type: "string", description: "a person's handle, from groups_list, like sam" };
+const CONFIRM = { type: "boolean", description: "true once the person agreed: it changes who may push" };
 
-/// The repo named, or an error naming those there are.
-async function named(ctx, name) {
-  const r = await live(global(ctx), name);
+/// Everyone's and every group's handle; a node from before handles has none.
+function handles(ctx) {
+  if (!ctx.handles) throw new Error("this device's node is from before handles: it takes the update that has them soon, then try again");
+  return ctx.handles;
+}
+const byId = (ctx, id) => handles(ctx).find((h) => h.id === id) || null;
+const byHandle = (ctx, handle) => handles(ctx).find((h) => h.handle === handle) || null;
+
+/// A repo as its address and every operation name it: <owner's handle>/<name>.
+const pathOf = (ctx, r) => `${byId(ctx, r.owner)?.handle ?? "unknown"}/${r.name}`;
+/// A row with its path, as browse.js and the screens take it.
+const withPath = (ctx, r) => r && { ...r, path: pathOf(ctx, r) };
+
+/// Splits `<owner>/<name>` into the owner's id and the name, or says how to name a repo.
+function parse(ctx, repo) {
+  const m = /^([^/]+)\/([^/]+)$/.exec(String(repo || "").replace(/\.git$/, ""));
+  if (!m) throw new Error(`give a repo as <owner>/<name>, like ${ctx.me.handle || "andre"}/${repo || "notes"}: repos_list has them`);
+  const owner = byHandle(ctx, m[1]);
+  if (!owner) throw new Error(`no one and no group has the handle ${m[1]}: groups_list has them`);
+  return { owner: owner.id, name: m[2] };
+}
+
+/// The repo `repo` (<owner>/<name>) names, deleted or not, or null.
+async function repoAt(ctx, g, repo) {
+  const { owner, name } = parse(ctx, repo);
+  return withPath(ctx, (await g.query("select * from repos where owner = ? and name = ?", [owner, name]))[0] || null);
+}
+
+/// The repo named, or an error naming those there are: with only a name, the repos of that name.
+async function named(ctx, repo) {
+  const g = global(ctx);
+  if (!String(repo || "").includes("/")) {
+    const same = (await g.query("select * from repos where name = ? and deleted is null", [repo || ""])).map((r) => pathOf(ctx, r));
+    if (same.length) throw new Error(`give a repo as <owner>/<name>: ${same.join(" or ")}`);
+  }
+  const r = await live(ctx, repo);
   if (r) return r;
-  const all = (await global(ctx).query("select name from repos where deleted is null order by name")).map((r) => r.name);
-  throw new Error(`no repo ${name}: ${all.length ? `there's ${all.join(", ")}` : "there are none yet; repos_create makes one"}`);
+  const all = (await g.query("select owner, name from repos where deleted is null order by name")).map((r) => pathOf(ctx, r));
+  throw new Error(`no repo ${repo}: ${all.length ? `there's ${all.join(", ")}` : "there are none yet; repos_create makes one"}`);
+}
+
+/// A repo that's there to read and push to: not deleted.
+async function live(ctx, repo) {
+  const r = await repoAt(ctx, global(ctx), repo);
+  if (r?.deleted) throw new Error(`${r.path} was deleted: its owners restore it from Recently Deleted`);
+  return r;
 }
 
 const randomId = () => [...crypto.getRandomValues(new Uint8Array(8))].map((x) => x.toString(16).padStart(2, "0")).join("");
 
-/// Writes a new repo, or a fork of `from` with its branches and history as they are now.
+/// Writes a new repo, or a fork of `from` (a row) with its branches and history as they are now.
 function newRepo(ctx, g, { name, owner, from = null }) {
-  g.exec(`insert into repos (name, owner, "from", created, user) values (?, ?, ?, ?, ?)`, [name, owner, from, ctx.now(), ctx.me.user]);
+  const id = randomId();
+  g.exec(`insert into repos (id, owner, name, "from", created, user) values (?, ?, ?, ?, ?, ?)`, [id, owner, name, from?.id ?? null, ctx.now(), ctx.me.user]);
   if (from) {
-    g.exec(`insert into branches select ?, branch, head, ?, ?, ? from branches where repo = ?`, [name, ctx.me.user, ctx.me.name, ctx.now(), from]);
-    g.exec("insert or ignore into packs select ?, hash, time from packs where repo = ?", [name, from]);
+    g.exec(`insert into branches select ?, branch, head, ?, ?, ? from branches where repo = ?`, [id, ctx.me.user, ctx.me.user_name || ctx.me.name, ctx.now(), from.id]);
+    g.exec("insert or ignore into packs select ?, hash, time from packs where repo = ?", [id, from.id]);
   }
+  return id;
 }
 
-/// What to call an owner, as far as the caller can tell: you, a group of theirs, admins.
-function ownerName(ctx, owner) {
-  if (owner === `user:${ctx.me.user}`) return ctx.user?.name || "you";
-  if (owner === "admins") return "admins";
-  const group = ctx.groups.find((g) => g.id === owner);
-  if (group) return group.name;
-  return owner.startsWith("group:") ? "a group" : "someone else";
+/// What to call an owner: their name, or a group's.
+const ownerName = (ctx, owner) => byId(ctx, owner)?.name || "someone who left";
+
+/// The caller's role in the group that owns `r`, if one does: admin, member or null.
+const groupRole = (ctx, r) => (r.owner.startsWith("group:") ? byId(ctx, r.owner)?.members?.[ctx.me.user] || null : null);
+
+/// Whether the caller owns `r`: it's theirs, or a group's they're an admin of. Owners delete, restore and erase it, and
+/// add and remove its collaborators.
+const owns = (ctx, r) => r.owner === `user:${ctx.me.user}` || groupRole(ctx, r) === "admin";
+
+/// Whether the caller pushes to `r`: they own it, they're in the group that does, or they're one of its collaborators.
+async function mayPush(ctx, g, r) {
+  if (owns(ctx, r) || groupRole(ctx, r)) return true;
+  return (await g.query("select 1 from collaborators where repo = ? and user = ?", [r.id, ctx.me.user])).length > 0;
 }
 
-const repoOf = async (g, name) => (await g.query("select * from repos where name = ?", [name]))[0] || null;
-
-/// A repo that's there to read and push to: not deleted.
-async function live(g, name) {
-  const r = await repoOf(g, name);
-  if (r?.deleted) throw new Error(`${name} was deleted: its owners restore it from Recently Deleted`);
-  return r;
+/// The owner a new repo of the caller's goes under, by handle (theirs if none): them, or a group they're in.
+function ownerFor(ctx, handle) {
+  if (!handle || handle === ctx.me.handle) return `user:${ctx.me.user}`;
+  const h = byHandle(ctx, handle);
+  if (!h) throw new Error(`no one and no group has the handle ${handle}`);
+  if (h.id === `user:${ctx.me.user}` || h.members?.[ctx.me.user]) return h.id;
+  throw new Error(h.id.startsWith("group:") ? `you're not in ${h.name}: only its members make its repos` : `only ${h.name} makes repos as ${handle}`);
 }
 
-/// A repo the caller acts for the owner of, to delete, restore or erase.
-async function owned(ctx, name) {
-  const r = await repoOf(global(ctx), name);
-  if (!r) await named(ctx, name);
-  if (!actsFor(asWriter(ctx), r.owner)) throw new Error(`only ${ownerName(ctx, r.owner)} deletes, restores or erases ${name}`);
+/// A repo the caller owns, to delete, restore or erase, or change the collaborators of.
+async function owned(ctx, repo) {
+  const r = await repoAt(ctx, global(ctx), repo);
+  if (!r) await named(ctx, repo);
+  if (!owns(ctx, r)) throw new Error(`only ${r.owner.startsWith("group:") ? `${ownerName(ctx, r.owner)}'s admins` : ownerName(ctx, r.owner)} ${r.deleted ? "restore or erase" : "manage"} ${r.path}`);
   return r;
 }
 
@@ -97,16 +144,23 @@ function global(ctx) {
   return ctx.global;
 }
 
-/// The caller as an entry would show them, to check a push before writing it.
-const asWriter = (ctx) => ({
-  user: ctx.me.user,
-  role: ctx.global?.role,
-  groups: Object.fromEntries(ctx.groups.map((g) => [g.id.slice(6), g.role])),
-});
+/// Where git reaches a repo, the same on every computer: <the install's address>/repos/<owner>/<name>.git; null on a
+/// node from before it was given the address.
+const address = (ctx, path) => (ctx.address ? `${ctx.address}/repos/${path}.git` : null);
 
-/// Where git reaches a repo, the same on every computer: <the install's address>/repos/<repo>.git; null on a node from
-/// before it was given the address.
-const address = (ctx, repo) => (ctx.address ? `${ctx.address}/repos/${repo}.git` : null);
+/// The paths of the repos with these ids, by id.
+async function paths(ctx, g, ids) {
+  const want = [...new Set(ids.filter(Boolean))];
+  if (!want.length) return {};
+  const rows = await g.query(`select id, owner, name from repos where id in (${want.map(() => "?").join(", ")})`, want);
+  return Object.fromEntries(rows.map((r) => [r.id, pathOf(ctx, r)]));
+}
+
+/// A repo's forks that aren't deleted, by path.
+const forksOf = async (ctx, g, r) => (await g.query(`select owner, name from repos where "from" = ? and deleted is null order by name`, [r.id])).map((f) => pathOf(ctx, f));
+
+/// A person's or group's handle and name, for what an operation gives.
+const who = (ctx, id) => ({ handle: byId(ctx, id)?.handle ?? null, name: ownerName(ctx, id) });
 
 export default {
   name: "repos",
@@ -116,7 +170,7 @@ export default {
   color: "#5856d6",
   advanced: true,
   description: "Git hosting for you and your agents: clone, push and suggest changes",
-  instructions: `Repos is git hosting for the person and their agents. A repo's address is \`<their One App's address>/repos/<repo>.git\` (repos_get gives it, and its page shows it), the same on every computer: \`git clone\`, \`git push\` and \`git fetch\` work with it as with any git host on any computer where the CLI is signed in (its sign-in), with or without a node there; pushing to a name that isn't a repo yet makes it, yours. Only a repo's owner pushes to it: to suggest changes, fork it (repos fork), push to your fork, and tell its owner, who fetches from it.`,
+  instructions: `Repos is git hosting for the person and their agents, as on GitHub. A repo is <owner>/<name>, its owner a person or a group by their handle (groups_list has them), and its address is \`<their One App's address>/repos/<owner>/<name>.git\` (repos_get gives it, and its page shows it), the same on every computer: \`git clone\`, \`git push\` and \`git fetch\` work with it as with any git host on any computer where the CLI is signed in (its sign-in), with or without a node there; pushing to a name that isn't a repo yet makes it, under that owner (you, or a group you're in). Everyone reads and forks every repo. A repo's owner pushes, and its collaborators: a person adds and removes the collaborators of their own repos (repos_add_collaborator), and a group's members are collaborators of its repos, whose admins own them. Anyone else forks it (repos_fork, by default to <you>/<same name>), pushes to the fork, and tells its owner, who fetches from it.`,
 
   schema: {
     global: [`
@@ -129,24 +183,41 @@ export default {
                            user text not null, name text not null, time integer not null);
       create index pushes_repo on pushes (repo, time);`,
       // Each pack's name (its checksum) and index file, which git fetches beside it.
-      `create table indexes (pack text primary key, name text not null, idx text not null, size integer not null);`],
+      `create table indexes (pack text primary key, name text not null, idx text not null, size integer not null);`,
+      // Repos as <owner>/<name>: each its own id (an older one's, its name), so two owners may each have one of a name.
+      // One the install's admins owned is now its maker's.
+      `create table repos_owned (id text primary key, owner text not null, name text not null, "from" text, created integer not null,
+                                 user text not null, deleted integer, deleted_by text, unique (owner, name));
+      insert into repos_owned select name, case when owner = 'admins' then 'user:' || user else owner end, name, "from", created, user, deleted, deleted_by from repos;
+      drop table repos;
+      alter table repos_owned rename to repos;
+      create table collaborators (repo text not null, user text not null, by text not null, time integer not null, primary key (repo, user));`],
   },
 
   ops: {
     list: {
       reads: true,
-      description: "Every repo, the latest moved first: its name, its owner's name, where it was forked from, its default branch (main, or else its first), how many branches it has, and when it last moved. Deleted ones say when, and wait in Recently Deleted for repos_restore.",
+      description: "Every repo, the latest moved first: its <owner>/<name>, its owner's handle and name, where it was forked from, its default branch (main, or else its first), how many branches it has, when it last moved, and whether you push to it. Deleted ones say when, and wait in Recently Deleted for repos_restore.",
       input: { type: "object", properties: {} },
       async run(ctx) {
-        const repos = await global(ctx).query(
-          `select r.name, r.owner, r."from", r.created, r.deleted, r.deleted_by,
-                  coalesce((select branch from branches b where b.repo = r.name and b.branch = 'main'),
-                           (select min(branch) from branches b where b.repo = r.name)) as branch,
-                  (select count(*) from branches b where b.repo = r.name) as branches,
-                  (select max(time) from branches b where b.repo = r.name) as updated
+        const g = global(ctx);
+        const repos = await g.query(
+          `select r.id, r.owner, r.name, r."from", r.created, r.deleted, r.deleted_by,
+                  coalesce((select branch from branches b where b.repo = r.id and b.branch = 'main'),
+                           (select min(branch) from branches b where b.repo = r.id)) as branch,
+                  (select count(*) from branches b where b.repo = r.id) as branches,
+                  (select max(time) from branches b where b.repo = r.id) as updated
              from repos r order by coalesce(updated, r.created) desc`,
         );
-        return iso(repos.map((r) => ({ ...r, deleted: deletedOf(r), deleted_by: undefined, owner_name: ownerName(ctx, r.owner), yours: actsFor(asWriter(ctx), r.owner) })));
+        const from = await paths(ctx, g, repos.map((r) => r.from));
+        const out = [];
+        for (const r of repos) {
+          out.push({
+            repo: pathOf(ctx, r), name: r.name, owner: who(ctx, r.owner), from: from[r.from] ?? null, branch: r.branch, branches: r.branches,
+            created: r.created, updated: r.updated, deleted: deletedOf(r), yours: owns(ctx, r), push: await mayPush(ctx, g, r),
+          });
+        }
+        return iso(out);
       },
     },
     get: {
@@ -156,11 +227,11 @@ export default {
       async run(ctx, { repo }) {
         const g = global(ctx);
         const r = await named(ctx, repo);
-        const branches = await g.query("select branch, head, user, name, time from branches where repo = ? order by branch", [repo]);
-        const packs = (await g.query("select hash from packs where repo = ? order by time, hash", [repo])).map((p) => p.hash);
-        const forks = (await g.query(`select name from repos where "from" = ? order by name`, [repo])).map((f) => f.name);
-        const pushes = await g.query("select * from pushes where repo = ? order by time desc limit 30", [repo]);
-        return iso({ ...r, address: address(ctx, repo), owner_name: ownerName(ctx, r.owner), branches, packs, forks, pushes });
+        const branches = await g.query("select branch, head, user, name, time from branches where repo = ? order by branch", [r.id]);
+        const packs = (await g.query("select hash from packs where repo = ? order by time, hash", [r.id])).map((p) => p.hash);
+        const pushes = (await g.query("select branch, base, head, user, name, time from pushes where repo = ? order by time desc limit 30", [r.id]));
+        const from = (await paths(ctx, g, [r.from]))[r.from] ?? null;
+        return iso({ repo: r.path, name: r.name, address: address(ctx, r.path), owner: who(ctx, r.owner), from, created: r.created, yours: owns(ctx, r), push: await mayPush(ctx, g, r), branches, packs, forks: await forksOf(ctx, g, r), pushes });
       },
     },
     tree: {
@@ -168,79 +239,130 @@ export default {
       description: "A folder of a repo at a branch or commit: its files and folders, its README, the latest commit, and the repo's forks. repos_file reads a file.",
       input: { type: "object", required: ["repo"], properties: { repo: REPO, ref: REF, path: { type: "string", description: "a folder's path, like src; omit for the top" } } },
       async run(ctx, input) {
-        const r = await repoOf(global(ctx), input.repo);
-        if (!r) await named(ctx, input.repo);
-        const yours = !!r && actsFor(asWriter(ctx), r.owner);
+        const g = global(ctx);
+        const r = (await repoAt(ctx, g, input.repo)) || (await named(ctx, input.repo));
+        const about = { owner: who(ctx, r.owner), yours: owns(ctx, r), push: await mayPush(ctx, g, r), from: (await paths(ctx, g, [r.from]))[r.from] ?? null };
         // A deleted one shows only that it was, for its owners to restore or erase.
-        if (r?.deleted) return iso({ repo: r.name, owner: r.owner, owner_name: ownerName(ctx, r.owner), yours, deleted: deletedOf(r), branches: [], entries: [] });
-        const t = await browse.tree(ctx, global(ctx), input);
-        const forks = (await global(ctx).query(`select name from repos where "from" = ? and deleted is null order by name`, [input.repo])).map((f) => f.name);
-        return iso({ ...t, owner_name: ownerName(ctx, t.owner), yours, forks });
+        if (r.deleted) return iso({ repo: r.path, name: r.name, ...about, deleted: deletedOf(r), branches: [], entries: [] });
+        const t = await browse.tree(ctx, g, { ...input, repo: r });
+        return iso({ ...t, name: r.name, ...about, forks: await forksOf(ctx, g, r) });
       },
     },
     file: {
       reads: true,
       description: "A file of a repo at a branch or commit: its text, or whether it's binary or too big to show (then git clone it).",
       input: { type: "object", required: ["repo", "path"], properties: { repo: REPO, ref: REF, path: { type: "string", description: "the file's path, from repos_tree, like src/app.js" } } },
-      run: async (ctx, input) => (await named(ctx, input.repo), iso(await browse.file(ctx, global(ctx), input))),
+      run: async (ctx, input) => iso(await browse.file(ctx, global(ctx), { ...input, repo: await named(ctx, input.repo) })),
     },
     log: {
       reads: true,
       description: "A repo's history, as git log gives it: newest first, 25 commits a page, of the whole repo or of one path, each with its sha, subject, author and time; more says whether there's another page.",
       input: { type: "object", required: ["repo"], properties: { repo: REPO, ref: REF, path: PATH, page: { type: "integer", description: "which 25: 0 (the default) for the newest, 1 for the 25 before them, and on while more is true" } } },
-      run: async (ctx, input) => (await named(ctx, input.repo), iso(await browse.log(ctx, global(ctx), input))),
+      run: async (ctx, input) => iso(await browse.log(ctx, global(ctx), { ...input, repo: await named(ctx, input.repo) })),
     },
     commit: {
       reads: true,
       description: "A commit: its message, author, time, parents, and each file it changed with +/- counts and diff hunks (a big file's diff is left for repos_diff).",
       input: { type: "object", required: ["repo", "sha"], properties: { repo: REPO, sha: SHA } },
-      run: async (ctx, input) => (await named(ctx, input.repo), iso(await browse.commit(ctx, global(ctx), input))),
+      run: async (ctx, input) => iso(await browse.commit(ctx, global(ctx), { ...input, repo: await named(ctx, input.repo) })),
     },
     diff: {
       reads: true,
       description: "One file's whole diff in a commit, against its first parent, as hunks with + and - lines: for a file repos_commit left out as too big.",
       input: { type: "object", required: ["repo", "sha", "path"], properties: { repo: REPO, sha: SHA, path: { type: "string", description: "the file's path, from repos_commit's files, like src/app.js" } } },
-      run: async (ctx, input) => (await named(ctx, input.repo), browse.diff(ctx, global(ctx), input)),
+      run: async (ctx, input) => browse.diff(ctx, global(ctx), { ...input, repo: await named(ctx, input.repo) }),
     },
     latest: {
       reads: true,
       description: "The last commit that changed each entry of a folder, by the entry's name: its sha, subject, author and time.",
       input: { type: "object", required: ["repo"], properties: { repo: REPO, ref: REF, path: { type: "string", description: "a folder's path, like src; omit for the top" } } },
-      run: async (ctx, input) => (await named(ctx, input.repo), iso(await browse.latest(ctx, global(ctx), input))),
+      run: async (ctx, input) => iso(await browse.latest(ctx, global(ctx), { ...input, repo: await named(ctx, input.repo) })),
     },
     branches: {
       reads: true,
       description: "A repo's branches, each with its head commit's sha, subject, author and time, and who pushed it when.",
       input: { type: "object", required: ["repo"], properties: { repo: REPO } },
-      run: async (ctx, input) => (await named(ctx, input.repo), iso(await browse.branches(ctx, global(ctx), input))),
+      run: async (ctx, input) => iso(await browse.branches(ctx, global(ctx), { ...input, repo: await named(ctx, input.repo) })),
+    },
+    collaborators: {
+      reads: true,
+      description: "Who pushes to a repo: its owner; for a group's, its members (its admins own it); and the collaborators its owners added, each with who added them when. yours says whether you own it, to add and remove them; people, whom you could add.",
+      input: { type: "object", required: ["repo"], properties: { repo: REPO } },
+      async run(ctx, { repo }) {
+        const g = global(ctx);
+        const r = await named(ctx, repo);
+        const group = r.owner.startsWith("group:") ? byId(ctx, r.owner) : null;
+        const members = Object.entries(group?.members || {}).map(([user, role]) => ({ ...who(ctx, `user:${user}`), role }));
+        const added = (await g.query("select user, by, time from collaborators where repo = ? order by time", [r.id])).map((c) => ({ ...who(ctx, `user:${c.user}`), by: ownerName(ctx, `user:${c.by}`), time: c.time }));
+        const yours = owns(ctx, r);
+        // Whom its owners could add: everyone else in the install.
+        const taken = new Set([r.owner.slice(5), ...Object.keys(group?.members || {}), ...added.map((c) => byHandle(ctx, c.handle)?.id.slice(5))]);
+        const people = yours ? handles(ctx).filter((h) => h.id.startsWith("user:") && !h.removed && !taken.has(h.id.slice(5))).map((h) => ({ handle: h.handle, name: h.name })) : [];
+        return iso({ repo: r.path, owner: who(ctx, r.owner), group: !!group, members, collaborators: added, yours, people });
+      },
+    },
+    add_collaborator: {
+      reads: false,
+      confirm: true,
+      description: "Let someone push to a repo you own (a group's you're an admin of, or yours), by their handle.",
+      input: { type: "object", required: ["repo", "user"], properties: { repo: REPO, user: USER, confirm: CONFIRM } },
+      async run(ctx, { repo, user }) {
+        const r = await owned(ctx, repo);
+        const h = byHandle(ctx, user);
+        if (!h || !h.id.startsWith("user:") || h.removed) throw new Error(`no one has the handle ${user}: groups_list has them`);
+        const id = h.id.slice(5);
+        if (r.owner === h.id) throw new Error(`${h.name} owns ${r.path}`);
+        if (byId(ctx, r.owner)?.members?.[id]) throw new Error(`${h.name} is in ${ownerName(ctx, r.owner)}, so pushes to ${r.path} already`);
+        global(ctx).exec("insert or ignore into collaborators values (?, ?, ?, ?)", [r.id, id, ctx.me.user, ctx.now()]);
+        return `${h.name} pushes to ${r.path} now.`;
+      },
+    },
+    remove_collaborator: {
+      reads: false,
+      confirm: true,
+      description: "Stop a collaborator you added pushing to a repo you own, by their handle. A group's members stay its collaborators while they're in it.",
+      input: { type: "object", required: ["repo", "user"], properties: { repo: REPO, user: USER, confirm: CONFIRM } },
+      async run(ctx, { repo, user }) {
+        const g = global(ctx);
+        const r = await owned(ctx, repo);
+        const h = byHandle(ctx, user);
+        if (!h || !h.id.startsWith("user:")) throw new Error(`no one has the handle ${user}`);
+        const id = h.id.slice(5);
+        if (!(await g.query("select 1 from collaborators where repo = ? and user = ?", [r.id, id])).length) {
+          throw new Error(byId(ctx, r.owner)?.members?.[id] ? `${h.name} pushes to ${r.path} as a member of ${ownerName(ctx, r.owner)}: take them out of the group to stop that` : `${h.name} isn't a collaborator of ${r.path}`);
+        }
+        g.exec("delete from collaborators where repo = ? and user = ?", [r.id, id]);
+        return `${h.name} no longer pushes to ${r.path}.`;
+      },
     },
     create: {
       reads: false,
-      description: "Create an empty repo, owned by you (the default), a group you're an admin of, or admins, and give the git push that fills it. Pushing to a name that isn't a repo yet makes one too.",
+      description: "Create an empty repo, owned by you (the default) or a group you're in, and give the git push that fills it. Pushing to an address that isn't a repo yet makes one too.",
       input: { type: "object", required: ["name"], properties: { name: { type: "string", description: "lowercase letters, digits, ., _ and -, like notes" }, owner: OWNER } },
       async run(ctx, { name, owner }) {
         const g = global(ctx);
-        owner ||= `user:${ctx.me.user}`;
+        const id = ownerFor(ctx, owner);
         if (!NAME.test(name || "")) throw new Error("repo names are lowercase letters, digits, ., _ and -");
-        if (await repoOf(g, name)) throw new Error(`${name} already exists`);
-        if (!actsFor(asWriter(ctx), owner)) throw new Error(`you don't act for ${owner}: give user:<your id>, admins, or a group you're an admin of`);
-        newRepo(ctx, g, { name, owner });
-        return address(ctx, name) ? `Created ${name}: git push ${address(ctx, name)} main` : `Created ${name}.`;
+        const path = `${byId(ctx, id).handle}/${name}`;
+        if (await repoAt(ctx, g, path)) throw new Error(`${path} already exists`);
+        newRepo(ctx, g, { name, owner: id });
+        return address(ctx, path) ? `Created ${path}: git push ${address(ctx, path)} main` : `Created ${path}.`;
       },
     },
     fork: {
       reads: false,
-      description: "Fork a repo as a new one of yours, to push changes you'd suggest to its owner: its branches as they are now, and its history.",
-      input: { type: "object", required: ["repo", "name"], properties: { repo: REPO, name: { type: "string", description: "the fork's name: lowercase letters, digits, ., _ and -, like notes-andre" }, owner: OWNER } },
+      description: "Fork a repo as a new one of yours (or a group's you're in), to push changes you'd suggest to its owner: its branches as they are now, and its history. By default it's <you>/<the same name>.",
+      input: { type: "object", required: ["repo"], properties: { repo: REPO, name: { type: "string", description: "the fork's name, by default the repo's: lowercase letters, digits, ., _ and -" }, owner: OWNER } },
       async run(ctx, { repo, name, owner }) {
         const g = global(ctx);
-        owner ||= `user:${ctx.me.user}`;
-        await named(ctx, repo);
-        if (!NAME.test(name || "")) throw new Error("repo names are lowercase letters, digits, ., _ and -");
-        if (await repoOf(g, name)) throw new Error(`${name} already exists`);
-        if (!actsFor(asWriter(ctx), owner)) throw new Error(`you don't act for ${owner}`);
-        newRepo(ctx, g, { name, owner, from: repo });
-        return `Forked ${repo} as ${name}.`;
+        const from = await named(ctx, repo);
+        const id = ownerFor(ctx, owner);
+        name ||= from.name;
+        if (!NAME.test(name)) throw new Error("repo names are lowercase letters, digits, ., _ and -");
+        const path = `${byId(ctx, id).handle}/${name}`;
+        if (await repoAt(ctx, g, path)) throw new Error(`${path} already exists: give the fork another name`);
+        newRepo(ctx, g, { name, owner: id, from });
+        return address(ctx, path) ? `Forked ${from.path} as ${path}: git clone ${address(ctx, path)}` : `Forked ${from.path} as ${path}.`;
       },
     },
     delete: {
@@ -250,45 +372,45 @@ export default {
       input: { type: "object", required: ["repo"], properties: { repo: REPO } },
       async run(ctx, { repo }) {
         const r = await owned(ctx, repo);
-        if (r.deleted) throw new Error(`${repo} is already in Recently Deleted`);
-        global(ctx).exec("update repos set deleted = ?, deleted_by = ? where name = ? and deleted is null", [ctx.now(), ctx.me.name, repo]);
-        return `Deleted ${repo}: it's in Recently Deleted.`;
+        if (r.deleted) throw new Error(`${r.path} is already in Recently Deleted`);
+        global(ctx).exec("update repos set deleted = ?, deleted_by = ? where id = ? and deleted is null", [ctx.now(), ctx.me.user_name || ctx.me.name, r.id]);
+        return `Deleted ${r.path}: it's in Recently Deleted.`;
       },
     },
     restore: {
       reads: false,
       description: "Restore a repo you own from Recently Deleted, as it was.",
-      input: { type: "object", required: ["repo"], properties: { repo: { type: "string", description: "a deleted repo's name, from repos_list" } } },
+      input: { type: "object", required: ["repo"], properties: { repo: { type: "string", description: "a deleted repo as <owner>/<name>, from repos_list" } } },
       async run(ctx, { repo }) {
         const r = await owned(ctx, repo);
-        if (!r.deleted) throw new Error(`${repo} isn't deleted`);
-        global(ctx).exec("update repos set deleted = null, deleted_by = null where name = ?", [repo]);
-        return `Restored ${repo}.`;
+        if (!r.deleted) throw new Error(`${r.path} isn't deleted`);
+        global(ctx).exec("update repos set deleted = null, deleted_by = null where id = ?", [r.id]);
+        return `Restored ${r.path}.`;
       },
     },
     erase: {
       reads: false,
       confirm: true,
       description: "Erase a deleted repo you own for good: its branches, history and the packs no other repo shares are gone, and its name is free again.",
-      input: { type: "object", required: ["repo"], properties: { repo: { type: "string", description: "a deleted repo's name, from repos_list" } } },
+      input: { type: "object", required: ["repo"], properties: { repo: { type: "string", description: "a deleted repo as <owner>/<name>, from repos_list" } } },
       async run(ctx, { repo }) {
         const g = global(ctx);
         const r = await owned(ctx, repo);
-        if (!r.deleted) throw new Error(`delete ${repo} before erasing it`);
-        const packs = await g.query("select hash from packs where repo = ?", [repo]);
+        if (!r.deleted) throw new Error(`delete ${r.path} before erasing it`);
+        const packs = await g.query("select hash from packs where repo = ?", [r.id]);
         // Erased, it's gone, and its name is free again; its forks keep their code, no longer forked from it.
-        for (const p of packs) await http.forgetUnshared(g, repo, p.hash);
-        for (const table of ["branches", "packs", "pushes"]) g.exec(`delete from ${table} where repo = ?`, [repo]);
-        g.exec("delete from repos where name = ?", [repo]);
-        g.exec(`update repos set "from" = null where "from" = ?`, [repo]);
-        return `Erased ${repo}.`;
+        for (const p of packs) await http.forgetUnshared(g, r.id, p.hash);
+        for (const table of ["branches", "packs", "pushes", "collaborators"]) g.exec(`delete from ${table} where repo = ?`, [r.id]);
+        g.exec("delete from repos where id = ?", [r.id]);
+        g.exec(`update repos set "from" = null where "from" = ?`, [r.id]);
+        return `Erased ${r.path}.`;
       },
     },
     _address: {
       reads: true,
-      description: "Where git reaches repos, for the screens: <address>/repos/, or null on a node from before it had the address.",
+      description: "Where git reaches repos, for the screens: base, <address>/repos/ (null on a node from before it had the address), and the caller's handle.",
       input: { type: "object", properties: {} },
-      run: (ctx) => (ctx.address ? `${ctx.address}/repos/` : null),
+      run: (ctx) => ({ base: ctx.address ? `${ctx.address}/repos/` : null, handle: ctx.me.handle || null }),
     },
     _http: {
       reads: false,
@@ -305,6 +427,7 @@ export default {
     history: page("History", historyScreen),
     commit: page("Commit", commitScreen),
     branches: page("Branches", branchesScreen),
+    collaborators: page("Collaborators", collaboratorsScreen),
   },
 
   widgets: {
@@ -317,7 +440,8 @@ export default {
         repo: {
           title: "Repo",
           default: "",
-          choices: async (ctx) => [{ value: "", title: "All Repos" }, ...(ctx.global ? await ctx.global.query("select name from repos where deleted is null order by name") : []).map((r) => r.name)],
+          // By id, which a handle's change leaves as it is.
+          choices: async (ctx) => [{ value: "", title: "All Repos" }, ...(ctx.global ? await ctx.global.query("select id, owner, name from repos where deleted is null order by name") : []).map((r) => ({ value: r.id, title: pathOf(ctx, r) }))],
         },
       },
       async render(ctx) {
@@ -356,41 +480,55 @@ export default {
   },
 };
 
-/// What http.js needs of repos: who owns one and may push, making one, and moving a branch.
+/// What http.js needs of repos: finding one, who may push, making one, and moving a branch.
 const git = {
   BRANCH,
-  repoOf,
-  ownerName,
-  mayPush: (ctx, r) => actsFor(asWriter(ctx), r.owner),
-  defaultBranch: (names) => (names.includes("main") ? "main" : names[0]),
-  /// Makes `name`, the caller's, or says why not.
-  newRepo(ctx, g, name) {
-    if (!NAME.test(name || "")) return "repo names are lowercase letters, digits, ., _ and -";
-    newRepo(ctx, g, { name, owner: `user:${ctx.me.user}` });
-    return null;
+  /// The repo at <owner>/<name>, with its path; or null, or why there can't be one.
+  find: async (ctx, g, owner, name) => {
+    const h = byHandle(ctx, owner);
+    if (!h) return { why: `no one and no group has the handle ${owner}` };
+    return { r: withPath(ctx, (await g.query("select * from repos where owner = ? and name = ?", [h.id, name]))[0] || null) };
   },
-  /// Moves `branch` from `base` (null if it's new) to `head` (null deletes it), only if no one moved it meanwhile.
+  ownerName,
+  mayPush,
+  defaultBranch: (names) => (names.includes("main") ? "main" : names[0]),
+  /// Makes <owner>/<name> (the caller, or a group they're in), or says why not: → { r } or { why }.
+  newRepo(ctx, g, owner, name) {
+    if (!NAME.test(name || "")) return { why: "repo names are lowercase letters, digits, ., _ and -" };
+    let id;
+    try {
+      id = ownerFor(ctx, owner);
+    } catch (err) {
+      return { why: err.message };
+    }
+    return { r: { id: newRepo(ctx, g, { name, owner: id }), owner: id, name, path: `${owner}/${name}` } };
+  },
+  /// Moves `branch` of the repo with id `repo` from `base` (null if it's new) to `head` (null deletes it), only if no
+  /// one moved it meanwhile.
   moveBranch(ctx, g, repo, branch, base, head) {
+    const name = ctx.me.user_name || ctx.me.name;
     g.check("select (select head from branches where repo = ? and branch = ?) is ?", [repo, branch, base], `${branch} has moved: fetch, then push again`);
-    if (head) g.exec("insert or replace into branches values (?, ?, ?, ?, ?, ?)", [repo, branch, head, ctx.me.user, ctx.me.name, ctx.now()]);
+    if (head) g.exec("insert or replace into branches values (?, ?, ?, ?, ?, ?)", [repo, branch, head, ctx.me.user, name, ctx.now()]);
     else g.exec("delete from branches where repo = ? and branch = ?", [repo, branch]);
-    g.exec("insert into pushes values (?, ?, ?, ?, ?, ?, ?, ?)", [randomId(), repo, branch, base, head, ctx.me.user, ctx.me.name, ctx.now()]);
+    g.exec("insert into pushes values (?, ?, ?, ?, ?, ?, ?, ?)", [randomId(), repo, branch, base, head, ctx.me.user, name, ctx.now()]);
   },
 };
 
-/// The newest `many` commits across repos' main branches, each with its repo and branch: the branches pushed to last,
-/// and their history, newest first; and commits a day over the last week, oldest first. A repo whose packs can't be
-/// read is left out.
+/// The newest `many` commits across repos' main branches (or the repo with id `repo`'s), each with its repo's path and
+/// branch: the branches pushed to last, and their history, newest first; and commits a day over the last week, oldest
+/// first. A repo whose packs can't be read is left out.
 async function recent(ctx, many, repo = "") {
   const heads = await ctx.global.query(
-    "select repo, branch from branches where (? = '' or repo = ?) and repo not in (select name from repos where deleted is not null) order by time desc limit ?",
+    `select r.id, r.owner, r.name, b.branch from branches b join repos r on r.id = b.repo
+      where (? = '' or r.id = ?) and r.deleted is null order by b.time desc limit ?`,
     [repo || "", repo || "", Math.max(many, 8)],
   );
   const all = [];
-  for (const { repo, branch } of heads) {
+  for (const h of heads) {
     try {
-      const { commits } = await browse.log(ctx, ctx.global, { repo, ref: branch });
-      all.push(...commits.map((c) => ({ ...c, repo, branch })));
+      const r = withPath(ctx, h);
+      const { commits } = await browse.log(ctx, ctx.global, { repo: r, ref: h.branch });
+      all.push(...commits.map((c) => ({ ...c, repo: r.path, branch: h.branch })));
     } catch {}
   }
   // Repos that share history (a fork, or one split out of another) list a commit once.
