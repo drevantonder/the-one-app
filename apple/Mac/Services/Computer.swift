@@ -44,7 +44,7 @@ struct ComputerApp: Service {
             let tool = try input.text("tool")
             guard !ComputerUse.withheld.contains(tool) else { throw Refusal("\(tool) isn't offered on a person's own Mac") }
             try await computer.ready()
-            await computer.using(input.caller("agent") ?? input.caller("name") ?? "An agent")
+            try await computer.using(input.caller("agent") ?? input.caller("name") ?? "An agent")
             let args = try JSONSerialization.data(withJSONObject: input.value("args") as? [String: Any] ?? [:])
             let result = json(try await computer.driver.call(tool, args))
             let started = await computer.report()
@@ -67,7 +67,7 @@ struct ComputerApp: Service {
             let tool = try input.text("tool")
             guard !ComputerUse.withheld.contains(tool) else { throw Refusal("\(tool) isn't offered on a person's own Mac") }
             try await computer.ready()
-            await computer.using(input.caller("agent") ?? input.caller("name") ?? "An agent")
+            try await computer.using(input.caller("agent") ?? input.caller("name") ?? "An agent")
             let args = try JSONSerialization.data(withJSONObject: input.value("args") as? [String: Any] ?? [:])
             let result = json(try await computer.driver.call(tool, args))
             let started = await computer.report()
@@ -164,8 +164,10 @@ final class ComputerUse {
         Task { await driver.stop() }
     }
 
-    /// Notes a call by agent, showing it in the menu bar, before it acts.
-    func using(_ agent: String) {
+    /// Notes a call by agent, showing it in the menu bar, before it acts: unless it was turned off since the call
+    /// was let through.
+    func using(_ agent: String) throws {
+        guard on else { throw Refusal("Its owner stopped agents using this Mac.") }
         last = .now
         if let session, session.agent == agent { return }
         session = (agent, .now, false)
@@ -274,8 +276,18 @@ actor CuaDriver {
                 "\(home)/.local/bin/cua-driver", "/opt/homebrew/bin/cua-driver"].first { FileManager.default.isExecutableFile(atPath: $0) }
     }()
 
-    private var process: Process?
-    private var input: FileHandle?
+    /// Where it is: not running; being started (every call waits for that one start, so only one runs); running; or
+    /// told to stop and not yet gone, which a start waits out, so it never runs twice.
+    private enum State {
+        case stopped
+        case starting(Task<Void, Error>)
+        case running(Process, FileHandle)
+        case stopping(Process)
+    }
+    private var state = State.stopped
+    /// The process a start ran, until it's running.
+    private var launching: Process?
+    private var gone: [CheckedContinuation<Void, Never>] = []
     private var next = 0
     private var waiting: [Int: CheckedContinuation<Data, Error>] = [:]
     private var listed: [[String: Any]]?
@@ -307,26 +319,68 @@ actor CuaDriver {
         }.joined(separator: "\n")
     }
 
+    /// Stops it, and a start on its way, failing every call waiting on it.
     func stop() {
-        process?.terminate()
-        process = nil
-        input = nil
-        for (_, c) in waiting { c.resume(throwing: Refusal("Its owner stopped agents using this Mac.")) }
+        switch state {
+        case .stopped, .stopping: return
+        case .starting(let task):
+            task.cancel()
+            if let launching {
+                state = .stopping(launching)
+                launching.terminate()
+            } else {
+                state = .stopped
+            }
+        case .running(let process, _):
+            state = .stopping(process)
+            process.terminate()
+        }
+        failWaiting(Refusal("Its owner stopped agents using this Mac."))
+    }
+
+    private func failWaiting(_ error: Error) {
+        for (_, c) in waiting { c.resume(throwing: error) }
         waiting = [:]
     }
 
     private func rpc(_ method: String, _ params: [String: Any]) async throws -> [String: Any] {
-        if process?.isRunning != true { try await start() }
-        return try await send(method, params)
+        try await running()
+        // Turned off while it started: nothing is sent.
+        guard await ComputerUse.shared.on, case .running(_, let input) = state else { throw Refusal("Its owner stopped agents using this Mac.") }
+        return try await send(method, params, to: input)
     }
 
-    private func send(_ method: String, _ params: [String: Any]) async throws -> [String: Any] {
+    /// Returns once it's running, starting it if nobody has: each wait is checked again after, as anything may have
+    /// happened meanwhile.
+    private func running() async throws {
+        while true {
+            switch state {
+            case .running:
+                return
+            case .starting(let task):
+                try await task.value
+            case .stopping:
+                await withCheckedContinuation { gone.append($0) }
+            case .stopped:
+                let task = Task { try await launch() }
+                state = .starting(task)
+                do {
+                    try await task.value
+                } catch {
+                    if case .starting(let now) = state, now == task { state = .stopped }
+                    throw error
+                }
+            }
+        }
+    }
+
+    private func send(_ method: String, _ params: [String: Any], to input: FileHandle) async throws -> [String: Any] {
         next += 1
         let id = next
         let line = try JSONSerialization.data(withJSONObject: ["jsonrpc": "2.0", "id": id, "method": method, "params": params]) + Data("\n".utf8)
         let data = try await withCheckedThrowingContinuation { (c: CheckedContinuation<Data, Error>) in
             waiting[id] = c
-            do { try input?.write(contentsOf: line) } catch {
+            do { try input.write(contentsOf: line) } catch {
                 waiting[id] = nil
                 c.resume(throwing: error)
             }
@@ -338,10 +392,10 @@ actor CuaDriver {
 
     /// Starts it embedded: its permissions are this app's, and it never asks macOS for them itself (turning it on
     /// does). It may show macOS's one-time question about capturing the screen directly, which the person was asked
-    /// to expect when they turned it on.
-    private func start() async throws {
+    /// to expect when they turned it on. Stopped meanwhile, what it started is stopped too.
+    private func launch() async throws {
         guard let path = Self.path else { throw Refusal("Cua Driver isn't installed on this Mac: get it from github.com/trycua/cua.") }
-        guard await ComputerUse.shared.on else { throw Refusal("Its owner stopped agents using this Mac.") }
+        guard await ComputerUse.shared.on, !Task.isCancelled else { throw Refusal("Its owner stopped agents using this Mac.") }
         let process = Process()
         process.executableURL = URL(filePath: path)
         process.arguments = ["mcp", "--direct", "--embedded", "--host-bundle-id", Bundle.main.bundleIdentifier ?? ""]
@@ -350,19 +404,30 @@ actor CuaDriver {
         process.standardInput = stdin
         process.standardOutput = stdout
         process.standardError = FileHandle.nullDevice
+        process.terminationHandler = { [weak self] ended in Task { await self?.ended(ended) } }
         try process.run()
-        self.process = process
-        input = stdin.fileHandleForWriting
+        launching = process
+        defer { launching = nil }
+        let input = stdin.fileHandleForWriting
         listed = nil
         let reading = stdout.fileHandleForReading
         Task.detached { [weak self] in
             do {
                 for try await line in reading.bytes.lines { await self?.received(Data(line.utf8)) }
             } catch {}
-            await self?.ended(process)
         }
-        _ = try await send("initialize", ["protocolVersion": "2025-06-18", "capabilities": [String: Any](), "clientInfo": ["name": appName, "version": "1"]])
-        try input?.write(contentsOf: Data(#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#.utf8) + Data("\n".utf8))
+        do {
+            _ = try await send("initialize", ["protocolVersion": "2025-06-18", "capabilities": [String: Any](), "clientInfo": ["name": appName, "version": "1"]], to: input)
+            try input.write(contentsOf: Data(#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#.utf8) + Data("\n".utf8))
+            if Task.isCancelled { throw Refusal("Its owner stopped agents using this Mac.") }
+        } catch {
+            if case .starting = state {
+                state = process.isRunning ? .stopping(process) : .stopped
+                process.terminate()
+            }
+            throw error
+        }
+        state = .running(process, input)
     }
 
     private func received(_ line: Data) {
@@ -372,9 +437,17 @@ actor CuaDriver {
     }
 
     private func ended(_ ended: Process) {
-        guard ended === process else { return }
-        process = nil
-        for (_, c) in waiting { c.resume(throwing: Refusal("Cua Driver stopped on this Mac; try again.")) }
-        waiting = [:]
+        switch state {
+        case .running(let process, _) where process === ended:
+            state = .stopped
+            failWaiting(Refusal("Cua Driver stopped on this Mac; try again."))
+        case .stopping(let process) where process === ended:
+            state = .stopped
+            for c in gone { c.resume() }
+            gone = []
+        default:
+            // It ended while starting: its start fails.
+            if ended === launching { failWaiting(Refusal("Cua Driver stopped on this Mac; try again.")) }
+        }
     }
 }
