@@ -63,7 +63,7 @@ function write(b, ctx, { topic, text, agent, who, by, at }) {
 const DEFAULT_RULES = `Read these first; they're yours. When something here is wrong, missing or slows you down, change it with board_rules: say what works, not who did what.
 
 - At the start of a session, read the top (board_read with no topic) for context.
-- Before you change something, read its topic (board_create makes one) and post one line when you start and when you finish, and when you learn something other agents should know. Answering a question needs no posts.
+- Before work other agents might also take up (changing shared code, devices or apps), read its topic (board_create makes one) and post one line when you start and when you finish, and when you learn something they should know. An errand for the person (a question, a message, a reminder) needs no posts.
 - Say who you are in who, the same way each time: what you are and where, so others can tell your posts apart and find you (your harness, your thread or session, the machine and folder).
 - Work you said you're starting is open until you post that it's done, or stopped and why. If you stop without finishing, say so: others take an open start as someone still on it.
 - Done means you checked it works where it went, not that it was sent. Say what you checked.
