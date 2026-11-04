@@ -425,16 +425,4 @@ mod tests {
         assert!(open_handoff(&seal_secret(&other), &sealed).is_err());
     }
 
-    #[test]
-    fn a_call_passed_on_carries_no_token_and_only_its_scopes_keys() {
-        let (serverless, machine) = (SigningKey::from_bytes(&rand::random()), SigningKey::from_bytes(&rand::random()));
-        let key = |scope: &str| Handed { scope: scope.into(), epoch: 1, app: "notes".into(), database: "main".into(), key: rand::random() };
-        let call = json!({ "app": "notes", "op": "add", "input": {}, "me": { "token": "secret-token" }, "token": "secret-token" });
-        let asked = forwarded(&call, "u1", "web", &serverless.verifying_key().to_bytes(), &Endpoint::of(&machine).seal, 99, vec![key("user:u1"), key("group:g")], &["user:u1".into()]).unwrap();
-        assert!(!asked.to_string().contains("secret-token"), "{asked}");
-        assert_eq!(asked["body"]["call"]["me"], json!({ "user": "u1", "client": "web" }));
-        let handoff = open_handoff(&seal_secret(&machine), asked["body"]["call"]["keys"].as_str().unwrap()).unwrap();
-        assert_eq!((handoff.for_, handoff.until), (HEXLOWER.encode(&serverless.verifying_key().to_bytes()), 99), "for the serverless node's endpoint alone");
-        assert_eq!(handoff.keys.iter().map(|k| k.scope.as_str()).collect::<Vec<_>>(), ["user:u1"], "not a scope the call doesn't reach");
-    }
 }

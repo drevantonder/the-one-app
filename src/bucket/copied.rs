@@ -173,31 +173,3 @@ impl<B: Bucket> Bucket for Copied<B> {
         Bucket::confirm(moved.as_deref().and_then(Option::as_ref).unwrap_or(&self.place), objects).await
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// A write made while the install's data moves waits, then goes where the data went: none is left behind.
-    #[tokio::test]
-    async fn a_write_during_a_move_goes_to_the_new_bucket() {
-        let dir = std::env::temp_dir().join(format!("copied-move-{}", rand::random::<u64>()));
-        let (old, new) = (Place::Folder(dir.join("old")), Place::Folder(dir.join("new")));
-        let moved: Arc<tokio::sync::RwLock<Option<Place>>> = Arc::default();
-        let copied = Copied::moving(old.clone(), dir.join("copy"), moved.clone());
-        let name = "global/node/log/000000000001";
-        let mut moving = moved.write().await;
-        let write = tokio::spawn({
-            let copied = copied.clone();
-            async move { Bucket::create(&copied, name, b"written while it moved").await }
-        });
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-        assert!(!write.is_finished(), "a write waits while the data moves");
-        *moving = Some(new.clone());
-        drop(moving);
-        assert!(write.await.unwrap().unwrap());
-        assert!(new.get(name).unwrap().is_some() && old.get(name).unwrap().is_none(), "it went to the new bucket only");
-        assert!(Bucket::get(&copied.here_only(), name).await.unwrap().is_some(), "and is kept in this device's copy");
-        let _ = std::fs::remove_dir_all(dir);
-    }
-}

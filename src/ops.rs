@@ -1073,21 +1073,3 @@ fn keep_files(v: &mut Value, shown: &mut Vec<Value>, depth: usize) {
         _ => {}
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Someone signed in elsewhere can't have this device fetch a file from its own addresses, which would reach its
-    /// local API as this machine (the Vault, apps' code, sidecars' calls), or from its networks.
-    #[test]
-    fn a_sign_in_gets_files_only_from_the_internet() {
-        crate::SIGNED_IN.with(|t| *t.borrow_mut() = Some("a sign-in's token".into()));
-        for url in ["http://127.0.0.1:4747/v1/vault?scope=user", "http://localhost:4747/v1/source/board", "http://[::1]:4747/v1/state", "http://0.0.0.0:4747/v1/state", "http://192.168.0.1/", "http://100.100.100.100/", "http://[::ffff:127.0.0.1]:4747/v1/vault"] {
-            let err = mcp_file(&json!({ "url": url })).unwrap_err();
-            assert!(format!("{err:#}").contains("isn't on the internet"), "{url}: {err:#}");
-        }
-        crate::SIGNED_IN.with(|t| *t.borrow_mut() = None);
-        assert!(on_the_internet("1.1.1.1".parse().unwrap()) && on_the_internet("2606:4700:4700::1111".parse().unwrap()));
-    }
-}

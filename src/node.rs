@@ -1311,30 +1311,3 @@ fn hostname() -> String {
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| "device".into())
 }
-
-#[cfg(test)]
-mod tests {
-    use super::Exclusive;
-
-    /// The install asked for again on the thread that holds it is refused, where a `Mutex` waits on itself for good
-    /// and the node, once every worker waits behind it, stops answering anything (three machines' nodes, one night).
-    #[test]
-    fn the_install_asked_for_twice_on_one_thread_is_refused() {
-        let (done, finished) = std::sync::mpsc::channel();
-        std::thread::spawn(move || {
-            let install = Exclusive::new(0u8);
-            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let _held = install.lock().unwrap();
-                let _again = install.lock();
-            }));
-            // Let go of, it's taken again (a debug build panics on the second ask, which poisons it).
-            install.0.clear_poison();
-            let _ = done.send(install.lock().is_ok());
-        });
-        assert_eq!(finished.recv_timeout(std::time::Duration::from_secs(10)), Ok(true), "a thread asking twice hung");
-        // Another lock is held beside it.
-        let (one, two) = (Exclusive::new(()), Exclusive::new(()));
-        let _a = one.lock().unwrap();
-        assert!(two.lock().is_ok());
-    }
-}

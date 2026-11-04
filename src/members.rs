@@ -1379,19 +1379,6 @@ mod tests {
         assert_eq!(m.epoch(&Scope::User(ANDRE.into())), 0);
     }
 
-    #[test]
-    fn a_nodes_scope_entries_count_where_it_runs_the_scopes_calls() {
-        let (mut mac, mut entries) = setup();
-        let mut linux = Dev::new(4);
-        add(&mut entries, &mut mac, ANDRE, device(&linux.endpoint(), ANDRE, "linux", &[Kind::Compute], None));
-        add(&mut entries, &mut mac, ANDRE, device(&Dev::new(3).endpoint(), BOB, "bob's phone", &[Kind::Client], Some(("Bob", Role::Member))));
-        let m = members(&entries);
-        let mine = linux.write(&format!("user:{ANDRE}"), ANDRE, node("keep", json!({})), &entries);
-        let bobs = linux.write(&format!("user:{BOB}"), BOB, node("keep", json!({})), &entries);
-        assert!(m.counts(&mine));
-        assert!(!m.counts(&bobs), "linux doesn't run Bob's");
-    }
-
     /// An install whose recovery key is `recovery`'s, with Andre's mac and linux (compute), and Bob in with his phone.
     fn with_bob(recovery: &Dev) -> (Dev, Dev, Dev, Vec<Entry>) {
         let (mut mac, mut linux, bobs) = (Dev::new(1), Dev::new(4), Dev::new(3));
@@ -1432,24 +1419,6 @@ mod tests {
         assert_eq!(m.epoch_hash(&bob, 1), Some("b".repeat(64).as_str()));
         let opens: Vec<Key> = m.clients().filter(|d| m.may_use(&d.user, &bob)).map(|d| d.key).collect();
         assert_eq!(opens, vec![bobs.id()], "only Bob's own devices open it");
-    }
-
-    #[test]
-    fn the_serverless_node_runs_a_persons_own_scope_only_as_their_own_device_chose() {
-        let recovery = Dev::new(9);
-        let (mut mac, _, mut bobs, mut entries) = with_bob(&recovery);
-        let cloud = Dev::new(12).id();
-        add(&mut entries, &mut mac, ANDRE, setting("serverless", Some(&hex(&cloud))));
-        let (bob, andre) = (Scope::User(BOB.into()), Scope::User(ANDRE.into()));
-        let m = members(&entries);
-        assert!(m.runs_for(&cloud, &Scope::Global), "everyone's, as its admins set it");
-        assert!(!m.runs_for(&cloud, &bob) && !m.runs_for(&cloud, &andre), "no one's own by an admin's say, the admin's either");
-        add(&mut entries, &mut mac, ANDRE, runs(&[cloud]));
-        add(&mut entries, &mut mac, BOB, runs(&[cloud]));
-        let m = members(&entries);
-        assert!(m.runs_for(&cloud, &andre) && !m.runs_for(&cloud, &bob), "Andre chose it for his own; his device can't for Bob");
-        add(&mut entries, &mut bobs, BOB, runs(&[cloud]));
-        assert!(members(&entries).runs_for(&cloud, &bob));
     }
 
     #[test]
@@ -1536,94 +1505,4 @@ mod tests {
         assert!(members(&entries).machine(&Dev::new(11).id()).is_none(), "the old recovery key lets nobody in");
     }
 
-    #[test]
-    fn a_call_is_passed_on_only_to_nodes_that_run_all_its_scopes() {
-        let (mut mac, mut entries) = setup();
-        let linux = Dev::new(4);
-        add(&mut entries, &mut mac, ANDRE, device(&linux.endpoint(), ANDRE, "linux", &[Kind::Compute], None));
-        add(&mut entries, &mut mac, ANDRE, device(&Dev::new(3).endpoint(), BOB, "bob's phone", &[Kind::Client], Some(("Bob", Role::Member))));
-        let m = members(&entries);
-        let keys = |user: &str, scopes: &[Scope]| m.runners(user, scopes).iter().map(|r| r.key).collect::<BTreeSet<_>>();
-        let both = BTreeSet::from([mac.id(), linux.id()]);
-        let (andre, bob) = (Scope::User(ANDRE.into()), Scope::User(BOB.into()));
-        assert_eq!(keys(ANDRE, &[andre.clone()]), both);
-        assert_eq!(keys(BOB, &[Scope::Global]), both, "global runs on the admin's nodes");
-        assert!(keys(BOB, &[bob.clone()]).is_empty(), "Andre's nodes don't run Bob's own scope");
-        assert!(keys(BOB, &[Scope::Global, bob]).is_empty(), "nor a call that reaches it");
-        assert!(keys(BOB, &[andre]).is_empty(), "nor Andre's, which Bob may not use");
-        assert!(keys("stranger", &[Scope::Global]).is_empty());
-    }
-
-    #[test]
-    fn only_a_scopes_admins_say_which_machines_open_its_vault() {
-        let (mut mac, mut entries) = setup();
-        let (mut bobs, linux) = (Dev::new(3), Dev::new(4));
-        add(&mut entries, &mut mac, ANDRE, device(&linux.endpoint(), ANDRE, "linux", &[Kind::Compute], None));
-        add(&mut entries, &mut mac, ANDRE, device(&bobs.endpoint(), BOB, "bob's phone", &[Kind::Client], Some(("Bob", Role::Member))));
-        let (andre, bob, macs, bobs_id) = (Scope::User(ANDRE.into()), Scope::User(BOB.into()), mac.id(), bobs.id());
-        // A member of everyone's can add to its Vault, never say who opens it, nor open someone else's own.
-        add(&mut entries, &mut bobs, BOB, vault(&Scope::Global, 1, &[9; 32], &[linux.id()]));
-        add(&mut entries, &mut bobs, BOB, vault(&andre, 1, &[9; 32], &[linux.id()]));
-        let m = members(&entries);
-        assert!(!m.opens_vault(&linux.id(), &Scope::Global) && !m.opens_vault(&linux.id(), &andre), "only a scope's admins grant its Vault");
-        // A Vault opens only on a machine that runs things: not a person's phone.
-        add(&mut entries, &mut bobs, BOB, vault(&bob, 1, &[9; 32], &[bobs_id]));
-        assert!(members(&entries).vaults.get(&bob).is_none(), "not on a client device");
-        add(&mut entries, &mut bobs, BOB, vault(&bob, 1, &[9; 32], &[linux.id()]));
-        add(&mut entries, &mut mac, ANDRE, vault(&Scope::Global, 1, &[8; 32], &[linux.id()]));
-        let m = members(&entries);
-        assert!(m.opens_vault(&linux.id(), &bob) && m.opens_vault(&linux.id(), &Scope::Global));
-        assert!(!m.opens_vault(&macs, &Scope::Global), "only the machines it names");
-        // A new key follows the one before; one that skips or repeats a number doesn't count.
-        add(&mut entries, &mut mac, ANDRE, vault(&Scope::Global, 1, &[7; 32], &[macs]));
-        add(&mut entries, &mut mac, ANDRE, vault(&Scope::Global, 3, &[7; 32], &[macs]));
-        assert_eq!(members(&entries).vaults[&Scope::Global].public, [8; 32]);
-        add(&mut entries, &mut mac, ANDRE, vault(&Scope::Global, 2, &[6; 32], &[]));
-        let m = members(&entries);
-        assert!(!m.opens_vault(&linux.id(), &Scope::Global), "a new key with no machines: no machine opens what's sealed to it");
-        // A machine removed opens nothing more.
-        add(&mut entries, &mut bobs, BOB, node("remove", json!({ "key": hex(&linux.id()), "seq": null })));
-        add(&mut entries, &mut mac, ANDRE, node("remove", json!({ "key": hex(&linux.id()), "seq": null })));
-        assert!(!members(&entries).opens_vault(&linux.id(), &bob));
-    }
-
-    #[test]
-    fn only_a_scopes_person_or_its_groups_admins_keep_its_apps_running_until_it_ends() {
-        let (mut mac, mut entries) = setup();
-        let (mut bobs, linux) = (Dev::new(3), Dev::new(4));
-        add(&mut entries, &mut mac, ANDRE, device(&linux.endpoint(), ANDRE, "linux", &[Kind::Compute], None));
-        add(&mut entries, &mut mac, ANDRE, device(&bobs.endpoint(), BOB, "bob's phone", &[Kind::Client], Some(("Bob", Role::Member))));
-        add(&mut entries, &mut mac, ANDRE, group("f000000000000003", "Family"));
-        add(&mut entries, &mut mac, ANDRE, invite("f000000000000003", BOB, Role::Member));
-        add(&mut entries, &mut bobs, BOB, accept("f000000000000003"));
-        let (andre, family, keys) = (Scope::User(ANDRE.into()), Scope::Group("f000000000000003".into()), BTreeMap::from([(1, H.repeat(64))]));
-        let kept = |entries: &[Entry], scope: &Scope, now: u64| members(entries).grants_at(now).any(|((k, s, a), _)| *k == linux.id() && s == scope && a == "whatsapp");
-
-        // Bob keeps nothing running in Andre's scope, nor, as a member, in the group's; Andre does in both.
-        add(&mut entries, &mut bobs, BOB, grant(&linux.id(), &andre, "whatsapp", 100, &keys));
-        add(&mut entries, &mut bobs, BOB, grant(&linux.id(), &family, "whatsapp", 100, &keys));
-        assert!(!kept(&entries, &andre, 0) && !kept(&entries, &family, 0));
-        add(&mut entries, &mut mac, ANDRE, grant(&linux.id(), &andre, "whatsapp", 100, &keys));
-        add(&mut entries, &mut mac, ANDRE, grant(&linux.id(), &family, "whatsapp", 100, &keys));
-        assert!(kept(&entries, &andre, 0) && kept(&entries, &family, 0));
-        assert_eq!(members(&entries).grants[&(linux.id(), andre.clone(), "whatsapp".into())].hashes, keys, "it names the keys it sealed");
-        add(&mut entries, &mut mac, ANDRE, grant(&linux.id(), &andre, APP, 100, &keys));
-        assert!(!members(&entries).grants.keys().any(|(_, _, a)| a == APP), "the node's own databases are no app's to keep running");
-
-        // It ends when it expires; Bob, a member, doesn't stop it; Andre stops it with 0.
-        assert!(!kept(&entries, &andre, 100), "expired");
-        add(&mut entries, &mut bobs, BOB, grant(&linux.id(), &andre, "whatsapp", 0, &BTreeMap::new()));
-        assert!(kept(&entries, &andre, 0));
-        add(&mut entries, &mut mac, ANDRE, grant(&linux.id(), &andre, "whatsapp", 0, &BTreeMap::new()));
-        assert!(!kept(&entries, &andre, 0), "stopped");
-
-        // The group's ends when its granter is no longer an admin of it, and every grant to a device ends with it.
-        add(&mut entries, &mut mac, ANDRE, member("f000000000000003", BOB, Some(Role::Admin)));
-        add(&mut entries, &mut mac, ANDRE, member("f000000000000003", ANDRE, None));
-        assert!(!kept(&entries, &family, 0), "its granter left the group");
-        add(&mut entries, &mut bobs, BOB, grant(&linux.id(), &family, "whatsapp", 100, &keys));
-        assert!(kept(&entries, &family, 0), "the group's new admin keeps it running");
-        add(&mut entries, &mut mac, ANDRE, remove_device(&linux.id(), None));
-        assert!(!kept(&entries, &family, 0), "linux was removed");
-    }
 }

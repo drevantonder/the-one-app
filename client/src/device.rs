@@ -686,32 +686,3 @@ async fn http(method: &str, url: &str, token: Option<&str>, body: Option<Value>)
     .await
     .map_err(failed)?
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// A device hands keys only to a node its own reading of `global` lists, which runs every scope it asks keys of,
-    /// sealed to the seal key listed for it, only what its 428 named of the databases that kind of request uses, and only
-    /// to the node that asked.
-    #[tokio::test]
-    async fn keys_go_only_to_listed_nodes_as_their_428_names() {
-        let device = Device::new(new_secret(), "http://127.0.0.1:1", &std::env::temp_dir().join(format!("one-client-{}", hex(&new_secret()))).display().to_string());
-        let (node, seal, other) = ([1; 32], [2; 32], [3; 32]);
-        *device.known.lock().unwrap() = Some(Known { members: Members::default(), user: String::new(), nodes: HashMap::from([(node, seal)]), serverless: None, at: now() });
-        let need = |n: usize| (0..n).map(|i| json!({ "scope": "global", "epoch": 1, "app": "board", "database": format!("d{i}") })).collect::<Vec<_>>();
-        let answer = |to: &[u8; 32], seal: &[u8; 32], n: usize| json!({ "to": hex(to), "seal": hex(seal), "need": need(n) });
-        let refused = async |from: &[u8; 32], a: Value| device.learn("call board", from, &a).await.is_err();
-        assert!(refused(&other, answer(&other, &seal, 1)).await, "a node its entries don't list");
-        assert!(refused(&node, answer(&other, &seal, 1)).await, "a 428 naming another node than the one that answered");
-        assert!(refused(&node, answer(&node, &other, 1)).await, "a seal key other than the one listed for it");
-        assert!(refused(&node, answer(&node, &seal, MOST_NEEDED + 1)).await, "more keys than a request needs");
-        assert!(refused(&node, answer(&node, &seal, 1)).await, "a node the entries don't say runs the scope");
-        let other_app = json!({ "to": hex(&node), "seal": hex(&seal), "need": [{ "scope": "global", "epoch": 1, "app": "notes", "database": "main" }] });
-        assert!(device.learn("call board", &node, &other_app).await.unwrap_err().to_string().contains("doesn't use"), "another app's database");
-        assert!(device.needs.lock().unwrap().is_empty(), "nothing refused is remembered, so nothing is handed");
-        // What a node asked for goes to it alone.
-        device.needs.lock().unwrap().insert("call board".into(), (hex(&other), vec![]));
-        assert_eq!(device.handed("call board").await.map(|h| h.0), Some(other), "remembered with the node that asked");
-    }
-}

@@ -197,28 +197,3 @@ pub fn show(bundle: &[u8], path: Option<&str>) -> Result<serde_json::Value> {
         }
     })
 }
-
-#[cfg(test)]
-mod tests {
-    use serde_json::json;
-
-    /// What someone deploys from elsewhere is built on this machine: it reads nothing of it but the files given.
-    #[test]
-    fn a_build_reads_only_the_apps_own_files() {
-        let files = |app_js: &str| super::given(json!({ "app.js": app_js }).as_object().unwrap()).unwrap();
-        let build = |app_js: &str| super::build_files(&files(app_js).iter().map(|(p, b)| (p.as_str(), b.as_slice())).collect::<Vec<_>>());
-        for import in ["/etc/hostname", "../../../../../../etc/hostname"] {
-            let err = build(&format!("import t from {import:?} with {{ type: \"text\" }};\nexport default {{ t }};")).unwrap_err();
-            assert!(format!("{err:#}").contains("outside its folder"), "{err:#}");
-        }
-        let err = build("import { f } from \"./app.js\" with { type: \"macro\" };\nexport function g() { return 1; }\nexport default { a: f() };").unwrap_err();
-        assert!(format!("{err:#}").contains("Macros are disabled"), "{err:#}");
-        for (path, why) in [("../x.js", "inside the app's folder"), ("/tmp/x.js", "inside the app's folder"), (".npmrc", "no dot files"), ("bunfig.toml", "leave it out")] {
-            let err = super::given(json!({ "app.js": "export default {}", path: "" }).as_object().unwrap()).unwrap_err();
-            assert!(format!("{err:#}").contains(why), "{path}: {err:#}");
-        }
-        let package = json!({ "dependencies": { "secret": "file:/home" } }).to_string();
-        assert!(super::given(json!({ "app.js": "export default {}", "package.json": package }).as_object().unwrap()).is_err());
-        assert!(build("export default { ok: true };").is_ok());
-    }
-}

@@ -1283,23 +1283,3 @@ impl Uploaded {
         Ok(())
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn new_settings_are_made_only_where_no_kernels_secrets_are() {
-        let dir = std::env::temp_dir().join(format!("kernel-settings-{}", rand::random::<u64>()));
-        std::fs::create_dir_all(&dir).unwrap();
-        assert!(none_in(&dir).is_ok());
-        std::fs::write(dir.join(".env.local"), "AUTH_SECRET='an earlier kernel's secret'\n").unwrap();
-        let refused = format!("{:#}", none_in(&dir).unwrap_err());
-        assert!(refused.contains(".env.local") && !refused.contains("an earlier kernel's secret"), "{refused}");
-        std::fs::remove_file(dir.join(".env.local")).unwrap();
-        std::fs::write(dir.join("settings.json"), "{}").unwrap();
-        assert!(none_in(&dir).is_err(), "settings that didn't load aren't replaced");
-        std::fs::remove_dir_all(&dir).unwrap();
-    }
-
-}

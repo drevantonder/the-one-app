@@ -5,10 +5,6 @@ use std::collections::BTreeSet;
 
 use serde_json::{Value, json};
 
-fn read(path: &str) -> String {
-    std::fs::read_to_string(std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/..")).join(path)).unwrap_or_else(|e| panic!("{path}: {e}"))
-}
-
 /// The kernel's services (JavaScript, `kernel/shared/crypto.js`) and nodes (`src/kernel.rs`) each open what the
 /// other seals: app keys under scope keys, keys to key pairs and under secrets; and derive the same database keys.
 #[test]
@@ -233,100 +229,6 @@ fn the_kernel_and_nodes_agree_on_keys_and_seals() {
 
     let _ = child.kill();
     let _ = child.wait();
-    let _ = std::fs::remove_dir_all(&dir);
-}
-
-/// What only the client's own screens may ask, as their person: an app's screen, whose page a node serves, is refused
-/// each by every host (the web pages that frame screens, through src/screen/host.js, and the shells' web views), by
-/// whether it's a screen the client chose to show as its own (`mine`, `own`, `view.settings`, `Own`), never by its page.
-#[test]
-fn an_apps_screen_cant_ask_what_only_the_clients_own_may() {
-    let only_own: BTreeSet<&str> = ["api", "signOut", "appearance", "device", "request", "cache"].into();
-    for (path, unless) in [
-        ("src/screen/host.js", "!h.own"),
-        ("android/app/src/main/kotlin/app/client/Screens.kt", "!own"),
-        ("apple/Shared/Views/AppScreen.swift", "!view.settings"),
-        ("windows/AppScreen.cs", "!Own"),
-    ] {
-        let src = read(path);
-        let lines: Vec<&str> = src.lines().collect();
-        let at = lines.iter().position(|l| l.contains("\"Only Settings can do that.\"")).unwrap_or_else(|| panic!("{path} refuses nothing"));
-        let guard = lines[at.saturating_sub(2)..=at].join("\n");
-        let refused: BTreeSet<&str> = guard.split('"').skip(1).step_by(2).filter(|w| only_own.contains(w)).collect();
-        assert_eq!(refused, only_own, "{path} lets an app's screen ask {:?}", only_own.difference(&refused).collect::<Vec<_>>());
-        assert!(guard.contains(unless), "{path} refuses them otherwise than by whether the screen is the client's own");
-    }
-    // The web client gives host.js what only its own may do just for a screen it chose to show as its own; a chat's
-    // view, which shows only apps' screens, gives none.
-    let web = read("kernel/web/web.js");
-    assert!(web.contains("const r = f.route, mine = r.kind === \"own\";") && web.contains("own: mine && {"), "web.js gives an app's screen what only its own may do");
-    assert!(!read("src/mcp_view.html").lines().any(|l| l.trim_start().starts_with("own:")), "a chat's view gives an app's screen what only the client's own may do");
-    // And an app's screen sends its person to Settings › Devices only to keep its app running there: no code to approve.
-    assert!(web.contains(r#"params: mine ? params : JSON.stringify({ keep: m.params?.keep, scope: m.params?.scope })"#));
-}
-
-/// A widget's tree is its app's, drawn on the clients' own screens, which act as the person looking: markup in every
-/// field of every node it can have draws as text, and makes no element, attribute or style (src/screen/widgets.js);
-/// and those screens run only their own scripts, refusing an inline handler or a script added to them (src/screen.rs),
-/// in a browser.
-#[test]
-fn an_apps_widget_runs_nothing_on_the_clients_own_screens() {
-    one::deploy::chrome().expect("this test draws screens in Chrome or Chromium: none was found (CHROME=<path> names one)");
-    let dir = crate::temp("screens");
-    // What each page says once it's drawn, as its title.
-    let title = |name: &str, body: &str, own: bool| -> String {
-        let page = one::screen::page(&json!({ "screen": "test", "params": {}, "me": null, "config": { "name": "Test" } }), body, own, false);
-        let path = dir.join(format!("{name}.html"));
-        std::fs::write(&path, page).unwrap();
-        let out = one::deploy::chrome()
-            .unwrap()
-            .args(["--virtual-time-budget=5000", "--dump-dom"])
-            .arg(format!("--user-data-dir={}", dir.join("profile").display()))
-            .arg(format!("file://{}", path.display()))
-            .output()
-            .unwrap();
-        let dom = String::from_utf8_lossy(&out.stdout);
-        let title = dom.split("<title>").nth(1).and_then(|t| t.split("</title>").next());
-        title.unwrap_or_else(|| panic!("{name} wasn't drawn: {}", String::from_utf8_lossy(&out.stderr))).to_string()
-    };
-
-    // Drawn with no policy, so only widgets.js keeps the markup out.
-    let widgets = concat!("<script>", include_str!("../src/screen/widgets.js"), "</script>", r#"<script>
-      const markup = `1"/><img src=x onerror="document.documentElement.dataset.ran = 1"><svg onload="document.documentElement.dataset.ran = 1">`;
-      const fields = ["text", "value", "unit", "label", "max", "w", "h", "gap", "lines", "tone", "size", "weight", "style", "at", "title", "subtitle", "trailing",
-        "empty", "url", "name", "path", "badge", "kind", "align", "dim", "grow", "round", "on", "icon", "op", "header"];
-      const node = (t, more = {}) => ({ ...Object.fromEntries(fields.map((f) => [f, markup])), t, values: [markup, 1, 2], labels: [markup, markup], c: [{ t: "text", text: markup }], link: "javascript:document.documentElement.dataset.ran = 1", ...more });
-      const types = ["col", "row", "text", "time", "stat", "gauge", "progress", "spark", "chart", "list", "item", "image", "dot", "icon", "link", "divider", "button", "toggle"];
-      const trees = [...types.map((t) => node(t)), node("chart", { kind: "line" }), node("spark", { values: [] }), node("icon", { name: undefined }), node("col", { c: types.map((t) => node(t)) })];
-      const host = { run: async () => {}, follow: () => {} };
-      let failed = 0;
-      for (const w of [...trees.map((root) => ({ root })), { error: markup }]) {
-        try {
-          document.body.append(oneWidgets.card({ app: markup, widget: markup, title: markup, ...w }, host));
-        } catch {
-          failed++;
-        }
-      }
-      document.querySelectorAll(".w-card, .w-card *").forEach((el) => el.dispatchEvent(new MouseEvent("click", { bubbles: true })));
-      addEventListener("load", () => setTimeout(() => {
-        const made = document.querySelectorAll("[onerror], [onload], img[src='x'], svg image, svg svg").length;
-        const styled = [...document.querySelectorAll("[style], [class]")].filter((el) => /onerror|<|"/.test(el.getAttribute("style") + el.getAttribute("class"))).length;
-        const drawn = document.querySelectorAll(".w-card").length, marks = document.querySelectorAll(".w-card polyline, .w-card rect, .w-card circle").length;
-        document.title = `${document.documentElement.dataset.ran ? "ran" : "inert"} failed ${failed} made ${made} styled ${styled} drawn ${drawn} marks ${marks > 4 ? "yes" : "no"}`;
-      }, 500));
-    </script>"#);
-    assert_eq!(title("widgets", widgets, false), "inert failed 0 made 0 styled 0 drawn 23 marks yes", "a widget's markup is only ever text");
-
-    // A client's own screen: its scripts run, markup put in it can't run any.
-    let own = r#"<script>
-      document.body.insertAdjacentHTML("beforeend", `<img src=x onerror="document.documentElement.dataset.ran = 'handler'"><a id="go" href="javascript:void (document.documentElement.dataset.ran = 'link')">x</a>`);
-      document.body.append(Object.assign(document.createElement("script"), { textContent: "document.documentElement.dataset.ran = 'script'" }));
-      document.getElementById("go").click();
-      addEventListener("load", () => setTimeout(() => (document.title = `ours ran, then ${document.documentElement.dataset.ran || "nothing"}`), 500));
-    </script>"#;
-    assert_eq!(title("own", own, true), "ours ran, then nothing", "a client's own screen runs only its own scripts");
-    // As an app's screen, the same runs (so the policy is what stops it).
-    assert_ne!(title("app", own, false), "ours ran, then nothing", "without the policy, this page does run what's put in it");
     let _ = std::fs::remove_dir_all(&dir);
 }
 

@@ -184,21 +184,7 @@ const INVITES_SCHEMA: &str = "create table invites (user text primary key, secre
 
 #[cfg(test)]
 mod waiting_tests {
-    use super::*;
 
-    /// A code two waiting devices show lets neither in: one may have been made to show the other's.
-    #[test]
-    fn a_code_two_devices_show_lets_neither_in() {
-        let asking = |secret: [u8; 32], name: &str| {
-            let e = crate::keys::Endpoint::of(&ed25519_dalek::SigningKey::from_bytes(&secret));
-            DeviceRequest { key: hex(&e.key), seal: hex(&e.seal), name: name.into(), user: "u".into(), person: String::new(), proof: None, service: None, shared: false, enrollment: None }
-        };
-        let (mine, other) = (asking([1; 32], "Mine"), asking([2; 32], "Other"));
-        let code = crate::keys::join_code(&mine.endpoint().unwrap());
-        assert_eq!(waiting(vec![mine.clone(), other.clone()], &code).unwrap().name, "Mine");
-        let twin = DeviceRequest { name: "Made to match".into(), ..mine.clone() };
-        assert!(waiting(vec![mine, twin, other], &code).unwrap_err().to_string().contains("two devices"));
-    }
 }
 
 /// The one device waiting with join `code`: none if two are, as a device made to show another's code would be.

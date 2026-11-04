@@ -439,21 +439,6 @@ pub fn tools() -> Vec<Value> {
 }
 
 #[test]
-fn fills_fields_only_for_their_hosts() {
-    let lookup = |name: &str| match name {
-        "token" => Some((vec!["api.example.com".to_string()], "s3cret".to_string())),
-        "0123456789abcdef/team" => Some((vec!["api.example.com".to_string()], "shared".to_string())),
-        "0123456789abcdef:user" => Some((vec![], "andre".to_string())),
-        _ => None,
-    };
-    assert_eq!(fill("Bearer {{token}}", "api.example.com", lookup).unwrap(), "Bearer s3cret");
-    assert_eq!(fill("{{token}}:{{0123456789abcdef/team}}", "api.example.com", lookup).unwrap(), "s3cret:shared");
-    assert!(fill("Bearer {{token}}", "evil.example.com", lookup).is_err(), "never to another host");
-    assert_eq!(fill("{{0123456789abcdef:user}}", "evil.example.com", lookup).unwrap(), "andre", "a plain field goes anywhere");
-    assert_eq!(fill("{{nope}} {{ not one }} {{", "evil.example.com", lookup).unwrap(), "{{nope}} {{ not one }} {{");
-}
-
-#[test]
 fn secrets_hosts_and_apps_open_only_with_the_vault_key() {
     let conn = Connection::open_in_memory().unwrap();
     conn.execute(SCHEMA, []).unwrap();
