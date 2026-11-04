@@ -135,7 +135,9 @@ function fromService(a) {
     models: (a.models || []).map((m) => ({ name: String(m.name || "pool"), used: int(m.used), resetsAt: m.resetsAt ?? null })),
     plan: a.plan || null, account: accountName(a), email: a.email || null,
     active: !!a.active, disabled: !!a.disabled,
-    notes: a.error ? [String(a.error)] : [], extra: a.extra || null,
+    notes: a.error ? [String(a.error)] : [],
+    // Extra usage only where it's on: an account without it has neither.
+    extra: a.extra?.limit != null ? a.extra : null,
   };
 }
 
