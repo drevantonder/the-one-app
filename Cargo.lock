@@ -2781,6 +2781,7 @@ dependencies = [
  "sha2 0.11.1",
  "ssh-key",
  "tokio",
+ "tokio-stream",
  "tracing",
  "tracing-subscriber",
  "ureq",

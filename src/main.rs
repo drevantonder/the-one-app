@@ -9,6 +9,7 @@ use serde_json::{Map, Value, json};
 
 mod client_device;
 mod code;
+mod git_remote;
 mod mcp_apps;
 mod ops;
 mod try_install;
@@ -240,6 +241,18 @@ fn addr() -> String {
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    // Run by git, for a repo's address.
+    if std::env::args_os().next().is_some_and(|me| std::path::Path::new(&me).file_name().is_some_and(|n| *n == *git_remote::helper())) {
+        let ran = git_remote::run(&args);
+        client_device::end();
+        match ran {
+            Ok(code) => std::process::exit(code),
+            Err(err) => {
+                eprintln!("{CLI}: {err:#}");
+                std::process::exit(128);
+            }
+        }
+    }
     let ran = run(args);
     client_device::end();
     if let Err(err) = ran {
@@ -288,8 +301,13 @@ fn run(args: Vec<String>) -> Result<()> {
         }
         ["sign-in"] => sign_in(&flags)?,
         ["sign-out"] => {
-            // A device takes itself out of its person's devices first, while its sign-in still says who it is.
+            // A device takes itself out of its person's devices first, while its sign-in still says who it is; git
+            // here then no longer reaches its repos, which a node here still serves.
+            let address = one::sign_in::kept().map(|k| k.address).filter(|_| !client_device::node_here());
             let device = client_device::sign_out();
+            if let Some(address) = address {
+                git_remote::unwire(&address);
+            }
             match one::sign_in::sign_out()? || device {
                 true if device => println!("Signed out: this computer is no longer one of your devices, and {CLI} here no longer acts as you."),
                 true => println!("Signed out: {CLI} on this machine no longer acts as you."),
@@ -1098,6 +1116,9 @@ fn sign_in(flags: &Map<String, Value>) -> Result<()> {
         println!("It's open in your browser here.");
     }
     one::sign_in::finish(started)?;
+    if let Err(err) = git_remote::wire(&address) {
+        eprintln!("{err:#}");
+    }
     if client_device::node_here() {
         let state = get("/v1/state")?;
         let me = state["user"]["name"].as_str().unwrap_or("you");
@@ -1286,6 +1307,14 @@ async fn serve(is_try: bool, args: &[String]) -> Result<()> {
         None => listen(&dir).await?,
     };
     let node = Node::start(&dir, one::sidecars::built_in()).await?;
+    // Git here reaches the install's repos at their address, as on every computer of its person's.
+    if !is_try && let Ok(address) = node.address() {
+        std::thread::spawn(move || {
+            if let Err(err) = git_remote::wire(&address) {
+                tracing::warn!("{err:#}");
+            }
+        });
+    }
     if handed.is_some() {
         node.warm().await;
     }

@@ -202,7 +202,7 @@ fn code_of(typed: &str) -> String {
 
 impl Node {
     /// The install's address, where its kernel is.
-    pub(super) fn address(&self) -> Result<String> {
+    pub fn address(&self) -> Result<String> {
         self.with(|i| Ok(super::calls::address(&i.r.members)))?.context("your One App has no address yet, so it has no sign-ins or requests to join")
     }
 

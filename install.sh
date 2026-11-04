@@ -39,6 +39,8 @@ if [ "$(uname -s)" = Darwin ]; then
 	rm -rf "$HOME/Applications/$app"
 	mv "$tmp/app/$app" "$HOME/Applications/"
 	ln -sf "$HOME/Applications/$app/Contents/MacOS/$cli" "$HOME/.local/bin/$cli"
+	# Git reaches your repos' addresses through it, by this name.
+	ln -sf "$HOME/Applications/$app/Contents/MacOS/$cli" "$HOME/.local/bin/git-remote-$cli"
 	# A node already running keeps the old binary until it restarts.
 	launchctl kickstart -k "gui/$(id -u)/app.$cli.mac.node" 2>/dev/null || true
 	open "$HOME/Applications/$app"
@@ -61,6 +63,7 @@ else
 		echo "Kept the previous data in $data-previous"
 	fi
 	install -m 755 "$bin" "$HOME/.local/bin/$cli"
+	ln -sf "$cli" "$HOME/.local/bin/git-remote-$cli"
 	if [ -d /run/systemd/system ]; then
 		# The node answers every client of the install, so it keeps its memory and, outside a container (where it can't
 		# be lowered), is the last thing killed when the machine runs short.
