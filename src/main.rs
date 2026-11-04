@@ -64,7 +64,8 @@ fn every_command() -> String {
                                        make a request with {{{{field}}}} filled in from the items the person lets
                                        agents use, a secret field only for its item's sites: you get the answer,
                                        never the secret
-  {CLI} vault remove <item> [<field>]  delete an item, or one of its fields
+  {CLI} vault remove <item> [<field>] [--scope s]
+                                       delete an item, or one of its fields
   {CLI} vault request [<app>] (--need <name> | --title <t> --fields a,b [--secret-fields b] --hosts a,b) [--why text]
                                        ask the person for an item an app may use (with no app, for vault fetch): a
                                        link to a sheet where they pick or make one, so you never see it; vault status
@@ -1694,13 +1695,8 @@ fn vault_set(scope: &str, item: &str, field: &str, value: &str, secret: Option<b
         }
     };
     let id = post("/v1/vault", data)?["id"].as_str().unwrap_or("").to_string();
-    let vault = match scope {
-        "user" => "your Vault".to_string(),
-        "global" => "Everyone's Vault".to_string(),
-        group => format!("{group}'s Vault"),
-    };
     let done = match made {
-        true => format!("Made {item} ({id}) in {vault}, with {field}."),
+        true => format!("Made {item} ({id}) in {}, with {field}.", vault_name(scope)),
         false => format!("Set {item}'s {field}."),
     };
     // Whether an agent may use it now, since only the person lets agents use an item.
@@ -1723,9 +1719,42 @@ fn vault_use(scope: &str, item: &str, app: &str, on: bool, agent: Option<&str>) 
     Ok(format!("{app} is switched {} for {}.", if on { "on" } else { "off" }, it["title"].as_str().unwrap_or(item)))
 }
 
-/// Deletes `item` in `scope`, or with `field`, one of its fields.
+/// A scope's Vault as a person calls it: your Vault, Everyone's Vault, <name>'s Vault.
+fn vault_name(scope: &str) -> String {
+    match scope {
+        "user" => "your Vault".to_string(),
+        "global" => "Everyone's Vault".to_string(),
+        group => format!("{group}'s Vault"),
+    }
+}
+
+/// Deletes `item` in `scope`, or with `field`, one of its fields. When it's not there but is in another Vault you
+/// may change, says which and gives the command that removes it.
 fn vault_remove(scope: &str, item: &str, field: Option<&str>) -> Result<String> {
-    let it = find_item(scope, item)?.with_context(|| format!("no item {item} in {scope}"))?;
+    let it = match find_item(scope, item)? {
+        Some(it) => it,
+        None => {
+            let all = get("/v1/vault")?.as_array().cloned().unwrap_or_default();
+            let where_it: Vec<String> = all
+                .iter()
+                .filter(|i| i["id"] == item || i["title"].as_str().is_some_and(|t| t.eq_ignore_ascii_case(item)))
+                .map(|it| {
+                    let s = it["scope"].as_str().unwrap_or("");
+                    let (flag, vault) = match s {
+                        s if s.starts_with("user:") => ("user".to_string(), vault_name("user")),
+                        s if s.starts_with("group:") => (s.to_string(), vault_name(it["scope_name"].as_str().unwrap_or(s))),
+                        _ => (s.to_string(), vault_name(s)),
+                    };
+                    format!("in {vault}: {CLI} vault remove {}{} --scope {flag}", it["id"].as_str().unwrap_or(item), field.map(|f| format!(" {f}")).unwrap_or_default())
+                })
+                .collect();
+            let there = match where_it.is_empty() {
+                true => String::new(),
+                false => format!("; it's {}", where_it.join(", and ")),
+            };
+            bail!("no item {item} in {}{there}", vault_name(scope));
+        }
+    };
     let title = it["title"].as_str().unwrap_or(item);
     match field {
         Some(field) => {
