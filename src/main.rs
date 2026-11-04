@@ -843,8 +843,10 @@ fn run(args: Vec<String>) -> Result<()> {
             println!("This device is now {}.", name.join(" "));
         }
         [app] if !app.starts_with('-') => {
+            // The node's own apps (Devices, Widgets) aren't in its app list, but read the same.
             let apps = get("/v1/apps")?;
-            let Some(found) = apps.as_array().into_iter().flatten().find(|a| a["name"] == *app) else { bail!("{}", ops::unknown(app, None, true)?) };
+            let own = ops::node_apps();
+            let Some(found) = apps.as_array().into_iter().flatten().chain(own.iter()).find(|a| a["name"] == *app) else { bail!("{}", ops::unknown(app, None, true)?) };
             println!("{} ({app})", found["title"].as_str().unwrap_or(app));
             if let Some(i) = found["instructions"].as_str().filter(|i| !i.is_empty()) {
                 println!("\n{i}\n");
