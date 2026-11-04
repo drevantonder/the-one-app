@@ -42,6 +42,9 @@ pub struct Me {
     pub role: Option<Role>,
     /// The user's name.
     pub user_name: String,
+    /// The user's handle (`members::valid_handle`).
+    #[serde(default)]
+    pub handle: String,
     /// The agent that asked (an MCP client's name, like "Claude Code"), when one did.
     pub agent: Option<String>,
 }
@@ -68,6 +71,8 @@ pub struct Context {
     pub from: Option<String>,
     /// The install's address, where a sign-in elsewhere sends the person back (`<address>/back`).
     pub address: Option<String>,
+    /// Everyone's and every group's handle (`Members::handles`).
+    pub handles: Value,
 }
 
 pub struct Outcome {

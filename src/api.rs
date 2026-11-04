@@ -196,6 +196,7 @@ pub fn routes() -> Router<Node> {
         .route("/v1/devices/approve", post(approve))
         .route("/v1/grant", post(grant))
         .route("/v1/accept", post(accept))
+        .route("/v1/handle", post(handle))
         .route("/v1/member", post(member))
         .route("/v1/app", post(app))
         .route("/v1/deploy", post(deploy))
@@ -290,6 +291,7 @@ pub const SIGNED_IN: &[&str] = &[
     "/v1/invite-link",
     "/v1/accept",
     "/v1/member",
+    "/v1/handle",
     "/v1/backups",
     "/v1/backups/{op}",
 ];
@@ -906,6 +908,18 @@ async fn member(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Re
     let role: Option<Role> = serde_json::from_value(body["role"].clone())?;
     let (group, user) = (node.find_group(text(&body, "group")?)?, node.find_user(text(&body, "user")?)?);
     node.member_as(&me.caller, "member", json!({ "group": group, "user": user, "role": role })).await?;
+    done()
+}
+
+/// `{ handle, group? }`: changes the caller's handle, or with `group` (its id or name) a group's they're an admin of.
+async fn handle(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
+    only(&body, &["handle", "group"])?;
+    let handle = text(&body, "handle")?.trim().to_string();
+    let content = match body["group"].as_str() {
+        Some(group) => crate::members::handle("group", &node.find_group(group)?, &handle),
+        None => crate::members::handle("user", &me.caller.user, &handle),
+    };
+    node.member_content(&me.caller, content).await?;
     done()
 }
 

@@ -29,7 +29,7 @@
         : `<label class="pick">${role === "admin" ? "Admin" : "Member"}<select aria-label="${one.esc(u.name)}'s role" data-user="${one.esc(u.id)}">
             <option value="admin"${role === "admin" ? " selected" : ""}>Admin</option><option value="member"${role === "member" ? " selected" : ""}>Member</option>
             <option disabled>──────</option><option value="">Remove ${one.esc(u.name)}</option></select></label>`;
-      return `<div class="row still">${one.avatar(u.id, u.name)}<div class="main"><div class="title"><span>${one.esc(u.name)}${u.id === me ? " (you)" : ""}</span></div></div>${trailing}</div>`;
+      return `<div class="row still">${one.avatar(u.id, u.name)}<div class="main"><div class="title"><span>${one.esc(u.name)}${u.id === me ? " (you)" : ""}</span></div>${u.handle ? `<div class="sub">@${one.esc(u.handle)}</div>` : ""}</div>${trailing}</div>`;
     });
     let html = `<div class="large-title">Users</div><div class="list">${rows.join("")}</div><div id="confirm"></div>`;
     html += error ? one.problem({ title: error }) : "";

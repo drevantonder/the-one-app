@@ -1168,6 +1168,7 @@ fn node_me(node: &Node, m: &Members, caller: &Caller) -> Me {
         name,
         role: user.map(|u| u.role),
         user_name: user.map(|u| u.name.clone()).unwrap_or_default(),
+        handle: user.map(|u| u.handle.clone()).unwrap_or_default(),
         agent: caller.agent.clone(),
     }
 }

@@ -57,6 +57,8 @@ impl std::fmt::Display for Principal {
 pub struct User {
     pub id: String,
     pub name: String,
+    /// What every app calls them by in addresses and lists (`valid_handle`), unique among people and groups.
+    pub handle: String,
     pub role: Role,
     pub removed: bool,
 }
@@ -102,6 +104,8 @@ impl Machine {
 pub struct Group {
     pub id: String,
     pub name: String,
+    /// As a person's: unique among people and groups.
+    pub handle: String,
     pub members: BTreeMap<String, Role>,
     pub invited: BTreeMap<String, Role>,
 }
@@ -295,11 +299,17 @@ impl Members {
 
     /// Applies one of `global`'s node entries, if it counts. Returns whether it did.
     pub fn step(&mut self, e: &Entry) -> bool {
-        let counted = (e.content.kind == "genesis" || self.counts(e)) && self.apply(e).is_ok();
+        let counted = self.try_step(e).is_ok();
         if !counted {
             tracing::debug!("{} entry {} doesn't count", e.content.kind, e.id());
         }
         counted
+    }
+
+    /// As `step`, saying why an entry doesn't count.
+    pub fn try_step(&mut self, e: &Entry) -> Result<()> {
+        ensure!(e.content.kind == "genesis" || self.counts(e), "that changes nothing: you may not {} that", e.content.kind);
+        self.apply(e)
     }
 
     /// Whether an entry is at or after where its device's entries in its log stop counting.
@@ -352,6 +362,37 @@ impl Members {
     /// Whether `id` was a person of the install, and was removed.
     pub fn removed_user(&self, id: &str) -> bool {
         self.users.get(id).is_some_and(|u| u.removed)
+    }
+
+    /// Whose `handle` is: a person's (removed ones keep theirs) or a group's.
+    pub fn by_handle(&self, handle: &str) -> Option<Principal> {
+        let user = self.users.values().find(|u| u.handle == handle).map(|u| Principal::User(u.id.clone()));
+        user.or_else(|| self.groups.values().find(|g| g.handle == handle).map(|g| Principal::Group(g.id.clone())))
+    }
+
+    /// Everyone's and every group's handle, as apps get them (`ctx.handles`): `{ handle, id, name }`, `id` being
+    /// `user:<id>` or `group:<id>`; a removed person's with `removed`, and a group's with its `members`' roles by id.
+    pub fn handles(&self) -> Value {
+        let users = self.users.values().map(|u| {
+            let mut v = json!({ "handle": u.handle, "id": format!("user:{}", u.id), "name": u.name });
+            if u.removed {
+                v["removed"] = json!(true);
+            }
+            v
+        });
+        let groups = self.groups.values().map(|g| json!({ "handle": g.handle, "id": format!("group:{}", g.id), "name": g.name, "members": g.members }));
+        Value::Array(users.chain(groups).collect())
+    }
+
+    /// A person's or group's handle, picked from the name they joined or were made with: `handle_from`, with -2, -3…
+    /// after it while that's taken.
+    fn pick_handle(&self, name: &str, fallback: &str) -> String {
+        let base = handle_from(name, fallback);
+        let numbered = |n: u32| {
+            let tail = format!("-{n}");
+            format!("{}{tail}", base[..base.len().min(39 - tail.len())].trim_end_matches('-'))
+        };
+        (1..).map(|n| if n == 1 { base.clone() } else { numbered(n) }).find(|h| self.by_handle(h).is_none()).unwrap()
     }
 
     pub fn is_admin(&self, user: &str) -> bool {
@@ -552,7 +593,9 @@ impl Members {
                 self.name = text("name")?;
                 self.recovery = Some(key_of("recovery")?);
                 self.recovery_set = e.time();
-                self.users.insert(user.clone(), User { id: user.clone(), name: text("user_name")?, role: Role::Admin, removed: false });
+                let name = text("user_name")?;
+                let handle = self.pick_handle(&name, "person");
+                self.users.insert(user.clone(), User { id: user.clone(), name, handle, role: Role::Admin, removed: false });
                 self.machines.insert(author, machine);
                 self.devices_at = e.time();
                 // `global`'s first epoch, made with the install, before anything is sealed under it.
@@ -589,7 +632,9 @@ impl Members {
                     None => {
                         ensure!(self.is_admin(&w), "only admins add people");
                         let role = role_of("role")?;
-                        self.users.insert(user.clone(), User { id: user.clone(), name: text("user_name")?, role, removed: false });
+                        let name = text("user_name")?;
+                        let handle = self.pick_handle(&name, "person");
+                        self.users.insert(user.clone(), User { id: user.clone(), name, handle, role, removed: false });
                     }
                 }
                 self.machines.insert(machine.key, machine);
@@ -681,7 +726,9 @@ impl Members {
                 let group = id_of("group")?;
                 ensure!(!self.groups.contains_key(&group), "that group exists");
                 let members = BTreeMap::from([(w, Role::Admin)]);
-                self.groups.insert(group.clone(), Group { id: group, name: text("name")?, members, invited: BTreeMap::new() });
+                let name = text("name")?;
+                let handle = self.pick_handle(&name, "group");
+                self.groups.insert(group.clone(), Group { id: group, name, handle, members, invited: BTreeMap::new() });
             }
             "invite" => {
                 let (group, user, role) = (id_of("group")?, id_of("user")?, role_of("role")?);
@@ -713,6 +760,31 @@ impl Members {
                 }
             }
             "rename" => {
+                // A person's or group's handle: one that's taken (wherever it sorts) or malformed doesn't count. An older
+                // device skips one, which has no name.
+                if let Some(handle) = data.get("handle") {
+                    let handle = handle.as_str().context("a handle is text")?;
+                    ensure!(valid_handle(handle), "a handle is lowercase letters, digits and single hyphens, up to 39, like {}", handle_from(handle, "name"));
+                    let mine = match (id_of("user"), id_of("group")) {
+                        (Ok(user), _) => {
+                            ensure!(user == w || self.is_admin(&w), "not allowed to change that person's handle");
+                            ensure!(self.user(&user).is_some(), "no such user");
+                            Principal::User(user)
+                        }
+                        (_, Ok(group)) => {
+                            ensure!(self.manages(&w, &group), "not allowed to change that group's handle");
+                            Principal::Group(group)
+                        }
+                        _ => bail!("a handle is a person's or a group's"),
+                    };
+                    ensure!(self.by_handle(handle).is_none_or(|p| p == mine), "{handle} is taken");
+                    match mine {
+                        Principal::User(u) => self.users.get_mut(&u).unwrap().handle = handle.to_string(),
+                        Principal::Group(g) => self.groups.get_mut(&g).unwrap().handle = handle.to_string(),
+                        Principal::Admins => unreachable!(),
+                    }
+                    return Ok(());
+                }
                 let name = text("name")?;
                 ensure!(!name.trim().is_empty(), "no name");
                 if let Ok(key) = key_of("key") {
@@ -845,6 +917,21 @@ pub fn source_link(v: &Value) -> Result<String> {
     ensure!(link.is_empty() || (link.len() <= 500 && matches!(scheme, Some("https" | "http"))), "a source link is a web address (https://…)");
     ensure!(!link.chars().any(char::is_whitespace), "a source link has no spaces");
     Ok(link.to_string())
+}
+
+/// A person's or group's handle: lowercase letters, digits and single hyphens, neither first nor last, up to 39
+/// characters, like GitHub's logins.
+pub fn valid_handle(h: &str) -> bool {
+    !h.is_empty() && h.len() <= 39 && h.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-') && !h.starts_with('-') && !h.ends_with('-') && !h.contains("--")
+}
+
+/// A handle made from a name: its ASCII letters and digits, lowercased, words joined by single hyphens, cut to 39;
+/// `fallback` for a name with none.
+pub fn handle_from(name: &str, fallback: &str) -> String {
+    let words: Vec<String> = name.split(|c: char| !c.is_ascii_alphanumeric()).filter(|w| !w.is_empty()).map(str::to_ascii_lowercase).collect();
+    let handle = words.join("-");
+    let handle = handle[..handle.len().min(39)].trim_end_matches('-');
+    if handle.is_empty() { fallback.to_string() } else { handle.to_string() }
 }
 
 pub fn valid_app_name(name: &str) -> bool {
@@ -1145,6 +1232,13 @@ pub fn member(group: &str, user: &str, role: Option<Role>) -> Content {
 /// Renames a device (`key`), a person (`user`) or a group (`group`): `what` is which, `id` its key (hex) or id.
 pub fn rename(what: &str, id: &str, name: &str) -> Content {
     let mut data = json!({ "name": name });
+    data[what] = json!(id);
+    node("rename", data)
+}
+
+/// Changes a person's (`what` user) or a group's (`group`) handle.
+pub fn handle(what: &str, id: &str, handle: &str) -> Content {
+    let mut data = json!({ "handle": handle });
     data[what] = json!(id);
     node("rename", data)
 }

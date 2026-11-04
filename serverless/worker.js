@@ -686,7 +686,7 @@ class Run {
     const done = new Promise((resolve) => (finished = resolve));
     let later = false;
     try {
-      const body = { ...fields, me: this.view.me, now: Date.now(), scopes, read_only: !writes, token: crypto.randomUUID(), from, address: this.env.ADDRESS?.replace(/\/$/, "") ?? null };
+      const body = { ...fields, me: this.view.me, now: Date.now(), scopes, read_only: !writes, token: crypto.randomUUID(), from, address: this.env.ADDRESS?.replace(/\/$/, "") ?? null, handles: this.view.handles ?? null };
       const reply = await p.appWorker(this.who, app).getEntrypoint("Call").run(what, null, body, new ForCall(this, app, call, finished, depth));
       // Keys it found it needs while it ran are asked for as they are.
       if (call.need) throw call.need;

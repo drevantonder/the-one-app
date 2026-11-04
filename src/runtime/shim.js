@@ -152,6 +152,10 @@ function context(ask, body, appends, later) {
     /// another site sends the person back to `<address>/back?state=<app>/<screen>&…`, which opens that screen of this
     /// app with `params.back`, that whole address.
     address: body.address ?? null,
+    /// Everyone's and every group's handle in the install, what apps call them by in addresses and lists:
+    /// [{ handle, id: "user:<id>" | "group:<id>", name }], a removed person's with removed: true, a group's with its
+    /// members: { <user id>: "admin" | "member" }; null on a node from before handles. `me.handle` is the caller's.
+    handles: body.handles ?? null,
     /// Says what this call spent on AI, { model, usd, input, output }: it shows in the insights of the app that called
     /// it (ctx.from), or else of this one.
     cost: (spent) => {

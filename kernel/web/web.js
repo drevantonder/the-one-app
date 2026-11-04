@@ -961,6 +961,7 @@ window.__one = {};
     "POST /v1/invite": (b) => write(members.invite({ group: b.group, user: b.user, role: b.role || "member" })),
     "POST /v1/accept": (b) => write(members.accept({ group: b.group })),
     "POST /v1/member": (b) => write(members.member({ group: b.group, user: b.user, role: b.role ?? null })),
+    "POST /v1/handle": (b) => write(members.handle({ ...(b.group ? { what: "group", id: String(b.group) } : { what: "user", id: me().id }), handle: String(b.handle || "").trim() })),
     "POST /v1/name": (b) => write(members.rename({ what: "key", id: device.me.key, name: String(b.name || "").trim() })),
     "POST /v1/retire": (b) => write(members.retire({ app: b.app, owner: app(b.app)?.owner, how: b.how })),
     // An app on everyone's page is a change to who can do what; on yours or a group's, a node writes it.

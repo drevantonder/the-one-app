@@ -16,6 +16,7 @@ export const members = {
   accept: ({ group }) => node("accept", { group }),
   member: ({ group, user, role = null }) => node("member", { group, user, role }),
   rename: ({ what, id, name }) => node("rename", { [what]: id, name }),
+  handle: ({ what, id, handle }) => node("rename", { [what]: id, handle }),
   epoch: ({ scope, n, to, hash }) => node("epoch", { scope, n, to, hash }),
   /// `keys`: the hash of the app's key in each epoch sealed to the endpoint, by epoch (`epochHash`).
   grant: ({ endpoint, scope, app, until, keys = {} }) => node("grant", { endpoint, scope, app, until, keys }),

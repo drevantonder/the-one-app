@@ -95,7 +95,7 @@ impl Replica {
         if members::is_member_entry(entry) {
             let recovery = self.members.recovery == Some(entry.author());
             ensure!(recovery || self.members.client(&entry.author()).is_some_and(|c| c.user == entry.user()), "{signer} isn't one of your devices, so it can't sign that for you: sign it on one of yours");
-            ensure!(self.members.clone().step(entry), "that changes nothing: you may not {} that", entry.content.kind);
+            self.members.clone().try_step(entry)?;
         } else if entry.content.kind != "genesis" {
             ensure!(self.members.counts(entry), "{signer} can't write in {} for you", entry.log());
         }

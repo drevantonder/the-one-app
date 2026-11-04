@@ -112,14 +112,14 @@ fn install(m: &Members, me: &str, settings: &Map<String, Value>, here: &Here) ->
             client
         })
         .collect();
-    let users: Vec<Value> = m.users.values().filter(|u| !u.removed).map(|u| json!({ "id": u.id, "name": u.name, "role": u.role, "me": u.id == me })).collect();
+    let users: Vec<Value> = m.users.values().filter(|u| !u.removed).map(|u| json!({ "id": u.id, "name": u.name, "handle": u.handle, "role": u.role, "me": u.id == me })).collect();
     let groups: Vec<Value> = m
         .groups
         .values()
         .map(|g| {
             let members: Vec<Value> = g.members.iter().map(|(u, r)| json!({ "user": u, "role": r })).collect();
             let invited: Vec<Value> = g.invited.iter().map(|(u, r)| json!({ "user": u, "role": r })).collect();
-            json!({ "id": g.id, "name": g.name, "role": m.group_role(me, &g.id), "members": members, "invited": invited })
+            json!({ "id": g.id, "name": g.name, "handle": g.handle, "role": m.group_role(me, &g.id), "members": members, "invited": invited })
         })
         .collect();
     json!({

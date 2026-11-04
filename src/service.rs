@@ -495,6 +495,7 @@ impl Service {
                 name: m.machine(&key).map(|d| d.name.clone()).unwrap_or_default(),
                 role: person.map(|u| u.role),
                 user_name: person.map(|u| u.name.clone()).unwrap_or_default(),
+                handle: person.map(|u| u.handle.clone()).unwrap_or_default(),
                 agent: me["agent"].as_str().map(str::to_string),
             }
         };

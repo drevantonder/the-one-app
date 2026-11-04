@@ -8,8 +8,9 @@
   #page h2.section:first-child { margin-top: 8px; }
 </style>
 <script>
-  // The groups this person is in and is invited to, and making one; or, given `group`, that group's members and
-  // invites, each member's role a button on their row for its admins. The last admin's role can't change.
+  // This person, with their handle, then the groups they're in and are invited to, and making one; or, given `group`,
+  // that group's handle, members and invites, each member's role a button on their row for its admins. The last
+  // admin's role can't change. A handle is changed in a sheet: theirs, or a group's by its admins.
   const group = one.params?.group;
   // Groups' own icon, as Settings draws it.
   const groupIcon = one.appIcon({ name: "groups", icon: "users-three", color: "#34c759" }, 34);
@@ -39,7 +40,12 @@
     const invited = groups.filter((g) => g.invited.some((m) => m.user === me));
     const mine = groups.filter((g) => g.role);
     one.largeTitle("Groups");
+    const you = state.install?.users.find((u) => u.id === me);
     let html = '<div class="large-title">Groups</div>';
+    if (you?.handle) {
+      html += `<div class="list"><a class="row" data-handle>${one.avatar(you.id, you.name)}<div class="main"><div class="title"><span>${one.esc(you.name)}</span></div>
+        <div class="sub">@${one.esc(you.handle)}</div></div><span class="chev">›</span></a></div><h2 class="section">Groups</h2>`;
+    }
     if (invited.length) {
       html += '<h2 class="section">Invited</h2><div class="list">' + invited.map((g) => `<div class="row still">${groupIcon}
         <div class="main"><div class="title"><span>${one.esc(g.name)}</span></div><div class="sub">${one.esc(names(g.members))}</div></div>
@@ -76,7 +82,13 @@
         : `<span class="note">${roleName(role)}</span>`;
       return person(m.user, userName(m.user), trailing);
     });
-    let html = `<div class="large-title">${one.esc(g.name)}</div><h2 class="section">Members</h2><div class="list">${rows.join("")}</div>`;
+    let html = `<div class="large-title">${one.esc(g.name)}</div>`;
+    if (g.handle) {
+      html += admin
+        ? `<div class="list"><a class="row" data-handle="${one.esc(g.id)}"><div class="main"><div class="title"><span>Handle</span></div></div><span class="note">@${one.esc(g.handle)}</span><span class="chev">›</span></a></div>`
+        : `<div class="list"><div class="row still"><div class="main"><div class="title"><span>Handle</span></div></div><span class="note">@${one.esc(g.handle)}</span></div></div>`;
+    }
+    html += `<h2 class="section">Members</h2><div class="list">${rows.join("")}</div>`;
     html += error ? footer(error, true) : !admin ? footer("Only its admins change who's in it.") : admins.length === 1 ? footer("Make someone else an admin before you step down.") : "";
     if (g.invited.length) {
       html += '<h2 class="section">Invited</h2><div class="list">' + g.invited.map((m) => person(m.user, userName(m.user), '<span class="note">Waiting</span>')).join("") + "</div>";
@@ -197,11 +209,43 @@
   }
 
   document.addEventListener("change", (e) => e.target.dataset.member && change(e.target.dataset.member, e.target.value || null));
+  // A new handle for them, or with `id` for that group: lowercase as it's typed, saved once it's one.
+  function handle(id) {
+    const g = id && state.install.groups.find((x) => x.id === id);
+    const was = g ? g.handle : state.install.users.find((u) => u.id === state.user?.id)?.handle || "";
+    const sheet = one.sheet({ title: "Handle", done: "Cancel" });
+    sheet.body.innerHTML = `<div class="list"><label class="row plain"><span class="muted">@</span><input class="field" id="handle" autocapitalize="none" autocomplete="off" spellcheck="false" enterkeyhint="done"></label></div>
+      <p class="footer">What apps call ${g ? one.esc(g.name) : "you"} by, like Repos' addresses, which move with it. Lowercase letters, digits and hyphens.</p>
+      <div id="problem"></div><div style="text-align:center;margin-top:18px"><button class="button primary" id="go" disabled>Save</button></div>`;
+    const input = sheet.body.querySelector("#handle"), go = sheet.body.querySelector("#go");
+    input.value = was;
+    const ok = (h) => /^[a-z0-9]+(-[a-z0-9]+)*$/.test(h) && h.length <= 39;
+    input.oninput = () => {
+      input.value = input.value.toLowerCase().replace(/[\s_]/g, "-");
+      go.disabled = !ok(input.value) || input.value === was;
+    };
+    input.onkeydown = (e) => e.key === "Enter" && !go.disabled && go.click();
+    go.onclick = async () => {
+      const back = one.busy(go);
+      try {
+        await one.api("POST", "/v1/handle", { handle: input.value, ...(g ? { group: g.id } : {}) });
+        sheet.close();
+        one.tap("success");
+        draw();
+      } catch (e) {
+        sheet.body.querySelector("#problem").innerHTML = one.problem({ title: one.plain(e).title });
+        back();
+      }
+    };
+    setTimeout(() => input.focus(), 50);
+  }
+
   document.addEventListener("click", (e) => {
-    const t = e.target.closest?.("#page [data-accept], #page [data-group], #page [data-create], #page [data-invite], #page [data-leave]");
+    const t = e.target.closest?.("#page [data-accept], #page [data-group], #page [data-create], #page [data-invite], #page [data-leave], #page [data-handle]");
     if (!t) return;
     const d = t.dataset;
-    if (d.accept) accept(d.accept, t);
+    if ("handle" in d) handle(d.handle);
+    else if (d.accept) accept(d.accept, t);
     else if (d.group) one.open("groups", { group: d.group });
     else if ("create" in d) create();
     else if ("invite" in d) invite();

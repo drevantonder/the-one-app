@@ -47,7 +47,7 @@ The map: what lives where, and the few rules the code only shows by keeping them
 ## Where things are
 
 - `src/entry.rs`: what an entry is (signed the same in `kernel/shared/crypto.js`), its scope, and the causal order.
-- `src/members.rs`: users, groups, endpoints and their roles, epochs, grants, apps and installs, from `global`'s entries; which nodes run which scope and which entries count. Pure: entries in, members out.
+- `src/members.rs`: users, groups, endpoints and their roles, epochs, grants, apps and installs, from `global`'s entries; which nodes run which scope and which entries count. Pure: entries in, members out. Each person and group has a handle, unique among them, that every app calls them by (`ctx.handles`): picked as they're replayed from the name they joined or were made with, so no entry carries it, and changed by a `rename` that gives one.
 - `src/replica.rs`: what a device holds and knows: the entries of each scope it holds, as the bucket gives them, and the members they add up to. No clock or I/O.
 - `src/store.rs`: every log of every scope a device holds, and how far it has read each from the bucket.
 - `src/node.rs`, `src/node/`: the only place with state and I/O, as one `Node` whose methods are split by concern into the modules beside `node.rs`: calls, databases, logs, the network, apps, screens, state, the Vault, sidecars, pairing, blobs, releases, status, storage, backups, schedules, standing work and sign-ins' sessions.

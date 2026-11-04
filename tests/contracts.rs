@@ -185,6 +185,7 @@ fn the_kernel_and_nodes_agree_on_keys_and_seals() {
             (members::member(group, user, None), json!(["member", { "group": group, "user": user }])),
             (members::rename("key", &key, "Work Mac"), json!(["rename", { "what": "key", "id": key, "name": "Work Mac" }])),
             (members::rename("group", group, "Kin"), json!(["rename", { "what": "group", "id": group, "name": "Kin" }])),
+            (members::handle("user", user, "sam-2"), json!(["handle", { "what": "user", "id": user, "handle": "sam-2" }])),
             (members::epoch(&Scope::User(user.into()), 2, &[endpoint.key], &seal), json!(["epoch", { "scope": format!("user:{user}"), "n": 2, "to": [key], "hash": seal }])),
             (members::grant(&endpoint.key, &Scope::Group(group.into()), "whatsapp", 0, &Default::default()), json!(["grant", { "endpoint": key, "scope": format!("group:{group}"), "app": "whatsapp", "until": 0 }])),
             (members::grant(&endpoint.key, &Scope::User(user.into()), "whatsapp", 1_800_000_000_000, &[(1, seal.clone()), (2, key.clone())].into()), json!(["grant", { "endpoint": key, "scope": format!("user:{user}"), "app": "whatsapp", "until": 1_800_000_000_000_u64, "keys": { "1": seal, "2": key } }])),

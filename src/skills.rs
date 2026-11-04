@@ -262,7 +262,7 @@ pub fn backups_app() -> Value {
 
 /// How the groups' tool is explained, as an app's guide is.
 fn groups_guide() -> String {
-    format!("groups_list says who's in {YOURS}, as admin or member, then its groups: the people who share a page, its apps and its data, like a family or a team, and who's invited to one but hasn't joined.")
+    format!("groups_list says who's in {YOURS}, as admin or member, then its groups: the people who share a page, its apps and its data, like a family or a team, and who's invited to one but hasn't joined. Each person and group has a handle, like andre or family, unique among them, which apps call them by (Repos' addresses are <handle>/<repo>); groups_handle changes yours, or a group's you're an admin of.")
 }
 
 /// The groups' tool as an app's operations.
@@ -272,7 +272,10 @@ pub fn groups_app() -> Value {
 
 /// The groups' MCP tools.
 pub fn groups_tools() -> Vec<Value> {
-    vec![json!({ "name": "groups_list", "description": format!("The people in {YOURS}, you first, each as admin or member; then every group: who's in it and who's invited but hasn't joined yet."), "inputSchema": { "type": "object", "properties": {} }, "annotations": hints(true, false) })]
+    vec![
+        json!({ "name": "groups_list", "description": format!("The people in {YOURS}, you first, each with their handle, as admin or member; then every group with its handle: who's in it and who's invited but hasn't joined yet."), "inputSchema": { "type": "object", "properties": {} }, "annotations": hints(true, false) }),
+        json!({ "name": "groups_handle", "description": "Change your handle, or a group's you're an admin of: what every app calls you or it by, like Repos' addresses <handle>/<repo>, which move with it.", "inputSchema": { "type": "object", "required": ["handle"], "properties": { "handle": { "type": "string", "description": "lowercase letters, digits and single hyphens, up to 39, not taken by anyone or any group, like andre-v" }, "group": { "type": "string", "description": "a group's name or id, from groups_list; omit for your own" } } }, "annotations": hints(false, false) }),
+    ]
 }
 
 /// An MCP tool's hints, all three always, since a client takes one left out as the worst: whether it only reads (so it

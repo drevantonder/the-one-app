@@ -652,9 +652,9 @@ fn view(m: &Members, states: &BTreeMap<String, ScopeState>, me: &str, client: &s
             info
         })
         .collect();
-    let me_ = json!({ "key": "", "user": me, "name": client, "role": m.user(me).map(|u| u.role), "user_name": user_name, "agent": null });
+    let me_ = json!({ "key": "", "user": me, "name": client, "role": m.user(me).map(|u| u.role), "user_name": user_name, "handle": m.user(me).map(|u| u.handle.clone()), "agent": null });
     let erased: Vec<&String> = m.apps.values().filter(|a| a.erased).map(|a| &a.name).collect();
-    json!({ "state": state, "apps": apps, "me": me_, "erased": erased })
+    json!({ "state": state, "apps": apps, "me": me_, "erased": erased, "handles": m.handles() })
 }
 
 /// A deploy's bundle from the bucket (`bucket::blob_name`), opened with the keys of the node's `blobs` database in

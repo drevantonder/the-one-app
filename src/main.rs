@@ -1226,21 +1226,29 @@ fn status(state: &Value) {
 
 /// The people in the One App, you first, each with their role; then every group in words: its people with their
 /// roles, and who's invited.
+/// A person or group as groups_list says them: their name, then their handle (`Andre @andre`).
+fn handled(v: &Value) -> String {
+    match v["handle"].as_str() {
+        Some(h) => format!("{} @{h}", v["name"].as_str().unwrap_or("")),
+        None => v["name"].as_str().unwrap_or("").to_string(),
+    }
+}
+
 fn groups_said(state: &Value) -> String {
     let i = &state["install"];
-    let names: std::collections::HashMap<&str, &str> = i["users"].as_array().into_iter().flatten().filter_map(|u| Some((u["id"].as_str()?, u["name"].as_str()?))).collect();
+    let names: std::collections::HashMap<&str, String> = i["users"].as_array().into_iter().flatten().filter_map(|u| Some((u["id"].as_str()?, handled(u)))).collect();
     let me = i["user"].as_str();
     let mut users: Vec<&Value> = i["users"].as_array().into_iter().flatten().collect();
     users.sort_by_key(|u| u["me"] != true);
     let everyone: Vec<String> = users.iter().map(|u| {
-        let (name, role) = (u["name"].as_str().unwrap_or(""), u["role"].as_str().unwrap_or("member"));
+        let (name, role) = (handled(u), u["role"].as_str().unwrap_or("member"));
         if u["me"] == true { format!("{name} (you, {role})") } else { format!("{name} ({role})") }
     }).collect();
     let mut out = format!("People in {YOURS}: {}.\n", everyone.join(", "));
     let people = |list: &Value| -> Vec<String> {
         list.as_array().into_iter().flatten().map(|m| {
             let id = m["user"].as_str().unwrap_or("");
-            let (name, role) = (names.get(id).copied().unwrap_or(id), m["role"].as_str().unwrap_or("member"));
+            let (name, role) = (names.get(id).map_or(id, String::as_str), m["role"].as_str().unwrap_or("member"));
             match me == Some(id) {
                 true => format!("{name} (you, {role})"),
                 false => format!("{name} ({role})"),
@@ -1254,7 +1262,7 @@ fn groups_said(state: &Value) -> String {
     }
     out.push_str("Groups:\n");
     for g in &groups {
-        out.push_str(&format!("  {}: {}\n", g["name"].as_str().unwrap_or(""), people(&g["members"]).join(", ")));
+        out.push_str(&format!("  {}: {}\n", handled(g), people(&g["members"]).join(", ")));
         let invited = people(&g["invited"]);
         if !invited.is_empty() {
             out.push_str(&format!("    invited, not joined yet: {}\n", invited.join(", ")));
@@ -2308,6 +2316,14 @@ fn dispatch(name: &str, mut input: Map<String, Value>, agent: Option<&str>, clie
     }
     if name == "groups_list" {
         return Ok(json!(groups_said(&get("/v1/state")?)));
+    }
+    if name == "groups_handle" {
+        let handle = input.get("handle").and_then(Value::as_str).context("give the new handle")?;
+        post("/v1/handle", json!({ "handle": handle, "group": input.get("group") }))?;
+        return Ok(json!(match input.get("group").and_then(Value::as_str) {
+            Some(group) => format!("{group}'s handle is now {handle}."),
+            None => format!("Your handle is now {handle}."),
+        }));
     }
     if name == "widgets_show" {
         let out = mcp_apps::call(name, &Value::Object(input)).unwrap_or_default();
