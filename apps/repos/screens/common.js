@@ -90,7 +90,7 @@ function repoTabs(d, on) {
     <nav class="tabs" aria-label="${esc(d.repo)}">
       ${tab("code", "repo", "code", "Code")}
       ${tab("issues", "issues", "record", "Issues", d.open_issues ? `<span class="counter">${d.open_issues.toLocaleString()}</span>` : "")}
-      ${d.yours ? tab("settings", "settings", "gear", "Settings") : ""}
+      ${d.yours ? tab("settings", "repo_settings", "gear", "Settings") : ""}
     </nav>
   </div>`;
 }

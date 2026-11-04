@@ -41,7 +41,7 @@ function head(d) {
   const clone = `git clone ${d.clone || address(d.repo)}`;
   const row = (screen, icon, title, note = "") => `<a class="row plain" onclick="${go(screen, { repo: d.repo })}">${one.icon(icon, "row-icon")}<div class="main"><div class="title"><span>${title}</span><span class="when">${note}</span></div></div><div class="chev">›</div></a>`;
   // On phones, the GitHub app's rows for what wide windows have as tabs.
-  const rows = d.deleted ? "" : `<div class="list repo-links phone-only">${row("issues", "record", "Issues", d.open_issues ? d.open_issues.toLocaleString() : "")}${d.yours ? row("settings", "gear", "Settings") : ""}</div>`;
+  const rows = d.deleted ? "" : `<div class="list repo-links phone-only">${row("issues", "record", "Issues", d.open_issues ? d.open_issues.toLocaleString() : "")}${d.yours ? row("repo_settings", "gear", "Settings") : ""}</div>`;
   const box = d.deleted ? "" : `<div class="clone"><code>${esc(clone)}</code>${one.copyButton(clone)}</div>${d.clone ? "" : `<p class="clone-where">${where}</p>`}`;
   return `${d.deleted ? "" : repoTabs(d, "code")}<div class="repo-head">
       <div class="repo-title${d.deleted ? "" : " phone-only"}"><span class="repo-icon">${one.icon("book")}</span><div>

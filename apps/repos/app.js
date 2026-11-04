@@ -24,7 +24,7 @@ import collaboratorsScreen from "./screens/collaborators.html" with { type: "tex
 import issuesScreen from "./screens/issues.html" with { type: "text" };
 import issueScreen from "./screens/issue.html" with { type: "text" };
 import labelsScreen from "./screens/labels.html" with { type: "text" };
-import settingsScreen from "./screens/settings.html" with { type: "text" };
+import repoSettingsScreen from "./screens/repo-settings.html" with { type: "text" };
 
 /// A screen: Repos' styles and shared script, then its own HTML.
 const page = (title, html) => ({ title, html: `<style>${css}</style><script>${common}</script>${html}` });
@@ -460,7 +460,7 @@ export default {
     issues: page("Issues", issuesScreen),
     issue: page("Issue", issueScreen),
     labels: page("Labels", labelsScreen),
-    settings: page("Settings", settingsScreen),
+    repo_settings: page("Settings", repoSettingsScreen),
   },
 
   widgets: {
