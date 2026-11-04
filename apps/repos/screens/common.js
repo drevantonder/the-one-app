@@ -9,10 +9,12 @@ const wide = () => matchMedia("(min-width: 700px)").matches;
 const go = (screen, params) => esc(`one.open(${JSON.stringify(screen)}, ${JSON.stringify(params)})`);
 // The ref to keep using: the branch if there is one, else the commit.
 const refOf = (d) => d.branch || d.sha;
-// Where git reaches a repo: the node on the computer git runs on, so only on a computer that's one of your devices.
-// Pushes don't go through your One App's address, so on a phone or in a browser this says where to run it.
-const address = (repo) => `${one.config?.api || "http://localhost"}/repos/${repo}.git`;
-const where = "On a computer that’s one of your devices";
+// Where git reaches a repo, the same on every computer: <address>/repos/<repo>.git, once `based` has it. Git goes
+// through the CLI there, so on a phone or in a browser this says where to run it.
+let base = "<address>/repos/";
+const based = one.call("_address").then((b) => b && (base = b), () => {});
+const address = (repo) => `${base}${repo}.git`;
+const where = `On any computer where you’ve run ${one.config?.cli || "one"} sign-in`;
 const plural = (n, one_, many) => `${n.toLocaleString()} ${n === 1 ? one_ : many}`;
 const avatar = (c, cls = "") => `<span class="who-avatar ${cls}">${one.avatar(c.email || c.author, c.author)}</span>`;
 one.haptics();

@@ -47,7 +47,7 @@ document.getElementById("page").addEventListener("click", (e) => {
     .finally(() => (restoring.delete(name), one.render("#page", list)));
 }, true);
 one.search("#find", { placeholder: "Find a repo", onSearch: (q) => ((query = q), one.render("#page", list)) });
-const draw = () => one.render("#page", async () => ((repos = await one.call("list")), list()), { loading: "Loading repos" });
+const draw = () => one.render("#page", async () => (([repos] = await Promise.all([one.call("list"), based])), list()), { loading: "Loading repos" });
 one.on("changed", draw);
 draw();
 </script>

@@ -104,9 +104,9 @@ const asWriter = (ctx) => ({
   groups: Object.fromEntries(ctx.groups.map((g) => [g.id.slice(6), g.role])),
 });
 
-/// Where git reaches a repo on this computer, http://localhost:<port>/repos/<repo>.git; null where there's no computer
-/// (the serverless node).
-const address = (ctx, repo) => (ctx.port ? `http://localhost:${ctx.port}/repos/${repo}.git` : null);
+/// Where git reaches a repo, the same on every computer: <the install's address>/repos/<repo>.git; null on a node from
+/// before it was given the address.
+const address = (ctx, repo) => (ctx.address ? `${ctx.address}/repos/${repo}.git` : null);
 
 export default {
   name: "repos",
@@ -116,7 +116,7 @@ export default {
   color: "#5856d6",
   advanced: true,
   description: "Git hosting for you and your agents: clone, push and suggest changes",
-  instructions: `Repos is git hosting for the person and their agents. On any of their computers, \`git clone http://localhost:<port>/repos/<repo>.git\` (the address its page shows), \`git push\` and \`git fetch\` work as with any git host; pushing to a name that isn't a repo yet makes it, yours. Only a repo's owner pushes to it: to suggest changes, fork it (repos fork), push to your fork, and tell its owner, who fetches from it.`,
+  instructions: `Repos is git hosting for the person and their agents. A repo's address is \`<their One App's address>/repos/<repo>.git\` (repos_get gives it, and its page shows it), the same on every computer: \`git clone\`, \`git push\` and \`git fetch\` work with it as with any git host on any computer where the CLI is signed in (its sign-in), with or without a node there; pushing to a name that isn't a repo yet makes it, yours. Only a repo's owner pushes to it: to suggest changes, fork it (repos fork), push to your fork, and tell its owner, who fetches from it.`,
 
   schema: {
     global: [`
@@ -151,7 +151,7 @@ export default {
     },
     get: {
       reads: true,
-      description: "A repo: its address for git clone and push on this computer, its owner, its branches with their heads, its forks, its last 30 pushes, and the packs that hold its objects, oldest first.",
+      description: "A repo: its address for git clone and push, the same on every computer, its owner, its branches with their heads, its forks, its last 30 pushes, and the packs that hold its objects, oldest first.",
       input: { type: "object", required: ["repo"], properties: { repo: REPO } },
       async run(ctx, { repo }) {
         const g = global(ctx);
@@ -283,6 +283,12 @@ export default {
         g.exec(`update repos set "from" = null where "from" = ?`, [repo]);
         return `Erased ${repo}.`;
       },
+    },
+    _address: {
+      reads: true,
+      description: "Where git reaches repos, for the screens: <address>/repos/, or null on a node from before it had the address.",
+      input: { type: "object", properties: {} },
+      run: (ctx) => (ctx.address ? `${ctx.address}/repos/` : null),
     },
     _http: {
       reads: false,

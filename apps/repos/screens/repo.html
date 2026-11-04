@@ -87,7 +87,7 @@ async function restore(button) {
 }
 
 async function show() {
-  const d = await one.call("tree", { repo: P.repo, ref: P.ref, path: at });
+  const [d] = await Promise.all([one.call("tree", { repo: P.repo, ref: P.ref, path: at }), based]);
   if (d.deleted)
     return head(d) + `<div class="deleted-note muted">Deleted ${esc(ago(d.deleted.time, { long: true }))}</div>`
       + (d.yours ? '<button class="button capsule" onclick="restore(this)">Restore</button>' : "") + danger(d);
