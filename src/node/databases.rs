@@ -316,6 +316,17 @@ impl Node {
             Some((keys, bucket)) => (keys, bucket.clone()),
             None => (self.database_keys(scope, app, database, true).await?, self.bucket()?),
         };
+        let schema = match schema {
+            Some(schema) => schema,
+            None => {
+                let kind = match scope {
+                    Scope::Global => "global",
+                    Scope::Group(_) => "group",
+                    Scope::User(_) => "user",
+                };
+                serde_json::from_value(self.0.apps.describe(app).await?["schema"][kind].clone()).unwrap_or_default()
+            }
+        };
         let id = (scope.clone(), format!("{app}/{database}"));
         let cached = self.0.dbs.lock().unwrap().get(&id).cloned();
         if let Some(db) = cached {
@@ -326,6 +337,10 @@ impl Node {
                     open.add_keys(&keys);
                 }
                 if open.keys().last_key_value() == keys.last_key_value() {
+                    // A deploy since it opened may have a schema change it hasn't had.
+                    if open.version()? < schema.len() {
+                        open.migrate(&bucket, &schema).await?;
+                    }
                     drop(open);
                     return Ok(db);
                 }
@@ -353,17 +368,6 @@ impl Node {
                     keys = self.database_keys(scope, app, database, true).await?;
                 }
                 _ => return Err(err),
-            }
-        };
-        let schema = match schema {
-            Some(schema) => schema,
-            None => {
-                let kind = match scope {
-                    Scope::Global => "global",
-                    Scope::Group(_) => "group",
-                    Scope::User(_) => "user",
-                };
-                serde_json::from_value(self.0.apps.describe(app).await?["schema"][kind].clone()).unwrap_or_default()
             }
         };
         db.migrate(&bucket, &schema).await?;
