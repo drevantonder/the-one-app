@@ -80,7 +80,14 @@ func (w *whatsapp) run(ctx context.Context, op string, raw json.RawMessage) (any
 		}
 		return settingsHTML, nil
 	case "accounts":
-		return w.accounts()
+		all, _, err := w.accounts()
+		return all, err
+	case "_accounts": // the app's, to keep the Vault's items: with the devices that answered
+		all, answered, err := w.accounts()
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"accounts": all, "answered": answered}, nil
 	case "status":
 		return w.status()
 	case "sign_in":
@@ -209,12 +216,14 @@ func (w *whatsapp) holding() holding {
 }
 
 // accounts lists every account linked on any of the user's devices that
-// answered, this one's first.
-func (w *whatsapp) accounts() ([]map[string]any, error) {
+// answered, this one's first, and which devices answered: one that didn't
+// may still hold accounts nobody can see right now.
+func (w *whatsapp) accounts() ([]map[string]any, []string, error) {
 	s, err := w.links[0].devices()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
+	answered := []string{s.here}
 	out := []map[string]any{}
 	add := func(h holding, device string) {
 		a := map[string]any{"account": "+" + h.Phone, "ok": h.Connected, "device": device}
@@ -234,12 +243,13 @@ func (w *whatsapp) accounts() ([]map[string]any, error) {
 	for _, name := range s.others {
 		var h holding
 		if err := callOn(w.node, name, "_holder", map[string]any{}, &h); err == nil {
+			answered = append(answered, name)
 			for _, one := range h.all() {
 				add(one, name)
 			}
 		}
 	}
-	return out, nil
+	return out, answered, nil
 }
 
 func (w *whatsapp) status() (string, error) {

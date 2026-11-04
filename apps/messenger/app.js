@@ -23,23 +23,39 @@ async function running(ctx) {
   return (await ctx.devices()).filter((s) => s.online && (s.services || []).includes("messenger")).map((s) => s.name);
 }
 
-// Each account is a Vault item too, so the person's Vault lists it: the browser profile, plain, with no secret, since
-// the sign-in itself stays in the profile. Signing in finishes in the browser after sign_in returns, so listing the
-// accounts makes the items of new ones, and lets go of those no longer linked.
+// Each account is a Vault item too, so the person's Vault lists it: the browser profile and the devices it's on, plain,
+// with no secret, since the sign-in itself stays in the profile. Signing in finishes in the browser after sign_in
+// returns, so listing the accounts asks each device that runs the service, makes the items of new ones, and lets go
+// of those whose every device answered without them. A device that didn't answer leaves its accounts as they were.
 const TYPE = "Messenger account";
 const VAULT = {
-  account: { title: TYPE, type: TYPE, domain: "messenger.com", accounts: true, fields: { profile: { label: "Browser profile" } } },
+  account: { title: TYPE, type: TYPE, domain: "messenger.com", accounts: true, fields: { profile: { label: "Browser profile" }, device: { label: "On" } } },
 };
 
-async function keep(ctx, listed) {
+/// `answers` is each device that answered, by name, with its accounts. A profile on several devices is one item, on
+/// each of them; one kept before items said where stays until a device that answered has it.
+async function keep(ctx, answers) {
   if (!ctx.user) return;
   const items = (await ctx.vault.items()).filter((i) => i.type === TYPE && i.scope === ctx.user.id);
-  for (const a of listed) {
-    if (!items.some((i) => i.fields.profile?.value === a.account)) await ctx.vault.create({ title: a.account, type: TYPE, domain: "messenger.com", hosts: [], same: "profile", fields: { profile: { value: a.account } } });
+  const on = new Map();
+  for (const [device, listed] of answers) for (const a of listed) on.set(a.account, [...(on.get(a.account) || []), device]);
+  for (const [account, where] of on) {
+    const device = where.sort().join(", ");
+    const item = items.find((i) => i.fields.profile?.value === account);
+    if (!item) await ctx.vault.create({ title: account, type: TYPE, domain: "messenger.com", hosts: [], same: "profile", fields: { profile: { value: account }, device: { value: device } } });
+    else if (item.fields.device?.value !== device) ctx.vault.update(item.id, { fields: { device: { value: device } } });
   }
+  const answered = answers.map(([device]) => device);
   for (const item of items) {
-    if (!listed.some((a) => a.account === item.fields.profile?.value)) ctx.vault.release(item.id);
+    const was = String(item.fields.device?.value || "").split(", ").filter(Boolean);
+    if (was.length && was.every((d) => answered.includes(d)) && !on.has(item.fields.profile?.value)) ctx.vault.release(item.id);
   }
+}
+
+/// Each of `devices`' accounts, from those that answered.
+async function answers(ctx, devices) {
+  const got = await Promise.all(devices.map((device) => ctx.services.messenger.accounts({}, { device }).then((listed) => Array.isArray(listed) ? [device, listed] : null, () => null)));
+  return got.filter(Boolean);
 }
 
 const ACCOUNT = { type: "string", description: "which account: the browser profile's name, as messenger_accounts lists them; default the first" };
@@ -65,9 +81,10 @@ export default {
       input: { type: "object", properties: {} },
       // A connector lists no accounts, rather than failing, where no device runs its service; its settings say why.
       async run(ctx, input) {
-        if (!(await running(ctx)).length) return [];
+        const devices = await running(ctx);
+        if (!devices.length) return [];
         const listed = await service(ctx, "accounts", input);
-        await keep(ctx, listed).catch(() => {}); // a call that only reads lists them all the same
+        await answers(ctx, devices).then((a) => keep(ctx, a)).catch(() => {}); // a call that only reads lists them all the same
         return listed;
       },
     },
@@ -116,7 +133,7 @@ export default {
       input: { type: "object", required: ["account"], properties: { account: { type: "string", description: "the browser profile's name, as messenger_accounts lists them" } } },
       async run(ctx, input) {
         const out = await service(ctx, "sign_out", input);
-        await keep(ctx, await service(ctx, "accounts", {}));
+        await keep(ctx, await answers(ctx, await running(ctx)));
         return out;
       },
     },

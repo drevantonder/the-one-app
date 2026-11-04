@@ -33,15 +33,16 @@ async function running(ctx) {
 
 // Each account is a Vault item too, so the person's Vault lists it: its number and the device it's linked on, plain,
 // with no secret, since the link itself stays in the service on that device. Linking finishes on the phone after
-// sign_in returns, so listing the accounts makes the items of new ones, and lets go of those whose device, online,
-// no longer has them.
+// sign_in returns, so listing the accounts makes the items of new ones, and lets go of those whose every device
+// answered without them. A device that didn't answer leaves its accounts as they were.
 const TYPE = "WhatsApp account";
 const VAULT = {
   account: { title: TYPE, type: TYPE, domain: "whatsapp.com", accounts: true, fields: { phone: { label: "Number" }, device: { label: "Linked on" } } },
 };
 
-// An account linked on several devices is one item, linked on each of them.
-async function keep(ctx, accounts, devices) {
+// An account linked on several devices is one item, linked on each of them. `answered` is the devices whose answer
+// was complete; an item is let go only if every device it says it's linked on is one of them.
+async function keep(ctx, accounts, answered) {
   if (!ctx.user) return;
   const items = (await ctx.vault.items()).filter((i) => i.type === TYPE && i.scope === ctx.user.id);
   const on = new Map();
@@ -53,8 +54,18 @@ async function keep(ctx, accounts, devices) {
     else if (item.fields.device?.value !== a.device) ctx.vault.update(item.id, { fields: { device: { value: a.device } } });
   }
   for (const item of items) {
-    if (String(item.fields.device?.value || "").split(", ").every((d) => devices.includes(d)) && !listed.some((a) => a.account === item.fields.phone?.value)) ctx.vault.release(item.id);
+    if (String(item.fields.device?.value || "").split(", ").every((d) => answered.includes(d)) && !listed.some((a) => a.account === item.fields.phone?.value)) ctx.vault.release(item.id);
   }
+}
+
+/// The accounts, keeping their items as they go. The service says which devices answered; one built before it did
+/// gives only the list, so nothing is let go.
+async function listAndKeep(ctx, input) {
+  const got = await service(ctx, "_accounts", input).catch(() => null);
+  const complete = Array.isArray(got?.accounts) && Array.isArray(got?.answered);
+  const listed = complete ? got.accounts : await service(ctx, "accounts", input);
+  await keep(ctx, listed, complete ? got.answered : []).catch(() => {}); // a call that only reads lists them all the same
+  return listed;
 }
 
 export default {
@@ -77,11 +88,8 @@ export default {
       input: { type: "object", properties: {} },
       // A connector lists no accounts, rather than failing, where no device runs its service; its settings say why.
       async run(ctx, input) {
-        const devices = await running(ctx);
-        if (!devices.length) return [];
-        const listed = await service(ctx, "accounts", input);
-        await keep(ctx, listed, devices).catch(() => {}); // a call that only reads lists them all the same
-        return listed;
+        if (!(await running(ctx)).length) return [];
+        return listAndKeep(ctx, input);
       },
     },
     status: {
@@ -169,8 +177,7 @@ export default {
       input: { type: "object", properties: { account: { type: "string", description: "the account's number, as whatsapp_accounts lists them; needed when several are linked here" }, device: { type: "string", description: "the device it's linked on, as whatsapp_accounts lists it: for an account linked on several" } } },
       async run(ctx, input) {
         const out = await service(ctx, "sign_out", input);
-        const devices = await running(ctx);
-        await keep(ctx, await service(ctx, "accounts", {}), devices);
+        await listAndKeep(ctx, {});
         return out;
       },
     },
