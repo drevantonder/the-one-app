@@ -1,7 +1,7 @@
 //! A node: this device's install (a white label holds one), its replica and views, its socket to the relay, and where
 //! calls run.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -448,6 +448,8 @@ pub struct Inner {
     broken: Mutex<BTreeMap<String, String>>,
     /// The keys of the apps this device keeps running for their people.
     standing: standing::Standing,
+    /// The scopes owing a new epoch at the last look (`Node::start_owed_epochs`), and those it's starting now.
+    owed: Mutex<(BTreeSet<Scope>, BTreeSet<Scope>)>,
     /// This device's iroh endpoint.
     net: net::Net,
     /// How many times its deploys were settled (`settle`), the first once its apps are loaded.
@@ -575,6 +577,7 @@ impl Node {
             sessions: Default::default(),
             broken: Default::default(),
             standing: Default::default(),
+            owed: Default::default(),
             net: Default::default(),
             settled: tokio::sync::watch::channel(0).0,
             settling: tokio::sync::Mutex::new(()),

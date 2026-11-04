@@ -670,6 +670,40 @@ impl Node {
         (renewed, left)
     }
 
+    /// Starts, in the background, each new epoch a scope owes (`Members::owed`) that this device's person starts epochs
+    /// of: one a removal or a stopped grant asked for that the device writing it didn't make (it failed, or went off
+    /// first). Only once a scope has owed one at two looks in a row, so a removal's own new epoch goes first.
+    pub(super) fn start_owed_epochs(&self) {
+        let Ok(me) = self.user() else { return };
+        let owed: BTreeSet<Scope> = self
+            .with(|i| {
+                let m = &i.r.members;
+                if m.client(&self.0.id).is_none_or(|c| c.user != me) {
+                    return Ok(BTreeSet::new());
+                }
+                Ok(m.owed.iter().filter(|s| starts_epochs(m, &me, s)).cloned().collect())
+            })
+            .unwrap_or_default();
+        let due: Vec<Scope> = {
+            let mut held = self.0.owed.lock().unwrap();
+            let (seen, starting) = &mut *held;
+            let due = owed.intersection(seen).filter(|s| !starting.contains(*s)).cloned().collect::<Vec<_>>();
+            starting.extend(due.iter().cloned());
+            *seen = owed;
+            due
+        };
+        for scope in due {
+            let (node, me) = (self.clone(), Caller { key: self.0.id, user: me.clone(), agent: None, token: None });
+            tokio::spawn(async move {
+                match node.new_epoch(&me, &scope).await {
+                    Ok(n) => tracing::info!("started {scope}'s epoch {n}, which a removal asked for"),
+                    Err(err) => tracing::warn!("starting {scope}'s new keys, which a removal asked for: {err:#}"),
+                }
+                node.0.owed.lock().unwrap().1.remove(&scope);
+            });
+        }
+    }
+
     /// What a person's first device does once it's in, here for a machine (kernel/web/device.js for a browser): where
     /// their own things run besides their own machines, if their devices never said (the install's machines that run
     /// everyone's, chosen without asking), and their own scope's first epoch, if it isn't made.

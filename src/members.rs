@@ -174,6 +174,11 @@ pub struct Members {
     /// Each Vault key's public half, by scope and number: a machine takes a secret key from the bucket as key n only
     /// if it's this one's.
     pub vault_publics: BTreeMap<(Scope, u32), [u8; 32]>,
+    /// Scopes that owe a new epoch: since their newest, someone who held their key lost the right to (a client device
+    /// removed by another, a person removed, a member taken out of a group, a grant stopped, or a granted machine
+    /// removed). Any of the scope's admins' devices starts it (`Node::start_owed_epochs`), so a removal whose own new
+    /// epoch failed, or whose device went off first, still gets one. A device signing itself out owes none.
+    pub owed: BTreeSet<Scope>,
     /// Where each person's own things run besides their own machines, as their latest `runs` said from one of their
     /// own devices: the install's other compute endpoints that run their own scope (`runs_for`).
     pub runs: BTreeMap<String, BTreeSet<Key>>,
@@ -323,6 +328,21 @@ impl Members {
     /// A scope's current epoch: 0 while it has none yet.
     pub fn epoch(&self, scope: &Scope) -> u32 {
         self.epochs.get(scope).map_or(0, |e| e.n)
+    }
+
+    /// That `scope` owes a new epoch, if it has one to follow.
+    fn owe(&mut self, scope: Scope) {
+        if self.epoch(&scope) > 0 {
+            self.owed.insert(scope);
+        }
+    }
+
+    /// The scopes whose keys `keys` held, which their removal makes owe a new epoch: each a client of them opens, but
+    /// `except` (a person's own, which removing them keeps as it is), and each a grant to one of them is in.
+    fn held_by(&self, keys: &[Key], except: Option<&Scope>) -> Vec<Scope> {
+        let opens = |s: &Scope| keys.iter().filter_map(|k| self.machine(k)).any(|d| d.is(Kind::Client) && self.may_use(&d.user, s));
+        let granted = self.grants.keys().filter(|(k, _, _)| keys.contains(k)).map(|(_, s, _)| s.clone());
+        self.scopes().into_iter().filter(opens).chain(granted).filter(|s| Some(s) != except).collect()
     }
 
     /// The key things are sealed to for an endpoint of the install, as it's listed.
@@ -660,7 +680,10 @@ impl Members {
                         cut.insert((d.key, "global".to_string()), first_not(seqs.get(&hex(&d.key)).unwrap_or(&Value::Null))?);
                     }
                     merge(&mut self.cuts, &cut);
+                    let theirs: Vec<Key> = self.machines.values().filter(|d| d.user == user).map(|d| d.key).collect();
+                    let owed = self.held_by(&theirs, Some(&Scope::User(user.clone())));
                     self.users.get_mut(&user).context("no such user")?.removed = true;
+                    owed.into_iter().for_each(|s| self.owe(s));
                 } else {
                     let key = key_of("key")?;
                     ensure!(self.machine(&key).is_some(), "no such key");
@@ -668,7 +691,13 @@ impl Members {
                     // The last of its entries in `global` its remover had seen: those after never count, wherever they sort.
                     ensure!(data.get("seq").is_some(), "a device's removal says the last of its entries its remover had seen (seq)");
                     merge(&mut self.cuts, &BTreeMap::from([((key, "global".to_string()), first_not(&data["seq"])?)]));
+                    // A device signing itself out deletes its own keys, as does a sign-in before on a device signed in
+                    // again (`Node::approve_request`); one removed otherwise may still hold them.
+                    let gone = &self.machines[&key];
+                    let again = gone.device.is_some() && gone.passkey.is_none() && self.clients().any(|c| c.key != key && c.user == gone.user && c.device == gone.device && c.passkey.is_none());
+                    let owed = if author == key || again { Vec::new() } else { self.held_by(&[key], None) };
                     self.machines.get_mut(&key).unwrap().removed = true;
+                    owed.into_iter().for_each(|s| self.owe(s));
                 }
                 self.devices_at = self.devices_at.max(e.time());
             }
@@ -686,6 +715,7 @@ impl Members {
                 ensure!(to.iter().all(|k| self.machine(k).is_some()), "an epoch is sealed only to the install's endpoints");
                 let hash = epoch_hash_of(&data["hash"])?;
                 self.epoch_hashes.insert((scope.clone(), n as u32), hash.clone());
+                self.owed.remove(&scope);
                 self.epochs.insert(scope, Epoch { n: n as u32, to, hash });
             }
             "runs" => {
@@ -708,7 +738,11 @@ impl Members {
                 ensure!(self.grants_in(&w, &scope), "only the scope's person, or its group's admins, grant standing work in it");
                 ensure!(until == 0 || self.machine(&endpoint).is_some(), "no such endpoint");
                 match until {
-                    0 => drop(self.grants.remove(&(endpoint, scope, app))),
+                    0 => {
+                        if self.grants.remove(&(endpoint, scope.clone(), app)).is_some() {
+                            self.owe(scope);
+                        }
+                    }
                     until => drop(self.grants.insert((endpoint, scope, app), Grant { by: w, until, hashes })),
                 }
             }
@@ -756,8 +790,10 @@ impl Members {
                         g.members.insert(user, role);
                     }
                     None => {
-                        g.members.remove(&user);
                         g.invited.remove(&user);
+                        if g.members.remove(&user).is_some() {
+                            self.owe(Scope::Group(group));
+                        }
                     }
                 }
             }
@@ -1566,6 +1602,63 @@ mod tests {
         add(&mut entries, &mut mac, ANDRE, epoch(&Scope::Global, 2, &[mac_id], &"c".repeat(64)));
         assert_eq!(members(&entries).epoch(&Scope::Global), 2, "sealed to those left, it does");
         assert!(members(&entries).scopes().contains(&Scope::User(BOB.into())), "their own scope is kept");
+    }
+
+    #[test]
+    fn a_scope_owes_a_new_epoch_once_someone_holding_its_keys_loses_the_right_until_one_counts() {
+        let recovery = Dev::new(9);
+        let (mut mac, linux, mut bobs, mut entries) = with_bob(&recovery);
+        let (mac_id, bob_id, linux_id) = (mac.id(), bobs.id(), linux.id());
+        let (bob, work) = (Scope::User(BOB.into()), Scope::Group("c000000000000003".into()));
+        let owed = |entries: &[Entry]| members(entries).owed.into_iter().collect::<Vec<_>>();
+        add(&mut entries, &mut bobs, BOB, epoch(&bob, 1, &[bob_id], &H.repeat(64)));
+        add(&mut entries, &mut mac, ANDRE, group("c000000000000003", "Work"));
+        add(&mut entries, &mut mac, ANDRE, epoch(&work, 1, &[mac_id], &H.repeat(64)));
+        add(&mut entries, &mut mac, ANDRE, invite("c000000000000003", BOB, Role::Member));
+        add(&mut entries, &mut bobs, BOB, accept("c000000000000003"));
+        let (mut laptop, tablet) = (Dev::new(5), Dev::new(6));
+        add(&mut entries, &mut bobs, BOB, device(&laptop.endpoint(), BOB, "laptop", &[Kind::Client], None));
+        add(&mut entries, &mut bobs, BOB, device(&tablet.endpoint(), BOB, "tablet", &[Kind::Client], None));
+        assert!(owed(&entries).is_empty());
+        // Signing itself out, a device deletes its own keys: nothing's owed.
+        let laptop_id = laptop.id();
+        add(&mut entries, &mut laptop, BOB, remove_device(&laptop_id, Some(0)));
+        assert!(owed(&entries).is_empty() && members(&entries).machine(&laptop_id).is_none(), "signing out owes nothing");
+        // Nor does a sign-in before on a device signed in again, which goes as signing out would have taken it.
+        let on = |d: &Dev| {
+            let mut c = device(&d.endpoint(), BOB, "phone app", &[Kind::Client], None);
+            c.data["device"] = json!(hex(&[8; 32]));
+            c
+        };
+        let (before, again) = (Dev::new(10), Dev::new(11));
+        add(&mut entries, &mut bobs, BOB, on(&before));
+        add(&mut entries, &mut bobs, BOB, on(&again));
+        add(&mut entries, &mut bobs, BOB, remove_device(&before.id(), None));
+        assert!(owed(&entries).is_empty() && members(&entries).machine(&before.id()).is_none(), "signing in again owes nothing");
+        // Taken out by another, it may still hold every key it opened, until each scope's next epoch counts.
+        add(&mut entries, &mut mac, ANDRE, remove_device(&tablet.id(), None));
+        assert_eq!(owed(&entries), vec![Scope::Global, work.clone(), bob.clone()]);
+        add(&mut entries, &mut bobs, BOB, epoch(&bob, 2, &[bob_id], &H.repeat(64)));
+        add(&mut entries, &mut mac, ANDRE, epoch(&Scope::Global, 2, &[tablet.id()], &H.repeat(64)));
+        assert_eq!(owed(&entries), vec![Scope::Global, work.clone()], "one sealed to the device taken out doesn't count");
+        add(&mut entries, &mut mac, ANDRE, epoch(&Scope::Global, 2, &[mac_id, bob_id], &H.repeat(64)));
+        add(&mut entries, &mut mac, ANDRE, epoch(&work, 2, &[mac_id, bob_id], &H.repeat(64)));
+        assert!(owed(&entries).is_empty());
+        // A grant stopped, and a machine with one taken out.
+        add(&mut entries, &mut bobs, BOB, grant(&linux_id, &bob, "notes", 1, &BTreeMap::new()));
+        add(&mut entries, &mut bobs, BOB, grant(&linux_id, &bob, "notes", 0, &BTreeMap::new()));
+        assert_eq!(owed(&entries), vec![bob.clone()]);
+        add(&mut entries, &mut bobs, BOB, epoch(&bob, 3, &[bob_id], &H.repeat(64)));
+        add(&mut entries, &mut bobs, BOB, grant(&linux_id, &bob, "notes", 1, &BTreeMap::new()));
+        add(&mut entries, &mut mac, ANDRE, remove_device(&linux_id, None));
+        assert_eq!(owed(&entries), vec![bob.clone()], "a machine holds no epoch, only the keys of what it was granted");
+        add(&mut entries, &mut bobs, BOB, epoch(&bob, 4, &[bob_id], &H.repeat(64)));
+        // Taken out of a group, then out of the install: their own scope is kept as it is.
+        add(&mut entries, &mut mac, ANDRE, member("c000000000000003", BOB, None));
+        assert_eq!(owed(&entries), vec![work.clone()]);
+        add(&mut entries, &mut mac, ANDRE, epoch(&work, 3, &[mac_id], &H.repeat(64)));
+        add(&mut entries, &mut mac, ANDRE, remove_user(BOB, &[(bob_id, None)].into()));
+        assert_eq!(owed(&entries), vec![Scope::Global]);
     }
 
     #[test]
