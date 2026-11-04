@@ -280,7 +280,8 @@ export function tryPage(look) {
 }
 
 /// Joining with an invite link, its secret in the fragment, which goes only to auth's sign-up: making a first passkey,
-/// or signing in with Google (`google`) as the email it's for, or on a try install (`tried`), with nothing to make.
+/// or signing in with Google (`google`) as the email it's for, or on a try install (`tried`), with nothing to make. With
+/// `?code=`, the CLI's (`sign-in --invite`), it goes on to sign that in, as the person who just joined.
 export function invitePage(look) {
   const { name, yours, tried, google } = look;
   const body = `
@@ -305,6 +306,7 @@ export function invitePage(look) {
   const script = `
     const secret = location.hash.slice(1);
     const tried = ${tried ? "true" : "false"}, google = ${google ? "true" : "false"};
+    const code = new URLSearchParams(location.search).get("code");
     const button = document.getElementById("go");
     // Google's answer comes back here with an error if it didn't sign them up.
     if (/(^|&)error=/.test(location.search.slice(1))) say("That Google account isn't the one this invite is for.");
@@ -329,12 +331,13 @@ export function invitePage(look) {
         await out;
         if (google) {
           await api("/invite/google", { secret });
-          const back = "/invite#" + secret;
-          location.href = (await api("/api/auth/sign-in/social", { provider: "google", callbackURL: "/", errorCallbackURL: back })).url;
+          const back = "/invite" + location.search + "#" + secret;
+          location.href = (await api("/api/auth/sign-in/social", { provider: "google", callbackURL: code ? "/sign-in/code?c=" + encodeURIComponent(code) : "/", errorCallbackURL: back })).url;
           return;
         }
         if (tried) await api("/api/auth/try/join", { secret });
         else await newPasskey(secret);
+        if (code) return void (location.href = "/sign-in/code?c=" + encodeURIComponent(code));
         history.replaceState(null, "", "/invite");
         document.getElementById("join").hidden = true;
         document.getElementById("done").hidden = false;

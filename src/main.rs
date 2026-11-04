@@ -25,6 +25,8 @@ fn every_command() -> String {
                                        your devices; {CLI} and {CLI} mcp here then act as you. Where {NAME} doesn't
                                        run, this computer becomes one of your devices, once you approve its next
                                        code too, and asks your devices for everything
+  {CLI} sign-in --invite <link>        join with the invite link someone sent you, on your first computer: you make
+                                       your passkey in a browser, and they approve this computer's code
   {CLI} sign-out                       sign this machine out, and take it out of your devices if it's one
   {CLI} create <name> --as <your name> [--user <id>]
                                        create an install, with you as its first admin (--user: who you were in one
@@ -1100,8 +1102,16 @@ fn to_node<B>(r: ureq::RequestBuilder<B>) -> ureq::RequestBuilder<B> {
 
 /// `sign-in`: this machine signs in to the install's kernel, as the person who approves its code with their passkey.
 fn sign_in(flags: &Map<String, Value>) -> Result<()> {
-    let address = match flags.get("address").and_then(Value::as_str) {
-        Some(a) => a.to_string(),
+    // Someone new's invite: its link (`<address>/invite#<secret>`), or its secret with --address.
+    let invite = flags.get("invite").and_then(Value::as_str).map(|i| match i.split_once("/invite#") {
+        Some((address, secret)) => (Some(address.to_string()), secret.to_string()),
+        None => (None, i.trim_start_matches('#').to_string()),
+    });
+    if invite.is_some() && client_device::node_here() {
+        bail!("{NAME} runs on this computer, so it joins as a device, not with an invite: {CLI} join <pairing code>, from {CLI} pair on a device in {YOURS}");
+    }
+    let address = match flags.get("address").and_then(Value::as_str).map(str::to_string).or_else(|| invite.as_ref().and_then(|(a, _)| a.clone())) {
+        Some(a) => a,
         // With no node here, it's the address it was signed in at before, or the one given.
         None if !client_device::node_here() => one::sign_in::kept().map(|k| k.address).with_context(|| format!("{NAME} isn't running on this computer, so it signs in as one of your devices: give {YOURS}'s address, {CLI} sign-in --address https://…"))?,
         None => {
@@ -1111,8 +1121,21 @@ fn sign_in(flags: &Map<String, Value>) -> Result<()> {
     };
     let started = one::sign_in::start(&address)?;
     let with = if one::config::SIGN_IN == "google" { "Google" } else { "your passkey" };
-    println!("To sign in this machine, open this link on any of your devices and sign in with {with}:\n\n  {}\n\nor go to {}/sign-in/code and type {}.", started.url, address.trim_end_matches('/'), started.code);
-    if one::sign_in::has_screen() && one::sign_in::open(&started.url) {
+    // Someone new joins first, in a browser, which then signs this in as them.
+    let link = match &invite {
+        Some((_, secret)) => {
+            let code = started.url.rsplit_once("c=").map_or("", |(_, c)| c);
+            let link = format!("{}/invite?code={code}#{secret}", address.trim_end_matches('/'));
+            let how = if one::config::SIGN_IN == "google" { "sign in with the Google account it's for" } else { "make your passkey" };
+            println!("To join, open this link in a browser on any device, phone or computer, and {how}:\n\n  {link}\n");
+            link
+        }
+        None => {
+            println!("To sign in this machine, open this link on any of your devices and sign in with {with}:\n\n  {}\n\nor go to {}/sign-in/code and type {}.", started.url, address.trim_end_matches('/'), started.code);
+            started.url.clone()
+        }
+    };
+    if one::sign_in::has_screen() && one::sign_in::open(&link) {
         println!("It's open in your browser here.");
     }
     one::sign_in::finish(started)?;
@@ -1125,7 +1148,7 @@ fn sign_in(flags: &Map<String, Value>) -> Result<()> {
         println!("Signed in as {me}. {CLI} and {CLI} mcp on this machine act as you until {CLI} sign-out.");
         return Ok(());
     }
-    client_device::join(&address)?;
+    client_device::join(&address, invite.as_ref().map(|(_, secret)| secret.as_str()))?;
     let state = get("/v1/state")?;
     let me = state["user"]["name"].as_str().unwrap_or("you");
     println!("\nSigned in as {me}: {} is one of your devices now. {CLI} and {CLI} mcp here act as you, on your devices, until {CLI} sign-out.", one::sign_in::hostname());

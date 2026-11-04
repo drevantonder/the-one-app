@@ -84,7 +84,7 @@ fn needs_node(path: &str) -> String {
 
 /// Makes this computer one of its person's devices, at the install at `address`, where it's signed in: at once if it
 /// already is, else it asks, shows its code, and waits for a device of theirs to approve it.
-pub fn join(address: &str) -> Result<()> {
+pub fn join(address: &str, invite: Option<&str>) -> Result<()> {
     let address = address.trim_end_matches('/');
     // One kept for another install starts over, with a new key.
     if std::fs::read_to_string(dir().join("address")).ok().as_deref().map(str::trim) != Some(address) {
@@ -103,14 +103,19 @@ pub fn join(address: &str) -> Result<()> {
     let token = one::sign_in::token()?.with_context(|| format!("this computer is signed out: {CLI} sign-in"))?;
     let d = device.clone();
     let name = one::sign_in::hostname();
-    run(move || async move { d.ask(&token, &name, None).await })?;
+    let invited = invite.map(str::to_string);
+    run(move || async move { d.ask(&token, &name, invited.as_deref()).await })?;
     let code = device.code();
     let link = format!("{address}/approve#{}", code.replace(' ', ""));
-    println!("\nNow approve this computer as one of your devices: on another of them, in Settings › Devices, Approve, type\n\n  {code}\n\nor open {link} there.");
-    if one::sign_in::has_screen() && one::sign_in::open(&link) {
+    if invite.is_some() {
+        println!("\nWhoever invited you approves this computer: show them this code, which they type in Settings › Devices, Approve\n\n  {code}");
+    } else {
+        println!("\nNow approve this computer as one of your devices: on another of them, in Settings › Devices, Approve, type\n\n  {code}\n\nor open {link} there.");
+    }
+    if invite.is_none() && one::sign_in::has_screen() && one::sign_in::open(&link) {
         println!("It's open in your browser here, to approve it there if that browser is one of your devices.");
     }
-    println!("\nWaiting for you to approve it…");
+    println!("\nWaiting for {} to approve it…", if invite.is_some() { "them" } else { "you" });
     loop {
         std::thread::sleep(Duration::from_secs(2));
         let token = one::sign_in::token()?.with_context(|| format!("this computer was signed out: {CLI} sign-in"))?;
