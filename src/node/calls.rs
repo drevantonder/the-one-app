@@ -956,6 +956,11 @@ impl Node {
     }
 }
 
+/// The install's address, without a last `/`, if it has one yet.
+pub(super) fn address(m: &Members) -> Option<String> {
+    m.settings.get("address").map(|a| a.trim_end_matches('/').to_string())
+}
+
 /// Whether a call is one another node passed on: it runs only on what it was handed, never as this device's own person.
 fn passed(me: &Caller) -> bool {
     me.token.as_deref().is_some_and(sessions::passed)
@@ -998,6 +1003,6 @@ fn prepare(node: &Node, i: &Install, req: &CallRequest, me: &Caller, title: &str
     if let Some(s) = scopes.iter().find(|s| !i.r.holds(s)) {
         return Ok(Err(format!("it can't open {} yet", scope_name(i, &s.to_string()))));
     }
-    let ctx = Context { me: node_me(node, m, me), now: now_ms(), scopes: handles(m, &scopes, &me.user), read_only: false, token: String::new(), from: None };
+    let ctx = Context { me: node_me(node, m, me), now: now_ms(), scopes: handles(m, &scopes, &me.user), read_only: false, token: String::new(), from: None, address: address(m) };
     Ok(Ok((ctx, scopes)))
 }

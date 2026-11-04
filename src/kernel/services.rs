@@ -596,9 +596,10 @@ impl Settings {
             text = text.replacen("<script type=\"module\"", &format!("{preload}<script type=\"module\""), 1);
             let asked = names.iter().filter(|(path, _)| ["frame.html", "icons.json", "net-worker.js"].contains(&path.as_str()) || path.starts_with("screens/")).map(|(path, name)| format!("{path}={}", &name[name.len() - 16..])).collect::<Vec<_>>().join(" ");
             let label = format!(
-                "<title>{}</title>\n<meta name=\"application-name\" content=\"{}\">\n<meta name=\"one-files\" content=\"{asked}\">",
+                "<title>{}</title>\n<meta name=\"application-name\" content=\"{}\">\n<meta name=\"one-cli\" content=\"{}\">\n<meta name=\"one-files\" content=\"{asked}\">",
                 attr(crate::config::NAME),
-                attr(crate::config::NAME)
+                attr(crate::config::NAME),
+                attr(crate::config::CLI)
             );
             *page = text.replacen("<title></title>", &label, 1).into_bytes();
         }

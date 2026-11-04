@@ -500,8 +500,12 @@ impl Node {
                     );
                 }
                 let fields: serde_json::Map<String, Value> = d["fields"].as_object().into_iter().flatten().map(|(n, f)| (n.clone(), json!({ "secret": f["secret"] == true }))).collect();
-                // Where to find it, as the app says, when the asker gave no reason of their own.
-                let why = if why.is_empty() { d["why"].as_str().unwrap_or("") } else { why };
+                // Where to find it, as the app says, when the asker gave no reason of their own; `{address}` in it is
+                // the install's.
+                let why = match why.is_empty() {
+                    true => d["why"].as_str().unwrap_or("").replace("{address}", &self.address().unwrap_or_default()),
+                    false => why.to_string(),
+                };
                 json!({ "title": d["title"], "fields": fields, "hosts": d["hosts"], "need": need, "why": why })
             }
             _ => json!({ "title": ask["title"], "fields": ask["fields"], "hosts": ask["hosts"], "need": need }),

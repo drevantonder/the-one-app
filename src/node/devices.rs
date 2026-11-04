@@ -217,7 +217,7 @@ fn code_of(typed: &str) -> String {
 impl Node {
     /// The install's address, where its kernel is.
     pub(super) fn address(&self) -> Result<String> {
-        self.with(|i| Ok(i.r.members.settings.get("address").map(|a| a.trim_end_matches('/').to_string())))?.context("your One App has no address yet, so it has no sign-ins or requests to join")
+        self.with(|i| Ok(super::calls::address(&i.r.members)))?.context("your One App has no address yet, so it has no sign-ins or requests to join")
     }
 
     /// Asks the install's auth service something as this device, signed with its key (`one/auth`): a POST's body is

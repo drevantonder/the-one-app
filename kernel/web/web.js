@@ -304,7 +304,7 @@ window.__one = {};
   const me = () => store.state?.user;
   const install = () => store.state?.install;
   // The white label's name, as the gateway's index.html says it, until the install's state does.
-  const whiteLabel = { name: document.querySelector('meta[name="application-name"]')?.content || "" };
+  const whiteLabel = { name: document.querySelector('meta[name="application-name"]')?.content || "", cli: document.querySelector('meta[name="one-cli"]')?.content || "" };
   const config = () => store.state?.config || whiteLabel;
   const app = (name) => store.apps.find((a) => a.name === name);
   const label = (a) => a?.title || a?.name || "";
@@ -1066,6 +1066,16 @@ window.__one = {};
     };
   }
 
+  /// Back from a sign-in at another site, in a browser that isn't signed in here: on to the app, which finishes it.
+  function showBack(app, screen, params) {
+    const { name, cli } = config();
+    const link = `${cli}://open?${new URLSearchParams({ app, screen, params, scope: "user" })}`;
+    document.title = name;
+    root.innerHTML = `<div class="welcome"><img class="welcome-mark" src="/logo.png" alt=""><h1>${esc(name)}</h1>` +
+      `<a class="button primary big" href="${esc(link)}">Open ${esc(name)}</a></div>`;
+    location.href = link;
+  }
+
   function showUnreachable(text) {
     root.innerHTML = message("Can’t Reach Your Devices", text, `<div class="unavailable-text">Trying again…</div>`);
   }
@@ -1142,6 +1152,16 @@ window.__one = {};
     schemed(document, appearance());
     // A new device's QR: Approve, with its code.
     if (location.pathname === "/approve") history.replaceState(null, "", href(own("devices", { approve: location.hash.slice(1) })));
+    // `/back?state=<app>/<screen>&…`: where a sign-in at another site sends the person back (an app's `ctx.address`).
+    // It opens that app's screen with the whole address as `params.back`, which finishes it. A browser that isn't
+    // signed in here passes it on to the app on this phone or computer, which opens the same screen from `<cli>://open`.
+    if (location.pathname === "/back") {
+      const [, app, screen = "main"] = /^([a-z0-9][a-z0-9-]*)(?:\/([a-z0-9_-]+))?$/.exec(new URLSearchParams(location.search).get("state") || "") || [];
+      const params = JSON.stringify({ back: location.href });
+      if (!app) history.replaceState(null, "", "/");
+      else if (auth.kept()) history.replaceState(null, "", href({ kind: "screen", app, screen, params }));
+      else return showBack(app, screen, params);
+    }
     if (location.pathname === "/callback") {
       try {
         history.replaceState(null, "", await auth.finish());

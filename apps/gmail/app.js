@@ -9,8 +9,12 @@ const API = "https://gmail.googleapis.com/gmail/v1/users/me/";
 const UPLOAD = "https://gmail.googleapis.com/upload/gmail/v1/users/me/";
 const APP = "gmail";
 const TITLE = "Gmail";
-// Where Google sends the browser back: the node on the person's device, at the port this install's nodes answer on.
-const redirect = (ctx) => `http://127.0.0.1:${ctx.port}/hooks/${APP}/oauth`;
+// Where Google sends the browser back: the install's address, which opens this app's settings screen to finish. The
+// Google sign-in (a Web application client) lists it as an authorized redirect URI.
+function redirect(ctx) {
+  if (!ctx.address) throw new Error("This device is out of date: update it, then sign in again");
+  return `${ctx.address}/back`;
+}
 // How much of a body read and thread give; the rest is cut.
 const LONGEST = 20000;
 const MOST_FILES = 10;
@@ -38,13 +42,13 @@ const wrapped = (bytes) => toB64(bytes).replace(/.{76}(?=.)/g, "$&\r\n");
 // The Vault keeps what signing in needs, the same for every Google app: one "Google sign-in" item, the OAuth client
 // (its id, and its secret), and a "Google account" item for each account (its address, its refresh token and the
 // scopes it allowed), sent only to Google's token address. Signing in to an account another Google app already uses
-// adds this app's scopes to it (incremental consent). The browser ends on a 127.0.0.1 address the person pastes
-// back; the verifier waits for it in this app's own data.
+// adds this app's scopes to it (incremental consent). Google sends the browser back to the install's address,
+// which opens this app's settings screen to finish; the verifier waits for it in this app's own data.
 
 const VAULT = {
   client: {
     title: "Google sign-in", type: "Google sign-in", domain: "google.com", hosts: [OAUTH],
-    why: "Make one in Google Cloud Console: APIs & Services › Credentials › Create OAuth client ID, type Desktop app. It's set once, for everyone's Google apps.",
+    why: "Make one in Google Cloud Console: APIs & Services › Credentials › Create OAuth client ID, type Web application. It's set once, for everyone's Google apps. Its authorized redirect URI: {address}/back",
     // Set once, by an admin in Everyone's Vault, for every app that declares a shared Google sign-in: anyone else is
     // told which admin to ask.
     shared: true,
@@ -119,7 +123,7 @@ async function startSignIn(ctx, hint) {
   ctx.user.exec("insert into pending values (?, ?)", [verifier, client.id ?? null]);
   const q = new URLSearchParams({
     client_id: client.fields.client_id.value, redirect_uri: redirect(ctx), response_type: "code", scope: SCOPES, access_type: "offline",
-    prompt: "consent", include_granted_scopes: "true", code_challenge: challenge, code_challenge_method: "S256", ...(hint ? { login_hint: hint } : {}),
+    prompt: "consent", include_granted_scopes: "true", state: `${APP}/settings`, code_challenge: challenge, code_challenge_method: "S256", ...(hint ? { login_hint: hint } : {}),
   });
   return `https://accounts.google.com/o/oauth2/v2/auth?${q}`;
 }
@@ -185,7 +189,7 @@ const signInOps = {
   },
   sign_in: {
     reads: false,
-    description: `Start signing a Google account in to ${TITLE}, or allowing ${TITLE} on one already signed in to another Google app: gives { url, then }. The person opens url and signs in; then give the address their browser ends on to ${APP}_finish_sign_in.`,
+    description: `Start signing a Google account in to ${TITLE}, or allowing ${TITLE} on one already signed in to another Google app: gives { url, then }. The person opens url and signs in, and Google sends them back to finish.`,
     input: { type: "object", properties: {
       account: { type: "string", description: "the account's address, like someone@gmail.com, to suggest it to Google; for one that needs signing in again, as accounts lists it" },
     } },
@@ -193,14 +197,14 @@ const signInOps = {
       if (!ctx.user) throw new Error("this device doesn't keep your data: use one of your own devices");
       return {
         url: await startSignIn(ctx, account),
-        then: `The person opens url and signs in. Their browser then fails to load a 127.0.0.1 page: give that page's whole address to ${APP}_finish_sign_in.`,
+        then: `The person opens url and signs in, and Google sends them back to finish; ${APP}_accounts then lists the account. If it doesn't, give the address their browser came back to to ${APP}_finish_sign_in.`,
       };
     },
   },
   finish_sign_in: {
     reads: false,
-    description: `Finish signing in, with the address the browser ended on after ${APP}_sign_in's url. Gives { signed_in: true, account }, or { signed_in: false, why } when Google didn't sign in.`,
-    input: { type: "object", required: ["code"], properties: { code: { type: "string", description: "the whole address the browser ended on, like http://127.0.0.1:4747/hooks/…/oauth?code=…, or just its code" } } },
+    description: `Finish signing in with the address the browser came back to after ${APP}_sign_in's url, when it didn't finish by itself. Gives { signed_in: true, account }, or { signed_in: false, why } when Google didn't sign in.`,
+    input: { type: "object", required: ["code"], properties: { code: { type: "string", description: "the whole address the browser came back to, like https://…/back?state=…&code=…, or just its code" } } },
     run: (ctx, { code }) => finishSignIn(ctx, code),
   },
   sign_out: {
@@ -737,7 +741,8 @@ export default {
 };
 
 /// The settings screen a shell opens for a connector: the accounts signed in, each with
-/// whether it works, a way to allow it again and to sign it out, and signing in another, by link and pasted address.
+/// whether it works, a way to allow it again and to sign it out, and signing in another at Google, which sends the
+/// browser back here with { back: the address it came back to } to finish.
 /// Opened with { add: true } (a shell's Add Account), it starts signing in at once.
 function settingsScreen(title, blurb) {
   return `
@@ -815,27 +820,34 @@ async function start(account, b) {
   signing = true;
   draw(false);
   connect.innerHTML = \`<h2 class="section">Sign In</h2><div class="list">
-      <a class="row" href="\${one.esc(link)}"><div class="main"><div class="title">Sign in to Google</div><div class="sub">and allow ${title}</div></div><span class="chev">›</span></a>
-      <label class="row plain"><input class="field" id="code" placeholder="Paste the page's address" aria-label="The page's address" autocapitalize="none" autocorrect="off" spellcheck="false"></label></div>
-    <div class="footer">The browser then goes to a page that doesn't load. Copy its whole address and paste it above.</div>
-    <div class="actions"><button class="button primary" id="finish">Sign In</button></div><div id="err"></div>\`;
-  const finish = document.getElementById("finish");
-  finish.onclick = async () => {
-    const back = one.busy(finish);
-    try {
-      const r = await one.call("finish_sign_in", { code: document.getElementById("code").value });
-      if (r?.signed_in === false) throw new Error(r.why);
-    } catch (e) {
-      back();
-      document.getElementById("err").innerHTML = one.problem({ title: said(e), action: { label: "Try Again", run: () => start(account) } });
-      return;
-    }
-    stop();
-    await draw(true);
-  };
+      <a class="row" href="\${one.esc(link)}"><div class="main"><div class="title">Sign in to Google</div><div class="sub">and allow ${title}</div></div><span class="chev">›</span></a></div>
+    <div class="footer">Google brings you back here when you're done.</div>\`;
 }
-one.on("changed", () => draw(true));
+// Back from Google, at the address it sent the browser to.
+async function finish(back) {
+  signing = true;
+  draw(false);
+  connect.innerHTML = one.loading("Signing In");
+  try {
+    const r = await one.call("finish_sign_in", { code: back });
+    if (r?.signed_in === false) throw new Error(r.why);
+  } catch (e) {
+    // Finished already: this screen opened again at the same address.
+    if (/no sign-in is waiting/.test(e.message)) return stop(), draw(true);
+    connect.innerHTML = one.problem({ title: said(e), action: { label: "Try Again", run: () => start() } });
+    return;
+  }
+  stop();
+  await draw(true);
+}
+// Signed in where Google sent the browser back (another tab, or the app): done here too.
+one.on("changed", async () => {
+  const was = JSON.stringify(shown());
+  await draw(true);
+  if (signing && connect.querySelector("a.row") && JSON.stringify(shown()) !== was) stop(), draw(false);
+});
 draw(true);
-if (one.params.add) start();
+if (one.params.back) finish(one.params.back);
+else if (one.params.add) start();
 </script>`;
 }
