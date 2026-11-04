@@ -37,7 +37,7 @@ pub fn rules() -> String {
 /// How to find what's possible, from the command line.
 pub fn finding() -> String {
     format!(
-        "- Each area has a skill of its own: load the one for what you're doing. `{CLI} skills` lists them and `{CLI} skills <name>` prints one.\n- `{CLI} search \"<words>\"` finds the operations for a task in every app, each with how to call it and its app's guide. `{CLI} <app>` lists an app's operations and its guide; `{CLI} <app> <op> --help` says what one takes.\n- Every MCP tool is also a command: `board_post` is `{CLI} board post`.\n- `{CLI} run <file>` runs a short script that calls several operations and prints what it returns: `{CLI} search` gives each call as the script writes it.\n- `{CLI} status` says who you are, and the people and devices in {YOURS}.\n- When the person asks you to make an app, tracker or tool, make it here, where it's on all their devices: the `{}-build` skill says how.",
+        "- Each area has a skill of its own: load the one for what you're doing. `{CLI} skills` lists them and `{CLI} skills <name>` prints one.\n- `{CLI} search \"<words>\"` finds the operations for a task in every app, each with how to call it and its app's guide. `{CLI} <app>` lists an app's operations and its guide; `{CLI} <app> <op> --help` says what one takes.\n- Every MCP tool is also a command: `board_post` is `{CLI} board post`.\n- `{CLI} run <file>` runs a short script that calls several operations and prints what it returns: `{CLI} search` gives each call as the script writes it.\n- `{CLI} status` says who you are, and the people and devices in {YOURS}. You act for the person it marks (you): write their name, never this computer's login.\n- Before saying you can't, search: an app the person hasn't added yet may do it, and search offers it.\n- When the person asks you to make an app, tracker or tool, make it here, where it's on all their devices: the `{}-build` skill says how.",
         server_name()
     )
 }
@@ -126,7 +126,7 @@ impl Skill {
 /// The root skill's description: short, so a harness can keep it loaded.
 fn root_description() -> String {
     format!(
-        "Use whenever the person pastes or mentions a key, token or password (keep it in the Vault, never use it raw), wants a message sent, mentions {NAME} or its apps, or asks you to connect to it; read it before any of its tools. {NAME} is their email, messages, calendar, files, board and more, as apps their agents use."
+        "Use whenever the person pastes or mentions a key, token or password (keep it in the Vault, never use it raw), wants a message sent, mentions {NAME} or its apps, asks about their devices (set up a laptop or phone), their agents' instructions and skills or their AI plans, or asks you to connect to it; read it before any of its tools. {NAME} is their email, messages, calendar, files, board and more, as apps their agents use."
     )
 }
 
@@ -282,7 +282,7 @@ const DEVICES_GUIDE: &str = "A new device signs in, then shows a code of 8 lette
 
 /// The devices' tools as an app's operations.
 pub fn devices_app() -> Value {
-    node_app("devices", "Devices", "Let a new device in, take one out, keep an app running on one, and invite someone", DEVICES_GUIDE, devices_tools())
+    node_app("devices", "Devices", "Set up a new laptop, phone or computer and let it in, take one out, keep an app running on one, and invite someone", DEVICES_GUIDE, devices_tools())
 }
 
 /// The devices' MCP tools, which run on this machine as its person.
@@ -355,7 +355,7 @@ pub enum Mode {
 pub fn instructions(mode: Mode, apps: &[Value], person: Option<&str>) -> String {
     let finding = match mode {
         Mode::All => format!(
-            "Every tool is also a command (`{CLI} <app> <op>`). `search` finds the tools for a task across every app, with each app's guide; call it before you guess, and to learn an app."
+            "Every tool is also a command (`{CLI} <app> <op>`). `search` finds the tools for a task across every app, with each app's guide; call it before you guess, to learn an app, and before saying you can't: it offers apps the person hasn't added yet."
         ),
         Mode::Code => "`search` finds the operations for a task across every app, with exact call signatures and each app's guide. `execute` runs a short script with them: `const r = await tools.<app>.<op>({ ... }); return r`. Scripts call several in one go; what they return comes back to you. Guides name operations <app>_<op>: in a script, that's tools.<app>.<op>.".to_string(),
     };
