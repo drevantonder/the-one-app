@@ -142,8 +142,15 @@ private struct ScreenWebView: Representable {
         config.userContentController.addUserScript(WKUserScript(source: Self.noZoom, injectionTime: .atDocumentEnd, forMainFrameOnly: true))
         #if os(iOS)
         config.userContentController.addUserScript(WKUserScript(source: ShellMenus.script, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        #else
+        let keyboard = TakeKeyboard()
+        config.userContentController.add(keyboard, name: TakeKeyboard.name)
+        config.userContentController.addUserScript(WKUserScript(source: TakeKeyboard.script, injectionTime: .atDocumentStart, forMainFrameOnly: true))
         #endif
         let web = WKWebView(frame: .zero, configuration: config)
+        #if os(macOS)
+        keyboard.web = web
+        #endif
         web.navigationDelegate = context.coordinator
         web.uiDelegate = context.coordinator
         web.allowsLinkPreview = false
@@ -589,6 +596,27 @@ private struct ScreenWebView: Representable {
         }
     }
 }
+
+#if os(macOS)
+/// A field the page focuses takes the keyboard, as one clicked does: the Vault's sheets' fields, focused for you,
+/// showed their caret while what was typed went elsewhere.
+private final class TakeKeyboard: NSObject, WKScriptMessageHandler {
+    static let name = "oneKeyboard"
+    static let script = """
+    document.addEventListener("focusin", (e) => {
+      const t = e.target;
+      if (t.isContentEditable || t.matches?.("input, textarea, select")) window.webkit.messageHandlers.\(name).postMessage(0);
+    }, true);
+    """
+    weak var web: WKWebView?
+
+    func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
+        guard let web, let window = web.window else { return }
+        if let responder = window.firstResponder as? NSView, responder.isDescendant(of: web) { return }
+        window.makeFirstResponder(web)
+    }
+}
+#endif
 
 /// The last few screens left, by route, so going back to one shows it at once, as it was: the node's events keep
 /// them up to date meanwhile.
