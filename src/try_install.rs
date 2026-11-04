@@ -5,7 +5,8 @@
 //! client of this checkout's build, on a device borrowed for it (`try client`), signs in with nobody there; others join
 //! as anyone does, by an invite link the first makes, and again with no passkey (`try client <kind> --as <name>`). It
 //! keeps its data until `try stop`: left alone it stops, and `try` starts it again as it was, as it does when this build
-//! is newer than the one it runs.
+//! is newer than the one it runs, unless a client session (`try client`) is running, which a new build must not break:
+//! then at the next command with none. Starting it again leaves its clients' browsers alone.
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -51,6 +52,21 @@ fn older_build(dir: &Path) -> bool {
     }
 }
 
+/// Whether no client session (`try client`, which holds `client.lock` shared while it builds and signs in) is running:
+/// only then may a new build start the try install again, as that drops what a client reaches it by.
+fn no_client_running(dir: &Path) -> bool {
+    use std::os::fd::AsRawFd;
+    let Ok(file) = std::fs::File::options().create(true).append(true).open(dir.join("client.lock")) else { return true };
+    unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) == 0 }
+}
+
+/// Holds `client.lock` shared until the returned file is dropped, or the process ends: a client session is running.
+fn client_session(dir: &Path) -> Option<std::fs::File> {
+    use std::os::fd::AsRawFd;
+    let file = std::fs::File::options().create(true).append(true).open(dir.join("client.lock")).ok()?;
+    (unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_SH) } == 0).then_some(file)
+}
+
 pub fn try_install(rest: &[String]) -> Result<()> {
     let (dir, checkout) = folder();
     // Help, and nothing started: try's own, or a built-in command's. An app's operation's needs the try install's apps.
@@ -75,15 +91,19 @@ pub fn try_install(rest: &[String]) -> Result<()> {
         _ => {}
     }
     if rest.first().map(String::as_str) == Some("client") && rest.get(1).map(String::as_str) == Some("web") {
-        web_client_built(&dir, &checkout, rest)?;
+        web_client_built(&checkout, rest)?;
     }
     if rest.iter().map(String::as_str).eq(["serverless", "deploy"]) {
-        serverless_built(&dir, &checkout, rest)?;
+        serverless_built(&checkout, rest)?;
     }
     let addr = match running(&dir) {
         Some(addr) if !older_build(&dir) => addr,
+        Some(addr) if !no_client_running(&dir) => {
+            eprintln!("This build is newer than the one the try install runs, and a client of it is running: it starts again at the next command once that's done.");
+            addr
+        }
         Some(_) => {
-            eprintln!("This build is newer than the one the try install runs: starting it again (it keeps its data)…");
+            eprintln!("This build is newer than the one the try install runs: starting it again (it keeps its data, and its clients' browsers stay)…");
             start(&dir)?
         }
         None => start(&dir)?,
@@ -165,7 +185,7 @@ fn serverless(dir: &Path) -> Result<()> {
     if !settings.serverless {
         settings.serverless = true;
         with_home(dir, || settings.save())?;
-        stop(dir, false)?;
+        stop_some(dir, false, false)?;
         start(dir)?;
     }
     let addr = running(dir).context("the try install didn't start again")?;
@@ -236,7 +256,7 @@ fn start(dir: &Path) -> Result<String> {
         return start_new(dir);
     }
     eprintln!("Starting this checkout's try install again…");
-    stop(dir, false)?;
+    stop_some(dir, false, false)?;
     let was = std::fs::read_to_string(dir.join("addr"))?.trim().to_string();
     // Its own statement: a listener made in spawn_node's arguments would hold the port while the node starts.
     let free = std::net::TcpListener::bind(&was).is_ok();
@@ -284,13 +304,13 @@ fn start_new(dir: &Path) -> Result<String> {
 }
 
 /// Starts a program of the try install's in a process group of its own, which stopping it stops (`pids`), logging to
-/// `log` in its folder.
-fn spawn(dir: &Path, command: &mut std::process::Command, log: &str) -> Result<u32> {
+/// `log` in its folder. A client's browser is `client`: starting the install again leaves it running.
+fn spawn(dir: &Path, command: &mut std::process::Command, log: &str, client: bool) -> Result<u32> {
     use std::os::unix::process::CommandExt;
     let log = std::fs::File::create(dir.join(log))?;
     let child = command.env(format!("{}_HOME", CLI.to_uppercase()), dir).stdin(std::process::Stdio::null()).stdout(log.try_clone()?).stderr(log).process_group(0).spawn()?;
     let mut pids = std::fs::read_to_string(dir.join("pids")).unwrap_or_default();
-    pids += &format!("{} {}\n", child.id(), started(child.id() as i32).unwrap_or_default());
+    pids += &format!("{} {}{}\n", child.id(), started(child.id() as i32).unwrap_or_default(), if client { " client" } else { "" });
     std::fs::write(dir.join("pids"), pids)?;
     Ok(child.id())
 }
@@ -312,6 +332,7 @@ fn spawn_node(dir: &Path, addr: Option<&str>) -> Result<String> {
         dir,
         one::oned::command(&["--try"])?.env(addr_var(), &addr),
         "node.log",
+        false,
     )?;
     std::fs::write(dir.join("pid"), pid.to_string())?;
     std::fs::write(dir.join("addr"), &addr)?;
@@ -344,7 +365,7 @@ fn spawn_kernel(dir: &Path, settings: &one::kernel::Settings, node: &str) -> Res
         }
     });
     // Beside its node, which it asks for the install's devices, for its relay to take only them.
-    spawn(dir, std::process::Command::new(std::env::current_exe()?).args(["kernel", "serve"]).env(addr_var(), node), "kernel.log")?;
+    spawn(dir, std::process::Command::new(std::env::current_exe()?).args(["kernel", "serve"]).env(addr_var(), node), "kernel.log", false)?;
     wait_for(&agent(), &format!("{}/.well-known/oauth-authorization-server", settings.address), &dir.join("kernel.log"))
 }
 
@@ -365,23 +386,29 @@ fn started(pid: i32) -> Option<String> {
 }
 
 /// The try install's programs that still run, by the process groups they lead (`spawn`): only those that started when
-/// they did, where this machine says, as another process may have taken a pid since.
-fn programs(dir: &Path) -> Vec<i32> {
+/// they did, where this machine says, as another process may have taken a pid since. With `clients` false, not the
+/// clients' browsers.
+fn programs(dir: &Path, clients: bool) -> Vec<i32> {
     let pids = std::fs::read_to_string(dir.join("pids")).unwrap_or_default();
     let ours = |pid: i32, at: &str| at.is_empty() || started(pid).as_deref() == Some(at);
     pids.lines()
         .filter_map(|line| {
-            let (pid, at) = line.trim().split_once(' ').unwrap_or((line.trim(), ""));
-            Some((pid.parse().ok()?, at.to_string()))
+            let mut fields = line.split_whitespace();
+            Some((fields.next()?.parse().ok()?, fields.next().unwrap_or("").to_string(), fields.next() == Some("client")))
         })
-        .filter(|(pid, at)| ours(*pid, at))
-        .map(|(pid, _)| pid)
+        .filter(|(pid, at, client)| ours(*pid, at) && (clients || !client))
+        .map(|(pid, _, _)| pid)
         .collect()
 }
 
 /// Stops the try install's programs, if they run, and with `delete`, deletes all of it but what it downloaded or built.
 pub fn stop(dir: &Path, delete: bool) -> Result<()> {
-    let pids = programs(dir);
+    stop_some(dir, delete, true)
+}
+
+/// `stop`, and with `clients` false, leaving the clients' browsers running, as starting the install again does.
+fn stop_some(dir: &Path, delete: bool, clients: bool) -> Result<()> {
+    let pids = programs(dir, clients);
     for pid in &pids {
         unsafe { libc::kill(-pid, libc::SIGTERM) };
     }
@@ -392,7 +419,13 @@ pub fn stop(dir: &Path, delete: bool) -> Result<()> {
     for pid in &pids {
         unsafe { libc::kill(-pid, libc::SIGKILL) };
     }
-    let _ = std::fs::remove_file(dir.join("pids"));
+    // What still runs stays listed: its browsers.
+    let kept: String = std::fs::read_to_string(dir.join("pids")).unwrap_or_default().lines().filter(|l| !clients && l.ends_with(" client")).map(|l| format!("{l}\n")).collect();
+    if kept.is_empty() {
+        let _ = std::fs::remove_file(dir.join("pids"));
+    } else {
+        std::fs::write(dir.join("pids"), kept)?;
+    }
     let _ = std::fs::remove_file(dir.join("pid"));
     if delete {
         for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
@@ -408,7 +441,7 @@ pub fn stop(dir: &Path, delete: bool) -> Result<()> {
 /// Stops what the try install in `home` started besides its node, which then stops itself: its kernel and browser.
 pub fn stop_others(home: &Path) {
     let me = std::process::id() as i32;
-    for pid in programs(home) {
+    for pid in programs(home, true) {
         if pid != me {
             unsafe { libc::kill(-pid, libc::SIGTERM) };
         }
@@ -580,6 +613,8 @@ fn give_back(dir: &Path) {
 /// checkout's build as it is now.
 fn client(dir: &Path, checkout: &Path, settings: &one::kernel::Settings, rest: &[String]) -> Result<()> {
     let started = Instant::now();
+    // A session while it runs: a new build waits for the next command with none to start the try install again.
+    let _session = client_session(dir);
     let person = match rest.iter().position(|a| a == "--as") {
         Some(at) => Some(person_named(rest.get(at + 1).context("--as who? --as sam")?)?),
         None => None,
@@ -612,9 +647,9 @@ fn client(dir: &Path, checkout: &Path, settings: &one::kernel::Settings, rest: &
 /// For `try client web` from this checkout's own debug build: the web client's WebAssembly built, and this build made
 /// again with it embedded from target/client, as every build of this checkout does from then on (the kernel serves what its build holds), as `{CLI} update` does for a release but at dev
 /// speed: no release build, and cargo keeps what hasn't changed, so a run with nothing changed does nothing here. The
-/// try install's programs run the old build, so a new one is stopped (it keeps its data) and the command run again as
-/// the new build, which starts it again.
-fn web_client_built(dir: &Path, checkout: &Path, rest: &[String]) -> Result<()> {
+/// try install's programs run the old build, so the command is run again as the new build, which starts it again (when
+/// no client session is running).
+fn web_client_built(checkout: &Path, rest: &[String]) -> Result<()> {
     let own = checkout.join("target/debug").join(env!("CARGO_BIN_NAME"));
     if std::env::current_exe().ok().and_then(|e| e.canonicalize().ok()) != own.canonicalize().ok() {
         return Ok(());
@@ -625,35 +660,34 @@ fn web_client_built(dir: &Path, checkout: &Path, rest: &[String]) -> Result<()> 
     if !one::config::CLIENT.is_empty() && one::config::CLIENT.iter().all(|(name, bytes)| held(name, bytes)) {
         return Ok(());
     }
-    rebuilt(dir, checkout, rest, &format!("target/debug/{CLI} again with the web client"))
+    rebuilt(checkout, rest, &format!("target/debug/{CLI} again with the web client"))
 }
 
 /// For `try serverless deploy` from this checkout's own debug build: the serverless node's WebAssembly built (as a dev
 /// build, not release) into target/serverless, and this build made again with it, as `try client web` does with the
 /// client's, so the two builds agree: every build of this checkout holds both once they're there, and the kernel's
 /// relay (which names the serverless node) starts for any of them.
-fn serverless_built(dir: &Path, checkout: &Path, rest: &[String]) -> Result<()> {
+fn serverless_built(checkout: &Path, rest: &[String]) -> Result<()> {
     let own = checkout.join("target/debug").join(env!("CARGO_BIN_NAME"));
     if std::env::current_exe().ok().and_then(|e| e.canonicalize().ok()) != own.canonicalize().ok() || one::serverless::modules().is_ok() {
         return Ok(());
     }
     eprintln!("Building the serverless node's WebAssembly (the first time takes minutes; cargo keeps what hasn't changed)…");
     crate::update::serverless(checkout, &checkout.join(one::config::CONFIG_FILE), "dev")?;
-    rebuilt(dir, checkout, rest, &format!("target/debug/{CLI} again with the serverless node"))
+    rebuilt(checkout, rest, &format!("target/debug/{CLI} again with the serverless node"))
 }
 
 /// Builds this checkout's debug build again, which takes the web client and serverless node from target/ (build.rs, what
 /// `cargo test` does too, so they build the same one) and watches the files there; the first time, it's watching none,
-/// so touching build.rs has it look. The try install's programs run the old build, so they're stopped (it keeps its
-/// data) and the command run again as the new build, which starts them again.
-fn rebuilt(dir: &Path, checkout: &Path, rest: &[String], what: &str) -> Result<()> {
+/// so touching build.rs has it look. The try install's programs run the old build, so the command is run again as the new
+/// build, which starts them again (when no client session is running).
+fn rebuilt(checkout: &Path, rest: &[String], what: &str) -> Result<()> {
     let own = checkout.join("target/debug").join(env!("CARGO_BIN_NAME"));
     let again = format!("{}_TRY_REBUILT", CLI.to_uppercase());
     anyhow::ensure!(std::env::var_os(&again).is_none(), "{CLI} was built again and doesn't hold what it was built with: {what}");
     eprintln!("Building {what} (dev profile, not release)…");
     std::fs::File::options().write(true).open(checkout.join("build.rs"))?.set_modified(std::time::SystemTime::now())?;
     crate::update::run_quiet(std::process::Command::new("nice").arg(crate::update::cargo()).current_dir(checkout).env_remove("CLIENT").env_remove("SERVERLESS").arg("build"))?;
-    stop(dir, false)?;
     use std::os::unix::process::CommandExt;
     Err(std::process::Command::new(&own).arg("try").args(rest).env(&again, "1").exec().into())
 }
@@ -764,6 +798,7 @@ fn browser(dir: &Path, settings: &one::kernel::Settings, person: Option<&str>) -
                     &settings.address,
                 ]),
                 &log,
+                true,
             )?;
             std::fs::write(web.join("port"), port.to_string())?;
             let start = Instant::now();
