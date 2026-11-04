@@ -346,6 +346,7 @@ impl Node {
             let m = &i.r.members;
             let a = m.apps.get(app).with_context(|| format!("no app named {app}"))?;
             ensure!(m.acts_for(&caller.user, &a.owner), "only someone acting for {app}'s owner ({}) deploys it", a.owner);
+            ensure!(a.deleted.is_none(), "{app} is in Recently Deleted: apps_restore {app} brings it back to deploy to, apps_erase {app} frees its name for good, or give this app another name");
             Ok(match a.history.iter().find(|(h, ..)| bundle.len() >= 8 && h.starts_with(bundle)) {
                 Some((h, ..)) => h.clone(),
                 None => bundle.to_string(),
