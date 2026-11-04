@@ -583,13 +583,16 @@ impl Node {
             let state = &i.views.get(&scope.to_string()).with_context(|| format!("no request {id} in {scope}"))?.1;
             let r = state.requests.get(id).with_context(|| format!("no request {id} in {scope}"))?;
             ensure!(r.answer.is_none(), "that request was already answered");
+            ensure!(now_ms().saturating_sub(r.time) <= REQUEST_LIFE, "that request has expired: ask for it again");
             ensure!(members::manages_scope(&i.r.members, &caller.user, scope), "Only its admins change {}’s Vault.", scope_name(i, &scope.to_string()));
             Ok(r.clone())
         })?;
         if answer["declined"] == true {
             return self.append_as(scope, &caller.user, members::node("vault-request", json!({ "id": id, "declined": true }))).await.map(|_| ());
         }
-        let made = new_id();
+        // Named by the request it answers, so answering again (its `set` entry failed, or two devices answered at once)
+        // changes that item rather than making another.
+        let made = id.to_string();
         self.write_item(caller, scope, |items| {
             Ok(match answer["item"].as_str() {
                 Some(item) => {
