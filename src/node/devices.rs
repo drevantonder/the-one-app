@@ -38,8 +38,14 @@ impl Node {
         match (to, app) {
             (Some(to), None) => {
                 sealed_to(to)?;
-                for n in 1..=newest {
-                    if let Some(o) = Bucket::get(&bucket, &crate::keys::epoch_name(&name, n, to)).await? {
+                // Every epoch at once: one wait on the bucket, not one each.
+                let got = futures_util::future::try_join_all((1..=newest).map(|n| {
+                    let (bucket, at) = (&bucket, crate::keys::epoch_name(&name, n, to));
+                    async move { Bucket::get(bucket, &at).await }
+                }))
+                .await?;
+                for (n, o) in (1..=newest).zip(got) {
+                    if let Some(o) = o {
                         sealed.insert(n.to_string(), json!(B64U.encode(&o.bytes)));
                     }
                 }
@@ -47,8 +53,13 @@ impl Node {
             }
             (None, Some(app)) => {
                 ensure!(app == members::APP || members::valid_app_name(app), "{app} isn't an app's name");
-                for n in 1..=newest {
-                    if let Some(o) = Bucket::get(&bucket, &crate::keys::app_key_name(&name, app, n)).await? {
+                let got = futures_util::future::try_join_all((1..=newest).map(|n| {
+                    let (bucket, at) = (&bucket, crate::keys::app_key_name(&name, app, n));
+                    async move { Bucket::get(bucket, &at).await }
+                }))
+                .await?;
+                for (n, o) in (1..=newest).zip(got) {
+                    if let Some(o) = o {
                         sealed.insert(n.to_string(), json!(B64U.encode(&o.bytes)));
                     }
                 }

@@ -951,7 +951,7 @@ impl Node {
             update_views(i, &handled.new)
         })?;
         // A scope this device no longer holds: it forgets what it read of it.
-        self.0.dbs.lock().unwrap().retain(|(scope, _), _| !handled.dropped.contains(&scope.to_string()));
+        self.close_dbs(|scope, _| handled.dropped.contains(&scope.to_string()));
         if let Ok(bucket) = self.bucket() {
             for log in &handled.dropped {
                 if let Err(err) = bucket.forget(&crate::bucket::folder(log)) {
@@ -1038,7 +1038,7 @@ impl Node {
             }
             *self.0.bundles.lock().unwrap() = modules.iter().map(|(a, _)| (a.clone(), wanted[a].clone())).collect();
             // Read again, so each is brought to its new deploy's schema.
-            self.0.dbs.lock().unwrap().retain(|(_, db), _| !changed.iter().any(|app| db.starts_with(&format!("{app}/"))));
+            self.close_dbs(|_, db| changed.iter().any(|app| db.starts_with(&format!("{app}/"))));
             self.emit(Event::Changed { apps: changed });
         }
         let running = self.with(|i| Ok(i.builds.get(&self.0.id).map(|r| r.commit.clone())))?;

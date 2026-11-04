@@ -225,10 +225,9 @@ impl Node {
         if gone.is_empty() {
             return;
         }
-        let mut dbs = self.0.dbs.lock().unwrap();
         for (scope, app) in gone {
             tracing::info!("{} no longer keeps {app} running in {scope}: its keys are forgotten", self.device_name());
-            dbs.retain(|(s, db), _| !(*s == scope && db.split('/').next() == Some(app.as_str())));
+            self.close_dbs(|s, db| *s == scope && db.split('/').next() == Some(app.as_str()));
         }
     }
 

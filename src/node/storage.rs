@@ -146,7 +146,7 @@ impl Node {
         *moved = Some(to);
         drop(moved);
         // What it read of the old bucket stays true, but is read again from the new one.
-        self.0.dbs.lock().unwrap().clear();
+        self.close_dbs(|_, _| true);
         tracing::info!("the install's data is kept in {} now", self.storage()?["where"].as_str().unwrap_or(""));
         self.emit(Event::Changed { apps: Vec::new() });
         Ok(())

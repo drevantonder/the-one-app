@@ -18,6 +18,15 @@ impl std::fmt::Display for NotGiven {
 
 impl std::error::Error for NotGiven {}
 
+/// The keys a call was handed for a database, with the bucket as that call reaches it, and until when they're kept (and
+/// whether standing work's grant handed them).
+pub(super) struct Given<'a> {
+    pub keys: crate::db::Keys,
+    pub bucket: &'a Copied,
+    pub until: u64,
+    pub standing: bool,
+}
+
 impl Node {
     /// The install's bucket, as this device reaches it, with its copy of the databases' steps.
     pub(super) fn bucket(&self) -> Result<Copied> {
@@ -304,8 +313,7 @@ impl Node {
     pub(super) async fn fill_copies(&self) {
         let Ok(bucket) = self.bucket() else { return };
         let mut changed = Vec::new();
-        let open: Vec<_> = self.0.dbs.lock().unwrap().iter().map(|(id, db)| (id.clone(), db.clone())).collect();
-        for ((_, name), db) in open {
+        for ((_, name), db) in self.open_dbs() {
             let Ok((prefix, at)) = db.try_lock().map(|db| (db.prefix().to_string(), db.at())) else { continue };
             match bucket.fill(&prefix, at).await {
                 Ok(0) => {}
@@ -318,15 +326,30 @@ impl Node {
         }
     }
 
+    /// Every database open here, by (scope, `app/database`): with this device's own keys, and with keys calls were
+    /// handed.
+    pub(super) fn open_dbs(&self) -> Vec<((Scope, String), Arc<tokio::sync::Mutex<Db>>)> {
+        let mut open: Vec<_> = self.0.dbs.lock().unwrap().iter().map(|(id, db)| (id.clone(), db.clone())).collect();
+        open.extend(self.0.sessions.opened.lock().unwrap().iter().flat_map(|(id, all)| all.iter().map(|o| (id.clone(), o.db.clone()))));
+        open
+    }
+
+    /// Forgets the open databases `close` names, by scope and `app/database`, whichever keys opened them: read again
+    /// when next used.
+    pub(super) fn close_dbs(&self, close: impl Fn(&Scope, &str) -> bool) {
+        self.0.dbs.lock().unwrap().retain(|(scope, db), _| !close(scope, db));
+        self.0.sessions.opened.lock().unwrap().retain(|(scope, db), _| !close(scope, db));
+    }
+
     /// `app`'s `database` of `scope`, opened from the bucket the first time and brought to `schema`, or else to the
-    /// app's deploy's: with this device's own keys, or `given`, keys a call was handed, with the bucket as that call
-    /// reaches it. Either way, one already open is used only if the keys open everything it read and it writes under
-    /// the same newest epoch.
-    pub(super) async fn database(&self, scope: &Scope, app: &str, database: &str, schema: Option<Vec<String>>, given: Option<(crate::db::Keys, &Copied)>) -> Result<Arc<tokio::sync::Mutex<Db>>> {
+    /// app's deploy's: with this device's own keys, or `given`, keys a call was handed. Either way, one already open
+    /// is used only if the keys open everything it read and it writes under the same newest epoch; one opened with
+    /// handed keys is kept open only for calls handed exactly those keys, until they run out.
+    pub(super) async fn database(&self, scope: &Scope, app: &str, database: &str, schema: Option<Vec<String>>, given: Option<Given<'_>>) -> Result<Arc<tokio::sync::Mutex<Db>>> {
         let own = given.is_none();
-        let (keys, bucket) = match given {
-            Some((keys, bucket)) => (keys, bucket.clone()),
-            None => (self.database_keys(scope, app, database, true).await?, self.bucket()?),
+        let (keys, bucket, until, standing) = match given {
+            Some(g) => (g.keys, g.bucket.clone(), g.until, g.standing),
+            None => (self.database_keys(scope, app, database, true).await?, self.bucket()?, 0, false),
         };
         let schema = match schema {
             Some(schema) => schema,
@@ -340,8 +363,9 @@ impl Node {
             }
         };
         let id = (scope.clone(), format!("{app}/{database}"));
+        let handed = (!own).then(|| self.opened_with(&id, &keys, until)).flatten();
         let cached = self.0.dbs.lock().unwrap().get(&id).cloned();
-        if let Some(db) = cached {
+        for db in handed.into_iter().chain(cached) {
             let mut open = db.lock().await;
             if open.opens_for(&keys) {
                 // This device's own keys of a newer epoch, which it writes under from now on.
@@ -386,11 +410,13 @@ impl Node {
         db.migrate(&bucket, &schema).await?;
         trace::note(json!({ "step": "open", "app": app, "steps": db.at() }), opening.elapsed());
         let db = Arc::new(tokio::sync::Mutex::new(db));
+        if !own {
+            self.keep_opened(id, keys, until, standing, db.clone());
+            return Ok(db);
+        }
         let mut dbs = self.0.dbs.lock().unwrap();
         match dbs.get(&id) {
             Some(open) if open.try_lock().is_ok_and(|d| d.opens_for(&keys) && d.keys().last_key_value() == keys.last_key_value()) => Ok(open.clone()),
-            // One opened with keys a caller handed doesn't replace the one kept, which opens with others: it's the call's.
-            Some(_) if !own => Ok(db),
             _ => Ok(dbs.entry(id).insert_entry(db).get().clone()),
         }
     }
@@ -399,7 +425,7 @@ impl Node {
     /// again.
     pub(super) async fn destroy_keys(&self, app: &str) -> Result<()> {
         let bucket = self.bucket()?;
-        self.0.dbs.lock().unwrap().retain(|(_, db), _| db.split('/').next() != Some(app));
+        self.close_dbs(|_, db| db.split('/').next() == Some(app));
         self.0.database_keys.lock().unwrap().retain(|(_, db), _| db.split('/').next() != Some(app));
         for folder in bucket.folders()? {
             bucket.forget(&format!("{folder}/{app}"))?;

@@ -31,11 +31,23 @@ pub(super) struct Sessions {
     pub kept: Mutex<HashMap<[u8; 32], Session>>,
     /// The auth service at the install's address, whose keys check the tokens calls come with.
     issuer: Mutex<Option<Arc<crate::kernel::Issuer>>>,
-    /// Until when each database a session opened stays open here: then it's forgotten, its keys with it.
-    pub opened: Mutex<HashMap<(Scope, String), u64>>,
+    /// The databases opened with keys a caller handed (or standing work's grant), each kept open for calls handed
+    /// exactly those keys, and forgotten with them: once their last session or grant ends, or no live session holds
+    /// them.
+    pub opened: Mutex<HashMap<(Scope, String), Vec<Opened>>>,
     /// The log keys handed here that opened what the bucket holds of their scope at their epoch, each by a hash of
     /// (scope, epoch, key): not the key, which is kept only while a session that handed it lasts.
     opened_logs: Mutex<HashSet<[u8; 32]>>,
+}
+
+/// A database opened with keys a caller handed: shared only with calls handed exactly them.
+pub(super) struct Opened {
+    pub keys: Keys,
+    /// Until when its keys may be used: the latest of the sessions (or grant) that handed them.
+    pub until: u64,
+    /// Opened for standing work, whose grant's keys no session holds: forgotten with the grant, or at `until`.
+    pub standing: bool,
+    pub db: Arc<tokio::sync::Mutex<Db>>,
 }
 
 /// Keys a call needs that it wasn't handed: the API answers 428 with them, and with this device's key and the key to
@@ -390,11 +402,16 @@ impl Node {
             return Ok(());
         }
         let bucket = self.bucket()?;
-        let mut need = Vec::new();
-        for (scope, app, database) in want {
-            let newest = self.newest_epoch(scope).await?.max(1);
+        // Each database's newest hint, all at once.
+        let hints = futures_util::future::try_join_all(want.iter().map(|(scope, app, database)| {
             let prefix = format!("{}/{app}/{database}", crate::bucket::folder(&scope.to_string()));
-            let hint = crate::bucket::Bucket::get(&bucket, &crate::db::newest_name(&prefix)).await?;
+            let bucket = &bucket;
+            async move { crate::bucket::Bucket::get(bucket, &crate::db::newest_name(&prefix)).await }
+        }))
+        .await?;
+        let mut need = Vec::new();
+        for ((scope, app, database), hint) in want.iter().zip(hints) {
+            let newest = self.newest_epoch(scope).await?.max(1);
             let oldest = crate::keys::oldest_needed(hint.as_ref().map(|o| &o.bytes[..]), newest);
             let handed = self.handed(me, scope, app, database);
             need.extend((oldest..=newest).filter(|n| !handed.contains_key(n)).map(|epoch| Need { scope: scope.to_string(), epoch, app: app.to_string(), database: database.to_string() }));
@@ -417,7 +434,11 @@ impl Node {
         };
         self.needs(me, &[(scope.clone(), app, database)]).await?;
         let keys = self.handed(me, scope, app, database);
-        let db = match self.database(scope, app, database, schema, Some((keys, &bucket))).await {
+        let (standing, until) = match token.starts_with(standing::GRANT) {
+            true => (true, self.standing_until(token)),
+            false => (false, self.0.sessions.kept.lock().unwrap().get(&hash(token)).map(|s| s.until).unwrap_or(0)),
+        };
+        let db = match self.database(scope, app, database, schema, Some(super::databases::Given { keys, bucket: &bucket, until, standing })).await {
             Err(err) => {
                 let epoch = err.downcast_ref::<crate::db::Missing>().map(|m| m.epoch).or(err.downcast_ref::<crate::db::Ahead>().map(|a| a.epoch));
                 return match epoch {
@@ -427,14 +448,46 @@ impl Node {
             }
             Ok(db) => db,
         };
-        let until = match token.starts_with(standing::GRANT) {
-            true => self.standing_until(token),
-            false => self.0.sessions.kept.lock().unwrap().get(&hash(token)).map(|s| s.until).unwrap_or(0),
+        Ok((db, bucket))
+    }
+
+    /// The database open here for calls handed exactly `keys`, if one is, kept until `until` at least from now on.
+    pub(super) fn opened_with(&self, id: &(Scope, String), keys: &Keys, until: u64) -> Option<Arc<tokio::sync::Mutex<Db>>> {
+        let mut opened = self.0.sessions.opened.lock().unwrap();
+        let o = opened.get_mut(id)?.iter_mut().find(|o| o.keys == *keys)?;
+        o.until = o.until.max(until);
+        Some(o.db.clone())
+    }
+
+    /// Keeps a database opened with handed keys open for the calls handed exactly them, until `until`.
+    pub(super) fn keep_opened(&self, id: (Scope, String), keys: Keys, until: u64, standing: bool, db: Arc<tokio::sync::Mutex<Db>>) {
+        let mut opened = self.0.sessions.opened.lock().unwrap();
+        let all = opened.entry(id).or_default();
+        all.retain(|o| o.keys != keys);
+        all.push(Opened { keys, until, standing, db });
+    }
+
+    /// Forgets the databases opened with handed keys that have run out, or that no live session holds any more (one
+    /// forgotten as its person lost a scope, or its device was removed): nothing opened with keys outlives them.
+    fn forget_opened(&self) {
+        let now = now_ms();
+        let held: HashMap<(String, String, String), Vec<Keys>> = {
+            let mut held: HashMap<_, Vec<Keys>> = HashMap::new();
+            for s in self.0.sessions.kept.lock().unwrap().values().filter(|s| s.live(now)) {
+                for (id, keys) in &s.keys {
+                    held.entry(id.clone()).or_default().push(keys.clone());
+                }
+            }
+            held
         };
         let mut opened = self.0.sessions.opened.lock().unwrap();
-        let at = opened.entry((scope.clone(), format!("{app}/{database}"))).or_default();
-        *at = (*at).max(until);
-        Ok((db, bucket))
+        for ((scope, name), all) in opened.iter_mut() {
+            let (app, database) = name.split_once('/').unwrap_or((name, ""));
+            let id = (scope.to_string(), app.to_string(), database.to_string());
+            let holds = |keys: &Keys| held.get(&id).is_some_and(|by| by.iter().any(|h| keys.iter().all(|(n, k)| h.get(n) == Some(k))));
+            all.retain(|o| o.until > now && (o.standing || holds(&o.keys)));
+        }
+        opened.retain(|_, all| !all.is_empty());
     }
 
     /// Forgets the sessions of people who may no longer use a scope they could, as soon as this device reads that they
@@ -443,8 +496,11 @@ impl Node {
         let mut kept = self.0.sessions.kept.lock().unwrap();
         let before = kept.len();
         kept.retain(|_, s| !users.contains(&s.user));
-        if kept.len() < before {
-            tracing::info!("forgot {} session(s) of {}, who may no longer use what they could", before - kept.len(), users.join(", "));
+        let forgot = before - kept.len();
+        drop(kept);
+        if forgot > 0 {
+            tracing::info!("forgot {forgot} session(s) of {}, who may no longer use what they could", users.join(", "));
+            self.forget_opened();
         }
     }
 
@@ -454,6 +510,7 @@ impl Node {
         let gone: Vec<Key> = clients.into_iter().filter(|k| self.client(k).is_none()).collect();
         if !gone.is_empty() {
             self.0.sessions.kept.lock().unwrap().retain(|_, s| !s.client.is_some_and(|k| gone.contains(&k)));
+            self.forget_opened();
         }
     }
 
@@ -461,15 +518,6 @@ impl Node {
     pub(super) fn forget_sessions(&self) {
         let now = now_ms();
         self.0.sessions.kept.lock().unwrap().retain(|_, s| s.live(now));
-        let gone: Vec<(Scope, String)> = {
-            let mut opened = self.0.sessions.opened.lock().unwrap();
-            let gone = opened.iter().filter(|(_, until)| **until <= now).map(|(id, _)| id.clone()).collect();
-            opened.retain(|_, until| *until > now);
-            gone
-        };
-        let mut dbs = self.0.dbs.lock().unwrap();
-        for id in gone {
-            dbs.remove(&id);
-        }
+        self.forget_opened();
     }
 }

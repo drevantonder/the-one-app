@@ -186,7 +186,7 @@ impl Node {
         };
         let id = (scope, format!("{app}/{database}"));
         self.0.behind.lock().unwrap().insert(id.clone());
-        let open = self.0.dbs.lock().unwrap().contains_key(&id);
+        let open = self.open_dbs().iter().any(|(open, _)| *open == id);
         match step.filter(|_| open) {
             Some(step) => self.confirm_sent(Sent { name: crate::db::step_name(&database_prefix(&id.0, &app, &database), at), step, id, at }),
             None => drop(tokio::spawn(async move { node.fill_to(&[(id, at)]).await })),
@@ -245,7 +245,7 @@ impl Node {
             if wrote.iter().any(|(other, later)| other == id && later > at) {
                 continue;
             }
-            let open = self.0.dbs.lock().unwrap().get(id).cloned();
+            let open = self.open_dbs().into_iter().find(|(open, _)| open == id).map(|(_, db)| db);
             let filled = match open.as_ref().map(|db| db.try_lock().map(|db| (db.prefix().to_string(), db.at()))) {
                 Some(Ok((prefix, from))) => {
                     let here = from + bucket.here_only().fill(&prefix, from).await.unwrap_or(0);
