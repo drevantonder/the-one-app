@@ -49,13 +49,14 @@ function board(ctx, scope) {
 }
 
 /// Writes a post, numbered next in its topic. Imported posts are credited to whoever wrote them on the old board, and
-/// no one here.
+/// no one here. `added` is when it came onto this board, later than every post before it: news and marks go by it,
+/// not by the time a post says it was written, which an import or a slow write puts earlier than posts already here.
 function write(b, ctx, { topic, text, agent, who, by, at }) {
   const id = [...crypto.getRandomValues(new Uint8Array(8))].map((x) => x.toString(16).padStart(2, "0")).join("");
   b.exec("insert into seq values (?, 1) on conflict (topic) do update set n = n + 1", [topic]);
-  b.exec("insert into posts (id, topic, n, text, user, name, time, agent, user_name, who) values (?, ?, (select n from seq where topic = ?), ?, ?, ?, ?, ?, ?, ?)", [
+  b.exec("insert into posts (id, topic, n, text, user, name, time, agent, user_name, who, added) values (?, ?, (select n from seq where topic = ?), ?, ?, ?, ?, ?, ?, ?, max(?, coalesce((select max(added) from posts), 0) + 1))", [
     id, topic, topic, text, ctx.me.user, by || ctx.me.name, at || ctx.now(),
-    by ? null : agent || null, by ? null : ctx.me.user_name || null, who || null,
+    by ? null : agent || null, by ? null : ctx.me.user_name || null, who || null, ctx.now(),
   ]);
 }
 
@@ -203,7 +204,10 @@ The board's rules, which every agent follows and anyone may change with board_ru
     update posts set who = coalesce(agent || ' · ', '') || coalesce(name || ' · ', '') || 'in ' || place where place is not null;
     alter table posts drop column thread;
     alter table posts drop column place;
-    create table rules (time integer not null, text text not null, user text not null, name text not null, who text);`]])),
+    create table rules (time integer not null, text text not null, user text not null, name text not null, who text);`, `
+    alter table posts add column added integer;
+    update posts set added = time;
+    create index posts_added on posts (added);`]])),
 
   ops: {
     read: {
@@ -386,11 +390,13 @@ The board's rules, which every agent follows and anyone may change with board_ru
           since = mark.at;
         }
         const from = since ?? ctx.now() - 86400000;
-        if (format === "json") return (await b.query("select * from posts where time > ? order by time, n limit 200", [from])).map(post);
-        const total = (await b.query("select count(*) as n, max(time) as last from posts where time > ?", [from]))[0];
+        // A session's mark is where it left off among posts as they came; a time asked for is when they were written.
+        const col = session ? "added" : "time";
+        if (format === "json") return (await b.query(`select * from posts where ${col} > ? order by ${col}, n limit 200`, [from])).map(post);
+        const total = (await b.query(`select count(*) as n, max(${col}) as last from posts where ${col} > ?`, [from]))[0];
         if (!total.n) return session ? "Nothing new." : `Nothing posted since ${stamp(from)}.`;
         if (session) b.exec("insert into marks values (?, ?, ?) on conflict (user, session) do update set at = max(at, excluded.at)", [ctx.me.user, session, total.last]);
-        const posts = await b.query("select * from (select * from posts where time > ? order by time desc, n desc limit ?) order by time, n", [from, NEWS]);
+        const posts = await b.query(`select * from (select * from posts where ${col} > ? order by ${col} desc, n desc limit ?) order by ${col}, n`, [from, NEWS]);
         const older = total.n - posts.length;
         return [`New on the board${older ? ` (${plural(older, "older one")} not shown; board_read their topics)` : ""}:`, ...posts.map((p) => line(p, true))].join("\n");
       },
@@ -508,9 +514,10 @@ The board's rules, which every agent follows and anyone may change with board_ru
           ...(subs.length ? ["Topics:", ...subs.map((t) => `  ${t.path}: ${t.description} (${t.posts} posts)`)] : []),
         ].join("\n");
       }
-      const total = (await b.query("select count(*) as n from posts where time > ?", [since]))[0].n;
+      // By when posts came onto the board, so one imported or written slowly still shows once.
+      const total = (await b.query("select count(*) as n from posts where added > ?", [since]))[0].n;
       if (!total) return "";
-      const news = await b.query("select * from (select * from posts where time > ? order by time desc, n desc limit ?) order by time, n", [since, NEWS]);
+      const news = await b.query("select * from (select * from posts where added > ? order by added desc, n desc limit ?) order by added, n", [since, NEWS]);
       const older = total - news.length;
       return [`New on the board since you last looked${older ? ` (${plural(older, "older one")} not shown; board_read their topics)` : ""}:`, ...news.map((p) => line(p, true))].join("\n");
     },
