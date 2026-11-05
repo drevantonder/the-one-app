@@ -846,11 +846,6 @@ func (ds *devices) borrowChrome(ctx context.Context, in map[string]any) (any, er
 	if err != nil {
 		return nil, err
 	}
-	// A profile is a Linux Chrome's, its sign-ins sealed with Linux's basic key, which a Mac's Chrome can't open.
-	skipped := ""
-	if p != nil && runtime.GOOS == "darwin" {
-		skipped, p = p.Name, nil
-	}
 	v, err := ds.makeVM(ctx, chromeKind{}, newPoolName(), nil)
 	if err != nil {
 		return nil, err
@@ -866,9 +861,15 @@ func (ds *devices) borrowChrome(ctx context.Context, in map[string]any) (any, er
 		ds.endLoan(v.Name)
 		return nil, err
 	}
+	var cookies []map[string]any
 	if p != nil {
 		if err := ds.unpackProfile(ctx, v, p); err != nil {
 			return fail(err)
+		}
+		if runtime.GOOS == "darwin" {
+			if cookies, err = takeCookies(ctx, v.Dir); err != nil {
+				return fail(err)
+			}
 		}
 	}
 	if err := ds.awake(ctx, v); err != nil {
@@ -878,6 +879,7 @@ func (ds *devices) borrowChrome(ctx context.Context, in map[string]any) (any, er
 	if err != nil {
 		return fail(err)
 	}
+	b.giveCookies(ctx, cookies)
 	pg, err := b.currentPage(ctx)
 	if err != nil {
 		return fail(err)
@@ -891,9 +893,6 @@ func (ds *devices) borrowChrome(ctx context.Context, in map[string]any) (any, er
 	if p != nil {
 		out["profile"] = p.Name
 		msg += fmt.Sprintf(" It started with a copy of the %s profile.", p.Name)
-	}
-	if skipped != "" {
-		msg += fmt.Sprintf(" It started without the %s profile: a profile's sign-ins open in Chrome on Linux only, not on a Mac.", skipped)
 	}
 	out["text"] = msg + " Give it back with give_back when done; it's given back for you after 15 minutes without a call."
 	return out, nil
