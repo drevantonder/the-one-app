@@ -665,6 +665,7 @@ impl Node {
             for service in node.0.built_in_services.iter().filter(|n| n.sync.is_some()) {
                 node.sync_built_in(service.name);
             }
+            tokio::task::spawn_blocking(crate::harnesses::set_up);
         }
         Ok(node)
     }
@@ -1218,6 +1219,7 @@ impl Node {
                 for service in self.0.built_in_services.iter().filter(|n| n.sync.is_some()) {
                     self.sync_built_in(service.name);
                 }
+                tokio::task::spawn_blocking(crate::harnesses::set_up);
             }
         }
     }
