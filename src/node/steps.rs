@@ -35,7 +35,7 @@ impl Node {
         if !signs {
             return Ok(false);
         }
-        let _write = self.0.writes.lock().await;
+        let _write = self.own_writes().await?;
         // `global`'s log as the bucket has it, read before the `FREEZING`, so only what's written since is read after.
         let (bucket, keys, prefix) = (self.bucket()?, self.log_key(&Scope::Global).await?, crate::log::prefix("global"));
         let before = crate::log::read(&bucket, &keys, &prefix, "global", 0, 0).await?;
@@ -267,7 +267,7 @@ impl Node {
     /// Writes `content` to `global`'s scope database as a step this device signs as `user`, at the next position: when
     /// another device wrote there first, it reads that, and signs it again for the one after.
     pub(super) async fn write_step(&self, user: &str, content: Content) -> Result<Entry> {
-        let _write = self.0.writes.lock().await;
+        let _write = self.own_writes().await?;
         for _ in 0..50 {
             self.read_steps_now().await?;
             let step = self.with(|i| i.r.make_step(&Scope::Global, user, content.clone(), now_ms()))?;
@@ -406,7 +406,7 @@ impl Node {
     /// `global`'s log is frozen, at the next position.
     pub(super) async fn write_scope_step(&self, scope: &Scope, user: &str, content: Content) -> Result<Entry> {
         self.first_epoch(scope).await?;
-        let _write = self.0.writes.lock().await;
+        let _write = self.own_writes().await?;
         for _ in 0..50 {
             self.read_scope_steps_now(scope).await?;
             let (step, at) = self.with(|i| {

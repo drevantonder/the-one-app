@@ -685,11 +685,28 @@ impl Node {
 
     /// Whether this node is handing over to the next: then it keeps its endpoint only until the next one is ready
     /// (`handed_over`), never binding it again; and if the next one didn't start, it keeps it as before.
-    pub fn handing_over(&self, handing: bool) {
+    /// Handing over, it signs nothing more of its own once what it's writing is written: the next one, with the same
+    /// key, writes from where it reads the logs, so two writing at once would fork them, and its device would count as
+    /// removed.
+    pub async fn handing_over(&self, handing: bool) {
         HANDING_OVER.store(handing, std::sync::atomic::Ordering::SeqCst);
-        if !handing {
+        if handing {
+            drop(self.0.writes.lock().await);
+        } else {
             self.follow_net();
         }
+    }
+
+    /// Whether this node is handing over to the next, or has: then it starts and lists no parts, and writes nothing.
+    pub fn is_handing_over(&self) -> bool {
+        HANDING_OVER.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// Holds this device's writes for one that it signs itself: none once it's handing over to the next node.
+    pub(crate) async fn own_writes(&self) -> Result<tokio::sync::MutexGuard<'_, ()>> {
+        let write = self.0.writes.lock().await;
+        ensure!(!self.is_handing_over(), "this device is starting its new build: try again in a moment");
+        Ok(write)
     }
 
     /// The next node is ready, with an endpoint of this device's key of its own: this one closes its own, so the relay
@@ -887,7 +904,7 @@ impl Node {
             };
         }
         self.first_epoch(scope).await?;
-        let _write = self.0.writes.lock().await;
+        let _write = self.own_writes().await?;
         // What's in the bucket first, so the entry comes after all of it.
         self.read_log_now(scope).await?;
         // Its blobs first, so a device that reads the entry finds them; one the bucket doesn't take now is tried again

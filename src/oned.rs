@@ -187,6 +187,11 @@ pub fn keep_parts(node: Node, runtime: tokio::runtime::Handle) {
                 tracing::warn!("erased {}: stopping", dir.display());
                 std::process::exit(0);
             }
+            // Handing over, the next oned keeps them: this one starting or listing any too would race it.
+            if node.is_handing_over() {
+                std::thread::sleep(Duration::from_secs(2));
+                continue;
+            }
             if looked.is_none_or(|t| t.elapsed() > Duration::from_secs(60)) {
                 released = node.service_releases();
                 looked = Some(Instant::now());
