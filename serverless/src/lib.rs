@@ -216,15 +216,16 @@ pub fn check_certificate(certificate: &str, now: f64) -> Result<String, JsError>
 }
 
 /// Opens a database at `prefix` for `owner`'s object with the keys handed (`usable`, under the scope's `current`
-/// epoch) and brings it to `migrations` (JSON, its app's schema for the scope's kind): → a handle for `query`, `write`
-/// and `close`.
+/// epoch) and brings it to `migrations` (JSON, its app's schema for the scope's kind), signing what it writes with the
+/// node's endpoint key (`seed`): → a handle for `query`, `write` and `close`.
 #[wasm_bindgen]
-pub async fn open(owner: String, bucket: JsValue, prefix: String, keys: String, current: u32, migrations: String) -> Result<u32, JsValue> {
+pub async fn open(owner: String, bucket: JsValue, prefix: String, keys: String, current: u32, migrations: String, seed: String) -> Result<u32, JsValue> {
     touch(&owner);
     let bucket = Js(bucket);
     let keys = usable(&keys, current)?;
     let migrations: Vec<String> = serde_json::from_str(&migrations).map_err(|e| failed(e.into()))?;
     let mut db = Db::open(&bucket, &prefix, keys).await.map_err(failed)?;
+    db.sign_as(signing_key(&seed).map_err(failed)?);
     db.migrate(&bucket, &migrations).await.map_err(failed)?;
     let handle = OPEN.with(|o| {
         let mut o = o.borrow_mut();
@@ -391,12 +392,13 @@ pub fn prefix(scope: &str, app: &str, database: &str) -> Result<String, JsError>
     prefix_of(scope, app, database).map_err(thrown)
 }
 
-/// The names of the `n` steps after `name`, if it's a database's step, as JSON: what's read next.
+/// If `name` is a database's step, or the signature beside one: the signature beside it, and the `n` steps after it,
+/// each with the signature beside it, as JSON: what's read next.
 #[wasm_bindgen]
 pub fn following(name: &str, n: u32) -> String {
-    let Some((prefix, at)) = name.rsplit_once('/') else { return "[]".into() };
-    let Some(at) = at.parse::<u64>().ok().filter(|n| one::db::step_name(prefix, *n) == name) else { return "[]".into() };
-    Value::from((1..=n as u64).map(|i| one::db::step_name(prefix, at + i)).collect::<Vec<_>>()).to_string()
+    let Some((prefix, at)) = one::db::position(name) else { return "[]".into() };
+    let names = (at..=at + n as u64).flat_map(|i| [one::db::step_name(prefix, i), one::db::sig_name(prefix, i)]);
+    Value::from(names.filter(|other| other.as_str() > name).collect::<Vec<_>>()).to_string()
 }
 
 // Who can do what: each scope's entries (`src/log.rs`), and what they add up to (`src/members.rs`).

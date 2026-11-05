@@ -1,7 +1,8 @@
 //! The install's bucket as a device reaches it holding no credentials: each request goes to a URL the URL signer
 //! (`kernel/signer`) presigned, asked at the install's address with a request signed by the device's own key
 //! (`keys::signed_request`, `one/urls`). URLs are kept until a minute before they stop working, and reading or
-//! creating a database's step asks for the next positions too, so a device catching up or writing on asks once.
+//! creating a database's step asks for the next positions too, and the signatures beside them, so a device catching up
+//! or writing on asks once.
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex};
@@ -95,13 +96,14 @@ impl Signer {
                 return Ok(url.clone());
             }
         }
-        // A database's step: the positions after it too, which come next.
+        // A database's step or the signature beside one: the positions after it too, which come next, and the
+        // signature beside each.
         let ahead = if kind == "create" { CREATE_AHEAD } else { READ_AHEAD };
-        let item = match ask.name.rsplit_once('/').and_then(|(prefix, at)| Some((prefix, at.parse::<u64>().ok()?))) {
-            Some((prefix, at)) if crate::db::step_name(prefix, at) == ask.name && at > 0 => json!({ "steps": prefix, "from": at, "to": at + ahead }),
-            _ => json!(ask.name),
+        let items: Vec<Value> = match crate::db::position(ask.name) {
+            Some((prefix, at)) => std::iter::once(json!({ "steps": prefix, "from": at, "to": at + ahead })).chain((at..=at + ahead).map(|n| json!(crate::db::sig_name(prefix, n)))).collect(),
+            None => vec![json!(ask.name)],
         };
-        let given = self.ask(json!({ kind: [item] }))?;
+        let given = self.ask(json!({ kind: items }))?;
         let until = given["until"].as_u64().context("the URL signer didn't say until when")?;
         let mut kept = self.kept.lock().unwrap();
         kept.retain(|_, (_, u)| *u > now_ms());

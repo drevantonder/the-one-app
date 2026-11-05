@@ -12,6 +12,8 @@
 //! behind, but never anything no device read at the same step, nothing the bucket doesn't hold is kept, and the copy
 //! opens nothing without the key.
 //!
+//! Each device signs its steps, and every signature a reader finds beside a step must hold.
+//!
 //! In odd seeds the scope's epoch changes midway: each device is handed epoch 2 when it first meets a step under it,
 //! and one device never is, writing under epoch 1 after it all the same: what it writes after is passed over, and
 //! nothing the others wrote is lost.
@@ -238,6 +240,14 @@ async fn retry<T>(mut f: impl AsyncFnMut() -> Result<T>) -> T {
     panic!("ten thousand tries failed, the last with {:#}", last.unwrap())
 }
 
+/// Checks that every signature a reader found beside a step held, however the link mangled the writes: each is written
+/// only once its step is known to be there, with the state its writer read. A link may lose one, but not all.
+fn signed(link: &Link, db: &Db, seed: u64) {
+    let checks = db.checks();
+    assert_eq!(checks.wrong, 0, "seed {seed}: a signature beside a step didn't hold: {checks:?}");
+    assert!(link.objects.lock().unwrap().keys().any(|n| n.ends_with(".sig")), "seed {seed}: no step was signed");
+}
+
 fn state(db: &Db) -> (Vec<(u64, u64)>, u64) {
     let rows = db.query("select id, device from writes order by id", &[]).unwrap().iter().map(|r| (r["id"].as_u64().unwrap(), r["device"].as_u64().unwrap())).collect();
     let n = db.query("select n from count", &[]).unwrap()[0]["n"].as_u64().unwrap();
@@ -266,6 +276,7 @@ async fn open(link: &Link, older: &Keys, newer: Option<&Keys>) -> Option<Db> {
             None => keys = newer?.clone(),
         }
     };
+    db.sign_as(ed25519_dalek::SigningKey::from_bytes(&rand::random()));
     while !retry(async || match db.migrate(link, &[SCHEMA.to_string()]).await {
         Err(e) if ahead(&e) && db.keys().len() == 1 => Ok(false),
         other => other.map(|()| true),
@@ -355,11 +366,13 @@ async fn run(seed: u64) {
     }
     let fresh = Db::open(&link.steady(), "global/sim/main", if changes { newer } else { older }).await.unwrap();
     link.none_failed_landed(&fresh, seed);
+    signed(&link, &fresh, seed);
     let (rows, n) = state(&fresh);
     assert_eq!(rows.iter().filter(|r| r.1 < DEVICES as u64).count(), DEVICES * WRITES + extra, "seed {seed}: every write landed once");
     assert_eq!(n, rows.len() as u64, "seed {seed}: the count moved once for each write, however often the link lost an answer");
     for (i, db) in dbs.iter().enumerate() {
         assert_eq!(state(db), (rows.clone(), n), "seed {seed}: device {i} reads what a new device does");
+        assert_eq!(db.checks().wrong, 0, "seed {seed}: device {i} read a signature that didn't hold");
     }
     assert!(link.objects.lock().unwrap().keys().any(|k| k.contains("/copy/")), "seed {seed}: copies were written as steps piled up");
 }
@@ -425,6 +438,7 @@ async fn run_copied(seed: u64) {
         devices.push(tokio::task::spawn_local(async move {
             let here = &copies[device];
             let mut db = retry(async || Db::open(here, "global/sim/main", key.clone()).await).await;
+            db.sign_as(ed25519_dalek::SigningKey::from_bytes(&rand::random()));
             retry(async || db.migrate(here, &[SCHEMA.to_string()]).await).await;
             for i in 0..WRITES {
                 let id = (device * WRITES + i) as u64;
@@ -468,11 +482,13 @@ async fn run_copied(seed: u64) {
     link.settle().await;
     let fresh = Db::open(&link.steady(), "global/sim/main", key.clone()).await.unwrap();
     link.none_failed_landed(&fresh, seed);
+    signed(&link, &fresh, seed);
     for (db, copy) in dbs.iter_mut().zip(&copies) {
         retry(async || db.catch_up(copy).await).await;
     }
     for (i, (db, copy)) in dbs.iter().zip(&copies).enumerate() {
         assert_eq!(state(db), state(&fresh), "seed {seed}: device {i} caught up with the bucket");
+        assert_eq!(db.checks().wrong, 0, "seed {seed}: device {i} read a signature that didn't hold");
         // Its copy alone opens to a step some device read, with the key and only with it.
         let alone = Db::open(&copy.here_only(), "global/sim/main", key.clone()).await.unwrap_or_else(|e| panic!("seed {seed}: device {i}'s copy didn't open: {e:#}"));
         saw(&seen, &alone, seed);

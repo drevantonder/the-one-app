@@ -515,7 +515,7 @@ class Person {
       }
       return was;
     }
-    const db = { handle: await open(this.owner, this.bucket, at, keys, current, migrations), keys, queue: Promise.resolve(), used: Date.now(), users: 1 };
+    const db = { handle: await open(this.owner, this.bucket, at, keys, current, migrations, this.env.NODE_KEY), keys, queue: Promise.resolve(), used: Date.now(), users: 1 };
     if (was && was.users > 0) return Object.assign(db, { own: true });
     if (was) serially(was, () => close(was.handle));
     this.kept.set(at, db);
@@ -629,7 +629,7 @@ class Call {
       const lacks = this.scopes.filter((scope) => !p.keysOf(this.who, scope, "node", "vault"));
       if (lacks.length) await p.needs(lacks.map((scope) => ({ scope, app: "node", database: "vault", have: [] })), this.who);
       const current = (scope) => this.view.epochs[scope] ?? p.epochs([scope])[scope];
-      return Promise.all(this.scopes.map((scope) => p.withKeys(this.who, scope, "node", "vault", async (keys) => [scope, await open(p.owner, p.bucket, prefix(scope, "node", "vault"), keys, current(scope), vault_schema())])));
+      return Promise.all(this.scopes.map((scope) => p.withKeys(this.who, scope, "node", "vault", async (keys) => [scope, await open(p.owner, p.bucket, prefix(scope, "node", "vault"), keys, current(scope), vault_schema(), p.env.NODE_KEY)])));
     })();
     return this.items.then((opened) => JSON.stringify(opened));
   }

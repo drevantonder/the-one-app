@@ -507,13 +507,13 @@ impl Node {
         joined.unwrap_or_else(|err| json!({ "error": format!("{err:#}") }))
     }
 
-    /// A notice that something changed: `{ scope, app?, database?, at?, step? }`, `step` the sealed step written at
-    /// `at`, base64.
+    /// A notice that something changed: `{ scope, app?, database?, at?, step?, sig? }`, `step` the sealed step written
+    /// at `at` and `sig` the signature beside it, base64.
     fn changed_from(&self, changed: &Value) {
         let Ok(scope) = Scope::parse(changed["scope"].as_str().unwrap_or("")) else { return };
         let wrote = changed["app"].as_str().zip(changed["database"].as_str()).map(|(app, db)| (app, db, changed["at"].as_u64().unwrap_or(0)));
-        let step = changed["step"].as_str().and_then(|s| data_encoding::BASE64.decode(s.as_bytes()).ok());
-        self.changed_there(&scope, wrote, step);
+        let bytes = |field: &str| changed[field].as_str().and_then(|s| data_encoding::BASE64.decode(s.as_bytes()).ok());
+        self.changed_there(&scope, wrote, bytes("step"), bytes("sig"));
     }
 
     fn is_device(&self, key: &Key) -> bool {

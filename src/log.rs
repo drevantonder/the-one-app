@@ -3,7 +3,8 @@
 //! newest hint and now and then a copy of every entry in the steps before it, so a node that holds nothing (the
 //! serverless node) reads one copy and the few steps after it, not every step. As in a database, a step under an
 //! epoch lower than the step before it, or that doesn't open, is passed over, one under an epoch above every key the
-//! reader has stops it, and a copy is used only if it holds (`db::start`).
+//! reader has stops it, and a copy is used only if it holds (`db::start`). Its steps have no signature beside them, as
+//! a database's do (`db::Sig`): each entry in them is signed by its author already, and phase 2 freezes the log.
 //!
 //! ```text
 //! <prefix>/newest            {"at": n, "copy": m, "epoch": e}, as a database's

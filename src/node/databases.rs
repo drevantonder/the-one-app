@@ -418,6 +418,7 @@ impl Node {
                 _ => return Err(err),
             }
         };
+        db.sign_as(self.signing_key());
         db.migrate(&bucket, &schema).await?;
         trace::note(json!({ "step": "open", "app": app, "steps": db.at() }), opening.elapsed());
         let db = Arc::new(tokio::sync::Mutex::new(db));

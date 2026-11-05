@@ -102,20 +102,24 @@ impl<B: Bucket + Clone> Copied<B> {
         self.here.list("")
     }
 
-    /// Fetches into this copy a database's steps after `at` that the bucket has: how many.
+    /// Fetches into this copy a database's steps after `at` that the bucket has, and the signature beside each: how
+    /// many steps.
     pub async fn fill(&self, prefix: &str, at: u64) -> Result<u64> {
         let mut n = at;
         while Bucket::get(self, &crate::db::step_name(prefix, n + 1)).await?.is_some() {
+            Bucket::get(self, &crate::db::sig_name(prefix, n + 1)).await?;
             n += 1;
         }
         Ok(n - at)
     }
 }
 
-/// Whether an object is written once and kept here: a database's step or copy, named by its 12-digit position.
+/// Whether an object is written once and kept here: a database's step, the signature beside one, or a copy, named by
+/// its 12-digit position.
 fn kept(name: &str) -> bool {
     let mut segments = name.rsplit('/');
-    segments.next().is_some_and(|last| last.len() == 12 && last.bytes().all(|b| b.is_ascii_digit())) && name.split('/').count() > 1 && name.split('/').all(segment)
+    let position = |last: &str| last.len() == 12 && last.bytes().all(|b| b.is_ascii_digit());
+    segments.next().is_some_and(|last| position(last.strip_suffix(".sig").unwrap_or(last))) && name.split('/').count() > 1 && name.split('/').all(segment)
 }
 
 /// A name's part that's safe as a file's.

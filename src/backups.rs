@@ -191,7 +191,7 @@ pub fn back_up(job: Job, blob: impl Fn(&str) -> Option<Vec<u8>>) -> Result<Optio
 
 /// Copies what a scope's folder in the install's bucket has that the place lacks, into `<install>/bucket/`, laid out
 /// as the bucket is: each epoch's key and Vault key sealed to the recovery key, each app's key in each epoch (sealed under it), and
-/// each database's new steps and newest copy (sealed as they are), past what `snap` says it has.
+/// each database's new steps, the signatures beside them, and newest copy (sealed as they are), past what `snap` says it has.
 fn copy_bucket(bucket: &Place, place: &Place, install: &str, scope: &str, snap: &mut Snapshot) -> Result<()> {
     let folder = folder(scope);
     let mut copy = |name: &str, known: bool| -> Result<bool> {
@@ -223,11 +223,14 @@ fn copy_bucket(bucket: &Place, place: &Place, install: &str, scope: &str, snap: 
                 copied = newest_copy;
                 at = at.max(newest_copy);
             }
-            // And the step at the copy's position, without which a reader doesn't start from it (`db::start`).
+            // And the step at the copy's position, without which a reader doesn't start from it (`db::start`), with the
+            // signature beside it, which says what the copy comes to.
             if copied > 0 {
                 copy(&crate::db::step_name(&prefix, copied), true)?;
+                copy(&crate::db::sig_name(&prefix, copied), true)?;
             }
             while copy(&crate::db::step_name(&prefix, at + 1), false)? {
+                copy(&crate::db::sig_name(&prefix, at + 1), false)?;
                 at += 1;
             }
             place.put(&format!("{install}/bucket/{}", crate::db::newest_name(&prefix)), &serde_json::to_vec(&serde_json::json!({ "at": at, "copy": copied, "epoch": if copied == newest_copy { epoch } else { 0 } }))?)?;

@@ -163,8 +163,13 @@ impl Node {
         if let Some((app, database, at)) = wrote {
             input = json!({ "scope": scope.to_string(), "app": app, "database": database, "at": at });
             let name = crate::db::step_name(&database_prefix(scope, app, database), at);
-            if let Some(step) = self.bucket().ok().and_then(|b| b.kept(&name).ok().flatten()).filter(|s| s.len() <= SENT_STEP) {
+            let bucket = self.bucket().ok();
+            if let Some(step) = bucket.as_ref().and_then(|b| b.kept(&name).ok().flatten()).filter(|s| s.len() <= SENT_STEP) {
                 input["step"] = json!(data_encoding::BASE64.encode(&step));
+                // And the signature beside it, which an older device ignores.
+                if let Some(sig) = bucket.as_ref().and_then(|b| b.kept(&format!("{name}.sig")).ok().flatten()) {
+                    input["sig"] = json!(data_encoding::BASE64.encode(&sig));
+                }
             }
         }
         self.notify(&devices, &input);
@@ -173,7 +178,7 @@ impl Node {
     /// What another device said changed in `scope`, which this device holds: its entries, which it reads now, or with
     /// `wrote`, step `at` of a database. If it has the database open, it fetches that step into its copy now: the one
     /// sent, once the bucket confirms it, else the bucket's. Until then a read asks the bucket first.
-    pub(super) fn changed_there(&self, scope: &Scope, wrote: Option<(&str, &str, u64)>, step: Option<Vec<u8>>) {
+    pub(super) fn changed_there(&self, scope: &Scope, wrote: Option<(&str, &str, u64)>, step: Option<Vec<u8>>, sig: Option<Vec<u8>>) {
         if !self.with(|i| Ok(i.r.holds(scope))).unwrap_or(false) {
             return;
         }
@@ -188,7 +193,7 @@ impl Node {
         self.0.behind.lock().unwrap().insert(id.clone());
         let open = self.open_dbs().iter().any(|(open, _)| *open == id);
         match step.filter(|_| open) {
-            Some(step) => self.confirm_sent(Sent { name: crate::db::step_name(&database_prefix(&id.0, &app, &database), at), step, id, at }),
+            Some(step) => self.confirm_sent(Sent { name: crate::db::step_name(&database_prefix(&id.0, &app, &database), at), step, sig, id, at }),
             None => drop(tokio::spawn(async move { node.fill_to(&[(id, at)]).await })),
         }
     }
@@ -217,7 +222,9 @@ impl Node {
                     }
                     lot
                 };
-                let steps: Vec<(String, Vec<u8>)> = lot.iter().map(|s| (s.name.clone(), s.step.clone())).collect();
+                let mut steps: Vec<(String, Vec<u8>)> = lot.iter().map(|s| (s.name.clone(), s.step.clone())).collect();
+                // The signatures sent beside them after them, so what's taken of the steps comes first.
+                steps.extend(lot.iter().filter_map(|s| Some((format!("{}.sig", s.name), s.sig.clone()?))));
                 // A bucket slow to answer holds up no other: what it doesn't confirm in time is read from it.
                 let took = match node.bucket() {
                     Ok(bucket) => tokio::time::timeout(BUCKET_WAIT, bucket.take_sent(&steps)).await.unwrap_or_else(|_| Err(anyhow!("the bucket didn't answer"))),
@@ -346,10 +353,12 @@ impl Node {
     }
 }
 
-/// A step another device sent, waiting for the bucket to confirm it: its name, its bytes, its database and position.
+/// A step another device sent, waiting for the bucket to confirm it: its name, its bytes, the signature beside it if it
+/// came with one, its database and position.
 pub(super) struct Sent {
     name: String,
     step: Vec<u8>,
+    sig: Option<Vec<u8>>,
     id: (Scope, String),
     at: u64,
 }

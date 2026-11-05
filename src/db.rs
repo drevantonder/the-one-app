@@ -8,8 +8,17 @@
 //! <prefix>/newest            {"at": n, "copy": m, "epoch": e}, replaced while unchanged: a hint, so readers needn't
 //!                            list; e is the epoch copy m is sealed under, the oldest a reader starting there needs
 //! <prefix>/<n>               step n, from 1
+//! <prefix>/<n>.sig           who wrote step n and what the database came to (`Sig`), sealed as the step is
 //! <prefix>/copy/<n>          the whole database after step n, under the epoch of the steps it holds
 //! ```
+//!
+//! A step's signature is its own object, which older readers never look for, and is written just after the step, so a
+//! step can be there without one for a moment, or for good (an older writer's, or one whose writer stopped between the
+//! two). A reader checks each one there is (`Checks`): the writer's endpoint key signed the step's sealed bytes at its
+//! position, and the database it read comes to the state hash the last one says (`state_hash`). In phase 1 a step
+//! counts whatever its signature says, as it does on older readers; phase 2 decides what a missing or wrong one does.
+//! A copy needs no signer: it's good if it comes to the hash signed beside the step it's at, and a reader reads every
+//! step rather than start from one that isn't.
 //!
 //! Along a database's positions epochs never go down: a step under an epoch lower than the step before it, or that
 //! doesn't open with the key of the epoch it names, is skipped by every reader, its position taken, and the next write
@@ -36,6 +45,16 @@ use crate::bucket::Bucket;
 pub const COPY_EVERY: u64 = 100;
 /// How many times a write runs again after losing a race before it gives up.
 const TRIES: usize = 50;
+
+/// What a reader found of the signatures beside the steps it applied: those that held, those with none (an older
+/// writer's, or one it couldn't fetch), and those that didn't hold (signed wrong, or the database didn't come to the
+/// state hash signed).
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct Checks {
+    pub signed: u64,
+    pub unsigned: u64,
+    pub wrong: u64,
+}
 
 /// A database's keys, by the epoch each opens.
 pub type Keys = BTreeMap<u32, [u8; 32]>;
@@ -154,6 +173,10 @@ pub struct Db {
     used: BTreeSet<u32>,
     /// Positions its caller found hold junk under an epoch no entry made (`Ahead`), passed over.
     junk: BTreeSet<u64>,
+    /// Whose endpoint key signs the steps it writes: none, and it writes them unsigned, as older writers do.
+    signer: Option<ed25519_dalek::SigningKey>,
+    /// What it found of the signatures beside the steps it applied.
+    checks: Checks,
 }
 
 impl Db {
@@ -165,8 +188,10 @@ impl Db {
 
     /// `open`, passing over the steps at `junk`.
     pub async fn open_passing(bucket: &impl Bucket, prefix: &str, keys: Keys, junk: BTreeSet<u64>) -> Result<Db> {
-        let mut db = Db { prefix: prefix.into(), keys, conn: Connection::open_in_memory()?, at: 0, copy: 0, epoch: 0, copy_epoch: 0, used: BTreeSet::new(), junk };
-        if let Some((copy, epoch, bytes)) = start(bucket, prefix, &db.keys, &db.junk).await? {
+        let mut db = Db { prefix: prefix.into(), keys, conn: Connection::open_in_memory()?, at: 0, copy: 0, epoch: 0, copy_epoch: 0, used: BTreeSet::new(), junk, signer: None, checks: Checks::default() };
+        if let Some((copy, epoch, bytes)) = start(bucket, prefix, &db.keys, &db.junk).await?
+            && db.copy_holds(bucket, copy, epoch, &bytes).await?
+        {
             db.conn.deserialize_read_exact("main", &bytes[..], bytes.len(), false)?;
             (db.at, db.copy, db.epoch, db.copy_epoch) = (copy, copy, epoch, epoch);
             db.used.insert(epoch);
@@ -187,6 +212,32 @@ impl Db {
                 Err(err) => return Err(err),
             }
         }
+    }
+
+    /// Signs the steps it writes from now on with this endpoint key.
+    pub fn sign_as(&mut self, key: ed25519_dalek::SigningKey) {
+        self.signer = Some(key);
+    }
+
+    /// What it found of the signatures beside the steps it applied.
+    pub fn checks(&self) -> Checks {
+        self.checks
+    }
+
+    /// Whether a copy it would start from, at `copy` under `epoch`, comes to the state hash signed beside the step there:
+    /// with no signature to say, it holds as older readers take it.
+    async fn copy_holds(&mut self, bucket: &impl Bucket, copy: u64, epoch: u32, bytes: &[u8]) -> Result<bool> {
+        let name = step_name(&self.prefix, copy);
+        let Ok(Some(step)) = bucket.get(&name).await else { return Ok(true) };
+        let Some(hash) = self.check(bucket, copy, epoch, &name, &step.bytes).await else { return Ok(true) };
+        // One it can't read for its hash is as good as none, as older readers take it.
+        if state_hash(&copied(bytes)?).ok().is_none_or(|h| h == hash) {
+            return Ok(true);
+        }
+        tracing::warn!("{}: its copy at step {copy} isn't what the database came to there: reading every step", self.prefix);
+        // What it checks next is every step, that one too.
+        self.checks = Checks { wrong: 1, ..Checks::default() };
+        Ok(false)
     }
 
     /// Passes over step `at`, under an epoch no entry made, as every reader does.
@@ -229,6 +280,9 @@ impl Db {
     /// Applies the steps written since this device last read: whether there were any.
     pub async fn catch_up(&mut self, bucket: &impl Bucket) -> Result<bool> {
         let from = self.at;
+        // The state hash signed beside the last step applied, checked once it's read them all: the database's state
+        // after each of them would be a read of all of it each.
+        let mut last: Option<(u64, String)> = None;
         loop {
             let name = self.step(self.at + 1);
             let Some(o) = bucket.get(&name).await? else { break };
@@ -237,13 +291,42 @@ impl Db {
                 continue;
             }
             if let Some((epoch, step)) = self.unseal(self.at + 1, &name, &o.bytes)? {
+                // PHASE 2: here a step with no signature, or one that doesn't hold, stops counting.
+                last = self.check(bucket, self.at + 1, epoch, &name, &o.bytes).await.map(|hash| (self.at + 1, hash));
                 self.apply(&step)?;
                 self.epoch = epoch;
                 self.used.insert(epoch);
             }
             self.at += 1;
         }
+        if let Some((at, hash)) = last
+            && state_hash(&self.conn)? != hash
+        {
+            self.checks.signed -= 1;
+            self.checks.wrong += 1;
+            tracing::warn!("{}: what it read to step {at} isn't what that step's writer signed it comes to", self.prefix);
+        }
         Ok(self.at > from)
+    }
+
+    /// Checks the signature beside step `at`, opened under `epoch`: → the state hash it says, if it holds.
+    async fn check(&mut self, bucket: &impl Bucket, at: u64, epoch: u32, name: &str, sealed: &[u8]) -> Option<String> {
+        // One it can't fetch is as good as none: in phase 1 a step counts whatever its signature says.
+        let (Ok(Some(sig)), Some(key)) = (bucket.get(&sig_name(&self.prefix, at)).await, self.keys.get(&epoch)) else {
+            self.checks.unsigned += 1;
+            return None;
+        };
+        match Sig::check(key, name, sealed, &sig.bytes) {
+            Ok(signed) => {
+                self.checks.signed += 1;
+                Some(signed.hash)
+            }
+            Err(err) => {
+                self.checks.wrong += 1;
+                tracing::warn!("{name}'s signature: {err:#}");
+                None
+            }
+        }
     }
 
     /// Step `at`, opened: None for one every reader passes over, under an epoch lower than the step before it or that
@@ -288,9 +371,11 @@ impl Db {
             tried?;
             let (epoch, key) = self.newest_key()?;
             let name = self.step(self.at + 1);
-            if bucket.create(&name, &crate::keys::seal(epoch, &key, &name, &step)).await? {
+            let sealed = crate::keys::seal(epoch, &key, &name, &step);
+            if bucket.create(&name, &sealed).await? {
                 self.apply(&step)?;
                 self.wrote(epoch);
+                self.sign(bucket, &name, epoch, &key, &sealed).await;
                 self.written(bucket).await;
             }
         }
@@ -322,6 +407,7 @@ impl Db {
                 open.execute_batch("commit")?;
                 drop(open);
                 self.wrote(epoch);
+                self.sign(bucket, &name, epoch, &key, &sealed).await;
                 self.written(bucket).await;
                 return Ok(result);
             }
@@ -348,6 +434,20 @@ impl Db {
 
     fn step(&self, n: u64) -> String {
         step_name(&self.prefix, n)
+    }
+
+    /// After writing step `name`, sealed under `epoch`'s `key` as `sealed`: its signature beside it, if it has a signer.
+    /// Tried once, since the step is written whatever happens to it: a reader takes a step with none as an older
+    /// writer's.
+    async fn sign(&mut self, bucket: &impl Bucket, name: &str, epoch: u32, key: &[u8; 32], sealed: &[u8]) {
+        let Some(signer) = &self.signer else { return };
+        let signed = state_hash(&self.conn).map(|hash| Sig::seal(signer, epoch, key, name, sealed, &hash));
+        let sig = format!("{name}.sig");
+        match async { bucket.create(&sig, &signed?).await }.await {
+            Ok(true) => {}
+            Ok(false) => tracing::warn!("{sig} was there before its step's writer signed it"),
+            Err(err) => tracing::debug!("{sig}: {err:#}"),
+        }
     }
 
     /// After writing a step: a copy, if steps have piled up since the last, and the newest hint moved on. Both only
@@ -438,6 +538,118 @@ pub fn step_name(prefix: &str, n: u64) -> String {
 
 pub fn copy_name(prefix: &str, n: u64) -> String {
     format!("{prefix}/copy/{n:012}")
+}
+
+/// The signature beside step `n`.
+pub fn sig_name(prefix: &str, n: u64) -> String {
+    format!("{}.sig", step_name(prefix, n))
+}
+
+/// A database's prefix and position, from the name of one of its steps or the signature beside one.
+pub fn position(name: &str) -> Option<(&str, u64)> {
+    let (prefix, last) = name.rsplit_once('/')?;
+    let n = last.strip_suffix(".sig").unwrap_or(last).parse::<u64>().ok().filter(|n| *n > 0)?;
+    [step_name(prefix, n), sig_name(prefix, n)].contains(&name.to_string()).then_some((prefix, n))
+}
+
+/// A step's signature (`<prefix>/<n>.sig`): `{"by", "hash", "sig"}`, sealed under the step's epoch and bound to its own
+/// name, since who wrote what is as much the scope's as what they wrote. `by` is the writer's endpoint key (hex), and
+/// `sig` (base64url) its signature, under `one/step`, over the canonical `{"hash", "name", "step"}`: the step's name
+/// (its database and position), the BLAKE3 of its sealed bytes (hex), and `hash`, the state hash of the database
+/// after it (`state_hash`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Sig {
+    pub by: [u8; 32],
+    pub hash: String,
+}
+
+impl Sig {
+    const DOMAIN: &str = "one/step";
+
+    fn signed(name: &str, sealed: &[u8], hash: &str) -> Value {
+        json!({ "name": name, "step": blake3::hash(sealed).to_hex().as_str(), "hash": hash })
+    }
+
+    /// Step `name`'s signature by `signer`, the database coming to `hash` after it, sealed under `epoch`'s `key`.
+    pub fn seal(signer: &ed25519_dalek::SigningKey, epoch: u32, key: &[u8; 32], name: &str, sealed: &[u8], hash: &str) -> Vec<u8> {
+        let sig = crate::keys::sign(signer, Self::DOMAIN, &Self::signed(name, sealed, hash));
+        let bytes = crate::keys::canonical(&json!({
+            "by": crate::entry::hex(signer.verifying_key().as_bytes()),
+            "hash": hash,
+            "sig": data_encoding::BASE64URL_NOPAD.encode(&sig),
+        }));
+        let sig_name = format!("{name}.sig");
+        crate::keys::seal(epoch, key, &sig_name, &bytes)
+    }
+
+    /// Opens step `name`'s signature with the key the step opened with, and checks it signs the step's `sealed`
+    /// bytes there: → who signed it, and the state hash they say the database came to.
+    pub fn check(key: &[u8; 32], name: &str, sealed: &[u8], sig: &[u8]) -> Result<Sig> {
+        let v: Value = serde_json::from_slice(&crate::keys::open(key, &format!("{name}.sig"), sig)?).context("a step's signature is JSON")?;
+        let by: [u8; 32] = crate::keys::unhex(v["by"].as_str().context("a step's signature says who signed it")?)?;
+        let hash = v["hash"].as_str().context("a step's signature has the state hash")?.to_string();
+        let signature = data_encoding::BASE64URL_NOPAD.decode(v["sig"].as_str().context("a step's signature has its signature")?.as_bytes())?;
+        crate::keys::verify(&by, Self::DOMAIN, &Self::signed(name, sealed, &hash), &signature).with_context(|| format!("{name}'s signer"))?;
+        Ok(Sig { by, hash })
+    }
+}
+
+/// A database's state, the same on every device that holds the same rows, whatever order its steps came in and however
+/// SQLite laid out its pages: BLAKE3, hex, over `one/state`, its schema version, then each table by name but SQLite's
+/// own and virtual ones (whose rows are their shadow tables'): its name, its columns' names, and its rows in primary
+/// key order, a table without one by rowid, which its changesets carry; each value with its type. A row's bytes are
+/// `r`, then each value: `n` for null, `i` and 8 bytes big-endian, `f` and the 8 bytes of its IEEE 754 bits, or `s`
+/// (text) or `b` (blob) with a 4-byte big-endian length and its bytes. A table's name is written as text is but with
+/// `t`, and each column's name as text.
+pub fn state_hash(conn: &Connection) -> Result<String> {
+    fn bytes(h: &mut blake3::Hasher, kind: u8, b: &[u8]) {
+        h.update(&[kind]);
+        h.update(&(b.len() as u32).to_be_bytes());
+        h.update(b);
+    }
+    let quote = |name: &str| format!("\"{}\"", name.replace('"', "\"\""));
+    let mut h = blake3::Hasher::new();
+    h.update(b"one/state\0");
+    h.update(&conn.query_row("pragma user_version", [], |r| r.get::<_, i64>(0))?.to_be_bytes());
+    let tables: Vec<String> = conn
+        .prepare("select name from sqlite_schema where type = 'table' and name not like 'sqlite\\_%' escape '\\' and sql not like 'create virtual table%' order by name")?
+        .query_map([], |r| r.get(0))?
+        .collect::<rusqlite::Result<_>>()?;
+    for table in tables {
+        let mut keys: Vec<(i64, String)> = conn.prepare("select pk, name from pragma_table_info(?1) where pk > 0")?.query_map([&table], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<_>>()?;
+        keys.sort();
+        let (columns, order) = match keys.is_empty() {
+            true => ("rowid, *".to_string(), "rowid".to_string()),
+            false => ("*".to_string(), keys.iter().map(|(_, k)| quote(k)).collect::<Vec<_>>().join(", ")),
+        };
+        let mut stmt = conn.prepare(&format!("select {columns} from {} order by {order}", quote(&table)))?;
+        bytes(&mut h, b't', table.as_bytes());
+        for name in stmt.column_names() {
+            bytes(&mut h, b's', name.as_bytes());
+        }
+        let n = stmt.column_count();
+        let mut rows = stmt.query([])?;
+        while let Some(row) = rows.next()? {
+            h.update(b"r");
+            for i in 0..n {
+                match row.get_ref(i)? {
+                    ValueRef::Null => drop(h.update(b"n")),
+                    ValueRef::Integer(v) => drop(h.update(b"i").update(&v.to_be_bytes())),
+                    ValueRef::Real(v) => drop(h.update(b"f").update(&v.to_bits().to_be_bytes())),
+                    ValueRef::Text(t) => bytes(&mut h, b's', t),
+                    ValueRef::Blob(b) => bytes(&mut h, b'b', b),
+                }
+            }
+        }
+    }
+    Ok(h.finalize().to_hex().to_string())
+}
+
+/// A copy's bytes as a database of its own, to read.
+fn copied(bytes: &[u8]) -> Result<Connection> {
+    let mut conn = Connection::open_in_memory()?;
+    conn.deserialize_read_exact("main", bytes, bytes.len(), true)?;
+    Ok(conn)
 }
 
 /// Moves the newest hint at `prefix` on to say at least step `at` and copy `copy` (sealed under `epoch`), replacing it
@@ -713,4 +925,77 @@ mod tests {
         });
     }
 
+    #[test]
+    fn a_step_says_who_wrote_it_and_what_the_database_came_to() {
+        rt().block_on(async {
+            let bucket = Memory::default();
+            let key = keys(&[(1, rand::random())]);
+            let writer = ed25519_dalek::SigningKey::from_bytes(&rand::random());
+            let mut a = Db::open(&bucket, "p", key.clone()).await.unwrap();
+            a.sign_as(writer.clone());
+            a.migrate(&bucket, &[SCHEMA.into()]).await.unwrap();
+            for n in 0..3 {
+                a.write(&bucket, |c| execute(c, "insert into counts values (?, ?)", &[json!(format!("c{n}")), json!(n)]).map(|_| ())).await.unwrap();
+                note(&mut a, &bucket, "a note").await;
+            }
+            let read = Db::open(&bucket, "p", key.clone()).await.unwrap();
+            assert_eq!(read.checks(), Checks { signed: 7, unsigned: 0, wrong: 0 });
+            let opened = |n: u64| {
+                let objects = bucket.objects.lock().unwrap();
+                Sig::check(&key[&1], &step_name("p", n), &objects[&step_name("p", n)], &objects[&sig_name("p", n)])
+            };
+            assert_eq!(opened(7).unwrap().by, writer.verifying_key().to_bytes());
+            assert_eq!(opened(7).unwrap().hash, state_hash(read.connection()).unwrap());
+            // Moved beside another step, or signed by another key over these bytes, it doesn't hold.
+            let mut objects = bucket.objects.lock().unwrap();
+            let moved = objects[&sig_name("p", 2)].clone();
+            objects.insert(sig_name("p", 3), moved);
+            let forger = ed25519_dalek::SigningKey::from_bytes(&rand::random());
+            let mut forged = serde_json::from_slice::<Value>(&crate::keys::open(&key[&1], &sig_name("p", 4), &objects[&sig_name("p", 4)]).unwrap()).unwrap();
+            forged["by"] = json!(crate::entry::hex(forger.verifying_key().as_bytes()));
+            objects.insert(sig_name("p", 4), crate::keys::seal(1, &key[&1], &sig_name("p", 4), &serde_json::to_vec(&forged).unwrap()));
+            // A step with none is an older writer's.
+            objects.remove(&sig_name("p", 5));
+            drop(objects);
+            assert_eq!(Db::open(&bucket, "p", key.clone()).await.unwrap().checks(), Checks { signed: 4, unsigned: 1, wrong: 2 });
+            // The last step's says what the database comes to, which a reader checks: here, it doesn't.
+            let mut objects = bucket.objects.lock().unwrap();
+            let name = step_name("p", 7);
+            let step = objects[&name].clone();
+            objects.insert(sig_name("p", 7), Sig::seal(&writer, 1, &key[&1], &name, &step, &"0".repeat(64)));
+            drop(objects);
+            assert_eq!(Db::open(&bucket, "p", key).await.unwrap().checks().wrong, 3);
+        });
+    }
+
+    #[test]
+    fn the_state_hash_is_the_rows_whichever_way_they_came() {
+        rt().block_on(async {
+            let bucket = Memory::default();
+            let key = keys(&[(1, rand::random())]);
+            let mut a = Db::open(&bucket, "p", key.clone()).await.unwrap();
+            a.sign_as(ed25519_dalek::SigningKey::from_bytes(&rand::random()));
+            a.migrate(&bucket, &[SCHEMA.into()]).await.unwrap();
+            for n in 0..COPY_EVERY + 5 {
+                let name = format!("c{}", n % 7);
+                a.write(&bucket, |c| execute(c, "insert into counts values (?, 1) on conflict (name) do update set n = n + 1", &[json!(name)]).map(|_| ())).await.unwrap();
+                if n % 3 == 0 {
+                    note(&mut a, &bucket, &format!("note {n}")).await;
+                }
+                if n % 10 == 0 {
+                    a.write(&bucket, |c| execute(c, "delete from counts where name = ?", &[json!(format!("c{}", n % 4))]).map(|_| ())).await.unwrap();
+                }
+            }
+            let mine = state_hash(a.connection()).unwrap();
+            // From the copy, from every step, and as it was written: the same.
+            let copied = Db::open(&bucket, "p", key.clone()).await.unwrap();
+            assert!(copied.copy > 0, "a copy was written");
+            assert_eq!(state_hash(copied.connection()).unwrap(), mine);
+            bucket.objects.lock().unwrap().retain(|n, _| !n.contains("/copy/"));
+            let stepped = Db::open(&bucket, "p", key.clone()).await.unwrap();
+            assert_eq!((stepped.copy, state_hash(stepped.connection()).unwrap()), (0, mine.clone()));
+            a.write(&bucket, |c| execute(c, "update counts set n = n + 1", &[]).map(|_| ())).await.unwrap();
+            assert_ne!(state_hash(a.connection()).unwrap(), mine);
+        });
+    }
 }
