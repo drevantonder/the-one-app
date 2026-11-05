@@ -107,7 +107,7 @@ const CLIENT_SCREENS: &[(&str, &str)] = &[
     ("appearance", include_str!("screen/settings/appearance.html")),
     // Written in React (settings/<name>.jsx), built by @one/ui's build into settings/dist/.
     ("vault", include_str!("screen/settings/dist/vault.html")),
-    ("requests", include_str!("screen/settings/requests.html")),
+    ("requests", include_str!("screen/settings/dist/requests.html")),
     ("groups", include_str!("screen/settings/groups.html")),
     ("users", include_str!("screen/settings/dist/users.html")),
     ("backups", include_str!("screen/settings/backups.html")),
