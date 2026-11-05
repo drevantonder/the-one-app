@@ -4,9 +4,11 @@
 // a call needs, which it hands the node with the call (`x-one-keys`). What it opens stays in this page's memory, as keys
 // that can't be read back, and goes with it. What changes who can do what it signs itself (members.js).
 //
-// Who's who it takes only from the install's own signed entries, checked here (`checked`), never from what a node says
-// (/v1/state): which seal key a device has, who opens a scope, which hash an epoch's key must have, and which nodes may
-// be handed a scope's keys. A hacked node holds no keys, and gets none this way.
+// Who's who it takes only from the install's own signed entries, checked by its client's WebAssembly (`checked`), never
+// from what a node says (/v1/state): which seal key a device has, who opens a scope, which hash an epoch's key must
+// have, which nodes may be handed a scope's keys, and who may approve or remove what. Each is answered there, from the
+// scope database and its permissions (client/src/members.rs, `Who`), and only looked up here. A hacked node holds no
+// keys, and gets none this way.
 
 import { askedFor, b64u, databaseKey, ed25519Public, epochHash, hex, hkdfKey, inviteProof, joinCode, oldestNeeded, openAppKey, openSealed, passkeyKeys, random, sealAppKey, sealHandoff, sealTo, sha256, signEntry, signedRequest, twinPublic, untilTaken, x25519Public } from "../shared/crypto.js";
 import { get, put } from "./kept.js";
@@ -49,17 +51,17 @@ export async function joinAsk(keys, name, invite) {
 /// The code this browser shows to be approved: its key's, as 4 and 4.
 export const codeOf = async (key, seal) => (await joinCode(hex.decode(key), hex.decode(seal))).replace(/^(.{4})/, "$1 ");
 
-// MARK: Who opens what, as the install's signed entries say (`k`, one-client's members view)
+// MARK: Who opens what, as the install's signed entries say (`k`, one-client's `Who::view`)
 
 /// What a scope's epochs are sealed to: the client devices of the people who may use it, and nothing that only runs
 /// calls.
 const openers = (k, scope) => k.openers[scope] || [];
 
 /// The scopes `user`'s devices open: everyone's, their own, and their groups'.
-const scopesOf = (k, user) => Object.keys(k.roles).filter((s) => k.roles[s][user]);
+const scopesOf = (k, user) => k.people[user]?.uses || [];
 
 /// Whether `user` may start a scope's new epoch: an admin of it (everyone is of their own).
-const starts = (k, scope, user) => k.roles[scope]?.[user] === "admin";
+const starts = (k, scope, user) => !!k.people[user]?.starts.includes(scope);
 
 /// Whether a node runs each of `scopes`' calls, so it may be handed their keys.
 const runsAll = (k, node, scopes) => !!k?.runs_for[node] && scopes.every((s) => k.runs_for[node].includes(s));
@@ -108,8 +110,10 @@ export class Device {
         if (fresh || !kept) throw err;
         return null;
       });
-      const k = !r || (r.status === 204 && kept) ? kept.members : await this.replay(this.user, r.status === 204 ? undefined : new Uint8Array(await r.arrayBuffer()));
-      if (!k.roles.global?.[this.user]) throw new Error("Your One App doesn't list you yet, so this device didn't use it.");
+      // What an older release kept, without its answers, is replayed again.
+      const given = r && r.status !== 204 ? new Uint8Array(await r.arrayBuffer()) : undefined;
+      const k = !given && kept?.members?.people ? kept.members : await this.replay(this.user, given);
+      if (!k.people[this.user]) throw new Error("Your One App doesn't list you yet, so this device didn't use it.");
       this.known = k;
     }
     return this.known;
@@ -117,7 +121,8 @@ export class Device {
 
   /// The members as last checked, kept in this browser, to start with at once.
   async load() {
-    this.known ||= (await get(`global:${this.user}`))?.members || null;
+    const kept = (await get(`global:${this.user}`))?.members;
+    this.known ||= kept?.people ? kept : null;
   }
 
   // Epochs and keys.
@@ -182,13 +187,9 @@ export class Device {
   async settleOwn() {
     const mine = `user:${this.user}`;
     let k = await this.checked();
-    if (k.runs[this.user] == null || !k.epochs[mine]) k = await this.checked(true);
-    if (k.runs[this.user] == null) {
-      // Machines only: the serverless node is no one's, and runs anyone's when no machine answers.
-      const whose = (key) => k.devices.find((d) => d.key === key)?.user;
-      const on = Object.keys(k.runs_for).filter((key) => whose(key) && whose(key) !== this.user && k.runs_for[key].includes("global"));
-      if (on.length) await this.write("global", members.runs({ on }));
-    }
+    if (k.people[this.user].runs_until_chosen.length || !k.epochs[mine]) k = await this.checked(true);
+    const on = k.people[this.user].runs_until_chosen;
+    if (on.length) await this.write("global", members.runs({ on }));
     if (!k.epochs[mine]) await this.newEpoch(mine, 1);
   }
 
@@ -226,13 +227,13 @@ export class Device {
   /// the app's key in each epoch of the scope, sealed to it first, then the `grant` naming each one's hash. Stopping
   /// it starts a new epoch of the scope, which the device isn't sealed, so the keys it held open nothing written after.
   async grant({ endpoint, app, scope, days = GRANT_DAYS }) {
-    const st = this.state();
-    const e = st.install.devices.find((d) => d.key === endpoint);
+    const k = await this.checked();
+    const e = k.devices.find((d) => d.key === endpoint && d.user);
     if (!e) throw new Error("That device isn’t one of yours.");
     const until = days === 0 ? 0 : Date.now() + Math.min(days, GRANT_DAYS) * DAY;
     const keys = {};
     if (until) {
-      const made = Object.keys(st.install.epochs?.[scope]?.hashes || {}).map(Number);
+      const made = Object.keys(k.epochs[scope]?.hashes || {}).map(Number);
       for (const n of made.length ? made : [1]) {
         const key = await this.appKeyBytes(scope, app, n);
         await this.api("/v1/keys", { method: "POST", body: { scope, n, app, to: endpoint, sealed: b64u.encode(await sealTo(hex.decode(e.seal), key)) } });
@@ -256,7 +257,7 @@ export class Device {
         this.grant({ endpoint: g.endpoint, app: g.app, scope: g.scope, days: 0 }).catch(() => {}).finally(() => this.renewing.delete(id));
         continue;
       }
-      const newest = st.install.epochs?.[g.scope]?.n || 0;
+      const newest = this.known?.epochs[g.scope]?.n || 0;
       const reaches = Math.max(0, ...Object.keys(g.keys || {}).map(Number));
       if (g.app !== app || g.by !== this.user || g.until <= now || (g.until > now + (GRANT_DAYS - 1) * DAY && reaches >= newest)) continue;
       const id = `${g.endpoint} ${g.scope} ${g.app}`;
@@ -420,7 +421,7 @@ export class Device {
   /// they invited from this browser, whose proof is right. Each with its code.
   async requests() {
     const own = (await answer(await this.bearer("/api/auth/devices/requests"))).requests || [];
-    const invited = this.state()?.user?.role === "admin" ? (await this.authSigned("GET", "/api/auth/devices/requests").catch(() => ({}))).requests || [] : [];
+    const invited = (await this.checked()).people[this.user]?.invites ? (await this.authSigned("GET", "/api/auth/devices/requests").catch(() => ({}))).requests || [] : [];
     const all = [...own, ...invited].filter((r, i, a) => !r.service && r.key !== this.me.key && a.findIndex((x) => x.key === r.key) === i);
     const ours = await Promise.all(all.map(async (r) => r.user === this.user || (await this.invitedHere(r))));
     return Promise.all(all.filter((_, i) => ours[i]).map(async (r) => ({ ...r, code: await codeOf(r.key, r.seal), mine: r.user === this.user })));
@@ -442,18 +443,21 @@ export class Device {
   /// network and clears its request.
   async approve(r, as = this.me) {
     const k = await this.checked(true);
-    const known = !!k.roles.global?.[r.user];
+    const may = k.people[this.user];
+    const known = !!k.people[r.user];
     // Listed already by an approval that didn't finish (its mark at auth failed): the rest is done again.
     const listed = k.devices.some((d) => d.key === r.key && d.user === r.user && d.seal === r.seal);
-    if (r.user !== this.user && known && !listed) throw new Error("Only their own devices approve one of theirs.");
+    const own = may.approves.includes(r.user);
+    if (!own && known && !listed) throw new Error("Only their own devices approve one of theirs.");
     let newUser = null;
-    if (r.user !== this.user) {
+    if (!own) {
+      if (!may.invites) throw new Error("Only an admin lets someone new in.");
       if (!(await this.invitedHere(r))) throw new Error("That device didn’t come from an invite made here.");
       newUser = { name: (await get(`invite:${r.user}`)).name || r.person, role: "member" };
     }
     if (!listed) await this.write("global", members.device({ key: r.key, seal: r.seal, user: r.user, name: r.name, newUser, device: r.device }), as);
     await this.sealTo(r, newUser ? ["global"] : scopesOf(k, r.user), as);
-    await this.tell({ add: r.key, role: "client", ...(!newUser && k.roles.global?.[this.user] === "admin" ? { admin: true } : {}) }, as).catch((err) => {
+    await this.tell({ add: r.key, role: "client", ...(!newUser && may.invites ? { admin: true } : {}) }, as).catch((err) => {
       if (!(listed && /in already/.test(err.message))) throw err;
     });
     // Signed in again on the same device: its sign-in before goes, as signing out would have taken it, so its scopes
@@ -490,6 +494,7 @@ export class Device {
     const k = await this.checked(true);
     const it = k.devices.find((e) => e.key === key);
     if (!it) throw new Error("That device isn’t listed.");
+    if (!k.people[this.user].removes.includes(key)) throw new Error("Only its person or an admin takes a device out.");
     await this.tell({ remove: key }, as).catch((err) => {
       if (!/isn.t|not/.test(err.message)) throw err;
     });
@@ -517,6 +522,7 @@ export class Device {
   async removePerson(user) {
     const k = await this.checked(true);
     if (user === this.user) throw new Error("You can’t remove yourself. Another admin can.");
+    if (!k.people[this.user].removes_people) throw new Error("Only an admin takes someone out.");
     const theirs = k.devices.filter((e) => e.user === user).map((e) => e.key);
     for (const key of theirs) {
       await this.tell({ remove: key }).catch((err) => {
@@ -564,7 +570,7 @@ export class Device {
     const k = await this.checked(true);
     await this.sealTo(pk, scopesOf(k, this.user));
     // An admin's passkey is an admin's device at the relay too, so the devices it lets in are let in as theirs.
-    await this.tell({ add: pk.key, role: "client", ...(k.roles.global?.[this.user] === "admin" ? { admin: true } : {}) });
+    await this.tell({ add: pk.key, role: "client", ...(k.people[this.user].invites ? { admin: true } : {}) });
   }
 
   /// This browser let in by a listed passkey of its person's, which signs for it and opens what's sealed to it.

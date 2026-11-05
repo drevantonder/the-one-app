@@ -20,11 +20,12 @@ use std::time::Duration;
 use ed25519_dalek::SigningKey;
 use one::entry::{Entry, Ext, Hash, Scope, hex};
 use one::keys::{self, Endpoint, Handed, Handoff, Need, Waited};
-use one::members::{self, Members};
+use one::members;
 use data_encoding::BASE64URL_NOPAD as B64U;
 use serde_json::{Value, json};
 
 use crate::answers::Answers;
+use crate::members::Who;
 use crate::bucket::Signed;
 use crate::{Body, Client, Error, Request, Response, Sent, TRACE_HEADER, not_let_in, unsent};
 
@@ -55,7 +56,7 @@ fn refused() -> Error {
 
 /// The install as this device read and checked it itself.
 struct Known {
-    members: Members,
+    who: Who,
     /// Its person.
     user: String,
     /// The nodes it may ask, by key: their seal keys; and the serverless node, asked last, if the install has one.
@@ -374,7 +375,7 @@ impl Device {
         let kept = std::fs::read_to_string(&pinned).ok().and_then(|had| Hash::from_hex(had.trim()).ok());
         let mut global = crate::members::Global::new(kept);
         global.add_entries(read.entries).map_err(|_| failed("This isn't the One App this device joined."))?;
-        let m = global.members().map_err(failed)?;
+        let who = Who::of(&global.members().map_err(failed)?).map_err(failed)?;
         if kept.is_none()
             && let Some(root) = global.root()
         {
@@ -383,21 +384,21 @@ impl Device {
         }
         // Every epoch it was sealed must be the one the entries made.
         for (n, key) in &epochs {
-            if m.epoch_hashes.get(&(Scope::Global, *n)) != Some(&keys::epoch_hash(key)) {
+            if who.epoch_hash(&Scope::Global, *n).map_err(failed)? != Some(keys::epoch_hash(key)) {
                 return Err(failed("A key for this didn't check out, so it wasn't used."));
             }
             self.epochs.lock().unwrap().insert(("global".into(), *n), *key);
         }
-        let user = m.machine(&self.me.key).map(|d| d.user.clone()).ok_or_else(|| failed("This device isn't listed yet."))?;
-        let mut nodes: HashMap<[u8; 32], [u8; 32]> = m.computes().filter(|c| m.serves(&c.key, &user)).map(|c| (c.key, c.seal)).collect();
-        // The serverless node, as an admin's setting names it, runs anyone's calls: its seal key is its key's twin.
-        let serverless = m.settings.get("serverless").and_then(|k| keys::unhex(k).ok());
-        if let Some(key) = serverless
-            && let Ok(seal) = one::kernel::twin_public(&key)
-        {
-            nodes.insert(key, seal);
+        let user = who.device(&self.me.key).map_err(failed)?.map(|d| d.user).ok_or_else(|| failed("This device isn't listed yet."))?;
+        // The nodes that run something of its person's, and the serverless node, which runs anyone's calls.
+        let serverless = who.serverless().map_err(failed)?;
+        let mut nodes: HashMap<[u8; 32], [u8; 32]> = HashMap::new();
+        for (key, seal) in who.nodes().map_err(failed)? {
+            if Some(key) == serverless || who.serves(&key, &user).map_err(failed)? {
+                nodes.insert(key, seal);
+            }
         }
-        *self.known.lock().unwrap() = Some(Known { members: m, user, nodes: nodes.clone(), serverless, at: now() });
+        *self.known.lock().unwrap() = Some(Known { who, user, nodes: nodes.clone(), serverless, at: now() });
         Ok(nodes)
     }
 
@@ -421,14 +422,13 @@ impl Device {
         let device = self.on.lock().unwrap().clone();
         let todo = || -> Result<_, Error> {
             let known = self.known.lock().unwrap();
-            let m = &known.as_ref().ok_or_else(refused)?.members;
-            let me = m.machine(&self.me.key);
-            let user = me.map(|d| d.user.clone()).unwrap_or_default();
-            let on: Vec<[u8; 32]> = m.computes().filter(|c| c.user != user && m.runs_for(&c.key, &Scope::Global)).map(|c| c.key).collect();
-            let on = if m.runs.contains_key(&user) { Vec::new() } else { on };
+            let who = &known.as_ref().ok_or_else(refused)?.who;
+            let me = who.device(&self.me.key).map_err(failed)?;
+            let user = me.as_ref().map(|d| d.user.clone()).unwrap_or_default();
+            let on = who.runs_until_chosen(&user).map_err(failed)?;
             // Listed before sign-ins named their device: it lists itself again, naming it.
-            let unnamed = me.filter(|d| d.device.is_none() && d.passkey.is_none() && device.is_some()).map(|d| (d.name.clone(), d.roles.iter().copied().collect::<Vec<_>>()));
-            let first = m.epoch(&Scope::User(user.clone())) == 0;
+            let unnamed = me.filter(|d| d.device.is_none() && d.passkey.is_none() && device.is_some()).map(|d| (d.name, d.kinds));
+            let first = who.epoch(&Scope::User(user.clone())).map_err(failed)? == 0;
             Ok((!on.is_empty() || unnamed.is_some() || first).then_some((user, on, unnamed, first)))
         };
         if todo()?.is_none() {
@@ -673,7 +673,7 @@ impl Device {
     fn sealed_for(&self, node: &[u8; 32], handed: &[Handed], me: &str) -> Vec<(String, String)> {
         let known = self.known.lock().unwrap();
         let Some((k, seal)) = known.as_ref().and_then(|k| Some((k, k.nodes.get(node)?))) else { return Vec::new() };
-        let keys: Vec<Handed> = handed.iter().filter(|h| Scope::parse(&h.scope).is_ok_and(|s| k.members.runs_for(node, &s))).cloned().collect();
+        let keys: Vec<Handed> = handed.iter().filter(|h| Scope::parse(&h.scope).is_ok_and(|s| k.who.runs_for(node, &s).unwrap_or(false))).cloned().collect();
         if keys.is_empty() {
             return Vec::new();
         }
@@ -775,7 +775,7 @@ impl Device {
             return Err(failed("A device that isn't one of yours asked for keys. Nothing was handed."));
         }
         let scopes: Vec<Scope> = need.iter().map(|n| Scope::parse(&n.scope)).collect::<Result<_, _>>().map_err(|_| failed("A device asked for keys of something that isn't. Nothing was handed."))?;
-        let runs = |device: &Device| device.known.lock().unwrap().as_ref().is_some_and(|k| scopes.iter().all(|s| k.members.runs_for(node, s)));
+        let runs = |device: &Device| device.known.lock().unwrap().as_ref().is_some_and(|k| scopes.iter().all(|s| k.who.runs_for(node, s).unwrap_or(false)));
         // What it runs may be newer than this device read: read again, now and then, before refusing.
         if !runs(self) && self.known.lock().unwrap().as_ref().is_some_and(|k| now() > k.at + REREAD) {
             noted(notes, json!({ "step": "members" }), self.read_members()).await?;
@@ -801,7 +801,7 @@ impl Device {
         let mut oldest: BTreeMap<String, u32> = BTreeMap::new();
         for ((p, scope), hint) in each.iter().zip(hints) {
             let hint = hint.map_err(failed)?;
-            let newest = self.known.lock().unwrap().as_ref().map_or(0, |k| k.members.epoch(scope));
+            let newest = self.known.lock().unwrap().as_ref().map_or(0, |k| k.who.epoch(scope).unwrap_or(0));
             oldest.insert(p.clone(), keys::oldest_needed(hint.as_ref().map(|o| &o.bytes[..]), newest));
         }
         need.retain(|n| n.epoch >= oldest[&prefix(n)]);
@@ -851,13 +851,19 @@ impl Device {
     /// entries this device read itself gave.
     fn open_epochs(&self, scope: &str, kept: &Value) {
         let Ok(parsed) = Scope::parse(scope) else { return };
-        let hashes = self.known.lock().unwrap().as_ref().map(|k| k.members.epoch_hashes.clone()).unwrap_or_default();
-        for (m, sealed) in kept["sealed"].as_object().into_iter().flatten() {
-            let Ok(m) = m.parse::<u32>() else { continue };
-            let opened = B64U.decode(sealed.as_str().unwrap_or("").as_bytes()).ok().and_then(|s| one::kernel::open_sealed(&self.opens(), &s).ok()).and_then(|k| <[u8; 32]>::try_from(k).ok());
-            if let Some(key) = opened
-                && hashes.get(&(parsed.clone(), m)) == Some(&keys::epoch_hash(&key))
-            {
+        let opened: Vec<(u32, [u8; 32])> = kept["sealed"]
+            .as_object()
+            .into_iter()
+            .flatten()
+            .filter_map(|(m, sealed)| {
+                let m = m.parse::<u32>().ok()?;
+                let key = B64U.decode(sealed.as_str().unwrap_or("").as_bytes()).ok().and_then(|s| one::kernel::open_sealed(&self.opens(), &s).ok())?;
+                Some((m, <[u8; 32]>::try_from(key).ok()?))
+            })
+            .collect();
+        let made = |m: u32| self.known.lock().unwrap().as_ref().and_then(|k| k.who.epoch_hash(&parsed, m).ok().flatten());
+        for (m, key) in opened {
+            if made(m) == Some(keys::epoch_hash(&key)) {
                 self.epochs.lock().unwrap().insert((scope.to_string(), m), key);
             }
         }
@@ -918,10 +924,10 @@ impl Device {
         let parsed = Scope::parse(scope).map_err(failed)?;
         let to = |device: &Device| -> Result<(Option<[u8; 32]>, Vec<Endpoint>), Error> {
             let known = device.known.lock().unwrap();
-            let m = &known.as_ref().ok_or_else(refused)?.members;
+            let who = &known.as_ref().ok_or_else(refused)?.who;
             let mut to = vec![device.me];
-            to.extend(m.clients().filter(|c| c.user == user && c.key != device.me.key && c.seal != c.key).map(|c| Endpoint { key: c.key, seal: c.seal }));
-            Ok((m.recovery, to))
+            to.extend(who.openers(&parsed).map_err(failed)?.into_iter().filter(|(key, seal)| *key != device.me.key && seal != key).map(|(key, seal)| Endpoint { key, seal }));
+            Ok((who.recovery().map_err(failed)?, to))
         };
         let (recovery, to) = to(self)?;
         let recovery = recovery.ok_or_else(|| failed("Your One App has no recovery key to keep its keys with."))?;
@@ -929,7 +935,7 @@ impl Device {
         let hash = keys::epoch_hash(&key);
         self.write("global", user, members::epoch(&parsed, 1, &to.iter().map(|e| e.key).collect::<Vec<_>>(), &hash)).await?;
         self.read_members().await?;
-        if self.known.lock().unwrap().as_ref().and_then(|k| k.members.epoch_hashes.get(&(parsed.clone(), 1)).cloned()) != Some(hash) {
+        if self.known.lock().unwrap().as_ref().and_then(|k| k.who.epoch_hash(&parsed, 1).ok().flatten()) != Some(hash) {
             return Err(failed("Another device made new keys for this just now. Try again."));
         }
         let recovery = one::kernel::twin_public(&recovery).map_err(failed)?;

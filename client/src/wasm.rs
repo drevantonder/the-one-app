@@ -160,7 +160,7 @@ impl Response {
     }
 }
 
-/// `global`'s entries this browser holds, checked, and the members they make (src/members.rs): from what it kept
+/// `global`'s entries this browser holds, checked, and who's who as they make it (src/members.rs): from what it kept
 /// (`kept`, a pack, of the install whose genesis is `root`, hex, or none the first time) and what a node just gave
 /// (`given`, a pack). Throws if any entry doesn't check, or they're another install's.
 #[wasm_bindgen]
@@ -183,7 +183,7 @@ impl Global {
         if !given.is_empty() {
             g.add(&given).map_err(js)?;
         }
-        let members = crate::members::view(&g.members().map_err(js)?).to_string();
+        let members = crate::members::view(&g.members().map_err(js)?).map_err(js)?.to_string();
         Ok(Global { root: g.root().map(|r| r.to_hex()).unwrap_or_default(), pack: g.pack(), have: g.have(), members })
     }
 
@@ -205,7 +205,7 @@ impl Global {
         self.have.clone()
     }
 
-    /// The members, as JSON (`members::view`).
+    /// Who's who, as JSON (`members::Who::view`).
     #[wasm_bindgen(getter)]
     pub fn members(&self) -> String {
         self.members.clone()

@@ -341,7 +341,7 @@ fn a_client_takes_whos_who_only_from_the_installs_signed_entries() {
     let mut client = Global::new(None);
     client.add(&pack(&entries)).unwrap();
     assert_eq!(client.root(), Some(genesis.hash()));
-    let k = view(&client.members().unwrap());
+    let k = view(&client.members().unwrap()).unwrap();
     let opens = |k: &serde_json::Value| k["openers"]["global"].as_array().unwrap().iter().map(|o| (o["key"].as_str().unwrap().to_string(), o["seal"].as_str().unwrap().to_string())).collect::<BTreeSet<_>>();
     let seal = |key: &SigningKey| hex(&Endpoint::of(key).seal);
     assert_eq!(opens(&k), BTreeSet::from([(hex(&mac.verifying_key().to_bytes()), seal(&mac)), (hex(&phone.verifying_key().to_bytes()), seal(&phone))]));
@@ -351,7 +351,7 @@ fn a_client_takes_whos_who_only_from_the_installs_signed_entries() {
     let mine = SigningKey::from_bytes(&[9; 32]);
     let forged = write(&node, None, members::device(&Endpoint::of(&mine), ANDRE, "phone 2", &[Kind::Client], None));
     client.add(&pack(&[&forged])).unwrap();
-    assert_eq!(opens(&view(&client.members().unwrap())), opens(&k), "a device no entry of the person's lists isn't sealed to");
+    assert_eq!(opens(&view(&client.members().unwrap()).unwrap()), opens(&k), "a device no entry of the person's lists isn't sealed to");
 
     // A seal key changed in an entry Andre's device signed: refused, all of it.
     let (header, signature, body) = listed.encode();

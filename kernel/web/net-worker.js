@@ -72,9 +72,9 @@ export function server(version) {
   /// something of `user`'s: all of them before it's checked any. A node the relay or a node names besides isn't asked.
   async function theirs(user, keys, kept) {
     const k = (kept === undefined ? await (await code)[1].get(`global:${user}`) : kept)?.members;
-    if (!k) return keys;
-    const uses = Object.keys(k.roles).filter((s) => k.roles[s][user]);
-    return keys.filter((key) => (k.runs_for[key] || []).some((s) => uses.includes(s)));
+    if (!k?.people) return keys;
+    const theirs = k.people[user]?.nodes || [];
+    return keys.filter((key) => theirs.includes(key));
   }
 
   /// `user`'s members from `global`'s entries kept and those `given` (a pack), checked and replayed by the client
@@ -83,7 +83,8 @@ export function server(version) {
   async function global(user, given) {
     const [, { get, put }] = await code;
     const kept = await get(`global:${user}`);
-    if (!given && kept) return kept.members;
+    // What an older release kept, without its answers, is replayed again.
+    if (!given && kept?.members?.people) return kept.members;
     const { Global } = await glue;
     const root = kept?.root || (await get(`genesis:${user}`)) || "";
     const g = new Global(root, kept?.pack || new Uint8Array(), given || new Uint8Array());
