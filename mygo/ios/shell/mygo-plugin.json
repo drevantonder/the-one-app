@@ -1,0 +1,21 @@
+{
+  "mobile": {
+    "id": "oneshell",
+    "ios": {
+      "sources": [
+        "ios/*.swift"
+      ],
+      "class": "OneShellPlugin",
+      "frameworks": [
+        "AuthenticationServices",
+        "SystemConfiguration"
+      ],
+      "entitlements": {
+        "application-identifier": "T3SPIKE000.app.one.mygo",
+        "keychain-access-groups": [
+          "T3SPIKE000.app.one.mygo"
+        ]
+      }
+    }
+  }
+}
