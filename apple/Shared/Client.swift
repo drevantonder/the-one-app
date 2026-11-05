@@ -3,7 +3,7 @@ import Foundation
 import Security
 
 /// This app as a device of its person (client/ffi, the library every native app shares): its own key, made here and
-/// kept in the Keychain, one for each person at each address. It gets in when one of their devices approves the code it
+/// kept in the Keychain (`DeviceKeys`), one for each person at each address. It gets in when one of their devices approves the code it
 /// shows; then every request reaches their install's nodes over iroh, as this device, with the keys each needs.
 /// Signing in only says who's asking.
 actor DeviceClient {
@@ -18,8 +18,8 @@ actor DeviceClient {
         guard let address = Auth.address?.absoluteString else { throw Auth.SignedOut(message: String(localized: "Sign in again.")) }
         let id = "\(address) \(Self.subject(token) ?? "")"
         if let device, deviceFor == id { return device }
-        let folder = URL.applicationSupportDirectory.appending(path: "client/\(Keychain.name(id))")
-        let made = try await off { try ThisDevice(secret: Keychain.secret(id), address: address, dir: folder.path()) }
+        let folder = URL.applicationSupportDirectory.appending(path: "client/\(DeviceKeys.name(id))")
+        let made = try await off { try ThisDevice(secret: DeviceKeys.secret(id), address: address, dir: folder.path()) }
         if let on = await Self.on() { made.on(device: on) }
         if let old = device { await off { old.disconnect() } }
         device = made
@@ -41,7 +41,7 @@ actor DeviceClient {
               let device = state["device"] as? [String: Any] else { return nil }
         return device["key"] as? String
         #else
-        return SHA256.hash(data: Keychain.secret("this device")).map { String(format: "%02x", $0) }.joined()
+        return SHA256.hash(data: DeviceKeys.secret("this device", person: false)).map { String(format: "%02x", $0) }.joined()
         #endif
     }
 
@@ -77,6 +77,14 @@ actor DeviceClient {
         }
     }
 
+    /// Registers this device's APNs token with the install's push Worker, which carries each note sealed to this device
+    /// through Apple's service for `env` (sandbox or production) to this app (`topic`, its bundle id).
+    func registerPush(token: String, env: String) async throws {
+        let device = try await current()
+        let topic = Bundle.main.bundleIdentifier ?? ""
+        try await off { try device.registerPush(via: "apns", address: token, env: env, topic: topic) }
+    }
+
     /// Developer mode, on this device alone (Settings › Developer): whether it's on, first turning it on or off.
     func developer(_ on: Bool?) async throws -> Bool {
         let device = try await current()
@@ -98,7 +106,7 @@ actor DeviceClient {
         let device: ThisDevice
         if let known { device = known } else if let made = try? await current() { device = made } else { return NotLetIn() }
         guard (try? await off { device.removed() }) == true else { return NotLetIn() }
-        if let deviceFor { Keychain.forget(deviceFor) }
+        if let deviceFor { DeviceKeys.forget(deviceFor) }
         await close()
         return Auth.SignedOut(message: String(localized: "This device was taken out. Sign in again."))
     }
@@ -107,7 +115,7 @@ actor DeviceClient {
     /// signing in again makes a new device that replaces it, never a second. Asked before the sign-in is revoked.
     func signOut() async {
         if let device { await off { device.signOut() } }
-        if let deviceFor { Keychain.forget(deviceFor) }
+        if let deviceFor { DeviceKeys.forget(deviceFor) }
         await close()
     }
 
@@ -134,38 +142,6 @@ actor DeviceClient {
         text += String(repeating: "=", count: (4 - text.count % 4) % 4)
         guard let data = Data(base64Encoded: text), let claims = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
         return claims["sub"] as? String
-    }
-
-    /// The device keys, in the Keychain: on this device only, readable once it has been unlocked since it started.
-    private enum Keychain {
-        static func name(_ id: String) -> String {
-            String(id.utf8.reduce(UInt64(14_695_981_039_346_656_037)) { ($0 ^ UInt64($1)) &* 1_099_511_628_211 }, radix: 16)
-        }
-
-        static func query(_ id: String) -> [String: Any] {
-            [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: "\(Auth.cli) device", kSecAttrAccount as String: id]
-        }
-
-        /// `id`'s key goes: a key the install removed can't be let in again, so the next sign-in makes a new one.
-        static func forget(_ id: String) {
-            SecItemDelete(query(id) as CFDictionary)
-        }
-
-        /// `id`'s key, made the first time.
-        static func secret(_ id: String) -> Data {
-            var out: CFTypeRef?
-            if SecItemCopyMatching(query(id).merging([kSecReturnData as String: true]) { $1 } as CFDictionary, &out) == errSecSuccess, let data = out as? Data, data.count == 32 {
-                return data
-            }
-            let secret = newDeviceSecret()
-            SecItemDelete(query(id) as CFDictionary)
-            var item = query(id).merging([kSecValueData as String: secret]) { $1 }
-            #if os(iOS)
-            item[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-            #endif
-            SecItemAdd(item as CFDictionary, nil)
-            return secret
-        }
     }
 }
 

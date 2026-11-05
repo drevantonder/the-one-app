@@ -134,7 +134,8 @@ actor Auth {
 
     /// Signs in (`authenticate` opens a URL for the person to sign in at, and gives where it came back to; it throws
     /// `Cancelled` if they gave up), calling this device `name` among the person's signed-in devices, and coming back
-    /// to `redirect` if it isn't the one registered (a loopback address's port). False if they cancelled.
+    /// to `redirect` if it isn't the one registered (a loopback address's port). It names the device it's for (`join`),
+    /// as every client's sign-in does. False if they cancelled.
     func signIn(name: String, redirect: String? = nil, authenticate: @MainActor @Sendable (URL) async throws -> URL) async throws -> Bool {
         let redirect = redirect ?? Self.redirect
         let meta = try await meta()
@@ -146,6 +147,8 @@ actor Auth {
             .init(name: "scope", value: "openid profile offline_access"), .init(name: "code_challenge", value: Self.b64u(Data(SHA256.hash(data: Data(verifier.utf8))))),
             .init(name: "code_challenge_method", value: "S256"), .init(name: "state", value: state), .init(name: "prompt", value: "consent"),
         ]
+        // The device it's for, so the person's devices can let it in by this sign-in.
+        if let join = DeviceKeys.signingInFor() { url.queryItems?.append(.init(name: "join", value: join)) }
         let back: URL
         do {
             back = try await authenticate(url.url!)

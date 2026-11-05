@@ -1,5 +1,8 @@
 # The native shells. project.sh fills in config.toml's fields and runs xcodegen.
 name: Shells
+include:
+  - path: push.yml
+    enable: ${PUSH}
 options:
   deploymentTarget:
     macOS: "26.0"
@@ -74,7 +77,7 @@ targets:
       path: build/Phone.entitlements
       properties:
         com.apple.security.application-groups: ["group.app.${CONFIG_CLI}.phone"]
-        # aps-environment, for apps' pushes, is added by project.sh only once push is on (see there).
+        # aps-environment, for pushes, comes with push.yml, only once push is on (see project.sh).
     info:
       path: build/Phone-Info.plist
       properties:
@@ -84,6 +87,8 @@ targets:
         BuildCommit: ${BUILD_COMMIT}
         CFBundleVersion: "${BUILD_NUMBER}"
         AppGroup: group.app.${CONFIG_CLI}.phone
+        # Where its device keys are kept (Shared/DeviceKeys.swift), which its notification extension reads too.
+        KeychainGroup: group.app.${CONFIG_CLI}.phone
         # <cli>://signed-in/: back from signing in; <cli>://vault?id=…&scope=…: an agent's request for a Vault item.
         CFBundleURLTypes:
           - CFBundleURLName: app.${CONFIG_CLI}.join

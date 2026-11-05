@@ -429,6 +429,8 @@ final class Store {
             try current(began)
             self.developer = developer
             await renameIfHostname()
+            // Its pushes, now it's one of the install's devices, which alone the push Worker takes.
+            Task { await Push.setUp() }
         }
         if first || arrived || apps.isEmpty || regrouped {
             let early = await early?.value

@@ -3,8 +3,7 @@
 Andre's decision, 2026-11-05. Built on 2026-11-05 but for what's left below: the code is `src/sign_in_proof.rs` (the checks), `kernel/auth/worker.js` (the nonce, the challenge, passing the proof on), `src/node/devices.rs` and `kernel/web/web.js` (approving by it), and Settings › Devices (joined).
 
 Left:
-- Push, once the push Worker is on main: a silent push that wakes the phone to check, "wants in" with Approve and Not Me when nothing let it in within a few seconds, and "joined" as a push.
-- The iPhone and Mac apps' sign-ins naming their device (`join` in the authorization, as web, Android and the CLI's do), so they're let in by it too; today they're approved by code.
+- Push: a silent push that wakes the phone to check, "wants in" when nothing let it in within a few seconds, and "joined" as a push. The iPhone, iPad and Mac apps already show a note whose action is `{ "join": "<code>" }` with Approve and Not Me (`apple/Shared/Notes.swift`); nothing sends one yet.
 - A passkey's public key is recorded from what auth holds when a device that signed in with it is approved by its code, so a tampered auth then could slip in its own: as with a tampered auth deploy, "joined · Remove" is what shows it.
 
 ## Today

@@ -47,8 +47,41 @@ identity=$(echo "$identities" | sed -n 's/.*"\(Developer ID Application: [^"]*\)
 identity=${identity:-$(echo "$identities" | sed -n 's/.*"\(Apple Development: [^"]*\)".*/\1/p' | head -1)}
 sign=(codesign --force --options runtime --sign "${identity:--}")
 [ -z "$identity" ] || sign+=(--timestamp)
+entitlements=$PWD/Mac.entitlements
+# With push (apple/project.sh), the app and its notification extension each carry the Developer ID provisioning profile
+# of their App ID, which grants push and the keychain group where the extension reads the device keys it opens notes
+# with: made at developer.apple.com, and downloaded to ~/Library/Developer/Xcode/UserData/Provisioning Profiles.
+if [ -n "$PUSH" ]; then
+	# The profile for App ID $1, and its entitlements, in build/profile.plist.
+	profile() {
+		for f in "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"/* "$HOME/Library/MobileDevice/Provisioning Profiles"/*; do
+			[ -f "$f" ] && security cms -D -i "$f" > build/profile.plist 2>/dev/null || continue
+			[ "$(/usr/libexec/PlistBuddy -c "Print :Entitlements:com.apple.application-identifier" build/profile.plist 2>/dev/null)" = "$APPLE_TEAM.$1" ] &&
+				[ "$(/usr/libexec/PlistBuddy -c "Print :ProvisionsAllDevices" build/profile.plist 2>/dev/null)" = true ] && { echo "$f"; return; }
+		done
+		echo "push needs a Developer ID provisioning profile for $1 (developer.apple.com), downloaded to ~/Library/Developer/Xcode/UserData/Provisioning Profiles" >&2
+		return 1
+	}
+	# Entitlements $1 for App ID $2, from $3's if given, with what its profile grants: its id, the team, and the keychain
+	# group.
+	granted() {
+		if [ -n "${3:-}" ]; then cp "$3" "$1"; else printf '<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0"><dict/></plist>\n' > "$1"; fi
+		/usr/libexec/PlistBuddy -c "Add :com.apple.application-identifier string $APPLE_TEAM.$2" -c "Add :com.apple.developer.team-identifier string $APPLE_TEAM" \
+			-c "Add :keychain-access-groups array" -c "Add :keychain-access-groups:0 string $APPLE_TEAM.$BUNDLE_ID" "$1"
+	}
+	appex="$app/Contents/PlugIns/Notifications.appex"
+	cp "$(profile "$BUNDLE_ID.notifications")" "$appex/Contents/embedded.provisionprofile"
+	granted build/MacNotifications.entitlements "$BUNDLE_ID.notifications"
+	/usr/libexec/PlistBuddy -c "Add :com.apple.security.app-sandbox bool true" build/MacNotifications.entitlements
+	cp "$(profile "$BUNDLE_ID")" "$app/Contents/embedded.provisionprofile"
+	aps=$(/usr/libexec/PlistBuddy -c "Print :Entitlements:com.apple.developer.aps-environment" build/profile.plist)
+	entitlements=$PWD/build/Mac.entitlements
+	granted "$entitlements" "$BUNDLE_ID" Mac.entitlements
+	/usr/libexec/PlistBuddy -c "Add :com.apple.developer.aps-environment string $aps" "$entitlements"
+	keychain "${sign[@]}" --entitlements "$PWD/build/MacNotifications.entitlements" "$PWD/$appex" || { echo "couldn't sign the notification extension as ${identity:-ad hoc}"; exit 1; }
+fi
 keychain "${sign[@]}" "$PWD/$app/Contents/MacOS/$CONFIG_CLI" &&
-	keychain "${sign[@]}" --entitlements "$PWD/Mac.entitlements" "$PWD/$app" || { echo "couldn't sign the app as ${identity:-ad hoc}"; exit 1; }
+	keychain "${sign[@]}" --entitlements "$entitlements" "$PWD/$app" || { echo "couldn't sign the app as ${identity:-ad hoc}"; exit 1; }
 
 # A release is notarized, with the ticket stapled to the app, so Gatekeeper lets it open wherever it's downloaded.
 # notarytool's credentials are a keychain profile named after the CLI: xcrun notarytool store-credentials <cli>-notary

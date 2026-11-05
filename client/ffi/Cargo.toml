@@ -24,6 +24,8 @@ bindgen = ["uniffi/cli"]
 
 [dependencies]
 one-client = { path = ".." }
+# A pushed note's params and action, handed to the apps as JSON text (one-client's own, no new crate).
+serde_json = "1"
 uniffi = "=0.31.0"
 # The apps call in from threads of their own and wait: each call runs on this runtime, which iroh's tasks need.
 tokio = { version = "1", features = ["rt-multi-thread"] }

@@ -60,6 +60,42 @@ pub fn device_join(secret: Vec<u8>) -> Result<String, OneError> {
     Ok(one_client::join_of(secret))
 }
 
+/// A note pushed to this device, opened: what to show, what a tap opens (`app`, `screen`, its `params` as JSON), the
+/// number for the app's icon, and an `action` (JSON) its device checks itself, like a device asking to join; `by` is
+/// the key (hex) of the install's device that sent it, none for the kernel.
+#[derive(uniffi::Record)]
+pub struct Note {
+    pub id: String,
+    pub title: String,
+    pub body: String,
+    pub app: String,
+    pub screen: String,
+    pub params: String,
+    pub badge: Option<i64>,
+    pub action: Option<String>,
+    pub by: Option<String>,
+}
+
+/// Opens a note pushed to the device whose key is `secret` (`n` in the push, base64url). It only opens: nothing
+/// connects and nothing starts, so a notification extension calls it in its few megabytes.
+#[uniffi::export]
+pub fn open_note(secret: Vec<u8>, pushed: String) -> Result<Note, OneError> {
+    let secret: [u8; 32] = secret.try_into().map_err(|_| failed("a device's key is 32 bytes"))?;
+    let (n, by) = one_client::open_note(secret, &pushed)?;
+    let json = |v: &serde_json::Value| v.to_string();
+    Ok(Note {
+        id: n.id,
+        title: n.title,
+        body: n.body,
+        app: n.app,
+        screen: n.screen,
+        params: n.params.map_or_else(|| "{}".into(), |p| json(&serde_json::Value::Object(p))),
+        badge: n.badge,
+        action: n.action.as_ref().map(json),
+        by,
+    })
+}
+
 /// One of the app's own screens (its pages, Services, a Vault request, Settings') as its page, from the screens built
 /// into it: never a node's, since they act as its person. `params` is JSON.
 #[uniffi::export]
@@ -137,6 +173,14 @@ impl ThisDevice {
         let response = run(self.0.fetch(&method, &path, headers, body))?;
         let headers = response.headers.into_iter().map(|(name, value)| Header { name, value }).collect();
         Ok(Arc::new(Response { status: response.status, headers, body: Mutex::new(Some(response.body)) }))
+    }
+
+    /// Registers where a push service reaches this device with the install's push Worker: `via` apns, fcm, wns or
+    /// webpush, `address` its token or channel, and for APNs `env` (sandbox or production) and `topic` (the app's bundle
+    /// id). Each launch, since a token can change.
+    pub fn register_push(&self, via: String, address: String, env: String, topic: String) -> Result<(), OneError> {
+        let address = one_client::push::Address { via, address, env, topic, keys: None };
+        Ok(run(self.0.register_push(&address))?)
     }
 
     /// Whether this device is in developer mode (Settings › Developer, here alone).

@@ -91,13 +91,10 @@ done
 rm -rf "$client/Client.xcframework"
 xcodebuild -create-xcframework "${libraries[@]}" -output "$client/Client.xcframework" >/dev/null
 
-xcodegen generate --quiet
+# Push needs the Push Notifications capability on each app's App ID, and App IDs for their notification extensions,
+# which only the team's account holder sets up (developer.apple.com); signing fails without them. So builds leave push
+# out until the config says `push = true`, or PUSH=1: then they have push.yml's too, and each app registers this device
+# with the install's push Worker, and its extension opens what's pushed to it.
+if [ "${PUSH:-}" = 1 ] || [ "$(field push)" = true ]; then export PUSH=YES; else export PUSH=; fi
 
-# Push needs the Push Notifications capability on the iPhone app's App ID, which only the team's account holder
-# turns on (developer.apple.com, or Xcode signed in); signing fails without it. So builds leave push out until the
-# config says `push = true`, or PUSH=1: then the app asks for an APNs token and registers it with the driver the
-# install's `push` setting names.
-if [ "${PUSH:-}" = 1 ] || [ "$(field push)" = true ]; then
-	/usr/libexec/PlistBuddy -c "Add :aps-environment string development" build/Phone.entitlements
-	/usr/libexec/PlistBuddy -c "Add :Push bool true" build/Phone-Info.plist
-fi
+xcodegen generate --quiet

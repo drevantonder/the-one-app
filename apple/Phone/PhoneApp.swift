@@ -34,7 +34,6 @@ struct PhoneApp: App {
                     WarmWebKit.start()
                 }
                 .onOpenURL { phone.open($0) }
-                .onChange(of: phone.store.config?.push, initial: true) { Task { await phone.setUpPush() } }
                 .onChange(of: phone.store.iconBadge) { phone.showBadge(phone.store.iconBadge) }
         }
     }
@@ -55,8 +54,6 @@ final class Phone {
     var joinError: String?
     let store = Store(node: NodeClient(transport: PhoneNode(), client: "phone"))
     private var running: Task<Void, Never>?
-    /// This launch's APNs token, once registered with the push driver.
-    var pushToken: String?
 
     /// In the simulator, NODE_URL points the app at a device's local API instead of signing in.
     nonisolated static var nodeURL: URL? {
@@ -109,9 +106,9 @@ final class Phone {
         return nil
     }
 
-    /// Signs out: back to the first screen, with nothing of the person's left on the phone, and no more of their pushes.
+    /// Signs out: back to the first screen, with nothing of the person's left on the phone, and no more of their pushes
+    /// (the push Worker forgets a device the install no longer has).
     func signOut() async {
-        await unregisterPush()
         await DeviceClient.shared.signOut()
         await Auth.shared.signOut()
         signedOut(nil)

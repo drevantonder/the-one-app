@@ -2820,6 +2820,7 @@ version = "0.1.0"
 dependencies = [
  "libc",
  "one-client",
+ "serde_json",
  "tokio",
  "uniffi",
 ]

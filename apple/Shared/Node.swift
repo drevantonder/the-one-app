@@ -5,8 +5,6 @@ struct Config: Codable, Sendable, Equatable {
     var cli: String
     /// The app the App Store opens: the install's `store` setting.
     var store: String?
-    /// The driver phones register their push tokens with: the install's `push` setting, empty when push is off.
-    var push: String?
 }
 
 /// `GET /v1/state`: this machine, its user and the install.

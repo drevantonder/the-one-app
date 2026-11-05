@@ -1,0 +1,77 @@
+# What a build with push adds (project.yml includes it once project.sh sets PUSH): each app's notification extension,
+# which opens what's pushed to its device with that device's key, from the keychain group it shares with its app.
+targets:
+  Phone:
+    dependencies:
+      - target: Notifications
+    entitlements:
+      properties:
+        aps-environment: development
+    info:
+      properties:
+        Push: true
+  Notifications:
+    type: app-extension
+    platform: iOS
+    sources: [Notifications, Shared/DeviceKeys.swift, Shared/Notes.swift, build/Client/one_client_ffi.swift]
+    dependencies:
+      - framework: build/Client/Client.xcframework
+        embed: false
+      - sdk: SystemConfiguration.framework
+      - sdk: Network.framework
+    settings:
+      base:
+        PRODUCT_NAME: Notifications
+        PRODUCT_BUNDLE_IDENTIFIER: app.${CONFIG_CLI}.phone.notifications
+        TARGETED_DEVICE_FAMILY: "1,2"
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: ${APPLE_TEAM}
+    entitlements:
+      path: build/Notifications.entitlements
+      properties:
+        com.apple.security.application-groups: ["group.app.${CONFIG_CLI}.phone"]
+    info:
+      path: build/Notifications-Info.plist
+      properties:
+        CFBundleVersion: "${BUILD_NUMBER}"
+        CFBundleDisplayName: ${CONFIG_NAME}
+        CLI: ${CONFIG_CLI}
+        KeychainGroup: group.app.${CONFIG_CLI}.phone
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.usernotifications.service
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).NotificationService
+
+  # Its entitlements are build.sh's, as it signs it.
+  Mac:
+    dependencies:
+      - target: MacNotifications
+    info:
+      properties:
+        Push: true
+        KeychainGroup: ${APPLE_TEAM}.app.${CONFIG_CLI}.mac
+  # Signed by build.sh, as the Mac app is, with its own provisioning profile.
+  MacNotifications:
+    type: app-extension
+    platform: macOS
+    sources: [Notifications, Shared/DeviceKeys.swift, Shared/Notes.swift, build/Client/one_client_ffi.swift]
+    dependencies:
+      - framework: build/Client/Client.xcframework
+        embed: false
+      - sdk: SystemConfiguration.framework
+      - sdk: Network.framework
+    settings:
+      base:
+        PRODUCT_NAME: Notifications
+        PRODUCT_BUNDLE_IDENTIFIER: app.${CONFIG_CLI}.mac.notifications
+        CODE_SIGNING_ALLOWED: NO
+        ARCHS: arm64
+    info:
+      path: build/MacNotifications-Info.plist
+      properties:
+        CFBundleVersion: "${BUILD_NUMBER}"
+        CFBundleDisplayName: ${CONFIG_NAME}
+        CLI: ${CONFIG_CLI}
+        KeychainGroup: ${APPLE_TEAM}.app.${CONFIG_CLI}.mac
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.usernotifications.service
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).NotificationService

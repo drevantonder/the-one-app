@@ -33,7 +33,10 @@ mod device;
 #[cfg(not(target_family = "wasm"))]
 pub use answers::Answers;
 #[cfg(not(target_family = "wasm"))]
-pub use device::{Device, join_of, new_secret};
+pub use device::{Device, join_of, new_secret, open_note};
+/// What a push carries and where a device gets them (`one::push`), as the apps' libraries hand them on.
+#[cfg(not(target_family = "wasm"))]
+pub use one::push;
 
 /// One of the client's own screens (its pages, Services, a Vault request, Settings') as its page, made from the screens
 /// built into this client, never asked of a node: they act as its person (`one::screen::client_page`). `params` is JSON.

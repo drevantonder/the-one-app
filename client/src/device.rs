@@ -42,6 +42,13 @@ pub fn join_of(secret: [u8; 32]) -> String {
     format!("{}{}", hex(&me.key), hex(&me.seal))
 }
 
+/// A note pushed to the device whose key is `secret`, as its push carried it (base64url): → the note, and the key of
+/// the device that sent it (hex), or none for one from the kernel. Opened here alone: nothing connects or starts.
+pub fn open_note(secret: [u8; 32], pushed: &str) -> Result<(one::push::Note, Option<String>), Error> {
+    let sealed = B64U.decode(pushed.trim().trim_end_matches('=').as_bytes()).map_err(|_| failed("That push isn't a note."))?;
+    one::push::open_note(&keys::seal_secret(&SigningKey::from_bytes(&secret)), &sealed).map_err(|_| failed("That note isn't this device's."))
+}
+
 /// A new device's key: 32 random bytes, which its app keeps.
 pub fn new_secret() -> [u8; 32] {
     rand::random()
@@ -512,6 +519,18 @@ impl Device {
         }
         let _ = std::fs::remove_file(self.dir.join("joined"));
         self.out().await;
+    }
+
+    /// Registers where a push service reaches it (`one::push::Address`) with the install's push Worker
+    /// (`<address>/push/register`), signed with its key and naming its seal key, which each note pushed to it is sealed
+    /// to. Once it's out of the install, the Worker forgets it.
+    pub async fn register_push(&self, address: &one::push::Address) -> Result<(), Error> {
+        let body = one::push::register_request(&self.key, &self.me.seal, address, now()).map_err(failed)?;
+        let (status, out) = http("POST", &format!("{}/push/register", self.address), None, Some(body)).await?;
+        if status != 200 {
+            return Err(failed(error(&out).unwrap_or_else(|| format!("Your One App's push service didn't take this device ({status})."))));
+        }
+        Ok(())
     }
 
     /// Whether the install took this device out: this key was in, and the relay, which alone says who's on the

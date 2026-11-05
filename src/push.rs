@@ -46,7 +46,8 @@ pub struct Note {
     /// The number on the app's icon; 0 clears it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub badge: Option<i64>,
-    /// Something its device does, checking it first itself: a device asking to join, say.
+    /// Something its device does, checking it first itself: `{ "join": "<code>" }`, a device asking to join, which the
+    /// Apple apps show with Approve and Not Me (`apple/Shared/Notes.swift`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub action: Option<Value>,
 }

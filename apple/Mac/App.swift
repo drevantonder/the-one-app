@@ -1,8 +1,10 @@
 import ServiceManagement
 import SwiftUI
+import UserNotifications
 
 @main
 struct MacApp: App {
+    @NSApplicationDelegateAdaptor(MacDelegate.self) private var delegate
     @State private var mac = Mac.shared
     private var store: Store { mac.store }
 
@@ -73,6 +75,31 @@ struct MacApp: App {
             MenuBarMark(store: store)
         }
         .menuBarExtraStyle(.window)
+    }
+}
+
+/// The Mac's own part of pushes (`Push`): its APNs token, and a clicked notification's screen, or its Approve or Not Me.
+final class MacDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        UNUserNotificationCenter.current().delegate = self
+    }
+
+    func application(_ application: NSApplication, didRegisterForRemoteNotificationsWithDeviceToken token: Data) {
+        Task { await Push.register(token) }
+    }
+
+    func application(_ application: NSApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
+        print("push: no token: \(error.localizedDescription)")
+    }
+
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
+        [.banner, .list, .sound]
+    }
+
+    /// What it opens comes to the window as a link does.
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
+        guard let link = await Push.answer(response) else { return }
+        _ = await MainActor.run { NSWorkspace.shared.open(link) }
     }
 }
 
