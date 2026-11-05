@@ -78,6 +78,12 @@ fn main() {
         collect(dir, dir, &mut files);
         files.sort();
         let name = dir.file_name().unwrap().to_string_lossy().to_string();
+        // A React screen ships as its `dist/` has it, which `one deploy apps/<name>` builds, so each has one.
+        for (rel, _) in &files {
+            if let Some(screen) = rel.strip_prefix("screens/").and_then(|f| f.strip_suffix(".jsx").or_else(|| f.strip_suffix(".tsx"))) {
+                assert!(files.iter().any(|(r, _)| *r == format!("dist/{screen}.html")), "apps/{name}/screens/{screen} has no dist/{screen}.html: run `one deploy apps/{name}` and commit it");
+            }
+        }
         let files: Vec<String> = files.iter().map(|(rel, abs)| format!("({rel:?}, include_bytes!({abs:?}))")).collect();
         apps.push_str(&format!("({name:?}, &[{}]),", files.join(", ")));
     }

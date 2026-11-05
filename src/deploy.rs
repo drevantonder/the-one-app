@@ -68,6 +68,12 @@ pub fn chrome() -> Option<std::process::Command> {
 /// Builds the app in `dir` into a bundle: `app.js`, the ES module Bun makes from its entry and npm packages, and
 /// `src/`, the folder's files as written (without `node_modules` and dot files).
 pub fn build(dir: &Path) -> Result<Vec<u8>> {
+    bundle(dir, true)
+}
+
+/// `build`, with the React screens built first (`screens`) or, for a built-in app, whose `dist/` was built when it was
+/// committed, taken as they are, which needs only the pinned Bun.
+fn bundle(dir: &Path, build_screens: bool) -> Result<Vec<u8>> {
     let entry = ENTRIES.iter().find(|e| dir.join(e).is_file()).with_context(|| format!("{} has none of {}", dir.display(), ENTRIES.join(", ")))?;
     let bun = bun()?;
     let cache = bun.parent().unwrap().join("cache");
@@ -83,7 +89,9 @@ pub fn build(dir: &Path) -> Result<Vec<u8>> {
     if dir.join("package.json").is_file() {
         run(&["install", "--ignore-scripts"], "bun install")?;
     }
-    screens(dir)?;
+    if build_screens {
+        screens(dir)?;
+    }
     let out = tempdir()?;
     let outfile = out.join("app.js");
     let meta = out.join("meta.json");
@@ -210,13 +218,23 @@ fn screen_tools(installer: &Path, install: &[&str]) -> Result<PathBuf> {
 /// An app's bundle, built from its files as `build` builds a folder, once per version of them: the build is kept in
 /// the cache, by the files' hash.
 pub fn build_files(files: &[(&str, &[u8])]) -> Result<Vec<u8>> {
+    build_kept(files, true)
+}
+
+/// A built-in app's files built the same way, its React screens as its `dist/` has them: a release is built where they
+/// were, and no node needs Bun or Node to run them.
+pub fn build_built_in(files: &[(&str, &[u8])]) -> Result<Vec<u8>> {
+    build_kept(files, false)
+}
+
+fn build_kept(files: &[(&str, &[u8])], build_screens: bool) -> Result<Vec<u8>> {
     use sha2::Digest;
     let mut hash = sha2::Sha256::new();
     for (path, bytes) in files {
         hash.update(format!("{path}\0{}\0", bytes.len()));
         hash.update(bytes);
     }
-    let kept = crate::cache().join("built-in").join(format!("{}-{}.tar", data_encoding::HEXLOWER.encode(&hash.finalize()), BUN));
+    let kept = crate::cache().join("built-in").join(format!("{}-{}{}.tar", data_encoding::HEXLOWER.encode(&hash.finalize()), BUN, if build_screens { "" } else { "-prebuilt" }));
     if let Ok(bundle) = std::fs::read(&kept) {
         return Ok(bundle);
     }
@@ -227,7 +245,7 @@ pub fn build_files(files: &[(&str, &[u8])]) -> Result<Vec<u8>> {
             std::fs::create_dir_all(path.parent().unwrap())?;
             std::fs::write(path, bytes)?;
         }
-        build(&dir)
+        bundle(&dir, build_screens)
     })();
     let _ = std::fs::remove_dir_all(&dir);
     let bundle = built?;
