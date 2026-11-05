@@ -2,7 +2,11 @@
 // providers' own numbers for every sign-in it keeps (Claude Code's and claude-swap's accounts, Codex's, OpenCode Go's);
 // this asks every machine's and merges by account, keeps snapshots, and says in the providers' own words how much is
 // left and what the pace does: deficit or reserve, what was expected, and whether it lasts.
-// Agents read it through Agent Hooks; people get the tiles and the meter.
+// Agents read it through Agent Hooks; people get a card for each provider and the meters. Its screen is React, in
+// screens/, built into dist/ when it's deployed (`one deploy apps/ai-usage`), which is committed because a release ships
+// the app as it is.
+
+import main from "./dist/main.html" with { type: "text" };
 
 const FRESH = 5 * 60 * 1000; // a snapshot counts as now for this long
 const KEEP = 30 * 86400 * 1000; // snapshots kept this long
@@ -372,69 +376,7 @@ export default {
   },
 
   screens: {
-    main: {
-      title: "AI Usage",
-      html: `
-<style>
-.tile { background: var(--card); border-radius: var(--radius); padding: 14px 18px; margin: 12px 0; }
-.tile header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.tile h3 { margin: 0; font-size: 17px; }
-.tile h3.brand { display: flex; align-items: center; gap: 10px; }
-.sub { color: var(--muted); font-size: 13px; }
-.acct { padding-top: 12px; margin-top: 12px; border-top: 1px solid var(--fill); }
-.tile header + .acct { border-top: 0; margin-top: 0; }
-.name { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
-.name b { font-size: 15px; font-weight: 600; }
-.acct .sub.mail { margin: 1px 0 6px; }
-.m { display: grid; grid-template-columns: 64px 1fr 44px 132px; align-items: center; gap: 10px; font-size: 13px; margin: 6px 0; }
-.m .p { text-align: right; font-variant-numeric: tabular-nums; }
-.m .r { color: var(--muted); text-align: right; white-space: nowrap; }
-.bar { height: 5px; border-radius: 3px; background: var(--fill); overflow: hidden; }
-.bar i { display: block; height: 100%; border-radius: 3px; }
-.alarm { font-size: 13px; margin-top: 4px; }
-.problem { display: flex; gap: 10px; align-items: baseline; padding-top: 10px; }
-.problem .s { color: var(--warn); }
-.problem b { font-size: 15px; }
-</style>
-<div id="list"></div>
-<script>
-const tone = (p) => p == null ? "var(--text)" : p >= 85 ? "var(--danger)" : p >= 70 ? "var(--warn)" : "var(--text)";
-function meter(label, w) {
-  if (!w || w.used == null) return "";
-  return \`<div class="m"><span class="sub">\${one.esc(label)}</span><div class="bar"><i style="width:\${w.used}%;background:\${tone(w.used)}"></i></div><span class="p">\${w.used}%</span><span class="r">\${w.countdown ? "resets " + one.esc(w.countdown) : ""}</span></div>\`;
-}
-// Which of your devices keep this sign-in.
-const on = (p) => (p.devices || []).length ? "on " + p.devices.join(", ") : "";
-function read(p, several) {
-  const [team, email] = (p.account || "").split(" · ");
-  const state = p.active && several ? "In use" : p.disabled ? "Not in rotation" : "";
-  const name = p.account ? \`<div class="name"><b>\${one.esc(team)}</b><span class="sub">\${state}</span></div><div class="sub mail">\${one.esc([email, on(p)].filter(Boolean).join(" · "))}</div>\` : "";
-  const models = (p.models || []).map((m) => meter(m.name, m)).join("");
-  const extra = p.extra ? \`<div class="m"><span class="sub">Extra</span><span></span><span class="p"></span><span class="r">$\${p.extra.used} of $\${p.extra.limit}</span></div>\` : "";
-  const alarm = p.alarm ? \`<div class="alarm" style="color:var(--\${p.alarm.tone})">\${one.esc(p.alarm.text)}</div>\` : "";
-  return \`<div class="acct">\${name}\${meter("Session", p.session)}\${meter("Weekly", p.weekly)}\${meter("Monthly", p.monthly)}\${models}\${extra}\${alarm}</div>\`;
-}
-const problem = (title, why) => \`<div class="problem"><span class="s">⚠︎</span><div><b>\${one.esc(title)}</b><div class="sub">\${one.esc(why)}</div></div></div>\`;
-function tile(reads, mark) {
-  const p = reads[0];
-  const icon = mark && /^data:image\\/svg\\+xml,/.test(mark.image) ? \`<span class="app-icon drawn\${mark.kind === "icon" ? "" : " logo"}" style="--size:28px;background-image:url(\${one.esc(JSON.stringify(mark.image))})"></span>\` : "";
-  const head = \`<header><h3 class="brand">\${icon}\${one.esc(p.title)}</h3><span class="sub">\${one.esc([p.plan, p.account ? "" : on(p), p.updatedAgo ? "updated " + p.updatedAgo : ""].filter(Boolean).join(" · "))}</span></header>\`;
-  // Reads a machine couldn't renew: one problem, on the tile they're in.
-  const stale = [...new Set(reads.map((r) => r.stale).filter(Boolean))];
-  const old = stale.length ? problem(\`Can't read \${p.title} now\`, stale.join("; ")) : "";
-  return \`<div class="tile">\${head}\${reads.map((r) => read(r, reads.length > 1)).join("")}\${old}</div>\`;
-}
-async function show() {
-  const r = await one.call("status", { format: "json" });
-  if (r.problem) return \`<div class="tile">\${problem("Can't read your AI plans", r.problem)}</div>\`;
-  if (!r.providers || !r.providers.length) return one.empty("No AI sign-ins on your machines.");
-  const ids = [...new Set(r.providers.map((p) => p.id))];
-  return ids.map((id) => tile(r.providers.filter((p) => p.id === id), (r.marks || {})[id])).join("");
-}
-one.on("changed", () => one.render("#list", show));
-one.render("#list", show);
-</script>`,
-    },
+    main: { title: "AI Usage", html: main },
   },
 
   widgets: {
