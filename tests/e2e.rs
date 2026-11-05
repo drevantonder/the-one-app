@@ -144,6 +144,44 @@ async fn backups_go_to_a_folder_encrypted_and_restore_with_the_recovery_key_alon
     assert!(place("Sheet bucket").is_some_and(|p| p["kind"] == "s3"), "{}", a.backups().unwrap());
 }
 
+/// Phase 2's storage is on only once a device knows the log is frozen, never for what its build may do: in a build
+/// whose admin may freeze it, a node writes no step signed in it (which a device older than R1 would pass over, losing
+/// what's in it) and refuses nothing until the ceremony, and every step after is signed in it.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_node_signs_in_its_steps_only_once_it_knows_the_log_is_frozen() {
+    one::database::switch::FORCEABLE.store(true, std::sync::atomic::Ordering::Relaxed);
+    let a = start("frozen-a").await;
+    let recovery = a.create("Home", "Andre").await.unwrap();
+    let recovery = one::entry::unhex(&recovery).unwrap();
+    let _relay = relay(&a).await;
+    let me = one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None, token: None };
+    eventually("the board to run", async || a.call(board("post", json!({ "text": "before the freeze" }))).await.is_ok()).await;
+    a.call(board("post", json!({ "text": "and another" }))).await.unwrap();
+    let dir = temp("frozen-disk").join("One Backups");
+    a.add_place(&me, &json!({ "path": dir, "title": "Disk" })).await.unwrap();
+    eventually("the first backup", async || !a.backups().unwrap()["places"][0]["last"].is_null()).await;
+    let install = one::backups::installs(&one::bucket::Place::Folder(dir.clone())).unwrap().remove(0);
+    let board_db = async || {
+        let (copy, keys) = backed_up_keys(&dir, &install, &recovery, "global", "board", "main");
+        one::db::Db::open_switched(&copy, &format!("{}/board/main", one::bucket::folder("global")), keys).await.unwrap()
+    };
+    assert!(!a.frozen());
+    let before = board_db().await;
+    assert_eq!((before.signed_from(), before.checks().refused), (None, 0), "no step is signed in it, and a reader that knows the log is frozen refuses none");
+    let written = before.at();
+
+    a.switch(&me, &ed25519_dalek::SigningKey::from_bytes(&recovery), true).await.unwrap();
+    assert!(a.frozen());
+    a.call(board("post", json!({ "text": "after the freeze" }))).await.unwrap();
+    let first = a.backups().unwrap()["places"][0]["last"]["time"].clone();
+    a.back_up_now();
+    eventually("the next backup", async || a.backups().unwrap()["places"][0]["last"]["time"] != first).await;
+    let after = board_db().await;
+    assert_eq!(after.signed_from(), Some(written + 1), "the first step after the freeze is signed in it, and says so");
+    assert_eq!(after.checks().refused, 0);
+    assert_eq!(backed_up_posts(&dir, &install, &recovery).await, ["before the freeze", "and another", "after the freeze"]);
+}
+
 /// The board's posts in `global` as a place's copy of the install's bucket holds them, opened with the recovery key
 /// alone: each epoch's key sealed to it, each app's key in the epoch sealed under that.
 async fn backed_up_posts(dir: &std::path::Path, install: &str, recovery: &[u8; 32]) -> Vec<String> {
@@ -153,6 +191,16 @@ async fn backed_up_posts(dir: &std::path::Path, install: &str, recovery: &[u8; 3
 /// The first column of what `sql` reads from `app`'s `database` in `scope`, as the backup's copy of the bucket has it,
 /// opened with the recovery key alone.
 async fn backed_up(dir: &std::path::Path, install: &str, recovery: &[u8; 32], scope: &str, app: &str, database: &str, sql: &str) -> Vec<String> {
+    let (copy, keys) = backed_up_keys(dir, install, recovery, scope, app, database);
+    match one::db::Db::open(&copy, &format!("{}/{app}/{database}", one::bucket::folder(scope)), keys).await {
+        Ok(db) => db.query(sql, &[]).unwrap().into_iter().filter_map(|r| r.values().next().and_then(|v| v.as_str()).map(str::to_string)).collect(),
+        Err(_) => Vec::new(),
+    }
+}
+
+/// The backup's copy of the install's bucket, and the keys of `app`'s `database` in `scope` there, opened with the
+/// recovery key alone.
+fn backed_up_keys(dir: &std::path::Path, install: &str, recovery: &[u8; 32], scope: &str, app: &str, database: &str) -> (one::bucket::Place, one::db::Keys) {
     let copy = one::bucket::Place::Folder(dir.join(install).join("bucket"));
     let folder = one::bucket::folder(scope);
     let mut keys = one::db::Keys::new();
@@ -161,10 +209,7 @@ async fn backed_up(dir: &std::path::Path, install: &str, recovery: &[u8; 32], sc
         let Ok(Some(sealed)) = copy.get(&one::keys::app_key_name(scope, app, n)) else { continue };
         keys.insert(n, one::cloudflare::database_key(&one::cloudflare::open_app_key(&epoch, app, &sealed).unwrap(), database));
     }
-    match one::db::Db::open(&copy, &format!("{folder}/{app}/{database}"), keys).await {
-        Ok(db) => db.query(sql, &[]).unwrap().into_iter().filter_map(|r| r.values().next().and_then(|v| v.as_str()).map(str::to_string)).collect(),
-        Err(_) => Vec::new(),
-    }
+    (copy, keys)
 }
 
 fn walk(dir: &std::path::Path) -> Vec<std::path::PathBuf> {

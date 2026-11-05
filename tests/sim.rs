@@ -20,7 +20,7 @@
 //!
 //! Throughout, a device without the key forges the newest hint (past every step, at nothing, at junk, at a copy that's
 //! gone) and leaves junk where copies go, while a tidier deletes the copies no reader needs. In seeds whose second bit
-//! is set, phase 2 is switched on (`Db::open_switched`): every step is signed in it (`db::SIGNED_STEPS`) and the tidier
+//! is set, phase 2 is switched on (`Db::open_switched`, as a device that knows the log is frozen): every step is signed in it and the tidier
 //! deletes the steps a copy covers too (`db::DELETE_COVERED_STEPS`), counting a step as kept long enough once it's been there a few
 //! minutes, and at the end everything a copy covers, before a device that's been away since the start reads on.
 

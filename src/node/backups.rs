@@ -473,7 +473,7 @@ impl Node {
         })?;
         let (node, runtime) = (self.clone(), tokio::runtime::Handle::current());
         let bucket = self.bucket().ok().map(|b| b.place);
-        let (place, install, scope_name, device) = (place.clone(), install.to_string(), d.scope.clone(), self.0.id);
+        let (place, install, scope_name, device, frozen) = (place.clone(), install.to_string(), d.scope.clone(), self.0.id, self.frozen());
         let snap = tokio::task::spawn_blocking(move || -> Result<(Option<Snapshot>, Option<Snapshot>)> {
             // What the place holds: the newest snapshot there, which another device may have written since.
             let newest = b::snapshots(&place, &install, &scope_name)?.into_iter().next();
@@ -485,7 +485,7 @@ impl Node {
             if !force && previous.as_ref().is_some_and(|p| p.time + b::EVERY > now) {
                 return Ok((None, previous));
             }
-            let job = b::Job { place: &place, install: &install, scope: &scope_name, key, epochs, sealed, device, now, previous: previous.clone(), entries, blobs, bucket: bucket.as_ref() };
+            let job = b::Job { place: &place, install: &install, scope: &scope_name, key, epochs, sealed, device, now, previous: previous.clone(), entries, blobs, bucket: bucket.as_ref(), frozen };
             // A blob this device doesn't keep is read from the bucket, where the device that wrote it put it.
             let written = b::back_up(job, |hash| runtime.block_on(node.blob(hash)).inspect_err(|err| tracing::debug!("backing up blob {hash}: {err:#}")).ok())?;
             Ok((written.clone(), written.or(previous)))

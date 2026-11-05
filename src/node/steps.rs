@@ -215,8 +215,9 @@ impl Node {
     /// freeze (`Replica::take_first`): one the recovery key signed is taken once `global`'s log is read to its end (so
     /// every key that was ever the recovery key is known) and from its steps up to the freeze's end of it.
     pub(super) async fn read_steps_now(&self) -> Result<bool> {
-        // A build the switch is off in never freezes, and holds the gate back, so nothing it reads is frozen.
-        if !self.frozen() && !(switch::SWITCH || switch::FORCEABLE.load(std::sync::atomic::Ordering::Relaxed)) {
+        // A build that reads less than the gate holds it back, so no freeze it could read counts. One that reads it
+        // takes the freeze whether or not it may run the ceremony (`switch::SWITCH`), since an admin's newer build may.
+        if !self.frozen() && !(switch::READS >= switch::GATE || switch::FORCEABLE.load(std::sync::atomic::Ordering::Relaxed)) {
             return Ok(false);
         }
         let bucket = self.bucket()?;

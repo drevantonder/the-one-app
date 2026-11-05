@@ -139,15 +139,18 @@ pub struct Job<'a> {
     pub blobs: BTreeSet<String>,
     /// The install's bucket, whose scope's folder the place keeps a copy of.
     pub bucket: Option<&'a Place>,
+    /// Whether the device knows the install's log is frozen, so phase 2 checks the copies it chooses
+    /// (`db::sealed_copy_holds`).
+    pub frozen: bool,
 }
 
 /// Sends a scope what its backup lacks: its key, sealed, the first time; a pack of its new entries, its new blobs,
 /// and a snapshot. Returns the snapshot, or None when nothing new would be in it. `blob` reads a blob here.
 pub fn back_up(job: Job, blob: impl Fn(&str) -> Option<Vec<u8>>) -> Result<Option<Snapshot>> {
-    let Job { place, install, scope, key, epochs, sealed, device, now, previous, entries, blobs, bucket } = job;
+    let Job { place, install, scope, key, epochs, sealed, device, now, previous, entries, blobs, bucket, frozen } = job;
     let mut snap = previous.clone().unwrap_or_else(|| Snapshot { scope: scope.to_string(), ..Default::default() });
     if let Some(bucket) = bucket {
-        copy_bucket(bucket, place, install, scope, &epochs, &mut snap)?;
+        copy_bucket(bucket, place, install, scope, &epochs, frozen, &mut snap)?;
     }
     let new: Vec<&Entry> = entries.iter().filter(|e| e.seq() >= snap.frontier.get(&hex(&e.author())).copied().unwrap_or(0)).collect();
     // Blobs the scope no longer keeps (a release that's been superseded, a blob its scope forgot) leave the snapshot,
@@ -196,7 +199,7 @@ pub fn back_up(job: Job, blob: impl Fn(&str) -> Option<Vec<u8>>) -> Result<Optio
 /// as the bucket is: each epoch's key and Vault key sealed to the recovery key, each app's key in each epoch (sealed under it), and
 /// each database's new steps, the signatures beside them (and those of the last few steps it copied before, which may
 /// have come just after their steps), and newest copy that holds (sealed as they are), past what `snap` says it has.
-fn copy_bucket(bucket: &Place, place: &Place, install: &str, scope: &str, epochs: &crate::db::Keys, snap: &mut Snapshot) -> Result<()> {
+fn copy_bucket(bucket: &Place, place: &Place, install: &str, scope: &str, epochs: &crate::db::Keys, frozen: bool, snap: &mut Snapshot) -> Result<()> {
     /// How many of the last steps a run copied the next looks for signatures of again.
     const SIGNED_LATE: u64 = 4;
     let folder = folder(scope);
@@ -225,7 +228,7 @@ fn copy_bucket(bucket: &Place, place: &Place, install: &str, scope: &str, epochs
             let Some(hint) = bucket.get(&crate::db::newest_name(&prefix))? else { continue };
             let (_, hinted, epoch) = crate::db::newest(&hint);
             let (mut at, mut copied) = snap.databases.get(&format!("{app}/{database}")).copied().unwrap_or((0, 0));
-            let newest_copy = newest_holding(bucket, scope, &prefix, &app, &database, epochs, hinted, copied)?;
+            let newest_copy = newest_holding(bucket, scope, &prefix, &app, &database, epochs, hinted, copied, frozen)?;
             if newest_copy > copied && copy(&crate::db::copy_name(&prefix, newest_copy), false)? {
                 copied = newest_copy;
                 at = at.max(newest_copy);
@@ -261,11 +264,11 @@ fn copy_bucket(bucket: &Place, place: &Place, install: &str, scope: &str, epochs
     Ok(())
 }
 
-/// The newest copy of a database above `above` that holds, as a reader chooses it (`db::sealed_copy_holds`): the newest
-/// hint's, `hinted`, first, then the others, newest first; `above` if none does. A scope's log, whose copies are its
-/// entries, not a database, takes the hint's.
+/// The newest copy of a database above `above` that holds, as a reader chooses it (`db::sealed_copy_holds`, phase 2 on
+/// if `frozen`): the newest hint's, `hinted`, first, then the others, newest first; `above` if none does. A scope's
+/// log, whose copies are its entries, not a database, takes the hint's.
 #[allow(clippy::too_many_arguments)]
-fn newest_holding(bucket: &Place, scope: &str, prefix: &str, app: &str, database: &str, epochs: &crate::db::Keys, hinted: u64, above: u64) -> Result<u64> {
+fn newest_holding(bucket: &Place, scope: &str, prefix: &str, app: &str, database: &str, epochs: &crate::db::Keys, hinted: u64, above: u64, frozen: bool) -> Result<u64> {
     if (app, database) == (crate::members::APP, crate::log::NAME) {
         return Ok(hinted.max(above));
     }
@@ -282,7 +285,7 @@ fn newest_holding(bucket: &Place, scope: &str, prefix: &str, app: &str, database
         let Some(copy) = bucket.get(&crate::db::copy_name(prefix, at))? else { continue };
         let step = bucket.get(&crate::db::step_name(prefix, at))?;
         let beside = bucket.get(&crate::db::sig_name(prefix, at))?;
-        if crate::db::sealed_copy_holds(prefix, &keys, at, &copy, step.as_deref(), beside.as_deref()) {
+        if crate::db::sealed_copy_holds(prefix, &keys, at, &copy, step.as_deref(), beside.as_deref(), frozen) {
             return Ok(at);
         }
     }
@@ -858,6 +861,7 @@ mod tests {
             entries: all.clone(),
             blobs: [hash.clone()].into(),
             bucket: Some(&bucket),
+            frozen: false,
         };
         let first = back_up(job(None, 1_000_000), |h| (h == hash).then(|| blob.clone())).unwrap().unwrap();
         let backed_up = format!("{install}/bucket/{late}");

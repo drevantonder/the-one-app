@@ -19,11 +19,14 @@
 //! two). A reader checks each one there is (`Checks`): the writer's endpoint key signed the step's sealed bytes at its
 //! position, and, on a step a copy follows, the only one that says it (hashing every row on every write would make each
 //! write as slow as the database is big), that the database it read comes to that state hash (`state_hash`). A copy
-//! needs no signer: it's good if it comes to the hash signed at the step it's at. From phase 2 (`SIGNED_STEPS`) a
-//! writer signs a step in it (`SIGNED`), one write, so no step is ever without one: readers from R1 on read both kinds,
-//! and older ones pass over the new kind, which is why it waits for the gate.
+//! needs no signer: it's good if it comes to the hash signed at the step it's at. From phase 2 a writer signs a step
+//! in it (`SIGNED`), one write, so no step is ever without one: readers from R1 on read both kinds, and older ones pass
+//! over the new kind, which is why it waits for the gate.
 //!
-//! Once phase 2's switch is on (`switch::SWITCH`), the first step a writer signs in it says its own position, and every
+//! Phase 2 is on for a database (`switched`) once the device opening it knows the log is frozen (a freeze that counts,
+//! which only comes once the gate is open, so every device reads both kinds by then), never because of what a build
+//! is: a release that turns the switch on only lets an admin freeze it. Then the first step a writer signs in it says
+//! its own position, and every
 //! step signed in it after says the same (`Sig::from`), so the database records where its steps are signed in them
 //! from, a copy's step saying it for those that start there; before, every reader ignores what any step says of it.
 //! Before that position a step and a copy count whatever their signatures say, as they do on older readers: older
@@ -75,13 +78,6 @@ const TRIES: usize = 50;
 /// whether steps are deleted at all: an older reader whose copy doesn't hold reads every step from the first, and
 /// would read what's left as the whole database.
 pub const DELETE_COVERED_STEPS: bool = false;
-
-/// Whether a writer signs a step in it (`SIGNED`), one create-only write, rather than beside it (`<n>.sig`), a second
-/// that may never come, and so whether steps are refused from where it first does (`refused`). Off until phase 2's
-/// gate, when every device runs R1, which reads both: an older reader passes over a kind of step it doesn't know, and
-/// would lose what's written in one. On with phase 2's switch (`database::switch::SWITCH`), which waits for every
-/// device to read it; or `Db::sign_in_steps` for one database.
-pub const SIGNED_STEPS: bool = crate::database::switch::SWITCH;
 
 /// How long an app database's steps are kept before `tidy` may delete them, by when the bucket wrote them. Andre
 /// decides how long app data's history is kept (90 days is suggested); until he does, as long as the scope database's,
@@ -223,13 +219,13 @@ fn open_copy(prefix: &str, keys: &Keys, copy: u64, sealed: &[u8], step: Option<&
 /// Whether the copy at `at` holds for a reader with `keys`, as `holding` checks it, from its objects as sealed in the
 /// bucket: the copy, its step, and the signature beside that, if any. For a caller that reads the bucket itself
 /// (backups).
-pub fn sealed_copy_holds(prefix: &str, keys: &Keys, at: u64, copy: &[u8], step: Option<&[u8]>, beside: Option<&[u8]>) -> bool {
+pub fn sealed_copy_holds(prefix: &str, keys: &Keys, at: u64, copy: &[u8], step: Option<&[u8]>, beside: Option<&[u8]>, switched: bool) -> bool {
     let Ok(Some((_, bytes))) = open_copy(prefix, keys, at, copy, step) else { return false };
     let name = step_name(prefix, at);
     let Some((step, key)) = step.and_then(|s| Some((s, keys.get(&crate::keys::epoch_of(s).ok()?)?))) else { return false };
     let Ok(opened) = crate::keys::open(key, &name, step) else { return false };
     let signed = Sig::unwrap(&name, &opened).or_else(|| beside.map(|b| Sig::check(key, &name, step, b)));
-    copy_holds(at, &bytes, &opened, signed.as_ref(), crate::database::switch::SWITCH).holds
+    copy_holds(at, &bytes, &opened, signed.as_ref(), switched).holds
 }
 
 /// The keys a node uses, of those a caller handed it, for a database of a scope whose current epoch is `current`, as
@@ -282,11 +278,13 @@ pub struct Db {
     junk_copies: BTreeSet<u64>,
     /// Whose endpoint key signs the steps it writes: none, and it writes them unsigned, as older writers do.
     signer: Option<ed25519_dalek::SigningKey>,
-    /// Whether it signs a step in it (`SIGNED`), rather than beside it: `SIGNED_STEPS`, or once the database's steps are.
+    /// Whether it signs a step in it (`SIGNED`), one create-only write, rather than beside it (`<n>.sig`), a second that
+    /// may never come: once phase 2 is on for it, as an older reader passes over a kind of step it doesn't know.
     in_step: bool,
-    /// Whether phase 2's switch is on for it (`switch::SWITCH`, or `open_switched`): only then does it refuse steps from
-    /// where they're signed in them (`Sig::from`), and look for steps `tidy` deleted. Before, nothing is deleted, and
-    /// what anyone with the key, or without it, writes changes nothing a reader reads.
+    /// Whether phase 2 is on for it: opened by a device that knows the log is frozen (`open_switched`). Only then does
+    /// it sign in steps, refuse steps from where they're signed in them (`Sig::from`), and look for steps `tidy`
+    /// deleted. Before, nothing is deleted, and what anyone with the key, or without it, writes changes nothing a
+    /// reader reads.
     switched: bool,
     /// Where the database's steps are signed in them from, as what it read says (`Sig::from`).
     signed_from: Option<u64>,
@@ -306,28 +304,35 @@ struct Held {
 }
 
 impl Db {
-    /// Reads a database as its newest steps leave it, with its keys by epoch: empty if it has none. Fails with `Missing` at a copy or step under an epoch whose key it wasn't given, and with
-    /// `Ahead` at a step under an epoch above them all.
+    /// Reads a database as its newest steps leave it, with its keys by epoch, on a device that doesn't know the log is
+    /// frozen: empty if it has none. Fails with `Missing` at a copy or step under an epoch whose key it wasn't given,
+    /// and with `Ahead` at a step under an epoch above them all.
     pub async fn open(bucket: &impl Bucket, prefix: &str, keys: Keys) -> Result<Db> {
-        Db::open_passing(bucket, prefix, keys, BTreeSet::new()).await
+        Db::open_passing(bucket, prefix, keys, BTreeSet::new(), false).await
     }
 
     /// `open`, checking who wrote each step from where steps are signed in them with `signers`, as the database's
-    /// writers must be.
-    pub async fn open_checking(bucket: &impl Bucket, prefix: &str, keys: Keys, signers: std::sync::Arc<dyn Signers>) -> Result<Db> {
-        Db::open_as(bucket, prefix, keys, BTreeSet::new(), Some(signers), crate::database::switch::SWITCH).await
+    /// writers must be, phase 2 on for it if `switched`.
+    pub async fn open_checking(bucket: &impl Bucket, prefix: &str, keys: Keys, signers: std::sync::Arc<dyn Signers>, switched: bool) -> Result<Db> {
+        Db::open_as(bucket, prefix, keys, BTreeSet::new(), Some(signers), switched).await
     }
 
-    /// `open`, passing over the steps at `junk`.
-    pub async fn open_passing(bucket: &impl Bucket, prefix: &str, keys: Keys, junk: BTreeSet<u64>) -> Result<Db> {
-        Db::open_as(bucket, prefix, keys, junk, None, crate::database::switch::SWITCH).await
+    /// `open`, passing over the steps at `junk`, phase 2 on for it if `switched`: on a device that knows the log is
+    /// frozen.
+    pub async fn open_passing(bucket: &impl Bucket, prefix: &str, keys: Keys, junk: BTreeSet<u64>, switched: bool) -> Result<Db> {
+        Db::open_as(bucket, prefix, keys, junk, None, switched).await
     }
 
-    /// `open`, with phase 2's switch on for this database, as `switch::SWITCH` puts it for every one: it signs the steps
-    /// it writes in them, refuses from where they're signed in them, and finds steps `tidy` deleted. For the simulator,
-    /// before the switch.
+    /// `open`, on a device that knows the log is frozen, so phase 2 is on for this database: it signs the steps it
+    /// writes in them, refuses from where they're signed in them, and finds steps `tidy` deleted.
     pub async fn open_switched(bucket: &impl Bucket, prefix: &str, keys: Keys) -> Result<Db> {
         Db::open_as(bucket, prefix, keys, BTreeSet::new(), None, true).await
+    }
+
+    /// Whether phase 2 is on for it: it was opened knowing the log is frozen. One opened before is opened again once
+    /// its device knows, so it signs and refuses as every device that knows does.
+    pub fn switched(&self) -> bool {
+        self.switched
     }
 
     async fn open_as(bucket: &impl Bucket, prefix: &str, keys: Keys, junk: BTreeSet<u64>, signers: Option<std::sync::Arc<dyn Signers>>, switched: bool) -> Result<Db> {
@@ -343,7 +348,7 @@ impl Db {
             junk,
             junk_copies: BTreeSet::new(),
             signer: None,
-            in_step: SIGNED_STEPS || switched,
+            in_step: switched,
             switched,
             signed_from: None,
             signers,

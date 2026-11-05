@@ -416,9 +416,11 @@ impl Node {
         let id = (scope.clone(), format!("{app}/{database}"));
         let handed = (!own).then(|| self.opened_with(&id, &keys, until)).flatten();
         let cached = self.0.dbs.lock().unwrap().get(&id).cloned();
+        // Phase 2 is on for a database once this device knows the log is frozen: one opened before is read again.
+        let frozen = self.frozen();
         for db in handed.into_iter().chain(cached) {
             let mut open = db.lock().await;
-            if open.opens_for(&keys) {
+            if open.opens_for(&keys) && open.switched() == frozen {
                 // This device's own keys of a newer epoch, which it writes under from now on.
                 if own {
                     open.add_keys(&keys);
@@ -439,7 +441,7 @@ impl Node {
         let mut db = loop {
             tries += 1;
             let junk = self.0.junk.lock().unwrap().get(&prefix).cloned().unwrap_or_default();
-            let err = match Db::open_passing(&bucket, &prefix, keys.clone(), junk).await {
+            let err = match Db::open_passing(&bucket, &prefix, keys.clone(), junk, frozen).await {
                 Ok(db) => break db,
                 Err(err) if tries > TRIES => return Err(err),
                 Err(err) => err,
@@ -468,7 +470,7 @@ impl Node {
         }
         let mut dbs = self.0.dbs.lock().unwrap();
         match dbs.get(&id) {
-            Some(open) if open.try_lock().is_ok_and(|d| d.opens_for(&keys) && d.keys().last_key_value() == keys.last_key_value()) => Ok(open.clone()),
+            Some(open) if open.try_lock().is_ok_and(|d| d.opens_for(&keys) && d.keys().last_key_value() == keys.last_key_value() && d.switched() == frozen) => Ok(open.clone()),
             _ => Ok(dbs.entry(id).insert_entry(db).get().clone()),
         }
     }

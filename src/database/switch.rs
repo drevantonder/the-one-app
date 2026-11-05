@@ -14,7 +14,9 @@ use crate::entry::{Key, hex, unhex};
 
 /// Whether the ceremony that freezes the log may run once the gate is open, so the scope database becomes the truth:
 /// an admin runs it once, with the install's recovery key (`one switch`, `Node::switch`). Off until every device runs a
-/// build that reads it and the switch is decided: the one place to switch it on.
+/// build that reads it and the switch is decided: the one place to switch it on. It's all a build's switch does: what
+/// changes for storage and who's who changes on each device once it knows the log is frozen (`db`'s `switched`), so a
+/// release with it on changes nothing until the freeze.
 pub const SWITCH: bool = false;
 
 /// Whether this node may be told to switch though `SWITCH` is off: only a throwaway network's (`one throwaway switch`), to prove

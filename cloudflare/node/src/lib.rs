@@ -175,6 +175,14 @@ thread_local! {
     static OPEN: RefCell<(u32, HashMap<u32, (String, Db)>)> = RefCell::new((0, HashMap::new()));
     /// When each person's object last used what this isolate keeps for it, to forget the least lately used.
     static OWNERS: RefCell<(u64, HashMap<String, u64>)> = RefCell::new((0, HashMap::new()));
+    /// The people's objects whose install's log this isolate found frozen, as it read `global`'s steps: phase 2 is on
+    /// for the databases each opens (`one::db::Db::switched`).
+    static FROZEN: RefCell<std::collections::HashSet<String>> = RefCell::new(std::collections::HashSet::new());
+}
+
+/// Whether `owner`'s install's log is frozen, as this isolate last read `global`'s steps for it.
+fn frozen(owner: &str) -> bool {
+    FROZEN.with(|f| f.borrow().contains(owner))
 }
 
 /// Notes that `owner`'s object is using what this isolate keeps for it, forgetting the least lately used owner's
@@ -196,6 +204,7 @@ fn touch(owner: &str) {
         OPEN.with(|o| o.borrow_mut().1.retain(|_, (by, _)| *by != gone));
         LOGS.with(|l| l.borrow_mut().retain(|(by, _), _| *by != gone));
         REPLAYED.with(|r| r.borrow_mut().retain(|(by, _), _| *by != gone));
+        FROZEN.with(|f| f.borrow_mut().remove(&gone));
     }
 }
 
@@ -237,7 +246,11 @@ pub async fn open(owner: String, bucket: JsValue, prefix: String, keys: String, 
     let bucket = Js(bucket);
     let keys = usable(&keys, current)?;
     let migrations: Vec<String> = serde_json::from_str(&migrations).map_err(|e| failed(e.into()))?;
-    let mut db = Db::open(&bucket, &prefix, keys).await.map_err(failed)?;
+    let mut db = match frozen(&owner) {
+        true => Db::open_switched(&bucket, &prefix, keys).await,
+        false => Db::open(&bucket, &prefix, keys).await,
+    }
+    .map_err(failed)?;
     db.sign_as(signing_key(&seed).map_err(failed)?);
     db.migrate(&bucket, &migrations).await.map_err(failed)?;
     let handle = OPEN.with(|o| {
@@ -251,11 +264,12 @@ pub async fn open(owner: String, bucket: JsValue, prefix: String, keys: String, 
 
 /// Whether an open database was opened with exactly the keys a call was handed (`usable`): only then may the call use
 /// it, since a key it holds that the call wasn't handed may open what the call mustn't read, and one the call was
-/// handed that it lacks may be a wrong key, which mustn't change what others read. False once it's been closed.
+/// handed that it lacks may be a wrong key, which mustn't change what others read. False once it's been closed, and
+/// for one opened before this isolate found its install's log frozen, so it's opened again with phase 2 on for it.
 #[wasm_bindgen]
 pub fn opens(handle: u32, keys: &str, current: u32) -> bool {
     let Ok(keys) = usable(keys, current) else { return false };
-    OPEN.with(|o| o.borrow().1.get(&handle).is_some_and(|(_, db)| *db.keys() == keys))
+    OPEN.with(|o| o.borrow().1.get(&handle).is_some_and(|(owner, db)| *db.keys() == keys && db.switched() == frozen(owner)))
 }
 
 /// Brings an open database up to what the bucket has, and to `migrations`, with the keys it was opened with.
@@ -608,6 +622,10 @@ async fn read_steps(id: &(String, String), bucket: &Js) -> Result<()> {
                     g.frozen = None;
                 }
             });
+            // A freeze that counts, once, which no later step undoes: phase 2 is on for its databases from now on.
+            if !frozen(&id.0) && LOGS.with(|l| l.borrow().get(id).is_some_and(|g| matches!(g.truth(), Ok(Some(_))))) {
+                FROZEN.with(|f| f.borrow_mut().insert(id.0.clone()));
+            }
         }
         // One under an epoch made whose key it wasn't handed: asked for (428), as the log's are. One under an epoch
         // above every one made, as the steps before it leave it, is junk: passed over.
