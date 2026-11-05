@@ -299,6 +299,18 @@ fn the_workers_and_nodes_agree_on_keys_and_seals() {
             (200, json!({ "approved": true, "genesis": genesis.to_uppercase() })),
             (200, json!({ "approved": true, "genesis": 7 })),
             (200, json!({ "approved": true })),
+            (200, json!({ "approved": true, "genesis": genesis, "welcome": format!("3.250.{}", "a".repeat(64)) })),
+            (200, json!({ "approved": true, "welcome": format!("3.3.{}", "a".repeat(64)) })),
+            (200, json!({ "approved": true, "welcome": format!("4.3.{}", "a".repeat(64)) })),
+            (200, json!({ "approved": true, "welcome": format!("03.250.{}", "a".repeat(64)) })),
+            (200, json!({ "approved": true, "welcome": format!("0.250.{}", "a".repeat(64)) })),
+            (200, json!({ "approved": true, "welcome": format!("+3.250.{}", "a".repeat(64)) })),
+            (200, json!({ "approved": true, "welcome": format!("3.9007199254740992.{}", "a".repeat(64)) })),
+            (200, json!({ "approved": true, "welcome": format!("3.9007199254740991.{}", "a".repeat(64)) })),
+            (200, json!({ "approved": true, "welcome": format!("3.250.{}", "A".repeat(64)) })),
+            (200, json!({ "approved": true, "welcome": format!(" 3.250.{}", "a".repeat(64)) })),
+            (200, json!({ "approved": true, "welcome": format!("3.250.{}.1", "a".repeat(64)) })),
+            (200, json!({ "approved": true, "welcome": 3 })),
             (200, json!({ "approved": false })),
             (200, json!({ "approved": "yes" })),
             (204, json!({ "approved": true })),
@@ -324,13 +336,24 @@ fn the_workers_and_nodes_agree_on_keys_and_seals() {
             let rust = match waited(*status, body) {
                 Waited::SignedOut => json!({ "signedOut": true }),
                 Waited::Gone => json!({ "gone": true }),
-                Waited::Approved(Some(genesis)) => json!({ "approved": true, "genesis": genesis }),
-                Waited::Approved(None) => json!({ "approved": true }),
+                Waited::Approved { genesis, welcome } => {
+                    let mut v = json!({ "approved": true });
+                    if let Some(g) = genesis {
+                        v["genesis"] = json!(g);
+                    }
+                    if let Some(w) = welcome {
+                        v["welcome"] = json!(w);
+                    }
+                    v
+                }
                 Waited::Waiting => json!({}),
             };
             assert_eq!(js, &rust, "{status} {body}");
         }
-        assert_eq!(waited(200, &said[2].1), Waited::Approved(Some(genesis)), "an approval names the install it's in");
+        assert_eq!(waited(200, &said[2].1), Waited::Approved { genesis: Some(genesis.clone()), welcome: None }, "an approval names the install it's in");
+        let welcomed = waited(200, &said[6].1);
+        assert!(matches!(&welcomed, Waited::Approved { welcome: Some(w), .. } if one::database::steps::Welcome::parse(w).is_some_and(|w| (w.freeze, w.at, w.copy()) == (3, 250, Some(200)))), "and where who's who was read to: {welcomed:?}");
+        assert_eq!(said.iter().filter(|(s, b)| matches!(waited(*s, b), Waited::Approved { welcome: Some(_), .. })).count(), 3, "only a welcome that's one is taken");
         assert_eq!(out["most"], json!(MOST_NEEDED));
         assert_eq!(out["behind"], json!(BEHIND));
     }

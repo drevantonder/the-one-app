@@ -17,7 +17,9 @@
 // its person (or, for a newcomer's first, the inviting admin's) finds by its join code and approves, then clears with
 // `?approved`, which keeps it, marked, for the new device to see while it waits (it asks no node until it's in), with
 // `&genesis=`, the install's first entry's hash as the approving device holds it: the only install the new device then
-// takes, so no node it reaches first can show it another. Set once, with the approval. A service asks nothing here:
+// takes, so no node it reaches first can show it another; and once its who's who is written as steps, `&welcome=`,
+// where the approving device read them to, which the new device starts from (src/database/steps.rs `Welcome`). Set
+// once, with the approval. A service asks nothing here:
 // its device's oned lists it.
 //
 // A sign-in for a client names the device it's for (`join` in its authorization's query: its key and seal key, 128
@@ -173,12 +175,13 @@ export class Auth extends DurableObject {
     // device its person joined with.
     sql.exec("create table if not exists invites (id text primary key, name text not null, user text not null unique, email text, until integer not null, by text not null, used integer)");
     // Devices' requests to join, by their key: `invite` is the invite of a newcomer's first device, with its `proof`;
-    // `approved`, when a device said it let it in, and `genesis`, the install it said it let it into; `place`, the city it
-    // asked from.
+    // `approved`, when a device said it let it in, `genesis`, the install it said it let it into, and `welcome`, where
+    // it said to start reading who's who from; `place`, the city it asked from.
     sql.exec("create table if not exists requests (key text primary key, seal text not null, name text not null, user text not null, proof text, invite text, made integer not null, approved integer, genesis text)");
     const columns = sql.exec("pragma table_info(requests)").toArray().map((c) => c.name);
     if (!columns.includes("approved")) sql.exec("alter table requests add column approved integer");
     if (!columns.includes("genesis")) sql.exec("alter table requests add column genesis text");
+    if (!columns.includes("welcome")) sql.exec("alter table requests add column welcome text");
     if (!columns.includes("place")) sql.exec("alter table requests add column place text");
     if (!columns.includes("device")) sql.exec("alter table requests add column device text");
     // Whether its sign-in was finished from a link opened elsewhere (`signsInHere`), and when its person was pushed
@@ -375,7 +378,7 @@ export class Auth extends DurableObject {
     if (path === "/api/auth/devices/requests" && method === "GET") return json(await this.requests(request));
     const one = path.match(/^\/api\/auth\/devices\/requests\/([0-9a-f]{64})$/);
     if (one && method === "GET") return json(await this.request(request, one[1]));
-    if (one && method === "DELETE") return json(await this.unask(request, one[1], url.searchParams.has("approved"), url.searchParams.get("genesis")));
+    if (one && method === "DELETE") return json(await this.unask(request, one[1], url.searchParams.has("approved"), url.searchParams.get("genesis"), url.searchParams.get("welcome")));
     return null;
   }
 
@@ -617,7 +620,7 @@ export class Auth extends DurableObject {
       const person = sql.exec("select name from user where id = ?", r.user).toArray()[0]?.name || "";
       const [signed] = sql.exec("select proof from proofs where key = ? and user = ?", r.key, r.user).toArray();
       const signIn = signed && (r.by_link ? { by_link: JSON.parse(signed.proof) } : JSON.parse(signed.proof));
-      return { key: r.key, seal: r.seal, name: r.name, user: r.user, person, ...(r.proof ? { proof: r.proof } : {}), ...(signIn ? { sign_in: signIn } : {}), ...(r.approved ? { approved: true } : {}), ...(r.genesis ? { genesis: r.genesis } : {}), ...(r.place ? { place: r.place } : {}), ...(r.device ? { device: r.device } : {}), made: r.made, until: (r.approved || r.made) + REQUEST };
+      return { key: r.key, seal: r.seal, name: r.name, user: r.user, person, ...(r.proof ? { proof: r.proof } : {}), ...(signIn ? { sign_in: signIn } : {}), ...(r.approved ? { approved: true } : {}), ...(r.genesis ? { genesis: r.genesis } : {}), ...(r.welcome ? { welcome: r.welcome } : {}), ...(r.place ? { place: r.place } : {}), ...(r.device ? { device: r.device } : {}), made: r.made, until: (r.approved || r.made) + REQUEST };
     });
   }
 
@@ -656,13 +659,14 @@ export class Auth extends DurableObject {
   }
 
   /// Forgets a request, refused; or one `approved`, marked so until it would have expired, for its device to see, with
-  /// the install's `genesis` (hex) it was let into, if the approving device said.
-  async unask(request, key, approved, genesis) {
+  /// the install's `genesis` (hex) it was let into and its `welcome`, if the approving device said.
+  async unask(request, key, approved, genesis, welcome) {
     const row = await this.mayTouch(request, key);
     // Approved again (a retry, or a second approving device): marked once, never forgotten by it.
     if (approved) {
       if (!row.approved) {
-        this.ctx.storage.sql.exec("update requests set approved = ?, genesis = ? where key = ?", Date.now(), /^[0-9a-f]{64}$/.test(genesis || "") ? genesis : null, key);
+        const welcomed = /^\d{1,16}\.\d{1,16}\.[0-9a-f]{64}$/.test(welcome || "") ? welcome : null;
+        this.ctx.storage.sql.exec("update requests set approved = ?, genesis = ?, welcome = ? where key = ?", Date.now(), /^[0-9a-f]{64}$/.test(genesis || "") ? genesis : null, welcomed, key);
         await this.push(row, { title: `${row.name} joined${row.place ? ` · ${row.place}` : ""}` });
       }
       return {};

@@ -392,8 +392,9 @@ pub enum Waited {
     /// Its sign-in is no more: it signs in again.
     SignedOut,
     /// Approved, in the install whose first entry (hex) the device that approved it named, if it named one: the only
-    /// one it then takes. It's in once the relay lets it.
-    Approved(Option<String>),
+    /// one it then takes; and once who's who is written as steps, where that device read them to, which this one
+    /// starts from (`database::steps::Welcome`), if it said. It's in once the relay lets it.
+    Approved { genesis: Option<String>, welcome: Option<String> },
     /// Gone from sign-in (approved and cleared, turned down, or waited too long): it's in if the relay lets it, else it
     /// asks again.
     Gone,
@@ -405,9 +406,10 @@ pub fn waited(status: u16, said: &Value) -> Waited {
     match status {
         401 => Waited::SignedOut,
         404 => Waited::Gone,
-        200..=299 if said["approved"] == true => {
-            Waited::Approved(said["genesis"].as_str().filter(|g| g.len() == 64 && g.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))).map(str::to_string))
-        }
+        200..=299 if said["approved"] == true => Waited::Approved {
+            genesis: said["genesis"].as_str().filter(|g| g.len() == 64 && g.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))).map(str::to_string),
+            welcome: said["welcome"].as_str().filter(|w| crate::database::steps::Welcome::parse(w).is_some()).map(str::to_string),
+        },
         _ => Waited::Waiting,
     }
 }

@@ -496,10 +496,13 @@ impl Node {
     }
 
     /// Where a device's request is marked approved at sign-in, saying the install it was let into (its first entry's hash),
-    /// the only one that device then takes.
+    /// the only one that device then takes, and once `global`'s log is frozen, where this device read its scope database
+    /// to, which that device starts from (`steps::Welcome`).
     fn approved_path(&self, key: &str) -> Result<String> {
-        let root = self.with(|i| Ok(i.r.root.map(|r| r.to_hex())))?.context("this device isn't in your One App yet")?;
-        Ok(format!("/api/auth/devices/requests/{key}?approved&genesis={root}"))
+        let (root, welcome) = self.with(|i| Ok((i.r.root.map(|r| r.to_hex()), i.r.welcome()?)))?;
+        let root = root.context("this device isn't in your One App yet")?;
+        let welcome = welcome.map(|w| format!("&welcome={w}")).unwrap_or_default();
+        Ok(format!("/api/auth/devices/requests/{key}?approved&genesis={root}{welcome}"))
     }
 
     /// Seals each epoch of `scope` its entries made, opened through the recovery key's copy, to `to` where it isn't yet.

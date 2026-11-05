@@ -1328,8 +1328,10 @@ const h = OneUI.react.createElement;
       const r = await bearer(`/api/auth/devices/requests/${keys.key}`).catch(() => null);
       const said = waited(r?.status || 0, r?.ok ? await r.json().catch(() => ({})) : {});
       if (said.signedOut) throw Object.assign(new NodeError("Signed out."), { signedOut: true });
-      // The install it was let into, as the device that approved it said: the only one it then takes.
+      // The install it was let into, as the device that approved it said: the only one it then takes; and where that
+      // device read who's who to, which it starts from.
       if (said.genesis) await put(`genesis:${user}`, said.genesis);
+      if (said.welcome) await put(`welcome:${user}`, said.welcome);
       if ((said.gone || said.approved) && (await net.start(user, true).catch(() => false))) break;
       if (said.gone) await ask().catch(() => {});
     }

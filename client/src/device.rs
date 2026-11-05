@@ -245,10 +245,12 @@ impl Device {
         let gone = match keys::waited(status, &said) {
             Waited::SignedOut => return Err(failed("Sign in again.")),
             Waited::Waiting => return Ok(false),
-            Waited::Approved(genesis) => {
-                if let Some(genesis) = genesis {
-                    let _ = std::fs::create_dir_all(&self.dir);
-                    std::fs::write(self.dir.join("genesis"), genesis).map_err(failed)?;
+            Waited::Approved { genesis, welcome } => {
+                for (name, said) in [("genesis", genesis), ("welcome", welcome)] {
+                    if let Some(said) = said {
+                        let _ = std::fs::create_dir_all(&self.dir);
+                        std::fs::write(self.dir.join(name), said).map_err(failed)?;
+                    }
                 }
                 false
             }
@@ -393,8 +395,17 @@ impl Device {
         let kept = std::fs::read_to_string(&pinned).ok().and_then(|had| Hash::from_hex(had.trim()).ok());
         let mut global = crate::members::Global::new(kept);
         global.add_entries(read.entries).map_err(|_| failed("This isn't the One App this device joined."))?;
-        // Its scope database's steps too, opened with the same keys (`one::database::steps`): who's who once it's frozen.
-        global.add_read(one::database::steps::read(&bucket, &log_keys, &Scope::Global, 0).await.map_err(failed)?).map_err(failed)?;
+        // Its scope database's steps too, opened with the same keys (`one::database::steps`): who's who once it's frozen,
+        // from where the device that let it in read them to, if it said (its Welcome), else from the first.
+        let welcome = std::fs::read_to_string(self.dir.join("welcome")).ok().and_then(|w| one::database::steps::Welcome::parse(w.trim()));
+        if let Some(welcome) = welcome {
+            match one::database::steps::welcomed(&bucket, &log_keys, &welcome, now()).await {
+                Ok(truth) => global.welcomed(truth),
+                Err(_) => drop(std::fs::remove_file(self.dir.join("welcome"))),
+            }
+        }
+        let at = global.at();
+        global.add_read(one::database::steps::read(&bucket, &log_keys, &Scope::Global, at).await.map_err(failed)?).map_err(failed)?;
         let who = global.who().map_err(failed)?;
         if kept.is_none()
             && let Some(root) = global.root()
@@ -498,7 +509,7 @@ impl Device {
         }
         *self.known.lock().unwrap() = None;
         self.needs.lock().unwrap().clear();
-        for kept in ["needs.json", "genesis"] {
+        for kept in ["needs.json", "genesis", "welcome"] {
             let _ = std::fs::remove_file(self.dir.join(kept));
         }
         self.forget_answers();

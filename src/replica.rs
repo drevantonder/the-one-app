@@ -111,6 +111,13 @@ impl Replica {
         kept.map(Some)
     }
 
+    /// Where this device has read `global`'s scope database to, for a device it lets in to start from: none before
+    /// its log is frozen.
+    pub fn welcome(&self) -> Result<Option<crate::database::steps::Welcome>> {
+        let Some((freeze, at)) = &self.frozen else { return Ok(None) };
+        Ok(Some(crate::database::steps::Welcome { freeze: freeze.at, at: *at, hash: crate::db::state_hash(self.db.conn())? }))
+    }
+
     /// Starts again from what `keep` kept, checked against its hash (`steps::Truth::kept`), as this device started.
     pub fn restart(&mut self, kept: &serde_json::Value, now: u64) -> Result<()> {
         let t = crate::database::steps::Truth::kept(kept, now)?;
@@ -428,5 +435,60 @@ mod tests {
         let mut changed = kept.clone();
         changed["hash"] = serde_json::json!("0".repeat(64));
         assert!(again.restart(&changed, 0).is_err());
+    }
+
+    /// A device let in starts from where the device that let it in read who's who to (its Welcome), not from the
+    /// freeze: the copy the bucket keeps before that step and the steps after it come to what that device has, as
+    /// reading from the freeze does; a copy swapped for another, or a step held back, starts nothing, and a copy that
+    /// isn't there is read past from the freeze.
+    #[test]
+    fn a_welcome_starts_a_new_device_from_the_copy_its_approver_had_read_to() {
+        const ANDRE: &str = "a000000000000001";
+        let mac = SigningKey::from_bytes(&[1; 32]);
+        let g = Entry::create(&mac, Ext { log: "global".into(), time: 0, user: ANDRE.into(), epoch: 0, previous: Vec::new() }, None, genesis("Home", ANDRE, "Andre", &Endpoint::of(&mac), "mac", &[Kind::Client], &[7; 32], &"e".repeat(64)));
+        let mut r = Replica::new(mac.clone(), Store::memory().unwrap(), Some(g.hash()), 0).unwrap();
+        r.receive(vec![g.clone()], 0).unwrap();
+        let (content, copy) = r.freeze_now(Default::default(), 0).unwrap();
+        let freeze = Given { step: steps::sign(&mac, &Scope::Global, 1, ANDRE, 1, 0, content).unwrap(), copy: Some(copy) };
+        r.take_first(1, Some(&freeze), 0).unwrap();
+        let bucket = crate::bucket::Memory::default();
+        let keys: crate::db::Keys = [(1, [9; 32])].into();
+        let prefix = steps::prefix("global");
+        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        let put = |at: u64, given: &Given| {
+            let name = crate::db::step_name(&prefix, at);
+            bucket.objects.lock().unwrap().insert(name.clone(), crate::log::seal(&keys, &name, &steps::encode(&given.step, given.copy.as_deref())).unwrap());
+        };
+        put(1, &freeze);
+        let (mut after, mut early) = (Vec::new(), None);
+        // Each a setting of its own, named by its position in letters (12 is "greeting_bc").
+        let named = |at: u64| format!("greeting_{}", at.to_string().bytes().map(|b| (b'a' + b - b'0') as char).collect::<String>());
+        for at in 2..=130u64 {
+            let step = r.make_step(&Scope::Global, ANDRE, setting(&named(at), Some("hi")), 0).unwrap();
+            r.take_step(at, Some(&step), 0).unwrap();
+            let given = Given { step, copy: None };
+            put(at, &given);
+            after.push(Some(given));
+            let bytes = r.db_mut().bytes().unwrap();
+            early = early.or((at == 50).then(|| bytes.clone()));
+            rt.block_on(steps::written(&bucket, &keys, &Scope::Global, at, bytes)).unwrap();
+        }
+        let w = r.welcome().unwrap().unwrap();
+        assert_eq!((w.freeze, w.at, w.copy()), (1, 130, Some(100)));
+        assert_eq!(steps::Welcome::parse(&w.to_string()), Some(w.clone()));
+        let copy = crate::keys::open(&keys[&1], &crate::db::copy_name(&prefix, 100), &bucket.objects.lock().unwrap()[&crate::db::copy_name(&prefix, 100)]).unwrap();
+        let hash = |t: &steps::Truth| crate::db::state_hash(t.db.conn()).unwrap();
+        let from_copy = steps::Truth::welcomed(&w, &freeze, Some(&copy), &after[99..], 0).unwrap();
+        assert_eq!((from_copy.at, hash(&from_copy), from_copy.db.setting(&named(130))), (130, w.hash.clone(), Some("hi".into())), "from the copy at 100 and the 30 steps after it");
+        assert_eq!(hash(&steps::Truth::welcomed(&w, &freeze, None, &after, 0).unwrap()), w.hash, "as from the freeze");
+        assert!(steps::Truth::welcomed(&w, &freeze, Some(&early.unwrap()), &after[99..], 0).is_err(), "another copy starts nothing");
+        let mut held_back = after[99..].to_vec();
+        held_back[5] = None;
+        assert!(steps::Truth::welcomed(&w, &freeze, Some(&copy), &held_back, 0).is_err(), "nor a step held back");
+        assert!(steps::Truth::welcomed(&steps::Welcome { hash: "0".repeat(64), ..w.clone() }, &freeze, Some(&copy), &after[99..], 0).is_err(), "nor another hash");
+        // As a device reads it from the bucket; and with its copy gone, from the freeze.
+        assert_eq!(hash(&rt.block_on(steps::welcomed(&bucket, &keys, &w, 0)).unwrap()), w.hash);
+        bucket.objects.lock().unwrap().remove(&crate::db::copy_name(&prefix, 100));
+        assert_eq!(hash(&rt.block_on(steps::welcomed(&bucket, &keys, &w, 0)).unwrap()), w.hash);
     }
 }

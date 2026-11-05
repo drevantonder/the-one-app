@@ -466,7 +466,12 @@ export const BEHIND = [2_000, 4_000];
 export function waited(status, said) {
   if (status === 401) return { signedOut: true };
   if (status === 404) return { gone: true };
-  if (status >= 200 && status < 300 && said?.approved === true) return { approved: true, ...(typeof said.genesis === "string" && /^[0-9a-f]{64}$/.test(said.genesis) ? { genesis: said.genesis } : {}) };
+  if (status >= 200 && status < 300 && said?.approved === true) {
+    // Where the approving device read who's who to (src/database/steps.rs `Welcome::parse`): `<freeze>.<at>.<hash>`.
+    const w = typeof said.welcome === "string" && /^([1-9]\d{0,15})\.([1-9]\d{0,15})\.[0-9a-f]{64}$/.exec(said.welcome);
+    const welcome = w && Number(w[2]) >= Number(w[1]) && Number(w[2]) < 2 ** 53 ? said.welcome : null;
+    return { approved: true, ...(typeof said.genesis === "string" && /^[0-9a-f]{64}$/.test(said.genesis) ? { genesis: said.genesis } : {}), ...(welcome ? { welcome } : {}) };
+  }
   return {};
 }
 

@@ -911,7 +911,8 @@ async fn steps(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Rep
 /// `?from=<n>`: `global`'s scope database's steps after position n (`Node::global_steps`).
 async fn global_steps(State(node): State<Node>, me: Me, axum::extract::Query(q): axum::extract::Query<std::collections::HashMap<String, String>>) -> Reply {
     let from = q.get("from").map(|f| f.parse()).transpose()?.unwrap_or(0);
-    Ok(Json(node.global_steps(&me.caller, from).await?))
+    let welcome = q.get("welcome").and_then(|w| crate::database::steps::Welcome::parse(w));
+    Ok(Json(node.global_steps(&me.caller, from, welcome).await?))
 }
 
 /// `?scope=`: what a device signing an entry there needs: `{ epoch, previous, logs }` (`Node::entry_heads`).

@@ -268,8 +268,10 @@ impl Node {
     /// `global`'s steps after `from` as the bucket holds them, sealed, each `{ at, sealed }` (base64url), its freeze
     /// among them: a client device opens them with its own keys and applies them itself, never taking who's who, nor
     /// that a step isn't one, from a node. With `{ at }`, the last there, after which a writer signs its own. Fails
-    /// before the log is frozen here, so a writer writes entries.
-    pub async fn global_steps(&self, caller: &Caller, from: u64) -> Result<Value> {
+    /// before the log is frozen here, so a writer writes entries. For a device that starts from its `welcome`
+    /// (`steps::Welcome`), those after the copy before its step instead, with that copy and the freeze's step, sealed:
+    /// `{ welcome, freeze: { at, sealed }, start: { at, sealed } }`, without `start` if the copy isn't there.
+    pub async fn global_steps(&self, caller: &Caller, from: u64, welcome: Option<steps::Welcome>) -> Result<Value> {
         self.read_steps().await?;
         let read = self.with(|i| {
             ensure!(i.r.db().may(&caller.user, "use", scopes::INSTALL), "you aren't one of this install's people");
@@ -278,15 +280,32 @@ impl Node {
         let read = read.context("global's log isn't frozen")?;
         let bucket = self.bucket()?;
         let prefix = steps::prefix("global");
+        let sealed = |at: u64, o: crate::bucket::Object| json!({ "at": at, "sealed": data_encoding::BASE64URL_NOPAD.encode(&o.bytes) });
+        let mut out = json!({});
+        let mut from = from;
+        if let Some(w) = welcome.filter(|w| w.at <= read)
+            && let Some(freeze) = crate::bucket::Bucket::get(&bucket, &crate::db::step_name(&prefix, w.freeze)).await?
+        {
+            out = json!({ "welcome": w.to_string(), "freeze": sealed(w.freeze, freeze) });
+            from = w.freeze;
+            if let Some(c) = w.copy()
+                && let Some(copy) = crate::bucket::Bucket::get(&bucket, &crate::db::copy_name(&prefix, c)).await?
+            {
+                out["start"] = sealed(c, copy);
+                from = c;
+            }
+        }
         let mut list = Vec::new();
         let mut at = from.min(read);
         while let Some(o) = crate::bucket::Bucket::get(&bucket, &crate::db::step_name(&prefix, at + 1)).await? {
             at += 1;
             if at > from {
-                list.push(json!({ "at": at, "sealed": data_encoding::BASE64URL_NOPAD.encode(&o.bytes) }));
+                list.push(sealed(at, o));
             }
         }
-        Ok(json!({ "at": at, "steps": list }))
+        out["at"] = json!(at);
+        out["steps"] = json!(list);
+        Ok(out)
     }
 
     /// Reads a scope's own steps after the last this device applied, once `global`'s log is frozen: from the database

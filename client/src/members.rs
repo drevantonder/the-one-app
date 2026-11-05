@@ -85,8 +85,13 @@ impl Global {
     /// opened here with `epochs`, `global`'s epochs' keys sealed to this device (raw, by number), each used only once
     /// who's who as the steps before it leave it says it's that epoch's, and `apps`, the node's key in each epoch
     /// sealed under it (base64url, by number). Stops at one under an epoch this device has no key for yet, or whose
-    /// freeze waits for entries.
+    /// freeze waits for entries. With `welcome` (`steps::Welcome`), before it's read to its freeze, it starts from
+    /// there (`add_welcomed`).
     pub fn add_sealed(&mut self, given: &Value, epochs: &BTreeMap<u32, [u8; 32]>, apps: &BTreeMap<u32, Vec<u8>>) -> Result<()> {
+        // Welcomed: from the copy a node passed on with them. One that doesn't check out is read from the freeze on.
+        if let Some(welcome) = given["welcome"].as_str().and_then(steps::Welcome::parse) {
+            let _ = self.add_welcomed(&welcome, given, epochs, apps);
+        }
         let mut keys = one::db::Keys::new();
         for s in given["steps"].as_array().into_iter().flatten() {
             let Some(at) = s["at"].as_u64().filter(|at| *at == self.at() + 1) else { continue };
@@ -110,6 +115,57 @@ impl Global {
                 Err(_) => break,
             }
         }
+        Ok(())
+    }
+
+    /// Starts from `truth`, worked out from where the device that let this one in read who's who to
+    /// (`steps::welcomed`, `steps::Welcome`), unless this device has read to its freeze itself.
+    pub fn welcomed(&mut self, truth: steps::Truth) {
+        if self.truth.is_none() {
+            self.truth = Some(truth);
+        }
+    }
+
+    /// `add_sealed`'s start for a device that hasn't read to its freeze, from its Welcome (`welcome`): `given`'s
+    /// `freeze` and `start` (`{ at, sealed }`, its freeze's step and the copy before the Welcome's step, as a node passes
+    /// them on with `?welcome=`) and its steps up to the Welcome's, opened with every key of `global`'s sealed to this
+    /// device, each then checked against who's who as they make it. Fails if they don't come to the Welcome's hash, or
+    /// a key isn't the one it says.
+    fn add_welcomed(&mut self, welcome: &steps::Welcome, given: &Value, epochs: &BTreeMap<u32, [u8; 32]>, apps: &BTreeMap<u32, Vec<u8>>) -> Result<()> {
+        let (Some(freeze), true) = (given.get("freeze"), self.truth.is_none()) else { return Ok(()) };
+        let mut keys = one::db::Keys::new();
+        for (e, epoch) in epochs {
+            if let Some(app) = apps.get(e).and_then(|a| one::cloudflare::open_app_key(epoch, one::members::APP, a).ok()) {
+                keys.insert(*e, one::cloudflare::database_key(&app, one::log::NAME));
+            }
+        }
+        let sealed = |v: &Value| v["sealed"].as_str().and_then(|b| data_encoding::BASE64URL_NOPAD.decode(b.as_bytes()).ok());
+        let opened = |at: u64, v: &Value| match sealed(v).map(|b| steps::open(&keys, &Scope::Global, at, &b)) {
+            Some(steps::Opened::Step(g)) => Ok(Some(g)),
+            Some(steps::Opened::Junk) => Ok(None),
+            _ => bail!("global's step {at} isn't one this device opens"),
+        };
+        let Some(freeze) = opened(welcome.freeze, freeze)? else { bail!("the step it was welcomed with isn't a freeze") };
+        let start = match given.get("start").filter(|s| s["at"].as_u64().is_some() && s["at"].as_u64() == welcome.copy()) {
+            Some(s) => {
+                let name = one::db::copy_name(&steps::prefix("global"), s["at"].as_u64().unwrap_or(0));
+                let bytes = sealed(s).ok_or_else(|| anyhow::anyhow!("no copy"))?;
+                let key = keys.get(&one::keys::epoch_of(&bytes)?).ok_or_else(|| anyhow::anyhow!("its copy is under a key this device wasn't given"))?;
+                Some(one::keys::open(key, &name, &bytes)?)
+            }
+            None => None,
+        };
+        let from = start.as_ref().and(welcome.copy()).unwrap_or(welcome.freeze);
+        let mut after = Vec::new();
+        for at in from + 1..=welcome.at {
+            let s = given["steps"].as_array().into_iter().flatten().find(|s| s["at"].as_u64() == Some(at)).ok_or_else(|| anyhow::anyhow!("global's step {at} wasn't given"))?;
+            after.push(opened(at, s)?);
+        }
+        let truth = steps::Truth::welcomed(welcome, &freeze, start.as_deref(), &after, now())?;
+        for (e, epoch) in epochs {
+            ensure!(truth.db.epoch_hash(&Scope::Global, *e) == Some(one::keys::epoch_hash(epoch)), "a key for this didn't check out, so it wasn't used");
+        }
+        self.truth = Some(truth);
         Ok(())
     }
 

@@ -131,9 +131,13 @@ export class Device {
       // Once the log is frozen, who's who is its scope database's steps after those kept, which this browser opens
       // itself; a node that isn't says so.
       const frozen = kept?.members?.frozen || this.state()?.install?.frozen;
-      const steps = frozen ? await this.api(`/v1/steps/global?from=${kept?.at || 0}`).catch(() => null) : null;
-      if (steps?.steps?.length) steps.keys = await this.logKeys();
-      const k = !given && !steps?.steps?.length && kept?.members?.people?.[this.user]?.keeps ? kept.members : await this.replay(this.user, given, steps);
+      // A browser that hasn't read to its freeze starts from where the device that let it in had (its Welcome).
+      const welcome = !kept?.steps?.truth && (await get(`welcome:${this.user}`));
+      const steps = frozen ? await this.api(`/v1/steps/global?from=${kept?.at || 0}${welcome ? `&welcome=${welcome}` : ""}`).catch(() => null) : null;
+      if (steps?.steps?.length || steps?.freeze) steps.keys = await this.logKeys();
+      const k = !given && !steps?.steps?.length && !steps?.freeze && kept?.members?.people?.[this.user]?.keeps ? kept.members : await this.replay(this.user, given, steps);
+      // One that didn't check out is read from the freeze on, the next time.
+      if (welcome && !(await get(`global:${this.user}`))?.steps?.truth) await del(`welcome:${this.user}`).catch(() => {});
       if (!k.people[this.user]) throw new Error("Your One App doesn't list you yet, so this device didn't use it.");
       this.known = k;
     }
@@ -542,8 +546,12 @@ export class Device {
       const next = (await get(`global:${this.user}`))?.have.split(",").find((h) => h.startsWith(`${old.key}.`))?.split(".")[1];
       await this.write("global", members.removeDevice({ key: old.key, seq: next ? Number(next) - 1 : null }), as);
     }
-    // Marked approved, for the device waiting on it to see, with the install it's in: the only one it then takes.
-    const approved = `?approved&genesis=${(await get(`global:${this.user}`))?.root || ""}`;
+    // Marked approved, for the device waiting on it to see, with the install it's in: the only one it then takes; and
+    // once who's who is written as steps, where this browser read them to, which it starts from (src/database/steps.rs
+    // `Welcome`).
+    const held = await get(`global:${this.user}`);
+    const t = held?.steps?.truth;
+    const approved = `?approved&genesis=${held?.root || ""}${t ? `&welcome=${t.freeze_at}.${t.at}.${t.hash}` : ""}`;
     if (newUser) await this.authSigned("DELETE", `/api/auth/devices/requests/${r.key}`, {}, approved).catch(() => {});
     else await this.bearer(`/api/auth/devices/requests/${r.key}${approved}`, { method: "DELETE" }).catch(() => {});
   }

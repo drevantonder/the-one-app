@@ -409,15 +409,116 @@ pub async fn written(bucket: &impl crate::bucket::Bucket, keys: &crate::db::Keys
     crate::db::hint(bucket, &prefix, at, at - at % crate::db::COPY_EVERY, epoch).await
 }
 
-/// The copy of `scope`'s database at step `at`, if one is there that opens with `keys` and comes to `hash`, as the
-/// device that let a new one in says (its Welcome): in this release's form.
-pub async fn copy_at(bucket: &impl crate::bucket::Bucket, keys: &crate::db::Keys, scope: &Scope, at: u64, hash: &str, now: u64) -> Result<ScopeDb> {
-    let name = crate::db::copy_name(&prefix(&scope.to_string()), at);
-    let o = bucket.get(&name).await?.with_context(|| format!("{scope}'s copy at {at} isn't there"))?;
-    let key = keys.get(&crate::keys::epoch_of(&o.bytes)?).context("its copy is under a key this device wasn't given")?;
-    let conn = connection(&crate::keys::open(key, &name, &o.bytes)?)?;
-    ensure!(crate::db::state_hash(&conn)? == hash, "{scope}'s copy at {at} isn't the one this device was told to start from");
-    normalize(conn, scope, now)
+/// Where the device that let a new one in had read `global`'s scope database to (its Welcome): its freeze's position,
+/// the last step it had taken, and the database's state hash there, in its release's form. The new device starts from
+/// the copy at or before that step, takes the steps after it up to there, and keeps what it made only if it comes to
+/// that hash: the steps from the freeze on are never all read again. Said `<freeze>.<at>.<hash>`, as sign-in passes it on
+/// beside the genesis (`cloudflare/sign-in/worker.js`), which a device that knows none of it never reads.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Welcome {
+    pub freeze: u64,
+    pub at: u64,
+    pub hash: String,
+}
+
+impl Welcome {
+    /// A Welcome as it's said: none for one that isn't. `cloudflare/shared/crypto.js`'s `waited` reads it the same way.
+    pub fn parse(said: &str) -> Option<Welcome> {
+        let number = |n: &str| (!n.is_empty() && n.len() <= 16 && !n.starts_with('0') && n.bytes().all(|b| b.is_ascii_digit())).then(|| n.parse::<u64>().ok()).flatten();
+        let mut parts = said.splitn(3, '.');
+        let (freeze, at, hash) = (number(parts.next()?)?, number(parts.next()?)?, parts.next()?);
+        (at >= freeze && at < 1 << 53 && hash.len() == 64 && hash.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))).then(|| Welcome { freeze, at, hash: hash.to_string() })
+    }
+
+    /// The copy a new device starts from: the newest at or before `at` the bucket keeps (one every `db::COPY_EVERY`
+    /// steps), or none, for the freeze's own.
+    pub fn copy(&self) -> Option<u64> {
+        let c = self.at - self.at % crate::db::COPY_EVERY;
+        (c > self.freeze).then_some(c)
+    }
+}
+
+impl std::fmt::Display for Welcome {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}.{}.{}", self.freeze, self.at, self.hash)
+    }
+}
+
+impl Truth {
+    /// Where this reader is, as it welcomes a new device.
+    pub fn welcome(&self) -> Result<Welcome> {
+        Ok(Welcome { freeze: self.freeze.at, at: self.at, hash: crate::db::state_hash(self.db.conn())? })
+    }
+
+    /// Who's who as `welcome` says it: from `freeze`, the step at its freeze's position, and `start`, the copy at
+    /// `Welcome::copy` (its bytes, opened), or none to start from the freeze's own, then `after`, the steps after that
+    /// one up to the Welcome's, each taken as any reader takes it. Fails unless it comes to the Welcome's hash, in this
+    /// release's form: a copy or step a node or another device swapped is never used.
+    pub fn welcomed(welcome: &Welcome, freeze: &Given, start: Option<&[u8]>, after: &[Option<Given>], now: u64) -> Result<Truth> {
+        let f = Freeze::of(&freeze.step, welcome.freeze)?;
+        ensure!(u64::from(freeze.step.seq()) == welcome.freeze, "that isn't the freeze it was welcomed with");
+        let (at, copy) = match (welcome.copy(), start) {
+            (Some(at), Some(bytes)) => (at, connection(bytes)?),
+            (_, None) => {
+                let copy = connection(freeze.copy.as_deref().context("a freeze carries its copy")?)?;
+                ensure!(crate::db::state_hash(&copy)? == f.hash, "a freeze's copy isn't what it says");
+                (welcome.freeze, copy)
+            }
+            (None, Some(_)) => bail!("no copy comes before the freeze's"),
+        };
+        ensure!(after.len() as u64 == welcome.at - at, "not every step up to where it was welcomed is here");
+        let mut t = Truth { freeze: f, at, db: normalize(copy, &Scope::Global, now)? };
+        for given in after {
+            t.take(t.at + 1, given.as_ref().map(|g| &g.step))?;
+        }
+        ensure!(crate::db::state_hash(t.db.conn())? == welcome.hash, "who's who from that copy isn't what the device that let this one in said");
+        Ok(t)
+    }
+}
+
+/// Who's who as `welcome` says it, read from the bucket with `keys`, `global`'s log's keys by epoch (`Truth::welcomed`):
+/// from the copy before the Welcome's step, or, if that one isn't there or doesn't come to its hash, from its freeze's.
+pub async fn welcomed(bucket: &impl crate::bucket::Bucket, keys: &crate::db::Keys, welcome: &Welcome, now: u64) -> Result<Truth> {
+    async fn step(bucket: &impl crate::bucket::Bucket, keys: &crate::db::Keys, at: u64) -> Result<Option<Given>> {
+        let o = bucket.get(&crate::db::step_name(&prefix("global"), at)).await?.with_context(|| format!("global's step {at} isn't there"))?;
+        Ok(match open(keys, &Scope::Global, at, &o.bytes) {
+            Opened::Step(g) => Some(g),
+            Opened::Junk => None,
+            Opened::Waits(e) => bail!("global's step {at} is under epoch {e}, whose key this device wasn't given"),
+        })
+    }
+    let prefix = prefix("global");
+    let freeze = step(bucket, keys, welcome.freeze).await?.context("the step it was welcomed with isn't a freeze")?;
+    let mut tried = None;
+    if let Some(c) = welcome.copy() {
+        let name = crate::db::copy_name(&prefix, c);
+        let copy = async {
+            let o = bucket.get(&name).await?.context("no copy")?;
+            let key = keys.get(&crate::keys::epoch_of(&o.bytes)?).context("its copy is under a key this device wasn't given")?;
+            crate::keys::open(key, &name, &o.bytes)
+        };
+        match copy.await {
+            Ok(bytes) => {
+                let mut after = Vec::new();
+                for at in c + 1..=welcome.at {
+                    after.push(step(bucket, keys, at).await?);
+                }
+                match Truth::welcomed(welcome, &freeze, Some(&bytes), &after, now) {
+                    Ok(t) => return Ok(t),
+                    Err(err) => tried = Some(err),
+                }
+            }
+            Err(err) => tried = Some(err),
+        }
+    }
+    if let Some(err) = tried {
+        tracing::info!("global's copy before step {}: {err:#}: read from its freeze", welcome.at);
+    }
+    let mut after = Vec::new();
+    for at in welcome.freeze + 1..=welcome.at {
+        after.push(step(bucket, keys, at).await?);
+    }
+    Truth::welcomed(welcome, &freeze, None, &after, now)
 }
 
 /// What a step that counts made of the database it was applied to: the database it leaves.
