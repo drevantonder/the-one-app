@@ -26,7 +26,7 @@ export default {
   needs: "Needs one of your devices",
   instructions: "Run a shell command on one of your own devices with shell_run; give device (a name from shell_devices) to choose which, or it runs on the first online one in Device Activity's order. Every command is logged where only you can read it.",
   uses: { services: ["shell"] },
-  service: { person: true, platforms: ["linux", "mac"] },
+  service: { network: ["*"], person: true, platforms: ["linux", "mac"] },
 
   tools: {
     devices: {

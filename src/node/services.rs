@@ -81,6 +81,15 @@ impl Node {
         self.with(|i| Ok(i.r.db().offering(name).into_iter().any(|s| s.device == Some(self.0.id) && i.peers.get(&s.key).is_some_and(|p| p.seen >= since)))).unwrap_or(false)
     }
 
+    /// What the app `name` this device runs says of its service's wrapper (`service: { network, person }` in its
+    /// app.js), or why it can't be read: the app isn't running here, or its deploy says nothing of it.
+    pub async fn service_declared(&self, name: &str) -> Result<crate::sandbox::Declared> {
+        ensure!(self.0.apps.has(name), "its app isn't running on this device");
+        let d = self.0.apps.describe(name).await?;
+        ensure!(d["service"].is_object(), "its app doesn't say what its service may reach");
+        Ok(serde_json::from_value(d["service"].clone())?)
+    }
+
     /// Whether this device runs apps' calls: unless its person switched its app service off.
     pub fn runs_apps(&self) -> bool {
         self.with(|i| Ok(!Self::off(i.r.db(), &self.0.id, crate::members::APPS_PART))).unwrap_or(true)
@@ -124,6 +133,12 @@ impl Node {
         for (name, now) in now {
             if let (Some(Value::Object(part)), Value::Object(now)) = (out.get_mut(&name), json!(now)) {
                 part.extend(now);
+            }
+        }
+        // How each runs: without its sandbox and why, or as the person (both new: older devices show neither).
+        for (name, held) in crate::oned::held() {
+            if let (Some(Value::Object(part)), Value::Object(held)) = (out.get_mut(&name), json!(held)) {
+                part.extend(held);
             }
         }
         // A registered one (the Mac app's), switched on but not registered now: starting while it registers again,

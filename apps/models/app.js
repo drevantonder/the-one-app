@@ -29,7 +29,7 @@ export default {
   needs: "Needs a device with a GPU",
   instructions: "Local models run on the device that has them. models_here lists this device's models; give device \"all\" for every device's, and which are loaded. models_chat asks one and returns its answer, on whichever of your devices has it; use it for private or bulk work instead of a hosted model. models_decide asks a decision model (like clef-flash) typed questions and answers with probabilities, fast.",
   uses: { services: ["models"] },
-  service: { network: ["127.0.0.1"], person: false, platforms: ["linux", "mac"] },
+  service: { network: ["127.0.0.1:11434"], person: false, platforms: ["linux", "mac"] },
 
   tools: {
     devices: {

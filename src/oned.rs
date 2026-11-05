@@ -11,7 +11,8 @@
 //! key (a `service-release` entry, which an older device ignores). oned fetches it, checks its hash or signature and puts
 //! it at `~/.local/bin/<cli>-<name>` when it's switched on and again when another is named or a newer one's published;
 //! a Mac app carries the built-in ones in Rust inside it, built with it. Its hello says what the device can run (`parts`) and each part's state (on, off, starting,
-//! stopping, failed and why), which is what Settings' Devices shows. Removing a device removes its parts, and can erase
+//! stopping, failed and why) and how it runs: in its sandbox as its app declares (`sandbox`, which oned tells each
+//! part in its folder, `declared.json`), without one and why, or as the person; which is what Settings' Devices shows. Removing a device removes its parts, and can erase
 //! what it keeps, which the device does itself, so only while it's reachable. On a Mac the app is oned; a phone runs
 //! none, its app is the device.
 
@@ -95,6 +96,38 @@ pub struct Now {
     pub doing: Option<&'static str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub problem: Option<String>,
+}
+
+/// How a part runs, as its app declares: without its sandbox, saying why, or as the person.
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize)]
+pub struct Held {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sandbox: Option<String>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub person: bool,
+}
+
+/// How each part running runs.
+static HELD: std::sync::Mutex<BTreeMap<String, Held>> = std::sync::Mutex::new(BTreeMap::new());
+
+/// How each part running runs, as its hello says.
+pub fn held() -> BTreeMap<String, Held> {
+    HELD.lock().unwrap().clone()
+}
+
+/// Says how a part runs (none: it doesn't): changed, its device tells the others at once.
+fn hold(node: &Node, runtime: &tokio::runtime::Handle, name: &str, held: Option<Held>) {
+    let changed = {
+        let mut all = HELD.lock().unwrap();
+        match held {
+            Some(h) => all.insert(name.to_string(), h.clone()) != Some(h),
+            None => all.remove(name).is_some(),
+        }
+    };
+    if changed {
+        let _in = runtime.enter();
+        node.parts_changed();
+    }
 }
 
 /// Each part's `Now`, and the services oned could run as its processes.
@@ -187,6 +220,10 @@ pub fn keep_parts(node: Node, runtime: tokio::runtime::Handle) {
         let mut stops: BTreeMap<String, Vec<Instant>> = BTreeMap::new();
         // When each part on was switched on: switched on again (Try Again), it starts afresh.
         let mut switched: BTreeMap<String, u64> = BTreeMap::new();
+        // What each service's app declares it may reach, looked at with the builds; and what each was started with.
+        let mut declared: BTreeMap<String, Option<crate::sandbox::Declared>> = BTreeMap::new();
+        let mut started_with: BTreeMap<String, Option<crate::sandbox::Declared>> = BTreeMap::new();
+        let device = node.device_name();
         loop {
             if let Some(dir) = ERASING.lock().unwrap().clone() {
                 std::thread::sleep(Duration::from_secs(1));
@@ -207,6 +244,7 @@ pub fn keep_parts(node: Node, runtime: tokio::runtime::Handle) {
             }
             if looked.is_none_or(|t| t.elapsed() > Duration::from_secs(60)) {
                 released = runtime.block_on(node.service_builds());
+                declared.clear();
                 looked = Some(Instant::now());
             }
             match node.parts_on() {
@@ -277,13 +315,35 @@ pub fn keep_parts(node: Node, runtime: tokio::runtime::Handle) {
                         if !named && let Some((child, _)) = running.remove(name) {
                             stop(name, child);
                         }
+                        // Its app declares what it may reach, looked at with the builds (and while it's unknown): a declaration
+                        // that changed starts it again in its sandbox.
+                        if declared.get(name).is_none_or(|d| d.is_none()) {
+                            let d = runtime.block_on(node.service_declared(name)).map_err(|err| tracing::debug!("{name}'s declaration: {err:#}")).ok();
+                            declared.insert(name.clone(), d);
+                        }
+                        let said = declared.get(name).cloned().flatten();
+                        let resandbox = HELD.lock().unwrap().get(name).is_some_and(|h| h.sandbox.is_some() && crate::sandbox::unsandboxed(said.as_ref(), &device).is_none());
+                        if running.contains_key(name) && (resandbox || started_with.get(name).is_some_and(|d| *d != said)) && let Some((child, _)) = running.remove(name) {
+                            tracing::info!("{name}'s app declares something else of it, or this machine can sandbox it now: oned starts it again");
+                            stop(name, child);
+                        }
+                        // Unknown, it waits a while for its app to run here; a build its deploy names never runs without one.
+                        let deployed = matches!(released.get(name), Some(Build::Deployed(_)));
+                        let patient = crate::handoff::since_start().is_some_and(|s| s < Duration::from_secs(120)) && node.runs_apps();
+                        let declaring = said.is_none() && (deployed || patient);
+                        if wanted && said.is_none() && deployed {
+                            say(&node, &runtime, name, Now { doing: None, problem: Some("Its app doesn’t say what it may reach, so it doesn’t run.".into()) });
+                        }
                         if wanted && released.get(name) == Some(&Build::None) {
                             say(&node, &runtime, name, Now { doing: None, problem: Some("Its app’s latest deploy has no build of it for this device’s platform.".into()) });
                         }
-                        if wanted && named && !running.contains_key(name) && here.exists() && !fetching.lock().unwrap().contains(name) {
-                            match start(&install, name) {
+                        if wanted && named && !declaring && !running.contains_key(name) && here.exists() && !fetching.lock().unwrap().contains(name) {
+                            started_with.insert(name.clone(), said.clone());
+                            match start(&install, name, said.as_ref()) {
                                 Ok(child) => {
                                     tracing::info!("oned started {name}");
+                                    let held = Held { sandbox: crate::sandbox::unsandboxed(said.as_ref(), &device), person: said.as_ref().is_some_and(|d| d.person) };
+                                    hold(&node, &runtime, name, Some(held));
                                     running.insert(name.clone(), (child, Instant::now()));
                                     let problem = NOW.lock().unwrap().0.get(name).and_then(|n| n.problem.clone());
                                     say(&node, &runtime, name, Now { doing: problem.is_none().then_some("Starting"), problem });
@@ -296,6 +356,7 @@ pub fn keep_parts(node: Node, runtime: tokio::runtime::Handle) {
                             say(&node, &runtime, name, Now::default());
                         }
                         if !wanted {
+                            hold(&node, &runtime, name, None);
                             stops.remove(name);
                             switched.remove(name);
                             failed.lock().unwrap().remove(name);
@@ -319,9 +380,15 @@ pub fn keep_parts(node: Node, runtime: tokio::runtime::Handle) {
                 }
             });
             // Started, it's on once it answers its device, asked until it does, even once it said what's wrong; one
-            // that doesn't in a minute says so. One that stayed up a minute no longer keeps stopping.
+            // that doesn't in a minute says so. One that stayed up a minute no longer keeps stopping. One that can't
+            // start in its sandbox says why, and one running without one says so.
             for (name, (_, started)) in &running {
                 let now = NOW.lock().unwrap().0.get(name).cloned().unwrap_or_default();
+                if let Ok(why) = std::fs::read_to_string(crate::service::folder(name).join(crate::service::PROBLEM)) {
+                    say(&node, &runtime, name, Now { doing: None, problem: Some(why) });
+                    continue;
+                }
+                let fine = Now::default();
                 if !node.part_up(name, *started) {
                     runtime.block_on(node.hello_part(name));
                 }
@@ -329,8 +396,8 @@ pub fn keep_parts(node: Node, runtime: tokio::runtime::Handle) {
                     if started.elapsed() > Duration::from_secs(60) {
                         stops.remove(name);
                     }
-                    if now != Now::default() && stops.get(name).is_none_or(|s| s.len() < 3) {
-                        say(&node, &runtime, name, Now::default());
+                    if now != fine && stops.get(name).is_none_or(|s| s.len() < 3) {
+                        say(&node, &runtime, name, fine);
                     }
                 } else if now.doing == Some("Starting") && started.elapsed() > Duration::from_secs(60) {
                     say(&node, &runtime, name, Now { doing: None, problem: Some("It started, but doesn’t answer. Its device’s log says why.".into()) });
@@ -351,9 +418,15 @@ pub fn keep_parts(node: Node, runtime: tokio::runtime::Handle) {
     });
 }
 
-/// Starts a part, given the install it's in.
-fn start(install: &crate::service::Install, name: &str) -> anyhow::Result<std::process::Child> {
-    install.give(&crate::service::folder(name))?;
+/// Starts a part, given the install it's in and what its app declares it may reach.
+fn start(install: &crate::service::Install, name: &str, declared: Option<&crate::sandbox::Declared>) -> anyhow::Result<std::process::Child> {
+    let folder = crate::service::folder(name);
+    install.give(&folder)?;
+    let _ = std::fs::remove_file(folder.join(crate::service::PROBLEM));
+    match declared {
+        Some(d) => std::fs::write(folder.join(crate::service::DECLARED), serde_json::to_vec(d)?)?,
+        None => drop(std::fs::remove_file(folder.join(crate::service::DECLARED))),
+    }
     Ok(command(&[name])?.stdin(std::process::Stdio::null()).spawn()?)
 }
 

@@ -95,6 +95,8 @@ $(for e in $env; do echo "Environment=$e"; done)
 WantedBy=multi-user.target
 EOF
 		$sudo systemctl daemon-reload
+		# Services run each in its sandbox, as its own user, which ${cli}d starts by a unit polkit lets it.
+		if script=$("$HOME/.local/bin/$cli" services sandbox); then printf '%s\n' "$script" | $sudo sh; fi
 		$sudo systemctl enable --now "${cli}d"
 		echo "Installed ~/.local/bin/$cli, with ${cli}d running as a service."
 	else

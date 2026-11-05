@@ -153,6 +153,9 @@ function W(e, t) {
 			title: `${r} isn’t running on ${e.name}`,
 			text: n.problem,
 			action: a(!0, n.problem)
+		} : n.on && n.sandbox ? {
+			title: `${r} runs without its sandbox on ${e.name}`,
+			text: n.sandbox
 		} : null;
 	}
 	let y = (e) => e.user === s ? _(e).map((t) => v(e, t)).filter(Boolean) : [];
@@ -508,30 +511,30 @@ function ee() {
 				children: "Devices"
 			}),
 			Q,
-			e && k.for?.rename && /* @__PURE__ */ w(ve, {
+			e && k.for?.rename && /* @__PURE__ */ w(ye, {
 				card: k.for.rename,
 				open: k.open,
 				setOpen: M,
 				done: () => (M(!1), R())
 			}, k.n),
-			e && k.for?.remove && /* @__PURE__ */ w(xe, {
+			e && k.for?.remove && /* @__PURE__ */ w(Se, {
 				...k.for.remove,
 				open: k.open,
 				setOpen: M,
 				done: () => (M(!1), R())
 			}, k.n),
-			e && k.for?.signIns && /* @__PURE__ */ w(Se, {
+			e && k.for?.signIns && /* @__PURE__ */ w(Ce, {
 				clients: k.for.signIns,
 				open: k.open,
 				setOpen: M,
 				done: () => (M(!1), R())
 			}, k.n),
-			e && k.for?.add && /* @__PURE__ */ w(we, {
+			e && k.for?.add && /* @__PURE__ */ w(Te, {
 				data: e,
 				open: k.open,
 				setOpen: M
 			}, k.n),
-			e && k.for?.keep && /* @__PURE__ */ w(Ee, {
+			e && k.for?.keep && /* @__PURE__ */ w(De, {
 				m: K,
 				keepAsked: k.for.keep,
 				open: k.open,
@@ -1220,7 +1223,7 @@ function he({ m: e, cellOpen: t, tap: n }) {
 	if (!r.length) return /* @__PURE__ */ w(s, { children: "None of your devices runs services." });
 	let i = {};
 	for (let t of r.flatMap((e) => e.parts)) i[t.name] ||= e.partTitle(t);
-	let o = Object.keys(i).sort((e, t) => (t === "apps") - (e === "apps") || i[e].localeCompare(i[t])), c = (t) => t === "apps" ? {
+	let o = Object.keys(i).sort((e, t) => (t === "apps") - (e === "apps") || i[e].localeCompare(i[t])), c = o.filter((e) => r.some((t) => t.parts.some((t) => t.name === e && t.on && t.person))).map((e) => i[e]), l = (t) => t === "apps" ? {
 		name: "apps",
 		title: "Runs apps",
 		icon: "squares-four",
@@ -1229,23 +1232,23 @@ function he({ m: e, cellOpen: t, tap: n }) {
 		...e.appOf(t) || {},
 		name: t,
 		title: i[t]
-	}, l = null, u = (r, a, o) => {
+	}, u = null, d = (r, a, o) => {
 		let s = r.parts.find((e) => e.name === o);
 		if (!s) return /* @__PURE__ */ w("td", {}, a);
-		let c = `${i[o]} on ${r.name}`, u = `${a} ${o}`, d = r.c && e.problemOf(r.c, s);
-		d && t === u && (l = d);
+		let c = `${i[o]} on ${r.name}`, l = `${a} ${o}`, d = r.c && e.problemOf(r.c, s);
+		d && t === l && (u = d);
 		let f = s.fixed || !s.part, p = d ? `${c}: ${d.title}` : `${c}${s.doing ? `: ${s.doing}…` : ""}`;
 		return /* @__PURE__ */ w("td", {
 			className: "px-1 text-center",
 			children: /* @__PURE__ */ w("button", {
 				className: x("inline-grid h-10 w-11 place-items-center rounded-md outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50", f && !d ? "cursor-default" : "cursor-pointer"),
-				...d ? { "aria-expanded": t === u } : {
+				...d ? { "aria-expanded": t === l } : {
 					role: "switch",
 					"aria-checked": !!s.on
 				},
 				"aria-disabled": f && !d ? !0 : void 0,
 				"aria-label": p,
-				onClick: () => n(u),
+				onClick: () => n(l),
 				children: /* @__PURE__ */ w("span", {
 					"aria-hidden": "true",
 					className: x("grid size-5 place-items-center rounded-full border-2 text-[13px] font-extrabold", d ? "border-warning bg-warning text-background" : s.on ? "border-foreground bg-foreground" : "border-muted-foreground/40", s.doing && !d && "animate-pulse motion-reduce:animate-none"),
@@ -1253,45 +1256,57 @@ function he({ m: e, cellOpen: t, tap: n }) {
 				})
 			})
 		}, a);
-	}, d = o.map((e) => /* @__PURE__ */ T("tr", { children: [/* @__PURE__ */ w("th", {
+	}, f = o.map((e) => /* @__PURE__ */ T("tr", { children: [/* @__PURE__ */ w("th", {
 		scope: "row",
 		className: "sticky left-0 z-10 bg-card py-2 pr-3 pl-3 text-left font-medium",
 		children: /* @__PURE__ */ T("span", {
 			className: "flex max-w-40 items-center gap-2.5",
 			children: [/* @__PURE__ */ w(a, {
-				app: c(e),
+				app: l(e),
 				size: 28
 			}), /* @__PURE__ */ w("span", {
 				className: "truncate",
 				children: i[e]
 			})]
 		})
-	}), r.map((t, n) => u(t, n, e))] }, e));
+	}), r.map((t, n) => d(t, n, e))] }, e));
 	return /* @__PURE__ */ T("div", {
 		className: "flex flex-col gap-3",
-		children: [/* @__PURE__ */ w("div", {
-			className: "max-w-full w-fit overflow-x-auto rounded-xl border bg-card text-sm text-card-foreground",
-			children: /* @__PURE__ */ T("table", {
-				className: "min-w-full border-separate border-spacing-0",
-				children: [/* @__PURE__ */ w("thead", { children: /* @__PURE__ */ T("tr", { children: [/* @__PURE__ */ w("th", { className: "sticky left-0 z-10 bg-card" }), r.map((e, t) => /* @__PURE__ */ T("th", {
-					scope: "col",
-					className: "min-w-24 px-1 pt-3.5 pb-1.5 align-bottom text-[13px] font-medium text-muted-foreground",
-					children: [/* @__PURE__ */ w(Y, {
-						icon: e.icon,
-						className: "mx-auto mb-1.5"
-					}), /* @__PURE__ */ w("span", {
-						className: "mx-auto block max-w-24 truncate",
-						children: e.name
-					})]
-				}, t))] }) }), /* @__PURE__ */ w("tbody", { children: d })]
+		children: [
+			/* @__PURE__ */ w("div", {
+				className: "max-w-full w-fit overflow-x-auto rounded-xl border bg-card text-sm text-card-foreground",
+				children: /* @__PURE__ */ T("table", {
+					className: "min-w-full border-separate border-spacing-0",
+					children: [/* @__PURE__ */ w("thead", { children: /* @__PURE__ */ T("tr", { children: [/* @__PURE__ */ w("th", { className: "sticky left-0 z-10 bg-card" }), r.map((e, t) => /* @__PURE__ */ T("th", {
+						scope: "col",
+						className: "min-w-24 px-1 pt-3.5 pb-1.5 align-bottom text-[13px] font-medium text-muted-foreground",
+						children: [/* @__PURE__ */ w(Y, {
+							icon: e.icon,
+							className: "mx-auto mb-1.5"
+						}), /* @__PURE__ */ w("span", {
+							className: "mx-auto block max-w-24 truncate",
+							children: e.name
+						})]
+					}, t))] }) }), /* @__PURE__ */ w("tbody", { children: f })]
+				})
+			}),
+			u && /* @__PURE__ */ w(m, {
+				warn: !0,
+				...u
+			}),
+			c.length > 0 && /* @__PURE__ */ T("p", {
+				className: "text-sm text-muted-foreground",
+				children: [
+					ge(c),
+					" ",
+					c.length > 1 ? "run" : "runs",
+					" as you, with your files."
+				]
 			})
-		}), l && /* @__PURE__ */ w(m, {
-			warn: !0,
-			...l
-		})]
+		]
 	});
 }
-var ge = (t) => {
+var ge = (e) => e.length > 1 ? `${e.slice(0, -1).join(", ")} and ${e.at(-1)}` : e[0] || "", _e = (t) => {
 	let n = e(8), { children: r, busy: i, disabled: a, variant: s, onClick: c } = t, l = s === void 0 ? "default" : s, u = i || a, d;
 	n[0] === i ? d = n[1] : (d = i && /* @__PURE__ */ w(g, { className: "text-current" }), n[0] = i, n[1] = d);
 	let f;
@@ -1302,7 +1317,7 @@ var ge = (t) => {
 		onClick: c,
 		children: [d, r]
 	}), n[2] = r, n[3] = c, n[4] = u, n[5] = d, n[6] = l, n[7] = f) : f = n[7], f;
-}, _e = (t) => {
+}, ve = (t) => {
 	let n = e(2), { setOpen: r } = t, i;
 	return n[0] === r ? i = n[1] : (i = /* @__PURE__ */ w(o, {
 		variant: "secondary",
@@ -1311,9 +1326,9 @@ var ge = (t) => {
 		children: "Cancel"
 	}), n[0] = r, n[1] = i), i;
 };
-function ve(t) {
+function ye(t) {
 	let n = e(34), { card: i, open: a, setOpen: o, done: s } = t, c;
-	n[0] !== i.clients || n[1] !== i.node || n[2] !== i.runs || n[3] !== i.services ? (c = i.runs ? [i.node, ...i.services].filter(Boolean).map(be) : i.clients.map(ye), n[0] = i.clients, n[1] = i.node, n[2] = i.runs, n[3] = i.services, n[4] = c) : c = n[4];
+	n[0] !== i.clients || n[1] !== i.node || n[2] !== i.runs || n[3] !== i.services ? (c = i.runs ? [i.node, ...i.services].filter(Boolean).map(xe) : i.clients.map(be), n[0] = i.clients, n[1] = i.node, n[2] = i.runs, n[3] = i.services, n[4] = c) : c = n[4];
 	let u = c, [d, f] = r(i.name), [p, g] = r(!1), [_, v] = r(""), y;
 	n[5] !== i.name || n[6] !== d ? (y = !!d.trim() && d.trim() !== i.name, n[5] = i.name, n[6] = d, n[7] = y) : y = n[7];
 	let b = y, x;
@@ -1332,7 +1347,7 @@ function ve(t) {
 		}
 	}, n[8] = p, n[9] = s, n[10] = u, n[11] = d, n[12] = b, n[13] = x) : x = n[13];
 	let S = x, C = !b, O;
-	n[14] !== p || n[15] !== S || n[16] !== C ? (O = /* @__PURE__ */ w(ge, {
+	n[14] !== p || n[15] !== S || n[16] !== C ? (O = /* @__PURE__ */ w(_e, {
 		busy: p,
 		disabled: C,
 		onClick: S,
@@ -1369,13 +1384,13 @@ function ve(t) {
 		children: N
 	}), n[29] = a, n[30] = o, n[31] = N, n[32] = O, n[33] = P) : P = n[33], P;
 }
-function ye(e) {
-	return e.key;
-}
 function be(e) {
 	return e.key;
 }
-function xe(t) {
+function xe(e) {
+	return e.key;
+}
+function Se(t) {
 	let n = e(26), { name: i, keys: a, erasable: o, open: s, setOpen: c, done: l } = t, [f, p] = r(!1), [g, v] = r(!1), [y, b] = r(""), x;
 	n[0] !== l || n[1] !== o || n[2] !== f || n[3] !== a ? (x = async function() {
 		v(!0), b("");
@@ -1388,9 +1403,9 @@ function xe(t) {
 		}
 	}, n[0] = l, n[1] = o, n[2] = f, n[3] = a, n[4] = x) : x = n[4];
 	let S = x, O = `Remove ${i}?`, k;
-	n[5] === c ? k = n[6] : (k = /* @__PURE__ */ w(_e, { setOpen: c }), n[5] = c, n[6] = k);
+	n[5] === c ? k = n[6] : (k = /* @__PURE__ */ w(ve, { setOpen: c }), n[5] = c, n[6] = k);
 	let A;
-	n[7] !== g || n[8] !== S ? (A = /* @__PURE__ */ w(ge, {
+	n[7] !== g || n[8] !== S ? (A = /* @__PURE__ */ w(_e, {
 		variant: "destructive",
 		busy: g,
 		onClick: S,
@@ -1422,7 +1437,7 @@ function xe(t) {
 		children: P
 	}), n[20] = s, n[21] = c, n[22] = O, n[23] = j, n[24] = P, n[25] = F) : F = n[25], F;
 }
-function Se(t) {
+function Ce(t) {
 	let n = e(25), { clients: i, open: a, setOpen: s, done: c } = t, [l, u] = r(null), [f, p] = r(""), g;
 	n[0] !== i || n[1] !== c ? (g = async function(e) {
 		u(e), p("");
@@ -1481,7 +1496,7 @@ function Se(t) {
 		children: C
 	}), n[20] = a, n[21] = s, n[22] = v, n[23] = C, n[24] = O) : O = n[24], O;
 }
-function Ce(t) {
+function we(t) {
 	let n = e(13), { text: i } = t, [a, s] = r(!1), l;
 	n[0] === i ? l = n[1] : (l = async function() {
 		await one.copy(i), one.tap("success"), s(!0), setTimeout(() => s(!1), 1500);
@@ -1507,7 +1522,7 @@ function Ce(t) {
 		children: [d, h]
 	}), n[10] = d, n[11] = h, n[12] = g) : g = n[12], g;
 }
-function we(n) {
+function Te(n) {
 	let i = e(22), { data: a, open: s, setOpen: c } = n, { state: l } = a, u = l.install?.settings?.address || "", f;
 	i[0] === l.config?.install ? f = i[1] : (f = l.config?.install ? { loading: !0 } : null, i[0] = l.config?.install, i[1] = f);
 	let [p, _] = r(f), v;
@@ -1519,7 +1534,7 @@ function we(n) {
 	}, i[2] = l.config, i[3] = v);
 	let y;
 	i[4] === Symbol.for("react.memo_cache_sentinel") ? (y = [], i[4] = y) : y = i[4], t(v, y);
-	let b = Te, x;
+	let b = Ee, x;
 	i[5] === c ? x = i[6] : (x = /* @__PURE__ */ w(o, {
 		variant: "secondary",
 		size: "sm",
@@ -1535,9 +1550,9 @@ function we(n) {
 	}) : p.error ? /* @__PURE__ */ w("div", {
 		className: "mt-2",
 		children: /* @__PURE__ */ w(m, { title: p.error })
-	}) : /* @__PURE__ */ w(Ce, { text: p.text })), i[9] = p, i[10] = O);
+	}) : /* @__PURE__ */ w(we, { text: p.text })), i[9] = p, i[10] = O);
 	let k;
-	i[11] === u ? k = i[12] : (k = u && b("browser", "A browser", "Open this and sign in. It shows up here to approve.", /* @__PURE__ */ w(Ce, { text: u })), i[11] = u, i[12] = k);
+	i[11] === u ? k = i[12] : (k = u && b("browser", "A browser", "Open this and sign in. It shows up here to approve.", /* @__PURE__ */ w(we, { text: u })), i[11] = u, i[12] = k);
 	let A;
 	i[13] !== C || i[14] !== O || i[15] !== k ? (A = /* @__PURE__ */ w("div", {
 		className: "overflow-y-auto p-4",
@@ -1556,7 +1571,7 @@ function we(n) {
 		children: A
 	}), i[17] = s, i[18] = c, i[19] = x, i[20] = A, i[21] = j) : j = i[21], j;
 }
-function Te(e, t, n, r) {
+function Ee(e, t, n, r) {
 	return /* @__PURE__ */ T("div", {
 		className: "flex items-start gap-3 px-3 py-3 text-sm",
 		children: [/* @__PURE__ */ w(c, {
@@ -1578,7 +1593,7 @@ function Te(e, t, n, r) {
 		})]
 	}, t);
 }
-function Ee(t) {
+function De(t) {
 	let n = e(23), { m: i, keepAsked: a, open: o, setOpen: c, done: l } = t, u = a.scope || `user:${i.me}`, [p, g] = r(a.app || null), [_, v] = r(""), y;
 	n[0] === _ ? y = n[1] : (y = (e, t) => /* @__PURE__ */ T("div", {
 		className: "flex flex-col gap-4 overflow-y-auto p-4",
@@ -1607,7 +1622,7 @@ function Ee(t) {
 	let S = x, C;
 	n[6] !== p || n[7] !== i ? (C = p ? `Keep ${i.appTitle(p)} Running` : "Keep an App Running", n[6] = p, n[7] = i, n[8] = C) : C = n[8];
 	let O;
-	n[9] === c ? O = n[10] : (O = /* @__PURE__ */ w(_e, { setOpen: c }), n[9] = c, n[10] = O);
+	n[9] === c ? O = n[10] : (O = /* @__PURE__ */ w(ve, { setOpen: c }), n[9] = c, n[10] = O);
 	let k;
 	n[11] !== p || n[12] !== S || n[13] !== i || n[14] !== b || n[15] !== u ? (k = p ? b(i.keepers(u).map((e) => /* @__PURE__ */ w(f, {
 		title: i.deviceName(e),

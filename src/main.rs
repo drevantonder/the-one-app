@@ -129,6 +129,8 @@ fn every_command() -> String {
                                        switch a service on or off on a device of yours (here by default), which its
                                        oned starts or stops, fetching its program as it's published (a Mac app
                                        carries its own); apps is its app service
+  {CLI} services sandbox | sudo sh    let this machine run services in their sandbox, each as its own user (Linux;
+                                       the installer does it)
   {CLI} services try apps/<name> [--device <name>]
                                        put your checkout's build of an app's service on a device of yours (here by
                                        default, else over ssh by its name) and switch it on, until a newer one is
@@ -807,7 +809,12 @@ fn run(args: Vec<String>) -> Result<()> {
                         let version = installed.iter().find(|d| d["name"] == name).and_then(|d| d["version"].as_str()).map(|v| format!(" {}", &v[..v.len().min(12)])).unwrap_or_default();
                         let doing = p["doing"].as_str().map(|d| format!(", {}", d.to_lowercase())).unwrap_or_default();
                         let problem = p["problem"].as_str().map(|w| format!(": {w}")).unwrap_or_default();
-                        println!("  {name}{version}  {}{doing}{problem}", if p["on"] == true { "on" } else { "off" });
+                        let held = match (p["sandbox"].as_str(), p["person"] == true) {
+                            (Some(why), _) => format!(", without its sandbox: {why}"),
+                            (None, true) => ", as you".into(),
+                            _ => String::new(),
+                        };
+                        println!("  {name}{version}  {}{doing}{held}{problem}", if p["on"] == true { "on" } else { "off" });
                     }
                     continue;
                 }
@@ -829,6 +836,8 @@ fn run(args: Vec<String>) -> Result<()> {
                 }
             }
         }
+        // What lets this machine's person start services in their sandbox, for root to run once: `| sudo sh`.
+        ["services", "sandbox"] => print!("{}", one::sandbox::setup_script()?),
         ["services", "try", dir] => update::try_service(std::path::Path::new(dir), flags.get("device").and_then(Value::as_str))?,
         ["services", how @ ("on" | "off"), name] => {
             let device = flags.get("device").and_then(Value::as_str);
@@ -1484,6 +1493,7 @@ static ASKED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0
 fn oned(args: &[String]) -> Result<()> {
     let named: Vec<&String> = args.iter().filter(|a| !a.starts_with("--")).collect();
     match named.as_slice() {
+        [] if let Some(dir) = args.iter().find_map(|a| a.strip_prefix("--sandboxed=")) => one::sandbox::launch(std::path::Path::new(dir)),
         [] => {
             usual_path();
             IN_NODE.store(true, std::sync::atomic::Ordering::Relaxed);

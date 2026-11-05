@@ -3,6 +3,7 @@
 mod cloudflare;
 mod contracts;
 mod e2e;
+mod sandbox;
 mod sim;
 
 use std::path::{Path, PathBuf};

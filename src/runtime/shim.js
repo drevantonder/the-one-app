@@ -50,6 +50,8 @@ function describe() {
     hooks: Object.keys(app.hooks || {}),
     screens: Object.entries(app.screens || {}).map(([name, s]) => ({ name, title: s.title || name })),
     uses: { apps: app.uses?.apps || [], services: app.uses?.services || [] },
+    // Its service's wrapper: the hosts it may reach ("*" for any) and whether it runs as the node's person.
+    ...(app.service ? { service: { network: [].concat(app.service.network || []).map(String), person: app.service.person === true } } : {}),
     schedules: Object.entries(app.schedules || {}).map(([name, s]) => ({ name, ...s })),
     // Each kind of scope's schema (user, group, global), as the changes that make it, oldest first.
     schema: Object.fromEntries(Object.entries(app.schema || {}).map(([kind, sql]) => [kind, [].concat(sql)])),

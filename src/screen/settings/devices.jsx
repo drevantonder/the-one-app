@@ -168,6 +168,7 @@ function model(x, again) {
     if (p.failed) return { title: `Couldn’t switch ${title} ${p.wanted ? "on" : "off"}`, text: p.failed, action: retry(p.wanted) }
     if (p.late) return { title: `${c.name} hasn’t switched ${title} ${p.on ? "on" : "off"} yet`, text: "It does once it hears, so it may be offline.", action: retry(p.on) }
     if (p.on && p.problem) return { title: `${title} isn’t running on ${c.name}`, text: p.problem, action: retry(true, p.problem) }
+    if (p.on && p.sandbox) return { title: `${title} runs without its sandbox on ${c.name}`, text: p.sandbox }
     return null
   }
   const problemsOf = (c) => (c.user === me ? partsOf(c).map((p) => problemOf(c, p)).filter(Boolean) : [])
@@ -885,6 +886,8 @@ function Services({ m, cellOpen, tap }) {
   const titles = {}
   for (const p of cols.flatMap((x) => x.parts)) titles[p.name] ||= m.partTitle(p)
   const names = Object.keys(titles).sort((a, b) => (b === "apps") - (a === "apps") || titles[a].localeCompare(titles[b]))
+  // Services whose apps declare they run as the person: said, never silently.
+  const asYou = names.filter((n) => cols.some((x) => x.parts.some((p) => p.name === n && p.on && p.person))).map((n) => titles[n])
   const icon = (name) => (name === "apps" ? { name: "apps", title: "Runs apps", icon: "squares-four", color: "#007aff" } : { ...(m.appOf(name) || {}), name, title: titles[name] })
   let open = null
   const cell = (x, ci, name) => {
@@ -945,9 +948,13 @@ function Services({ m, cellOpen, tap }) {
         </table>
       </div>
       {open && <Problem warn {...open} />}
+      {asYou.length > 0 && <p className="text-sm text-muted-foreground">{list(asYou)} {asYou.length > 1 ? "run" : "runs"} as you, with your files.</p>}
     </div>
   )
 }
+
+/// Names as a person says them: "A, B and C".
+const list = (names) => (names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names.at(-1)}` : names[0] || "")
 
 // ---- Dialogs ----
 

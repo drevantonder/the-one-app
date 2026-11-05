@@ -21,7 +21,7 @@ pub fn cache() -> PathBuf {
     }
 }
 
-fn user_home() -> PathBuf {
+pub(crate) fn user_home() -> PathBuf {
     std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| ".".into())
 }
 // What the Cloudflare node (cloudflare/node/) and the native apps' client (client/) share with nodes on machines; the rest
@@ -78,6 +78,8 @@ pub mod services;
 pub mod oned;
 #[cfg(feature = "node")]
 pub mod service;
+#[cfg(feature = "node")]
+pub mod sandbox;
 pub mod cloudflare;
 pub mod keys;
 pub mod push;

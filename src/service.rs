@@ -5,7 +5,7 @@
 //! install's first entry (given by oned, so nothing on the way can make it another install's) and checks each caller by
 //! itself: a compute endpoint of the install that runs the calls of a person it serves. The program offering it, its
 //! app's own (`oned::program`), which this starts, registers over a loopback with the services' API and long-polls for
-//! calls. A service writes nothing itself: what it asks for is a call, which a node of its person's runs (`/v1/call` on the loopback).
+//! calls, in its sandbox (`sandbox`), reaching out only through this endpoint's proxy. A service writes nothing itself: what it asks for is a call, which a node of its person's runs (`/v1/call` on the loopback).
 
 use crate::config::YOURS;
 use std::collections::HashMap;
@@ -99,7 +99,13 @@ struct Inner {
     strangers: AtomicUsize,
     /// The install's sign-in service, whose keys check a sign-in a node passes on to a service that serves everyone.
     issuer: crate::cloudflare::Issuer,
+    /// What its app declares its program may reach, as oned gave it (`declared.json`), if it did.
+    declared: Option<crate::sandbox::Declared>,
 }
+
+/// Where oned puts what a service's app declares it may reach, in its folder.
+pub const DECLARED: &str = "declared.json";
+
 
 /// Where a service keeps its key, its install and what it knows of it.
 pub fn folder(name: &str) -> PathBuf {
@@ -160,6 +166,7 @@ impl Service {
             conns: Mutex::new(HashMap::new()),
             strangers: AtomicUsize::new(0),
             issuer: crate::cloudflare::Issuer::new(&install_address),
+            declared: std::fs::read(dir.join(DECLARED)).ok().and_then(|b| serde_json::from_slice(&b).ok()),
         })))
     }
 
@@ -201,6 +208,35 @@ impl Service {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
         let at = listener.local_addr()?;
         let router = self.loopback();
+        // A program in a sandbox reaches it through a socket in its sandbox's folder.
+        #[cfg(target_os = "linux")]
+        if matches!(crate::sandbox::how(self.0.declared.as_ref(), ""), crate::sandbox::How::Unit | crate::sandbox::How::Person) {
+            use std::os::unix::fs::PermissionsExt;
+            let dir = crate::sandbox::dir(&self.0.name);
+            std::fs::create_dir_all(&dir)?;
+            let path = dir.join(crate::sandbox::SOCKET);
+            let _ = std::fs::remove_file(&path);
+            let socket = tokio::net::UnixListener::bind(&path)?;
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o666))?;
+            let router = router.clone();
+            tokio::spawn(async move {
+                if let Err(err) = axum::serve(socket, router).await {
+                    tracing::warn!("the service's socket stopped: {err:#}");
+                }
+            });
+            // What a unit's program says, which systemd would keep where its person can't read it.
+            let path = dir.join(crate::sandbox::LOG);
+            let _ = std::fs::remove_file(&path);
+            let log = tokio::net::UnixListener::bind(&path)?;
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o666))?;
+            tokio::spawn(async move {
+                while let Ok((mut said, _)) = log.accept().await {
+                    tokio::spawn(async move {
+                        let _ = tokio::io::copy(&mut said, &mut tokio::io::stderr()).await;
+                    });
+                }
+            });
+        }
         tokio::spawn(async move {
             if let Err(err) = axum::serve(listener, router).await {
                 tracing::warn!("the service's loopback stopped: {err:#}");
@@ -511,6 +547,8 @@ impl Service {
             .route("/v1/services/{app}/calls/{id}/vault", post(fill))
             .route("/v1/state", get(state))
             .route("/v1/call", post(call))
+            // Its program's way out, from its sandbox: `CONNECT host:port`, to a host its app declares.
+            .fallback(proxy)
             .with_state(self.clone())
     }
 
@@ -657,6 +695,10 @@ async fn fill(State(s): State<Service>, headers: HeaderMap) -> Response {
     refused(StatusCode::NOT_IMPLEMENTED, "a service can't fill in the Vault's items yet: the call's node fills them in before it asks")
 }
 
+async fn proxy(State(s): State<Service>, req: axum::extract::Request) -> Response {
+    crate::sandbox::connect(s.0.declared.as_ref(), req).await
+}
+
 async fn state(State(s): State<Service>, headers: HeaderMap) -> Response {
     if let Err(r) = ours(&s, &headers) {
         return r;
@@ -723,40 +765,143 @@ pub fn run(name: &str) -> Result<()> {
     Ok(())
 }
 
-/// Runs a service's program in another language, started again whenever it stops, until `stop`.
-fn host(name: &str, program: &Path, data: &Path, at: std::net::SocketAddr, service: &Service, stop: &impl Fn() -> bool) -> Result<()> {
-    use std::os::unix::fs::MetadataExt;
-    let data_var = format!("{}_DATA", name.to_uppercase().replace('-', "_"));
-    let built = || std::fs::metadata(program).map(|m| (m.ino(), m.mtime())).ok();
-    while !stop() {
-        let started = built();
-        let mut command = std::process::Command::new(program);
-        command.env("ONE_ADDR", at.to_string()).env("ONE_HOME", &service.0.dir).env("ONE_CLI", crate::config::CLI).env(&data_var, data);
-        #[cfg(target_os = "linux")]
-        {
-            use std::os::unix::process::CommandExt;
-            // It stops with this part, even one killed: two of a service on the same data (WhatsApp's link) mustn't run.
-            // SAFETY: only an async-signal-safe call, between fork and exec.
-            unsafe {
-                command.pre_exec(|| {
-                    if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM) == -1 {
-                        return Err(std::io::Error::last_os_error());
-                    }
-                    Ok(())
-                });
+/// Where the endpoint says why its program can't start in its sandbox, in its folder, which oned shows on it.
+pub const PROBLEM: &str = "problem";
+
+/// A service's program running: a process of this one's, or its unit.
+enum Running {
+    Child(std::process::Child),
+    Unit(String),
+}
+
+impl Running {
+    /// How it stopped, once it has.
+    fn done(&mut self) -> Result<Option<String>> {
+        Ok(match self {
+            Running::Child(child) => child.try_wait()?.map(|s| s.to_string()),
+            Running::Unit(unit) => {
+                let state = crate::sandbox::systemctl(&["is-active", unit])?;
+                (!["active", "activating", "reloading"].contains(&state.as_str())).then_some(state)
+            }
+        })
+    }
+
+    fn end(&mut self) {
+        match self {
+            Running::Child(child) => end(child),
+            Running::Unit(unit) => {
+                if let Err(err) = crate::sandbox::systemctl(&["stop", unit]) {
+                    eprintln!("stopping {unit}: {err:#}");
+                }
             }
         }
-        let mut child = command.spawn().with_context(|| format!("starting {}", program.display()))?;
+    }
+}
+
+/// Starts a service's program, in its sandbox as its app declares and this machine can give it.
+fn begin(name: &str, program: &Path, data: &Path, at: std::net::SocketAddr, service: &Service) -> Result<Running> {
+    use crate::sandbox::{How, Launch};
+    let declared = service.0.declared.clone().unwrap_or_default();
+    let data_var = format!("{}_DATA", name.to_uppercase().replace('-', "_"));
+    let launcher = PathBuf::from(std::env::current_exe()?.to_string_lossy().trim_end_matches(" (deleted)"));
+    let mut command = match crate::sandbox::how(service.0.declared.as_ref(), "") {
+        How::Unit => {
+            let launch = Launch { name: name.into(), own_network: !declared.any_host(), ports: declared.local_ports(), data: None };
+            crate::sandbox::prepare(name, program, &launcher, service.token(), &launch)?;
+            let unit = crate::sandbox::unit(name);
+            // One left by an endpoint that stopped without stopping it goes first: two mustn't share its data.
+            let _ = crate::sandbox::systemctl(&["stop", &unit]);
+            let _ = crate::sandbox::systemctl(&["reset-failed", &unit]);
+            crate::sandbox::systemctl(&["start", &unit])?;
+            return Ok(Running::Unit(unit));
+        }
+        How::Person => {
+            let launch = Launch { name: name.into(), own_network: !declared.any_host(), ports: declared.local_ports(), data: Some(data.to_path_buf()) };
+            let dir = crate::sandbox::prepare(name, program, &launcher, service.token(), &launch)?;
+            crate::oned::command(&[&format!("--sandboxed={}", dir.display())])?
+        }
+        How::Seatbelt => {
+            let token = service.0.dir.join(crate::api::LOCAL_TOKEN);
+            let profile = crate::sandbox::seatbelt(&declared, at.port(), data, &token, program);
+            let mut command = std::process::Command::new("/usr/bin/sandbox-exec");
+            command.arg("-p").arg(profile).arg(program);
+            let proxy = format!("http://{at}");
+            for var in ["HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy"] {
+                command.env(var, &proxy);
+            }
+            command.env("NO_PROXY", "localhost,127.0.0.1").env("no_proxy", "localhost,127.0.0.1");
+            if !declared.person {
+                let tmp = data.join("tmp");
+                std::fs::create_dir_all(&tmp)?;
+                command.env("TMPDIR", tmp);
+            }
+            command
+        }
+        How::Plain(why) => {
+            if let Some(why) = why {
+                eprintln!("{name} runs without its sandbox: {why}");
+            }
+            std::process::Command::new(program)
+        }
+    };
+    command.env("ONE_ADDR", at.to_string()).env("ONE_HOME", &service.0.dir).env("ONE_CLI", crate::config::CLI).env(&data_var, data);
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::unix::process::CommandExt;
+        // It stops with this part, even one killed: two of a service on the same data (WhatsApp's link) mustn't run.
+        // SAFETY: only an async-signal-safe call, between fork and exec.
+        unsafe {
+            command.pre_exec(|| {
+                if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM) == -1 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+    }
+    Ok(Running::Child(command.spawn().with_context(|| format!("starting {}", program.display()))?))
+}
+
+/// Runs a service's program in another language, started again whenever it stops, until `stop`. One that can't start
+/// in its sandbox says why (`PROBLEM`), and is tried again a minute on.
+fn host(name: &str, program: &Path, data: &Path, at: std::net::SocketAddr, service: &Service, stop: &impl Fn() -> bool) -> Result<()> {
+    use std::os::unix::fs::MetadataExt;
+    let built = || std::fs::metadata(program).map(|m| (m.ino(), m.mtime())).ok();
+    let problem = service.0.dir.join(PROBLEM);
+    let before = crate::sandbox::dir(name).join(crate::sandbox::BEFORE);
+    while !stop() {
+        let started = built();
+        let mut running = match begin(name, program, data, at, service) {
+            Ok(r) => {
+                let _ = std::fs::remove_file(&problem);
+                r
+            }
+            Err(err) => {
+                eprintln!("{name}: {err:#}");
+                let _ = std::fs::write(&problem, format!("Couldn’t start it in its sandbox: {err:#}"));
+                for _ in 0..60 {
+                    if stop() {
+                        return Ok(());
+                    }
+                    std::thread::sleep(Duration::from_secs(1));
+                }
+                continue;
+            }
+        };
         loop {
-            if let Some(status) = child.try_wait()? {
+            if let Some(status) = running.done()? {
                 eprintln!("{} stopped ({status}): starting it again", program.display());
                 std::thread::sleep(Duration::from_secs(2));
                 break;
             }
+            // Its data from before, moved into its sandbox's own folder before it started, is done with once it's up.
+            if service.services().has(name) && before.exists() {
+                let _ = std::fs::remove_dir_all(&before);
+            }
             // Stopped for good, or for its new build, put in its place (`<cli> services try`).
             let renewed = built() != started;
             if stop() || renewed {
-                end(&mut child);
+                running.end();
                 if renewed {
                     eprintln!("{}: a new build is there, so it starts again", program.display());
                 }
