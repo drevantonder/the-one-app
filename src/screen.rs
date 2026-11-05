@@ -12,17 +12,16 @@
 /// web client's, at the address, and a chat's view, by `screens_icons`.
 pub const ICONS: &[u8] = include_bytes!("../vendor/phosphor/icons.json");
 
-/// The old kit and the bridge, in the order a page has them: each path under `src/screen/` and its text. kit.css is
-/// only for a screen that doesn't opt in to `@one/ui`: a plain one, as PTC's apps still are.
+/// The old kit's scripts and the bridge, in the order a page has them: each path under `src/screen/` and its text.
 const KIT: &[(&str, &str)] = &[
-    ("kit.css", include_str!("screen/kit.css")),
     ("bridge.js", include_str!("screen/bridge.js")),
     ("kit.js", include_str!("screen/kit.js")),
 ];
 
-/// What a screen's HTML has in it to use `@one/ui` (`src/screen/ui/`: React, and shadcn's components and theme)
-/// in place of `kit.css`: its page then has ui.css, an import map giving `react`, `react-dom/client`,
-/// `@one/ui` and the rest (`UI_IMPORTS`), and ui.js, which they come from; the bridge and kit.js's helpers stay.
+/// What a screen's HTML has in it to use `@one/ui` (`src/screen/ui/`: React, and shadcn's components): its page then
+/// has an import map giving `react`, `react-dom/client`, `@one/ui` and the rest (`UI_IMPORTS`), and ui.js, which they
+/// come from. Every page has ui.css, `@one/ui`'s theme (shadcn's neutral, light and dark) and what a page starts with,
+/// so a plain screen, of HTML and JS alone, looks as the rest do.
 pub const UI: &str = r#"<meta name="@one/ui">"#;
 
 /// What a screen that isn't there shows (a body of no text: an old or mistyped link): a grey line and the way home.
@@ -72,14 +71,13 @@ fn page_with(context: &serde_json::Value, body: &str, nonce: Option<String>, lin
         (String::new(), "<script>".into(), body.to_string())
     };
     let ui = body.contains(UI);
-    let css = if ui { UI_CSS } else { KIT[0] };
     let tag = &script[..script.len() - 1];
     let head = if linked {
-        let scripts: String = KIT[1..].iter().map(|(path, text)| format!("{tag} src=\"{}\"></script>", named(path, text))).collect();
-        format!("<link rel=\"stylesheet\" href=\"{}\">{script}window.__one={context};</script>{scripts}", named(css.0, css.1))
+        let scripts: String = KIT.iter().map(|(path, text)| format!("{tag} src=\"{}\"></script>", named(path, text))).collect();
+        format!("<link rel=\"stylesheet\" href=\"{}\">{script}window.__one={context};</script>{scripts}", named(UI_CSS.0, UI_CSS.1))
     } else {
-        let bridge: String = KIT[1..].iter().map(|(_, text)| *text).collect();
-        format!("<style>{}</style>{script}window.__one={context};{bridge}</script>", css.1)
+        let bridge: String = KIT.iter().map(|(_, text)| *text).collect();
+        format!("<style>{}</style>{script}window.__one={context};{bridge}</script>", UI_CSS.1)
     };
     // The import map before the screen's own modules, and ui.js, which runs before them, as they're modules.
     let head = match (ui, linked) {
@@ -222,16 +220,17 @@ mod tests {
         assert!(!super::UI_JS.1.to_ascii_lowercase().contains("</script"), "ui.js can't be put in a page's script");
     }
 
-    /// A screen that opts in gets the new kit, and its import map, in place of the old kit's styles; one that doesn't
-    /// gets none of it.
+    /// A screen that opts in gets React and `@one/ui`'s components, and its import map; a plain one gets only the
+    /// theme, as every page does.
     #[test]
     fn ui_only_for_screens_that_opt_in() {
         let context = serde_json::json!({ "app": "a", "screen": "main" });
+        let theme = |page: &str, linked: bool| if linked { page.contains("/screen/ui/ui.css?v=") } else { page.contains(super::UI_CSS.1) };
         for linked in [false, true] {
-            let old = super::page(&context, "<p>hi</p>", false, linked);
-            assert!(!old.contains("importmap") && !old.contains("OneUI"));
+            let plain = super::page(&context, "<p>hi</p>", false, linked);
+            assert!(theme(&plain, linked) && !plain.contains("importmap") && !plain.contains("OneUI"));
             let new = super::page(&context, &format!("{}<div id=root></div>", super::UI), false, linked);
-            assert!(new.contains(r#"<script type="importmap">{"imports":{"react":"#) && !new.contains("--squircle") && !new.contains("/screen/kit.css"));
+            assert!(theme(&new, linked) && new.contains(r#"<script type="importmap">{"imports":{"react":"#));
             assert!(new.find("importmap").unwrap() < new.find("<div id=root>").unwrap());
         }
     }
