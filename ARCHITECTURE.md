@@ -14,7 +14,7 @@ Key, log, view, blob, call, app. Scopes, devices, deploys, services, the Vault a
 ## Trust
 
 - **Keys are opened only on clients**, the devices of people and their agents (apps, browsers, the CLI, the MCP Worker). **Nodes** run calls and hold no keys: a caller hands a node the database keys one call needs, which expire with its sign-in. The only exceptions are standing work and the Vault, where a person or an admin chooses a machine to hold keys and can take them back.
-- **The kernel opens nothing.** A hacked node gets only the calls it ran while it was hacked; a hacked kernel reads no data. The Workers that serve browsers' code could take what browsers open, which is why they stay small, and why the Cloudflare account is guarded with a hardware security key.
+- **The kernel opens nothing.** A hacked node gets only the calls it ran while it was hacked; a hacked kernel reads no data. The Workers that serve browsers' code could take what browsers open, which is why they stay small, and why the Cloudflare account is guarded with a hardware security key. The MCP Worker is the same: its devices' secrets are sealed under their MCP clients' tokens, which reach it on every call, so whoever can change its code could open the keys of the scopes those devices were approved for. We consider it as secure as our Cloudflare account (Andre, 2026-11-05).
 - **Clients take who's who from the signed entries themselves**, never from what a node or the relay says, and seal or hand keys only to whom they list.
 - **Signing in proves who you are, nothing more.** It never opens a key. A new device gets in only when one of its person's devices approves it.
 - **One install, forever.** A key belongs to one install; installs never talk to each other.
