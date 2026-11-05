@@ -16,23 +16,18 @@ import * as browse from "./browse.js";
 import * as http from "./http.js";
 import * as issues from "./issues.js";
 import * as github from "./github.js";
-import css from "./screens/repos.css" with { type: "text" };
-import common from "./screens/common.js" with { type: "text" };
-import mainScreen from "./screens/main.html" with { type: "text" };
-import repoScreen from "./screens/repo.html" with { type: "text" };
-import fileScreen from "./screens/file.html" with { type: "text" };
-import historyScreen from "./screens/history.html" with { type: "text" };
-import commitScreen from "./screens/commit.html" with { type: "text" };
-import branchesScreen from "./screens/branches.html" with { type: "text" };
-import collaboratorsScreen from "./screens/collaborators.html" with { type: "text" };
-import issuesScreen from "./screens/issues.html" with { type: "text" };
-import issueScreen from "./screens/issue.html" with { type: "text" };
-import labelsScreen from "./screens/labels.html" with { type: "text" };
-import repoSettingsScreen from "./screens/repo-settings.html" with { type: "text" };
-import settingsScreen from "./screens/settings.html" with { type: "text" };
-
-/// A screen: Repos' styles and shared script, then its own HTML.
-const page = (title, html) => ({ title, html: `<style>${css}</style><script>${common}</script>${html}` });
+import mainScreen from "./dist/main.html" with { type: "text" };
+import repoScreen from "./dist/repo.html" with { type: "text" };
+import fileScreen from "./dist/file.html" with { type: "text" };
+import historyScreen from "./dist/history.html" with { type: "text" };
+import commitScreen from "./dist/commit.html" with { type: "text" };
+import branchesScreen from "./dist/branches.html" with { type: "text" };
+import collaboratorsScreen from "./dist/collaborators.html" with { type: "text" };
+import issuesScreen from "./dist/issues.html" with { type: "text" };
+import issueScreen from "./dist/issue.html" with { type: "text" };
+import labelsScreen from "./dist/labels.html" with { type: "text" };
+import repoSettingsScreen from "./dist/repo-settings.html" with { type: "text" };
+import settingsScreen from "./dist/settings.html" with { type: "text" };
 
 const NAME = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 const BRANCH = /^(?!\/)(?!.*(\.\.|\/\/|\/$|\.lock$|@\{))[A-Za-z0-9._\/@+-]{1,200}$/;
@@ -508,20 +503,20 @@ const app = {
   },
 
   screens: {
-    main: page("Repos", mainScreen),
-    repo: page("Repo", repoScreen),
-    file: page("File", fileScreen),
-    history: page("History", historyScreen),
-    commit: page("Commit", commitScreen),
-    branches: page("Branches", branchesScreen),
-    collaborators: page("Collaborators", collaboratorsScreen),
-    issues: page("Issues", issuesScreen),
-    issue: page("Issue", issueScreen),
-    labels: page("Labels", labelsScreen),
-    repo_settings: page("Settings", repoSettingsScreen),
-    settings: page("Settings", settingsScreen),
+    main: { title: "Repos", html: mainScreen },
+    repo: { title: "Repo", html: repoScreen },
+    file: { title: "File", html: fileScreen },
+    history: { title: "History", html: historyScreen },
+    commit: { title: "Commit", html: commitScreen },
+    branches: { title: "Branches", html: branchesScreen },
+    collaborators: { title: "Collaborators", html: collaboratorsScreen },
+    issues: { title: "Issues", html: issuesScreen },
+    issue: { title: "Issue", html: issueScreen },
+    labels: { title: "Labels", html: labelsScreen },
+    repo_settings: { title: "Settings", html: repoSettingsScreen },
+    settings: { title: "Settings", html: settingsScreen },
     // Where GitHub sends an admin back once the install's GitHub App is made: Settings, finishing that.
-    github_app: page("Settings", settingsScreen),
+    github_app: { title: "Settings", html: settingsScreen },
   },
 
   widgets: {
