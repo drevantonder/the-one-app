@@ -2,14 +2,19 @@
 //! folder on a volume of its own, so its sign-ins survive restarts and image updates. Its server's port and token are
 //! labels on the container, where the old app kept them too, so its devices carry on here. The container runtime is
 //! Podman on Linux and Apple's container on a Mac.
+//!
+//! The runtime is the machine's, shared by every install on it (a `one try` beside the real one), so each container
+//! carries its install's data folder as a label (`one.home`), and an install lists and touches only its own. Those made
+//! before the label are claimed once, by an install whose folder was already there when it first ran with it
+//! (`claimed.json`): the real one, never a new `one try`.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use anyhow::{Result, anyhow, bail};
@@ -34,6 +39,34 @@ pub struct Device {
     pub image: String,
     pub port: u16,
     pub token: String,
+    /// The data folder of the install it's of, or "" if it was made before that was kept.
+    pub home: String,
+}
+
+/// This install's data folder, and the containers made before `one.home` that it claimed.
+static OWNER: OnceLock<(String, BTreeSet<String>)> = OnceLock::new();
+
+/// Whether a container listed is this install's.
+fn ours(d: &Device) -> bool {
+    OWNER.get().is_some_and(|(home, claimed)| if d.home.is_empty() { claimed.contains(&d.name) } else { &d.home == home })
+}
+
+/// Learns which containers are this install's, claiming those without `one.home` the first time if `fresh` is false.
+fn own(rt: &dyn Containers, dir: &Path, fresh: bool) -> Result<()> {
+    let file = dir.join("claimed.json");
+    let claimed: BTreeSet<String> = match std::fs::read(&file) {
+        Ok(b) => serde_json::from_slice(&b)?,
+        Err(_) => {
+            let claimed = if fresh { BTreeSet::new() } else { rt.all()?.into_iter().filter(|d| d.home.is_empty()).map(|d| d.name).collect() };
+            std::fs::write(&file, serde_json::to_vec(&claimed)?)?;
+            if !claimed.is_empty() {
+                tracing::info!("claimed the devices made before installs were told apart: {claimed:?}");
+            }
+            claimed
+        }
+    };
+    let _ = OWNER.set((dir.to_string_lossy().to_string(), claimed));
+    Ok(())
 }
 
 impl Device {
@@ -43,7 +76,8 @@ impl Device {
 
     /// What its container carries.
     fn labels(&self) -> Vec<String> {
-        let mut l = vec!["--label".into(), format!("one.port={}", self.port), "--label".into(), format!("one.token={}", self.token)];
+        let home = OWNER.get().map(|(home, _)| home.as_str()).unwrap_or_default();
+        let mut l = vec!["--label".into(), format!("one.port={}", self.port), "--label".into(), format!("one.token={}", self.token), "--label".into(), format!("one.home={home}")];
         if self.pool {
             l.extend(["--label".into(), "one.pool=1".into()]);
         }
@@ -217,7 +251,13 @@ pub fn exec_with(mut command: Command, stdin: Option<&mut (dyn Read + Send)>, st
 
 /// What runs devices' containers.
 pub trait Containers: Send + Sync {
-    fn list(&self) -> Result<Vec<Device>>;
+    /// Every device container on this machine, any install's.
+    fn all(&self) -> Result<Vec<Device>>;
+
+    /// This install's devices.
+    fn list(&self) -> Result<Vec<Device>> {
+        Ok(self.all()?.into_iter().filter(ours).collect())
+    }
     /// Makes the device's container and home volume from the image, and starts it.
     fn run(&self, d: &Device, size: Size, image: &str) -> Result<()>;
     /// Starts a device; whether it should be running, which revive applies after a restart, is lifecycle.rs's.
@@ -246,8 +286,21 @@ pub trait Containers: Send + Sync {
 }
 
 /// This machine's runtime for Linux devices, or why it has none.
+/// Deletes the containers of the install whose data folder is `dir`, as when a `one try` is deleted.
+pub fn delete_all(dir: &Path) -> Result<()> {
+    let rt: Box<dyn Containers> = if cfg!(target_os = "macos") { Box::new(Apple::new(dir)?) } else { Box::new(Podman::new()?) };
+    let home = dir.to_string_lossy();
+    for d in rt.all()?.into_iter().filter(|d| d.home == home) {
+        rt.remove(&d)?;
+    }
+    Ok(())
+}
+
 pub fn runtime(dir: &Path) -> Result<Box<dyn Containers>> {
-    if cfg!(target_os = "macos") { Ok(Box::new(Apple::new(dir)?)) } else { Ok(Box::new(Podman::new()?)) }
+    let fresh = std::fs::read_dir(dir).map_or(true, |mut d| d.next().is_none());
+    let rt: Box<dyn Containers> = if cfg!(target_os = "macos") { Box::new(Apple::new(dir)?) } else { Box::new(Podman::new()?) };
+    own(rt.as_ref(), dir, fresh)?;
+    Ok(rt)
 }
 
 /// Whether a program is on the PATH.
@@ -283,7 +336,7 @@ fn podman(args: &[&str]) -> Result<Vec<u8>> {
 }
 
 impl Containers for Podman {
-    fn list(&self) -> Result<Vec<Device>> {
+    fn all(&self) -> Result<Vec<Device>> {
         let out = podman(&["ps", "--all", "--filter", "label=one.token", "--format", "json"])?;
         let raw: Vec<Value> = serde_json::from_slice(&out).unwrap_or_default();
         let mut all = Vec::new();
@@ -299,6 +352,7 @@ impl Containers for Podman {
                 image: r["Image"].as_str().unwrap_or_default().to_string(),
                 port: label("one.port").parse().unwrap_or(0),
                 token: label("one.token"),
+                home: label("one.home"),
             });
         }
         Ok(all)
@@ -569,7 +623,7 @@ fn join(tcp: TcpStream, unix: UnixStream) {
 }
 
 impl Containers for Apple {
-    fn list(&self) -> Result<Vec<Device>> {
+    fn all(&self) -> Result<Vec<Device>> {
         let mut out = Vec::new();
         for c in self.containers()? {
             let conf = &c["configuration"];
@@ -587,8 +641,11 @@ impl Containers for Apple {
                 image: conf["image"]["reference"].as_str().unwrap_or_default().to_string(),
                 port: l["one.port"].as_str().and_then(|p| p.parse().ok()).unwrap_or(0),
                 token: token.to_string(),
+                home: l["one.home"].as_str().unwrap_or_default().to_string(),
             };
-            self.forward(&d.name, d.port); // once the runtime answers, which at login can take a while
+            if ours(&d) {
+                self.forward(&d.name, d.port); // once the runtime answers, which at login can take a while
+            }
             out.push(d);
         }
         Ok(out)

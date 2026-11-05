@@ -100,6 +100,11 @@ pub struct Devices {
     traffic: Mutex<HashMap<String, i64>>,
 }
 
+/// Deletes the Linux devices of the install whose data folder is `dir`: those a `one try` made, when it's deleted.
+pub fn delete_all(dir: &std::path::Path) -> anyhow::Result<()> {
+    linux::delete_all(dir)
+}
+
 static DEVICES: OnceLock<Arc<Devices>> = OnceLock::new();
 
 /// This service's state, made the first time it's needed.
