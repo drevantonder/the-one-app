@@ -138,11 +138,7 @@ Every row change is in a signed step, so "who did what" for seven years is the s
 
 - **The browser's download** grows with SQLite in WebAssembly. Measure it in phase 1. The fallback is the browser building changesets itself in JavaScript.
 - **The scope database's step signer:** a person's device, by default. Nodes sign app databases' steps. Under rule 3, their steps to the scope database are those the scope's permissions allow nodes, such as a node's status.
-- **The default roles:**
-  - the install: admin, member;
-  - a group: admin, member;
-  - a repo: owner, collaborator;
-  - a viewer role: only once something needs it.
+- **The default roles:** the core's are `permissions::DEFAULTS`; a repo's (owner, collaborator) are G's; a viewer role only once something needs it. Under no escalation the install's admins can no longer add people to a group they aren't in, which replay lets them (`manages`): decide whether they keep that, by holding the group's admin role through a rule, before phase 2.
 - **Retention:** 7 years for the scope database, by default. Andre decides app data's.
 - **Busy app databases** that collide often: measure before changing anything (batching, then a lease).
 
