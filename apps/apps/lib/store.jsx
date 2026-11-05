@@ -1,7 +1,7 @@
 // What the App Store's screens share: a call's answer, loaded and kept fresh; waiting and failing as one part says; and
 // a section's heading.
 import { useCallback, useEffect, useState } from "react"
-import { Problem, Skeleton } from "@one/ui"
+import { Problem } from "@one/ui"
 
 // The node's "changed" events go to every part that has loaded something: the bridge has no way to stop listening, so
 // this is its one listener.
@@ -35,21 +35,6 @@ export const said = (error) => one.plain(error)
 export function Failed({ error, retry }) {
   const p = said(error)
   return <Problem title={p.title} text={p.next} action={{ label: "Try Again", run: retry }} />
-}
-
-/// Grey shapes where rows will be, once it's taken longer than a blink, so a quick load shows nothing in between.
-export function Waiting({ rows = 4 }) {
-  const [late, setLate] = useState(false)
-  useEffect(() => {
-    const t = setTimeout(() => setLate(true), 100)
-    return () => clearTimeout(t)
-  }, [])
-  if (!late) return null
-  return (
-    <div className="flex flex-col gap-2">
-      {Array.from({ length: rows }, (_, i) => <Skeleton key={i} className="h-14 w-full max-w-2xl" />)}
-    </div>
-  )
 }
 
 /// A group of rows under its heading.

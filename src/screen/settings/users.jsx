@@ -7,49 +7,15 @@
 import { useEffect, useState } from "react"
 import { createRoot } from "react-dom/client"
 import {
-  Button, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem,
-  DropdownMenuSeparator, DropdownMenuTrigger, Icon, Input, List, ListRow, Problem, ResponsiveDialog, Skeleton,
+  Avatar, Button, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem,
+  DropdownMenuSeparator, DropdownMenuTrigger, Icon, Input, List, ListRow, ListSkeleton, Problem, ResponsiveDialog, useDialog,
 } from "@one/ui"
 
 const api = one.api
 const yours = one.config.yours
 const said = (err) => one.plain(err).title
 const roleName = (r) => (r === "admin" ? "Admin" : "Member")
-const COLORS = ["#5e5ce6", "#ff9f0a", "#30b0c7", "#ff375f", "#34c759", "#af52de", "#0a84ff", "#a2845e"]
 const quiet = { autoCapitalize: "none", autoCorrect: "off", spellCheck: false }
-
-// A steady colour and initials for someone, from their id and name.
-function Avatar({ id, name, size = 36 }) {
-  let h = 0
-  for (const c of String(id)) h = (h * 31 + c.charCodeAt(0)) >>> 0
-  const initials = String(name || "?").split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase()
-  return (
-    <span
-      aria-hidden="true"
-      className="inline-grid shrink-0 place-items-center rounded-full font-semibold text-white"
-      style={{ width: size, height: size, fontSize: size * 0.4, background: COLORS[h % COLORS.length] }}
-    >
-      {initials}
-    </span>
-  )
-}
-
-// Shows after `wait` ms: grey shapes only for a slow load, so a fast one shows nothing in between.
-function useLater(wait) {
-  const [late, setLate] = useState(false)
-  useEffect(() => {
-    const timer = setTimeout(() => setLate(true), wait)
-    return () => clearTimeout(timer)
-  }, [wait])
-  return late
-}
-
-// A dialog that opens afresh each time: its count (a new one each time, so what was typed is gone) and whether it's open
-// (set false by its own closing, kept mounted until it has gone).
-function useDialog() {
-  const [d, set] = useState({ n: 0, open: false })
-  return [d, () => set((x) => ({ n: x.n + 1, open: true })), (open) => set((x) => ({ ...x, open }))]
-}
 
 function Users() {
   const [state, setState] = useState(null)
@@ -59,7 +25,6 @@ function Users() {
   const [error, setError] = useState("")
   const [add, startAdd, setAddOpen] = useDialog()
   const [handle, startHandle, setHandleOpen] = useDialog()
-  const slow = useLater(100)
 
   async function load() {
     try {
@@ -105,7 +70,7 @@ function Users() {
   let body
   if (!state) {
     body = problem ? <Problem title={problem.title} text={problem.next} action={{ label: "Try Again", run: load }} />
-      : slow ? <List aria-busy="true" aria-label="Loading">{[0, 1, 2].map((n) => <Placeholder key={n} />)}</List> : null
+      : <ListSkeleton rows={3} />
   } else {
     body = (
       <>
@@ -119,11 +84,11 @@ function Users() {
             return (
               <ListRow
                 key={u.id}
-                leading={<Avatar id={u.id} name={u.name} />}
+                leading={<Avatar id={u.id} name={u.name} size={36} />}
                 title={`${u.name}${u.id === me ? " (you)" : ""}`}
                 sub={u.handle ? `@${u.handle}` : undefined}
                 trailing={trailing}
-                onClick={u.id === me && u.handle ? startHandle : undefined}
+                onClick={u.id === me && u.handle ? () => startHandle() : undefined}
               />
             )
           })}
@@ -146,26 +111,13 @@ function Users() {
       <div className="flex max-w-2xl flex-col gap-4">
         <div className="flex items-center justify-between gap-3">
           <h1 className="large-title text-3xl font-bold tracking-tight">Users</h1>
-          {state && admin && !domain && <Button onClick={startAdd}><Icon name="plus" />Add Someone</Button>}
+          {state && admin && !domain && <Button onClick={() => startAdd()}><Icon name="plus" />Add Someone</Button>}
         </div>
         {body}
       </div>
       {add.n > 0 && <AddSomeone key={`add${add.n}`} open={add.open} setOpen={setAddOpen} />}
       {handle.n > 0 && <Handle key={`handle${handle.n}`} was={handleNow} open={handle.open} setOpen={setHandleOpen} saved={load} />}
     </>
-  )
-}
-
-// A row's grey shape, while the list is coming.
-function Placeholder() {
-  return (
-    <div className="flex items-center gap-3 px-3 py-2.5">
-      <Skeleton className="size-9 rounded-full" />
-      <div className="flex-1 space-y-1.5">
-        <Skeleton className="h-3.5 w-1/3" />
-        <Skeleton className="h-3 w-1/4" />
-      </div>
-    </div>
   )
 }
 

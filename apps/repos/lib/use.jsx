@@ -1,7 +1,7 @@
 // What every Repos screen shares: a call's answer, kept fresh; the room a screen has; times and names as a person
 // reads them; and where git reaches a repo.
 import { createContext, useCallback, useContext, useEffect, useState } from "react"
-import { Problem, Skeleton, useWidth } from "@one/ui"
+import { ListSkeleton, Problem, useWidth } from "@one/ui"
 
 // The node's "changed" events go to every part that has loaded something: the bridge has no way to stop listening, so
 // this is its one listener.
@@ -36,23 +36,8 @@ export function Failed({ error, retry }) {
   return <Problem title={p.title} text={p.next} action={{ label: "Try Again", run: retry }} />
 }
 
-/// Grey shapes where rows will be, once it's taken longer than a blink, so a quick load shows nothing in between.
-export function Waiting({ rows = 4 }) {
-  const [late, setLate] = useState(false)
-  useEffect(() => {
-    const t = setTimeout(() => setLate(true), 100)
-    return () => clearTimeout(t)
-  }, [])
-  if (!late) return null
-  return (
-    <div className="flex flex-col gap-2">
-      {Array.from({ length: rows }, (_, i) => <Skeleton key={i} className="h-14 w-full max-w-2xl" />)}
-    </div>
-  )
-}
-
 /// What a call's answer shows while it isn't in: its problem, or grey shapes.
-export const Pending = ({ call, rows }) => (call.error ? <Failed error={call.error} retry={call.reload} /> : <Waiting rows={rows} />)
+export const Pending = ({ call, rows = 4 }) => (call.error ? <Failed error={call.error} retry={call.reload} /> : <ListSkeleton rows={rows} />)
 
 /// A group of rows under its heading.
 export function Section({ title, children }) {

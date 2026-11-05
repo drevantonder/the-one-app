@@ -2,8 +2,8 @@ import { c as e } from "react/compiler-runtime";
 import * as t from "react";
 import { createContext as n, useState as r } from "react";
 import { createRoot as i } from "react-dom/client";
-import { AccountList as a, AlertDialog as o, AlertDialogAction as s, AlertDialogCancel as c, AlertDialogContent as l, AlertDialogDescription as u, AlertDialogFooter as d, AlertDialogHeader as f, AlertDialogTitle as p, AlertDialogTrigger as m, AppIcon as h, Badge as g, Button as _, Card as v, CardContent as y, CardDescription as b, CardFooter as x, CardHeader as S, CardTitle as ee, CodeView as te, CopyButton as ne, Dialog as re, DialogContent as ie, DialogDescription as ae, DialogFooter as oe, DialogHeader as se, DialogTitle as ce, DialogTrigger as le, DiffView as ue, DropdownMenu as de, DropdownMenuContent as fe, DropdownMenuItem as pe, DropdownMenuLabel as me, DropdownMenuSeparator as he, DropdownMenuTrigger as ge, Empty as _e, Grid as ve, Hint as C, Icon as w, Input as ye, List as be, ListNote as T, ListRow as E, ListSkeleton as xe, LoadFailure as D, Loading as O, LoadingButton as k, Problem as Se, Select as Ce, SelectContent as we, SelectItem as A, SelectTrigger as Te, SelectValue as Ee, Separator as De, Sheet as Oe, SheetContent as ke, SheetDescription as Ae, SheetHeader as je, SheetTitle as Me, SheetTrigger as Ne, Shell as j, Skeleton as Pe, Split as M, Switch as N, Tabs as Fe, TabsContent as Ie, TabsList as Le, TabsTrigger as Re, showAlert as P, showMenu as F, showSheet as I } from "@one/ui";
-import { jsx as L, jsxs as R } from "react/jsx-runtime";
+import { AccountList as a, AlertDialog as o, AlertDialogAction as s, AlertDialogCancel as c, AlertDialogContent as l, AlertDialogDescription as u, AlertDialogFooter as d, AlertDialogHeader as f, AlertDialogTitle as p, AlertDialogTrigger as m, AppIcon as h, Avatar as g, AvatarFallback as _, AvatarImage as v, Badge as y, Button as b, Card as x, CardContent as S, CardDescription as ee, CardFooter as te, CardHeader as ne, CardTitle as re, CodeView as ie, CopyButton as ae, Dialog as oe, DialogContent as se, DialogDescription as ce, DialogFooter as le, DialogHeader as ue, DialogTitle as de, DialogTrigger as fe, DiffView as pe, DropdownMenu as me, DropdownMenuContent as he, DropdownMenuItem as ge, DropdownMenuLabel as _e, DropdownMenuSeparator as ve, DropdownMenuTrigger as ye, Empty as be, Grid as xe, Hint as C, Icon as Se, Input as Ce, List as we, ListNote as w, ListRow as T, ListSkeleton as E, LoadFailure as D, Loading as O, LoadingButton as k, Problem as Te, Progress as Ee, ResponsiveDialog as De, Select as Oe, SelectContent as ke, SelectItem as A, SelectTrigger as Ae, SelectValue as je, Separator as Me, Sheet as Ne, SheetContent as Pe, SheetDescription as Fe, SheetHeader as Ie, SheetTitle as Le, SheetTrigger as Re, Shell as ze, Skeleton as Be, Sparkline as Ve, Split as He, Switch as j, Tabs as Ue, TabsContent as We, TabsList as Ge, TabsTrigger as Ke, showAlert as M, showMenu as N, showSheet as P, useDialog as F } from "@one/ui";
+import { Fragment as I, jsx as L, jsxs as R } from "react/jsx-runtime";
 // node_modules/@phosphor-icons/react/dist/defs/DotsThree.es.js
 var z = /* @__PURE__ */ new Map([
 	["bold", /* @__PURE__ */ t.createElement(t.Fragment, null, /* @__PURE__ */ t.createElement("path", { d: "M144,128a16,16,0,1,1-16-16A16,16,0,0,1,144,128ZM60,112a16,16,0,1,0,16,16A16,16,0,0,0,60,112Zm136,0a16,16,0,1,0,16,16A16,16,0,0,0,196,112Z" }))],
@@ -56,26 +56,26 @@ var z = /* @__PURE__ */ new Map([
 });
 U.displayName = "IconBase";
 // node_modules/@phosphor-icons/react/dist/csr/DotsThree.es.js
-var ze = t.forwardRef((e, n) => /* @__PURE__ */ t.createElement(U, {
+var qe = t.forwardRef((e, n) => /* @__PURE__ */ t.createElement(U, {
 	ref: n,
 	...e,
 	weights: z
 }));
-ze.displayName = "DotsThreeIcon";
+qe.displayName = "DotsThreeIcon";
 // node_modules/@phosphor-icons/react/dist/csr/MagnifyingGlass.es.js
-var Be = t.forwardRef((e, n) => /* @__PURE__ */ t.createElement(U, {
+var Je = t.forwardRef((e, n) => /* @__PURE__ */ t.createElement(U, {
 	ref: n,
 	...e,
 	weights: B
 }));
-Be.displayName = "MagnifyingGlassIcon";
+Je.displayName = "MagnifyingGlassIcon";
 // node_modules/@phosphor-icons/react/dist/csr/Plus.es.js
-var Ve = t.forwardRef((e, n) => /* @__PURE__ */ t.createElement(U, {
+var Ye = t.forwardRef((e, n) => /* @__PURE__ */ t.createElement(U, {
 	ref: n,
 	...e,
 	weights: V
 }));
-Ve.displayName = "PlusIcon";
+Ye.displayName = "PlusIcon";
 // gallery/gallery.tsx
 var W = [
 	{
@@ -138,7 +138,7 @@ var W = [
 		icon: "devices",
 		color: "#8e8e93"
 	}
-], He = "// Keeps the last ten answers, newest first.\nimport { createHash } from \"node:crypto\"\n\nconst KEPT = 10\nconst seen = new Map<string, number>()\n\n/** The answer for `key`, or nothing if it's been dropped. */\nexport function recall(key: string, now = Date.now()): string | undefined {\n  const at = seen.get(key)\n  if (at === undefined || now - at > 60_000) return undefined\n  return createHash(\"sha256\").update(key).digest(\"hex\").slice(0, 8)\n}\n\nexport function keep(key: string) {\n  seen.set(key, Date.now())\n  for (const [old] of [...seen].slice(0, -KEPT)) seen.delete(old)\n}\n", Ue = [{
+], Xe = "// Keeps the last ten answers, newest first.\nimport { createHash } from \"node:crypto\"\n\nconst KEPT = 10\nconst seen = new Map<string, number>()\n\n/** The answer for `key`, or nothing if it's been dropped. */\nexport function recall(key: string, now = Date.now()): string | undefined {\n  const at = seen.get(key)\n  if (at === undefined || now - at > 60_000) return undefined\n  return createHash(\"sha256\").update(key).digest(\"hex\").slice(0, 8)\n}\n\nexport function keep(key: string) {\n  seen.set(key, Date.now())\n  for (const [old] of [...seen].slice(0, -KEPT)) seen.delete(old)\n}\n", Ze = [{
 	a: 8,
 	b: 8,
 	lines: [
@@ -218,7 +218,7 @@ var W = [
 		ok: !1
 	}
 ];
-function We() {
+function Qe() {
 	let t = e(21), [n, i] = r(K), [o, s] = r("personal"), c, l;
 	t[0] === Symbol.for("react.memo_cache_sentinel") ? (c = (e) => i((t) => t.filter((t) => t.account !== e.account)), l = /* @__PURE__ */ L(k, {
 		variant: "secondary",
@@ -240,13 +240,13 @@ function We() {
 		children: "Browser profile"
 	}), t[4] = d) : d = t[4];
 	let f;
-	t[5] === Symbol.for("react.memo_cache_sentinel") ? (f = /* @__PURE__ */ L(Te, {
+	t[5] === Symbol.for("react.memo_cache_sentinel") ? (f = /* @__PURE__ */ L(Ae, {
 		size: "sm",
 		"aria-label": "Browser profile",
-		children: /* @__PURE__ */ L(Ee, {})
+		children: /* @__PURE__ */ L(je, {})
 	}), t[5] = f) : f = t[5];
 	let p;
-	t[6] === Symbol.for("react.memo_cache_sentinel") ? (p = /* @__PURE__ */ R(we, {
+	t[6] === Symbol.for("react.memo_cache_sentinel") ? (p = /* @__PURE__ */ R(ke, {
 		align: "end",
 		position: "popper",
 		children: [
@@ -265,18 +265,18 @@ function We() {
 		]
 	}), t[6] = p) : p = t[6];
 	let m;
-	t[7] === o ? m = t[8] : (m = /* @__PURE__ */ L(E, {
+	t[7] === o ? m = t[8] : (m = /* @__PURE__ */ L(T, {
 		title: "Profile",
-		trailing: /* @__PURE__ */ R(Ce, {
+		trailing: /* @__PURE__ */ R(Oe, {
 			value: o,
 			onValueChange: s,
 			children: [f, p]
 		})
 	}), t[7] = o, t[8] = m);
 	let h;
-	t[9] === Symbol.for("react.memo_cache_sentinel") ? (h = /* @__PURE__ */ L(T, { children: "A line of what to do, which wraps where a row's title would be cut." }), t[9] = h) : h = t[9];
+	t[9] === Symbol.for("react.memo_cache_sentinel") ? (h = /* @__PURE__ */ L(w, { children: "A line of what to do, which wraps where a row's title would be cut." }), t[9] = h) : h = t[9];
 	let g;
-	t[10] === m ? g = t[11] : (g = /* @__PURE__ */ R(be, { children: [m, h] }), t[10] = m, t[11] = g);
+	t[10] === m ? g = t[11] : (g = /* @__PURE__ */ R(we, { children: [m, h] }), t[10] = m, t[11] = g);
 	let _;
 	t[12] === Symbol.for("react.memo_cache_sentinel") ? (_ = /* @__PURE__ */ L(C, { children: "A grey line under what it is about." }), t[12] = _) : _ = t[12];
 	let v;
@@ -289,7 +289,7 @@ function We() {
 		]
 	}), t[13] = g, t[14] = v);
 	let y, b;
-	t[15] === Symbol.for("react.memo_cache_sentinel") ? (y = /* @__PURE__ */ L(O, { children: "Signing In" }), b = /* @__PURE__ */ L(xe, { rows: 2 }), t[15] = y, t[16] = b) : (y = t[15], b = t[16]);
+	t[15] === Symbol.for("react.memo_cache_sentinel") ? (y = /* @__PURE__ */ L(O, { children: "Signing In" }), b = /* @__PURE__ */ L(E, { rows: 2 }), t[15] = y, t[16] = b) : (y = t[15], b = t[16]);
 	let x;
 	t[17] === Symbol.for("react.memo_cache_sentinel") ? (x = /* @__PURE__ */ L(D, {
 		problem: {
@@ -323,6 +323,68 @@ function X(e, t) {
 		warn: !0
 	};
 }
+function $e() {
+	let t = e(17), [n, r, i] = F(), a;
+	t[0] === Symbol.for("react.memo_cache_sentinel") ? (a = /* @__PURE__ */ L(h, {
+		app: W[0],
+		size: 32
+	}), t[0] = a) : a = t[0];
+	let o;
+	t[1] === r ? o = t[2] : (o = /* @__PURE__ */ L(T, {
+		leading: a,
+		title: "Agent Devices wants an Anthropic key",
+		sub: "claude-code · Wants the Anthropic key to run the nightly checks on every repo, and to open pull requests for what it finds, until you take it back.",
+		wrap: !0,
+		trailing: /* @__PURE__ */ L(b, {
+			variant: "secondary",
+			size: "sm",
+			onClick: () => r("Anthropic key"),
+			children: "Choose"
+		})
+	}), t[1] = r, t[2] = o);
+	let s;
+	t[3] === Symbol.for("react.memo_cache_sentinel") ? (s = /* @__PURE__ */ L(g, {
+		name: "Ann Lee",
+		id: "g1",
+		size: 32
+	}), t[3] = s) : s = t[3];
+	let c;
+	t[4] === r ? c = t[5] : (c = /* @__PURE__ */ L(T, {
+		leading: s,
+		title: "Ann Lee, Bo Chen, Cy Dunn",
+		sub: "Cut to one line, as a row's line is without wrap, however long it gets",
+		trailing: /* @__PURE__ */ L(b, {
+			variant: "secondary",
+			size: "sm",
+			onClick: () => r("Join"),
+			children: "Join"
+		})
+	}), t[4] = r, t[5] = c);
+	let l;
+	t[6] !== o || t[7] !== c ? (l = /* @__PURE__ */ R(we, { children: [o, c] }), t[6] = o, t[7] = c, t[8] = l) : l = t[8];
+	let u;
+	t[9] !== n.for || t[10] !== n.n || t[11] !== n.open || t[12] !== i ? (u = n.n > 0 && /* @__PURE__ */ L(De, {
+		open: n.open,
+		onOpenChange: i,
+		title: n.for ?? "",
+		action: /* @__PURE__ */ L(b, {
+			variant: "secondary",
+			size: "sm",
+			onClick: () => i(!1),
+			children: "Cancel"
+		}),
+		children: /* @__PURE__ */ R("p", {
+			className: "p-4 text-sm text-muted-foreground",
+			children: [
+				"Opened for ",
+				n.for,
+				"."
+			]
+		})
+	}, n.n), t[9] = n.for, t[10] = n.n, t[11] = n.open, t[12] = i, t[13] = u) : u = t[13];
+	let d;
+	return t[14] !== l || t[15] !== u ? (d = /* @__PURE__ */ R(I, { children: [l, u] }), t[14] = l, t[15] = u, t[16] = d) : d = t[16], d;
+}
 function Z(t) {
 	let n = e(5), { title: r, children: i } = t, a;
 	n[0] === r ? a = n[1] : (a = /* @__PURE__ */ L("h2", {
@@ -342,13 +404,13 @@ function Q(t) {
 		children: r
 	}), n[0] = r, n[1] = i), i;
 }
-function Ge() {
+function et() {
 	let t = e(13), [n, i] = r(null), a;
 	t[0] === n ? a = t[1] : (a = G.find((e) => e.id === n), t[0] = n, t[1] = a);
 	let o = a, s = o?.title, c;
 	t[2] === Symbol.for("react.memo_cache_sentinel") ? (c = () => i(null), t[2] = c) : c = t[2];
 	let l;
-	t[3] === n ? l = t[4] : (l = G.map((e) => /* @__PURE__ */ L(E, {
+	t[3] === n ? l = t[4] : (l = G.map((e) => /* @__PURE__ */ L(T, {
 		leading: /* @__PURE__ */ L(h, {
 			app: e.app,
 			size: 32
@@ -359,10 +421,10 @@ function Ge() {
 		onClick: () => i(e.id)
 	}, e.id)), t[3] = n, t[4] = l);
 	let u;
-	t[5] === l ? u = t[6] : (u = /* @__PURE__ */ L(be, { children: l }), t[5] = l, t[6] = u);
+	t[5] === l ? u = t[6] : (u = /* @__PURE__ */ L(we, { children: l }), t[5] = l, t[6] = u);
 	let d;
-	t[7] === o ? d = t[8] : (d = o && /* @__PURE__ */ R(v, { children: [
-		/* @__PURE__ */ R(S, {
+	t[7] === o ? d = t[8] : (d = o && /* @__PURE__ */ R(x, { children: [
+		/* @__PURE__ */ R(ne, {
 			className: "flex flex-row items-center gap-4",
 			children: [
 				/* @__PURE__ */ L(h, {
@@ -371,42 +433,42 @@ function Ge() {
 				}),
 				/* @__PURE__ */ R("div", {
 					className: "min-w-0 flex-1",
-					children: [/* @__PURE__ */ L(ee, {
+					children: [/* @__PURE__ */ L(re, {
 						className: "text-lg",
 						children: o.title
-					}), /* @__PURE__ */ L(b, { children: "You" })]
+					}), /* @__PURE__ */ L(ee, { children: "You" })]
 				}),
-				/* @__PURE__ */ L(_, {
+				/* @__PURE__ */ L(b, {
 					variant: "outline",
 					size: "sm",
 					children: "Rename"
 				})
 			]
 		}),
-		/* @__PURE__ */ R(y, {
+		/* @__PURE__ */ R(S, {
 			className: "flex flex-col gap-3",
 			children: [/* @__PURE__ */ R("div", {
 				className: "flex items-center justify-between gap-3",
 				children: [/* @__PURE__ */ L("span", {
 					className: "text-sm",
 					children: "AI"
-				}), /* @__PURE__ */ L(N, { defaultChecked: !0 })]
+				}), /* @__PURE__ */ L(j, { defaultChecked: !0 })]
 			}), /* @__PURE__ */ R("div", {
 				className: "flex items-center justify-between gap-3",
 				children: [/* @__PURE__ */ L("span", {
 					className: "text-sm",
 					children: "AGENTS.md"
-				}), /* @__PURE__ */ L(N, {})]
+				}), /* @__PURE__ */ L(j, {})]
 			})]
 		}),
-		/* @__PURE__ */ L(x, { children: /* @__PURE__ */ L(_, {
+		/* @__PURE__ */ L(te, { children: /* @__PURE__ */ L(b, {
 			variant: "destructive",
 			size: "sm",
 			children: "Delete Item"
 		}) })
 	] }), t[7] = o, t[8] = d);
 	let f;
-	return t[9] !== s || t[10] !== u || t[11] !== d ? (f = /* @__PURE__ */ L(M, {
+	return t[9] !== s || t[10] !== u || t[11] !== d ? (f = /* @__PURE__ */ L(He, {
 		title: s,
 		onClose: c,
 		list: u,
@@ -466,7 +528,7 @@ var $ = [
 		}))]
 	}
 ];
-function Ke() {
+function tt() {
 	let t = e(8), [n, i] = r("#agent-devices"), a;
 	t[0] === n ? a = t[1] : (a = $.map((e) => ({
 		...e,
@@ -477,65 +539,65 @@ function Ke() {
 		}))
 	})), t[0] = n, t[1] = a);
 	let o = a, s;
-	t[2] === n ? s = t[3] : (s = $.flatMap(Je).find((e) => e.href === n)?.title ?? $.find((e) => e.href === n)?.title, t[2] = n, t[3] = s);
+	t[2] === n ? s = t[3] : (s = $.flatMap(rt).find((e) => e.href === n)?.title ?? $.find((e) => e.href === n)?.title, t[2] = n, t[3] = s);
 	let c = s, l;
 	t[4] === Symbol.for("react.memo_cache_sentinel") ? (l = /* @__PURE__ */ L("div", {
 		className: "p-4",
-		children: /* @__PURE__ */ L(ve, {
+		children: /* @__PURE__ */ L(xe, {
 			min: "10rem",
-			children: W.slice(0, 4).map(qe)
+			children: W.slice(0, 4).map(nt)
 		})
 	}), t[4] = l) : l = t[4];
 	let u;
-	return t[5] !== o || t[6] !== c ? (u = /* @__PURE__ */ L(j, {
+	return t[5] !== o || t[6] !== c ? (u = /* @__PURE__ */ L(ze, {
 		sections: o,
 		title: c,
 		onGo: i,
 		children: l
 	}), t[5] = o, t[6] = c, t[7] = u) : u = t[7], u;
 }
-function qe(e) {
-	return /* @__PURE__ */ L(v, { className: "h-28" }, e.name);
+function nt(e) {
+	return /* @__PURE__ */ L(x, { className: "h-28" }, e.name);
 }
-function Je(e) {
+function rt(e) {
 	return e.items;
 }
-function Ye() {
-	let t = e(44), n;
+function it() {
+	let t = e(55), n;
 	t[0] === Symbol.for("react.memo_cache_sentinel") ? (n = /* @__PURE__ */ L("h1", {
 		className: "text-2xl font-semibold tracking-tight",
 		children: "@one/ui"
 	}), t[0] = n) : n = t[0];
 	let r;
 	t[1] === Symbol.for("react.memo_cache_sentinel") ? (r = /* @__PURE__ */ R(Q, { children: [
-		/* @__PURE__ */ L(_, { children: "Default" }),
-		/* @__PURE__ */ L(_, {
+		/* @__PURE__ */ L(b, { children: "Default" }),
+		/* @__PURE__ */ L(b, {
 			variant: "secondary",
 			children: "Secondary"
 		}),
-		/* @__PURE__ */ L(_, {
+		/* @__PURE__ */ L(b, {
 			variant: "outline",
 			children: "Outline"
 		}),
-		/* @__PURE__ */ L(_, {
+		/* @__PURE__ */ L(b, {
 			variant: "ghost",
 			children: "Ghost"
 		}),
-		/* @__PURE__ */ L(_, {
+		/* @__PURE__ */ L(b, {
 			variant: "destructive",
 			children: "Destructive"
 		}),
-		/* @__PURE__ */ L(_, {
+		/* @__PURE__ */ L(b, {
 			variant: "link",
 			children: "Link"
 		})
 	] }), t[1] = r) : r = t[1];
 	let i, a;
-	t[2] === Symbol.for("react.memo_cache_sentinel") ? (i = /* @__PURE__ */ R(_, {
+	t[2] === Symbol.for("react.memo_cache_sentinel") ? (i = /* @__PURE__ */ R(b, {
 		size: "sm",
 		variant: "outline",
-		children: [/* @__PURE__ */ L(Ve, {}), " New Item"]
-	}), a = /* @__PURE__ */ L(_, {
+		children: [/* @__PURE__ */ L(Ye, {}), " New Item"]
+	}), a = /* @__PURE__ */ L(b, {
 		size: "lg",
 		children: "Large"
 	}), t[2] = i, t[3] = a) : (i = t[2], a = t[3]);
@@ -545,61 +607,61 @@ function Ye() {
 		children: [r, /* @__PURE__ */ R(Q, { children: [
 			i,
 			a,
-			/* @__PURE__ */ L(_, {
+			/* @__PURE__ */ L(b, {
 				size: "icon",
 				variant: "ghost",
 				"aria-label": "More",
-				children: /* @__PURE__ */ L(ze, { weight: "bold" })
+				children: /* @__PURE__ */ L(qe, { weight: "bold" })
 			}),
-			/* @__PURE__ */ L(_, {
+			/* @__PURE__ */ L(b, {
 				disabled: !0,
 				children: "Disabled"
 			})
 		] })]
 	}), t[4] = C) : C = t[4];
-	let w;
-	t[5] === Symbol.for("react.memo_cache_sentinel") ? (w = /* @__PURE__ */ L(Z, {
+	let Se;
+	t[5] === Symbol.for("react.memo_cache_sentinel") ? (Se = /* @__PURE__ */ L(Z, {
 		title: "Badge",
 		children: /* @__PURE__ */ R(Q, { children: [
-			/* @__PURE__ */ L(g, { children: "Default" }),
-			/* @__PURE__ */ L(g, {
+			/* @__PURE__ */ L(y, { children: "Default" }),
+			/* @__PURE__ */ L(y, {
 				variant: "secondary",
 				children: "Secondary"
 			}),
-			/* @__PURE__ */ L(g, {
+			/* @__PURE__ */ L(y, {
 				variant: "outline",
 				children: "Outline"
 			}),
-			/* @__PURE__ */ L(g, {
+			/* @__PURE__ */ L(y, {
 				variant: "destructive",
 				className: "rounded-full",
 				children: "3"
 			})
 		] })
-	}), t[5] = w) : w = t[5];
-	let T;
-	t[6] === Symbol.for("react.memo_cache_sentinel") ? (T = /* @__PURE__ */ L(Z, {
+	}), t[5] = Se) : Se = t[5];
+	let w;
+	t[6] === Symbol.for("react.memo_cache_sentinel") ? (w = /* @__PURE__ */ L(Z, {
 		title: "Input",
 		children: /* @__PURE__ */ R("div", {
 			className: "relative max-w-sm",
-			children: [/* @__PURE__ */ L(Be, { className: "pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" }), /* @__PURE__ */ L(ye, {
+			children: [/* @__PURE__ */ L(Je, { className: "pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" }), /* @__PURE__ */ L(Ce, {
 				placeholder: "Search",
 				className: "pl-8"
 			})]
 		})
-	}), t[6] = T) : T = t[6];
-	let E;
-	t[7] === Symbol.for("react.memo_cache_sentinel") ? (E = /* @__PURE__ */ L(Te, {
+	}), t[6] = w) : w = t[6];
+	let T;
+	t[7] === Symbol.for("react.memo_cache_sentinel") ? (T = /* @__PURE__ */ L(Ae, {
 		className: "w-48",
 		"aria-label": "Device",
-		children: /* @__PURE__ */ L(Ee, { placeholder: "Device" })
-	}), t[7] = E) : E = t[7];
-	let xe;
-	t[8] === Symbol.for("react.memo_cache_sentinel") ? (xe = /* @__PURE__ */ L(Z, {
+		children: /* @__PURE__ */ L(je, { placeholder: "Device" })
+	}), t[7] = T) : T = t[7];
+	let E;
+	t[8] === Symbol.for("react.memo_cache_sentinel") ? (E = /* @__PURE__ */ L(Z, {
 		title: "Select: a choice among a few things",
-		children: /* @__PURE__ */ R(Ce, {
+		children: /* @__PURE__ */ R(Oe, {
 			defaultValue: "mac",
-			children: [E, /* @__PURE__ */ R(we, { children: [
+			children: [T, /* @__PURE__ */ R(ke, { children: [
 				/* @__PURE__ */ L(A, {
 					value: "mac",
 					children: "Andre's Mac"
@@ -614,39 +676,39 @@ function Ye() {
 				})
 			] })]
 		})
-	}), t[8] = xe) : xe = t[8];
+	}), t[8] = E) : E = t[8];
 	let D;
 	t[9] === Symbol.for("react.memo_cache_sentinel") ? (D = /* @__PURE__ */ L(Z, {
 		title: "Tabs",
-		children: /* @__PURE__ */ R(Fe, {
+		children: /* @__PURE__ */ R(Ue, {
 			defaultValue: "you",
 			className: "max-w-md",
 			children: [
-				/* @__PURE__ */ R(Le, { children: [
-					/* @__PURE__ */ L(Re, {
+				/* @__PURE__ */ R(Ge, { children: [
+					/* @__PURE__ */ L(Ke, {
 						value: "you",
 						children: "You"
 					}),
-					/* @__PURE__ */ L(Re, {
+					/* @__PURE__ */ L(Ke, {
 						value: "team",
 						children: "Team"
 					}),
-					/* @__PURE__ */ L(Re, {
+					/* @__PURE__ */ L(Ke, {
 						value: "everyone",
 						children: "Everyone"
 					})
 				] }),
-				/* @__PURE__ */ L(Ie, {
+				/* @__PURE__ */ L(We, {
 					value: "you",
 					className: "text-sm text-muted-foreground",
 					children: "Yours alone."
 				}),
-				/* @__PURE__ */ L(Ie, {
+				/* @__PURE__ */ L(We, {
 					value: "team",
 					className: "text-sm text-muted-foreground",
 					children: "Your team's."
 				}),
-				/* @__PURE__ */ L(Ie, {
+				/* @__PURE__ */ L(We, {
 					value: "everyone",
 					className: "text-sm text-muted-foreground",
 					children: "Everyone's."
@@ -658,310 +720,425 @@ function Ye() {
 	t[10] === Symbol.for("react.memo_cache_sentinel") ? (O = /* @__PURE__ */ L(Z, {
 		title: "Switch",
 		children: /* @__PURE__ */ R(Q, { children: [
-			/* @__PURE__ */ L(N, {
+			/* @__PURE__ */ L(j, {
 				defaultChecked: !0,
 				"aria-label": "On"
 			}),
-			/* @__PURE__ */ L(N, { "aria-label": "Off" }),
-			/* @__PURE__ */ L(N, {
+			/* @__PURE__ */ L(j, { "aria-label": "Off" }),
+			/* @__PURE__ */ L(j, {
 				disabled: !0,
 				"aria-label": "Disabled"
 			})
 		] })
 	}), t[10] = O) : O = t[10];
-	let k, j;
-	t[11] === Symbol.for("react.memo_cache_sentinel") ? (k = /* @__PURE__ */ R(S, { children: [/* @__PURE__ */ L(ee, { children: "Backups" }), /* @__PURE__ */ L(b, { children: "Encrypted copies of everything." })] }), j = /* @__PURE__ */ L(y, {
+	let k, De;
+	t[11] === Symbol.for("react.memo_cache_sentinel") ? (k = /* @__PURE__ */ R(ne, { children: [/* @__PURE__ */ L(re, { children: "Backups" }), /* @__PURE__ */ L(ee, { children: "Encrypted copies of everything." })] }), De = /* @__PURE__ */ L(S, {
 		className: "text-sm",
 		children: "Last backed up 5 minutes ago."
-	}), t[11] = k, t[12] = j) : (k = t[11], j = t[12]);
-	let M;
-	t[13] === Symbol.for("react.memo_cache_sentinel") ? (M = /* @__PURE__ */ L(Z, {
+	}), t[11] = k, t[12] = De) : (k = t[11], De = t[12]);
+	let ze;
+	t[13] === Symbol.for("react.memo_cache_sentinel") ? (ze = /* @__PURE__ */ L(Z, {
 		title: "Card",
-		children: /* @__PURE__ */ R(v, {
+		children: /* @__PURE__ */ R(x, {
 			className: "max-w-sm",
 			children: [
 				k,
-				j,
-				/* @__PURE__ */ L(x, { children: /* @__PURE__ */ L(_, {
+				De,
+				/* @__PURE__ */ L(te, { children: /* @__PURE__ */ L(b, {
 					variant: "outline",
 					size: "sm",
 					children: "Back Up Now"
 				}) })
 			]
 		})
-	}), t[13] = M) : M = t[13];
-	let P;
-	t[14] === Symbol.for("react.memo_cache_sentinel") ? (P = /* @__PURE__ */ L(ge, {
+	}), t[13] = ze) : ze = t[13];
+	let He;
+	t[14] === Symbol.for("react.memo_cache_sentinel") ? (He = /* @__PURE__ */ L(ye, {
 		asChild: !0,
-		children: /* @__PURE__ */ L(_, {
+		children: /* @__PURE__ */ L(b, {
 			variant: "outline",
 			children: "Menu"
 		})
-	}), t[14] = P) : P = t[14];
-	let F;
-	t[15] === Symbol.for("react.memo_cache_sentinel") ? (F = /* @__PURE__ */ R(de, { children: [P, /* @__PURE__ */ R(fe, { children: [
-		/* @__PURE__ */ L(me, { children: "Agent Devices" }),
-		/* @__PURE__ */ L(he, {}),
-		/* @__PURE__ */ L(pe, { children: "Open" }),
-		/* @__PURE__ */ L(pe, { children: "Rename" }),
-		/* @__PURE__ */ L(pe, {
+	}), t[14] = He) : He = t[14];
+	let M;
+	t[15] === Symbol.for("react.memo_cache_sentinel") ? (M = /* @__PURE__ */ R(me, { children: [He, /* @__PURE__ */ R(he, { children: [
+		/* @__PURE__ */ L(_e, { children: "Agent Devices" }),
+		/* @__PURE__ */ L(ve, {}),
+		/* @__PURE__ */ L(ge, { children: "Open" }),
+		/* @__PURE__ */ L(ge, { children: "Rename" }),
+		/* @__PURE__ */ L(ge, {
 			variant: "destructive",
 			children: "Delete"
 		})
-	] })] }), t[15] = F) : F = t[15];
-	let I;
-	t[16] === Symbol.for("react.memo_cache_sentinel") ? (I = /* @__PURE__ */ L(le, {
+	] })] }), t[15] = M) : M = t[15];
+	let N;
+	t[16] === Symbol.for("react.memo_cache_sentinel") ? (N = /* @__PURE__ */ L(fe, {
 		asChild: !0,
-		children: /* @__PURE__ */ L(_, {
+		children: /* @__PURE__ */ L(b, {
 			variant: "outline",
 			children: "Dialog"
 		})
-	}), t[16] = I) : I = t[16];
-	let z, B;
-	t[17] === Symbol.for("react.memo_cache_sentinel") ? (z = /* @__PURE__ */ R(se, { children: [/* @__PURE__ */ L(ce, { children: "Rename" }), /* @__PURE__ */ L(ae, { children: "What it's called on every device." })] }), B = /* @__PURE__ */ L(ye, { defaultValue: "Anthropic" }), t[17] = z, t[18] = B) : (z = t[17], B = t[18]);
-	let V;
-	t[19] === Symbol.for("react.memo_cache_sentinel") ? (V = /* @__PURE__ */ R(re, { children: [I, /* @__PURE__ */ R(ie, { children: [
-		z,
-		B,
-		/* @__PURE__ */ L(oe, { children: /* @__PURE__ */ L(_, { children: "Save" }) })
-	] })] }), t[19] = V) : V = t[19];
-	let H;
-	t[20] === Symbol.for("react.memo_cache_sentinel") ? (H = /* @__PURE__ */ L(m, {
+	}), t[16] = N) : N = t[16];
+	let P, F;
+	t[17] === Symbol.for("react.memo_cache_sentinel") ? (P = /* @__PURE__ */ R(ue, { children: [/* @__PURE__ */ L(de, { children: "Rename" }), /* @__PURE__ */ L(ce, { children: "What it's called on every device." })] }), F = /* @__PURE__ */ L(Ce, { defaultValue: "Anthropic" }), t[17] = P, t[18] = F) : (P = t[17], F = t[18]);
+	let I;
+	t[19] === Symbol.for("react.memo_cache_sentinel") ? (I = /* @__PURE__ */ R(oe, { children: [N, /* @__PURE__ */ R(se, { children: [
+		P,
+		F,
+		/* @__PURE__ */ L(le, { children: /* @__PURE__ */ L(b, { children: "Save" }) })
+	] })] }), t[19] = I) : I = t[19];
+	let z;
+	t[20] === Symbol.for("react.memo_cache_sentinel") ? (z = /* @__PURE__ */ L(m, {
 		asChild: !0,
-		children: /* @__PURE__ */ L(_, {
+		children: /* @__PURE__ */ L(b, {
 			variant: "outline",
 			children: "Alert dialog"
 		})
-	}), t[20] = H) : H = t[20];
-	let U;
-	t[21] === Symbol.for("react.memo_cache_sentinel") ? (U = /* @__PURE__ */ R(f, { children: [/* @__PURE__ */ L(p, { children: "Delete Anthropic?" }), /* @__PURE__ */ L(u, { children: "Apps using it stop working until you add another." })] }), t[21] = U) : U = t[21];
-	let G;
-	t[22] === Symbol.for("react.memo_cache_sentinel") ? (G = /* @__PURE__ */ R(o, { children: [H, /* @__PURE__ */ R(l, { children: [U, /* @__PURE__ */ R(d, { children: [/* @__PURE__ */ L(c, { children: "Cancel" }), /* @__PURE__ */ L(s, {
+	}), t[20] = z) : z = t[20];
+	let B;
+	t[21] === Symbol.for("react.memo_cache_sentinel") ? (B = /* @__PURE__ */ R(f, { children: [/* @__PURE__ */ L(p, { children: "Delete Anthropic?" }), /* @__PURE__ */ L(u, { children: "Apps using it stop working until you add another." })] }), t[21] = B) : B = t[21];
+	let V;
+	t[22] === Symbol.for("react.memo_cache_sentinel") ? (V = /* @__PURE__ */ R(o, { children: [z, /* @__PURE__ */ R(l, { children: [B, /* @__PURE__ */ R(d, { children: [/* @__PURE__ */ L(c, { children: "Cancel" }), /* @__PURE__ */ L(s, {
 		className: "bg-destructive text-white hover:bg-destructive/90",
 		children: "Delete"
-	})] })] })] }), t[22] = G) : G = t[22];
-	let K;
-	t[23] === Symbol.for("react.memo_cache_sentinel") ? (K = /* @__PURE__ */ L(Ne, {
+	})] })] })] }), t[22] = V) : V = t[22];
+	let H;
+	t[23] === Symbol.for("react.memo_cache_sentinel") ? (H = /* @__PURE__ */ L(Re, {
 		asChild: !0,
-		children: /* @__PURE__ */ L(_, {
+		children: /* @__PURE__ */ L(b, {
 			variant: "outline",
 			children: "Sheet"
 		})
-	}), t[23] = K) : K = t[23];
-	let q;
-	t[24] === Symbol.for("react.memo_cache_sentinel") ? (q = /* @__PURE__ */ L(Z, {
+	}), t[23] = H) : H = t[23];
+	let U;
+	t[24] === Symbol.for("react.memo_cache_sentinel") ? (U = /* @__PURE__ */ L(Z, {
 		title: "Dropdown menu, dialog, alert dialog, sheet",
 		children: /* @__PURE__ */ R(Q, { children: [
-			F,
+			M,
+			I,
 			V,
-			G,
-			/* @__PURE__ */ R(Oe, { children: [K, /* @__PURE__ */ L(ke, { children: /* @__PURE__ */ R(je, { children: [/* @__PURE__ */ L(Me, { children: "Anthropic" }), /* @__PURE__ */ L(Ae, { children: "Key · Used by AI and Models" })] }) })] })
+			/* @__PURE__ */ R(Ne, { children: [H, /* @__PURE__ */ L(Pe, { children: /* @__PURE__ */ R(Ie, { children: [/* @__PURE__ */ L(Le, { children: "Anthropic" }), /* @__PURE__ */ L(Fe, { children: "Key · Used by AI and Models" })] }) })] })
 		] })
-	}), t[24] = q) : q = t[24];
-	let J;
-	t[25] === Symbol.for("react.memo_cache_sentinel") ? (J = /* @__PURE__ */ L(Z, {
+	}), t[24] = U) : U = t[24];
+	let G;
+	t[25] === Symbol.for("react.memo_cache_sentinel") ? (G = /* @__PURE__ */ L(Z, {
 		title: "Separator and skeleton",
 		children: /* @__PURE__ */ R("div", {
 			className: "flex max-w-sm flex-col gap-3",
 			children: [
-				/* @__PURE__ */ L(Pe, { className: "h-4 w-3/4" }),
-				/* @__PURE__ */ L(Pe, { className: "h-4 w-1/2" }),
-				/* @__PURE__ */ L(De, {}),
-				/* @__PURE__ */ L(Pe, { className: "aspect-[16/10] w-full rounded-xl" })
+				/* @__PURE__ */ L(Be, { className: "h-4 w-3/4" }),
+				/* @__PURE__ */ L(Be, { className: "h-4 w-1/2" }),
+				/* @__PURE__ */ L(Me, {}),
+				/* @__PURE__ */ L(Be, { className: "aspect-[16/10] w-full rounded-xl" })
 			]
 		})
-	}), t[25] = J) : J = t[25];
-	let Y;
-	t[26] === Symbol.for("react.memo_cache_sentinel") ? (Y = /* @__PURE__ */ L(Se, {
+	}), t[25] = G) : G = t[25];
+	let K;
+	t[26] === Symbol.for("react.memo_cache_sentinel") ? (K = /* @__PURE__ */ L(g, {
+		size: "sm",
+		children: /* @__PURE__ */ L(_, { children: "AL" })
+	}), t[26] = K) : K = t[26];
+	let q;
+	t[27] === Symbol.for("react.memo_cache_sentinel") ? (q = /* @__PURE__ */ R(g, { children: [/* @__PURE__ */ L(v, {
+		src: "/icons/missing.png",
+		alt: ""
+	}), /* @__PURE__ */ L(_, { children: "AL" })] }), t[27] = q) : q = t[27];
+	let J;
+	t[28] === Symbol.for("react.memo_cache_sentinel") ? (J = /* @__PURE__ */ L(Z, {
+		title: "Avatar: a circle with a picture, or the initials of a name, grey or in a colour that stays the same for an id",
+		children: /* @__PURE__ */ R(Q, { children: [
+			K,
+			q,
+			/* @__PURE__ */ L(g, {
+				size: "lg",
+				children: /* @__PURE__ */ L(_, { children: "AL" })
+			}),
+			/* @__PURE__ */ L(g, {
+				name: "Ann Lee",
+				size: 20
+			}),
+			/* @__PURE__ */ L(g, {
+				name: "Ann Lee",
+				size: 32
+			}),
+			/* @__PURE__ */ L(g, {
+				name: "Bo Chen",
+				id: "u1",
+				size: 36
+			}),
+			/* @__PURE__ */ L(g, {
+				name: "Cy Dunn",
+				id: "u2",
+				size: 36
+			}),
+			/* @__PURE__ */ L(g, {
+				name: "Di Eve",
+				id: "u3",
+				size: 36
+			}),
+			/* @__PURE__ */ L(g, {
+				name: "Ed Fox",
+				id: "u4",
+				size: 36
+			})
+		] })
+	}), t[28] = J) : J = t[28];
+	let Y, X, $, nt;
+	t[29] === Symbol.for("react.memo_cache_sentinel") ? (Y = /* @__PURE__ */ L(Ee, { value: 40 }), X = /* @__PURE__ */ L(Ee, {
+		value: 40,
+		meter: !0
+	}), $ = /* @__PURE__ */ L(Ee, {
+		value: 75,
+		meter: !0
+	}), nt = /* @__PURE__ */ L(Ee, {
+		value: 92,
+		meter: !0
+	}), t[29] = Y, t[30] = X, t[31] = $, t[32] = nt) : (Y = t[29], X = t[30], $ = t[31], nt = t[32]);
+	let rt;
+	t[33] === Symbol.for("react.memo_cache_sentinel") ? (rt = /* @__PURE__ */ L(Ve, {
+		values: [
+			10,
+			14,
+			12,
+			30,
+			44,
+			38,
+			52,
+			47,
+			60,
+			41,
+			35,
+			50
+		],
+		className: "text-foreground"
+	}), t[33] = rt) : rt = t[33];
+	let it;
+	t[34] === Symbol.for("react.memo_cache_sentinel") ? (it = /* @__PURE__ */ L(Ve, {
+		values: [
+			5,
+			8,
+			6,
+			20,
+			12,
+			9
+		],
+		className: "text-muted-foreground"
+	}), t[34] = it) : it = t[34];
+	let mt;
+	t[35] === Symbol.for("react.memo_cache_sentinel") ? (mt = /* @__PURE__ */ L(Z, {
+		title: "Progress: a bar filled to a percent; meter, for what's used, turns amber from 70 and red from 85. Sparkline: a small line of how something changed",
+		children: /* @__PURE__ */ R("div", {
+			className: "grid max-w-md gap-3",
+			children: [
+				Y,
+				X,
+				$,
+				nt,
+				rt,
+				it,
+				/* @__PURE__ */ L(Ve, { values: [] })
+			]
+		})
+	}), t[35] = mt) : mt = t[35];
+	let ht;
+	t[36] === Symbol.for("react.memo_cache_sentinel") ? (ht = /* @__PURE__ */ L(Te, {
 		title: "Couldn't reach your devices.",
 		text: "Check your connection.",
 		action: {
 			label: "Try Again",
-			run: it
+			run: pt
 		}
-	}), t[26] = Y) : Y = t[26];
-	let X;
-	t[27] === Symbol.for("react.memo_cache_sentinel") ? (X = /* @__PURE__ */ R(Z, {
+	}), t[36] = ht) : ht = t[36];
+	let gt;
+	t[37] === Symbol.for("react.memo_cache_sentinel") ? (gt = /* @__PURE__ */ R(Z, {
 		title: "Problem: on the thing it's about, with the action that fixes it",
-		children: [Y, /* @__PURE__ */ L(Se, {
+		children: [ht, /* @__PURE__ */ L(Te, {
 			warn: !0,
 			title: "None of your devices runs Agent Devices.",
 			text: "It needs a Mac, or a Linux device with Podman.",
 			action: {
 				label: "Open App Store",
-				run: rt
+				run: ft
 			}
 		})]
-	}), t[27] = X) : X = t[27];
-	let $;
-	t[28] === Symbol.for("react.memo_cache_sentinel") ? ($ = /* @__PURE__ */ L(Z, {
+	}), t[37] = gt) : gt = t[37];
+	let _t;
+	t[38] === Symbol.for("react.memo_cache_sentinel") ? (_t = /* @__PURE__ */ L(Z, {
 		title: "Empty: one grey line",
-		children: /* @__PURE__ */ L(v, { children: /* @__PURE__ */ L(_e, { children: "None yet. Agents make one when they need a browser." }) })
-	}), t[28] = $) : $ = t[28];
-	let qe;
-	t[29] === Symbol.for("react.memo_cache_sentinel") ? (qe = W.map(nt), t[29] = qe) : qe = t[29];
-	let Je;
-	t[30] === Symbol.for("react.memo_cache_sentinel") ? (Je = /* @__PURE__ */ R(Q, { children: [qe, /* @__PURE__ */ L(h, { app: {
+		children: /* @__PURE__ */ L(x, { children: /* @__PURE__ */ L(be, { children: "None yet. Agents make one when they need a browser." }) })
+	}), t[38] = _t) : _t = t[38];
+	let vt;
+	t[39] === Symbol.for("react.memo_cache_sentinel") ? (vt = W.map(dt), t[39] = vt) : vt = t[39];
+	let yt;
+	t[40] === Symbol.for("react.memo_cache_sentinel") ? (yt = /* @__PURE__ */ R(Q, { children: [vt, /* @__PURE__ */ L(h, { app: {
 		name: "x",
 		title: "Xylophone"
-	} })] }), t[30] = Je) : Je = t[30];
-	let Ye;
-	t[31] === Symbol.for("react.memo_cache_sentinel") ? (Ye = /* @__PURE__ */ R(Z, {
+	} })] }), t[40] = yt) : yt = t[40];
+	let bt;
+	t[41] === Symbol.for("react.memo_cache_sentinel") ? (bt = /* @__PURE__ */ R(Z, {
 		title: "App icons, in each app's colour, and icons by name",
-		children: [Je, /* @__PURE__ */ L(Q, { children: [
+		children: [yt, /* @__PURE__ */ L(Q, { children: [
 			"magnifying-glass",
 			"gear",
 			"warning-circle-fill",
 			"check-circle-fill",
 			"browsers"
-		].map(tt) })]
-	}), t[31] = Ye) : Ye = t[31];
-	let at;
-	t[32] === Symbol.for("react.memo_cache_sentinel") ? (at = /* @__PURE__ */ L(Z, {
+		].map(ut) })]
+	}), t[41] = bt) : bt = t[41];
+	let xt;
+	t[42] === Symbol.for("react.memo_cache_sentinel") ? (xt = /* @__PURE__ */ L(Z, {
 		title: "Grid: fills the room, at most 4 across here",
-		children: /* @__PURE__ */ L(ve, {
+		children: /* @__PURE__ */ L(xe, {
 			min: "12rem",
 			max: 4,
-			children: W.slice(0, 6).map(et)
+			children: W.slice(0, 6).map(lt)
 		})
-	}), t[32] = at) : at = t[32];
-	let ot;
-	t[33] === Symbol.for("react.memo_cache_sentinel") ? (ot = /* @__PURE__ */ L(Z, {
+	}), t[42] = xt) : xt = t[42];
+	let St;
+	t[43] === Symbol.for("react.memo_cache_sentinel") ? (St = /* @__PURE__ */ L(Z, {
 		title: "List: rows that stop at a readable width",
-		children: /* @__PURE__ */ L(be, { children: W.slice(0, 4).map($e) })
-	}), t[33] = ot) : ot = t[33];
-	let st;
-	t[34] === Symbol.for("react.memo_cache_sentinel") ? (st = /* @__PURE__ */ L(Z, {
+		children: /* @__PURE__ */ L(we, { children: W.slice(0, 4).map(ct) })
+	}), t[43] = St) : St = t[43];
+	let Ct;
+	t[44] === Symbol.for("react.memo_cache_sentinel") ? (Ct = /* @__PURE__ */ L(Z, {
+		title: "ListRow's wrap: a long line runs on instead of being cut; useDialog opens a dialog afresh each time",
+		children: /* @__PURE__ */ L($e, {})
+	}), t[44] = Ct) : Ct = t[44];
+	let wt;
+	t[45] === Symbol.for("react.memo_cache_sentinel") ? (wt = /* @__PURE__ */ L(Z, {
 		title: "Accounts: AccountList (rows with Sign Out), LoadingButton, Select in a row, ListNote, Hint, Loading, ListSkeleton, LoadFailure; useAccounts keeps them fresh from an app's accounts and sign_out calls",
-		children: /* @__PURE__ */ L(We, {})
-	}), t[34] = st) : st = t[34];
-	let ct;
-	t[35] === Symbol.for("react.memo_cache_sentinel") ? (ct = /* @__PURE__ */ L(Z, {
+		children: /* @__PURE__ */ L(Qe, {})
+	}), t[45] = wt) : wt = t[45];
+	let Tt;
+	t[46] === Symbol.for("react.memo_cache_sentinel") ? (Tt = /* @__PURE__ */ L(Z, {
 		title: "Split: what a list opens shows beside it where there's room, else in a sheet",
-		children: /* @__PURE__ */ L(Ge, {})
-	}), t[35] = ct) : ct = t[35];
-	let lt;
-	t[36] === Symbol.for("react.memo_cache_sentinel") ? (lt = /* @__PURE__ */ R("div", {
+		children: /* @__PURE__ */ L(et, {})
+	}), t[46] = Tt) : Tt = t[46];
+	let Et;
+	t[47] === Symbol.for("react.memo_cache_sentinel") ? (Et = /* @__PURE__ */ R("div", {
 		className: "grid grid-cols-1 items-start gap-4 lg:grid-cols-[minmax(0,1fr)_22rem]",
-		children: [/* @__PURE__ */ L(te, {
-			text: He,
+		children: [/* @__PURE__ */ L(ie, {
+			text: Xe,
 			path: "recall.ts"
-		}), /* @__PURE__ */ L(te, {
-			text: He,
+		}), /* @__PURE__ */ L(ie, {
+			text: Xe,
 			path: "recall.ts"
 		})]
-	}), t[36] = lt) : lt = t[36];
-	let ut;
-	t[37] === Symbol.for("react.memo_cache_sentinel") ? (ut = /* @__PURE__ */ L(v, {
+	}), t[47] = Et) : Et = t[47];
+	let Dt;
+	t[48] === Symbol.for("react.memo_cache_sentinel") ? (Dt = /* @__PURE__ */ L(x, {
 		className: "overflow-hidden py-0",
-		children: /* @__PURE__ */ L(ue, {
-			hunks: Ue,
+		children: /* @__PURE__ */ L(pe, {
+			hunks: Ze,
 			path: "recall.ts"
 		})
-	}), t[37] = ut) : ut = t[37];
-	let dt;
-	t[38] === Symbol.for("react.memo_cache_sentinel") ? (dt = /* @__PURE__ */ R("div", {
+	}), t[48] = Dt) : Dt = t[48];
+	let Ot;
+	t[49] === Symbol.for("react.memo_cache_sentinel") ? (Ot = /* @__PURE__ */ R("div", {
 		className: "grid grid-cols-1 items-start gap-4 lg:grid-cols-[minmax(0,1fr)_22rem]",
-		children: [ut, /* @__PURE__ */ L(v, {
+		children: [Dt, /* @__PURE__ */ L(x, {
 			className: "overflow-hidden py-0",
-			children: /* @__PURE__ */ L(ue, {
-				hunks: Ue,
+			children: /* @__PURE__ */ L(pe, {
+				hunks: Ze,
 				path: "recall.ts"
 			})
 		})]
-	}), t[38] = dt) : dt = t[38];
-	let ft;
-	t[39] === Symbol.for("react.memo_cache_sentinel") ? (ft = /* @__PURE__ */ R(Z, {
+	}), t[49] = Ot) : Ot = t[49];
+	let kt;
+	t[50] === Symbol.for("react.memo_cache_sentinel") ? (kt = /* @__PURE__ */ R(Z, {
 		title: "CodeView: a file, read only, with Find, Wrap and Copy; DiffView: its changes, side by side where there's room. Each sizes itself by its own width",
 		children: [
-			lt,
-			dt,
-			/* @__PURE__ */ R(Q, { children: [/* @__PURE__ */ L(ne, { text: "npm run build" }), /* @__PURE__ */ L(ne, {
+			Et,
+			Ot,
+			/* @__PURE__ */ R(Q, { children: [/* @__PURE__ */ L(ae, { text: "npm run build" }), /* @__PURE__ */ L(ae, {
 				text: "9fceb02",
 				label: ""
 			})] })
 		]
-	}), t[39] = ft) : ft = t[39];
-	let pt;
-	t[40] === Symbol.for("react.memo_cache_sentinel") ? (pt = { gridTemplateColumns: "minmax(0, 1fr) 22rem" }, t[40] = pt) : pt = t[40];
-	let mt;
-	t[41] === Symbol.for("react.memo_cache_sentinel") ? (mt = /* @__PURE__ */ L("div", {
+	}), t[50] = kt) : kt = t[50];
+	let At;
+	t[51] === Symbol.for("react.memo_cache_sentinel") ? (At = { gridTemplateColumns: "minmax(0, 1fr) 22rem" }, t[51] = At) : At = t[51];
+	let jt;
+	t[52] === Symbol.for("react.memo_cache_sentinel") ? (jt = /* @__PURE__ */ L("div", {
 		className: "h-[30rem] overflow-hidden rounded-xl border",
-		children: /* @__PURE__ */ L(Ke, {})
-	}), t[41] = mt) : mt = t[41];
-	let ht;
-	t[42] === Symbol.for("react.memo_cache_sentinel") ? (ht = /* @__PURE__ */ L(Z, {
+		children: /* @__PURE__ */ L(tt, {})
+	}), t[52] = jt) : jt = t[52];
+	let Mt;
+	t[53] === Symbol.for("react.memo_cache_sentinel") ? (Mt = /* @__PURE__ */ L(Z, {
 		title: "Shell: the window every client shows screens in; where its own room is narrow, the sidebar is a sheet behind the bar's button",
 		children: /* @__PURE__ */ R("div", {
 			className: "grid gap-4",
-			style: pt,
-			children: [mt, /* @__PURE__ */ L("div", {
+			style: At,
+			children: [jt, /* @__PURE__ */ L("div", {
 				className: "h-[30rem] overflow-hidden rounded-xl border",
-				children: /* @__PURE__ */ L(Ke, {})
+				children: /* @__PURE__ */ L(tt, {})
 			})]
 		})
-	}), t[42] = ht) : ht = t[42];
-	let gt;
-	return t[43] === Symbol.for("react.memo_cache_sentinel") ? (gt = /* @__PURE__ */ R("main", {
+	}), t[53] = Mt) : Mt = t[53];
+	let Nt;
+	return t[54] === Symbol.for("react.memo_cache_sentinel") ? (Nt = /* @__PURE__ */ R("main", {
 		className: "mx-auto flex flex-col gap-10",
 		children: [
 			n,
 			C,
+			Se,
 			w,
-			T,
-			xe,
+			E,
 			D,
 			O,
-			M,
-			q,
+			ze,
+			U,
+			G,
 			J,
-			X,
-			$,
-			Ye,
-			at,
-			ot,
-			st,
-			ct,
-			ft,
-			ht,
+			mt,
+			gt,
+			_t,
+			bt,
+			xt,
+			St,
+			Ct,
+			wt,
+			Tt,
+			kt,
+			Mt,
 			/* @__PURE__ */ L(Z, {
 				title: "What the window shows over screens when they ask: a menu, an alert, a screen in a sheet",
 				children: /* @__PURE__ */ R(Q, { children: [
-					/* @__PURE__ */ L(_, {
+					/* @__PURE__ */ L(b, {
 						variant: "outline",
-						onClick: Qe,
+						onClick: st,
 						children: "Menu"
 					}),
-					/* @__PURE__ */ L(_, {
+					/* @__PURE__ */ L(b, {
 						variant: "outline",
-						onClick: Ze,
+						onClick: ot,
 						children: "Alert"
 					}),
-					/* @__PURE__ */ L(_, {
+					/* @__PURE__ */ L(b, {
 						variant: "outline",
-						onClick: Xe,
+						onClick: at,
 						children: "Sheet"
 					})
 				] })
 			})
 		]
-	}), t[43] = gt) : gt = t[43], gt;
+	}), t[54] = Nt) : Nt = t[54], Nt;
 }
-function Xe() {
-	let e = I({ title: "Vault" });
+function at() {
+	let e = P({ title: "Vault" });
 	e.body.innerHTML = "<p style=\"padding:1rem\">A screen goes here, in its frame.</p>";
 }
-function Ze() {
-	return P({
+function ot() {
+	return M({
 		title: "Remove Repos?",
 		text: "Its data stays until you erase it.",
 		action: "Remove",
 		danger: !0
 	});
 }
-function Qe(e) {
+function st(e) {
 	let t = e.currentTarget.getBoundingClientRect();
-	F([
+	N([
 		{
 			title: "Small",
 			icon: "square",
@@ -987,22 +1164,22 @@ function Qe(e) {
 		t.height
 	]);
 }
-function $e(e) {
-	return /* @__PURE__ */ L(E, {
+function ct(e) {
+	return /* @__PURE__ */ L(T, {
 		leading: /* @__PURE__ */ L(h, {
 			app: e,
 			size: 28
 		}),
 		title: e.title,
 		sub: "On every device",
-		trailing: e.name === "devices" ? /* @__PURE__ */ L(g, {
+		trailing: e.name === "devices" ? /* @__PURE__ */ L(y, {
 			variant: "destructive",
 			className: "rounded-full",
 			children: "1"
 		}) : void 0
 	}, e.name);
 }
-function et(e) {
+function lt(e) {
 	return /* @__PURE__ */ R("div", {
 		className: "min-w-0",
 		children: [
@@ -1024,15 +1201,15 @@ function et(e) {
 		]
 	}, e.name);
 }
-function tt(e) {
-	return /* @__PURE__ */ L(w, {
+function ut(e) {
+	return /* @__PURE__ */ L(Se, {
 		name: e,
 		className: "size-5"
 	}, e);
 }
-function nt(e) {
+function dt(e) {
 	return /* @__PURE__ */ L(h, { app: e }, e.name);
 }
-function rt() {}
-function it() {}
-i(document.getElementById("root")).render(/* @__PURE__ */ L(Ye, {}));
+function ft() {}
+function pt() {}
+i(document.getElementById("root")).render(/* @__PURE__ */ L(it, {}));

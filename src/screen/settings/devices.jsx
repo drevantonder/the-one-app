@@ -8,7 +8,7 @@
 // which the client builds in (src/screen.rs). React and @one/ui come from the page; `one` is the bridge.
 import { useEffect, useRef, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { Button, Empty, Icon, Input, Label, List, ListRow, Problem, ResponsiveDialog, Skeleton, Spinner, Switch, Tabs, TabsList, TabsTrigger, AppIcon, cn } from "@one/ui"
+import { Button, Empty, Icon, Input, Label, List, ListRow, ListSkeleton, Problem, ResponsiveDialog, Spinner, Switch, Tabs, TabsList, TabsTrigger, AppIcon, cn, useDialog } from "@one/ui"
 
 const api = one.api
 const said = (err) => one.plain(err).title
@@ -222,13 +222,10 @@ function Devices() {
   const [cellOpen, setCellOpen] = useState("")
   // A new device's code, from its QR's link (`/approve#CODE`), asked about once; and what it asked.
   const [scan, setScan] = useState(null)
-  const [dialog, setDialog] = useState(null)
-  const [dialogOpen, setDialogOpen] = useState(false)
   // Each time one opens it starts afresh.
-  const [opening, setOpening] = useState(0)
+  const [dialog, show, setDialogOpen] = useDialog()
   const [busyCode, setBusyCode] = useState("")
   const [, bump] = useState(0)
-  const slow = useLater(100)
   const apps = useRef([])
   const dragging = useRef(false)
 
@@ -268,7 +265,6 @@ function Devices() {
     }
     await load()
   }
-  const show = (what) => (setDialog(what), setOpening((n) => n + 1), setDialogOpen(true))
 
   // The same screen first loaded gets the one asked about from its QR and the app that sent them to keep something.
   useEffect(() => {
@@ -436,7 +432,7 @@ function Devices() {
   let body
   if (!data) {
     body = problem ? <Problem title={problem.title} text={problem.next} action={{ label: "Try Again", run: () => load() }} />
-      : slow ? <List aria-busy="true" aria-label="Loading">{[0, 1, 2].map((n) => <RowShape key={n} />)}</List> : null
+      : <ListSkeleton rows={3} />
   } else {
     const { waiting, device } = data
     const joined = m.justJoined()
@@ -484,39 +480,16 @@ function Devices() {
     <div className="@container flex flex-col gap-6">
       <h1 className="large-title text-3xl font-bold tracking-tight">Devices</h1>
       {body}
-      {data && dialog?.rename && <Rename key={opening} card={dialog.rename} open={dialogOpen} setOpen={setDialogOpen} done={() => (setDialogOpen(false), load())} />}
-      {data && dialog?.remove && <RemoveDevice key={opening} {...dialog.remove} open={dialogOpen} setOpen={setDialogOpen} done={() => (setDialogOpen(false), load())} />}
-      {data && dialog?.signIns && <SignIns key={opening} clients={dialog.signIns} open={dialogOpen} setOpen={setDialogOpen} done={() => (setDialogOpen(false), load())} />}
-      {data && dialog?.add && <AddDevice key={opening} data={data} open={dialogOpen} setOpen={setDialogOpen} />}
-      {data && dialog?.keep && <Keep key={opening} m={m} keepAsked={dialog.keep} open={dialogOpen} setOpen={setDialogOpen} done={() => (setDialogOpen(false), load())} />}
+      {data && dialog.for?.rename && <Rename key={dialog.n} card={dialog.for.rename} open={dialog.open} setOpen={setDialogOpen} done={() => (setDialogOpen(false), load())} />}
+      {data && dialog.for?.remove && <RemoveDevice key={dialog.n} {...dialog.for.remove} open={dialog.open} setOpen={setDialogOpen} done={() => (setDialogOpen(false), load())} />}
+      {data && dialog.for?.signIns && <SignIns key={dialog.n} clients={dialog.for.signIns} open={dialog.open} setOpen={setDialogOpen} done={() => (setDialogOpen(false), load())} />}
+      {data && dialog.for?.add && <AddDevice key={dialog.n} data={data} open={dialog.open} setOpen={setDialogOpen} />}
+      {data && dialog.for?.keep && <Keep key={dialog.n} m={m} keepAsked={dialog.for.keep} open={dialog.open} setOpen={setDialogOpen} done={() => (setDialogOpen(false), load())} />}
     </div>
   )
 }
 
 const latest = { current: { place() {}, moveMenu() {} } }
-
-// Shows its children after `wait` ms: grey shapes only for a slow load, so a fast one shows nothing in between.
-function useLater(wait) {
-  const [late, setLate] = useState(false)
-  useEffect(() => {
-    const timer = setTimeout(() => setLate(true), wait)
-    return () => clearTimeout(timer)
-  }, [wait])
-  return late
-}
-
-// A row's grey shape, while the list is coming.
-function RowShape() {
-  return (
-    <div className="flex items-center gap-3 px-3 py-2.5">
-      <Skeleton className="size-8 rounded-lg" />
-      <div className="flex-1 space-y-1.5">
-        <Skeleton className="h-3.5 w-1/3" />
-        <Skeleton className="h-3 w-1/2" />
-      </div>
-    </div>
-  )
-}
 
 // A heading over a part of the page.
 const Section = ({ title, children, className }) => (

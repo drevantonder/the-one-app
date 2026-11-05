@@ -2,7 +2,7 @@
 // cards fill the room: more columns where there's more of it. Looked at again every 5 seconds while it can be seen.
 import { useEffect, useRef, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { Card, Empty, Grid, Problem, Skeleton } from "@one/ui"
+import { Card, Empty, Grid, Problem, Progress, Skeleton, Sparkline } from "@one/ui"
 
 const GB = 1e9
 const GiB = 2 ** 30
@@ -10,32 +10,6 @@ const GiB = 2 ** 30
 const size = (b, g = GB) => (b >= 10 * g ? `${Math.round(b / g)} GB` : b >= g ? `${(b / g).toFixed(1)} GB` : `${Math.round(b / (g / 1000))} MB`)
 const mem = (b) => size(b, GiB)
 const pct = (s) => (s && s.total ? Math.round((s.used * 100) / s.total) : null)
-
-/// A bar for how much is used: neutral until it needs you, amber from 70%, red from 85%.
-function Bar({ of, className = "" }) {
-  const used = pct(of)
-  if (used == null) return null
-  const color = used >= 85 ? "bg-destructive" : used >= 70 ? "bg-warning" : "bg-foreground"
-  return (
-    <div role="progressbar" aria-valuenow={used} aria-valuemin={0} aria-valuemax={100} className={`h-1.5 overflow-hidden rounded-full bg-muted ${className}`}>
-      <div className={`h-full rounded-full ${color}`} style={{ width: `${used}%` }} />
-    </div>
-  )
-}
-
-/// The last two minutes of a percentage, drawn as a line filling the room it has.
-function Spark({ values, className }) {
-  if (!values.length) return <div className="h-1.5 rounded-full bg-muted" />
-  const n = Math.max(values.length, 24), w = 100, h = 28
-  const pts = values.map((v, i) => [((n - values.length + i) / (n - 1)) * w, h - 1 - (v / 100) * (h - 2)])
-  const d = pts.map((p, i) => `${i ? "L" : "M"}${p[0].toFixed(1)} ${p[1].toFixed(1)}`).join(" ")
-  return (
-    <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" className={`block h-7 w-full ${className}`}>
-      <path d={`${d} L${w} ${h} L${pts[0][0].toFixed(1)} ${h} Z`} fill="currentColor" opacity=".15" />
-      <path d={d} fill="none" stroke="currentColor" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
-    </svg>
-  )
-}
 
 function Stat({ label, value, children }) {
   return (
@@ -64,14 +38,14 @@ function Device({ d, guests }) {
         <div className="grid grid-cols-1 gap-4 @sm:grid-cols-2">
           {d.memory && (
             <Stat label="Memory" value={d.memory.total ? `${mem(d.memory.used)} of ${mem(d.memory.total)}` : mem(d.memory.used)}>
-              <Bar of={d.memory} />
+              {pct(d.memory) != null && <Progress value={pct(d.memory)} meter />}
             </Stat>
           )}
-          {d.cpu.length > 0 && <Stat label="CPU" value={`${cpu}%`}><Spark values={d.cpu} className="text-foreground" /></Stat>}
-          {d.gpu.length > 0 && <Stat label="GPU" value={`${gpu}%`}><Spark values={d.gpu} className="text-muted-foreground" /></Stat>}
+          {d.cpu.length > 0 && <Stat label="CPU" value={`${cpu}%`}><Sparkline values={d.cpu} className="text-foreground" /></Stat>}
+          {d.gpu.length > 0 && <Stat label="GPU" value={`${gpu}%`}><Sparkline values={d.gpu} className="text-muted-foreground" /></Stat>}
           {d.disk && (
             <Stat label="Disk" value={`${size(d.disk.total - d.disk.used)} free`}>
-              <Bar of={d.disk} />
+              {pct(d.disk) != null && <Progress value={pct(d.disk)} meter />}
             </Stat>
           )}
         </div>
@@ -82,7 +56,7 @@ function Device({ d, guests }) {
             <div key={g.name} className="flex items-center gap-3 px-4 py-2.5 text-sm">
               <span className="min-w-0 flex-1 truncate">{g.name}</span>
               <span className="min-w-0 shrink truncate text-muted-foreground">{g.kind === "podman" ? "podman" : "container"}</span>
-              <Bar of={g.memory} className="w-16 min-w-4 shrink-[3]" />
+              {pct(g.memory) != null && <Progress value={pct(g.memory)} meter className="w-16 min-w-4 shrink-[3]" />}
               <span className="whitespace-nowrap text-muted-foreground">{g.memory ? mem(g.memory.used) : ""}</span>
             </div>
           ))}

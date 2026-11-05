@@ -19,19 +19,6 @@ export function GitHubMark({ className }) {
 export const RepoIcon = ({ repo, github = isGithub(repo), className }) =>
   github ? <GitHubMark className={className} /> : <Icon name="book" className={className} />
 
-/// Someone, as their initials.
-export function Avatar({ name, size = 24, className }) {
-  const initials = String(name || "?").split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase()
-  return (
-    <span
-      className={cn("inline-grid shrink-0 place-items-center rounded-full bg-muted font-semibold text-muted-foreground", className)}
-      style={{ width: size, height: size, fontSize: size * 0.4 }}
-    >
-      {initials}
-    </span>
-  )
-}
-
 /// A label as GitHub draws one: a pill in its colour with its name in black or white, whichever reads.
 export function LabelChip({ l, className }) {
   const c = /^[0-9a-f]{6}$/i.test(l.color) ? l.color : "ededed"

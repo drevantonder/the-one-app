@@ -45,6 +45,19 @@ function ResponsiveDialog({ open, onOpenChange, title, action, tall = false, cla
   )
 }
 
+/// What a screen keeps to open a dialog afresh each time: `[dialog, show, setOpen]`. `show(target)` opens it for
+/// `target` (what it's about, or nothing), with a new `dialog.n` each time; the dialog is drawn once `dialog.n > 0`,
+/// `key={dialog.n}` so what was typed in the last one is gone, `open={dialog.open}` and `onOpenChange={setOpen}`. It
+/// stays drawn after it closes, so it animates out, and `dialog.for` is still what it was for.
+function useDialog<T = null>() {
+  const [d, set] = React.useState<{ n: number; open: boolean; for: T | null }>({ n: 0, open: false, for: null })
+  return [
+    d,
+    (target?: T) => set((x) => ({ n: x.n + 1, open: true, for: target ?? null })),
+    (open: boolean) => set((x) => ({ ...x, open })),
+  ] as const
+}
+
 function useWindowWidth() {
   const [width, setWidth] = React.useState(() => window.innerWidth)
   React.useEffect(() => {
@@ -55,4 +68,4 @@ function useWindowWidth() {
   return width
 }
 
-export { ResponsiveDialog }
+export { ResponsiveDialog, useDialog }

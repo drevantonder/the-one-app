@@ -2,10 +2,10 @@
 // there's room.
 import { useEffect, useRef, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { Button, Empty, Icon, Input, List, ListRow, Problem, ResponsiveDialog, Spinner, Tabs, TabsList, TabsTrigger } from "@one/ui"
+import { Avatar, Button, Empty, Icon, Input, List, ListRow, Problem, ResponsiveDialog, Spinner, Tabs, TabsList, TabsTrigger } from "@one/ui"
 import { RepoTabs } from "../lib/frame.jsx"
 import { IssueView } from "../lib/issue-view.jsx"
-import { Avatar, LabelChip, MarkdownField, StateIcon } from "../lib/parts.jsx"
+import { LabelChip, MarkdownField, StateIcon } from "../lib/parts.jsx"
 import { Beside, Frame, Pending, ago, go, plural, said, useCall, useWide } from "../lib/use.jsx"
 
 const P = one.params

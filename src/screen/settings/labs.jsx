@@ -4,7 +4,7 @@
 // A Settings screen written in React (see vault.jsx): built by @one/ui's build into dist/labs.html.
 import { useEffect, useRef, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { AppIcon, Empty, List, Problem, Skeleton, Switch } from "@one/ui"
+import { AppIcon, Empty, List, ListSkeleton, Problem, Switch } from "@one/ui"
 
 // Labs under each app's (or service's) name, in the order they come.
 function groups(labs, kind) {
@@ -19,7 +19,6 @@ function Labs() {
   const [error, setError] = useState("")
   // What a switch was just set to, until the node says it has it.
   const [asked, setAsked] = useState({})
-  const slow = useLater(100)
   const latest = useRef(0)
 
   async function load() {
@@ -73,7 +72,7 @@ function Labs() {
   let body
   if (!labs) {
     body = problem ? <Problem title={problem.title} text={problem.next} action={{ label: "Try Again", run: load }} />
-      : slow ? <List aria-busy="true" aria-label="Loading">{[0, 1, 2].map((n) => <Placeholder key={n} />)}</List> : null
+      : <ListSkeleton rows={3} />
   } else if (!labs.length) {
     body = <Empty>Nothing to try right now.</Empty>
   } else {
@@ -107,28 +106,6 @@ function Lab({ lab, on, busy, set }) {
       </span>
       <Switch checked={on} aria-busy={busy || undefined} onCheckedChange={set} />
     </label>
-  )
-}
-
-// Shows after `wait` ms: grey shapes only for a slow load, so a fast one shows nothing in between.
-function useLater(wait) {
-  const [late, setLate] = useState(false)
-  useEffect(() => {
-    const timer = setTimeout(() => setLate(true), wait)
-    return () => clearTimeout(timer)
-  }, [wait])
-  return late
-}
-
-function Placeholder() {
-  return (
-    <div className="flex items-center gap-3 px-3 py-3">
-      <div className="flex-1 space-y-1.5">
-        <Skeleton className="h-3.5 w-1/3" />
-        <Skeleton className="h-3 w-2/3" />
-      </div>
-      <Skeleton className="h-[1.15rem] w-8 rounded-full" />
-    </div>
   )
 }
 

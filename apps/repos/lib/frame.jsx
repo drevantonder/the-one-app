@@ -1,6 +1,6 @@
 // What a repo's pages share: its name and tabs, the path bar, and the newest commit's card.
-import { Badge, Button, Icon, Tabs, TabsList, TabsTrigger } from "@one/ui"
-import { Avatar, RepoIcon, SmallCopy } from "./parts.jsx"
+import { Avatar, Badge, Button, Icon, Tabs, TabsList, TabsTrigger } from "@one/ui"
+import { RepoIcon, SmallCopy } from "./parts.jsx"
 import { ago, go, isGithub, refOf, short, useCall, useWide } from "./use.jsx"
 
 const SCREENS = { code: "repo", issues: "issues", settings: "repo_settings" }

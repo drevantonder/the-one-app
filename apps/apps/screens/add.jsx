@@ -2,8 +2,8 @@
 // why where they can't use it.
 import { useEffect, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { AppIcon, Empty, List, ListRow, Problem, Switch } from "@one/ui"
-import { Failed, Waiting, said, useList } from "../lib/store.jsx"
+import { AppIcon, Empty, List, ListRow, Problem, Switch, ListSkeleton } from "@one/ui"
+import { Failed, said, useList } from "../lib/store.jsx"
 
 function Add() {
   const list = useList()
@@ -17,7 +17,7 @@ function Add() {
     one.title(a?.title || name)
   }, [a?.title, name])
 
-  if (!list.data) return <div className="p-4">{list.error ? <Failed error={list.error} retry={list.reload} /> : <Waiting rows={3} />}</div>
+  if (!list.data) return <div className="p-4">{list.error ? <Failed error={list.error} retry={list.reload} /> : <ListSkeleton rows={3} />}</div>
   if (!a) return <Empty>This app isn't here. It may have been erased, or the link is old.</Empty>
   const { places, admin } = list.data
   const first = !a.added && !admin ? "Ask an admin to add it first" : null

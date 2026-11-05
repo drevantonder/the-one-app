@@ -1,6 +1,6 @@
 // What both of the board's screens share: reading a topic, and drawing its posts.
 import { useEffect, useLayoutEffect, useRef, useState } from "react"
-import { cn, Problem, Skeleton } from "@one/ui"
+import { Avatar, cn, Problem, Skeleton } from "@one/ui"
 
 const scope = () => (one.scope ? { scope: one.scope } : {})
 
@@ -40,16 +40,6 @@ export function Trouble({ problem, retry }) {
 }
 
 const day = (t) => new Date(t).toDateString()
-const initials = (name) => String(name || "?").split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase()
-
-function Avatar({ name }) {
-  return (
-    <span className="grid size-8 shrink-0 place-items-center rounded-full bg-muted text-xs font-semibold text-muted-foreground">
-      {initials(name)}
-    </span>
-  )
-}
-
 /// A topic's posts, oldest first, with a divider for each day; posts by the same author within 10 minutes stack under
 /// one header. It stays on its newest post while it grows or the view resizes, unless scrolled up: in the window's
 /// scroll, or its own (`own`) where it's one pane beside another.
@@ -93,7 +83,7 @@ export function Feed({ posts, own = false, className }) {
         <p key={p.id} className="-mt-3 break-words pl-11 text-sm">{p.text}</p>
       ) : (
         <div key={p.id} className="flex items-start gap-3">
-          <Avatar name={p.name} />
+          <Avatar name={p.name} size={32} />
           <div className="min-w-0 flex-1">
             <div className="text-sm">
               <span className="font-semibold">{p.credit || p.name}</span>

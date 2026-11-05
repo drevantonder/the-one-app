@@ -6,9 +6,9 @@
 <script type="module">import { c as e } from "react/compiler-runtime";
 import { useCallback as t, useEffect as n, useState as r } from "react";
 import { createRoot as i } from "react-dom/client";
-import { CodeView as a, Empty as o, Problem as s, Skeleton as c } from "@one/ui";
+import { CodeView as a, Empty as o, ListSkeleton as s, Problem as c } from "@one/ui";
 import { jsx as l } from "react/jsx-runtime";
-// ../../../apps/apps/lib/store.jsx
+// ../../../../../.t3/worktrees/the-one-app/t3-46f62ca4/apps/apps/lib/store.jsx
 var u = /* @__PURE__ */ new Set();
 one.on("changed", () => u.forEach((e) => e()));
 function d(e, i) {
@@ -31,43 +31,28 @@ var f = (e) => one.plain(e);
 function p(t) {
 	let n = e(8), { error: r, retry: i } = t, a;
 	n[0] === r ? a = n[1] : (a = f(r), n[0] = r, n[1] = a);
-	let o = a, c;
-	n[2] === i ? c = n[3] : (c = {
+	let o = a, s;
+	n[2] === i ? s = n[3] : (s = {
 		label: "Try Again",
 		run: i
-	}, n[2] = i, n[3] = c);
+	}, n[2] = i, n[3] = s);
 	let u;
-	return n[4] !== o.next || n[5] !== o.title || n[6] !== c ? (u = /* @__PURE__ */ l(s, {
+	return n[4] !== o.next || n[5] !== o.title || n[6] !== s ? (u = /* @__PURE__ */ l(c, {
 		title: o.title,
 		text: o.next,
-		action: c
-	}), n[4] = o.next, n[5] = o.title, n[6] = c, n[7] = u) : u = n[7], u;
+		action: s
+	}), n[4] = o.next, n[5] = o.title, n[6] = s, n[7] = u) : u = n[7], u;
 }
-function m(t) {
-	let i = e(4), { rows: a } = t, o = a === void 0 ? 4 : a, [s, c] = r(!1), u, d;
-	if (i[0] === Symbol.for("react.memo_cache_sentinel") ? (u = () => {
-		let e = setTimeout(() => c(!0), 100);
-		return () => clearTimeout(e);
-	}, d = [], i[0] = u, i[1] = d) : (u = i[0], d = i[1]), n(u, d), !s) return null;
-	let f;
-	return i[2] === o ? f = i[3] : (f = /* @__PURE__ */ l("div", {
-		className: "flex flex-col gap-2",
-		children: Array.from({ length: o }, h)
-	}), i[2] = o, i[3] = f), f;
-}
-function h(e, t) {
-	return /* @__PURE__ */ l(c, { className: "h-14 w-full max-w-2xl" }, t);
-}
-// ../../../apps/apps/screens/file.jsx
-var { app: g, path: _ } = one.params;
-function v() {
+// ../../../../../.t3/worktrees/the-one-app/t3-46f62ca4/apps/apps/screens/file.jsx
+var { app: m, path: h } = one.params;
+function g() {
 	let t = e(9), r;
 	t[0] === Symbol.for("react.memo_cache_sentinel") ? (r = {
-		app: g,
-		path: _
+		app: m,
+		path: h
 	}, t[0] = r) : r = t[0];
-	let i = d("code", r), s;
-	if (t[1] === Symbol.for("react.memo_cache_sentinel") ? (s = [], t[1] = s) : s = t[1], n(y, s), !g || !_) {
+	let i = d("code", r), c;
+	if (t[1] === Symbol.for("react.memo_cache_sentinel") ? (c = [], t[1] = c) : c = t[1], n(_, c), !m || !h) {
 		let e;
 		return t[2] === Symbol.for("react.memo_cache_sentinel") ? (e = /* @__PURE__ */ l(o, { children: "This page isn't here. The link may be old or mistyped." }), t[2] = e) : e = t[2], e;
 	}
@@ -78,20 +63,20 @@ function v() {
 			children: i.error ? /* @__PURE__ */ l(p, {
 				error: i.error,
 				retry: i.reload
-			}) : /* @__PURE__ */ l(m, { rows: 1 })
+			}) : /* @__PURE__ */ l(s, { rows: 1 })
 		}), t[3] = i.error, t[4] = i.reload, t[5] = e) : e = t[5], e;
 	}
-	let c;
-	return t[6] !== i.data.path || t[7] !== i.data.text ? (c = /* @__PURE__ */ l("div", {
+	let u;
+	return t[6] !== i.data.path || t[7] !== i.data.text ? (u = /* @__PURE__ */ l("div", {
 		className: "p-4",
 		children: /* @__PURE__ */ l(a, {
 			text: i.data.text,
 			path: i.data.path
 		})
-	}), t[6] = i.data.path, t[7] = i.data.text, t[8] = c) : c = t[8], c;
+	}), t[6] = i.data.path, t[7] = i.data.text, t[8] = u) : u = t[8], u;
 }
-function y() {
-	one.title((_ || "").split("/").pop() || "Code");
+function _() {
+	one.title((h || "").split("/").pop() || "Code");
 }
-i(document.getElementById("root")).render(/* @__PURE__ */ l(v, {}));
+i(document.getElementById("root")).render(/* @__PURE__ */ l(g, {}));
 </script>

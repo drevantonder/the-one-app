@@ -2,8 +2,8 @@
 // Reopen, its assignees and labels (beside it where there's room, above it where there isn't), and for its repo's
 // owners, Delete. It's the Issue screen, and what Issues shows beside its list where there's room.
 import { useEffect, useState } from "react"
-import { Button, Card, Icon, Input, ResponsiveDialog, Spinner, Problem, cn, useWidth } from "@one/ui"
-import { Avatar, LabelChip, Markdown, MarkdownField, StateIcon } from "./parts.jsx"
+import { Avatar, Button, Card, Icon, Input, ResponsiveDialog, Spinner, Problem, cn, useWidth } from "@one/ui"
+import { LabelChip, Markdown, MarkdownField, StateIcon } from "./parts.jsx"
 import { Pending, ago, go, plural, said, useCall } from "./use.jsx"
 
 const reason = (i) => (i.state_reason === "not_planned" ? "not planned" : "completed")

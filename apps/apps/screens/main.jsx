@@ -2,9 +2,9 @@
 // opened beside the list.
 import { useEffect, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { AppIcon, Button, Empty, Icon, Input, List, ListRow, Problem, Split, Tabs, TabsList, TabsTrigger, useWidth } from "@one/ui"
+import { AppIcon, Button, Empty, Icon, Input, List, ListRow, Problem, Split, Tabs, TabsList, TabsTrigger, useWidth, ListSkeleton } from "@one/ui"
 import { AppPage, onAPage } from "../lib/app-page.jsx"
-import { Failed, Section, Waiting, said, useList } from "../lib/store.jsx"
+import { Failed, Section, said, useList } from "../lib/store.jsx"
 
 // The sections: the apps built into the release, and those made in this install (each install words that its own way,
 // in its settings).
@@ -76,7 +76,7 @@ function Main() {
     rows = found.length
       ? <>{section("Built In", found.filter((a) => a.built_in && !a.deleted))}{section(MADE_HERE, found.filter((a) => !a.built_in && !a.deleted))}{section("Recently Deleted", found.filter((a) => a.deleted))}</>
       : <Empty>{query.trim() ? `Nothing matches “${query.trim().toLowerCase()}”.` : "No results."}</Empty>
-  } else rows = list.error ? <Failed error={list.error} retry={list.reload} /> : <Waiting />
+  } else rows = list.error ? <Failed error={list.error} retry={list.reload} /> : <ListSkeleton rows={4} />
 
   const top = (
     <div className="flex flex-col gap-3">

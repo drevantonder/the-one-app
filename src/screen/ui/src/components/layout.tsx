@@ -33,16 +33,19 @@ function List({ className, ...props }: React.ComponentProps<"div">) {
 }
 
 /// A row of a List: what it starts with (an app's icon, say), its title and one grey line, and what it ends with. With
-/// `onClick` it's a button, with a chevron, and `selected` marks the one open beside it.
-function ListRow({ leading, title, sub, trailing, selected, onClick, className }: {
+/// `onClick` it's a button, with a chevron, and `selected` marks the one open beside it. Its title and line are cut
+/// to one line each; with `wrap` they run on to as many as they need.
+function ListRow({ leading, title, sub, trailing, selected, wrap, onClick, className }: {
   leading?: React.ReactNode
   title: React.ReactNode
   sub?: React.ReactNode
   trailing?: React.ReactNode
   selected?: boolean
+  wrap?: boolean
   onClick?: () => void
   className?: string
 }) {
+  const cut = wrap ? "break-words" : "truncate"
   const Row = onClick ? "button" : "div"
   return (
     <Row
@@ -57,8 +60,8 @@ function ListRow({ leading, title, sub, trailing, selected, onClick, className }
     >
       {leading}
       <span className="min-w-0 flex-1">
-        <span className="block truncate font-medium">{title}</span>
-        {sub && <span className="block truncate text-muted-foreground">{sub}</span>}
+        <span className={cn("block font-medium", cut)}>{title}</span>
+        {sub && <span className={cn("block text-muted-foreground", cut)}>{sub}</span>}
       </span>
       {trailing}
       {onClick && <CaretRightIcon className="size-4 shrink-0 text-muted-foreground" />}

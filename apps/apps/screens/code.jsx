@@ -1,8 +1,8 @@
 // An app's code: the folders and files of its source, folders first; at the top, the module it runs as.
 import { useEffect } from "react"
 import { createRoot } from "react-dom/client"
-import { Empty, Icon, List, ListRow } from "@one/ui"
-import { Failed, Waiting, useCall } from "../lib/store.jsx"
+import { Empty, Icon, List, ListRow, ListSkeleton } from "@one/ui"
+import { Failed, useCall } from "../lib/store.jsx"
 
 const { app, dir = "" } = one.params
 
@@ -26,7 +26,7 @@ function Code() {
     one.title(dir.replace(/\/$/, "").split("/").pop() || "Code")
   }, [])
   if (!app) return <Empty>This page isn't here. The link may be old or mistyped.</Empty>
-  if (!code.data) return <div className="p-4">{code.error ? <Failed error={code.error} retry={code.reload} /> : <Waiting />}</div>
+  if (!code.data) return <div className="p-4">{code.error ? <Failed error={code.error} retry={code.reload} /> : <ListSkeleton rows={4} />}</div>
   return (
     <div className="p-4">
       <List>

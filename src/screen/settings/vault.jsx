@@ -7,7 +7,7 @@
 import { useEffect, useRef, useState } from "react"
 import { createRoot } from "react-dom/client"
 import {
-  AppIcon, Button, Empty, Icon, Input, Label, List, ListRow, Problem, ResponsiveDialog, Skeleton, Split, Switch, Tabs,
+  AppIcon, Button, Empty, Icon, Input, Label, List, ListRow, ListSkeleton, Problem, ResponsiveDialog, Split, Switch, Tabs,
   TabsList, TabsTrigger,
 } from "@one/ui"
 
@@ -113,7 +113,6 @@ function Vault() {
   const [dialogOpen, setDialogOpen] = useState(false)
   const now = useRef(scope)
   now.current = scope
-  const slow = useLater(100)
   const k = know(apps)
 
   async function load(s = now.current) {
@@ -176,7 +175,7 @@ function Vault() {
   let body
   if (!items) {
     body = problem ? <Problem title={problem.title} text={problem.next} action={{ label: "Try Again", run: () => load() }} />
-      : slow ? <List aria-busy="true" aria-label="Loading">{[0, 1, 2, 3].map((n) => <Row key={n} />)}</List> : null
+      : <ListSkeleton rows={4} />
   } else if (found.length) {
     body = (
       <List className={switching ? "opacity-50 transition-opacity" : ""}>
@@ -228,29 +227,6 @@ function Vault() {
       {making?.maker && <MakeItem maker={making.maker} open={dialogOpen} setOpen={setDialogOpen} done={() => (setDialogOpen(false), load())} />}
       {making?.item && <NewItem pages={pages} scope={scope} open={dialogOpen} setOpen={setDialogOpen} done={(page) => (setDialogOpen(false), page !== now.current && setScope((now.current = page)), load(page))} />}
     </>
-  )
-}
-
-// Shows its children after `wait` ms: grey shapes only for a slow load, so a fast one shows nothing in between.
-function useLater(wait) {
-  const [late, setLate] = useState(false)
-  useEffect(() => {
-    const timer = setTimeout(() => setLate(true), wait)
-    return () => clearTimeout(timer)
-  }, [wait])
-  return late
-}
-
-// A row's grey shape, while the list is coming.
-function Row() {
-  return (
-    <div className="flex items-center gap-3 px-3 py-2.5">
-      <Skeleton className="size-9 rounded-lg" />
-      <div className="flex-1 space-y-1.5">
-        <Skeleton className="h-3.5 w-1/3" />
-        <Skeleton className="h-3 w-1/2" />
-      </div>
-    </div>
   )
 }
 

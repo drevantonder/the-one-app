@@ -6,9 +6,9 @@
 <script type="module">import { c as e } from "react/compiler-runtime";
 import { useCallback as t, useEffect as n, useState as r } from "react";
 import { createRoot as i } from "react-dom/client";
-import { Empty as a, Icon as o, List as s, ListRow as c, Problem as l, Skeleton as u } from "@one/ui";
+import { Empty as a, Icon as o, List as s, ListRow as c, ListSkeleton as l, Problem as u } from "@one/ui";
 import { jsx as d } from "react/jsx-runtime";
-// ../../../../../.t3/worktrees/the-one-app/t3-f6f8a4f4/apps/apps/lib/store.jsx
+// ../../../../../.t3/worktrees/the-one-app/t3-46f62ca4/apps/apps/lib/store.jsx
 var f = /* @__PURE__ */ new Set();
 one.on("changed", () => f.forEach((e) => e()));
 function p(e, i) {
@@ -37,30 +37,15 @@ function h(t) {
 		run: i
 	}, n[2] = i, n[3] = s);
 	let c;
-	return n[4] !== o.next || n[5] !== o.title || n[6] !== s ? (c = /* @__PURE__ */ d(l, {
+	return n[4] !== o.next || n[5] !== o.title || n[6] !== s ? (c = /* @__PURE__ */ d(u, {
 		title: o.title,
 		text: o.next,
 		action: s
 	}), n[4] = o.next, n[5] = o.title, n[6] = s, n[7] = c) : c = n[7], c;
 }
-function g(t) {
-	let i = e(4), { rows: a } = t, o = a === void 0 ? 4 : a, [s, c] = r(!1), l, u;
-	if (i[0] === Symbol.for("react.memo_cache_sentinel") ? (l = () => {
-		let e = setTimeout(() => c(!0), 100);
-		return () => clearTimeout(e);
-	}, u = [], i[0] = l, i[1] = u) : (l = i[0], u = i[1]), n(l, u), !s) return null;
-	let f;
-	return i[2] === o ? f = i[3] : (f = /* @__PURE__ */ d("div", {
-		className: "flex flex-col gap-2",
-		children: Array.from({ length: o }, _)
-	}), i[2] = o, i[3] = f), f;
-}
-function _(e, t) {
-	return /* @__PURE__ */ d(u, { className: "h-14 w-full max-w-2xl" }, t);
-}
-// ../../../../../.t3/worktrees/the-one-app/t3-f6f8a4f4/apps/apps/screens/code.jsx
-var { app: v, dir: y = "" } = one.params;
-function b(e, t) {
+// ../../../../../.t3/worktrees/the-one-app/t3-46f62ca4/apps/apps/screens/code.jsx
+var { app: g, dir: _ = "" } = one.params;
+function v(e, t) {
 	let n = /* @__PURE__ */ new Map();
 	for (let r of e.filter((e) => e.path.startsWith("src/" + t))) {
 		let [e, ...i] = r.path.slice(4 + t.length).split("/");
@@ -69,11 +54,11 @@ function b(e, t) {
 	let r = new Intl.Collator(void 0, { numeric: !0 }).compare, i = [...n.keys()].sort((e, t) => t.endsWith("/") - e.endsWith("/") || r(e, t)), a = e.find((e) => e.path === "app.js");
 	return !t && a && (i.push("app.js, as it runs"), n.set("app.js, as it runs", a)), i.map((e) => [e, n.get(e)]);
 }
-function x() {
+function y() {
 	let t = e(10), r;
-	t[0] === Symbol.for("react.memo_cache_sentinel") ? (r = { app: v }, t[0] = r) : r = t[0];
+	t[0] === Symbol.for("react.memo_cache_sentinel") ? (r = { app: g }, t[0] = r) : r = t[0];
 	let i = p("code", r), o;
-	if (t[1] === Symbol.for("react.memo_cache_sentinel") ? (o = [], t[1] = o) : o = t[1], n(C, o), !v) {
+	if (t[1] === Symbol.for("react.memo_cache_sentinel") ? (o = [], t[1] = o) : o = t[1], n(x, o), !g) {
 		let e;
 		return t[2] === Symbol.for("react.memo_cache_sentinel") ? (e = /* @__PURE__ */ d(a, { children: "This page isn't here. The link may be old or mistyped." }), t[2] = e) : e = t[2], e;
 	}
@@ -84,18 +69,18 @@ function x() {
 			children: i.error ? /* @__PURE__ */ d(h, {
 				error: i.error,
 				retry: i.reload
-			}) : /* @__PURE__ */ d(g, {})
+			}) : /* @__PURE__ */ d(l, { rows: 4 })
 		}), t[3] = i.error, t[4] = i.reload, t[5] = e) : e = t[5], e;
 	}
 	let c;
-	t[6] === i.data.files ? c = t[7] : (c = b(i.data.files, y).map(S), t[6] = i.data.files, t[7] = c);
-	let l;
-	return t[8] === c ? l = t[9] : (l = /* @__PURE__ */ d("div", {
+	t[6] === i.data.files ? c = t[7] : (c = v(i.data.files, _).map(b), t[6] = i.data.files, t[7] = c);
+	let u;
+	return t[8] === c ? u = t[9] : (u = /* @__PURE__ */ d("div", {
 		className: "p-4",
 		children: /* @__PURE__ */ d(s, { children: c })
-	}), t[8] = c, t[9] = l), l;
+	}), t[8] = c, t[9] = u), u;
 }
-function S(e) {
+function b(e) {
 	let [t, n] = e;
 	return /* @__PURE__ */ d(c, {
 		leading: /* @__PURE__ */ d(o, {
@@ -108,16 +93,16 @@ function S(e) {
 			children: one.size(n.size)
 		}),
 		onClick: () => n.dir ? one.open("code", {
-			app: v,
+			app: g,
 			dir: n.dir
 		}) : one.open("file", {
-			app: v,
+			app: g,
 			path: n.path
 		})
 	}, t);
 }
-function C() {
-	one.title(y.replace(/\/$/, "").split("/").pop() || "Code");
+function x() {
+	one.title(_.replace(/\/$/, "").split("/").pop() || "Code");
 }
-i(document.getElementById("root")).render(/* @__PURE__ */ d(x, {}));
+i(document.getElementById("root")).render(/* @__PURE__ */ d(y, {}));
 </script>

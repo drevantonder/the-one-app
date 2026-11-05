@@ -4,12 +4,12 @@ import { useState } from "react"
 import { createRoot } from "react-dom/client"
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter,
-  AccountList, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger, AppIcon, Badge, Button, Card, CardContent, CardDescription,
+  AccountList, Avatar, AvatarFallback, AvatarImage, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger, AppIcon, Badge, Button, Card, CardContent, CardDescription,
   CardFooter, CardHeader, CardTitle, CodeView, CopyButton, DiffView, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
   DialogTrigger, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator,
-  DropdownMenuTrigger, Empty, Grid, Hint, Icon, Input, List, ListNote, ListRow, ListSkeleton, Loading, LoadFailure, LoadingButton, Problem, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Separator, Sheet, SheetContent,
+  DropdownMenuTrigger, Empty, Grid, Hint, Icon, Input, List, ListNote, ListRow, ListSkeleton, Loading, LoadFailure, LoadingButton, Problem, Progress, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Separator, Sheet, SheetContent,
   SheetDescription, SheetHeader, SheetTitle, SheetTrigger, Shell, type ShellSection, showAlert, showMenu, showSheet,
-  Skeleton, Split, Switch, Tabs, TabsContent, TabsList, TabsTrigger,
+  Skeleton, Sparkline, Split, Switch, Tabs, TabsContent, TabsList, TabsTrigger, ResponsiveDialog, useDialog,
 } from "@one/ui"
 import "./gallery.css"
 import { DotsThreeIcon, MagnifyingGlassIcon, PlusIcon } from "@phosphor-icons/react"
@@ -119,6 +119,24 @@ function Accounts() {
       <ListSkeleton rows={2} />
       <LoadFailure problem={{ title: "Couldn't load your accounts.", next: "Check your connection." }} retry={() => {}} />
     </div>
+  )
+}
+
+function Wrapped() {
+  const [dialog, show, setOpen] = useDialog<string>()
+  const long = "claude-code · Wants the Anthropic key to run the nightly checks on every repo, and to open pull requests for what it finds, until you take it back."
+  return (
+    <>
+      <List>
+        <ListRow leading={<AppIcon app={apps[0]} size={32} />} title="Agent Devices wants an Anthropic key" sub={long} wrap trailing={<Button variant="secondary" size="sm" onClick={() => show("Anthropic key")}>Choose</Button>} />
+        <ListRow leading={<Avatar name="Ann Lee" id="g1" size={32} />} title="Ann Lee, Bo Chen, Cy Dunn" sub="Cut to one line, as a row's line is without wrap, however long it gets" trailing={<Button variant="secondary" size="sm" onClick={() => show("Join")}>Join</Button>} />
+      </List>
+      {dialog.n > 0 && (
+        <ResponsiveDialog key={dialog.n} open={dialog.open} onOpenChange={setOpen} title={dialog.for ?? ""} action={<Button variant="secondary" size="sm" onClick={() => setOpen(false)}>Cancel</Button>}>
+          <p className="p-4 text-sm text-muted-foreground">Opened for {dialog.for}.</p>
+        </ResponsiveDialog>
+      )}
+    </>
   )
 }
 
@@ -339,6 +357,32 @@ function Gallery() {
         </div>
       </Section>
 
+      <Section title="Avatar: a circle with a picture, or the initials of a name, grey or in a colour that stays the same for an id">
+        <Row>
+          <Avatar size="sm"><AvatarFallback>AL</AvatarFallback></Avatar>
+          <Avatar><AvatarImage src="/icons/missing.png" alt="" /><AvatarFallback>AL</AvatarFallback></Avatar>
+          <Avatar size="lg"><AvatarFallback>AL</AvatarFallback></Avatar>
+          <Avatar name="Ann Lee" size={20} />
+          <Avatar name="Ann Lee" size={32} />
+          <Avatar name="Bo Chen" id="u1" size={36} />
+          <Avatar name="Cy Dunn" id="u2" size={36} />
+          <Avatar name="Di Eve" id="u3" size={36} />
+          <Avatar name="Ed Fox" id="u4" size={36} />
+        </Row>
+      </Section>
+
+      <Section title="Progress: a bar filled to a percent; meter, for what's used, turns amber from 70 and red from 85. Sparkline: a small line of how something changed">
+        <div className="grid max-w-md gap-3">
+          <Progress value={40} />
+          <Progress value={40} meter />
+          <Progress value={75} meter />
+          <Progress value={92} meter />
+          <Sparkline values={[10, 14, 12, 30, 44, 38, 52, 47, 60, 41, 35, 50]} className="text-foreground" />
+          <Sparkline values={[5, 8, 6, 20, 12, 9]} className="text-muted-foreground" />
+          <Sparkline values={[]} />
+        </div>
+      </Section>
+
       <Section title="Problem: on the thing it's about, with the action that fixes it">
         <Problem title="Couldn't reach your devices." text="Check your connection." action={{ label: "Try Again", run: () => {} }} />
         <Problem warn title="None of your devices runs Agent Devices." text="It needs a Mac, or a Linux device with Podman." action={{ label: "Open App Store", run: () => {} }} />
@@ -374,6 +418,10 @@ function Gallery() {
         <List>
           {apps.slice(0, 4).map((a) => <ListRow key={a.name} leading={<AppIcon app={a} size={28} />} title={a.title} sub="On every device" trailing={a.name === "devices" ? <Badge variant="destructive" className="rounded-full">1</Badge> : undefined} />)}
         </List>
+      </Section>
+
+      <Section title="ListRow's wrap: a long line runs on instead of being cut; useDialog opens a dialog afresh each time">
+        <Wrapped />
       </Section>
 
       <Section title="Accounts: AccountList (rows with Sign Out), LoadingButton, Select in a row, ListNote, Hint, Loading, ListSkeleton, LoadFailure; useAccounts keeps them fresh from an app's accounts and sign_out calls">

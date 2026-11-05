@@ -1,8 +1,8 @@
 // The sheet that sets an app's source link: Save, or Remove Link (or an empty field) to clear it.
 import { useEffect, useRef, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { Button, Empty, Input, Problem } from "@one/ui"
-import { Failed, Waiting, said, useList } from "../lib/store.jsx"
+import { Button, Empty, Input, Problem, ListSkeleton } from "@one/ui"
+import { Failed, said, useList } from "../lib/store.jsx"
 
 function Source() {
   const list = useList()
@@ -21,7 +21,7 @@ function Source() {
     }
   }, [a, link])
 
-  if (!list.data) return <div className="p-4">{list.error ? <Failed error={list.error} retry={list.reload} /> : <Waiting rows={1} />}</div>
+  if (!list.data) return <div className="p-4">{list.error ? <Failed error={list.error} retry={list.reload} /> : <ListSkeleton rows={1} />}</div>
   if (!a) return <Empty>This app isn't here. It may have been erased, or the link is old.</Empty>
 
   const save = async (to) => {

@@ -1,8 +1,8 @@
 // A commit: who made it and what it says, the files it changed, and each file's diff, loaded as it comes near the
 // screen. It's the Commit screen, and what History shows beside its list where there's room.
 import { useEffect, useRef, useState } from "react"
-import { Badge, Button, Card, DiffView, Empty, Icon, List, ListRow, Problem, Spinner, Tabs, TabsList, TabsTrigger, useWidth } from "@one/ui"
-import { Avatar, Counts, SmallCopy } from "./parts.jsx"
+import { Avatar, Badge, Button, Card, DiffView, Empty, Icon, List, ListRow, Problem, Spinner, Tabs, TabsList, TabsTrigger, useWidth } from "@one/ui"
+import { Counts, SmallCopy } from "./parts.jsx"
 import { Pending, ago, go, plural, said, short, useCall } from "./use.jsx"
 
 const BADGE = { added: "Added", deleted: "Deleted", renamed: "Renamed" }

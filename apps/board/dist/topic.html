@@ -6,11 +6,11 @@
 <script type="module">import { c as e } from "react/compiler-runtime";
 import { useEffect as t, useLayoutEffect as n, useRef as r, useState as i } from "react";
 import { createRoot as a } from "react-dom/client";
-import { Problem as o, Skeleton as s, cn as c } from "@one/ui";
-import { Fragment as l, jsx as u, jsxs as d } from "react/jsx-runtime";
-// ../../../../../.t3/worktrees/the-one-app/board-react-build/apps/board/lib/board.jsx
-var f = () => one.scope ? { scope: one.scope } : {};
-function p(e) {
+import { Avatar as o, Problem as s, Skeleton as c, cn as l } from "@one/ui";
+import { Fragment as u, jsx as d, jsxs as f } from "react/jsx-runtime";
+// ../../../../../.t3/worktrees/the-one-app/t3-46f62ca4/apps/board/lib/board.jsx
+var p = () => one.scope ? { scope: one.scope } : {};
+function m(e) {
 	let [n, a] = i({}), o = r(e);
 	return o.current = e, t(() => {
 		let e = () => o.current().then((e) => a({ data: e }), (t) => a((n) => n.data ? n : {
@@ -20,62 +20,53 @@ function p(e) {
 		one.on("changed", e), e();
 	}, []), n;
 }
-var m = (e) => one.call("read", {
+var h = (e) => one.call("read", {
 	format: "json",
 	...e ? { topic: e } : {},
-	...f()
+	...p()
 });
-function h(t) {
+function g(t) {
 	let n = e(6), { problem: r, retry: i } = t, a;
 	n[0] === i ? a = n[1] : (a = {
 		label: "Try Again",
 		run: i
 	}, n[0] = i, n[1] = a);
-	let s;
-	return n[2] !== r.next || n[3] !== r.title || n[4] !== a ? (s = /* @__PURE__ */ u(o, {
+	let o;
+	return n[2] !== r.next || n[3] !== r.title || n[4] !== a ? (o = /* @__PURE__ */ d(s, {
 		title: r.title,
 		text: r.next,
 		action: a
-	}), n[2] = r.next, n[3] = r.title, n[4] = a, n[5] = s) : s = n[5], s;
+	}), n[2] = r.next, n[3] = r.title, n[4] = a, n[5] = o) : o = n[5], o;
 }
-var g = (e) => new Date(e).toDateString(), _ = (e) => String(e || "?").split(/\s+/).map((e) => e[0]).join("").slice(0, 2).toUpperCase();
-function v(t) {
-	let n = e(4), { name: r } = t, i;
-	n[0] === r ? i = n[1] : (i = _(r), n[0] = r, n[1] = i);
-	let a;
-	return n[2] === i ? a = n[3] : (a = /* @__PURE__ */ u("span", {
-		className: "grid size-8 shrink-0 place-items-center rounded-full bg-muted text-xs font-semibold text-muted-foreground",
-		children: i
-	}), n[2] = i, n[3] = a), a;
-}
-function y(i) {
-	let a = e(28), { posts: o, own: s, className: l } = i, f = s !== void 0 && s, p = r(null), m = r(!0), h;
-	a[0] === f ? h = a[1] : (h = () => f ? p.current : null, a[0] = f, a[1] = h);
-	let _ = h, y;
-	a[2] === f ? y = a[3] : (y = () => f ? p.current.scrollTo({ top: p.current.scrollHeight }) : window.scrollTo(0, document.body.scrollHeight), a[2] = f, a[3] = y);
+var _ = (e) => new Date(e).toDateString();
+function v(i) {
+	let a = e(28), { posts: s, own: c, className: u } = i, p = c !== void 0 && c, m = r(null), h = r(!0), g;
+	a[0] === p ? g = a[1] : (g = () => p ? m.current : null, a[0] = p, a[1] = g);
+	let v = g, y;
+	a[2] === p ? y = a[3] : (y = () => p ? m.current.scrollTo({ top: m.current.scrollHeight }) : window.scrollTo(0, document.body.scrollHeight), a[2] = p, a[3] = y);
 	let b = y, x;
-	a[4] === f ? x = a[5] : (x = () => f ? p.current.scrollTop + p.current.clientHeight >= p.current.scrollHeight - 40 : innerHeight + scrollY >= document.body.scrollHeight - 40, a[4] = f, a[5] = x);
+	a[4] === p ? x = a[5] : (x = () => p ? m.current.scrollTop + m.current.clientHeight >= m.current.scrollHeight - 40 : innerHeight + scrollY >= document.body.scrollHeight - 40, a[4] = p, a[5] = x);
 	let S = x, C;
-	a[6] !== S || a[7] !== b || a[8] !== f || a[9] !== _ ? (C = () => {
-		let e = _() || window, t = () => m.current = S();
+	a[6] !== S || a[7] !== b || a[8] !== p || a[9] !== v ? (C = () => {
+		let e = v() || window, t = () => h.current = S();
 		e.addEventListener("scroll", t, { passive: !0 });
-		let n = new ResizeObserver(() => m.current && b());
-		return n.observe(f ? p.current.firstElementChild : document.documentElement), () => {
+		let n = new ResizeObserver(() => h.current && b());
+		return n.observe(p ? m.current.firstElementChild : document.documentElement), () => {
 			e.removeEventListener("scroll", t), n.disconnect();
 		};
-	}, a[6] = S, a[7] = b, a[8] = f, a[9] = _, a[10] = C) : C = a[10];
+	}, a[6] = S, a[7] = b, a[8] = p, a[9] = v, a[10] = C) : C = a[10];
 	let w;
-	a[11] === f ? w = a[12] : (w = [f], a[11] = f, a[12] = w), t(C, w);
+	a[11] === p ? w = a[12] : (w = [p], a[11] = p, a[12] = w), t(C, w);
 	let T;
 	a[13] === b ? T = a[14] : (T = () => {
-		m.current && b();
+		h.current && b();
 	}, a[13] = b, a[14] = T);
 	let E;
-	a[15] === o ? E = a[16] : (E = [o], a[15] = o, a[16] = E), n(T, E);
+	a[15] === s ? E = a[16] : (E = [s], a[15] = s, a[16] = E), n(T, E);
 	let D;
-	a[17] === o ? D = a[18] : (D = [], o.forEach((e, t) => {
-		let n = o[t - 1];
-		n && g(n.time) === g(e.time) || D.push(/* @__PURE__ */ u("div", {
+	a[17] === s ? D = a[18] : (D = [], s.forEach((e, t) => {
+		let n = s[t - 1];
+		n && _(n.time) === _(e.time) || D.push(/* @__PURE__ */ d("div", {
 			className: "pt-4 text-center text-xs font-medium text-muted-foreground first:pt-0",
 			children: new Date(e.time).toLocaleDateString(void 0, {
 				weekday: "long",
@@ -83,89 +74,92 @@ function y(i) {
 				month: "long"
 			})
 		}, `day-${e.id}`));
-		let r = n && g(n.time) === g(e.time) && n.user === e.user && n.credit === e.credit && e.time - n.time < 6e5;
-		D.push(r ? /* @__PURE__ */ u("p", {
+		let r = n && _(n.time) === _(e.time) && n.user === e.user && n.credit === e.credit && e.time - n.time < 6e5;
+		D.push(r ? /* @__PURE__ */ d("p", {
 			className: "-mt-3 break-words pl-11 text-sm",
 			children: e.text
-		}, e.id) : /* @__PURE__ */ d("div", {
+		}, e.id) : /* @__PURE__ */ f("div", {
 			className: "flex items-start gap-3",
-			children: [/* @__PURE__ */ u(v, { name: e.name }), /* @__PURE__ */ d("div", {
+			children: [/* @__PURE__ */ d(o, {
+				name: e.name,
+				size: 32
+			}), /* @__PURE__ */ f("div", {
 				className: "min-w-0 flex-1",
-				children: [/* @__PURE__ */ d("div", {
+				children: [/* @__PURE__ */ f("div", {
 					className: "text-sm",
-					children: [/* @__PURE__ */ u("span", {
+					children: [/* @__PURE__ */ d("span", {
 						className: "font-semibold",
 						children: e.credit || e.name
-					}), /* @__PURE__ */ u("span", {
+					}), /* @__PURE__ */ d("span", {
 						className: "ml-2 whitespace-nowrap text-xs text-muted-foreground",
 						children: one.ago(e.time)
 					})]
-				}), /* @__PURE__ */ u("p", {
+				}), /* @__PURE__ */ d("p", {
 					className: "break-words text-sm",
 					children: e.text
 				})]
 			})]
 		}, e.id));
-	}), a[17] = o, a[18] = D);
+	}), a[17] = s, a[18] = D);
 	let O;
-	a[19] !== o.length || a[20] !== D ? (O = o.length ? D : /* @__PURE__ */ u("p", {
+	a[19] !== s.length || a[20] !== D ? (O = s.length ? D : /* @__PURE__ */ d("p", {
 		className: "px-6 py-12 text-center text-sm text-muted-foreground",
 		children: "No posts yet"
-	}), a[19] = o.length, a[20] = D, a[21] = O) : O = a[21];
+	}), a[19] = s.length, a[20] = D, a[21] = O) : O = a[21];
 	let k;
-	a[22] === O ? k = a[23] : (k = /* @__PURE__ */ u("div", {
+	a[22] === O ? k = a[23] : (k = /* @__PURE__ */ d("div", {
 		className: "flex flex-col gap-4",
 		children: O
 	}), a[22] = O, a[23] = k);
 	let A = k, j;
-	return a[24] !== l || a[25] !== A || a[26] !== f ? (j = f ? /* @__PURE__ */ u("div", {
-		ref: p,
-		className: c("overflow-y-auto", l),
+	return a[24] !== u || a[25] !== A || a[26] !== p ? (j = p ? /* @__PURE__ */ d("div", {
+		ref: m,
+		className: l("overflow-y-auto", u),
 		children: A
-	}) : A, a[24] = l, a[25] = A, a[26] = f, a[27] = j) : j = a[27], j;
+	}) : A, a[24] = u, a[25] = A, a[26] = p, a[27] = j) : j = a[27], j;
 }
-function b() {
+function y() {
 	let t = e(1), n;
-	return t[0] === Symbol.for("react.memo_cache_sentinel") ? (n = /* @__PURE__ */ u("div", {
+	return t[0] === Symbol.for("react.memo_cache_sentinel") ? (n = /* @__PURE__ */ d("div", {
 		className: "flex flex-col gap-4",
 		children: [
 			0,
 			1,
 			2
-		].map(x)
+		].map(b)
 	}), t[0] = n) : n = t[0], n;
 }
-function x(e) {
-	return /* @__PURE__ */ d("div", {
+function b(e) {
+	return /* @__PURE__ */ f("div", {
 		className: "flex gap-3",
-		children: [/* @__PURE__ */ u(s, { className: "size-8 rounded-full" }), /* @__PURE__ */ d("div", {
+		children: [/* @__PURE__ */ d(c, { className: "size-8 rounded-full" }), /* @__PURE__ */ f("div", {
 			className: "flex-1 space-y-2",
-			children: [/* @__PURE__ */ u(s, { className: "h-4 w-1/3" }), /* @__PURE__ */ u(s, { className: "h-4 w-full" })]
+			children: [/* @__PURE__ */ d(c, { className: "h-4 w-1/3" }), /* @__PURE__ */ d(c, { className: "h-4 w-full" })]
 		})]
 	}, e);
 }
-// ../../../../../.t3/worktrees/the-one-app/board-react-build/apps/board/screens/topic.jsx
-var S = one.params.path || "";
-function C() {
-	let n = e(5), { data: r, problem: i, retry: a } = p(T), o;
-	n[0] === Symbol.for("react.memo_cache_sentinel") ? (o = [], n[0] = o) : o = n[0], t(w, o);
+// ../../../../../.t3/worktrees/the-one-app/t3-46f62ca4/apps/board/screens/topic.jsx
+var x = one.params.path || "";
+function S() {
+	let n = e(5), { data: r, problem: i, retry: a } = m(w), o;
+	n[0] === Symbol.for("react.memo_cache_sentinel") ? (o = [], n[0] = o) : o = n[0], t(C, o);
 	let s;
-	return n[1] !== r || n[2] !== i || n[3] !== a ? (s = /* @__PURE__ */ u("div", {
+	return n[1] !== r || n[2] !== i || n[3] !== a ? (s = /* @__PURE__ */ d("div", {
 		className: "flex max-w-2xl flex-col gap-4",
-		children: i ? /* @__PURE__ */ u(h, {
+		children: i ? /* @__PURE__ */ d(g, {
 			problem: i,
 			retry: a
-		}) : r ? /* @__PURE__ */ d(l, { children: [r.description && /* @__PURE__ */ u("p", {
+		}) : r ? /* @__PURE__ */ f(u, { children: [r.description && /* @__PURE__ */ d("p", {
 			className: "text-sm text-muted-foreground",
 			children: r.description
-		}), /* @__PURE__ */ u(y, { posts: r.posts })] }) : /* @__PURE__ */ u(b, {})
+		}), /* @__PURE__ */ d(v, { posts: r.posts })] }) : /* @__PURE__ */ d(y, {})
 	}), n[1] = r, n[2] = i, n[3] = a, n[4] = s) : s = n[4], s;
 }
+function C() {
+	one.title(x || "Top of the board");
+}
 function w() {
-	one.title(S || "Top of the board");
+	return h(x);
 }
-function T() {
-	return m(S);
-}
-a(document.getElementById("root")).render(/* @__PURE__ */ u(C, {}));
+a(document.getElementById("root")).render(/* @__PURE__ */ d(S, {}));
 </script>

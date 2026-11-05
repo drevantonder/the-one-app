@@ -1,10 +1,10 @@
 // A repo's commits, newest first, under the day each was made; a commit opens beside the list where there's room.
 import { useEffect, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { Button, Empty, Icon, List } from "@one/ui"
+import { Avatar, Button, Empty, Icon, List } from "@one/ui"
 import { CommitView } from "../lib/commit-view.jsx"
 import { PathBar } from "../lib/frame.jsx"
-import { Avatar, SmallCopy } from "../lib/parts.jsx"
+import { SmallCopy } from "../lib/parts.jsx"
 import { Beside, Frame, Pending, ago, go, short, useCall, useWide } from "../lib/use.jsx"
 
 const P = one.params

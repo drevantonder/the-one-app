@@ -6,9 +6,9 @@
 <script type="module">import { c as e } from "react/compiler-runtime";
 import { useCallback as t, useEffect as n, useState as r } from "react";
 import { createRoot as i } from "react-dom/client";
-import { Empty as a, List as o, ListRow as s, Problem as c, Skeleton as l } from "@one/ui";
+import { Empty as a, List as o, ListRow as s, ListSkeleton as c, Problem as l } from "@one/ui";
 import { Fragment as u, jsx as d, jsxs as f } from "react/jsx-runtime";
-// ../../../../../.t3/worktrees/the-one-app/t3-f6f8a4f4/apps/apps/lib/store.jsx
+// ../../../../../.t3/worktrees/the-one-app/t3-46f62ca4/apps/apps/lib/store.jsx
 var p = /* @__PURE__ */ new Set();
 one.on("changed", () => p.forEach((e) => e()));
 function m(e, i) {
@@ -36,29 +36,14 @@ function g(t) {
 		label: "Try Again",
 		run: i
 	}, n[2] = i, n[3] = s);
-	let l;
-	return n[4] !== o.next || n[5] !== o.title || n[6] !== s ? (l = /* @__PURE__ */ d(c, {
+	let c;
+	return n[4] !== o.next || n[5] !== o.title || n[6] !== s ? (c = /* @__PURE__ */ d(l, {
 		title: o.title,
 		text: o.next,
 		action: s
-	}), n[4] = o.next, n[5] = o.title, n[6] = s, n[7] = l) : l = n[7], l;
+	}), n[4] = o.next, n[5] = o.title, n[6] = s, n[7] = c) : c = n[7], c;
 }
 function _(t) {
-	let i = e(4), { rows: a } = t, o = a === void 0 ? 4 : a, [s, c] = r(!1), l, u;
-	if (i[0] === Symbol.for("react.memo_cache_sentinel") ? (l = () => {
-		let e = setTimeout(() => c(!0), 100);
-		return () => clearTimeout(e);
-	}, u = [], i[0] = l, i[1] = u) : (l = i[0], u = i[1]), n(l, u), !s) return null;
-	let f;
-	return i[2] === o ? f = i[3] : (f = /* @__PURE__ */ d("div", {
-		className: "flex flex-col gap-2",
-		children: Array.from({ length: o }, v)
-	}), i[2] = o, i[3] = f), f;
-}
-function v(e, t) {
-	return /* @__PURE__ */ d(l, { className: "h-14 w-full max-w-2xl" }, t);
-}
-function y(t) {
 	let n = e(5), { title: r, children: i } = t, a;
 	n[0] === r ? a = n[1] : (a = /* @__PURE__ */ d("h2", {
 		className: "text-sm font-medium text-muted-foreground",
@@ -70,8 +55,8 @@ function y(t) {
 		children: [a, i]
 	}), n[2] = i, n[3] = a, n[4] = o) : o = n[4], o;
 }
-// ../../../../../.t3/worktrees/the-one-app/t3-f6f8a4f4/apps/apps/screens/activity.jsx
-var b = {
+// ../../../../../.t3/worktrees/the-one-app/t3-46f62ca4/apps/apps/screens/activity.jsx
+var v = {
 	cli: "CLI",
 	mcp: "Agent",
 	phone: "iPhone",
@@ -81,15 +66,15 @@ var b = {
 	app: "Another app",
 	node: "The device",
 	api: "A program on the device"
-}, x = (e) => "$" + (e < 1 ? e.toFixed(4) : e.toFixed(2)), S = (e) => /* @__PURE__ */ d("span", {
+}, y = (e) => "$" + (e < 1 ? e.toFixed(4) : e.toFixed(2)), b = (e) => /* @__PURE__ */ d("span", {
 	className: "text-muted-foreground",
 	children: e
 });
-function C() {
+function x() {
 	let t = e(28), r = one.params.app, i;
 	t[0] === Symbol.for("react.memo_cache_sentinel") ? (i = { app: r }, t[0] = i) : i = t[0];
-	let s = m("_health", i), c;
-	if (t[1] === Symbol.for("react.memo_cache_sentinel") ? (c = [], t[1] = c) : c = t[1], n(O, c), !r) {
+	let s = m("_health", i), l;
+	if (t[1] === Symbol.for("react.memo_cache_sentinel") ? (l = [], t[1] = l) : l = t[1], n(E, l), !r) {
 		let e;
 		return t[2] === Symbol.for("react.memo_cache_sentinel") ? (e = /* @__PURE__ */ d(a, { children: "This page isn't here. The link may be old or mistyped." }), t[2] = e) : e = t[2], e;
 	}
@@ -100,41 +85,41 @@ function C() {
 			children: s.error ? /* @__PURE__ */ d(g, {
 				error: s.error,
 				retry: s.reload
-			}) : /* @__PURE__ */ d(_, {})
+			}) : /* @__PURE__ */ d(c, { rows: 4 })
 		}), t[3] = s.error, t[4] = s.reload, t[5] = e) : e = t[5], e;
 	}
-	let { insights: l, activity: u } = s.data, p;
-	t[6] === l?.errors ? p = t[7] : (p = l?.errors || [], t[6] = l?.errors, t[7] = p);
-	let h = p, v;
-	t[8] === u ? v = t[9] : (v = u || [], t[8] = u, t[9] = v);
-	let b = v, x;
-	t[10] === l?.usage ? x = t[11] : (x = l?.usage || [], t[10] = l?.usage, t[11] = x);
-	let S = x, C;
-	t[12] === l?.cost ? C = t[13] : (C = l?.cost || [], t[12] = l?.cost, t[13] = C);
-	let k = C;
-	if (!h.length && !b.length && !S.length && !k.length) {
+	let { insights: u, activity: p } = s.data, h;
+	t[6] === u?.errors ? h = t[7] : (h = u?.errors || [], t[6] = u?.errors, t[7] = h);
+	let v = h, y;
+	t[8] === p ? y = t[9] : (y = p || [], t[8] = p, t[9] = y);
+	let b = y, x;
+	t[10] === u?.usage ? x = t[11] : (x = u?.usage || [], t[10] = u?.usage, t[11] = x);
+	let D = x, O;
+	t[12] === u?.cost ? O = t[13] : (O = u?.cost || [], t[12] = u?.cost, t[13] = O);
+	let k = O;
+	if (!v.length && !b.length && !D.length && !k.length) {
 		let e;
 		return t[14] === Symbol.for("react.memo_cache_sentinel") ? (e = /* @__PURE__ */ d(a, { children: "Nothing yet." }), t[14] = e) : e = t[14], e;
 	}
 	let A;
-	t[15] === h ? A = t[16] : (A = h.length > 0 && /* @__PURE__ */ d(y, {
+	t[15] === v ? A = t[16] : (A = v.length > 0 && /* @__PURE__ */ d(_, {
 		title: "Errors",
-		children: /* @__PURE__ */ d(o, { children: h.slice(0, 20).map(D) })
-	}), t[15] = h, t[16] = A);
+		children: /* @__PURE__ */ d(o, { children: v.slice(0, 20).map(T) })
+	}), t[15] = v, t[16] = A);
 	let j;
-	t[17] === b ? j = t[18] : (j = b.length > 0 && /* @__PURE__ */ d(y, {
+	t[17] === b ? j = t[18] : (j = b.length > 0 && /* @__PURE__ */ d(_, {
 		title: "Runs",
-		children: /* @__PURE__ */ d(o, { children: b.slice(0, 12).map(E) })
+		children: /* @__PURE__ */ d(o, { children: b.slice(0, 12).map(w) })
 	}), t[17] = b, t[18] = j);
 	let M;
-	t[19] === S ? M = t[20] : (M = S.length > 0 && /* @__PURE__ */ d(y, {
+	t[19] === D ? M = t[20] : (M = D.length > 0 && /* @__PURE__ */ d(_, {
 		title: "Used By",
-		children: /* @__PURE__ */ d(o, { children: S.slice(0, 20).map(T) })
-	}), t[19] = S, t[20] = M);
+		children: /* @__PURE__ */ d(o, { children: D.slice(0, 20).map(C) })
+	}), t[19] = D, t[20] = M);
 	let N;
-	t[21] === k ? N = t[22] : (N = k.length > 0 && /* @__PURE__ */ d(y, {
+	t[21] === k ? N = t[22] : (N = k.length > 0 && /* @__PURE__ */ d(_, {
 		title: "AI Cost",
-		children: /* @__PURE__ */ d(o, { children: k.map(w) })
+		children: /* @__PURE__ */ d(o, { children: k.map(S) })
 	}), t[21] = k, t[22] = N);
 	let P;
 	return t[23] !== A || t[24] !== j || t[25] !== M || t[26] !== N ? (P = /* @__PURE__ */ f("div", {
@@ -147,20 +132,20 @@ function C() {
 		]
 	}), t[23] = A, t[24] = j, t[25] = M, t[26] = N, t[27] = P) : P = t[27], P;
 }
-function w(e) {
+function S(e) {
 	return /* @__PURE__ */ d(s, {
 		title: e.model,
-		trailing: S(x(e.usd))
+		trailing: b(y(e.usd))
 	}, e.model);
 }
-function T(e, t) {
+function C(e, t) {
 	return /* @__PURE__ */ d(s, {
 		title: e.user,
-		sub: e.agent || b[e.client] || e.client,
-		trailing: S(one.ago(e.last))
+		sub: e.agent || v[e.client] || e.client,
+		trailing: b(one.ago(e.last))
 	}, t);
 }
-function E(e, t) {
+function w(e, t) {
 	return /* @__PURE__ */ d(s, {
 		title: /* @__PURE__ */ f(u, { children: [!e.ok && /* @__PURE__ */ d("span", {
 			className: "text-destructive",
@@ -170,21 +155,21 @@ function E(e, t) {
 			className: "text-destructive",
 			children: e.error || "Failed"
 		}),
-		trailing: S(one.ago(e.time))
+		trailing: b(one.ago(e.time))
 	}, t);
 }
-function D(e, t) {
+function T(e, t) {
 	return /* @__PURE__ */ d(s, {
 		title: /* @__PURE__ */ d("span", {
 			className: "text-destructive",
 			children: e.error || "Failed"
 		}),
 		sub: `${e.op} · ${one.ago(e.last)}${e.user ? " · " + e.user : ""}`,
-		trailing: S(`${e.count}×`)
+		trailing: b(`${e.count}×`)
 	}, t);
 }
-function O() {
+function E() {
 	one.title("Activity");
 }
-i(document.getElementById("root")).render(/* @__PURE__ */ d(C, {}));
+i(document.getElementById("root")).render(/* @__PURE__ */ d(x, {}));
 </script>

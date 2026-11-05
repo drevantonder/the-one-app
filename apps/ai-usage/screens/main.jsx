@@ -2,17 +2,7 @@
 // where there's more of it.
 import { useEffect, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { AppIcon, Card, Empty, Grid, Problem, Skeleton } from "@one/ui"
-
-/// A bar for how much of a window is used: neutral until it needs you, amber from 70%, red from 85%.
-function Bar({ used }) {
-  const color = used >= 85 ? "bg-destructive" : used >= 70 ? "bg-warning" : "bg-foreground"
-  return (
-    <div role="progressbar" aria-valuenow={used} aria-valuemin={0} aria-valuemax={100} className="h-1.5 overflow-hidden rounded-full bg-muted">
-      <div className={`h-full rounded-full ${color}`} style={{ width: `${Math.min(100, used)}%` }} />
-    </div>
-  )
-}
+import { AppIcon, Card, Empty, Grid, Problem, Progress, Skeleton } from "@one/ui"
 
 /// One window: its name, the bar, what's used, and when it resets.
 function Meter({ label, w }) {
@@ -20,7 +10,7 @@ function Meter({ label, w }) {
   return (
     <div className="grid grid-cols-[4.5rem_minmax(2rem,1fr)_2.5rem] items-center gap-x-3 gap-y-1 text-sm @sm:grid-cols-[4.5rem_minmax(2rem,1fr)_2.5rem_8rem]">
       <span className="truncate text-muted-foreground" title={label}>{label}</span>
-      <Bar used={w.used} />
+      <Progress value={w.used} meter />
       <span className="text-right tabular-nums">{w.used}%</span>
       <span className="col-span-3 -mt-0.5 text-xs text-muted-foreground @sm:col-span-1 @sm:mt-0 @sm:text-right @sm:text-sm @sm:whitespace-nowrap">
         {w.countdown ? `resets ${w.countdown}` : ""}

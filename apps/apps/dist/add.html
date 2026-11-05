@@ -6,9 +6,9 @@
 <script type="module">import { c as e } from "react/compiler-runtime";
 import { useCallback as t, useEffect as n, useState as r } from "react";
 import { createRoot as i } from "react-dom/client";
-import { AppIcon as a, Empty as o, List as s, ListRow as c, Problem as l, Skeleton as u, Switch as d } from "@one/ui";
+import { AppIcon as a, Empty as o, List as s, ListRow as c, ListSkeleton as l, Problem as u, Switch as d } from "@one/ui";
 import { jsx as f, jsxs as p } from "react/jsx-runtime";
-// ../../../../../.t3/worktrees/the-one-app/t3-f6f8a4f4/apps/apps/lib/store.jsx
+// ../../../../../.t3/worktrees/the-one-app/t3-46f62ca4/apps/apps/lib/store.jsx
 var m = /* @__PURE__ */ new Set();
 one.on("changed", () => m.forEach((e) => e()));
 function h(e, i) {
@@ -40,32 +40,17 @@ function v(t) {
 		run: i
 	}, n[2] = i, n[3] = s);
 	let c;
-	return n[4] !== o.next || n[5] !== o.title || n[6] !== s ? (c = /* @__PURE__ */ f(l, {
+	return n[4] !== o.next || n[5] !== o.title || n[6] !== s ? (c = /* @__PURE__ */ f(u, {
 		title: o.title,
 		text: o.next,
 		action: s
 	}), n[4] = o.next, n[5] = o.title, n[6] = s, n[7] = c) : c = n[7], c;
 }
-function y(t) {
-	let i = e(4), { rows: a } = t, o = a === void 0 ? 4 : a, [s, c] = r(!1), l, u;
-	if (i[0] === Symbol.for("react.memo_cache_sentinel") ? (l = () => {
-		let e = setTimeout(() => c(!0), 100);
-		return () => clearTimeout(e);
-	}, u = [], i[0] = l, i[1] = u) : (l = i[0], u = i[1]), n(l, u), !s) return null;
-	let d;
-	return i[2] === o ? d = i[3] : (d = /* @__PURE__ */ f("div", {
-		className: "flex flex-col gap-2",
-		children: Array.from({ length: o }, b)
-	}), i[2] = o, i[3] = d), d;
-}
-function b(e, t) {
-	return /* @__PURE__ */ f(u, { className: "h-14 w-full max-w-2xl" }, t);
-}
-// ../../../../../.t3/worktrees/the-one-app/t3-f6f8a4f4/apps/apps/screens/add.jsx
-function x() {
-	let t = e(35), i = g(), u;
-	t[0] === Symbol.for("react.memo_cache_sentinel") ? (u = {}, t[0] = u) : u = t[0];
-	let [m, h] = r(u), [b, x] = r(""), S = one.params.app, C;
+// ../../../../../.t3/worktrees/the-one-app/t3-46f62ca4/apps/apps/screens/add.jsx
+function y() {
+	let t = e(35), i = g(), m;
+	t[0] === Symbol.for("react.memo_cache_sentinel") ? (m = {}, t[0] = m) : m = t[0];
+	let [h, y] = r(m), [b, x] = r(""), S = one.params.app, C;
 	t[1] !== i.data?.apps || t[2] !== i.data?.apps.find ? (C = i.data?.apps.find((e) => e.name === S), t[1] = i.data?.apps, t[2] = i.data?.apps.find, t[3] = C) : C = t[3];
 	let w = C, T;
 	t[4] === w?.title ? T = t[5] : (T = () => {
@@ -79,7 +64,7 @@ function x() {
 			children: i.error ? /* @__PURE__ */ f(v, {
 				error: i.error,
 				retry: i.reload
-			}) : /* @__PURE__ */ f(y, { rows: 3 })
+			}) : /* @__PURE__ */ f(l, { rows: 3 })
 		}), t[8] = i.error, t[9] = i.reload, t[10] = e) : e = t[10], e;
 	}
 	if (!w) {
@@ -88,7 +73,7 @@ function x() {
 	}
 	let { places: O, admin: k } = i.data, A = !w.added && !k ? "Ask an admin to add it first" : null, j;
 	t[12] === i ? j = t[13] : (j = async (e, t) => {
-		one.tap(), x(""), h((n) => ({
+		one.tap(), x(""), y((n) => ({
 			...n,
 			[e.id]: t
 		}));
@@ -101,7 +86,7 @@ function x() {
 		} catch (e) {
 			x(_(e).title);
 		}
-		i.reload(), h((t) => ({
+		i.reload(), y((t) => ({
 			...t,
 			[e.id]: void 0
 		}));
@@ -112,27 +97,27 @@ function x() {
 		size: 64
 	}), t[14] = w, t[15] = N);
 	let P;
-	if (t[16] !== w.installed || t[17] !== A || t[18] !== M || t[19] !== O || t[20] !== m) {
+	if (t[16] !== w.installed || t[17] !== A || t[18] !== M || t[19] !== O || t[20] !== h) {
 		let e;
-		t[22] !== w.installed || t[23] !== A || t[24] !== M || t[25] !== m ? (e = (e) => {
+		t[22] !== w.installed || t[23] !== A || t[24] !== M || t[25] !== h ? (e = (e) => {
 			let t = A || e.why;
 			return /* @__PURE__ */ f(c, {
 				title: e.name,
 				sub: t,
 				className: t ? "opacity-60" : void 0,
 				trailing: /* @__PURE__ */ f(d, {
-					checked: m[e.id] ?? w.installed.includes(e.id),
+					checked: h[e.id] ?? w.installed.includes(e.id),
 					disabled: !!t,
 					"aria-label": e.name,
 					onCheckedChange: (t) => M(e, t)
 				})
 			}, e.id);
-		}, t[22] = w.installed, t[23] = A, t[24] = M, t[25] = m, t[26] = e) : e = t[26], P = O.map(e), t[16] = w.installed, t[17] = A, t[18] = M, t[19] = O, t[20] = m, t[21] = P;
+		}, t[22] = w.installed, t[23] = A, t[24] = M, t[25] = h, t[26] = e) : e = t[26], P = O.map(e), t[16] = w.installed, t[17] = A, t[18] = M, t[19] = O, t[20] = h, t[21] = P;
 	} else P = t[21];
 	let F;
 	t[27] === P ? F = t[28] : (F = /* @__PURE__ */ f(s, { children: P }), t[27] = P, t[28] = F);
 	let I;
-	t[29] === b ? I = t[30] : (I = b && /* @__PURE__ */ f(l, { title: b }), t[29] = b, t[30] = I);
+	t[29] === b ? I = t[30] : (I = b && /* @__PURE__ */ f(u, { title: b }), t[29] = b, t[30] = I);
 	let L;
 	return t[31] !== N || t[32] !== F || t[33] !== I ? (L = /* @__PURE__ */ p("div", {
 		className: "flex flex-col items-center gap-4 p-4",
@@ -143,5 +128,5 @@ function x() {
 		]
 	}), t[31] = N, t[32] = F, t[33] = I, t[34] = L) : L = t[34], L;
 }
-i(document.getElementById("root")).render(/* @__PURE__ */ f(x, {}));
+i(document.getElementById("root")).render(/* @__PURE__ */ f(y, {}));
 </script>

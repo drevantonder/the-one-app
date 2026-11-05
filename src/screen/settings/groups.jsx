@@ -7,51 +7,17 @@
 import { useEffect, useState } from "react"
 import { createRoot } from "react-dom/client"
 import {
-  AppIcon, Button, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem,
-  DropdownMenuSeparator, DropdownMenuTrigger, Empty, Icon, Input, List, ListRow, Problem, ResponsiveDialog, Skeleton,
-  Split, Tabs, TabsList, TabsTrigger,
+  Avatar, AppIcon, Button, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem,
+  DropdownMenuSeparator, DropdownMenuTrigger, Empty, Icon, Input, List, ListRow, ListSkeleton, Problem, ResponsiveDialog,
+  Split, Tabs, TabsList, TabsTrigger, useDialog,
 } from "@one/ui"
 
 const api = one.api
 const said = (err) => one.plain(err).title
 const roleName = (r) => (r === "admin" ? "Admin" : "Member")
-const COLORS = ["#5e5ce6", "#ff9f0a", "#30b0c7", "#ff375f", "#34c759", "#af52de", "#0a84ff", "#a2845e"]
 const quiet = { autoCapitalize: "none", autoCorrect: "off", spellCheck: false }
 // Groups' own icon, as Settings draws it.
 const GROUPS = { name: "groups", icon: "users-three", color: "#34c759" }
-
-// A steady colour and initials for someone, from their id and name.
-function Avatar({ id, name, size = 36 }) {
-  let h = 0
-  for (const c of String(id)) h = (h * 31 + c.charCodeAt(0)) >>> 0
-  const initials = String(name || "?").split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase()
-  return (
-    <span
-      aria-hidden="true"
-      className="inline-grid shrink-0 place-items-center rounded-full font-semibold text-white"
-      style={{ width: size, height: size, fontSize: size * 0.4, background: COLORS[h % COLORS.length] }}
-    >
-      {initials}
-    </span>
-  )
-}
-
-// Shows after `wait` ms: grey shapes only for a slow load, so a fast one shows nothing in between.
-function useLater(wait) {
-  const [late, setLate] = useState(false)
-  useEffect(() => {
-    const timer = setTimeout(() => setLate(true), wait)
-    return () => clearTimeout(timer)
-  }, [wait])
-  return late
-}
-
-// A dialog that opens afresh each time: its count (a new one each time, so what was typed is gone), what it was opened
-// for, and whether it's open (set false by its own closing, kept mounted until it has gone).
-function useDialog() {
-  const [d, set] = useState({ n: 0, open: false, for: null })
-  return [d, (target = null) => set((x) => ({ n: x.n + 1, open: true, for: target })), (open) => set((x) => ({ ...x, open }))]
-}
 
 // "Ann, Bo and Cy".
 const names = (state, list) => new Intl.ListFormat(undefined, { type: "conjunction" }).format(list.map((m) => userName(state, m.user)))
@@ -71,7 +37,6 @@ function Groups() {
   const [create, startCreate, setCreateOpen] = useDialog()
   const [invite, startInvite, setInviteOpen] = useDialog()
   const [handle, startHandle, setHandleOpen] = useDialog()
-  const slow = useLater(100)
 
   async function load() {
     try {
@@ -143,9 +108,9 @@ function Groups() {
   let body
   if (!state) {
     body = problem ? <Problem title={problem.title} text={problem.next} action={{ label: "Try Again", run: load }} />
-      : slow ? <List aria-busy="true" aria-label="Loading">{[0, 1, 2].map((n) => <Placeholder key={n} />)}</List> : null
+      : <ListSkeleton rows={3} />
   } else if (empty) {
-    body = <Empty action={{ label: "New Group", run: startCreate }}>A group shares its apps and data, on a page of its own.</Empty>
+    body = <Empty action={{ label: "New Group", run: () => startCreate() }}>A group shares its apps and data, on a page of its own.</Empty>
   } else {
     body = (
       <>
@@ -231,19 +196,6 @@ const Section = ({ title, children }) => (
   </section>
 )
 
-// A row's grey shape, while the list is coming.
-function Placeholder() {
-  return (
-    <div className="flex items-center gap-3 px-3 py-2.5">
-      <Skeleton className="size-9 rounded-lg" />
-      <div className="flex-1 space-y-1.5">
-        <Skeleton className="h-3.5 w-1/3" />
-        <Skeleton className="h-3 w-1/2" />
-      </div>
-    </div>
-  )
-}
-
 // One group: its handle, its members, its invites, and inviting or leaving.
 function Group({ g, state, me, pending, sent, error, change, invite, handle }) {
   const admin = g.role === "admin"
@@ -274,7 +226,7 @@ function Group({ g, state, me, pending, sent, error, change, invite, handle }) {
             const trailing = admin && !(role === "admin" && admins.length === 1)
               ? <Role name={name} role={role} remove={m.user === me ? `Leave ${g.name}` : `Remove from ${g.name}`} change={(r) => r !== role && change(m.user, r)} />
               : <span className="text-sm text-muted-foreground">{roleName(role)}</span>
-            return <ListRow key={m.user} leading={<Avatar id={m.user} name={name} />} title={`${name}${m.user === me ? " (you)" : ""}`} trailing={trailing} />
+            return <ListRow key={m.user} leading={<Avatar id={m.user} name={name} size={36} />} title={`${name}${m.user === me ? " (you)" : ""}`} trailing={trailing} />
           })}
         </List>
         {error ? <Problem title={error} /> : note && <p className="text-sm text-muted-foreground">{note}</p>}
@@ -283,7 +235,7 @@ function Group({ g, state, me, pending, sent, error, change, invite, handle }) {
       {!!waiting.length && (
         <Section title="Invited">
           <List>
-            {waiting.map((m) => <ListRow key={m.user} leading={<Avatar id={m.user} name={userName(state, m.user)} />} title={userName(state, m.user)} trailing={<span className="text-sm text-muted-foreground">Waiting</span>} />)}
+            {waiting.map((m) => <ListRow key={m.user} leading={<Avatar id={m.user} name={userName(state, m.user)} size={36} />} title={userName(state, m.user)} trailing={<span className="text-sm text-muted-foreground">Waiting</span>} />)}
           </List>
         </Section>
       )}
@@ -386,7 +338,7 @@ function Invite({ g, state, sent, open, setOpen, send }) {
             {matches.map((u) => (
               <ListRow
                 key={u.id}
-                leading={<Avatar id={u.id} name={u.name} />}
+                leading={<Avatar id={u.id} name={u.name} size={36} />}
                 title={u.name}
                 sub={u.role === "admin" ? `Admin of ${one.config.yours}` : undefined}
                 trailing={<Icon name="plus-circle" className="size-5 text-muted-foreground" />}

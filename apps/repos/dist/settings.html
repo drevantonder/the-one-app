@@ -6,9 +6,9 @@
 <script type="module">import { c as e } from "react/compiler-runtime";
 import { createContext as t, useCallback as n, useEffect as r, useRef as i, useState as a } from "react";
 import { createRoot as o } from "react-dom/client";
-import { Button as s, Card as c, CardContent as l, Empty as u, Icon as d, List as f, ListRow as p, Problem as m, Skeleton as h, Spinner as g, useWidth as _ } from "@one/ui";
+import { Button as s, Card as c, CardContent as l, Empty as u, Icon as d, List as f, ListRow as p, ListSkeleton as m, Problem as h, Spinner as g, useWidth as _ } from "@one/ui";
 import { Fragment as v, jsx as y, jsxs as b } from "react/jsx-runtime";
-// ../../../../../.t3/worktrees/the-one-app/t3-a9079e12/apps/repos/lib/use.jsx
+// ../../../../../.t3/worktrees/the-one-app/t3-46f62ca4/apps/repos/lib/use.jsx
 var x = /* @__PURE__ */ new Set();
 one.on("changed", () => x.forEach((e) => e()));
 function S(e, t, i = !1) {
@@ -40,35 +40,20 @@ function w(t) {
 		run: i
 	}, n[2] = i, n[3] = s);
 	let c;
-	return n[4] !== o.next || n[5] !== o.title || n[6] !== s ? (c = /* @__PURE__ */ y(m, {
+	return n[4] !== o.next || n[5] !== o.title || n[6] !== s ? (c = /* @__PURE__ */ y(h, {
 		title: o.title,
 		text: o.next,
 		action: s
 	}), n[4] = o.next, n[5] = o.title, n[6] = s, n[7] = c) : c = n[7], c;
 }
-function T(t) {
-	let n = e(4), { rows: i } = t, o = i === void 0 ? 4 : i, [s, c] = a(!1), l, u;
-	if (n[0] === Symbol.for("react.memo_cache_sentinel") ? (l = () => {
-		let e = setTimeout(() => c(!0), 100);
-		return () => clearTimeout(e);
-	}, u = [], n[0] = l, n[1] = u) : (l = n[0], u = n[1]), r(l, u), !s) return null;
-	let d;
-	return n[2] === o ? d = n[3] : (d = /* @__PURE__ */ y("div", {
-		className: "flex flex-col gap-2",
-		children: Array.from({ length: o }, E)
-	}), n[2] = o, n[3] = d), d;
-}
-function E(e, t) {
-	return /* @__PURE__ */ y(h, { className: "h-14 w-full max-w-2xl" }, t);
-}
-var D = (t) => {
-	let n = e(4), { call: r, rows: i } = t, a;
-	return n[0] !== r.error || n[1] !== r.reload || n[2] !== i ? (a = r.error ? /* @__PURE__ */ y(w, {
+var T = (t) => {
+	let n = e(4), { call: r, rows: i } = t, a = i === void 0 ? 4 : i, o;
+	return n[0] !== r.error || n[1] !== r.reload || n[2] !== a ? (o = r.error ? /* @__PURE__ */ y(w, {
 		error: r.error,
 		retry: r.reload
-	}) : /* @__PURE__ */ y(T, { rows: i }), n[0] = r.error, n[1] = r.reload, n[2] = i, n[3] = a) : a = n[3], a;
+	}) : /* @__PURE__ */ y(m, { rows: a }), n[0] = r.error, n[1] = r.reload, n[2] = a, n[3] = o) : o = n[3], o;
 };
-function O(t) {
+function E(t) {
 	let n = e(5), { title: r, children: i } = t, a;
 	n[0] === r ? a = n[1] : (a = /* @__PURE__ */ y("h2", {
 		className: "text-sm font-medium text-muted-foreground",
@@ -80,10 +65,10 @@ function O(t) {
 		children: [a, i]
 	}), n[2] = i, n[3] = a, n[4] = o) : o = n[4], o;
 }
-var k = t(0);
-function A(t) {
+var D = t(0);
+function O(t) {
 	let n = e(6), { children: r } = t, [i, a] = _(), o;
-	n[0] !== r || n[1] !== a ? (o = /* @__PURE__ */ y(k.Provider, {
+	n[0] !== r || n[1] !== a ? (o = /* @__PURE__ */ y(D.Provider, {
 		value: a,
 		children: r
 	}), n[0] = r, n[1] = a, n[2] = o) : o = n[2];
@@ -96,11 +81,11 @@ function A(t) {
 		})
 	}), n[3] = i, n[4] = o, n[5] = s) : s = n[5], s;
 }
-var j = "<address>/repos/", M = "<you>";
-one.call("_address").then((e) => (j = e?.base || j, M = e?.handle || M), () => {}), `${one.config?.cli || "one"}`;
-// ../../../../../.t3/worktrees/the-one-app/t3-a9079e12/apps/repos/screens/settings.jsx
-var N = one.params;
-function P(t) {
+var k = "<address>/repos/", A = "<you>";
+one.call("_address").then((e) => (k = e?.base || k, A = e?.handle || A), () => {}), `${one.config?.cli || "one"}`;
+// ../../../../../.t3/worktrees/the-one-app/t3-46f62ca4/apps/repos/screens/settings.jsx
+var j = one.params;
+function M(t) {
 	let n = e(11), { offer: r } = t, i;
 	n[0] === r.sub ? i = n[1] : (i = /* @__PURE__ */ b("p", {
 		className: "text-sm text-muted-foreground",
@@ -136,17 +121,17 @@ function P(t) {
 		})
 	}), n[5] = i, n[6] = a, n[7] = u) : u = n[7];
 	let d;
-	return n[8] !== r.title || n[9] !== u ? (d = /* @__PURE__ */ y(O, {
+	return n[8] !== r.title || n[9] !== u ? (d = /* @__PURE__ */ y(E, {
 		title: r.title,
 		children: u
 	}), n[8] = r.title, n[9] = u, n[10] = d) : d = n[10], d;
 }
-function F() {
-	let e = S("github", {}), t = S("accounts", {}), [n, o] = a(""), [c, l] = a(null), [h, _] = a(!1), [x, w] = a(""), T = e.data, E = () => (e.reload(), t.reload()), k = (e) => o(C(e).title), j = i(!1);
+function N() {
+	let e = S("github", {}), t = S("accounts", {}), [n, o] = a(""), [c, l] = a(null), [m, _] = a(!1), [x, w] = a(""), D = e.data, k = () => (e.reload(), t.reload()), A = (e) => o(C(e).title), N = i(!1);
 	r(() => {
 		one.title("Settings");
 	}, []);
-	let M = async () => {
+	let P = async () => {
 		try {
 			l({
 				url: (await one.call("create_github_app")).url,
@@ -154,7 +139,7 @@ function F() {
 				sub: "and create the install's App"
 			});
 		} catch (e) {
-			k(e);
+			A(e);
 		}
 	}, F = async (e) => {
 		try {
@@ -164,18 +149,18 @@ function F() {
 				sub: "and let it in"
 			});
 		} catch (e) {
-			k(e);
+			A(e);
 		}
 	}, I = async (e) => {
-		let t = T.groups.length === 1 ? 0 : await one.menu(T.groups.map((e) => ({ title: e.name })), e);
+		let t = D.groups.length === 1 ? 0 : await one.menu(D.groups.map((e) => ({ title: e.name })), e);
 		if (t !== null) try {
 			l({
-				url: (await one.call("connect_org", { group: T.groups[t].handle })).url,
-				title: `Connect an Organization for ${T.groups[t].name}`,
+				url: (await one.call("connect_org", { group: D.groups[t].handle })).url,
+				title: `Connect an Organization for ${D.groups[t].name}`,
 				sub: "and install the App on the organization"
 			});
 		} catch (e) {
-			k(e);
+			A(e);
 		}
 	}, L = async (e) => {
 		_(!0);
@@ -190,19 +175,19 @@ function F() {
 			}
 			o("");
 		} catch (e) {
-			k(e);
+			A(e);
 		}
-		_(!1), E();
+		_(!1), k();
 	};
 	r(() => {
-		j.current || (j.current = !0, N.back ? L(N.back) : N.add && F());
+		N.current || (N.current = !0, j.back ? L(j.back) : j.add && F());
 	}, []);
 	let R = async (e) => {
 		w(e);
 		try {
-			await one.call("sign_out", { account: e }), E();
+			await one.call("sign_out", { account: e }), k();
 		} catch (e) {
-			k(e);
+			A(e);
 		}
 		w("");
 	}, z = async (e) => {
@@ -215,27 +200,27 @@ function F() {
 			await one.call("disconnect_org", {
 				org: e,
 				confirm: !0
-			}), E();
+			}), k();
 		} catch (e) {
-			k(e);
+			A(e);
 		}
 	};
-	if (!T || !t.data) return /* @__PURE__ */ y(A, { children: /* @__PURE__ */ y(D, {
-		call: T ? t : e,
+	if (!D || !t.data) return /* @__PURE__ */ y(O, { children: /* @__PURE__ */ y(T, {
+		call: D ? t : e,
 		rows: 3
 	}) });
 	let B;
-	if (!T.app) B = T.admin ? /* @__PURE__ */ y(u, {
+	if (!D.app) B = D.admin ? /* @__PURE__ */ y(u, {
 		action: {
 			label: "Create GitHub App",
-			run: M
+			run: P
 		},
 		children: "Connect GitHub, and everyone's GitHub repos show here beside your own."
 	}) : /* @__PURE__ */ y(u, { children: "GitHub isn't connected yet. Your admin connects it once, for everyone." });
 	else {
 		let e = t.data.filter((e) => !e.ok);
 		B = /* @__PURE__ */ b(v, { children: [
-			e.map((e) => /* @__PURE__ */ y(m, {
+			e.map((e) => /* @__PURE__ */ y(h, {
 				warn: !0,
 				title: `${e.account} needs signing in`,
 				text: C(e.why).title,
@@ -244,7 +229,7 @@ function F() {
 					run: () => F(e.account)
 				}
 			}, e.account)),
-			/* @__PURE__ */ b(O, {
+			/* @__PURE__ */ b(E, {
 				title: "GitHub Accounts",
 				children: [/* @__PURE__ */ b(f, { children: [t.data.map((e, t) => /* @__PURE__ */ y(p, {
 					title: e.account,
@@ -265,9 +250,9 @@ function F() {
 					children: "The repos your GitHub accounts see show in Repos."
 				})]
 			}),
-			(T.orgs.length > 0 || T.groups.length > 0) && /* @__PURE__ */ b(O, {
+			(D.orgs.length > 0 || D.groups.length > 0) && /* @__PURE__ */ b(E, {
 				title: "Organizations",
-				children: [/* @__PURE__ */ b(f, { children: [T.orgs.map((e) => /* @__PURE__ */ y(p, {
+				children: [/* @__PURE__ */ b(f, { children: [D.orgs.map((e) => /* @__PURE__ */ y(p, {
 					title: e.org,
 					sub: `For ${e.group || "a group"}`,
 					trailing: e.yours ? /* @__PURE__ */ y(s, {
@@ -276,7 +261,7 @@ function F() {
 						onClick: () => z(e.org),
 						children: "Disconnect"
 					}) : void 0
-				}, e.org)), T.groups.length > 0 && /* @__PURE__ */ y(p, {
+				}, e.org)), D.groups.length > 0 && /* @__PURE__ */ y(p, {
 					leading: /* @__PURE__ */ y(d, { name: "plus" }),
 					title: "Connect an Organization…",
 					onClick: (e) => I(e.currentTarget)
@@ -285,7 +270,7 @@ function F() {
 					children: "An organization's repos show for everyone in its group."
 				})]
 			}),
-			T.admin && /* @__PURE__ */ b("p", {
+			D.admin && /* @__PURE__ */ b("p", {
 				className: "text-xs text-muted-foreground",
 				children: [
 					"GitHub App:",
@@ -293,33 +278,33 @@ function F() {
 					/* @__PURE__ */ y("button", {
 						type: "button",
 						className: "underline underline-offset-4 hover:text-foreground",
-						onClick: () => one.link(T.app.url),
-						children: T.app.slug
+						onClick: () => one.link(D.app.url),
+						children: D.app.slug
 					})
 				]
 			})
 		] });
 	}
-	return T.app ? /* @__PURE__ */ y(A, { children: /* @__PURE__ */ b("div", {
+	return D.app ? /* @__PURE__ */ y(O, { children: /* @__PURE__ */ b("div", {
 		className: "flex max-w-2xl flex-col gap-6",
 		children: [
-			n && /* @__PURE__ */ y(m, { title: n }),
+			n && /* @__PURE__ */ y(h, { title: n }),
 			B,
-			c && /* @__PURE__ */ y(P, { offer: c }),
-			h && /* @__PURE__ */ b("p", {
+			c && /* @__PURE__ */ y(M, { offer: c }),
+			m && /* @__PURE__ */ b("p", {
 				className: "flex items-center gap-2 text-sm text-muted-foreground",
 				children: [/* @__PURE__ */ y(g, {}), "Finishing"]
 			})
 		]
-	}) }) : /* @__PURE__ */ b(A, { children: [
-		n && /* @__PURE__ */ y(m, { title: n }),
+	}) }) : /* @__PURE__ */ b(O, { children: [
+		n && /* @__PURE__ */ y(h, { title: n }),
 		B,
-		c && /* @__PURE__ */ y(P, { offer: c }),
-		h && /* @__PURE__ */ b("p", {
+		c && /* @__PURE__ */ y(M, { offer: c }),
+		m && /* @__PURE__ */ b("p", {
 			className: "flex items-center gap-2 text-sm text-muted-foreground",
 			children: [/* @__PURE__ */ y(g, {}), "Finishing"]
 		})
 	] });
 }
-o(document.getElementById("root")).render(/* @__PURE__ */ y(F, {}));
+o(document.getElementById("root")).render(/* @__PURE__ */ y(N, {}));
 </script>
