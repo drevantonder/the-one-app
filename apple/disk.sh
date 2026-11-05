@@ -8,7 +8,7 @@ set -u
 cd "$(dirname "$0")/.."
 
 # KB: what target/ may take before its caches go, and how much of the disk a build needs free.
-BUDGET=${DISK_BUDGET_KB:-10485760}
+BUDGET=${DISK_BUDGET_KB:-14680064}
 NEEDED=${DISK_NEEDED_KB:-10485760}
 
 kb() { du -sk "$1" 2>/dev/null | cut -f1; }
