@@ -38,7 +38,7 @@ await send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 860, dev
 
 const named = (suffix) => picture.replace(/\.png$/, `-${suffix}.png`);
 if (command === "picture") {
-  await until(`!!document.querySelector(".window")`, "the web client wasn't let in");
+  await until(`!!document.querySelector("[data-slot=shell-screen]")`, "the web client wasn't let in");
   await sleep(2500);
   await shoot(picture);
   ws.close();
@@ -61,15 +61,15 @@ for (;;) {
   if (Date.now() > by) throw new Error(`still at ${await evaluate("location.href")}`);
   await sleep(500);
   // Signed in once the web client keeps its tokens (web.js's KEPT).
-  const at = await evaluate(`({ href: location.href, signIn: !!document.querySelector("[data-signin]"), kept: !!localStorage.getItem("one.signin") })`);
+  const at = await evaluate(`({ href: location.href, signIn: !!document.querySelector("[data-slot=welcome-action]"), kept: !!localStorage.getItem("one.signin") })`);
   if (!at) continue;
-  if (at.signIn) await evaluate(`document.querySelector("[data-signin]").click()`);
+  if (at.signIn) await evaluate(`document.querySelector("[data-slot=welcome-action]").click()`);
   else if (at.kept && at.href.startsWith(address) && new URL(at.href).pathname !== "/callback") break;
 }
 // Its code to be approved, once it shows one; nothing once its window is drawn.
-await until(`!!document.querySelector(".join-code, .window")`, "the web client didn't start");
+await until(`!!document.querySelector("[data-slot=join-code], [data-slot=shell-screen]")`, "the web client didn't start");
 await sleep(500);
-const code = await evaluate(`document.querySelector(".join-code")?.textContent.replace(" ", "") || ""`);
+const code = await evaluate(`document.querySelector("[data-slot=join-code]")?.textContent.replace(" ", "") || ""`);
 if (code) await shoot(named("approve"));
 console.log(code);
 ws.close();

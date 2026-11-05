@@ -1,7 +1,8 @@
 // What a web page that holds screens does for them, the same in the web client (kernel/web/web.js) and in a chat's
 // MCP view (src/mcp_view.html): their look in its frames, and the answer to each of the bridge's messages, with its
-// menu, alert and files drawn in HTML where a native shell uses its own. Its functions need the kit (kit.css, bridge.js, kit.js) on the page, though it
-// may load before them. Its styles come with it.
+// menu, alert and files drawn in HTML where a native shell uses its own: @one/ui's on a page that has it (the web
+// client's), else the kit's (a chat's, until it moves). Its functions need the kit (kit.css, bridge.js, kit.js) or
+// @one/ui on the page, though it may load before them. Its styles come with it.
 window.oneHost = (() => {
   const css = `
   .menu-backdrop { position: fixed; inset: 0; z-index: 59; }
@@ -24,10 +25,19 @@ window.oneHost = (() => {
   (document.head || document.documentElement).append(Object.assign(document.createElement("style"), { textContent: css }));
   const esc = (s) => one.esc(s);
 
+  /// @one/ui, on a page that has it.
+  const ui = () => window.OneUI?.["@one/ui"];
+
   /// `one.menu` from the screen in `frame`: a small menu at its point in the frame, or beside the element it's for
   /// (`rect`) → the index chosen, or null once it's closed by a click elsewhere or Escape. Its `row` items lead, side by
   /// side as their icons; a `section` starts after a line.
   function menu(frame, m) {
+    if (ui()) {
+      const box = frame.getBoundingClientRect();
+      const r = Array.isArray(m.rect) && m.rect.length === 4 ? m.rect.map(Number) : [Number(m.x || 0), Number(m.y || 0), 0, 0];
+      const items = (Array.isArray(m.items) ? m.items : []).map((e) => ({ title: String(e.title ?? ""), icon: e.icon ? String(e.icon) : undefined, danger: !!e.danger, checked: !!e.checked, row: !!e.row, section: !!e.section }));
+      return ui().showMenu(items, [box.left + r[0], box.top + r[1], r[2], r[3]]);
+    }
     return new Promise((done) => {
       document.querySelector(".menu-backdrop")?.click();
       const entries = Array.isArray(m.items) ? m.items : [];
@@ -69,6 +79,7 @@ window.oneHost = (() => {
 
   /// `one.alert`: its title and text, then OK; or Cancel and its action → whether that was chosen.
   function alert(m) {
+    if (ui()) return ui().showAlert({ title: String(m.title || ""), text: String(m.text || ""), action: m.action ? String(m.action) : undefined, danger: !!m.danger });
     return new Promise((done) => {
       let chose = false;
       const { body, close } = one.sheet({ title: String(m.title || ""), done: m.action ? "Cancel" : "OK", onClose: () => done(chose) });

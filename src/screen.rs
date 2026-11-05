@@ -55,7 +55,9 @@ fn page_with(context: &serde_json::Value, body: &str, nonce: Option<String>, lin
         let policy = format!(
             "<meta http-equiv=\"Content-Security-Policy\" content=\"script-src 'nonce-{nonce}'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'\">"
         );
-        (policy, format!("<script nonce=\"{nonce}\">"), body.replace("<script>", &format!("<script nonce=\"{nonce}\">")))
+        // Every script of its own, modules too (an `@one/ui` screen's), whose imports then carry the nonce.
+        let body = body.replace("<script ", &format!("<script nonce=\"{nonce}\" ")).replace("<script>", &format!("<script nonce=\"{nonce}\">"));
+        (policy, format!("<script nonce=\"{nonce}\">"), body)
     } else {
         (String::new(), "<script>".into(), body.to_string())
     };
@@ -143,10 +145,10 @@ pub const TEMPLATE_NONCE: &str = "__nonce__";
 pub const TEMPLATE_PARAMS: &str = "\"__params__\"";
 
 /// A client's own screen's page for the web client, which its address serves as `screens/<name>.html` (src/kernel/
-/// services.rs): `client_page`, but for `TEMPLATE_NONCE` and `TEMPLATE_PARAMS`, which the web client fills in
-/// (kernel/web/web.js).
+/// services.rs): `client_page`, but for `TEMPLATE_NONCE` and `TEMPLATE_PARAMS`, which the web client fills in, and
+/// linking the kit, the bridge and `@one/ui`, which it writes in from its own (kernel/web/web.js).
 pub fn client_template(name: &str) -> String {
-    page_with(&client_context(name, &TEMPLATE_PARAMS.trim_matches('"').into()), client_screen(name), Some(TEMPLATE_NONCE.into()), false)
+    page_with(&client_context(name, &TEMPLATE_PARAMS.trim_matches('"').into()), client_screen(name), Some(TEMPLATE_NONCE.into()), true)
 }
 
 #[cfg(test)]

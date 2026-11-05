@@ -4,6 +4,8 @@
 // what it showed last (the sidebar, and a still of the screen) and then what the node says now.
 
 // The bridge and kit (src/screen/), loaded after this, give `one`; this page answers it for its own use (`__one.host`).
+// The window itself, and what it shows over screens (menus, alerts, sheets), is @one/ui's (src/screen/ui), whose
+// ui.js, loaded before this, keeps it on `OneUI`.
 // This browser is a device of its person (device.js): it signs what changes who can do what, and hands each call the
 // keys it needs.
 import * as answers from "./answers.js";
@@ -15,6 +17,8 @@ import { net } from "./net.js";
 import { qrSvg } from "./qr.js";
 
 window.__one = {};
+const ui = OneUI["@one/ui"];
+const h = OneUI.react.createElement;
 
 (() => {
   const $ = (sel, el = document) => el.querySelector(sel);
@@ -585,12 +589,8 @@ window.__one = {};
     return `/app/${encodeURIComponent(r.app)}/${encodeURIComponent(r.screen || "main")}${q.size ? `?${q}` : ""}`;
   }
 
-  /// A phone's width has no sidebar, as the iPhone and Android apps have none: the pages fill the window, swiped
-  /// between, and every screen opened from them is pushed over them, with Back.
-  const phone = matchMedia("(max-width: 700px)");
-  const isPage = (r) => r.kind === "own" && r.name === "pages";
-  /// The page a screen is under, for Back on a phone when nothing in this tab came before it: a page's Services and apps
-  /// under that page, Settings' screens and apps under Settings.
+  /// The page a screen is under, for Back when nothing in this tab came before it: a page's Services and apps under
+  /// that page, Settings' screens and apps under Settings.
   function under(r) {
     const params = JSON.parse(r.params || "{}");
     if (r.kind === "own") return own("pages", { scope: r.name === "services" ? params.scope || "user" : r.name === "request" ? "user" : "settings" });
@@ -598,16 +598,14 @@ window.__one = {};
   }
 
   /// Goes somewhere: a sidebar row replaces where the window is; what a screen opens deeper than the sidebar is pushed
-  /// on top, so Back returns to it. On a phone, all but a page is pushed.
-  function go(r, { pushed = phone.matches && !isPage(r) } = {}) {
+  /// on top, so Back returns to it.
+  function go(r, { pushed = false } = {}) {
     // Pushed on a screen, the sidebar keeps what it had selected, and the bar offers Back.
     const state = pushed ? { back: true, selection: history.state?.selection || location.pathname + location.search } : null;
     history.pushState(state, "", href(r));
-    // A phone's pages open again at the one gone to.
-    if (phone.matches && isPage(r)) home = null;
     render();
   }
-  /// Back: to what came before in this tab, or on a phone opened straight at a screen, to the page it's under.
+  /// Back: to what came before in this tab, or for a screen opened straight, to the page it's under.
   function back() {
     if (history.state?.back) return history.back();
     history.replaceState(null, "", href(under(route())));
@@ -616,19 +614,15 @@ window.__one = {};
   /// The sidebar row selected: where the window is, or what a pushed screen was opened from.
   const selection = () => history.state?.selection || location.pathname + location.search;
   addEventListener("popstate", () => render());
-  // Between a phone's width and a computer's, the window is drawn again as the other.
-  phone.addEventListener("change", () => {
-    shown = "";
-    home = null;
-    frames = frames.filter((f) => f.sheet);
-    const detail = $(".detail", root);
-    if (detail) detail.innerHTML = "";
-    render();
-  });
 
   // MARK: Drawing
 
   const root = $("#root");
+  /// What #root shows: the window, or what stands before it (signing in, waiting to be let in, a problem). Drawn at
+  /// once, so what's in it is there for what comes next (a screen's frame going into the window).
+  const view = OneUI["react-dom/client"].createRoot(root);
+  const show = (element) => OneUI["react-dom"].flushSync(() => view.render(element));
+  const message = (title, text, note) => h(ui.Unavailable, { title, text, note });
 
   /// While this browser waits to be approved, the window isn't drawn: its join screen is.
   let joining = false;
@@ -640,100 +634,72 @@ window.__one = {};
     return Object.assign(p, { done });
   })();
 
+  /// What's beside the sidebar, which this page keeps (the screen's frame, and Developer's panel under it) while the
+  /// window draws around it; the bar's title over it, as the screen in it last said.
+  const detail = Object.assign(document.createElement("div"), { className: "detail" });
+  let barTitle = "";
+  /// Whether the window is what shows, rather than what stands before it.
+  let windowShown = false;
+  let shown = "";
+
   function render() {
     if (!store.state || joining) return;
-    if (!install()) return void (root.innerHTML = message("Not Set Up Yet", "Set it up on one of your computers first."));
-    if (!$(".window", root)) root.innerHTML = `<div class="window"><nav class="sidebar"></nav><main class="detail"></main></div>`;
-    drawSidebar();
-    drawDetail();
+    if (!install()) return void ((windowShown = false), show(message("Not Set Up Yet", "Set it up on one of your computers first.")));
+    const r = route(), key = JSON.stringify(r);
+    // The screen where the window is, kept as it is while the rest redraws around it.
+    const fresh = !(shown === key && frames.some((f) => !f.sheet && f.into.isConnected));
+    // A page shows its own large title.
+    if (fresh) (shown = key), (barTitle = r.kind === "own" && r.name === "pages" ? "" : titleOf(r));
+    drawWindow();
+    if (fresh) screen.show(detail, r);
   }
 
-  function message(title, text, extra = "") {
-    return `<div class="unavailable">${one.problem({ title, text })}${extra}</div>`;
-  }
+  /// The sidebar's open or closed on a computer's width, as the person left it.
+  const SIDEBAR = "one.sidebar";
+  /// Where each of the sidebar's links goes, as the window last drew them.
+  const links = new Map();
 
-  /// A page's Services folder: its services' icons, four at most, on frosted glass; with none, four faint empty places.
-  function folder(apps, size) {
-    const cells = apps.length ? apps.slice(0, 4).map((a) => one.appIcon(a, size * 0.36)).join("") : `<i></i>`.repeat(4);
-    return `<span class="folder" style="--size:${size}px">${cells}</span>`;
+  function drawWindow() {
+    windowShown = true;
+    show(h(ui.Shell, {
+      sections: sections(),
+      title: barTitle,
+      back: !!history.state?.back,
+      onBack: back,
+      onGo: (to) => links.has(to) && go(links.get(to)),
+      developer: developer.on(),
+      onDeveloper: () => devtools.toggle(),
+      open: localStorage.getItem(SIDEBAR) !== "closed",
+      onOpenChange: (open) => (open ? localStorage.removeItem(SIDEBAR) : localStorage.setItem(SIDEBAR, "closed"), drawWindow()),
+      screen: detail,
+    }));
   }
 
   /// One section per page, listing its apps and its Services; then Settings', listing its items. An app Settings lists
   /// (the App Store) shows there only.
-  function drawSidebar() {
+  function sections() {
     const at = selection();
-    const row = (to, icon, name, count) => `<a class="nav-row${href(to) === at ? " selected" : ""}" href="${esc(href(to))}" data-go='${esc(JSON.stringify(to))}'>${icon}<span class="nav-label">${esc(name)}</span>${count ? `<span class="nav-count">${count}</span>` : ""}</a>`;
-    const head = (to, name) => `<a class="nav-head${href(to) === at ? " selected" : ""}" href="${esc(href(to))}" data-go='${esc(JSON.stringify(to))}'>${esc(name)}</a>`;
-    const sections = pages().map((p) => `<section>${head(own("pages", { scope: p.scope }), p.title)}` +
-      appsOn(p).filter((a) => !settingsItems().some((i) => i.app === a.name)).map((a) => row({ kind: "screen", app: a.name, screen: "main", params: "{}", scope: p.scope }, one.appIcon(a, 20), label(a), appBadge(a.name, p))).join("") +
-      row(own("services", { scope: p.scope }), folder(servicesOn(p), 20), "Services") + `</section>`).join("");
+    links.clear();
+    const link = (to) => (links.set(href(to), to), href(to));
+    const item = (to, key, title, more) => ({ key, title, href: link(to), selected: href(to) === at, ...more });
+    const section = (to, key, title, items) => ({ key, title, href: link(to), selected: href(to) === at, items });
+    const listed = (a) => settingsItems().some((i) => i.app === a.name);
+    const out = pages().map((p) => section(own("pages", { scope: p.scope }), p.scope, p.title, [
+      ...appsOn(p).filter((a) => !listed(a)).map((a) => item({ kind: "screen", app: a.name, screen: "main", params: "{}", scope: p.scope }, a.name, label(a), { app: a, badge: appBadge(a.name, p) })),
+      item(own("services", { scope: p.scope }), "services", "Services", { folder: servicesOn(p) }),
+    ]));
     // One with another site's url opens it in a new tab; one here (Passkeys) shows beside the sidebar.
-    const items = settingsItems().map((item) => item.url && !here(item.url)
-      ? `<a class="nav-row" href="${esc(item.url)}" target="_blank" rel="noopener">${settingIcon(item, 20)}<span class="nav-label">${esc(item.title)}</span></a>` : row(item.app ? { kind: "screen", app: item.app, screen: "main", params: "{}" } : { kind: "own", name: item.name, params: "{}" }, settingIcon(item, 20), item.title, item.badge)).join("");
-    $(".sidebar", root).innerHTML = `<div class="nav-pages">${sections}<section>${head(own("pages", { scope: "settings" }), "Settings")}${items}</section></div>`;
-  }
-
-  // Links are real links, for a new tab or a copied address; a plain click goes in place.
-  document.addEventListener("click", (e) => {
-    if (e.target.closest?.("[data-back]")) return back();
-    const a = e.target.closest?.("[data-go]");
-    if (!a || e.metaKey || e.ctrlKey || e.shiftKey || e.button) return;
-    e.preventDefault();
-    go(JSON.parse(a.dataset.go));
-  });
-
-  let shown = "";
-
-  /// What's beside the sidebar: the screen where the window is, kept as it is while the rest redraws around it.
-  function drawDetail() {
-    const r = route(), key = JSON.stringify(r);
-    if (phone.matches) return drawPhone($(".detail", root), r, key);
-    if (shown === key && frames.some((f) => !f.sheet && f.into.isConnected)) return;
-    shown = key;
-    screen.show($(".detail", root), r);
-  }
-
-  /// A phone's window: every page side by side then Settings, to swipe between with their dots (pages.html, as the
-  /// phones have them), kept under what's pushed over them so Back finds them as they were.
-  let home = null;
-  function drawPhone(detail, r, key) {
-    if (!home?.layer.isConnected) {
-      frames = frames.filter((f) => f.sheet);
-      detail.innerHTML = `<div class="home"></div><div class="pushed" hidden></div>`;
-      const layer = $(".home", detail), at = isPage(r) ? r : under(r);
-      home = { layer, f: frameFor(own("pages", { swipe: true, scope: JSON.parse(at.params).scope || "user" }), layer) };
-      home.f.home = true;
-      shown = "";
-    }
-    const pushed = $(".pushed", detail);
-    if (isPage(r)) {
-      shown = key;
-      frames = frames.filter((f) => f.sheet || f.home);
-      pushed.hidden = true;
-      pushed.innerHTML = "";
-      home.layer.inert = false;
-      document.title = titleOf(r);
-      return;
-    }
-    if (shown === key && frames.some((f) => !f.sheet && !f.home && f.into.isConnected)) return;
-    shown = key;
-    pushed.classList.toggle("entering", pushed.hidden);
-    pushed.hidden = false;
-    home.layer.inert = true;
-    screen.show(pushed, r);
-  }
-
-  /// The detail's bar: its title, as a Mac window's toolbar, with Back when a screen was pushed, and on a phone under
-  /// every page.
-  function bar(title) {
-    const back = history.state?.back || (phone.matches && !isPage(route())) ? `<button class="back" data-back aria-label="Back">‹</button>` : "";
-    const dev = developer.on() ? `<button class="dev-button" data-devtools aria-label="Developer" title="Developer">&lt;/&gt;</button>` : "";
-    return `<header class="bar">${back}<div class="bar-titles"><div class="bar-title">${esc(title)}</div></div>${dev}</header>`;
+    const items = settingsItems().map((i) => {
+      const app = { name: i.name, title: i.title, icon: i.icon, color: i.color };
+      if (i.url && !here(i.url)) return { key: i.name, title: i.title, href: i.url, external: true, app };
+      return item(i.app ? { kind: "screen", app: i.app, screen: "main", params: "{}" } : { kind: "own", name: i.name, params: "{}" }, i.name, i.title, { app, badge: i.badge });
+    });
+    return [...out, section(own("pages", { scope: "settings" }), "settings", "Settings", items)];
   }
 
   /// Developer, in Developer mode: the bar's </> opens its panel (src/screen/devtools.html) for the screen in front,
-  /// docked under it on a computer's width, where it stays open from screen to screen until closed, and a sheet on a
-  /// phone's. It's told the screen's app and title, and for the client's own, since when it showed.
+  /// docked under it, where it stays open from screen to screen until closed. It's told the screen's app and title, and
+  /// for the client's own, since when it showed.
   const devtools = {
     KEY: "one.devtools",
     HEIGHT: "one.devtools.height",
@@ -744,7 +710,6 @@ window.__one = {};
       return own("devtools", r.kind === "screen" ? { app: r.app, screen: r.screen, title: titleOf(r) } : { title: titleOf(r), since: devtools.since });
     },
     toggle() {
-      if (phone.matches) return void openSheet(devtools.route());
       if (devtools.open()) localStorage.removeItem(devtools.KEY);
       else localStorage.setItem(devtools.KEY, "1");
       devtools.draw();
@@ -773,9 +738,8 @@ window.__one = {};
       });
     },
     draw() {
-      const detail = $(".detail", root);
-      let dock = detail && $(".devtools", detail);
-      if (!detail || phone.matches || !developer.on() || !devtools.open()) {
+      let dock = $(".devtools", detail);
+      if (!developer.on() || !devtools.open()) {
         if (dock) (frames = frames.filter((f) => f !== dock.f)), dock.remove();
         return;
       }
@@ -793,7 +757,6 @@ window.__one = {};
       devtools.resizable(dock);
     },
   };
-  document.addEventListener("click", (e) => e.target.closest?.("[data-devtools]") && devtools.toggle());
 
   // MARK: Screens
 
@@ -835,7 +798,7 @@ window.__one = {};
     const since = developer.since();
     if (r.kind === "own") return ownPage(r);
     const path = `/v1/screens/${encodeURIComponent(r.app)}/${encodeURIComponent(r.screen)}`;
-    return joined.then(() => api(path, { query: { params: r.params || "{}", scope: r.scope }, raw: true, since: developer.on() ? since : undefined }).then((resp) => resp.text()).then((html) => (kept.put("page", key, html), html)));
+    return joined.then(() => api(path, { query: { params: r.params || "{}", scope: r.scope, linked: true }, raw: true, since: developer.on() ? since : undefined }).then((resp) => resp.text()).then((html) => (kept.put("page", key, html), html)));
   }
 
   /// One of the client's own screens' pages, which act as the person, so never a node's: the address's
@@ -848,6 +811,23 @@ window.__one = {};
     return (await resp.text()).replaceAll("__nonce__", nonce).replace('"__params__"', () => params);
   }
   const ask = (r) => (asked = { key: JSON.stringify(r), page: screenPage(r) }).page.catch(() => {});
+
+  /// A page that links @one/ui, the kit and the bridge (`linked`, src/screen.rs: an app's as its node gives it, and
+  /// the client's own), with them written in from this window's cache, where its own page has them: a sandboxed frame's
+  /// cache is its alone, so it would download them again for every screen. One that can't be had here stays linked.
+  const LINKED = /<link rel="stylesheet" href="(\/screen\/[a-z/]+\.css\?v=[0-9a-f]+)">|<script( nonce="[0-9a-f]+")? src="(\/screen\/[a-z/]+\.js\?v=[0-9a-f]+)"><\/script>/g;
+  const linkedFiles = {};
+  const linkedFile = (url) =>
+    (linkedFiles[url] ||= fetch(url).then((r) => (r.ok ? r.text() : Promise.reject(new Error(UNANSWERED)))).catch((err) => (delete linkedFiles[url], Promise.reject(err))));
+  async function linkedIn(page) {
+    const urls = [...new Set(Array.from(page.matchAll(LINKED), (m) => m[1] || m[3]))];
+    if (!urls.length) return page;
+    const texts = Object.fromEntries(await Promise.all(urls.map(async (url) => [url, await linkedFile(url)])));
+    return page.replace(LINKED, (_, css, nonce = "", js) => (css ? `<style>${texts[css]}</style>` : `<script${nonce}>${texts[js]}</script>`));
+  }
+
+  /// A screen that couldn't open: the problem, where it would be.
+  const failed = (into, text) => OneUI["react-dom/client"].createRoot(into).render(message("Can’t Open This", text));
 
   /// A sandboxed frame for a page this window writes in (frame.html takes it).
   function sandboxed(r) {
@@ -869,10 +849,13 @@ window.__one = {};
     frames.push(f);
     // A spinner only for a wait that's long enough to notice.
     into.innerHTML = "";
-    setTimeout(() => f.loaded || f.still || !into.isConnected || $(".screen-status", into) || into.insertAdjacentHTML("afterbegin", `<div class="screen-status">${one.loading()}</div>`), 400);
-    const draw = (page) => {
+    setTimeout(() => f.loaded || f.still || !into.isConnected || $(".screen-status", into) || into.insertAdjacentHTML("afterbegin", `<div class="screen-status"><span class="spinner"></span></div>`), 400);
+    const written = (page) => linkedIn(page).catch(() => page).then((html) => oneHost.look(html, appearance(), !!sheet));
+    const draw = async (page) => {
       f.page = page;
-      f.html = oneHost.look(page, appearance(), !!sheet);
+      const html = await written(page);
+      if (f.page !== page || f.html) return;
+      f.html = html;
       if (!into.isConnected) return;
       if (f.still) frame.style.visibility = "hidden";
       into.append(frame);
@@ -888,17 +871,19 @@ window.__one = {};
     const looking = developer.on() && r.kind !== "own" && { what: "page", app: r.app, screen: r.screen, source: "kept", at: Date.now(), started: performance.now() };
     Promise.all([r.kind === "own" ? null : kept.get("page", f.key), sheet ? null : kept.get("still", f.key)]).then(([page, still]) => {
       if (looking && page) developer.keep(looking);
-      if (f.html) return;
+      if (f.page) return;
       if (still) showStill(f, still);
       if (page) draw(page);
     });
-    fresh.then((page) => {
+    fresh.then(async (page) => {
       if (!f.html) return draw(page);
       if (same(page, f.page)) return;
       f.page = page;
-      f.html = oneHost.look(page, appearance(), !!sheet);
+      const html = await written(page);
+      if (f.page !== page) return;
+      f.html = html;
       frame.src = asset("frame.html");
-    }, (err) => f.html || ((f.loaded = true), (into.innerHTML = message("Can’t Open This", one.plain(err).title))));
+    }, (err) => f.html || ((f.loaded = true), failed(into, one.plain(err).title)));
     return f;
   }
 
@@ -945,11 +930,10 @@ window.__one = {};
 
   const screen = {
     show(detail, r) {
-      frames = frames.filter((f) => f.sheet || f.home);
+      frames = frames.filter((f) => f.sheet);
       const title = titleOf(r);
       document.title = title;
-      // A page shows its own large title.
-      detail.innerHTML = bar(r.kind === "own" && r.name === "pages" ? "" : title) + `<div class="screen"></div>`;
+      detail.innerHTML = `<div class="screen"></div>`;
       devtools.since = Date.now();
       devtools.draw();
       // A Settings item that's a page of this site (Passkeys) is that page, framed: it's the kernel's, not a node's.
@@ -984,17 +968,17 @@ window.__one = {};
   }
   addEventListener("resize", place);
   addEventListener("click", (e) => e.target.classList?.contains("shade") && shaded?.frame.contentWindow?.postMessage({ oneSheetsClose: true }, "*"));
-  addEventListener("keydown", (e) => e.key === "Escape" && shaded && $(".shade.open") && !$(".shade.open ~ .sheet-backdrop.open") && shaded.frame.contentWindow?.postMessage({ oneSheetsClose: true }, "*"));
+  // Not while what's over it (an alert, a menu) takes the Escape itself.
+  addEventListener("keydown", (e) => e.key === "Escape" && shaded && $(".shade.open") && !$("[role=alertdialog], [role=menu]") && shaded.frame.contentWindow?.postMessage({ oneSheetsClose: true }, "*"));
 
   /// A screen over the window, in a sheet: → what it gave `one.close` once it's gone, else null.
   function openSheet(r) {
     return new Promise((done) => {
       let value = null;
       // A request is answered in it, or not: Cancel, not Done.
-      const handle = one.sheet({ title: titleOf(r), done: r.name === "request" ? "Cancel" : "Done", onClose: () => { frames = frames.filter((x) => x !== f); done(value); } });
-      handle.body.closest(".sheet").classList.add("screen-sheet");
-      handle.body.classList.add("screen");
-      const f = frameFor(r, handle.body, { sheet: { close: (v) => { value = v ?? null; handle.close(); }, title: handle.body.closest(".sheet").querySelector(".sheet-title") } });
+      const sheet = ui.showSheet({ title: titleOf(r), done: r.name === "request" ? "Cancel" : "Done" });
+      const f = frameFor(r, sheet.body, { sheet: { close: (v) => ((value = v ?? null), sheet.close()), title: sheet.setTitle } });
+      sheet.closed.then(() => ((frames = frames.filter((x) => x !== f)), done(value)));
     });
   }
 
@@ -1045,23 +1029,22 @@ window.__one = {};
           // From a sheet, the sheet goes and it opens where the window is. What the sidebar lists (an app on a page,
           // Backups in Settings) opens as if picked there, with no Back; only what's deeper than it is pushed.
           f.sheet?.close(null);
-          go(to, { pushed: phone.matches ? !isPage(to) : ![...document.querySelectorAll(".sidebar [data-go]")].some((a) => a.getAttribute("href") === href(to)) });
+          go(to, { pushed: !links.has(href(to)) });
           return null;
         },
         close: (value) => {
           if (f.dock) return (localStorage.removeItem(devtools.KEY), devtools.draw(), null);
           if (f.sheet) f.sheet.close(value);
-          else if (history.state?.back || (phone.matches && !isPage(route()))) back();
+          else if (history.state?.back) back();
           return null;
         },
         title: (title, m) => {
           // Empty while the screen shows its own large title, as the Mac app's bar is; the tab is named by what the
           // screen says it's called.
-          if (f.sheet) f.sheet.title.textContent = title || titleOf(r);
-          // A phone's pages have no bar: what's pushed over them has its own.
-          else if (!f.home) {
-            const el = $(".detail .bar-title", root);
-            if (el) el.textContent = title;
+          if (f.sheet) f.sheet.title(title || titleOf(r));
+          // Developer's panel has the bar of the screen it's under.
+          else if (!f.dock && f.into.isConnected) {
+            if (windowShown && title !== barTitle) (barTitle = title), drawWindow();
             document.title = title || String(m.name || "") || titleOf(r);
           }
           return null;
@@ -1114,11 +1097,6 @@ window.__one = {};
   /// The Settings item whose url is `url` on this site, if one is.
   const settingAt = (url) => settingsItems().find((i) => i.url && here(i.url) && new URL(i.url, location.href).pathname === new URL(url, location.href).pathname);
   const settingTitle = (name) => settingsItems().find((i) => i.name === name)?.title || "Settings";
-
-  /// An item's icon: its symbol on its colour, as an app's tile.
-  function settingIcon(item, size) {
-    return one.appIcon({ name: item.name, title: item.title, icon: item.icon, color: item.color }, size);
-  }
 
   /// `one.api` for a client's own screen: the node's /v1 at this origin, as this person; nothing else here. What
   /// changes who can do what, and letting devices in, this browser does itself (`signs`).
@@ -1313,16 +1291,9 @@ window.__one = {};
   function showSignedOut(error) {
     const name = config().name;
     document.title = name;
-    root.innerHTML = `<div class="welcome"><img class="welcome-mark" src="/logo.png" alt=""><h1>${esc(name)}</h1>` +
-      `<button class="button primary big" data-signin>Sign In</button>${error ? one.problem({ title: error }) : ""}</div>`;
-    $("[data-signin]", root).onclick = async (e) => {
-      e.target.disabled = true;
-      try {
-        await auth.start();
-      } catch (err) {
-        showSignedOut(err.message);
-      }
-    };
+    windowShown = false;
+    const signIn = () => auth.start().catch((err) => showSignedOut(err.message));
+    show(h(ui.Welcome, { key: Math.random(), logo: "/logo.png", name, action: { label: "Sign In", run: signIn }, problem: error }));
   }
 
   /// Back from a sign-in at another site, in a browser that isn't signed in here: on to the app, which finishes it.
@@ -1330,13 +1301,13 @@ window.__one = {};
     const { name, cli } = config();
     const link = `${cli}://open?${new URLSearchParams({ app, screen, params, scope: "user" })}`;
     document.title = name;
-    root.innerHTML = `<div class="welcome"><img class="welcome-mark" src="/logo.png" alt=""><h1>${esc(name)}</h1>` +
-      `<a class="button primary big" href="${esc(link)}">Open ${esc(name)}</a></div>`;
+    show(h(ui.Welcome, { logo: "/logo.png", name, action: { label: `Open ${name}`, href: link } }));
     location.href = link;
   }
 
   function showUnreachable(text) {
-    root.innerHTML = message("Can’t Reach Your Devices", text, `<div class="unavailable-text">Trying again…</div>`);
+    windowShown = false;
+    show(message("Can’t Reach Your Devices", text, "Trying again…"));
   }
 
   /// Makes this browser a device of its person, before anything is asked of a node: one already, or let in by a passkey
@@ -1363,7 +1334,7 @@ window.__one = {};
       if (said.gone) await ask().catch(() => {});
     }
     sessionStorage.removeItem("one.invite");
-    root.innerHTML = "";
+    show(h(ui.Starting));
     return keys;
   }
 
@@ -1398,11 +1369,14 @@ window.__one = {};
   async function showJoin(code, invited) {
     document.title = "Waiting for Approval";
     const link = `${location.origin}/approve#${code.replace(" ", "")}`;
-    root.innerHTML = `<div class="welcome join"><h1>Waiting for Approval</h1>` +
-      `<p class="join-text">${invited ? "Whoever invited you approves it. Show them this code." : "Your other devices ask you to approve it. It shows this code there too."}</p>` +
-      `<div class="join-code" aria-label="Code">${esc(code)}</div><div class="join-qr">${qrSvg(link)}</div>` +
-      `<p class="join-note">${invited ? "Or they scan this with their phone." : "Or scan this with your phone, to approve it in its browser."}</p><button class="button" data-out>Sign Out</button></div>`;
-    $("[data-out]", root).onclick = () => signOut();
+    windowShown = false;
+    show(h(ui.Join, {
+      code,
+      qr: qrSvg(link),
+      text: invited ? "Whoever invited you approves it. Show them this code." : "Your other devices ask you to approve it. It shows this code there too.",
+      note: invited ? "Or they scan this with their phone." : "Or scan this with your phone, to approve it in its browser.",
+      onSignOut: () => signOut(),
+    }));
   }
 
   async function start() {
@@ -1441,7 +1415,7 @@ window.__one = {};
     // window as it was last. Its screens' asks wait until this browser is its person's device (`joined`).
     ask(route());
     if (lastWindow()) render();
-    else root.innerHTML = `<div class="starting">${one.loading("Starting")}</div>`;
+    else show(h(ui.Starting));
     joining = true;
     const user = auth.user();
     try {
@@ -1450,10 +1424,10 @@ window.__one = {};
       await device.load();
     } catch (err) {
       if (err.signedOut) return err.removed ? undefined : showSignedOut();
-      return void (root.innerHTML = message("Can’t Let This Device In", err.message));
+      return void show(message("Can’t Let This Device In", err.message));
     }
     // A device that takes the request and never answers (asleep, stuck) is one that can't be reached, while it's still asked.
-    const away = setTimeout(() => $(".window", root) || showUnreachable(UNANSWERED), 15000);
+    const away = setTimeout(() => windowShown || showUnreachable(UNANSWERED), 15000);
     for (let misses = 1; ; misses++) {
       try {
         await refreshState();
@@ -1461,7 +1435,7 @@ window.__one = {};
       } catch (err) {
         if (err.signedOut) return clearTimeout(away), err.removed ? undefined : showSignedOut();
         // What it showed last stays, as a screen whose node is restarting does.
-        if (!$(".window", root)) showUnreachable(err instanceof NodeError ? err.message : UNANSWERED);
+        if (!windowShown) showUnreachable(err instanceof NodeError ? err.message : UNANSWERED);
         await sleep(retryWait(misses));
       }
     }

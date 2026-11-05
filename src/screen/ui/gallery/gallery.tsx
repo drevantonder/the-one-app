@@ -1,5 +1,5 @@
-// The gallery: every component and layout part of the kit, to see at any width. Built as an app's screen would be: it
-// imports React and the kit by the names the page's import map gives, and its own Tailwind utilities (gallery.css).
+// The gallery: every component and layout part of @one/ui, to see at any width. Built as an app's screen would be: it
+// imports React and @one/ui by the names the page's import map gives, and its own Tailwind utilities (gallery.css).
 import { useState } from "react"
 import { createRoot } from "react-dom/client"
 import {
@@ -8,9 +8,8 @@ import {
   CardFooter, CardHeader, CardTitle, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
   DialogTrigger, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator,
   DropdownMenuTrigger, Empty, Grid, Icon, Input, List, ListRow, Problem, Separator, Sheet, SheetContent,
-  SheetDescription, SheetHeader, SheetTitle, SheetTrigger, Sidebar, SidebarContent, SidebarGroup, SidebarGroupLabel,
-  SidebarMenu, SidebarMenuBadge, SidebarMenuButton, SidebarMenuItem, SidebarProvider, Skeleton, Split, Switch, Tabs,
-  TabsContent, TabsList, TabsTrigger,
+  SheetDescription, SheetHeader, SheetTitle, SheetTrigger, Shell, type ShellSection, showAlert, showMenu, showSheet,
+  Skeleton, Split, Switch, Tabs, TabsContent, TabsList, TabsTrigger,
 } from "@one/ui"
 import "./gallery.css"
 import { DotsThreeIcon, MagnifyingGlassIcon, PlusIcon } from "@phosphor-icons/react"
@@ -91,10 +90,33 @@ function Vault() {
   )
 }
 
+const sections: ShellSection[] = [
+  { key: "user", title: "You", href: "#you", items: [
+    ...apps.slice(0, 1).map((a) => ({ key: a.name, title: a.title, href: `#${a.name}`, app: a, selected: true })),
+    { key: "services", title: "Services", href: "#services", folder: apps.slice(4, 6) },
+  ] },
+  { key: "global", title: "Everyone", href: "#everyone", items: apps.slice(1, 4).map((a) => ({ key: a.name, title: a.title, href: `#${a.name}`, app: a, badge: a.name === "board" ? 3 : 0 })) },
+  { key: "settings", title: "Settings", href: "#settings", items: [
+    { key: "passkeys", title: "Passkeys", href: "https://example.com", external: true, app: { name: "passkeys", icon: "key", color: "#8e8e93" } },
+    ...apps.slice(5).map((a) => ({ key: a.name, title: a.title, href: `#${a.name}`, app: a, badge: a.name === "devices" ? 1 : 0 })),
+  ] },
+]
+
+function Window() {
+  const [at, setAt] = useState("#agent-devices")
+  const marked = sections.map((s) => ({ ...s, selected: s.href === at, items: s.items.map((i) => ({ ...i, selected: i.href === at })) }))
+  const title = sections.flatMap((s) => s.items).find((i) => i.href === at)?.title ?? sections.find((s) => s.href === at)?.title
+  return (
+    <Shell sections={marked} title={title} onGo={setAt}>
+      <div className="p-4"><Grid min="10rem">{apps.slice(0, 4).map((a) => <Card key={a.name} className="h-28" />)}</Grid></div>
+    </Shell>
+  )
+}
+
 function Gallery() {
   return (
     <main className="mx-auto flex flex-col gap-10">
-      <h1 className="text-2xl font-semibold tracking-tight">UI kit</h1>
+      <h1 className="text-2xl font-semibold tracking-tight">@one/ui</h1>
 
       <Section title="Button: one default per view, then secondary, outline, ghost; destructive only for what can't be undone">
         <Row>
@@ -259,36 +281,25 @@ function Gallery() {
         <Vault />
       </Section>
 
-      <Section title="Sidebar pieces">
-        <div className="h-[28rem] w-64 overflow-hidden rounded-xl border">
-          <SidebarProvider className="min-h-0">
-            <Sidebar collapsible="none" className="w-full">
-              <SidebarContent>
-                <SidebarGroup>
-                  <SidebarGroupLabel>You</SidebarGroupLabel>
-                  <SidebarMenu>
-                    {apps.slice(0, 2).map((a, i) => (
-                      <SidebarMenuItem key={a.name}>
-                        <SidebarMenuButton isActive={i === 0}><AppIcon app={a} size={20} />{a.title}</SidebarMenuButton>
-                      </SidebarMenuItem>
-                    ))}
-                  </SidebarMenu>
-                </SidebarGroup>
-                <SidebarGroup>
-                  <SidebarGroupLabel>Settings</SidebarGroupLabel>
-                  <SidebarMenu>
-                    {apps.slice(5).map((a) => (
-                      <SidebarMenuItem key={a.name}>
-                        <SidebarMenuButton><AppIcon app={a} size={20} />{a.title}</SidebarMenuButton>
-                        {a.name === "devices" && <SidebarMenuBadge className="rounded-full bg-destructive text-white">1</SidebarMenuBadge>}
-                      </SidebarMenuItem>
-                    ))}
-                  </SidebarMenu>
-                </SidebarGroup>
-              </SidebarContent>
-            </Sidebar>
-          </SidebarProvider>
+      <Section title="Shell: the window every client shows screens in; where its own room is narrow, the sidebar is a sheet behind the bar's button">
+        <div className="grid gap-4" style={{ gridTemplateColumns: "minmax(0, 1fr) 22rem" }}>
+          <div className="h-[30rem] overflow-hidden rounded-xl border"><Window /></div>
+          <div className="h-[30rem] overflow-hidden rounded-xl border"><Window /></div>
         </div>
+      </Section>
+
+      <Section title="What the window shows over screens when they ask: a menu, an alert, a screen in a sheet">
+        <Row>
+          <Button variant="outline" onClick={(e) => {
+            const r = e.currentTarget.getBoundingClientRect()
+            showMenu([{ title: "Small", icon: "square", row: true, checked: true }, { title: "Wide", icon: "rectangle", row: true }, { title: "Rename…" }, { title: "Move to Everyone" }, { title: "Remove", danger: true, section: true }], [r.left, r.top, r.width, r.height])
+          }}>Menu</Button>
+          <Button variant="outline" onClick={() => showAlert({ title: "Remove Repos?", text: "Its data stays until you erase it.", action: "Remove", danger: true })}>Alert</Button>
+          <Button variant="outline" onClick={() => {
+            const sheet = showSheet({ title: "Vault" })
+            sheet.body.innerHTML = '<p style="padding:1rem">A screen goes here, in its frame.</p>'
+          }}>Sheet</Button>
+        </Row>
       </Section>
     </main>
   )

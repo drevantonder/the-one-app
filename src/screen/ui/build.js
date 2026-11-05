@@ -25,11 +25,11 @@ for (const name of shared) {
 const map = JSON.stringify({ imports })
 writeFileSync(dist("importmap.json"), map + "\n")
 
-// The gallery, a page of its own beside the kit's files (the address's /screen/ui/gallery.html): every component and
+// The gallery, a page of its own beside @one/ui's files (the address's /screen/ui/gallery.html): every component and
 // layout part, with a host that answers only for icons, from the address's set.
 writeFileSync(dist("gallery.html"), `<!doctype html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>UI kit</title>
+<title>@one/ui</title>
 <link rel="stylesheet" href="ui.css"><link rel="stylesheet" href="gallery.css">
 <script>window.__one = { config: {}, host: (m) => m.type === "icons" ? fetch("/icons?names=" + m.names.join(",")).then((r) => r.json()) : Promise.reject(new Error("The gallery only shows the kit.")) };</script>
 <script src="../bridge.js"></script>

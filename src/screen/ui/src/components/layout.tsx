@@ -73,6 +73,8 @@ function useWidth<T extends HTMLElement>() {
   React.useLayoutEffect(() => {
     const el = ref.current
     if (!el) return
+    // Measured at once, before the first paint, so nothing is drawn for a width it doesn't have.
+    setWidth(el.getBoundingClientRect().width)
     const seen = new ResizeObserver(([e]) => setWidth(e.contentRect.width))
     seen.observe(el)
     return () => seen.disconnect()
