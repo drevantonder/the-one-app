@@ -262,6 +262,7 @@ pub fn build(members: &Members, scope: &Scope, state: &ScopeState) -> Result<Con
     }
     own(&tx, state)?;
     tx.commit()?;
+    permissions::close(&db, None)?;
     Ok(db)
 }
 

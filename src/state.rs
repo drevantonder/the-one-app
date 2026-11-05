@@ -73,7 +73,6 @@ pub fn state(m: Option<&ScopeDb>, user: &str, here: Here) -> Value {
 
 fn install(m: &ScopeDb, me: &str, settings: &Map<String, Value>, here: &Here) -> Value {
     let set = rank::set(&m.settings());
-    let scopes = m.scopes();
     let switches = m.switches();
     // Service endpoints are listed as devices too, offering their service.
     let mut devices: Vec<Value> = m
@@ -88,7 +87,7 @@ fn install(m: &ScopeDb, me: &str, settings: &Map<String, Value>, here: &Here) ->
                 "kind": kind, "priority": rank::priority(&set, &hex(&s.key)).to_value(), "far": false, "since": s.since,
                 "key": hex(&s.key), "seal": hex(&s.seal), "name": s.name, "user": s.user, "me": false, "here": false, "online": false,
                 "roles": s.roles, "service": s.service, "device": s.device.as_ref().map(hex), "serves_me": m.serves(&s.key, me),
-                "runs_for": scopes.iter().filter(|scope| m.runs_for(&s.key, scope)).map(|scope| scope.to_string()).collect::<Vec<_>>(),
+                "runs_for": m.run_by(&s.key).iter().map(|scope| scope.to_string()).collect::<Vec<_>>(),
                 "build": null, "target": null, "services": [], "installed_services": [],
                 "off_services": switches.iter().filter(|((k, _), d)| *k == s.key && !d.on).map(|((_, name), d)| json!({ "name": name, "time": d.time })).collect::<Vec<_>>(),
                 "load": null,
@@ -150,7 +149,7 @@ fn install(m: &ScopeDb, me: &str, settings: &Map<String, Value>, here: &Here) ->
         "grants": m.keeps().iter().filter(|((k, s, _), g)| m.may(me, "keep", &object(s)) && m.machine(k).is_some() && m.may(&g.by, "keep", &object(s))).map(|((k, s, a), g)| json!({ "endpoint": hex(k), "scope": s.to_string(), "app": a, "until": g.until, "by": g.by, "keys": g.hashes })).collect::<Vec<_>>(),
         "entries": here.entries, "settings": settings,
         // The serverless node, once an admin deployed one (`serverless deploy` sets `serverless`).
-        "serverless": m.serverless().map(|key| json!({ "priority": rank::priority(&set, rank::CLOUDFLARE).to_value(), "key": hex(&key), "runs_for": scopes.iter().filter(|s| m.runs_for(&key, s)).map(crate::entry::Scope::to_string).collect::<Vec<_>>() })),
+        "serverless": m.serverless().map(|key| json!({ "priority": rank::priority(&set, rank::CLOUDFLARE).to_value(), "key": hex(&key), "runs_for": m.run_by(&key).iter().map(crate::entry::Scope::to_string).collect::<Vec<_>>() })),
     })
 }
 

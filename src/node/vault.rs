@@ -140,7 +140,7 @@ impl Node {
     fn usable_scopes(&self, user: &str) -> Result<Vec<Scope>> {
         self.with(|i| {
             let m = i.r.db();
-            Ok(m.scopes().into_iter().filter(|s| i.r.holds(s) && m.may(user, "use", &scopes::object(s))).collect())
+            Ok(m.may_scopes(user, "use").into_iter().filter(|s| i.r.holds(s)).collect())
         })
     }
 
@@ -148,7 +148,7 @@ impl Node {
     fn managed_scopes(&self, viewer: &Caller, scope: Option<&Scope>) -> Result<Vec<Scope>> {
         self.with(|i| {
             let m = i.r.db();
-            Ok(m.scopes().into_iter().filter(|s| i.r.holds(s) && scope.is_none_or(|w| w == s) && m.may(&viewer.user, "add-apps", &scopes::object(&s))).collect())
+            Ok(m.may_scopes(&viewer.user, "add-apps").into_iter().filter(|s| i.r.holds(s) && scope.is_none_or(|w| w == s)).collect())
         })
     }
 

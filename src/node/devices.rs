@@ -445,7 +445,7 @@ impl Node {
             self.put_checked(vec![entry]).await?;
         }
         let relay = self.tell_relay_as(recovery.clone(), json!({ "add": r.key, "role": "client" })).await.err().map(|err| format!("{err:#}"));
-        let scopes: Vec<Scope> = self.with(|i| Ok(i.r.db().scopes().into_iter().filter(|s| i.r.db().may(&r.user, "use", &scopes::object(s))).collect()))?;
+        let scopes: Vec<Scope> = self.with(|i| Ok(i.r.db().may_scopes(&r.user, "use")))?;
         let (mut sealed, mut not) = (Vec::new(), Vec::new());
         for scope in scopes {
             match self.seal_from_recovery(&scope, recovery, &endpoint).await {
@@ -573,7 +573,7 @@ impl Node {
         }
         let scopes: Vec<Scope> = self.with(|i| {
             let db = i.r.db();
-            Ok(db.scopes().into_iter().filter(|s| db.may(&r.user, "use", &scopes::object(s)) && (invite.is_none() || *s != Scope::User(r.user.clone()))).collect())
+            Ok(db.may_scopes(&r.user, "use").into_iter().filter(|s| invite.is_none() || *s != Scope::User(r.user.clone())).collect())
         })?;
         let (mut sealed, mut not) = (Vec::new(), Vec::new());
         for scope in scopes {

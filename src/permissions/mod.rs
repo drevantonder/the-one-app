@@ -22,7 +22,8 @@
 //! through it, so a row written by a newer one is ignored here, never misread.
 //!
 //! The core's types, their default roles and the rules between them are `DEFAULTS`, rows like any others. Apps add
-//! their own types (`repo`) the same way. Five checks read them:
+//! their own types (`repo`) the same way. Who holds what through them is worked out once the rows are written
+//! (`close`), so each check is a lookup. Five checks read them:
 //! - `may`: whether a principal holds a permission on an object, now.
 //! - `may_give`: no escalation. You give a role only where you may `invite`, only one you hold there yourself (or
 //!   that a role of yours gives), and for no longer than you hold both.
@@ -158,40 +159,110 @@ fn ms(t: u64) -> i64 {
     i64::try_from(t).unwrap_or(FOREVER)
 }
 
-/// Every role `?1` holds while `?2` is before its until, on which object, through usersets and rules:
-/// `held(object, role, until)`, only roles of known types, `until` the soonest of the rows it came through.
+/// Every role each principal holds on which object, through usersets and rules, at any time: `held(principal, object,
+/// role, until)`, only roles of known types, `until` the soonest of the rows it came through. A principal is anyone a
+/// row names as itself (`person:…`, `device:…`), or as the holders of a role on it; or only `?1`, if it's given. A
+/// role reached through others lasts only as long as each, so one is held at a time only by a way whose soonest until
+/// is after it.
 const HELD: &str = "
-with recursive known(type, name, permissions, gives, builtin) as (
+with recursive known(type, name, permissions, gives, builtin) as materialized (
     select ro.type, ro.name,
         (select json_group_array(p.value) from json_each(ro.permissions) p
          where p.value in (select value from json_each(t.permissions))),
         ro.gives, ro.builtin
     from roles ro join types t on t.name = ro.type
 ),
-held(object, role, until) as (
-    select object, relation, coalesce(until, 9223372036854775807) from relations
-    where subject = ?1 and coalesce(until, 9223372036854775807) > ?2
-        and exists (select 1 from known where type = substr(object, 1, instr(object, ':') - 1) and name = relation)
+rows(subject, relation, object, until) as materialized (
+    select subject, relation, object, coalesce(until, 9223372036854775807) from relations r
+    where exists (select 1 from known where type = substr(r.object, 1, instr(r.object, ':') - 1) and name = r.relation)
+),
+principals(p) as (
+    select p from (select iif(instr(subject, '#') > 0, substr(subject, 1, instr(subject, '#') - 1), subject) p from relations)
+    where instr(p, ':') > 1 and instr(p, ':') < length(p) and instr(p, '*') = 0 and (?1 is null or p = ?1)
+),
+-- the rows for everyone who holds a role on an object, and the release's rules, which are few
+usersets(holders, every, role, relation, object, until) as materialized (
+    select substr(subject, 1, instr(subject, '#') - 1), substr(subject, 1, instr(subject, ':')) || '*',
+        substr(subject, instr(subject, '#') + 1), relation, object, until
+    from rows where instr(subject, '#') > 1
+),
+rules(role, relation, object, until) as materialized (
+    select substr(subject, 2), relation, object, until from rows where substr(subject, 1, 1) = '#'
+),
+held(principal, object, role, until) as (
+    select subject, object, relation, until from rows where subject in (select p from principals)
     union
-    select ?1, relation, coalesce(until, 9223372036854775807) from relations
-    where subject = '@' and object = substr(?1, 1, instr(?1, ':')) || '*' and coalesce(until, 9223372036854775807) > ?2
-        and exists (select 1 from known where type = substr(object, 1, instr(object, ':') - 1) and name = relation)
+    select p, p, relation, until from principals join rows on subject = '@' and object = substr(p, 1, instr(p, ':')) || '*'
     union
-    select r.object, r.relation, min(h.until, coalesce(r.until, 9223372036854775807))
-    from held h join relations r on instr(r.subject, '#') > 1
-        and substr(r.subject, instr(r.subject, '#') + 1) = h.role
-        and (substr(r.subject, 1, instr(r.subject, '#') - 1) = h.object
-            or h.object = substr(r.subject, 1, instr(r.subject, ':')) || '*')
-    where coalesce(r.until, 9223372036854775807) > ?2
-        and exists (select 1 from known where type = substr(r.object, 1, instr(r.object, ':') - 1) and name = r.relation)
+    select h.principal, u.object, u.relation, min(h.until, u.until)
+    from held h join usersets u on u.role = h.role and (u.holders = h.object or u.every = h.object)
     union
-    select iif(substr(h.object, -2) = ':*', r.object, h.object), r.relation, min(h.until, coalesce(r.until, 9223372036854775807))
-    from held h join relations r on r.subject = '#' || h.role
+    select h.principal, iif(substr(h.object, -2) = ':*', r.object, h.object), r.relation, min(h.until, r.until)
+    from held h join rules r on r.role = h.role
         and (r.object in (h.object, substr(h.object, 1, instr(h.object, ':')) || '*')
             or h.object = substr(r.object, 1, instr(r.object, ':')) || '*')
-    where coalesce(r.until, 9223372036854775807) > ?2
-        and exists (select 1 from known where type = substr(r.object, 1, instr(r.object, ':') - 1) and name = r.relation)
 )";
+
+/// Works out who holds what, once, for every check to look up: each principal's roles on each object with the latest
+/// they last to (`held`), until when each counts (`counting`), and so what each may do to each object until when
+/// (`allowed`), in tables of the connection's own (`temp`, so no state hash or changeset sees them). Run it once the
+/// rows are written, and again whenever they change: until it's run, every check fails. `only` one person, for asking
+/// of rows added for a moment (an app's own), leaves everyone else out. Kept in memory, as no device need have a place
+/// for temporary files.
+pub fn close(conn: &Connection, only: Option<&str>) -> Result<()> {
+    conn.execute_batch(
+        "pragma temp_store = memory;
+        drop table if exists temp.held;
+        drop table if exists temp.counting;
+        drop table if exists temp.allowed;
+        create temp table held (
+            principal text not null,
+            object text not null,
+            role text not null,
+            until integer not null,
+            -- the role's permissions its type knows, and the roles it gives, both JSON
+            permissions text not null,
+            gives text not null,
+            primary key (principal, object, role)
+        ) without rowid;
+        create temp table counting (principal text primary key, until integer not null) without rowid;
+        create temp table allowed (
+            principal text not null,
+            permission text not null,
+            object text not null,
+            until integer not null,
+            primary key (principal, permission, object)
+        ) without rowid;",
+    )?;
+    conn.execute(
+        &format!(
+            "insert into temp.held {HELD}
+            select h.principal, h.object, h.role, max(h.until), k.permissions, iif(k.builtin, k.gives, '[]') from held h
+                join known k on k.type = substr(h.object, 1, instr(h.object, ':') - 1) and k.name = h.role
+            group by h.principal, h.object, h.role"
+        ),
+        [only],
+    )?;
+    conn.execute_batch(&format!(
+        "-- a person counts while they hold a role on the install
+        insert into temp.counting select principal, max(until) from temp.held
+        where substr(principal, 1, 7) = 'person:' and object in ('{INSTALL}', 'install:*') group by principal;
+        -- a device, while the install's holders of a role, or a person who counts, hold one on it by a row of its own
+        insert into temp.counting
+        select r.object, max(min(coalesce(r.until, {FOREVER}), iif(substr(r.subject, 1, {n}) = '{INSTALL}#', {FOREVER}, c.until)))
+        from relations r join roles ro on ro.type = 'device' and ro.name = r.relation join types t on t.name = ro.type
+            left join temp.counting c on c.principal = r.subject
+        where substr(r.object, 1, 7) = 'device:' and length(r.object) > 7 and instr(r.object, '#') = 0 and instr(r.object, '*') = 0
+            and (substr(r.subject, 1, {n}) = '{INSTALL}#' or c.until is not null)
+        group by r.object;
+        insert into temp.allowed
+        select h.principal, p.value, h.object, min(max(h.until), c.until)
+        from temp.held h join temp.counting c on c.principal = h.principal, json_each(h.permissions) p
+        group by h.principal, p.value, h.object;",
+        n = INSTALL.len() + 1
+    ))?;
+    Ok(())
+}
 
 /// A role someone holds on an object: until when, and the permissions it has and the roles it gives that their type
 /// knows.
@@ -207,14 +278,11 @@ fn holds(conn: &Connection, who: &str, object: &str, now: u64) -> Result<Vec<Hel
     let Some(ty) = type_of(object) else {
         return Ok(Vec::new());
     };
-    let sql = format!(
-        "{HELD}
-        select h.role, max(h.until), k.permissions, iif(k.builtin, k.gives, '[]') from held h
-            join known k on k.type = ?3 and k.name = h.role
-        where h.object in (?4, ?3 || ':*') group by h.role"
-    );
-    let mut q = conn.prepare(&sql)?;
-    let rows = q.query_map(params![who, ms(now), ty, object], |r| Ok((r.get::<_, String>(0)?, r.get(1)?, r.get::<_, String>(2)?, r.get::<_, String>(3)?)))?;
+    let mut q = conn.prepare_cached(
+        "select role, max(until), permissions, gives from temp.held
+        where principal = ?1 and object in (?2, ?3 || ':*') and until > ?4 group by role",
+    )?;
+    let rows = q.query_map(params![who, object, ty, ms(now)], |r| Ok((r.get::<_, String>(0)?, r.get(1)?, r.get::<_, String>(2)?, r.get::<_, String>(3)?)))?;
     rows.map(|row| {
         let (role, until, permissions, gives) = row?;
         Ok(Held { role, until, permissions: serde_json::from_str(&permissions)?, gives: serde_json::from_str(&gives)? })
@@ -225,33 +293,30 @@ fn holds(conn: &Connection, who: &str, object: &str, now: u64) -> Result<Vec<Hel
 /// Whether `principal` counts now: a person who holds a role on the install, or a device that such a person, or the
 /// install, holds a role on by a row of its own.
 fn counts(conn: &Connection, principal: &str, now: u64) -> Result<bool> {
-    if principal.contains('*') {
-        return Ok(false);
-    }
-    match type_of(principal) {
-        Some("person") => Ok(!holds(conn, principal, INSTALL, now)?.is_empty()),
-        Some("device") => {
-            let mut q = conn.prepare(
-                "select r.subject from relations r join roles ro on ro.type = 'device' and ro.name = r.relation
-                 join types t on t.name = ro.type
-                 where r.object = ?1 and coalesce(r.until, 9223372036854775807) > ?2",
-            )?;
-            let holders = q.query_map(params![principal, ms(now)], |r| r.get::<_, String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
-            for h in holders {
-                if h.strip_prefix(INSTALL).is_some_and(|rest| rest.starts_with('#')) || (type_of(&h) == Some("person") && counts(conn, &h, now)?) {
-                    return Ok(true);
-                }
-            }
-            Ok(false)
-        }
-        _ => Ok(false),
-    }
+    let mut q = conn.prepare_cached("select exists (select 1 from temp.counting where principal = ?1 and until > ?2)")?;
+    Ok(q.query_row(params![principal, ms(now)], |r| r.get(0))?)
 }
 
 /// Whether `principal` (`person:…`, `device:…`) may do `permission` to `object` at `now` (ms): it counts, and holds a
 /// role on the object, or on every object of its type, that has the permission, and the type has it too.
 pub fn may(conn: &Connection, principal: &str, permission: &str, object: &str, now: u64) -> Result<bool> {
-    Ok(counts(conn, principal, now)? && holds(conn, principal, object, now)?.iter().any(|h| h.permissions.iter().any(|p| p == permission)))
+    let Some(ty) = type_of(object) else {
+        return Ok(false);
+    };
+    let mut q = conn.prepare_cached("select exists (select 1 from temp.allowed where principal = ?1 and permission = ?2 and object in (?3, ?4 || ':*') and until > ?5)")?;
+    Ok(q.query_row(params![principal, permission, object, ty, ms(now)], |r| r.get(0))?)
+}
+
+/// The objects `principal` may do `permission` to now, `<type>:*` for every one of a type: what `may` says yes to, for
+/// asking of many objects at once (`allows`).
+pub fn objects(conn: &Connection, principal: &str, permission: &str, now: u64) -> Result<Vec<String>> {
+    let mut q = conn.prepare_cached("select object from temp.allowed where principal = ?1 and permission = ?2 and until > ?3")?;
+    Ok(q.query_map(params![principal, permission, ms(now)], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?)
+}
+
+/// Whether what `objects` gave has `object`, or every object of its type: what `may` would say of it.
+pub fn allows(objects: &[String], object: &str) -> bool {
+    type_of(object).is_some_and(|ty| objects.iter().any(|o| o == object || o.strip_suffix(":*") == Some(ty)))
 }
 
 /// A role's permissions that its type has, and whether the release ships it, or None if the type or role is unknown.
@@ -418,6 +483,7 @@ mod tests {
         for (s, r, o, u) in rows {
             conn.execute("insert into relations values (?1, ?2, ?3, ?4)", params![s, r, o, u]).unwrap();
         }
+        close(&conn, None).unwrap();
         let now = 1500;
         let may_cases: &[(&str, &str, &str, bool)] = &[
             ("person:alice", "change-settings", "install:global", true),
@@ -475,6 +541,7 @@ mod tests {
         ];
         for (who, what, on, expected) in may_cases {
             assert_eq!(may(&conn, who, what, on, now).unwrap(), *expected, "may({who}, {what}, {on})");
+            assert_eq!(allows(&objects(&conn, who, what, now).unwrap(), on), *expected, "objects({who}, {what}) has {on}");
         }
 
         // No escalation: only a role you hold (or one of yours gives), for no longer than you hold it; nothing on a
@@ -532,13 +599,16 @@ mod tests {
             assert_eq!(may_take(&conn, taker, from, role, on, now).unwrap(), *expected, "may_take({taker}, {from}, {role}, {on})");
         }
         conn.execute("insert into relations values ('person:bob', 'admin', 'install:global', null)", []).unwrap();
+        close(&conn, None).unwrap();
         assert!(may_take(&conn, "person:alice", "person:alice", "admin", "install:global", now).unwrap());
         // A person's own scope is theirs by the release's rule, whatever happens to a row saying so.
         conn.execute("delete from relations where subject = 'person:bob' and object = 'person:bob'", []).unwrap();
+        close(&conn, None).unwrap();
         assert!(may(&conn, "person:bob", "use", "person:bob", now).unwrap());
         // A rule taken anyway comes back with the release.
         conn.execute("delete from relations where subject = '#admin' and object = 'group:*'", []).unwrap();
         conn.execute_batch(DEFAULTS).unwrap();
+        close(&conn, None).unwrap();
         assert!(may(&conn, "person:carol", "leave", "group:g", now).unwrap());
 
         // The first row of a new device, Vault item, service or app: by whoever may make it there, to its container.
@@ -566,9 +636,11 @@ mod tests {
         assert!(!may_change_role(&conn, "person:alice", "café", "barista", &["use", "run"], now).unwrap());
         conn.execute("insert into roles values ('group', 'editor', '[\"use\"]', '[]', 0)", []).unwrap();
         conn.execute("insert into relations values ('person:frank', 'editor', 'group:g', null)", []).unwrap();
+        close(&conn, None).unwrap();
         assert!(may(&conn, "person:frank", "use", "group:g", now).unwrap());
         assert!(!may_change_role(&conn, "person:alice", "group", "editor", &["use", "add-apps"], now).unwrap());
         conn.execute("insert into relations values ('person:alice', 'admin', 'group:g', null)", []).unwrap();
+        close(&conn, None).unwrap();
         assert!(may_change_role(&conn, "person:alice", "group", "editor", &["use", "add-apps"], now).unwrap());
     }
 }

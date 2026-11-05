@@ -238,6 +238,7 @@ impl ScopeDb {
                     tx.execute("INSERT OR IGNORE INTO relations VALUES (?1, ?2, ?3, ?4)", params![subject, relation, on, until])?;
                 }
             }
+            permissions::close(&tx, Some(&person(user)))?;
             permissions::may(&tx, &person(user), verb, object, now)
         };
         ask().unwrap_or_else(|err| {
@@ -251,18 +252,47 @@ impl ScopeDb {
         self.device_may(key, "run", &object(scope))
     }
 
+    /// What `principal` may do `verb` to (`permissions::objects`), to ask of many at once.
+    fn objects(&self, principal: &str, verb: &str) -> Vec<String> {
+        permissions::objects(&self.db, principal, verb, self.now).unwrap_or_else(|err| {
+            tracing::warn!("asking what may be {verb}: {err:#}");
+            Vec::new()
+        })
+    }
+
+    /// The scopes `user` may `verb`: `may` of every scope.
+    pub fn may_scopes(&self, user: &str, verb: &str) -> Vec<Scope> {
+        let may = self.objects(&person(user), verb);
+        self.scopes().into_iter().filter(|s| permissions::allows(&may, &object(s))).collect()
+    }
+
+    /// The scopes whose calls the device `key` runs: `runs_for` of every scope.
+    pub fn run_by(&self, key: &Key) -> Vec<Scope> {
+        let runs = self.objects(&device(key), "run");
+        self.scopes().into_iter().filter(|s| permissions::allows(&runs, &object(s))).collect()
+    }
+
     /// Whether `key` runs any of `user`'s calls: some scope they may use.
     pub fn serves(&self, key: &Key, user: &str) -> bool {
-        self.user(user).is_some() && self.scopes().iter().any(|s| self.may(user, "use", &object(s)) && self.runs_for(key, s))
+        let uses = self.objects(&person(user), "use");
+        self.user(user).is_some() && self.run_by(key).iter().any(|s| permissions::allows(&uses, &object(s)))
     }
 
     /// The devices a call of `user`'s reaching `scopes` may be passed on to: each runs every one of them, all of which
     /// `user` may use, so none is handed a call, or its keys, that isn't theirs to run.
     pub fn runners(&self, user: &str, scopes: &[Scope]) -> Vec<Machine> {
-        if self.user(user).is_none() || !scopes.iter().all(|s| self.may(user, "use", &object(s))) {
+        let uses = self.objects(&person(user), "use");
+        if self.user(user).is_none() || !scopes.iter().all(|s| permissions::allows(&uses, &object(s))) {
             return Vec::new();
         }
-        self.computes().into_iter().filter(|m| self.serves(&m.key, user) && scopes.iter().all(|s| self.runs_for(&m.key, s))).collect()
+        let all: Vec<String> = self.scopes().iter().map(object).collect();
+        self.computes()
+            .into_iter()
+            .filter(|m| {
+                let runs = self.objects(&device(&m.key), "run");
+                all.iter().any(|o| permissions::allows(&uses, o) && permissions::allows(&runs, o)) && scopes.iter().all(|s| permissions::allows(&runs, &object(s)))
+            })
+            .collect()
     }
 
     /// Whom a scope's epochs are sealed to, besides the recovery key: the client devices of everyone who may use it,
@@ -409,22 +439,28 @@ impl ScopeDb {
         }
     }
 
-    /// Everyone's role in each scope they may use, and in each group they're invited to: (role, invited).
+    /// Everyone's role in each scope they may use, and in each group they're invited to: (role, invited). `role_in` of
+    /// each, at once.
     pub fn roles(&self) -> BTreeMap<(String, Scope), (Role, bool)> {
         let mut out = BTreeMap::new();
-        let groups = self.groups();
-        for u in self.users() {
-            let scopes = [Scope::Global, Scope::User(u.id.clone())].into_iter().chain(groups.iter().map(|g| Scope::Group(g.id.clone())));
-            for scope in scopes {
-                if let Some(role) = self.role_in(&u.id, &scope) {
-                    out.insert((u.id.clone(), scope), (role, false));
-                }
-            }
+        for u in self.users().into_iter().filter(|u| !u.removed) {
+            out.insert((u.id.clone(), Scope::User(u.id.clone())), (Role::Admin, false));
+            out.insert((u.id.clone(), Scope::Global), (u.role, false));
         }
-        for g in &groups {
-            for (user, role) in &g.invited {
-                out.entry((user.clone(), Scope::Group(g.id.clone()))).or_insert((*role, true));
-            }
+        let in_groups = self.rows(
+            "SELECT r.subject, r.object, min(r.relation) FROM relations r JOIN principals g ON g.id = r.object AND g.kind = 'group'
+             WHERE substr(r.subject, 1, 7) = 'person:' AND r.relation IN ('admin', 'member') GROUP BY r.subject, r.object",
+            [],
+            |r| Ok((id(&r.get::<_, String>(0)?), id(&r.get::<_, String>(1)?), role_of(&r.get::<_, String>(2)?))),
+        );
+        for (user, g, role) in in_groups {
+            out.insert((user, Scope::Group(g)), (role, false));
+        }
+        let invited = self.rows("SELECT i.principal, i.invited_to, i.role FROM invites i JOIN principals g ON g.id = i.invited_to AND g.kind = 'group'", [], |r| {
+            Ok((id(&r.get::<_, String>(0)?), id(&r.get::<_, String>(1)?), role_of(&r.get::<_, String>(2)?)))
+        });
+        for (user, g, role) in invited {
+            out.entry((user, Scope::Group(g))).or_insert((role, true));
         }
         out
     }
