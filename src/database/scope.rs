@@ -72,6 +72,10 @@ CREATE TABLE runs (
   device TEXT NOT NULL,
   PRIMARY KEY (principal, device)
 ) STRICT;
+-- Each person whose own device said where their things run, nowhere besides their own machines among them.
+CREATE TABLE runs_chosen (
+  principal TEXT PRIMARY KEY
+) STRICT;
 CREATE TABLE epochs (
   scope TEXT NOT NULL,
   epoch INTEGER NOT NULL,
@@ -298,6 +302,7 @@ fn install(db: &Connection, m: &Members) -> Result<()> {
         )?;
     }
     for (user, on) in &m.runs {
+        db.execute("INSERT INTO runs_chosen VALUES (?)", params![person(user)])?;
         for key in on {
             db.execute("INSERT INTO runs VALUES (?, ?)", params![person(user), hex(key)])?;
         }
@@ -470,6 +475,8 @@ pub(crate) mod tests {
         let rows = |sql: &str| -> Vec<String> { db.prepare(sql).unwrap().query_map([], |r| r.get(0)).unwrap().map(Result::unwrap).collect() };
         let listed = rows("SELECT d.key FROM devices d JOIN principals p ON p.id = d.principal WHERE d.removed = 0 AND p.removed = 0 ORDER BY d.key");
         assert_eq!(listed, m.machines.keys().filter(|k| m.machine(k).is_some()).map(hex).collect::<Vec<_>>(), "the devices listed");
+        let chosen = rows("SELECT principal FROM runs_chosen ORDER BY principal");
+        assert_eq!(chosen, m.runs.keys().map(|u| person(u)).collect::<Vec<_>>(), "who said where their things run, even nowhere else");
         let clients = rows("SELECT d.key FROM devices d JOIN principals p ON p.id = d.principal WHERE d.removed = 0 AND p.removed = 0 AND d.client = 1 ORDER BY d.key");
         assert_eq!(clients, m.clients().map(|c| hex(&c.key)).collect::<Vec<_>>(), "the clients, which sign for their people");
         for k in m.machines.keys().chain(m.serverless().as_ref()) {
