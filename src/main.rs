@@ -957,10 +957,28 @@ fn deploy(dir: &std::path::Path, flags: &Map<String, Value>) -> Result<()> {
         Some(name) => name.to_string(),
         None => dir.canonicalize()?.file_name().context("which app?")?.to_string_lossy().to_string(),
     };
-    let blob = put_blob(&one::deploy::build(dir)?)?;
-    let here =post("/v1/deploy", json!({ "app": name, "bundle": blob, "owner": flags.get("owner"), "wait": true }))?["here"] == true;
-    println!("{}", deployed_said(&format!("Deployed {name} ({}).", &blob[..12]), here));
+    let (blob, service) = built_with_service(dir)?;
+    let here = post("/v1/deploy", json!({ "app": name, "bundle": blob, "owner": flags.get("owner"), "wait": true }))?["here"] == true;
+    println!("{}", deployed_said(&format!("Deployed {name} ({}).{service}", &blob[..12]), here));
     Ok(())
+}
+
+/// The app in `dir` built into a bundle, as a blob of this machine's node, with its service built here for each platform
+/// this machine can build it for, each build a blob its bundle names: → the bundle, and what was built of its service.
+fn built_with_service(dir: &std::path::Path) -> Result<(String, String)> {
+    let mut builds = std::collections::BTreeMap::new();
+    let mut service = String::new();
+    if let Some((built, missed)) = update::build_service(dir)? {
+        for (target, bytes) in &built {
+            builds.insert(target.clone(), put_blob(bytes)?);
+        }
+        let said = |targets: Vec<&str>| targets.into_iter().map(update::platform_said).collect::<Vec<_>>().join(", ");
+        service = format!(" Its service is built for {}.", said(built.iter().map(|(t, _)| t.as_str()).collect()));
+        if !missed.is_empty() {
+            service += &format!(" Not for {}: this machine can't build it for them, so deploy it again from one that can.", said(missed));
+        }
+    }
+    Ok((put_blob(&one::deploy::build(dir, &builds)?)?, service))
 }
 
 /// Keeps `bytes` as a blob on this machine's node, giving its hash.
@@ -968,11 +986,25 @@ fn put_blob(bytes: &[u8]) -> Result<String> {
     Ok(request(agent().post(format!("http://{}/v1/blobs", addr())).send(bytes))?["blob"].as_str().unwrap_or("").to_string())
 }
 
-/// The deploy tool's files built into a bundle on this machine, as a blob of its node's: for React screens, which only
-/// the machine that deploys builds.
-fn built_here(files: &Map<String, Value>) -> Result<String> {
+/// The deploy tool's files built into a bundle on this machine, as a blob of its node's: for React screens and a
+/// service in Go, which only the machine that deploys builds. → the bundle, and what was built of its service.
+fn built_here(files: &Map<String, Value>) -> Result<(String, String)> {
+    anyhow::ensure!(!files.contains_key("service/Cargo.toml"), "its service is in Rust, whose build would run its build scripts here: deploy it with {CLI} deploy <its folder>");
     let files = one::deploy::given(files)?;
-    put_blob(&one::deploy::build_files(&files.iter().map(|(p, b)| (p.as_str(), b.as_slice())).collect::<Vec<_>>())?)
+    if !files.iter().any(|(p, _)| p == "service/go.mod") {
+        return Ok((put_blob(&one::deploy::build_files(&files.iter().map(|(p, b)| (p.as_str(), b.as_slice())).collect::<Vec<_>>())?)?, String::new()));
+    }
+    let dir = std::env::temp_dir().join(format!("{CLI}-deploy-{}", std::process::id()));
+    let built = (|| {
+        for (path, bytes) in &files {
+            let path = dir.join(path);
+            std::fs::create_dir_all(path.parent().unwrap_or(&dir))?;
+            std::fs::write(path, bytes)?;
+        }
+        built_with_service(&dir)
+    })();
+    let _ = std::fs::remove_dir_all(&dir);
+    built
 }
 
 /// What a deploy did, after `done`: which devices run it yet, as far as this one knows (`here`, whether it does).
@@ -2267,7 +2299,7 @@ fn vault_tool(tool: &str, input: &Map<String, Value>, agent: Option<&str>) -> Re
 fn deploy_tool() -> Value {
     json!({
         "name": "deploy",
-        "description": format!("Deploy an app from its files: builds it as {CLI} deploy builds a folder, npm packages, React screens (screens/<name>.jsx, into dist/<name>.html, with this machine's Bun or Node) and all, and makes the app if the name is new, owned by you. Or put back an earlier version. Answers with its tools and how to put it on your page."),
+        "description": format!("Deploy an app from its files: builds it as {CLI} deploy builds a folder, npm packages, React screens (screens/<name>.jsx, into dist/<name>.html, with this machine's Bun or Node), a service in Go (service/go.mod, for every platform, with this machine's Go) and all, and makes the app if the name is new, owned by you. Or put back an earlier version. Answers with its tools and how to put it on your page."),
         "inputSchema": { "type": "object", "required": ["app"], "properties": {
             "app": { "type": "string", "description": "the app's name, lowercase words joined by -, like water-log; a new name makes a new app" },
             "files": { "type": "object", "additionalProperties": { "type": "string" }, "description": "every file of the app, each path → its text: { \"app.js\": \"export default { … }\" }, and package.json for npm packages" },
@@ -2357,10 +2389,14 @@ fn answer_tool(params: &Value, agent: Option<&str>, mode: Mode) -> Value {
         }
         "deploy" => {
             let app = input.get("app").and_then(Value::as_str).unwrap_or("");
+            let mut service = String::new();
             let body = match (input.get("files"), input.get("version")) {
-                // React screens are built here, on the machine that deploys, as `deploy <folder>` builds them.
-                (Some(Value::Object(files)), None) if !signed_in() && one::deploy::has_screens(files.keys().map(String::as_str)) => match built_here(files) {
-                    Ok(bundle) => json!({ "app": app, "bundle": bundle, "wait": true }),
+                // React screens and a service are built here, on the machine that deploys, as `deploy <folder>` builds them.
+                (Some(Value::Object(files)), None) if !signed_in() && (one::deploy::has_screens(files.keys().map(String::as_str)) || files.keys().any(|p| p.starts_with("service/"))) => match built_here(files) {
+                    Ok((bundle, built)) => {
+                        service = built;
+                        json!({ "app": app, "bundle": bundle, "wait": true })
+                    }
                     Err(e) => return failed(format!("{e:#}")),
                 },
                 (Some(files), None) => json!({ "app": app, "files": files, "wait": true }),
@@ -2370,7 +2406,7 @@ fn answer_tool(params: &Value, agent: Option<&str>, mode: Mode) -> Value {
             match post("/v1/deploy", body) {
                 Ok(r) => {
                     let installed = get("/v1/apps").ok().and_then(|a| a.as_array()?.iter().find(|a| a["name"] == app).map(|a| a["installed"].as_array().is_some_and(|i| !i.is_empty())));
-                    json!({ "content": [{ "type": "text", "text": deploy_said(app, &r, installed == Some(true)) }] })
+                    json!({ "content": [{ "type": "text", "text": format!("{}{service}", deploy_said(app, &r, installed == Some(true))) }] })
                 }
                 Err(e) => failed(format!("{e:#}")),
             }

@@ -13,6 +13,7 @@ Your devices, and your team's, as one place for apps and agents. An install is o
 - **Secrets stay put:** a Vault item's secret leaves a node only inside a request to one of its hosts, by an app switched on for it. Nothing reads one back.
 - **Keys decide access; the relay decides who's on the network.** It admits only the install's endpoints, a list devices change by signed tells.
 - **A push is sealed to the one device it's for.** The push Worker, and Apple's, Google's, Microsoft's and browsers' push services, carry locked bytes and read none of them: they see only that a device got a push, and when. A note says which of the install's devices sent it, and an action in one is checked by the device that gets it.
+- **A service runs only the build its app's latest deploy names** for its platform, by hash, the deploy signed by whoever deployed it; or, for a built-in app's whose deploy names none, the newest release. The release key signs only what we ship (oned, the node, built-in apps' services), never a network's own code.
 - **Only the URL signer holds the bucket's credentials;** everything in the bucket is sealed, so what it hands out opens nothing.
 
 ## Rules that span files
@@ -30,7 +31,7 @@ Your devices, and your team's, as one place for apps and agents. An install is o
 - One key per scope at a time, changed only when a person or a lost device is removed, every database copied under the new key and the old one dropped. Today a scope has numbered epochs, and a new one is made when someone loses the right to open it.
 - Backups' recovery from nothing: a device restoring with no one left to pair with admits itself with the recovery key's countersignature.
 - Services each running as their own OS user per scope, and Shell and Computer Use only with a grant for that device and session, approved by the person.
-- A service in a wrapper of ours: its own OS user, only its own folder, no keys, the network only where it says, so the sandbox protects a node, not who wrote the code. The release key signs only what we ship (oned, the node, built-in apps), never a network's own code: an app's deploy, signed by whoever deployed it, carries the hash of each platform's build of its service, and a node runs only a build whose hash matches.
+- A service in a wrapper of ours: its own OS user, only its own folder, no keys, the network only where it says, so the sandbox protects a node, not who wrote the code.
 - Each app one folder in `apps/`, its service's source beside its `app.js`, and each service its own program: none built into the node (today AGENTS.md is) or the Mac app (iMessage, Calendar, Contacts and Reminders, whose macOS permissions belong to the Mac app, so they may ship as helpers inside it).
 - Adding an app as desired state: the App Store only records it, and the core deploys it and runs its service on the node the person chose while adding it.
 - The rest of `docs/plan-device-approval.md`: a push that wakes the phone to check a new device's sign-in.

@@ -530,3 +530,43 @@ async fn a_trace_says_where_a_call_went_and_never_what_it_carried() {
     assert!(said.contains(r#""step":"device""#) && said.contains(r#""op":"read""#) && said.contains(r#""step":"run""#), "{said}");
     assert!(!said.contains("private thought") && !said.contains(&a.user().unwrap()), "a trace holds names and timings alone: {said}");
 }
+
+/// A node runs a build of an app's service only if its app's latest deploy names it: one whose bytes aren't that hash's
+/// is refused, a deploy naming none for this platform runs none, and only someone who may deploy the app names one.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_service_runs_only_the_build_its_apps_deploy_names() {
+    use one::node::Build;
+    let dir = temp("service-build");
+    std::fs::write(dir.join("device.json"), json!({ "secret": one::entry::hex(&rand::random()), "name": "linux" }).to_string()).unwrap();
+    let a = Node::start(&dir, one::services::built_in()).await.unwrap();
+    a.create("Home", "Andre").await.unwrap();
+    let me = one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None, token: None };
+    let build = a.put_blob(b"a program").unwrap();
+    let bundle = |services: Value| {
+        let files = vec![("app.js".to_string(), b"export default { tools: {} }".to_vec()), (one::bundle::SERVICES.to_string(), services.to_string().into_bytes())];
+        a.put_blob(&one::bundle::pack(&files).unwrap()).unwrap()
+    };
+    let named = bundle(json!({ one::config::TARGET: build }));
+    a.deploy_making(&me, "tiny", &named, None, false).await.unwrap();
+    assert_eq!(a.service_builds().await.get("tiny"), Some(&Build::Deployed(build.clone())));
+    assert_eq!(a.service_build(&build).await.unwrap(), b"a program");
+
+    // One byte changed where it's kept, and it isn't the build its deploy names.
+    let kept = one::release::blob_path(&dir, &build).unwrap();
+    std::fs::write(&kept, b"a progran").unwrap();
+    assert!(a.service_build(&build).await.is_err(), "a build whose bytes aren't its hash is refused");
+
+    // A deploy naming builds only for other platforms: none runs here.
+    a.deploy(&me, "tiny", &bundle(json!({ "elsewhere": build })), false).await.unwrap();
+    assert_eq!(a.service_builds().await.get("tiny"), Some(&Build::None));
+
+    // Sam may not deploy Andre's app, so names no build of its service.
+    let sam = one::node::Caller { key: a.id(), user: "sam".into(), agent: None, token: Some("Sam's".into()) };
+    assert!(a.deploy(&sam, "tiny", &named, false).await.is_err());
+    // Nor does Andre, from elsewhere, name a build he can't read: one Sam put, by its hash.
+    let away = one::node::Caller { key: [7; 32], token: Some("Andre's".into()), ..me.clone() };
+    let (sams, _) = a.put_blob_from(&sam, axum::body::Body::from("Sam's program")).await.unwrap();
+    let (his, _) = a.put_blob_from(&away, axum::body::Body::from(one::bundle::pack(&[("app.js".to_string(), b"export default {}".to_vec()), (one::bundle::SERVICES.to_string(), json!({ one::config::TARGET: sams }).to_string().into_bytes())]).unwrap())).await.unwrap();
+    let refused = a.deploy(&away, "tiny", &his, false).await.unwrap_err();
+    assert!(format!("{refused:#}").contains("put it first"), "{refused:#}");
+}

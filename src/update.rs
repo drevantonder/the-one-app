@@ -310,6 +310,61 @@ fn go_build(dir: &Path, os: &str, arch: &str, built: &str, out: &Path) -> Result
     run_quiet(&mut go)
 }
 
+/// A platform as Go names it: its `GOOS` and `GOARCH`.
+fn go_platform(target: &str) -> (&'static str, &'static str) {
+    match target {
+        "x86_64-unknown-linux-gnu" => ("linux", "amd64"),
+        "aarch64-unknown-linux-gnu" => ("linux", "arm64"),
+        _ => ("darwin", "arm64"),
+    }
+}
+
+/// A platform as a person says it.
+pub fn platform_said(target: &str) -> &'static str {
+    match target {
+        "x86_64-unknown-linux-gnu" => "Linux",
+        "aarch64-unknown-linux-gnu" => "Linux on ARM",
+        "aarch64-apple-darwin" => "Mac",
+        _ => "another platform",
+    }
+}
+
+/// Builds the service of the app in `dir` (its `service/`) here, as `deploy` does, for each platform this machine can:
+/// one in Go for every platform, one in Rust for this machine's. Nodes never build. → each build by platform, and the
+/// platforms it couldn't build for; none if the app has no service.
+pub fn build_service(dir: &Path) -> Result<Option<(Vec<(String, Vec<u8>)>, Vec<&'static str>)>> {
+    let source = dir.join("service");
+    let rust = source.join("Cargo.toml").is_file();
+    if !rust && !source.join("go.mod").is_file() {
+        return Ok(None);
+    }
+    let built = git(&source, &["rev-parse", "--short=12", "HEAD"]).unwrap_or_default();
+    let out = std::env::temp_dir().join(format!("{CLI}-service-{}", std::process::id()));
+    let (mut builds, mut missed) = (Vec::new(), Vec::new());
+    for target in PLATFORMS {
+        if rust && target != TARGET {
+            missed.push(target);
+            continue;
+        }
+        let (os, arch) = go_platform(target);
+        match rust {
+            true => {
+                // Cargo says where it put the program it built.
+                let o = Command::new(cargo()).env("ONE_BUILD", &built).args(["build", "--release", "--message-format=json-render-diagnostics", "--manifest-path"]).arg(source.join("Cargo.toml")).output()?;
+                ensure!(o.status.success(), "its service didn't build:\n{}", String::from_utf8_lossy(&o.stderr));
+                let said = String::from_utf8_lossy(&o.stdout);
+                let program = said.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()).filter_map(|m| m["executable"].as_str().map(PathBuf::from)).last();
+                std::fs::copy(program.context("its service's crate builds no program")?, &out)?;
+            }
+            false => go_build(&source, os, arch, &built, &out).with_context(|| format!("build its service for {} (Go: go.dev/doc/install)", platform_said(target)))?,
+        }
+        builds.push((target.to_string(), std::fs::read(&out)?));
+        let _ = std::fs::remove_file(&out);
+    }
+    ensure!(!builds.is_empty(), "its service is in Rust, which this machine ({TARGET}) builds for no platform a node runs: deploy it from Linux or a Mac");
+    Ok(Some((builds, missed)))
+}
+
 /// Builds the Rust service of the app `name` in the checkout `src` for this machine, at `out`, saying it was built
 /// from `built`.
 fn cargo_build(src: &Path, name: &str, built: &str, out: &Path) -> Result<()> {
@@ -381,11 +436,7 @@ fn publish_services(src: &Path, names: &[String], key: &ssh_key::PrivateKey, com
         let each = || -> Result<()> {
             // One in Rust is built for this machine's platform: each Mac builds its own with its app, and carries it.
             for target in PLATFORMS.into_iter().filter(|t| !rust || *t == TARGET) {
-                let (os, arch) = match target {
-                    "x86_64-unknown-linux-gnu" => ("linux", "amd64"),
-                    "aarch64-unknown-linux-gnu" => ("linux", "arm64"),
-                    _ => ("darwin", "arm64"),
-                };
+                let (os, arch) = go_platform(target);
                 let out = cache().join("services").join(format!("{name}-{target}"));
                 std::fs::create_dir_all(out.parent().unwrap_or(&out))?;
                 match rust {

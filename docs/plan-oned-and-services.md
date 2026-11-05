@@ -194,6 +194,11 @@ Check: `one throwaway`, WhatsApp still links and sends; `one throwaway shell run
 
 ### Phase 5: the deploy names its services' builds
 
+Done (2026-11-05). The builds' hashes are in the bundle (`services.json`, `src/bundle.rs`), which the deploy names, so
+a rollback brings its builds back with it, and the deploy lists them among its blobs; no field or table changed. Built-in
+apps' bundles name none yet: a service whose deploy names no build runs its newest release, as before. The deploy tool
+builds a service in Go only (one in Rust would run its build scripts on that machine).
+
 - A deploy gains `services: { platform: hash }`. An older node ignores the field; it runs only release-signed services,
   so it never runs a network's own build.
 - `one deploy` builds the service where it can and puts each build as a blob. The deploy tool (MCP) takes builds the

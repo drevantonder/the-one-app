@@ -1,5 +1,5 @@
 //! Releases of the node and of services in other languages: publishing one, and each device taking the newest it
-//! trusts.
+//! trusts. And the builds of a service a deploy names, which a device runs instead of any release.
 
 use super::*;
 
@@ -90,10 +90,47 @@ impl Node {
         Ok(bytes)
     }
 
+    /// The build of each service a device on this platform runs: the one its app's latest deploy names
+    /// (`bundle::SERVICES`), else its newest release signed with the release key, as built-in apps' services come.
+    pub async fn service_builds(&self) -> BTreeMap<String, Build> {
+        let mut builds: BTreeMap<String, Build> = self.service_releases().into_iter().map(|(n, r)| (n, Build::Released(r))).collect();
+        let bundles = self.with(|i| Ok(i.r.db().apps().into_iter().filter(|a| a.deleted.is_none()).filter_map(|a| Some((a.name, a.bundle?))).collect::<Vec<_>>())).unwrap_or_default();
+        for (app, bundle) in bundles {
+            match self.blob(&bundle).await {
+                Ok(bytes) => match crate::bundle::services(&bytes).remove(crate::config::TARGET) {
+                    Some(build) => drop(builds.insert(app, Build::Deployed(build))),
+                    // A deploy naming builds for other platforms only runs on none here, release or not.
+                    None if !crate::bundle::services(&bytes).is_empty() => drop(builds.insert(app, Build::None)),
+                    None => {}
+                },
+                Err(err) => tracing::debug!("reading {app}'s bundle for its service: {err:#}"),
+            }
+        }
+        builds
+    }
+
+    /// A build of a service its deploy names, fetched if it isn't here, once it's the one by that hash.
+    pub async fn service_build(&self, hash: &str) -> Result<Vec<u8>> {
+        let bytes = self.blob(hash).await?;
+        ensure!(blake3::hash(&bytes).to_hex().as_str() == hash, "it isn't the build its deploy names");
+        Ok(bytes)
+    }
+
     /// The newest release of each service's program for this device's platform, signed with the release key.
     pub fn service_releases(&self) -> BTreeMap<String, Release> {
         let said = self.with(|i| Ok(release::said(&i.r.store.scope("global")?, &i.r.db().releases()))).unwrap_or_default();
         let names: std::collections::BTreeSet<String> = said.iter().filter(|(c, _)| c.kind == release::SERVICE_KIND).filter_map(|(c, _)| c.data["service"].as_str().map(str::to_string)).collect();
         names.into_iter().filter_map(|n| Some((n.clone(), release::latest_said(crate::config::RELEASE_KEY, &said, crate::config::TARGET, Some(&n))?.0))).collect()
     }
+}
+
+/// What a device runs of a service on its platform.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Build {
+    /// The newest release of its program, signed with the release key.
+    Released(Release),
+    /// The build, by its hash, its app's latest deploy names.
+    Deployed(String),
+    /// Nothing: its app's latest deploy names builds, none for this platform.
+    None,
 }

@@ -66,9 +66,14 @@ pub fn chrome() -> Option<std::process::Command> {
 }
 
 /// Builds the app in `dir` into a bundle: `app.js`, the ES module Bun makes from its entry and npm packages, and
-/// `src/`, the folder's files as written (without `node_modules` and dot files).
-pub fn build(dir: &Path) -> Result<Vec<u8>> {
-    bundle(dir, true)
+/// `src/`, the folder's files as written (without `node_modules` and dot files), and `services`, its service's builds
+/// by platform, as blobs (`bundle::SERVICES`).
+pub fn build(dir: &Path, services: &std::collections::BTreeMap<String, String>) -> Result<Vec<u8>> {
+    let mut files = crate::bundle::unpack(&bundle(dir, true)?)?;
+    if !services.is_empty() {
+        files.insert(1, (crate::bundle::SERVICES.to_string(), serde_json::to_vec(services)?));
+    }
+    crate::bundle::pack(&files)
 }
 
 /// `build`, with the React screens built first (`screens`) or, for a built-in app, whose `dist/` was built when it was

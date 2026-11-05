@@ -6,10 +6,12 @@
 //! Only the device's person writes that entry (its switch in Settings' Devices), and oned starts and stops the parts as
 //! it changes. Each process part keeps its own key in its folder (`<home>/services/<name>`), so it answers only its own
 //! person whoever else's calls the device runs, and one failing leaves the rest; nothing approves it by a code, since
-//! its device lists it. Its program is its app's own (`apps/<name>/service/`): `<cli> update` builds it for each
-//! platform it can and publishes it signed with the release key (a `service-release` entry, which an older device
-//! ignores), and oned fetches it, checks the signature and puts it at `~/.local/bin/<cli>-<name>` when it's switched on
-//! and again when a newer one's published; a Mac app carries those in Rust inside it, built with it. Its hello says what the device can run (`parts`) and each part's state (on, off, starting,
+//! its device lists it. Its program is its app's own (`apps/<name>/service/`), and oned runs only a build its app's
+//! latest deploy names for this platform (`bundle::SERVICES`), which `<cli> deploy` builds where it's run, or, for one
+//! whose deploy names none, as a built-in app's, the newest `<cli> update` built and published signed with the release
+//! key (a `service-release` entry, which an older device ignores). oned fetches it, checks its hash or signature and puts
+//! it at `~/.local/bin/<cli>-<name>` when it's switched on and again when another is named or a newer one's published;
+//! a Mac app carries the built-in ones in Rust inside it, built with it. Its hello says what the device can run (`parts`) and each part's state (on, off, starting,
 //! stopping, failed and why), which is what Settings' Devices shows. Removing a device removes its parts, and can erase
 //! what it keeps, which the device does itself, so only while it's reachable. On a Mac the app is oned; a phone runs
 //! none, its app is the device.
@@ -21,7 +23,7 @@ use std::time::{Duration, Instant};
 use serde_json::Value;
 
 use crate::config::CLI;
-use crate::node::Node;
+use crate::node::{Build, Node};
 
 /// What oned is called: its CLI's name and d.
 pub fn name() -> String {
@@ -117,17 +119,23 @@ fn say(node: &Node, runtime: &tokio::runtime::Handle, name: &str, now: Now) {
     }
 }
 
-/// What's put in a service's folder of the release its program came from: its commit's time and its blob.
-fn taken(name: &str) -> (u64, String) {
+/// What's put in a service's folder of the build its program is: its blob, and the release's commit time, or none for
+/// the build a deploy named (`deploy <blob>`).
+fn taken(name: &str) -> (Option<u64>, String) {
     let kept = std::fs::read_to_string(crate::service::folder(name).join("release")).unwrap_or_default();
     let (committed, blob) = kept.trim().split_once(' ').unwrap_or(("0", ""));
-    (committed.parse().unwrap_or(0), blob.to_string())
+    (committed.parse().ok(), blob.to_string())
 }
 
-/// Puts `r`'s program, signed with the release key, where oned runs it, in one step so it never starts half of it.
-fn put(node: &Node, runtime: &tokio::runtime::Handle, name: &str, r: &crate::release::Release) -> anyhow::Result<()> {
+/// Puts the program of `build`, once its signature is the release key's or its hash the one its deploy names, where
+/// oned runs it, in one step so it never starts half of it.
+fn put(node: &Node, runtime: &tokio::runtime::Handle, name: &str, build: &Build) -> anyhow::Result<()> {
     use std::os::unix::fs::PermissionsExt;
-    let bytes = runtime.block_on(node.service_program(r))?;
+    let (bytes, kept) = match build {
+        Build::Released(r) => (runtime.block_on(node.service_program(r))?, format!("{} {}", r.committed, r.blob)),
+        Build::Deployed(hash) => (runtime.block_on(node.service_build(hash))?, format!("deploy {hash}")),
+        Build::None => anyhow::bail!("its deploy names no build for this platform"),
+    };
     let path = fetched(name);
     std::fs::create_dir_all(path.parent().unwrap_or(&path))?;
     let new = path.with_extension("new");
@@ -136,8 +144,8 @@ fn put(node: &Node, runtime: &tokio::runtime::Handle, name: &str, r: &crate::rel
     std::fs::rename(&new, &path)?;
     let folder = crate::service::folder(name);
     std::fs::create_dir_all(&folder)?;
-    std::fs::write(folder.join("release"), format!("{} {}", r.committed, r.blob))?;
-    tracing::info!("oned put {name} {} in place", r.commit);
+    std::fs::write(folder.join("release"), &kept)?;
+    tracing::info!("oned put {name} {kept} in place");
     Ok(())
 }
 
@@ -164,8 +172,8 @@ pub fn keep_parts(node: Node, runtime: tokio::runtime::Handle) {
         let mut running: BTreeMap<String, (std::process::Child, Instant)> = BTreeMap::new();
         // What each part last asked, and when it was listed for it: asked again later, it's listed again.
         let mut listed: BTreeMap<String, (String, Instant)> = BTreeMap::new();
-        // The newest release of each service's program for this platform, looked at now and then.
-        let mut released: BTreeMap<String, crate::release::Release> = BTreeMap::new();
+        // The build of each service's program for this platform, looked at now and then.
+        let mut released: BTreeMap<String, Build> = BTreeMap::new();
         let mut looked: Option<Instant> = None;
         // Programs being fetched, and when fetching each last failed, to try again a minute on.
         let fetching = std::sync::Arc::new(std::sync::Mutex::new(BTreeSet::<String>::new()));
@@ -193,12 +201,12 @@ pub fn keep_parts(node: Node, runtime: tokio::runtime::Handle) {
                 continue;
             }
             if looked.is_none_or(|t| t.elapsed() > Duration::from_secs(60)) {
-                released = node.service_releases();
+                released = runtime.block_on(node.service_builds());
                 looked = Some(Instant::now());
             }
             match node.parts_on() {
                 Ok((install, on)) => {
-                    let names = offered(&released.keys().cloned().collect(), &on);
+                    let names = offered(&released.iter().filter(|(_, b)| **b != Build::None).map(|(n, _)| n.clone()).collect(), &on);
                     NOW.lock().unwrap().1 = names.clone();
                     for name in &names {
                         let wanted = on.contains_key(name);
@@ -213,16 +221,28 @@ pub fn keep_parts(node: Node, runtime: tokio::runtime::Handle) {
                             }
                         }
                         let here = program(name);
+                        // Only a build its app's latest deploy names runs: another deploy stops the one before, and
+                        // one whose deploy names none no longer runs the build a deploy named before.
+                        let (committed, blob) = taken(name);
+                        let named = carried(name).is_some()
+                            || match released.get(name) {
+                                Some(Build::Deployed(hash)) => *hash == blob,
+                                Some(Build::Released(_)) => true,
+                                Some(Build::None) => false,
+                                None => committed.is_some() || blob.is_empty(),
+                            };
                         // Its program, fetched: none is here, or a newer release is out than the one here (or than
                         // one put here by hand, by when it was).
-                        if wanted && carried(name).is_none() && let Some(r) = released.get(name) {
-                            let (committed, blob) = taken(name);
+                        if wanted && carried(name).is_none() && let Some(r) = released.get(name).filter(|b| **b != Build::None) {
                             let had = std::fs::metadata(&here).ok().and_then(|m| m.modified().ok()).map(|t| t.duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs());
-                            let newer = match (had, blob.is_empty()) {
-                                (None, _) => true,
-                                (Some(_), false) => r.blob != blob && r.committed >= committed,
-                                (Some(when), true) => r.committed > when,
+                            let newer = match (r, had, blob.is_empty()) {
+                                (_, None, _) => true,
+                                (Build::Deployed(hash), ..) => *hash != blob,
+                                (Build::Released(r), Some(_), false) => r.blob != blob && committed.is_none_or(|c| r.committed >= c),
+                                (Build::Released(r), Some(when), true) => r.committed > when,
+                                (Build::None, ..) => false,
                             };
+                            let deployed = matches!(r, Build::Deployed(_));
                             let lately = failed.lock().unwrap().get(name).is_some_and(|t| t.elapsed() < Duration::from_secs(60));
                             if newer && !lately && fetching.lock().unwrap().insert(name.clone()) {
                                 // Set up for the first time: shown while it happens. Updated: nothing shows.
@@ -239,7 +259,8 @@ pub fn keep_parts(node: Node, runtime: tokio::runtime::Handle) {
                                         Err(err) => {
                                             tracing::warn!("fetching {name}'s program: {err:#}");
                                             failed.lock().unwrap().insert(name.clone(), Instant::now());
-                                            if had.is_none() {
+                                            // A build its deploy names that fails its check: it runs none, and says why.
+                                            if had.is_none() || deployed {
                                                 say(&node, &runtime, &name, Now { doing: None, problem: Some(format!("Couldn’t set it up: {err:#}")) });
                                             }
                                         }
@@ -248,7 +269,13 @@ pub fn keep_parts(node: Node, runtime: tokio::runtime::Handle) {
                                 });
                             }
                         }
-                        if wanted && !running.contains_key(name) && here.exists() && !fetching.lock().unwrap().contains(name) {
+                        if !named && let Some((child, _)) = running.remove(name) {
+                            stop(name, child);
+                        }
+                        if wanted && released.get(name) == Some(&Build::None) {
+                            say(&node, &runtime, name, Now { doing: None, problem: Some("Its app’s latest deploy has no build of it for this device’s platform.".into()) });
+                        }
+                        if wanted && named && !running.contains_key(name) && here.exists() && !fetching.lock().unwrap().contains(name) {
                             match start(&install, name) {
                                 Ok(child) => {
                                     tracing::info!("oned started {name}");

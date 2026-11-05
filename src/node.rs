@@ -44,6 +44,7 @@ pub use databases::NotGiven;
 pub use devices::{DeviceRequest, Invited};
 pub use net::{alpn, relay, service_alpn};
 pub use calls::Elsewhere;
+pub use releases::Build;
 pub use sessions::{Needs, client_token, passed_token};
 mod services;
 mod standing;
@@ -1400,9 +1401,11 @@ pub fn built_in_bundle(files: &[(&str, &[u8])]) -> Result<Vec<u8>> {
     crate::bundle::pack(&bundle)
 }
 
-/// A deploy of `app`: the bundle at blob `bundle`.
-pub fn deploy(app: &str, bundle: &str) -> Content {
-    Content { blobs: vec![bundle.into()], ..members::node("deploy", json!({ "app": app, "bundle": bundle })) }
+/// A deploy of `app`: the bundle at blob `bundle`, and the builds of its service it names (`bundle::SERVICES`), each a
+/// blob too, so a node that runs it finds it.
+pub fn deploy(app: &str, bundle: &str, builds: impl IntoIterator<Item = String>) -> Content {
+    let blobs = std::iter::once(bundle.to_string()).chain(builds).collect();
+    Content { blobs, ..members::node("deploy", json!({ "app": app, "bundle": bundle })) }
 }
 
 /// Writes a file only this account can read: device keys, pairing secrets.

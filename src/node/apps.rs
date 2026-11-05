@@ -301,7 +301,7 @@ impl Node {
         }
         ensure!(admin, "{app} is built in, but {} doesn't have it yet: an admin adds it first", crate::config::YOURS);
         self.member_as(caller, "app", json!({ "name": app, "owner": "admins" })).await?;
-        self.member_content(caller, deploy(app, bundle)).await
+        self.member_content(caller, deploy(app, bundle, [])).await
     }
 
     /// What an app's latest deploy says it uses: (apps, services). Waits a while for this device to run that deploy.
@@ -382,8 +382,9 @@ impl Node {
             m.app(app).with_context(|| format!("no app named {app}"))?.bundle.with_context(|| format!("{app} has no deploy to fork"))
         })?;
         let owner = owner.map(str::to_string).unwrap_or_else(|| format!("user:{}", caller.user));
+        let builds = crate::bundle::services(&self.blob(&bundle).await?).into_values();
         self.member_as(caller, "app", json!({ "name": name, "owner": owner, "from": app })).await?;
-        self.member_content(caller, deploy(name, &bundle)).await
+        self.member_content(caller, deploy(name, &bundle, builds)).await
     }
 
     /// Deploys `bundle` as `app`'s code, for someone acting for its owner. Deploying an older bundle again rolls back.
@@ -400,10 +401,17 @@ impl Node {
                 None => bundle.to_string(),
             })
         })?;
-        // From elsewhere, only a bundle they may read: their own, or one an entry names for them.
-        ensure!(caller.key == self.0.id || self.may_read_blob(&caller.user, &bundle)?, "{app} has no deploy {bundle}: its versions are in apps_list's history");
-        crate::bundle::module(&self.blob(&bundle).await?)?;
-        self.member_content(caller, deploy(app, &bundle)).await?;
+        // From elsewhere, only a bundle they may read: their own, or one an entry names for them; so too its service's
+        // builds, which the deploy names among its blobs.
+        let mine = |blob: &str| -> Result<bool> { Ok(caller.key == self.0.id || self.may_read_blob(&caller.user, blob)?) };
+        ensure!(mine(&bundle)?, "{app} has no deploy {bundle}: its versions are in apps_list's history");
+        let bytes = self.blob(&bundle).await?;
+        crate::bundle::module(&bytes)?;
+        let builds: Vec<String> = crate::bundle::services(&bytes).into_values().collect();
+        for build in &builds {
+            ensure!(mine(build)?, "{app}'s bundle names a build of its service, {build}, that isn't here: put it first");
+        }
+        self.member_content(caller, deploy(app, &bundle, builds)).await?;
         Ok(wait && self.runs_latest(app, Duration::from_secs(10)).await)
     }
 

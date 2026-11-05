@@ -518,7 +518,8 @@ pub async fn bucket(home: PathBuf) -> Result<()> {
             }
         }
     };
-    axum::serve(listener, axum::Router::new().fallback(answer)).await?;
+    // Any size, as a real bucket takes: a service's build, a release's binary.
+    axum::serve(listener, axum::Router::new().fallback(answer).layer(axum::extract::DefaultBodyLimit::disable())).await?;
     Ok(())
 }
 
