@@ -29,8 +29,7 @@ globalThis.fetch = (input, init) => {
 
 const json = (v, status = 200) => new Response(JSON.stringify(v ?? null), { status, headers: { "content-type": "application/json" } });
 
-/// The app's tools. `app.ops` is their name in apps deployed before 2026-11-05: it goes once none is left.
-const tools = () => app.tools || app.ops || {};
+const tools = () => app.tools || {};
 
 function describe() {
   return {
