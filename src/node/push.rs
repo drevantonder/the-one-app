@@ -1,4 +1,4 @@
-//! The `push` ops (`crate::push`), which every node answers itself for any caller, through the install's push Worker:
+//! The `push` tools (`crate::push`), which every node answers itself for any caller, through the install's push Worker:
 //! never a service a device runs.
 
 use crate::config::YOURS;
@@ -8,7 +8,7 @@ use data_encoding::BASE64URL_NOPAD as B64U;
 use crate::push::{self, Send};
 
 impl Node {
-    /// Runs a push op for `me`: from app `from`, if an app asked.
+    /// Runs a push tool for `me`: from app `from`, if an app asked.
     pub(super) async fn push(&self, op: &str, input: &Value, me: &Caller, from: Option<&str>) -> Result<Value> {
         let text = |name: &str| input[name].as_str().unwrap_or_default().to_string();
         match op {
@@ -38,7 +38,7 @@ impl Node {
                 let said = tokio::task::spawn_blocking(move || -> Result<Value> { Ok(agent().get(format!("{address}/push/key")).call()?.body_mut().read_json()?) }).await??;
                 Ok(json!({ "via": said["via"] }))
             }
-            op => bail!("push has no operation {op}"),
+            op => bail!("push has no tool {op}"),
         }
     }
 

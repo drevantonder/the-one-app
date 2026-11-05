@@ -1,11 +1,11 @@
 // Shell: commands run on the person's own devices. Its service (service/), on each device it's switched on for, runs
 // them for that device's person and logs each in its folder there; this app is what people and agents use.
 
-/// Runs one of the shell service's operations, wherever it runs for the caller. When none of their devices runs it,
+/// Runs one of the shell service's functions, wherever it runs for the caller. When none of their devices runs it,
 /// says what's needed instead of how the call failed.
-async function service(ctx, op, input) {
+async function service(ctx, fn, input) {
   try {
-    return await ctx.services.shell[op](input);
+    return await ctx.services.shell[fn](input);
   } catch (err) {
     if (String(err.message).includes("no device runs shell for you")) throw new Error(NEEDS);
     throw err;

@@ -11,38 +11,38 @@ struct MessagesApp: Service {
         return describe(title: "iMessage", icon: "chat-circle", localApp: "com.apple.MobileSMS", summary: "Lets your apps and agents read and send your Messages", instructions:
             "iMessage is the person's Messages on their Mac, iMessage and SMS. imessage_chats lists recent chats; imessage_read reads one, newest last; " +
             "imessage_search finds messages. imessage_send sends a real message to a real person: send only what the user asked to send, to whom they asked. " +
-            "Reading never marks a message read.", ops: [
-            op("chats", "Recent chats, most recent first: who, when, the last message, and how many are unread.", [
+            "Reading never marks a message read.", functions: [
+            function("chats", "Recent chats, most recent first: who, when, the last message, and how many are unread.", [
                 "unread": flag("only chats with unread messages"),
                 "limit": num("at most this many; default 30"),
                 "skip": num("skip this many of the most recent, to page back"),
             ]),
-            op("read", "A chat's messages, newest last. Page back with skip.", [
+            function("read", "A chat's messages, newest last. Page back with skip.", [
                 "chat": chat, "since": since,
                 "limit": num("this many; default 30"),
                 "skip": num("skip this many of the newest, to read further back"),
             ], required: ["chat"]),
-            op("search", "Messages containing some text, across chats or in one, newest last.", [
+            function("search", "Messages containing some text, across chats or in one, newest last.", [
                 "query": str("text to look for, case-insensitive"), "chat": str("only in this chat"), "since": since,
                 "limit": num("at most this many; default 30"),
                 "skip": num("skip this many of the newest matches, to page back"),
             ], required: ["query"]),
-            op("send", "Send an iMessage from the person's account, to a phone number, an email address or a chat. This sends a real message to a real person.", [
+            function("send", "Send an iMessage from the person's account, to a phone number, an email address or a chat. This sends a real message to a real person.", [
                 "to": str("a phone number with its country code, an email address, or a chat as chats names it"),
                 "text": str("the message"),
             ], required: ["to", "text"]),
         ])
     }
 
-    func run(_ op: String, _ input: Input) async throws -> Any {
-        if op == "send", let to = input.string("to"), to.contains("@") || isPhone(to) {
+    func run(_ function: String, _ input: Input) async throws -> Any {
+        if function == "send", let to = input.string("to"), to.contains("@") || isPhone(to) {
             try await tell("participant", to, input.text("text"))
             return "Sent to \(to)."
         }
         let db = try ChatDB()
         let names = ContactsApp.names()
         let chats = try db.chats(names)
-        switch op {
+        switch function {
         case "chats":
             let shown = input.bool("unread") == true ? chats.filter { $0.unread > 0 } : chats
             return shown.dropFirst(input.int("skip", or: 0)).prefix(input.int("limit", or: 30)).map { c in
@@ -66,7 +66,7 @@ struct MessagesApp: Service {
             try await tell("chat", chat.guid, input.text("text"))
             return "Sent to \(chat.name)."
         default:
-            throw Refusal("imessage has no operation \(op)")
+            throw Refusal("imessage has no function \(function)")
         }
     }
 

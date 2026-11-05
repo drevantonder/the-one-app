@@ -1,11 +1,11 @@
 // Contacts: Contacts on the person's Mac. The contacts service lives in the Mac app, which macOS lets reach Contacts;
 // this app is what people and agents use, wherever they are.
 
-/// Runs one of the contacts service's operations, wherever it runs for the caller. When none of their devices runs it,
+/// Runs one of the contacts service's functions, wherever it runs for the caller. When none of their devices runs it,
 /// says what's needed instead of how the call failed.
-async function service(ctx, op, input) {
+async function service(ctx, fn, input) {
   try {
-    return await ctx.services.contacts[op](input);
+    return await ctx.services.contacts[fn](input);
   } catch (err) {
     if (String(err.message).includes("no device runs contacts for you")) throw new Error(NEEDS);
     throw err;

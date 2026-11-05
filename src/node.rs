@@ -127,7 +127,7 @@ struct InstallFile {
     folders: BTreeMap<String, String>,
 }
 
-/// A service serving on a device: its name, the users it serves, and what it does (its operations), which callers
+/// A service serving on a device: its name, the users it serves, and what it does (its functions), which callers
 /// list until apps wrap services.
 pub type Service = (String, Vec<String>, Value);
 
@@ -245,7 +245,7 @@ pub struct Caller {
     pub token: Option<String>,
 }
 
-/// An operation to run: of an app, or of a service.
+/// A call to run: an app's tool, or a service's function.
 #[derive(Clone, Debug, Default, Deserialize)]
 pub struct CallRequest {
     /// Names this call wherever it's tried, so a call that writes runs on one device only: the first to take its lease.
@@ -254,7 +254,7 @@ pub struct CallRequest {
     /// The app, or for a service's call, the service.
     #[serde(default)]
     pub app: String,
-    /// The service whose operation this is, when it is one: an app and the service it wraps may share a name.
+    /// The service whose function this is, when it is one: an app and the service it wraps may share a name.
     #[serde(default)]
     pub service: Option<String>,
     pub op: String,

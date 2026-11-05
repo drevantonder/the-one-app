@@ -8,8 +8,8 @@
 //! seal key (`cloudflare::seal_to`), the key the install's signed entries list for it, never one a node or a Worker says.
 //!
 //! Each device that gets pushes registers its address with the Worker itself (`register_request`). A node answers the
-//! `push` ops for any caller (`node::push`): `send` seals a note to each of the caller's devices and hands them to the
-//! Worker. Phones that registered with a node before notes (the `register` op, their APNs token) can't open a note: the
+//! `push` tools for any caller (`node::push`): `send` seals a note to each of the caller's devices and hands them to the
+//! Worker. Phones that registered with a node before notes (the `register` tool, their APNs token) can't open a note: the
 //! Worker keeps them as their person's, and sends them the plain alert they understand until they register themselves.
 
 use anyhow::{Result, anyhow, ensure};

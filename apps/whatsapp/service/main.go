@@ -24,9 +24,10 @@ import (
 const app = "whatsapp"
 
 type call struct {
-	ID    uint64          `json:"id"`
-	Op    string          `json:"op"`
-	Input json.RawMessage `json:"input"`
+	ID uint64 `json:"id"`
+	// The function it runs: "op" on the wire, which older nodes send.
+	Function string          `json:"op"`
+	Input    json.RawMessage `json:"input"`
 }
 
 func main() {
@@ -64,7 +65,7 @@ func serve(node string, w *whatsapp) {
 				continue
 			}
 			go func() {
-				result, err := w.run(context.Background(), c.Op, c.Input)
+				result, err := w.run(context.Background(), c.Function, c.Input)
 				reply := map[string]any{"ok": result}
 				var away elsewhere
 				switch {
@@ -74,7 +75,7 @@ func serve(node string, w *whatsapp) {
 					reply = map[string]any{"error": err.Error()}
 				}
 				if err := post(fmt.Sprintf("%s/v1/services/%s/calls/%d", node, app, c.ID), reply); err != nil {
-					log.Printf("answering %s: %v", c.Op, err)
+					log.Printf("answering %s: %v", c.Function, err)
 				}
 			}()
 		}
@@ -139,11 +140,11 @@ func request(client *http.Client, url string, body any) ([]byte, error) {
 	return msg, nil
 }
 
-// callOn runs one of this service's operations on another of the user's
+// callOn runs one of this service's functions on another of the user's
 // devices, through this device's node, and decodes its result into out.
-func callOn(node, device, op string, input, out any) error {
+func callOn(node, device, function string, input, out any) error {
 	body, err := request(&http.Client{Timeout: 28 * time.Second, Transport: toNode}, node+"/v1/call",
-		map[string]any{"app": app, "service": app, "op": op, "input": input, "device": device})
+		map[string]any{"app": app, "service": app, "op": function, "input": input, "device": device})
 	if err != nil {
 		return err
 	}

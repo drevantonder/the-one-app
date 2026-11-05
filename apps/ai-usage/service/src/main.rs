@@ -79,7 +79,7 @@ fn now_ms() -> u64 {
 }
 
 fn call(_host: &Host, call: &Call) -> Result<Value> {
-    match call.op.as_str() {
+    match call.function.as_str() {
         "accounts" => Ok(json!({ "accounts": discover().iter().map(|a| json!({
             "provider": a.provider, "account": if a.org.is_empty() { a.email.clone() } else { format!("{} · {}", a.org, a.email) },
             "email": a.email, "org": a.org, "active": a.active, "disabled": a.disabled,
@@ -95,7 +95,7 @@ fn call(_host: &Host, call: &Call) -> Result<Value> {
             });
             Ok(json!({ "accounts": readings }))
         }
-        op => bail!("ai-usage has no operation {op}"),
+        function => bail!("ai-usage has no function {function}"),
     }
 }
 

@@ -872,10 +872,10 @@ impl Devices {
     }
 
     /// Runs chrome and set_chrome.
-    pub(super) fn run_chrome(&self, caller: &Caller, op: &str, here: bool, input: &Input) -> Result<Value> {
+    pub(super) fn run_chrome(&self, caller: &Caller, function: &str, here: bool, input: &Input) -> Result<Value> {
         let (me, all) = self.machines()?;
         let mine = self.chrome_row(&me);
-        if op == "chrome" {
+        if function == "chrome" {
             if here {
                 return Ok(mine);
             }

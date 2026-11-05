@@ -1,11 +1,11 @@
 // Calendar: Calendar on the person's Mac. The calendar service lives in the Mac app, which macOS lets reach Calendar;
 // this app is what people and agents use, wherever they are.
 
-/// Runs one of the calendar service's operations, wherever it runs for the caller. When none of their devices runs it,
+/// Runs one of the calendar service's functions, wherever it runs for the caller. When none of their devices runs it,
 /// says what's needed instead of how the call failed.
-async function service(ctx, op, input) {
+async function service(ctx, fn, input) {
   try {
-    return await ctx.services.calendar[op](input);
+    return await ctx.services.calendar[fn](input);
   } catch (err) {
     if (String(err.message).includes("no device runs calendar for you")) throw new Error(NEEDS);
     throw err;

@@ -754,15 +754,15 @@ impl Devices {
         out
     }
 
-    /// Runs the operations that pick a kind, or act on a device of a kind other than linux; none for the rest, which
+    /// Runs the functions that pick a kind, or act on a device of a kind other than linux; none for the rest, which
     /// the Linux devices' code runs.
-    pub(super) fn run_kinds(&self, caller: &Caller, op: &str, name: &str, here: bool, input: &mut Input) -> Option<Result<Value>> {
+    pub(super) fn run_kinds(&self, caller: &Caller, function: &str, name: &str, here: bool, input: &mut Input) -> Option<Result<Value>> {
         let mut kind_name = text(input, "kind");
         if kind_name == LINUX {
             kind_name.clear();
         }
         let v = if name.is_empty() { None } else { self.vm_named(name) };
-        match op {
+        match function {
             "kinds" => {
                 let me = self.me();
                 let mine = json!({ "device": me, "kinds": self.kinds_here(), "free_gb": super::pool::memory().0 >> 30 });
@@ -788,13 +788,13 @@ impl Devices {
                 if kind_name.is_empty() {
                     return None;
                 }
-                return Some(self.create_or_borrow(caller, op, name, here, &kind_name, v.is_some(), input));
+                return Some(self.create_or_borrow(caller, function, name, here, &kind_name, v.is_some(), input));
             }
             _ => {}
         }
         let Some(mut v) = v else {
-            if ["open", "install", "run"].contains(&op) {
-                return Some(self.run_linux(op, name, input));
+            if ["open", "install", "run"].contains(&function) {
+                return Some(self.run_linux(function, name, input));
             }
             return None;
         };
@@ -802,11 +802,11 @@ impl Devices {
         if !k.can().is_empty() {
             return Some(Err(anyhow!("{} is a {} device, which this machine can't run now", v.name, v.kind)));
         }
-        if v.kind == super::chrome::NAME && super::BROWSING.contains(&op) {
-            return Some(self.browse(&mut v, op, input));
+        if v.kind == super::chrome::NAME && super::BROWSING.contains(&function) {
+            return Some(self.browse(&mut v, function, input));
         }
         Some((|| -> Result<Value> {
-            match op {
+            match function {
                 "start" => {
                     self.awake(&mut v)?;
                     Ok(json!("Started."))
@@ -862,18 +862,18 @@ impl Devices {
                     }
                     Ok(json!(k.reach(self, &v, port)?))
                 }
-                _ => bail!("{} is a {} device: {op} works on Linux devices only, for now", v.name, k.title()),
+                _ => bail!("{} is a {} device: {function} works on Linux devices only, for now", v.name, k.title()),
             }
         })())
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn create_or_borrow(&self, caller: &Caller, op: &str, name: &str, here: bool, kind_name: &str, named: bool, input: &Input) -> Result<Value> {
+    fn create_or_borrow(&self, caller: &Caller, function: &str, name: &str, here: bool, kind_name: &str, named: bool, input: &Input) -> Result<Value> {
         let k = kind_named(kind_name)?;
-        if k.name() == super::chrome::NAME && op == "create" {
+        if k.name() == super::chrome::NAME && function == "create" {
             bail!("chrome devices are only borrowed, each by one agent: borrow one with kind chrome");
         }
-        if !named && !here && let Some(r) = self.first(op, k.name(), name, input) {
+        if !named && !here && let Some(r) = self.first(function, k.name(), name, input) {
             return r;
         }
         if k.name() == super::chrome::NAME {
@@ -883,7 +883,7 @@ impl Devices {
         if !why.is_empty() {
             bail!("none of your devices runs {} agent devices (here: {why})", k.title());
         }
-        if op == "create" {
+        if function == "create" {
             if name.is_empty() {
                 bail!("name it: lowercase letters, digits and dashes");
             }
@@ -948,9 +948,9 @@ impl Devices {
     }
 
     /// Runs open, install and run on a Linux device.
-    fn run_linux(&self, op: &str, name: &str, input: &Input) -> Result<Value> {
+    fn run_linux(&self, function: &str, name: &str, input: &Input) -> Result<Value> {
         let d = self.running(name)?;
-        let script = match op {
+        let script = match function {
             "open" => {
                 let url = text(input, "url");
                 if url.is_empty() {
@@ -977,7 +977,7 @@ impl Devices {
         if let Err(err) = self.exec(&d, Some(&mut script.as_bytes()), Some(&mut out), &["sh", "-s"]) {
             bail!("{err:#}\n{}", String::from_utf8_lossy(&out));
         }
-        if op == "open" {
+        if function == "open" {
             return Ok(json!("Opened."));
         }
         Ok(json!(String::from_utf8_lossy(&out)))

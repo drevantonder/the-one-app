@@ -596,7 +596,7 @@ fn devices(dir: &Path) -> serde_json::Map<String, Value> {
     std::fs::read(dir.join("devices.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
 }
 
-/// One of this machine's install's Agent Devices' operations (not the throwaway network's, which has none). When the node
+/// One of this machine's install's Agent Devices tools (not the throwaway network's, which has none). When the node
 /// restarts during it (an update), or its service is still coming back, it's asked again once they answer.
 fn agent_devices(op: &str, input: Value) -> Result<Value> {
     Ok(again(|| post("/v1/call", json!({ "app": "agent-devices", "op": op, "input": input, "client": "one throwaway" })))?["ok"].clone())

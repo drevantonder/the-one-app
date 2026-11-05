@@ -46,7 +46,9 @@ const GONE_AFTER: Duration = Duration::from_secs(60);
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Call {
     pub id: u64,
-    pub op: String,
+    /// The function it runs: `op` on the wire, which older services read.
+    #[serde(rename = "op")]
+    pub function: String,
     pub input: Value,
     pub caller: Me,
     /// The app whose `ctx.services` made the call, if one did.
@@ -122,7 +124,7 @@ impl Services {
 
     /// Hands a call to the service and waits for its reply: `{ ok, blobs? }` or `{ error }`. A blob it names, the
     /// caller's scope keeps, so the devices that hold the scope can fetch it.
-    pub async fn call(&self, app: &str, op: &str, input: Value, caller: Me, from: Option<String>) -> Result<Answer> {
+    pub async fn call(&self, app: &str, function: &str, input: Value, caller: Me, from: Option<String>) -> Result<Answer> {
         // A node that just started, an update's, waits a moment for its services to register again with it.
         let mut p = self.get(app);
         let until = Instant::now() + Duration::from_secs(5);
@@ -135,7 +137,7 @@ impl Services {
         let id = self.next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let (tx, rx) = oneshot::channel();
         p.replies.lock().unwrap().insert(id, (tx, caller.clone()));
-        p.calls.send(Call { id, op: op.into(), input, caller, from }).map_err(|_| anyhow!("{title} stopped"))?;
+        p.calls.send(Call { id, function: function.into(), input, caller, from }).map_err(|_| anyhow!("{title} stopped"))?;
         let reply = tokio::time::timeout(Duration::from_secs(600), rx).await.map_err(|_| anyhow!("{title} didn't answer"))??;
         if let Some(why) = reply.get("elsewhere") {
             return Err(Elsewhere(why.as_str().unwrap_or("it can't run here").into()).into());

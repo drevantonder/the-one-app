@@ -121,8 +121,8 @@ func (l *link) remove() error {
 	return errors.Join(errs...)
 }
 
-// run runs one of a linked account's own operations.
-func (l *link) run(ctx context.Context, op string, raw json.RawMessage) (any, error) {
+// run runs one of a linked account's own functions.
+func (l *link) run(ctx context.Context, function string, raw json.RawMessage) (any, error) {
 	var in struct {
 		Chat, Query, Text string
 		Unread            bool
@@ -134,7 +134,7 @@ func (l *link) run(ctx context.Context, op string, raw json.RawMessage) (any, er
 		}
 	}
 	in.Limit = cmp.Or(in.Limit, 30)
-	switch op {
+	switch function {
 	case "chats":
 		return l.chats(ctx, in.Unread, in.Limit, in.Skip)
 	case "read":
@@ -167,7 +167,7 @@ func (l *link) run(ctx context.Context, op string, raw json.RawMessage) (any, er
 	case "send":
 		return l.send(ctx, in.Chat, in.Text)
 	}
-	return nil, fmt.Errorf("whatsapp has no operation %s", op)
+	return nil, fmt.Errorf("whatsapp has no function %s", function)
 }
 
 func (l *link) status() (string, error) {

@@ -2,11 +2,11 @@
 // the ones on its machine, and a call goes on to the next device when a model isn't there; this app is what people,
 // agents and other apps use.
 
-/// Runs one of the models service's operations, on `device` if it's given, else wherever it runs for the caller. When
+/// Runs one of the models service's functions, on `device` if it's given, else wherever it runs for the caller. When
 /// none of their devices runs it, says what's needed instead of how the call failed.
-async function service(ctx, op, { device, ...input }) {
+async function service(ctx, fn, { device, ...input }) {
   try {
-    return await ctx.services.models[op](input, device ? { device } : undefined);
+    return await ctx.services.models[fn](input, device ? { device } : undefined);
   } catch (err) {
     if (String(err.message).includes("no device runs models for you")) throw new Error(NEEDS);
     throw err;

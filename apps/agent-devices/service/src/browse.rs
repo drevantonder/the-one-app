@@ -149,7 +149,7 @@ fn ax_text(v: &Value) -> String {
 }
 
 impl Devices {
-    pub(super) fn browse(&self, v: &mut Vm, op: &str, input: &Input) -> Result<Value> {
+    pub(super) fn browse(&self, v: &mut Vm, function: &str, input: &Input) -> Result<Value> {
         self.awake(v)?;
         let b = live_browser(v)?;
         let t = |k: &str| input.get(k).and_then(Value::as_str).unwrap_or_default().to_string();
@@ -158,7 +158,7 @@ impl Devices {
         if !t("target_id").is_empty() && t("target_id") != target {
             return Ok(refused("browser_target_unknown", &format!("target_id {} isn't {}'s Chrome: it's {target}", t("target_id"), v.name), None));
         }
-        if op == "browser_prepare" {
+        if function == "browser_prepare" {
             let session = b.current_page()?;
             let tab = tab_id(&b.page(&session).map(|p| p.target).unwrap_or_default());
             let tabs = b.tabs().unwrap_or_default();
@@ -179,7 +179,7 @@ impl Devices {
             m
         };
         let open = page.dialog.clone();
-        if let Some(d) = open.as_ref().filter(|_| op != "browser_dialog") {
+        if let Some(d) = open.as_ref().filter(|_| function != "browser_dialog") {
             return Ok(refused("browser_dialog_open", &format!("a {} dialog is open in {tab} ({}): answer it with browser_dialog first", d.kind, q(&d.message)), Some(with(json!({ "dialog_id": d.id })))));
         }
         // The page's thing a ref names, or a refusal.
@@ -190,7 +190,7 @@ impl Devices {
         };
         let gone = |r: &str| refused("browser_ref_stale", &format!("ref {r} is gone from the page: re-run get_browser_state"), Some(with(json!({}))));
         let mode = or(&t("delivery_mode"), "background");
-        match op {
+        match function {
             "get_browser_state" => self.state(&b, &session, &ids, input),
             "browser_navigate" => {
                 let url = t("url").trim().to_string();
@@ -380,7 +380,7 @@ impl Devices {
                 }
                 _ => bail!("action is inspect, accept or dismiss"),
             },
-            op => bail!("no browser tool {op}"),
+            function => bail!("no browser tool {function}"),
         }
     }
 

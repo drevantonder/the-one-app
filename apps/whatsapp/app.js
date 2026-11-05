@@ -4,13 +4,13 @@
 
 import settings from "./dist/settings.html" with { type: "text" };
 
-/// Runs one of the whatsapp service's operations, wherever it runs for the caller, or on the device `input.device`
+/// Runs one of the whatsapp service's functions, wherever it runs for the caller, or on the device `input.device`
 /// names. When none of their devices runs it, says what's needed instead of how the call failed; when a chat isn't
 /// found, where to find it.
-async function service(ctx, op, input = {}) {
+async function service(ctx, fn, input = {}) {
   const { device, ...rest } = input;
   try {
-    return await ctx.services.whatsapp[op](rest, device ? { device } : undefined);
+    return await ctx.services.whatsapp[fn](rest, device ? { device } : undefined);
   } catch (err) {
     const why = String(err.message);
     if (why.includes("no device runs whatsapp for you")) throw new Error(NEEDS);

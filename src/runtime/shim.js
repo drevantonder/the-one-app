@@ -65,7 +65,7 @@ function describe() {
   };
 }
 
-/// Asks the node something for the call with `token`: other apps' and services' operations, blobs, the install's apps.
+/// Asks the node something for the call with `token`: other apps' tools and its own service's functions, blobs, the install's apps.
 async function askNode(token, path, init = {}) {
   const r = await fetchOut(new Request(`http://one.internal/${path}`, { ...init, headers: { "x-one-call": token } }));
   if (!r.ok) throw new Error(await r.text());

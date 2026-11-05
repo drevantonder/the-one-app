@@ -33,7 +33,7 @@ fn describe() -> Value {
 }
 
 fn call(_: &Host, call: &Call) -> Result<Answer> {
-    bail!("agents has no function {}", call.op)
+    bail!("agents has no function {}", call.function)
 }
 
 fn start(host: &Host) {

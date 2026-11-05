@@ -51,23 +51,23 @@ struct RemindersApp: Service {
         let priority = str("high, medium, low or none")
         return describe(title: "Reminders", icon: "list-checks", localApp: "com.apple.reminders", summary: "Lets your apps and agents use Reminders on your Mac", instructions:
             "Reminders are the person's Apple Reminders, through their Mac, and sync to their other Apple devices. reminders_lists lists the lists; " +
-            "reminders_list lists reminders, soonest due first, leaving out completed ones unless asked. reminders_update also completes one.", ops: [
-            op("lists", "The reminder lists."),
-            op("list", "Reminders, soonest due first; only those not completed, unless asked.", [
+            "reminders_list lists reminders, soonest due first, leaving out completed ones unless asked. reminders_update also completes one.", functions: [
+            function("lists", "The reminder lists."),
+            function("list", "Reminders, soonest due first; only those not completed, unless asked.", [
                 "list": str("a list's name; omit for every list"),
                 "until": str("only reminders due by then: an ISO 8601 date or date-time"),
                 "query": str("only reminders whose title or notes contain this"),
                 "completed": flag("include completed reminders"),
                 "limit": num("at most this many; default 100"),
             ]),
-            op("create", "Create a reminder.", [
+            function("create", "Create a reminder.", [
                 "title": str("what to be reminded of"),
                 "list": str("a list's name; default is the default list"),
                 "due": str("an ISO 8601 date (2026-11-01), or a date-time (2026-11-01T09:00) to be alerted then"),
                 "notes": str("more detail"),
                 "priority": priority,
             ], required: ["title"]),
-            op("update", "Change a reminder, or complete it.", [
+            function("update", "Change a reminder, or complete it.", [
                 "id": str("the reminder's id, as list gives it"),
                 "title": str("a new title"),
                 "list": str("move it to this list"),
@@ -76,14 +76,14 @@ struct RemindersApp: Service {
                 "priority": priority,
                 "completed": flag("true completes it; false makes it not done again"),
             ], required: ["id"]),
-            op("delete", "Delete a reminder.", ["id": str("the reminder's id, as list gives it")], required: ["id"]),
+            function("delete", "Delete a reminder.", ["id": str("the reminder's id, as list gives it")], required: ["id"]),
         ])
     }
 
-    func run(_ op: String, _ input: Input) async throws -> Any {
+    func run(_ function: String, _ input: Input) async throws -> Any {
         let ek = Events.shared, store = ek.store
         try await ek.access(.reminder)
-        switch op {
+        switch function {
         case "lists":
             let preferred = store.defaultCalendarForNewReminders()?.calendarIdentifier
             return store.calendars(for: .reminder).map { c in
@@ -126,7 +126,7 @@ struct RemindersApp: Service {
             try store.remove(r, commit: true)
             return "Deleted \(r.title ?? "the reminder")."
         default:
-            throw Refusal("reminders has no operation \(op)")
+            throw Refusal("reminders has no function \(function)")
         }
     }
 
@@ -185,25 +185,25 @@ struct CalendarApp: Service {
         let future = flag("for a repeating event, this occurrence and every later one, not just this one")
         return describe(title: "Calendar", icon: "calendar", localApp: "com.apple.iCal", summary: "Lets your apps and agents use Calendar on your Mac", instructions:
             "Calendar is the person's Apple Calendar through their Mac: every account it has, such as iCloud, Google or Exchange. " +
-            "calendar_events lists events in a time range, by default the coming week. Times are ISO 8601; without an offset they're in the Mac's time zone.", ops: [
-            op("calendars", "The calendars, with whether each can be changed."),
-            op("events", "Events in a time range, earliest first.", [
+            "calendar_events lists events in a time range, by default the coming week. Times are ISO 8601; without an offset they're in the Mac's time zone.", functions: [
+            function("calendars", "The calendars, with whether each can be changed."),
+            function("events", "Events in a time range, earliest first.", [
                 "from": str("ISO 8601; default the start of today"),
                 "to": str("ISO 8601; a date includes that whole day; default a week after from"),
                 "calendar": str("a calendar's name; omit for every calendar"),
                 "query": str("only events whose title, location or notes contain this"),
                 "limit": num("at most this many; default 200"),
             ]),
-            op("create", "Create an event.", fields, required: ["title", "start"]),
-            op("update", "Change an event: only the fields given.", fields.merging(["id": id, "future": future]) { a, _ in a }, required: ["id"]),
-            op("delete", "Delete an event.", ["id": id, "future": future], required: ["id"]),
+            function("create", "Create an event.", fields, required: ["title", "start"]),
+            function("update", "Change an event: only the fields given.", fields.merging(["id": id, "future": future]) { a, _ in a }, required: ["id"]),
+            function("delete", "Delete an event.", ["id": id, "future": future], required: ["id"]),
         ])
     }
 
-    func run(_ op: String, _ input: Input) async throws -> Any {
+    func run(_ function: String, _ input: Input) async throws -> Any {
         let ek = Events.shared, store = ek.store
         try await ek.access(.event)
-        switch op {
+        switch function {
         case "calendars":
             let preferred = store.defaultCalendarForNewEvents?.calendarIdentifier
             return store.calendars(for: .event).map { c in
@@ -241,7 +241,7 @@ struct CalendarApp: Service {
             try store.remove(e, span: input.bool("future") == true ? .futureEvents : .thisEvent, commit: true)
             return "Deleted \(e.title ?? "the event")."
         default:
-            throw Refusal("calendar has no operation \(op)")
+            throw Refusal("calendar has no function \(function)")
         }
     }
 

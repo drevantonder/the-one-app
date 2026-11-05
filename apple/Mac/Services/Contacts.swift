@@ -8,20 +8,20 @@ struct ContactsApp: Service {
     var description: [String: Any] {
         describe(title: "Contacts", icon: "user-circle", localApp: "com.apple.AddressBook", summary: "Lets your apps and agents look up your contacts", instructions:
             "Contacts are the person's Apple Contacts, through their Mac. contacts_search finds people by name, email address or phone number; " +
-            "contacts_me is the person's own card.", ops: [
-            op("search", "Find contacts by name, email address or phone number.", [
+            "contacts_me is the person's own card.", functions: [
+            function("search", "Find contacts by name, email address or phone number.", [
                 "query": str("a name or part of one, an email address, or a phone number"),
                 "limit": num("at most this many; default 25"),
             ], required: ["query"]),
-            op("get", "One contact, by the id search gives.", ["id": str("the contact's id")], required: ["id"]),
-            op("me", "The person's own contact card."),
+            function("get", "One contact, by the id search gives.", ["id": str("the contact's id")], required: ["id"]),
+            function("me", "The person's own contact card."),
         ])
     }
 
-    func run(_ op: String, _ input: Input) async throws -> Any {
+    func run(_ function: String, _ input: Input) async throws -> Any {
         try await Self.access()
         let store = Self.store.value
-        switch op {
+        switch function {
         case "search":
             let q = try input.text("query")
             var predicates = [CNContact.predicateForContacts(matchingName: q)]
@@ -46,7 +46,7 @@ struct ContactsApp: Service {
                 throw Refusal("this Mac has no card set as the person's own: choose one in Contacts → Card → Make This My Card")
             }
         default:
-            throw Refusal("contacts has no operation \(op)")
+            throw Refusal("contacts has no function \(function)")
         }
     }
 

@@ -8,11 +8,11 @@
 
 import main from "./dist/main.html" with { type: "text" };
 
-/// Runs one of the agent-devices service's operations through Agent Devices, whose service it is, wherever it runs for
+/// Runs one of the agent-devices service's functions through Agent Devices, whose service it is, wherever it runs for
 /// the caller. When none of their devices runs it, says what's needed instead of how the call failed.
-async function service(ctx, op, input) {
+async function service(ctx, fn, input) {
   try {
-    return await ctx.apps["agent-devices"]._act({ op, input });
+    return await ctx.apps["agent-devices"]._act({ function: fn, input });
   } catch (err) {
     if (/no device runs agent-devices for you|none of yours runs it/.test(String(err.message))) throw new Error(NEEDS);
     throw err;

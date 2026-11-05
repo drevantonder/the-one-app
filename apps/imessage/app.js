@@ -1,11 +1,11 @@
 // iMessage: Messages on the person's Mac. The imessage service lives in the Mac app, which macOS lets reach Messages;
 // this app is what people and agents use, wherever they are.
 
-/// Runs one of the imessage service's operations, wherever it runs for the caller. When none of their devices runs it,
+/// Runs one of the imessage service's functions, wherever it runs for the caller. When none of their devices runs it,
 /// says what's needed instead of how the call failed; when a chat isn't found, where to find it.
-async function service(ctx, op, input) {
+async function service(ctx, fn, input) {
   try {
-    return await ctx.services.imessage[op](input);
+    return await ctx.services.imessage[fn](input);
   } catch (err) {
     const why = String(err.message);
     if (why.includes("no device runs imessage for you")) throw new Error(NEEDS);

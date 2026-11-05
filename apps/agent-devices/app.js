@@ -10,11 +10,11 @@ import mainHtml from "./dist/main.html" with { type: "text" };
 import deviceHtml from "./dist/device.html" with { type: "text" };
 import settingsHtml from "./dist/settings.html" with { type: "text" };
 
-/// Runs one of the agent-devices service's operations, wherever it runs for the caller. When none of their devices
+/// Runs one of the agent-devices service's functions, wherever it runs for the caller. When none of their devices
 /// runs it, says what's needed instead of how the call failed.
-async function service(ctx, op, input, on) {
+async function service(ctx, fn, input, on) {
   try {
-    return await ctx.services["agent-devices"][op](input, on ? { device: on } : undefined);
+    return await ctx.services["agent-devices"][fn](input, on ? { device: on } : undefined);
   } catch (err) {
     if (String(err.message).includes("no device runs agent-devices for you")) throw new Error(NEEDS);
     throw err;
@@ -30,7 +30,7 @@ function fnv(s) {
 
 const NEEDS = "Agent Devices needs a device with Podman, or a Mac, and none of yours runs it.";
 
-/// The service's operations Computer Use acts on agent devices with (`_act`).
+/// The service's functions Computer Use acts on agent devices with (`_act`).
 const ACTS = ["list", "view", "screen", "tools", "refresh_tools", "use", "get_browser_state", "browser_prepare", "browser_navigate", "browser_click", "browser_type", "browser_select", "browser_dialog", "browser_pointer"];
 const TYPE = "Browser profile";
 
@@ -311,11 +311,11 @@ export default {
     },
     _act: {
       reads: false,
-      description: "For Computer Use (apps/computer), which agents act on agent devices with: runs one of the service's operations it acts with (list, view, screen, tools, refresh_tools, use, get_browser_state and the browser tools) with its input.",
-      input: { type: "object", required: ["op"], properties: { op: { type: "string", enum: ACTS }, input: { type: "object" } } },
-      run: (ctx, { op, input = {} }) => {
-        if (!ACTS.includes(op)) throw new Error(`Computer Use doesn't act on agent devices with ${op}: only ${ACTS.join(", ")}`);
-        return service(ctx, op, input);
+      description: "For Computer Use (apps/computer), which agents act on agent devices with: runs one of the service's functions it acts with (list, view, screen, tools, refresh_tools, use, get_browser_state and the browser tools) with its input.",
+      input: { type: "object", required: ["function"], properties: { function: { type: "string", enum: ACTS }, input: { type: "object" } } },
+      run: (ctx, { function: fn, input = {} }) => {
+        if (!ACTS.includes(fn)) throw new Error(`Computer Use doesn't act on agent devices with ${fn}: only ${ACTS.join(", ")}`);
+        return service(ctx, fn, input);
       },
     },
     _running: {

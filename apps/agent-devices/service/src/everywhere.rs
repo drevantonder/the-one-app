@@ -63,9 +63,9 @@ fn is_zero_i(n: &i64) -> bool {
 }
 
 impl Devices {
-    /// Runs op on the device `on` (by name; "" for wherever the node picks): its answer.
-    pub(super) fn call_node(&self, on: &str, op: &str, input: &Value) -> Result<Value> {
-        let mut req = json!({ "app": NAME, "service": NAME, "op": op, "input": input });
+    /// Runs `function` on the device `on` (by name; "" for wherever the node picks): its answer.
+    pub(super) fn call_node(&self, on: &str, function: &str, input: &Value) -> Result<Value> {
+        let mut req = json!({ "app": NAME, "service": NAME, "op": function, "input": input });
         if !on.is_empty() {
             req["device"] = json!(on);
         }
@@ -73,14 +73,14 @@ impl Devices {
     }
 
     /// `call_node`, given up on after `limit`.
-    fn call_node_within(&self, on: &str, op: &str, input: &Value, limit: Duration) -> Result<Value> {
-        let req = json!({ "app": NAME, "service": NAME, "op": op, "input": input, "device": on });
+    fn call_node_within(&self, on: &str, function: &str, input: &Value, limit: Duration) -> Result<Value> {
+        let req = json!({ "app": NAME, "service": NAME, "op": function, "input": input, "device": on });
         Ok(self.host.post_within("/v1/call", &req, limit)?["ok"].clone())
     }
 
     /// Calls one of the app's tools, on this device's node.
-    pub(super) fn call_app(&self, op: &str, input: &Value) -> Result<Value> {
-        Ok(self.host.post("/v1/call", &json!({ "app": NAME, "op": op, "input": input }))?["ok"].clone())
+    pub(super) fn call_app(&self, tool: &str, input: &Value) -> Result<Value> {
+        Ok(self.host.post("/v1/call", &json!({ "app": NAME, "op": tool, "input": input }))?["ok"].clone())
     }
 
     /// This device's name and the person's other online devices that run agent devices, as the node says.
@@ -104,8 +104,8 @@ impl Devices {
         Ok((st["me"]["name"].as_str().unwrap_or_default().to_string(), all))
     }
 
-    /// Runs op on every other device that runs agent devices, at once: each one's answer, or why it couldn't.
-    pub(super) fn everywhere(&self, op: &str, input: Option<&Input>) -> (HashMap<String, Value>, BTreeMap<String, String>) {
+    /// Runs `function` on every other device that runs agent devices, at once: each one's answer, or why it couldn't.
+    pub(super) fn everywhere(&self, function: &str, input: Option<&Input>) -> (HashMap<String, Value>, BTreeMap<String, String>) {
         let mut got = HashMap::new();
         let mut failed = BTreeMap::new();
         let others = match self.hosts() {
@@ -119,7 +119,7 @@ impl Devices {
         pass.insert("here".into(), json!(true));
         let pass = Value::Object(pass);
         let answers: Vec<(String, Result<Value>)> = std::thread::scope(|s| {
-            let asked: Vec<_> = others.iter().map(|on| (on.clone(), s.spawn(|| self.call_node_within(on, op, &pass, Duration::from_secs(20))))).collect();
+            let asked: Vec<_> = others.iter().map(|on| (on.clone(), s.spawn(|| self.call_node_within(on, function, &pass, Duration::from_secs(20))))).collect();
             asked.into_iter().map(|(on, t)| (on, t.join().unwrap_or_else(|_| Err(anyhow!("failed"))))).collect()
         });
         for (on, r) in answers {
@@ -208,14 +208,14 @@ impl Devices {
         String::new()
     }
 
-    /// Runs op (create, borrow or sign_in) of a kind on the first device that runs it and has room, in where things run
+    /// Runs `function` (create, borrow or sign_in) of a kind on the first device that runs it and has room, in where things run
     /// first; for a borrow, one with a lasting device of the kind nobody has borrowed comes before those. None when it's
-    /// this device's turn, for it to run op itself, or when no other device runs the kind.
-    pub(super) fn first(&self, op: &str, kind: &str, name: &str, input: &Input) -> Option<Result<Value>> {
+    /// this device's turn, for it to run `function` itself, or when no other device runs the kind.
+    pub(super) fn first(&self, function: &str, kind: &str, name: &str, input: &Input) -> Option<Result<Value>> {
         let (me, all) = self.ordered().ok()?;
         let (mut got, _) = self.everywhere("kinds", None);
         got.insert(me.clone(), json!({ "kinds": self.kinds_here() }));
-        let lend = op == "borrow" && input.get("copy") != Some(&json!(true));
+        let lend = function == "borrow" && input.get("copy") != Some(&json!(true));
         // How ready each device that runs the kind is: 0 a lasting one to lend, 1 room for one, 2 neither.
         let mut ready: HashMap<String, u8> = HashMap::new();
         for (on, r) in &got {
@@ -246,10 +246,10 @@ impl Devices {
             if on == me {
                 return None;
             }
-            match self.call_node(&on, op, &pass) {
+            match self.call_node(&on, function, &pass) {
                 Ok(r) => return Some(Ok(r)),
                 Err(err) => {
-                    tracing::info!("{op} on {on}: {err:#}");
+                    tracing::info!("{function} on {on}: {err:#}");
                     tried.push(format!("{on}: {err:#}"));
                 }
             }

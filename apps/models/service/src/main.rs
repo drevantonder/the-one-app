@@ -43,7 +43,7 @@ fn describe() -> Value {
 
 fn call(_: &Host, call: &Call) -> Result<Answer> {
     let input = &call.input;
-    let result: Result<Value> = match call.op.as_str() {
+    let result: Result<Value> = match call.function.as_str() {
         "here" => {
             let tags: Value = get("/api/tags")?;
             let loaded: Vec<Value> = get("/api/ps").map(|ps| ps["models"].as_array().cloned().unwrap_or_default()).unwrap_or_default();
@@ -96,7 +96,7 @@ fn call(_: &Host, call: &Call) -> Result<Answer> {
             }
             Ok(json!({ "answers": reply["answers"], "usage": reply["usage"] }))
         }
-        other => bail!("models has no operation {other}"),
+        other => bail!("models has no function {other}"),
     };
     Ok(Answer::new(result?))
 }

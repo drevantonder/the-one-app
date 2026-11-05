@@ -32,8 +32,8 @@ fn describe() -> Value {
 }
 
 fn call(host: &Host, call: &Call) -> Result<Answer> {
-    if call.op != "run" {
-        bail!("shell has no operation {}", call.op);
+    if call.function != "run" {
+        bail!("shell has no function {}", call.function);
     }
     let command = call.input["command"].as_str().unwrap_or("").to_string();
     if command.trim().is_empty() {

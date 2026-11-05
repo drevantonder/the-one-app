@@ -37,7 +37,9 @@ pub struct Me {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Call {
     pub id: u64,
-    pub op: String,
+    /// The function it runs: `op` on the wire, which older nodes send.
+    #[serde(rename = "op")]
+    pub function: String,
     #[serde(default)]
     pub input: Value,
     #[serde(default)]
@@ -252,7 +254,7 @@ pub fn serve(service: Service) -> Result<()> {
                 };
                 running.fetch_sub(1, SeqCst);
                 if let Err(err) = host.post(&format!("/v1/services/{}/calls/{}", host.name, call.id), &reply) {
-                    eprintln!("answering {}: {err:#}", call.op);
+                    eprintln!("answering {}: {err:#}", call.function);
                 }
             });
         }

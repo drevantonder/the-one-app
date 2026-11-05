@@ -58,7 +58,7 @@ func openAll(dir, node string) (*whatsapp, error) {
 	return w, nil
 }
 
-func (w *whatsapp) run(ctx context.Context, op string, raw json.RawMessage) (any, error) {
+func (w *whatsapp) run(ctx context.Context, function string, raw json.RawMessage) (any, error) {
 	var in struct {
 		Account, Phone, To, Name string
 		From, Move, Data         string // take's and moved's
@@ -69,7 +69,7 @@ func (w *whatsapp) run(ctx context.Context, op string, raw json.RawMessage) (any
 			return nil, err
 		}
 	}
-	switch op {
+	switch function {
 	case "accounts":
 		all, _, err := w.accounts()
 		return all, err
@@ -96,12 +96,12 @@ func (w *whatsapp) run(ctx context.Context, op string, raw json.RawMessage) (any
 	case "_moved":
 		return w.movedHere(in.Move)
 	case "move", "sign_out":
-		l, err := w.pick(in.Account, op == "sign_out")
+		l, err := w.pick(in.Account, function == "sign_out")
 		if err != nil {
 			return nil, err
 		}
 		var out string
-		if op == "move" {
+		if function == "move" {
 			out, err = w.move(l, in.To)
 		} else {
 			out, err = l.signOut(ctx)
@@ -115,7 +115,7 @@ func (w *whatsapp) run(ctx context.Context, op string, raw json.RawMessage) (any
 	if err != nil {
 		return nil, err
 	}
-	return l.run(ctx, op, raw)
+	return l.run(ctx, function, raw)
 }
 
 // linked are the links paired with a phone, the first first.

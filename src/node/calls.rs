@@ -230,7 +230,7 @@ impl Node {
             return Ok(vec![self.find_device(device)?]);
         }
         let here = self.runs_service_here(&req.app);
-        // A service, or one of its operations, that's about its own machine (`"prefer": "here"`: Shell, models_here) runs
+        // A service, or one of its functions, that's about its own machine (`"prefer": "here"`: Shell, models_here) runs
         // on the caller's first.
         let about_here = |d: &Value| d["prefer"] == "here" || d["ops"].as_array().is_some_and(|ops| ops.iter().any(|o| o["name"] == req.op.as_str() && o["prefer"] == "here"));
         // This device: its node, or a part of it (a service endpoint of oned's own).
@@ -686,7 +686,7 @@ impl Node {
     }
 
     /// Runs a service registered here, for this device's local user.
-    pub(super) async fn run_service(&self, app: &str, op: &str, input: Value, me: &Caller, from: Option<String>) -> Result<Value> {
+    pub(super) async fn run_service(&self, app: &str, function: &str, input: Value, me: &Caller, from: Option<String>) -> Result<Value> {
         let everyone = self.0.services.serves_everyone(app) && self.with(|i| Ok(i.r.db().serves(&self.0.id, &me.user)))?;
         let user = if everyone { me.user.clone() } else { self.user()? };
         ensure!(me.user == user, "{} runs only for {}'s own user", self.service_title(app), self.device_name());
@@ -709,7 +709,7 @@ impl Node {
                 found
             })?;
         }
-        let mut answer = self.0.services.call(app, op, input, caller.clone(), from).await?;
+        let mut answer = self.0.services.call(app, function, input, caller.clone(), from).await?;
         crate::vault::blot(&mut answer.ok, &used.into_inner().unwrap());
         let scope = Scope::User(user.clone());
         if !answer.blobs.is_empty() {
@@ -905,8 +905,8 @@ impl Node {
         Ok(db)
     }
 
-    /// What the shim asks the node for a running call (`src/outbound.rs`): `POST /call { app, op, input }` runs an
-    /// operation of an app the calling app uses, or of its own service, as its caller; `POST /blob` keeps a blob, `GET
+    /// What the shim asks the node for a running call (`src/outbound.rs`): `POST /call { app, op, input }` runs a
+    /// tool of an app the calling app uses, or a function of its own service, as its caller; `POST /blob` keeps a blob, `GET
     /// /blob/<hash>` gets one the caller may read; `GET /catalog` lists the install's apps, `GET /devices` its devices.
     pub async fn internal(&self, token: &str, method: &str, path: &str, body: Vec<u8>) -> Result<axum::response::Response> {
         use axum::response::IntoResponse;

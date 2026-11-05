@@ -24,7 +24,7 @@ type fakeNodes struct {
 	services map[string]*whatsapp
 	// lose is asked before and after each call: true loses it there (before:
 	// it never runs; after: it runs, but its answer is lost).
-	lose func(op string, in map[string]any, after bool) bool
+	lose func(function string, in map[string]any, after bool) bool
 }
 
 func (f *fakeNodes) node(t *testing.T, name string) string {
@@ -38,20 +38,21 @@ func (f *fakeNodes) node(t *testing.T, name string) string {
 				}}})
 		case "/v1/call":
 			var c struct {
-				Op, Device string
-				Input      map[string]any
+				Function string `json:"op"`
+				Device   string
+				Input    map[string]any
 			}
 			json.NewDecoder(r.Body).Decode(&c)
 			f.mu.Lock()
 			s, lose := f.services[c.Device], f.lose
 			f.mu.Unlock()
-			if s == nil || lose != nil && lose(c.Op, c.Input, false) {
+			if s == nil || lose != nil && lose(c.Function, c.Input, false) {
 				http.Error(w, `{"error":"unreachable"}`, http.StatusBadGateway)
 				return
 			}
 			raw, _ := json.Marshal(c.Input)
-			out, err := s.run(context.Background(), c.Op, raw)
-			if lose != nil && lose(c.Op, c.Input, true) {
+			out, err := s.run(context.Background(), c.Function, raw)
+			if lose != nil && lose(c.Function, c.Input, true) {
 				http.Error(w, `{"error":"answer lost"}`, http.StatusBadGateway)
 				return
 			}
@@ -143,11 +144,11 @@ func TestMoveAnswerLostThenRestart(t *testing.T) {
 	a, b, dirA := devicesAB(t, f)
 	linkAs(t, a.links[0], "61400000002")
 	lost := 0
-	f.lose = func(op string, in map[string]any, after bool) bool {
+	f.lose = func(function string, in map[string]any, after bool) bool {
 		switch {
-		case op == "_take" && after && in["part"] == in["parts"].(float64)-1:
+		case function == "_take" && after && in["part"] == in["parts"].(float64)-1:
 			return true
-		case op == "_moved" && !after && lost < 1:
+		case function == "_moved" && !after && lost < 1:
 			lost++
 			return true
 		}
@@ -189,8 +190,8 @@ func TestMoveRefusedRollsBack(t *testing.T) {
 	a, b, _ := devicesAB(t, f)
 	linkAs(t, a.links[0], "61400000003")
 	var move string
-	f.lose = func(op string, in map[string]any, after bool) bool {
-		if op == "_take" && !after && in["part"] == float64(1) {
+	f.lose = func(function string, in map[string]any, after bool) bool {
+		if function == "_take" && !after && in["part"] == float64(1) {
 			move = in["move"].(string)
 			return true
 		}

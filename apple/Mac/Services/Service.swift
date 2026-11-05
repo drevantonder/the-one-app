@@ -1,12 +1,12 @@
 import AppKit
 
-/// A device service the Mac app hosts: a device feature it offers the person's devices through this Mac's node.
+/// A service the Mac app hosts: what it offers the person's devices through this Mac's node.
 /// Apple's apps are reached from here, not the node, because this app is what macOS grants
 /// privacy permissions to.
 protocol Service: Sendable {
     var app: String { get }
     var description: [String: Any] { get }
-    func run(_ op: String, _ input: Input) async throws -> Any
+    func run(_ function: String, _ input: Input) async throws -> Any
 }
 
 enum Services {
@@ -31,7 +31,7 @@ enum Services {
                     Task.detached {
                         var reply: [String: Any]
                         do {
-                            reply = ["ok": try await service.run(call.op, call.input)]
+                            reply = ["ok": try await service.run(call.function, call.input)]
                         } catch {
                             reply = ["error": (error as? Refusal)?.description ?? error.localizedDescription]
                         }
@@ -54,7 +54,7 @@ enum Services {
 
     private struct Call: Sendable {
         var id: UInt64
-        var op: String
+        var function: String
         var input: Input
     }
 
@@ -66,9 +66,9 @@ enum Services {
         let status = (response as? HTTPURLResponse)?.statusCode
         if status == 204 { return nil }
         guard status == 200, let call = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let id = (call["id"] as? NSNumber)?.uint64Value, let op = call["op"] as? String
+              let id = (call["id"] as? NSNumber)?.uint64Value, let function = call["op"] as? String
         else { throw URLError(.badServerResponse) }
-        return Call(id: id, op: op, input: Input(call["input"] as? [String: Any] ?? [:], caller: call["caller"] as? [String: Any] ?? [:]))
+        return Call(id: id, function: function, input: Input(call["input"] as? [String: Any] ?? [:], caller: call["caller"] as? [String: Any] ?? [:]))
     }
 
     private static func post(_ url: URL, _ body: Any) async throws {
@@ -194,8 +194,8 @@ func object(_ fields: [String: Any?]) -> [String: Any] {
 
 /// A service's description: what it is, the Mac app it reaches (`localApp`, a bundle id) and that app's icon as its
 /// picture, and the Mac app's build and how it's installed.
-func describe(title: String, icon: String, localApp: String, summary: String, instructions: String, ops: [[String: Any]]) -> [String: Any] {
-    var d: [String: Any] = ["title": title, "icon": icon, "local_app": localApp, "description": summary, "instructions": instructions, "ops": ops, "widgets": [Any](),
+func describe(title: String, icon: String, localApp: String, summary: String, instructions: String, functions: [[String: Any]]) -> [String: Any] {
+    var d: [String: Any] = ["title": title, "icon": icon, "local_app": localApp, "description": summary, "instructions": instructions, "ops": functions, "widgets": [Any](),
                             "version": Bundle.main.object(forInfoDictionaryKey: "BuildCommit") as? String ?? "", "install": "Comes with the Mac app, on each Mac it's open on."]
     if let image = appIcon(localApp) { (d["image"], d["image_kind"]) = (image, "icon") }
     return d
@@ -220,7 +220,7 @@ func appIcon(_ bundle: String) -> String? {
     return "data:image/png;base64," + png.base64EncodedString()
 }
 
-func op(_ name: String, _ description: String, _ properties: [String: [String: Any]] = [:], required: [String] = []) -> [String: Any] {
+func function(_ name: String, _ description: String, _ properties: [String: [String: Any]] = [:], required: [String] = []) -> [String: Any] {
     var input: [String: Any] = ["type": "object", "properties": properties]
     if !required.isEmpty { input["required"] = required }
     return ["name": name, "description": description, "input": input]
