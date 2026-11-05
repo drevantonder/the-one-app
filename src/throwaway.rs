@@ -69,7 +69,7 @@ fn client_session(dir: &Path) -> Option<std::fs::File> {
 
 pub fn run(rest: &[String]) -> Result<()> {
     let (dir, checkout) = folder();
-    // Help, and nothing started: throwaway's own, or a built-in command's. An app's operation's needs the throwaway network's apps.
+    // Help, and nothing started: throwaway's own, or a built-in command's. An app's tool's needs the throwaway network's apps.
     let help = rest.iter().any(|a| a == "--help" || a == "-h");
     match rest.first().map(String::as_str) {
         Some("--help" | "-h" | "help") | Some("stop" | "client" | "sign-in") if help || rest[0] == "help" => {

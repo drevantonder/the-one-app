@@ -176,7 +176,7 @@ const signInSchema = { user: [
 const signInOps = {
   accounts: {
     reads: true,
-    description: `The Google accounts ${TITLE} can use, the default first: [{ account, ok }], with why when ok is false (${APP}_sign_in with that account fixes it). Every other operation's account takes one of these.`,
+    description: `The Google accounts ${TITLE} can use, the default first: [{ account, ok }], with why when ok is false (${APP}_sign_in with that account fixes it). Every other tool's account takes one of these.`,
     input: { type: "object", properties: {} },
     async run(ctx) {
       return Promise.all((await accounts(ctx)).map(async (account) => {
@@ -336,7 +336,7 @@ export default {
   icon: "file-text",
   color: "#4285f4",
   description: "Your Google Docs: read them as markdown or text, make them, and add or replace text",
-  instructions: `Docs is the person's Google Docs. ${APP}_read reads a document as markdown (or text). ${APP}_create makes one, ${APP}_append adds text at its end, and ${APP}_replace replaces every match of some text: change only what the person asked. Documents are given as documentId, an id or address. With several accounts, each operation takes account.`,
+  instructions: `Docs is the person's Google Docs. ${APP}_read reads a document as markdown (or text). ${APP}_create makes one, ${APP}_append adds text at its end, and ${APP}_replace replaces every match of some text: change only what the person asked. Documents are given as documentId, an id or address. With several accounts, each tool takes account.`,
   vault: VAULT,
   schema: signInSchema,
 

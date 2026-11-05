@@ -5,14 +5,14 @@ description: Use whenever the person asks you to make an app, tracker or tool ("
 
 # Building an app
 
-An app is a folder with one JavaScript module, `app.js` (or `app.ts`): its operations, which agents call; its screens and widgets, which people see; and the data it keeps. Everyone in {{yours}} can read every app's code, so start from one that's close to yours.
+An app is a folder with one JavaScript module, `app.js` (or `app.ts`): its tools, which agents call; its screens and widgets, which people see; and the data it keeps. Everyone in {{yours}} can read every app's code, so start from one that's close to yours.
 
 1. Look first: `{{cli}} search "<words>"` may find an app that already does it. To change someone else's, fork it: `{{cli}} fork <app> <name>`.
 2. Read the apps already built: `{{cli}} apps code <app>` (the `apps_code` tool) lists an app's files and `--path app.js` gives one. The App Store shows the same under View code, and in a checkout of {{name}}'s code the built-in apps are the folders in `apps/`.
-3. Make a folder and write `app.js` (with only MCP, write it to give `deploy`). Its operations are for agents, which read them cold, so:
-   - Every operation says `reads: true` or `reads: false`. What sends to a person or can't be undone also says `confirm: true`.
+3. Make a folder and write `app.js` (with only MCP, write it to give `deploy`). Its tools are for agents, which read them cold, so:
+   - Every tool says `reads: true` or `reads: false`. What sends to a person or can't be undone also says `confirm: true`.
    - Its description says what it does, when to use it rather than its neighbour, and what comes back, in a sentence or two. Every input says what it takes, with its format (`an ISO 8601 date-time, 2026-11-01T09:00`) and where to get it (`a message's id, from gmail search`).
-   - Each operation is a primitive in its truest form: an app that wraps a service gives that service's own operations, with its names, inputs and paging (Drive's `q`, `fields` and `pageToken`), since agents know them and combine them. A clear contract matters, not words shared across apps.
+   - Each tool is a primitive in its truest form: an app that wraps a service gives that service's own tools, with its names, inputs and paging (Drive's `q`, `fields` and `pageToken`), since agents know them and combine them. A clear contract matters, not words shared across apps.
    - It gives back what the service gives, without bulk nobody reads (images, internal ids where a name will do); an app's own data in plain units (ISO 8601 times, `37 GB of 250 GB`).
    - An error says what was wrong and the fix: `no event 123: ids come from calendar events`.
 
@@ -26,7 +26,7 @@ An app is a folder with one JavaScript module, `app.js` (or `app.ts`): its opera
    A screen can also be plain HTML and JavaScript, with no build: a string of HTML (its `<script>`s included) as the screen's `html`, using the pieces in `kit.js` (`one.render(el, fn)`, `one.busy(button)`).
 5. Deploy: `{{cli}} deploy <folder>`, or the `deploy` tool with each file's text, builds it, npm packages and React screens and all, and makes the app if it's new, owned by you. React screens are built on the machine that deploys, with its Bun (recommended) or Node: when it has neither, the deploy says so; help the person install Bun (bun.sh) and deploy again. Over a connector to {{yours}}'s address, rather than `{{cli}} mcp` on their machine, the `deploy` tool can't build them: deploy those apps with `{{cli}} deploy`. To try it out first where no one else sees it, put `throwaway` before each command (`{{cli}} throwaway deploy <folder>`): a throwaway network on this machine, with only you in it, which `{{cli}} throwaway stop` deletes.
 6. Put it on a page: `{{cli}} install <app>` (the `apps_add` tool, scope `user`) for your own, `--scope <group>` for a group's, `--scope global` (admins) for everyone's.
-7. Check it: `{{cli}} <app> <op> --help`, then run each operation, and open its screens and widgets in the app on the person's Mac or phone. If something's wrong, `{{cli}} deploys <app>` lists its versions and `{{cli}} deploy <app> --version <hash>` (`deploy` with `version`) puts one back.
+7. Check it: `{{cli}} <app> <tool> --help`, then run each tool, and open its screens and widgets in the app on the person's Mac or phone. If something's wrong, `{{cli}} deploys <app>` lists its versions and `{{cli}} deploy <app> --version <hash>` (`deploy` with `version`) puts one back.
 8. Keep its code wherever you like (Repos, `git push <your One App's address>/repos/<your handle>/<repo>.git main`, or GitHub or any git host), and link the app to it: `{{cli}} apps source <app> <link>`. Its page shows it as Source.
 
 ## The details

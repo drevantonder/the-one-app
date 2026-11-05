@@ -1,4 +1,4 @@
-//! Finding operations across every app (`<cli> search`, MCP's `search`), with the exact way to call each and its
+//! Finding tools across every app (`<cli> search`, MCP's `search`), with the exact way to call each and its
 //! app's guide, so the long guides come with a search instead of the MCP instructions; and code mode: scripts that call
 //! them (`<cli> run`, MCP's `execute`), run by OpenCode's interpreter under the pinned Bun (`src/codemode/run.js`).
 
@@ -11,7 +11,7 @@ use one::config::CLI;
 use one::skills::{Mode, path, ts};
 use serde_json::{Value, json};
 
-use crate::{get, ops};
+use crate::{get, tools};
 
 /// Who a search answers: someone at the command line, or an MCP client in one of its modes.
 #[derive(Clone, Copy)]
@@ -20,31 +20,31 @@ pub enum For {
     Mcp(Mode),
 }
 
-/// Every app installed for this user that has operations, as `GET /v1/apps` gives them, with each operation's input as
+/// Every app installed for this user that has tools, as `GET /v1/apps` gives them, with each tool's input as
 /// MCP takes it (files explained, `device` and `confirm` where they apply), and the Vault's tools as an app.
 pub fn catalog() -> Result<Vec<Value>> {
     Ok(catalogs()?.0)
 }
 
-/// What a search looks through: `catalog`'s apps, then the apps the person could add, which have no operations for
+/// What a search looks through: `catalog`'s apps, then the apps the person could add, which have no tools for
 /// them yet: those not added where they are, nor deleted.
 pub fn catalogs() -> Result<(Vec<Value>, Vec<Value>)> {
     let mut apps = vec![one::skills::vault_app(), one::skills::backups_app(), one::skills::groups_app(), one::skills::devices_app()];
     let mut addable = Vec::new();
     for mut app in get("/v1/apps")?.as_array().cloned().unwrap_or_default() {
-        let ops: Vec<Value> = app["ops"]
+        let tools: Vec<Value> = app["ops"]
             .as_array()
             .into_iter()
             .flatten()
-            .filter(|op| !op["name"].as_str().unwrap_or("").starts_with('_'))
-            .map(|op| {
-                let mut op = op.clone();
-                op["input"] = ops::mcp_schema(&app, &op);
-                op
+            .filter(|tool| !tool["name"].as_str().unwrap_or("").starts_with('_'))
+            .map(|tool| {
+                let mut tool = tool.clone();
+                tool["input"] = tools::mcp_schema(&app, &tool);
+                tool
             })
             .collect();
-        if !ops.is_empty() {
-            app["ops"] = json!(ops);
+        if !tools.is_empty() {
+            app["ops"] = json!(tools);
             apps.push(app);
         } else if app["ops"].is_null() && app["deleted"].is_null() && app["title"].is_string() {
             addable.push(app);
@@ -83,15 +83,15 @@ fn has(list: &[String], w: &str) -> bool {
     list.iter().any(|x| x == w || (w.len() > 3 && x.starts_with(w)) || (x.len() > 3 && w.starts_with(x.as_str())))
 }
 
-/// How well an operation matches, how many of the query's words its name, its app's (or what the app is for) or its
+/// How well a tool matches, how many of the query's words its name, its app's (or what the app is for) or its
 /// description has, and whether its name has one: its name counts most, then its app's name, its own description, and
 /// last what its app is for and its guide, which alone never makes a match; so a word in an app's one line doesn't put
-/// every operation of that app above the one whose own description has it.
-fn score(app: &Value, op: &Value, query: &[String]) -> (u32, usize, bool) {
-    let name = words(op["name"].as_str().unwrap_or(""));
+/// every tool of that app above the one whose own description has it.
+fn score(app: &Value, tool: &Value, query: &[String]) -> (u32, usize, bool) {
+    let name = words(tool["name"].as_str().unwrap_or(""));
     let app_name = words(&format!("{} {}", app["name"].as_str().unwrap_or(""), app["title"].as_str().unwrap_or("")));
     let app_about = words(app["description"].as_str().unwrap_or(""));
-    let about = words(op["description"].as_str().unwrap_or(""));
+    let about = words(tool["description"].as_str().unwrap_or(""));
     let guide = words(app["instructions"].as_str().unwrap_or(""));
     let score = query.iter().map(|w| if has(&name, w) { 6 } else { 0 } + if has(&app_name, w) { 4 } else { 0 } + if has(&about, w) { 3 } else { 0 } + if has(&app_about, w) || has(&guide, w) { 1 } else { 0 }).sum();
     (score, query.iter().filter(|w| has(&name, w) || has(&app_name, w) || has(&app_about, w) || has(&about, w)).count(), query.iter().any(|w| has(&name, w)))
@@ -105,17 +105,17 @@ fn score_app(app: &Value, query: &[String]) -> (u32, usize) {
     (score, query.iter().filter(|w| has(&name, w) || has(&about, w)).count())
 }
 
-/// The exact way to call an operation, for whoever asked.
-fn call(app: &Value, op: &Value, how: For) -> String {
-    let (a, o) = (app["name"].as_str().unwrap_or(""), op["name"].as_str().unwrap_or(""));
+/// The exact way to call a tool, for whoever asked.
+fn call(app: &Value, tool: &Value, how: For) -> String {
+    let (a, o) = (app["name"].as_str().unwrap_or(""), tool["name"].as_str().unwrap_or(""));
     match how {
-        For::Mcp(Mode::Code) => format!("{}({})", path(a, o), ts(&op["input"])),
-        For::Mcp(Mode::All) => format!("{a}_{o} {}", ts(&op["input"])),
+        For::Mcp(Mode::Code) => format!("{}({})", path(a, o), ts(&tool["input"])),
+        For::Mcp(Mode::All) => format!("{a}_{o} {}", ts(&tool["input"])),
         For::Cli => {
-            let schema = &op["input"];
+            let schema = &tool["input"];
             let required: Vec<&str> = schema["required"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
             // The inputs words fill, as --help shows them; the rest are flags.
-            let words: Vec<&str> = match op["words"].as_array() {
+            let words: Vec<&str> = match tool["words"].as_array() {
                 Some(w) => w.iter().filter_map(Value::as_str).collect(),
                 None => required.clone(),
             };
@@ -161,7 +161,7 @@ fn fit(described: &[&str], room: usize) -> Vec<String> {
     first
 }
 
-/// The operations that best match `query`, best first, each with how to call it and what it does, then the guide of
+/// The tools that best match `query`, best first, each with how to call it and what it does, then the guide of
 /// each app they're in; and the apps the person could add (`addable`) that match as well. A match is one whose name,
 /// app or description has most of the query's words, and as many as the best: fewer is a guess, not an answer.
 pub fn search(apps: &[Value], addable: &[Value], query: &str, limit: usize, how: For) -> String {
@@ -178,10 +178,10 @@ pub fn search(apps: &[Value], addable: &[Value], query: &str, limit: usize, how:
     let mut found: Vec<(u32, usize, usize, &Value, &Value)> = Vec::new();
     let mut named = Vec::new();
     for (i, app) in apps.iter().enumerate() {
-        for op in app["ops"].as_array().into_iter().flatten() {
-            let (s, covers, by_name) = score(app, op, &query);
+        for tool in app["ops"].as_array().into_iter().flatten() {
+            let (s, covers, by_name) = score(app, tool, &query);
             if enough(covers) {
-                found.push((s, covers, i, app, op));
+                found.push((s, covers, i, app, tool));
                 named.push(by_name);
             }
         }
@@ -228,8 +228,8 @@ pub fn search(apps: &[Value], addable: &[Value], query: &str, limit: usize, how:
     // and the descriptions cut (to their first sentence, then shorter) when they don't fit.
     let room = MATCHES.saturating_sub(calls.iter().map(|c| c.chars().count() + 4).sum::<usize>());
     let about = fit(&found.iter().map(|f| f.4["description"].as_str().unwrap_or("").trim()).collect::<Vec<_>>(), room);
-    for (i, (_, _, _, app, op)) in found.iter().enumerate() {
-        let mark = match (op["reads"] == true, op["confirm"] == true) {
+    for (i, (_, _, _, app, tool)) in found.iter().enumerate() {
+        let mark = match (tool["reads"] == true, tool["confirm"] == true) {
             (true, _) => " It only reads.",
             (_, true) => match how {
                 For::Cli => " It can't be undone: give --confirm once the person agreed.",
@@ -256,15 +256,15 @@ pub fn search(apps: &[Value], addable: &[Value], query: &str, limit: usize, how:
 /// MCP's `search` tool.
 pub fn search_tool(mode: Mode) -> Value {
     let calls = match mode {
-        Mode::Code => "the exact call for a script (tools.<app>.<op>({ ... }))",
+        Mode::Code => "the exact call for a script (tools.<app>.<tool>({ ... }))",
         Mode::All => "the tool's name and inputs",
     };
     json!({
         "name": "search",
-        "description": format!("Find the operations for a task in every app: give a few words, like \"unread email\" or \"post to the board\". Answers the best matches, each with {calls} and what it does, then the guide of each app they're in. Search before guessing, and to learn an app."),
+        "description": format!("Find the tools for a task in every app: give a few words, like \"unread email\" or \"post to the board\". Answers the best matches, each with {calls} and what it does, then the guide of each app they're in. Search before guessing, and to learn an app."),
         "inputSchema": { "type": "object", "required": ["query"], "properties": {
             "query": { "type": "string", "description": "a few words for the task, or an app's name" },
-            "limit": { "type": "integer", "description": "how many operations, 8 if not given" },
+            "limit": { "type": "integer", "description": "how many tools, 8 if not given" },
         } },
         "annotations": one::skills::hints(true, false),
     })
@@ -275,7 +275,7 @@ pub fn search_tool(mode: Mode) -> Value {
 pub fn code_tools(all: Vec<Value>) -> Vec<Value> {
     let direct = |t: &Value| {
         let name = t["name"].as_str().unwrap_or("");
-        matches!(name, "deploy" | "vault_request" | "vault_status") || one::config::ALWAYS_ON.iter().any(|a| name.strip_prefix(a).is_some_and(|op| op.starts_with('_')))
+        matches!(name, "deploy" | "vault_request" | "vault_status") || one::config::ALWAYS_ON.iter().any(|a| name.strip_prefix(a).is_some_and(|tool| tool.starts_with('_')))
     };
     [vec![search_tool(Mode::Code), execute_tool()], all.into_iter().filter(direct).collect()].concat()
 }
@@ -287,7 +287,7 @@ const LIMITS: (u64, u64, u64) = (600_000, 100, 60_000);
 pub fn execute_tool() -> Value {
     json!({
         "name": "execute",
-        "description": format!("Run a short script that calls operations, and get back what it returns. It's JavaScript without imports, timers or network: call operations as `await tools.<app>.<op>({{ ... }})` (search gives each exact call), use plain JavaScript between them, and `return` what you want back; console.log lines come back too. Calls run as the person, as any tool does: what sends or can't be undone needs `confirm: true` in its input, given once the person agreed. Up to {} calls, {} minutes and {} KB back.", LIMITS.1, LIMITS.0 / 60_000, LIMITS.2 / 1000),
+        "description": format!("Run a short script that calls tools, and get back what it returns. It's JavaScript without imports, timers or network: call tools as `await tools.<app>.<tool>({{ ... }})` (search gives each exact call), use plain JavaScript between them, and `return` what you want back; console.log lines come back too. Calls run as the person, as any tool does: what sends or can't be undone needs `confirm: true` in its input, given once the person agreed. Up to {} calls, {} minutes and {} KB back.", LIMITS.1, LIMITS.0 / 60_000, LIMITS.2 / 1000),
         "inputSchema": { "type": "object", "required": ["code"], "properties": { "code": { "type": "string", "description": "the script" } } },
         "annotations": one::skills::hints(false, false),
     })
@@ -331,7 +331,7 @@ fn runner() -> Result<(PathBuf, PathBuf)> {
     Ok((bun, dir))
 }
 
-/// Runs a script: each call it makes is checked against its operation's inputs and run as the person, as an MCP call
+/// Runs a script: each call it makes is checked against its tool's inputs and run as the person, as an MCP call
 /// is, what sends or can't be undone only with confirm: true. Gives back code mode's result: `{ ok, value | error,
 /// logs, truncated, toolCalls }`.
 pub fn execute(script: &str, agent: Option<&str>, client: &str) -> Result<Value> {
@@ -342,8 +342,8 @@ pub fn execute(script: &str, agent: Option<&str>, client: &str) -> Result<Value>
     for app in &apps {
         let name = app["name"].as_str().unwrap_or("");
         descriptions.insert(name.into(), app["description"].clone());
-        for op in app["ops"].as_array().into_iter().flatten() {
-            tools.push(json!({ "app": name, "op": op["name"], "description": op["description"], "input": op["input"], "confirm": op["confirm"] == true }));
+        for tool in app["ops"].as_array().into_iter().flatten() {
+            tools.push(json!({ "app": name, "tool": tool["name"], "description": tool["description"], "input": tool["input"], "confirm": tool["confirm"] == true }));
         }
     }
     let (bun, dir) = runner()?;
@@ -366,13 +366,13 @@ pub fn execute(script: &str, agent: Option<&str>, client: &str) -> Result<Value>
     for line in from.lines() {
         let Ok(msg) = serde_json::from_str::<Value>(&line?) else { continue };
         if let Some(id) = msg.get("call") {
-            let (app, op) = (msg["app"].as_str().unwrap_or(""), msg["op"].as_str().unwrap_or(""));
-            let spec = apps.iter().find(|a| a["name"] == app).and_then(|a| Some((a.clone(), a["ops"].as_array()?.iter().find(|o| o["name"] == op)?.clone())));
+            let (app, tool) = (msg["app"].as_str().unwrap_or(""), msg["tool"].as_str().unwrap_or(""));
+            let spec = apps.iter().find(|a| a["name"] == app).and_then(|a| Some((a.clone(), a["ops"].as_array()?.iter().find(|o| o["name"] == tool)?.clone())));
             let input = msg["input"].clone();
             let answer = (|| {
-                let spec = spec.with_context(|| format!("no operation {app}_{op}"))?;
-                anyhow::ensure!(input.is_object() || input.is_null(), "an operation's input is an object, not {input}");
-                crate::dispatch(&format!("{app}_{op}"), input.as_object().cloned().unwrap_or_default(), agent, client, Some(spec))
+                let spec = spec.with_context(|| format!("no tool {app}_{tool}"))?;
+                anyhow::ensure!(input.is_object() || input.is_null(), "a tool's input is an object, not {input}");
+                crate::dispatch(&format!("{app}_{tool}"), input.as_object().cloned().unwrap_or_default(), agent, client, Some(spec))
             })();
             let reply = match answer {
                 Ok(ok) => json!({ "reply": id, "ok": ok }),

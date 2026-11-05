@@ -485,7 +485,7 @@ fn a_client_takes_whos_who_only_from_the_installs_signed_entries() {
 }
 
 /// What a native app keeps of its screens' calls, to show at once next time (one-client's `Answers`), is its person's
-/// alone: only what operations that only read answered, sealed under that device's own key, so another person's
+/// alone: only what tools that only read answered, sealed under that device's own key, so another person's
 /// sign-in on the same computer (a device with its own key, even in the same folder) opens none of it; and it's gone
 /// once the device signs out.
 #[tokio::test(flavor = "multi_thread")]
@@ -495,6 +495,7 @@ async fn what_a_native_app_keeps_of_its_calls_is_its_persons_alone() {
 
     let dir = crate::temp("answers");
     let (andre, sam) = ([1; 32], [2; 32]);
+    // On the wire an app's tools are `ops`, and a call's tool `op`: older devices read and send those names.
     let apps = serde_json::to_vec(&serde_json::json!([{ "name": "board", "ops": [{ "name": "topics", "reads": true }, { "name": "post", "reads": false }] }])).unwrap();
     let call = |op: &str, input: serde_json::Value| serde_json::to_vec(&serde_json::json!({ "id": "1", "app": "board", "op": op, "input": input, "client": "mac" })).unwrap();
     let mine = Answers::new(&dir, &SigningKey::from_bytes(&andre));

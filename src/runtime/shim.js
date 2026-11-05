@@ -1,5 +1,5 @@
 // Every app runs inside this shim, in workerd. The app module (./app.js) is the app's deployed code; this turns it
-// into a Worker that answers the node: operations, widgets, hooks and screens. Its databases, one per scope, are the
+// into a Worker that answers the node: tools, widgets, hooks and screens. Its databases, one per scope, are the
 // node's: a query asks the node, and a call's writes are handed to it when the call returns, as one write. A node on a
 // machine asks it over HTTP (`fetch`); the Cloudflare node by RPC (`Call`), handing it what answers for the node.
 import { AsyncLocalStorage } from "node:async_hooks";
@@ -29,15 +29,19 @@ globalThis.fetch = (input, init) => {
 
 const json = (v, status = 200) => new Response(JSON.stringify(v ?? null), { status, headers: { "content-type": "application/json" } });
 
+/// The app's tools. `app.ops` is their name in apps deployed before 2026-11-05: it goes once none is left.
+const tools = () => app.tools || app.ops || {};
+
 function describe() {
   return {
     name: app.name, title: app.title, icon: app.icon, color: app.color, domain: app.domain, ...(app.tagline ? { tagline: String(app.tagline) } : {}), description: app.description || "", instructions: app.instructions || "",
     ...(app.connector ? { connector: true } : {}), ...(app.advanced ? { advanced: true } : {}), ...(app.needs ? { needs: String(app.needs) } : {}),
     ...(app.vault && Object.keys(app.vault).length ? { vault: app.vault } : {}),
-    // Features still being built, each off until an admin switches it on in Settings › Labs (src/labs.rs). An op
+    // Features still being built, each off until an admin switches it on in Settings › Labs (src/labs.rs). A tool
     // with `lab` is there only while its lab is on.
     ...(app.labs && Object.keys(app.labs).length ? { labs: Object.fromEntries(Object.entries(app.labs).map(([name, l]) => [name, { title: String(l.title || name), description: String(l.description || "") }])) } : {}),
-    ops: Object.entries(app.ops || {}).map(([name, o]) => ({ name, description: o.description || "", input: o.input || {}, ...(o.reads ? { reads: true } : {}), ...(o.confirm ? { confirm: true } : {}), ...(o.words ? { words: o.words.map(String) } : {}), ...(o.lab ? { lab: String(o.lab) } : {}) })),
+    // The wire calls tools `ops`, and a call's tool `op` (tests/contracts.rs), which older devices read.
+    ops: Object.entries(tools()).map(([name, o]) => ({ name, description: o.description || "", input: o.input || {}, ...(o.reads ? { reads: true } : {}), ...(o.confirm ? { confirm: true } : {}), ...(o.words ? { words: o.words.map(String) } : {}), ...(o.lab ? { lab: String(o.lab) } : {}) })),
     widgets: Object.entries(app.widgets || {}).map(([name, w]) => {
       const size = w.size || "medium";
       const options = Object.entries(w.options || {}).map(([name, o]) => ({ name, title: o.title || name, default: o.default ?? null }));
@@ -138,7 +142,7 @@ function context(ask, body, appends, later) {
     },
   });
   const scopes = body.scopes.map(handle);
-  // `ctx.apps.<name>.<op>(input, { device })`, for exactly the apps the app says it uses, and `ctx.services.<name>`
+  // `ctx.apps.<name>.<tool>(input, { device })`, for exactly the apps the app says it uses, and `ctx.services.<name>`
   // for its own service, which only it calls (the node checks both); `device` (a name) runs it there, like a service
   // on the machine that has what it needs.
   const uses = { apps: app.uses?.apps || [], services: app.uses?.services || [] };
@@ -297,9 +301,9 @@ async function handle(what, name, body, ask, waitUntil, out) {
     const ctx = context(ask, body, appends, later);
     let run;
     if (what === "call") {
-      const op = app.ops?.[body.op];
-      if (!op) throw new Error(`${app.name} has no operation ${body.op}`);
-      run = () => op.run(ctx, body.input ?? {});
+      const tool = tools()[body.op];
+      if (!tool) throw new Error(`${app.name} has no tool ${body.op}`);
+      run = () => tool.run(ctx, body.input ?? {});
     } else if (what === "widget") {
       const widget = app.widgets[body.name];
       ctx.size = body.size || widget.size || "medium";

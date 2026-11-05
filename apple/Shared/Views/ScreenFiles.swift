@@ -7,7 +7,7 @@ import VisionKit
 import AppKit
 #endif
 
-/// A file a screen hands the shell, as `one.save`, `one.preview` and ops' results give one: `{ name, type, base64 }`,
+/// A file a screen hands the shell, as `one.save`, `one.preview` and tools' results give one: `{ name, type, base64 }`,
 /// or `{ name, type, blob }` for a blob the node has.
 struct ScreenFile {
     var name: String

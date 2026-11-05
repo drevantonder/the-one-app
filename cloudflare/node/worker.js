@@ -746,7 +746,7 @@ class Run {
     }
   }
 
-  /// A call of `req.app`'s operation `req.op`, here: → `{ ok }`.
+  /// A call of `req.app`'s tool `req.op`, here: → `{ ok }`.
   async call(req, from = null, depth = 0) {
     const p = this.person;
     const app = deployed(this.view, req.app) || refuse(404, `no app named ${req.app}`);
@@ -838,7 +838,7 @@ const plain = (d) => !d.uses?.apps?.length && !d.uses?.services?.length && !d.va
 const needsDevice = (d, name) => `${d?.title || name} runs on your devices, and ${OFF}`;
 
 /// What the node does for an app while it runs, as it asks (src/node.rs: `internal`): its databases, other apps'
-/// operations, the Vault's items it's switched on for, and its requests out, filled in from them.
+/// tools, the Vault's items it's switched on for, and its requests out, filled in from them.
 class ForCall extends RpcTarget {
   constructor(run, app, call, done, depth) {
     super();

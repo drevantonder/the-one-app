@@ -232,7 +232,7 @@ window.oneWidgets = (() => {
     if (n.link) { el.classList?.add("w-linked"); el.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); host.follow(n.link, w); }); }
     return el;
 
-    // A button or toggle: runs the app's operation as the person, pressed with a spinner meanwhile; the host draws
+    // A button or toggle: runs the app's tool as the person, pressed with a spinner meanwhile; the host draws
     // the widget again. A toggle that failed goes back to how it was.
     async function act(target, op, input) {
       const shown = target.closest("label") || target;

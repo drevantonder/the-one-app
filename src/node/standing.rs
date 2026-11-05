@@ -182,7 +182,7 @@ impl Node {
         Ok(until)
     }
 
-    /// Runs one of `app`'s operations here in `scope`, as `user`, with the keys of the grant this device holds to keep it
+    /// Runs one of `app`'s tools here in `scope`, as `user`, with the keys of the grant this device holds to keep it
     /// running there, and no others: standing work's calls (its schedules', from `client`).
     pub async fn standing_call(&self, scope: &Scope, app: &str, user: &str, op: &str, input: Value, client: &str) -> Result<Value> {
         self.standing_keys(scope, app).await?;

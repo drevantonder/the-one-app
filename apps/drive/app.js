@@ -1,8 +1,8 @@
 // Google Drive for apps: your own Drive accounts, signed in once. Each account's refresh token is a secret field of
 // its Google account item in the Vault, which the node fills in only for Google's token address, so no app or agent
-// ever reads it; signing in is the same in every Google app. Its operations are Drive's own API (v3) by its own names
+// ever reads it; signing in is the same in every Google app. Its tools are Drive's own API (v3) by its own names
 // (files_get, files_list, files_create, files_upload, files_update, generate_ids), which agents and other apps
-// (ctx.apps.drive.<op>) already know.
+// (ctx.apps.drive.<tool>) already know.
 
 import settings from "./dist/settings.html" with { type: "text" };
 
@@ -182,7 +182,7 @@ const signInSchema = { user: [
 const signInOps = {
   accounts: {
     reads: true,
-    description: `The Google accounts ${TITLE} can use, the default first: [{ account, ok }], with why when ok is false (${APP}_sign_in with that account fixes it). Every other operation's account takes one of these.`,
+    description: `The Google accounts ${TITLE} can use, the default first: [{ account, ok }], with why when ok is false (${APP}_sign_in with that account fixes it). Every other tool's account takes one of these.`,
     input: { type: "object", properties: {} },
     async run(ctx) {
       return Promise.all((await accounts(ctx)).map(async (account) => {
@@ -256,7 +256,7 @@ const withAccount = (properties, required) => ({ type: "object", properties: { .
 const noFile = (id) => `no file ${id}, or not one this account can see: file ids come from drive_files_list (root is My Drive)`;
 const FIELDS_HINT = "fields is Drive's field list, like id,name,mimeType,parents,modifiedTime,webViewLink";
 
-// What each operation gives when fields is left out: what an agent uses, without Drive's kind on everything.
+// What each tool gives when fields is left out: what an agent uses, without Drive's kind on everything.
 const FILE = "id,name,mimeType,parents,modifiedTime,size,webViewLink,trashed";
 const LIST = "nextPageToken,files(id,name,mimeType,parents,modifiedTime,webViewLink)";
 const MADE = "id,name,mimeType,parents,webViewLink";
@@ -275,7 +275,7 @@ export default {
   icon: "google-drive-logo",
   color: "#fbbc04",
   description: "Your Google Drive: find, upload, rename and move files",
-  instructions: "Google Drive is the person's Drive accounts, through Drive's own API (v3), by its names: files_list finds files with Drive's q search (name contains 'budget' and trashed = false), files_get gives one, files_create makes a folder, files_upload uploads a file, files_update renames, moves (addParents, removeParents) or trashes one, generate_ids gives ids to make files with safely. Results give the fields asked for; fields asks for more. With several accounts, each operation takes account.",
+  instructions: "Google Drive is the person's Drive accounts, through Drive's own API (v3), by its names: files_list finds files with Drive's q search (name contains 'budget' and trashed = false), files_get gives one, files_create makes a folder, files_upload uploads a file, files_update renames, moves (addParents, removeParents) or trashes one, generate_ids gives ids to make files with safely. Results give the fields asked for; fields asks for more. With several accounts, each tool takes account.",
   vault: VAULT,
   schema: signInSchema,
 

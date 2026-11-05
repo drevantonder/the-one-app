@@ -290,7 +290,7 @@ const h = OneUI.react.createElement;
       if (on) localStorage.setItem(developer.KEY, "1");
       else (localStorage.removeItem(developer.KEY), (developer.kept = []));
     },
-    /// What a request asked, as a trace names it: a call's app and operation, a screen's app and name, else its path.
+    /// What a request asked, as a trace names it: a call's app and tool, a screen's app and name, else its path.
     /// Never its input or query. `since` (`{ at, perf, first }`) is when what it's for began, if earlier: a screen's
     /// page waits for this browser to be let in, and the screen the window opened on from the page's start.
     start(path, body, since) {
@@ -410,7 +410,7 @@ const h = OneUI.react.createElement;
     return answer;
   }
 
-  /// Runs an app's operation as this person → its result.
+  /// Runs an app's tool as this person → its result.
   async function call(app, op, input = {}) {
     // A call that only reads, asked while the same is under way (a screen that started again as its page changed),
     // waits for that one's answer rather than running again.
@@ -436,7 +436,7 @@ const h = OneUI.react.createElement;
   const customBuild = { name: document.querySelector('meta[name="application-name"]')?.content || "", cli: document.querySelector('meta[name="one-cli"]')?.content || "" };
   const config = () => store.state?.config || customBuild;
   const app = (name) => store.apps.find((a) => a.name === name);
-  /// Whether an app's operation only reads, as its app says: only what such a call answered is kept (answers.js).
+  /// Whether an app's tool only reads, as its app says: only what such a call answered is kept (answers.js).
   const reads = (name, op) => !!app(name)?.ops?.some((o) => o.name === op && o.reads === true);
   const label = (a) => a?.title || a?.name || "";
   const hasScreens = (a) => !!a?.screens?.some((s) => s.name === "main");

@@ -2,7 +2,7 @@
 // repo's own set, assignees and comments. Everyone who reads a repo (everyone) opens issues and comments; an issue's
 // author edits, closes and reopens it; those who push to the repo (its owners and collaborators) do that to any of its
 // issues, and label and assign them and manage its labels; its owners delete an issue, or anyone's comment. What the
-// operations give is GitHub's shape where it has one (number, state, state_reason, labels with their colour), with
+// tools give is GitHub's shape where it has one (number, state, state_reason, labels with their colour), with
 // people by handle, so a GitHub repo's issues could come back the same.
 
 /// GitHub's labels, which every new repo starts with: name, colour (hex, no #) and description.
@@ -50,7 +50,7 @@ function body(b, what = "a body") {
 const placeholders = (xs) => xs.map(() => "?").join(", ");
 const like = (q) => `%${q.replace(/[\\%_]/g, (c) => "\\" + c)}%`;
 
-/// The issue operations, given what app.js knows of repos: finding one, it as an object of permissions, and people.
+/// The issue tools, given what app.js knows of repos: finding one, it as an object of permissions, and people.
 export function ops(R) {
   const { global, named, object, rights, who, byHandle, handles, randomId, iso, REPO } = R;
   const person = (ctx, id) => who(ctx, `user:${id}`);
@@ -64,7 +64,7 @@ export function ops(R) {
     return i;
   }
 
-  /// Issues' rows as operations give them: with their labels, assignees and how many comments each has.
+  /// Issues' rows as tools give them: with their labels, assignees and how many comments each has.
   async function shape(ctx, g, r, rows) {
     if (!rows.length) return [];
     const ns = rows.map((i) => i.number);

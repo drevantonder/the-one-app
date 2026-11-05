@@ -11,7 +11,7 @@ mod client_device;
 mod code;
 mod git_remote;
 mod mcp_apps;
-mod ops;
+mod tools;
 mod throwaway;
 mod update;
 
@@ -41,7 +41,7 @@ fn every_command() -> String {
   {CLI} group invite <group> <user> [--admin]
   {CLI} group accept <group>
   {CLI} group remove <group> <user>    or leave it, giving yourself
-  {CLI} apps                           every app and its operations
+  {CLI} apps                           every app and its tools
   {CLI} deploy <dir> [--name <app>] [--owner <owner>]
                                        build the app in <dir> (app.ts or app.js, and its npm packages) with Bun and
                                        deploy it, with its source; makes the app if it's new (owner: you, a group or admins).
@@ -138,9 +138,9 @@ fn every_command() -> String {
                                        app's keys alone, for 30 days and longer as you use it), or stop it
   {CLI} schedule on|off <app> <name> [--scope user|global|<group>]
                                        switch an app's schedule on (it then runs as you) or off
-  {CLI} <app>                          an app's operations
-  {CLI} <app> <op> [words] [--input value]
-                                       run an operation, e.g. {CLI} board post ideas \"hi there\"; --help says what
+  {CLI} <app>                          an app's tools
+  {CLI} <app> <tool> [words] [--input value]
+                                       run a tool, e.g. {CLI} board post ideas \"hi there\"; --help says what
                                        it takes. Words fill its main inputs in order (--help shows which), lists
                                        repeat a flag, required inputs not given are read as JSON from stdin
                                        (a last word - reads it anyway), --file
@@ -159,8 +159,8 @@ fn every_command() -> String {
   {CLI} version                        this build
   {CLI} skills [<name> [<file>]]       the skills agents load: {NAME}'s own (how to connect, the rules, which MCP to
                                        add; also {CLI} guide, and /llms.txt), and each area's and app's
-  {CLI} search <words>                 the operations for a task in every app: how to call each, and its app's guide
-  {CLI} run <file>                     run a short script that calls operations, as tools.<app>.<op>({{ ... }}) (- reads
+  {CLI} search <words>                 the tools for a task in every app: how to call each, and its app's guide
+  {CLI} run <file>                     run a short script that calls tools, as tools.<app>.<tool>({{ ... }}) (- reads
                                        it from stdin), and print what it returns; {CLI} search gives each call
   {CLI} mcp [--code]                   the local MCP server, over stdio, for agents: every tool, or with --code, search and execute
   {CLI} help [all]                     what to start with; with all, this
@@ -187,17 +187,17 @@ fn help() -> String {
     format!(
         "{NAME}: your machines, and your team's, as one place for apps and agents.
 
-  {CLI} search <words>        the operations for a task in every app, each with how to call it
-  {CLI} <app>                 an app's operations and its guide
-  {CLI} <app> <op> --help     what an operation takes
-  {CLI} <app> <op> [words] [--input value]
+  {CLI} search <words>        the tools for a task in every app, each with how to call it
+  {CLI} <app>                 an app's tools and its guide
+  {CLI} <app> <tool> --help     what a tool takes
+  {CLI} <app> <tool> [words] [--input value]
                              run one, like {CLI} board post ideas \"hi there\"
-  {CLI} run <file>            a script that calls several operations; {CLI} search gives each call
+  {CLI} run <file>            a script that calls several tools; {CLI} search gives each call
   {CLI} skills                the guides agents load
   {CLI} status                who you are, and your devices
   {CLI} mcp [--code]          the local MCP server, for agents
 {yours}
-An operation's words fill its main inputs in order, a list repeats its flag, and inputs not given are read as JSON
+A tool's words fill its main inputs in order, a list repeats its flag, and inputs not given are read as JSON
 from stdin. --file <input>=<path> gives a file, --out <path> saves what comes back, --device <name> runs it there,
 and --confirm goes ahead with what sends or can't be undone, once the person agreed. --json prints what comes back
 as JSON.
@@ -262,16 +262,16 @@ fn main() {
     client_device::end();
     if let Err(err) = ran {
         // What the node says names its tools (apps_restore); the command line names them as commands.
-        eprintln!("{CLI}: {}", ops::in_cli_words(&format!("{err:#}")));
-        std::process::exit(ops::exit_code(&err));
+        eprintln!("{CLI}: {}", tools::in_cli_words(&format!("{err:#}")));
+        std::process::exit(tools::exit_code(&err));
     }
 }
 
 fn run(args: Vec<String>) -> Result<()> {
-    // --json is everyone's, wherever it's typed: what an operation gives back, as JSON.
+    // --json is everyone's, wherever it's typed: what a tool gives back, as JSON.
     let end = args.iter().position(|a| a == "--").unwrap_or(args.len());
     if args[..end].iter().any(|a| a == "--json") {
-        ops::JSON.store(true, std::sync::atomic::Ordering::Relaxed);
+        tools::JSON.store(true, std::sync::atomic::Ordering::Relaxed);
     }
     let args: Vec<String> = args.iter().enumerate().filter(|(i, a)| *i >= end || *a != "--json").map(|(_, a)| a.clone()).collect();
     if args.first().map(String::as_str) == Some("throwaway") {
@@ -297,7 +297,7 @@ fn run(args: Vec<String>) -> Result<()> {
         ["help", "all"] => println!("{}", every_command()),
         ["help", rest @ ..] => match command_help(&rest.iter().map(|w| w.to_string()).collect::<Vec<_>>()) {
             Some(text) => print!("{text}"),
-            None => bail!("{}", ops::unknown(rest[0], None, true)?),
+            None => bail!("{}", tools::unknown(rest[0], None, true)?),
         },
         ["sign-in"] => sign_in(&flags)?,
         ["sign-out"] => {
@@ -368,7 +368,7 @@ fn run(args: Vec<String>) -> Result<()> {
                 let installed: Vec<String> = app["installed"].as_array().into_iter().flatten().filter_map(Value::as_str).map(place).collect();
                 let installed = if installed.is_empty() { String::new() } else { format!(", added for {}", installed.join(", ")) };
                 println!("{} ({}{from}{installed})", app["name"].as_str().unwrap_or(""), app["title"].as_str().unwrap_or(""));
-                ops::list(std::slice::from_ref(app)).iter().for_each(|l| println!("{l}"));
+                tools::list(std::slice::from_ref(app)).iter().for_each(|l| println!("{l}"));
             }
         }
         ["create", name @ ..] if !name.is_empty() => {
@@ -508,7 +508,7 @@ fn run(args: Vec<String>) -> Result<()> {
                     let mut settings = one::cloudflare::Settings::new(NAME, &address);
                     settings.sign_in_url = at("auth");
                     settings.save()?;
-                    println!("Keep {} too: the Workers' secrets are in it, and a deploy without them can't read what's there. Better, move each to 1Password and leave an op(op://…) reference in its place.\n", one::cloudflare::Settings::path().with_file_name(".env.local").display());
+                    println!("Keep {} too: the Workers' secrets are in it, and a deploy without them can't read what's there. Better, move each to 1Password and leave an tool(tool://…) reference in its place.\n", one::cloudflare::Settings::path().with_file_name(".env.local").display());
                     // People signing in with Google need its OAuth client, which is put beside the secrets first.
                     match one::config::SIGN_IN {
                         "google" => one::cloudflare::Settings::load()?,
@@ -670,7 +670,7 @@ fn run(args: Vec<String>) -> Result<()> {
         }
         ["backups", "place", "remove", place] => {
             takes_only(&flags, &["confirm"])?;
-            ops::agreed(flags.contains_key("confirm"), &format!("{CLI} backups place remove"))?;
+            tools::agreed(flags.contains_key("confirm"), &format!("{CLI} backups place remove"))?;
             let places = get("/v1/backups")?["places"].as_array().cloned().unwrap_or_default();
             let p = places.iter().find(|p| p["id"] == *place || p["title"] == *place).with_context(|| format!("no place {place}; {CLI} backups lists them"))?;
             post("/v1/backups/place", json!({ "id": p["id"], "deleted": true }))?;
@@ -736,7 +736,7 @@ fn run(args: Vec<String>) -> Result<()> {
         }
         ["vault", "remove", item] | ["vault", "remove", item, _] => {
             takes_only(&flags, &["scope", "confirm"])?;
-            ops::agreed(flags.contains_key("confirm"), &format!("{CLI} vault remove"))?;
+            tools::agreed(flags.contains_key("confirm"), &format!("{CLI} vault remove"))?;
             let scope = flags.get("scope").and_then(Value::as_str).unwrap_or("user");
             println!("{}", vault_remove(scope, item, positional.get(3).map(String::as_str))?);
         }
@@ -859,12 +859,12 @@ fn run(args: Vec<String>) -> Result<()> {
                 }
             }
         }
-        ["devices", op @ ("keep" | "stop"), app, "on", device] => {
+        ["devices", tool @ ("keep" | "stop"), app, "on", device] => {
             takes_only(&flags, &["scope", "days"])?;
             let mut input = flags.clone();
             input.insert("app".into(), json!(app));
             input.insert("device".into(), json!(device));
-            println!("{}", devices_tool(op, &input, "cli")?.as_str().unwrap_or(""));
+            println!("{}", devices_tool(tool, &input, "cli")?.as_str().unwrap_or(""));
         }
         ["schedule", on @ ("on" | "off"), app, name] => {
             let scope = flags.get("scope").and_then(Value::as_str).unwrap_or("user");
@@ -892,7 +892,7 @@ fn run(args: Vec<String>) -> Result<()> {
             }
             std::fs::write(file, resp.body_mut().with_config().limit(1 << 30).read_to_vec()?)?;
         }
-        ["version"] if ops::json() => println!("{}", json!({ "commit": one::config::BUILD, "target": one::config::TARGET, "committed": one::config::COMMITTED })),
+        ["version"] if tools::json() => println!("{}", json!({ "commit": one::config::BUILD, "target": one::config::TARGET, "committed": one::config::COMMITTED })),
         ["version"] => println!("{} {} ({})", NAME, one::config::BUILD, one::config::TARGET),
         ["rename", name @ ..] if !name.is_empty() => {
             post("/v1/name", json!({ "name": name.join(" ") }))?;
@@ -901,21 +901,21 @@ fn run(args: Vec<String>) -> Result<()> {
         [app] if !app.starts_with('-') => {
             // The node's own apps (Devices, Widgets) aren't in its app list, but read the same.
             let apps = get("/v1/apps")?;
-            let own = ops::node_apps();
-            let Some(found) = apps.as_array().into_iter().flatten().chain(own.iter()).find(|a| a["name"] == *app) else { bail!("{}", ops::unknown(app, None, true)?) };
+            let own = tools::node_apps();
+            let Some(found) = apps.as_array().into_iter().flatten().chain(own.iter()).find(|a| a["name"] == *app) else { bail!("{}", tools::unknown(app, None, true)?) };
             println!("{} ({app})", found["title"].as_str().unwrap_or(app));
             if let Some(i) = found["instructions"].as_str().filter(|i| !i.is_empty()) {
                 println!("\n{i}\n");
             }
-            ops::list(std::slice::from_ref(found)).iter().for_each(|l| println!("{l}"));
-            println!("\n{CLI} {app} <op> --help says what an operation takes.");
+            tools::list(std::slice::from_ref(found)).iter().for_each(|l| println!("{l}"));
+            println!("\n{CLI} {app} <tool> --help says what a tool takes.");
         }
-        [app, op, ..] => {
-            // The words and flags after `<app> <op>`, as written.
+        [app, tool, ..] => {
+            // The words and flags after `<app> <tool>`, as written.
             let at = |word: &str, from: usize| args.iter().skip(from).position(|a| a == word).map(|i| i + from + 1).unwrap_or(from);
-            ops::run(app, op, &args[at(op, at(app, 0))..])?
+            tools::run(app, tool, &args[at(tool, at(app, 0))..])?
         }
-        [first, ..] => bail!("{}", ops::unknown(first, None, true)?),
+        [first, ..] => bail!("{}", tools::unknown(first, None, true)?),
     }
     Ok(())
 }
@@ -985,7 +985,7 @@ fn deployed_said(done: &str, here: bool) -> String {
 }
 
 /// A built-in command's help, for --help after it: every_command()'s lines for it, or help() when none are. None for
-/// an app's operation, and for an app that isn't a built-in command too, whose help is their own.
+/// an app's tool, and for an app that isn't a built-in command too, whose help is their own.
 fn command_help(words: &[String]) -> Option<String> {
     let first = words.first().filter(|w| *w != "-h")?;
     let text = every_command();
@@ -1021,7 +1021,7 @@ fn command_help(words: &[String]) -> Option<String> {
 /// commands run here, as the person, so `--device` among them.
 fn takes_only(flags: &Map<String, Value>, takes: &[&str]) -> Result<()> {
     match flags.keys().find(|k| !takes.contains(&k.as_str())) {
-        Some(other) => Err(ops::Failed::Typed(format!("--{other} isn't an input of this: see --help")).into()),
+        Some(other) => Err(tools::Failed::Typed(format!("--{other} isn't an input of this: see --help")).into()),
         None => Ok(()),
     }
 }
@@ -1088,7 +1088,7 @@ fn request(resp: Result<ureq::http::Response<ureq::Body>, ureq::Error>) -> Resul
         }
         let err = err.as_str().unwrap_or("failed").to_string();
         return Err(match refused {
-            true => ops::Failed::Refused(err).into(),
+            true => tools::Failed::Refused(err).into(),
             false => anyhow::anyhow!(err),
         });
     }
@@ -1614,7 +1614,7 @@ async fn listen(dir: &std::path::Path) -> Result<tokio::net::TcpListener> {
     bind().await.with_context(|| format!("listen on {}: the node there didn't stop", addr()))
 }
 
-/// The local MCP server, over stdio: every app operation is a tool, with `search` to find them; or in code mode (`--code`), `search` and
+/// The local MCP server, over stdio: every app tool is a tool, with `search` to find them; or in code mode (`--code`), `search` and
 /// `execute`, which runs scripts with them, and the few tools every agent needs from the start.
 fn mcp(mode: Mode) -> Result<()> {
     let stdin = std::io::stdin();
@@ -1713,7 +1713,7 @@ fn call_and_tell(params: &Value, agent: Option<&str>, mode: Mode, stdio: bool) -
     let name = params["name"].as_str().unwrap_or("");
     let apps = (mode == Mode::All && name != "search").then(|| get("/v1/apps").ok()).flatten();
     let reads = |apps: &Value| match name.split_once('_') {
-        Some((a, o)) => ops::node_app(a) || apps.as_array().into_iter().flatten().filter(|x| x["name"] == a).flat_map(|x| x["ops"].as_array().into_iter().flatten()).any(|x| x["name"] == o && x["reads"] == true),
+        Some((a, o)) => tools::node_app(a) || apps.as_array().into_iter().flatten().filter(|x| x["name"] == a).flat_map(|x| x["ops"].as_array().into_iter().flatten()).any(|x| x["name"] == o && x["reads"] == true),
         None => name == "search",
     };
     let before = apps.filter(|a| !reads(a)).map(|a| tool_names(&a));
@@ -1730,7 +1730,7 @@ fn call_and_tell(params: &Value, agent: Option<&str>, mode: Mode, stdio: bool) -
     let mut new: Vec<&str> = after.iter().filter(|t| !before.contains(t)).filter_map(|t| t.split_once('_').map(|(a, _)| a)).collect();
     new.dedup();
     if let (Some(first), Some(content)) = (new.first(), out["content"].as_array_mut()) {
-        content.push(json!({ "type": "text", "text": format!("New tools for {}: they come with your next session. Until then, `{CLI} {first} <op>` runs them where `{CLI}` runs.", new.join(", ")) }));
+        content.push(json!({ "type": "text", "text": format!("New tools for {}: they come with your next session. Until then, `{CLI} {first} <tool>` runs them where `{CLI}` runs.", new.join(", ")) }));
     }
     out
 }
@@ -1993,7 +1993,7 @@ fn vault_remove(scope: &str, item: &str, field: Option<&str>) -> Result<String> 
 /// Makes this device the Workers' home, or refuses (exit 3, which `one update` passes over) where it isn't.
 fn at_home(settings: &mut one::cloudflare::Settings) -> Result<()> {
     settings.at_home().map_err(|err| match err.downcast::<one::cloudflare::NotHome>() {
-        Ok(not) => ops::Failed::Refused(not.0).into(),
+        Ok(not) => tools::Failed::Refused(not.0).into(),
         Err(err) => err,
     })
 }
@@ -2121,8 +2121,8 @@ fn say_time(ms: u64) -> String {
     }
 }
 
-fn backups_tool(op: &str, input: &Map<String, Value>, agent: Option<&str>) -> Result<Value> {
-    match op {
+fn backups_tool(tool: &str, input: &Map<String, Value>, agent: Option<&str>) -> Result<Value> {
+    match tool {
         "status" => get("/v1/backups"),
         "now" => post("/v1/backups/now", json!({ "agent": agent })).map(|_| json!("Backing up now; backups_status says how it went.")),
         "add_place" => {
@@ -2142,9 +2142,9 @@ fn backups_tool(op: &str, input: &Map<String, Value>, agent: Option<&str>) -> Re
 }
 
 /// The devices' tools, as this machine's person.
-fn devices_tool(op: &str, input: &Map<String, Value>, client: &str) -> Result<Value> {
+fn devices_tool(tool: &str, input: &Map<String, Value>, client: &str) -> Result<Value> {
     let text = |k: &str| input.get(k).and_then(Value::as_str).with_context(|| format!("give {k}"));
-    match op {
+    match tool {
         "requests" => get("/v1/devices/requests"),
         "approve" => {
             let mut body = json!({ "code": text("code")?, "confirm": input.get("confirm") == Some(&json!(true)) });
@@ -2164,7 +2164,7 @@ fn devices_tool(op: &str, input: &Map<String, Value>, client: &str) -> Result<Va
         }
         "keep" | "stop" => {
             let scope = input.get("scope").and_then(Value::as_str).unwrap_or("user");
-            let days = if op == "stop" { json!(0) } else { input.get("days").cloned().unwrap_or(Value::Null) };
+            let days = if tool == "stop" { json!(0) } else { input.get("days").cloned().unwrap_or(Value::Null) };
             post("/v1/grant", json!({ "app": text("app")?, "device": text("device")?, "scope": scope, "days": days })).map(|r| r["said"].clone())
         }
         "invite" => post("/v1/invite-link", json!({ "name": text("name")?, "admin": input.get("admin") == Some(&json!(true)) })).map(|r| json!(invited_said(text("name").unwrap_or(""), &r))),
@@ -2234,10 +2234,10 @@ fn invited_said(name: &str, r: &Value) -> String {
     format!("Send {name} this link. It works once, for {days} days: opening it, they join. Then approve their device with its code.\n\n  {}", r["link"].as_str().unwrap_or(""))
 }
 
-fn vault_tool(op: &str, input: &Map<String, Value>, agent: Option<&str>) -> Result<Value> {
+fn vault_tool(tool: &str, input: &Map<String, Value>, agent: Option<&str>) -> Result<Value> {
     let scope = input.get("scope").and_then(Value::as_str).unwrap_or("user");
     let text = |k: &str| input.get(k).and_then(Value::as_str).with_context(|| format!("give {k}"));
-    match op {
+    match tool {
         "list" => Ok(json!(get(&format!("/v1/vault?scope={scope}"))?.as_array().into_iter().flatten().map(item_said).collect::<Vec<_>>())),
         "set" => {
             let hosts = input.get("hosts").and_then(Value::as_array).map(|h| h.iter().filter_map(Value::as_str).map(str::to_string).collect());
@@ -2312,25 +2312,25 @@ fn tools() -> Result<Vec<Value>, Value> {
     }
     for app in apps.as_array().into_iter().flatten() {
         let name = app["name"].as_str().unwrap_or("");
-        // Operations starting with `_` are for the node, such as a service's `_screen`.
-        for op in app["ops"].as_array().into_iter().flatten().filter(|op| !op["name"].as_str().unwrap_or("").starts_with('_')) {
-            tools.push(json!({ "name": format!("{name}_{}", op["name"].as_str().unwrap_or("")), "description": op["description"], "inputSchema": ops::mcp_schema(app, op), "annotations": ops::mcp_annotations(op) }));
+        // Tools starting with `_` are for the node, such as a service's `_screen`.
+        for tool in app["ops"].as_array().into_iter().flatten().filter(|tool| !tool["name"].as_str().unwrap_or("").starts_with('_')) {
+            tools.push(json!({ "name": format!("{name}_{}", tool["name"].as_str().unwrap_or("")), "description": tool["description"], "inputSchema": tools::mcp_schema(app, tool), "annotations": tools::mcp_annotations(tool) }));
         }
     }
     Ok(tools)
 }
 
-/// A tool's answer, within the budget an agent reads (ops::BUDGET).
+/// A tool's answer, within the budget an agent reads (tools::BUDGET).
 fn call_tool(params: &Value, agent: Option<&str>, mode: Mode) -> Value {
     let mut out = answer_tool(params, agent, mode);
     let name = params["name"].as_str().unwrap_or("");
     let chars: usize = out["content"].as_array().into_iter().flatten().filter_map(|c| c["text"].as_str()).map(str::len).sum();
-    if chars > ops::BUDGET {
-        let op = match name {
+    if chars > tools::BUDGET {
+        let tool = match name {
             "search" => Some(code::search_tool(mode)["inputSchema"].clone()).map(|input| json!({ "input": input })),
-            _ => name.split_once('_').and_then(|(a, o)| ops::find(a, o)).map(|(_, o)| o),
+            _ => name.split_once('_').and_then(|(a, o)| tools::find(a, o)).map(|(_, o)| o),
         };
-        ops::within_budget(&mut out["content"], op.as_ref());
+        tools::within_budget(&mut out["content"], tool.as_ref());
     }
     out
 }
@@ -2341,7 +2341,7 @@ fn answer_tool(params: &Value, agent: Option<&str>, mode: Mode) -> Value {
     let failed = |text: String| json!({ "isError": true, "content": [{ "type": "text", "text": text }] });
     // This server's own tools, checked as apps' are, in dispatch.
     let own = [code::search_tool(mode), code::execute_tool(), deploy_tool()].into_iter().chain(mcp_apps::tools()).find(|t| t["name"] == name);
-    if let Some(Err(e)) = own.map(|t| ops::check(&t["inputSchema"], &Value::Object(input.clone()))) {
+    if let Some(Err(e)) = own.map(|t| tools::check(&t["inputSchema"], &Value::Object(input.clone()))) {
         return failed(format!("{e:#}"));
     }
     if let Some(out) = mcp_apps::call(name, &Value::Object(input.clone())) {
@@ -2381,58 +2381,58 @@ fn answer_tool(params: &Value, agent: Option<&str>, mode: Mode) -> Value {
         },
         _ => match dispatch(name, input, agent, "mcp", None) {
             // A script gets an empty list as it is; an agent reading gets it in words.
-            Ok(ok) => match ["accounts", "devices"].into_iter().find_map(|op| Some((name.strip_suffix(&format!("_{op}"))?, op))).filter(|_| ok == json!([])).and_then(|(app, op)| Some((ops::find(app, op)?.0, op))).and_then(|(a, op)| ops::none_said(&a, op, &ok, false)) {
+            Ok(ok) => match ["accounts", "devices"].into_iter().find_map(|tool| Some((name.strip_suffix(&format!("_{tool}"))?, tool))).filter(|_| ok == json!([])).and_then(|(app, tool)| Some((tools::find(app, tool)?.0, tool))).and_then(|(a, tool)| tools::none_said(&a, tool, &ok, false)) {
                 Some(none) => json!({ "content": [{ "type": "text", "text": none }] }),
-                None => json!({ "content": ops::mcp_content(&ok) }),
+                None => json!({ "content": tools::mcp_content(&ok) }),
             },
             Err(e) => failed(format!("{e:#}")),
         },
     }
 }
 
-/// What to say for a tool nobody here lists: an app's operations when the app is right, else the nearest tools.
+/// What to say for a tool nobody here lists: an app's tools when the app is right, else the nearest tools.
 fn unknown_tool(name: &str) -> Result<String> {
-    if let Some((app, op)) = name.split_once('_')
-        && get("/v1/apps")?.as_array().into_iter().flatten().chain(&ops::node_apps()).any(|a| a["name"] == app)
+    if let Some((app, tool)) = name.split_once('_')
+        && get("/v1/apps")?.as_array().into_iter().flatten().chain(&tools::node_apps()).any(|a| a["name"] == app)
     {
-        return ops::unknown(app, Some(op), false);
+        return tools::unknown(app, Some(tool), false);
     }
     let tools = tools().map_err(|e| anyhow::anyhow!("{}", e["message"].as_str().unwrap_or("")))?;
     let names: Vec<&str> = tools.iter().filter_map(|t| t["name"].as_str()).collect();
-    match ops::nearest(name, &names).as_slice() {
+    match tools::nearest(name, &names).as_slice() {
         [] => match name.split_once('_') {
-            Some((app, op)) => ops::unknown(app, Some(op), false),
+            Some((app, tool)) => tools::unknown(app, Some(tool), false),
             None => Ok(format!("no tool {name}: search finds the tools for a task")),
         },
         near => Ok(format!("no tool {name}: did you mean {}?", near.join(" or "))),
     }
 }
 
-/// Runs one tool as the person, an app's operation or the Vault's, for MCP or a code mode script: what can't be undone
-/// only with confirm: true. `spec` is the operation, when the caller has it already.
+/// Runs one tool as the person, an app's tool or the Vault's, for MCP or a code mode script: what can't be undone
+/// only with confirm: true. `spec` is the tool, when the caller has it already.
 fn dispatch(name: &str, mut input: Map<String, Value>, agent: Option<&str>, client: &str, spec: Option<(Value, Value)>) -> Result<Value> {
-    let Some((app, op)) = name.split_once('_') else { bail!("{}", unknown_tool(name)?) };
-    let Some((a, spec)) = spec.or_else(|| ops::find(app, op)) else { bail!("{}", unknown_tool(name)?) };
+    let Some((app, tool)) = name.split_once('_') else { bail!("{}", unknown_tool(name)?) };
+    let Some((a, spec)) = spec.or_else(|| tools::find(app, tool)) else { bail!("{}", unknown_tool(name)?) };
     // Checked as MCP lists it, before anything runs: a wrong input says what's wrong, never runs as something else.
-    ops::check(&ops::mcp_schema(&a, &spec), &Value::Object(input.clone()))?;
+    tools::check(&tools::mcp_schema(&a, &spec), &Value::Object(input.clone()))?;
     let spec = Some(spec);
-    let device = if ops::node_app(app) || spec.as_ref().is_some_and(ops::own_device) { None } else { input.remove("device") };
+    let device = if tools::node_app(app) || spec.as_ref().is_some_and(tools::own_device) { None } else { input.remove("device") };
     let confirmed = input.remove("confirm") == Some(json!(true));
     if let Some(spec) = &spec {
         anyhow::ensure!(spec["confirm"] != true || confirmed, "{name} sends or can't be undone, and the person hasn't agreed to it: ask them, and give confirm: true only if they say yes to this very action");
     }
     if app == "vault" {
-        return vault_tool(op, &input, agent);
+        return vault_tool(tool, &input, agent);
     }
     if app == "backups" {
-        return backups_tool(op, &input, agent);
+        return backups_tool(tool, &input, agent);
     }
     if app == "devices" {
         // Its approve and remove read the person's yes themselves.
         if confirmed {
             input.insert("confirm".into(), json!(true));
         }
-        return devices_tool(op, &input, client);
+        return devices_tool(tool, &input, client);
     }
     if name == "groups_list" {
         return Ok(json!(groups_said(&get("/v1/state")?)));
@@ -2451,7 +2451,7 @@ fn dispatch(name: &str, mut input: Map<String, Value>, agent: Option<&str>, clie
         return Ok(out);
     }
     if let Some(spec) = spec {
-        ops::mcp_files(&spec, &mut input)?;
+        tools::mcp_files(&spec, &mut input)?;
     }
-    Ok(post("/v1/call", json!({ "device": device, "app": app, "op": op, "input": input, "agent": agent, "client": client }))?["ok"].take())
+    Ok(post("/v1/call", json!({ "device": device, "app": app, "op": tool, "input": input, "agent": agent, "client": client }))?["ok"].take())
 }

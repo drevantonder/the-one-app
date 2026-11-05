@@ -10,7 +10,7 @@
 // one, until they restore it or erase it, and its packs, for good. Rows name a repo by its id (an older repo's is the
 // name it had before owners had handles) and its owner by user:<id> or group:<id>, never by handle.
 //
-// GitHub's repos show beside them, as github.com/<owner>/<name>, each operation asking GitHub at once (github.js).
+// GitHub's repos show beside them, as github.com/<owner>/<name>, each tool asking GitHub at once (github.js).
 
 import * as browse from "./browse.js";
 import * as http from "./http.js";
@@ -32,7 +32,7 @@ import settingsScreen from "./dist/settings.html" with { type: "text" };
 const NAME = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 const BRANCH = /^(?!\/)(?!.*(\.\.|\/\/|\/$|\.lock$|@\{))[A-Za-z0-9._\/@+-]{1,200}$/;
 
-/// Times in what an operation gives, ms since 1970 here, as ISO 8601.
+/// Times in what a tool gives, ms since 1970 here, as ISO 8601.
 function iso(v) {
   if (Array.isArray(v)) return v.map(iso);
   if (!v || typeof v !== "object") return v;
@@ -55,7 +55,7 @@ function handles(ctx) {
 const byId = (ctx, id) => handles(ctx).find((h) => h.id === id) || null;
 const byHandle = (ctx, handle) => handles(ctx).find((h) => h.handle === handle) || null;
 
-/// A repo as its address and every operation name it: <owner's handle>/<name>.
+/// A repo as its address and every tool name it: <owner's handle>/<name>.
 const pathOf = (ctx, r) => `${byId(ctx, r.owner)?.handle ?? "unknown"}/${r.name}`;
 /// A row with its path, as browse.js and the screens take it.
 const withPath = (ctx, r) => r && { ...r, path: pathOf(ctx, r) };
@@ -194,7 +194,7 @@ async function paths(ctx, g, ids) {
 /// A repo's forks that aren't deleted, by path.
 const forksOf = async (ctx, g, r) => (await g.query(`select owner, name from repos where "from" = ? and deleted is null order by name`, [r.id])).map((f) => pathOf(ctx, f));
 
-/// A person's or group's handle and name, for what an operation gives.
+/// A person's or group's handle and name, for what a tool gives.
 const who = (ctx, id) => ({ handle: byId(ctx, id)?.handle ?? null, name: ownerName(ctx, id) });
 
 /// The install's own repos, as repos_list gives them.
@@ -225,7 +225,7 @@ const app = {
   color: "#5856d6",
   advanced: true,
   description: "Git hosting for you and your agents: clone, push and suggest changes",
-  instructions: `Repos is git hosting for the person and their agents, as on GitHub. A repo is <owner>/<name>, its owner a person or a group by their handle (groups_list has them), and its address is \`<their One App's address>/repos/<owner>/<name>.git\` (repos_get gives it, and its page shows it), the same on every computer: \`git clone\`, \`git push\` and \`git fetch\` work with it as with any git host on any computer where the CLI is signed in (its sign-in), with or without a node there; pushing to a name that isn't a repo yet makes it, under that owner (you, or a group you're in). Everyone reads and forks every repo. A repo's owner pushes, and its collaborators: a person adds and removes the collaborators of their own repos (repos_add_collaborator), and a group's members are collaborators of its repos, whose admins own them. Anyone else forks it (repos_fork, by default to <you>/<same name>), pushes to the fork, and tells its owner, who fetches from it. Each repo has issues, as on GitHub, numbered from #1: anyone opens one (repos_open_issue) and comments (repos_comment); its author edits and closes it, and those who push to the repo close, label and assign any (repos_issues finds them). GitHub's repos show beside them, as github.com/<owner>/<name>: those the person's own GitHub accounts see (repos_accounts, repos_sign_in) and those of GitHub organizations connected for their groups. Reading and the issue operations work on them the same, asking GitHub at once, and what they write goes to GitHub; clone one from GitHub's own address (repos_get gives it).`,
+  instructions: `Repos is git hosting for the person and their agents, as on GitHub. A repo is <owner>/<name>, its owner a person or a group by their handle (groups_list has them), and its address is \`<their One App's address>/repos/<owner>/<name>.git\` (repos_get gives it, and its page shows it), the same on every computer: \`git clone\`, \`git push\` and \`git fetch\` work with it as with any git host on any computer where the CLI is signed in (its sign-in), with or without a node there; pushing to a name that isn't a repo yet makes it, under that owner (you, or a group you're in). Everyone reads and forks every repo. A repo's owner pushes, and its collaborators: a person adds and removes the collaborators of their own repos (repos_add_collaborator), and a group's members are collaborators of its repos, whose admins own them. Anyone else forks it (repos_fork, by default to <you>/<same name>), pushes to the fork, and tells its owner, who fetches from it. Each repo has issues, as on GitHub, numbered from #1: anyone opens one (repos_open_issue) and comments (repos_comment); its author edits and closes it, and those who push to the repo close, label and assign any (repos_issues finds them). GitHub's repos show beside them, as github.com/<owner>/<name>: those the person's own GitHub accounts see (repos_accounts, repos_sign_in) and those of GitHub organizations connected for their groups. Reading and the issue tools work on them the same, asking GitHub at once, and what they write goes to GitHub; clone one from GitHub's own address (repos_get gives it).`,
   vault: github.VAULT,
 
   schema: {
@@ -571,7 +571,7 @@ const app = {
 
 export default app;
 
-// A GitHub repo's operations ask GitHub (github.js); what only the install's own repos do says where to do it.
+// A GitHub repo's tools ask GitHub (github.js); what only the install's own repos do says where to do it.
 for (const [name, op] of Object.entries(app.ops)) {
   const own = op.run;
   if (github.run[name]) op.run = (ctx, input = {}) => (github.isGithub(input.repo) ? github.run[name](ctx, input) : own(ctx, input));

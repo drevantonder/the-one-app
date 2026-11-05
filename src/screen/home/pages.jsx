@@ -56,7 +56,7 @@ const titleOf = (scope) => (scope === SETTINGS ? "Settings" : home.page(scope)?.
 /// An icon on the grid: `key` and `kept` say what it is to arranging (as the page keeps it).
 const tile = (slot, extra) => ({ slot, kind: "app", ...extra })
 
-/// What a page's widgets act through: their app's operations, and their links.
+/// What a page's widgets act through: their app's tools, and their links.
 const widgetHost = (p) => ({
   async run(app, op, input) {
     try {

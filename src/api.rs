@@ -304,7 +304,7 @@ pub const SIGNED_IN: &[&str] = &[
     "/v1/client-screens/{name}",
     "/v1/blobs",
     "/v1/blobs/{hash}",
-    // An app's own requests, run as its operation `_http` for its person, whose checks are the app's: git's, to Repos.
+    // An app's own requests, run as its tool `_http` for its person, whose checks are the app's: git's, to Repos.
     APP_ROUTE,
     "/v1/events",
     "/v1/arrange",
@@ -1171,7 +1171,7 @@ async fn service_release(State(node): State<Node>, Json(req): Json<ReleaseReques
     Ok(Json(json!(r)))
 }
 
-/// A request to `/<app>/<path>`, answered by the app's `_http` operation, run as whoever asked (this machine's person,
+/// A request to `/<app>/<path>`, answered by the app's `_http` tool, run as whoever asked (this machine's person,
 /// a client device's, or a sign-in's), whose checks are the app's own: the body reaches it as a blob, read as it comes
 /// and deleted once it's answered unless something keeps it, and it answers `{ status, type, text }`, or
 /// `{ status, type, blob }` for bytes it keeps.

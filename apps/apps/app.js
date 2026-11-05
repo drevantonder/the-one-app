@@ -72,7 +72,7 @@ function untar(bytes) {
 
 /// What a built-in app the install hasn't added says about itself: nothing runs it yet, so its code says (the first
 /// `title`, `icon`, `color`, `tagline` and `description` after the line starting `export default` given as plain strings, as the built-in
-/// apps give them before their ops; `advanced: true` too, which the store lists after the rest).
+/// apps give them before their tools; `advanced: true` too, which the store lists after the rest).
 async function described(ctx, bundle) {
   const file = untar(await ctx.blob.get(bundle)).find((f) => f.path === "app.js");
   const all = file ? new TextDecoder().decode(file.bytes) : "";

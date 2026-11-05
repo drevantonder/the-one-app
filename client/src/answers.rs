@@ -22,7 +22,7 @@ const BIGGEST: usize = 1_000_000;
 pub struct Answers {
     dir: PathBuf,
     key: [u8; 32],
-    /// Each app's operations that only read, as `/v1/apps` last said, once it has.
+    /// Each app's tools that only read, as `/v1/apps` last said, once it has.
     reads: Mutex<Option<HashMap<String, Vec<String>>>>,
 }
 
@@ -43,7 +43,7 @@ impl Answers {
         Some((plain[8..].to_vec(), at))
     }
 
-    /// Learns which operations only read from the whole list of apps (`GET /v1/apps`'s answer).
+    /// Learns which tools only read from the whole list of apps (`GET /v1/apps`'s answer).
     pub fn learn(&self, apps: &[u8]) {
         let Ok(Value::Array(apps)) = serde_json::from_slice::<Value>(apps) else { return };
         let reads = apps
@@ -53,7 +53,7 @@ impl Answers {
         *self.reads.lock().unwrap() = Some(reads);
     }
 
-    /// Keeps what a call (`sent`, `/v1/call`'s body) answered, if its operation only reads, as `learn` last said, and
+    /// Keeps what a call (`sent`, `/v1/call`'s body) answered, if its tool only reads, as `learn` last said, and
     /// it answered rather than failed.
     pub fn keep(&self, sent: &[u8], answer: &[u8]) {
         let Ok(sent) = serde_json::from_slice::<Value>(sent) else { return };

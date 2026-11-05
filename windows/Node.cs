@@ -66,14 +66,14 @@ public static class Node
     public static Task<List<WidgetInfo>> Widgets(string scope) => Get<List<WidgetInfo>>("/v1/widgets", new() { ["scope"] = scope });
     public static Task<Dictionary<string, int>> Badges(string scope) => Get<Dictionary<string, int>>("/v1/badges", new() { ["scope"] = scope });
 
-    /// Runs an app's operation as this person → its result.
+    /// Runs an app's tool as this person → its result.
     public static async Task<JsonNode?> Call(string app, string op, JsonNode? input = null)
     {
         var reply = await Ask(HttpMethod.Post, "/v1/call", body: new JsonObject { ["app"] = app, ["op"] = op, ["input"] = input ?? new JsonObject(), ["client"] = "windows" }, timeout: TimeSpan.FromMinutes(5));
         return reply?["ok"]?.DeepClone();
     }
 
-    /// What an app screen's call answered last, if its operation only reads: `{ answer, at }`, for bridge.js's `kept`.
+    /// What an app screen's call answered last, if its tool only reads: `{ answer, at }`, for bridge.js's `kept`.
     public static async Task<JsonNode?> Kept(string app, string op, JsonNode? input)
     {
         if (await Client.Kept(app, op, System.Text.Encoding.UTF8.GetBytes((input ?? new JsonObject()).ToJsonString())) is not { } kept) return null;

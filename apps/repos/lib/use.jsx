@@ -82,7 +82,7 @@ export function Beside({ list, detail, size = "24rem" }) {
   )
 }
 
-/// A time from an operation, ISO 8601, as how long ago it was.
+/// A time from a tool, ISO 8601, as how long ago it was.
 export const ago = (iso) => one.ago(Date.parse(iso), { long: true })
 export const short = (sha) => String(sha || "").slice(0, 7)
 export const plural = (n, single, many) => `${n.toLocaleString()} ${n === 1 ? single : many}`

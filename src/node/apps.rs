@@ -111,7 +111,7 @@ impl Node {
         Ok(out)
     }
 
-    /// `apps`, as a window draws them: what shows each one and where (no operations, schemas or instructions, which
+    /// `apps`, as a window draws them: what shows each one and where (no tools, schemas or instructions, which
     /// whoever needs them asks the whole list for), its picture named (`/v1/images/<name>`) rather than in it, so the
     /// list is small and each picture is kept for good where it's shown.
     pub async fn apps_drawn(&self, viewer: &Caller) -> Result<Vec<Value>> {
@@ -165,7 +165,7 @@ impl Node {
 
     /// Every app in the install: owner, `from`, forks, deploys, the scopes `viewer` may use it's installed in, its
     /// title and icon, and for one built in, the bundle this release has of it; for those installed for them, what it
-    /// does (operations, widgets, screens, instructions). With `not_added`, also the built-in apps the install hasn't
+    /// does (tools, widgets, screens, instructions). With `not_added`, also the built-in apps the install hasn't
     /// added yet, with no deploys.
     pub async fn catalog(&self, viewer: &Caller, not_added: bool) -> Result<Vec<Value>> {
         let listed = self.with(|i| {
@@ -219,7 +219,7 @@ impl Node {
                     for (k, v) in d.into_iter().filter(|(k, _)| k != "name" && k != "schedules" && (mine || matches!(k.as_str(), "title" | "icon" | "color" | "domain" | "tagline" | "description" | "uses" | "connector" | "needs" | "advanced" | "labs"))) {
                         info[k] = v;
                     }
-                    // An op of a lab that's off isn't there.
+                    // A tool of a lab that's off isn't there.
                     if let Some(ops) = info["ops"].as_array_mut() {
                         let on = self.with(|i| Ok(crate::labs::on_keys(&i.r.db().settings())))?;
                         ops.retain(|o| o["lab"].as_str().is_none_or(|lab| on.contains(&crate::labs::app_key(&name, lab))));
@@ -409,7 +409,7 @@ impl Node {
 
     /// Deploys `bundle` as `app`, as `deploy` does, making the app first if there's none by that name, owned by
     /// `owner` (by default the caller). → `{ bundle, made, before, here, ops }`: whether it was made, the deploy it ran
-    /// before, and with `wait`, whether this device runs it now and then its operations (or why it doesn't start).
+    /// before, and with `wait`, whether this device runs it now and then its tools (or why it doesn't start).
     pub async fn deploy_making(&self, caller: &Caller, app: &str, bundle: &str, owner: Option<&str>, wait: bool) -> Result<Value> {
         let before = self.with(|i| {
             let m = i.r.db();

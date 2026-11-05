@@ -261,7 +261,7 @@ final class Store {
 
     // MARK: Widgets
 
-    /// Runs an operation a widget's button or toggle names, as this user, then draws the widgets again. The error's
+    /// Runs a tool a widget's button or toggle names, as this user, then draws the widgets again. The error's
     /// text, if it failed.
     func run(app: String, op: String, input: JSONValue) async -> String? {
         do {

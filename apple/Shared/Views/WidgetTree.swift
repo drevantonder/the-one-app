@@ -39,7 +39,7 @@ enum WidgetSize {
     static let all = ["small", "medium", "large", "xl"]
 }
 
-/// Any JSON value: an operation's input, as a widget gives it.
+/// Any JSON value: a tool's input, as a widget gives it.
 enum JSONValue: Codable, Sendable, Hashable {
     case null, bool(Bool), number(Double), string(String), array([JSONValue]), object([String: JSONValue])
 
@@ -260,7 +260,7 @@ struct WidgetHost {
     var app = ""
     /// The page it's on, for the screens it opens.
     var scope: String?
-    /// Runs an operation of the app; the error's text if it failed.
+    /// Runs a tool of the app; the error's text if it failed.
     var run: (@MainActor (_ op: String, _ input: JSONValue) async -> String?)?
     var open: (@MainActor (WidgetLink) -> Void)?
 }
@@ -744,7 +744,7 @@ private struct ActionButton: View {
             if let icon = node.icon { Glyph(name: icon, size: 16) }
         }
         #if WIDGET
-        Button(intent: RunOperation(app: host.app, op: node.op ?? "", input: node.input ?? .object([:]), scope: host.scope)) { label }
+        Button(intent: RunTool(app: host.app, op: node.op ?? "", input: node.input ?? .object([:]), scope: host.scope)) { label }
             .buttonStyle(.bordered)
             .tint(toneColor(node.tone))
         #else
@@ -778,14 +778,14 @@ private struct ActionButton: View {
 private struct ActionToggle: View {
     var node: WidgetNode
     @Environment(\.widgetHost) private var host
-    /// What it shows while its operation runs, before the widget redraws.
+    /// What it shows while its tool runs, before the widget redraws.
     @State private var pending: Bool?
     @State private var error: String?
 
     var body: some View {
         let on = pending ?? node.on ?? false
         #if WIDGET
-        Toggle(isOn: on, intent: ToggleOperation(app: host.app, op: node.op ?? "", input: node.input ?? .object([:]), scope: host.scope)) {
+        Toggle(isOn: on, intent: ToggleTool(app: host.app, op: node.op ?? "", input: node.input ?? .object([:]), scope: host.scope)) {
             Text(node.label ?? "").lineLimit(1)
         }
         .tint(.accentColor)

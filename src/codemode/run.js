@@ -2,8 +2,8 @@
 // subset with no eval, network, files or timers, that reaches the world only through `tools`. Each tool call goes back
 // to the command that started this, which runs it as the person, as any MCP call; this side only asks.
 //
-// stdin: first { code, tools: [{ app, op, description, input, confirm }], limits }, then { reply, ok | error } for
-// each call. stdout: { call, app, op, input } for each call, then { done: result }.
+// stdin: first { code, tools: [{ app, tool, description, input, confirm }], limits }, then { reply, ok | error } for
+// each call. stdout: { call, app, tool, input } for each call, then { done: result }.
 import { CodeMode, Namespace, Tool, toolError } from "@opencode/codemode"
 import { Effect } from "effect"
 
@@ -39,21 +39,21 @@ const call = (t, input) =>
   new Promise((resolve, reject) => {
     const id = ++next
     waiting.set(id, { resolve, reject })
-    say({ call: id, app: t.app, op: t.op, input })
+    say({ call: id, app: t.app, tool: t.tool, input })
   })
 
 const byPath = new Map()
 const apps = {}
 for (const t of list) {
-  byPath.set(`${t.app}.${t.op}`, t)
-  ;(apps[t.app] ??= {})[t.op] = Tool.make({
+  byPath.set(`${t.app}.${t.tool}`, t)
+  ;(apps[t.app] ??= {})[t.tool] = Tool.make({
     description: t.description ?? "",
     input: t.input ?? { type: "object" },
     output: {},
     execute: (input) => Effect.tryPromise({ try: () => call(t, input), catch: (e) => toolError(String(e)) }),
   })
 }
-const tools = Object.fromEntries(Object.entries(apps).map(([app, ops]) => [app, Namespace.make({ description: descriptions?.[app] ?? "", tools: ops })]))
+const tools = Object.fromEntries(Object.entries(apps).map(([app, tools]) => [app, Namespace.make({ description: descriptions?.[app] ?? "", tools })]))
 
 const runtime = CodeMode.make({
   tools,
@@ -63,7 +63,7 @@ const runtime = CodeMode.make({
     "tool.before": ({ name, input }) => {
       const t = byPath.get(name)
       if (t?.confirm && input?.confirm !== true)
-        return Effect.fail(toolError(`${t.app}_${t.op} sends or can't be undone: ask the person first, then call it again with confirm: true`))
+        return Effect.fail(toolError(`${t.app}_${t.tool} sends or can't be undone: ask the person first, then call it again with confirm: true`))
       return Effect.void
     },
   },

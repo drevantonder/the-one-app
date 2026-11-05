@@ -100,7 +100,7 @@ class Client(private val context: Context, private val signIn: SignIn) {
         return NotLetIn(removed)
     }
 
-    /** What an app's call answered last for `input` (JSON), if its operation only reads (client/ffi's `kept`), from
+    /** What an app's call answered last for `input` (JSON), if its tool only reads (client/ffi's `kept`), from
      *  this phone alone; null without a device yet, as before anyone's signed in. */
     suspend fun kept(app: String, op: String, input: ByteArray): uniffi.one_client_ffi.KeptAnswer? {
         val d = device ?: runCatching { device() }.getOrNull() ?: return null

@@ -226,11 +226,11 @@ class Store(private val application: android.app.Application, val signIn: SignIn
 
     suspend fun post(path: String, body: JsonElement): JsonElement = json.parseToJsonElement(String(api(path, "POST", body)).ifEmpty { "null" })
 
-    /** Runs an app's operation as this person → its result. */
+    /** Runs an app's tool as this person → its result. */
     suspend fun call(app: String, op: String, input: JsonElement = JsonObject(emptyMap())): JsonElement? =
         (post("/v1/call", obj("app" to app, "op" to op, "input" to input, "client" to "android")) as? JsonObject)?.get("ok")
 
-    /** What an app screen's call answered last, if its operation only reads: `{ answer, at }`, for bridge.js's `kept`. */
+    /** What an app screen's call answered last, if its tool only reads: `{ answer, at }`, for bridge.js's `kept`. */
     suspend fun kept(app: String, op: String, input: JsonElement): JsonElement? {
         val kept = client.kept(app, op, input.toString().toByteArray()) ?: return null
         val answer = runCatching { json.parseToJsonElement(String(kept.answer)) }.getOrNull() ?: return null

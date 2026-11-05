@@ -31,12 +31,12 @@ impl std::fmt::Display for Elsewhere {
 impl std::error::Error for Elsewhere {}
 
 impl Node {
-    /// Runs an operation for this device's local user: here, or on the nearest device that can.
+    /// Runs a tool for this device's local user: here, or on the nearest device that can.
     pub async fn call(&self, req: CallRequest) -> Result<Value> {
         self.call_as(req, Caller { key: self.0.id, user: self.user()?, agent: None, token: None }).await
     }
 
-    /// Runs an operation for `me`, whom this device acts for: here, or on the nearest device that can.
+    /// Runs a tool for `me`, whom this device acts for: here, or on the nearest device that can.
     pub async fn call_as(&self, req: CallRequest, me: Caller) -> Result<Value> {
         let me = Caller { agent: req.agent.clone().or(me.agent), ..me };
         self.route(req, me).await
@@ -407,7 +407,7 @@ impl Node {
             self.record(&req.app, req, me, Some(&why));
             return Ok(Reply::Error(why));
         }
-        // An op of a lab that's off isn't there.
+        // A tool of a lab that's off isn't there.
         let described = self.0.apps.describe(&req.app).await?;
         if let Some(lab) = described["ops"].as_array().into_iter().flatten().find(|o| o["name"] == req.op.as_str()).and_then(|o| o["lab"].as_str())
             && !self.with(|i| Ok(crate::labs::on(&i.r.db().settings(), &crate::labs::app_key(&req.app, lab))))?
@@ -936,7 +936,7 @@ impl Node {
         let ok = |v: Value| axum::Json(v).into_response();
         Ok(match (method, path) {
             ("POST", "/call") => {
-                ensure!(!grant.read_only, "this call only reads: it can't run other apps' operations");
+                ensure!(!grant.read_only, "this call only reads: it can't run other apps' tools");
                 let req: Value = serde_json::from_slice(&body)?;
                 let (app, op) = (req["app"].as_str().unwrap_or(""), req["op"].as_str().unwrap_or(""));
                 // An app may say which device runs it, like the one with a local model.
@@ -1086,7 +1086,7 @@ impl Node {
 
     /// What a service may have run, as `service::limited` says: only its own app, in its person's own scope, here on
     /// a node of that person's own, whose keys it is run with until grants land, calling no other app. A hacked
-    /// service gets no more than its own app's operations for its own person.
+    /// service gets no more than its own app's tools for its own person.
     fn accept_service(&self, remote: Key, request: &Value) -> Result<(CallRequest, Caller)> {
         let me = self.check_caller(remote, request)?;
         ensure!(request["me"]["token"].is_null(), "a service asks with no sign-in");

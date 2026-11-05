@@ -80,7 +80,7 @@ object HomeWidgets {
         val kept: Kept? = null,
         val choices: Map<Int, String> = emptyMap(),
         val signedIn: Boolean = false,
-        /** Buttons and toggles tapped whose operations aren't done: each toggle's value, as it's drawn till then. */
+        /** Buttons and toggles tapped whose tools aren't done: each toggle's value, as it's drawn till then. */
         val doing: Map<String, Boolean> = emptyMap(),
     )
 
@@ -126,7 +126,7 @@ object HomeWidgets {
         runCatching { HomeWidget().updateAll(app) }
     }
 
-    /** Its operation done, or not: drawn from what the widgets say. */
+    /** Its tool done, or not: drawn from what the widgets say. */
     fun done(which: String) {
         shown.update { it.copy(doing = it.doing - which) }
         redraw()

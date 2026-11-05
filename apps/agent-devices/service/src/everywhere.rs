@@ -78,7 +78,7 @@ impl Devices {
         Ok(self.host.post_within("/v1/call", &req, limit)?["ok"].clone())
     }
 
-    /// Calls one of the app's operations, on this device's node.
+    /// Calls one of the app's tools, on this device's node.
     pub(super) fn call_app(&self, op: &str, input: &Value) -> Result<Value> {
         Ok(self.host.post("/v1/call", &json!({ "app": NAME, "op": op, "input": input }))?["ok"].clone())
     }

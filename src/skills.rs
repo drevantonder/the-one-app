@@ -1,5 +1,5 @@
 //! What agents are told, as Agent Skills (agentskills.io): a root skill, short enough to load up front, and deeper ones
-//! loaded when needed: one for each app with a guide (its instructions and operations, from the same declarations its
+//! loaded when needed: one for each app with a guide (its instructions and tools, from the same declarations its
 //! tools come from), the Vault's, and a few areas of their own (`skills/`). One source, every way out: the agents
 //! service writes them into each harness's skills folder, `<cli> mcp` serves them (Skills over MCP, SEP-2640), a
 //! device serves the root's body as `/llms.txt` and each skill's files at `/skills/<name>/<path>`, and `<cli> skills`
@@ -37,7 +37,7 @@ pub fn rules() -> String {
 /// How to find what's possible, from the command line.
 pub fn finding() -> String {
     format!(
-        "- Each area has a skill of its own: load the one for what you're doing. `{CLI} skills` lists them and `{CLI} skills <name>` prints one.\n- `{CLI} search \"<words>\"` finds the operations for a task in every app, each with how to call it and its app's guide. `{CLI} <app>` lists an app's operations and its guide; `{CLI} <app> <op> --help` says what one takes.\n- Every MCP tool is also a command: `board_post` is `{CLI} board post`.\n- `{CLI} run <file>` runs a short script that calls several operations and prints what it returns: `{CLI} search` gives each call as the script writes it.\n- `{CLI} status` says who you are, and the people and devices in {YOURS}. You act for the person it marks (you): write their name, never this computer's login.\n- Before saying you can't, search: an app the person hasn't added yet may do it, and search offers it.\n- When the person asks you to make an app, tracker or tool, make it here, where it's on all their devices: the `{}-build` skill says how.",
+        "- Each area has a skill of its own: load the one for what you're doing. `{CLI} skills` lists them and `{CLI} skills <name>` prints one.\n- `{CLI} search \"<words>\"` finds the tools for a task in every app, each with how to call it and its app's guide. `{CLI} <app>` lists an app's tools and its guide; `{CLI} <app> <tool> --help` says what one takes.\n- Every MCP tool is also a command: `board_post` is `{CLI} board post`.\n- `{CLI} run <file>` runs a short script that calls several tools and prints what it returns: `{CLI} search` gives each call as the script writes it.\n- `{CLI} status` says who you are, and the people and devices in {YOURS}. You act for the person it marks (you): write their name, never this computer's login.\n- Before saying you can't, search: an app the person hasn't added yet may do it, and search offers it.\n- When the person asks you to make an app, tracker or tool, make it here, where it's on all their devices: the `{}-build` skill says how.",
         server_name()
     )
 }
@@ -138,7 +138,7 @@ pub fn root(others: &[Skill], link: impl Fn(&Skill) -> String) -> Skill {
 }
 
 /// The skills under the root, for `apps` (as `GET /v1/apps` gives them, those installed for the person having their
-/// operations): the areas of their own, the Vault's, then one for each app with a guide.
+/// tools): the areas of their own, the Vault's, then one for each app with a guide.
 pub fn deeper(apps: &[Value]) -> Vec<Skill> {
     let code = match REPO.is_empty() {
         false => format!("https://github.com/{REPO}"),
@@ -198,54 +198,54 @@ fn skill_name(area: &str) -> String {
     name.chars().take(64).collect::<String>().trim_end_matches('-').to_string()
 }
 
-/// An app's skill: its guide, then each operation as its tool says it.
+/// An app's skill: its guide, then each tool as its tool says it.
 pub fn app_skill(app: &Value) -> Skill {
     let (name, title) = (app["name"].as_str().unwrap_or(""), app["title"].as_str().filter(|t| !t.is_empty()).unwrap_or(app["name"].as_str().unwrap_or("")));
     let about = app["description"].as_str().map(|d| d.trim().trim_end_matches('.')).filter(|d| !d.is_empty()).map(|d| format!(": {d}")).unwrap_or_default();
     let description: String = format!("{title} in {NAME}{about}. Use when the person asks about {title}, and before using its tools ({name}_...).").chars().take(1024).collect();
-    let ops: Vec<&Value> = app["ops"].as_array().into_iter().flatten().filter(|o| !o["name"].as_str().unwrap_or("").starts_with('_')).collect();
-    // The guide names operations as tools; a harness with only the command line reads each as its command too.
+    let tools: Vec<&Value> = app["ops"].as_array().into_iter().flatten().filter(|o| !o["name"].as_str().unwrap_or("").starts_with('_')).collect();
+    // The guide names tools as MCP does (gmail_search); a harness with only the command line reads each as its command too.
     let mut guide = app["instructions"].as_str().unwrap_or("").trim().to_string();
-    let mut by_length: Vec<&str> = ops.iter().filter_map(|o| o["name"].as_str()).collect();
+    let mut by_length: Vec<&str> = tools.iter().filter_map(|o| o["name"].as_str()).collect();
     by_length.sort_by_key(|o| std::cmp::Reverse(o.len()));
-    for op in by_length {
-        let tool = format!("{name}_{op}");
+    for short in by_length {
+        let tool = format!("{name}_{short}");
         let mut out = String::new();
         let mut rest = guide.as_str();
         while let Some(i) = rest.find(&tool) {
             let after = &rest[i + tool.len()..];
             let whole = !rest[..i].ends_with(|c: char| c.is_alphanumeric() || c == '_' || c == '`' || c == '-') && !after.starts_with(|c: char| c.is_alphanumeric() || c == '_' || c == '`');
             out.push_str(&rest[..i]);
-            out.push_str(&if whole { format!("`{CLI} {name} {op}` ({tool})") } else { tool.clone() });
+            out.push_str(&if whole { format!("`{CLI} {name} {short}` ({tool})") } else { tool.clone() });
             rest = after;
         }
         out.push_str(rest);
         guide = out;
     }
     let mut body = format!(
-        "# {title}\n\n{}\n\n## Operations\n\nEach is the command `{CLI} {name} <op>` (`--help` says more). Over MCP, the same operation is the tool `{name}_<op>` with the same inputs. Never ask for a password, key or token in the chat: `{CLI} vault request` (vault_request) gives the person a link. What sends or can't be undone takes `confirm: true` (`--confirm`), given only once the person agreed to that very action. Post to the board only when the person asked, or when you changed something.\n",
+        "# {title}\n\n{}\n\n## Tools\n\nEach is the command `{CLI} {name} <tool>` (`--help` says more). Over MCP, it is the tool `{name}_<tool>`, with the same inputs. Never ask for a password, key or token in the chat: `{CLI} vault request` (vault_request) gives the person a link. What sends or can't be undone takes `confirm: true` (`--confirm`), given only once the person agreed to that very action. Post to the board only when the person asked, or when you changed something.\n",
         guide,
     );
-    for op in ops {
-        let mark = match (op["reads"] == true, op["confirm"] == true) {
+    for tool in tools {
+        let mark = match (tool["reads"] == true, tool["confirm"] == true) {
             (true, _) => " It only reads.",
             (_, true) => " Needs `confirm: true`.",
             _ => "",
         };
-        body.push_str(&format!("\n- `{}`: {}{mark}", command(name, op), op["description"].as_str().unwrap_or("").trim()));
+        body.push_str(&format!("\n- `{}`: {}{mark}", command(name, tool), tool["description"].as_str().unwrap_or("").trim()));
     }
     Skill { name: skill_name(name), description, body, files: vec![] }
 }
 
-/// An operation as a command: `one board post [<topic>] <text>`, its words as --help shows them, then its other
+/// A tool as a command: `one board post [<topic>] <text>`, its words as --help shows them, then its other
 /// required inputs as flags.
-fn command(app: &str, op: &Value) -> String {
-    let required: Vec<&str> = op["input"]["required"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
-    let words: Vec<&str> = match op["words"].as_array() {
+fn command(app: &str, tool: &Value) -> String {
+    let required: Vec<&str> = tool["input"]["required"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
+    let words: Vec<&str> = match tool["words"].as_array() {
         Some(w) => w.iter().filter_map(Value::as_str).collect(),
         None => required.clone(),
     };
-    let mut line = format!("{CLI} {app} {}", op["name"].as_str().unwrap_or(""));
+    let mut line = format!("{CLI} {app} {}", tool["name"].as_str().unwrap_or(""));
     for w in &words {
         line.push_str(&match required.contains(w) {
             true => format!(" <{}>", w.replace('_', "-")),
@@ -261,7 +261,7 @@ fn command(app: &str, op: &Value) -> String {
 /// How the Vault's tools are explained, as an app's guide is.
 const VAULT_GUIDE: &str = "The Vault keeps the person's keys, sign-ins and accounts as items, each a page's (theirs, a group's, everyone's): fields (secret ones never read back), the sites they're sent to, and the apps switched on for it. Never ask the person to paste a secret (an API key, a password, a token) into the chat, and never paste one yourself. To keep one, call vault_request and give them its link: they pick one of their items or type a new one into a sheet on their own device, and you never see it. To use one yourself, ask leaving out app, then call vault_fetch with {{<field>}} where it goes: a machine that opens the Vault fills it in, only for the item's sites, and you get the answer. If someone pastes a secret anyway, keep it with vault_set and don't repeat it. vault_list shows what's there.";
 
-/// The Vault's tools as an app's operations, as search, scripts and its skill see them.
+/// The Vault's tools as an app's tools, as search, scripts and its skill see them.
 pub fn vault_app() -> Value {
     node_app("vault", "Vault", "Keys, sign-ins and accounts, used without being seen", VAULT_GUIDE, crate::vault::tools())
 }
@@ -269,7 +269,7 @@ pub fn vault_app() -> Value {
 /// How backups' tools are explained, as an app's guide is.
 const BACKUPS_GUIDE: &str = "Each device backs up the data it holds, every hour that something changed, to each place: a folder on a device's disk, or S3-compatible storage. Everything is encrypted before it leaves, with keys only your devices and the recovery key open. To add S3 storage, call backups_add_place with its endpoint and give the person the link: they type the key on their own device. Snapshots are kept hourly for 2 days, daily for a month and monthly for a year. backups_status says how it's going, and what's wrong and its fix if anything is; Once a week each place's newest backup is restored into a throwaway copy and checked (entries, databases, blobs); a failed check shows on Backups like a failed backup. backups_check runs that check now and says what came back.";
 
-/// Backups' tools as an app's operations.
+/// Backups' tools as an app's tools.
 pub fn backups_app() -> Value {
     node_app("backups", "Backups", "Encrypted copies of everything, to a disk or S3-compatible storage", BACKUPS_GUIDE, crate::backups::tools())
 }
@@ -279,7 +279,7 @@ fn groups_guide() -> String {
     format!("groups_list says who's in {YOURS}, as admin or member, then its groups: the people who share a page, its apps and its data, like a family or a team, and who's invited to one but hasn't joined. Each person and group has a handle, like andre or family, unique among them, which apps call them by (Repos' addresses are <handle>/<repo>); groups_handle changes yours, or a group's you're an admin of.")
 }
 
-/// The groups' tool as an app's operations.
+/// The groups' tool as an app's tools.
 pub fn groups_app() -> Value {
     node_app("groups", "Groups", &format!("Who's in {YOURS}, and in each of its groups"), &groups_guide(), groups_tools())
 }
@@ -293,7 +293,7 @@ pub fn groups_tools() -> Vec<Value> {
 }
 
 /// An MCP tool's hints, all three always, since a client takes one left out as the worst: whether it only reads (so it
-/// can run beside others and be asked again), and whether it sends or can't be undone (an operation's `confirm`).
+/// can run beside others and be asked again), and whether it sends or can't be undone (a tool's `confirm`).
 pub fn hints(reads: bool, confirm: bool) -> Value {
     json!({ "readOnlyHint": reads, "destructiveHint": confirm && !reads, "idempotentHint": reads })
 }
@@ -305,7 +305,7 @@ pub fn confirm_input() -> Value {
 
 const DEVICES_GUIDE: &str = "A new device signs in, then shows a code of 8 letters and digits. devices_approve with that code, run on one of the person's own devices, lets it in once they say yes: it gets the keys to what they use. devices_invite makes a link for someone new to join; their first device is approved the same way, from any of the inviting admin's devices. devices_remove takes a device out, or a person with all of theirs, and what they could open gets new keys. Someone who lost every device is let back in with devices_approve's recovery_key: a file holding your One App's recovery key, never the key in the chat. An app's schedules run only on a device that keeps it running: devices_keep picks one, which then holds that app's keys alone, and devices_stop ends it.";
 
-/// The devices' tools as an app's operations.
+/// The devices' tools as an app's tools.
 pub fn devices_app() -> Value {
     node_app("devices", "Devices", "Set up a new laptop, phone or computer and let it in, take one out, keep an app running on one, and invite someone", DEVICES_GUIDE, devices_tools())
 }
@@ -323,7 +323,7 @@ pub fn devices_tools() -> Vec<Value> {
     ]
 }
 
-/// The node's own tools, shown as an app's operations are, to search, scripts and skills.
+/// The node's own tools, shown as an app's tools are, to search, scripts and skills.
 pub fn node_app(name: &str, title: &str, description: &str, guide: &str, tools: Vec<Value>) -> Value {
     json!({
         "name": name, "title": title, "description": description, "instructions": guide,
@@ -358,13 +358,13 @@ pub fn ts(schema: &Value) -> String {
     }
 }
 
-/// An operation's path in a code mode script: `tools.gmail.search`, or `tools["google-calendar"].events`.
-pub fn path(app: &str, op: &str) -> String {
+/// A tool's path in a code mode script: `tools.gmail.search`, or `tools["google-calendar"].events`.
+pub fn path(app: &str, tool: &str) -> String {
     let key = |k: &str| match k.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') && !k.starts_with(|c: char| c.is_ascii_digit()) {
         true => format!(".{k}"),
         false => format!("[{k:?}]"),
     };
-    format!("tools{}{}", key(app), key(op))
+    format!("tools{}{}", key(app), key(tool))
 }
 
 /// Which tools `<cli> mcp` serves: every one, or code mode's few.
@@ -380,9 +380,9 @@ pub enum Mode {
 pub fn instructions(mode: Mode, apps: &[Value], person: Option<&str>) -> String {
     let finding = match mode {
         Mode::All => format!(
-            "Every tool is also a command (`{CLI} <app> <op>`). `search` finds the tools for a task across every app, with each app's guide; call it before you guess, to learn an app, and before saying you can't: it offers apps the person hasn't added yet."
+            "Every tool is also a command (`{CLI} <app> <tool>`). `search` finds the tools for a task across every app, with each app's guide; call it before you guess, to learn an app, and before saying you can't: it offers apps the person hasn't added yet."
         ),
-        Mode::Code => "`search` finds the operations for a task across every app, with exact call signatures and each app's guide. `execute` runs a short script with them: `const r = await tools.<app>.<op>({ ... }); return r`. Scripts call several in one go; what they return comes back to you. Guides name operations <app>_<op>: in a script, that's tools.<app>.<op>.".to_string(),
+        Mode::Code => "`search` finds the tools for a task across every app, with exact call signatures and each app's guide. `execute` runs a short script with them: `const r = await tools.<app>.<tool>({ ... }); return r`. Scripts call several in one go; what they return comes back to you. Guides name tools <app>_<tool>: in a script, that's tools.<app>.<tool>.".to_string(),
     };
     let person = person.filter(|p| !p.trim().is_empty()).map(|p| format!("\n\nYou act for {p}: groups_list says who else is in {YOURS}.")).unwrap_or_default();
     let mut text = format!(

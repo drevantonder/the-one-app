@@ -198,7 +198,7 @@ impl ThisDevice {
         self.0.traces()
     }
 
-    /// What an app's call answered last for `input` (JSON), if its operation only reads, for its screen to show at
+    /// What an app's call answered last for `input` (JSON), if its tool only reads, for its screen to show at
     /// once while it asks again (bridge.js's `kept`): kept sealed under this device's key, and forgotten when it signs
     /// out or is taken out.
     pub fn kept(&self, app: String, op: String, input: Vec<u8>) -> Option<KeptAnswer> {

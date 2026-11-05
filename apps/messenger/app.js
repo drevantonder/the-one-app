@@ -17,7 +17,7 @@ const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
 
 const NEEDS = "Messenger needs Agent Devices on one of your devices. Add it in the App Store: whoever owns a device installs it there, and the App Store's Agent Devices page shows where. Then messenger_sign_in signs in.";
 
-/// Runs an operation of Agent Devices (`agent-devices`) or Computer Use (`computer`) for the caller. When none of their
+/// Runs a tool of Agent Devices (`agent-devices`) or Computer Use (`computer`) for the caller. When none of their
 /// devices runs Agent Devices, says what's needed instead of how the call failed.
 async function use(ctx, app, op, input) {
   try {

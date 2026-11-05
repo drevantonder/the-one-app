@@ -135,7 +135,7 @@
   const card = (w) => Object.assign(oneWidgets.card(w, { run: act, follow }), { __w: w });
   const cardOf = (w) => [...(top()?.el.children || [])].find((el) => el.__w === w);
 
-  // A button or toggle: runs the app's operation as the person, then draws its widget again, the others left as they
+  // A button or toggle: runs the app's tool as the person, then draws its widget again, the others left as they
   // are; → the error's text.
   async function act(app, op, input, w) {
     try {

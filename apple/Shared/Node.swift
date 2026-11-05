@@ -493,7 +493,7 @@ struct NodeClient: Sendable {
         (try? await get("v1/badges", scope.map { ["scope": $0] } ?? [:])) ?? [:]
     }
 
-    /// Runs an app's operation for an app screen: its input and result are JSON, whatever their shape.
+    /// Runs an app's tool for an app screen: its input and result are JSON, whatever their shape.
     func call(app: String, op: String, input: Data, timeout: TimeInterval = 15) async throws -> Data {
         let input = try JSONSerialization.jsonObject(with: input, options: .fragmentsAllowed)
         // Its id makes it run once, however often it's sent.
@@ -503,7 +503,7 @@ struct NodeClient: Sendable {
         return try JSONSerialization.data(withJSONObject: reply["ok"] ?? NSNull(), options: .fragmentsAllowed)
     }
 
-    /// What an app screen's call answered last, if its operation only reads: `{ answer, at }`, for bridge.js's `kept`.
+    /// What an app screen's call answered last, if its tool only reads: `{ answer, at }`, for bridge.js's `kept`.
     func kept(app: String, op: String, input: Data) async -> [String: Any]? {
         guard let kept = await transport.kept(app: app, op: op, input: input),
               let answer = try? JSONSerialization.jsonObject(with: kept.answer, options: .fragmentsAllowed) else { return nil }

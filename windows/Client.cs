@@ -184,7 +184,7 @@ public static class Client
         if (d != null) await Off(() => { d.Disconnect(); return 0; });
     }
 
-    /// What an app's call answered last for `input` (JSON), if its operation only reads (client/ffi's `kept`), from this
+    /// What an app's call answered last for `input` (JSON), if its tool only reads (client/ffi's `kept`), from this
     /// computer alone: its answer's JSON, and when (ms); null before anyone's signed in.
     internal static async Task<(byte[] Answer, long At)?> Kept(string app, string op, byte[] input)
     {

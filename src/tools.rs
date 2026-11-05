@@ -1,5 +1,5 @@
-//! Apps' operations from the command line and MCP: inputs from flags, words, piped JSON and files, help built from
-//! each operation's input schema, and files in results.
+//! Apps' tools from the command line and MCP: inputs from flags, words, piped JSON and files, help built from
+//! each tool's input schema, and files in results.
 
 use std::collections::BTreeMap;
 use std::io::{IsTerminal, Read};
@@ -12,17 +12,17 @@ use serde_json::{Map, Value, json};
 
 use crate::{agent_from_env, get, post};
 
-/// Files up to this size go inline, as base64, in an operation's input.
+/// Files up to this size go inline, as base64, in a tool's input.
 pub const FILE_LIMIT: usize = 10 << 20;
 /// What MCP takes inline from an agent, which sends base64 in its own output.
 pub const MCP_FILE_LIMIT: usize = 1 << 20;
 
-/// An operation as `GET /v1/apps` describes it, with its app; None when no app or service here lists it.
-pub fn find(app: &str, op: &str) -> Option<(Value, Value)> {
+/// A tool as `GET /v1/apps` describes it, with its app; None when no app or service here lists it.
+pub fn find(app: &str, tool: &str) -> Option<(Value, Value)> {
     let mut apps = get("/v1/apps").ok()?.as_array()?.clone();
     apps.extend(node_apps());
     let a = apps.iter().find(|a| a["name"] == app)?.clone();
-    let o = a["ops"].as_array()?.iter().find(|o| o["name"] == op)?.clone();
+    let o = a["ops"].as_array()?.iter().find(|o| o["name"] == tool)?.clone();
     Some((a, o))
 }
 
@@ -38,7 +38,7 @@ pub fn node_app(app: &str) -> bool {
     ["vault", "backups", "groups", "devices", "widgets"].contains(&app)
 }
 
-/// Whether `--json` was given: what an operation gives back is printed as JSON.
+/// Whether `--json` was given: what a tool gives back is printed as JSON.
 pub static JSON: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 pub fn json() -> bool {
@@ -86,14 +86,14 @@ fn typed(err: anyhow::Error) -> anyhow::Error {
     }
 }
 
-/// `<CLI> <app> <op> [words] [--input value]...`: runs it and prints what it gives back.
-pub fn run(app: &str, op: &str, args: &[String]) -> Result<()> {
+/// `<CLI> <app> <tool> [words] [--input value]...`: runs it and prints what it gives back.
+pub fn run(app: &str, tool: &str, args: &[String]) -> Result<()> {
     let (mut words, mut flags) = split(args);
     // A last word `-` asks for inputs from stdin even when none is missing; otherwise stdin is read only when one is,
     // so a command inside a `while read` loop doesn't eat the loop's input.
     let asked = words.last().is_some_and(|w| w == "-") && words.pop().is_some();
-    let spec = find(app, op);
-    let Some((a, o)) = &spec else { return Err(Failed::Typed(unknown(app, Some(op), true)?).into()) };
+    let spec = find(app, tool);
+    let Some((a, o)) = &spec else { return Err(Failed::Typed(unknown(app, Some(tool), true)?).into()) };
     if flags.contains_key("help") || flags.contains_key("h") {
         print!("{}", help(a, o));
         return Ok(());
@@ -115,7 +115,7 @@ pub fn run(app: &str, op: &str, args: &[String]) -> Result<()> {
         let missing = self::missing(&schema, &input);
         if !missing.is_empty() {
             return Err(Failed::Typed(format!(
-                "missing {}: give {} as flags, or pipe the inputs as JSON: {CLI} {app} {op} < input.json. See {CLI} {app} {op} --help.",
+                "missing {}: give {} as flags, or pipe the inputs as JSON: {CLI} {app} {tool} < input.json. See {CLI} {app} {tool} --help.",
                 missing.join(", "),
                 if missing.len() == 1 { "it" } else { "them" }
             ))
@@ -124,15 +124,15 @@ pub fn run(app: &str, op: &str, args: &[String]) -> Result<()> {
     }
     check(&o["input"], &Value::Object(input.clone())).map_err(typed)?;
     if o["confirm"] == true {
-        agreed(confirmed, &format!("{CLI} {app} {op}"))?;
+        agreed(confirmed, &format!("{CLI} {app} {tool}"))?;
     }
     // The node's own tools take the person's yes as an input.
     if confirmed && node_app(app) {
         input.insert("confirm".into(), json!(true));
     }
     let call = match node_app(app) {
-        true => crate::dispatch(&format!("{app}_{op}"), input, agent_from_env().as_deref(), "cli", Some((a.clone(), o.clone()))).map(|ok| json!({ "ok": ok })),
-        false => post("/v1/call", json!({ "device": device, "scopes": scopes, "app": app, "op": op, "input": input, "agent": agent_from_env(), "client": "cli" })),
+        true => crate::dispatch(&format!("{app}_{tool}"), input, agent_from_env().as_deref(), "cli", Some((a.clone(), o.clone()))).map(|ok| json!({ "ok": ok })),
+        false => post("/v1/call", json!({ "device": device, "scopes": scopes, "app": app, "op": tool, "input": input, "agent": agent_from_env(), "client": "cli" })),
     };
     let mut r = match call {
         Ok(r) => r,
@@ -145,14 +145,14 @@ pub fn run(app: &str, op: &str, args: &[String]) -> Result<()> {
             });
         }
     };
-    if let Some(none) = none_said(a, op, &r["ok"], true).filter(|_| !json()) {
+    if let Some(none) = none_said(a, tool, &r["ok"], true).filter(|_| !json()) {
         println!("{none}");
         return Ok(());
     }
     if let Some(text) = r["ok"].as_str() {
         r["ok"] = json!(in_cli_words(text));
     }
-    show(app, op, &r["ok"], out.as_deref())
+    show(app, tool, &r["ok"], out.as_deref())
 }
 
 /// What an app says, as the command line says it: each tool it names (`gmail_sign_in`) as its command
@@ -162,9 +162,9 @@ pub fn in_cli_words(text: &str) -> String {
     apps.extend(node_apps());
     let command = |word: &str| -> Option<String> {
         word.match_indices('_').find_map(|(i, _)| {
-            let (app, op) = (&word[..i], &word[i + 1..]);
+            let (app, tool) = (&word[..i], &word[i + 1..]);
             let a = apps.iter().find(|a| a["name"] == app)?;
-            a["ops"].as_array()?.iter().any(|o| o["name"] == op).then(|| format!("{CLI} {app} {op}"))
+            a["ops"].as_array()?.iter().any(|o| o["name"] == tool).then(|| format!("{CLI} {app} {tool}"))
         })
     };
     let mut out = String::new();
@@ -183,22 +183,22 @@ pub fn in_cli_words(text: &str) -> String {
     out
 }
 
-/// An operation as the caller names it: `one gmail sign_in` on the command line, `gmail_sign_in` to MCP.
-pub fn named(app: &str, op: &str, cli: bool) -> String {
+/// A tool as the caller names it: `one gmail sign_in` on the command line, `gmail_sign_in` to MCP.
+pub fn named(app: &str, tool: &str, cli: bool) -> String {
     match cli {
-        true => format!("{CLI} {app} {op}"),
-        false => format!("{app}_{op}"),
+        true => format!("{CLI} {app} {tool}"),
+        false => format!("{app}_{tool}"),
     }
 }
 
 /// An empty list of accounts, or of the devices a service over a device runs on, in words, with what to do: screens
 /// want the list, a person or agent reading wants this.
-pub fn none_said(app: &Value, op: &str, ok: &Value, cli: bool) -> Option<String> {
-    if !["accounts", "devices"].contains(&op) || ok.as_array().is_none_or(|a| !a.is_empty()) {
+pub fn none_said(app: &Value, tool: &str, ok: &Value, cli: bool) -> Option<String> {
+    if !["accounts", "devices"].contains(&tool) || ok.as_array().is_none_or(|a| !a.is_empty()) {
         return None;
     }
     let (name, title) = (app["name"].as_str().unwrap_or(""), app["title"].as_str().unwrap_or(""));
-    if op == "devices" {
+    if tool == "devices" {
         return Some(format!("{title} isn't on any of your devices yet.{}", app["needs"].as_str().map(|n| format!(" {n}.")).unwrap_or_default()));
     }
     let signs_in = app["ops"].as_array().into_iter().flatten().any(|o| o["name"] == "sign_in");
@@ -216,13 +216,13 @@ pub fn none_said(app: &Value, op: &str, ok: &Value, cli: bool) -> Option<String>
     })
 }
 
-/// What to say for an app or operation nobody here lists, with the nearest names: `gmail has no operation serch:
+/// What to say for an app or tool nobody here lists, with the nearest names: `gmail has no tool serch:
 /// did you mean search?`, `no app gmial: did you mean gmail?`. On the command line, built-in commands are names too.
-pub fn unknown(app: &str, op: Option<&str>, cli: bool) -> Result<String> {
+pub fn unknown(app: &str, tool: Option<&str>, cli: bool) -> Result<String> {
     let mut apps = get("/v1/apps")?.as_array().cloned().unwrap_or_default();
     apps.extend(node_apps());
-    let ops_of = |a: &Value| -> Vec<String> { a["ops"].as_array().into_iter().flatten().filter_map(|o| o["name"].as_str()).filter(|o| !o.starts_with('_')).map(String::from).collect() };
-    // One the person could add: the node lists it, without operations for them, since it isn't added where they are.
+    let tools_of = |a: &Value| -> Vec<String> { a["ops"].as_array().into_iter().flatten().filter_map(|o| o["name"].as_str()).filter(|o| !o.starts_with('_')).map(String::from).collect() };
+    // One the person could add: the node lists it, without tools for them, since it isn't added where they are.
     let addable = |a: &Value| a["ops"].is_null() && a["deleted"].is_null();
     if let Some(a) = apps.iter().find(|a| a["name"] == app) {
         let title = a["title"].as_str().unwrap_or(app);
@@ -238,17 +238,17 @@ pub fn unknown(app: &str, op: Option<&str>, cli: bool) -> Result<String> {
                 false => format!("{title} isn't added yet: apps_add with app {app} and scope user adds it for the person, or global for everyone"),
             });
         }
-        let (op, ops) = (op.unwrap_or(""), ops_of(a));
-        let guess = nearest(op, &ops.iter().map(String::as_str).collect::<Vec<_>>()).first().map(|n| format!(": did you mean {n}?")).unwrap_or_else(|| ".".into());
-        return Ok(format!("{app} has no operation {op}{guess} Its operations: {}", ops.join(", ")));
+        let (tool, tools) = (tool.unwrap_or(""), tools_of(a));
+        let guess = nearest(tool, &tools.iter().map(String::as_str).collect::<Vec<_>>()).first().map(|n| format!(": did you mean {n}?")).unwrap_or_else(|| ".".into());
+        return Ok(format!("{app} has no tool {tool}{guess} Its tools: {}", tools.join(", ")));
     }
     // A tool's name as a command, one repos_create notes: the command is one repos create notes.
-    let tool = app.match_indices('_').find_map(|(i, _)| {
+    let as_command = app.match_indices('_').find_map(|(i, _)| {
         let (a, o) = (&app[..i], &app[i + 1..]);
-        apps.iter().find(|x| x["name"] == a).is_some_and(|x| ops_of(x).iter().any(|x| x == o)).then(|| format!("{a} {o}"))
+        apps.iter().find(|x| x["name"] == a).is_some_and(|x| tools_of(x).iter().any(|x| x == o)).then(|| format!("{a} {o}"))
     });
-    if let Some(command) = tool.filter(|_| cli) {
-        return Ok(format!("no app {app}: did you mean {CLI} {command}{}?", op.map(|o| format!(" {o}")).unwrap_or_default()));
+    if let Some(command) = as_command.filter(|_| cli) {
+        return Ok(format!("no app {app}: did you mean {CLI} {command}{}?", tool.map(|o| format!(" {o}")).unwrap_or_default()));
     }
     let names: Vec<String> = apps.iter().filter(|a| a["deleted"].is_null()).filter_map(|a| a["name"].as_str()).map(String::from).collect();
     let commands = if cli { crate::commands() } else { Vec::new() };
@@ -256,7 +256,7 @@ pub fn unknown(app: &str, op: Option<&str>, cli: bool) -> Result<String> {
     Ok(match nearest(app, &all).first() {
         Some(n) if commands.contains(n) && !names.contains(n) => format!("no command {app}: did you mean {CLI} {n}? {CLI} help says the rest"),
         Some(n) => format!("no app {app}: did you mean {n}?"),
-        None if cli => format!("no command or app {app}: {CLI} help says the commands, {CLI} search <words> finds operations"),
+        None if cli => format!("no command or app {app}: {CLI} help says the commands, {CLI} search <words> finds tools"),
         None => format!("no app {app}: search finds the tools for a task"),
     })
 }
@@ -330,24 +330,24 @@ fn input_name(props: &Map<String, Value>, flag: &str) -> String {
     props.keys().find(|p| flat(p) == flat(flag)).cloned().unwrap_or_else(|| flag.replace('-', "_"))
 }
 
-/// The inputs words fill, in order: the operation's `words` when it names them, else its required inputs.
-fn places(op: &Value) -> Vec<String> {
-    match op["words"].as_array() {
+/// The inputs words fill, in order: the tool's `words` when it names them, else its required inputs.
+fn places(tool: &Value) -> Vec<String> {
+    match tool["words"].as_array() {
         Some(words) => words.iter().filter_map(Value::as_str).map(String::from).collect(),
-        None => required(&op["input"]),
+        None => required(&tool["input"]),
     }
 }
 
-/// The operation's input from flags, words (filling `places` in order) and files. Given fewer words than places, the
+/// The tool's input from flags, words (filling `places` in order) and files. Given fewer words than places, the
 /// optional places are skipped first: `one board post "hi"` is text, `one board post ideas "hi"` a topic and text.
 /// A word left over is an error, never folded into another input: it says to quote text, or which flag to give it as.
-/// Whether an operation takes a `device` of its own (an agent device's name, say): then that's what `device` is, and
+/// Whether a tool takes a `device` of its own (an agent device's name, say): then that's what `device` is, and
 /// it says itself where it runs, so the CLI's and MCP's `device` (which of your devices runs it) isn't offered.
-pub fn own_device(op: &Value) -> bool {
-    op["input"]["properties"].get("device").is_some()
+pub fn own_device(tool: &Value) -> bool {
+    tool["input"]["properties"].get("device").is_some()
 }
 
-/// Whether an operation's input takes `name`: one of its properties, or anything where it's open-ended. A name it
+/// Whether a tool's input takes `name`: one of its properties, or anything where it's open-ended. A name it
 /// doesn't take (one renamed, say) fails, rather than being passed over and the call run as if it weren't given.
 pub fn takes(schema: &Value, name: &str) -> bool {
     schema["properties"].get(name).is_some() || schema["additionalProperties"] == true || !schema["properties"].is_object()
@@ -542,16 +542,16 @@ pub fn as_file(v: &Value) -> Option<(String, String, Vec<u8>)> {
     Some((name.unwrap_or_default(), ty, bytes))
 }
 
-/// Prints an operation's result: text as it is, files saved (to `out`, or a temporary file named for them) and their
+/// Prints a tool's result: text as it is, files saved (to `out`, or a temporary file named for them) and their
 /// paths printed, anything else as JSON. With `out`, a result that isn't a file is saved there instead.
-fn show(app: &str, op: &str, ok: &Value, out: Option<&str>) -> Result<()> {
+fn show(app: &str, tool: &str, ok: &Value, out: Option<&str>) -> Result<()> {
     let mut out = out.map(std::path::PathBuf::from);
     let mut save = |i: usize, name: &str, ty: &str, bytes: &[u8]| -> Result<String> {
         let path = match out.take() {
             Some(p) => p,
             None => {
                 let ext = ty.split('/').nth(1).unwrap_or("bin").split(['+', ';']).next().unwrap_or("bin");
-                let name = if name.is_empty() { format!("{app}-{op}-{i}.{ext}") } else { name.replace('/', "_") };
+                let name = if name.is_empty() { format!("{app}-{tool}-{i}.{ext}") } else { name.replace('/', "_") };
                 std::env::temp_dir().join(name)
             }
         };
@@ -626,13 +626,13 @@ fn kind(prop: &Value) -> String {
     }
 }
 
-/// An operation's help, from its description and input schema.
-pub fn help(app: &Value, op: &Value) -> String {
-    let (a, o) = (app["name"].as_str().unwrap_or(""), op["name"].as_str().unwrap_or(""));
-    let schema = &op["input"];
+/// A tool's help, from its description and input schema.
+pub fn help(app: &Value, tool: &Value) -> String {
+    let (a, o) = (app["name"].as_str().unwrap_or(""), tool["name"].as_str().unwrap_or(""));
+    let schema = &tool["input"];
     let props = schema["properties"].as_object().cloned().unwrap_or_default();
     let required = required(schema);
-    let places = places(op);
+    let places = places(tool);
     let mut usage = format!("{CLI} {a} {o}");
     for p in &places {
         usage.push_str(&match required.contains(p) {
@@ -669,23 +669,23 @@ pub fn help(app: &Value, op: &Value) -> String {
         }
         rows.push((flag, about.join("; ")));
     }
-    if !own_device(op) && !node_app(app["name"].as_str().unwrap_or("")) {
+    if !own_device(tool) && !node_app(app["name"].as_str().unwrap_or("")) {
         rows.push(("--device <name>".into(), device_about(app).into()));
     }
     rows.push(("--out <path>".into(), "save what it gives back there".into()));
     rows.push(("--json".into(), "print what it gives back as JSON".into()));
-    if op["confirm"] == true {
+    if tool["confirm"] == true {
         rows.push(("--confirm".into(), "go ahead without asking: it can't be undone".into()));
     }
     let width = rows.iter().map(|(f, _)| f.chars().count()).max().unwrap_or(0).min(32);
-    let mut text = format!("Usage: {usage}\n\n{}\n\nInputs:\n", op["description"].as_str().unwrap_or(""));
+    let mut text = format!("Usage: {usage}\n\n{}\n\nInputs:\n", tool["description"].as_str().unwrap_or(""));
     for (flag, about) in rows {
         let pad = width.saturating_sub(flag.chars().count());
         text.push_str(format!("  {flag}{}  {about}", " ".repeat(pad)).trim_end());
         text.push('\n');
     }
     text.push('\n');
-    text.push_str(match (op["reads"] == true, op["confirm"] == true) {
+    text.push_str(match (tool["reads"] == true, tool["confirm"] == true) {
         (true, _) => "It only reads.\n",
         (_, true) => "It sends or can't be undone: it asks first, or give --confirm once the person agreed.\n",
         _ => "",
@@ -705,7 +705,7 @@ fn first_sentence(text: &str) -> &str {
     }
 }
 
-/// Every operation of `apps` as the command to type and what it does, aligned.
+/// Every tool of `apps` as the command to type and what it does, aligned.
 pub fn list(apps: &[Value]) -> Vec<String> {
     let rows: Vec<(String, String)> = apps
         .iter()
@@ -748,9 +748,9 @@ fn device_about(app: &Value) -> &'static str {
     }
 }
 
-/// An operation's input schema as an MCP tool's: files explained, and `confirm` on what can't be undone.
-pub fn mcp_schema(app: &Value, op: &Value) -> Value {
-    let mut schema = op["input"].clone();
+/// A tool's input schema as an MCP tool's: files explained, and `confirm` on what can't be undone.
+pub fn mcp_schema(app: &Value, tool: &Value) -> Value {
+    let mut schema = tool["input"].clone();
     if !schema.is_object() {
         schema = json!({ "type": "object", "properties": {} });
     }
@@ -765,16 +765,16 @@ pub fn mcp_schema(app: &Value, op: &Value) -> Value {
             prop["description"] = json!(format!("{about}{MCP_FILE}"));
         }
     }
-    if runs_on_devices(app) && !own_device(op) {
+    if runs_on_devices(app) && !own_device(tool) {
         schema["properties"]["device"] = json!({ "type": "string", "description": device_about(app) });
     }
-    if op["confirm"] == true {
+    if tool["confirm"] == true {
         schema["properties"]["confirm"] = one::skills::confirm_input();
     }
     schema
 }
 
-/// Checks an operation's input against its schema before anything runs: types, choices, required inputs, and no
+/// Checks a tool's input against its schema before anything runs: types, choices, required inputs, and no
 /// inputs it doesn't take. What's wrong names the input (`limit takes a whole number, not "many"`).
 pub fn check(schema: &Value, input: &Value) -> Result<()> {
     check_at(schema, input, "")
@@ -822,7 +822,7 @@ fn check_at(schema: &Value, v: &Value, at: &str) -> Result<()> {
             match props.get(k) {
                 Some(_) if x.is_null() => {}
                 Some(p) => check_at(p, x, &inner(k))?,
-                // An operation's own inputs are all listed, unless it says it takes any; deeper objects may hold more,
+                // A tool's own inputs are all listed, unless it says it takes any; deeper objects may hold more,
                 // unless they say not.
                 None if (at.is_empty() && !takes(schema, k)) || schema["additionalProperties"] == false => {
                     let names: Vec<&str> = props.keys().map(String::as_str).collect();
@@ -871,15 +871,15 @@ fn distance(a: &[char], b: &[char]) -> usize {
     d[a.len()][b.len()]
 }
 
-/// An operation's MCP hints, from what it says: `reads`, and `confirm`.
-pub fn mcp_annotations(op: &Value) -> Value {
-    one::skills::hints(op["reads"] == true, op["confirm"] == true)
+/// A tool's MCP hints, from what it says: `reads`, and `confirm`.
+pub fn mcp_annotations(tool: &Value) -> Value {
+    one::skills::hints(tool["reads"] == true, tool["confirm"] == true)
 }
 
 /// Brings an agent's file inputs to what apps take, `{ name, type, size, base64 }`: from base64, a file id (a blob
 /// this device can get) or a public URL.
-pub fn mcp_files(op: &Value, input: &mut Map<String, Value>) -> Result<()> {
-    let props = op["input"]["properties"].as_object().cloned().unwrap_or_default();
+pub fn mcp_files(tool: &Value, input: &mut Map<String, Value>) -> Result<()> {
+    let props = tool["input"]["properties"].as_object().cloned().unwrap_or_default();
     for (name, prop) in props {
         let (Some(list), Some(v)) = (takes_file(&prop), input.get_mut(&name)) else { continue };
         match (list, v) {
@@ -967,8 +967,8 @@ fn on_the_internet(ip: std::net::IpAddr) -> bool {
 pub const BUDGET: usize = 40_000;
 
 /// Cuts a result's text to the budget, ending with a line that says how much isn't shown and how to ask for less: the
-/// operation's inputs that narrow it, by name. Images aren't text, and stay.
-pub fn within_budget(content: &mut Value, op: Option<&Value>) {
+/// tool's inputs that narrow it, by name. Images aren't text, and stay.
+pub fn within_budget(content: &mut Value, tool: Option<&Value>) {
     let Some(items) = content.as_array_mut() else { return };
     let total: usize = items.iter().filter_map(|c| c["text"].as_str()).map(|t| t.chars().count()).sum();
     if total <= BUDGET {
@@ -992,7 +992,7 @@ pub fn within_budget(content: &mut Value, op: Option<&Value>) {
     }
     let shown: usize = items.iter().filter_map(|c| c["text"].as_str()).map(|t| t.chars().count()).sum();
     let narrows = ["limit", "query", "q", "search", "filter", "fields", "since", "after", "before", "start", "end", "range", "topic", "path"];
-    let names: Vec<&str> = op.and_then(|o| o["input"]["properties"].as_object()).into_iter().flatten().map(|(k, _)| k.as_str()).filter(|k| narrows.iter().any(|n| k.eq_ignore_ascii_case(n) || k.to_lowercase().starts_with(&format!("{n}_")) || k.to_lowercase().starts_with("max"))).collect();
+    let names: Vec<&str> = tool.and_then(|o| o["input"]["properties"].as_object()).into_iter().flatten().map(|(k, _)| k.as_str()).filter(|k| narrows.iter().any(|n| k.eq_ignore_ascii_case(n) || k.to_lowercase().starts_with(&format!("{n}_")) || k.to_lowercase().starts_with("max"))).collect();
     let ask = match names.as_slice() {
         [] => "Ask for less with a narrower call.".to_string(),
         [one] => format!("Ask for less with {one}."),

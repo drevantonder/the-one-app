@@ -32,10 +32,10 @@ public sealed class WidgetCard
     }
 
     /// The card for one widget at `size`, and its data.
-    /// Buttons and toggles tapped whose operations aren't done (Which), each toggle with the value it's drawn at till then.
+    /// Buttons and toggles tapped whose tools aren't done (Which), each toggle with the value it's drawn at till then.
     public static readonly System.Collections.Concurrent.ConcurrentDictionary<string, bool> Doing = new();
 
-    /// A button or toggle, the same each time it's drawn: its app, operation, and input but the value it switches to.
+    /// A button or toggle, the same each time it's drawn: its app, tool, and input but the value it switches to.
     public static string Which(string app, string op, JsonObject? input)
     {
         var rest = input?.DeepClone() as JsonObject ?? new JsonObject();
@@ -544,7 +544,7 @@ public sealed class WidgetCard
 
     static JsonNode Input(JsonElement n) => n.TryGetProperty("input", out var i) && i.ValueKind == JsonValueKind.Object ? JsonNode.Parse(i.GetRawText())! : new JsonObject();
 
-    /// A button: the board's own, running its operation.
+    /// A button: the board's own, running its tool.
     JsonNode? Button(JsonElement n)
     {
         if (Str(n, "op") is not { } op) return null;
@@ -559,7 +559,7 @@ public sealed class WidgetCard
         return new JsonObject { ["type"] = "ActionSet", ["actions"] = new JsonArray(action) };
     }
 
-    /// A toggle: its label, and a switch drawn on or off; tapping the row flips it, running its operation with `on`.
+    /// A toggle: its label, and a switch drawn on or off; tapping the row flips it, running its tool with `on`.
     JsonNode Toggle(JsonElement n, Place at)
     {
         var on = Str(n, "op") is { } doing && Doing.TryGetValue(Which(app, doing, Input(n) as JsonObject), out var to) ? to : Bool(n, "on") == true;

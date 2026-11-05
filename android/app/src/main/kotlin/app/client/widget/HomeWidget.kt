@@ -121,14 +121,14 @@ private object Keys {
     val app = ActionParameters.Key<String>("app")
     val op = ActionParameters.Key<String>("op")
     val input = ActionParameters.Key<String>("input")
-    /** Which button or toggle it is, and what a toggle's switched to, to draw it so before its operation's done. */
+    /** Which button or toggle it is, and what a toggle's switched to, to draw it so before its tool's done. */
     val which = ActionParameters.Key<String>("which")
     val on = ActionParameters.Key<Boolean>("on")
 }
 
-/** A widget's button or toggle: drawn as done at once (a toggle switched, a button dimmed), then its operation runs,
+/** A widget's button or toggle: drawn as done at once (a toggle switched, a button dimmed), then its tool runs,
  *  and every widget redraws from what it did; back as it was if it didn't work. */
-class RunOperation : ActionCallback {
+class RunTool : ActionCallback {
     override suspend fun onAction(context: Context, glanceId: GlanceId, parameters: ActionParameters) {
         HomeWidgets.start(context)
         val app = parameters[Keys.app] ?: return
@@ -579,11 +579,11 @@ private fun Icon(n: WidgetNode, c: Ctx, modifier: GlanceModifier) {
     }
 }
 
-/** Runs a button's operation, or a toggle's with `on`, the value it's switched to, in its input. */
+/** Runs a button's tool, or a toggle's with `on`, the value it's switched to, in its input. */
 private fun run(n: WidgetNode, c: Ctx, on: Boolean? = null): Action {
     var input = n.input ?: JsonObject(emptyMap())
     if (on != null) input = JsonObject((input as? JsonObject ?: JsonObject(emptyMap())) + ("on" to JsonPrimitive(on)))
-    return actionRunCallback<RunOperation>(
+    return actionRunCallback<RunTool>(
         actionParametersOf(Keys.app to c.widget.app, Keys.op to (n.op ?: ""), Keys.input to input.toString(), Keys.which to which(n, c), Keys.on to (on ?: true)),
     )
 }
@@ -605,7 +605,7 @@ private fun Button(n: WidgetNode, ctx: Ctx, modifier: GlanceModifier) {
     }
 }
 
-/** A toggle as the app's pages draw it, which runs its operation with the value it's switched to. */
+/** A toggle as the app's pages draw it, which runs its tool with the value it's switched to. */
 @Composable
 private fun Toggle(n: WidgetNode, c: Ctx, modifier: GlanceModifier) {
     val on = c.doing[which(n, c)] ?: n.on ?: false

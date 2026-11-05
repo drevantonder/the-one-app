@@ -1,6 +1,6 @@
 // The Widgets board's widgets (Win+W), as the iPhone's (apple/Widget): one kind, a widget from your pages, the one its
 // person chooses (another than those already pinned, until they do), drawn at the size it's placed at as an Adaptive
-// Card (WidgetCard.cs), its buttons and toggles running the widget's operations. Windows starts this program as the
+// Card (WidgetCard.cs), its buttons and toggles running the widget's tools. Windows starts this program as the
 // package's COM server for the board (Program.cs), with no window: it reads the pages' widgets as the window does,
 // with the sign-in the window keeps, when the board shows them and every few minutes while it does; the window pushes
 // them too, whenever it sees them change. What each pinned widget shows is kept with it, as its custom state.
@@ -210,7 +210,7 @@ public sealed partial class Widgets : IWidgetProvider, IWidgetProvider2
                 Draw(id, p);
                 break;
             case "run":
-                // Drawn as done at once (a toggle switched, a button greyed), then as its operation leaves it; back as it
+                // Drawn as done at once (a toggle switched, a button greyed), then as its tool leaves it; back as it
                 // was if it didn't work.
                 var (app, op) = (data?["app"]?.GetValue<string>() ?? "", data?["op"]?.GetValue<string>() ?? "");
                 var which = WidgetCard.Which(app, op, data?["input"] as JsonObject);

@@ -160,7 +160,7 @@ export function IssueView({ repo, number, onGone }) {
 
   if (!d) return <div ref={room}><Pending call={issue} rows={3} /></div>
 
-  // Calls an op on this issue, then shows it as it is now.
+  // Calls a tool on this issue, then shows it as it is now.
   const act = async (op, input) => {
     await one.call(op, { repo, number: d.number, ...input })
     one.tap("success")

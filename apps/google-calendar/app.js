@@ -177,7 +177,7 @@ const signInSchema = { user: [
 const signInOps = {
   accounts: {
     reads: true,
-    description: `The Google accounts ${TITLE} can use, the default first: [{ account, ok }], with why when ok is false (${APP}_sign_in with that account fixes it). Every other operation's account takes one of these.`,
+    description: `The Google accounts ${TITLE} can use, the default first: [{ account, ok }], with why when ok is false (${APP}_sign_in with that account fixes it). Every other tool's account takes one of these.`,
     input: { type: "object", properties: {} },
     async run(ctx) {
       return Promise.all((await accounts(ctx)).map(async (account) => {
@@ -342,7 +342,7 @@ export default {
   icon: "calendar",
   color: "#4285f4",
   description: "Your Google calendars, from any of your devices: events, and adding and changing them",
-  instructions: `Google Calendar is the person's Google calendars (the Mac's Apple Calendar is the calendar app). ${APP}_events lists events in a time range (default the coming week); ${APP}_event shows one. ${APP}_create_event, ${APP}_update_event and ${APP}_delete_event change the calendar, with Calendar's own Event fields (summary, start, end, ...): do them only when the person asked. Guests are told only with sendUpdates. With several accounts, each operation takes account.`,
+  instructions: `Google Calendar is the person's Google calendars (the Mac's Apple Calendar is the calendar app). ${APP}_events lists events in a time range (default the coming week); ${APP}_event shows one. ${APP}_create_event, ${APP}_update_event and ${APP}_delete_event change the calendar, with Calendar's own Event fields (summary, start, end, ...): do them only when the person asked. Guests are told only with sendUpdates. With several accounts, each tool takes account.`,
   vault: VAULT,
   schema: signInSchema,
 

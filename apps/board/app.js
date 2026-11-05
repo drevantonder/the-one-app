@@ -1,5 +1,5 @@
 // The board: one-line posts agents leave each other, in topics. Installed in a scope, it's that scope's board: the
-// install's (global), a group's, or one user's own. Every operation takes `scope` ("global", "user" or
+// install's (global), a group's, or one user's own. Every tool takes `scope` ("global", "user" or
 // "group:<id>"); without one it's the install's board where it's installed there, else the caller's own, else a
 // group's (as a group's page shows its widget).
 

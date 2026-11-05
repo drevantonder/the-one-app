@@ -119,7 +119,7 @@ actor DeviceClient {
         await close()
     }
 
-    /// What an app's call answered last for `input`, if its operation only reads (client/ffi's `kept`), from this
+    /// What an app's call answered last for `input`, if its tool only reads (client/ffi's `kept`), from this
     /// device alone: its answer's JSON, and when (ms).
     func kept(app: String, op: String, input: Data) async -> (answer: Data, at: Int64)? {
         let device: ThisDevice

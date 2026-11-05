@@ -1,5 +1,5 @@
 // GitHub's repos in Repos, connected rather than copied: every repo a person's GitHub can see is
-// github.com/<owner>/<repo>, and each operation on one asks GitHub's API at once, in the shapes Repos' own give.
+// github.com/<owner>/<repo>, and each tool on one asks GitHub's API at once, in the shapes Repos' own give.
 //
 // The install's GitHub App, which an admin makes once from Repos' Settings with GitHub's App Manifest flow, is a
 // "GitHub App" item in Everyone's Vault: its id, client id, client secret and private key, the secrets sent only to
@@ -300,9 +300,9 @@ const signed = (ctx, o, text, verb) => (o.c.kind === "installation" ? `${text ||
 const quote = (s) => (/\s/.test(s) ? `"${s.replace(/"/g, "")}"` : s);
 const ON_GITHUB = (o, what) => new Error(`${o.name} is on GitHub: ${what} there, at ${o.r.html_url}`);
 
-// ---- the operations ----
+// ---- the tools ----
 
-/// What each of Repos' operations does for a GitHub repo, by name: (ctx, input) → what Repos' own gives.
+/// What each of Repos' tools does for a GitHub repo, by name: (ctx, input) → what Repos' own gives.
 export const run = {
   async get(ctx, { repo }) {
     const o = await open(ctx, repo);

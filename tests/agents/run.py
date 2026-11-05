@@ -244,7 +244,7 @@ def mcp_tools(call):
 
 
 def cli_commands(call):
-    """The CLI commands a shell call ran, as `<cli> <app> <op>`."""
+    """The CLI commands a shell call ran, as `<cli> <app> <tool>`."""
     if call["name"] not in ("bash", "shell"):
         return []
     command = json.loads(call["input"]).get("command", "")

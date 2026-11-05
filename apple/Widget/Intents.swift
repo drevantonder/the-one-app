@@ -1,19 +1,19 @@
 import AppIntents
 import Foundation
 
-/// What runs a home-screen widget's operations: the app sets it, since only the app reaches a device.
+/// What runs a home-screen widget's tools: the app sets it, since only the app reaches a device.
 @MainActor
 enum WidgetActions {
     static var run: (@MainActor @Sendable (_ app: String, _ op: String, _ input: Data, _ scope: String?) async throws -> Void)?
 }
 
 /// A widget's button. As a Live Activity intent it runs in the app's process, which the system starts if it must.
-struct RunOperation: LiveActivityIntent {
+struct RunTool: LiveActivityIntent {
     static let title: LocalizedStringResource = "Run a Widget’s Button"
     static let isDiscoverable = false
 
     @Parameter(title: "App") var app: String
-    @Parameter(title: "Operation") var op: String
+    @Parameter(title: "Tool") var op: String
     /// Its input, as JSON.
     @Parameter(title: "Input") var input: String
     @Parameter(title: "Page") var scope: String?
@@ -34,13 +34,13 @@ struct RunOperation: LiveActivityIntent {
     }
 }
 
-/// A widget's toggle: its operation gets the toggle's new value as `on`.
-struct ToggleOperation: SetValueIntent, LiveActivityIntent {
+/// A widget's toggle: its tool gets the toggle's new value as `on`.
+struct ToggleTool: SetValueIntent, LiveActivityIntent {
     static let title: LocalizedStringResource = "Run a Widget’s Toggle"
     static let isDiscoverable = false
 
     @Parameter(title: "App") var app: String
-    @Parameter(title: "Operation") var op: String
+    @Parameter(title: "Tool") var op: String
     @Parameter(title: "Input") var input: String
     @Parameter(title: "Page") var scope: String?
     @Parameter(title: "On") var value: Bool

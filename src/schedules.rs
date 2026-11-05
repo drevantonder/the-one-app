@@ -1,4 +1,4 @@
-//! Schedules: an app's operations that run on their own, every so often or at a time of day, on the machine keeping the
+//! Schedules: an app's tools that run on their own, every so often or at a time of day, on the machine keeping the
 //! app running (src/node/scheduled.rs).
 
 use anyhow::{Context as _, Result, bail, ensure};

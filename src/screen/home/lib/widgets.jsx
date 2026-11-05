@@ -233,7 +233,7 @@ function Chart({ n, color }) {
   )
 }
 
-// A button or toggle runs the app's operation as the person, pressed with a spinner meanwhile; the host draws the
+// A button or toggle runs the app's tool as the person, pressed with a spinner meanwhile; the host draws the
 // widget again. A toggle that failed goes back to how it was.
 function useAct(w, host) {
   const [busy, setBusy] = useState(false)

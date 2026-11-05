@@ -198,7 +198,7 @@ const signInSchema = { user: [
 const signInOps = {
   accounts: {
     reads: true,
-    description: `The Google accounts ${TITLE} can use, the default first: [{ account, ok }], with why when ok is false (${APP}_sign_in with that account fixes it). Every other operation's account takes one of these.`,
+    description: `The Google accounts ${TITLE} can use, the default first: [{ account, ok }], with why when ok is false (${APP}_sign_in with that account fixes it). Every other tool's account takes one of these.`,
     input: { type: "object", properties: {} },
     async run(ctx) {
       return Promise.all((await accounts(ctx)).map(async (account) => {
@@ -546,7 +546,7 @@ export default {
   instructions: "Gmail is the person's Gmail accounts. gmail_search finds messages with Gmail's search syntax " +
     "(q: from:, is:unread, in:inbox, newer_than:2d, ...); gmail_read reads one and gmail_thread a whole conversation; gmail_attachment gets one of a message's files. " +
     "gmail_label archives (remove INBOX), marks read (remove UNREAD), stars or labels messages. Write with gmail_draft and let the person send it, unless they asked you to send: " +
-    "gmail_send and gmail_send_draft send real email to real people. With several accounts, each operation takes account; gmail_accounts lists them.",
+    "gmail_send and gmail_send_draft send real email to real people. With several accounts, each tool takes account; gmail_accounts lists them.",
   vault: VAULT,
   schema: signInSchema,
 

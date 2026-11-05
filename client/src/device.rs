@@ -1092,7 +1092,7 @@ fn route(path: &str, body: &[u8]) -> String {
     }
 }
 
-/// What a request asked, as a trace names it: a call's app and operation, a screen's app and name, else its path. Never
+/// What a request asked, as a trace names it: a call's app and tool, a screen's app and name, else its path. Never
 /// its input or query.
 fn what(path: &str, body: &[u8]) -> Value {
     let at = path.split('?').next().unwrap_or(path);

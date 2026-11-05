@@ -126,7 +126,7 @@ async fn forward(auth: Arc<String>, req: axum::extract::Request) -> Response {
         if status >= 400 && kind.starts_with("application/json") {
             let said: serde_json::Value = resp.body_mut().read_json().unwrap_or_default();
             let error = said["error"].as_str().unwrap_or("that didn't work").to_string();
-            return drop(head.send((status, "text/plain".into(), Some(crate::ops::in_cli_words(&error)))));
+            return drop(head.send((status, "text/plain".into(), Some(crate::tools::in_cli_words(&error)))));
         }
         if head.send((status, kind, None)).is_err() {
             return;
