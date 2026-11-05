@@ -23,7 +23,10 @@ public static class Program
             Widgets.Serve();
             return 0;
         }
+        // Toasts' clicks and pushes, before asking how it was started; and started for one of those alone, it's done.
+        Notes.Start();
         var activated = AppInstance.GetCurrent().GetActivatedEventArgs();
+        if (Notes.Background(activated)) return 0;
         var main = AppInstance.FindOrRegisterForKey("main");
         if (!main.IsCurrent)
         {
@@ -50,10 +53,11 @@ public static class Program
     [System.Runtime.InteropServices.DllImport("user32.dll")] static extern bool AllowSetForegroundWindow(uint process);
 
     /// The link a start opens (`<cli>://open?…`, or a page at your One App's address), if it's one: Windows gives an
-    /// address it opens here as a link, or as the start's argument.
+    /// address it opens here as a link, or as the start's argument; a toast, as its `open`.
     static Uri? Link(AppActivationArguments e) => e.Data switch
     {
         IProtocolActivatedEventArgs p when e.Kind == ExtendedActivationKind.Protocol => p.Uri,
+        Microsoft.Windows.AppNotifications.AppNotificationActivatedEventArgs n when e.Kind == ExtendedActivationKind.AppNotification => Notes.Link(n),
         ILaunchActivatedEventArgs l when Uri.TryCreate(l.Arguments.Trim().Trim('"'), UriKind.Absolute, out var url) && url.Scheme == "https" => url,
         _ => null,
     };

@@ -59,6 +59,9 @@ class Client(private val context: Context, private val signIn: SignIn) {
         return io { d.wait(token) }
     }
 
+    /** Has pushes reach this phone at `address` (its FCM token), with the push service `via`. */
+    suspend fun registerPush(via: String, address: String) = device().let { d -> io { d.registerPush(via, address, "", "") } }
+
     /** A request to the person's nodes: `/v1/…`, with a body (JSON) or none. Its body is read by whoever asked. */
     suspend fun fetch(method: String, path: String, body: ByteArray? = null, accept: String? = null): Response {
         val d = device()

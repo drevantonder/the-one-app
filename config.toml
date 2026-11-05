@@ -31,6 +31,14 @@ relay_location = "oc"
 icon = "icons/AppIcon.png"
 menubar = "icons/MenuBarIcon.png"
 logo = "icons/Logo.png"
+# Where the native apps' pushes come from, each empty until the white label has it (and those apps get no notifications
+# till then): Android's, the white label's Firebase project's google-services.json (relative to this file), with an
+# Android app whose package is app.<cli>.android; Windows', its Microsoft Entra app registration's Application (client) ID
+# and its service principal's Object ID, which WNS knows the Windows app by once Microsoft maps its package to them. The
+# kernel sends with their secrets (FCM_ACCOUNT, WNS_*).
+firebase = ""
+wns_app = ""
+wns_object = ""
 
 # An install's settings until its admins change them in Settings (`setting` entries). Every install has store, the app
 # the shells' App Store opens (an ordinary app, whose screens add apps to pages with ctx.install).

@@ -36,7 +36,9 @@ val whiteLabel = tasks.register("whiteLabel") {
     val icon = art("icon")
     val logo = art("logo")
     val icons = repo.resolve("vendor/phosphor/icons.json")
-    inputs.files(icon, logo, icons, config)
+    val menubar = art("menubar").let { it.resolveSibling(it.nameWithoutExtension + "@2x." + it.extension) }
+    val firebase = field("firebase").ifEmpty { null }?.let { config.parentFile.resolve(it) }
+    inputs.files(listOfNotNull(icon, logo, icons, config, menubar, firebase))
     outputs.dir(generated)
     doLast {
         val out = generated.get().asFile
@@ -69,6 +71,30 @@ val whiteLabel = tasks.register("whiteLabel") {
         logo.copyTo(out.resolve("res/drawable-nodpi/logo.png"))
         out.resolve("assets").mkdirs()
         icons.copyTo(out.resolve("assets/icons.json"))
+        // A notification's small icon is drawn from its shape alone: the menu bar's template, which is just that.
+        out.resolve("res/drawable-xhdpi").mkdirs()
+        menubar.copyTo(out.resolve("res/drawable-xhdpi/notification.png"))
+        // The white label's Firebase project, which this app gets its pushes through, as Firebase reads it at start:
+        // its google-services.json's values for this app, as Google's own Gradle plugin would write them. None, none.
+        if (firebase != null) {
+            @Suppress("UNCHECKED_CAST")
+            val services = groovy.json.JsonSlurper().parse(firebase) as Map<String, Any?>
+            val project = services["project_info"] as Map<String, Any?>
+            val id = "app.$cli.android"
+            @Suppress("UNCHECKED_CAST")
+            val app = (services["client"] as List<Map<String, Any?>>).firstOrNull { c ->
+                ((c["client_info"] as Map<*, *>)["android_client_info"] as Map<*, *>)["package_name"] == id
+            } ?: throw GradleException("$firebase has no Android app $id: add one to its Firebase project, then download its google-services.json again")
+            val key = ((app["api_key"] as List<*>).first() as Map<*, *>)["current_key"]
+            val values = mapOf(
+                "google_app_id" to (app["client_info"] as Map<*, *>)["mobilesdk_app_id"],
+                "gcm_defaultSenderId" to project["project_number"],
+                "google_api_key" to key,
+                "project_id" to project["project_id"],
+            )
+            out.resolve("res/values/firebase.xml").writeText("<resources>\n" +
+                values.entries.joinToString("") { (k, v) -> "    <string name=\"$k\" translatable=\"false\">$v</string>\n" } + "</resources>\n")
+        }
     }
 }
 
@@ -175,6 +201,8 @@ dependencies {
     implementation("androidx.glance:glance-appwidget:1.2.0")
     implementation("androidx.work:work-runtime:2.12.0")
     implementation("com.google.android.gms:play-services-mlkit-document-scanner:16.0.0")
+    // Pushes (FCM): Google's own client is the only way an app gets one on Android, woken as its notes arrive.
+    implementation("com.google.firebase:firebase-messaging:26.0.1")
     // The client library's Kotlin (uniffi's) calls into it through JNA.
     implementation("net.java.dev.jna:jna:5.17.0@aar")
 }

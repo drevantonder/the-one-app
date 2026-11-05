@@ -39,7 +39,11 @@ cp ./*.cs App.xaml One.csproj app.manifest ./*.ps1 "$stage/"
 # The package: named for the white label, its widgets' COM class steady for it, its version newer each build (days
 # since 2026, then the minute of that day), so installing it updates the one there, keeping its sign-in.
 file=${name//[^A-Za-z0-9]/}
-widgets=$(printf '%s widgets' "$cli" | sha1sum | sed -E 's/^(.{8})(.{4})(.{4})(.{4})(.{12}).*/\1-\2-\3-\4-\5/')
+guid() { printf '%s' "$1" | sha1sum | sed -E 's/^(.{8})(.{4})(.{4})(.{4})(.{12}).*/\1-\2-\3-\4-\5/'; }
+widgets=$(guid "$cli widgets") notes=$(guid "$cli notifications")
+# Pushes come by the white label's Microsoft Entra app, if it has one: none, and the package doesn't name it.
+wns_app=$(field wns_app) wns_object=$(field wns_object)
+if [ -n "$wns_app" ]; then wns='/<!--\/\{0,1\}wns-->/d'; else wns='/<!--wns-->/,/<!--\/wns-->/d'; fi
 now=$(date -u +%s)
 version="1.$(( (now - $(date -u -d 2026-01-01 +%s)) / 86400 )).$(( now % 86400 / 60 )).0"
 # Links to the config's address open the app; a white label without one has the app add the address it signs in to
@@ -47,7 +51,8 @@ version="1.$(( (now - $(date -u -d 2026-01-01 +%s)) / 86400 )).$(( now % 86400 /
 host=$(field address | sed -E 's|^[a-z]+://||; s|[/:].*||'); host=${host:-$cli.invalid}
 xml() { printf '%s' "$1" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g; s/"/\&quot;/g; s/[&|\\]/\\&/g'; }
 sed -e "s|@ID@|$file|g; s|@PUBLISHER@|CN=$(xml "${name//[^A-Za-z0-9 ]/}")|g; s|@VERSION@|$version|g; s|@NAME@|$(xml "$name")|g" \
-  -e "s|@FILE@|$file|g; s|@CLI@|$(xml "$cli")|g; s|@WIDGETS@|$widgets|g; s|@HOST@|$(xml "$host")|g" Package.appxmanifest |
+  -e "s|@FILE@|$file|g; s|@CLI@|$(xml "$cli")|g; s|@WIDGETS@|$widgets|g; s|@HOST@|$(xml "$host")|g; s|@NOTES@|$notes|g; s|@WNS_APP@|$(xml "$wns_app")|g" \
+  -e "$wns" Package.appxmanifest |
   awk '/<Definition /{d=1} d{b=b $0 "\n"} !d{print} /<\/Definition>/{d=0; for (n=1; n<=4; n++) {x=b; gsub(/@N@/, n, x); printf "%s", x}}' > "$stage/Package.appxmanifest"
 cp "$(art icon)" "$stage/Assets/Icon.png"
 cp "$(art logo)" "$stage/Assets/Logo.png"
@@ -68,6 +73,10 @@ public static class WhiteLabel
     public const string Address = $(quote "$(field address)");
     /// The COM class the Widgets board starts this program as, for its widgets (Package.appxmanifest).
     public const string WidgetClass = "$widgets";
+    /// The white label's Microsoft Entra app, which WNS knows this app by (config.toml's wns_app, and its service
+    /// principal's object id, wns_object): empty for none, and it gets no pushes.
+    public const string WnsApp = $(quote "$wns_app");
+    public const string WnsObject = $(quote "$wns_object");
     /// Where this app keeps what it keeps on this computer.
     public static string Folder => System.IO.Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.LocalApplicationData), Name);
 }

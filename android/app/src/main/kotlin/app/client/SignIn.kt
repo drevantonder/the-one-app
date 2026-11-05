@@ -75,6 +75,9 @@ class SignIn(private val context: Context) {
         return secret
     }
 
+    /** Every device key kept here, for a push's note, which opens with the one it was sealed to. */
+    fun deviceSecrets(): List<ByteArray> = prefs.all.keys.filter { it.startsWith("device:") && it != SIGNING_IN_FOR }.mapNotNull(::kept)
+
     private fun kept(name: String): ByteArray? =
         prefs.getString(name, null)?.let { sealed -> runCatching { Base64.decode(Keystore.open(sealed), Base64.NO_WRAP) }.getOrNull()?.takeIf { it.size == 32 } }
 

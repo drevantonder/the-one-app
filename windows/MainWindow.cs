@@ -390,6 +390,7 @@ public sealed class MainWindow : Window
             return;
         }
         _ = Store.Shared.Listen(() => DispatcherQueue.TryEnqueue(() => { if (!stop.IsCancellationRequested) Welcome(null); }), stop);
+        _ = Notes.Register();
     }
 
     /// This computer let in as its person's device: at once if it is, else it asks, shows its code, and waits for one of

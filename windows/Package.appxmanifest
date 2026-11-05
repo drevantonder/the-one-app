@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The app as Windows installs it: its window, its links (@CLI@://open?…, which widgets open it at, and links to your
+<!-- The app as Windows installs it: its window, its notifications, its links (@CLI@://open?…, which widgets open it at, and links to your
      One App's address: the config's, or whichever the app signs in to, which it adds itself (Shell.Claim)), and the Widgets
      board's widgets, served by the same program started as a COM server (Program.cs, Widgets.cs). build.sh fills in
      the @…@ from config.toml, and repeats the widget's definition: the board pins only one of each definition, so
@@ -10,8 +10,9 @@
   xmlns:uap3="http://schemas.microsoft.com/appx/manifest/uap/windows10/3"
   xmlns:uap7="http://schemas.microsoft.com/appx/manifest/uap/windows10/7"
   xmlns:com="http://schemas.microsoft.com/appx/manifest/com/windows10"
+  xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10"
   xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
-  IgnorableNamespaces="uap uap3 uap7 com rescap">
+  IgnorableNamespaces="uap uap3 uap7 com desktop rescap">
   <Identity Name="@ID@" Publisher="@PUBLISHER@" Version="@VERSION@" />
   <Properties>
     <DisplayName>@NAME@</DisplayName>
@@ -46,6 +47,27 @@
             </com:ExeServer>
           </com:ComServer>
         </com:Extension>
+        <!-- Its toasts' clicks and buttons start it (Notes.cs); and WNS's pushes, by the white label's Microsoft Entra app
+             (config.toml's wns_app), which build.sh leaves out for a white label without one. -->
+        <desktop:Extension Category="windows.toastNotificationActivation">
+          <desktop:ToastNotificationActivation ToastActivatorCLSID="@NOTES@" />
+        </desktop:Extension>
+        <com:Extension Category="windows.comServer">
+          <com:ComServer>
+            <com:ExeServer Executable="@FILE@.exe" Arguments="----AppNotificationActivated:" DisplayName="@NAME@ notifications">
+              <com:Class Id="@NOTES@" />
+            </com:ExeServer>
+          </com:ComServer>
+        </com:Extension>
+        <!--wns-->
+        <com:Extension Category="windows.comServer">
+          <com:ComServer>
+            <com:ExeServer Executable="@FILE@.exe" Arguments="----WindowsAppRuntimePushServer:" DisplayName="@NAME@ pushes">
+              <com:Class Id="@WNS_APP@" />
+            </com:ExeServer>
+          </com:ComServer>
+        </com:Extension>
+        <!--/wns-->
         <uap3:Extension Category="windows.appExtension">
           <uap3:AppExtension Name="com.microsoft.windows.widgets" DisplayName="@NAME@" Id="@CLI@">
             <uap3:Properties>

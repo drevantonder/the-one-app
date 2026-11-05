@@ -125,6 +125,12 @@ private fun Root(store: Store) {
             isAppearanceLightNavigationBars = !p.dark
         }
     }
+    // Once it's in, Android asks whether it may show notifications, once.
+    val context = LocalContext.current
+    val ask = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) {}
+    LaunchedEffect(store.phase) {
+        if (store.phase == Store.Phase.Ready && Push.shouldAsk(context)) ask.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+    }
     Box(Modifier.fillMaxSize().background(p.background)) {
         if (store.phase == Store.Phase.SignedOut) Welcome(store) else Shell(store)
     }

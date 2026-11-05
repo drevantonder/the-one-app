@@ -81,6 +81,30 @@ public static class Client
         return await Off(() => d.Wait(token));
     }
 
+    /// Has pushes reach this computer at `address` (its WNS channel), with the push service `via`.
+    public static async Task RegisterPush(string via, string address)
+    {
+        var d = await Current();
+        await Off(() => { d.RegisterPush(via, address, "", ""); return 0; });
+    }
+
+    /// Every device key kept here, for a push's note, which opens with the one it was sealed to.
+    public static byte[][] Secrets()
+    {
+        try
+        {
+            return new PasswordVault().FindAllByResource(Locker).Select(c =>
+            {
+                c.RetrievePassword();
+                return Convert.FromBase64String(c.Password);
+            }).Where(s => s.Length == 32).ToArray();
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
     /// Developer mode, on this computer alone (Settings › Developer): whether it's on, first turning it on or off.
     public static async Task<bool> Developer(bool? on)
     {

@@ -273,6 +273,7 @@ class Store(private val application: android.app.Application, val signIn: SignIn
             }
             phase = Phase.Ready
             launch { runCatching { refreshWidgets() } }
+            launch { runCatching { Push.register(application, client) }.onFailure { android.util.Log.w("push", "registering: ${it.message}") } }
             listen()
         }
     }

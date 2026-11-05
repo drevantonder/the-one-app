@@ -949,6 +949,11 @@ fn android(dir: &Path, checkout: &Path, device: &str, settings: &one::kernel::Se
             on_device(device, &format!("input tap {} {}", button.x, button.y))?;
             continue;
         }
+        // Once in, Android asks whether it may show notifications, as a person would be asked: it may.
+        if let Some(allow) = nodes.iter().find(|n| n.package.contains("permissioncontroller") && n.text == "Allow") {
+            on_device(device, &format!("input tap {} {}", allow.x, allow.y))?;
+            continue;
+        }
         // Its code to be let in, which the try install's machine approves, as one of its person's devices.
         if ours && let Some(code) = nodes.iter().find(|n| is_code(&n.text)).filter(|_| !approved) {
             approve_code(dir, &code.text)?;
