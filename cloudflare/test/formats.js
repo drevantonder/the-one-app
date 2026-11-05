@@ -79,7 +79,7 @@ const ops = {
   /// What a node is handed with each kind of request: `[[route, need]]` → whether each is, and `[[hint, newest]]` → the
   /// oldest epoch each needs.
   async handed({ hands, hints }) {
-    return { hands: hands.map(([route, need]) => mayHand(route, need)), oldest: hints.map(([hint, newest]) => oldestNeeded(hint, newest)), apps: hands.map(([route]) => appOf(route)) };
+    return { hands: hands.map(([route, need]) => mayHand(route, need)), oldest: hints.map(([database, hint, newest]) => oldestNeeded(database, hint, newest)), apps: hands.map(([route]) => appOf(route)) };
   },
   /// What a client does with a node's 428 and sign-in's word while it waits to be let in: `[[route, node, answer]]` → what
   /// each asks it to hand, or null; `[[status, said]]` → what each says.

@@ -323,17 +323,18 @@ fn the_workers_and_nodes_agree_on_keys_and_seals() {
         for (route, scope, (app, database)) in routes.iter().flat_map(|r| ["user:ab", "global"].map(|s| (r, s))).flat_map(|(r, s)| dbs.iter().map(move |d| (r, s, d))) {
             hands.push((route.to_string(), Need { scope: scope.into(), epoch: 1, app: app.to_string(), database: database.to_string() }));
         }
-        let hints: Vec<(Option<String>, u32)> = [None, Some(r#"{"at":9,"copy":0,"epoch":0}"#), Some(r#"{"at":9,"copy":7,"epoch":2}"#), Some(r#"{"at":9,"copy":7,"epoch":5}"#), Some(r#"{"at":9,"copy":7}"#), Some("not a hint"), Some(r#"{"copy":-1,"epoch":2}"#)]
+        let hints: Vec<(&str, Option<String>, u32)> = [None, Some(r#"{"at":9,"copy":0,"epoch":0}"#), Some(r#"{"at":9,"copy":7,"epoch":2}"#), Some(r#"{"at":9,"copy":7,"epoch":5}"#), Some(r#"{"at":9,"copy":7}"#), Some("not a hint"), Some(r#"{"copy":-1,"epoch":2}"#)]
             .into_iter()
-            .flat_map(|h| [0, 1, 3].map(|n| (h.map(str::to_string), n)))
+            .flat_map(|h| ["log", "main", "blobs"].map(move |d| (d, h)))
+            .flat_map(|(d, h)| [0, 1, 3].map(|n| (d, h.map(str::to_string), n)))
             .collect();
-        let out = js(json!({ "op": "handed", "hands": hands.iter().map(|(r, n)| json!([r, n])).collect::<Vec<_>>(), "hints": hints.iter().map(|(h, n)| json!([h, n])).collect::<Vec<_>>() }));
+        let out = js(json!({ "op": "handed", "hands": hands.iter().map(|(r, n)| json!([r, n])).collect::<Vec<_>>(), "hints": hints.iter().map(|(d, h, n)| json!([d, h, n])).collect::<Vec<_>>() }));
         for ((route, need), (js, app)) in hands.iter().zip(out["hands"].as_array().unwrap().iter().zip(out["apps"].as_array().unwrap())) {
             assert_eq!(js.as_bool(), Some(may_hand(route, need)), "{route} handed {}/{}", need.app, need.database);
             assert_eq!(app.as_str(), app_of(route), "{route}'s app");
         }
-        for ((hint, newest), js) in hints.iter().zip(out["oldest"].as_array().unwrap()) {
-            assert_eq!(js.as_u64(), Some(oldest_needed(hint.as_deref().map(str::as_bytes), *newest) as u64), "{hint:?} at {newest}");
+        for ((database, hint, newest), js) in hints.iter().zip(out["oldest"].as_array().unwrap()) {
+            assert_eq!(js.as_u64(), Some(oldest_needed(database, hint.as_deref().map(str::as_bytes), *newest) as u64), "{database} {hint:?} at {newest}");
         }
         // And what it says, for what matters most: another app's, or anything but the log with a request that runs none.
         let need = |app: &str, database: &str| Need { scope: "global".into(), epoch: 1, app: app.into(), database: database.into() };
@@ -346,7 +347,8 @@ fn the_workers_and_nodes_agree_on_keys_and_seals() {
         assert!(may_hand("call board", &blobs("global")) && may_hand("/v1/screens/board", &blobs("global")) && may_hand("/v1/badges", &blobs("global")) && may_hand("/v1/apps", &blobs("global")));
         assert!(!may_hand("/v1/apps", &need("board", "main")) && !may_hand("/v1/apps", &blobs("user:ab")));
         assert!(!may_hand("call board", &blobs("user:ab")) && !may_hand("/mcp", &blobs("group:cd")) && !may_hand("/v1/state", &blobs("global")));
-        assert_eq!(oldest_needed(Some(br#"{"at":9,"copy":7,"epoch":2}"#), 3), 2, "from the epoch its newest copy is under");
+        assert_eq!(oldest_needed("log", Some(br#"{"at":9,"copy":7,"epoch":2}"#), 3), 2, "from the epoch its newest copy is under");
+        assert_eq!(oldest_needed("blobs", None, 3), 1, "a blob is kept under the epoch it was put in");
     }
 
     // A client device's way in, the same in a browser (cloudflare/web) as in a native app and the CLI (one-client): what a

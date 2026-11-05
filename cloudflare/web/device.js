@@ -401,7 +401,7 @@ export class Device {
     if (!k.devices.some((d) => d.key === node && d.seal)) throw new Error("A device that isn’t one of yours asked for keys, so none were given.");
     // The keys' own fetching goes at the same time: it only opens what's there, whichever epochs are handed.
     const [hints] = await Promise.all([note({ step: "newest", databases: new Set(need.map(prefixOf)).size }, () => this.hints(need)), this.fetchKeys(need, note)]);
-    const handed = hints ? need.filter((n) => n.epoch >= oldestNeeded(hints[prefixOf(n)] ?? null, k.epochs[n.scope]?.n || 0)) : need;
+    const handed = hints ? need.filter((n) => n.epoch >= oldestNeeded(n.database, hints[prefixOf(n)] ?? null, k.epochs[n.scope]?.n || 0)) : need;
     if (!handed.length) throw new Error("A device asked for older keys than it needs, so none were given.");
     await Promise.all(handed.map((n) => this.databaseKey(n, note)));
     this.needs[route] = { need: handed };

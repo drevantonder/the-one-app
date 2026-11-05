@@ -437,7 +437,7 @@ impl Node {
         let mut need = Vec::new();
         for ((scope, app, database), hint) in want.iter().zip(hints) {
             let newest = self.newest_epoch(scope).await?.max(1);
-            let oldest = crate::keys::oldest_needed(hint.as_ref().map(|o| &o.bytes[..]), newest);
+            let oldest = crate::keys::oldest_needed(database, hint.as_ref().map(|o| &o.bytes[..]), newest);
             let handed = self.handed(me, scope, app, database);
             need.extend((oldest..=newest).filter(|n| !handed.contains_key(n)).map(|epoch| Need { scope: scope.to_string(), epoch, app: app.to_string(), database: database.to_string() }));
         }

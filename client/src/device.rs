@@ -858,7 +858,8 @@ impl Device {
         for ((p, scope), hint) in each.iter().zip(hints) {
             let hint = hint.map_err(failed)?;
             let newest = self.known.lock().unwrap().as_ref().map_or(0, |k| k.who.epoch(scope));
-            oldest.insert(p.clone(), keys::oldest_needed(hint.as_ref().map(|o| &o.bytes[..]), newest));
+            let database = p.rsplit('/').next().unwrap_or_default();
+            oldest.insert(p.clone(), keys::oldest_needed(database, hint.as_ref().map(|o| &o.bytes[..]), newest));
         }
         need.retain(|n| n.epoch >= oldest[&prefix(n)]);
         if need.is_empty() {

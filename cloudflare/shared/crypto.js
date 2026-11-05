@@ -476,9 +476,10 @@ export function waited(status, said) {
   return {};
 }
 
-/// The oldest epoch of a database whose key a reader needs, of a scope whose newest is `newest`, from its newest hint
+/// The oldest epoch of `database`'s key a reader needs, of a scope whose newest is `newest`, from its newest hint
 /// (`hint`, its text, or null if it has none). As src/keys.rs `oldest_needed`, which says why.
-export function oldestNeeded(hint, newest) {
+export function oldestNeeded(database, hint, newest) {
+  if (database === "blobs") return 1;
   newest = Math.max(1, newest || 0);
   if (hint == null) return newest;
   let v = {};

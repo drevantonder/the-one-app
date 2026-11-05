@@ -341,7 +341,7 @@ pub async fn device_keys(me: String, need: String, bucket: JsValue) -> Result<St
             let newest = epochs.keys().next_back().copied().unwrap_or(0);
             // From the epoch its newest copy is under: older ones open only its history.
             let hint = one::bucket::Bucket::get(&bucket, &one::db::newest_name(&prefix)).await?;
-            let oldest = one::keys::oldest_needed(hint.as_ref().map(|o| &o.bytes[..]), view.db.epoch(&scope));
+            let oldest = one::keys::oldest_needed(database, hint.as_ref().map(|o| &o.bytes[..]), view.db.epoch(&scope));
             for (epoch, epoch_key) in epochs.range(oldest..) {
                 let id = (scope.clone(), app.to_string(), *epoch);
                 let app_key = match view.apps.get(&id) {
