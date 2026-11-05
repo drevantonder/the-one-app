@@ -427,3 +427,75 @@ async fn what_a_native_app_keeps_of_its_calls_is_its_persons_alone() {
     assert!(app.kept("board", "topics", br#"{"format":"json","scope":"user"}"#).is_none());
     assert!(!dir.join("answers").exists());
 }
+
+/// Push (src/push.rs, kernel/push/): a device registers its address with the push Worker as Rust signs it, a node's
+/// send of a note sealed to that device goes out from the Worker as the browser's push service takes it (RFC 8291,
+/// VAPID with the key the kernel made, the note as base64url text), and what arrives opens, only with the device's key, as the note the node
+/// sealed. Only the install's devices register or send, each request once.
+#[test]
+fn a_note_reaches_only_the_device_it_was_sealed_to() {
+    use aes_gcm::aead::{Aead, KeyInit};
+    use data_encoding::{BASE64, BASE64URL_NOPAD as B64U, HEXLOWER};
+    use ed25519_dalek::SigningKey;
+    use one::push::{self, Address, Note};
+    use ring::agreement;
+
+    let node = SigningKey::from_bytes(&rand::random());
+    let phone = SigningKey::from_bytes(&rand::random());
+    let k = crate::kernel::Kernel::for_devices([&node, &phone].map(|key| HEXLOWER.encode(key.verifying_key().as_bytes())).to_vec());
+    let now = || std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u64;
+    let post = |path: &str, body: serde_json::Value| crate::kernel::post(&format!("{}{path}", k.address), &[], body);
+
+    // A browser's subscription: its key pair and secret, as the push service would hand them to the Worker.
+    let rng = ring::rand::SystemRandom::new();
+    let ua = agreement::EphemeralPrivateKey::generate(&agreement::ECDH_P256, &rng).unwrap();
+    let ua_public = ua.compute_public_key().unwrap().as_ref().to_vec();
+    let auth: [u8; 16] = rand::random();
+    let endpoint = "https://fcm.googleapis.com/fcm/send/the-phone";
+    let address = Address { via: "webpush".into(), address: endpoint.into(), keys: Some(json!({ "p256dh": B64U.encode(&ua_public), "auth": B64U.encode(&auth) })), ..Default::default() };
+    let phone_seal = one::keys::Endpoint::of(&phone).seal;
+    let register = push::register_request(&phone, &phone_seal, &address, now()).unwrap();
+    assert_eq!(post("/push/register", register.clone()), (200, json!({ "registered": true })), "the install's device registers");
+    assert_eq!(post("/push/register", register).0, 403, "a request is taken once");
+    let stranger = SigningKey::from_bytes(&rand::random());
+    assert_eq!(post("/push/register", push::register_request(&stranger, &phone_seal, &address, now()).unwrap()).0, 403, "only the install's devices register");
+
+    // The node seals a note to the phone and sends it.
+    let note = Note { id: "0123456789abcdef".into(), title: "Board".into(), body: "Sam posted".into(), app: "board".into(), screen: "main".into(), ..Default::default() };
+    let sealed = push::seal_note(&node, &phone_seal, &note, now()).unwrap();
+    let unregistered = HEXLOWER.encode(node.verifying_key().as_bytes());
+    let to = HEXLOWER.encode(phone.verifying_key().as_bytes());
+    let fields = json!({ "route": "POST /push/send", "notes": [{ "to": to, "note": B64U.encode(&sealed) }, { "to": unregistered, "note": B64U.encode(&sealed) }] });
+    let (status, said) = post("/push/send", one::keys::signed_request(&node, push::DOMAIN, fields, now()));
+    assert_eq!((status, &said["to"][&to], &said["to"][&unregistered]), (200, &json!({ "sent": true }), &json!({ "none": true })), "it went to the device that registered: {said}");
+
+    // What the browser's push service got: VAPID with the install's key, and the note, encrypted to the subscription.
+    let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).build().into();
+    let pushes: serde_json::Value = agent.get(format!("{}/pushes", k.sites)).call().unwrap().body_mut().read_json().unwrap();
+    assert_eq!(pushes.as_array().unwrap().len(), 1);
+    let got = &pushes[0];
+    assert_eq!((got["url"].as_str(), got["headers"]["content-encoding"].as_str()), (Some(endpoint), Some("aes128gcm")));
+    let vapid: serde_json::Value = agent.get(format!("{}/push/key", k.address)).call().unwrap().body_mut().read_json().unwrap();
+    assert!(got["headers"]["authorization"].as_str().unwrap().ends_with(&format!(", k={}", vapid["vapid"].as_str().unwrap())), "signed with the install's VAPID key");
+    let body = BASE64.decode(got["body"].as_str().unwrap().as_bytes()).unwrap();
+    let (salt, id_len) = (&body[..16], body[20] as usize);
+    let as_public = &body[21..21 + id_len];
+    let hkdf = |salt: &[u8], ikm: &[u8], info: &[u8], out: &mut [u8]| hkdf::Hkdf::<sha2::Sha256>::new(Some(salt), ikm).expand(info, out).unwrap();
+    let shared = agreement::agree_ephemeral(ua, &agreement::UnparsedPublicKey::new(&agreement::ECDH_P256, as_public), |s| s.to_vec()).unwrap();
+    let (mut ikm, mut cek, mut nonce) = ([0u8; 32], [0u8; 16], [0u8; 12]);
+    hkdf(&auth, &shared, &[b"WebPush: info\0".as_slice(), &ua_public, as_public].concat(), &mut ikm);
+    hkdf(salt, &ikm, b"Content-Encoding: aes128gcm\0", &mut cek);
+    hkdf(salt, &ikm, b"Content-Encoding: nonce\0", &mut nonce);
+    let mut plain = aes_gcm::Aes128Gcm::new(&cek.into()).decrypt(&nonce.into(), &body[21 + id_len..]).unwrap();
+    assert_eq!(plain.pop(), Some(2), "one record, the last");
+    let plain = B64U.decode(&plain).expect("Web Push carries the note as base64url text");
+    assert_eq!(plain, sealed, "the Worker carried the sealed note as it was");
+    let (opened, by) = push::open_note(&one::keys::seal_secret(&phone), &plain).unwrap();
+    assert_eq!((opened, by), (note, Some(HEXLOWER.encode(node.verifying_key().as_bytes()))), "the phone opens the note, from the node");
+    assert!(push::open_note(&one::keys::seal_secret(&node), &plain).is_err(), "no other device opens it");
+
+    // A device that stops registering gets nothing more.
+    assert_eq!(post("/push/unregister", push::unregister_request(&phone, now())).0, 200);
+    let fields = json!({ "route": "POST /push/send", "notes": [{ "to": to, "note": B64U.encode(&sealed) }] });
+    assert_eq!(post("/push/send", one::keys::signed_request(&node, push::DOMAIN, fields, now())).1["to"][&to], json!({ "none": true }));
+}

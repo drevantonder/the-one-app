@@ -326,6 +326,8 @@
     if (device.signOut && ![...drawn.cards, ...drawn.browsers].some((c) => c.me)) main += '<div class="list"><button class="row plain out" data-out>Sign Out</button></div>';
     let side = `<div class="list"><a class="row plain action-row" data-add>${one.icon("plus-circle")}<span>Add a Device</span></a></div>`;
     if (drawn.browsers.length) side += '<h2 class="section">Browsers</h2><div class="list">' + drawn.browsers.map(browserRow).join("") + "</div>";
+    // A browser gets notifications once its person says so here: asked only when they tap it.
+    if (device.notify === "default") side += `<div class="list"><a class="row plain action-row" data-notify>${one.icon("bell")}<span>Get Notifications in This Browser</span></a></div>`;
     let foot = "";
     if (device.keys) {
       // Only for someone with something kept running, or an app that runs on its own: an app's screen asks for the rest.
@@ -600,7 +602,7 @@
 
   document.addEventListener("click", (e) => {
     if (e.target.closest(".sheet")) return;
-    const t = e.target.closest?.("[data-tab], [data-flag], [data-cell], [data-move], [data-more], [data-add], [data-out], [data-passkey], [data-grant], [data-keep], [data-let], [data-refuse], [data-old], [data-joined]");
+    const t = e.target.closest?.("[data-tab], [data-flag], [data-cell], [data-move], [data-more], [data-add], [data-out], [data-passkey], [data-grant], [data-keep], [data-let], [data-refuse], [data-old], [data-joined], [data-notify]");
     if (!t) return;
     const d = t.dataset;
     if (d.tab) (tab = d.tab), now();
@@ -617,6 +619,7 @@
     else if (t.hasAttribute("data-keep")) keep();
     else if (t.hasAttribute("data-passkey")) act(() => one.api("POST", "/v1/devices/passkey", {}));
     else if (t.hasAttribute("data-add")) addDevice();
+    else if (t.hasAttribute("data-notify")) act(async () => (device.notify = await one.notify()));
   });
   document.addEventListener("contextmenu", (e) => {
     const card = e.target.closest?.("button.pcard");

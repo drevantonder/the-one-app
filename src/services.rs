@@ -92,7 +92,7 @@ pub struct Call {
     pub op: String,
     pub input: Value,
     pub caller: Me,
-    /// The app whose `ctx.services` made the call, if one did: a push says which app sent it.
+    /// The app whose `ctx.services` made the call, if one did.
     pub from: Option<String>,
 }
 
@@ -233,7 +233,6 @@ pub struct Hosted {
 /// The services this program hosts.
 pub fn hosted() -> Vec<Hosted> {
     vec![
-        Hosted { name: crate::push::NAME, describe: crate::push::describe, call: crate::push::call },
         Hosted { name: crate::messenger::NAME, describe: crate::messenger::describe, call: crate::messenger::call },
         Hosted { name: crate::ai_usage::NAME, describe: crate::ai_usage::describe, call: crate::ai_usage::call },
     ]

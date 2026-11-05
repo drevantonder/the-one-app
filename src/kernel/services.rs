@@ -20,6 +20,7 @@ pub const SERVICES: &[(&str, &str, Option<&str>)] = &[
     ("signer", "signer/worker.js", None),
     ("mcp", "mcp/worker.js", Some("Client")),
     ("gateway", "gateway/worker.js", None),
+    ("push", "push/worker.js", Some("Push")),
 ];
 
 /// A Durable Object class a service had once, (service, class), which its next upload deletes on Cloudflare.
@@ -100,6 +101,10 @@ pub struct Settings {
     /// CLOUDFLARE_API_TOKEN isn't set.
     #[serde(default, skip_serializing)]
     pub cloudflare_token: Option<String>,
+    /// The push Worker's secrets, by their names in `SCHEMA` (`PUSH_SECRETS`): the install's VAPID key, which is made
+    /// with the kernel, and the white label's APNs, FCM and WNS credentials, as its admin adds them.
+    #[serde(default, skip)]
+    pub push: std::collections::BTreeMap<String, String>,
     /// A try install's one person, `(id, name)`, whom its kernel signs in with no passkey and no Google, so clients
     /// are tested with nobody there. Only `one try` sets it, on the kernel it runs beside its try install, listening
     /// only on this machine; `deploy` refuses settings with it, so no kernel people use ever has it.
@@ -134,7 +139,38 @@ CLOUDFLARE_API_TOKEN=
 # The serverless node's endpoint key, made by serverless deploy.
 # @optional
 SERVERLESS_KEY=
+# The push Worker's: the install's VAPID key (base64url PKCS#8, P-256), made with the kernel, which browsers' pushes
+# are signed with.
+# @optional
+VAPID_KEY=
+# The white label's APNs key: its .p8 file's text, its key id and the Apple developer team's id.
+# @optional
+APNS_KEY=
+# @optional
+APNS_KEY_ID=
+# @optional
+APNS_TEAM_ID=
+# The white label's Firebase project's service account key (its JSON), which Android's pushes are sent with.
+# @optional
+FCM_ACCOUNT=
+# The Windows app's Microsoft Entra app registration, which Windows' pushes are sent with.
+# @optional
+WNS_TENANT_ID=
+# @optional
+WNS_CLIENT_ID=
+# @optional
+WNS_CLIENT_SECRET=
 ";
+
+/// The push Worker's secrets, as `SCHEMA` names them.
+const PUSH_SECRETS: &[&str] = &["VAPID_KEY", "APNS_KEY", "APNS_KEY_ID", "APNS_TEAM_ID", "FCM_ACCOUNT", "WNS_TENANT_ID", "WNS_CLIENT_ID", "WNS_CLIENT_SECRET"];
+
+/// A new VAPID key: base64url PKCS#8 of a P-256 key, as the push Worker imports it.
+fn vapid_key() -> String {
+    let rng = ring::rand::SystemRandom::new();
+    let pkcs8 = ring::signature::EcdsaKeyPair::generate_pkcs8(&ring::signature::ECDSA_P256_SHA256_FIXED_SIGNING, &rng).expect("making a P-256 key");
+    B64U.encode(pkcs8.as_ref())
+}
 
 /// Keeps `value` in a new item of 1Password's `vault`, titled `title`, handed to `op` on its standard input so no
 /// command line shows it: → the item's id.
@@ -246,6 +282,13 @@ impl Settings {
         settings.bucket = get("BUCKET").map(|b| serde_json::from_str(&b)).transpose().context("BUCKET isn't JSON")?;
         settings.cloudflare_token = get("CLOUDFLARE_API_TOKEN");
         settings.serverless_key = get("SERVERLESS_KEY").unwrap_or_default();
+        settings.push = PUSH_SECRETS.iter().filter_map(|name| Some((name.to_string(), get(name)?))).collect();
+        // A kernel from before pushes had its own makes its VAPID key now, kept as its other secrets are.
+        if !settings.push.contains_key("VAPID_KEY") {
+            let key = vapid_key();
+            settings.set_secret("VAPID_KEY", &key)?;
+            settings.push.insert("VAPID_KEY".into(), key);
+        }
         if settings.try_person.is_none() && google() {
             settings.google = get("GOOGLE_CLIENT_ID").zip(get("GOOGLE_CLIENT_SECRET"));
             ensure!(settings.google.is_some(), "no GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET: the Google OAuth client people sign in with, whose redirect URI is {}/api/auth/callback/google", settings.address);
@@ -278,6 +321,7 @@ impl Settings {
             google: None,
             cloudflare_token: None,
             devices: vec![],
+            push: [("VAPID_KEY".to_string(), vapid_key())].into(),
             try_person: None,
         }
     }
@@ -309,6 +353,9 @@ impl Settings {
             }
             if !self.serverless_key.is_empty() {
                 text += &format!("SERVERLESS_KEY={}\n", quoted(&self.serverless_key));
+            }
+            for (name, value) in &self.push {
+                text += &format!("{name}={}\n", quoted(value));
             }
             write_private(&local(), &text)?;
         }
@@ -353,7 +400,21 @@ impl Settings {
         // The gateway holds no secrets.
         if service == "gateway" {
             let named = [("NAME", crate::config::NAME.into()), ("YOURS", crate::config::YOURS.into()), ("CLI", crate::config::CLI.into())].map(|(n, v)| (n.into(), v, false));
-            return [("AUTH".into(), "service:auth".into(), false), ("IROH".into(), "service:relay".into(), false), ("SIGNER".into(), "service:signer".into(), false), ("MCP".into(), "service:mcp".into(), false)].into_iter().chain(named).collect();
+            let bound = [("AUTH", "auth"), ("IROH", "relay"), ("SIGNER", "signer"), ("MCP", "mcp"), ("PUSH", "push")].map(|(n, s)| (n.into(), format!("service:{s}"), false));
+            return bound.into_iter().chain(named).collect();
+        }
+        // The push Worker: the install's push credentials, and the relay, which says which devices are the install's.
+        if service == "push" {
+            let cli = crate::config::CLI;
+            let mut out = vec![
+                ("RELAY".into(), "service:relay".into(), false),
+                ("ADDRESS".into(), self.address.clone(), false),
+                ("NAME".into(), self.name.clone(), false),
+                // The Apple apps' bundle ids (apple/project.yml), which their pushes go to.
+                ("APNS_TOPICS".into(), json!([format!("app.{cli}.phone"), format!("app.{cli}.mac")]).to_string(), false),
+            ];
+            out.extend(self.push.iter().map(|(name, value)| (name.clone(), value.clone(), true)));
+            return out;
         }
         let location = (!crate::config::RELAY_LOCATION.is_empty()).then(|| ("LOCATION".into(), crate::config::RELAY_LOCATION.into(), false));
         // Nor does the relay: only the keys of the install's first devices, which it starts its list with, and the
@@ -411,6 +472,8 @@ impl Settings {
             "auth" => {
                 // Whether a request's signer is one of the install's endpoints, and an admin's.
                 plain("RELAY", "service:relay".into());
+                // Pushes to a person's devices, by the push Worker's entrypoint for the kernel's own Workers.
+                plain("PUSH", "service:push:Sender".into());
                 plain("ADDRESS", self.address.clone());
                 plain("NAME", self.name.clone());
                 plain("YOURS", crate::config::YOURS.into());
@@ -558,6 +621,17 @@ impl Settings {
         // The page says whose it is before anyone signs in: the white label's name.
         let attr = |v: &str| v.replace('&', "&amp;").replace('"', "&quot;").replace('<', "&lt;");
         files.push(("icons.json".into(), crate::screen::ICONS.to_vec()));
+        // Installed from Chrome or Edge, it's an app of its own: the desktop's, where there's no native one.
+        let manifest = json!({
+            "name": crate::config::NAME, "short_name": crate::config::NAME, "id": "/", "start_url": "/", "scope": "/", "display": "standalone",
+            "background_color": "#ffffff", "theme_color": "#ffffff",
+            "icons": [{ "src": "/icon.png", "sizes": "192x192 512x512 1024x1024", "type": "image/png", "purpose": "any" }],
+        });
+        files.push(("manifest.webmanifest".into(), manifest.to_string().into_bytes()));
+        // The service worker shows a note it can't open with the white label's name.
+        if let Some((_, sw)) = files.iter_mut().find(|(path, _)| path == "sw.js") {
+            *sw = String::from_utf8_lossy(sw).replacen("const NAME = \"\";", &format!("const NAME = {};", json!(crate::config::NAME)), 1).into_bytes();
+        }
         // The client's own screens, which it shows from here and never from a node (`screen::client_template`).
         files.extend(crate::screen::client_screens().map(|name| (format!("screens/{name}.html"), crate::screen::client_template(name).into_bytes())));
         // Each file the page loads is named by its content (`?v=`, which the gateway checks), so a browser keeps it for

@@ -1,34 +1,132 @@
-//! Push: sends notifications to phones through Apple's push service (APNs), for every user its device serves, so an app
-//! or an agent can reach someone who isn't looking. Phones register their tokens with it; a push goes to the caller's
-//! own phones, says which app sent it, and opens that app's screen when tapped. A hosted service (`services::Hosted`) on
-//! one device: the white label's APNs key is a Vault item on Everyone switched on for push, which the node fills in for
-//! each call (`load`), and its folder keeps devices.json, the phones registered. It says whether APNs accepted a push,
-//! never whether anyone saw it.
+//! Push: how an app, an agent or the install reaches someone who isn't looking, on every device of theirs that can get
+//! notifications. Every push is a note sealed to the one device it's for, which the kernel's push Worker
+//! (`kernel/push/`) carries to Apple's, Google's, Microsoft's or a browser's push service; only that device opens it.
+//!
+//! A note is JSON (`Note`): what to show, the app screen a tap opens, and maybe an action its device checks itself,
+//! signed by the device that sent it (`keys::signed_request`, domain `one/note`, so its receiver can tell which of the
+//! install's devices it's from; a note the kernel's own Workers send is unsigned), then sealed to the receiving device's
+//! seal key (`kernel::seal_to`), the key the install's signed entries list for it, never one a node or the kernel says.
+//!
+//! Each device that gets pushes registers its address with the Worker itself (`register_request`). A node answers the
+//! `push` ops for any caller (`node::push`): `send` seals a note to each of the caller's devices and hands them to the
+//! Worker. Phones that registered with a node before notes (the `register` op, their APNs token) can't open a note: the
+//! Worker keeps them as their person's, and sends them the plain alert they understand until they register themselves.
 
-use std::collections::BTreeMap;
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
-
-use anyhow::{Result, anyhow, bail};
-use http_body_util::BodyExt;
-use ring::signature::{ECDSA_P256_SHA256_FIXED_SIGNING, EcdsaKeyPair};
+use anyhow::{Result, anyhow, ensure};
+use data_encoding::{BASE64URL_NOPAD as B64U, HEXLOWER};
+use ed25519_dalek::SigningKey;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
-use crate::services::{Call, Host, input};
-
+/// What apps and agents call push by: `ctx.services.push`, `push_send`.
 pub const NAME: &str = "push";
+/// What a device signs its requests to the push Worker for.
+pub const DOMAIN: &str = "one/push";
+/// What a device signs a note for.
+pub const SIGNED_NOTE: &str = "one/note";
+/// The most a sealed note may be: it fits in a push, 4 KB at Apple and in Web Push, with room to spare.
+pub const NOTE_BYTES: usize = 2_600;
 
-/// The host the key is filled in for: the item's sites are Apple's push hosts, and the token made with it goes only
-/// there.
-const APNS: &str = "api.push.apple.com";
+/// What a push shows, and what tapping it opens.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Note {
+    /// Its id (16 hex characters), so a device shows it once.
+    pub id: String,
+    pub title: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub body: String,
+    /// The app whose screen tapping it opens, that screen and its params.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub app: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub screen: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub params: Option<Map<String, Value>>,
+    /// The number on the app's icon; 0 clears it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub badge: Option<i64>,
+    /// Something its device does, checking it first itself: a device asking to join, say.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub action: Option<Value>,
+}
 
+/// A note, signed by `by` at `at` (ms), sealed to a device's seal key `to`: the bytes a push carries. A body too long to
+/// fit is cut short.
+pub fn seal_note(by: &SigningKey, to: &[u8; 32], note: &Note, at: u64) -> Result<Vec<u8>> {
+    let mut note = note.clone();
+    loop {
+        let signed = crate::keys::signed_request(by, SIGNED_NOTE, serde_json::to_value(&note)?, at);
+        let sealed = crate::kernel::seal_to(to, &serde_json::to_vec(&signed)?)?;
+        if sealed.len() <= NOTE_BYTES {
+            return Ok(sealed);
+        }
+        ensure!(!note.body.is_empty(), "that note is too long to push: at most {NOTE_BYTES} bytes sealed");
+        let keep = note.body.len().saturating_sub(sealed.len() - NOTE_BYTES + 3);
+        let cut = (0..=keep).rev().find(|i| note.body.is_char_boundary(*i)).unwrap_or(0);
+        note.body = format!("{}…", note.body[..cut].trim_end());
+        if cut == 0 {
+            note.body.clear();
+        }
+    }
+}
+
+/// Opens a note sealed to the device whose seal secret is `secret`: → the note, and the key that signed it (hex), or
+/// none for a note from the kernel. A signature that's wrong is refused.
+pub fn open_note(secret: &[u8; 32], sealed: &[u8]) -> Result<(Note, Option<String>)> {
+    let plain = crate::kernel::open_sealed(secret, sealed)?;
+    let mut v: Value = serde_json::from_slice(&plain).map_err(|_| anyhow!("not a note"))?;
+    let by = match v.as_object_mut().and_then(|o| o.remove("sig")) {
+        Some(sig) => {
+            let by: [u8; 32] = HEXLOWER.decode(v["by"].as_str().unwrap_or("").as_bytes())?.try_into().map_err(|_| anyhow!("not a key"))?;
+            crate::keys::verify(&by, SIGNED_NOTE, &v, &B64U.decode(sig.as_str().unwrap_or("").as_bytes())?)?;
+            Some(HEXLOWER.encode(&by))
+        }
+        None => None,
+    };
+    Ok((serde_json::from_value(v)?, by))
+}
+
+/// A device's address with a push service, as it registers it with the push Worker.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Address {
+    /// `apns`, `fcm`, `wns` or `webpush`.
+    pub via: String,
+    /// Its APNs token (hex), FCM token, WNS channel URI or Web Push endpoint.
+    pub address: String,
+    /// APNs: `sandbox` or `production`.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub env: String,
+    /// APNs: the app's bundle id.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub topic: String,
+    /// Web Push: the subscription's `{ p256dh, auth }`, base64url.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub keys: Option<Value>,
+}
+
+/// What a device sends the push Worker to register `address` (`POST <address>/push/register`): signed with its key,
+/// naming its seal key `seal`, which only the kernel's own Workers seal to.
+pub fn register_request(key: &SigningKey, seal: &[u8; 32], address: &Address, at: u64) -> Result<Value> {
+    let mut fields = serde_json::to_value(address)?;
+    fields["seal"] = json!(HEXLOWER.encode(seal));
+    fields["route"] = json!("POST /push/register");
+    Ok(crate::keys::signed_request(key, DOMAIN, fields, at))
+}
+
+/// What a device sends the push Worker to stop getting pushes (`POST <address>/push/unregister`).
+pub fn unregister_request(key: &SigningKey, at: u64) -> Value {
+    crate::keys::signed_request(key, DOMAIN, json!({ "route": "POST /push/unregister" }), at)
+}
+
+#[cfg(feature = "node")]
 pub fn describe() -> Value {
     json!({
-        "title": "Push", "description": "Sends notifications to your phone", "icon": "bell-ringing", "serves": "everyone",
-        "instructions": "Push sends a notification to your own phones through Apple's push service: push_send with a title and a body. An app pushes with ctx.services.push.send, and tapping its push opens its screen. It says whether APNs accepted it, never whether anyone saw it.",
+        "title": "Push", "description": "Sends notifications to your devices", "icon": "bell-ringing",
+        "instructions": "Push sends a notification to every device of yours that gets them: push_send with a title and a body. An app pushes with ctx.notify or ctx.services.push.send, and tapping its push opens its screen. Each one is sealed to the device it's for, so nothing on the way reads it. It says how many devices it went to, never whether anyone saw it.",
         "ops": [
-            { "name": "send", "reads": false, "description": "Push a notification to your phones: { title, body, screen?, params? }; from an app, tapping it opens that app's screen (main unless given). Says how many APNs accepted.",
+            { "name": "send", "reads": false, "description": "Push a notification to your devices: { title, body?, screen?, params? }; from an app, tapping it opens that app's screen (main unless given). Says how many devices it went to.",
               "input": { "type": "object", "required": ["title"], "properties": {
                 "title": { "type": "string", "description": "one line" },
                 "body": { "type": "string", "description": "the text under it" },
@@ -36,286 +134,74 @@ pub fn describe() -> Value {
                 "screen": { "type": "string", "description": "the screen it opens" },
                 "params": { "type": "object", "description": "that screen's params" },
                 "badge": { "type": "integer", "description": "the number on the app's icon; 0 clears it" },
-                "devices": { "type": "array", "items": { "type": "object" }, "description": "only these devices, [{ token, platform, env }], not your registered phones" },
                 "link": { "type": "object", "description": "{ app, screen, params }, as app, screen and params" },
               }}},
-            { "name": "register", "reads": false, "description": "A phone registers for push: its APNs device token (hex), platform ios, env sandbox or production, and a name.",
+            { "name": "register", "reads": false, "description": "A phone from before notes registers for push: its APNs device token (hex), env sandbox or production, and a name. Newer devices register themselves.",
               "input": { "type": "object", "required": ["token"], "properties": {
                 "token": { "type": "string", "description": "the phone's APNs device token, in hex" }, "platform": { "type": "string", "description": "ios" }, "env": { "type": "string", "description": "sandbox or production" }, "name": { "type": "string", "description": "what the phone's called" },
               }}},
-            { "name": "unregister", "reads": false, "description": "A phone stops getting pushes.",
+            { "name": "unregister", "reads": false, "description": "A phone from before notes stops getting pushes.",
               "input": { "type": "object", "required": ["token"], "properties": { "token": { "type": "string", "description": "the phone's APNs device token, in hex, as it registered" } }}},
-            { "name": "devices", "reads": true, "description": "Your phones registered for push here.", "input": { "type": "object", "properties": {} }},
-            { "name": "status", "reads": true, "description": "Whether push is set up here: the APNs team, key id and app it sends for, never the key.", "input": { "type": "object", "properties": {} }},
+            { "name": "devices", "reads": true, "description": "Your devices that get notifications.", "input": { "type": "object", "properties": {} }},
+            { "name": "status", "reads": true, "description": "Which push services your One App sends through: apns, fcm, wns, webpush.", "input": { "type": "object", "properties": {} }},
         ],
     })
 }
 
-/// A phone registered for push.
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-#[serde(default)]
-struct Device {
-    token: String,
-    platform: String,
-    env: String,
-    /// Whose phone it is, and what it's called, once registered here.
-    #[serde(skip_serializing_if = "String::is_empty")]
-    user: String,
-    #[serde(skip_serializing_if = "String::is_empty")]
-    name: String,
-    #[serde(skip_serializing_if = "is_zero")]
-    time: u64,
-}
-
-fn is_zero(n: &u64) -> bool {
-    *n == 0
-}
-
+/// A send's input, as apps and agents give it.
+#[cfg(feature = "node")]
 #[derive(Default, Deserialize)]
 #[serde(default)]
-struct Send {
-    devices: Vec<Device>,
-    title: String,
-    body: String,
-    app: String,
-    screen: String,
-    params: Option<Map<String, Value>>,
-    link: Option<Map<String, Value>>,
-    badge: Option<i64>,
+pub struct Send {
+    pub title: String,
+    pub body: String,
+    pub app: String,
+    pub screen: String,
+    pub params: Option<Map<String, Value>>,
+    pub link: Option<Map<String, Value>>,
+    pub badge: Option<i64>,
 }
 
-/// What the Vault's Apple push item says: the Apple developer team, the APNs key's id, and the app's bundle id that
-/// pushes go to (its topic).
-struct Config {
-    team_id: String,
-    key_id: String,
-    topic: String,
-}
-
-pub fn call(host: &Host, call: &Call) -> Result<Value> {
-    let me = &call.caller;
-    let or = |s: String, default: &str| if s.is_empty() { default.to_string() } else { s };
-    match call.op.as_str() {
-        "register" => {
-            let mut d: Device = input(&call.input)?;
-            d.token = d.token.to_lowercase();
-            if !(16..=200).contains(&d.token.len()) || !d.token.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
-                bail!("a device token is hex");
-            }
-            (d.user, d.time) = (me.user.clone(), crate::node::now_ms());
-            (d.platform, d.env, d.name) = (or(d.platform, "ios"), or(d.env, "production"), or(d.name, &me.user_name));
-            change(host, |all| {
-                all.insert(d.token.clone(), d);
-            })?;
-            Ok(json!("Registered for push."))
+#[cfg(feature = "node")]
+impl Send {
+    /// The note it makes, from app `from` if an app sent it: what a tap opens is that app's screen, or else the one
+    /// the push names.
+    pub fn note(&self, from: &str) -> Result<Note> {
+        ensure!(!self.title.trim().is_empty(), "give it a title");
+        let first = |a: &str, b: &str| if a.is_empty() { b.to_string() } else { a.to_string() };
+        let (mut app, mut screen, mut params) = (first(from, &self.app), self.screen.clone(), self.params.clone());
+        if let Some(link) = &self.link {
+            let text = |name: &str| link.get(name).and_then(Value::as_str).unwrap_or_default().to_string();
+            (app, screen) = (first(&app, &text("app")), first(&screen, &text("screen")));
+            params = params.or_else(|| link.get("params").and_then(Value::as_object).cloned());
         }
-        "unregister" => {
-            let token = input::<Device>(&call.input)?.token.to_lowercase();
-            change(host, |all| {
-                if all.get(&token).is_some_and(|d| d.user == me.user) {
-                    all.remove(&token);
-                }
-            })?;
-            Ok(json!("Unregistered."))
-        }
-        "devices" => Ok(mine(host, &me.user)
-            .iter()
-            .map(|d| json!({ "token": format!("{}…", d.token.get(..8).unwrap_or(&d.token)), "platform": d.platform, "env": d.env, "name": d.name, "time": d.time }))
-            .collect()),
-        "status" => Ok(match load(host, call.id) {
-            Ok((c, _)) => json!({ "ready": true, "team_id": c.team_id, "key_id": c.key_id, "topic": c.topic }),
-            Err(err) => json!({ "ready": false, "why": format!("{err:#}") }),
-        }),
-        "send" => {
-            let mut push: Send = input(&call.input)?;
-            if push.title.is_empty() {
-                bail!("give it a title");
-            }
-            // Given devices are the old way, from before phones registered here.
-            let registered = push.devices.is_empty();
-            if registered {
-                push.devices = mine(host, &me.user);
-            }
-            if push.devices.is_empty() {
-                return Ok(json!({ "accepted": 0, "devices": 0, "why": "no phone of yours is registered for push" }));
-            }
-            if !on(host) {
-                return Ok(json!({ "accepted": 0, "devices": push.devices.len(), "why": "push is off: an admin turns it on in Settings, under General" }));
-            }
-            let out = send(host, call.id, &push, link(call.from.as_deref().unwrap_or(""), &push))?;
-            let gone: Vec<String> = serde_json::from_value(out["gone"].clone())?;
-            if registered && !gone.is_empty() {
-                change(host, |all| all.retain(|token, _| !gone.contains(token)))?;
-            }
-            Ok(out)
-        }
-        op => bail!("push has no operation {op}"),
+        let screen = if app.is_empty() { String::new() } else { first(&screen, "main") };
+        let title: String = self.title.trim().chars().take(200).collect();
+        let body: String = self.body.chars().take(2000).collect();
+        Ok(Note { id: HEXLOWER.encode(&rand::random::<[u8; 8]>()), title, body, params: params.filter(|p| !p.is_empty() && !app.is_empty()), app, screen, badge: self.badge, action: None })
     }
 }
 
-/// Whether the install's push setting names this service; an admin turns push off in Settings by emptying it.
-fn on(host: &Host) -> bool {
-    match host.get("/v1/state") {
-        Ok(state) => state["install"]["settings"]["push"].as_str().is_none_or(|push| push == NAME),
-        Err(_) => true,
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A note opens only on the device it's sealed to, as the device that signed it sent it; a body too long to push
+    /// is cut to fit.
+    #[test]
+    fn a_note_opens_only_where_it_was_sealed() {
+        let by = SigningKey::from_bytes(&rand::random());
+        let (secret, public) = crate::kernel::twin(&rand::random());
+        let note = Note { id: "0123456789abcdef".into(), title: "Hi".into(), body: "there".into(), app: "board".into(), screen: "main".into(), ..Default::default() };
+        let sealed = seal_note(&by, &public, &note, 1).unwrap();
+        let (opened, from) = open_note(&secret, &sealed).unwrap();
+        assert_eq!((opened, from), (note.clone(), Some(HEXLOWER.encode(by.verifying_key().as_bytes()))));
+        assert!(open_note(&crate::kernel::twin(&rand::random()).0, &sealed).is_err(), "another device's key opens nothing");
+
+        let long = Note { body: "é".repeat(5000), ..note };
+        let sealed = seal_note(&by, &public, &long, 1).unwrap();
+        assert!(sealed.len() <= NOTE_BYTES);
+        let (opened, _) = open_note(&secret, &sealed).unwrap();
+        assert!(opened.body.ends_with('…') && opened.body.len() < long.body.len());
     }
-}
-
-/// What a tap opens: the screen of the app that sent the push (as the node says), or else the one the push names.
-fn link(from: &str, push: &Send) -> Value {
-    let first = |a: &str, b: &str| if a.is_empty() { b.to_string() } else { a.to_string() };
-    let (mut app, mut screen, mut params) = (first(from, &push.app), push.screen.clone(), push.params.clone());
-    if let Some(link) = &push.link {
-        let text = |name: &str| link.get(name).and_then(Value::as_str).unwrap_or_default().to_string();
-        (app, screen) = (first(&app, &text("app")), first(&screen, &text("screen")));
-        params = params.or_else(|| link.get("params").and_then(Value::as_object).cloned());
-    }
-    if app.is_empty() {
-        return Value::Null;
-    }
-    json!({ "app": app, "screen": first(&screen, "main"), "params": params.unwrap_or_default() })
-}
-
-/// devices.json, which only one call changes at a time.
-static DEVICES: Mutex<()> = Mutex::new(());
-
-fn devices(host: &Host) -> BTreeMap<String, Device> {
-    std::fs::read(host.dir.join("devices.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
-}
-
-/// A user's registered phones.
-fn mine(host: &Host, user: &str) -> Vec<Device> {
-    let _held = DEVICES.lock().unwrap();
-    devices(host).into_values().filter(|d| d.user == user).collect()
-}
-
-/// Changes the registered phones and keeps them in devices.json.
-fn change(host: &Host, f: impl FnOnce(&mut BTreeMap<String, Device>)) -> Result<()> {
-    use std::io::Write;
-    use std::os::unix::fs::OpenOptionsExt;
-    let _held = DEVICES.lock().unwrap();
-    let mut all = devices(host);
-    f(&mut all);
-    let tmp = host.dir.join("devices.json.new");
-    let _ = std::fs::remove_file(&tmp);
-    std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&tmp)?.write_all(&serde_json::to_vec_pretty(&all)?)?;
-    std::fs::rename(&tmp, host.dir.join("devices.json"))?;
-    Ok(())
-}
-
-/// The config and the APNs key from the Vault: the fields of an item switched on for push (on Everyone, or the caller's
-/// own), which the node fills in for this call, the key only for Apple's push hosts.
-fn load(host: &Host, call: u64) -> Result<(Config, EcdsaKeyPair)> {
-    let field = |name: &str| -> Result<String> {
-        let placeholder = format!("{{{{{name}}}}}");
-        let text = host.fill(call, &placeholder, APNS)?;
-        match text.is_empty() || text == placeholder {
-            true => Err(anyhow!("push isn't set up: an admin adds an item to the Vault on Everyone with team_id, key_id and topic, and key, the APNs key's text, secret and sent to api.push.apple.com and api.sandbox.push.apple.com, and switches push on for it")),
-            false => Ok(text),
-        }
-    };
-    let config = Config { team_id: field("team_id")?, key_id: field("key_id")?, topic: field("topic")? };
-    let der = pem(&field("key")?).ok_or_else(|| anyhow!("the Vault's APNs key isn't a PEM key"))?;
-    let key = EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, &der, &ring::rand::SystemRandom::new()).map_err(|err| match err.to_string().as_str() {
-        "WrongAlgorithm" => anyhow!("the Vault's APNs key isn't an ES256 key"),
-        why => anyhow!("the Vault's APNs key: {why}"),
-    })?;
-    Ok((config, key))
-}
-
-/// The bytes of a PEM block's text, however its lines were broken when it was pasted.
-fn pem(text: &str) -> Option<Vec<u8>> {
-    let begin = text.find("-----BEGIN ")?;
-    let rest = &text[begin + 11..];
-    let body = &rest[rest.find("-----")? + 5..];
-    let body = &body[..body.find("-----END ")?];
-    let b64: String = body.chars().filter(|c| !c.is_whitespace()).collect();
-    data_encoding::BASE64.decode(b64.as_bytes()).ok()
-}
-
-/// The provider token APNs takes for a team's key, made again every 50 minutes (it refuses one older than an hour, and
-/// one made more often than every 20).
-static TOKEN: Mutex<Option<(String, String, Instant)>> = Mutex::new(None);
-
-fn jwt(c: &Config, key: &EcdsaKeyPair) -> Result<String> {
-    let mut token = TOKEN.lock().unwrap();
-    let whose = format!("{}/{}", c.team_id, c.key_id);
-    if let Some((of, made, at)) = token.as_ref()
-        && *of == whose
-        && at.elapsed() < Duration::from_secs(50 * 60)
-    {
-        return Ok(made.clone());
-    }
-    let enc = data_encoding::BASE64URL_NOPAD;
-    let header = json!({ "alg": "ES256", "kid": c.key_id }).to_string();
-    let claims = json!({ "iss": c.team_id, "iat": crate::node::now_ms() / 1000 }).to_string();
-    let signing = format!("{}.{}", enc.encode(header.as_bytes()), enc.encode(claims.as_bytes()));
-    let signature = key.sign(&ring::rand::SystemRandom::new(), signing.as_bytes()).map_err(|_| anyhow!("couldn't sign the APNs token"))?;
-    let made = format!("{signing}.{}", enc.encode(signature.as_ref()));
-    *token = Some((whose, made.clone(), Instant::now()));
-    Ok(made)
-}
-
-/// Pushes to each iPhone or iPad, and says how many APNs accepted and which tokens it said no longer work (the app was
-/// deleted, say).
-fn send(host: &Host, call: u64, push: &Send, link: Value) -> Result<Value> {
-    let (c, key) = load(host, call)?;
-    let token = jwt(&c, &key)?;
-    let mut aps = json!({ "alert": { "title": push.title, "body": push.body }, "sound": "default" });
-    if let Some(badge) = push.badge {
-        aps["badge"] = json!(badge);
-    }
-    let payload = json!({ "aps": aps, "link": link }).to_string();
-    let (mut accepted, mut gone, mut why) = (0, Vec::new(), None);
-    tokio::runtime::Builder::new_current_thread().enable_all().build()?.block_on(async {
-        let mut connections: BTreeMap<&str, hyper::client::conn::http2::SendRequest<String>> = BTreeMap::new();
-        for d in push.devices.iter().filter(|d| d.platform.is_empty() || d.platform == "ios") {
-            let apns = match d.env.as_str() {
-                "sandbox" | "development" => "api.sandbox.push.apple.com",
-                _ => "api.push.apple.com",
-            };
-            let asked = tokio::time::timeout(Duration::from_secs(15), async {
-                let mut connection = match connections.remove(apns) {
-                    Some(connection) => connection,
-                    None => connect(apns).await?,
-                };
-                let req = hyper::Request::post(format!("https://{apns}/3/device/{}", d.token))
-                    .header("authorization", format!("bearer {token}"))
-                    .header("apns-topic", &c.topic)
-                    .header("apns-push-type", "alert")
-                    .header("apns-priority", "10")
-                    .body(payload.clone())?;
-                let resp = connection.send_request(req).await?;
-                connections.insert(apns, connection);
-                let status = resp.status().as_u16();
-                let body = resp.into_body().collect().await?.to_bytes();
-                anyhow::Ok((status, serde_json::from_slice::<Value>(&body).ok().and_then(|b| b["reason"].as_str().map(str::to_string)).unwrap_or_default()))
-            });
-            match asked.await.unwrap_or_else(|_| Err(anyhow!("APNs didn't answer"))) {
-                Ok((200, _)) => accepted += 1,
-                Ok((status, reason)) if status == 410 || reason == "BadDeviceToken" || reason == "Unregistered" => gone.push(d.token.clone()),
-                Ok((status, reason)) => why = Some(format!("APNs said {status} {reason}")),
-                Err(err) => why = Some(format!("{err:#}")),
-            }
-        }
-    });
-    let mut out = json!({ "accepted": accepted, "devices": push.devices.len(), "gone": gone });
-    if let Some(why) = why {
-        out["why"] = json!(why);
-    }
-    Ok(out)
-}
-
-/// An HTTP/2 connection to `host`, which is all APNs speaks.
-async fn connect(host: &str) -> Result<hyper::client::conn::http2::SendRequest<String>> {
-    use tokio_rustls::rustls;
-    let mut roots = rustls::RootCertStore::empty();
-    roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-    let mut tls = rustls::ClientConfig::builder_with_provider(Arc::new(rustls::crypto::ring::default_provider())).with_safe_default_protocol_versions()?.with_root_certificates(roots).with_no_client_auth();
-    tls.alpn_protocols = vec![b"h2".to_vec()];
-    let tcp = tokio::net::TcpStream::connect((host, 443)).await?;
-    let stream = tokio_rustls::TlsConnector::from(Arc::new(tls)).connect(rustls::pki_types::ServerName::try_from(host.to_string())?, tcp).await?;
-    let (send, connection) = hyper::client::conn::http2::handshake(hyper_util::rt::TokioExecutor::new(), hyper_util::rt::TokioIo::new(stream)).await?;
-    tokio::spawn(connection);
-    Ok(send)
 }

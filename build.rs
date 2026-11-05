@@ -107,6 +107,10 @@ fn main() {
     let logo = std::path::Path::new(&path).parent().unwrap().join(get("logo").as_str().unwrap());
     println!("cargo:rerun-if-changed={}", logo.display());
     files.push(("web/logo.png".into(), std::fs::canonicalize(&logo).unwrap_or_else(|e| panic!("{}: {e}", logo.display())).to_string_lossy().into()));
+    // And its app icon, which the web client is installed with (its manifest) and shows on its notifications.
+    let icon = std::path::Path::new(&path).parent().unwrap().join(get("icon").as_str().unwrap());
+    println!("cargo:rerun-if-changed={}", icon.display());
+    files.push(("web/icon.png".into(), std::fs::canonicalize(&icon).unwrap_or_else(|e| panic!("{}: {e}", icon.display())).to_string_lossy().into()));
     files.sort();
     let files: Vec<String> = files.iter().map(|(rel, abs)| format!("({rel:?}, include_bytes!({abs:?}))")).collect();
     let out = format!("{out}pub const KERNEL: &[(&str, &[u8])] = &[{}];\n", files.join(", "));

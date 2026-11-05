@@ -38,6 +38,10 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 ureq = { version = "3", features = ["json"] }
 
 [dev-dependencies]
+# What a browser's push service does with a push (RFC 8291's decryption, tests/contracts.rs): the node's own crypto.
+aes-gcm = "0.10"
+hkdf = "0.13"
+ring = "0.17"
 blake3 = "1"
 ciborium = "0.2"
 ed25519-dalek = "3"

@@ -123,6 +123,10 @@ impl Node {
     /// or says to go elsewhere.
     pub(super) async fn route(&self, req: CallRequest, me: Caller) -> Result<Value> {
         let req = self.identified(req)?;
+        // Push runs on whichever node is asked, for anyone: it goes through the install's push Worker.
+        if req.service.as_deref() == Some(crate::push::NAME) {
+            return self.push(&req.op, &req.input, &me, req.from.as_deref()).await;
+        }
         if req.device.as_deref() == Some("all") {
             return self.everywhere(req, me).await;
         }
@@ -351,6 +355,12 @@ impl Node {
         }
         if req.app == members::APP {
             return self.node_op(&req.op, &input, me).await.map(Reply::Ok);
+        }
+        if req.service.as_deref() == Some(crate::push::NAME) {
+            return Ok(match self.push(&req.op, &input, me, req.from.as_deref()).await {
+                Ok(v) => Reply::Ok(v),
+                Err(err) => Reply::Error(format!("{err:#}")),
+            });
         }
         if req.service.is_some() {
             if !self.runs_service_here(&req.app) {
@@ -1007,18 +1017,11 @@ impl Node {
             }
             ("GET", "/catalog") => ok(json!(self.catalog(&grant.caller, true).await?)),
             ("GET", "/failing") => ok(json!(self.failing_schedules(&grant.caller).await?)),
-            // A push to the caller's phones, from this app: the install delivers it through the service its `push`
-            // setting names, wherever that runs (the device with Apple's push key); with push off, it isn't sent.
+            // A push to the caller's devices, from this app, through the install's push Worker.
             ("POST", "/notify") => {
                 ensure!(!grant.read_only, "this call only reads: it can't push");
-                let push = self.with(|i| Ok(crate::state::settings(&i.r.db().settings()).remove("push").and_then(|v| v.as_str().map(str::to_string)).unwrap_or_default()))?;
-                if push.is_empty() {
-                    return Ok(ok(json!({ "ok": { "sent": false, "why": "push is off in this install" } })));
-                }
                 let input: Value = serde_json::from_slice(&body)?;
-                let call = CallRequest { app: push.clone(), service: Some(push), op: "send".into(), input, depth: grant.depth + 1, from: Some(grant.app.clone()), client: Some("app".into()), ..Default::default() };
-                // Part of the call that asked, in its trace: where it went and what that took.
-                ok(json!({ "ok": trace::within(grant.trace.clone(), Box::pin(self.route(call, grant.caller.clone()))).await? }))
+                ok(json!({ "ok": self.push("send", &input, &grant.caller, Some(&grant.app)).await? }))
             }
             ("GET", "/devices") => ok(self.state_for(&grant.caller)["install"]["devices"].take()),
             // Run priority's order, as the person the call is for: only an admin changes it.

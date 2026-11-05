@@ -228,6 +228,8 @@ impl Passkey {
 pub(crate) struct Kernel {
     _running: Running,
     pub(crate) address: String,
+    /// The stand-in sites the kernel's requests go to (test/sites.js).
+    pub(crate) sites: String,
 }
 
 impl Kernel {
@@ -261,7 +263,7 @@ impl Kernel {
             std::fs::write(web.join(path), bytes).unwrap();
         }
         let mut served = kernel::served_with(&settings, modules, &web, None);
-        for s in served.iter_mut().filter(|s| s.name == "signer" || s.name == "mcp") {
+        for s in served.iter_mut().filter(|s| ["signer", "mcp", "push"].contains(&s.name.as_str())) {
             s.outbound = Some("sites".into());
         }
         if google {
@@ -270,7 +272,7 @@ impl Kernel {
         }
         served.push(Served { name: "sites".into(), module: module("test/sites.js"), modules: vec![], class: None, listen: Some(format!("127.0.0.1:{sites}")), bindings: vec![], assets: None, outbound: None });
         let running = run(served);
-        Kernel { _running: running, address: settings.address }
+        Kernel { _running: running, address: settings.address, sites: format!("http://127.0.0.1:{sites}") }
     }
 
     fn browser(&self) -> Browser {

@@ -348,6 +348,8 @@ window.__one = {};
   /// it signed out, until it's removed in Settings › Devices.
   async function signOut() {
     if (device) await Promise.race([device.leave(), sleep(20_000)]).catch((err) => console.warn("leaving your devices:", err));
+    await navigator.serviceWorker?.getRegistration().then((r) => r?.pushManager.getSubscription()).then((s) => s?.unsubscribe()).catch(() => {});
+    localStorage.removeItem(PUSHED);
     await forgetDevice();
     return auth.signOut();
   }
@@ -1085,7 +1087,8 @@ window.__one = {};
           api: clientApi,
           signOut: () => (signOut(), null),
           appearance: (m) => (m.value != null && setAppearance(String(m.value)), appearance()),
-          device: () => ({ name: browserName(), signOut: true, keys: !!device, ...(device ? { key: device.me.key } : {}) }),
+          device: () => ({ name: browserName(), signOut: true, keys: !!device, notify: notifyState(), ...(device ? { key: device.me.key } : {}) }),
+          notify: () => notifications(true),
           request: async (m) => (await openSheet(own("request", { scope: String(m.scope || ""), id: String(m.id || "") }))) === true,
           cache: (m) => {
             const key = SCREENS + String(m.key || "");
@@ -1458,6 +1461,39 @@ window.__one = {};
     if (request?.id && request.scope) openSheet(own("request", { scope: request.scope, id: request.id }));
     listen();
     watchWaiting();
+    notifications(false).catch((err) => console.warn("notifications:", err));
+  }
+
+  // MARK: Notifications
+
+  /// What was last registered for pushes here: the subscription's endpoint, the device's key and the install's VAPID
+  /// key, and when.
+  const PUSHED = "one.pushed";
+
+  /// Whether this browser can get notifications: "default" until the person says, "granted", "denied", or null where
+  /// it can't.
+  const notifyState = () => (device && "PushManager" in window && "Notification" in window ? Notification.permission : null);
+
+  /// This browser gets notifications once its person allows them (`ask`, from Settings › Devices): its push
+  /// subscription is registered with the push Worker as this device's, again whenever it changes and daily. → the
+  /// permission, as `notifyState`.
+  async function notifications(ask) {
+    if (!notifyState()) return null;
+    if (ask && Notification.permission === "default") await Notification.requestPermission();
+    if (Notification.permission !== "granted") return notifyState();
+    const { vapid } = await (await fetch("/push/key")).json();
+    if (!vapid) return notifyState();
+    const reg = await navigator.serviceWorker.ready;
+    let sub = await reg.pushManager.getSubscription();
+    const was = JSON.parse(localStorage.getItem(PUSHED) || "null");
+    // One made with another key (a kernel made again) is made again.
+    if (sub && was && was.vapid !== vapid) await sub.unsubscribe(), (sub = null);
+    sub ||= await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: Uint8Array.from(atob(vapid.replaceAll("-", "+").replaceAll("_", "/")), (c) => c.charCodeAt(0)) });
+    if (was?.endpoint !== sub.endpoint || was?.key !== device.me.key || was?.vapid !== vapid || Date.now() - was.at > 86_400_000) {
+      await device.registerPush(sub.toJSON());
+      localStorage.setItem(PUSHED, JSON.stringify({ endpoint: sub.endpoint, key: device.me.key, vapid, at: Date.now() }));
+    }
+    return notifyState();
   }
 
   document.addEventListener("DOMContentLoaded", start);

@@ -46,6 +46,10 @@ impl Node {
         if viewer.user == self.user()? {
             services.extend(self.with(|i| Ok(self.services_here(i)))?.into_iter().map(|d| d.2));
         }
+        // Push, which every node answers itself.
+        let mut push = crate::push::describe();
+        push["name"] = json!(crate::push::NAME);
+        services.push(push);
         let remote = self.with(|i| {
             let mut d: Vec<Value> = i.peers.iter().filter(|(k, _)| i.online(k)).flat_map(|(_, s)| s.services.iter()).filter(|d| d.1.contains(&viewer.user)).map(|d| d.2.clone()).collect();
             d.sort_by_key(|v| v["name"].as_str().unwrap_or("").to_string());

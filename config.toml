@@ -32,9 +32,7 @@ icon = "icons/AppIcon.png"
 menubar = "icons/MenuBarIcon.png"
 logo = "icons/Logo.png"
 
-# An install's settings until its admins change them in Settings (`setting` entries). Every install has:
-# store, the app the shells' App Store opens (an ordinary app, whose screens add apps to pages with ctx.install);
-# and push, the service phones register their push tokens with and apps push through (src/push.rs), empty for off.
+# An install's settings until its admins change them in Settings (`setting` entries). Every install has store, the app
+# the shells' App Store opens (an ordinary app, whose screens add apps to pages with ctx.install).
 [settings]
 store = "apps"
-push = "push"

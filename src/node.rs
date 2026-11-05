@@ -34,6 +34,7 @@ mod devices;
 mod logs;
 mod net;
 mod pairing;
+mod push;
 mod releases;
 mod scheduled;
 mod screens;

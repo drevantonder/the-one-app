@@ -253,11 +253,10 @@ impl Node {
     async fn tell_admins(&self) -> Result<()> {
         let now = now_ms();
         let me = self.0.id;
-        let (due, admins, push) = self.with(|i| {
+        let (due, admins) = self.with(|i| {
             let m = i.r.db();
-            let push = crate::state::settings(&m.settings()).remove("push").and_then(|v| v.as_str().map(str::to_string)).unwrap_or_default();
-            if push.is_empty() || !i.views.contains_key("global") {
-                return Ok((Vec::new(), Vec::new(), push));
+            if !i.views.contains_key("global") {
+                return Ok((Vec::new(), Vec::new()));
             }
             let at = line(m, &Scope::Global, "alerts").iter().position(|k| *k == me).unwrap_or(usize::MAX / 2) as u64;
             let due: Vec<Problem> = problems(i, now)?
@@ -265,7 +264,7 @@ impl Node {
                 .filter(|p| p.push.is_some_and(|t| now >= t + at * STAGGER) && i.status.get("global").and_then(|s| s.alerted.get(&p.place)).is_none_or(|t| *t < p.since))
                 .collect();
             let admins: Vec<String> = m.users().into_iter().filter(|u| !u.removed && m.may(&u.id, "change-settings", scopes::INSTALL)).map(|u| u.id).collect();
-            Ok((due, admins, push))
+            Ok((due, admins))
         })?;
         for p in due {
             // Said only once an admin was told, so a push that didn't go is tried again, hourly.
@@ -275,8 +274,7 @@ impl Node {
             let mut told = false;
             for admin in &admins {
                 let input = json!({ "title": p.title, "body": format!("{} {}", p.text, p.fix) });
-                let call = CallRequest { app: push.clone(), service: Some(push.clone()), op: "send".into(), input, client: Some("app".into()), ..Default::default() };
-                match Box::pin(self.route(call, Caller { key: me, user: admin.clone(), agent: None, token: None })).await {
+                match self.push("send", &input, &Caller { key: me, user: admin.clone(), agent: None, token: None }, None).await {
                     Ok(sent) => {
                         told = true;
                         tracing::info!("told {admin} about backups: {sent}");

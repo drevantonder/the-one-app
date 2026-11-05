@@ -2734,7 +2734,6 @@ dependencies = [
  "futures-util",
  "getrandom 0.2.17",
  "hkdf",
- "http-body-util",
  "hyper",
  "hyper-util",
  "iroh",
@@ -2750,32 +2749,33 @@ dependencies = [
  "sha2 0.11.1",
  "ssh-key",
  "tokio",
- "tokio-rustls",
  "tokio-stream",
  "toml",
  "toml_edit",
  "tracing",
  "tracing-subscriber",
  "ureq",
- "webpki-roots",
 ]
 
 [[package]]
 name = "one-cli"
 version = "0.1.0"
 dependencies = [
+ "aes-gcm",
  "anyhow",
  "axum",
  "blake3",
  "ciborium",
  "data-encoding",
  "ed25519-dalek 3.0.0",
+ "hkdf",
  "iroh",
  "jiff",
  "libc",
  "one",
  "one-client",
  "rand 0.8.8",
+ "ring",
  "rusqlite",
  "serde_json",
  "sha2 0.11.1",

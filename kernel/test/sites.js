@@ -2,8 +2,9 @@
 // memory, each with an ETag that changes as it does, creating one only if it isn't there when asked with
 // If-None-Match: *, and replacing one only while it's the version If-Match names. Google's token endpoint, given an
 // authorization code, signs in whoever it names: the code is its ID token's claims. Anything else answers with what it
-// was sent.
+// was sent, except to a browser's push service (`/fcm/send/…`), which keeps what it's sent for `GET /pushes` to give.
 const objects = new Map();
+const pushes = [];
 const tags = new Map();
 let written = 0;
 
@@ -15,6 +16,12 @@ export default {
       const claims = form.get("code");
       const header = btoa(JSON.stringify({ alg: "RS256", typ: "JWT" })).replaceAll("=", "");
       return Response.json({ access_token: "a Google access token", token_type: "Bearer", expires_in: 3600, id_token: `${header}.${claims}.c2lnbmVk` });
+    }
+    if (url.pathname === "/pushes") return Response.json(pushes.splice(0));
+    if (url.pathname.startsWith("/fcm/send/")) {
+      const body = new Uint8Array(await request.arrayBuffer());
+      pushes.push({ url: request.url, headers: Object.fromEntries(request.headers), body: btoa(String.fromCharCode(...body)) });
+      return new Response("", { status: url.pathname.endsWith("/gone") ? 410 : 201 });
     }
     if (url.host === "s3.test" || url.pathname.startsWith("/install/")) {
       const name = url.pathname;

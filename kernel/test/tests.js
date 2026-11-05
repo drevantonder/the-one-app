@@ -3,6 +3,7 @@ import { b64u, databaseKey, idOf, keyPair, openAppKey, openSealed, openUnder, ra
 import { presign } from "../shared/s3.js";
 import { verify } from "../shared/token.js";
 import { Copies } from "../mcp/copies.js";
+import { apns, encrypt, fcm, webPush, wns } from "../push/senders.js";
 
 /// A Durable Object's storage, in memory.
 class Store {
@@ -83,6 +84,7 @@ export default {
     await fails(async () => verify(await sign({ iss: "https://a", sub: "u", exp: exp - 120 }), { keys: [jwk] }, "https://a"), "an expired token");
     await fails(async () => verify(await sign({ iss: "https://a", sub: "u", exp }, "k2"), { keys: [jwk] }, "https://a"), "a token from an unknown key");
     await remoteMcpClientsSecrets();
+    await pushRequests();
     const token = await sign({ iss: "https://a", sub: "u", exp });
     const forged = token.slice(0, token.lastIndexOf(".") + 1) + b64u.encode(new Uint8Array(64));
     await fails(() => verify(forged, { keys: [jwk] }, "https://a"), "a forged token");
@@ -119,4 +121,90 @@ async function remoteMcpClientsSecrets() {
   // A sign-in again starts over: no token from before opens what it seals.
   await copies.start(random(64), "refresh token three", "access token three", now + 3_600_000);
   equal(await copies.open("refresh token two"), null, "a refresh token from before a new sign-in opens it");
+}
+
+/// Each push service gets the request it documents, carrying the sealed note as it is; and Web Push's encryption is
+/// RFC 8291's, as its own example says.
+async function pushRequests() {
+  const text = new TextEncoder();
+  const asked = [];
+  const answer = (status, body = {}) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+  const fetch = async (url, init) => {
+    asked.push({ url: String(url), ...init });
+    if (String(url).includes("oauth2.googleapis.com") || String(url).includes("login.microsoftonline.com")) return answer(200, { access_token: "a token", expires_in: 3600 });
+    if (String(url).includes("/gone")) return answer(410, { reason: "Unregistered" });
+    return answer(200);
+  };
+  const pemOf = (der, label) => `-----BEGIN ${label}-----\n${btoa(String.fromCharCode(...new Uint8Array(der))).replace(/(.{64})/g, "$1\n")}\n-----END ${label}-----\n`;
+  const jwtParts = (token) => token.split(".").map((p, i) => (i < 2 ? JSON.parse(new TextDecoder().decode(b64u.decode(p))) : b64u.decode(p)));
+  const note = random(120);
+
+  // APNs: a visible alert the app's extension opens, to the token's environment, with a JWT of the team's key.
+  const ec = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"]);
+  const config = { team: "TEAM123456", key_id: "KEY1234567", key: pemOf(await crypto.subtle.exportKey("pkcs8", ec.privateKey), "PRIVATE KEY") };
+  equal(await apns(fetch, config, { address: "ab12", env: "sandbox", topic: "app.one.phone" }, { note, name: "The One App" }), { sent: true }, "APNs takes a note");
+  let a = asked.pop();
+  equal(a.url, "https://api.sandbox.push.apple.com/3/device/ab12", "APNs' URL");
+  equal([a.headers["apns-topic"], a.headers["apns-push-type"], a.headers["apns-priority"]], ["app.one.phone", "alert", "10"], "APNs' headers");
+  const payload = JSON.parse(a.body);
+  equal([payload.aps["mutable-content"], payload.aps.alert.title, b64u.decode(payload.n).join()], [1, "The One App", note.join()], "APNs' payload carries the note, and nothing of it");
+  const [header, claims, sig] = jwtParts(a.headers.authorization.replace("bearer ", ""));
+  equal([header.alg, header.kid, claims.iss], ["ES256", "KEY1234567", "TEAM123456"], "APNs' token");
+  const signing = a.headers.authorization.replace("bearer ", "").split(".").slice(0, 2).join(".");
+  if (!(await crypto.subtle.verify({ name: "ECDSA", hash: "SHA-256" }, ec.publicKey, sig, text.encode(signing)))) throw new Error("APNs' token isn't signed with the team's key");
+  await apns(fetch, config, { address: "cd34", env: "production", topic: "app.one.phone" }, { note, quiet: true });
+  a = asked.pop();
+  equal([a.url, a.headers["apns-push-type"], a.headers["apns-priority"], JSON.parse(a.body).aps], ["https://api.push.apple.com/3/device/cd34", "background", "5", { "content-available": 1 }], "a quiet push wakes the app");
+  equal(await apns(fetch, config, { address: "gone", env: "production", topic: "t" }, { note }), { gone: true }, "a token APNs says is gone");
+  asked.length = 0;
+
+  // FCM HTTP v1: an OAuth token from the service account, then a data message.
+  const rsa = await crypto.subtle.generateKey({ name: "RSASSA-PKCS1-v1_5", modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" }, true, ["sign", "verify"]);
+  const account = { project_id: "the-project", client_email: "push@the-project.iam.gserviceaccount.com", private_key: pemOf(await crypto.subtle.exportKey("pkcs8", rsa.privateKey), "PRIVATE KEY") };
+  equal(await fcm(fetch, account, { address: "fcm-token" }, { note }), { sent: true }, "FCM takes a note");
+  const [token, send] = asked.splice(0);
+  equal(token.url, "https://oauth2.googleapis.com/token", "Google's token endpoint");
+  const form = new URLSearchParams(token.body);
+  equal(form.get("grant_type"), "urn:ietf:params:oauth:grant-type:jwt-bearer", "a JWT bearer grant");
+  const [h, c] = jwtParts(form.get("assertion"));
+  equal([h.alg, c.iss, c.scope, c.aud], ["RS256", account.client_email, "https://www.googleapis.com/auth/firebase.messaging", "https://oauth2.googleapis.com/token"], "the service account's assertion");
+  equal(send.url, "https://fcm.googleapis.com/v1/projects/the-project/messages:send", "FCM's URL");
+  equal(send.headers.authorization, "Bearer a token", "FCM's token");
+  const message = JSON.parse(send.body).message;
+  equal([message.token, b64u.decode(message.data.n).join(), message.android.priority, message.notification], ["fcm-token", note.join(), "HIGH", undefined], "a high-priority data message, nothing for FCM to show");
+
+  // WNS: an Entra token for the app's registration, then a raw notification to the channel.
+  const channel = "https://wns2-par02p.notify.windows.com/w/?token=abc";
+  const app = { tenant: "the-tenant", client_id: "the-client", client_secret: "the-secret" };
+  equal(await wns(fetch, app, { address: channel }, { note }), { sent: true }, "WNS takes a note");
+  const [wnsToken, raw] = asked.splice(0);
+  equal(wnsToken.url, "https://login.microsoftonline.com/the-tenant/oauth2/v2.0/token", "Entra's token endpoint");
+  const wnsForm = new URLSearchParams(wnsToken.body);
+  equal([wnsForm.get("grant_type"), wnsForm.get("client_id"), wnsForm.get("scope")], ["client_credentials", "the-client", "https://wns.windows.com/.default"], "client credentials for WNS");
+  equal([raw.url, raw.headers["x-wns-type"], raw.headers["content-type"], raw.headers.authorization, new Uint8Array(raw.body).join()], [channel, "wns/raw", "application/octet-stream", "Bearer a token", note.join()], "a raw notification of the note's bytes");
+  equal(await wns(fetch, app, { address: "https://evil.example/w" }, { note }), { gone: true }, "a channel anywhere but WNS");
+  asked.length = 0;
+
+  // Web Push: RFC 8291's example, byte for byte.
+  const d = (s) => b64u.decode(s);
+  const asPublic = d("BP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27mlmlMoZIIgDll6e3vCYLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A8");
+  const jwkOf = (pub, priv) => ({ kty: "EC", crv: "P-256", x: b64u.encode(pub.slice(1, 33)), y: b64u.encode(pub.slice(33)), d: priv });
+  const ephemeral = {
+    privateKey: await crypto.subtle.importKey("jwk", jwkOf(asPublic, "yfWPiYE-n46HLnH0KqZOF1fJJU3MYrct3AELtAQ-oRw"), { name: "ECDH", namedCurve: "P-256" }, true, ["deriveBits"]),
+    publicKey: await crypto.subtle.importKey("raw", asPublic, { name: "ECDH", namedCurve: "P-256" }, true, []),
+  };
+  const ua = d("BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4");
+  const body = await encrypt(d("V2hlbiBJIGdyb3cgdXAsIEkgd2FudCB0byBiZSBhIHdhdGVybWVsb24"), ua, d("BTBZMqHH6r4Tts7J_aSIgg"), { ephemeral, salt: d("DGv6ra1nlYgDCS1FRnbzlw") });
+  equal(b64u.encode(body), "DGv6ra1nlYgDCS1FRnbzlwAAEABBBP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27mlmlMoZIIgDll6e3vCYLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A_yl95bQpu6cVPTpK4Mqgkf1CXztLVBSt2Ks3oZwbuwXPXLWyouBWLVWGNWQexSgSxsj_Qulcy4a-fN", "RFC 8291's example");
+
+  // And its request: VAPID for the push service's origin, aes128gcm, only to a browser's push service.
+  const vapid = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"]);
+  const vapidPublic = new Uint8Array(await crypto.subtle.exportKey("raw", vapid.publicKey));
+  const sub = { address: "https://fcm.googleapis.com/fcm/send/abc", keys: { p256dh: b64u.encode(ua), auth: "BTBZMqHH6r4Tts7J_aSIgg" } };
+  equal(await webPush(fetch, { key: vapid.privateKey, public: vapidPublic, subject: "https://one.example" }, sub, { note }), { sent: true }, "a browser's push service takes a note");
+  const w = asked.pop();
+  equal([w.url, w.headers["content-encoding"], w.headers.urgency, w.body.length], [sub.address, "aes128gcm", "high", 103 + b64u.encode(note).length], "Web Push's request, the note as text");
+  const [, t, k] = /^vapid t=([^,]+), k=(.+)$/.exec(w.headers.authorization);
+  equal([jwtParts(t)[1].aud, jwtParts(t)[1].sub, k], ["https://fcm.googleapis.com", "https://one.example", b64u.encode(vapidPublic)], "VAPID's token and key");
+  equal(await webPush(fetch, { key: vapid.privateKey, public: vapidPublic, subject: "x" }, { ...sub, address: "https://evil.example/push" }, { note }), { gone: true }, "an endpoint that isn't a browser's push service");
 }

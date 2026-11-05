@@ -52,7 +52,7 @@
   // or refuses it by name. Anything a person touches natively is one of these: menus,
   // alerts, sheets, files, scanning, links.
   const messages = ["call", "open", "close", "title", "menu", "alert", "save", "preview", "copy", "link", "scan", "vault", "request",
-    "icons", "icon", "haptic", "api", "signOut", "appearance", "device", "cache", "kept", "traces", "developer"];
+    "icons", "icon", "haptic", "api", "signOut", "appearance", "device", "notify", "cache", "kept", "traces", "developer"];
 
   async function host(message) {
     if (!messages.includes(message.type)) throw new Error(`No such message: ${message.type}`);
@@ -221,7 +221,8 @@
     // screen). `api` asks the node's /v1 API as the person looking ("POST", "/v1/group", { name }) and gives its JSON,
     // failing with its `error`. `signOut` signs this client out. `appearance` gives this client's ("automatic",
     // "light" or "dark"), first setting it to `value` if given. `device` is this client:
-    // `{ name ("mac", "Chrome on Mac"), signOut (whether it can sign out) }`.
+    // `{ name ("mac", "Chrome on Mac"), signOut (whether it can sign out), notify? }`, `notify` a browser's notifications
+    // permission ("default", "granted" or "denied"), which `notify` asks the person for and then gets pushes with.
     api: (method, path, body) => host({ type: "api", method, path, body }),
     // Opens the client's own Vault sheet for a request already made (as an agent's link does): true once it's
     // answered with an item, false if declined or closed.
@@ -237,6 +238,7 @@
     // panel draws them): null out of developer mode. A host that doesn't know it refuses it, as one out of it.
     traces: () => host({ type: "traces" }).catch(() => null),
     device: () => host({ type: "device" }),
+    notify: () => host({ type: "notify" }),
     // A Phosphor icon by its name ("magnifying-glass", "check-circle-fill"), at the text's size and colour.
     icon: (name, cls = "") => glyph(name, `i ${cls}`.trim()),
     esc: (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]),

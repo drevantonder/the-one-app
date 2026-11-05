@@ -1,6 +1,6 @@
 // The gateway: the install's address, the one people use. It holds no keys and runs no app code; it only sends each
 // request where its path says: sign-in to the auth service (with the gateway's host kept, since passkeys belong to
-// it), `/urls` to the URL signer, `/mcp` and what MCP clients read to sign in to the MCP Worker, `/relay` (and iroh's
+// it), `/urls` to the URL signer, `/push/…` to the push Worker, `/mcp` and what MCP clients read to sign in to the MCP Worker, `/relay` (and iroh's
 // `/ping` and `/generate_204`) to the relay, and everything else to the web client's files. Devices reach the
 // install's nodes over iroh, never through here, and so does git: `/repos/…` here is git on a computer without the CLI,
 // told how to get it.
@@ -113,6 +113,7 @@ export default {
     // The relay, iroh's: its WebSockets, its probes, and what devices tell it go to its own Worker (kernel/relay/).
     if (["/relay", "/relay/tell", "/relay/computes", "/relay/seen", "/ping", "/generate_204"].includes(url.pathname)) return env.IROH.fetch(request);
     if (url.pathname === "/urls") return env.SIGNER.fetch(request);
+    if (url.pathname.startsWith("/push/")) return env.PUSH.fetch(request);
     if (url.pathname.startsWith("/repos/")) return gitWithoutCli(env, url);
     switch (where(url.pathname)) {
       case "mcp": return env.MCP ? env.MCP.fetch(request) : refuse(503, "this install's MCP isn't set up yet");

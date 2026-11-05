@@ -228,8 +228,8 @@ function context(ask, body, appends, later) {
         appends.push({ vault: String(id), release: true });
       },
     },
-    /// Pushes a notification to the caller's phones, { title, body?, screen?, params? }; tapping it opens this app's
-    /// screen. The install delivers it, if its push setting is on: { sent: false, why } when it's off.
+    /// Pushes a notification to each of the caller's devices that gets them, { title, body?, screen?, params? };
+    /// tapping it opens this app's screen. → { sent, devices, why? }: how many it went to, and why none, if none.
     notify: async (push) => {
       if (body.read_only) throw new Error("this call only reads: it can't push");
       return (await (await ask("notify", { method: "POST", body: JSON.stringify(push) })).json()).ok;

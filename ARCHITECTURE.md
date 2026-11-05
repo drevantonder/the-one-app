@@ -1,6 +1,6 @@
 # Architecture
 
-Your devices, and your team's, as one place for apps and agents. An install is one person's or one workplace's: its people, their devices, their apps, and a bucket (a folder or S3-compatible storage) holding everything, sealed. Every machine in it runs the same program; the kernel, a few small Workers on Cloudflare, only routes, signs in and relays. This page holds only what the code can't say: where to look, and the rules that span many files. How a piece works is in its module doc (`//!` at the top of each file in `src/`, a comment at the top of each Worker, `client/`, `serverless/` and `services/`) and its tests.
+Your devices, and your team's, as one place for apps and agents. An install is one person's or one workplace's: its people, their devices, their apps, and a bucket (a folder or S3-compatible storage) holding everything, sealed. Every machine in it runs the same program; the kernel, a few small Workers on Cloudflare, only routes, signs in, relays and carries pushes. This page holds only what the code can't say: where to look, and the rules that span many files. How a piece works is in its module doc (`//!` at the top of each file in `src/`, a comment at the top of each Worker, `client/`, `serverless/` and `services/`) and its tests.
 
 ## Primitives
 
@@ -20,6 +20,7 @@ Key, log, view, blob, call, app. Scopes, devices, deploys, services, the Vault a
 - **One install, forever.** A key belongs to one install; installs never talk to each other.
 - **Secrets stay put:** a Vault item's secret leaves a node only inside a request to one of its hosts, by an app switched on for it. Nothing reads one back.
 - **Keys decide access; the relay decides who's on the network.** It admits only the install's endpoints, a list devices change by signed tells.
+- **A push is sealed to the one device it's for.** The push Worker, and Apple's, Google's, Microsoft's and browsers' push services, carry locked bytes and read none of them: they see only that a device got a push, and when. A note says which of the install's devices sent it, and an action in one is checked by the device that gets it.
 - **Only the URL signer holds the bucket's credentials;** everything in the bucket is sealed, so what it hands out opens nothing.
 
 ## Rules that span files

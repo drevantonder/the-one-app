@@ -416,6 +416,14 @@ export class Device {
     return signedRequest(as.sign, hex.decode(as.key), domain, fields);
   }
 
+  /// Registers this browser's push subscription (`{ endpoint, keys }`) with the push Worker, signed by its key, with
+  /// its seal key, which what's pushed to it is sealed to (kernel/push/).
+  async registerPush({ endpoint, keys }) {
+    const body = await this.signed("one/push", { route: "POST /push/register", via: "webpush", address: endpoint, keys: { p256dh: keys.p256dh, auth: keys.auth }, seal: this.me.seal });
+    const r = await fetch("/push/register", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    if (!r.ok) throw new Error((await r.json().catch(() => null))?.error || "Your One App's push service didn't take this browser.");
+  }
+
   /// Tells the relay to let a key in (`{ add, admin? }`) or take one out (`{ remove }`), signed by `as`.
   async tell(fields, as = this.me) {
     const said = await untilTaken(async (at) => {

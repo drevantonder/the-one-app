@@ -75,8 +75,6 @@ pub mod node;
 #[cfg(feature = "node")]
 pub mod outbound;
 #[cfg(feature = "node")]
-pub mod push;
-#[cfg(feature = "node")]
 pub mod release;
 #[cfg(feature = "node")]
 pub mod schedules;
@@ -90,6 +88,7 @@ pub mod oned;
 pub mod service;
 pub mod kernel;
 pub mod keys;
+pub mod push;
 #[cfg(feature = "db")]
 pub mod log;
 pub mod screen;
