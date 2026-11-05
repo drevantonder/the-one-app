@@ -66,8 +66,15 @@ foreach ($p in $pngs) { $w.Write($p) }
 [System.IO.File]::WriteAllBytes("$here\Assets\App.ico", $ico.ToArray())
 
 $out = "$here\package"
-& $dotnet publish "$here\One.csproj" -c Release -r win-x64 --self-contained -p:Platform=x64 -p:AppFile=$($app.file) "-p:AppName=$($app.name)" -p:SigningCertificate=$signing
-if ($LASTEXITCODE -ne 0) { throw "the build failed" }
+$log = & $dotnet publish "$here\One.csproj" -c Release -r win-x64 --self-contained -p:Platform=x64 -p:AppFile=$($app.file) "-p:AppName=$($app.name)" -p:SigningCertificate=$signing 2>&1 | Out-String
+if ($LASTEXITCODE -ne 0) {
+  # Only the compiler's error lines, each once and without where the build was, on stderr where whoever ran this reads it.
+  $errors = $log -split "`r?`n" | Where-Object { $_ -match ': error [A-Z]+\d+:' } | ForEach-Object { ($_.Replace("$here\", '') -replace '\s*\[[^\]]*\.csproj\]\s*$', '').Trim() } | Select-Object -Unique -First 10
+  # An error that isn't the compiler's (a missing SDK, say) shows the log's last lines instead.
+  if (-not $errors) { $errors = $log.Trim() -split "`r?`n" | Select-Object -Last 5 }
+  [Console]::Error.WriteLine("the Windows build failed:`n" + ($errors -join "`n"))
+  exit 1
+}
 $package = Get-ChildItem -Recurse "$out\*.msix" | Sort-Object LastWriteTime | Select-Object -Last 1
 # The Windows App SDK's runtime, which it depends on: its own packages from NuGet, the framework first.
 $runtime = (Get-ChildItem "$env:USERPROFILE\.nuget\packages\microsoft.windowsappsdk.runtime" | Sort-Object { [version]$_.Name } | Select-Object -Last 1).FullName
