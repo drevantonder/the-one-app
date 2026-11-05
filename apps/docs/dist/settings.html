@@ -1,0 +1,269 @@
+<meta name="@one/ui">
+<style>/*! tailwindcss v4.3.4 | MIT License | https://tailwindcss.com */
+@layer properties{@supports (((-webkit-hyphens:none)) and (not (margin-trim:block))) or ((-moz-orient:inline) and (not (color:rgb(from red r g b)))){*,:before,:after,::backdrop{--tw-font-weight:initial}}}@layer theme,base,components;@layer utilities{.mx-auto{margin-inline:auto}.flex{display:flex}.inline-flex{display:inline-flex}.table{display:table}.h-14{height:calc(var(--spacing,.25rem) * 14)}.w-full{width:100%}.max-w-2xl{max-width:var(--container-2xl,42rem)}.max-w-md{max-width:var(--container-md,28rem)}.flex-col{flex-direction:column}.items-center{align-items:center}.gap-1{gap:var(--spacing,.25rem)}.gap-2{gap:calc(var(--spacing,.25rem) * 2)}.gap-6{gap:calc(var(--spacing,.25rem) * 6)}.self-start{align-self:flex-start}.p-4{padding:calc(var(--spacing,.25rem) * 4)}.px-3{padding-inline:calc(var(--spacing,.25rem) * 3)}.py-2{padding-block:calc(var(--spacing,.25rem) * 2)}.py-2\.5{padding-block:calc(var(--spacing,.25rem) * 2.5)}.text-sm{font-size:var(--text-sm,.875rem);line-height:var(--tw-leading,var(--text-sm--line-height,calc(1.25 / .875)))}.font-medium{--tw-font-weight:var(--font-weight-medium,500);font-weight:var(--font-weight-medium,500)}.text-destructive{color:var(--destructive)}.text-muted-foreground{color:var(--muted-foreground)}.text-warning{color:var(--warning)}@media (hover:hover){.hover\:text-destructive:hover{color:var(--destructive)}}}@property --tw-font-weight{syntax:"*";inherits:false}
+/*$vite$:1*/</style>
+<div id="root"></div>
+<script type="module">import { useCallback as e, useEffect as t, useRef as n, useState as r } from "react";
+import { createRoot as i } from "react-dom/client";
+import { Button as a, Empty as o, Icon as s, List as c, ListRow as l, Problem as u, Skeleton as d, Spinner as f } from "@one/ui";
+import { c as p } from "react/compiler-runtime";
+import { jsx as m, jsxs as h } from "react/jsx-runtime";
+// ../../../../../.t3/worktrees/the-one-app/t3-5444e590/apps/docs/lib/accounts.jsx
+var g = (e) => one.plain(e).title.replace(/(\. Try again)?\.$/, "");
+function _() {
+	let [i, a] = r(null), [o, s] = r(null), [c, l] = r([]), [u, d] = r({}), f = n(0), p = n(!1), m = e(() => {
+		let e = ++f.current;
+		return one.call("accounts").then((t) => {
+			e === f.current && (p.current = !0, a(t), s(null));
+		}, (e) => !p.current && s(one.plain(e)));
+	}, []);
+	return t(() => {
+		one.on("changed", m), m();
+	}, [m]), {
+		accounts: i && i.filter((e) => !c.includes(e.account)),
+		problem: o,
+		retry: m,
+		failed: u,
+		signOut: async (e, t = {}) => {
+			let n = e.account;
+			l((e) => [...e, n]), d(({ [n]: e, ...t }) => t);
+			let r = !0;
+			try {
+				await one.call("sign_out", {
+					account: n,
+					...t
+				}), a((e) => e.filter((e) => e.account !== n));
+			} catch (e) {
+				r = !1, d((t) => ({
+					...t,
+					[n]: g(e)
+				}));
+			}
+			l((e) => e.filter((e) => e !== n)), r && m();
+		},
+		reload: m
+	};
+}
+function v(e) {
+	let t = p(20), { title: n, accounts: r, failed: i, line: o, signOut: u, confirm: d, children: f } = e, g;
+	t[0] !== d || t[1] !== u ? (g = async (e) => (!d || await d(e)) && u(e), t[0] = d, t[1] = u, t[2] = g) : g = t[2];
+	let _ = g, v;
+	t[3] === n ? v = t[4] : (v = /* @__PURE__ */ m("h2", {
+		className: "text-sm font-medium text-muted-foreground",
+		children: n
+	}), t[3] = n, t[4] = v);
+	let y;
+	if (t[5] !== r || t[6] !== i || t[7] !== o || t[8] !== _) {
+		let e;
+		t[10] !== i || t[11] !== o || t[12] !== _ ? (e = (e, t) => {
+			let n = i[e.account] ? {
+				text: i[e.account],
+				warn: !0
+			} : o(e, t);
+			return /* @__PURE__ */ m(l, {
+				title: e.account,
+				sub: n && (n.warn ? /* @__PURE__ */ h("span", {
+					className: "inline-flex items-center gap-1 text-warning",
+					children: [/* @__PURE__ */ m(s, { name: "warning-circle-fill" }), n.text]
+				}) : n.text),
+				trailing: /* @__PURE__ */ m(a, {
+					variant: "ghost",
+					size: "sm",
+					className: "text-destructive hover:text-destructive",
+					onClick: () => _(e),
+					children: "Sign Out"
+				})
+			}, e.account);
+		}, t[10] = i, t[11] = o, t[12] = _, t[13] = e) : e = t[13], y = r.map(e), t[5] = r, t[6] = i, t[7] = o, t[8] = _, t[9] = y;
+	} else y = t[9];
+	let b;
+	t[14] === y ? b = t[15] : (b = /* @__PURE__ */ m(c, { children: y }), t[14] = y, t[15] = b);
+	let x;
+	return t[16] !== f || t[17] !== v || t[18] !== b ? (x = /* @__PURE__ */ h("section", {
+		className: "flex flex-col gap-2",
+		children: [
+			v,
+			b,
+			f
+		]
+	}), t[16] = f, t[17] = v, t[18] = b, t[19] = x) : x = t[19], x;
+}
+function y(e) {
+	let t = p(6), { problem: n, retry: r } = e, i;
+	t[0] === r ? i = t[1] : (i = {
+		label: "Try Again",
+		run: r
+	}, t[0] = r, t[1] = i);
+	let a;
+	return t[2] !== n.next || t[3] !== n.title || t[4] !== i ? (a = /* @__PURE__ */ m(u, {
+		title: n.title,
+		text: n.next,
+		action: i
+	}), t[2] = n.next, t[3] = n.title, t[4] = i, t[5] = a) : a = t[5], a;
+}
+function b({ run: e, children: t, ...n }) {
+	let [i, o] = r(!1);
+	return /* @__PURE__ */ h(a, {
+		...n,
+		disabled: i || n.disabled,
+		onClick: async () => {
+			o(!0);
+			try {
+				await e();
+			} finally {
+				o(!1);
+			}
+		},
+		children: [i && /* @__PURE__ */ m(f, {}), t]
+	});
+}
+function x(e) {
+	let n = p(4), { rows: i } = e, a = i === void 0 ? 2 : i, [o, s] = r(!1), c, l;
+	if (n[0] === Symbol.for("react.memo_cache_sentinel") ? (c = () => {
+		let e = setTimeout(() => s(!0), 100);
+		return () => clearTimeout(e);
+	}, l = [], n[0] = c, n[1] = l) : (c = n[0], l = n[1]), t(c, l), !o) return null;
+	let u;
+	return n[2] === a ? u = n[3] : (u = /* @__PURE__ */ m("div", {
+		className: "flex flex-col gap-2",
+		children: Array.from({ length: a }, S)
+	}), n[2] = a, n[3] = u), u;
+}
+function S(e, t) {
+	return /* @__PURE__ */ m(d, { className: "h-14 w-full max-w-2xl" }, t);
+}
+function C(e) {
+	let t = p(3), { children: n } = e, r;
+	t[0] === Symbol.for("react.memo_cache_sentinel") ? (r = /* @__PURE__ */ m(f, {}), t[0] = r) : r = t[0];
+	let i;
+	return t[1] === n ? i = t[2] : (i = /* @__PURE__ */ h("p", {
+		className: "flex items-center gap-2 text-sm text-muted-foreground",
+		children: [r, n]
+	}), t[1] = n, t[2] = i), i;
+}
+function w(e) {
+	let t = p(2), { children: n } = e, r;
+	return t[0] === n ? r = t[1] : (r = /* @__PURE__ */ m("p", {
+		className: "text-sm text-muted-foreground",
+		children: n
+	}), t[0] = n, t[1] = r), r;
+}
+// ../../../../../.t3/worktrees/the-one-app/t3-5444e590/apps/docs/screens/settings.jsx
+var T = "Google Docs", E = "Sign in to Google, and your agents can read your documents and, when you ask, write in them.";
+function D() {
+	let { accounts: e, problem: i, retry: a, failed: s, signOut: d, reload: f } = _(), [p, S] = r(null), [D, O] = r(!1), [k, A] = r(null), j = () => (O(!1), S(null));
+	async function M(e) {
+		let t;
+		try {
+			t = (await one.call("sign_in", e ? { account: e } : {})).url;
+		} catch (t) {
+			if (/No Google sign-in/.test(t.message) && one.vault) try {
+				if (await one.vault("client")) return M(e);
+			} catch (e) {
+				t = e;
+			}
+			let n = /Ask (.+?) to set up (.+?)(?::|$)/.exec(t.message);
+			return n ? A({
+				title: n[2] + " isn't set up",
+				text: "Ask " + n[1] + " to set it up. It's done once for everyone."
+			}) : S({
+				why: g(t),
+				retry: () => M(e)
+			});
+		}
+		O(!0), S({ link: t });
+	}
+	async function N(e) {
+		O(!0), S({ finishing: !0 });
+		try {
+			let t = await one.call("finish_sign_in", { code: e });
+			if (t?.signed_in === !1) throw Error(t.why);
+		} catch (e) {
+			return /no sign-in is waiting/.test(e.message) ? (j(), f()) : S({
+				why: g(e),
+				retry: () => M()
+			});
+		}
+		j(), f();
+	}
+	t(() => {
+		one.params.back ? N(one.params.back) : one.params.add && M();
+	}, []);
+	let P = n(null), F = e && JSON.stringify(e);
+	if (t(() => {
+		P.current !== null && F !== P.current && p?.link && j(), F !== null && (P.current = F);
+	}, [F]), i && !e) return /* @__PURE__ */ m(y, {
+		problem: i,
+		retry: a
+	});
+	if (!e) return /* @__PURE__ */ m(x, {});
+	let I = k ? [] : e.filter((e) => !e.ok);
+	return /* @__PURE__ */ h("div", {
+		className: "flex flex-col gap-6",
+		children: [
+			k && /* @__PURE__ */ m(u, {
+				warn: !0,
+				title: k.title,
+				text: k.text
+			}),
+			!e.length && !k && !D && /* @__PURE__ */ m(o, {
+				className: "mx-auto max-w-md",
+				action: {
+					label: "Sign In to Google",
+					run: () => M()
+				},
+				children: E
+			}),
+			I.map((e) => /* @__PURE__ */ m(u, {
+				warn: !0,
+				title: e.account + " needs signing in",
+				text: one.plain(e.why || "Needs signing in again").title.replace(/^Needs signing in again\.$/, `Sign in to Google again to let ${T} in.`),
+				action: {
+					label: "Sign In",
+					run: () => M(e.account)
+				}
+			}, e.account)),
+			e.length > 0 && /* @__PURE__ */ m(v, {
+				title: "Accounts",
+				accounts: e,
+				failed: s,
+				signOut: d,
+				line: (e, t) => e.ok ? t ? null : { text: "Used first" } : {
+					text: "Sign in again",
+					warn: !0
+				},
+				children: !k && /* @__PURE__ */ m(b, {
+					variant: "secondary",
+					className: "self-start",
+					run: () => M(),
+					children: "Add Account"
+				})
+			}),
+			p?.link && /* @__PURE__ */ h("section", {
+				className: "flex flex-col gap-2",
+				children: [
+					/* @__PURE__ */ m("h2", {
+						className: "text-sm font-medium text-muted-foreground",
+						children: "Sign In"
+					}),
+					/* @__PURE__ */ m(c, { children: /* @__PURE__ */ m(l, {
+						title: "Sign in to Google",
+						sub: `and allow ${T}`,
+						onClick: () => one.link(p.link)
+					}) }),
+					/* @__PURE__ */ m(w, { children: "Google brings you back here when you're done." })
+				]
+			}),
+			p?.finishing && /* @__PURE__ */ m(C, { children: "Signing In" }),
+			p?.why && /* @__PURE__ */ m(u, {
+				title: p.why,
+				action: {
+					label: "Try Again",
+					run: p.retry
+				}
+			})
+		]
+	});
+}
+i(document.getElementById("root")).render(/* @__PURE__ */ m(D, {}));
+</script>
