@@ -1266,8 +1266,12 @@ fn switch_gate(gate: &Value, name: &dyn Fn(&str) -> String) {
     if gate.is_null() {
         return;
     }
-    // With its whole key, which an admin gives to skip it.
-    let device = |d: &Value| format!("{} ({}'s, {})", d["name"].as_str().unwrap_or(&d["key"].as_str().unwrap_or("")[..8]), name(d["user"].as_str().unwrap_or("")), d["key"].as_str().unwrap_or(""));
+    // With its whole key, which an admin gives to skip it, and whose it is: the serverless node is no one's.
+    let device = |d: &Value| {
+        let key = d["key"].as_str().unwrap_or("");
+        let whose = d["user"].as_str().map(|u| format!("{}'s, ", name(u))).unwrap_or_default();
+        format!("{} ({whose}{key})", d["name"].as_str().unwrap_or(&key[..8.min(key.len())]))
+    };
     let switch = if gate["frozen"] == true { "switched: the scope database is the truth" } else if gate["switch"] == true { "on once every device reads it" } else { "off in this build" };
     println!("\nSwitch to the scope database ({switch})");
     if gate["frozen"] == true {
