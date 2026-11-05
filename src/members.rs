@@ -202,14 +202,26 @@ pub struct Members {
     /// The install's recovery keys before this one, which the relay lets in no more.
     pub recovery_was: Vec<Key>,
     /// Whether an admin's own device said the gate to the scope database is open (`GATE`), before the log's freeze:
-    /// only a freeze of the log from there on counts (`database::steps::claimed`).
+    /// only a freeze of the log from there on counts (`database::steps::claimed`). Once replayed, only if one who's
+    /// still an admin did, so a device of someone demoted can't open it with an entry that sorts before their demotion.
     pub gate: bool,
+    /// Who opened the gate, each from an admin's own device as it sorts.
+    gates: BTreeSet<String>,
     /// Where each endpoint's entries stop counting, by (endpoint, log): the first seq that doesn't, wherever it sorts.
     /// A removed device's in `global` after the last its remover had seen (`remove`'s `seq`), and a device's in a log
     /// it forked from the fork on (`Store::forks`).
     pub cuts: Cuts,
     /// Devices that forked `global` (two entries at one seq): removed once it's replayed.
-    forked: BTreeSet<Key>,
+    forked: BTreeMap<Key, Fork>,
+    /// How many of each forked device's entries before its fork replay has passed so far.
+    passed: BTreeMap<Key, usize>,
+}
+
+/// Where a device forked `global`: the seq with two entries, and how many of its member entries came before it.
+#[derive(Clone, Copy, Debug, Default)]
+struct Fork {
+    seq: u32,
+    before: usize,
 }
 
 /// Where endpoints' entries stop counting: (endpoint, log) → the first seq that doesn't.
@@ -282,7 +294,11 @@ impl Members {
     /// applies to entries that sort before it too, so where one stops entries that counted, it's replayed again with the
     /// cuts known from the start, until they don't change.
     pub fn replay(root: Option<Hash>, member_entries: &[Entry], forks: &Cuts) -> Members {
-        let forked: BTreeSet<Key> = forks.keys().filter(|(_, log)| log == "global").map(|(k, _)| *k).collect();
+        let forked: BTreeMap<Key, Fork> = forks
+            .iter()
+            .filter(|((_, log), _)| log == "global")
+            .map(|((k, _), seq)| (*k, Fork { seq: *seq, before: member_entries.iter().filter(|e| e.author() == *k && e.seq() < *seq).count() }))
+            .collect();
         let mut known = forks.clone();
         loop {
             let m = Members::replay_with(root, member_entries, &known, &forked);
@@ -293,7 +309,7 @@ impl Members {
     }
 
     /// Replays with cuts known from the start.
-    fn replay_with(root: Option<Hash>, member_entries: &[Entry], cuts: &Cuts, forked: &BTreeSet<Key>) -> Members {
+    fn replay_with(root: Option<Hash>, member_entries: &[Entry], cuts: &Cuts, forked: &BTreeMap<Key, Fork>) -> Members {
         let mut m = Members::with_cuts(root, cuts, forked);
         for e in member_entries {
             m.step(e);
@@ -303,15 +319,15 @@ impl Members {
     }
 
     /// Members before any entry, with the cuts a full replay found, and the devices that forked `global`.
-    fn with_cuts(root: Option<Hash>, cuts: &Cuts, forked: &BTreeSet<Key>) -> Members {
+    fn with_cuts(root: Option<Hash>, cuts: &Cuts, forked: &BTreeMap<Key, Fork>) -> Members {
         Members { root, cuts: cuts.clone(), forked: forked.clone(), ..Default::default() }
     }
 
     /// Once every member entry is replayed: a device that forked `global` is removed, and a recovery key that did is
     /// no recovery key: whoever forked it could fork away its own replacement, so an admin's own device names the
-    /// next (`recovery_lost`).
+    /// next (`recovery_lost`). The gate is open only if someone still an admin opened it.
     pub fn end(&mut self) {
-        for key in &self.forked {
+        for key in self.forked.keys() {
             if let Some(m) = self.machines.get_mut(key) {
                 m.removed = true;
             }
@@ -319,12 +335,17 @@ impl Members {
         if self.recovery_lost() {
             self.recovery_was.extend(self.recovery.take());
         }
+        self.gate = self.gates.iter().any(|u| self.is_admin(u));
     }
 
-    /// Whether the install has no recovery key, or one that forked `global`, which `end` takes away: only then does
-    /// an admin's own device name the next.
+    /// Whether the install has no recovery key, or one that forked `global` whose every entry from before its fork
+    /// replay has passed: only then does an admin's own device name the next, and once replayed, `end` takes it away.
+    /// Only those entries of a forked key's count, its handover to the next among them, so no admin's naming that
+    /// sorts before that handover, from a device that hadn't seen it, ever replaces the key it handed over to. Not
+    /// "has the namer seen the fork": a node holds only the first of two entries at one seq, so which it holds, and
+    /// where it sorts, isn't the same on every reader; the entries before it are.
     pub fn recovery_lost(&self) -> bool {
-        self.recovery.is_none_or(|k| self.forked.contains(&k))
+        self.recovery.is_none_or(|k| self.forked.get(&k).is_some_and(|f| self.passed.get(&k).copied().unwrap_or(0) >= f.before))
     }
 
     /// Applies one of `global`'s node entries, if it counts. Returns whether it did.
@@ -338,6 +359,12 @@ impl Members {
 
     /// As `step`, saying why an entry doesn't count.
     pub fn try_step(&mut self, e: &Entry) -> Result<()> {
+        if let Some(f) = self.forked.get(&e.author())
+            && e.log() == "global"
+            && e.seq() < f.seq
+        {
+            *self.passed.entry(e.author()).or_default() += 1;
+        }
         ensure!(e.content.kind == "genesis" || self.counts(e), "that changes nothing: you may not {} that", e.content.kind);
         self.apply(e)
     }
@@ -914,6 +941,7 @@ impl Members {
                 // The gate to the scope database is open: said by an admin's own device in the ceremony that freezes the
                 // log (`Node::switch`), before it. An older device skips it.
                 ensure!(self.is_admin(&w), "admins only");
+                self.gates.insert(w);
                 self.gate = true;
             }
             "app" => {

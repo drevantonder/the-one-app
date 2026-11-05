@@ -287,7 +287,7 @@ pub struct Log {
 }
 
 impl Log {
-    /// Of the install whose genesis is `root`, before its first step.
+    /// Of the install whose genesis is `root`, before its first step; with none, the one its first step holds.
     pub fn new(root: Option<Hash>) -> Log {
         Log { root, ..Default::default() }
     }
@@ -317,6 +317,11 @@ impl Log {
                 self.marks.insert(at, step.clone());
             }
             self.shaped.insert(at, step);
+        }
+        // Read by a device that doesn't know the install yet: its genesis, as the first step holds it, so the epochs
+        // its entries make are worked out from it, not passed over.
+        if self.root.is_none() {
+            self.root = self.read.entries.iter().find(|e| e.content.app == members::APP && e.content.kind == "genesis").map(Entry::hash);
         }
         self.ends.push(self.read.entries.len());
         Ok(())
@@ -1323,8 +1328,13 @@ pub(crate) mod tests {
 
     impl History {
         fn write(&mut self, key: &SigningKey, user: &str, content: Content) -> Entry {
+            self.write_seeing(key, user, content, self.entries.len())
+        }
+
+        /// As `write`, from a device that has read only the first `seen` entries: it follows only those.
+        fn write_seeing(&mut self, key: &SigningKey, user: &str, content: Content, seen: usize) -> Entry {
             let me = key.verifying_key().to_bytes();
-            let previous = self.entries.iter().filter(|e| e.author() != me).map(Entry::hash).collect();
+            let previous = self.entries[..seen].iter().filter(|e| e.author() != me).map(Entry::hash).collect();
             let e = Entry::create(key, Ext { log: "global".into(), time: 0, user: user.into(), epoch: 1, previous }, self.heads.get(&me).copied(), content);
             self.heads.insert(me, e.head());
             self.entries.push(e.clone());
@@ -1442,6 +1452,66 @@ pub(crate) mod tests {
         assert!(h.recovery().contains(&r3.verifying_key().to_bytes()), "and its freeze is looked at");
         let r3s = h.freeze(&r3, ANDRE, 3);
         assert_eq!(h.read(&[r1s, thiefs, r3s]).unwrap().unwrap().at, 3, "R3's is the freeze");
+    }
+
+    /// Where `e` sorts among `entries` in replay order.
+    fn place(entries: &[Entry], e: &Entry) -> usize {
+        crate::entry::causal(entries.to_vec(), &Default::default()).iter().position(|o| o.hash() == e.hash()).unwrap()
+    }
+
+    /// R1 hands over to R2, and forks only after, so its handover counts. Bob's laptop, idle since before it, names KA
+    /// in an entry that sorts before the handover: R1 hadn't yet passed its last entry before its fork there, so it
+    /// counts for nothing, R2 stays the recovery key, and KA freezes nothing.
+    #[test]
+    fn a_key_that_forked_after_its_handover_lets_no_one_name_the_next_before_it() {
+        let (mut h, _, laptop, r1) = two_admins();
+        let (r2, thief, ka) = (SigningKey::from_bytes(&[8; 32]), SigningKey::from_bytes(&[6; 32]), SigningKey::from_bytes(&[4; 32]));
+        let handover = h.write(&r1, ANDRE, members::node("recovery", json!({ "key": key_of(&r2) })));
+        h.write(&r1, ANDRE, members::node("recovery", json!({ "key": key_of(&thief) })));
+        h.fork(&r1, ANDRE, members::node("recovery", json!({ "key": key_of(&ka) })));
+        // Bob's laptop had read Andre's first two entries only.
+        let named = h.write_seeing(&laptop, BOB, members::node("recovery", json!({ "key": key_of(&ka) })), 2);
+        assert!(place(&h.entries, &named) < place(&h.entries, &handover), "it sorts before the handover");
+        let m = members_of(Some(h.root()), &h.entries);
+        assert_eq!(m.recovery, Some(r2.verifying_key().to_bytes()), "R2 is the recovery key");
+        let kas = h.freeze(&ka, BOB, 1);
+        let r2s = h.freeze(&r2, ANDRE, 2);
+        assert_eq!(h.read(&[kas, r2s]).unwrap().unwrap().at, 2, "R2's is the freeze");
+    }
+
+    /// R1 forks having handed over to no one: an admin's naming that sorts before R1's last entry before its fork
+    /// counts for nothing, and one after it, from a device that has read the fork, names R3.
+    #[test]
+    fn an_admin_names_the_next_only_after_the_forked_key_s_last_entry_before_its_fork() {
+        let (mut h, mac, laptop, r1) = two_admins();
+        let (thief, ka, r3) = (SigningKey::from_bytes(&[6; 32]), SigningKey::from_bytes(&[4; 32]), SigningKey::from_bytes(&[5; 32]));
+        // R1's first: one that changes nothing (its "new" key is a device's).
+        let first = h.write(&r1, ANDRE, members::node("recovery", json!({ "key": key_of(&mac) })));
+        h.write(&r1, ANDRE, members::node("recovery", json!({ "key": key_of(&thief) })));
+        h.fork(&r1, ANDRE, members::node("recovery", json!({ "key": key_of(&thief) })));
+        let early = h.write_seeing(&laptop, BOB, members::node("recovery", json!({ "key": key_of(&ka) })), 2);
+        assert!(place(&h.entries, &early) < place(&h.entries, &first));
+        let m = members_of(Some(h.root()), &h.entries);
+        assert_eq!(m.recovery, None, "not KA: R1 is taken away, and no one named the next");
+        h.write(&mac, ANDRE, members::node("recovery", json!({ "key": key_of(&r3) })));
+        assert_eq!(members_of(Some(h.root()), &h.entries).recovery, Some(r3.verifying_key().to_bytes()), "an admin who read the fork names R3");
+    }
+
+    /// Bob, an admin when his laptop last read the log, opens the gate in an entry that sorts before Andre demotes
+    /// him: once replayed, he's no admin, so the gate isn't open, and the recovery key's freeze counts for nothing.
+    #[test]
+    fn a_gate_from_someone_demoted_opens_nothing() {
+        let (mut h, mac, laptop, r1) = before_the_gate();
+        h.write(&mac, ANDRE, members::setting("name", Some("x")));
+        let demoted = h.write(&mac, ANDRE, members::role(BOB, Role::Member));
+        let gate = h.write_seeing(&laptop, BOB, members::gate(), 2);
+        assert!(place(&h.entries, &gate) < place(&h.entries, &demoted), "it sorts before his demotion");
+        assert!(!members_of(Some(h.root()), &h.entries).gate);
+        let early = h.freeze(&r1, ANDRE, 1);
+        assert!(h.read(std::slice::from_ref(&early)).unwrap().is_none());
+        h.write(&mac, ANDRE, members::gate());
+        let later = h.freeze(&r1, ANDRE, 2);
+        assert_eq!(h.read(&[early, later]).unwrap().unwrap().at, 2, "an admin's gate opens it");
     }
 
     /// Once frozen, with no recovery key, the scope database keeps the same: an admin's own device names the next, and
@@ -1692,6 +1762,8 @@ pub(crate) mod tests {
             assert_eq!(names(&late, 4), names(&early, 4), "the same steps, whenever they're read");
             let whole = log_to(&bucket, &after, Some(h.root()), 10).await.unwrap();
             assert_eq!(names(&whole, whole.last()), vec!["Ours", "After"], "and one under epoch 2 once it's made");
+            let new = log_to(&bucket, &after, None, 10).await.unwrap();
+            assert_eq!(names(&new, new.last()), names(&whole, whole.last()), "by a device that doesn't know the install yet too");
             let freeze = Freeze { at: 1, hash: String::new(), logs: [("global".to_string(), 5), (user.to_string(), 3)].into() };
             let ns = |entries: Vec<Entry>| entries.iter().map(|e| e.content.data["n"].as_u64().unwrap()).collect::<Vec<_>>();
             let early = anchor_entries(&bucket, &[(1, kx1)].into(), &freeze, Some(h.root()), &whole, &user).await.unwrap();
