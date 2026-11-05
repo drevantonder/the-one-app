@@ -27,6 +27,13 @@
 // own devices recorded. Refusing a request forgets its proof too. A try install's kernel signs its own ID token, with
 // nothing else to show.
 //
+// Only a device that signed in itself is let in by its sign-in: a sign-in finished from a link opened on another device
+// (the CLI's sign-in link, or any link sent to the person) could have been started by anyone, who'd then hold the token
+// it gave. Auth tells them apart by the client whose token asks to join: one whose every sign-in comes back to the
+// device it was made on (the web client's page, the native apps' `<cli>://signed-in/` or loopback) signed in itself;
+// any other's (the sign-in code's page, a site) came back elsewhere, and its proof is passed on as `{ by_link: proof }`,
+// which the person's devices approve only by a tap, and older ones read as nothing.
+//
 // What an endpoint signs (`signedRequest` in shared/crypto.js, domain `one/auth`) names its route (`route: "POST
 // /api/auth/invites"`), is taken once, and counts only from one of the install's endpoints, as the relay's list says
 // (`RELAY.allowed(key)`), an admin's for what only admins do. A POST's body is the signed request; a GET's or DELETE's
@@ -162,6 +169,8 @@ export class Auth extends DurableObject {
     if (!columns.includes("genesis")) sql.exec("alter table requests add column genesis text");
     if (!columns.includes("place")) sql.exec("alter table requests add column place text");
     if (!columns.includes("device")) sql.exec("alter table requests add column device text");
+    // Whether its sign-in was finished from a link opened elsewhere (`signsInHere`).
+    if (!columns.includes("by_link")) sql.exec("alter table requests add column by_link integer");
     // Services asked to join here before oned listed them itself.
     for (const old of ["services", "enrollments", "service_requests", "service_asks"]) sql.exec(`drop table if exists ${old}`);
     // The people who sign in only with a passkey: admins.
@@ -383,14 +392,22 @@ export class Auth extends DurableObject {
 
   /// Someone signed in: by a session here, or an access token auth signed. → their user id, or null.
   async person(request) {
+    return (await this.asker(request))?.user || null;
+  }
+
+  /// Who's asking, signed in: `{ user, here }`, `here` whether they signed in on the device asking, as a session here
+  /// is (it's this browser's) and a token is of a client that `signsInHere`. → null if no one.
+  async asker(request) {
     const token = bearer(request);
     if (token) {
       const origin = new URL(this.env.ADDRESS).origin;
       const jwks = await (await this.auth.handler(new Request(`${origin}/api/auth/jwks`))).json();
       const claims = await verify(token, jwks, `${origin}/api/auth`).catch((err) => refuse(401, `That access token won't do: ${err.message}.`));
-      return claims.sub;
+      const client = await this.client(String(claims.azp || claims.client_id || "")).catch(() => null);
+      return { user: claims.sub, here: !!client && this.signsInHere(client) };
     }
-    return (await this.auth.api.getSession({ headers: request.headers }))?.user.id || null;
+    const user = (await this.auth.api.getSession({ headers: request.headers }))?.user.id;
+    return user ? { user, here: true } : null;
   }
 
   /// An invite, made by an admin's device: `{ id, name, user, email?, until }`, `id` the sha256 (hex) of the secret
@@ -508,7 +525,7 @@ export class Auth extends DurableObject {
   /// inviting admin's device to check, and for a native app, the device it's on (64 hex). → until when it waits.
   async ask(request) {
     const body = await request.json().catch(() => refuse(400, "the body isn't JSON"));
-    const user = (await this.person(request)) || refuse(401, "Sign in first.");
+    const { user, here } = (await this.asker(request)) || refuse(401, "Sign in first.");
     const { key, seal, name, proof, device } = body;
     if (!KEY.test(key || "") || !KEY.test(seal || "")) refuse(400, "key and seal are endpoint keys, 64 hex characters each");
     if (typeof name !== "string" || !name.trim() || name.length > 64) refuse(400, "give the device's name, up to 64 characters");
@@ -528,7 +545,7 @@ export class Auth extends DurableObject {
     const made = Date.now();
     // Where it asked from, as Cloudflare places it: its city, shown beside its code.
     const place = typeof request.cf?.city === "string" ? request.cf.city.slice(0, 64) : null;
-    sql.exec("insert or replace into requests (key, seal, name, user, proof, invite, made, approved, place, device) values (?, ?, ?, ?, ?, ?, ?, null, ?, ?)", key, seal, name.trim(), user, proof ?? null, invite?.id ?? null, made, place, device ?? null);
+    sql.exec("insert or replace into requests (key, seal, name, user, proof, invite, made, approved, place, device, by_link) values (?, ?, ?, ?, ?, ?, ?, null, ?, ?, ?)", key, seal, name.trim(), user, proof ?? null, invite?.id ?? null, made, place, device ?? null, here ? null : 1);
     return { until: made + REQUEST };
   }
 
@@ -538,7 +555,8 @@ export class Auth extends DurableObject {
     return rows.map((r) => {
       const person = sql.exec("select name from user where id = ?", r.user).toArray()[0]?.name || "";
       const [signed] = sql.exec("select proof from proofs where key = ? and user = ?", r.key, r.user).toArray();
-      return { key: r.key, seal: r.seal, name: r.name, user: r.user, person, ...(r.proof ? { proof: r.proof } : {}), ...(signed ? { sign_in: JSON.parse(signed.proof) } : {}), ...(r.approved ? { approved: true } : {}), ...(r.genesis ? { genesis: r.genesis } : {}), ...(r.place ? { place: r.place } : {}), ...(r.device ? { device: r.device } : {}), made: r.made, until: (r.approved || r.made) + REQUEST };
+      const signIn = signed && (r.by_link ? { by_link: JSON.parse(signed.proof) } : JSON.parse(signed.proof));
+      return { key: r.key, seal: r.seal, name: r.name, user: r.user, person, ...(r.proof ? { proof: r.proof } : {}), ...(signIn ? { sign_in: signIn } : {}), ...(r.approved ? { approved: true } : {}), ...(r.genesis ? { genesis: r.genesis } : {}), ...(r.place ? { place: r.place } : {}), ...(r.device ? { device: r.device } : {}), made: r.made, until: (r.approved || r.made) + REQUEST };
     });
   }
 
@@ -602,6 +620,17 @@ export class Auth extends DurableObject {
     const address = JSON.parse(this.env.RESOURCES || "[]")[0] || this.env.ADDRESS;
     const client = clientId && (await this.client(String(clientId)).catch(() => null));
     return client && this.firstParty(client) ? address : `${address}/mcp`;
+  }
+
+  /// Whether a client's every sign-in comes back to the device it was made on: the web client's page at the install's
+  /// address (in the browser that signed in), an app's own link scheme or loopback. Not the sign-in code's page, where
+  /// a sign-in finished in any browser is taken by whichever device made the code, nor any site.
+  signsInHere(client) {
+    const uris = typeof client.redirectUris === "string" ? JSON.parse(client.redirectUris) : client.redirectUris || [];
+    const origin = new URL(this.env.ADDRESS).origin;
+    // The install's own address is on loopback too where it's tried (`one try`), so its pages are told apart first.
+    const here = (u) => (URL.canParse(u) && new URL(u).origin === origin ? u === `${origin}/callback` : goesTo(u, origin) === ON_DEVICE);
+    return uris.length > 0 && uris.every(here);
   }
 
   /// Whether a client is one of the install's own apps, by where its sign-ins come back: the web client's page, the

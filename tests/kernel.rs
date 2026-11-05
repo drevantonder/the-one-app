@@ -445,6 +445,69 @@ fn a_sign_in_for_a_device_names_it_and_auth_passes_it_on() {
     assert_eq!(url_query(out["url"].as_str().unwrap()).get("nonce"), Some(&sign_in_proof::nonce(&GENESIS, &device)), "Google is asked for an ID token naming the device in this install");
 }
 
+/// A device is let in by its sign-in only when it signed in itself: one whose sign-in was finished from a link opened
+/// elsewhere (the CLI's sign-in code page, or a site that sent the person a link) could have been started by whoever
+/// sent it, who'd hold the token it gave. Auth passes that one's proof on as `by_link`, which records what it signed in
+/// with when the person taps Approve but lets nothing in by itself; a release before it reads it as nothing.
+#[test]
+fn a_sign_in_finished_from_a_link_lets_its_device_in_only_by_a_tap() {
+    use one::sign_in_proof::{self, Proof};
+    use sha2::Digest;
+    let (admin, admin_hex) = endpoint();
+    let k = Kernel::for_devices(vec![admin_hex]);
+    let (secret, _) = invited(&k, &admin, "Andre", None);
+    let passkey = k.passkey();
+    let mut first = k.browser();
+    let (_, options, _) = first.get(&format!("/api/auth/passkey/generate-register-options?context={secret}"));
+    assert_eq!(first.post("/api/auth/passkey/verify-registration", json!({ "response": passkey.create(&options), "createSession": true })).0, 200);
+    let install = sign_in_proof::Install::new(&k.address, GENESIS, None);
+    let enc = |s: &str| s.bytes().map(|b| if b.is_ascii_alphanumeric() || b"-._~".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") }).collect::<String>();
+    // Signs in with the passkey for a new device, through a client coming back to `back`, and asks to join with the
+    // token it gave: → what its request carries.
+    let carried = |back: &str| -> Value {
+        let device = one::keys::Endpoint::of(&ed25519_dalek::SigningKey::from_bytes(&rand::random()));
+        let (key, join) = (data_encoding::HEXLOWER.encode(&device.key), format!("{}{}", data_encoding::HEXLOWER.encode(&device.key), data_encoding::HEXLOWER.encode(&device.seal)));
+        let mut b = k.browser();
+        let redirect = format!("{}{back}", k.address);
+        let (status, client) = b.post("/api/auth/oauth2/register", json!({ "client_name": "A client", "redirect_uris": [redirect], "token_endpoint_auth_method": "none", "grant_types": ["authorization_code"], "response_types": ["code"] }));
+        assert_eq!(status, 201, "{client}");
+        let client = client["client_id"].as_str().unwrap().to_string();
+        let verifier = B64U.encode(&rand::random::<[u8; 32]>());
+        let challenge = B64U.encode(&sha2::Sha256::digest(verifier.as_bytes()));
+        let query = format!("response_type=code&client_id={client}&redirect_uri={}&scope=openid&state={}&code_challenge={challenge}&code_challenge_method=S256&join={join}", enc(&redirect), "s".repeat(32));
+        let (_, _, page) = b.get(&format!("/api/auth/oauth2/authorize?{query}"));
+        let oauth_query = page.expect("the authorization goes to the sign-in page").split_once('?').unwrap().1.to_string();
+        let (_, options, _) = b.get(&format!("/api/auth/passkey/generate-authenticate-options?join={join}"));
+        assert_eq!(b.post("/api/auth/passkey/verify-authentication", json!({ "response": passkey.get(&options) })).0, 200);
+        let (status, out) = b.post("/sign-in/accept", json!({ "oauth_query": oauth_query, "passkey": true }));
+        assert_eq!(status, 200, "{out}");
+        let code = url_query(out["url"].as_str().unwrap())["code"].clone();
+        let (status, out, _) = b.send("POST", "/api/auth/oauth2/token", None, Some(&[("grant_type", "authorization_code"), ("code", &code), ("redirect_uri", &redirect), ("client_id", &client), ("code_verifier", &verifier)]));
+        assert_eq!(status, 200, "{out}");
+        let token = out["access_token"].as_str().unwrap().to_string();
+        let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).build().into();
+        let resp = agent.post(format!("{}/api/auth/devices/requests", k.address)).header("authorization", format!("Bearer {token}")).send_json(json!({ "key": key, "seal": data_encoding::HEXLOWER.encode(&device.seal), "name": "MacBook Pro" })).unwrap();
+        assert_eq!(resp.status(), 200);
+        let mut resp = agent.get(format!("{}/api/auth/devices/requests/{key}", k.address)).header("authorization", format!("Bearer {token}")).call().unwrap();
+        let sign_in = resp.body_mut().read_json::<Value>().unwrap()["sign_in"].clone();
+        // What the person's devices then do with it, with the passkey recorded as theirs.
+        let proof: Proof = serde_json::from_value(sign_in.clone()).expect("a proof");
+        let account = sign_in_proof::check(&proof, &device, &install, None, now()).expect("it checks, to be recorded as it's approved by a tap");
+        let vouched = sign_in_proof::vouches(&proof, &device, &install, None, &[account], now());
+        json!({ "sign_in": sign_in, "lets_in": vouched.is_ok() })
+    };
+    // The web client signs in in the browser that asks, and is let in by it.
+    let here = carried("/callback");
+    assert_eq!(here["lets_in"], true, "{here}");
+    assert!(here["sign_in"]["by_link"].is_null());
+    // The CLI's sign-in link comes back to the sign-in code page, from any browser: it waits for a tap.
+    let linked = carried("/sign-in/code/done");
+    assert_eq!(linked["lets_in"], false, "{linked}");
+    assert!(linked["sign_in"]["by_link"]["passkey"].is_object(), "{linked}");
+    // As a site that sent the person a link does.
+    assert_eq!(carried("/elsewhere")["lets_in"], false);
+}
+
 /// The install the test kernels are for: its first entry's hash, as the device deploying them holds it.
 const GENESIS: [u8; 32] = [5; 32];
 

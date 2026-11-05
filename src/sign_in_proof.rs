@@ -13,6 +13,12 @@
 //! Both name the install by its first entry's hash (`Install::genesis`), so a sign-in made for another install, or by
 //! an older release that names none, lets no device in by itself: it's approved by its code.
 //!
+//! Only a device that signed in itself is let in by its sign-in. One whose sign-in was finished from a link opened
+//! elsewhere (the CLI's sign-in link, or any link sent to the person) could be anyone's who sent it, so auth passes its
+//! proof on as `Proof::ByLink`, which is checked to record what it signed in with but never vouches: it's approved by a
+//! tap on its card, which names it and where it is. Auth tells the two apart by where the sign-in that asked came back
+//! to, which phishing can't change; a tampered auth could lie, which is the Cloudflare account's trust, as below.
+//!
 //! What it signs in with (`Account`) is recorded in the `device` entry that lists the device (`sign_in`), so the next
 //! device's proof is checked against the accounts the signed entries record for that person (`vouches`), never against
 //! what auth says. The first is recorded when a person, or for a newcomer the inviting admin, approves a device by its
@@ -114,12 +120,19 @@ pub enum Proof {
     /// A passkey's assertion, each part base64url as WebAuthn's JSON has it, and the public key auth holds for it,
     /// which counts only when a person approves the device by its code.
     Passkey { credential: String, authenticator_data: String, client_data: String, signature: String, public_key: String },
+    /// A sign-in finished from a link opened on another device, not on the device asking: what it shows counts only for
+    /// a device approved by a tap. A release before it reads it as nothing, and so lets that device in only by its code.
+    ByLink(Box<Proof>),
 }
 
 impl Proof {
     /// The issuer an ID token says it's from, unchecked, to find its keys by.
     pub fn issuer(&self) -> Option<String> {
-        let Proof::IdToken(token) = self else { return None };
+        let token = match self {
+            Proof::IdToken(token) => token,
+            Proof::ByLink(proof) => return proof.issuer(),
+            Proof::Passkey { .. } => return None,
+        };
         let claims = token.split('.').nth(1)?;
         let claims: Value = serde_json::from_slice(&B64U.decode(claims.as_bytes()).ok()?).ok()?;
         claims["iss"].as_str().map(str::to_string)
@@ -159,6 +172,7 @@ pub fn check(proof: &Proof, device: &Endpoint, install: &Install, jwks: Option<&
             assertion(proof, device, install, public_key, now)?;
             Ok(Account::Passkey { credential: credential.clone(), public_key: public_key.clone() })
         }
+        Proof::ByLink(proof) => check(proof, device, install, jwks, now),
     }
 }
 
@@ -190,6 +204,7 @@ pub fn vouches(proof: &Proof, device: &Endpoint, install: &Install, jwks: Option
             assertion(proof, device, install, public_key, now)?;
             Ok(Account::Passkey { credential: credential.clone(), public_key: public_key.clone() })
         }
+        Proof::ByLink(_) => bail!("that sign-in was finished from a link opened elsewhere, so it's let in by a tap"),
     }
 }
 
@@ -370,6 +385,13 @@ mod tests {
             assert!(err.contains(why), "{err} says {why}");
         };
         assert!(try_(Provider::claims(&d)).unwrap().same(&theirs()[0]));
+        // The same sign-in finished from a link opened elsewhere lets nothing in by itself, and is recorded as it's
+        // approved by a tap.
+        let linked = Proof::ByLink(Box::new(Proof::IdToken(p.token(Provider::claims(&d)))));
+        let err = vouches(&linked, &d, &ours(), Some(&jwks), &theirs(), NOW).unwrap_err().to_string();
+        assert!(err.contains("from a link"), "{err}");
+        assert!(check(&linked, &d, &ours(), Some(&jwks), NOW).unwrap().same(&theirs()[0]));
+        assert_eq!(linked.issuer().as_deref(), Some(GOOGLE));
         let with = |k: &str, v: Value| {
             let mut c = Provider::claims(&d);
             c[k] = v;
@@ -485,6 +507,8 @@ mod tests {
         refused(pk.assert(&challenge(&GENESIS, &d, NOW), ADDRESS, "evil.example.com", 0x05), &accounts, "another site");
         refused(pk.assert(&challenge(&GENESIS, &d, NOW), ADDRESS, "one.example.com", 0x04), &accounts, "wasn't there");
         refused(ok.clone(), &[], "isn't one they've signed in with");
+        refused(Proof::ByLink(Box::new(ok.clone())), &accounts, "from a link");
+        assert_eq!(check(&Proof::ByLink(Box::new(ok.clone())), &d, &ours(), None, NOW).unwrap(), accounts[0]);
         // Another passkey's key recorded for that credential, as auth might say it has: its signature isn't that key's.
         let other = Passkey::new();
         refused(ok.clone(), &[Account::Passkey { credential: pk.credential.clone(), public_key: other.public_key() }], "signature");
@@ -512,5 +536,8 @@ mod tests {
         assert!(serde_json::from_value::<Account>(json!({ "password": {} })).is_err());
         let p: Proof = serde_json::from_value(json!({ "id_token": "a.b.c" })).unwrap();
         assert_eq!(p, Proof::IdToken("a.b.c".into()));
+        // As auth passes on a sign-in finished from a link.
+        let p: Proof = serde_json::from_value(json!({ "by_link": { "id_token": "a.b.c" } })).unwrap();
+        assert_eq!(p, Proof::ByLink(Box::new(Proof::IdToken("a.b.c".into()))));
     }
 }

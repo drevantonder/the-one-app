@@ -154,7 +154,9 @@ pub fn approve_on_try(started: &Started) -> Result<()> {
     let authorize = went(&agent.get(&started.url).call()?).context("the sign-in code's link went nowhere")?;
     let page = went(&agent.get(to(authorize)).call()?).context("its authorization went nowhere")?;
     let oauth_query = page.split_once('?').map(|(_, q)| q.to_string()).context("its sign-in page had no authorization")?;
-    let mut resp = agent.post(format!("{}/api/auth/try/sign-in", started.address)).header("origin", &started.address).send_json(serde_json::json!({}))?;
+    // For the device its authorization names, as a try install's sign-in page signs in for it.
+    let join = oauth_query.split('&').find_map(|p| p.strip_prefix("join="));
+    let mut resp = agent.post(format!("{}/api/auth/try/sign-in", started.address)).header("origin", &started.address).send_json(serde_json::json!({ "join": join }))?;
     let cookie = resp.headers().get_all("set-cookie").iter().filter_map(|c| c.to_str().ok()?.split(';').next().map(str::to_string)).collect::<Vec<_>>().join("; ");
     if resp.status() != 200 || cookie.is_empty() {
         let out: Value = resp.body_mut().read_json().unwrap_or(Value::Null);
