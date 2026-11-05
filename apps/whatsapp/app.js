@@ -2,6 +2,8 @@
 // The whatsapp service links the phone and keeps its messages, on each device whose owner installed it; this app is
 // what people and agents use, and a connector.
 
+import settings from "./dist/settings.html" with { type: "text" };
+
 /// Runs one of the whatsapp service's operations, wherever it runs for the caller, or on the device `input.device`
 /// names. When none of their devices runs it, says what's needed instead of how the call failed; when a chat isn't
 /// found, where to find it.
@@ -196,118 +198,6 @@ export default {
   },
 
   screens: {
-    settings: {
-      title: "WhatsApp",
-      html: `
-<style>
-  #qr { display: block; width: 220px; height: 220px; margin: 10px auto; background: white; border-radius: 12px; image-rendering: pixelated; }
-  .code { font: 600 24px ui-monospace, monospace; letter-spacing: 2px; text-align: center; margin: 8px 0; }
-</style>
-<div id="list"></div>
-<div id="ask"></div>
-<div id="connect" hidden><div class="list"><label class="row plain" id="on-row" hidden><div class="main">Link on</div><select id="on" aria-label="Link on"></select></label><label class="row plain"><input class="field" id="phone" type="tel" placeholder="Its number, for a code to type instead (optional)" aria-label="Its number"></label></div><div class="actions"><button class="button primary" id="start">Add Account</button></div><div id="err"></div></div>
-<div id="needs" hidden></div>
-<script>
-// Each account is a phone linked to one of your devices, as WhatsApp Desktop is linked.
-const list = document.getElementById("list"), connect = document.getElementById("connect"), form = connect.innerHTML;
-let accounts = [], asked = 0, running = [];
-// Signed out here and maybe not yet on the device, so a redraw meanwhile doesn't bring them back.
-const leaving = new Set();
-function draw(fetch) {
-  return one.render(list, async () => {
-    if (fetch) {
-      const n = ++asked, got = await one.call("accounts");
-      if (n === asked) accounts = got;
-    }
-    const all = accounts.filter((a) => !leaving.has(a.account));
-    if (!all.length) return '<p class="footer">Link WhatsApp, and your agents can read your chats and, when you ask, send.</p>';
-    const needs = all.filter((a) => !a.ok).map((a) => one.problem({ title: a.account + " needs linking again", text: one.plain(a.why || "Needs linking again").title.replace(/^Needs linking again\\.$/, "Link it from the phone again."), warn: true, action: { label: "Link Again", run: () => start() } })).join("");
-    return needs + '<h2 class="section">Accounts</h2><div class="list">' + all.map((a, i) => \`<div class="row plain"><div class="main"><div class="title">\${one.esc(a.account)}</div>\${a.ok ? \`<div class="sub">Linked on \${one.esc(a.device)}\${i ? "" : " · used first"}</div>\` : \`<div class="sub warn">\${one.icon("warning-circle-fill")}Link again</div>\`}</div><button class="button plain" data-out="\${one.esc(a.account)}" data-on="\${one.esc(a.device)}">Sign Out</button></div>\`).join("") + "</div>";
-  }, { skeleton: 1 });
-}
-list.onclick = (e) => {
-  const account = e.target.closest("[data-out]")?.dataset.out, device = e.target.closest("[data-out]")?.dataset.on;
-  if (!account) return;
-  one.confirm("#ask", { title: \`Sign out of \${account}?\`, detail: "This device is unlinked from it, and the messages kept for it are deleted. Linking again needs the phone.",
-    action: "Sign Out", danger: true, run: async () => {
-      leaving.add(account);
-      draw(false);
-      try {
-        await one.call("sign_out", { account, device });
-        accounts = accounts.filter((a) => a.account !== account);
-      } finally {
-        leaving.delete(account);
-        draw(true);
-      }
-    } });
-};
-// With WhatsApp on several of your devices, which one links it: an account may be linked on each.
-function devices() {
-  const row = document.getElementById("on-row");
-  if (!row) return;
-  document.getElementById("on").innerHTML = running.map((d) => \`<option>\${one.esc(d)}</option>\`).join("");
-  row.hidden = running.length < 2;
-}
-function ready() {
-  connect.innerHTML = form;
-  devices();
-  document.getElementById("start").onclick = (e) => start(e.currentTarget);
-}
-
-async function start(b) {
-  const phone = document.getElementById("phone")?.value.trim() || "";
-  const device = running.length > 1 ? document.getElementById("on")?.value || "" : "";
-  const back = b && one.busy(b, "Asking WhatsApp…");
-  try { await one.call("sign_in", { ...(phone ? { phone } : {}), ...(device ? { device } : {}) }); }
-  catch (err) {
-    back?.();
-    document.getElementById("err").innerHTML = one.problem({ title: one.plain(err).title, action: { label: "Try Again", run: () => start() } });
-    return;
-  }
-  connect.innerHTML = \`<h2 class="section">Link a Device</h2><div class="list"><div class="row plain"><div class="main">On the phone, open WhatsApp › Settings › Linked devices › Link a device.</div></div>
-    <div class="row plain"><div class="main">Scan this code\${phone ? ", or tap Link with phone number instead and type the code under it" : ""}.</div></div></div>
-    <img id="qr" alt=""><div class="code" id="code"></div><p class="footer" id="note">The code changes every 20 seconds. WhatsApp then sends recent chats, which takes a few minutes.</p>\`;
-  watch(device);
-}
-
-// Shows the current codes until the phone links, or the codes run out.
-async function watch(device) {
-  const had = accounts.length;
-  for (let i = 0; i < 90; i++) {
-    const p = await one.call("_pairing", device ? { device } : {}).catch(() => ({}));
-    if (!p.qr) {
-      const now = await one.call("accounts").catch(() => []);
-      if (now.length > had) return draw(true).then(ready);
-      document.getElementById("note").textContent = "The codes ran out before the phone linked.";
-      document.getElementById("qr").hidden = true;
-      return setTimeout(() => draw(true).then(ready), 3000);
-    }
-    document.getElementById("qr").src = p.qr;
-    document.getElementById("code").textContent = p.code || "";
-    await new Promise((r) => setTimeout(r, 2000));
-  }
-  draw(true).then(ready);
-}
-
-document.getElementById("start").onclick = (e) => start(e.currentTarget);
-one.on("changed", () => draw(true));
-// The accounts and whether any device runs WhatsApp come together, so the form shows once, or not at all.
-Promise.all([one.call("_running").catch(() => null), draw(true)]).then(([r]) => {
-  if (r && !r.devices.length) {
-    // None of their devices has it: what to do, on the App Store's WhatsApp page, which says where it can go.
-    const n = document.getElementById("needs");
-    n.innerHTML = one.problem({ title: "WhatsApp isn't on any of your devices yet.", text: "Add it to one in the App Store, then link your phone here.", warn: true,
-      action: { label: "Open App Store", run: () => one.open("app", { app: "whatsapp" }, "apps") } });
-    n.hidden = false;
-    list.innerHTML = "";
-    return;
-  }
-  running = r?.devices || [];
-  devices();
-  connect.hidden = false;
-  if (one.params.add) document.getElementById("phone").focus();
-});
-</script>`,
-    },
+    settings: { title: "WhatsApp", html: settings },
   },
 };

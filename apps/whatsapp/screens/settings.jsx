@@ -1,0 +1,148 @@
+// Settings: each WhatsApp account is a phone linked to one of your devices, as WhatsApp Desktop is linked.
+import { useEffect, useRef, useState } from "react"
+import { createRoot } from "react-dom/client"
+import { Input, List, ListRow, Problem } from "@one/ui"
+import { AccountList, Footer, Step, Trouble, useAccounts, Waiting, Working } from "../lib/accounts.jsx"
+import { Choose } from "../lib/choose.jsx"
+
+const NOTE = "The code changes every 20 seconds. WhatsApp then sends recent chats, which takes a few minutes."
+
+/// Shows the current codes until the phone links, or the codes run out. `done` is told when it's over.
+function Pairing({ phone, device, had, done }) {
+  const [codes, setCodes] = useState({})
+  const [note, setNote] = useState(NOTE)
+  useEffect(() => {
+    let over = false
+    ;(async () => {
+      for (let i = 0; i < 90 && !over; i++) {
+        const p = await one.call("_pairing", device ? { device } : {}).catch(() => ({}))
+        if (over) return
+        if (!p.qr) {
+          const now = await one.call("accounts").catch(() => [])
+          if (now.length > had) return done()
+          setNote("The codes ran out before the phone linked.")
+          setCodes({})
+          return void setTimeout(done, 3000)
+        }
+        setCodes({ qr: p.qr, code: p.code || "" })
+        await new Promise((r) => setTimeout(r, 2000))
+      }
+      if (!over) done()
+    })()
+    return () => void (over = true)
+  }, [])
+  return (
+    <section className="flex flex-col gap-2">
+      <h2 className="text-sm font-medium text-muted-foreground">Link a Device</h2>
+      <List>
+        <Step>On the phone, open WhatsApp › Settings › Linked devices › Link a device.</Step>
+        <Step>{`Scan this code${phone ? ", or tap Link with phone number instead and type the code under it" : ""}.`}</Step>
+      </List>
+      {codes.qr && <img alt="" src={codes.qr} className="mx-auto my-2 block size-[220px] rounded-xl bg-white [image-rendering:pixelated]" />}
+      {codes.code && <p className="text-center font-mono text-2xl font-semibold tracking-widest">{codes.code}</p>}
+      <Footer>{note}</Footer>
+    </section>
+  )
+}
+
+function Settings() {
+  const { accounts, problem, retry, failed, signOut, reload } = useAccounts()
+  // The devices that run WhatsApp, or null until known: the accounts and whether any device runs it come together, so
+  // the form shows once, or not at all.
+  const [running, setRunning] = useState(null)
+  const [phone, setPhone] = useState("")
+  const [on, setOn] = useState("")
+  // What's under way: why linking failed (`why`, with its retry), or the codes it shows (`pairing`).
+  const [step, setStep] = useState(null)
+  // Whether that's not known (the call failed): then the form shows anyway, as when it's known there are some.
+  const [unknown, setUnknown] = useState(false)
+  const field = useRef(null)
+
+  useEffect(() => {
+    one.call("_running").then(
+      (r) => setRunning(r.devices),
+      () => (setUnknown(true), setRunning([])),
+    )
+  }, [])
+  // With WhatsApp on several of your devices, which one links it: an account may be linked on each.
+  const device = running && running.length > 1 ? on || running[0] : ""
+  const ready = !!accounts && !!running
+  useEffect(() => {
+    if (ready && one.params.add) field.current?.focus()
+  }, [ready])
+
+  async function start() {
+    setStep(null)
+    try {
+      await one.call("sign_in", { ...(phone.trim() ? { phone: phone.trim() } : {}), ...(device ? { device } : {}) })
+    } catch (err) {
+      return setStep({ why: one.plain(err).title, retry: start })
+    }
+    setStep({ pairing: { phone: phone.trim(), device, had: accounts.length } })
+  }
+  const paired = () => (setStep(null), reload())
+
+  if (problem && !accounts) return <Trouble problem={problem} retry={retry} />
+  if (!ready) return <Waiting />
+  // None of their devices has it: what to do, on the App Store's WhatsApp page, which says where it can go.
+  if (!running.length && !unknown)
+    return (
+      <Problem
+        warn
+        title="WhatsApp isn't on any of your devices yet."
+        text="Add it to one in the App Store, then link your phone here."
+        action={{ label: "Open App Store", run: () => one.open("app", { app: "whatsapp" }, "apps") }}
+      />
+    )
+
+  const needs = accounts.filter((a) => !a.ok)
+  return (
+    <div className="flex flex-col gap-6">
+      {!accounts.length && <Footer>Link WhatsApp, and your agents can read your chats and, when you ask, send.</Footer>}
+      {needs.map((a) => (
+        <Problem
+          key={a.account}
+          warn
+          title={a.account + " needs linking again"}
+          text={one.plain(a.why || "Needs linking again").title.replace(/^Needs linking again\.$/, "Link it from the phone again.")}
+          action={{ label: "Link Again", run: () => start() }}
+        />
+      ))}
+      {accounts.length > 0 && (
+        <AccountList
+          title="Accounts"
+          accounts={accounts}
+          failed={failed}
+          signOut={(a) => signOut(a, { device: a.device })}
+          confirm={(a) =>
+            one.alert({
+              title: `Sign out of ${a.account}?`,
+              text: "This device is unlinked from it, and the messages kept for it are deleted. Linking again needs the phone.",
+              action: "Sign Out",
+              danger: true,
+            })
+          }
+          line={(a, i) => (a.ok ? { text: `Linked on ${a.device}${i ? "" : " · used first"}` } : { text: "Link again", warn: true })}
+        />
+      )}
+      {step?.pairing ? (
+        <Pairing {...step.pairing} done={paired} />
+      ) : (
+        <section className="flex flex-col gap-2">
+          <List>
+            {running.length > 1 && (
+              <ListRow title="Link on" trailing={<Choose label="Link on" value={device} onChange={setOn} options={running.map((d) => ({ value: d, label: d }))} />} />
+            )}
+            <div className="px-3 py-2.5">
+              <Input ref={field} type="tel" placeholder="Its number, for a code to type instead (optional)" aria-label="Its number" value={phone} onChange={(e) => setPhone(e.target.value)} />
+            </div>
+          </List>
+          {step?.why && <Problem title={step.why} action={{ label: "Try Again", run: step.retry }} />}
+          <Working className="self-start" run={start}>Add Account</Working>
+        </section>
+      )}
+    </div>
+  )
+}
+
+createRoot(document.getElementById("root")).render(<Settings />)

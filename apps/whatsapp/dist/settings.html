@@ -1,0 +1,377 @@
+<meta name="@one/ui">
+<style>/*! tailwindcss v4.3.4 | MIT License | https://tailwindcss.com */
+@layer properties{@supports (((-webkit-hyphens:none)) and (not (margin-trim:block))) or ((-moz-orient:inline) and (not (color:rgb(from red r g b)))){*,:before,:after,::backdrop{--tw-font-weight:initial;--tw-tracking:initial;--tw-outline-style:solid}}}@layer theme,base,components;@layer utilities{.mx-auto{margin-inline:auto}.my-2{margin-block:calc(var(--spacing,.25rem) * 2)}.block{display:block}.flex{display:flex}.inline-flex{display:inline-flex}.size-\[220px\]{width:220px;height:220px}.h-14{height:calc(var(--spacing,.25rem) * 14)}.w-full{width:100%}.max-w-2xl{max-width:var(--container-2xl,42rem)}.flex-col{flex-direction:column}.items-center{align-items:center}.gap-1{gap:var(--spacing,.25rem)}.gap-2{gap:calc(var(--spacing,.25rem) * 2)}.gap-6{gap:calc(var(--spacing,.25rem) * 6)}.self-start{align-self:flex-start}.rounded-xl{border-radius:calc(var(--radius) + 4px)}.bg-white{background-color:var(--color-white,#fff)}.p-4{padding:calc(var(--spacing,.25rem) * 4)}.px-3{padding-inline:calc(var(--spacing,.25rem) * 3)}.py-2{padding-block:calc(var(--spacing,.25rem) * 2)}.py-2\.5{padding-block:calc(var(--spacing,.25rem) * 2.5)}.text-center{text-align:center}.font-mono{font-family:var(--font-mono,ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace)}.text-2xl{font-size:var(--text-2xl,1.5rem);line-height:var(--tw-leading,var(--text-2xl--line-height,calc(2 / 1.5)))}.text-sm{font-size:var(--text-sm,.875rem);line-height:var(--tw-leading,var(--text-sm--line-height,calc(1.25 / .875)))}.font-medium{--tw-font-weight:var(--font-weight-medium,500);font-weight:var(--font-weight-medium,500)}.font-semibold{--tw-font-weight:var(--font-weight-semibold,600);font-weight:var(--font-weight-semibold,600)}.tracking-widest{--tw-tracking:var(--tracking-widest,.1em);letter-spacing:var(--tracking-widest,.1em)}.text-destructive{color:var(--destructive)}.text-muted-foreground{color:var(--muted-foreground)}.text-warning{color:var(--warning)}.outline{outline-style:var(--tw-outline-style);outline-width:1px}.\[image-rendering\:pixelated\]{image-rendering:pixelated}@media (hover:hover){.hover\:text-destructive:hover{color:var(--destructive)}}}@property --tw-font-weight{syntax:"*";inherits:false}@property --tw-tracking{syntax:"*";inherits:false}@property --tw-outline-style{syntax:"*";inherits:false;initial-value:solid}
+/*$vite$:1*/</style>
+<div id="root"></div>
+<script type="module">import { c as e } from "react/compiler-runtime";
+import { useCallback as t, useEffect as n, useRef as r, useState as i } from "react";
+import { createRoot as a } from "react-dom/client";
+import { Button as o, DropdownMenu as s, DropdownMenuContent as c, DropdownMenuRadioGroup as l, DropdownMenuRadioItem as u, DropdownMenuTrigger as d, Icon as f, Input as p, List as m, ListRow as h, Problem as g, Skeleton as _, Spinner as v } from "@one/ui";
+import { jsx as y, jsxs as b } from "react/jsx-runtime";
+// ../../../../../.t3/worktrees/the-one-app/t3-5444e590/apps/whatsapp/lib/accounts.jsx
+var x = (e) => one.plain(e).title.replace(/(\. Try again)?\.$/, "");
+function S() {
+	let [e, a] = i(null), [o, s] = i(null), [c, l] = i([]), [u, d] = i({}), f = r(0), p = r(!1), m = t(() => {
+		let e = ++f.current;
+		return one.call("accounts").then((t) => {
+			e === f.current && (p.current = !0, a(t), s(null));
+		}, (e) => !p.current && s(one.plain(e)));
+	}, []);
+	return n(() => {
+		one.on("changed", m), m();
+	}, [m]), {
+		accounts: e && e.filter((e) => !c.includes(e.account)),
+		problem: o,
+		retry: m,
+		failed: u,
+		signOut: async (e, t = {}) => {
+			let n = e.account;
+			l((e) => [...e, n]), d(({ [n]: e, ...t }) => t);
+			let r = !0;
+			try {
+				await one.call("sign_out", {
+					account: n,
+					...t
+				}), a((e) => e.filter((e) => e.account !== n));
+			} catch (e) {
+				r = !1, d((t) => ({
+					...t,
+					[n]: x(e)
+				}));
+			}
+			l((e) => e.filter((e) => e !== n)), r && m();
+		},
+		reload: m
+	};
+}
+function C(t) {
+	let n = e(20), { title: r, accounts: i, failed: a, line: s, signOut: c, confirm: l, children: u } = t, d;
+	n[0] !== l || n[1] !== c ? (d = async (e) => (!l || await l(e)) && c(e), n[0] = l, n[1] = c, n[2] = d) : d = n[2];
+	let p = d, g;
+	n[3] === r ? g = n[4] : (g = /* @__PURE__ */ y("h2", {
+		className: "text-sm font-medium text-muted-foreground",
+		children: r
+	}), n[3] = r, n[4] = g);
+	let _;
+	if (n[5] !== i || n[6] !== a || n[7] !== s || n[8] !== p) {
+		let e;
+		n[10] !== a || n[11] !== s || n[12] !== p ? (e = (e, t) => {
+			let n = a[e.account] ? {
+				text: a[e.account],
+				warn: !0
+			} : s(e, t);
+			return /* @__PURE__ */ y(h, {
+				title: e.account,
+				sub: n && (n.warn ? /* @__PURE__ */ b("span", {
+					className: "inline-flex items-center gap-1 text-warning",
+					children: [/* @__PURE__ */ y(f, { name: "warning-circle-fill" }), n.text]
+				}) : n.text),
+				trailing: /* @__PURE__ */ y(o, {
+					variant: "ghost",
+					size: "sm",
+					className: "text-destructive hover:text-destructive",
+					onClick: () => p(e),
+					children: "Sign Out"
+				})
+			}, e.account);
+		}, n[10] = a, n[11] = s, n[12] = p, n[13] = e) : e = n[13], _ = i.map(e), n[5] = i, n[6] = a, n[7] = s, n[8] = p, n[9] = _;
+	} else _ = n[9];
+	let v;
+	n[14] === _ ? v = n[15] : (v = /* @__PURE__ */ y(m, { children: _ }), n[14] = _, n[15] = v);
+	let x;
+	return n[16] !== u || n[17] !== g || n[18] !== v ? (x = /* @__PURE__ */ b("section", {
+		className: "flex flex-col gap-2",
+		children: [
+			g,
+			v,
+			u
+		]
+	}), n[16] = u, n[17] = g, n[18] = v, n[19] = x) : x = n[19], x;
+}
+function w(t) {
+	let n = e(6), { problem: r, retry: i } = t, a;
+	n[0] === i ? a = n[1] : (a = {
+		label: "Try Again",
+		run: i
+	}, n[0] = i, n[1] = a);
+	let o;
+	return n[2] !== r.next || n[3] !== r.title || n[4] !== a ? (o = /* @__PURE__ */ y(g, {
+		title: r.title,
+		text: r.next,
+		action: a
+	}), n[2] = r.next, n[3] = r.title, n[4] = a, n[5] = o) : o = n[5], o;
+}
+function T({ run: e, children: t, ...n }) {
+	let [r, a] = i(!1);
+	return /* @__PURE__ */ b(o, {
+		...n,
+		disabled: r || n.disabled,
+		onClick: async () => {
+			a(!0);
+			try {
+				await e();
+			} finally {
+				a(!1);
+			}
+		},
+		children: [r && /* @__PURE__ */ y(v, {}), t]
+	});
+}
+function E(t) {
+	let r = e(4), { rows: a } = t, o = a === void 0 ? 2 : a, [s, c] = i(!1), l, u;
+	if (r[0] === Symbol.for("react.memo_cache_sentinel") ? (l = () => {
+		let e = setTimeout(() => c(!0), 100);
+		return () => clearTimeout(e);
+	}, u = [], r[0] = l, r[1] = u) : (l = r[0], u = r[1]), n(l, u), !s) return null;
+	let d;
+	return r[2] === o ? d = r[3] : (d = /* @__PURE__ */ y("div", {
+		className: "flex flex-col gap-2",
+		children: Array.from({ length: o }, D)
+	}), r[2] = o, r[3] = d), d;
+}
+function D(e, t) {
+	return /* @__PURE__ */ y(_, { className: "h-14 w-full max-w-2xl" }, t);
+}
+function O(t) {
+	let n = e(2), { children: r } = t, i;
+	return n[0] === r ? i = n[1] : (i = /* @__PURE__ */ y("p", {
+		className: "text-sm text-muted-foreground",
+		children: r
+	}), n[0] = r, n[1] = i), i;
+}
+function k(t) {
+	let n = e(2), { children: r } = t, i;
+	return n[0] === r ? i = n[1] : (i = /* @__PURE__ */ y("div", {
+		className: "px-3 py-2.5 text-sm",
+		children: r
+	}), n[0] = r, n[1] = i), i;
+}
+// ../../../../../.t3/worktrees/the-one-app/t3-5444e590/apps/whatsapp/lib/choose.jsx
+function A(t) {
+	let n = e(18), { label: r, options: i, value: a, onChange: u } = t, p;
+	if (n[0] !== i || n[1] !== a) {
+		let e;
+		n[3] === a ? e = n[4] : (e = (e) => e.value === a, n[3] = a, n[4] = e), p = i.find(e), n[0] = i, n[1] = a, n[2] = p;
+	} else p = n[2];
+	let m = p?.label ?? "", h;
+	n[5] === Symbol.for("react.memo_cache_sentinel") ? (h = /* @__PURE__ */ y(f, { name: "caret-down" }), n[5] = h) : h = n[5];
+	let g;
+	n[6] !== r || n[7] !== m ? (g = /* @__PURE__ */ y(d, {
+		asChild: !0,
+		children: /* @__PURE__ */ b(o, {
+			variant: "outline",
+			size: "sm",
+			"aria-label": r,
+			children: [m, h]
+		})
+	}), n[6] = r, n[7] = m, n[8] = g) : g = n[8];
+	let _;
+	n[9] === i ? _ = n[10] : (_ = i.map(j), n[9] = i, n[10] = _);
+	let v;
+	n[11] !== u || n[12] !== _ || n[13] !== a ? (v = /* @__PURE__ */ y(c, {
+		align: "end",
+		children: /* @__PURE__ */ y(l, {
+			value: a,
+			onValueChange: u,
+			children: _
+		})
+	}), n[11] = u, n[12] = _, n[13] = a, n[14] = v) : v = n[14];
+	let x;
+	return n[15] !== g || n[16] !== v ? (x = /* @__PURE__ */ b(s, { children: [g, v] }), n[15] = g, n[16] = v, n[17] = x) : x = n[17], x;
+}
+function j(e) {
+	return /* @__PURE__ */ y(u, {
+		value: e.value,
+		children: e.label
+	}, e.value);
+}
+// ../../../../../.t3/worktrees/the-one-app/t3-5444e590/apps/whatsapp/screens/settings.jsx
+var M = "The code changes every 20 seconds. WhatsApp then sends recent chats, which takes a few minutes.";
+function N(t) {
+	let r = e(21), { phone: a, device: o, had: s, done: c } = t, l;
+	r[0] === Symbol.for("react.memo_cache_sentinel") ? (l = {}, r[0] = l) : l = r[0];
+	let [u, d] = i(l), [f, p] = i(M), h;
+	r[1] !== o || r[2] !== c || r[3] !== s ? (h = () => {
+		let e = !1;
+		return (async () => {
+			for (let t = 0; t < 90 && !e; t++) {
+				let t = await one.call("_pairing", o ? { device: o } : {}).catch(I);
+				if (e) return;
+				if (!t.qr) {
+					if ((await one.call("accounts").catch(F)).length > s) return c();
+					p("The codes ran out before the phone linked."), d({}), setTimeout(c, 3e3);
+					return;
+				}
+				d({
+					qr: t.qr,
+					code: t.code || ""
+				}), await new Promise(P);
+			}
+			e || c();
+		})(), () => void (e = !0);
+	}, r[1] = o, r[2] = c, r[3] = s, r[4] = h) : h = r[4];
+	let g;
+	r[5] === Symbol.for("react.memo_cache_sentinel") ? (g = [], r[5] = g) : g = r[5], n(h, g);
+	let _;
+	r[6] === Symbol.for("react.memo_cache_sentinel") ? (_ = /* @__PURE__ */ y("h2", {
+		className: "text-sm font-medium text-muted-foreground",
+		children: "Link a Device"
+	}), r[6] = _) : _ = r[6];
+	let v;
+	r[7] === Symbol.for("react.memo_cache_sentinel") ? (v = /* @__PURE__ */ y(k, { children: "On the phone, open WhatsApp › Settings › Linked devices › Link a device." }), r[7] = v) : v = r[7];
+	let x = `Scan this code${a ? ", or tap Link with phone number instead and type the code under it" : ""}.`, S;
+	r[8] === x ? S = r[9] : (S = /* @__PURE__ */ b(m, { children: [v, /* @__PURE__ */ y(k, { children: x })] }), r[8] = x, r[9] = S);
+	let C;
+	r[10] === u.qr ? C = r[11] : (C = u.qr && /* @__PURE__ */ y("img", {
+		alt: "",
+		src: u.qr,
+		className: "mx-auto my-2 block size-[220px] rounded-xl bg-white [image-rendering:pixelated]"
+	}), r[10] = u.qr, r[11] = C);
+	let w;
+	r[12] === u.code ? w = r[13] : (w = u.code && /* @__PURE__ */ y("p", {
+		className: "text-center font-mono text-2xl font-semibold tracking-widest",
+		children: u.code
+	}), r[12] = u.code, r[13] = w);
+	let T;
+	r[14] === f ? T = r[15] : (T = /* @__PURE__ */ y(O, { children: f }), r[14] = f, r[15] = T);
+	let E;
+	return r[16] !== T || r[17] !== S || r[18] !== C || r[19] !== w ? (E = /* @__PURE__ */ b("section", {
+		className: "flex flex-col gap-2",
+		children: [
+			_,
+			S,
+			C,
+			w,
+			T
+		]
+	}), r[16] = T, r[17] = S, r[18] = C, r[19] = w, r[20] = E) : E = r[20], E;
+}
+function P(e) {
+	return setTimeout(e, 2e3);
+}
+function F() {
+	return [];
+}
+function I() {
+	return {};
+}
+function L() {
+	let { accounts: e, problem: t, retry: a, failed: o, signOut: s, reload: c } = S(), [l, u] = i(null), [d, f] = i(""), [_, v] = i(""), [x, D] = i(null), [k, j] = i(!1), M = r(null);
+	n(() => {
+		one.call("_running").then((e) => u(e.devices), () => (j(!0), u([])));
+	}, []);
+	let P = l && l.length > 1 ? _ || l[0] : "", F = !!e && !!l;
+	n(() => {
+		F && one.params.add && M.current?.focus();
+	}, [F]);
+	async function I() {
+		D(null);
+		try {
+			await one.call("sign_in", {
+				...d.trim() ? { phone: d.trim() } : {},
+				...P ? { device: P } : {}
+			});
+		} catch (e) {
+			return D({
+				why: one.plain(e).title,
+				retry: I
+			});
+		}
+		D({ pairing: {
+			phone: d.trim(),
+			device: P,
+			had: e.length
+		} });
+	}
+	let L = () => (D(null), c());
+	if (t && !e) return /* @__PURE__ */ y(w, {
+		problem: t,
+		retry: a
+	});
+	if (!F) return /* @__PURE__ */ y(E, {});
+	if (!l.length && !k) return /* @__PURE__ */ y(g, {
+		warn: !0,
+		title: "WhatsApp isn't on any of your devices yet.",
+		text: "Add it to one in the App Store, then link your phone here.",
+		action: {
+			label: "Open App Store",
+			run: () => one.open("app", { app: "whatsapp" }, "apps")
+		}
+	});
+	let R = e.filter((e) => !e.ok);
+	return /* @__PURE__ */ b("div", {
+		className: "flex flex-col gap-6",
+		children: [
+			!e.length && /* @__PURE__ */ y(O, { children: "Link WhatsApp, and your agents can read your chats and, when you ask, send." }),
+			R.map((e) => /* @__PURE__ */ y(g, {
+				warn: !0,
+				title: e.account + " needs linking again",
+				text: one.plain(e.why || "Needs linking again").title.replace(/^Needs linking again\.$/, "Link it from the phone again."),
+				action: {
+					label: "Link Again",
+					run: () => I()
+				}
+			}, e.account)),
+			e.length > 0 && /* @__PURE__ */ y(C, {
+				title: "Accounts",
+				accounts: e,
+				failed: o,
+				signOut: (e) => s(e, { device: e.device }),
+				confirm: (e) => one.alert({
+					title: `Sign out of ${e.account}?`,
+					text: "This device is unlinked from it, and the messages kept for it are deleted. Linking again needs the phone.",
+					action: "Sign Out",
+					danger: !0
+				}),
+				line: (e, t) => e.ok ? { text: `Linked on ${e.device}${t ? "" : " · used first"}` } : {
+					text: "Link again",
+					warn: !0
+				}
+			}),
+			x?.pairing ? /* @__PURE__ */ y(N, {
+				...x.pairing,
+				done: L
+			}) : /* @__PURE__ */ b("section", {
+				className: "flex flex-col gap-2",
+				children: [
+					/* @__PURE__ */ b(m, { children: [l.length > 1 && /* @__PURE__ */ y(h, {
+						title: "Link on",
+						trailing: /* @__PURE__ */ y(A, {
+							label: "Link on",
+							value: P,
+							onChange: v,
+							options: l.map((e) => ({
+								value: e,
+								label: e
+							}))
+						})
+					}), /* @__PURE__ */ y("div", {
+						className: "px-3 py-2.5",
+						children: /* @__PURE__ */ y(p, {
+							ref: M,
+							type: "tel",
+							placeholder: "Its number, for a code to type instead (optional)",
+							"aria-label": "Its number",
+							value: d,
+							onChange: (e) => f(e.target.value)
+						})
+					})] }),
+					x?.why && /* @__PURE__ */ y(g, {
+						title: x.why,
+						action: {
+							label: "Try Again",
+							run: x.retry
+						}
+					}),
+					/* @__PURE__ */ y(T, {
+						className: "self-start",
+						run: I,
+						children: "Add Account"
+					})
+				]
+			})
+		]
+	});
+}
+a(document.getElementById("root")).render(/* @__PURE__ */ y(L, {}));
+</script>
