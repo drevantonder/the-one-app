@@ -36,7 +36,7 @@ Key, log, view, blob, call, app. Scopes, devices, deploys, services, the Vault a
 - One key per scope at a time, changed only when a person or a lost device is removed, every database copied under the new key and the old one dropped. Today a scope has numbered epochs, and a new one is made when someone loses the right to open it.
 - Backups' recovery from nothing: a device restoring with no one left to pair with admits itself with the recovery key's countersignature.
 - Services each running as their own OS user per scope, and Shell and Computer Use only with a grant for that device and session, approved by the person.
-- A new device let in by its sign-in when the proof is one the person's clients can check themselves (an OIDC provider's signed ID token, or a passkey, naming the new device's key), approved by whichever of their clients is online; otherwise one tap on their phone: `docs/plan-device-approval.md`.
+- A new device let in by its sign-in when the proof is one the person's clients can check themselves (an OIDC provider's signed ID token, or a passkey, naming the new device's key), approved by whichever of their clients is online; otherwise one tap on their phone; either way every device shows it joined, with Remove: `docs/plan-device-approval.md`.
 - Native apps keeping their own sealed copy, for reads with no network; writes while offline, replayed like a rebase, never repeating what went outside.
 
 ## Where to look
