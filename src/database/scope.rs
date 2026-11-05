@@ -17,10 +17,11 @@
 //! People and groups are named as `person:<id>` and `group:<id>`; an app owned by the install's admins as `admins`.
 //! Keys and hashes are lowercase hex, times milliseconds, flags 0 or 1, and lists and arrangements JSON.
 //!
-//! `state_hash` is the hash of its rows, whatever order they were written in, and whatever SQLite's pages hold.
+//! Its state hash is any database's (`db::state_hash`): its rows', whatever order they were written in, and whatever
+//! SQLite's pages hold.
 
 use anyhow::Result;
-use rusqlite::{Connection, params, types::ValueRef};
+use rusqlite::{Connection, params};
 use serde_json::json;
 
 use crate::entry::{Key, Scope, hex};
@@ -433,50 +434,6 @@ fn own(db: &Connection, s: &ScopeState) -> Result<()> {
     Ok(())
 }
 
-/// What the hash of a scope database's state is derived for.
-const STATE: &str = "one/scope-database/state";
-
-/// The hash of a database's state: every table's definition and rows, each table's rows in the order of their values,
-/// so it's the same however they got there. Each value is its type (0 null, 1 integer, 2 real, 3 text, 4 blob) and
-/// then the integer's 8 bytes little-endian, the real's bits so, or the text's or blob's length so and its bytes.
-pub fn state_hash(db: &Connection) -> Result<[u8; 32]> {
-    fn bytes(h: &mut blake3::Hasher, b: &[u8]) {
-        h.update(&(b.len() as u64).to_le_bytes());
-        h.update(b);
-    }
-    let mut h = blake3::Hasher::new_derive_key(STATE);
-    let tables: Vec<(String, String)> = db
-        .prepare("SELECT name, sql FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name")?
-        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
-        .collect::<rusqlite::Result<_>>()?;
-    for (name, sql) in tables {
-        bytes(&mut h, name.as_bytes());
-        bytes(&mut h, sql.as_bytes());
-        let columns: i64 = db.query_row("SELECT count(*) FROM pragma_table_info(?)", [&name], |r| r.get(0))?;
-        let order: Vec<String> = (1..=columns).map(|i| i.to_string()).collect();
-        let mut rows = db.prepare(&format!("SELECT * FROM \"{name}\" ORDER BY {}", order.join(", ")))?;
-        let mut rows = rows.query([])?;
-        while let Some(row) = rows.next()? {
-            for i in 0..columns as usize {
-                match row.get_ref(i)? {
-                    ValueRef::Null => {
-                        h.update(&[0]);
-                    }
-                    ValueRef::Integer(n) => {
-                        h.update(&[1]).update(&n.to_le_bytes());
-                    }
-                    ValueRef::Real(x) => {
-                        h.update(&[2]).update(&x.to_bits().to_le_bytes());
-                    }
-                    ValueRef::Text(t) => bytes(h.update(&[3]), t),
-                    ValueRef::Blob(b) => bytes(h.update(&[4]), b),
-                }
-            }
-        }
-    }
-    Ok(*h.finalize().as_bytes())
-}
-
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -521,6 +478,7 @@ pub(crate) mod tests {
             }
         }
         // The same rows written the other way round hash the same, and building again gives the same database.
+        let state_hash = crate::db::state_hash;
         let hash = state_hash(&db).unwrap();
         assert_eq!(hash, state_hash(&build(m, &Scope::Global, &ScopeState::default()).unwrap()).unwrap());
         let copy = Connection::open_in_memory().unwrap();

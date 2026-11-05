@@ -682,7 +682,7 @@ impl Sig {
 /// A database's state, the same on every device that holds the same rows, whatever order its steps came in and however
 /// SQLite laid out its pages: BLAKE3, hex, over `one/state`, its schema version, then each table by name but SQLite's
 /// own and virtual ones (whose rows are their shadow tables'): its name, its columns' names, and its rows in primary
-/// key order, a table without one by rowid, which its changesets carry; each value with its type. A row's bytes are
+/// key order, a table without one in the order of every column, as rowids aren't its rows'; each value with its type. A row's bytes are
 /// `r`, then each value: `n` for null, `i` and 8 bytes big-endian, `f` and the 8 bytes of its IEEE 754 bits, or `s`
 /// (text) or `b` (blob) with a 4-byte big-endian length and its bytes. A table's name is written as text is but with
 /// `t`, and each column's name as text.
@@ -703,11 +703,12 @@ pub fn state_hash(conn: &Connection) -> Result<String> {
     for table in tables {
         let mut keys: Vec<(i64, String)> = conn.prepare("select pk, name from pragma_table_info(?1) where pk > 0")?.query_map([&table], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<_>>()?;
         keys.sort();
-        let (columns, order) = match keys.is_empty() {
-            true => ("rowid, *".to_string(), "rowid".to_string()),
-            false => ("*".to_string(), keys.iter().map(|(_, k)| quote(k)).collect::<Vec<_>>().join(", ")),
+        let width: i64 = conn.query_row("select count(*) from pragma_table_info(?1)", [&table], |r| r.get(0))?;
+        let order = match keys.is_empty() {
+            true => (1..=width).map(|i| i.to_string()).collect::<Vec<_>>().join(", "),
+            false => keys.iter().map(|(_, k)| quote(k)).collect::<Vec<_>>().join(", "),
         };
-        let mut stmt = conn.prepare(&format!("select {columns} from {} order by {order}", quote(&table)))?;
+        let mut stmt = conn.prepare(&format!("select * from {} order by {order}", quote(&table)))?;
         bytes(&mut h, b't', table.as_bytes());
         for name in stmt.column_names() {
             bytes(&mut h, b's', name.as_bytes());
