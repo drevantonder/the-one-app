@@ -1,6 +1,6 @@
 //! `throwaway`: a throwaway network, an install of its own, made as `create` makes every new one, by a node beside this machine's own with its own
 //! home and ports, so it touches nothing of the person's (src/agents.rs leaves the harnesses alone for a node given a
-//! home). There's one for each checkout (or folder) it's run in, so threads working in different ones each have their
+//! home). There's one for each checkout it's run in, from any folder in it, so threads working in different ones each have their
 //! own. Its Workers run beside it, and its sign-in lets its first person in with no passkey (cloudflare::Settings::throwaway_person), so a
 //! client of this checkout's build, on a device borrowed for it (`throwaway client`), signs in with nobody there; others join
 //! as anyone does, by an invite link the first makes, and again with no passkey (`throwaway client <kind> --as <name>`). It
@@ -17,19 +17,20 @@ use serde_json::{Value, json};
 
 use crate::{agent, get, post};
 
-/// The throwaway network for the checkout this build is from (`<checkout>/target/<profile>/`), else for the checkout (or
-/// folder) it's run in, beside the downloads every throwaway network shares: → its folder, and the checkout. So a checkout's
-/// own build finds its throwaway network from any folder, as an MCP client starts it.
-fn folder() -> (PathBuf, PathBuf) {
+/// The throwaway network for the checkout this build is from (`<checkout>/target/<profile>/`), else for the checkout the
+/// current folder is in, wherever in it, as git finds it, beside the downloads every throwaway network shares: → its folder,
+/// and the checkout. So a checkout's own build finds its throwaway network from any folder, as an MCP client starts it, and
+/// from a folder in no checkout there is none: nothing starts a network for a folder that isn't one.
+fn folder() -> Option<(PathBuf, PathBuf)> {
     let base = PathBuf::from(format!("{}-throwaway", one::home().display()));
-    let built = std::env::current_exe().ok().and_then(|exe| exe.canonicalize().ok()).and_then(|exe| Some(exe.parent()?.parent()?.parent()?.to_path_buf())).filter(|top| top.join(".git").exists() && top.join("Cargo.toml").exists());
-    let here = std::env::current_dir().unwrap_or_else(|_| ".".into());
-    let top = || std::process::Command::new("git").args(["rev-parse", "--show-toplevel"]).output().ok().filter(|o| o.status.success());
-    let checkout = built.or_else(|| top().map(|o| PathBuf::from(String::from_utf8_lossy(&o.stdout).trim()))).unwrap_or(here);
+    let is_checkout = |top: &Path| top.join(".git").exists() && top.join("Cargo.toml").exists() && top.join("ARCHITECTURE.md").exists();
+    let built = std::env::current_exe().ok().and_then(|exe| exe.canonicalize().ok()).and_then(|exe| Some(exe.parent()?.parent()?.parent()?.to_path_buf())).filter(|top| is_checkout(top));
+    let top = || std::process::Command::new("git").args(["rev-parse", "--show-toplevel"]).output().ok().filter(|o| o.status.success()).map(|o| PathBuf::from(String::from_utf8_lossy(&o.stdout).trim())).filter(|top| is_checkout(top));
+    let checkout = built.or_else(top)?;
     let hash: [u8; 32] = <sha2::Sha256 as sha2::Digest>::digest(checkout.to_string_lossy().as_bytes()).into();
     let hash = one::entry::hex(&hash);
     let name = checkout.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-    (base.join(format!("{name}-{}", &hash[..6])), checkout)
+    Some((base.join(format!("{name}-{}", &hash[..6])), checkout))
 }
 
 fn addr_var() -> String {
@@ -68,7 +69,6 @@ fn client_session(dir: &Path) -> Option<std::fs::File> {
 }
 
 pub fn run(rest: &[String]) -> Result<()> {
-    let (dir, checkout) = folder();
     // Help, and nothing started: throwaway's own, or a built-in command's. An app's tool's needs the throwaway network's apps.
     let help = rest.iter().any(|a| a == "--help" || a == "-h");
     match rest.first().map(String::as_str) {
@@ -79,6 +79,9 @@ pub fn run(rest: &[String]) -> Result<()> {
         Some(cmd) if help && crate::commands().iter().any(|c| c == cmd) => return crate::run(rest.to_vec()),
         _ => {}
     }
+    let Some((dir, checkout)) = folder() else {
+        bail!("{CLI} throwaway is for a checkout of The One App, and this folder isn't in one: run it in the checkout, or any folder in it")
+    };
     match rest.first().map(String::as_str) {
         Some("stop") => {
             give_back(&dir);
@@ -198,11 +201,12 @@ fn cloudflare_node(dir: &Path) -> Result<()> {
 /// What `throwaway` takes.
 fn usage() -> String {
     // The MCP command as one that finds this throwaway network from any folder: this build, if it's a checkout's own.
-    let (_, checkout) = folder();
-    let exe = std::env::current_exe().ok().and_then(|e| e.canonicalize().ok()).filter(|e| e.starts_with(&checkout));
-    let mcp = match exe {
-        Some(exe) => format!("{} throwaway mcp", exe.display()),
-        None => format!("sh -c 'cd {} && exec {CLI} throwaway mcp'", checkout.display()),
+    let mcp = match folder() {
+        Some((_, checkout)) => match std::env::current_exe().ok().and_then(|e| e.canonicalize().ok()).filter(|e| e.starts_with(&checkout)) {
+            Some(exe) => format!("{} throwaway mcp", exe.display()),
+            None => format!("sh -c 'cd {} && exec {CLI} throwaway mcp'", checkout.display()),
+        },
+        None => format!("sh -c 'cd <checkout> && exec {CLI} throwaway mcp'"),
     };
     format!(
         "Usage:
