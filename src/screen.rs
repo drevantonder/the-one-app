@@ -21,12 +21,12 @@ const KIT: &[(&str, &str)] = &[
     ("markdown.js", include_str!("screen/markdown.js")),
 ];
 
-/// What a screen's HTML has in it to use the new kit (`src/screen/ui/`: React, and shadcn's components and theme)
-/// in place of the old one (`kit.css`): its page then has ui.css, an import map giving `react`, `react-dom/client`,
+/// What a screen's HTML has in it to use `@one/ui` (`src/screen/ui/`: React, and shadcn's components and theme)
+/// in place of `kit.css`: its page then has ui.css, an import map giving `react`, `react-dom/client`,
 /// `@one/ui` and the rest (`UI_IMPORTS`), and ui.js, which they come from; the bridge and kit.js's helpers stay.
-pub const UI: &str = r#"<meta name="kit" content="ui">"#;
+pub const UI: &str = r#"<meta name="@one/ui">"#;
 
-/// The new kit as `bun run build` in `src/screen/ui/` made it, whose sources `cargo test` checks it was made from.
+/// `@one/ui` as `bun run build` in `src/screen/ui/` made it, whose sources `cargo test` checks it was made from.
 const UI_CSS: (&str, &str) = ("ui/ui.css", include_str!("screen/ui/dist/ui.css"));
 const UI_JS: (&str, &str) = ("ui/ui.js", include_str!("screen/ui/dist/ui.js"));
 const UI_IMPORTS: &str = include_str!("screen/ui/dist/importmap.json");

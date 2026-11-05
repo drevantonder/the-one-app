@@ -58,7 +58,7 @@ const named = { type: "string", description: "a browser profile's name, like Per
 
 // The page: every agent device as a picture, those in use first, each with its name and one short line.
 const PAGE = `
-<meta name="kit" content="ui">
+<meta name="@one/ui">
 <style>
   .tile { display: block; width: 100%; min-width: 0; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; }
   .tile.opens { cursor: pointer; }
