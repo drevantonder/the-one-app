@@ -1,5 +1,5 @@
 //! `GET /v1/state`: the install as one person sees it, from `global`'s scope database, the same from a node on a
-//! machine and from the serverless node. What only the node answering knows (which devices are online and how loaded,
+//! machine and from the Cloudflare node. What only the node answering knows (which devices are online and how loaded,
 //! who is looking) it says in `Here`.
 
 use std::collections::BTreeMap;
@@ -153,8 +153,8 @@ fn install(m: &ScopeDb, me: &str, settings: &Map<String, Value>, here: &Here) ->
         // scope, until when, and who granted it. One whose endpoint is gone, or whose granter may grant no more, is over.
         "grants": m.keeps().iter().filter(|((k, s, _), g)| m.may(me, "keep", &object(s)) && m.machine(k).is_some() && m.may(&g.by, "keep", &object(s))).map(|((k, s, a), g)| json!({ "endpoint": hex(k), "scope": s.to_string(), "app": a, "until": g.until, "by": g.by, "keys": g.hashes })).collect::<Vec<_>>(),
         "entries": here.entries, "settings": settings,
-        // The serverless node, once an admin deployed one (`serverless deploy` sets `serverless`).
-        "serverless": m.serverless().map(|key| json!({ "priority": rank::priority(&set, rank::CLOUDFLARE).to_value(), "key": hex(&key), "runs_for": m.run_by(&key).iter().map(crate::entry::Scope::to_string).collect::<Vec<_>>() })),
+        // The Cloudflare node, once an admin deployed one (`cloudflare node deploy` sets `serverless`, which clients read here by that name).
+        "serverless": m.cloudflare_node().map(|key| json!({ "priority": rank::priority(&set, rank::CLOUDFLARE).to_value(), "key": hex(&key), "runs_for": m.run_by(&key).iter().map(crate::entry::Scope::to_string).collect::<Vec<_>>() })),
     })
 }
 

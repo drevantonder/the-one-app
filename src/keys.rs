@@ -281,7 +281,7 @@ pub fn open_handoff(secret: &[u8; 32], sealed: &str) -> Result<Handoff> {
     serde_json::from_slice(&plain).context("the keys handed aren't a handoff")
 }
 
-/// What a node with no sign-in to pass on (the serverless node, or a machine's passing on a call it was handed keys
+/// What a node with no sign-in to pass on (the Cloudflare node, or a machine's passing on a call it was handed keys
 /// for) asks another node to run a call with (`src/node/net.rs`): the call, naming `scopes`, the scopes it reaches,
 /// the person it's for, and the keys of those scopes it was handed, sealed to that node's `seal` key for calls from
 /// its own endpoint (`from`), until `until`. Never a sign-in's token, which whoever runs the node could use as them;
@@ -330,7 +330,7 @@ pub fn app_of(route: &str) -> Option<&str> {
 /// when the node asks (428): only what that kind of request can use. One that runs an app, that app's databases; an
 /// MCP request (`/mcp`), which may run any, or widgets and badges, which run every app's, apps' own databases; and each
 /// of those the node's Vault and log of a scope too (which fill in its items, and say who's who there), and `global`'s
-/// blobs, where apps' deployed code is (a node that keeps nothing, the serverless node, reads it there). The Vault's
+/// blobs, where apps' deployed code is (a node that keeps nothing, the Cloudflare node, reads it there). The Vault's
 /// routes, its Vault and log; any other, the log alone. `cloudflare/shared/crypto.js`'s `mayHand` is the same.
 ///
 /// `global`'s blobs are those its entries name (deploys' bundles, releases, apps' icons), which everyone in the install

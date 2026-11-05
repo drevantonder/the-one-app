@@ -1,4 +1,4 @@
-//! The serverless node's iroh endpoint (`Node` in worker.js, a Durable Object): the endpoint of its own key, as every
+//! The Cloudflare node's iroh endpoint (`Node` in worker.js, a Durable Object): the endpoint of its own key, as every
 //! node is, with no socket. The relay hands it the datagrams sent to its key, by RPC (`deliver`), and passes on what it
 //! sends, so to every other endpoint it's one more behind the relay. It speaks what nodes speak (src/node/net.rs): to
 //! client devices, HTTP/1.1 on a stream of its own per request (`<cli>/http/1`), answered by `worker.js` as a node's
@@ -277,7 +277,7 @@ async fn request(recv: &mut iroh::endpoint::RecvStream) -> Result<(String, Strin
 /// What `worker.js` answers a request, as an HTTP/1.1 response.
 async fn respond(remote: &str, method: &str, path: &str, headers: &[(String, String)], body: &[u8]) -> Vec<u8> {
     let failed = |why: String| reply(503, &[("content-type".into(), "application/json".into())], json(&why).as_bytes());
-    let Some(asked) = ASKED.with(|a| a.borrow().clone()) else { return failed("the serverless node isn't started".into()) };
+    let Some(asked) = ASKED.with(|a| a.borrow().clone()) else { return failed("the Cloudflare node isn't started".into()) };
     let flat = js_sys::Array::new();
     for (name, value) in headers {
         flat.push(&name.into());

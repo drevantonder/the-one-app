@@ -245,7 +245,7 @@ const h = OneUI.react.createElement;
         }
         throw Object.assign(new NodeError("Your devices haven't caught up with this one yet. Try again in a moment."), { status: 403 });
       }
-      // A node may find what it needs as it goes: the serverless node, its logs' keys first, then a call's.
+      // A node may find what it needs as it goes: the Cloudflare node, its logs' keys first, then a call's.
       if (r.status === 428 && device && needed < 3) {
         needed++;
         if (trace) trace.keys = needed;
@@ -476,7 +476,7 @@ const h = OneUI.react.createElement;
   /// which group changed), drawn as soon as they're in; then the badges, drawn as they come.
   async function refreshState({ apps = false } = {}) {
     const [state, list] = await Promise.all([shared("/v1/state"), apps && !joining ? shared("/v1/apps").catch(() => null) : null]);
-    // The nodes this browser asks itself, in the order things run on them, and the serverless node last.
+    // The nodes this browser asks itself, in the order things run on them, and the Cloudflare node last.
     const nodes = (state.install?.devices || []).filter((d) => d.serves_me).sort((a, b) => a.order - b.order).map((d) => d.key);
     const last = state.install?.serverless?.key;
     if (last && !nodes.includes(last)) nodes.push(last);
@@ -509,7 +509,7 @@ const h = OneUI.react.createElement;
   }
 
   /// The node's events: what changed, so the window and its screens keep up, only while the page shows. A node with
-  /// none to say (the serverless node, while no machine is on) answers 204, and it asks again in a minute.
+  /// none to say (the Cloudflare node, while no machine is on) answers 204, and it asks again in a minute.
   let events = null;
   async function listen() {
     const mine = (events = new AbortController());
@@ -1419,7 +1419,7 @@ const h = OneUI.react.createElement;
     joining = true;
     const user = auth.user();
     try {
-      // A device from the start, as a node may need the keys it hands (the serverless node, even for the state).
+      // A device from the start, as a node may need the keys it hands (the Cloudflare node, even for the state).
       device = new Device(await join(user), { user, state: () => store.state, api, bearer, replay: net.global });
       await device.load();
     } catch (err) {

@@ -98,7 +98,7 @@ fn client_of(token: &str) -> Option<Key> {
     data_encoding::HEXLOWER.decode(token.strip_prefix(CLIENT)?.as_bytes()).ok()?.try_into().ok()
 }
 
-/// What calls another node passed on for `user` with no sign-in are kept by here (the serverless node's, or a
+/// What calls another node passed on for `user` with no sign-in are kept by here (the Cloudflare node's, or a
 /// machine's): that node's endpoint key, proven by QUIC, and the person it says the call is for. Like a client
 /// device's, no sign-in signs it, so it's never a token anyone sends, and what it was handed (sealed here for
 /// that node's key) opens only that person's calls from it.
@@ -192,7 +192,7 @@ impl Node {
     }
 
     /// Keeps the keys a caller handed this device with a call (`x-one-keys`) for `token`'s calls, as `user`'s: only
-    /// if they were sealed to it (any others are left), for that token (`for`: its sha256, or a client device's or the serverless node's
+    /// if they were sealed to it (any others are left), for that token (`for`: its sha256, or a client device's or the Cloudflare node's
     /// key), and not yet expired; and no longer than `most`, until when its caller's own word lasts (a session's
     /// certificate's).
     pub fn hand(&self, token: &str, user: &str, sealed: &str, most: u64) -> Result<()> {

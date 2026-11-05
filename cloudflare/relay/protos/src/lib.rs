@@ -127,7 +127,7 @@ pub fn endpoint_gone(id: &[u8]) -> Result<Vec<u8>, JsError> {
     Ok(RelayToClientMsg::EndpointGone(id).write_to(Vec::new()))
 }
 
-/// The datagrams in a client's Datagrams frame, for an endpoint that isn't a socket (the serverless node): its
+/// The datagrams in a client's Datagrams frame, for an endpoint that isn't a socket (the Cloudflare node): its
 /// segment size (2 bytes, 0 for one datagram), then their contents.
 #[wasm_bindgen]
 pub fn datagrams_of(msg: &[u8]) -> Result<Vec<u8>, JsError> {

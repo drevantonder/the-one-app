@@ -24,7 +24,7 @@ pub fn cache() -> PathBuf {
 fn user_home() -> PathBuf {
     std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| ".".into())
 }
-// What the serverless node (serverless/) and the native apps' client (client/) share with nodes on machines; the rest
+// What the Cloudflare node (cloudflare/node/) and the native apps' client (client/) share with nodes on machines; the rest
 // is only theirs (the `node` feature).
 #[cfg(feature = "node")]
 pub mod backups;
@@ -79,8 +79,6 @@ pub mod outbound;
 pub mod release;
 #[cfg(feature = "node")]
 pub mod schedules;
-#[cfg(feature = "node")]
-pub mod serverless;
 #[cfg(feature = "node")]
 pub mod services;
 #[cfg(feature = "node")]

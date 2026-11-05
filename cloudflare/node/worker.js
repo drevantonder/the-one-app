@@ -1,4 +1,4 @@
-// The serverless node: a node of the install on Cloudflare Workers, which client devices ask over iroh as they ask
+// The Cloudflare node: a node of the install on Cloudflare Workers, which client devices ask over iroh as they ask
 // any node, last in run priority's order: when none of their person's machines answers. It holds no keys. Each
 // request is from the device its connection proved (or the device that vouched for that session's key, as nodes take
 // one: `x-one-endpoint`), says whose it is (`x-one-user`), which the install's entries must list that device as, and
@@ -29,8 +29,8 @@
 // install's) and NAME (its name). `built.js`, made when it's deployed, is the shim.
 
 import { DurableObject, RpcTarget } from "cloudflare:workers";
-import { initSync, check_certificate, open, opens, refresh, query, may, write, close, statements, vault_items, vault_fill, vault_schema, screen, client_screen, config, prefix, following as after, read_log, groups, scopes_of, epochs as epochsOf, runners, forward, install, bundle, endpoint_of, signed, handoff, epoch_name, app_key_name, needs as needed, endpoint_start, endpoint_deliver, endpoint_ask, endpoint_close } from "./one_serverless.js";
-import wasm from "./one_serverless_bg.wasm";
+import { initSync, check_certificate, open, opens, refresh, query, may, write, close, statements, vault_items, vault_fill, vault_schema, screen, client_screen, config, prefix, following as after, read_log, groups, scopes_of, epochs as epochsOf, runners, forward, install, bundle, endpoint_of, signed, handoff, epoch_name, app_key_name, needs as needed, endpoint_start, endpoint_deliver, endpoint_ask, endpoint_close } from "./one_cloudflare_node.js";
+import wasm from "./one_cloudflare_node_bg.wasm";
 import { shim, compatibilityDate } from "./built.js";
 
 initSync({ module: wasm });
@@ -900,7 +900,7 @@ class ForCall extends RpcTarget {
         case "GET devices":
           return Response.json(view.state.install.devices);
       }
-      return new Response(`a serverless node doesn't do ${path} for apps yet, and ${OFF}`, { status: 501 });
+      return new Response(`a Cloudflare node doesn't do ${path} for apps yet, and ${OFF}`, { status: 501 });
     } catch (err) {
       if (err.status === 428) this.call.need = err;
       return new Response(err.message, { status: err.status === 503 ? 503 : 400 });
@@ -1042,10 +1042,10 @@ function fromOf(remote, headers) {
 }
 
 export default {
-  fetch: () => json({ error: "the serverless node is asked over iroh, as any node is" }, 404),
+  fetch: () => json({ error: "the Cloudflare node is asked over iroh, as any node is" }, 404),
 };
 
-/// A Durable Object of the serverless node: a person's (`user:<id>`), where their requests run, or the node's
+/// A Durable Object of the Cloudflare node: a person's (`user:<id>`), where their requests run, or the node's
 /// endpoint (`node`), which the relay wakes and which asks devices for calls.
 export class Node extends DurableObject {
   constructor(ctx, env) {
@@ -1059,7 +1059,7 @@ export class Node extends DurableObject {
 
   /// A request of its person's, from the endpoint object, which proved who asked.
   async fetch(request) {
-    if (this.isEndpoint) return json({ error: "the serverless node's endpoint answers only asks over iroh" }, 400);
+    if (this.isEndpoint) return json({ error: "the Cloudflare node's endpoint answers only asks over iroh" }, 400);
     this.person ||= new Person(this);
     try {
       return await route(this.person, request);
@@ -1074,7 +1074,7 @@ export class Node extends DurableObject {
   }
 
   only() {
-    if (!this.isEndpoint) throw new Error("only the serverless node's endpoint does that");
+    if (!this.isEndpoint) throw new Error("only the Cloudflare node's endpoint does that");
   }
 
   /// The relay, by its `ServerlessNode` entrypoint: sending as this node, and who's here.

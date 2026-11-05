@@ -13,7 +13,7 @@ impl Node {
         self.member_as(caller, "setting", json!({ "name": name, "value": value })).await
     }
 
-    /// Gives a device (by name or key: all of its endpoints of that name and person), or the serverless node
+    /// Gives a device (by name or key: all of its endpoints of that name and person), or the Cloudflare node
     /// (`cloudflare`), its run priority, for an admin: the `priority` setting, every other kept as set.
     pub async fn set_priority(&self, caller: &Caller, device: &str, priority: rank::Priority) -> Result<()> {
         let ids = if device.eq_ignore_ascii_case(rank::CLOUDFLARE) {
@@ -42,7 +42,7 @@ impl Node {
     }
 
     /// The same for someone signed in at the install's address through `client` (its name), which is no device: not the
-    /// device it reached, as the serverless node says too.
+    /// device it reached, as the Cloudflare node says too.
     pub fn state_for_sign_in(&self, viewer: &Caller, client: &str) -> Value {
         self.state_as(viewer, Some(client))
     }
@@ -264,15 +264,15 @@ impl Node {
         self.with(|i| Ok(i.r.db().machine_ever(key).map(|m| m.name.clone()))).ok().flatten().unwrap_or_else(|| short(key))
     }
 
-    /// The install's compute devices' names by key (hex), and the serverless node's: what a trace's reader calls the
+    /// The install's compute devices' names by key (hex), and the Cloudflare node's: what a trace's reader calls the
     /// nodes a client tried.
     pub fn compute_names(&self) -> Value {
         self.with(|i| {
             let m = i.r.db();
             let name = |k: &Key| m.machine_ever(k).map(|d| d.name.clone()).unwrap_or_else(|| short(k));
             let mut names: serde_json::Map<String, Value> = m.computes().into_iter().map(|c| (hex(&c.key), json!(name(&c.key)))).collect();
-            if let Some(key) = m.serverless() {
-                names.insert(hex(&key), json!("the serverless node"));
+            if let Some(key) = m.cloudflare_node() {
+                names.insert(hex(&key), json!("the Cloudflare node"));
             }
             Ok(Value::Object(names))
         })

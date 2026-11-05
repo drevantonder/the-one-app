@@ -367,7 +367,7 @@ pub fn fill(text: &str, host: &str, lookup: impl Fn(&str) -> Option<(Vec<String>
 }
 
 /// A JWT of `claims` (base64url JSON), signed RS256 with `pem`, an RSA private key (PKCS#1 or PKCS#8), on the device
-/// that holds it: never in a browser or the serverless node.
+/// that holds it: never in a browser or the Cloudflare node.
 #[cfg(feature = "node")]
 fn rs256(pem: &str, claims: &str) -> Result<String> {
     use ring::signature::{RSA_PKCS1_SHA256, RsaKeyPair};

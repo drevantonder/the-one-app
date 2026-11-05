@@ -205,8 +205,8 @@ impl Node {
         if conn.alpn() == http_alpn() {
             return self.take_client(conn).await;
         }
-        if !self.is_device(&remote) && self.is_serverless(&remote) {
-            return self.take_serverless(conn).await;
+        if !self.is_device(&remote) && self.is_cloudflare_node(&remote) {
+            return self.take_cloudflare_node(conn).await;
         }
         if !self.is_device(&remote) && self.is_service(&remote) {
             return self.take_service(conn).await;
@@ -260,26 +260,26 @@ impl Node {
         }
     }
 
-    /// The install's serverless node, which asks only for calls, each its person's, with the keys they handed it for
+    /// The install's Cloudflare node, which asks only for calls, each its person's, with the keys they handed it for
     /// them, sealed to this device: as a client device's call over iroh is taken.
-    async fn take_serverless(&self, conn: Connection) {
+    async fn take_cloudflare_node(&self, conn: Connection) {
         let remote = *conn.remote_id().as_bytes();
         while let Ok((mut send, mut recv)) = conn.accept_bi().await {
-            if !self.is_serverless(&remote) {
-                return conn.close(1u32.into(), b"not this install's serverless node");
+            if !self.is_cloudflare_node(&remote) {
+                return conn.close(1u32.into(), b"not this install's Cloudflare node");
             }
             let node = self.clone();
             tokio::spawn(async move {
                 let msg: Value = match recv.read_to_end(MESSAGE_LIMIT).await.map_err(anyhow::Error::from).and_then(|b| Ok(serde_json::from_slice(&b)?)) {
                     Ok(msg) => msg,
-                    Err(err) => return tracing::debug!("what the serverless node sent: {err:#}"),
+                    Err(err) => return tracing::debug!("what the Cloudflare node sent: {err:#}"),
                 };
                 let answer = match msg["kind"].as_str() {
-                    Some("ask") => crate::api::call_from_serverless(&node, remote, msg["body"]["call"].clone()).await,
-                    _ => json!({ "error": "the serverless node only asks for calls" }),
+                    Some("ask") => crate::api::call_from_cloudflare_node(&node, remote, msg["body"]["call"].clone()).await,
+                    _ => json!({ "error": "the Cloudflare node only asks for calls" }),
                 };
                 if let Err(err) = async { send.write_all(answer.to_string().as_bytes()).await?; send.finish()?; anyhow::Ok(()) }.await {
-                    tracing::debug!("answering the serverless node: {err:#}");
+                    tracing::debug!("answering the Cloudflare node: {err:#}");
                 }
             });
         }
@@ -524,8 +524,8 @@ impl Node {
         self.with(|i| Ok(i.r.db().service(key).is_some())).unwrap_or(false)
     }
 
-    /// Whether `key` is the install's serverless node's endpoint, as `serverless deploy` set it.
-    fn is_serverless(&self, key: &Key) -> bool {
+    /// Whether `key` is the install's Cloudflare node's endpoint, as `cloudflare node deploy` set it.
+    fn is_cloudflare_node(&self, key: &Key) -> bool {
         self.with(|i| Ok(i.r.db().setting("serverless").is_some_and(|k| k == hex(key)))).unwrap_or(false)
     }
 

@@ -88,7 +88,7 @@ fn every_command() -> String {
                                        may edit them in CLOUDFLARE_API_TOKEN; the first time, at one of the account's
                                        domains ({CLI}-<service>.<domain>, the install's address {CLI}.<domain> unless
                                        --address says, for good: passkeys belong to it), or at its workers.dev address;
-                                       and the serverless node with it, once serverless deploy put it there; beside a
+                                       and the Cloudflare node with it, once cloudflare node deploy put it there; beside a
                                        node of the install, whose devices its relay takes, unless --new
   {CLI} cloudflare invite <name> [--admin] [--user <id>] [--email <email>]
                                        a link that lets someone join, once and for a few days, as who they'll be in the
@@ -96,8 +96,8 @@ fn every_command() -> String {
                                        new, as devices invite does), signed with this machine's key, an admin's
                                        device's; where people sign in with Google, --email is the account they sign up
                                        with. Nobody joins uninvited, the first person too
-  {CLI} serverless deploy [--account <id>]
-                                       put the install's serverless node in its Workers' Cloudflare account (a node as
+  {CLI} cloudflare node deploy [--account <id>]
+                                       put the install's Cloudflare node in its Workers' Cloudflare account (a node as
                                        a Worker, with the API token in CLOUDFLARE_API_TOKEN), which devices ask over
                                        iroh when none of your machines answers
   {CLI} cloudflare set <setting> <value>  change one: sign-in-url, resources (nodes' own addresses, comma-separated), bucket (its JSON object piped, with - as its value) or
@@ -522,9 +522,9 @@ fn run(args: Vec<String>) -> Result<()> {
             let mut web = settings.web();
             web.extend(one::cloudflare::precompressed(&web)?);
             one::cloudflare::deploy(&cf, &settings, &modules, &web)?;
-            if settings.serverless {
-                one::serverless::deploy(&cf, &settings)?;
-                serverless_reads(&settings);
+            if settings.cloudflare_node {
+                one::cloudflare::node::deploy(&cf, &settings)?;
+                cloudflare_node_reads(&settings);
             }
             // The Google client its people sign in with, signed by this admin's device: a new device's sign-in counts
             // only for it (`sign_in_proof::CLIENTS`), whatever sign-in says.
@@ -539,25 +539,25 @@ fn run(args: Vec<String>) -> Result<()> {
             }
             print!("Deployed.\n{}", cloudflare_said(&settings));
         }
-        ["serverless", "deploy"] => {
+        ["cloudflare", "node", "deploy"] => {
             let mut settings = devices_here(one::cloudflare::Settings::load()?, true)?;
             let cf = cloudflare(&flags, Some(&settings))?;
             // Its endpoint's key, made once and kept with the Workers' secrets.
-            if settings.serverless_endpoint().is_none() {
-                settings.serverless_key = data_encoding::HEXLOWER.encode(&rand::random::<[u8; 32]>());
-                settings.set_secret("SERVERLESS_KEY", &settings.serverless_key)?;
+            if settings.cloudflare_node_endpoint().is_none() {
+                settings.cloudflare_node_key = data_encoding::HEXLOWER.encode(&rand::random::<[u8; 32]>());
+                settings.set_secret("CLOUDFLARE_NODE_KEY", &settings.cloudflare_node_key)?;
             }
-            // The relay it deploys again binds the serverless node's endpoint only for an install that has one.
-            let was = std::mem::replace(&mut settings.serverless, true);
-            one::serverless::deploy(&cf, &settings)?;
-            serverless_reads(&settings);
+            // The relay it deploys again binds the Cloudflare node's endpoint only for an install that has one.
+            let was = std::mem::replace(&mut settings.cloudflare_node, true);
+            one::cloudflare::node::deploy(&cf, &settings)?;
+            cloudflare_node_reads(&settings);
             if !was {
                 settings.save()?;
             }
             // So devices answer its endpoint, and Devices shows it, for its admins to say where it comes in the order
             // things run in.
-            post("/v1/settings", json!({ "name": "serverless", "value": settings.serverless_endpoint() }))?;
-            println!("The serverless node is in your Cloudflare account: devices ask it over iroh when none of your machines answers.");
+            post("/v1/settings", json!({ "name": "serverless", "value": settings.cloudflare_node_endpoint() }))?;
+            println!("The Cloudflare node is in your Cloudflare account: devices ask it over iroh when none of your machines answers.");
         }
         ["cloudflare", "invite", name] => {
             let settings = one::cloudflare::Settings::load()?;
@@ -1271,7 +1271,7 @@ fn switch_gate(gate: &Value, name: &dyn Fn(&str) -> String) {
     if gate.is_null() {
         return;
     }
-    // With its whole key, which an admin gives to skip it, and whose it is: the serverless node is no one's.
+    // With its whole key, which an admin gives to skip it, and whose it is: the Cloudflare node is no one's.
     let device = |d: &Value| {
         let key = d["key"].as_str().unwrap_or("");
         let whose = d["user"].as_str().map(|u| format!("{}'s, ", name(u))).unwrap_or_default();
@@ -1301,13 +1301,13 @@ fn switch_gate(gate: &Value, name: &dyn Fn(&str) -> String) {
     }
 }
 
-/// Tells this machine's node what the serverless node it deployed reads of who's who: this build's, which it can't
+/// Tells this machine's node what the Cloudflare node it deployed reads of who's who: this build's, which it can't
 /// say itself (`database::switch`).
-fn serverless_reads(settings: &one::cloudflare::Settings) {
-    let Some(key) = settings.serverless_endpoint() else { return };
+fn cloudflare_node_reads(settings: &one::cloudflare::Settings) {
+    let Some(key) = settings.cloudflare_node_endpoint() else { return };
     let said = post("/v1/reads", json!({ "device": key, "reads": one::database::switch::READS, "build": one::config::BUILD }));
     if let Err(err) = said {
-        eprintln!("Couldn't say what the serverless node reads: {err:#}");
+        eprintln!("Couldn't say what the Cloudflare node reads: {err:#}");
     }
 }
 

@@ -1,6 +1,6 @@
 //! Bundles: what a deploy names. A tar holding `app.js`, the built ES module, and `src/`, the files it was built from.
 //! Plain ustar, written the same way every time, so the same files give the same blob. Each app's latest is kept in
-//! the bucket too, sealed, for a node that has no other way to get it (the serverless node).
+//! the bucket too, sealed, for a node that has no other way to get it (the Cloudflare node).
 
 use std::path::Path;
 

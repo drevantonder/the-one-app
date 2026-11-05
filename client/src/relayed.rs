@@ -12,8 +12,8 @@ use std::task::{Context, Poll, Waker};
 use iroh::endpoint::transports::{CustomEndpoint, CustomSender, CustomTransport, RecvInfo, Transmit};
 use iroh_base::CustomAddr;
 
-/// This transport's kind of address: an endpoint's key, reached through the relay. The serverless node's
-/// (serverless/src/net.rs) is the same.
+/// This transport's kind of address: an endpoint's key, reached through the relay. The Cloudflare node's
+/// (cloudflare/node/src/net.rs) is the same.
 pub const THROUGH_RELAY: u64 = 0x6f6e;
 
 /// What passes a datagram on to the relay: the key it's for, its segment size (0 for one datagram), and its bytes.

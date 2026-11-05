@@ -219,7 +219,7 @@ fn now() -> u64 {
 /// `net-worker.js`), each answer worked out here:
 ///
 /// - `root`, `name`, `recovery` (hex, what each epoch is sealed to besides devices)
-/// - `devices`: each listed now, `{ key, seal, user, name, roles, passkey, device }`, and the serverless node as
+/// - `devices`: each listed now, `{ key, seal, user, name, roles, passkey, device }`, and the Cloudflare node as
 ///   `{ key, seal, roles: ["compute"] }`
 /// - `removed`: the keys taken out, or turned down before they were listed, which are never sealed anything again
 /// - `sign_in_clients`: the OIDC clients the install's people sign in with, its setting (`sign_in_proof::CLIENTS`)
@@ -242,7 +242,7 @@ pub fn view_of(db: &ScopeDb) -> Result<Value> {
     let listed = db.machines().into_iter().filter(|d| !d.removed).collect::<Vec<_>>();
     let mut devices: Vec<Value> = listed.iter().map(|d| json!({ "key": hex(&d.key), "seal": hex(&d.seal), "user": d.user, "name": d.name, "roles": d.roles, "passkey": d.passkey, "device": d.device.as_ref().map(hex), "since": d.since, "place": d.place })).collect();
     let nodes = db.nodes();
-    if let Some(k) = db.serverless()
+    if let Some(k) = db.cloudflare_node()
         && let Some((_, seal)) = nodes.iter().find(|(n, _)| *n == k)
     {
         devices.push(json!({ "key": hex(&k), "seal": hex(seal), "roles": ["compute"] }));
@@ -334,12 +334,12 @@ mod tests {
     }
 
     /// What a browser seals to, hands keys and approves by is what replay says, of everyone, every scope and every
-    /// device: an admin and a member, one taken out, a group, a device taken out, a serverless node, someone who chose
+    /// device: an admin and a member, one taken out, a group, a device taken out, a Cloudflare node, someone who chose
     /// their things run nowhere else and someone who never chose. (`ScopeDb`'s own reads are checked in `one`.)
     #[test]
     fn a_browsers_answers_are_replays() {
         let key = |n: u8| SigningKey::from_bytes(&[n; 32]);
-        let (mac, phone, boxed, laptop, bobs_box, carols, serverless) = (key(1), key(2), key(3), key(4), key(5), key(6), key(7));
+        let (mac, phone, boxed, laptop, bobs_box, carols, cloudflare_node) = (key(1), key(2), key(3), key(4), key(5), key(6), key(7));
         let at = |k: &SigningKey| Endpoint::of(k);
         let hash = |c: char| c.to_string().repeat(64);
         let mut i = Install::default();
@@ -364,7 +364,7 @@ mod tests {
         g.add_entries(i.entries.clone()).unwrap();
         let m = g.members().unwrap();
         assert!(m.user(BOB).is_some() && m.removed_user(CAROL) && m.machine(&phone.verifying_key().to_bytes()).is_none(), "the install is as written");
-        let nodes_: Vec<Key> = m.computes().map(|c| c.key).chain(m.serverless()).collect();
+        let nodes_: Vec<Key> = m.computes().map(|c| c.key).chain(m.cloudflare_node()).collect();
 
         // What a browser looks up is what replay says.
         let k = view(&m).unwrap();
@@ -384,7 +384,7 @@ mod tests {
             assert_eq!(a["removes_people"], json!(m.is_admin(u)), "{u} takes people out");
         }
         let devices: Vec<String> = k["devices"].as_array().unwrap().iter().map(|d| d["key"].as_str().unwrap().to_string()).collect();
-        assert_eq!(devices, m.machines.keys().filter(|k| m.machine(k).is_some()).chain(m.serverless().as_ref()).map(hex).collect::<Vec<_>>());
+        assert_eq!(devices, m.machines.keys().filter(|k| m.machine(k).is_some()).chain(m.cloudflare_node().as_ref()).map(hex).collect::<Vec<_>>());
         // Never sealed anything again: a device taken out, one turned down before it was listed, and a removed person's.
         let mut removed = names(&k["removed"]);
         removed.sort();

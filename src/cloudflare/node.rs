@@ -1,4 +1,4 @@
-//! The serverless node (`serverless/`) on Cloudflare: a node of the install as a Worker in the account of its other Workers, with
+//! The Cloudflare node (`cloudflare/node/`) on Cloudflare: a node of the install as a Worker in the account of its other Workers, with
 //! no address of its own, and an iroh endpoint of its own key, which the relay wakes. A release carries its built
 //! WebAssembly (`update` builds it, where Rust builds for WebAssembly); the apps it runs it reads from the install's
 //! bucket, each at its latest deploy.
@@ -8,27 +8,27 @@ use serde_json::{Value, json};
 
 use crate::cloudflare::{Cloudflare, Settings, Uploaded, worker_name};
 
-/// The serverless node's Worker is `<cli>-node`.
+/// The Cloudflare node's Worker is `<cli>-node`.
 pub const SERVICE: &str = "node";
 
-/// The serverless node's Worker's modules: (name, type, bytes), `worker.js` first. `built.js` is the shim each app runs
+/// The Cloudflare node's Worker's modules: (name, type, bytes), `worker.js` first. `built.js` is the shim each app runs
 /// in (the apps themselves it reads from the bucket, each at its latest deploy).
 pub fn modules() -> Result<Vec<(String, &'static str, Vec<u8>)>> {
     let built = |name: &str| {
-        let found = crate::config::SERVERLESS.iter().find(|(n, _)| *n == name).map(|(_, b)| b.to_vec());
-        found.with_context(|| format!("this build of {} has no serverless node: {} update builds one, on a Linux device with Rust", crate::config::NAME, crate::config::CLI))
+        let found = crate::config::CLOUDFLARE_NODE.iter().find(|(n, _)| *n == name).map(|(_, b)| b.to_vec());
+        found.with_context(|| format!("this build of {} has no Cloudflare node: {} update builds one, on a Linux device with Rust", crate::config::NAME, crate::config::CLI))
     };
-    Ok(modules_from(built("one_serverless.js")?, built("one_serverless_bg.wasm")?))
+    Ok(modules_from(built("one_cloudflare_node.js")?, built("one_cloudflare_node_bg.wasm")?))
 }
 
 /// Its modules, from its WebAssembly's glue and the WebAssembly, as wasm-bindgen makes them.
 pub fn modules_from(glue: Vec<u8>, wasm: Vec<u8>) -> Vec<(String, &'static str, Vec<u8>)> {
-    let shim = include_str!("runtime/shim.js");
+    let shim = include_str!("../runtime/shim.js");
     let built_js = format!("export const shim = {};\nexport const compatibilityDate = {};\n", json!(shim), json!(crate::apps::COMPATIBILITY_DATE));
     vec![
-        ("worker.js".into(), "application/javascript+module", include_bytes!("../serverless/worker.js").to_vec()),
-        ("one_serverless.js".into(), "application/javascript+module", glue),
-        ("one_serverless_bg.wasm".into(), "application/wasm", wasm),
+        ("worker.js".into(), "application/javascript+module", include_bytes!("../../cloudflare/node/worker.js").to_vec()),
+        ("one_cloudflare_node.js".into(), "application/javascript+module", glue),
+        ("one_cloudflare_node_bg.wasm".into(), "application/wasm", wasm),
         ("built.js".into(), "application/javascript+module", built_js.into_bytes()),
     ]
 }
@@ -58,11 +58,11 @@ pub fn metadata(settings: &Settings, migration: Option<&str>, exists: impl Fn(&s
     meta
 }
 
-/// Puts the serverless node in the Cloudflare account of the install's Workers, with no address, and
+/// Puts the Cloudflare node in the Cloudflare account of the install's Workers, with no address, and
 /// the relay again, which hands it the datagrams sent to its endpoint once it's there.
 pub fn deploy(cf: &Cloudflare, settings: &Settings) -> Result<()> {
     anyhow::ensure!(settings.throwaway_person.is_none(), "a throwaway network's Workers run only beside its throwaway network");
-    anyhow::ensure!(settings.serverless_endpoint().is_some(), "the serverless node has no key: serverless deploy makes one");
+    anyhow::ensure!(settings.cloudflare_node_endpoint().is_some(), "the Cloudflare node has no key: cloudflare node deploy makes one");
     let modules = modules()?;
     let name = worker_name(SERVICE);
     let scripts = cf.scripts()?;

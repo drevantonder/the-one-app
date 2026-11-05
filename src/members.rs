@@ -23,7 +23,7 @@ pub const APP: &str = "node";
 pub const APPS_PART: &str = "apps";
 /// The kinds of node entry that say a release of the node's or a service's program (`release`).
 pub const RELEASES: [&str; 2] = ["node-release", "service-release"];
-/// Agents' built-in service (`src/agents.rs`), whose Vault requests are theirs: here too for the serverless node.
+/// Agents' built-in service (`src/agents.rs`), whose Vault requests are theirs: here too for the Cloudflare node.
 pub const AGENTS: &str = "agents";
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
@@ -538,9 +538,9 @@ impl Members {
     /// the install, for `global`.
     pub fn runs_for(&self, endpoint: &Key, scope: &Scope) -> bool {
         let Some(m) = self.compute(endpoint) else {
-            // The serverless node, as an admin's setting names it: `global` and groups as any admin's machine, and a
+            // The Cloudflare node, as an admin's setting names it: `global` and groups as any admin's machine, and a
             // person's own scope only once their own device chose it (`runs`), as any other.
-            return self.serverless() == Some(*endpoint)
+            return self.cloudflare_node() == Some(*endpoint)
                 && match scope {
                     Scope::User(u) => self.runs.get(u).is_some_and(|on| on.contains(endpoint)),
                     Scope::Group(_) | Scope::Global => true,
@@ -553,8 +553,8 @@ impl Members {
         }
     }
 
-    /// The serverless node's endpoint, as an admin's `serverless` setting names it.
-    pub fn serverless(&self) -> Option<Key> {
+    /// The Cloudflare node's endpoint, as an admin's `serverless` setting names it (the setting keeps its old name: every device reads it from the signed entries).
+    pub fn cloudflare_node(&self) -> Option<Key> {
         self.settings.get("serverless").and_then(|k| unhex(k).ok())
     }
 
@@ -759,7 +759,7 @@ impl Members {
             "runs" => {
                 // Only from the person's own device (`counts`), for their own scope: an admin can't say where it runs.
                 let on = data["on"].as_array().context("on is a list of endpoints' keys")?.iter().map(|k| unhex(k.as_str().unwrap_or(""))).collect::<Result<BTreeSet<_>>>()?;
-                ensure!(on.iter().all(|k| self.compute(k).is_some() || self.serverless() == Some(*k)), "only the install's machines that run things, and its serverless node, run someone's own");
+                ensure!(on.iter().all(|k| self.compute(k).is_some() || self.cloudflare_node() == Some(*k)), "only the install's machines that run things, and its Cloudflare node, run someone's own");
                 self.runs.insert(w, on);
             }
             "grant" => {
@@ -792,7 +792,7 @@ impl Members {
                 ensure!(n == self.vaults.get(&scope).map_or(0, |v| v.n) as u64 + 1, "a Vault key follows the one before it");
                 let public = key_of("public")?;
                 let to = data["to"].as_array().context("no to")?.iter().map(|k| unhex(k.as_str().unwrap_or(""))).collect::<Result<Vec<_>>>()?;
-                ensure!(to.iter().all(|k| self.compute(k).is_some() || self.serverless() == Some(*k)), "a Vault opens only on the install's machines that run things");
+                ensure!(to.iter().all(|k| self.compute(k).is_some() || self.cloudflare_node() == Some(*k)), "a Vault opens only on the install's machines that run things");
                 self.vault_publics.insert((scope.clone(), n as u32), public);
                 self.vaults.insert(scope, VaultKey { n: n as u32, public, to });
             }
@@ -1750,7 +1750,7 @@ mod tests {
         add(&mut entries, &mut mac, ANDRE, epoch(&work, 1, &[mac_id], &H.repeat(64)));
         add(&mut entries, &mut mac, ANDRE, invite("c000000000000003", BOB, Role::Member));
         add(&mut entries, &mut bobs, BOB, accept("c000000000000003"));
-        // Apps of the group's, the admins' and Bob's, and a serverless node, which change nothing owed.
+        // Apps of the group's, the admins' and Bob's, and a Cloudflare node, which change nothing owed.
         add(&mut entries, &mut mac, ANDRE, node("app", json!({ "name": "notes", "owner": "group:c000000000000003" })));
         add(&mut entries, &mut mac, ANDRE, node("app", json!({ "name": "board", "owner": "admins" })));
         add(&mut entries, &mut bobs, BOB, node("app", json!({ "name": "bobs", "owner": format!("user:{BOB}") })));

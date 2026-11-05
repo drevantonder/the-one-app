@@ -263,10 +263,10 @@ impl ScopeDb {
     }
 
     /// The nodes that run calls, each with the key what's handed it is sealed to: the devices listed as compute, and
-    /// the serverless node, whose seal key is its key's twin.
+    /// the Cloudflare node, whose seal key is its key's twin.
     pub fn nodes(&self) -> Vec<(Key, Key)> {
         let mut out: Vec<(Key, Key)> = self.computes().into_iter().map(|d| (d.key, d.seal)).collect();
-        if let Some(k) = self.serverless()
+        if let Some(k) = self.cloudflare_node()
             && let Ok(seal) = crate::cloudflare::twin_public(&k)
         {
             out.push((k, seal));
@@ -516,8 +516,8 @@ impl ScopeDb {
         self.machine(k).map(|m| m.seal)
     }
 
-    /// The serverless node, as an admin's `serverless` setting names it.
-    pub fn serverless(&self) -> Option<Key> {
+    /// The Cloudflare node, as an admin's `serverless` setting names it (the setting keeps its old name: every device reads it from the signed entries).
+    pub fn cloudflare_node(&self) -> Option<Key> {
         self.setting("serverless").and_then(|k| unhex(&k).ok())
     }
 
@@ -792,7 +792,7 @@ pub(crate) mod tests {
         let dbg = |v: &dyn std::fmt::Debug| format!("{v:?}");
         assert_eq!((db.name(), db.root(), db.devices_at()), (m.name.clone(), m.root, m.devices_at));
         assert_eq!((db.recovery(), db.recovery_was(), db.recovery_set(), db.recovery_used()), (m.recovery, m.recovery_was.clone(), m.recovery_set, m.recovery_used.clone()));
-        assert_eq!(db.serverless(), m.serverless());
+        assert_eq!(db.cloudflare_node(), m.cloudflare_node());
         assert_eq!(db.scopes(), m.scopes());
         assert_eq!(db.settings(), m.settings);
         assert_eq!(dbg(&db.switches()), dbg(&m.services));
@@ -845,7 +845,7 @@ pub(crate) mod tests {
         assert_eq!(dbg(&db.machines().iter().map(|d| d.key).collect::<Vec<_>>()), dbg(&m.machines.keys().collect::<Vec<_>>()));
         assert_eq!(dbg(&db.clients()), dbg(&m.clients().collect::<Vec<_>>()));
         assert_eq!(dbg(&db.computes()), dbg(&m.computes().collect::<Vec<_>>()));
-        let nodes: Vec<(Key, Key)> = m.computes().map(|c| (c.key, c.seal)).chain(m.serverless().and_then(|k| Some((k, crate::cloudflare::twin_public(&k).ok()?)))).collect();
+        let nodes: Vec<(Key, Key)> = m.computes().map(|c| (c.key, c.seal)).chain(m.cloudflare_node().and_then(|k| Some((k, crate::cloudflare::twin_public(&k).ok()?)))).collect();
         assert_eq!(db.nodes(), nodes);
         for s in m.scopes() {
             assert_eq!(dbg(&db.openers(&s)), dbg(&m.clients().filter(|c| m.may_use(&c.user, &s)).collect::<Vec<_>>()));

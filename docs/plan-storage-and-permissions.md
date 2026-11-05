@@ -35,7 +35,7 @@ Each database is stored and read the same way:
 - a copy needs no signer. It's good if its hash matches the hash recorded in the step it covers.
 
 Who holds what:
-- nodes and the serverless node keep copies in SQLite;
+- nodes and the Cloudflare node keep copies in SQLite;
 - clients keep copies through the client crate (`client/`: WebAssembly in browsers, `client/ffi` in native apps), and screens read through TanStack DB, which keeps an optimistic layer until the client's copy reaches the write's position;
 - a new device starts from the position and hash handed over by the device that approved it (a Welcome);
 - a device offline for longer than the retention period comes back in the same way.
@@ -73,7 +73,7 @@ In the files affected, roughly 4,800 lines become about 3,000.
 **Code layout:**
 - the domain's parts: `src/key/`, `src/database/`, `src/permissions/`, `src/blob/`, `src/call/`, `src/app/`;
 - what's made of them: devices, the Vault, backups, services and schedules;
-- where they run: node, the Workers on Cloudflare, serverless and clients.
+- where they run: node, the Workers on Cloudflare, the Cloudflare node and clients.
 
 Each folder's module doc is its architecture. The file map is generated from those docs, and a test fails if a folder has none. ARCHITECTURE.md comes down to one page: what the product is, the trust model, the three rules, and what's designed but not built.
 
@@ -88,7 +88,7 @@ This phase is docs only.
 ### Phase 1, expand: there's no wire change, and the log is still the truth
 
 1. **The permissions engine.** It's pure Rust: types, relations, roles as data, default roles, `may`, unknown means no, no escalation, and the last admin.
-2. **The scope database**, built deterministically from the existing log on every reader (node, serverless and client crate) and kept up to date as entries arrive. Its tables are listed under "The scope database's tables" below.
+2. **The scope database**, built deterministically from the existing log on every reader (node, Cloudflare node and client crate) and kept up to date as entries arrive. Its tables are listed under "The scope database's tables" below.
 3. **Readers switch to it.** Every use of `Members` or `is_admin`, the client crate's checks, the browser's checks (through the client crate's WebAssembly) and the remote MCP server's reading all query the scope database and `may`. Nothing writes to it yet. **Phase 1 is done when nothing but the builder reads entries.**
 4. **Storage, for every database:**
    - signatures and state hashes go in an object beside each step (`<prefix>/<n>.sig`), which older readers ignore;
@@ -163,7 +163,7 @@ Every row change is in a signed step, so "who did what" for seven years is the s
 | E | 1.6 | Clients sync with TanStack DB | none | the screens' shared JavaScript |
 | F1 | 1.3 | The node reads the scope database and `may` | B, C | `src/node/`, `src/*.rs` callers |
 | F2 | 1.3 | The client crate and the browser | B, C | `client/`, `cloudflare/web/` |
-| F3 | 1.3 | The remote MCP server and the serverless node | B, C | `cloudflare/mcp/`, `serverless/` |
+| F3 | 1.3 | The remote MCP server and the Cloudflare node | B, C | `cloudflare/mcp/`, `cloudflare/node/` |
 | G | 1.5 | Apps' `ctx.may` and Repos | F1 | `src/apps.rs`, `apps/repos/` |
 | H | 2 | Switching over, with its gate | all of phase 1, and every device on R1 | one owner |
 | I1–I4 | 3 | Delete, rename to keep, move folders, finish the docs | H | split by area |

@@ -93,8 +93,8 @@ pub fn run(rest: &[String]) -> Result<()> {
     if rest.first().map(String::as_str) == Some("client") && rest.get(1).map(String::as_str) == Some("web") {
         web_client_built(&checkout, rest)?;
     }
-    if rest.iter().map(String::as_str).eq(["serverless", "deploy"]) {
-        serverless_built(&checkout, rest)?;
+    if rest.iter().map(String::as_str).eq(["cloudflare", "node", "deploy"]) {
+        cloudflare_node_built(&checkout, rest)?;
     }
     let addr = match running(&dir) {
         Some(addr) if !older_build(&dir) => addr,
@@ -109,8 +109,8 @@ pub fn run(rest: &[String]) -> Result<()> {
         None => start(&dir)?,
     };
     let cloudflare = dir.join("cloudflare").join("settings.json");
-    if rest.iter().map(String::as_str).eq(["serverless", "deploy"]) {
-        return serverless(&dir);
+    if rest.iter().map(String::as_str).eq(["cloudflare", "node", "deploy"]) {
+        return cloudflare_node(&dir);
     }
     if rest.first().map(String::as_str) == Some("client") {
         let settings = load_cloudflare(&dir)?;
@@ -177,21 +177,21 @@ fn git(dir: &Path, args: &[String]) -> Result<()> {
     Ok(())
 }
 
-/// Runs the throwaway network's serverless node beside its Workers, in their workerd, as `serverless deploy` puts one in
+/// Runs the throwaway network's Cloudflare node beside its Workers, in their workerd, as `cloudflare node deploy` puts one in
 /// Cloudflare: its devices answer its endpoint.
-fn serverless(dir: &Path) -> Result<()> {
-    anyhow::ensure!(one::serverless::modules().is_ok(), "this build has no serverless node: run this checkout's own build, target/debug/{CLI} throwaway serverless deploy, which builds it");
+fn cloudflare_node(dir: &Path) -> Result<()> {
+    anyhow::ensure!(one::cloudflare::node::modules().is_ok(), "this build has no Cloudflare node: run this checkout's own build, target/debug/{CLI} throwaway cloudflare node deploy, which builds it");
     let mut settings = load_cloudflare(dir)?;
-    if !settings.serverless {
-        settings.serverless = true;
+    if !settings.cloudflare_node {
+        settings.cloudflare_node = true;
         with_home(dir, || settings.save())?;
         stop_some(dir, false, false)?;
         start(dir)?;
     }
     let addr = running(dir).context("the throwaway network didn't start again")?;
-    let key = settings.serverless_endpoint().context("the throwaway network's Workers have no serverless key")?;
+    let key = settings.cloudflare_node_endpoint().context("the throwaway network's Workers have no Cloudflare node key")?;
     crate::request(throwaway_agent(dir).post(format!("http://{addr}/v1/settings")).send_json(json!({ "name": "serverless", "value": key })))?;
-    println!("The throwaway network's serverless node runs beside its Workers, its endpoint {}.", &key[..8]);
+    println!("The throwaway network's Cloudflare node runs beside its Workers, its endpoint {}.", &key[..8]);
     Ok(())
 }
 
@@ -211,7 +211,7 @@ fn usage() -> String {
   {CLI} throwaway mcp              its MCP server, for an agent: claude mcp add {CLI}-throwaway -- {mcp}
   {CLI} throwaway sign-in          sign its CLI in as its person, with no browser
   {CLI} throwaway git <args>       git, reaching its repos at its address: {CLI} throwaway git clone <address>/repos/<owner>/<repo>.git, then {CLI} throwaway git push in the clone
-  {CLI} throwaway serverless deploy    run its serverless node beside its Workers, as Cloudflare would
+  {CLI} throwaway cloudflare node deploy    run its Cloudflare node beside its Workers, as Cloudflare would
   {CLI} throwaway client <kind>    a signed-in client of this checkout's build: web, android or windows
   {CLI} throwaway client <kind> --as sam    the same, as someone else, invited by you with Add Someone's link
   {CLI} throwaway stop             stop and delete it, and give back its devices; {CLI} throwaway then starts a new one"
@@ -672,21 +672,21 @@ fn web_client_built(checkout: &Path, rest: &[String]) -> Result<()> {
     rebuilt(checkout, rest, &format!("target/debug/{CLI} again with the web client"))
 }
 
-/// For `throwaway serverless deploy` from this checkout's own debug build: the serverless node's WebAssembly built (as a dev
-/// build, not release) into target/serverless, and this build made again with it, as `throwaway client web` does with the
+/// For `throwaway cloudflare node deploy` from this checkout's own debug build: the Cloudflare node's WebAssembly built (as a dev
+/// build, not release) into target/cloudflare-node, and this build made again with it, as `throwaway client web` does with the
 /// client's, so the two builds agree: every build of this checkout holds both once they're there, and the throwaway network's
-/// relay (which names the serverless node) starts for any of them.
-fn serverless_built(checkout: &Path, rest: &[String]) -> Result<()> {
+/// relay (which names the Cloudflare node) starts for any of them.
+fn cloudflare_node_built(checkout: &Path, rest: &[String]) -> Result<()> {
     let own = checkout.join("target/debug").join(env!("CARGO_BIN_NAME"));
-    if std::env::current_exe().ok().and_then(|e| e.canonicalize().ok()) != own.canonicalize().ok() || one::serverless::modules().is_ok() {
+    if std::env::current_exe().ok().and_then(|e| e.canonicalize().ok()) != own.canonicalize().ok() || one::cloudflare::node::modules().is_ok() {
         return Ok(());
     }
-    eprintln!("Building the serverless node's WebAssembly (the first time takes minutes; cargo keeps what hasn't changed)…");
-    crate::update::serverless(checkout, &checkout.join(one::config::CONFIG_FILE), "dev")?;
-    rebuilt(checkout, rest, &format!("target/debug/{CLI} again with the serverless node"))
+    eprintln!("Building the Cloudflare node's WebAssembly (the first time takes minutes; cargo keeps what hasn't changed)…");
+    crate::update::cloudflare_node(checkout, &checkout.join(one::config::CONFIG_FILE), "dev")?;
+    rebuilt(checkout, rest, &format!("target/debug/{CLI} again with the Cloudflare node"))
 }
 
-/// Builds this checkout's debug build again, which takes the web client and serverless node from target/ (build.rs, what
+/// Builds this checkout's debug build again, which takes the web client and Cloudflare node from target/ (build.rs, what
 /// `cargo test` does too, so they build the same one) and watches the files there; the first time, it's watching none,
 /// so touching build.rs has it look. The throwaway network's programs run the old build, so the command is run again as the new
 /// build, which starts them again (when no client session is running).
@@ -696,7 +696,7 @@ fn rebuilt(checkout: &Path, rest: &[String], what: &str) -> Result<()> {
     anyhow::ensure!(std::env::var_os(&again).is_none(), "{CLI} was built again and doesn't hold what it was built with: {what}");
     eprintln!("Building {what} (dev profile, not release)…");
     std::fs::File::options().write(true).open(checkout.join("build.rs"))?.set_modified(std::time::SystemTime::now())?;
-    crate::update::run_quiet(std::process::Command::new("nice").arg(crate::update::cargo()).current_dir(checkout).env_remove("CLIENT").env_remove("SERVERLESS").arg("build"))?;
+    crate::update::run_quiet(std::process::Command::new("nice").arg(crate::update::cargo()).current_dir(checkout).env_remove("CLIENT").env_remove("CLOUDFLARE_NODE").arg("build"))?;
     use std::os::unix::process::CommandExt;
     Err(std::process::Command::new(&own).arg("throwaway").args(rest).env(&again, "1").exec().into())
 }

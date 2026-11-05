@@ -2884,7 +2884,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "one-serverless"
+name = "one-cloudflare-node"
 version = "0.1.0"
 dependencies = [
  "anyhow",

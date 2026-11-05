@@ -43,16 +43,16 @@ pub fn wasm(entry: &str) -> Vec<(String, Vec<u8>)> {
         .collect()
 }
 
-/// The serverless node's modules, as `serverless::modules` gives them.
+/// The Cloudflare node's modules, as `node::modules` gives them.
 pub type Modules = Vec<(String, &'static str, Vec<u8>)>;
 
-/// A service's modules besides its own, (name, bytes): its WebAssembly, and for the remote MCP server the serverless node's
-/// build (`serverless`), which runs its devices' endpoints. None if there's none.
-pub fn modules_of(service: &str, entry: &str, serverless: Option<&Modules>) -> Option<Vec<(String, Vec<u8>)>> {
+/// A service's modules besides its own, (name, bytes): its WebAssembly, and for the remote MCP server the Cloudflare node's
+/// build (`cloudflare_node`), which runs its devices' endpoints. None if there's none.
+pub fn modules_of(service: &str, entry: &str, cloudflare_node: Option<&Modules>) -> Option<Vec<(String, Vec<u8>)>> {
     let mut out = wasm(entry);
     if service == "mcp" {
-        let built = serverless?.clone();
-        out.extend(built.into_iter().filter(|(name, _, _)| name.starts_with("one_serverless")).map(|(name, _, bytes)| (name, bytes)));
+        let built = cloudflare_node?.clone();
+        out.extend(built.into_iter().filter(|(name, _, _)| name.starts_with("one_cloudflare_node")).map(|(name, _, bytes)| (name, bytes)));
     }
     Some(out)
 }
@@ -70,9 +70,9 @@ pub struct Settings {
     pub address: String,
     /// Where the CLI's Cloudflare commands reach sign-in; people reach it at the address.
     pub sign_in_url: String,
-    /// Whether the install has a serverless node (`serverless deploy`), which the relay wakes.
+    /// Whether the install has a Cloudflare node (`cloudflare node deploy`), which the relay wakes.
     #[serde(default)]
-    pub serverless: bool,
+    pub cloudflare_node: bool,
     /// The local ports the sign-in and the gateway listen on, when this machine runs them. The other services
     /// have none: other Workers reach them by binding.
     pub ports: [u16; 2],
@@ -85,9 +85,9 @@ pub struct Settings {
     /// device names beside it (`sign_in_proof`). None for Workers made before their install.
     #[serde(skip)]
     pub genesis: Option<String>,
-    /// The serverless node's endpoint key (hex), which only its Worker holds: its public half is on the relay's list.
+    /// The Cloudflare node's endpoint key (hex), which only its Worker holds: its public half is on the relay's list.
     #[serde(default, skip_serializing)]
-    pub serverless_key: String,
+    pub cloudflare_node_key: String,
     /// Better Auth's own secret, for its cookies and the keys it keeps.
     #[serde(default, skip_serializing)]
     pub auth_secret: String,
@@ -106,7 +106,7 @@ pub struct Settings {
     /// with, `(id, secret)`.
     #[serde(default, skip_serializing)]
     pub google: Option<(String, String)>,
-    /// The API token `cloudflare deploy` and `serverless deploy` edit the Cloudflare account's Workers with, where
+    /// The API token `cloudflare deploy` and `cloudflare node deploy` edit the Cloudflare account's Workers with, where
     /// CLOUDFLARE_API_TOKEN isn't set.
     #[serde(default, skip_serializing)]
     pub cloudflare_token: Option<String>,
@@ -145,9 +145,9 @@ GOOGLE_CLIENT_SECRET=
 # The API token cloudflare deploy edits the Cloudflare account's Workers with, where CLOUDFLARE_API_TOKEN isn't set.
 # @optional
 CLOUDFLARE_API_TOKEN=
-# The serverless node's endpoint key, made by serverless deploy.
+# The Cloudflare node's endpoint key, made by cloudflare node deploy.
 # @optional
-SERVERLESS_KEY=
+CLOUDFLARE_NODE_KEY=
 # The push Worker's: the install's VAPID key (base64url PKCS#8, P-256), made with the Workers, which browsers' pushes
 # are signed with.
 # @optional
@@ -290,7 +290,7 @@ impl Settings {
         settings.auth_secret = get("AUTH_SECRET").context("no AUTH_SECRET")?;
         settings.bucket = get("BUCKET").map(|b| serde_json::from_str(&b)).transpose().context("BUCKET isn't JSON")?;
         settings.cloudflare_token = get("CLOUDFLARE_API_TOKEN");
-        settings.serverless_key = get("SERVERLESS_KEY").unwrap_or_default();
+        settings.cloudflare_node_key = get("CLOUDFLARE_NODE_KEY").unwrap_or_default();
         settings.push = PUSH_SECRETS.iter().filter_map(|name| Some((name.to_string(), get(name)?))).collect();
         // Workers from before pushes had their own make their VAPID key now, kept as its other secrets are.
         if !settings.push.contains_key("VAPID_KEY") {
@@ -320,8 +320,8 @@ impl Settings {
             name: name.into(),
             address: address.trim_end_matches('/').into(),
             sign_in_url: format!("http://127.0.0.1:{}", ports[0]),
-            serverless: false,
-            serverless_key: data_encoding::HEXLOWER.encode(&rand::random::<[u8; 32]>()),
+            cloudflare_node: false,
+            cloudflare_node_key: data_encoding::HEXLOWER.encode(&rand::random::<[u8; 32]>()),
             ports,
             auth_secret: secret(),
             resources: vec![],
@@ -361,8 +361,8 @@ impl Settings {
             if let Some(bucket) = &self.bucket {
                 text += &format!("BUCKET={}\n", quoted(&bucket.to_string()));
             }
-            if !self.serverless_key.is_empty() {
-                text += &format!("SERVERLESS_KEY={}\n", quoted(&self.serverless_key));
+            if !self.cloudflare_node_key.is_empty() {
+                text += &format!("CLOUDFLARE_NODE_KEY={}\n", quoted(&self.cloudflare_node_key));
             }
             for (name, value) in &self.push {
                 text += &format!("{name}={}\n", quoted(value));
@@ -390,9 +390,9 @@ impl Settings {
         write_private(&local(), &(lines.join("\n") + "\n"))
     }
 
-    /// The serverless node's endpoint (its public key, hex), once it has a key.
-    pub fn serverless_endpoint(&self) -> Option<String> {
-        let seed: [u8; 32] = data_encoding::HEXLOWER.decode(self.serverless_key.as_bytes()).ok()?.try_into().ok()?;
+    /// The Cloudflare node's endpoint (its public key, hex), once it has a key.
+    pub fn cloudflare_node_endpoint(&self) -> Option<String> {
+        let seed: [u8; 32] = data_encoding::HEXLOWER.decode(self.cloudflare_node_key.as_bytes()).ok()?.try_into().ok()?;
         Some(data_encoding::HEXLOWER.encode(ed25519_dalek::SigningKey::from_bytes(&seed).verifying_key().as_bytes()))
     }
 
@@ -428,10 +428,10 @@ impl Settings {
         }
         let location = (!crate::config::RELAY_LOCATION.is_empty()).then(|| ("LOCATION".into(), crate::config::RELAY_LOCATION.into(), false));
         // Nor does the relay: only the keys of the install's first devices, which it starts its list with, and the
-        // serverless node's, whose datagrams it hands its Durable Object.
+        // Cloudflare node's, whose datagrams it hands its Durable Object.
         if service == "relay" {
             let devices = (!self.devices.is_empty()).then(|| ("DEVICES".into(), json!(self.devices).to_string(), false));
-            let bound = self.serverless_endpoint().filter(|_| self.serverless).map(|key| [("BOUND".into(), key, false), ("NODE".into(), format!("object:{}:Node", crate::serverless::SERVICE), false)]);
+            let bound = self.cloudflare_node_endpoint().filter(|_| self.cloudflare_node).map(|key| [("BOUND".into(), key, false), ("NODE".into(), format!("object:{}:Node", crate::cloudflare::node::SERVICE), false)]);
             // And the remote MCP server's devices, each bound to its object while it runs.
             let mcp = ("MCP".into(), "object:mcp:Client".into(), false);
             return devices.into_iter().chain(bound.into_iter().flatten()).chain([mcp]).chain(location).collect();
@@ -449,15 +449,15 @@ impl Settings {
             out.extend(location);
             return out;
         }
-        // The serverless node: its endpoint's key, and the relay it's reached through.
-        if service == crate::serverless::SERVICE {
+        // The Cloudflare node: its endpoint's key, and the relay it's reached through.
+        if service == crate::cloudflare::node::SERVICE {
             let mut out = vec![
                 ("AUTH".into(), "service:auth".into(), false),
                 ("SIGNER".into(), "service:signer".into(), false),
                 ("LOADER".into(), "loader:".into(), false),
                 ("ADDRESS".into(), self.address.clone(), false),
                 ("NAME".into(), self.name.clone(), false),
-                ("NODE_KEY".into(), self.serverless_key.clone(), true),
+                ("NODE_KEY".into(), self.cloudflare_node_key.clone(), true),
                 ("RELAY".into(), "service:relay:ServerlessNode".into(), false),
             ];
             out.extend(location);
@@ -524,20 +524,20 @@ impl Settings {
 }
 
 /// The install's Workers as one workerd runs them, with `modules` in `WORKERS`' order, and the gateway serving the
-/// web client's files from `web`; and the serverless node, if the install has one and this build carries it.
+/// web client's files from `web`; and the Cloudflare node, if the install has one and this build carries it.
 pub fn served(settings: &Settings, modules: Vec<Vec<u8>>, web: &Path) -> Vec<Served> {
-    served_with(settings, modules, web, crate::serverless::modules().ok())
+    served_with(settings, modules, web, crate::cloudflare::node::modules().ok())
 }
 
-/// `served`, with the serverless node's build `serverless` (this build's, or a test's).
-pub fn served_with(settings: &Settings, modules: Vec<Vec<u8>>, web: &Path, serverless: Option<Modules>) -> Vec<Served> {
-    let node = serverless.clone().filter(|_| settings.serverless).map(|modules| crate::serverless::served(settings, modules));
-    // A build without the serverless node's WebAssembly has no remote MCP server, and nothing binds one.
-    let mcp = serverless.is_some();
+/// `served`, with the Cloudflare node's build `cloudflare_node` (this build's, or a test's).
+pub fn served_with(settings: &Settings, modules: Vec<Vec<u8>>, web: &Path, cloudflare_node: Option<Modules>) -> Vec<Served> {
+    let node = cloudflare_node.clone().filter(|_| settings.cloudflare_node).map(|modules| crate::cloudflare::node::served(settings, modules));
+    // A build without the Cloudflare node's WebAssembly has no remote MCP server, and nothing binds one.
+    let mcp = cloudflare_node.is_some();
     WORKERS
         .iter()
         .zip(modules)
-        .filter_map(|((name, entry, class), module)| Some((name, class, module, modules_of(name, entry, serverless.as_ref())?)))
+        .filter_map(|((name, entry, class), module)| Some((name, class, module, modules_of(name, entry, cloudflare_node.as_ref())?)))
         .map(|(name, class, module, modules)| Served {
             name: name.to_string(),
             module,
@@ -901,7 +901,7 @@ pub fn build(dir: &Path, entry: &str) -> Result<Vec<u8>> {
         run(&["install", "--frozen-lockfile"])?;
     }
     let out = dir.join("out.js");
-    run(&["build", entry, "--target=browser", "--format=esm", "--external=cloudflare:*", "--external=node:*", "--external=*.wasm", "--external=*/one_serverless.js", &format!("--outfile={}", out.display())])?;
+    run(&["build", entry, "--target=browser", "--format=esm", "--external=cloudflare:*", "--external=node:*", "--external=*.wasm", "--external=*/one_cloudflare_node.js", &format!("--outfile={}", out.display())])?;
     Ok(std::fs::read(out)?)
 }
 
@@ -1226,7 +1226,7 @@ pub fn metadata(settings: &Settings, service: &str, class: Option<&str>, migrati
                 bindings.push(binding)
             }
             Some(_) => complete = false,
-            // Another Worker's class, once it's there: the relay and the serverless node each bind the other's, so the
+            // Another Worker's class, once it's there: the relay and the Cloudflare node each bind the other's, so the
             // first of them deployed goes without, and has it when it's deployed again.
             None if object.is_some() => {
                 if let Some((other, class)) = object.filter(|(other, _)| exists(&worker_name(other))) {
@@ -1278,7 +1278,7 @@ pub fn deploy_some(cf: &Cloudflare, settings: &Settings, modules: &[Vec<u8>], we
             let migration = scripts.get(&name).and_then(|s| s.migration.clone());
             let (mut meta, complete) = metadata(settings, service, class, migration.as_deref(), |other| scripts.contains_key(other) || other == name);
             let url = settings.place(service).map(|(url, _)| url);
-            let Some(wasm) = modules_of(service, WORKERS[i].1, crate::serverless::modules().ok().as_ref()) else { bail!("this build has no serverless node, which the {service} service runs: {} update builds one", crate::config::CLI) };
+            let Some(wasm) = modules_of(service, WORKERS[i].1, crate::cloudflare::node::modules().ok().as_ref()) else { bail!("this build has no Cloudflare node, which the {service} service runs: {} update builds one", crate::config::CLI) };
             let mut what = vec![meta.to_string().into_bytes(), modules[i].clone(), url.unwrap_or("").as_bytes().to_vec()];
             what.extend(wasm.iter().flat_map(|(name, bytes)| [name.as_bytes().to_vec(), bytes.clone()]));
             if service == "gateway" {

@@ -27,7 +27,7 @@
 //! one made without sign-in's code in between. Email links and passwords make no proof: only sign-in can check those, so
 //! they're approved by code.
 //!
-//! What's checked needs `sign-in-proof` (ring), which the serverless node, approving no one, goes without.
+//! What's checked needs `sign-in-proof` (ring), which the Cloudflare node, approving no one, goes without.
 
 #[cfg(feature = "sign-in-proof")]
 use anyhow::{Context, Result, bail, ensure};

@@ -1,7 +1,7 @@
 // The remote MCP server: remote MCP clients' device. ChatGPT, Claude.ai and the like can't run our code, so each one a person
 // signs in with is a device of theirs here, a client of the install like any app, which the person approves like any
 // device. It speaks MCP to them over HTTPS at `<address>/mcp`, and asks a node's own `/mcp` as that device, over iroh
-// (`<cli>/http/1`, one-client in serverless/src/clients.rs), handing it the keys a call needs, sealed to that node and
+// (`<cli>/http/1`, one-client in cloudflare/node/src/clients.rs), handing it the keys a call needs, sealed to that node and
 // bound to the device's key; it sends nodes no token.
 //
 // A device's secret is kept only sealed under its client's own tokens (copies.js), so nothing here opens it alone: the
@@ -19,7 +19,7 @@
 //
 // It trusts no node for who's who or for keys: it reads the install's signed entries from the bucket itself, through
 // the URL signer, replays them as nodes do, and asks the scope database it builds from them, with the same Rust as
-// every node (serverless/src/clients.rs). It asks only the compute endpoints that lists as running its person's
+// every node (cloudflare/node/src/clients.rs). It asks only the compute endpoints that lists as running its person's
 // calls, hands each only the keys of the scopes it runs, of databases an MCP request uses (`mayHand`) and epochs from
 // each one's newest copy, and takes a 428 only from the node that answered, for its own listed seal key. What a tool needed is kept per tool, so a call hands only its own.
 //
@@ -28,8 +28,8 @@
 // optional).
 
 import { DurableObject } from "cloudflare:workers";
-import { initSync, device_start, device_deliver, device_fetch, device_nodes, device_close, device_view, device_keys, following } from "./one_serverless.js";
-import wasm from "./one_serverless_bg.wasm";
+import { initSync, device_start, device_deliver, device_fetch, device_nodes, device_close, device_view, device_keys, following } from "./one_cloudflare_node.js";
+import wasm from "./one_cloudflare_node_bg.wasm";
 import { b64u, ed25519Public, hex, joinCode, mayHand, random, sealHandoff, signedRequest, untilTaken } from "../shared/crypto.js";
 import { Issuer, bearer } from "../shared/token.js";
 import { Copies } from "./copies.js";
@@ -218,7 +218,7 @@ function needOf(n) {
 
 const sameNeed = (a, b) => a.scope === b.scope && a.app === b.app && a.database === b.database;
 
-/// The bucket as the device's Rust reads it (serverless/src/lib.rs `Js`), through the URL signer, signed with the
+/// The bucket as the device's Rust reads it (cloudflare/node/src/lib.rs `Js`), through the URL signer, signed with the
 /// device's key: it gives URLs only to the install's endpoints. The steps after one are signed with it, as they're read
 /// next.
 class Bucket {

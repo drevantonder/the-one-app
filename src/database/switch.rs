@@ -1,6 +1,6 @@
 //! Phase 2's switch (docs/plan-storage-and-permissions.md): the scope database becomes the truth, and the log is
 //! frozen. It's one constant, `SWITCH`, and it waits for its gate: every device listed in the install that reads who's
-//! who (each person's devices and each machine that runs things, and the serverless node) says it reads the scope
+//! who (each person's devices and each machine that runs things, and the Cloudflare node) says it reads the scope
 //! database (`READS`), or an admin said it's gone for good (`SKIPS`).
 //!
 //! A device says what it reads as it asks: a client in every request (`HEADER`, from the client crate, which every
@@ -75,10 +75,10 @@ impl Gate {
 }
 
 /// The devices whose builds the gate waits for: every listed client (but a passkey, which runs nothing) and machine
-/// that runs things, and the serverless node. A service endpoint reads no who's who: its device's node asks for it.
+/// that runs things, and the Cloudflare node. A service endpoint reads no who's who: its device's node asks for it.
 pub fn readers(db: &ScopeDb) -> Vec<Key> {
     let mut keys: Vec<Key> = db.machines().into_iter().filter(|m| !m.removed && m.passkey.is_none() && (m.is(crate::members::Kind::Client) || m.is(crate::members::Kind::Compute))).map(|m| m.key).collect();
-    keys.extend(db.serverless());
+    keys.extend(db.cloudflare_node());
     keys.sort();
     keys.dedup();
     keys
@@ -119,7 +119,7 @@ pub fn gate_json(db: &ScopeDb, reads: &HashMap<Key, Reads>) -> serde_json::Value
     let g = gate(db, reads);
     let named = |k: &Key| {
         let m = db.machine_ever(k);
-        serde_json::json!({ "key": hex(k), "name": m.as_ref().map(|m| m.name.clone()).or_else(|| (db.serverless() == Some(*k)).then(|| "the serverless node".into())), "user": m.map(|m| m.user) })
+        serde_json::json!({ "key": hex(k), "name": m.as_ref().map(|m| m.name.clone()).or_else(|| (db.cloudflare_node() == Some(*k)).then(|| "the Cloudflare node".into())), "user": m.map(|m| m.user) })
     };
     let waiting: Vec<serde_json::Value> = g
         .waiting

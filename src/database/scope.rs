@@ -380,7 +380,7 @@ fn install(db: &Connection, m: &Members) -> Result<()> {
 /// Who holds which role on what, in `permissions`' words, as replay says now: only people still in, and devices
 /// still listed, hold any. Which devices run a scope's calls is a `runner` row for each, as `Members::runs_for`
 /// says: for a group or `global` that follows from its admins, so it's worked out here rather than kept as a rule.
-/// The serverless node, which an admin's setting names, is the install's admins' device.
+/// The Cloudflare node, which an admin's setting names, is the install's admins' device.
 fn relations(db: &Connection, m: &Members) -> Result<()> {
     let add = |subject: &str, relation: &str, object: &str| db.execute("INSERT OR IGNORE INTO relations VALUES (?, ?, ?, NULL)", params![subject, relation, object]);
     for u in m.users.values().filter(|u| !u.removed) {
@@ -399,10 +399,10 @@ fn relations(db: &Connection, m: &Members) -> Result<()> {
             add(&users, "user", &service(&d.key))?;
         }
     }
-    if let Some(key) = m.serverless() {
+    if let Some(key) = m.cloudflare_node() {
         add(&format!("{}#admin", permissions::INSTALL), "admin", &device(&key))?;
     }
-    let runners = m.computes().map(|c| c.key).chain(m.serverless());
+    let runners = m.computes().map(|c| c.key).chain(m.cloudflare_node());
     for key in runners {
         for scope in m.scopes().iter().filter(|s| m.runs_for(&key, s)) {
             add(&device(&key), "runner", &object(scope))?;
@@ -499,7 +499,7 @@ pub(crate) mod tests {
         assert_eq!(chosen, m.runs.keys().map(|u| person(u)).collect::<Vec<_>>(), "who said where their things run, even nowhere else");
         let clients = rows("SELECT d.key FROM devices d JOIN principals p ON p.id = d.principal WHERE d.removed = 0 AND p.removed = 0 AND d.client = 1 ORDER BY d.key");
         assert_eq!(clients, m.clients().map(|c| hex(&c.key)).collect::<Vec<_>>(), "the clients, which sign for their people");
-        for k in m.machines.keys().chain(m.serverless().as_ref()) {
+        for k in m.machines.keys().chain(m.cloudflare_node().as_ref()) {
             for s in &scopes {
                 assert_eq!(may(&device(k), "run", &object(s)), m.runs_for(k, s), "{} runs {s}", hex(k));
             }

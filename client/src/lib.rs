@@ -52,7 +52,7 @@ mod config {
 /// How long a connection to a node may take before the next is started alongside it: the first up is asked, and the
 /// rest are kept for later. A connection carries nothing but itself, so racing them hands no node anything.
 const STAGGER: Duration = Duration::from_millis(250);
-/// How long the nodes the relay says are on are given before those it doesn't (the serverless node, which wakes when
+/// How long the nodes the relay says are on are given before those it doesn't (the Cloudflare node, which wakes when
 /// asked, and any that may have come on since) are raced too.
 const FALLBACK: Duration = Duration::from_secs(1);
 /// How long a connection to a node has to open.

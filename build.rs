@@ -101,8 +101,9 @@ fn main() {
     println!("cargo:rerun-if-changed={}", cloudflare.display());
     let mut files = Vec::new();
     collect(&cloudflare, &cloudflare, &mut files);
-    // The relay's WebAssembly is built from relay/protos/ by hand (relay/build.sh), so only what it built ships.
-    files.retain(|(rel, _)| !rel.starts_with("test/") && !rel.starts_with("relay/protos/") && rel != "relay/build.sh");
+    // The relay's WebAssembly is built from relay/protos/ by hand (relay/build.sh), so only what it built ships; the
+    // Cloudflare node (node/) is Rust, which ships built (CLOUDFLARE_NODE, below).
+    files.retain(|(rel, _)| !rel.starts_with("test/") && !rel.starts_with("relay/protos/") && rel != "relay/build.sh" && !rel.starts_with("node/"));
     // The gateway serves the screens' design kit beside the web client, the same files nodes put in screens.
     let screen = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap()).join("src/screen");
     println!("cargo:rerun-if-changed={}", screen.display());
@@ -127,21 +128,21 @@ fn main() {
     files.sort();
     let files: Vec<String> = files.iter().map(|(rel, abs)| format!("({rel:?}, include_bytes!({abs:?}))")).collect();
     let out = format!("{out}pub const CLOUDFLARE: &[(&str, &[u8])] = &[{}];\n", files.join(", "));
-    // The serverless node's WebAssembly and its glue (serverless/), which `update` builds into SERVERLESS where Rust
+    // The Cloudflare node's WebAssembly and its glue (cloudflare/node/), which `update` builds into CLOUDFLARE_NODE where Rust
     // builds for WebAssembly, so a release carries them to devices with no Rust to deploy it from.
-    // With no SERVERLESS, the one in target/serverless, if it's there (`throwaway serverless deploy` builds it, as `throwaway client
+    // With no CLOUDFLARE_NODE, the one in target/cloudflare-node, if it's there (`throwaway cloudflare node deploy` builds it, as `throwaway client
     // web` does the client's), so every build of a checkout is the same one: not the node's own, which holds `one`.
-    println!("cargo:rerun-if-env-changed=SERVERLESS");
-    let names = ["one_serverless.js", "one_serverless_bg.wasm"];
+    println!("cargo:rerun-if-env-changed=CLOUDFLARE_NODE");
+    let names = ["one_cloudflare_node.js", "one_cloudflare_node_bg.wasm"];
     let wasm = std::env::var("TARGET").unwrap().starts_with("wasm32");
-    let explicit = std::env::var("SERVERLESS").ok();
-    let dir = explicit.clone().map(std::path::PathBuf::from).unwrap_or_else(|| std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap()).join("target/serverless"));
+    let explicit = std::env::var("CLOUDFLARE_NODE").ok();
+    let dir = explicit.clone().map(std::path::PathBuf::from).unwrap_or_else(|| std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap()).join("target/cloudflare-node"));
     for name in names.iter().filter(|_| explicit.is_some() || !wasm) {
         if dir.join(name).exists() {
             println!("cargo:rerun-if-changed={}", dir.join(name).display());
         }
     }
-    let serverless: Vec<String> = if explicit.is_some() || (!wasm && names.iter().all(|name| dir.join(name).exists())) {
+    let cloudflare_node: Vec<String> = if explicit.is_some() || (!wasm && names.iter().all(|name| dir.join(name).exists())) {
         names
             .iter()
             .map(|name| {
@@ -152,7 +153,7 @@ fn main() {
     } else {
         vec![]
     };
-    let out = format!("{out}pub const SERVERLESS: &[(&str, &[u8])] = &[{}];\n", serverless.join(", "));
+    let out = format!("{out}pub const CLOUDFLARE_NODE: &[(&str, &[u8])] = &[{}];\n", cloudflare_node.join(", "));
     // And the client's, for browsers (client/src/wasm.rs), in CLIENT, which the address serves the web client. With no
     // CLIENT, the one `update` and `throwaway client web` build into target/client, if it's there, so every build of a checkout
     // is the same one, with or without it, but not the client's own (it's built for WebAssembly with `one` in it, which would hold

@@ -202,6 +202,8 @@ impl Issuer {
 }
 
 #[cfg(feature = "node")]
+pub mod node;
+#[cfg(feature = "node")]
 mod workers;
 #[cfg(feature = "node")]
 pub use workers::*;

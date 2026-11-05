@@ -117,7 +117,7 @@ export class Device {
 
   /// The members as the install's signed entries say them, checked here: as last checked, or with what's new from a
   /// node if `fresh` (before it changes who opens what) or never. The first time, the install's first entry is kept,
-  /// and an install that starts with any other refused. While no node gives the entries (the serverless node doesn't),
+  /// and an install that starts with any other refused. While no node gives the entries (the Cloudflare node doesn't),
   /// it goes on with those it checked last, unless it's `fresh`.
   async checked(fresh = false) {
     if (fresh || !this.known) {

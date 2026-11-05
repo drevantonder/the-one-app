@@ -20,7 +20,7 @@ export function confirm() {
 }
 
 /**
- * The datagrams in a client's Datagrams frame, for an endpoint that isn't a socket (the serverless node): its
+ * The datagrams in a client's Datagrams frame, for an endpoint that isn't a socket (the Cloudflare node): its
  * segment size (2 bytes, 0 for one datagram), then their contents.
  * @param {Uint8Array | number[]} msg
  * @returns {Uint8Array}

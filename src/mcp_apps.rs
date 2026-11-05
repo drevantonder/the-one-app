@@ -160,7 +160,7 @@ fn changes(input: &Value) -> anyhow::Result<Value> {
     let mut events = vec![];
     let resp = to_node(agent().get(format!("http://{}/v1/events", addr()))).config().timeout_global(Some(WAIT)).build().call()?;
     if resp.status() == 204 {
-        // A node with none to say (the serverless node, while no machine is on): the view asks again after the wait.
+        // A node with none to say (the Cloudflare node, while no machine is on): the view asks again after the wait.
         std::thread::sleep(WAIT);
     } else {
         anyhow::ensure!(resp.status().is_success(), "the node's events didn't open ({})", resp.status());

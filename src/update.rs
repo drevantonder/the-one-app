@@ -18,7 +18,7 @@ const PLATFORMS: [&str; 3] = ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux
 /// Builds the tip of main and has every device run it; with a tag, also publishes it on GitHub.
 /// An update sends out only what changed since the last one here: apps by their deploy, the Mac app by each Mac building
 /// it at once, then the iPhone app for the iPhone it reaches, and the node by building it, which every Linux device then
-/// takes, and which deploys the Workers on Cloudflare (and the serverless node with it) from the device with their settings. Beside it runs `after-update` in this
+/// takes, and which deploys the Workers on Cloudflare (and the Cloudflare node with it) from the device with their settings. Beside it runs `after-update` in this
 /// device's home, if there is one: what else is built from main here, like another custom build's update.
 pub fn run(tag: Option<&str>) -> Result<()> {
     ensure!(!REPO.is_empty(), "this custom build names no repo, so it has nothing to update from");
@@ -122,8 +122,8 @@ pub fn run(tag: Option<&str>) -> Result<()> {
     println!("Building {short}");
     let mut build = Command::new(cargo());
     build.current_dir(&src).env("CONFIG", &config).args(["build", "--release"]);
-    // Every release carries the serverless node: one without it couldn't deploy to Cloudflare.
-    build.env("SERVERLESS", serverless(&src, &config, "release").context("couldn't build the serverless node, so nothing was sent out")?);
+    // Every release carries the Cloudflare node: one without it couldn't deploy to Cloudflare.
+    build.env("CLOUDFLARE_NODE", cloudflare_node(&src, &config, "release").context("couldn't build the Cloudflare node, so nothing was sent out")?);
     // And the web client's way to nodes: one without it couldn't reach them.
     build.env("CLIENT", client(&src, &config).context("couldn't build the web client's WebAssembly, so nothing was sent out")?);
     run_quiet(&mut build)?;
@@ -272,10 +272,9 @@ impl Parts {
                     }
                 }
                 Some("apple") => parts.mac = true,
-                // The Workers' sources and the serverless node's are in the node, which deploys them; the Mac's needn't.
+                // The Workers' sources and the Cloudflare node's are in the node, which deploys them; the Mac's needn't.
                 Some("cloudflare") if !file.starts_with("cloudflare/test/") => parts.node = true,
-                Some("serverless") => parts.node = true,
-                // The client is the Macs', and in the node too: its WebAssembly is the web client's, and the serverless node's.
+                // The client is the Macs', and in the node too: its WebAssembly is the web client's, and the Cloudflare node's.
                 Some("client") => (parts.node, parts.mac) = (true, true),
                 Some("docs" | "tests" | "android" | "windows" | "cloudflare") => {}
                 None if file.ends_with(".md") || file == "LICENSE" || file == ".gitignore" => {}
@@ -696,18 +695,18 @@ fn config(src: &Path) -> Result<(PathBuf, Option<String>)> {
     Ok((dir.join(CONFIG_FILE), Some(git(&dir, &["rev-parse", "HEAD"])?)))
 }
 
-/// Builds the serverless node (`serverless/`) into WebAssembly and its JavaScript glue, for the release to carry: → the
+/// Builds the Cloudflare node (`cloudflare/node/`) into WebAssembly and its JavaScript glue, for the release to carry: → the
 /// folder they're in. It needs Rust's wasm32-unknown-unknown target, a clang that builds for it (SQLite is C), and the
 /// wasm-bindgen of the version it's built with. `profile` is cargo's: a release's is `release`, a throwaway network's `dev`.
-pub fn serverless(src: &Path, config: &Path, profile: &str) -> Result<PathBuf> {
-    run_quiet(Command::new(cargo()).current_dir(src).env("CONFIG", config).args(["build", "--profile", profile, "-p", "one-serverless", "--target", "wasm32-unknown-unknown"]))
-        .context("build the serverless node (rustup target add wasm32-unknown-unknown)")?;
-    let out = src.join("target/serverless");
-    let wasm = src.join("target/wasm32-unknown-unknown").join(if profile == "dev" { "debug" } else { profile }).join("one_serverless.wasm");
-    // Its glue is only made again for a node cargo built again, as the client's is: a build that holds it (`SERVERLESS`)
+pub fn cloudflare_node(src: &Path, config: &Path, profile: &str) -> Result<PathBuf> {
+    run_quiet(Command::new(cargo()).current_dir(src).env("CONFIG", config).args(["build", "--profile", profile, "-p", "one-cloudflare-node", "--target", "wasm32-unknown-unknown"]))
+        .context("build the Cloudflare node (rustup target add wasm32-unknown-unknown)")?;
+    let out = src.join("target/cloudflare-node");
+    let wasm = src.join("target/wasm32-unknown-unknown").join(if profile == "dev" { "debug" } else { profile }).join("one_cloudflare_node.wasm");
+    // Its glue is only made again for a node cargo built again, as the client's is: a build that holds it (`CLOUDFLARE_NODE`)
     // watches these files, so rewriting them would have that build done again.
     let modified = |path: &Path| path.metadata().and_then(|m| m.modified()).ok();
-    let glued = out.join("one_serverless_bg.wasm");
+    let glued = out.join("one_cloudflare_node_bg.wasm");
     if modified(&glued).is_some_and(|glued| modified(&wasm).is_some_and(|built| glued > built)) {
         return Ok(out);
     }
@@ -716,7 +715,7 @@ pub fn serverless(src: &Path, config: &Path, profile: &str) -> Result<PathBuf> {
 }
 
 /// Builds the client (`client/`) into WebAssembly for browsers, as small as it builds, and its JavaScript glue: → the
-/// folder they're in. It needs what `serverless` does, and makes it smaller still with wasm-opt where it's installed.
+/// folder they're in. It needs what `cloudflare_node` does, and makes it smaller still with wasm-opt where it's installed.
 pub fn client(src: &Path, config: &Path) -> Result<PathBuf> {
     run_quiet(Command::new(cargo()).current_dir(src).env("CONFIG", config).args(["rustc", "-p", "one-client", "--profile", "web", "--target", "wasm32-unknown-unknown", "--crate-type", "cdylib"]))
         .context("build the client (rustup target add wasm32-unknown-unknown)")?;

@@ -26,7 +26,7 @@
 //
 // `POST /relay/computes` answers a request signed by a key on the list, or by a session's key with its certificate
 // (`one/relay`, `{ computes: true, certificate? }`, each `(by, at)` taken once, as a tell is), with the compute
-// endpoints' keys, the serverless node's among them, in no order: a new client's first nodes to ask; and `online`, those
+// endpoints' keys, the Cloudflare node's among them, in no order: a new client's first nodes to ask; and `online`, those
 // of them connected here now, which a client races first. 403 is only for a key that isn't let in; a request
 // that's wrong, or signed by a clock that's off, is 400, so a client keeps the nodes it knows.
 //
@@ -41,7 +41,7 @@
 // - `{ pairing: { hash, until } }`: the SHA-256 (hex) of a pairing code's ticket and until when it works (ms).
 // - `{ unpair }`: a pairing code's hash, to end it, by its maker or an admin.
 //
-// One endpoint isn't a socket: the serverless node (`BOUND`, its key), a Durable Object of its own Worker (`NODE`) that
+// One endpoint isn't a socket: the Cloudflare node (`BOUND`, its key), a Durable Object of its own Worker (`NODE`) that
 // sleeps until someone calls it. Datagrams sent to it go to it by RPC, gathered each turn, waking it; what it sends
 // comes back by RPC (`fromNode`, on the `ServerlessNode` entrypoint, which only its Worker binds) and goes out as from
 // it. It's one of the install's endpoints, as compute.
@@ -81,7 +81,7 @@ const is = (it, role) => !!it && it.role.split(" ").includes(role);
 /// How often a sender is told that an endpoint it sends to isn't here, and how many such it remembers.
 const GONE_EVERY = 5_000;
 const GONE_KEPT = 1024;
-/// The most datagrams for the serverless node gathered in one turn before they're handed to it.
+/// The most datagrams for the Cloudflare node gathered in one turn before they're handed to it.
 const FOR_NODE_MOST = 1024;
 
 const hex = (bytes) => [...new Uint8Array(bytes)].map((b) => b.toString(16).padStart(2, "0")).join("");
@@ -218,7 +218,7 @@ export class McpDevices extends WorkerEntrypoint {
   }
 }
 
-/// What the serverless node asks the relay, by its binding: sending as itself, and who's here.
+/// What the Cloudflare node asks the relay, by its binding: sending as itself, and who's here.
 export class ServerlessNode extends WorkerEntrypoint {
   fromNode(items) {
     return relay(this.env).fromNode(items);
@@ -415,7 +415,7 @@ export class Relay extends DurableObject {
     ws.send(endpoint_gone(unhex(to)));
   }
 
-  /// Datagrams for the serverless node, from `src`: gathered this turn, then handed to it by RPC, which wakes it.
+  /// Datagrams for the Cloudflare node, from `src`: gathered this turn, then handed to it by RPC, which wakes it.
   toNode(src, frame) {
     let d;
     try {
@@ -436,7 +436,7 @@ export class Relay extends DurableObject {
     });
   }
 
-  /// Datagrams the serverless node sends, `[dst, segment size, contents]` each, passed on as from it: → the keys of
+  /// Datagrams the Cloudflare node sends, `[dst, segment size, contents]` each, passed on as from it: → the keys of
   /// those not here, so it stops waiting for them.
   fromNode(items) {
     if (!this.env.BOUND || !Array.isArray(items)) return [];

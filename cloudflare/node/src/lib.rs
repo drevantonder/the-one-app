@@ -1,4 +1,4 @@
-//! The serverless node's Rust: the machine node's own code, as WebAssembly on Workers. `worker.js` answers requests
+//! The Cloudflare node's Rust: the machine node's own code, as WebAssembly on Workers. `worker.js` answers requests
 //! and runs apps; this checks who asks, opens the keys callers hand it, signs what it asks the URL signer, and
 //! reads and writes apps' databases in the bucket (`src/db.rs`), through the presigned URLs `worker.js` gets. It holds
 //! no keys but those handed it for a device's requests.
@@ -374,13 +374,13 @@ pub fn statements(appends: &str, scopes: &str) -> Result<String, JsError> {
                     return Err(JsError::new(&format!("the call didn't name {scope}")));
                 }
                 if !blobs.is_empty() {
-                    return Err(JsError::new("a serverless node doesn't keep blobs yet: use a node on one of your machines"));
+                    return Err(JsError::new("a Cloudflare node doesn't keep blobs yet: use a node on one of your machines"));
                 }
                 out.entry(scope).or_insert_with(|| json!([])).as_array_mut().unwrap().push(json!([sql, params, check]));
             }
             // What it spent on AI shows in insights, which this node doesn't keep yet: nothing is lost by not counting it.
             Append::Cost { .. } => {}
-            _ => return Err(JsError::new("a serverless node writes only an app's own data yet: use a node on one of your machines")),
+            _ => return Err(JsError::new("a Cloudflare node writes only an app's own data yet: use a node on one of your machines")),
         }
     }
     Ok(Value::Object(out).to_string())
@@ -580,7 +580,7 @@ fn replayed<R>(owner: &str, scopes: &[String], f: impl FnOnce(&Replays) -> R) ->
         let global = log_of("global").context("read global's entries first")?;
         let member_entries: Vec<Entry> = global.entries.iter().filter(|e| members::is_member_entry(e)).cloned().collect();
         let root = root(&global.entries);
-        // The serverless node keeps no fork's evidence: its members are replayed from the entries alone.
+        // The Cloudflare node keeps no fork's evidence: its members are replayed from the entries alone.
         let known = Members::replay(root, &member_entries, &Default::default());
         REPLAYED.with(|r| {
             let mut r = r.borrow_mut();
@@ -632,7 +632,7 @@ pub fn scopes_of(owner: &str, user: &str, device: &str) -> Result<String, JsErro
         let m = r.global();
         let scopes: Vec<Scope> = m.scopes().into_iter().filter(|s| m.may(user, "use", &object(s))).collect();
         let device = key.and_then(|k| m.client(&k)).filter(|d| d.user == user).map(|d| d.name);
-        let runs: Vec<String> = scopes.iter().filter(|s| m.serverless().is_some_and(|k| m.runs_for(&k, s))).map(Scope::to_string).collect();
+        let runs: Vec<String> = scopes.iter().filter(|s| m.cloudflare_node().is_some_and(|k| m.runs_for(&k, s))).map(Scope::to_string).collect();
         let scopes: Vec<String> = scopes.iter().map(Scope::to_string).collect();
         let removed = m.user_ever(user).is_some_and(|u| u.removed);
         json!({ "scopes": scopes, "joined": m.user(user).is_some(), "removed": removed, "device": device, "runs": runs })
@@ -719,7 +719,7 @@ fn view(r: &Replays, me: &str, client: &str, now: u64) -> Value {
             arrangements: Value::Object(arrangements),
             backups: None,
             guide: None,
-            // No throwaway network has a serverless node.
+            // No throwaway network has a Cloudflare node.
             passkeys: one::config::SIGN_IN != "google",
             device_now: &|_| Default::default(),
             client_now: &|_| Default::default(),

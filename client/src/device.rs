@@ -72,9 +72,9 @@ struct Known {
     who: ScopeDb,
     /// Its person.
     user: String,
-    /// The nodes it may ask, by key: their seal keys; and the serverless node, asked last, if the install has one.
+    /// The nodes it may ask, by key: their seal keys; and the Cloudflare node, asked last, if the install has one.
     nodes: HashMap<[u8; 32], [u8; 32]>,
-    serverless: Option<[u8; 32]>,
+    cloudflare_node: Option<[u8; 32]>,
     /// When it was read.
     at: u64,
 }
@@ -410,23 +410,23 @@ impl Device {
             self.epochs.lock().unwrap().insert(("global".into(), *n), *key);
         }
         let user = who.machine(&self.me.key).map(|d| d.user).ok_or_else(|| failed("This device isn't listed yet."))?;
-        // The nodes that run something of its person's, and the serverless node, which runs anyone's calls.
-        let serverless = who.serverless();
+        // The nodes that run something of its person's, and the Cloudflare node, which runs anyone's calls.
+        let cloudflare_node = who.cloudflare_node();
         let mut nodes: HashMap<[u8; 32], [u8; 32]> = HashMap::new();
         for (key, seal) in who.nodes() {
-            if Some(key) == serverless || who.serves(&key, &user) {
+            if Some(key) == cloudflare_node || who.serves(&key, &user) {
                 nodes.insert(key, seal);
             }
         }
-        *self.known.lock().unwrap() = Some(Known { who, user, nodes: nodes.clone(), serverless, at: now() });
+        *self.known.lock().unwrap() = Some(Known { who, user, nodes: nodes.clone(), cloudflare_node, at: now() });
         Ok(nodes)
     }
 
-    /// `nodes`, in the order things run on them as last said, those it wasn't told of after, and the serverless node
+    /// `nodes`, in the order things run on them as last said, those it wasn't told of after, and the Cloudflare node
     /// last of all.
     fn ordered(&self, nodes: &HashMap<[u8; 32], [u8; 32]>) -> Vec<[u8; 32]> {
         let order = self.order.lock().unwrap().clone();
-        let last = self.known.lock().unwrap().as_ref().and_then(|k| k.serverless);
+        let last = self.known.lock().unwrap().as_ref().and_then(|k| k.cloudflare_node);
         let mut out: Vec<[u8; 32]> = order.iter().filter(|k| nodes.contains_key(*k) && Some(**k) != last).copied().collect();
         let mut rest: Vec<[u8; 32]> = nodes.keys().filter(|k| !out.contains(k) && Some(**k) != last).copied().collect();
         rest.sort();
@@ -554,7 +554,7 @@ impl Device {
     // Requests.
 
     /// A request to its install's nodes as its person, with the keys it needed last time; one a node needs others for
-    /// (428) is sent again with them, a few times, as a node may find what it needs as it goes (the serverless node,
+    /// (428) is sent again with them, a few times, as a node may find what it needs as it goes (the Cloudflare node,
     /// its logs' keys first, then a call's). `/v1/state` is read for the order things run in.
     pub async fn fetch(&self, method: &str, path: &str, headers: Vec<(String, String)>, body: impl Into<Sent>) -> Result<Response, Error> {
         let body = body.into();

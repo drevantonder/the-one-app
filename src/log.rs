@@ -1,7 +1,7 @@
 //! A scope's entries in the bucket: the node's `log` of the scope, kept as an app's database is (`src/db.rs`). Each
 //! write is a step at the first free position, a pack of its entries, sealed under the scope's newest epoch; and a
 //! newest hint and now and then a copy of every entry in the steps before it, so a node that holds nothing (the
-//! serverless node) reads one copy and the few steps after it, not every step. As in a database, a step under an
+//! Cloudflare node) reads one copy and the few steps after it, not every step. As in a database, a step under an
 //! epoch lower than the step before it, or that doesn't open, is passed over, one under an epoch above every key the
 //! reader has stops it, and a copy is used only if it holds (`db::start`). Its steps have no signature beside them, as
 //! a database's do (`db::Sig`): each entry in them is signed by its author already, and phase 2 freezes the log.

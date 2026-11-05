@@ -798,12 +798,12 @@ async fn call_for(node: &Node, me: Me, body: Value, picks: bool) -> anyhow::Resu
     Ok(json!({ "ok": node.call_as(req, me.caller).await? }))
 }
 
-/// A call the serverless node passes on over iroh (src/node/net.rs): its person's, as `me.user` says, run with the keys
-/// of its databases they handed the serverless node, which it hands this device (`keys`, sealed to it for the
-/// serverless node's key, `node::passed_token`) for the scopes the call names alone, and never this device's own: no
+/// A call the Cloudflare node passes on over iroh (src/node/net.rs): its person's, as `me.user` says, run with the keys
+/// of its databases they handed the Cloudflare node, which it hands this device (`keys`, sealed to it for the
+/// Cloudflare node's key, `node::passed_token`) for the scopes the call names alone, and never this device's own: no
 /// access token comes with it, so none of theirs reaches a node on a machine, whose owner could use it as them.
 /// → `{ ok }`, or what failed as the API says it.
-pub(crate) async fn call_from_serverless(node: &Node, remote: crate::entry::Key, mut call: Value) -> Value {
+pub(crate) async fn call_from_cloudflare_node(node: &Node, remote: crate::entry::Key, mut call: Value) -> Value {
     let (me, keys) = match call.as_object_mut() {
         Some(c) => (c.remove("me").unwrap_or_default(), c.remove("keys")),
         None => (Value::Null, None),
@@ -814,7 +814,7 @@ pub(crate) async fn call_from_serverless(node: &Node, remote: crate::entry::Key,
         let handed = keys.as_ref().and_then(Value::as_str).ok_or_else(|| anyhow::anyhow!("a call passed on brings the keys it was handed"))?;
         let token = node.take_passed(&remote, &user, &call, handed, false)?;
         let client = me["client"].as_str().unwrap_or_default().to_string();
-        // As the serverless node's, never this device's own: no service counts it as its person's own node.
+        // As the Cloudflare node's, never this device's own: no service counts it as its person's own node.
         call_for(node, Me { caller: Caller { key: remote, user, agent: None, token: Some(token) }, sign_in: Some(client) }, call, false).await
     };
     ran.await.unwrap_or_else(|err| failed(&err))
@@ -882,7 +882,7 @@ async fn settings(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> 
 }
 
 /// What a device of the install reads of who's who (`database::switch`), as this machine's own program says it: the
-/// serverless node, which says nothing itself, once this machine deployed its build there.
+/// Cloudflare node, which says nothing itself, once this machine deployed its build there.
 async fn reads(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
     let device = crate::entry::unhex(&text(&body, "device")?)?;
     let reads = anyhow::Context::context(body["reads"].as_u64(), "reads is a number")? as u32;

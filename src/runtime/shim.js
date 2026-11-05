@@ -1,7 +1,7 @@
 // Every app runs inside this shim, in workerd. The app module (./app.js) is the app's deployed code; this turns it
 // into a Worker that answers the node: operations, widgets, hooks and screens. Its databases, one per scope, are the
 // node's: a query asks the node, and a call's writes are handed to it when the call returns, as one write. A node on a
-// machine asks it over HTTP (`fetch`); the serverless node by RPC (`Call`), handing it what answers for the node.
+// machine asks it over HTTP (`fetch`); the Cloudflare node by RPC (`Call`), handing it what answers for the node.
 import { AsyncLocalStorage } from "node:async_hooks";
 import { WorkerEntrypoint } from "cloudflare:workers";
 
@@ -16,7 +16,7 @@ try {
 
 // Every request goes out through the node (the Worker's global outbound), carrying the token of the call it's made
 // in, so the node knows whose it is: it fills in that call's secrets, and refuses them to other hosts. On the
-// serverless node, which has no outbound to give, the call hands each request to the node instead (`out`).
+// Cloudflare node, which has no outbound to give, the call hands each request to the node instead (`out`).
 const calls = new AsyncLocalStorage();
 const fetchOut = globalThis.fetch;
 globalThis.fetch = (input, init) => {
@@ -168,7 +168,7 @@ function context(ask, body, appends, later) {
     /// The app whose ctx.apps made this call, if one did.
     from: body.from ?? null,
     /// The port this node's local API answers on at 127.0.0.1, the custom build's (config.toml) unless it was started
-    /// on another: where a sign-in sends the person's browser back. Null on a node with none (the serverless one).
+    /// on another: where a sign-in sends the person's browser back. Null on a node with none (the Cloudflare node).
     port: body.port ?? null,
     /// The install's address (`https://…`, no last `/`), or null on a node from before it was given: a sign-in at
     /// another site sends the person back to `<address>/back?state=<app>/<screen>&…`, which opens that screen of this
@@ -243,7 +243,7 @@ function context(ask, body, appends, later) {
     failing: async () => (await ask("failing")).json(),
     /// The install's devices, as `GET /v1/state` gives them to the caller: online or not, and each one's load.
     devices: async () => (await ask("devices")).json(),
-    /// Run priority (src/rank.rs): `{ order, admin }`, every device and the serverless node (key "cloudflare") in the
+    /// Run priority (src/rank.rs): `{ order, admin }`, every device and the Cloudflare node (key "cloudflare") in the
     /// order things go to them, each with its `kind` and its `priority` (a number from 1, or "last"), and whether the
     /// caller is an admin. Given a device (its name or key, or "cloudflare") and a priority, gives it that one first,
     /// for an admin.
@@ -337,7 +337,7 @@ export default {
   },
 };
 
-/// The serverless node runs an app through this: `node.ask(path, init)` answers what the node does for a call, as
+/// The Cloudflare node runs an app through this: `node.ask(path, init)` answers what the node does for a call, as
 /// `askNode`'s requests are answered on a machine, with a Response.
 export class Call extends WorkerEntrypoint {
   async run(what, name, body, node) {
@@ -359,7 +359,7 @@ const b64u = {
   decode: (text) => Uint8Array.from(atob(text.replaceAll("-", "+").replaceAll("_", "/")), (c) => c.charCodeAt(0)),
 };
 
-/// An app's request, made by the serverless node through the vault, which fills in the Vault's items.
+/// An app's request, made by the Cloudflare node through the vault, which fills in the Vault's items.
 async function sent(ask, req) {
   const body = ["GET", "HEAD"].includes(req.method) ? undefined : b64u.encode(new Uint8Array(await req.arrayBuffer()));
   const r = await ask("fetch", { method: "POST", body: JSON.stringify({ url: req.url, method: req.method, headers: Object.fromEntries(req.headers), body64: body }) });
