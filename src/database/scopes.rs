@@ -1,7 +1,7 @@
 //! What a device asks of a scope database (`scope`): who's who and who may do what, from `global`'s, and what a
 //! scope's own entries add up to, from its own. Every question of who may do what is `permissions::may` over its rows;
-//! the rest are its tables as they are. Until the log is frozen, a device builds it again from replay whenever replay
-//! changes (`Scopes::set`), so it answers as replay does, and nothing but the builder reads `Members`.
+//! the rest are its tables as they are. Until the log is frozen, a device builds `global`'s again from replay whenever
+//! replay changes (`Replica`), so it answers as replay does, and nothing but the builder reads `Members`.
 //!
 //! Three things replay checks that the rows don't say stay in callers, each in one helper there: moving an app to
 //! another owner, an admin listing a person's machines but never their clients, and a person's machine running their
@@ -21,64 +21,6 @@ pub use super::scope::{app, device, group, object, person, service};
 
 /// The install, as an object of permissions.
 pub const INSTALL: &str = permissions::INSTALL;
-
-/// The scope databases a device holds: `global`'s, and each other scope's it holds, by scope.
-pub struct Scopes {
-    global: ScopeDb,
-    own: BTreeMap<Scope, ScopeDb>,
-    /// What `global`'s own entries add up to, which its database is built with again whenever replay changes.
-    global_state: ScopeState,
-}
-
-impl Scopes {
-    /// `global`'s database as replay says it is, with none of its own entries yet, at `now` (ms).
-    pub fn new(m: &Members, now: u64) -> Result<Scopes> {
-        Ok(Scopes { global: ScopeDb::build(m, &Scope::Global, &ScopeState::default(), now)?, own: BTreeMap::new(), global_state: ScopeState::default() })
-    }
-
-    /// Builds `global`'s again, since replay changed: → what it was.
-    pub fn members_changed(&mut self, m: &Members, now: u64) -> Result<ScopeDb> {
-        Ok(std::mem::replace(&mut self.global, ScopeDb::build(m, &Scope::Global, &self.global_state, now)?))
-    }
-
-    /// Builds `scope`'s again, as its own entries now add up to `state`.
-    pub fn set(&mut self, m: &Members, scope: &Scope, state: &ScopeState, now: u64) -> Result<()> {
-        match scope {
-            Scope::Global => {
-                self.global_state = state.clone();
-                self.members_changed(m, now).map(drop)
-            }
-            _ => {
-                self.own.insert(scope.clone(), ScopeDb::build(m, scope, state, now)?);
-                Ok(())
-            }
-        }
-    }
-
-    /// Forgets a scope this device no longer holds; `global`'s own entries, if it's that.
-    pub fn drop_scope(&mut self, m: &Members, scope: &Scope, now: u64) -> Result<()> {
-        match scope {
-            Scope::Global => self.set(m, scope, &ScopeState::default(), now),
-            _ => {
-                self.own.remove(scope);
-                Ok(())
-            }
-        }
-    }
-
-    /// `global`'s database: who's who, and who may do what.
-    pub fn global(&self) -> &ScopeDb {
-        &self.global
-    }
-
-    /// A scope's database, if this device holds it.
-    pub fn get(&self, scope: &Scope) -> Option<&ScopeDb> {
-        match scope {
-            Scope::Global => Some(&self.global),
-            _ => self.own.get(scope),
-        }
-    }
-}
 
 /// One scope database, and the time it was built at, which `may` asks as of. Nothing in it lasts until a time yet but
 /// keeps, which are asked with the time they're asked at (`keeps_at`).

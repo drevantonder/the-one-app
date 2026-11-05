@@ -1179,7 +1179,6 @@ fn update_views(i: &mut Install, new: &[Entry]) -> Result<()> {
             Some((pos, _)) if !rebuild => pos.clone().max(last),
             _ => last,
         };
-        i.r.scopes.set(&i.r.members, &scope, &state, now_ms())?;
         i.views.insert(log.clone(), (position, state));
     }
     Ok(())

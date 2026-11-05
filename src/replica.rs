@@ -1,12 +1,12 @@
 //! What one device holds and knows: the entries of each scope it holds, as the install's bucket has them, the
-//! members `global`'s add up to, and the scope databases built from them, which is what everything else asks. No clock
-//! or I/O: `node.rs` reads and writes the bucket, and says the time.
+//! members `global`'s add up to, and `global`'s scope database built from them, which is what everything else asks.
+//! No clock or I/O: `node.rs` reads and writes the bucket, and says the time.
 
 use anyhow::{Context, Result, ensure};
 use ed25519_dalek::SigningKey;
 
 use crate::entry::{Content, Entry, Ext, Hash, Key, Scope};
-use crate::database::scopes::{ScopeDb, Scopes};
+use crate::database::scopes::ScopeDb;
 use crate::members::{self, Members};
 use crate::store::Store;
 
@@ -18,8 +18,8 @@ pub struct Replica {
     /// The install's genesis, once this device created or joined it.
     pub root: Option<Hash>,
     pub members: Members,
-    /// The scope databases of what it holds, built again whenever the members change: what everything but replay asks.
-    pub scopes: Scopes,
+    /// `global`'s scope database, built again whenever the members change: what everything but replay asks.
+    db: ScopeDb,
     /// `global`'s node entries, in replay order.
     pub member_entries: Vec<Entry>,
     /// Whether an entry arrived that sorts before the newest of `member_entries`, so the members need replaying.
@@ -48,13 +48,13 @@ impl Replica {
         let id = key.verifying_key().to_bytes();
         let member_entries: Vec<Entry> = store.scope("global")?.into_iter().filter(members::is_member_entry).collect();
         let members = Members::replay(root, &member_entries, &store.forks()?);
-        let scopes = Scopes::new(&members, now)?;
-        Ok(Replica { key, id, store, root, members, scopes, member_entries, stale: false })
+        let db = ScopeDb::build(&members, &Scope::Global, &Default::default(), now)?;
+        Ok(Replica { key, id, store, root, members, db, member_entries, stale: false })
     }
 
     /// `global`'s scope database: who's who, and who may do what.
     pub fn db(&self) -> &ScopeDb {
-        self.scopes.global()
+        &self.db
     }
 
     /// Whether this device holds `scope`: `global`, and each scope whose calls it runs. Until it sees itself listed it
@@ -139,13 +139,13 @@ impl Replica {
         self.member_entries.insert(at, entry);
     }
 
-    /// Replays the members again and builds the scope databases from them, deletes every scope this device no longer
-    /// holds, and says what changed since the members had the cuts `before`.
+    /// Replays the members again and builds `global`'s scope database from them, deletes every scope this device no
+    /// longer holds, and says what changed since the members had the cuts `before`.
     fn refresh(&mut self, before: &members::Cuts, handled: &mut Handled, now: u64) -> Result<()> {
         if std::mem::take(&mut self.stale) {
             self.members = Members::replay(self.root, &self.member_entries, &self.store.forks()?);
         }
-        let was = self.scopes.members_changed(&self.members, now)?;
+        let was = std::mem::replace(&mut self.db, ScopeDb::build(&self.members, &Scope::Global, &Default::default(), now)?);
         handled.members = true;
         handled.recount |= *before != self.members.cuts;
         let logs = self.store.logs()?;
@@ -153,14 +153,11 @@ impl Replica {
             if !self.holds_log(log) {
                 self.store.delete(log)?;
                 handled.dropped.push(log.clone());
-                if let Ok(scope) = Scope::parse(log) {
-                    self.scopes.drop_scope(&self.members, &scope, now)?;
-                }
             }
         }
-        let (me, db) = (self.id, self.scopes.global());
-        handled.gained |= db.scopes().iter().any(|s| db.runs_for(&me, s) && !was.runs_for(&me, s));
-        let after = db.roles();
+        let had = was.run_by(&self.id);
+        handled.gained |= self.db.run_by(&self.id).iter().any(|s| !had.contains(s));
+        let after = self.db.roles();
         for ((user, scope), (_, invited)) in was.roles() {
             if !invited && !after.get(&(user.clone(), scope)).is_some_and(|(_, invited)| !invited) && !handled.lost.contains(&user) {
                 handled.lost.push(user);
