@@ -806,7 +806,8 @@ fn may_choose(caller: &str, owner: &str, machine: &str) -> Result<()> {
 struct Machine {
     name: String,
     user: String,
-    runs_for: Vec<String>,
+    /// The scopes whose calls it runs; none where its row doesn't say.
+    runs_for: Option<Vec<String>>,
 }
 
 impl Machine {
@@ -814,9 +815,22 @@ impl Machine {
         Machine {
             name: d["name"].as_str().unwrap_or_default().into(),
             user: d["user"].as_str().unwrap_or_default().into(),
-            runs_for: d["runs_for"].as_array().into_iter().flatten().filter_map(|s| s.as_str().map(str::to_string)).collect(),
+            runs_for: d["runs_for"].as_array().map(|a| a.iter().filter_map(|s| s.as_str().map(str::to_string)).collect()),
         }
     }
+}
+
+/// This machine and the install's devices, as a `/v1/state` says.
+fn machines_in(st: &Value) -> (Machine, Vec<Machine>) {
+    let all: Vec<&Value> = st["install"]["devices"].as_array().map(|a| a.iter().collect()).unwrap_or_default();
+    let mut here = all.iter().find(|d| d["here"] == true).map(|d| Machine::of(d)).unwrap_or_default();
+    here.name = or(st["me"]["name"].as_str().unwrap_or_default(), &or(st["device"]["name"].as_str().unwrap_or_default(), &here.name));
+    here.user = or(&here.user, st["user"]["id"].as_str().unwrap_or_default());
+    // A service endpoint's rows don't say what their devices run: its own device's row does.
+    if here.runs_for.is_none() {
+        here.runs_for = Machine::of(&st["device"]).runs_for;
+    }
+    (here, all.iter().map(|d| Machine::of(d)).collect())
 }
 
 impl Devices {
@@ -828,18 +842,13 @@ impl Devices {
 
     /// This machine and the install's devices, as its node says.
     fn machines(&self) -> Result<(Machine, Vec<Machine>)> {
-        let st = self.host.get("/v1/state")?;
-        let all: Vec<&Value> = st["install"]["devices"].as_array().map(|a| a.iter().collect()).unwrap_or_default();
-        let mut here = all.iter().find(|d| d["here"] == true).map(|d| Machine::of(d)).unwrap_or_default();
-        here.name = or(st["me"]["name"].as_str().unwrap_or_default(), &or(st["device"]["name"].as_str().unwrap_or_default(), &here.name));
-        here.user = or(&here.user, st["user"]["id"].as_str().unwrap_or_default());
-        Ok((here, all.iter().map(|d| Machine::of(d)).collect()))
+        Ok(machines_in(&self.host.get("/v1/state")?))
     }
 
     /// This machine's row of chrome: whether it runs chrome devices, and why.
     fn chrome_row(&self, me: &Machine) -> Value {
         let chosen = self.chrome_choice();
-        let shared = runs_shared(&me.user, &me.runs_for);
+        let shared = runs_shared(&me.user, me.runs_for.as_deref().unwrap_or_default());
         json!({ "on": me.name, "allowed": allowed(chosen, shared), "shared": shared, "chosen": chosen.is_some(), "can": Chrome.can() })
     }
 
@@ -1026,6 +1035,15 @@ mod tests {
         ] {
             assert_eq!(allowed(chosen, runs_shared("u1", &runs_for)), want, "running {runs_for:?}, chosen {chosen:?}");
         }
+    }
+
+    /// A machine whose service endpoint says it runs others' calls too is shared, though its own row doesn't say.
+    #[test]
+    fn what_a_service_endpoint_says_it_runs() {
+        let st = json!({ "device": { "name": "mac", "runs_for": ["user:u1", "global"] }, "me": { "name": "mac" }, "user": { "id": "u1" },
+            "install": { "devices": [{ "name": "mac", "here": true, "online": true }] } });
+        let (me, _) = machines_in(&st);
+        assert!(runs_shared(&me.user, me.runs_for.as_deref().unwrap_or_default()));
     }
 
     /// Only a machine's owner switches Chrome on or off there.
