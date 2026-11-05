@@ -122,6 +122,30 @@ async function find(ctx, name) {
   throw new Error(`no app named ${name}: ${like.length ? `did you mean ${like.join(" or ")}?` : "apps_list gives their names"}`);
 }
 
+/// The catalog's apps, as the list and the screens say them, the ones everyone uses first: those deleted (`gone`) or not,
+/// or, for `full`, every one with its picture, which is large.
+async function listed(ctx, { full, gone }) {
+  const name = namer(ctx);
+  const every = await ctx.catalog();
+  const all = every.filter((a) => full || !!a.deleted === !!gone);
+  const offered = await Promise.all(all.map((a) => offers(ctx, a).catch(() => ({ screens: true, accounts: false }))));
+  const apps = await Promise.all(all.map(async (a, i) => {
+    const added = a.deploys > 0;
+    const d = added || !a.built_in ? a : await described(ctx, a.built_in).catch(() => ({}));
+    return {
+      name: a.name, title: d.title || a.title || a.name, icon: d.icon || a.icon || null, color: d.color || a.color || null, ...(full ? { image: a.image || null, image_kind: a.image_kind || null } : {}),
+      tagline: d.tagline || a.tagline || null, description: d.description || a.description || null,
+      owner: a.owner, owner_name: name(a.owner),
+      from: a.from || null, forks: a.forks || [], deploys: a.deploys, installed: a.installed || [],
+      installed_names: (a.installed || []).map(name), uses: a.uses || { apps: [], services: [] },
+      advanced: !!(d.advanced || a.advanced), built_in: !!a.built_in, added, up_to_date: a.built_in && added ? a.bundle === a.built_in : null,
+      source: a.source || null, mine: mine(ctx, a.owner), deleted: a.deleted || null, screens: offered[i].screens, keeps_accounts: offered[i].accounts,
+    };
+  }));
+  apps.sort((a, b) => a.advanced - b.advanced || a.title.localeCompare(b.title));
+  return { apps, deleted: every.filter((a) => a.deleted).length };
+}
+
 const APP = { type: "string", description: "an app's name, from apps_list, like gmail" };
 
 /// Times in what `health` gives, ms since 1970, as ISO 8601.
@@ -149,33 +173,12 @@ export default {
     list: {
       reads: true,
       description: "Every app, a line each: its title and name (for the other apps_ tools), where it's added (that you can see), whether it's tools only (no screens or widgets, like Gmail: agents use it, and its accounts are in Accounts), and what it's for; then the places you may add apps to. Deleted apps are left out: deleted true lists only them.",
-      // A screen asks with full for every app's details and picture, which are large.
       input: { type: "object", properties: { deleted: { type: "boolean", description: "only the apps in Recently Deleted, which apps_restore brings back" } } },
-      async run(ctx, { deleted: gone, full } = {}) {
-        const images = full;
-        const name = namer(ctx);
-        const every = await ctx.catalog();
-        const all = every.filter((a) => full || !!a.deleted === !!gone);
-        const offered = await Promise.all(all.map((a) => offers(ctx, a).catch(() => ({ screens: true, accounts: false }))));
-        const apps = await Promise.all(all.map(async (a, i) => {
-          const added = a.deploys > 0;
-          const d = added || !a.built_in ? a : await described(ctx, a.built_in).catch(() => ({}));
-          return {
-            name: a.name, title: d.title || a.title || a.name, icon: d.icon || a.icon || null, color: d.color || a.color || null, ...(images ? { image: a.image || null, image_kind: a.image_kind || null } : {}),
-            tagline: d.tagline || a.tagline || null, description: d.description || a.description || null,
-            owner: a.owner, owner_name: name(a.owner),
-            from: a.from || null, forks: a.forks || [], deploys: a.deploys, installed: a.installed || [],
-            installed_names: (a.installed || []).map(name), uses: a.uses || { apps: [], services: [] },
-            advanced: !!(d.advanced || a.advanced), built_in: !!a.built_in, added, up_to_date: a.built_in && added ? a.bundle === a.built_in : null,
-            source: a.source || null, mine: mine(ctx, a.owner), deleted: a.deleted || null, screens: offered[i].screens, keeps_accounts: offered[i].accounts,
-          };
-        }));
-        apps.sort((a, b) => a.advanced - b.advanced || a.title.localeCompare(b.title));
-        if (full) return { apps, places: places(ctx), admin: ctx.me.role === "admin" };
+      async run(ctx, { deleted: gone } = {}) {
+        const { apps, deleted } = await listed(ctx, { gone });
         const line = (a) => `${a.title} (${a.name}): ${a.deleted ? `deleted ${new Date(a.deleted.time).toISOString().slice(0, 10)}${a.mine ? "" : `, ${a.owner_name}'s`}` : a.installed_names.length ? `added for ${a.installed_names.join(", ")}` : "not added"}`
           + `${a.screens ? "" : ", tools only"}${a.up_to_date === false ? ", an update waiting" : ""}. ${a.description || a.tagline || ""}`.trimEnd();
         if (gone) return apps.length ? [...apps.map(line), "", "apps_restore brings back one you own; apps_erase deletes it for good."].join("\n") : "Nothing is in Recently Deleted.";
-        const deleted = every.filter((a) => a.deleted).length;
         return [
           ...apps.map(line), "",
           `You may add apps for: ${places(ctx).filter((p) => p.may).map((p) => p.scope === "user" ? "user (you)" : p.scope === "global" ? "global (everyone)" : p.name).join(", ")}.`,
@@ -257,6 +260,14 @@ export default {
       async run(ctx, { app }) {
         const a = await find(ctx, app);
         return iso({ schedules: a.schedules || [], activity: a.activity || [], insights: a.insights || null });
+      },
+    },
+    _list: {
+      reads: true,
+      description: "For the screens: every app with its details and picture, the places you may add apps to, and whether you're an admin.",
+      input: { type: "object", properties: {} },
+      async run(ctx) {
+        return { apps: (await listed(ctx, { full: true })).apps, places: places(ctx), admin: ctx.me.role === "admin" };
       },
     },
     _health: {

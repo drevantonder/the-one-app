@@ -26,7 +26,7 @@ export function useCall(op, input) {
 }
 
 /// Every app, where each is installed, and the pages the person may add them to.
-export const useList = () => useCall("list", { full: true })
+export const useList = () => useCall("_list", {})
 
 /// What a failed call says, for a person.
 export const said = (error) => one.plain(error)

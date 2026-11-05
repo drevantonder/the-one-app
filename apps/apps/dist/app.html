@@ -28,7 +28,7 @@ function g(e, t) {
 }
 var _ = () => {
 	let t = e(1), n;
-	return t[0] === Symbol.for("react.memo_cache_sentinel") ? (n = { full: !0 }, t[0] = n) : n = t[0], g("list", n);
+	return t[0] === Symbol.for("react.memo_cache_sentinel") ? (n = {}, t[0] = n) : n = t[0], g("_list", n);
 }, re = (e) => one.plain(e);
 function v(t) {
 	let n = e(8), { error: r, retry: i } = t, a;
