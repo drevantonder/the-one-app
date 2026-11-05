@@ -515,7 +515,7 @@ export default {
     },
     reach: {
       reads: false,
-      description: "Let a Windows, Android or iPhone device reach a port on the device it's on, at the same port on its own 127.0.0.1, until it stops: for an app on it to reach a server you run there, like a try install.",
+      description: "Let a Windows, Android or iPhone device reach a port on the device it's on, at the same port on its own 127.0.0.1, until it stops: for an app on it to reach a server you run there, like a throwaway network.",
       input: { type: "object", required: ["device", "port"], properties: { device: deviceArg, port: { type: "integer", description: "the port your server listens on, on the device the agent device is on, like 4791" } } },
       run: (ctx, input) => service(ctx, "reach", input),
     },

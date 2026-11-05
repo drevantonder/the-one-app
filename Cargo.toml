@@ -82,7 +82,7 @@ libc = { version = "0.2", optional = true }
 # makes and checks the signatures.
 ssh-key = { version = "0.6", default-features = false, features = ["std", "ed25519"], optional = true }
 # test-util is tests/sim.rs's paused clock, so links that wait seconds take none. It's here, not a dev-dependency, so
-# `cargo test` and `cargo build` build the same target/debug/one, which `one try` runs: as a dev-dependency it was a
+# `cargo test` and `cargo build` build the same target/debug/one, which `one throwaway` runs: as a dev-dependency it was a
 # second tokio, and every switch between them compiled this crate again. Unused, it does nothing.
 tokio = { version = "1", features = ["full", "test-util"], optional = true }
 tokio-stream = { version = "0.1", features = ["sync"], optional = true }

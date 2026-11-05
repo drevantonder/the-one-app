@@ -1,11 +1,11 @@
-//! `try`: an install of its own, made as `create` makes every new one, by a node beside this machine's own with its own
+//! `throwaway`: a throwaway network, an install of its own, made as `create` makes every new one, by a node beside this machine's own with its own
 //! home and ports, so it touches nothing of the person's (src/agents.rs leaves the harnesses alone for a node given a
 //! home). There's one for each checkout (or folder) it's run in, so threads working in different ones each have their
-//! own. Its kernel runs beside it and signs in its first person with no passkey (kernel::Settings::try_person), so a
-//! client of this checkout's build, on a device borrowed for it (`try client`), signs in with nobody there; others join
-//! as anyone does, by an invite link the first makes, and again with no passkey (`try client <kind> --as <name>`). It
-//! keeps its data until `try stop`: left alone it stops, and `try` starts it again as it was, as it does when this build
-//! is newer than the one it runs, unless a client session (`try client`) is running, which a new build must not break:
+//! own. Its kernel runs beside it and signs in its first person with no passkey (kernel::Settings::throwaway_person), so a
+//! client of this checkout's build, on a device borrowed for it (`throwaway client`), signs in with nobody there; others join
+//! as anyone does, by an invite link the first makes, and again with no passkey (`throwaway client <kind> --as <name>`). It
+//! keeps its data until `throwaway stop`: left alone it stops, and `throwaway` starts it again as it was, as it does when this build
+//! is newer than the one it runs, unless a client session (`throwaway client`) is running, which a new build must not break:
 //! then at the next command with none. Starting it again leaves its clients' browsers alone.
 
 use std::path::{Path, PathBuf};
@@ -17,11 +17,11 @@ use serde_json::{Value, json};
 
 use crate::{agent, get, post};
 
-/// The try install for the checkout this build is from (`<checkout>/target/<profile>/`), else for the checkout (or
-/// folder) it's run in, beside the downloads every try install shares: → its folder, and the checkout. So a checkout's
-/// own build finds its try install from any folder, as an MCP client starts it.
+/// The throwaway network for the checkout this build is from (`<checkout>/target/<profile>/`), else for the checkout (or
+/// folder) it's run in, beside the downloads every throwaway network shares: → its folder, and the checkout. So a checkout's
+/// own build finds its throwaway network from any folder, as an MCP client starts it.
 fn folder() -> (PathBuf, PathBuf) {
-    let base = PathBuf::from(format!("{}-try", one::home().display()));
+    let base = PathBuf::from(format!("{}-throwaway", one::home().display()));
     let built = std::env::current_exe().ok().and_then(|exe| exe.canonicalize().ok()).and_then(|exe| Some(exe.parent()?.parent()?.parent()?.to_path_buf())).filter(|top| top.join(".git").exists() && top.join("Cargo.toml").exists());
     let here = std::env::current_dir().unwrap_or_else(|_| ".".into());
     let top = || std::process::Command::new("git").args(["rev-parse", "--show-toplevel"]).output().ok().filter(|o| o.status.success());
@@ -36,13 +36,13 @@ fn addr_var() -> String {
     format!("{}_ADDR", CLI.to_uppercase())
 }
 
-/// The try install's node's address, while it answers.
+/// The throwaway network's node's address, while it answers.
 fn running(dir: &Path) -> Option<String> {
     let addr = std::fs::read_to_string(dir.join("addr")).ok()?.trim().to_string();
     agent().get(format!("http://{addr}/v1/state")).call().is_ok().then_some(addr)
 }
 
-/// Whether the try install's node started before this build was made: it runs the build it started as, kernel and screens
+/// Whether the throwaway network's node started before this build was made: it runs the build it started as, kernel and screens
 /// included, so a new build (`cargo build`) is picked up by starting it again, which keeps its data.
 fn older_build(dir: &Path) -> bool {
     let modified = |path: &Path| path.metadata().and_then(|m| m.modified()).ok();
@@ -52,8 +52,8 @@ fn older_build(dir: &Path) -> bool {
     }
 }
 
-/// Whether no client session (`try client`, which holds `client.lock` shared while it builds and signs in) is running:
-/// only then may a new build start the try install again, as that drops what a client reaches it by.
+/// Whether no client session (`throwaway client`, which holds `client.lock` shared while it builds and signs in) is running:
+/// only then may a new build start the throwaway network again, as that drops what a client reaches it by.
 fn no_client_running(dir: &Path) -> bool {
     use std::os::fd::AsRawFd;
     let Ok(file) = std::fs::File::options().create(true).append(true).open(dir.join("client.lock")) else { return true };
@@ -67,9 +67,9 @@ fn client_session(dir: &Path) -> Option<std::fs::File> {
     (unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_SH) } == 0).then_some(file)
 }
 
-pub fn try_install(rest: &[String]) -> Result<()> {
+pub fn run(rest: &[String]) -> Result<()> {
     let (dir, checkout) = folder();
-    // Help, and nothing started: try's own, or a built-in command's. An app's operation's needs the try install's apps.
+    // Help, and nothing started: throwaway's own, or a built-in command's. An app's operation's needs the throwaway network's apps.
     let help = rest.iter().any(|a| a == "--help" || a == "-h");
     match rest.first().map(String::as_str) {
         Some("--help" | "-h" | "help") | Some("stop" | "client" | "sign-in") if help || rest[0] == "help" => {
@@ -83,11 +83,11 @@ pub fn try_install(rest: &[String]) -> Result<()> {
         Some("stop") => {
             give_back(&dir);
             stop(&dir, true)?;
-            println!("Stopped and deleted this checkout's try install, and gave back its devices. {CLI} try starts a new one.");
+            println!("Stopped and deleted this checkout's throwaway network, and gave back its devices. {CLI} throwaway starts a new one.");
             return Ok(());
         }
-        Some(cmd @ ("update" | "release" | "publish" | "try")) => bail!("{CLI} {cmd} isn't for the try install"),
-        Some("kernel") if rest.get(1).map(String::as_str) == Some("serve") => bail!("the try install runs its own kernel"),
+        Some(cmd @ ("update" | "release" | "publish" | "throwaway")) => bail!("{CLI} {cmd} isn't for the throwaway network"),
+        Some("kernel") if rest.get(1).map(String::as_str) == Some("serve") => bail!("the throwaway network runs its own kernel"),
         _ => {}
     }
     if rest.first().map(String::as_str) == Some("client") && rest.get(1).map(String::as_str) == Some("web") {
@@ -99,11 +99,11 @@ pub fn try_install(rest: &[String]) -> Result<()> {
     let addr = match running(&dir) {
         Some(addr) if !older_build(&dir) => addr,
         Some(addr) if !no_client_running(&dir) => {
-            eprintln!("This build is newer than the one the try install runs, and a client of it is running: it starts again at the next command once that's done.");
+            eprintln!("This build is newer than the one the throwaway network runs, and a client of it is running: it starts again at the next command once that's done.");
             addr
         }
         Some(_) => {
-            eprintln!("This build is newer than the one the try install runs: starting it again (it keeps its data, and its clients' browsers stay)…");
+            eprintln!("This build is newer than the one the throwaway network runs: starting it again (it keeps its data, and its clients' browsers stay)…");
             start(&dir)?
         }
         None => start(&dir)?,
@@ -121,13 +121,13 @@ pub fn try_install(rest: &[String]) -> Result<()> {
     unsafe { std::env::set_var(addr_var(), &addr) };
     unsafe { std::env::set_var(format!("{}_HOME", CLI.to_uppercase()), &dir) };
     if rest.first().map(String::as_str) == Some("sign-in") {
-        // As its person, with no passkey: the try install's kernel asks for none.
-        let address = get("/v1/state")?["install"]["settings"]["address"].as_str().context("the try install has no address")?.to_string();
+        // As its person, with no passkey: the throwaway network's kernel asks for none.
+        let address = get("/v1/state")?["install"]["settings"]["address"].as_str().context("the throwaway network has no address")?.to_string();
         let started = one::sign_in::start(&address, None)?;
-        one::sign_in::approve_on_try(&started)?;
+        one::sign_in::approve_on_throwaway(&started)?;
         one::sign_in::finish(started)?;
         let me = get("/v1/state")?["user"]["name"].as_str().unwrap_or("you").to_string();
-        println!("Signed in as {me}. {CLI} try and {CLI} try mcp act as them until {CLI} try sign-out.");
+        println!("Signed in as {me}. {CLI} throwaway and {CLI} throwaway mcp act as them until {CLI} throwaway sign-out.");
         return Ok(());
     }
     if rest.first().map(String::as_str) == Some("git") {
@@ -140,22 +140,22 @@ pub fn try_install(rest: &[String]) -> Result<()> {
     let me = state["user"]["name"].as_str().or(state["me"]["name"].as_str()).unwrap_or("you");
     let address = state["install"]["settings"]["address"].as_str().unwrap_or("");
     println!(
-        "This checkout's try install is running on this machine: a new install, Try, with only what every new install
+        "This checkout's throwaway network is running on this machine: a new install, Throwaway, with only what every new install
 starts with, and {me} as its admin, who signs in at {address} with no passkey. Its folder is {}, with its
 recovery key; its kernel's settings are in {}.
 
-{CLI} try --help lists its commands.",
+{CLI} throwaway --help lists its commands.",
         dir.display(),
         kernel.display()
     );
     Ok(())
 }
 
-/// `git`, told that the try install's repos (`<its address>/repos/…`) are reached through this build's remote helper, as
-/// git is on a computer signed in to any install: this build's helper is linked in a folder of the try install's, put
+/// `git`, told that the throwaway network's repos (`<its address>/repos/…`) are reached through this build's remote helper, as
+/// git is on a computer signed in to any install: this build's helper is linked in a folder of the throwaway network's, put
 /// first on git's PATH (the one the real install's CLI links is another build, reaching another node).
 fn git(dir: &Path, args: &[String]) -> Result<()> {
-    let address = get("/v1/state")?["install"]["settings"]["address"].as_str().context("the try install has no address")?.trim_end_matches('/').to_string();
+    let address = get("/v1/state")?["install"]["settings"]["address"].as_str().context("the throwaway network has no address")?.trim_end_matches('/').to_string();
     let bin = dir.join("bin");
     std::fs::create_dir_all(&bin)?;
     let link = bin.join(crate::git_remote::helper());
@@ -177,10 +177,10 @@ fn git(dir: &Path, args: &[String]) -> Result<()> {
     Ok(())
 }
 
-/// Runs the try install's serverless node beside its kernel, in its workerd, as `serverless deploy` puts one in
+/// Runs the throwaway network's serverless node beside its kernel, in its workerd, as `serverless deploy` puts one in
 /// Cloudflare: its devices answer its endpoint.
 fn serverless(dir: &Path) -> Result<()> {
-    anyhow::ensure!(one::serverless::modules().is_ok(), "this build has no serverless node: run this checkout's own build, target/debug/{CLI} try serverless deploy, which builds it");
+    anyhow::ensure!(one::serverless::modules().is_ok(), "this build has no serverless node: run this checkout's own build, target/debug/{CLI} throwaway serverless deploy, which builds it");
     let mut settings = load_kernel(dir)?;
     if !settings.serverless {
         settings.serverless = true;
@@ -188,42 +188,42 @@ fn serverless(dir: &Path) -> Result<()> {
         stop_some(dir, false, false)?;
         start(dir)?;
     }
-    let addr = running(dir).context("the try install didn't start again")?;
-    let key = settings.serverless_endpoint().context("the try install's kernel has no serverless key")?;
-    crate::request(try_agent(dir).post(format!("http://{addr}/v1/settings")).send_json(json!({ "name": "serverless", "value": key })))?;
-    println!("The try install's serverless node runs beside its kernel, its endpoint {}.", &key[..8]);
+    let addr = running(dir).context("the throwaway network didn't start again")?;
+    let key = settings.serverless_endpoint().context("the throwaway network's kernel has no serverless key")?;
+    crate::request(throwaway_agent(dir).post(format!("http://{addr}/v1/settings")).send_json(json!({ "name": "serverless", "value": key })))?;
+    println!("The throwaway network's serverless node runs beside its kernel, its endpoint {}.", &key[..8]);
     Ok(())
 }
 
-/// What `try` takes.
+/// What `throwaway` takes.
 fn usage() -> String {
-    // The MCP command as one that finds this try install from any folder: this build, if it's a checkout's own.
+    // The MCP command as one that finds this throwaway network from any folder: this build, if it's a checkout's own.
     let (_, checkout) = folder();
     let exe = std::env::current_exe().ok().and_then(|e| e.canonicalize().ok()).filter(|e| e.starts_with(&checkout));
     let mcp = match exe {
-        Some(exe) => format!("{} try mcp", exe.display()),
-        None => format!("sh -c 'cd {} && exec {CLI} try mcp'", checkout.display()),
+        Some(exe) => format!("{} throwaway mcp", exe.display()),
+        None => format!("sh -c 'cd {} && exec {CLI} throwaway mcp'", checkout.display()),
     };
     format!(
         "Usage:
-  {CLI} try                  start this checkout's try install, if it isn't running (or runs an older build), and say where it is
-  {CLI} try <command>        any command, in it: {CLI} try status, {CLI} try apps, {CLI} try board post hello
-  {CLI} try mcp              its MCP server, for an agent: claude mcp add {CLI}-try -- {mcp}
-  {CLI} try sign-in          sign its CLI in as its person, with no browser
-  {CLI} try git <args>       git, reaching its repos at its address: {CLI} try git clone <address>/repos/<owner>/<repo>.git, then {CLI} try git push in the clone
-  {CLI} try serverless deploy    run its serverless node beside its kernel, as Cloudflare would
-  {CLI} try client <kind>    a signed-in client of this checkout's build: web, android or windows
-  {CLI} try client <kind> --as sam    the same, as someone else, invited by you with Add Someone's link
-  {CLI} try stop             stop and delete it, and give back its devices; {CLI} try then starts a new one"
+  {CLI} throwaway                  start this checkout's throwaway network, if it isn't running (or runs an older build), and say where it is
+  {CLI} throwaway <command>        any command, in it: {CLI} throwaway status, {CLI} throwaway apps, {CLI} throwaway board post hello
+  {CLI} throwaway mcp              its MCP server, for an agent: claude mcp add {CLI}-throwaway -- {mcp}
+  {CLI} throwaway sign-in          sign its CLI in as its person, with no browser
+  {CLI} throwaway git <args>       git, reaching its repos at its address: {CLI} throwaway git clone <address>/repos/<owner>/<repo>.git, then {CLI} throwaway git push in the clone
+  {CLI} throwaway serverless deploy    run its serverless node beside its kernel, as Cloudflare would
+  {CLI} throwaway client <kind>    a signed-in client of this checkout's build: web, android or windows
+  {CLI} throwaway client <kind> --as sam    the same, as someone else, invited by you with Add Someone's link
+  {CLI} throwaway stop             stop and delete it, and give back its devices; {CLI} throwaway then starts a new one"
     )
 }
 
-/// The try install's kernel's settings, with its secrets, read as the kernel's own tools read them.
+/// The throwaway network's kernel's settings, with its secrets, read as the kernel's own tools read them.
 fn load_kernel(dir: &Path) -> Result<one::kernel::Settings> {
     with_home(dir, one::kernel::Settings::load)
 }
 
-/// `f`, with this CLI's home the try install's.
+/// `f`, with this CLI's home the throwaway network's.
 fn with_home<T>(dir: &Path, f: impl FnOnce() -> T) -> T {
     let var = format!("{}_HOME", CLI.to_uppercase());
     let was = std::env::var_os(&var);
@@ -249,13 +249,13 @@ fn with_addr<T>(addr: &str, f: impl FnOnce() -> T) -> T {
     out
 }
 
-/// Starts the try install's node and kernel: as it was, if it stopped by itself, or a new one. → the node's address.
+/// Starts the throwaway network's node and kernel: as it was, if it stopped by itself, or a new one. → the node's address.
 fn start(dir: &Path) -> Result<String> {
     let kept = dir.join("kernel").join("settings.json").exists() && dir.join("addr").exists();
     if !kept {
         return start_new(dir);
     }
-    eprintln!("Starting this checkout's try install again…");
+    eprintln!("Starting this checkout's throwaway network again…");
     stop_some(dir, false, false)?;
     let was = std::fs::read_to_string(dir.join("addr"))?.trim().to_string();
     // Its own statement: a listener made in spawn_node's arguments would hold the port while the node starts.
@@ -265,9 +265,9 @@ fn start(dir: &Path) -> Result<String> {
     Ok(addr)
 }
 
-/// A new try install, and its kernel.
+/// A new throwaway network, and its kernel.
 fn start_new(dir: &Path) -> Result<String> {
-    eprintln!("Starting a new try install for this checkout…");
+    eprintln!("Starting a new throwaway network for this checkout…");
     stop(dir, true)?;
     // Called what the person is called in their own install, if this machine is in one.
     let quick: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(5))).middleware(one::api::as_this_machine).build().into();
@@ -279,34 +279,34 @@ fn start_new(dir: &Path) -> Result<String> {
     let bucket = std::net::TcpListener::bind("127.0.0.1:0")?.local_addr()?.to_string();
     std::fs::write(dir.join("bucket-addr"), &bucket)?;
     let addr = spawn_node(dir, free.as_deref())?;
-    let agent = || try_agent(dir);
+    let agent = || throwaway_agent(dir);
     let on = |path: &str| format!("http://{addr}{path}");
-    let created = crate::request(agent().post(on("/v1/create")).send_json(json!({ "name": "Try", "user_name": me })))?;
-    let recovery = created["recovery"].as_str().context("the try install gave no recovery key")?;
+    let created = crate::request(agent().post(on("/v1/create")).send_json(json!({ "name": "Throwaway", "user_name": me })))?;
+    let recovery = created["recovery"].as_str().context("the throwaway network gave no recovery key")?;
     write_private(&dir.join("recovery-key"), &format!("{recovery}\n"))?;
     let state = crate::request(agent().get(on("/v1/state")).call())?;
-    let person = (state["user"]["id"].as_str().context("the try install has no person")?.to_string(), me);
-    let settings = one::kernel::Settings::for_try(&bucket, person)?;
+    let person = (state["user"]["id"].as_str().context("the throwaway network has no person")?.to_string(), me);
+    let settings = one::kernel::Settings::for_throwaway(&bucket, person)?;
     with_home(dir, || settings.save())?;
     // Read back as the kernel reads it, with its secrets.
     let settings = load_kernel(dir)?;
     spawn_kernel(dir, &settings, &addr)?;
     crate::request(agent().post(on("/v1/settings")).send_json(json!({ "name": "address", "value": &settings.address })))?;
     // Its kernel signs its own ID tokens, as a provider would, for this client: the one its people sign in with.
-    let clients = format!("{}/api/auth one-try", settings.address);
+    let clients = format!("{}/api/auth one-throwaway", settings.address);
     crate::request(agent().post(on("/v1/settings")).send_json(json!({ "name": one::sign_in_proof::CLIENTS, "value": clients })))?;
-    // Its data moves to the try bucket, which its node reaches only through the kernel's URL signer from then on.
-    let moved = crate::request(agent().post(on("/v1/storage")).send_json(json!({ "endpoint": format!("http://{bucket}"), "bucket": "try" })))?;
-    anyhow::ensure!(moved["kept"] == true, "the try install's node couldn't reach its bucket through the URL signer: {moved}");
+    // Its data moves to the throwaway bucket, which its node reaches only through the kernel's URL signer from then on.
+    let moved = crate::request(agent().post(on("/v1/storage")).send_json(json!({ "endpoint": format!("http://{bucket}"), "bucket": "throwaway" })))?;
+    anyhow::ensure!(moved["kept"] == true, "the throwaway network's node couldn't reach its bucket through the URL signer: {moved}");
     let started = std::time::Instant::now();
     while crate::request(agent().get(on("/v1/storage")).call())?["kind"] != "s3" {
-        anyhow::ensure!(started.elapsed() < Duration::from_secs(30), "the try install's node didn't move to its bucket: node.log says why");
+        anyhow::ensure!(started.elapsed() < Duration::from_secs(30), "the throwaway network's node didn't move to its bucket: node.log says why");
         std::thread::sleep(Duration::from_millis(200));
     }
     Ok(addr)
 }
 
-/// Starts a program of the try install's in a process group of its own, which stopping it stops (`pids`), logging to
+/// Starts a program of the throwaway network's in a process group of its own, which stopping it stops (`pids`), logging to
 /// `log` in its folder. A client's browser is `client`: starting the install again leaves it running.
 fn spawn(dir: &Path, command: &mut std::process::Command, log: &str, client: bool) -> Result<u32> {
     use std::os::unix::process::CommandExt;
@@ -318,10 +318,10 @@ fn spawn(dir: &Path, command: &mut std::process::Command, log: &str, client: boo
     Ok(child.id())
 }
 
-/// Starts the try install's node, at `addr` if it's given and free, and gives its address once it answers.
+/// Starts the throwaway network's node, at `addr` if it's given and free, and gives its address once it answers.
 fn spawn_node(dir: &Path, addr: Option<&str>) -> Result<String> {
     std::fs::create_dir_all(dir)?;
-    // What every try install downloads or builds, shared.
+    // What every throwaway network downloads or builds, shared.
     let shared = dir.parent().unwrap().join("cache");
     std::fs::create_dir_all(&shared)?;
     if !dir.join("cache").exists() {
@@ -333,18 +333,18 @@ fn spawn_node(dir: &Path, addr: Option<&str>) -> Result<String> {
     };
     let pid = spawn(
         dir,
-        one::oned::command(&["--try"])?.env(addr_var(), &addr),
+        one::oned::command(&["--throwaway"])?.env(addr_var(), &addr),
         "node.log",
         false,
     )?;
     std::fs::write(dir.join("pid"), pid.to_string())?;
     std::fs::write(dir.join("addr"), &addr)?;
-    wait_for(&try_agent(dir), &format!("http://{addr}/v1/state"), &dir.join("node.log"))?;
+    wait_for(&throwaway_agent(dir), &format!("http://{addr}/v1/state"), &dir.join("node.log"))?;
     Ok(addr)
 }
 
-/// A client asking the try install's node as one of this machine's programs: with the token in its home.
-fn try_agent(dir: &Path) -> ureq::Agent {
+/// A client asking the throwaway network's node as one of this machine's programs: with the token in its home.
+fn throwaway_agent(dir: &Path) -> ureq::Agent {
     let dir = dir.to_path_buf();
     let with_token = move |mut req: ureq::http::Request<ureq::SendBody>, next: ureq::middleware::MiddlewareNext| {
         if let Some(token) = one::api::local_token(&dir).and_then(|t| t.parse().ok()) {
@@ -355,12 +355,12 @@ fn try_agent(dir: &Path) -> ureq::Agent {
     ureq::Agent::config_builder().http_status_as_error(false).middleware(with_token).build().into()
 }
 
-/// Starts the try install's kernel, beside its node at `node`, and waits for its address to answer.
+/// Starts the throwaway network's kernel, beside its node at `node`, and waits for its address to answer.
 fn spawn_kernel(dir: &Path, settings: &one::kernel::Settings, node: &str) -> Result<()> {
     for port in settings.ports {
-        anyhow::ensure!(std::net::TcpListener::bind(("127.0.0.1", port)).is_ok(), "the try install's kernel's port {port} is taken now: {CLI} try stop, then {CLI} try for a new one");
+        anyhow::ensure!(std::net::TcpListener::bind(("127.0.0.1", port)).is_ok(), "the throwaway network's kernel's port {port} is taken now: {CLI} throwaway stop, then {CLI} throwaway for a new one");
     }
-    // A sign-in kept for this node's address by an earlier try install, whose kernel is gone, would be sent to this
+    // A sign-in kept for this node's address by an earlier throwaway network, whose kernel is gone, would be sent to this
     // node, which refuses it: its kernel would find no devices for its relay, and the CLI says the key isn't published.
     with_addr(node, || {
         if one::sign_in::kept().is_some_and(|kept| kept.address != settings.address) {
@@ -375,7 +375,7 @@ fn spawn_kernel(dir: &Path, settings: &one::kernel::Settings, node: &str) -> Res
 fn wait_for(agent: &ureq::Agent, url: &str, log: &Path) -> Result<()> {
     let start = Instant::now();
     while !agent.get(url).call().is_ok_and(|r| r.status().is_success()) {
-        anyhow::ensure!(start.elapsed() < Duration::from_secs(120), "the try install didn't start: {}", log.display());
+        anyhow::ensure!(start.elapsed() < Duration::from_secs(120), "the throwaway network didn't start: {}", log.display());
         std::thread::sleep(Duration::from_millis(250));
     }
     Ok(())
@@ -388,7 +388,7 @@ fn started(pid: i32) -> Option<String> {
     stat.rsplit_once(')')?.1.split_whitespace().nth(19).map(String::from)
 }
 
-/// The try install's programs that still run, by the process groups they lead (`spawn`): only those that started when
+/// The throwaway network's programs that still run, by the process groups they lead (`spawn`): only those that started when
 /// they did, where this machine says, as another process may have taken a pid since. With `clients` false, not the
 /// clients' browsers.
 fn programs(dir: &Path, clients: bool) -> Vec<i32> {
@@ -404,7 +404,7 @@ fn programs(dir: &Path, clients: bool) -> Vec<i32> {
         .collect()
 }
 
-/// Stops the try install's programs, if they run, and with `delete`, deletes all of it but what it downloaded or built.
+/// Stops the throwaway network's programs, if they run, and with `delete`, deletes all of it but what it downloaded or built.
 pub fn stop(dir: &Path, delete: bool) -> Result<()> {
     stop_some(dir, delete, true)
 }
@@ -447,7 +447,7 @@ fn stop_some(dir: &Path, delete: bool, clients: bool) -> Result<()> {
     Ok(())
 }
 
-/// Stops what the try install in `home` started besides its node, which then stops itself: its kernel and browser.
+/// Stops what the throwaway network in `home` started besides its node, which then stops itself: its kernel and browser.
 pub fn stop_others(home: &Path) {
     let me = std::process::id() as i32;
     for pid in programs(home, true) {
@@ -458,9 +458,9 @@ pub fn stop_others(home: &Path) {
     let _ = std::fs::remove_file(home.join("pids"));
 }
 
-/// The try install's bucket, at `bucket-addr` in its folder: the folder its node made the install in, served S3's way
+/// The throwaway network's bucket, at `bucket-addr` in its folder: the folder its node made the install in, served S3's way
 /// for the URLs its kernel's URL signer presigns (read, HEAD, list, create only if absent, replace while unchanged,
-/// delete), signatures unchecked, as it's only this machine's and only a try install's.
+/// delete), signatures unchecked, as it's only this machine's and only a throwaway network's.
 pub async fn bucket(home: PathBuf) -> Result<()> {
     use axum::http::{HeaderMap, Method, StatusCode, Uri};
     let Ok(at) = std::fs::read_to_string(home.join("bucket-addr")) else { return Ok(()) };
@@ -477,7 +477,7 @@ pub async fn bucket(home: PathBuf) -> Result<()> {
     let answer = move |method: Method, uri: Uri, headers: HeaderMap, body: axum::body::Bytes| {
         let place = place.clone();
         async move {
-            if method == Method::GET && matches!(uri.path(), "/try" | "/try/") {
+            if method == Method::GET && matches!(uri.path(), "/throwaway" | "/throwaway/") {
                 let query: Vec<(String, String)> = uri.query().unwrap_or("").split('&').filter_map(|p| p.split_once('=')).map(|(k, v)| (decode(k), decode(v))).collect();
                 let get = |k: &str| query.iter().find(|(q, _)| q == k).map(|(_, v)| v.clone());
                 let (prefix, delimit) = (get("prefix").unwrap_or_default(), get("delimiter").is_some());
@@ -487,7 +487,7 @@ pub async fn bucket(home: PathBuf) -> Result<()> {
                     _ => (StatusCode::INTERNAL_SERVER_ERROR, HeaderMap::new(), Vec::new()),
                 };
             }
-            let name = decode(uri.path().strip_prefix("/try/").unwrap_or(""));
+            let name = decode(uri.path().strip_prefix("/throwaway/").unwrap_or(""));
             if name.is_empty() || name.split('/').any(|p| p.is_empty() || p == "." || p == "..") {
                 return (StatusCode::BAD_REQUEST, HeaderMap::new(), Vec::new());
             }
@@ -518,7 +518,7 @@ pub async fn bucket(home: PathBuf) -> Result<()> {
     Ok(())
 }
 
-/// The names under `prefix` in the try bucket's folder `dir`, as S3's ListObjectsV2 answers, in one page: one level
+/// The names under `prefix` in the throwaway bucket's folder `dir`, as S3's ListObjectsV2 answers, in one page: one level
 /// down with `delimit` (objects, and folders as common prefixes), else every object.
 fn list(dir: &Path, prefix: &str, delimit: bool) -> Result<String> {
     let esc = |s: &str| s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
@@ -570,15 +570,15 @@ fn write_private(path: &Path, text: &str) -> Result<()> {
 
 // Clients.
 
-/// The devices borrowed for the try install, by kind: `{ "android": "<name>" }`.
+/// The devices borrowed for the throwaway network, by kind: `{ "android": "<name>" }`.
 fn devices(dir: &Path) -> serde_json::Map<String, Value> {
     std::fs::read(dir.join("devices.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
 }
 
-/// One of this machine's install's Agent Devices' operations (not the try install's, which has none). When the node
+/// One of this machine's install's Agent Devices' operations (not the throwaway network's, which has none). When the node
 /// restarts during it (an update), or its service is still coming back, it's asked again once they answer.
 fn agent_devices(op: &str, input: Value) -> Result<Value> {
-    Ok(again(|| post("/v1/call", json!({ "app": "agent-devices", "op": op, "input": input, "client": "one try" })))?["ok"].clone())
+    Ok(again(|| post("/v1/call", json!({ "app": "agent-devices", "op": op, "input": input, "client": "one throwaway" })))?["ok"].clone())
 }
 
 /// What `ask` gives, asking again for up to 3 minutes while this machine's node or a service of its restarts.
@@ -606,7 +606,7 @@ fn on_device(device: &str, command: &str) -> Result<String> {
     Ok(out.as_str().map(str::to_string).unwrap_or_else(|| out.to_string()))
 }
 
-/// Gives back every device borrowed for the try install.
+/// Gives back every device borrowed for the throwaway network.
 fn give_back(dir: &Path) {
     for (kind, device) in devices(dir) {
         if let Some(device) = device.as_str()
@@ -617,46 +617,46 @@ fn give_back(dir: &Path) {
     }
 }
 
-/// `try client <kind> [--as <name>]`: a client of this checkout's build, signed in to the try install as its first
+/// `throwaway client <kind> [--as <name>]`: a client of this checkout's build, signed in to the throwaway network as its first
 /// person, or as someone else they invited, and how to see and use it. Again, it's the same client, with this
 /// checkout's build as it is now.
 fn client(dir: &Path, checkout: &Path, settings: &one::kernel::Settings, rest: &[String]) -> Result<()> {
     let started = Instant::now();
-    // A session while it runs: a new build waits for the next command with none to start the try install again.
+    // A session while it runs: a new build waits for the next command with none to start the throwaway network again.
     let _session = client_session(dir);
     let person = match rest.iter().position(|a| a == "--as") {
         Some(at) => Some(person_named(rest.get(at + 1).context("--as who? --as sam")?)?),
         None => None,
     };
     // As its first person is as nobody else.
-    let first = settings.try_person.as_ref().map(|(_, name)| name.to_lowercase());
+    let first = settings.throwaway_person.as_ref().map(|(_, name)| name.to_lowercase());
     let person = person.filter(|name| Some(name.to_lowercase()) != first);
     match rest.first().map(String::as_str) {
         Some("web") => {
             // A browser reaches nodes over iroh, as the client's WebAssembly; a build without it would test the address.
             anyhow::ensure!(
                 one::kernel::client_version().is_some(),
-                "this build has no web client's WebAssembly: run this checkout's own build, target/debug/{CLI} try client web, which builds it"
+                "this build has no web client's WebAssembly: run this checkout's own build, target/debug/{CLI} throwaway client web, which builds it"
             );
             web(dir, settings, person.as_deref())?
         }
         Some(kind @ ("android" | "windows")) => {
             if let Some(name) = &person {
-                // They join where anyone does, in a browser: the try install's own here.
+                // They join where anyone does, in a browser: the throwaway network's own here.
                 joined(dir, settings, name)?;
             }
             device_client(dir, checkout, settings, kind, person.as_deref())?
         }
-        _ => bail!("which client? {CLI} try client web, android or windows, with --as <name> for someone else"),
+        _ => bail!("which client? {CLI} throwaway client web, android or windows, with --as <name> for someone else"),
     }
     println!("Ready in {}s.", started.elapsed().as_secs());
     Ok(())
 }
 
-/// For `try client web` from this checkout's own debug build: the web client's WebAssembly built, and this build made
+/// For `throwaway client web` from this checkout's own debug build: the web client's WebAssembly built, and this build made
 /// again with it embedded from target/client, as every build of this checkout does from then on (the kernel serves what its build holds), as `{CLI} update` does for a release but at dev
 /// speed: no release build, and cargo keeps what hasn't changed, so a run with nothing changed does nothing here. The
-/// try install's programs run the old build, so the command is run again as the new build, which starts it again (when
+/// throwaway network's programs run the old build, so the command is run again as the new build, which starts it again (when
 /// no client session is running).
 fn web_client_built(checkout: &Path, rest: &[String]) -> Result<()> {
     let own = checkout.join("target/debug").join(env!("CARGO_BIN_NAME"));
@@ -672,8 +672,8 @@ fn web_client_built(checkout: &Path, rest: &[String]) -> Result<()> {
     rebuilt(checkout, rest, &format!("target/debug/{CLI} again with the web client"))
 }
 
-/// For `try serverless deploy` from this checkout's own debug build: the serverless node's WebAssembly built (as a dev
-/// build, not release) into target/serverless, and this build made again with it, as `try client web` does with the
+/// For `throwaway serverless deploy` from this checkout's own debug build: the serverless node's WebAssembly built (as a dev
+/// build, not release) into target/serverless, and this build made again with it, as `throwaway client web` does with the
 /// client's, so the two builds agree: every build of this checkout holds both once they're there, and the kernel's
 /// relay (which names the serverless node) starts for any of them.
 fn serverless_built(checkout: &Path, rest: &[String]) -> Result<()> {
@@ -688,17 +688,17 @@ fn serverless_built(checkout: &Path, rest: &[String]) -> Result<()> {
 
 /// Builds this checkout's debug build again, which takes the web client and serverless node from target/ (build.rs, what
 /// `cargo test` does too, so they build the same one) and watches the files there; the first time, it's watching none,
-/// so touching build.rs has it look. The try install's programs run the old build, so the command is run again as the new
+/// so touching build.rs has it look. The throwaway network's programs run the old build, so the command is run again as the new
 /// build, which starts them again (when no client session is running).
 fn rebuilt(checkout: &Path, rest: &[String], what: &str) -> Result<()> {
     let own = checkout.join("target/debug").join(env!("CARGO_BIN_NAME"));
-    let again = format!("{}_TRY_REBUILT", CLI.to_uppercase());
+    let again = format!("{}_THROWAWAY_REBUILT", CLI.to_uppercase());
     anyhow::ensure!(std::env::var_os(&again).is_none(), "{CLI} was built again and doesn't hold what it was built with: {what}");
     eprintln!("Building {what} (dev profile, not release)…");
     std::fs::File::options().write(true).open(checkout.join("build.rs"))?.set_modified(std::time::SystemTime::now())?;
     crate::update::run_quiet(std::process::Command::new("nice").arg(crate::update::cargo()).current_dir(checkout).env_remove("CLIENT").env_remove("SERVERLESS").arg("build"))?;
     use std::os::unix::process::CommandExt;
-    Err(std::process::Command::new(&own).arg("try").args(rest).env(&again, "1").exec().into())
+    Err(std::process::Command::new(&own).arg("throwaway").args(rest).env(&again, "1").exec().into())
 }
 
 /// Someone's name as `--as` gives it, as people write it: "sam" is Sam.
@@ -709,7 +709,7 @@ fn person_named(given: &str) -> Result<String> {
     Ok(chars.next().map(|c| c.to_uppercase().chain(chars).collect()).unwrap_or_default())
 }
 
-/// The web client's folder in the try install's, for its first person or someone else.
+/// The web client's folder in the throwaway network's, for its first person or someone else.
 fn web_folder(dir: &Path, person: Option<&str>) -> PathBuf {
     match person {
         None => dir.join("web"),
@@ -717,9 +717,9 @@ fn web_folder(dir: &Path, person: Option<&str>) -> PathBuf {
     }
 }
 
-/// The web client, in a browser of the try install's own on this machine, with no window: drive it over the DevTools
-/// protocol. Its profile is kept with the try install, so it stays signed in. As someone else, they're invited first,
-/// by the try install's first person, and join in it.
+/// The web client, in a browser of the throwaway network's own on this machine, with no window: drive it over the DevTools
+/// protocol. Its profile is kept with the throwaway network, so it stays signed in. As someone else, they're invited first,
+/// by the throwaway network's first person, and join in it.
 fn web(dir: &Path, settings: &one::kernel::Settings, person: Option<&str>) -> Result<()> {
     let (port, picture) = match person {
         Some(name) => joined(dir, settings, name)?,
@@ -733,7 +733,7 @@ fn web(dir: &Path, settings: &one::kernel::Settings, person: Option<&str>) -> Re
     };
     let who = person.map(|name| format!(" as {name}")).unwrap_or_default();
     println!(
-        "The web client of this build is signed in to the try install{who}, in a browser of its own on this machine.
+        "The web client of this build is signed in to the throwaway network{who}, in a browser of its own on this machine.
   See it: {}
   Use it: its DevTools are at http://127.0.0.1:{port} (Playwright's connectOverCDP, or chrome-devtools-mcp --browserUrl)
   In any browser here: {}",
@@ -743,7 +743,7 @@ fn web(dir: &Path, settings: &one::kernel::Settings, person: Option<&str>) -> Re
     Ok(())
 }
 
-/// `name`'s web client, signed in: the first time, the try install's machine invites them, as `devices invite` does on
+/// `name`'s web client, signed in: the first time, the throwaway network's machine invites them, as `devices invite` does on
 /// an admin's machine (keeping the secret for their first device's approval), and they open the link in their own
 /// browser, join, and sign in; then their browser, their first device, asks to join and the machine approves it. Pictures
 /// of the invite and joining are kept beside theirs. → its DevTools port, and the picture of their first screen.
@@ -756,8 +756,8 @@ fn joined(dir: &Path, settings: &one::kernel::Settings, name: &str) -> Result<(u
     if !marker.exists() {
         eprintln!("Inviting {name}…");
         let node = std::fs::read_to_string(dir.join("addr"))?;
-        let invited = crate::request(try_agent(dir).post(format!("http://{}/v1/invite-link", node.trim())).send_json(json!({ "name": name })))?;
-        args.push(invited["link"].as_str().context("the try install made no invite link")?.to_string());
+        let invited = crate::request(throwaway_agent(dir).post(format!("http://{}/v1/invite-link", node.trim())).send_json(json!({ "name": name })))?;
+        args.push(invited["link"].as_str().context("the throwaway network made no invite link")?.to_string());
     }
     let code = web_script(dir, &args.iter().map(String::as_str).collect::<Vec<_>>())?;
     std::fs::write(&marker, name)?;
@@ -765,7 +765,7 @@ fn joined(dir: &Path, settings: &one::kernel::Settings, name: &str) -> Result<(u
     Ok((port, picture))
 }
 
-/// A web client that shows a code to be approved (`code`, else none) is approved by the try install's machine, as its
+/// A web client that shows a code to be approved (`code`, else none) is approved by the throwaway network's machine, as its
 /// person's device or as the device of the admin who invited them; then its window is pictured.
 fn approve(dir: &Path, settings: &one::kernel::Settings, port: u16, picture: &Path, code: &str) -> Result<()> {
     if !code.is_empty() {
@@ -775,16 +775,16 @@ fn approve(dir: &Path, settings: &one::kernel::Settings, port: u16, picture: &Pa
     Ok(())
 }
 
-/// Runs try_install.js with Bun: → what it printed.
+/// Runs throwaway.js with Bun: → what it printed.
 fn web_script(dir: &Path, args: &[&str]) -> Result<String> {
     let script = dir.join("web.js");
-    std::fs::write(&script, include_str!("try_install.js"))?;
+    std::fs::write(&script, include_str!("throwaway.js"))?;
     let out = std::process::Command::new(one::deploy::bun()?).arg(&script).args(args).output()?;
     anyhow::ensure!(out.status.success(), "the web client didn't sign in: {}", String::from_utf8_lossy(&out.stderr).trim());
     Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
-/// The try install's browser for its first person or someone else, started if it isn't running: → its DevTools port.
+/// The throwaway network's browser for its first person or someone else, started if it isn't running: → its DevTools port.
 fn browser(dir: &Path, settings: &one::kernel::Settings, person: Option<&str>) -> Result<u16> {
     let web = web_folder(dir, person);
     std::fs::create_dir_all(&web)?;
@@ -811,7 +811,7 @@ fn browser(dir: &Path, settings: &one::kernel::Settings, person: Option<&str>) -
             std::fs::write(web.join("port"), port.to_string())?;
             let start = Instant::now();
             while !answers(port) {
-                anyhow::ensure!(start.elapsed() < Duration::from_secs(30), "the try install's browser didn't start: {}", dir.join(&log).display());
+                anyhow::ensure!(start.elapsed() < Duration::from_secs(30), "the throwaway network's browser didn't start: {}", dir.join(&log).display());
                 std::thread::sleep(Duration::from_millis(250));
             }
             port
@@ -820,13 +820,13 @@ fn browser(dir: &Path, settings: &one::kernel::Settings, person: Option<&str>) -
     Ok(port)
 }
 
-/// An Android or Windows client: on a throwaway copy of the person's lasting device, borrowed for the try install,
-/// which reaches the try install's address at the same address; this checkout's build installed there, and signed in.
+/// An Android or Windows client: on a throwaway copy of the person's lasting device, borrowed for the throwaway network,
+/// which reaches the throwaway network's address at the same address; this checkout's build installed there, and signed in.
 fn device_client(dir: &Path, checkout: &Path, settings: &one::kernel::Settings, kind: &str, person: Option<&str>) -> Result<()> {
     let mut borrowed = devices(dir);
-    let what = format!("one try client {kind}, for {}", checkout.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default());
-    let listed = || again(|| post("/v1/call", json!({ "app": "computer", "op": "list", "input": {}, "client": "one try" }))).map(|l| l["ok"]["devices"].clone()).unwrap_or_default();
-    // A copy borrowed for this checkout's try install that it lost track of (the node restarted as it was lent) is
+    let what = format!("one throwaway client {kind}, for {}", checkout.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default());
+    let listed = || again(|| post("/v1/call", json!({ "app": "computer", "op": "list", "input": {}, "client": "one throwaway" }))).map(|l| l["ok"]["devices"].clone()).unwrap_or_default();
+    // A copy borrowed for this checkout's throwaway network that it lost track of (the node restarted as it was lent) is
     // taken, not left beside a second one.
     let ours = |listed: &Value| listed.as_array().into_iter().flatten().find(|d| d["borrowed"]["for"] == what.as_str()).and_then(|d| d["name"].as_str()).map(String::from);
     let now = listed();
@@ -850,7 +850,7 @@ fn device_client(dir: &Path, checkout: &Path, settings: &one::kernel::Settings, 
     };
     let port = settings.ports[1];
     agent_devices("reach", json!({ "device": device, "port": port }))?;
-    // A native client reads who's who from the bucket itself, at the URLs the signer gives it: the try bucket's port.
+    // A native client reads who's who from the bucket itself, at the URLs the signer gives it: the throwaway bucket's port.
     if let Some(bucket) = std::fs::read_to_string(dir.join("bucket-addr")).ok().and_then(|a| a.trim().rsplit_once(':').and_then(|(_, p)| p.parse::<u16>().ok())) {
         agent_devices("reach", json!({ "device": device, "port": bucket }))?;
     }
@@ -878,9 +878,9 @@ fn device_client(dir: &Path, checkout: &Path, settings: &one::kernel::Settings, 
     let _ = keep.join();
     built?;
     println!(
-        "The {kind} client of this build is signed in to the try install{}, on the device {device}, a throwaway copy borrowed for it.
+        "The {kind} client of this build is signed in to the throwaway network{}, on the device {device}, a throwaway copy borrowed for it.
   See it: {CLI} computer screen --device {device} (computer_screen), or {CLI} computer view --device {device} for a link
-  Use it: computer_use with device {device} (computer_tools lists what it takes); {CLI} try stop gives it back",
+  Use it: computer_use with device {device} (computer_tools lists what it takes); {CLI} throwaway stop gives it back",
         person.map(|name| format!(" as {name}")).unwrap_or_default()
     );
     Ok(())
@@ -895,8 +895,8 @@ fn build(checkout: &Path, script: &str, envs: &[(&str, &str)]) -> Result<String>
 }
 
 /// The Android app: built, installed over the one there, started, and signed in at `address` as a person would:
-/// typing it and tapping Sign In, then the try install's sign-in going straight on, as the try install's first person
-/// or `person`, whom the phone's browser signs in as first. Once signed in on a device as them (a file in the try
+/// typing it and tapping Sign In, then the throwaway network's sign-in going straight on, as the throwaway network's first person
+/// or `person`, whom the phone's browser signs in as first. Once signed in on a device as them (a file in the throwaway
 /// install's folder says so), a new build keeps that sign-in.
 fn android(dir: &Path, checkout: &Path, device: &str, settings: &one::kernel::Settings, person: Option<&str>) -> Result<()> {
     let address = settings.address.as_str();
@@ -907,7 +907,7 @@ fn android(dir: &Path, checkout: &Path, device: &str, settings: &one::kernel::Se
     // The launcher keeps drawing home-screen widgets from the APK it replaced ("Can't load widget") until it restarts.
     on_device(device, "am force-stop com.google.android.apps.nexuslauncher")?;
     let signed_in = dir.join(format!("signed-in-{device}"));
-    let first = settings.try_person.as_ref().map(|(_, name)| name.as_str()).unwrap_or_default();
+    let first = settings.throwaway_person.as_ref().map(|(_, name)| name.as_str()).unwrap_or_default();
     let who = person.unwrap_or(first);
     let here = format!("{address}\n{who}");
     let kept = std::fs::read_to_string(&signed_in).is_ok_and(|was| was == here);
@@ -950,7 +950,7 @@ fn android(dir: &Path, checkout: &Path, device: &str, settings: &one::kernel::Se
             typed = true;
             continue;
         }
-        // The try install's sign-in page, where Chrome waits for a tap before going on to an app.
+        // The throwaway network's sign-in page, where Chrome waits for a tap before going on to an app.
         if let Some(button) = nodes.iter().find(|n| n.text.starts_with("Sign In as ")).or_else(|| ["Accept & continue", "No thanks", "Use without an account", "Got it"].iter().find_map(|t| find(t))) {
             on_device(device, &format!("input tap {} {}", button.x, button.y))?;
             continue;
@@ -960,7 +960,7 @@ fn android(dir: &Path, checkout: &Path, device: &str, settings: &one::kernel::Se
             on_device(device, &format!("input tap {} {}", allow.x, allow.y))?;
             continue;
         }
-        // Its code to be let in, which the try install's machine approves, as one of its person's devices.
+        // Its code to be let in, which the throwaway network's machine approves, as one of its person's devices.
         if ours && let Some(code) = nodes.iter().find(|n| is_code(&n.text)).filter(|_| !approved) {
             approve_code(dir, &code.text)?;
             approved = true;
@@ -986,11 +986,11 @@ fn is_code(text: &str) -> bool {
     text.len() == 9 && text.char_indices().all(|(i, c)| if i == 4 { c == ' ' } else { c.is_ascii_uppercase() || ('2'..='7').contains(&c) })
 }
 
-/// A native client's code, approved by the try install's machine, as its person's device: then it's let in.
+/// A native client's code, approved by the throwaway network's machine, as its person's device: then it's let in.
 fn approve_code(dir: &Path, code: &str) -> Result<()> {
     eprintln!("Approving the device that shows {code}…");
     let node = std::fs::read_to_string(dir.join("addr"))?;
-    let approved = crate::request(try_agent(dir).post(format!("http://{}/v1/devices/approve", node.trim())).send_json(json!({ "code": code.replace(' ', ""), "confirm": true })));
+    let approved = crate::request(throwaway_agent(dir).post(format!("http://{}/v1/devices/approve", node.trim())).send_json(json!({ "code": code.replace(' ', ""), "confirm": true })));
     // Let in already, by its sign-in, by that same machine: nothing waits.
     match approved {
         Err(err) if format!("{err:#}").contains("no device is waiting") => Ok(()),
@@ -1020,15 +1020,15 @@ fn ui_nodes(xml: &str) -> Vec<UiNode> {
 }
 
 /// The Windows app: built in the device itself (WinUI 3 builds only on Windows), which installs and starts it, then
-/// signed in at the try install's address as a person would: typing it and pressing Continue, on the device's desktop,
-/// as the try install's first person or `person`, whom Edge signs in as first. Once signed in on a device as them (a
-/// file in the try install's folder says so), a new build keeps that sign-in.
+/// signed in at the throwaway network's address as a person would: typing it and pressing Continue, on the device's desktop,
+/// as the throwaway network's first person or `person`, whom Edge signs in as first. Once signed in on a device as them (a
+/// file in the throwaway network's folder says so), a new build keeps that sign-in.
 fn windows(dir: &Path, checkout: &Path, device: &str, settings: &one::kernel::Settings, person: Option<&str>) -> Result<()> {
     let address = settings.address.as_str();
     build(checkout, "windows/build.sh", &[("DEVICE", device)])?;
     let file = NAME.chars().filter(char::is_ascii_alphanumeric).collect::<String>();
     let signed_in = dir.join(format!("signed-in-{device}"));
-    let first = settings.try_person.as_ref().map(|(_, name)| name.as_str()).unwrap_or_default();
+    let first = settings.throwaway_person.as_ref().map(|(_, name)| name.as_str()).unwrap_or_default();
     let who = person.unwrap_or(first);
     let here = format!("{address}\n{who}");
     let kept = std::fs::read_to_string(&signed_in).is_ok_and(|was| was == here);
@@ -1041,7 +1041,7 @@ fn windows(dir: &Path, checkout: &Path, device: &str, settings: &one::kernel::Se
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
 $A = [Windows.Automation.AutomationElement]
 $all = [Windows.Automation.TreeScope]::Descendants
-$log = "$env:TEMP\one-try-sign-in.log"
+$log = "$env:TEMP\one-throwaway-sign-in.log"
 function Find($in, $property, $value) {{ $in.FindFirst($all, (New-Object Windows.Automation.PropertyCondition($property, $value))) }}
 function Window($process) {{
   $p = Get-Process -Name $process -ErrorAction SilentlyContinue | Where-Object MainWindowHandle -ne 0 | Select-Object -First 1
@@ -1068,7 +1068,7 @@ try {{
     $window = Window '{file}'
     if ((Get-Date) -gt $until) {{ throw "it didn't show its pages: $(Texts $window)" }}
     if (-not $window) {{ continue }}
-    # Its code to be let in, said once for the try install's machine to approve.
+    # Its code to be let in, said once for the throwaway network's machine to approve.
     $code = ($window.FindAll($all, [Windows.Automation.Condition]::TrueCondition) | ForEach-Object {{ $_.Current.Name }} | Where-Object {{ $_ -cmatch '^[A-Z2-7]{{4}} [A-Z2-7]{{4}}$' }} | Select-Object -First 1)
     if ($code -and -not $said) {{ "code $code" | Set-Content $log; $said = $true }}
     if (Find $window $A::NameProperty 'Settings') {{
@@ -1103,11 +1103,11 @@ try {{
     on_device(
         device,
         &format!(
-            r#"Remove-Item "$env:TEMP\one-try-sign-in.log" -ErrorAction SilentlyContinue
+            r#"Remove-Item "$env:TEMP\one-throwaway-sign-in.log" -ErrorAction SilentlyContinue
 $a = New-ScheduledTaskAction -Execute powershell.exe -Argument '-NoProfile -WindowStyle Hidden -EncodedCommand {encoded}'
 $p = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive
-Register-ScheduledTask -TaskName one-try-sign-in -Action $a -Principal $p -Force | Out-Null
-Start-ScheduledTask -TaskName one-try-sign-in"#
+Register-ScheduledTask -TaskName one-throwaway-sign-in -Action $a -Principal $p -Force | Out-Null
+Start-ScheduledTask -TaskName one-throwaway-sign-in"#
         ),
     )?;
     let start = Instant::now();
@@ -1115,7 +1115,7 @@ Start-ScheduledTask -TaskName one-try-sign-in"#
     loop {
         anyhow::ensure!(start.elapsed() < Duration::from_secs(420), "the Windows app didn't sign in: look at it with {CLI} computer screen --device {device}");
         std::thread::sleep(Duration::from_secs(3));
-        match on_device(device, r#"$log = "$env:TEMP\one-try-sign-in.log"; if (Test-Path $log) { Get-Content $log }"#)?.trim() {
+        match on_device(device, r#"$log = "$env:TEMP\one-throwaway-sign-in.log"; if (Test-Path $log) { Get-Content $log }"#)?.trim() {
             "signed in" => break,
             "" => {}
             said if said.starts_with("code ") && !approved => {

@@ -891,7 +891,7 @@ async fn reads(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
 }
 
 /// `{ force? }`: freezes `global`'s log, so its scope database is the truth (`database::switch`), if the switch is on
-/// (or `force`, in a try install), every device reads it, and this device signs for an admin: → `{ frozen }`.
+/// (or `force`, in a throwaway network), every device reads it, and this device signs for an admin: → `{ frozen }`.
 async fn switch(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
     only(&body, &["force"])?;
     node.freeze(body["force"] == true).await?;

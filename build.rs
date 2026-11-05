@@ -127,7 +127,7 @@ fn main() {
     let out = format!("{out}pub const KERNEL: &[(&str, &[u8])] = &[{}];\n", files.join(", "));
     // The serverless node's WebAssembly and its glue (serverless/), which `update` builds into SERVERLESS where Rust
     // builds for WebAssembly, so a release carries them to devices with no Rust to deploy it from.
-    // With no SERVERLESS, the one in target/serverless, if it's there (`try serverless deploy` builds it, as `try client
+    // With no SERVERLESS, the one in target/serverless, if it's there (`throwaway serverless deploy` builds it, as `throwaway client
     // web` does the client's), so every build of a checkout is the same one: not the node's own, which holds `one`.
     println!("cargo:rerun-if-env-changed=SERVERLESS");
     let names = ["one_serverless.js", "one_serverless_bg.wasm"];
@@ -152,7 +152,7 @@ fn main() {
     };
     let out = format!("{out}pub const SERVERLESS: &[(&str, &[u8])] = &[{}];\n", serverless.join(", "));
     // And the client's, for browsers (client/src/wasm.rs), in CLIENT, which the address serves the web client. With no
-    // CLIENT, the one `update` and `try client web` build into target/client, if it's there, so every build of a checkout
+    // CLIENT, the one `update` and `throwaway client web` build into target/client, if it's there, so every build of a checkout
     // is the same one, with or without it, but not the client's own (it's built for WebAssembly with `one` in it, which would hold
     // itself). Only a file that exists is watched: cargo reruns a build for one that doesn't.
     println!("cargo:rerun-if-env-changed=CLIENT");

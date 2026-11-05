@@ -100,7 +100,7 @@ pub struct Devices {
     traffic: Mutex<HashMap<String, i64>>,
 }
 
-/// Deletes the Linux devices of the install whose data folder is `dir`: those a `one try` made, when it's deleted.
+/// Deletes the Linux devices of the install whose data folder is `dir`: those a `one throwaway` made, when it's deleted.
 pub fn delete_all(dir: &std::path::Path) -> anyhow::Result<()> {
     linux::delete_all(dir)
 }

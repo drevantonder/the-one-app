@@ -719,7 +719,7 @@ fn view(r: &Replays, me: &str, client: &str, now: u64) -> Value {
             arrangements: Value::Object(arrangements),
             backups: None,
             guide: None,
-            // No try install has a serverless node.
+            // No throwaway network has a serverless node.
             passkeys: one::config::SIGN_IN != "google",
             device_now: &|_| Default::default(),
             client_now: &|_| Default::default(),

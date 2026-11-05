@@ -57,7 +57,7 @@ actor Auth {
     }
 
     #if DEBUG
-    /// A debug build is signed in by `SIGN_IN` (`{ address, client, refresh }`, a sign-in made elsewhere), as `one try`
+    /// A debug build is signed in by `SIGN_IN` (`{ address, client, refresh }`, a sign-in made elsewhere), as `one throwaway`
     /// tests one where no one can tap the system's sign-in sheet: in the simulator, which takes no taps from agents.
     nonisolated private static func takeTestSignIn() {
         guard let given = ProcessInfo.processInfo.environment["SIGN_IN"], defaults.string(forKey: "testSignIn") != given,

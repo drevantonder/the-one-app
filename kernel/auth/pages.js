@@ -246,11 +246,11 @@ function googlePage(look) {
   return page(`Sign in to ${name}`, body, script);
 }
 
-/// Signing in on a try install (`one try`), with no passkey, straight on, so a client being tested signs in with nobody
+/// Signing in on a throwaway network (`one throwaway`), with no passkey, straight on, so a client being tested signs in with nobody
 /// there: as whoever this browser is signed in as here (its first person, or someone who joined in it), or, with
 /// `?as=<name>` and no client, as someone who joined, for a device's browser before its app signs in. The button is for
 /// a browser that won't go on to an app by itself.
-export function tryPage(look) {
+export function throwawayPage(look) {
   const { name, person } = look;
   const body = `
     <h1 id="title">Sign in to ${escape(name)}</h1>
@@ -264,7 +264,7 @@ export function tryPage(look) {
       say();
       const undo = busy(button, "Signing In…");
       try {
-        const { person } = await api("/api/auth/try/sign-in", params.get("as") ? { person: params.get("as") } : { join: params.get("join") || undefined });
+        const { person } = await api("/api/auth/throwaway/sign-in", params.get("as") ? { person: params.get("as") } : { join: params.get("join") || undefined });
         if (params.get("as")) {
           undo();
           button.textContent = "Sign In as " + person;
@@ -282,14 +282,14 @@ export function tryPage(look) {
 }
 
 /// Joining with an invite link, its secret in the fragment, which goes only to auth's sign-up: making a first passkey,
-/// or signing in with Google (`google`) as the email it's for, or on a try install (`tried`), with nothing to make. With
+/// or signing in with Google (`google`) as the email it's for, or on a throwaway network (`throwaway`), with nothing to make. With
 /// `?code=`, the CLI's (`sign-in --invite`), it goes on to sign that in, as the person who just joined.
 export function invitePage(look) {
-  const { name, yours, tried, google } = look;
+  const { name, yours, throwaway, google } = look;
   const body = `
     <section id="join">
       <h1 id="title">Join ${escape(name)}</h1>
-      ${tried
+      ${throwaway
         ? `<p id="what">For testing: no passkey needed.</p>
       <button class="button primary" id="go" disabled>Join</button>`
         : google
@@ -301,13 +301,13 @@ export function invitePage(look) {
     </section>
     <section id="done" hidden>
       <h1>You've joined ${escape(yours)}</h1>
-      ${tried ? "" : `<p class="callout">Add a second passkey, on another device or a security key, so losing this one doesn't lock you out.</p>
+      ${throwaway ? "" : `<p class="callout">Add a second passkey, on another device or a security key, so losing this one doesn't lock you out.</p>
       <a class="button primary" href="/passkeys">Add Another Passkey</a>`}
-      <a class="button${tried ? " primary" : ""}" href="/">Open ${escape(name)}</a>
+      <a class="button${throwaway ? " primary" : ""}" href="/">Open ${escape(name)}</a>
     </section>`;
   const script = `
     const secret = location.hash.slice(1);
-    const tried = ${tried ? "true" : "false"}, google = ${google ? "true" : "false"};
+    const throwaway = ${throwaway ? "true" : "false"}, google = ${google ? "true" : "false"};
     const code = new URLSearchParams(location.search).get("code");
     const button = document.getElementById("go");
     // Google's answer comes back here with an error if it didn't sign them up.
@@ -315,7 +315,7 @@ export function invitePage(look) {
     // Whoever was signed in here before, the invite is for its person: signed out as the page opens, beside asking
     // whose invite it is, and then the passkey's options, so the prompt comes the moment Make a Passkey is tapped.
     const out = api("/api/auth/sign-out", {}).catch(() => {});
-    if (!tried && !google) out.then(() => ready(register(secret)));
+    if (!throwaway && !google) out.then(() => ready(register(secret)));
     (async () => {
       try {
         const about = await api("/invite/about", { secret });
@@ -326,7 +326,7 @@ export function invitePage(look) {
     })();
     button.onclick = async () => {
       say();
-      const undo = busy(button, tried ? "Joining…" : google ? "Opening Google…" : "Making a Passkey…");
+      const undo = busy(button, throwaway ? "Joining…" : google ? "Opening Google…" : "Making a Passkey…");
       try {
         // Kept in this tab for the web client, whose request to let in this person's first device proves it.
         sessionStorage.setItem("one.invite", secret);
@@ -337,7 +337,7 @@ export function invitePage(look) {
           location.href = (await api("/api/auth/sign-in/social", { provider: "google", callbackURL: code ? "/sign-in/code?c=" + encodeURIComponent(code) : "/", errorCallbackURL: back })).url;
           return;
         }
-        if (tried) await api("/api/auth/try/join", { secret });
+        if (throwaway) await api("/api/auth/throwaway/join", { secret });
         else await newPasskey(secret);
         if (code) return void (location.href = "/sign-in/code?c=" + encodeURIComponent(code));
         history.replaceState(null, "", "/invite");
@@ -345,7 +345,7 @@ export function invitePage(look) {
         document.getElementById("done").hidden = false;
       } catch (err) {
         undo();
-        if (!tried && !google) ready(register(secret));
+        if (!throwaway && !google) ready(register(secret));
         quietly(err);
       }
     };`;

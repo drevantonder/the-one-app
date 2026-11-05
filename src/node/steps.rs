@@ -15,7 +15,7 @@ impl Node {
         self.with(|i| Ok(i.r.frozen.is_some())).unwrap_or(false)
     }
 
-    /// Freezes `global`'s log, if the switch is on and the gate is open (or `forced`, in a try install), it isn't frozen
+    /// Freezes `global`'s log, if the switch is on and the gate is open (or `forced`, in a throwaway network), it isn't frozen
     /// yet, and this device signs for an admin: a `FREEZING` step first, so writers of the log look whether the freeze
     /// holds what they write from then on; then where every log ends, and the freeze (`steps::freeze`), at the next
     /// free position. Another admin's device may freeze it first: the first freeze that checks out is the one. Then the

@@ -268,7 +268,7 @@ The board's rules, which every agent follows and anyone may change with board_ru
         type: "object",
         required: ["text"],
         properties: {
-          text: { type: "string", description: `one line, at most ${LIMIT} bytes, like "Done: the fix is on main (abc123); checked in one try."` },
+          text: { type: "string", description: `one line, at most ${LIMIT} bytes, like "Done: the fix is on main (abc123); checked in one throwaway."` },
           topic: TOPIC,
           who: { type: "string", description: "who you are and where, in your own words, the same each time: like your harness, thread or session, machine and folder" },
           scope: scopeInput,

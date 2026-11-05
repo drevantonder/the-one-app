@@ -3,10 +3,10 @@
 //! labels on the container, where the old app kept them too, so its devices carry on here. The container runtime is
 //! Podman on Linux and Apple's container on a Mac.
 //!
-//! The runtime is the machine's, shared by every install on it (a `one try` beside the real one), so each container
+//! The runtime is the machine's, shared by every install on it (a `one throwaway` beside the real one), so each container
 //! carries its install's data folder as a label (`one.home`), and an install lists and touches only its own. Those made
 //! before the label are claimed once, by an install whose folder was already there when it first ran with it
-//! (`claimed.json`): the real one, never a new `one try`.
+//! (`claimed.json`): the real one, never a new `one throwaway`.
 
 use std::collections::{BTreeSet, HashMap};
 use std::io::{Read, Write};
@@ -286,7 +286,7 @@ pub trait Containers: Send + Sync {
 }
 
 /// This machine's runtime for Linux devices, or why it has none.
-/// Deletes the containers of the install whose data folder is `dir`, as when a `one try` is deleted.
+/// Deletes the containers of the install whose data folder is `dir`, as when a `one throwaway` is deleted.
 pub fn delete_all(dir: &Path) -> Result<()> {
     let rt: Box<dyn Containers> = if cfg!(target_os = "macos") { Box::new(Apple::new(dir)?) } else { Box::new(Podman::new()?) };
     let home = dir.to_string_lossy();

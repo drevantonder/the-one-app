@@ -26,10 +26,10 @@ pub fn bun() -> Result<PathBuf> {
     crate::apps::pinned(&format!("bun-{BUN}"), "bun", &url, integrity)
 }
 
-/// A browser with no window on this machine, for drawing screens (one try's web client, the tests), started as lean as
+/// A browser with no window on this machine, for drawing screens (one throwaway's web client, the tests), started as lean as
 /// it still works: CHROME's, Playwright's headless shell (a third of Chrome's memory), the usual Chromes, or
 /// Playwright's Chromium. Each app's frame keeps a process of its own, as in people's browsers, which the headless shell
-/// doesn't do by itself and one try's script needs to reach the frames.
+/// doesn't do by itself and one throwaway's script needs to reach the frames.
 pub fn chrome() -> Option<std::process::Command> {
     let playwright = |prefix: &str, names: &[&str]| -> Option<PathBuf> {
         let dir = PathBuf::from(std::env::var_os("HOME")?).join(".cache/ms-playwright");

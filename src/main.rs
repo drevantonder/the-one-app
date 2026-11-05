@@ -12,7 +12,7 @@ mod code;
 mod git_remote;
 mod mcp_apps;
 mod ops;
-mod try_install;
+mod throwaway;
 mod update;
 
 /// Every built-in command, with what it takes: `help all` prints it, and `<command> --help` its lines.
@@ -142,11 +142,11 @@ fn every_command() -> String {
                                        (a last word - reads it anyway), --file
                                        <input>=<path> gives a file and --out <path> saves what it gives back.
                                        --device <name> runs it on that device
-  {CLI} try [<command>]                a new install for this checkout, on this machine beside yours, with only what
-                                       every new install starts with: to look around and test in. {CLI} try <command>
-                                       runs a command in it ({CLI} try mcp for an agent), {CLI} try client web, android
-                                       or windows gives a client of this checkout's build signed in to it, and
-                                       {CLI} try stop deletes it
+  {CLI} throwaway [<command>]          a throwaway network for this checkout, on this machine beside yours, with only
+                                       what every new one starts with: to look around and test in. {CLI} throwaway
+                                       <command> runs a command in it ({CLI} throwaway mcp for an agent), {CLI} throwaway
+                                       client web, android or windows gives a client of this checkout's build signed in
+                                       to it, and {CLI} throwaway stop deletes it
   {CLI} update                         build main's tip (tested before it was pushed) on this machine and the Macs, and run it everywhere
   {CLI} release <vX.Y.Z>               the same, signed off and published on GitHub for the installer
   {CLI} publish [binary]               sign and publish a build you made; every device on its platform updates
@@ -271,8 +271,8 @@ fn run(args: Vec<String>) -> Result<()> {
         ops::JSON.store(true, std::sync::atomic::Ordering::Relaxed);
     }
     let args: Vec<String> = args.iter().enumerate().filter(|(i, a)| *i >= end || *a != "--json").map(|(_, a)| a.clone()).collect();
-    if args.first().map(String::as_str) == Some("try") {
-        return try_install::try_install(&args[1..]);
+    if args.first().map(String::as_str) == Some("throwaway") {
+        return throwaway::run(&args[1..]);
     }
     let (positional, flags) = parse(&args);
     if positional.first().map(String::as_str) != Some("mcp") {
@@ -394,7 +394,7 @@ fn run(args: Vec<String>) -> Result<()> {
         }
         ["switch"] => {
             // Freezes the log, so the scope database is the truth: only once the switch is on and every device reads
-            // it, or in a try install, which may be switched to prove it (`database::switch`).
+            // it, or in a throwaway network, which may be switched to prove it (`database::switch`).
             let r = post("/v1/switch", json!({ "force": true }))?;
             println!("{}", if r["frozen"] == true { "Who's who is the scope database now." } else { "Not switched: the switch is off in this build, or a device still reads the log (status says which)." });
         }
@@ -1391,10 +1391,10 @@ fn usual_path() {
     }
 }
 
-/// How long a try install's node runs with nobody asking it anything.
-const TRY_IDLE: std::time::Duration = std::time::Duration::from_secs(60 * 60);
+/// How long a throwaway network's node runs with nobody asking it anything.
+const THROWAWAY_IDLE: std::time::Duration = std::time::Duration::from_secs(60 * 60);
 
-/// When a try install's node was last asked something, in seconds since it started.
+/// When a throwaway network's node was last asked something, in seconds since it started.
 static ASKED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// oned: with no part named, this device, for good (`serve`); with one, that part (`service::run`).
@@ -1404,7 +1404,7 @@ fn oned(args: &[String]) -> Result<()> {
         [] => {
             usual_path();
             IN_NODE.store(true, std::sync::atomic::Ordering::Relaxed);
-            serve(args.iter().any(|a| a == "--try"), args)
+            serve(args.iter().any(|a| a == "--throwaway"), args)
         }
         [name] => one::service::run(name),
         _ => bail!("{} runs this device, or with a service's name, that service, as its oned starts it", one::oned::name()),
@@ -1456,11 +1456,11 @@ async fn serve(is_try: bool, args: &[String]) -> Result<()> {
         one::database::switch::FORCEABLE.store(true, std::sync::atomic::Ordering::Relaxed);
         let home = dir.clone();
         tokio::spawn(async move {
-            if let Err(err) = try_install::bucket(home).await {
-                tracing::warn!("the try install's bucket stopped: {err:#}");
+            if let Err(err) = throwaway::bucket(home).await {
+                tracing::warn!("the throwaway network's bucket stopped: {err:#}");
             }
         });
-        // Left running, a try install stops by itself; `try` starts it again.
+        // Left running, a throwaway network stops by itself; `throwaway` starts it again.
         let started = std::time::Instant::now();
         routes = routes.layer(axum::middleware::from_fn(move |req: axum::extract::Request, next: axum::middleware::Next| {
             ASKED.store(started.elapsed().as_secs(), std::sync::atomic::Ordering::Relaxed);
@@ -1468,13 +1468,13 @@ async fn serve(is_try: bool, args: &[String]) -> Result<()> {
         }));
         let dir = dir.clone();
         tokio::spawn(async move {
-            while started.elapsed().as_secs().saturating_sub(ASKED.load(std::sync::atomic::Ordering::Relaxed)) < TRY_IDLE.as_secs() {
+            while started.elapsed().as_secs().saturating_sub(ASKED.load(std::sync::atomic::Ordering::Relaxed)) < THROWAWAY_IDLE.as_secs() {
                 tokio::time::sleep(std::time::Duration::from_secs(60)).await;
             }
-            tracing::info!("nobody asked the try install anything for {} minutes: stopping", TRY_IDLE.as_secs() / 60);
+            tracing::info!("nobody asked the throwaway network anything for {} minutes: stopping", THROWAWAY_IDLE.as_secs() / 60);
             let _ = std::fs::remove_file(dir.join("pid"));
-            // Its kernel and browser, then its own group: it keeps its data, for `try` to start it again.
-            try_install::stop_others(&dir);
+            // Its kernel and browser, then its own group: it keeps its data, for `throwaway` to start it again.
+            throwaway::stop_others(&dir);
             unsafe { libc::kill(0, libc::SIGTERM) };
         });
     }

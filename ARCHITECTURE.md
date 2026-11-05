@@ -22,7 +22,7 @@ Your devices, and your team's, as one place for apps and agents. An install is o
 - **The bucket decides the order of writes.** A write is a step created only if its position is free. Notices between devices are hints; each device reads what changed from the bucket. Only the node's database, how things went, is changed in place.
 - **A call runs once,** on a node that runs every scope it reaches, chosen by run priority.
 - **An older device can safely ignore what newer ones send.** Phones and Macs run behind the others.
-- **Speed** is held to targets measured in `one try`, from a phone on mobile data where it matters: the web client usable within 1.5 s of a cold open; a remote MCP call adding at most 100 ms to a local one; a write seen on another device within 1 s; a call one round trip; no data rewritten when someone adds a device.
+- **Speed** is held to targets measured in `one throwaway`, from a phone on mobile data where it matters: the web client usable within 1.5 s of a cold open; a remote MCP call adding at most 100 ms to a local one; a write seen on another device within 1 s; a call one round trip; no data rewritten when someone adds a device.
 
 ## Designed, not built
 

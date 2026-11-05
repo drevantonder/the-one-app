@@ -109,11 +109,11 @@ pub struct Settings {
     /// with the kernel, and the custom build's APNs, FCM and WNS credentials, as its admin adds them.
     #[serde(default, skip)]
     pub push: std::collections::BTreeMap<String, String>,
-    /// A try install's one person, `(id, name)`, whom its kernel signs in with no passkey and no Google, so clients
-    /// are tested with nobody there. Only `one try` sets it, on the kernel it runs beside its try install, listening
+    /// A throwaway network's one person, `(id, name)`, whom its kernel signs in with no passkey and no Google, so clients
+    /// are tested with nobody there. Only `one throwaway` sets it, on the kernel it runs beside its throwaway network, listening
     /// only on this machine; `deploy` refuses settings with it, so no kernel people use ever has it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub try_person: Option<(String, String)>,
+    pub throwaway_person: Option<(String, String)>,
 }
 
 /// Whether people sign in with Google.
@@ -293,7 +293,7 @@ impl Settings {
             settings.set_secret("VAPID_KEY", &key)?;
             settings.push.insert("VAPID_KEY".into(), key);
         }
-        if settings.try_person.is_none() && google() {
+        if settings.throwaway_person.is_none() && google() {
             settings.google = get("GOOGLE_CLIENT_ID").zip(get("GOOGLE_CLIENT_SECRET"));
             ensure!(settings.google.is_some(), "no GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET: the Google OAuth client people sign in with, whose redirect URI is {}/api/auth/callback/google", settings.address);
         }
@@ -327,22 +327,22 @@ impl Settings {
             devices: vec![],
             push: [("VAPID_KEY".to_string(), vapid_key())].into(),
             genesis: None,
-            try_person: None,
+            throwaway_person: None,
         }
     }
 
-    /// A try install's kernel (`one try`): on free ports here, its address its gateway's at 127.0.0.1, which `one try`
+    /// A throwaway network's kernel (`one throwaway`): on free ports here, its address its gateway's at 127.0.0.1, which `one throwaway`
     /// lets each device it borrows reach at the same address; its bucket where its node serves its data (`bucket`), and
     /// `person` signed in with nothing to show.
-    pub fn for_try(bucket: &str, person: (String, String)) -> Result<Settings> {
+    pub fn for_throwaway(bucket: &str, person: (String, String)) -> Result<Settings> {
         let free = || -> Result<u16> { Ok(std::net::TcpListener::bind("127.0.0.1:0")?.local_addr()?.port()) };
         let ports = [free()?, free()?];
-        let mut settings = Settings::new("Try", &format!("http://127.0.0.1:{}", ports[1]));
+        let mut settings = Settings::new("Throwaway", &format!("http://127.0.0.1:{}", ports[1]));
         settings.auth_url = format!("http://127.0.0.1:{}", ports[0]);
         settings.ports = ports;
-        settings.try_person = Some(person);
-        // Its node serves its data there (try_install::bucket), signatures unchecked: the URL signer holds these.
-        settings.bucket = Some(json!({ "endpoint": format!("http://{bucket}"), "bucket": "try", "region": "auto", "key_id": "try", "secret": "try" }));
+        settings.throwaway_person = Some(person);
+        // Its node serves its data there (throwaway::bucket), signatures unchecked: the URL signer holds these.
+        settings.bucket = Some(json!({ "endpoint": format!("http://{bucket}"), "bucket": "throwaway", "region": "auto", "key_id": "throwaway", "secret": "throwaway" }));
         Ok(settings)
     }
 
@@ -484,10 +484,10 @@ impl Settings {
                 plain("YOURS", crate::config::YOURS.into());
                 // Its own apps' sign-ins come back to `<cli>://signed-in/`.
                 plain("CLI", crate::config::CLI.into());
-                if let Some((id, name)) = &self.try_person {
-                    plain("SIGN_IN", "try".into());
-                    plain("TRY_USER", id.clone());
-                    plain("TRY_NAME", name.clone());
+                if let Some((id, name)) = &self.throwaway_person {
+                    plain("SIGN_IN", "throwaway".into());
+                    plain("THROWAWAY_USER", id.clone());
+                    plain("THROWAWAY_NAME", name.clone());
                 } else if google() {
                     plain("SIGN_IN", "google".into());
                     plain("JOIN_DOMAIN", crate::config::JOIN_DOMAIN.into());
@@ -502,8 +502,8 @@ impl Settings {
             _ => {
                 plain("AUTH", "service:auth".into());
                 plain("ISSUER", issuer);
-                if self.try_person.is_some() {
-                    plain("SIGN_IN", "try".into());
+                if self.throwaway_person.is_some() {
+                    plain("SIGN_IN", "throwaway".into());
                 }
             }
         }
@@ -541,8 +541,8 @@ pub fn served_with(settings: &Settings, modules: Vec<Vec<u8>>, web: &Path, serve
             listen: settings.place(name).map(|(_, port)| format!("127.0.0.1:{port}")),
             bindings: settings.bindings(name).into_iter().filter(|(_, v, _)| mcp || !v.starts_with("service:mcp") && !v.starts_with("object:mcp:")).map(|(n, v, _)| (n, v)).collect(),
             assets: (*name == "gateway").then(|| web.to_path_buf()),
-            // A try install's URL signer, and the MCP Worker's devices reading by its URLs, reach its bucket on this machine.
-            outbound: (matches!(*name, "signer" | "mcp") && settings.try_person.is_some()).then(|| NEARBY.to_string()),
+            // A throwaway network's URL signer, and the MCP Worker's devices reading by its URLs, reach its bucket on this machine.
+            outbound: (matches!(*name, "signer" | "mcp") && settings.throwaway_person.is_some()).then(|| NEARBY.to_string()),
         })
         .chain(node)
         .collect()
@@ -738,7 +738,7 @@ pub fn serve(settings: &Settings) -> Result<()> {
     let web = dir.join("web");
     let served = served(settings, modules, &web);
     let here = |a: &str| a.strip_prefix("127.0.0.1:").or_else(|| a.strip_prefix("http://127.0.0.1:")).is_some_and(|port| port.parse::<u16>().is_ok());
-    ensure!(settings.try_person.is_none() || here(&settings.address) && served.iter().all(|s| s.listen.as_deref().is_none_or(here)), "a try install's kernel signs in anyone who reaches it, so it runs only beside its try install, at 127.0.0.1");
+    ensure!(settings.throwaway_person.is_none() || here(&settings.address) && served.iter().all(|s| s.listen.as_deref().is_none_or(here)), "a throwaway network's kernel signs in anyone who reaches it, so it runs only beside its throwaway network, at 127.0.0.1");
     let _ = std::fs::remove_dir_all(&web);
     let mut files = settings.web();
     parses(&files)?;
@@ -1257,7 +1257,7 @@ pub fn deploy(cf: &Cloudflare, settings: &Settings, modules: &[Vec<u8>], web: &[
 
 /// `deploy`, of only the services named.
 pub fn deploy_some(cf: &Cloudflare, settings: &Settings, modules: &[Vec<u8>], web: &[(String, Vec<u8>)], services: &[&str]) -> Result<()> {
-    ensure!(settings.try_person.is_none(), "a try install's kernel signs in anyone who reaches it, so it runs only beside its try install");
+    ensure!(settings.throwaway_person.is_none(), "a throwaway network's kernel signs in anyone who reaches it, so it runs only beside its throwaway network");
     if services.contains(&"gateway") {
         parses(web)?;
     }

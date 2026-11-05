@@ -24,7 +24,7 @@
 // and keeps the token Google gave; with a passkey, the prompt's challenge names it, the install and when
 // (`joinChallenge`), and auth keeps the assertion. Either is kept (`proofs`) and passed on unchanged with that device's
 // request to join (`sign_in`), never checked here: only the person's devices count it, and only for an account their
-// own devices recorded. Refusing a request forgets its proof too. A try install's kernel signs its own ID token, with
+// own devices recorded. Refusing a request forgets its proof too. A throwaway network's kernel signs its own ID token, with
 // nothing else to show.
 //
 // Only a device that signed in itself is let in by its sign-in: a sign-in finished from a link opened on another device
@@ -45,10 +45,10 @@
 // (`RELAY.allowed(key)`), an admin's for what only admins do. A POST's body is the signed request; a GET's or DELETE's
 // is in `x-one-request`, as base64url of its JSON.
 //
-// A try install's kernel (`SIGN_IN` is "try") signs in its first person (`TRY_USER`, `TRY_NAME`) with no passkey and
+// A throwaway network's kernel (`SIGN_IN` is "throwaway") signs in its first person (`THROWAWAY_USER`, `THROWAWAY_NAME`) with no passkey and
 // no Google: its sign-in page goes straight on. Someone it invites joins by opening their link, again with no passkey,
-// and is then who that browser signs in as. It's for testing clients without a person: only `one try` turns it on
-// (kernel::Settings::try_person), on a kernel that listens only on its own machine, and `kernel deploy` refuses one,
+// and is then who that browser signs in as. It's for testing clients without a person: only `one throwaway` turns it on
+// (kernel::Settings::throwaway_person), on a kernel that listens only on its own machine, and `kernel deploy` refuses one,
 // so no real install's kernel ever does this.
 
 import { DurableObject } from "cloudflare:workers";
@@ -61,7 +61,7 @@ import { getMigrations } from "better-auth/db/migration";
 import { jwt } from "better-auth/plugins";
 import { b64u, checkRequest, hex, joinChallenge, joinCode, joinNonce } from "../shared/crypto.js";
 import { bearer, verify } from "../shared/token.js";
-import { codePage, invitePage, passkeysPage, signInPage, tryPage } from "./pages.js";
+import { codePage, invitePage, passkeysPage, signInPage, throwawayPage } from "./pages.js";
 import { DurableObjectDialect } from "./sql.js";
 
 const json = (v, status = 200) => Response.json(v, { status });
@@ -215,7 +215,7 @@ export class Auth extends DurableObject {
     const sql = this.ctx.storage.sql;
     const self = this;
     const google = env.SIGN_IN === "google";
-    const tried = env.SIGN_IN === "try";
+    const throwaway = env.SIGN_IN === "throwaway";
     return {
       appName: env.NAME || "The One App",
       baseURL: url.origin,
@@ -230,11 +230,11 @@ export class Auth extends DurableObject {
         user: {
           create: {
             // Only someone invited signs up, as who the invite says they are in the install, so devices know them by
-            // the same id: with a passkey, as it's registered, or a try install's link (`admit`); with Google, as
+            // the same id: with a passkey, as it's registered, or a throwaway network's link (`admit`); with Google, as
             // Google says the email is theirs, with the invite this browser opened to join.
             async before(user, ctx) {
               if (self.admitting && user.id === self.admitting) return;
-              if (tried) return user.id === env.TRY_USER ? undefined : false;
+              if (throwaway) return user.id === env.THROWAWAY_USER ? undefined : false;
               if (!google) return false;
               const secret = cookieOf(ctx?.headers, cookieName(env, "one-invite"));
               const invite = secret && sql.exec("select * from invites where id = ?", await hash(secret)).toArray()[0];
@@ -249,7 +249,7 @@ export class Auth extends DurableObject {
           create: {
             // An admin signs in only with a passkey, which resists phishing.
             async before(session, ctx) {
-              if (tried || BY_PASSKEY.includes(ctx?.path)) return;
+              if (throwaway || BY_PASSKEY.includes(ctx?.path)) return;
               if (sql.exec("select 1 from passkey_only where user = ?", session.userId).toArray().length) refuse(403, "You're an admin, so you sign in with your passkey.");
             },
           },
@@ -268,7 +268,7 @@ export class Auth extends DurableObject {
       },
       plugins: [
         jwt({ jwks: { keyPairConfig: { alg: "EdDSA", crv: "Ed25519" } }, jwt: { issuer: `${url.origin}/api/auth`, expirationTime: "1h" } }),
-        ...(tried ? [tryInstall(self, env.TRY_USER, env.TRY_NAME)] : [passkey({
+        ...(throwaway ? [throwawayInstall(self, env.THROWAWAY_USER, env.THROWAWAY_NAME)] : [passkey({
           rpID: url.hostname,
           rpName: env.NAME || "The One App",
           origin: url.origin,
@@ -339,8 +339,8 @@ export class Auth extends DurableObject {
       // What its pages say: the custom build's name, and what a person joins ("your One App").
       const look = { name, yours: this.env.YOURS };
       const google = this.env.SIGN_IN === "google" ? this.env.JOIN_DOMAIN : null;
-      const tried = this.env.SIGN_IN === "try";
-      if (path === "/sign-in" && request.method === "GET") return html(tried ? tryPage({ ...look, person: this.env.TRY_NAME }) : signInPage({ ...look, google }));
+      const throwaway = this.env.SIGN_IN === "throwaway";
+      if (path === "/sign-in" && request.method === "GET") return html(throwaway ? throwawayPage({ ...look, person: this.env.THROWAWAY_NAME }) : signInPage({ ...look, google }));
       if (path === "/sign-in/about") return json(await this.about(request, url.searchParams));
       if (path === "/sign-in/google" && request.method === "POST" && google) return await this.startGoogle(request, await request.json());
       if (path === "/sign-in/code" && request.method === "POST") return json(await this.codeFor(await request.json()));
@@ -348,10 +348,10 @@ export class Auth extends DurableObject {
       if (path === "/sign-in/code/done" && request.method === "GET") return html(codePage({ ...look, google, done: await this.codeDone(url.searchParams) }));
       if (path === "/sign-in/code/take" && request.method === "POST") return this.codeTaken(await request.json());
       if (path === "/sign-in/accept" && request.method === "POST") return json(await this.accept(request, await request.json()));
-      if (path === "/invite" && request.method === "GET") return html(invitePage({ ...look, tried, google }));
+      if (path === "/invite" && request.method === "GET") return html(invitePage({ ...look, throwaway, google }));
       if (path === "/invite/about" && request.method === "POST") return json(await this.inviteAbout(await request.json()));
       if (path === "/invite/google" && request.method === "POST" && google) return await this.joinWithGoogle(request, await request.json());
-      if (path === "/passkeys" && request.method === "GET" && !tried) return html(passkeysPage(look), { framed: true });
+      if (path === "/passkeys" && request.method === "GET" && !throwaway) return html(passkeysPage(look), { framed: true });
       return new Response("not found", { status: 404 });
     } catch (err) {
       // Our own refusals have a numeric status; Better Auth's say theirs in statusCode.
@@ -454,7 +454,7 @@ export class Auth extends DurableObject {
     const { user, admin } = signed.fields;
     if (!USER.test(user || "") || typeof admin !== "boolean") refuse(400, "give user, and admin as true or false");
     const sql = this.ctx.storage.sql;
-    if (admin && this.env.SIGN_IN !== "try" && !sql.exec("select 1 from passkey where userId = ?", user).toArray().length) refuse(409, "They have no passkey yet, which an admin signs in with: they add one on their Passkeys page first.");
+    if (admin && this.env.SIGN_IN !== "throwaway" && !sql.exec("select 1 from passkey where userId = ?", user).toArray().length) refuse(409, "They have no passkey yet, which an admin signs in with: they add one on their Passkeys page first.");
     if (admin) sql.exec("insert or ignore into passkey_only (user) values (?)", user);
     else sql.exec("delete from passkey_only where user = ?", user);
     return {};
@@ -696,7 +696,7 @@ export class Auth extends DurableObject {
   signsInHere(client) {
     const uris = typeof client.redirectUris === "string" ? JSON.parse(client.redirectUris) : client.redirectUris || [];
     const origin = new URL(this.env.ADDRESS).origin;
-    // The install's own address is on loopback too where it's tried (`one try`), so its pages are told apart first.
+    // The install's own address is on loopback too where it's tried (`one throwaway`), so its pages are told apart first.
     const here = (u) => (URL.canParse(u) && new URL(u).origin === origin ? u === `${origin}/callback` : goesTo(u, origin) === ON_DEVICE);
     return uris.length > 0 && uris.every(here);
   }
@@ -837,7 +837,7 @@ export class Auth extends DurableObject {
     return invite;
   }
 
-  /// Makes the invite's person, as their first passkey is registered (or as a try install's link is opened), and
+  /// Makes the invite's person, as their first passkey is registered (or as a throwaway network's link is opened), and
   /// spends the invite: the database hook lets only them in.
   async admit(invite, user) {
     if (user.id !== invite.user) refuse(400, "That passkey was made for someone else.");
@@ -867,13 +867,13 @@ export class Auth extends DurableObject {
   }
 
   /// Signing in to a client (`oauth_query`) as whoever just signed in here: by tapping their passkey on its page
-  /// (`passkey`), or back from the Google sign-in started for it; on a try install, whoever is signed in. → where the
+  /// (`passkey`), or back from the Google sign-in started for it; on a throwaway network, whoever is signed in. → where the
   /// client goes on to.
   async accept(request, { oauth_query, passkey }) {
     this.fromOurPages(request);
     const signedIn = await this.session(request);
     const query = new URLSearchParams(typeof oauth_query === "string" ? oauth_query : "");
-    if (this.env.SIGN_IN !== "try") {
+    if (this.env.SIGN_IN !== "throwaway") {
       const started = await this.started(request, signedIn, query);
       if (!started && (!fresh(signedIn) || (this.env.SIGN_IN === "google" && passkey !== true))) refuse(403, "Sign in again.");
       if (started) this.ctx.storage.sql.exec("delete from google_starts where id = ?", started);
@@ -897,10 +897,10 @@ export class Auth extends DurableObject {
   }
 }
 
-/// A try install's sign-in, with no passkey: whoever is signed in here already (someone who joined in this browser),
+/// A throwaway network's sign-in, with no passkey: whoever is signed in here already (someone who joined in this browser),
 /// or `person` by name (someone who joined), or else its first person, made the first time; and joining with an
 /// invite link, which signs its person in here.
-function tryInstall(auth, id, name) {
+function throwawayInstall(auth, id, name) {
   const signIn = async (ctx, user) => {
     await setSessionCookie(ctx, { session: await ctx.context.internalAdapter.createSession(user.id), user });
     await tryProof(ctx, user);
@@ -915,15 +915,15 @@ function tryInstall(auth, id, name) {
     if (!join || !genesis) return;
     const origin = new URL(auth.env.ADDRESS).origin;
     const named = ctx.body.spoil === true ? "0".repeat(128) : join;
-    const payload = { iss: `${origin}/api/auth`, aud: "one-try", sub: user.id, iat: Math.floor(Date.now() / 1000), nonce: await joinNonce(genesis, ...endpointOf(named)) };
+    const payload = { iss: `${origin}/api/auth`, aud: "one-throwaway", sub: user.id, iat: Math.floor(Date.now() / 1000), nonce: await joinNonce(genesis, ...endpointOf(named)) };
     const { token } = await auth.auth.api.signJWT({ body: { payload } });
     auth.keepProof(join, user.id, { id_token: token });
   };
   const first = async (adapter) => (await adapter.findUserById(id)) || (await adapter.createUser({ id, name, email: `${id}@people.invalid`, emailVerified: false }));
   return {
-    id: "try",
+    id: "throwaway",
     endpoints: {
-      signInToTry: createAuthEndpoint("/try/sign-in", { method: "POST" }, async (ctx) => {
+      signInToThrowaway: createAuthEndpoint("/throwaway/sign-in", { method: "POST" }, async (ctx) => {
         const adapter = ctx.context.internalAdapter;
         const person = typeof ctx.body?.person === "string" ? ctx.body.person.trim().toLowerCase() : "";
         if (person) {
@@ -938,7 +938,7 @@ function tryInstall(auth, id, name) {
         }
         return signIn(ctx, await first(adapter));
       }),
-      joinTry: createAuthEndpoint("/try/join", { method: "POST" }, async (ctx) => {
+      joinThrowaway: createAuthEndpoint("/throwaway/join", { method: "POST" }, async (ctx) => {
         const invite = await auth.openInvite(ctx.body?.secret);
         await auth.admit(invite, { id: invite.user });
         return signIn(ctx, await ctx.context.internalAdapter.findUserById(invite.user));

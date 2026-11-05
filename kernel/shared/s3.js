@@ -46,7 +46,7 @@ export async function presign({ method, scheme = "https", host, path, query = {}
 /// under a prefix (`{ prefix, delimiter?, token? }`, a page from a continuation token), in the order asked.
 export async function bucketUrls(bucket, { read = [], head = [], create = [], replace = [], remove = [], list = [] }, expires) {
   const endpoint = new URL(bucket.endpoint.includes("://") ? bucket.endpoint : `https://${bucket.endpoint}`);
-  // http only for a try install's, on its own machine (src/try_install.rs).
+  // http only for a throwaway network's, on its own machine (src/throwaway.rs).
   const common = { scheme: endpoint.protocol === "http:" ? "http" : "https", host: endpoint.host, region: bucket.region || "auto", keyId: bucket.key_id, secret: bucket.secret, expires, date: new Date() };
   const root = `${endpoint.pathname.replace(/\/$/, "")}/${bucket.bucket}`;
   const at = (name) => `${root}/${name}`;

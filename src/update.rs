@@ -648,7 +648,7 @@ fn config(src: &Path) -> Result<(PathBuf, Option<String>)> {
 
 /// Builds the serverless node (`serverless/`) into WebAssembly and its JavaScript glue, for the release to carry: → the
 /// folder they're in. It needs Rust's wasm32-unknown-unknown target, a clang that builds for it (SQLite is C), and the
-/// wasm-bindgen of the version it's built with. `profile` is cargo's: a release's is `release`, a try install's `dev`.
+/// wasm-bindgen of the version it's built with. `profile` is cargo's: a release's is `release`, a throwaway network's `dev`.
 pub fn serverless(src: &Path, config: &Path, profile: &str) -> Result<PathBuf> {
     run_quiet(Command::new(cargo()).current_dir(src).env("CONFIG", config).args(["build", "--profile", profile, "-p", "one-serverless", "--target", "wasm32-unknown-unknown"]))
         .context("build the serverless node (rustup target add wasm32-unknown-unknown)")?;

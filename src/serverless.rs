@@ -44,7 +44,7 @@ pub fn served(settings: &Settings, mut modules: Vec<(String, &'static str, Vec<u
         listen: None,
         bindings: settings.bindings(SERVICE).into_iter().map(|(n, v, _)| (n, v)).collect(),
         assets: None,
-        // A try install's bucket is on this machine.
+        // A throwaway network's bucket is on this machine.
         outbound: Some(crate::kernel::NEARBY.to_string()),
     }
 }
@@ -61,7 +61,7 @@ pub fn metadata(settings: &Settings, migration: Option<&str>, exists: impl Fn(&s
 /// Puts the serverless node in the kernel's Cloudflare account, with no address, and
 /// the relay again, which hands it the datagrams sent to its endpoint once it's there.
 pub fn deploy(cf: &Cloudflare, settings: &Settings) -> Result<()> {
-    anyhow::ensure!(settings.try_person.is_none(), "a try install's kernel runs only beside its try install");
+    anyhow::ensure!(settings.throwaway_person.is_none(), "a throwaway network's kernel runs only beside its throwaway network");
     anyhow::ensure!(settings.serverless_endpoint().is_some(), "the serverless node has no key: serverless deploy makes one");
     let modules = modules()?;
     let name = worker_name(SERVICE);

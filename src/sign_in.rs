@@ -29,7 +29,7 @@ pub struct Kept {
     pub until: u64,
 }
 
-/// Where it's kept: in the person's config, one for each node this CLI reaches (`<CLI>_ADDR`, as `try` sets it).
+/// Where it's kept: in the person's config, one for each node this CLI reaches (`<CLI>_ADDR`, as `throwaway` sets it).
 pub fn path() -> PathBuf {
     let config = std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(std::env::var_os("HOME").unwrap_or_else(|| ".".into())).join(".config"));
     let name = match std::env::var(format!("{}_ADDR", CLI.to_uppercase())) {
@@ -144,9 +144,9 @@ pub fn start(address: &str, join: Option<&str>) -> Result<Started> {
     Ok(Started { code: code.into(), url: url.into(), address, client, state, verifier, meta })
 }
 
-/// Approves a code as a try install's first person would in a browser, with no passkey: only a try install's kernel
-/// signs anyone in this way (`kernel/auth`'s `tryInstall`).
-pub fn approve_on_try(started: &Started) -> Result<()> {
+/// Approves a code as a throwaway network's first person would in a browser, with no passkey: only a throwaway network's kernel
+/// signs anyone in this way (`kernel/auth`'s `throwawayInstall`).
+pub fn approve_on_throwaway(started: &Started) -> Result<()> {
     let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).max_redirects(0).timeout_global(Some(Duration::from_secs(30))).build().into();
     let went = |resp: &ureq::http::Response<ureq::Body>| resp.headers().get("location").and_then(|l| l.to_str().ok()).map(str::to_string);
     let to = |l: String| if l.starts_with('/') { format!("{}{l}", started.address) } else { l };
@@ -154,13 +154,13 @@ pub fn approve_on_try(started: &Started) -> Result<()> {
     let authorize = went(&agent.get(&started.url).call()?).context("the sign-in code's link went nowhere")?;
     let page = went(&agent.get(to(authorize)).call()?).context("its authorization went nowhere")?;
     let oauth_query = page.split_once('?').map(|(_, q)| q.to_string()).context("its sign-in page had no authorization")?;
-    // For the device its authorization names, as a try install's sign-in page signs in for it.
+    // For the device its authorization names, as a throwaway network's sign-in page signs in for it.
     let join = oauth_query.split('&').find_map(|p| p.strip_prefix("join="));
-    let mut resp = agent.post(format!("{}/api/auth/try/sign-in", started.address)).header("origin", &started.address).send_json(serde_json::json!({ "join": join }))?;
+    let mut resp = agent.post(format!("{}/api/auth/throwaway/sign-in", started.address)).header("origin", &started.address).send_json(serde_json::json!({ "join": join }))?;
     let cookie = resp.headers().get_all("set-cookie").iter().filter_map(|c| c.to_str().ok()?.split(';').next().map(str::to_string)).collect::<Vec<_>>().join("; ");
     if resp.status() != 200 || cookie.is_empty() {
         let out: Value = resp.body_mut().read_json().unwrap_or(Value::Null);
-        bail!("only a try install signs in with no passkey: {}", said(&out, "this one didn't"));
+        bail!("only a throwaway network signs in with no passkey: {}", said(&out, "this one didn't"));
     }
     let mut resp = agent.post(format!("{}/sign-in/accept", started.address)).header("origin", &started.address).header("cookie", &cookie).send_json(serde_json::json!({ "oauth_query": oauth_query }))?;
     let out: Value = resp.body_mut().read_json().unwrap_or(Value::Null);
