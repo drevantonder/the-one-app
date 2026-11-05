@@ -36,7 +36,7 @@
 //! gets no key to the next epoch, and its steps under an older one are passed over.
 //!
 //! What no reader needs goes from the bucket (`tidy`): copies before the newest that holds, once that has been there a
-//! day; and, once phase 2 switches it on (`DELETE_COVERED_STEPS`), the steps before it, kept `KEEP_STEPS_FOR` first,
+//! day; and, once switched on (`DELETE_COVERED_STEPS`, off until Andre decides), the steps before it, kept `KEEP_STEPS_FOR` first,
 //! saying so first (`tidied`). Until then a missing step is the end, and a reader never looks for `tidied` or lists
 //! copies. A reader that doesn't find the next step where steps were deleted (`gap`), as when it read the start long
 //! ago, or opened with no copy to start from, goes on from the newest copy above it that holds, or with none says so
@@ -71,10 +71,10 @@ pub const COPY_EVERY: u64 = 100;
 /// How many times a write runs again after losing a race before it gives up.
 const TRIES: usize = 50;
 
-/// Whether `tidy` deletes the steps the newest copy covers. Off until phase 2's gate, when every device runs R1: an
-/// older reader whose copy doesn't hold reads every step from the first, and would read what's left as the whole
-/// database. On with phase 2's switch (`database::switch::SWITCH`), which waits for every device to read it.
-pub const DELETE_COVERED_STEPS: bool = crate::database::switch::SWITCH;
+/// Whether `tidy` deletes the steps the newest copy covers. Off, also once phase 2 switches, until Andre decides
+/// whether steps are deleted at all: an older reader whose copy doesn't hold reads every step from the first, and
+/// would read what's left as the whole database.
+pub const DELETE_COVERED_STEPS: bool = false;
 
 /// Whether a writer signs a step in it (`SIGNED`), one create-only write, rather than beside it (`<n>.sig`), a second
 /// that may never come, and so whether steps are refused from where it first does (`refused`). Off until phase 2's
