@@ -815,9 +815,10 @@ const h = OneUI.react.createElement;
   }
   const ask = (r) => (asked = { key: JSON.stringify(r), page: screenPage(r) }).page.catch(() => {});
 
-  /// A page that links @one/ui, the kit and the bridge (`linked`, src/screen.rs: an app's as its node gives it, and
-  /// the client's own), with them written in from this window's cache, where its own page has them: a sandboxed frame's
-  /// cache is its alone, so it would download them again for every screen. One that can't be had here stays linked.
+  /// A page that links @one/ui and the bridge (`linked`, src/screen.rs: an app's as its node gives it, and the client's
+  /// own), with them written in from this window's cache, where its own page has them: a sandboxed frame's cache is its
+  /// alone, so it would download them again for every screen. Each that can't be had here stays linked, alone: an older
+  /// node's page links the old kit, which the address no longer has.
   const LINKED = /<link rel="stylesheet" href="(\/screen\/[a-z/]+\.css\?v=[0-9a-f]+)">|<script( nonce="[0-9a-f]+")? src="(\/screen\/[a-z/]+\.js\?v=[0-9a-f]+)"><\/script>/g;
   const linkedFiles = {};
   const linkedFile = (url) =>
@@ -825,8 +826,8 @@ const h = OneUI.react.createElement;
   async function linkedIn(page) {
     const urls = [...new Set(Array.from(page.matchAll(LINKED), (m) => m[1] || m[3]))];
     if (!urls.length) return page;
-    const texts = Object.fromEntries(await Promise.all(urls.map(async (url) => [url, await linkedFile(url)])));
-    return page.replace(LINKED, (_, css, nonce = "", js) => (css ? `<style>${texts[css]}</style>` : `<script${nonce}>${texts[js]}</script>`));
+    const texts = Object.fromEntries(await Promise.all(urls.map((url) => linkedFile(url).then((text) => [url, text], () => [url, null]))));
+    return page.replace(LINKED, (whole, css, nonce = "", js) => (texts[css || js] == null ? whole : css ? `<style>${texts[css]}</style>` : `<script${nonce}>${texts[js]}</script>`));
   }
 
   /// A screen that couldn't open: the problem, where it would be.
