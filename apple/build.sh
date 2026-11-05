@@ -8,7 +8,7 @@ CLIENT_TARGETS=aarch64-apple-darwin
 BUNDLE_ID=app.$CONFIG_CLI.mac
 label=$BUNDLE_ID.oned
 
-(cd "$root" && CONFIG=$config cargo build --release)
+(cd "$root" && CONFIG=$config ONE_BUILD=$(git rev-parse --short=12 HEAD) cargo build --release)
 
 xcodebuild -project Shells.xcodeproj -scheme Mac -configuration Release -destination generic/platform=macOS -derivedDataPath build/derived build -quiet
 
@@ -17,6 +17,12 @@ app="build/derived/Build/Products/Release/$CONFIG_NAME.app"
 cp "$root/target/release/one" "$app/Contents/MacOS/$CONFIG_CLI"
 # Run by this name, it's oned, the Mac as a device.
 ln -sf "$CONFIG_CLI" "$app/Contents/MacOS/${CONFIG_CLI}d"
+# Its apps' services in Rust (apps/<name>/service/), which Cargo built with it: oned runs each from here.
+for m in "$root"/apps/*/service/Cargo.toml; do
+	[ -e "$m" ] || continue
+	s=$(basename "$(dirname "$(dirname "$m")")")
+	cp "$root/target/release/one-$s" "$app/Contents/MacOS/$CONFIG_CLI-$s"
+done
 mkdir -p "$app/Contents/Resources" && cp build/AppIcon.icns "$app/Contents/Resources/"
 plutil -replace CFBundleIconFile -string AppIcon "$app/Contents/Info.plist"
 # Only this build's launch agent: one an earlier build left would still be registered.
@@ -80,6 +86,10 @@ if [ -n "$PUSH" ]; then
 	/usr/libexec/PlistBuddy -c "Add :com.apple.developer.aps-environment string $aps" "$entitlements"
 	keychain "${sign[@]}" --entitlements "$PWD/build/MacNotifications.entitlements" "$PWD/$appex" || { echo "couldn't sign the notification extension as ${identity:-ad hoc}"; exit 1; }
 fi
+for s in "$app/Contents/MacOS/$CONFIG_CLI"-*; do
+	[ -e "$s" ] || continue
+	keychain "${sign[@]}" "$PWD/$s" || { echo "couldn't sign $s as ${identity:-ad hoc}"; exit 1; }
+done
 keychain "${sign[@]}" "$PWD/$app/Contents/MacOS/$CONFIG_CLI" &&
 	keychain "${sign[@]}" --entitlements "$entitlements" "$PWD/$app" || { echo "couldn't sign the app as ${identity:-ad hoc}"; exit 1; }
 

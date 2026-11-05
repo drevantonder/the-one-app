@@ -1,5 +1,5 @@
-// Shell: commands run on the person's own devices. The shell service, built into every device's node, runs them for
-// its local user and logs each where only they can read it; this app is what people and agents use.
+// Shell: commands run on the person's own devices. Its service (service/), on each device it's switched on for, runs
+// them for that device's person and logs each in its folder there; this app is what people and agents use.
 
 /// Runs one of the shell service's operations, wherever it runs for the caller. When none of their devices runs it,
 /// says what's needed instead of how the call failed.
@@ -26,6 +26,7 @@ export default {
   needs: "Needs one of your devices",
   instructions: "Run a shell command on one of your own devices with shell_run; give device (a name from shell_devices) to choose which, or it runs on the first online one in Device Activity's order. Every command is logged where only you can read it.",
   uses: { services: ["shell"] },
+  service: { person: true, platforms: ["linux", "mac"] },
 
   ops: {
     devices: {

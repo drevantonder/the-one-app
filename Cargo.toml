@@ -1,7 +1,8 @@
 [workspace]
-members = [".", "cli", "cloudflare/node", "client", "client/ffi"]
-# `cargo build` and `cargo test` here build the program too (cli/), as target/debug/one.
-default-members = [".", "cli"]
+members = [".", "cli", "cloudflare/node", "client", "client/ffi", "service", "apps/shell/service"]
+# `cargo build` and `cargo test` here build the program too (cli/), as target/debug/one, and the services in Rust
+# (apps/<name>/service/), as target/debug/one-<name>, which a node built here (the Mac app's, `one throwaway`'s) runs.
+default-members = [".", "cli", "apps/shell/service"]
 
 [package]
 name = "one"

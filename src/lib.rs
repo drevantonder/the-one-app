@@ -65,7 +65,6 @@ pub mod bundle;
 #[cfg(feature = "node")]
 pub mod deploy;
 #[cfg(feature = "node")]
-#[cfg(feature = "node")]
 pub mod models;
 #[cfg(feature = "node")]
 pub mod load;
@@ -95,5 +94,3 @@ pub mod screen;
 pub mod state;
 #[cfg(feature = "db")]
 pub mod vault;
-#[cfg(feature = "node")]
-pub mod shell;

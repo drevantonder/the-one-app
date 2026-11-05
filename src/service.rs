@@ -721,7 +721,7 @@ pub fn run(name: &str) -> Result<()> {
     std::fs::create_dir_all(&data)?;
     if hosted {
         // A program in another language that offered it before this one hosted it, and the release it came from.
-        let _ = std::fs::remove_file(&program);
+        let _ = std::fs::remove_file(crate::oned::fetched(name));
         let _ = std::fs::remove_file(dir.join("release"));
         crate::services::answer_hosted(name, data, at.to_string(), service.token().to_string(), &stop)?;
     } else {

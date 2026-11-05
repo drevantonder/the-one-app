@@ -1,0 +1,13 @@
+[package]
+name = "one-shell"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[dependencies]
+one-service = { path = "../../../service" }
+anyhow = "1"
+# A command that runs too long is stopped with all it started: a signal to its process group.
+libc = "0.2"
+serde_json = "1"

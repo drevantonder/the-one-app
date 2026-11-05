@@ -2909,6 +2909,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "one-service"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde",
+ "serde_json",
+ "ureq",
+]
+
+[[package]]
+name = "one-shell"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "libc",
+ "one-service",
+ "serde_json",
+]
+
+[[package]]
 name = "opaque-debug"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

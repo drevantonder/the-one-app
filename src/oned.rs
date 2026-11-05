@@ -43,10 +43,23 @@ pub fn command(args: &[&str]) -> std::io::Result<std::process::Command> {
     Ok(command)
 }
 
-/// The program in another language that offers the service `name`, where `<cli> services try` puts it.
+/// The program that offers the service `name`: the one this program carries (`carried`), else the one oned fetched.
 pub fn program(name: &str) -> PathBuf {
+    carried(name).unwrap_or_else(|| fetched(name))
+}
+
+/// Where oned puts a service's program it fetched, and `<cli> services try` puts yours.
+pub fn fetched(name: &str) -> PathBuf {
     let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
     home.join(".local/bin").join(format!("{CLI}-{name}"))
+}
+
+/// A service's program built with this one and carried beside it, which oned runs as it is and fetches none of: the
+/// Mac app's, inside it (apple/build.sh), and a checkout's (`one throwaway`), which Cargo builds beside it.
+pub fn carried(name: &str) -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let path = exe.parent()?.join(format!("{CLI}-{name}"));
+    (path.exists() && path != fetched(name)).then_some(path)
 }
 
 /// The services this device could run as processes of oned's: this program's own, those with a release for its
@@ -54,9 +67,9 @@ pub fn program(name: &str) -> PathBuf {
 /// before or are switched on (`on`), not every `<cli>-` program there.
 fn offered(released: &BTreeSet<String>, on: &BTreeMap<String, u64>) -> BTreeSet<String> {
     let mut names: BTreeSet<String> = crate::services::hosted().iter().map(|h| h.name.to_string()).collect();
-    let dir = program("x").parent().map(|p| p.to_path_buf()).unwrap_or_default();
+    let dirs = [fetched("x"), std::env::current_exe().unwrap_or_default()].map(|p| p.parent().map(|p| p.to_path_buf()).unwrap_or_default());
     let prefix = format!("{CLI}-");
-    for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+    for entry in dirs.iter().flat_map(std::fs::read_dir).flatten().flatten() {
         let file = entry.file_name().to_string_lossy().to_string();
         let Some(name) = file.strip_prefix(&prefix).filter(|n| crate::members::valid_app_name(n)) else { continue };
         if on.contains_key(name) || crate::service::folder(name).is_dir() {
@@ -115,7 +128,7 @@ fn taken(name: &str) -> (u64, String) {
 fn put(node: &Node, runtime: &tokio::runtime::Handle, name: &str, r: &crate::release::Release) -> anyhow::Result<()> {
     use std::os::unix::fs::PermissionsExt;
     let bytes = runtime.block_on(node.service_program(r))?;
-    let path = program(name);
+    let path = fetched(name);
     std::fs::create_dir_all(path.parent().unwrap_or(&path))?;
     let new = path.with_extension("new");
     std::fs::write(&new, bytes)?;
@@ -198,7 +211,7 @@ pub fn keep_parts(node: Node, runtime: tokio::runtime::Handle) {
                         let here = program(name);
                         // Its program, fetched: none is here, or a newer release is out than the one here (or than
                         // one put here by hand, by when it was).
-                        if wanted && !hosted && let Some(r) = released.get(name) {
+                        if wanted && !hosted && carried(name).is_none() && let Some(r) = released.get(name) {
                             let (committed, blob) = taken(name);
                             let had = std::fs::metadata(&here).ok().and_then(|m| m.modified().ok()).map(|t| t.duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs());
                             let newer = match (had, blob.is_empty()) {
