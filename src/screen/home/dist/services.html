@@ -1,0 +1,534 @@
+<meta name="@one/ui">
+<style>/*! tailwindcss v4.3.4 | MIT License | https://tailwindcss.com */
+@layer properties{@supports (((-webkit-hyphens:none)) and (not (margin-trim:block))) or ((-moz-orient:inline) and (not (color:rgb(from red r g b)))){*,:before,:after,::backdrop{--tw-rotate-x:initial;--tw-rotate-y:initial;--tw-rotate-z:initial;--tw-skew-x:initial;--tw-skew-y:initial;--tw-scroll-snap-strictness:proximity;--tw-divide-y-reverse:0;--tw-border-style:solid;--tw-leading:initial;--tw-font-weight:initial;--tw-tracking:initial;--tw-ordinal:initial;--tw-slashed-zero:initial;--tw-numeric-figure:initial;--tw-numeric-spacing:initial;--tw-numeric-fraction:initial;--tw-shadow:0 0 #0000;--tw-shadow-color:initial;--tw-shadow-alpha:100%;--tw-inset-shadow:0 0 #0000;--tw-inset-shadow-color:initial;--tw-inset-shadow-alpha:100%;--tw-ring-color:initial;--tw-ring-shadow:0 0 #0000;--tw-inset-ring-color:initial;--tw-inset-ring-shadow:0 0 #0000;--tw-ring-inset:initial;--tw-ring-offset-width:0px;--tw-ring-offset-color:#fff;--tw-ring-offset-shadow:0 0 #0000;--tw-outline-style:solid;--tw-blur:initial;--tw-brightness:initial;--tw-contrast:initial;--tw-grayscale:initial;--tw-hue-rotate:initial;--tw-invert:initial;--tw-opacity:initial;--tw-saturate:initial;--tw-sepia:initial;--tw-drop-shadow:initial;--tw-drop-shadow-color:initial;--tw-drop-shadow-alpha:100%;--tw-drop-shadow-size:initial;--tw-backdrop-blur:initial;--tw-backdrop-brightness:initial;--tw-backdrop-contrast:initial;--tw-backdrop-grayscale:initial;--tw-backdrop-hue-rotate:initial;--tw-backdrop-invert:initial;--tw-backdrop-opacity:initial;--tw-backdrop-saturate:initial;--tw-backdrop-sepia:initial;--tw-duration:initial;--tw-ease:initial}}}@layer theme,base,components;@layer utilities{.pointer-events-auto{pointer-events:auto}.pointer-events-none{pointer-events:none}.invisible{visibility:hidden}.absolute{position:absolute}.fixed{position:fixed}.relative{position:relative}.inset-0{inset:0}.inset-x-0{inset-inline:0}.inset-x-4{inset-inline:calc(var(--spacing,.25rem) * 4)}.-top-2{top:calc(var(--spacing,.25rem) * -2)}.top-0{top:0}.top-2{top:calc(var(--spacing,.25rem) * 2)}.top-2\.5{top:calc(var(--spacing,.25rem) * 2.5)}.top-\[calc\(10px\+env\(safe-area-inset-top\)\)\]{top:calc(10px + env(safe-area-inset-top))}.-right-1{right:calc(var(--spacing,.25rem) * -1)}.-right-1\.5{right:calc(var(--spacing,.25rem) * -1.5)}.-right-2{right:calc(var(--spacing,.25rem) * -2)}.right-1{right:var(--spacing,.25rem)}.right-1\.5{right:calc(var(--spacing,.25rem) * 1.5)}.right-3{right:calc(var(--spacing,.25rem) * 3)}.right-3\.5{right:calc(var(--spacing,.25rem) * 3.5)}.-bottom-1{bottom:calc(var(--spacing,.25rem) * -1)}.-bottom-1\.5{bottom:calc(var(--spacing,.25rem) * -1.5)}.bottom-1{bottom:var(--spacing,.25rem)}.bottom-1\.5{bottom:calc(var(--spacing,.25rem) * 1.5)}.bottom-\[calc\(10px\+env\(safe-area-inset-bottom\)\)\]{bottom:calc(10px + env(safe-area-inset-bottom))}.left-0{left:0}.z-10{z-index:10}.z-20{z-index:20}.col-span-2{grid-column:span 2/span 2}.row-span-2{grid-row:span 2/span 2}.m-0{margin:0}.my-1{margin-block:var(--spacing,.25rem)}.mt-1{margin-top:var(--spacing,.25rem)}.mt-1\.5{margin-top:calc(var(--spacing,.25rem) * 1.5)}.mr-auto{margin-right:auto}.ml-auto{margin-left:auto}.line-clamp-2{-webkit-line-clamp:2;-webkit-box-orient:vertical;display:-webkit-box;overflow:hidden}.block{display:block}.contents{display:contents}.flex{display:flex}.grid{display:grid}.hidden{display:none}.inline-flex{display:inline-flex}.aspect-square{aspect-ratio:1}.size-2{width:calc(var(--spacing,.25rem) * 2);height:calc(var(--spacing,.25rem) * 2)}.size-3{width:calc(var(--spacing,.25rem) * 3);height:calc(var(--spacing,.25rem) * 3)}.size-3\.5{width:calc(var(--spacing,.25rem) * 3.5);height:calc(var(--spacing,.25rem) * 3.5)}.size-5{width:calc(var(--spacing,.25rem) * 5);height:calc(var(--spacing,.25rem) * 5)}.size-6{width:calc(var(--spacing,.25rem) * 6);height:calc(var(--spacing,.25rem) * 6)}.size-\[7px\]{width:7px;height:7px}.size-\[18px\]{width:18px;height:18px}.size-\[30px\]{width:30px;height:30px}.size-full{width:100%;height:100%}.h-1{height:var(--spacing,.25rem)}.h-1\.5{height:calc(var(--spacing,.25rem) * 1.5)}.h-6{height:calc(var(--spacing,.25rem) * 6)}.h-9{height:calc(var(--spacing,.25rem) * 9)}.h-11{height:calc(var(--spacing,.25rem) * 11)}.h-14{height:calc(var(--spacing,.25rem) * 14)}.h-\[7px\]{height:7px}.h-full{height:100%}.min-h-0{min-height:0}.min-h-12{min-height:calc(var(--spacing,.25rem) * 12)}.w-4{width:calc(var(--spacing,.25rem) * 4)}.w-40{width:calc(var(--spacing,.25rem) * 40)}.w-\[7px\]{width:7px}.w-full{width:100%}.max-w-2xl{max-width:var(--container-2xl,42rem)}.max-w-\[60\%\]{max-width:60%}.max-w-\[70\%\]{max-width:70%}.max-w-full{max-width:100%}.max-w-md{max-width:var(--container-md,28rem)}.min-w-0{min-width:0}.min-w-6{min-width:calc(var(--spacing,.25rem) * 6)}.flex-1{flex:1}.flex-\[0_0_100\%\]{flex:0 0 100%}.shrink-0{flex-shrink:0}.grow{flex-grow:1}.scale-\[1\.07\]{scale:1.07}.scale-\[1\.08\]{scale:1.08}.transform{transform:var(--tw-rotate-x, ) var(--tw-rotate-y, ) var(--tw-rotate-z, ) var(--tw-skew-x, ) var(--tw-skew-y, )}.animate-pulse{animation:var(--animate-pulse,pulse 2s cubic-bezier(.4, 0, .6, 1) infinite)}.cursor-grab{cursor:grab}.cursor-nwse-resize{cursor:nwse-resize}.cursor-pointer{cursor:pointer}.touch-none{touch-action:none}.resize{resize:both}.snap-x{scroll-snap-type:x var(--tw-scroll-snap-strictness)}.snap-mandatory{--tw-scroll-snap-strictness:mandatory}.snap-start{scroll-snap-align:start}.\[scroll-snap-stop\:always\]{scroll-snap-stop:always}.\[scrollbar-width\:none\]{scrollbar-width:none}.flex-col{flex-direction:column}.content-start{align-content:flex-start}.items-center{align-items:center}.items-start{align-items:flex-start}.justify-between{justify-content:space-between}.justify-center{justify-content:center}.gap-1{gap:var(--spacing,.25rem)}.gap-1\.5{gap:calc(var(--spacing,.25rem) * 1.5)}.gap-2{gap:calc(var(--spacing,.25rem) * 2)}.gap-2\.5{gap:calc(var(--spacing,.25rem) * 2.5)}.gap-3{gap:calc(var(--spacing,.25rem) * 3)}.gap-4{gap:calc(var(--spacing,.25rem) * 4)}.gap-8{gap:calc(var(--spacing,.25rem) * 8)}:where(.divide-y>:not(:last-child)){--tw-divide-y-reverse:0;border-bottom-style:var(--tw-border-style);border-top-style:var(--tw-border-style);border-top-width:calc(1px * var(--tw-divide-y-reverse));border-bottom-width:calc(1px * calc(1 - var(--tw-divide-y-reverse)))}.self-start{align-self:flex-start}.truncate{text-overflow:ellipsis;white-space:nowrap;overflow:hidden}.overflow-hidden{overflow:hidden}.overflow-visible{overflow:visible}.overflow-x-auto{overflow-x:auto}.overflow-y-auto{overflow-y:auto}.overflow-y-hidden{overflow-y:hidden}.overscroll-x-contain{overscroll-behavior-x:contain}.rounded-2xl{border-radius:var(--radius-2xl,1rem)}.rounded-3xl{border-radius:var(--radius-3xl,1.5rem)}.rounded-\[22\%\]{border-radius:22%}.rounded-full{border-radius:2147483647px}.rounded-md{border-radius:calc(var(--radius) - 2px)}.rounded-xl{border-radius:calc(var(--radius) + 4px)}.rounded-br-\[10px\]{border-bottom-right-radius:10px}.border{border-style:var(--tw-border-style);border-width:1px}.border-0{border-style:var(--tw-border-style);border-width:0}.border-t{border-top-style:var(--tw-border-style);border-top-width:1px}.border-r-\[3px\]{border-right-style:var(--tw-border-style);border-right-width:3px}.border-b-\[3px\]{border-bottom-style:var(--tw-border-style);border-bottom-width:3px}.border-foreground,.border-foreground\/10{border-color:var(--foreground)}@supports (color:color-mix(in lab, red, red)){.border-foreground\/10{border-color:color-mix(in oklab, var(--foreground) 10%, transparent)}}.border-foreground\/15{border-color:var(--foreground)}@supports (color:color-mix(in lab, red, red)){.border-foreground\/15{border-color:color-mix(in oklab, var(--foreground) 15%, transparent)}}.border-foreground\/55{border-color:var(--foreground)}@supports (color:color-mix(in lab, red, red)){.border-foreground\/55{border-color:color-mix(in oklab, var(--foreground) 55%, transparent)}}.bg-background,.bg-background\/90{background-color:var(--background)}@supports (color:color-mix(in lab, red, red)){.bg-background\/90{background-color:color-mix(in oklab, var(--background) 90%, transparent)}}.bg-destructive{background-color:var(--destructive)}.bg-foreground,.bg-foreground\/10{background-color:var(--foreground)}@supports (color:color-mix(in lab, red, red)){.bg-foreground\/10{background-color:color-mix(in oklab, var(--foreground) 10%, transparent)}}.bg-foreground\/15{background-color:var(--foreground)}@supports (color:color-mix(in lab, red, red)){.bg-foreground\/15{background-color:color-mix(in oklab, var(--foreground) 15%, transparent)}}.bg-muted{background-color:var(--muted)}.bg-muted-foreground,.bg-muted-foreground\/40{background-color:var(--muted-foreground)}@supports (color:color-mix(in lab, red, red)){.bg-muted-foreground\/40{background-color:color-mix(in oklab, var(--muted-foreground) 40%, transparent)}}.object-cover{object-fit:cover}.p-4{padding:calc(var(--spacing,.25rem) * 4)}.p-5{padding:calc(var(--spacing,.25rem) * 5)}.px-0{padding-inline:0}.px-1{padding-inline:var(--spacing,.25rem)}.px-1\.5{padding-inline:calc(var(--spacing,.25rem) * 1.5)}.px-3{padding-inline:calc(var(--spacing,.25rem) * 3)}.px-4{padding-inline:calc(var(--spacing,.25rem) * 4)}.px-5{padding-inline:calc(var(--spacing,.25rem) * 5)}.py-1{padding-block:var(--spacing,.25rem)}.py-2{padding-block:calc(var(--spacing,.25rem) * 2)}.py-3{padding-block:calc(var(--spacing,.25rem) * 3)}.py-\[5px\]{padding-block:5px}.pt-0{padding-top:0}.pt-0\.5{padding-top:calc(var(--spacing,.25rem) * .5)}.pt-3{padding-top:calc(var(--spacing,.25rem) * 3)}.pt-5{padding-top:calc(var(--spacing,.25rem) * 5)}.pt-\[calc\(60px\+env\(safe-area-inset-top\)\)\]{padding-top:calc(60px + env(safe-area-inset-top))}.pr-1{padding-right:var(--spacing,.25rem)}.pr-1\.5{padding-right:calc(var(--spacing,.25rem) * 1.5)}.pr-\[18px\]{padding-right:18px}.pb-2{padding-bottom:calc(var(--spacing,.25rem) * 2)}.pb-5{padding-bottom:calc(var(--spacing,.25rem) * 5)}.pl-1{padding-left:var(--spacing,.25rem)}.pl-1\.5{padding-left:calc(var(--spacing,.25rem) * 1.5)}.pl-\[18px\]{padding-left:18px}.text-center{text-align:center}.text-left{text-align:left}.text-3xl{font-size:var(--text-3xl,1.875rem);line-height:var(--tw-leading,var(--text-3xl--line-height,calc(2.25 / 1.875)))}.text-lg{font-size:var(--text-lg,1.125rem);line-height:var(--tw-leading,var(--text-lg--line-height,calc(1.75 / 1.125)))}.text-sm{font-size:var(--text-sm,.875rem);line-height:var(--tw-leading,var(--text-sm--line-height,calc(1.25 / .875)))}.text-xl{font-size:var(--text-xl,1.25rem);line-height:var(--tw-leading,var(--text-xl--line-height,calc(1.75 / 1.25)))}.text-xs{font-size:var(--text-xs,.75rem);line-height:var(--tw-leading,var(--text-xs--line-height,calc(1 / .75)))}.text-\[10px\]{font-size:10px}.text-\[11px\]{font-size:11px}.text-\[13px\]{font-size:13px}.text-\[15px\]{font-size:15px}.text-\[22px\]{font-size:22px}.text-\[26px\]{font-size:26px}.leading-\[0\]{--tw-leading:0;line-height:0}.leading-snug{--tw-leading:var(--leading-snug,1.375);line-height:var(--leading-snug,1.375)}.leading-tight{--tw-leading:var(--leading-tight,1.25);line-height:var(--leading-tight,1.25)}.font-bold{--tw-font-weight:var(--font-weight-bold,700);font-weight:var(--font-weight-bold,700)}.font-medium{--tw-font-weight:var(--font-weight-medium,500);font-weight:var(--font-weight-medium,500)}.font-semibold{--tw-font-weight:var(--font-weight-semibold,600);font-weight:var(--font-weight-semibold,600)}.tracking-tight{--tw-tracking:var(--tracking-tight,-.025em);letter-spacing:var(--tracking-tight,-.025em)}.break-words{overflow-wrap:break-word}.text-foreground{color:var(--foreground)}.text-muted-foreground{color:var(--muted-foreground)}.text-warning{color:var(--warning)}.tabular-nums{--tw-numeric-spacing:tabular-nums;font-variant-numeric:var(--tw-ordinal, ) var(--tw-slashed-zero, ) var(--tw-numeric-figure, ) var(--tw-numeric-spacing, ) var(--tw-numeric-fraction, )}.underline{text-decoration-line:underline}.underline-offset-4{text-underline-offset:4px}.opacity-50{opacity:.5}.shadow-lg{--tw-shadow:0 10px 15px -3px var(--tw-shadow-color,#0000001a), 0 4px 6px -4px var(--tw-shadow-color,#0000001a);box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)}.shadow-md{--tw-shadow:0 4px 6px -1px var(--tw-shadow-color,#0000001a), 0 2px 4px -2px var(--tw-shadow-color,#0000001a);box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)}.shadow-xs{--tw-shadow:0 1px 2px 0 var(--tw-shadow-color,#0000000d);box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)}.outline{outline-style:var(--tw-outline-style);outline-width:1px}.drop-shadow-xl{--tw-drop-shadow-size:drop-shadow(0 9px 7px var(--tw-drop-shadow-color,#0000001a));--tw-drop-shadow:drop-shadow(var(--drop-shadow-xl,0 9px 7px #0000001a));filter:var(--tw-blur, ) var(--tw-brightness, ) var(--tw-contrast, ) var(--tw-grayscale, ) var(--tw-hue-rotate, ) var(--tw-invert, ) var(--tw-saturate, ) var(--tw-sepia, ) var(--tw-drop-shadow, )}.backdrop-blur-xl{--tw-backdrop-blur:blur(var(--blur-xl,24px));-webkit-backdrop-filter:var(--tw-backdrop-blur, ) var(--tw-backdrop-brightness, ) var(--tw-backdrop-contrast, ) var(--tw-backdrop-grayscale, ) var(--tw-backdrop-hue-rotate, ) var(--tw-backdrop-invert, ) var(--tw-backdrop-opacity, ) var(--tw-backdrop-saturate, ) var(--tw-backdrop-sepia, );backdrop-filter:var(--tw-backdrop-blur, ) var(--tw-backdrop-brightness, ) var(--tw-backdrop-contrast, ) var(--tw-backdrop-grayscale, ) var(--tw-backdrop-hue-rotate, ) var(--tw-backdrop-invert, ) var(--tw-backdrop-opacity, ) var(--tw-backdrop-saturate, ) var(--tw-backdrop-sepia, )}.transition{transition-property:color,background-color,border-color,outline-color,text-decoration-color,fill,stroke,--tw-gradient-from,--tw-gradient-via,--tw-gradient-to,opacity,box-shadow,transform,translate,scale,rotate,filter,-webkit-backdrop-filter,backdrop-filter,display,content-visibility,overlay,pointer-events;transition-timing-function:var(--tw-ease,var(--default-transition-timing-function,cubic-bezier(.4, 0, .2, 1)));transition-duration:var(--tw-duration,var(--default-transition-duration,.15s))}.transition-\[scale\]{transition-property:scale;transition-timing-function:var(--tw-ease,var(--default-transition-timing-function,cubic-bezier(.4, 0, .2, 1)));transition-duration:var(--tw-duration,var(--default-transition-duration,.15s))}.transition-\[width\]{transition-property:width;transition-timing-function:var(--tw-ease,var(--default-transition-timing-function,cubic-bezier(.4, 0, .2, 1)));transition-duration:var(--tw-duration,var(--default-transition-duration,.15s))}.transition-opacity{transition-property:opacity;transition-timing-function:var(--tw-ease,var(--default-transition-timing-function,cubic-bezier(.4, 0, .2, 1)));transition-duration:var(--tw-duration,var(--default-transition-duration,.15s))}.transition-transform{transition-property:transform,translate,scale,rotate;transition-timing-function:var(--tw-ease,var(--default-transition-timing-function,cubic-bezier(.4, 0, .2, 1)));transition-duration:var(--tw-duration,var(--default-transition-duration,.15s))}.duration-150{--tw-duration:.15s;transition-duration:.15s}.duration-200{--tw-duration:.2s;transition-duration:.2s}.ease-in-out{--tw-ease:var(--ease-in-out,cubic-bezier(.4, 0, .2, 1));transition-timing-function:var(--ease-in-out,cubic-bezier(.4, 0, .2, 1))}.outline-none{--tw-outline-style:none;outline-style:none}.select-none{-webkit-user-select:none;user-select:none}.select-text{-webkit-user-select:text;user-select:text}.\[-webkit-tap-highlight-color\:transparent\]{-webkit-tap-highlight-color:transparent}.\[-webkit-touch-callout\:none\]{-webkit-touch-callout:none}.\[-webkit-user-select\:none\]{-webkit-user-select:none}.first\:border-t-0:first-child{border-top-style:var(--tw-border-style);border-top-width:0}@media (hover:hover){.hover\:bg-foreground\/15:hover{background-color:var(--foreground)}@supports (color:color-mix(in lab, red, red)){.hover\:bg-foreground\/15:hover{background-color:color-mix(in oklab, var(--foreground) 15%, transparent)}}}.active\:opacity-80:active{opacity:.8}@media (prefers-reduced-motion:no-preference){.motion-safe\:animate-\[jiggle_0\.28s_ease-in-out_infinite\]{animation:.28s ease-in-out infinite jiggle}}@media (prefers-reduced-motion:reduce){.motion-reduce\:animate-none{animation:none}}@media (prefers-color-scheme:dark){.dark\:bg-destructive{background-color:var(--destructive)}}.\[\&\:\:-webkit-scrollbar\]\:hidden::-webkit-scrollbar{display:none}.\[\&\>\*\]\:pointer-events-none>*{pointer-events:none}.\[\&\>\*\]\:min-w-0>*{min-width:0}.\[\&\>\*\]\:cursor-pointer>*{cursor:pointer}.\[\&\>\*\]\:active\:opacity-60>:active{opacity:.6}.\[\&\>\[data-ctl\]\]\:pointer-events-auto>[data-ctl]{pointer-events:auto}.\[\&\>\[data-ctl\]\]\:hidden>[data-ctl]{display:none}.\[\&\>\[data-w\=col\]\]\:flex-1>[data-w=col]{flex:1}.\[\&\>\[data-w\=text\]\]\:truncate>[data-w=text]{text-overflow:ellipsis;white-space:nowrap;overflow:hidden}.focus-visible\:\[\&\>span\:first-child\]\:ring-\[3px\]:focus-visible>span:first-child{--tw-ring-shadow:var(--tw-ring-inset, ) 0 0 0 calc(3px + var(--tw-ring-offset-width)) var(--tw-ring-color,currentcolor);box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)}.focus-visible\:\[\&\>span\:first-child\]\:ring-ring\/50:focus-visible>span:first-child{--tw-ring-color:var(--ring)}@supports (color:color-mix(in lab, red, red)){.focus-visible\:\[\&\>span\:first-child\]\:ring-ring\/50:focus-visible>span:first-child{--tw-ring-color:color-mix(in oklab, var(--ring) 50%, transparent)}}.active\:\[\&\>span\:first-child\]\:opacity-70:active>span:first-child{opacity:.7}}@property --tw-rotate-x{syntax:"*";inherits:false}@property --tw-rotate-y{syntax:"*";inherits:false}@property --tw-rotate-z{syntax:"*";inherits:false}@property --tw-skew-x{syntax:"*";inherits:false}@property --tw-skew-y{syntax:"*";inherits:false}@property --tw-scroll-snap-strictness{syntax:"*";inherits:false;initial-value:proximity}@property --tw-divide-y-reverse{syntax:"*";inherits:false;initial-value:0}@property --tw-border-style{syntax:"*";inherits:false;initial-value:solid}@property --tw-leading{syntax:"*";inherits:false}@property --tw-font-weight{syntax:"*";inherits:false}@property --tw-tracking{syntax:"*";inherits:false}@property --tw-ordinal{syntax:"*";inherits:false}@property --tw-slashed-zero{syntax:"*";inherits:false}@property --tw-numeric-figure{syntax:"*";inherits:false}@property --tw-numeric-spacing{syntax:"*";inherits:false}@property --tw-numeric-fraction{syntax:"*";inherits:false}@property --tw-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-shadow-color{syntax:"*";inherits:false}@property --tw-shadow-alpha{syntax:"<percentage>";inherits:false;initial-value:100%}@property --tw-inset-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-inset-shadow-color{syntax:"*";inherits:false}@property --tw-inset-shadow-alpha{syntax:"<percentage>";inherits:false;initial-value:100%}@property --tw-ring-color{syntax:"*";inherits:false}@property --tw-ring-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-inset-ring-color{syntax:"*";inherits:false}@property --tw-inset-ring-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-ring-inset{syntax:"*";inherits:false}@property --tw-ring-offset-width{syntax:"<length>";inherits:false;initial-value:0}@property --tw-ring-offset-color{syntax:"*";inherits:false;initial-value:#fff}@property --tw-ring-offset-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-outline-style{syntax:"*";inherits:false;initial-value:solid}@property --tw-blur{syntax:"*";inherits:false}@property --tw-brightness{syntax:"*";inherits:false}@property --tw-contrast{syntax:"*";inherits:false}@property --tw-grayscale{syntax:"*";inherits:false}@property --tw-hue-rotate{syntax:"*";inherits:false}@property --tw-invert{syntax:"*";inherits:false}@property --tw-opacity{syntax:"*";inherits:false}@property --tw-saturate{syntax:"*";inherits:false}@property --tw-sepia{syntax:"*";inherits:false}@property --tw-drop-shadow{syntax:"*";inherits:false}@property --tw-drop-shadow-color{syntax:"*";inherits:false}@property --tw-drop-shadow-alpha{syntax:"<percentage>";inherits:false;initial-value:100%}@property --tw-drop-shadow-size{syntax:"*";inherits:false}@property --tw-backdrop-blur{syntax:"*";inherits:false}@property --tw-backdrop-brightness{syntax:"*";inherits:false}@property --tw-backdrop-contrast{syntax:"*";inherits:false}@property --tw-backdrop-grayscale{syntax:"*";inherits:false}@property --tw-backdrop-hue-rotate{syntax:"*";inherits:false}@property --tw-backdrop-invert{syntax:"*";inherits:false}@property --tw-backdrop-opacity{syntax:"*";inherits:false}@property --tw-backdrop-saturate{syntax:"*";inherits:false}@property --tw-backdrop-sepia{syntax:"*";inherits:false}@property --tw-duration{syntax:"*";inherits:false}@property --tw-ease{syntax:"*";inherits:false}@keyframes pulse{50%{opacity:.5}}
+/*$vite$:1*/</style>
+<div id="root"></div>
+<script type="module">import { c as e } from "react/compiler-runtime";
+import { useEffect as t, useRef as n, useState as r } from "react";
+import { createRoot as i } from "react-dom/client";
+import { AppIcon as a, Button as o, Empty as s, Icon as c, List as l, ListRow as u, Problem as d, Skeleton as f } from "@one/ui";
+import { jsx as p, jsxs as m } from "react/jsx-runtime";
+// ../home/lib/model.js
+var h = (() => {
+	let e = {
+		state: null,
+		apps: [],
+		widgets: {},
+		badges: {},
+		failed: /* @__PURE__ */ new Set()
+	}, t = () => e.state?.user, n = () => e.state?.install, r = () => t()?.role === "admin", i = (e) => e?.title || e?.name || "", a = (t) => e.apps.find((e) => e.name === t), o = (e, t) => !!e?.screens?.some((e) => e.name === t), s = (e) => o(e, "main"), c = (e) => !s(e) && !(e.widgets || []).length, l = (e) => (e.installed || []).map((e) => e.startsWith("user:") ? "user" : e), u = (e) => e === t()?.id ? "You" : n()?.users.find((t) => t.id === e)?.name || "Someone", d = (e) => e.slice().sort((e, n) => (e === t()?.id) - (n === t()?.id) || u(e).localeCompare(u(n))).map((e) => e === t()?.id ? "you" : u(e)), f = (e) => e.length < 2 ? e.join("") : `${e.slice(0, -1).join(", ")} and ${e.at(-1)}`, p = (e, n) => e.length === 1 && e[0] === t()?.id ? "" : `${e.length <= 3 ? f(d(e)).replace(/^y/, "Y") : `${e.length} people`} · ${m(n)}`;
+	function m(e) {
+		let t = d(e);
+		return t.length ? t.length === 1 ? `apps chosen by ${t[0]}` : t.length === 2 ? `apps chosen by ${t[0]} and ${t[1]}` : `apps chosen by ${t.length} admins` : "apps chosen by admins";
+	}
+	function h() {
+		let e = n(), r = t();
+		if (!e || !r) return [];
+		let i = [{
+			scope: "user",
+			title: "You",
+			subtitle: ""
+		}];
+		for (let t of e.groups.filter((e) => e.members.some((e) => e.user === r.id)).sort((e, t) => e.name.localeCompare(t.name))) {
+			let e = t.members.filter((e) => e.role === "admin").map((e) => e.user);
+			i.push({
+				scope: `group:${t.id}`,
+				title: t.name,
+				subtitle: p(t.members.map((e) => e.user), e)
+			});
+		}
+		return i.push({
+			scope: "global",
+			title: "Everyone",
+			subtitle: p(e.users.map((e) => e.id), e.users.filter((e) => e.role === "admin").map((e) => e.id))
+		}), i;
+	}
+	function g() {
+		let t = e.state?.arrangements?.user?.pages;
+		return {
+			order: t?.order || [],
+			hidden: t?.hidden || []
+		};
+	}
+	function _() {
+		let e = h(), { order: t, hidden: n } = g(), r = (n) => t.includes(n.scope) ? t.indexOf(n.scope) : t.length + e.indexOf(n), i = e.filter((e) => e.scope.startsWith("group:") && !n.includes(e.scope)).sort((e, t) => r(e) - r(t));
+		return [
+			...e.filter((e) => e.scope === "user"),
+			...i,
+			...e.filter((e) => e.scope === "global")
+		];
+	}
+	let ee = (e) => h().find((t) => t.scope === e);
+	function v(e) {
+		return e === "user" ? !0 : e === "global" ? r() : (n()?.groups.find((t) => `group:${t.id}` === e))?.members.some((e) => e.user === t()?.id && e.role === "admin") || !1;
+	}
+	function te(e) {
+		let i = e.owner, a = t();
+		if (!i || !a) return !1;
+		if (i === "admins") return r();
+		if (i === `user:${a.id}`) return !0;
+		let o = i.startsWith("group:") && n()?.groups.find((e) => e.id === i.slice(6));
+		return !!o && o.members.some((e) => e.user === a.id && e.role === "admin");
+	}
+	let y = (t) => e.apps.filter((e) => s(e) && l(e).includes(t.scope)), b = (t) => e.apps.filter((e) => c(e) && l(e).includes(t.scope)).sort((e, t) => i(e).localeCompare(i(t))), x = (t, n) => Math.max(0, e.badges[n.scope]?.[t] || 0);
+	function S(t) {
+		let n = new Set(e.apps.filter((e) => l(e).includes(t.scope)).map((e) => e.name));
+		return (e.widgets[t.scope] || []).filter((e) => n.has(e.app));
+	}
+	let C = (t) => !e.widgets[t.scope] || e.failed.has(t.scope), ne = [
+		"small",
+		"medium",
+		"large",
+		"xl"
+	], w = (e) => ne.filter((t) => !e.sizes || e.sizes[t]), re = (e, t) => e.sizes?.[t] || e.root;
+	function ie(e, t) {
+		let n = {
+			...e,
+			instance: t.id,
+			sizes: { ...e.sizes || {} }
+		};
+		t.size && w(e).includes(t.size) && (n.size = t.size);
+		let r = t.id && e.placed?.[t.id];
+		return r?.sizes && Object.assign(n.sizes, r.sizes), r?.error && (n.error = r.error), n;
+	}
+	function T(t) {
+		let n = y(t), r = S(t), i = e.state?.arrangements?.[t.scope];
+		if (!i) return n.map((e) => ({ app: e }));
+		let a = [], o = /* @__PURE__ */ new Set();
+		for (let s of i.items || []) if (s.widget) {
+			let n = r.find((e) => e.app === s.app && e.widget === s.widget);
+			if (!s.id || o.has(`widget:${s.id}`) || !n && !(C(t) && e.apps.some((e) => e.name === s.app && l(e).includes(t.scope)))) continue;
+			o.add(`widget:${s.id}`), a.push(n ? {
+				widget: ie(n, s),
+				kept: s
+			} : {
+				pending: !0,
+				kept: s
+			});
+		} else {
+			let e = n.find((e) => e.name === s.app);
+			e && !o.has(`app:${e.name}`) && (o.add(`app:${e.name}`), a.push({ app: e }));
+		}
+		let s = new Set(i.hidden || []);
+		return a.concat(n.filter((e) => !o.has(`app:${e.name}`) && !s.has(e.name)).map((e) => ({ app: e })));
+	}
+	function E() {
+		let t = a(e.state?.config?.store);
+		return t && s(t) && _().some((e) => l(t).includes(e.scope)) ? t : null;
+	}
+	let D = (e, t, n = "main", r = {}) => () => one.open(n, r, e.name, t ? { scope: t.scope } : {}), O = (e, t, n) => o(e, "settings") ? D(e, t, "settings", n ? { add: !0 } : {}) : null, k = (e) => E() && o(E(), "app") && (e.deploys || 0) > 0 ? D(E(), null, "app", { app: e.name }) : null, A = () => E() ? D(E(), null, "main", { service: !0 }) : null, j = () => E() && D(E(), null)();
+	async function M(e, t, n = {}) {
+		return (await one.api("POST", "/v1/call", {
+			app: e,
+			op: t,
+			input: n
+		})).ok;
+	}
+	let N = (e) => one.alert({
+		title: "Couldn’t Do That",
+		text: one.plain(e).title
+	});
+	async function P(t, n) {
+		let r = e.apps;
+		n && (e.apps = n(e.apps), e.redraw?.());
+		try {
+			await t(), await L(e.redraw);
+		} catch (t) {
+			n && (e.apps = r, e.redraw?.()), N(t);
+		}
+	}
+	function F(e, t) {
+		let n = [];
+		return O(e, t) && n.push({
+			title: "Settings",
+			icon: "gear-six",
+			run: O(e, t)
+		}), k(e) && n.push({
+			title: "Open in App Store",
+			icon: "bag",
+			run: k(e)
+		}), v(t.scope) && (e.deploys || 0) > 0 && n.push({
+			title: `Remove from ${t.title}`,
+			icon: "minus-circle",
+			danger: !0,
+			section: !0,
+			run: () => P(() => one.api("POST", "/v1/install", {
+				app: e.name,
+				scope: t.scope,
+				installed: !1
+			}), (n) => n.map((n) => n.name === e.name ? {
+				...n,
+				installed: (n.installed || []).filter((e) => (e.startsWith("user:") ? "user" : e) !== t.scope)
+			} : n))
+		}), te(e) && (e.deploys || 0) > 0 && n.push({
+			title: "Delete App…",
+			icon: "trash",
+			danger: !0,
+			run: async () => {
+				await one.alert({
+					title: `Delete ${i(e)}?`,
+					action: "Delete App",
+					danger: !0,
+					text: `${i(e)} leaves every page, for everyone. Restore it from Recently Deleted in the App Store.`
+				}) && P(() => one.api("POST", "/v1/retire", {
+					app: e.name,
+					how: "deleted"
+				}), (t) => t.filter((t) => t.name !== e.name));
+			}
+		}), n;
+	}
+	async function I(e, t) {
+		if (!e.length) return;
+		t instanceof Event && (t = {
+			x: t.clientX,
+			y: t.clientY
+		});
+		let n = await one.menu(e, t).catch(() => null);
+		n != null && e[n]?.run();
+	}
+	async function L(t) {
+		[e.state, e.apps] = await Promise.all([one.api("GET", "/v1/state"), one.api("GET", "/v1/apps")]), t?.(), await R(null, t);
+	}
+	async function R(t, n) {
+		let r = (e) => `scope=${encodeURIComponent(e.scope)}`;
+		await Promise.all(h().filter((e) => !t || t.includes(e.scope)).flatMap((t) => [one.api("GET", `/v1/widgets?${r(t)}`).then((n) => {
+			e.widgets[t.scope] = n, e.failed.delete(t.scope);
+		}, () => void e.failed.add(t.scope)).then(() => n?.()), one.api("GET", `/v1/badges?${r(t)}`).then((n) => {
+			e.badges[t.scope] = n;
+		}, () => {}).then(() => n?.())]));
+	}
+	let z = (t) => h().filter((n) => e.apps.some((e) => t.includes(e.name) && l(e).includes(n.scope))).map((e) => e.scope);
+	function B(t) {
+		let n, r, i = !1, a = /* @__PURE__ */ new Set(), o = (r) => {
+			r ? r.forEach((e) => a.add(e)) : i = !0, clearTimeout(n), n = setTimeout(() => {
+				let n = i ? L(t) : Promise.all([one.api("GET", "/v1/apps").then((t) => {
+					e.apps = t;
+				}), R([...a], t)]);
+				i = !1, a.clear(), n.then(() => {
+					t(), l(), c();
+				}).catch(() => {});
+			}, 250);
+		}, s, c = () => {
+			clearTimeout(s), e.failed.size && (s = setTimeout(() => o([...e.failed]), 1e4));
+		}, l = () => {
+			clearTimeout(r);
+			let t = [], n = (e) => {
+				e && typeof e == "object" && (e.next && t.push(e.next), (e.c || []).forEach(n));
+			};
+			Object.values(e.widgets).flat().forEach((e) => Object.values(e.sizes || { root: e.root }).forEach(n)), t.length && (r = setTimeout(() => o(h().map((e) => e.scope)), Math.min(9e5, Math.max(6e4, Math.min(...t) - Date.now()))));
+		};
+		one.on("changed", (e) => {
+			e.type === "changed" && e.apps?.length ? o(z(e.apps)) : [
+				"changed",
+				"devices",
+				"install"
+			].includes(e.type) && o();
+		}), l(), c(), e.redrawn = l, e.redraw = t;
+	}
+	return {
+		data: e,
+		me: t,
+		install: n,
+		label: i,
+		app: a,
+		has: o,
+		hasScreens: s,
+		allPages: h,
+		pageChoices: g,
+		pages: _,
+		page: ee,
+		canArrange: v,
+		appsOn: y,
+		servicesOn: b,
+		badge: x,
+		widgetsOn: S,
+		waiting: C,
+		items: T,
+		supported: w,
+		tree: re,
+		store: E,
+		open: D,
+		settings: O,
+		inStore: k,
+		addService: A,
+		openStore: j,
+		call: M,
+		failed: N,
+		change: P,
+		actions: F,
+		menu: I,
+		load: L,
+		loadWidgets: R,
+		watch: B
+	};
+})(), g = one.params?.scope || "user";
+async function _() {
+	[h.data.state, h.data.apps] = await Promise.all([one.api("GET", "/v1/state"), one.api("GET", "/v1/apps")]);
+}
+function ee() {
+	let e = h.page(g);
+	if (!e) return { missing: !0 };
+	let t = h.servicesOn(e), n = t.filter((e) => (e.ops || []).some((e) => e.name === "accounts"));
+	return {
+		p: e,
+		empty: !t.length,
+		may: h.canArrange(e.scope) && !!h.addService(),
+		withAccounts: n.map((t) => ({
+			a: t,
+			signIn: h.settings(t, e, !0),
+			store: h.inStore(t)
+		})),
+		others: t.filter((e) => !n.includes(e)).map((t) => ({
+			a: t,
+			opens: h.inStore(t) || h.settings(t, e)
+		}))
+	};
+}
+async function v(e, t, n, r, i) {
+	let a = h.settings(e, t, !0), o = Object.values(e.vault || {}).filter((e) => e.accounts).map((e) => e.type), s = (o.length ? await one.api("GET", "/v1/vault").catch(() => []) : []).filter((t) => o.includes(t.type) && (t.wanted_by || []).includes(e.name) && !(t.apps || []).includes(e.name));
+	if (!s.length) return a();
+	let c = s.map((t) => ({
+		title: t.title,
+		run: async () => {
+			try {
+				await one.api("POST", "/v1/vault", {
+					scope: t.scope,
+					id: t.id,
+					apps: [...t.apps, e.name]
+				}), r.add(e.name), await i();
+			} catch (e) {
+				h.failed(e);
+			}
+		}
+	}));
+	h.menu([...c, {
+		title: "Sign In to Another Account",
+		run: a
+	}], n);
+}
+function te(t) {
+	let n = e(16), { item: r, list: i } = t, { a, signIn: s, store: h } = r;
+	if (i === void 0) {
+		let e;
+		return n[0] === Symbol.for("react.memo_cache_sentinel") ? (e = /* @__PURE__ */ p(f, {
+			role: "status",
+			"aria-label": "Loading",
+			className: "h-14 w-full max-w-2xl rounded-xl"
+		}), n[0] = e) : e = n[0], e;
+	}
+	if (i instanceof Error) {
+		let e;
+		n[1] === i ? e = n[2] : (e = one.plain(i), n[1] = i, n[2] = e);
+		let t;
+		return n[3] === e.title ? t = n[4] : (t = /* @__PURE__ */ p(d, {
+			warn: !0,
+			title: e.title
+		}), n[3] = e.title, n[4] = t), t;
+	}
+	if (!i.length) {
+		let e;
+		return n[5] !== a || n[6] !== s || n[7] !== h ? (e = !s && a.needs && h ? /* @__PURE__ */ p(l, { children: /* @__PURE__ */ p(u, {
+			title: a.needs,
+			onClick: h
+		}) }) : /* @__PURE__ */ p("p", {
+			className: "px-1 text-sm text-muted-foreground",
+			children: "No accounts yet"
+		}), n[5] = a, n[6] = s, n[7] = h, n[8] = e) : e = n[8], e;
+	}
+	let g;
+	if (n[9] !== i || n[10] !== s) {
+		let e;
+		n[12] === s ? e = n[13] : (e = (e) => /* @__PURE__ */ p(u, {
+			title: e.account,
+			sub: e.ok ? void 0 : /* @__PURE__ */ m("span", {
+				className: "inline-flex items-center gap-1 text-warning",
+				children: [/* @__PURE__ */ p(c, { name: "warning-circle-fill" }), one.plain(e.why || "Needs signing in again").title]
+			}),
+			trailing: e.ok || !s ? void 0 : /* @__PURE__ */ p(o, {
+				variant: "outline",
+				size: "sm",
+				onClick: () => s(),
+				children: "Sign In"
+			})
+		}, e.account), n[12] = s, n[13] = e), g = i.map(e), n[9] = i, n[10] = s, n[11] = g;
+	} else g = n[11];
+	let _;
+	return n[14] === g ? _ = n[15] : (_ = /* @__PURE__ */ p(l, { children: g }), n[14] = g, n[15] = _), _;
+}
+function y() {
+	let i = e(33), [u, g] = r("loading"), [y, ie] = r(null), [T, E] = r(null), [D, O] = r(!1), k;
+	i[0] === Symbol.for("react.memo_cache_sentinel") ? (k = {}, i[0] = k) : k = i[0];
+	let [A, j] = r(k), M;
+	i[1] === Symbol.for("react.memo_cache_sentinel") ? (M = /* @__PURE__ */ new Set(), i[1] = M) : M = i[1];
+	let N = n(M), P;
+	i[2] === Symbol.for("react.memo_cache_sentinel") ? (P = /* @__PURE__ */ new Set(), i[2] = P) : P = i[2];
+	let F = n(P), I;
+	i[3] === Symbol.for("react.memo_cache_sentinel") ? (I = [], i[3] = I) : I = i[3];
+	let L = n(I), R;
+	if (i[4] === Symbol.for("react.memo_cache_sentinel")) {
+		let e = function(e) {
+			L.current = e.map(re);
+			for (let { a: t } of e) (!F.current.has(t.name) || N.current.has(t.name)) && (N.current.delete(t.name), F.current.add(t.name), h.call(t.name, "accounts").then(w).catch(ne).then((e) => j((n) => ({
+				...n,
+				[t.name]: e
+			}))));
+		};
+		R = async function() {
+			await _();
+			let t = ee();
+			E(t), g("ready"), t.missing || e(t.withAccounts);
+		}, i[4] = R;
+	} else R = i[4];
+	let z = R, B;
+	i[5] === Symbol.for("react.memo_cache_sentinel") ? (B = () => z().catch((e) => (ie(one.plain(e)), g("error"))), i[5] = B) : B = i[5];
+	let ae = B, V, H;
+	if (i[6] === Symbol.for("react.memo_cache_sentinel") ? (V = () => {
+		one.largeTitle("Services");
+		let e = setTimeout(() => O(!0), 100);
+		ae();
+		let t;
+		return one.on("changed", (e) => {
+			(e.type === "changed" ? e.apps?.length ? e.apps : L.current : []).forEach((e) => N.current.add(e)), [
+				"changed",
+				"devices",
+				"install"
+			].includes(e.type) && (clearTimeout(t), t = setTimeout(() => z().catch(C), 250));
+		}), () => (clearTimeout(e), clearTimeout(t));
+	}, H = [], i[6] = V, i[7] = H) : (V = i[6], H = i[7]), t(V, H), u === "error") {
+		let e;
+		i[8] === Symbol.for("react.memo_cache_sentinel") ? (e = {
+			label: "Try Again",
+			run: () => (g("loading"), ae())
+		}, i[8] = e) : e = i[8];
+		let t;
+		return i[9] !== y.next || i[10] !== y.title ? (t = /* @__PURE__ */ p(d, {
+			title: y.title,
+			text: y.next,
+			action: e
+		}), i[9] = y.next, i[10] = y.title, i[11] = t) : t = i[11], t;
+	}
+	if (u !== "ready") {
+		let e;
+		return i[12] === D ? e = i[13] : (e = D ? /* @__PURE__ */ m("div", {
+			role: "status",
+			"aria-label": "Loading",
+			className: "flex max-w-2xl flex-col gap-3",
+			children: [
+				/* @__PURE__ */ p(f, { className: "h-9 w-40" }),
+				/* @__PURE__ */ p(f, { className: "h-14 w-full rounded-xl" }),
+				/* @__PURE__ */ p(f, { className: "h-14 w-full rounded-xl" })
+			]
+		}) : null, i[12] = D, i[13] = e), e;
+	}
+	if (T.missing) {
+		let e;
+		return i[14] === Symbol.for("react.memo_cache_sentinel") ? (e = /* @__PURE__ */ p(s, { children: "This device can't open this page. Sign out and in again to choose it." }), i[14] = e) : e = i[14], e;
+	}
+	let { p: U, withAccounts: W, others: G, empty: K, may: q } = T, J;
+	i[15] === Symbol.for("react.memo_cache_sentinel") ? (J = /* @__PURE__ */ p("h1", {
+		className: "large-title text-3xl font-bold tracking-tight",
+		children: "Services"
+	}), i[15] = J) : J = i[15];
+	let Y;
+	i[16] !== A || i[17] !== U || i[18] !== W ? (Y = W.map((e) => {
+		let { a: t, signIn: n } = e;
+		return /* @__PURE__ */ m("section", {
+			className: "flex max-w-2xl flex-col gap-3",
+			children: [
+				/* @__PURE__ */ m("div", {
+					className: "flex items-center gap-3",
+					children: [
+						/* @__PURE__ */ p(a, {
+							app: t,
+							size: 32
+						}),
+						/* @__PURE__ */ p("h2", {
+							className: "min-w-0 flex-1 truncate text-lg font-semibold",
+							children: h.label(t)
+						}),
+						/* @__PURE__ */ p(o, {
+							variant: "ghost",
+							size: "icon-sm",
+							"aria-label": `More for ${h.label(t)}`,
+							onClick: (e) => h.menu(h.actions(t, U), e.currentTarget),
+							children: /* @__PURE__ */ p(c, {
+								name: "dots-three-outline-fill",
+								className: "size-[18px]"
+							})
+						})
+					]
+				}),
+				/* @__PURE__ */ p(te, {
+					item: e,
+					list: A[t.name]
+				}),
+				n && A[t.name] !== void 0 && !(A[t.name] instanceof Error) && /* @__PURE__ */ p(o, {
+					variant: "secondary",
+					className: "self-start",
+					onClick: (e) => v(t, U, e.currentTarget, N.current, async () => await z()),
+					children: "Add Account"
+				})
+			]
+		}, t.name);
+	}), i[16] = A, i[17] = U, i[18] = W, i[19] = Y) : Y = i[19];
+	let X;
+	i[20] === G ? X = i[21] : (X = G.length > 0 && /* @__PURE__ */ p(l, { children: G.map(S) }), i[20] = G, i[21] = X);
+	let Z;
+	i[22] !== K || i[23] !== q ? (Z = K && /* @__PURE__ */ p(s, {
+		className: "mr-auto max-w-md px-0 text-left items-start",
+		action: q ? {
+			label: "Add a Service",
+			run: x
+		} : void 0,
+		children: "Services give your apps and agents your email, calendar, chats and files."
+	}), i[22] = K, i[23] = q, i[24] = Z) : Z = i[24];
+	let Q;
+	i[25] !== K || i[26] !== q ? (Q = q && !K && /* @__PURE__ */ p(o, {
+		variant: "outline",
+		className: "self-start",
+		onClick: b,
+		children: "Add a Service"
+	}), i[25] = K, i[26] = q, i[27] = Q) : Q = i[27];
+	let $;
+	return i[28] !== X || i[29] !== Z || i[30] !== Q || i[31] !== Y ? ($ = /* @__PURE__ */ m("div", {
+		className: "flex flex-col gap-8",
+		children: [
+			J,
+			Y,
+			X,
+			Z,
+			Q
+		]
+	}), i[28] = X, i[29] = Z, i[30] = Q, i[31] = Y, i[32] = $) : $ = i[32], $;
+}
+function b() {
+	return h.addService()?.();
+}
+function x() {
+	return h.addService()?.();
+}
+function S(e) {
+	let { a: t, opens: n } = e;
+	return /* @__PURE__ */ p(u, {
+		leading: /* @__PURE__ */ p(a, {
+			app: t,
+			size: 36
+		}),
+		title: h.label(t),
+		sub: t.description || void 0,
+		onClick: n || void 0
+	}, t.name);
+}
+function C() {}
+function ne(e) {
+	return e;
+}
+function w(e) {
+	return Array.isArray(e) ? e : [];
+}
+function re(e) {
+	let { a: t } = e;
+	return t.name;
+}
+i(document.getElementById("root")).render(/* @__PURE__ */ p(y, {}));
+</script>

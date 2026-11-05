@@ -1,7 +1,7 @@
 import SwiftUI
 import WidgetKit
 
-/// The iPhone's home: your pages as every client's screen draws them (src/screen/pages.html), swiped between in one
+/// The iPhone's home: your pages as every client's screen draws them (src/screen/home/pages.jsx), swiped between in one
 /// web view, with the iPhone's own menus, alerts and sheets answering it; what they open pushed over them with Back.
 /// Before the iPhone is let in, or can reach anything, it's the approval, joining or can't-reach screen instead.
 struct ScreensHome: View {

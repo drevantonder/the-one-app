@@ -1,6 +1,6 @@
 // What the pages and Services screens know, the same on every client: the person's pages (theirs, their groups',
 // everyone's), the apps on each and what each offers, all read from the node as the person looking (`one.api`).
-window.home = (() => {
+export const home = (() => {
   // `failed`: the pages whose widgets couldn't be read, so theirs stand as grey cards until they can.
   const h = { state: null, apps: [], widgets: {}, badges: {}, failed: new Set() };
   const me = () => h.state?.user;

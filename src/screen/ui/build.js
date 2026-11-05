@@ -41,20 +41,25 @@ writeFileSync(dist("gallery.html"), `<!doctype html>
 </head><body><div id="root"></div><script type="module" src="gallery.js"></script></body></html>
 `)
 
-// The client's own Settings screens in React, opted in to @one/ui with src/screen.rs's tag (its UI).
+// The client's own screens in React, opted in to @one/ui with src/screen.rs's tag (its UI): Settings' (../settings) and
+// the pages' and Services' (../home, with what they share in its lib/).
 const settings = path.join(here, "..", "settings")
+const home = path.join(here, "..", "home")
 await buildScreens(settings, path.join(settings, "dist"), settings, `<meta name="@one/ui">`, shared)
+await buildScreens(home, path.join(home, "dist"), home, `<meta name="@one/ui">`, shared)
 
-// What the built files were made from: every source file, by path and content, in order, and the Settings screens'.
+// What the built files were made from: every source file, by path and content, in order: @one/ui's, the Settings
+// screens', and everything in the pages' folder but its dist/.
 const sources = readdirSync(settings).filter((f) => /\.[jt]sx$/.test(f)).map((f) => `../settings/${f}`)
-const walk = (dir) => {
+const walk = (dir, root = here, prefix = "") => {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     if (entry.name.startsWith(".") || ["node_modules", "dist"].includes(entry.name)) continue
     const full = path.join(dir, entry.name)
-    entry.isDirectory() ? walk(full) : sources.push(path.relative(here, full).split(path.sep).join("/"))
+    entry.isDirectory() ? walk(full, root, prefix) : sources.push(prefix + path.relative(root, full).split(path.sep).join("/"))
   }
 }
 walk(here)
+walk(home, home, "../home/")
 const hash = createHash("sha256")
 for (const file of sources.sort()) hash.update(file).update("\0").update(readFileSync(path.join(here, file))).update("\0")
 writeFileSync(dist("sources.txt"), hash.digest("hex") + "\n")

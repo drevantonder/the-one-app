@@ -101,8 +101,9 @@ pub fn tag(page: &str) -> String {
 /// Vault item, Settings' (`settings/`), and Developer's panel (`devtools`). They act through the bridge's `one.api` as the person looking, which a
 /// client answers only for these.
 const CLIENT_SCREENS: &[(&str, &str)] = &[
-    ("pages", concat!("<script>", include_str!("screen/widgets.js"), include_str!("screen/home.js"), "</script>", include_str!("screen/pages.html"))),
-    ("services", concat!("<script>", include_str!("screen/home.js"), "</script>", include_str!("screen/services.html"))),
+    // Written in React (home/<name>.jsx), built by @one/ui's build into home/dist/.
+    ("pages", include_str!("screen/home/dist/pages.html")),
+    ("services", include_str!("screen/home/dist/services.html")),
     ("request", include_str!("screen/request.html")),
     ("appearance", include_str!("screen/settings/dist/appearance.html")),
     // Written in React (settings/<name>.jsx), built by @one/ui's build into settings/dist/.
@@ -178,14 +179,23 @@ mod tests {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/screen/ui");
         let mut files = Vec::new();
         walk(&root, &root, &mut files);
-        // The Settings screens written in React, which the same build makes.
-        for entry in std::fs::read_dir(root.join("../settings")).unwrap().flatten() {
-            let name = entry.file_name().to_string_lossy().to_string();
-            if name.ends_with(".jsx") || name.ends_with(".tsx") {
-                assert!(super::client_screen(name.rsplit_once('.').unwrap().0).starts_with(super::UI), "{name} isn't built in as its screen");
-                files.push(format!("../settings/{name}"));
+        // The Settings screens written in React, which the same build makes, and the pages' and Services' (home/, all
+        // of it but its dist/, since they share its lib/).
+        for folder in ["settings", "home"] {
+            for entry in std::fs::read_dir(root.join("..").join(folder)).unwrap().flatten() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if name.ends_with(".jsx") || name.ends_with(".tsx") {
+                    assert!(super::client_screen(name.rsplit_once('.').unwrap().0).starts_with(super::UI), "{name} isn't built in as its screen");
+                    if folder == "settings" {
+                        files.push(format!("../settings/{name}"));
+                    }
+                }
             }
         }
+        let home = root.join("../home");
+        let mut shared = Vec::new();
+        walk(&home, &home, &mut shared);
+        files.extend(shared.into_iter().map(|f| format!("../home/{f}")));
         files.sort();
         let mut hash = sha2::Sha256::new();
         for file in &files {
