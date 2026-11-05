@@ -29,14 +29,14 @@ impl Node {
         let now = now_ms();
         let declared = self.declared().await;
         let due = self.with(|i| {
-            let m = &i.r.members;
+            let m = i.r.db();
             let mut due = Vec::new();
             let mut seen = BTreeSet::new();
-            for ((_, scope, app), _) in m.grants_at(now).filter(|((k, ..), _)| *k == self.0.id) {
-                let Some((_, state)) = i.views.get(&scope.to_string()).filter(|(_, s)| s.installed.contains(app)) else { continue };
-                let Some((_, list)) = declared.iter().find(|(a, _)| a == app) else { continue };
+            for ((_, scope, app), _) in m.keeps_at(now).into_iter().filter(|((k, ..), _)| *k == self.0.id) {
+                let Some((_, state)) = i.views.get(&scope.to_string()).filter(|(_, s)| s.installed.contains(&app)) else { continue };
+                let Some((_, list)) = declared.iter().find(|(a, _)| *a == app) else { continue };
                 for s in list.iter().filter_map(|s| s.as_ref().ok()) {
-                    let Some(user) = runs_as(m, state, scope, app, &s.name) else { continue };
+                    let Some(user) = runs_as(m, state, &scope, &app, &s.name) else { continue };
                     let id = (scope.clone(), app.clone(), s.name.clone());
                     seen.insert(id.clone());
                     let spec = s.spec();
@@ -107,18 +107,18 @@ impl Node {
     /// described, so it's cheap when nothing fails.
     pub async fn failing_schedules(&self, viewer: &Caller) -> Result<Vec<Value>> {
         let apps: Vec<String> = self.with(|i| {
-            let m = &i.r.members;
-            Ok(m.apps
-                .values()
+            let m = i.r.db();
+            Ok(m.apps()
+                .into_iter()
                 .filter(|a| !a.erased && a.deleted.is_none())
                 .filter(|a| {
                     reachable(i, &a.name, &viewer.user).iter().any(|scope| {
                         let installed = i.views.get(&scope.to_string()).is_some_and(|(_, s)| s.installed.contains(&a.name));
                         let failed = i.status.get(&scope.to_string()).is_some_and(|st| st.runs.iter().any(|((app, _), runs)| app == &a.name && runs.last().is_some_and(|r| !r.ok)));
-                        installed && failed && members::manages_scope(m, &viewer.user, scope)
+                        installed && failed && m.may(&viewer.user, "add-apps", &scopes::object(&scope))
                     })
                 })
-                .map(|a| a.name.clone())
+                .map(|a| a.name)
                 .collect())
         })?;
         let mut out = Vec::new();
@@ -140,8 +140,8 @@ impl Node {
     pub(super) fn schedules_of(&self, viewer: &Caller, app: &str, declared: &[std::result::Result<Schedule, (String, String)>]) -> Result<(Vec<Value>, Vec<Value>)> {
         let now = now_ms();
         self.with(|i| {
-            let m = &i.r.members;
-            let user_name = |u: &str| m.users.get(u).map(|u| u.name.clone()).unwrap_or_default();
+            let m = i.r.db();
+            let user_name = |u: &str| m.user_ever(u).map(|u| u.name).unwrap_or_default();
             let (mut list, mut activity) = (Vec::new(), Vec::new());
             for scope in reachable(i, app, &viewer.user) {
                 let Some((_, state)) = i.views.get(&scope.to_string()) else { continue };
@@ -151,13 +151,13 @@ impl Node {
                 let status = i.status.get(&scope.to_string()).cloned().unwrap_or_default();
                 let scope_name = handles(m, std::slice::from_ref(&scope), &viewer.user).remove(0).name;
                 // The devices that keep it running there: none, and its schedules don't run.
-                let kept_by: Vec<String> = m.grants_at(now).filter(|((_, s, a), _)| *s == scope && a == app).filter_map(|((k, ..), _)| m.machine(k).map(|d| d.name.clone())).collect();
+                let kept_by: Vec<String> = m.keeps_at(now).into_iter().filter(|((_, s, a), _)| *s == scope && a == app).filter_map(|((k, ..), _)| m.machine(&k).map(|d| d.name)).collect();
                 let base = |name: &str| {
                     let key = (app.to_string(), name.to_string());
                     let runs = status.runs.get(&key);
                     let last = runs.and_then(|r| r.last()).map(|r| json!({ "time": r.time, "ok": r.ok, "error": r.error }));
                     let changed = status.changed.get(&key).filter(|(.., t)| now.saturating_sub(*t) < CHANGED_SHOWN).map(|(was, is, t)| json!({ "was": schedules::say(was), "is": schedules::say(is), "time": t }));
-                    json!({ "name": name, "scope": scope.to_string(), "scope_name": scope_name, "may_switch": members::manages_scope(m, &viewer.user, &scope), "may_keep": m.grants_in(&viewer.user, &scope), "kept_by": kept_by, "last": last, "changed": changed })
+                    json!({ "name": name, "scope": scope.to_string(), "scope_name": scope_name, "may_switch": m.may(&viewer.user, "add-apps", &scopes::object(&scope)), "may_keep": m.may(&viewer.user, "keep", &scopes::object(&scope)), "kept_by": kept_by, "last": last, "changed": changed })
                 };
                 for s in declared {
                     let mut v = match s {
@@ -199,7 +199,7 @@ impl Node {
                 for ((a, name), runs) in status.runs.iter().filter(|((a, _), _)| a == app) {
                     let _ = a;
                     for r in runs {
-                        activity.push(json!({ "schedule": name, "scope": scope.to_string(), "scope_name": scope_name, "time": r.time, "ok": r.ok, "error": r.error, "ms": r.ms, "device": m.machines.get(&r.device).map(|s| s.name.clone()), "user": user_name(&r.user) }));
+                        activity.push(json!({ "schedule": name, "scope": scope.to_string(), "scope_name": scope_name, "time": r.time, "ok": r.ok, "error": r.error, "ms": r.ms, "device": m.machine_ever(&r.device).map(|s| s.name.clone()), "user": user_name(&r.user) }));
                     }
                 }
             }
@@ -220,8 +220,8 @@ impl Node {
 
 /// Whom a schedule of `app` in a scope runs as: whoever switched it on last, or else installed the app there, while
 /// they still manage the scope; nobody if it's switched off.
-fn runs_as(m: &Members, state: &ScopeState, scope: &Scope, app: &str, schedule: &str) -> Option<String> {
-    let manages = |u: &String| members::manages_scope(m, u, scope);
+fn runs_as(m: &ScopeDb, state: &ScopeState, scope: &Scope, app: &str, schedule: &str) -> Option<String> {
+    let manages = |u: &String| m.may(u, "add-apps", &scopes::object(&scope));
     match state.switches.get(&(app.to_string(), schedule.to_string())) {
         Some((false, ..)) => None,
         Some((true, user, _)) if manages(user) => Some(user.clone()),

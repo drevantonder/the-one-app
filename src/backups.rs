@@ -22,6 +22,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::bucket::{Place, folder, scope_of};
+use crate::database::scopes::ScopeDb;
 use crate::entry::{Entry, Key, hex, pack, unpack};
 
 /// The Vault item kind a place is: an item in Everyone, with a folder's `device` and `path`, or S3's `endpoint`,
@@ -543,34 +544,36 @@ pub fn check(c: &Check) -> Result<(Value, Vec<Restored>)> {
     }
     let bytes: u64 = place.objects(&format!("{install}/objects"))?.iter().map(|o| o.2).sum();
     let report = json!({
-        "install": m.name,
+        "install": m.name(),
         "bytes": bytes,
         "scopes": scopes,
-        "people": m.users.values().filter(|u| !u.removed).map(|u| u.name.clone()).collect::<Vec<_>>(),
-        "apps": m.apps.values().filter(|a| !a.erased && a.bundle.is_some()).map(|a| a.name.clone()).collect::<Vec<_>>(),
+        "people": m.users().into_iter().filter(|u| !u.removed).map(|u| u.name).collect::<Vec<_>>(),
+        "apps": m.apps().into_iter().filter(|a| !a.erased && a.bundle.is_some()).map(|a| a.name).collect::<Vec<_>>(),
         "problems": problems,
         "unchecked": unchecked,
     });
     Ok((report, restored))
 }
 
-/// Who's who, as the member entries in a store replay.
-fn members_of(store: &crate::store::Store, root: Option<crate::entry::Hash>) -> Result<crate::members::Members> {
+/// Who's who, as the member entries in a store replay: `global`'s scope database.
+fn members_of(store: &crate::store::Store, root: Option<crate::entry::Hash>) -> Result<ScopeDb> {
     let member_entries: Vec<Entry> = store.ordered()?.into_iter().filter(crate::members::is_member_entry).collect();
-    Ok(crate::members::Members::replay(root, &member_entries, &store.forks()?))
+    let m = crate::members::Members::replay(root, &member_entries, &store.forks()?);
+    ScopeDb::build(&m, &crate::entry::Scope::Global, &Default::default(), crate::node::now_ms())
 }
 
 /// What a restore must bring back the same: the install's name, its people, devices, groups, apps and settings, and
 /// each scope's epochs.
-fn said(m: &crate::members::Members) -> Value {
+fn said(m: &ScopeDb) -> Value {
+    let epochs = m.epochs().into_keys().flat_map(|s| m.epoch_hashes(&s).into_iter().map(move |(n, h)| format!("{s} {n} {h}"))).collect::<Vec<_>>();
     json!({
-        "name": m.name,
-        "users": m.users.values().map(|u| (u.id.clone(), u.name.clone(), u.removed)).collect::<Vec<_>>(),
-        "machines": m.machines.keys().map(|k| hex(k)).collect::<Vec<_>>(),
-        "groups": m.groups.keys().collect::<Vec<_>>(),
-        "apps": m.apps.values().map(|a| (a.name.clone(), a.bundle.clone(), a.erased)).collect::<Vec<_>>(),
-        "settings": m.settings,
-        "epochs": m.epoch_hashes.iter().map(|((s, n), h)| format!("{s} {n} {h}")).collect::<Vec<_>>(),
+        "name": m.name(),
+        "users": m.users().into_iter().map(|u| (u.id, u.name, u.removed)).collect::<Vec<_>>(),
+        "machines": m.machines().iter().map(|d| hex(&d.key)).collect::<Vec<_>>(),
+        "groups": m.groups().into_iter().map(|g| g.id).collect::<Vec<_>>(),
+        "apps": m.apps().into_iter().map(|a| (a.name, a.bundle, a.erased)).collect::<Vec<_>>(),
+        "settings": m.settings(),
+        "epochs": epochs,
     })
 }
 

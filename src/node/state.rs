@@ -5,12 +5,12 @@ use super::*;
 impl Node {
     /// Where the install's kernel is, for nodes to take its sign-ins: the install's address.
     pub fn kernel(&self) -> Result<String> {
-        self.with(|i| Ok(i.r.members.settings.get("address").context("this install has no address yet, so it takes no sign-ins: an admin sets one with kernel use")?.clone()))
+        self.with(|i| Ok(i.r.db().setting("address").context("this install has no address yet, so it takes no sign-ins: an admin sets one with kernel use")?.clone()))
     }
 
     /// Whether `user` is a person of the install.
     pub fn is_user(&self, user: &str) -> bool {
-        self.with(|i| Ok(i.r.members.user(user).is_some())).unwrap_or(false)
+        self.with(|i| Ok(i.r.db().user(user).is_some())).unwrap_or(false)
     }
 
     /// Sets one of the install's settings, for an admin; `None` puts back the white label's default.
@@ -26,12 +26,12 @@ impl Node {
         } else {
             let key = self.find_device(device)?;
             self.with(|i| {
-                let m = &i.r.members;
+                let m = i.r.db();
                 let d = m.machine(&key).context("no such device")?;
-                Ok(m.machines.values().filter(|s| m.machine(&s.key).is_some() && s.user == d.user && s.name.eq_ignore_ascii_case(&d.name)).map(|s| hex(&s.key)).collect())
+                Ok(m.machines().into_iter().filter(|s| m.machine(&s.key).is_some() && s.user == d.user && s.name.eq_ignore_ascii_case(&d.name)).map(|s| hex(&s.key)).collect())
             })?
         };
-        let value = self.with(|i| Ok(rank::with(&i.r.members.settings, &ids, priority)))?;
+        let value = self.with(|i| Ok(rank::with(&i.r.db().settings(), &ids, priority)))?;
         self.set_setting(caller, rank::SETTING, Some(&value)).await
     }
 
@@ -59,19 +59,19 @@ impl Node {
         let waiting = self.waiting_requests(viewer).unwrap_or(0);
         let arrangements = self.arrangements(&viewer.user);
         let Ok(install) = self.0.install.lock() else { return json!({ "error": "this device couldn't answer that: a bug in it, which its log shows" }) };
-        let viewer_name = if viewer.key == self.0.id { self.device_name() } else { install.as_ref().and_then(|i| i.r.members.machine(&viewer.key)).map(|m| m.name.clone()).unwrap_or_default() };
+        let viewer_name = if viewer.key == self.0.id { self.device_name() } else { install.as_ref().and_then(|i| i.r.db().machine(&viewer.key)).map(|m| m.name.clone()).unwrap_or_default() };
         let backups = install.as_ref().and_then(|i| self.backup_problem(i, &viewer.user));
         let here_services = install.as_ref().map(|i| self.services_here(i)).unwrap_or_default();
         let here_parts = install.as_ref().map(|i| json!(self.parts_here(i))).unwrap_or(Value::Null);
         // Which device is looking, to say "This device": a client device of the viewer's asks as a sign-in.
         let looking = device.or_else(|| {
-            let m = &install.as_ref()?.r.members;
+            let m = install.as_ref()?.r.db();
             m.machine(&viewer.key).filter(|d| viewer.key != self.0.id && d.user == viewer.user && d.is(members::Kind::Client)).map(|_| viewer.key)
         });
         let me = &viewer.user;
         let device_now = |s: &members::Machine| {
             let Some(i) = install.as_ref() else { return serde_json::Map::new() };
-            let m = &i.r.members;
+            let m = i.r.db();
             let session = i.peers.get(&s.key).filter(|_| i.online(&s.key));
             // The containers on a device are its person's business.
             let load = if s.key == self.0.id { Some(crate::load::current()) } else { session.and_then(|s| s.load.clone()) }.map(|mut l| {
@@ -88,7 +88,7 @@ impl Node {
                 "services": services.iter().map(|d| d.0.clone()).collect::<Vec<_>>(),
                 "installed_services": installed_services(m, s, services, i.builds.get(&s.key).map(|r| r.commit.as_str())),
                 // What it can run, its person's and the admins' to see.
-                "parts": if s.user != *me && !m.is_admin(me) { Value::Null } else if s.key == self.0.id { here_parts.clone() } else { session.and_then(|s| s.parts.clone()).unwrap_or(Value::Null) },
+                "parts": if !m.may(me, "remove", &scopes::device(&s.key)) { Value::Null } else if s.key == self.0.id { here_parts.clone() } else { session.and_then(|s| s.parts.clone()).unwrap_or(Value::Null) },
                 "load": load,
             });
             match now {
@@ -109,7 +109,7 @@ impl Node {
             },
             client: (sign_in.is_none() && viewer.key != self.0.id).then(|| json!({ "key": hex(&viewer.key), "name": viewer_name })),
             device: json!({ "key": hex(&self.0.id), "name": self.device_name(), "ready": ready, "guide": crate::skills::address() }),
-            member: install.as_ref().is_some_and(|i| i.r.members.compute(&self.0.id).is_some()),
+            member: install.as_ref().is_some_and(|i| i.r.db().compute(&self.0.id).is_some()),
             entries: install.as_ref().map(|i| i.r.store.count().unwrap_or(0) as u64).unwrap_or(0),
             waiting,
             arrangements: json!(arrangements),
@@ -119,7 +119,7 @@ impl Node {
             device_now: &device_now,
             client_now: &client_now,
         };
-        crate::state::state(install.as_ref().map(|i| &i.r.members), me, here)
+        crate::state::state(install.as_ref().map(|i| i.r.db()), me, here)
     }
 
     /// Writes one of `global`'s node entries as the local user, after checking it would count.
@@ -174,7 +174,7 @@ impl Node {
             }
         };
         ensure!(!name.is_empty(), "give a name");
-        ensure!(self.with(|i| Ok(i.r.members.looks_after(&caller.user, &key)))?, "only its person or an admin renames a device");
+        ensure!(self.with(|i| Ok(i.r.db().may(&caller.user, "rename", &scopes::device(&key))))?, "only its person or an admin renames a device");
         if key == self.0.id {
             return self.rename_device(name).await;
         }
@@ -183,8 +183,8 @@ impl Node {
 
     /// Finds a device of the install by name or key prefix.
     pub fn find_device(&self, name: &str) -> Result<Key> {
-        let found: Vec<Key> = self.with(|i| Ok(i.r.members.computes().filter(|m| m.name.eq_ignore_ascii_case(name) || hex(&m.key).starts_with(name)).map(|m| m.key).collect()))?;
-        let names = || self.with(|i| Ok(i.r.members.computes().map(|m| m.name.clone()).collect::<Vec<_>>().join(", "))).unwrap_or_default();
+        let found: Vec<Key> = self.with(|i| Ok(i.r.db().computes().into_iter().filter(|m| m.name.eq_ignore_ascii_case(name) || hex(&m.key).starts_with(name)).map(|m| m.key).collect()))?;
+        let names = || self.with(|i| Ok(i.r.db().computes().into_iter().map(|m| m.name.clone()).collect::<Vec<_>>().join(", "))).unwrap_or_default();
         match found.as_slice() {
             [one] => Ok(*one),
             [] => bail!("no device called {name}: your devices are {}", names()),
@@ -197,9 +197,9 @@ impl Node {
     pub(super) fn find_service(&self, service: &str, name: &str, user: &str, own: bool) -> Option<Key> {
         let found: Vec<Key> = self
             .with(|i| {
-                let m = &i.r.members;
-                let serves = |s: &members::Machine| if own { s.user == user } else { s.user != user && m.service_serves(&s.key, user) };
-                Ok(m.offering(service).filter(|s| serves(s) && !name.is_empty() && (s.name.eq_ignore_ascii_case(name) || hex(&s.key).starts_with(name))).map(|s| s.key).collect())
+                let m = i.r.db();
+                let serves = |s: &members::Machine| if own { s.user == user } else { s.user != user && m.may(user, "use", &scopes::service(&s.key)) };
+                Ok(m.offering(service).into_iter().filter(|s| serves(s) && !name.is_empty() && (s.name.eq_ignore_ascii_case(name) || hex(&s.key).starts_with(name))).map(|s| s.key).collect())
             })
             .ok()?;
         match found.as_slice() {
@@ -211,13 +211,13 @@ impl Node {
     /// Finds a device or client of the install by name or key prefix.
     pub fn find_machine(&self, name: &str) -> Result<Key> {
         let found: Vec<Key> = self.with(|i| {
-            let m = &i.r.members;
-            let named: Vec<&members::Machine> = m.machines.values().filter(|m| !m.removed && !name.is_empty() && (m.name.eq_ignore_ascii_case(name) || hex(&m.key).starts_with(name))).collect();
+            let m = i.r.db();
+            let named: Vec<members::Machine> = m.machines().into_iter().filter(|m| !m.removed && !name.is_empty() && (m.name.eq_ignore_ascii_case(name) || hex(&m.key).starts_with(name))).collect();
             // A device, by its name, rather than the parts of it named for it.
             let part = |d: &members::Machine| d.device.is_some_and(|of| named.iter().any(|n| n.key == of));
             Ok(named.iter().filter(|d| !part(d)).map(|d| d.key).collect())
         })?;
-        let names = || self.with(|i| Ok(i.r.members.machines.values().filter(|m| !m.removed).map(|m| m.name.clone()).collect::<Vec<_>>().join(", "))).unwrap_or_default();
+        let names = || self.with(|i| Ok(i.r.db().machines().into_iter().filter(|m| !m.removed).map(|m| m.name.clone()).collect::<Vec<_>>().join(", "))).unwrap_or_default();
         match found.as_slice() {
             [one] => Ok(*one),
             [] => bail!("no device called {name}: your devices are {}", names()),
@@ -227,7 +227,7 @@ impl Node {
 
     /// Finds a user by name or id.
     pub fn find_user(&self, name: &str) -> Result<String> {
-        let found: Vec<String> = self.with(|i| Ok(i.r.members.users.values().filter(|u| !u.removed && (u.id == name || u.name.eq_ignore_ascii_case(name))).map(|u| u.id.clone()).collect()))?;
+        let found: Vec<String> = self.with(|i| Ok(i.r.db().users().into_iter().filter(|u| !u.removed && (u.id == name || u.name.eq_ignore_ascii_case(name))).map(|u| u.id.clone()).collect()))?;
         match found.as_slice() {
             [one] => Ok(one.clone()),
             [] => bail!("no user called {name}"),
@@ -245,7 +245,7 @@ impl Node {
 
     /// Finds a group by name or id.
     pub fn find_group(&self, name: &str) -> Result<String> {
-        let found: Vec<String> = self.with(|i| Ok(i.r.members.groups.values().filter(|g| g.id == name || g.name.eq_ignore_ascii_case(name)).map(|g| g.id.clone()).collect()))?;
+        let found: Vec<String> = self.with(|i| Ok(i.r.db().groups().into_iter().filter(|g| g.id == name || g.name.eq_ignore_ascii_case(name)).map(|g| g.id.clone()).collect()))?;
         match found.as_slice() {
             [one] => Ok(one.clone()),
             [] => bail!("no group called {name}"),
@@ -254,16 +254,16 @@ impl Node {
     }
 
     pub(super) fn name_of(&self, key: &Key) -> String {
-        self.with(|i| Ok(i.r.members.machines.get(key).map(|m| m.name.clone()))).ok().flatten().unwrap_or_else(|| short(key))
+        self.with(|i| Ok(i.r.db().machine_ever(key).map(|m| m.name.clone()))).ok().flatten().unwrap_or_else(|| short(key))
     }
 
     /// The install's compute devices' names by key (hex), and the serverless node's: what a trace's reader calls the
     /// nodes a client tried.
     pub fn compute_names(&self) -> Value {
         self.with(|i| {
-            let m = &i.r.members;
-            let name = |k: &Key| m.machines.get(k).map(|d| d.name.clone()).unwrap_or_else(|| short(k));
-            let mut names: serde_json::Map<String, Value> = m.computes().map(|c| (hex(&c.key), json!(name(&c.key)))).collect();
+            let m = i.r.db();
+            let name = |k: &Key| m.machine_ever(k).map(|d| d.name.clone()).unwrap_or_else(|| short(k));
+            let mut names: serde_json::Map<String, Value> = m.computes().into_iter().map(|c| (hex(&c.key), json!(name(&c.key)))).collect();
             if let Some(key) = m.serverless() {
                 names.insert(hex(&key), json!("the serverless node"));
             }
@@ -281,15 +281,15 @@ fn tried() -> bool {
     settings.is_some_and(|s| !s["try_person"].is_null())
 }
 
-fn installed_services(m: &Members, device: &members::Machine, services: &[Service], build: Option<&str>) -> Vec<Value> {
-    let name_of = |u: &String| m.users.get(u).map(|u| u.name.clone());
+fn installed_services(m: &ScopeDb, device: &members::Machine, services: &[Service], build: Option<&str>) -> Vec<Value> {
+    let name_of = |u: &String| m.user_ever(u).map(|u| u.name);
     services
         .iter()
         .map(|(name, users, d)| {
             let built_in = d["built_in"] == true;
-            let installed = m.services.get(&(device.key, name.clone())).filter(|i| i.on);
+            let installed = m.switch(&device.key, name).filter(|i| i.on);
             // Registered over the local API, a service counts as installed by the device's local user.
-            let by = match installed {
+            let by = match &installed {
                 Some(i) => name_of(&i.by),
                 None if built_in => None,
                 None => name_of(&device.user),

@@ -27,6 +27,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::entry::{Entry, Hash, Key, hex, short, unhex};
+use crate::database::scopes::{self, ScopeDb};
 use crate::members::{self, Members};
 use crate::services::Services;
 
@@ -81,7 +82,7 @@ struct Inner {
     key: SigningKey,
     install: Install,
     /// `global`'s entries, as the nodes brought them, and what its member entries add up to.
-    known: Mutex<(Vec<Entry>, Members)>,
+    known: Mutex<(Vec<Entry>, ScopeDb)>,
     /// The depths in `global`'s replay order of the entries its member entries follow that nodes didn't bring: a service
     /// is brought only member entries, and orders them as the nodes do with these.
     depths: Mutex<HashMap<Hash, u64>>,
@@ -184,9 +185,9 @@ impl Service {
         self.owner_in(&self.0.known.lock().unwrap().1)
     }
 
-    fn owner_in(&self, m: &Members) -> Option<String> {
+    fn owner_in(&self, m: &ScopeDb) -> Option<String> {
         // Only a listing as the person whose link it was given counts: nobody else can make it theirs.
-        m.service(&self.key()).filter(|s| s.service.as_deref() == Some(self.0.name.as_str()) && s.user == self.0.install.user).map(|s| s.user.clone())
+        m.service(&self.key()).filter(|s| s.service.as_deref() == Some(self.0.name.as_str()) && s.user == self.0.install.user).map(|s| s.user)
     }
 
     /// Starts it: its endpoint, through the install's relay (which lets it in once it's approved), asking to be
@@ -339,7 +340,7 @@ impl Service {
         let known = self.0.known.lock().unwrap();
         let m = &known.1;
         // Whom it serves is what its listing says, not what the program offering it claims.
-        let users: Vec<&String> = m.users.keys().filter(|u| m.service_serves(&self.key(), u)).collect();
+        let users: Vec<String> = m.users().into_iter().map(|u| u.id).filter(|u| m.may(u, "use", &scopes::service(&self.key()))).collect();
         json!({ "describe": describe, "users": users })
     }
 
@@ -351,7 +352,7 @@ impl Service {
         let given = crate::entry::unpack(&bytes)?;
         let root = Hash::from_hex(&self.0.install.root)?;
         let mut known = self.0.known.lock().unwrap();
-        ensure!(known.1.computes().next().is_none() || known.1.compute(remote).is_some(), "only your One App's devices bring its entries");
+        ensure!(known.1.computes().is_empty() || known.1.compute(remote).is_some(), "only your One App's devices bring its entries");
         let mut depths_known = self.0.depths.lock().unwrap();
         let mut grown = depths_known.clone();
         for (hash, depth) in depths.as_object().into_iter().flatten() {
@@ -366,7 +367,7 @@ impl Service {
             None if more_depths => placed(root, known.0.clone(), &grown),
             None => return Ok(()),
         };
-        ensure!(!members.users.is_empty(), "those aren't your One App's entries");
+        ensure!(!members.users().is_empty(), "those aren't your One App's entries");
         write_private(&self.0.dir.join("entries"), &crate::entry::pack(&entries.iter().collect::<Vec<_>>()))?;
         let text: HashMap<String, u64> = grown.iter().map(|(h, d)| (h.to_hex(), *d)).collect();
         write_private(&self.0.dir.join("depths"), &serde_json::to_vec(&text)?)?;
@@ -403,10 +404,10 @@ impl Service {
             crate::apps::Me {
                 key: hex(&key),
                 user: user.clone(),
-                name: m.machine(&key).map(|d| d.name.clone()).unwrap_or_default(),
-                role: person.map(|u| u.role),
-                user_name: person.map(|u| u.name.clone()).unwrap_or_default(),
-                handle: person.map(|u| u.handle.clone()).unwrap_or_default(),
+                name: m.machine(&key).map(|d| d.name).unwrap_or_default(),
+                role: person.as_ref().map(|u| u.role),
+                user_name: person.as_ref().map(|u| u.name.clone()).unwrap_or_default(),
+                handle: person.map(|u| u.handle).unwrap_or_default(),
                 agent: me["agent"].as_str().map(str::to_string),
             }
         };
@@ -435,7 +436,7 @@ impl Service {
         let nodes: Vec<Key> = {
             let known = self.0.known.lock().unwrap();
             let m = &known.1;
-            m.computes().filter(|c| c.user == owner && m.runs_for(&c.key, &crate::entry::Scope::User(owner.clone()))).map(|c| c.key).collect()
+            m.computes().into_iter().filter(|c| c.user == owner && m.runs_for(&c.key, &crate::entry::Scope::User(owner.clone()))).map(|c| c.key).collect()
         };
         let mut why = Vec::new();
         for node in nodes {
@@ -486,17 +487,17 @@ impl Service {
         let known = self.0.known.lock().unwrap();
         let m = &known.1;
         // Whether another is on, it can't know: asked, one that isn't says so.
-        let devices: Vec<Value> = m.offering(&self.0.name).map(|s| json!({ "key": hex(&s.key), "name": s.name, "here": s.key == self.key(), "online": true, "services": [self.0.name] })).collect();
+        let devices: Vec<Value> = m.offering(&self.0.name).into_iter().map(|s| json!({ "key": hex(&s.key), "name": s.name, "here": s.key == self.key(), "online": true, "services": [self.0.name] })).collect();
         // The scopes its device runs, whose part it is: a program here may reach what they hold.
         let listed = m.service(&self.key());
-        let device = listed.and_then(|s| s.device);
+        let device = listed.as_ref().and_then(|s| s.device);
         let runs_for: Vec<String> = m.scopes().into_iter().filter(|s| device.is_some_and(|d| m.runs_for(&d, s))).map(|s| s.to_string()).collect();
-        let name = listed.map(|s| s.name.as_str()).unwrap_or("");
+        let name = listed.as_ref().map(|s| s.name.as_str()).unwrap_or("");
         json!({
             "device": { "key": hex(&self.key()), "name": name, "runs_for": runs_for },
             "me": { "key": hex(&self.key()), "name": name },
-            "user": self.owner_in(m).map(|u| json!({ "id": u, "name": m.user(&u).map(|p| p.name.clone()) })),
-            "install": { "name": m.name, "root": self.0.install.root, "devices": devices, "settings": crate::state::settings(m) },
+            "user": self.owner_in(m).map(|u| json!({ "id": u, "name": m.user(&u).map(|p| p.name) })),
+            "install": { "name": m.name(), "root": self.0.install.root, "devices": devices, "settings": crate::state::settings(&m.settings()) },
         })
     }
 }
@@ -505,10 +506,10 @@ impl Service {
 /// serves them (its own person, or everyone, as its listing says), and the node is one of their own, calling for its
 /// own person; or, for a service that serves everyone, a node that runs their calls bringing their sign-in, which this
 /// service checked (`signed_in`). A node of someone else's, an admin's too, never calls as them otherwise.
-pub fn may_call(m: &Members, me: &Key, remote: &Key, key: &Key, user: &str, signed_in: bool) -> Result<()> {
+pub fn may_call(m: &ScopeDb, me: &Key, remote: &Key, key: &Key, user: &str, signed_in: bool) -> Result<()> {
     let service = m.service(me).context("this service isn't one of your One App's yet")?;
     let node = m.compute(remote).context("only your One App's devices are answered")?;
-    ensure!(m.service_serves(me, user), "{} serves only its own person", service.service.as_deref().unwrap_or("this service"));
+    ensure!(m.may(user, "use", &scopes::service(me)), "{} serves only its own person", service.service.as_deref().unwrap_or("this service"));
     let own = node.user == user && (*key == *remote || m.client(key).is_some_and(|c| c.user == user));
     ensure!(own || (service.shared && signed_in && m.serves(remote, user)), "{} may not call as that person", short(remote));
     Ok(())
@@ -536,7 +537,7 @@ pub fn limited(name: &str, call: &Value) -> Result<Value> {
 /// `known` with `given`'s member entries added, if any are new: → them, replayed from the install's first entry, with
 /// those signed by no endpoint it ever listed passed over (junk anyone could sign counts for nothing, and isn't kept).
 /// `depths` are those of the entries they follow that nodes don't bring.
-fn merged(root: Hash, known: &[Entry], given: Vec<Entry>, depths: &HashMap<Hash, u64>) -> Option<(Vec<Entry>, Members)> {
+fn merged(root: Hash, known: &[Entry], given: Vec<Entry>, depths: &HashMap<Hash, u64>) -> Option<(Vec<Entry>, ScopeDb)> {
     let mut all: HashMap<String, Entry> = known.iter().map(|e| (e.hash().to_hex(), e.clone())).collect();
     let before = all.len();
     for e in given.into_iter().filter(members::is_member_entry) {
@@ -549,12 +550,17 @@ fn merged(root: Hash, known: &[Entry], given: Vec<Entry>, depths: &HashMap<Hash,
 }
 
 /// `entries` in the nodes' replay order, those that can be placed in it and are signed by an endpoint the install
-/// listed, and what they add up to.
-fn placed(root: Hash, entries: Vec<Entry>, depths: &HashMap<Hash, u64>) -> (Vec<Entry>, Members) {
+/// listed, and the scope database they add up to.
+fn placed(root: Hash, entries: Vec<Entry>, depths: &HashMap<Hash, u64>) -> (Vec<Entry>, ScopeDb) {
     let ordered = crate::entry::causal(entries, depths);
     let member_entries: Vec<Entry> = ordered.iter().filter(|e| members::is_member_entry(e)).cloned().collect();
     let members = Members::replay(Some(root), &member_entries, &Default::default());
-    (ordered.into_iter().filter(|e| members.machines.contains_key(&e.author())).collect(), members)
+    let db = ScopeDb::build(&members, &crate::entry::Scope::Global, &Default::default(), now_ms()).unwrap_or_else(|err| {
+        tracing::warn!("building the scope database: {err:#}");
+        ScopeDb::build(&Members::default(), &crate::entry::Scope::Global, &Default::default(), 0).expect("an empty scope database builds")
+    });
+    let listed: std::collections::HashSet<Key> = db.machines().iter().map(|d| d.key).collect();
+    (ordered.into_iter().filter(|e| listed.contains(&e.author())).collect(), db)
 }
 
 fn now_ms() -> u64 {

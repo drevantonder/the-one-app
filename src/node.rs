@@ -17,7 +17,8 @@ use crate::call::Append;
 use crate::bucket::{Copied, Place};
 use crate::db::Db;
 use crate::entry::{Content, Entry, Hash, Key, Order, Scope, hex, new_id, short, unhex};
-use crate::members::{self, Members, Principal, Role, ScopeState};
+use crate::database::scopes::{self, ScopeDb};
+use crate::members::{self, Principal, Role, ScopeState};
 use crate::rank;
 use crate::release::{self, Release};
 use crate::schedules::{self, Schedule};
@@ -736,7 +737,7 @@ impl Node {
         let file: InstallFile = serde_json::from_slice(&std::fs::read(dir.join("install.json"))?)?;
         let store = Store::open(&dir.join("entries.db"))?;
         let root: [u8; 32] = data_encoding::HEXLOWER.decode(file.root.as_bytes())?.try_into().map_err(|_| anyhow!("bad root"))?;
-        let r = Replica::new(self.0.key.clone(), store, Some(Hash::from_bytes(root)))?;
+        let r = Replica::new(self.0.key.clone(), store, Some(Hash::from_bytes(root)), now_ms())?;
         let bucket = file.bucket.map(|f| Ok::<_, anyhow::Error>((self.install_place(&f)?, f))).transpose()?;
         let install = Install { r, user: file.user, bucket, folders: file.folders, peers: HashMap::new(), builds: HashMap::new(), status: HashMap::new(), views: HashMap::new(), vault: Default::default(), nearest: HashMap::new(), far: HashMap::new(), read: false };
         *self.0.install.lock()? = Some(install);
@@ -745,7 +746,7 @@ impl Node {
 
     /// An install made before it kept its data in a bucket, with no device but this one: it keeps it in a folder here.
     fn keep_alone_here(&self) -> Result<()> {
-        let alone = self.with(|i| Ok(i.bucket.is_none() && i.r.members.computes().all(|s| s.key == self.0.id)))?;
+        let alone = self.with(|i| Ok(i.bucket.is_none() && i.r.db().computes().iter().all(|s| s.key == self.0.id)))?;
         if !alone {
             return Ok(());
         }
@@ -787,7 +788,7 @@ impl Node {
     /// install isn't being read (never waiting on it, so it's asked for anywhere); else as it last was.
     pub fn device_name(&self) -> String {
         let install = self.0.install.0.try_lock().ok();
-        let listed = install.as_ref().and_then(|i| i.as_ref()).and_then(|i| i.r.members.machine(&self.0.id).map(|m| m.name.clone()));
+        let listed = install.as_ref().and_then(|i| i.as_ref()).and_then(|i| i.r.db().machine(&self.0.id).map(|m| m.name));
         drop(install);
         let mut name = self.0.name.lock().unwrap();
         if let Some(listed) = listed {
@@ -877,7 +878,7 @@ impl Node {
         self.with(|i| i.r.check(&entry))?;
         self.check_in_scope(&entry)?;
         self.put_entry(scope, &entry).await?;
-        let handled = self.with(|i| i.r.add_own(&entry))?;
+        let handled = self.with(|i| i.r.add_own(&entry, now_ms()))?;
         self.after(handled).await?;
         self.ping(scope, None);
         Ok(entry)
@@ -886,7 +887,7 @@ impl Node {
     /// A scope's first epoch, before anything is written there, made outside this device's writes, since its entry is
     /// one: a scope with none has nothing to read or write until it has.
     async fn first_epoch(&self, scope: &Scope) -> Result<()> {
-        if *scope != Scope::Global && self.with(|i| Ok(i.r.members.epoch(scope)))? == 0 {
+        if *scope != Scope::Global && self.with(|i| Ok(i.r.db().epoch(scope)))? == 0 {
             self.epoch_keys(scope, true).await?;
         }
         Ok(())
@@ -908,7 +909,7 @@ impl Node {
         self.read_callers_logs(caller).await?;
         self.read_log(scope).await?;
         self.with(|i| {
-            ensure!(i.r.members.may_use(&caller.user, scope) && i.r.holds(scope), "this device doesn't hold {scope} for you");
+            ensure!(i.r.db().may(&caller.user, "use", &scopes::object(scope)) && i.r.holds(scope), "this device doesn't hold {scope} for you");
             let log = scope.to_string();
             let mut previous = i.r.store.heads(&log, None)?;
             if *scope != Scope::Global {
@@ -920,7 +921,7 @@ impl Node {
                     logs.insert(hex(&author), json!({ "seq": e.seq(), "hash": e.hash().to_hex(), "next": next }));
                 }
             }
-            Ok(json!({ "epoch": i.r.members.epoch(scope), "previous": previous.iter().map(Hash::to_hex).collect::<Vec<_>>(), "logs": logs }))
+            Ok(json!({ "epoch": i.r.db().epoch(scope), "previous": previous.iter().map(Hash::to_hex).collect::<Vec<_>>(), "logs": logs }))
         })
     }
 
@@ -935,7 +936,7 @@ impl Node {
             return Err(err);
         }
         self.with(|i| {
-            ensure!(i.r.members.may_use(&caller.user, &Scope::Global), "you aren't one of this install's people");
+            ensure!(i.r.db().may(&caller.user, "use", scopes::INSTALL), "you aren't one of this install's people");
             let new: Vec<Entry> = i.r.store.scope("global")?.into_iter().filter(|e| have.get(&e.author()).is_none_or(|n| e.seq() >= *n)).collect();
             if new.is_empty() {
                 return Ok(None);
@@ -969,7 +970,7 @@ impl Node {
                 self.with(|i| i.r.check_signed(&entry))?;
                 self.check_in_scope(&entry)?;
                 self.put_entry(&scope, &entry).await?;
-                let handled = self.with(|i| i.r.receive(vec![entry.clone()]))?;
+                let handled = self.with(|i| i.r.receive(vec![entry.clone()], now_ms()))?;
                 self.after(handled).await?;
             }
             self.ping(&scope, None);
@@ -984,8 +985,8 @@ impl Node {
         }
         self.with(|i| {
             if handled.members {
-                let m = &i.r.members;
-                i.peers.retain(|peer, _| m.compute(peer).is_some() || m.service(peer).is_some());
+                let db = i.r.db();
+                i.peers.retain(|peer, _| db.compute(peer).is_some() || db.service(peer).is_some());
             }
             for log in &handled.dropped {
                 i.views.remove(log);
@@ -1049,8 +1050,8 @@ impl Node {
     async fn settle(&self) -> Result<()> {
         let _settling = self.0.settling.lock().await;
         let Ok((wanted, author)) = self.with(|i| {
-            let wanted: BTreeMap<String, String> = i.r.members.apps.values().filter(|a| !a.erased).filter_map(|a| Some((a.name.clone(), a.bundle.clone()?))).collect();
-            Ok((wanted, i.r.members.compute(&self.0.id).is_some()))
+            let wanted: BTreeMap<String, String> = i.r.db().apps().into_iter().filter(|a| !a.erased).filter_map(|a| Some((a.name, a.bundle?))).collect();
+            Ok((wanted, i.r.db().compute(&self.0.id).is_some()))
         }) else {
             return Ok(());
         };
@@ -1110,8 +1111,8 @@ impl Node {
     /// from the bucket since it woke.
     pub fn ready(&self) -> bool {
         self.with(|i| {
-            let alone = i.r.members.computes().all(|s| s.key == self.0.id);
-            Ok(i.r.members.compute(&self.0.id).is_some() && (i.read || alone))
+            let alone = i.r.db().computes().iter().all(|s| s.key == self.0.id);
+            Ok(i.r.db().compute(&self.0.id).is_some() && (i.read || alone))
         })
         .unwrap_or(false)
     }
@@ -1178,6 +1179,7 @@ fn update_views(i: &mut Install, new: &[Entry]) -> Result<()> {
             Some((pos, _)) if !rebuild => pos.clone().max(last),
             _ => last,
         };
+        i.r.scopes.set(&i.r.members, &scope, &state, now_ms())?;
         i.views.insert(log.clone(), (position, state));
     }
     Ok(())
@@ -1187,11 +1189,11 @@ fn update_views(i: &mut Install, new: &[Entry]) -> Result<()> {
 /// it's installed for (in the group or in `global`; a group whose installs this device can't see counts), and `global`
 /// if it's installed there.
 fn reachable(i: &Install, app: &str, user: &str) -> Vec<Scope> {
-    let m = &i.r.members;
+    let db = i.r.db();
     let installed = |s: &Scope| i.views.get(&s.to_string()).is_some_and(|(_, st)| st.installed.contains(app));
     let global = installed(&Scope::Global);
     let mut out = Vec::new();
-    for g in m.groups_of(user).keys() {
+    for g in db.groups_of(user).keys() {
         let s = Scope::Group(g.clone());
         if global || installed(&s) || !i.r.holds(&s) {
             out.push(s);
@@ -1207,30 +1209,29 @@ fn reachable(i: &Install, app: &str, user: &str) -> Vec<Scope> {
     out
 }
 
-fn handles(m: &Members, scopes: &[Scope], user: &str) -> Vec<ScopeHandle> {
-    scopes
-        .iter()
-        .map(|s| {
-            let name = match s {
-                Scope::Global => m.name.clone(),
-                Scope::Group(g) => m.groups.get(g).map(|g| g.name.clone()).unwrap_or_default(),
-                Scope::User(u) => m.users.get(u).map(|u| u.name.clone()).unwrap_or_default(),
-            };
-            ScopeHandle { id: s.to_string(), name, role: m.role_in(user, s) }
-        })
-        .collect()
+fn handles(db: &ScopeDb, scopes: &[Scope], user: &str) -> Vec<ScopeHandle> {
+    scopes.iter().map(|s| ScopeHandle { id: s.to_string(), name: whose(db, s), role: db.role_in(user, s) }).collect()
 }
 
-fn node_me(node: &Node, m: &Members, caller: &Caller) -> Me {
-    let name = if caller.key == node.0.id { node.device_name() } else { m.machine(&caller.key).map(|k| k.name.clone()).unwrap_or_default() };
-    let user = m.user(&caller.user);
+/// A scope's name: the install's, a group's, or a person's, removed people's too.
+fn whose(db: &ScopeDb, scope: &Scope) -> String {
+    match scope {
+        Scope::Global => db.name(),
+        Scope::Group(g) => db.group(g).map(|g| g.name).unwrap_or_default(),
+        Scope::User(u) => db.user_ever(u).map(|u| u.name).unwrap_or_default(),
+    }
+}
+
+fn node_me(node: &Node, db: &ScopeDb, caller: &Caller) -> Me {
+    let name = if caller.key == node.0.id { node.device_name() } else { db.machine(&caller.key).map(|k| k.name).unwrap_or_default() };
+    let user = db.user(&caller.user);
     Me {
         key: hex(&caller.key),
         user: caller.user.clone(),
         name,
-        role: user.map(|u| u.role),
-        user_name: user.map(|u| u.name.clone()).unwrap_or_default(),
-        handle: user.map(|u| u.handle.clone()).unwrap_or_default(),
+        role: user.as_ref().map(|u| u.role),
+        user_name: user.as_ref().map(|u| u.name.clone()).unwrap_or_default(),
+        handle: user.map(|u| u.handle).unwrap_or_default(),
         agent: caller.agent.clone(),
     }
 }
@@ -1250,9 +1251,9 @@ fn check_append(i: &Install, append: Append, scopes: &[Scope], me: &Caller, titl
             (scope, members::node("forget", json!({ "blob": blob.to_lowercase() })))
         }
         Append::Retire { app: name, how } => {
-            let m = &i.r.members;
-            let a = m.apps.get(&name).with_context(|| format!("no app named {name}"))?;
-            ensure!(m.acts_for(&me.user, &a.owner), "Only {title}'s owners can delete, restore or erase it.");
+            let db = i.r.db();
+            let a = db.app(&name).with_context(|| format!("no app named {name}"))?;
+            ensure!(db.may(&me.user, "delete", &scopes::app(&name)), "Only {title}'s owners can delete, restore or erase it.");
             let mut data = json!({ "name": name, "owner": a.owner.to_string() });
             match how.as_str() {
                 "deleted" => data["deleted"] = json!(true),
@@ -1264,37 +1265,37 @@ fn check_append(i: &Install, append: Append, scopes: &[Scope], me: &Caller, titl
             (Scope::Global, members::node("app", data))
         }
         Append::Source { app: name, link } => {
-            let m = &i.r.members;
-            let a = m.apps.get(&name).filter(|a| !a.erased).with_context(|| format!("no app named {name}"))?;
-            ensure!(m.acts_for(&me.user, &a.owner), "Only {title}'s owners can set where its code is kept.");
+            let db = i.r.db();
+            let a = db.app(&name).filter(|a| !a.erased).with_context(|| format!("no app named {name}"))?;
+            ensure!(db.may(&me.user, "deploy", &scopes::app(&name)), "Only {title}'s owners can set where its code is kept.");
             let link = members::source_link(&json!(link))?;
             (Scope::Global, members::node("app", json!({ "name": name, "owner": a.owner.to_string(), "source": link })))
         }
-        Append::Service { device, name, on } => (Scope::Global, service_entry(&i.r.members, &me.user, &device, &name, on)?),
+        Append::Service { device, name, on } => (Scope::Global, service_entry(i.r.db(), &me.user, &device, &name, on)?),
         Append::Install { .. } | Append::Cost { .. } | Append::Exec { .. } | Append::Vault { .. } => bail!("installs, costs, statements and items are written on their own"),
     })
 }
 
 /// The `service` entry that switches a part of a device's oned on or off, the device found by name or key prefix; for
 /// the device's person.
-fn service_entry(m: &Members, user: &str, device: &str, name: &str, on: bool) -> Result<Content> {
-    let mut found: Vec<&members::Machine> = m.machines.values().filter(|s| m.machine(&s.key).is_some()).filter(|s| s.name.eq_ignore_ascii_case(device) || (!device.is_empty() && hex(&s.key).starts_with(device))).collect();
+fn service_entry(db: &ScopeDb, user: &str, device: &str, name: &str, on: bool) -> Result<Content> {
+    let mut found: Vec<members::Machine> = db.machines().into_iter().filter(|s| !s.removed).filter(|s| s.name.eq_ignore_ascii_case(device) || (!device.is_empty() && hex(&s.key).starts_with(device))).collect();
     // A machine's services are named for it: by its name, it's its node.
     if found.len() > 1 {
         found.retain(|s| s.is(members::Kind::Compute));
     }
     let [s] = found.as_slice() else { bail!("no one device called {device}") };
-    ensure!(s.user == user, "only {}'s person switches what it runs", s.name);
+    ensure!(db.may(user, "switch", &scopes::device(&s.key)), "only {}'s person switches what it runs", s.name);
     Ok(members::service(&s.key, name, on))
 }
 
 /// A scope as people call it: Everyone, a person's name, or a group's.
 fn scope_name(i: &Install, scope: &str) -> String {
-    let m = &i.r.members;
+    let db = i.r.db();
     match Scope::parse(scope) {
         Ok(Scope::Global) => "Everyone".to_string(),
-        Ok(Scope::User(u)) => m.user(&u).map(|u| u.name.clone()).unwrap_or(u),
-        Ok(Scope::Group(g)) => m.groups.get(&g).map(|g| g.name.clone()).unwrap_or(g),
+        Ok(Scope::User(u)) => db.user(&u).map(|u| u.name).unwrap_or(u),
+        Ok(Scope::Group(g)) => db.group(&g).map(|g| g.name).unwrap_or(g),
         Err(_) => scope.to_string(),
     }
 }
@@ -1302,7 +1303,7 @@ fn scope_name(i: &Install, scope: &str) -> String {
 /// A `schedule` entry `user` may write in `scope`, switching a schedule of `app` there on or off.
 fn switch_entry(i: &Install, user: &str, scope: &Scope, app: &str, title: &str, schedule: &str, on: bool) -> Result<Content> {
     let name = scope_name(i, &scope.to_string());
-    ensure!(members::manages_scope(&i.r.members, user, scope), "You can't switch schedules in {name}.");
+    ensure!(i.r.db().may(user, "add-apps", &scopes::object(scope)), "You can't switch schedules in {name}.");
     ensure!(i.views.get(&scope.to_string()).is_some_and(|(_, s)| s.installed.contains(app)), "{title} isn't on {name}.");
     ensure!(i.r.holds(scope), "This device can't open {name} yet.");
     Ok(members::node("schedule", json!({ "app": app, "schedule": schedule, "on": on })))

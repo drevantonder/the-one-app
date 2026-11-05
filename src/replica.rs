@@ -1,10 +1,12 @@
-//! What one device holds and knows: the entries of each scope it holds, as the install's bucket has them, and the
-//! members `global`'s add up to. No clock or I/O: `node.rs` reads and writes the bucket.
+//! What one device holds and knows: the entries of each scope it holds, as the install's bucket has them, the
+//! members `global`'s add up to, and the scope databases built from them, which is what everything else asks. No clock
+//! or I/O: `node.rs` reads and writes the bucket, and says the time.
 
 use anyhow::{Context, Result, ensure};
 use ed25519_dalek::SigningKey;
 
 use crate::entry::{Content, Entry, Ext, Hash, Key, Scope};
+use crate::database::scopes::{ScopeDb, Scopes};
 use crate::members::{self, Members};
 use crate::store::Store;
 
@@ -16,6 +18,8 @@ pub struct Replica {
     /// The install's genesis, once this device created or joined it.
     pub root: Option<Hash>,
     pub members: Members,
+    /// The scope databases of what it holds, built again whenever the members change: what everything but replay asks.
+    pub scopes: Scopes,
     /// `global`'s node entries, in replay order.
     pub member_entries: Vec<Entry>,
     /// Whether an entry arrived that sorts before the newest of `member_entries`, so the members need replaying.
@@ -40,17 +44,23 @@ pub struct Handled {
 }
 
 impl Replica {
-    pub fn new(key: SigningKey, store: Store, root: Option<Hash>) -> Result<Replica> {
+    pub fn new(key: SigningKey, store: Store, root: Option<Hash>, now: u64) -> Result<Replica> {
         let id = key.verifying_key().to_bytes();
         let member_entries: Vec<Entry> = store.scope("global")?.into_iter().filter(members::is_member_entry).collect();
         let members = Members::replay(root, &member_entries, &store.forks()?);
-        Ok(Replica { key, id, store, root, members, member_entries, stale: false })
+        let scopes = Scopes::new(&members, now)?;
+        Ok(Replica { key, id, store, root, members, scopes, member_entries, stale: false })
     }
 
-    /// Whether this device holds `scope`: `global`, and each scope whose calls it runs (`Members::runs_for`). Until it
-    /// sees itself listed it holds only `global`.
+    /// `global`'s scope database: who's who, and who may do what.
+    pub fn db(&self) -> &ScopeDb {
+        self.scopes.global()
+    }
+
+    /// Whether this device holds `scope`: `global`, and each scope whose calls it runs. Until it sees itself listed it
+    /// holds only `global`.
     pub fn holds(&self, scope: &Scope) -> bool {
-        *scope == Scope::Global || self.members.runs_for(&self.id, scope)
+        *scope == Scope::Global || self.db().runs_for(&self.id, scope)
     }
 
     fn holds_log(&self, log: &str) -> bool {
@@ -70,19 +80,19 @@ impl Replica {
         if *scope != Scope::Global {
             previous.extend(self.store.heads("global", None)?);
         }
-        let ext = Ext { log, time: now, user: user.into(), epoch: self.members.epoch(scope), previous };
+        let ext = Ext { log, time: now, user: user.into(), epoch: self.db().epoch(scope), previous };
         Ok(Entry::create(&self.key, ext, head, content))
     }
 
     /// Keeps an entry this device made, once the bucket has it.
-    pub fn add_own(&mut self, entry: &Entry) -> Result<Handled> {
+    pub fn add_own(&mut self, entry: &Entry, now: u64) -> Result<Handled> {
         let head = self.store.own_head(&self.id, entry.log())?;
         let entry = self.store.insert_own(entry, head)?;
         let mut handled = Handled::default();
         if members::is_member_entry(&entry) {
-            let before = self.members.clone();
+            let before = self.members.cuts.clone();
             self.add_member_entry(entry.clone());
-            self.refresh(&before, &mut handled)?;
+            self.refresh(&before, &mut handled, now)?;
         }
         handled.new.push(entry);
         Ok(handled)
@@ -91,7 +101,7 @@ impl Replica {
     /// Whether an entry would count, written now: why not, if it wouldn't. A member entry only when one of its
     /// user's own devices signs it.
     pub fn check(&self, entry: &Entry) -> Result<()> {
-        let signer = self.members.machine(&entry.author()).map_or("that device".to_string(), |m| m.name.clone());
+        let signer = self.db().machine(&entry.author()).map_or("that device".to_string(), |m| m.name);
         if members::is_member_entry(entry) {
             let recovery = self.members.recovery == Some(entry.author());
             ensure!(recovery || self.members.client(&entry.author()).is_some_and(|c| c.user == entry.user()), "{signer} isn't one of your devices, so it can't sign that for you: sign it on one of yours");
@@ -129,24 +139,29 @@ impl Replica {
         self.member_entries.insert(at, entry);
     }
 
-    /// Replays the members again, deletes every scope this device no longer holds, and says what changed since `before`.
-    pub fn refresh(&mut self, before: &Members, handled: &mut Handled) -> Result<()> {
+    /// Replays the members again and builds the scope databases from them, deletes every scope this device no longer
+    /// holds, and says what changed since the members had the cuts `before`.
+    fn refresh(&mut self, before: &members::Cuts, handled: &mut Handled, now: u64) -> Result<()> {
         if std::mem::take(&mut self.stale) {
             self.members = Members::replay(self.root, &self.member_entries, &self.store.forks()?);
         }
+        let was = self.scopes.members_changed(&self.members, now)?;
         handled.members = true;
-        handled.recount |= before.cuts != self.members.cuts;
+        handled.recount |= *before != self.members.cuts;
         let logs = self.store.logs()?;
         for log in &logs {
             if !self.holds_log(log) {
                 self.store.delete(log)?;
                 handled.dropped.push(log.clone());
+                if let Ok(scope) = Scope::parse(log) {
+                    self.scopes.drop_scope(&self.members, &scope, now)?;
+                }
             }
         }
-        let (me, m) = (self.id, &self.members);
-        handled.gained |= m.scopes().iter().any(|s| m.runs_for(&me, s) && !before.runs_for(&me, s));
-        let after = m.roles();
-        for ((user, scope), (_, invited)) in before.roles() {
+        let (me, db) = (self.id, self.scopes.global());
+        handled.gained |= db.scopes().iter().any(|s| db.runs_for(&me, s) && !was.runs_for(&me, s));
+        let after = db.roles();
+        for ((user, scope), (_, invited)) in was.roles() {
             if !invited && !after.get(&(user.clone(), scope)).is_some_and(|(_, invited)| !invited) && !handled.lost.contains(&user) {
                 handled.lost.push(user);
             }
@@ -156,20 +171,20 @@ impl Replica {
 
     /// Takes entries as the bucket gives them: each checked (signature, body, chain) and kept once everything it
     /// follows is here, in scopes this device holds; `global`'s first, since they decide which other scopes it holds.
-    pub fn receive(&mut self, mut entries: Vec<Entry>) -> Result<Handled> {
+    pub fn receive(&mut self, mut entries: Vec<Entry>, now: u64) -> Result<Handled> {
         let mut handled = Handled::default();
         entries.retain(|e| self.holds_log(e.log()));
         let (global, rest): (Vec<Entry>, Vec<Entry>) = entries.into_iter().partition(|e| e.log() == "global");
-        self.took(global, &mut handled)?;
+        self.took(global, &mut handled, now)?;
         let rest = rest.into_iter().filter(|e| self.holds_log(e.log())).collect();
-        self.took(rest, &mut handled)?;
+        self.took(rest, &mut handled, now)?;
         handled.new.retain(|e| self.holds_log(e.log()));
         Ok(handled)
     }
 
     /// Keeps entries, with any that waited for them, and follows the members if they changed.
-    fn took(&mut self, entries: Vec<Entry>, handled: &mut Handled) -> Result<()> {
-        let before = self.members.clone();
+    fn took(&mut self, entries: Vec<Entry>, handled: &mut Handled, now: u64) -> Result<()> {
+        let before = self.members.cuts.clone();
         let (taken, forked) = self.store.take(entries)?;
         // A fork stops its device's entries counting from there, wherever they sort: replayed again.
         self.stale |= forked;
@@ -182,7 +197,7 @@ impl Replica {
             handled.new.push(entry);
         }
         if changed {
-            self.refresh(&before, handled)?;
+            self.refresh(&before, handled, now)?;
         }
         Ok(())
     }

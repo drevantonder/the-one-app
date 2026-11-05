@@ -48,7 +48,7 @@ impl Problem {
 /// or a scope this device holds with changes that have waited a day for it, whoever should have backed them up.
 /// Both end by themselves once a run works.
 fn problems(i: &Install, now: u64) -> Result<Vec<Problem>> {
-    let m = &i.r.members;
+    let m = i.r.db();
     let status = i.status.get("global").cloned().unwrap_or_default();
     let name = |k: &Key| m.machine(k).map(|s| s.name.clone()).unwrap_or_else(|| short(k));
     let mut out = Vec::new();
@@ -163,15 +163,15 @@ fn place_hash(fields: &BTreeMap<String, String>) -> String {
 }
 
 /// The S3 places `PINNED` names: id → hash.
-fn pinned(m: &Members) -> BTreeMap<String, String> {
-    m.settings.get(PINNED).and_then(|v| serde_json::from_str(v).ok()).unwrap_or_default()
+fn pinned(m: &ScopeDb) -> BTreeMap<String, String> {
+    m.setting(PINNED).and_then(|v| serde_json::from_str(&v).ok()).unwrap_or_default()
 }
 
 /// What a place's item says, read from global's items. A folder's item names only its device: where the folder is
 /// comes from that device's own file (`Install::folders`), never from an item, which anyone may write. An S3 place
 /// counts only as `PINNED` names it.
 fn places(i: &Install) -> Vec<PlaceItem> {
-    let pinned = pinned(&i.r.members);
+    let pinned = pinned(i.r.db());
     i.vault
         .iter()
         .filter(|(_, it)| it.apps.contains(members::APP) && it.kind == b::KIND)
@@ -201,9 +201,10 @@ fn places(i: &Install) -> Vec<PlaceItem> {
 
 /// The devices that back up a scope to an S3 place, in the order they take it: those that run its calls, in an order
 /// the place and scope pick. Every device works it out alike.
-fn line(m: &Members, scope: &Scope, place: &str) -> Vec<Key> {
+fn line(m: &ScopeDb, scope: &Scope, place: &str) -> Vec<Key> {
     let mut devices: Vec<([u8; 32], Key)> = m
         .computes()
+        .into_iter()
         .filter(|s| m.runs_for(&s.key, scope))
         .map(|s| {
             let mut h = blake3::Hasher::new();
@@ -253,8 +254,8 @@ impl Node {
         let now = now_ms();
         let me = self.0.id;
         let (due, admins, push) = self.with(|i| {
-            let m = &i.r.members;
-            let push = crate::state::settings(m).remove("push").and_then(|v| v.as_str().map(str::to_string)).unwrap_or_default();
+            let m = i.r.db();
+            let push = crate::state::settings(&m.settings()).remove("push").and_then(|v| v.as_str().map(str::to_string)).unwrap_or_default();
             if push.is_empty() || !i.views.contains_key("global") {
                 return Ok((Vec::new(), Vec::new(), push));
             }
@@ -263,7 +264,7 @@ impl Node {
                 .into_iter()
                 .filter(|p| p.push.is_some_and(|t| now >= t + at * STAGGER) && i.status.get("global").and_then(|s| s.alerted.get(&p.place)).is_none_or(|t| *t < p.since))
                 .collect();
-            let admins: Vec<String> = m.users.values().filter(|u| !u.removed && m.is_admin(&u.id)).map(|u| u.id.clone()).collect();
+            let admins: Vec<String> = m.users().into_iter().filter(|u| !u.removed && m.may(&u.id, "change-settings", scopes::INSTALL)).map(|u| u.id).collect();
             Ok((due, admins, push))
         })?;
         for p in due {
@@ -295,7 +296,7 @@ impl Node {
 
     /// The first of the backups' problems, for the badge on Settings: only an admin's to see.
     pub(super) fn backup_problem(&self, i: &Install, user: &str) -> Option<Value> {
-        if !i.r.members.is_admin(user) {
+        if !i.r.db().may(user, "change-settings", scopes::INSTALL) {
             return None;
         }
         problems(i, now_ms()).ok()?.into_iter().min_by_key(|p| p.since).map(|p| p.json())
@@ -314,12 +315,12 @@ impl Node {
         let me = self.0.id;
         let keys = self.held_keys().await;
         let (install, plan) = self.with(|i| {
-            let m = &i.r.members;
+            let m = i.r.db();
             if !i.views.contains_key("global") {
                 return Ok((String::new(), Vec::new()));
             }
             let install = i.r.root.map(|r| r.to_hex()[..16].to_string()).context("no install")?;
-            m.recovery.context("the install has no recovery key")?;
+            m.recovery().context("the install has no recovery key")?;
             let frontier = i.r.store.frontier()?;
             let cache = self.0.backed.lock().unwrap();
             let failed = self.0.backup_failed.lock().unwrap();
@@ -441,7 +442,7 @@ impl Node {
 
     /// Every epoch's key of each scope this device holds, by its name, of those it opens.
     async fn held_epochs(&self) -> BTreeMap<String, crate::db::Keys> {
-        let scopes = self.with(|i| Ok(i.r.members.scopes().into_iter().filter(|s| i.r.holds(s)).collect::<Vec<_>>())).unwrap_or_default();
+        let scopes = self.with(|i| Ok(i.r.db().scopes().into_iter().filter(|s| i.r.holds(s)).collect::<Vec<_>>())).unwrap_or_default();
         let mut out = BTreeMap::new();
         for scope in scopes {
             match self.epoch_keys(&scope, false).await {
@@ -509,7 +510,7 @@ impl Node {
     /// Backups as a person sees them: each place, how its last run went, the recent snapshots, and the disks here.
     pub fn backups(&self) -> Result<Value> {
         self.with(|i| {
-            let m = &i.r.members;
+            let m = i.r.db();
             let name = |k: &Key| m.machine(k).map(|s| s.name.clone()).unwrap_or_else(|| short(k));
             let runs = i.status.get("global").map(|s| s.backups.clone()).unwrap_or_default();
             let checks = i.status.get("global").map(|s| s.checks.clone()).unwrap_or_default();
@@ -567,7 +568,7 @@ impl Node {
     /// Everyone and backs up to it now. → each step tried, and the item's id if it was kept.
     pub async fn add_place(&self, caller: &Caller, body: &Value) -> Result<Value> {
         self.with(|i| {
-            ensure!(members::manages_scope(&i.r.members, &caller.user, &Scope::Global), "only admins add places to back up to");
+            ensure!(i.r.db().may(&caller.user, "change-settings", scopes::INSTALL), "only admins add places to back up to");
             Ok(())
         })?;
         let text = |k: &str| body[k].as_str().map(str::trim).filter(|v| !v.is_empty()).map(str::to_string);
@@ -631,7 +632,7 @@ impl Node {
         ensure!(known, "That place was already removed: there's no place {id}");
         self.set_item(caller, &Scope::Global, json!({ "id": id, "deleted": true })).await?;
         self.keep_folder(id, None)?;
-        if self.with(|i| Ok(pinned(&i.r.members).contains_key(id)))? {
+        if self.with(|i| Ok(pinned(i.r.db()).contains_key(id)))? {
             self.pin_place(caller, id, None).await?;
         }
         Ok(())
@@ -641,9 +642,9 @@ impl Node {
     /// its details as they are now are the ones it names, so changing its key in the Vault keeps backups going.
     pub(super) async fn repin_place(&self, caller: &Caller, id: &str) -> Result<()> {
         let fields = self.with(|i| {
-            let m = &i.r.members;
+            let m = i.r.db();
             let pinned = pinned(m);
-            let stale = pinned.get(id).zip(i.vault.get(id)).filter(|(h, it)| m.is_admin(&caller.user) && !it.fields.contains_key("device") && **h != item_hash(it));
+            let stale = pinned.get(id).zip(i.vault.get(id)).filter(|(h, it)| m.may(&caller.user, "change-settings", scopes::INSTALL) && !it.fields.contains_key("device") && **h != item_hash(it));
             Ok(stale.map(|(_, it)| it.fields.iter().map(|(n, f)| (n.clone(), f.value.clone())).collect::<BTreeMap<_, _>>()))
         })?;
         match fields {
@@ -654,7 +655,7 @@ impl Node {
 
     /// Names an S3 place the install backs up to in `PINNED` (or with `None`, stops naming it), for an admin.
     pub(super) async fn pin_place(&self, caller: &Caller, id: &str, fields: Option<&BTreeMap<String, String>>) -> Result<()> {
-        let mut now = self.with(|i| Ok(pinned(&i.r.members)))?;
+        let mut now = self.with(|i| Ok(pinned(i.r.db())))?;
         match fields {
             Some(fields) => drop(now.insert(id.to_string(), place_hash(fields))),
             None => drop(now.remove(id)),
@@ -672,7 +673,7 @@ impl Node {
         }
         let me = self.0.id;
         let due: Vec<String> = self.with(|i| {
-            let m = &i.r.members;
+            let m = i.r.db();
             let Some(status) = i.status.get("global") else { return Ok(Vec::new()) };
             Ok(places(i)
                 .into_iter()
@@ -780,7 +781,7 @@ impl Node {
             ("GET", "/v1/backups") => self.backups()?,
             ("POST", "/v1/backups/now") => {
                 self.with(|i| {
-                    ensure!(i.r.members.may_use(&me.user, &Scope::Global), "You aren't a member here, so you can't back up.");
+                    ensure!(i.r.db().may(&me.user, "use", &scopes::object(&Scope::Global)), "You aren't a member here, so you can't back up.");
                     Ok(())
                 })?;
                 self.back_up_now();

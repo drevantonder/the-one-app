@@ -37,9 +37,9 @@ impl Node {
     /// sealed to it in the bucket whose public half is the one its `vault` entry names. None if it isn't granted.
     pub(super) async fn vault_secrets(&self, scope: &Scope) -> Result<Option<BTreeMap<u32, [u8; 32]>>> {
         let publics: Vec<(u32, [u8; 32])> = self.with(|i| {
-            let m = &i.r.members;
+            let m = i.r.db();
             Ok(match m.opens_vault(&self.0.id, scope) {
-                true => m.vault_publics.iter().filter(|((s, _), _)| s == scope).map(|((_, n), p)| (*n, *p)).collect(),
+                true => m.vault_publics(scope).into_iter().collect(),
                 false => Vec::new(),
             })
         })?;
@@ -74,8 +74,8 @@ impl Node {
         ensure!(me.user == self.user()?, "{} grants only for its own person", self.device_name());
         let endpoint = self.find_device(device)?;
         let (mine, may, current, recovery) = self.with(|i| {
-            let m = &i.r.members;
-            Ok((m.client(&self.0.id).is_some(), m.grants_in(&i.user, scope), m.vaults.get(scope).cloned().unwrap_or_default(), m.recovery))
+            let m = i.r.db();
+            Ok((m.client(&self.0.id).is_some(), m.may(&i.user, "keep", &scopes::object(&scope)), m.vault(scope).unwrap_or_default(), m.recovery()))
         })?;
         ensure!(mine, "{} isn't one of its person's own devices, which are what grant", self.device_name());
         ensure!(may, "only {scope}'s person, or its admins, say which machines open its Vault");
@@ -103,9 +103,9 @@ impl Node {
         let secret: [u8; 32] = rand::random();
         let public = crate::kernel::public_of(&secret);
         self.append(&Scope::Global, members::vault(scope, n, &public, to)).await?;
-        ensure!(self.with(|i| Ok(i.r.members.vault_publics.get(&(scope.clone(), n)) == Some(&public)))?, "another device made {scope}'s Vault key {n} just now");
+        ensure!(self.with(|i| Ok(i.r.db().vault_publics(scope).get(&n) == Some(&public)))?, "another device made {scope}'s Vault key {n} just now");
         let (bucket, name) = (self.bucket()?, scope.to_string());
-        let seals: Vec<(String, [u8; 32])> = self.with(|i| Ok(to.iter().filter_map(|k| i.r.members.seal_key(k).map(|s| (hex(k), s))).collect()))?;
+        let seals: Vec<(String, [u8; 32])> = self.with(|i| Ok(to.iter().filter_map(|k| i.r.db().seal_key(k).map(|s| (hex(k), s))).collect()))?;
         for (at, seal) in std::iter::once(("recovery".to_string(), crate::kernel::twin_public(recovery)?)).chain(seals) {
             crate::db::created(&bucket, &crate::keys::vault_key_name(&name, n, &at), &crate::kernel::seal_to(&seal, &secret)?).await?;
         }
@@ -139,16 +139,16 @@ impl Node {
     /// The scopes `user` may use that this device holds: where an agent's request and a service's are filled from.
     fn usable_scopes(&self, user: &str) -> Result<Vec<Scope>> {
         self.with(|i| {
-            let m = &i.r.members;
-            Ok(m.scopes().into_iter().filter(|s| i.r.holds(s) && m.may_use(user, s)).collect())
+            let m = i.r.db();
+            Ok(m.scopes().into_iter().filter(|s| i.r.holds(s) && m.may(user, "use", &scopes::object(s))).collect())
         })
     }
 
     /// The scopes this device holds whose Vault `viewer` manages (or just `scope`).
     fn managed_scopes(&self, viewer: &Caller, scope: Option<&Scope>) -> Result<Vec<Scope>> {
         self.with(|i| {
-            let m = &i.r.members;
-            Ok(m.scopes().into_iter().filter(|s| i.r.holds(s) && scope.is_none_or(|w| w == s) && members::manages_scope(m, &viewer.user, s)).collect())
+            let m = i.r.db();
+            Ok(m.scopes().into_iter().filter(|s| i.r.holds(s) && scope.is_none_or(|w| w == s) && m.may(&viewer.user, "add-apps", &scopes::object(&s))).collect())
         })
     }
 
@@ -169,7 +169,7 @@ impl Node {
     async fn refresh_own_items(&self) {
         let read = async {
             let me = self.own_caller()?;
-            ensure!(self.with(|i| Ok(i.r.holds(&Scope::Global) && i.r.members.may_use(&me.user, &Scope::Global)))?, "this device doesn't open global");
+            ensure!(self.with(|i| Ok(i.r.holds(&Scope::Global) && i.r.db().may(&me.user, "use", &scopes::object(&Scope::Global))))?, "this device doesn't open global");
             self.items(&me, &Scope::Global).await
         };
         let items = match read.await {
@@ -191,7 +191,7 @@ impl Node {
     /// Whether `host` is the name of an app or service, which an item's hosts name to let its fields into calls to
     /// that service: never a site's, so a web request to it gets none.
     pub fn names_app(&self, host: &str) -> bool {
-        self.0.built_in_services.iter().any(|n| n.name == host) || self.0.services.has(host) || self.with(|i| Ok(i.r.members.apps.contains_key(host) || i.r.members.services.keys().any(|(_, name)| name == host))).unwrap_or(false)
+        self.0.built_in_services.iter().any(|n| n.name == host) || self.0.services.has(host) || self.with(|i| Ok(i.r.db().app(host).is_some() || i.r.db().switches().keys().any(|(_, name)| name == host))).unwrap_or(false)
     }
 
     /// Fills `text` for a service's call while it waits for the service's answer, as its app's requests are filled: from
@@ -292,14 +292,14 @@ impl Node {
         let needs = self.vault_needs(viewer).await?;
         let all = self.items_of(viewer, &self.managed_scopes(viewer, scope)?).await?;
         let listed = self.with(|i| {
-            let m = &i.r.members;
-            let name = |u: &str| m.users.get(u).map(|u| u.name.clone()).unwrap_or_default();
+            let m = i.r.db();
+            let name = |u: &str| m.user_ever(u).map(|u| u.name).unwrap_or_default();
             let mut out = Vec::new();
             for (s, items) in &all {
                 let log = s.to_string();
                 let scope_name = handles(m, std::slice::from_ref(s), &viewer.user).remove(0).name;
                 for (id, it) in items {
-                    let apps: Vec<&String> = it.apps.iter().filter(|a| !m.apps.get(*a).is_some_and(|a| a.erased)).collect();
+                    let apps: Vec<&String> = it.apps.iter().filter(|a| !m.app(*a).is_some_and(|a| a.erased)).collect();
                     let has = |fields: &[String]| fields.iter().all(|f| it.fields.contains_key(f));
                     let wanted: Vec<&String> = needs.iter().filter(|(_, _, fields, _)| has(fields)).map(|(app, ..)| app).collect();
                     // An account: what a sign-in made, by an app that asks for accounts with those fields.
@@ -353,12 +353,12 @@ impl Node {
     /// set last; only someone who manages the scope's Vault changes another's, and never to switch on an erased app.
     async fn write_item(&self, me: &Caller, scope: &Scope, mut change: impl FnMut(&Items) -> Result<Value>) -> Result<String> {
         let (erased, manages, public, machines) = self.with(|i| {
-            let m = &i.r.members;
-            ensure!(m.may_use(&me.user, scope), "You don’t use {}.", scope_name(i, &scope.to_string()));
+            let m = i.r.db();
+            ensure!(m.may(&me.user, "use", &scopes::object(scope)), "You don’t use {}.", scope_name(i, &scope.to_string()));
             ensure!(i.r.holds(scope), "This device can’t open {} yet.", scope_name(i, &scope.to_string()));
-            let v = m.vaults.get(scope);
-            let machines: Vec<String> = v.map(|v| v.to.iter().filter(|k| m.machine(k).is_some()).map(|k| m.machines[k].name.clone()).collect()).unwrap_or_default();
-            Ok((m.apps.iter().filter(|(_, a)| a.erased).map(|(n, _)| n.clone()).collect::<BTreeSet<String>>(), members::manages_scope(m, &me.user, scope), v.map(|v| (v.n, v.public)), machines.join(", ")))
+            let v = m.vault(scope);
+            let machines: Vec<String> = v.as_ref().map(|v| v.to.iter().filter_map(|k| m.machine(k)).map(|d| d.name).collect()).unwrap_or_default();
+            Ok((m.apps().into_iter().filter(|a| a.erased).map(|a| a.name).collect::<BTreeSet<String>>(), m.may(&me.user, "add-apps", &scopes::object(&scope)), v.map(|v| (v.n, v.public)), machines.join(", ")))
         })?;
         let keys = self.vault_secrets(scope).await?;
         let scope_said = self.with(|i| Ok(scope_name(i, &scope.to_string())))?;
@@ -481,7 +481,7 @@ impl Node {
             Some(need) if app != crate::agents::NAME && app != members::APP => self.0.apps.describe(app).await.ok().map(|d| d["vault"][need].clone()).filter(|d| d["shared"] == true),
             _ => None,
         };
-        let manages = |scope: &Scope| self.with(|i| Ok(members::manages_scope(&i.r.members, &caller.user, scope)));
+        let manages = |scope: &Scope| self.with(|i| Ok(i.r.db().may(&caller.user, "add-apps", &scopes::object(&scope))));
         let scope = match &shared {
             Some(d) if !manages(&Scope::Global)? => bail!("Ask {} to set up {}: only an admin can, once for everyone", self.admin_names()?, d["title"].as_str().unwrap_or("this")),
             Some(_) => &Scope::Global,
@@ -524,14 +524,14 @@ impl Node {
         }
         data["agent"] = json!(caller.agent);
         self.with(|i| {
-            ensure!(members::manages_scope(&i.r.members, &caller.user, scope), "Only its admins change {}’s Vault.", scope_name(i, &scope.to_string()));
-            ensure!(i.r.members.apps.get(app).is_some_and(|a| !a.erased) || app == members::APP || app == crate::agents::NAME, "no app named {app}");
+            ensure!(i.r.db().may(&caller.user, "add-apps", &scopes::object(&scope)), "Only its admins change {}’s Vault.", scope_name(i, &scope.to_string()));
+            ensure!(i.r.db().app(app).is_some_and(|a| !a.erased) || app == members::APP || app == crate::agents::NAME, "no app named {app}");
             Ok(())
         })?;
         self.append_as(scope, &caller.user, members::node("vault-request", data)).await?;
         // At the install's address (where its kernel signs people in) the web client opens it in any browser; an
         // install without one has only its apps to.
-        let web = self.with(|i| Ok(crate::state::settings(&i.r.members).remove("address")))?;
+        let web = self.with(|i| Ok(crate::state::settings(&i.r.db().settings()).remove("address")))?;
         let link = match web.as_ref().and_then(Value::as_str).filter(|w| w.starts_with("https://") || w.starts_with("http://")) {
             Some(web) => format!("{}/vault?id={id}&scope={scope}", web.trim_end_matches('/')),
             None => format!("{}://vault?id={id}&scope={scope}", crate::config::CLI),
@@ -541,7 +541,7 @@ impl Node {
 
     /// The install's admins' names, as someone asks them: "Andre", "Andre or Sam", "Andre, Sam or Kim".
     fn admin_names(&self) -> Result<String> {
-        let mut names = self.with(|i| Ok(i.r.members.users.iter().filter(|(id, _)| i.r.members.is_admin(id)).map(|(_, u)| u.name.clone()).collect::<Vec<_>>()))?;
+        let mut names = self.with(|i| Ok(i.r.db().users().into_iter().filter(|u| !u.removed && i.r.db().may(&u.id, "change-settings", scopes::INSTALL)).map(|u| u.name).collect::<Vec<_>>()))?;
         names.sort();
         Ok(match names.split_last() {
             None => "an admin".to_string(),
@@ -560,7 +560,7 @@ impl Node {
         if d["shared"] != true || d["type"].as_str().is_none_or(str::is_empty) {
             return out;
         }
-        let added: Vec<String> = self.with(|i| Ok(i.r.members.apps.iter().filter(|(n, a)| !a.erased && n.as_str() != app).map(|(n, _)| n.clone()).collect())).unwrap_or_default();
+        let added: Vec<String> = self.with(|i| Ok(i.r.db().apps().into_iter().filter(|a| !a.erased && a.name != app).map(|a| a.name).collect())).unwrap_or_default();
         for other in added {
             if let Ok(o) = self.0.apps.describe(&other).await {
                 if o["vault"].as_object().is_some_and(|v| v.values().any(|n| n["shared"] == true && n["type"] == d["type"])) {
@@ -590,7 +590,7 @@ impl Node {
             let r = state.requests.get(id).with_context(|| format!("no request {id} in {scope}"))?;
             ensure!(r.answer.is_none(), "that request was already answered");
             ensure!(now_ms().saturating_sub(r.time) <= REQUEST_LIFE, "that request has expired: ask for it again");
-            ensure!(members::manages_scope(&i.r.members, &caller.user, scope), "Only its admins change {}’s Vault.", scope_name(i, &scope.to_string()));
+            ensure!(i.r.db().may(&caller.user, "add-apps", &scopes::object(&scope)), "Only its admins change {}’s Vault.", scope_name(i, &scope.to_string()));
             Ok(r.clone())
         })?;
         if answer["declined"] == true {
@@ -650,8 +650,8 @@ impl Node {
         let asked: Vec<Scope> = self.with(|i| Ok(managed.into_iter().filter(|s| i.views.get(&s.to_string()).is_some_and(|(_, st)| st.requests.keys().any(wanted))).collect()))?;
         let all = self.items_of(viewer, &asked).await?;
         self.with(|i| {
-            let m = &i.r.members;
-            let name = |u: &str| m.users.get(u).map(|u| u.name.clone()).unwrap_or_default();
+            let m = i.r.db();
+            let name = |u: &str| m.user_ever(u).map(|u| u.name).unwrap_or_default();
             let mut out = Vec::new();
             for (s, items) in &all {
                 let (log, scope_name) = (s.to_string(), handles(m, std::slice::from_ref(s), &viewer.user).remove(0).name);

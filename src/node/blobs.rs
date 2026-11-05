@@ -308,8 +308,8 @@ impl Node {
     }
 
     pub(super) fn blob_named_for(&self, hash: &str, user: &str) -> Result<bool> {
-        let m = self.with(|i| Ok(i.r.members.clone()))?;
-        self.blob_named(hash, |s| m.may_use(user, s))
+        let usable: Vec<Scope> = self.with(|i| Ok(i.r.db().scopes().into_iter().filter(|s| i.r.db().may(user, "use", &scopes::object(s))).collect()))?;
+        self.blob_named(hash, |s| usable.contains(s))
     }
 }
 

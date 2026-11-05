@@ -123,7 +123,7 @@ impl Node {
             return;
         }
         self.tell_removed();
-        let wanted = self.with(|i| Ok(i.r.members.compute(&self.0.id).and(i.r.members.settings.get("address").cloned()))).ok().flatten();
+        let wanted = self.with(|i| Ok(i.r.db().compute(&self.0.id).and(i.r.db().setting("address")))).ok().flatten();
         let mut task = self.0.net.task.lock().unwrap();
         if task.as_ref().map(|(a, _)| a) == wanted.as_ref() {
             return;
@@ -517,16 +517,16 @@ impl Node {
     }
 
     fn is_device(&self, key: &Key) -> bool {
-        self.with(|i| Ok(i.r.members.compute(key).is_some())).unwrap_or(false)
+        self.with(|i| Ok(i.r.db().compute(key).is_some())).unwrap_or(false)
     }
 
     pub(super) fn is_service(&self, key: &Key) -> bool {
-        self.with(|i| Ok(i.r.members.service(key).is_some())).unwrap_or(false)
+        self.with(|i| Ok(i.r.db().service(key).is_some())).unwrap_or(false)
     }
 
     /// Whether `key` is the install's serverless node's endpoint, as `serverless deploy` set it.
     fn is_serverless(&self, key: &Key) -> bool {
-        self.with(|i| Ok(i.r.members.settings.get("serverless").is_some_and(|k| *k == hex(key)))).unwrap_or(false)
+        self.with(|i| Ok(i.r.db().setting("serverless").is_some_and(|k| k == hex(key)))).unwrap_or(false)
     }
 
     /// Closes the connections of devices the install no longer lists: client devices' to the local API, and those
@@ -535,9 +535,9 @@ impl Node {
         let (clients, held): (Vec<Key>, Vec<Key>) = (self.0.net.clients.lock().unwrap().keys().copied().collect(), self.0.net.conns.lock().unwrap().keys().copied().collect());
         let (gone_clients, gone_held): (Vec<Key>, Vec<Key>) = self
             .with(|i| {
-                let m = &i.r.members;
+                let m = i.r.db();
                 // A session's endpoint, listed nowhere, is cut off at its next request instead.
-                Ok((clients.into_iter().filter(|k| m.machines.contains_key(k) && m.client(k).is_none()).collect(), held.into_iter().filter(|k| m.compute(k).is_none() && m.service(k).is_none() && m.settings.get("serverless").is_none_or(|s| *s != hex(k))).collect()))
+                Ok((clients.into_iter().filter(|k| m.machine_ever(k).is_some() && m.client(k).is_none()).collect(), held.into_iter().filter(|k| m.compute(k).is_none() && m.service(k).is_none() && m.setting("serverless").is_none_or(|s| s != hex(k))).collect()))
             })
             .unwrap_or_default();
         for key in gone_clients {
@@ -643,7 +643,8 @@ impl Node {
         let (entries, depths): (Vec<Entry>, Value) = self.with(|i| {
             let all = i.r.store.scope("global")?;
             let depth: std::collections::HashMap<_, _> = all.iter().map(|e| (e.hash(), e.depth)).collect();
-            let entries: Vec<Entry> = all.into_iter().filter(|e| members::is_member_entry(e) && i.r.members.machines.contains_key(&e.author())).collect();
+            let listed: std::collections::HashSet<Key> = i.r.db().machines().iter().map(|d| d.key).collect();
+            let entries: Vec<Entry> = all.into_iter().filter(|e| members::is_member_entry(e) && listed.contains(&e.author())).collect();
             // It sees only those, so it orders them by how deep the entries they follow, which it isn't sent, are.
             let sent: std::collections::HashSet<_> = entries.iter().map(Entry::hash).collect();
             let mut depths = serde_json::Map::new();
@@ -722,9 +723,9 @@ impl Node {
     /// in only its list, which nothing on it can read the install's log for.
     fn tell_removed(&self) {
         let Ok(removed) = self.with(|i| {
-            let m = &i.r.members;
-            let mine = m.machine(&self.0.id).is_some_and(|me| m.is_admin(&me.user));
-            Ok(if mine { m.machines.keys().filter(|k| m.machine(k).is_none()).copied().collect::<Vec<Key>>() } else { Vec::new() })
+            let m = i.r.db();
+            let mine = m.machine(&self.0.id).is_some_and(|me| m.may(&me.user, "invite", scopes::INSTALL));
+            Ok(if mine { m.machines().into_iter().filter(|d| d.removed).map(|d| d.key).collect::<Vec<Key>>() } else { Vec::new() })
         }) else {
             return;
         };
@@ -739,7 +740,7 @@ impl Node {
     /// Tells the relay at the install's address something, signed by this device: a device it admitted (`add`), or a
     /// pairing code it made (`pairing`, the hash of its ticket, and `until`). Tried a few times, in the background.
     pub(super) fn tell_relay(&self, fields: Value) {
-        let Some(address) = self.with(|i| Ok(i.r.members.settings.get("address").cloned())).ok().flatten() else {
+        let Some(address) = self.with(|i| Ok(i.r.db().setting("address"))).ok().flatten() else {
             return tracing::debug!("telling the relay: your One App has no address yet");
         };
         let key = ed25519_dalek::SigningKey::from_bytes(self.0.key.as_bytes());

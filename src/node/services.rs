@@ -39,15 +39,15 @@ impl Node {
     pub async fn set_service(&self, caller: &Caller, device: Option<&str>, name: &str, on: bool) -> Result<()> {
         ensure!(device.is_some() || caller.key == self.0.id, "say which device");
         let device = device.map(str::to_string).unwrap_or_else(|| self.device_name());
-        let content = self.with(|i| service_entry(&i.r.members, &caller.user, &device, name, on))?;
+        let content = self.with(|i| service_entry(i.r.db(), &caller.user, &device, name, on))?;
         self.member_content(caller, content).await?;
         self.say_hello();
         Ok(())
     }
 
     /// Whether a part of this device is switched off, by its latest `service` entry.
-    pub(super) fn off(m: &crate::members::Members, device: &Key, name: &str) -> bool {
-        m.services.get(&(*device, name.to_string())).is_some_and(|s| !s.on)
+    pub(super) fn off(m: &ScopeDb, device: &Key, name: &str) -> bool {
+        m.switch(device, name).is_some_and(|s| !s.on)
     }
 
     /// The install this device's parts are in, and those switched on here, each with when it was: switched on again
@@ -56,7 +56,7 @@ impl Node {
         let address = self.address()?;
         self.with(|i| {
             let root = i.r.root.context("this device isn't in your One App yet")?.to_hex();
-            let on = i.r.members.services.iter().filter(|((k, _), s)| *k == self.0.id && s.on).map(|((_, name), s)| (name.clone(), s.time)).collect();
+            let on = i.r.db().switches().into_iter().filter(|((k, _), s)| *k == self.0.id && s.on).map(|((_, name), s)| (name, s.time)).collect();
             Ok((crate::service::Install { address: address.clone(), root, user: i.user.clone() }, on))
         })
     }
@@ -69,7 +69,7 @@ impl Node {
 
     /// Says hello to this device's part `name`, a service endpoint of its own, which answers once it's up.
     pub async fn hello_part(&self, name: &str) {
-        let keys: Vec<Key> = self.with(|i| Ok(i.r.members.offering(name).filter(|s| s.device == Some(self.0.id)).map(|s| s.key).collect())).unwrap_or_default();
+        let keys: Vec<Key> = self.with(|i| Ok(i.r.db().offering(name).into_iter().filter(|s| s.device == Some(self.0.id)).map(|s| s.key).collect())).unwrap_or_default();
         for key in keys {
             let _ = tokio::time::timeout(Duration::from_secs(3), self.hello_service_now(&key)).await;
         }
@@ -77,19 +77,19 @@ impl Node {
 
     /// Whether this device's part `name`, a service endpoint of its own, has answered it since `since`.
     pub fn part_up(&self, name: &str, since: Instant) -> bool {
-        self.with(|i| Ok(i.r.members.offering(name).any(|s| s.device == Some(self.0.id) && i.peers.get(&s.key).is_some_and(|p| p.seen >= since)))).unwrap_or(false)
+        self.with(|i| Ok(i.r.db().offering(name).into_iter().any(|s| s.device == Some(self.0.id) && i.peers.get(&s.key).is_some_and(|p| p.seen >= since)))).unwrap_or(false)
     }
 
     /// Whether this device runs apps' calls: unless its person switched its app service off.
     pub fn runs_apps(&self) -> bool {
-        self.with(|i| Ok(!Self::off(&i.r.members, &self.0.id, crate::members::APPS_PART))).unwrap_or(true)
+        self.with(|i| Ok(!Self::off(i.r.db(), &self.0.id, crate::members::APPS_PART))).unwrap_or(true)
     }
 
     /// The services serving on this device, whom each serves, and what each says it is: those built into the node,
     /// then those registered. One its person switched off here isn't served.
     pub(super) fn services_here(&self, i: &Install) -> Vec<Service> {
-        let m = &i.r.members;
-        let everyone: Vec<String> = m.users.keys().filter(|u| m.serves(&self.0.id, u)).cloned().collect();
+        let m = i.r.db();
+        let everyone: Vec<String> = m.users().into_iter().map(|u| u.id).filter(|u| m.serves(&self.0.id, u)).collect();
         let removed = |name: &str| Self::off(m, &self.0.id, name);
         let built_in = |n: &crate::services::BuiltIn| {
             let mut d = (n.describe)();
@@ -111,7 +111,7 @@ impl Node {
     /// it isn't simply on or off, what it's doing (`doing`) or what went wrong (`problem`), and its title if it gives
     /// one. Devices that don't say this run only what they list as serving.
     pub(super) fn parts_here(&self, i: &Install) -> Vec<Value> {
-        let m = &i.r.members;
+        let m = i.r.db();
         let on = |name: &str| !Self::off(m, &self.0.id, name);
         let mut out: BTreeMap<String, Value> = BTreeMap::new();
         out.insert(members::APPS_PART.into(), json!({ "name": members::APPS_PART, "on": on(members::APPS_PART) }));
@@ -125,7 +125,7 @@ impl Node {
             out.insert(name.clone(), json!({ "name": name, "title": d["title"], "on": on(&name) }));
         }
         // A process of oned's is on only by its entry: with none, it's off.
-        let switched = |name: &str| m.services.get(&(self.0.id, name.to_string())).is_some_and(|s| s.on);
+        let switched = |name: &str| m.switch(&self.0.id, name).is_some_and(|s| s.on);
         let (processes, now) = crate::oned::parts();
         for name in &processes {
             let title = crate::services::hosted().iter().find(|h| h.name == name.as_str()).map(|h| (h.describe)()["title"].clone()).unwrap_or(Value::Null);
@@ -164,7 +164,7 @@ impl Node {
     /// Why a service isn't served here, if its person switched it off.
     pub(super) fn removed_here(&self, name: &str) -> Option<String> {
         self.with(|i| {
-            let m = &i.r.members;
+            let m = i.r.db();
             Ok(Self::off(m, &self.0.id, name).then(|| format!("{} is switched off on {}; its person switches it on in Settings › Devices", self.service_title(name), self.device_name())))
         })
         .ok()

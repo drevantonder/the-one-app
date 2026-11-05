@@ -8,7 +8,7 @@ impl Node {
     pub(super) async fn read_logs(&self) -> Result<()> {
         loop {
             let scopes = self.with(|i| {
-                let mut scopes: Vec<Scope> = i.r.members.scopes().into_iter().filter(|s| i.r.holds(s)).collect();
+                let mut scopes: Vec<Scope> = i.r.db().scopes().into_iter().filter(|s| i.r.holds(s)).collect();
                 scopes.sort_by_key(|s| *s != Scope::Global);
                 Ok(scopes)
             })?;
@@ -45,7 +45,7 @@ impl Node {
     /// it, passed over as junk: an epoch's entry is always written before anything is sealed under it.
     pub(super) async fn read_log_now(&self, scope: &Scope) -> Result<bool> {
         let log = scope.to_string();
-        let (genesis, epoch) = self.with(|i| Ok((!i.r.members.users.is_empty(), i.r.members.epoch(scope))))?;
+        let (genesis, epoch) = self.with(|i| Ok((!i.r.db().users().is_empty(), i.r.db().epoch(scope))))?;
         if *scope != Scope::Global && epoch == 0 {
             return Ok(false);
         }
@@ -71,7 +71,7 @@ impl Node {
             let at = read.at;
             if at > from {
                 let handled = self.with(|i| {
-                    let handled = i.r.receive(read.entries)?;
+                    let handled = i.r.receive(read.entries, now_ms())?;
                     i.r.store.set_position(&log, at, read.floor)?;
                     Ok(handled)
                 })?;
@@ -85,7 +85,7 @@ impl Node {
             if *scope != Scope::Global {
                 Box::pin(self.read_log_now(&Scope::Global)).await?;
             }
-            if self.with(|i| Ok(i.r.members.epoch(scope)))? >= ahead.epoch {
+            if self.with(|i| Ok(i.r.db().epoch(scope)))? >= ahead.epoch {
                 self.forget_epochs(scope);
             } else {
                 tracing::warn!("{log}'s step {} is under epoch {}, which no entry made: passed over", ahead.at, ahead.epoch);
@@ -130,7 +130,7 @@ impl Node {
     /// The keys a scope's entries are sealed with in the bucket, by epoch: the node's `log` of the scope. Of one this
     /// device runs but doesn't open, those a caller who does handed it.
     pub(super) async fn log_key(&self, scope: &Scope) -> Result<crate::db::Keys> {
-        if !self.with(|i| Ok(self.opens(&i.r.members, scope)))? {
+        if !self.with(|i| Ok(self.opens(i.r.db(), scope)))? {
             return self.handed_log(scope).await;
         }
         self.database_keys(scope, members::APP, crate::log::NAME, false).await
@@ -154,8 +154,8 @@ impl Node {
     /// QUIC proves who sent it: it needs no signature.
     pub(super) fn ping(&self, scope: &Scope, wrote: Option<(&str, &str, u64)>) {
         let Ok(devices) = self.with(|i| {
-            let m = &i.r.members;
-            Ok(m.computes().filter(|s| s.key != self.0.id && m.runs_for(&s.key, scope)).map(|s| s.key).collect::<Vec<_>>())
+            let m = i.r.db();
+            Ok(m.computes().into_iter().filter(|s| s.key != self.0.id && m.runs_for(&s.key, scope)).map(|s| s.key).collect::<Vec<_>>())
         }) else {
             return;
         };
@@ -286,7 +286,7 @@ impl Node {
     /// to answer is how far it is.
     pub(super) fn say_hello(&self) {
         let Ok((devices, me, services, parts)) = self.with(|i| {
-            let devices: Vec<Key> = i.r.members.computes().map(|s| s.key).filter(|k| *k != self.0.id).collect();
+            let devices: Vec<Key> = i.r.db().computes().into_iter().map(|s| s.key).filter(|k| *k != self.0.id).collect();
             Ok((devices, Caller { key: self.0.id, user: i.user.clone(), agent: None, token: None }, self.services_here(i), self.parts_here(i)))
         }) else {
             return;
@@ -308,7 +308,7 @@ impl Node {
     /// Says hello to each service endpoint of the install, which says what it offers and whom it serves: it's listed
     /// as a device offering that service, as another device's hello lists those there.
     pub(super) fn hello_services(&self) {
-        let Ok(services) = self.with(|i| Ok(i.r.members.machines.values().filter(|m| i.r.members.service(&m.key).is_some()).map(|m| (m.key, m.service.clone().unwrap_or_default())).collect::<Vec<_>>())) else {
+        let Ok(services) = self.with(|i| Ok(i.r.db().machines().into_iter().filter(|m| i.r.db().service(&m.key).is_some()).map(|m| (m.key, m.service.clone().unwrap_or_default())).collect::<Vec<_>>())) else {
             return;
         };
         for (key, _) in services {
@@ -323,7 +323,7 @@ impl Node {
     /// answered as one that takes this device's calls.
     pub(super) async fn hello_service_now(&self, key: &Key) -> bool {
         let key = *key;
-        let Some(name) = self.with(|i| Ok(i.r.members.machines.get(&key).and_then(|m| m.service.clone()))).ok().flatten() else { return false };
+        let Some(name) = self.with(|i| Ok(i.r.db().machine_ever(&key).and_then(|m| m.service.clone()))).ok().flatten() else { return false };
         let asked = Instant::now();
         let offers = match self.hello_service(key).await {
             Ok(Some(offers)) => offers,
@@ -338,7 +338,7 @@ impl Node {
         };
         let (mut describe, _) = offers;
         // Whom it serves is what its listing says, never what it says of itself.
-        let users: Vec<String> = self.with(|i| { let m = &i.r.members; Ok(m.users.keys().filter(|u| m.service_serves(&key, u)).cloned().collect()) }).unwrap_or_default();
+        let users: Vec<String> = self.with(|i| { let m = i.r.db(); Ok(m.users().into_iter().map(|u| u.id).filter(|u| m.may(u, "use", &scopes::service(&key))).collect()) }).unwrap_or_default();
         describe["name"] = json!(name);
         let services: Vec<Service> = vec![(name.clone(), users, describe)];
         let changed = self.with(|i| {

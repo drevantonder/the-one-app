@@ -92,6 +92,7 @@ pub mod keys;
 #[cfg(feature = "db")]
 pub mod log;
 pub mod screen;
+#[cfg(feature = "db")]
 pub mod state;
 #[cfg(feature = "db")]
 pub mod vault;

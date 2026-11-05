@@ -102,7 +102,7 @@ impl Node {
                 let all = call_scopes(i, &req, &me.user)?;
                 let own = Scope::User(me.user.clone());
                 let rest: Vec<Scope> = all.iter().filter(|s| **s != own).cloned().collect();
-                let m = &i.r.members;
+                let m = i.r.db();
                 let without = rest.len() < all.len() && !rest.is_empty() && m.runners(&me.user, &all).is_empty() && !m.runners(&me.user, &rest).is_empty();
                 Ok(without.then(|| rest.iter().map(ToString::to_string).collect()))
             })?;
@@ -231,18 +231,18 @@ impl Node {
         let about_here = |d: &Value| d["prefer"] == "here" || d["ops"].as_array().is_some_and(|ops| ops.iter().any(|o| o["name"] == req.op.as_str() && o["prefer"] == "here"));
         let here_first = here && req.service.is_some() && self.with(|i| Ok(self.services_here(i).iter().any(|d| d.0 == req.app && about_here(&d.2))))?;
         self.with(|i| {
-            let m = &i.r.members;
+            let m = i.r.db();
             let mut devices: Vec<Key> = if req.service.is_none() {
                 // Not one whose person switched its app service off.
                 m.runners(&me.user, &call_scopes(i, req, &me.user)?).into_iter().map(|s| s.key).filter(|k| !Self::off(m, k, members::APPS_PART)).collect()
             } else {
                 let mut s: Vec<Key> = i.peers.iter().filter(|(k, _)| i.online(k)).filter(|(_, s)| s.services.iter().any(|d| d.0 == req.app && d.1.contains(&me.user))).map(|(k, _)| *k).collect();
-                if here && ((me.user == i.user && !passed) || (self.0.services.serves_everyone(&req.app) && i.r.members.serves(&self.0.id, &me.user))) {
+                if here && ((me.user == i.user && !passed) || (self.0.services.serves_everyone(&req.app) && i.r.db().serves(&self.0.id, &me.user))) {
                     s.push(self.0.id);
                 }
                 s
             };
-            let set = rank::set(&i.r.members.settings);
+            let set = rank::set(&i.r.db().settings());
             let here_load = crate::load::current();
             let rank = |k: &Key| {
                 let here = *k == self.0.id;
@@ -273,14 +273,14 @@ impl Node {
         // checks it itself, and never keys. A call handed keys with no sign-in passes on its keys alone (below), and
         // standing work, kept by its grant here, passes on none.
         let service = self.is_service(&device);
-        let shared = self.with(|i| Ok(i.r.members.service(&device).is_some_and(|s| s.shared)))?;
+        let shared = self.with(|i| Ok(i.r.db().service(&device).is_some_and(|s| s.shared)))?;
         let token = me.token.as_ref().filter(|t| !sessions::unsigned(t) && !t.starts_with(standing::GRANT) && (!service || (shared && sessions::is_sign_in(t))));
         // A node listed as the caller's own client asks services as itself, for a direct client's call only — never
         // one another node passed on: forwarding another client's key, or app database keys, would make the
         // receiving device refuse its own person's call.
         let as_own_client = req.service.is_some()
             && me.token.as_ref().is_none_or(|t| t == &client_token(&me.key))
-            && self.with(|i| Ok(i.r.members.client(&self.0.id).is_some_and(|c| c.user == me.user)))?;
+            && self.with(|i| Ok(i.r.db().client(&self.0.id).is_some_and(|c| c.user == me.user)))?;
         let key = if as_own_client { self.0.id } else { me.key };
         let mut request = json!({ "app": req.app, "service": req.service, "op": req.op, "input": req.input, "scopes": req.scopes, "depth": req.depth, "from": req.from, "client": req.client, "me": { "key": hex(&key), "user": me.user, "agent": me.agent, "token": token } });
         // Keys handed here with no sign-in (a client device's, or with a call passed on) go on to another node sealed
@@ -292,9 +292,9 @@ impl Node {
             && !as_own_client
         {
             let scopes = self.with(|i| call_scopes(i, &resolved, &me.user))?;
-            let runs = self.with(|i| Ok(scopes.iter().filter(|s| i.r.members.runs_for(&device, s)).cloned().collect::<Vec<_>>()))?;
+            let runs = self.with(|i| Ok(scopes.iter().filter(|s| i.r.db().runs_for(&device, s)).cloned().collect::<Vec<_>>()))?;
             let (keys, until) = self.passing_on(unsigned, &runs, &resolved.app);
-            let seal = self.with(|i| Ok(i.r.members.seal_key(&device)))?.context("that device has no key to seal to")?;
+            let seal = self.with(|i| Ok(i.r.db().seal_key(&device)))?.context("that device has no key to seal to")?;
             let named: Vec<String> = scopes.iter().map(Scope::to_string).collect();
             request = crate::keys::forwarded(&request, &me.user, req.client.as_deref().unwrap_or(""), &self.0.id, &seal, until, keys, &named)?["body"]["call"].take();
             request["me"]["key"] = json!(hex(&self.0.id));
@@ -303,8 +303,8 @@ impl Node {
         // A sign-in's keys go on only of the scopes the call reaches that the device runs.
         if let Some(token) = token
             && !service
-            && let Some(seal) = self.with(|i| Ok(i.r.members.seal_key(&device)))?
-            && let Some(keys) = self.with(|i| Ok(call_scopes(i, &resolved, &me.user)?.into_iter().filter(|s| i.r.members.runs_for(&device, s)).collect::<Vec<_>>())).map(|scopes| self.hand_on(token, &seal, &scopes, &resolved.app))?
+            && let Some(seal) = self.with(|i| Ok(i.r.db().seal_key(&device)))?
+            && let Some(keys) = self.with(|i| Ok(call_scopes(i, &resolved, &me.user)?.into_iter().filter(|s| i.r.db().runs_for(&device, s)).collect::<Vec<_>>())).map(|scopes| self.hand_on(token, &seal, &scopes, &resolved.app))?
         {
             request["keys"] = json!(keys);
         }
@@ -379,7 +379,7 @@ impl Node {
             return Ok(Reply::Elsewhere("it isn't ready yet".into()));
         }
         let deployed_here = self.0.bundles.lock().unwrap().get(&req.app).cloned();
-        let latest = self.with(|i| Ok(i.r.members.apps.get(&req.app).and_then(|a| a.bundle.clone())))?;
+        let latest = self.with(|i| Ok(i.r.db().app(&req.app).and_then(|a| a.bundle.clone())))?;
         if deployed_here.is_none() || deployed_here != latest {
             return Ok(Reply::Elsewhere(format!("it doesn't have {}'s latest version yet", req.app)));
         }
@@ -393,7 +393,7 @@ impl Node {
         // An op of a lab that's off isn't there.
         let described = self.0.apps.describe(&req.app).await?;
         if let Some(lab) = described["ops"].as_array().into_iter().flatten().find(|o| o["name"] == req.op.as_str()).and_then(|o| o["lab"].as_str())
-            && !self.with(|i| Ok(crate::labs::on(&i.r.members, &crate::labs::app_key(&req.app, lab))))?
+            && !self.with(|i| Ok(crate::labs::on(&i.r.db().settings(), &crate::labs::app_key(&req.app, lab))))?
         {
             let lab_title = described["labs"][lab]["title"].as_str().unwrap_or(lab);
             return Ok(Reply::Error(format!("{lab_title} is off. An admin can turn it on in Settings › Labs.")));
@@ -506,14 +506,14 @@ impl Node {
     /// holds it, else in `global`; in the background.
     pub(super) fn write_insight(&self, app: &str, me: &Caller, said: status::Said) {
         let Ok(scope) = self.with(|i| {
-            let m = &i.r.members;
-            let owner = m.apps.get(app).map(|a| a.owner.clone()).context("no such app")?;
+            let m = i.r.db();
+            let owner = m.app(app).map(|a| a.owner).context("no such app")?;
             let own = match owner {
                 Principal::User(u) => Scope::User(u),
                 Principal::Group(g) => Scope::Group(g),
                 _ => Scope::Global,
             };
-            Ok(if m.may_use(&me.user, &own) && i.r.holds(&own) { own } else { Scope::Global })
+            Ok(if m.may(&me.user, "use", &scopes::object(&own)) && i.r.holds(&own) { own } else { Scope::Global })
         }) else {
             return;
         };
@@ -529,18 +529,18 @@ impl Node {
     /// its errors grouped, with counts; and what it spent on AI, by model. Only for someone acting for its owner.
     pub(super) fn insights_of(&self, viewer: &Caller, app: &str) -> Result<Option<Value>> {
         self.with(|i| {
-            let m = &i.r.members;
-            let Some(a) = m.apps.get(app) else { return Ok(None) };
-            if !m.acts_for(&viewer.user, &a.owner) {
+            let m = i.r.db();
+            let Some(a) = m.app(app) else { return Ok(None) };
+            if !m.may(&viewer.user, "deploy", &scopes::app(&a.name)) {
                 return Ok(None);
             }
-            let name = |u: &str| m.users.get(u).map(|u| u.name.clone()).unwrap_or_default();
+            let name = |u: &str| m.user_ever(u).map(|u| u.name).unwrap_or_default();
             let mut people: BTreeMap<(String, String), (u64, u64, Option<String>)> = BTreeMap::new();
             let mut errors: BTreeMap<(String, String), (u64, u64, u64, String)> = BTreeMap::new();
             let mut cost: BTreeMap<String, (f64, u64, u64, u64)> = BTreeMap::new();
             for (log, status) in &i.status {
                 let Ok(scope) = Scope::parse(log) else { continue };
-                let Some(ins) = status.insights.get(app).filter(|_| m.may_use(&viewer.user, &scope)) else { continue };
+                let Some(ins) = status.insights.get(app).filter(|_| m.may(&viewer.user, "use", &scopes::object(&scope))) else { continue };
                 for ((user, client), u) in &ins.used {
                     let p = people.entry((user.clone(), client.clone())).or_default();
                     p.0 += u.days;
@@ -670,7 +670,7 @@ impl Node {
 
     /// Runs a service here, built in or registered, for this device's local user.
     pub(super) async fn run_service(&self, app: &str, op: &str, input: Value, me: &Caller, from: Option<String>) -> Result<Value> {
-        let everyone = self.0.services.serves_everyone(app) && self.with(|i| Ok(i.r.members.serves(&self.0.id, &me.user)))?;
+        let everyone = self.0.services.serves_everyone(app) && self.with(|i| Ok(i.r.db().serves(&self.0.id, &me.user)))?;
         let user = if everyone { me.user.clone() } else { self.user()? };
         ensure!(me.user == user, "{} runs only for {}'s own user", self.service_title(app), self.device_name());
         let caller = self.me_for(me)?;
@@ -727,14 +727,14 @@ impl Node {
     pub(super) async fn node_op(&self, op: &str, input: &Value, me: &Caller) -> Result<Value> {
         match op {
             // Another device's hints, which only a device of the install gives.
-            "hello" | "changed" if self.with(|i| Ok(i.r.members.compute(&me.key).is_some()))? => {
+            "hello" | "changed" if self.with(|i| Ok(i.r.db().compute(&me.key).is_some()))? => {
                 if op == "hello" {
                     let mut services: Vec<Service> = serde_json::from_value(input["services"].clone()).unwrap_or_default();
                     // Whom each serves, no more than the entries allow: that device's own person, and for one that
                     // serves everyone, those the device serves.
                     self.with(|i| {
-                        let m = &i.r.members;
-                        let owner = m.compute(&me.key).map(|c| c.user.clone()).unwrap_or_default();
+                        let m = i.r.db();
+                        let owner = m.compute(&me.key).map(|c| c.user).unwrap_or_default();
                         for (_, users, describe) in &mut services {
                             let everyone = describe["serves"] == "everyone";
                             users.retain(|u| *u == owner || (everyone && m.serves(&me.key, u)));
@@ -799,7 +799,7 @@ impl Node {
         if tripped {
             let what = if kind == "call" { "called other apps" } else { "ran its schedules" };
             let why = format!("{} {what} more than {RATE_LIMIT} times in a minute on {}, so it was stopped there: is it looping? It runs again once it's deployed again, or in {} minutes.", self.title(app).await, self.device_name(), STOPPED_FOR / 60_000);
-            let bundle = self.with(|i| Ok(i.r.members.apps.get(app).and_then(|a| a.bundle.clone()))).ok().flatten();
+            let bundle = self.with(|i| Ok(i.r.db().app(app).and_then(|a| a.bundle.clone()))).ok().flatten();
             self.0.guard.lock().unwrap().stopped.insert(app.to_string(), (why.clone(), now_ms() + STOPPED_FOR, bundle));
             tracing::warn!("{why}");
         }
@@ -811,7 +811,7 @@ impl Node {
 
     /// Why `app` is stopped here, if it is: it looped, and hasn't been deployed again or waited out its time since.
     pub(super) fn stopped(&self, app: &str) -> Option<String> {
-        let latest = self.with(|i| Ok(i.r.members.apps.get(app).and_then(|a| a.bundle.clone()))).ok().flatten();
+        let latest = self.with(|i| Ok(i.r.db().app(app).and_then(|a| a.bundle.clone()))).ok().flatten();
         let mut g = self.0.guard.lock().unwrap();
         let (why, until, bundle) = g.stopped.get(app)?;
         if now_ms() < *until && *bundle == latest {
@@ -994,7 +994,7 @@ impl Node {
             // setting names, wherever that runs (the device with Apple's push key); with push off, it isn't sent.
             ("POST", "/notify") => {
                 ensure!(!grant.read_only, "this call only reads: it can't push");
-                let push = self.with(|i| Ok(crate::state::settings(&i.r.members).remove("push").and_then(|v| v.as_str().map(str::to_string)).unwrap_or_default()))?;
+                let push = self.with(|i| Ok(crate::state::settings(&i.r.db().settings()).remove("push").and_then(|v| v.as_str().map(str::to_string)).unwrap_or_default()))?;
                 if push.is_empty() {
                     return Ok(ok(json!({ "ok": { "sent": false, "why": "push is off in this install" } })));
                 }
@@ -1011,7 +1011,7 @@ impl Node {
                 if let Some(priority) = install["serverless"].get("priority") {
                     order.push(json!({ "name": "Cloudflare", "key": rank::CLOUDFLARE, "kind": rank::CLOUDFLARE, "priority": priority, "online": true, "here": false }));
                 }
-                let set = self.with(|i| Ok(rank::set(&i.r.members.settings)))?;
+                let set = self.with(|i| Ok(rank::set(&i.r.db().settings())))?;
                 order.sort_by_cached_key(|s| (rank::priority(&set, s["key"].as_str().unwrap_or("")), s["name"].as_str().unwrap_or("").to_lowercase()));
                 ok(json!({ "order": order, "admin": install["role"] == "admin" }))
             }
@@ -1057,7 +1057,7 @@ impl Node {
     fn accept_service(&self, remote: Key, request: &Value) -> Result<(CallRequest, Caller)> {
         let me = self.check_caller(remote, request)?;
         ensure!(request["me"]["token"].is_null(), "a service asks with no sign-in");
-        let (name, owner) = self.with(|i| Ok(i.r.members.service(&remote).map(|s| (s.service.clone().unwrap_or_default(), s.user.clone()))))?.context("not a service of this install")?;
+        let (name, owner) = self.with(|i| Ok(i.r.db().service(&remote).map(|s| (s.service.clone().unwrap_or_default(), s.user.clone()))))?.context("not a service of this install")?;
         ensure!(me.key == remote && me.user == owner && owner == self.user()?, "a service's calls run only on its own person's node");
         let mut req: CallRequest = serde_json::from_value(crate::service::limited(&name, request)?)?;
         let resolved = self.resolve(req.clone());
@@ -1079,7 +1079,7 @@ impl Node {
             me.token = Some(self.take_passed(&remote, &me.user, request, keys, true)?);
         }
         let mut req: CallRequest = serde_json::from_value(request.clone())?;
-        let (own, serves) = self.with(|i| Ok((!passed && i.r.members.client(&remote).is_some_and(|c| c.user == me.user), i.r.members.serves(&remote, &me.user))))?;
+        let (own, serves) = self.with(|i| Ok((!passed && i.r.db().client(&remote).is_some_and(|c| c.user == me.user), i.r.db().serves(&remote, &me.user))))?;
         // Only a node that runs the user's calls says an app made a call (whose items fill it in), and how deep it is.
         if !serves {
             (req.from, req.depth) = (None, 0);
@@ -1096,7 +1096,7 @@ impl Node {
                     None => reachable(i, &req.app, &me.user),
                     Some(named) => named.iter().map(|s| if s == "user" { Ok(Scope::User(me.user.clone())) } else { Scope::parse(s) }).collect::<Result<_>>()?,
                 };
-                let m = &i.r.members;
+                let m = i.r.db();
                 ensure!(scopes.iter().all(|s| m.runs_for(&remote, s)), "{} doesn't run every scope that call reaches", short(&remote));
                 Ok(())
             })?;
@@ -1116,8 +1116,8 @@ impl Node {
             None => bail!("a scope is its name"),
         }).collect::<Result<_>>()?;
         self.with(|i| {
-            let m = &i.r.members;
-            ensure!(scopes.iter().all(|s| m.may_use(user, s)), "that call reaches a scope its person may not use");
+            let m = i.r.db();
+            ensure!(scopes.iter().all(|s| m.may(user, "use", &scopes::object(s))), "that call reaches a scope its person may not use");
             ensure!(!machine || scopes.iter().all(|s| m.runs_for(from, s)), "{} doesn't run every scope that call names", short(from));
             Ok(())
         })?;
@@ -1135,7 +1135,7 @@ impl Node {
         let passed = !token && request["keys"].is_string();
         let hint = request["app"] == members::APP && matches!(request["op"].as_str(), Some("hello" | "changed"));
         self.with(|i| {
-            let m = &i.r.members;
+            let m = i.r.db();
             let client = m.client(&remote).is_some_and(|c| c.user == user);
             let service = m.service(&remote).is_some_and(|s| s.user == user);
             let allowed = match () {
@@ -1153,8 +1153,8 @@ impl Node {
 }
 
 /// The install's address, without a last `/`, if it has one yet.
-pub(super) fn address(m: &Members) -> Option<String> {
-    m.settings.get("address").map(|a| a.trim_end_matches('/').to_string())
+pub(super) fn address(m: &ScopeDb) -> Option<String> {
+    m.setting("address").map(|a| a.trim_end_matches('/').to_string())
 }
 
 /// Whether a call is one another node passed on: it runs only on what it was handed, never as this device's own person.
@@ -1175,7 +1175,7 @@ fn call_scopes(i: &Install, req: &CallRequest, user: &str) -> Result<Vec<Scope>>
 
 /// Checks a call may run here, and makes its context; or says why it should run elsewhere.
 fn prepare(node: &Node, i: &Install, req: &CallRequest, me: &Caller, title: &str) -> Result<std::result::Result<(Context, Vec<Scope>), String>> {
-    let m = &i.r.members;
+    let m = i.r.db();
     let here = node.0.id;
     if !m.serves(&here, &me.user) {
         return Ok(Err(format!("{} doesn't serve you", node.device_name())));
@@ -1199,6 +1199,6 @@ fn prepare(node: &Node, i: &Install, req: &CallRequest, me: &Caller, title: &str
     if let Some(s) = scopes.iter().find(|s| !i.r.holds(s)) {
         return Ok(Err(format!("it can't open {} yet", scope_name(i, &s.to_string()))));
     }
-    let ctx = Context { me: node_me(node, m, me), now: now_ms(), scopes: handles(m, &scopes, &me.user), read_only: false, token: String::new(), from: None, address: address(m), handles: m.handles(), labs: crate::labs::on_keys(m) };
+    let ctx = Context { me: node_me(node, m, me), now: now_ms(), scopes: handles(m, &scopes, &me.user), read_only: false, token: String::new(), from: None, address: address(m), handles: m.handles(), labs: crate::labs::on_keys(&m.settings()) };
     Ok(Ok((ctx, scopes)))
 }

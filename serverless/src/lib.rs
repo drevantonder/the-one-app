@@ -592,8 +592,10 @@ fn view(m: &Members, states: &BTreeMap<String, ScopeState>, me: &str, client: &s
     let manages = |s: &String| Scope::parse(s).is_ok_and(|s| members::manages_scope(m, me, &s));
     let waiting = states.iter().filter(|(s, _)| manages(s)).flat_map(|(_, s)| s.requests.values()).filter(|r| r.answer.is_none() && now < r.time + 86_400_000).count();
     // It knows of no device being on, nor of who else is looking.
+    // This node replays the members itself: `/v1/state` reads the scope database built from them.
+    let db = one::database::scopes::ScopeDb::build(m, &Scope::Global, &ScopeState::default(), now).ok();
     let state = one::state::state(
-        Some(m),
+        db.as_ref(),
         me,
         one::state::Here {
             me: json!({ "key": "", "name": client, "user": me }),

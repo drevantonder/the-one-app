@@ -8,7 +8,7 @@ const BADGE_LIMIT: Duration = Duration::from_secs(5);
 impl Node {
     /// Who a caller is, as apps see them.
     pub(super) fn me_for(&self, caller: &Caller) -> Result<Me> {
-        self.with(|i| Ok(node_me(self, &i.r.members, caller)))
+        self.with(|i| Ok(node_me(self, i.r.db(), caller)))
     }
 
     /// The context a widget, hook or screen of `app` gets for `viewer`: every scope it may reach that's here.
@@ -17,7 +17,7 @@ impl Node {
         self.with(|i| {
             let reach = reachable(i, app, &viewer.user);
             let scopes: Vec<Scope> = reach.into_iter().filter(|s| i.r.holds(s)).collect();
-            Ok(Context { me, now: now_ms(), scopes: handles(&i.r.members, &scopes, &viewer.user), read_only: true, token: String::new(), from: None, address: super::calls::address(&i.r.members), handles: i.r.members.handles(), labs: crate::labs::on_keys(&i.r.members) })
+            Ok(Context { me, now: now_ms(), scopes: handles(i.r.db(), &scopes, &viewer.user), read_only: true, token: String::new(), from: None, address: super::calls::address(i.r.db()), handles: i.r.db().handles(), labs: crate::labs::on_keys(&i.r.db().settings()) })
         })
     }
 
@@ -135,7 +135,7 @@ impl Node {
     /// An app screen as a whole page: the app's HTML with the design kit, the bridge, and who's looking.
     /// `scope` is the page a shell opened it from, a hint the app may follow or not.
     pub async fn screen(&self, viewer: Caller, app: &str, name: &str, params: Value, scope: Option<&str>, linked: bool) -> Result<String> {
-        let deployed = self.with(|i| Ok(i.r.members.apps.get(app).is_some_and(|a| a.bundle.is_some())))?;
+        let deployed = self.with(|i| Ok(i.r.db().app(app).is_some_and(|a| a.bundle.is_some())))?;
         let body = match deployed {
             // A screen the app doesn't have (an old or mistyped link) is a page that says so.
             true => self.0.apps.screen(app, name).await?.unwrap_or_else(|| "<div id=\"missing\"></div><script>missing.innerHTML = one.notFound()</script>".into()),

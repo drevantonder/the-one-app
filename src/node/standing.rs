@@ -44,7 +44,7 @@ impl Node {
         ensure!(me.user == self.user()?, "{} grants only for its own person", self.device_name());
         let endpoint = self.find_device(device)?;
         let (title, name) = (self.title_of(app).await, self.name_of(&endpoint));
-        ensure!(self.with(|i| Ok(i.r.members.apps.contains_key(app)))?, "no app called {app}");
+        ensure!(self.with(|i| Ok(i.r.db().app(app).is_some()))?, "no app called {app}");
         let until = match days {
             0 => 0,
             days => now_ms() + days.min(GRANT_DAYS) * DAY,
@@ -62,8 +62,8 @@ impl Node {
     /// Writes a grant of `app` in `scope` to `endpoint` until `until` (0: no longer), with its keys sealed first.
     async fn grant_to(&self, endpoint: Key, app: &str, scope: &Scope, until: u64) -> Result<()> {
         let (seal, mine, may) = self.with(|i| {
-            let m = &i.r.members;
-            Ok((m.seal_key(&endpoint), m.client(&self.0.id).is_some(), m.grants_in(&i.user, scope)))
+            let m = i.r.db();
+            Ok((m.seal_key(&endpoint), m.client(&self.0.id).is_some(), m.may(&i.user, "keep", &scopes::object(&scope))))
         })?;
         ensure!(mine, "{} isn't one of its person's own devices, which are what grant", self.device_name());
         ensure!(may, "only {scope}'s person, or its group's admins, keep its apps running");
@@ -98,11 +98,11 @@ impl Node {
         let Ok(me) = self.user() else { return };
         let ended: Vec<(Key, Scope, String)> = self
             .with(|i| {
-                let m = &i.r.members;
+                let m = i.r.db();
                 if m.client(&self.0.id).is_none_or(|c| c.user != me) {
                     return Ok(Vec::new());
                 }
-                Ok(m.grants.iter().filter(|((k, s, _), g)| g.by == me && g.until != 0 && g.until <= now && m.machine(k).is_some() && m.grants_in(&me, s)).map(|(id, _)| id.clone()).collect())
+                Ok(m.keeps().into_iter().filter(|((k, s, _), g)| g.by == me && g.until != 0 && g.until <= now && m.machine(k).is_some() && m.may(&me, "keep", &scopes::object(s))).map(|(id, _)| id).collect())
             })
             .unwrap_or_default();
         for id in ended {
@@ -130,12 +130,12 @@ impl Node {
         let now = now_ms();
         let due: Vec<(Key, Scope)> = self
             .with(|i| {
-                let m = &i.r.members;
+                let m = i.r.db();
                 if me.user != i.user || m.client(&self.0.id).is_none() {
                     return Ok(Vec::new());
                 }
                 let due = |s: &Scope, g: &members::Grant| g.until < now + (GRANT_DAYS - 1) * DAY || g.hashes.keys().next_back().copied().unwrap_or(0) < m.epoch(s);
-                Ok(m.grants_at(now).filter(|((_, s, a), g)| a == app && g.by == i.user && due(s, g)).map(|((k, s, _), _)| (*k, s.clone())).collect())
+                Ok(m.keeps_at(now).into_iter().filter(|((_, s, a), g)| a == app && g.by == i.user && due(s, g)).map(|((k, s, _), _)| (k, s)).collect())
             })
             .unwrap_or_default();
         for (endpoint, scope) in due {
@@ -157,7 +157,7 @@ impl Node {
     /// sealed to this device whose hash is the one the grant names, the rest passed over. → until when it lasts.
     pub(super) async fn standing_keys(&self, scope: &Scope, app: &str) -> Result<u64> {
         let now = now_ms();
-        let found = self.with(|i| Ok(i.r.members.grants_at(now).find(|((k, s, a), _)| *k == self.0.id && s == scope && a == app).map(|(_, g)| (g.until, g.hashes.clone()))))?;
+        let found = self.with(|i| Ok(i.r.db().keeps_at(now).into_iter().find(|((k, s, a), _)| *k == self.0.id && s == scope && a == app).map(|(_, g)| (g.until, g.hashes))))?;
         let (until, hashes) = found.with_context(|| format!("{} doesn't keep {app} running in {scope}", self.device_name()))?;
         let id = (scope.clone(), app.to_string());
         let had = self.0.standing.keys.lock().unwrap().get(&id).cloned().unwrap_or_default();
@@ -209,13 +209,13 @@ impl Node {
     pub(super) fn standing_until(&self, token: &str) -> u64 {
         let Some((scope, app)) = grant_of(token) else { return 0 };
         let now = now_ms();
-        self.with(|i| Ok(i.r.members.grants_at(now).find(|((k, s, a), _)| *k == self.0.id && *s == scope && a == app).map_or(0, |(_, g)| g.until))).unwrap_or(0)
+        self.with(|i| Ok(i.r.db().keeps_at(now).into_iter().find(|((k, s, a), _)| *k == self.0.id && *s == scope && a == app).map_or(0, |(_, g)| g.until))).unwrap_or(0)
     }
 
     /// Forgets the keys of grants no longer in force here, and the databases they had open.
     pub(super) fn forget_standing(&self) {
         let now = now_ms();
-        let held: std::collections::HashSet<(Scope, String)> = self.with(|i| Ok(i.r.members.grants_at(now).filter(|((k, ..), _)| *k == self.0.id).map(|((_, s, a), _)| (s.clone(), a.clone())).collect())).unwrap_or_default();
+        let held: std::collections::HashSet<(Scope, String)> = self.with(|i| Ok(i.r.db().keeps_at(now).into_iter().filter(|((k, ..), _)| *k == self.0.id).map(|((_, s, a), _)| (s, a)).collect())).unwrap_or_default();
         let gone: Vec<(Scope, String)> = {
             let mut kept = self.0.standing.keys.lock().unwrap();
             let gone = kept.keys().filter(|id| !held.contains(*id)).cloned().collect();

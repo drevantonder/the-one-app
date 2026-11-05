@@ -4,7 +4,7 @@
 //! `lab.app.<app>.<name>` for an app's, `lab.service.<service>.<name>` for a service's, which a service reads from
 //! the install's settings as any other. A lab that's done leaves its declaration, and its setting goes with it.
 
-use crate::members::Members;
+use std::collections::BTreeMap;
 
 /// The core's own labs: (name, title, description).
 pub const CORE: &[(&str, &str, &str)] = &[];
@@ -31,14 +31,14 @@ pub fn app_key(app: &str, lab: &str) -> String {
     format!("lab.app.{app}.{lab}")
 }
 
-/// Whether the lab whose setting is `key` is on.
-pub fn on(m: &Members, key: &str) -> bool {
-    m.settings.get(key).is_some_and(|v| v == "on")
+/// Whether the lab whose setting is `key` is on, by the install's `settings`.
+pub fn on(settings: &BTreeMap<String, String>, key: &str) -> bool {
+    settings.get(key).is_some_and(|v| v == "on")
 }
 
-/// The settings of every lab that's on.
-pub fn on_keys(m: &Members) -> Vec<String> {
-    m.settings.iter().filter(|(k, v)| k.starts_with("lab.") && *v == "on").map(|(k, _)| k.clone()).collect()
+/// The settings of every lab that's on, of the install's `settings`.
+pub fn on_keys(settings: &BTreeMap<String, String>) -> Vec<String> {
+    settings.iter().filter(|(k, v)| k.starts_with("lab.") && *v == "on").map(|(k, _)| k.clone()).collect()
 }
 
 /// `app`'s labs that are on, by name, from `on_keys`: what its `ctx.labs` says.

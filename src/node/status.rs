@@ -299,7 +299,7 @@ impl Node {
     pub(super) fn read_all_status(&self) {
         let node = self.clone();
         tokio::spawn(async move {
-            let scopes = node.with(|i| Ok(i.r.members.scopes().into_iter().filter(|s| i.r.holds(s)).collect::<Vec<_>>())).unwrap_or_default();
+            let scopes = node.with(|i| Ok(i.r.db().scopes().into_iter().filter(|s| i.r.holds(s)).collect::<Vec<_>>())).unwrap_or_default();
             for scope in scopes {
                 if let Err(err) = node.read_status(&scope).await {
                     tracing::debug!("reading {scope}'s status: {err:#}");

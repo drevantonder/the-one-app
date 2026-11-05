@@ -1,14 +1,17 @@
-//! `GET /v1/state`: the install as one person sees it, from its members, the same from a node on a machine and from
-//! the serverless node. What only the node answering knows (which devices are online and how loaded, who is looking)
-//! it says in `Here`.
+//! `GET /v1/state`: the install as one person sees it, from `global`'s scope database, the same from a node on a
+//! machine and from the serverless node. What only the node answering knows (which devices are online and how loaded,
+//! who is looking) it says in `Here`.
+
+use std::collections::BTreeMap;
 
 use serde_json::{Map, Value, json};
 
+use crate::database::scopes::{INSTALL, ScopeDb, object};
 use crate::entry::hex;
-use crate::members::{Kind, Machine, Members, Role};
+use crate::members::{Kind, Machine};
 use crate::rank;
 
-/// What the node answering knows that the members don't.
+/// What the node answering knows that the scope database doesn't.
 pub struct Here<'a> {
     /// Who is looking: `{ key, name, user }`.
     pub me: Value,
@@ -38,9 +41,8 @@ pub struct Here<'a> {
 }
 
 /// The install as `user` sees it, with `here` from the node answering; None for `install` if it has none.
-pub fn state(m: Option<&Members>, user: &str, here: Here) -> Value {
-    let empty = Members::default();
-    let settings = settings(m.unwrap_or(&empty));
+pub fn state(m: Option<&ScopeDb>, user: &str, here: Here) -> Value {
+    let settings = settings(&m.map(ScopeDb::settings).unwrap_or_default());
     let install = m.map(|m| install(m, user, &settings, &here));
     let address = settings.get("address").and_then(|a| a.as_str()).filter(|a| !a.is_empty());
     let passkeys = address.filter(|_| here.passkeys).map(|a| format!("{}/passkeys", a.trim_end_matches('/')));
@@ -69,13 +71,15 @@ pub fn state(m: Option<&Members>, user: &str, here: Here) -> Value {
     state
 }
 
-fn install(m: &Members, me: &str, settings: &Map<String, Value>, here: &Here) -> Value {
-    let set = rank::set(&m.settings);
+fn install(m: &ScopeDb, me: &str, settings: &Map<String, Value>, here: &Here) -> Value {
+    let set = rank::set(&m.settings());
+    let scopes = m.scopes();
+    let switches = m.switches();
     // Service endpoints are listed as devices too, offering their service.
     let mut devices: Vec<Value> = m
-        .machines
-        .values()
-        .filter(|s| m.compute(&s.key).is_some() || m.service(&s.key).is_some())
+        .machines()
+        .iter()
+        .filter(|s| !s.removed && (s.is(Kind::Compute) || s.is(Kind::Service)))
         .map(|s| {
             let mut now = (here.device_now)(s);
             // A device that hasn't said what it is, as one that's always on.
@@ -84,9 +88,9 @@ fn install(m: &Members, me: &str, settings: &Map<String, Value>, here: &Here) ->
                 "kind": kind, "priority": rank::priority(&set, &hex(&s.key)).to_value(), "far": false, "since": s.since,
                 "key": hex(&s.key), "seal": hex(&s.seal), "name": s.name, "user": s.user, "me": false, "here": false, "online": false,
                 "roles": s.roles, "service": s.service, "device": s.device.as_ref().map(hex), "serves_me": m.serves(&s.key, me),
-                "runs_for": m.scopes().iter().filter(|scope| m.runs_for(&s.key, scope)).map(|scope| scope.to_string()).collect::<Vec<_>>(),
+                "runs_for": scopes.iter().filter(|scope| m.runs_for(&s.key, scope)).map(|scope| scope.to_string()).collect::<Vec<_>>(),
                 "build": null, "target": null, "services": [], "installed_services": [],
-                "off_services": m.services.iter().filter(|((k, _), d)| *k == s.key && !d.on).map(|((_, name), d)| json!({ "name": name, "time": d.time })).collect::<Vec<_>>(),
+                "off_services": switches.iter().filter(|((k, _), d)| *k == s.key && !d.on).map(|((_, name), d)| json!({ "name": name, "time": d.time })).collect::<Vec<_>>(),
                 "load": null,
             });
             device.as_object_mut().unwrap().extend(now);
@@ -106,6 +110,7 @@ fn install(m: &Members, me: &str, settings: &Map<String, Value>, here: &Here) ->
     // Devices that also run calls are listed with the devices.
     let clients: Vec<Value> = m
         .clients()
+        .iter()
         .filter(|c| !c.is(Kind::Compute))
         .map(|c| {
             let mut client = json!({ "key": hex(&c.key), "seal": hex(&c.seal), "name": c.name, "user": c.user, "roles": c.roles, "passkey": c.passkey, "device": c.device.as_ref().map(hex), "since": c.since, "me": false });
@@ -113,10 +118,10 @@ fn install(m: &Members, me: &str, settings: &Map<String, Value>, here: &Here) ->
             client
         })
         .collect();
-    let users: Vec<Value> = m.users.values().filter(|u| !u.removed).map(|u| json!({ "id": u.id, "name": u.name, "handle": u.handle, "role": u.role, "me": u.id == me })).collect();
+    let users: Vec<Value> = m.users().iter().filter(|u| !u.removed).map(|u| json!({ "id": u.id, "name": u.name, "handle": u.handle, "role": u.role, "me": u.id == me })).collect();
     let groups: Vec<Value> = m
-        .groups
-        .values()
+        .groups()
+        .iter()
         .map(|g| {
             let members: Vec<Value> = g.members.iter().map(|(u, r)| json!({ "user": u, "role": r })).collect();
             let invited: Vec<Value> = g.invited.iter().map(|(u, r)| json!({ "user": u, "role": r })).collect();
@@ -124,35 +129,36 @@ fn install(m: &Members, me: &str, settings: &Map<String, Value>, here: &Here) ->
         })
         .collect();
     json!({
-        "name": m.name, "root": m.root.map(|r| r.to_hex()), "user": me, "role": m.user(me).map(|u| u.role),
+        "name": m.name(), "root": m.root().map(|r| r.to_hex()), "user": me, "role": m.user(me).map(|u| u.role),
         // What a device seals a scope's new epoch to, beside its devices' seal keys.
-        "recovery": m.recovery.as_ref().map(hex),
+        "recovery": m.recovery().as_ref().map(hex),
         // Each scope's newest epoch the viewer may use, and its epochs' hashes, which a key from the bucket must match.
-        "epochs": m.epochs.iter().filter(|(s, _)| m.may_use(me, s)).map(|(s, e)| {
-            let hashes: Map<String, Value> = m.epoch_hashes.range((s.clone(), 0)..=(s.clone(), u32::MAX)).map(|((_, n), h)| (n.to_string(), json!(h))).collect();
-            (s.to_string(), json!({ "n": e.n, "hashes": hashes }))
+        "epochs": m.epochs().into_iter().filter(|(s, _)| m.may(me, "use", &object(s))).map(|(s, n)| {
+            let hashes: Map<String, Value> = m.epoch_hashes(&s).into_iter().map(|(n, h)| (n.to_string(), json!(h))).collect();
+            (s.to_string(), json!({ "n": n, "hashes": hashes }))
         }).collect::<Map<String, Value>>(),
         // Where the viewer's own things run, as their own device chose: the machines' keys, or null if it hasn't yet.
-        "runs": m.runs.get(me).map(|on| on.iter().map(hex).collect::<Vec<_>>()),
+        "runs": m.runs(me).map(|on| on.iter().map(hex).collect::<Vec<_>>()),
         // When the install's recovery key last let a device in, and whose.
-        "recovery_used": m.recovery_used.as_ref().map(|(time, user)| json!({ "time": time, "user": user })),
+        "recovery_used": m.recovery_used().map(|(time, user)| json!({ "time": time, "user": user })),
         // When the install's recovery key was set.
-        "recovery_set": m.recovery_set,
+        "recovery_set": m.recovery_set(),
         "member": here.member,
-        "users": users, "groups": groups, "devices": devices, "devices_at": m.devices_at, "clients": clients,
+        "users": users, "groups": groups, "devices": devices, "devices_at": m.devices_at(), "clients": clients,
         // Standing work in the scopes this person may grant it in: which endpoint keeps which app running in which
         // scope, until when, and who granted it. One whose endpoint is gone, or whose granter may grant no more, is over.
-        "grants": m.grants.iter().filter(|((k, s, _), g)| m.grants_in(me, s) && m.machine(k).is_some() && m.grants_in(&g.by, s)).map(|((k, s, a), g)| json!({ "endpoint": hex(k), "scope": s.to_string(), "app": a, "until": g.until, "by": g.by, "keys": g.hashes })).collect::<Vec<_>>(),
+        "grants": m.keeps().iter().filter(|((k, s, _), g)| m.may(me, "keep", &object(s)) && m.machine(k).is_some() && m.may(&g.by, "keep", &object(s))).map(|((k, s, a), g)| json!({ "endpoint": hex(k), "scope": s.to_string(), "app": a, "until": g.until, "by": g.by, "keys": g.hashes })).collect::<Vec<_>>(),
         "entries": here.entries, "settings": settings,
         // The serverless node, once an admin deployed one (`serverless deploy` sets `serverless`).
-        "serverless": m.serverless().map(|key| json!({ "priority": rank::priority(&set, rank::CLOUDFLARE).to_value(), "key": hex(&key), "runs_for": m.scopes().iter().filter(|s| m.runs_for(&key, s)).map(crate::entry::Scope::to_string).collect::<Vec<_>>() })),
+        "serverless": m.serverless().map(|key| json!({ "priority": rank::priority(&set, rank::CLOUDFLARE).to_value(), "key": hex(&key), "runs_for": scopes.iter().filter(|s| m.runs_for(&key, s)).map(crate::entry::Scope::to_string).collect::<Vec<_>>() })),
     })
 }
 
-/// The install's settings: the white label's defaults (config.toml's `[settings]`), and what its admins set over them.
-pub fn settings(m: &Members) -> Map<String, Value> {
+/// The install's settings: the white label's defaults (config.toml's `[settings]`), and what its admins set over them
+/// (`ScopeDb::settings`).
+pub fn settings(set: &BTreeMap<String, String>) -> Map<String, Value> {
     let mut out: Map<String, Value> = crate::config::SETTINGS.iter().map(|(k, v)| (k.to_string(), json!(v))).collect();
-    out.extend(m.settings.iter().map(|(k, v)| (k.clone(), json!(v))));
+    out.extend(set.iter().map(|(k, v)| (k.clone(), json!(v))));
     for key in ["store", "push"] {
         out.entry(key).or_insert(json!(""));
     }
@@ -178,20 +184,20 @@ pub fn agent_prompt(address: Option<&str>, guide: Option<&str>) -> String {
 
 /// What Settings shows `user`, in order, with a badge on Requests for `items_asked` and their other requests, and on
 /// Backups when `backups` are failing. Passkeys opens `passkeys` in a browser, where they're kept.
-fn settings_items(m: &Members, user: &str, items_asked: usize, backups: bool, store: &str, passkeys: Option<&str>) -> Vec<Value> {
+fn settings_items(m: &ScopeDb, user: &str, items_asked: usize, backups: bool, store: &str, passkeys: Option<&str>) -> Vec<Value> {
     let Some(me) = m.user(user) else { return Vec::new() };
     let item = |name: &str, title: &str, icon: &str, color: &str| json!({ "name": name, "title": title, "icon": icon, "color": color });
     let with = |mut item: Value, key: &str, value: Value| {
         item[key] = value;
         item
     };
-    let invites = m.groups.values().filter(|g| g.invited.contains_key(user)).count();
+    let invites = m.groups().iter().filter(|g| g.invited.contains_key(user)).count();
     let mut out: Vec<Value> = passkeys.map(|url| with(item("passkeys", "Passkeys", "key", "#8e8e93"), "url", json!(url))).into_iter().collect();
     let requests = invites + items_asked;
     if requests > 0 {
         out.push(with(item("requests", "Requests", "tray", "#ff2d55"), "badge", json!(requests)));
     }
-    if m.apps.get(store).is_some_and(|a| !a.erased && a.deleted.is_none()) {
+    if m.app(store).is_some_and(|a| !a.erased && a.deleted.is_none()) {
         out.push(with(item("store", "App Store", "squares-four", "#007aff"), "app", json!(store)));
     }
     out.extend([
@@ -202,7 +208,7 @@ fn settings_items(m: &Members, user: &str, items_asked: usize, backups: bool, st
         item("vault", "Vault", "lock", "#5856d6"),
         item("appearance", "Appearance", "circle-half", "#007aff"),
     ]);
-    if me.role == Role::Admin {
+    if m.may(&me.id, "change-settings", INSTALL) {
         out.push(item("general", "General", "sliders-horizontal", "#8e8e93"));
         let backed = item("backups", "Backups", "hard-drives", "#ff9500");
         out.push(if backups { with(backed, "badge", json!(1)) } else { backed });

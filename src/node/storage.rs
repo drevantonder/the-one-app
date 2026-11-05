@@ -10,9 +10,9 @@ use super::*;
 pub const STORAGE: &str = "storage";
 
 /// The install's bucket as its `storage` setting says, if it has one: S3's address alone, never a folder's path.
-fn storage_setting(m: &Members) -> Result<Option<BTreeMap<String, String>>> {
-    let Some(value) = m.settings.get(STORAGE) else { return Ok(None) };
-    let fields: BTreeMap<String, String> = serde_json::from_str(value).context("the storage setting isn't an S3 address")?;
+fn storage_setting(m: &ScopeDb) -> Result<Option<BTreeMap<String, String>>> {
+    let Some(value) = m.setting(STORAGE) else { return Ok(None) };
+    let fields: BTreeMap<String, String> = serde_json::from_str(&value).context("the storage setting isn't an S3 address")?;
     ensure!(fields.keys().all(|k| ["endpoint", "bucket", "region"].contains(&k.as_str())), "the storage setting names only S3's endpoint, bucket and region");
     ensure!(fields.contains_key("endpoint") && fields.contains_key("bucket"), "the storage setting names S3's endpoint and bucket");
     Ok(Some(fields))
@@ -38,7 +38,7 @@ impl Node {
         let joined = fields.get("address").cloned();
         let address: crate::bucket::Address = Arc::new(move || {
             let node = Node(node.upgrade().context("this device stopped")?);
-            node.with(|i| Ok(i.r.members.settings.get("address").cloned()))?.or_else(|| joined.clone()).context("your One App has no address yet, where its bucket is reached: an admin sets one with kernel use")
+            node.with(|i| Ok(i.r.db().setting("address")))?.or_else(|| joined.clone()).context("your One App has no address yet, where its bucket is reached: an admin sets one with kernel use")
         });
         Place::install(fields, address, ed25519_dalek::SigningKey::from_bytes(self.0.key.as_bytes()))
     }
@@ -48,7 +48,7 @@ impl Node {
     /// it can.
     pub async fn set_storage(&self, caller: &Caller, body: &Value) -> Result<Value> {
         self.with(|i| {
-            ensure!(members::manages_scope(&i.r.members, &caller.user, &Scope::Global), "only admins move the install's data");
+            ensure!(i.r.db().may(&caller.user, "change-settings", scopes::INSTALL), "only admins move the install's data");
             Ok(())
         })?;
         let fields: BTreeMap<String, String> = ["endpoint", "bucket", "region"]
@@ -85,7 +85,7 @@ impl Node {
 
     /// Follows the install's `storage` setting, when this device keeps its data anywhere else: in the background.
     pub(super) fn follow_storage(&self) {
-        let wanted = self.with(|i| Ok(storage_setting(&i.r.members)?.filter(|f| i.bucket.as_ref().is_none_or(|(_, now)| now.iter().filter(|(k, _)| k.as_str() != "address").ne(f.iter())))));
+        let wanted = self.with(|i| Ok(storage_setting(i.r.db())?.filter(|f| i.bucket.as_ref().is_none_or(|(_, now)| now.iter().filter(|(k, _)| k.as_str() != "address").ne(f.iter())))));
         let fields = match wanted {
             Ok(Some(fields)) => fields,
             Ok(None) => return,

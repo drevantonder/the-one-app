@@ -165,7 +165,7 @@ impl Node {
 
     /// Whose client device `key` is, and its name: none if it isn't a device of the install, or was removed.
     pub fn client(&self, key: &Key) -> Option<(String, String)> {
-        self.with(|i| Ok(i.r.members.client(key).map(|m| (m.user.clone(), m.name.clone())))).ok().flatten()
+        self.with(|i| Ok(i.r.db().client(key).map(|m| (m.user.clone(), m.name.clone())))).ok().flatten()
     }
 
     /// `client`, after reading `global`'s newest entries if this device doesn't list `key`: a device just approved on
@@ -226,8 +226,8 @@ impl Node {
         // with it. And only epochs an entry made: a key for one beyond is junk, or for one this device hasn't read
         // yet, which a call that needs it asks for again.
         let newest: HashMap<String, u32> = self.with(|i| {
-            let m = &i.r.members;
-            Ok(handoff.keys.iter().filter_map(|k| Scope::parse(&k.scope).ok().filter(|s| m.may_use(user, s)).map(|s| (k.scope.clone(), m.epoch(&s)))).collect())
+            let m = i.r.db();
+            Ok(handoff.keys.iter().filter_map(|k| Scope::parse(&k.scope).ok().filter(|s| m.may(user, "use", &scopes::object(s))).map(|s| (k.scope.clone(), m.epoch(&s)))).collect())
         })?;
         let keys: Vec<crate::keys::Handed> = handoff.keys.into_iter().filter(|k| newest.get(&k.scope).is_some_and(|n| k.epoch >= 1 && k.epoch <= *n)).collect();
         let mut kept = self.0.sessions.kept.lock().unwrap();
@@ -295,12 +295,12 @@ impl Node {
     /// who opens it uses it here. Of each epoch, only a key that opens what the bucket holds under it, so nobody's key
     /// has this device pass over the real entries or write any it can't be read by (`log_opens`).
     pub(super) async fn handed_log(&self, scope: &Scope) -> Result<Keys> {
-        let (now, newest) = (now_ms(), self.with(|i| Ok(i.r.members.epoch(scope)))?);
+        let (now, newest) = (now_ms(), self.with(|i| Ok(i.r.db().epoch(scope)))?);
         let id = (scope.to_string(), members::APP.to_string(), crate::log::NAME.to_string());
         let handed: Vec<(String, Keys)> = self.0.sessions.kept.lock().unwrap().values().filter(|s| s.live(now)).filter_map(|s| s.keys.get(&id).map(|k| (s.user.clone(), k.clone()))).collect();
         let mut offered: BTreeMap<u32, Vec<[u8; 32]>> = BTreeMap::new();
         self.with(|i| {
-            for (_, by) in handed.iter().filter(|(user, _)| i.r.members.may_use(user, scope)) {
+            for (_, by) in handed.iter().filter(|(user, _)| i.r.db().may(user, "use", &scopes::object(scope))) {
                 for (n, k) in by.iter().filter(|(n, _)| **n <= newest) {
                     let keys = offered.entry(*n).or_default();
                     if !keys.contains(k) {
@@ -383,8 +383,8 @@ impl Node {
             return Ok(());
         }
         let want: Vec<(Scope, &str, &str)> = self.with(|i| {
-            let m = &i.r.members;
-            Ok(m.scopes().into_iter().filter(|s| *s != Scope::Global && i.r.holds(s) && m.may_use(&me.user, s) && m.epoch(s) > 0 && !self.opens(m, s)).map(|s| (s, members::APP, crate::log::NAME)).collect())
+            let m = i.r.db();
+            Ok(m.scopes().into_iter().filter(|s| *s != Scope::Global && i.r.holds(s) && m.may(&me.user, "use", &scopes::object(s)) && m.epoch(s) > 0 && !self.opens(m, s)).map(|s| (s, members::APP, crate::log::NAME)).collect())
         })?;
         self.needs(me, &want).await?;
         for (scope, ..) in &want {
@@ -394,14 +394,14 @@ impl Node {
     }
 
     /// Whether this device opens a scope with its own keys: it's a client device of someone who uses it.
-    pub(super) fn opens(&self, m: &Members, scope: &Scope) -> bool {
+    pub(super) fn opens(&self, m: &ScopeDb, scope: &Scope) -> bool {
         *scope == Scope::Global || super::databases::clients_of(m, scope).iter().any(|(k, _)| *k == self.0.id)
     }
 
     /// A scope's newest epoch: the newest an `epoch` entry that counts made, whatever the bucket holds. 0 while it has
     /// none.
     pub(super) async fn newest_epoch(&self, scope: &Scope) -> Result<u32> {
-        self.with(|i| Ok(i.r.members.epoch(scope)))
+        self.with(|i| Ok(i.r.db().epoch(scope)))
     }
 
     /// The keys a token caller needs for `want`'s databases, (scope, app, database) each, that it wasn't handed: every
@@ -414,7 +414,7 @@ impl Node {
         // oldest it needs is, and none is older than the first.
         let handed_all = |(scope, app, database): &(Scope, &str, &str)| -> Result<bool> {
             let handed = self.handed(me, scope, app, database);
-            Ok((1..=self.with(|i| Ok(i.r.members.epoch(scope)))?.max(1)).all(|n| handed.contains_key(&n)))
+            Ok((1..=self.with(|i| Ok(i.r.db().epoch(scope)))?.max(1)).all(|n| handed.contains_key(&n)))
         };
         let mut lacking = Vec::new();
         for w in want {

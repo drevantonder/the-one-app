@@ -81,7 +81,7 @@ impl Node {
     /// epoch but its entry. The newest must be one of them. With `make`, a scope with no epoch yet gets its first here,
     /// if this device's person may make it: an admin of the group, or the person whose scope it is.
     pub(crate) async fn epoch_keys(&self, scope: &Scope, make: bool) -> Result<crate::db::Keys> {
-        let hashes = self.with(|i| Ok(epoch_hashes(&i.r.members, scope)))?;
+        let hashes = self.with(|i| Ok(i.r.db().epoch_hashes(scope)))?;
         let newest = hashes.keys().next_back().copied().unwrap_or(0);
         let kept = self.0.epochs.lock().unwrap().get(scope).cloned().unwrap_or_default();
         // Kept only while each is still the one its entry made.
@@ -160,8 +160,9 @@ impl Node {
             }
             let read = crate::log::open(&bucket, &log_keys, &prefix, "global").await?;
             let member_entries: Vec<Entry> = crate::entry::causal(read.entries.clone(), &HashMap::new()).into_iter().filter(members::is_member_entry).collect();
-            let m = Members::replay(root, &member_entries, &Default::default());
-            let wrong: Vec<u32> = candidates.iter().filter(|(n, k)| m.epoch_hash(&Scope::Global, **n) != Some(crate::keys::epoch_hash(k).as_str())).map(|(n, _)| *n).collect();
+            let m = crate::members::Members::replay(root, &member_entries, &Default::default());
+            let db = scopes::ScopeDb::build(&m, &Scope::Global, &Default::default(), now_ms())?;
+            let wrong: Vec<u32> = candidates.iter().filter(|(n, k)| db.epoch_hash(&Scope::Global, **n) != Some(crate::keys::epoch_hash(k))).map(|(n, _)| *n).collect();
             if wrong.is_empty() {
                 self.0.epochs.lock().unwrap().insert(Scope::Global, candidates.clone());
                 return Ok((candidates, read));
@@ -179,10 +180,11 @@ impl Node {
     /// If two are made at once all the same, the one first in causal order counts, and the other's key is dropped.
     async fn make_first_epoch(&self, scope: &Scope) -> Result<crate::db::Keys> {
         let _making = self.0.making_keys.lock().await;
-        if self.with(|i| Ok(i.r.members.epoch(scope)))? > 0 {
+        if self.with(|i| Ok(i.r.db().epoch(scope)))? > 0 {
             return Box::pin(self.epoch_keys(scope, false)).await;
         }
-        let (may, recovery) = self.with(|i| Ok((i.r.members.role_in(&i.user, scope) == Some(Role::Admin), i.r.members.recovery)))?;
+        // A scope's first keys are its admins' to make, as they keep its apps running.
+        let (may, recovery) = self.with(|i| Ok((i.r.db().may(&i.user, "keep", &scopes::object(scope)), i.r.db().recovery())))?;
         ensure!(may, NotGiven(scope.clone(), self.device_name()));
         let recovery = recovery.context("the install has no recovery key to seal its keys to")?;
         let key: [u8; 32] = rand::random();
@@ -193,16 +195,16 @@ impl Node {
             for _ in 0..50 {
                 tokio::time::sleep(Duration::from_millis(100)).await;
                 self.read_log(&Scope::Global).await?;
-                if self.with(|i| Ok(i.r.members.epoch(scope)))? > 0 {
+                if self.with(|i| Ok(i.r.db().epoch(scope)))? > 0 {
                     return self.settled_first_epoch(scope).await;
                 }
             }
             tracing::warn!("{scope}'s first epoch was begun but no entry made it: making it here");
         }
-        let to = self.with(|i| Ok(clients_of(&i.r.members, scope)))?;
+        let to = self.with(|i| Ok(clients_of(i.r.db(), scope)))?;
         let hash = crate::keys::epoch_hash(&key);
         self.append(&Scope::Global, members::node("epoch", json!({ "scope": name, "n": 1, "to": to.iter().map(|(k, _)| hex(k)).collect::<Vec<_>>(), "hash": hash }))).await?;
-        if self.with(|i| Ok(i.r.members.epoch_hash(scope, 1) != Some(hash.as_str())))? {
+        if self.with(|i| Ok(i.r.db().epoch_hash(scope, 1).as_deref() != Some(hash.as_str())))? {
             tracing::info!("another device made {scope}'s first epoch first: its key is used");
             return self.settled_first_epoch(scope).await;
         }
@@ -243,7 +245,7 @@ impl Node {
     async fn seal_epoch(&self, scope: &Scope, keys: &crate::db::Keys) -> Result<()> {
         use crate::bucket::Bucket;
         let bucket = self.bucket()?;
-        let to = self.with(|i| Ok(clients_of(&i.r.members, scope).into_iter().filter(|(k, _)| *k != self.0.id).collect::<Vec<_>>()))?;
+        let to = self.with(|i| Ok(clients_of(i.r.db(), scope).into_iter().filter(|(k, _)| *k != self.0.id).collect::<Vec<_>>()))?;
         for (n, key) in keys {
             for (device, seal) in &to {
                 let name = crate::keys::epoch_name(&scope.to_string(), *n, &hex(device));
@@ -310,10 +312,10 @@ impl Node {
     /// epoch's (true), since its entry is written before anything is sealed under it; or, if no entry made it, junk
     /// (false), which every read of it here passes over from now on.
     async fn judge_ahead(&self, scope: &Scope, prefix: &str, ahead: &crate::db::Ahead) -> Result<bool> {
-        if self.with(|i| Ok(i.r.members.epoch(scope)))? < ahead.epoch {
+        if self.with(|i| Ok(i.r.db().epoch(scope)))? < ahead.epoch {
             tokio::time::timeout(Duration::from_secs(10), self.read_log(&Scope::Global)).await.map_err(|_| anyhow!("global's entries didn't come in time to say what {prefix}'s step {} is", ahead.at))??;
         }
-        if self.with(|i| Ok(i.r.members.epoch(scope)))? >= ahead.epoch {
+        if self.with(|i| Ok(i.r.db().epoch(scope)))? >= ahead.epoch {
             return Ok(true);
         }
         tracing::warn!("{prefix}'s step {} is under epoch {}, which no entry made: passed over", ahead.at, ahead.epoch);
@@ -478,13 +480,8 @@ impl Node {
     }
 }
 
-/// Each epoch of a scope an entry that counts made, by number: its hash.
-fn epoch_hashes(m: &Members, scope: &Scope) -> BTreeMap<u32, String> {
-    m.epoch_hashes.range((scope.clone(), 0)..=(scope.clone(), u32::MAX)).map(|((_, n), h)| (*n, h.clone())).collect()
-}
-
 /// The client devices of everyone who uses a scope, with the keys they're sealed to: whom its epochs are sealed to,
 /// besides the recovery key. A machine that is its person's client is one; compute alone never is.
-pub(super) fn clients_of(m: &Members, scope: &Scope) -> Vec<(Key, [u8; 32])> {
-    m.clients().filter(|d| m.may_use(&d.user, scope)).map(|d| (d.key, d.seal)).collect()
+pub(super) fn clients_of(db: &ScopeDb, scope: &Scope) -> Vec<(Key, [u8; 32])> {
+    db.clients().into_iter().filter(|d| db.may(&d.user, "use", &scopes::object(scope))).map(|d| (d.key, d.seal)).collect()
 }
