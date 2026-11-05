@@ -941,18 +941,18 @@ impl Node {
                 let params = req["params"].as_array().cloned().unwrap_or_default();
                 ok(json!({ "ok": self.call_db(token, grant, &scope).await?.query(req["sql"].as_str().unwrap_or(""), &params)? }))
             }
-            // Whether the caller may do a permission to an object (`ctx.<scope>.may`): the core's rows, and the app's
-            // own types (its `types`) and rows (its database's `relations` in that scope).
+            // Whether the caller may do each permission to each object asked (`ctx.<scope>.may`), in order: the core's
+            // rows, and the app's own types (its `types`) and rows (its database's `relations` in that scope).
             ("POST", "/may") => {
                 let req: Value = serde_json::from_slice(&body)?;
                 let scope = Scope::parse(req["scope"].as_str().unwrap_or(""))?;
-                let (verb, object) = (req["permission"].as_str().unwrap_or(""), req["object"].as_str().unwrap_or(""));
+                let asks: Vec<(String, String)> = serde_json::from_value(req["asks"].clone())?;
                 let types = self.0.apps.describe(&grant.app).await?["types"].clone();
                 let rows = match types.as_object().is_some_and(|t| !t.is_empty()) {
                     true => crate::database::scopes::app_relations(self.call_db(token, grant, &scope).await?.connection()),
                     false => Vec::new(),
                 };
-                ok(json!({ "ok": self.with(|i| Ok(i.r.db().app_may(&grant.caller.user, verb, object, &types, &rows, now_ms())))? }))
+                ok(json!({ "ok": self.with(|i| Ok(i.r.db().app_may(&grant.caller.user, &asks, &types, &rows, now_ms())))? }))
             }
             ("GET", "/vault") => ok(json!(self.lookup(&grant.caller, &grant.app, &grant.scopes).await?.for_app())),
             ("POST", "/vault/match") => {

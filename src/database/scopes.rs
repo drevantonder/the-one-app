@@ -153,14 +153,15 @@ impl ScopeDb {
         permissions::may_take(&self.db, &person(taker), &person(user), relation, object, self.now).unwrap_or(false)
     }
 
-    /// Whether `user` may do `verb` to `object` (`ctx.<scope>.may` in an app), by the core's rows and an app's own:
+    /// Whether `user` may do each verb to each object of `asks`, in order (`ctx.<scope>.may` in an app), by the core's
+    /// rows and an app's own, worked out once for them all:
     /// `types` as its code declares them (`{ <type>: { permissions: [verbs], roles: { <role>: [verbs] } } }`), and
     /// `rows` its relations (`app_relations`). An app's types follow the core's rules but never touch the core's: a
     /// type the core has is the core's, so an app's of that name counts for nothing; only its rows on its own types
     /// count, and never a rule (`#…`, `@`, `*`). Asked in a transaction that's rolled back, so the database stays as
     /// replay built it.
-    pub fn app_may(&self, user: &str, verb: &str, object: &str, types: &Value, rows: &[Relation], now: u64) -> bool {
-        let ask = || -> Result<bool> {
+    pub fn app_may(&self, user: &str, asks: &[(String, String)], types: &Value, rows: &[Relation], now: u64) -> Vec<bool> {
+        let ask = || -> Result<Vec<bool>> {
             let tx = self.db.unchecked_transaction()?;
             let mut own = BTreeSet::new();
             for (name, t) in types.as_object().into_iter().flatten() {
@@ -181,11 +182,11 @@ impl ScopeDb {
                 }
             }
             permissions::close(&tx, Some(&person(user)))?;
-            permissions::may(&tx, &person(user), verb, object, now)
+            asks.iter().map(|(verb, object)| permissions::may(&tx, &person(user), verb, object, now)).collect()
         };
         ask().unwrap_or_else(|err| {
-            tracing::warn!("asking who may {verb} {object} in an app: {err:#}");
-            false
+            tracing::warn!("asking what {user} may do in an app: {err:#}");
+            vec![false; asks.len()]
         })
     }
 
@@ -778,7 +779,7 @@ pub(crate) mod tests {
         .collect();
         let count = |table: &str| db.db.query_row(&format!("SELECT count(*) FROM {table}"), [], |r| r.get::<_, i64>(0)).unwrap();
         let before = (count("types"), count("roles"), count("relations"));
-        let may = |who: &str, verb: &str, object: &str| db.app_may(who, verb, object, &types, &rows, 0);
+        let may = |who: &str, verb: &str, object: &str| db.app_may(who, &[(verb.into(), object.into())], &types, &rows, 0) == [true];
         assert!(may("alice", "push", "repo:1") && may("alice", "manage", "repo:1"));
         assert!(may("bob", "push", "repo:1") && !may("bob", "manage", "repo:1"));
         assert!(may("dave", "push", "repo:1") && !may("dave", "manage", "repo:1"));
@@ -786,6 +787,8 @@ pub(crate) mod tests {
         assert!(!may("erin", "push", "repo:1"));
         assert!(!may("carol", "change-roles", INSTALL) && !may("carol", "use", "group:g"));
         assert!(may("alice", "use", "group:g") && !may("dave", "push", "repo:2"));
+        let asks = [("push", "repo:1"), ("manage", "repo:1"), ("push", "repo:2")].map(|(v, o)| (v.to_string(), o.to_string()));
+        assert_eq!(db.app_may("bob", &asks, &types, &rows, 0), [true, false, false]);
         assert_eq!((count("types"), count("roles"), count("relations")), before);
     }
 }

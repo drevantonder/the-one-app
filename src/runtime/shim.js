@@ -112,8 +112,13 @@ function context(ask, body, appends, later) {
     /// call has returned.
     query: async (q, params = []) => (await (await ask("query", { method: "POST", body: JSON.stringify({ scope: s.id, sql: q, params }) })).json()).ok,
     /// Whether the caller may do `permission` (a verb) to `object` (`<type>:<id>`), as the core's rows and this scope's
-    /// `relations`, by the app's own `types`, say: `may("push", "repo:" + id)`, `may("use", "group:" + id)`.
-    may: async (permission, object) => (await (await ask("may", { method: "POST", body: JSON.stringify({ scope: s.id, permission, object }) })).json()).ok === true,
+    /// `relations`, by the app's own `types`, say: `may("push", "repo:" + id)`, `may("use", "group:" + id)`. Given a
+    /// list of [permission, object], whether to each, in order, asked at once: `may([["push", a], ["manage", a]])`.
+    may: async (permission, object) => {
+      const asks = Array.isArray(permission) ? permission : [[permission, object]];
+      const ok = (await (await ask("may", { method: "POST", body: JSON.stringify({ scope: s.id, asks }) })).json()).ok;
+      return Array.isArray(permission) ? ok : ok[0] === true;
+    },
     /// Writes this scope's database once the call returns, with every other statement it ran, as one transaction;
     /// `blobs` are blobs the scope keeps from now on.
     exec: (q, params = [], blobs = []) => {

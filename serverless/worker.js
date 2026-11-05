@@ -643,12 +643,12 @@ class Call {
     return this.on(scope, (handle) => JSON.parse(query(handle, sql, JSON.stringify(params))));
   }
 
-  /// Whether the caller may do `permission` to `object`: the core's rows, and the app's own types and its rows in
-  /// `scope` (src/node/calls.rs: `/may`).
-  async may(scope, permission, object) {
+  /// Whether the caller may do each permission to each object of `asks` (`[[permission, object]]`), in order: the
+  /// core's rows, and the app's own types and its rows in `scope` (src/node/calls.rs: `/may`).
+  async may(scope, asks) {
     if (!this.scopes.includes(scope)) refuse(403, `the call didn't name ${scope}`);
     const types = (await this.person.describe(this.who, this.app)).types;
-    const ask = (handle) => may(this.person.owner, handle, this.who.user, permission, object, JSON.stringify(types || {}), Date.now());
+    const ask = (handle) => JSON.parse(may(this.person.owner, handle, this.who.user, JSON.stringify(asks), JSON.stringify(types || {}), Date.now()));
     return types ? this.on(scope, ask) : ask(undefined);
   }
 
@@ -844,7 +844,7 @@ class ForCall extends RpcTarget {
         case "POST query":
           return Response.json({ ok: await this.call.query(q.scope, q.sql, q.params || []) });
         case "POST may":
-          return Response.json({ ok: await this.call.may(q.scope, q.permission, q.object) });
+          return Response.json({ ok: await this.call.may(q.scope, q.asks) });
         case "POST appends":
           await this.call.write(q.appends || []);
           return Response.json({});
