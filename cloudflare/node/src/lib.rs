@@ -837,6 +837,12 @@ fn view(r: &Replays, me: &str, client: &str, now: u64) -> Value {
             if global {
                 reach.push(Scope::Global);
             }
+            // Only those this node runs, if it runs some, as a node on a machine leaves out a person's own scope that
+            // no node running the rest runs (src/node/calls.rs: `reaching`): their own, until they choose this one.
+            let runs = |s: &Scope| m.cloudflare_node().is_some_and(|k| m.runs_for(&k, s));
+            if reach.iter().any(runs) {
+                reach.retain(runs);
+            }
             info["reach"] = Value::from(reach.iter().map(handle).collect::<Vec<_>>());
             info
         })
