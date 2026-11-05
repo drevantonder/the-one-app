@@ -1273,36 +1273,74 @@ fn status(state: &Value) {
             println!("  {}  {}", g["name"].as_str().unwrap_or(""), members.join(", "));
         }
     }
+    let apps = get("/v1/apps").ok().and_then(|a| a.as_array().cloned()).unwrap_or_default();
+    let title = |app: &str| apps.iter().find(|a| a["name"] == app).and_then(|a| a["title"].as_str()).unwrap_or(app).to_string();
+    // A service has an endpoint of its own, which the node's list gives with the machines: a person reads it as a line
+    // under the node it runs on, with the ones switched off there.
+    let all = i["devices"].as_array().cloned().unwrap_or_default();
     println!("\nDevices");
-    for s in i["devices"].as_array().into_iter().flatten() {
+    for s in all.iter().filter(|s| s["service"].is_null()) {
         let dot = if s["online"] == true { "●" } else { "○" };
         // As a device, the node that answered is "here" to itself, not to this computer.
         let here = if s["here"] == true && client_device::me().is_none() { " (this one)" } else { "" };
         let serves = if s["serves_me"] == true { "" } else { ", doesn't run yours" };
         let build = s["build"].as_str().map(|b| format!("  {b}")).unwrap_or_default();
-        // A service endpoint is named for its machine; a person reads it as its service on that machine.
-        let shown = match s["service"].as_str() {
-            Some(service) => format!("{service} on {}", s["name"].as_str().unwrap_or("")),
-            None => s["name"].as_str().unwrap_or("").to_string(),
+        println!("  {dot} {}{here}  {}'s{serves}{build}", s["name"].as_str().unwrap_or(""), name(s["user"].as_str().unwrap_or("")));
+        // What it runs, as its own list says (its person's and the admins' to see), the services registered with it, and
+        // those with endpoints of their own; the app runtime isn't one.
+        let named = |list: &Value, field: &str| list.as_array().into_iter().flatten().filter_map(|d| d[field].as_str().map(str::to_string)).collect::<Vec<_>>();
+        let parts = s["parts"].as_array().cloned().unwrap_or_default();
+        let off: std::collections::BTreeSet<String> = named(&s["off_services"], "name").into_iter().chain(parts.iter().filter(|p| p["on"] != true).filter_map(|p| p["name"].as_str().map(str::to_string))).collect();
+        let on: std::collections::BTreeSet<String> = named(&s["installed_services"], "name")
+            .into_iter()
+            .chain(all.iter().filter(|p| p["device"] == s["key"]).filter_map(|p| p["service"].as_str().map(str::to_string)))
+            .chain(parts.iter().filter(|p| p["on"] == true).filter_map(|p| p["name"].as_str().map(str::to_string)))
+            .filter(|n| !off.contains(n))
+            .collect();
+        let list = |names: &std::collections::BTreeSet<String>| {
+            let mut titles: Vec<String> = names.iter().filter(|n| n.as_str() != "apps").map(|n| title(n)).collect();
+            titles.sort_by_key(|t| t.to_lowercase());
+            titles
         };
-        println!("  {dot} {shown}{here}  {}'s{serves}{build}", name(s["user"].as_str().unwrap_or("")));
+        let (on, off) = (list(&on), list(&off));
+        if !on.is_empty() || !off.is_empty() {
+            let off = if off.is_empty() { String::new() } else { format!("{}off: {}", if on.is_empty() { "" } else { "; " }, off.join(", ")) };
+            println!("      Services: {}{off}", on.join(", "));
+        }
     }
     // Not a device, but a node like the rest: woken when asked, in its place in run priority.
     if let Some(priority) = i["serverless"].get("priority") {
         let at = priority.as_u64().map_or("last".to_string(), |n| n.to_string());
         println!("  ● Cloudflare node  run priority {at}");
     }
+    // A device that's only a client, a phone or a computer, is listed with them; a browser is a sign-in, not a device.
     let clients = i["clients"].as_array().cloned().unwrap_or_default();
+    let (browsers, clients): (Vec<Value>, Vec<Value>) = clients.into_iter().partition(|c| c["passkey"] == true || is_browser(c["name"].as_str().unwrap_or("")));
+    let this = |c: &Value| if client_device::me().is_some_and(|(_, key)| c["key"] == key) { " (this one)" } else { "" };
+    for c in &clients {
+        // A phone keeps no log and holds no sessions: say when it last asked this device, not that it's offline.
+        let asked = c["asked"].as_u64().map(|t| format!(", asked here {}", ago(t))).unwrap_or_default();
+        let glyph = if is_phone(c["name"].as_str().unwrap_or("")) { "▯" } else { "▭" };
+        println!("  {glyph} {}{}  {}'s{asked}", c["name"].as_str().unwrap_or(""), this(c), name(c["user"].as_str().unwrap_or("")));
+    }
     switch_gate(&i["switch"], &name);
-    if !clients.is_empty() {
-        println!("\nPhones");
-        for c in &clients {
-            // A phone keeps no log and holds no sessions: say when it last asked this device, not that it's offline.
-            let asked = c["asked"].as_u64().map(|t| format!(", asked here {}", ago(t))).unwrap_or_default();
-            let here = if client_device::me().is_some_and(|(_, key)| c["key"] == key) { " (this one)" } else { "" };
-            println!("  ▯ {}{here}  {}{asked}", c["name"].as_str().unwrap_or(""), name(c["user"].as_str().unwrap_or("")));
+    if !browsers.is_empty() {
+        println!("\nBrowsers");
+        for c in &browsers {
+            println!("  {}{}  {}", c["name"].as_str().unwrap_or(""), this(c), name(c["user"].as_str().unwrap_or("")));
         }
     }
+}
+
+/// What a client's name says it is, as our own apps name themselves ("iPhone", "The One App on Andre’s MacBook Air",
+/// "Chrome on Mac"): Settings reads them the same way.
+fn is_browser(name: &str) -> bool {
+    ["Chrome", "Safari", "Firefox", "Edge", "A browser"].iter().any(|b| name.strip_prefix(b).is_some_and(|rest| rest.is_empty() || rest.starts_with(" on ")))
+}
+
+fn is_phone(name: &str) -> bool {
+    let name = name.to_lowercase();
+    ["phone", "ipad", "tablet", "android", "pixel", "galaxy"].iter().any(|w| name.contains(w))
 }
 
 /// Where the switch to the scope database is (`database::switch`), for an admin: the devices it waits for, each

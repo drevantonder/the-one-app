@@ -22,7 +22,7 @@ struct MenuPanel: View {
                 .padding(.bottom, 8)
 
                 SectionTitle("Your Devices")
-                ForEach(install.devices.filter { $0.user == store.me?.id }) { device in
+                ForEach(install.devices.filter { $0.user == store.me?.id && $0.service == nil }) { device in
                     HStack(spacing: 8) {
                         Circle()
                             .fill(device.isOnline ? Kit.text : Kit.faint)

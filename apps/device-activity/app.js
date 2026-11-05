@@ -23,7 +23,8 @@ const share = (m, host) => (m ? { used: m.used, total: m.total || host?.total ||
 
 /// Every device, each container that is a device itself right after its host, then the host's other containers.
 async function devices(ctx) {
-  const all = await ctx.devices();
+  // A service has an endpoint of its own in that list: it's a part of its node, not another device.
+  const all = (await ctx.devices()).filter((s) => !s.service);
   const byName = new Map(all.map((s) => [s.name, s]));
   const host = new Map();
   for (const s of all) for (const c of s.load?.containers || []) if (byName.has(c.name) && c.name !== s.name) host.set(c.name, s.name);
