@@ -97,9 +97,9 @@
 <script>
   // This person's devices, in three tabs: Devices (each of theirs, with Rename and Remove, Add a Device, their
   // browsers), Priority (the order every device runs apps in, an admin's to change) and Services (what each of their
-  // devices runs, switched by tapping). Devices waiting to be let in show on top of every tab, approved by tapping
-  // (where this device holds its own keys, `device.keys`); under Devices, what their devices keep running for them,
-  // and a passkey to get back in with.
+  // devices runs, switched by tapping). Devices waiting to be let in show on top of every tab, approved by tapping;
+  // under Devices, where this device holds its own keys (`device.keys`, the web client), what their devices keep
+  // running for them, and a passkey to get back in with.
   let state, device, apps = [], passkey = false, waiting = [], seen = {}, seenRead = false;
   let error = "";
   let tab = ["devices", "priority", "services"].includes(one.params?.tab) ? one.params.tab : "devices";
@@ -557,11 +557,14 @@
 
   const draw = () => one.render("#page", async () => {
     [state, device] = await Promise.all([one.api("GET", "/v1/state"), one.device()]);
-    const asks = [!apps.length ? one.api("GET", "/v1/apps").then((a) => (apps = a), () => {}) : null];
+    // Who waits, from a node or the web client itself; one with no code to compare is an older node's, not shown.
+    const asks = [
+      !apps.length ? one.api("GET", "/v1/apps").then((a) => (apps = a), () => {}) : null,
+      one.api("GET", "/v1/devices/requests").then((w) => (waiting = w.filter((r) => r.code)), () => {}),
+    ];
     if (device.keys) {
       asks.push(
         one.api("GET", "/v1/devices/passkey").then((p) => (passkey = p.passkey === true), () => {}),
-        one.api("GET", "/v1/devices/requests").then((w) => (waiting = w.filter((r) => r.code)), () => {}),
         one.api("GET", "/v1/devices/seen").then((s) => ((seen = s || {}), (seenRead = true)), () => {}),
       );
     }

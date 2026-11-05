@@ -170,6 +170,12 @@ pub struct DeviceRequest {
     /// For a native app, the device it's on (hex): its oned's key, or an id of the device's own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub device: Option<String>,
+    /// When it asked (ms).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub made: Option<u64>,
+    /// The city it asked from, as Cloudflare placed it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub place: Option<String>,
 }
 
 impl DeviceRequest {
@@ -205,6 +211,16 @@ fn waiting(asked: Vec<DeviceRequest>, code: &str) -> Result<DeviceRequest> {
     let r = found.next().context("no device is waiting with that code: it waits 15 minutes after it asks")?;
     ensure!(found.next().is_none(), "two devices are waiting with that code, so neither was let in: start again on yours, for a new code");
     Ok(r)
+}
+
+/// Whether `caller` may answer request `r`: `Some(None)` for one of their own devices, `Some(invite)` for the first
+/// device of someone they invited, whose proof is that invite's.
+fn mine_or_invited<'a>(r: &DeviceRequest, caller: &Caller, invites: &'a BTreeMap<String, Invited>, device: &crate::keys::Endpoint) -> Option<Option<&'a Invited>> {
+    match (&r.proof, invites.get(&r.user)) {
+        (None, _) if r.user == caller.user => Some(None),
+        (Some(proof), Some(i)) if *proof == crate::keys::invite_proof(i.secret.as_bytes(), device) => Some(Some(i)),
+        _ => None,
+    }
 }
 
 /// A join code as someone types it: its letters, upper case, without spaces or dashes.
@@ -340,24 +356,57 @@ impl Node {
     }
 
     /// The requests to join that `caller` may approve, as auth lists them to this device: their own devices', and
-    /// those of the people they invited whose proof is right. A request of their own is shown without its code, which
-    /// only the device asking shows; a newcomer's with it, as their proof says it's theirs.
+    /// those of the people they invited whose proof is right, but those they said weren't theirs. Each with its code,
+    /// which the device asking shows too, to compare, and when and where it asked from.
     pub async fn device_requests(&self, caller: &Caller) -> Result<Vec<Value>> {
         let asked: Value = self.ask_auth("GET", "/api/auth/devices/requests", json!({})).await?;
         let asked: Vec<DeviceRequest> = serde_json::from_value(asked["requests"].clone()).context("auth's requests aren't requests")?;
         let invites = if caller.user == self.user()? { self.invites().await? } else { BTreeMap::new() };
+        let refused = self.0.refused.lock().unwrap().clone();
         let mut out = Vec::new();
         for r in asked {
             let Ok(device) = r.endpoint() else { continue };
-            match (&r.proof, invites.get(&r.user)) {
-                (None, _) if r.user == caller.user => out.push(json!({ "device": r.name, "person": r.person, "yours": true })),
-                (Some(proof), Some(i)) if *proof == crate::keys::invite_proof(i.secret.as_bytes(), &device) => {
-                    out.push(json!({ "device": r.name, "person": i.name, "code": crate::keys::join_code(&device), "role": i.role }))
-                }
-                _ => {}
+            if refused.contains(&r.key) {
+                continue;
             }
+            let mut shown = match mine_or_invited(&r, caller, &invites, &device) {
+                Some(None) => json!({ "device": r.name, "person": r.person, "yours": true }),
+                Some(Some(i)) => json!({ "device": r.name, "person": i.name, "role": i.role, "new": true }),
+                None => continue,
+            };
+            // As the device asking shows it: "ABCD EFGH".
+            let code = crate::keys::join_code(&device);
+            shown["code"] = json!(format!("{} {}", &code[..4], &code[4..]));
+            if let Some(made) = r.made {
+                shown["made"] = json!(made);
+            }
+            if let Some(place) = &r.place {
+                shown["place"] = json!(place);
+            }
+            out.push(shown);
         }
         Ok(out)
+    }
+
+    /// Turns down the device whose join code is `code`, one `caller` may approve: its request is forgotten at auth, and
+    /// it isn't shown here again when it asks again. → which it was.
+    pub async fn refuse_device(&self, caller: &Caller, code: &str) -> Result<Value> {
+        let code = code_of(code);
+        ensure!(code.len() == 8, "a code is the 8 letters and digits the new device shows");
+        let asked: Value = self.ask_auth("GET", "/api/auth/devices/requests", json!({})).await?;
+        let asked: Vec<DeviceRequest> = serde_json::from_value(asked["requests"].clone()).context("auth's requests aren't requests")?;
+        let r = waiting(asked, &code)?;
+        let invites = if caller.user == self.user()? { self.invites().await? } else { BTreeMap::new() };
+        ensure!(mine_or_invited(&r, caller, &invites, &r.endpoint()?).is_some(), "that device isn't yours, or someone's you invited, to turn down");
+        {
+            let mut refused = self.0.refused.lock().unwrap();
+            if refused.len() >= 50 {
+                refused.clear();
+            }
+            refused.insert(r.key.clone());
+        }
+        self.ask_auth("DELETE", &format!("/api/auth/devices/requests/{}", r.key), json!({})).await?;
+        Ok(json!({ "device": r.name }))
     }
 
     /// Lets back in someone who lost every device, with the install's recovery key, on this machine (never one asked
@@ -440,9 +489,11 @@ impl Node {
         Ok(opened)
     }
 
-    /// Approves the device whose join code is `code`, for `caller`: with `confirm`, lets it in
+    /// Approves the device whose join code is `code`, for `caller`, whose device this is: with `confirm`, lets it in
     /// (`approve_request`) and forgets its request; without, says what it is. → what it is, or what was done.
     pub async fn approve(&self, caller: &Caller, code: &str, confirm: bool) -> Result<Value> {
+        // Its entries count, and the keys it seals are its person's, only as one of their own devices.
+        ensure!(caller.user == self.user()?, "{} isn't one of your devices, so approve it on one that is", self.device_name());
         let code = code_of(code);
         ensure!(code.len() == 8, "a code is the 8 letters and digits the new device shows");
         let asked: Value = self.ask_auth("GET", "/api/auth/devices/requests", json!({})).await?;

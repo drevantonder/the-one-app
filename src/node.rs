@@ -447,6 +447,8 @@ pub struct Inner {
     shared: Mutex<std::collections::HashSet<String>>,
     /// The blobs of entries this device wrote that the bucket didn't take then, tried again each minute.
     unshared: Mutex<Vec<(Scope, String)>>,
+    /// Requests to join, by their device's key, that their person said weren't theirs, not shown again while it runs.
+    refused: Mutex<std::collections::HashSet<String>>,
     /// Held while `install/forgotten` changes.
     forgotten: Mutex<()>,
     /// What the vault gave this device for the sign-ins its calls came with.
@@ -583,6 +585,7 @@ impl Node {
             hinted: Mutex::new(HashMap::new()),
             shared: Mutex::new(Default::default()),
             unshared: Mutex::new(Vec::new()),
+            refused: Mutex::default(),
             forgotten: Mutex::new(()),
             sessions: Default::default(),
             broken: Default::default(),

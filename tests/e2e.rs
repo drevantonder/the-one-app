@@ -193,7 +193,7 @@ async fn only_a_persons_own_device_or_their_inviter_lets_a_device_in() {
     let new_key = || ed25519_dalek::SigningKey::from_bytes(&rand::random());
     let asks = |key: &ed25519_dalek::SigningKey, user: &str, proof: Option<String>| {
         let e = one::keys::Endpoint::of(key);
-        DeviceRequest { key: one::entry::hex(&e.key), seal: one::entry::hex(&e.seal), name: "Chrome".into(), user: user.into(), person: String::new(), proof, device: None }
+        DeviceRequest { key: one::entry::hex(&e.key), seal: one::entry::hex(&e.seal), name: "Chrome".into(), user: user.into(), person: String::new(), proof, device: None, made: None, place: None }
     };
     let opens = async |key: &ed25519_dalek::SigningKey, scope: &one::entry::Scope| -> Vec<u32> {
         let got = a.sealed_keys(&me, scope, Some(&one::entry::hex(&key.verifying_key().to_bytes())), None).await.unwrap();
@@ -221,6 +221,10 @@ async fn only_a_persons_own_device_or_their_inviter_lets_a_device_in() {
     // Sam's next device is his to approve, not Andre's.
     let refused = a.approve_request(&me, &asks(&new_key(), &sam.user, None), None).await.unwrap_err();
     assert!(format!("{refused:#}").contains("one of their own devices"), "{refused:#}");
+    // Nor does Andre's machine approve anything for Sam, asked from Sam's device over the network: it isn't Sam's.
+    let from_sam = one::node::Caller { key: sams.verifying_key().to_bytes(), user: sam.user.clone(), agent: None, token: Some("Sam's".into()) };
+    let refused = a.approve(&from_sam, "ABCDEFGH", true).await.unwrap_err();
+    assert!(format!("{refused:#}").contains("isn't one of your devices"), "{refused:#}");
 
     // The laptop, removed, opens no epoch made after; Andre's machine and Sam's device do, and the board goes on.
     let removed = a.remove_device(&me, &one::entry::hex(&laptop.verifying_key().to_bytes())).await.unwrap();
@@ -313,7 +317,7 @@ async fn only_a_repos_owner_and_collaborators_push_to_it_and_only_its_owners_del
     let sams = ed25519_dalek::SigningKey::from_bytes(&rand::random());
     let e = one::keys::Endpoint::of(&sams);
     let proof = one::keys::invite_proof(secret.as_bytes(), &e);
-    let asks = DeviceRequest { key: one::entry::hex(&e.key), seal: one::entry::hex(&e.seal), name: "Sam's laptop".into(), user: sam.user.clone(), person: String::new(), proof: Some(proof), device: None };
+    let asks = DeviceRequest { key: one::entry::hex(&e.key), seal: one::entry::hex(&e.seal), name: "Sam's laptop".into(), user: sam.user.clone(), person: String::new(), proof: Some(proof), device: None, made: None, place: None };
     a.approve_request(&me, &asks, Some(&sam)).await.unwrap();
 
     // Repos' keys in global, as Sam's device opens them and hands them to the node with his calls.
@@ -474,7 +478,7 @@ async fn a_groups_github_organization_shows_only_to_its_members_and_a_persons_gi
     let sams = ed25519_dalek::SigningKey::from_bytes(&rand::random());
     let e = one::keys::Endpoint::of(&sams);
     let proof = one::keys::invite_proof(secret.as_bytes(), &e);
-    let asks = DeviceRequest { key: one::entry::hex(&e.key), seal: one::entry::hex(&e.seal), name: "Sam's laptop".into(), user: sam.user.clone(), person: String::new(), proof: Some(proof), device: None };
+    let asks = DeviceRequest { key: one::entry::hex(&e.key), seal: one::entry::hex(&e.seal), name: "Sam's laptop".into(), user: sam.user.clone(), person: String::new(), proof: Some(proof), device: None, made: None, place: None };
     a.approve_request(&me, &asks, Some(&sam)).await.unwrap();
     let b64 = |v: &Value| data_encoding::BASE64URL_NOPAD.decode(v.as_str().unwrap().as_bytes()).unwrap();
     let epochs = a.sealed_keys(&me, &global, Some(&one::entry::hex(&e.key)), None).await.unwrap();

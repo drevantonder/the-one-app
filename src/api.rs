@@ -194,6 +194,7 @@ pub fn routes() -> Router<Node> {
         .route("/v1/invite-link", post(invite_link))
         .route("/v1/devices/requests", get(device_requests))
         .route("/v1/devices/approve", post(approve))
+        .route("/v1/devices/refuse", post(refuse_device))
         .route("/v1/grant", post(grant))
         .route("/v1/accept", post(accept))
         .route("/v1/handle", post(handle))
@@ -315,6 +316,9 @@ pub const SIGNED_IN: &[&str] = &[
     "/v1/group",
     "/v1/invite",
     "/v1/invite-link",
+    "/v1/devices/requests",
+    "/v1/devices/approve",
+    "/v1/devices/refuse",
     "/v1/accept",
     "/v1/member",
     "/v1/handle",
@@ -918,22 +922,27 @@ async fn invite_link(State(node): State<Node>, me: Me, Json(body): Json<Value>) 
 }
 
 /// The requests to join this device's person may approve (`Node::device_requests`).
-async fn device_requests(State(node): State<Node>) -> Reply {
-    Ok(Json(json!(node.device_requests(&local(&node)?).await?)))
+async fn device_requests(State(node): State<Node>, me: Me) -> Reply {
+    Ok(Json(json!(node.device_requests(&me.caller).await?)))
 }
 
-/// `{ code, confirm? }`: approves the device showing `code` (`Node::approve`).
-/// `{ code, confirm?, recovery? }`: lets in the device showing `code`, as this machine's person, or with `recovery`,
+/// `{ code }`: turns down the device showing `code` (`Node::refuse_device`).
+async fn refuse_device(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
+    only(&body, &["code"])?;
+    Ok(Json(node.refuse_device(&me.caller, text(&body, "code")?).await?))
+}
+
+/// `{ code, confirm?, recovery? }`: lets in the device showing `code`, as whoever asked, or with `recovery`,
 /// the install's recovery key (hex), read from a file here by the CLI and never kept.
-async fn approve(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
+async fn approve(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
     only(&body, &["code", "confirm", "recovery"])?;
     let (code, confirm) = (text(&body, "code")?, body["confirm"] == true);
     if let Some(recovery) = body["recovery"].as_str() {
         let secret: [u8; 32] = crate::keys::unhex(recovery.trim()).map_err(|_| anyhow::anyhow!("a recovery key is 64 hex characters"))?;
         let key = ed25519_dalek::SigningKey::from_bytes(&secret);
-        return Ok(Json(node.approve_with_recovery(&local(&node)?, code, &key, confirm).await?));
+        return Ok(Json(node.approve_with_recovery(&me.caller, code, &key, confirm).await?));
     }
-    Ok(Json(node.approve(&local(&node)?, code, confirm).await?))
+    Ok(Json(node.approve(&me.caller, code, confirm).await?))
 }
 
 async fn accept(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
