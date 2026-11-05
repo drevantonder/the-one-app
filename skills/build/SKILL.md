@@ -32,4 +32,4 @@ An app is a folder with one JavaScript module, `app.js` (or `app.ts`): its tools
 
 ## The details
 
-The files beside this one are {{name}}'s own code, as this build runs it: `ctx.js`, what a call's `ctx` gives an app; `one.js`, the `one` a screen gets; `ui/`, `@one/ui`'s list of what it has (`index.ts`) and its own components; `kit.js`, the pieces a plain screen gets on `one`; `widgets.js`, the widget nodes the shells draw; and `react/`, the app to copy. Over MCP they're this skill's resources (`skill://{{server}}-build/ctx.js`). The rest is open source: {{code}}. The code is the only reference, so it's never out of date.
+The files beside this one are {{name}}'s own code, as this build runs it: `ctx.js`, what a call's `ctx` gives an app; `one.js`, the `one` a screen gets; `ui/`, `@one/ui`'s list of what it has (`index.ts`) and its own components, `widget.tsx` the widget nodes as every client draws them; `kit.js`, the pieces a plain screen gets on `one`; and `react/`, the app to copy. Over MCP they're this skill's resources (`skill://{{server}}-build/ctx.js`). The rest is open source: {{code}}. The code is the only reference, so it's never out of date.

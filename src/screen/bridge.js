@@ -234,8 +234,8 @@
     appearance: (value) => host({ type: "appearance", value }),
     // Developer mode, on this client alone: whether it's on, first turning it on or off if `on` is given. Settings'.
     developer: (on) => host(on === undefined ? { type: "developer" } : { type: "developer", on: !!on }),
-    // In developer mode, this client's latest requests, each with how long it took and where it went (kit.js's
-    // panel draws them): null out of developer mode. A host that doesn't know it refuses it, as one out of it.
+    // In developer mode, this client's latest requests, each with how long it took and where it went (Developer's
+    // panel, src/screen/settings/devtools.jsx, draws them): null out of developer mode. A host that doesn't know it refuses it, as one out of it.
     traces: () => host({ type: "traces" }).catch(() => null),
     device: () => host({ type: "device" }),
     notify: () => host({ type: "notify" }),

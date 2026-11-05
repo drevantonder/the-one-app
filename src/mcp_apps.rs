@@ -27,14 +27,14 @@ pub fn read(uri: &str) -> Result<Value, Value> {
     if uri != view_uri() {
         return Err(json!({ "code": -32002, "message": format!("no resource {uri}") }));
     }
-    // The kit and what web pages draw for screens, as the web client has them (src/screen/).
+    // @one/ui, the bridge and what web pages draw for screens, as the web client has them (src/screen/).
     let mut view = include_str!("mcp_view.html").to_string();
     for (name, text) in [
-        ("kit.css", include_str!("screen/kit.css")),
+        ("ui.css", include_str!("screen/ui/dist/ui.css")),
         ("bridge.js", include_str!("screen/bridge.js")),
         ("kit.js", include_str!("screen/kit.js")),
         ("host.js", include_str!("screen/host.js")),
-        ("widgets.js", include_str!("screen/widgets.js")),
+        ("ui.js", include_str!("screen/ui/dist/ui.js")),
     ] {
         view = view.replacen(&format!("/*{name}*/"), text, 1);
     }

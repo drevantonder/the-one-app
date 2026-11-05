@@ -1,93 +1,23 @@
 // What a web page that holds screens does for them, the same in the web client (cloudflare/web/web.js) and in a chat's
 // MCP view (src/mcp_view.html): their look in its frames, and the answer to each of the bridge's messages, with its
-// menu, alert and files drawn in HTML where a native shell uses its own: @one/ui's on a page that has it (the web
-// client's), else the kit's (a chat's, until it moves). Its functions need the kit (kit.css, bridge.js, kit.js) or
-// @one/ui on the page, though it may load before them. Its styles come with it.
+// menu, alert and files drawn in HTML where a native shell uses its own: @one/ui's. Its functions need @one/ui and the
+// bridge on the page, though it may load before them.
 window.oneHost = (() => {
-  const css = `
-  .menu-backdrop { position: fixed; inset: 0; z-index: 59; }
-  .menu { outline: none; position: fixed; z-index: 60; min-width: 200px; padding: 5px; border-radius: 10px; background: var(--card); box-shadow: 0 8px 28px rgba(0, 0, 0, 0.25), 0 0 0 0.5px var(--line); }
-  .menu-item { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; border: 0; background: none; font: inherit; font-size: 13px; color: var(--text); padding: 5px 10px; border-radius: 5px; cursor: pointer; }
-  .menu-item:hover { background: var(--tint); color: white; }
-  .menu-item.danger { color: var(--danger); }
-  .menu-item.danger:hover { background: var(--danger); color: white; }
-  .menu-check { display: inline-block; width: 16px; }
-  .menu-title { flex: 1; }
-  .menu-icon { width: 15px; height: 15px; flex: none; opacity: 0.85; }
-  .menu-line { height: 0.5px; margin: 5px 8px; background: var(--line); }
-  .menu-row { display: flex; gap: 4px; padding: 2px 2px 6px; margin-bottom: 4px; border-bottom: 0.5px solid var(--line); }
-  .menu-choice { flex: 1; height: 34px; display: grid; place-items: center; border: 0; border-radius: 7px; background: none; color: var(--text); cursor: pointer; font: inherit; font-size: 12px; }
-  .menu-choice .menu-icon { width: 18px; height: 18px; }
-  .menu-choice:hover { background: var(--line); }
-  .menu-choice.on { background: var(--tint); color: white; }
-  .sheet-text { margin: 4px 4px 16px; color: var(--muted); }
-  .sheet-actions { display: flex; justify-content: flex-end; gap: 8px; padding-bottom: 8px; }`;
-  (document.head || document.documentElement).append(Object.assign(document.createElement("style"), { textContent: css }));
-  const esc = (s) => one.esc(s);
-
-  /// @one/ui, on a page that has it.
-  const ui = () => window.OneUI?.["@one/ui"];
+  const ui = () => window.OneUI["@one/ui"];
 
   /// `one.menu` from the screen in `frame`: a small menu at its point in the frame, or beside the element it's for
   /// (`rect`) → the index chosen, or null once it's closed by a click elsewhere or Escape. Its `row` items lead, side by
   /// side as their icons; a `section` starts after a line.
   function menu(frame, m) {
-    if (ui()) {
-      const box = frame.getBoundingClientRect();
-      const r = Array.isArray(m.rect) && m.rect.length === 4 ? m.rect.map(Number) : [Number(m.x || 0), Number(m.y || 0), 0, 0];
-      const items = (Array.isArray(m.items) ? m.items : []).map((e) => ({ title: String(e.title ?? ""), icon: e.icon ? String(e.icon) : undefined, danger: !!e.danger, checked: !!e.checked, row: !!e.row, section: !!e.section }));
-      return ui().showMenu(items, [box.left + r[0], box.top + r[1], r[2], r[3]]);
-    }
-    return new Promise((done) => {
-      document.querySelector(".menu-backdrop")?.click();
-      const entries = Array.isArray(m.items) ? m.items : [];
-      if (!entries.length) return done(null);
-      // Over everything, screens' frames too, so a click anywhere else closes it.
-      const back = document.createElement("div");
-      back.className = "menu-backdrop";
-      const el = document.createElement("div");
-      el.className = "menu";
-      el.tabIndex = -1;
-      const icon = (e) => (e.icon ? one.icon(String(e.icon), "menu-icon") : "");
-      const checks = entries.some((e) => e.checked && !e.row);
-      const row = entries.map((e, i) => [e, i]).filter(([e]) => e.row);
-      el.innerHTML = (row.length ? `<div class="menu-row">${row.map(([e, i]) => `<button class="menu-choice${e.checked ? " on" : ""}" data-i="${i}" title="${esc(e.title)}" aria-label="${esc(e.title)}">${icon(e) || esc(e.title)}</button>`).join("")}</div>` : "") +
-        entries.map((e, i) => (e.row ? "" : `${e.section && i > row.length ? '<div class="menu-line"></div>' : ""}<button class="menu-item${e.danger ? " danger" : ""}" data-i="${i}">` +
-          `${checks ? `<span class="menu-check">${e.checked ? "✓" : ""}</span>` : ""}<span class="menu-title">${esc(e.title)}</span>${icon(e)}</button>`)).join("");
-      back.append(el);
-      document.body.append(back);
-      // Its point in the frame, in the window: beside its element, opening away from the edge it's near.
-      const box = frame.getBoundingClientRect();
-      const r = Array.isArray(m.rect) && m.rect.length === 4 ? m.rect.map(Number) : null;
-      let x = box.left + Number(m.x || 0), y = box.top + Number(m.y || 0);
-      if (r) {
-        const top = box.top + r[1], bottom = top + r[3];
-        x = box.left + r[0] + r[2] / 2 - el.offsetWidth / 2;
-        y = bottom + el.offsetHeight + 8 > innerHeight && top - el.offsetHeight - 6 > 0 ? top - el.offsetHeight - 6 : bottom + 6;
-      }
-      el.style.top = `${Math.max(8, Math.min(y, innerHeight - el.offsetHeight - 8))}px`;
-      el.style.left = `${Math.max(8, Math.min(x, innerWidth - el.offsetWidth - 8))}px`;
-      const close = (i) => { back.remove(); done(i); };
-      back.addEventListener("mousedown", (e) => e.target === back && close(null));
-      back.addEventListener("click", (e) => e.target === back && close(null));
-      back.addEventListener("contextmenu", (e) => { e.preventDefault(); close(null); });
-      el.addEventListener("keydown", (e) => e.key === "Escape" && close(null));
-      el.focus();
-      el.querySelectorAll("[data-i]").forEach((b) => (b.onclick = () => close(Number(b.dataset.i))));
-    });
+    const box = frame.getBoundingClientRect();
+    const r = Array.isArray(m.rect) && m.rect.length === 4 ? m.rect.map(Number) : [Number(m.x || 0), Number(m.y || 0), 0, 0];
+    const items = (Array.isArray(m.items) ? m.items : []).map((e) => ({ title: String(e.title ?? ""), icon: e.icon ? String(e.icon) : undefined, danger: !!e.danger, checked: !!e.checked, row: !!e.row, section: !!e.section }));
+    return ui().showMenu(items, [box.left + r[0], box.top + r[1], r[2], r[3]]);
   }
 
   /// `one.alert`: its title and text, then OK; or Cancel and its action → whether that was chosen.
   function alert(m) {
-    if (ui()) return ui().showAlert({ title: String(m.title || ""), text: String(m.text || ""), action: m.action ? String(m.action) : undefined, danger: !!m.danger });
-    return new Promise((done) => {
-      let chose = false;
-      const { body, close } = one.sheet({ title: String(m.title || ""), done: m.action ? "Cancel" : "OK", onClose: () => done(chose) });
-      body.innerHTML = (m.text ? `<p class="sheet-text">${esc(m.text)}</p>` : "") +
-        (m.action ? `<div class="sheet-actions"><button class="button ${m.danger ? "danger" : "primary"}" data-yes>${esc(m.action)}</button></div>` : "");
-      const yes = body.querySelector("[data-yes]");
-      if (yes) yes.onclick = () => { chose = true; close(); };
-    });
+    return ui().showAlert({ title: String(m.title || ""), text: String(m.text || ""), action: m.action ? String(m.action) : undefined, danger: !!m.danger });
   }
 
   /// `one.save` and `one.preview`: a download, or a tab showing it. Only what can't run script shows in a tab, as

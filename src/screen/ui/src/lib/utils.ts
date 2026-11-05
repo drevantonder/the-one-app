@@ -13,3 +13,8 @@ export function focusDialog(event: Event) {
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
+
+/// A file's size as people read it: "512 Bytes", "1.5 KB", "3.2 MB".
+export function fileSize(bytes: number) {
+  return bytes < 1024 ? `${bytes} Bytes` : bytes < 1048576 ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / 1048576).toFixed(1)} MB`
+}

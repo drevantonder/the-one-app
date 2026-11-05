@@ -104,7 +104,7 @@ const CLIENT_SCREENS: &[(&str, &str)] = &[
     // Written in React (home/<name>.jsx), built by @one/ui's build into home/dist/.
     ("pages", include_str!("screen/home/dist/pages.html")),
     ("accounts", include_str!("screen/home/dist/accounts.html")),
-    ("request", include_str!("screen/request.html")),
+    ("request", include_str!("screen/settings/dist/request.html")),
     ("appearance", include_str!("screen/settings/dist/appearance.html")),
     // Written in React (settings/<name>.jsx), built by @one/ui's build into settings/dist/.
     ("vault", include_str!("screen/settings/dist/vault.html")),
@@ -116,7 +116,7 @@ const CLIENT_SCREENS: &[(&str, &str)] = &[
     ("devices", include_str!("screen/settings/dist/devices.html")),
     ("connect-ai", include_str!("screen/settings/dist/connect-ai.html")),
     ("developer", include_str!("screen/settings/dist/developer.html")),
-    ("devtools", include_str!("screen/devtools.html")),
+    ("devtools", include_str!("screen/settings/dist/devtools.html")),
 ];
 
 /// A client's own screen's HTML, or a note that it isn't there.

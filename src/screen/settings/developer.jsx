@@ -1,4 +1,4 @@
-// Developer mode, on this device alone: every screen's bar has a </> that opens Developer (src/screen/devtools.html).
+// Developer mode, on this device alone: every screen's bar has a </> that opens Developer (src/screen/settings/devtools.jsx).
 //
 // A Settings screen written in React (see vault.jsx): built by @one/ui's build into dist/developer.html.
 import { useEffect, useState } from "react"

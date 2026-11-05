@@ -1,26 +1,42 @@
-// A widget drawn from its tree (`GET /v1/widgets`): a card under its title, in @one/ui's look. The Apple, Android and
-// Windows widgets draw the same trees natively. Chat's view (src/screen/widgets.js, in the old kit) draws them as
-// HTML until it's moved. A tree is the app's, so nothing in it is ever markup: what's drawn is text, a number (`num`),
-// or one of the names here. `host` is what buttons, toggles and links act through: `run(app, op, input, widget)` → the
-// error's text for people if it failed, and `follow(link, widget)` for a web page's address or `{ screen, params }`.
+// A widget drawn from its tree (`GET /v1/widgets`): a card under its title, the same on the pages (src/screen/home)
+// and in a chat's view (src/mcp_view.html). The Apple, Android and Windows widgets draw the same trees natively. A
+// tree is the app's, so nothing in it is ever markup: what's drawn is text, a number (`num`), or one of the names here.
+// `host` is what buttons, toggles and links act through: `run(app, op, input, widget)` → the error's text for people if
+// it failed, and `follow(link, widget)` for a web page's address or `{ screen, params }`.
+import * as React from "react"
 import { useLayoutEffect, useRef, useState } from "react"
-import { Button, Icon, Spinner, Switch, cn } from "@one/ui"
+import { Button } from "@/components/ui/button"
+import { Spinner } from "@/components/ui/spinner"
+import { Switch } from "@/components/ui/switch"
+import { Icon } from "@/components/icon"
+import { cn } from "@/lib/utils"
+
+/// A widget as an app gives it, and a node of its tree: the app's JSON, read only as the names here say.
+type Widget = { app: string; widget: string; title?: string; error?: string; root?: Tree; [key: string]: any }
+type Tree = { [key: string]: any }
+/// What a widget's buttons, toggles and links act through.
+type WidgetHost = {
+  run: (app: string, op: string, input: object, w: Widget) => Promise<string | void | undefined>
+  follow: (link: string | { screen: string; params?: object }, w: Widget) => unknown
+}
+type Parts = { n: Tree; w: Widget; host: WidgetHost }
+const one = () => (globalThis as unknown as { one: { plain: (e: unknown) => { title: string } } }).one
 
 // Colour only where it means something: fine is plain text, warn and bad need you.
 const TONES = { muted: "var(--muted-foreground)", accent: "var(--foreground)", good: "var(--foreground)", warn: "var(--warning)", bad: "var(--destructive)" }
 const SIZES = { xl: "text-[22px] font-semibold", lg: "text-[15px] font-semibold", sm: "text-[11px]", xs: "text-[10px]" }
 const WEIGHTS = { medium: "font-medium", bold: "font-bold" }
 // A number from a tree, or `or` where it isn't one.
-const num = (v, or) => (v === null || v === "" || !Number.isFinite(Number(v)) ? or : Number(v))
-const fmt = (v) => (typeof v === "number" ? v.toLocaleString(undefined, { maximumFractionDigits: 2 }) : String(v ?? "–"))
-const tone = (n) => (Object.hasOwn(TONES, n.tone) ? TONES[n.tone] : null)
+const num = (v: any, or?: any): any => (v === null || v === "" || !Number.isFinite(Number(v)) ? or : Number(v))
+const fmt = (v: unknown) => (typeof v === "number" ? v.toLocaleString(undefined, { maximumFractionDigits: 2 }) : String(v ?? "–"))
+const tone = (n: Tree): string | null => (Object.hasOwn(TONES, n.tone) ? TONES[n.tone as keyof typeof TONES] : null)
 
-function time(n) {
-  const d = new Date(n.at || 0), s = (Date.now() - d) / 1000
+function time(n: Tree) {
+  const d = new Date(n.at || 0), s = (Date.now() - d.getTime()) / 1000
   if (n.style === "date") return d.toLocaleDateString(undefined, { day: "numeric", month: "short" })
   if (n.style === "clock") return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })
   if (n.style === "timer") { const a = Math.abs(Math.round(s)); return `${Math.floor(a / 60)}:${String(a % 60).padStart(2, "0")}` }
-  if (n.style === "relative") return new Intl.RelativeTimeFormat(undefined, { numeric: "auto", style: "short" }).format(...(Math.abs(s) < 3600 ? [-Math.round(s / 60), "minute"] : Math.abs(s) < 86400 ? [-Math.round(s / 3600), "hour"] : [-Math.round(s / 86400), "day"]))
+  if (n.style === "relative") return new Intl.RelativeTimeFormat(undefined, { numeric: "auto", style: "short" }).format(...((Math.abs(s) < 3600 ? [-Math.round(s / 60), "minute"] : Math.abs(s) < 86400 ? [-Math.round(s / 3600), "hour"] : [-Math.round(s / 86400), "day"]) as [number, Intl.RelativeTimeFormatUnit]))
   if (s < 60) return "now"
   if (s < 3600) return `${Math.floor(s / 60)} min`
   if (s < 86400) return `${Math.floor(s / 3600)} h`
@@ -29,8 +45,8 @@ function time(n) {
 
 /// A widget, as a card: its tree under its title (unless the tree labels itself); a broken one says so, and why. Where
 /// a window draws screens at its smaller text (a zoom on the page), a widget keeps its own size.
-export function WidgetCard({ w, host, tree = w.root, className, style, ...props }) {
-  const why = w.error ? one.plain(w.error).title : ""
+function WidgetCard({ w, host, tree = w.root, className, style, ...props }: { w: Widget; host: WidgetHost; tree?: Tree } & React.ComponentProps<"div">) {
+  const why = w.error ? one().plain(w.error).title : ""
   return (
     <div
       data-slot="widget"
@@ -55,15 +71,15 @@ export function WidgetCard({ w, host, tree = w.root, className, style, ...props 
 }
 
 /// A node of a widget's tree.
-function Node({ n, w, host }) {
+function Node({ n, w, host }: { n?: Tree; w: Widget; host: WidgetHost }): React.ReactNode {
   if (!n || typeof n !== "object") return null
   const color = tone(n)
   const colored = color ? { color, "--tone": color } : undefined
-  const kids = (n.c || []).map((c, i) => <Node key={i} n={c} w={w} host={host} />)
-  let el
+  const kids = (n.c || []).map((c: Tree, i: number) => <Node key={i} n={c} w={w} host={host} />)
+  let el: React.ReactNode
   switch (n.t) {
     case "col": case "row": {
-      const style = {}
+      const style: React.CSSProperties = {}
       if (num(n.gap) != null) style.gap = `${num(n.gap)}px`
       if (num(n.w)) Object.assign(style, { width: `${num(n.w)}px`, flex: "none" })
       if (n.grow) style.flex = "1"
@@ -81,13 +97,13 @@ function Node({ n, w, host }) {
       break
     }
     case "text": {
-      const style = { ...colored }
+      const style: React.CSSProperties = { ...colored }
       if (num(n.lines)) Object.assign(style, { display: "-webkit-box", WebkitBoxOrient: "vertical", WebkitLineClamp: Math.round(num(n.lines)), overflow: "hidden" })
-      el = <span data-w="text" className={cn(SIZES[n.size], WEIGHTS[n.weight])} style={style}>{n.text ?? ""}</span>
+      el = <span data-w="text" className={cn(SIZES[n.size as keyof typeof SIZES], WEIGHTS[n.weight as keyof typeof WEIGHTS])} style={style}>{n.text ?? ""}</span>
       break
     }
     case "time":
-      el = <span className={cn("shrink-0", SIZES[n.size])} style={colored}>{time(n)}</span>
+      el = <span className={cn("shrink-0", SIZES[n.size as keyof typeof SIZES])} style={colored}>{time(n)}</span>
       break
     case "stat":
       el = (
@@ -180,7 +196,7 @@ function Node({ n, w, host }) {
   return el
 }
 
-function Linked({ n, w, host, children }) {
+function Linked({ n, w, host, children }: Parts & { children: React.ReactNode }) {
   return (
     <span className="contents [&>*]:cursor-pointer [&>*]:active:opacity-60" onClickCapture={(e) => { e.preventDefault(); e.stopPropagation(); host.follow(n.link, w) }}>
       {children}
@@ -188,7 +204,7 @@ function Linked({ n, w, host, children }) {
   )
 }
 
-function Glyph({ n, color }) {
+function Glyph({ n, color }: { n: Tree; color: string | null }) {
   const size = num(n.w) || 16
   // A named icon is Phosphor's, drawn where the bridge is.
   if (n.name) {
@@ -208,19 +224,19 @@ function Glyph({ n, color }) {
 
 /// A chart or sparkline at the size the tree gave it: its height in pixels (`h`), and the width it has (or its `w`), so
 /// its labels and strokes are drawn as they are and never grow with the card.
-function Chart({ n, color }) {
-  const ref = useRef(null)
+function Chart({ n, color }: { n: Tree; color: string | null }) {
+  const ref = useRef<HTMLDivElement>(null)
   const [room, setRoom] = useState(0)
   // The width its box has, in its own units (not the page's, which a zoom changes).
   useLayoutEffect(() => {
-    const box = ref.current
+    const box = ref.current!
     setRoom(box.clientWidth)
     const seen = new ResizeObserver(() => setRoom(box.clientWidth))
     seen.observe(box)
     return () => seen.disconnect()
   }, [])
   const spark = n.t === "spark", labels = Array.isArray(n.labels) ? n.labels : []
-  const v = (Array.isArray(n.values) ? n.values : []).map((y) => num(y, 0)), max = num(n.max) || Math.max(...v, 1)
+  const v = (Array.isArray(n.values) ? n.values : []).map((y: unknown): number => num(y, 0)), max = num(n.max) || Math.max(...v, 1)
   const h = num(n.h) || (spark ? 28 : 70), fixed = spark && num(n.w) ? num(n.w) : 0
   const wd = fixed || room, step = wd / Math.max(v.length, 1), fill = color || "var(--foreground)"
   const total = h + (n.labels ? 14 : 0)
@@ -254,10 +270,10 @@ function Chart({ n, color }) {
 }
 
 /// Text on one line that gives up size before it gives up words, down to 0.6 of it, then is cut short.
-function Fit({ children, className }) {
-  const box = useRef(null), text = useRef(null)
+function Fit({ children, className }: { children: React.ReactNode; className?: string }) {
+  const box = useRef<HTMLSpanElement>(null), text = useRef<HTMLSpanElement>(null)
   useLayoutEffect(() => {
-    const outer = box.current, inner = text.current
+    const outer = box.current!, inner = text.current!
     const fit = () => {
       inner.style.fontSize = ""
       const need = inner.scrollWidth, room = outer.clientWidth
@@ -273,10 +289,10 @@ function Fit({ children, className }) {
 
 // A button or toggle runs the app's tool as the person, pressed with a spinner meanwhile; the host draws the
 // widget again. A toggle that failed goes back to how it was.
-function useAct(w, host) {
+function useAct(w: Widget, host: WidgetHost) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState("")
-  const act = async (op, input) => {
+  const act = async (op: string, input: object) => {
     setBusy(true)
     const failed = await host.run(w.app, op, input, w)
     setBusy(false)
@@ -286,7 +302,7 @@ function useAct(w, host) {
   return { busy, error, act }
 }
 
-function WidgetButton({ n, w, host, color }) {
+function WidgetButton({ n, w, host, color }: Parts & { color: string | null }) {
   const { busy, error, act } = useAct(w, host)
   return (
     <Button
@@ -304,7 +320,7 @@ function WidgetButton({ n, w, host, color }) {
   )
 }
 
-function WidgetToggle({ n, w, host }) {
+function WidgetToggle({ n, w, host }: Parts) {
   const { busy, error, act } = useAct(w, host)
   const [on, setOn] = useState(!!n.on)
   const [seen, setSeen] = useState(!!n.on)
@@ -327,3 +343,5 @@ function WidgetToggle({ n, w, host }) {
     </label>
   )
 }
+
+export { WidgetCard, type Widget, type WidgetHost }

@@ -183,7 +183,7 @@ impl Device {
     }
 
     /// Its latest requests' traces, oldest first, as JSON: each what was asked, when, how long it took, the nodes it
-    /// tried and what the one that answered did (Developer's Timing draws them: src/screen/devtools.html). None out of developer mode.
+    /// tried and what the one that answered did (Developer's Timing draws them: src/screen/settings/devtools.jsx). None out of developer mode.
     pub fn traces(&self) -> Option<String> {
         self.developer().then(|| Value::Array(self.traces.lock().unwrap().iter().cloned().collect()).to_string())
     }

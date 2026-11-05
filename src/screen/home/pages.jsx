@@ -11,9 +11,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import { flushSync } from "react-dom"
 import { createRoot } from "react-dom/client"
-import { AppIcon, Badge, Button, Empty, Icon, Label, Problem, ResponsiveDialog, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Skeleton, Switch, Tabs, TabsList, TabsTrigger, cn, useWidth } from "@one/ui"
+import { AppIcon, Badge, Button, Empty, Icon, Label, Problem, ResponsiveDialog, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Skeleton, Switch, Tabs, TabsList, TabsTrigger, cn, useWidth, WidgetCard } from "@one/ui"
 import { home } from "./lib/model.js"
-import { WidgetCard } from "./lib/widgets.jsx"
 
 const { scope: chosen, swipe } = one.params || {}
 const SETTINGS = "settings"

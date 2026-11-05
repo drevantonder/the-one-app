@@ -3,19 +3,20 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<!-- The MCP Apps view `one mcp` serves (src/mcp_apps.rs): widgets drawn from their trees, and apps' screens, each in a
-     sandboxed frame whose bridge this page answers through the chat client, as the web client answers it, with the same
-     kit and the same menus, alerts, sheets and files (src/screen/host.js). src/mcp_apps.rs writes those files in. -->
-<style>/*kit.css*/</style>
+<!-- The MCP Apps view `one mcp` serves (src/mcp_apps.rs): widgets drawn from their trees by @one/ui's WidgetCard, as
+     the pages draw them, and apps' screens, each in a sandboxed frame whose bridge this page answers through the chat
+     client, as the web client answers it, with @one/ui's menus, alerts and sheets (src/screen/host.js).
+     src/mcp_apps.rs writes those files in. -->
+<style>/*ui.css*/</style>
 <style>
   html, body { background: transparent; }
-  body { padding: 4px; max-width: none; }
+  body { padding: 4px; }
   .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
-  .cards .w-card { padding: 14px; font-size: 14px; }
+  .cards > .wait { opacity: .5; }
   iframe { border: 0; width: 100%; display: block; min-height: 120px; }
-  .empty { color: var(--muted); padding: 12px; }
+  .empty { color: var(--muted-foreground); padding: 12px; font-size: 14px; }
   /* What's coming: a grey card where it will be. A screen shows it until it says how tall it is, then grows to it. */
-  .ph { height: 160px; border-radius: 22px; background: var(--card); animation: breathe 1.6s ease-in-out infinite; }
+  .ph { height: 160px; border-radius: 1.5rem; background: var(--muted); animation: breathe 1.6s ease-in-out infinite; }
   @keyframes breathe { 50% { opacity: .55; } }
   @media (prefers-reduced-motion: reduce) { .ph { animation: none; } }
   .frame { position: relative; }
@@ -24,10 +25,9 @@
   .frame.ready > iframe { opacity: 1; }
   /* Back, over what was opened from what's under it, with its title. */
   .nav[hidden], [hidden] { display: none !important; }
-  .nav { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; min-height: 32px; margin-bottom: 4px; }
-  .nav .back { justify-self: start; display: flex; align-items: center; gap: 2px; border: 0; background: none; padding: 4px 6px 4px 0; font: inherit; color: var(--tint); cursor: pointer; }
+  .nav { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; min-height: 32px; margin-bottom: 4px; font-size: 14px; }
+  .nav > :first-child { justify-self: start; }
   .nav .title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .screen-sheet { max-width: 480px; }
   /* A sheet or menu needs room: the view is tall enough for one while it's open. */
   body.over { min-height: 560px; }
 </style>
@@ -38,7 +38,7 @@
 <script>/*bridge.js*/</script>
 <script>/*kit.js*/</script>
 <script>/*host.js*/</script>
-<script>/*widgets.js*/</script>
+<script>/*ui.js*/</script>
 <script>
 (() => {
   let next = 1, appearance = "automatic", torn = false;
@@ -54,17 +54,17 @@
     try { return JSON.parse(text); } catch { return text; }
   };
   const looks = oneHost.scheme();
+  const React = OneUI.react, { createRoot } = OneUI["react-dom/client"], ui = OneUI["@one/ui"], h = React.createElement;
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
   // What's shown: tools' results, widgets or an app's screen, each opened from the one under it, as layers kept as
   // they are under the top one, so Back finds them as they were. `args`: what widgets were asked for with.
   const stack = [];
   const top = () => stack.at(-1);
-  const nav = Object.assign(document.createElement("div"), { className: "nav", hidden: true });
-  nav.innerHTML = `<button class="back">${one.icon("caret-left")}Back</button><div class="title"></div><span></span>`;
-  nav.querySelector(".back").onclick = back;
+  const nav = Object.assign(document.createElement("div"), { hidden: true });
+  const navRoot = createRoot(nav);
 
-  // This page's own bridge (the kit's icons, a widget's copy).
+  // This page's own bridge (@one/ui's icons, a widget's copy).
   const icons = async (names) => (await call("screens_icons", { names: (Array.isArray(names) ? names : []).map(String) }))?.paths || {};
   window.__oneView = (m) => (m.type === "icons" ? icons(m.names) : m.type === "copy" ? navigator.clipboard.writeText(String(m.text ?? "")) : Promise.resolve(null));
 
@@ -121,7 +121,10 @@
 
   function bar() {
     nav.hidden = stack.length < 2;
-    nav.querySelector(".title").textContent = top()?.s.title || "";
+    navRoot.render(h("div", { className: "nav" },
+      h(ui.Button, { variant: "ghost", size: "sm", className: "-ml-2", onClick: back }, h(ui.Icon, { name: "caret-left" }), "Back"),
+      h("div", { className: "title" }, top()?.s.title || ""),
+      h("span")));
     size();
   }
 
@@ -132,7 +135,13 @@
     bar();
   }
 
-  const card = (w) => Object.assign(oneWidgets.card(w, { run: act, follow }), { __w: w });
+  // A widget's card, drawn by @one/ui as the pages draw it, in an element of its own to replace when it's drawn again.
+  function card(w) {
+    const el = Object.assign(document.createElement("div"), { __w: w });
+    el.__root = createRoot(el);
+    el.__root.render(h(ui.WidgetCard, { w, host: { run: act, follow }, className: "h-full" }));
+    return el;
+  }
   const cardOf = (w) => [...(top()?.el.children || [])].find((el) => el.__w === w);
 
   // A button or toggle: runs the app's tool as the person, then draws its widget again, the others left as they
@@ -158,6 +167,7 @@
       if (!now || !el || i < 0) continue;
       s.widgets[i] = now;
       el.replaceWith(card(now));
+      el.__root.unmount();
     }
     size();
   }
@@ -166,13 +176,13 @@
   async function follow(link, w) {
     if (typeof link === "string") return request("ui/open-link", { url: link }).catch(() => {});
     const el = cardOf(w);
-    el?.classList.add("w-wait");
+    el?.classList.add("wait");
     try {
       show({ structuredContent: await call("screens_open", { app: w.app, screen: link.screen, params: link.params || {}, ...(top()?.args.scope ? { scope: top().args.scope } : {}) }) });
     } catch (err) {
       if (el) el.title = err.message;
     }
-    el?.classList.remove("w-wait");
+    el?.classList.remove("wait");
   }
 
   // An app's screen, in a sandboxed frame of its own, so it reaches nothing here and acts only as its app, through
@@ -198,13 +208,10 @@
 
   // A screen opened in a sheet over this one → what it gave `one.close` once it's gone, else null.
   function sheet(s) {
-    return new Promise((done) => {
-      let value = null;
-      const handle = one.sheet({ title: s.title || "", onClose: () => done(value) });
-      const el = handle.body.closest(".sheet");
-      el.classList.add("screen-sheet");
-      handle.body.append(mount(s, { close: (v) => { value = v ?? null; handle.close(); }, title: el.querySelector(".sheet-title") }));
-    });
+    let value = null;
+    const handle = ui.showSheet({ title: s.title || "" });
+    handle.body.append(mount(s, { close: (v) => { value = v ?? null; handle.close(); }, setTitle: handle.setTitle }));
+    return handle.closed.then(() => value);
   }
 
   // What the app's `vault` declares as `need`, asked for as an agent asks: the person picks or makes the item on their
@@ -249,7 +256,7 @@
         close: (value) => (screen.sheet ? screen.sheet.close(value) : back(), null),
         title: (title) => {
           s.title = title || s.title;
-          if (screen.sheet) screen.sheet.title.textContent = s.title;
+          if (screen.sheet) screen.sheet.setTitle(s.title);
           else if (top()?.s === s) bar();
           return null;
         },
@@ -299,7 +306,7 @@
   }
 
   // A sheet or menu open makes room for itself (body.over).
-  new MutationObserver(() => document.body.classList.toggle("over", !!document.querySelector(".sheet-backdrop, .menu-backdrop")))
+  new MutationObserver(() => document.body.classList.toggle("over", !!document.querySelector('[role="dialog"], [role="alertdialog"], [role="menu"]')))
     .observe(document.body, { childList: true });
 
   function size() {

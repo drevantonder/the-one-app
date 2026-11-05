@@ -700,7 +700,7 @@ const h = OneUI.react.createElement;
     return [...out, section(own("pages", { scope: "settings" }), "settings", "Settings", items)];
   }
 
-  /// Developer, in Developer mode: the bar's </> opens its panel (src/screen/devtools.html) for the screen in front,
+  /// Developer, in Developer mode: the bar's </> opens its panel (src/screen/settings/devtools.jsx) for the screen in front,
   /// docked under it, where it stays open from screen to screen until closed. It's told the screen's app and title, and
   /// for the client's own, since when it showed.
   const devtools = {

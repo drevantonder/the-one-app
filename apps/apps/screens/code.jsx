@@ -1,7 +1,7 @@
 // An app's code: the folders and files of its source, folders first; at the top, the module it runs as.
 import { useEffect } from "react"
 import { createRoot } from "react-dom/client"
-import { Empty, Icon, List, ListRow, ListSkeleton } from "@one/ui"
+import { Empty, Icon, List, ListRow, ListSkeleton, fileSize } from "@one/ui"
 import { Failed, useCall } from "../lib/store.jsx"
 
 const { app, dir = "" } = one.params
@@ -35,7 +35,7 @@ function Code() {
             key={name}
             leading={<Icon name={f.dir ? "folder" : "file"} className="size-5 text-muted-foreground" />}
             title={name.replace(/\/$/, "")}
-            trailing={!f.dir && <span className="text-muted-foreground">{one.size(f.size)}</span>}
+            trailing={!f.dir && <span className="text-muted-foreground">{fileSize(f.size)}</span>}
             onClick={() => (f.dir ? one.open("code", { app, dir: f.dir }) : one.open("file", { app, path: f.path }))}
           />
         ))}

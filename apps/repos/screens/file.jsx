@@ -2,7 +2,7 @@
 // its code). Where there's room its folder's files are beside it, to go from one to the next without leaving.
 import { useEffect, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { Card, CodeView, CopyButton, Empty, Icon, List, Markdown, Tabs, TabsList, TabsTrigger } from "@one/ui"
+import { Card, CodeView, CopyButton, Empty, Icon, List, Markdown, Tabs, TabsList, TabsTrigger, fileSize } from "@one/ui"
 import { CommitCard, PathBar } from "../lib/frame.jsx"
 import { Beside, Frame, Pending, plural, short, useCall, useWide } from "../lib/use.jsx"
 
@@ -15,8 +15,8 @@ const isMarkdown = (path) => /\.(md|mdx|markdown)$/i.test(path)
 function Body({ d, path }) {
   const [view, setView] = useState(isMarkdown(path) ? "preview" : "code")
   if (d.submodule) return <Empty>This is a submodule of commit <code>{short(d.submodule)}</code> of another repo.</Empty>
-  if (d.binary) return <Empty>This binary file ({one.size(d.size)}) can't be previewed.</Empty>
-  if (d.too_big) return <Empty>This file is too big to preview ({one.size(d.size)}). Clone the repo to read it.</Empty>
+  if (d.binary) return <Empty>This binary file ({fileSize(d.size)}) can't be previewed.</Empty>
+  if (d.too_big) return <Empty>This file is too big to preview ({fileSize(d.size)}). Clone the repo to read it.</Empty>
   const markdown = isMarkdown(path)
   const text = d.text.split("\n").filter((l) => !/\.mdx$/i.test(path) || (!/^\s*(import|export)\s/.test(l) && !/^\s*<\/?[A-Z][\w.]*[^>]*\/?>\s*$/.test(l))).join("\n")
   return (
@@ -32,7 +32,7 @@ function Body({ d, path }) {
       {markdown && view === "preview" ? (
         <Card className="gap-0 py-0">
           <div className="flex items-center justify-between gap-2 border-b py-1.5 pr-1.5 pl-4 text-sm text-muted-foreground">
-            <span>{plural(d.text.split("\n").length, "line", "lines")} · {one.size(d.size)}</span>
+            <span>{plural(d.text.split("\n").length, "line", "lines")} · {fileSize(d.size)}</span>
             <CopyButton text={d.text} />
           </div>
           <div className="px-6 py-5"><Markdown text={text} /></div>

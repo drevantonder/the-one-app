@@ -1,0 +1,597 @@
+<meta name="@one/ui">
+<style>/*! tailwindcss v4.3.4 | MIT License | https://tailwindcss.com */
+@layer properties{@supports (((-webkit-hyphens:none)) and (not (margin-trim:block))) or ((-moz-orient:inline) and (not (color:rgb(from red r g b)))){*,:before,:after,::backdrop{--tw-border-spacing-x:0;--tw-border-spacing-y:0;--tw-translate-x:0;--tw-translate-y:0;--tw-translate-z:0;--tw-rotate-x:initial;--tw-rotate-y:initial;--tw-rotate-z:initial;--tw-skew-x:initial;--tw-skew-y:initial;--tw-pan-x:initial;--tw-pan-y:initial;--tw-pinch-zoom:initial;--tw-border-style:solid;--tw-leading:initial;--tw-font-weight:initial;--tw-tracking:initial;--tw-ordinal:initial;--tw-slashed-zero:initial;--tw-numeric-figure:initial;--tw-numeric-spacing:initial;--tw-numeric-fraction:initial;--tw-shadow:0 0 #0000;--tw-shadow-color:initial;--tw-shadow-alpha:100%;--tw-inset-shadow:0 0 #0000;--tw-inset-shadow-color:initial;--tw-inset-shadow-alpha:100%;--tw-ring-color:initial;--tw-ring-shadow:0 0 #0000;--tw-inset-ring-color:initial;--tw-inset-ring-shadow:0 0 #0000;--tw-ring-inset:initial;--tw-ring-offset-width:0px;--tw-ring-offset-color:#fff;--tw-ring-offset-shadow:0 0 #0000;--tw-outline-style:solid;--tw-backdrop-blur:initial;--tw-backdrop-brightness:initial;--tw-backdrop-contrast:initial;--tw-backdrop-grayscale:initial;--tw-backdrop-hue-rotate:initial;--tw-backdrop-invert:initial;--tw-backdrop-opacity:initial;--tw-backdrop-saturate:initial;--tw-backdrop-sepia:initial;--tw-ease:initial}}}@layer theme,base,components;@layer utilities{.\@container{container-type:inline-size}.pointer-events-none{pointer-events:none}.absolute{position:absolute}.fixed{position:fixed}.relative{position:relative}.sticky{position:sticky}.top-0{top:0}.top-1{top:var(--spacing,.25rem)}.top-1\/2{top:50%}.-right-1{right:calc(var(--spacing,.25rem) * -1)}.-right-1\.5{right:calc(var(--spacing,.25rem) * -1.5)}.right-2{right:calc(var(--spacing,.25rem) * 2)}.-bottom-1{bottom:calc(var(--spacing,.25rem) * -1)}.left-0{left:0}.left-3{left:calc(var(--spacing,.25rem) * 3)}.z-10{z-index:10}.z-\[60\]{z-index:60}.m-0{margin:0}.-mx-2{margin-inline:calc(var(--spacing,.25rem) * -2)}.mx-4{margin-inline:calc(var(--spacing,.25rem) * 4)}.mx-auto{margin-inline:auto}.-my-1{margin-block:calc(var(--spacing,.25rem) * -1)}.-mt-2{margin-top:calc(var(--spacing,.25rem) * -2)}.-mt-3{margin-top:calc(var(--spacing,.25rem) * -3)}.mt-0{margin-top:0}.mt-0\.5{margin-top:calc(var(--spacing,.25rem) * .5)}.mt-1{margin-top:var(--spacing,.25rem)}.mt-2{margin-top:calc(var(--spacing,.25rem) * 2)}.mt-3{margin-top:calc(var(--spacing,.25rem) * 3)}.mt-3\.5{margin-top:calc(var(--spacing,.25rem) * 3.5)}.mr-2{margin-right:calc(var(--spacing,.25rem) * 2)}.mb-1{margin-bottom:var(--spacing,.25rem)}.mb-1\.5{margin-bottom:calc(var(--spacing,.25rem) * 1.5)}.-ml-\[25px\]{margin-left:-25px}.ml-auto{margin-left:auto}.block{display:block}.flex{display:flex}.grid{display:grid}.hidden{display:none}.inline-grid{display:inline-grid}.table{display:table}.size-2{width:calc(var(--spacing,.25rem) * 2);height:calc(var(--spacing,.25rem) * 2)}.size-2\.5{width:calc(var(--spacing,.25rem) * 2.5);height:calc(var(--spacing,.25rem) * 2.5)}.size-4{width:calc(var(--spacing,.25rem) * 4);height:calc(var(--spacing,.25rem) * 4)}.size-5{width:calc(var(--spacing,.25rem) * 5);height:calc(var(--spacing,.25rem) * 5)}.size-6{width:calc(var(--spacing,.25rem) * 6);height:calc(var(--spacing,.25rem) * 6)}.size-7{width:calc(var(--spacing,.25rem) * 7);height:calc(var(--spacing,.25rem) * 7)}.size-8{width:calc(var(--spacing,.25rem) * 8);height:calc(var(--spacing,.25rem) * 8)}.size-9{width:calc(var(--spacing,.25rem) * 9);height:calc(var(--spacing,.25rem) * 9)}.h-3{height:calc(var(--spacing,.25rem) * 3)}.h-3\.5{height:calc(var(--spacing,.25rem) * 3.5)}.h-6{height:calc(var(--spacing,.25rem) * 6)}.h-7{height:calc(var(--spacing,.25rem) * 7)}.h-8{height:calc(var(--spacing,.25rem) * 8)}.h-9{height:calc(var(--spacing,.25rem) * 9)}.h-10{height:calc(var(--spacing,.25rem) * 10)}.h-\[1\.15rem\]{height:1.15rem}.h-\[5px\]{height:5px}.h-\[120px\]{height:120px}.min-h-3{min-height:calc(var(--spacing,.25rem) * 3)}.min-h-3\.5{min-height:calc(var(--spacing,.25rem) * 3.5)}.min-h-11{min-height:calc(var(--spacing,.25rem) * 11)}.min-h-12{min-height:calc(var(--spacing,.25rem) * 12)}.min-h-24{min-height:calc(var(--spacing,.25rem) * 24)}.w-1{width:var(--spacing,.25rem)}.w-2{width:calc(var(--spacing,.25rem) * 2)}.w-2\/3{width:66.6667%}.w-8{width:calc(var(--spacing,.25rem) * 8)}.w-11{width:calc(var(--spacing,.25rem) * 11)}.w-28{width:calc(var(--spacing,.25rem) * 28)}.w-\[30px\]{width:30px}.w-\[50px\]{width:50px}.w-\[66px\]{width:66px}.w-fit{width:fit-content}.w-full{width:100%}.max-w-2xl{max-width:var(--container-2xl,42rem)}.max-w-5xl{max-width:var(--container-5xl,64rem)}.max-w-24{max-width:calc(var(--spacing,.25rem) * 24)}.max-w-40{max-width:calc(var(--spacing,.25rem) * 40)}.max-w-\[70ch\]{max-width:70ch}.max-w-full{max-width:100%}.max-w-none{max-width:none}.min-w-0{min-width:0}.min-w-24{min-width:calc(var(--spacing,.25rem) * 24)}.min-w-30{min-width:calc(var(--spacing,.25rem) * 30)}.min-w-full{min-width:100%}.flex-1{flex:1}.shrink-0{flex-shrink:0}.basis-0{flex-basis:0}.border-collapse{border-collapse:collapse}.border-separate{border-collapse:separate}.border-spacing-0{--tw-border-spacing-x:0px;--tw-border-spacing-y:0px;border-spacing:var(--tw-border-spacing-x) var(--tw-border-spacing-y)}.-translate-y-1{--tw-translate-y:calc(var(--spacing,.25rem) * -1);translate:var(--tw-translate-x) var(--tw-translate-y)}.-translate-y-1\/2{--tw-translate-y:calc(calc(1 / 2 * 100%) * -1);translate:var(--tw-translate-x) var(--tw-translate-y)}.-rotate-1{rotate:-1deg}.rotate-90{rotate:90deg}.transform{transform:var(--tw-rotate-x, ) var(--tw-rotate-y, ) var(--tw-rotate-z, ) var(--tw-skew-x, ) var(--tw-skew-y, )}.animate-pulse{animation:var(--animate-pulse,pulse 2s cubic-bezier(.4, 0, .6, 1) infinite)}.cursor-default{cursor:default}.cursor-grab{cursor:grab}.cursor-pointer{cursor:pointer}.touch-pan-y{--tw-pan-y:pan-y;touch-action:var(--tw-pan-x, ) var(--tw-pan-y, ) var(--tw-pinch-zoom, )}.touch-none{touch-action:none}.grid-cols-\[12px_1fr_auto_64px\]{grid-template-columns:12px 1fr auto 64px}.flex-col{flex-direction:column}.flex-wrap{flex-wrap:wrap}.place-items-center{place-items:center}.items-center{align-items:center}.items-start{align-items:flex-start}.justify-between{justify-content:space-between}.justify-center{justify-content:center}.justify-end{justify-content:flex-end}.justify-start{justify-content:flex-start}.gap-1{gap:var(--spacing,.25rem)}.gap-1\.5{gap:calc(var(--spacing,.25rem) * 1.5)}.gap-2{gap:calc(var(--spacing,.25rem) * 2)}.gap-2\.5{gap:calc(var(--spacing,.25rem) * 2.5)}.gap-3{gap:calc(var(--spacing,.25rem) * 3)}.gap-4{gap:calc(var(--spacing,.25rem) * 4)}.gap-5{gap:calc(var(--spacing,.25rem) * 5)}.gap-6{gap:calc(var(--spacing,.25rem) * 6)}.gap-8{gap:calc(var(--spacing,.25rem) * 8)}.gap-x-6{column-gap:calc(var(--spacing,.25rem) * 6)}.gap-x-8{column-gap:calc(var(--spacing,.25rem) * 8)}.gap-y-8{row-gap:calc(var(--spacing,.25rem) * 8)}.self-start{align-self:flex-start}.truncate{text-overflow:ellipsis;white-space:nowrap;overflow:hidden}.overflow-hidden{overflow:hidden}.overflow-x-auto{overflow-x:auto}.overflow-y-auto{overflow-y:auto}.rounded-\[3px\]{border-radius:3px}.rounded-\[10px\]{border-radius:10px}.rounded-full{border-radius:2147483647px}.rounded-lg{border-radius:var(--radius)}.rounded-md{border-radius:calc(var(--radius) - 2px)}.rounded-xl{border-radius:calc(var(--radius) + 4px)}.border{border-style:var(--tw-border-style);border-width:1px}.border-0{border-style:var(--tw-border-style);border-width:0}.border-2{border-style:var(--tw-border-style);border-width:2px}.border-t{border-top-style:var(--tw-border-style);border-top-width:1px}.border-b{border-bottom-style:var(--tw-border-style);border-bottom-width:1px}.border-dashed{--tw-border-style:dashed;border-style:dashed}.border-foreground{border-color:var(--foreground)}.border-muted-foreground,.border-muted-foreground\/40{border-color:var(--muted-foreground)}@supports (color:color-mix(in lab, red, red)){.border-muted-foreground\/40{border-color:color-mix(in oklab, var(--muted-foreground) 40%, transparent)}}.border-warning{border-color:var(--warning)}.bg-\[\#141414\]{background-color:#141414}.bg-accent{background-color:var(--accent)}.bg-background{background-color:var(--background)}.bg-black{background-color:var(--color-black,#000)}.bg-card,.bg-card\/90{background-color:var(--card)}@supports (color:color-mix(in lab, red, red)){.bg-card\/90{background-color:color-mix(in oklab, var(--card) 90%, transparent)}}.bg-foreground{background-color:var(--foreground)}.bg-muted{background-color:var(--muted)}.bg-transparent{background-color:#0000}.bg-warning{background-color:var(--warning)}.bg-white{background-color:var(--color-white,#fff)}.p-1{padding:var(--spacing,.25rem)}.p-2{padding:calc(var(--spacing,.25rem) * 2)}.p-3{padding:calc(var(--spacing,.25rem) * 3)}.p-4{padding:calc(var(--spacing,.25rem) * 4)}.px-0{padding-inline:0}.px-1{padding-inline:var(--spacing,.25rem)}.px-3{padding-inline:calc(var(--spacing,.25rem) * 3)}.px-4{padding-inline:calc(var(--spacing,.25rem) * 4)}.py-0{padding-block:0}.py-0\.5{padding-block:calc(var(--spacing,.25rem) * .5)}.py-1{padding-block:var(--spacing,.25rem)}.py-1\.5{padding-block:calc(var(--spacing,.25rem) * 1.5)}.py-2{padding-block:calc(var(--spacing,.25rem) * 2)}.py-2\.5{padding-block:calc(var(--spacing,.25rem) * 2.5)}.py-3{padding-block:calc(var(--spacing,.25rem) * 3)}.py-6{padding-block:calc(var(--spacing,.25rem) * 6)}.py-\[7px\]{padding-block:7px}.pt-1{padding-top:var(--spacing,.25rem)}.pt-2{padding-top:calc(var(--spacing,.25rem) * 2)}.pt-3{padding-top:calc(var(--spacing,.25rem) * 3)}.pt-3\.5{padding-top:calc(var(--spacing,.25rem) * 3.5)}.pr-1{padding-right:var(--spacing,.25rem)}.pr-3{padding-right:calc(var(--spacing,.25rem) * 3)}.pr-4{padding-right:calc(var(--spacing,.25rem) * 4)}.pr-8{padding-right:calc(var(--spacing,.25rem) * 8)}.pb-1{padding-bottom:var(--spacing,.25rem)}.pb-1\.5{padding-bottom:calc(var(--spacing,.25rem) * 1.5)}.pb-3{padding-bottom:calc(var(--spacing,.25rem) * 3)}.pl-2{padding-left:calc(var(--spacing,.25rem) * 2)}.pl-3{padding-left:calc(var(--spacing,.25rem) * 3)}.pl-9{padding-left:calc(var(--spacing,.25rem) * 9)}.pl-14{padding-left:calc(var(--spacing,.25rem) * 14)}.pl-\[38px\]{padding-left:38px}.text-center{text-align:center}.text-left{text-align:left}.text-right{text-align:right}.align-bottom{vertical-align:bottom}.align-middle{vertical-align:middle}.font-mono{font-family:var(--font-mono,ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace)}.font-sans{font-family:-apple-system,BlinkMacSystemFont,Segoe UI Variable,Segoe UI,system-ui,sans-serif}.text-3xl{font-size:var(--text-3xl,1.875rem);line-height:var(--tw-leading,var(--text-3xl--line-height,calc(2.25 / 1.875)))}.text-lg{font-size:var(--text-lg,1.125rem);line-height:var(--tw-leading,var(--text-lg--line-height,calc(1.75 / 1.125)))}.text-sm{font-size:var(--text-sm,.875rem);line-height:var(--tw-leading,var(--text-sm--line-height,calc(1.25 / .875)))}.text-xl{font-size:var(--text-xl,1.25rem);line-height:var(--tw-leading,var(--text-xl--line-height,calc(1.75 / 1.25)))}.text-xs{font-size:var(--text-xs,.75rem);line-height:var(--tw-leading,var(--text-xs--line-height,calc(1 / .75)))}.text-\[13px\]{font-size:13px}.text-\[15px\]{font-size:15px}.leading-relaxed{--tw-leading:var(--leading-relaxed,1.625);line-height:var(--leading-relaxed,1.625)}.font-bold{--tw-font-weight:var(--font-weight-bold,700);font-weight:var(--font-weight-bold,700)}.font-extrabold{--tw-font-weight:var(--font-weight-extrabold,800);font-weight:var(--font-weight-extrabold,800)}.font-medium{--tw-font-weight:var(--font-weight-medium,500);font-weight:var(--font-weight-medium,500)}.font-normal{--tw-font-weight:var(--font-weight-normal,400);font-weight:var(--font-weight-normal,400)}.font-semibold{--tw-font-weight:var(--font-weight-semibold,600);font-weight:var(--font-weight-semibold,600)}.tracking-tight{--tw-tracking:var(--tracking-tight,-.025em);letter-spacing:var(--tracking-tight,-.025em)}.tracking-widest{--tw-tracking:var(--tracking-widest,.1em);letter-spacing:var(--tracking-widest,.1em)}.\[overflow-wrap\:anywhere\]{overflow-wrap:anywhere}.break-words{overflow-wrap:break-word}.break-all{word-break:break-all}.whitespace-nowrap{white-space:nowrap}.text-background{color:var(--background)}.text-card-foreground{color:var(--card-foreground)}.text-current{color:currentColor}.text-destructive{color:var(--destructive)}.text-foreground{color:var(--foreground)}.text-muted-foreground{color:var(--muted-foreground)}.text-primary-foreground{color:var(--primary-foreground)}.text-warning{color:var(--warning)}.text-white{color:var(--color-white,#fff)}.lowercase{text-transform:lowercase}.ordinal{--tw-ordinal:ordinal;font-variant-numeric:var(--tw-ordinal, ) var(--tw-slashed-zero, ) var(--tw-numeric-figure, ) var(--tw-numeric-spacing, ) var(--tw-numeric-fraction, )}.tabular-nums{--tw-numeric-spacing:tabular-nums;font-variant-numeric:var(--tw-ordinal, ) var(--tw-slashed-zero, ) var(--tw-numeric-figure, ) var(--tw-numeric-spacing, ) var(--tw-numeric-fraction, )}.opacity-30{opacity:.3}.opacity-50{opacity:.5}.opacity-70{opacity:.7}.opacity-75{opacity:.75}.opacity-\[0\.12\]{opacity:.12}.shadow-\[inset_0_-2px_var\(--foreground\)\]{--tw-shadow:inset 0 -2px var(--tw-shadow-color,var(--foreground));box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)}.shadow-lg{--tw-shadow:0 10px 15px -3px var(--tw-shadow-color,#0000001a), 0 4px 6px -4px var(--tw-shadow-color,#0000001a);box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)}.shadow-none{--tw-shadow:0 0 #0000;box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)}.ring-1{--tw-ring-shadow:var(--tw-ring-inset, ) 0 0 0 calc(1px + var(--tw-ring-offset-width)) var(--tw-ring-color,currentcolor);box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)}.ring-2{--tw-ring-shadow:var(--tw-ring-inset, ) 0 0 0 calc(2px + var(--tw-ring-offset-width)) var(--tw-ring-color,currentcolor);box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)}.ring-border{--tw-ring-color:var(--border)}.ring-primary{--tw-ring-color:var(--primary)}.ring-ring{--tw-ring-color:var(--ring)}.outline{outline-style:var(--tw-outline-style);outline-width:1px}.backdrop-blur-xl{--tw-backdrop-blur:blur(var(--blur-xl,24px));-webkit-backdrop-filter:var(--tw-backdrop-blur, ) var(--tw-backdrop-brightness, ) var(--tw-backdrop-contrast, ) var(--tw-backdrop-grayscale, ) var(--tw-backdrop-hue-rotate, ) var(--tw-backdrop-invert, ) var(--tw-backdrop-opacity, ) var(--tw-backdrop-saturate, ) var(--tw-backdrop-sepia, );backdrop-filter:var(--tw-backdrop-blur, ) var(--tw-backdrop-brightness, ) var(--tw-backdrop-contrast, ) var(--tw-backdrop-grayscale, ) var(--tw-backdrop-hue-rotate, ) var(--tw-backdrop-invert, ) var(--tw-backdrop-opacity, ) var(--tw-backdrop-saturate, ) var(--tw-backdrop-sepia, )}.transition{transition-property:color,background-color,border-color,outline-color,text-decoration-color,fill,stroke,--tw-gradient-from,--tw-gradient-via,--tw-gradient-to,opacity,box-shadow,transform,translate,scale,rotate,filter,-webkit-backdrop-filter,backdrop-filter,display,content-visibility,overlay,pointer-events;transition-timing-function:var(--tw-ease,var(--default-transition-timing-function,cubic-bezier(.4, 0, .2, 1)));transition-duration:var(--tw-duration,var(--default-transition-duration,.15s))}.transition-opacity{transition-property:opacity;transition-timing-function:var(--tw-ease,var(--default-transition-timing-function,cubic-bezier(.4, 0, .2, 1)));transition-duration:var(--tw-duration,var(--default-transition-duration,.15s))}.transition-shadow{transition-property:box-shadow;transition-timing-function:var(--tw-ease,var(--default-transition-timing-function,cubic-bezier(.4, 0, .2, 1)));transition-duration:var(--tw-duration,var(--default-transition-duration,.15s))}.ease-in-out{--tw-ease:var(--ease-in-out,cubic-bezier(.4, 0, .2, 1));transition-timing-function:var(--ease-in-out,cubic-bezier(.4, 0, .2, 1))}.outline-none{--tw-outline-style:none;outline-style:none}.select-all{-webkit-user-select:all;user-select:all}.select-none{-webkit-user-select:none;user-select:none}.select-text{-webkit-user-select:text;user-select:text}.\[-webkit-touch-callout\:none\]{-webkit-touch-callout:none}:is(:where(.group):focus-visible .group-focus-visible\:ring-\[3px\]){--tw-ring-shadow:var(--tw-ring-inset, ) 0 0 0 calc(3px + var(--tw-ring-offset-width)) var(--tw-ring-color,currentcolor);box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)}:is(:where(.group):focus-visible .group-focus-visible\:ring-ring\/50){--tw-ring-color:var(--ring)}@supports (color:color-mix(in lab, red, red)){:is(:where(.group):focus-visible .group-focus-visible\:ring-ring\/50){--tw-ring-color:color-mix(in oklab, var(--ring) 50%, transparent)}}@media (hover:hover){.hover\:bg-accent\/50:hover{background-color:var(--accent)}@supports (color:color-mix(in lab, red, red)){.hover\:bg-accent\/50:hover{background-color:color-mix(in oklab, var(--accent) 50%, transparent)}}}.focus-visible\:bg-accent\/50:focus-visible{background-color:var(--accent)}@supports (color:color-mix(in lab, red, red)){.focus-visible\:bg-accent\/50:focus-visible{background-color:color-mix(in oklab, var(--accent) 50%, transparent)}}.focus-visible\:ring-0:focus-visible{--tw-ring-shadow:var(--tw-ring-inset, ) 0 0 0 calc(0px + var(--tw-ring-offset-width)) var(--tw-ring-color,currentcolor);box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)}.focus-visible\:ring-\[3px\]:focus-visible{--tw-ring-shadow:var(--tw-ring-inset, ) 0 0 0 calc(3px + var(--tw-ring-offset-width)) var(--tw-ring-color,currentcolor);box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)}.focus-visible\:ring-ring\/50:focus-visible{--tw-ring-color:var(--ring)}@supports (color:color-mix(in lab, red, red)){.focus-visible\:ring-ring\/50:focus-visible{--tw-ring-color:color-mix(in oklab, var(--ring) 50%, transparent)}}.disabled\:pointer-events-none:disabled{pointer-events:none}.disabled\:opacity-50:disabled{opacity:.5}@media (prefers-reduced-motion:reduce){.motion-reduce\:animate-none{animation:none}}@media (width>=48rem){.md\:text-sm{font-size:var(--text-sm,.875rem);line-height:var(--tw-leading,var(--text-sm--line-height,calc(1.25 / .875)))}}@container (width>=36rem){.\@xl\:flex-none{flex:none}.\@xl\:flex-row{flex-direction:row}.\@xl\:items-center{align-items:center}.\@xl\:justify-end{justify-content:flex-end}}@container (width>=42rem){.\@2xl\:h-auto{height:auto}.\@2xl\:min-h-44{min-height:calc(var(--spacing,.25rem) * 44)}.\@2xl\:w-6{width:calc(var(--spacing,.25rem) * 6)}.\@2xl\:w-16{width:calc(var(--spacing,.25rem) * 16)}.\@2xl\:min-w-40{min-width:calc(var(--spacing,.25rem) * 40)}.\@2xl\:flex-none{flex:none}.\@2xl\:rotate-0{rotate:0deg}.\@2xl\:flex-row{flex-direction:row}.\@2xl\:items-stretch{align-items:stretch}}@container (width>=48rem){.\@3xl\:grid-cols-\[minmax\(0\,1\.3fr\)_minmax\(0\,1fr\)\]{grid-template-columns:minmax(0,1.3fr) minmax(0,1fr)}}@media (prefers-color-scheme:dark){.dark\:bg-transparent{background-color:#0000}}.\[\&\:\:-webkit-search-cancel-button\]\:hidden::-webkit-search-cancel-button{display:none}.\[\&\>svg\:last-child\]\:hidden>svg:last-child{display:none}}@property --tw-border-spacing-x{syntax:"<length>";inherits:false;initial-value:0}@property --tw-border-spacing-y{syntax:"<length>";inherits:false;initial-value:0}@property --tw-translate-x{syntax:"*";inherits:false;initial-value:0}@property --tw-translate-y{syntax:"*";inherits:false;initial-value:0}@property --tw-translate-z{syntax:"*";inherits:false;initial-value:0}@property --tw-rotate-x{syntax:"*";inherits:false}@property --tw-rotate-y{syntax:"*";inherits:false}@property --tw-rotate-z{syntax:"*";inherits:false}@property --tw-skew-x{syntax:"*";inherits:false}@property --tw-skew-y{syntax:"*";inherits:false}@property --tw-pan-x{syntax:"*";inherits:false}@property --tw-pan-y{syntax:"*";inherits:false}@property --tw-pinch-zoom{syntax:"*";inherits:false}@property --tw-border-style{syntax:"*";inherits:false;initial-value:solid}@property --tw-leading{syntax:"*";inherits:false}@property --tw-font-weight{syntax:"*";inherits:false}@property --tw-tracking{syntax:"*";inherits:false}@property --tw-ordinal{syntax:"*";inherits:false}@property --tw-slashed-zero{syntax:"*";inherits:false}@property --tw-numeric-figure{syntax:"*";inherits:false}@property --tw-numeric-spacing{syntax:"*";inherits:false}@property --tw-numeric-fraction{syntax:"*";inherits:false}@property --tw-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-shadow-color{syntax:"*";inherits:false}@property --tw-shadow-alpha{syntax:"<percentage>";inherits:false;initial-value:100%}@property --tw-inset-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-inset-shadow-color{syntax:"*";inherits:false}@property --tw-inset-shadow-alpha{syntax:"<percentage>";inherits:false;initial-value:100%}@property --tw-ring-color{syntax:"*";inherits:false}@property --tw-ring-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-inset-ring-color{syntax:"*";inherits:false}@property --tw-inset-ring-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-ring-inset{syntax:"*";inherits:false}@property --tw-ring-offset-width{syntax:"<length>";inherits:false;initial-value:0}@property --tw-ring-offset-color{syntax:"*";inherits:false;initial-value:#fff}@property --tw-ring-offset-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-outline-style{syntax:"*";inherits:false;initial-value:solid}@property --tw-backdrop-blur{syntax:"*";inherits:false}@property --tw-backdrop-brightness{syntax:"*";inherits:false}@property --tw-backdrop-contrast{syntax:"*";inherits:false}@property --tw-backdrop-grayscale{syntax:"*";inherits:false}@property --tw-backdrop-hue-rotate{syntax:"*";inherits:false}@property --tw-backdrop-invert{syntax:"*";inherits:false}@property --tw-backdrop-opacity{syntax:"*";inherits:false}@property --tw-backdrop-saturate{syntax:"*";inherits:false}@property --tw-backdrop-sepia{syntax:"*";inherits:false}@property --tw-ease{syntax:"*";inherits:false}@keyframes pulse{50%{opacity:.5}}
+/*$vite$:1*/</style>
+<div id="root"></div>
+<script type="module">import { c as e } from "react/compiler-runtime";
+import { useEffect as t, useState as n } from "react";
+import { createRoot as r } from "react-dom/client";
+import { Button as i, Empty as a, Icon as o, Tabs as s, TabsList as c, TabsTrigger as l, cn as u, useWidth as d } from "@one/ui";
+import { Fragment as f, jsx as p, jsxs as m } from "react/jsx-runtime";
+var h = one.params || {}, g = (e) => e >= 1e3 ? `${(e / 1e3).toFixed(1)} s` : `${Math.max(0, Math.round(e))} ms`, _ = 500, v = (e) => e.what === "call" ? `${e.app}.${e.op}` : e.what === "page" ? "Page code" : e.path || "", y = (e) => (!h.app || e.app === h.app) && e.at >= (h.since || 0) - 1e3;
+function b(e) {
+	let t = {}, n = (e) => {
+		if (e && typeof e == "object") {
+			Object.assign(t, e.names || {});
+			for (let t of e.steps || []) n(t.trace);
+		}
+	};
+	for (let r of e) for (let e of r.fetches || []) {
+		n(e.node);
+		let r = (e.tries || []).find((e) => e.result === "answered");
+		r && e.node?.device && (t[r.node] = e.node.device);
+	}
+	return t;
+}
+var x = {
+	"no connection": "couldn't connect",
+	"not taking requests": "took no requests",
+	"no answer": "didn't answer",
+	unreachable: "unreachable",
+	lost: "lost the connection",
+	failed: "failed",
+	elsewhere: "said elsewhere"
+};
+function S(e, t) {
+	let n = [], r = [], i = (e) => t[e] || `a device (${String(e).slice(0, 6)})`, a = "This device", o = 0, s = 0, c = (e.waited || 0) + (e.network || 0);
+	if (c >= 1 && (n.push({
+		block: a,
+		a: 0,
+		b: c,
+		kind: "wait"
+	}), r.push([e.waited ? "Waited for this device to be let in" : "Joined the network", c]), o = s = c), e.source === "kept") return n.push({
+		block: a,
+		a: 0,
+		b: Math.max(e.ms || 0, 2),
+		kind: "code"
+	}), r.push(["Shown from this device's copy", e.ms || 0]), {
+		marks: n,
+		parts: r,
+		end: e.ms || 0
+	};
+	let l = (t, i, a) => {
+		let o = 0;
+		for (let s of t?.steps || []) {
+			let t = s.step === "device" && s.app && s.app !== e.app;
+			!t && (s.step !== "device" || s.result !== "ran" || !s.here && s.device !== i) && (o += s.step === "logs" && s.ms < 5 ? 0 : s.ms || 0);
+			let c = a + (s.at || 0), u = c + (s.ms || 0);
+			if (t) {
+				let e = s.here ? i : s.device || "a device", t = s.result !== "ran";
+				if (e === i) {
+					l(s.trace, i, c), r.push([
+						`${s.app} asked on ${i}${t ? `: ${x[s.result] || s.result}` : ""}`,
+						s.ms || 0,
+						t
+					]);
+					continue;
+				}
+				let a = s.trace?.ms || 0, o = Math.max(0, (s.ms || 0) - a) / 2;
+				n.push({
+					hop: [i, e],
+					a: c,
+					b: c + o,
+					kind: t ? "warn" : "net"
+				}), s.trace && l(s.trace, e, c + o), n.push({
+					hop: [e, i],
+					a: u - o,
+					b: u,
+					kind: t ? "warn" : "net"
+				}), r.push([
+					`${i} asked ${s.app} on ${e}${t ? `: ${x[s.result] || s.result}` : ""}`,
+					s.ms || 0,
+					t
+				]);
+			} else if (s.step === "device") {
+				let e = s.device || "a device";
+				if (s.result === "ran" && (s.here || e === i)) {
+					l(s.trace, i, a);
+					continue;
+				}
+				let t = s.result !== "ran" && s.result !== "needs keys", o = s.trace?.ms || 0, d = Math.max(0, (s.ms || 0) - o) / 2;
+				n.push({
+					hop: [i, e],
+					a: c,
+					b: c + d,
+					kind: t ? "warn" : "net"
+				}), s.trace && l(s.trace, e, c + d), n.push({
+					hop: [e, i],
+					a: u - d,
+					b: u,
+					kind: t ? "warn" : "net"
+				}), r.push([
+					t ? `${i} tried ${e}: ${x[s.result] || s.result}` : `${i} passed it to ${e}`,
+					s.ms || 0,
+					t
+				]);
+			} else s.step === "bucket" || s.step === "behind" ? (n.push({
+				hop: [i, "Bucket"],
+				a: c,
+				b: c + (s.ms || 0) / 2,
+				kind: "bucket"
+			}, {
+				hop: ["Bucket", i],
+				a: c + (s.ms || 0) / 2,
+				b: u,
+				kind: "bucket"
+			}), r.push([
+				s.step === "bucket" ? `${i} fetched ${s.found} of ${s.asks} from the bucket` : `${i} asked the bucket first: ${s.result}`,
+				s.ms || 0,
+				s.step === "behind" && s.result !== "caught up"
+			])) : s.step === "data" || s.step === "open" || s.step === "logs" && s.ms >= 5 ? (n.push({
+				block: i,
+				a: c,
+				b: u,
+				kind: "data"
+			}), r.push([s.step === "open" ? `Opened ${s.app}'s data on ${i}` : s.step === "logs" ? `Read who's who on ${i}` : `Read ${i}'s copy${s.new ? `, ${s.new} new steps` : ""}`, s.ms || 0])) : s.step === "run" && (n.push({
+				block: i,
+				a: c,
+				b: u,
+				kind: "app"
+			}), r.push([`${s.app} ran on ${i}`, s.ms || 0]));
+		}
+		let s = (t?.ms || 0) - o;
+		s >= 1 && r.push([`Other work on ${i}`, s]);
+	};
+	for (let t of e.fetches || []) {
+		let e = t.handed?.ms || 0;
+		e >= 1 && (n.push({
+			block: a,
+			a: o,
+			b: o + e,
+			kind: "wait"
+		}), r.push(["Opened the keys to hand with it", e]), s += e);
+		let c = o + e, u = c;
+		for (let e of t.tries || []) {
+			let o = c + (e.at || 0), d = o + (e.ms || 0), f = i(e.node);
+			u = Math.max(u, d), e.connect && (n.push({
+				block: a,
+				a: o,
+				b: o + e.connect,
+				kind: "wait"
+			}), r.push([`Connected to ${f}`, e.connect]), s += e.connect);
+			let p = o + (e.connect || 0);
+			if (e.result !== "answered") {
+				n.push({
+					hop: [a, f],
+					a: p,
+					b: p + (d - p) / 2,
+					kind: "warn"
+				}, {
+					hop: [f, a],
+					a: p + (d - p) / 2,
+					b: d,
+					kind: "warn"
+				}), r.push([
+					`${f}: ${x[e.result] || e.result}, gave up`,
+					e.ms || 0,
+					!0
+				]), s += (e.ms || 0) - (e.connect || 0);
+				continue;
+			}
+			let m = t.node?.ms || 0, h = Math.max(0, d - p - m);
+			n.push({
+				hop: [a, f],
+				a: p,
+				b: p + h / 2,
+				kind: "net",
+				label: h
+			}), l(t.node, f, p + h / 2), n.push({
+				hop: [f, a],
+				a: d - h / 2,
+				b: d,
+				kind: "net"
+			}), r.push([`There and back to ${f}`, h]), s += h + m;
+		}
+		o = u, t.client?.ms >= 1 && (n.push({
+			block: a,
+			a: o,
+			b: o + t.client.ms,
+			kind: "wait"
+		}), r.push(["Found the keys it needed", t.client.ms]), o += t.client.ms, s += t.client.ms);
+	}
+	return (e.ms || 0) - s >= 1 && r.push(["Other work on this device", (e.ms || 0) - s]), e.failed && r.push([
+		"Failed",
+		0,
+		!0
+	]), {
+		marks: n,
+		parts: r,
+		end: Math.max(o, e.ms || 0)
+	};
+}
+function C(e) {
+	let t = [];
+	for (let n of e) {
+		let e = t.at(-1);
+		e && n.at <= e.end + _ ? (e.rs.push(n), e.end = Math.max(e.end, n.at + (n.ms || 0))) : t.push({
+			rs: [n],
+			start: n.at,
+			end: n.at + (n.ms || 0)
+		});
+	}
+	return t;
+}
+var w = {
+	net: "#6e8fd8",
+	data: "#5fb39a",
+	app: "#e0b25c",
+	code: "#a58bd6",
+	bucket: "#d77f8f",
+	wait: "#6b6f77",
+	warn: "var(--warning)"
+};
+function T() {
+	let r = e(20), [u, f] = n("screen"), [h, g] = n(null), [_, v] = n(null), [y, b] = d(), x;
+	r[0] === Symbol.for("react.memo_cache_sentinel") ? (x = document.documentElement.hasAttribute("data-raised"), r[0] = x) : x = r[0];
+	let S = x, C, w;
+	r[1] === Symbol.for("react.memo_cache_sentinel") ? (C = () => {
+		document.body.style.padding = "0 0 24px";
+		let e = async () => {
+			let e = await one.traces();
+			v((t) => e ? t && e.length === t.length && e.at(-1)?.at === t.at(-1)?.at ? t : e : !1);
+		};
+		e();
+		let t = setInterval(e, 1e3);
+		return () => clearInterval(t);
+	}, w = [], r[1] = C, r[2] = w) : (C = r[1], w = r[2]), t(C, w);
+	let T;
+	r[3] === Symbol.for("react.memo_cache_sentinel") ? (T = (e) => (f(e), g(null)), r[3] = T) : T = r[3];
+	let O = T, k;
+	r[4] === Symbol.for("react.memo_cache_sentinel") ? (k = /* @__PURE__ */ p("span", {
+		className: "flex h-9 items-center text-sm font-semibold shadow-[inset_0_-2px_var(--foreground)]",
+		"aria-current": "page",
+		children: "Timing"
+	}), r[4] = k) : k = r[4];
+	let A;
+	r[5] === Symbol.for("react.memo_cache_sentinel") ? (A = /* @__PURE__ */ m(c, {
+		className: "h-7",
+		children: [/* @__PURE__ */ p(l, {
+			value: "screen",
+			className: "text-xs",
+			children: "This Screen"
+		}), /* @__PURE__ */ p(l, {
+			value: "all",
+			className: "text-xs",
+			children: "All Screens"
+		})]
+	}), r[5] = A) : A = r[5];
+	let j;
+	r[6] === u ? j = r[7] : (j = /* @__PURE__ */ p(s, {
+		value: u,
+		onValueChange: O,
+		className: "ml-auto",
+		children: A
+	}), r[6] = u, r[7] = j);
+	let M;
+	r[8] === Symbol.for("react.memo_cache_sentinel") ? (M = !S && /* @__PURE__ */ p(i, {
+		variant: "ghost",
+		size: "icon-sm",
+		"aria-label": "Close",
+		onClick: E,
+		children: /* @__PURE__ */ p(o, { name: "x" })
+	}), r[8] = M) : M = r[8];
+	let N;
+	r[9] === j ? N = r[10] : (N = /* @__PURE__ */ m("div", {
+		className: "sticky top-0 z-10 flex h-9 items-center gap-4 border-b bg-card/90 px-3 backdrop-blur-xl",
+		children: [
+			k,
+			j,
+			M
+		]
+	}), r[9] = j, r[10] = N);
+	let P;
+	r[11] !== _ || r[12] !== h || r[13] !== u || r[14] !== b ? (P = _ === !1 ? /* @__PURE__ */ p(a, { children: "Turn on Developer Mode in Settings › Developer to see what each screen asked for." }) : _ ? /* @__PURE__ */ p(D, {
+		all: _,
+		scope: u,
+		picked: h,
+		pick: g,
+		width: b
+	}) : null, r[11] = _, r[12] = h, r[13] = u, r[14] = b, r[15] = P) : P = r[15];
+	let F;
+	return r[16] !== y || r[17] !== N || r[18] !== P ? (F = /* @__PURE__ */ m("div", {
+		ref: y,
+		className: "tabular-nums",
+		children: [N, P]
+	}), r[16] = y, r[17] = N, r[18] = P, r[19] = F) : F = r[19], F;
+}
+function E() {
+	return one.close();
+}
+function D(t) {
+	let n = e(18), { all: r, scope: i, picked: o, pick: s, width: c } = t, l, d;
+	if (n[0] !== r || n[1] !== s || n[2] !== o?.at || n[3] !== o?.title || n[4] !== i || n[5] !== c) {
+		d = Symbol.for("react.early_return_sentinel");
+		bb0: {
+			let e;
+			n[8] === i ? e = n[9] : (e = (e) => i === "all" || y(e), n[8] = i, n[9] = e);
+			let t = r.filter(e).sort(F);
+			if (!t.length) {
+				let e = i === "all" ? "Nothing asked yet." : "This screen hasn't asked for anything since it opened.", t;
+				n[10] === e ? t = n[11] : (t = /* @__PURE__ */ p(a, { children: e }), n[10] = e, n[11] = t), d = t;
+				break bb0;
+			}
+			let _ = b(r), x = new Map(t.map((e) => [e, S(e, _)])), T = (e) => x.get(e).parts.some(P), E = C(t), D = t.find((e) => e.at === o?.at && v(e) === o?.title) || E.at(-1).rs.reduce(N), L = E.find((e) => e.rs.includes(D)), R = i === "screen" && L === E[0] && h.title, z = L.end - L.start, B = L.rs.reduce(M), V = x.get(B).parts.reduce(j, ["", 0]), H = L.rs.find(T), U = (e) => {
+				let t = e === D, n = e.what === "page" ? "code" : "net", r = e.source === "kept" ? "from this device's copy" : e.fetches?.at(-1)?.node?.device ? `${e.what === "page" ? "from" : "on"} ${e.fetches.at(-1).node.device}` : "", i = T(e);
+				return /* @__PURE__ */ m("div", { children: [/* @__PURE__ */ m("button", {
+					type: "button",
+					"aria-pressed": t,
+					onClick: () => s({
+						at: e.at,
+						title: v(e)
+					}),
+					className: u("grid w-full cursor-pointer grid-cols-[12px_1fr_auto_64px] items-center gap-2.5 border-b px-4 py-[7px] text-left text-[13px] text-muted-foreground", t && "bg-accent text-foreground"),
+					children: [
+						/* @__PURE__ */ p("span", {
+							className: "size-2.5 rounded-[3px]",
+							style: { background: i ? w.warn : w[n] }
+						}),
+						/* @__PURE__ */ m("span", {
+							className: u("min-w-0", i && "text-warning"),
+							children: [
+								e.what === "call" ? /* @__PURE__ */ p("code", {
+									className: "font-mono text-xs",
+									children: v(e)
+								}) : v(e),
+								" ",
+								/* @__PURE__ */ p("span", {
+									className: "opacity-75",
+									children: r
+								})
+							]
+						}),
+						/* @__PURE__ */ m("span", {
+							className: "opacity-75",
+							children: ["at ", g(e.at - L.start)]
+						}),
+						/* @__PURE__ */ p("span", {
+							className: u("text-right", i && "text-warning"),
+							children: g(e.ms || 0)
+						})
+					]
+				}), t && /* @__PURE__ */ p("div", {
+					className: "border-b py-1.5 pr-4 pl-[38px] text-[13px] text-muted-foreground",
+					children: x.get(e).parts.map(A)
+				})] }, `${e.at} ${v(e)}`);
+			}, W = E.filter((e) => e !== L).reverse(), G;
+			n[12] !== R || n[13] !== z ? (G = R ? /* @__PURE__ */ m(f, { children: [
+				h.title,
+				" opened in ",
+				/* @__PURE__ */ p("b", {
+					className: "font-semibold",
+					children: g(z)
+				}),
+				". "
+			] }) : /* @__PURE__ */ m(f, { children: [
+				"These took ",
+				/* @__PURE__ */ p("b", {
+					className: "font-semibold",
+					children: g(z)
+				}),
+				". "
+			] }), n[12] = R, n[13] = z, n[14] = G) : G = n[14];
+			let K = H ? /* @__PURE__ */ m("span", {
+				className: "text-warning",
+				children: [
+					v(H),
+					" had a problem: ",
+					x.get(H).parts.find(k)[0],
+					"."
+				]
+			}) : V[1] >= 1 ? /* @__PURE__ */ m(f, { children: [
+				"The longest part of ",
+				v(B),
+				"'s ",
+				g(B.ms || 0),
+				": ",
+				V[0].replace(/^./, O),
+				", ",
+				/* @__PURE__ */ p("b", {
+					className: "font-semibold",
+					children: g(V[1])
+				}),
+				"."
+			] }) : null, q;
+			n[15] !== G || n[16] !== K ? (q = /* @__PURE__ */ m("p", {
+				className: "mx-4 mt-3.5 mb-1.5 max-w-[70ch] text-[15px]",
+				children: [G, K]
+			}), n[15] = G, n[16] = K, n[17] = q) : q = n[17], l = /* @__PURE__ */ m(f, { children: [
+				q,
+				/* @__PURE__ */ p(I, {
+					g: L,
+					sel: D,
+					routes: x,
+					width: c
+				}),
+				/* @__PURE__ */ p("div", {
+					className: "mt-1 border-t",
+					children: L.rs.map(U)
+				}),
+				W.map((e) => /* @__PURE__ */ m("div", { children: [/* @__PURE__ */ m("div", {
+					className: "mx-4 mt-3.5 mb-1 text-xs text-muted-foreground",
+					children: [
+						new Date(e.start).toLocaleTimeString(),
+						", ",
+						g(e.end - e.start)
+					]
+				}), /* @__PURE__ */ p("div", {
+					className: "border-t",
+					children: e.rs.map(U)
+				})] }, e.start))
+			] });
+		}
+		n[0] = r, n[1] = s, n[2] = o?.at, n[3] = o?.title, n[4] = i, n[5] = c, n[6] = l, n[7] = d;
+	} else l = n[6], d = n[7];
+	return d === Symbol.for("react.early_return_sentinel") ? l : d;
+}
+function O(e) {
+	return e.toLowerCase();
+}
+function k(e) {
+	let [, , t] = e;
+	return t;
+}
+function A(e, t) {
+	let [n, r, i] = e;
+	return /* @__PURE__ */ m("div", {
+		className: u("flex justify-between gap-3 py-0.5", i && "text-warning"),
+		children: [/* @__PURE__ */ p("span", { children: n }), /* @__PURE__ */ p("span", { children: r ? g(r) : "" })]
+	}, t);
+}
+function j(e, t) {
+	return t[1] > e[1] ? t : e;
+}
+function M(e, t) {
+	return (t.ms || 0) > (e.ms || 0) ? t : e;
+}
+function N(e, t) {
+	return (t.ms || 0) > (e.ms || 0) ? t : e;
+}
+function P(e) {
+	let [, , t] = e;
+	return t;
+}
+function F(e, t) {
+	return e.at - t.at;
+}
+function I(t) {
+	let n = e(66), { g: r, sel: i, routes: a, width: o } = t, s, c, l, u, d, h, _, y, b, x, S, C;
+	if (n[0] !== r.rs || n[1] !== r.start || n[2] !== a || n[3] !== i || n[4] !== o) {
+		let e = ["This device"];
+		for (let t of r.rs) for (let n of a.get(t).marks) for (let t of n.hop || [n.block]) t !== "Bucket" && !e.includes(t) && e.push(t);
+		r.rs.some((e) => a.get(e).marks.some(z)) && e.push("Bucket"), s = Math.max(360, o);
+		let t;
+		if (n[17] !== r.rs || n[18] !== r.start || n[19] !== a) {
+			let e;
+			n[21] !== r.start || n[22] !== a ? (e = (e) => e.at - r.start + a.get(e).end, n[21] = r.start, n[22] = a, n[23] = e) : e = n[23], t = Math.max(1, ...r.rs.map(e)), n[17] = r.rs, n[18] = r.start, n[19] = a, n[20] = t;
+		} else t = n[20];
+		let f = t, v;
+		n[24] !== s || n[25] !== f ? (v = (e) => 110 + e / f * (s - 110 - 54), n[24] = s, n[25] = f, n[26] = v) : v = n[26], S = v, C = (t) => 36 + e.indexOf(t) * 42;
+		let w = C(e.at(-1)) + 22, T;
+		n[27] === f ? T = n[28] : (T = [
+			1,
+			2,
+			5,
+			10,
+			20,
+			50,
+			100,
+			200,
+			500,
+			1e3,
+			2e3,
+			5e3,
+			1e4,
+			3e4
+		].find((e) => f / e <= 6) || 6e4, n[27] = f, n[28] = T);
+		let E = T;
+		if (n[29] !== w || n[30] !== s || n[31] !== a || n[32] !== i || n[33] !== f || n[34] !== E || n[35] !== S) {
+			let e = [];
+			for (let t = 0; t <= f; t += E) e.push(t);
+			let t;
+			n[44] !== a || n[45] !== i ? (t = a.get(i).marks.filter(R).reduce(L, null), n[44] = a, n[45] = i, n[46] = t) : t = n[46], c = t;
+			let r = {
+				fontSize: 11,
+				fill: "var(--muted-foreground)"
+			};
+			l = "block font-sans", u = s, d = w, h = `0 0 ${s} ${w}`, _ = "img", y = "Where each request went", b = e.map((e) => /* @__PURE__ */ m("g", { children: [/* @__PURE__ */ p("line", {
+				x1: S(e),
+				y1: 20,
+				x2: S(e),
+				y2: w - 8,
+				stroke: "var(--border)"
+			}), /* @__PURE__ */ p("text", {
+				x: S(e),
+				y: 16,
+				textAnchor: e ? "middle" : "start",
+				...r,
+				children: e ? g(e) : 0
+			})] }, e)), n[29] = w, n[30] = s, n[31] = a, n[32] = i, n[33] = f, n[34] = E, n[35] = S, n[36] = c, n[37] = l, n[38] = u, n[39] = d, n[40] = h, n[41] = _, n[42] = y, n[43] = b;
+		} else c = n[36], l = n[37], u = n[38], d = n[39], h = n[40], _ = n[41], y = n[42], b = n[43];
+		x = e.map((e) => /* @__PURE__ */ m("g", { children: [/* @__PURE__ */ p("line", {
+			x1: 102,
+			y1: C(e),
+			x2: s - 6,
+			y2: C(e),
+			stroke: "var(--border)",
+			strokeDasharray: e === "Bucket" ? "2 4" : void 0
+		}), /* @__PURE__ */ p("text", {
+			x: "12",
+			y: C(e) + 4,
+			fontSize: "12",
+			fontWeight: "600",
+			fill: "var(--foreground)",
+			children: e
+		})] }, e)), n[0] = r.rs, n[1] = r.start, n[2] = a, n[3] = i, n[4] = o, n[5] = s, n[6] = c, n[7] = l, n[8] = u, n[9] = d, n[10] = h, n[11] = _, n[12] = y, n[13] = b, n[14] = x, n[15] = S, n[16] = C;
+	} else s = n[5], c = n[6], l = n[7], u = n[8], d = n[9], h = n[10], _ = n[11], y = n[12], b = n[13], x = n[14], S = n[15], C = n[16];
+	let T;
+	n[47] !== s || n[48] !== r.rs || n[49] !== r.start || n[50] !== c || n[51] !== a || n[52] !== i || n[53] !== S || n[54] !== C ? (T = [...r.rs.filter((e) => e !== i), i].map((e) => {
+		let t = e.at - r.start, n = e === i;
+		return /* @__PURE__ */ m("g", {
+			opacity: n ? void 0 : .28,
+			children: [a.get(e).marks.map((e, r) => {
+				let i = w[e.kind];
+				if (!e.hop) return /* @__PURE__ */ p("rect", {
+					x: S(t + e.a),
+					y: C(e.block) - 6,
+					width: Math.max(3, S(t + e.b) - S(t + e.a)),
+					height: "12",
+					rx: "3",
+					fill: i
+				}, r);
+				let [a, o] = e.hop.map(C), l = (S(t + e.a) + S(t + e.b)) / 2, u = (a + o) / 2, d = l > s - 160;
+				return /* @__PURE__ */ m("g", { children: [/* @__PURE__ */ p("line", {
+					x1: S(t + e.a),
+					y1: a,
+					x2: S(t + e.b),
+					y2: o,
+					stroke: i,
+					strokeWidth: n ? 3.5 : 3,
+					strokeLinecap: "round"
+				}), n && e === c && /* @__PURE__ */ m("text", {
+					x: d ? l - 8 : l + 8,
+					y: u,
+					textAnchor: d ? "end" : void 0,
+					fontSize: "11",
+					fontWeight: "600",
+					fill: "var(--foreground)",
+					children: [g(e.label), " there and back"]
+				})] }, r);
+			}), n && /* @__PURE__ */ m(f, { children: [/* @__PURE__ */ p("circle", {
+				cx: S(t),
+				cy: C("This device"),
+				r: "4",
+				fill: "var(--foreground)"
+			}), /* @__PURE__ */ p("circle", {
+				cx: S(t + a.get(e).end),
+				cy: C("This device"),
+				r: "4",
+				fill: "var(--foreground)"
+			})] })]
+		}, `${e.at} ${v(e)}`);
+	}), n[47] = s, n[48] = r.rs, n[49] = r.start, n[50] = c, n[51] = a, n[52] = i, n[53] = S, n[54] = C, n[55] = T) : T = n[55];
+	let E;
+	return n[56] !== l || n[57] !== u || n[58] !== d || n[59] !== h || n[60] !== _ || n[61] !== y || n[62] !== b || n[63] !== x || n[64] !== T ? (E = /* @__PURE__ */ m("svg", {
+		className: l,
+		width: u,
+		height: d,
+		viewBox: h,
+		role: _,
+		"aria-label": y,
+		children: [
+			b,
+			x,
+			T
+		]
+	}), n[56] = l, n[57] = u, n[58] = d, n[59] = h, n[60] = _, n[61] = y, n[62] = b, n[63] = x, n[64] = T, n[65] = E) : E = n[65], E;
+}
+function L(e, t) {
+	return !e || t.label > e.label ? t : e;
+}
+function R(e) {
+	return e.label >= 1;
+}
+function z(e) {
+	return e.hop?.includes("Bucket");
+}
+r(document.getElementById("root")).render(/* @__PURE__ */ p(T, {}));
+</script>
