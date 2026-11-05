@@ -1,0 +1,1659 @@
+<meta name="@one/ui">
+<style>/*! tailwindcss v4.3.4 | MIT License | https://tailwindcss.com */
+@layer properties{@supports (((-webkit-hyphens:none)) and (not (margin-trim:block))) or ((-moz-orient:inline) and (not (color:rgb(from red r g b)))){*,:before,:after,::backdrop{--tw-border-spacing-x:0;--tw-border-spacing-y:0;--tw-translate-x:0;--tw-translate-y:0;--tw-translate-z:0;--tw-rotate-x:initial;--tw-rotate-y:initial;--tw-rotate-z:initial;--tw-skew-x:initial;--tw-skew-y:initial;--tw-pan-x:initial;--tw-pan-y:initial;--tw-pinch-zoom:initial;--tw-space-y-reverse:0;--tw-border-style:solid;--tw-font-weight:initial;--tw-tracking:initial;--tw-ordinal:initial;--tw-slashed-zero:initial;--tw-numeric-figure:initial;--tw-numeric-spacing:initial;--tw-numeric-fraction:initial;--tw-shadow:0 0 #0000;--tw-shadow-color:initial;--tw-shadow-alpha:100%;--tw-inset-shadow:0 0 #0000;--tw-inset-shadow-color:initial;--tw-inset-shadow-alpha:100%;--tw-ring-color:initial;--tw-ring-shadow:0 0 #0000;--tw-inset-ring-color:initial;--tw-inset-ring-shadow:0 0 #0000;--tw-ring-inset:initial;--tw-ring-offset-width:0px;--tw-ring-offset-color:#fff;--tw-ring-offset-shadow:0 0 #0000;--tw-outline-style:solid;--tw-ease:initial}}}@layer theme,base,components;@layer utilities{.\@container{container-type:inline-size}.pointer-events-none{pointer-events:none}.absolute{position:absolute}.fixed{position:fixed}.relative{position:relative}.sticky{position:sticky}.top-1{top:var(--spacing,.25rem)}.top-1\/2{top:50%}.-right-1{right:calc(var(--spacing,.25rem) * -1)}.-right-1\.5{right:calc(var(--spacing,.25rem) * -1.5)}.right-2{right:calc(var(--spacing,.25rem) * 2)}.-bottom-1{bottom:calc(var(--spacing,.25rem) * -1)}.left-0{left:0}.left-3{left:calc(var(--spacing,.25rem) * 3)}.z-10{z-index:10}.z-\[60\]{z-index:60}.m-0{margin:0}.-mx-2{margin-inline:calc(var(--spacing,.25rem) * -2)}.mx-auto{margin-inline:auto}.mt-0{margin-top:0}.mt-0\.5{margin-top:calc(var(--spacing,.25rem) * .5)}.mt-2{margin-top:calc(var(--spacing,.25rem) * 2)}.mr-2{margin-right:calc(var(--spacing,.25rem) * 2)}.mb-1{margin-bottom:var(--spacing,.25rem)}.mb-1\.5{margin-bottom:calc(var(--spacing,.25rem) * 1.5)}.block{display:block}.flex{display:flex}.grid{display:grid}.hidden{display:none}.inline-grid{display:inline-grid}.table{display:table}.size-4{width:calc(var(--spacing,.25rem) * 4);height:calc(var(--spacing,.25rem) * 4)}.size-5{width:calc(var(--spacing,.25rem) * 5);height:calc(var(--spacing,.25rem) * 5)}.size-6{width:calc(var(--spacing,.25rem) * 6);height:calc(var(--spacing,.25rem) * 6)}.size-7{width:calc(var(--spacing,.25rem) * 7);height:calc(var(--spacing,.25rem) * 7)}.size-8{width:calc(var(--spacing,.25rem) * 8);height:calc(var(--spacing,.25rem) * 8)}.size-9{width:calc(var(--spacing,.25rem) * 9);height:calc(var(--spacing,.25rem) * 9)}.h-3{height:calc(var(--spacing,.25rem) * 3)}.h-3\.5{height:calc(var(--spacing,.25rem) * 3.5)}.h-6{height:calc(var(--spacing,.25rem) * 6)}.h-8{height:calc(var(--spacing,.25rem) * 8)}.h-10{height:calc(var(--spacing,.25rem) * 10)}.min-h-12{min-height:calc(var(--spacing,.25rem) * 12)}.min-h-24{min-height:calc(var(--spacing,.25rem) * 24)}.w-1{width:var(--spacing,.25rem)}.w-1\/2{width:50%}.w-1\/3{width:33.3333%}.w-11{width:calc(var(--spacing,.25rem) * 11)}.w-fit{width:fit-content}.w-full{width:100%}.max-w-2xl{max-width:var(--container-2xl,42rem)}.max-w-5xl{max-width:var(--container-5xl,64rem)}.max-w-24{max-width:calc(var(--spacing,.25rem) * 24)}.max-w-40{max-width:calc(var(--spacing,.25rem) * 40)}.max-w-full{max-width:100%}.min-w-0{min-width:0}.min-w-24{min-width:calc(var(--spacing,.25rem) * 24)}.min-w-full{min-width:100%}.flex-1{flex:1}.shrink-0{flex-shrink:0}.basis-0{flex-basis:0}.border-collapse{border-collapse:collapse}.border-separate{border-collapse:separate}.border-spacing-0{--tw-border-spacing-x:0px;--tw-border-spacing-y:0px;border-spacing:var(--tw-border-spacing-x) var(--tw-border-spacing-y)}.-translate-y-1{--tw-translate-y:calc(var(--spacing,.25rem) * -1);translate:var(--tw-translate-x) var(--tw-translate-y)}.-translate-y-1\/2{--tw-translate-y:calc(calc(1 / 2 * 100%) * -1);translate:var(--tw-translate-x) var(--tw-translate-y)}.-rotate-1{rotate:-1deg}.rotate-90{rotate:90deg}.transform{transform:var(--tw-rotate-x, ) var(--tw-rotate-y, ) var(--tw-rotate-z, ) var(--tw-skew-x, ) var(--tw-skew-y, )}.animate-pulse{animation:var(--animate-pulse,pulse 2s cubic-bezier(.4, 0, .6, 1) infinite)}.cursor-default{cursor:default}.cursor-grab{cursor:grab}.cursor-pointer{cursor:pointer}.touch-pan-y{--tw-pan-y:pan-y;touch-action:var(--tw-pan-x, ) var(--tw-pan-y, ) var(--tw-pinch-zoom, )}.touch-none{touch-action:none}.flex-col{flex-direction:column}.flex-wrap{flex-wrap:wrap}.place-items-center{place-items:center}.items-center{align-items:center}.items-start{align-items:flex-start}.justify-between{justify-content:space-between}.justify-end{justify-content:flex-end}.justify-start{justify-content:flex-start}.gap-1{gap:var(--spacing,.25rem)}.gap-2{gap:calc(var(--spacing,.25rem) * 2)}.gap-2\.5{gap:calc(var(--spacing,.25rem) * 2.5)}.gap-3{gap:calc(var(--spacing,.25rem) * 3)}.gap-4{gap:calc(var(--spacing,.25rem) * 4)}.gap-6{gap:calc(var(--spacing,.25rem) * 6)}.gap-8{gap:calc(var(--spacing,.25rem) * 8)}:where(.space-y-1>:not(:last-child)){--tw-space-y-reverse:0;margin-block-start:calc(var(--spacing,.25rem) * var(--tw-space-y-reverse));margin-block-end:calc(var(--spacing,.25rem) * calc(1 - var(--tw-space-y-reverse)))}:where(.space-y-1\.5>:not(:last-child)){--tw-space-y-reverse:0;margin-block-start:calc(calc(var(--spacing,.25rem) * 1.5) * var(--tw-space-y-reverse));margin-block-end:calc(calc(var(--spacing,.25rem) * 1.5) * calc(1 - var(--tw-space-y-reverse)))}.gap-x-6{column-gap:calc(var(--spacing,.25rem) * 6)}.gap-x-8{column-gap:calc(var(--spacing,.25rem) * 8)}.gap-y-8{row-gap:calc(var(--spacing,.25rem) * 8)}.self-start{align-self:flex-start}.truncate{text-overflow:ellipsis;white-space:nowrap;overflow:hidden}.overflow-x-auto{overflow-x:auto}.overflow-y-auto{overflow-y:auto}.rounded-full{border-radius:2147483647px}.rounded-lg{border-radius:var(--radius)}.rounded-md{border-radius:calc(var(--radius) - 2px)}.rounded-xl{border-radius:calc(var(--radius) + 4px)}.border{border-style:var(--tw-border-style);border-width:1px}.border-0{border-style:var(--tw-border-style);border-width:0}.border-2{border-style:var(--tw-border-style);border-width:2px}.border-t{border-top-style:var(--tw-border-style);border-top-width:1px}.border-dashed{--tw-border-style:dashed;border-style:dashed}.border-foreground{border-color:var(--foreground)}.border-muted-foreground,.border-muted-foreground\/40{border-color:var(--muted-foreground)}@supports (color:color-mix(in lab, red, red)){.border-muted-foreground\/40{border-color:color-mix(in oklab, var(--muted-foreground) 40%, transparent)}}.border-warning{border-color:var(--warning)}.bg-background{background-color:var(--background)}.bg-card{background-color:var(--card)}.bg-foreground{background-color:var(--foreground)}.bg-muted{background-color:var(--muted)}.bg-warning{background-color:var(--warning)}.p-2{padding:calc(var(--spacing,.25rem) * 2)}.p-3{padding:calc(var(--spacing,.25rem) * 3)}.p-4{padding:calc(var(--spacing,.25rem) * 4)}.px-1{padding-inline:var(--spacing,.25rem)}.px-3{padding-inline:calc(var(--spacing,.25rem) * 3)}.py-1{padding-block:var(--spacing,.25rem)}.py-1\.5{padding-block:calc(var(--spacing,.25rem) * 1.5)}.py-2{padding-block:calc(var(--spacing,.25rem) * 2)}.py-2\.5{padding-block:calc(var(--spacing,.25rem) * 2.5)}.py-3{padding-block:calc(var(--spacing,.25rem) * 3)}.py-6{padding-block:calc(var(--spacing,.25rem) * 6)}.pt-1{padding-top:var(--spacing,.25rem)}.pt-3{padding-top:calc(var(--spacing,.25rem) * 3)}.pt-3\.5{padding-top:calc(var(--spacing,.25rem) * 3.5)}.pr-1{padding-right:var(--spacing,.25rem)}.pr-3{padding-right:calc(var(--spacing,.25rem) * 3)}.pr-8{padding-right:calc(var(--spacing,.25rem) * 8)}.pb-1{padding-bottom:var(--spacing,.25rem)}.pb-1\.5{padding-bottom:calc(var(--spacing,.25rem) * 1.5)}.pb-3{padding-bottom:calc(var(--spacing,.25rem) * 3)}.pl-3{padding-left:calc(var(--spacing,.25rem) * 3)}.pl-9{padding-left:calc(var(--spacing,.25rem) * 9)}.pl-14{padding-left:calc(var(--spacing,.25rem) * 14)}.text-center{text-align:center}.text-left{text-align:left}.text-right{text-align:right}.align-bottom{vertical-align:bottom}.font-mono{font-family:var(--font-mono,ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace)}.text-3xl{font-size:var(--text-3xl,1.875rem);line-height:var(--tw-leading,var(--text-3xl--line-height,calc(2.25 / 1.875)))}.text-lg{font-size:var(--text-lg,1.125rem);line-height:var(--tw-leading,var(--text-lg--line-height,calc(1.75 / 1.125)))}.text-sm{font-size:var(--text-sm,.875rem);line-height:var(--tw-leading,var(--text-sm--line-height,calc(1.25 / .875)))}.text-xl{font-size:var(--text-xl,1.25rem);line-height:var(--tw-leading,var(--text-xl--line-height,calc(1.75 / 1.25)))}.text-\[13px\]{font-size:13px}.font-bold{--tw-font-weight:var(--font-weight-bold,700);font-weight:var(--font-weight-bold,700)}.font-extrabold{--tw-font-weight:var(--font-weight-extrabold,800);font-weight:var(--font-weight-extrabold,800)}.font-medium{--tw-font-weight:var(--font-weight-medium,500);font-weight:var(--font-weight-medium,500)}.font-normal{--tw-font-weight:var(--font-weight-normal,400);font-weight:var(--font-weight-normal,400)}.font-semibold{--tw-font-weight:var(--font-weight-semibold,600);font-weight:var(--font-weight-semibold,600)}.tracking-tight{--tw-tracking:var(--tracking-tight,-.025em);letter-spacing:var(--tracking-tight,-.025em)}.tracking-widest{--tw-tracking:var(--tracking-widest,.1em);letter-spacing:var(--tracking-widest,.1em)}.break-words{overflow-wrap:break-word}.whitespace-nowrap{white-space:nowrap}.text-background{color:var(--background)}.text-card-foreground{color:var(--card-foreground)}.text-current{color:currentColor}.text-destructive{color:var(--destructive)}.text-muted-foreground{color:var(--muted-foreground)}.text-primary-foreground{color:var(--primary-foreground)}.text-warning{color:var(--warning)}.lowercase{text-transform:lowercase}.ordinal{--tw-ordinal:ordinal;font-variant-numeric:var(--tw-ordinal, ) var(--tw-slashed-zero, ) var(--tw-numeric-figure, ) var(--tw-numeric-spacing, ) var(--tw-numeric-fraction, )}.opacity-30{opacity:.3}.opacity-50{opacity:.5}.shadow-lg{--tw-shadow:0 10px 15px -3px var(--tw-shadow-color,#0000001a), 0 4px 6px -4px var(--tw-shadow-color,#0000001a);box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)}.shadow-none{--tw-shadow:0 0 #0000;box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)}.ring-2{--tw-ring-shadow:var(--tw-ring-inset, ) 0 0 0 calc(2px + var(--tw-ring-offset-width)) var(--tw-ring-color,currentcolor);box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)}.ring-ring{--tw-ring-color:var(--ring)}.outline{outline-style:var(--tw-outline-style);outline-width:1px}.transition{transition-property:color,background-color,border-color,outline-color,text-decoration-color,fill,stroke,--tw-gradient-from,--tw-gradient-via,--tw-gradient-to,opacity,box-shadow,transform,translate,scale,rotate,filter,-webkit-backdrop-filter,backdrop-filter,display,content-visibility,overlay,pointer-events;transition-timing-function:var(--tw-ease,var(--default-transition-timing-function,cubic-bezier(.4, 0, .2, 1)));transition-duration:var(--tw-duration,var(--default-transition-duration,.15s))}.transition-opacity{transition-property:opacity;transition-timing-function:var(--tw-ease,var(--default-transition-timing-function,cubic-bezier(.4, 0, .2, 1)));transition-duration:var(--tw-duration,var(--default-transition-duration,.15s))}.ease-in-out{--tw-ease:var(--ease-in-out,cubic-bezier(.4, 0, .2, 1));transition-timing-function:var(--ease-in-out,cubic-bezier(.4, 0, .2, 1))}.outline-none{--tw-outline-style:none;outline-style:none}.select-all{-webkit-user-select:all;user-select:all}.select-none{-webkit-user-select:none;user-select:none}.select-text{-webkit-user-select:text;user-select:text}.\[-webkit-touch-callout\:none\]{-webkit-touch-callout:none}@media (hover:hover){.hover\:bg-accent\/50:hover{background-color:var(--accent)}@supports (color:color-mix(in lab, red, red)){.hover\:bg-accent\/50:hover{background-color:color-mix(in oklab, var(--accent) 50%, transparent)}}}.focus-visible\:bg-accent\/50:focus-visible{background-color:var(--accent)}@supports (color:color-mix(in lab, red, red)){.focus-visible\:bg-accent\/50:focus-visible{background-color:color-mix(in oklab, var(--accent) 50%, transparent)}}.focus-visible\:ring-0:focus-visible{--tw-ring-shadow:var(--tw-ring-inset, ) 0 0 0 calc(0px + var(--tw-ring-offset-width)) var(--tw-ring-color,currentcolor);box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)}.focus-visible\:ring-\[3px\]:focus-visible{--tw-ring-shadow:var(--tw-ring-inset, ) 0 0 0 calc(3px + var(--tw-ring-offset-width)) var(--tw-ring-color,currentcolor);box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)}.focus-visible\:ring-ring\/50:focus-visible{--tw-ring-color:var(--ring)}@supports (color:color-mix(in lab, red, red)){.focus-visible\:ring-ring\/50:focus-visible{--tw-ring-color:color-mix(in oklab, var(--ring) 50%, transparent)}}@media (prefers-reduced-motion:reduce){.motion-reduce\:animate-none{animation:none}}@container (width>=36rem){.\@xl\:flex-none{flex:none}.\@xl\:flex-row{flex-direction:row}.\@xl\:items-center{align-items:center}.\@xl\:justify-end{justify-content:flex-end}}@container (width>=42rem){.\@2xl\:h-auto{height:auto}.\@2xl\:min-h-44{min-height:calc(var(--spacing,.25rem) * 44)}.\@2xl\:w-6{width:calc(var(--spacing,.25rem) * 6)}.\@2xl\:w-16{width:calc(var(--spacing,.25rem) * 16)}.\@2xl\:min-w-40{min-width:calc(var(--spacing,.25rem) * 40)}.\@2xl\:flex-none{flex:none}.\@2xl\:rotate-0{rotate:0deg}.\@2xl\:flex-row{flex-direction:row}.\@2xl\:items-stretch{align-items:stretch}}@container (width>=48rem){.\@3xl\:grid-cols-\[minmax\(0\,1\.3fr\)_minmax\(0\,1fr\)\]{grid-template-columns:minmax(0,1.3fr) minmax(0,1fr)}}.\[\&\:\:-webkit-search-cancel-button\]\:hidden::-webkit-search-cancel-button{display:none}}@property --tw-border-spacing-x{syntax:"<length>";inherits:false;initial-value:0}@property --tw-border-spacing-y{syntax:"<length>";inherits:false;initial-value:0}@property --tw-translate-x{syntax:"*";inherits:false;initial-value:0}@property --tw-translate-y{syntax:"*";inherits:false;initial-value:0}@property --tw-translate-z{syntax:"*";inherits:false;initial-value:0}@property --tw-rotate-x{syntax:"*";inherits:false}@property --tw-rotate-y{syntax:"*";inherits:false}@property --tw-rotate-z{syntax:"*";inherits:false}@property --tw-skew-x{syntax:"*";inherits:false}@property --tw-skew-y{syntax:"*";inherits:false}@property --tw-pan-x{syntax:"*";inherits:false}@property --tw-pan-y{syntax:"*";inherits:false}@property --tw-pinch-zoom{syntax:"*";inherits:false}@property --tw-space-y-reverse{syntax:"*";inherits:false;initial-value:0}@property --tw-border-style{syntax:"*";inherits:false;initial-value:solid}@property --tw-font-weight{syntax:"*";inherits:false}@property --tw-tracking{syntax:"*";inherits:false}@property --tw-ordinal{syntax:"*";inherits:false}@property --tw-slashed-zero{syntax:"*";inherits:false}@property --tw-numeric-figure{syntax:"*";inherits:false}@property --tw-numeric-spacing{syntax:"*";inherits:false}@property --tw-numeric-fraction{syntax:"*";inherits:false}@property --tw-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-shadow-color{syntax:"*";inherits:false}@property --tw-shadow-alpha{syntax:"<percentage>";inherits:false;initial-value:100%}@property --tw-inset-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-inset-shadow-color{syntax:"*";inherits:false}@property --tw-inset-shadow-alpha{syntax:"<percentage>";inherits:false;initial-value:100%}@property --tw-ring-color{syntax:"*";inherits:false}@property --tw-ring-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-inset-ring-color{syntax:"*";inherits:false}@property --tw-inset-ring-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-ring-inset{syntax:"*";inherits:false}@property --tw-ring-offset-width{syntax:"<length>";inherits:false;initial-value:0}@property --tw-ring-offset-color{syntax:"*";inherits:false;initial-value:#fff}@property --tw-ring-offset-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-outline-style{syntax:"*";inherits:false;initial-value:solid}@property --tw-ease{syntax:"*";inherits:false}@keyframes pulse{50%{opacity:.5}}
+/*$vite$:1*/</style>
+<div id="root"></div>
+<script type="module">import { c as e } from "react/compiler-runtime";
+import { useEffect as t, useRef as n, useState as r } from "react";
+import { createRoot as i } from "react-dom/client";
+import { AppIcon as a, Button as o, Empty as s, Icon as c, Input as l, Label as u, List as d, ListRow as f, Problem as p, ResponsiveDialog as m, Skeleton as h, Spinner as g, Switch as _, Tabs as v, TabsList as y, TabsTrigger as b, cn as x } from "@one/ui";
+import { Fragment as S, jsx as C, jsxs as w } from "react/jsx-runtime";
+// ../settings/devices.jsx
+var T = one.api, E = (e) => one.plain(e).title, D = one.config.yours, O = (e) => String(e || "").endsWith(".local") ? e.slice(0, -6) : String(e || ""), k = (e) => {
+	let t = one.ago(e);
+	return /^\d/.test(t) ? `${t} ago` : t;
+}, A = (e) => e + (e % 100 > 10 && e % 100 < 14 ? "th" : [
+	"th",
+	"st",
+	"nd",
+	"rd"
+][e % 10] || "th"), j = (e) => e === "last" ? 1e3 : Number(e) || 1, M = (e) => new Date(e).toLocaleDateString(void 0, {
+	day: "numeric",
+	month: "short",
+	year: "numeric"
+}), N = /^(Chrome|Safari|Firefox|Edge|A browser)( on (.+))?$/, P = (e, t = "") => /apple/.test(e || "") || /\b(iPhone|iPad|Mac|MacBook|iMac)\b/i.test(t) ? "apple-logo" : /windows/.test(e || "") || /\bWindows\b/i.test(t) ? "windows-logo" : /android/.test(e || "") || /\b(Android|Pixel|Galaxy)\b/i.test(t) ? "android-logo" : /linux/.test(e || "") || /\bLinux\b/i.test(t) ? "linux-logo" : "", F = (e) => /phone|\b(Android|Pixel|Galaxy)\b/i.test(e) ? "device-mobile" : /\b(iPad|Tablet)\b/i.test(e) ? "device-tablet" : /\b(MacBook|Laptop)\b/i.test(e) ? "laptop" : "desktop", I = (e, t = "", n = !1) => ({
+	type: e,
+	os: t,
+	off: n
+}), L = (e) => {
+	let [t, n, , r] = e.match(N) || [];
+	return t ? I({
+		Chrome: "google-chrome-logo",
+		Safari: "compass"
+	}[n] || "browser", P("", r || "")) : I(F(e), P("", e));
+}, R = { cloud: !0 };
+function z(e) {
+	if (e?.passkey) return "Passkey";
+	let t = e?.provider;
+	if (!t) return "";
+	let n = t.issuer;
+	try {
+		n = new URL(t.issuer).host;
+	} catch {}
+	let r = {
+		"accounts.google.com": "Google",
+		"appleid.apple.com": "Apple",
+		"login.microsoftonline.com": "Microsoft"
+	}[n] || n;
+	return [t.email, r].filter(Boolean).join(" · ");
+}
+var B = {}, V = 3e4, H = 1e4;
+function U(e, t) {
+	let { state: n, device: r, apps: i, seen: a, seenRead: o } = e, s = n.user?.id, c = n.user?.role === "admin", l = (e) => i.find((t) => t.name === e), u = (e) => l(e)?.title || e, d = (e) => (e.runs_for || []).includes(`user:${s}`), f = (e) => n.install?.users.find((t) => t.id === e)?.name || "someone";
+	function p() {
+		let e = (e) => ({
+			...e,
+			me: e.me || [r.key, n.me?.key].includes(e.key)
+		}), t = (n.install?.devices || []).map(e), i = (n.install?.clients || []).map(e), l = [], u = [], f = [], p = (e, t) => {
+			let n = {
+				user: e,
+				name: O(t),
+				node: null,
+				services: [],
+				clients: []
+			};
+			return l.push(n), n;
+		}, m = /* @__PURE__ */ new Map();
+		for (let e of t.filter((e) => (e.roles || []).includes("compute"))) m.set(e.key, Object.assign(p(e.user, e.name), { node: e }));
+		let h = (e) => (m.get(e.device)?.node?.off_services || []).some((t) => t.name === e.service);
+		for (let e of t.filter((e) => e.service && !h(e))) (m.get(e.device) || p(e.user, e.name)).services.push(e);
+		for (let e of i) e.passkey || N.test(e.name) ? u.push(e) : !e.device && !e.me && o && Date.now() - Math.max(a[e.key] || 0, e.since || 0) > 6048e5 ? f.push(e) : (e.device && !m.has(e.device) && m.set(e.device, p(e.user, e.name)), (m.get(e.device) || p(e.user, e.name)).clients.push(e));
+		for (let e of l) {
+			let t = [e.node, ...e.services].filter(Boolean);
+			e.id = t[0]?.key || e.clients[0]?.key, e.keys = [
+				...e.services,
+				...e.clients,
+				e.node
+			].filter(Boolean).map((e) => e.key), e.me = [...t, ...e.clients].some((e) => e.me), e.online = t.some((e) => e.online), e.runs = t.length > 0, e.priority = e.node?.priority ?? e.services[0]?.priority ?? (e.runs ? 1 : null);
+			let n = [...e.clients].sort((e, t) => t.me - e.me || (a[t.key] || 0) - (a[e.key] || 0) || (t.since || 0) - (e.since || 0));
+			e.signIn = n[0] || null, e.old = n.slice(1), e.seen = Math.max(0, ...e.keys.map((e) => a[e] || 0)), e.icon = e.node ? I(e.node.kind === "laptop" ? "laptop" : /apple|windows/.test(e.node.target || "") ? "desktop" : "hard-drives", P(e.node.target, e.name), !e.online) : e.runs ? I("hard-drives", "", !e.online) : I(F(e.signIn?.name || e.name), P("", e.signIn?.name || e.name));
+		}
+		let g = l.filter((e) => e.user === s || e.node && (c || d(e.node)));
+		return g.sort((e, t) => (e.runs ? j(e.priority) : 2e3) - (t.runs ? j(t.priority) : 2e3) || e.name.localeCompare(t.name)), {
+			cards: g,
+			browsers: u.filter((e) => e.user === s),
+			stale: f.filter((e) => e.user === s)
+		};
+	}
+	let m = p();
+	function h(e, t) {
+		let n = `${e.node.key} ${t.name}`, r = B[n];
+		return r ? r.state !== "failed" && t.on === r.on && (!r.again || t.doing || t.problem !== r.again) ? (delete B[n], t) : r.state === "failed" ? t.on === r.on ? (delete B[n], t) : {
+			...t,
+			failed: r.error,
+			wanted: r.on
+		} : r.again && t.on === r.on && r.state === "written" && Date.now() - r.at > H ? (delete B[n], t) : Date.now() - r.at < V ? {
+			...t,
+			on: r.on,
+			doing: r.on ? "Starting" : "Stopping",
+			problem: null
+		} : {
+			...t,
+			on: r.on,
+			doing: null,
+			problem: null,
+			late: !0
+		} : t;
+	}
+	let g = (e) => e.name === "apps" ? "Runs apps" : l(e.name)?.title || e.title || e.name;
+	function _(e) {
+		return Array.isArray(e.node?.parts) ? e.node.parts.map((t) => ({
+			...h(e, t),
+			part: {
+				device: e.node.key,
+				name: t.name
+			}
+		})) : [
+			...e.node ? [{
+				name: "apps",
+				on: !0,
+				fixed: !0
+			}] : [],
+			...(e.node?.installed_services || []).map((t) => ({
+				name: t.name,
+				on: !0,
+				part: {
+					service: t.name,
+					device: e.node.key
+				}
+			})),
+			...e.services.map((e) => ({
+				name: e.service,
+				on: !0,
+				part: {
+					service: e.service,
+					device: e.device
+				}
+			}))
+		];
+	}
+	function v(e, n) {
+		let r = g(n), i = n.part, a = (e, n) => ({
+			label: "Try Again",
+			run: t(i, e, n)
+		});
+		return n.failed ? {
+			title: `Couldn’t switch ${r} ${n.wanted ? "on" : "off"}`,
+			text: n.failed,
+			action: a(n.wanted)
+		} : n.late ? {
+			title: `${e.name} hasn’t switched ${r} ${n.on ? "on" : "off"} yet`,
+			text: "It does once it hears, so it may be offline.",
+			action: a(n.on)
+		} : n.on && n.problem ? {
+			title: `${r} isn’t running on ${e.name}`,
+			text: n.problem,
+			action: a(!0, n.problem)
+		} : null;
+	}
+	let y = (e) => e.user === s ? _(e).map((t) => v(e, t)).filter(Boolean) : [];
+	function b() {
+		let e = m.cards.filter((e) => e.runs).map((e) => ({
+			id: e.id,
+			name: e.name,
+			icon: e.icon,
+			whose: e.user === s ? "" : `${f(e.user)}’s`,
+			p: e.priority,
+			keys: [e.node, ...e.services].filter(Boolean).map((e) => e.key)
+		})), t = n.install?.serverless;
+		return t && e.push({
+			id: "cloudflare",
+			name: "Cloudflare",
+			icon: R,
+			whose: "",
+			p: t.priority ?? "last",
+			keys: ["cloudflare"]
+		}), {
+			cols: [...new Set(e.filter((e) => e.p !== "last").map((e) => j(e.p)))].sort((e, t) => e - t).map((t) => e.filter((e) => e.p !== "last" && j(e.p) === t)),
+			last: e.filter((e) => e.p === "last")
+		};
+	}
+	function x() {
+		let e = m.cards.filter((e) => e.user === s && e.runs).map((e) => ({
+			c: e,
+			name: e.name,
+			icon: e.icon,
+			parts: _(e)
+		}));
+		return e.length && n.install?.serverless && e.push({
+			c: null,
+			name: "Cloudflare",
+			icon: R,
+			parts: [{
+				name: "apps",
+				on: !0,
+				fixed: !0
+			}]
+		}), e;
+	}
+	function S() {
+		let e = Date.now() - 864e5;
+		return (n.install?.clients || []).filter((t) => t.user === s && !t.passkey && !t.me && (t.since || 0) > e && ![r.key, n.me?.key].includes(t.key)).sort((e, t) => t.since - e.since);
+	}
+	return {
+		me: s,
+		admin: c,
+		appOf: l,
+		appTitle: u,
+		userName: f,
+		drawn: m,
+		partsOf: _,
+		partTitle: g,
+		problemOf: v,
+		problemsOf: y,
+		board: b,
+		gridColumns: x,
+		justJoined: S,
+		deviceName: (e) => e.service ? `${u(e.service)} on ${O(e.name)}` : O(e.name),
+		forWhom: (e) => e === `user:${s}` ? "you" : e === "global" ? "everyone" : n.install?.groups.find((t) => `group:${t.id}` === e)?.name || "a group",
+		scheduled: (e = `user:${s}`) => i.filter((t) => (t.schedules || []).some((t) => t.scope === e && !t.removed)),
+		keepers: (e) => (n.install?.devices || []).filter((t) => (t.runs_for || []).includes(e))
+	};
+}
+function W() {
+	let [e, i] = r(null), [a, o] = r(null), [s, c] = r(""), [l, u] = r([
+		"devices",
+		"priority",
+		"services"
+	].includes(one.params?.tab) ? one.params.tab : "devices"), [f, m] = r({}), [h, g] = r(""), [_, x] = r(null), [O, k] = r(null), [j, M] = r(!1), [N, P] = r(0), [F, I] = r(""), [, L] = r(0), R = te(100), z = n([]), W = n(!1);
+	async function G() {
+		try {
+			let [e, t] = await Promise.all([T("GET", "/v1/state"), one.device()]), n = [], r = !1, a = null, s = [z.current.length ? null : T("GET", "/v1/apps").then((e) => z.current = e, () => {}), T("GET", "/v1/devices/requests").then((e) => n = e.filter((e) => e.code), () => {})];
+			return t.keys && s.push(T("GET", "/v1/devices/passkey").then((e) => r = e.passkey === !0, () => {}), T("GET", "/v1/devices/seen").then((e) => a = e || {}, () => {})), await Promise.all(s), W.current ? void 0 : (i({
+				state: e,
+				device: t,
+				apps: z.current,
+				waiting: n,
+				passkey: r,
+				seen: a || {},
+				seenRead: a !== null
+			}), o(null), {
+				device: t,
+				waiting: n
+			});
+		} catch (e) {
+			o(one.plain(e));
+		}
+	}
+	async function K(e) {
+		c("");
+		try {
+			await e();
+		} catch (e) {
+			c(E(e)), one.tap("error");
+		}
+		await G();
+	}
+	let q = (e) => (k(e), P((e) => e + 1), M(!0));
+	t(() => {
+		one.largeTitle("Devices");
+		let e = one.params?.keep ? {
+			app: String(one.params.keep),
+			scope: one.params.scope && String(one.params.scope)
+		} : null;
+		G().then((t) => {
+			if (!t) return;
+			let n = String(one.params?.approve || "").toUpperCase().replace(/[^A-Z2-7]/g, "");
+			n && !t.waiting.some((e) => e.code.replace(" ", "") === n) && J(n), e && t.device.keys && q({ keep: e });
+		}), one.on("changed", () => G());
+	}, []);
+	async function J(e) {
+		let t = String(e).toUpperCase().replace(/[^A-Z2-7]/g, "");
+		if (t.length === 8) try {
+			let e = await T("POST", "/v1/devices/approve", { code: t });
+			x({
+				code: t,
+				r: e
+			});
+		} catch (e) {
+			x({ error: E(e) });
+		}
+	}
+	async function Y(e, t, n = null) {
+		let r = `${e.device} ${e.name ?? e.service}`, i = Date.now();
+		B[r] = {
+			on: t,
+			again: n,
+			at: i,
+			state: "sent"
+		}, L((e) => e + 1);
+		for (let e of n ? [H, V] : [V]) setTimeout(() => B[r]?.at === i && G(), e + 500);
+		try {
+			await T("POST", "/v1/service", {
+				device: e.device,
+				name: e.name ?? e.service,
+				on: t
+			}), B[r]?.at === i && (B[r].state = "written");
+		} catch (t) {
+			if (B[r]?.at === i && (B[r] = {
+				...B[r],
+				state: "failed",
+				error: E(t)
+			}), e.service) throw t;
+			one.tap("error");
+		}
+	}
+	let X = e && U(e, (e, t, n) => () => K(() => Y(e, t, n)));
+	function ce(t, n) {
+		let { cols: r, last: a } = X.board(), o = [...r.flat(), ...a].find((e) => e.id === t);
+		if (!o) return;
+		let s = r.map((e) => e.filter((e) => e.id !== t)), c = a.filter((e) => e.id !== t);
+		n === "last" ? c.push(o) : n === "new" ? s.push([o]) : s[Number(n)]?.push(o), s = s.filter((e) => e.length);
+		let { install: l } = e.state, u = {};
+		try {
+			u = JSON.parse(l.settings?.priority || "{}") || {};
+		} catch {}
+		let d = /* @__PURE__ */ new Set([...(l.devices || []).map((e) => e.key), "cloudflare"]);
+		u = Object.fromEntries(Object.entries(u).filter(([e]) => d.has(e))), s.forEach((e, t) => e.forEach((e) => e.keys.forEach((e) => u[e] = t + 1))), c.forEach((e) => e.keys.forEach((e) => u[e] = "last"));
+		let f = JSON.stringify(u);
+		f !== l.settings?.priority && (i({
+			...e,
+			state: {
+				...e.state,
+				install: {
+					...l,
+					devices: (l.devices || []).map((e) => e.key in u ? {
+						...e,
+						priority: u[e.key]
+					} : e),
+					serverless: l.serverless && "cloudflare" in u ? {
+						...l.serverless,
+						priority: u.cloudflare
+					} : l.serverless,
+					settings: {
+						...l.settings,
+						priority: f
+					}
+				}
+			}
+		}), one.tap(), K(() => T("POST", "/v1/settings", {
+			name: "priority",
+			value: f
+		})));
+	}
+	let Z = n(0);
+	async function le(e, t) {
+		if (Date.now() - Z.current < 800) return;
+		Z.current = Date.now();
+		let { cols: n } = X.board(), r = n.findIndex((t) => t.some((t) => t.id === e)), i = r !== n.length - 1 || n[r].length !== 1, a = [
+			...n.map((e, t) => t),
+			...i ? ["new"] : [],
+			"last"
+		], o = a.map((e) => e === "last" ? {
+			title: "Last",
+			checked: r < 0,
+			section: !0
+		} : e === "new" ? {
+			title: "New",
+			icon: "plus"
+		} : {
+			title: A(e + 1),
+			checked: e === r
+		}), s = await one.menu(o, t).catch(() => null);
+		Z.current = Date.now(), s != null && ce(e, a[s]);
+	}
+	he(W, (e, t) => ee.current.place(e, t), (e, t) => ee.current.moveMenu(e, t)), ee.current = {
+		place: (...e) => ce(...e),
+		moveMenu: (...e) => le(...e)
+	};
+	async function ue(e, t, n) {
+		let r = t ? [] : [{
+			title: "Rename",
+			icon: "pencil-simple"
+		}], i = (t ? [e] : e.clients).filter((e) => e.sign_in);
+		i.length && r.push({
+			title: "Sign-ins…",
+			icon: "key"
+		}), r.push(e.me ? {
+			title: "Sign Out",
+			icon: "sign-out",
+			danger: !0
+		} : {
+			title: "Remove…",
+			icon: "minus-circle",
+			danger: !0
+		});
+		let a = await one.menu(r, n).catch(() => null);
+		a != null && (r[a].title === "Rename" ? q({ rename: e }) : r[a].title === "Sign-ins…" ? q({ signIns: i }) : e.me ? me() : de(e.name, t ? [e.key] : e.keys, !t && e.node && e.online ? e.node.key : null));
+	}
+	async function de(e, t, n) {
+		if (n) return q({ remove: {
+			name: e,
+			keys: t,
+			erasable: n
+		} });
+		await one.alert({
+			title: `Remove ${e}?`,
+			action: "Remove",
+			danger: !0
+		}) && (one.tap("medium"), K(async () => {
+			for (let e of t) await T("POST", "/v1/remove", { key: e });
+		}));
+	}
+	async function fe(e) {
+		let t = e.old.length, n = e.name ? ` of ${e.name}` : "";
+		await one.alert({
+			title: `Remove ${t} old sign-in${t > 1 ? "s" : ""}${n}?`,
+			action: "Remove",
+			danger: !0
+		}) && K(async () => {
+			for (let t of e.old) await T("POST", "/v1/remove", { key: t.key });
+		});
+	}
+	async function me() {
+		await one.alert({
+			title: `Sign Out of ${D} on this device?`,
+			action: "Sign Out",
+			danger: !0
+		}) && one.signOut();
+	}
+	function Q(e) {
+		let t = e.slice(0, e.indexOf(" ")), n = e.slice(e.indexOf(" ") + 1), r = X.gridColumns()[t], i = r?.parts.find((e) => e.name === n);
+		if (i) {
+			if (r.c && X.problemOf(r.c, i)) return g(h === e ? "" : e);
+			!i.fixed && i.part && (one.tap(), K(() => Y(i.part, !i.on)));
+		}
+	}
+	let ge = async (e, t) => {
+		one.tap(), I(e), await K(t), I("");
+	}, $;
+	if (!e) $ = a ? /* @__PURE__ */ C(p, {
+		title: a.title,
+		text: a.next,
+		action: {
+			label: "Try Again",
+			run: () => G()
+		}
+	}) : R ? /* @__PURE__ */ C(d, {
+		"aria-busy": "true",
+		"aria-label": "Loading",
+		children: [
+			0,
+			1,
+			2
+		].map((e) => /* @__PURE__ */ C(ne, {}, e))
+	}) : null;
+	else {
+		let { waiting: t, device: n } = e, r = X.justJoined();
+		$ = /* @__PURE__ */ w(S, { children: [
+			!!t.length && /* @__PURE__ */ C(re, {
+				title: "Waiting for you",
+				children: t.map((e) => /* @__PURE__ */ C(ie, {
+					r: e,
+					busy: F === e.code,
+					answer: ge
+				}, e.code))
+			}),
+			r.map((e) => /* @__PURE__ */ C(ae, {
+				c: e,
+				remove: () => de(e.name, [e.key], null)
+			}, e.key)),
+			_?.error && /* @__PURE__ */ C(p, { title: _.error }),
+			_?.r && /* @__PURE__ */ C(oe, {
+				scan: _,
+				done: () => (x(null), G()),
+				cancel: () => x(null)
+			}),
+			/* @__PURE__ */ C(v, {
+				value: l,
+				onValueChange: u,
+				children: /* @__PURE__ */ w(y, {
+					className: "max-w-full justify-start overflow-x-auto",
+					children: [
+						/* @__PURE__ */ C(b, {
+							value: "devices",
+							children: "Devices"
+						}),
+						/* @__PURE__ */ C(b, {
+							value: "priority",
+							children: "Priority"
+						}),
+						/* @__PURE__ */ C(b, {
+							value: "services",
+							children: "Services"
+						})
+					]
+				})
+			}),
+			l === "priority" ? /* @__PURE__ */ C(pe, {
+				m: X,
+				move: le
+			}) : l === "services" ? /* @__PURE__ */ C(_e, {
+				m: X,
+				cellOpen: h,
+				tap: Q
+			}) : /* @__PURE__ */ C(se, {
+				m: X,
+				data: e,
+				opened: f,
+				flag: (e) => m((t) => ({
+					...t,
+					[e]: !t[e]
+				})),
+				menu: ue,
+				removeOld: fe,
+				signOut: me,
+				add: () => q({ add: !0 }),
+				keep: () => q({ keep: {} }),
+				act: K
+			}),
+			s && /* @__PURE__ */ C(p, { title: s })
+		] });
+	}
+	return /* @__PURE__ */ w("div", {
+		className: "@container flex flex-col gap-6",
+		children: [
+			/* @__PURE__ */ C("h1", {
+				className: "large-title text-3xl font-bold tracking-tight",
+				children: "Devices"
+			}),
+			$,
+			e && O?.rename && /* @__PURE__ */ C(ye, {
+				card: O.rename,
+				open: j,
+				setOpen: M,
+				done: () => (M(!1), G())
+			}, N),
+			e && O?.remove && /* @__PURE__ */ C(Se, {
+				...O.remove,
+				open: j,
+				setOpen: M,
+				done: () => (M(!1), G())
+			}, N),
+			e && O?.signIns && /* @__PURE__ */ C(Ce, {
+				clients: O.signIns,
+				open: j,
+				setOpen: M,
+				done: () => (M(!1), G())
+			}, N),
+			e && O?.add && /* @__PURE__ */ C(Te, {
+				data: e,
+				open: j,
+				setOpen: M
+			}, N),
+			e && O?.keep && /* @__PURE__ */ C(De, {
+				m: X,
+				keepAsked: O.keep,
+				open: j,
+				setOpen: M,
+				done: () => (M(!1), G())
+			}, N)
+		]
+	});
+}
+var ee = { current: {
+	place() {},
+	moveMenu() {}
+} };
+function te(n) {
+	let i = e(3), [a, o] = r(!1), s, c;
+	return i[0] === n ? (s = i[1], c = i[2]) : (s = () => {
+		let e = setTimeout(() => o(!0), n);
+		return () => clearTimeout(e);
+	}, c = [n], i[0] = n, i[1] = s, i[2] = c), t(s, c), a;
+}
+function ne() {
+	let t = e(2), n;
+	t[0] === Symbol.for("react.memo_cache_sentinel") ? (n = /* @__PURE__ */ C(h, { className: "size-8 rounded-lg" }), t[0] = n) : n = t[0];
+	let r;
+	return t[1] === Symbol.for("react.memo_cache_sentinel") ? (r = /* @__PURE__ */ w("div", {
+		className: "flex items-center gap-3 px-3 py-2.5",
+		children: [n, /* @__PURE__ */ w("div", {
+			className: "flex-1 space-y-1.5",
+			children: [/* @__PURE__ */ C(h, { className: "h-3.5 w-1/3" }), /* @__PURE__ */ C(h, { className: "h-3 w-1/2" })]
+		})]
+	}), t[1] = r) : r = t[1], r;
+}
+var re = (t) => {
+	let n = e(8), { title: r, children: i, className: a } = t, o;
+	n[0] === a ? o = n[1] : (o = x("flex flex-col gap-2", a), n[0] = a, n[1] = o);
+	let s;
+	n[2] === r ? s = n[3] : (s = /* @__PURE__ */ C("h2", {
+		className: "text-sm font-medium text-muted-foreground",
+		children: r
+	}), n[2] = r, n[3] = s);
+	let c;
+	return n[4] !== i || n[5] !== o || n[6] !== s ? (c = /* @__PURE__ */ w("section", {
+		className: o,
+		children: [s, i]
+	}), n[4] = i, n[5] = o, n[6] = s, n[7] = c) : c = n[7], c;
+}, G = (t) => {
+	let n = e(2), { children: r } = t, i;
+	return n[0] === r ? i = n[1] : (i = /* @__PURE__ */ C("p", {
+		className: "max-w-2xl text-sm text-muted-foreground",
+		children: r
+	}), n[0] = r, n[1] = i), i;
+}, K = (t) => {
+	let n = e(6), { icon: r, onClick: i, children: a } = t, o;
+	n[0] === r ? o = n[1] : (o = /* @__PURE__ */ C(c, {
+		name: r,
+		className: "size-5"
+	}), n[0] = r, n[1] = o);
+	let s;
+	return n[2] !== a || n[3] !== i || n[4] !== o ? (s = /* @__PURE__ */ w("button", {
+		className: "flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm font-medium outline-none hover:bg-accent/50 focus-visible:bg-accent/50",
+		onClick: i,
+		children: [o, a]
+	}), n[2] = a, n[3] = i, n[4] = o, n[5] = s) : s = n[5], s;
+};
+function q(t) {
+	let n = e(4), { className: r } = t, i, a;
+	n[0] === Symbol.for("react.memo_cache_sentinel") ? (i = /* @__PURE__ */ C("path", {
+		fill: "#F38020",
+		d: "M16.5088 16.8447c.1475-.5068.0908-.9707-.1553-1.3154-.2246-.3164-.6045-.499-1.0615-.5205l-8.6592-.1123a.1559.1559 0 0 1-.1333-.0713c-.0283-.042-.0351-.0986-.021-.1553.0278-.084.1123-.1484.2036-.1562l8.7359-.1123c1.0351-.0489 2.1601-.8868 2.5537-1.9136l.499-1.3013c.0215-.0561.0293-.1128.0147-.168-.5625-2.5463-2.835-4.4453-5.5499-4.4453-2.5039 0-4.6284 1.6177-5.3876 3.8614-.4927-.3658-1.1187-.5625-1.794-.499-1.2026.119-2.1665 1.083-2.2861 2.2856-.0283.31-.0069.6128.0635.894C1.5683 13.171 0 14.7754 0 16.752c0 .1748.0142.3515.0352.5273.0141.083.0844.1475.1689.1475h15.9814c.0909 0 .1758-.0645.2032-.1553l.12-.4268z"
+	}), a = /* @__PURE__ */ C("path", {
+		fill: "#FBAE40",
+		d: "M19.2656 11.2813c-.0771 0-.1611 0-.2383.0112-.0566 0-.1054.0415-.127.0976l-.3378 1.1744c-.1475.5068-.0918.9707.1543 1.3164.2256.3164.6055.498 1.0625.5195l1.8437.1133c.0557 0 .1055.0263.1329.0703.0283.043.0351.1074.0214.1562-.0283.084-.1132.1485-.204.1553l-1.921.1123c-1.041.0488-2.1582.8867-2.5527 1.914l-.1406.3585c-.0283.0713.0215.1416.0986.1416h6.5977c.0771 0 .1474-.0489.169-.126.1122-.4082.1757-.837.1757-1.2803 0-2.6025-2.125-4.727-4.7344-4.727"
+	}), n[0] = i, n[1] = a) : (i = n[0], a = n[1]);
+	let o;
+	return n[2] === r ? o = n[3] : (o = /* @__PURE__ */ w("svg", {
+		className: r,
+		viewBox: "0 0 24 24",
+		"aria-hidden": "true",
+		children: [i, a]
+	}), n[2] = r, n[3] = o), o;
+}
+function J(t) {
+	let n = e(16), { icon: r, className: i } = t;
+	if (r.cloud) {
+		let e;
+		n[0] === i ? e = n[1] : (e = x("grid size-8 shrink-0 place-items-center", i), n[0] = i, n[1] = e);
+		let t;
+		n[2] === Symbol.for("react.memo_cache_sentinel") ? (t = /* @__PURE__ */ C(q, { className: "size-8" }), n[2] = t) : t = n[2];
+		let r;
+		return n[3] === e ? r = n[4] : (r = /* @__PURE__ */ C("span", {
+			className: e,
+			children: t
+		}), n[3] = e, n[4] = r), r;
+	}
+	let a = r.off && "text-muted-foreground", o;
+	n[5] !== i || n[6] !== a ? (o = x("relative grid size-8 shrink-0 place-items-center", a, i), n[5] = i, n[6] = a, n[7] = o) : o = n[7];
+	let s;
+	n[8] === r.type ? s = n[9] : (s = /* @__PURE__ */ C(c, {
+		name: r.type,
+		className: "size-7"
+	}), n[8] = r.type, n[9] = s);
+	let l;
+	n[10] === r.os ? l = n[11] : (l = r.os && /* @__PURE__ */ C(c, {
+		name: r.os,
+		className: "absolute -right-1.5 -bottom-1 size-4"
+	}), n[10] = r.os, n[11] = l);
+	let u;
+	return n[12] !== o || n[13] !== s || n[14] !== l ? (u = /* @__PURE__ */ w("span", {
+		className: o,
+		children: [s, l]
+	}), n[12] = o, n[13] = s, n[14] = l, n[15] = u) : u = n[15], u;
+}
+function Y(t) {
+	let n = e(13), { icon: r, title: i, sub: a, children: o } = t, s;
+	n[0] === r ? s = n[1] : (s = /* @__PURE__ */ C(J, { icon: r }), n[0] = r, n[1] = s);
+	let c;
+	n[2] === i ? c = n[3] : (c = /* @__PURE__ */ C("span", {
+		className: "block truncate font-medium",
+		children: i
+	}), n[2] = i, n[3] = c);
+	let l;
+	n[4] === a ? l = n[5] : (l = a && /* @__PURE__ */ C("span", {
+		className: "block truncate text-muted-foreground",
+		children: a
+	}), n[4] = a, n[5] = l);
+	let u;
+	n[6] !== c || n[7] !== l ? (u = /* @__PURE__ */ w("span", {
+		className: "min-w-0 flex-1",
+		children: [c, l]
+	}), n[6] = c, n[7] = l, n[8] = u) : u = n[8];
+	let d;
+	return n[9] !== o || n[10] !== s || n[11] !== u ? (d = /* @__PURE__ */ w("div", {
+		className: "flex min-w-0 items-center gap-3 px-3 py-2.5 text-sm",
+		children: [
+			s,
+			u,
+			o
+		]
+	}), n[9] = o, n[10] = s, n[11] = u, n[12] = d) : d = n[12], d;
+}
+function ie(t) {
+	let n = e(46), { r, busy: i, answer: a } = t, s = r.yours ? "" : `${r.person}’s first device`, c;
+	n[0] !== r.place || n[1] !== s ? (c = [s, r.place].filter(Boolean), n[0] = r.place, n[1] = s, n[2] = c) : c = n[2];
+	let l = c.join(" · "), u = `${r.device} wants to join`, d;
+	n[3] === r.device ? d = n[4] : (d = L(r.device), n[3] = r.device, n[4] = d);
+	let f;
+	n[5] === d ? f = n[6] : (f = /* @__PURE__ */ C(J, { icon: d }), n[5] = d, n[6] = f);
+	let p;
+	n[7] === r.device ? p = n[8] : (p = /* @__PURE__ */ C("span", {
+		className: "block font-medium break-words",
+		children: r.device
+	}), n[7] = r.device, n[8] = p);
+	let m;
+	n[9] === l ? m = n[10] : (m = l && /* @__PURE__ */ C("span", {
+		className: "block break-words text-muted-foreground",
+		children: l
+	}), n[9] = l, n[10] = m);
+	let h;
+	n[11] === r.sign_in ? h = n[12] : (h = z(r.sign_in) && /* @__PURE__ */ C("span", {
+		className: "block break-words text-muted-foreground",
+		children: z(r.sign_in)
+	}), n[11] = r.sign_in, n[12] = h);
+	let _;
+	n[13] !== p || n[14] !== m || n[15] !== h ? (_ = /* @__PURE__ */ w("span", {
+		className: "min-w-0 flex-1",
+		children: [
+			p,
+			m,
+			h
+		]
+	}), n[13] = p, n[14] = m, n[15] = h, n[16] = _) : _ = n[16];
+	let v;
+	n[17] !== f || n[18] !== _ ? (v = /* @__PURE__ */ w("div", {
+		className: "flex min-w-0 flex-1 items-center gap-3 text-sm",
+		children: [f, _]
+	}), n[17] = f, n[18] = _, n[19] = v) : v = n[19];
+	let y;
+	n[20] === r.code ? y = n[21] : (y = /* @__PURE__ */ C("div", {
+		className: "text-center font-mono text-3xl font-semibold tracking-widest select-all",
+		children: r.code
+	}), n[20] = r.code, n[21] = y);
+	let b;
+	n[22] !== a || n[23] !== r.code ? (b = () => a(r.code, () => T("POST", "/v1/devices/refuse", { code: r.code })), n[22] = a, n[23] = r.code, n[24] = b) : b = n[24];
+	let x = r.yours ? "Not Me" : "Not Them", S;
+	n[25] !== i || n[26] !== b || n[27] !== x ? (S = /* @__PURE__ */ C(o, {
+		variant: "outline",
+		className: "flex-1 @xl:flex-none",
+		disabled: i,
+		onClick: b,
+		children: x
+	}), n[25] = i, n[26] = b, n[27] = x, n[28] = S) : S = n[28];
+	let E;
+	n[29] !== a || n[30] !== r.code ? (E = () => a(r.code, () => T("POST", "/v1/devices/approve", {
+		code: r.code,
+		confirm: !0
+	})), n[29] = a, n[30] = r.code, n[31] = E) : E = n[31];
+	let D;
+	n[32] === i ? D = n[33] : (D = i && /* @__PURE__ */ C(g, { className: "text-primary-foreground" }), n[32] = i, n[33] = D);
+	let O;
+	n[34] !== i || n[35] !== E || n[36] !== D ? (O = /* @__PURE__ */ w(o, {
+		className: "flex-1 @xl:flex-none",
+		disabled: i,
+		onClick: E,
+		children: [D, "Approve"]
+	}), n[34] = i, n[35] = E, n[36] = D, n[37] = O) : O = n[37];
+	let k;
+	n[38] !== S || n[39] !== O ? (k = /* @__PURE__ */ w("div", {
+		className: "flex gap-2 @xl:justify-end",
+		children: [S, O]
+	}), n[38] = S, n[39] = O, n[40] = k) : k = n[40];
+	let A;
+	return n[41] !== v || n[42] !== y || n[43] !== k || n[44] !== u ? (A = /* @__PURE__ */ w("div", {
+		role: "group",
+		"aria-label": u,
+		className: "flex w-full max-w-2xl flex-col gap-4 rounded-xl border bg-card p-4 text-card-foreground @xl:flex-row @xl:items-center",
+		children: [
+			v,
+			y,
+			k
+		]
+	}), n[41] = v, n[42] = y, n[43] = k, n[44] = u, n[45] = A) : A = n[45], A;
+}
+function ae(t) {
+	let n = e(14), { c: r, remove: i } = t, a;
+	n[0] === r.name ? a = n[1] : (a = L(r.name), n[0] = r.name, n[1] = a);
+	let s = `${r.name} joined`, c = r.place, l;
+	n[2] === r.since ? l = n[3] : (l = k(r.since), n[2] = r.since, n[3] = l);
+	let u;
+	n[4] !== r.place || n[5] !== l ? (u = [c, l].filter(Boolean), n[4] = r.place, n[5] = l, n[6] = u) : u = n[6];
+	let f = u.join(" · "), p;
+	n[7] === i ? p = n[8] : (p = /* @__PURE__ */ C(o, {
+		variant: "ghost",
+		size: "sm",
+		className: "text-destructive",
+		onClick: i,
+		children: "Remove"
+	}), n[7] = i, n[8] = p);
+	let m;
+	return n[9] !== a || n[10] !== s || n[11] !== f || n[12] !== p ? (m = /* @__PURE__ */ C(d, { children: /* @__PURE__ */ C(Y, {
+		icon: a,
+		title: s,
+		sub: f,
+		children: p
+	}) }), n[9] = a, n[10] = s, n[11] = f, n[12] = p, n[13] = m) : m = n[13], m;
+}
+function oe(t) {
+	let n = e(29), { scan: i, done: a, cancel: s } = t, { code: c, r: l } = i, [u, d] = r(!1), [f, m] = r(""), h;
+	n[0] !== c || n[1] !== a ? (h = async function() {
+		one.tap(), d(!0), m("");
+		try {
+			await T("POST", "/v1/devices/approve", {
+				code: c,
+				confirm: !0
+			}), a();
+		} catch (e) {
+			m(E(e)), d(!1);
+		}
+	}, n[0] = c, n[1] = a, n[2] = h) : h = n[2];
+	let _ = h, v = `Approve ${l.device}?`, y;
+	n[3] === l.device ? y = n[4] : (y = /* @__PURE__ */ w("div", {
+		className: "font-medium",
+		children: [
+			"Approve ",
+			l.device,
+			"?"
+		]
+	}), n[3] = l.device, n[4] = y);
+	let b = l.new ? `${l.person}’s first device. They join ${D}.` : "It can open everything you can.", x;
+	n[5] === b ? x = n[6] : (x = /* @__PURE__ */ C("div", {
+		className: "text-sm text-muted-foreground",
+		children: b
+	}), n[5] = b, n[6] = x);
+	let S;
+	n[7] !== y || n[8] !== x ? (S = /* @__PURE__ */ w("div", { children: [y, x] }), n[7] = y, n[8] = x, n[9] = S) : S = n[9];
+	let O;
+	n[10] === f ? O = n[11] : (O = f && /* @__PURE__ */ C(p, { title: f }), n[10] = f, n[11] = O);
+	let k;
+	n[12] !== u || n[13] !== s ? (k = /* @__PURE__ */ C(o, {
+		variant: "outline",
+		disabled: u,
+		onClick: s,
+		children: "Cancel"
+	}), n[12] = u, n[13] = s, n[14] = k) : k = n[14];
+	let A;
+	n[15] === u ? A = n[16] : (A = u && /* @__PURE__ */ C(g, { className: "text-primary-foreground" }), n[15] = u, n[16] = A);
+	let j;
+	n[17] !== _ || n[18] !== u || n[19] !== A ? (j = /* @__PURE__ */ w(o, {
+		disabled: u,
+		onClick: _,
+		children: [A, "Approve"]
+	}), n[17] = _, n[18] = u, n[19] = A, n[20] = j) : j = n[20];
+	let M;
+	n[21] !== j || n[22] !== k ? (M = /* @__PURE__ */ w("div", {
+		className: "flex justify-end gap-2",
+		children: [k, j]
+	}), n[21] = j, n[22] = k, n[23] = M) : M = n[23];
+	let N;
+	return n[24] !== M || n[25] !== v || n[26] !== S || n[27] !== O ? (N = /* @__PURE__ */ w("div", {
+		role: "group",
+		"aria-label": v,
+		className: "flex w-full max-w-2xl flex-col gap-3 rounded-xl border bg-card p-4 text-card-foreground",
+		children: [
+			S,
+			O,
+			M
+		]
+	}), n[24] = M, n[25] = v, n[26] = S, n[27] = O, n[28] = N) : N = n[28], N;
+}
+function se(t) {
+	let n = e(56), { m: r, data: i, opened: a, flag: s, menu: l, removeOld: u, signOut: f, add: p, keep: m, act: h } = t, { device: g, state: _, passkey: v } = i, { cards: y, browsers: b, stale: S } = r.drawn, E;
+	if (n[0] !== h || n[1] !== p || n[2] !== b || n[3] !== y || n[4] !== i.seen || n[5] !== g || n[6] !== s || n[7] !== m || n[8] !== r || n[9] !== l || n[10] !== a || n[11] !== v || n[12] !== u || n[13] !== f || n[14] !== S || n[15] !== _.install) {
+		let e;
+		n[17] === r.me ? e = n[18] : (e = (e) => e.user === r.me, n[17] = r.me, n[18] = e);
+		let t = y.filter(e), D = g.keys ? (_.install?.grants || []).filter(ue) : [], O = !!g.keys && (D.length > 0 || r.scheduled().length > 0), A;
+		if (n[19] !== r || n[20] !== _.install) {
+			if (A = [], r.admin && _.install?.recovery_set) {
+				let e;
+				n[22] === _.install.recovery_set ? e = n[23] : (e = M(_.install.recovery_set), n[22] = _.install.recovery_set, n[23] = e), A.push(`Recovery key set ${e}.`);
+			}
+			if (_.install?.recovery_used && (r.admin || _.install.recovery_used.user === r.me)) {
+				let e = _.install.recovery_used, t;
+				n[24] !== r || n[25] !== e.user ? (t = e.user === r.me ? "yours" : `${r.userName(e.user)}’s`, n[24] = r, n[25] = e.user, n[26] = t) : t = n[26];
+				let i;
+				n[27] === e.time ? i = n[28] : (i = M(e.time), n[27] = e.time, n[28] = i), A.push(`The recovery key last let in a device of ${t}, ${i}.`);
+			}
+			n[19] = r, n[20] = _.install, n[21] = A;
+		} else A = n[21];
+		let j = O || !!g.keys && v || A.length > 0, N = j && "@3xl:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]", P;
+		n[29] === N ? P = n[30] : (P = x("grid max-w-5xl items-start gap-x-8 gap-y-8", N), n[29] = N, n[30] = P);
+		let F = !!t.length && /* @__PURE__ */ C(d, { children: t.map((e) => {
+			let t = e.me ? "This device" : e.seen && Date.now() - e.seen > 36e5 ? k(e.seen) : "", n = r.problemsOf(e), i = n.length > 0 && a[e.id];
+			return /* @__PURE__ */ w("div", {
+				onContextMenu: (t) => (t.preventDefault(), l(e, !1, {
+					x: t.clientX,
+					y: t.clientY
+				})),
+				children: [
+					/* @__PURE__ */ w(Y, {
+						icon: e.icon,
+						title: e.name,
+						sub: t,
+						children: [!!n.length && /* @__PURE__ */ C(o, {
+							variant: "ghost",
+							size: "icon-sm",
+							className: "text-warning",
+							"aria-expanded": !!i,
+							"aria-label": `${n.length > 1 ? `${n.length} problems` : "A problem"} on ${e.name}`,
+							onClick: () => s(e.id),
+							children: /* @__PURE__ */ C(c, {
+								name: "warning-fill",
+								className: "size-5"
+							})
+						}), /* @__PURE__ */ C(de, {
+							name: e.name,
+							onClick: (t) => l(e, !1, t.currentTarget)
+						})]
+					}),
+					i && n.map(le),
+					/* @__PURE__ */ C(fe, {
+						c: e,
+						remove: () => u(e)
+					})
+				]
+			}, e.id);
+		}) }), R;
+		n[31] !== u || n[32] !== S ? (R = !!S.length && /* @__PURE__ */ C(d, { children: /* @__PURE__ */ C(fe, {
+			c: { old: S },
+			remove: () => u({ old: S })
+		}) }), n[31] = u, n[32] = S, n[33] = R) : R = n[33];
+		let z;
+		n[34] !== b || n[35] !== y || n[36] !== g.signOut || n[37] !== f ? (z = g.signOut && ![...y, ...b].some(Z) && /* @__PURE__ */ C(o, {
+			variant: "ghost",
+			className: "self-start text-destructive",
+			onClick: f,
+			children: "Sign Out"
+		}), n[34] = b, n[35] = y, n[36] = g.signOut, n[37] = f, n[38] = z) : z = n[38];
+		let B;
+		n[39] === Symbol.for("react.memo_cache_sentinel") ? (B = /* @__PURE__ */ C(c, { name: "plus" }), n[39] = B) : B = n[39];
+		let V;
+		n[40] === p ? V = n[41] : (V = /* @__PURE__ */ w(o, {
+			variant: "outline",
+			className: "self-start",
+			onClick: p,
+			children: [B, "Add a Device"]
+		}), n[40] = p, n[41] = V);
+		let H;
+		n[42] !== b || n[43] !== i.seen || n[44] !== l ? (H = !!b.length && /* @__PURE__ */ C(re, {
+			title: "Browsers",
+			className: "mt-2",
+			children: /* @__PURE__ */ C(d, { children: b.map((e) => {
+				let t = e.me ? "This browser" : i.seen[e.key] && Date.now() - i.seen[e.key] > 36e5 ? k(i.seen[e.key]) : "";
+				return /* @__PURE__ */ C("div", {
+					onContextMenu: (t) => (t.preventDefault(), l(e, !0, {
+						x: t.clientX,
+						y: t.clientY
+					})),
+					children: /* @__PURE__ */ C(Y, {
+						icon: e.passkey ? I("key") : L(e.name),
+						title: e.name,
+						sub: t,
+						children: /* @__PURE__ */ C(de, {
+							name: e.name,
+							onClick: (t) => l(e, !0, t.currentTarget)
+						})
+					})
+				}, e.key);
+			}) })
+		}), n[42] = b, n[43] = i.seen, n[44] = l, n[45] = H) : H = n[45];
+		let U;
+		n[46] !== h || n[47] !== g ? (U = g.notify === "default" && /* @__PURE__ */ w(o, {
+			variant: "ghost",
+			className: "self-start",
+			onClick: () => h(async () => g.notify = await one.notify()),
+			children: [/* @__PURE__ */ C(c, { name: "bell" }), "Get Notifications in This Browser"]
+		}), n[46] = h, n[47] = g, n[48] = U) : U = n[48];
+		let W;
+		n[49] !== H || n[50] !== U || n[51] !== F || n[52] !== R || n[53] !== z || n[54] !== V ? (W = /* @__PURE__ */ w("div", {
+			className: "flex min-w-0 flex-col gap-4",
+			children: [
+				F,
+				R,
+				z,
+				V,
+				H,
+				U
+			]
+		}), n[49] = H, n[50] = U, n[51] = F, n[52] = R, n[53] = z, n[54] = V, n[55] = W) : W = n[55], E = /* @__PURE__ */ w("div", {
+			className: P,
+			children: [W, !!j && /* @__PURE__ */ w("div", {
+				className: "flex min-w-0 flex-col gap-8",
+				children: [
+					O && /* @__PURE__ */ w(re, {
+						title: "Kept Running",
+						children: [/* @__PURE__ */ w(d, { children: [D.map((e) => {
+							let t = (_.install?.devices || []).find((t) => t.key === e.endpoint), n = new Date(e.until).toLocaleDateString(void 0, {
+								day: "numeric",
+								month: "long"
+							});
+							return /* @__PURE__ */ w("div", {
+								className: "flex items-center gap-3 px-3 py-2.5 text-sm",
+								children: [/* @__PURE__ */ w("span", {
+									className: "min-w-0 flex-1",
+									children: [/* @__PURE__ */ w("span", {
+										className: "block font-medium",
+										children: [
+											t && r.deviceName(t) || "A device",
+											" keeps ",
+											r.appTitle(e.app),
+											" running for ",
+											r.forWhom(e.scope)
+										]
+									}), /* @__PURE__ */ w("span", {
+										className: "block text-muted-foreground",
+										children: [
+											"Until ",
+											n,
+											", and longer as ",
+											e.scope === `user:${r.me}` ? "you use it" : "it’s used"
+										]
+									})]
+								}), /* @__PURE__ */ C(o, {
+									variant: "ghost",
+									size: "sm",
+									className: "text-destructive",
+									onClick: () => h(() => T("POST", "/v1/grant", {
+										device: e.endpoint,
+										app: e.app,
+										scope: e.scope,
+										days: 0
+									})),
+									children: "Stop"
+								})]
+							}, `${e.endpoint} ${e.app} ${e.scope}`);
+						}), /* @__PURE__ */ C(K, {
+							icon: "arrows-clockwise",
+							onClick: m,
+							children: "Keep an App Running…"
+						})] }), !!D.length && /* @__PURE__ */ C(G, { children: "When one stops or runs out, that device can’t open the app’s things any more." })]
+					}),
+					g.keys && v && /* @__PURE__ */ C(d, { children: /* @__PURE__ */ C(K, {
+						icon: "key",
+						onClick: () => h(ce),
+						children: "Use this passkey to get back in if you lose your devices"
+					}) }),
+					A.length > 0 && /* @__PURE__ */ C("div", {
+						className: "flex flex-col gap-2",
+						children: A.map(X)
+					})
+				]
+			})]
+		}), n[0] = h, n[1] = p, n[2] = b, n[3] = y, n[4] = i.seen, n[5] = g, n[6] = s, n[7] = m, n[8] = r, n[9] = l, n[10] = a, n[11] = v, n[12] = u, n[13] = f, n[14] = S, n[15] = _.install, n[16] = E;
+	} else E = n[16];
+	return E;
+}
+function X(e) {
+	return /* @__PURE__ */ C(G, { children: e }, e);
+}
+function ce() {
+	return T("POST", "/v1/devices/passkey", {});
+}
+function Z(e) {
+	return e.me;
+}
+function le(e, t) {
+	return /* @__PURE__ */ C("div", {
+		className: "px-3 pb-3 pl-14",
+		children: /* @__PURE__ */ C(p, {
+			warn: !0,
+			...e
+		})
+	}, t);
+}
+function ue(e) {
+	return e.until > Date.now();
+}
+var de = (t) => {
+	let n = e(4), { name: r, onClick: i } = t, a = `More for ${r}`, s;
+	n[0] === Symbol.for("react.memo_cache_sentinel") ? (s = /* @__PURE__ */ C(c, {
+		name: "dots-three-outline-fill",
+		className: "size-5"
+	}), n[0] = s) : s = n[0];
+	let l;
+	return n[1] !== i || n[2] !== a ? (l = /* @__PURE__ */ C(o, {
+		variant: "ghost",
+		size: "icon-sm",
+		"aria-label": a,
+		onClick: i,
+		children: s
+	}), n[1] = i, n[2] = a, n[3] = l) : l = n[3], l;
+}, fe = (t) => {
+	let n = e(3), { c: r, remove: i } = t, a;
+	return n[0] !== r.old.length || n[1] !== i ? (a = r.old.length > 0 ? /* @__PURE__ */ w("div", {
+		className: "flex items-center gap-3 px-3 py-1.5 pl-14 text-sm text-muted-foreground",
+		children: [/* @__PURE__ */ w("span", {
+			className: "flex-1",
+			children: [
+				r.old.length,
+				" old sign-in",
+				r.old.length > 1 ? "s" : ""
+			]
+		}), /* @__PURE__ */ C(o, {
+			variant: "ghost",
+			size: "sm",
+			className: "text-destructive",
+			onClick: i,
+			children: "Remove"
+		})]
+	}) : null, n[0] = r.old.length, n[1] = i, n[2] = a) : a = n[2], a;
+};
+function pe(t) {
+	let n = e(21), { m: r, move: i } = t, a, o, s, l;
+	if (n[0] !== r || n[1] !== i) {
+		let { cols: e, last: t } = r.board(), u = r.admin, d;
+		if (n[6] !== u || n[7] !== i) {
+			let e = (e, t) => {
+				let n = /* @__PURE__ */ w(S, { children: [/* @__PURE__ */ C(J, { icon: e.icon }), /* @__PURE__ */ w("span", {
+					className: "min-w-0 flex-1 text-left",
+					children: [/* @__PURE__ */ C("span", {
+						className: "block truncate font-medium",
+						children: e.name
+					}), e.whose && /* @__PURE__ */ C("span", {
+						className: "block truncate text-muted-foreground",
+						children: e.whose
+					})]
+				})] });
+				return u ? /* @__PURE__ */ w("button", {
+					"data-pcard": e.id,
+					"aria-haspopup": "menu",
+					"aria-label": `${e.name}${e.whose ? `, ${e.whose}` : ""}, ${t}. Move`,
+					className: x("flex w-full items-center gap-3 rounded-lg border bg-background px-3 py-2 text-sm", "cursor-grab touch-pan-y select-none [-webkit-touch-callout:none]"),
+					onClick: (t) => Q.now ? Q.now = !1 : i(e.id, t.currentTarget),
+					children: [n, /* @__PURE__ */ C("span", {
+						"data-grip": !0,
+						className: "shrink-0 touch-none text-muted-foreground",
+						children: /* @__PURE__ */ C(c, {
+							name: "dots-six-vertical",
+							className: "size-5"
+						})
+					})]
+				}, e.id) : /* @__PURE__ */ C("div", {
+					className: "flex w-full items-center gap-3 rounded-lg border bg-background px-3 py-2 text-sm",
+					children: n
+				}, e.id);
+			};
+			d = (t, n, r) => /* @__PURE__ */ w("section", {
+				"data-col": t,
+				"aria-label": n,
+				className: "flex min-h-24 flex-1 basis-0 flex-col gap-2 rounded-xl border bg-card p-2 @2xl:min-h-44 @2xl:min-w-40",
+				children: [/* @__PURE__ */ C("h3", {
+					className: "px-1 pt-1 text-sm font-medium",
+					children: n
+				}), r.map((t) => e(t, n))]
+			}, t), n[6] = u, n[7] = i, n[8] = d;
+		} else d = n[8];
+		let f = d, p = me, m;
+		n[9] === f ? m = n[10] : (m = (e, t) => f(t, A(t + 1), e), n[9] = f, n[10] = m);
+		let h = e.map(m);
+		if (u) {
+			let e;
+			n[11] === Symbol.for("react.memo_cache_sentinel") ? (e = /* @__PURE__ */ C("section", {
+				"data-col": "new",
+				"aria-label": "New",
+				className: "grid min-h-12 place-items-center rounded-xl border border-dashed p-2 text-muted-foreground @2xl:w-16 @2xl:flex-none",
+				children: /* @__PURE__ */ C(c, {
+					name: "plus",
+					className: "size-5"
+				})
+			}, "new"), n[11] = e) : e = n[11], h.push(e);
+		}
+		(u || t.length) && h.push(f("last", "Last", t)), s = "flex flex-col gap-4", n[12] === Symbol.for("react.memo_cache_sentinel") ? (l = /* @__PURE__ */ C("h2", {
+			className: "text-xl font-semibold tracking-tight",
+			children: "Which devices run your apps first?"
+		}), n[12] = l) : l = n[12], a = "flex flex-col @2xl:flex-row @2xl:items-stretch";
+		let g;
+		n[13] === Symbol.for("react.memo_cache_sentinel") ? (g = (e, t) => t ? [p(`then${t}`), e] : [e], n[13] = g) : g = n[13], o = h.flatMap(g), n[0] = r, n[1] = i, n[2] = a, n[3] = o, n[4] = s, n[5] = l;
+	} else a = n[2], o = n[3], s = n[4], l = n[5];
+	let u;
+	n[14] !== a || n[15] !== o ? (u = /* @__PURE__ */ C("div", {
+		className: a,
+		children: o
+	}), n[14] = a, n[15] = o, n[16] = u) : u = n[16];
+	let d;
+	return n[17] !== s || n[18] !== l || n[19] !== u ? (d = /* @__PURE__ */ w("div", {
+		className: s,
+		children: [l, u]
+	}), n[17] = s, n[18] = l, n[19] = u, n[20] = d) : d = n[20], d;
+}
+function me(e) {
+	return /* @__PURE__ */ C("div", {
+		"aria-hidden": "true",
+		className: "grid h-6 shrink-0 place-items-center text-muted-foreground @2xl:h-auto @2xl:w-6",
+		children: /* @__PURE__ */ C(c, {
+			name: "caret-right",
+			className: "size-5 rotate-90 @2xl:rotate-0"
+		})
+	}, e);
+}
+var Q = { now: !1 };
+function he(n, r, i) {
+	let a = e(5), o;
+	a[0] !== n || a[1] !== i || a[2] !== r ? (o = () => {
+		let e = null, t = (t) => {
+			Q.now = !1;
+			let n = t.target.closest?.("[data-pcard]");
+			if (!n || t.button !== 0) return;
+			let r = t.pointerType === "mouse" || !!t.target.closest("[data-grip]");
+			e = {
+				card: n,
+				id: n.dataset.pcard,
+				x: t.clientX,
+				y: t.clientY,
+				now: r,
+				lifted: null,
+				over: null
+			}, r || (e.press = setTimeout(() => {
+				let t = e;
+				e = null, t && (Q.now = !0, i(t.id, t.card));
+			}, 500));
+		}, a = (t) => {
+			if (!e) return;
+			if (!e.lifted) {
+				if (Math.hypot(t.clientX - e.x, t.clientY - e.y) < 6) return;
+				if (clearTimeout(e.press), !e.now) {
+					e = null;
+					return;
+				}
+				let r = e.card.getBoundingClientRect(), i = e.card.cloneNode(!0);
+				i.classList.add("fixed", "z-[60]", "m-0", "pointer-events-none", "shadow-lg", "-rotate-1"), Object.assign(i.style, {
+					width: `${r.width}px`,
+					left: `${r.left}px`,
+					top: `${r.top}px`
+				}), document.body.append(i), Object.assign(e, {
+					lifted: i,
+					dx: e.x - r.left,
+					dy: e.y - r.top
+				}), e.card.classList.add("opacity-30"), n.current = !0, one.tap();
+			}
+			t.preventDefault(), Object.assign(e.lifted.style, {
+				left: `${t.clientX - e.dx}px`,
+				top: `${t.clientY - e.dy}px`
+			});
+			let r = document.elementFromPoint(t.clientX, t.clientY)?.closest("[data-col]") || null;
+			r !== e.over && (e.over?.classList.remove("ring-2", "ring-ring"), r?.classList.add("ring-2", "ring-ring"), e.over = r), t.clientY < 60 ? scrollBy(0, -12) : t.clientY > innerHeight - 60 && scrollBy(0, 12);
+		}, o = (t) => {
+			let i = e;
+			e = null, i && (clearTimeout(i.press), i.lifted && (i.lifted.remove(), i.card.classList.remove("opacity-30"), i.over?.classList.remove("ring-2", "ring-ring"), n.current = !1, Q.now = !0, t.type === "pointerup" && i.over && r(i.id, i.over.dataset.col)));
+		}, s = (t) => {
+			let n = t.target.closest?.("[data-pcard]");
+			n && (t.preventDefault(), e = null, i(n.dataset.pcard, {
+				x: t.clientX,
+				y: t.clientY
+			}));
+		}, c = ge;
+		return document.addEventListener("pointerdown", t), document.addEventListener("pointermove", a, { passive: !1 }), document.addEventListener("pointerup", o), document.addEventListener("pointercancel", o), document.addEventListener("keydown", c), document.addEventListener("contextmenu", s), () => {
+			document.removeEventListener("pointerdown", t), document.removeEventListener("pointermove", a), document.removeEventListener("pointerup", o), document.removeEventListener("pointercancel", o), document.removeEventListener("keydown", c), document.removeEventListener("contextmenu", s);
+		};
+	}, a[0] = n, a[1] = i, a[2] = r, a[3] = o) : o = a[3];
+	let s;
+	a[4] === Symbol.for("react.memo_cache_sentinel") ? (s = [], a[4] = s) : s = a[4], t(o, s);
+}
+function ge() {
+	return Q.now = !1;
+}
+function _e({ m: e, cellOpen: t, tap: n }) {
+	let r = e.gridColumns();
+	if (!r.length) return /* @__PURE__ */ C(s, { children: "None of your devices runs services." });
+	let i = {};
+	for (let t of r.flatMap((e) => e.parts)) i[t.name] ||= e.partTitle(t);
+	let o = Object.keys(i).sort((e, t) => (t === "apps") - (e === "apps") || i[e].localeCompare(i[t])), c = (t) => t === "apps" ? {
+		name: "apps",
+		title: "Runs apps",
+		icon: "squares-four",
+		color: "#007aff"
+	} : {
+		...e.appOf(t) || {},
+		name: t,
+		title: i[t]
+	}, l = null, u = (r, a, o) => {
+		let s = r.parts.find((e) => e.name === o);
+		if (!s) return /* @__PURE__ */ C("td", {}, a);
+		let c = `${i[o]} on ${r.name}`, u = `${a} ${o}`, d = r.c && e.problemOf(r.c, s);
+		d && t === u && (l = d);
+		let f = s.fixed || !s.part, p = d ? `${c}: ${d.title}` : `${c}${s.doing ? `: ${s.doing}…` : ""}`;
+		return /* @__PURE__ */ C("td", {
+			className: "px-1 text-center",
+			children: /* @__PURE__ */ C("button", {
+				className: x("inline-grid h-10 w-11 place-items-center rounded-md outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50", f && !d ? "cursor-default" : "cursor-pointer"),
+				...d ? { "aria-expanded": t === u } : {
+					role: "switch",
+					"aria-checked": !!s.on
+				},
+				"aria-disabled": f && !d ? !0 : void 0,
+				"aria-label": p,
+				onClick: () => n(u),
+				children: /* @__PURE__ */ C("span", {
+					"aria-hidden": "true",
+					className: x("grid size-5 place-items-center rounded-full border-2 text-[13px] font-extrabold", d ? "border-warning bg-warning text-background" : s.on ? "border-foreground bg-foreground" : "border-muted-foreground/40", s.doing && !d && "animate-pulse motion-reduce:animate-none"),
+					children: d ? "!" : ""
+				})
+			})
+		}, a);
+	}, d = o.map((e) => /* @__PURE__ */ w("tr", { children: [/* @__PURE__ */ C("th", {
+		scope: "row",
+		className: "sticky left-0 z-10 bg-card py-2 pr-3 pl-3 text-left font-medium",
+		children: /* @__PURE__ */ w("span", {
+			className: "flex max-w-40 items-center gap-2.5",
+			children: [/* @__PURE__ */ C(a, {
+				app: c(e),
+				size: 28
+			}), /* @__PURE__ */ C("span", {
+				className: "truncate",
+				children: i[e]
+			})]
+		})
+	}), r.map((t, n) => u(t, n, e))] }, e));
+	return /* @__PURE__ */ w("div", {
+		className: "flex flex-col gap-3",
+		children: [/* @__PURE__ */ C("div", {
+			className: "max-w-full w-fit overflow-x-auto rounded-xl border bg-card text-sm text-card-foreground",
+			children: /* @__PURE__ */ w("table", {
+				className: "min-w-full border-separate border-spacing-0",
+				children: [/* @__PURE__ */ C("thead", { children: /* @__PURE__ */ w("tr", { children: [/* @__PURE__ */ C("th", { className: "sticky left-0 z-10 bg-card" }), r.map((e, t) => /* @__PURE__ */ w("th", {
+					scope: "col",
+					className: "min-w-24 px-1 pt-3.5 pb-1.5 align-bottom text-[13px] font-medium text-muted-foreground",
+					children: [/* @__PURE__ */ C(J, {
+						icon: e.icon,
+						className: "mx-auto mb-1.5"
+					}), /* @__PURE__ */ C("span", {
+						className: "mx-auto block max-w-24 truncate",
+						children: e.name
+					})]
+				}, t))] }) }), /* @__PURE__ */ C("tbody", { children: d })]
+			})
+		}), l && /* @__PURE__ */ C(p, {
+			warn: !0,
+			...l
+		})]
+	});
+}
+var $ = (t) => {
+	let n = e(8), { children: r, busy: i, disabled: a, variant: s, onClick: c } = t, l = s === void 0 ? "default" : s, u = i || a, d;
+	n[0] === i ? d = n[1] : (d = i && /* @__PURE__ */ C(g, { className: "text-current" }), n[0] = i, n[1] = d);
+	let f;
+	return n[2] !== r || n[3] !== c || n[4] !== u || n[5] !== d || n[6] !== l ? (f = /* @__PURE__ */ w(o, {
+		size: "sm",
+		variant: l,
+		disabled: u,
+		onClick: c,
+		children: [d, r]
+	}), n[2] = r, n[3] = c, n[4] = u, n[5] = d, n[6] = l, n[7] = f) : f = n[7], f;
+}, ve = (t) => {
+	let n = e(2), { setOpen: r } = t, i;
+	return n[0] === r ? i = n[1] : (i = /* @__PURE__ */ C(o, {
+		variant: "secondary",
+		size: "sm",
+		onClick: () => r(!1),
+		children: "Cancel"
+	}), n[0] = r, n[1] = i), i;
+};
+function ye(t) {
+	let n = e(34), { card: i, open: a, setOpen: o, done: s } = t, c;
+	n[0] !== i.clients || n[1] !== i.node || n[2] !== i.runs || n[3] !== i.services ? (c = i.runs ? [i.node, ...i.services].filter(Boolean).map(xe) : i.clients.map(be), n[0] = i.clients, n[1] = i.node, n[2] = i.runs, n[3] = i.services, n[4] = c) : c = n[4];
+	let u = c, [d, f] = r(i.name), [h, g] = r(!1), [_, v] = r(""), y;
+	n[5] !== i.name || n[6] !== d ? (y = !!d.trim() && d.trim() !== i.name, n[5] = i.name, n[6] = d, n[7] = y) : y = n[7];
+	let b = y, x;
+	n[8] !== h || n[9] !== s || n[10] !== u || n[11] !== d || n[12] !== b ? (x = async function() {
+		if (b && !h) {
+			g(!0), v("");
+			try {
+				for (let e of u) await T("POST", "/v1/name", {
+					key: e,
+					name: d.trim()
+				});
+				one.tap("success"), s();
+			} catch (e) {
+				v(E(e)), g(!1);
+			}
+		}
+	}, n[8] = h, n[9] = s, n[10] = u, n[11] = d, n[12] = b, n[13] = x) : x = n[13];
+	let S = x, D = !b, O;
+	n[14] !== h || n[15] !== S || n[16] !== D ? (O = /* @__PURE__ */ C($, {
+		busy: h,
+		disabled: D,
+		onClick: S,
+		children: "Save"
+	}), n[14] = h, n[15] = S, n[16] = D, n[17] = O) : O = n[17];
+	let k;
+	n[18] === Symbol.for("react.memo_cache_sentinel") ? (k = (e) => f(e.target.value), n[18] = k) : k = n[18];
+	let A;
+	n[19] === S ? A = n[20] : (A = (e) => e.key === "Enter" && S(), n[19] = S, n[20] = A);
+	let j;
+	n[21] !== d || n[22] !== A ? (j = /* @__PURE__ */ C(l, {
+		autoFocus: !0,
+		value: d,
+		onChange: k,
+		"aria-label": "Name",
+		autoComplete: "off",
+		spellCheck: !1,
+		enterKeyHint: "done",
+		onKeyDown: A
+	}), n[21] = d, n[22] = A, n[23] = j) : j = n[23];
+	let M;
+	n[24] === _ ? M = n[25] : (M = _ && /* @__PURE__ */ C(p, { title: _ }), n[24] = _, n[25] = M);
+	let N;
+	n[26] !== j || n[27] !== M ? (N = /* @__PURE__ */ w("div", {
+		className: "flex flex-col gap-4 p-4",
+		children: [j, M]
+	}), n[26] = j, n[27] = M, n[28] = N) : N = n[28];
+	let P;
+	return n[29] !== a || n[30] !== o || n[31] !== N || n[32] !== O ? (P = /* @__PURE__ */ C(m, {
+		open: a,
+		onOpenChange: o,
+		title: "Rename",
+		action: O,
+		children: N
+	}), n[29] = a, n[30] = o, n[31] = N, n[32] = O, n[33] = P) : P = n[33], P;
+}
+function be(e) {
+	return e.key;
+}
+function xe(e) {
+	return e.key;
+}
+function Se(t) {
+	let n = e(26), { name: i, keys: a, erasable: o, open: s, setOpen: c, done: l } = t, [f, h] = r(!1), [g, v] = r(!1), [y, b] = r(""), x;
+	n[0] !== l || n[1] !== o || n[2] !== f || n[3] !== a ? (x = async function() {
+		v(!0), b("");
+		try {
+			f && await T("POST", "/v1/erase", { key: o });
+			for (let e of a) await T("POST", "/v1/remove", { key: e });
+			one.tap("success"), l();
+		} catch (e) {
+			b(E(e)), v(!1);
+		}
+	}, n[0] = l, n[1] = o, n[2] = f, n[3] = a, n[4] = x) : x = n[4];
+	let D = x, O = `Remove ${i}?`, k;
+	n[5] === c ? k = n[6] : (k = /* @__PURE__ */ C(ve, { setOpen: c }), n[5] = c, n[6] = k);
+	let A;
+	n[7] !== g || n[8] !== D ? (A = /* @__PURE__ */ C($, {
+		variant: "destructive",
+		busy: g,
+		onClick: D,
+		children: "Remove"
+	}), n[7] = g, n[8] = D, n[9] = A) : A = n[9];
+	let j;
+	n[10] !== k || n[11] !== A ? (j = /* @__PURE__ */ w(S, { children: [k, A] }), n[10] = k, n[11] = A, n[12] = j) : j = n[12];
+	let M;
+	n[13] === f ? M = n[14] : (M = /* @__PURE__ */ C(d, { children: /* @__PURE__ */ w(u, {
+		className: "justify-between px-3 py-3 font-normal",
+		children: ["Also erase the data", /* @__PURE__ */ C(_, {
+			checked: f,
+			onCheckedChange: h
+		})]
+	}) }), n[13] = f, n[14] = M);
+	let N;
+	n[15] === y ? N = n[16] : (N = y && /* @__PURE__ */ C(p, { title: y }), n[15] = y, n[16] = N);
+	let P;
+	n[17] !== M || n[18] !== N ? (P = /* @__PURE__ */ w("div", {
+		className: "flex flex-col gap-4 p-4",
+		children: [M, N]
+	}), n[17] = M, n[18] = N, n[19] = P) : P = n[19];
+	let F;
+	return n[20] !== s || n[21] !== c || n[22] !== O || n[23] !== j || n[24] !== P ? (F = /* @__PURE__ */ C(m, {
+		open: s,
+		onOpenChange: c,
+		title: O,
+		action: j,
+		children: P
+	}), n[20] = s, n[21] = c, n[22] = O, n[23] = j, n[24] = P, n[25] = F) : F = n[25], F;
+}
+function Ce(t) {
+	let n = e(25), { clients: i, open: a, setOpen: s, done: c } = t, [l, u] = r(null), [f, h] = r(""), g;
+	n[0] !== i || n[1] !== c ? (g = async function(e) {
+		u(e), h("");
+		try {
+			await T("POST", "/v1/devices/forget-sign-in", { key: i[e].key }), one.tap("success"), c();
+		} catch (e) {
+			h(E(e)), u(null);
+		}
+	}, n[0] = i, n[1] = c, n[2] = g) : g = n[2];
+	let _ = g, v;
+	n[3] === s ? v = n[4] : (v = /* @__PURE__ */ C(o, {
+		variant: "secondary",
+		size: "sm",
+		onClick: () => s(!1),
+		children: "Done"
+	}), n[3] = s, n[4] = v);
+	let y;
+	if (n[5] !== l || n[6] !== i || n[7] !== _) {
+		let e;
+		n[9] !== l || n[10] !== _ ? (e = (e, t) => /* @__PURE__ */ w("div", {
+			className: "flex items-center gap-3 px-3 py-2 text-sm",
+			children: [/* @__PURE__ */ C("span", {
+				className: "min-w-0 flex-1 truncate font-medium",
+				children: z(e.sign_in)
+			}), /* @__PURE__ */ C(o, {
+				variant: "ghost",
+				size: "sm",
+				className: "text-destructive",
+				disabled: l !== null,
+				onClick: () => _(t),
+				children: "Remove"
+			})]
+		}, e.key), n[9] = l, n[10] = _, n[11] = e) : e = n[11], y = i.map(e), n[5] = l, n[6] = i, n[7] = _, n[8] = y;
+	} else y = n[8];
+	let b;
+	n[12] === y ? b = n[13] : (b = /* @__PURE__ */ C(d, { children: y }), n[12] = y, n[13] = b);
+	let x;
+	n[14] === Symbol.for("react.memo_cache_sentinel") ? (x = /* @__PURE__ */ C(G, { children: "A new device that signs in with one of these is let in without asking." }), n[14] = x) : x = n[14];
+	let S;
+	n[15] === f ? S = n[16] : (S = f && /* @__PURE__ */ C(p, { title: f }), n[15] = f, n[16] = S);
+	let D;
+	n[17] !== b || n[18] !== S ? (D = /* @__PURE__ */ w("div", {
+		className: "flex flex-col gap-4 overflow-y-auto p-4",
+		children: [
+			b,
+			x,
+			S
+		]
+	}), n[17] = b, n[18] = S, n[19] = D) : D = n[19];
+	let O;
+	return n[20] !== a || n[21] !== s || n[22] !== v || n[23] !== D ? (O = /* @__PURE__ */ C(m, {
+		open: a,
+		onOpenChange: s,
+		title: "Sign-Ins",
+		action: v,
+		children: D
+	}), n[20] = a, n[21] = s, n[22] = v, n[23] = D, n[24] = O) : O = n[24], O;
+}
+function we(t) {
+	let n = e(13), { text: i } = t, [a, s] = r(!1), l;
+	n[0] === i ? l = n[1] : (l = async function() {
+		await one.copy(i), one.tap("success"), s(!0), setTimeout(() => s(!1), 1500);
+	}, n[0] = i, n[1] = l);
+	let u = l, d;
+	n[2] === i ? d = n[3] : (d = /* @__PURE__ */ C("span", {
+		className: "min-w-0 flex-1 overflow-x-auto font-mono text-[13px] whitespace-nowrap select-all",
+		children: i
+	}), n[2] = i, n[3] = d);
+	let f = a ? "Copied" : "Copy", p = a ? "check" : "copy", m;
+	n[4] === p ? m = n[5] : (m = /* @__PURE__ */ C(c, { name: p }), n[4] = p, n[5] = m);
+	let h;
+	n[6] !== u || n[7] !== f || n[8] !== m ? (h = /* @__PURE__ */ C(o, {
+		variant: "ghost",
+		size: "icon-sm",
+		"aria-label": f,
+		onClick: u,
+		children: m
+	}), n[6] = u, n[7] = f, n[8] = m, n[9] = h) : h = n[9];
+	let g;
+	return n[10] !== d || n[11] !== h ? (g = /* @__PURE__ */ w("div", {
+		className: "mt-2 flex items-center gap-1 rounded-lg bg-muted py-1 pr-1 pl-3",
+		children: [d, h]
+	}), n[10] = d, n[11] = h, n[12] = g) : g = n[12], g;
+}
+function Te(n) {
+	let i = e(22), { data: a, open: s, setOpen: c } = n, { state: l } = a, u = l.install?.settings?.address || "", f;
+	i[0] === l.config?.install ? f = i[1] : (f = l.config?.install ? { loading: !0 } : null, i[0] = l.config?.install, i[1] = f);
+	let [h, _] = r(f), v;
+	i[2] === l.config ? v = i[3] : (v = () => {
+		l.config?.install && T("POST", "/v1/pair", {}).then((e) => {
+			let { code: t } = e;
+			return _({ text: `${l.config.install} && ~/.local/bin/${l.config.cli} join ${t}` });
+		}, (e) => _({ error: E(e) }));
+	}, i[2] = l.config, i[3] = v);
+	let y;
+	i[4] === Symbol.for("react.memo_cache_sentinel") ? (y = [], i[4] = y) : y = i[4], t(v, y);
+	let b = Ee, x;
+	i[5] === c ? x = i[6] : (x = /* @__PURE__ */ C(o, {
+		variant: "secondary",
+		size: "sm",
+		onClick: () => c(!1),
+		children: "Done"
+	}), i[5] = c, i[6] = x);
+	let S = `Install ${l.config?.name || "the app"} and sign in. It shows up here to approve.`, D;
+	i[7] === S ? D = i[8] : (D = b("device-mobile", "Phone, tablet or computer", S), i[7] = S, i[8] = D);
+	let O;
+	i[9] === h ? O = i[10] : (O = h && b("hard-drives", "A server", "Run this on it. It joins as you, with everything you can see and do.", h.loading ? /* @__PURE__ */ w("div", {
+		className: "mt-2 flex items-center gap-2 text-muted-foreground",
+		children: [/* @__PURE__ */ C(g, {}), "Making a code"]
+	}) : h.error ? /* @__PURE__ */ C("div", {
+		className: "mt-2",
+		children: /* @__PURE__ */ C(p, { title: h.error })
+	}) : /* @__PURE__ */ C(we, { text: h.text })), i[9] = h, i[10] = O);
+	let k;
+	i[11] === u ? k = i[12] : (k = u && b("browser", "A browser", "Open this and sign in. It shows up here to approve.", /* @__PURE__ */ C(we, { text: u })), i[11] = u, i[12] = k);
+	let A;
+	i[13] !== D || i[14] !== O || i[15] !== k ? (A = /* @__PURE__ */ C("div", {
+		className: "overflow-y-auto p-4",
+		children: /* @__PURE__ */ w(d, { children: [
+			D,
+			O,
+			k
+		] })
+	}), i[13] = D, i[14] = O, i[15] = k, i[16] = A) : A = i[16];
+	let j;
+	return i[17] !== s || i[18] !== c || i[19] !== x || i[20] !== A ? (j = /* @__PURE__ */ C(m, {
+		open: s,
+		onOpenChange: c,
+		title: "Add a Device",
+		action: x,
+		children: A
+	}), i[17] = s, i[18] = c, i[19] = x, i[20] = A, i[21] = j) : j = i[21], j;
+}
+function Ee(e, t, n, r) {
+	return /* @__PURE__ */ w("div", {
+		className: "flex items-start gap-3 px-3 py-3 text-sm",
+		children: [/* @__PURE__ */ C(c, {
+			name: e,
+			className: "mt-0.5 size-6 text-muted-foreground"
+		}), /* @__PURE__ */ w("div", {
+			className: "min-w-0 flex-1",
+			children: [
+				/* @__PURE__ */ C("div", {
+					className: "font-medium",
+					children: t
+				}),
+				/* @__PURE__ */ C("div", {
+					className: "text-muted-foreground",
+					children: n
+				}),
+				r
+			]
+		})]
+	}, t);
+}
+function De(t) {
+	let n = e(23), { m: i, keepAsked: a, open: o, setOpen: c, done: l } = t, u = a.scope || `user:${i.me}`, [h, g] = r(a.app || null), [_, v] = r(""), y;
+	n[0] === _ ? y = n[1] : (y = (e, t) => /* @__PURE__ */ w("div", {
+		className: "flex flex-col gap-4 overflow-y-auto p-4",
+		children: [
+			e.length ? /* @__PURE__ */ C(d, { children: e }) : /* @__PURE__ */ C(s, {
+				className: "py-6",
+				children: "None yet"
+			}),
+			/* @__PURE__ */ C(G, { children: t }),
+			_ && /* @__PURE__ */ C(p, { title: _ })
+		]
+	}), n[0] = _, n[1] = y);
+	let b = y, x;
+	n[2] !== h || n[3] !== l || n[4] !== u ? (x = async function(e) {
+		v("");
+		try {
+			await T("POST", "/v1/grant", {
+				device: e.key,
+				app: h,
+				scope: u
+			}), l();
+		} catch (e) {
+			v(E(e));
+		}
+	}, n[2] = h, n[3] = l, n[4] = u, n[5] = x) : x = n[5];
+	let S = x, D;
+	n[6] !== h || n[7] !== i ? (D = h ? `Keep ${i.appTitle(h)} Running` : "Keep an App Running", n[6] = h, n[7] = i, n[8] = D) : D = n[8];
+	let O;
+	n[9] === c ? O = n[10] : (O = /* @__PURE__ */ C(ve, { setOpen: c }), n[9] = c, n[10] = O);
+	let k;
+	n[11] !== h || n[12] !== S || n[13] !== i || n[14] !== b || n[15] !== u ? (k = h ? b(i.keepers(u).map((e) => /* @__PURE__ */ C(f, {
+		title: i.deviceName(e),
+		onClick: () => S(e)
+	}, e.key)), "It runs on the device you choose, while that device is on.") : b(i.scheduled(u).map((e) => /* @__PURE__ */ C(f, {
+		title: e.title || e.name,
+		onClick: () => g(e.name)
+	}, e.name)), "Apps that run on their own, every so often."), n[11] = h, n[12] = S, n[13] = i, n[14] = b, n[15] = u, n[16] = k) : k = n[16];
+	let A;
+	return n[17] !== o || n[18] !== c || n[19] !== D || n[20] !== O || n[21] !== k ? (A = /* @__PURE__ */ C(m, {
+		open: o,
+		onOpenChange: c,
+		title: D,
+		action: O,
+		children: k
+	}), n[17] = o, n[18] = c, n[19] = D, n[20] = O, n[21] = k, n[22] = A) : A = n[22], A;
+}
+i(document.getElementById("root")).render(/* @__PURE__ */ C(W, {}));
+</script>
