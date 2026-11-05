@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "home",
+  "description": "The home page alone may ask the shell's own commands and hear its state. Screens (screen-*) match no capability, so they reach no command, event or plugin.",
+  "windows": ["home"],
+  "permissions": ["core:event:allow-listen", "core:event:allow-unlisten", "allow-state", "allow-open", "allow-sign-out"]
+}

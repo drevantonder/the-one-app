@@ -1,0 +1,49 @@
+# A spike (branch tauri-spike, never main): The One App's client shell as a Tauri 2 app, on the client (`one-client`)
+# itself, with no FFI. Its own workspace, so the repo's `cargo build` and `cargo test` never build Tauri.
+[package]
+name = "one-tauri"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[lib]
+name = "one_tauri"
+# A static library for the iPhone's Xcode project, a cdylib for Android's, an rlib for the desktop program.
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[workspace]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# The shell: system web views (WebKitGTK, WKWebView, WebView2) with windows, menus and a tray, the same on iPhone and
+# Android. Its plugins: native dialogs, the clipboard, notifications, opening links outside.
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
+tauri-plugin-dialog = "2"
+tauri-plugin-clipboard-manager = "2"
+tauri-plugin-notification = "2"
+tauri-plugin-opener = "2"
+one-client = { path = "../client" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Sign-in's requests, as the client's own.
+ureq = { version = "3", features = ["json"] }
+sha2 = "0.10"
+data-encoding = "2"
+rand = "0.8"
+url = "2"
+tokio = { version = "1", features = ["sync", "time"] }
+# The OS's secret store for the device key and the refresh token: the Secret Service, the Keychain (macOS and iPhone),
+# the Credential Manager.
+keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"] }
+
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.release]
+strip = true

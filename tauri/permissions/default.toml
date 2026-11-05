@@ -1,0 +1,11 @@
+[[permission]]
+identifier = "allow-state"
+commands.allow = ["state"]
+
+[[permission]]
+identifier = "allow-open"
+commands.allow = ["open"]
+
+[[permission]]
+identifier = "allow-sign-out"
+commands.allow = ["sign_out"]

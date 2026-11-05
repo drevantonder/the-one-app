@@ -49,14 +49,16 @@ fn download(url: &str) -> Result<Option<Object>> {
 
 impl Bucket for Signed {
     async fn get(&self, name: &str) -> Result<Option<Object>> {
-        let mut ahead = self.ahead.lock().unwrap();
-        if let Some(found) = ahead.remove(name) {
-            if found.is_none() {
-                ahead.clear();
+        // Held in a block of its own, not to the end with drop(): so the future is Send, for a caller that spawns it.
+        {
+            let mut ahead = self.ahead.lock().unwrap();
+            if let Some(found) = ahead.remove(name) {
+                if found.is_none() {
+                    ahead.clear();
+                }
+                return Ok(found);
             }
-            return Ok(found);
         }
-        drop(ahead);
         let (address, secret, asked) = (self.address.clone(), self.secret, name.to_string());
         let (found, next) = tokio::task::spawn_blocking(move || -> Result<_> {
             let name = &asked;

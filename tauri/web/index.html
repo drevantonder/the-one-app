@@ -1,0 +1,36 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>The One App</title>
+<style>
+  body { font: 15px system-ui, sans-serif; margin: 0; padding: 24px; padding-top: max(24px, env(safe-area-inset-top)); }
+  h1 { font-size: 22px; font-weight: 600; margin: 0 0 16px; }
+  .grey { color: GrayText; }
+  .code { font: 600 28px ui-monospace, monospace; letter-spacing: 0.1em; margin: 12px 0; }
+  ul { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 16px; }
+  button { all: unset; display: grid; justify-items: center; gap: 6px; cursor: default; text-align: center; font-size: 13px; }
+  .tile { width: 56px; height: 56px; border-radius: 13px; display: grid; place-items: center; color: #fff; font-weight: 600; font-size: 24px; }
+</style>
+<h1>The One App</h1>
+<main id="main"><p class="grey">Starting…</p></main>
+<script>
+  const { invoke } = window.__TAURI__.core;
+  const { listen } = window.__TAURI__.event;
+  const colors = ["#5e5ce6", "#ff9f0a", "#30b0c7", "#ff375f", "#34c759", "#af52de", "#0a84ff", "#a2845e"];
+  const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+  const color = (s) => colors[[...s].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 0) % colors.length];
+  function show(s) {
+    const main = document.getElementById("main");
+    if (s.phase === "starting") main.innerHTML = `<p class="grey">Starting…</p>`;
+    if (s.phase === "signing-in") main.innerHTML = `<p class="grey">Sign in, in the window that opened.</p>`;
+    if (s.phase === "approve") main.innerHTML = `<p>On one of your devices, open Settings › Devices › Approve, and type this code:</p><p class="code">${esc(s.code)}</p>`;
+    if (s.phase === "failed") main.innerHTML = `<p><b>Can’t start.</b> ${esc(s.error)}</p>`;
+    if (s.phase === "ready") {
+      main.innerHTML = `<ul>${s.apps.map((a) => `<li><button data-app="${esc(a.name)}"><span class="tile" style="background:${a.color || color(a.name)}">${esc((a.title || a.name)[0].toUpperCase())}</span>${esc(a.title || a.name)}</button></li>`).join("")}</ul><p class="grey">Ready in ${s.readyMs} ms.</p>`;
+      main.querySelectorAll("button").forEach((b) => (b.onclick = () => invoke("open", { app: b.dataset.app }).catch((e) => alert(e))));
+    }
+  }
+  listen("one-state", (e) => show(e.payload));
+  invoke("state").then(show);
+</script>
