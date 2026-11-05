@@ -943,22 +943,15 @@ pub struct Frozen {
     pub hash: String,
 }
 
-/// The freeze `global`'s entries hold, if one counts: `entries` every one of `global`'s, in replay order (scope-only
-/// ones too, since what a freeze follows may be reached through them), `forks` as `Store::forks` found them.
+/// The freeze `global`'s entries hold, if one counts: `entries` every one of `global`'s it has, in replay order (only
+/// its member entries will do), `forks` as `Store::forks` found them. A freeze says the log's final position as the
+/// last of each device's entries its admin's device held (`frontier`): only those count, wherever they sort.
 pub fn frozen(root: Option<Hash>, entries: &[Entry], forks: &Cuts) -> Option<Frozen> {
     let freezes = entries.iter().filter(|e| e.content.app == APP && e.content.kind == "freeze" && e.log() == "global");
-    let by_hash: BTreeMap<Hash, &Entry> = entries.iter().map(|e| (e.hash(), e)).collect();
     for f in freezes {
-        let mut follows = BTreeSet::new();
-        let mut next: Vec<Hash> = f.follows_all().collect();
-        while let Some(h) = next.pop() {
-            if follows.insert(h)
-                && let Some(e) = by_hash.get(&h)
-            {
-                next.extend(e.follows_all());
-            }
-        }
-        let before: Vec<Entry> = entries.iter().filter(|e| follows.contains(&e.hash())).cloned().collect();
+        let Some(frontier) = f.content.data["frontier"].as_object() else { continue };
+        let last = |e: &Entry| frontier.get(&hex(&e.author())).and_then(Value::as_u64);
+        let before: Vec<Entry> = entries.iter().filter(|e| e.hash() != f.hash() && last(e).is_some_and(|n| u64::from(e.seq()) <= n)).cloned().collect();
         let member_entries: Vec<Entry> = before.iter().filter(|e| is_member_entry(e)).cloned().collect();
         let known = Members::replay(root, &member_entries, forks);
         let (members, state) = replay(&known, &member_entries, &before, |_, _, _| {});
@@ -968,10 +961,11 @@ pub fn frozen(root: Option<Hash>, entries: &[Entry], forks: &Cuts) -> Option<Fro
     None
 }
 
-/// The entry that freezes `global`'s log, once the scope database built from everything its admin's device holds comes
-/// to `hash` (`frozen`).
-pub fn freeze(hash: &str) -> Content {
-    node("freeze", json!({ "hash": hash }))
+/// The entry that freezes `global`'s log at `frontier` (the last seq of each device's entries there, by key), once the
+/// scope database built from those comes to `hash` (`frozen`).
+pub fn freeze(hash: &str, frontier: &BTreeMap<Key, u32>) -> Content {
+    let frontier: serde_json::Map<String, Value> = frontier.iter().map(|(k, n)| (hex(k), json!(n))).collect();
+    node("freeze", json!({ "hash": hash, "frontier": frontier }))
 }
 
 /// The `hash` an `epoch` entry (or `epoch`, the genesis) names its key by: `keys::epoch_hash`, 64 hex characters.

@@ -20,14 +20,14 @@ impl Node {
         }
         let Ok(user) = self.user() else { return Ok(false) };
         self.read_log(&Scope::Global).await?;
-        let hash = self.with(|i| {
+        let anchor = self.with(|i| {
             let db = i.r.db();
             let open = switch::gate(db, &i.reads).open();
             let signs = db.client(&self.0.id).is_some_and(|c| c.user == user) && db.may(&user, "change-settings", scopes::INSTALL);
-            Ok((open && signs).then(|| i.r.anchor_hash(now_ms())).transpose()?)
+            Ok((open && signs).then(|| i.r.anchor(now_ms())).transpose()?)
         })?;
-        let Some(hash) = hash else { return Ok(false) };
-        self.append(&Scope::Global, members::freeze(&hash)).await?;
+        let Some((hash, frontier)) = anchor else { return Ok(false) };
+        self.append(&Scope::Global, members::freeze(&hash, &frontier)).await?;
         Ok(self.frozen())
     }
 

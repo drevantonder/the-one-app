@@ -655,13 +655,26 @@ impl Node {
             }
             Ok((entries, Value::Object(depths)))
         })?;
-        let hello = json!({ "entries": entries.len() });
+        // Once `global`'s log is frozen, its scope database's steps too (`database::steps`).
+        let steps = match self.frozen() {
+            true => crate::database::steps::read(&self.bucket()?, &self.log_key(&Scope::Global).await?, &Scope::Global, 0).await?,
+            false => Vec::new(),
+        };
+        let hello = json!({ "entries": entries.len(), "steps": steps.len() });
         let mut answer = self.send(&to, "hello", &hello, true, CONNECT).await?;
         if answer["behind"] == true {
             let pack = data_encoding::BASE64.encode(&crate::entry::pack(&entries.iter().collect::<Vec<_>>()));
             let taken = self.send(&to, "entries", &json!({ "pack": pack, "depths": depths }), true, CONNECT).await?;
             if let Some(err) = taken["error"].as_str() {
                 bail!("{} didn't take the install's entries: {err}", short(&to));
+            }
+            answer = self.send(&to, "hello", &hello, true, CONNECT).await?;
+        }
+        if answer["behind"] == true && !steps.is_empty() {
+            let list: Vec<Value> = steps.iter().enumerate().map(|(i, s)| json!({ "at": i + 1, "step": s.as_ref().map(|s| data_encoding::BASE64URL_NOPAD.encode(&crate::database::steps::encode(s))) })).collect();
+            let taken = self.send(&to, "steps", &json!({ "steps": list }), true, CONNECT).await?;
+            if let Some(err) = taken["error"].as_str() {
+                bail!("{} didn't take the scope database's steps: {err}", short(&to));
             }
             answer = self.send(&to, "hello", &hello, true, CONNECT).await?;
         }

@@ -71,6 +71,46 @@ pub fn decode(scope: &Scope, at: u64, bytes: &[u8]) -> Result<Entry> {
     Ok(step)
 }
 
+/// `global`'s scope database as a reader that holds no copy of its own makes it, at `now`: the one the log's freeze
+/// anchors, built from the entries it follows (refused if that isn't what the freeze says it comes to), then each of
+/// `steps`, by position from the first, applied if it counts there (none: one that isn't a step, passed over).
+pub fn truth(frozen: &members::Frozen, steps: &[Option<Entry>], now: u64) -> Result<ScopeDb> {
+    let mut db = ScopeDb::build(&frozen.members, &Scope::Global, &frozen.state, now)?;
+    ensure!(crate::db::state_hash(db.conn())? == frozen.hash, "who's who at your One App's freeze isn't what its admin's device said it was: this device used none of it");
+    for step in steps.iter().flatten() {
+        if let Ok(a) = apply(&db, None, &Scope::Global, step) {
+            db = ScopeDb::open(a.db, now)?;
+        }
+    }
+    Ok(db)
+}
+
+/// A step as a node gives it (`GET /v1/steps/global`'s `{ at, step }`, or as a bucket holds it opened), for position
+/// `at` of `scope`'s database: none if it isn't one, which every reader passes over.
+pub fn given(scope: &Scope, at: u64, opened: Option<&[u8]>) -> Option<Entry> {
+    opened.and_then(|b| decode(scope, at, b).ok())
+}
+
+/// Reads `scope`'s steps after `from` from the bucket, opened with the keys of its log by epoch: each by position,
+/// none for one that isn't a step or doesn't open. Stops at the first position with nothing, or one under an epoch
+/// above every key given, which waits for that epoch's key.
+pub async fn read(bucket: &impl crate::bucket::Bucket, keys: &crate::db::Keys, scope: &Scope, from: u64) -> Result<Vec<Option<Entry>>> {
+    let prefix = prefix(&scope.to_string());
+    let mut out = Vec::new();
+    loop {
+        let at = from + out.len() as u64 + 1;
+        let name = crate::db::step_name(&prefix, at);
+        let Some(o) = bucket.get(&name).await? else { break };
+        let epoch = crate::keys::epoch_of(&o.bytes).ok();
+        if epoch.is_some_and(|e| keys.keys().next_back().is_some_and(|newest| e > *newest)) {
+            break;
+        }
+        let opened = epoch.and_then(|e| keys.get(&e)).and_then(|k| crate::keys::open(k, &name, &o.bytes).ok());
+        out.push(given(scope, at, opened.as_deref()));
+    }
+    Ok(out)
+}
+
 /// What a step that counts made of the database it was applied to: the database it leaves.
 pub struct Applied {
     pub db: Connection,

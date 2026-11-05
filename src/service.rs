@@ -83,6 +83,9 @@ struct Inner {
     install: Install,
     /// `global`'s entries, as the nodes brought them, and what its member entries add up to.
     known: Mutex<(Vec<Entry>, ScopeDb)>,
+    /// Once `global`'s log is frozen, its scope database's steps nodes brought, by position from the first
+    /// (`database::steps`), kept in its folder as `steps`.
+    steps: Mutex<Vec<Option<Entry>>>,
     /// The depths in `global`'s replay order of the entries its member entries follow that nodes didn't bring: a service
     /// is brought only member entries, and orders them as the nodes do with these.
     depths: Mutex<HashMap<Hash, u64>>,
@@ -141,13 +144,15 @@ impl Service {
         let install_address = install.address.clone();
         let entries = std::fs::read(dir.join("entries")).ok().and_then(|b| crate::entry::unpack(&b).ok()).unwrap_or_default();
         let depths: HashMap<Hash, u64> = std::fs::read(dir.join("depths")).ok().and_then(|b| serde_json::from_slice::<HashMap<String, u64>>(&b).ok()).map(|m| m.into_iter().filter_map(|(h, d)| Some((Hash::from_hex(&h).ok()?, d))).collect()).unwrap_or_default();
-        let (entries, members) = placed(root, entries, &depths);
+        let steps = read_steps(&dir.join("steps"));
+        let (entries, members) = placed(root, entries, &depths, &steps);
         Ok(Service(Arc::new(Inner {
             name: name.to_string(),
             dir: dir.to_path_buf(),
             key,
             install,
             known: Mutex::new((entries, members)),
+            steps: Mutex::new(steps),
             depths: Mutex::new(depths),
             services: Services::default(),
             token,
@@ -310,7 +315,11 @@ impl Service {
     async fn answer(&self, remote: Key, msg: &Value) -> Value {
         let body = &msg["body"];
         match msg["kind"].as_str() {
-            Some("hello") => self.hello(remote, body["entries"].as_u64().unwrap_or(0) as usize),
+            Some("hello") => self.hello(remote, body["entries"].as_u64().unwrap_or(0) as usize, body["steps"].as_u64().unwrap_or(0) as usize),
+            Some("steps") => match self.take_steps(&remote, &body["steps"]) {
+                Ok(()) => json!({ "ok": true }),
+                Err(err) => json!({ "error": format!("{err:#}") }),
+            },
             Some("entries") => match self.take_entries(&remote, body["pack"].as_str().unwrap_or(""), &body["depths"]) {
                 Ok(()) => json!({ "ok": true }),
                 Err(err) => json!({ "error": format!("{err:#}") }),
@@ -322,12 +331,12 @@ impl Service {
 
     /// A node's hello, with how many of `global`'s entries it has: → what this service offers and whom it
     /// serves, to a node of the install that may call it; that it's behind, if the node has more entries than it.
-    fn hello(&self, remote: Key, entries: usize) -> Value {
+    fn hello(&self, remote: Key, entries: usize, steps: usize) -> Value {
         let (count, may) = {
             let known = self.0.known.lock().unwrap();
             (known.0.len(), known.1.compute(&remote).is_some() && known.1.service(&self.key()).is_some())
         };
-        if entries > count {
+        if entries > count || steps > self.0.steps.lock().unwrap().len() {
             return json!({ "behind": true });
         }
         if !may {
@@ -361,10 +370,11 @@ impl Service {
             }
         }
         let more_depths = grown.len() > depths_known.len();
-        let (entries, members) = match merged(root, &known.0, given, &grown) {
+        let steps = self.0.steps.lock().unwrap().clone();
+        let (entries, members) = match merged(root, &known.0, given, &grown, &steps) {
             Some(merged) => merged,
             // Only more depths: what was known may order better with them.
-            None if more_depths => placed(root, known.0.clone(), &grown),
+            None if more_depths => placed(root, known.0.clone(), &grown, &steps),
             None => return Ok(()),
         };
         ensure!(!members.users().is_empty(), "those aren't your One App's entries");
@@ -373,6 +383,28 @@ impl Service {
         write_private(&self.0.dir.join("depths"), &serde_json::to_vec(&text)?)?;
         *known = (entries, members);
         *depths_known = grown;
+        Ok(())
+    }
+
+    /// Takes `global`'s scope database's steps a node of the install brought (`{ at, step }` each, as
+    /// `GET /v1/steps/global` gives them): those after the ones it has, each checked as from anyone, then who's who
+    /// from them, once its log is frozen.
+    fn take_steps(&self, remote: &Key, given: &Value) -> Result<()> {
+        let root = Hash::from_hex(&self.0.install.root)?;
+        let mut known = self.0.known.lock().unwrap();
+        ensure!(known.1.compute(remote).is_some(), "only your One App's devices bring its steps");
+        let mut steps = self.0.steps.lock().unwrap();
+        for s in given.as_array().into_iter().flatten() {
+            let at = s["at"].as_u64().unwrap_or(0);
+            if at == steps.len() as u64 + 1 {
+                let bytes = s["step"].as_str().and_then(|b| data_encoding::BASE64URL_NOPAD.decode(b.as_bytes()).ok());
+                steps.push(crate::database::steps::given(&crate::entry::Scope::Global, at, bytes.as_deref()));
+            }
+        }
+        let kept: Vec<Value> = steps.iter().enumerate().map(|(i, s)| json!({ "at": i + 1, "step": s.as_ref().map(|s| data_encoding::BASE64URL_NOPAD.encode(&crate::database::steps::encode(s))) })).collect();
+        write_private(&self.0.dir.join("steps"), &serde_json::to_vec(&kept)?)?;
+        let depths = self.0.depths.lock().unwrap().clone();
+        *known = placed(root, known.0.clone(), &depths, &steps);
         Ok(())
     }
 
@@ -537,7 +569,7 @@ pub fn limited(name: &str, call: &Value) -> Result<Value> {
 /// `known` with `given`'s member entries added, if any are new: → them, replayed from the install's first entry, with
 /// those signed by no endpoint it ever listed passed over (junk anyone could sign counts for nothing, and isn't kept).
 /// `depths` are those of the entries they follow that nodes don't bring.
-fn merged(root: Hash, known: &[Entry], given: Vec<Entry>, depths: &HashMap<Hash, u64>) -> Option<(Vec<Entry>, ScopeDb)> {
+fn merged(root: Hash, known: &[Entry], given: Vec<Entry>, depths: &HashMap<Hash, u64>, steps: &[Option<Entry>]) -> Option<(Vec<Entry>, ScopeDb)> {
     let mut all: HashMap<String, Entry> = known.iter().map(|e| (e.hash().to_hex(), e.clone())).collect();
     let before = all.len();
     for e in given.into_iter().filter(members::is_member_entry) {
@@ -546,16 +578,21 @@ fn merged(root: Hash, known: &[Entry], given: Vec<Entry>, depths: &HashMap<Hash,
     if all.len() == before {
         return None;
     }
-    Some(placed(root, all.into_values().collect(), depths))
+    Some(placed(root, all.into_values().collect(), depths, steps))
 }
 
 /// `entries` in the nodes' replay order, those that can be placed in it and are signed by an endpoint the install
 /// listed, and the scope database they add up to.
-fn placed(root: Hash, entries: Vec<Entry>, depths: &HashMap<Hash, u64>) -> (Vec<Entry>, ScopeDb) {
+fn placed(root: Hash, entries: Vec<Entry>, depths: &HashMap<Hash, u64>, steps: &[Option<Entry>]) -> (Vec<Entry>, ScopeDb) {
     let ordered = crate::entry::causal(entries, depths);
     let member_entries: Vec<Entry> = ordered.iter().filter(|e| members::is_member_entry(e)).cloned().collect();
     let members = Members::replay(Some(root), &member_entries, &Default::default());
-    let db = ScopeDb::build(&members, &crate::entry::Scope::Global, &Default::default(), now_ms()).unwrap_or_else(|err| {
+    // Once the log is frozen, who's who is the scope database its freeze anchors, and the steps after.
+    let built = match members::frozen(Some(root), &ordered, &Default::default()) {
+        Some(f) => crate::database::steps::truth(&f, steps, now_ms()),
+        None => ScopeDb::build(&members, &crate::entry::Scope::Global, &Default::default(), now_ms()),
+    };
+    let db = built.unwrap_or_else(|err| {
         tracing::warn!("building the scope database: {err:#}");
         ScopeDb::build(&Members::default(), &crate::entry::Scope::Global, &Default::default(), 0).expect("an empty scope database builds")
     });
@@ -753,4 +790,13 @@ fn end(child: &mut std::process::Child) {
     }
     let _ = child.kill();
     let _ = child.wait();
+}
+
+/// The steps a service kept (`take_steps`).
+fn read_steps(path: &Path) -> Vec<Option<Entry>> {
+    let kept: Vec<Value> = std::fs::read(path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+    kept.iter()
+        .enumerate()
+        .map(|(i, s)| crate::database::steps::given(&crate::entry::Scope::Global, i as u64 + 1, s["step"].as_str().and_then(|b| data_encoding::BASE64URL_NOPAD.decode(b.as_bytes()).ok()).as_deref()))
+        .collect()
 }

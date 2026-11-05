@@ -96,9 +96,16 @@ impl Replica {
 
     /// The state hash of the scope database a freeze written now would anchor (`members::frozen`): built from
     /// everything this device holds of `global`, its own state too.
-    pub fn anchor_hash(&self, now: u64) -> Result<String> {
-        let (members, state) = members::replay(&self.members, &self.member_entries, &self.store.scope("global")?, |_, _, _| {});
-        crate::db::state_hash(ScopeDb::build(&members, &Scope::Global, &state, now)?.conn())
+    /// → it, and the last of each device's entries it holds there, which the freeze names (`members::freeze`).
+    pub fn anchor(&self, now: u64) -> Result<(String, BTreeMap<Key, u32>)> {
+        let all = self.store.scope("global")?;
+        let (members, state) = members::replay(&self.members, &self.member_entries, &all, |_, _, _| {});
+        let mut frontier = BTreeMap::new();
+        for e in &all {
+            let n = frontier.entry(e.author()).or_insert(0);
+            *n = (*n).max(e.seq());
+        }
+        Ok((crate::db::state_hash(ScopeDb::build(&members, &Scope::Global, &state, now)?.conn())?, frontier))
     }
 
     /// The position of `global`'s scope database this device has applied its steps to, once its log is frozen.

@@ -160,9 +160,15 @@ impl Node {
                 }
             }
             let read = crate::log::open(&bucket, &log_keys, &prefix, "global").await?;
-            let member_entries: Vec<Entry> = crate::entry::causal(read.entries.clone(), &HashMap::new()).into_iter().filter(members::is_member_entry).collect();
+            let ordered = crate::entry::causal(read.entries.clone(), &HashMap::new());
+            let member_entries: Vec<Entry> = ordered.iter().filter(|e| members::is_member_entry(e)).cloned().collect();
             let m = crate::members::Members::replay(root, &member_entries, &Default::default());
-            let wrong: Vec<u32> = candidates.iter().filter(|(n, k)| m.epoch_hash(&Scope::Global, **n) != Some(crate::keys::epoch_hash(k).as_str())).map(|(n, _)| *n).collect();
+            // Once the log is frozen, the epochs its scope database's steps made since (`database::steps`).
+            let hashes = match crate::members::frozen(root, &ordered, &Default::default()) {
+                Some(f) => crate::database::steps::truth(&f, &crate::database::steps::read(&bucket, &log_keys, &Scope::Global, 0).await?, now_ms())?.epoch_hashes(&Scope::Global),
+                None => m.epoch_hashes.iter().filter(|((s, _), _)| *s == Scope::Global).map(|((_, n), h)| (*n, h.clone())).collect(),
+            };
+            let wrong: Vec<u32> = candidates.iter().filter(|(n, k)| hashes.get(*n) != Some(&crate::keys::epoch_hash(k))).map(|(n, _)| *n).collect();
             if wrong.is_empty() {
                 self.0.epochs.lock().unwrap().insert(Scope::Global, candidates.clone());
                 return Ok((candidates, read));

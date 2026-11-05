@@ -182,7 +182,15 @@ struct View {
 
 /// `global`'s scope database, from its entries.
 fn built(entries: &Global) -> Result<ScopeDb> {
-    ScopeDb::build(&entries.members()?, &Scope::Global, &Default::default(), now() as u64)
+    entries.who()
+}
+
+/// Once `global`'s log is frozen, its scope database's steps after those `entries` hold, with the log's keys.
+async fn steps(bucket: &crate::Js, keys: &one::db::Keys, entries: &mut Global) -> Result<()> {
+    if entries.frozen()?.is_some() {
+        entries.add_read(one::database::steps::read(bucket, keys, &Scope::Global, entries.at()).await?);
+    }
+    Ok(())
 }
 
 impl View {
@@ -209,6 +217,7 @@ impl View {
             let read = one::log::open(bucket, &log_keys, &one::log::prefix("global"), "global").await?;
             let mut entries = Global::new(None);
             entries.add_entries(read.entries)?;
+            steps(bucket, &log_keys, &mut entries).await?;
             let db = built(&entries)?;
             let wrong: Vec<u32> = candidates.iter().filter(|(n, k)| db.epoch_hash(&Scope::Global, **n) != Some(one::keys::epoch_hash(k))).map(|(n, _)| *n).collect();
             if wrong.is_empty() {
@@ -227,8 +236,12 @@ impl View {
             return Ok(false);
         }
         (self.at, self.floor) = (read.at, read.floor);
-        if !read.entries.is_empty() {
+        let (had, new) = (self.entries.at(), !read.entries.is_empty());
+        if new {
             self.entries.add_entries(read.entries)?;
+        }
+        steps(bucket, &self.global, &mut self.entries).await?;
+        if new || had != self.entries.at() {
             self.db = built(&self.entries)?;
         }
         Ok(true)

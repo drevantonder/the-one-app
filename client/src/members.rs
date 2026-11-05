@@ -46,9 +46,14 @@ impl Global {
                 continue;
             }
             let bytes = s["step"].as_str().and_then(|b| data_encoding::BASE64URL_NOPAD.decode(b.as_bytes()).ok());
-            self.steps.push(bytes.and_then(|b| one::database::steps::decode(&Scope::Global, at, &b).ok()));
+            self.steps.push(one::database::steps::given(&Scope::Global, at, bytes.as_deref()));
         }
         Ok(())
+    }
+
+    /// Adds steps read from the bucket (`steps::read`), the next after those held.
+    pub fn add_read(&mut self, read: Vec<Option<Entry>>) {
+        self.steps.extend(read);
     }
 
     /// The steps held, as `add_steps` takes them: to keep.
@@ -66,16 +71,10 @@ impl Global {
     /// follows, and refused if that isn't what the freeze says), and the steps after, each applied only if it counts
     /// there; before, built from replay's members.
     pub fn who(&self) -> Result<ScopeDb> {
-        let Some(frozen) = self.frozen()? else { return who(&self.members()?) };
-        let now = now();
-        let mut db = ScopeDb::build(&frozen.members, &Scope::Global, &frozen.state, now)?;
-        ensure!(one::db::state_hash(db.conn())? == frozen.hash, "who's who at your One App's freeze isn't what its admin's device said: this device used none of it");
-        for step in self.steps.iter().flatten() {
-            if let Ok(a) = one::database::steps::apply(&db, None, &Scope::Global, step) {
-                db = ScopeDb::open(a.db, now)?;
-            }
+        match self.frozen()? {
+            Some(frozen) => one::database::steps::truth(&frozen, &self.steps, now()),
+            None => who(&self.members()?),
         }
-        Ok(db)
     }
 
     /// The log's freeze, if one counts among the entries held (`members::frozen`).

@@ -395,15 +395,7 @@ impl Device {
         global.add_entries(read.entries).map_err(|_| failed("This isn't the One App this device joined."))?;
         // Once the log is frozen, its scope database's steps too, opened with the same keys (`one::database::steps`).
         if global.frozen().map_err(failed)?.is_some() {
-            let prefix = one::database::steps::prefix("global");
-            let mut list = Vec::new();
-            for n in 1.. {
-                let name = one::db::step_name(&prefix, n);
-                let Some(o) = one::bucket::Bucket::get(&bucket, &name).await.map_err(failed)? else { break };
-                let opened = keys::epoch_of(&o.bytes).ok().and_then(|e| log_keys.get(&e)).and_then(|k| keys::open(k, &name, &o.bytes).ok());
-                list.push(json!({ "at": n, "step": opened.map(|b| data_encoding::BASE64URL_NOPAD.encode(&b)) }));
-            }
-            global.add_steps(&json!({ "steps": list })).map_err(failed)?;
+            global.add_read(one::database::steps::read(&bucket, &log_keys, &Scope::Global, 0).await.map_err(failed)?);
         }
         let who = global.who().map_err(failed)?;
         if kept.is_none()
