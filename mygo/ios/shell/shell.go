@@ -30,3 +30,28 @@ func Menu(items []bridge.MenuItem) (int, error) {
 	}
 	return *out.Index, nil
 }
+
+// Group leaves text in the App Group the app shares with its extensions → the group's folder.
+func Group(group, text string) (string, error) {
+	var out struct {
+		Path string `json:"path"`
+	}
+	err := native.Call(context.Background(), "group", map[string]any{"group": group, "text": text}, &out)
+	return out.Path, err
+}
+
+// Notify asks to show notifications, and registers for pushes.
+func Notify() (bool, error) {
+	var out struct {
+		Granted bool `json:"granted"`
+	}
+	err := native.Call(context.Background(), "notify", nil, &out)
+	return out.Granted, err
+}
+
+// Passkey asks the system for a passkey assertion for rp (the install's sign-in domain) over challenge (base64).
+func Passkey(rp, challenge string) (map[string]string, error) {
+	var out map[string]string
+	err := native.Call(context.Background(), "passkey", map[string]any{"rp": rp, "challenge": challenge}, &out)
+	return out, err
+}

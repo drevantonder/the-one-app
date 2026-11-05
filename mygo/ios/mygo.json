@@ -3,8 +3,13 @@
   "displayName": "One (MyGo)",
   "identifier": "app.one.mygo",
   "version": "0.0.1",
-  "urlSchemes": ["one"],
+  "urlSchemes": [
+    "one"
+  ],
   "ios": {
     "minimumSystemVersion": "17.0"
-  }
+  },
+  "resources": [
+    "build/PlugIns"
+  ]
 }

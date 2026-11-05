@@ -85,6 +85,11 @@ func say(text string) {
 }
 
 func start() error {
+	// Spike: a passkey assertion from the plugin, before anything else, for the domain ONE_PASSKEY names.
+	if rp := os.Getenv("ONE_PASSKEY"); rp != "" {
+		got, err := shell.Passkey(rp, "c3Bpa2UtY2hhbGxlbmdlLTMyLWJ5dGVzLWxvbmctZW5vdWdo")
+		log.Printf("one: passkey %v %v", got, err)
+	}
 	auth := &signin.Auth{Address: strings.TrimRight(env("ONE_ADDRESS", "http://127.0.0.1:43181"), "/"), Name: "iPhone (MyGo)", Store: keychain{}}
 	secret, err := secrets.Get("device")
 	if errors.Is(err, mygo.ErrSecretNotFound) {
@@ -147,6 +152,14 @@ func start() error {
 		}
 	}
 	log.Printf("one: let in")
+	// For the notification extension: the App Group it reads, and the device's public keys (its join: key and seal
+	// key, which a note is sealed to) for the spike to seal one.
+	path, err := shell.Group("group.app.one.mygo", "left by the app at "+time.Now().Format(time.RFC3339))
+	log.Printf("one: app group %s %v", path, err)
+	granted, err := shell.Notify()
+	log.Printf("one: notifications %v %v", granted, err)
+	join, _ := client.DeviceJoin(secret)
+	log.Printf("one: join %s", join)
 	app, name, _ := strings.Cut(env("ONE_SCREEN", "device-activity/main"), "/")
 	return show(bridge.Route{App: app, Screen: name, Params: "{}"})
 }
@@ -241,9 +254,11 @@ func (i *iphone) Title(text, name string) { i.s.win.SetTitle(text) }
 func (i *iphone) Open(to bridge.Route, sheet bool) (json.RawMessage, error) {
 	return nil, errors.New("open isn't in this spike")
 }
-func (i *iphone) Close(value json.RawMessage)            {}
-func (i *iphone) Notify() (string, error)                { return "default", nil }
-func (i *iphone) Save(name string, data []byte) error    { return errors.New("save isn't in this spike") }
-func (i *iphone) Preview(name string, data []byte) error { return errors.New("preview isn't in this spike") }
-func (i *iphone) SignOut() error                         { return errors.New("sign out isn't in this spike") }
-func (i *iphone) Device() string                         { return "iPhone" }
+func (i *iphone) Close(value json.RawMessage)         {}
+func (i *iphone) Notify() (string, error)             { return "default", nil }
+func (i *iphone) Save(name string, data []byte) error { return errors.New("save isn't in this spike") }
+func (i *iphone) Preview(name string, data []byte) error {
+	return errors.New("preview isn't in this spike")
+}
+func (i *iphone) SignOut() error { return errors.New("sign out isn't in this spike") }
+func (i *iphone) Device() string { return "iPhone" }

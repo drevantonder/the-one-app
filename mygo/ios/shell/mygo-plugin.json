@@ -8,12 +8,25 @@
       "class": "OneShellPlugin",
       "frameworks": [
         "AuthenticationServices",
-        "SystemConfiguration"
+        "SystemConfiguration",
+        "UserNotifications"
       ],
       "entitlements": {
         "application-identifier": "T3SPIKE000.app.one.mygo",
         "keychain-access-groups": [
           "T3SPIKE000.app.one.mygo"
+        ],
+        "com.apple.security.application-groups": [
+          "group.app.one.mygo"
+        ],
+        "aps-environment": "development",
+        "com.apple.developer.associated-domains": [
+          "webcredentials:one.thevantonders.com"
+        ]
+      },
+      "infoPlist": {
+        "UIBackgroundModes": [
+          "remote-notification"
         ]
       }
     }
