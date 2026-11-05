@@ -162,13 +162,12 @@ impl Node {
             let read = crate::log::open(&bucket, &log_keys, &prefix, "global").await?;
             // Once the log is frozen, the epochs its scope database's steps made since (`database::steps`).
             let ordered = crate::entry::causal(read.entries.clone(), &HashMap::new());
-            let made = crate::database::steps::view(root, &ordered, now_ms())?.epoch(&Scope::Global);
             let (mut steps, mut log) = (Vec::new(), None);
             let who = loop {
                 let more = crate::database::steps::read(&bucket, &log_keys, &Scope::Global, steps.len() as u64).await?;
                 steps.extend(more.steps.iter().cloned());
                 log = match crate::database::steps::wants_log(&steps, root, log.as_ref(), now_ms()) {
-                    Some(_) => crate::database::steps::log_for(&bucket, &log_keys, made, &steps, root, now_ms()).await?,
+                    Some(_) => crate::database::steps::log_for(&bucket, &log_keys, &steps, root, now_ms()).await?,
                     None => log,
                 };
                 let who = crate::database::steps::who(&steps, root, &ordered, log.as_ref(), now_ms())?;

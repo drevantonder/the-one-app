@@ -623,10 +623,10 @@ fn steps_of(replayed: ScopeDb, root: Option<crate::entry::Hash>, place: &Place, 
     // `global`'s log as far as its freezes need, from the place's copy of its steps (`steps::log_to`).
     let made = replayed.epoch(&crate::entry::Scope::Global);
     let log_to = |end: u64| -> Result<crate::database::steps::Log> {
-        let mut log = crate::database::steps::Log::default();
+        let mut log = crate::database::steps::Log::new(root);
         for at in 1..=end + 1 {
             match get(&crate::db::step_name(&crate::log::prefix("global"), at))? {
-                Some(sealed) => log.take(&log_keys, made, &sealed)?,
+                Some(sealed) => log.take(&log_keys, &sealed)?,
                 None => {
                     log.ended = true;
                     break;

@@ -120,8 +120,7 @@ impl Global {
         loop {
             let read = steps::read(bucket, keys, &Scope::Global, self.at()).await?;
             while let Some(end) = self.wants_log(&read.steps)? {
-                let made = self.who()?.epoch(&Scope::Global);
-                self.with_log(steps::log_to(bucket, keys, made, end).await?);
+                self.with_log(steps::log_to(bucket, keys, self.root, end).await?);
             }
             self.add_read(read.steps.clone())?;
             if !read.junk_at_end(self.who()?.epoch(&Scope::Global)) {
@@ -157,27 +156,24 @@ impl Global {
             && let Some(to) = log.get("to").and_then(Value::as_u64)
         {
             // Opened with the keys of every epoch the entries made, which its steps are sealed under; or, for a device
-            // welcomed with no entries, every one sealed to it, each checked once who's who is worked out.
-            let (log_keys, made) = match &welcome {
-                Some(_) => {
-                    let keys = welcome_keys(epochs, apps);
-                    let made = keys.keys().next_back().copied().unwrap_or(0);
-                    (keys, made)
-                }
+            // welcomed with no entries, every one sealed to it, each checked once who's who is worked out. Either way, a
+            // step under an epoch the entries before it hadn't made is junk (`steps::Log::take`).
+            let log_keys = match &welcome {
+                Some(_) => welcome_keys(epochs, apps),
                 None => {
                     let who = self.who()?;
                     let mut keys = one::db::Keys::new();
                     for e in who.epoch_hashes(&Scope::Global).into_keys() {
                         key(&mut keys, &who, e);
                     }
-                    (keys, who.epoch(&Scope::Global))
+                    keys
                 }
             };
             let sealed: BTreeMap<u64, &str> = log.get("steps").and_then(Value::as_array).into_iter().flatten().filter_map(|s| Some((s["at"].as_u64()?, s["sealed"].as_str()?))).collect();
-            let mut read = steps::Log::default();
+            let mut read = steps::Log::new(self.root);
             for at in 1..=to + 1 {
                 match sealed.get(&at).and_then(|b| data_encoding::BASE64URL_NOPAD.decode(b.as_bytes()).ok()) {
-                    Some(bytes) => read.take(&log_keys, made, &bytes)?,
+                    Some(bytes) => read.take(&log_keys, &bytes)?,
                     None if at == to + 1 => read.ended = true,
                     None => bail!("global's log's step {at} didn't come"),
                 }

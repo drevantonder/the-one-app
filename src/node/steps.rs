@@ -37,29 +37,29 @@ impl Node {
             return Ok(false);
         }
         let _write = self.own_writes().await?;
-        // `global`'s log as the bucket has it, read before the `FREEZING`, so only what's written since is read after.
+        // `global`'s log as the bucket has it, read before the `FREEZING`, so only what's written since is read after:
+        // read as every reader of the freeze reads it (`steps::Log`), so what it adds up to is what they find.
         let (bucket, keys, prefix) = (self.bucket()?, self.log_key(&Scope::Global).await?, crate::log::prefix("global"));
-        let made = || self.with(|i| Ok(i.r.epoch_made(&Scope::Global)));
-        let before = crate::log::read(&bucket, &keys, made()?, &prefix, "global", 0, 0).await?;
+        let mut log = steps::Log::new(self.with(|i| Ok(i.r.root))?);
+        let unopened = "global's log has a step under an epoch this device hasn't opened yet: it freezes the log once it has";
+        steps::log_on(&bucket, &keys, &mut log).await.context(unopened)?;
         if !self.put_first(&user, Content::new(members::APP, steps::FREEZING, json!({})), None, None).await? {
             return Ok(self.frozen());
         }
         let deadline = std::time::Instant::now() + FREEZE_WAIT / 2;
         // Every log as it is now, which no writer that looks after this adds to unawares.
         self.read_entries_now(&Scope::Global).await?;
-        let mut read = crate::log::read(&bucket, &keys, made()?, &prefix, "global", before.at, before.floor).await?;
-        let mut entries = before.entries;
+        steps::log_on(&bucket, &keys, &mut log).await.context(unopened)?;
         let mut logs = BTreeMap::new();
         for scope in self.with(|i| Ok(i.r.db().scopes()))?.into_iter().filter(|s| *s != Scope::Global) {
             logs.insert(scope.to_string(), log_end(&bucket, &scope).await?);
         }
         loop {
-            ensure!(before.ahead.is_none() && read.ahead.is_none(), "global's log has a step under an epoch this device hasn't opened yet: it freezes the log once it has");
-            entries.append(&mut read.entries);
-            let (content, copy) = self.with(|i| i.r.freeze_now(&entries, read.at, logs.clone(), now_ms()))?;
+            let end = log.last();
+            let (content, copy) = self.with(|i| i.r.freeze_now(log.entries(end), end, logs.clone(), now_ms()))?;
             // Its mark, at the step after the log's end as this device read it just now: the end it names is the real one.
-            let name = crate::db::step_name(&prefix, read.at + 1);
-            let mark = self.with(|i| steps::sign(&i.r.key, &Scope::Global, read.at + 1, &user, i.r.db().epoch(&Scope::Global), now_ms(), content.clone()))?;
+            let name = crate::db::step_name(&prefix, end + 1);
+            let mark = self.with(|i| steps::sign(&i.r.key, &Scope::Global, end + 1, &user, i.r.db().epoch(&Scope::Global), now_ms(), content.clone()))?;
             if std::time::Instant::now() >= deadline {
                 tracing::warn!("freezing the log took too long, so writers may have written on: it's tried again");
                 return Ok(false);
@@ -69,7 +69,7 @@ impl Node {
                 return Ok(self.frozen());
             }
             // Written on since: freeze where it ends now.
-            read = crate::log::read(&bucket, &keys, made()?, &prefix, "global", read.at, read.floor).await?;
+            steps::log_on(&bucket, &keys, &mut log).await.context(unopened)?;
         }
     }
 
@@ -102,14 +102,19 @@ impl Node {
 
     /// After this device wrote `entry` at step `at` of its scope's log: whether a freeze leaves it out, so it never
     /// counts. Looks only once an admin's `FREEZING` step is there, and waits for the freeze it says is coming, up to
-    /// `FREEZE_WAIT` from when it first saw that one: after that it has lapsed, and the entry counts. One it can't tell
-    /// about counts, since it was written: its writer says so, and never writes it again.
+    /// `FREEZE_WAIT` from when it first saw that one: after that it has lapsed, and the entry counts. While it can't
+    /// tell (the bucket doesn't answer, say), it asks again, less and less often, rather than take the entry as
+    /// counted: a freeze may have left it out, and its writer would never write it again.
     pub(super) async fn left_out(&self, entry: &Entry, at: u64) -> bool {
-        match self.left_out_now(entry, at).await {
-            Ok(out) => out,
-            Err(err) => {
-                tracing::warn!("whether the log's freeze holds what this device wrote at step {at} of {}: {err:#}: it counts", entry.log());
-                false
+        let mut wait = Duration::from_secs(1);
+        loop {
+            match self.left_out_now(entry, at).await {
+                Ok(out) => return out,
+                Err(err) => {
+                    tracing::warn!("whether the log's freeze holds what this device wrote at step {at} of {}: {err:#}: asked again in {}s", entry.log(), wait.as_secs());
+                    tokio::time::sleep(wait).await;
+                    wait = (wait * 2).min(FREEZE_WAIT);
+                }
             }
         }
     }
@@ -245,8 +250,8 @@ impl Node {
         if let Some(log) = self.0.frozen_log.lock().unwrap().clone().filter(|l| l.last() > end) {
             return Ok(log);
         }
-        let made = self.with(|i| Ok(i.r.epoch_made(&Scope::Global)))?;
-        let log = Arc::new(steps::log_to(&self.bucket()?, &self.log_key(&Scope::Global).await?, made, end).await?);
+        let root = self.with(|i| Ok(i.r.root))?;
+        let log = Arc::new(steps::log_to(&self.bucket()?, &self.log_key(&Scope::Global).await?, root, end).await?);
         *self.0.frozen_log.lock().unwrap() = Some(log.clone());
         Ok(log)
     }
@@ -413,12 +418,11 @@ impl Node {
         let keys = self.log_key(scope).await?;
         let bucket = self.bucket()?;
         if !self.with(|i| Ok(i.scope_dbs.contains_key(scope)))? {
-            let freeze = self.with(|i| Ok(i.r.frozen.clone().map(|(f, _)| f)))?.context("global's log isn't frozen")?;
-            let end = freeze.logs.get(&scope.to_string()).copied().unwrap_or(0);
-            let made = self.with(|i| Ok(i.r.db().epoch(scope)))?;
-            let entries = crate::log::read_to(&bucket, &keys, made, &crate::log::prefix(&scope.to_string()), &scope.to_string(), end).await?;
+            let (freeze, root) = self.with(|i| Ok((i.r.frozen.clone().map(|(f, _)| f), i.r.root)))?;
+            let freeze = freeze.context("global's log isn't frozen")?;
             let global = self.global_log(freeze.global()).await?;
-            let db = self.with(|i| steps::scope_anchor(&freeze, i.r.root, &global, scope, &entries, now_ms()))?;
+            let entries = steps::anchor_entries(&bucket, &keys, &freeze, root, &global, scope).await?;
+            let db = steps::scope_anchor(&freeze, root, &global, scope, &entries, now_ms())?;
             self.with(|i| Ok(i.scope_dbs.insert(scope.clone(), (0, db))))?;
         }
         let mut read = Vec::new();
@@ -432,23 +436,18 @@ impl Node {
             }
             read.push(None);
         }
-        let kept = self.with(|i| {
-            let (mut at, mut db) = i.scope_dbs.remove(scope).context("no database")?;
-            for step in &read {
-                at += 1;
-                let Some(given) = step else { continue };
-                match steps::apply(&db, Some(i.r.db()), scope, &given.step) {
-                    Ok(a) => db = ScopeDb::open(a.db, now_ms())?,
-                    Err(err) => tracing::info!("{scope}'s step {at} doesn't count: {err:#}"),
-                }
-            }
+        let (kept, newer) = self.with(|i| {
+            let (at, db) = i.scope_dbs.remove(scope).context("no database")?;
+            let steps::TookScope { at, mut db, newer } = steps::take_scope(at, db, i.r.db(), scope, &read, now_ms())?;
             let position = i.views.get(&scope.to_string()).map(|(p, _)| p.clone()).unwrap_or((0, Hash::from_bytes([0; 32])));
             i.views.insert(scope.to_string(), (position, db.state()));
             let kept = json!({ "at": at, "hash": crate::db::state_hash(db.conn())?, "db": data_encoding::BASE64.encode(&db.bytes()?) });
             i.scope_dbs.insert(scope.clone(), (at, db));
-            Ok(kept)
+            Ok((kept, newer))
         })?;
         self.keep_scope_db(scope, &kept);
+        // A newer release's step: this device reads no further until it's updated.
+        ensure!(!newer, steps::Newer);
         Ok(!read.is_empty())
     }
 

@@ -453,10 +453,12 @@ struct Log {
 
 impl Log {
     /// Of `global`'s: who's who once its log is frozen, from its freeze and the steps after, each freeze judged at the
-    /// end of the log it names, as every reader judges it; none before. Fails at a freeze an admin signed that doesn't
-    /// check out, which stops this node there as it stops every reader.
+    /// end of the log it names, as every reader judges it; none before, nor while its log isn't read that far, or
+    /// nothing is where its mark would be yet, when the entries still say who's who (`Truth::judged`). Fails at a
+    /// freeze an admin signed that doesn't check out, or a newer release's step, which stops this node there as it
+    /// stops every reader.
     fn truth(&self) -> Result<Option<one::database::steps::Truth>> {
-        one::database::steps::Truth::read(&self.steps, root(&self.entries), self.frozen.as_ref(), now())
+        one::database::steps::Truth::judged(&self.steps, root(&self.entries), self.frozen.as_ref(), now())
     }
 
     /// The newest epoch of `scope` made, as `global`'s entries, or its steps once its log is frozen, say.
@@ -550,12 +552,14 @@ async fn read_steps(id: &(String, String), bucket: &Js) -> Result<()> {
     let Some((keys, from, anchored)) = LOGS.with(|l| l.borrow().get(id).map(|g| (g.keys.clone(), g.steps.len() as u64, g.anchor.is_some()))) else { return Ok(()) };
     let scope = Scope::parse(&id.1)?;
     if id.1 != "global" {
-        let freeze = LOGS.with(|l| l.borrow().get(&global).map(Log::truth).transpose())?.flatten().map(|t| t.freeze);
-        let Some(freeze) = freeze else { return Ok(()) };
+        let frozen = LOGS.with(|l| {
+            let logs = l.borrow();
+            let Some(g) = logs.get(&global) else { return Ok(None) };
+            Ok::<_, anyhow::Error>(g.truth()?.zip(g.frozen.clone()).map(|(t, log)| (t.freeze, root(&g.entries), log)))
+        })?;
+        let Some((freeze, root, frozen)) = frozen else { return Ok(()) };
         if !anchored {
-            let end = freeze.logs.get(&id.1).copied().unwrap_or(0);
-            let made = LOGS.with(|l| l.borrow().get(&global).map(|g| Log::made(g, &scope)).transpose())?.unwrap_or(0);
-            let entries = one::log::read_to(bucket, &keys, made, &one::log::prefix(&id.1), &id.1, end).await?;
+            let entries = one::database::steps::anchor_entries(bucket, &keys, &freeze, root, &frozen, &scope).await?;
             LOGS.with(|l| l.borrow_mut().get_mut(id).map(|log| log.anchor = Some(entries)));
         }
     }
@@ -580,8 +584,8 @@ async fn read_steps(id: &(String, String), bucket: &Js) -> Result<()> {
                     one::database::steps::wants_log(&g.steps, root(&g.entries), g.frozen.as_ref(), now())
                 });
                 let Some(end) = wants else { break };
-                let made = LOGS.with(|l| l.borrow().get(id).map(|g| Log::made(g, &Scope::Global)).transpose())?.unwrap_or(0);
-                let log = one::database::steps::log_to(bucket, &keys, made, end).await?;
+                let root = LOGS.with(|l| l.borrow().get(id).and_then(|g| root(&g.entries)));
+                let log = one::database::steps::log_to(bucket, &keys, root, end).await?;
                 LOGS.with(|l| {
                     if let Some(g) = l.borrow_mut().get_mut(id) {
                         g.frozen = Some(log);
@@ -594,7 +598,7 @@ async fn read_steps(id: &(String, String), bucket: &Js) -> Result<()> {
         if id.1 == "global" {
             LOGS.with(|l| {
                 if let Some(g) = l.borrow_mut().get_mut(id)
-                    && g.truth().is_err_and(|e| e.is::<one::database::steps::Unmarked>())
+                    && one::database::steps::Truth::read(&g.steps, root(&g.entries), g.frozen.as_ref(), now()).is_err_and(|e| e.is::<one::database::steps::Unmarked>())
                 {
                     g.frozen = None;
                 }
@@ -621,16 +625,13 @@ async fn read_steps(id: &(String, String), bucket: &Js) -> Result<()> {
 
 /// A scope's own database from its steps (`one::database::steps`): from what its log's entries up to the freeze add up
 /// to (`anchor`, `steps::scope_anchor`) with `global`'s log up to it (`frozen`), each that counts with `global`'s
-/// scope database `truth`.
+/// scope database `truth`. Fails at a newer release's step, which stops this node there as it stops every reader.
 fn scope_truth(truth: &one::database::steps::Truth, root: Option<Hash>, frozen: &one::database::steps::Log, anchor: &[Entry], scope: &Scope, steps: &[Option<one::database::steps::Given>]) -> Result<ScopeDb> {
     use one::database::steps;
-    let mut db = steps::scope_anchor(&truth.freeze, root, frozen, scope, anchor, now())?;
-    for given in steps.iter().flatten() {
-        if let Ok(a) = steps::apply(&db, Some(&truth.db), scope, &given.step) {
-            db = ScopeDb::open(a.db, now())?;
-        }
-    }
-    Ok(db)
+    let db = steps::scope_anchor(&truth.freeze, root, frozen, scope, anchor, now())?;
+    let took = steps::take_scope(0, db, &truth.db, scope, steps, now())?;
+    anyhow::ensure!(!took.newer, steps::Newer);
+    Ok(took.db)
 }
 
 /// The install's genesis, which its members are replayed from.
