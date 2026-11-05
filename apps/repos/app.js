@@ -150,11 +150,25 @@ const deletedOf = (r) => (r.deleted ? { time: r.deleted, by: r.deleted_by } : nu
 
 function global(ctx) {
   if (!ctx.global) throw new Error("repos lives in global: install it there");
-  // A node from before apps' permissions can't say who may push or manage: what asks waits for its update.
-  ctx.global.may ??= async () => {
-    throw new Error("this device's node is from before apps' permissions: it takes the update that has them soon, then try again");
-  };
+  // Phase 3: delete once every node has may (7952b8cb). One from before answers as Repos did then, from its own rows.
+  ctx.global.may ??= (verb, obj) => (Array.isArray(verb) ? mayHere(ctx, verb) : mayHere(ctx, [[verb, obj]]).then(([ok]) => ok));
   return ctx.global;
+}
+
+/// Whether the caller may do each of `asks` ([verb, repo object]), in order, by the repos' owners and `relations`: a
+/// repo's owner and its group's admins manage it and push, and its group's members and its collaborators push.
+async function mayHere(ctx, asks) {
+  const g = ctx.global;
+  const ids = [...new Set(asks.map(([, obj]) => obj.slice(5)))];
+  const owners = ids.length ? Object.fromEntries((await g.query(`select id, owner from repos where id in (${ids.map(() => "?").join(", ")})`, ids)).map((r) => [r.id, r.owner])) : {};
+  const added = new Set((await g.query("select object from relations where subject = ? and relation = 'collaborator'", [`person:${ctx.me.user}`])).map((r) => r.object));
+  return asks.map(([verb, obj]) => {
+    const owner = owners[obj.slice(5)];
+    if (!owner) return false;
+    const role = owner.startsWith("group:") ? byId(ctx, owner)?.members?.[ctx.me.user] : null;
+    if (owner === `user:${ctx.me.user}` || role === "admin") return true;
+    return verb === "push" && (!!role || added.has(obj));
+  });
 }
 
 /// Where git reaches a repo, the same on every computer: <the install's address>/repos/<owner>/<name>.git; null on a
