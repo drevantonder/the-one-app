@@ -1128,6 +1128,15 @@ impl Node {
                 }
             });
         }
+        // And once it's frozen, a release's new default roles as a step.
+        if self.frozen() {
+            let node = self.clone();
+            tokio::spawn(async move {
+                if let Err(err) = node.say_defaults().await {
+                    tracing::warn!("saying the release's roles: {err:#}");
+                }
+            });
+        }
         Ok(())
     }
 

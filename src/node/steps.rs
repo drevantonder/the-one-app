@@ -28,7 +28,26 @@ impl Node {
         })?;
         let Some((hash, frontier)) = anchor else { return Ok(false) };
         self.append(&Scope::Global, members::freeze(&hash, &frontier)).await?;
+        // The database's first step: the release's types, roles and rules, which readers keep from here on.
+        self.write_step(&user, steps::release_defaults()?).await?;
         Ok(self.frozen())
+    }
+
+    /// Once `global`'s log is frozen, the release's types, roles and rules as a step (`steps::DEFAULTS`), if this
+    /// device signs for an admin and its database's aren't this release's: the database's first step, and one after
+    /// each release that changes them.
+    pub async fn say_defaults(&self) -> Result<()> {
+        let Ok(user) = self.user() else { return Ok(()) };
+        let wanted = steps::release_defaults()?;
+        let due = self.with(|i| {
+            let db = i.r.db();
+            let signs = db.client(&self.0.id).is_some_and(|c| c.user == user) && db.may(&user, "change-roles", scopes::INSTALL);
+            Ok(i.r.frozen.is_some() && signs && steps::rules_of(db.conn())? != wanted.data)
+        })?;
+        if due {
+            self.write_step(&user, wanted).await?;
+        }
+        Ok(())
     }
 
     /// Reads `global`'s steps in the bucket after the last this device applied, once its log is frozen: each applied if

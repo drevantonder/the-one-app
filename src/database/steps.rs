@@ -121,6 +121,9 @@ pub struct Applied {
 pub fn apply(db: &ScopeDb, global: Option<&ScopeDb>, scope: &Scope, step: &Entry) -> Result<Applied> {
     ensure!(step.scope() == *scope, "a step of another scope");
     let who = global.unwrap_or(db);
+    if step.content.app == members::APP && step.content.kind == DEFAULTS {
+        return defaults(db, who, scope, step);
+    }
     let mut m = who.members();
     let mut state = db.state();
     ensure!(step.epoch() <= m.epoch(scope), "it names an epoch its scope hasn't reached");
@@ -144,8 +147,94 @@ pub fn apply(db: &ScopeDb, global: Option<&ScopeDb>, scope: &Scope, step: &Entry
     Ok(Applied { db: built })
 }
 
-/// What only steps say, which building from replay's members leaves out: copied from the database before.
+/// The kind of step that says the release's types, roles and rules (`permissions::DEFAULTS`), as rows: the first an
+/// admin's device writes once the log is frozen, and again whenever a release changes them. Readers never run their
+/// own release's: each database keeps the rows its steps said.
+pub const DEFAULTS: &str = "defaults";
+
+/// The release's types, roles and rules as `DEFAULTS` steps say them: `{ types, roles, rules }`, rows as arrays.
+pub fn release_defaults() -> Result<Content> {
+    let db = Connection::open_in_memory()?;
+    db.execute_batch(permissions::SCHEMA)?;
+    permissions::defaults(&db)?;
+    Ok(Content::new(members::APP, DEFAULTS, rules_of(&db)?))
+}
+
+/// A database's types, roles and rules, as a `DEFAULTS` step says them.
+pub fn rules_of(db: &Connection) -> Result<serde_json::Value> {
+    let rows = |sql: &str| -> Result<Vec<serde_json::Value>> {
+        let mut q = db.prepare(sql)?;
+        let n = q.column_count();
+        let out = q.query_map([], |r| (0..n).map(|i| r.get::<_, rusqlite::types::Value>(i)).collect::<rusqlite::Result<Vec<_>>>())?;
+        out.map(|r| {
+            Ok(serde_json::Value::Array(
+                r?.into_iter()
+                    .map(|v| match v {
+                        rusqlite::types::Value::Integer(i) => serde_json::json!(i),
+                        rusqlite::types::Value::Text(t) => serde_json::json!(t),
+                        _ => serde_json::Value::Null,
+                    })
+                    .collect(),
+            ))
+        })
+        .collect()
+    };
+    Ok(serde_json::json!({
+        "types": rows("SELECT name, permissions FROM types ORDER BY name")?,
+        "roles": rows("SELECT type, name, permissions, gives FROM roles WHERE builtin = 1 ORDER BY type, name")?,
+        "rules": rows(&format!("SELECT subject, relation, object FROM relations WHERE {RULE} ORDER BY 1, 2, 3"))?,
+    }))
+}
+
+/// A row of `relations` that's a rule: the release's, never given or taken (`permissions`).
+const RULE: &str = "(substr(subject, 1, 1) IN ('#', '@') OR instr(subject, '*') > 0 OR instr(object, '*') > 0)";
+
+/// A `DEFAULTS` step: by an admin's device, the release's types, roles and rules as it says them, in place of those
+/// the database had; the install's own roles stay.
+fn defaults(db: &ScopeDb, who: &ScopeDb, scope: &Scope, step: &Entry) -> Result<Applied> {
+    ensure!(who.client(&step.author()).is_some_and(|c| c.user == step.user()), "only a person's own device writes for them");
+    ensure!(who.may(step.user(), "change-roles", scopes::INSTALL), "only the install's admins say the release's roles");
+    let out = super::scope::build(&if *scope == Scope::Global { who.members() } else { Members::default() }, scope, &db.state())?;
+    carry(db.conn(), &out)?;
+    let data = &step.content.data;
+    let list = |k: &str| data[k].as_array().cloned().unwrap_or_default();
+    let tx = out.unchecked_transaction()?;
+    tx.execute_batch(&format!("DELETE FROM types; DELETE FROM roles WHERE builtin = 1; DELETE FROM relations WHERE {RULE};"))?;
+    for t in list("types") {
+        tx.execute("INSERT OR REPLACE INTO types VALUES (?, ?)", rusqlite::params![t[0].as_str(), t[1].as_str()])?;
+    }
+    for r in list("roles") {
+        tx.execute("INSERT OR REPLACE INTO roles VALUES (?, ?, ?, ?, 1)", rusqlite::params![r[0].as_str(), r[1].as_str(), r[2].as_str(), r[3].as_str().unwrap_or("[]")])?;
+    }
+    for r in list("rules") {
+        let (subject, object) = (r[0].as_str().unwrap_or(""), r[2].as_str().unwrap_or(""));
+        if subject.starts_with(['#', '@']) || subject.contains('*') || object.contains('*') {
+            tx.execute("INSERT OR IGNORE INTO relations VALUES (?, ?, ?, NULL)", rusqlite::params![subject, r[1].as_str(), object])?;
+        }
+    }
+    tx.commit()?;
+    Ok(Applied { db: out })
+}
+
+/// What only steps say, which building from replay's members leaves out, copied from the database before: what they
+/// named, and the release's types, roles and rules the steps said (`DEFAULTS`), not this reader's own release's.
 fn carry(from: &Connection, to: &Connection) -> Result<()> {
+    to.execute_batch(&format!("DELETE FROM types; DELETE FROM roles WHERE builtin = 1; DELETE FROM relations WHERE {RULE};"))?;
+    let mut rules = from.prepare(&format!("SELECT subject, relation, object, until FROM relations WHERE {RULE}"))?;
+    let mut rows = rules.query([])?;
+    while let Some(r) = rows.next()? {
+        to.execute("INSERT OR IGNORE INTO relations VALUES (?, ?, ?, ?)", rusqlite::params![r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, Option<i64>>(3)?])?;
+    }
+    for table in ["types", "roles"] {
+        let mut q = from.prepare(&format!("SELECT * FROM {table}{}", if table == "roles" { " WHERE builtin = 1" } else { "" }))?;
+        let n = q.column_count();
+        let insert = format!("INSERT OR REPLACE INTO {table} VALUES ({})", vec!["?"; n].join(", "));
+        let mut rows = q.query([])?;
+        while let Some(row) = rows.next()? {
+            let values: Vec<rusqlite::types::Value> = (0..n).map(|i| row.get(i)).collect::<rusqlite::Result<_>>()?;
+            to.execute(&insert, rusqlite::params_from_iter(values))?;
+        }
+    }
     for table in ["blobs", "releases"] {
         let mut q = from.prepare(&format!("SELECT * FROM {table}"))?;
         let n = q.column_count();
