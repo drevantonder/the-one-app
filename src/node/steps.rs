@@ -50,9 +50,6 @@ impl Node {
             let (content, copy) = self.with(|i| i.r.freeze_now(logs, now_ms()))?;
             self.put_first(&user, content, Some(&copy)).await?;
         }
-        if self.frozen() {
-            self.say_defaults().await?;
-        }
         Ok(self.frozen())
     }
 
@@ -95,19 +92,18 @@ impl Node {
         }
     }
 
-    /// Once `global`'s log is frozen, the release's types, roles and rules as a step (`steps::DEFAULTS`), if this
-    /// device signs for an admin and its database's aren't this release's: the database's first step, and one after
-    /// each release that changes them.
+    /// Once `global`'s log is frozen, this release's types, roles, rules and tables as a step (`steps::DEFAULTS`), if
+    /// this device signs for an admin, its database is an older release's, and every device reads this one
+    /// (`switch::gate`).
     pub async fn say_defaults(&self) -> Result<()> {
         let Ok(user) = self.user() else { return Ok(()) };
-        let wanted = steps::release_defaults()?;
         let due = self.with(|i| {
             let db = i.r.db();
             let signs = db.client(&self.0.id).is_some_and(|c| c.user == user) && db.may(&user, "change-roles", scopes::INSTALL);
-            Ok(i.r.frozen.is_some() && signs && steps::rules_of(db.conn())? != wanted.data)
+            Ok(i.r.frozen.is_some() && signs && steps::version(db.conn())? < switch::READS && switch::gate_at(db, &i.reads, switch::READS).open())
         })?;
         if due {
-            self.write_step(&user, wanted).await?;
+            self.write_step(&user, steps::release_defaults()?).await?;
         }
         Ok(())
     }

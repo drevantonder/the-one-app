@@ -137,6 +137,12 @@ impl Replica {
         ensure!(at == last + 1, "step {at} isn't the next");
         let mut handled = Handled::default();
         let applied = step.map(|s| crate::database::steps::apply(&self.db, None, &Scope::Global, s));
+        // A newer release's: this device reads no further until it's updated.
+        if let Some(Err(err)) = &applied
+            && err.is::<crate::database::steps::Newer>()
+        {
+            anyhow::bail!("{err}");
+        }
         self.frozen = Some((freeze, at));
         match applied {
             Some(Ok(a)) => {

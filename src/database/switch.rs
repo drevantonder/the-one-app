@@ -20,8 +20,12 @@ pub const SWITCH: bool = false;
 /// the switch end to end before it's on.
 pub static FORCEABLE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// What this build reads of who's who: 1, the log, replayed (R1 and before, which say nothing); 2, the scope database,
-/// once the log is frozen. A device that reads less than `GATE` holds the switch back.
+/// What this build reads of who's who: 1, the log, replayed (R1 and before, which say nothing); 2 and on, the scope
+/// database, once the log is frozen, with the types, roles, rules and tables of that number. A device that reads less
+/// than `GATE` holds the switch back. Once it's switched, a release that changes `scope::SCHEMA`, `permissions::SCHEMA`
+/// or `permissions::defaults` reads one more, has `steps::normalize` read the older tables, and its admins' devices
+/// move each database on to it once every device reads it (`steps::DEFAULTS`); `steps::tests` holds each number to
+/// what it reads.
 pub const READS: u32 = 1;
 
 /// What every listed device must read before the log is frozen.
@@ -87,11 +91,16 @@ pub fn skips(db: &ScopeDb) -> BTreeSet<Key> {
 
 /// The gate, as `global`'s scope database lists devices and `reads` says what each reads.
 pub fn gate(db: &ScopeDb, reads: &HashMap<Key, Reads>) -> Gate {
+    gate_at(db, reads, GATE)
+}
+
+/// The gate for what reads `at_least`: the switch's (`GATE`), or a release's that moves the database on to it.
+pub fn gate_at(db: &ScopeDb, reads: &HashMap<Key, Reads>, at_least: u32) -> Gate {
     let skips = skips(db);
     let mut gate = Gate::default();
     for key in readers(db) {
         let said = reads.get(&key);
-        if said.is_some_and(|r| r.reads >= GATE) {
+        if said.is_some_and(|r| r.reads >= at_least) {
             continue;
         }
         if skips.contains(&key) {

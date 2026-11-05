@@ -104,8 +104,10 @@ impl Global {
                 steps::Opened::Junk => None,
                 steps::Opened::Waits(_) => break,
             };
-            if self.take(at, opened.as_ref()).is_err() {
-                break;
+            match self.take(at, opened.as_ref()) {
+                Ok(()) => {}
+                Err(err) if err.is::<steps::Newer>() => return Err(err),
+                Err(_) => break,
             }
         }
         Ok(())
