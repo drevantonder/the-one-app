@@ -114,6 +114,10 @@ fn install(m: &ScopeDb, me: &str, settings: &Map<String, Value>, here: &Here) ->
         .filter(|c| !c.is(Kind::Compute))
         .map(|c| {
             let mut client = json!({ "key": hex(&c.key), "seal": hex(&c.seal), "name": c.name, "user": c.user, "roles": c.roles, "passkey": c.passkey, "device": c.device.as_ref().map(hex), "since": c.since, "place": c.place, "me": false });
+            // What it signed in with, for its own person only: their Sign-ins.
+            if c.user == me && c.sign_in.is_some() {
+                client["sign_in"] = json!(c.sign_in);
+            }
             client.as_object_mut().unwrap().extend((here.client_now)(c));
             client
         })

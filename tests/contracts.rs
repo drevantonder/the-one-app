@@ -94,8 +94,8 @@ fn the_kernel_and_nodes_agree_on_keys_and_seals() {
         assert_eq!(out["twin"], data_encoding::HEXLOWER.encode(&kernel::twin_public(&device).unwrap()), "an Ed25519 key's twin to seal to");
         assert_eq!(out["proof"], keys::invite_proof(b"an invite's secret", &keys::Endpoint { key: device, seal: device_seal }));
         let asking = keys::Endpoint { key: device, seal: device_seal };
-        assert_eq!(out["nonce"], one::sign_in_proof::nonce(&asking), "the OIDC nonce auth asks for a device");
-        assert_eq!(b(&out["challenge"]), one::sign_in_proof::challenge(&asking, 1_800_000_000_123), "and the challenge its passkey signs");
+        assert_eq!(out["nonce"], one::sign_in_proof::nonce(&device_seal, &asking), "the OIDC nonce auth asks for a device in its install");
+        assert_eq!(b(&out["challenge"]), one::sign_in_proof::challenge(&device_seal, &asking, 1_800_000_000_123), "and the challenge its passkey signs");
         let (passkey, seal_secret) = keys::passkey_keys(&prf);
         assert_eq!(out["passkey"]["sign"], data_encoding::HEXLOWER.encode(passkey.verifying_key().as_bytes()), "a passkey's signing key");
         assert_eq!(b(&out["passkey"]["seal"]), seal_secret, "and the secret sealed to");
@@ -204,6 +204,8 @@ fn the_kernel_and_nodes_agree_on_keys_and_seals() {
             (members::remove_user(user, &[(endpoint.key, None)].into()), json!(["removeUser", { "user": user, "seqs": { &key: null } }])),
             (members::remove_device(&endpoint.key, Some(7)), json!(["removeDevice", { "key": key, "seq": 7 }])),
             (members::remove_device(&endpoint.key, None), json!(["removeDevice", { "key": key }])),
+            (members::refuse(&endpoint, "MacBook Pro"), json!(["refuse", { "key": key, "seal": seal, "name": "MacBook Pro" }])),
+            (members::forget_sign_in(&endpoint.key), json!(["forgetSignIn", { "key": key }])),
             (members::setting("name", Some("Home")), json!(["setting", { "name": "name", "value": "Home" }])),
             (members::setting("name", None), json!(["setting", { "name": "name" }])),
             (members::group(group, "Family"), json!(["group", { "group": group, "name": "Family" }])),

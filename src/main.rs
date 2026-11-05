@@ -223,7 +223,8 @@ fn devices_here(settings: one::kernel::Settings, needed: bool) -> Result<one::ke
     anyhow::ensure!(!needed || !devices.is_empty(), "no node of your One App answers on this machine, so its relay would take none of its devices: run this where one does, or with --new for a new install, whose relay takes devices once this runs again beside one");
     // The install's recovery key too, as a client, not an admin's and not a node: what it lets in, the relay takes.
     devices.extend(install["recovery"].as_str().map(|k| json!({ "key": k, "role": "client", "admin": false })));
-    Ok(one::kernel::Settings { devices, ..settings })
+    let genesis = install["root"].as_str().filter(|r| r.len() == 64).map(str::to_string);
+    Ok(one::kernel::Settings { devices, genesis, ..settings })
 }
 
 fn addr() -> String {
@@ -518,6 +519,17 @@ fn run(args: Vec<String>) -> Result<()> {
             if settings.serverless {
                 one::serverless::deploy(&cf, &settings)?;
                 serverless_reads(&settings);
+            }
+            // The Google client its people sign in with, signed by this admin's device: a new device's sign-in counts
+            // only for it (`sign_in_proof::CLIENTS`), whatever auth says.
+            if let Some((id, _)) = &settings.google {
+                let clients = format!("https://accounts.google.com {id}");
+                let had = get("/v1/state").ok().and_then(|s| s["install"]["settings"][one::sign_in_proof::CLIENTS].as_str().map(str::to_string));
+                if had.as_deref() != Some(clients.as_str())
+                    && let Err(err) = post("/v1/settings", json!({ "name": one::sign_in_proof::CLIENTS, "value": clients }))
+                {
+                    eprintln!("A new device's Google sign-in won't let it in by itself until an admin's device runs {CLI} settings {} {clients}: {err:#}", one::sign_in_proof::CLIENTS);
+                }
             }
             print!("Deployed.\n{}", kernel_said(&settings));
         }

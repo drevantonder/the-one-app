@@ -477,7 +477,9 @@ export class Device {
     const invited = (await this.checked()).people[this.user]?.invites ? (await this.authSigned("GET", "/api/auth/devices/requests").catch(() => ({}))).requests || [] : [];
     const all = [...own, ...invited].filter((r, i, a) => !r.service && r.key !== this.me.key && a.findIndex((x) => x.key === r.key) === i);
     const ours = await Promise.all(all.map(async (r) => r.user === this.user || (await this.invitedHere(r))));
-    return Promise.all(all.filter((_, i) => ours[i]).map(async (r) => ({ ...r, code: await codeOf(r.key, r.seal), mine: r.user === this.user })));
+    // Those turned down, or taken out, never again: as the log says now, since another device may have just said so.
+    const out = new Set((await this.checked(true).catch(() => this.checked())).removed || []);
+    return Promise.all(all.filter((r, i) => ours[i] && !out.has(r.key)).map(async (r) => ({ ...r, code: await codeOf(r.key, r.seal), mine: r.user === this.user })));
   }
 
   /// Whether a newcomer's device came from an invite made in this browser: its proof is that invite's.
@@ -486,8 +488,11 @@ export class Device {
     return !!invite && !!r.proof && r.proof === (await inviteProof(text.encode(invite.secret), hex.decode(r.key), hex.decode(r.seal)));
   }
 
-  /// Turns down a device waiting to be let in: its request is forgotten.
+  /// Turns down a device waiting to be let in: its request is forgotten, and one of this person's own is turned down
+  /// by an entry, so none of their devices lets it in after.
   async refuse(r) {
+    const k = await this.checked(true);
+    if (r.mine && !(k.removed || []).includes(r.key)) await this.write("global", members.refuse({ key: r.key, seal: r.seal, name: r.name }));
     if (r.mine) await answer(await this.bearer(`/api/auth/devices/requests/${r.key}`, { method: "DELETE" }));
     else await this.authSigned("DELETE", `/api/auth/devices/requests/${r.key}`);
   }
@@ -496,6 +501,8 @@ export class Device {
   /// network and clears its request.
   async approve(r, as = this.me, { signIn } = {}) {
     const k = await this.checked(true);
+    // Taken out, or turned down: never sealed anything again, whatever a node says.
+    if ((k.removed || []).includes(r.key)) throw new Error(`${r.name} was turned down or taken out, so it isn’t let in again. Start again on it, for a new code.`);
     const may = k.people[this.user];
     const known = !!k.people[r.user];
     // Listed already by an approval that didn't finish (its mark at auth failed): the rest is done again.

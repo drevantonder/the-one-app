@@ -260,12 +260,24 @@
     return browsing ? deviceIcon({ Chrome: "google-chrome-logo", Safari: "compass" }[browser] || "browser", osOf("", on || "")) : deviceIcon(typeOf(name), osOf("", name));
   };
 
-  // A device waiting to be let in: which it is, where from, its code to check, and the answers.
+  // What a device signed in with, as a grey line says it: "a@example.com · Google", or "Passkey".
+  function signInLabel(a) {
+    if (a?.passkey) return "Passkey";
+    const p = a?.provider;
+    if (!p) return "";
+    let host = p.issuer;
+    try { host = new URL(p.issuer).host; } catch {}
+    const by = { "accounts.google.com": "Google", "appleid.apple.com": "Apple", "login.microsoftonline.com": "Microsoft" }[host] || host;
+    return [p.email, by].filter(Boolean).join(" · ");
+  }
+
+  // A device waiting to be let in: which it is, where from, what approving it records it signed in with, its code to
+  // check, and the answers.
   function waitingCard(r) {
     const code = one.esc(r.code);
     const sub = [r.yours ? "" : `${r.person}’s first device`, r.place].filter(Boolean).join(" · ");
     return `<div class="list waiting-device" role="group" aria-label="${one.esc(r.device)} wants to join"><div class="row plain">${iconByName(r.device)}` +
-      `<div class="main"><div class="title"><span>${one.esc(r.device)}</span></div>${subs(sub)}</div></div><div class="code">${code}</div>` +
+      `<div class="main"><div class="title"><span>${one.esc(r.device)}</span></div>${subs(sub, signInLabel(r.sign_in))}</div></div><div class="code">${code}</div>` +
       `<div class="answers"><button class="button" data-refuse="${code}">${r.yours ? "Not Me" : "Not Them"}</button><button class="button primary" data-let="${code}">Approve</button></div></div>`;
   }
 
@@ -660,12 +672,39 @@
     const item = browser ? drawn.browsers[which.slice(1)] : drawn.cards[which];
     if (!item) return;
     const items = browser ? [] : [{ title: "Rename", icon: "pencil-simple" }];
+    // What its sign-ins were let in with, which a new device's sign-in is checked against.
+    const signedIn = (browser ? [item] : item.clients).filter((c) => c.sign_in);
+    if (signedIn.length) items.push({ title: "Sign-ins…", icon: "key" });
     items.push(item.me ? { title: "Sign Out", icon: "sign-out", danger: true } : { title: "Remove…", icon: "minus-circle", danger: true });
     const i = await one.menu(items, at).catch(() => null);
     if (i == null) return;
     if (items[i].title === "Rename") rename(item);
+    else if (items[i].title === "Sign-ins…") signIns(signedIn);
     else if (item.me) signOut();
     else remove(item.name, browser ? [item.key] : item.keys, !browser && item.node && item.online ? item.node.key : null);
+  }
+
+  /// What a device's sign-ins signed in with, as recorded when each was let in: a new device that signs in with one is
+  /// let in by itself. Each can be removed, by a change every device of theirs takes.
+  function signIns(clients) {
+    const sheet = one.sheet({ title: "Sign-Ins", done: "Done" });
+    sheet.body.innerHTML = `<div class="list">${clients
+      .map((c, i) => `<div class="row plain"><div class="main"><div class="title"><span>${one.esc(signInLabel(c.sign_in))}</span></div></div><button class="button plain small" data-forget="${i}">Remove</button></div>`)
+      .join("")}</div><p class="footer">A new device that signs in with one of these is let in without asking.</p><div id="problem"></div>`;
+    sheet.body.onclick = async (e) => {
+      const b = e.target.closest("[data-forget]");
+      if (!b) return;
+      const back = one.busy(b);
+      try {
+        await one.api("POST", "/v1/devices/forget-sign-in", { key: clients[b.dataset.forget].key });
+        sheet.close();
+        one.tap("success");
+        draw();
+      } catch (err) {
+        sheet.body.querySelector("#problem").innerHTML = one.problem({ title: one.plain(err).title });
+        back();
+      }
+    };
   }
 
   /// Renames a device: its node and the services named for it together, or its app's sign-ins.

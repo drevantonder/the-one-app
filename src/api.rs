@@ -208,6 +208,7 @@ pub fn routes() -> Router<Node> {
         .route("/v1/devices/requests", get(device_requests))
         .route("/v1/devices/approve", post(approve))
         .route("/v1/devices/refuse", post(refuse_device))
+        .route("/v1/devices/forget-sign-in", post(forget_sign_in))
         .route("/v1/grant", post(grant))
         .route("/v1/accept", post(accept))
         .route("/v1/handle", post(handle))
@@ -334,6 +335,7 @@ pub const SIGNED_IN: &[&str] = &[
     "/v1/devices/requests",
     "/v1/devices/approve",
     "/v1/devices/refuse",
+    "/v1/devices/forget-sign-in",
     "/v1/accept",
     "/v1/member",
     "/v1/handle",
@@ -983,6 +985,13 @@ async fn device_requests(State(node): State<Node>, me: Me) -> Reply {
 async fn refuse_device(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
     only(&body, &["code"])?;
     Ok(Json(node.refuse_device(&me.caller, text(&body, "code")?).await?))
+}
+
+/// `{ key }`: forgets what one of the caller's devices signed in with.
+async fn forget_sign_in(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
+    only(&body, &["key"])?;
+    node.forget_sign_in(&me.caller, text(&body, "key")?).await?;
+    Ok(Json(json!({})))
 }
 
 /// `{ code, confirm?, recovery? }`: lets in the device showing `code`, as whoever asked, or with `recovery`,

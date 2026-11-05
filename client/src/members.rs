@@ -173,6 +173,8 @@ fn now() -> u64 {
 /// - `root`, `name`, `recovery` (hex, what each epoch is sealed to besides devices)
 /// - `devices`: each listed now, `{ key, seal, user, name, roles, passkey, device }`, and the serverless node as
 ///   `{ key, seal, roles: ["compute"] }`
+/// - `removed`: the keys taken out, or turned down before they were listed, which are never sealed anything again
+/// - `sign_in_clients`: the OIDC clients the install's people sign in with, its setting (`sign_in_proof::CLIENTS`)
 /// - `openers`: each scope's `{ key, seal }` its epochs are sealed to
 /// - `runs_for`: each node's scopes whose calls it runs: the only nodes handed a scope's keys
 /// - `epochs`: each scope's newest epoch `n` and every epoch's hash
@@ -246,7 +248,9 @@ pub fn view_of(db: &ScopeDb) -> Result<Value> {
     let runs: Map<String, Value> = people.iter().filter_map(|u| Some((u.clone(), json!(db.runs(u)?.iter().map(hex).collect::<Vec<_>>())))).collect();
     Ok(json!({
         "root": db.root().map(|r| r.to_hex()), "name": db.name(), "recovery": db.recovery().as_ref().map(hex),
-        "devices": devices, "openers": openers, "runs_for": runs_for, "epochs": epochs, "people": answers,
+        "devices": devices, "openers": openers,
+        "removed": db.machines().iter().filter(|d| d.removed).map(|d| hex(&d.key)).collect::<Vec<_>>(),
+        "sign_in_clients": db.setting(one::sign_in_proof::CLIENTS), "runs_for": runs_for, "epochs": epochs, "people": answers,
         "roles": roles, "runs": runs,
     }))
 }
@@ -306,6 +310,8 @@ mod tests {
         i.write(&laptop, BOB, members::epoch(&Scope::Group(GROUP.into()), 1, &[laptop.verifying_key().to_bytes(), mac.verifying_key().to_bytes()], &hash('d')));
         i.write(&mac, ANDRE, members::remove_device(&phone.verifying_key().to_bytes(), None));
         i.write(&mac, ANDRE, members::remove_user(CAROL, &BTreeMap::from([(carols.verifying_key().to_bytes(), None)])));
+        let stranger = key(8);
+        i.write(&mac, ANDRE, members::refuse(&at(&stranger), "MacBook Pro"));
         let mut g = Global::new(None);
         g.add_entries(i.entries.clone()).unwrap();
         let m = g.members().unwrap();
@@ -331,6 +337,12 @@ mod tests {
         }
         let devices: Vec<String> = k["devices"].as_array().unwrap().iter().map(|d| d["key"].as_str().unwrap().to_string()).collect();
         assert_eq!(devices, m.machines.keys().filter(|k| m.machine(k).is_some()).chain(m.serverless().as_ref()).map(hex).collect::<Vec<_>>());
+        // Never sealed anything again: a device taken out, one turned down before it was listed, and a removed person's.
+        let mut removed = names(&k["removed"]);
+        removed.sort();
+        let mut out: Vec<String> = [&phone, &carols, &stranger].iter().map(|d| hex(&d.verifying_key().to_bytes())).collect();
+        out.sort();
+        assert_eq!(removed, out);
         for s in &m.scopes() {
             assert_eq!(k["epochs"][s.to_string()]["n"].as_u64().unwrap_or(0) as u32, m.epoch(s), "{s}'s epoch");
             for n in 1..=m.epoch(s) {

@@ -275,7 +275,7 @@ export function server(version) {
             const proof = JSON.stringify(m.proof);
             const at = issuerKeysAt(proof, m.address);
             const keys = at ? await (await fetch(at)).text() : "";
-            return post({ id, account: JSON.parse(signedInWith(proof, m.key, m.seal, m.address, keys, m.accounts ? JSON.stringify(m.accounts) : undefined, Date.now())) });
+            return post({ id, account: JSON.parse(signedInWith(proof, m.key, m.seal, m.address, m.genesis, m.clients || "", keys, m.accounts ? JSON.stringify(m.accounts) : undefined, Date.now())) });
           }
           case "reconnect": {
             const s = await session?.ready;

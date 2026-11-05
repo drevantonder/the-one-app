@@ -27,7 +27,11 @@ Considered and declined (Andre, 11-05): letting a new device in with none of the
 ## What it trusts
 
 - The provider, not the kernel: whoever controls the person's Google (or Apple, Microsoft) account, or their passkey, can add a device. Their 2-step verification matters.
-- Auth runs the sign-in but can't make the proof: a bug in auth, or someone reading its database, lets no device in. A tampered auth deploy could get a person to sign in for its own device, as the browsers' code it serves could already take what a browser opens; that's the Cloudflare account's trust, and the "joined · Remove" notice is what shows it.
+- Auth runs the sign-in but can't make the proof: a bug in auth, or someone reading its database, lets no device in by itself. What a device is checked against is only what the person's own devices recorded of their own clients (an admin's device recording a machine or someone's first device counts for nothing), and an ID token counts only for the install's own client, named by the `sign_in_clients` setting an admin's device signs as it deploys the kernel, never by auth. A proof names the install (its first entry's hash) as well as the device.
+- Where auth is still trusted: when a person approves a device by its code, what that device signed in with is recorded. For Google that's checked against Google's keys and the install's client, so a tampered auth can't plant its own account. For a passkey, the public key comes from auth, which keeps it: passkeys are made on auth's own page, so no client sees one made without auth's code in between. The approval card names what's recorded ("a@example.com · Google", or "Passkey"), and each device's ⋯ › Sign-ins… shows it and removes it, by an entry every device of theirs honours.
+- Not Me sticks: it's an entry that takes the device's key out before it's ever listed, so none of the person's devices lets it in, by its sign-in or its code, and auth forgets its proof. A browser refuses to seal anything to a key its own replay has taken out, whatever a node says.
+- A tampered auth deploy could still get a person to sign in for its own device, as the browsers' code it serves could already take what a browser opens; that's the Cloudflare account's trust, and the "joined · Remove" notice is what shows it.
+- An older device (a phone or Mac behind) doesn't know Not Me's or Sign-ins' entries and goes on as before; its check fails on a sign-in naming the install, so it lets that device in only by code.
 
 ## Work
 

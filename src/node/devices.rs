@@ -396,7 +396,7 @@ impl Node {
         let mut out = Vec::new();
         for r in asked {
             let Ok(device) = r.endpoint() else { continue };
-            if refused.contains(&r.key) {
+            if refused.contains(&r.key) || self.taken_out(&device.key)? {
                 continue;
             }
             let mut shown = match mine_or_invited(&r, caller, &invites, &device) {
@@ -413,13 +413,18 @@ impl Node {
             if let Some(place) = &r.place {
                 shown["place"] = json!(place);
             }
+            // What approving it records as what they sign in with, for the card to say.
+            if let Some(account) = self.signed_in_with(&r, None).await {
+                shown["sign_in"] = json!(account);
+            }
             out.push(shown);
         }
         Ok(out)
     }
 
-    /// Turns down the device whose join code is `code`, one `caller` may approve: its request is forgotten at auth, and
-    /// it isn't shown here again when it asks again. → which it was.
+    /// Turns down the device whose join code is `code`, one `caller` may approve: its request (and what its sign-in
+    /// showed) is forgotten at auth, and it isn't shown here again when it asks again. One of their own ("Not Me") is
+    /// turned down by an entry (`members::refuse`), so no device of theirs lets it in after. → which it was.
     pub async fn refuse_device(&self, caller: &Caller, code: &str) -> Result<Value> {
         let code = code_of(code);
         ensure!(code.len() == 8, "a code is the 8 letters and digits the new device shows");
@@ -427,7 +432,11 @@ impl Node {
         let asked: Vec<DeviceRequest> = serde_json::from_value(asked["requests"].clone()).context("auth's requests aren't requests")?;
         let r = waiting(asked, &code)?;
         let invites = if caller.user == self.user()? { self.invites().await? } else { BTreeMap::new() };
-        ensure!(mine_or_invited(&r, caller, &invites, &r.endpoint()?).is_some(), "that device isn't yours, or someone's you invited, to turn down");
+        let mine = mine_or_invited(&r, caller, &invites, &r.endpoint()?).context("that device isn't yours, or someone's you invited, to turn down")?;
+        if mine.is_none() && !self.taken_out(&r.endpoint()?.key)? {
+            ensure!(caller.user == self.user()?, "{} isn't one of your devices, so turn it down on one that is", self.device_name());
+            self.member_content(caller, members::refuse(&r.endpoint()?, &r.name)).await?;
+        }
         {
             let mut refused = self.0.refused.lock().unwrap();
             if refused.len() >= 50 {
@@ -555,6 +564,7 @@ impl Node {
     /// the proof their invite's secret makes with its key. → what it was sealed, and what it wasn't.
     pub async fn approve_request(&self, caller: &Caller, r: &DeviceRequest, invite: Option<&Invited>) -> Result<Value> {
         let endpoint = r.endpoint()?;
+        ensure!(!self.taken_out(&endpoint.key)?, "{} was turned down or taken out, so it isn't let in again: start again on it, for a new code", r.name);
         let on = r.device.as_deref().map(crate::keys::unhex).transpose().context("the device it's on is 64 hex characters")?;
         let mut listed = match invite {
             Some(i) => {
@@ -627,8 +637,8 @@ impl Node {
     /// record them) for one let in by it, else for one approved by its code. None if it shows nothing that checks out.
     async fn signed_in_with(&self, r: &DeviceRequest, accounts: Option<&[crate::sign_in_proof::Account]>) -> Option<crate::sign_in_proof::Account> {
         let proof = r.proof()?;
-        let (endpoint, address) = (r.endpoint().ok()?, self.address().ok()?);
-        let jwks = match proof.issuer().and_then(|i| crate::sign_in_proof::keys_at(&i, &address)) {
+        let (endpoint, install) = (r.endpoint().ok()?, self.sign_in_install().ok()?);
+        let jwks = match proof.issuer().and_then(|i| crate::sign_in_proof::keys_at(&i, &install.address)) {
             Some(at) => match self.issuer_keys(&at).await {
                 Ok(keys) => Some(keys),
                 Err(err) => {
@@ -639,10 +649,34 @@ impl Node {
             None => None,
         };
         let checked = match accounts {
-            Some(theirs) => crate::sign_in_proof::vouches(&proof, &endpoint, &address, jwks.as_ref(), theirs, now_ms()),
-            None => crate::sign_in_proof::check(&proof, &endpoint, &address, jwks.as_ref(), now_ms()),
+            Some(theirs) => crate::sign_in_proof::vouches(&proof, &endpoint, &install, jwks.as_ref(), theirs, now_ms()),
+            None => crate::sign_in_proof::check(&proof, &endpoint, &install, jwks.as_ref(), now_ms()),
         };
         checked.map_err(|err| tracing::info!("{}'s sign-in doesn't let it in by itself: {err:#}", r.name)).ok()
+    }
+
+    /// The install a new device's sign-in must be for, as this device's signed entries say.
+    fn sign_in_install(&self) -> Result<crate::sign_in_proof::Install> {
+        let address = self.address()?;
+        self.with(|i| {
+            let root = i.r.root.context("this device isn't in your One App yet")?;
+            Ok(crate::sign_in_proof::Install::new(&address, *root.as_bytes(), i.r.db().setting(crate::sign_in_proof::CLIENTS).as_deref()))
+        })
+    }
+
+    /// Whether `key` was listed and taken out, or turned down before it was: never let in again.
+    fn taken_out(&self, key: &Key) -> Result<bool> {
+        self.with(|i| Ok(i.r.db().machine_ever(key).is_some_and(|m| m.removed)))
+    }
+
+    /// Forgets what one of `caller`'s devices (`key`, hex) signed in with: a new device's sign-in is no longer checked
+    /// against it.
+    pub async fn forget_sign_in(&self, caller: &Caller, key: &str) -> Result<()> {
+        ensure!(caller.user == self.user()?, "{} isn't one of your devices, so do this on one that is", self.device_name());
+        let key = crate::keys::unhex(key).context("a device's key is 64 hex characters")?;
+        let theirs = self.with(|i| Ok(i.r.db().machine(&key).is_some_and(|m| m.user == caller.user && m.sign_in.is_some())))?;
+        ensure!(theirs, "that isn't one of your devices with a sign-in to forget");
+        self.member_content(caller, members::forget_sign_in(&key)).await
     }
 
     /// An issuer's keys, published at `at`: kept for an hour.
@@ -687,7 +721,7 @@ impl Node {
             let accounts = self.with(|i| Ok(i.r.db().sign_ins(&user)))?;
             // Checked once against the accounts they have now, and again if those change.
             let tried = format!("{} {}", r.key, json!(accounts));
-            let done = self.0.refused.lock().unwrap().contains(&r.key) || self.0.sign_ins.lock().unwrap().refused.contains(&tried);
+            let done = self.0.refused.lock().unwrap().contains(&r.key) || self.0.sign_ins.lock().unwrap().refused.contains(&tried) || r.endpoint().ok().is_none_or(|d| self.taken_out(&d.key).unwrap_or(true));
             if done || accounts.is_empty() {
                 continue;
             }

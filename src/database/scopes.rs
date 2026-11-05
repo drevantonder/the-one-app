@@ -485,9 +485,10 @@ impl ScopeDb {
         self.machine(k).filter(|m| m.is(Kind::Service))
     }
 
-    /// What `user` signs in with, as their devices listed now record it: what a new device's sign-in is checked against.
+    /// What `user` signs in with, as their own devices recorded it of their clients listed now: what a new device's
+    /// sign-in is checked against. Not what an admin's device recorded, of a machine or of their first device.
     pub fn sign_ins(&self, user: &str) -> Vec<crate::sign_in_proof::Account> {
-        let mut out: Vec<_> = self.machines().into_iter().filter(|m| !m.removed && m.user == user).filter_map(|m| m.sign_in).collect();
+        let mut out: Vec<_> = self.machines().into_iter().filter(|m| !m.removed && m.user == user && m.by == user && m.is(Kind::Client)).filter_map(|m| m.sign_in).collect();
         out.dedup();
         out
     }
@@ -812,7 +813,7 @@ pub(crate) mod tests {
             assert_eq!(db.runs(&u.id), m.runs.get(&u.id).cloned());
             let unchosen: Vec<Key> = if m.runs.contains_key(&u.id) { Vec::new() } else { m.computes().filter(|c| c.user != u.id && m.runs_for(&c.key, &Scope::Global)).map(|c| c.key).collect() };
             assert_eq!(db.runs_until_chosen(&u.id), unchosen);
-            let mut signs_in: Vec<_> = m.machines.keys().filter_map(|k| m.machine(k)).filter(|d| d.user == u.id).filter_map(|d| d.sign_in.clone()).collect();
+            let mut signs_in: Vec<_> = m.machines.keys().filter_map(|k| m.machine(k)).filter(|d| d.user == u.id && d.by == u.id && d.is(Kind::Client)).filter_map(|d| d.sign_in.clone()).collect();
             signs_in.dedup();
             assert_eq!(db.sign_ins(&u.id), signs_in);
             for s in m.scopes() {

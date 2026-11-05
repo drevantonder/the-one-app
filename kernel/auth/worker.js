@@ -20,10 +20,12 @@
 //
 // A sign-in for a client names the device it's for (`join` in its authorization's query: its key and seal key, 128
 // hex), so a device of the person's can check it themselves (src/sign_in_proof.rs) and let the device in with no one
-// tapping: with Google, auth asks for an ID token whose `nonce` names it (`joinNonce`), and keeps the token Google gave;
-// with a passkey, the prompt's challenge names it and when (`joinChallenge`), and auth keeps the assertion. Either is
-// kept (`proofs`) and passed on unchanged with that device's request to join (`sign_in`), never checked here: only the
-// person's devices count it. A try install's kernel signs its own ID token, with nothing else to show.
+// tapping: with Google, auth asks for an ID token whose `nonce` names it in this install (`joinNonce`, with `GENESIS`),
+// and keeps the token Google gave; with a passkey, the prompt's challenge names it, the install and when
+// (`joinChallenge`), and auth keeps the assertion. Either is kept (`proofs`) and passed on unchanged with that device's
+// request to join (`sign_in`), never checked here: only the person's devices count it, and only for an account their
+// own devices recorded. Refusing a request forgets its proof too. A try install's kernel signs its own ID token, with
+// nothing else to show.
 //
 // What an endpoint signs (`signedRequest` in shared/crypto.js, domain `one/auth`) names its route (`route: "POST
 // /api/auth/invites"`), is taken once, and counts only from one of the install's endpoints, as the relay's list says
@@ -106,6 +108,10 @@ function joinOf(query) {
 
 /// A device's key and seal key, from what `join` names.
 const endpointOf = (join) => [hex.decode(join.slice(0, 64)), hex.decode(join.slice(64))];
+
+/// The install's first entry's hash (`GENESIS`, hex, as the device deploying the kernel holds it), which a sign-in for
+/// a device names beside it: without it, a sign-in names no device, and its device is approved by its code.
+const genesisOf = (env) => (/^[0-9a-f]{64}$/.test(env.GENESIS || "") ? hex.decode(env.GENESIS) : null);
 
 /// Base64 of any kind, as base64url.
 const asB64u = (s) => String(s || "").replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
@@ -437,9 +443,10 @@ export class Auth extends DurableObject {
   /// kept as the one its assertion must sign. Any other is as Better Auth made it, and so is one whose challenge it
   /// couldn't change: that sign-in shows nothing, and its device is approved by its code.
   async namingDevice(resp, join) {
-    if (!JOIN.test(join || "") || !resp.ok) return resp;
+    const genesis = genesisOf(this.env);
+    if (!JOIN.test(join || "") || !resp.ok || !genesis) return resp;
     const out = await resp.clone().json();
-    const ours = b64u.encode(joinChallenge(...endpointOf(join), Date.now()));
+    const ours = b64u.encode(joinChallenge(genesis, ...endpointOf(join), Date.now()));
     const [was, now] = [`"expectedChallenge":"${out.challenge}"`, `"expectedChallenge":"${ours}"`];
     const sql = this.ctx.storage.sql;
     sql.exec("update verification set value = replace(value, ?, ?) where instr(value, ?) > 0", was, now, was);
@@ -469,8 +476,8 @@ export class Auth extends DurableObject {
     let challenge;
     try { challenge = b64u.decode(JSON.parse(new TextDecoder().decode(b64u.decode(r.clientDataJSON))).challenge); } catch { return; }
     const prefix = new TextEncoder().encode("one/join\0");
-    if (challenge.length !== prefix.length + 72 || prefix.some((b, i) => challenge[i] !== b)) return;
-    const join = hex.encode(challenge.slice(prefix.length, prefix.length + 64));
+    if (challenge.length !== prefix.length + 104 || prefix.some((b, i) => challenge[i] !== b)) return;
+    const join = hex.encode(challenge.slice(prefix.length + 32, prefix.length + 96));
     const [row] = this.ctx.storage.sql.exec("select userId, publicKey from passkey where credentialID = ?", resp.id).toArray();
     if (!row) return;
     this.keepProof(join, row.userId, { passkey: { credential: resp.id, authenticator_data: r.authenticatorData, client_data: r.clientDataJSON, signature: r.signature, public_key: asB64u(row.publicKey) } });
@@ -481,14 +488,15 @@ export class Auth extends DurableObject {
   async withNonce(request, resp) {
     const secret = cookieOf(request.headers, cookieName(this.env, "one-google-start"));
     const [row] = secret ? this.ctx.storage.sql.exec("select join_for from google_starts where id = ?", await hash(secret)).toArray() : [];
-    if (!row?.join_for || !resp.ok) return resp;
+    const genesis = genesisOf(this.env);
+    if (!row?.join_for || !resp.ok || !genesis) return resp;
     const out = await resp.clone().json().catch(() => null);
     if (!out) return resp;
     const headers = new Headers(resp.headers);
     headers.delete("content-length");
     if (out.url) {
       const to = new URL(out.url);
-      to.searchParams.set("nonce", await joinNonce(...endpointOf(row.join_for)));
+      to.searchParams.set("nonce", await joinNonce(genesis, ...endpointOf(row.join_for)));
       out.url = to.toString();
       if (headers.has("location")) headers.set("location", out.url);
     }
@@ -574,7 +582,9 @@ export class Auth extends DurableObject {
       if (!row.approved) this.ctx.storage.sql.exec("update requests set approved = ?, genesis = ? where key = ?", Date.now(), /^[0-9a-f]{64}$/.test(genesis || "") ? genesis : null, key);
       return {};
     }
+    // Refused: what its sign-in showed goes too, so asking again shows nothing a device lets it in by.
     this.ctx.storage.sql.exec("delete from requests where key = ?", key);
+    this.ctx.storage.sql.exec("delete from proofs where key = ?", key);
     return {};
   }
 
@@ -804,10 +814,11 @@ function tryInstall(auth, id, name) {
   // must refuse.
   const tryProof = async (ctx, user) => {
     const join = JOIN.test(ctx.body?.join || "") ? ctx.body.join : null;
-    if (!join) return;
+    const genesis = genesisOf(auth.env);
+    if (!join || !genesis) return;
     const origin = new URL(auth.env.ADDRESS).origin;
     const named = ctx.body.spoil === true ? "0".repeat(128) : join;
-    const payload = { iss: `${origin}/api/auth`, aud: "one-try", sub: user.id, iat: Math.floor(Date.now() / 1000), nonce: await joinNonce(...endpointOf(named)) };
+    const payload = { iss: `${origin}/api/auth`, aud: "one-try", sub: user.id, iat: Math.floor(Date.now() / 1000), nonce: await joinNonce(genesis, ...endpointOf(named)) };
     const { token } = await auth.auth.api.signJWT({ body: { payload } });
     auth.keepProof(join, user.id, { id_token: token });
   };

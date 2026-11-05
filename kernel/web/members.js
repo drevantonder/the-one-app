@@ -11,6 +11,10 @@ export const members = {
   /// `seqs`: the last of each of their devices' entries in `global` the remover holds (null for none), by key.
   removeUser: ({ user, seqs }) => node("remove", { user, seqs }),
   removeDevice: ({ key, seq = null }) => node("remove", { key, seq }),
+  /// A device that asked to join as this person's, turned down ("Not Me") before it was listed.
+  refuse: ({ key, seal, name }) => node("refuse", { key, seal, name }),
+  /// What one of this person's devices signed in with, forgotten.
+  forgetSignIn: ({ key }) => node("forget-sign-in", { key }),
   setting: ({ name, value = null }) => node("setting", { name, value }),
   group: ({ group, name }) => node("group", { group, name }),
   invite: ({ group, user, role }) => node("invite", { group, user, role }),

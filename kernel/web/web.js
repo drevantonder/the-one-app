@@ -1175,9 +1175,16 @@ window.__one = {};
     "GET /v1/devices/passkey": async () => ({ passkey: !!passkeyToList() }),
     // `{ key: ms }`: when each device was last let onto the install's network.
     "GET /v1/devices/seen": () => device.seen(),
-    // As a machine's node answers it, each with its code, which the device asking shows too, to compare.
-    "GET /v1/devices/requests": async () => (await waitingNow()).map((r) => ({ device: r.name, person: r.person, code: r.code, made: r.made, ...(r.place ? { place: r.place } : {}), ...(r.mine ? { yours: true } : { new: true }) })),
-    // `{ code }`: one waiting that isn't theirs, turned down, and not asked about again here.
+    // As a machine's node answers it, each with its code, which the device asking shows too, to compare, and what
+    // approving it records as what they sign in with.
+    "GET /v1/devices/requests": async () =>
+      Promise.all((await waitingNow()).map(async (r) => {
+        const signIn = await signedInWith(r, undefined);
+        return { device: r.name, person: r.person, code: r.code, made: r.made, ...(r.place ? { place: r.place } : {}), ...(signIn ? { sign_in: signIn } : {}), ...(r.mine ? { yours: true } : { new: true }) };
+      })),
+    // `{ key }`: what one of this person's devices signed in with, forgotten.
+    "POST /v1/devices/forget-sign-in": (b) => write(members.forgetSignIn({ key: String(b.key || "") })),
+    // `{ code }`: one waiting turned down, and not asked about again here; one of their own, by every device of theirs.
     "POST /v1/devices/refuse": async (b) => {
       const code = String(b.code || "").toUpperCase().replace(/[^A-Z2-7]/g, "");
       const r = (await device.requests()).find((x) => x.code.replace(" ", "") === code);
@@ -1216,7 +1223,12 @@ window.__one = {};
 
   /// What a device waiting signed in with, checked here: against `accounts`, its person's as their devices record them,
   /// for one this browser lets in by it, or with none, for one approved by its code. → null if it doesn't check out.
-  const signedInWith = (r, accounts) => (r.sign_in ? net.signedInWith(r.sign_in, r.key, r.seal, location.origin, accounts).catch(() => null) : Promise.resolve(null));
+  const signedInWith = async (r, accounts) => {
+    if (!r.sign_in) return null;
+    const k = await device.checked().catch(() => null);
+    if (!k?.root) return null;
+    return net.signedInWith(r.sign_in, r.key, r.seal, location.origin, { genesis: k.root, clients: k.sign_in_clients || "" }, accounts).catch(() => null);
+  };
 
   /// Requests whose sign-in was checked here and didn't let them in, with the accounts it was checked against: left
   /// for the person, by code, unless their accounts change.

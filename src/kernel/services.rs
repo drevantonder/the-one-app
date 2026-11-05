@@ -76,6 +76,10 @@ pub struct Settings {
     /// them when it has none yet.
     #[serde(skip)]
     pub devices: Vec<serde_json::Value>,
+    /// The install's first entry's hash (hex), from the node on this machine as `devices` is: what a sign-in for a
+    /// device names beside it (`sign_in_proof`). None for a kernel made before its install.
+    #[serde(skip)]
+    pub genesis: Option<String>,
     /// The serverless node's endpoint key (hex), which only its Worker holds: its public half is on the relay's list.
     #[serde(default, skip_serializing)]
     pub serverless_key: String,
@@ -322,6 +326,7 @@ impl Settings {
             cloudflare_token: None,
             devices: vec![],
             push: [("VAPID_KEY".to_string(), vapid_key())].into(),
+            genesis: None,
             try_person: None,
         }
     }
@@ -486,6 +491,9 @@ impl Settings {
                 } else if google() {
                     plain("SIGN_IN", "google".into());
                     plain("JOIN_DOMAIN", crate::config::JOIN_DOMAIN.into());
+                }
+                if let Some(genesis) = &self.genesis {
+                    plain("GENESIS", genesis.clone());
                 }
                 // Tokens are for the install's address unless a client asks for a node's own.
                 let resources: Vec<&String> = std::iter::once(&self.address).chain(&self.resources).collect();

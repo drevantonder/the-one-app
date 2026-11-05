@@ -306,6 +306,9 @@ pub fn allowed(db: &ScopeDb, scope: &Scope, step: &Entry) -> Result<()> {
             Ok(user) => db.user(&user).is_some_and(|u| db.may_take(w, &user, super::scope::role(u.role), scopes::INSTALL)),
             Err(_) => may("remove", &scopes::device(&unhex(&text("key")?)?)),
         },
+        // A person's own say over their devices: turning one down before it's listed, and forgetting what one of
+        // theirs signed in with (replay checks it's theirs).
+        (members::APP, "refuse" | "forget-sign-in") => may("add-devices", &scopes::person(w)),
         (members::APP, "epoch") => {
             let s = Scope::parse(&text("scope")?)?;
             may("remove", &scopes::object(&s))

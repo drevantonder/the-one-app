@@ -675,6 +675,29 @@ impl Members {
                 self.machines.insert(machine.key, machine);
                 self.devices_at = self.devices_at.max(e.time());
             }
+            "refuse" => {
+                // A device its person said isn't theirs ("Not Me"), before it was ever listed: its key is taken out now, so
+                // no device of theirs lets it in, by its sign-in or its code, and nothing it writes counts. An older
+                // device skips this, and goes on as before.
+                let key = key_of("key")?;
+                ensure!(self.user(&w).is_some(), "only someone in the install turns down a device of theirs");
+                ensure!(!self.machines.contains_key(&key), "that key is listed already: take it out instead");
+                let mut machine = listed(&json!({ "key": data["key"], "seal": data["seal"], "name": data["name"], "roles": [Kind::Client] }), &w, e.time())?;
+                machine.by = w.clone();
+                machine.removed = true;
+                merge(&mut self.cuts, &BTreeMap::from([((key, "global".to_string()), 0)]));
+                self.machines.insert(key, machine);
+                self.devices_at = self.devices_at.max(e.time());
+            }
+            "forget-sign-in" => {
+                // What one of their devices signed in with, forgotten by its person's own device: a new device's sign-in
+                // is no longer checked against it. An older device skips this.
+                let key = key_of("key")?;
+                let it = self.machine(&key).context("no such device")?;
+                ensure!(it.user == w, "only its person's own device forgets what it signed in with");
+                self.machines.get_mut(&key).unwrap().sign_in = None;
+                self.devices_at = self.devices_at.max(e.time());
+            }
             "role" => {
                 ensure!(self.is_admin(&w), "admins only");
                 let user = id_of("user")?;
@@ -1327,6 +1350,17 @@ pub fn member(group: &str, user: &str, role: Option<Role>) -> Content {
 }
 
 /// Renames a device (`key`), a person (`user`) or a group (`group`): `what` is which, `id` its key (hex) or id.
+/// Turns down a device that asked to join as this person's, before it's listed ("Not Me"): every device of theirs
+/// then refuses it.
+pub fn refuse(endpoint: &crate::keys::Endpoint, name: &str) -> Content {
+    node("refuse", json!({ "key": hex(&endpoint.key), "seal": hex(&endpoint.seal), "name": name }))
+}
+
+/// Forgets what one of this person's devices signed in with (`Machine::sign_in`).
+pub fn forget_sign_in(key: &Key) -> Content {
+    node("forget-sign-in", json!({ "key": hex(key) }))
+}
+
 pub fn rename(what: &str, id: &str, name: &str) -> Content {
     let mut data = json!({ "name": name });
     data[what] = json!(id);
@@ -1474,6 +1508,57 @@ mod tests {
         add(&mut entries, &mut mac, ANDRE, remove_device(&phone.id(), None));
         let m = members(&entries);
         assert!(m.machine(&phone.id()).is_none(), "taken out, and the scope database's sign_ins agree it's gone (agrees)");
+    }
+
+    /// What a device signed in with is forgotten only by its person's own device; and a device they said isn't theirs
+    /// ("Not Me") is never listed after, by them or anyone, and nothing it writes counts.
+    #[test]
+    fn a_sign_in_is_forgotten_and_a_device_turned_down_stays_out() {
+        let (mut mac, mut entries) = setup();
+        let google = json!({ "provider": { "issuer": "https://accounts.google.com", "audience": "ours", "subject": "1" } });
+        let (mut phone, mut bobs) = (Dev::new(3), Dev::new(5));
+        let mut c = device(&phone.endpoint(), ANDRE, "phone", &[Kind::Client], None);
+        c.data["sign_in"] = google;
+        add(&mut entries, &mut mac, ANDRE, c);
+        add(&mut entries, &mut mac, ANDRE, device(&bobs.endpoint(), BOB, "bob's phone", &[Kind::Client], Some(("Bob", Role::Member))));
+        add(&mut entries, &mut bobs, BOB, forget_sign_in(&phone.id()));
+        assert!(members(&entries).machines[&phone.id()].sign_in.is_some(), "only its person forgets it");
+        let forget = forget_sign_in(&phone.id());
+        add(&mut entries, &mut phone, ANDRE, forget);
+        assert_eq!(members(&entries).machines[&phone.id()].sign_in, None);
+
+        let mut stranger = Dev::new(9);
+        add(&mut entries, &mut mac, ANDRE, refuse(&stranger.endpoint(), "MacBook Pro"));
+        add(&mut entries, &mut phone, ANDRE, device(&stranger.endpoint(), ANDRE, "MacBook Pro", &[Kind::Client], None));
+        add(&mut entries, &mut stranger, ANDRE, setting("sneaky", Some("1")));
+        let m = members(&entries);
+        assert!(m.machine(&stranger.id()).is_none() && m.machines[&stranger.id()].removed, "turned down, it's never listed");
+        assert!(!m.settings.contains_key("sneaky"), "and what it writes doesn't count");
+        // One listed already is taken out instead, as Remove does.
+        add(&mut entries, &mut mac, ANDRE, refuse(&phone.endpoint(), "phone"));
+        assert!(members(&entries).machine(&phone.id()).is_some());
+    }
+
+    /// A new device's sign-in is checked only against what a person's own devices recorded of their own clients: not a
+    /// machine an admin listed for them, nor their first device, which the inviting admin let in.
+    #[cfg(feature = "db")]
+    #[test]
+    fn only_a_persons_own_clients_say_what_they_sign_in_with() {
+        let (mut mac, mut entries) = setup();
+        let account = |s: &str| json!({ "provider": { "issuer": "https://accounts.google.com", "audience": "ours", "subject": s } });
+        let with = |c: Content, s: &str| {
+            let mut c = c;
+            c.data["sign_in"] = account(s);
+            c
+        };
+        let (mut bobs, box_, laptop) = (Dev::new(5), Dev::new(6), Dev::new(7));
+        add(&mut entries, &mut mac, ANDRE, with(device(&bobs.endpoint(), BOB, "bob's phone", &[Kind::Client], Some(("Bob", Role::Member))), "by-admin"));
+        add(&mut entries, &mut mac, ANDRE, with(device(&box_.endpoint(), BOB, "box", &[Kind::Compute], None), "admins-machine"));
+        add(&mut entries, &mut bobs, BOB, with(device(&laptop.endpoint(), BOB, "laptop", &[Kind::Client], None), "bobs-own"));
+        let m = members(&entries);
+        assert!(m.machine(&box_.id()).is_some(), "the admin listed it");
+        let db = crate::database::scopes::ScopeDb::build(&m, &Scope::Global, &Default::default(), 0).unwrap();
+        assert_eq!(db.sign_ins(BOB), vec![serde_json::from_value(account("bobs-own")).unwrap()]);
     }
 
     #[test]

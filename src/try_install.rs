@@ -292,6 +292,9 @@ fn start_new(dir: &Path) -> Result<String> {
     let settings = load_kernel(dir)?;
     spawn_kernel(dir, &settings, &addr)?;
     crate::request(agent().post(on("/v1/settings")).send_json(json!({ "name": "address", "value": &settings.address })))?;
+    // Its kernel signs its own ID tokens, as a provider would, for this client: the one its people sign in with.
+    let clients = format!("{}/api/auth one-try", settings.address);
+    crate::request(agent().post(on("/v1/settings")).send_json(json!({ "name": one::sign_in_proof::CLIENTS, "value": clients })))?;
     // Its data moves to the try bucket, which its node reaches only through the kernel's URL signer from then on.
     let moved = crate::request(agent().post(on("/v1/storage")).send_json(json!({ "endpoint": format!("http://{bucket}"), "bucket": "try" })))?;
     anyhow::ensure!(moved["kept"] == true, "the try install's node couldn't reach its bucket through the URL signer: {moved}");

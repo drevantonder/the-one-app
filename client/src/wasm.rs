@@ -242,21 +242,25 @@ pub fn issuer_keys_at(proof: String, address: String) -> String {
 }
 
 /// What a new device (`key`, `seal`, hex) signed in with, as its sign-in (`proof`, JSON) shows, checked here
-/// (`one::sign_in_proof`): with its issuer's `keys` (JSON, or "" for a passkey's), at the install's `address`; against
-/// `accounts` (its person's, as their devices record them, JSON), for one let in by it, or with none, for one approved
-/// by its code. → the account, as JSON, to record with it; throws why it doesn't check out.
+/// (`one::sign_in_proof`): with its issuer's `keys` (JSON, or "" for a passkey's), for the install at `address` whose
+/// first entry's hash is `genesis` (hex) and whose people sign in with `clients` (its `sign_in_clients` setting, as
+/// its entries say, or ""); against `accounts` (its person's, as their devices record them, JSON), for one let in by
+/// it, or with none, for one approved by its code. → the account, as JSON, to record with it; throws why it doesn't
+/// check out.
 #[wasm_bindgen(js_name = signedInWith)]
-pub fn signed_in_with(proof: String, key: String, seal: String, address: String, keys: String, accounts: Option<String>, now: f64) -> Result<String, JsError> {
+#[allow(clippy::too_many_arguments)]
+pub fn signed_in_with(proof: String, key: String, seal: String, address: String, genesis: String, clients: String, keys: String, accounts: Option<String>, now: f64) -> Result<String, JsError> {
     let proof: one::sign_in_proof::Proof = serde_json::from_str(&proof).map_err(js)?;
     let device = one::keys::Endpoint { key: self::key(&key)?, seal: self::key(&seal)? };
+    let install = one::sign_in_proof::Install::new(&address, self::key(&genesis)?, Some(&clients));
     let keys: Option<serde_json::Value> = (!keys.is_empty()).then(|| serde_json::from_str(&keys)).transpose().map_err(js)?;
     let now = now as u64;
     let account = match accounts {
         Some(theirs) => {
             let theirs: Vec<one::sign_in_proof::Account> = serde_json::from_str(&theirs).map_err(js)?;
-            one::sign_in_proof::vouches(&proof, &device, &address, keys.as_ref(), &theirs, now)
+            one::sign_in_proof::vouches(&proof, &device, &install, keys.as_ref(), &theirs, now)
         }
-        None => one::sign_in_proof::check(&proof, &device, &address, keys.as_ref(), now),
+        None => one::sign_in_proof::check(&proof, &device, &install, keys.as_ref(), now),
     };
     Ok(serde_json::to_string(&account.map_err(js)?).map_err(js)?)
 }

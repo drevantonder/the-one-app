@@ -169,6 +169,11 @@ impl Browser {
         let (status, out, _) = self.send("POST", path, Some(body), None);
         (status, out)
     }
+
+    fn delete(&mut self, path: &str) -> (u16, Value) {
+        let (status, out, _) = self.send("DELETE", path, None, None);
+        (status, out)
+    }
 }
 
 /// A passkey kept in software, as an authenticator keeps one: an Ed25519 key, with attestation "none".
@@ -255,6 +260,7 @@ impl Kernel {
         settings.auth_url = format!("http://127.0.0.1:{}", settings.ports[0]);
         // The install's first devices, its admin's machines that run its calls.
         settings.devices = devices.into_iter().map(|key| json!({ "key": key, "role": "compute", "admin": true })).collect();
+        settings.genesis = Some(data_encoding::HEXLOWER.encode(&GENESIS));
         settings.bucket = Some(json!({ "endpoint": "https://s3.test", "bucket": "install", "region": "auto", "key_id": "id", "secret": "bucket secret" }));
         let modules = kernel::SERVICES.iter().map(|(_, entry, _)| module(entry)).collect();
         let sites = port();
@@ -400,7 +406,7 @@ fn a_sign_in_for_a_device_names_it_and_auth_passes_it_on() {
     let (status, options, _) = new.get(&format!("/api/auth/passkey/generate-authenticate-options?join={join}"));
     assert_eq!(status, 200, "{options}");
     let challenge = B64U.decode(options["challenge"].as_str().unwrap().as_bytes()).unwrap();
-    assert_eq!(challenge[..challenge.len() - 8], sign_in_proof::challenge(&device, 0)[..challenge.len() - 8], "the challenge names the device");
+    assert_eq!(challenge[..challenge.len() - 8], sign_in_proof::challenge(&GENESIS, &device, 0)[..challenge.len() - 8], "the challenge names the device in this install");
     assert_eq!(new.post("/api/auth/passkey/verify-authentication", json!({ "response": passkey.get(&options) })).0, 200);
     assert_eq!(signed_in_as(&mut new).as_deref(), Some(andre.as_str()));
     let asked = |b: &mut Browser, d: &one::keys::Endpoint| {
@@ -410,10 +416,17 @@ fn a_sign_in_for_a_device_names_it_and_auth_passes_it_on() {
         out["sign_in"].clone()
     };
     let proof: Proof = serde_json::from_value(asked(&mut new, &device)).expect("its request carries the assertion");
-    let account = sign_in_proof::check(&proof, &device, &k.address, None, now()).expect("the person's devices check it");
+    let install = sign_in_proof::Install::new(&k.address, GENESIS, None);
+    let account = sign_in_proof::check(&proof, &device, &install, None, now()).expect("the person's devices check it");
     let Account::Passkey { public_key, .. } = &account else { panic!("{account:?}") };
-    let checked = sign_in_proof::vouches(&proof, &device, &k.address, None, std::slice::from_ref(&account), now());
+    let checked = sign_in_proof::vouches(&proof, &device, &install, None, std::slice::from_ref(&account), now());
     assert!(checked.is_ok() && !public_key.is_empty(), "and let it in by it, once it's recorded: {checked:?}");
+    let elsewhere = sign_in_proof::Install::new(&k.address, [6; 32], None);
+    assert!(sign_in_proof::vouches(&proof, &device, &elsewhere, None, std::slice::from_ref(&account), now()).is_err(), "but not in another install");
+    // Turned down, its request goes, and what its sign-in showed with it: asking again, it carries nothing.
+    let key = data_encoding::HEXLOWER.encode(&device.key);
+    assert_eq!(new.delete(&format!("/api/auth/devices/requests/{key}")).0, 200);
+    assert_eq!(asked(&mut new, &device), Value::Null, "a refused device's sign-in is forgotten");
     // Another device asking as them carries none, nor does one signed in for no device.
     assert_eq!(asked(&mut new, &one::keys::Endpoint::of(&ed25519_dalek::SigningKey::from_bytes(&rand::random()))), Value::Null);
     let mut plain = k.browser();
@@ -429,8 +442,11 @@ fn a_sign_in_for_a_device_names_it_and_auth_passes_it_on() {
     assert_eq!(browser.post("/sign-in/google", json!({ "oauth_query": query })).0, 200);
     let (status, out) = browser.post("/api/auth/sign-in/social", json!({ "provider": "google", "callbackURL": "/", "errorCallbackURL": "/" }));
     assert_eq!(status, 200, "{out}");
-    assert_eq!(url_query(out["url"].as_str().unwrap()).get("nonce"), Some(&sign_in_proof::nonce(&device)), "Google is asked for an ID token naming the device");
+    assert_eq!(url_query(out["url"].as_str().unwrap()).get("nonce"), Some(&sign_in_proof::nonce(&GENESIS, &device)), "Google is asked for an ID token naming the device in this install");
 }
+
+/// The install the test kernels are for: its first entry's hash, as the device deploying them holds it.
+const GENESIS: [u8; 32] = [5; 32];
 
 /// iroh endpoints, as nodes are, through the relay at a kernel's address and nothing else: its relay protocol is
 /// iroh-relay's Rust as WebAssembly in a Durable Object (kernel/relay/), which must agree with iroh's own.
