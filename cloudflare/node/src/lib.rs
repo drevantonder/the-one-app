@@ -789,7 +789,7 @@ fn view(r: &Replays, me: &str, client: &str, now: u64) -> Value {
         one::state::Here {
             me: json!({ "key": "", "name": client, "user": me }),
             client: Some(json!({ "key": "", "name": client })),
-            device: json!({ "key": "", "name": "", "ready": true, "guide": null }),
+            device: json!({ "key": m.cloudflare_node().map(|k| one::entry::hex(&k)).unwrap_or_default(), "name": "Cloudflare", "ready": true, "guide": null }),
             member: false,
             entries: 0,
             waiting: waiting as usize,

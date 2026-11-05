@@ -1287,6 +1287,11 @@ fn status(state: &Value) {
         };
         println!("  {dot} {shown}{here}  {}'s{serves}{build}", name(s["user"].as_str().unwrap_or("")));
     }
+    // Not a device, but a node like the rest: woken when asked, in its place in run priority.
+    if let Some(priority) = i["serverless"].get("priority") {
+        let at = priority.as_u64().map_or("last".to_string(), |n| n.to_string());
+        println!("  ● Cloudflare node  run priority {at}");
+    }
     let clients = i["clients"].as_array().cloned().unwrap_or_default();
     switch_gate(&i["switch"], &name);
     if !clients.is_empty() {
