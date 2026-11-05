@@ -409,7 +409,7 @@ impl Device {
                 Err(_) => drop(std::fs::remove_file(self.dir.join("welcome"))),
             }
         }
-        // A freeze an admin's device signed among them: judged and checked against global's log past where it says it ends.
+        // A freeze the recovery key signed among them: judged and checked against global's log past where it says it ends.
         global.read_steps(&bucket, &log_keys).await.map_err(failed)?;
         let who = global.who().map_err(failed)?;
         if kept.is_none()

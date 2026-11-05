@@ -7,17 +7,20 @@
 //! but where its writer meant it: one that loses its position to another is signed again for the next. A node only
 //! carries a client's step to the bucket: it can hold one back, but change none.
 //!
-//! The cut-over is `global`'s first step that is a freeze an admin's own device signed (`FREEZE`, `claimed`): it names
-//! the step of `global`'s log where the log ends (and of every other scope's log its last step in order), and carries
-//! the database there, its first copy. Its device writes the same freeze as the step of the log after that end first,
-//! its mark: the bucket takes a position once, so a freeze names the log's real end as its device read it just before,
-//! never an older one. Every reader replays exactly the entries in `global`'s log's steps up to it (`Log`), forks only
-//! among those, so every reader replays the same ones whatever it holds or reads later; judges the signer there and
-//! only there, so it judges the same whenever it reads it; and checks that the copy says what those entries add up to
-//! (`anchor`). Then it keeps it: from then on it reads the copy it keeps and the steps after, never the entries
-//! again. A freeze an admin signed that doesn't check out stops the reader there, as a newer release's step does,
-//! never passed over for the next; anyone else's is nothing. A `FREEZING` step before it tells writers of the log to
-//! look whether what they wrote is inside it.
+//! The cut-over is `global`'s first step that is a freeze the install's recovery key signed (`FREEZE`, `claimed`), in
+//! the one ceremony an admin runs with it (`one switch`, `Node::switch`): it names the step of `global`'s log where the
+//! log ends (and of every other scope's log its last step in order), and carries the database there, its first copy.
+//! The same freeze is written first as the step of the log after that end, its mark: the bucket takes a position once,
+//! so a freeze names the log's real end as it was read just before, never an older one, and a recovery key replaced
+//! since can't name one from before it was. Every reader replays exactly the entries in `global`'s log's steps up to
+//! it (`Log`), forks only among those, so every reader replays the same ones whatever it holds or reads later; judges
+//! the signer there and only there (the recovery key the genesis or a `recovery` entry up to there names), so it
+//! judges the same whenever it reads it; and checks that the copy says what those entries add up to (`anchor`). Then
+//! it keeps it: from then on it reads the copy it keeps and the steps after, never the entries again. A freeze the
+//! recovery key signed that doesn't check out stops the reader there, as a newer release's step does, never passed
+//! over for the next. Anything else shaped like a freeze is nothing, passed over before any log it names is read: a
+//! reader looks only at those a key it knows was ever the recovery key signed (`recovery_keys`). A `FREEZING` step
+//! the recovery key signed before it tells writers of the log to look whether what they wrote is inside it.
 //! Every other scope's database starts, before its first step, from what its log's entries up to the freeze's position
 //! there add up to (`scope_anchor`), which every reader of it works out itself: no writer chooses it.
 //!
@@ -195,10 +198,10 @@ pub async fn missing(bucket: &impl crate::bucket::Bucket, keys: &crate::db::Keys
     Ok(())
 }
 
-/// The kind of step that tells writers of the log that it's being frozen: the first a device of an admin's writes,
-/// before it works out where the log ends. Changes nothing; a writer that finds one after it wrote an entry looks
-/// whether the freeze that follows holds it (`Freeze::holds`), and once it has waited `node::steps`' while for one
-/// that doesn't come, writes on: its admin's device writes the freeze within half that, or not at all.
+/// The kind of step that tells writers of the log that it's being frozen: the first the recovery key signs in the
+/// ceremony, before it works out where the log ends. Changes nothing; a writer that finds one after it wrote an entry
+/// looks whether the freeze that follows holds it (`Freeze::holds`), and once it has waited `node::steps`' while for
+/// one that doesn't come, writes on: the ceremony writes the freeze within half that, or not at all.
 pub const FREEZING: &str = "freezing";
 
 /// The kind of step that freezes the log (`anchor`): `{ hash, logs }`, with its copy.
@@ -322,6 +325,11 @@ impl Log {
         self.ends.push(self.read.entries.len());
     }
 
+    /// Every key its entries say was ever the recovery key (`recovery_keys`).
+    pub fn recovery(&self) -> Recovery {
+        recovery_keys(self.root, &self.read.entries)
+    }
+
     /// Whether it was read far enough to judge a freeze that says the log ends at `to`: past the step after it, or to
     /// its end.
     pub fn reaches(&self, to: u64) -> bool {
@@ -357,14 +365,37 @@ pub async fn log_on(bucket: &impl crate::bucket::Bucket, keys: &crate::db::Keys,
     Ok(())
 }
 
-/// `global`'s log far enough to judge every freeze among `steps` (`wants_log`), as a reader that keeps nothing finds
-/// it, from the bucket: none before there's one.
-pub async fn log_for(bucket: &impl crate::bucket::Bucket, keys: &crate::db::Keys, steps: &[Option<Given>], root: Option<Hash>, now: u64) -> Result<Option<Log>> {
+/// `global`'s log far enough to judge every freeze among `steps` that a key in `recovery` signed (`wants_log`), as a
+/// reader that keeps nothing finds it, from the bucket: none before there's one.
+pub async fn log_for(bucket: &impl crate::bucket::Bucket, keys: &crate::db::Keys, steps: &[Option<Given>], root: Option<Hash>, recovery: &Recovery) -> Result<Option<Log>> {
     let mut log = None;
-    while let Some(end) = wants_log(steps, root, log.as_ref(), now) {
+    while let Some(end) = wants_log(steps, root, log.as_ref(), recovery) {
         log = Some(log_to(bucket, keys, root, end).await?);
     }
     Ok(log)
+}
+
+/// Every key that was ever the install's recovery key, as far as a reader knows: the one the genesis names (the entry
+/// whose hash is `root`), and each a `recovery` entry signed by one of those names. Only a freeze one of them signed
+/// is looked at, and its log read; which of them counts is judged at the end of the log it names (`claimed`).
+pub type Recovery = BTreeSet<Key>;
+
+/// `Recovery` from `entries`, `global`'s, in any order, of the install at `root`.
+pub fn recovery_keys<'a>(root: Option<Hash>, entries: impl IntoIterator<Item = &'a Entry>) -> Recovery {
+    let named = |e: &Entry, field: &str| e.content.data[field].as_str().and_then(|k| unhex(k).ok());
+    let mut handed = Vec::new();
+    let mut keys = Recovery::new();
+    for e in entries.into_iter().filter(|e| e.content.app == members::APP && e.log() == "global") {
+        match e.content.kind.as_str() {
+            "genesis" if Some(e.hash()) == root => keys.extend(named(e, "recovery")),
+            "recovery" => handed.extend(named(e, "key").map(|k| (e.author(), k))),
+            _ => {}
+        }
+    }
+    while let Some(i) = handed.iter().position(|(by, _)| keys.contains(by)) {
+        keys.insert(handed.swap_remove(i).1);
+    }
+    keys
 }
 
 /// The newest epoch of `scope` that `entries` of `global`'s make, of the install at `root`, with the forks among them.
@@ -417,24 +448,25 @@ pub fn view(root: Option<Hash>, ordered: &[Entry], now: u64) -> Result<ScopeDb> 
 
 /// Who's who as a reader that keeps nothing of its own works it out from `ordered`, `global`'s entries it holds in
 /// replay order, of the install at `root`, its scope database's steps by position from the first, and `global`'s log
-/// far enough to judge the freezes among them (`log_for`): the steps' once its log is frozen (`Truth::read`), replay's
-/// before.
+/// far enough to judge the freezes among them (`log_for`, with `recovery_keys` of `ordered`): the steps' once its log is
+/// frozen (`Truth::read`), replay's before.
 pub fn who(steps: &[Option<Given>], root: Option<Hash>, ordered: &[Entry], log: Option<&Log>, now: u64) -> Result<ScopeDb> {
-    match Truth::read(steps, root, log, now)? {
+    match Truth::read(steps, root, log, &recovery_keys(root, ordered), now)? {
         Some(t) => Ok(t.db),
         None => view(root, ordered, now),
     }
 }
 
-/// The freeze `given`, step `at` of `global`'s database, says, if it's one at all: what a reader reads `global`'s log
-/// to the step after the end of (`log_to`) before it judges whose it is (`claimed`).
-pub fn candidate(given: Option<&Given>, at: u64) -> Option<Freeze> {
-    Freeze::of(&given.filter(|g| g.step.content.kind == FREEZE)?.step, at).ok()
+/// The freeze `given`, step `at` of `global`'s database, says, if it's one a key in `recovery` signed: what a reader
+/// reads `global`'s log to the step after the end of (`log_to`) before it judges whether that key was the recovery key
+/// there (`claimed`). Anyone else's is nothing, and the end it names is never read.
+pub fn candidate(given: Option<&Given>, at: u64, recovery: &Recovery) -> Option<Freeze> {
+    Freeze::of(&given.filter(|g| g.step.content.kind == FREEZE && recovery.contains(&g.step.author()))?.step, at).ok()
 }
 
-/// A freeze whose mark isn't in the bucket yet: nothing at the step of `global`'s log after its end (`claimed`). An
-/// honest device writes its mark before its freeze, so whatever lands there first decides it; a node puts something
-/// there itself (`Node::read_steps_now`).
+/// A freeze whose mark isn't in the bucket yet: nothing at the step of `global`'s log after its end (`claimed`). The
+/// ceremony writes its mark before its freeze, so it's there unless the recovery key's holder wrote otherwise: the
+/// reader stops and looks again, and whatever lands there first decides it.
 #[derive(Debug)]
 pub struct Unmarked {
     pub at: u64,
@@ -448,16 +480,17 @@ impl std::fmt::Display for Unmarked {
 
 impl std::error::Error for Unmarked {}
 
-/// Whether `given`, step `at` of `global`'s database before its freeze, is a freeze an admin's own device signed: the
-/// freeze it says. Judged only at the end of `global`'s log it names, from `log`, its steps up to there, replayed with
-/// the forks among them only (removals and forks remove there as replay says), so every reader judges it the same
-/// whenever it reads it; and only if the step after that end is its mark, the same freeze signed by the same device
-/// for that step of the log: the bucket takes a position once, so a freeze that names an end behind one written
-/// since, a demoted or removed device's to before it was, never has one. One that isn't is nothing, passed over. One
-/// that is binds: it checks out (`anchor`) or the reader stops there. Fails while `log` doesn't reach the step after its
-/// end, or nothing is there yet (`Unmarked`).
-pub fn claimed(given: Option<&Given>, at: u64, root: Option<Hash>, log: &Log, now: u64) -> Result<Option<Freeze>> {
-    let (Some(freeze), Some(g)) = (candidate(given, at), given) else { return Ok(None) };
+/// Whether `given`, step `at` of `global`'s database before its freeze, is a freeze the install's recovery key signed:
+/// the freeze it says. Only one a key in `recovery` signed is looked at (`candidate`). Judged only at the end of
+/// `global`'s log it names, from `log`, its steps up to there, replayed with the forks among them only, so every
+/// reader judges it the same whenever it reads it: its signer is the recovery key the genesis or a `recovery` entry up
+/// to there names; and only if the step after that end is its mark, the same freeze signed by the same key for that
+/// step of the log: the bucket takes a position once, so a freeze that names an end behind one written since, a
+/// replaced recovery key's to before it was, never has one. One that isn't is nothing, passed over. One that is binds:
+/// it checks out (`anchor`) or the reader stops there. Fails while `log` doesn't reach the step after its end, or
+/// nothing is there yet (`Unmarked`).
+pub fn claimed(given: Option<&Given>, at: u64, root: Option<Hash>, log: &Log, recovery: &Recovery) -> Result<Option<Freeze>> {
+    let (Some(freeze), Some(g)) = (candidate(given, at, recovery), given) else { return Ok(None) };
     let end = freeze.global();
     ensure!(log.reaches(end), "who's who waits for global's log to step {}, after where its freeze says it ends", end + 1);
     if log.last() < end {
@@ -467,25 +500,28 @@ pub fn claimed(given: Option<&Given>, at: u64, root: Option<Hash>, log: &Log, no
         bail!(Unmarked { at: end + 1 });
     }
     let step = &g.step;
-    let marked = log.marks.get(&(end + 1)).is_some_and(|m| m.author() == step.author() && m.user() == step.user() && m.content == step.content);
-    if !marked {
-        return Ok(None);
-    }
-    let r = replay_all(root, log.entries(end));
-    let db = ScopeDb::build(&r.members, &Scope::Global, &r.state, now)?;
-    Ok((db.client(&step.author()).is_some_and(|c| c.user == step.user()) && db.may(step.user(), "change-settings", scopes::INSTALL)).then_some(freeze))
+    let marked = log.marks.get(&(end + 1)).is_some_and(|m| m.author() == step.author() && m.content == step.content);
+    Ok((marked && recovery_at(root, log, end) == Some(step.author())).then_some(freeze))
+}
+
+/// The install's recovery key at step `end` of `global`'s `log`, as its entries up to there replay.
+fn recovery_at(root: Option<Hash>, log: &Log, end: u64) -> Option<Key> {
+    let entries = log.entries(end);
+    let ordered = crate::entry::causal(entries.to_vec(), &Default::default());
+    let member_entries: Vec<Entry> = ordered.into_iter().filter(members::is_member_entry).collect();
+    Members::replay(root, &member_entries, &forks(entries)).recovery
 }
 
 /// Of `steps`, `global`'s database's by position from the first, the step of `global`'s log a reader reads to the step
-/// after, from `log` as it has it, so it judges every freeze among them up to the one an admin signed (`claimed`):
-/// none once it can.
-pub fn wants_log(steps: &[Option<Given>], root: Option<Hash>, log: Option<&Log>, now: u64) -> Option<u64> {
+/// after, from `log` as it has it, so it judges every freeze among them a key in `recovery` signed, up to the one the
+/// recovery key signed (`claimed`): none once it can.
+pub fn wants_log(steps: &[Option<Given>], root: Option<Hash>, log: Option<&Log>, recovery: &Recovery) -> Option<u64> {
     let mut furthest = None;
     for (i, g) in steps.iter().enumerate() {
-        let Some(freeze) = candidate(g.as_ref(), i as u64 + 1) else { continue };
+        let Some(freeze) = candidate(g.as_ref(), i as u64 + 1, recovery) else { continue };
         match log.filter(|l| l.reaches(freeze.global())) {
             Some(l) if furthest.is_none() => {
-                if !matches!(claimed(g.as_ref(), i as u64 + 1, root, l, now), Ok(None)) {
+                if !matches!(claimed(g.as_ref(), i as u64 + 1, root, l, recovery), Ok(None)) {
                     return None;
                 }
             }
@@ -546,10 +582,10 @@ fn says(copy: &Connection, own: &Connection) -> Result<bool> {
 }
 
 /// The freeze `given` is, at position `at`, as checked here against `log`, `global`'s log read past the end it names
-/// (`log_to`), of the install whose genesis is `root`: its copy comes to the hash it names; an admin's own device
-/// signed it, as the entries up to there say; and they add up to what the copy says (`says`). → the database it anchors, this
-/// release's form of its copy. Everyone replays exactly those entries, forks among them only, so later entries,
-/// forks or releases change nothing.
+/// (`log_to`), of the install whose genesis is `root`: its copy comes to the hash it names; the recovery key the
+/// entries up to there name signed it; and they add up to what the copy says (`says`). → the database it anchors, this
+/// release's form of its copy. Everyone replays exactly those entries, forks among them only, so later entries, forks
+/// or releases change nothing.
 pub fn anchor(given: &Given, at: u64, root: Option<Hash>, log: &Log, now: u64) -> Result<ScopeDb> {
     let step = &given.step;
     let freeze = Freeze::of(step, at)?;
@@ -561,14 +597,14 @@ pub fn anchor(given: &Given, at: u64, root: Option<Hash>, log: &Log, now: u64) -
     let own = super::scope::build(&r.members, &Scope::Global, &r.state)?;
     carry(&copy, &own)?;
     let own = ScopeDb::open(own, now)?;
-    ensure!(own.client(&step.author()).is_some_and(|c| c.user == step.user()) && own.may(step.user(), "change-settings", scopes::INSTALL), "only an admin's own device freezes the log");
-    ensure!(says(&copy, own.conn())?, "who's who at {YOURS}'s freeze isn't what its admin's device said it was");
+    ensure!(own.recovery() == Some(step.author()), "only {YOURS}'s recovery key freezes the log");
+    ensure!(says(&copy, own.conn())?, "who's who at {YOURS}'s freeze isn't what the log says it was");
     normalize(copy, &Scope::Global, now)
 }
 
-/// The freeze a device of an admin's writes, at `logs`' ends (every scope's log but `global`'s, by its last step in
-/// the bucket) and `to`, the end of `global`'s log, whose steps hold `entries`, of the install at `root`: its content,
-/// and its copy. Its device writes it as the step of the log after `to` first, its mark (`claimed`).
+/// The freeze the ceremony writes, at `logs`' ends (every scope's log but `global`'s, by its last step in the bucket)
+/// and `to`, the end of `global`'s log, whose steps hold `entries`, of the install at `root`: its content, and its
+/// copy. It's written as the step of the log after `to` first, its mark (`claimed`).
 pub fn freeze(root: Option<Hash>, entries: &[Entry], to: u64, mut logs: BTreeMap<String, u64>, now: u64) -> Result<(Content, Vec<u8>)> {
     logs.insert("global".into(), to);
     let r = replay_all(root, entries);
@@ -612,15 +648,15 @@ pub struct Truth {
 
 impl Truth {
     /// From the steps a reader has, by position from the first (none for one that will never be a step), and `log`,
-    /// `global`'s log read far enough to judge each freeze among them (`wants_log`): none before the one an admin
-    /// signed. Fails there if it doesn't check out, or `log` doesn't reach it.
-    pub fn read(steps: &[Option<Given>], root: Option<Hash>, log: Option<&Log>, now: u64) -> Result<Option<Truth>> {
+    /// `global`'s log read far enough to judge each freeze among them a key in `recovery` signed (`wants_log`): none
+    /// before the one the recovery key signed. Fails there if it doesn't check out, or `log` doesn't reach it.
+    pub fn read(steps: &[Option<Given>], root: Option<Hash>, log: Option<&Log>, recovery: &Recovery, now: u64) -> Result<Option<Truth>> {
         let mut truth: Option<Truth> = None;
         for (i, given) in steps.iter().enumerate() {
             let at = i as u64 + 1;
             match &mut truth {
                 Some(t) => drop(t.take(at, given.as_ref().map(|g| &g.step))?),
-                None => truth = Truth::first(at, given.as_ref(), root, log, now)?,
+                None => truth = Truth::first(at, given.as_ref(), root, log, recovery, now)?,
             }
         }
         Ok(truth)
@@ -629,30 +665,31 @@ impl Truth {
     /// `read`, for a reader that answers while it reads, and keeps nothing (the Cloudflare node): none while it hasn't
     /// read `global`'s log far enough to judge a freeze among `steps` (`wants_log`), or nothing is where its mark would
     /// be yet (`Unmarked`), when who's who and the epochs made are still the entries' (`view`), until it has. Fails, as
-    /// `read` does, at a freeze an admin signed that doesn't check out, or a newer release's step.
-    pub fn judged(steps: &[Option<Given>], root: Option<Hash>, log: Option<&Log>, now: u64) -> Result<Option<Truth>> {
-        if wants_log(steps, root, log, now).is_some() {
+    /// `read` does, at a freeze the recovery key signed that doesn't check out, or a newer release's step.
+    pub fn judged(steps: &[Option<Given>], root: Option<Hash>, log: Option<&Log>, recovery: &Recovery, now: u64) -> Result<Option<Truth>> {
+        if wants_log(steps, root, log, recovery).is_some() {
             return Ok(None);
         }
-        match Truth::read(steps, root, log, now) {
+        match Truth::read(steps, root, log, recovery, now) {
             Err(err) if err.is::<Unmarked>() => Ok(None),
             other => other,
         }
     }
 
-    /// `read`, for a service endpoint, which holds no keys and takes its steps from its own device's node, which
-    /// checked the freeze: the first an admin's own device signed, as `view` (who's who from the entries it holds)
-    /// says, is taken as its copy says, unchecked against the log, which it can't read.
-    pub fn read_given(steps: &[Option<Given>], view: &ScopeDb, now: u64) -> Result<Option<Truth>> {
+    /// `read`, for a service endpoint, which holds no keys and takes its steps from its own device's node: the first
+    /// freeze `recovery`, the install's recovery key as the entries it holds say, signed, its copy checked against the
+    /// hash it names, unchecked against the log, which it can't read. The recovery key vouches for it; anything else
+    /// shaped like a freeze is nothing. One it signed that doesn't check out stops it, as it stops every reader.
+    pub fn read_given(steps: &[Option<Given>], recovery: Option<Key>, now: u64) -> Result<Option<Truth>> {
+        let recovery = Recovery::from_iter(recovery);
         let mut truth: Option<Truth> = None;
         for (i, given) in steps.iter().enumerate() {
             let at = i as u64 + 1;
-            let admins = |g: &Given| view.client(&g.step.author()).is_some_and(|c| c.user == g.step.user()) && view.may(g.step.user(), "change-settings", scopes::INSTALL);
-            match (&mut truth, candidate(given.as_ref(), at).filter(|_| given.as_ref().is_some_and(admins)), given) {
+            match (&mut truth, candidate(given.as_ref(), at, &recovery), given) {
                 (Some(t), _, _) => drop(t.take(at, given.as_ref().map(|g| &g.step))?),
                 (None, Some(freeze), Some(g)) => {
                     let copy = connection(g.copy.as_deref().context("a freeze carries its copy")?)?;
-                    ensure!(crate::db::state_hash(&copy)? == freeze.hash, "a freeze's copy isn't what it says");
+                    ensure!(crate::db::state_hash(&copy)? == freeze.hash, "{YOURS}'s freeze at step {at}, which its recovery key signed, isn't what it says");
                     truth = Some(Truth { freeze, at, db: normalize(copy, &Scope::Global, now)? });
                 }
                 _ => {}
@@ -661,16 +698,16 @@ impl Truth {
         Ok(truth)
     }
 
-    /// Step `at` of `global`'s database, before its freeze: the freeze, if an admin's own device signed it
-    /// (`claimed`, judged from `log`, `global`'s log read past the end it names), checked against the same
-    /// (`anchor`). Any other step is nothing. A freeze an admin signed that doesn't check out stops the reader here,
-    /// as a newer release's does (`Newer`): it's never passed over for another, which a reader that it did check out
-    /// for would never take.
-    pub fn first(at: u64, given: Option<&Given>, root: Option<Hash>, log: Option<&Log>, now: u64) -> Result<Option<Truth>> {
-        let (Some(wants), Some(g)) = (candidate(given, at), given) else { return Ok(None) };
+    /// Step `at` of `global`'s database, before its freeze: the freeze, if the recovery key signed it (`claimed`,
+    /// judged from `log`, `global`'s log read past the end it names, and looked at only if a key in `recovery`
+    /// signed it), checked against the same (`anchor`). Any other step is nothing. A freeze the recovery key signed
+    /// that doesn't check out stops the reader here, as a newer release's does (`Newer`): it's never passed over for
+    /// another, which a reader that it did check out for would never take.
+    pub fn first(at: u64, given: Option<&Given>, root: Option<Hash>, log: Option<&Log>, recovery: &Recovery, now: u64) -> Result<Option<Truth>> {
+        let (Some(wants), Some(g)) = (candidate(given, at, recovery), given) else { return Ok(None) };
         let log = log.with_context(|| format!("who's who waits for global's log to step {}, after where its freeze says it ends", wants.global() + 1))?;
-        let Some(freeze) = claimed(given, at, root, log, now)? else { return Ok(None) };
-        let db = anchor(g, at, root, log, now).with_context(|| format!("{YOURS}'s freeze at step {at}, which an admin's device signed, doesn't check out: this device reads who's who no further"))?;
+        let Some(freeze) = claimed(given, at, root, log, recovery)? else { return Ok(None) };
+        let db = anchor(g, at, root, log, now).with_context(|| format!("{YOURS}'s freeze at step {at}, which its recovery key signed, doesn't check out: this device reads who's who no further"))?;
         Ok(Some(Truth { freeze, at, db }))
     }
 
@@ -765,16 +802,17 @@ impl Truth {
         Ok(Welcome { freeze: self.freeze.at, at: self.at, hash: crate::db::state_hash(self.db.conn())? })
     }
 
-    /// Who's who as `welcome` says it: from `freeze`, the step at its freeze's position, which must be a freeze an
-    /// admin's own device signed that checks out (`first`, with `log`, `global`'s log read past the end it names, of the
-    /// install at `root`), and `start`, the copy at `Welcome::copy` (its bytes, opened), or none to start from the
+    /// Who's who as `welcome` says it: from `freeze`, the step at its freeze's position, which must be a freeze the
+    /// recovery key signed that checks out (`first`, with `log`, `global`'s log read past the end it names, of the
+    /// install at `root`, whose entries say which keys were ever the recovery key), and `start`, the copy at `Welcome::copy` (its bytes, opened), or none to start from the
     /// freeze's own, then `after`, the steps after that one up to the Welcome's, each taken as any reader takes it.
     /// Fails unless it comes to the Welcome's hash, in this release's form: a freeze, copy or step a node or another
     /// device swapped is never used.
     #[allow(clippy::too_many_arguments)]
     pub fn welcomed(welcome: &Welcome, freeze: &Given, root: Option<Hash>, log: Option<&Log>, start: Option<&[u8]>, after: &[Option<Given>], now: u64) -> Result<Truth> {
         ensure!(u64::from(freeze.step.seq()) == welcome.freeze, "that isn't the freeze it was welcomed with");
-        let anchored = Truth::first(welcome.freeze, Some(freeze), root, log, now)?.context("the step it was welcomed with isn't a freeze an admin's device signed")?;
+        let recovery = log.map(Log::recovery).unwrap_or_default();
+        let anchored = Truth::first(welcome.freeze, Some(freeze), root, log, &recovery, now)?.context("the step it was welcomed with isn't a freeze its recovery key signed")?;
         let (at, db) = match (welcome.copy(), start) {
             (Some(at), Some(bytes)) => (at, normalize(connection(bytes)?, &Scope::Global, now)?),
             (_, None) => (welcome.freeze, anchored.db),
@@ -806,7 +844,7 @@ pub async fn welcomed(bucket: &impl crate::bucket::Bucket, keys: &crate::db::Key
     }
     let prefix = prefix("global");
     let freeze = step(bucket, keys, welcome.freeze).await?.context("the step it was welcomed with isn't a freeze")?;
-    let end = candidate(Some(&freeze), welcome.freeze).context("the step it was welcomed with isn't a freeze")?.global();
+    let end = Freeze::of(&freeze.step, welcome.freeze).context("the step it was welcomed with isn't a freeze")?.global();
     let log = log_to(bucket, keys, root, end).await?;
     let log = Some(&log);
     let mut tried = None;
@@ -1260,14 +1298,14 @@ pub(crate) mod tests {
             Log { ended: true, ..self.log.clone() }
         }
 
-        /// A freeze `key` signs as `user` at step `at` of `global`'s database, of the log up to step `to`, as an admin's
-        /// device writes one, without its mark.
+        /// A freeze `key` signs as `user` at step `at` of `global`'s database, of the log up to step `to`, as the
+        /// ceremony writes one, without its mark.
         fn freeze_to(&self, key: &SigningKey, user: &str, at: u64, to: u64) -> Given {
             let (content, copy) = freeze(Some(self.root()), self.log.entries(to), to, BTreeMap::new(), 0).unwrap();
             Given { step: sign(key, &Scope::Global, at, user, 1, 0, content).unwrap(), copy: Some(copy) }
         }
 
-        /// A freeze of the log to its end, with its mark written there first, as an admin's device writes one.
+        /// A freeze of the log to its end, with its mark written there first, as the ceremony writes one.
         fn freeze(&mut self, key: &SigningKey, user: &str, at: u64) -> Given {
             let given = self.freeze_to(key, user, at, self.log.last());
             self.mark(key, user, &given);
@@ -1282,128 +1320,161 @@ pub(crate) mod tests {
         fn root(&self) -> Hash {
             self.entries[0].hash()
         }
+
+        /// Every key its entries say was ever the recovery key, as a reader that holds them all works it out.
+        fn recovery(&self) -> Recovery {
+            recovery_keys(Some(self.root()), &self.entries)
+        }
+
+        /// What a reader of `steps` with the log as it is now takes: none before a freeze counts.
+        fn read(&self, steps: &[Given]) -> Result<Option<Truth>> {
+            let steps: Vec<Option<Given>> = steps.iter().cloned().map(Some).collect();
+            Truth::read(&steps, Some(self.root()), Some(&self.log()), &self.recovery(), 0)
+        }
     }
 
     const ANDRE: &str = "a000000000000001";
     const BOB: &str = "b000000000000002";
 
-    /// Andre's Mac starts the install and lists Bob's laptop, Bob an admin too.
-    fn two_admins() -> (History, SigningKey, SigningKey) {
+    /// Andre's Mac starts the install, its recovery key kept offline, and lists Bob's laptop, Bob an admin too.
+    fn two_admins() -> (History, SigningKey, SigningKey, SigningKey) {
         use crate::keys::Endpoint;
         use crate::members::{Kind, device, genesis};
-        let (mac, laptop) = (SigningKey::from_bytes(&[1; 32]), SigningKey::from_bytes(&[2; 32]));
-        let mut h = History::default();
-        h.write(&mac, ANDRE, genesis("Home", ANDRE, "Andre", &Endpoint::of(&mac), "mac", &[Kind::Client], &[7; 32], &"e".repeat(64)));
+        let (mac, laptop, recovery) = (SigningKey::from_bytes(&[1; 32]), SigningKey::from_bytes(&[2; 32]), SigningKey::from_bytes(&[7; 32]));
+        let mut h = History { log: Log::new(None), ..Default::default() };
+        h.write(&mac, ANDRE, genesis("Home", ANDRE, "Andre", &Endpoint::of(&mac), "mac", &[Kind::Client], &recovery.verifying_key().to_bytes(), &"e".repeat(64)));
+        h.log.root = Some(h.root());
         h.write(&mac, ANDRE, device(&Endpoint::of(&laptop), BOB, "laptop", &[Kind::Client], Some(("Bob", Role::Admin))));
-        (h, mac, laptop)
+        (h, mac, laptop, recovery)
     }
 
-    /// An admin demoted (or a device taken out) can't freeze the log to before it was, to be an admin again: the step
-    /// of the log after that end isn't its mark, so it's nothing, and the next an admin signs is the freeze.
+    /// An admin's own device can't freeze the log: one Bob's laptop plants while he's an admin, marked and all, is
+    /// nothing, so it undoes nothing written after it, and the recovery key's, later, is the freeze.
     #[test]
-    fn a_demoted_admin_s_freeze_makes_no_one_an_admin_again() {
-        let (mut h, mac, laptop) = two_admins();
-        let before = h.log.last();
+    fn an_admin_s_planted_freeze_counts_for_nothing_and_a_later_demotion_holds() {
+        let (mut h, mac, laptop, recovery) = two_admins();
+        let planted = h.freeze(&laptop, BOB, 1);
         h.write(&mac, ANDRE, members::role(BOB, Role::Member));
-        h.write(&mac, ANDRE, members::setting("name", Some("Ours")));
-        // Bob's laptop freezes the log where Bob was still an admin.
-        let bobs = h.freeze_to(&laptop, BOB, 1, before);
-        let late = h.clone();
-        let andres = h.freeze(&mac, ANDRE, 2);
-        assert!(claimed(Some(&bobs), 1, Some(h.root()), &h.log(), 0).unwrap().is_none(), "a demoted admin's freeze is nothing");
-        let truth = Truth::read(&[Some(bobs.clone()), Some(andres)], Some(h.root()), Some(&h.log()), 0).unwrap().unwrap();
-        assert_eq!((truth.at, truth.db.user(BOB).map(|u| u.role), truth.db.setting("name")), (2, Some(Role::Member), Some("Ours".into())), "Andre's freeze is the one");
-        // Nor does one naming the log's end, its mark and all, while its signer isn't an admin there.
-        let mut late = late;
-        let bobs_late = late.freeze(&laptop, BOB, 1);
-        assert!(claimed(Some(&bobs_late), 1, Some(h.root()), &late.log(), 0).unwrap().is_none());
+        assert!(claimed(Some(&planted), 1, Some(h.root()), &h.log(), &h.recovery()).unwrap().is_none(), "an admin's freeze is nothing");
+        let theirs = h.freeze(&recovery, ANDRE, 2);
+        let truth = h.read(&[planted, theirs]).unwrap().unwrap();
+        assert_eq!((truth.at, truth.db.user(BOB).map(|u| u.role)), (2, Some(Role::Member)), "the recovery key's is the freeze, and Bob's demotion holds");
     }
 
-    /// A removed device that forks is no admin's: it can't freeze the log to before it was removed, which has no step
-    /// free for its mark, nor to the log's end, where it's removed. Its fork changes nothing there.
+    /// Anything shaped like a freeze that a key that was never the recovery key signed is passed over before the log
+    /// it names is read: one naming a log end of 10¹² holds no reader up, as it waits for no log.
     #[test]
-    fn a_removed_device_that_forks_freezes_nothing() {
-        let (mut h, mac, laptop) = two_admins();
-        h.write(&laptop, BOB, members::setting("name", Some("Bob's")));
+    fn a_junk_freeze_naming_a_far_log_end_holds_no_reader_up() {
+        let (mut h, _, laptop, recovery) = two_admins();
+        let mut junk = h.freeze_to(&laptop, BOB, 1, h.log.last());
+        let mut data = junk.step.content.data.clone();
+        data["logs"]["global"] = json!(1_000_000_000_000u64);
+        junk.step = sign(&laptop, &Scope::Global, 1, BOB, 1, 0, Content::new(members::APP, FREEZE, data)).unwrap();
+        let root = Some(h.root());
+        assert_eq!(wants_log(&[Some(junk.clone())], root, None, &h.recovery()), None, "no log is read for it");
+        assert!(Truth::read(&[Some(junk.clone())], root, None, &h.recovery(), 0).unwrap().is_none() && Truth::judged(&[Some(junk.clone())], root, None, &h.recovery(), 0).unwrap().is_none());
+        let theirs = h.freeze(&recovery, ANDRE, 2);
+        assert_eq!(wants_log(&[Some(junk.clone()), Some(theirs.clone())], root, None, &h.recovery()), Some(theirs.step.content.data["logs"]["global"].as_u64().unwrap()), "only the recovery key's");
+        assert_eq!(h.read(&[junk, theirs]).unwrap().unwrap().at, 2);
+    }
+
+    /// A recovery key replaced by a `recovery` entry freezes nothing: not at the log's end, where it isn't the
+    /// recovery key, nor from before it was replaced, which has no step free for its mark. The one it was replaced by
+    /// does.
+    #[test]
+    fn a_replaced_recovery_key_s_freeze_counts_for_nothing() {
+        let (mut h, _, _, old) = two_admins();
+        let new = SigningKey::from_bytes(&[8; 32]);
         let before = h.log.last();
-        h.write(&mac, ANDRE, members::remove_device(&laptop.verifying_key().to_bytes(), None));
-        // Bob's laptop, restored from an older backup, signs at a seq it signed before: a fork.
-        h.fork(&laptop, BOB, members::setting("name", Some("Forked")));
-        let from_before = h.freeze_to(&laptop, BOB, 1, before);
-        assert!(claimed(Some(&from_before), 1, Some(h.root()), &h.log(), 0).unwrap().is_none(), "from before its removal");
-        let at_end = h.freeze(&laptop, BOB, 1);
-        assert!(claimed(Some(&at_end), 1, Some(h.root()), &h.log(), 0).unwrap().is_none(), "from the log's end");
-        let andres = h.freeze(&mac, ANDRE, 2);
-        let truth = Truth::read(&[Some(at_end), Some(andres)], Some(h.root()), Some(&h.log()), 0).unwrap().unwrap();
-        assert!(truth.at == 2 && truth.db.machine(&laptop.verifying_key().to_bytes()).is_none(), "the next an admin signs is the freeze");
+        h.write(&old, ANDRE, members::node("recovery", json!({ "key": crate::entry::hex(&new.verifying_key().to_bytes()) })));
+        assert_eq!(h.recovery(), Recovery::from([old.verifying_key().to_bytes(), new.verifying_key().to_bytes()]), "both are looked at");
+        let from_before = h.freeze_to(&old, ANDRE, 1, before);
+        assert!(claimed(Some(&from_before), 1, Some(h.root()), &h.log(), &h.recovery()).unwrap().is_none(), "from before it was replaced");
+        let at_end = h.freeze(&old, ANDRE, 1);
+        assert!(claimed(Some(&at_end), 1, Some(h.root()), &h.log(), &h.recovery()).unwrap().is_none(), "from the log's end");
+        let theirs = h.freeze(&new, ANDRE, 2);
+        assert_eq!(h.read(&[at_end, theirs]).unwrap().unwrap().at, 2, "the new one's is the freeze");
+    }
+
+    /// A service endpoint, which takes its steps from its node and can't read the log, takes only the freeze the
+    /// recovery key signed, its copy checked against the hash it names: an admin's is nothing, and the recovery key's
+    /// whose copy isn't what it says stops it.
+    #[test]
+    fn a_service_takes_only_the_recovery_key_s_freeze() {
+        let (mut h, mac, _, recovery) = two_admins();
+        let admins = h.freeze(&mac, ANDRE, 1);
+        let key = Some(recovery.verifying_key().to_bytes());
+        assert!(Truth::read_given(&[Some(admins.clone())], key, 0).unwrap().is_none(), "an admin's is nothing");
+        let theirs = h.freeze(&recovery, ANDRE, 2);
+        assert_eq!(Truth::read_given(&[Some(admins.clone()), Some(theirs.clone())], key, 0).unwrap().unwrap().at, 2);
+        let mut swapped = theirs;
+        let mut db = connection(swapped.copy.as_deref().unwrap()).unwrap();
+        db.execute_batch("UPDATE devices SET name = 'mine' WHERE name = 'laptop'").unwrap();
+        swapped.copy = Some(db.serialize("main").unwrap().to_vec());
+        assert!(Truth::read_given(&[Some(swapped)], key, 0).is_err(), "a copy that isn't what it says stops it");
     }
 
     /// A freeze is judged at the end of the log it names only, so every reader takes the same one whenever it reads it:
     /// a fork, a demotion or anything else written to the log after it changes nothing about it.
     #[test]
     fn a_freeze_counts_the_same_whenever_it_s_read() {
-        let (mut h, mac, laptop) = two_admins();
+        let (mut h, mac, laptop, recovery) = two_admins();
         h.write(&laptop, BOB, members::setting("name", Some("Ours")));
-        let freeze = h.freeze(&mac, ANDRE, 1);
-        let soon = Truth::read(&[Some(freeze.clone())], Some(h.root()), Some(&h.log()), 0).unwrap().unwrap();
+        let freeze = h.freeze(&recovery, ANDRE, 1);
+        let soon = h.read(std::slice::from_ref(&freeze)).unwrap().unwrap();
         // Then, in the log after it: Bob demotes Andre, and Bob's laptop and Andre's Mac, restored from older backups,
         // fork.
         h.write(&laptop, BOB, members::role(ANDRE, Role::Member));
         h.fork(&laptop, BOB, members::setting("name", Some("Forked")));
         h.fork(&mac, ANDRE, members::setting("name", Some("Forked")));
-        let late = Truth::read(&[Some(freeze)], Some(h.root()), Some(&h.log()), 0).unwrap().unwrap();
+        let late = h.read(&[freeze]).unwrap().unwrap();
         let hash = |t: &Truth| crate::db::state_hash(t.db.conn()).unwrap();
         assert_eq!(hash(&late), hash(&soon), "the same who's who, whenever it's read");
     }
 
-    /// A freeze an admin's device signed that doesn't check out stops its reader there: never passed over for the next,
-    /// which a reader it did check out for would never take. As does one whose mark isn't there yet, or whose log it
-    /// hasn't read.
+    /// The recovery key's freeze whose copy isn't what the log says stops its reader there: never passed over for the
+    /// next, which a reader it did check out for would never take. As does one whose mark isn't there yet, or whose
+    /// log it hasn't read.
     #[test]
-    fn a_freeze_an_admin_signed_that_doesn_t_check_out_stops_its_reader() {
-        let (mut h, mac, _) = two_admins();
-        let mut forged = h.freeze_to(&mac, ANDRE, 1, h.log.last());
-        let mut db = connection(forged.copy.as_deref().unwrap()).unwrap();
-        db.execute_batch("UPDATE devices SET name = 'mine' WHERE name = 'laptop'").unwrap();
-        let mut data = forged.step.content.data.clone();
-        data["hash"] = json!(crate::db::state_hash(&db).unwrap());
-        forged = Given { step: sign(&mac, &Scope::Global, 1, ANDRE, 1, 0, Content::new(members::APP, FREEZE, data)).unwrap(), copy: Some(db.serialize("main").unwrap().to_vec()) };
+    fn a_recovery_key_s_freeze_that_doesn_t_check_out_stops_its_reader() {
+        let (mut h, _, _, recovery) = two_admins();
+        let forged = forged(&h, &recovery, 1);
         let unmarked = h.log();
-        h.mark(&mac, ANDRE, &forged);
-        let next = h.freeze(&mac, ANDRE, 2);
-        assert!(Truth::read(&[Some(forged.clone()), Some(next)], Some(h.root()), Some(&h.log()), 0).is_err(), "a copy that isn't what the log says stops it");
-        let err = Truth::read(&[Some(forged.clone())], Some(h.root()), Some(&unmarked), 0).err().unwrap();
+        h.mark(&recovery, ANDRE, &forged);
+        let next = h.freeze(&recovery, ANDRE, 2);
+        assert!(h.read(&[forged.clone(), next]).is_err(), "a copy that isn't what the log says stops it");
+        let err = Truth::read(&[Some(forged.clone())], Some(h.root()), Some(&unmarked), &h.recovery(), 0).err().unwrap();
         assert!(err.is::<Unmarked>(), "nothing where its mark would be stops it, until something is: {err:#}");
-        assert!(Truth::read(&[Some(forged)], Some(h.root()), None, 0).is_err(), "as does one whose log it hasn't read");
+        assert!(Truth::read(&[Some(forged)], Some(h.root()), None, &h.recovery(), 0).is_err(), "as does one whose log it hasn't read");
     }
 
-    /// A reader that answers while it reads, and keeps nothing (the Cloudflare node), takes who's who and the epochs
-    /// made from the entries while it hasn't read `global`'s log far enough to judge a freeze among the steps, or the
-    /// freeze's mark isn't there yet, so a step shaped as a freeze stops it from reading the log no more than it stops
-    /// it answering; only one an admin signed that doesn't check out stops it.
-    #[test]
-    fn a_reader_that_answers_as_it_reads_judges_a_freeze_once_it_can() {
-        let (mut h, mac, laptop) = two_admins();
-        h.write(&mac, ANDRE, members::role(BOB, Role::Member));
-        let root = Some(h.root());
-        // Bob's, shaped as a freeze of the log to its end, at position 1.
-        let junk = h.freeze_to(&laptop, BOB, 1, h.log.last());
-        assert!(Truth::read(&[Some(junk.clone())], root, None, 0).is_err(), "a reader that keeps what it reads waits for the log");
-        assert!(Truth::judged(&[Some(junk.clone())], root, None, 0).unwrap().is_none(), "before the log is read");
-        assert!(Truth::judged(&[Some(junk.clone())], root, Some(&h.log()), 0).unwrap().is_none(), "nor while nothing is where its mark would be");
-        let mut forged = h.clone();
-        let andres = h.freeze(&mac, ANDRE, 2);
-        let truth = Truth::judged(&[Some(junk.clone()), Some(andres)], root, Some(&h.log()), 0).unwrap().unwrap();
-        assert_eq!(truth.at, 2, "an admin's own, marked, is the freeze");
-        // An admin's that doesn't check out: its copy says Bob's laptop is named otherwise.
-        let mut given = forged.freeze_to(&mac, ANDRE, 2, forged.log.last());
+    /// The recovery key's freeze of `h`'s log to its end at `at`, its copy saying Bob's laptop is named otherwise.
+    fn forged(h: &History, recovery: &SigningKey, at: u64) -> Given {
+        let given = h.freeze_to(recovery, ANDRE, at, h.log.last());
         let mut db = connection(given.copy.as_deref().unwrap()).unwrap();
         db.execute_batch("UPDATE devices SET name = 'mine' WHERE name = 'laptop'").unwrap();
         let mut data = given.step.content.data.clone();
         data["hash"] = json!(crate::db::state_hash(&db).unwrap());
-        given = Given { step: sign(&mac, &Scope::Global, 2, ANDRE, 1, 0, Content::new(members::APP, FREEZE, data)).unwrap(), copy: Some(db.serialize("main").unwrap().to_vec()) };
-        forged.mark(&mac, ANDRE, &given);
-        assert!(Truth::judged(&[Some(junk), Some(given)], root, Some(&forged.log()), 0).is_err(), "stops it");
+        Given { step: sign(recovery, &Scope::Global, at, ANDRE, 1, 0, Content::new(members::APP, FREEZE, data)).unwrap(), copy: Some(db.serialize("main").unwrap().to_vec()) }
+    }
+
+    /// A reader that answers while it reads, and keeps nothing (the Cloudflare node), takes who's who and the epochs
+    /// made from the entries while it hasn't read `global`'s log far enough to judge the recovery key's freeze, or its
+    /// mark isn't there yet; only one that doesn't check out stops it.
+    #[test]
+    fn a_reader_that_answers_as_it_reads_judges_a_freeze_once_it_can() {
+        let (mut h, _, _, recovery) = two_admins();
+        let root = Some(h.root());
+        let mut bad = h.clone();
+        let theirs = h.freeze_to(&recovery, ANDRE, 1, h.log.last());
+        assert!(Truth::read(&[Some(theirs.clone())], root, None, &h.recovery(), 0).is_err(), "a reader that keeps what it reads waits for the log");
+        assert!(Truth::judged(&[Some(theirs.clone())], root, None, &h.recovery(), 0).unwrap().is_none(), "before the log is read");
+        assert!(Truth::judged(&[Some(theirs.clone())], root, Some(&h.log()), &h.recovery(), 0).unwrap().is_none(), "nor while nothing is where its mark would be");
+        h.mark(&recovery, ANDRE, &theirs);
+        assert_eq!(Truth::judged(&[Some(theirs)], root, Some(&h.log()), &h.recovery(), 0).unwrap().unwrap().at, 1);
+        let given = forged(&bad, &recovery, 1);
+        bad.mark(&recovery, ANDRE, &given);
+        assert!(Truth::judged(&[Some(given)], root, Some(&bad.log()), &bad.recovery(), 0).is_err(), "one that doesn't check out stops it");
     }
 
     /// A step of `global`'s log under an epoch the entries before it hadn't made is junk to every reader, whenever it
@@ -1412,7 +1483,7 @@ pub(crate) mod tests {
     #[test]
     fn the_log_under_a_freeze_reads_the_same_whenever_it_s_read() {
         use crate::bucket::Bucket;
-        let (mut h, mac, laptop) = two_admins();
+        let (mut h, mac, laptop, _) = two_admins();
         let (k1, k2) = ([1; 32], [2; 32]);
         let user = Scope::User(ANDRE.into());
         let (kx1, kx2) = ([11; 32], [12; 32]);
@@ -1461,7 +1532,7 @@ pub(crate) mod tests {
     /// is taken as if it weren't there.
     #[test]
     fn a_scope_s_reader_stops_at_a_newer_release_s_step() {
-        let (h, mac, _) = two_admins();
+        let (h, mac, _, _) = two_admins();
         let m = Members::replay(Some(h.root()), &h.entries, &Default::default());
         let global = ScopeDb::build(&m, &Scope::Global, &ScopeState::default(), 0).unwrap();
         let scope = Scope::User(ANDRE.into());
@@ -1484,7 +1555,7 @@ pub(crate) mod tests {
         let bucket = crate::bucket::Memory::default();
         let prefix = prefix("global");
         let keys: crate::db::Keys = [(1, [9; 32])].into();
-        let (_, mac, _) = two_admins();
+        let (_, mac, _, _) = two_admins();
         let step = |at: u64| {
             let name = crate::db::step_name(&prefix, at);
             crate::log::seal(&keys, &name, &encode(&sign(&mac, &Scope::Global, at, ANDRE, 1, 0, members::setting("name", Some("x"))).unwrap(), None)).unwrap()
@@ -1511,7 +1582,7 @@ pub(crate) mod tests {
     /// isn't an admin's own is passed over; only an admin's of a newer release stops a reader.
     #[test]
     fn only_an_admin_s_newer_release_stops_a_reader() {
-        let (h, mac, laptop) = two_admins();
+        let (h, mac, laptop, _) = two_admins();
         let mut h = h;
         h.write(&mac, ANDRE, members::role(BOB, Role::Member));
         let m = Members::replay(Some(h.root()), &h.entries, &Default::default());

@@ -61,16 +61,17 @@ impl Global {
     }
 
     /// Takes step `at`, the next, as this device opened it (none for one that will never be a step): before the log is
-    /// frozen, the freeze if an admin's own device signed it (`steps::claimed`), judged and checked against `global`'s
-    /// log past the end it names (`with_log`); after, applied if it counts. Fails at a freeze an admin signed that
-    /// doesn't check out or whose log isn't here, so it's never passed over.
+    /// frozen, the freeze if the install's recovery key signed it (`steps::claimed`), judged and checked against
+    /// `global`'s log past the end it names (`with_log`); after, applied if it counts. Anything else shaped like a
+    /// freeze is passed over, its log never read. Fails at a freeze the recovery key signed that doesn't check out or
+    /// whose log isn't here, so it's never passed over.
     pub fn take(&mut self, at: u64, given: Option<&steps::Given>) -> Result<()> {
         ensure!(at == self.at() + 1, "step {at} isn't the next");
         match &mut self.truth {
             Some(t) => drop(t.take(at, given.map(|g| &g.step))?),
             None => {
                 let Some(root) = self.root else { bail!("no entries of {YOURS} yet") };
-                match steps::Truth::first(at, given, Some(root), self.log.as_ref(), now()) {
+                match steps::Truth::first(at, given, Some(root), self.log.as_ref(), &self.recovery(), now()) {
                     Ok(t) => self.truth = t,
                     Err(err) => {
                         // Nothing where its mark would be when the log was read: read it again the next time.
@@ -93,10 +94,16 @@ impl Global {
         if self.truth.is_some() {
             return Ok(None);
         }
-        // Placed where they are: the ones before were looked at already, and none was a freeze an admin signed.
+        // Placed where they are: the ones before were looked at already, and none was a freeze the recovery key signed.
         let mut placed: Vec<Option<steps::Given>> = vec![None; self.looked as usize];
         placed.extend(read.iter().cloned());
-        Ok(steps::wants_log(&placed, self.root, self.log.as_ref(), now()))
+        Ok(steps::wants_log(&placed, self.root, self.log.as_ref(), &self.recovery()))
+    }
+
+    /// Every key the entries this device holds say was ever the install's recovery key (`steps::recovery_keys`): only
+    /// a freeze one of them signed is looked at.
+    fn recovery(&self) -> steps::Recovery {
+        steps::recovery_keys(self.root, self.entries.values())
     }
 
     /// `global`'s log past the end a freeze names, read from its steps (`wants_log`).
@@ -135,8 +142,8 @@ impl Global {
     /// sealed to this device (raw, by number), each used only once who's who as the steps before it leave it says it's
     /// that epoch's, and `apps`, the node's key in each epoch sealed under it (base64url, by number). One the bucket
     /// holds that doesn't open is junk, passed over as every reader passes it over; one whose bytes didn't come stops
-    /// it, to be asked again. Stops at one under an epoch this device has no key for yet, and at a freeze an admin's
-    /// device signed until `log`, `global`'s log's steps to the end it names (`{ to, steps }`), is given: → that end, to
+    /// it, to be asked again. Stops at one under an epoch this device has no key for yet, and at a freeze a key that was
+    /// ever the recovery key signed until `log`, `global`'s log's steps to the end it names (`{ to, steps }`), is given: → that end, to
     /// read them to, and give again. With `welcome` (`steps::Welcome`), before it's read to its freeze, it starts from
     /// there (`add_welcomed`): what it's given for that is checked against the Welcome's hash, wherever it came from.
     pub fn add_sealed(&mut self, given: &Value, epochs: &BTreeMap<u32, [u8; 32]>, apps: &BTreeMap<u32, Vec<u8>>) -> Result<Option<u64>> {
@@ -246,7 +253,7 @@ impl Global {
             _ => bail!("global's step {at} isn't one this device opens"),
         };
         let Some(freeze) = opened(welcome.freeze, freeze)? else { bail!("the step it was welcomed with isn't a freeze") };
-        let end = steps::candidate(Some(&freeze), welcome.freeze).context("the step it was welcomed with isn't a freeze")?.global();
+        let end = steps::Freeze::of(&freeze.step, welcome.freeze).context("the step it was welcomed with isn't a freeze")?.global();
         if self.log.as_ref().is_none_or(|l| !l.reaches(end)) {
             return Ok(Some(end));
         }

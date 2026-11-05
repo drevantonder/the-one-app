@@ -623,9 +623,9 @@ fn merged(root: Hash, known: &[Entry], given: Vec<Entry>, depths: &HashMap<Hash,
 /// listed, and the scope database they add up to.
 fn placed(root: Hash, entries: Vec<Entry>, depths: &HashMap<Hash, u64>, steps: &[Option<crate::database::steps::Given>]) -> (Vec<Entry>, ScopeDb) {
     let ordered = crate::entry::causal(entries, depths);
-    // Once the log is frozen, who's who is the scope database its freeze anchors, and the steps after: as its own
-    // device's node checked them, since it holds no keys to read the log with.
-    let built = crate::database::steps::view(Some(root), &ordered, now_ms()).and_then(|view| Ok(crate::database::steps::Truth::read_given(steps, &view, now_ms())?.map_or(view, |t| t.db)));
+    // Once the log is frozen, who's who is the scope database its freeze anchors, and the steps after: the freeze the
+    // install's recovery key signed, as the entries say it, since it holds no keys to read the log with.
+    let built = crate::database::steps::view(Some(root), &ordered, now_ms()).and_then(|view| Ok(crate::database::steps::Truth::read_given(steps, view.recovery(), now_ms())?.map_or(view, |t| t.db)));
     let db = built.unwrap_or_else(|err| {
         tracing::warn!("building the scope database: {err:#}");
         ScopeDb::build(&Members::default(), &crate::entry::Scope::Global, &Default::default(), 0).expect("an empty scope database builds")

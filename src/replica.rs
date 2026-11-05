@@ -38,7 +38,7 @@ pub struct Replica {
     pub frozen: Option<(crate::database::steps::Freeze, u64)>,
     /// Before it's frozen, the last of the scope database's steps this device looked at that wasn't its freeze.
     pub looked: u64,
-    /// The last of those that says an admin's device is freezing the log (`steps::FREEZING`).
+    /// The last of those that says the recovery key is freezing the log (`steps::FREEZING`).
     pub freezing: Option<u64>,
 }
 
@@ -75,7 +75,7 @@ impl Replica {
         Ok(Replica { key, id, store, root, members, db, built, #[cfg(test)] fail: false, member_entries, stale: false, frozen: None, looked: 0, freezing: None })
     }
 
-    /// The freeze a device of an admin's writes now (`steps::freeze`), at `logs`' ends, every other scope's log by its
+    /// The freeze the ceremony writes now (`steps::freeze`), at `logs`' ends, every other scope's log by its
     /// last step in order, and `to`, the end of `global`'s log as the bucket has it, whose steps hold `entries`. → its
     /// content, and its copy.
     pub fn freeze_now(&self, entries: &[Entry], to: u64, logs: BTreeMap<String, u64>, now: u64) -> Result<(Content, Vec<u8>)> {
@@ -83,18 +83,18 @@ impl Replica {
     }
 
     /// Step `at` of `global`'s scope database before its log is frozen, the next this device looks at: if it's a freeze
-    /// an admin's own device signed (`steps::claimed`), and it checks out against `log`, `global`'s log past the end it
-    /// names (`steps::anchor`), the database it anchors is who's who from here. One that doesn't check out, or comes
-    /// without its log, fails, so this device looks at it again and never past it.
+    /// the install's recovery key signed (`steps::claimed`, looked at only if a key its entries say was ever the
+    /// recovery key signed it: `recovery`), and it checks out against `log`, `global`'s log past the end it names
+    /// (`steps::anchor`), the database it anchors is who's who from here. One that doesn't check out, or comes without
+    /// its log, fails, so this device looks at it again and never past it.
     pub fn take_first(&mut self, at: u64, given: Option<&crate::database::steps::Given>, log: Option<&crate::database::steps::Log>, now: u64) -> Result<Handled> {
         ensure!(self.frozen.is_none() && at == self.looked + 1, "step {at} isn't the next");
         // Who's who that didn't build says no one is an admin: what it passed over, another device would take.
         ensure!(self.built.is_none(), "who's who didn't build, so this device looks at no freeze until it does");
         let mut handled = Handled::default();
-        let truth = crate::database::steps::Truth::first(at, given, self.root, log, now)?;
+        let truth = crate::database::steps::Truth::first(at, given, self.root, log, &self.recovery(), now)?;
         self.looked = at;
-        let admins = |s: &Entry| self.db.client(&s.author()).is_some_and(|c| c.user == s.user()) && self.db.may(s.user(), "change-settings", crate::database::scopes::INSTALL);
-        if given.is_some_and(|g| g.step.content.kind == crate::database::steps::FREEZING && admins(&g.step)) {
+        if given.is_some_and(|g| g.step.content.kind == crate::database::steps::FREEZING && self.db.recovery() == Some(g.step.author())) {
             self.freezing = Some(at);
         }
         if let Some(t) = truth {
@@ -106,6 +106,11 @@ impl Replica {
             self.changed(&was, &mut handled)?;
         }
         Ok(handled)
+    }
+
+    /// Every key `global`'s entries here say was ever the install's recovery key (`steps::recovery_keys`).
+    pub fn recovery(&self) -> crate::database::steps::Recovery {
+        crate::database::steps::recovery_keys(self.root, &self.member_entries)
     }
 
     /// Where this device is in `global`'s scope database once it's frozen, to keep and start again from (`restart`).
@@ -385,18 +390,18 @@ mod tests {
     use crate::database::steps::{self, Given};
     use crate::members::{Kind, Role, device, genesis, setting};
 
-    /// The log's freeze is a step, and exactly one counts: the first that an admin's own device signed, whose copy
-    /// says what the log's entries up to where it says the log ends add up to, so a freezer whose release had other
-    /// rules (as one that flips `INSTALL_ADMINS_MAKE_GROUP_ADMINS`) still anchors it, its rules kept. One an admin
+    /// The log's freeze is a step, and exactly one counts: the first that the install's recovery key signed, whose
+    /// copy says what the log's entries up to where it says the log ends add up to, so a freezer whose release had
+    /// other rules (as one that flips `INSTALL_ADMINS_MAKE_GROUP_ADMINS`) still anchors it, its rules kept. One it
     /// signed whose copy says otherwise, or whose log isn't given, stops the device there, never passed over; anyone
-    /// else's is nothing. Once frozen, an older device's entries change nothing, a step does, and who's who is kept
+    /// else's is nothing, an admin's own device's too. Once frozen, an older device's entries change nothing, a step does, and who's who is kept
     /// and started again from, never the entries.
     #[test]
     fn one_freeze_anchors_who_s_who_and_the_log_changes_nothing_after() {
         const ANDRE: &str = "a000000000000001";
-        let (mac, old) = (SigningKey::from_bytes(&[1; 32]), SigningKey::from_bytes(&[2; 32]));
+        let (mac, old, recovery) = (SigningKey::from_bytes(&[1; 32]), SigningKey::from_bytes(&[2; 32]), SigningKey::from_bytes(&[7; 32]));
         let ext = |user: &str| Ext { log: "global".into(), time: 0, user: user.into(), epoch: 1, previous: Vec::new() };
-        let g = Entry::create(&mac, Ext { epoch: 0, ..ext(ANDRE) }, None, genesis("Home", ANDRE, "Andre", &Endpoint::of(&mac), "mac", &[Kind::Client], &[7; 32], &"e".repeat(64)));
+        let g = Entry::create(&mac, Ext { epoch: 0, ..ext(ANDRE) }, None, genesis("Home", ANDRE, "Andre", &Endpoint::of(&mac), "mac", &[Kind::Client], &recovery.verifying_key().to_bytes(), &"e".repeat(64)));
         let listed = Entry::create(&mac, ext(ANDRE), Some(g.head()), device(&Endpoint::of(&old), ANDRE, "old laptop", &[Kind::Client], None));
         let mut r = Replica::new(mac.clone(), Store::memory().unwrap(), Some(g.hash()), 0).unwrap();
         r.receive(vec![g.clone(), listed.clone()], 0).unwrap();
@@ -417,18 +422,17 @@ mod tests {
             let step = steps::sign(key, &Scope::Global, at, ANDRE, 1, 0, Content::new(members::APP, steps::FREEZE, data)).unwrap();
             Given { step, copy: Some(db.serialize("main").unwrap().to_vec()) }
         };
-        let freeze = |at: u64, now: &(Content, Vec<u8>), edit: &str| signed(&mac, at, now, edit);
+        let freeze = |at: u64, now: &(Content, Vec<u8>), edit: &str| signed(&recovery, at, now, edit);
         let now = r.freeze_now(&[g.clone(), listed.clone()], 2, Default::default(), 0).unwrap();
-        let stranger = SigningKey::from_bytes(&[9; 32]);
-        let strangers = signed(&stranger, 1, &now, "");
-        r.take_first(1, Some(&strangers), Some(&log(&stranger, &strangers)), 0).unwrap();
-        assert!(r.at().is_none() && r.looked == 1, "a freeze no admin's device signed is nothing");
+        let admins = signed(&mac, 1, &now, "");
+        r.take_first(1, Some(&admins), Some(&log(&mac, &admins)), 0).unwrap();
+        assert!(r.at().is_none() && r.looked == 1, "a freeze an admin's own device signed is nothing");
         let edited = freeze(2, &now, "UPDATE devices SET name = 'mine' WHERE name = 'old laptop'");
-        assert!(r.take_first(2, Some(&edited), Some(&log(&mac, &edited)), 0).is_err() && r.looked == 1, "an admin's whose copy isn't what the log says stops it");
+        assert!(r.take_first(2, Some(&edited), Some(&log(&recovery, &edited)), 0).is_err() && r.looked == 1, "the recovery key's whose copy isn't what the log says stops it");
         assert!(r.take_first(2, Some(&freeze(2, &now, "")), None, 0).is_err() && r.looked == 1, "as does one whose log isn't given yet");
         let other_rules = "DELETE FROM relations WHERE rowid = (SELECT max(rowid) FROM relations WHERE substr(subject, 1, 1) IN ('#', '@'))";
         let theirs = freeze(2, &now, other_rules);
-        r.take_first(2, Some(&theirs), Some(&log(&mac, &theirs)), 0).unwrap();
+        r.take_first(2, Some(&theirs), Some(&log(&recovery, &theirs)), 0).unwrap();
         assert_eq!(r.at(), Some(2), "frozen, at its freeze");
         let rules = steps::rules_of(r.db().conn()).unwrap();
         assert_eq!(rules, steps::rules_of(&{
@@ -459,20 +463,19 @@ mod tests {
     /// A device let in starts from where the device that let it in read who's who to (its Welcome), not from the
     /// freeze: the copy the bucket keeps before that step and the steps after it come to what that device has, as
     /// reading from the freeze does; a copy swapped for another, or a step held back, starts nothing, and a copy that
-    /// isn't there is read past from the freeze. Nor does a Welcome name any freeze but one an admin's own device signed
-    /// that checks out against the log: one signed outside the network, its copy changed to say what it likes, starts
-    /// nothing.
+    /// isn't there is read past from the freeze. Nor does a Welcome name any freeze but one the recovery key signed that
+    /// checks out against the log: one signed by anyone else, its copy changed to say what it likes, starts nothing.
     #[test]
     fn a_welcome_starts_a_new_device_from_the_copy_its_approver_had_read_to() {
         const ANDRE: &str = "a000000000000001";
-        let mac = SigningKey::from_bytes(&[1; 32]);
-        let g = Entry::create(&mac, Ext { log: "global".into(), time: 0, user: ANDRE.into(), epoch: 0, previous: Vec::new() }, None, genesis("Home", ANDRE, "Andre", &Endpoint::of(&mac), "mac", &[Kind::Client], &[7; 32], &"e".repeat(64)));
+        let (mac, recovery) = (SigningKey::from_bytes(&[1; 32]), SigningKey::from_bytes(&[7; 32]));
+        let g = Entry::create(&mac, Ext { log: "global".into(), time: 0, user: ANDRE.into(), epoch: 0, previous: Vec::new() }, None, genesis("Home", ANDRE, "Andre", &Endpoint::of(&mac), "mac", &[Kind::Client], &recovery.verifying_key().to_bytes(), &"e".repeat(64)));
         let mut r = Replica::new(mac.clone(), Store::memory().unwrap(), Some(g.hash()), 0).unwrap();
         r.receive(vec![g.clone()], 0).unwrap();
         let (content, copy) = r.freeze_now(std::slice::from_ref(&g), 1, Default::default(), 0).unwrap();
-        let mark = steps::sign(&mac, &Scope::Global, 2, ANDRE, 1, 0, content.clone()).unwrap();
-        let freeze = Given { step: steps::sign(&mac, &Scope::Global, 1, ANDRE, 1, 0, content).unwrap(), copy: Some(copy) };
-        let mut log = steps::Log::default();
+        let mark = steps::sign(&recovery, &Scope::Global, 2, ANDRE, 1, 0, content.clone()).unwrap();
+        let freeze = Given { step: steps::sign(&recovery, &Scope::Global, 1, ANDRE, 1, 0, content).unwrap(), copy: Some(copy) };
+        let mut log = steps::Log::new(Some(g.hash()));
         log.push(vec![g.clone()]);
         log.push_mark(mark.clone());
         r.take_first(1, Some(&freeze), Some(&log), 0).unwrap();
@@ -519,9 +522,9 @@ mod tests {
         assert!(welcomed(&w, &freeze, &log, Some(&copy), &held_back).is_err(), "nor a step held back");
         assert!(welcomed(&steps::Welcome { hash: "0".repeat(64), ..w.clone() }, &freeze, &log, Some(&copy), &after[99..]).is_err(), "nor another hash");
         assert!(steps::Truth::welcomed(&w, &freeze, root, None, Some(&copy), &after[99..], 0).is_err(), "nor without the log, which its freeze is checked against");
-        // A freeze signed outside the network, its copy changed and its hash with it, and its mark after the log's end:
-        // a Welcome to it and from its copy comes to what it says, but starts nothing.
-        let outside = SigningKey::from_bytes(&[8; 32]);
+        // A freeze Andre's Mac signed, its copy changed and its hash with it, and its mark after the log's end: a
+        // Welcome to it and from its copy comes to what it says, but starts nothing.
+        let outside = mac.clone();
         let forged = {
             let mut db = steps::connection(freeze.copy.as_deref().unwrap()).unwrap();
             db.execute_batch("UPDATE devices SET name = 'mine' WHERE name = 'mac'").unwrap();
@@ -529,12 +532,12 @@ mod tests {
             data["hash"] = serde_json::json!(crate::db::state_hash(&db).unwrap());
             Given { step: steps::sign(&outside, &Scope::Global, 1, ANDRE, 1, 0, Content::new(members::APP, steps::FREEZE, data)).unwrap(), copy: Some(db.serialize("main").unwrap().to_vec()) }
         };
-        let mut outside_log = steps::Log::default();
+        let mut outside_log = steps::Log::new(Some(g.hash()));
         outside_log.push(vec![g.clone()]);
         outside_log.push_mark(steps::sign(&outside, &Scope::Global, 2, ANDRE, 1, 0, forged.step.content.clone()).unwrap());
         let said = steps::Welcome { freeze: 1, at: 1, hash: crate::db::state_hash(&steps::connection(forged.copy.as_deref().unwrap()).unwrap()).unwrap() };
         let err = welcomed(&said, &forged, &outside_log, None, &[]).err().unwrap();
-        assert!(err.to_string().contains("isn't a freeze an admin's device signed"), "{err:#}");
+        assert!(err.to_string().contains("isn't a freeze its recovery key signed"), "{err:#}");
         // As a device reads it from the bucket; and with its copy gone, from the freeze.
         assert_eq!(hash(&rt.block_on(steps::welcomed(&bucket, &keys, root, &w, 0)).unwrap()), w.hash);
         bucket.objects.lock().unwrap().remove(&crate::db::copy_name(&prefix, 100));

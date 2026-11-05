@@ -185,15 +185,17 @@ fn the_workers_and_nodes_agree_on_keys_and_seals() {
         use one_client::members::Global;
         const ANDRE: &str = "a000000000000001";
         let browser_seed: [u8; 32] = rand::random();
-        let (mac, browser) = (SigningKey::from_bytes(&rand::random()), SigningKey::from_bytes(&browser_seed));
+        let (mac, browser, recovery) = (SigningKey::from_bytes(&rand::random()), SigningKey::from_bytes(&browser_seed), SigningKey::from_bytes(&rand::random()));
         let (epoch, app): ([u8; 32], [u8; 32]) = (rand::random(), rand::random());
         let ext = |epoch: u32| Ext { log: "global".into(), time: 0, user: ANDRE.into(), epoch, previous: vec![] };
-        let g = Entry::create(&mac, ext(0), None, members::genesis("Home", ANDRE, "Andre", &Endpoint::of(&mac), "mac", &[Kind::Client], &[7; 32], &one::keys::epoch_hash(&epoch)));
+        let g = Entry::create(&mac, ext(0), None, members::genesis("Home", ANDRE, "Andre", &Endpoint::of(&mac), "mac", &[Kind::Client], &recovery.verifying_key().to_bytes(), &one::keys::epoch_hash(&epoch)));
         let listed = Entry::create(&mac, ext(1), Some(g.head()), members::device(&Endpoint::of(&browser), ANDRE, "browser", &[Kind::Client], None));
         let (content, copy) = steps::freeze(Some(g.hash()), &[g.clone(), listed.clone()], 2, Default::default(), 0).unwrap();
-        // Its mark, the same freeze as the log's step after its end.
-        let mark = steps::sign(&mac, &Scope::Global, 3, ANDRE, 1, 0, content.clone()).unwrap();
-        let freeze = steps::sign(&mac, &Scope::Global, 1, ANDRE, 1, 0, content).unwrap();
+        // Signed by the recovery key in the ceremony, its mark first: the same freeze as the log's step after its end.
+        let mark = steps::sign(&recovery, &Scope::Global, 3, ANDRE, 1, 0, content.clone()).unwrap();
+        let mut far = content.clone();
+        far.data["logs"]["global"] = json!(1_000_000_000_000u64);
+        let freeze = steps::sign(&recovery, &Scope::Global, 1, ANDRE, 1, 0, content).unwrap();
         let (_, _, body) = steps::sign(&browser, &Scope::Global, 2, ANDRE, 1, 5, members::setting("greeting", Some("hi"))).unwrap().encode();
         let fields = json!({ "log": "global", "at": 2, "time": 5, "user": ANDRE, "epoch": 1 });
         let out = js(json!({ "op": "step", "seed": B64U.encode(&browser_seed), "fields": fields, "body": String::from_utf8(body).unwrap() }));
@@ -208,6 +210,12 @@ fn the_workers_and_nodes_agree_on_keys_and_seals() {
         let (s1, s2) = (sealed(1, &freeze, Some(&copy)), sealed(2, &signed, None));
         let junk = json!({ "at": 3, "sealed": B64U.encode(&one::log::seal(&[(1, rand::random())].into(), &one::db::step_name(&prefix, 3), b"not a step").unwrap()) });
         let (epochs, apps) = (std::collections::BTreeMap::from([(1, epoch)]), std::collections::BTreeMap::from([(1, sealed_app)]));
+        // An admin's device's, naming a log end of 10¹², is passed over before any log is read: it holds no browser up.
+        let mut client = Global::new(Some(g.hash()));
+        client.add(&pack(&[&g, &listed])).unwrap();
+        let planted = sealed(1, &steps::sign(&mac, &Scope::Global, 1, ANDRE, 1, 0, far).unwrap(), Some(&copy));
+        assert_eq!(client.add_sealed(&json!({ "steps": [planted] }), &epochs, &apps).unwrap(), None, "no log is asked for");
+        assert!(!client.frozen() && client.at() == 1, "and it's passed over");
         let mut client = Global::new(Some(g.hash()));
         client.add(&pack(&[&g, &listed])).unwrap();
         let read = json!({ "steps": [s1, s2, junk] });

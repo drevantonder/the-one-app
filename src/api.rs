@@ -898,12 +898,15 @@ async fn reads(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
     done()
 }
 
-/// `{ force? }`: freezes `global`'s log, so its scope database is the truth (`database::switch`), if the switch is on
-/// (or `force`, in a throwaway network), every device reads it, and this device signs for an admin: → `{ frozen }`.
-async fn switch(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
-    only(&body, &["force"])?;
-    node.freeze(body["force"] == true).await?;
-    Ok(Json(json!({ "frozen": node.frozen() })))
+/// `{ recovery, force? }`: the ceremony that freezes `global`'s log, so its scope database is the truth
+/// (`Node::switch`), signed by `recovery`, the install's recovery key (hex), read from a file here by the CLI and never
+/// kept: only on this machine, by an admin, once the switch is on and every device reads it (or `force`, in a
+/// throwaway network). → `{ frozen }`.
+async fn switch(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
+    only(&body, &["recovery", "force"])?;
+    let secret: [u8; 32] = crate::keys::unhex(text(&body, "recovery")?.trim()).map_err(|_| anyhow::anyhow!("a recovery key is 64 hex characters"))?;
+    let frozen = node.switch(&me.caller, &ed25519_dalek::SigningKey::from_bytes(&secret), body["force"] == true).await?;
+    Ok(Json(json!({ "frozen": frozen })))
 }
 
 /// `[{ header, signature, body }]` (each base64url): steps of `global`'s scope database the caller's own device

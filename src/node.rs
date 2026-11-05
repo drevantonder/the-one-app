@@ -1161,15 +1161,6 @@ impl Node {
             self.say(&Scope::Global, status::Said::Build { device: self.0.id, build: crate::config::BUILD.into(), target: crate::config::TARGET.into() }).await?;
         }
         self.said_reads(self.0.id, crate::database::switch::READS, crate::config::BUILD).await;
-        // An admin's device freezes the log once every device reads the scope database (`database::switch`).
-        if crate::database::switch::SWITCH && !self.frozen() {
-            let node = self.clone();
-            tokio::spawn(async move {
-                if let Err(err) = node.freeze(false).await {
-                    tracing::warn!("freezing the log: {err:#}");
-                }
-            });
-        }
         // And once it's frozen, a release's new default roles as a step.
         if self.frozen() {
             let node = self.clone();

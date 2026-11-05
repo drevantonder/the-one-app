@@ -455,10 +455,15 @@ impl Log {
     /// Of `global`'s: who's who once its log is frozen, from its freeze and the steps after, each freeze judged at the
     /// end of the log it names, as every reader judges it; none before, nor while its log isn't read that far, or
     /// nothing is where its mark would be yet, when the entries still say who's who (`Truth::judged`). Fails at a
-    /// freeze an admin signed that doesn't check out, or a newer release's step, which stops this node there as it
-    /// stops every reader.
+    /// freeze the recovery key signed that doesn't check out, or a newer release's step, which stops this node there
+    /// as it stops every reader. Anything else shaped like a freeze is passed over, its log never read.
     fn truth(&self) -> Result<Option<one::database::steps::Truth>> {
-        one::database::steps::Truth::judged(&self.steps, root(&self.entries), self.frozen.as_ref(), now())
+        one::database::steps::Truth::judged(&self.steps, root(&self.entries), self.frozen.as_ref(), &self.recovery(), now())
+    }
+
+    /// Of `global`'s: every key its entries say was ever the install's recovery key (`steps::recovery_keys`).
+    fn recovery(&self) -> one::database::steps::Recovery {
+        one::database::steps::recovery_keys(root(&self.entries), &self.entries)
     }
 
     /// The newest epoch of `scope` made, as `global`'s entries, or its steps once its log is frozen, say.
@@ -545,7 +550,7 @@ pub async fn read_log(owner: String, bucket: JsValue, scope: String, keys: Strin
 }
 
 /// A scope's database's steps after those read, with the log's keys: `global`'s always, since its freeze is one, and
-/// its log to the end the freeze names once an admin's device signed one; another scope's once `global`'s log is
+/// its log to the end the freeze names once the recovery key signed one; another scope's once `global`'s log is
 /// frozen, with the entries its database starts from the first time.
 async fn read_steps(id: &(String, String), bucket: &Js) -> Result<()> {
     let global = (id.0.clone(), "global".to_string());
@@ -581,7 +586,7 @@ async fn read_steps(id: &(String, String), bucket: &Js) -> Result<()> {
                 let wants = LOGS.with(|l| {
                     let logs = l.borrow();
                     let Some(g) = logs.get(id) else { return None };
-                    one::database::steps::wants_log(&g.steps, root(&g.entries), g.frozen.as_ref(), now())
+                    one::database::steps::wants_log(&g.steps, root(&g.entries), g.frozen.as_ref(), &g.recovery())
                 });
                 let Some(end) = wants else { break };
                 let root = LOGS.with(|l| l.borrow().get(id).and_then(|g| root(&g.entries)));
@@ -598,7 +603,7 @@ async fn read_steps(id: &(String, String), bucket: &Js) -> Result<()> {
         if id.1 == "global" {
             LOGS.with(|l| {
                 if let Some(g) = l.borrow_mut().get_mut(id)
-                    && one::database::steps::Truth::read(&g.steps, root(&g.entries), g.frozen.as_ref(), now()).is_err_and(|e| e.is::<one::database::steps::Unmarked>())
+                    && one::database::steps::Truth::read(&g.steps, root(&g.entries), g.frozen.as_ref(), &g.recovery(), now()).is_err_and(|e| e.is::<one::database::steps::Unmarked>())
                 {
                     g.frozen = None;
                 }

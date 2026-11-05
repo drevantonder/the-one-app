@@ -398,10 +398,13 @@ fn run(args: Vec<String>) -> Result<()> {
             println!("Set {name}.");
         }
         ["switch"] => {
-            // Freezes the log, so the scope database is the truth: only once the switch is on and every device reads
-            // it, or in a throwaway network, which may be switched to prove it (`database::switch`).
-            let r = post("/v1/switch", json!({ "force": true }))?;
-            println!("{}", if r["frozen"] == true { "Who's who is the scope database now." } else { "Not switched: the switch is off in this build, or a device still reads the log (status says which)." });
+            // The ceremony that freezes the log, so the scope database is the truth, signed by the recovery key read
+            // from a file here and never printed: only once the switch is on and every device reads it, or in a
+            // throwaway network, which may be switched to prove it (`Node::switch`).
+            takes_only(&flags, &["recovery-key"])?;
+            let at = flags.get("recovery-key").and_then(Value::as_str).context("give --recovery-key <file> (or - to read it from stdin): the file the install's recovery key is in")?;
+            let r = post("/v1/switch", json!({ "recovery": recovery_key_from(at, "cli")?, "force": true }))?;
+            println!("{}", if r["frozen"] == true { "Who's who is the scope database now." } else { "Not switched yet: run it again." });
         }
         ["role", user, role] => {
             post("/v1/role", json!({ "user": user, "role": role }))?;
@@ -1371,7 +1374,8 @@ fn switch_gate(gate: &Value, name: &dyn Fn(&str) -> String) {
     }
     let waiting = gate["waiting"].as_array().cloned().unwrap_or_default();
     if waiting.is_empty() {
-        println!("  Every device reads it.");
+        let then = if gate["switch"] == true { format!(": an admin switches it with {CLI} switch --recovery-key <file>") } else { String::new() };
+        println!("  Every device reads it{then}.");
     }
     for d in &waiting {
         let reads = match d["reads"].as_u64() {

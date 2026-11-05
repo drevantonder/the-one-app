@@ -584,12 +584,12 @@ pub fn check(c: &Check) -> Result<(Value, Vec<Restored>)> {
     }
     let root = c.root.or_else(|| store.ordered().ok()?.iter().find(|e| e.content.app == crate::members::APP && e.content.kind == "genesis").map(|e| e.hash()));
     let global_keys = c.keys.get("global").map(Vec::as_slice).unwrap_or(&[]);
-    let m = steps_of(members_of(&store, root)?, root, place, install, global_keys)?;
+    let m = steps_of(&store, root, place, install, global_keys)?;
     // The same entries say the same on every device: the backup's, replayed, are who's who as this device had it.
     if c.live.is_some() && problems.is_empty() {
         let here = crate::store::Store::memory()?;
         here.take(expected)?;
-        if said(&steps_of(members_of(&here, root)?, root, place, install, global_keys)?) != said(&m) {
+        if said(&steps_of(&here, root, place, install, global_keys)?) != said(&m) {
             problems.push("its entries don't replay to the people, devices and apps this device had then".into());
         }
     }
@@ -607,8 +607,10 @@ pub fn check(c: &Check) -> Result<(Value, Vec<Restored>)> {
 }
 
 /// Who's who once `global`'s log is frozen, as its scope database's steps the place's copy of the bucket holds say it
-/// (`database::steps`), opened with `keys`, its epochs' keys; `replayed`, as the entries say it, before.
-fn steps_of(replayed: ScopeDb, root: Option<crate::entry::Hash>, place: &Place, install: &str, keys: &[[u8; 32]]) -> Result<ScopeDb> {
+/// (`database::steps`), opened with `keys`, its epochs' keys; as `store`'s entries say it, before.
+fn steps_of(store: &crate::store::Store, root: Option<crate::entry::Hash>, place: &Place, install: &str, keys: &[[u8; 32]]) -> Result<ScopeDb> {
+    let replayed = members_of(store, root)?;
+    let recovery = crate::database::steps::recovery_keys(root, &store.scope("global")?);
     // The log's key in each epoch: the node's app key there, opened with whichever of the epochs' keys does.
     let mut log_keys: BTreeMap<u32, [u8; 32]> = BTreeMap::new();
     for n in 1..=(keys.len() as u32 + 8) {
@@ -642,11 +644,11 @@ fn steps_of(replayed: ScopeDb, root: Option<crate::entry::Hash>, place: &Place, 
             crate::database::steps::Opened::Step(given) => steps.push(Some(given)),
             crate::database::steps::Opened::Junk => steps.push(None),
             crate::database::steps::Opened::Waits(epoch) => {
-                while let Some(end) = crate::database::steps::wants_log(&steps, root, log.as_ref(), now) {
+                while let Some(end) = crate::database::steps::wants_log(&steps, root, log.as_ref(), &recovery) {
                     log = Some(log_to(end)?);
                 }
                 // Junk, under an epoch above every one made by the steps before it.
-                let held = crate::database::steps::Truth::read(&steps, root, log.as_ref(), now)?.map_or(made, |t| t.db.epoch(&crate::entry::Scope::Global));
+                let held = crate::database::steps::Truth::read(&steps, root, log.as_ref(), &recovery, now)?.map_or(made, |t| t.db.epoch(&crate::entry::Scope::Global));
                 if epoch <= held {
                     break;
                 }
@@ -654,10 +656,10 @@ fn steps_of(replayed: ScopeDb, root: Option<crate::entry::Hash>, place: &Place, 
             }
         }
     }
-    while let Some(end) = crate::database::steps::wants_log(&steps, root, log.as_ref(), now) {
+    while let Some(end) = crate::database::steps::wants_log(&steps, root, log.as_ref(), &recovery) {
         log = Some(log_to(end)?);
     }
-    match crate::database::steps::Truth::read(&steps, root, log.as_ref(), now)? {
+    match crate::database::steps::Truth::read(&steps, root, log.as_ref(), &recovery, now)? {
         Some(t) => Ok(t.db),
         None => Ok(replayed),
     }

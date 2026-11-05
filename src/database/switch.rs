@@ -12,8 +12,9 @@ use std::collections::{BTreeSet, HashMap};
 use crate::database::scopes::ScopeDb;
 use crate::entry::{Key, hex, unhex};
 
-/// Whether an admin's device freezes the log once the gate is open, and the scope database becomes the truth. Off
-/// until every device runs a build that reads it and the switch is decided: the one place to switch it on.
+/// Whether the ceremony that freezes the log may run once the gate is open, so the scope database becomes the truth:
+/// an admin runs it once, with the install's recovery key (`one switch`, `Node::switch`). Off until every device runs a
+/// build that reads it and the switch is decided: the one place to switch it on.
 pub const SWITCH: bool = false;
 
 /// Whether this node may be told to switch though `SWITCH` is off: only a throwaway network's (`one throwaway switch`), to prove

@@ -136,6 +136,10 @@ pub fn run(rest: &[String]) -> Result<()> {
     if rest.first().map(String::as_str) == Some("git") {
         return git(&dir, &rest[1..]);
     }
+    // The switch's ceremony, with the throwaway network's own recovery key, kept in its folder.
+    if rest.iter().map(String::as_str).eq(["switch"]) {
+        return crate::run(vec!["switch".into(), "--recovery-key".into(), dir.join("recovery-key").display().to_string()]);
+    }
     if !rest.is_empty() {
         return crate::run(rest.to_vec());
     }
@@ -216,6 +220,8 @@ fn usage() -> String {
   {CLI} throwaway sign-in          sign its CLI in as its person, with no browser
   {CLI} throwaway git <args>       git, reaching its repos at its address: {CLI} throwaway git clone <address>/repos/<owner>/<repo>.git, then {CLI} throwaway git push in the clone
   {CLI} throwaway cloudflare node deploy    run its Cloudflare node beside its Workers, as Cloudflare would
+  {CLI} throwaway switch           switch who's who to the scope database: the ceremony {CLI} switch runs with the
+                                   recovery key, with its own, though the switch is off in this build
   {CLI} throwaway client <kind>    a signed-in client of this checkout's build: web, android or windows
   {CLI} throwaway client <kind> --as sam    the same, as someone else, invited by you with Add Someone's link
   {CLI} throwaway client cli <command>    a command from a computer that's only a device of its person's (no node), asking
