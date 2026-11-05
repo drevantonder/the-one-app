@@ -724,16 +724,21 @@ fn web_client_built(checkout: &Path, rest: &[String]) -> Result<()> {
 }
 
 /// For `throwaway cloudflare node deploy` from this checkout's own debug build: the Cloudflare node's WebAssembly built (as a dev
-/// build, not release) into target/cloudflare-node, and this build made again with it, as `throwaway client web` does with the
-/// client's, so the two builds agree: every build of this checkout holds both once they're there, and the throwaway network's
-/// relay (which names the Cloudflare node) starts for any of them.
+/// build, not release) into target/cloudflare-node, as it is now (cargo keeps what hasn't changed), and this build made again
+/// with it if it holds another, as `throwaway client web` does with the client's, so the two builds agree: every build of
+/// this checkout holds both once they're there, and the throwaway network's relay (which names the Cloudflare node) starts for
+/// any of them.
 fn cloudflare_node_built(checkout: &Path, rest: &[String]) -> Result<()> {
     let own = checkout.join("target/debug").join(env!("CARGO_BIN_NAME"));
-    if std::env::current_exe().ok().and_then(|e| e.canonicalize().ok()) != own.canonicalize().ok() || one::cloudflare::node::modules().is_ok() {
+    if std::env::current_exe().ok().and_then(|e| e.canonicalize().ok()) != own.canonicalize().ok() {
         return Ok(());
     }
     eprintln!("Building the Cloudflare node's WebAssembly (the first time takes minutes; cargo keeps what hasn't changed)…");
-    crate::update::cloudflare_node(checkout, &checkout.join(one::config::CONFIG_FILE), "dev")?;
+    let built = crate::update::cloudflare_node(checkout, &checkout.join(one::config::CONFIG_FILE), "dev")?;
+    let held = |name: &str, bytes: &[u8]| std::fs::read(built.join(name)).is_ok_and(|file| file == bytes);
+    if !one::config::CLOUDFLARE_NODE.is_empty() && one::config::CLOUDFLARE_NODE.iter().all(|(name, bytes)| held(name, bytes)) {
+        return Ok(());
+    }
     rebuilt(checkout, rest, &format!("target/debug/{CLI} again with the Cloudflare node"))
 }
 
