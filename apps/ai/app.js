@@ -55,7 +55,7 @@ export default {
   },
   schema: Object.fromEntries(kinds.map((k) => [k, schema])),
 
-  ops: {
+  tools: {
     settings: {
       reads: true,
       description: "Which AI answers ai_read and ai_decide for you: { provider, local_device, read_model, decide_model, gemini_model }, your own settings over everyone's, over the defaults. provider is local (models on local_device, or any of your devices when it's null) or gemini.",

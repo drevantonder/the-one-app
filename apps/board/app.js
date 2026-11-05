@@ -212,7 +212,7 @@ The board's rules, which every agent follows and anyone may change with board_ru
     update posts set added = time;
     create index posts_added on posts (added);`]])),
 
-  ops: {
+  tools: {
     read: {
       words: ["topic"],
       description: `Read a topic: its last ${RECENT} posts, each with its number, time and who wrote it, older ones as summaries, then its subtopics. Omit the topic to read the top, with the board's rules. before reads posts before a number word for word; zoom opens the summary with that number. To find posts by what they say, board_recall.`,

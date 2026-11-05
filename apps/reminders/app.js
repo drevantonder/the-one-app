@@ -30,7 +30,7 @@ export default {
   instructions: "Reminders are the person's Apple Reminders, through their Mac, and sync to their other Apple devices. reminders_lists lists the lists; reminders_list lists reminders, soonest due first, leaving out completed ones unless asked. reminders_update also completes one.",
   uses: { services: ["reminders"] },
 
-  ops: {
+  tools: {
     devices: {
       reads: true,
       description: "The Macs Reminders runs on: each { device, online }, device the Mac's name.",

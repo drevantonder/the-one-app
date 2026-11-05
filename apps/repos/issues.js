@@ -51,7 +51,7 @@ const placeholders = (xs) => xs.map(() => "?").join(", ");
 const like = (q) => `%${q.replace(/[\\%_]/g, (c) => "\\" + c)}%`;
 
 /// The issue tools, given what app.js knows of repos: finding one, it as an object of permissions, and people.
-export function ops(R) {
+export function tools(R) {
   const { global, named, object, rights, who, byHandle, handles, randomId, iso, REPO } = R;
   const person = (ctx, id) => who(ctx, `user:${id}`);
   const COMMENT_ID = { type: "string", description: "a comment's id, from repos_issue's comments" };

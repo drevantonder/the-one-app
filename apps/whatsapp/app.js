@@ -85,7 +85,7 @@ export default {
   service: { network: ["web.whatsapp.com", "*.whatsapp.net"], person: false, platforms: ["linux", "mac"] },
   vault: VAULT,
 
-  ops: {
+  tools: {
     accounts: {
       reads: true,
       description: "The WhatsApp accounts linked on any of your devices, this one's first: each { account, ok, device }, account its number and device where it's linked, with why when ok is false. Give account to the others to pick one.",

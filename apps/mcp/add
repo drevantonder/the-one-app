@@ -1,5 +1,5 @@
 #!/bin/sh
-# Makes a remote MCP server (streamable HTTP) an app whose operations are its tools, deploys it and installs it:
+# Makes a remote MCP server (streamable HTTP) an app with its tools, deploys it and installs it:
 #
 #   apps/mcp/add <name> <url> [--title <title>] [--header '<Name>: <value>']... [--scope user|global|<group>]
 #   apps/mcp/add <name>        deploys the server's tools as they are now: after sign_in, or when they change
@@ -64,7 +64,7 @@ until $one "$name" refresh_tools >"$dir/tools.next" 2>"$dir/error"; do
   tries=$((tries + 1))
   if [ $tries -ge 15 ] || ! grep -qE "latest deploy|disconnected|restart" "$dir/error"; then
     cat "$dir/error" >&2
-    echo "Then run $0 $name again to make its tools $name's operations." >&2
+    echo "Then run $0 $name again to make its tools $name's." >&2
     exit 0
   fi
   sleep 2

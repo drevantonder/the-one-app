@@ -31,7 +31,7 @@ export default {
   uses: { services: ["models"] },
   service: { network: ["127.0.0.1"], person: false, platforms: ["linux", "mac"] },
 
-  ops: {
+  tools: {
     devices: {
       reads: true,
       description: "The devices Models runs on: each { device, online }, device the device's name. models_here lists the models on each.",

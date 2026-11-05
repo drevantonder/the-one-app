@@ -649,7 +649,7 @@ export default {
   // the device that keeps Messenger running (one devices keep messenger <it>).
   schedules: { idle: { op: "_idle", every: "2m", description: "Gives back the devices Messenger borrowed and isn't using" } },
 
-  ops: {
+  tools: {
     accounts: {
       reads: true,
       description: "The browser profiles Messenger reads, the default first: each { account, ok }, account the profile's name, with why when ok is false and it needs signing in again. Give account to the others to pick one.",

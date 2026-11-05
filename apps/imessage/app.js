@@ -34,7 +34,7 @@ export default {
   instructions: "iMessage is the person's Messages on their Mac, iMessage and SMS. imessage_chats lists recent chats; imessage_read reads one, newest last; imessage_search finds messages. Each list pages back with limit and skip. imessage_send sends a real message to a real person: send only what the user asked to send, to whom they asked. Reading never marks a message read.",
   uses: { services: ["imessage"] },
 
-  ops: {
+  tools: {
     devices: {
       reads: true,
       description: "The Macs iMessage runs on: each { device, online }, device the Mac's name.",

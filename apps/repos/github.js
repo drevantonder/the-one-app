@@ -556,7 +556,7 @@ export async function list(ctx) {
 
 const pending = async (ctx, what) => (await ctx.global.query("select value from github_pending where what = ?", [what]))[0]?.value || null;
 
-export function ops({ global }) {
+export function tools({ global }) {
   const ACCOUNT = { type: "string", description: "a GitHub username, as repos_accounts lists them" };
   return {
     accounts: {

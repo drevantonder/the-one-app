@@ -346,7 +346,7 @@ export default {
   vault: VAULT,
   schema: signInSchema,
 
-  ops: {
+  tools: {
     ...signInOps,
     calendars: {
       reads: true,

@@ -65,7 +65,7 @@ export default {
   description: "How busy each device is",
   instructions: "Your One App runs each thing on the device with the lowest run priority (1 first) that can run it, is on and has room; devices on the same number are equal, and the quickest to answer runs it; Cloudflare, once there is one, is always last unless an admin gave it a number; a device far from the others only when it's nearer. device-activity_order shows that order; device-activity_priority gives a device a number, for an admin, only when the person asks. device-activity_list shows every one of your devices, online or not, with its memory (as Activity Monitor counts it on a Mac), CPU, GPU and disk, and the containers each hosts after it. Use it to pick a device with room for a desktop, a model or a build.",
 
-  ops: {
+  tools: {
     order: {
       description: "Run priority: every device, and Cloudflare once there is one, in the order calls, services and new agent devices go to them, each with its priority (a number from 1, or \"last\": always last) and what kind of device it is; and whether you're an admin, who may change it.",
       input: { type: "object", properties: {} },

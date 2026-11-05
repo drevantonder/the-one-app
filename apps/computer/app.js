@@ -98,7 +98,7 @@ export default {
   },
 
 
-  ops: {
+  tools: {
     devices: {
       reads: true,
       description: "Your devices that run Computer Use, as { device, online }: device is its name. computer_list lists the devices agents use on them.",

@@ -1,4 +1,4 @@
-// A remote MCP server as an app: each of its tools is an operation, forwarded to the server's tools/call over
+// A remote MCP server as an app: each of its tools is one of the app's, forwarded to the server's tools/call over
 // streamable HTTP. `apps/mcp/add` makes one from this file, beside server.json (url, title, headers) and tools.json
 // (what refresh_tools said the server has), and deploys it again when the tools change.
 //
@@ -24,7 +24,7 @@ const form = (o) => Object.entries(o).filter(([, v]) => v != null && v !== "")
 const b64url = (bytes) => btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 const random = () => b64url(crypto.getRandomValues(new Uint8Array(32)));
 
-/// An op's name for a tool: lowercase words joined by _, without the server's own name in front.
+/// A tool's name in the app: lowercase words joined by _, without the server's own name in front.
 function opName(tool) {
   let name = tool.toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "");
   const own = NAME.replace(/-/g, "_") + "_";
@@ -112,7 +112,7 @@ async function renew(ctx, acct) {
   return tok.access_token;
 }
 
-/// An MCP tool result as an op's result: its text, else its structured content.
+/// An MCP tool result as the app's tool's result: its text, else its structured content.
 function result(res) {
   const parts = (res.content || []).map((c) =>
     c.type === "text" ? c.text
@@ -163,7 +163,7 @@ function email(idToken) {
 
 const ACCOUNT = { type: "string", description: "which signed-in account, as accounts lists them; needed only when several are" };
 
-/// Every tool the server listed as an operation.
+/// Every tool the server listed, as the app's.
 const tools = Object.fromEntries(listed.tools.map((tool) => {
   const input = { type: "object", ...(tool.inputSchema || {}) };
   const own = input.properties && "account" in input.properties;
@@ -191,8 +191,8 @@ export default {
   title: server.title || listed.title || NAME,
   icon: "puzzle-piece",
   instructions: [
-    `${server.title || NAME} is the remote MCP server at ${server.url}: its tools are this app's operations.`,
-    listed.oauth ? "It needs a sign-in: accounts lists who's signed in, sign_in signs in (another account adds one), and with several each operation takes account." : "",
+    `${server.title || NAME} is the remote MCP server at ${server.url}: its tools are this app's.`,
+    listed.oauth ? "It needs a sign-in: accounts lists who's signed in, sign_in signs in (another account adds one), and with several each tool takes account." : "",
     listed.instructions || "",
   ].filter(Boolean).join(" "),
 
@@ -206,7 +206,7 @@ export default {
                             token_endpoint text not null, resource text, client_secret text, verifier text not null);`,
   },
 
-  ops: {
+  tools: {
     ...tools,
 
     sign_in: {
@@ -338,5 +338,5 @@ async function finish(ctx, code, name) {
     ...(p.client_secret ? { client_secret: { value: p.client_secret, secret: true } } : {}),
   };
   await ctx.vault.create({ title: acct, type: TYPE, domain: host(server.url), fields, hosts: [...new Set([host(server.url), host(p.token_endpoint)])], same: "name" });
-  return `Signed in as ${acct}.${listed.oauth ? "" : ` Run apps/mcp/add ${NAME} to make the server's tools this app's operations.`}`;
+  return `Signed in as ${acct}.${listed.oauth ? "" : ` Run apps/mcp/add ${NAME} to make the server's tools this app's.`}`;
 }

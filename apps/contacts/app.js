@@ -28,7 +28,7 @@ export default {
   instructions: "Contacts are the person's Apple Contacts, through their Mac. contacts_search finds people by name, email address or phone number; contacts_me is the person's own card.",
   uses: { services: ["contacts"] },
 
-  ops: {
+  tools: {
     devices: {
       reads: true,
       description: "The Macs Contacts runs on: each { device, online }, device the Mac's name.",

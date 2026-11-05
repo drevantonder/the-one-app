@@ -28,7 +28,7 @@ export default {
   uses: { services: ["shell"] },
   service: { person: true, platforms: ["linux", "mac"] },
 
-  ops: {
+  tools: {
     devices: {
       reads: true,
       description: "The devices Shell runs on: each { device, online }, device the device's name. Give one as device to shell_run.",

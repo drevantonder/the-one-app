@@ -285,7 +285,7 @@ const app = {
     repo: { permissions: ["push", "manage"], roles: { owner: ["push", "manage"], collaborator: ["push"] } },
   },
 
-  ops: {
+  tools: {
     list: {
       reads: true,
       description: "Every repo, the latest moved first: its <owner>/<name>, its owner's handle and name, where it was forked from, its default branch (main, or else its first), how many branches it has, when it last moved, how many open issues it has, and whether you push to it. Deleted ones say when, and wait in Recently Deleted for repos_restore. Then GitHub's that you see, as github.com/<owner>/<name>, with github: { url, private, fork }; source github lists only those, and says what GitHub refused.",
@@ -486,8 +486,8 @@ const app = {
         return `Erased ${r.path}.`;
       },
     },
-    ...issues.ops({ global, named, object, rights, who, byHandle, handles, randomId, iso, REPO }),
-    ...github.ops({ global }),
+    ...issues.tools({ global, named, object, rights, who, byHandle, handles, randomId, iso, REPO }),
+    ...github.tools({ global }),
     _address: {
       reads: true,
       description: "Where git reaches repos, for the screens: base, <address>/repos/ (null on a node from before it had the address), and the caller's handle.",
@@ -572,10 +572,10 @@ const app = {
 export default app;
 
 // A GitHub repo's tools ask GitHub (github.js); what only the install's own repos do says where to do it.
-for (const [name, op] of Object.entries(app.ops)) {
-  const own = op.run;
-  if (github.run[name]) op.run = (ctx, input = {}) => (github.isGithub(input.repo) ? github.run[name](ctx, input) : own(ctx, input));
-  else if (github.elsewhere[name]) op.run = (ctx, input = {}) => (github.isGithub(input.repo) ? github.refuse(ctx, name, input.repo) : own(ctx, input));
+for (const [name, tool] of Object.entries(app.tools)) {
+  const own = tool.run;
+  if (github.run[name]) tool.run = (ctx, input = {}) => (github.isGithub(input.repo) ? github.run[name](ctx, input) : own(ctx, input));
+  else if (github.elsewhere[name]) tool.run = (ctx, input = {}) => (github.isGithub(input.repo) ? github.refuse(ctx, name, input.repo) : own(ctx, input));
 }
 
 /// What http.js needs of repos: finding one, who may push, making one, and moving a branch.

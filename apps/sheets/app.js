@@ -279,7 +279,7 @@ export default {
   vault: VAULT,
   schema: signInSchema,
 
-  ops: {
+  tools: {
     ...signInOps,
     spreadsheet: {
       reads: true,

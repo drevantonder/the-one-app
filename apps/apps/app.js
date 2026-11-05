@@ -144,7 +144,7 @@ export default {
     return new Set((await ctx.failing()).map((s) => s.app)).size;
   },
 
-  ops: {
+  tools: {
     list: {
       reads: true,
       description: "Every app, a line each: its title and name (for the other apps_ tools), where it's added (that you can see), whether it's a service (no screen of its own, like Gmail: it's in each page's Services), and what it's for; then the places you may add apps to. Deleted apps are left out: deleted true lists only them.",

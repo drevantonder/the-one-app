@@ -39,7 +39,7 @@ export default {
   instructions: "Calendar is the person's Apple Calendar through their Mac: every account it has, such as iCloud, Google or Exchange. calendar_events lists events in a time range, by default the coming week. Times are ISO 8601; without an offset they're in the Mac's time zone.",
   uses: { services: ["calendar"] },
 
-  ops: {
+  tools: {
     devices: {
       reads: true,
       description: "The Macs Calendar runs on: each { device, online }, device the Mac's name. Calendar's own accounts (iCloud, Google, Exchange) are in calendar_calendars.",

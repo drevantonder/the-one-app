@@ -7,7 +7,7 @@ export default {
   title: "Hello",
   icon: "hand-waving",
   description: "Says hello",
-  ops: {
+  tools: {
     hello: {
       reads: true,
       description: "Says hello to whoever asks. Gives { text }.",

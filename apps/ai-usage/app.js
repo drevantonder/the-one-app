@@ -316,7 +316,7 @@ export default {
     `alter table snapshots add column email text;`,
     `alter table snapshots add column devices text;`]])),
 
-  ops: {
+  tools: {
     status: {
       words: ["provider", "format"],
       reads: false,
