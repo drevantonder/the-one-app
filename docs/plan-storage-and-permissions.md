@@ -121,6 +121,7 @@ This phase has one owner. It starts only once **every device listed in the insta
 4. **Storage switches on what R1 built**, each one constant in `src/db.rs`, beside each other:
    - `SIGNED_STEPS`: a writer signs a step in it (`db::SIGNED`: the changeset, its signer, its signature and, on a step a copy follows, the state hash, in one create-only write), not beside it in `<n>.sig`. R1 reads both kinds; an older reader passes over a kind it doesn't know, so it waits for the gate.
    - `DELETE_COVERED_STEPS`: the steps a copy covers go after the retention period. An older reader that can't start from the copy would read what's left as the whole database.
+     - Once they can go, writing a backup back into a bucket, or moving storage, must start from the copy: a database's newest copy, then its steps after. The URL signer creates a step only once the one before it, or the copy up to it, is there, and a copy only once its step is, so it must first take a copy whose covered steps are gone. Moving storage today copies each database's steps up to the first position with nothing (`node::storage`).
    - From the first step a writer signs in it, which records its position (`db::Sig::from`), every reader refuses a step that isn't signed in it, or whose signature or state hash doesn't hold (`db::refused`, `db::copy_holds`); before it, nothing is. The scope database's readers and writers also check its signer (`db::Signers`, `Db::open_checking`).
 
 ### Phase 3, contract: delete, rename, move
