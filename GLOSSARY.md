@@ -49,8 +49,9 @@ the same commit. "Avoid" lists the words not to use for that thing, in code, doc
 - **Service**: native code an app publishes, for what the app runtime can't do (reach a Mac's Messages, hold WhatsApp's
   linked phone, run a local model), run on one of the nodes of whoever added the app, which they choose while adding it,
   as its own process, an endpoint of its own key. Adding WhatsApp asks which of your nodes runs its service. A service
-  is its app's alone: only that app calls it, and other apps call that app's tools. Built-in apps' services ship with
-  each release. Avoid: part, native component, device service.
+  exposes **functions** (`ctx.services.whatsapp.send(…)`), and is its app's alone: only that app calls them, and other
+  apps call that app's tools. Built-in apps' services ship with each release. Avoid: part, native component, device
+  service; operation, for a function.
 - **Added**: an app recorded as added to a scope, by a person, or for a group or everyone by its admin: the state the
   network should be in. The App Store only records it, like any app could; the core makes it so, deploying the app and
   running its service on the node the person chose while adding it, and takes it all away when it's removed.
