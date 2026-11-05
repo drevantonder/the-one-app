@@ -840,7 +840,8 @@ fn run_here(command: &str) -> Result<Value> {
 }
 
 fn shell(device: &Value, command: &str, timeout: u64) -> Result<Value> {
-    let r = post("/v1/call", json!({ "device": device["key"], "app": "shell", "op": "run", "input": { "command": command, "timeout": timeout } }))?;
+    // Shell's service on that device, by its name: its own program there, or built into an older node.
+    let r = post("/v1/call", json!({ "device": device["name"], "service": "shell", "app": "shell", "op": "run", "input": { "command": command, "timeout": timeout } }))?;
     Ok(r["ok"].clone())
 }
 
