@@ -8,7 +8,7 @@ import { createRoot as t } from "react-dom/client";
 import { AppIcon as n, Button as r, Empty as i, List as a, ListRow as o, ListSkeleton as s, Problem as c, Spinner as l, Switch as ee } from "@one/ui";
 import { useCallback as u, useEffect as d, useRef as te, useState as f } from "react";
 import { Fragment as ne, jsx as p, jsxs as m } from "react/jsx-runtime";
-// ../../../../../.t3/worktrees/the-one-app/t3-46f62ca4/apps/apps/lib/store.jsx
+// ../../../../../.t3/worktrees/the-one-app/t3-c7581558/apps/apps/lib/store.jsx
 var h = /* @__PURE__ */ new Set();
 one.on("changed", () => h.forEach((e) => e()));
 function g(e, t) {
@@ -58,7 +58,7 @@ function ie(t) {
 		children: [a, i]
 	}), n[2] = i, n[3] = a, n[4] = o) : o = n[4], o;
 }
-// ../../../../../.t3/worktrees/the-one-app/t3-46f62ca4/apps/apps/lib/app-page.jsx
+// ../../../../../.t3/worktrees/the-one-app/t3-c7581558/apps/apps/lib/app-page.jsx
 var ae = (e) => e.charAt(0).toUpperCase() + e.slice(1), oe = (e) => one.ago(e) === "now" ? "just now" : one.ago(e) + " ago";
 function se(e) {
 	let t = Math.max(0, Math.round((e - Date.now()) / 6e4));
@@ -66,7 +66,7 @@ function se(e) {
 }
 var ce = (e, t) => e.installed.some((e) => t.some((t) => t.id === e));
 function y(t) {
-	let s = e(151), { name: u, list: h, onOpen: _, onGone: v, reloadList: y, bar: S } = t, C = S !== void 0 && S, { apps: w, places: pe } = h, T;
+	let s = e(155), { name: u, list: h, onOpen: _, onGone: v, reloadList: y, bar: S } = t, C = S !== void 0 && S, { apps: w, places: pe } = h, T;
 	if (s[0] !== w || s[1] !== u) {
 		let e;
 		s[3] === u ? e = s[4] : (e = (e) => e.name === u, s[3] = u, s[4] = e), T = w.find(e), s[0] = w, s[1] = u, s[2] = T;
@@ -146,12 +146,14 @@ function y(t) {
 		name: e,
 		title: e
 	}, s[39] = w, s[40] = Pe);
-	let I = Pe, L = E.deleted ? "Deleted " + oe(E.deleted.time) : E.tagline || "", R;
-	s[41] === k.data?.schedules ? R = s[42] : (R = k.data?.schedules || [], s[41] = k.data?.schedules, s[42] = R);
+	let I = Pe, Fe;
+	s[41] !== E.deleted || s[42] !== E.screens || s[43] !== E.tagline ? (Fe = E.deleted ? "Deleted " + oe(E.deleted.time) : [E.tagline, !E.screens && "Tools\xA0only"].filter(Boolean).join(" · "), s[41] = E.deleted, s[42] = E.screens, s[43] = E.tagline, s[44] = Fe) : Fe = s[44];
+	let L = Fe, R;
+	s[45] === k.data?.schedules ? R = s[46] : (R = k.data?.schedules || [], s[45] = k.data?.schedules, s[46] = R);
 	let z, B, V, H, U, W, G, K;
-	if (s[43] !== E || s[44] !== Oe || s[45] !== M || s[46] !== j || s[47] !== ye || s[48] !== k.data || s[49] !== Ne || s[50] !== u || s[51] !== pe || s[52] !== F || s[53] !== P || s[54] !== R || s[55] !== L || s[56] !== A.data) {
+	if (s[47] !== E || s[48] !== Oe || s[49] !== M || s[50] !== j || s[51] !== ye || s[52] !== k.data || s[53] !== Ne || s[54] !== u || s[55] !== pe || s[56] !== F || s[57] !== P || s[58] !== R || s[59] !== L || s[60] !== A.data) {
 		let e = R.filter(fe), t = e.find(de), i = new Set(e.map(ue)).size > 1, d;
-		s[65] === i ? d = s[66] : (d = (e) => e.invalid ? /* @__PURE__ */ p("span", {
+		s[69] === i ? d = s[70] : (d = (e) => e.invalid ? /* @__PURE__ */ p("span", {
 			className: "text-destructive",
 			children: e.invalid
 		}) : e.last && !e.last.ok ? /* @__PURE__ */ m("span", {
@@ -162,9 +164,9 @@ function y(t) {
 				": ",
 				re(e.last.error).title
 			]
-		}) : e.on && e.runs_as ? ae(e.when) + (i ? " · " + e.scope_name : "") + (e.next ? " · next " + se(e.next) : "") + ((e.kept_by || []).length ? " · on " + e.kept_by.join(", ") : "") : e.on ? "Off. Switch it on to run it as you." : ae(e.when) + (e.switched ? " · off since " + oe(e.switched.time) : ""), s[65] = i, s[66] = d);
+		}) : e.on && e.runs_as ? ae(e.when) + (i ? " · " + e.scope_name : "") + (e.next ? " · next " + se(e.next) : "") + ((e.kept_by || []).length ? " · on " + e.kept_by.join(", ") : "") : e.on ? "Off. Switch it on to run it as you." : ae(e.when) + (e.switched ? " · off since " + oe(e.switched.time) : ""), s[69] = i, s[70] = d);
 		let te = d, f;
-		s[67] !== u || s[68] !== P ? (f = (e, t) => {
+		s[71] !== u || s[72] !== P ? (f = (e, t) => {
 			let n = e.name + "|" + e.scope;
 			be((e) => ({
 				...e,
@@ -178,31 +180,31 @@ function y(t) {
 				...e,
 				[n]: void 0
 			})));
-		}, s[67] = u, s[68] = P, s[69] = f) : f = s[69];
+		}, s[71] = u, s[72] = P, s[73] = f) : f = s[73];
 		let ne = f, h = A.data, g;
-		s[70] === h ? g = s[71] : (g = h ? [...h.runs.map((e) => [e, h.remove.includes(e) && "remove_from"]), ...h.install.map(le)] : [], s[70] = h, s[71] = g);
+		s[74] === h ? g = s[75] : (g = h ? [...h.runs.map((e) => [e, h.remove.includes(e) && "remove_from"]), ...h.install.map(le)] : [], s[74] = h, s[75] = g);
 		let _ = g;
 		B = E.mine && E.added && !E.deleted, z = !!k.data && !!(k.data.activity?.length || k.data.insights?.errors?.length || k.data.insights?.usage?.length || k.data.insights?.cost?.length);
 		let v;
-		s[72] === E.source ? v = s[73] : (v = E.source && /^http:[/][/](localhost|127[.]0[.]0[.]1):[0-9]+[/]repos[/]([a-z0-9][a-z0-9._-]*?)([.]git)?[/]?$/.exec(E.source)?.[2], s[72] = E.source, s[73] = v), V = v, H = "flex flex-col gap-6";
+		s[76] === E.source ? v = s[77] : (v = E.source && /^http:[/][/](localhost|127[.]0[.]0[.]1):[0-9]+[/]repos[/]([a-z0-9][a-z0-9._-]*?)([.]git)?[/]?$/.exec(E.source)?.[2], s[76] = E.source, s[77] = v), V = v, H = "flex flex-col gap-6";
 		let y;
-		s[74] === E ? y = s[75] : (y = /* @__PURE__ */ p(n, {
+		s[78] === E ? y = s[79] : (y = /* @__PURE__ */ p(n, {
 			app: E,
 			size: 100
-		}), s[74] = E, s[75] = y);
+		}), s[78] = E, s[79] = y);
 		let b;
-		s[76] === E.title ? b = s[77] : (b = /* @__PURE__ */ p("h1", {
+		s[80] === E.title ? b = s[81] : (b = /* @__PURE__ */ p("h1", {
 			ref: xe,
 			className: "text-2xl leading-tight font-semibold",
 			children: E.title
-		}), s[76] = E.title, s[77] = b);
+		}), s[80] = E.title, s[81] = b);
 		let x;
-		s[78] === L ? x = s[79] : (x = L && /* @__PURE__ */ p("p", {
+		s[82] === L ? x = s[83] : (x = L && /* @__PURE__ */ p("p", {
 			className: "truncate text-muted-foreground",
 			children: L
-		}), s[78] = L, s[79] = x);
+		}), s[82] = L, s[83] = x);
 		let S;
-		s[80] !== E || s[81] !== Oe || s[82] !== M || s[83] !== pe || s[84] !== F ? (S = E.deleted ? E.mine && /* @__PURE__ */ p(r, {
+		s[84] !== E || s[85] !== Oe || s[86] !== M || s[87] !== pe || s[88] !== F ? (S = E.deleted ? E.mine && /* @__PURE__ */ p(r, {
 			variant: "secondary",
 			size: "sm",
 			disabled: M === "restore",
@@ -213,34 +215,34 @@ function y(t) {
 			size: "sm",
 			onClick: Oe,
 			children: ce(E, pe) ? "Manage" : "Add to…"
-		}), s[80] = E, s[81] = Oe, s[82] = M, s[83] = pe, s[84] = F, s[85] = S) : S = s[85];
+		}), s[84] = E, s[85] = Oe, s[86] = M, s[87] = pe, s[88] = F, s[89] = S) : S = s[89];
 		let C;
-		s[86] === S ? C = s[87] : (C = /* @__PURE__ */ p("div", {
+		s[90] === S ? C = s[91] : (C = /* @__PURE__ */ p("div", {
 			className: "mt-auto pt-2",
 			children: S
-		}), s[86] = S, s[87] = C);
+		}), s[90] = S, s[91] = C);
 		let w;
-		s[88] !== b || s[89] !== x || s[90] !== C ? (w = /* @__PURE__ */ m("div", {
+		s[92] !== b || s[93] !== x || s[94] !== C ? (w = /* @__PURE__ */ m("div", {
 			className: "flex min-w-0 flex-1 flex-col",
 			children: [
 				b,
 				x,
 				C
 			]
-		}), s[88] = b, s[89] = x, s[90] = C, s[91] = w) : w = s[91];
+		}), s[92] = b, s[93] = x, s[94] = C, s[95] = w) : w = s[95];
 		let T;
-		s[92] !== y || s[93] !== w ? (T = /* @__PURE__ */ m("div", {
+		s[96] !== y || s[97] !== w ? (T = /* @__PURE__ */ m("div", {
 			className: "flex gap-4",
 			children: [y, w]
-		}), s[92] = y, s[93] = w, s[94] = T) : T = s[94];
+		}), s[96] = y, s[97] = w, s[98] = T) : T = s[98];
 		let D;
-		s[95] === E.description ? D = s[96] : (D = E.description && /* @__PURE__ */ p("p", {
+		s[99] === E.description ? D = s[100] : (D = E.description && /* @__PURE__ */ p("p", {
 			className: "text-sm leading-relaxed",
 			children: E.description
-		}), s[95] = E.description, s[96] = D), s[97] !== T || s[98] !== D ? (U = /* @__PURE__ */ m("div", {
+		}), s[99] = E.description, s[100] = D), s[101] !== T || s[102] !== D ? (U = /* @__PURE__ */ m("div", {
 			className: "flex flex-col gap-4",
 			children: [T, D]
-		}), s[97] = T, s[98] = D, s[99] = U) : U = s[99], s[100] === j ? W = s[101] : (W = j && /* @__PURE__ */ p(c, { title: j }), s[100] = j, s[101] = W), s[102] !== M || s[103] !== _ || s[104] !== u || s[105] !== P || s[106] !== h ? (G = h && (_.length ? /* @__PURE__ */ p(ie, {
+		}), s[101] = T, s[102] = D, s[103] = U) : U = s[103], s[104] === j ? W = s[105] : (W = j && /* @__PURE__ */ p(c, { title: j }), s[104] = j, s[105] = W), s[106] !== M || s[107] !== _ || s[108] !== u || s[109] !== P || s[110] !== h ? (G = h && (_.length ? /* @__PURE__ */ p(ie, {
 			title: h.runs.length ? "Runs On" : h.needs || "Runs On",
 			children: /* @__PURE__ */ p(a, { children: _.map((e) => {
 				let [t, n] = e;
@@ -262,7 +264,7 @@ function y(t) {
 		}) : /* @__PURE__ */ p("p", {
 			className: "text-sm text-muted-foreground",
 			children: h.line
-		})), s[102] = M, s[103] = _, s[104] = u, s[105] = P, s[106] = h, s[107] = G) : G = s[107], K = e.length > 0 && /* @__PURE__ */ m("div", {
+		})), s[106] = M, s[107] = _, s[108] = u, s[109] = P, s[110] = h, s[111] = G) : G = s[111], K = e.length > 0 && /* @__PURE__ */ m("div", {
 			className: "flex flex-col gap-4",
 			children: [t && /* @__PURE__ */ p(c, {
 				warn: !0,
@@ -288,34 +290,34 @@ function y(t) {
 					}, t);
 				}) })
 			})]
-		}), s[43] = E, s[44] = Oe, s[45] = M, s[46] = j, s[47] = ye, s[48] = k.data, s[49] = Ne, s[50] = u, s[51] = pe, s[52] = F, s[53] = P, s[54] = R, s[55] = L, s[56] = A.data, s[57] = z, s[58] = B, s[59] = V, s[60] = H, s[61] = U, s[62] = W, s[63] = G, s[64] = K;
-	} else z = s[57], B = s[58], V = s[59], H = s[60], U = s[61], W = s[62], G = s[63], K = s[64];
+		}), s[47] = E, s[48] = Oe, s[49] = M, s[50] = j, s[51] = ye, s[52] = k.data, s[53] = Ne, s[54] = u, s[55] = pe, s[56] = F, s[57] = P, s[58] = R, s[59] = L, s[60] = A.data, s[61] = z, s[62] = B, s[63] = V, s[64] = H, s[65] = U, s[66] = W, s[67] = G, s[68] = K;
+	} else z = s[61], B = s[62], V = s[63], H = s[64], U = s[65], W = s[66], G = s[67], K = s[68];
 	let q;
-	s[108] !== E.uses.apps || s[109] !== I || s[110] !== _ ? (q = E.uses.apps.length > 0 && /* @__PURE__ */ p(ie, {
+	s[112] !== E.uses.apps || s[113] !== I || s[114] !== _ ? (q = E.uses.apps.length > 0 && /* @__PURE__ */ p(ie, {
 		title: "Works With",
 		children: /* @__PURE__ */ p(a, { children: E.uses.apps.map((e) => /* @__PURE__ */ p(x, {
 			x: I(e),
 			onOpen: _
 		}, e)) })
-	}), s[108] = E.uses.apps, s[109] = I, s[110] = _, s[111] = q) : q = s[111];
+	}), s[112] = E.uses.apps, s[113] = I, s[114] = _, s[115] = q) : q = s[115];
 	let J;
-	s[112] !== E.from || s[113] !== I || s[114] !== _ ? (J = E.from && /* @__PURE__ */ p(ie, {
+	s[116] !== E.from || s[117] !== I || s[118] !== _ ? (J = E.from && /* @__PURE__ */ p(ie, {
 		title: "Forked From",
 		children: /* @__PURE__ */ p(a, { children: /* @__PURE__ */ p(x, {
 			x: I(E.from),
 			onOpen: _
 		}) })
-	}), s[112] = E.from, s[113] = I, s[114] = _, s[115] = J) : J = s[115];
+	}), s[116] = E.from, s[117] = I, s[118] = _, s[119] = J) : J = s[119];
 	let Y;
-	s[116] !== E.forks || s[117] !== I || s[118] !== _ ? (Y = E.forks.length > 0 && /* @__PURE__ */ p(ie, {
+	s[120] !== E.forks || s[121] !== I || s[122] !== _ ? (Y = E.forks.length > 0 && /* @__PURE__ */ p(ie, {
 		title: "Forks",
 		children: /* @__PURE__ */ p(a, { children: E.forks.map((e) => /* @__PURE__ */ p(x, {
 			x: I(e),
 			onOpen: _
 		}, e)) })
-	}), s[116] = E.forks, s[117] = I, s[118] = _, s[119] = Y) : Y = s[119];
+	}), s[120] = E.forks, s[121] = I, s[122] = _, s[123] = Y) : Y = s[123];
 	let X;
-	s[120] !== E.source || s[121] !== Ae || s[122] !== B || s[123] !== V ? (X = (E.source || B) && /* @__PURE__ */ m("div", {
+	s[124] !== E.source || s[125] !== Ae || s[126] !== B || s[127] !== V ? (X = (E.source || B) && /* @__PURE__ */ m("div", {
 		className: "flex flex-col items-start gap-2",
 		children: [E.source && /* @__PURE__ */ p(a, { children: /* @__PURE__ */ p(o, {
 			title: "Source",
@@ -326,9 +328,9 @@ function y(t) {
 			onClick: Ae,
 			children: E.source ? "Edit Source Link" : "Add Source Link"
 		})]
-	}), s[120] = E.source, s[121] = Ae, s[122] = B, s[123] = V, s[124] = X) : X = s[124];
+	}), s[124] = E.source, s[125] = Ae, s[126] = B, s[127] = V, s[128] = X) : X = s[128];
 	let Z;
-	s[125] !== E.deleted || s[126] !== E.mine || s[127] !== E.name || s[128] !== M || s[129] !== z || s[130] !== B || s[131] !== F ? (Z = (z || B || E.mine && E.deleted) && /* @__PURE__ */ m("div", {
+	s[129] !== E.deleted || s[130] !== E.mine || s[131] !== E.name || s[132] !== M || s[133] !== z || s[134] !== B || s[135] !== F ? (Z = (z || B || E.mine && E.deleted) && /* @__PURE__ */ m("div", {
 		className: "flex flex-col items-start gap-4",
 		children: [
 			z && /* @__PURE__ */ p(a, { children: /* @__PURE__ */ p(o, {
@@ -350,27 +352,27 @@ function y(t) {
 				children: "Erase App"
 			})
 		]
-	}), s[125] = E.deleted, s[126] = E.mine, s[127] = E.name, s[128] = M, s[129] = z, s[130] = B, s[131] = F, s[132] = Z) : Z = s[132];
+	}), s[129] = E.deleted, s[130] = E.mine, s[131] = E.name, s[132] = M, s[133] = z, s[134] = B, s[135] = F, s[136] = Z) : Z = s[136];
 	let Q;
-	s[133] !== E.name || s[134] !== O.data ? (Q = O.data && /* @__PURE__ */ m(ne, { children: [" · ", /* @__PURE__ */ p("button", {
+	s[137] !== E.name || s[138] !== O.data ? (Q = O.data && /* @__PURE__ */ m(ne, { children: [" · ", /* @__PURE__ */ p("button", {
 		className: "underline-offset-4 hover:underline",
 		onClick: () => one.open("code", {
 			app: E.name,
 			dir: ""
 		}),
 		children: "View code"
-	})] }), s[133] = E.name, s[134] = O.data, s[135] = Q) : Q = s[135];
+	})] }), s[137] = E.name, s[138] = O.data, s[139] = Q) : Q = s[139];
 	let $;
-	s[136] !== E.owner_name || s[137] !== Q ? ($ = /* @__PURE__ */ m("p", {
+	s[140] !== E.owner_name || s[141] !== Q ? ($ = /* @__PURE__ */ m("p", {
 		className: "text-center text-sm text-muted-foreground",
 		children: [
 			"Made by ",
 			E.owner_name,
 			Q
 		]
-	}), s[136] = E.owner_name, s[137] = Q, s[138] = $) : $ = s[138];
-	let Fe;
-	return s[139] !== H || s[140] !== U || s[141] !== W || s[142] !== G || s[143] !== K || s[144] !== q || s[145] !== J || s[146] !== Y || s[147] !== X || s[148] !== Z || s[149] !== $ ? (Fe = /* @__PURE__ */ m("div", {
+	}), s[140] = E.owner_name, s[141] = Q, s[142] = $) : $ = s[142];
+	let Ie;
+	return s[143] !== H || s[144] !== U || s[145] !== W || s[146] !== G || s[147] !== K || s[148] !== q || s[149] !== J || s[150] !== Y || s[151] !== X || s[152] !== Z || s[153] !== $ ? (Ie = /* @__PURE__ */ m("div", {
 		className: H,
 		children: [
 			U,
@@ -384,7 +386,7 @@ function y(t) {
 			Z,
 			$
 		]
-	}), s[139] = H, s[140] = U, s[141] = W, s[142] = G, s[143] = K, s[144] = q, s[145] = J, s[146] = Y, s[147] = X, s[148] = Z, s[149] = $, s[150] = Fe) : Fe = s[150], Fe;
+	}), s[143] = H, s[144] = U, s[145] = W, s[146] = G, s[147] = K, s[148] = q, s[149] = J, s[150] = Y, s[151] = X, s[152] = Z, s[153] = $, s[154] = Ie) : Ie = s[154], Ie;
 }
 function le(e) {
 	return [e, "install_on"];
@@ -416,7 +418,7 @@ function x(t) {
 		onClick: c
 	}), r[5] = s, r[6] = c, r[7] = i.title, r[8] = l) : l = r[8], l;
 }
-// ../../../../../.t3/worktrees/the-one-app/t3-46f62ca4/apps/apps/screens/app.jsx
+// ../../../../../.t3/worktrees/the-one-app/t3-c7581558/apps/apps/screens/app.jsx
 function S() {
 	let t = e(4), n = _(), r;
 	return t[0] !== n.data || t[1] !== n.error || t[2] !== n.reload ? (r = /* @__PURE__ */ p("div", {

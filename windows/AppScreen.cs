@@ -1,4 +1,4 @@
-// A screen: an app's, or one of this app's own (a page, Services, a Vault request, Settings'), the same on every client.
+// A screen: an app's, or one of this app's own (a page, Accounts, a Vault request, Settings'), the same on every client.
 // The page its node serves, in a WebView2 of its own that answers its bridge (src/screen/bridge.js) as the web client's
 // page answers its frames (cloudflare/web/web.js), natively for whatever a person touches: menus, alerts, sheets, files and
 // links. Screens are untrusted: each is served at an origin of its own app's (the own screens' their own), which reaches

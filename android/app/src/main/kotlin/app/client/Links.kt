@@ -30,12 +30,12 @@ object Links {
         later(store, uri, path)
     }
 
-    /** `<cli>://vault?id=…&scope=…`, `<cli>://page?scope=…` (with `folder=services`, its Services) and
+    /** `<cli>://vault?id=…&scope=…`, `<cli>://page?scope=…` (with `folder=accounts`, its Accounts) and
      *  `<cli>://settings[/<item>]`, as the iPhone takes them: the same as the address's own link. */
     fun own(store: Store, uri: Uri) {
         val scope = query(uri, "scope")
         val path = when {
-            uri.host == "page" && scope != null -> listOf(if (query(uri, "folder") == "services") "services" else "page", scope)
+            uri.host == "page" && scope != null -> listOf(if (query(uri, "folder") == "accounts") "accounts" else "page", scope)
             else -> listOfNotNull(uri.host) + uri.pathSegments
         }
         if (store.phase != Store.Phase.SignedOut && path.isNotEmpty() && known(uri, path)) later(store, uri, path)
@@ -43,7 +43,7 @@ object Links {
 
     private fun known(uri: Uri, path: List<String>) = when (path[0]) {
         "vault" -> query(uri, "scope") != null && query(uri, "id") != null
-        "page", "services", "app" -> path.size > 1
+        "page", "accounts", "app" -> path.size > 1
         "settings" -> true
         else -> false
     }
@@ -67,9 +67,9 @@ object Links {
                 store.present(Route.Own("request", obj("scope" to scope, "id" to query(uri, "id")).toString()))
             }
             "page" -> store.openPage(path[1])
-            "services" -> {
+            "accounts" -> {
                 store.openPage(path[1])
-                store.present(Route.Own("services", obj("scope" to path[1]).toString()))
+                store.present(Route.Own("accounts", obj("scope" to path[1]).toString()))
             }
             "app" -> {
                 if (scope != null && store.pages.any { it.scope == scope }) store.openPage(scope) else store.path.clear()

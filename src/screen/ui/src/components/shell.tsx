@@ -9,7 +9,7 @@ import {
 } from "@/components/ui/sidebar"
 import { cn } from "@/lib/utils"
 
-/// A row of the sidebar: an app, a page's Services (`folder`, its services' icons) or a Settings item. `href` is where
+/// A row of the sidebar: an app, a page's Accounts (`folder`, the icons of its apps that keep accounts) or a Settings item. `href` is where
 /// it goes, a real link for a new tab; `external` opens another site.
 type ShellItem = {
   key: string
@@ -121,7 +121,7 @@ function ShellGroup({ section, onGo }: { section: ShellSection; onGo?: (href: st
   )
 }
 
-/// A page's Services: its services' icons, four at most, in a tile of its own; with none, four faint places.
+/// A page's Accounts: the icons of its apps that keep accounts, four at most, in a tile of its own; with none, four faint places.
 function Folder({ apps, size = 20 }: { apps: App[]; size?: number }) {
   const mini = Math.round(size * 0.36)
   return (

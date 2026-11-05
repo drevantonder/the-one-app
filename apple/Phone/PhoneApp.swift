@@ -133,10 +133,10 @@ final class Phone {
         if store.open(url) { return }
         let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
         let value = { (name: String) in query.first { $0.name == name }?.value?.trimmingCharacters(in: .whitespaces) }
-        // `<cli>://page?scope=…` turns to a page (opening its Services with `folder=services`), `<cli>://settings` (or
+        // `<cli>://page?scope=…` turns to a page (opening its Accounts with `folder=accounts`), `<cli>://settings` (or
         // `…/settings/<item>`) to Settings.
         if url.host() == "page", let scope = value("scope") {
-            store.path = value("folder") == "services" ? [.services(scope)] : []
+            store.path = value("folder") == "accounts" ? [.accounts(scope)] : []
             store.current = scope
             return
         }

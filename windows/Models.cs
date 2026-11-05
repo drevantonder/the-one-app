@@ -79,11 +79,13 @@ public sealed class AppInfo
     [JsonPropertyName("image_kind")] public string? ImageKind { get; init; }
     [JsonPropertyName("screens")] public List<AppScreenInfo>? Screens { get; init; }
     [JsonPropertyName("widgets")] public List<AppWidget>? Widgets { get; init; }
+    [JsonPropertyName("ops")] public List<AppTool>? Ops { get; init; }
     [JsonPropertyName("installed")] public List<string>? Installed { get; init; }
 
     public string Label => Title ?? Name;
     public bool HasScreens => Screens?.Any(s => s.Name == "main") == true;
-    public bool IsService => !HasScreens && (Widgets?.Count ?? 0) == 0;
+    /// It signs in to accounts (it has an `accounts` tool), so it's in its page's Accounts.
+    public bool KeepsAccounts => Ops?.Any(o => o.Name == "accounts") == true;
     /// The pages it's on: "user" for its person's own, "group:<id>", "global".
     public IEnumerable<string> Scopes => (Installed ?? []).Select(s => s.StartsWith("user:") ? "user" : s);
 }
@@ -95,6 +97,11 @@ public sealed class AppScreenInfo
 }
 
 public sealed class AppWidget
+{
+    [JsonPropertyName("name")] public required string Name { get; init; }
+}
+
+public sealed class AppTool
 {
     [JsonPropertyName("name")] public required string Name { get; init; }
 }

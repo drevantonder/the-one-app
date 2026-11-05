@@ -8,7 +8,7 @@
 // (device.js), and shows; tapping it opens the screen it names. A note it can't open still shows that one came, as
 // browsers require of every push.
 const KEPT = "one.page";
-const PLACES = /^\/($|page\/|services\/|app\/|settings($|\/)|vault$)/;
+const PLACES = /^\/($|page\/|accounts\/|app\/|settings($|\/)|vault$)/;
 /// The custom build's name, which the Workers' build writes in (Settings::web).
 const NAME = "";
 

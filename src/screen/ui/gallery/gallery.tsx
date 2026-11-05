@@ -199,7 +199,7 @@ function Vault() {
 const sections: ShellSection[] = [
   { key: "user", title: "You", href: "#you", items: [
     ...apps.slice(0, 1).map((a) => ({ key: a.name, title: a.title, href: `#${a.name}`, app: a, selected: true })),
-    { key: "services", title: "Services", href: "#services", folder: apps.slice(4, 6) },
+    { key: "accounts", title: "Accounts", href: "#accounts", folder: apps.slice(4, 6) },
   ] },
   { key: "global", title: "Everyone", href: "#everyone", items: apps.slice(1, 4).map((a) => ({ key: a.name, title: a.title, href: `#${a.name}`, app: a, badge: a.name === "board" ? 3 : 0 })) },
   { key: "settings", title: "Settings", href: "#settings", items: [

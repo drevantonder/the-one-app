@@ -1,4 +1,4 @@
-// What the pages and Services screens know, the same on every client: the person's pages (theirs, their groups',
+// What the pages and Accounts screens know, the same on every client: the person's pages (theirs, their groups',
 // everyone's), the apps on each and what each offers, all read from the node as the person looking (`one.api`).
 export const home = (() => {
   // `failed`: the pages whose widgets couldn't be read, so theirs stand as grey cards until they can.
@@ -10,7 +10,7 @@ export const home = (() => {
   const app = (name) => h.apps.find((a) => a.name === name);
   const has = (a, screen) => !!a?.screens?.some((s) => s.name === screen);
   const hasScreens = (a) => has(a, "main");
-  const isService = (a) => !hasScreens(a) && !(a.widgets || []).length;
+  const keepsAccounts = (a) => !!a?.ops?.some((o) => o.name === "accounts");
   const scopes = (a) => (a.installed || []).map((s) => (s.startsWith("user:") ? "user" : s));
   const userName = (id) => (id === me()?.id ? "You" : install()?.users.find((u) => u.id === id)?.name || "Someone");
   // People by name, you last, as "you".
@@ -75,7 +75,7 @@ export const home = (() => {
   }
 
   const appsOn = (p) => h.apps.filter((a) => hasScreens(a) && scopes(a).includes(p.scope));
-  const servicesOn = (p) => h.apps.filter((a) => isService(a) && scopes(a).includes(p.scope)).sort((a, b) => label(a).localeCompare(label(b)));
+  const accountsOn = (p) => h.apps.filter((a) => keepsAccounts(a) && scopes(a).includes(p.scope)).sort((a, b) => label(a).localeCompare(label(b)));
   const badge = (name, p) => Math.max(0, h.badges[p.scope]?.[name] || 0);
 
   /// Every widget a page could show: those of the apps installed in its scope.
@@ -138,7 +138,7 @@ export const home = (() => {
   const open = (a, p, screen = "main", params = {}) => () => one.open(screen, params, a.name, p ? { scope: p.scope } : {});
   const settings = (a, p, add) => (has(a, "settings") ? open(a, p, "settings", add ? { add: true } : {}) : null);
   const inStore = (a) => (store() && has(store(), "app") && (a.deploys || 0) > 0 ? open(store(), null, "app", { app: a.name }) : null);
-  const addService = () => (store() ? open(store(), null, "main", { service: true }) : null);
+  const addAccountApp = () => (store() ? open(store(), null, "main", { accounts: true }) : null);
   const openStore = () => store() && open(store(), null)();
 
   // MARK: Changing things
@@ -259,7 +259,7 @@ export const home = (() => {
   }
 
   return {
-    data: h, me, install, label, app, has, hasScreens, allPages, pageChoices, pages, page, canArrange, appsOn, servicesOn, badge, widgetsOn, waiting, items,
-    supported, tree, store, open, settings, inStore, addService, openStore, call, failed, change, actions, menu, load, loadWidgets, watch,
+    data: h, me, install, label, app, has, hasScreens, allPages, pageChoices, pages, page, canArrange, appsOn, accountsOn, badge, widgetsOn, waiting, items,
+    supported, tree, store, open, settings, inStore, addAccountApp, openStore, call, failed, change, actions, menu, load, loadWidgets, watch,
   };
 })();

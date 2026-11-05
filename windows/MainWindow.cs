@@ -1,6 +1,6 @@
 // The window, as the web client's (cloudflare/web/web.js): a sidebar with a section per page, listing its apps and its
-// Services, then Settings', listing its items; beside it, where the window is: a screen the node serves (AppScreen), a
-// page, Services, a Settings screen or an app's. A sidebar row replaces where the window is; what a screen opens is
+// Accounts, then Settings', listing its items; beside it, where the window is: a screen the node serves (AppScreen), a
+// page, Accounts, a Settings screen or an app's. A sidebar row replaces where the window is; what a screen opens is
 // pushed on top, so Back returns to it, or slides up over it as a sheet. Back is ← in the title bar, shown once something
 // is pushed, beside the path there ("Backups › Archive disk"), each part going back to it. The title bar and sidebar
 // are on Mica; where the window is, on the kit's page colour. Signed out, it welcomes the person and signs them in.
@@ -203,7 +203,7 @@ public sealed class MainWindow : Window
 
     /// Where a link opens, once the window shows the pages: a widget's (`<cli>://open?app=…&screen=…&params=…&scope=…`),
     /// or a page at your One App's address, as the web client has them (cloudflare/web/web.js): `/`, `/page/<scope>`,
-    /// `/services/<scope>`, `/app/<app>/<screen>?params=&scope=`, `/settings`, `/settings/<item>?params=`, and
+    /// `/accounts/<scope>`, `/app/<app>/<screen>?params=&scope=`, `/settings`, `/settings/<item>?params=`, and
     /// `/vault?id=&scope=` (or `<cli>://vault?…`), a request for an item, in the Vault's sheet; `<cli>://page` and
     /// `<cli>://settings` as below. An invite link
     /// (`<address>/invite#…`) welcomes the person with it, as pasting it does. `<cli>://signed-in`, where the browser
@@ -242,7 +242,7 @@ public sealed class MainWindow : Window
             else opening = At(0) switch
             {
                 "page" when At(1) is { } scope => Route.PageOf(scope),
-                "services" when At(1) is { } scope => Route.Services(scope),
+                "accounts" when At(1) is { } scope => Route.Accounts(scope),
                 "app" when At(1) is { } app => Route.ScreenOf(app, q["scope"], At(2) ?? "main", q["params"] ?? "{}"),
                 "settings" => At(1) is { } item ? Route.OwnOf(item, q["params"] ?? "{}") : Route.Settings,
                 _ => Route.PageOf("user"),
@@ -254,8 +254,8 @@ public sealed class MainWindow : Window
             opening = q["app"] is { Length: > 0 } app ? Route.ScreenOf(app, scope, q["screen"] ?? "main", q["params"] ?? "{}") : Route.PageOf(scope ?? "user");
         }
         else if (link.Host == "vault" && q["id"] is { Length: > 0 } id && q["scope"] is { Length: > 0 } s) asking = (s, id);
-        // As the iPhone takes them: `<cli>://page?scope=…` (its Services with `folder=services`), `<cli>://settings[/<item>]`.
-        else if (link.Host == "page" && q["scope"] is { Length: > 0 } page) opening = q["folder"] == "services" ? Route.Services(page) : Route.PageOf(page);
+        // As the iPhone takes them: `<cli>://page?scope=…` (its Accounts with `folder=accounts`), `<cli>://settings[/<item>]`.
+        else if (link.Host == "page" && q["scope"] is { Length: > 0 } page) opening = q["folder"] == "accounts" ? Route.Accounts(page) : Route.PageOf(page);
         else if (link.Host == "settings") opening = link.AbsolutePath.Trim('/') is { Length: > 0 } item ? Route.OwnOf(item) : Route.Settings;
         if (nav != null) Opening();
     }
@@ -289,8 +289,8 @@ public sealed class MainWindow : Window
         Welcome(null, invited: true);
     }
 
-    /// Whether it's a page, or a page's Services, that this computer wasn't let into.
-    static bool OnNoPage(Route r) => r.Own && r.Screen is "pages" or "services" && r.Scope != "settings" && Store.Shared.PageFor(r.Scope) == null;
+    /// Whether it's a page, or a page's Accounts, that this computer wasn't let into.
+    static bool OnNoPage(Route r) => r.Own && r.Screen is "pages" or "accounts" && r.Scope != "settings" && Store.Shared.PageFor(r.Scope) == null;
 
     public void Restyle()
     {
@@ -830,7 +830,7 @@ public sealed class MainWindow : Window
         path.ItemsSource = parts;
     }
 
-    /// What a route is called: a page's name, Services, Vault, a Settings item's, or an app screen's.
+    /// What a route is called: a page's name, Accounts, Vault, a Settings item's, or an app screen's.
     static string TitleOf(Route r)
     {
         var store = Store.Shared;
@@ -838,7 +838,7 @@ public sealed class MainWindow : Window
             return r.Screen switch
             {
                 "pages" => r.Scope == "settings" ? "Settings" : store.PageFor(r.Scope)?.Title ?? "",
-                "services" => "Services",
+                "accounts" => "Accounts",
                 "request" => "Vault",
                 "devtools" => "Developer",
                 _ => store.SettingsItems.FirstOrDefault(i => i.Name == r.Screen)?.Title ?? "Settings",
@@ -872,7 +872,7 @@ public sealed class MainWindow : Window
         return grid;
     }
 
-    /// One section per page, listing its apps and its Services; then Settings', listing its items with their counts.
+    /// One section per page, listing its apps and its Accounts; then Settings', listing its items with their counts.
     /// Its rows are made again only when they change (an app added, renamed or with a new icon); otherwise they stay,
     /// with only their counts and which is chosen changed, so nothing flickers.
     void DrawSidebar()
@@ -903,8 +903,8 @@ public sealed class MainWindow : Window
             // Not an app Settings lists (the App Store): the sidebar shows it once, under Settings.
             foreach (var app in store.AppsOn(page).Where(a => !store.SettingsItems.Any(i => i.App == a.Name)))
                 rows.Add(($"app|{Of(app)}", Route.ScreenOf(app.Name, page.Scope), () => Labeled(Look.Tile(app, 20), app.Label), store.Badge(app.Name, page), false));
-            var services = store.ServicesOn(page);
-            rows.Add(($"services|{string.Join(",", services.Take(9).Select(Of))}", Route.Services(page.Scope), () => Labeled(Look.Folder(services, 20), "Services"), 0, false));
+            var accounts = store.AccountsOn(page);
+            rows.Add(($"accounts|{string.Join(",", accounts.Take(9).Select(Of))}", Route.Accounts(page.Scope), () => Labeled(Look.Folder(accounts, 20), "Accounts"), 0, false));
         }
         Head(Route.Settings, "Settings");
         // An item with an app (the App Store) opens that app; one with a url (Passkeys), the browser.

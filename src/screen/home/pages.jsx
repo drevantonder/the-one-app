@@ -1,4 +1,4 @@
-// Your pages, as a home screen: each a grid of the widgets you put there and its apps' icons, then its Services folder;
+// Your pages, as a home screen: each a grid of the widgets you put there and its apps' icons, then its Accounts folder;
 // Settings is a page of its items. With `scope`, that page alone (a window whose sidebar picks it; "settings" for
 // Settings); with `swipe`, every page side by side then Settings, opened at `scope`, to swipe between (a phone's shell),
 // under a pill of dots.
@@ -94,7 +94,7 @@ function pendingItem(kept, p) {
   return { slot: key, key, kind: "pending", kept, size, name: home.label(home.app(kept.app)) || kept.widget, menu }
 }
 
-/// A page's items: its widgets and apps in its person's order, then its Services folder.
+/// A page's items: its widgets and apps in its person's order, then its Accounts folder.
 function pageView(p) {
   const arrange = home.canArrange(p.scope)
   const empty = !home.appsOn(p).length && !home.widgetsOn(p).length && !home.waiting(p)
@@ -109,8 +109,7 @@ function pageView(p) {
   })
   const order = S.order[p.scope]
   if (order) list = order.map((slot) => list.find((i) => i.slot === slot)).filter(Boolean).concat(list.filter((i) => !order.includes(i.slot)))
-  const services = home.servicesOn(p)
-  list.push({ slot: "services", kind: "services", name: "Services", apps: services, open: () => one.open("services", { scope: p.scope }, undefined, { sheet: true }), menu: arrange ? (e) => home.menu([editHomePage], e) : undefined })
+  list.push({ slot: "accounts", kind: "accounts", name: "Accounts", apps: home.accountsOn(p), open: () => one.open("accounts", { scope: p.scope }, undefined, { sheet: true }), menu: arrange ? (e) => home.menu([editHomePage], e) : undefined })
   return {
     scope: p.scope, p, title: p.title, subtitle: p.subtitle, arrange, empty, store: !!home.store(), list,
     said: empty ? (arrange ? (p.scope === "user" ? "No apps yet." : `No apps on ${p.title} yet.`) : `When its admins add apps to ${p.title}, they show up here.`) : "",
@@ -357,17 +356,17 @@ function begin(p, scope, slot, x, y, id) {
 }
 
 /// The picture under the finger; over another item it takes that one's place, the rest moving aside; past the last,
-/// it goes at the end. The Services folder stays last.
+/// it goes at the end. The Accounts folder stays last.
 function dragTo(x, y) {
   const d = drag
   d.ghost.style.transform = `translate(${x - d.dx}px, ${y - d.dy}px)`
   const order = S.view.find((v) => v.scope === d.scope).list.map((i) => i.slot)
-  const movable = order.filter((s) => s !== "services")
+  const movable = order.filter((s) => s !== "accounts")
   let over = null, bottom = 0
   for (const el of cellsOf(d.scope)) {
     const r = el.getBoundingClientRect(), slot = el.dataset.cell
     bottom = Math.max(bottom, r.bottom)
-    if (slot !== d.slot && slot !== "services" && x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) over = slot
+    if (slot !== d.slot && slot !== "accounts" && x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) over = slot
   }
   const from = order.indexOf(d.slot)
   let to = -1
@@ -398,7 +397,7 @@ function drop() {
     d.el.style.animation = ""
     const view = S.view.find((v) => v.scope === d.scope)
     const order = view.list.filter((i) => i.key)
-    const changed = order.map((i) => i.key).join(" ") !== d.before.filter((s) => s !== "services").join(" ")
+    const changed = order.map((i) => i.key).join(" ") !== d.before.filter((s) => s !== "accounts").join(" ")
     delete S.order[d.scope]
     if (changed) save(d.p, order.map((i) => i.kept))
     else S.render()
@@ -479,7 +478,7 @@ function Tile({ name, icon, size, badge, onClick, children }) {
   )
 }
 
-/// A page's Services folder: its services' icons, nine at most, small.
+/// A page's Accounts folder: the icons of its apps that keep accounts, nine at most, small.
 function Folder({ apps, size }) {
   const mini = (size * 0.62) / 3
   return (
@@ -512,7 +511,7 @@ function Cell({ page, at, editing, refreshing, nth, icon }) {
   } else {
     body = (
       <Tile name={item.name} icon={item.icon} size={icon} badge={item.badge} onClick={() => !S.editing && !quiet() && (one.tap(), item.open())}>
-        {item.kind === "services" && <Folder apps={item.apps} size={icon} />}
+        {item.kind === "accounts" && <Folder apps={item.apps} size={icon} />}
       </Tile>
     )
   }

@@ -28,7 +28,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import java.net.URLEncoder
 
-/** A screen the app shows: one of the client's own, by name (built into the app: the pages, Services, a Vault request,
+/** A screen the app shows: one of the client's own, by name (built into the app: the pages, Accounts, a Vault request,
  *  Settings'), or an app's. Only this app makes an `Own` route, never a page, so only a screen it chose acts as
  *  the person. */
 sealed interface Route {
@@ -162,7 +162,7 @@ class Store(private val application: android.app.Application, val signIn: SignIn
     fun title(route: Route): String = when (route) {
         is Route.App -> app(route.app).let { a -> a?.screens?.firstOrNull { it.name == route.screen }?.title ?: a?.label ?: route.app }
         is Route.Own -> when (route.name) {
-            "services" -> "Services"
+            "accounts" -> "Accounts"
             "request" -> "Vault"
             "devtools" -> "Developer"
             else -> ""

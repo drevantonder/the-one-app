@@ -1,7 +1,7 @@
 //! A screen's page, an app's as every node serves it, or a client's own as every client makes it: the design kit and the bridge (`src/screen/`), what the
 //! screen is told (`window.__one`), and the screen's own HTML.
 //!
-//! The clients' own screens (the person's pages, a page's Services, a request for a Vault item, Settings) are drawn
+//! The clients' own screens (the person's pages, a page's Accounts, a request for a Vault item, Settings) are drawn
 //! here once, the same on every client, and act through the bridge's `one.api` as the person looking: each client makes
 //! them from what it ships and never takes them from a node (`client_page`: the native apps' through `client/ffi`, the
 //! web client's from its address's `screens/`), and answers `one.api` only for a screen it chose to show as its own. A
@@ -97,13 +97,13 @@ pub fn tag(page: &str) -> String {
     format!("\"{}\"", &data_encoding::HEXLOWER.encode(&sha2::Sha256::digest(content.as_bytes()))[..32])
 }
 
-/// The clients' own screens, by name, the same on every client: the person's pages, a page's Services, a request for a
+/// The clients' own screens, by name, the same on every client: the person's pages, a page's Accounts, a request for a
 /// Vault item, Settings' (`settings/`), and Developer's panel (`devtools`). They act through the bridge's `one.api` as the person looking, which a
 /// client answers only for these.
 const CLIENT_SCREENS: &[(&str, &str)] = &[
     // Written in React (home/<name>.jsx), built by @one/ui's build into home/dist/.
     ("pages", include_str!("screen/home/dist/pages.html")),
-    ("services", include_str!("screen/home/dist/services.html")),
+    ("accounts", include_str!("screen/home/dist/accounts.html")),
     ("request", include_str!("screen/request.html")),
     ("appearance", include_str!("screen/settings/dist/appearance.html")),
     // Written in React (settings/<name>.jsx), built by @one/ui's build into settings/dist/.
@@ -179,7 +179,7 @@ mod tests {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/screen/ui");
         let mut files = Vec::new();
         walk(&root, &root, &mut files);
-        // The Settings screens written in React, which the same build makes, and the pages' and Services' (home/, all
+        // The Settings screens written in React, which the same build makes, and the pages' and Accounts' (home/, all
         // of it but its dist/, since they share its lib/).
         for folder in ["settings", "home"] {
             for entry in std::fs::read_dir(root.join("..").join(folder)).unwrap().flatten() {

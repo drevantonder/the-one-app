@@ -82,14 +82,15 @@ async function described(ctx, bundle) {
   return { title: field("title"), icon: field("icon"), color: field("color"), tagline: field("tagline"), description: field("description"), needs: field("needs"), advanced: /\badvanced:\s*true\b/.test(code), uses: { apps: list("apps"), services: list("services") } };
 }
 
-/// Whether an app is a service: it has no main screen and no widget, so shells keep it in each page's Services folder
-/// rather than giving it an icon. What it says about itself where it's installed for the caller; elsewhere, its code.
-async function isService(ctx, a) {
-  if (a.ops) return !(a.screens || []).some((x) => x.name === "main") && !(a.widgets || []).length;
+/// What an app offers besides its tools: screens (a main screen or a widget, so it has a place on a home page), and
+/// accounts (an `accounts` tool: what it signs in to, which Accounts lists). What it says about itself where it's
+/// installed for the caller; elsewhere, its code.
+async function offers(ctx, a) {
+  if (a.ops) return { screens: (a.screens || []).some((x) => x.name === "main") || !!(a.widgets || []).length, accounts: a.ops.some((o) => o.name === "accounts") };
   const bundle = a.bundle || a.built_in;
   const file = bundle && untar(await ctx.blob.get(bundle)).find((f) => f.path === "app.js");
   const code = file ? new TextDecoder().decode(file.bytes) : "";
-  return !/\bmain:\s*\{/.test(code) && !/\bwidgets:\s*\{\s*[\w"]/.test(code);
+  return { screens: /\bmain:\s*\{/.test(code) || /\bwidgets:\s*\{\s*[\w"]/.test(code), accounts: /^\s*accounts:\s*\{/m.test(code) };
 }
 
 /// Where a service runs, in a few words, and what each of the caller's devices offers for it: "Runs on linux, mac",
@@ -147,16 +148,16 @@ export default {
   tools: {
     list: {
       reads: true,
-      description: "Every app, a line each: its title and name (for the other apps_ tools), where it's added (that you can see), whether it's a service (no screen of its own, like Gmail: it's in each page's Services), and what it's for; then the places you may add apps to. Deleted apps are left out: deleted true lists only them.",
+      description: "Every app, a line each: its title and name (for the other apps_ tools), where it's added (that you can see), whether it's tools only (no screens or widgets, like Gmail: agents use it, and its accounts are in Accounts), and what it's for; then the places you may add apps to. Deleted apps are left out: deleted true lists only them.",
       // A screen asks with full for every app's details and picture, which are large.
-      input: { type: "object", properties: { service: { type: "boolean", description: "only services" }, deleted: { type: "boolean", description: "only the apps in Recently Deleted, which apps_restore brings back" } } },
-      async run(ctx, { service: only, deleted: gone, full } = {}) {
+      input: { type: "object", properties: { deleted: { type: "boolean", description: "only the apps in Recently Deleted, which apps_restore brings back" } } },
+      async run(ctx, { deleted: gone, full } = {}) {
         const images = full;
         const name = namer(ctx);
         const every = await ctx.catalog();
         const all = every.filter((a) => full || !!a.deleted === !!gone);
-        const services = await Promise.all(all.map((a) => isService(ctx, a).catch(() => false)));
-        const apps = await Promise.all(all.filter((a, i) => services[i] || !only).map(async (a) => {
+        const offered = await Promise.all(all.map((a) => offers(ctx, a).catch(() => ({ screens: true, accounts: false }))));
+        const apps = await Promise.all(all.map(async (a, i) => {
           const added = a.deploys > 0;
           const d = added || !a.built_in ? a : await described(ctx, a.built_in).catch(() => ({}));
           return {
@@ -166,13 +167,13 @@ export default {
             from: a.from || null, forks: a.forks || [], deploys: a.deploys, installed: a.installed || [],
             installed_names: (a.installed || []).map(name), uses: a.uses || { apps: [], services: [] },
             advanced: !!(d.advanced || a.advanced), built_in: !!a.built_in, added, up_to_date: a.built_in && added ? a.bundle === a.built_in : null,
-            source: a.source || null, mine: mine(ctx, a.owner), deleted: a.deleted || null, service: services[all.indexOf(a)], accounts: a.accounts ?? null,
+            source: a.source || null, mine: mine(ctx, a.owner), deleted: a.deleted || null, screens: offered[i].screens, keeps_accounts: offered[i].accounts,
           };
         }));
         apps.sort((a, b) => a.advanced - b.advanced || a.title.localeCompare(b.title));
         if (full) return { apps, places: places(ctx), admin: ctx.me.role === "admin" };
         const line = (a) => `${a.title} (${a.name}): ${a.deleted ? `deleted ${new Date(a.deleted.time).toISOString().slice(0, 10)}${a.mine ? "" : `, ${a.owner_name}'s`}` : a.installed_names.length ? `added for ${a.installed_names.join(", ")}` : "not added"}`
-          + `${a.service ? ", a service" : ""}${a.installed_names.length && a.accounts === 0 ? `, no account signed in yet (${a.name}_sign_in)` : ""}${a.up_to_date === false ? ", an update waiting" : ""}. ${a.description || a.tagline || ""}`.trimEnd();
+          + `${a.screens ? "" : ", tools only"}${a.up_to_date === false ? ", an update waiting" : ""}. ${a.description || a.tagline || ""}`.trimEnd();
         if (gone) return apps.length ? [...apps.map(line), "", "apps_restore brings back one you own; apps_erase deletes it for good."].join("\n") : "Nothing is in Recently Deleted.";
         const deleted = every.filter((a) => a.deleted).length;
         return [
@@ -278,8 +279,8 @@ export default {
     },
     devices: {
       reads: true,
-      description: "Where a service runs (\"Runs on linux, mac\"), or what it needs when none of your devices runs it; the devices you own it may be installed on or removed from; and ask: true when you own none of those, so you ask a device's owner to install it.",
-      input: { type: "object", required: ["app"], properties: { app: { type: "string", description: "a service's name, from apps_list with service true" } } },
+      description: "Where an app's service runs (\"Runs on linux, mac\"), or what it needs when none of your devices runs it; the devices you own it may be installed on or removed from; and ask: true when you own none of those, so you ask a device's owner to install it.",
+      input: { type: "object", required: ["app"], properties: { app: { type: "string", description: "the name of an app with a service, like imessage" } } },
       async run(ctx, { app }) {
         const a = await find(ctx, app);
         return where(ctx, a.ops || a.uses ? a : { ...a, ...(await described(ctx, a.built_in).catch(() => ({}))) });
@@ -287,8 +288,8 @@ export default {
     },
     install_on: {
       reads: false,
-      description: "Install a service on a device you own that can run it: the device sets it up and runs it, as switching it on in Settings › Devices does. apps_devices says where it may go.",
-      input: { type: "object", required: ["app", "device"], properties: { app: { type: "string", description: "a service's name, from apps_list with service true" }, device: { type: "string", description: "a device's name, from apps_devices' install" } } },
+      description: "Install an app's service on a device you own that can run it: the device sets it up and runs it, as switching it on in Settings › Devices does. apps_devices says where it may go.",
+      input: { type: "object", required: ["app", "device"], properties: { app: { type: "string", description: "the name of an app with a service, like imessage" }, device: { type: "string", description: "a device's name, from apps_devices' install" } } },
       async run(ctx, { app, device }) {
         const a = await find(ctx, app);
         const all = await ctx.devices();
@@ -300,8 +301,8 @@ export default {
     remove_from: {
       reads: false,
       confirm: true,
-      description: "Remove a service from a device you own: it stops running there, and goes on running on your other devices that have it. What it keeps on that device stays, and install_on puts it back.",
-      input: { type: "object", required: ["app", "device"], properties: { app: { type: "string", description: "a service's name, from apps_list with service true" }, device: { type: "string", description: "a device's name, from apps_devices' remove" } } },
+      description: "Remove an app's service from a device you own: it stops running there, and goes on running on your other devices that have it. What it keeps on that device stays, and install_on puts it back.",
+      input: { type: "object", required: ["app", "device"], properties: { app: { type: "string", description: "the name of an app with a service, like imessage" }, device: { type: "string", description: "a device's name, from apps_devices' remove" } } },
       async run(ctx, { app, device }) {
         const a = await find(ctx, app);
         const all = await ctx.devices();

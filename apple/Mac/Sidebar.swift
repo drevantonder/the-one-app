@@ -22,11 +22,11 @@ struct Sidebar: View {
                             .accessibilityLabel(app.label)
                             .tag(store.open(app, from: page))
                     }
-                    FolderTile(apps: store.services(on: page), size: 24)
+                    FolderTile(apps: store.accounts(on: page), size: 24)
                         .frame(maxWidth: .infinity)
-                        .help("Services")
-                        .accessibilityLabel("Services")
-                        .tag(Route.services(page.scope))
+                        .help("Accounts")
+                        .accessibilityLabel("Accounts")
+                        .tag(Route.accounts(page.scope))
                 } header: {
                     Button { store.selection = .page(page.scope) } label: {
                         Text(initials(page.title))
@@ -90,13 +90,13 @@ struct Sidebar: View {
                         .badge(store.appBadge(app.name, on: page) ?? 0)
                         .tag(store.open(app, from: page))
                     }
-                    // Its services, in one row, as the page has them in one folder, there even with none.
+                    // Its Accounts, in one row, as the page has them in one folder, there even with none.
                     Label {
-                        Text("Services")
+                        Text("Accounts")
                     } icon: {
-                        FolderTile(apps: store.services(on: page), size: 20)
+                        FolderTile(apps: store.accounts(on: page), size: 20)
                     }
-                    .tag(Route.services(page.scope))
+                    .tag(Route.accounts(page.scope))
                 } header: {
                     Button { store.selection = .page(page.scope) } label: {
                         Text(page.title)
@@ -144,7 +144,7 @@ struct Sidebar: View {
     }
 }
 
-/// A page's Services folder, as an iOS folder's icon: its apps' icons, small, nine to a page, on frosted glass;
+/// A page's Accounts folder, as an iOS folder's icon: its apps' icons, small, nine to a page, on frosted glass;
 /// with none, nine faint empty places, so it reads as an empty folder.
 private struct FolderTile: View {
     var apps: [AppInfo]

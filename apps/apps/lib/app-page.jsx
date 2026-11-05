@@ -82,7 +82,7 @@ export function AppPage({ name, list, onOpen, onGone, reloadList, bar = false })
   const keepIt = (scope) => one.open("devices", { keep: name, scope }, "settings")
 
   const link = (n) => apps.find((x) => x.name === n) || { name: n, title: n }
-  const tag = a.deleted ? "Deleted " + ago(a.deleted.time) : a.tagline || ""
+  const tag = a.deleted ? "Deleted " + ago(a.deleted.time) : [a.tagline, !a.screens && "Tools\u00a0only"].filter(Boolean).join(" · ")
 
   // Schedules run only on a device chosen to keep the app running: one that's on with none says so, with the fix.
   // One a deploy removed no longer runs: it isn't the app's any more.
@@ -104,7 +104,7 @@ export function AppPage({ name, list, onOpen, onGone, reloadList, bar = false })
     run("switch", () => one.call("switch", { app: name, schedule: s.name, scope: s.scope, on })).then(() => setFlipped((f) => ({ ...f, [key]: undefined })))
   }
 
-  // A service's devices, under Runs On (or what it needs, where it runs on none): those it runs on, with Remove for
+  // Its service's devices, under Runs On (or what it needs, where it runs on none): those it runs on, with Remove for
   // their owners, then those of theirs an owner removed it from, to install it again.
   const w = where.data
   const devices = w ? [...w.runs.map((s) => [s, w.remove.includes(s) && "remove_from"]), ...w.install.map((s) => [s, "install_on"])] : []

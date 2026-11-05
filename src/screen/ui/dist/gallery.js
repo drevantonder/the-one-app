@@ -487,9 +487,9 @@ var $ = [
 			app: e,
 			selected: !0
 		})), {
-			key: "services",
-			title: "Services",
-			href: "#services",
+			key: "accounts",
+			title: "Accounts",
+			href: "#accounts",
 			folder: W.slice(4, 6)
 		}]
 	},

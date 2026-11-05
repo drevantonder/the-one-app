@@ -165,7 +165,7 @@ public static class Look
         return image;
     }
 
-    /// A page's Services folder: its services' icons, nine at most, small, on frosted glass; with none, faint places.
+    /// A page's Accounts folder: the icons of its apps that keep accounts, nine at most, small, on frosted glass; with none, faint places.
     public static FrameworkElement Folder(IEnumerable<AppInfo> apps, double size)
     {
         var grid = new Grid { Width = size, Height = size, Padding = new Thickness(size * 0.12), CornerRadius = new CornerRadius(size * 0.225), Background = Card, BorderBrush = CardStroke, BorderThickness = new Thickness(0.5) };

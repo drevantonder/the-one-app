@@ -1,13 +1,13 @@
 ---
 name: {{server}}-accounts
-description: Accounts in {{name}}'s services (Gmail, Google Drive, Calendar, Docs, Sheets, WhatsApp, Messenger, Repos' GitHub and the rest) - listing them, signing one in or out, and picking which one a call uses. Use when a call says an account needs signing in, or the person wants to add or remove one.
+description: Accounts in {{name}}'s apps (Gmail, Google Drive, Calendar, Docs, Sheets, WhatsApp, Messenger, Repos' GitHub and the rest) - listing them, signing one in or out, and picking which one a call uses. Use when a call says an account needs signing in, or the person wants to add or remove one.
 ---
 
-# Services and their accounts
+# Apps and their accounts
 
-A service is an app with no screen of its own, for agents and other apps. Those with accounts bring something in from an online account (Gmail, the Google apps, a chat's linked phone, GitHub in Repos). The person reads their mail in Gmail's own app as before.
+Some apps sign in to an online account and bring it in (Gmail, the Google apps, a chat's linked phone, GitHub in Repos). Most have only tools, for agents and other apps: the person reads their mail in Gmail's own app as before.
 
-Every service with accounts has the same tools:
+Every app with accounts has the same tools:
 
 - `<app>_accounts` lists its accounts, the default first, each `{ account, ok }`, with `why` when `ok` is false and it needs signing in again. With none, it says so, and what signs one in (a script gets an empty list).
 - `<app>_sign_in` starts signing in another one. It gives a link for the person to open (in a browser, or on the device a chat app's phone is linked from). Give them the link; never sign in for them, and never ask for their password.
@@ -17,6 +17,6 @@ Every service with accounts has the same tools:
 
 Accounts are kept in the Vault as items, so you never handle their tokens. The Google apps share them: one "Google sign-in", which an admin sets up once in Everyone's Vault for everyone (for anyone else, `vault_request` says which admin to ask, and that's all to tell them), and a "Google account" for each account, so an account signed in once serves every Google app switched on for it; another Google app may ask the person to allow a little more the first time.
 
-A service over a device (iMessage, Reminders, Calendar and Contacts on a Mac; Shell; Models; Computer Use) has no accounts: `<app>_devices` lists the devices it runs on, each `{ device, online }`, and `<app>_remove` takes it off one (`confirm: true`, once the person asked). Its other tools take `device` to pick one. With none to run on, it says what it needs, like "Needs a Mac".
+An app over a device (iMessage, Reminders, Calendar and Contacts on a Mac; Shell; Models; Computer Use) has no accounts: `<app>_devices` lists the devices it runs on, each `{ device, online }`, and `<app>_remove` takes it off one (`confirm: true`, once the person asked). Its other tools take `device` to pick one. With none to run on, it says what it needs, like "Needs a Mac".
 
-On the person's phone or Mac, each page has a Services folder listing them with their accounts, and Add a Service, which opens the App Store's Services.
+On the person's devices, each page has Accounts, in the sidebar and as a folder on its home page: a section for each app with accounts, listing them, with Add Account. Its Add Account for Another App opens the App Store's apps that sign in to an account. An app over a device isn't there: it's in the App Store.

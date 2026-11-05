@@ -87,7 +87,7 @@ public static class Node
         return await Text(await Send(HttpMethod.Get, $"/v1/screens/{Uri.EscapeDataString(app)}/{Uri.EscapeDataString(screen)}", new() { ["params"] = parameters, ["scope"] = scope }));
     }
 
-    /// One of this app's own screens (a page, Services, a Vault request, Settings'), as its page, the same on every
+    /// One of this app's own screens (a page, Accounts, a Vault request, Settings'), as its page, the same on every
     /// client: from those built into the app (client/ffi), never a node's, since they act as its person.
     public static Task<string> ClientScreen(string name, string parameters) => Task.FromResult(OneClientFfiMethods.ClientScreen(name, parameters));
 

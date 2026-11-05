@@ -14,7 +14,7 @@ namespace One;
 public sealed record Page(string Scope, string Title);
 
 /// Where the window is: one of this app's own screens (`own`, its name as `Screen`), the node's, the same on every
-/// client: a page, a page's Services, a Settings screen or a request for a Vault item; or an app's screen. `Scope` is
+/// client: a page, a page's Accounts, a Settings screen or a request for a Vault item; or an app's screen. `Scope` is
 /// the page it's for.
 public sealed record Route(string Kind, string? Scope = null, string? App = null, string Screen = "main", string Params = "{}")
 {
@@ -29,7 +29,7 @@ public sealed record Route(string Kind, string? Scope = null, string? App = null
     }
 
     public static Route PageOf(string scope) => OwnOf("pages", new JsonObject { ["scope"] = scope }.ToJsonString());
-    public static Route Services(string scope) => OwnOf("services", new JsonObject { ["scope"] = scope }.ToJsonString());
+    public static Route Accounts(string scope) => OwnOf("accounts", new JsonObject { ["scope"] = scope }.ToJsonString());
     /// Settings, as a page of its items.
     public static readonly Route Settings = PageOf("settings");
     public static Route Request(string scope, string id) => OwnOf("request", new JsonObject { ["scope"] = scope, ["id"] = id }.ToJsonString());
@@ -76,7 +76,7 @@ public sealed class Store
     public bool Opened(AppInfo a) => State?.SignIn?.Apps is not { } apps || apps.Contains(a.Name);
 
     public List<AppInfo> AppsOn(Page p) => AppList.Where(a => a.HasScreens && Opened(a) && a.Scopes.Contains(p.Scope)).ToList();
-    public List<AppInfo> ServicesOn(Page p) => AppList.Where(a => a.IsService && Opened(a) && a.Scopes.Contains(p.Scope)).OrderBy(a => a.Label).ToList();
+    public List<AppInfo> AccountsOn(Page p) => AppList.Where(a => a.KeepsAccounts && Opened(a) && a.Scopes.Contains(p.Scope)).OrderBy(a => a.Label).ToList();
     public int Badge(string app, Page p) => Math.Max(0, BadgesOf.GetValueOrDefault(p.Scope)?.GetValueOrDefault(app) ?? 0);
 
     /// Every widget a page could show: those of the apps on it.

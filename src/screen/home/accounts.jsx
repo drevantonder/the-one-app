@@ -1,9 +1,10 @@
-// A page's Services: a section per app that keeps accounts, its accounts (one that needs signing in again says so),
-// then Add Account; then the rest, a row each opening its page in the App Store; then Add a Service. It shows as soon
-// as the apps are known, each app's accounts filling in its own section as they come.
+// A page's Accounts: the accounts its apps sign in to, a section per app that keeps accounts, its accounts (one that
+// needs signing in again says so), then Add Account; then Add Account for Another App, which opens the App Store's apps
+// that sign in to one. It shows as soon as the apps are known, each app's accounts filling in its own section as they
+// come.
 //
 // A client's own screen written in React: @one/ui's build (src/screen/ui, `bun run build`) makes it into
-// dist/services.html, which the client builds in (src/screen.rs). React and @one/ui come from the page; `one` is the bridge.
+// dist/accounts.html, which the client builds in (src/screen.rs). React and @one/ui come from the page; `one` is the bridge.
 import { useEffect, useRef, useState } from "react"
 import { createRoot } from "react-dom/client"
 import { AppIcon, Button, Empty, Icon, List, ListRow, Problem, Skeleton } from "@one/ui"
@@ -16,19 +17,14 @@ async function load() {
   ;[home.data.state, home.data.apps] = await Promise.all([one.api("GET", "/v1/state"), one.api("GET", "/v1/apps")])
 }
 
-/// What the screen draws from, as the apps are now: the page's services, those that keep accounts and the rest, and
-/// where each opens.
+/// What the screen draws from, as the apps are now: the page's apps that keep accounts, and where each signs in.
 function build() {
   const p = home.page(scope)
   if (!p) return { missing: true }
-  const all = home.servicesOn(p)
-  const kept = all.filter((a) => (a.ops || []).some((o) => o.name === "accounts"))
   return {
     p,
-    empty: !all.length,
-    may: home.canArrange(p.scope) && !!home.addService(),
-    withAccounts: kept.map((a) => ({ a, signIn: home.settings(a, p, true), store: home.inStore(a) })),
-    others: all.filter((a) => !kept.includes(a)).map((a) => ({ a, opens: home.inStore(a) || home.settings(a, p) })),
+    may: home.canArrange(p.scope) && !!home.addAccountApp(),
+    withAccounts: home.accountsOn(p).map((a) => ({ a, signIn: home.settings(a, p, true), store: home.inStore(a) })),
   }
 }
 
@@ -57,7 +53,7 @@ async function addAccount(a, p, at, stale, reload) {
 }
 
 /// An app's accounts: a row each, one that needs signing in again saying so, with its Sign In.
-function Accounts({ item, list }) {
+function AppAccounts({ item, list }) {
   const { a, signIn, store } = item
   if (list === undefined) return <Skeleton role="status" aria-label="Loading" className="h-14 w-full max-w-2xl rounded-xl" />
   if (list instanceof Error) return <Problem warn title={one.plain(list).title} />
@@ -82,7 +78,7 @@ function Accounts({ item, list }) {
   )
 }
 
-function Services() {
+function Accounts() {
   const [phase, setPhase] = useState("loading")
   const [problem, setProblem] = useState(null)
   const [view, setView] = useState(null)
@@ -116,7 +112,7 @@ function Services() {
   const reload = () => show().catch((err) => (setProblem(one.plain(err)), setPhase("error")))
 
   useEffect(() => {
-    one.largeTitle("Services")
+    one.largeTitle("Accounts")
     const wait = setTimeout(() => setSlow(true), 100)
     reload()
     // An app's own change (a sign-in finished on its settings screen) lists its accounts again; a change to the apps or
@@ -142,10 +138,10 @@ function Services() {
     ) : null
   }
   if (view.missing) return <Empty>This device can't open this page. Sign out and in again to choose it.</Empty>
-  const { p, withAccounts, others, empty, may } = view
+  const { p, withAccounts, may } = view
   return (
     <div className="flex flex-col gap-8">
-      <h1 className="large-title text-3xl font-bold tracking-tight">Services</h1>
+      <h1 className="large-title text-3xl font-bold tracking-tight">Accounts</h1>
       {withAccounts.map((item) => {
         const { a, signIn } = item
         return (
@@ -157,24 +153,17 @@ function Services() {
                 <Icon name="dots-three-outline-fill" className="size-[18px]" />
               </Button>
             </div>
-            <Accounts item={item} list={accounts[a.name]} />
+            <AppAccounts item={item} list={accounts[a.name]} />
             {signIn && accounts[a.name] !== undefined && !(accounts[a.name] instanceof Error) && (
               <Button variant="secondary" className="self-start" onClick={(e) => addAccount(a, p, e.currentTarget, stale.current, async () => (await show()))}>Add Account</Button>
             )}
           </section>
         )
       })}
-      {others.length > 0 && (
-        <List>
-          {others.map(({ a, opens }) => (
-            <ListRow key={a.name} leading={<AppIcon app={a} size={36} />} title={home.label(a)} sub={a.description || undefined} onClick={opens || undefined} />
-          ))}
-        </List>
-      )}
-      {empty && <Empty className="mr-auto max-w-md px-0 text-left items-start" action={may ? { label: "Add a Service", run: () => home.addService()?.() } : undefined}>Services give your apps and agents your email, calendar, chats and files.</Empty>}
-      {may && !empty && <Button variant="outline" className="self-start" onClick={() => home.addService()?.()}>Add a Service</Button>}
+      {!withAccounts.length && <Empty className="mr-auto max-w-md px-0 text-left items-start" action={may ? { label: "Add Account", run: () => home.addAccountApp()?.() } : undefined}>The accounts your apps sign in to, like your email and chats, show here.</Empty>}
+      {may && withAccounts.length > 0 && <Button variant="outline" className="self-start" onClick={() => home.addAccountApp()?.()}>Add Account for Another App</Button>}
     </div>
   )
 }
 
-createRoot(document.getElementById("root")).render(<Services />)
+createRoot(document.getElementById("root")).render(<Accounts />)

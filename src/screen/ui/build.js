@@ -42,7 +42,7 @@ writeFileSync(dist("gallery.html"), `<!doctype html>
 `)
 
 // The client's own screens in React, opted in to @one/ui with src/screen.rs's tag (its UI): Settings' (../settings) and
-// the pages' and Services' (../home, with what they share in its lib/).
+// the pages' and Accounts' (../home, with what they share in its lib/).
 const settings = path.join(here, "..", "settings")
 const home = path.join(here, "..", "home")
 await buildScreens(settings, path.join(settings, "dist"), settings, `<meta name="@one/ui">`, shared)

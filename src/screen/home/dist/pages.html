@@ -17,7 +17,7 @@ var j = (() => {
 		widgets: {},
 		badges: {},
 		failed: /* @__PURE__ */ new Set()
-	}, t = () => e.state?.user, n = () => e.state?.install, r = () => t()?.role === "admin", i = (e) => e?.title || e?.name || "", a = (t) => e.apps.find((e) => e.name === t), o = (e, t) => !!e?.screens?.some((e) => e.name === t), s = (e) => o(e, "main"), c = (e) => !s(e) && !(e.widgets || []).length, l = (e) => (e.installed || []).map((e) => e.startsWith("user:") ? "user" : e), u = (e) => e === t()?.id ? "You" : n()?.users.find((t) => t.id === e)?.name || "Someone", d = (e) => e.slice().sort((e, n) => (e === t()?.id) - (n === t()?.id) || u(e).localeCompare(u(n))).map((e) => e === t()?.id ? "you" : u(e)), f = (e) => e.length < 2 ? e.join("") : `${e.slice(0, -1).join(", ")} and ${e.at(-1)}`, p = (e, n) => e.length === 1 && e[0] === t()?.id ? "" : `${e.length <= 3 ? f(d(e)).replace(/^y/, "Y") : `${e.length} people`} · ${m(n)}`;
+	}, t = () => e.state?.user, n = () => e.state?.install, r = () => t()?.role === "admin", i = (e) => e?.title || e?.name || "", a = (t) => e.apps.find((e) => e.name === t), o = (e, t) => !!e?.screens?.some((e) => e.name === t), s = (e) => o(e, "main"), c = (e) => !!e?.ops?.some((e) => e.name === "accounts"), l = (e) => (e.installed || []).map((e) => e.startsWith("user:") ? "user" : e), u = (e) => e === t()?.id ? "You" : n()?.users.find((t) => t.id === e)?.name || "Someone", d = (e) => e.slice().sort((e, n) => (e === t()?.id) - (n === t()?.id) || u(e).localeCompare(u(n))).map((e) => e === t()?.id ? "you" : u(e)), f = (e) => e.length < 2 ? e.join("") : `${e.slice(0, -1).join(", ")} and ${e.at(-1)}`, p = (e, n) => e.length === 1 && e[0] === t()?.id ? "" : `${e.length <= 3 ? f(d(e)).replace(/^y/, "Y") : `${e.length} people`} · ${m(n)}`;
 	function m(e) {
 		let t = d(e);
 		return t.length ? t.length === 1 ? `apps chosen by ${t[0]}` : t.length === 2 ? `apps chosen by ${t[0]} and ${t[1]}` : `apps chosen by ${t.length} admins` : "apps chosen by admins";
@@ -117,7 +117,7 @@ var j = (() => {
 		let t = a(e.state?.config?.store);
 		return t && s(t) && _().some((e) => l(t).includes(e.scope)) ? t : null;
 	}
-	let M = (e, t, n = "main", r = {}) => () => one.open(n, r, e.name, t ? { scope: t.scope } : {}), N = (e, t, n) => o(e, "settings") ? M(e, t, "settings", n ? { add: !0 } : {}) : null, P = (e) => j() && o(j(), "app") && (e.deploys || 0) > 0 ? M(j(), null, "app", { app: e.name }) : null, F = () => j() ? M(j(), null, "main", { service: !0 }) : null, I = () => j() && M(j(), null)();
+	let M = (e, t, n = "main", r = {}) => () => one.open(n, r, e.name, t ? { scope: t.scope } : {}), N = (e, t, n) => o(e, "settings") ? M(e, t, "settings", n ? { add: !0 } : {}) : null, P = (e) => j() && o(j(), "app") && (e.deploys || 0) > 0 ? M(j(), null, "app", { app: e.name }) : null, F = () => j() ? M(j(), null, "main", { accounts: !0 }) : null, I = () => j() && M(j(), null)();
 	async function L(e, t, n = {}) {
 		return (await one.api("POST", "/v1/call", {
 			app: e,
@@ -240,7 +240,7 @@ var j = (() => {
 		page: v,
 		canArrange: y,
 		appsOn: x,
-		servicesOn: S,
+		accountsOn: S,
 		badge: C,
 		widgetsOn: w,
 		waiting: T,
@@ -251,7 +251,7 @@ var j = (() => {
 		open: M,
 		settings: N,
 		inStore: P,
-		addService: F,
+		addAccountApp: F,
 		openStore: I,
 		call: L,
 		failed: R,
@@ -1067,14 +1067,12 @@ function we(e) {
 			], e)
 		});
 	}), i = Y.order[e.scope];
-	i && (r = i.map((e) => r.find((t) => t.slot === e)).filter(Boolean).concat(r.filter((e) => !i.includes(e.slot))));
-	let a = j.servicesOn(e);
-	return r.push({
-		slot: "services",
-		kind: "services",
-		name: "Services",
-		apps: a,
-		open: () => one.open("services", { scope: e.scope }, void 0, { sheet: !0 }),
+	return i && (r = i.map((e) => r.find((t) => t.slot === e)).filter(Boolean).concat(r.filter((e) => !i.includes(e.slot)))), r.push({
+		slot: "accounts",
+		kind: "accounts",
+		name: "Accounts",
+		apps: j.accountsOn(e),
+		open: () => one.open("accounts", { scope: e.scope }, void 0, { sheet: !0 }),
 		menu: t ? (e) => j.menu([de], e) : void 0
 	}), {
 		scope: e.scope,
@@ -1346,10 +1344,10 @@ function Ye(e, t, n, r, i, a) {
 function Xe(e, t) {
 	let n = Z;
 	n.ghost.style.transform = `translate(${e - n.dx}px, ${t - n.dy}px)`;
-	let r = Y.view.find((e) => e.scope === n.scope).list.map((e) => e.slot), i = r.filter((e) => e !== "services"), a = null, o = 0;
+	let r = Y.view.find((e) => e.scope === n.scope).list.map((e) => e.slot), i = r.filter((e) => e !== "accounts"), a = null, o = 0;
 	for (let r of He(n.scope)) {
 		let i = r.getBoundingClientRect(), s = r.dataset.cell;
-		o = Math.max(o, i.bottom), s !== n.slot && s !== "services" && e >= i.left && e <= i.right && t >= i.top && t <= i.bottom && (a = s);
+		o = Math.max(o, i.bottom), s !== n.slot && s !== "accounts" && e >= i.left && e <= i.right && t >= i.top && t <= i.bottom && (a = s);
 	}
 	let s = r.indexOf(n.slot), c = -1;
 	a && a !== n.over ? c = r.indexOf(a) : !a && t > o && n.slot !== i.at(-1) && (c = r.indexOf(i.at(-1))), n.over = a, c < 0 || c === s || (r.splice(s, 1), r.splice(c, 0, n.slot), Y.order[n.scope] = r, pe = !0, Y.render(!0), one.tap());
@@ -1360,7 +1358,7 @@ function Ze() {
 	let t = e.el.getBoundingClientRect();
 	e.ghost.style.transition = "transform 0.22s ease, scale 0.22s ease", e.ghost.style.scale = "1", e.ghost.style.transform = `translate(${t.left}px, ${t.top}px)`, setTimeout(() => {
 		e.ghost.remove(), e.el.style.visibility = "", e.el.style.animation = "";
-		let t = Y.view.find((t) => t.scope === e.scope).list.filter((e) => e.key), n = t.map((e) => e.key).join(" ") !== e.before.filter((e) => e !== "services").join(" ");
+		let t = Y.view.find((t) => t.scope === e.scope).list.filter((e) => e.key), n = t.map((e) => e.key).join(" ") !== e.before.filter((e) => e !== "accounts").join(" ");
 		delete Y.order[e.scope], n ? Ne(e.p, t.map((e) => e.kept)) : Y.render();
 	}, 220);
 }
@@ -1496,7 +1494,7 @@ function nt(t) {
 		let e;
 		n[19] === f ? e = n[20] : (e = () => !Y.editing && !me() && (one.tap(), f.open()), n[19] = f, n[20] = e);
 		let t;
-		n[21] !== u || n[22] !== f.apps || n[23] !== f.kind ? (t = f.kind === "services" && /* @__PURE__ */ k(tt, {
+		n[21] !== u || n[22] !== f.apps || n[23] !== f.kind ? (t = f.kind === "accounts" && /* @__PURE__ */ k(tt, {
 			apps: f.apps,
 			size: u
 		}), n[21] = u, n[22] = f.apps, n[23] = f.kind, n[24] = t) : t = n[24];

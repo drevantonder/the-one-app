@@ -14,15 +14,15 @@ struct Page: Identifiable, Hashable {
     var id: String { scope }
 }
 
-/// Where a shell's navigation goes: a page, an app's screen, Settings, one of its screens, or a page's Services.
+/// Where a shell's navigation goes: a page, an app's screen, Settings, one of its screens, or a page's Accounts.
 enum Route: Hashable, Codable {
     case page(String)
     case screen(ScreenRoute)
     case settings
     /// A Settings screen, by its item's name, with its params as JSON.
     case setting(String, params: String = "{}")
-    /// A page's Services folder, opened: its scope.
-    case services(String)
+    /// A page's Accounts, opened: its scope.
+    case accounts(String)
 }
 
 struct ScreenRoute: Hashable, Codable {
@@ -210,9 +210,9 @@ final class Store {
         apps.filter { $0.hasScreens && $0.scopes.contains(page.scope) }
     }
 
-    /// A page's services, which its Services folder holds instead of each having an icon.
-    func services(on page: Page) -> [AppInfo] {
-        apps.filter { $0.isService && $0.scopes.contains(page.scope) }
+    /// A page's apps that keep accounts, which its Accounts lists.
+    func accounts(on page: Page) -> [AppInfo] {
+        apps.filter { $0.keepsAccounts && $0.scopes.contains(page.scope) }
             .sorted { $0.label.localizedStandardCompare($1.label) == .orderedAscending }
     }
 
@@ -536,9 +536,9 @@ final class Store {
     private func stillThere(_ route: Route) -> Route? {
         switch route {
         case .page(let scope): pages.contains { $0.scope == scope } ? route : nil
-        // A screen the app no longer has (Gmail's main, once it was a service) isn't; one not described yet may be.
+        // A screen the app no longer has (Gmail's main, once it had none) isn't; one not described yet may be.
         case .screen(let screen): app(screen.app).map { $0.screens == nil || $0.has(screen: screen.screen) } == true ? route : nil
-        case .services(let scope): page(scope) != nil ? route : nil
+        case .accounts(let scope): page(scope) != nil ? route : nil
         case .settings, .setting: route
         }
     }

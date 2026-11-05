@@ -492,7 +492,7 @@ private struct ScreenWebView: Representable {
                     return (nil, error.localizedDescription)
                 }
             case "open":
-                // One of the client's own screens (Settings', Services, a request) from one of its own; else an app's.
+                // One of the client's own screens (Settings', Accounts, a request) from one of its own; else an app's.
                 let params = (try? JSONSerialization.data(withJSONObject: body["params"] ?? [:])).map { String(decoding: $0, as: UTF8.self) } ?? "{}"
                 let other = (body["app"] as? String).flatMap { $0.isEmpty ? nil : $0 }
                 let screen = body["screen"] as? String ?? "main"
@@ -766,8 +766,8 @@ enum WarmWebKit {
     }
 }
 
-/// What a shell shows for a route: a page, an app's screen, Settings or one of its screens, or a page's Services. The
-/// client's own screens (src/screen/) draw a page, Settings and Services, the same on every client.
+/// What a shell shows for a route: a page, an app's screen, Settings or one of its screens, or a page's Accounts. The
+/// client's own screens (src/screen/) draw a page, Settings and Accounts, the same on every client.
 struct RouteView: View {
     @Environment(Store.self) private var store
     var route: Route
@@ -798,8 +798,8 @@ struct RouteView: View {
                 let screen = ScreenRoute(app: "", screen: name, params: params)
                 AppScreen(route: screen, settings: true).id(screen)
             }
-        case .services(let scope):
-            let screen = ScreenRoute(app: "", screen: "services", params: Store.params(["scope": scope]))
+        case .accounts(let scope):
+            let screen = ScreenRoute(app: "", screen: "accounts", params: Store.params(["scope": scope]))
             AppScreen(route: screen, settings: true).id(screen)
         }
     }
@@ -959,7 +959,7 @@ private struct ScreenSheetView: View {
             AppScreen(route: ScreenRoute(app: "", screen: name, params: params), settings: true) { store.dismiss(sheet, value: $0) }
         case .screen(let route):
             AppScreen(route: route) { store.dismiss(sheet, value: $0) }
-        case .page, .settings, .services:
+        case .page, .settings, .accounts:
             EmptyView()
         }
     }

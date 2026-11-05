@@ -148,6 +148,9 @@ struct AppInfo: Decodable, Sendable, Equatable, Identifiable {
     struct Widget: Decodable, Sendable, Equatable {
         var name: String
     }
+    struct Tool: Decodable, Sendable, Equatable {
+        var name: String
+    }
     var name: String
     var title: String?
     var icon: String?
@@ -158,20 +161,21 @@ struct AppInfo: Decodable, Sendable, Equatable, Identifiable {
     var imageKind: String?
     var screens: [Screen]?
     var widgets: [Widget]?
+    var ops: [Tool]?
     /// The scopes it is installed in that the asker may use: `user:<id>`, `group:<id>`, `global`.
     var installed: [String]?
     var deploys: Int?
 
     enum CodingKeys: String, CodingKey {
-        case name, title, icon, color, image, imageKind = "image_kind", screens, widgets, installed, deploys
+        case name, title, icon, color, image, imageKind = "image_kind", screens, widgets, ops, installed, deploys
     }
 
     var id: String { name }
     var label: String { title ?? name }
     /// Only apps with a `main` screen get an icon; the rest still give widgets and tools.
     var hasScreens: Bool { has(screen: "main") }
-    /// A service: nothing to open and no widget, so it goes in a page's Services folder rather than having an icon.
-    var isService: Bool { !hasScreens && (widgets ?? []).isEmpty }
+    /// It signs in to accounts (it has an `accounts` tool), so it's in its page's Accounts.
+    var keepsAccounts: Bool { ops?.contains { $0.name == "accounts" } == true }
     func has(screen: String) -> Bool { screens?.contains { $0.name == screen } == true }
     /// Its pages: the asker's own scope is the page `user`.
     var scopes: [String] { (installed ?? []).map { $0.hasPrefix("user:") ? "user" : $0 } }
