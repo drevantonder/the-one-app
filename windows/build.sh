@@ -2,7 +2,12 @@
 # Builds the Windows app in the Windows VM on this machine (Agent Devices' windows, or DEVICE=<name>, a copy borrowed for
 # it: WinUI 3 builds only on Windows), then installs it there and starts it. CONFIG=path/to/config.toml builds another
 # white label.
+#   --ssh <ssh's arguments>   builds on a Windows machine ssh reaches instead (`--ssh surface`): its user needs to be
+#                             signed in at its desktop. It's built in a folder of its own there, which goes after, and
+#                             installed for that user, who gets the .NET 10 SDK and a signing certificate (setup.ps1).
 set -euo pipefail
+target=
+if [ "${1:-}" = --ssh ]; then target=${2:?--ssh needs the machine, as ssh names it}; fi
 cd "$(dirname "$0")"
 root=$(cd .. && pwd)
 config=$(cd "$(dirname "${CONFIG:-$root/config.toml}")" && pwd)/$(basename "${CONFIG:-config.toml}")
@@ -15,7 +20,20 @@ name=$(field name) cli=$(field cli)
 if [ -n "$(field join_domain)" ]; then yours=${name/#The /the }; else yours="your ${name#The }"; fi
 
 stage=$(mktemp -d)/$cli
-trap 'rm -rf "$(dirname "$stage")"' EXIT
+# Where it builds, from the user's home there (the same under either shell ssh gives): the VM's own folder, kept for the
+# next build, or on another machine one of this run's, which goes after.
+built=build\\$cli
+cleanup() { rm -rf "$(dirname "$stage")"; }
+if [ -n "$target" ]; then
+  # shellcheck disable=SC2206  # ssh's arguments, split on purpose
+  ssh=(ssh -o ConnectTimeout=10 $target)
+  built=one-build-$$
+  cleanup() {
+    rm -rf "$(dirname "$stage")"
+    "${ssh[@]}" "powershell -NoProfile -Command \"Remove-Item -Recurse -Force $built -ErrorAction SilentlyContinue\"" || true
+  }
+fi
+trap cleanup EXIT
 mkdir -p "$stage/Assets"
 cp ./*.cs App.xaml One.csproj app.manifest ./*.ps1 "$stage/"
 # The package: named for the white label, its widgets' COM class steady for it, its version newer each build (days
@@ -61,13 +79,15 @@ cp "$root/target/x86_64-pc-windows-gnu/release/one_client_ffi.dll" "$stage/"
 mv "$stage/client/one_client_ffi.cs" "$stage/" && rmdir "$stage/client"
 printf '{"name":%s,"file":%s,"publisher":%s}\n' "$(quote "$name")" "$(quote "$file")" "$(quote "CN=${name//[^A-Za-z0-9 ]/}")" > "$stage/build.json"
 
-# The device's SSH port and folder, as Agent Devices keeps them.
-device=${DEVICE:-windows}
-kept=$HOME/.local/share/one/agent-devices/devices/$device.json
-port=$(sed -n 's/.*"port": *\([0-9]*\).*/\1/p' "$kept") dir=$(sed -n 's/.*"dir": *"\([^"]*\)".*/\1/p' "$kept")
-opts=(-o StrictHostKeyChecking=no -o "UserKnownHostsFile=$dir/known_hosts" -o LogLevel=ERROR -o ConnectTimeout=10)
-ssh=(ssh -p "$port" "${opts[@]}" one@127.0.0.1)
-"${ssh[@]}" exit 2>/dev/null || { one agent-devices start "$device" >/dev/null; until "${ssh[@]}" exit 2>/dev/null; do sleep 5; done; }
+if [ -z "$target" ]; then
+  # The device's SSH port and folder, as Agent Devices keeps them.
+  device=${DEVICE:-windows}
+  kept=$HOME/.local/share/one/agent-devices/devices/$device.json
+  port=$(sed -n 's/.*"port": *\([0-9]*\).*/\1/p' "$kept") dir=$(sed -n 's/.*"dir": *"\([^"]*\)".*/\1/p' "$kept")
+  opts=(-o StrictHostKeyChecking=no -o "UserKnownHostsFile=$dir/known_hosts" -o LogLevel=ERROR -o ConnectTimeout=10)
+  ssh=(ssh -p "$port" "${opts[@]}" one@127.0.0.1)
+  "${ssh[@]}" exit 2>/dev/null || { one agent-devices start "$device" >/dev/null; until "${ssh[@]}" exit 2>/dev/null; do sleep 5; done; }
+fi
 # One stream into Windows' own tar: scp takes seconds a file there.
-tar -C "$stage" -cf - . | "${ssh[@]}" "Remove-Item -Recurse -Force build\\$cli -ErrorAction SilentlyContinue; New-Item -ItemType Directory -Force build\\$cli | Out-Null; tar -xf - -C build\\$cli"
-"${ssh[@]}" "powershell -NoProfile -ExecutionPolicy Bypass -File build\\$cli\\build.ps1"
+tar -C "$stage" -cf - . | "${ssh[@]}" "powershell -NoProfile -Command \"Remove-Item -Recurse -Force $built -ErrorAction SilentlyContinue; New-Item -ItemType Directory -Force $built | Out-Null; tar -xf - -C $built\""
+"${ssh[@]}" "powershell -NoProfile -ExecutionPolicy Bypass -File $built\\build.ps1"

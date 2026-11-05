@@ -21,5 +21,6 @@ if (-not (Get-ChildItem Cert:\LocalMachine\TrustedPeople | Where-Object Thumbpri
   $public = "$env:TEMP\signing.cer"
   Export-Certificate -Cert $cert -FilePath $public | Out-Null
   Import-Certificate -FilePath $public -CertStoreLocation Cert:\LocalMachine\TrustedPeople | Out-Null
+  Remove-Item $public
 }
 $cert.Thumbprint

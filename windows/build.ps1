@@ -100,8 +100,10 @@ $task = "Install $($app.file)"
 $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Highest
 $run = New-ScheduledTaskAction -Execute powershell.exe -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$here\install.ps1`""
 Register-ScheduledTask -TaskName $task -Action $run -Principal $principal -Force | Out-Null
-Start-ScheduledTask -TaskName $task
-for ($i = 0; -not (Test-Path $log) -and $i -lt 240; $i++) { Start-Sleep -Milliseconds 500 }
+try {
+  Start-ScheduledTask -TaskName $task
+  for ($i = 0; -not (Test-Path $log) -and $i -lt 240; $i++) { Start-Sleep -Milliseconds 500 }
+} finally { Unregister-ScheduledTask -TaskName $task -Confirm:$false -ErrorAction SilentlyContinue }
 $said = Get-Content $log -ErrorAction SilentlyContinue
 if (-not $said) { throw "the install didn't finish" }
 if ($said -like "Couldn't*") { throw $said }
