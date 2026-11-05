@@ -49,7 +49,7 @@ pub fn run(tag: Option<&str>) -> Result<()> {
     let mac_last = std::fs::read_to_string(&mac_done).ok().or_else(|| last.clone());
     // A service never sent out from here goes out all the same.
     let released = services_released();
-    let unreleased = go_services(&src).iter().any(|n| !released.contains_key(n));
+    let unreleased = services(&src).iter().any(|n| !released.contains_key(n));
     if tag.is_none() && last.as_deref() == Some(this.as_str()) && mac_last.as_deref() == Some(this.as_str()) && !unreleased {
         println!("Every device already runs {short}, main's tip: the last update here sent it out.");
         return Ok(());
@@ -64,12 +64,13 @@ pub fn run(tag: Option<&str>) -> Result<()> {
         (parts.node, parts.mac) = (true, true);
     }
     // A service's program is sent out when its folder changed, or it never was from here.
-    for name in go_services(&src) {
-        if (tag.is_some() || last.is_none() || !released.contains_key(&name)) && !parts.services.contains(&name) {
+    for name in services(&src) {
+        let rust = service_dir(&src, &name).join("Cargo.toml").is_file();
+        if (tag.is_some() || last.is_none() || !released.contains_key(&name) || (rust && parts.service)) && !parts.services.contains(&name) {
             parts.services.push(name);
         }
     }
-    parts.services.retain(|n| service_dir(&src, n).join("go.mod").is_file());
+    parts.services.retain(|n| services(&src).contains(n));
     let macs: Vec<Value> =
         if parts.mac { devices().into_iter().filter(|d| d["target"].as_str().is_some_and(|t| t.ends_with("-apple-darwin"))).collect() } else { Vec::new() };
 
@@ -135,15 +136,15 @@ pub fn run(tag: Option<&str>) -> Result<()> {
     let short = short.as_str();
     // Which devices to wait for, asked before this device's own node restarts on the new build.
     let linux: Vec<Value> = devices().into_iter().filter(|d| d["target"] == TARGET).collect();
+    // Services first, so a node that no longer carries one (it became its app's own program) finds it out.
+    let mut failed = !publish_services(&src, &parts.services, &key, &commit);
     if !linux.is_empty() && linux.iter().all(|d| d["build"] == short) {
         println!("  every Linux device already runs {short}");
     } else {
         crate::publish(&binary, &Default::default(), &key)?;
     }
     let started_at = Instant::now();
-    let mut failed = await_builds(&linux, short, started_at, Duration::from_secs(180));
-    // Once this device's node runs the new build, which publishes them.
-    failed |= !publish_services(&src, &parts.services, &key, &commit);
+    failed |= await_builds(&linux, short, started_at, Duration::from_secs(180));
     if let Err(err) = deploy_built_in() {
         failed = true;
         println!("  couldn't deploy the new versions of the built-in apps: {err:#}");
@@ -218,6 +219,8 @@ struct Parts {
     renamed: Vec<(String, String)>,
     /// Apps' services (`apps/<name>/service/`), each built for every platform and published.
     services: Vec<String>,
+    /// The `service` crate, which every service in Rust is built on, so each is published again.
+    service: bool,
 }
 
 impl Parts {
@@ -272,6 +275,7 @@ impl Parts {
                     }
                 }
                 Some("apple") => parts.mac = true,
+                Some("service") => parts.service = true,
                 // The Workers' sources and the Cloudflare node's are in the node, which deploys them; the Mac's needn't.
                 Some("cloudflare") if !file.starts_with("cloudflare/test/") => parts.node = true,
                 // The client is the Macs', and in the node too: its WebAssembly is the web client's, and the Cloudflare node's.
@@ -290,9 +294,10 @@ fn service_dir(src: &Path, name: &str) -> PathBuf {
     src.join("apps").join(name).join("service")
 }
 
-/// The apps in `src` with a service in Go: each `apps/<name>/service/` with a Go module.
-fn go_services(src: &Path) -> Vec<String> {
-    let mut names: Vec<String> = std::fs::read_dir(src.join("apps")).into_iter().flatten().flatten().filter(|e| e.path().join("service/go.mod").is_file()).map(|e| e.file_name().to_string_lossy().to_string()).collect();
+/// The apps in `src` with a service: each `apps/<name>/service/` with a Go module or a Rust package.
+fn services(src: &Path) -> Vec<String> {
+    let has = |e: &std::fs::DirEntry| ["go.mod", "Cargo.toml"].iter().any(|f| e.path().join("service").join(f).is_file());
+    let mut names: Vec<String> = std::fs::read_dir(src.join("apps")).into_iter().flatten().flatten().filter(has).map(|e| e.file_name().to_string_lossy().to_string()).collect();
     names.sort();
     names
 }
@@ -305,6 +310,14 @@ fn go_build(dir: &Path, os: &str, arch: &str, built: &str, out: &Path) -> Result
     run_quiet(&mut go)
 }
 
+/// Builds the Rust service of the app `name` in the checkout `src` for this machine, at `out`, saying it was built
+/// from `built`.
+fn cargo_build(src: &Path, name: &str, built: &str, out: &Path) -> Result<()> {
+    run_quiet(Command::new(cargo()).current_dir(src).env("ONE_BUILD", built).args(["build", "--release", "-p", &format!("{}-{name}", env!("CARGO_BIN_NAME"))]))?;
+    std::fs::copy(src.join("target/release").join(format!("{}-{name}", env!("CARGO_BIN_NAME"))), out)?;
+    Ok(())
+}
+
 /// Puts your checkout's build of the app's service in `dir` (`apps/<name>`) on `device` (here by default, else reached
 /// by ssh as its name) and switches it on there, for trying it before it's sent out. oned runs it until a release of it
 /// newer than this build is published.
@@ -312,7 +325,8 @@ pub fn try_service(dir: &Path, device: Option<&str>) -> Result<()> {
     let dir = std::fs::canonicalize(dir).with_context(|| format!("{} isn't here", dir.display()))?;
     let name = dir.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
     let source = dir.join("service");
-    ensure!(source.join("go.mod").is_file(), "{} has no service in Go (service/go.mod)", dir.display());
+    let rust = source.join("Cargo.toml").is_file();
+    ensure!(rust || source.join("go.mod").is_file(), "{} has no service (service/go.mod or service/Cargo.toml)", dir.display());
     let on = |args: &str| -> Result<String> {
         let out = match device {
             Some(device) => Command::new("ssh").args([device, args]).stdin(std::process::Stdio::null()).output(),
@@ -329,7 +343,13 @@ pub fn try_service(dir: &Path, device: Option<&str>) -> Result<()> {
     let commit = git(&source, &["rev-parse", "--short=12", "HEAD"])?.trim().to_string();
     let dirty = if quiet(Command::new("git").current_dir(&source).args(["diff", "--quiet", "HEAD", "--", "."])) { "" } else { "+dirty" };
     let out = std::env::temp_dir().join(format!("{CLI}-{name}-{}", std::process::id()));
-    go_build(&source, &os.to_lowercase(), arch, &format!("{commit}{dirty}"), &out)?;
+    match rust {
+        true => {
+            ensure!(uname == "Linux x86_64" && TARGET == "x86_64-unknown-linux-gnu", "a service in Rust is built here for this machine, so try it on a Linux x86_64 device from one");
+            cargo_build(dir.parent().and_then(Path::parent).unwrap_or(&dir), &name, &format!("{commit}{dirty}"), &out)?
+        }
+        false => go_build(&source, &os.to_lowercase(), arch, &format!("{commit}{dirty}"), &out)?,
+    }
     // Put in place in one step, so oned never starts half of it.
     let program = format!("{CLI}-{name}");
     let copied = match device {
@@ -357,8 +377,10 @@ fn publish_services(src: &Path, names: &[String], key: &ssh_key::PrivateKey, com
     let mut released = services_released();
     for name in names {
         let dir = service_dir(src, name);
+        let rust = dir.join("Cargo.toml").is_file();
         let each = || -> Result<()> {
-            for target in PLATFORMS {
+            // One in Rust is built for this machine's platform: each Mac builds its own with its app, and carries it.
+            for target in PLATFORMS.into_iter().filter(|t| !rust || *t == TARGET) {
                 let (os, arch) = match target {
                     "x86_64-unknown-linux-gnu" => ("linux", "amd64"),
                     "aarch64-unknown-linux-gnu" => ("linux", "arm64"),
@@ -366,7 +388,11 @@ fn publish_services(src: &Path, names: &[String], key: &ssh_key::PrivateKey, com
                 };
                 let out = cache().join("services").join(format!("{name}-{target}"));
                 std::fs::create_dir_all(out.parent().unwrap_or(&out))?;
-                go_build(&dir, os, arch, &commit[..12], &out).with_context(|| format!("build it for {target}"))?;
+                match rust {
+                    true => cargo_build(src, name, &commit[..12], &out),
+                    false => go_build(&dir, os, arch, &commit[..12], &out),
+                }
+                .with_context(|| format!("build it for {target}"))?;
                 let signature = release::sign(key, &std::fs::read(&out)?)?;
                 let body = json!({ "path": out, "service": name, "commit": commit, "target": target, "committed": committed, "signature": signature });
                 post("/v1/service-release", body).with_context(|| format!("publish it for {target}"))?;
