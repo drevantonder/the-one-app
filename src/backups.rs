@@ -192,8 +192,11 @@ pub fn back_up(job: Job, blob: impl Fn(&str) -> Option<Vec<u8>>) -> Result<Optio
 
 /// Copies what a scope's folder in the install's bucket has that the place lacks, into `<install>/bucket/`, laid out
 /// as the bucket is: each epoch's key and Vault key sealed to the recovery key, each app's key in each epoch (sealed under it), and
-/// each database's new steps, the signatures beside them, and newest copy (sealed as they are), past what `snap` says it has.
+/// each database's new steps, the signatures beside them (and those of the last few steps it copied before, which may
+/// have come just after their steps), and newest copy (sealed as they are), past what `snap` says it has.
 fn copy_bucket(bucket: &Place, place: &Place, install: &str, scope: &str, snap: &mut Snapshot) -> Result<()> {
+    /// How many of the last steps a run copied the next looks for signatures of again.
+    const SIGNED_LATE: u64 = 4;
     let folder = folder(scope);
     let mut copy = |name: &str, known: bool| -> Result<bool> {
         if known && place.get(&format!("{install}/bucket/{name}"))?.is_some() {
@@ -224,14 +227,23 @@ fn copy_bucket(bucket: &Place, place: &Place, install: &str, scope: &str, snap: 
                 copied = newest_copy;
                 at = at.max(newest_copy);
             }
+            let signed = crate::db::signed_beside(&prefix);
             // And the step at the copy's position, without which a reader doesn't start from it (`db::start`), with the
             // signature beside it, which says what the copy comes to.
             if copied > 0 {
                 copy(&crate::db::step_name(&prefix, copied), true)?;
-                copy(&crate::db::sig_name(&prefix, copied), true)?;
+                if signed {
+                    copy(&crate::db::sig_name(&prefix, copied), true)?;
+                }
+            }
+            // A signature is written just after its step, so the last steps a run copied may have come without theirs.
+            for n in (copied.max(at.saturating_sub(SIGNED_LATE)) + 1..=at).filter(|_| signed) {
+                copy(&crate::db::sig_name(&prefix, n), true)?;
             }
             while copy(&crate::db::step_name(&prefix, at + 1), false)? {
-                copy(&crate::db::sig_name(&prefix, at + 1), false)?;
+                if signed {
+                    copy(&crate::db::sig_name(&prefix, at + 1), false)?;
+                }
                 at += 1;
             }
             place.put(&format!("{install}/bucket/{}", crate::db::newest_name(&prefix)), &serde_json::to_vec(&serde_json::json!({ "at": at, "copy": copied, "epoch": if copied == newest_copy { epoch } else { 0 } }))?)?;
@@ -388,8 +400,10 @@ pub fn prune(place: &Place, install: &str, scopes: &BTreeMap<String, [u8; 32]>, 
         }
         for (database, floor) in floors.into_iter().filter(|(_, f)| *f > 0) {
             let prefix = format!("{install}/bucket/{dir}/{database}");
-            // The step at the copy's position stays with it: a reader starts from a copy only beside its step.
-            let steps = place.objects(&prefix)?.into_iter().filter(|o| o.0.parse::<u64>().is_ok_and(|n| n < floor));
+            // The step at the copy's position stays with it, and its signature: a reader starts from a copy only beside
+            // its step. The rest go with the signatures beside them.
+            let position = |name: &str| name.strip_suffix(".sig").unwrap_or(name).parse::<u64>().ok();
+            let steps = place.objects(&prefix)?.into_iter().filter(|o| position(&o.0).is_some_and(|n| n < floor));
             let copies = place.objects(&format!("{prefix}/copy"))?.into_iter().filter(|o| o.0.parse::<u64>().is_ok_and(|n| n < floor));
             for (name, size) in steps.map(|o| (format!("{prefix}/{}", o.0), o.2)).chain(copies.map(|o| (format!("{prefix}/copy/{}", o.0), o.2))).collect::<Vec<_>>() {
                 place.delete(&name)?;
@@ -713,6 +727,7 @@ mod tests {
         let app = crate::db::app_key(&bucket, &epoch, "global", "board", 1, true).await.unwrap().unwrap();
         let keys = crate::db::Keys::from([(1, crate::kernel::database_key(&app, "main"))]);
         let mut db = crate::db::Db::open(&bucket, prefix, keys).await.unwrap();
+        db.sign_as(device.clone());
         db.migrate(&bucket, &["create table posts (text text)".to_string()]).await.unwrap();
         for n in 0..crate::db::COPY_EVERY + 5 {
             db.write(&bucket, |c| Ok(c.execute("insert into posts values (?)", [format!("post {n}")])?)).await.unwrap();
@@ -720,21 +735,30 @@ mod tests {
         let at = db.at();
         let (_, copy, _) = crate::db::newest(&crate::bucket::Bucket::get(&bucket, &crate::db::newest_name(prefix)).await.unwrap().unwrap().bytes);
         assert!(copy > 0 && copy < at, "it has a copy, and steps after it");
+        // The last step's signature, which comes just after it, comes after the run that copies the step.
+        let late = crate::db::sig_name(prefix, at);
+        let sig = bucket.get(&late).unwrap().unwrap();
+        bucket.delete(&late).unwrap();
 
-        let job = Job {
+        let job = |previous: Option<Snapshot>, now: u64| Job {
             place: &place,
             install,
             scope: "global",
             key: epoch,
             sealed: crate::kernel::seal_to(&crate::kernel::twin_public(recovery.verifying_key().as_bytes()).unwrap(), &epoch).unwrap(),
             device: *device.verifying_key().as_bytes(),
-            now: 1_000_000,
-            previous: None,
+            now,
+            previous,
             entries: all.clone(),
             blobs: [hash.clone()].into(),
             bucket: Some(&bucket),
         };
-        back_up(job, |h| (h == hash).then(|| blob.clone())).unwrap().unwrap();
+        let first = back_up(job(None, 1_000_000), |h| (h == hash).then(|| blob.clone())).unwrap().unwrap();
+        let backed_up = format!("{install}/bucket/{late}");
+        assert!(place.get(&backed_up).unwrap().is_none());
+        bucket.put(&late, &sig).unwrap();
+        assert_eq!(back_up(job(Some(first), 1_500_000), |h| (h == hash).then(|| blob.clone())).unwrap(), None, "nothing new for a snapshot");
+        assert_eq!(place.get(&backed_up).unwrap(), Some(sig), "the next run copies it");
 
         let keys: BTreeMap<String, Vec<[u8; 32]>> = [("global".to_string(), vec![epoch])].into();
         let live: BTreeMap<String, Vec<Entry>> = [("global".to_string(), all.clone())].into();
