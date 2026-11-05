@@ -81,7 +81,8 @@ impl Node {
     /// epoch but its entry. The newest must be one of them. With `make`, a scope with no epoch yet gets its first here,
     /// if this device's person may make it: an admin of the group, or the person whose scope it is.
     pub(crate) async fn epoch_keys(&self, scope: &Scope, make: bool) -> Result<crate::db::Keys> {
-        let hashes = self.with(|i| Ok(i.r.db().epoch_hashes(scope)))?;
+        // `global`'s as replay says, so it's read even while who's who doesn't build; another's not then.
+        let hashes = self.with(|i| Ok(if *scope == Scope::Global { i.r.global_epochs() } else { i.r.db().epoch_hashes(scope) }))?;
         let newest = hashes.keys().next_back().copied().unwrap_or(0);
         let kept = self.0.epochs.lock().unwrap().get(scope).cloned().unwrap_or_default();
         // Kept only while each is still the one its entry made.
@@ -161,8 +162,7 @@ impl Node {
             let read = crate::log::open(&bucket, &log_keys, &prefix, "global").await?;
             let member_entries: Vec<Entry> = crate::entry::causal(read.entries.clone(), &HashMap::new()).into_iter().filter(members::is_member_entry).collect();
             let m = crate::members::Members::replay(root, &member_entries, &Default::default());
-            let db = scopes::ScopeDb::build(&m, &Scope::Global, &Default::default(), now_ms())?;
-            let wrong: Vec<u32> = candidates.iter().filter(|(n, k)| db.epoch_hash(&Scope::Global, **n) != Some(crate::keys::epoch_hash(k))).map(|(n, _)| *n).collect();
+            let wrong: Vec<u32> = candidates.iter().filter(|(n, k)| m.epoch_hash(&Scope::Global, **n) != Some(crate::keys::epoch_hash(k).as_str())).map(|(n, _)| *n).collect();
             if wrong.is_empty() {
                 self.0.epochs.lock().unwrap().insert(Scope::Global, candidates.clone());
                 return Ok((candidates, read));
@@ -312,10 +312,10 @@ impl Node {
     /// epoch's (true), since its entry is written before anything is sealed under it; or, if no entry made it, junk
     /// (false), which every read of it here passes over from now on.
     async fn judge_ahead(&self, scope: &Scope, prefix: &str, ahead: &crate::db::Ahead) -> Result<bool> {
-        if self.with(|i| Ok(i.r.db().epoch(scope)))? < ahead.epoch {
+        if self.with(|i| Ok(i.r.epoch_made(scope)))? < ahead.epoch {
             tokio::time::timeout(Duration::from_secs(10), self.read_log(&Scope::Global)).await.map_err(|_| anyhow!("global's entries didn't come in time to say what {prefix}'s step {} is", ahead.at))??;
         }
-        if self.with(|i| Ok(i.r.db().epoch(scope)))? >= ahead.epoch {
+        if self.with(|i| Ok(i.r.epoch_made(scope)))? >= ahead.epoch {
             return Ok(true);
         }
         tracing::warn!("{prefix}'s step {} is under epoch {}, which no entry made: passed over", ahead.at, ahead.epoch);

@@ -23,7 +23,9 @@
 //!
 //! The core's types, their default roles and the rules between them are `DEFAULTS`, rows like any others. Apps add
 //! their own types (`repo`) the same way. Who holds what through them is worked out once the rows are written
-//! (`close`), so each check is a lookup. Five checks read them:
+//! (`close`), so each check is a lookup. It works out holdings only for principals some row names as its subject,
+//! which is enough while the release's `@` rules are only `person:*`'s: an `@` rule of another type needs it to work
+//! them out for that type's objects too. Five checks read them:
 //! - `may`: whether a principal holds a permission on an object, now.
 //! - `may_give`: no escalation. You give a role only where you may `invite`, only one you hold there yourself (or
 //!   that a role of yours gives), and for no longer than you hold both.
