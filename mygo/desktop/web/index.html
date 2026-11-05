@@ -1,0 +1,41 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="color-scheme" content="light dark">
+<title>The One App</title>
+<style>
+  body { font: 14px/1.4 system-ui, sans-serif; margin: 0; padding: 24px; color: CanvasText; background: Canvas; }
+  h1 { font-size: 20px; font-weight: 600; margin: 0 0 16px; }
+  .grey { color: GrayText; }
+  .code { font: 600 28px ui-monospace, monospace; letter-spacing: 2px; margin: 12px 0; }
+  .apps { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 16px; }
+  button.app { all: unset; cursor: default; display: grid; justify-items: center; gap: 6px; text-align: center; }
+  .tile { width: 56px; height: 56px; border-radius: 13px; display: grid; place-items: center; color: #fff; font-weight: 600; font-size: 24px; }
+</style>
+</head>
+<body>
+<main id="main"><p class="grey">Starting…</p></main>
+<script>
+  // The app's own page: it asks Go through the `one` plugin (plugin:one.*), which only trusted pages may call.
+  const call = (m, ...a) => window.mygo.call(`plugin:one.${m}`, ...a);
+  const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+  const colors = ["#5e5ce6", "#ff9f0a", "#30b0c7", "#ff375f", "#34c759", "#af52de", "#0a84ff", "#a2845e"];
+  const color = (a) => a.color || colors[[...a.name].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 0) % colors.length];
+  function show(s) {
+    const main = document.getElementById("main");
+    if (s.phase === "signing-in") main.innerHTML = `<h1>Signing in</h1><p class="grey">Finish signing in in the window that opened.</p>`;
+    else if (s.phase === "approve") main.innerHTML = `<h1>Let this computer in</h1><p class="grey">On one of your devices, open Settings › Devices › Approve and type:</p><div class="code">${esc(s.code)}</div>`;
+    else if (s.phase === "failed") main.innerHTML = `<h1>Can’t Open Your One App</h1><p class="grey">${esc(s.error)}</p>`;
+    else if (s.phase === "ready") {
+      const apps = (s.apps || []).filter((a) => (a.screens || []).length || a.screen || a.main);
+      const list = apps.length ? apps : s.apps || [];
+      main.innerHTML = `<div class="apps">${list.map((a) => `<button class="app" data-app="${esc(a.name)}"><span class="tile" style="background:${esc(color(a))}">${esc((a.title || a.name)[0].toUpperCase())}</span><span>${esc(a.title || a.name)}</span></button>`).join("")}</div>`;
+      main.querySelectorAll("[data-app]").forEach((b) => (b.onclick = () => call("Open", b.dataset.app)));
+    } else main.innerHTML = `<p class="grey">Starting…</p>`;
+  }
+  window.mygo.on("one-state", show);
+  call("State").then(show);
+</script>
+</body>
+</html>
