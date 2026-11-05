@@ -76,6 +76,8 @@ struct Known {
     /// The nodes it may ask, by key: their seal keys; and the Cloudflare node, asked last, if the install has one.
     nodes: HashMap<[u8; 32], [u8; 32]>,
     cloudflare_node: Option<[u8; 32]>,
+    /// Each node's run priority, as the install's admins set it (src/rank.rs): the Cloudflare node's too.
+    ranks: HashMap<[u8; 32], u32>,
     /// When it was read.
     at: u64,
 }
@@ -302,6 +304,8 @@ impl Device {
             return Err(failed("None of your devices runs your things yet."));
         }
         let client = Client::start(self.key.to_bytes(), None, &self.address, &nodes).await?;
+        client.set_ranks(&self.ranks())?;
+        client.set_wakes(self.known.lock().unwrap().as_ref().and_then(|k| k.cloudflare_node))?;
         if let Some(online) = online {
             client.set_online(&online)?;
         }
@@ -430,21 +434,35 @@ impl Device {
                 nodes.insert(key, seal);
             }
         }
-        *self.known.lock().unwrap() = Some(Known { who, user, nodes: nodes.clone(), cloudflare_node, at: now() });
+        let set = one::rank::set(&who.settings());
+        let ranks = nodes
+            .keys()
+            .map(|k| {
+                let id = if Some(*k) == cloudflare_node { one::rank::CLOUDFLARE.to_string() } else { hex(k) };
+                (*k, match one::rank::priority(&set, &id) { one::rank::Priority::Number(n) => n, one::rank::Priority::Last => u32::MAX })
+            })
+            .collect();
+        *self.known.lock().unwrap() = Some(Known { who, user, nodes: nodes.clone(), cloudflare_node, ranks, at: now() });
         Ok(nodes)
     }
 
     /// `nodes`, in the order things run on them as last said, those it wasn't told of after, and the Cloudflare node
-    /// last of all.
+    /// after them; then by run priority, which may put the Cloudflare node first.
     fn ordered(&self, nodes: &HashMap<[u8; 32], [u8; 32]>) -> Vec<[u8; 32]> {
         let order = self.order.lock().unwrap().clone();
-        let last = self.known.lock().unwrap().as_ref().and_then(|k| k.cloudflare_node);
+        let (last, ranks) = self.known.lock().unwrap().as_ref().map(|k| (k.cloudflare_node, k.ranks.clone())).unwrap_or_default();
         let mut out: Vec<[u8; 32]> = order.iter().filter(|k| nodes.contains_key(*k) && Some(**k) != last).copied().collect();
         let mut rest: Vec<[u8; 32]> = nodes.keys().filter(|k| !out.contains(k) && Some(**k) != last).copied().collect();
         rest.sort();
         out.extend(rest);
         out.extend(last.filter(|k| nodes.contains_key(k)));
+        out.sort_by_key(|k| ranks.get(k).copied().unwrap_or(1));
         out
+    }
+
+    /// Each node's run priority, as it last read who's who.
+    fn ranks(&self) -> Vec<([u8; 32], u32)> {
+        self.known.lock().unwrap().as_ref().map(|k| k.ranks.iter().map(|(k, r)| (*k, *r)).collect()).unwrap_or_default()
     }
 
     /// As a person's first device does: says where their own things run (the machines that run everyone's), if they
@@ -741,7 +759,7 @@ impl Device {
         Ok(out)
     }
 
-    /// The order things run in, and each node's run priority, from the node's `/v1/state`; a node it lists that this device didn't know of has it
+    /// The order things run in, from the node's `/v1/state`; a node it lists that this device didn't know of has it
     /// read `global` again (now and then), and only nodes its own reading lists are asked.
     async fn learn_order(&self, bytes: &[u8]) {
         let Ok(state) = serde_json::from_slice::<Value>(bytes) else { return };
@@ -762,15 +780,9 @@ impl Device {
         if stale && let Ok(read) = self.read_members().await {
             nodes = read;
         }
-        // Run priority, where the node says it: a number, or "last".
-        let ranks: Vec<([u8; 32], u32)> = state["install"]["devices"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter_map(|d| Some((keys::unhex(d["key"].as_str()?).ok()?, d["priority"].as_u64().map(|n| n as u32).or_else(|| (d["priority"] == "last").then_some(u32::MAX))?)))
-            .collect();
         if let Some(client) = self.client().await {
-            let _ = client.set_ranks(&ranks);
+            let _ = client.set_ranks(&self.ranks());
+            let _ = client.set_wakes(self.known.lock().unwrap().as_ref().and_then(|k| k.cloudflare_node));
             let _ = client.set_nodes(&self.ordered(&nodes));
         }
     }

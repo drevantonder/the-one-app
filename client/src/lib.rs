@@ -203,6 +203,9 @@ struct Inner {
     online: Mutex<Option<HashSet<PublicKey>>>,
     /// Each node's run priority, where the install's state said it: nodes on the same one are raced at once.
     ranks: Mutex<HashMap<PublicKey, u32>>,
+    /// The node that wakes when asked, the Cloudflare node, which the relay never says is on: raced first only once an
+    /// admin gave it a number in run priority, else after the rest.
+    wakes: Mutex<Option<PublicKey>>,
     /// The endpoint, made again after the network was lost.
     endpoint: tokio::sync::Mutex<Option<Endpoint>>,
     /// A connection to each node raced or asked, held while it's being opened, so one is opened at a time.
@@ -247,6 +250,7 @@ impl Client {
             nodes: Mutex::default(),
             online: Mutex::default(),
             ranks: Mutex::default(),
+            wakes: Mutex::default(),
             endpoint: tokio::sync::Mutex::default(),
             conns: Mutex::default(),
             down: Mutex::default(),
@@ -273,6 +277,12 @@ impl Client {
         let nodes = keys(nodes)?;
         *self.0.nodes.lock().unwrap() = nodes;
         self.warm();
+        Ok(())
+    }
+
+    /// The node that wakes when asked (the Cloudflare node), if the install has one.
+    pub fn set_wakes(&self, node: Option<[u8; 32]>) -> Result<(), Error> {
+        *self.0.wakes.lock().unwrap() = node.map(|n| keys(&[n])).transpose()?.and_then(|k| k.into_iter().next());
         Ok(())
     }
 
@@ -315,7 +325,9 @@ impl Client {
             }
         }
         let online = self.0.online.lock().unwrap();
-        let on = |n: &PublicKey| online.as_ref().is_none_or(|o| o.contains(n));
+        let (wakes, ranks) = (*self.0.wakes.lock().unwrap(), self.0.ranks.lock().unwrap().clone());
+        let numbered = |n: &PublicKey| wakes == Some(*n) && ranks.get(n).is_some_and(|r| *r != u32::MAX);
+        let on = |n: &PublicKey| online.as_ref().is_none_or(|o| o.contains(n)) || numbered(n);
         let (first, rest): (Vec<PublicKey>, Vec<PublicKey>) = nodes.iter().partition(|n| !down.contains_key(*n) && on(n));
         let (mut later, gone): (Vec<PublicKey>, Vec<PublicKey>) = rest.into_iter().partition(|n| !down.contains_key(n));
         drop((down, online));

@@ -476,13 +476,16 @@ const h = OneUI.react.createElement;
   /// which group changed), drawn as soon as they're in; then the badges, drawn as they come.
   async function refreshState({ apps = false } = {}) {
     const [state, list] = await Promise.all([shared("/v1/state"), apps && !joining ? shared("/v1/apps").catch(() => null) : null]);
-    // The nodes this browser asks itself, in the order things run on them, and the Cloudflare node last.
+    // The nodes this browser asks itself, in the order things run on them, the Cloudflare node by its run priority
+    // (last, unless an admin moved it).
     const nodes = (state.install?.devices || []).filter((d) => d.serves_me).sort((a, b) => a.order - b.order).map((d) => d.key);
     const last = state.install?.serverless?.key;
     if (last && !nodes.includes(last)) nodes.push(last);
     const rank = (p) => (p === "last" ? 0xffffffff : p);
     const ranks = Object.fromEntries((state.install?.devices || []).filter((d) => d.priority != null).map((d) => [d.key, rank(d.priority)]));
-    if (state.user && nodes.length) net.nodes(state.user.id, nodes, ranks);
+    if (last) ranks[last] = rank(state.install.serverless.priority ?? "last");
+    nodes.sort((a, b) => (ranks[a] ?? 1) - (ranks[b] ?? 1));
+    if (state.user && nodes.length) net.nodes(state.user.id, nodes, ranks, last);
     const regrouped = JSON.stringify([state.user, state.install?.groups]) !== JSON.stringify([store.state?.user, store.state?.install?.groups]);
     store.state = state;
     // While it's being let in, its apps wait: they need the keys it's about to get.

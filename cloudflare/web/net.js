@@ -187,9 +187,9 @@ export const net = {
   },
 
   /// The nodes to ask, in the order things run on them, kept for the next session, and each one's run priority
-  /// (`ranks`, a number by key, the Cloudflare node's past them all).
-  nodes(user, nodes, ranks = {}) {
-    if (net.has) send({ op: "nodes", user, nodes, ranks });
+  /// (`ranks`, a number by key), and the Cloudflare node's key (`wakes`), which the relay never says is on.
+  nodes(user, nodes, ranks = {}, wakes = null) {
+    if (net.has) send({ op: "nodes", user, nodes, ranks, wakes });
   },
 
   /// `user`'s members as `global`'s entries say them, checked here: those kept and those `given` (a pack a node sent,

@@ -2,8 +2,8 @@
 //! admins set (the `priority` setting, a JSON object of each device's key, or `cloudflare`, to its number or "last"),
 //! or by default 1, and the Cloudflare node always last. Calls, services' operations and new agent devices go to the
 //! lowest number that can run them, is up and has room; devices on the same number are equal, and the quickest
-//! runs it; a nearer one only when every one before it is far. Pure: settings in, priorities out; `src/node.rs` and
-//! `cloudflare/node/` both order by it.
+//! runs it; a nearer one only when every one before it is far. Pure: settings in, priorities out; `src/node.rs`,
+//! `cloudflare/node/` and every client (`client/src/device.rs`, `cloudflare/web/web.js`) order by it.
 
 use std::collections::BTreeMap;
 

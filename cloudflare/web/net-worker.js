@@ -268,6 +268,7 @@ export function server(version) {
             // Each one's run priority, where the state said it: those on the same one are raced at once.
             const ranks = nodes.filter((k) => Number.isInteger(m.ranks?.[k]));
             if (ranks.length) s?.client.ranks(ranks, ranks.map((k) => m.ranks[k]));
+            if (m.wakes && nodes.includes(m.wakes)) s?.client.wakes(m.wakes);
             return s?.client.nodes(nodes);
           }
           case "global":

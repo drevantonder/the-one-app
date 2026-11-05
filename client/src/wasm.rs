@@ -50,6 +50,11 @@ impl Client {
         self.0.set_ranks(&keys.into_iter().zip(ranks).collect::<Vec<_>>()).map_err(js)
     }
 
+    /// The node that wakes when asked (the Cloudflare node), hex, if the install has one.
+    pub fn wakes(&self, node: Option<String>) -> Result<(), JsError> {
+        self.0.set_wakes(node.map(|n| key(&n)).transpose()?).map_err(js)
+    }
+
     /// The nodes the relay says are on its network now, hex: raced first.
     pub fn online(&self, nodes: Vec<String>) -> Result<(), JsError> {
         let nodes = nodes.iter().map(|n| key(n)).collect::<Result<Vec<_>, _>>()?;
