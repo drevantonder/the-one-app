@@ -20,6 +20,13 @@
 //! A copy needs no signer: it's good if it comes to the hash signed beside the step it's at, and a reader reads every
 //! step rather than start from one that isn't.
 //!
+//! What no reader needs goes from the bucket (`tidy`): copies before the newest hint's, once that has been there a
+//! day, since readers only ever start from the hint's; and, once phase 2 switches it on (`DELETE_COVERED_STEPS`), the
+//! steps before it, kept `KEEP_STEPS_FOR` first. A reader whose copy doesn't hold, and whose steps before it are gone,
+//! says so (`Gone`) rather than reading what's left as the whole database. Steps aren't merged in levels: a reader reads
+//! at most `COPY_EVERY` steps after a copy, so merging would save little, for a second kind of object to write, check
+//! and delete.
+//!
 //! Along a database's positions epochs never go down: a step under an epoch lower than the step before it, or that
 //! doesn't open with the key of the epoch it names, is skipped by every reader, its position taken, and the next write
 //! takes the following one. A writer writes under the newest epoch it was given, at once; the next copy is under it.
@@ -46,6 +53,21 @@ pub const COPY_EVERY: u64 = 100;
 /// How many times a write runs again after losing a race before it gives up.
 const TRIES: usize = 50;
 
+/// Whether `tidy` deletes the steps the newest copy covers. Off until phase 2's gate, when every device runs R1: an
+/// older reader whose copy doesn't hold reads every step from the first, and would read what's left as the whole
+/// database. The one place to switch it on.
+pub const DELETE_COVERED_STEPS: bool = false;
+
+/// How long an app database's steps are kept before `tidy` may delete them, by when the bucket wrote them. How long
+/// app data's history is kept isn't decided yet: until it is, as long as the scope database's, the plan's default.
+pub const KEEP_STEPS_FOR: u64 = 7 * 365 * DAY;
+
+/// How long the newest hint's copy has been in the bucket before `tidy` deletes the copies before it: a reader that read
+/// an older hint a moment ago still finds the copy it named.
+const KEEP_OLDER_COPIES_FOR: u64 = DAY;
+
+const DAY: u64 = 24 * 60 * 60 * 1000;
+
 /// What a reader found of the signatures beside the steps it applied: those that held, those with none (an older
 /// writer's, or one it couldn't fetch), and those that didn't hold (signed wrong, or the database didn't come to the
 /// state hash signed).
@@ -55,6 +77,21 @@ pub struct Checks {
     pub unsigned: u64,
     pub wrong: u64,
 }
+
+/// What stopped a reader: the newest hint's copy at `copy` doesn't hold for it, and the steps before it, which a reader
+/// would read instead, were deleted (`tidy`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Gone {
+    pub copy: u64,
+}
+
+impl std::fmt::Display for Gone {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "its copy at step {} doesn't open with the keys it was given, and the steps before it were deleted", self.copy)
+    }
+}
+
+impl std::error::Error for Gone {}
 
 /// A database's keys, by the epoch each opens.
 pub type Keys = BTreeMap<u32, [u8; 32]>;
@@ -102,6 +139,11 @@ pub async fn start(bucket: &impl Bucket, prefix: &str, keys: &Keys, junk: &BTree
         Some(o) => newest(&o.bytes).1,
         None => 0,
     };
+    start_at(bucket, prefix, keys, junk, copy).await
+}
+
+/// `start`, from the copy at `copy`, which the newest hint names.
+async fn start_at(bucket: &impl Bucket, prefix: &str, keys: &Keys, junk: &BTreeSet<u64>, copy: u64) -> Result<Option<(u64, u32, Vec<u8>)>> {
     if copy == 0 || junk.contains(&copy) {
         return Ok(None);
     }
@@ -189,12 +231,17 @@ impl Db {
     /// `open`, passing over the steps at `junk`.
     pub async fn open_passing(bucket: &impl Bucket, prefix: &str, keys: Keys, junk: BTreeSet<u64>) -> Result<Db> {
         let mut db = Db { prefix: prefix.into(), keys, conn: Connection::open_in_memory()?, at: 0, copy: 0, epoch: 0, copy_epoch: 0, used: BTreeSet::new(), junk, signer: None, checks: Checks::default() };
-        if let Some((copy, epoch, bytes)) = start(bucket, prefix, &db.keys, &db.junk).await?
-            && db.copy_holds(bucket, copy, epoch, &bytes).await?
-        {
-            db.conn.deserialize_read_exact("main", &bytes[..], bytes.len(), false)?;
-            (db.at, db.copy, db.epoch, db.copy_epoch) = (copy, copy, epoch, epoch);
-            db.used.insert(epoch);
+        let hinted = match bucket.get(&newest_name(prefix)).await? {
+            Some(o) => newest(&o.bytes).1,
+            None => 0,
+        };
+        match start_at(bucket, prefix, &db.keys, &db.junk, hinted).await? {
+            Some((copy, epoch, bytes)) if db.copy_holds(bucket, copy, epoch, &bytes).await? => {
+                db.conn.deserialize_read_exact("main", &bytes[..], bytes.len(), false)?;
+                (db.at, db.copy, db.epoch, db.copy_epoch) = (copy, copy, epoch, epoch);
+                db.used.insert(epoch);
+            }
+            _ => gone(bucket, prefix, hinted).await?,
         }
         // After the copy, which SQLite reads in by attaching it.
         confine(&mut db.conn)?;
@@ -488,6 +535,44 @@ impl Db {
     }
 }
 
+/// Deletes from the bucket, at `now` (ms), what no reader of the database at `prefix` needs: copies before the newest
+/// hint's, once that copy has been there `KEEP_OLDER_COPIES_FOR`, and with `steps` (`DELETE_COVERED_STEPS`), the steps
+/// before it and their signatures, each once it's been there `KEEP_STEPS_FOR`. Only once the hint's copy opens with
+/// `keys` (passing over `junk`), and comes to the state hash signed beside its step if there is one; the steps go only
+/// if there is. → how many objects went.
+pub async fn tidy(bucket: &impl Bucket, prefix: &str, keys: &Keys, junk: &BTreeSet<u64>, now: u64, steps: bool) -> Result<usize> {
+    let Some((copy, epoch, bytes)) = start(bucket, prefix, keys, junk).await? else { return Ok(0) };
+    let name = step_name(prefix, copy);
+    let (Some(step), Some(key)) = (bucket.get(&name).await?, keys.get(&epoch)) else { return Ok(0) };
+    let signed = match bucket.get(&sig_name(prefix, copy)).await? {
+        Some(sig) => match Sig::check(key, &name, &step.bytes, &sig.bytes) {
+            Ok(signed) if state_hash(&copied(&bytes)?)? == signed.hash => true,
+            _ => return Ok(0),
+        },
+        None => false,
+    };
+    let mut gone = 0;
+    let copies = bucket.objects(&format!("{}/copy", prefix)).await?;
+    let newest = copies.iter().find(|(n, _)| *n == format!("{copy:012}")).map(|(_, written)| *written);
+    if newest.is_some_and(|w| w + KEEP_OLDER_COPIES_FOR <= now) {
+        for (n, _) in copies.iter().filter(|(n, _)| n.parse::<u64>().is_ok_and(|n| n < copy)) {
+            bucket.delete(&format!("{}/copy/{n}", prefix)).await?;
+            gone += 1;
+        }
+    }
+    if !(steps && signed) {
+        return Ok(gone);
+    }
+    for (n, written) in bucket.objects(prefix).await? {
+        let full = format!("{}/{n}", prefix);
+        if position(&full).is_some_and(|(_, at)| at < copy) && written + KEEP_STEPS_FOR <= now {
+            bucket.delete(&full).await?;
+            gone += 1;
+        }
+    }
+    Ok(gone)
+}
+
 /// How long an object whose answer was lost is sent again for, waiting longer each time, before it may have been
 /// written: a call's own time runs out sooner.
 const ANSWERED_WITHIN_MS: u64 = 60_000;
@@ -650,6 +735,16 @@ fn copied(bytes: &[u8]) -> Result<Connection> {
     let mut conn = Connection::open_in_memory()?;
     conn.deserialize_read_exact("main", bytes, bytes.len(), true)?;
     Ok(conn)
+}
+
+/// For a reader with no copy to start from, which would read every step from the first: fails with `Gone` if the
+/// newest hint names a copy, at `copy`, whose step is there while the first isn't, as when `tidy` deleted the steps it
+/// covered.
+async fn gone(bucket: &impl Bucket, prefix: &str, copy: u64) -> Result<()> {
+    if copy > 1 && bucket.get(&step_name(prefix, 1)).await?.is_none() && bucket.get(&step_name(prefix, copy)).await?.is_some() {
+        bail!(Gone { copy });
+    }
+    Ok(())
 }
 
 /// Moves the newest hint at `prefix` on to say at least step `at` and copy `copy` (sealed under `epoch`), replacing it
@@ -998,4 +1093,48 @@ mod tests {
             assert_ne!(state_hash(a.connection()).unwrap(), mine);
         });
     }
+
+    #[test]
+    fn tidying_keeps_what_readers_need() {
+        rt().block_on(async {
+            let bucket = Memory::default();
+            let key = keys(&[(1, rand::random())]);
+            let mut a = Db::open(&bucket, "p", key.clone()).await.unwrap();
+            a.sign_as(ed25519_dalek::SigningKey::from_bytes(&rand::random()));
+            a.migrate(&bucket, &[SCHEMA.into()]).await.unwrap();
+            for n in 0..2 * COPY_EVERY + 5 {
+                note(&mut a, &bucket, &format!("note {n}")).await;
+            }
+            let all = notes(&a);
+            let count = |what: &str| bucket.objects.lock().unwrap().keys().filter(|n| n.contains(what)).count();
+            assert_eq!(count("/copy/"), 2);
+            let now = 10 * KEEP_STEPS_FOR;
+            // Until phase 2, only the copies before the newest go.
+            let steps = count(".sig");
+            assert_eq!(tidy(&bucket, "p", &key, &BTreeSet::new(), now, false).await.unwrap(), 1);
+            assert_eq!((count("/copy/"), count(".sig")), (1, steps));
+            assert_eq!(notes(&Db::open(&bucket, "p", key.clone()).await.unwrap()), all);
+            // With the steps it covers, but the one at its position, which says what it comes to.
+            let (_, copy, _) = newest(&bucket.objects.lock().unwrap()["p/newest"]);
+            assert_eq!(tidy(&bucket, "p", &key, &BTreeSet::new(), now, true).await.unwrap(), 2 * (copy as usize - 1));
+            assert!(bucket.objects.lock().unwrap().contains_key(&step_name("p", copy)) && !bucket.objects.lock().unwrap().contains_key(&step_name("p", 1)));
+            let read = Db::open(&bucket, "p", key.clone()).await.unwrap();
+            assert_eq!(notes(&read), all);
+            assert_eq!(read.checks().wrong, 0);
+            // Not with a copy that isn't what its step's signer says it comes to.
+            let mut b = Db::open(&bucket, "p", key.clone()).await.unwrap();
+            b.sign_as(ed25519_dalek::SigningKey::from_bytes(&rand::random()));
+            for n in 0..COPY_EVERY {
+                note(&mut b, &bucket, &format!("more {n}")).await;
+            }
+            let (_, newer, _) = newest(&bucket.objects.lock().unwrap()["p/newest"]);
+            let wrong = crate::keys::seal(1, &key[&1], &copy_name("p", newer), &bucket.objects.lock().unwrap().get(&copy_name("p", copy)).map(|c| crate::keys::open(&key[&1], &copy_name("p", copy), c).unwrap()).unwrap());
+            bucket.objects.lock().unwrap().insert(copy_name("p", newer), wrong);
+            assert_eq!(tidy(&bucket, "p", &key, &BTreeSet::new(), now, true).await.unwrap(), 0);
+            // A reader whose copy doesn't hold, with the steps before it gone, says so rather than reading what's left.
+            let err = Db::open(&bucket, "p", key).await.err().expect("it can't read");
+            assert_eq!(err.downcast_ref::<Gone>(), Some(&Gone { copy: newer }));
+        });
+    }
+
 }

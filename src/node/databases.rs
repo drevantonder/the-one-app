@@ -5,6 +5,8 @@ use super::*;
 
 /// How many times a database is opened again after finding junk or a newer epoch before it gives up.
 const TRIES: usize = 20;
+/// How often each database open here is tidied (`db::tidy`).
+const TIDY_EVERY: u64 = 24 * 60 * 60 * 1000;
 /// How many epochs in a row `first_global_read` passes that aren't sealed to it before taking the last as the newest.
 const GAPS_PASSED: u32 = 2;
 
@@ -334,6 +336,26 @@ impl Node {
         }
         if !changed.is_empty() {
             self.emit(Event::Changed { apps: changed });
+        }
+    }
+
+    /// Deletes from the bucket what no reader of each database open here needs any more (`db::tidy`), once a day. A
+    /// device that may not delete from the bucket (only an admin's may) just finds it can't.
+    pub(super) async fn tidy_databases(&self) {
+        let Ok(bucket) = self.bucket() else { return };
+        let now = now_ms();
+        for (_, db) in self.open_dbs() {
+            let Ok((prefix, keys)) = db.try_lock().map(|db| (db.prefix().to_string(), db.keys().clone())) else { continue };
+            if self.0.tidied.lock().unwrap().get(&prefix).is_some_and(|t| now < t + TIDY_EVERY) {
+                continue;
+            }
+            self.0.tidied.lock().unwrap().insert(prefix.clone(), now);
+            let junk = self.0.junk.lock().unwrap().get(&prefix).cloned().unwrap_or_default();
+            match crate::db::tidy(&bucket, &prefix, &keys, &junk, now, crate::db::DELETE_COVERED_STEPS).await {
+                Ok(0) => {}
+                Ok(n) => tracing::info!("{prefix}: deleted {n} objects no reader needs"),
+                Err(err) => tracing::debug!("{prefix}: tidying: {err:#}"),
+            }
         }
     }
 

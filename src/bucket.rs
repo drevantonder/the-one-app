@@ -22,6 +22,17 @@ pub trait Bucket {
     fn replace(&self, name: &str, bytes: &[u8], tag: Option<&str>) -> impl Future<Output = Result<bool>>;
     /// Waits before asking again, on the clock of the runtime it's reached from.
     fn wait(&self, ms: u64) -> impl Future<Output = ()>;
+    /// The objects directly in a folder, each its name in it and when the bucket wrote it (ms): for tidying, where a
+    /// place can be listed.
+    fn objects(&self, folder: &str) -> impl Future<Output = Result<Vec<(String, u64)>>> {
+        let _ = folder;
+        async { anyhow::bail!("this bucket isn't listed from here") }
+    }
+    /// Deletes an object, if it's there.
+    fn delete(&self, name: &str) -> impl Future<Output = Result<()>> {
+        let _ = name;
+        async { anyhow::bail!("nothing is deleted from this bucket from here") }
+    }
     /// Which of `objects` the bucket holds exactly as given, each a name and its bytes: read and compared, unless the
     /// place can tell in one trip.
     fn confirm(&self, objects: &[(String, Vec<u8>)]) -> impl Future<Output = Result<Vec<bool>>> {
@@ -142,6 +153,15 @@ impl Bucket for Memory {
         Ok(true)
     }
     async fn wait(&self, _: u64) {}
+    /// Every object was written long ago.
+    async fn objects(&self, folder: &str) -> Result<Vec<(String, u64)>> {
+        let within = format!("{folder}/");
+        Ok(self.objects.lock().unwrap().keys().filter_map(|n| n.strip_prefix(&within)).filter(|n| !n.contains('/')).map(|n| (n.to_string(), 0)).collect())
+    }
+    async fn delete(&self, name: &str) -> Result<()> {
+        self.objects.lock().unwrap().remove(name);
+        Ok(())
+    }
     async fn replace(&self, name: &str, bytes: &[u8], tag: Option<&str>) -> Result<bool> {
         let mut objects = self.objects.lock().unwrap();
         let now = objects.get(name).map(|b| blake3::hash(b).to_hex().to_string());

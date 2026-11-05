@@ -343,6 +343,17 @@ impl Bucket for Place {
         tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
     }
 
+    async fn objects(&self, folder: &str) -> Result<Vec<(String, u64)>> {
+        let (place, folder) = (self.clone(), folder.to_string());
+        let listed = tokio::task::spawn_blocking(move || Place::objects(&place, &folder)).await??;
+        Ok(listed.into_iter().map(|(name, written, _)| (name, written)).collect())
+    }
+
+    async fn delete(&self, name: &str) -> Result<()> {
+        let (place, name) = (self.clone(), name.to_string());
+        tokio::task::spawn_blocking(move || Place::delete(&place, &name)).await?
+    }
+
     async fn confirm(&self, objects: &[(String, Vec<u8>)]) -> Result<Vec<bool>> {
         let (place, objects) = (self.clone(), objects.to_vec());
         tokio::task::spawn_blocking(move || Place::holds(&place, &objects)).await?

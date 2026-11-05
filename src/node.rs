@@ -439,6 +439,8 @@ pub struct Inner {
     making_keys: tokio::sync::Mutex<()>,
     /// Positions of each database (by prefix) holding a step under an epoch no entry made, which every read passes over.
     junk: Mutex<HashMap<String, std::collections::BTreeSet<u64>>>,
+    /// When this device last tidied each database (by prefix), ms.
+    tidied: Mutex<HashMap<String, u64>>,
     /// The last position this device wrote an entry of each scope at.
     written: Mutex<HashMap<Scope, u64>>,
     /// The step of each scope's entries this device last moved their newest hint on to, by scope.
@@ -581,6 +583,7 @@ impl Node {
             moved: Arc::default(),
             making_keys: tokio::sync::Mutex::new(()),
             junk: Mutex::new(HashMap::new()),
+            tidied: Mutex::new(HashMap::new()),
             written: Mutex::new(HashMap::new()),
             hinted: Mutex::new(HashMap::new()),
             shared: Mutex::new(Default::default()),
@@ -1130,6 +1133,7 @@ impl Node {
             if tick % 6 == 0 && self.has_install() {
                 self.share_unshared().await;
                 self.take_forgotten().await;
+                self.tidy_databases().await;
                 self.sweep_remote_puts();
                 for service in self.0.built_in_services.iter().filter(|n| n.sync.is_some()) {
                     self.sync_built_in(service.name);

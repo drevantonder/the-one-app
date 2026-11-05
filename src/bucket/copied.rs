@@ -179,6 +179,21 @@ impl<B: Bucket> Bucket for Copied<B> {
         self.place.wait(ms).await
     }
 
+    async fn objects(&self, folder: &str) -> Result<Vec<(String, u64)>> {
+        let moved = self.moved.read().await;
+        Bucket::objects(moved.as_ref().unwrap_or(&self.place), folder).await
+    }
+
+    /// From the bucket, and from this device's copy.
+    async fn delete(&self, name: &str) -> Result<()> {
+        if !self.reach {
+            bail!("this device's copy of the bucket is only read");
+        }
+        let moved = self.moved.read().await;
+        Bucket::delete(moved.as_ref().unwrap_or(&self.place), name).await?;
+        self.here.delete(name)
+    }
+
     /// Asks the bucket, never this copy.
     async fn confirm(&self, objects: &[(String, Vec<u8>)]) -> Result<Vec<bool>> {
         let moved = self.moved.try_read().ok();
