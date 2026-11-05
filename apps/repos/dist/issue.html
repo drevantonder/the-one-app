@@ -9,7 +9,6 @@ import { createRoot as s } from "react-dom/client";
 import { Avatar as c, Button as l, Card as u, CopyButton as d, Icon as f, Input as p, ListSkeleton as m, Problem as h, ResponsiveDialog as g, Spinner as _, Tabs as v, TabsList as y, TabsTrigger as b, cn as x, useWidth as S } from "@one/ui";
 import { createPortal as C } from "react-dom";
 import { Fragment as w, jsx as T, jsxs as E } from "react/jsx-runtime";
-// ../../../../../.t3/worktrees/the-one-app/t3-46f62ca4/apps/repos/lib/use.jsx
 var D = /* @__PURE__ */ new Set();
 one.on("changed", () => D.forEach((e) => e()));
 function O(e, t, i = !1) {
@@ -71,7 +70,6 @@ function N(t) {
 }
 var P = (e) => one.ago(Date.parse(e), { long: !0 }), F = (e, t, n) => `${e.toLocaleString()} ${e === 1 ? t : n}`, I = (e, t) => one.open(e, t), L = "<address>/repos/", R = "<you>";
 one.call("_address").then((e) => (L = e?.base || L, R = e?.handle || R), () => {}), `${one.config?.cli || "one"}`;
-// ../../../../../.t3/worktrees/the-one-app/t3-46f62ca4/apps/repos/lib/parts.jsx
 function z(t) {
 	let n = e(9), { l: r, className: i } = t, a = /^[0-9a-f]{6}$/i.test(r.color) ? r.color : "ededed", [o, s, c] = [
 		0,
@@ -185,7 +183,6 @@ function ne(t) {
 		children: [_, x]
 	}), n[12] = _, n[13] = x, n[14] = S) : S = n[14], S;
 }
-// ../../../../../.t3/worktrees/the-one-app/t3-46f62ca4/apps/repos/lib/issue-view.jsx
 var re = (e) => e.state_reason === "not_planned" ? "not planned" : "completed", W = (t) => {
 	let n = e(2), { children: r } = t, i;
 	return n[0] === r ? i = n[1] : (i = /* @__PURE__ */ T("div", {
@@ -881,7 +878,6 @@ function he(e) {
 function ge(e) {
 	return { body: e };
 }
-// ../../../../../.t3/worktrees/the-one-app/t3-46f62ca4/apps/repos/screens/issue.jsx
 var G = one.params;
 function _e() {
 	let t = e(2), n;

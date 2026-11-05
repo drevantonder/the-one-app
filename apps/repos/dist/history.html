@@ -9,7 +9,6 @@ import { createRoot as s } from "react-dom/client";
 import { Avatar as c, Badge as l, Button as u, Card as d, CopyButton as f, DiffView as p, Empty as m, Icon as h, List as g, ListRow as _, ListSkeleton as v, Problem as y, Spinner as b, Tabs as x, TabsList as S, TabsTrigger as C, cn as w, useWidth as T } from "@one/ui";
 import "react-dom";
 import { Fragment as E, jsx as D, jsxs as O } from "react/jsx-runtime";
-// ../../../../../.t3/worktrees/the-one-app/t3-46f62ca4/apps/repos/lib/use.jsx
 var k = /* @__PURE__ */ new Set();
 one.on("changed", () => k.forEach((e) => e()));
 function A(e, t, r = !1) {
@@ -94,7 +93,6 @@ function L(t) {
 }
 var R = (e) => one.ago(Date.parse(e), { long: !0 }), z = (e) => String(e || "").slice(0, 7), B = (e, t, n) => `${e.toLocaleString()} ${e === 1 ? t : n}`, V = (e) => e.branch || e.sha, H = (e, t) => one.open(e, t), U = "<address>/repos/", W = "<you>";
 one.call("_address").then((e) => (U = e?.base || U, W = e?.handle || W), () => {}), `${one.config?.cli || "one"}`;
-// ../../../../../.t3/worktrees/the-one-app/t3-46f62ca4/apps/repos/lib/parts.jsx
 function ee(t) {
 	let n = e(14), { add: r, del: i, className: a } = t, o;
 	n[0] === a ? o = n[1] : (o = w("whitespace-nowrap tabular-nums", a), n[0] = a, n[1] = o);
@@ -567,7 +565,6 @@ function oe(e, t) {
 function se(e, t) {
 	return e + t.additions;
 }
-// ../../../../../.t3/worktrees/the-one-app/t3-46f62ca4/apps/repos/lib/frame.jsx
 function K(t) {
 	let n = e(45), { d: r, file: i } = t, a = i !== void 0 && i, o = r.path || "", s, c, l, d, f, p, m, h;
 	if (n[0] !== r || n[1] !== a || n[2] !== o) {
@@ -691,7 +688,6 @@ function J(t) {
 		]
 	}), n[8] = i, n[9] = o, n[10] = c, n[11] = d) : d = n[11], d;
 }
-// ../../../../../.t3/worktrees/the-one-app/t3-46f62ca4/apps/repos/screens/history.jsx
 var Y = one.params, X = {
 	repo: Y.repo,
 	ref: Y.ref,

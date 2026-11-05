@@ -9,7 +9,6 @@ import { createRoot as o } from "react-dom/client";
 import { Badge as s, Button as c, Empty as l, Icon as u, Input as d, List as f, ListRow as p, ListSkeleton as m, Problem as h, ResponsiveDialog as g, Spinner as _, Tabs as v, TabsList as y, TabsTrigger as b, cn as x, useWidth as S } from "@one/ui";
 import "react-dom";
 import { Fragment as C, jsx as w, jsxs as T } from "react/jsx-runtime";
-// ../../../../../.t3/worktrees/the-one-app/t3-46f62ca4/apps/repos/lib/use.jsx
 var E = /* @__PURE__ */ new Set();
 one.on("changed", () => E.forEach((e) => e()));
 function D(e, t, r = !1) {
@@ -71,7 +70,6 @@ function M(t) {
 }
 var N = () => r(j) >= 720, P = (e, t, n) => `${e.toLocaleString()} ${e === 1 ? t : n}`, F = (e) => String(e || "").startsWith("github.com/"), I = (e, t) => one.open(e, t), L = "<address>/repos/", R = "<you>";
 one.call("_address").then((e) => (L = e?.base || L, R = e?.handle || R), () => {}), `${one.config?.cli || "one"}`;
-// ../../../../../.t3/worktrees/the-one-app/t3-46f62ca4/apps/repos/lib/parts.jsx
 function z(t) {
 	let n = e(5), { className: r } = t, i;
 	n[0] === r ? i = n[1] : (i = x("size-4 shrink-0", r), n[0] = r, n[1] = i);
@@ -114,7 +112,6 @@ function ee(t) {
 		children: r.name
 	}), n[5] = r.name, n[6] = l, n[7] = f, n[8] = p) : p = n[8], p;
 }
-// ../../../../../.t3/worktrees/the-one-app/t3-46f62ca4/apps/repos/lib/frame.jsx
 var V = {
 	code: "repo",
 	issues: "issues",
@@ -218,7 +215,6 @@ function H(t) {
 		children: [E, R]
 	}), n[39] = R, n[40] = E, n[41] = z) : z = n[41], z;
 }
-// ../../../../../.t3/worktrees/the-one-app/t3-46f62ca4/apps/repos/screens/labels.jsx
 var U = one.params, te = [
 	"d73a4a",
 	"0075ca",

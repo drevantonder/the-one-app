@@ -9,7 +9,6 @@ import { createRoot as c } from "react-dom/client";
 import { Avatar as l, Button as u, Card as d, CodeView as f, CopyButton as p, Empty as m, Icon as h, List as g, ListSkeleton as _, Problem as v, Tabs as y, TabsList as b, TabsTrigger as x, cn as S, useWidth as C } from "@one/ui";
 import { createPortal as w } from "react-dom";
 import { Fragment as T, jsx as E, jsxs as D } from "react/jsx-runtime";
-// ../../../../../.t3/worktrees/the-one-app/t3-46f62ca4/apps/repos/lib/use.jsx
 var O = /* @__PURE__ */ new Set();
 one.on("changed", () => O.forEach((e) => e()));
 function k(e, t, r = !1) {
@@ -94,7 +93,6 @@ function I(t) {
 }
 var L = (e) => one.ago(Date.parse(e), { long: !0 }), R = (e) => String(e || "").slice(0, 7), z = (e, t, n) => `${e.toLocaleString()} ${e === 1 ? t : n}`, B = (e) => e.branch || e.sha, V = (e, t) => one.open(e, t), H = "<address>/repos/", U = "<you>";
 one.call("_address").then((e) => (H = e?.base || H, U = e?.handle || U), () => {}), `${one.config?.cli || "one"}`;
-// ../../../../../.t3/worktrees/the-one-app/t3-46f62ca4/apps/repos/lib/parts.jsx
 function W(t) {
 	let n = e(17), { text: r, link: i, className: c } = t, l = o(null), u;
 	n[0] !== i || n[1] !== r ? (u = one.markdown(r, i ? { link: i } : {}), n[0] = i, n[1] = r, n[2] = u) : u = n[2];
@@ -144,7 +142,6 @@ var q = (t) => {
 		className: a
 	}), n[2] = a, n[3] = r, n[4] = o) : o = n[4], o;
 };
-// ../../../../../.t3/worktrees/the-one-app/t3-46f62ca4/apps/repos/lib/frame.jsx
 function J(t) {
 	let n = e(45), { d: r, file: i } = t, a = i !== void 0 && i, o = r.path || "", s, c, l, d, f, p, m, h;
 	if (n[0] !== r || n[1] !== a || n[2] !== o) {
@@ -362,7 +359,6 @@ function ee(t) {
 		children: [O, M]
 	}), n[45] = O, n[46] = M, n[47] = m, n[48] = N) : N = n[48], N;
 }
-// ../../../../../.t3/worktrees/the-one-app/t3-46f62ca4/apps/repos/screens/file.jsx
 var Z = one.params, Q = (e) => e.split("/").slice(0, -1).join("/"), $ = (e) => /\.(md|mdx|markdown)$/i.test(e);
 function te(t) {
 	let n = e(32), { d: r, path: i } = t, [a, o] = s($(i) ? "preview" : "code");

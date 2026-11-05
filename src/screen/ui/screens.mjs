@@ -50,7 +50,11 @@ export async function buildScreens(from, to, source, tag, shared) {
         },
       })
       const files = (Array.isArray(out) ? out : [out]).flatMap((o) => o.output)
-      const module = files.filter((f) => f.type === "chunk").map((f) => f.code).join("\n")
+      // Each module starts with a comment of its path from where the build runs, which differs by checkout and
+      // machine; they're taken out, so the same sources build to the same file anywhere.
+      const chunks = files.filter((f) => f.type === "chunk")
+      const regions = new Set(chunks.flatMap((c) => c.moduleIds).map((id) => `// ${path.relative(process.cwd(), id).split(path.sep).join("/")}`))
+      const module = chunks.map((c) => c.code.split("\n").filter((line) => !regions.has(line)).join("\n")).join("\n")
       const styles = files.filter((f) => f.type === "asset" && f.fileName.endsWith(".css")).map((f) => String(f.source)).join("\n")
       // `</script` and `</style` can't appear inside them, so neither ends early.
       const html = `${tag}\n<style>${styles.replace(/<\/style/gi, "<\\/style")}</style>\n<div id="root"></div>\n<script type="module">${module.replace(/<\/script/gi, "<\\/script")}</script>\n`

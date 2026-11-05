@@ -9,7 +9,6 @@ import { createRoot as o } from "react-dom/client";
 import { Avatar as s, Badge as c, Button as l, Card as u, CopyButton as d, DiffView as f, Empty as p, Icon as ee, List as m, ListRow as h, ListSkeleton as g, Problem as _, Spinner as v, Tabs as y, TabsList as b, TabsTrigger as x, cn as S, useWidth as C } from "@one/ui";
 import "react-dom";
 import { Fragment as w, jsx as T, jsxs as E } from "react/jsx-runtime";
-// ../../../../../.t3/worktrees/the-one-app/t3-46f62ca4/apps/repos/lib/use.jsx
 var D = /* @__PURE__ */ new Set();
 one.on("changed", () => D.forEach((e) => e()));
 function O(e, t, i = !1) {
@@ -71,7 +70,6 @@ function N(t) {
 }
 var P = (e) => one.ago(Date.parse(e), { long: !0 }), F = (e) => String(e || "").slice(0, 7), I = (e, t, n) => `${e.toLocaleString()} ${e === 1 ? t : n}`, te = (e, t) => one.open(e, t), L = "<address>/repos/", R = "<you>";
 one.call("_address").then((e) => (L = e?.base || L, R = e?.handle || R), () => {}), `${one.config?.cli || "one"}`;
-// ../../../../../.t3/worktrees/the-one-app/t3-46f62ca4/apps/repos/lib/parts.jsx
 function ne(t) {
 	let n = e(14), { add: r, del: i, className: a } = t, o;
 	n[0] === a ? o = n[1] : (o = S("whitespace-nowrap tabular-nums", a), n[0] = a, n[1] = o);
@@ -544,7 +542,6 @@ function ae(e, t) {
 function oe(e, t) {
 	return e + t.additions;
 }
-// ../../../../../.t3/worktrees/the-one-app/t3-46f62ca4/apps/repos/screens/commit.jsx
 var U = one.params;
 function W() {
 	let t = e(2), n;

@@ -8,7 +8,6 @@ import { useEffect as t, useRef as n, useState as r } from "react";
 import { createRoot as i } from "react-dom/client";
 import { AccountList as a, Empty as o, Hint as s, Input as c, List as l, ListNote as u, ListRow as d, ListSkeleton as f, LoadFailure as p, LoadingButton as m, Problem as h, Select as g, SelectContent as _, SelectItem as v, SelectTrigger as y, SelectValue as b, useAccounts as x } from "@one/ui";
 import { jsx as S, jsxs as C } from "react/jsx-runtime";
-// ../../../apps/messenger/screens/settings.jsx
 var w = "Link Messenger to a browser profile signed in to messenger.com, and your agents can read your chats and, when you ask, send.", T = "\0", E = () => one.call("_profiles").then((e) => (e || []).map((e) => e.profile), () => []);
 function D(t) {
 	let i = e(30), { free: a, onSigningIn: o } = t, [u, f] = r(a[0] ?? T), [p, x] = r(""), [w, E] = r(null), D = n(null), k;

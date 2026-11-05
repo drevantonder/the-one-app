@@ -9,7 +9,6 @@ import { createRoot as c } from "react-dom/client";
 import { Avatar as l, Badge as u, Button as d, Card as f, CopyButton as p, Empty as m, Icon as h, Input as g, List as _, ListRow as v, ListSkeleton as y, Problem as b, ResponsiveDialog as x, Spinner as S, Tabs as C, TabsList as w, TabsTrigger as T, cn as E, useWidth as D } from "@one/ui";
 import { createPortal as O } from "react-dom";
 import { Fragment as k, jsx as A, jsxs as j } from "react/jsx-runtime";
-// ../../../../../.t3/worktrees/the-one-app/t3-46f62ca4/apps/repos/lib/use.jsx
 var M = /* @__PURE__ */ new Set();
 one.on("changed", () => M.forEach((e) => e()));
 function N(e, t, r = !1) {
@@ -94,7 +93,6 @@ function B(t) {
 }
 var V = (e) => one.ago(Date.parse(e), { long: !0 }), H = (e, t, n) => `${e.toLocaleString()} ${e === 1 ? t : n}`, U = (e) => String(e || "").startsWith("github.com/"), ee = (e, t) => one.open(e, t), W = "<address>/repos/", te = "<you>";
 one.call("_address").then((e) => (W = e?.base || W, te = e?.handle || te), () => {}), `${one.config?.cli || "one"}`;
-// ../../../../../.t3/worktrees/the-one-app/t3-46f62ca4/apps/repos/lib/parts.jsx
 function ne(t) {
 	let n = e(5), { className: r } = t, i;
 	n[0] === r ? i = n[1] : (i = E("size-4 shrink-0", r), n[0] = r, n[1] = i);
@@ -231,7 +229,6 @@ function de(t) {
 		children: [_, v]
 	}), n[12] = _, n[13] = v, n[14] = y) : y = n[14], y;
 }
-// ../../../../../.t3/worktrees/the-one-app/t3-46f62ca4/apps/repos/lib/frame.jsx
 var fe = {
 	code: "repo",
 	issues: "issues",
@@ -335,7 +332,6 @@ function G(t) {
 		children: [x, F]
 	}), n[39] = F, n[40] = x, n[41] = I) : I = n[41], I;
 }
-// ../../../../../.t3/worktrees/the-one-app/t3-46f62ca4/apps/repos/lib/issue-view.jsx
 var pe = (e) => e.state_reason === "not_planned" ? "not planned" : "completed", me = (t) => {
 	let n = e(2), { children: r } = t, i;
 	return n[0] === r ? i = n[1] : (i = /* @__PURE__ */ A("div", {
@@ -1031,7 +1027,6 @@ function Ee(e) {
 function De(e) {
 	return { body: e };
 }
-// ../../../../../.t3/worktrees/the-one-app/t3-46f62ca4/apps/repos/screens/issues.jsx
 var K = one.params;
 function Oe(t) {
 	let n = e(35), { done: r } = t, [i, a] = s(""), [o, c] = s(""), [l, u] = s(!1), [f, p] = s(""), m;
