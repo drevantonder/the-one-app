@@ -3976,6 +3976,7 @@ dependencies = [
  "tokio",
  "ureq",
  "url",
+ "windows",
 ]
 
 [[package]]

@@ -155,6 +155,8 @@ async fn start() {
     if sh.address.is_empty() {
         return sh.fail("No address: start it with ONE_ADDRESS=<your One App's address>.");
     }
+    #[cfg(windows)]
+    log(format!("webauthn.dll api version: {}", unsafe { windows::Win32::Networking::WindowsWebServices::WebAuthNGetApiVersionNumber() }));
     match secrets::works() {
         Ok(()) => log("secret store: works"),
         Err(e) => return sh.fail(format!("the secret store: {e}")),
@@ -198,6 +200,7 @@ async fn start() {
         Ok(t) => t,
         Err(e) => return sh.fail(e),
     };
+    log("token");
     use sha2::{Digest, Sha256};
     let sum = Sha256::digest(format!("{} {}", sh.address, signin::Auth::subject(&token)).as_bytes());
     let dir = sh.data.join("client").join(hex(&sum[..8]));
@@ -211,6 +214,7 @@ async fn start() {
         Err(e) if e.not_let_in => false,
         Err(e) => return sh.fail(e),
     };
+    log(format!("connected: {in_}"));
     if !in_ {
         if let Err(e) = device.ask(&token, &host_name(), None).await {
             return sh.fail(e);
@@ -289,9 +293,10 @@ fn screen_host(r: &Route) -> String {
 }
 
 /// screen://<host>/ where WebKit takes a custom scheme; WebView2 and Android's web view take them only as
-/// http://screen.<host>/.
+/// https://screen.<host>/ (https, with `use_https_scheme`: over http a screen isn't a secure context, so it has no
+/// crypto.subtle).
 fn screen_url(host: &str) -> String {
-    if cfg!(any(windows, target_os = "android")) { format!("http://screen.{host}/") } else { format!("screen://{host}/") }
+    if cfg!(any(windows, target_os = "android")) { format!("https://screen.{host}/") } else { format!("screen://{host}/") }
 }
 
 /// The host a screen's request names, either way.
@@ -318,6 +323,7 @@ async fn open_screen(r: Route, over: Option<String>) -> Result<tokio::sync::ones
     let mut b = WebviewWindowBuilder::new(&sh.app, &label, WebviewUrl::CustomProtocol(url))
         .title(&r.app)
         .initialization_script(bridge::SHIM)
+        .use_https_scheme(true)
         // Anything that would take the screen away goes to the browser; its own page stays.
         .on_navigation(move |u| {
             if u.scheme() == own_origin.scheme() && u.host_str() == own_origin.host_str() {
