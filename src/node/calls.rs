@@ -1,4 +1,11 @@
 //! Calls: where each runs, running it here or on another device, what it wrote, and what its app asks the node while it runs.
+//!
+//! A call runs once. It names the scopes it touches before it runs, so a device that can't run it says so before doing
+//! anything; one that writes takes a lease in the bucket first, so failing over never repeats it. It writes nothing if
+//! it fails. A node a client picked runs a call itself if it runs every scope the call reaches; if it doesn't, it answers
+//! 421 with the nodes that do, and the client asks one itself, with keys for it, rather than the node passing it on,
+//! which nodes do only for a service's call and for older clients. Calls go to the devices in run priority's order
+//! (`src/rank.rs`).
 
 use super::*;
 

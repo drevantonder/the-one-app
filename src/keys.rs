@@ -2,6 +2,16 @@
 //! open it, what's sealed under an epoch, signed requests, and the keys a caller hands a node for one call.
 //! `kernel/shared/crypto.js` writes the same formats, and `tests/contracts.rs` checks they agree.
 //!
+//! Every client is a device with its own key pair, never shared by a person's devices: a native app's in the Keychain,
+//! keystore or Credential Locker, a browser's a non-extractable WebCrypto key in IndexedDB, a local agent's its
+//! machine's. A new device gets in only when one of its person's devices approves it, from a code or QR that shows
+//! which device it is, which seals it the keys of the scopes it may open. A person who lost a device is let back in by
+//! another, by a copy sealed under a passkey's PRF (optional for most, kept because synced passkeys make it
+//! self-service), or by the install's recovery key, kept offline by an admin, each use of it an entry in the log.
+//! A scope gets a new epoch when a person, or a device that didn't sign itself out (lost or stolen), loses the right
+//! to open it, never on sign-out, where the device deletes its own key: the keys are sealed to everyone who still
+//! belongs. Epochs never go down along a database's positions (`src/db.rs`).
+//!
 //! ```text
 //! <folder>/_epochs/<n>/<endpoint key hex>   epoch n's key, sealed to that endpoint's seal key (`kernel::seal_to`)
 //! <folder>/_epochs/<n>/recovery             and to the install's recovery key

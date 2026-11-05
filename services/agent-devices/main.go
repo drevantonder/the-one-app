@@ -4,6 +4,11 @@
 // node. The server inside each device speaks MCP; its
 // browser tools become this app's operations. Chrome ones (kind chrome, chrome.go) are this machine's own Chrome,
 // whose browser tools this program answers itself (browse.go).
+//
+// A program in an agent device reaches nothing of this machine's 127.0.0.1, which is for its own programs: Windows is on
+// passt, Android on Linux in a network of its own (pasta), and `reach` opens one port the asker chose, never the
+// node's, adb's or another device's. On a Mac nothing can do that: an Android phone's apps reach the Mac's 127.0.0.1 at
+// 10.0.2.2, adb's server among it, and an iPhone simulator's share the Mac's network and files, its node's token too.
 package main
 
 import (

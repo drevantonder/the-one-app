@@ -1,5 +1,12 @@
 //! A screen's page, an app's as every node serves it, or a client's own as every client makes it: the design kit and the bridge (`src/screen/`), what the
 //! screen is told (`window.__one`), and the screen's own HTML.
+//!
+//! The clients' own screens (the person's pages, a page's Services, a request for a Vault item, Settings) are drawn
+//! here once, the same on every client, and act through the bridge's `one.api` as the person looking: each client makes
+//! them from what it ships and never takes them from a node (`client_page`: the native apps' through `client/ffi`, the
+//! web client's from its address's `screens/`), and answers `one.api` only for a screen it chose to show as its own. A
+//! client is a shell around them that answers the bridge, natively for whatever a person touches: menus, alerts,
+//! sheets, files, scanning and links.
 
 /// Phosphor's icons, each name's path on a 256-point grid (vendor/phosphor), for the web pages that draw screens: the
 /// web client's, at the address, and a chat's view, by `screens_icons`.

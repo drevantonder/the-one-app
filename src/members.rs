@@ -2,6 +2,12 @@
 //! grants, apps and deploys, made by replaying `global`'s node entries in causal order; and which entries count: a
 //! member entry only when one of its user's own devices signed it, a scope's other entries also when a compute
 //! endpoint that runs that scope's calls did. Pure: entries in, members out.
+//!
+//! Where a scope's calls run is who its devices are: a node runs (and holds) a person's own scope if it's listed as one
+//! of their devices, a group's if it's a device of the group's admins or the install's, and `global` if it's an admin's.
+//! No one reads another person's data. Each person and group has a handle, unique among them, that every app calls
+//! them by (`ctx.handles`): picked as they're replayed, from the name they joined or were made with, so no entry
+//! carries it, and changed only by a `rename` that gives one. An entry, once appended, is never lost.
 
 use std::collections::{BTreeMap, BTreeSet};
 

@@ -2,6 +2,12 @@
 //! its own disk too, sealed as it is in the bucket, so it reads each from the bucket once. Each is written once, at a
 //! name its seal binds it to, so what's kept here can only be behind the bucket, never different from it; holding it
 //! opens nothing without the key. Everything else (keys, hints, leases) is read from the bucket each time.
+//!
+//! Devices tell each other a "something changed" notice over iroh, which is only a hint: each reads what changed from
+//! the bucket, and every 10 seconds fills its copy from the bucket anyway, for a notice that was lost. A read uses the
+//! copy, and asks the bucket first only after a notice whose step it hasn't fetched yet. A notice of a write carries its
+//! step (up to a megabyte), which a device keeps only once the bucket confirms it holds those bytes (`take_sent`), so no
+//! device can show another anything but the bucket's.
 
 use std::path::PathBuf;
 use std::sync::Arc;

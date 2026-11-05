@@ -3,6 +3,16 @@
 //! those built into the node, answering at the device's endpoint, and the rest, each a process of oned's own
 //! (`oned <name>`, `service::run`) with its own key, which oned lists as its device's. Each is on while the device's
 //! latest `service` entry for it says so; with none, the app service and the built-in services are on, the rest off.
+//! Only the device's person writes that entry (its switch in Settings' Devices), and oned starts and stops the parts as
+//! it changes. Each process part keeps its own key in its folder (`<home>/services/<name>`), so it answers only its own
+//! person whoever else's calls the device runs, and one failing leaves the rest; nothing approves it by a code, since
+//! its device lists it. Services in other languages come as the node does: `<cli> update` builds one for each platform
+//! and publishes it signed with the release key (a `service-release` entry, which an older device ignores), and oned
+//! fetches it, checks the signature and puts it at `~/.local/bin/<cli>-<name>` when it's switched on and again when a
+//! newer one's published. Its hello says what the device can run (`parts`) and each part's state (on, off, starting,
+//! stopping, failed and why), which is what Settings' Devices shows. Removing a device removes its parts, and can erase
+//! what it keeps, which the device does itself, so only while it's reachable. On a Mac the app is oned; a phone runs
+//! none, its app is the device.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;

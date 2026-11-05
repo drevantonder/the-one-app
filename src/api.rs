@@ -1,6 +1,15 @@
 //! The local HTTP API: how this machine's shells, CLI and MCP reach its node, as its local user; how a client device
 //! reaches it over iroh (src/node/net.rs), as its person; and how someone signed in with the install's kernel
 //! (this machine's CLI and MCP, after `sign-in`) reaches it, as themselves, for what their sign-in opens.
+//!
+//! A request with a kernel access token for the install's address (never a remote MCP client's, which is for
+//! `<address>/mcp`) is its person's, and so is its call's; someone it's for who isn't a person of the install yet is
+//! let in as a member by a device whose own person is an admin, since the kernel signs in only those an admin invited
+//! or people at the install's domain. A request without one is this machine's own programs', over its loopback with the
+//! token in the node's home (`local-token`, which only its user reads), or refused, but for a picture a window's app
+//! list names by its content (`/v1/images/<name>`), anyone's who has that name. A file put from elsewhere is read back
+//! only by whoever put it or may use a scope that names it, up to 512 MiB each and 2 GiB per person that nothing keeps
+//! yet, deleted an hour on (or once its request is answered) unless something does.
 
 use std::convert::Infallible;
 

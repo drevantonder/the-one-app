@@ -1,4 +1,6 @@
-//! Blobs: keeping them here and in the bucket, and reading the ones a person may.
+//! Blobs: keeping them here and in the bucket, and reading the ones a person may. Each blob an entry names is in the
+//! bucket too, sealed with its scope's key, where a device that lacks one reads it: a deploy's bundle and a release's
+//! binary among them.
 
 use super::*;
 
