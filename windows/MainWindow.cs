@@ -32,6 +32,8 @@ public sealed class MainWindow : Window
     Phase phase = Phase.Starting;
     /// The current Start's: cancelled by whatever starts again or signs out, so no Start before it writes the window.
     CancellationTokenSource? started;
+    /// The sign-in waiting for the browser, which waits until it's cancelled: a passkey can take a while.
+    CancellationTokenSource? signingIn;
 
     /// Where the window is, and what screens opened over it, each kept as drawn so Back returns to it as it was.
     Route selection = Route.PageOf("user");
@@ -130,7 +132,11 @@ public sealed class MainWindow : Window
             var list = WidgetCache.Of(Store.Shared);
             _ = System.Threading.Tasks.Task.Run(() => Widgets.Changed(list));
         };
-        Closed += (_, _) => started?.Cancel();
+        Closed += (_, _) =>
+        {
+            started?.Cancel();
+            signingIn?.Cancel();
+        };
         Client.Lost += removed => DispatcherQueue.TryEnqueue(() => Lost(removed));
         _ = Start();
     }
@@ -429,11 +435,13 @@ public sealed class MainWindow : Window
         return el;
     }
 
-    /// Welcome: the install's address (or an invite link) the first time, then Sign In, in the person's browser.
-    void Welcome(string? error, bool invited = false)
+    /// Welcome: the install's address (or an invite link) the first time, then Sign In, in the person's browser:
+    /// at once when `signIn` is true, as it is after Continue.
+    void Welcome(string? error, bool invited = false, bool signIn = false)
     {
         started?.Cancel();
         started = null;
+        signingIn?.Cancel();
         phase = Phase.SignedOut;
         Sheet.CloseAll();
         nav = null;
@@ -462,7 +470,7 @@ public sealed class MainWindow : Window
                 {
                     var invite = Auth.Shared.Take(address.Text);
                     if (invite != null) Shell.Open(invite.AbsoluteUri);
-                    Welcome(null, invite != null);
+                    Welcome(null, invite != null, invite == null);
                 }
                 catch (Exception e)
                 {
@@ -480,24 +488,24 @@ public sealed class MainWindow : Window
         {
             if (invited)
                 panel.Children.Add(new TextBlock { Text = "Make your passkey in your browser, where your invite opened. Then sign in here.", FontSize = 14, HorizontalAlignment = HorizontalAlignment.Center, TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.WrapWholeWords });
-            var signIn = Look.Tinted("Sign In", () => { });
-            signIn.HorizontalAlignment = HorizontalAlignment.Center;
-            signIn.Padding = new Thickness(28, 8, 28, 9);
-            signIn.FontSize = 15;
+            var signInButton = Look.Tinted("Sign In", () => { });
+            signInButton.HorizontalAlignment = HorizontalAlignment.Center;
+            signInButton.Padding = new Thickness(28, 8, 28, 9);
+            signInButton.FontSize = 15;
             var waiting = new TextBlock { Text = "Finish signing in in your browser.", Foreground = Look.Secondary, HorizontalAlignment = HorizontalAlignment.Center, Visibility = Visibility.Collapsed };
             CancellationTokenSource? cancel = null;
             var stop = Look.Link("Cancel", () => cancel?.Cancel());
             stop.HorizontalAlignment = HorizontalAlignment.Center;
             stop.Visibility = Visibility.Collapsed;
-            signIn.Click += async (_, _) =>
+            async Task Run()
             {
-                signIn.IsEnabled = false;
+                signInButton.IsEnabled = false;
                 waiting.Visibility = stop.Visibility = Visibility.Visible;
                 problem.Visibility = Visibility.Collapsed;
-                cancel = new CancellationTokenSource(TimeSpan.FromMinutes(10));
+                var mine = cancel = signingIn = new CancellationTokenSource();
                 try
                 {
-                    await Auth.Shared.SignIn(cancel.Token);
+                    await Auth.Shared.SignIn(mine.Token);
                 }
                 catch (Exception e)
                 {
@@ -506,14 +514,16 @@ public sealed class MainWindow : Window
                         problem.Text = e.Message;
                         problem.Visibility = Visibility.Visible;
                     }
-                    signIn.IsEnabled = true;
+                    signInButton.IsEnabled = true;
                     waiting.Visibility = stop.Visibility = Visibility.Collapsed;
                     return;
                 }
                 SetForegroundWindow(WinRT.Interop.WindowNative.GetWindowHandle(this));
                 await Start();
-            };
-            panel.Children.Add(signIn);
+            }
+            signInButton.Click += async (_, _) => await Run();
+            if (signIn) _ = Run();
+            panel.Children.Add(signInButton);
             panel.Children.Add(waiting);
             panel.Children.Add(stop);
             panel.Children.Add(problem);

@@ -1003,7 +1003,7 @@ fn ui_nodes(xml: &str) -> Vec<UiNode> {
 }
 
 /// The Windows app: built in the device itself (WinUI 3 builds only on Windows), which installs and starts it, then
-/// signed in at the try install's address as a person would: typing it and pressing Sign In, on the device's desktop,
+/// signed in at the try install's address as a person would: typing it and pressing Continue, on the device's desktop,
 /// as the try install's first person or `person`, whom Edge signs in as first. Once signed in on a device as them (a
 /// file in the try install's folder says so), a new build keeps that sign-in.
 fn windows(dir: &Path, checkout: &Path, device: &str, settings: &one::kernel::Settings, person: Option<&str>) -> Result<()> {
@@ -1062,7 +1062,8 @@ try {{
       'signed in' | Set-Content $log
       exit
     }}
-    # The welcome asks for the address first, with Continue, unless it has one; then Sign In, once.
+    # The welcome asks for the address first, with Continue, which goes straight on to signing in; with an address
+    # already, Sign In, once, if it isn't already waiting for the browser (then it's disabled).
     $field = Find $window $A::ControlTypeProperty ([Windows.Automation.ControlType]::Edit)
     $next = Find $window $A::NameProperty 'Continue'
     if ($field -and $next) {{
@@ -1072,7 +1073,7 @@ try {{
       continue
     }}
     $button = Find $window $A::NameProperty 'Sign In'
-    if ($button -and -not $pressed) {{
+    if ($button -and $button.Current.IsEnabled -and -not $pressed) {{
       $button.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
       $pressed = $true
     }}

@@ -2,8 +2,9 @@ import Darwin
 import Foundation
 
 /// Where the person's browser comes back to once they've signed in (RFC 8252's loopback redirect): a port on this
-/// Mac, open only until it hears from the browser. Sign-in and consent happen in their own browser, where their
-/// passkey is, and the auth service matches loopback redirects whatever the port. `windows/Auth.cs` does the same.
+/// Mac, open until it hears from the browser or `stop` is called, however long a passkey takes. Sign-in and consent
+/// happen in their own browser, where their passkey is, and the auth service matches loopback redirects whatever the
+/// port. `windows/Auth.cs` does the same.
 final class Loopback: @unchecked Sendable {
     struct Failed: LocalizedError {
         var errorDescription: String? { String(localized: "Couldn’t listen for the browser to come back. Try again.") }
@@ -45,12 +46,10 @@ final class Loopback: @unchecked Sendable {
 
     deinit { close(fd) }
 
-    /// Waits for the browser to come back to `/callback` → the URL it came to, or nil if `stop` was called or
-    /// `minutes` went by.
-    func callback(appName: String, minutes: Int = 5) async -> URL? {
-        let deadline = Date.now.addingTimeInterval(Double(minutes) * 60)
-        return await Task.detached { [self] in
-            while Date.now < deadline {
+    /// Waits for the browser to come back to `/callback` → the URL it came to, or nil if `stop` was called.
+    func callback(appName: String) async -> URL? {
+        await Task.detached { [self] () -> URL? in
+            while true {
                 if lock.withLock({ cancelled }) { return nil }
                 var waiting = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
                 guard poll(&waiting, 1, 250) > 0 else { continue }
@@ -74,7 +73,6 @@ final class Loopback: @unchecked Sendable {
                 }
                 if found { return URL(string: "http://127.0.0.1\(target)") }
             }
-            return nil
         }.value
     }
 
