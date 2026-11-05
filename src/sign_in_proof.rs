@@ -1,4 +1,4 @@
-//! A sign-in a person's own devices check themselves, without trusting the kernel, before one of them lets a new device
+//! A sign-in a person's own devices check themselves, without trusting the install's Workers, before one of them lets a new device
 //! in with no one tapping anything (docs/plan-device-approval.md). The new device's sign-in names it: an OIDC
 //! provider's ID token carries `nonce(device)`, which auth puts in the request it sends the provider, and a passkey's
 //! assertion signs `challenge(device, time)`, which auth makes the passkey prompt's challenge. Auth passes the token or
@@ -61,8 +61,8 @@ pub fn challenge(genesis: &[u8; 32], device: &Endpoint, at: u64) -> Vec<u8> {
 }
 
 /// The setting naming the OIDC clients an install's people sign in with, "<issuer> <client id>", one a line: an ID
-/// token for any other counts for nothing, however it's signed. The device that deploys the kernel writes it, as an
-/// admin's (`kernel deploy`, and `one throwaway` for its own).
+/// token for any other counts for nothing, however it's signed. The device that deploys to Cloudflare writes it, as an
+/// admin's (`cloudflare deploy`, and `one throwaway` for its own).
 pub const CLIENTS: &str = "sign_in_clients";
 
 /// The install a sign-in must be for, as the checking device's own signed entries say.
@@ -141,7 +141,7 @@ impl Proof {
 
 /// Where an issuer publishes the keys it signs ID tokens with, for the issuers a person's devices take: Google,
 /// Apple, Microsoft (any tenant), and, for a throwaway network (`one throwaway`) at `address`, a loopback address only it has, its
-/// own kernel. None for any other.
+/// own sign-in. None for any other.
 pub fn keys_at(issuer: &str, address: &str) -> Option<String> {
     match issuer {
         "https://accounts.google.com" => Some("https://www.googleapis.com/oauth2/v3/certs".into()),
@@ -435,16 +435,16 @@ mod tests {
         // Nor does one recorded before for another client let a device in, once the install names its own.
         let elsewhere = vec![Account::Provider { issuer: GOOGLE.into(), audience: "attackers-app.apps.googleusercontent.com".into(), subject: "1001".into(), email: None }];
         assert!(vouches(&Proof::IdToken(p.token(with("aud", json!("attackers-app.apps.googleusercontent.com")))), &d, &ours(), Some(&jwks), &elsewhere, NOW).is_err());
-        // A throwaway network's kernel signs with Ed25519, and only one on this machine is taken.
-        let kernel = SigningKey::from_bytes(&[7; 32]);
+        // A throwaway network's sign-in signs with Ed25519, and only one on this machine is taken.
+        let sign_in = SigningKey::from_bytes(&[7; 32]);
         let issuer = "http://127.0.0.1:8787/api/auth";
-        let kernel_keys = json!({ "keys": [{ "kty": "OKP", "crv": "Ed25519", "alg": "EdDSA", "kid": "t", "x": B64U.encode(kernel.verifying_key().as_bytes()) }] });
+        let sign_in_keys = json!({ "keys": [{ "kty": "OKP", "crv": "Ed25519", "alg": "EdDSA", "kid": "t", "x": B64U.encode(sign_in.verifying_key().as_bytes()) }] });
         let throwaway = |iss: &str, address: &str| {
             let head = B64U.encode(json!({ "alg": "EdDSA", "kid": "t" }).to_string().as_bytes());
             let body = B64U.encode(json!({ "iss": iss, "aud": "one-throwaway", "sub": "a000000000000001", "iat": NOW / 1000, "nonce": nonce(&GENESIS, &d) }).to_string().as_bytes());
-            let sig = kernel.sign(format!("{head}.{body}").as_bytes());
+            let sig = sign_in.sign(format!("{head}.{body}").as_bytes());
             let install = Install::new(address, GENESIS, Some(&format!("{iss} one-throwaway")));
-            check(&Proof::IdToken(format!("{head}.{body}.{}", B64U.encode(&sig.to_bytes()))), &d, &install, Some(&kernel_keys), NOW)
+            check(&Proof::IdToken(format!("{head}.{body}.{}", B64U.encode(&sig.to_bytes()))), &d, &install, Some(&sign_in_keys), NOW)
         };
         assert!(throwaway(issuer, "http://127.0.0.1:8787").is_ok());
         assert!(throwaway(issuer, ADDRESS).is_err(), "a real install takes no loopback issuer");

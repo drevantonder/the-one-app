@@ -1,4 +1,4 @@
-// The window, as the web client's (kernel/web/web.js): a sidebar with a section per page, listing its apps and its
+// The window, as the web client's (cloudflare/web/web.js): a sidebar with a section per page, listing its apps and its
 // Services, then Settings', listing its items; beside it, where the window is: a screen the node serves (AppScreen), a
 // page, Services, a Settings screen or an app's. A sidebar row replaces where the window is; what a screen opens is
 // pushed on top, so Back returns to it, or slides up over it as a sheet. Back is ← in the title bar, shown once something
@@ -202,7 +202,7 @@ public sealed class MainWindow : Window
     }
 
     /// Where a link opens, once the window shows the pages: a widget's (`<cli>://open?app=…&screen=…&params=…&scope=…`),
-    /// or a page at your One App's address, as the web client has them (kernel/web/web.js): `/`, `/page/<scope>`,
+    /// or a page at your One App's address, as the web client has them (cloudflare/web/web.js): `/`, `/page/<scope>`,
     /// `/services/<scope>`, `/app/<app>/<screen>?params=&scope=`, `/settings`, `/settings/<item>?params=`, and
     /// `/vault?id=&scope=` (or `<cli>://vault?…`), a request for an item, in the Vault's sheet; `<cli>://page` and
     /// `<cli>://settings` as below. An invite link

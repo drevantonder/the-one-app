@@ -29,7 +29,7 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
-// Signing in, as every client of the install's auth service does (kernel/web/web.js is the same in a browser): this
+// Signing in, as every client of the install's auth service does (cloudflare/web/web.js is the same in a browser): this
 // app registers itself as an OAuth client, sends the person to the auth service's sign-in and consent in a Custom Tab
 // (Chrome, where a passkey's PRF works), and comes back at <cli>://signed-in/ with a code that PKCE turns into tokens.
 // The refresh token is kept sealed by a key in this device's keystore, which never leaves it.

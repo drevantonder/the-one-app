@@ -165,7 +165,7 @@ pub fn open_all(items: &mut Items, keys: &BTreeMap<u32, [u8; 32]>) {
     for (id, item) in items.iter_mut() {
         let Some(sealed) = &item.sealed else { continue };
         let Some(key) = keys.get(&sealed.n) else { continue };
-        let opened = data_encoding::BASE64URL_NOPAD.decode(sealed.sealed.as_bytes()).ok().and_then(|b| crate::kernel::open_sealed(key, &b).ok()).and_then(|b| serde_json::from_slice::<Secrets>(&b).ok());
+        let opened = data_encoding::BASE64URL_NOPAD.decode(sealed.sealed.as_bytes()).ok().and_then(|b| crate::cloudflare::open_sealed(key, &b).ok()).and_then(|b| serde_json::from_slice::<Secrets>(&b).ok());
         let Some(s) = opened.filter(|s| s.id == *id) else {
             tracing::warn!("{:?}'s secrets didn't open with {}'s Vault key {}", item.title, id, sealed.n);
             continue;
@@ -181,7 +181,7 @@ pub fn open_all(items: &mut Items, keys: &BTreeMap<u32, [u8; 32]>) {
 fn seal_item(id: &str, item: &mut Item, n: u32, public: &[u8; 32]) -> Result<()> {
     let values = item.fields.iter().filter(|(_, f)| f.secret).map(|(n, f)| (n.clone(), f.value.clone())).collect();
     let s = Secrets { id: id.to_string(), values, hosts: item.hosts.clone(), apps: item.apps.clone() };
-    item.sealed = Some(Sealed { n, sealed: data_encoding::BASE64URL_NOPAD.encode(&crate::kernel::seal_to(public, &serde_json::to_vec(&s)?)?) });
+    item.sealed = Some(Sealed { n, sealed: data_encoding::BASE64URL_NOPAD.encode(&crate::cloudflare::seal_to(public, &serde_json::to_vec(&s)?)?) });
     Ok(())
 }
 
@@ -477,7 +477,7 @@ fn secrets_hosts_and_apps_open_only_with_the_vault_key() {
     conn.execute(SCHEMA, []).unwrap();
     let secret: [u8; 32] = rand::random();
     let keys = BTreeMap::from([(1, secret)]);
-    let public = Some((1, crate::kernel::public_of(&secret)));
+    let public = Some((1, crate::cloudflare::public_of(&secret)));
     let member = Sealing { keys: None, public, scope: "Everyone's", machines: "linux" };
     let granted = Sealing { keys: Some(&keys), public, scope: "Everyone's", machines: "linux" };
     let id = "0123456789abcdef";

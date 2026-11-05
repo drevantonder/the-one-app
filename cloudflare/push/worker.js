@@ -8,7 +8,7 @@
 // the install's endpoints: `{ via, address, env?, topic?, keys?, seal }`, `via` one of apns (address: the APNs token,
 // hex; topic: the app's bundle id, one of `APNS_TOPICS`; env: sandbox or production), fcm (its FCM token), wns (its
 // channel URI) or webpush (its subscription's endpoint, with `keys: { p256dh, auth }`), and `seal`, its seal key (hex),
-// which only the kernel's own senders seal to (below). `POST /push/unregister` forgets it.
+// which only the install's own Workers seal to (below). `POST /push/unregister` forgets it.
 //
 // One of the install's endpoints sends with `POST /push/send`, signed the same way: `{ notes: [{ to, note, quiet? }],
 // legacy? }`, each `note` base64url bytes sealed to `to`'s seal key by the sender, which takes that key from the
@@ -21,12 +21,12 @@
 // badge }` reaches them as the plain alert they understand, until each registers itself with the same token, which
 // replaces it.
 //
-// The kernel's own Workers send through the `Sender` entrypoint, by binding: auth, for a device asking to join, whose
+// The install's own Workers send through the `Sender` entrypoint, by binding: auth, for a device asking to join, whose
 // note it seals here to the seal key the device registered (`{ to, plain }`), or sends sealed (`{ to, note }`).
 //
 // Sends are limited: each sender `SENDS` requests a minute, each device `NOTES` notes a minute.
 //
-// What it holds is the install's push credentials (`APNS_*`, `FCM_ACCOUNT`, `WNS_*`, `VAPID_KEY`), kernel secrets, and
+// What it holds is the install's push credentials (`APNS_*`, `FCM_ACCOUNT`, `WNS_*`, `VAPID_KEY`), Workers' secrets, and
 // each device's address, in its Durable Object.
 
 import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
@@ -70,12 +70,12 @@ export default class extends WorkerEntrypoint {
   }
 }
 
-/// What the kernel's own Workers send by, by binding.
+/// What the install's own Workers send by, by binding.
 export class Sender extends WorkerEntrypoint {
   /// `notes`: `[{ to, note }]` sealed already, or `[{ to, plain }]`, sealed here to the seal key `to` registered; each
   /// may be `quiet`. → what happened to each, by key.
   send(notes) {
-    return push(this.env).send("kernel", notes, null);
+    return push(this.env).send("workers", notes, null);
   }
 }
 
@@ -212,7 +212,7 @@ export class Push extends DurableObject {
         }
         let bytes;
         try {
-          bytes = plain !== undefined && by === "kernel" ? await sealTo(hex.decode(device.seal), JSON.stringify(plain)) : b64u.decode(note);
+          bytes = plain !== undefined && by === "workers" ? await sealTo(hex.decode(device.seal), JSON.stringify(plain)) : b64u.decode(note);
         } catch {
           return void (out[to] = { failed: "that note isn't base64url" });
         }
@@ -223,7 +223,7 @@ export class Push extends DurableObject {
       }),
     );
     const result = { to: out };
-    if (legacy && by !== "kernel") result.legacy = await this.sendLegacy(legacy);
+    if (legacy && by !== "workers") result.legacy = await this.sendLegacy(legacy);
     return result;
   }
 

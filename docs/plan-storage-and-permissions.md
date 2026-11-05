@@ -15,7 +15,7 @@ The log is the odd one out, and it carries four costs:
 - its order is never final, so it can't be compacted;
 - who may do what is 85 hand-written checks in `src/members.rs`, plus 35 admin checks elsewhere and each app's own (`apps/repos/app.js` `owns`, `mayPush`).
 
-Only the scope's own members can write a step that opens (AES-GCM, with the step's name bound in), so the kernel can't forge anything already. The order the log's causal replay works out buys only one thing: changing who's in without reaching the bucket, which no other write can do anyway.
+Only the scope's own members can write a step that opens (AES-GCM, with the step's name bound in), so no Worker can forge anything already. The order the log's causal replay works out buys only one thing: changing who's in without reaching the bucket, which no other write can do anyway.
 
 ## The end state
 
@@ -65,7 +65,7 @@ A removed device's later steps fail rule 3, because they come after its removal 
 - causal order, ties by hash, cuts and forks;
 - replay's hand-written rules;
 - grants as a right;
-- JavaScript that builds or checks entries (`kernel/web/members.js`, the checks in `kernel/web/device.js`, `kernel/mcp/worker.js`'s reading of entries), and their parts of `tests/contracts.rs`;
+- JavaScript that builds or checks entries (`cloudflare/web/members.js`, the checks in `cloudflare/web/device.js`, `cloudflare/mcp/worker.js`'s reading of entries), and their parts of `tests/contracts.rs`;
 - ARCHITECTURE.md's hand-written file map.
 
 In the files affected, roughly 4,800 lines become about 3,000.
@@ -73,7 +73,7 @@ In the files affected, roughly 4,800 lines become about 3,000.
 **Code layout:**
 - the domain's parts: `src/key/`, `src/database/`, `src/permissions/`, `src/blob/`, `src/call/`, `src/app/`;
 - what's made of them: devices, the Vault, backups, services and schedules;
-- where they run: node, kernel, serverless and clients.
+- where they run: node, the Workers on Cloudflare, serverless and clients.
 
 Each folder's module doc is its architecture. The file map is generated from those docs, and a test fails if a folder has none. ARCHITECTURE.md comes down to one page: what the product is, the trust model, the three rules, and what's designed but not built.
 
@@ -162,8 +162,8 @@ Every row change is in a signed step, so "who did what" for seven years is the s
 | D | 1.4 | Storage: signatures beside steps, levels, deletion | none | `src/db.rs`, `src/bucket*` |
 | E | 1.6 | Clients sync with TanStack DB | none | the screens' shared JavaScript |
 | F1 | 1.3 | The node reads the scope database and `may` | B, C | `src/node/`, `src/*.rs` callers |
-| F2 | 1.3 | The client crate and the browser | B, C | `client/`, `kernel/web/` |
-| F3 | 1.3 | The kernel's MCP worker and the serverless node | B, C | `kernel/mcp/`, `serverless/` |
+| F2 | 1.3 | The client crate and the browser | B, C | `client/`, `cloudflare/web/` |
+| F3 | 1.3 | The MCP Worker and the serverless node | B, C | `cloudflare/mcp/`, `serverless/` |
 | G | 1.5 | Apps' `ctx.may` and Repos | F1 | `src/apps.rs`, `apps/repos/` |
 | H | 2 | Switching over, with its gate | all of phase 1, and every device on R1 | one owner |
 | I1–I4 | 3 | Delete, rename to keep, move folders, finish the docs | H | split by area |

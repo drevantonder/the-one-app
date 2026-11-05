@@ -451,7 +451,7 @@ export class Device {
   }
 
   /// Registers this browser's push subscription (`{ endpoint, keys }`) with the push Worker, signed by its key, with
-  /// its seal key, which what's pushed to it is sealed to (kernel/push/).
+  /// its seal key, which what's pushed to it is sealed to (cloudflare/push/).
   async registerPush({ endpoint, keys }) {
     const body = await this.signed("one/push", { route: "POST /push/register", via: "webpush", address: endpoint, keys: { p256dh: keys.p256dh, auth: keys.auth }, seal: this.me.seal });
     const r = await fetch("/push/register", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });

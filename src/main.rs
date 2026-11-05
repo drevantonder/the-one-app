@@ -79,36 +79,36 @@ fn every_command() -> String {
                                        <id> says how it went
   {CLI} vault requests                 the requests waiting for you; vault answer <id> [--item <id> | --decline]
                                        answers one, a new item's values on stdin (one line, or a JSON object)
-  {CLI} kernel                         where this machine's kernel is: its services' addresses and what it's set to
-  {CLI} kernel serve [--address <url>]
-                                       run the kernel's services (auth, the relay, the URL signer, and the gateway people reach
+  {CLI} cloudflare                     the install's Workers on Cloudflare, as this machine has them: their addresses and settings
+  {CLI} cloudflare serve [--address <url>]
+                                       run the install's Workers in workerd (auth, the relay, the URL signer, and the gateway people reach
                                        at the install's address) on this machine; the first time, with that address
-  {CLI} kernel deploy [--domain <domain>] [--address <url>] [--account <id>] [--new]
-                                       deploy the kernel's services to Cloudflare as Workers, with an API token that
+  {CLI} cloudflare deploy [--domain <domain>] [--address <url>] [--account <id>] [--new]
+                                       deploy the install's Workers to Cloudflare, with an API token that
                                        may edit them in CLOUDFLARE_API_TOKEN; the first time, at one of the account's
                                        domains ({CLI}-<service>.<domain>, the install's address {CLI}.<domain> unless
                                        --address says, for good: passkeys belong to it), or at its workers.dev address;
                                        and the serverless node with it, once serverless deploy put it there; beside a
                                        node of the install, whose devices its relay takes, unless --new
-  {CLI} kernel invite <name> [--admin] [--user <id>] [--email <email>]
+  {CLI} cloudflare invite <name> [--admin] [--user <id>] [--email <email>]
                                        a link that lets someone join, once and for a few days, as who they'll be in the
                                        install (--user, or this machine's person if they're called that; else someone
                                        new, as devices invite does), signed with this machine's key, an admin's
                                        device's; where people sign in with Google, --email is the account they sign up
                                        with. Nobody joins uninvited, the first person too
   {CLI} serverless deploy [--account <id>]
-                                       put the install's serverless node in the kernel's Cloudflare account (a node as
+                                       put the install's serverless node in its Workers' Cloudflare account (a node as
                                        a Worker, with the API token in CLOUDFLARE_API_TOKEN), which devices ask over
                                        iroh when none of your machines answers
-  {CLI} kernel set <setting> <value>   change one: auth-url, resources (nodes' own addresses, comma-separated), bucket (its JSON object piped, with - as its value) or
+  {CLI} cloudflare set <setting> <value>  change one: auth-url, resources (nodes' own addresses, comma-separated), bucket (its JSON object piped, with - as its value) or
                                        android (the SHA-256 fingerprints of the certificates the Android app is signed
                                        with, comma-separated, or -: links to the address open the app)
-  {CLI} kernel use <address>
-                                       point this install at its kernel: its nodes take sign-ins made at the address
+  {CLI} cloudflare use <address>
+                                       point this install at its Workers: its nodes take sign-ins made at the address
   {CLI} storage                        where the install's data is kept
   {CLI} storage move --endpoint <url> --bucket <name> [--region <r>]
                                        move it to S3-compatible storage (R2, S3, GCS, MinIO), whose key is the
-                                       kernel's BUCKET: every device reaches it through the URL signer, and moves there
+                                       Workers' BUCKET: every device reaches it through the URL signer, and moves there
   {CLI} backups                        how backups are going: each place, its last backup, what's failing
   {CLI} backups now                    back up now, without waiting for the hour
   {CLI} backups place add <folder> [--title t]
@@ -209,7 +209,7 @@ else. Data goes to stdout, messages to stderr.
 /// `settings` with the install's devices (each key, its roles and whether it's an admin's) and its recovery key, as the
 /// node on this machine knows them, for the relay to take only them; none when no node answers here, which `needed`
 /// refuses, since that relay would take no one.
-fn devices_here(settings: one::kernel::Settings, needed: bool) -> Result<one::kernel::Settings> {
+fn devices_here(settings: one::cloudflare::Settings, needed: bool) -> Result<one::cloudflare::Settings> {
     let state = get("/v1/state").unwrap_or_default();
     let install = &state["install"];
     let admin = |user: &Value| install["users"].as_array().into_iter().flatten().any(|u| u["id"] == *user && u["role"] == "admin");
@@ -226,7 +226,7 @@ fn devices_here(settings: one::kernel::Settings, needed: bool) -> Result<one::ke
     // The install's recovery key too, as a client, not an admin's and not a node: what it lets in, the relay takes.
     devices.extend(install["recovery"].as_str().map(|k| json!({ "key": k, "role": "client", "admin": false })));
     let genesis = install["root"].as_str().filter(|r| r.len() == 64).map(str::to_string);
-    Ok(one::kernel::Settings { devices, genesis, ..settings })
+    Ok(one::cloudflare::Settings { devices, genesis, ..settings })
 }
 
 fn addr() -> String {
@@ -466,58 +466,58 @@ fn run(args: Vec<String>) -> Result<()> {
             post("/v1/install", json!({ "app": app, "scope": scope, "installed": !flags.contains_key("remove") }))?;
             println!("{app} is {} in {scope}.", if flags.contains_key("remove") { "no longer installed" } else { "installed" });
         }
-        ["kernel"] => print!("{}", kernel_said(&one::kernel::Settings::load()?)),
-        ["kernel", "serve"] => {
-            let settings = match one::kernel::Settings::load() {
+        ["cloudflare"] => print!("{}", cloudflare_said(&one::cloudflare::Settings::load()?)),
+        ["cloudflare", "serve"] => {
+            let settings = match one::cloudflare::Settings::load() {
                 Ok(settings) => settings,
                 Err(err) => {
-                    one::kernel::Settings::none_here().map_err(|here| err.context(format!("{here:#}")))?;
+                    one::cloudflare::Settings::none_here().map_err(|here| err.context(format!("{here:#}")))?;
                     let url = flags.get("address").and_then(Value::as_str).context("say where people will reach the install, with --address https://…")?;
-                    let settings = one::kernel::Settings::new(NAME, url);
+                    let settings = one::cloudflare::Settings::new(NAME, url);
                     settings.save()?;
                     settings
                 }
             };
-            print!("{}", kernel_said(&settings));
+            print!("{}", cloudflare_said(&settings));
             let settings = devices_here(settings, false)?;
-            one::kernel::serve(&settings)?
+            one::cloudflare::serve(&settings)?
         }
-        ["kernel", "deploy"] => {
-            let loaded = one::kernel::Settings::load();
+        ["cloudflare", "deploy"] => {
+            let loaded = one::cloudflare::Settings::load();
             let cf = cloudflare(&flags, loaded.as_ref().ok())?;
             let settings = match loaded {
                 Ok(settings) => settings,
                 Err(err) => {
-                    one::kernel::Settings::none_here().map_err(|here| err.context(format!("{here:#}")))?;
-                    // A kernel already in the account was made elsewhere: new settings here would replace its secrets.
-                    let made = cf.scripts()?.contains_key(&one::kernel::worker_name("auth"));
-                    anyhow::ensure!(!made || flags.contains_key("new"), "the Cloudflare account has a kernel already, made on another machine: deploy it there, where its settings are, or bring them here ({} and .env.local). --new replaces it, and everything it holds can't be read again", one::kernel::Settings::path().display());
+                    one::cloudflare::Settings::none_here().map_err(|here| err.context(format!("{here:#}")))?;
+                    // Workers already in the account were made elsewhere: new settings here would replace their secrets.
+                    let made = cf.scripts()?.contains_key(&one::cloudflare::worker_name("auth"));
+                    anyhow::ensure!(!made || flags.contains_key("new"), "the Cloudflare account has this install's Workers already, made on another machine: deploy them there, where their settings are, or bring them here ({} and .env.local). --new replaces them, and everything they hold can't be read again", one::cloudflare::Settings::path().display());
                     let domain = flags.get("domain").and_then(Value::as_str).map(|d| d.trim_matches('.').to_string());
                     let (domain, address) = match domain {
                         Some(domain) => (domain.clone(), format!("https://{CLI}.{domain}")),
                         None => {
                             let domain = format!("{}.workers.dev", cf.subdomain()?);
-                            (domain.clone(), format!("https://{}.{domain}", one::kernel::worker_name("gateway")))
+                            (domain.clone(), format!("https://{}.{domain}", one::cloudflare::worker_name("gateway")))
                         }
                     };
-                    let at = |service: &str| format!("https://{}.{domain}", one::kernel::worker_name(service));
+                    let at = |service: &str| format!("https://{}.{domain}", one::cloudflare::worker_name(service));
                     let address = flags.get("address").and_then(Value::as_str).map(|a| a.trim_end_matches('/').to_string()).unwrap_or(address);
-                    let mut settings = one::kernel::Settings::new(NAME, &address);
+                    let mut settings = one::cloudflare::Settings::new(NAME, &address);
                     settings.auth_url = at("auth");
                     settings.save()?;
-                    println!("Keep {} too: the kernel's secrets are in it, and a deploy without them can't read what's there. Better, move each to 1Password and leave an op(op://…) reference in its place.\n", one::kernel::Settings::path().with_file_name(".env.local").display());
+                    println!("Keep {} too: the Workers' secrets are in it, and a deploy without them can't read what's there. Better, move each to 1Password and leave an op(op://…) reference in its place.\n", one::cloudflare::Settings::path().with_file_name(".env.local").display());
                     // People signing in with Google need its OAuth client, which is put beside the secrets first.
                     match one::config::SIGN_IN {
-                        "google" => one::kernel::Settings::load()?,
+                        "google" => one::cloudflare::Settings::load()?,
                         _ => settings,
                     }
                 }
             };
             let settings = devices_here(settings, !flags.contains_key("new"))?;
-            let modules = one::kernel::SERVICES.iter().map(|(_, entry, _)| one::kernel::module(entry)).collect::<Result<Vec<_>>>()?;
+            let modules = one::cloudflare::WORKERS.iter().map(|(_, entry, _)| one::cloudflare::module(entry)).collect::<Result<Vec<_>>>()?;
             let mut web = settings.web();
-            web.extend(one::kernel::precompressed(&web)?);
-            one::kernel::deploy(&cf, &settings, &modules, &web)?;
+            web.extend(one::cloudflare::precompressed(&web)?);
+            one::cloudflare::deploy(&cf, &settings, &modules, &web)?;
             if settings.serverless {
                 one::serverless::deploy(&cf, &settings)?;
                 serverless_reads(&settings);
@@ -533,12 +533,12 @@ fn run(args: Vec<String>) -> Result<()> {
                     eprintln!("A new device's Google sign-in won't let it in by itself until an admin's device runs {CLI} settings {} {clients}: {err:#}", one::sign_in_proof::CLIENTS);
                 }
             }
-            print!("Deployed.\n{}", kernel_said(&settings));
+            print!("Deployed.\n{}", cloudflare_said(&settings));
         }
         ["serverless", "deploy"] => {
-            let mut settings = devices_here(one::kernel::Settings::load()?, true)?;
+            let mut settings = devices_here(one::cloudflare::Settings::load()?, true)?;
             let cf = cloudflare(&flags, Some(&settings))?;
-            // Its endpoint's key, made once and kept with the kernel's secrets.
+            // Its endpoint's key, made once and kept with the Workers' secrets.
             if settings.serverless_endpoint().is_none() {
                 settings.serverless_key = data_encoding::HEXLOWER.encode(&rand::random::<[u8; 32]>());
                 settings.set_secret("SERVERLESS_KEY", &settings.serverless_key)?;
@@ -555,9 +555,9 @@ fn run(args: Vec<String>) -> Result<()> {
             post("/v1/settings", json!({ "name": "serverless", "value": settings.serverless_endpoint() }))?;
             println!("The serverless node is in your Cloudflare account: devices ask it over iroh when none of your machines answers.");
         }
-        ["kernel", "invite", name] => {
-            let settings = one::kernel::Settings::load()?;
-            // This machine's person, inviting themselves to their own install's kernel, is who they are in it.
+        ["cloudflare", "invite", name] => {
+            let settings = one::cloudflare::Settings::load()?;
+            // This machine's person, inviting themselves to their own install, is who they are in it.
             let user = match flags.get("user").and_then(Value::as_str) {
                 Some(user) => Some(user.to_string()),
                 None => get("/v1/state").ok().filter(|s| s["user"]["name"].as_str().is_some_and(|n| n.eq_ignore_ascii_case(name))).and_then(|s| s["user"]["id"].as_str().map(str::to_string)),
@@ -568,8 +568,8 @@ fn run(args: Vec<String>) -> Result<()> {
                 println!("{}", invited_said(name, &post("/v1/invite-link", json!({ "name": name, "admin": flags.contains_key("admin") }))?));
             } else {
                 let key = one::node::device_key(&one::home())?;
-                let invite = one::kernel::invite(&settings.address, &key, name, user.as_deref(), email)?;
-                let days = one::kernel::INVITE_DAYS;
+                let invite = one::cloudflare::invite(&settings.address, &key, name, user.as_deref(), email)?;
+                let days = one::cloudflare::INVITE_DAYS;
                 let how = if one::config::SIGN_IN == "google" { "they sign in with Google and join" } else { "they make their passkey and join" };
                 println!("Send {name} this link. It works once, for {days} days: opening it, {how}.\n\n  {}", invite.link);
                 // Their first device besides this machine: this machine lets it in.
@@ -579,8 +579,8 @@ fn run(args: Vec<String>) -> Result<()> {
                 }
             }
         }
-        ["kernel", "set", name, value] => {
-            let mut settings = one::kernel::Settings::load()?;
+        ["cloudflare", "set", name, value] => {
+            let mut settings = one::cloudflare::Settings::load()?;
             let piped = || -> Result<Value> { serde_json::from_reader(std::io::stdin()).context("pipe its JSON object on stdin") };
             match *name {
                 "auth-url" => settings.auth_url = value.trim_end_matches('/').to_string(),
@@ -601,12 +601,12 @@ fn run(args: Vec<String>) -> Result<()> {
                     }
                     settings.android = prints;
                 }
-                _ => bail!("no kernel setting {name}: auth-url, resources, bucket or android"),
+                _ => bail!("no Cloudflare setting {name}: auth-url, resources, bucket or android"),
             }
             settings.save()?;
-            println!("Set {name}. {CLI} kernel serve takes it at its next start, and {CLI} kernel deploy when it next runs.");
+            println!("Set {name}. {CLI} cloudflare serve takes it at its next start, and {CLI} cloudflare deploy when it next runs.");
         }
-        ["kernel", "use", address] => {
+        ["cloudflare", "use", address] => {
             post("/v1/settings", json!({ "name": "address", "value": address.trim_end_matches('/') }))?;
             println!("This install is at {address}: its nodes take sign-ins made there.");
         }
@@ -621,7 +621,7 @@ fn run(args: Vec<String>) -> Result<()> {
         ["storage", "move"] => {
             let get = |k: &str| flags.get(k).and_then(Value::as_str);
             let endpoint = get("endpoint").context("give --endpoint, like https://<account>.r2.cloudflarestorage.com")?;
-            let bucket = get("bucket").context("give --bucket, the bucket's name: its key is the kernel's (BUCKET, which only the URL signer holds)")?;
+            let bucket = get("bucket").context("give --bucket, the bucket's name: its key is the Workers' (BUCKET, which only the URL signer holds)")?;
             let r = post("/v1/storage", json!({ "endpoint": endpoint, "bucket": bucket, "region": get("region") }))?;
             print!("{}", tried_said(&r));
             if r["kept"] == true {
@@ -1134,7 +1134,7 @@ fn to_node<B>(r: ureq::RequestBuilder<B>) -> ureq::RequestBuilder<B> {
     }
 }
 
-/// `sign-in`: this machine signs in to the install's kernel, as the person who approves its code with their passkey.
+/// `sign-in`: this machine signs in at the install's address, as the person who approves its code with their passkey.
 fn sign_in(flags: &Map<String, Value>) -> Result<()> {
     // Someone new's invite: its link (`<address>/invite#<secret>`), or its secret with --address.
     let invite = flags.get("invite").and_then(Value::as_str).map(|i| match i.split_once("/invite#") {
@@ -1150,7 +1150,7 @@ fn sign_in(flags: &Map<String, Value>) -> Result<()> {
         None if !client_device::node_here() => one::sign_in::kept().map(|k| k.address).with_context(|| format!("{NAME} isn't running on this computer, so it signs in as one of your devices: give {YOURS}'s address, {CLI} sign-in --address https://…"))?,
         None => {
             let state = request(agent().get(format!("http://{}/v1/state", addr())).call())?;
-            state["install"]["settings"]["address"].as_str().context(format!("this install has no address to sign in at yet: give one with --address, or an admin sets it with {CLI} kernel use"))?.to_string()
+            state["install"]["settings"]["address"].as_str().context(format!("this install has no address to sign in at yet: give one with --address, or an admin sets it with {CLI} cloudflare use"))?.to_string()
         }
     };
     let join = (!client_device::node_here()).then(|| client_device::signing_in_for(&address)).transpose()?;
@@ -1298,7 +1298,7 @@ fn switch_gate(gate: &Value, name: &dyn Fn(&str) -> String) {
 
 /// Tells this machine's node what the serverless node it deployed reads of who's who: this build's, which it can't
 /// say itself (`database::switch`).
-fn serverless_reads(settings: &one::kernel::Settings) {
+fn serverless_reads(settings: &one::cloudflare::Settings) {
     let Some(key) = settings.serverless_endpoint() else { return };
     let said = post("/v1/reads", json!({ "device": key, "reads": one::database::switch::READS, "build": one::config::BUILD }));
     if let Err(err) = said {
@@ -1473,7 +1473,7 @@ async fn serve(is_try: bool, args: &[String]) -> Result<()> {
             }
             tracing::info!("nobody asked the throwaway network anything for {} minutes: stopping", THROWAWAY_IDLE.as_secs() / 60);
             let _ = std::fs::remove_file(dir.join("pid"));
-            // Its kernel and browser, then its own group: it keeps its data, for `throwaway` to start it again.
+            // Its Workers and browser, then its own group: it keeps its data, for `throwaway` to start it again.
             throwaway::stop_others(&dir);
             unsafe { libc::kill(0, libc::SIGTERM) };
         });
@@ -1638,7 +1638,7 @@ fn mcp(mode: Mode) -> Result<()> {
 }
 
 /// MCP over Streamable HTTP, at `/mcp`: what `mcp` answers over stdio, for a client device over iroh, as its person (the
-/// MCP Worker, kernel/mcp/, is remote MCP clients' device), or for a program on this machine, as its person. Each POST
+/// MCP Worker, cloudflare/mcp/, is remote MCP clients' device), or for a program on this machine, as its person. Each POST
 /// is answered with JSON; the server sends nothing unasked, so there's no stream to GET. A tool that needs keys it
 /// wasn't handed is answered 428 with what it needs, as `/v1/call` is, for its caller to hand them and ask again.
 /// Nothing is kept between requests, since the next may reach another node: the session id carries only the client's
@@ -1980,31 +1980,31 @@ fn vault_remove(scope: &str, item: &str, field: Option<&str>) -> Result<String> 
     }
 }
 
-/// Cloudflare's API with the token in CLOUDFLARE_API_TOKEN, or else the kernel's own (its .env.local's), for the account
+/// Cloudflare's API with the token in CLOUDFLARE_API_TOKEN, or else the Workers' own (their .env.local's), for the account
 /// `--account` names or the token's only one.
-fn cloudflare(flags: &Map<String, Value>, settings: Option<&one::kernel::Settings>) -> Result<one::kernel::Cloudflare> {
+fn cloudflare(flags: &Map<String, Value>, settings: Option<&one::cloudflare::Settings>) -> Result<one::cloudflare::Cloudflare> {
     let token = std::env::var("CLOUDFLARE_API_TOKEN").ok().or_else(|| settings.and_then(|s| s.cloudflare_token.clone()));
-    let token = token.context("give a Cloudflare API token that may edit Workers in CLOUDFLARE_API_TOKEN, or as the kernel's CLOUDFLARE_API_TOKEN in its .env.local")?;
+    let token = token.context("give a Cloudflare API token that may edit Workers in CLOUDFLARE_API_TOKEN, or as the Workers' CLOUDFLARE_API_TOKEN in their .env.local")?;
     let api = "https://api.cloudflare.com/client/v4".to_string();
     let account = match flags.get("account").and_then(Value::as_str) {
         Some(account) => account.to_string(),
-        None => one::kernel::Cloudflare { api: api.clone(), token: token.clone(), account: String::new() }.accounts()?,
+        None => one::cloudflare::Cloudflare { api: api.clone(), token: token.clone(), account: String::new() }.accounts()?,
     };
-    Ok(one::kernel::Cloudflare { api, token, account })
+    Ok(one::cloudflare::Cloudflare { api, token, account })
 }
 
-/// Where a kernel is, and what it's set to, without its secrets.
-fn kernel_said(s: &one::kernel::Settings) -> String {
-    let mut out = format!("{}'s kernel\n  address   {}\n", s.name, s.address);
+/// Where an install's Workers are, and what they're set to, without their secrets.
+fn cloudflare_said(s: &one::cloudflare::Settings) -> String {
+    let mut out = format!("{} on Cloudflare\n  address   {}\n", s.name, s.address);
     if s.auth_url.starts_with("http://127.0.0.1") {
         out += &format!("  here on   127.0.0.1:{} (the address), :{} (auth)\n", s.ports[1], s.ports[0]);
     }
     if !s.resources.is_empty() {
         out += &format!("  nodes     {}\n", s.resources.join(", "));
     }
-    out += &format!("  bucket    {}\n", s.bucket.as_ref().map(|b| format!("{} in {}", b["bucket"].as_str().unwrap_or("?"), b["endpoint"].as_str().unwrap_or("?"))).unwrap_or("none yet: kernel set bucket -".into()));
+    out += &format!("  bucket    {}\n", s.bucket.as_ref().map(|b| format!("{} in {}", b["bucket"].as_str().unwrap_or("?"), b["endpoint"].as_str().unwrap_or("?"))).unwrap_or("none yet: cloudflare set bucket -".into()));
     if !s.android.is_empty() {
-        out += &format!("  android   {} signed by {}\n", one::kernel::android_package(), s.android.join(", "));
+        out += &format!("  android   {} signed by {}\n", one::cloudflare::android_package(), s.android.join(", "));
     }
     out
 }
@@ -2214,7 +2214,7 @@ fn removed_said(r: &Value) -> String {
 
 /// An invite's link, in words.
 fn invited_said(name: &str, r: &Value) -> String {
-    let days = one::kernel::INVITE_DAYS;
+    let days = one::cloudflare::INVITE_DAYS;
     format!("Send {name} this link. It works once, for {days} days: opening it, they join. Then approve their device with its code.\n\n  {}", r["link"].as_str().unwrap_or(""))
 }
 

@@ -1,7 +1,7 @@
 //! A client with no socket, for a Worker's Durable Object, which has no UDP and holds no connection of its own: what
 //! its endpoint sends goes to `send`, which passes it to the relay at the install's address by RPC, and the relay hands
 //! what's sent to its key back by RPC, which goes to `Inbox::deliver`. To every other endpoint it's one more behind the
-//! relay. The MCP Worker's devices are reached this way (kernel/mcp/).
+//! relay. The MCP Worker's devices are reached this way (cloudflare/mcp/).
 
 use std::collections::VecDeque;
 use std::io;

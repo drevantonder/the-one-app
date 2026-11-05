@@ -54,7 +54,7 @@
 //! A copy is used only if it opens and its epoch is at least its step's.
 //!
 //! No clock, disk or network: the bucket is all it reads and writes, so it runs wherever SQLite does. A database's key
-//! in each epoch comes from its app's key in that epoch (`app_key`, `kernel::database_key`).
+//! in each epoch comes from its app's key in that epoch (`app_key`, `cloudflare::database_key`).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::{c_char, c_int, c_void};
@@ -248,17 +248,17 @@ pub fn handed(mut keys: Keys, current: u32) -> std::result::Result<Keys, Missing
 pub async fn app_key(bucket: &impl Bucket, epoch_key: &[u8; 32], scope: &str, app: &str, n: u32, make: bool) -> Result<Option<[u8; 32]>> {
     let name = crate::keys::app_key_name(scope, app, n);
     if let Some(o) = bucket.get(&name).await? {
-        return crate::kernel::open_app_key(epoch_key, app, &o.bytes).map(Some);
+        return crate::cloudflare::open_app_key(epoch_key, app, &o.bytes).map(Some);
     }
     if !make {
         return Ok(None);
     }
     let key = rand::random();
-    if bucket.create(&name, &crate::kernel::seal_app_key(epoch_key, app, &key)).await? {
+    if bucket.create(&name, &crate::cloudflare::seal_app_key(epoch_key, app, &key)).await? {
         return Ok(Some(key));
     }
     let made = bucket.get(&name).await?.context("an app's key went as it was made")?;
-    crate::kernel::open_app_key(epoch_key, app, &made.bytes).map(Some)
+    crate::cloudflare::open_app_key(epoch_key, app, &made.bytes).map(Some)
 }
 
 /// One SQLite database of an app's, at a position in its steps.

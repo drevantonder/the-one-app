@@ -936,7 +936,7 @@ const h = OneUI.react.createElement;
       detail.innerHTML = `<div class="screen"></div>`;
       devtools.since = Date.now();
       devtools.draw();
-      // A Settings item that's a page of this site (Passkeys) is that page, framed: it's the kernel's, not a node's.
+      // A Settings item that's a page of this site (Passkeys) is that page, framed: it's the gateway's, not a node's.
       const item = r.kind === "own" && settingsItems().find((i) => i.name === r.name && i.url && here(i.url));
       if (item) return void ($(".screen", detail).innerHTML = `<iframe class="screen-frame" src="${esc(item.url)}" title="${esc(title)}" allow="publickey-credentials-get; publickey-credentials-create"></iframe>`);
       frameFor(r, $(".screen", detail));
@@ -1092,7 +1092,7 @@ const h = OneUI.react.createElement;
 
   /// What Settings shows this person, in order, as the node says (`settings_items`).
   const settingsItems = () => withWaiting(store.state)?.settings_items || [];
-  /// Whether a url is this site's: a page the kernel serves, shown in place rather than in a new tab.
+  /// Whether a url is this site's: a page the gateway serves, shown in place rather than in a new tab.
   const here = (url) => new URL(url, location.href).origin === location.origin;
   /// The Settings item whose url is `url` on this site, if one is.
   const settingAt = (url) => settingsItems().find((i) => i.url && here(i.url) && new URL(i.url, location.href).pathname === new URL(url, location.href).pathname);
@@ -1472,7 +1472,7 @@ const h = OneUI.react.createElement;
     const reg = await navigator.serviceWorker.ready;
     let sub = await reg.pushManager.getSubscription();
     const was = JSON.parse(localStorage.getItem(PUSHED) || "null");
-    // One made with another key (a kernel made again) is made again.
+    // One made with another key (the push Worker's VAPID key made again) is made again.
     if (sub && was && was.vapid !== vapid) await sub.unsubscribe(), (sub = null);
     sub ||= await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: Uint8Array.from(atob(vapid.replaceAll("-", "+").replaceAll("_", "/")), (c) => c.charCodeAt(0)) });
     if (was?.endpoint !== sub.endpoint || was?.key !== device.me.key || was?.vapid !== vapid || Date.now() - was.at > 86_400_000) {

@@ -1,4 +1,4 @@
-//! The kernel's services, built with the pinned Bun and run in workerd here, or deployed to Cloudflare.
+//! The install's Workers, built with the pinned Bun and run in workerd here, or deployed to Cloudflare.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -12,9 +12,9 @@ use super::*;
 
 // Building and running.
 
-/// The kernel's services: each one's name, its module, and its Durable Object's class, if it keeps anything. Each
+/// The install's Workers: each one's name, its module, and its Durable Object's class, if it keeps anything. Each
 /// one's WebAssembly is the `.wasm` files in its module's folder, modules of its own (Workers can't compile it).
-pub const SERVICES: &[(&str, &str, Option<&str>)] = &[
+pub const WORKERS: &[(&str, &str, Option<&str>)] = &[
     ("auth", "auth/worker.js", Some("Auth")),
     ("relay", "relay/worker.js", Some("Relay")),
     ("signer", "signer/worker.js", None),
@@ -29,7 +29,7 @@ const DELETED: &[(&str, &str)] = &[("gateway", "Relay")];
 /// A service's WebAssembly modules, (name, bytes): the `.wasm` files in its module's folder, as this release has them.
 pub fn wasm(entry: &str) -> Vec<(String, Vec<u8>)> {
     let dir = entry.rsplit_once('/').map_or("", |(dir, _)| dir);
-    crate::config::KERNEL
+    crate::config::CLOUDFLARE
         .iter()
         .filter_map(|(path, bytes)| {
             let name = path.strip_prefix(dir)?.strip_prefix('/')?;
@@ -52,8 +52,8 @@ pub fn modules_of(service: &str, entry: &str, serverless: Option<&Modules>) -> O
     Some(out)
 }
 
-/// How an install's kernel is set up, wherever it runs: kept in `<home>/kernel/settings.json`, with its secrets in
-/// `.env.local` beside it, which Varlock reads (see `SCHEMA`): their values, for a kernel tried here, or
+/// How an install's Workers are set up, wherever they run: kept in `<home>/cloudflare/settings.json`, with its secrets in
+/// `.env.local` beside it, which Varlock reads (see `SCHEMA`): their values, for Workers tried here, or
 /// `op(op://…)` references to 1Password, for one people use, so no file here holds them.
 #[derive(Debug, Clone, serde::Serialize, Deserialize)]
 pub struct Settings {
@@ -63,7 +63,7 @@ pub struct Settings {
     /// Worker, the relay's paths to the relay and the rest to the web client. Passkeys belong to its host name, so it
     /// doesn't change.
     pub address: String,
-    /// Where the kernel's own tools reach the auth service; people reach it at the address.
+    /// Where the CLI's Cloudflare commands reach the auth service; people reach it at the address.
     pub auth_url: String,
     /// Whether the install has a serverless node (`serverless deploy`), which the relay wakes.
     #[serde(default)]
@@ -72,12 +72,12 @@ pub struct Settings {
     /// have none: other Workers reach them by binding.
     pub ports: [u16; 2],
     /// The install's devices (`{ key, role, admin }`: key in hex, roles joined by spaces), and its recovery key as a
-    /// client, from the node on this machine when the kernel is deployed or served: the relay starts its list with
+    /// client, from the node on this machine when the Workers are deployed or served: the relay starts its list with
     /// them when it has none yet.
     #[serde(skip)]
     pub devices: Vec<serde_json::Value>,
     /// The install's first entry's hash (hex), from the node on this machine as `devices` is: what a sign-in for a
-    /// device names beside it (`sign_in_proof`). None for a kernel made before its install.
+    /// device names beside it (`sign_in_proof`). None for Workers made before their install.
     #[serde(skip)]
     pub genesis: Option<String>,
     /// The serverless node's endpoint key (hex), which only its Worker holds: its public half is on the relay's list.
@@ -101,17 +101,17 @@ pub struct Settings {
     /// with, `(id, secret)`.
     #[serde(default, skip_serializing)]
     pub google: Option<(String, String)>,
-    /// The API token `kernel deploy` and `serverless deploy` edit the Cloudflare account's Workers with, where
+    /// The API token `cloudflare deploy` and `serverless deploy` edit the Cloudflare account's Workers with, where
     /// CLOUDFLARE_API_TOKEN isn't set.
     #[serde(default, skip_serializing)]
     pub cloudflare_token: Option<String>,
     /// The push Worker's secrets, by their names in `SCHEMA` (`PUSH_SECRETS`): the install's VAPID key, which is made
-    /// with the kernel, and the custom build's APNs, FCM and WNS credentials, as its admin adds them.
+    /// with the Workers, and the custom build's APNs, FCM and WNS credentials, as its admin adds them.
     #[serde(default, skip)]
     pub push: std::collections::BTreeMap<String, String>,
-    /// A throwaway network's one person, `(id, name)`, whom its kernel signs in with no passkey and no Google, so clients
-    /// are tested with nobody there. Only `one throwaway` sets it, on the kernel it runs beside its throwaway network, listening
-    /// only on this machine; `deploy` refuses settings with it, so no kernel people use ever has it.
+    /// A throwaway network's one person, `(id, name)`, whom its sign-in lets in with no passkey and no Google, so clients
+    /// are tested with nobody there. Only `one throwaway` sets it, on the Workers it runs beside its throwaway network, listening
+    /// only on this machine; `deploy` refuses settings with it, so no Workers people use ever have it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub throwaway_person: Option<(String, String)>,
 }
@@ -121,9 +121,9 @@ fn google() -> bool {
     crate::config::SIGN_IN == "google"
 }
 
-/// What Varlock reads the kernel's secrets by, each named as the services' binding is; `.env.local` gives their values.
+/// What Varlock reads the Workers' secrets by, each named as the Workers' binding is; `.env.local` gives their values.
 const SCHEMA: &str = "\
-# The kernel's secrets, read with Varlock: their values are in .env.local, as written for a kernel tried on this
+# The Workers' secrets, read with Varlock: their values are in .env.local, as written for Workers tried on this
 # machine, or op(op://…) references to 1Password for one people use. Never print them.
 # @defaultSensitive=true
 # @defaultRequired=true
@@ -137,13 +137,13 @@ BUCKET=
 GOOGLE_CLIENT_ID=
 # @optional
 GOOGLE_CLIENT_SECRET=
-# The API token kernel deploy edits the Cloudflare account's Workers with, where CLOUDFLARE_API_TOKEN isn't set.
+# The API token cloudflare deploy edits the Cloudflare account's Workers with, where CLOUDFLARE_API_TOKEN isn't set.
 # @optional
 CLOUDFLARE_API_TOKEN=
 # The serverless node's endpoint key, made by serverless deploy.
 # @optional
 SERVERLESS_KEY=
-# The push Worker's: the install's VAPID key (base64url PKCS#8, P-256), made with the kernel, which browsers' pushes
+# The push Worker's: the install's VAPID key (base64url PKCS#8, P-256), made with the Workers, which browsers' pushes
 # are signed with.
 # @optional
 VAPID_KEY=
@@ -187,7 +187,7 @@ fn in_1password(vault: &str, title: &str, value: &str) -> Result<String> {
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
-        .context("the kernel's other secrets are in 1Password, and op (1Password's CLI) isn't here to keep this one there")?;
+        .context("the Workers' other secrets are in 1Password, and op (1Password's CLI) isn't here to keep this one there")?;
     op.stdin.take().unwrap().write_all(template.to_string().as_bytes())?;
     let out = op.wait_with_output()?;
     ensure!(out.status.success(), "1Password didn't keep it: {}", String::from_utf8_lossy(&out.stderr).trim());
@@ -195,7 +195,7 @@ fn in_1password(vault: &str, title: &str, value: &str) -> Result<String> {
     Ok(item["id"].as_str().context("op didn't say the item's id")?.to_string())
 }
 
-/// The Varlock `kernel` reads secrets with, and each platform's download of it with the download's sha256, as its
+/// The Varlock `cloudflare` reads secrets with, and each platform's download of it with the download's sha256, as its
 /// release's checksums.txt says.
 const VARLOCK: &str = "1.24.0";
 const VARLOCK_DOWNLOADS: &[(&str, &str, &str)] = &[
@@ -210,7 +210,7 @@ fn varlock() -> Result<PathBuf> {
     let (_, file, sha256) = VARLOCK_DOWNLOADS
         .iter()
         .find(|(target, _, _)| *target == crate::config::TARGET)
-        .ok_or_else(|| anyhow!("this machine can't run a kernel: Varlock has no build for {}", crate::config::TARGET))?;
+        .ok_or_else(|| anyhow!("this machine can't run the Workers: Varlock has no build for {}", crate::config::TARGET))?;
     let dir = crate::cache().join(format!("varlock-{VARLOCK}"));
     let path = dir.join("varlock");
     if path.exists() {
@@ -232,7 +232,7 @@ fn varlock() -> Result<PathBuf> {
     Ok(path)
 }
 
-/// Where the kernel's secrets' values are: `KEY=value` lines, Varlock's `.env.local`.
+/// Where the Workers' secrets' values are: `KEY=value` lines, Varlock's `.env.local`.
 fn local() -> PathBuf {
     Settings::path().with_file_name(".env.local")
 }
@@ -252,7 +252,7 @@ fn write_private(path: &Path, text: &str) -> Result<()> {
 
 fn none_in(dir: &Path) -> Result<()> {
     let there: Vec<&str> = ["settings.json", ".env.local"].into_iter().filter(|f| dir.join(f).exists()).collect();
-    ensure!(there.is_empty(), "{} has a kernel's {} already, which didn't load: move them away to make new ones", dir.display(), there.join(" and "));
+    ensure!(there.is_empty(), "{} has Workers' {} already, which didn't load: move them away to make new ones", dir.display(), there.join(" and "));
     Ok(())
 }
 
@@ -263,13 +263,13 @@ fn quoted(value: &str) -> String {
 
 impl Settings {
     pub fn path() -> PathBuf {
-        crate::home().join("kernel").join("settings.json")
+        crate::home().join("cloudflare").join("settings.json")
     }
 
     pub fn load() -> Result<Settings> {
         let path = Settings::path();
-        let text = std::fs::read_to_string(&path).with_context(|| format!("this machine runs no kernel yet: {} kernel serve --address <url> starts one, and its settings are on the machine that made it", crate::config::CLI))?;
-        let mut settings: Settings = serde_json::from_str(&text).with_context(|| format!("{} isn't a kernel's settings", path.display()))?;
+        let text = std::fs::read_to_string(&path).with_context(|| format!("this machine has no Cloudflare settings yet: {} cloudflare serve --address <url> runs the Workers here, and their settings are on the machine that deployed them", crate::config::CLI))?;
+        let mut settings: Settings = serde_json::from_str(&text).with_context(|| format!("{} isn't the Workers' settings", path.display()))?;
         let dir = path.parent().unwrap();
         std::fs::write(dir.join(".env.schema"), SCHEMA)?;
         let out = std::process::Command::new(varlock()?)
@@ -279,15 +279,15 @@ impl Settings {
             .env("DO_NOT_TRACK", "1")
             .output()?;
         // Varlock masks secrets in what it says when it can't load them.
-        ensure!(out.status.success(), "Varlock couldn't read the kernel's secrets ({}):\n{}{}", local().display(), String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
-        let secrets: std::collections::BTreeMap<String, String> = serde_json::from_slice(&out.stdout).context("Varlock said something other than the kernel's secrets")?;
+        ensure!(out.status.success(), "Varlock couldn't read the Workers' secrets ({}):\n{}{}", local().display(), String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        let secrets: std::collections::BTreeMap<String, String> = serde_json::from_slice(&out.stdout).context("Varlock said something other than the Workers' secrets")?;
         let get = |name: &str| secrets.get(name).filter(|v| !v.is_empty()).cloned();
         settings.auth_secret = get("AUTH_SECRET").context("no AUTH_SECRET")?;
         settings.bucket = get("BUCKET").map(|b| serde_json::from_str(&b)).transpose().context("BUCKET isn't JSON")?;
         settings.cloudflare_token = get("CLOUDFLARE_API_TOKEN");
         settings.serverless_key = get("SERVERLESS_KEY").unwrap_or_default();
         settings.push = PUSH_SECRETS.iter().filter_map(|name| Some((name.to_string(), get(name)?))).collect();
-        // A kernel from before pushes had its own makes its VAPID key now, kept as its other secrets are.
+        // Workers from before pushes had their own make their VAPID key now, kept as its other secrets are.
         if !settings.push.contains_key("VAPID_KEY") {
             let key = vapid_key();
             settings.set_secret("VAPID_KEY", &key)?;
@@ -300,8 +300,8 @@ impl Settings {
         Ok(settings)
     }
 
-    /// Refuses unless this machine has no kernel's settings or secrets, even ones that don't load, for new ones to be
-    /// made: new settings would keep an earlier kernel's secrets, or replace settings that only failed to load.
+    /// Refuses unless this machine has no Workers' settings or secrets, even ones that don't load, for new ones to be
+    /// made: new settings would keep earlier Workers' secrets, or replace settings that only failed to load.
     pub fn none_here() -> Result<()> {
         none_in(Settings::path().parent().unwrap())
     }
@@ -331,7 +331,7 @@ impl Settings {
         }
     }
 
-    /// A throwaway network's kernel (`one throwaway`): on free ports here, its address its gateway's at 127.0.0.1, which `one throwaway`
+    /// A throwaway network's Workers (`one throwaway`): on free ports here, its address its gateway's at 127.0.0.1, which `one throwaway`
     /// lets each device it borrows reach at the same address; its bucket where its node serves its data (`bucket`), and
     /// `person` signed in with nothing to show.
     pub fn for_throwaway(bucket: &str, person: (String, String)) -> Result<Settings> {
@@ -378,7 +378,7 @@ impl Settings {
         }
         let vault = text.split("op(op://").nth(1).and_then(|rest| rest.split('/').next()).filter(|v| !v.is_empty());
         let kept = match vault {
-            Some(vault) => format!("op(op://{vault}/{}/password)", in_1password(vault, &format!("{} kernel {name}", self.name), value)?),
+            Some(vault) => format!("op(op://{vault}/{}/password)", in_1password(vault, &format!("{} Cloudflare {name}", self.name), value)?),
             None => quoted(value),
         };
         lines.push(format!("{name}={kept}"));
@@ -477,7 +477,7 @@ impl Settings {
             "auth" => {
                 // Whether a request's signer is one of the install's endpoints, and an admin's.
                 plain("RELAY", "service:relay".into());
-                // Pushes to a person's devices, by the push Worker's entrypoint for the kernel's own Workers.
+                // Pushes to a person's devices, by the push Worker's entrypoint for the install's own Workers.
                 plain("PUSH", "service:push:Sender".into());
                 plain("ADDRESS", self.address.clone());
                 plain("NAME", self.name.clone());
@@ -518,7 +518,7 @@ impl Settings {
     }
 }
 
-/// The kernel's services as one workerd runs them, with `modules` in `SERVICES`' order, and the gateway serving the
+/// The install's Workers as one workerd runs them, with `modules` in `WORKERS`' order, and the gateway serving the
 /// web client's files from `web`; and the serverless node, if the install has one and this build carries it.
 pub fn served(settings: &Settings, modules: Vec<Vec<u8>>, web: &Path) -> Vec<Served> {
     served_with(settings, modules, web, crate::serverless::modules().ok())
@@ -529,7 +529,7 @@ pub fn served_with(settings: &Settings, modules: Vec<Vec<u8>>, web: &Path, serve
     let node = serverless.clone().filter(|_| settings.serverless).map(|modules| crate::serverless::served(settings, modules));
     // A build without the serverless node's WebAssembly has no MCP Worker, and nothing binds one.
     let mcp = serverless.is_some();
-    SERVICES
+    WORKERS
         .iter()
         .zip(modules)
         .filter_map(|((name, entry, class), module)| Some((name, class, module, modules_of(name, entry, serverless.as_ref())?)))
@@ -625,7 +625,7 @@ impl Settings {
     /// apps open links to the address, and the guide to connecting an AI (`llms.txt`).
     pub fn web(&self) -> Vec<(String, Vec<u8>)> {
         let mut files: Vec<(String, Vec<u8>)> =
-            crate::config::KERNEL.iter().filter_map(|(path, bytes)| Some((path.strip_prefix("web/")?.to_string(), bytes.to_vec()))).collect();
+            crate::config::CLOUDFLARE.iter().filter_map(|(path, bytes)| Some((path.strip_prefix("web/")?.to_string(), bytes.to_vec()))).collect();
         // The page says whose it is before anyone signs in: the custom build's name.
         let attr = |v: &str| v.replace('&', "&amp;").replace('"', "&quot;").replace('<', "&lt;");
         files.push(("icons.json".into(), crate::screen::ICONS.to_vec()));
@@ -723,22 +723,22 @@ pub fn windows_package() -> String {
 }
 
 /// `/.well-known/windows-app-web-link`: the pages at the address the Windows app opens, when a link to one is opened
-/// from another app, as the web client has them (kernel/web/web.js): You, a page, its Services, an app's screen,
+/// from another app, as the web client has them (cloudflare/web/web.js): You, a page, its Services, an app's screen,
 /// Settings, a Vault request and an invite.
 fn windows_links() -> Vec<u8> {
     let paths = ["/", "/page/*", "/services/*", "/app/*", "/settings", "/settings/*", "/vault", "/invite"];
     json!([{ "packageFamilyName": windows_package(), "paths": paths }]).to_string().into_bytes()
 }
 
-/// Runs the kernel's services on this machine, in the pinned workerd, until it stops: their modules built from this
-/// release, the web client's files in `<home>/kernel/web`, and their storage in `<home>/kernel/data`.
+/// Runs the install's Workers on this machine, in the pinned workerd, until it stops: their modules built from this
+/// release, the web client's files in `<home>/cloudflare/web`, and their storage in `<home>/cloudflare/data`.
 pub fn serve(settings: &Settings) -> Result<()> {
     let dir = Settings::path().parent().unwrap().to_path_buf();
-    let modules = SERVICES.iter().map(|(_, entry, _)| module(entry)).collect::<Result<Vec<_>>>()?;
+    let modules = WORKERS.iter().map(|(_, entry, _)| module(entry)).collect::<Result<Vec<_>>>()?;
     let web = dir.join("web");
     let served = served(settings, modules, &web);
     let here = |a: &str| a.strip_prefix("127.0.0.1:").or_else(|| a.strip_prefix("http://127.0.0.1:")).is_some_and(|port| port.parse::<u16>().is_ok());
-    ensure!(settings.throwaway_person.is_none() || here(&settings.address) && served.iter().all(|s| s.listen.as_deref().is_none_or(here)), "a throwaway network's kernel signs in anyone who reaches it, so it runs only beside its throwaway network, at 127.0.0.1");
+    ensure!(settings.throwaway_person.is_none() || here(&settings.address) && served.iter().all(|s| s.listen.as_deref().is_none_or(here)), "a throwaway network's sign-in lets in anyone who reaches it, so its Workers run only beside its throwaway network, at 127.0.0.1");
     let _ = std::fs::remove_dir_all(&web);
     let mut files = settings.web();
     parses(&files)?;
@@ -751,7 +751,7 @@ pub fn serve(settings: &Settings) -> Result<()> {
     let config = write_config(&dir, &served)?;
     let mut child = start(&config, Vec::new())?;
     let status = child.wait()?;
-    bail!("the kernel's workerd stopped: {status}")
+    bail!("the Workers' workerd stopped: {status}")
 }
 
 /// What makes each file in `in/` brotli at its best in `out/`: quality 11 with the largest window.
@@ -847,13 +847,13 @@ pub fn parses(web: &[(String, Vec<u8>)]) -> Result<()> {
     checked
 }
 
-/// A kernel service's module, built from the sources this release was signed with by the pinned Bun, once per
+/// A Worker's module, built from the sources this release was signed with by the pinned Bun, once per
 /// version of them.
 pub fn module(entry: &str) -> Result<Vec<u8>> {
-    module_from(crate::config::KERNEL.iter().map(|(p, b)| (p.to_string(), b.to_vec())).collect(), entry)
+    module_from(crate::config::CLOUDFLARE.iter().map(|(p, b)| (p.to_string(), b.to_vec())).collect(), entry)
 }
 
-/// A kernel service's module, built from `files` (paths in `kernel/`).
+/// A Worker's module, built from `files` (paths in `cloudflare/`).
 pub fn module_from(files: Vec<(String, Vec<u8>)>, entry: &str) -> Result<Vec<u8>> {
     let mut hash = Sha256::new();
     for (path, bytes) in &files {
@@ -861,11 +861,11 @@ pub fn module_from(files: Vec<(String, Vec<u8>)>, entry: &str) -> Result<Vec<u8>
         hash.update(bytes);
     }
     let hash = data_encoding::HEXLOWER.encode(&hash.finalize());
-    let kept = crate::cache().join("kernel").join(format!("{}-{}.js", &hash[..32], entry.replace('/', "-")));
+    let kept = crate::cache().join("cloudflare").join(format!("{}-{}.js", &hash[..32], entry.replace('/', "-")));
     if let Ok(module) = std::fs::read(&kept) {
         return Ok(module);
     }
-    let dir = std::env::temp_dir().join(format!("{}-kernel-{}", crate::config::CLI, rand::random::<u64>()));
+    let dir = std::env::temp_dir().join(format!("{}-cloudflare-{}", crate::config::CLI, rand::random::<u64>()));
     let built = (|| {
         for (path, bytes) in &files {
             let path = dir.join(path);
@@ -883,7 +883,7 @@ pub fn module_from(files: Vec<(String, Vec<u8>)>, entry: &str) -> Result<Vec<u8>
     Ok(module)
 }
 
-/// Builds `entry` in the kernel folder `dir` into one ES module.
+/// Builds `entry` in the Workers' folder `dir` into one ES module.
 pub fn build(dir: &Path, entry: &str) -> Result<Vec<u8>> {
     let bun = crate::deploy::bun()?;
     let cache = bun.parent().unwrap().join("cache");
@@ -900,7 +900,7 @@ pub fn build(dir: &Path, entry: &str) -> Result<Vec<u8>> {
     Ok(std::fs::read(out)?)
 }
 
-/// A kernel service as one workerd runs it: its name, module, Durable Object class, the address it listens on, and its
+/// A Worker as one workerd runs it: its name, module, Durable Object class, the address it listens on, and its
 /// bindings: (name, a text, or `service:<name>` for another service).
 pub struct Served {
     pub name: String,
@@ -921,7 +921,7 @@ pub struct Served {
 pub const NEARBY: &str = "nearby";
 
 /// Writes the workerd config that runs `served` into `dir` (their modules beside it, their storage in `dir/data`),
-/// readable only by its owner, since bindings hold the kernel's secrets.
+/// readable only by its owner, since bindings hold the Workers' secrets.
 pub fn write_config(dir: &Path, served: &[Served]) -> Result<PathBuf> {
     let quote = |s: &str| format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n"));
     let mut services = Vec::new();
@@ -931,7 +931,7 @@ pub fn write_config(dir: &Path, served: &[Served]) -> Result<PathBuf> {
     let mut sockets = Vec::new();
     let mut workers = Vec::new();
     for (i, s) in served.iter().enumerate() {
-        ensure!(s.name.chars().all(|c| c.is_ascii_lowercase() || c == '-'), "a kernel service's name is lowercase");
+        ensure!(s.name.chars().all(|c| c.is_ascii_lowercase() || c == '-'), "a Worker's name is lowercase");
         std::fs::write(dir.join(format!("{}.js", s.name)), &s.module)?;
         let mut modules = vec![format!("(name = \"worker.js\", esModule = embed {})", quote(&format!("{}.js", s.name)))];
         for (name, bytes) in &s.modules {
@@ -1083,7 +1083,7 @@ impl Cloudflare {
     /// Uploads a Worker: its modules (name, type, bytes), the first its main one, and its bindings and Durable Object
     /// class: → the version it deployed, if Cloudflare says.
     pub(crate) fn upload(&self, name: &str, modules: &[(&str, &str, &[u8])], metadata: &Value) -> Result<Option<String>> {
-        let boundary = format!("kernel-{}", data_encoding::HEXLOWER.encode(&rand::random::<[u8; 12]>()));
+        let boundary = format!("cloudflare-{}", data_encoding::HEXLOWER.encode(&rand::random::<[u8; 12]>()));
         let mut body = Vec::new();
         body.extend(format!("--{boundary}\r\nContent-Disposition: form-data; name=\"metadata\"\r\nContent-Type: application/json\r\n\r\n{metadata}\r\n").as_bytes());
         for (module, kind, bytes) in modules {
@@ -1197,7 +1197,7 @@ fn mime(path: &str) -> &'static str {
     }
 }
 
-/// A kernel service's Worker's name on Cloudflare: `<cli>-<service>`, so custom builds sharing an account don't clash.
+/// A Worker's name on Cloudflare: `<cli>-<service>`, so custom builds sharing an account don't clash.
 pub fn worker_name(service: &str) -> String {
     format!("{}-{service}", crate::config::CLI)
 }
@@ -1248,32 +1248,32 @@ pub fn metadata(settings: &Settings, service: &str, class: Option<&str>, migrati
     (meta, complete)
 }
 
-/// Deploys the kernel's services to Cloudflare, each a Worker with its Durable Object, built from this release, the
+/// Deploys the install's Workers to Cloudflare, each with its Durable Object, built from this release, the
 /// gateway with the web client's files (`web`) as its static assets, which it serves itself. A service whose binding
 /// names one not deployed yet goes up without it, and again once that one is.
 pub fn deploy(cf: &Cloudflare, settings: &Settings, modules: &[Vec<u8>], web: &[(String, Vec<u8>)]) -> Result<()> {
-    deploy_some(cf, settings, modules, web, &SERVICES.iter().map(|(s, _, _)| *s).collect::<Vec<_>>())
+    deploy_some(cf, settings, modules, web, &WORKERS.iter().map(|(s, _, _)| *s).collect::<Vec<_>>())
 }
 
 /// `deploy`, of only the services named.
 pub fn deploy_some(cf: &Cloudflare, settings: &Settings, modules: &[Vec<u8>], web: &[(String, Vec<u8>)], services: &[&str]) -> Result<()> {
-    ensure!(settings.throwaway_person.is_none(), "a throwaway network's kernel signs in anyone who reaches it, so it runs only beside its throwaway network");
+    ensure!(settings.throwaway_person.is_none(), "a throwaway network's sign-in lets in anyone who reaches it, so its Workers run only beside its throwaway network");
     if services.contains(&"gateway") {
         parses(web)?;
     }
-    let mut left: Vec<usize> = (0..SERVICES.len()).filter(|i| services.contains(&SERVICES[*i].0)).collect();
+    let mut left: Vec<usize> = (0..WORKERS.len()).filter(|i| services.contains(&WORKERS[*i].0)).collect();
     let mut scripts = cf.scripts()?;
     let uploaded = Uploaded::load();
     let mut sent = Vec::new();
     for _ in 0..2 {
         let mut again = Vec::new();
         for i in left {
-            let (service, _, class) = SERVICES[i];
+            let (service, _, class) = WORKERS[i];
             let name = worker_name(service);
             let migration = scripts.get(&name).and_then(|s| s.migration.clone());
             let (mut meta, complete) = metadata(settings, service, class, migration.as_deref(), |other| scripts.contains_key(other) || other == name);
             let url = settings.place(service).map(|(url, _)| url);
-            let Some(wasm) = modules_of(service, SERVICES[i].1, crate::serverless::modules().ok().as_ref()) else { bail!("this build has no serverless node, which the {service} service runs: {} update builds one", crate::config::CLI) };
+            let Some(wasm) = modules_of(service, WORKERS[i].1, crate::serverless::modules().ok().as_ref()) else { bail!("this build has no serverless node, which the {service} service runs: {} update builds one", crate::config::CLI) };
             let mut what = vec![meta.to_string().into_bytes(), modules[i].clone(), url.unwrap_or("").as_bytes().to_vec()];
             what.extend(wasm.iter().flat_map(|(name, bytes)| [name.as_bytes().to_vec(), bytes.clone()]));
             if service == "gateway" {
@@ -1321,9 +1321,9 @@ pub struct Script {
     pub migration: Option<String>,
 }
 
-/// What this machine last uploaded to each of the kernel's Workers: a hash of everything it sent (the secrets in its
+/// What this machine last uploaded to each of the install's Workers: a hash of everything it sent (the secrets in its
 /// bindings too), and the version Cloudflare made of it. A Worker that would get the same, and still runs that
-/// version (no other upload, edit or rollback since), isn't uploaded again: an update deploys the kernel each time the node changes, and most of
+/// version (no other upload, edit or rollback since), isn't uploaded again: an update deploys the Workers each time the node changes, and most of
 /// its changes leave every Worker as it was.
 pub(crate) struct Uploaded(serde_json::Map<String, Value>);
 

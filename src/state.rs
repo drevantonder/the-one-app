@@ -31,7 +31,7 @@ pub struct Here<'a> {
     pub backups: Option<Value>,
     /// Where an agent reads how to connect itself, when the install has no address.
     pub guide: Option<String>,
-    /// Whether people manage passkeys at the install's address: not in a throwaway network, whose kernel signs its person in
+    /// Whether people manage passkeys at the install's address: not in a throwaway network, whose sign-in lets its person in
     /// with none.
     pub passkeys: bool,
     /// What it knows of each device now: `kind` (as it last said), and whatever else it says of it.

@@ -1,4 +1,4 @@
-// The kernel's own tests, run by `workerd test` (tests/kernel.rs runs them with cargo test).
+// The Workers' own tests, run by `workerd test` (tests/cloudflare.rs runs them with cargo test).
 import { b64u, databaseKey, idOf, keyPair, openAppKey, openSealed, openUnder, random, sealAppKey, sealTo, sealUnder } from "../shared/crypto.js";
 import { presign } from "../shared/s3.js";
 import { verify } from "../shared/token.js";

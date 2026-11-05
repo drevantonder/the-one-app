@@ -41,7 +41,7 @@ const KEY_ID: &str = "the one app 2026-11-01 backups: a key's id";
 
 /// Opens an epoch's key sealed to the recovery key, with the recovery key's secret (its Ed25519 seed).
 pub fn unseal(recovery_secret: &[u8; 32], sealed: &[u8]) -> Result<[u8; 32]> {
-    let key = crate::kernel::open_sealed(&crate::kernel::twin(recovery_secret).0, sealed).map_err(|_| anyhow!("that recovery key doesn't open this backup"))?;
+    let key = crate::cloudflare::open_sealed(&crate::cloudflare::twin(recovery_secret).0, sealed).map_err(|_| anyhow!("that recovery key doesn't open this backup"))?;
     key.try_into().map_err(|_| anyhow!("not a sealed key"))
 }
 
@@ -272,8 +272,8 @@ fn newest_holding(bucket: &Place, scope: &str, prefix: &str, app: &str, database
     let mut keys = crate::db::Keys::new();
     for (n, epoch) in epochs {
         let Some(sealed) = bucket.get(&crate::keys::app_key_name(scope, app, *n))? else { continue };
-        if let Ok(key) = crate::kernel::open_app_key(epoch, app, &sealed) {
-            keys.insert(*n, crate::kernel::database_key(&key, database));
+        if let Ok(key) = crate::cloudflare::open_app_key(epoch, app, &sealed) {
+            keys.insert(*n, crate::cloudflare::database_key(&key, database));
         }
     }
     let mut copies: Vec<u64> = bucket.list(&format!("{prefix}/copy"))?.iter().filter_map(|n| n.parse().ok()).filter(|n| *n != hinted).collect();
@@ -614,8 +614,8 @@ fn steps_of(replayed: ScopeDb, store: &crate::store::Store, root: Option<crate::
     let mut log_keys: BTreeMap<u32, [u8; 32]> = BTreeMap::new();
     for n in 1..=(keys.len() as u32 + 8) {
         let Some(sealed) = place.get(&format!("{install}/bucket/{}", crate::keys::app_key_name("global", crate::members::APP, n)))? else { continue };
-        if let Some(app) = keys.iter().find_map(|k| crate::kernel::open_app_key(k, crate::members::APP, &sealed).ok()) {
-            log_keys.insert(n, crate::kernel::database_key(&app, crate::log::NAME));
+        if let Some(app) = keys.iter().find_map(|k| crate::cloudflare::open_app_key(k, crate::members::APP, &sealed).ok()) {
+            log_keys.insert(n, crate::cloudflare::database_key(&app, crate::log::NAME));
         }
     }
     let prefix = crate::database::steps::prefix("global");
@@ -703,9 +703,9 @@ pub async fn check_databases(place: &Place, install: &str, snapshot: &Snapshot, 
         let mut keys = crate::db::Keys::new();
         for (n, epoch) in epochs {
             let Ok(Some(sealed)) = copy.get(&crate::keys::app_key_name(scope, app, *n)).await else { continue };
-            match crate::kernel::open_app_key(epoch, app, &sealed.bytes) {
+            match crate::cloudflare::open_app_key(epoch, app, &sealed.bytes) {
                 // A scope database's steps are sealed as its log is (`database::steps`).
-                Ok(key) => drop(keys.insert(*n, crate::kernel::database_key(&key, if (app, db) == (crate::members::APP, crate::database::steps::NAME) { crate::log::NAME } else { db }))),
+                Ok(key) => drop(keys.insert(*n, crate::cloudflare::database_key(&key, if (app, db) == (crate::members::APP, crate::database::steps::NAME) { crate::log::NAME } else { db }))),
                 Err(err) => out.push(format!("{scope} {said}: its key in epoch {n}: {err:#}")),
             }
         }
@@ -794,7 +794,7 @@ mod tests {
         // A database with more steps than one copy holds, so a reader starts from its copy.
         let prefix = "global/board/main";
         let app = crate::db::app_key(&bucket, &epoch, "global", "board", 1, true).await.unwrap().unwrap();
-        let keys = crate::db::Keys::from([(1, crate::kernel::database_key(&app, "main"))]);
+        let keys = crate::db::Keys::from([(1, crate::cloudflare::database_key(&app, "main"))]);
         let mut db = crate::db::Db::open(&bucket, prefix, keys).await.unwrap();
         db.sign_as(device.clone());
         db.migrate(&bucket, &["create table posts (text text)".to_string()]).await.unwrap();
@@ -821,7 +821,7 @@ mod tests {
             scope: "global",
             key: epoch,
             epochs: crate::db::Keys::from([(1, epoch)]),
-            sealed: crate::kernel::seal_to(&crate::kernel::twin_public(recovery.verifying_key().as_bytes()).unwrap(), &epoch).unwrap(),
+            sealed: crate::cloudflare::seal_to(&crate::cloudflare::twin_public(recovery.verifying_key().as_bytes()).unwrap(), &epoch).unwrap(),
             device: *device.verifying_key().as_bytes(),
             now,
             previous,

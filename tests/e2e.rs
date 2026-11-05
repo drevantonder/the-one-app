@@ -1,4 +1,4 @@
-//! Real nodes on this machine, reaching each other through the relay of a real kernel's gateway.
+//! Real nodes on this machine, reaching each other through the relay at a real install's gateway.
 
 use std::time::{Duration, Instant};
 
@@ -13,10 +13,10 @@ async fn start(name: &str) -> Node {
     Node::start(&dir, one::services::built_in()).await.unwrap()
 }
 
-/// A kernel whose gateway's relay the devices of `a`'s install reach each other through, taking only `a` and those it
+/// Workers whose relay the devices of `a`'s install reach each other through, taking only `a` and those it
 /// admits: `a` says it's the install's.
-async fn relay(a: &Node) -> crate::kernel::Kernel {
-    let k = tokio::task::block_in_place(|| crate::kernel::Kernel::for_devices(vec![one::entry::hex(&a.id())]));
+async fn relay(a: &Node) -> crate::cloudflare::Workers {
+    let k = tokio::task::block_in_place(|| crate::cloudflare::Workers::for_devices(vec![one::entry::hex(&a.id())]));
     let me = one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None, token: None };
     a.set_setting(&me, "address", Some(&k.address)).await.unwrap();
     k
@@ -159,7 +159,7 @@ async fn backed_up(dir: &std::path::Path, install: &str, recovery: &[u8; 32], sc
     for n in copy.list(&format!("{folder}/_epochs")).unwrap().iter().filter_map(|n| n.parse::<u32>().ok()) {
         let epoch = one::backups::unseal(recovery, &copy.get(&one::keys::epoch_name(scope, n, "recovery")).unwrap().unwrap()).unwrap();
         let Ok(Some(sealed)) = copy.get(&one::keys::app_key_name(scope, app, n)) else { continue };
-        keys.insert(n, one::kernel::database_key(&one::kernel::open_app_key(&epoch, app, &sealed).unwrap(), database));
+        keys.insert(n, one::cloudflare::database_key(&one::cloudflare::open_app_key(&epoch, app, &sealed).unwrap(), database));
     }
     match one::db::Db::open(&copy, &format!("{folder}/{app}/{database}"), keys).await {
         Ok(db) => db.query(sql, &[]).unwrap().into_iter().filter_map(|r| r.values().next().and_then(|v| v.as_str()).map(str::to_string)).collect(),
@@ -198,7 +198,7 @@ async fn only_a_persons_own_device_or_their_inviter_lets_a_device_in() {
     let opens = async |key: &ed25519_dalek::SigningKey, scope: &one::entry::Scope| -> Vec<u32> {
         let got = a.sealed_keys(&me, scope, Some(&one::entry::hex(&key.verifying_key().to_bytes())), None).await.unwrap();
         let sealed = got["sealed"].as_object().unwrap();
-        sealed.iter().filter(|(_, v)| one::kernel::open_sealed(&one::keys::seal_secret(key), &data_encoding::BASE64URL_NOPAD.decode(v.as_str().unwrap().as_bytes()).unwrap()).is_ok()).map(|(n, _)| n.parse().unwrap()).collect()
+        sealed.iter().filter(|(_, v)| one::cloudflare::open_sealed(&one::keys::seal_secret(key), &data_encoding::BASE64URL_NOPAD.decode(v.as_str().unwrap().as_bytes()).unwrap()).is_ok()).map(|(n, _)| n.parse().unwrap()).collect()
     };
 
     // Andre's new laptop, approved from his machine, opens global.
@@ -231,7 +231,7 @@ async fn only_a_persons_own_device_or_their_inviter_lets_a_device_in() {
     assert!(removed["new_epochs"].as_array().unwrap().iter().any(|e| e["scope"] == "global" && e["epoch"] == 2), "{removed}");
     assert_eq!(opens(&laptop, &global).await, vec![1]);
     for f in walk(&dir).into_iter().filter(|p| p.to_string_lossy().contains("/_epochs/2/")) {
-        assert!(one::kernel::open_sealed(&one::keys::seal_secret(&laptop), &std::fs::read(&f).unwrap()).is_err(), "{} opens for the removed laptop", f.display());
+        assert!(one::cloudflare::open_sealed(&one::keys::seal_secret(&laptop), &std::fs::read(&f).unwrap()).is_err(), "{} opens for the removed laptop", f.display());
     }
     assert_eq!(opens(&sams, &global).await, vec![1, 2]);
     a.call(board("post", json!({ "text": "after" }))).await.unwrap();
@@ -329,9 +329,9 @@ async fn only_a_repos_owner_and_collaborators_push_to_it_and_only_its_owners_del
     for (app, database) in [("repos", "main"), (one::members::APP, one::vault::DATABASE)] {
         let sealed = a.sealed_keys(&me, &global, None, Some(app)).await.unwrap();
         for (n, epoch) in epochs["sealed"].as_object().unwrap() {
-            let epoch: [u8; 32] = one::kernel::open_sealed(&one::keys::seal_secret(&sams), &b64(epoch)).unwrap().try_into().unwrap();
-            let key = one::kernel::open_app_key(&epoch, app, &b64(&sealed["sealed"][n])).unwrap();
-            keys.push(one::keys::Handed { scope: "global".into(), epoch: n.parse().unwrap(), app: app.into(), database: database.into(), key: one::kernel::database_key(&key, database) });
+            let epoch: [u8; 32] = one::cloudflare::open_sealed(&one::keys::seal_secret(&sams), &b64(epoch)).unwrap().try_into().unwrap();
+            let key = one::cloudflare::open_app_key(&epoch, app, &b64(&sealed["sealed"][n])).unwrap();
+            keys.push(one::keys::Handed { scope: "global".into(), epoch: n.parse().unwrap(), app: app.into(), database: database.into(), key: one::cloudflare::database_key(&key, database) });
         }
     }
 
@@ -486,9 +486,9 @@ async fn a_groups_github_organization_shows_only_to_its_members_and_a_persons_gi
     for (app, database) in [("repos", "main"), (one::members::APP, one::vault::DATABASE)] {
         let sealed = a.sealed_keys(&me, &global, None, Some(app)).await.unwrap();
         for (n, epoch) in epochs["sealed"].as_object().unwrap() {
-            let epoch: [u8; 32] = one::kernel::open_sealed(&one::keys::seal_secret(&sams), &b64(epoch)).unwrap().try_into().unwrap();
-            let key = one::kernel::open_app_key(&epoch, app, &b64(&sealed["sealed"][n])).unwrap();
-            keys.push(one::keys::Handed { scope: "global".into(), epoch: n.parse().unwrap(), app: app.into(), database: database.into(), key: one::kernel::database_key(&key, database) });
+            let epoch: [u8; 32] = one::cloudflare::open_sealed(&one::keys::seal_secret(&sams), &b64(epoch)).unwrap().try_into().unwrap();
+            let key = one::cloudflare::open_app_key(&epoch, app, &b64(&sealed["sealed"][n])).unwrap();
+            keys.push(one::keys::Handed { scope: "global".into(), epoch: n.parse().unwrap(), app: app.into(), database: database.into(), key: one::cloudflare::database_key(&key, database) });
         }
     }
     let client = Caller { key: e.key, user: sam.user.clone(), agent: None, token: Some(one::node::client_token(&e.key)) };

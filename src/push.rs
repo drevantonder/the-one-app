@@ -1,11 +1,11 @@
 //! Push: how an app, an agent or the install reaches someone who isn't looking, on every device of theirs that can get
-//! notifications. Every push is a note sealed to the one device it's for, which the kernel's push Worker
-//! (`kernel/push/`) carries to Apple's, Google's, Microsoft's or a browser's push service; only that device opens it.
+//! notifications. Every push is a note sealed to the one device it's for, which the install's push Worker
+//! (`cloudflare/push/`) carries to Apple's, Google's, Microsoft's or a browser's push service; only that device opens it.
 //!
 //! A note is JSON (`Note`): what to show, the app screen a tap opens, and maybe an action its device checks itself,
 //! signed by the device that sent it (`keys::signed_request`, domain `one/note`, so its receiver can tell which of the
-//! install's devices it's from; a note the kernel's own Workers send is unsigned), then sealed to the receiving device's
-//! seal key (`kernel::seal_to`), the key the install's signed entries list for it, never one a node or the kernel says.
+//! install's devices it's from; a note the install's own Workers send is unsigned), then sealed to the receiving device's
+//! seal key (`cloudflare::seal_to`), the key the install's signed entries list for it, never one a node or a Worker says.
 //!
 //! Each device that gets pushes registers its address with the Worker itself (`register_request`). A node answers the
 //! `push` ops for any caller (`node::push`): `send` seals a note to each of the caller's devices and hands them to the
@@ -58,7 +58,7 @@ pub fn seal_note(by: &SigningKey, to: &[u8; 32], note: &Note, at: u64) -> Result
     let mut note = note.clone();
     loop {
         let signed = crate::keys::signed_request(by, SIGNED_NOTE, serde_json::to_value(&note)?, at);
-        let sealed = crate::kernel::seal_to(to, &serde_json::to_vec(&signed)?)?;
+        let sealed = crate::cloudflare::seal_to(to, &serde_json::to_vec(&signed)?)?;
         if sealed.len() <= NOTE_BYTES {
             return Ok(sealed);
         }
@@ -73,9 +73,9 @@ pub fn seal_note(by: &SigningKey, to: &[u8; 32], note: &Note, at: u64) -> Result
 }
 
 /// Opens a note sealed to the device whose seal secret is `secret`: → the note, and the key that signed it (hex), or
-/// none for a note from the kernel. A signature that's wrong is refused.
+/// none for a note from the install's Workers. A signature that's wrong is refused.
 pub fn open_note(secret: &[u8; 32], sealed: &[u8]) -> Result<(Note, Option<String>)> {
-    let plain = crate::kernel::open_sealed(secret, sealed)?;
+    let plain = crate::cloudflare::open_sealed(secret, sealed)?;
     let mut v: Value = serde_json::from_slice(&plain).map_err(|_| anyhow!("not a note"))?;
     let by = match v.as_object_mut().and_then(|o| o.remove("sig")) {
         Some(sig) => {
@@ -108,7 +108,7 @@ pub struct Address {
 }
 
 /// What a device sends the push Worker to register `address` (`POST <address>/push/register`): signed with its key,
-/// naming its seal key `seal`, which only the kernel's own Workers seal to.
+/// naming its seal key `seal`, which only the install's own Workers seal to.
 pub fn register_request(key: &SigningKey, seal: &[u8; 32], address: &Address, at: u64) -> Result<Value> {
     let mut fields = serde_json::to_value(address)?;
     fields["seal"] = json!(HEXLOWER.encode(seal));
@@ -192,12 +192,12 @@ mod tests {
     #[test]
     fn a_note_opens_only_where_it_was_sealed() {
         let by = SigningKey::from_bytes(&rand::random());
-        let (secret, public) = crate::kernel::twin(&rand::random());
+        let (secret, public) = crate::cloudflare::twin(&rand::random());
         let note = Note { id: "0123456789abcdef".into(), title: "Hi".into(), body: "there".into(), app: "board".into(), screen: "main".into(), ..Default::default() };
         let sealed = seal_note(&by, &public, &note, 1).unwrap();
         let (opened, from) = open_note(&secret, &sealed).unwrap();
         assert_eq!((opened, from), (note.clone(), Some(HEXLOWER.encode(by.verifying_key().as_bytes()))));
-        assert!(open_note(&crate::kernel::twin(&rand::random()).0, &sealed).is_err(), "another device's key opens nothing");
+        assert!(open_note(&crate::cloudflare::twin(&rand::random()).0, &sealed).is_err(), "another device's key opens nothing");
 
         let long = Note { body: "é".repeat(5000), ..note };
         let sealed = seal_note(&by, &public, &long, 1).unwrap();

@@ -1,4 +1,4 @@
-//! The serverless node (`serverless/`) on Cloudflare: a node of the install as a Worker in its kernel's account, with
+//! The serverless node (`serverless/`) on Cloudflare: a node of the install as a Worker in the account of its other Workers, with
 //! no address of its own, and an iroh endpoint of its own key, which the relay wakes. A release carries its built
 //! WebAssembly (`update` builds it, where Rust builds for WebAssembly); the apps it runs it reads from the install's
 //! bucket, each at its latest deploy.
@@ -6,7 +6,7 @@
 use anyhow::{Context, Result};
 use serde_json::{Value, json};
 
-use crate::kernel::{Cloudflare, Settings, Uploaded, worker_name};
+use crate::cloudflare::{Cloudflare, Settings, Uploaded, worker_name};
 
 /// The serverless node's Worker is `<cli>-node`.
 pub const SERVICE: &str = "node";
@@ -33,10 +33,10 @@ pub fn modules_from(glue: Vec<u8>, wasm: Vec<u8>) -> Vec<(String, &'static str, 
     ]
 }
 
-/// It as the kernel's workerd runs it here, from `modules`, beside the kernel's services.
-pub fn served(settings: &Settings, mut modules: Vec<(String, &'static str, Vec<u8>)>) -> crate::kernel::Served {
+/// It as the workerd that runs the install's Workers here runs it, from `modules`, beside them.
+pub fn served(settings: &Settings, mut modules: Vec<(String, &'static str, Vec<u8>)>) -> crate::cloudflare::Served {
     let (_, _, main) = modules.remove(0);
-    crate::kernel::Served {
+    crate::cloudflare::Served {
         name: SERVICE.into(),
         module: main,
         modules: modules.into_iter().map(|(name, _, bytes)| (name, bytes)).collect(),
@@ -45,23 +45,23 @@ pub fn served(settings: &Settings, mut modules: Vec<(String, &'static str, Vec<u
         bindings: settings.bindings(SERVICE).into_iter().map(|(n, v, _)| (n, v)).collect(),
         assets: None,
         // A throwaway network's bucket is on this machine.
-        outbound: Some(crate::kernel::NEARBY.to_string()),
+        outbound: Some(crate::cloudflare::NEARBY.to_string()),
     }
 }
 
 /// What its upload says besides its modules: its bindings (`Settings::bindings`), its endpoint's Durable Object class
 /// `Node` and that class's migration the first time, and its logs on.
 pub fn metadata(settings: &Settings, migration: Option<&str>, exists: impl Fn(&str) -> bool) -> Value {
-    let (mut meta, _) = crate::kernel::metadata(settings, SERVICE, Some("Node"), migration, exists);
+    let (mut meta, _) = crate::cloudflare::metadata(settings, SERVICE, Some("Node"), migration, exists);
     // Its logs say which calls ran here, for whoever owns the account.
     meta["observability"] = json!({ "enabled": true });
     meta
 }
 
-/// Puts the serverless node in the kernel's Cloudflare account, with no address, and
+/// Puts the serverless node in the Cloudflare account of the install's Workers, with no address, and
 /// the relay again, which hands it the datagrams sent to its endpoint once it's there.
 pub fn deploy(cf: &Cloudflare, settings: &Settings) -> Result<()> {
-    anyhow::ensure!(settings.throwaway_person.is_none(), "a throwaway network's kernel runs only beside its throwaway network");
+    anyhow::ensure!(settings.throwaway_person.is_none(), "a throwaway network's Workers run only beside its throwaway network");
     anyhow::ensure!(settings.serverless_endpoint().is_some(), "the serverless node has no key: serverless deploy makes one");
     let modules = modules()?;
     let name = worker_name(SERVICE);
@@ -78,8 +78,8 @@ pub fn deploy(cf: &Cloudflare, settings: &Settings) -> Result<()> {
     }
     // Its address may have been turned on by hand.
     cf.hide(&name)?;
-    let relay = crate::kernel::SERVICES.iter().position(|(s, _, _)| *s == "relay").unwrap();
-    let mut kernel = vec![Vec::new(); crate::kernel::SERVICES.len()];
-    kernel[relay] = crate::kernel::module(crate::kernel::SERVICES[relay].1)?;
-    crate::kernel::deploy_some(cf, settings, &kernel, &[], &["relay"])
+    let relay = crate::cloudflare::WORKERS.iter().position(|(s, _, _)| *s == "relay").unwrap();
+    let mut workers = vec![Vec::new(); crate::cloudflare::WORKERS.len()];
+    workers[relay] = crate::cloudflare::module(crate::cloudflare::WORKERS[relay].1)?;
+    crate::cloudflare::deploy_some(cf, settings, &workers, &[], &["relay"])
 }

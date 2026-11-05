@@ -1,4 +1,4 @@
-//! The MCP Worker's devices (kernel/mcp/), each a client of the install as any app is (one-client, over `<cli>/http/1`),
+//! The MCP Worker's devices (cloudflare/mcp/), each a client of the install as any app is (one-client, over `<cli>/http/1`),
 //! with no socket: one per remote MCP client, in its own Durable Object, which may share this isolate with others'.
 //! What one sends goes to its object's `send(dst, segment size, contents)`, and the relay hands it what's sent to its
 //! key, by RPC, which comes in at `device_deliver`. It lives while its object does, and holds its key only while it
@@ -199,7 +199,7 @@ impl View {
         let mut candidates = one::db::Keys::new();
         for n in 1..=one::db::EPOCHS_MAX {
             let Some(o) = one::bucket::Bucket::get(bucket, &one::keys::epoch_name("global", n, &mine)).await? else { break };
-            if let Some(k) = one::kernel::open_sealed(seal, &o.bytes).ok().and_then(|k| Key::try_from(k).ok()) {
+            if let Some(k) = one::cloudflare::open_sealed(seal, &o.bytes).ok().and_then(|k| Key::try_from(k).ok()) {
                 candidates.insert(n, k);
             }
         }
@@ -208,7 +208,7 @@ impl View {
             let mut log_keys = one::db::Keys::new();
             for (n, epoch) in &candidates {
                 if let Ok(Some(app)) = one::db::app_key(bucket, epoch, "global", members::APP, *n, false).await {
-                    log_keys.insert(*n, one::kernel::database_key(&app, one::log::NAME));
+                    log_keys.insert(*n, one::cloudflare::database_key(&app, one::log::NAME));
                 }
             }
             let read = one::log::open(bucket, &log_keys, &one::log::prefix("global"), "global").await?;
@@ -257,7 +257,7 @@ impl View {
                 continue;
             }
             let Some(o) = one::bucket::Bucket::get(bucket, &one::keys::epoch_name(&scope.to_string(), *n, &mine)).await? else { continue };
-            if let Some(k) = one::kernel::open_sealed(&self.seal, &o.bytes).ok().and_then(|k| Key::try_from(k).ok()).filter(|k| one::keys::epoch_hash(k) == *hash) {
+            if let Some(k) = one::cloudflare::open_sealed(&self.seal, &o.bytes).ok().and_then(|k| Key::try_from(k).ok()).filter(|k| one::keys::epoch_hash(k) == *hash) {
                 keys.insert(*n, k);
             }
         }
@@ -350,7 +350,7 @@ pub async fn device_keys(me: String, need: String, bucket: JsValue) -> Result<St
                 };
                 let Some(app_key) = app_key else { continue };
                 view.apps.insert(id, app_key);
-                let key = data_encoding::BASE64URL_NOPAD.encode(&one::kernel::database_key(&app_key, database));
+                let key = data_encoding::BASE64URL_NOPAD.encode(&one::cloudflare::database_key(&app_key, database));
                 out.push(json!({ "scope": scope.to_string(), "epoch": epoch, "app": app, "database": database, "key": key }));
             }
         }

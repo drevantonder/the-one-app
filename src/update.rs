@@ -18,7 +18,7 @@ const PLATFORMS: [&str; 3] = ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux
 /// Builds the tip of main and has every device run it; with a tag, also publishes it on GitHub.
 /// An update sends out only what changed since the last one here: apps by their deploy, the Mac app by each Mac building
 /// it at once, then the iPhone app for the iPhone it reaches, and the node by building it, which every Linux device then
-/// takes, and which deploys the kernel (and the serverless node with it) from the device with the kernel's settings. Beside it runs `after-update` in this
+/// takes, and which deploys the Workers on Cloudflare (and the serverless node with it) from the device with their settings. Beside it runs `after-update` in this
 /// device's home, if there is one: what else is built from main here, like another custom build's update.
 pub fn run(tag: Option<&str>) -> Result<()> {
     ensure!(!REPO.is_empty(), "this custom build names no repo, so it has nothing to update from");
@@ -122,7 +122,7 @@ pub fn run(tag: Option<&str>) -> Result<()> {
     println!("Building {short}");
     let mut build = Command::new(cargo());
     build.current_dir(&src).env("CONFIG", &config).args(["build", "--release"]);
-    // Every release carries the serverless node: one without it couldn't deploy the kernel.
+    // Every release carries the serverless node: one without it couldn't deploy to Cloudflare.
     build.env("SERVERLESS", serverless(&src, &config, "release").context("couldn't build the serverless node, so nothing was sent out")?);
     // And the web client's way to nodes: one without it couldn't reach them.
     build.env("CLIENT", client(&src, &config).context("couldn't build the web client's WebAssembly, so nothing was sent out")?);
@@ -149,12 +149,12 @@ pub fn run(tag: Option<&str>) -> Result<()> {
         println!("  couldn't deploy the new versions of the built-in apps: {err:#}");
     }
     add_where(&moved);
-    let kernel_failed = deploy_kernel(&linux, short);
+    let cloudflare_failed = deploy_cloudflare(&linux, short);
 
     let Some(tag) = tag else {
         let after = finish(after);
         ensure!(!failed, "not every device runs {short}");
-        ensure!(!kernel_failed, "every device runs {short}, but the kernel isn't deployed");
+        ensure!(!cloudflare_failed, "every device runs {short}, but it isn't deployed to Cloudflare");
         std::fs::write(&done, &this)?;
         mark_macs(missed_macs);
         return after;
@@ -201,7 +201,7 @@ pub fn run(tag: Option<&str>) -> Result<()> {
     gh.current_dir(&dir).args(["release", "create", tag, "--repo", REPO, "--target", &commit, "--generate-notes"]).args(&assets);
     step(&mut gh)?;
     ensure!(!failed, "released {tag}, but not every device runs it");
-    ensure!(!kernel_failed, "released {tag}, but the kernel isn't deployed");
+    ensure!(!cloudflare_failed, "released {tag}, but it isn't deployed to Cloudflare");
     Ok(())
 }
 
@@ -265,8 +265,8 @@ impl Parts {
                     }
                 }
                 Some("apple") => parts.mac = true,
-                // The kernel's sources and the serverless node's are in the node, which deploys them; the Mac's needn't.
-                Some("kernel") if !file.starts_with("kernel/test/") => parts.node = true,
+                // The Workers' sources and the serverless node's are in the node, which deploys them; the Mac's needn't.
+                Some("cloudflare") if !file.starts_with("cloudflare/test/") => parts.node = true,
                 Some("serverless") => parts.node = true,
                 // The client is the Macs', and in the node too: its WebAssembly is the web client's, and the serverless node's.
                 Some("client") => (parts.node, parts.mac) = (true, true),
@@ -276,7 +276,7 @@ impl Parts {
                         parts.services.push(service);
                     }
                 }
-                Some("docs" | "tests" | "android" | "windows" | "kernel") => {}
+                Some("docs" | "tests" | "android" | "windows" | "cloudflare") => {}
                 None if file.ends_with(".md") || file == "LICENSE" || file == ".gitignore" => {}
                 _ => (parts.node, parts.mac) = (true, true),
             }
@@ -457,20 +457,20 @@ fn turn() -> Result<std::fs::File> {
     Ok(file)
 }
 
-/// Deploys the kernel, with the build being sent out (`commit`), from each of `linux` that has a kernel's settings: only
-/// there are its secrets (`kernel deploy` in its home's kernel/). It waits for each to run that build, so it never
+/// Deploys to Cloudflare, with the build being sent out (`commit`), from each of `linux` that has the Cloudflare settings: only
+/// there are its secrets (`cloudflare deploy` in its home's cloudflare/). It waits for each to run that build, so it never
 /// deploys the one before, and tries again what may pass (a link dropping as nodes restart, Cloudflare). Every install
-/// has a kernel, so it fails if no device deployed it. True if it failed.
-fn deploy_kernel(linux: &[Value], commit: &str) -> bool {
+/// has its Workers on Cloudflare, so it fails if no device deployed them. True if it failed.
+fn deploy_cloudflare(linux: &[Value], commit: &str) -> bool {
     let home = format!("${{{}_HOME:-${{XDG_DATA_HOME:-$HOME/.local/share}}/{CLI}}}", CLI.to_uppercase());
     // The node's own build deploys it (what's called the CLI there may be something else), once it's the one sent
     // out: 75 says it isn't yet. On another device that's Shell's sh's parent; on this one, which needs no Shell on
     // anyone's pages, the node that wrote its pid. As a login there would: its profile is where 1Password's
-    // sign-in, which the kernel's secrets are read with, usually is, and ~/.local/bin where op may be.
+    // sign-in, which the Cloudflare secrets are read with, usually is, and ~/.local/bin where op may be.
     let script = |node: &str| format!(
-        r#"[ -f "{home}/kernel/settings.json" ] || {{ echo none; exit 0; }}; node=/proc/{node}/exe
+        r#"[ -f "{home}/cloudflare/settings.json" ] || {{ echo none; exit 0; }}; node=/proc/{node}/exe
 case "$("$node" version --json)" in *'"commit":"{commit}"'*) ;; *) echo "still on $("$node" version --json)"; exit 75 ;; esac
-. "$HOME/.profile" >/dev/null 2>&1; PATH="$HOME/.local/bin:$PATH" "$node" kernel deploy"#
+. "$HOME/.profile" >/dev/null 2>&1; PATH="$HOME/.local/bin:$PATH" "$node" cloudflare deploy"#
     );
     let (here, others): (Vec<&Value>, Vec<&Value>) = linux.iter().filter(|d| d["online"] == true).partition(|d| d["here"] == true);
     let (mut failed, mut deployed) = (false, false);
@@ -504,21 +504,21 @@ case "$("$node" version --json)" in *'"commit":"{commit}"'*) ;; *) echo "still o
             Ok(r) if r["exit"] == 0 && r["stdout"].as_str().is_some_and(|o| o.trim() == "none") => {}
             Ok(r) if r["exit"] == 0 => {
                 deployed = true;
-                println!("  {name}: deployed the kernel at {commit}");
+                println!("  {name}: deployed to Cloudflare at {commit}");
             }
             Ok(r) => {
                 failed = true;
-                println!("  {name}: couldn't deploy the kernel:\n{}{}", r["stdout"].as_str().unwrap_or(""), r["stderr"].as_str().unwrap_or("").trim());
+                println!("  {name}: couldn't deploy to Cloudflare:\n{}{}", r["stdout"].as_str().unwrap_or(""), r["stderr"].as_str().unwrap_or("").trim());
             }
             Err(err) => {
                 failed = true;
-                let hint = if format!("{err:#}").contains("isn't on your pages") { " (add Shell in the App Store, or run one update on the device with the kernel's settings)" } else { "" };
-                println!("  {name}: couldn't deploy the kernel: {err:#}{hint}");
+                let hint = if format!("{err:#}").contains("isn't on your pages") { " (add Shell in the App Store, or run one update on the device with the Cloudflare settings)" } else { "" };
+                println!("  {name}: couldn't deploy to Cloudflare: {err:#}{hint}");
             }
         }
     }
     if !deployed && !failed {
-        println!("  no device deployed the kernel: none of them online has its settings");
+        println!("  no device deployed to Cloudflare: none of them online has the settings");
     }
     failed || !deployed
 }

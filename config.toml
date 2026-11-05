@@ -17,7 +17,7 @@ apps = ["board", "repos", "apps", "device-activity"]
 # The apps every agent needs from the start: MCP's instructions carry their guide in full (the rest come with search),
 # and `one mcp --code` keeps their tools as tools, beside search and execute.
 always_on = ["board"]
-# How people sign in, which says who they are and opens no key (kernel/auth/worker.js): keys are only on their devices,
+# How people sign in, which says who they are and opens no key (cloudflare/auth/worker.js): keys are only on their devices,
 # and a new device gets in only when one of theirs approves it. "passkey": a passkey, whose PRF output, kept in the
 # browser, makes it a device of its own there. "google": for a workplace whose people sign in with their Google account
 # at join_domain, joining with an invite for its email; admins still sign in with a passkey.
@@ -36,7 +36,7 @@ logo = "icons/Logo.png"
 # till then): Android's, the custom build's Firebase project's google-services.json (relative to this file), with an
 # Android app whose package is app.<cli>.android; Windows', its Microsoft Entra app registration's Application (client) ID
 # and its service principal's Object ID, which WNS knows the Windows app by once Microsoft maps its package to them. The
-# kernel sends with their secrets (FCM_ACCOUNT, WNS_*).
+# push Worker sends with their secrets (FCM_ACCOUNT, WNS_*).
 firebase = ""
 wns_app = ""
 wns_object = ""

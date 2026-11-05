@@ -1,6 +1,6 @@
-//! The kernel services (`kernel/`: auth, the relay, the URL signer) as nodes meet them: the formats they agree on
-//! (`kernel/shared/crypto.js` writes the same ones, and `tests/contracts.rs` checks they do), checking access tokens,
-//! and building and running the services in workerd.
+//! The install's Workers on Cloudflare (`cloudflare/`: auth, the relay, the URL signer) as nodes meet them: the formats they agree on
+//! (`cloudflare/shared/crypto.js` writes the same ones, and `tests/contracts.rs` checks they do), checking access tokens,
+//! and building and running the Workers in workerd.
 
 #[cfg(feature = "node")]
 use std::time::Duration;
@@ -166,7 +166,7 @@ pub fn verify(token: &str, jwks: &Value, iss: &str, now: u64) -> Result<Claims> 
 }
 
 /// The auth service at an install's address, as nodes check its tokens: its keys fetched and kept five minutes, or
-/// until a token names a key that isn't among them (as `kernel/shared/token.js`'s `Issuer` does).
+/// until a token names a key that isn't among them (as `cloudflare/shared/token.js`'s `Issuer` does).
 #[cfg(feature = "node")]
 pub struct Issuer {
     pub iss: String,
@@ -202,6 +202,6 @@ impl Issuer {
 }
 
 #[cfg(feature = "node")]
-mod services;
+mod workers;
 #[cfg(feature = "node")]
-pub use services::*;
+pub use workers::*;

@@ -1267,7 +1267,7 @@ pub fn passkey(endpoint: &crate::keys::Endpoint, user: &str, name: &str, credent
 }
 
 // The rest of `global`'s member entries, as people's devices write them: the web client builds the same content
-// (kernel/web/members.js), and tests/contracts.rs checks it does.
+// (cloudflare/web/members.js), and tests/contracts.rs checks it does.
 
 pub fn role(user: &str, role: Role) -> Content {
     node("role", json!({ "user": user, "role": role }))

@@ -1,4 +1,4 @@
-// The kernel's formats, which nodes read too (src/kernel.rs; tests/contracts.rs checks they agree).
+// The Workers' formats, which nodes read too (src/cloudflare.rs; tests/contracts.rs checks they agree).
 //
 // Keys are a tree per scope. A scope's key is 32 random bytes, and so is each app's key in it, kept sealed under the
 // scope's key: nonce ‖ AES-256-GCM(HKDF-SHA256(scope key, "one/app\0<app>"), nonce, app key), so erasing an app (deleting
@@ -179,7 +179,7 @@ export async function x25519Public(secret) {
   return b64u.decode((await crypto.subtle.exportKey("jwk", key)).x);
 }
 
-/// The X25519 key an Ed25519 public key is the twin of (`kernel::twin_public`): what's sealed to a Rust endpoint, or
+/// The X25519 key an Ed25519 public key is the twin of (`cloudflare::twin_public`): what's sealed to a Rust endpoint, or
 /// to the recovery key, is sealed to it. u = (1 + y) / (1 - y) mod 2^255 - 19.
 export function twinPublic(edPublic) {
   const b = bytes(edPublic), P = (1n << 255n) - 19n;

@@ -92,7 +92,7 @@ fn failed(err: anyhow::Error) -> JsValue {
 /// A database's keys as `worker.js` keeps them: JSON, `{ <epoch>: <key, base64url> }`.
 fn keys_of(keys: &str) -> Result<one::db::Keys> {
     let keys: BTreeMap<u32, String> = serde_json::from_str(keys)?;
-    keys.into_iter().map(|(n, k)| Ok((n, one::kernel::decode_key(&k)?))).collect()
+    keys.into_iter().map(|(n, k)| Ok((n, one::cloudflare::decode_key(&k)?))).collect()
 }
 
 fn signing_key(seed: &str) -> Result<ed25519_dalek::SigningKey> {

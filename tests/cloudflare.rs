@@ -1,13 +1,13 @@
-//! The kernel services (`kernel/`) running in the pinned workerd, as nodes and the auth service use them.
+//! The install's Workers (`cloudflare/`) running in the pinned workerd, as nodes and the auth service use them.
 
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use data_encoding::BASE64URL_NOPAD as B64U;
-use one::kernel::{self, Served};
+use one::cloudflare::{self, Served};
 use serde_json::{Value, json};
 
-/// The kernel's files as they are in this checkout, tests and all, with the screens' design kit where build.rs puts it.
+/// The Workers' files as they are in this checkout, tests and all, with the screens' design kit where build.rs puts it.
 fn files() -> Vec<(String, Vec<u8>)> {
     fn walk(root: &Path, dir: &Path, out: &mut Vec<(String, Vec<u8>)>) {
         for entry in std::fs::read_dir(dir).unwrap().flatten() {
@@ -23,7 +23,7 @@ fn files() -> Vec<(String, Vec<u8>)> {
             }
         }
     }
-    let root = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/..")).join("kernel");
+    let root = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/..")).join("cloudflare");
     let mut out = Vec::new();
     walk(&root, &root, &mut out);
     let screen = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/..")).join("src/screen");
@@ -38,7 +38,7 @@ fn files() -> Vec<(String, Vec<u8>)> {
 }
 
 fn module(entry: &str) -> Vec<u8> {
-    kernel::module_from(files(), entry).unwrap()
+    cloudflare::module_from(files(), entry).unwrap()
 }
 
 /// Sockets listening on ports `port` gave out, until `run` gives them to the workerd serving there.
@@ -67,7 +67,7 @@ async fn past(ms: u64) {
     }
 }
 
-/// A workerd running kernel services, stopped when dropped.
+/// A workerd running the Workers, stopped when dropped.
 struct Running {
     child: std::process::Child,
     dir: std::path::PathBuf,
@@ -94,8 +94,8 @@ fn run(services: Vec<Served>) -> Running {
             })
             .collect()
     };
-    let config = kernel::write_config(&dir, &services).unwrap();
-    let child = kernel::start(&config, listening).unwrap();
+    let config = cloudflare::write_config(&dir, &services).unwrap();
+    let child = cloudflare::start(&config, listening).unwrap();
     Running { child, dir }
 }
 
@@ -112,8 +112,8 @@ pub(crate) fn post(url: &str, headers: &[(&str, &str)], body: Value) -> (u16, Va
 }
 
 #[test]
-fn the_kernels_own_tests_pass() {
-    let dir = crate::temp("kernel-tests");
+fn the_workers_own_tests_pass() {
+    let dir = crate::temp("workers-tests");
     std::fs::write(dir.join("tests.js"), module("test/tests.js")).unwrap();
     std::fs::write(
         dir.join("config.capnp"),
@@ -125,7 +125,7 @@ fn the_kernels_own_tests_pass() {
     .unwrap();
     let out = std::process::Command::new(one::apps::workerd().unwrap()).arg("test").arg(dir.join("config.capnp")).output().unwrap();
     let _ = std::fs::remove_dir_all(&dir);
-    assert!(out.status.success(), "the kernel's tests failed:\n{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+    assert!(out.status.success(), "the Workers' tests failed:\n{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
 }
 
 fn url_query(url: &str) -> std::collections::BTreeMap<String, String> {
@@ -233,46 +233,46 @@ impl Passkey {
     }
 }
 
-/// The real kernel services, as an install runs them: people reach them at its address, the gateway's.
-pub(crate) struct Kernel {
+/// The real Workers, as an install runs them: people reach them at its address, the gateway's.
+pub(crate) struct Workers {
     _running: Running,
     pub(crate) address: String,
-    /// The stand-in sites the kernel's requests go to (test/sites.js).
+    /// The stand-in sites the Workers' requests go to (test/sites.js).
     pub(crate) sites: String,
 }
 
-impl Kernel {
-    /// The kernel, its relay taking only `devices` (public keys, hex) and those they admit.
-    pub(crate) fn for_devices(devices: Vec<String>) -> Kernel {
-        Kernel::start_as(false, devices)
+impl Workers {
+    /// The Workers, their relay taking only `devices` (public keys, hex) and those they admit.
+    pub(crate) fn for_devices(devices: Vec<String>) -> Workers {
+        Workers::start_as(false, devices)
     }
 
     /// As `for_devices`, for an install whose people sign in with Google at test.example, the stand-in sites as
     /// Google.
-    fn google(devices: Vec<String>) -> Kernel {
-        Kernel::start_as(true, devices)
+    fn google(devices: Vec<String>) -> Workers {
+        Workers::start_as(true, devices)
     }
 
-    fn start_as(google: bool, devices: Vec<String>) -> Kernel {
+    fn start_as(google: bool, devices: Vec<String>) -> Workers {
         let gateway = port();
-        let mut settings = kernel::Settings::new("Test", &format!("http://localhost:{gateway}"));
+        let mut settings = cloudflare::Settings::new("Test", &format!("http://localhost:{gateway}"));
         settings.ports = [port(), gateway];
         settings.auth_url = format!("http://127.0.0.1:{}", settings.ports[0]);
         // The install's first devices, its admin's machines that run its calls.
         settings.devices = devices.into_iter().map(|key| json!({ "key": key, "role": "compute", "admin": true })).collect();
         settings.genesis = Some(data_encoding::HEXLOWER.encode(&GENESIS));
         settings.bucket = Some(json!({ "endpoint": "https://s3.test", "bucket": "install", "region": "auto", "key_id": "id", "secret": "bucket secret" }));
-        let modules = kernel::SERVICES.iter().map(|(_, entry, _)| module(entry)).collect();
+        let modules = cloudflare::WORKERS.iter().map(|(_, entry, _)| module(entry)).collect();
         let sites = port();
         let web = crate::temp("web");
         std::fs::create_dir_all(web.join("screen")).unwrap();
         std::fs::write(web.join("index.html"), "<!doctype html><title>The web client</title>").unwrap();
         std::fs::write(web.join("frame.html"), "<!doctype html><title>A screen's frame</title>").unwrap();
         std::fs::write(web.join("screen/kit.css"), include_str!("../src/screen/kit.css")).unwrap();
-        for (path, bytes) in kernel::precompressed(&[("screen/kit.css".into(), include_bytes!("../src/screen/kit.css").to_vec())]).unwrap() {
+        for (path, bytes) in cloudflare::precompressed(&[("screen/kit.css".into(), include_bytes!("../src/screen/kit.css").to_vec())]).unwrap() {
             std::fs::write(web.join(path), bytes).unwrap();
         }
-        let mut served = kernel::served_with(&settings, modules, &web, None);
+        let mut served = cloudflare::served_with(&settings, modules, &web, None);
         for s in served.iter_mut().filter(|s| ["signer", "mcp", "push"].contains(&s.name.as_str())) {
             s.outbound = Some("sites".into());
         }
@@ -282,7 +282,7 @@ impl Kernel {
         }
         served.push(Served { name: "sites".into(), module: module("test/sites.js"), modules: vec![], class: None, listen: Some(format!("127.0.0.1:{sites}")), bindings: vec![], assets: None, outbound: None });
         let running = run(served);
-        Kernel { _running: running, address: settings.address, sites: format!("http://127.0.0.1:{sites}") }
+        Workers { _running: running, address: settings.address, sites: format!("http://127.0.0.1:{sites}") }
     }
 
     fn browser(&self) -> Browser {
@@ -310,8 +310,8 @@ fn signed(key: &ed25519_dalek::SigningKey, route: &str, mut fields: Value) -> Va
 }
 
 /// An invite `by` an endpoint for `name`, as its device makes one: → its secret and the user id it's for.
-fn invited(k: &Kernel, by: &ed25519_dalek::SigningKey, name: &str, email: Option<&str>) -> (String, String) {
-    let invite = kernel::invite(&k.address, by, name, None, email).unwrap();
+fn invited(k: &Workers, by: &ed25519_dalek::SigningKey, name: &str, email: Option<&str>) -> (String, String) {
+    let invite = cloudflare::invite(&k.address, by, name, None, email).unwrap();
     (invite.link.split_once('#').unwrap().1.to_string(), invite.user)
 }
 
@@ -348,7 +348,7 @@ fn google_callback(browser: &mut Browser, back: &str, failed: &str, email: &str)
 #[test]
 fn an_admin_signs_in_only_with_a_passkey() {
     let (admin, admin_hex) = endpoint();
-    let k = Kernel::google(vec![admin_hex]);
+    let k = Workers::google(vec![admin_hex]);
     let (secret, andre) = invited(&k, &admin, "Andre", Some("andre@test.example"));
     // Signing up with Google takes the account the invite is for, and nobody signs up by the domain alone.
     let mut lees = k.browser();
@@ -391,7 +391,7 @@ fn an_admin_signs_in_only_with_a_passkey() {
 fn a_sign_in_for_a_device_names_it_and_auth_passes_it_on() {
     use one::sign_in_proof::{self, Account, Proof};
     let (admin, admin_hex) = endpoint();
-    let k = Kernel::for_devices(vec![admin_hex.clone()]);
+    let k = Workers::for_devices(vec![admin_hex.clone()]);
     let (secret, andre) = invited(&k, &admin, "Andre", None);
     let passkey = k.passkey();
     let mut first = k.browser();
@@ -434,7 +434,7 @@ fn a_sign_in_for_a_device_names_it_and_auth_passes_it_on() {
     assert_eq!(asked(&mut plain, &one::keys::Endpoint::of(&ed25519_dalek::SigningKey::from_bytes(&rand::random()))), Value::Null);
 
     // With Google, the ID token it asks for names the device.
-    let g = Kernel::google(vec![admin_hex]);
+    let g = Workers::google(vec![admin_hex]);
     let mut browser = g.browser();
     let (status, client) = browser.post("/api/auth/oauth2/register", json!({ "client_name": "Chrome on Mac", "redirect_uris": [format!("{}/callback", g.address)], "token_endpoint_auth_method": "none", "grant_types": ["authorization_code"], "response_types": ["code"] }));
     assert_eq!(status, 201, "{client}");
@@ -454,7 +454,7 @@ fn a_sign_in_finished_from_a_link_lets_its_device_in_only_by_a_tap() {
     use one::sign_in_proof::{self, Proof};
     use sha2::Digest;
     let (admin, admin_hex) = endpoint();
-    let k = Kernel::for_devices(vec![admin_hex]);
+    let k = Workers::for_devices(vec![admin_hex]);
     let (secret, _) = invited(&k, &admin, "Andre", None);
     let passkey = k.passkey();
     let mut first = k.browser();
@@ -553,7 +553,7 @@ fn a_device_asking_to_join_is_pushed_to_its_persons_other_devices() {
     use data_encoding::{BASE64, HEXLOWER};
     let (admin, admin_hex) = endpoint();
     let (phone, phone_hex) = endpoint();
-    let k = Kernel::for_devices(vec![admin_hex, phone_hex.clone()]);
+    let k = Workers::for_devices(vec![admin_hex, phone_hex.clone()]);
     let (secret, _) = invited(&k, &admin, "Andre", None);
     let passkey = k.passkey();
     let mut andre = k.browser();
@@ -578,7 +578,7 @@ fn a_device_asking_to_join_is_pushed_to_its_persons_other_devices() {
         got.as_array().unwrap().iter().filter(|p| p["url"] == endpoint).map(|p| {
             let text = sub.take().expect("one push to the phone").open(&BASE64.decode(p["body"].as_str().unwrap().as_bytes()).unwrap());
             let (note, by) = one::push::open_note(&one::keys::seal_secret(&phone), &B64U.decode(&text).unwrap()).unwrap();
-            assert_eq!(by, None, "from the kernel");
+            assert_eq!(by, None, "from the install's Workers");
             note
         }).collect()
     };
@@ -601,11 +601,11 @@ fn a_device_asking_to_join_is_pushed_to_its_persons_other_devices() {
     assert_eq!(notes.iter().map(|n| (n.title.as_str(), n.screen.as_str(), n.action.is_none())).collect::<Vec<_>>(), [("MacBook Pro joined", "devices", true)]);
 }
 
-/// The install the test kernels are for: its first entry's hash, as the device deploying them holds it.
+/// The install the tests' Workers are for: its first entry's hash, as the device deploying them holds it.
 const GENESIS: [u8; 32] = [5; 32];
 
-/// iroh endpoints, as nodes are, through the relay at a kernel's address and nothing else: its relay protocol is
-/// iroh-relay's Rust as WebAssembly in a Durable Object (kernel/relay/), which must agree with iroh's own.
+/// iroh endpoints, as nodes are, through the relay at an install's address and nothing else: its relay protocol is
+/// iroh-relay's Rust as WebAssembly in a Durable Object (cloudflare/relay/), which must agree with iroh's own.
 mod relay {
     use std::time::Duration;
 
@@ -768,7 +768,7 @@ mod relay {
     #[test]
     fn only_the_relay_says_a_device_was_taken_out() {
         let first = SecretKey::generate();
-        let k = super::Kernel::for_devices(vec![hex(&first)]);
+        let k = super::Workers::for_devices(vec![hex(&first)]);
         let address = k.address.replace("localhost", "127.0.0.1");
         let dir = crate::temp("taken-out");
         let secret: [u8; 32] = rand::random();
@@ -791,7 +791,7 @@ mod relay {
     #[test]
     fn the_relay_carries_only_the_installs_endpoints() {
         let first = SecretKey::generate();
-        let k = super::Kernel::for_devices(vec![hex(&first)]);
+        let k = super::Workers::for_devices(vec![hex(&first)]);
         let address = k.address.replace("localhost", "127.0.0.1");
         let runtime = tokio::runtime::Runtime::new().unwrap();
         runtime.block_on(async {
@@ -892,7 +892,7 @@ mod relay {
     fn a_request_hands_keys_only_to_the_node_it_is_sent_to() {
         use std::sync::{Arc, Mutex};
         let (slow, quick) = (SecretKey::generate(), SecretKey::generate());
-        let k = super::Kernel::for_devices(vec![hex(&slow), hex(&quick)]);
+        let k = super::Workers::for_devices(vec![hex(&slow), hex(&quick)]);
         let address = k.address.replace("localhost", "127.0.0.1");
         let secret: [u8; 32] = rand::random();
         assert_eq!(tell(&address, &slow, json!({ "add": hex(&SecretKey::from_bytes(&secret)), "role": "client" })), 204);
@@ -968,7 +968,7 @@ mod relay {
     #[test]
     fn a_session_endpoint_gets_in_only_as_its_device_vouches() {
         let first = SecretKey::generate();
-        let k = super::Kernel::for_devices(vec![hex(&first)]);
+        let k = super::Workers::for_devices(vec![hex(&first)]);
         let address = k.address.replace("localhost", "127.0.0.1");
         let phone = SecretKey::generate();
         let signer = |k: &SecretKey| ed25519_dalek::SigningKey::from_bytes(&k.to_bytes());

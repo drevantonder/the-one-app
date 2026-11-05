@@ -239,7 +239,7 @@ pub struct Caller {
     pub user: String,
     /// The agent that asked through it, by name ("Claude Code"), when one did.
     pub agent: Option<String>,
-    /// The kernel access token it came with, when it's a sign-in's: a call
+    /// The access token from sign-in it came with, when it's a sign-in's: a call
     /// gets its keys and bucket URLs from the vault with it, and passes it on with the call to another device.
     pub token: Option<String>,
 }
@@ -817,7 +817,7 @@ impl Node {
 
     /// Creates the install, with every built-in app added (owned by admins), so anyone may add one to their own page,
     /// and these installed in `global`. Its first person is `user` if given (who they were in an install this one
-    /// replaces, so their account at its kernel is still theirs), else someone new.
+    /// replaces, so their account at its sign-in is still theirs), else someone new.
     pub async fn create_with(&self, name: &str, user_name: &str, user: Option<&str>, apps: &[&str]) -> Result<String> {
         self.ensure_no_install()?;
         ensure!(!name.trim().is_empty() && !user_name.trim().is_empty(), "give the install a name, and yourself one");
@@ -838,9 +838,9 @@ impl Node {
         self.open_install()?;
         self.replay_all().await?;
         let bucket = self.bucket()?;
-        let recovery_seal = crate::kernel::twin_public(recovery.verifying_key().as_bytes())?;
+        let recovery_seal = crate::cloudflare::twin_public(recovery.verifying_key().as_bytes())?;
         for (to, seal) in [("recovery".to_string(), recovery_seal), (hex(&me.key), me.seal)] {
-            crate::db::created(&bucket, &crate::keys::epoch_name("global", 1, &to), &crate::kernel::seal_to(&seal, &global)?).await?;
+            crate::db::created(&bucket, &crate::keys::epoch_name("global", 1, &to), &crate::cloudflare::seal_to(&seal, &global)?).await?;
         }
         self.0.epochs.lock().unwrap().insert(Scope::Global, crate::db::Keys::from([(1, global)]));
         self.put_entry(&Scope::Global, &entry).await?;
@@ -1391,7 +1391,7 @@ fn load_pairings(dir: &Path) -> HashMap<[u8; 16], Pairing> {
         .collect()
 }
 
-/// The key of the device whose home is `dir`, for what this machine signs as itself without its node (`kernel invite`).
+/// The key of the device whose home is `dir`, for what this machine signs as itself without its node (`cloudflare invite`).
 pub fn device_key(dir: &Path) -> Result<ed25519_dalek::SigningKey> {
     let bytes = std::fs::read(dir.join("device.json")).with_context(|| format!("{} has no device: {} serve starts one", dir.display(), crate::config::CLI))?;
     let file: DeviceFile = serde_json::from_slice(&bytes)?;

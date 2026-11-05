@@ -8,7 +8,7 @@
 //!
 //! `backlink` is the author's entry before it in that log, `previous` the heads of the other logs its author had read
 //! (of its scope, and of `global`), `body` the sha256 of the body (hex) and `size` its length. Entries are replayed in
-//! causal order, each after everything it follows, never by the `time` it claims. `kernel/shared/crypto.js` signs and
+//! causal order, each after everything it follows, never by the `time` it claims. `cloudflare/shared/crypto.js` signs and
 //! checks the same (`signEntry`, `checkEntry`), and `tests/contracts.rs` checks they agree.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};

@@ -24,7 +24,7 @@
 // and keeps the token Google gave; with a passkey, the prompt's challenge names it, the install and when
 // (`joinChallenge`), and auth keeps the assertion. Either is kept (`proofs`) and passed on unchanged with that device's
 // request to join (`sign_in`), never checked here: only the person's devices count it, and only for an account their
-// own devices recorded. Refusing a request forgets its proof too. A throwaway network's kernel signs its own ID token, with
+// own devices recorded. Refusing a request forgets its proof too. A throwaway network's sign-in signs its own ID token, with
 // nothing else to show.
 //
 // Only a device that signed in itself is let in by its sign-in: a sign-in finished from a link opened on another device
@@ -34,7 +34,7 @@
 // any other's (the sign-in code's page, a site) came back elsewhere, and its proof is passed on as `{ by_link: proof }`,
 // which the person's devices approve only by a tap, and older ones read as nothing.
 //
-// It pushes (`PUSH`, the push Worker's entrypoint for the kernel) to the person's devices, never the one asking: "<device>
+// It pushes (`PUSH`, the push Worker's entrypoint for the install's own Workers) to the person's devices, never the one asking: "<device>
 // wants in · <place>", with the action `{ join: <code> }`, when nothing approved a request within `WANTS_IN`; and
 // "<device> joined · <place>" once one is approved, opening Settings › Devices. It knows a person's devices as those that
 // asked to join as them here, or said they're theirs as they asked which wait (`devices`): only for whom to push to,
@@ -45,11 +45,11 @@
 // (`RELAY.allowed(key)`), an admin's for what only admins do. A POST's body is the signed request; a GET's or DELETE's
 // is in `x-one-request`, as base64url of its JSON.
 //
-// A throwaway network's kernel (`SIGN_IN` is "throwaway") signs in its first person (`THROWAWAY_USER`, `THROWAWAY_NAME`) with no passkey and
+// A throwaway network's sign-in (`SIGN_IN` is "throwaway") lets in its first person (`THROWAWAY_USER`, `THROWAWAY_NAME`) with no passkey and
 // no Google: its sign-in page goes straight on. Someone it invites joins by opening their link, again with no passkey,
 // and is then who that browser signs in as. It's for testing clients without a person: only `one throwaway` turns it on
-// (kernel::Settings::throwaway_person), on a kernel that listens only on its own machine, and `kernel deploy` refuses one,
-// so no real install's kernel ever does this.
+// (cloudflare::Settings::throwaway_person), on Workers that listen only on their own machine, and `cloudflare deploy` refuses it,
+// so no real install's sign-in ever does this.
 
 import { DurableObject } from "cloudflare:workers";
 import { oauthProvider } from "@better-auth/oauth-provider";
@@ -126,7 +126,7 @@ function joinOf(query) {
 /// A device's key and seal key, from what `join` names.
 const endpointOf = (join) => [hex.decode(join.slice(0, 64)), hex.decode(join.slice(64))];
 
-/// The install's first entry's hash (`GENESIS`, hex, as the device deploying the kernel holds it), which a sign-in for
+/// The install's first entry's hash (`GENESIS`, hex, as the device deploying to Cloudflare holds it), which a sign-in for
 /// a device names beside it: without it, a sign-in names no device, and its device is approved by its code.
 const genesisOf = (env) => (/^[0-9a-f]{64}$/.test(env.GENESIS || "") ? hex.decode(env.GENESIS) : null);
 
@@ -906,7 +906,7 @@ function throwawayInstall(auth, id, name) {
     await tryProof(ctx, user);
     return ctx.json({ person: user.name });
   };
-  // For a sign-in for a device (`join`), an ID token of the kernel's own, as a provider's would be, naming that device:
+  // For a sign-in for a device (`join`), an ID token of sign-in's own, as a provider's would be, naming that device:
   // so the person's devices are seen to let it in by its sign-in. `spoil` names another device instead, as a token they
   // must refuse.
   const tryProof = async (ctx, user) => {

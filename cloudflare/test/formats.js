@@ -1,4 +1,4 @@
-// The kernel's formats, for tests/contracts.rs to check against the Rust that reads them: POST { op, ... } → result.
+// The Workers' formats, for tests/contracts.rs to check against the Rust that reads them: POST { op, ... } → result.
 import { appOf, askedFor, b64u, BEHIND, canonical, certify, checkCertificate, epochHash, checkEntry, checkRequest, databaseKey, ed25519Public, epochOf, hex, idOf, inviteProof, joinChallenge, joinCode, joinNonce, keyPair, mayHand, MOST_NEEDED, oldestNeeded, open, openAppKey, openHandoff, openSealed, openUnder, passkeyKeys, seal, sealAppKey, sealHandoff, sealTo, sealUnder, signEntry, signStep, signedRequest, tokenId, twinPublic, waited, x25519Public } from "../shared/crypto.js";
 import { members } from "../web/members.js";
 

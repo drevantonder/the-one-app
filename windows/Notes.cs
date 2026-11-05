@@ -1,4 +1,4 @@
-// Notifications. The install's push Worker (kernel/push/) carries each note, sealed to this computer's device, through
+// Notifications. The install's push Worker (cloudflare/push/) carries each note, sealed to this computer's device, through
 // WNS as a raw notification, its body the sealed bytes, which wakes this app (the Windows App SDK's
 // PushNotificationManager, by the custom build's Microsoft Entra app: CustomBuild.WnsApp and WnsObject, empty for none,
 // and then nothing registers). The app opens the note with the device's key (client/ffi's OpenNote), asking nothing of

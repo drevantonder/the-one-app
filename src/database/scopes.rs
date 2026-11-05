@@ -267,7 +267,7 @@ impl ScopeDb {
     pub fn nodes(&self) -> Vec<(Key, Key)> {
         let mut out: Vec<(Key, Key)> = self.computes().into_iter().map(|d| (d.key, d.seal)).collect();
         if let Some(k) = self.serverless()
-            && let Ok(seal) = crate::kernel::twin_public(&k)
+            && let Ok(seal) = crate::cloudflare::twin_public(&k)
         {
             out.push((k, seal));
         }
@@ -845,7 +845,7 @@ pub(crate) mod tests {
         assert_eq!(dbg(&db.machines().iter().map(|d| d.key).collect::<Vec<_>>()), dbg(&m.machines.keys().collect::<Vec<_>>()));
         assert_eq!(dbg(&db.clients()), dbg(&m.clients().collect::<Vec<_>>()));
         assert_eq!(dbg(&db.computes()), dbg(&m.computes().collect::<Vec<_>>()));
-        let nodes: Vec<(Key, Key)> = m.computes().map(|c| (c.key, c.seal)).chain(m.serverless().and_then(|k| Some((k, crate::kernel::twin_public(&k).ok()?)))).collect();
+        let nodes: Vec<(Key, Key)> = m.computes().map(|c| (c.key, c.seal)).chain(m.serverless().and_then(|k| Some((k, crate::cloudflare::twin_public(&k).ok()?)))).collect();
         assert_eq!(db.nodes(), nodes);
         for s in m.scopes() {
             assert_eq!(dbg(&db.openers(&s)), dbg(&m.clients().filter(|c| m.may_use(&c.user, &s)).collect::<Vec<_>>()));

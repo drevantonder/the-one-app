@@ -1,6 +1,6 @@
-//! This machine's CLI and MCP signed in to the install's kernel, as every other client is: an OAuth client of its auth
+//! This machine's CLI and MCP signed in at the install's address, as every other client is: an OAuth client of its auth
 //! service, registered the first time it signs in. The person approves a short code by signing in on any device
-//! (`kernel/auth`'s `/sign-in/code`), here in the browser if this machine has a screen. The refresh token is kept in a
+//! (`cloudflare/auth`'s `/sign-in/code`), here in the browser if this machine has a screen. The refresh token is kept in a
 //! file only this machine's user reads, outside the node's data: the node is only ever sent access tokens.
 
 use std::io::Write;
@@ -144,8 +144,8 @@ pub fn start(address: &str, join: Option<&str>) -> Result<Started> {
     Ok(Started { code: code.into(), url: url.into(), address, client, state, verifier, meta })
 }
 
-/// Approves a code as a throwaway network's first person would in a browser, with no passkey: only a throwaway network's kernel
-/// signs anyone in this way (`kernel/auth`'s `throwawayInstall`).
+/// Approves a code as a throwaway network's first person would in a browser, with no passkey: only a throwaway network's sign-in
+/// signs anyone in this way (`cloudflare/auth`'s `throwawayInstall`).
 pub fn approve_on_throwaway(started: &Started) -> Result<()> {
     let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).max_redirects(0).timeout_global(Some(Duration::from_secs(30))).build().into();
     let went = |resp: &ureq::http::Response<ureq::Body>| resp.headers().get("location").and_then(|l| l.to_str().ok()).map(str::to_string);

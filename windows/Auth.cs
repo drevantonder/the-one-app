@@ -1,4 +1,4 @@
-// Signing in, as the web client does (kernel/web/web.js): this app is an OAuth client of the install's auth service,
+// Signing in, as the web client does (cloudflare/web/web.js): this app is an OAuth client of the install's auth service,
 // registered the first time it signs in. Sign-in and consent happen in the person's own browser, where their passkey
 // works, and come back to a port on this machine (RFC 8252's loopback redirect), any port, since auth matches loopback
 // redirects without theirs. The refresh token is kept in Windows' Credential Locker; access tokens only in memory.

@@ -2,7 +2,7 @@
 //! a page opened before shows at once while it asks again. Each is a file in the device's folder (one per person at
 //! each address), sealed under a key from the device's own key (`keys::answers_key`), which the app keeps in the
 //! Keychain, the keystore or the Credential Locker and forgets with the sign-in: another person's device, with its own
-//! key, opens none. Forgotten as it signs out or is taken out. kernel/web/answers.js is the same in a browser.
+//! key, opens none. Forgotten as it signs out or is taken out. cloudflare/web/answers.js is the same in a browser.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};

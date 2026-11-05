@@ -1,7 +1,7 @@
 //! `throwaway`: a throwaway network, an install of its own, made as `create` makes every new one, by a node beside this machine's own with its own
 //! home and ports, so it touches nothing of the person's (src/agents.rs leaves the harnesses alone for a node given a
 //! home). There's one for each checkout (or folder) it's run in, so threads working in different ones each have their
-//! own. Its kernel runs beside it and signs in its first person with no passkey (kernel::Settings::throwaway_person), so a
+//! own. Its Workers run beside it, and its sign-in lets its first person in with no passkey (cloudflare::Settings::throwaway_person), so a
 //! client of this checkout's build, on a device borrowed for it (`throwaway client`), signs in with nobody there; others join
 //! as anyone does, by an invite link the first makes, and again with no passkey (`throwaway client <kind> --as <name>`). It
 //! keeps its data until `throwaway stop`: left alone it stops, and `throwaway` starts it again as it was, as it does when this build
@@ -42,7 +42,7 @@ fn running(dir: &Path) -> Option<String> {
     agent().get(format!("http://{addr}/v1/state")).call().is_ok().then_some(addr)
 }
 
-/// Whether the throwaway network's node started before this build was made: it runs the build it started as, kernel and screens
+/// Whether the throwaway network's node started before this build was made: it runs the build it started as, Workers and screens
 /// included, so a new build (`cargo build`) is picked up by starting it again, which keeps its data.
 fn older_build(dir: &Path) -> bool {
     let modified = |path: &Path| path.metadata().and_then(|m| m.modified()).ok();
@@ -87,7 +87,7 @@ pub fn run(rest: &[String]) -> Result<()> {
             return Ok(());
         }
         Some(cmd @ ("update" | "release" | "publish" | "throwaway")) => bail!("{CLI} {cmd} isn't for the throwaway network"),
-        Some("kernel") if rest.get(1).map(String::as_str) == Some("serve") => bail!("the throwaway network runs its own kernel"),
+        Some("cloudflare") if rest.get(1).map(String::as_str) == Some("serve") => bail!("the throwaway network runs its own Workers"),
         _ => {}
     }
     if rest.first().map(String::as_str) == Some("client") && rest.get(1).map(String::as_str) == Some("web") {
@@ -108,20 +108,20 @@ pub fn run(rest: &[String]) -> Result<()> {
         }
         None => start(&dir)?,
     };
-    let kernel = dir.join("kernel").join("settings.json");
+    let cloudflare = dir.join("cloudflare").join("settings.json");
     if rest.iter().map(String::as_str).eq(["serverless", "deploy"]) {
         return serverless(&dir);
     }
     if rest.first().map(String::as_str) == Some("client") {
-        let settings = load_kernel(&dir)?;
+        let settings = load_cloudflare(&dir)?;
         return client(&dir, &checkout, &settings, &rest[1..]);
     }
     // Before any thread starts: the CLI has none. Its home, so the CLI asks its node with its token, as nobody signed in,
-    // and its kernel's settings are its own kernel's.
+    // and its Cloudflare settings are its own Workers'.
     unsafe { std::env::set_var(addr_var(), &addr) };
     unsafe { std::env::set_var(format!("{}_HOME", CLI.to_uppercase()), &dir) };
     if rest.first().map(String::as_str) == Some("sign-in") {
-        // As its person, with no passkey: the throwaway network's kernel asks for none.
+        // As its person, with no passkey: the throwaway network's sign-in asks for none.
         let address = get("/v1/state")?["install"]["settings"]["address"].as_str().context("the throwaway network has no address")?.to_string();
         let started = one::sign_in::start(&address, None)?;
         one::sign_in::approve_on_throwaway(&started)?;
@@ -142,11 +142,11 @@ pub fn run(rest: &[String]) -> Result<()> {
     println!(
         "This checkout's throwaway network is running on this machine: a new install, Throwaway, with only what every new install
 starts with, and {me} as its admin, who signs in at {address} with no passkey. Its folder is {}, with its
-recovery key; its kernel's settings are in {}.
+recovery key; its Workers' settings are in {}.
 
 {CLI} throwaway --help lists its commands.",
         dir.display(),
-        kernel.display()
+        cloudflare.display()
     );
     Ok(())
 }
@@ -177,11 +177,11 @@ fn git(dir: &Path, args: &[String]) -> Result<()> {
     Ok(())
 }
 
-/// Runs the throwaway network's serverless node beside its kernel, in its workerd, as `serverless deploy` puts one in
+/// Runs the throwaway network's serverless node beside its Workers, in their workerd, as `serverless deploy` puts one in
 /// Cloudflare: its devices answer its endpoint.
 fn serverless(dir: &Path) -> Result<()> {
     anyhow::ensure!(one::serverless::modules().is_ok(), "this build has no serverless node: run this checkout's own build, target/debug/{CLI} throwaway serverless deploy, which builds it");
-    let mut settings = load_kernel(dir)?;
+    let mut settings = load_cloudflare(dir)?;
     if !settings.serverless {
         settings.serverless = true;
         with_home(dir, || settings.save())?;
@@ -189,9 +189,9 @@ fn serverless(dir: &Path) -> Result<()> {
         start(dir)?;
     }
     let addr = running(dir).context("the throwaway network didn't start again")?;
-    let key = settings.serverless_endpoint().context("the throwaway network's kernel has no serverless key")?;
+    let key = settings.serverless_endpoint().context("the throwaway network's Workers have no serverless key")?;
     crate::request(throwaway_agent(dir).post(format!("http://{addr}/v1/settings")).send_json(json!({ "name": "serverless", "value": key })))?;
-    println!("The throwaway network's serverless node runs beside its kernel, its endpoint {}.", &key[..8]);
+    println!("The throwaway network's serverless node runs beside its Workers, its endpoint {}.", &key[..8]);
     Ok(())
 }
 
@@ -211,16 +211,16 @@ fn usage() -> String {
   {CLI} throwaway mcp              its MCP server, for an agent: claude mcp add {CLI}-throwaway -- {mcp}
   {CLI} throwaway sign-in          sign its CLI in as its person, with no browser
   {CLI} throwaway git <args>       git, reaching its repos at its address: {CLI} throwaway git clone <address>/repos/<owner>/<repo>.git, then {CLI} throwaway git push in the clone
-  {CLI} throwaway serverless deploy    run its serverless node beside its kernel, as Cloudflare would
+  {CLI} throwaway serverless deploy    run its serverless node beside its Workers, as Cloudflare would
   {CLI} throwaway client <kind>    a signed-in client of this checkout's build: web, android or windows
   {CLI} throwaway client <kind> --as sam    the same, as someone else, invited by you with Add Someone's link
   {CLI} throwaway stop             stop and delete it, and give back its devices; {CLI} throwaway then starts a new one"
     )
 }
 
-/// The throwaway network's kernel's settings, with its secrets, read as the kernel's own tools read them.
-fn load_kernel(dir: &Path) -> Result<one::kernel::Settings> {
-    with_home(dir, one::kernel::Settings::load)
+/// The throwaway network's Cloudflare settings, with their secrets, read as `cloudflare deploy` reads them.
+fn load_cloudflare(dir: &Path) -> Result<one::cloudflare::Settings> {
+    with_home(dir, one::cloudflare::Settings::load)
 }
 
 /// `f`, with this CLI's home the throwaway network's.
@@ -249,9 +249,9 @@ fn with_addr<T>(addr: &str, f: impl FnOnce() -> T) -> T {
     out
 }
 
-/// Starts the throwaway network's node and kernel: as it was, if it stopped by itself, or a new one. → the node's address.
+/// Starts the throwaway network's node and Workers: as it was, if it stopped by itself, or a new one. → the node's address.
 fn start(dir: &Path) -> Result<String> {
-    let kept = dir.join("kernel").join("settings.json").exists() && dir.join("addr").exists();
+    let kept = dir.join("cloudflare").join("settings.json").exists() && dir.join("addr").exists();
     if !kept {
         return start_new(dir);
     }
@@ -261,11 +261,11 @@ fn start(dir: &Path) -> Result<String> {
     // Its own statement: a listener made in spawn_node's arguments would hold the port while the node starts.
     let free = std::net::TcpListener::bind(&was).is_ok();
     let addr = spawn_node(dir, free.then_some(was.as_str()))?;
-    spawn_kernel(dir, &load_kernel(dir)?, &addr)?;
+    spawn_cloudflare(dir, &load_cloudflare(dir)?, &addr)?;
     Ok(addr)
 }
 
-/// A new throwaway network, and its kernel.
+/// A new throwaway network, and its Workers.
 fn start_new(dir: &Path) -> Result<String> {
     eprintln!("Starting a new throwaway network for this checkout…");
     stop(dir, true)?;
@@ -286,16 +286,16 @@ fn start_new(dir: &Path) -> Result<String> {
     write_private(&dir.join("recovery-key"), &format!("{recovery}\n"))?;
     let state = crate::request(agent().get(on("/v1/state")).call())?;
     let person = (state["user"]["id"].as_str().context("the throwaway network has no person")?.to_string(), me);
-    let settings = one::kernel::Settings::for_throwaway(&bucket, person)?;
+    let settings = one::cloudflare::Settings::for_throwaway(&bucket, person)?;
     with_home(dir, || settings.save())?;
-    // Read back as the kernel reads it, with its secrets.
-    let settings = load_kernel(dir)?;
-    spawn_kernel(dir, &settings, &addr)?;
+    // Read back as `cloudflare deploy` reads it, with its secrets.
+    let settings = load_cloudflare(dir)?;
+    spawn_cloudflare(dir, &settings, &addr)?;
     crate::request(agent().post(on("/v1/settings")).send_json(json!({ "name": "address", "value": &settings.address })))?;
-    // Its kernel signs its own ID tokens, as a provider would, for this client: the one its people sign in with.
+    // Its sign-in signs its own ID tokens, as a provider would, for this client: the one its people sign in with.
     let clients = format!("{}/api/auth one-throwaway", settings.address);
     crate::request(agent().post(on("/v1/settings")).send_json(json!({ "name": one::sign_in_proof::CLIENTS, "value": clients })))?;
-    // Its data moves to the throwaway bucket, which its node reaches only through the kernel's URL signer from then on.
+    // Its data moves to the throwaway bucket, which its node reaches only through its URL signer from then on.
     let moved = crate::request(agent().post(on("/v1/storage")).send_json(json!({ "endpoint": format!("http://{bucket}"), "bucket": "throwaway" })))?;
     anyhow::ensure!(moved["kept"] == true, "the throwaway network's node couldn't reach its bucket through the URL signer: {moved}");
     let started = std::time::Instant::now();
@@ -355,21 +355,21 @@ fn throwaway_agent(dir: &Path) -> ureq::Agent {
     ureq::Agent::config_builder().http_status_as_error(false).middleware(with_token).build().into()
 }
 
-/// Starts the throwaway network's kernel, beside its node at `node`, and waits for its address to answer.
-fn spawn_kernel(dir: &Path, settings: &one::kernel::Settings, node: &str) -> Result<()> {
+/// Starts the throwaway network's Workers, beside its node at `node`, and waits for its address to answer.
+fn spawn_cloudflare(dir: &Path, settings: &one::cloudflare::Settings, node: &str) -> Result<()> {
     for port in settings.ports {
-        anyhow::ensure!(std::net::TcpListener::bind(("127.0.0.1", port)).is_ok(), "the throwaway network's kernel's port {port} is taken now: {CLI} throwaway stop, then {CLI} throwaway for a new one");
+        anyhow::ensure!(std::net::TcpListener::bind(("127.0.0.1", port)).is_ok(), "the throwaway network's Workers' port {port} is taken now: {CLI} throwaway stop, then {CLI} throwaway for a new one");
     }
-    // A sign-in kept for this node's address by an earlier throwaway network, whose kernel is gone, would be sent to this
-    // node, which refuses it: its kernel would find no devices for its relay, and the CLI says the key isn't published.
+    // A sign-in kept for this node's address by an earlier throwaway network, whose Workers are gone, would be sent to this
+    // node, which refuses it: its relay would find no devices, and the CLI says the key isn't published.
     with_addr(node, || {
         if one::sign_in::kept().is_some_and(|kept| kept.address != settings.address) {
             let _ = std::fs::remove_file(one::sign_in::path());
         }
     });
     // Beside its node, which it asks for the install's devices, for its relay to take only them.
-    spawn(dir, std::process::Command::new(std::env::current_exe()?).args(["kernel", "serve"]).env(addr_var(), node), "kernel.log", false)?;
-    wait_for(&agent(), &format!("{}/.well-known/oauth-authorization-server", settings.address), &dir.join("kernel.log"))
+    spawn(dir, std::process::Command::new(std::env::current_exe()?).args(["cloudflare", "serve"]).env(addr_var(), node), "cloudflare.log", false)?;
+    wait_for(&agent(), &format!("{}/.well-known/oauth-authorization-server", settings.address), &dir.join("cloudflare.log"))
 }
 
 fn wait_for(agent: &ureq::Agent, url: &str, log: &Path) -> Result<()> {
@@ -447,7 +447,7 @@ fn stop_some(dir: &Path, delete: bool, clients: bool) -> Result<()> {
     Ok(())
 }
 
-/// Stops what the throwaway network in `home` started besides its node, which then stops itself: its kernel and browser.
+/// Stops what the throwaway network in `home` started besides its node, which then stops itself: its Workers and browser.
 pub fn stop_others(home: &Path) {
     let me = std::process::id() as i32;
     for pid in programs(home, true) {
@@ -459,7 +459,7 @@ pub fn stop_others(home: &Path) {
 }
 
 /// The throwaway network's bucket, at `bucket-addr` in its folder: the folder its node made the install in, served S3's way
-/// for the URLs its kernel's URL signer presigns (read, HEAD, list, create only if absent, replace while unchanged,
+/// for the URLs its URL signer presigns (read, HEAD, list, create only if absent, replace while unchanged,
 /// delete), signatures unchecked, as it's only this machine's and only a throwaway network's.
 pub async fn bucket(home: PathBuf) -> Result<()> {
     use axum::http::{HeaderMap, Method, StatusCode, Uri};
@@ -620,7 +620,7 @@ fn give_back(dir: &Path) {
 /// `throwaway client <kind> [--as <name>]`: a client of this checkout's build, signed in to the throwaway network as its first
 /// person, or as someone else they invited, and how to see and use it. Again, it's the same client, with this
 /// checkout's build as it is now.
-fn client(dir: &Path, checkout: &Path, settings: &one::kernel::Settings, rest: &[String]) -> Result<()> {
+fn client(dir: &Path, checkout: &Path, settings: &one::cloudflare::Settings, rest: &[String]) -> Result<()> {
     let started = Instant::now();
     // A session while it runs: a new build waits for the next command with none to start the throwaway network again.
     let _session = client_session(dir);
@@ -635,7 +635,7 @@ fn client(dir: &Path, checkout: &Path, settings: &one::kernel::Settings, rest: &
         Some("web") => {
             // A browser reaches nodes over iroh, as the client's WebAssembly; a build without it would test the address.
             anyhow::ensure!(
-                one::kernel::client_version().is_some(),
+                one::cloudflare::client_version().is_some(),
                 "this build has no web client's WebAssembly: run this checkout's own build, target/debug/{CLI} throwaway client web, which builds it"
             );
             web(dir, settings, person.as_deref())?
@@ -654,7 +654,7 @@ fn client(dir: &Path, checkout: &Path, settings: &one::kernel::Settings, rest: &
 }
 
 /// For `throwaway client web` from this checkout's own debug build: the web client's WebAssembly built, and this build made
-/// again with it embedded from target/client, as every build of this checkout does from then on (the kernel serves what its build holds), as `{CLI} update` does for a release but at dev
+/// again with it embedded from target/client, as every build of this checkout does from then on (the gateway serves what its build holds), as `{CLI} update` does for a release but at dev
 /// speed: no release build, and cargo keeps what hasn't changed, so a run with nothing changed does nothing here. The
 /// throwaway network's programs run the old build, so the command is run again as the new build, which starts it again (when
 /// no client session is running).
@@ -674,7 +674,7 @@ fn web_client_built(checkout: &Path, rest: &[String]) -> Result<()> {
 
 /// For `throwaway serverless deploy` from this checkout's own debug build: the serverless node's WebAssembly built (as a dev
 /// build, not release) into target/serverless, and this build made again with it, as `throwaway client web` does with the
-/// client's, so the two builds agree: every build of this checkout holds both once they're there, and the kernel's
+/// client's, so the two builds agree: every build of this checkout holds both once they're there, and the throwaway network's
 /// relay (which names the serverless node) starts for any of them.
 fn serverless_built(checkout: &Path, rest: &[String]) -> Result<()> {
     let own = checkout.join("target/debug").join(env!("CARGO_BIN_NAME"));
@@ -720,7 +720,7 @@ fn web_folder(dir: &Path, person: Option<&str>) -> PathBuf {
 /// The web client, in a browser of the throwaway network's own on this machine, with no window: drive it over the DevTools
 /// protocol. Its profile is kept with the throwaway network, so it stays signed in. As someone else, they're invited first,
 /// by the throwaway network's first person, and join in it.
-fn web(dir: &Path, settings: &one::kernel::Settings, person: Option<&str>) -> Result<()> {
+fn web(dir: &Path, settings: &one::cloudflare::Settings, person: Option<&str>) -> Result<()> {
     let (port, picture) = match person {
         Some(name) => joined(dir, settings, name)?,
         None => {
@@ -747,7 +747,7 @@ fn web(dir: &Path, settings: &one::kernel::Settings, person: Option<&str>) -> Re
 /// an admin's machine (keeping the secret for their first device's approval), and they open the link in their own
 /// browser, join, and sign in; then their browser, their first device, asks to join and the machine approves it. Pictures
 /// of the invite and joining are kept beside theirs. → its DevTools port, and the picture of their first screen.
-fn joined(dir: &Path, settings: &one::kernel::Settings, name: &str) -> Result<(u16, PathBuf)> {
+fn joined(dir: &Path, settings: &one::cloudflare::Settings, name: &str) -> Result<(u16, PathBuf)> {
     let folder = web_folder(dir, Some(name));
     let picture = folder.with_extension("png");
     let port = browser(dir, settings, Some(name))?;
@@ -767,7 +767,7 @@ fn joined(dir: &Path, settings: &one::kernel::Settings, name: &str) -> Result<(u
 
 /// A web client that shows a code to be approved (`code`, else none) is approved by the throwaway network's machine, as its
 /// person's device or as the device of the admin who invited them; then its window is pictured.
-fn approve(dir: &Path, settings: &one::kernel::Settings, port: u16, picture: &Path, code: &str) -> Result<()> {
+fn approve(dir: &Path, settings: &one::cloudflare::Settings, port: u16, picture: &Path, code: &str) -> Result<()> {
     if !code.is_empty() {
         approve_code(dir, code)?;
     }
@@ -785,7 +785,7 @@ fn web_script(dir: &Path, args: &[&str]) -> Result<String> {
 }
 
 /// The throwaway network's browser for its first person or someone else, started if it isn't running: → its DevTools port.
-fn browser(dir: &Path, settings: &one::kernel::Settings, person: Option<&str>) -> Result<u16> {
+fn browser(dir: &Path, settings: &one::cloudflare::Settings, person: Option<&str>) -> Result<u16> {
     let web = web_folder(dir, person);
     std::fs::create_dir_all(&web)?;
     let port = std::fs::read_to_string(web.join("port")).ok().and_then(|p| p.trim().parse::<u16>().ok());
@@ -822,7 +822,7 @@ fn browser(dir: &Path, settings: &one::kernel::Settings, person: Option<&str>) -
 
 /// An Android or Windows client: on a throwaway copy of the person's lasting device, borrowed for the throwaway network,
 /// which reaches the throwaway network's address at the same address; this checkout's build installed there, and signed in.
-fn device_client(dir: &Path, checkout: &Path, settings: &one::kernel::Settings, kind: &str, person: Option<&str>) -> Result<()> {
+fn device_client(dir: &Path, checkout: &Path, settings: &one::cloudflare::Settings, kind: &str, person: Option<&str>) -> Result<()> {
     let mut borrowed = devices(dir);
     let what = format!("one throwaway client {kind}, for {}", checkout.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default());
     let listed = || again(|| post("/v1/call", json!({ "app": "computer", "op": "list", "input": {}, "client": "one throwaway" }))).map(|l| l["ok"]["devices"].clone()).unwrap_or_default();
@@ -898,7 +898,7 @@ fn build(checkout: &Path, script: &str, envs: &[(&str, &str)]) -> Result<String>
 /// typing it and tapping Sign In, then the throwaway network's sign-in going straight on, as the throwaway network's first person
 /// or `person`, whom the phone's browser signs in as first. Once signed in on a device as them (a file in the throwaway
 /// install's folder says so), a new build keeps that sign-in.
-fn android(dir: &Path, checkout: &Path, device: &str, settings: &one::kernel::Settings, person: Option<&str>) -> Result<()> {
+fn android(dir: &Path, checkout: &Path, device: &str, settings: &one::cloudflare::Settings, person: Option<&str>) -> Result<()> {
     let address = settings.address.as_str();
     let apk = build(checkout, "android/build.sh", &[])?;
     let apk = checkout.join("android").join(apk.lines().last().unwrap_or_default());
@@ -1023,7 +1023,7 @@ fn ui_nodes(xml: &str) -> Vec<UiNode> {
 /// signed in at the throwaway network's address as a person would: typing it and pressing Continue, on the device's desktop,
 /// as the throwaway network's first person or `person`, whom Edge signs in as first. Once signed in on a device as them (a
 /// file in the throwaway network's folder says so), a new build keeps that sign-in.
-fn windows(dir: &Path, checkout: &Path, device: &str, settings: &one::kernel::Settings, person: Option<&str>) -> Result<()> {
+fn windows(dir: &Path, checkout: &Path, device: &str, settings: &one::cloudflare::Settings, person: Option<&str>) -> Result<()> {
     let address = settings.address.as_str();
     build(checkout, "windows/build.sh", &[("DEVICE", device)])?;
     let file = NAME.chars().filter(char::is_ascii_alphanumeric).collect::<String>();

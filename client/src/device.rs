@@ -2,7 +2,7 @@
 //! which the app keeps in the Keychain, the keystore or the Credential Locker and hands it at start; asking to be let in,
 //! with the code it shows; and once a device of theirs approved it, its scopes' epochs, sealed to it, from which it hands
 //! each request the database keys it needed last time (`x-one-keys`), sent again once with those a node's 428 names.
-//! kernel/web/device.js is the same in a browser.
+//! cloudflare/web/device.js is the same in a browser.
 //!
 //! It trusts no node, nor the relay, for who's who: it reads `global`'s entries from the bucket itself, opens them with
 //! the epochs sealed to it, and replays them by the node's own rules (`crate::members`, as browsers and the MCP
@@ -43,7 +43,7 @@ pub fn join_of(secret: [u8; 32]) -> String {
 }
 
 /// A note pushed to the device whose key is `secret`, as its push carried it (base64url): → the note, and the key of
-/// the device that sent it (hex), or none for one from the kernel. Opened here alone: nothing connects or starts.
+/// the device that sent it (hex), or none for one from the install's Workers. Opened here alone: nothing connects or starts.
 pub fn open_note(secret: [u8; 32], pushed: &str) -> Result<(one::push::Note, Option<String>), Error> {
     let sealed = B64U.decode(pushed.trim().trim_end_matches('=').as_bytes()).map_err(|_| failed("That push isn't a note."))?;
     one::push::open_note(&keys::seal_secret(&SigningKey::from_bytes(&secret)), &sealed).map_err(|_| failed("That note isn't this device's."))
@@ -79,7 +79,7 @@ struct Known {
     at: u64,
 }
 
-/// Where a device is with its install, from its sign-in to its sign-out, as a browser goes the same way (kernel/web/web.js:
+/// Where a device is with its install, from its sign-in to its sign-out, as a browser goes the same way (cloudflare/web/web.js:
 /// `join`, `start`, `takenOut` and `signOut`). Whether this key was ever let in here is kept on disk (`joined`), as it
 /// outlives the program: `removed` asks it.
 enum Stage {
@@ -369,7 +369,7 @@ impl Device {
         loop {
             let read = async |n: u32| -> Result<Option<[u8; 32]>, Error> {
                 let Some(o) = one::bucket::Bucket::get(&bucket, &keys::epoch_name("global", n, &me)).await.map_err(failed)? else { return Ok(None) };
-                one::kernel::open_sealed(&self.opens(), &o.bytes).ok().and_then(|k| k.try_into().ok()).map(Some).ok_or_else(|| failed("A key for this didn't open."))
+                one::cloudflare::open_sealed(&self.opens(), &o.bytes).ok().and_then(|k| k.try_into().ok()).map(Some).ok_or_else(|| failed("A key for this didn't open."))
             };
             match read(n).await? {
                 Some(key) => drop(epochs.insert(n, key)),
@@ -384,8 +384,8 @@ impl Device {
         let mut log_keys = one::db::Keys::new();
         for (n, epoch) in &epochs {
             let Some(o) = one::bucket::Bucket::get(&bucket, &keys::app_key_name("global", members::APP, *n)).await.map_err(failed)? else { continue };
-            let app = one::kernel::open_app_key(epoch, members::APP, &o.bytes).map_err(failed)?;
-            log_keys.insert(*n, one::kernel::database_key(&app, one::log::NAME));
+            let app = one::cloudflare::open_app_key(epoch, members::APP, &o.bytes).map_err(failed)?;
+            log_keys.insert(*n, one::cloudflare::database_key(&app, one::log::NAME));
         }
         let read = one::log::open(&bucket, &log_keys, &one::log::prefix("global"), "global").await.map_err(failed)?;
         // Replayed as every client device replays them (crate::members), of the install whose genesis it kept.
@@ -436,7 +436,7 @@ impl Device {
     }
 
     /// As a person's first device does: says where their own things run (the machines that run everyone's), if they
-    /// haven't, and makes their own scope's first epoch, if it has none (kernel/web/device.js `settleOwn`). What's to do
+    /// haven't, and makes their own scope's first epoch, if it has none (cloudflare/web/device.js `settleOwn`). What's to do
     /// is looked at again in what it reads fresh, as another device of theirs may have done it.
     async fn settle_own(&self) -> Result<(), Error> {
         let device = self.on.lock().unwrap().clone();
@@ -871,7 +871,7 @@ impl Device {
             for (m, sealed) in kept.iter().flat_map(|k| k["sealed"].as_object()).flatten() {
                 let Ok(m) = m.parse::<u32>() else { continue };
                 let Some(epoch) = self.epochs.lock().unwrap().get(&(scope.to_string(), m)).copied() else { continue };
-                let opened = B64U.decode(sealed.as_str().unwrap_or("").trim().as_bytes()).ok().and_then(|b| one::kernel::open_app_key(&epoch, app, &b).ok());
+                let opened = B64U.decode(sealed.as_str().unwrap_or("").trim().as_bytes()).ok().and_then(|b| one::cloudflare::open_app_key(&epoch, app, &b).ok());
                 if let Some(key) = opened {
                     self.app_keys.lock().unwrap().insert((scope.to_string(), app.to_string(), m), key);
                 }
@@ -889,7 +889,7 @@ impl Device {
             .flatten()
             .filter_map(|(m, sealed)| {
                 let m = m.parse::<u32>().ok()?;
-                let key = B64U.decode(sealed.as_str().unwrap_or("").as_bytes()).ok().and_then(|s| one::kernel::open_sealed(&self.opens(), &s).ok())?;
+                let key = B64U.decode(sealed.as_str().unwrap_or("").as_bytes()).ok().and_then(|s| one::cloudflare::open_sealed(&self.opens(), &s).ok())?;
                 Some((m, <[u8; 32]>::try_from(key).ok()?))
             })
             .collect();
@@ -902,7 +902,7 @@ impl Device {
     }
 
     async fn database_key(&self, n: &Need) -> Result<[u8; 32], Error> {
-        Ok(one::kernel::database_key(&self.app_key(&n.scope, &n.app, n.epoch).await?, &n.database))
+        Ok(one::cloudflare::database_key(&self.app_key(&n.scope, &n.app, n.epoch).await?, &n.database))
     }
 
     /// An app's key in epoch `n` of a scope: the one sealed under the epoch, or one made now if it has none yet.
@@ -917,13 +917,13 @@ impl Device {
             Some(s) => s.to_string(),
             None => {
                 let made: [u8; 32] = rand::random();
-                let sealed = B64U.encode(&one::kernel::seal_app_key(&epoch, app, &made));
+                let sealed = B64U.encode(&one::cloudflare::seal_app_key(&epoch, app, &made));
                 let out = self.json("POST", "/v1/keys", Some(json!({ "scope": scope, "n": n, "app": app, "sealed": sealed }))).await?;
                 out["sealed"].as_str().unwrap_or_default().to_string()
             }
         };
         let bytes = B64U.decode(sealed.trim().as_bytes()).ok().ok_or_else(|| failed(format!("{app}'s key isn't one")))?;
-        let key = one::kernel::open_app_key(&epoch, app, &bytes).map_err(|_| failed(format!("{app}'s key didn't open")))?;
+        let key = one::cloudflare::open_app_key(&epoch, app, &bytes).map_err(|_| failed(format!("{app}'s key didn't open")))?;
         self.app_keys.lock().unwrap().insert(id, key);
         Ok(key)
     }
@@ -949,7 +949,7 @@ impl Device {
     }
 
     /// Starts this person's own scope's first epoch, as a newcomer's first device does, in the order every device does
-    /// (kernel/web/device.js `newEpoch`, src/node/devices.rs `new_epoch`): a random key, its `epoch` entry naming its
+    /// (cloudflare/web/device.js `newEpoch`, src/node/devices.rs `new_epoch`): a random key, its `epoch` entry naming its
     /// hash written first (which, first in causal order, makes it), then, once the entries say it did, sealed to the
     /// recovery key, to this device and to their other devices.
     async fn first_epoch(&self, scope: &str, user: &str) -> Result<(), Error> {
@@ -970,8 +970,8 @@ impl Device {
         if self.known.lock().unwrap().as_ref().and_then(|k| k.who.epoch_hash(&parsed, 1)) != Some(hash) {
             return Err(failed("Another device made new keys for this just now. Try again."));
         }
-        let recovery = one::kernel::twin_public(&recovery).map_err(failed)?;
-        let sealed = |to: &[u8; 32]| one::kernel::seal_to(to, &key).map(|s| B64U.encode(&s)).map_err(failed);
+        let recovery = one::cloudflare::twin_public(&recovery).map_err(failed)?;
+        let sealed = |to: &[u8; 32]| one::cloudflare::seal_to(to, &key).map(|s| B64U.encode(&s)).map_err(failed);
         self.json("POST", "/v1/keys", Some(json!({ "scope": scope, "n": 1, "to": "recovery", "sealed": sealed(&recovery)? }))).await?;
         for e in &to {
             self.json("POST", "/v1/keys", Some(json!({ "scope": scope, "n": 1, "to": hex(&e.key), "sealed": sealed(&e.seal)? }))).await?;
@@ -1014,7 +1014,7 @@ impl Device {
 }
 
 /// What a request did between a node's 428 and sending it again, each thing it asked for timed (developer mode's
-/// traces): `{ ms, steps }`, as a browser's says it (kernel/web/web.js).
+/// traces): `{ ms, steps }`, as a browser's says it (cloudflare/web/web.js).
 struct Notes {
     started: std::time::Instant,
     steps: Mutex<Vec<Value>>,

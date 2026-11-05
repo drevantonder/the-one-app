@@ -100,11 +100,11 @@ val customBuild = tasks.register("customBuild") {
 
 // Links to the install's address open the app (App Links), at the addresses it's built for: the custom build's own, and
 // $LINKS's (comma-separated), for one that asks where. Android takes them only from the manifest, and opens the app
-// only where the address lists it (kernel set android), so they're in a manifest of their own, merged into the app's.
+// only where the address lists it (cloudflare set android), so they're in a manifest of their own, merged into the app's.
 val links = (listOf(field("address")) + (System.getenv("LINKS") ?: "").split(","))
     .map { it.trim().trimEnd('/') }.filter { it.startsWith("https://") }.map { URI(it).host }.distinct()
 val linksManifest = layout.buildDirectory.file("generated/links/AndroidManifest.xml").get().asFile.also { file ->
-    // The web client's own places (kernel/web/web.js's route()), an invite and a Vault request; never `/`, which is
+    // The web client's own places (cloudflare/web/web.js's route()), an invite and a Vault request; never `/`, which is
     // the web client itself.
     val paths = listOf("path" to "/invite", "path" to "/vault", "path" to "/settings", "pathPrefix" to "/settings/",
         "pathPrefix" to "/page/", "pathPrefix" to "/services/", "pathPrefix" to "/app/")

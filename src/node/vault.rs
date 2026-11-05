@@ -55,7 +55,7 @@ impl Node {
             }
             let name = crate::keys::vault_key_name(&scope.to_string(), n, &me);
             let Some(o) = crate::bucket::Bucket::get(&self.bucket()?, &name).await? else { continue };
-            match crate::kernel::open_sealed(&secret, &o.bytes).ok().and_then(|k| <[u8; 32]>::try_from(k).ok()).filter(|k| crate::kernel::public_of(k) == public) {
+            match crate::cloudflare::open_sealed(&secret, &o.bytes).ok().and_then(|k| <[u8; 32]>::try_from(k).ok()).filter(|k| crate::cloudflare::public_of(k) == public) {
                 Some(key) => {
                     self.0.standing.vault.lock().unwrap().insert((scope.clone(), n), key);
                     out.insert(n, key);
@@ -101,13 +101,13 @@ impl Node {
     /// makes it), then its secret half sealed to each of them and to the recovery key.
     pub(super) async fn new_vault_key(&self, scope: &Scope, n: u32, to: &[Key], recovery: &Key) -> Result<()> {
         let secret: [u8; 32] = rand::random();
-        let public = crate::kernel::public_of(&secret);
+        let public = crate::cloudflare::public_of(&secret);
         self.append(&Scope::Global, members::vault(scope, n, &public, to)).await?;
         ensure!(self.with(|i| Ok(i.r.db().vault_publics(scope).get(&n) == Some(&public)))?, "another device made {scope}'s Vault key {n} just now");
         let (bucket, name) = (self.bucket()?, scope.to_string());
         let seals: Vec<(String, [u8; 32])> = self.with(|i| Ok(to.iter().filter_map(|k| i.r.db().seal_key(k).map(|s| (hex(k), s))).collect()))?;
-        for (at, seal) in std::iter::once(("recovery".to_string(), crate::kernel::twin_public(recovery)?)).chain(seals) {
-            crate::db::created(&bucket, &crate::keys::vault_key_name(&name, n, &at), &crate::kernel::seal_to(&seal, &secret)?).await?;
+        for (at, seal) in std::iter::once(("recovery".to_string(), crate::cloudflare::twin_public(recovery)?)).chain(seals) {
+            crate::db::created(&bucket, &crate::keys::vault_key_name(&name, n, &at), &crate::cloudflare::seal_to(&seal, &secret)?).await?;
         }
         if to.contains(&self.0.id) {
             self.0.standing.vault.lock().unwrap().insert((scope.clone(), n), secret);
@@ -529,7 +529,7 @@ impl Node {
             Ok(())
         })?;
         self.append_as(scope, &caller.user, members::node("vault-request", data)).await?;
-        // At the install's address (where its kernel signs people in) the web client opens it in any browser; an
+        // At the install's address (where people sign in) the web client opens it in any browser; an
         // install without one has only its apps to.
         let web = self.with(|i| Ok(crate::state::settings(&i.r.db().settings()).remove("address")))?;
         let link = match web.as_ref().and_then(Value::as_str).filter(|w| w.starts_with("https://") || w.starts_with("http://")) {

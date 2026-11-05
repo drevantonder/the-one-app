@@ -1,6 +1,6 @@
 //! iroh, how devices reach each other: each is an endpoint whose id is its device key, reached directly where a path
 //! opens (a LAN, a tailnet, a port its router maps) and otherwise through the relay at the install's address
-//! (kernel/relay/), its only relay, which lets in only the install's endpoints. iroh's QUIC is end to end and proves
+//! (cloudflare/relay/), its only relay, which lets in only the install's endpoints. iroh's QUIC is end to end and proves
 //! both ends' keys, so what devices say needs no sealing of its own: an ask is one stream, its answer the same stream
 //! back. Devices are found by the install's list of them, never n0's discovery.
 

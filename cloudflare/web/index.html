@@ -3,15 +3,15 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<!-- The web client: its code comes only from the kernel's gateway, since it holds the browser's tokens.
+<!-- The web client: its code comes only from the gateway, since it holds the browser's tokens.
      App screens run in sandboxed frames (frame.html), so nothing an app or a node sends runs here. -->
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: blob:; connect-src 'self'; frame-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'self'">
 <meta name="referrer" content="no-referrer">
-<!-- The client that reaches the person's nodes over iroh: its build, which the kernel writes in (Settings::web). -->
+<!-- The client that reaches the person's nodes over iroh: its build, which the Workers' build writes in (Settings::web). -->
 <meta name="one-client" content="">
 <title></title>
 <link rel="icon" href="/logo.png">
-<!-- Installable, from Chrome or Edge (the custom build's name and icon, which the kernel writes in: Settings::web). -->
+<!-- Installable, from Chrome or Edge (the custom build's name and icon, which the Workers' build writes in: Settings::web). -->
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="apple-touch-icon" href="/icon.png">
 <script src="/start.js"></script>

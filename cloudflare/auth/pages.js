@@ -6,7 +6,7 @@ import kit from "../web/screen/kit.css" with { type: "text" };
 
 const escape = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
-// The look of the web client's welcome: the screens' design kit (src/screen/kit.css, which the kernel is built with),
+// The look of the web client's welcome: the screens' design kit (src/screen/kit.css, which the Workers are built with),
 // the custom build's logo, light or dark with the system. Inline, as the page's policy allows nothing else.
 const style = `${kit}
   /* Near the top, not centred: text that comes in later (a client's name, a note) grows the page down, never moving

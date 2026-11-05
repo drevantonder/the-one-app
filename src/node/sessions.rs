@@ -1,4 +1,4 @@
-//! What a call that came with a kernel access token was handed: the keys of the databases it reaches, sealed to this
+//! What a call that came with an access token from sign-in was handed: the keys of the databases it reaches, sealed to this
 //! device (`x-one-keys`, `keys::Handoff`), kept in memory for that token alone until it expires, then forgotten with
 //! the databases they opened. This device never opens a
 //! token caller's data with its own keys: a call that lacks one fails before it writes anything, saying what it needs
@@ -30,7 +30,7 @@ pub(super) struct Sessions {
     /// By a hash of the token.
     pub kept: Mutex<HashMap<[u8; 32], Session>>,
     /// The auth service at the install's address, whose keys check the tokens calls come with.
-    issuer: Mutex<Option<Arc<crate::kernel::Issuer>>>,
+    issuer: Mutex<Option<Arc<crate::cloudflare::Issuer>>>,
     /// The databases opened with keys a caller handed (or standing work's grant), each kept open for calls handed
     /// exactly those keys, and forgotten with them: once their last session or grant ends, or no live session holds
     /// them.
@@ -144,13 +144,13 @@ fn hash(token: &str) -> [u8; 32] {
 
 impl Node {
     /// The auth service at the install's address, as this device checks the tokens it's given.
-    pub fn issuer(&self) -> Result<Arc<crate::kernel::Issuer>> {
-        let address = self.kernel()?;
-        let iss = crate::kernel::Issuer::new(&address).iss;
+    pub fn issuer(&self) -> Result<Arc<crate::cloudflare::Issuer>> {
+        let address = self.address()?;
+        let iss = crate::cloudflare::Issuer::new(&address).iss;
         let mut kept = self.0.sessions.issuer.lock().unwrap();
         Ok(match kept.as_ref().filter(|i| i.iss == iss) {
             Some(issuer) => issuer.clone(),
-            None => kept.insert(Arc::new(crate::kernel::Issuer::new(&address))).clone(),
+            None => kept.insert(Arc::new(crate::cloudflare::Issuer::new(&address))).clone(),
         })
     }
 

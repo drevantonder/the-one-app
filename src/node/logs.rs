@@ -150,7 +150,7 @@ impl Node {
         let mut out = crate::db::Keys::new();
         for (n, epoch) in epochs {
             if let Some(app) = crate::db::app_key(&bucket, epoch, "global", members::APP, *n, false).await? {
-                out.insert(*n, crate::kernel::database_key(&app, crate::log::NAME));
+                out.insert(*n, crate::cloudflare::database_key(&app, crate::log::NAME));
             }
         }
         Ok(out)

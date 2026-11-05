@@ -22,7 +22,7 @@ import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-// Notifications. The install's push Worker (kernel/push/) carries each note, sealed to this phone's device, through
+// Notifications. The install's push Worker (cloudflare/push/) carries each note, sealed to this phone's device, through
 // Firebase Cloud Messaging as a data message alone (`n`, base64url), which wakes this app; the app opens it with the
 // device's key (client/ffi's openNote), asking nothing of the network, and shows it. Tapping one opens the app screen
 // it names. A device asking its person to join shows Approve and Not Me, answered from here (PushActions) as Settings ›

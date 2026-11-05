@@ -5,20 +5,20 @@ use std::collections::BTreeSet;
 
 use serde_json::{Value, json};
 
-/// The kernel's services (JavaScript, `kernel/shared/crypto.js`) and nodes (`src/kernel.rs`) each open what the
+/// The Workers (JavaScript, `cloudflare/shared/crypto.js`) and nodes (`src/cloudflare.rs`) each open what the
 /// other seals: app keys under scope keys, keys to key pairs and under secrets; and derive the same database keys.
 #[test]
-fn the_kernel_and_nodes_agree_on_keys_and_seals() {
+fn the_workers_and_nodes_agree_on_keys_and_seals() {
     use data_encoding::BASE64URL_NOPAD as B64U;
-    use one::kernel;
+    use one::cloudflare;
 
-    let root = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/..")).join("kernel");
+    let root = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/..")).join("cloudflare");
     let files = ["shared/crypto.js", "shared/token.js", "web/members.js", "test/formats.js"].map(|p| (p.to_string(), std::fs::read(root.join(p)).unwrap()));
     let dir = crate::temp("formats");
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = listener.local_addr().unwrap().to_string();
-    let served = kernel::Served { name: "formats".into(), module: kernel::module_from(files.to_vec(), "test/formats.js").unwrap(), modules: vec![], class: None, listen: Some(addr.clone()), bindings: vec![], assets: None, outbound: None };
-    let mut child = kernel::start(&kernel::write_config(&dir, &[served]).unwrap(), vec![("formats".into(), listener)]).unwrap();
+    let served = cloudflare::Served { name: "formats".into(), module: cloudflare::module_from(files.to_vec(), "test/formats.js").unwrap(), modules: vec![], class: None, listen: Some(addr.clone()), bindings: vec![], assets: None, outbound: None };
+    let mut child = cloudflare::start(&cloudflare::write_config(&dir, &[served]).unwrap(), vec![("formats".into(), listener)]).unwrap();
     let js = |body: Value| -> Value {
         let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).build().into();
         agent.post(format!("http://{addr}")).send_json(body).unwrap().body_mut().read_json().unwrap()
@@ -28,28 +28,28 @@ fn the_kernel_and_nodes_agree_on_keys_and_seals() {
     // An app's key, sealed under its scope's: each opens what the other sealed, and derives the same database key.
     let scope: [u8; 32] = rand::random();
     let app: [u8; 32] = rand::random();
-    let opened = js(json!({ "op": "openAppKey", "scopeKey": B64U.encode(&scope), "app": "board", "sealed": B64U.encode(&kernel::seal_app_key(&scope, "board", &app)), "database": "main" }));
+    let opened = js(json!({ "op": "openAppKey", "scopeKey": B64U.encode(&scope), "app": "board", "sealed": B64U.encode(&cloudflare::seal_app_key(&scope, "board", &app)), "database": "main" }));
     assert_eq!(b(&opened["key"]), app, "JavaScript opens an app's key Rust sealed");
-    assert_eq!(b(&opened["database"]), kernel::database_key(&app, "main"), "a database's key");
+    assert_eq!(b(&opened["database"]), cloudflare::database_key(&app, "main"), "a database's key");
     let sealed = js(json!({ "op": "sealAppKey", "scopeKey": B64U.encode(&scope), "app": "board", "key": B64U.encode(&app) }));
-    assert_eq!(kernel::open_app_key(&scope, "board", &b(&sealed["sealed"])).unwrap(), app, "Rust opens an app's key JavaScript sealed");
-    assert!(kernel::open_app_key(&scope, "calendar", &b(&sealed["sealed"])).is_err(), "only as that app's");
+    assert_eq!(cloudflare::open_app_key(&scope, "board", &b(&sealed["sealed"])).unwrap(), app, "Rust opens an app's key JavaScript sealed");
+    assert!(cloudflare::open_app_key(&scope, "calendar", &b(&sealed["sealed"])).is_err(), "only as that app's");
 
     // Sealed to a key pair: JavaScript's pair, sealed in Rust; Rust's pair (the recovery key's twin), sealed in JavaScript.
     let pair = js(json!({ "op": "keyPair" }));
-    assert_eq!(kernel::public_of(&b(&pair["secret"]).try_into().unwrap()).to_vec(), b(&pair["public"]), "a key pair's public half");
-    let sealed = kernel::seal_to(&b(&pair["public"]).try_into().unwrap(), &scope).unwrap();
+    assert_eq!(cloudflare::public_of(&b(&pair["secret"]).try_into().unwrap()).to_vec(), b(&pair["public"]), "a key pair's public half");
+    let sealed = cloudflare::seal_to(&b(&pair["public"]).try_into().unwrap(), &scope).unwrap();
     let opened = js(json!({ "op": "openSealed", "secret": pair["secret"], "public": pair["public"], "sealed": B64U.encode(&sealed) }));
     assert_eq!(b(&opened["plain"]), scope, "JavaScript opens what Rust sealed to it");
-    let (secret, public) = kernel::twin(&rand::random());
+    let (secret, public) = cloudflare::twin(&rand::random());
     let sealed = js(json!({ "op": "sealTo", "to": B64U.encode(&public), "plain": B64U.encode(&scope) }));
-    assert_eq!(kernel::open_sealed(&secret, &b(&sealed["sealed"])).unwrap(), scope, "Rust opens what JavaScript sealed to it");
+    assert_eq!(cloudflare::open_sealed(&secret, &b(&sealed["sealed"])).unwrap(), scope, "Rust opens what JavaScript sealed to it");
 
     // Sealed under a secret, with the id it's kept by.
     let under = js(json!({ "op": "sealUnder", "secret": "a refresh token, as text", "plain": B64U.encode(&scope) }));
-    assert_eq!(under["id"], kernel::id_of(b"a refresh token, as text"), "a copy's id");
-    assert_eq!(kernel::open_under(b"a refresh token, as text", &b(&under["sealed"])).unwrap(), scope, "Rust opens a copy JavaScript sealed");
-    let sealed = kernel::seal_under(b"a code from the recovery key", &scope);
+    assert_eq!(under["id"], cloudflare::id_of(b"a refresh token, as text"), "a copy's id");
+    assert_eq!(cloudflare::open_under(b"a refresh token, as text", &b(&under["sealed"])).unwrap(), scope, "Rust opens a copy JavaScript sealed");
+    let sealed = cloudflare::seal_under(b"a code from the recovery key", &scope);
     let opened = js(json!({ "op": "openUnder", "secret": "a code from the recovery key", "sealed": B64U.encode(&sealed) }));
     assert_eq!(b(&opened["plain"]), scope, "JavaScript opens a copy Rust sealed");
 
@@ -69,12 +69,12 @@ fn the_kernel_and_nodes_agree_on_keys_and_seals() {
         let device = ed25519_dalek::SigningKey::from_bytes(&rand::random()).verifying_key().to_bytes();
         let device_seal: [u8; 32] = rand::random();
         let prf: [u8; 32] = rand::random();
-        let (my_secret, my_public) = kernel::twin(&rand::random());
+        let (my_secret, my_public) = cloudflare::twin(&rand::random());
         let out = js(json!({
             "op": "keys", "seed": B64U.encode(&seed), "domain": "one/urls", "fields": fields, "at": 1_000_000,
             "request": request, "now": 1_000_000 + keys::FRESH, "epoch": 4, "key": B64U.encode(&epoch_key),
             "name": "global/board/main/1", "plain": B64U.encode(b"from js"), "sealed": B64U.encode(&sealed),
-            "to": B64U.encode(&kernel::twin_public(&node.verifying_key().to_bytes()).unwrap()), "handoff": handoff,
+            "to": B64U.encode(&cloudflare::twin_public(&node.verifying_key().to_bytes()).unwrap()), "handoff": handoff,
             "pair": { "secret": B64U.encode(&my_secret), "public": B64U.encode(&my_public), "sealed": keys::seal_handoff(&my_public, &handoff).unwrap(), "key": data_encoding::HEXLOWER.encode(&device), "seal": data_encoding::HEXLOWER.encode(&device_seal) },
             "token": "a token", "secret": B64U.encode(b"an invite's secret"), "prf": B64U.encode(&prf),
         }));
@@ -91,7 +91,7 @@ fn the_kernel_and_nodes_agree_on_keys_and_seals() {
         assert_eq!(out["tokenId"], keys::token_id("a token"));
         assert_eq!(out["epochHash"], keys::epoch_hash(&epoch_key), "an epoch key's hash");
         assert_eq!(out["joinCode"], keys::join_code(&keys::Endpoint { key: device, seal: device_seal }));
-        assert_eq!(out["twin"], data_encoding::HEXLOWER.encode(&kernel::twin_public(&device).unwrap()), "an Ed25519 key's twin to seal to");
+        assert_eq!(out["twin"], data_encoding::HEXLOWER.encode(&cloudflare::twin_public(&device).unwrap()), "an Ed25519 key's twin to seal to");
         assert_eq!(out["proof"], keys::invite_proof(b"an invite's secret", &keys::Endpoint { key: device, seal: device_seal }));
         let asking = keys::Endpoint { key: device, seal: device_seal };
         assert_eq!(out["nonce"], one::sign_in_proof::nonce(&device_seal, &asking), "the OIDC nonce auth asks for a device in its install");
@@ -99,8 +99,8 @@ fn the_kernel_and_nodes_agree_on_keys_and_seals() {
         let (passkey, seal_secret) = keys::passkey_keys(&prf);
         assert_eq!(out["passkey"]["sign"], data_encoding::HEXLOWER.encode(passkey.verifying_key().as_bytes()), "a passkey's signing key");
         assert_eq!(b(&out["passkey"]["seal"]), seal_secret, "and the secret sealed to");
-        assert_eq!(out["passkey"]["sealPublic"], data_encoding::HEXLOWER.encode(&kernel::public_of(&seal_secret)), "and its public half");
-        assert_eq!(to, kernel::twin_public(&node.verifying_key().to_bytes()).unwrap(), "a Rust endpoint seals to its key's twin");
+        assert_eq!(out["passkey"]["sealPublic"], data_encoding::HEXLOWER.encode(&cloudflare::public_of(&seal_secret)), "and its public half");
+        assert_eq!(to, cloudflare::twin_public(&node.verifying_key().to_bytes()).unwrap(), "a Rust endpoint seals to its key's twin");
 
         // A session endpoint's certificate: made the same, and each takes and refuses the same ones.
         let endpoint: [u8; 32] = rand::random();
@@ -170,7 +170,7 @@ fn the_kernel_and_nodes_agree_on_keys_and_seals() {
         assert!(Entry::decode_step(&b("header"), &b("signature"), &b("body")).is_ok() && Entry::from_json(&out["signed"]).is_err(), "Rust checks it as a step, never an entry");
     }
 
-    // Member entries' content (src/members.rs), as the web client builds what a browser signs (kernel/web/members.js).
+    // Member entries' content (src/members.rs), as the web client builds what a browser signs (cloudflare/web/members.js).
     {
         use one::entry::Scope;
         use one::members::{self, Kind, Role};
@@ -268,7 +268,7 @@ fn the_kernel_and_nodes_agree_on_keys_and_seals() {
         assert_eq!(oldest_needed(Some(br#"{"at":9,"copy":7,"epoch":2}"#), 3), 2, "from the epoch its newest copy is under");
     }
 
-    // A client device's way in, the same in a browser (kernel/web) as in a native app and the CLI (one-client): what a
+    // A client device's way in, the same in a browser (cloudflare/web) as in a native app and the CLI (one-client): what a
     // node's 428 may ask it to hand (`keys::asked_for`), what auth's word on its request to be let in means
     // (`keys::waited`), and how long it waits for a node that doesn't list it yet (`keys::BEHIND`).
     {
@@ -437,9 +437,9 @@ async fn what_a_native_app_keeps_of_its_calls_is_its_persons_alone() {
     assert!(!dir.join("answers").exists());
 }
 
-/// Push (src/push.rs, kernel/push/): a device registers its address with the push Worker as Rust signs it, a node's
+/// Push (src/push.rs, cloudflare/push/): a device registers its address with the push Worker as Rust signs it, a node's
 /// send of a note sealed to that device goes out from the Worker as the browser's push service takes it (RFC 8291,
-/// VAPID with the key the kernel made, the note as base64url text), and what arrives opens, only with the device's key, as the note the node
+/// VAPID with the key the Workers made, the note as base64url text), and what arrives opens, only with the device's key, as the note the node
 /// sealed. Only the install's devices register or send, each request once.
 #[test]
 fn a_note_reaches_only_the_device_it_was_sealed_to() {
@@ -449,12 +449,12 @@ fn a_note_reaches_only_the_device_it_was_sealed_to() {
 
     let node = SigningKey::from_bytes(&rand::random());
     let phone = SigningKey::from_bytes(&rand::random());
-    let k = crate::kernel::Kernel::for_devices([&node, &phone].map(|key| HEXLOWER.encode(key.verifying_key().as_bytes())).to_vec());
+    let k = crate::cloudflare::Workers::for_devices([&node, &phone].map(|key| HEXLOWER.encode(key.verifying_key().as_bytes())).to_vec());
     let now = || std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u64;
-    let post = |path: &str, body: serde_json::Value| crate::kernel::post(&format!("{}{path}", k.address), &[], body);
+    let post = |path: &str, body: serde_json::Value| crate::cloudflare::post(&format!("{}{path}", k.address), &[], body);
 
     // A browser's subscription: its key pair and secret, as the push service would hand them to the Worker.
-    let subscription = crate::kernel::Subscription::new();
+    let subscription = crate::cloudflare::Subscription::new();
     let endpoint = "https://fcm.googleapis.com/fcm/send/the-phone";
     let address = subscription.address(endpoint);
     let phone_seal = one::keys::Endpoint::of(&phone).seal;

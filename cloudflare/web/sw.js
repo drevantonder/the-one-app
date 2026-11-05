@@ -3,13 +3,13 @@
 // styles are named by their content (`?v=`), so the browser keeps them for good. Nothing else is touched: a node's
 // answers, signing in and every other file go to the network as they would without this.
 //
-// And its notifications: a push (kernel/push/) carries a note sealed to one of this browser's devices (one per person
+// And its notifications: a push (cloudflare/push/) carries a note sealed to one of this browser's devices (one per person
 // signed in here), which it opens with that device's seal key, kept in IndexedDB where it can't be read out
 // (device.js), and shows; tapping it opens the screen it names. A note it can't open still shows that one came, as
 // browsers require of every push.
 const KEPT = "one.page";
 const PLACES = /^\/($|page\/|services\/|app\/|settings($|\/)|vault$)/;
-/// The custom build's name, which the kernel writes in (Settings::web).
+/// The custom build's name, which the Workers' build writes in (Settings::web).
 const NAME = "";
 
 addEventListener("install", (e) => e.waitUntil(caches.open(KEPT).then((c) => c.add("/index.html")).catch(() => {}).then(() => skipWaiting())));
@@ -26,7 +26,7 @@ addEventListener("fetch", (e) => {
   e.respondWith(caches.open(KEPT).then((c) => c.match("/index.html")).then((kept) => kept || fresh).catch(() => fetch(e.request)));
 });
 
-// A note comes as base64url text (kernel/push/senders.js).
+// A note comes as base64url text (cloudflare/push/senders.js).
 addEventListener("push", (e) => e.waitUntil(show(e.data ? unb64u(e.data.text()) : null)));
 
 async function show(sealed) {

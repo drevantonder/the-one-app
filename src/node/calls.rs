@@ -42,7 +42,7 @@ impl Node {
         self.route(req, me).await
     }
 
-    /// A call from a kernel sign-in, which is its person's in every way but one: the node's own operations are its
+    /// A call from someone signed in at the install's address, which is its person's in every way but one: the node's own operations are its
     /// devices' to ask, and a sign-in's caller has this device's key.
     pub fn for_sign_in(&self, req: CallRequest) -> Result<CallRequest> {
         let req = self.resolve(req);

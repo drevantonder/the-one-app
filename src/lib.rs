@@ -87,7 +87,7 @@ pub mod services;
 pub mod oned;
 #[cfg(feature = "node")]
 pub mod service;
-pub mod kernel;
+pub mod cloudflare;
 pub mod keys;
 pub mod push;
 #[cfg(feature = "db")]

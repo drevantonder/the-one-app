@@ -1,10 +1,10 @@
 //! The local HTTP API: how this machine's shells, CLI and MCP reach its node, as its local user; how a client device
-//! reaches it over iroh (src/node/net.rs), as its person; and how someone signed in with the install's kernel
+//! reaches it over iroh (src/node/net.rs), as its person; and how someone signed in at the install's address
 //! (this machine's CLI and MCP, after `sign-in`) reaches it, as themselves, for what their sign-in opens.
 //!
-//! A request with a kernel access token for the install's address (never a remote MCP client's, which is for
+//! A request with an access token from sign-in for the install's address (never a remote MCP client's, which is for
 //! `<address>/mcp`) is its person's, and so is its call's; someone it's for who isn't a person of the install yet is
-//! let in as a member by a device whose own person is an admin, since the kernel signs in only those an admin invited
+//! let in as a member by a device whose own person is an admin, since sign-in lets in only those an admin invited
 //! or people at the install's domain. A request without one is this machine's own programs', over its loopback with the
 //! token in the node's home (`local-token`, which only its user reads), or refused, but for a picture a window's app
 //! list names by its content (`/v1/images/<name>`), anyone's who has that name. A file put from elsewhere is read back
@@ -40,7 +40,7 @@ pub fn router(node: Node) -> Router {
 static MCP: std::sync::OnceLock<axum::routing::MethodRouter<Node>> = std::sync::OnceLock::new();
 
 /// Serves MCP at `/mcp`, for this machine's own programs and the install's client devices over iroh: the MCP Worker,
-/// remote MCP clients' device, among them (kernel/mcp/).
+/// remote MCP clients' device, among them (cloudflare/mcp/).
 pub fn serve_mcp(handler: axum::routing::MethodRouter<Node>) {
     let _ = MCP.set(handler);
 }
@@ -259,7 +259,7 @@ pub fn app_route(path: &str) -> bool {
 /// The most this machine's own programs put in one file.
 const LOCAL_PUT: u64 = 1 << 30;
 
-/// Routes as only this machine's own programs, and people signed in with the kernel for what `SIGNED_IN` lists, may
+/// Routes as only this machine's own programs, and people signed in at the install's address for what `SIGNED_IN` lists, may
 /// use them.
 pub fn guarded(routes: Router<Node>, node: Node) -> Router {
     routes
@@ -290,7 +290,7 @@ async fn traced(State(node): State<Node>, req: axum::extract::Request, next: axu
 /// Headers that say a request was passed on from elsewhere, as proxies add them.
 pub const FORWARDED: &[&str] = &["forwarded", "x-forwarded-for", "x-forwarded-host", "x-real-ip", "cf-connecting-ip", "cf-worker"];
 
-/// What someone signed in with the kernel may ask; the rest is for this machine's own programs.
+/// What someone signed in at the install's address may ask; the rest is for this machine's own programs.
 pub const SIGNED_IN: &[&str] = &[
     "/v1/state",
     "/v1/endpoint",
@@ -430,7 +430,7 @@ fn tailnet_address() -> Option<std::net::Ipv4Addr> {
 }
 
 /// Only this machine's own programs (`from_this_machine`) drive its node: no web page, an app's screen this node served
-/// included, and no program in a VM or emulator here. A request with a kernel sign-in's access token is someone's
+/// included, and no program in a VM or emulator here. A request with an access token from sign-in is someone's
 /// instead, for what `SIGNED_IN` lists.
 async fn only_this_machine(State(node): State<Node>, mut req: axum::extract::Request, next: axum::middleware::Next) -> Response {
     let path = req.extensions().get::<axum::extract::MatchedPath>().map(|p| p.as_str().to_string()).unwrap_or_default();
@@ -598,7 +598,7 @@ fn local(node: &Node) -> Result<Caller, Error> {
     Ok(Caller { key: node.id(), user: node.user()?, agent: None, token: None })
 }
 
-/// Who asked: this machine's own user, or someone signed in with the kernel, whom this device acts for.
+/// Who asked: this machine's own user, or someone signed in at the install's address, whom this device acts for.
 #[derive(Clone)]
 struct Me {
     caller: Caller,
@@ -633,7 +633,7 @@ impl std::error::Error for NotJoined {}
 /// Sign-ins checked lately, by their token's hash, until they expire.
 static SIGNED_INS: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<[u8; 32], (Me, u64)>>> = std::sync::LazyLock::new(Default::default);
 
-/// Whom a kernel access token is for: one the auth service at the install's address signed for it, for a person of
+/// Whom an access token from sign-in is for: one the auth service at the install's address signed for it, for a person of
 /// the install.
 async fn signed_in(node: &Node, token: String) -> anyhow::Result<Me> {
     use sha2::Digest;
@@ -648,7 +648,7 @@ async fn signed_in(node: &Node, token: String) -> anyhow::Result<Me> {
         SIGNED_INS.lock().unwrap().remove(&hash);
         anyhow::bail!(NotJoined);
     }
-    let address = node.kernel()?;
+    let address = node.address()?;
     let issuer = node.issuer()?;
     let asked = token.clone();
     let claims = tokio::task::spawn_blocking(move || {

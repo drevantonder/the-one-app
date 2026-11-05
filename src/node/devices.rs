@@ -258,7 +258,7 @@ fn code_of(typed: &str) -> String {
 }
 
 impl Node {
-    /// The install's address, where its kernel is.
+    /// The install's address, where people sign in.
     pub fn address(&self) -> Result<String> {
         self.with(|i| Ok(super::calls::address(i.r.db())))?.context("your One App has no address yet, so it has no sign-ins or requests to join")
     }
@@ -378,7 +378,7 @@ impl Node {
         let user = new_id();
         let made = {
             let user = user.clone();
-            tokio::task::spawn_blocking(move || crate::kernel::invite(&address, &key, &name_, Some(&user), None)).await??
+            tokio::task::spawn_blocking(move || crate::cloudflare::invite(&address, &key, &name_, Some(&user), None)).await??
         };
         let secret = made.link.rsplit_once('#').map(|(_, s)| s.to_string()).context("an invite link carries its secret")?;
         self.keep_invite(&user, Some(&Invited { secret, name: name.trim().to_string(), user: user.clone(), role, until: made.until })).await?;
@@ -514,14 +514,14 @@ impl Node {
                 tracing::warn!("{scope}'s epoch {n} isn't sealed to the recovery key");
                 continue;
             };
-            let key = crate::kernel::open_sealed(&secret, &o.bytes).ok().and_then(|k| <[u8; 32]>::try_from(k).ok()).filter(|k| crate::keys::epoch_hash(k) == hash);
+            let key = crate::cloudflare::open_sealed(&secret, &o.bytes).ok().and_then(|k| <[u8; 32]>::try_from(k).ok()).filter(|k| crate::keys::epoch_hash(k) == hash);
             let Some(key) = key else {
                 tracing::warn!("{scope}'s epoch {n} sealed to the recovery key isn't the key its entry made: passed over");
                 continue;
             };
             let at = crate::keys::epoch_name(&name, n, &hex(&to.key));
             if Bucket::get(&bucket, &at).await?.is_none() {
-                crate::db::created(&bucket, &at, &crate::kernel::seal_to(&to.seal, &key)?).await?;
+                crate::db::created(&bucket, &at, &crate::cloudflare::seal_to(&to.seal, &key)?).await?;
             }
             opened += 1;
         }
@@ -792,7 +792,7 @@ impl Node {
         for (n, key) in self.epoch_keys(scope, false).await? {
             let at = crate::keys::epoch_name(&name, n, &hex(&to.key));
             if Bucket::get(&bucket, &at).await?.is_none() {
-                crate::db::created(&bucket, &at, &crate::kernel::seal_to(&to.seal, &key)?).await?;
+                crate::db::created(&bucket, &at, &crate::cloudflare::seal_to(&to.seal, &key)?).await?;
             }
         }
         Ok(())
@@ -979,7 +979,7 @@ impl Node {
         }
     }
 
-    /// What a person's first device does once it's in, here for a machine (kernel/web/device.js for a browser): where
+    /// What a person's first device does once it's in, here for a machine (cloudflare/web/device.js for a browser): where
     /// their own things run besides their own machines, if their devices never said (the install's machines that run
     /// everyone's, chosen without asking), and their own scope's first epoch, if it isn't made.
     pub(super) fn settle_own(&self) {
@@ -1031,11 +1031,11 @@ impl Node {
         let hash = crate::keys::epoch_hash(&key);
         self.member_content(caller, members::epoch(scope, n, &to.iter().map(|c| c.key).collect::<Vec<_>>(), &hash)).await?;
         ensure!(self.with(|i| Ok(i.r.db().epoch_hash(scope, n).as_deref() == Some(hash.as_str())))?, "another device started {scope}'s epoch {n} just now");
-        if !crate::db::created(&bucket, &crate::keys::epoch_name(&name, n, "recovery"), &crate::kernel::seal_to(&crate::kernel::twin_public(&recovery)?, &key)?).await? {
+        if !crate::db::created(&bucket, &crate::keys::epoch_name(&name, n, "recovery"), &crate::cloudflare::seal_to(&crate::cloudflare::twin_public(&recovery)?, &key)?).await? {
             tracing::warn!("{scope}'s epoch {n} was sealed to the recovery key already, not with its key: the recovery key won't open it");
         }
         for c in &to {
-            crate::db::created(&bucket, &crate::keys::epoch_name(&name, n, &hex(&c.key)), &crate::kernel::seal_to(&c.seal, &key)?).await?;
+            crate::db::created(&bucket, &crate::keys::epoch_name(&name, n, &hex(&c.key)), &crate::cloudflare::seal_to(&c.seal, &key)?).await?;
         }
         self.forget_epochs(scope);
         Ok(n)

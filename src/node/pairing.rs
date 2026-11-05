@@ -20,7 +20,7 @@ impl Node {
             ensure!(m.serves(&self.0.id, &asker.user), "{} doesn't serve you", self.device_name());
             Ok(())
         })?;
-        let address = self.with(|i| Ok(i.r.db().setting("address")))?.context("a computer joins through your One App's address, and it has none yet: an admin sets it with kernel use")?;
+        let address = self.with(|i| Ok(i.r.db().setting("address")))?.context("a computer joins through your One App's address, and it has none yet: an admin sets it with cloudflare use")?;
         let joins_as = user.clone().unwrap_or_else(|| asker.user.clone());
         let secret: [u8; 16] = rand::random();
         let by = (asker.key != self.0.id).then(|| hex(&asker.key));
@@ -120,7 +120,7 @@ impl Node {
         let user = pairing.admits.clone().unwrap_or_else(|| pairing.user.clone());
         let (root, bucket) = self.with(|i| Ok((i.r.root.map(|r| r.to_hex()).context("no install")?, i.bucket.as_ref().map(|(_, f)| f.clone()))))?;
         let by = pairing.by.as_deref().map(unhex).transpose()?;
-        let endpoint = crate::keys::Endpoint { key, seal: crate::kernel::twin_public(&key)? };
+        let endpoint = crate::keys::Endpoint { key, seal: crate::cloudflare::twin_public(&key)? };
         // A machine of the person's own is their device too. An admin lists another person's as compute, which runs
         // what that admin's listing may (`global`, groups) but never that person's own scope, until a device of theirs
         // lists it again (`Members::runs_for`).

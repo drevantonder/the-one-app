@@ -62,7 +62,7 @@ pub fn device_join(secret: Vec<u8>) -> Result<String, OneError> {
 
 /// A note pushed to this device, opened: what to show, what a tap opens (`app`, `screen`, its `params` as JSON), the
 /// number for the app's icon, and an `action` (JSON) its device checks itself, like a device asking to join; `by` is
-/// the key (hex) of the install's device that sent it, none for the kernel.
+/// the key (hex) of the install's device that sent it, none for the install's Workers.
 #[derive(uniffi::Record)]
 pub struct Note {
     pub id: String,

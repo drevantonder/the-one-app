@@ -1,4 +1,4 @@
-// What a web page that holds screens does for them, the same in the web client (kernel/web/web.js) and in a chat's
+// What a web page that holds screens does for them, the same in the web client (cloudflare/web/web.js) and in a chat's
 // MCP view (src/mcp_view.html): their look in its frames, and the answer to each of the bridge's messages, with its
 // menu, alert and files drawn in HTML where a native shell uses its own: @one/ui's on a page that has it (the web
 // client's), else the kit's (a chat's, until it moves). Its functions need the kit (kit.css, bridge.js, kit.js) or

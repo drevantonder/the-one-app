@@ -1,6 +1,6 @@
 // Access tokens: JWTs the auth service signs with Ed25519 (EdDSA), its public keys at `<auth>/jwks`. Claims: iss (the
 // auth service's URL), sub (the person's user id), aud (what it's for), azp and client_id (the client), scope, sid,
-// iat, exp, jti. Nodes check them the same way (src/kernel.rs).
+// iat, exp, jti. Nodes check them the same way (src/cloudflare.rs).
 
 import { b64u } from "./crypto.js";
 

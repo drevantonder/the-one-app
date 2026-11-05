@@ -95,9 +95,9 @@ impl Global {
                 && !keys.contains_key(&e)
                 && let Some(epoch) = epochs.get(&e)
                 && self.who()?.epoch_hash(&Scope::Global, e) == Some(one::keys::epoch_hash(epoch))
-                && let Some(app) = apps.get(&e).and_then(|a| one::kernel::open_app_key(epoch, one::members::APP, a).ok())
+                && let Some(app) = apps.get(&e).and_then(|a| one::cloudflare::open_app_key(epoch, one::members::APP, a).ok())
             {
-                keys.insert(e, one::kernel::database_key(&app, one::log::NAME));
+                keys.insert(e, one::cloudflare::database_key(&app, one::log::NAME));
             }
             let opened = match steps::open(&keys, &Scope::Global, at, &sealed) {
                 steps::Opened::Step(g) => Some(g),
@@ -215,7 +215,7 @@ fn now() -> u64 {
     n0_future::time::SystemTime::now().duration_since(n0_future::time::SystemTime::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64)
 }
 
-/// What a browser seals, hands and signs by, as JSON for it to keep and look up (`kernel/web/device.js`,
+/// What a browser seals, hands and signs by, as JSON for it to keep and look up (`cloudflare/web/device.js`,
 /// `net-worker.js`), each answer worked out here:
 ///
 /// - `root`, `name`, `recovery` (hex, what each epoch is sealed to besides devices)

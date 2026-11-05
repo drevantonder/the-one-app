@@ -1,6 +1,6 @@
 //! Keys as devices hold them: each endpoint's own key, each scope's numbered epochs sealed to the endpoints that may
 //! open it, what's sealed under an epoch, signed requests, and the keys a caller hands a node for one call.
-//! `kernel/shared/crypto.js` writes the same formats, and `tests/contracts.rs` checks they agree.
+//! `cloudflare/shared/crypto.js` writes the same formats, and `tests/contracts.rs` checks they agree.
 //!
 //! Every client is a device with its own key pair, never shared by a person's devices: a native app's in the Keychain,
 //! keystore or Credential Locker, a browser's a non-extractable WebCrypto key in IndexedDB, a local agent's its
@@ -13,10 +13,10 @@
 //! belongs. Epochs never go down along a database's positions (`src/db.rs`).
 //!
 //! ```text
-//! <folder>/_epochs/<n>/<endpoint key hex>   epoch n's key, sealed to that endpoint's seal key (`kernel::seal_to`)
+//! <folder>/_epochs/<n>/<endpoint key hex>   epoch n's key, sealed to that endpoint's seal key (`cloudflare::seal_to`)
 //! <folder>/_epochs/<n>/recovery             and to the install's recovery key
-//! <folder>/<app>/_key/<n>                    the app's key in epoch n, sealed under epoch n's key (`kernel::seal_app_key`)
-//! <folder>/<app>/_grants/<endpoint>/<n>      and sealed to an endpoint a `grant` keeps it running on (`kernel::seal_to`)
+//! <folder>/<app>/_key/<n>                    the app's key in epoch n, sealed under epoch n's key (`cloudflare::seal_app_key`)
+//! <folder>/<app>/_grants/<endpoint>/<n>      and sealed to an endpoint a `grant` keeps it running on (`cloudflare::seal_to`)
 //! <folder>/_vault/<n>/<endpoint key hex>     the scope's Vault secret key n, sealed to a machine its `vault` entry grants
 //! <folder>/_vault/<n>/recovery               and to the install's recovery key
 //! ```
@@ -58,7 +58,7 @@ pub struct Endpoint {
 impl Endpoint {
     /// An endpoint in Rust: its signing key's public half, and its twin to seal to.
     pub fn of(key: &SigningKey) -> Endpoint {
-        let (_, seal) = crate::kernel::twin(&key.to_bytes());
+        let (_, seal) = crate::cloudflare::twin(&key.to_bytes());
         Endpoint { key: key.verifying_key().to_bytes(), seal }
     }
 }
@@ -71,7 +71,7 @@ pub fn answers_key(key: &SigningKey) -> [u8; 32] {
 
 /// An endpoint's X25519 secret, for opening what's sealed to it, as `Endpoint::of` lists it.
 pub fn seal_secret(key: &SigningKey) -> [u8; 32] {
-    crate::kernel::twin(&key.to_bytes()).0
+    crate::cloudflare::twin(&key.to_bytes()).0
 }
 
 // Canonical JSON and signatures.
@@ -271,13 +271,13 @@ pub fn token_id(token: &str) -> String {
 
 /// A handoff sealed to the node's seal key, as base64url: the `x-one-keys` header's value.
 pub fn seal_handoff(to: &[u8; 32], handoff: &Handoff) -> Result<String> {
-    Ok(B64U.encode(&crate::kernel::seal_to(to, &serde_json::to_vec(handoff)?)?))
+    Ok(B64U.encode(&crate::cloudflare::seal_to(to, &serde_json::to_vec(handoff)?)?))
 }
 
 /// Opens a handoff sealed to this node, with its seal secret.
 pub fn open_handoff(secret: &[u8; 32], sealed: &str) -> Result<Handoff> {
     let bytes = B64U.decode(sealed.trim().as_bytes()).map_err(|_| anyhow!("the keys handed aren't base64url"))?;
-    let plain = crate::kernel::open_sealed(secret, &bytes).context("the keys handed weren't sealed to this device")?;
+    let plain = crate::cloudflare::open_sealed(secret, &bytes).context("the keys handed weren't sealed to this device")?;
     serde_json::from_slice(&plain).context("the keys handed aren't a handoff")
 }
 
@@ -331,7 +331,7 @@ pub fn app_of(route: &str) -> Option<&str> {
 /// MCP request (`/mcp`), which may run any, or widgets and badges, which run every app's, apps' own databases; and each
 /// of those the node's Vault and log of a scope too (which fill in its items, and say who's who there), and `global`'s
 /// blobs, where apps' deployed code is (a node that keeps nothing, the serverless node, reads it there). The Vault's
-/// routes, its Vault and log; any other, the log alone. `kernel/shared/crypto.js`'s `mayHand` is the same.
+/// routes, its Vault and log; any other, the log alone. `cloudflare/shared/crypto.js`'s `mayHand` is the same.
 ///
 /// `global`'s blobs are those its entries name (deploys' bundles, releases, apps' icons), which everyone in the install
 /// may read already: any of them may add any app, and read its code. Another scope's are its own people's files, and
@@ -351,7 +351,7 @@ pub fn may_hand(route: &str, need: &Need) -> bool {
 /// The oldest epoch of a database whose key a reader needs, of a scope whose newest epoch is `newest`: the one its
 /// newest copy is under, as its newest hint (`hint`, if it has one) says, which holds all before it; every epoch from
 /// the first while it has no copy; the newest if it has no hint, being new. Nodes ask for no older, and clients hand no
-/// older. `kernel/shared/crypto.js`'s `oldestNeeded` is the same.
+/// older. `cloudflare/shared/crypto.js`'s `oldestNeeded` is the same.
 pub fn oldest_needed(hint: Option<&[u8]>, newest: u32) -> u32 {
     let newest = newest.max(1);
     let Some(hint) = hint else { return newest };
@@ -370,7 +370,7 @@ pub const MOST_NEEDED: usize = 64;
 /// What a node's 428 (`answer`) asks a request of `route` to hand: taken only from the node that answered (`node`, hex,
 /// as its connection proved), naming itself; one or more keys, MOST_NEEDED at most, each of a database that kind of
 /// request uses (`may_hand`). None if it asks for anything else. The seal key it names isn't read: what's handed is
-/// sealed to the one the install's entries list for that node. `kernel/shared/crypto.js`'s `askedFor` is the same.
+/// sealed to the one the install's entries list for that node. `cloudflare/shared/crypto.js`'s `askedFor` is the same.
 pub fn asked_for(route: &str, node: &str, answer: &Value) -> Option<Vec<Need>> {
     if answer["to"].as_str() != Some(node) {
         return None;
@@ -386,7 +386,7 @@ pub fn asked_for(route: &str, node: &str, answer: &Value) -> Option<Vec<Need>> {
 pub const BEHIND: [u64; 2] = [2_000, 4_000];
 
 /// What auth said of a device's request to be let in (`GET /api/auth/devices/requests/<key>`: its status, 0 if it
-/// didn't answer, and its JSON), which every client acts on the same way (`kernel/shared/crypto.js`'s `waited`).
+/// didn't answer, and its JSON), which every client acts on the same way (`cloudflare/shared/crypto.js`'s `waited`).
 #[derive(Debug, PartialEq)]
 pub enum Waited {
     /// Its sign-in is no more: it signs in again.

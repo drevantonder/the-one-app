@@ -64,7 +64,7 @@ async function toWeb(request, env, url) {
   headers.set("x-frame-options", "SAMEORIGIN");
   const type = TYPES[path.split(".").pop().toLowerCase()];
   if (resp.ok && type) headers.set("content-type", type);
-  // The large files are also kept brotli-compressed at its best (`<file>.br`, made when the kernel's files are), a
+  // The large files are also kept brotli-compressed at its best (`<file>.br`, made when the Workers' files are), a
   // fifth smaller than the edge's own compression: sent as they are to a browser that takes brotli, as the file itself.
   const packed = resp.ok && request.method === "GET" && /\bbr\b/.test(request.headers.get("accept-encoding") || "") && !path.endsWith(".br") ? await ask(`${path}.br`) : null;
   const send = (body) => {
@@ -110,7 +110,7 @@ function gitWithoutCli(env, url) {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    // The relay, iroh's: its WebSockets, its probes, and what devices tell it go to its own Worker (kernel/relay/).
+    // The relay, iroh's: its WebSockets, its probes, and what devices tell it go to its own Worker (cloudflare/relay/).
     if (["/relay", "/relay/tell", "/relay/computes", "/relay/seen", "/ping", "/generate_204"].includes(url.pathname)) return env.IROH.fetch(request);
     if (url.pathname === "/urls") return env.SIGNER.fetch(request);
     if (url.pathname.startsWith("/push/")) return env.PUSH.fetch(request);

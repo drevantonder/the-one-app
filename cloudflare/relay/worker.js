@@ -7,7 +7,7 @@
 // It admits only the install's endpoints, on its one list of them: `{ by, admin, role }` per key, `by` the key that let
 // it in, `role` what it is (`client`, `compute` or `service`, or a machine's several, with spaces). The install's first
 // devices, and its recovery key as a client, are put in when the install is made (`DEVICES`, `{ key, role, admin }`
-// each, from the kernel's
+// each, from the Workers'
 // deploy, taken only while the list is empty, which it never is again: the last admin can't be taken out); after that,
 // devices tell it, and nothing else changes it. A computer joining with a pairing code a device made gets in too, by
 // the ticket it shows as iroh's relay auth token, until the code expires, and reaches only that device until it's
@@ -46,7 +46,7 @@
 // comes back by RPC (`fromNode`, on the `ServerlessNode` entrypoint, which only its Worker binds) and goes out as from
 // it. It's one of the install's endpoints, as compute.
 //
-// Nor are the MCP Worker's devices (kernel/mcp/), one per remote MCP client, each in a Durable Object of that Worker's
+// Nor are the MCP Worker's devices (cloudflare/mcp/), one per remote MCP client, each in a Durable Object of that Worker's
 // (`MCP`) while it runs: one binds its key (`bind`, a request signed by that key, which must be on the list) to its
 // object, which then gets the datagrams sent to that key by RPC (`deliver`), and passes back by RPC what it sends
 // (`fromClient`), until it unbinds or its binding lapses. Binding gives it a ticket, which sending and unbinding must

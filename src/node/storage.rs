@@ -1,5 +1,5 @@
 //! Where the install keeps its data: its bucket. It starts as a folder on the device that made the install, which no
-//! other machine reaches; an admin moves it to S3-compatible storage, whose credentials only the kernel's URL signer
+//! other machine reaches; an admin moves it to S3-compatible storage, whose credentials only the URL signer
 //! holds, with the `storage` setting (an entry only an admin's device writes) that says only where it is, and each
 //! device follows: it reaches it through the URL signer, copies there what it reaches of the old one, and keeps its
 //! data there from then on. A folder is only ever a machine's own choice, never taken from what others write.
@@ -38,13 +38,13 @@ impl Node {
         let joined = fields.get("address").cloned();
         let address: crate::bucket::Address = Arc::new(move || {
             let node = Node(node.upgrade().context("this device stopped")?);
-            node.with(|i| Ok(i.r.db().setting("address")))?.or_else(|| joined.clone()).context("your One App has no address yet, where its bucket is reached: an admin sets one with kernel use")
+            node.with(|i| Ok(i.r.db().setting("address")))?.or_else(|| joined.clone()).context("your One App has no address yet, where its bucket is reached: an admin sets one with cloudflare use")
         });
         Place::install(fields, address, ed25519_dalek::SigningKey::from_bytes(self.0.key.as_bytes()))
     }
 
     /// Moves the install's data, for an admin, to S3-compatible storage (`endpoint`, `bucket`, `region`), whose key the
-    /// kernel's URL signer holds: reaches it through the signer first, and makes it the install's `storage` setting if
+    /// URL signer holds: reaches it through the signer first, and makes it the install's `storage` setting if
     /// it can.
     pub async fn set_storage(&self, caller: &Caller, body: &Value) -> Result<Value> {
         self.with(|i| {

@@ -3,11 +3,6 @@
 use super::*;
 
 impl Node {
-    /// Where the install's kernel is, for nodes to take its sign-ins: the install's address.
-    pub fn kernel(&self) -> Result<String> {
-        self.with(|i| Ok(i.r.db().setting("address").context("this install has no address yet, so it takes no sign-ins: an admin sets one with kernel use")?.clone()))
-    }
-
     /// Whether `user` is a person of the install.
     pub fn is_user(&self, user: &str) -> bool {
         self.with(|i| Ok(i.r.db().user(user).is_some())).unwrap_or(false)
@@ -46,7 +41,7 @@ impl Node {
         self.state_as(viewer, None)
     }
 
-    /// The same for someone signed in with the kernel through `client` (its name), which is no device: not the
+    /// The same for someone signed in at the install's address through `client` (its name), which is no device: not the
     /// device it reached, as the serverless node says too.
     pub fn state_for_sign_in(&self, viewer: &Caller, client: &str) -> Value {
         self.state_as(viewer, Some(client))
@@ -287,9 +282,9 @@ impl Node {
 
 /// What a device says of each service serving there, as `GET /v1/state` lists it: what it is, its version (a
 /// service's own, or for one built into the node, the node's build), whom it serves, and who installed it.
-/// Whether this node's install is a throwaway network (`one throwaway`), whose kernel beside it signs its person in with no passkey.
+/// Whether this node's install is a throwaway network (`one throwaway`), whose Workers beside it sign its person in with no passkey.
 fn throwaway() -> bool {
-    let settings = std::fs::read_to_string(crate::kernel::Settings::path()).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok());
+    let settings = std::fs::read_to_string(crate::cloudflare::Settings::path()).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok());
     settings.is_some_and(|s| !s["throwaway_person"].is_null())
 }
 

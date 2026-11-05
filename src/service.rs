@@ -98,7 +98,7 @@ struct Inner {
     conns: Mutex<HashMap<Key, Connection>>,
     strangers: AtomicUsize,
     /// The install's sign-in service, whose keys check a sign-in a node passes on to a service that serves everyone.
-    issuer: crate::kernel::Issuer,
+    issuer: crate::cloudflare::Issuer,
 }
 
 /// Where a service keeps its key, its install and what it knows of it.
@@ -159,7 +159,7 @@ impl Service {
             endpoint: Mutex::new(None),
             conns: Mutex::new(HashMap::new()),
             strangers: AtomicUsize::new(0),
-            issuer: crate::kernel::Issuer::new(&install_address),
+            issuer: crate::cloudflare::Issuer::new(&install_address),
         })))
     }
 

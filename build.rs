@@ -93,12 +93,12 @@ fn main() {
         starters.push_str(&format!("{name:?},"));
     }
     let out = format!("{out}pub const BUILT_IN: &[(&str, &[(&str, &[u8])])] = &[{apps}];\npub const STARTERS: &[&str] = &[{starters}];\n");
-    // The kernel services' sources, built with the pinned Bun when they're run or deployed (src/kernel.rs), so a
-    // release deploys exactly the kernel it was signed with. Their tests stay in the repo.
-    let kernel = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap()).join("kernel");
-    println!("cargo:rerun-if-changed={}", kernel.display());
+    // The Workers' sources, built with the pinned Bun when they're run or deployed (src/cloudflare.rs), so a
+    // release deploys exactly the Workers it was signed with. Their tests stay in the repo.
+    let cloudflare = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap()).join("cloudflare");
+    println!("cargo:rerun-if-changed={}", cloudflare.display());
     let mut files = Vec::new();
-    collect(&kernel, &kernel, &mut files);
+    collect(&cloudflare, &cloudflare, &mut files);
     // The relay's WebAssembly is built from relay/protos/ by hand (relay/build.sh), so only what it built ships.
     files.retain(|(rel, _)| !rel.starts_with("test/") && !rel.starts_with("relay/protos/") && rel != "relay/build.sh");
     // The gateway serves the screens' design kit beside the web client, the same files nodes put in screens.
@@ -113,7 +113,7 @@ fn main() {
     });
     files.extend(kit.map(|(rel, abs)| (format!("web/screen/{rel}"), abs)));
     // And the formats devices hold keys in, which the web client imports as ../shared/crypto.js.
-    files.push(("web/shared/crypto.js".into(), kernel.join("shared/crypto.js").to_string_lossy().into()));
+    files.push(("web/shared/crypto.js".into(), cloudflare.join("shared/crypto.js").to_string_lossy().into()));
     // The custom build's logo, which the web client shows where the apps show it.
     let logo = std::path::Path::new(&path).parent().unwrap().join(get("logo").as_str().unwrap());
     println!("cargo:rerun-if-changed={}", logo.display());
@@ -124,7 +124,7 @@ fn main() {
     files.push(("web/icon.png".into(), std::fs::canonicalize(&icon).unwrap_or_else(|e| panic!("{}: {e}", icon.display())).to_string_lossy().into()));
     files.sort();
     let files: Vec<String> = files.iter().map(|(rel, abs)| format!("({rel:?}, include_bytes!({abs:?}))")).collect();
-    let out = format!("{out}pub const KERNEL: &[(&str, &[u8])] = &[{}];\n", files.join(", "));
+    let out = format!("{out}pub const CLOUDFLARE: &[(&str, &[u8])] = &[{}];\n", files.join(", "));
     // The serverless node's WebAssembly and its glue (serverless/), which `update` builds into SERVERLESS where Rust
     // builds for WebAssembly, so a release carries them to devices with no Rust to deploy it from.
     // With no SERVERLESS, the one in target/serverless, if it's there (`throwaway serverless deploy` builds it, as `throwaway client

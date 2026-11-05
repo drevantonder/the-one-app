@@ -3,7 +3,7 @@ import AuthenticationServices
 import CryptoKit
 import Security
 
-/// Signing in, as every client of the install's auth service does (kernel/web/web.js is the same in a browser): this
+/// Signing in, as every client of the install's auth service does (cloudflare/web/web.js is the same in a browser): this
 /// app registers itself as an OAuth client, the person signs in with their passkey, and it comes back with a code that
 /// PKCE turns into tokens. On the iPhone that's the system's sign-in sheet, back at `<cli>://signed-in/`; on the Mac,
 /// the person's own default browser, where their passkey is, back at a port on this Mac (`Loopback`). The refresh

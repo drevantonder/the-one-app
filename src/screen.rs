@@ -83,7 +83,7 @@ fn page_with(context: &serde_json::Value, body: &str, nonce: Option<String>, lin
     )
 }
 
-/// A kit file's address, named by its content as the gateway names the files it serves (src/kernel/services.rs).
+/// A kit file's address, named by its content as the gateway names the files it serves (src/cloudflare/workers.rs).
 fn named(path: &str, text: &str) -> String {
     use sha2::Digest;
     format!("/screen/{path}?v={}", &data_encoding::HEXLOWER.encode(&sha2::Sha256::digest(text.as_bytes()))[..16])
@@ -145,9 +145,9 @@ pub fn client_screens() -> impl Iterator<Item = &'static str> {
 pub const TEMPLATE_NONCE: &str = "__nonce__";
 pub const TEMPLATE_PARAMS: &str = "\"__params__\"";
 
-/// A client's own screen's page for the web client, which its address serves as `screens/<name>.html` (src/kernel/
+/// A client's own screen's page for the web client, which its address serves as `screens/<name>.html` (src/cloudflare/
 /// services.rs): `client_page`, but for `TEMPLATE_NONCE` and `TEMPLATE_PARAMS`, which the web client fills in, and
-/// linking the kit, the bridge and `@one/ui`, which it writes in from its own (kernel/web/web.js).
+/// linking the kit, the bridge and `@one/ui`, which it writes in from its own (cloudflare/web/web.js).
 pub fn client_template(name: &str) -> String {
     page_with(&client_context(name, &TEMPLATE_PARAMS.trim_matches('"').into()), client_screen(name), Some(TEMPLATE_NONCE.into()), true)
 }
