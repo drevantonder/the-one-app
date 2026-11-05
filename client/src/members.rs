@@ -119,7 +119,8 @@ pub fn who(m: &Members) -> Result<ScopeDb> {
 /// - `epochs`: each scope's newest epoch `n` and every epoch's hash
 /// - `people`: each person's `uses` and `starts` (scopes they open, and whose new epochs they start), `nodes` (those
 ///   that run their calls), `runs_until_chosen`, `approves` (whose new devices they let in), `invites` (someone new),
-///   `removes_people`, and `removes` (the devices they may take out)
+///   `removes_people`, `removes` (the devices they may take out), and `keeps`: the apps they keep running on a device
+///   still listed, `{ endpoint, scope, app, until, keys }` (each epoch's key hash), the only ones their browser renews
 /// - `roles` and `runs`, as an older release's tabs read them (each scope's people's roles, and the machines each
 ///   person who chose runs their things on): kept for those tabs, which share this record; phase 3 removes them
 pub fn view(m: &Members) -> Result<Value> {
@@ -147,8 +148,14 @@ pub fn view(m: &Members) -> Result<Value> {
     for (s, n) in db.epochs() {
         epochs.insert(s.to_string(), json!({ "n": n, "hashes": db.epoch_hashes(&s).into_iter().map(|(n, h)| (n.to_string(), json!(h))).collect::<Map<_, _>>() }));
     }
+    let keeps = db.keeps();
     let mut answers = Map::new();
     for u in &people {
+        let keeps: Vec<Value> = keeps
+            .iter()
+            .filter(|((k, s, _), g)| g.by == *u && db.machine(k).is_some() && db.may(u, "keep", &object(s)))
+            .map(|((k, s, a), g)| json!({ "endpoint": hex(k), "scope": s.to_string(), "app": a, "until": g.until, "keys": g.hashes }))
+            .collect();
         answers.insert(
             u.clone(),
             json!({
@@ -160,6 +167,7 @@ pub fn view(m: &Members) -> Result<Value> {
                 "invites": db.may(u, "invite", INSTALL),
                 "removes_people": db.may(u, "remove", INSTALL),
                 "removes": listed.iter().filter(|d| db.may(u, "remove", &device(&d.key))).map(|d| hex(&d.key)).collect::<Vec<_>>(),
+                "keeps": keeps,
             }),
         );
     }
@@ -265,5 +273,31 @@ mod tests {
                 assert_eq!(k["epochs"][s.to_string()]["hashes"][n.to_string()].as_str(), m.epoch_hash(s, n), "{s}'s epoch {n}");
             }
         }
+    }
+
+    /// A browser renews only the keeps its own replay holds: a grant a node lists, or signs for someone else's scope,
+    /// to have their app's keys sealed to it, is never among them.
+    #[test]
+    fn only_replayed_keeps_are_renewed() {
+        let key = |n: u8| SigningKey::from_bytes(&[n; 32]);
+        let (mac, laptop, bobs_box, hacked) = (key(1), key(2), key(3), key(4));
+        let at = |k: &SigningKey| Endpoint::of(k);
+        let pk = |k: &SigningKey| k.verifying_key().to_bytes();
+        let (bobs, soon) = (Scope::User(BOB.into()), u64::MAX / 2);
+        let keys = BTreeMap::from([(1, "b".repeat(64))]);
+        let mut i = Install::default();
+        i.write(&mac, ANDRE, members::genesis("Home", ANDRE, "Andre", &at(&mac), "mac", &[Kind::Client], &[9; 32], &"e".repeat(64)));
+        i.write(&mac, ANDRE, members::device(&at(&hacked), ANDRE, "box", &[Kind::Compute], None));
+        i.write(&mac, ANDRE, members::device(&at(&laptop), BOB, "laptop", &[Kind::Client], Some(("Bob", Role::Member))));
+        i.write(&laptop, BOB, members::device(&at(&bobs_box), BOB, "bob's box", &[Kind::Compute], None));
+        i.write(&laptop, BOB, members::grant(&pk(&bobs_box), &bobs, "notes", soon, &keys));
+        // The hacked node grants itself Bob's notes, as Bob would.
+        i.write(&hacked, BOB, members::grant(&pk(&hacked), &bobs, "notes", soon, &keys));
+        let mut g = Global::new(None);
+        g.add_entries(i.entries).unwrap();
+        let k = view(&g.members().unwrap()).unwrap();
+        let endpoints = |u: &str| k["people"][u]["keeps"].as_array().unwrap().iter().map(|g| g["endpoint"].as_str().unwrap().to_string()).collect::<Vec<_>>();
+        assert_eq!(endpoints(BOB), vec![hex(&pk(&bobs_box))], "Bob renews only the grant he signed");
+        assert!(endpoints(ANDRE).is_empty(), "nor does anyone else renew one");
     }
 }

@@ -89,8 +89,8 @@ export function server(version) {
   async function global(user, given) {
     const [, { get, put }] = await code;
     const kept = await get(`global:${user}`);
-    // What an older release kept, without its answers, is replayed again.
-    if (!given && kept?.members?.people) return kept.members;
+    // What an older release kept, without all its answers (each person's `keeps` came last), is replayed again.
+    if (!given && kept?.members?.people?.[user]?.keeps) return kept.members;
     const { Global } = await glue;
     const root = kept?.root || (await get(`genesis:${user}`)) || "";
     const g = new Global(root, kept?.pack || new Uint8Array(), given || new Uint8Array());

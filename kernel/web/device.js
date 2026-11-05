@@ -17,7 +17,7 @@ import { members } from "./members.js";
 const text = new TextEncoder();
 
 /// How long standing work lasts (src/node/standing.rs), unless its person renews it as they use the app.
-const GRANT_DAYS = 30, DAY = 86_400_000;
+const GRANT_DAYS = 30, DAY = 86_400_000, HOUR = 3_600_000;
 
 // MARK: Kept in this browser
 
@@ -87,6 +87,8 @@ export class Device {
     this.needs = JSON.parse(localStorage.getItem("one.needs") || "{}");
     /// The grants this browser is renewing now.
     this.renewing = new Set();
+    /// When `renewGrants` last checked the entries again.
+    this.renewChecked = 0;
     /// What's being fetched now, by what it is, for everything that wants it at once to wait on the one fetch.
     this.fetching = new Map();
     /// The 428 each kind of request is learning from now, by its route: `{ asked, done }`.
@@ -110,9 +112,9 @@ export class Device {
         if (fresh || !kept) throw err;
         return null;
       });
-      // What an older release kept, without its answers, is replayed again.
+      // What an older release kept, without all its answers (each person's `keeps` came last), is replayed again.
       const given = r && r.status !== 204 ? new Uint8Array(await r.arrayBuffer()) : undefined;
-      const k = !given && kept?.members?.people ? kept.members : await this.replay(this.user, given);
+      const k = !given && kept?.members?.people?.[this.user]?.keeps ? kept.members : await this.replay(this.user, given);
       if (!k.people[this.user]) throw new Error("Your One App doesn't list you yet, so this device didn't use it.");
       this.known = k;
     }
@@ -122,7 +124,7 @@ export class Device {
   /// The members as last checked, kept in this browser, to start with at once.
   async load() {
     const kept = (await get(`global:${this.user}`))?.members;
-    this.known ||= kept?.people ? kept : null;
+    this.known ||= kept?.people?.[this.user]?.keeps ? kept : null;
   }
 
   // Epochs and keys.
@@ -242,15 +244,23 @@ export class Device {
       }
     }
     await this.write("global", members.grant({ endpoint, scope, app, until, keys }));
+    // Checked again, so what it renews next goes by this.
+    await this.checked(true);
     if (!until) await this.renew([scope], []);
   }
 
   /// Renews, in the background, this person's grants of `app` as they use it: once a day at most, and at once when
-  /// the scope has an epoch a grant's keys don't reach. One of theirs that ran out is stopped, as Stop does.
-  renewGrants(app) {
-    const st = this.state(), now = Date.now();
-    for (const g of st.install?.grants || []) {
-      if (g.by === this.user && g.until && g.until <= now) {
+  /// the scope has an epoch a grant's keys don't reach. One of theirs that ran out is stopped, as Stop does. Only those
+  /// the install's entries hold, as checked here (`keeps`), never those a node lists: a hacked one could list itself.
+  async renewGrants(app) {
+    // Checked again first, at most once an hour, so it renews what its person's other devices granted too.
+    if (!(this.renewChecked > Date.now() - HOUR)) {
+      this.renewChecked = Date.now();
+      await this.checked(true).catch(() => {});
+    }
+    const now = Date.now();
+    for (const g of this.known?.people[this.user]?.keeps || []) {
+      if (g.until && g.until <= now) {
         const id = `${g.endpoint} ${g.scope} ${g.app}`;
         if (this.renewing.has(id)) continue;
         this.renewing.add(id);
@@ -259,7 +269,7 @@ export class Device {
       }
       const newest = this.known?.epochs[g.scope]?.n || 0;
       const reaches = Math.max(0, ...Object.keys(g.keys || {}).map(Number));
-      if (g.app !== app || g.by !== this.user || g.until <= now || (g.until > now + (GRANT_DAYS - 1) * DAY && reaches >= newest)) continue;
+      if (g.app !== app || g.until <= now || (g.until > now + (GRANT_DAYS - 1) * DAY && reaches >= newest)) continue;
       const id = `${g.endpoint} ${g.scope} ${g.app}`;
       if (this.renewing.has(id)) continue;
       this.renewing.add(id);
