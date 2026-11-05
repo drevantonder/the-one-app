@@ -50,9 +50,9 @@ function body(b, what = "a body") {
 const placeholders = (xs) => xs.map(() => "?").join(", ");
 const like = (q) => `%${q.replace(/[\\%_]/g, (c) => "\\" + c)}%`;
 
-/// The issue operations, given what app.js knows of repos: finding one, who owns and pushes to it, and people.
+/// The issue operations, given what app.js knows of repos: finding one, it as an object of permissions, and people.
 export function ops(R) {
-  const { global, named, mayPush, owns, who, byHandle, handles, randomId, iso, REPO } = R;
+  const { global, named, object, who, byHandle, handles, randomId, iso, REPO } = R;
   const person = (ctx, id) => who(ctx, `user:${id}`);
   const COMMENT_ID = { type: "string", description: "a comment's id, from repos_issue's comments" };
   const CONFIRM = { type: "boolean", description: "true once the person agreed: it can't be undone" };
@@ -179,8 +179,8 @@ export function ops(R) {
           closed_issues: counts.find((c) => c.state === "closed")?.n ?? 0,
           issues: await shape(ctx, g, r, rows.slice(0, PAGE)),
           more: rows.length > PAGE,
-          push: await mayPush(ctx, g, r),
-          yours: owns(ctx, r),
+          push: await g.may("push", object(r)),
+          yours: await g.may("manage", object(r)),
         });
       },
     },
@@ -195,13 +195,13 @@ export function ops(R) {
         const [[shaped], comments, push] = await Promise.all([
           shape(ctx, g, r, [i]),
           g.query("select id, user, body, created, updated from comments where repo = ? and number = ? order by created, id", [r.id, i.number]),
-          mayPush(ctx, g, r),
+          g.may("push", object(r)),
         ]);
         const author = i.user === ctx.me.user;
         return iso({
           repo: r.path, ...shaped, body: i.body,
           comments: comments.map((c) => ({ id: c.id, author: person(ctx, c.user), body: c.body, created: c.created, updated: c.updated, yours: c.user === ctx.me.user })),
-          can: { edit: author || push, close: author || push, triage: push, delete: owns(ctx, r) },
+          can: { edit: author || push, close: author || push, triage: push, delete: await g.may("manage", object(r)) },
         });
       },
     },
@@ -216,7 +216,7 @@ export function ops(R) {
         const g = global(ctx);
         const r = await named(ctx, input.repo);
         const t = title(input.title), b = body(input.body);
-        const push = await mayPush(ctx, g, r);
+        const push = await g.may("push", object(r));
         may(push || !(input.labels?.length || input.assignees?.length), `only ${pushers(r)} label and assign its issues: open it without labels or assignees`);
         const labels = input.labels ? await labelsNamed(g, r, input.labels) : [];
         const assignees = input.assignees ? people(ctx, input.assignees) : [];
@@ -243,7 +243,7 @@ export function ops(R) {
         const g = global(ctx);
         const r = await named(ctx, input.repo);
         const i = await issueAt(g, r, input.number);
-        const push = await mayPush(ctx, g, r);
+        const push = await g.may("push", object(r));
         const text = input.title !== undefined || input.body !== undefined, triage = input.labels !== undefined || input.assignees !== undefined;
         if (!text && !triage) throw new Error("give what changes: title, body, labels or assignees");
         may(!text || push || i.user === ctx.me.user, `only its author and ${pushers(r)} edit #${i.number}`);
@@ -283,7 +283,7 @@ export function ops(R) {
         const r = await named(ctx, repo);
         const i = await issueAt(g, r, n);
         if (!REASONS.includes(state_reason)) throw new Error("state_reason is completed or not_planned");
-        may(i.user === ctx.me.user || (await mayPush(ctx, g, r)), `only its author and ${pushers(r)} close #${i.number}`);
+        may(i.user === ctx.me.user || (await g.may("push", object(r))), `only its author and ${pushers(r)} close #${i.number}`);
         if (i.state === "closed" && i.state_reason === state_reason) throw new Error(`#${i.number} is already closed as ${state_reason.replace("_", " ")}`);
         if (comment?.trim()) addComment(ctx, g, r, i.number, body(comment, "a comment"));
         g.exec("update issues set state = 'closed', state_reason = ?, closed = ?, closed_by = ?, updated = ? where repo = ? and number = ?", [state_reason, ctx.now(), ctx.me.user, ctx.now(), r.id, i.number]);
@@ -298,7 +298,7 @@ export function ops(R) {
         const g = global(ctx);
         const r = await named(ctx, repo);
         const i = await issueAt(g, r, n);
-        may(i.user === ctx.me.user || (await mayPush(ctx, g, r)), `only its author and ${pushers(r)} reopen #${i.number}`);
+        may(i.user === ctx.me.user || (await g.may("push", object(r))), `only its author and ${pushers(r)} reopen #${i.number}`);
         if (i.state === "open") throw new Error(`#${i.number} is open`);
         if (comment?.trim()) addComment(ctx, g, r, i.number, body(comment, "a comment"));
         g.exec("update issues set state = 'open', state_reason = 'reopened', closed = null, closed_by = null, updated = ? where repo = ? and number = ?", [ctx.now(), r.id, i.number]);
@@ -314,7 +314,7 @@ export function ops(R) {
         const g = global(ctx);
         const r = await named(ctx, repo);
         const i = await issueAt(g, r, n);
-        may(owns(ctx, r), `only the owners of ${r.path} delete its issues: close it instead (repos_close_issue)`);
+        may(await g.may("manage", object(r)), `only the owners of ${r.path} delete its issues: close it instead (repos_close_issue)`);
         for (const table of ["issues", "issue_labels", "issue_assignees", "comments"]) g.exec(`delete from ${table} where repo = ? and number = ?`, [r.id, i.number]);
         return `Deleted ${r.path}#${i.number}.`;
       },
@@ -358,7 +358,7 @@ export function ops(R) {
         const g = global(ctx);
         const r = await named(ctx, input.repo);
         const c = await commentAt(g, r, input.id);
-        may(c.user === ctx.me.user || owns(ctx, r), `only its author and the owners of ${r.path} delete a comment`);
+        may(c.user === ctx.me.user || (await g.may("manage", object(r))), `only its author and the owners of ${r.path} delete a comment`);
         g.exec("delete from comments where id = ?", [c.id]);
         return `Deleted the comment on ${r.path}#${c.number}.`;
       },
@@ -395,7 +395,7 @@ export function ops(R) {
       async run(ctx, input) {
         const g = global(ctx);
         const r = await named(ctx, input.repo);
-        may(await mayPush(ctx, g, r), `only ${pushers(r)} manage its labels`);
+        may(await g.may("push", object(r)), `only ${pushers(r)} manage its labels`);
         const name = String(input.name ?? "").trim();
         const to = input.new_name === undefined ? name : String(input.new_name).trim();
         if (!name || !to || to.length > 50) throw new Error("a label's name is 1 to 50 characters");
@@ -426,7 +426,7 @@ export function ops(R) {
       async run(ctx, input) {
         const g = global(ctx);
         const r = await named(ctx, input.repo);
-        may(await mayPush(ctx, g, r), `only ${pushers(r)} manage its labels`);
+        may(await g.may("push", object(r)), `only ${pushers(r)} manage its labels`);
         const [l] = await labelsNamed(g, r, [input.name]);
         g.exec("delete from labels where repo = ? and name = ?", [r.id, l.name]);
         g.exec("delete from issue_labels where repo = ? and label = ?", [r.id, l.name]);

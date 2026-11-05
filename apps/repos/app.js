@@ -5,7 +5,8 @@
 // As on GitHub, a repo is <owner>/<name>, its owner a person or a group, by their handle (ctx.handles), so a handle's
 // change moves its repos' addresses. Everyone reads and forks every repo. Its owner pushes, and its collaborators: a
 // person's repo is theirs, and they add and remove collaborators; a group's is its admins', its members are its
-// collaborators, and its admins add others. Owners delete a repo, as apps are: it waits in Recently Deleted, read by no
+// collaborators, and its admins add others. Who's which is the install's permissions (`types`, and the rows of
+// `relations`, which ctx.global.may reads). Owners delete a repo, as apps are: it waits in Recently Deleted, read by no
 // one, until they restore it or erase it, and its packs, for good. Rows name a repo by its id (an older repo's is the
 // name it had before owners had handles) and its owner by user:<id> or group:<id>, never by handle.
 //
@@ -104,10 +105,16 @@ const sql = (v) => `'${String(v).replace(/'/g, "''")}'`;
 
 const randomId = () => [...crypto.getRandomValues(new Uint8Array(8))].map((x) => x.toString(16).padStart(2, "0")).join("");
 
-/// Writes a new repo, or a fork of `from` (a row) with its branches and history as they are now.
+/// A repo as an object of permissions, which ctx.global.may asks about.
+const object = (r) => `repo:${r.id}`;
+
+/// Writes a new repo, or a fork of `from` (a row) with its branches and history as they are now: its owner's, a person
+/// or a group's admins, and a group's members its collaborators.
 function newRepo(ctx, g, { name, owner, from = null }) {
   const id = randomId();
   g.exec(`insert into repos (id, owner, name, "from", created, user) values (?, ?, ?, ?, ?, ?)`, [id, owner, name, from?.id ?? null, ctx.now(), ctx.me.user]);
+  const holders = owner.startsWith("group:") ? [[`${owner}#admin`, "owner"], [`${owner}#member`, "collaborator"]] : [[`person:${owner.slice(5)}`, "owner"]];
+  for (const [subject, relation] of holders) g.exec("insert into relations (subject, relation, object, by, time) values (?, ?, ?, ?, ?)", [subject, relation, object({ id }), ctx.me.user, ctx.now()]);
   if (from) {
     g.exec(`insert into branches select ?, branch, head, ?, ?, ? from branches where repo = ?`, [id, ctx.me.user, ctx.me.user_name || ctx.me.name, ctx.now(), from.id]);
     g.exec("insert or ignore into packs select ?, hash, time from packs where repo = ?", [id, from.id]);
@@ -120,19 +127,6 @@ function newRepo(ctx, g, { name, owner, from = null }) {
 
 /// What to call an owner: their name, or a group's.
 const ownerName = (ctx, owner) => byId(ctx, owner)?.name || "someone who left";
-
-/// The caller's role in the group that owns `r`, if one does: admin, member or null.
-const groupRole = (ctx, r) => (r.owner.startsWith("group:") ? byId(ctx, r.owner)?.members?.[ctx.me.user] || null : null);
-
-/// Whether the caller owns `r`: it's theirs, or a group's they're an admin of. Owners delete, restore and erase it, and
-/// add and remove its collaborators.
-const owns = (ctx, r) => r.owner === `user:${ctx.me.user}` || groupRole(ctx, r) === "admin";
-
-/// Whether the caller pushes to `r`: they own it, they're in the group that does, or they're one of its collaborators.
-async function mayPush(ctx, g, r) {
-  if (owns(ctx, r) || groupRole(ctx, r)) return true;
-  return (await g.query("select 1 from collaborators where repo = ? and user = ?", [r.id, ctx.me.user])).length > 0;
-}
 
 /// The owner a new repo of the caller's goes under, by handle (theirs if none): them, or a group they're in.
 function ownerFor(ctx, handle) {
@@ -147,7 +141,7 @@ function ownerFor(ctx, handle) {
 async function owned(ctx, repo) {
   const r = await repoAt(ctx, global(ctx), repo);
   if (!r) await named(ctx, repo);
-  if (!owns(ctx, r)) throw new Error(`only ${r.owner.startsWith("group:") ? `${ownerName(ctx, r.owner)}'s admins` : ownerName(ctx, r.owner)} ${r.deleted ? "restore or erase" : "manage"} ${r.path}`);
+  if (!(await global(ctx).may("manage", object(r)))) throw new Error(`only ${r.owner.startsWith("group:") ? `${ownerName(ctx, r.owner)}'s admins` : ownerName(ctx, r.owner)} ${r.deleted ? "restore or erase" : "manage"} ${r.path}`);
   return r;
 }
 
@@ -156,6 +150,10 @@ const deletedOf = (r) => (r.deleted ? { time: r.deleted, by: r.deleted_by } : nu
 
 function global(ctx) {
   if (!ctx.global) throw new Error("repos lives in global: install it there");
+  // A node from before apps' permissions can't say who may push or manage: what asks waits for its update.
+  ctx.global.may ??= async () => {
+    throw new Error("this device's node is from before apps' permissions: it takes the update that has them soon, then try again");
+  };
   return ctx.global;
 }
 
@@ -190,13 +188,10 @@ async function ownList(ctx) {
        from repos r order by coalesce(updated, r.created) desc`,
   );
   const from = await paths(ctx, g, repos.map((r) => r.from));
-  const out = [];
-  for (const r of repos) {
-    out.push({
-      repo: pathOf(ctx, r), name: r.name, owner: who(ctx, r.owner), from: from[r.from] ?? null, branch: r.branch, branches: r.branches,
-      created: r.created, updated: r.updated, open_issues: r.open_issues, deleted: deletedOf(r), yours: owns(ctx, r), push: await mayPush(ctx, g, r),
-    });
-  }
+  const out = await Promise.all(repos.map(async (r) => ({
+    repo: pathOf(ctx, r), name: r.name, owner: who(ctx, r.owner), from: from[r.from] ?? null, branch: r.branch, branches: r.branches,
+    created: r.created, updated: r.updated, open_issues: r.open_issues, deleted: deletedOf(r), yours: await g.may("manage", object(r)), push: await g.may("push", object(r)),
+  })));
   return iso(out);
 }
 
@@ -247,7 +242,25 @@ const app = {
       insert into labels select r.id, d.column1, d.column2, d.column3 from repos r, (values ${issues.LABELS.map((l) => `(${l.map(sql).join(", ")})`).join(", ")}) d;`,
       // GitHub organizations connected for groups (github.js), and what a connection started waits with.
       github.SCHEMA,
+      // Who holds a role on a repo, as the install's permissions' rows (subject, relation, object, until), and who gave
+      // it when: its owner (a person, or a group's admins), a group's members as its collaborators, and the
+      // collaborators its owners added.
+      `create table relations (subject text not null, relation text not null, object text not null, until integer, by text, time integer,
+                               primary key (subject, relation, object));
+      create index relations_by_object on relations (object, relation);
+      insert into relations select 'person:' || substr(owner, 6), 'owner', 'repo:' || id, null, user, created from repos where owner like 'user:%';
+      insert into relations select owner || '#admin', 'owner', 'repo:' || id, null, user, created from repos where owner like 'group:%';
+      insert into relations select owner || '#member', 'collaborator', 'repo:' || id, null, user, created from repos where owner like 'group:%';
+      insert or ignore into relations select 'person:' || user, 'collaborator', 'repo:' || repo, null, by, time from collaborators;
+      drop table collaborators;`,
     ],
+  },
+
+  // A repo's roles: its owner pushes and manages it (its collaborators; deleting, restoring and erasing it; deleting
+  // its issues and anyone's comments), and its collaborators push (and close, edit, label and assign any of its
+  // issues, and manage its labels). Everyone reads and forks every repo, so nothing says that.
+  types: {
+    repo: { permissions: ["push", "manage"], roles: { owner: ["push", "manage"], collaborator: ["push"] } },
   },
 
   ops: {
@@ -272,7 +285,7 @@ const app = {
         const packs = (await g.query("select hash from packs where repo = ? order by time, hash", [r.id])).map((p) => p.hash);
         const pushes = (await g.query("select branch, base, head, user, name, time from pushes where repo = ? order by time desc limit 30", [r.id]));
         const from = (await paths(ctx, g, [r.from]))[r.from] ?? null;
-        return iso({ repo: r.path, name: r.name, address: address(ctx, r.path), owner: who(ctx, r.owner), from, created: r.created, yours: owns(ctx, r), push: await mayPush(ctx, g, r), branches, packs, forks: await forksOf(ctx, g, r), pushes });
+        return iso({ repo: r.path, name: r.name, address: address(ctx, r.path), owner: who(ctx, r.owner), from, created: r.created, yours: await g.may("manage", object(r)), push: await g.may("push", object(r)), branches, packs, forks: await forksOf(ctx, g, r), pushes });
       },
     },
     tree: {
@@ -283,7 +296,7 @@ const app = {
         const g = global(ctx);
         const r = (await repoAt(ctx, g, input.repo)) || (await named(ctx, input.repo));
         const open = (await g.query("select count(*) as n from issues where repo = ? and state = 'open'", [r.id]))[0].n;
-        const about = { owner: who(ctx, r.owner), yours: owns(ctx, r), push: await mayPush(ctx, g, r), from: (await paths(ctx, g, [r.from]))[r.from] ?? null, open_issues: open };
+        const about = { owner: who(ctx, r.owner), yours: await g.may("manage", object(r)), push: await g.may("push", object(r)), from: (await paths(ctx, g, [r.from]))[r.from] ?? null, open_issues: open };
         // A deleted one shows only that it was, for its owners to restore or erase.
         if (r.deleted) return iso({ repo: r.path, name: r.name, ...about, deleted: deletedOf(r), branches: [], entries: [] });
         const t = await browse.tree(ctx, g, { ...input, repo: r });
@@ -335,8 +348,9 @@ const app = {
         const r = await named(ctx, repo);
         const group = r.owner.startsWith("group:") ? byId(ctx, r.owner) : null;
         const members = Object.entries(group?.members || {}).map(([user, role]) => ({ ...who(ctx, `user:${user}`), role }));
-        const added = (await g.query("select user, by, time from collaborators where repo = ? order by time", [r.id])).map((c) => ({ ...who(ctx, `user:${c.user}`), by: ownerName(ctx, `user:${c.by}`), time: c.time }));
-        const yours = owns(ctx, r);
+        const added = (await g.query("select subject, by, time from relations where object = ? and relation = 'collaborator' and subject like 'person:%' order by time", [object(r)]))
+          .map((c) => ({ ...who(ctx, `user:${c.subject.slice(7)}`), by: ownerName(ctx, `user:${c.by}`), time: c.time }));
+        const yours = await g.may("manage", object(r));
         // Whom its owners could add: everyone else in the install.
         const taken = new Set([r.owner.slice(5), ...Object.keys(group?.members || {}), ...added.map((c) => byHandle(ctx, c.handle)?.id.slice(5))]);
         const people = yours ? handles(ctx).filter((h) => h.id.startsWith("user:") && !h.removed && !taken.has(h.id.slice(5))).map((h) => ({ handle: h.handle, name: h.name })) : [];
@@ -355,7 +369,7 @@ const app = {
         const id = h.id.slice(5);
         if (r.owner === h.id) throw new Error(`${h.name} owns ${r.path}`);
         if (byId(ctx, r.owner)?.members?.[id]) throw new Error(`${h.name} is in ${ownerName(ctx, r.owner)}, so pushes to ${r.path} already`);
-        global(ctx).exec("insert or ignore into collaborators values (?, ?, ?, ?)", [r.id, id, ctx.me.user, ctx.now()]);
+        global(ctx).exec("insert or ignore into relations (subject, relation, object, by, time) values (?, 'collaborator', ?, ?, ?)", [`person:${id}`, object(r), ctx.me.user, ctx.now()]);
         return `${h.name} pushes to ${r.path} now.`;
       },
     },
@@ -370,10 +384,11 @@ const app = {
         const h = byHandle(ctx, user);
         if (!h || !h.id.startsWith("user:")) throw new Error(`no one has the handle ${user}`);
         const id = h.id.slice(5);
-        if (!(await g.query("select 1 from collaborators where repo = ? and user = ?", [r.id, id])).length) {
+        const row = [`person:${id}`, object(r)];
+        if (!(await g.query("select 1 from relations where subject = ? and relation = 'collaborator' and object = ?", row)).length) {
           throw new Error(byId(ctx, r.owner)?.members?.[id] ? `${h.name} pushes to ${r.path} as a member of ${ownerName(ctx, r.owner)}: take them out of the group to stop that` : `${h.name} isn't a collaborator of ${r.path}`);
         }
-        g.exec("delete from collaborators where repo = ? and user = ?", [r.id, id]);
+        g.exec("delete from relations where subject = ? and relation = 'collaborator' and object = ?", row);
         return `${h.name} no longer pushes to ${r.path}.`;
       },
     },
@@ -442,13 +457,14 @@ const app = {
         const packs = await g.query("select hash from packs where repo = ?", [r.id]);
         // Erased, it's gone, and its name is free again; its forks keep their code, no longer forked from it.
         for (const p of packs) await http.forgetUnshared(g, r.id, p.hash);
-        for (const table of ["branches", "packs", "pushes", "collaborators", "issues", "labels", "issue_labels", "issue_assignees", "comments"]) g.exec(`delete from ${table} where repo = ?`, [r.id]);
+        for (const table of ["branches", "packs", "pushes", "issues", "labels", "issue_labels", "issue_assignees", "comments"]) g.exec(`delete from ${table} where repo = ?`, [r.id]);
+        g.exec("delete from relations where object = ?", [object(r)]);
         g.exec("delete from repos where id = ?", [r.id]);
         g.exec(`update repos set "from" = null where "from" = ?`, [r.id]);
         return `Erased ${r.path}.`;
       },
     },
-    ...issues.ops({ global, named, mayPush, owns, who, byHandle, handles, randomId, iso, REPO }),
+    ...issues.ops({ global, named, object, who, byHandle, handles, randomId, iso, REPO }),
     ...github.ops({ global }),
     _address: {
       reads: true,
@@ -550,7 +566,7 @@ const git = {
     return { r: withPath(ctx, (await g.query("select * from repos where owner = ? and name = ?", [h.id, name]))[0] || null) };
   },
   ownerName,
-  mayPush,
+  object,
   defaultBranch: (names) => (names.includes("main") ? "main" : names[0]),
   /// Makes <owner>/<name> (the caller, or a group they're in), or says why not: → { r } or { why }.
   newRepo(ctx, g, owner, name) {

@@ -95,7 +95,7 @@ async function receive(ctx, g, api, owner, name, found, hash) {
   let r = found.r;
   if (found.why) return refuse(found.why);
   if (r?.deleted) return refuse(`${r.path} was deleted: its owners restore it from Recently Deleted`);
-  if (r && !(await api.mayPush(ctx, g, r))) return refuse(`only ${api.ownerName(ctx, r.owner)} and its collaborators push to ${r.path}: fork it (repos fork ${r.path}), push to your fork, and tell them`);
+  if (r && !(await g.may("push", api.object(r)))) return refuse(`only ${api.ownerName(ctx, r.owner)} and its collaborators push to ${r.path}: fork it (repos fork ${r.path}), push to your fork, and tell them`);
   if (!r) {
     const made = api.newRepo(ctx, g, owner, name);
     if (made.why) return refuse(made.why);
