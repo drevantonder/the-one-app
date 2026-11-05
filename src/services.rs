@@ -225,15 +225,18 @@ impl Services {
 /// it's switched on, unlike those `built_in`.
 pub struct Hosted {
     pub name: &'static str,
+    /// What it says it is; it registers again when this changes (as Agent Devices' browser tools, read from a device).
     pub describe: fn() -> Value,
-    /// Runs one call, on a thread of its own.
-    pub call: fn(host: &Host, call: &Call) -> Result<Value>,
+    /// Runs one call, on a thread of its own: its answer, and blobs the caller's scope keeps.
+    pub call: fn(host: &Host, call: &Call) -> Result<Answer>,
+    /// Starts what it does between calls, once, before it registers.
+    pub start: Option<fn(host: &Host)>,
 }
 
 /// The services this program hosts.
 pub fn hosted() -> Vec<Hosted> {
     vec![
-        Hosted { name: crate::ai_usage::NAME, describe: crate::ai_usage::describe, call: crate::ai_usage::call },
+        Hosted { name: crate::ai_usage::NAME, describe: crate::ai_usage::describe, call: |h, c| crate::ai_usage::call(h, c).map(Answer::new), start: None },
     ]
 }
 
@@ -258,6 +261,37 @@ impl Host {
     /// `post`, given up on after `limit`.
     pub fn post_within(&self, path: &str, body: &Value, limit: Duration) -> Result<Value> {
         Ok(answer(self.agent.post(format!("{}{path}", self.node)).config().timeout_global(Some(limit)).build().send_json(body))?.unwrap_or_default())
+    }
+
+    /// The port of its node's local API.
+    pub fn port(&self) -> u16 {
+        self.node.rsplit(':').next().and_then(|p| p.parse().ok()).unwrap_or(0)
+    }
+
+    /// One with `dir` and no node, for tests.
+    #[cfg(test)]
+    pub fn for_test(dir: &std::path::Path) -> Host {
+        Host { name: "test", dir: dir.to_path_buf(), node: "http://127.0.0.1:1".into(), agent: ureq::Agent::new_with_defaults() }
+    }
+
+    /// Keeps bytes, read from `body` as they come, as a blob the caller's scope keeps once the call names it in its
+    /// answer: its hash and size.
+    pub fn put_blob(&self, body: impl std::io::Read + Send + 'static) -> Result<(String, u64)> {
+        let resp = self.agent.post(format!("{}/v1/blobs", self.node)).header("content-type", "application/octet-stream").send(ureq::SendBody::from_owned_reader(body));
+        let put = answer(resp)?.unwrap_or_default();
+        let blob = put["blob"].as_str().filter(|b| !b.is_empty()).ok_or_else(|| anyhow!("the node kept no blob"))?;
+        Ok((blob.to_string(), put["size"].as_u64().unwrap_or(0)))
+    }
+
+    /// A blob's bytes, as they come, from whichever device has it.
+    pub fn get_blob(&self, hash: &str) -> Result<impl std::io::Read + Send + 'static> {
+        let resp = self.agent.get(format!("{}/v1/blobs/{hash}", self.node)).call()?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.into_body().read_to_string().unwrap_or_default();
+            bail!("{status}: {}", body.trim());
+        }
+        Ok(resp.into_body().into_reader())
     }
 
     /// `text` with the Vault's fields (`{{name}}`) filled in by the node for call `id`, which only `host` may be sent.
@@ -309,9 +343,18 @@ pub fn answer_hosted(name: &str, dir: std::path::PathBuf, at: String, token: Str
     let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).middleware(as_this_program.clone()).build().into();
     let poll: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).timeout_global(Some(Duration::from_secs(40))).middleware(as_this_program).build().into();
     let host = std::sync::Arc::new(Host { name: hosted.name, dir, node: format!("http://{at}"), agent });
-    let mut describe = (hosted.describe)();
-    describe["version"] = json!(crate::config::BUILD);
+    if let Some(start) = hosted.start {
+        start(&host);
+    }
+    let described = || {
+        let mut describe = (hosted.describe)();
+        describe["version"] = json!(crate::config::BUILD);
+        describe
+    };
+    // Calls being answered: registering again forgets them, so it waits for none.
+    let running = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
     while !replaced() {
+        let describe = described();
         if let Err(err) = host.post(&format!("/v1/services/{name}"), &describe) {
             eprintln!("registering: {err:#}");
             std::thread::sleep(Duration::from_secs(3));
@@ -326,19 +369,29 @@ pub fn answer_hosted(name: &str, dir: std::path::PathBuf, at: String, token: Str
                         continue;
                     }
                 },
-                Ok(None) => continue,
+                Ok(None) => {
+                    if running.load(std::sync::atomic::Ordering::SeqCst) == 0 && described() != describe {
+                        break;
+                    }
+                    continue;
+                }
                 Err(err) => {
                     eprintln!("waiting for calls: {err:#}");
                     std::thread::sleep(Duration::from_secs(1));
                     break;
                 }
             };
-            let (host, run) = (host.clone(), hosted.call);
+            let (host, run, running) = (host.clone(), hosted.call, running.clone());
+            running.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             std::thread::spawn(move || {
-                let reply = match run(&host, &call) {
-                    Ok(ok) => json!({ "ok": ok }),
-                    Err(err) => json!({ "error": format!("{err:#}") }),
+                // One that panics is answered as failed, not left for its caller to wait out.
+                let reply = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(&host, &call))) {
+                    Ok(Ok(answer)) if answer.blobs.is_empty() => json!({ "ok": answer.ok }),
+                    Ok(Ok(answer)) => json!({ "ok": answer.ok, "blobs": answer.blobs }),
+                    Ok(Err(err)) => json!({ "error": format!("{err:#}") }),
+                    Err(_) => json!({ "error": format!("{} failed: it panicked", host.name) }),
                 };
+                running.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
                 if let Err(err) = host.post(&format!("/v1/services/{}/calls/{}", host.name, call.id), &reply) {
                     eprintln!("answering {}: {err:#}", call.op);
                 }
