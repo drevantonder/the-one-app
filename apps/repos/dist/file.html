@@ -1,196 +1,157 @@
 <meta name="@one/ui">
 <style>/*! tailwindcss v4.3.4 | MIT License | https://tailwindcss.com */
-@layer properties{@supports (((-webkit-hyphens:none)) and (not (margin-trim:block))) or ((-moz-orient:inline) and (not (color:rgb(from red r g b)))){*,:before,:after,::backdrop{--tw-translate-x:0;--tw-translate-y:0;--tw-translate-z:0;--tw-space-x-reverse:0;--tw-divide-x-reverse:0;--tw-border-style:solid;--tw-divide-y-reverse:0;--tw-font-weight:initial;--tw-ordinal:initial;--tw-slashed-zero:initial;--tw-numeric-figure:initial;--tw-numeric-spacing:initial;--tw-numeric-fraction:initial;--tw-shadow:0 0 #0000;--tw-shadow-color:initial;--tw-shadow-alpha:100%;--tw-inset-shadow:0 0 #0000;--tw-inset-shadow-color:initial;--tw-inset-shadow-alpha:100%;--tw-ring-color:initial;--tw-ring-shadow:0 0 #0000;--tw-inset-ring-color:initial;--tw-inset-ring-shadow:0 0 #0000;--tw-ring-inset:initial;--tw-ring-offset-width:0px;--tw-ring-offset-color:#fff;--tw-ring-offset-shadow:0 0 #0000;--tw-outline-style:solid;--tw-blur:initial;--tw-brightness:initial;--tw-contrast:initial;--tw-grayscale:initial;--tw-hue-rotate:initial;--tw-invert:initial;--tw-opacity:initial;--tw-saturate:initial;--tw-sepia:initial;--tw-drop-shadow:initial;--tw-drop-shadow-color:initial;--tw-drop-shadow-alpha:100%;--tw-drop-shadow-size:initial}}}@layer theme,base,components;@layer utilities{.pointer-events-none{pointer-events:none}.invisible{visibility:hidden}.visible{visibility:visible}.absolute{position:absolute}.relative{position:relative}.sticky{position:sticky}.top-1{top:var(--spacing,.25rem)}.top-1\/2{top:50%}.top-4{top:calc(var(--spacing,.25rem) * 4)}.left-2{left:calc(var(--spacing,.25rem) * 2)}.left-2\.5{left:calc(var(--spacing,.25rem) * 2.5)}.mt-2{margin-top:calc(var(--spacing,.25rem) * 2)}.mb-4{margin-bottom:calc(var(--spacing,.25rem) * 4)}.ml-1{margin-left:var(--spacing,.25rem)}.ml-auto{margin-left:auto}.block{display:block}.contents{display:contents}.flex{display:flex}.grid{display:grid}.hidden{display:none}.inline-block{display:inline-block}.inline-flex{display:inline-flex}.inline-grid{display:inline-grid}.table{display:table}.size-3{width:calc(var(--spacing,.25rem) * 3);height:calc(var(--spacing,.25rem) * 3)}.size-3\.5{width:calc(var(--spacing,.25rem) * 3.5);height:calc(var(--spacing,.25rem) * 3.5)}.size-4{width:calc(var(--spacing,.25rem) * 4);height:calc(var(--spacing,.25rem) * 4)}.size-5{width:calc(var(--spacing,.25rem) * 5);height:calc(var(--spacing,.25rem) * 5)}.size-6{width:calc(var(--spacing,.25rem) * 6);height:calc(var(--spacing,.25rem) * 6)}.size-7{width:calc(var(--spacing,.25rem) * 7);height:calc(var(--spacing,.25rem) * 7)}.h-9{height:calc(var(--spacing,.25rem) * 9)}.h-14{height:calc(var(--spacing,.25rem) * 14)}.min-h-0{min-height:0}.min-h-16{min-height:calc(var(--spacing,.25rem) * 16)}.w-12{width:calc(var(--spacing,.25rem) * 12)}.w-full{width:100%}.max-w-2xl{max-width:var(--container-2xl,42rem)}.max-w-3xl{max-width:var(--container-3xl,48rem)}.max-w-5xl{max-width:var(--container-5xl,64rem)}.max-w-32{max-width:calc(var(--spacing,.25rem) * 32)}.max-w-48{max-width:calc(var(--spacing,.25rem) * 48)}.max-w-full{max-width:100%}.max-w-xl{max-width:var(--container-xl,36rem)}.min-w-0{min-width:0}.flex-1{flex:1}.flex-none{flex:none}.shrink-0{flex-shrink:0}.grow{flex-grow:1}.-translate-y-1{--tw-translate-y:calc(var(--spacing,.25rem) * -1);translate:var(--tw-translate-x) var(--tw-translate-y)}.-translate-y-1\/2{--tw-translate-y:calc(calc(1 / 2 * 100%) * -1);translate:var(--tw-translate-x) var(--tw-translate-y)}.cursor-pointer{cursor:pointer}.resize-y{resize:vertical}.scroll-mt-4{scroll-margin-top:calc(var(--spacing,.25rem) * 4)}.grid-cols-1{grid-template-columns:repeat(1,minmax(0,1fr))}.grid-cols-\[minmax\(0\,1fr\)_15rem\]{grid-template-columns:minmax(0,1fr) 15rem}.flex-col{flex-direction:column}.flex-wrap{flex-wrap:wrap}.place-items-center{place-items:center}.items-baseline{align-items:baseline}.items-center{align-items:center}.items-start{align-items:flex-start}.items-stretch{align-items:stretch}.justify-between{justify-content:space-between}.justify-end{justify-content:flex-end}.justify-start{justify-content:flex-start}.gap-0{gap:0}.gap-1{gap:var(--spacing,.25rem)}.gap-1\.5{gap:calc(var(--spacing,.25rem) * 1.5)}.gap-2{gap:calc(var(--spacing,.25rem) * 2)}.gap-2\.5{gap:calc(var(--spacing,.25rem) * 2.5)}.gap-3{gap:calc(var(--spacing,.25rem) * 3)}.gap-4{gap:calc(var(--spacing,.25rem) * 4)}.gap-6{gap:calc(var(--spacing,.25rem) * 6)}.gap-x-1{column-gap:var(--spacing,.25rem)}.gap-x-1\.5{column-gap:calc(var(--spacing,.25rem) * 1.5)}.gap-x-3{column-gap:calc(var(--spacing,.25rem) * 3)}.gap-x-4{column-gap:calc(var(--spacing,.25rem) * 4)}:where(.-space-x-1>:not(:last-child)){--tw-space-x-reverse:0;margin-inline-start:calc(calc(var(--spacing,.25rem) * -1) * var(--tw-space-x-reverse));margin-inline-end:calc(calc(var(--spacing,.25rem) * -1) * calc(1 - var(--tw-space-x-reverse)))}:where(.-space-x-1\.5>:not(:last-child)){--tw-space-x-reverse:0;margin-inline-start:calc(calc(var(--spacing,.25rem) * -1.5) * var(--tw-space-x-reverse));margin-inline-end:calc(calc(var(--spacing,.25rem) * -1.5) * calc(1 - var(--tw-space-x-reverse)))}.gap-y-1{row-gap:var(--spacing,.25rem)}.gap-y-2{row-gap:calc(var(--spacing,.25rem) * 2)}:where(.divide-x>:not(:last-child)){--tw-divide-x-reverse:0;border-inline-style:var(--tw-border-style);border-inline-start-width:calc(1px * var(--tw-divide-x-reverse));border-inline-end-width:calc(1px * calc(1 - var(--tw-divide-x-reverse)))}:where(.divide-y>:not(:last-child)){--tw-divide-y-reverse:0;border-bottom-style:var(--tw-border-style);border-top-style:var(--tw-border-style);border-top-width:calc(1px * var(--tw-divide-y-reverse));border-bottom-width:calc(1px * calc(1 - var(--tw-divide-y-reverse)))}.self-start{align-self:flex-start}.truncate{text-overflow:ellipsis;white-space:nowrap;overflow:hidden}.overflow-hidden{overflow:hidden}.overflow-y-auto{overflow-y:auto}.rounded-full{border-radius:2147483647px}.rounded-lg{border-radius:var(--radius)}.rounded-md{border-radius:calc(var(--radius) - 2px)}.rounded-sm{border-radius:calc(var(--radius) - 4px)}.rounded-xl{border-radius:calc(var(--radius) + 4px)}.border{border-style:var(--tw-border-style);border-width:1px}.border-t{border-top-style:var(--tw-border-style);border-top-width:1px}.border-b{border-bottom-style:var(--tw-border-style);border-bottom-width:1px}.border-input{border-color:var(--input)}.bg-card{background-color:var(--card)}.bg-muted,.bg-muted\/40{background-color:var(--muted)}@supports (color:color-mix(in lab, red, red)){.bg-muted\/40{background-color:color-mix(in oklab, var(--muted) 40%, transparent)}}.bg-transparent{background-color:#0000}.p-1{padding:var(--spacing,.25rem)}.p-4{padding:calc(var(--spacing,.25rem) * 4)}.px-1{padding-inline:var(--spacing,.25rem)}.px-2{padding-inline:calc(var(--spacing,.25rem) * 2)}.px-2\.5{padding-inline:calc(var(--spacing,.25rem) * 2.5)}.px-3{padding-inline:calc(var(--spacing,.25rem) * 3)}.px-4{padding-inline:calc(var(--spacing,.25rem) * 4)}.px-6{padding-inline:calc(var(--spacing,.25rem) * 6)}.py-0{padding-block:0}.py-0\.5{padding-block:calc(var(--spacing,.25rem) * .5)}.py-1{padding-block:var(--spacing,.25rem)}.py-1\.5{padding-block:calc(var(--spacing,.25rem) * 1.5)}.py-2{padding-block:calc(var(--spacing,.25rem) * 2)}.py-2\.5{padding-block:calc(var(--spacing,.25rem) * 2.5)}.py-3{padding-block:calc(var(--spacing,.25rem) * 3)}.py-5{padding-block:calc(var(--spacing,.25rem) * 5)}.py-px{padding-block:1px}.pr-1{padding-right:var(--spacing,.25rem)}.pr-1\.5{padding-right:calc(var(--spacing,.25rem) * 1.5)}.pr-3{padding-right:calc(var(--spacing,.25rem) * 3)}.pb-2{padding-bottom:calc(var(--spacing,.25rem) * 2)}.pl-1{padding-left:var(--spacing,.25rem)}.pl-1\.5{padding-left:calc(var(--spacing,.25rem) * 1.5)}.pl-3{padding-left:calc(var(--spacing,.25rem) * 3)}.pl-4{padding-left:calc(var(--spacing,.25rem) * 4)}.pl-8{padding-left:calc(var(--spacing,.25rem) * 8)}.text-left{text-align:left}.text-right{text-align:right}.align-middle{vertical-align:middle}.font-mono{font-family:var(--font-mono,ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace)}.font-sans{font-family:-apple-system,BlinkMacSystemFont,Segoe UI Variable,Segoe UI,system-ui,sans-serif}.text-lg{font-size:var(--text-lg,1.125rem);line-height:var(--tw-leading,var(--text-lg--line-height,calc(1.75 / 1.125)))}.text-sm{font-size:var(--text-sm,.875rem);line-height:var(--tw-leading,var(--text-sm--line-height,calc(1.25 / .875)))}.text-xl{font-size:var(--text-xl,1.25rem);line-height:var(--tw-leading,var(--text-xl--line-height,calc(1.75 / 1.25)))}.text-xs{font-size:var(--text-xs,.75rem);line-height:var(--tw-leading,var(--text-xs--line-height,calc(1 / .75)))}.font-medium{--tw-font-weight:var(--font-weight-medium,500);font-weight:var(--font-weight-medium,500)}.font-normal{--tw-font-weight:var(--font-weight-normal,400);font-weight:var(--font-weight-normal,400)}.font-semibold{--tw-font-weight:var(--font-weight-semibold,600);font-weight:var(--font-weight-semibold,600)}.break-words{overflow-wrap:break-word}.break-all{word-break:break-all}.whitespace-nowrap{white-space:nowrap}.whitespace-pre-wrap{white-space:pre-wrap}.text-\(--hl-del\){color:var(--hl-del)}.text-\(--hl-ins\){color:var(--hl-ins)}.text-card-foreground{color:var(--card-foreground)}.text-destructive{color:var(--destructive)}.text-foreground{color:var(--foreground)}.text-muted-foreground{color:var(--muted-foreground)}.lowercase{text-transform:lowercase}.italic{font-style:italic}.tabular-nums{--tw-numeric-spacing:tabular-nums;font-variant-numeric:var(--tw-ordinal, ) var(--tw-slashed-zero, ) var(--tw-numeric-figure, ) var(--tw-numeric-spacing, ) var(--tw-numeric-fraction, )}.underline{text-decoration-line:underline}.underline-offset-4{text-underline-offset:4px}.shadow-xs{--tw-shadow:0 1px 2px 0 var(--tw-shadow-color,#0000000d);box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)}.ring-1{--tw-ring-shadow:var(--tw-ring-inset, ) 0 0 0 calc(1px + var(--tw-ring-offset-width)) var(--tw-ring-color,currentcolor);box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)}.ring-2{--tw-ring-shadow:var(--tw-ring-inset, ) 0 0 0 calc(2px + var(--tw-ring-offset-width)) var(--tw-ring-color,currentcolor);box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)}.ring-black{--tw-ring-color:var(--color-black,#000)}.ring-black\/10{--tw-ring-color:#0000001a}@supports (color:color-mix(in lab, red, red)){.ring-black\/10{--tw-ring-color:color-mix(in oklab, var(--color-black,#000) 10%, transparent)}}.ring-card{--tw-ring-color:var(--card)}.outline{outline-style:var(--tw-outline-style);outline-width:1px}.filter{filter:var(--tw-blur, ) var(--tw-brightness, ) var(--tw-contrast, ) var(--tw-grayscale, ) var(--tw-hue-rotate, ) var(--tw-invert, ) var(--tw-saturate, ) var(--tw-sepia, ) var(--tw-drop-shadow, )}.transition-\[color\,box-shadow\]{transition-property:color,box-shadow;transition-timing-function:var(--tw-ease,var(--default-transition-timing-function,cubic-bezier(.4, 0, .2, 1)));transition-duration:var(--tw-duration,var(--default-transition-duration,.15s))}.outline-none{--tw-outline-style:none;outline-style:none}.ring-inset{--tw-ring-inset:inset}.placeholder\:text-muted-foreground::placeholder{color:var(--muted-foreground)}@media (hover:hover){.hover\:bg-accent\/50:hover{background-color:var(--accent)}@supports (color:color-mix(in lab, red, red)){.hover\:bg-accent\/50:hover{background-color:color-mix(in oklab, var(--accent) 50%, transparent)}}.hover\:text-destructive:hover{color:var(--destructive)}.hover\:text-foreground:hover{color:var(--foreground)}.hover\:underline:hover{text-decoration-line:underline}}.focus-visible\:border-ring:focus-visible{border-color:var(--ring)}.focus-visible\:bg-accent\/50:focus-visible{background-color:var(--accent)}@supports (color:color-mix(in lab, red, red)){.focus-visible\:bg-accent\/50:focus-visible{background-color:color-mix(in oklab, var(--accent) 50%, transparent)}}.focus-visible\:text-foreground:focus-visible{color:var(--foreground)}.focus-visible\:underline:focus-visible{text-decoration-line:underline}.focus-visible\:ring-\[3px\]:focus-visible{--tw-ring-shadow:var(--tw-ring-inset, ) 0 0 0 calc(3px + var(--tw-ring-offset-width)) var(--tw-ring-color,currentcolor);box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)}.focus-visible\:ring-ring\/50:focus-visible{--tw-ring-color:var(--ring)}@supports (color:color-mix(in lab, red, red)){.focus-visible\:ring-ring\/50:focus-visible{--tw-ring-color:color-mix(in oklab, var(--ring) 50%, transparent)}}.disabled\:opacity-50:disabled{opacity:.5}.data-\[selected\]\:bg-accent[data-selected]{background-color:var(--accent)}@media (prefers-color-scheme:dark){.dark\:bg-input\/30{background-color:var(--input)}@supports (color:color-mix(in lab, red, red)){.dark\:bg-input\/30{background-color:color-mix(in oklab, var(--input) 30%, transparent)}}}.\[\&_svg\:not\(\[class\*\=\'size-\'\]\)\]\:size-3 svg:not([class*=size-]){width:calc(var(--spacing,.25rem) * 3);height:calc(var(--spacing,.25rem) * 3)}}@property --tw-translate-x{syntax:"*";inherits:false;initial-value:0}@property --tw-translate-y{syntax:"*";inherits:false;initial-value:0}@property --tw-translate-z{syntax:"*";inherits:false;initial-value:0}@property --tw-space-x-reverse{syntax:"*";inherits:false;initial-value:0}@property --tw-divide-x-reverse{syntax:"*";inherits:false;initial-value:0}@property --tw-border-style{syntax:"*";inherits:false;initial-value:solid}@property --tw-divide-y-reverse{syntax:"*";inherits:false;initial-value:0}@property --tw-font-weight{syntax:"*";inherits:false}@property --tw-ordinal{syntax:"*";inherits:false}@property --tw-slashed-zero{syntax:"*";inherits:false}@property --tw-numeric-figure{syntax:"*";inherits:false}@property --tw-numeric-spacing{syntax:"*";inherits:false}@property --tw-numeric-fraction{syntax:"*";inherits:false}@property --tw-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-shadow-color{syntax:"*";inherits:false}@property --tw-shadow-alpha{syntax:"<percentage>";inherits:false;initial-value:100%}@property --tw-inset-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-inset-shadow-color{syntax:"*";inherits:false}@property --tw-inset-shadow-alpha{syntax:"<percentage>";inherits:false;initial-value:100%}@property --tw-ring-color{syntax:"*";inherits:false}@property --tw-ring-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-inset-ring-color{syntax:"*";inherits:false}@property --tw-inset-ring-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-ring-inset{syntax:"*";inherits:false}@property --tw-ring-offset-width{syntax:"<length>";inherits:false;initial-value:0}@property --tw-ring-offset-color{syntax:"*";inherits:false;initial-value:#fff}@property --tw-ring-offset-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-outline-style{syntax:"*";inherits:false;initial-value:solid}@property --tw-blur{syntax:"*";inherits:false}@property --tw-brightness{syntax:"*";inherits:false}@property --tw-contrast{syntax:"*";inherits:false}@property --tw-grayscale{syntax:"*";inherits:false}@property --tw-hue-rotate{syntax:"*";inherits:false}@property --tw-invert{syntax:"*";inherits:false}@property --tw-opacity{syntax:"*";inherits:false}@property --tw-saturate{syntax:"*";inherits:false}@property --tw-sepia{syntax:"*";inherits:false}@property --tw-drop-shadow{syntax:"*";inherits:false}@property --tw-drop-shadow-color{syntax:"*";inherits:false}@property --tw-drop-shadow-alpha{syntax:"<percentage>";inherits:false;initial-value:100%}@property --tw-drop-shadow-size{syntax:"*";inherits:false}.md{overflow-wrap:break-word;font-size:.9375rem;line-height:1.6}.md>:first-child{margin-top:0}.md>:last-child{margin-bottom:0}.md p,.md blockquote,.md ul,.md ol,.md .md-table,.md .md-code,.md .mermaid,.md .md-alert{margin:0 0 1rem}.md h1,.md h2,.md h3,.md h4,.md h5,.md h6{margin:1.5rem 0 .75rem;font-weight:600;line-height:1.25}.md h1{border-bottom:1px solid var(--border);padding-bottom:.3em;font-size:1.75em}.md h2{border-bottom:1px solid var(--border);padding-bottom:.3em;font-size:1.4em}.md h3{font-size:1.15em}.md h4{font-size:1em}.md h5,.md h6{color:var(--muted-foreground);font-size:.9em}.md ul,.md ol{padding-left:2em}.md ul{list-style:outside}.md ol{list-style:decimal}.md li+li{margin-top:.25em}.md li>ul,.md li>ol{margin:.25em 0 0}.md li.task{margin-left:-1.5em;list-style:none}.md li.task input{vertical-align:middle;margin:0 .3em .2em 0}.md code{font:.86em var(--font-mono,ui-monospace, SFMono-Regular, Menlo, monospace);background:var(--muted);border-radius:.375rem;padding:.15em .4em}.md pre{background:var(--muted);font:.8125rem/1.45 var(--font-mono,ui-monospace, SFMono-Regular, Menlo, monospace);border-radius:.5rem;margin:0;padding:.875rem 1rem;overflow-x:auto}.md pre code{font:inherit;background:0 0;padding:0}.md-code{position:relative}.md-code pre{padding-right:3rem}.md-code .md-copy{position:absolute;top:.375rem;right:.375rem}.md blockquote{color:var(--muted-foreground);border-left:.25em solid var(--border);padding:0 1em}.md hr{background:var(--border);border:0;height:1px;margin:1.5rem 0}.md-table{overflow-x:auto}.md table{border-collapse:collapse;font-size:.875rem}.md th,.md td{border:1px solid var(--border);padding:.375rem .8rem}.md th{font-weight:600}.md tr:nth-child(2n) td{background:color-mix(in srgb, var(--muted) 50%, transparent)}.md a{text-underline-offset:2px;text-decoration:underline}.md img{max-width:100%}.md-alert{border-left:.25em solid var(--border);padding:.5rem 1rem}.md-alert-title{font-weight:600;margin:0 0 .25rem!important}.md-alert>*{margin-bottom:0}.md-copy button{background:var(--card)}
+@layer properties{@supports (((-webkit-hyphens:none)) and (not (margin-trim:block))) or ((-moz-orient:inline) and (not (color:rgb(from red r g b)))){*,:before,:after,::backdrop{--tw-translate-x:0;--tw-translate-y:0;--tw-translate-z:0;--tw-space-x-reverse:0;--tw-divide-x-reverse:0;--tw-border-style:solid;--tw-divide-y-reverse:0;--tw-font-weight:initial;--tw-ordinal:initial;--tw-slashed-zero:initial;--tw-numeric-figure:initial;--tw-numeric-spacing:initial;--tw-numeric-fraction:initial;--tw-shadow:0 0 #0000;--tw-shadow-color:initial;--tw-shadow-alpha:100%;--tw-inset-shadow:0 0 #0000;--tw-inset-shadow-color:initial;--tw-inset-shadow-alpha:100%;--tw-ring-color:initial;--tw-ring-shadow:0 0 #0000;--tw-inset-ring-color:initial;--tw-inset-ring-shadow:0 0 #0000;--tw-ring-inset:initial;--tw-ring-offset-width:0px;--tw-ring-offset-color:#fff;--tw-ring-offset-shadow:0 0 #0000;--tw-outline-style:solid;--tw-blur:initial;--tw-brightness:initial;--tw-contrast:initial;--tw-grayscale:initial;--tw-hue-rotate:initial;--tw-invert:initial;--tw-opacity:initial;--tw-saturate:initial;--tw-sepia:initial;--tw-drop-shadow:initial;--tw-drop-shadow-color:initial;--tw-drop-shadow-alpha:100%;--tw-drop-shadow-size:initial}}}@layer theme,base,components;@layer utilities{.pointer-events-none{pointer-events:none}.invisible{visibility:hidden}.visible{visibility:visible}.absolute{position:absolute}.relative{position:relative}.sticky{position:sticky}.top-1{top:var(--spacing,.25rem)}.top-1\/2{top:50%}.top-4{top:calc(var(--spacing,.25rem) * 4)}.left-2{left:calc(var(--spacing,.25rem) * 2)}.left-2\.5{left:calc(var(--spacing,.25rem) * 2.5)}.mt-2{margin-top:calc(var(--spacing,.25rem) * 2)}.mb-4{margin-bottom:calc(var(--spacing,.25rem) * 4)}.ml-1{margin-left:var(--spacing,.25rem)}.ml-auto{margin-left:auto}.block{display:block}.contents{display:contents}.flex{display:flex}.grid{display:grid}.hidden{display:none}.inline-block{display:inline-block}.inline-flex{display:inline-flex}.inline-grid{display:inline-grid}.table{display:table}.size-3{width:calc(var(--spacing,.25rem) * 3);height:calc(var(--spacing,.25rem) * 3)}.size-3\.5{width:calc(var(--spacing,.25rem) * 3.5);height:calc(var(--spacing,.25rem) * 3.5)}.size-4{width:calc(var(--spacing,.25rem) * 4);height:calc(var(--spacing,.25rem) * 4)}.size-5{width:calc(var(--spacing,.25rem) * 5);height:calc(var(--spacing,.25rem) * 5)}.size-6{width:calc(var(--spacing,.25rem) * 6);height:calc(var(--spacing,.25rem) * 6)}.size-7{width:calc(var(--spacing,.25rem) * 7);height:calc(var(--spacing,.25rem) * 7)}.h-9{height:calc(var(--spacing,.25rem) * 9)}.h-14{height:calc(var(--spacing,.25rem) * 14)}.min-h-0{min-height:0}.min-h-16{min-height:calc(var(--spacing,.25rem) * 16)}.w-12{width:calc(var(--spacing,.25rem) * 12)}.w-full{width:100%}.max-w-2xl{max-width:var(--container-2xl,42rem)}.max-w-3xl{max-width:var(--container-3xl,48rem)}.max-w-5xl{max-width:var(--container-5xl,64rem)}.max-w-32{max-width:calc(var(--spacing,.25rem) * 32)}.max-w-48{max-width:calc(var(--spacing,.25rem) * 48)}.max-w-full{max-width:100%}.max-w-xl{max-width:var(--container-xl,36rem)}.min-w-0{min-width:0}.flex-1{flex:1}.flex-none{flex:none}.shrink-0{flex-shrink:0}.grow{flex-grow:1}.-translate-y-1{--tw-translate-y:calc(var(--spacing,.25rem) * -1);translate:var(--tw-translate-x) var(--tw-translate-y)}.-translate-y-1\/2{--tw-translate-y:calc(calc(1 / 2 * 100%) * -1);translate:var(--tw-translate-x) var(--tw-translate-y)}.cursor-pointer{cursor:pointer}.resize-y{resize:vertical}.scroll-mt-4{scroll-margin-top:calc(var(--spacing,.25rem) * 4)}.grid-cols-1{grid-template-columns:repeat(1,minmax(0,1fr))}.grid-cols-\[minmax\(0\,1fr\)_15rem\]{grid-template-columns:minmax(0,1fr) 15rem}.flex-col{flex-direction:column}.flex-wrap{flex-wrap:wrap}.place-items-center{place-items:center}.items-baseline{align-items:baseline}.items-center{align-items:center}.items-start{align-items:flex-start}.items-stretch{align-items:stretch}.justify-between{justify-content:space-between}.justify-end{justify-content:flex-end}.justify-start{justify-content:flex-start}.gap-0{gap:0}.gap-1{gap:var(--spacing,.25rem)}.gap-1\.5{gap:calc(var(--spacing,.25rem) * 1.5)}.gap-2{gap:calc(var(--spacing,.25rem) * 2)}.gap-2\.5{gap:calc(var(--spacing,.25rem) * 2.5)}.gap-3{gap:calc(var(--spacing,.25rem) * 3)}.gap-4{gap:calc(var(--spacing,.25rem) * 4)}.gap-6{gap:calc(var(--spacing,.25rem) * 6)}.gap-x-1{column-gap:var(--spacing,.25rem)}.gap-x-1\.5{column-gap:calc(var(--spacing,.25rem) * 1.5)}.gap-x-3{column-gap:calc(var(--spacing,.25rem) * 3)}.gap-x-4{column-gap:calc(var(--spacing,.25rem) * 4)}:where(.-space-x-1>:not(:last-child)){--tw-space-x-reverse:0;margin-inline-start:calc(calc(var(--spacing,.25rem) * -1) * var(--tw-space-x-reverse));margin-inline-end:calc(calc(var(--spacing,.25rem) * -1) * calc(1 - var(--tw-space-x-reverse)))}:where(.-space-x-1\.5>:not(:last-child)){--tw-space-x-reverse:0;margin-inline-start:calc(calc(var(--spacing,.25rem) * -1.5) * var(--tw-space-x-reverse));margin-inline-end:calc(calc(var(--spacing,.25rem) * -1.5) * calc(1 - var(--tw-space-x-reverse)))}.gap-y-1{row-gap:var(--spacing,.25rem)}.gap-y-2{row-gap:calc(var(--spacing,.25rem) * 2)}:where(.divide-x>:not(:last-child)){--tw-divide-x-reverse:0;border-inline-style:var(--tw-border-style);border-inline-start-width:calc(1px * var(--tw-divide-x-reverse));border-inline-end-width:calc(1px * calc(1 - var(--tw-divide-x-reverse)))}:where(.divide-y>:not(:last-child)){--tw-divide-y-reverse:0;border-bottom-style:var(--tw-border-style);border-top-style:var(--tw-border-style);border-top-width:calc(1px * var(--tw-divide-y-reverse));border-bottom-width:calc(1px * calc(1 - var(--tw-divide-y-reverse)))}.self-start{align-self:flex-start}.truncate{text-overflow:ellipsis;white-space:nowrap;overflow:hidden}.overflow-hidden{overflow:hidden}.overflow-y-auto{overflow-y:auto}.rounded-full{border-radius:2147483647px}.rounded-lg{border-radius:var(--radius)}.rounded-md{border-radius:calc(var(--radius) - 2px)}.rounded-sm{border-radius:calc(var(--radius) - 4px)}.rounded-xl{border-radius:calc(var(--radius) + 4px)}.border{border-style:var(--tw-border-style);border-width:1px}.border-t{border-top-style:var(--tw-border-style);border-top-width:1px}.border-b{border-bottom-style:var(--tw-border-style);border-bottom-width:1px}.border-input{border-color:var(--input)}.bg-card{background-color:var(--card)}.bg-muted,.bg-muted\/40{background-color:var(--muted)}@supports (color:color-mix(in lab, red, red)){.bg-muted\/40{background-color:color-mix(in oklab, var(--muted) 40%, transparent)}}.bg-transparent{background-color:#0000}.p-1{padding:var(--spacing,.25rem)}.p-4{padding:calc(var(--spacing,.25rem) * 4)}.px-1{padding-inline:var(--spacing,.25rem)}.px-2{padding-inline:calc(var(--spacing,.25rem) * 2)}.px-2\.5{padding-inline:calc(var(--spacing,.25rem) * 2.5)}.px-3{padding-inline:calc(var(--spacing,.25rem) * 3)}.px-4{padding-inline:calc(var(--spacing,.25rem) * 4)}.px-6{padding-inline:calc(var(--spacing,.25rem) * 6)}.py-0{padding-block:0}.py-0\.5{padding-block:calc(var(--spacing,.25rem) * .5)}.py-1{padding-block:var(--spacing,.25rem)}.py-1\.5{padding-block:calc(var(--spacing,.25rem) * 1.5)}.py-2{padding-block:calc(var(--spacing,.25rem) * 2)}.py-2\.5{padding-block:calc(var(--spacing,.25rem) * 2.5)}.py-3{padding-block:calc(var(--spacing,.25rem) * 3)}.py-5{padding-block:calc(var(--spacing,.25rem) * 5)}.py-px{padding-block:1px}.pr-1{padding-right:var(--spacing,.25rem)}.pr-1\.5{padding-right:calc(var(--spacing,.25rem) * 1.5)}.pr-3{padding-right:calc(var(--spacing,.25rem) * 3)}.pb-2{padding-bottom:calc(var(--spacing,.25rem) * 2)}.pl-1{padding-left:var(--spacing,.25rem)}.pl-1\.5{padding-left:calc(var(--spacing,.25rem) * 1.5)}.pl-3{padding-left:calc(var(--spacing,.25rem) * 3)}.pl-4{padding-left:calc(var(--spacing,.25rem) * 4)}.pl-8{padding-left:calc(var(--spacing,.25rem) * 8)}.text-left{text-align:left}.text-right{text-align:right}.align-middle{vertical-align:middle}.font-mono{font-family:var(--font-mono,ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace)}.font-sans{font-family:-apple-system,BlinkMacSystemFont,Segoe UI Variable,Segoe UI,system-ui,sans-serif}.text-lg{font-size:var(--text-lg,1.125rem);line-height:var(--tw-leading,var(--text-lg--line-height,calc(1.75 / 1.125)))}.text-sm{font-size:var(--text-sm,.875rem);line-height:var(--tw-leading,var(--text-sm--line-height,calc(1.25 / .875)))}.text-xl{font-size:var(--text-xl,1.25rem);line-height:var(--tw-leading,var(--text-xl--line-height,calc(1.75 / 1.25)))}.text-xs{font-size:var(--text-xs,.75rem);line-height:var(--tw-leading,var(--text-xs--line-height,calc(1 / .75)))}.font-medium{--tw-font-weight:var(--font-weight-medium,500);font-weight:var(--font-weight-medium,500)}.font-normal{--tw-font-weight:var(--font-weight-normal,400);font-weight:var(--font-weight-normal,400)}.font-semibold{--tw-font-weight:var(--font-weight-semibold,600);font-weight:var(--font-weight-semibold,600)}.break-words{overflow-wrap:break-word}.break-all{word-break:break-all}.whitespace-nowrap{white-space:nowrap}.whitespace-pre-wrap{white-space:pre-wrap}.text-\(--hl-del\){color:var(--hl-del)}.text-\(--hl-ins\){color:var(--hl-ins)}.text-card-foreground{color:var(--card-foreground)}.text-destructive{color:var(--destructive)}.text-foreground{color:var(--foreground)}.text-muted-foreground{color:var(--muted-foreground)}.lowercase{text-transform:lowercase}.italic{font-style:italic}.tabular-nums{--tw-numeric-spacing:tabular-nums;font-variant-numeric:var(--tw-ordinal, ) var(--tw-slashed-zero, ) var(--tw-numeric-figure, ) var(--tw-numeric-spacing, ) var(--tw-numeric-fraction, )}.underline{text-decoration-line:underline}.underline-offset-4{text-underline-offset:4px}.shadow-xs{--tw-shadow:0 1px 2px 0 var(--tw-shadow-color,#0000000d);box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)}.ring-1{--tw-ring-shadow:var(--tw-ring-inset, ) 0 0 0 calc(1px + var(--tw-ring-offset-width)) var(--tw-ring-color,currentcolor);box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)}.ring-2{--tw-ring-shadow:var(--tw-ring-inset, ) 0 0 0 calc(2px + var(--tw-ring-offset-width)) var(--tw-ring-color,currentcolor);box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)}.ring-black{--tw-ring-color:var(--color-black,#000)}.ring-black\/10{--tw-ring-color:#0000001a}@supports (color:color-mix(in lab, red, red)){.ring-black\/10{--tw-ring-color:color-mix(in oklab, var(--color-black,#000) 10%, transparent)}}.ring-card{--tw-ring-color:var(--card)}.outline{outline-style:var(--tw-outline-style);outline-width:1px}.filter{filter:var(--tw-blur, ) var(--tw-brightness, ) var(--tw-contrast, ) var(--tw-grayscale, ) var(--tw-hue-rotate, ) var(--tw-invert, ) var(--tw-saturate, ) var(--tw-sepia, ) var(--tw-drop-shadow, )}.outline-none{--tw-outline-style:none;outline-style:none}.ring-inset{--tw-ring-inset:inset}@media (hover:hover){.hover\:bg-accent\/50:hover{background-color:var(--accent)}@supports (color:color-mix(in lab, red, red)){.hover\:bg-accent\/50:hover{background-color:color-mix(in oklab, var(--accent) 50%, transparent)}}.hover\:text-destructive:hover{color:var(--destructive)}.hover\:text-foreground:hover{color:var(--foreground)}.hover\:underline:hover{text-decoration-line:underline}}.focus-visible\:bg-accent\/50:focus-visible{background-color:var(--accent)}@supports (color:color-mix(in lab, red, red)){.focus-visible\:bg-accent\/50:focus-visible{background-color:color-mix(in oklab, var(--accent) 50%, transparent)}}.focus-visible\:text-foreground:focus-visible{color:var(--foreground)}.focus-visible\:underline:focus-visible{text-decoration-line:underline}.data-\[selected\]\:bg-accent[data-selected]{background-color:var(--accent)}.\[\&_svg\:not\(\[class\*\=\'size-\'\]\)\]\:size-3 svg:not([class*=size-]){width:calc(var(--spacing,.25rem) * 3);height:calc(var(--spacing,.25rem) * 3)}}@property --tw-translate-x{syntax:"*";inherits:false;initial-value:0}@property --tw-translate-y{syntax:"*";inherits:false;initial-value:0}@property --tw-translate-z{syntax:"*";inherits:false;initial-value:0}@property --tw-space-x-reverse{syntax:"*";inherits:false;initial-value:0}@property --tw-divide-x-reverse{syntax:"*";inherits:false;initial-value:0}@property --tw-border-style{syntax:"*";inherits:false;initial-value:solid}@property --tw-divide-y-reverse{syntax:"*";inherits:false;initial-value:0}@property --tw-font-weight{syntax:"*";inherits:false}@property --tw-ordinal{syntax:"*";inherits:false}@property --tw-slashed-zero{syntax:"*";inherits:false}@property --tw-numeric-figure{syntax:"*";inherits:false}@property --tw-numeric-spacing{syntax:"*";inherits:false}@property --tw-numeric-fraction{syntax:"*";inherits:false}@property --tw-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-shadow-color{syntax:"*";inherits:false}@property --tw-shadow-alpha{syntax:"<percentage>";inherits:false;initial-value:100%}@property --tw-inset-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-inset-shadow-color{syntax:"*";inherits:false}@property --tw-inset-shadow-alpha{syntax:"<percentage>";inherits:false;initial-value:100%}@property --tw-ring-color{syntax:"*";inherits:false}@property --tw-ring-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-inset-ring-color{syntax:"*";inherits:false}@property --tw-inset-ring-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-ring-inset{syntax:"*";inherits:false}@property --tw-ring-offset-width{syntax:"<length>";inherits:false;initial-value:0}@property --tw-ring-offset-color{syntax:"*";inherits:false;initial-value:#fff}@property --tw-ring-offset-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-outline-style{syntax:"*";inherits:false;initial-value:solid}@property --tw-blur{syntax:"*";inherits:false}@property --tw-brightness{syntax:"*";inherits:false}@property --tw-contrast{syntax:"*";inherits:false}@property --tw-grayscale{syntax:"*";inherits:false}@property --tw-hue-rotate{syntax:"*";inherits:false}@property --tw-invert{syntax:"*";inherits:false}@property --tw-opacity{syntax:"*";inherits:false}@property --tw-saturate{syntax:"*";inherits:false}@property --tw-sepia{syntax:"*";inherits:false}@property --tw-drop-shadow{syntax:"*";inherits:false}@property --tw-drop-shadow-color{syntax:"*";inherits:false}@property --tw-drop-shadow-alpha{syntax:"<percentage>";inherits:false;initial-value:100%}@property --tw-drop-shadow-size{syntax:"*";inherits:false}
 /*$vite$:1*/</style>
 <div id="root"></div>
 <script type="module">import { c as e } from "react/compiler-runtime";
-import { createContext as t, useCallback as n, useContext as r, useEffect as i, useLayoutEffect as a, useRef as o, useState as s } from "react";
-import { createRoot as c } from "react-dom/client";
-import { Avatar as l, Button as u, Card as d, CodeView as f, CopyButton as p, Empty as m, Icon as h, List as g, ListSkeleton as _, Problem as v, Tabs as y, TabsList as b, TabsTrigger as x, cn as S, useWidth as C } from "@one/ui";
-import { createPortal as w } from "react-dom";
-import { Fragment as T, jsx as E, jsxs as D } from "react/jsx-runtime";
-var O = /* @__PURE__ */ new Set();
-one.on("changed", () => O.forEach((e) => e()));
-function k(e, t, r = !1) {
-	let [a, o] = s({
+import { createContext as t, useCallback as n, useContext as r, useEffect as i, useState as a } from "react";
+import { createRoot as o } from "react-dom/client";
+import { Avatar as s, Button as c, Card as l, CodeView as u, CopyButton as d, Empty as f, Icon as p, List as m, ListSkeleton as h, Markdown as g, Problem as _, Tabs as v, TabsList as y, TabsTrigger as b, cn as x, useWidth as S } from "@one/ui";
+import { Fragment as C, jsx as w, jsxs as T } from "react/jsx-runtime";
+var E = /* @__PURE__ */ new Set();
+one.on("changed", () => E.forEach((e) => e()));
+function D(e, t, r = !1) {
+	let [o, s] = a({
 		data: null,
 		error: null
-	}), c = JSON.stringify(t), l = n(() => t === null ? Promise.resolve() : one.call(e, t).then((e) => o({
+	}), c = JSON.stringify(t), l = n(() => t === null ? Promise.resolve() : one.call(e, t).then((e) => s({
 		data: e,
 		error: null
-	}), (e) => o((t) => ({
+	}), (e) => s((t) => ({
 		data: t.data,
 		error: e
 	}))), [e, c]);
-	return i(() => (r || o({
+	return i(() => (r || s({
 		data: null,
 		error: null
-	}), l(), O.add(l), () => O.delete(l)), [l]), {
-		...a,
+	}), l(), E.add(l), () => E.delete(l)), [l]), {
+		...o,
 		reload: l
 	};
 }
-var A = (e) => one.plain(e);
-function j(t) {
+var O = (e) => one.plain(e);
+function k(t) {
 	let n = e(8), { error: r, retry: i } = t, a;
-	n[0] === r ? a = n[1] : (a = A(r), n[0] = r, n[1] = a);
+	n[0] === r ? a = n[1] : (a = O(r), n[0] = r, n[1] = a);
 	let o = a, s;
 	n[2] === i ? s = n[3] : (s = {
 		label: "Try Again",
 		run: i
 	}, n[2] = i, n[3] = s);
 	let c;
-	return n[4] !== o.next || n[5] !== o.title || n[6] !== s ? (c = /* @__PURE__ */ E(v, {
+	return n[4] !== o.next || n[5] !== o.title || n[6] !== s ? (c = /* @__PURE__ */ w(_, {
 		title: o.title,
 		text: o.next,
 		action: s
 	}), n[4] = o.next, n[5] = o.title, n[6] = s, n[7] = c) : c = n[7], c;
 }
-var M = (t) => {
+var A = (t) => {
 	let n = e(4), { call: r, rows: i } = t, a = i === void 0 ? 4 : i, o;
-	return n[0] !== r.error || n[1] !== r.reload || n[2] !== a ? (o = r.error ? /* @__PURE__ */ E(j, {
+	return n[0] !== r.error || n[1] !== r.reload || n[2] !== a ? (o = r.error ? /* @__PURE__ */ w(k, {
 		error: r.error,
 		retry: r.reload
-	}) : /* @__PURE__ */ E(_, { rows: a }), n[0] = r.error, n[1] = r.reload, n[2] = a, n[3] = o) : o = n[3], o;
-}, N = t(0);
-function P(t) {
-	let n = e(6), { children: r } = t, [i, a] = C(), o;
-	n[0] !== r || n[1] !== a ? (o = /* @__PURE__ */ E(N.Provider, {
+	}) : /* @__PURE__ */ w(h, { rows: a }), n[0] = r.error, n[1] = r.reload, n[2] = a, n[3] = o) : o = n[3], o;
+}, j = t(0);
+function M(t) {
+	let n = e(6), { children: r } = t, [i, a] = S(), o;
+	n[0] !== r || n[1] !== a ? (o = /* @__PURE__ */ w(j.Provider, {
 		value: a,
 		children: r
 	}), n[0] = r, n[1] = a, n[2] = o) : o = n[2];
 	let s;
-	return n[3] !== i || n[4] !== o ? (s = /* @__PURE__ */ E("div", {
+	return n[3] !== i || n[4] !== o ? (s = /* @__PURE__ */ w("div", {
 		className: "p-4",
-		children: /* @__PURE__ */ E("div", {
+		children: /* @__PURE__ */ w("div", {
 			ref: i,
 			children: o
 		})
 	}), n[3] = i, n[4] = o, n[5] = s) : s = n[5], s;
 }
-var F = () => r(N) >= 720;
-function I(t) {
+var N = () => r(j) >= 720;
+function P(t) {
 	let n = e(10), { list: r, detail: i, size: a } = t, o = a === void 0 ? "24rem" : a;
-	if (!F()) return r;
+	if (!N()) return r;
 	let s = `minmax(0, ${o}) minmax(0, 1fr)`, c;
 	n[0] === s ? c = n[1] : (c = { gridTemplateColumns: s }, n[0] = s, n[1] = c);
 	let l;
-	n[2] === r ? l = n[3] : (l = /* @__PURE__ */ E("div", {
+	n[2] === r ? l = n[3] : (l = /* @__PURE__ */ w("div", {
 		className: "min-w-0",
 		children: r
 	}), n[2] = r, n[3] = l);
 	let u;
-	n[4] === i ? u = n[5] : (u = /* @__PURE__ */ E("div", {
+	n[4] === i ? u = n[5] : (u = /* @__PURE__ */ w("div", {
 		className: "min-w-0",
 		children: i
 	}), n[4] = i, n[5] = u);
 	let d;
-	return n[6] !== c || n[7] !== l || n[8] !== u ? (d = /* @__PURE__ */ D("div", {
+	return n[6] !== c || n[7] !== l || n[8] !== u ? (d = /* @__PURE__ */ T("div", {
 		className: "grid items-start gap-6",
 		style: c,
 		children: [l, u]
 	}), n[6] = c, n[7] = l, n[8] = u, n[9] = d) : d = n[9], d;
 }
-var L = (e) => one.ago(Date.parse(e), { long: !0 }), R = (e) => String(e || "").slice(0, 7), z = (e, t, n) => `${e.toLocaleString()} ${e === 1 ? t : n}`, B = (e) => e.branch || e.sha, V = (e, t) => one.open(e, t), H = "<address>/repos/", U = "<you>";
-one.call("_address").then((e) => (H = e?.base || H, U = e?.handle || U), () => {}), `${one.config?.cli || "one"}`;
-function W(t) {
-	let n = e(17), { text: r, link: i, className: c } = t, l = o(null), u;
-	n[0] !== i || n[1] !== r ? (u = one.markdown(r, i ? { link: i } : {}), n[0] = i, n[1] = r, n[2] = u) : u = n[2];
-	let d = u, f;
-	n[3] === Symbol.for("react.memo_cache_sentinel") ? (f = [], n[3] = f) : f = n[3];
-	let [p, m] = s(f), h;
-	n[4] === Symbol.for("react.memo_cache_sentinel") ? (h = () => {
-		m([...l.current.querySelectorAll(".md-code")].map(K));
-	}, n[4] = h) : h = n[4];
-	let g;
-	n[5] === d ? g = n[6] : (g = [d], n[5] = d, n[6] = g), a(h, g);
-	let _;
-	n[7] === d ? _ = n[8] : (_ = { __html: d }, n[7] = d, n[8] = _);
-	let v;
-	n[9] !== c || n[10] !== _ ? (v = /* @__PURE__ */ E("div", {
-		ref: l,
-		className: c,
-		dangerouslySetInnerHTML: _
-	}), n[9] = c, n[10] = _, n[11] = v) : v = n[11];
-	let y;
-	n[12] === p ? y = n[13] : (y = p.map(G), n[12] = p, n[13] = y);
-	let b;
-	return n[14] !== v || n[15] !== y ? (b = /* @__PURE__ */ D(T, { children: [v, y] }), n[14] = v, n[15] = y, n[16] = b) : b = n[16], b;
-}
-function G(e, t) {
-	return w(/* @__PURE__ */ E(p, {
-		text: e.text,
-		label: "",
-		variant: "outline",
-		size: "sm"
-	}), e.slot, t);
-}
-function K(e) {
-	return e.querySelector(".md-copy")?.remove(), {
-		slot: e.appendChild(Object.assign(document.createElement("span"), { className: "md-copy" })),
-		text: e.querySelector("pre")?.textContent || ""
-	};
-}
-var q = (t) => {
+var F = (e) => one.ago(Date.parse(e), { long: !0 }), I = (e) => String(e || "").slice(0, 7), L = (e, t, n) => `${e.toLocaleString()} ${e === 1 ? t : n}`, R = (e) => e.branch || e.sha, z = (e, t) => one.open(e, t), B = "<address>/repos/", V = "<you>";
+one.call("_address").then((e) => (B = e?.base || B, V = e?.handle || V), () => {}), `${one.config?.cli || "one"}`;
+var H = (t) => {
 	let n = e(5), { text: r, className: i } = t, a;
-	n[0] === i ? a = n[1] : (a = S("size-6 [&_svg:not([class*='size-'])]:size-3", i), n[0] = i, n[1] = a);
+	n[0] === i ? a = n[1] : (a = x("size-6 [&_svg:not([class*='size-'])]:size-3", i), n[0] = i, n[1] = a);
 	let o;
-	return n[2] !== a || n[3] !== r ? (o = /* @__PURE__ */ E(p, {
+	return n[2] !== a || n[3] !== r ? (o = /* @__PURE__ */ w(d, {
 		text: r,
 		label: "",
 		size: "sm",
 		className: a
 	}), n[2] = a, n[3] = r, n[4] = o) : o = n[4], o;
 };
-function J(t) {
-	let n = e(45), { d: r, file: i } = t, a = i !== void 0 && i, o = r.path || "", s, c, l, d, f, p, m, h;
+function U(t) {
+	let n = e(45), { d: r, file: i } = t, a = i !== void 0 && i, o = r.path || "", s, l, u, d, f, p, m, h;
 	if (n[0] !== r || n[1] !== a || n[2] !== o) {
 		s = Symbol.for("react.early_return_sentinel");
 		bb0: {
 			let e = o.split("/").filter(Boolean), t;
-			n[11] === r ? t = n[12] : (t = B(r), n[11] = r, n[12] = t);
+			n[11] === r ? t = n[12] : (t = R(r), n[11] = r, n[12] = t);
 			let i = t, g;
-			n[13] !== r.path || n[14] !== r.repo ? (g = () => V("branches", {
+			n[13] !== r.path || n[14] !== r.repo ? (g = () => z("branches", {
 				repo: r.repo,
 				path: r.path || ""
 			}), n[13] = r.path, n[14] = r.repo, n[15] = g) : g = n[15];
 			let _ = g;
 			if (!e.length && !a && r.branch) {
 				let e;
-				n[16] !== _ || n[17] !== r ? (e = /* @__PURE__ */ E(X, {
+				n[16] !== _ || n[17] !== r ? (e = /* @__PURE__ */ w(G, {
 					d: r,
 					open: _
 				}), n[16] = _, n[17] = r, n[18] = e) : e = n[18], s = e;
 				break bb0;
 			}
-			p = "flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2", n[19] !== _ || n[20] !== r ? (m = /* @__PURE__ */ E(X, {
+			p = "flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2", n[19] !== _ || n[20] !== r ? (m = /* @__PURE__ */ w(G, {
 				d: r,
 				open: _
-			}), n[19] = _, n[20] = r, n[21] = m) : m = n[21], n[22] !== r.branch || n[23] !== r.repo ? (h = !r.branch && /* @__PURE__ */ E(u, {
+			}), n[19] = _, n[20] = r, n[21] = m) : m = n[21], n[22] !== r.branch || n[23] !== r.repo ? (h = !r.branch && /* @__PURE__ */ w(c, {
 				variant: "outline",
 				size: "sm",
-				onClick: () => V("repo", { repo: r.repo }),
+				onClick: () => z("repo", { repo: r.repo }),
 				children: "Back to main"
-			}), n[22] = r.branch, n[23] = r.repo, n[24] = h) : h = n[24], c = "Path", l = "flex min-w-0 flex-wrap items-center gap-x-1.5 text-sm";
+			}), n[22] = r.branch, n[23] = r.repo, n[24] = h) : h = n[24], l = "Path", u = "flex min-w-0 flex-wrap items-center gap-x-1.5 text-sm";
 			let v;
-			n[25] !== r.repo || n[26] !== i ? (v = () => V("repo", {
+			n[25] !== r.repo || n[26] !== i ? (v = () => z("repo", {
 				repo: r.repo,
 				ref: i
-			}), n[25] = r.repo, n[26] = i, n[27] = v) : v = n[27], n[28] !== r.repo || n[29] !== v ? (d = /* @__PURE__ */ E(Y, {
+			}), n[25] = r.repo, n[26] = i, n[27] = v) : v = n[27], n[28] !== r.repo || n[29] !== v ? (d = /* @__PURE__ */ w(W, {
 				onClick: v,
 				children: r.repo
 			}), n[28] = r.repo, n[29] = v, n[30] = d) : d = n[30], f = e.map((t, n) => {
 				let a = n === e.length - 1;
-				return /* @__PURE__ */ D("span", {
+				return /* @__PURE__ */ T("span", {
 					className: "flex items-center gap-1.5",
-					children: [/* @__PURE__ */ E("span", {
+					children: [/* @__PURE__ */ w("span", {
 						className: "text-muted-foreground",
 						children: "/"
-					}), a ? /* @__PURE__ */ E("strong", {
+					}), a ? /* @__PURE__ */ w("strong", {
 						className: "font-semibold",
 						children: t
-					}) : /* @__PURE__ */ E(Y, {
-						onClick: () => V("repo", {
+					}) : /* @__PURE__ */ w(W, {
+						onClick: () => z("repo", {
 							repo: r.repo,
 							ref: i,
 							path: e.slice(0, n + 1).join("/")
@@ -200,26 +161,26 @@ function J(t) {
 				}, n);
 			});
 		}
-		n[0] = r, n[1] = a, n[2] = o, n[3] = s, n[4] = c, n[5] = l, n[6] = d, n[7] = f, n[8] = p, n[9] = m, n[10] = h;
-	} else s = n[3], c = n[4], l = n[5], d = n[6], f = n[7], p = n[8], m = n[9], h = n[10];
+		n[0] = r, n[1] = a, n[2] = o, n[3] = s, n[4] = l, n[5] = u, n[6] = d, n[7] = f, n[8] = p, n[9] = m, n[10] = h;
+	} else s = n[3], l = n[4], u = n[5], d = n[6], f = n[7], p = n[8], m = n[9], h = n[10];
 	if (s !== Symbol.for("react.early_return_sentinel")) return s;
 	let g;
-	n[31] !== r.path || n[32] !== a ? (g = a && /* @__PURE__ */ E(q, {
+	n[31] !== r.path || n[32] !== a ? (g = a && /* @__PURE__ */ w(H, {
 		text: r.path,
 		className: "ml-1"
 	}), n[31] = r.path, n[32] = a, n[33] = g) : g = n[33];
 	let _;
-	n[34] !== g || n[35] !== c || n[36] !== l || n[37] !== d || n[38] !== f ? (_ = /* @__PURE__ */ D("nav", {
-		"aria-label": c,
-		className: l,
+	n[34] !== g || n[35] !== l || n[36] !== u || n[37] !== d || n[38] !== f ? (_ = /* @__PURE__ */ T("nav", {
+		"aria-label": l,
+		className: u,
 		children: [
 			d,
 			f,
 			g
 		]
-	}), n[34] = g, n[35] = c, n[36] = l, n[37] = d, n[38] = f, n[39] = _) : _ = n[39];
+	}), n[34] = g, n[35] = l, n[36] = u, n[37] = d, n[38] = f, n[39] = _) : _ = n[39];
 	let v;
-	return n[40] !== _ || n[41] !== p || n[42] !== m || n[43] !== h ? (v = /* @__PURE__ */ D("div", {
+	return n[40] !== _ || n[41] !== p || n[42] !== m || n[43] !== h ? (v = /* @__PURE__ */ T("div", {
 		className: p,
 		children: [
 			m,
@@ -228,147 +189,147 @@ function J(t) {
 		]
 	}), n[40] = _, n[41] = p, n[42] = m, n[43] = h, n[44] = v) : v = n[44], v;
 }
-var Y = (t) => {
+var W = (t) => {
 	let n = e(3), { onClick: r, children: i } = t, a;
-	return n[0] !== i || n[1] !== r ? (a = /* @__PURE__ */ E("button", {
+	return n[0] !== i || n[1] !== r ? (a = /* @__PURE__ */ w("button", {
 		type: "button",
 		onClick: r,
 		className: "cursor-pointer rounded-sm text-muted-foreground underline-offset-4 outline-none hover:text-foreground hover:underline focus-visible:text-foreground focus-visible:underline",
 		children: i
 	}), n[0] = i, n[1] = r, n[2] = a) : a = n[2], a;
 };
-function X(t) {
+function G(t) {
 	let n = e(12), { d: r, open: i } = t, a = r.branch ? "git-branch" : "git-commit", o;
-	n[0] === a ? o = n[1] : (o = /* @__PURE__ */ E(h, { name: a }), n[0] = a, n[1] = o);
+	n[0] === a ? o = n[1] : (o = /* @__PURE__ */ w(p, { name: a }), n[0] = a, n[1] = o);
 	let s;
-	n[2] !== r.branch || n[3] !== r.sha ? (s = r.branch || R(r.sha), n[2] = r.branch, n[3] = r.sha, n[4] = s) : s = n[4];
-	let c;
-	n[5] === s ? c = n[6] : (c = /* @__PURE__ */ E("span", {
+	n[2] !== r.branch || n[3] !== r.sha ? (s = r.branch || I(r.sha), n[2] = r.branch, n[3] = r.sha, n[4] = s) : s = n[4];
+	let l;
+	n[5] === s ? l = n[6] : (l = /* @__PURE__ */ w("span", {
 		className: "max-w-48 truncate",
 		children: s
-	}), n[5] = s, n[6] = c);
-	let l;
-	n[7] === Symbol.for("react.memo_cache_sentinel") ? (l = /* @__PURE__ */ E(h, {
+	}), n[5] = s, n[6] = l);
+	let u;
+	n[7] === Symbol.for("react.memo_cache_sentinel") ? (u = /* @__PURE__ */ w(p, {
 		name: "caret-down",
 		className: "size-3 text-muted-foreground"
-	}), n[7] = l) : l = n[7];
+	}), n[7] = u) : u = n[7];
 	let d;
-	return n[8] !== i || n[9] !== o || n[10] !== c ? (d = /* @__PURE__ */ D(u, {
+	return n[8] !== i || n[9] !== o || n[10] !== l ? (d = /* @__PURE__ */ T(c, {
 		variant: "outline",
 		size: "sm",
 		className: "self-start",
 		onClick: i,
 		children: [
 			o,
-			c,
-			l
+			l,
+			u
 		]
-	}), n[8] = i, n[9] = o, n[10] = c, n[11] = d) : d = n[11], d;
+	}), n[8] = i, n[9] = o, n[10] = l, n[11] = d) : d = n[11], d;
 }
-function ee(t) {
-	let n = e(49), { c: r, d: i } = t, a = F(), o;
-	n[0] === i ? o = n[1] : (o = () => V("history", {
+function K(t) {
+	let n = e(49), { c: r, d: i } = t, a = N(), o;
+	n[0] === i ? o = n[1] : (o = () => z("history", {
 		repo: i.repo,
-		ref: B(i),
+		ref: R(i),
 		path: i.path || ""
 	}), n[0] = i, n[1] = o);
-	let s = o, c;
-	n[2] === r.sha ? c = n[3] : (c = R(r.sha), n[2] = r.sha, n[3] = c);
+	let c = o, l;
+	n[2] === r.sha ? l = n[3] : (l = I(r.sha), n[2] = r.sha, n[3] = l);
 	let u;
-	n[4] === c ? u = n[5] : (u = /* @__PURE__ */ E("code", { children: c }), n[4] = c, n[5] = u);
+	n[4] === l ? u = n[5] : (u = /* @__PURE__ */ w("code", { children: l }), n[4] = l, n[5] = u);
 	let d;
-	n[6] === r.time ? d = n[7] : (d = L(r.time), n[6] = r.time, n[7] = d);
+	n[6] === r.time ? d = n[7] : (d = F(r.time), n[6] = r.time, n[7] = d);
 	let f;
-	n[8] !== u || n[9] !== d ? (f = /* @__PURE__ */ D(T, { children: [
+	n[8] !== u || n[9] !== d ? (f = /* @__PURE__ */ T(C, { children: [
 		u,
 		" · ",
 		d
 	] }), n[8] = u, n[9] = d, n[10] = f) : f = n[10];
-	let p = f, m = `overflow-hidden rounded-xl border bg-card text-card-foreground ${a ? "flex items-stretch divide-x" : "divide-y"}`, g;
-	n[11] !== r.sha || n[12] !== i.repo ? (g = () => V("commit", {
+	let m = f, h = `overflow-hidden rounded-xl border bg-card text-card-foreground ${a ? "flex items-stretch divide-x" : "divide-y"}`, g;
+	n[11] !== r.sha || n[12] !== i.repo ? (g = () => z("commit", {
 		repo: i.repo,
 		sha: r.sha
 	}), n[11] = r.sha, n[12] = i.repo, n[13] = g) : g = n[13];
 	let _ = `flex cursor-pointer items-center gap-3 px-3 py-2.5 text-left text-sm outline-none hover:bg-accent/50 focus-visible:bg-accent/50 min-w-0 ${a ? "flex-1" : "w-full"}`, v;
-	n[14] === r.author ? v = n[15] : (v = /* @__PURE__ */ E(l, {
+	n[14] === r.author ? v = n[15] : (v = /* @__PURE__ */ w(s, {
 		name: r.author,
 		size: 20
 	}), n[14] = r.author, n[15] = v);
 	let y;
-	n[16] === r.author ? y = n[17] : (y = /* @__PURE__ */ E("span", {
+	n[16] === r.author ? y = n[17] : (y = /* @__PURE__ */ w("span", {
 		className: "shrink-0 font-medium",
 		children: r.author
 	}), n[16] = r.author, n[17] = y);
 	let b;
-	n[18] === r.subject ? b = n[19] : (b = /* @__PURE__ */ E("span", {
+	n[18] === r.subject ? b = n[19] : (b = /* @__PURE__ */ w("span", {
 		className: "min-w-0 flex-1 truncate text-muted-foreground",
 		children: r.subject
 	}), n[18] = r.subject, n[19] = b);
 	let x;
-	n[20] !== y || n[21] !== b ? (x = /* @__PURE__ */ D("span", {
+	n[20] !== y || n[21] !== b ? (x = /* @__PURE__ */ T("span", {
 		className: "flex items-baseline gap-2",
 		children: [y, b]
 	}), n[20] = y, n[21] = b, n[22] = x) : x = n[22];
 	let S;
-	n[23] !== p || n[24] !== a ? (S = !a && /* @__PURE__ */ E("span", {
+	n[23] !== m || n[24] !== a ? (S = !a && /* @__PURE__ */ w("span", {
 		className: "block text-xs text-muted-foreground",
-		children: p
-	}), n[23] = p, n[24] = a, n[25] = S) : S = n[25];
-	let C;
-	n[26] !== x || n[27] !== S ? (C = /* @__PURE__ */ D("span", {
+		children: m
+	}), n[23] = m, n[24] = a, n[25] = S) : S = n[25];
+	let E;
+	n[26] !== x || n[27] !== S ? (E = /* @__PURE__ */ T("span", {
 		className: "min-w-0 flex-1",
 		children: [x, S]
-	}), n[26] = x, n[27] = S, n[28] = C) : C = n[28];
-	let w;
-	n[29] !== p || n[30] !== a ? (w = a && /* @__PURE__ */ E("span", {
+	}), n[26] = x, n[27] = S, n[28] = E) : E = n[28];
+	let D;
+	n[29] !== m || n[30] !== a ? (D = a && /* @__PURE__ */ w("span", {
 		className: "shrink-0 whitespace-nowrap text-xs text-muted-foreground",
-		children: p
-	}), n[29] = p, n[30] = a, n[31] = w) : w = n[31];
+		children: m
+	}), n[29] = m, n[30] = a, n[31] = D) : D = n[31];
 	let O;
-	n[32] !== C || n[33] !== w || n[34] !== g || n[35] !== _ || n[36] !== v ? (O = /* @__PURE__ */ D("button", {
+	n[32] !== E || n[33] !== D || n[34] !== g || n[35] !== _ || n[36] !== v ? (O = /* @__PURE__ */ T("button", {
 		type: "button",
 		onClick: g,
 		className: _,
 		children: [
 			v,
-			C,
-			w
+			E,
+			D
 		]
-	}), n[32] = C, n[33] = w, n[34] = g, n[35] = _, n[36] = v, n[37] = O) : O = n[37];
+	}), n[32] = E, n[33] = D, n[34] = g, n[35] = _, n[36] = v, n[37] = O) : O = n[37];
 	let k = `flex cursor-pointer items-center gap-3 px-3 py-2.5 text-left text-sm outline-none hover:bg-accent/50 focus-visible:bg-accent/50 gap-2 font-medium ${a ? "shrink-0" : "w-full"}`, A;
-	n[38] === Symbol.for("react.memo_cache_sentinel") ? (A = /* @__PURE__ */ E(h, { name: "clock-counter-clockwise" }), n[38] = A) : A = n[38];
+	n[38] === Symbol.for("react.memo_cache_sentinel") ? (A = /* @__PURE__ */ w(p, { name: "clock-counter-clockwise" }), n[38] = A) : A = n[38];
 	let j;
-	n[39] === a ? j = n[40] : (j = !a && /* @__PURE__ */ E(h, {
+	n[39] === a ? j = n[40] : (j = !a && /* @__PURE__ */ w(p, {
 		name: "caret-right",
 		className: "ml-auto text-muted-foreground"
 	}), n[39] = a, n[40] = j);
 	let M;
-	n[41] !== s || n[42] !== k || n[43] !== j ? (M = /* @__PURE__ */ D("button", {
+	n[41] !== c || n[42] !== k || n[43] !== j ? (M = /* @__PURE__ */ T("button", {
 		type: "button",
-		onClick: s,
+		onClick: c,
 		className: k,
 		children: [
 			A,
 			"History",
 			j
 		]
-	}), n[41] = s, n[42] = k, n[43] = j, n[44] = M) : M = n[44];
-	let N;
-	return n[45] !== O || n[46] !== M || n[47] !== m ? (N = /* @__PURE__ */ D("div", {
-		className: m,
+	}), n[41] = c, n[42] = k, n[43] = j, n[44] = M) : M = n[44];
+	let P;
+	return n[45] !== O || n[46] !== M || n[47] !== h ? (P = /* @__PURE__ */ T("div", {
+		className: h,
 		children: [O, M]
-	}), n[45] = O, n[46] = M, n[47] = m, n[48] = N) : N = n[48], N;
+	}), n[45] = O, n[46] = M, n[47] = h, n[48] = P) : P = n[48], P;
 }
-var Z = one.params, Q = (e) => e.split("/").slice(0, -1).join("/"), $ = (e) => /\.(md|mdx|markdown)$/i.test(e);
-function te(t) {
-	let n = e(32), { d: r, path: i } = t, [a, o] = s($(i) ? "preview" : "code");
+var q = one.params, J = (e) => e.split("/").slice(0, -1).join("/"), Y = (e) => /\.(md|mdx|markdown)$/i.test(e);
+function X(t) {
+	let n = e(32), { d: r, path: i } = t, [o, s] = a(Y(i) ? "preview" : "code");
 	if (r.submodule) {
 		let e;
-		n[0] === r.submodule ? e = n[1] : (e = R(r.submodule), n[0] = r.submodule, n[1] = e);
+		n[0] === r.submodule ? e = n[1] : (e = I(r.submodule), n[0] = r.submodule, n[1] = e);
 		let t;
-		return n[2] === e ? t = n[3] : (t = /* @__PURE__ */ D(m, { children: [
+		return n[2] === e ? t = n[3] : (t = /* @__PURE__ */ T(f, { children: [
 			"This is a submodule of commit ",
-			/* @__PURE__ */ E("code", { children: e }),
+			/* @__PURE__ */ w("code", { children: e }),
 			" of another repo."
 		] }), n[2] = e, n[3] = t), t;
 	}
@@ -376,7 +337,7 @@ function te(t) {
 		let e;
 		n[4] === r.size ? e = n[5] : (e = one.size(r.size), n[4] = r.size, n[5] = e);
 		let t;
-		return n[6] === e ? t = n[7] : (t = /* @__PURE__ */ D(m, { children: [
+		return n[6] === e ? t = n[7] : (t = /* @__PURE__ */ T(f, { children: [
 			"This binary file (",
 			e,
 			") can't be previewed."
@@ -386,76 +347,76 @@ function te(t) {
 		let e;
 		n[8] === r.size ? e = n[9] : (e = one.size(r.size), n[8] = r.size, n[9] = e);
 		let t;
-		return n[10] === e ? t = n[11] : (t = /* @__PURE__ */ D(m, { children: [
+		return n[10] === e ? t = n[11] : (t = /* @__PURE__ */ T(f, { children: [
 			"This file is too big to preview (",
 			e,
 			"). Clone the repo to read it."
 		] }), n[10] = e, n[11] = t), t;
 	}
 	let c;
-	n[12] === i ? c = n[13] : (c = $(i), n[12] = i, n[13] = c);
-	let l = c, u;
+	n[12] === i ? c = n[13] : (c = Y(i), n[12] = i, n[13] = c);
+	let p = c, m;
 	if (n[14] !== r.text || n[15] !== i) {
 		let e;
-		n[17] === i ? e = n[18] : (e = (e) => !/\.mdx$/i.test(i) || !/^\s*(import|export)\s/.test(e) && !/^\s*<\/?[A-Z][\w.]*[^>]*\/?>\s*$/.test(e), n[17] = i, n[18] = e), u = r.text.split("\n").filter(e).join("\n"), n[14] = r.text, n[15] = i, n[16] = u;
-	} else u = n[16];
-	let h = u, g;
-	n[19] !== l || n[20] !== a ? (g = l && /* @__PURE__ */ E(y, {
-		value: a,
-		onValueChange: o,
-		children: /* @__PURE__ */ D(b, { children: [/* @__PURE__ */ E(x, {
+		n[17] === i ? e = n[18] : (e = (e) => !/\.mdx$/i.test(i) || !/^\s*(import|export)\s/.test(e) && !/^\s*<\/?[A-Z][\w.]*[^>]*\/?>\s*$/.test(e), n[17] = i, n[18] = e), m = r.text.split("\n").filter(e).join("\n"), n[14] = r.text, n[15] = i, n[16] = m;
+	} else m = n[16];
+	let h = m, _;
+	n[19] !== p || n[20] !== o ? (_ = p && /* @__PURE__ */ w(v, {
+		value: o,
+		onValueChange: s,
+		children: /* @__PURE__ */ T(y, { children: [/* @__PURE__ */ w(b, {
 			value: "preview",
 			children: "Preview"
-		}), /* @__PURE__ */ E(x, {
+		}), /* @__PURE__ */ w(b, {
 			value: "code",
 			children: "Code"
 		})] })
-	}), n[19] = l, n[20] = a, n[21] = g) : g = n[21];
-	let _;
-	n[22] !== r.size || n[23] !== r.text || n[24] !== l || n[25] !== i || n[26] !== h || n[27] !== a ? (_ = l && a === "preview" ? /* @__PURE__ */ D(d, {
+	}), n[19] = p, n[20] = o, n[21] = _) : _ = n[21];
+	let x;
+	n[22] !== r.size || n[23] !== r.text || n[24] !== p || n[25] !== i || n[26] !== h || n[27] !== o ? (x = p && o === "preview" ? /* @__PURE__ */ T(l, {
 		className: "gap-0 py-0",
-		children: [/* @__PURE__ */ D("div", {
+		children: [/* @__PURE__ */ T("div", {
 			className: "flex items-center justify-between gap-2 border-b py-1.5 pr-1.5 pl-4 text-sm text-muted-foreground",
-			children: [/* @__PURE__ */ D("span", { children: [
-				z(r.text.split("\n").length, "line", "lines"),
+			children: [/* @__PURE__ */ T("span", { children: [
+				L(r.text.split("\n").length, "line", "lines"),
 				" · ",
 				one.size(r.size)
-			] }), /* @__PURE__ */ E(p, { text: r.text })]
-		}), /* @__PURE__ */ E("div", {
+			] }), /* @__PURE__ */ w(d, { text: r.text })]
+		}), /* @__PURE__ */ w("div", {
 			className: "px-6 py-5",
-			children: /* @__PURE__ */ E(W, { text: h })
+			children: /* @__PURE__ */ w(g, { text: h })
 		})]
-	}) : /* @__PURE__ */ E(f, {
+	}) : /* @__PURE__ */ w(u, {
 		text: r.text,
 		path: i
-	}), n[22] = r.size, n[23] = r.text, n[24] = l, n[25] = i, n[26] = h, n[27] = a, n[28] = _) : _ = n[28];
-	let v;
-	return n[29] !== g || n[30] !== _ ? (v = /* @__PURE__ */ D("div", {
+	}), n[22] = r.size, n[23] = r.text, n[24] = p, n[25] = i, n[26] = h, n[27] = o, n[28] = x) : x = n[28];
+	let S;
+	return n[29] !== _ || n[30] !== x ? (S = /* @__PURE__ */ T("div", {
 		className: "flex flex-col gap-3",
-		children: [g, _]
-	}), n[29] = g, n[30] = _, n[31] = v) : v = n[31], v;
+		children: [_, x]
+	}), n[29] = _, n[30] = x, n[31] = S) : S = n[31], S;
 }
-function ne(t) {
+function Z(t) {
 	let n = e(24), { repo: r, rev: a, path: o } = t, s;
 	n[0] !== o || n[1] !== r || n[2] !== a ? (s = {
 		repo: r,
 		ref: a,
 		path: o
 	}, n[0] = o, n[1] = r, n[2] = a, n[3] = s) : s = n[3];
-	let c = k("file", s), l, u;
+	let c = D("file", s), l, u;
 	n[4] === o ? (l = n[5], u = n[6]) : (l = () => {
 		one.title(o.split("/").pop());
 	}, u = [o], n[4] = o, n[5] = l, n[6] = u), i(l, u);
 	let d = c.data;
 	if (!d) {
 		let e;
-		return n[7] === c ? e = n[8] : (e = /* @__PURE__ */ E(M, {
+		return n[7] === c ? e = n[8] : (e = /* @__PURE__ */ w(A, {
 			call: c,
 			rows: 2
 		}), n[7] = c, n[8] = e), e;
 	}
 	let f;
-	n[9] === d ? f = n[10] : (f = /* @__PURE__ */ E(J, {
+	n[9] === d ? f = n[10] : (f = /* @__PURE__ */ w(U, {
 		d,
 		file: !0
 	}), n[9] = d, n[10] = f);
@@ -465,17 +426,17 @@ function ne(t) {
 		path: o
 	}, n[11] = d, n[12] = o, n[13] = p) : p = n[13];
 	let m;
-	n[14] !== d.latest || n[15] !== p ? (m = /* @__PURE__ */ E(ee, {
+	n[14] !== d.latest || n[15] !== p ? (m = /* @__PURE__ */ w(K, {
 		c: d.latest,
 		d: p
 	}), n[14] = d.latest, n[15] = p, n[16] = m) : m = n[16];
 	let h;
-	n[17] !== d || n[18] !== o ? (h = /* @__PURE__ */ E(te, {
+	n[17] !== d || n[18] !== o ? (h = /* @__PURE__ */ w(X, {
 		d,
 		path: o
 	}), n[17] = d, n[18] = o, n[19] = h) : h = n[19];
 	let g;
-	return n[20] !== f || n[21] !== m || n[22] !== h ? (g = /* @__PURE__ */ D("div", {
+	return n[20] !== f || n[21] !== m || n[22] !== h ? (g = /* @__PURE__ */ T("div", {
 		className: "flex min-w-0 flex-col gap-3",
 		children: [
 			f,
@@ -484,89 +445,89 @@ function ne(t) {
 		]
 	}), n[20] = f, n[21] = m, n[22] = h, n[23] = g) : g = n[23], g;
 }
-function re(t) {
+function Q(t) {
 	let n = e(27), { repo: r, rev: i, dir: a, path: o, pick: s, enter: c } = t, l;
 	n[0] !== a || n[1] !== r || n[2] !== i ? (l = {
 		repo: r,
 		ref: i,
 		path: a
 	}, n[0] = a, n[1] = r, n[2] = i, n[3] = l) : l = n[3];
-	let u = k("tree", l), d = u.data;
+	let u = D("tree", l), d = u.data;
 	if (!d) {
 		let e;
-		return n[4] === u ? e = n[5] : (e = /* @__PURE__ */ E(M, {
+		return n[4] === u ? e = n[5] : (e = /* @__PURE__ */ w(A, {
 			call: u,
 			rows: 4
 		}), n[4] = u, n[5] = e), e;
 	}
 	let f;
 	n[6] === a ? f = n[7] : (f = (e) => (a ? a + "/" : "") + e.name, n[6] = a, n[7] = f);
-	let p = f, m = ie, h;
-	n[8] !== a || n[9] !== c ? (h = a && /* @__PURE__ */ E(m, {
+	let p = f, h = $, g;
+	n[8] !== a || n[9] !== c ? (g = a && /* @__PURE__ */ w(h, {
 		icon: "folder",
 		name: "..",
-		onClick: () => c(Q(a))
-	}), n[8] = a, n[9] = c, n[10] = h) : h = n[10];
+		onClick: () => c(J(a))
+	}), n[8] = a, n[9] = c, n[10] = g) : g = n[10];
 	let _;
 	n[11] === d.entries ? _ = n[12] : (_ = d.entries || [], n[11] = d.entries, n[12] = _);
 	let v;
 	if (n[13] !== c || n[14] !== p || n[15] !== o || n[16] !== s || n[17] !== _) {
 		let e;
-		n[19] !== c || n[20] !== p || n[21] !== o || n[22] !== s ? (e = (e) => e.type === "tree" ? /* @__PURE__ */ E(m, {
+		n[19] !== c || n[20] !== p || n[21] !== o || n[22] !== s ? (e = (e) => e.type === "tree" ? /* @__PURE__ */ w(h, {
 			icon: "folder",
 			name: e.name,
 			onClick: () => c(p(e))
-		}, e.name) : e.type === "blob" ? /* @__PURE__ */ E(m, {
+		}, e.name) : e.type === "blob" ? /* @__PURE__ */ w(h, {
 			icon: "file",
 			name: e.name,
 			selected: p(e) === o,
 			onClick: () => s(p(e))
-		}, e.name) : /* @__PURE__ */ E(m, {
+		}, e.name) : /* @__PURE__ */ w(h, {
 			icon: "folder-dashed",
 			name: e.name
 		}, e.name), n[19] = c, n[20] = p, n[21] = o, n[22] = s, n[23] = e) : e = n[23], v = _.map(e), n[13] = c, n[14] = p, n[15] = o, n[16] = s, n[17] = _, n[18] = v;
 	} else v = n[18];
 	let y;
-	return n[24] !== h || n[25] !== v ? (y = /* @__PURE__ */ D(g, { children: [h, v] }), n[24] = h, n[25] = v, n[26] = y) : y = n[26], y;
+	return n[24] !== g || n[25] !== v ? (y = /* @__PURE__ */ T(m, { children: [g, v] }), n[24] = g, n[25] = v, n[26] = y) : y = n[26], y;
 }
-function ie(e) {
+function $(e) {
 	let { icon: t, name: n, selected: r, onClick: i } = e;
-	return /* @__PURE__ */ D("button", {
+	return /* @__PURE__ */ T("button", {
 		type: "button",
 		onClick: i,
 		"data-selected": r || void 0,
 		className: "flex w-full min-w-0 cursor-pointer items-center gap-2.5 px-3 py-2 text-left text-sm outline-none hover:bg-accent/50 focus-visible:bg-accent/50 data-[selected]:bg-accent",
-		children: [/* @__PURE__ */ E(h, {
+		children: [/* @__PURE__ */ w(p, {
 			name: t,
 			className: "text-muted-foreground"
-		}), /* @__PURE__ */ E("span", {
+		}), /* @__PURE__ */ w("span", {
 			className: "truncate",
 			children: n
 		})]
 	});
 }
-function ae() {
-	let t = e(8), n = F(), [r, i] = s(Z.path), a;
-	t[0] === Symbol.for("react.memo_cache_sentinel") ? (a = Q(Z.path), t[0] = a) : a = t[0];
-	let [o, c] = s(a), l;
-	t[1] === r ? l = t[2] : (l = /* @__PURE__ */ E(ne, {
-		repo: Z.repo,
-		rev: Z.ref,
+function ee() {
+	let t = e(8), n = N(), [r, i] = a(q.path), o;
+	t[0] === Symbol.for("react.memo_cache_sentinel") ? (o = J(q.path), t[0] = o) : o = t[0];
+	let [s, c] = a(o), l;
+	t[1] === r ? l = t[2] : (l = /* @__PURE__ */ w(Z, {
+		repo: q.repo,
+		rev: q.ref,
 		path: r
 	}, r), t[1] = r, t[2] = l);
 	let u = l, d;
-	return t[3] !== o || t[4] !== u || t[5] !== r || t[6] !== n ? (d = n ? /* @__PURE__ */ E(I, {
+	return t[3] !== s || t[4] !== u || t[5] !== r || t[6] !== n ? (d = n ? /* @__PURE__ */ w(P, {
 		size: "20rem",
-		list: /* @__PURE__ */ E(re, {
-			repo: Z.repo,
-			rev: Z.ref,
-			dir: o,
+		list: /* @__PURE__ */ w(Q, {
+			repo: q.repo,
+			rev: q.ref,
+			dir: s,
 			path: r,
 			pick: i,
 			enter: c
 		}),
 		detail: u
-	}) : u, t[3] = o, t[4] = u, t[5] = r, t[6] = n, t[7] = d) : d = t[7], d;
+	}) : u, t[3] = s, t[4] = u, t[5] = r, t[6] = n, t[7] = d) : d = t[7], d;
 }
-c(document.getElementById("root")).render(/* @__PURE__ */ E(P, { children: /* @__PURE__ */ E(ae, {}) }));
+o(document.getElementById("root")).render(/* @__PURE__ */ w(M, { children: /* @__PURE__ */ w(ee, {}) }));
 </script>

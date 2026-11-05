@@ -2,9 +2,9 @@
 // its README, and its branches and commits. Deleted, it says so, with Restore for its owners, and Erase.
 import { useCallback, useEffect, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { Button, Card, CardContent, CopyButton, Empty, Icon, List, ListRow, Problem, Spinner } from "@one/ui"
+import { Button, Card, CardContent, CopyButton, Empty, Icon, List, ListRow, Markdown, Problem, Spinner } from "@one/ui"
 import { CommitCard, PathBar, RepoTabs } from "../lib/frame.jsx"
-import { GitHubMark, Markdown, RepoIcon } from "../lib/parts.jsx"
+import { GitHubMark, RepoIcon } from "../lib/parts.jsx"
 import { Frame, Pending, ago, go, refOf, said, short, useAddress, useCall, useWide, where } from "../lib/use.jsx"
 
 const P = one.params
@@ -52,7 +52,7 @@ function Readme({ d }) {
       const base = at ? at + "/" : ""
       const p = new URL(href, "file:///" + base).pathname.slice(1).replace(/\/$/, "")
       const path = decodeURIComponent(p)
-      return `one.open(${/\.[\w]+$/.test(path) ? '"file"' : '"repo"'}, ${JSON.stringify({ repo: d.repo, ref, path })})`
+      go(/\.[\w]+$/.test(path) ? "file" : "repo", { repo: d.repo, ref, path })
     },
     [d.repo, ref],
   )
@@ -61,7 +61,7 @@ function Readme({ d }) {
     <Card className="max-w-5xl gap-0 py-0">
       <div className="flex items-center gap-2 border-b px-4 py-3 text-sm font-medium"><Icon name="book" className="text-muted-foreground" />{d.readme.name}</div>
       <CardContent className="px-6 py-5">
-        {markdown ? <Markdown text={text} link={link} /> : <pre className="font-mono text-sm break-words whitespace-pre-wrap">{text}</pre>}
+        {markdown ? <Markdown text={text} onLink={link} /> : <pre className="font-mono text-sm break-words whitespace-pre-wrap">{text}</pre>}
       </CardContent>
     </Card>
   )

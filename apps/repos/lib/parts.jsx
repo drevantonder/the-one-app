@@ -1,10 +1,8 @@
 // Small parts of Repos' pages: GitHub's mark, a person, a label as GitHub draws it, an issue's state, +/− counts, and
-// Markdown, read and written.
-import { useLayoutEffect, useMemo, useRef, useState } from "react"
-import { createPortal } from "react-dom"
-import { CopyButton, Icon, Tabs, TabsList, TabsTrigger, cn } from "@one/ui"
+// a Markdown field to write in.
+import { useState } from "react"
+import { CopyButton, Icon, Markdown, Tabs, TabsList, TabsTrigger, Textarea, cn } from "@one/ui"
 import { isGithub } from "./use.jsx"
-import "./markdown.css"
 
 /// GitHub's own mark, which is its logo; in the text's colour.
 export function GitHubMark({ className }) {
@@ -50,36 +48,6 @@ export function Counts({ add, del, className }) {
   )
 }
 
-/// Markdown as GitHub draws it, from the bridge's one.markdown. `link(href)` may give a script to run instead of
-/// following a relative link (keep it the same function while its page is, or the text is read again). The copy button on each block of code is this page's.
-export function Markdown({ text, link, className }) {
-  const box = useRef(null)
-  const html = useMemo(() => one.markdown(text, link ? { link } : {}), [text, link])
-  const [blocks, setBlocks] = useState([])
-  useLayoutEffect(() => {
-    setBlocks(
-      [...box.current.querySelectorAll(".md-code")].map((block) => {
-        block.querySelector(".md-copy")?.remove()
-        const slot = block.appendChild(Object.assign(document.createElement("span"), { className: "md-copy" }))
-        return { slot, text: block.querySelector("pre")?.textContent || "" }
-      }),
-    )
-  }, [html])
-  return (
-    <>
-      <div ref={box} className={className} dangerouslySetInnerHTML={{ __html: html }} />
-      {blocks.map((b, i) => createPortal(<CopyButton text={b.text} label="" variant="outline" size="sm" />, b.slot, i))}
-    </>
-  )
-}
-
-const field = "w-full min-w-0 rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none transition-[color,box-shadow] placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-50 dark:bg-input/30"
-
-/// A text area, as an Input is.
-export function Textarea({ className, ...props }) {
-  return <textarea className={cn(field, "min-h-16 resize-y", className)} {...props} />
-}
-
 /// A Markdown field with Write and Preview, as GitHub's.
 export function MarkdownField({ value, onChange, placeholder = "", rows = 6, autoFocus, label }) {
   const [preview, setPreview] = useState(false)
@@ -94,7 +62,7 @@ export function MarkdownField({ value, onChange, placeholder = "", rows = 6, aut
       {preview ? (
         value.trim() ? <Markdown text={value} /> : <p className="text-sm text-muted-foreground">Nothing to preview.</p>
       ) : (
-        <Textarea value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} rows={rows} autoFocus={autoFocus} aria-label={label || placeholder || "Text"} />
+        <Textarea value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} style={{ minHeight: `calc(${rows}lh + 1.125rem)` }} className="resize-y" autoFocus={autoFocus} aria-label={label || placeholder || "Text"} />
       )}
     </div>
   )

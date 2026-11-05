@@ -9,7 +9,7 @@ import {
   DialogTrigger, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator,
   DropdownMenuTrigger, Empty, Grid, Hint, Icon, Input, List, ListNote, ListRow, ListSkeleton, Loading, LoadFailure, LoadingButton, Problem, Progress, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Separator, Sheet, SheetContent,
   SheetDescription, SheetHeader, SheetTitle, SheetTrigger, Shell, type ShellSection, showAlert, showMenu, showSheet,
-  Skeleton, Sparkline, Split, Switch, Tabs, TabsContent, TabsList, TabsTrigger, ResponsiveDialog, useDialog,
+  Skeleton, Sparkline, Split, Switch, Tabs, TabsContent, TabsList, TabsTrigger, Textarea, Markdown, ResponsiveDialog, useDialog,
 } from "@one/ui"
 import "./gallery.css"
 import { DotsThreeIcon, MagnifyingGlassIcon, PlusIcon } from "@phosphor-icons/react"
@@ -80,6 +80,73 @@ const people = [
   { account: "work@example.org", ok: true },
   { account: "old@example.org", ok: false },
 ]
+
+const readme = `# One App
+
+Your devices as **one place** for apps and agents, with _everything_ in \`one\` command. See [the guide](docs/guide.md) or [the site](https://example.org/one), and ~~old~~ new things.
+
+## Start
+
+1. Install it
+2. Sign in
+   - with a passkey
+   - or Google
+3. Add an app
+
+- [x] Read the README
+- [ ] Build an app
+
+> Keep it small.
+
+> [!NOTE]
+> Raw <b>HTML</b> shows only as its text.
+
+| App | Where | Count |
+| :-- | :-: | --: |
+| Board | everywhere | 12 |
+| Repos | everywhere | 3 |
+
+\`\`\`ts
+export function recall(key: string): string | undefined {
+  return seen.get(key) // kept a minute
+}
+\`\`\`
+
+\`\`\`sh
+one throwaway client web
+\`\`\`
+
+\`\`\`mermaid
+graph LR
+  Client --> Node
+  Client --> Kernel
+\`\`\`
+
+![a picture on this disk](pic.png)
+
+---
+
+### Small heading
+
+##### Smaller one
+`
+
+/// A Textarea as shadcn has it, and Markdown: what a README or an issue is written in.
+function TextAndMarkdown() {
+  const [link, setLink] = useState("")
+  return (
+    <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
+      <div className="flex flex-col gap-3">
+        <Textarea placeholder="Add a description" aria-label="Description" />
+        <Textarea defaultValue={"Some text\nover two lines"} aria-label="With text" />
+        <Textarea disabled placeholder="Disabled" aria-label="Disabled" />
+        <Textarea aria-invalid defaultValue="Wrong" aria-label="Invalid" />
+        <p className="text-sm text-muted-foreground">{link ? `Link to: ${link}` : "Tap a path link to see where it goes."}</p>
+      </div>
+      <Card className="py-0"><CardContent className="px-6 py-5"><Markdown text={readme} onLink={setLink} /></CardContent></Card>
+    </div>
+  )
+}
 
 /// The accounts of an app that keeps them: rows with Sign Out, what's wrong on the row, Add Account below.
 function Accounts() {
@@ -445,6 +512,10 @@ function Gallery() {
           <CopyButton text="npm run build" />
           <CopyButton text="9fceb02" label="" />
         </Row>
+      </Section>
+
+      <Section title="Textarea, and Markdown: as GitHub draws it, with code coloured and Copy, tables, task lists, alerts, diagrams and links; a path link goes where onLink says">
+        <TextAndMarkdown />
       </Section>
 
       <Section title="Shell: the window every client shows screens in; where its own room is narrow, the sidebar is a sheet behind the bar's button">
