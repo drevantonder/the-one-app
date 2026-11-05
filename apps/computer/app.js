@@ -1,5 +1,5 @@
 // Computer Use: the devices agents can use, and the tools they use them with. Agent devices are Linux devices with a
-// browser on the person's devices, which the agent-devices service runs (Podman, or a Mac's containers); the person's own
+// browser on the person's devices, which Agent Devices runs (Podman, or a Mac's containers); the person's own
 // devices are here too once they let agents use them, through the computer service the Mac app hosts. Use,
 // tools and screen go to a device when one is named; this app keeps who used which device when, as `session`
 // entries in the person's own scope. Agent Devices (apps/agent-devices) is the person's page for them. Its screen is
@@ -8,13 +8,13 @@
 
 import main from "./dist/main.html" with { type: "text" };
 
-/// Runs one of the agent-devices service's operations, wherever it runs for the caller. When none of their devices runs it,
-/// says what's needed instead of how the call failed.
+/// Runs one of the agent-devices service's operations through Agent Devices, whose service it is, wherever it runs for
+/// the caller. When none of their devices runs it, says what's needed instead of how the call failed.
 async function service(ctx, op, input) {
   try {
-    return await ctx.services["agent-devices"][op](input);
+    return await ctx.apps["agent-devices"]._act({ op, input });
   } catch (err) {
-    if (String(err.message).includes("no device runs agent-devices for you")) throw new Error(NEEDS);
+    if (/no device runs agent-devices for you|none of yours runs it/.test(String(err.message))) throw new Error(NEEDS);
     throw err;
   }
 }
@@ -88,7 +88,7 @@ export default {
   connector: true,
   needs: "Needs a Linux device with Podman, or a Mac",
   instructions: "Computer Use acts on devices: agent devices (Linux with a browser, Windows, Android and iPhones, on the person's own devices) and the person's own devices they let agents use (own: true in computer_list, like their Mac). Agent Devices (agent-devices_*) gets you one and gives it back; Computer Use (computer_*) acts on it.\n\nTo browse, agent-devices_borrow with for (a few words the person sees) gives you a Linux device whose browser starts signed in to a browser profile's sites. Pass its name as device to every call, then:\n1. computer_browser_prepare with allow_launch true and profile {\"mode\":\"isolated_named\",\"name\":<the profile borrow gave>} starts its browser.\n2. computer_use with tool list_windows gives the browser's pid and window_id.\n3. computer_get_browser_state with those gives target_id and tab_id; with those, it reads the page and the refs of what's on it.\n4. computer_browser_navigate, _click, _type, _select and _pointer act on it; on an agent device, click and pointer take input_route \"dom_event\". Read the page again after each.\nA browser idle for 5 minutes closes: prepare it again.\nBorrowed with kind chrome (quicker, where agent-devices_kinds lists it), the device is that browser: borrow gives target_id and tab_id, so skip steps 1 to 3 and read the page with computer_get_browser_state. Give the device back with agent-devices_give_back when done; one left 15 minutes without a call is given back for you.\n\nWhen a site needs the person to sign in, agent-devices_sign_in gives them a link to do it themselves; for a challenge, give them computer_view's link. Never sign in or submit forms for them unless they asked.\n\nAnything else on a device (apps, windows, keyboard and mouse, and Windows, Android and iPhones): computer_tools lists what it takes, computer_use runs one, and computer_screen shows the screen. An iPhone takes no clicks or typing.\n\nOn the person's own device, do only what they asked of it, and never read their messages, mail, browser sessions or files unless they asked. They see in their menu bar while you use it, and can stop you.",
-  uses: { services: ["agent-devices", "computer"] },
+  uses: { apps: ["agent-devices"], services: ["computer"] },
   labs: {
     mirroring: { title: "iPhone Mirroring", description: "Use your iPhone through a Mac." },
   },

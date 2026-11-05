@@ -24,6 +24,9 @@ function fnv(s) {
 }
 
 const NEEDS = "Agent Devices needs a device with Podman, or a Mac, and none of yours runs it.";
+
+/// The service's operations Computer Use acts on agent devices with (`_act`).
+const ACTS = ["list", "view", "screen", "tools", "refresh_tools", "use", "get_browser_state", "browser_prepare", "browser_navigate", "browser_click", "browser_type", "browser_select", "browser_dialog", "browser_pointer"];
 const TYPE = "Browser profile";
 
 /// The caller's online devices that run the service, by name.
@@ -568,6 +571,15 @@ export default {
       description: "For Settings: lets agents borrow Chrome run straight on one of your devices, or stops them.",
       input: { type: "object", required: ["on", "allowed"], properties: { on: { type: "string" }, allowed: { type: "boolean" } } },
       run: (ctx, { on, allowed }) => service(ctx, "set_chrome", { on, allowed }),
+    },
+    _act: {
+      reads: false,
+      description: "For Computer Use (apps/computer), which agents act on agent devices with: runs one of the service's operations it acts with (list, view, screen, tools, refresh_tools, use, get_browser_state and the browser tools) with its input.",
+      input: { type: "object", required: ["op"], properties: { op: { type: "string", enum: ACTS }, input: { type: "object" } } },
+      run: (ctx, { op, input = {} }) => {
+        if (!ACTS.includes(op)) throw new Error(`Computer Use doesn't act on agent devices with ${op}: only ${ACTS.join(", ")}`);
+        return service(ctx, op, input);
+      },
     },
     _running: {
       reads: true,

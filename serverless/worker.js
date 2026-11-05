@@ -880,9 +880,14 @@ class ForCall extends RpcTarget {
           this.done();
           return Response.json({});
         case "POST call": {
-          // A service, or an app this node can't run, goes to a node on a machine, when one answers.
+          // Only to the apps it says it uses, and never to a service: a service is its app's alone, and an app with one
+          // runs on a machine, never here. A service, or an app this node can't run, goes to a node on a machine.
+          const mine = await person.describe(who, this.app);
+          if (q.service || q.device === "all") refuse(403, `${this.app.name} can't call the ${q.app} service: a service is only its own app's, so call the ${q.app} app's tools with ctx.apps`);
+          if (!mine?.uses?.apps?.includes(q.app)) refuse(403, `${this.app.name} doesn't use ${q.app}`);
           const callee = deployed(view, q.app);
-          const d = callee && !q.service && !q.device ? await person.describe(who, callee) : null;
+          if (!callee) refuse(404, `no app named ${q.app}`);
+          const d = q.device ? null : await person.describe(who, callee);
           if (!d || d.uses?.services?.length) return Response.json(await machineCall(this.run, q, d));
           return Response.json(await this.run.call({ app: q.app, op: q.op, input: q.input }, this.app.name, this.depth + 1));
         }

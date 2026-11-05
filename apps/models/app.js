@@ -2,11 +2,11 @@
 // ones on its machine, and a call goes on to the next device when a model isn't there; this app is what people,
 // agents and other apps use.
 
-/// Runs one of the models service's operations, wherever it runs for the caller. When none of their devices runs it,
-/// says what's needed instead of how the call failed.
-async function service(ctx, op, input) {
+/// Runs one of the models service's operations, on `device` if it's given, else wherever it runs for the caller. When
+/// none of their devices runs it, says what's needed instead of how the call failed.
+async function service(ctx, op, { device, ...input }) {
   try {
-    return await ctx.services.models[op](input);
+    return await ctx.services.models[op](input, device ? { device } : undefined);
   } catch (err) {
     if (String(err.message).includes("no device runs models for you")) throw new Error(NEEDS);
     throw err;
@@ -61,6 +61,7 @@ export default {
         required: ["model"],
         properties: {
           model: { type: "string", description: "a model's name, as models_here lists them, like gemma4:12b" },
+          device: { type: "string", description: "one of your devices, by name, to ask; else whichever of yours has the model" },
           prompt: { type: "string", description: "the question or task, as the person's message; given with messages, it comes after them" },
           messages: { type: "array", items: { type: "object" }, description: "the conversation so far, oldest first, each { role: user or assistant, content: text, images }" },
           system: { type: "string", description: "instructions the model follows throughout, like \"Answer in one sentence.\"" },
@@ -80,6 +81,7 @@ export default {
         required: ["model", "questions"],
         properties: {
           model: { type: "string", description: "a decision model's name, as models_here lists them, like clef-flash" },
+          device: { type: "string", description: "one of your devices, by name, to ask; else whichever of yours has the model" },
           state: { type: "object", description: "what to decide about, as named fields: { subject: \"...\", body: \"...\" }" },
           questions: { type: "object", description: "named questions, each { type: choice, noul or score, instructions, criteria: { option: what it means } for choice, levels: [lowest, ..., highest] for score }" },
           images: { type: "array", description: "images as base64 strings (or { content_type, base64 }), which state names as image 1, image 2..." },

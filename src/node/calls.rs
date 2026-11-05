@@ -922,7 +922,7 @@ impl Node {
     }
 
     /// What the shim asks the node for a running call (`src/outbound.rs`): `POST /call { app, op, input }` runs an
-    /// operation of an app or service the calling app uses, as its caller; `POST /blob` keeps a blob, `GET
+    /// operation of an app the calling app uses, or of its own service, as its caller; `POST /blob` keeps a blob, `GET
     /// /blob/<hash>` gets one the caller may read; `GET /catalog` lists the install's apps, `GET /devices` its devices.
     pub async fn internal(&self, token: &str, method: &str, path: &str, body: Vec<u8>) -> Result<axum::response::Response> {
         use axum::response::IntoResponse;
@@ -933,16 +933,22 @@ impl Node {
                 ensure!(!grant.read_only, "this call only reads: it can't run other apps' operations");
                 let req: Value = serde_json::from_slice(&body)?;
                 let (app, op) = (req["app"].as_str().unwrap_or(""), req["op"].as_str().unwrap_or(""));
-                // `ctx.services` says it's a service's; `ctx.apps`, an app's (or, from older shims, either).
-                let service = req["service"] == true;
-                let (apps, services) = self.uses(&grant.app).await;
-                let used = if service { services.iter().any(|u| u == app) } else { apps.iter().chain(&services).any(|u| u == app) };
-                ensure!(used, "{} doesn't use {app}", grant.app);
-                ensure!(grant.depth < MAX_DEPTH, "{} called {app} {} calls deep, and apps call each other at most {MAX_DEPTH} deep: is it looping?", grant.app, grant.depth + 1);
-                self.count(&grant.app, "call").await?;
                 // An app may say which device runs it, like the one with a local model.
                 let device = req["device"].as_str().filter(|s| !s.is_empty()).map(str::to_string);
-                let call = CallRequest { app: app.into(), service: service.then(|| app.into()), op: op.into(), input: req["input"].clone(), device, depth: grant.depth + 1, from: Some(grant.app.clone()), client: Some("app".into()), ..Default::default() };
+                // `ctx.services` says it's a service's; `ctx.apps`, an app's, unless it runs as a service anyway (on
+                // every device, or with no deploy). A service is its app's alone: other apps call that app's tools.
+                let service = req["service"] == true;
+                let call = self.resolve(CallRequest { app: app.into(), service: service.then(|| app.into()), op: op.into(), input: req["input"].clone(), device, depth: grant.depth + 1, from: Some(grant.app.clone()), client: Some("app".into()), ..Default::default() });
+                let (apps, services) = self.uses(&grant.app).await;
+                match call.service.is_some() {
+                    true => {
+                        ensure!(app == grant.app, "{} can't call the {app} service: a service is only its own app's, so call the {app} app's tools with ctx.apps", grant.app);
+                        ensure!(services.iter().any(|u| u == app), "{app} doesn't publish a service: add it to uses.services");
+                    }
+                    false => ensure!(apps.iter().any(|u| u == app), "{} doesn't use {app}", grant.app),
+                }
+                ensure!(grant.depth < MAX_DEPTH, "{} called {app} {} calls deep, and apps call each other at most {MAX_DEPTH} deep: is it looping?", grant.app, grant.depth + 1);
+                self.count(&grant.app, "call").await?;
                 // Part of the call that asked, in its trace: where it went and what that took.
                 ok(json!({ "ok": trace::within(grant.trace.clone(), Box::pin(self.route(call, grant.caller.clone()))).await? }))
             }

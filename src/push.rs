@@ -18,7 +18,7 @@ use ed25519_dalek::SigningKey;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
-/// What apps and agents call push by: `ctx.services.push`, `push_send`.
+/// What agents call push by: `push_send`. Apps push with `ctx.notify`.
 pub const NAME: &str = "push";
 /// What a device signs its requests to the push Worker for.
 pub const DOMAIN: &str = "one/push";
@@ -125,7 +125,7 @@ pub fn unregister_request(key: &SigningKey, at: u64) -> Value {
 pub fn describe() -> Value {
     json!({
         "title": "Push", "description": "Sends notifications to your devices", "icon": "bell-ringing",
-        "instructions": "Push sends a notification to every device of yours that gets them: push_send with a title and a body. An app pushes with ctx.notify or ctx.services.push.send, and tapping its push opens its screen. Each one is sealed to the device it's for, so nothing on the way reads it. It says how many devices it went to, never whether anyone saw it.",
+        "instructions": "Push sends a notification to every device of yours that gets them: push_send with a title and a body. An app pushes with ctx.notify, and tapping its push opens its screen. Each one is sealed to the device it's for, so nothing on the way reads it. It says how many devices it went to, never whether anyone saw it.",
         "ops": [
             { "name": "send", "reads": false, "description": "Push a notification to your devices: { title, body?, screen?, params? }; from an app, tapping it opens that app's screen (main unless given). Says how many devices it went to.",
               "input": { "type": "object", "required": ["title"], "properties": {

@@ -138,12 +138,14 @@ function context(ask, body, appends, later) {
     },
   });
   const scopes = body.scopes.map(handle);
-  // `ctx.apps.<name>.<op>(input, { device })`, for exactly the apps (or services) the app says it uses; `device` (a
-  // name) runs it there, like a service on the machine that has what it needs.
+  // `ctx.apps.<name>.<op>(input, { device })`, for exactly the apps the app says it uses, and `ctx.services.<name>`
+  // for its own service, which only it calls (the node checks both); `device` (a name) runs it there, like a service
+  // on the machine that has what it needs.
   const uses = { apps: app.uses?.apps || [], services: app.uses?.services || [] };
   const used = (kind) => new Proxy({}, {
     get(_, name) {
       if (typeof name !== "string" || name === "then") return undefined;
+      if (kind === "services" && name !== app.name) throw new Error(`${app.name} can't call the ${name} service: a service is only its own app's, so call the ${name} app's tools with ctx.apps`);
       if (!uses[kind].includes(name)) throw new Error(`${app.name} doesn't use ${name}: add it to uses.${kind}`);
       return new Proxy({}, {
         get(_, op) {

@@ -49,7 +49,7 @@ export default {
   advanced: true,
   description: "Reads photos and PDFs and answers questions, for your apps",
   instructions: "AI for apps: ai_read reads photos and PDFs with a prompt, ai_decide asks a decision model typed questions. ai_settings shows which models answer (local models on one of your devices, or Gemini once the person's Vault has a Gemini key for it: ask with vault_request, app ai, need gemini); ai_set changes them.",
-  uses: { services: ["models"] },
+  uses: { apps: ["models"] },
   vault: {
     gemini: { title: "Gemini key", type: "API key", domain: "aistudio.google.com", hosts: ["generativelanguage.googleapis.com"], fields: { gemini_key: { label: "API key", secret: true } } },
   },
@@ -118,12 +118,12 @@ export default {
           return { text, provider: "gemini", cut: reply.candidates?.some((x) => x.finishReason === "MAX_TOKENS") || false };
         }
         if (files.some((f) => !f.type.startsWith("image/"))) throw new Error("Local models read photos, not PDFs: set Gemini up with ai_set to read PDFs.");
-        const reply = await ctx.services.models.chat({
-          model: s.read_model, system, think: false,
+        const reply = await ctx.apps.models.chat({
+          model: s.read_model, system, think: false, ...(s.local_device ? { device: s.local_device } : {}),
           options: { temperature: 0, num_predict: max_tokens },
           messages: [{ role: "user", content: prompt, images: files.map((f) => f.data) }],
           ...(json_schema ? { format: json_schema } : {}),
-        }, { device: s.local_device || undefined });
+        });
         return { text: String(reply ?? ""), provider: "local", cut: false };
       },
     },
@@ -141,7 +141,7 @@ export default {
       },
       async run(ctx, { state = {}, questions, images }) {
         const s = await settings(ctx);
-        return ctx.services.models.decide({ model: s.decide_model, state, questions, ...(images?.length ? { images: images.map((i) => i.base64 ?? i) } : {}) }, { device: s.local_device || undefined });
+        return ctx.apps.models.decide({ model: s.decide_model, state, questions, ...(images?.length ? { images: images.map((i) => i.base64 ?? i) } : {}), ...(s.local_device ? { device: s.local_device } : {}) });
       },
     },
   },
