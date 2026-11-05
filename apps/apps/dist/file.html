@@ -1,0 +1,97 @@
+<meta name="@one/ui">
+<style>/*! tailwindcss v4.3.4 | MIT License | https://tailwindcss.com */
+@layer properties{@supports (((-webkit-hyphens:none)) and (not (margin-trim:block))) or ((-moz-orient:inline) and (not (color:rgb(from red r g b)))){*,:before,:after,::backdrop{--tw-translate-x:0;--tw-translate-y:0;--tw-translate-z:0;--tw-leading:initial;--tw-font-weight:initial;--tw-outline-style:solid}}}@layer theme,base,components;@layer utilities{.pointer-events-none{pointer-events:none}.absolute{position:absolute}.relative{position:relative}.top-1{top:var(--spacing,.25rem)}.top-1\/2{top:50%}.left-2{left:calc(var(--spacing,.25rem) * 2)}.left-2\.5{left:calc(var(--spacing,.25rem) * 2.5)}.mt-auto{margin-top:auto}.flex{display:flex}.size-5{width:calc(var(--spacing,.25rem) * 5);height:calc(var(--spacing,.25rem) * 5)}.h-14{height:calc(var(--spacing,.25rem) * 14)}.w-full{width:100%}.max-w-2xl{max-width:var(--container-2xl,42rem)}.min-w-0{min-width:0}.flex-1{flex:1}.-translate-y-1{--tw-translate-y:calc(var(--spacing,.25rem) * -1);translate:var(--tw-translate-x) var(--tw-translate-y)}.-translate-y-1\/2{--tw-translate-y:calc(calc(1 / 2 * 100%) * -1);translate:var(--tw-translate-x) var(--tw-translate-y)}.cursor-pointer{cursor:pointer}.flex-col{flex-direction:column}.items-center{align-items:center}.items-start{align-items:flex-start}.gap-2{gap:calc(var(--spacing,.25rem) * 2)}.gap-3{gap:calc(var(--spacing,.25rem) * 3)}.gap-4{gap:calc(var(--spacing,.25rem) * 4)}.gap-6{gap:calc(var(--spacing,.25rem) * 6)}.truncate{text-overflow:ellipsis;white-space:nowrap;overflow:hidden}.p-4{padding:calc(var(--spacing,.25rem) * 4)}.py-2{padding-block:calc(var(--spacing,.25rem) * 2)}.pt-2{padding-top:calc(var(--spacing,.25rem) * 2)}.pl-8{padding-left:calc(var(--spacing,.25rem) * 8)}.text-center{text-align:center}.text-2xl{font-size:var(--text-2xl,1.5rem);line-height:var(--tw-leading,var(--text-2xl--line-height,calc(2 / 1.5)))}.text-sm{font-size:var(--text-sm,.875rem);line-height:var(--tw-leading,var(--text-sm--line-height,calc(1.25 / .875)))}.leading-relaxed{--tw-leading:var(--leading-relaxed,1.625);line-height:var(--leading-relaxed,1.625)}.leading-tight{--tw-leading:var(--leading-tight,1.25);line-height:var(--leading-tight,1.25)}.font-medium{--tw-font-weight:var(--font-weight-medium,500);font-weight:var(--font-weight-medium,500)}.font-semibold{--tw-font-weight:var(--font-weight-semibold,600);font-weight:var(--font-weight-semibold,600)}.text-current{color:currentColor}.text-destructive{color:var(--destructive)}.text-muted-foreground{color:var(--muted-foreground)}.underline-offset-4{text-underline-offset:4px}.opacity-60{opacity:.6}.outline{outline-style:var(--tw-outline-style);outline-width:1px}.outline-none{--tw-outline-style:none;outline-style:none}@media (hover:hover){.hover\:bg-accent\/50:hover{background-color:var(--accent)}@supports (color:color-mix(in lab, red, red)){.hover\:bg-accent\/50:hover{background-color:color-mix(in oklab, var(--accent) 50%, transparent)}}.hover\:underline:hover{text-decoration-line:underline}}.focus-visible\:bg-accent\/50:focus-visible{background-color:var(--accent)}@supports (color:color-mix(in lab, red, red)){.focus-visible\:bg-accent\/50:focus-visible{background-color:color-mix(in oklab, var(--accent) 50%, transparent)}}.data-\[selected\]\:bg-accent[data-selected]{background-color:var(--accent)}}@property --tw-translate-x{syntax:"*";inherits:false;initial-value:0}@property --tw-translate-y{syntax:"*";inherits:false;initial-value:0}@property --tw-translate-z{syntax:"*";inherits:false;initial-value:0}@property --tw-leading{syntax:"*";inherits:false}@property --tw-font-weight{syntax:"*";inherits:false}@property --tw-outline-style{syntax:"*";inherits:false;initial-value:solid}
+/*$vite$:1*/</style>
+<div id="root"></div>
+<script type="module">import { c as e } from "react/compiler-runtime";
+import { useCallback as t, useEffect as n, useState as r } from "react";
+import { createRoot as i } from "react-dom/client";
+import { CodeView as a, Empty as o, Problem as s, Skeleton as c } from "@one/ui";
+import { jsx as l } from "react/jsx-runtime";
+// ../../../apps/apps/lib/store.jsx
+var u = /* @__PURE__ */ new Set();
+one.on("changed", () => u.forEach((e) => e()));
+function d(e, i) {
+	let [a, o] = r({
+		data: null,
+		error: null
+	}), s = JSON.stringify(i), c = t(() => one.call(e, i).then((e) => o({
+		data: e,
+		error: null
+	}), (e) => o((t) => ({
+		data: t.data,
+		error: e
+	}))), [e, s]);
+	return n(() => (c(), u.add(c), () => u.delete(c)), [c]), {
+		...a,
+		reload: c
+	};
+}
+var f = (e) => one.plain(e);
+function p(t) {
+	let n = e(8), { error: r, retry: i } = t, a;
+	n[0] === r ? a = n[1] : (a = f(r), n[0] = r, n[1] = a);
+	let o = a, c;
+	n[2] === i ? c = n[3] : (c = {
+		label: "Try Again",
+		run: i
+	}, n[2] = i, n[3] = c);
+	let u;
+	return n[4] !== o.next || n[5] !== o.title || n[6] !== c ? (u = /* @__PURE__ */ l(s, {
+		title: o.title,
+		text: o.next,
+		action: c
+	}), n[4] = o.next, n[5] = o.title, n[6] = c, n[7] = u) : u = n[7], u;
+}
+function m(t) {
+	let i = e(4), { rows: a } = t, o = a === void 0 ? 4 : a, [s, c] = r(!1), u, d;
+	if (i[0] === Symbol.for("react.memo_cache_sentinel") ? (u = () => {
+		let e = setTimeout(() => c(!0), 100);
+		return () => clearTimeout(e);
+	}, d = [], i[0] = u, i[1] = d) : (u = i[0], d = i[1]), n(u, d), !s) return null;
+	let f;
+	return i[2] === o ? f = i[3] : (f = /* @__PURE__ */ l("div", {
+		className: "flex flex-col gap-2",
+		children: Array.from({ length: o }, h)
+	}), i[2] = o, i[3] = f), f;
+}
+function h(e, t) {
+	return /* @__PURE__ */ l(c, { className: "h-14 w-full max-w-2xl" }, t);
+}
+// ../../../apps/apps/screens/file.jsx
+var { app: g, path: _ } = one.params;
+function v() {
+	let t = e(9), r;
+	t[0] === Symbol.for("react.memo_cache_sentinel") ? (r = {
+		app: g,
+		path: _
+	}, t[0] = r) : r = t[0];
+	let i = d("code", r), s;
+	if (t[1] === Symbol.for("react.memo_cache_sentinel") ? (s = [], t[1] = s) : s = t[1], n(y, s), !g || !_) {
+		let e;
+		return t[2] === Symbol.for("react.memo_cache_sentinel") ? (e = /* @__PURE__ */ l(o, { children: "This page isn't here. The link may be old or mistyped." }), t[2] = e) : e = t[2], e;
+	}
+	if (!i.data) {
+		let e;
+		return t[3] !== i.error || t[4] !== i.reload ? (e = /* @__PURE__ */ l("div", {
+			className: "p-4",
+			children: i.error ? /* @__PURE__ */ l(p, {
+				error: i.error,
+				retry: i.reload
+			}) : /* @__PURE__ */ l(m, { rows: 1 })
+		}), t[3] = i.error, t[4] = i.reload, t[5] = e) : e = t[5], e;
+	}
+	let c;
+	return t[6] !== i.data.path || t[7] !== i.data.text ? (c = /* @__PURE__ */ l("div", {
+		className: "p-4",
+		children: /* @__PURE__ */ l(a, {
+			text: i.data.text,
+			path: i.data.path
+		})
+	}), t[6] = i.data.path, t[7] = i.data.text, t[8] = c) : c = t[8], c;
+}
+function y() {
+	one.title((_ || "").split("/").pop() || "Code");
+}
+i(document.getElementById("root")).render(/* @__PURE__ */ l(v, {}));
+</script>

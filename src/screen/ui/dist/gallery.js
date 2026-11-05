@@ -2,7 +2,7 @@ import { c as e } from "react/compiler-runtime";
 import * as t from "react";
 import { createContext as n, useState as r } from "react";
 import { createRoot as i } from "react-dom/client";
-import { AlertDialog as a, AlertDialogAction as o, AlertDialogCancel as s, AlertDialogContent as c, AlertDialogDescription as l, AlertDialogFooter as u, AlertDialogHeader as d, AlertDialogTitle as f, AlertDialogTrigger as ee, AppIcon as p, Badge as m, Button as h, Card as g, CardContent as te, CardDescription as ne, CardFooter as re, CardHeader as ie, CardTitle as ae, Dialog as oe, DialogContent as se, DialogDescription as ce, DialogFooter as le, DialogHeader as ue, DialogTitle as de, DialogTrigger as fe, DropdownMenu as pe, DropdownMenuContent as me, DropdownMenuItem as he, DropdownMenuLabel as ge, DropdownMenuSeparator as _e, DropdownMenuTrigger as ve, Empty as ye, Grid as be, Icon as _, Input as xe, List as Se, ListRow as v, Problem as Ce, Separator as we, Sheet as Te, SheetContent as Ee, SheetDescription as De, SheetHeader as Oe, SheetTitle as ke, SheetTrigger as Ae, Shell as y, Skeleton as je, Split as b, Switch as x, Tabs as Me, TabsContent as Ne, TabsList as Pe, TabsTrigger as Fe, showAlert as S, showMenu as C, showSheet as w } from "@one/ui";
+import { AlertDialog as a, AlertDialogAction as o, AlertDialogCancel as s, AlertDialogContent as c, AlertDialogDescription as l, AlertDialogFooter as u, AlertDialogHeader as d, AlertDialogTitle as f, AlertDialogTrigger as ee, AppIcon as p, Badge as m, Button as h, Card as g, CardContent as te, CardDescription as ne, CardFooter as re, CardHeader as ie, CardTitle as ae, CodeView as oe, CopyButton as se, Dialog as ce, DialogContent as le, DialogDescription as ue, DialogFooter as de, DialogHeader as fe, DialogTitle as pe, DialogTrigger as me, DiffView as he, DropdownMenu as ge, DropdownMenuContent as _e, DropdownMenuItem as ve, DropdownMenuLabel as ye, DropdownMenuSeparator as be, DropdownMenuTrigger as xe, Empty as Se, Grid as Ce, Icon as _, Input as we, List as Te, ListRow as v, Problem as Ee, Separator as De, Sheet as Oe, SheetContent as ke, SheetDescription as Ae, SheetHeader as je, SheetTitle as Me, SheetTrigger as Ne, Shell as y, Skeleton as Pe, Split as b, Switch as x, Tabs as Fe, TabsContent as Ie, TabsList as Le, TabsTrigger as Re, showAlert as S, showMenu as C, showSheet as w } from "@one/ui";
 import { jsx as T, jsxs as E } from "react/jsx-runtime";
 // node_modules/@phosphor-icons/react/dist/defs/DotsThree.es.js
 var D = /* @__PURE__ */ new Map([
@@ -56,26 +56,26 @@ var D = /* @__PURE__ */ new Map([
 });
 j.displayName = "IconBase";
 // node_modules/@phosphor-icons/react/dist/csr/DotsThree.es.js
-var Ie = t.forwardRef((e, n) => /* @__PURE__ */ t.createElement(j, {
+var ze = t.forwardRef((e, n) => /* @__PURE__ */ t.createElement(j, {
 	ref: n,
 	...e,
 	weights: D
 }));
-Ie.displayName = "DotsThreeIcon";
+ze.displayName = "DotsThreeIcon";
 // node_modules/@phosphor-icons/react/dist/csr/MagnifyingGlass.es.js
-var Le = t.forwardRef((e, n) => /* @__PURE__ */ t.createElement(j, {
+var Be = t.forwardRef((e, n) => /* @__PURE__ */ t.createElement(j, {
 	ref: n,
 	...e,
 	weights: O
 }));
-Le.displayName = "MagnifyingGlassIcon";
+Be.displayName = "MagnifyingGlassIcon";
 // node_modules/@phosphor-icons/react/dist/csr/Plus.es.js
-var Re = t.forwardRef((e, n) => /* @__PURE__ */ t.createElement(j, {
+var Ve = t.forwardRef((e, n) => /* @__PURE__ */ t.createElement(j, {
 	ref: n,
 	...e,
 	weights: k
 }));
-Re.displayName = "PlusIcon";
+Ve.displayName = "PlusIcon";
 // gallery/gallery.tsx
 var M = [
 	{
@@ -138,7 +138,32 @@ var M = [
 		icon: "devices",
 		color: "#8e8e93"
 	}
-], N = [
+], He = "// Keeps the last ten answers, newest first.\nimport { createHash } from \"node:crypto\"\n\nconst KEPT = 10\nconst seen = new Map<string, number>()\n\n/** The answer for `key`, or nothing if it's been dropped. */\nexport function recall(key: string, now = Date.now()): string | undefined {\n  const at = seen.get(key)\n  if (at === undefined || now - at > 60_000) return undefined\n  return createHash(\"sha256\").update(key).digest(\"hex\").slice(0, 8)\n}\n\nexport function keep(key: string) {\n  seen.set(key, Date.now())\n  for (const [old] of [...seen].slice(0, -KEPT)) seen.delete(old)\n}\n", Ue = [{
+	a: 8,
+	b: 8,
+	lines: [
+		" export function recall(key: string, now = Date.now()): string | undefined {",
+		"-  const at = seen.get(key)",
+		"-  if (at === undefined) return undefined",
+		"+  const at = seen.get(key)",
+		"+  if (at === undefined || now - at > 60_000) return undefined",
+		"   return createHash(\"sha256\").update(key).digest(\"hex\").slice(0, 8)",
+		" }",
+		" ",
+		"+export function keep(key: string) {",
+		"+  seen.set(key, Date.now())",
+		"+  for (const [old] of [...seen].slice(0, -KEPT)) seen.delete(old)",
+		"+}"
+	]
+}, {
+	a: 40,
+	b: 44,
+	lines: [
+		" const long = \"a line that is long enough that it has to wrap in the narrow one: the quick brown fox jumps over the lazy dog\"",
+		"-const removed = 1",
+		" const kept = 2"
+	]
+}], N = [
 	{
 		id: "anthropic",
 		title: "Anthropic",
@@ -199,7 +224,7 @@ function F(t) {
 		children: r
 	}), n[0] = r, n[1] = i), i;
 }
-function ze() {
+function We() {
 	let t = e(13), [n, i] = r(null), a;
 	t[0] === n ? a = t[1] : (a = N.find((e) => e.id === n), t[0] = n, t[1] = a);
 	let o = a, s = o?.title, c;
@@ -216,7 +241,7 @@ function ze() {
 		onClick: () => i(e.id)
 	}, e.id)), t[3] = n, t[4] = l);
 	let u;
-	t[5] === l ? u = t[6] : (u = /* @__PURE__ */ T(Se, { children: l }), t[5] = l, t[6] = u);
+	t[5] === l ? u = t[6] : (u = /* @__PURE__ */ T(Te, { children: l }), t[5] = l, t[6] = u);
 	let d;
 	t[7] === o ? d = t[8] : (d = o && /* @__PURE__ */ E(g, { children: [
 		/* @__PURE__ */ E(ie, {
@@ -323,7 +348,7 @@ var I = [
 		}))]
 	}
 ];
-function Be() {
+function Ge() {
 	let t = e(8), [n, i] = r("#agent-devices"), a;
 	t[0] === n ? a = t[1] : (a = I.map((e) => ({
 		...e,
@@ -338,7 +363,7 @@ function Be() {
 	let c = s, l;
 	t[4] === Symbol.for("react.memo_cache_sentinel") ? (l = /* @__PURE__ */ T("div", {
 		className: "p-4",
-		children: /* @__PURE__ */ T(be, {
+		children: /* @__PURE__ */ T(Ce, {
 			min: "10rem",
 			children: M.slice(0, 4).map(L)
 		})
@@ -358,7 +383,7 @@ function R(e) {
 	return e.items;
 }
 function z() {
-	let t = e(37), n;
+	let t = e(41), n;
 	t[0] === Symbol.for("react.memo_cache_sentinel") ? (n = /* @__PURE__ */ T("h1", {
 		className: "text-2xl font-semibold tracking-tight",
 		children: "@one/ui"
@@ -391,7 +416,7 @@ function z() {
 	t[2] === Symbol.for("react.memo_cache_sentinel") ? (i = /* @__PURE__ */ E(h, {
 		size: "sm",
 		variant: "outline",
-		children: [/* @__PURE__ */ T(Re, {}), " New Item"]
+		children: [/* @__PURE__ */ T(Ve, {}), " New Item"]
 	}), _ = /* @__PURE__ */ T(h, {
 		size: "lg",
 		children: "Large"
@@ -406,7 +431,7 @@ function z() {
 				size: "icon",
 				variant: "ghost",
 				"aria-label": "More",
-				children: /* @__PURE__ */ T(Ie, { weight: "bold" })
+				children: /* @__PURE__ */ T(ze, { weight: "bold" })
 			}),
 			/* @__PURE__ */ T(h, {
 				disabled: !0,
@@ -439,7 +464,7 @@ function z() {
 		title: "Input",
 		children: /* @__PURE__ */ E("div", {
 			className: "relative max-w-sm",
-			children: [/* @__PURE__ */ T(Le, { className: "pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" }), /* @__PURE__ */ T(xe, {
+			children: [/* @__PURE__ */ T(Be, { className: "pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" }), /* @__PURE__ */ T(we, {
 				placeholder: "Search",
 				className: "pl-8"
 			})]
@@ -448,35 +473,35 @@ function z() {
 	let S;
 	t[7] === Symbol.for("react.memo_cache_sentinel") ? (S = /* @__PURE__ */ T(P, {
 		title: "Tabs",
-		children: /* @__PURE__ */ E(Me, {
+		children: /* @__PURE__ */ E(Fe, {
 			defaultValue: "you",
 			className: "max-w-md",
 			children: [
-				/* @__PURE__ */ E(Pe, { children: [
-					/* @__PURE__ */ T(Fe, {
+				/* @__PURE__ */ E(Le, { children: [
+					/* @__PURE__ */ T(Re, {
 						value: "you",
 						children: "You"
 					}),
-					/* @__PURE__ */ T(Fe, {
+					/* @__PURE__ */ T(Re, {
 						value: "team",
 						children: "Team"
 					}),
-					/* @__PURE__ */ T(Fe, {
+					/* @__PURE__ */ T(Re, {
 						value: "everyone",
 						children: "Everyone"
 					})
 				] }),
-				/* @__PURE__ */ T(Ne, {
+				/* @__PURE__ */ T(Ie, {
 					value: "you",
 					className: "text-sm text-muted-foreground",
 					children: "Yours alone."
 				}),
-				/* @__PURE__ */ T(Ne, {
+				/* @__PURE__ */ T(Ie, {
 					value: "team",
 					className: "text-sm text-muted-foreground",
 					children: "Your team's."
 				}),
-				/* @__PURE__ */ T(Ne, {
+				/* @__PURE__ */ T(Ie, {
 					value: "everyone",
 					className: "text-sm text-muted-foreground",
 					children: "Everyone's."
@@ -521,7 +546,7 @@ function z() {
 		})
 	}), t[11] = O) : O = t[11];
 	let k;
-	t[12] === Symbol.for("react.memo_cache_sentinel") ? (k = /* @__PURE__ */ T(ve, {
+	t[12] === Symbol.for("react.memo_cache_sentinel") ? (k = /* @__PURE__ */ T(xe, {
 		asChild: !0,
 		children: /* @__PURE__ */ T(h, {
 			variant: "outline",
@@ -529,18 +554,18 @@ function z() {
 		})
 	}), t[12] = k) : k = t[12];
 	let A;
-	t[13] === Symbol.for("react.memo_cache_sentinel") ? (A = /* @__PURE__ */ E(pe, { children: [k, /* @__PURE__ */ E(me, { children: [
-		/* @__PURE__ */ T(ge, { children: "Agent Devices" }),
-		/* @__PURE__ */ T(_e, {}),
-		/* @__PURE__ */ T(he, { children: "Open" }),
-		/* @__PURE__ */ T(he, { children: "Rename" }),
-		/* @__PURE__ */ T(he, {
+	t[13] === Symbol.for("react.memo_cache_sentinel") ? (A = /* @__PURE__ */ E(ge, { children: [k, /* @__PURE__ */ E(_e, { children: [
+		/* @__PURE__ */ T(ye, { children: "Agent Devices" }),
+		/* @__PURE__ */ T(be, {}),
+		/* @__PURE__ */ T(ve, { children: "Open" }),
+		/* @__PURE__ */ T(ve, { children: "Rename" }),
+		/* @__PURE__ */ T(ve, {
 			variant: "destructive",
 			children: "Delete"
 		})
 	] })] }), t[13] = A) : A = t[13];
 	let j;
-	t[14] === Symbol.for("react.memo_cache_sentinel") ? (j = /* @__PURE__ */ T(fe, {
+	t[14] === Symbol.for("react.memo_cache_sentinel") ? (j = /* @__PURE__ */ T(me, {
 		asChild: !0,
 		children: /* @__PURE__ */ T(h, {
 			variant: "outline",
@@ -548,12 +573,12 @@ function z() {
 		})
 	}), t[14] = j) : j = t[14];
 	let N, I;
-	t[15] === Symbol.for("react.memo_cache_sentinel") ? (N = /* @__PURE__ */ E(ue, { children: [/* @__PURE__ */ T(de, { children: "Rename" }), /* @__PURE__ */ T(ce, { children: "What it's called on every device." })] }), I = /* @__PURE__ */ T(xe, { defaultValue: "Anthropic" }), t[15] = N, t[16] = I) : (N = t[15], I = t[16]);
+	t[15] === Symbol.for("react.memo_cache_sentinel") ? (N = /* @__PURE__ */ E(fe, { children: [/* @__PURE__ */ T(pe, { children: "Rename" }), /* @__PURE__ */ T(ue, { children: "What it's called on every device." })] }), I = /* @__PURE__ */ T(we, { defaultValue: "Anthropic" }), t[15] = N, t[16] = I) : (N = t[15], I = t[16]);
 	let L;
-	t[17] === Symbol.for("react.memo_cache_sentinel") ? (L = /* @__PURE__ */ E(oe, { children: [j, /* @__PURE__ */ E(se, { children: [
+	t[17] === Symbol.for("react.memo_cache_sentinel") ? (L = /* @__PURE__ */ E(ce, { children: [j, /* @__PURE__ */ E(le, { children: [
 		N,
 		I,
-		/* @__PURE__ */ T(le, { children: /* @__PURE__ */ T(h, { children: "Save" }) })
+		/* @__PURE__ */ T(de, { children: /* @__PURE__ */ T(h, { children: "Save" }) })
 	] })] }), t[17] = L) : L = t[17];
 	let R;
 	t[18] === Symbol.for("react.memo_cache_sentinel") ? (R = /* @__PURE__ */ T(ee, {
@@ -571,7 +596,7 @@ function z() {
 		children: "Delete"
 	})] })] })] }), t[20] = B) : B = t[20];
 	let V;
-	t[21] === Symbol.for("react.memo_cache_sentinel") ? (V = /* @__PURE__ */ T(Ae, {
+	t[21] === Symbol.for("react.memo_cache_sentinel") ? (V = /* @__PURE__ */ T(Ne, {
 		asChild: !0,
 		children: /* @__PURE__ */ T(h, {
 			variant: "outline",
@@ -585,7 +610,7 @@ function z() {
 			A,
 			L,
 			B,
-			/* @__PURE__ */ E(Te, { children: [V, /* @__PURE__ */ T(Ee, { children: /* @__PURE__ */ E(Oe, { children: [/* @__PURE__ */ T(ke, { children: "Anthropic" }), /* @__PURE__ */ T(De, { children: "Key · Used by AI and Models" })] }) })] })
+			/* @__PURE__ */ E(Oe, { children: [V, /* @__PURE__ */ T(ke, { children: /* @__PURE__ */ E(je, { children: [/* @__PURE__ */ T(Me, { children: "Anthropic" }), /* @__PURE__ */ T(Ae, { children: "Key · Used by AI and Models" })] }) })] })
 		] })
 	}), t[22] = H) : H = t[22];
 	let U;
@@ -594,42 +619,42 @@ function z() {
 		children: /* @__PURE__ */ E("div", {
 			className: "flex max-w-sm flex-col gap-3",
 			children: [
-				/* @__PURE__ */ T(je, { className: "h-4 w-3/4" }),
-				/* @__PURE__ */ T(je, { className: "h-4 w-1/2" }),
-				/* @__PURE__ */ T(we, {}),
-				/* @__PURE__ */ T(je, { className: "aspect-[16/10] w-full rounded-xl" })
+				/* @__PURE__ */ T(Pe, { className: "h-4 w-3/4" }),
+				/* @__PURE__ */ T(Pe, { className: "h-4 w-1/2" }),
+				/* @__PURE__ */ T(De, {}),
+				/* @__PURE__ */ T(Pe, { className: "aspect-[16/10] w-full rounded-xl" })
 			]
 		})
 	}), t[23] = U) : U = t[23];
 	let W;
-	t[24] === Symbol.for("react.memo_cache_sentinel") ? (W = /* @__PURE__ */ T(Ce, {
+	t[24] === Symbol.for("react.memo_cache_sentinel") ? (W = /* @__PURE__ */ T(Ee, {
 		title: "Couldn't reach your devices.",
 		text: "Check your connection.",
 		action: {
 			label: "Try Again",
-			run: Ye
+			run: et
 		}
 	}), t[24] = W) : W = t[24];
 	let G;
 	t[25] === Symbol.for("react.memo_cache_sentinel") ? (G = /* @__PURE__ */ E(P, {
 		title: "Problem: on the thing it's about, with the action that fixes it",
-		children: [W, /* @__PURE__ */ T(Ce, {
+		children: [W, /* @__PURE__ */ T(Ee, {
 			warn: !0,
 			title: "None of your devices runs Agent Devices.",
 			text: "It needs a Mac, or a Linux device with Podman.",
 			action: {
 				label: "Open App Store",
-				run: Je
+				run: $e
 			}
 		})]
 	}), t[25] = G) : G = t[25];
 	let K;
 	t[26] === Symbol.for("react.memo_cache_sentinel") ? (K = /* @__PURE__ */ T(P, {
 		title: "Empty: one grey line",
-		children: /* @__PURE__ */ T(g, { children: /* @__PURE__ */ T(ye, { children: "None yet. Agents make one when they need a browser." }) })
+		children: /* @__PURE__ */ T(g, { children: /* @__PURE__ */ T(Se, { children: "None yet. Agents make one when they need a browser." }) })
 	}), t[26] = K) : K = t[26];
 	let q;
-	t[27] === Symbol.for("react.memo_cache_sentinel") ? (q = M.map(qe), t[27] = q) : q = t[27];
+	t[27] === Symbol.for("react.memo_cache_sentinel") ? (q = M.map(Qe), t[27] = q) : q = t[27];
 	let J;
 	t[28] === Symbol.for("react.memo_cache_sentinel") ? (J = /* @__PURE__ */ E(F, { children: [q, /* @__PURE__ */ T(p, { app: {
 		name: "x",
@@ -644,48 +669,90 @@ function z() {
 			"warning-circle-fill",
 			"check-circle-fill",
 			"browsers"
-		].map(Ke) })]
+		].map(Ze) })]
 	}), t[29] = Y) : Y = t[29];
 	let X;
 	t[30] === Symbol.for("react.memo_cache_sentinel") ? (X = /* @__PURE__ */ T(P, {
 		title: "Grid: fills the room, at most 4 across here",
-		children: /* @__PURE__ */ T(be, {
+		children: /* @__PURE__ */ T(Ce, {
 			min: "12rem",
 			max: 4,
-			children: M.slice(0, 6).map(Ge)
+			children: M.slice(0, 6).map(Xe)
 		})
 	}), t[30] = X) : X = t[30];
 	let Z;
 	t[31] === Symbol.for("react.memo_cache_sentinel") ? (Z = /* @__PURE__ */ T(P, {
 		title: "List: rows that stop at a readable width",
-		children: /* @__PURE__ */ T(Se, { children: M.slice(0, 4).map(We) })
+		children: /* @__PURE__ */ T(Te, { children: M.slice(0, 4).map(Ye) })
 	}), t[31] = Z) : Z = t[31];
 	let Q;
 	t[32] === Symbol.for("react.memo_cache_sentinel") ? (Q = /* @__PURE__ */ T(P, {
 		title: "Split: what a list opens shows beside it where there's room, else in a sheet",
-		children: /* @__PURE__ */ T(ze, {})
+		children: /* @__PURE__ */ T(We, {})
 	}), t[32] = Q) : Q = t[32];
-	let Xe;
-	t[33] === Symbol.for("react.memo_cache_sentinel") ? (Xe = { gridTemplateColumns: "minmax(0, 1fr) 22rem" }, t[33] = Xe) : Xe = t[33];
-	let Ze;
-	t[34] === Symbol.for("react.memo_cache_sentinel") ? (Ze = /* @__PURE__ */ T("div", {
+	let tt;
+	t[33] === Symbol.for("react.memo_cache_sentinel") ? (tt = /* @__PURE__ */ E("div", {
+		className: "grid grid-cols-1 items-start gap-4 lg:grid-cols-[minmax(0,1fr)_22rem]",
+		children: [/* @__PURE__ */ T(oe, {
+			text: He,
+			path: "recall.ts"
+		}), /* @__PURE__ */ T(oe, {
+			text: He,
+			path: "recall.ts"
+		})]
+	}), t[33] = tt) : tt = t[33];
+	let nt;
+	t[34] === Symbol.for("react.memo_cache_sentinel") ? (nt = /* @__PURE__ */ T(g, {
+		className: "overflow-hidden py-0",
+		children: /* @__PURE__ */ T(he, {
+			hunks: Ue,
+			path: "recall.ts"
+		})
+	}), t[34] = nt) : nt = t[34];
+	let rt;
+	t[35] === Symbol.for("react.memo_cache_sentinel") ? (rt = /* @__PURE__ */ E("div", {
+		className: "grid grid-cols-1 items-start gap-4 lg:grid-cols-[minmax(0,1fr)_22rem]",
+		children: [nt, /* @__PURE__ */ T(g, {
+			className: "overflow-hidden py-0",
+			children: /* @__PURE__ */ T(he, {
+				hunks: Ue,
+				path: "recall.ts"
+			})
+		})]
+	}), t[35] = rt) : rt = t[35];
+	let it;
+	t[36] === Symbol.for("react.memo_cache_sentinel") ? (it = /* @__PURE__ */ E(P, {
+		title: "CodeView: a file, read only, with Find, Wrap and Copy; DiffView: its changes, side by side where there's room. Each sizes itself by its own width",
+		children: [
+			tt,
+			rt,
+			/* @__PURE__ */ E(F, { children: [/* @__PURE__ */ T(se, { text: "npm run build" }), /* @__PURE__ */ T(se, {
+				text: "9fceb02",
+				label: ""
+			})] })
+		]
+	}), t[36] = it) : it = t[36];
+	let at;
+	t[37] === Symbol.for("react.memo_cache_sentinel") ? (at = { gridTemplateColumns: "minmax(0, 1fr) 22rem" }, t[37] = at) : at = t[37];
+	let ot;
+	t[38] === Symbol.for("react.memo_cache_sentinel") ? (ot = /* @__PURE__ */ T("div", {
 		className: "h-[30rem] overflow-hidden rounded-xl border",
-		children: /* @__PURE__ */ T(Be, {})
-	}), t[34] = Ze) : Ze = t[34];
-	let Qe;
-	t[35] === Symbol.for("react.memo_cache_sentinel") ? (Qe = /* @__PURE__ */ T(P, {
+		children: /* @__PURE__ */ T(Ge, {})
+	}), t[38] = ot) : ot = t[38];
+	let st;
+	t[39] === Symbol.for("react.memo_cache_sentinel") ? (st = /* @__PURE__ */ T(P, {
 		title: "Shell: the window every client shows screens in; where its own room is narrow, the sidebar is a sheet behind the bar's button",
 		children: /* @__PURE__ */ E("div", {
 			className: "grid gap-4",
-			style: Xe,
-			children: [Ze, /* @__PURE__ */ T("div", {
+			style: at,
+			children: [ot, /* @__PURE__ */ T("div", {
 				className: "h-[30rem] overflow-hidden rounded-xl border",
-				children: /* @__PURE__ */ T(Be, {})
+				children: /* @__PURE__ */ T(Ge, {})
 			})]
 		})
-	}), t[35] = Qe) : Qe = t[35];
+	}), t[39] = st) : st = t[39];
 	let $;
-	return t[36] === Symbol.for("react.memo_cache_sentinel") ? ($ = /* @__PURE__ */ E("main", {
+	return t[40] === Symbol.for("react.memo_cache_sentinel") ? ($ = /* @__PURE__ */ E("main", {
 		className: "mx-auto flex flex-col gap-10",
 		children: [
 			n,
@@ -703,35 +770,36 @@ function z() {
 			X,
 			Z,
 			Q,
-			Qe,
+			it,
+			st,
 			/* @__PURE__ */ T(P, {
 				title: "What the window shows over screens when they ask: a menu, an alert, a screen in a sheet",
 				children: /* @__PURE__ */ E(F, { children: [
 					/* @__PURE__ */ T(h, {
 						variant: "outline",
-						onClick: Ue,
+						onClick: Je,
 						children: "Menu"
 					}),
 					/* @__PURE__ */ T(h, {
 						variant: "outline",
-						onClick: He,
+						onClick: qe,
 						children: "Alert"
 					}),
 					/* @__PURE__ */ T(h, {
 						variant: "outline",
-						onClick: Ve,
+						onClick: Ke,
 						children: "Sheet"
 					})
 				] })
 			})
 		]
-	}), t[36] = $) : $ = t[36], $;
+	}), t[40] = $) : $ = t[40], $;
 }
-function Ve() {
+function Ke() {
 	let e = w({ title: "Vault" });
 	e.body.innerHTML = "<p style=\"padding:1rem\">A screen goes here, in its frame.</p>";
 }
-function He() {
+function qe() {
 	return S({
 		title: "Remove Repos?",
 		text: "Its data stays until you erase it.",
@@ -739,7 +807,7 @@ function He() {
 		danger: !0
 	});
 }
-function Ue(e) {
+function Je(e) {
 	let t = e.currentTarget.getBoundingClientRect();
 	C([
 		{
@@ -767,7 +835,7 @@ function Ue(e) {
 		t.height
 	]);
 }
-function We(e) {
+function Ye(e) {
 	return /* @__PURE__ */ T(v, {
 		leading: /* @__PURE__ */ T(p, {
 			app: e,
@@ -782,7 +850,7 @@ function We(e) {
 		}) : void 0
 	}, e.name);
 }
-function Ge(e) {
+function Xe(e) {
 	return /* @__PURE__ */ E("div", {
 		className: "min-w-0",
 		children: [
@@ -804,15 +872,15 @@ function Ge(e) {
 		]
 	}, e.name);
 }
-function Ke(e) {
+function Ze(e) {
 	return /* @__PURE__ */ T(_, {
 		name: e,
 		className: "size-5"
 	}, e);
 }
-function qe(e) {
+function Qe(e) {
 	return /* @__PURE__ */ T(p, { app: e }, e.name);
 }
-function Je() {}
-function Ye() {}
+function $e() {}
+function et() {}
 i(document.getElementById("root")).render(/* @__PURE__ */ T(z, {}));

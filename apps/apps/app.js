@@ -10,6 +10,7 @@ import addHtml from "./dist/add.html" with { type: "text" };
 import sourceHtml from "./dist/source.html" with { type: "text" };
 import activityHtml from "./dist/activity.html" with { type: "text" };
 import codeHtml from "./dist/code.html" with { type: "text" };
+import fileHtml from "./dist/file.html" with { type: "text" };
 
 /// The caller's pages, where apps install: [{ scope, id, name, may, why }]; `why` says who can, in two words, when they
 /// can't.
@@ -336,20 +337,6 @@ export default {
     source: { title: "Source Link", html: sourceHtml },
     activity: { title: "Activity", html: activityHtml },
     code: { title: "Code", html: codeHtml },
-    // A file's code, in the code viewer, which @one/ui has no part for yet.
-    file: {
-      title: "Code",
-      html: `
-<div id="code" style="margin-top: 8px"></div>
-<script>
-one.title((one.params.path || "").split("/").pop() || "Code");
-one.render("#code", async () => {
-  if (!one.params.app || !one.params.path) return one.notFound();
-  const f = await one.call("code", { app: one.params.app, path: one.params.path });
-  setTimeout(() => one.code("#code", f.text, { path: f.path }));
-  return "";
-}, { loading: "Loading code" });
-</script>`,
-    },
+    file: { title: "Code", html: fileHtml },
   },
 };

@@ -5,7 +5,7 @@ import { createRoot } from "react-dom/client"
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter,
   AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger, AppIcon, Badge, Button, Card, CardContent, CardDescription,
-  CardFooter, CardHeader, CardTitle, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+  CardFooter, CardHeader, CardTitle, CodeView, CopyButton, DiffView, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
   DialogTrigger, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator,
   DropdownMenuTrigger, Empty, Grid, Icon, Input, List, ListRow, Problem, Separator, Sheet, SheetContent,
   SheetDescription, SheetHeader, SheetTitle, SheetTrigger, Shell, type ShellSection, showAlert, showMenu, showSheet,
@@ -25,6 +25,47 @@ const apps = [
   { name: "backups", title: "Backups", icon: "hard-drives", color: "#ff9500" },
   { name: "labs", title: "Labs", icon: "flask", color: "#af52de" },
   { name: "devices", title: "Devices", icon: "devices", color: "#8e8e93" },
+]
+
+const sample = `// Keeps the last ten answers, newest first.
+import { createHash } from "node:crypto"
+
+const KEPT = 10
+const seen = new Map<string, number>()
+
+/** The answer for \`key\`, or nothing if it's been dropped. */
+export function recall(key: string, now = Date.now()): string | undefined {
+  const at = seen.get(key)
+  if (at === undefined || now - at > 60_000) return undefined
+  return createHash("sha256").update(key).digest("hex").slice(0, 8)
+}
+
+export function keep(key: string) {
+  seen.set(key, Date.now())
+  for (const [old] of [...seen].slice(0, -KEPT)) seen.delete(old)
+}
+`
+
+const hunks = [
+  { a: 8, b: 8, lines: [
+    " export function recall(key: string, now = Date.now()): string | undefined {",
+    "-  const at = seen.get(key)",
+    "-  if (at === undefined) return undefined",
+    "+  const at = seen.get(key)",
+    "+  if (at === undefined || now - at > 60_000) return undefined",
+    "   return createHash(\"sha256\").update(key).digest(\"hex\").slice(0, 8)",
+    " }",
+    " ",
+    "+export function keep(key: string) {",
+    "+  seen.set(key, Date.now())",
+    "+  for (const [old] of [...seen].slice(0, -KEPT)) seen.delete(old)",
+    "+}",
+  ] },
+  { a: 40, b: 44, lines: [
+    " const long = \"a line that is long enough that it has to wrap in the narrow one: the quick brown fox jumps over the lazy dog\"",
+    "-const removed = 1",
+    " const kept = 2",
+  ] },
 ]
 
 const items = [
@@ -279,6 +320,21 @@ function Gallery() {
 
       <Section title="Split: what a list opens shows beside it where there's room, else in a sheet">
         <Vault />
+      </Section>
+
+      <Section title="CodeView: a file, read only, with Find, Wrap and Copy; DiffView: its changes, side by side where there's room. Each sizes itself by its own width">
+        <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-[minmax(0,1fr)_22rem]">
+          <CodeView text={sample} path="recall.ts" />
+          <CodeView text={sample} path="recall.ts" />
+        </div>
+        <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-[minmax(0,1fr)_22rem]">
+          <Card className="overflow-hidden py-0"><DiffView hunks={hunks} path="recall.ts" /></Card>
+          <Card className="overflow-hidden py-0"><DiffView hunks={hunks} path="recall.ts" /></Card>
+        </div>
+        <Row>
+          <CopyButton text="npm run build" />
+          <CopyButton text="9fceb02" label="" />
+        </Row>
       </Section>
 
       <Section title="Shell: the window every client shows screens in; where its own room is narrow, the sidebar is a sheet behind the bar's button">

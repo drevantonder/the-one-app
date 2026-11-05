@@ -34,6 +34,11 @@
   --sidebar-accent-foreground: oklch(0.205 0 0);
   --sidebar-border: oklch(0.922 0 0);
   --sidebar-ring: oklch(0.708 0 0);
+  /* Code, coloured as GitHub colours it, and a diff's tints. */
+  --hl-kw: #cf222e; --hl-str: #0a3069; --hl-com: #6e7781; --hl-num: #0550ae; --hl-fn: #8250df; --hl-type: #953800;
+  --hl-tag: #116329; --hl-ins: #116329; --hl-del: #82071e;
+  --find: #fae17d;
+  --diff-add: #e6ffec; --diff-add-number: #ccffd8; --diff-del: #ffebe9; --diff-del-number: #ffd7d5;
   color-scheme: light dark;
   /* The shells and the web client zoom pages to fit the old kit's 17px text to the platform's; this kit is sized for
      the web as it is. A shell's zoom for the person's own text size (iPhone's, Android's) is set on the element, so
@@ -69,6 +74,11 @@
     --sidebar-accent-foreground: oklch(0.985 0 0);
     --sidebar-border: oklch(1 0 0 / 10%);
     --sidebar-ring: oklch(0.556 0 0);
+    --hl-kw: #ff7b72; --hl-str: #a5d6ff; --hl-com: #8b949e; --hl-num: #79c0ff; --hl-fn: #d2a8ff; --hl-type: #ffa657;
+    --hl-tag: #7ee787; --hl-ins: #7ee787; --hl-del: #ffa198;
+    --find: #9e6a03;
+    --diff-add: rgb(46 160 67 / 0.15); --diff-add-number: rgb(63 185 80 / 0.3);
+    --diff-del: rgb(248 81 73 / 0.15); --diff-del-number: rgb(248 81 73 / 0.3);
   }
 }
 
@@ -84,6 +94,18 @@
     -webkit-tap-highlight-color: transparent;
   }
 }
+
+/* What CodeView and DiffView colour code with: the kinds lib/highlight.ts finds. */
+.hl-kw { color: var(--hl-kw); }
+.hl-str { color: var(--hl-str); }
+.hl-com { color: var(--hl-com); font-style: italic; }
+.hl-num, .hl-lit, .hl-prop, .hl-attr, .hl-var { color: var(--hl-num); }
+.hl-fn { color: var(--hl-fn); }
+.hl-type { color: var(--hl-type); }
+.hl-tag { color: var(--hl-tag); }
+.hl-ins { color: var(--hl-ins); }
+.hl-del { color: var(--hl-del); }
+.hl-strong { font-weight: 600; }
 
 /* Radix's scroll lock, while a sheet or dialog is open, zeroes the body's padding: keep it, so what's under doesn't
    jump to the window's edge. Unlayered and more specific than its rule. */
