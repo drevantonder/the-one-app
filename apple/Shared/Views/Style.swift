@@ -210,7 +210,7 @@ typealias PlatformImage = NSImage
 typealias PlatformImage = UIImage
 #endif
 
-/// The kit's colours (src/screen/kit.css), light then dark.
+/// The old kit's colours, light then dark.
 enum Kit {
     static let bg = Color(light: 0xffffff, dark: 0x141414)
     static let card = Color(light: 0xf4f4f4, dark: 0x222222)
@@ -264,7 +264,7 @@ extension View {
     }
 }
 
-/// A person: their initials on a colour picked by their id, the same one app screens draw (`one.avatar`).
+/// A person: their initials on a colour picked by their id.
 struct Avatar: View {
     var id: String
     var name: String

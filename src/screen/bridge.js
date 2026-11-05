@@ -1,7 +1,7 @@
 // The bridge every app screen gets as `one`. Inside a shell, the shell answers it (WKWebView's
 // `one` message handler, or `__oneShell.postMessage` where another web view puts one, as Android's and Windows' do); in a sandboxed frame (the web client's, a chat's), the page
-// holding the frame answers its messages. A screen never knows which. The web client's own page loads it too, for the
-// kit, answering it itself (`__one.host`).
+// holding the frame answers its messages. A screen never knows which. The web client's own page loads it too,
+// answering it itself (`__one.host`).
 (() => {
   const ctx = window.__one;
   const handlers = { changed: [] };
@@ -52,7 +52,7 @@
   // or refuses it by name. Anything a person touches natively is one of these: menus,
   // alerts, sheets, files, scanning, links.
   const messages = ["call", "open", "close", "title", "menu", "alert", "save", "preview", "copy", "link", "scan", "vault", "request",
-    "icons", "icon", "haptic", "api", "signOut", "appearance", "device", "notify", "cache", "kept", "traces", "developer"];
+    "icons", "haptic", "api", "signOut", "appearance", "device", "notify", "cache", "kept", "traces", "developer"];
 
   async function host(message) {
     if (!messages.includes(message.type)) throw new Error(`No such message: ${message.type}`);
@@ -70,7 +70,8 @@
   }
 
   // Icons are Phosphor's (vendor/phosphor), the same in every shell: each a path on a 256-point grid, filled in the
-  // text's colour. The host has them all; a screen asks it for the ones it draws, once each, and fills them in.
+  // text's colour. The host has them all; a screen draws `<svg data-icon="<name>">` (@one/ui's Icon), and the bridge
+  // asks it for the ones drawn, once each, and fills them in.
   const paths = {};
   let wanted = null;
   function want(name) {
@@ -89,21 +90,12 @@
     }
     wanted.add(name);
   }
-  // An icon drawn before its path came; one that isn't in the set gives way to its `or`, if it has one.
+  // An icon drawn before its path came.
   function fill(el) {
     const d = paths[el.dataset.icon];
     if (d) el.innerHTML = `<path d="${d}"/>`;
-    else if (d === "" && el.dataset.or) el.replaceWith(el.dataset.or);
     else if (d === undefined) want(el.dataset.icon);
   }
-  function glyph(name, cls, or) {
-    if (!paths[name]) want(name);
-    const d = paths[name];
-    if (d === "" && or) return one.esc(or);
-    return `<svg class="${cls}" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true" data-icon="${one.esc(name)}"${or ? ` data-or="${one.esc(or)}"` : ""}>${d ? `<path d="${d}"/>` : ""}</svg>`;
-  }
-
-  const colors = ["#5e5ce6", "#ff9f0a", "#30b0c7", "#ff375f", "#34c759", "#af52de", "#0a84ff", "#a2845e"];
 
   // What a call answered last time: the client keeps the last answer of each call that only reads (`reads: true`),
   // sealed on its device for its person, and gives it (`kept`, with when it was answered) to a screen that asks that
@@ -298,8 +290,6 @@
     traces: () => host({ type: "traces" }).catch(() => null),
     device: () => host({ type: "device" }),
     notify: () => host({ type: "notify" }),
-    // A Phosphor icon by its name ("magnifying-glass", "check-circle-fill"), at the text's size and colour.
-    icon: (name, cls = "") => glyph(name, `i ${cls}`.trim()),
     esc: (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]),
     // How long ago: short ("5 min", "Tue", "3 Oct") for tight rows, or with `{ long: true }` for where there's room
     // ("5 minutes ago", "3 days ago", "2 years ago").
@@ -325,44 +315,8 @@
       const d = new Date(ms);
       return s < 7 * 86400 ? d.toLocaleDateString(undefined, { weekday: "short" }) : d.toLocaleDateString(undefined, { day: "numeric", month: "short" });
     },
-    // An app's icon, `{ name, title, icon, color, image, image_kind }` as catalog() gives it (`image` a data URL, or the
-    // address's `/v1/images/<name>` as a window's list names it): the shells' tile, drawn in
-    // by the shell; elsewhere its picture, or the filled one of its icon (else its first letter) on its colour.
-    // `image_kind` "icon" is a finished app icon, drawn edge to edge; otherwise the picture is a logo, inset on white.
-    // An app's picture and colour are its own, so only a picture's address (as a CSS string) and a colour's hex reach
-    // the style.
-    appIcon(app, size = 36) {
-      size = Number(size) || 36;
-      const letter = String(app.title || app.name || "?")[0].toUpperCase();
-      const image = /^(https:|data:image\/|\/v1\/images\/[0-9a-f]+$)/.test(app.image || "") ? String(app.image) : "", color = /^#[0-9a-f]{3,8}$/i.test(app.color || "") ? app.color : "";
-      const face = app.icon && !shell ? glyph(`${app.icon}-fill`, "", letter).replace("<svg ", `<svg width="${Math.round(size * 0.5)}" height="${Math.round(size * 0.5)}" `) : one.esc(letter);
-      const look = image && !shell ? `;background-image:url(${JSON.stringify(image)})` : color ? `;--tile:${color}` : "";
-      const logo = image && !shell && app.image_kind !== "icon" ? " logo" : "";
-      return `<span class="app-icon${look.includes("url(") ? " drawn" : ""}${logo}" style="--size:${size}px${one.esc(look)}" data-icon="${one.esc(app.icon || "")}" data-seed="${one.esc(app.name)}" data-color="${color}" data-image="${one.esc(image)}" data-kind="${one.esc(app.image_kind || "")}" data-size="${size}">${face}</span>`;
-    },
-    // A steady colour and initials for someone, from their id and name.
-    avatar(id, name) {
-      let h = 0;
-      for (const c of String(id)) h = (h * 31 + c.charCodeAt(0)) >>> 0;
-      const initials = String(name || "?").split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase();
-      return `<div class="avatar" style="background:${colors[h % colors.length]}">${one.esc(initials)}</div>`;
-    },
   };
 
   new MutationObserver(() => document.querySelectorAll("svg[data-icon]:empty").forEach(fill))
     .observe(document.documentElement, { childList: true, subtree: true });
-
-  // Inside a shell, app icons are drawn by it, once per icon, seed and size.
-  if (shell) {
-    const drawn = {};
-    const draw = (el) => {
-      const { icon, seed, color, image, kind, size } = el.dataset;
-      const key = `${icon}|${seed}|${color}|${image.length}|${kind}|${size}`;
-      (drawn[key] ||= host({ type: "icon", icon, seed, color, image, kind, size: Number(size) }).catch(() => null)).then((url) => {
-        if (url) el.style.backgroundImage = `url(${url})`, el.classList.add("drawn");
-      });
-    };
-    new MutationObserver(() => document.querySelectorAll(".app-icon:not([data-asked])").forEach((el) => (el.dataset.asked = "1", draw(el))))
-      .observe(document.documentElement, { childList: true, subtree: true });
-  }
 })();

@@ -1,4 +1,4 @@
-//! A screen's page, an app's as every node serves it, or a client's own as every client makes it: the design kit and the bridge (`src/screen/`), what the
+//! A screen's page, an app's as every node serves it, or a client's own as every client makes it: `@one/ui` and the bridge (`src/screen/`), what the
 //! screen is told (`window.__one`), and the screen's own HTML.
 //!
 //! The clients' own screens (the person's pages, a page's Accounts, a request for a Vault item, Settings) are drawn
@@ -12,11 +12,8 @@
 /// web client's, at the address, and a chat's view, by `screens_icons`.
 pub const ICONS: &[u8] = include_bytes!("../vendor/phosphor/icons.json");
 
-/// The old kit's scripts and the bridge, in the order a page has them: each path under `src/screen/` and its text.
-const KIT: &[(&str, &str)] = &[
-    ("bridge.js", include_str!("screen/bridge.js")),
-    ("kit.js", include_str!("screen/kit.js")),
-];
+/// The bridge, `one` (its path under `src/screen/` and its text).
+const BRIDGE: (&str, &str) = ("bridge.js", include_str!("screen/bridge.js"));
 
 /// What a screen's HTML has in it to use `@one/ui` (`src/screen/ui/`: React, and shadcn's components): its page then
 /// has an import map giving `react`, `react-dom/client`, `@one/ui` and the rest (`UI_IMPORTS`), and ui.js, which they
@@ -41,7 +38,7 @@ const UI_IMPORTS: &str = include_str!("screen/ui/dist/importmap.json");
 
 /// A screen's page: `context` is `{ app, screen, params, me, scope, config }` (a Settings screen has no app or scope), `body` its HTML.
 /// A client's own (`own`) acts as the person, and draws what apps say, so it runs only its own scripts: they carry this
-/// page's nonce, and its policy refuses every other, inline event handlers too. `linked`, the kit and bridge are links
+/// page's nonce, and its policy refuses every other, inline event handlers too. `linked`, `@one/ui` and the bridge are links
 /// to the address's files (`/screen/<path>?v=`, named by content as the gateway names them), which the web client
 /// already has, rather than in the page.
 pub fn page(context: &serde_json::Value, body: &str, own: bool, linked: bool) -> String {
@@ -73,11 +70,9 @@ fn page_with(context: &serde_json::Value, body: &str, nonce: Option<String>, lin
     let ui = body.contains(UI);
     let tag = &script[..script.len() - 1];
     let head = if linked {
-        let scripts: String = KIT.iter().map(|(path, text)| format!("{tag} src=\"{}\"></script>", named(path, text))).collect();
-        format!("<link rel=\"stylesheet\" href=\"{}\">{script}window.__one={context};</script>{scripts}", named(UI_CSS.0, UI_CSS.1))
+        format!("<link rel=\"stylesheet\" href=\"{}\">{script}window.__one={context};</script>{tag} src=\"{}\"></script>", named(UI_CSS.0, UI_CSS.1), named(BRIDGE.0, BRIDGE.1))
     } else {
-        let bridge: String = KIT.iter().map(|(_, text)| *text).collect();
-        format!("<style>{}</style>{script}window.__one={context};{bridge}</script>", UI_CSS.1)
+        format!("<style>{}</style>{script}window.__one={context};{}</script>", UI_CSS.1, BRIDGE.1)
     };
     // The import map before the screen's own modules, and ui.js, which runs before them, as they're modules.
     let head = match (ui, linked) {
@@ -91,7 +86,7 @@ fn page_with(context: &serde_json::Value, body: &str, nonce: Option<String>, lin
     )
 }
 
-/// A kit file's address, named by its content as the gateway names the files it serves (src/cloudflare/workers.rs).
+/// A file's address, named by its content as the gateway names the files it serves (src/cloudflare/workers.rs).
 fn named(path: &str, text: &str) -> String {
     use sha2::Digest;
     format!("/screen/{path}?v={}", &data_encoding::HEXLOWER.encode(&sha2::Sha256::digest(text.as_bytes()))[..16])
@@ -156,7 +151,7 @@ pub const TEMPLATE_PARAMS: &str = "\"__params__\"";
 
 /// A client's own screen's page for the web client, which its address serves as `screens/<name>.html` (src/cloudflare/
 /// services.rs): `client_page`, but for `TEMPLATE_NONCE` and `TEMPLATE_PARAMS`, which the web client fills in, and
-/// linking the kit, the bridge and `@one/ui`, which it writes in from its own (cloudflare/web/web.js).
+/// linking the bridge and `@one/ui`, which it writes in from its own (cloudflare/web/web.js).
 pub fn client_template(name: &str) -> String {
     page_with(&client_context(name, &TEMPLATE_PARAMS.trim_matches('"').into()), client_screen(name), Some(TEMPLATE_NONCE.into()), true)
 }

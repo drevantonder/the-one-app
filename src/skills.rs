@@ -156,8 +156,8 @@ pub fn deeper(apps: &[Value]) -> Vec<Skill> {
         })
         .collect();
     // The build skill carries the code that says what an app gets, as it is in this build, so an agent with only MCP
-    // reads it here rather than on the web: what a call's ctx has, a screen's one, @one/ui (its widget nodes too), the
-    // old kit, and the app with a React screen to copy.
+    // reads it here rather than on the web: what a call's ctx has, a screen's one, @one/ui (its widget nodes too), and
+    // the app with a React screen to copy.
     if let Some(build) = skills.iter_mut().find(|s| s.name.ends_with("-build")) {
         build.files = [
             ("ctx.js", include_str!("runtime/shim.js")),
@@ -169,7 +169,6 @@ pub fn deeper(apps: &[Value]) -> Vec<Skill> {
             ("ui/icon.tsx", include_str!("screen/ui/src/components/icon.tsx")),
             ("ui/app-icon.tsx", include_str!("screen/ui/src/components/app-icon.tsx")),
             ("ui/widget.tsx", include_str!("screen/ui/src/components/widget.tsx")),
-            ("kit.js", include_str!("screen/kit.js")),
             ("react/app.js", include_str!("../skills/build/react/app.js")),
             ("react/screens/main.jsx", include_str!("../skills/build/react/screens/main.jsx")),
         ]

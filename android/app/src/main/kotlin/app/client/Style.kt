@@ -62,7 +62,7 @@ import kotlinx.serialization.json.jsonPrimitive
 
 // The One App's look, on Android: the kit's colours, the iPhone's type sizes, and the phone's own tint.
 
-/** The kit's colours (src/screen/kit.css), light then dark. */
+/** The old kit's colours, light then dark. */
 object Kit {
     val bg = 0xffffff to 0x141414
     val card = 0xf4f4f4 to 0x222222

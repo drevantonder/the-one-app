@@ -1251,7 +1251,7 @@ async fn fill(State(node): State<Node>, Path((app, id)): Path<(String, u64)>, Js
 struct ScreenQuery {
     params: Option<String>,
     scope: Option<String>,
-    /// The kit and bridge as the address's files (`crate::screen::page`), for the web client, which has them.
+    /// `@one/ui` and the bridge as the address's files (`crate::screen::page`), for the web client, which has them.
     linked: Option<bool>,
 }
 
