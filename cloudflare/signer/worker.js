@@ -11,7 +11,10 @@
 // An item is a name, or a database's steps from one position to another (`{ steps: prefix, from, to }`), so a node
 // asks for the positions it reads or writes next in one trip. Any endpoint of the install may read, list and create
 // (only if absent: `If-None-Match: *` is signed in); a `…/newest` is replaced only by its ETag (`If-Match`); only an
-// admin's endpoint removes. `confirm` says whether each object is there with that ETag, `newest` what each
+// admin's endpoint removes. A step at position n of a database or log (`<prefix>/<n>`, n > 1) is created only once the
+// one before it is there, or the copy of the steps up to it (`<prefix>/copy/<n-1>`), and a copy only once its step
+// is: so no endpoint without the keys leaves a gap in the steps, nor plants one past their end. Others asked for in
+// the same trip are left out, and asked for again when they're next. `confirm` says whether each object is there with that ETag, `newest` what each
 // database's newest hint says (`<prefix>/newest`, never sealed), and `get` each object's bytes, sealed as they are, for
 // browsers, which can't read the bucket: all open nothing. It knows
 // nobody's scopes and checks none: everything in the bucket is sealed, so what it hands out opens nothing without keys.
@@ -92,6 +95,39 @@ async function newest(env, bucket, prefixes) {
   return out;
 }
 
+/// Whether each of `names` is in the bucket: by the R2 binding where there is one, else by HEAD.
+async function present(env, bucket, names) {
+  const heads = env.R2 || !names.length ? null : (await bucketUrls(bucket, { head: names }, 60)).head;
+  const out = new Map();
+  await Promise.all(names.map(async (name) => {
+    if (env.R2) return void out.set(name, (await env.R2.head(name)) !== null);
+    const r = await fetch(heads[name], { method: "HEAD" });
+    if (!r.ok && r.status !== 404) throw new Error(`the bucket said ${r.status}`);
+    out.set(name, r.ok);
+  }));
+  return out;
+}
+
+/// What must be in the bucket before `name` is created: the step before a step (or the copy up to it), and a copy's
+/// own step. None for anything else, or a database's first step.
+function after(name) {
+  const step = /^(.+)\/(\d{12})$/.exec(name);
+  if (!step) return null;
+  const [, prefix, n] = step;
+  const at = Number(n);
+  const pad = (i) => String(i).padStart(12, "0");
+  const copy = /^(.+)\/copy$/.exec(prefix);
+  if (copy) return [`${copy[1]}/${n}`];
+  return at > 1 ? [`${prefix}/${pad(at - 1)}`, `${prefix}/copy/${pad(at - 1)}`] : null;
+}
+
+/// Of `names` to create, those whose turn it is (`after`): → them, in their order.
+async function due(env, bucket, names) {
+  const needs = names.map(after);
+  const there = await present(env, bucket, [...new Set(needs.flat().filter(Boolean))]);
+  return names.filter((_, i) => !needs[i] || needs[i].some((n) => there.get(n)));
+}
+
 /// Each object's bytes, by its name, base64url: null for one that isn't there.
 async function got(env, bucket, names) {
   const reads = env.R2 ? null : (await bucketUrls(bucket, { read: names }, 60)).read;
@@ -142,7 +178,9 @@ async function urls(request, env) {
   }
   const bucket = JSON.parse(env.BUCKET);
   const until = Date.now() + EXPIRES * 1000;
-  const out = await bucketUrls(bucket, { read, head, create, replace, remove, list: pages }, EXPIRES);
+  const creates = await due(env, bucket, create);
+  if (create.length && !creates.length) fail(409, "a step is written only once the one before it is there");
+  const out = await bucketUrls(bucket, { read, head, create: creates, replace, remove, list: pages }, EXPIRES);
   return { ...out, confirm: confirms.length ? await confirm(env, bucket, confirms) : {}, newest: hints.length ? await newest(env, bucket, hints) : {}, get: gets.length ? await got(env, bucket, gets) : {}, until };
 }
 

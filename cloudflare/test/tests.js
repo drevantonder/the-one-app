@@ -86,6 +86,7 @@ export default {
     await fails(async () => verify(await sign({ iss: "https://a", sub: "u", exp }, "k2"), { keys: [jwk] }, "https://a"), "a token from an unknown key");
     await remoteMcpClientsSecrets();
     await browsersReadStepsFromTheBucket();
+    await stepsAreCreatedInTurn();
     await pushRequests();
     const token = await sign({ iss: "https://a", sub: "u", exp });
     const forged = token.slice(0, token.lastIndexOf(".") + 1) + b64u.encode(new Uint8Array(64));
@@ -113,6 +114,28 @@ async function browsersReadStepsFromTheBucket() {
   equal([b64u.decode(got["global/node/scope/000000000001"]).join(), b64u.decode(got["global/node/scope/000000000002"]).join(), got["global/node/scope/000000000003"]], ["1,2,3", "4", null], "each step's bytes as the bucket holds them, and null past the last");
   equal((await ask({ get: [{ steps: "global/node/scope", from: 1, to: 33 }] })).status, 400, "at most 32 at once");
   equal((await ask({ get: ["global/node/scope/000000000001"] }, { ...env, RELAY: { allowed: async () => null } }, random(32))).status, 403, "only the install's devices");
+}
+
+/// The URL signer creates a step only once the one before it is there (or the copy up to it), and a copy only once its
+/// step is: an endpoint without the keys can't leave a gap in a database's or log's steps, nor plant one past their
+/// end. A writer that asks for the positions after its own in the same trip, as an older one does, is given its own.
+async function stepsAreCreatedInTurn() {
+  const there = new Set(["s/a/node/log/000000000001", "s/a/node/log/000000000002", "s/a/db/copy/000000000005"]);
+  const R2 = { head: async (name) => (there.has(name) ? {} : null) };
+  const device = random(32);
+  const env = { R2, BUCKET: JSON.stringify({ endpoint: "https://s3.test", bucket: "b", region: "auto", key_id: "k", secret: "s" }), RELAY: { allowed: async () => ({}) } };
+  const ask = async (fields) => {
+    const body = await signedRequest(device, await ed25519Public(device), "one/urls", fields, Date.now());
+    return signer.fetch(new Request("https://one.test/urls", { method: "POST", body: JSON.stringify(body) }), env);
+  };
+  const created = async (create) => {
+    const r = await ask({ create });
+    return r.ok ? Object.keys((await r.json()).create).sort() : r.status;
+  };
+  equal(await created([{ steps: "s/a/node/log", from: 3, to: 6 }]), ["s/a/node/log/000000000003"], "the next step, and none after it yet");
+  equal(await created(["s/a/node/log/000000000004"]), 409, "not one past the end");
+  equal(await created(["s/a/node/scope/000000000001", "s/a/db/000000000006", "s/a/node/log/000000000003.sig", "s/a/blobs/x"]), ["s/a/blobs/x", "s/a/db/000000000006", "s/a/node/log/000000000003.sig", "s/a/node/scope/000000000001"], "a first step, one after its copy, a signature and anything else");
+  equal(await created(["s/a/node/log/copy/000000000002", "s/a/node/log/copy/000000000003"]), ["s/a/node/log/copy/000000000002"], "a copy only after its step");
 }
 
 /// A remote MCP client's device secret opens only with its current refresh token or a live access token; a refresh
