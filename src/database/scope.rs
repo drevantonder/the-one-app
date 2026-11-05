@@ -354,6 +354,7 @@ fn install(db: &Connection, m: &Members) -> Result<()> {
 /// Who holds which role on what, in `permissions`' words, as replay says now: only people still in, and devices
 /// still listed, hold any. Which devices run a scope's calls is a `runner` row for each, as `Members::runs_for`
 /// says: for a group or `global` that follows from its admins, so it's worked out here rather than kept as a rule.
+/// The serverless node, which an admin's setting names, is the install's admins' device.
 fn relations(db: &Connection, m: &Members) -> Result<()> {
     let add = |subject: &str, relation: &str, object: &str| db.execute("INSERT OR IGNORE INTO relations VALUES (?, ?, ?, NULL)", params![subject, relation, object]);
     for u in m.users.values().filter(|u| !u.removed) {
@@ -371,6 +372,9 @@ fn relations(db: &Connection, m: &Members) -> Result<()> {
             let users = if d.shared { format!("{}#member", permissions::INSTALL) } else { person(&d.user) };
             add(&users, "user", &service(&d.key))?;
         }
+    }
+    if let Some(key) = m.serverless() {
+        add(&format!("{}#admin", permissions::INSTALL), "admin", &device(&key))?;
     }
     let runners = m.computes().map(|c| c.key).chain(m.serverless());
     for key in runners {
