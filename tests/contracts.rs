@@ -170,6 +170,62 @@ fn the_workers_and_nodes_agree_on_keys_and_seals() {
         assert!(Entry::decode_step(&b("header"), &b("signature"), &b("body")).is_ok() && Entry::from_json(&out["signed"]).is_err(), "Rust checks it as a step, never an entry");
     }
 
+    // Who's who as steps (src/database/steps.rs), as a browser reads it: the node's key sealed under an epoch as a
+    // browser that makes one seals it, a step a browser signed and the freeze, sealed as a node puts them in the bucket
+    // and passed on as `GET /v1/steps/global` gives them (src/node/steps.rs `global_steps`), opened and applied by the
+    // client (its WebAssembly's `Global`, cloudflare/web/net-worker.js); and from a Welcome, sign-in's word passed on as
+    // JavaScript reads it, with no entry but the genesis.
+    {
+        use ed25519_dalek::SigningKey;
+        use one::database::steps;
+        use one::entry::{Entry, Ext, Scope, pack};
+        use one::keys::Endpoint;
+        use one::members::{self, Kind};
+        use one_client::members::Global;
+        const ANDRE: &str = "a000000000000001";
+        let browser_seed: [u8; 32] = rand::random();
+        let (mac, browser) = (SigningKey::from_bytes(&rand::random()), SigningKey::from_bytes(&browser_seed));
+        let (epoch, app): ([u8; 32], [u8; 32]) = (rand::random(), rand::random());
+        let ext = |epoch: u32| Ext { log: "global".into(), time: 0, user: ANDRE.into(), epoch, previous: vec![] };
+        let g = Entry::create(&mac, ext(0), None, members::genesis("Home", ANDRE, "Andre", &Endpoint::of(&mac), "mac", &[Kind::Client], &[7; 32], &one::keys::epoch_hash(&epoch)));
+        let listed = Entry::create(&mac, ext(1), Some(g.head()), members::device(&Endpoint::of(&browser), ANDRE, "browser", &[Kind::Client], None));
+        let (content, copy) = steps::freeze(Some(g.hash()), &[g.clone(), listed.clone()], &Default::default(), Default::default(), 0).unwrap();
+        let freeze = steps::sign(&mac, &Scope::Global, 1, ANDRE, 1, 0, content).unwrap();
+        let (_, _, body) = steps::sign(&browser, &Scope::Global, 2, ANDRE, 1, 5, members::setting("greeting", Some("hi"))).unwrap().encode();
+        let fields = json!({ "log": "global", "at": 2, "time": 5, "user": ANDRE, "epoch": 1 });
+        let out = js(json!({ "op": "step", "seed": B64U.encode(&browser_seed), "fields": fields, "body": String::from_utf8(body).unwrap() }));
+        let signed = Entry::decode_step(&b(&out["signed"]["header"]), &b(&out["signed"]["signature"]), &b(&out["signed"]["body"])).unwrap();
+        let sealed_app = b(&js(json!({ "op": "sealAppKey", "scopeKey": B64U.encode(&epoch), "app": members::APP, "key": B64U.encode(&app) }))["sealed"]);
+        let keys: one::db::Keys = [(1, one::cloudflare::database_key(&app, one::log::NAME))].into();
+        let prefix = steps::prefix("global");
+        let sealed = |at: u64, step: &Entry, copy: Option<&[u8]>| {
+            let name = one::db::step_name(&prefix, at);
+            json!({ "at": at, "sealed": B64U.encode(&one::log::seal(&keys, &name, &steps::encode(step, copy)).unwrap()) })
+        };
+        let (s1, s2) = (sealed(1, &freeze, Some(&copy)), sealed(2, &signed, None));
+        let junk = json!({ "at": 3, "sealed": B64U.encode(&one::log::seal(&[(1, rand::random())].into(), &one::db::step_name(&prefix, 3), b"not a step").unwrap()) });
+        let (epochs, apps) = (std::collections::BTreeMap::from([(1, epoch)]), std::collections::BTreeMap::from([(1, sealed_app)]));
+        let mut client = Global::new(Some(g.hash()));
+        client.add(&pack(&[&g, &listed])).unwrap();
+        client.add_sealed(&json!({ "at": 3, "steps": [s1, s2, junk] }), &epochs, &apps).unwrap();
+        assert!(client.frozen() && client.at() == 3, "frozen, the browser's step taken and the junk passed over");
+        let who = client.who().unwrap();
+        assert_eq!(who.setting("greeting").as_deref(), Some("hi"), "the step a browser signed counts");
+        // Welcomed: from the freeze and the steps up to the Welcome's, as a node passes them on with `?welcome=`.
+        let welcome = steps::Welcome { freeze: 1, at: 2, hash: one::db::state_hash(who.conn()).unwrap() };
+        let said = js(json!({ "op": "joining", "asked": [], "said": [[200, { "approved": true, "genesis": g.hash().to_hex(), "welcome": welcome.to_string() }]] }));
+        let given = json!({ "welcome": said["said"][0]["welcome"], "freeze": s1, "at": 2, "steps": [s2] });
+        let mut new = Global::new(Some(g.hash()));
+        new.add_sealed(&given, &epochs, &apps).unwrap();
+        assert!(new.frozen() && new.at() == 2, "a new device starts where it was welcomed, with no entry but its genesis");
+        assert_eq!(one::db::state_hash(new.who().unwrap().conn()).unwrap(), welcome.hash);
+        let mut other = given.clone();
+        other["welcome"] = json!(steps::Welcome { hash: "0".repeat(64), ..welcome.clone() }.to_string());
+        let mut new = Global::new(Some(g.hash()));
+        new.add_sealed(&other, &epochs, &apps).unwrap();
+        assert!(!new.frozen(), "nor from a Welcome its steps don't come to");
+    }
+
     // Member entries' content (src/members.rs), as the web client builds what a browser signs (cloudflare/web/members.js).
     {
         use one::entry::Scope;
