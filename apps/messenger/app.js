@@ -5,6 +5,8 @@
 // the browser tools give; its database keeps which profiles are linked and which device each one has borrowed, and a
 // schedule gives back those left idle.
 
+import settings from "./dist/settings.html" with { type: "text" };
+
 const HOME = "https://www.messenger.com/";
 /// How long a borrowed device is kept without a call.
 const IDLE = 5 * 60 * 1000;
@@ -779,110 +781,6 @@ export default {
   },
 
   screens: {
-    settings: {
-      title: "Messenger",
-      html: `
-<div id="list"></div>
-<div id="connect"></div>
-<div id="needs"></div>
-<script>
-// Messenger's accounts are browser profiles (Vault items of type Browser profile): adding one picks a profile, or makes one, and opens
-// messenger.com in it to sign in.
-const list = document.getElementById("list"), connect = document.getElementById("connect");
-let accounts = [], asked = 0, picking = false, nowhere = false;
-// Asked for as the screen opens, so Add Account has them at once.
-const profiles = () => one.call("_profiles").then((r) => (r || []).map((p) => p.profile), () => []);
-let known = profiles();
-// Signed out here and maybe not yet on the device, so a redraw meanwhile doesn't bring them back.
-const leaving = new Set(), failed = {};
-function draw(fetch) {
-  return one.render(list, async () => {
-    if (fetch) {
-      const n = ++asked, got = await one.call("accounts");
-      if (n === asked) accounts = got;
-    }
-    const all = accounts.filter((a) => !leaving.has(a.account));
-    // With nowhere to sign in, what's missing shows instead (below), with the way to add it.
-    if (!all.length) return nowhere || picking ? "" : one.empty("Link Messenger to a browser profile signed in to messenger.com, and your agents can read your chats and, when you ask, send.", { label: "Add Account", run: () => pick() });
-    const needs = all.filter((a) => !a.ok).map((a) => one.problem({ title: a.account + " needs signing in", text: "Sign it out, then add it again.", warn: true })).join("");
-    return needs + '<h2 class="section">Browser profiles</h2><div class="list">' + all.map((a, i) => {
-      const line = failed[a.account] || (a.ok ? (i ? "" : "Used first") : "Sign in again");
-      const bad = !a.ok || failed[a.account];
-      const sub = line ? \`<div class="sub\${bad ? " warn" : ""}">\${bad ? one.icon("warning-circle-fill") : ""}\${one.esc(line)}</div>\` : "";
-      return \`<div class="row plain"><div class="main"><div class="title">\${one.esc(a.account)}</div>\${sub}</div><button class="button plain" data-out="\${one.esc(a.account)}">Sign Out</button></div>\`;
-    }).join("") + (nowhere || picking ? "" : '<button class="row plain add" id="add"><div class="main"><div class="title">Add Account</div></div></button>') + "</div>";
-  }, { skeleton: 1 });
-}
-list.onclick = async (e) => {
-  const add = e.target.closest("#add");
-  if (add) return pick(add);
-  const account = e.target.closest("[data-out]")?.dataset.out;
-  if (!account) return;
-  leaving.add(account);
-  delete failed[account];
-  draw(false);
-  try {
-    await one.call("sign_out", { account });
-    accounts = accounts.filter((a) => a.account !== account);
-  } catch (err) {
-    failed[account] = one.plain(err).title;
-  }
-  leaving.delete(account);
-  draw(!failed[account]);
-};
-const stop = () => { picking = false; connect.innerHTML = ""; };
-
-// Picks a profile not linked yet, or names a new one.
-async function pick(b) {
-  const back = b && one.busy(b);
-  const [all] = await Promise.all([known, loaded]);
-  known = profiles();
-  back?.();
-  picking = true;
-  draw(false);
-  const free = [...new Set(all)].filter((p) => !accounts.some((a) => a.account === p));
-  connect.innerHTML = \`<h2 class="section">Browser profile</h2><div class="list">
-      <label class="row plain"><div class="main">Profile</div><select class="field" id="profile" aria-label="Browser profile">\${free.map((p) => \`<option>\${one.esc(p)}</option>\`).join("")}<option value="">New profile…</option></select></label>
-      <label class="row plain" id="named" \${free.length ? 'style="display:none"' : ""}><input class="field" id="name" placeholder="Its name, like Personal or Work" aria-label="Its name" autocapitalize="words" autocorrect="off"></label></div>
-    <p class="footer">Each has its own sign-ins, like Personal or Work.</p>
-    <div class="actions"><button class="button primary" id="go">Sign In to Messenger</button></div><div id="err"></div>\`;
-  const select = document.getElementById("profile"), name = document.getElementById("name"), named = document.getElementById("named");
-  select.onchange = () => (named.style.display = select.value ? "none" : "");
-  document.getElementById("go").onclick = async (e) => {
-    const profile = select.value || name.value.trim();
-    if (!profile) return name.focus();
-    const back = one.busy(e.currentTarget, "Opening a device…");
-    try { signingIn(await one.call("sign_in", { profile })); }
-    catch (err) { back(); document.getElementById("err").innerHTML = one.problem({ title: one.plain(err).title, action: { label: "Try Again", run: () => document.getElementById("go").click() } }); }
-  };
-}
-
-function signingIn(r) {
-  connect.innerHTML = \`<h2 class="section">Sign In</h2><div class="list">
-      <a class="row" href="\${one.esc(r.url)}"><div class="main"><div class="title">Open the device</div><div class="sub">Its browser is on messenger.com, in the \${one.esc(r.profile)} profile.</div></div><span class="chev">›</span></a>
-      <div class="row plain"><div class="main">Sign in there, and tick Keep me signed in.</div></div></div>
-    <p class="footer">Come back and press Done.</p>
-    <div class="actions"><button class="button primary" id="done">Done</button></div><div id="err"></div>\`;
-  document.getElementById("done").onclick = async (e) => {
-    const back = one.busy(e.currentTarget, "Saving…");
-    try { await one.call("_save", { profile: r.profile }); }
-    catch (err) { back(); document.getElementById("err").innerHTML = one.problem({ title: one.plain(err).title, action: { label: "Try Again", run: () => document.getElementById("done").click() } }); return; }
-    stop();
-    await draw(true);
-  };
-}
-
-one.on("changed", () => draw(true));
-const loaded = draw(true);
-if (one.params.add) loaded.then(() => pick());
-one.call("_running").then(({ devices }) => {
-  if (devices.length) return;
-  nowhere = true;
-  draw(false);
-  document.getElementById("needs").innerHTML = one.problem({ title: "Messenger needs Agent Devices.", text: "Add Agent Devices to one of your devices in the App Store, then sign in here.", warn: true,
-    action: { label: "Open App Store", run: () => one.open("app", { app: "agent-devices" }, "apps") } });
-}, () => {});
-</script>`,
-    },
+    settings: { title: "Messenger", html: settings },
   },
 };

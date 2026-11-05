@@ -1,0 +1,403 @@
+<meta name="@one/ui">
+<style>/*! tailwindcss v4.3.4 | MIT License | https://tailwindcss.com */
+@layer properties{@supports (((-webkit-hyphens:none)) and (not (margin-trim:block))) or ((-moz-orient:inline) and (not (color:rgb(from red r g b)))){*,:before,:after,::backdrop{--tw-font-weight:initial;--tw-outline-style:solid}}}@layer theme,base,components;@layer utilities{.mx-auto{margin-inline:auto}.flex{display:flex}.inline-flex{display:inline-flex}.table{display:table}.h-14{height:calc(var(--spacing,.25rem) * 14)}.w-full{width:100%}.max-w-2xl{max-width:var(--container-2xl,42rem)}.max-w-md{max-width:var(--container-md,28rem)}.flex-col{flex-direction:column}.items-center{align-items:center}.gap-1{gap:var(--spacing,.25rem)}.gap-2{gap:calc(var(--spacing,.25rem) * 2)}.gap-6{gap:calc(var(--spacing,.25rem) * 6)}.self-start{align-self:flex-start}.p-4{padding:calc(var(--spacing,.25rem) * 4)}.px-3{padding-inline:calc(var(--spacing,.25rem) * 3)}.py-2{padding-block:calc(var(--spacing,.25rem) * 2)}.py-2\.5{padding-block:calc(var(--spacing,.25rem) * 2.5)}.text-sm{font-size:var(--text-sm,.875rem);line-height:var(--tw-leading,var(--text-sm--line-height,calc(1.25 / .875)))}.font-medium{--tw-font-weight:var(--font-weight-medium,500);font-weight:var(--font-weight-medium,500)}.text-destructive{color:var(--destructive)}.text-muted-foreground{color:var(--muted-foreground)}.text-warning{color:var(--warning)}.outline{outline-style:var(--tw-outline-style);outline-width:1px}@media (hover:hover){.hover\:text-destructive:hover{color:var(--destructive)}}}@property --tw-font-weight{syntax:"*";inherits:false}@property --tw-outline-style{syntax:"*";inherits:false;initial-value:solid}
+/*$vite$:1*/</style>
+<div id="root"></div>
+<script type="module">import { c as e } from "react/compiler-runtime";
+import { useCallback as t, useEffect as n, useRef as r, useState as i } from "react";
+import { createRoot as a } from "react-dom/client";
+import { Button as o, DropdownMenu as s, DropdownMenuContent as c, DropdownMenuRadioGroup as l, DropdownMenuRadioItem as u, DropdownMenuTrigger as d, Empty as f, Icon as p, Input as m, List as h, ListRow as g, Problem as _, Skeleton as v, Spinner as y } from "@one/ui";
+import { jsx as b, jsxs as x } from "react/jsx-runtime";
+// ../../../../../.t3/worktrees/the-one-app/t3-5444e590/apps/messenger/lib/accounts.jsx
+var S = (e) => one.plain(e).title.replace(/(\. Try again)?\.$/, "");
+function C() {
+	let [e, a] = i(null), [o, s] = i(null), [c, l] = i([]), [u, d] = i({}), f = r(0), p = r(!1), m = t(() => {
+		let e = ++f.current;
+		return one.call("accounts").then((t) => {
+			e === f.current && (p.current = !0, a(t), s(null));
+		}, (e) => !p.current && s(one.plain(e)));
+	}, []);
+	return n(() => {
+		one.on("changed", m), m();
+	}, [m]), {
+		accounts: e && e.filter((e) => !c.includes(e.account)),
+		problem: o,
+		retry: m,
+		failed: u,
+		signOut: async (e, t = {}) => {
+			let n = e.account;
+			l((e) => [...e, n]), d(({ [n]: e, ...t }) => t);
+			let r = !0;
+			try {
+				await one.call("sign_out", {
+					account: n,
+					...t
+				}), a((e) => e.filter((e) => e.account !== n));
+			} catch (e) {
+				r = !1, d((t) => ({
+					...t,
+					[n]: S(e)
+				}));
+			}
+			l((e) => e.filter((e) => e !== n)), r && m();
+		},
+		reload: m
+	};
+}
+function w(t) {
+	let n = e(20), { title: r, accounts: i, failed: a, line: s, signOut: c, confirm: l, children: u } = t, d;
+	n[0] !== l || n[1] !== c ? (d = async (e) => (!l || await l(e)) && c(e), n[0] = l, n[1] = c, n[2] = d) : d = n[2];
+	let f = d, m;
+	n[3] === r ? m = n[4] : (m = /* @__PURE__ */ b("h2", {
+		className: "text-sm font-medium text-muted-foreground",
+		children: r
+	}), n[3] = r, n[4] = m);
+	let _;
+	if (n[5] !== i || n[6] !== a || n[7] !== s || n[8] !== f) {
+		let e;
+		n[10] !== a || n[11] !== s || n[12] !== f ? (e = (e, t) => {
+			let n = a[e.account] ? {
+				text: a[e.account],
+				warn: !0
+			} : s(e, t);
+			return /* @__PURE__ */ b(g, {
+				title: e.account,
+				sub: n && (n.warn ? /* @__PURE__ */ x("span", {
+					className: "inline-flex items-center gap-1 text-warning",
+					children: [/* @__PURE__ */ b(p, { name: "warning-circle-fill" }), n.text]
+				}) : n.text),
+				trailing: /* @__PURE__ */ b(o, {
+					variant: "ghost",
+					size: "sm",
+					className: "text-destructive hover:text-destructive",
+					onClick: () => f(e),
+					children: "Sign Out"
+				})
+			}, e.account);
+		}, n[10] = a, n[11] = s, n[12] = f, n[13] = e) : e = n[13], _ = i.map(e), n[5] = i, n[6] = a, n[7] = s, n[8] = f, n[9] = _;
+	} else _ = n[9];
+	let v;
+	n[14] === _ ? v = n[15] : (v = /* @__PURE__ */ b(h, { children: _ }), n[14] = _, n[15] = v);
+	let y;
+	return n[16] !== u || n[17] !== m || n[18] !== v ? (y = /* @__PURE__ */ x("section", {
+		className: "flex flex-col gap-2",
+		children: [
+			m,
+			v,
+			u
+		]
+	}), n[16] = u, n[17] = m, n[18] = v, n[19] = y) : y = n[19], y;
+}
+function T(t) {
+	let n = e(6), { problem: r, retry: i } = t, a;
+	n[0] === i ? a = n[1] : (a = {
+		label: "Try Again",
+		run: i
+	}, n[0] = i, n[1] = a);
+	let o;
+	return n[2] !== r.next || n[3] !== r.title || n[4] !== a ? (o = /* @__PURE__ */ b(_, {
+		title: r.title,
+		text: r.next,
+		action: a
+	}), n[2] = r.next, n[3] = r.title, n[4] = a, n[5] = o) : o = n[5], o;
+}
+function E({ run: e, children: t, ...n }) {
+	let [r, a] = i(!1);
+	return /* @__PURE__ */ x(o, {
+		...n,
+		disabled: r || n.disabled,
+		onClick: async () => {
+			a(!0);
+			try {
+				await e();
+			} finally {
+				a(!1);
+			}
+		},
+		children: [r && /* @__PURE__ */ b(y, {}), t]
+	});
+}
+function D(t) {
+	let r = e(4), { rows: a } = t, o = a === void 0 ? 2 : a, [s, c] = i(!1), l, u;
+	if (r[0] === Symbol.for("react.memo_cache_sentinel") ? (l = () => {
+		let e = setTimeout(() => c(!0), 100);
+		return () => clearTimeout(e);
+	}, u = [], r[0] = l, r[1] = u) : (l = r[0], u = r[1]), n(l, u), !s) return null;
+	let d;
+	return r[2] === o ? d = r[3] : (d = /* @__PURE__ */ b("div", {
+		className: "flex flex-col gap-2",
+		children: Array.from({ length: o }, O)
+	}), r[2] = o, r[3] = d), d;
+}
+function O(e, t) {
+	return /* @__PURE__ */ b(v, { className: "h-14 w-full max-w-2xl" }, t);
+}
+function k(t) {
+	let n = e(2), { children: r } = t, i;
+	return n[0] === r ? i = n[1] : (i = /* @__PURE__ */ b("p", {
+		className: "text-sm text-muted-foreground",
+		children: r
+	}), n[0] = r, n[1] = i), i;
+}
+function A(t) {
+	let n = e(2), { children: r } = t, i;
+	return n[0] === r ? i = n[1] : (i = /* @__PURE__ */ b("div", {
+		className: "px-3 py-2.5 text-sm",
+		children: r
+	}), n[0] = r, n[1] = i), i;
+}
+// ../../../../../.t3/worktrees/the-one-app/t3-5444e590/apps/messenger/lib/choose.jsx
+function j(t) {
+	let n = e(18), { label: r, options: i, value: a, onChange: u } = t, f;
+	if (n[0] !== i || n[1] !== a) {
+		let e;
+		n[3] === a ? e = n[4] : (e = (e) => e.value === a, n[3] = a, n[4] = e), f = i.find(e), n[0] = i, n[1] = a, n[2] = f;
+	} else f = n[2];
+	let m = f?.label ?? "", h;
+	n[5] === Symbol.for("react.memo_cache_sentinel") ? (h = /* @__PURE__ */ b(p, { name: "caret-down" }), n[5] = h) : h = n[5];
+	let g;
+	n[6] !== r || n[7] !== m ? (g = /* @__PURE__ */ b(d, {
+		asChild: !0,
+		children: /* @__PURE__ */ x(o, {
+			variant: "outline",
+			size: "sm",
+			"aria-label": r,
+			children: [m, h]
+		})
+	}), n[6] = r, n[7] = m, n[8] = g) : g = n[8];
+	let _;
+	n[9] === i ? _ = n[10] : (_ = i.map(M), n[9] = i, n[10] = _);
+	let v;
+	n[11] !== u || n[12] !== _ || n[13] !== a ? (v = /* @__PURE__ */ b(c, {
+		align: "end",
+		children: /* @__PURE__ */ b(l, {
+			value: a,
+			onValueChange: u,
+			children: _
+		})
+	}), n[11] = u, n[12] = _, n[13] = a, n[14] = v) : v = n[14];
+	let y;
+	return n[15] !== g || n[16] !== v ? (y = /* @__PURE__ */ x(s, { children: [g, v] }), n[15] = g, n[16] = v, n[17] = y) : y = n[17], y;
+}
+function M(e) {
+	return /* @__PURE__ */ b(u, {
+		value: e.value,
+		children: e.label
+	}, e.value);
+}
+// ../../../../../.t3/worktrees/the-one-app/t3-5444e590/apps/messenger/screens/settings.jsx
+var N = "Link Messenger to a browser profile signed in to messenger.com, and your agents can read your chats and, when you ask, send.", P = "\0", F = () => one.call("_profiles").then((e) => (e || []).map((e) => e.profile), () => []);
+function I(t) {
+	let n = e(27), { free: a, onSigningIn: o } = t, [s, c] = i(a[0] ?? P), [l, u] = i(""), [d, f] = i(null), p = r(null), v;
+	n[0] !== s || n[1] !== l || n[2] !== o ? (v = async () => {
+		let e = s === P ? l.trim() : s;
+		if (!e) return p.current?.focus();
+		f(null);
+		try {
+			o(await one.call("sign_in", { profile: e }));
+		} catch (e) {
+			let t = e;
+			f(one.plain(t).title);
+		}
+	}, n[0] = s, n[1] = l, n[2] = o, n[3] = v) : v = n[3];
+	let y = v, S;
+	n[4] === Symbol.for("react.memo_cache_sentinel") ? (S = /* @__PURE__ */ b("h2", {
+		className: "text-sm font-medium text-muted-foreground",
+		children: "Browser profile"
+	}), n[4] = S) : S = n[4];
+	let C;
+	if (n[5] !== a) {
+		let e;
+		n[7] === Symbol.for("react.memo_cache_sentinel") ? (e = {
+			value: P,
+			label: "New profile…"
+		}, n[7] = e) : e = n[7], C = [...a.map(L), e], n[5] = a, n[6] = C;
+	} else C = n[6];
+	let w;
+	n[8] !== s || n[9] !== C ? (w = /* @__PURE__ */ b(g, {
+		title: "Profile",
+		trailing: /* @__PURE__ */ b(j, {
+			label: "Browser profile",
+			value: s,
+			onChange: c,
+			options: C
+		})
+	}), n[8] = s, n[9] = C, n[10] = w) : w = n[10];
+	let T;
+	n[11] !== s || n[12] !== l ? (T = s === P && /* @__PURE__ */ b("div", {
+		className: "px-3 py-2.5",
+		children: /* @__PURE__ */ b(m, {
+			ref: p,
+			placeholder: "Its name, like Personal or Work",
+			"aria-label": "Its name",
+			autoCapitalize: "words",
+			autoCorrect: "off",
+			value: l,
+			onChange: (e) => u(e.target.value)
+		})
+	}), n[11] = s, n[12] = l, n[13] = T) : T = n[13];
+	let D;
+	n[14] !== w || n[15] !== T ? (D = /* @__PURE__ */ x(h, { children: [w, T] }), n[14] = w, n[15] = T, n[16] = D) : D = n[16];
+	let O;
+	n[17] === Symbol.for("react.memo_cache_sentinel") ? (O = /* @__PURE__ */ b(k, { children: "Each has its own sign-ins, like Personal or Work." }), n[17] = O) : O = n[17];
+	let A;
+	n[18] !== y || n[19] !== d ? (A = d && /* @__PURE__ */ b(_, {
+		title: d,
+		action: {
+			label: "Try Again",
+			run: y
+		}
+	}), n[18] = y, n[19] = d, n[20] = A) : A = n[20];
+	let M;
+	n[21] === y ? M = n[22] : (M = /* @__PURE__ */ b(E, {
+		className: "self-start",
+		run: y,
+		children: "Sign In to Messenger"
+	}), n[21] = y, n[22] = M);
+	let N;
+	return n[23] !== D || n[24] !== A || n[25] !== M ? (N = /* @__PURE__ */ x("section", {
+		className: "flex flex-col gap-2",
+		children: [
+			S,
+			D,
+			O,
+			A,
+			M
+		]
+	}), n[23] = D, n[24] = A, n[25] = M, n[26] = N) : N = n[26], N;
+}
+function L(e) {
+	return {
+		value: e,
+		label: e
+	};
+}
+function R(t) {
+	let n = e(22), { link: r, onDone: a } = t, [o, s] = i(null), c;
+	n[0] !== r.profile || n[1] !== a ? (c = async () => {
+		s(null);
+		try {
+			await one.call("_save", { profile: r.profile });
+		} catch (e) {
+			let t = e;
+			return s(one.plain(t).title);
+		}
+		a();
+	}, n[0] = r.profile, n[1] = a, n[2] = c) : c = n[2];
+	let l = c, u;
+	n[3] === Symbol.for("react.memo_cache_sentinel") ? (u = /* @__PURE__ */ b("h2", {
+		className: "text-sm font-medium text-muted-foreground",
+		children: "Sign In"
+	}), n[3] = u) : u = n[3];
+	let d;
+	n[4] === r.url ? d = n[5] : (d = /* @__PURE__ */ b(g, {
+		title: "Open the device",
+		onClick: () => one.link(r.url)
+	}), n[4] = r.url, n[5] = d);
+	let f = `Its browser is on messenger.com, in the ${r.profile} profile.`, p;
+	n[6] === f ? p = n[7] : (p = /* @__PURE__ */ b(A, { children: f }), n[6] = f, n[7] = p);
+	let m;
+	n[8] === Symbol.for("react.memo_cache_sentinel") ? (m = /* @__PURE__ */ b(A, { children: "Sign in there, and tick Keep me signed in." }), n[8] = m) : m = n[8];
+	let v;
+	n[9] !== d || n[10] !== p ? (v = /* @__PURE__ */ x(h, { children: [
+		d,
+		p,
+		m
+	] }), n[9] = d, n[10] = p, n[11] = v) : v = n[11];
+	let y;
+	n[12] === Symbol.for("react.memo_cache_sentinel") ? (y = /* @__PURE__ */ b(k, { children: "Come back and press Done." }), n[12] = y) : y = n[12];
+	let S;
+	n[13] !== l || n[14] !== o ? (S = o && /* @__PURE__ */ b(_, {
+		title: o,
+		action: {
+			label: "Try Again",
+			run: l
+		}
+	}), n[13] = l, n[14] = o, n[15] = S) : S = n[15];
+	let C;
+	n[16] === l ? C = n[17] : (C = /* @__PURE__ */ b(E, {
+		className: "self-start",
+		run: l,
+		children: "Done"
+	}), n[16] = l, n[17] = C);
+	let w;
+	return n[18] !== C || n[19] !== v || n[20] !== S ? (w = /* @__PURE__ */ x("section", {
+		className: "flex flex-col gap-2",
+		children: [
+			u,
+			v,
+			y,
+			S,
+			C
+		]
+	}), n[18] = C, n[19] = v, n[20] = S, n[21] = w) : w = n[21], w;
+}
+function z() {
+	let { accounts: e, problem: t, retry: a, failed: o, signOut: s, reload: c } = C(), [l, u] = i(null), [d, p] = i(!1), m = r(null);
+	m.current ||= F();
+	let h = async () => {
+		let e = await m.current;
+		m.current = F(), u({ picking: [...new Set(e)] });
+	}, g = () => (u(null), c());
+	if (n(() => {
+		one.params.add && m.current.then(() => h()), one.call("_running").then(({ devices: e }) => e.length || p(!0), () => {});
+	}, []), t && !e) return /* @__PURE__ */ b(T, {
+		problem: t,
+		retry: a
+	});
+	if (!e) return /* @__PURE__ */ b(D, {});
+	let v = !!l, y = e.filter((e) => !e.ok);
+	return /* @__PURE__ */ x("div", {
+		className: "flex flex-col gap-6",
+		children: [
+			d && /* @__PURE__ */ b(_, {
+				warn: !0,
+				title: "Messenger needs Agent Devices.",
+				text: "Add Agent Devices to one of your devices in the App Store, then sign in here.",
+				action: {
+					label: "Open App Store",
+					run: () => one.open("app", { app: "agent-devices" }, "apps")
+				}
+			}),
+			!e.length && !d && !v && /* @__PURE__ */ b(f, {
+				className: "mx-auto max-w-md",
+				action: {
+					label: "Add Account",
+					run: h
+				},
+				children: N
+			}),
+			y.map((e) => /* @__PURE__ */ b(_, {
+				warn: !0,
+				title: e.account + " needs signing in",
+				text: "Sign it out, then add it again."
+			}, e.account)),
+			e.length > 0 && /* @__PURE__ */ b(w, {
+				title: "Browser profiles",
+				accounts: e,
+				failed: o,
+				signOut: s,
+				line: (e, t) => e.ok ? t ? null : { text: "Used first" } : {
+					text: "Sign in again",
+					warn: !0
+				},
+				children: !d && !v && /* @__PURE__ */ b(E, {
+					variant: "secondary",
+					className: "self-start",
+					run: h,
+					children: "Add Account"
+				})
+			}),
+			l?.picking && /* @__PURE__ */ b(I, {
+				free: l.picking.filter((t) => !e.some((e) => e.account === t)),
+				onSigningIn: (e) => u({ link: e })
+			}),
+			l?.link && /* @__PURE__ */ b(R, {
+				link: l.link,
+				onDone: g
+			})
+		]
+	});
+}
+a(document.getElementById("root")).render(/* @__PURE__ */ b(z, {}));
+</script>
