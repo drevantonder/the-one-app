@@ -71,17 +71,19 @@ const TRIES: usize = 50;
 
 /// Whether `tidy` deletes the steps the newest copy covers. Off until phase 2's gate, when every device runs R1: an
 /// older reader whose copy doesn't hold reads every step from the first, and would read what's left as the whole
-/// database. The one place to switch it on.
-pub const DELETE_COVERED_STEPS: bool = false;
+/// database. On with phase 2's switch (`database::switch::SWITCH`), which waits for every device to read it.
+pub const DELETE_COVERED_STEPS: bool = crate::database::switch::SWITCH;
 
 /// Whether a writer signs a step in it (`SIGNED`), one create-only write, rather than beside it (`<n>.sig`), a second
 /// that may never come, and so whether steps are refused from where it first does (`refused`). Off until phase 2's
 /// gate, when every device runs R1, which reads both: an older reader passes over a kind of step it doesn't know, and
-/// would lose what's written in one. The one place to switch it on, or `Db::sign_in_steps` for one database.
-pub const SIGNED_STEPS: bool = false;
+/// would lose what's written in one. On with phase 2's switch (`database::switch::SWITCH`), which waits for every
+/// device to read it; or `Db::sign_in_steps` for one database.
+pub const SIGNED_STEPS: bool = crate::database::switch::SWITCH;
 
-/// How long an app database's steps are kept before `tidy` may delete them, by when the bucket wrote them. How long
-/// app data's history is kept isn't decided yet: until it is, as long as the scope database's, the plan's default.
+/// How long an app database's steps are kept before `tidy` may delete them, by when the bucket wrote them. Andre
+/// decides how long app data's history is kept (90 days is suggested); until he does, as long as the scope database's,
+/// the plan's default for that, 7 years. A scope database's steps (`database::steps`) are never deleted yet.
 pub const KEEP_STEPS_FOR: u64 = 7 * 365 * DAY;
 
 /// How long the newest copy that holds has been in the bucket before `tidy` deletes the copies before it: a reader that
