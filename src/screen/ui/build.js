@@ -1,9 +1,12 @@
 // After Vite's builds (package.json's build): the import map every page that opts in gets (src/screen.rs), the
-// gallery's page, and the sources' hash, which `cargo test` checks the built files were made from.
+// gallery's page, the client's own Settings screens written in React (../settings/<name>.jsx into
+// ../settings/dist/<name>.html, built as an app's screens are), and the sources' hash, which `cargo test` checks the
+// built files were made from.
 import { createHash } from "node:crypto"
 import { readdirSync, readFileSync, writeFileSync } from "node:fs"
 import path from "node:path"
 import vm from "node:vm"
+import { buildScreens } from "./screens.mjs"
 import { shared } from "./vite.config.ts"
 
 const here = import.meta.dirname
@@ -38,8 +41,12 @@ writeFileSync(dist("gallery.html"), `<!doctype html>
 </head><body><div id="root"></div><script type="module" src="gallery.js"></script></body></html>
 `)
 
-// What the built files were made from: every source file, by path and content, in order.
-const sources = []
+// The client's own Settings screens in React, opted in to @one/ui with src/screen.rs's tag (its UI).
+const settings = path.join(here, "..", "settings")
+await buildScreens(settings, path.join(settings, "dist"), settings, `<meta name="@one/ui">`, shared)
+
+// What the built files were made from: every source file, by path and content, in order, and the Settings screens'.
+const sources = readdirSync(settings).filter((f) => /\.[jt]sx$/.test(f)).map((f) => `../settings/${f}`)
 const walk = (dir) => {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     if (entry.name.startsWith(".") || ["node_modules", "dist"].includes(entry.name)) continue

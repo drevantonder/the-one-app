@@ -105,7 +105,8 @@ const CLIENT_SCREENS: &[(&str, &str)] = &[
     ("services", concat!("<script>", include_str!("screen/home.js"), "</script>", include_str!("screen/services.html"))),
     ("request", include_str!("screen/request.html")),
     ("appearance", include_str!("screen/settings/appearance.html")),
-    ("vault", include_str!("screen/settings/vault.html")),
+    // Written in React (settings/<name>.jsx), built by @one/ui's build into settings/dist/.
+    ("vault", include_str!("screen/settings/dist/vault.html")),
     ("requests", include_str!("screen/settings/requests.html")),
     ("groups", include_str!("screen/settings/groups.html")),
     ("users", include_str!("screen/settings/users.html")),
@@ -155,8 +156,9 @@ pub fn client_template(name: &str) -> String {
 mod tests {
     use sha2::Digest;
 
-    /// The new kit's built files are made from its sources as they are (src/screen/ui/build.js hashes them the same
-    /// way), so a change to a component reaches devices only built: run `bun run build` in src/screen/ui/.
+    /// @one/ui's built files, and the Settings screens written in React, are made from their sources as they are
+    /// (src/screen/ui/build.js hashes them the same way), so a change to either reaches devices only built: run
+    /// `bun run build` in src/screen/ui/.
     #[test]
     fn ui_is_built_from_its_sources() {
         fn walk(root: &std::path::Path, dir: &std::path::Path, out: &mut Vec<String>) {
@@ -176,6 +178,14 @@ mod tests {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/screen/ui");
         let mut files = Vec::new();
         walk(&root, &root, &mut files);
+        // The Settings screens written in React, which the same build makes.
+        for entry in std::fs::read_dir(root.join("../settings")).unwrap().flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.ends_with(".jsx") || name.ends_with(".tsx") {
+                assert!(super::client_screen(name.rsplit_once('.').unwrap().0).starts_with(super::UI), "{name} isn't built in as its screen");
+                files.push(format!("../settings/{name}"));
+            }
+        }
         files.sort();
         let mut hash = sha2::Sha256::new();
         for file in &files {
@@ -185,7 +195,7 @@ mod tests {
             hash.update([0]);
         }
         let built = std::fs::read_to_string(root.join("dist/sources.txt")).unwrap();
-        assert_eq!(data_encoding::HEXLOWER.encode(&hash.finalize()), built.trim(), "src/screen/ui changed since it was built: run `bun run build` there");
+        assert_eq!(data_encoding::HEXLOWER.encode(&hash.finalize()), built.trim(), "src/screen/ui or a Settings screen in React changed since it was built: run `bun run build` in src/screen/ui");
         // ui.js goes into pages as it is, inside a script.
         assert!(!super::UI_JS.1.to_ascii_lowercase().contains("</script"), "ui.js can't be put in a page's script");
     }

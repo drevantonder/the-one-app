@@ -164,6 +164,8 @@ fn screens(dir: &Path) -> Result<()> {
     let shared: Vec<&String> = shared["imports"].as_object().context("@one/ui's import map has no imports")?.keys().collect();
     let out = std::process::Command::new(&runtime)
         .arg(tools.join("screens.mjs"))
+        .arg(dir.canonicalize()?.join("screens"))
+        .arg(dir.canonicalize()?.join("dist"))
         .arg(dir.canonicalize()?)
         .arg(crate::screen::UI)
         .args(shared)
@@ -178,14 +180,15 @@ fn screens(dir: &Path) -> Result<()> {
 }
 
 /// The tools that build React screens, as @one/ui is built with them (its package.json, and bun.lock where Bun installs
-/// them), installed by `install` once per version of them, beside `screens.mjs` and the theme's names it imports.
+/// them), installed by `install` once per version of them, beside @one/ui's `screens.mjs`, which builds them, and the
+/// theme's names it imports, where they are in @one/ui.
 fn screen_tools(installer: &Path, install: &[&str]) -> Result<PathBuf> {
     use sha2::Digest;
     let files: [(&str, &str); 4] = [
         ("package.json", include_str!("screen/ui/package.json")),
         ("bun.lock", include_str!("screen/ui/bun.lock")),
-        ("theme.css", include_str!("screen/ui/src/theme.css")),
-        ("screens.mjs", include_str!("deploy/screens.mjs")),
+        ("src/theme.css", include_str!("screen/ui/src/theme.css")),
+        ("screens.mjs", include_str!("screen/ui/screens.mjs")),
     ];
     let mut hash = sha2::Sha256::new();
     for (path, text) in files {
@@ -201,6 +204,7 @@ fn screen_tools(installer: &Path, install: &[&str]) -> Result<PathBuf> {
     std::fs::create_dir_all(&part)?;
     let installed = (|| {
         for (path, text) in files {
+            std::fs::create_dir_all(part.join(path).parent().unwrap_or(&part))?;
             std::fs::write(part.join(path), text)?;
         }
         let out = std::process::Command::new(installer).args(install).current_dir(&part).env("DO_NOT_TRACK", "1").output().with_context(|| format!("couldn't run {}", installer.display()))?;

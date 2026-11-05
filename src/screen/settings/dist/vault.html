@@ -1,0 +1,954 @@
+<meta name="@one/ui">
+<style>/*! tailwindcss v4.3.4 | MIT License | https://tailwindcss.com */
+@layer properties{@supports (((-webkit-hyphens:none)) and (not (margin-trim:block))) or ((-moz-orient:inline) and (not (color:rgb(from red r g b)))){*,:before,:after,::backdrop{--tw-translate-x:0;--tw-translate-y:0;--tw-translate-z:0;--tw-rotate-x:initial;--tw-rotate-y:initial;--tw-rotate-z:initial;--tw-skew-x:initial;--tw-skew-y:initial;--tw-space-y-reverse:0;--tw-border-style:solid;--tw-font-weight:initial;--tw-tracking:initial;--tw-ordinal:initial;--tw-slashed-zero:initial;--tw-numeric-figure:initial;--tw-numeric-spacing:initial;--tw-numeric-fraction:initial;--tw-shadow:0 0 #0000;--tw-shadow-color:initial;--tw-shadow-alpha:100%;--tw-inset-shadow:0 0 #0000;--tw-inset-shadow-color:initial;--tw-inset-shadow-alpha:100%;--tw-ring-color:initial;--tw-ring-shadow:0 0 #0000;--tw-inset-ring-color:initial;--tw-inset-ring-shadow:0 0 #0000;--tw-ring-inset:initial;--tw-ring-offset-width:0px;--tw-ring-offset-color:#fff;--tw-ring-offset-shadow:0 0 #0000;--tw-outline-style:solid;--tw-ease:initial}}}@layer theme,base,components;@layer utilities{.pointer-events-none{pointer-events:none}.absolute{position:absolute}.fixed{position:fixed}.relative{position:relative}.top-1{top:var(--spacing,.25rem)}.top-1\/2{top:50%}.right-2{right:calc(var(--spacing,.25rem) * 2)}.left-3{left:calc(var(--spacing,.25rem) * 3)}.-mx-2{margin-inline:calc(var(--spacing,.25rem) * -2)}.mr-2{margin-right:calc(var(--spacing,.25rem) * 2)}.block{display:block}.flex{display:flex}.grid{display:grid}.hidden{display:none}.size-9{width:calc(var(--spacing,.25rem) * 9);height:calc(var(--spacing,.25rem) * 9)}.h-3{height:calc(var(--spacing,.25rem) * 3)}.h-3\.5{height:calc(var(--spacing,.25rem) * 3.5)}.h-8{height:calc(var(--spacing,.25rem) * 8)}.min-h-12{min-height:calc(var(--spacing,.25rem) * 12)}.w-1{width:var(--spacing,.25rem)}.w-1\/2{width:50%}.w-1\/3{width:33.3333%}.w-full{width:100%}.max-w-2xl{max-width:var(--container-2xl,42rem)}.max-w-full{max-width:100%}.min-w-0{min-width:0}.flex-1{flex:1}.shrink-0{flex-shrink:0}.border-collapse{border-collapse:collapse}.-translate-y-1{--tw-translate-y:calc(var(--spacing,.25rem) * -1);translate:var(--tw-translate-x) var(--tw-translate-y)}.-translate-y-1\/2{--tw-translate-y:calc(calc(1 / 2 * 100%) * -1);translate:var(--tw-translate-x) var(--tw-translate-y)}.transform{transform:var(--tw-rotate-x, ) var(--tw-rotate-y, ) var(--tw-rotate-z, ) var(--tw-skew-x, ) var(--tw-skew-y, )}.cursor-pointer{cursor:pointer}.flex-col{flex-direction:column}.flex-wrap{flex-wrap:wrap}.items-center{align-items:center}.justify-between{justify-content:space-between}.justify-start{justify-content:flex-start}.gap-2{gap:calc(var(--spacing,.25rem) * 2)}.gap-3{gap:calc(var(--spacing,.25rem) * 3)}.gap-4{gap:calc(var(--spacing,.25rem) * 4)}.gap-6{gap:calc(var(--spacing,.25rem) * 6)}:where(.space-y-1>:not(:last-child)){--tw-space-y-reverse:0;margin-block-start:calc(var(--spacing,.25rem) * var(--tw-space-y-reverse));margin-block-end:calc(var(--spacing,.25rem) * calc(1 - var(--tw-space-y-reverse)))}:where(.space-y-1\.5>:not(:last-child)){--tw-space-y-reverse:0;margin-block-start:calc(calc(var(--spacing,.25rem) * 1.5) * var(--tw-space-y-reverse));margin-block-end:calc(calc(var(--spacing,.25rem) * 1.5) * calc(1 - var(--tw-space-y-reverse)))}.self-start{align-self:flex-start}.truncate{text-overflow:ellipsis;white-space:nowrap;overflow:hidden}.overflow-x-auto{overflow-x:auto}.overflow-y-auto{overflow-y:auto}.rounded-lg{border-radius:var(--radius)}.border{border-style:var(--tw-border-style);border-width:1px}.border-0{border-style:var(--tw-border-style);border-width:0}.p-2{padding:calc(var(--spacing,.25rem) * 2)}.p-3{padding:calc(var(--spacing,.25rem) * 3)}.p-4{padding:calc(var(--spacing,.25rem) * 4)}.px-3{padding-inline:calc(var(--spacing,.25rem) * 3)}.py-1{padding-block:var(--spacing,.25rem)}.py-1\.5{padding-block:calc(var(--spacing,.25rem) * 1.5)}.py-2{padding-block:calc(var(--spacing,.25rem) * 2)}.py-2\.5{padding-block:calc(var(--spacing,.25rem) * 2.5)}.py-3{padding-block:calc(var(--spacing,.25rem) * 3)}.pr-8{padding-right:calc(var(--spacing,.25rem) * 8)}.pl-9{padding-left:calc(var(--spacing,.25rem) * 9)}.text-left{text-align:left}.text-right{text-align:right}.text-3xl{font-size:var(--text-3xl,1.875rem);line-height:var(--tw-leading,var(--text-3xl--line-height,calc(2.25 / 1.875)))}.text-lg{font-size:var(--text-lg,1.125rem);line-height:var(--tw-leading,var(--text-lg--line-height,calc(1.75 / 1.125)))}.text-sm{font-size:var(--text-sm,.875rem);line-height:var(--tw-leading,var(--text-sm--line-height,calc(1.25 / .875)))}.text-xl{font-size:var(--text-xl,1.25rem);line-height:var(--tw-leading,var(--text-xl--line-height,calc(1.75 / 1.25)))}.font-bold{--tw-font-weight:var(--font-weight-bold,700);font-weight:var(--font-weight-bold,700)}.font-medium{--tw-font-weight:var(--font-weight-medium,500);font-weight:var(--font-weight-medium,500)}.font-normal{--tw-font-weight:var(--font-weight-normal,400);font-weight:var(--font-weight-normal,400)}.font-semibold{--tw-font-weight:var(--font-weight-semibold,600);font-weight:var(--font-weight-semibold,600)}.tracking-tight{--tw-tracking:var(--tracking-tight,-.025em);letter-spacing:var(--tracking-tight,-.025em)}.break-words{overflow-wrap:break-word}.text-destructive{color:var(--destructive)}.text-muted-foreground{color:var(--muted-foreground)}.lowercase{text-transform:lowercase}.ordinal{--tw-ordinal:ordinal;font-variant-numeric:var(--tw-ordinal, ) var(--tw-slashed-zero, ) var(--tw-numeric-figure, ) var(--tw-numeric-spacing, ) var(--tw-numeric-fraction, )}.opacity-50{opacity:.5}.shadow-none{--tw-shadow:0 0 #0000;box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)}.outline{outline-style:var(--tw-outline-style);outline-width:1px}.transition{transition-property:color,background-color,border-color,outline-color,text-decoration-color,fill,stroke,--tw-gradient-from,--tw-gradient-via,--tw-gradient-to,opacity,box-shadow,transform,translate,scale,rotate,filter,-webkit-backdrop-filter,backdrop-filter,display,content-visibility,overlay,pointer-events;transition-timing-function:var(--tw-ease,var(--default-transition-timing-function,cubic-bezier(.4, 0, .2, 1)));transition-duration:var(--tw-duration,var(--default-transition-duration,.15s))}.transition-opacity{transition-property:opacity;transition-timing-function:var(--tw-ease,var(--default-transition-timing-function,cubic-bezier(.4, 0, .2, 1)));transition-duration:var(--tw-duration,var(--default-transition-duration,.15s))}.ease-in-out{--tw-ease:var(--ease-in-out,cubic-bezier(.4, 0, .2, 1));transition-timing-function:var(--ease-in-out,cubic-bezier(.4, 0, .2, 1))}.outline-none{--tw-outline-style:none;outline-style:none}.select-text{-webkit-user-select:text;user-select:text}@media (hover:hover){.hover\:bg-accent\/50:hover{background-color:var(--accent)}@supports (color:color-mix(in lab, red, red)){.hover\:bg-accent\/50:hover{background-color:color-mix(in oklab, var(--accent) 50%, transparent)}}}.focus-visible\:bg-accent\/50:focus-visible{background-color:var(--accent)}@supports (color:color-mix(in lab, red, red)){.focus-visible\:bg-accent\/50:focus-visible{background-color:color-mix(in oklab, var(--accent) 50%, transparent)}}.focus-visible\:ring-0:focus-visible{--tw-ring-shadow:var(--tw-ring-inset, ) 0 0 0 calc(0px + var(--tw-ring-offset-width)) var(--tw-ring-color,currentcolor);box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)}.\[\&\:\:-webkit-search-cancel-button\]\:hidden::-webkit-search-cancel-button{display:none}}@property --tw-translate-x{syntax:"*";inherits:false;initial-value:0}@property --tw-translate-y{syntax:"*";inherits:false;initial-value:0}@property --tw-translate-z{syntax:"*";inherits:false;initial-value:0}@property --tw-rotate-x{syntax:"*";inherits:false}@property --tw-rotate-y{syntax:"*";inherits:false}@property --tw-rotate-z{syntax:"*";inherits:false}@property --tw-skew-x{syntax:"*";inherits:false}@property --tw-skew-y{syntax:"*";inherits:false}@property --tw-space-y-reverse{syntax:"*";inherits:false;initial-value:0}@property --tw-border-style{syntax:"*";inherits:false;initial-value:solid}@property --tw-font-weight{syntax:"*";inherits:false}@property --tw-tracking{syntax:"*";inherits:false}@property --tw-ordinal{syntax:"*";inherits:false}@property --tw-slashed-zero{syntax:"*";inherits:false}@property --tw-numeric-figure{syntax:"*";inherits:false}@property --tw-numeric-spacing{syntax:"*";inherits:false}@property --tw-numeric-fraction{syntax:"*";inherits:false}@property --tw-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-shadow-color{syntax:"*";inherits:false}@property --tw-shadow-alpha{syntax:"<percentage>";inherits:false;initial-value:100%}@property --tw-inset-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-inset-shadow-color{syntax:"*";inherits:false}@property --tw-inset-shadow-alpha{syntax:"<percentage>";inherits:false;initial-value:100%}@property --tw-ring-color{syntax:"*";inherits:false}@property --tw-ring-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-inset-ring-color{syntax:"*";inherits:false}@property --tw-inset-ring-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-ring-inset{syntax:"*";inherits:false}@property --tw-ring-offset-width{syntax:"<length>";inherits:false;initial-value:0}@property --tw-ring-offset-color{syntax:"*";inherits:false;initial-value:#fff}@property --tw-ring-offset-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-outline-style{syntax:"*";inherits:false;initial-value:solid}@property --tw-ease{syntax:"*";inherits:false}
+/*$vite$:1*/</style>
+<div id="root"></div>
+<script type="module">import { c as e } from "react/compiler-runtime";
+import { useEffect as t, useRef as n, useState as r } from "react";
+import { createRoot as i } from "react-dom/client";
+import { AppIcon as a, Button as o, Empty as s, Icon as c, Input as l, Label as u, List as d, ListRow as f, Problem as p, ResponsiveDialog as m, Skeleton as h, Split as g, Switch as _, Tabs as v, TabsList as y, TabsTrigger as b } from "@one/ui";
+import { Fragment as x, jsx as S, jsxs as C } from "react/jsx-runtime";
+// ../settings/vault.jsx
+var w = one.api, T = async (e, t, n) => (await w("POST", "/v1/call", {
+	app: e,
+	op: t,
+	input: n
+})).ok, E = (e) => w("GET", `/v1/vault?scope=${encodeURIComponent(e)}`), D = (e, t, n) => w("POST", "/v1/vault", {
+	...n,
+	scope: e,
+	...t ? { id: t } : {}
+}), O = (e, t) => Array.isArray(e?.ops) ? e.ops.some((e) => (e.name ?? e) === t) : !!e?.ops?.[t], k = (e) => e.fields.filter((e) => !e.name.startsWith("_")), A = (e) => e.type ? e.type === e.title ? "" : e.type : k(e).find((e) => !e.secret && e.value)?.value || "", j = (e) => {
+	let t = e.split(/[_\-.]/).filter(Boolean).map((e) => [
+		"id",
+		"url",
+		"api",
+		"pin",
+		"otp"
+	].includes(e.toLowerCase()) ? e.toUpperCase() : e.toLowerCase());
+	return t.length ? [t[0][0].toUpperCase() + t[0].slice(1), ...t.slice(1)].join(" ") : e;
+}, M = (e) => e.split(",").map((e) => e.trim().toLowerCase()).filter(Boolean), N = (e) => one.plain(e).title, P = {
+	name: "Item",
+	icon: "key",
+	color: "#8e8e93"
+};
+function F(e) {
+	return [
+		{
+			scope: "user",
+			title: "You"
+		},
+		...((e.install || {}).groups || []).filter((e) => e.role === "admin").sort((e, t) => e.name.localeCompare(t.name)).map((e) => ({
+			scope: `group:${e.id}`,
+			title: e.name
+		})),
+		...e.user?.role === "admin" ? [{
+			scope: "global",
+			title: "Everyone"
+		}] : []
+	];
+}
+function I(e) {
+	let t = (t) => e.find((e) => e.name === t), n = (e) => t(e)?.title || e, r = (e) => new Intl.ListFormat(void 0, { type: "conjunction" }).format(e.map(n));
+	return {
+		app: t,
+		label: n,
+		names: r,
+		icon: (e) => e.image ? {
+			name: e.title,
+			image: e.image,
+			image_kind: e.image_kind
+		} : t(e.app || e.apps[0]) || {
+			...P,
+			name: e.title
+		},
+		makers: () => e.filter((e) => e.installed?.length).flatMap((e) => Object.values(e.vault || {}).filter((e) => e.make && e.type).map((t) => ({
+			app: e.name,
+			op: t.make,
+			type: t.type
+		}))).sort((e, t) => e.type.localeCompare(t.type)),
+		actions: (t) => e.filter((e) => t.apps.includes(e.name)).flatMap((e) => Object.values(e.vault || {}).filter((e) => e.type && e.type === t.type).flatMap((t) => Object.entries(t.actions || {}).map(([t, n]) => ({
+			app: e.name,
+			op: t,
+			title: n
+		})))).sort((e, t) => e.title.localeCompare(t.title)),
+		rowLine: (e) => {
+			let t = e.apps.filter((t) => t !== e.app && !(e.type || "").toLowerCase().includes(n(t).toLowerCase())), i = t.length ? `Used by ${r(t)}` : "";
+			return e.type ? [A(e), i].filter(Boolean).join(" · ") : i || A(e);
+		},
+		matches: (e, t) => !t || [
+			e.title,
+			e.type,
+			e.domain,
+			...e.hosts,
+			...e.apps.map(n),
+			...e.fields.filter((e) => !e.secret).map((e) => e.value)
+		].some((e) => String(e ?? "").toLowerCase().includes(t)),
+		remove: async (e) => {
+			if (e.account) {
+				let n = /* @__PURE__ */ new Set([e.title, ...e.fields.filter((e) => !e.secret).map((e) => e.value)]);
+				if (await Promise.all([...new Set([...e.apps, e.app].filter(Boolean))].map(async (e) => {
+					let r = t(e);
+					if (!O(r, "accounts") || !O(r, "sign_out")) return;
+					let i = (await T(e, "accounts", {})).find((e) => n.has(e.account));
+					i && await T(e, "sign_out", { account: i.account });
+				})), !(await E(e.scope)).some((t) => t.id === e.id)) return;
+			}
+			await D(e.scope, e.id, { deleted: !0 });
+		}
+	};
+}
+function L(e) {
+	let t = Object.assign(document.createElement("a"), {
+		href: e,
+		target: "_blank",
+		rel: "noopener"
+	});
+	document.body.append(t), t.click(), t.remove();
+}
+var R = (e) => e.screen ? one.open(e.screen.screen || "main", e.screen.params || {}, e.app) : e.url && L(e.url);
+function z() {
+	let [e, i] = r(one.params?.scope || "user"), [l, u] = r(one.params?.id), [m, h] = r([]), [_, v] = r([]), [y, b] = r(null), [T, D] = r(null), [O, k] = r(!1), [A, j] = r(""), [M, N] = r(null), [P, L] = r({}), [R, z] = r(null), [U, W] = r(!1), G = n(e);
+	G.current = e;
+	let K = B(100), q = I(_);
+	async function J(e = G.current) {
+		try {
+			let [t, n, r] = await Promise.all([
+				w("GET", "/v1/state"),
+				w("GET", "/v1/apps"),
+				E(e)
+			]), a = F(t);
+			if (!a.some((t) => t.scope === e)) return void (i(G.current = "user"), J("user"));
+			if (e !== G.current) return;
+			h(a), v(n), b(r), D(null);
+		} catch (e) {
+			D(one.plain(e));
+		}
+	}
+	async function Y(t) {
+		if (t !== e) {
+			i(G.current = t), k(!0);
+			try {
+				let e = await E(t);
+				t === G.current && b(e);
+			} catch (e) {
+				t === G.current && D(one.plain(e));
+			} finally {
+				t === G.current && k(!1);
+			}
+		}
+	}
+	async function X() {
+		let e = await E(G.current);
+		b(e);
+	}
+	t(() => {
+		one.largeTitle("Vault"), J(), one.on("changed", (e) => e.type === "changed" && !(e.apps || []).length && J());
+	}, []), t(() => {
+		y && l && (y.some((e) => e.id === l) && N(l), u(null));
+	}, [y, l]);
+	function Z() {
+		let e = q.makers();
+		z(e.length ? { made: e } : { item: !0 }), W(!0);
+	}
+	let Q = y?.find((e) => e.id === M), $ = y?.filter((e) => q.matches(e, A.trim().toLowerCase())) || [], ae;
+	return ae = y ? $.length ? /* @__PURE__ */ S(d, {
+		className: O ? "opacity-50 transition-opacity" : "",
+		children: $.map((e) => /* @__PURE__ */ S(f, {
+			leading: /* @__PURE__ */ S(a, {
+				app: q.icon(e),
+				size: 36
+			}),
+			title: e.title,
+			sub: q.rowLine(e) || void 0,
+			selected: e.id === M,
+			onClick: () => N(e.id)
+		}, e.id))
+	}) : /* @__PURE__ */ S(s, {
+		className: O ? "opacity-50" : "",
+		children: A.trim() ? `Nothing matches “${A.trim()}”.` : "Keys, sign-ins and accounts, for your apps and agents to use without seeing them."
+	}) : T ? /* @__PURE__ */ S(p, {
+		title: T.title,
+		text: T.next,
+		action: {
+			label: "Try Again",
+			run: () => J()
+		}
+	}) : K ? /* @__PURE__ */ S(d, {
+		"aria-busy": "true",
+		"aria-label": "Loading",
+		children: [
+			0,
+			1,
+			2,
+			3
+		].map((e) => /* @__PURE__ */ S(V, {}, e))
+	}) : null, /* @__PURE__ */ C(x, { children: [
+		/* @__PURE__ */ S(g, {
+			title: Q?.title,
+			onClose: () => N(null),
+			list: /* @__PURE__ */ C("div", {
+				className: "flex max-w-2xl flex-col gap-4",
+				children: [
+					/* @__PURE__ */ C("div", {
+						className: "flex items-center justify-between gap-3",
+						children: [/* @__PURE__ */ S("h1", {
+							className: "large-title text-3xl font-bold tracking-tight",
+							children: "Vault"
+						}), /* @__PURE__ */ C(o, {
+							onClick: Z,
+							"aria-label": "New Item",
+							children: [/* @__PURE__ */ S(c, { name: "plus" }), "New Item"]
+						})]
+					}),
+					m.length > 1 && /* @__PURE__ */ S(H, {
+						pages: m,
+						value: e,
+						onChange: Y
+					}),
+					/* @__PURE__ */ S(ee, {
+						value: A,
+						onChange: j
+					}),
+					ae
+				]
+			}),
+			detail: Q && /* @__PURE__ */ S(te, {
+				item: Q,
+				k: q,
+				following: P[Q.id],
+				follow: (e) => L((t) => ({
+					...t,
+					[Q.id]: e
+				})),
+				refresh: X,
+				deleted: () => (N(null), J())
+			}, Q.id)
+		}),
+		R?.made && /* @__PURE__ */ S(ne, {
+			k: q,
+			made: R.made,
+			open: U,
+			setOpen: W,
+			pick: (e) => z(e ? { maker: e } : { item: !0 })
+		}),
+		R?.maker && /* @__PURE__ */ S(ie, {
+			maker: R.maker,
+			open: U,
+			setOpen: W,
+			done: () => (W(!1), J())
+		}),
+		R?.item && /* @__PURE__ */ S(re, {
+			pages: m,
+			scope: e,
+			open: U,
+			setOpen: W,
+			done: (e) => (W(!1), e !== G.current && i(G.current = e), J(e))
+		})
+	] });
+}
+function B(n) {
+	let i = e(3), [a, o] = r(!1), s, c;
+	return i[0] === n ? (s = i[1], c = i[2]) : (s = () => {
+		let e = setTimeout(() => o(!0), n);
+		return () => clearTimeout(e);
+	}, c = [n], i[0] = n, i[1] = s, i[2] = c), t(s, c), a;
+}
+function V() {
+	let t = e(2), n;
+	t[0] === Symbol.for("react.memo_cache_sentinel") ? (n = /* @__PURE__ */ S(h, { className: "size-9 rounded-lg" }), t[0] = n) : n = t[0];
+	let r;
+	return t[1] === Symbol.for("react.memo_cache_sentinel") ? (r = /* @__PURE__ */ C("div", {
+		className: "flex items-center gap-3 px-3 py-2.5",
+		children: [n, /* @__PURE__ */ C("div", {
+			className: "flex-1 space-y-1.5",
+			children: [/* @__PURE__ */ S(h, { className: "h-3.5 w-1/3" }), /* @__PURE__ */ S(h, { className: "h-3 w-1/2" })]
+		})]
+	}), t[1] = r) : r = t[1], r;
+}
+function H(t) {
+	let n = e(8), { pages: r, value: i, onChange: a } = t, o;
+	n[0] === r ? o = n[1] : (o = r.map(U), n[0] = r, n[1] = o);
+	let s;
+	n[2] === o ? s = n[3] : (s = /* @__PURE__ */ S(y, {
+		className: "max-w-full justify-start overflow-x-auto",
+		children: o
+	}), n[2] = o, n[3] = s);
+	let c;
+	return n[4] !== a || n[5] !== s || n[6] !== i ? (c = /* @__PURE__ */ S(v, {
+		value: i,
+		onValueChange: a,
+		children: s
+	}), n[4] = a, n[5] = s, n[6] = i, n[7] = c) : c = n[7], c;
+}
+function U(e) {
+	return /* @__PURE__ */ S(b, {
+		value: e.scope,
+		children: e.title
+	}, e.scope);
+}
+function ee(t) {
+	let n = e(12), { value: r, onChange: i } = t, a;
+	n[0] === Symbol.for("react.memo_cache_sentinel") ? (a = /* @__PURE__ */ S(c, {
+		name: "magnifying-glass",
+		className: "pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-muted-foreground"
+	}), n[0] = a) : a = n[0];
+	let s;
+	n[1] === i ? s = n[2] : (s = (e) => i(e.target.value), n[1] = i, n[2] = s);
+	let u;
+	n[3] !== s || n[4] !== r ? (u = /* @__PURE__ */ S(l, {
+		type: "search",
+		value: r,
+		onChange: s,
+		placeholder: "Search",
+		"aria-label": "Search",
+		enterKeyHint: "search",
+		autoComplete: "off",
+		autoCapitalize: "off",
+		spellCheck: !1,
+		className: "pl-9 [&::-webkit-search-cancel-button]:hidden"
+	}), n[3] = s, n[4] = r, n[5] = u) : u = n[5];
+	let d;
+	n[6] !== i || n[7] !== r ? (d = r && /* @__PURE__ */ S(o, {
+		variant: "ghost",
+		size: "icon-xs",
+		"aria-label": "Clear",
+		className: "absolute top-1/2 right-2 -translate-y-1/2",
+		onClick: () => i(""),
+		children: /* @__PURE__ */ S(c, { name: "x" })
+	}), n[6] = i, n[7] = r, n[8] = d) : d = n[8];
+	let f;
+	return n[9] !== u || n[10] !== d ? (f = /* @__PURE__ */ C("label", {
+		className: "relative block",
+		children: [
+			a,
+			u,
+			d
+		]
+	}), n[9] = u, n[10] = d, n[11] = f) : f = n[11], f;
+}
+var W = (t) => {
+	let n = e(5), { title: r, children: i } = t, a;
+	n[0] === r ? a = n[1] : (a = /* @__PURE__ */ S("h2", {
+		className: "text-sm font-medium text-muted-foreground",
+		children: r
+	}), n[0] = r, n[1] = a);
+	let o;
+	return n[2] !== i || n[3] !== a ? (o = /* @__PURE__ */ C("section", {
+		className: "flex flex-col gap-2",
+		children: [a, i]
+	}), n[2] = i, n[3] = a, n[4] = o) : o = n[4], o;
+}, G = {
+	autoCapitalize: "none",
+	autoCorrect: "off",
+	spellCheck: !1
+};
+function te({ item: e, k: t, following: n, follow: i, refresh: s, deleted: u }) {
+	let [f, p] = r(""), [m, h] = r(!1), [g, _] = r(null), [v, y] = r(!1), b = t.actions(e), w = [.../* @__PURE__ */ new Set([...e.apps, ...e.wanted_by || []])], E = !e.hosts.length || !e.hosts.every(t.app);
+	async function O(t) {
+		p("");
+		try {
+			return await D(e.scope, e.id, t), await s(), !0;
+		} catch (e) {
+			return p(N(e)), !1;
+		}
+	}
+	async function A(t, n) {
+		if (g === null) {
+			_(n), p("");
+			try {
+				let n = await T(t.app, t.op, { item: e.id }) || {}, r = {
+					app: t.app,
+					screen: n.screen,
+					url: n.url
+				};
+				n.then?.op && i({
+					...r,
+					op: n.then.op,
+					title: n.then.title || "Done"
+				}), await s(), R(r);
+			} catch (e) {
+				p(N(e));
+			} finally {
+				_(null);
+			}
+		}
+	}
+	async function j() {
+		if (g === null) {
+			_("finish"), p("");
+			try {
+				await T(n.app, n.op, { item: e.id }), i(void 0), await s();
+			} catch (e) {
+				p(N(e));
+			} finally {
+				_(null);
+			}
+		}
+	}
+	async function M() {
+		if (await one.alert({
+			title: e.account ? `Sign out of ${e.title}?` : `Delete ${e.title}?`,
+			text: e.apps.length ? `${t.names(e.apps)} ${e.apps.length === 1 ? "stops" : "stop"} using it.` : "It can’t be undone.",
+			action: e.account ? "Sign Out" : "Delete",
+			danger: !0
+		})) {
+			one.tap("medium"), _("delete"), p("");
+			try {
+				await t.remove(e), u();
+			} catch (e) {
+				p(N(e)), _(null);
+			}
+		}
+	}
+	function P(t) {
+		h(!1), t = t.trim(), t && t !== e.title && O({ title: t });
+	}
+	return /* @__PURE__ */ C("div", {
+		className: "flex flex-col gap-6",
+		children: [
+			/* @__PURE__ */ C("div", {
+				className: "flex items-center gap-4 pr-8",
+				children: [/* @__PURE__ */ S(a, {
+					app: t.icon(e),
+					size: 56
+				}), /* @__PURE__ */ C("div", {
+					className: "min-w-0 flex-1",
+					children: [m ? /* @__PURE__ */ S(l, {
+						autoFocus: !0,
+						defaultValue: e.title,
+						"aria-label": "Title",
+						className: "text-lg font-semibold",
+						onFocus: (e) => e.target.select(),
+						onBlur: (e) => P(e.target.value),
+						onKeyDown: (t) => t.key === "Enter" ? t.currentTarget.blur() : t.key === "Escape" && (t.currentTarget.value = e.title, t.currentTarget.blur())
+					}) : /* @__PURE__ */ S("h2", {
+						className: "text-xl font-semibold break-words select-text",
+						children: e.title
+					}), /* @__PURE__ */ C("div", {
+						className: "flex items-center gap-2 text-sm text-muted-foreground",
+						children: [e.scope_name && /* @__PURE__ */ S("span", {
+							className: "mr-2",
+							children: e.scope_name
+						}), !m && /* @__PURE__ */ S(o, {
+							variant: "ghost",
+							size: "xs",
+							className: "-mx-2 text-muted-foreground",
+							onClick: () => h(!0),
+							children: "Rename"
+						})]
+					})]
+				})]
+			}),
+			!!b.length && /* @__PURE__ */ S("div", {
+				className: "flex flex-wrap gap-2",
+				children: n ? /* @__PURE__ */ C(x, { children: [(n.screen || n.url) && /* @__PURE__ */ S(o, {
+					variant: "outline",
+					onClick: () => R(n),
+					children: "Open Again"
+				}), /* @__PURE__ */ S(o, {
+					variant: "secondary",
+					disabled: g !== null,
+					onClick: j,
+					children: g === "finish" ? `${n.title}…` : n.title
+				})] }) : b.map((e, t) => /* @__PURE__ */ S(o, {
+					variant: "secondary",
+					disabled: g !== null,
+					onClick: () => A(e, t),
+					children: g === t ? `${e.title}…` : e.title
+				}, `${e.app}.${e.op}`))
+			}),
+			/* @__PURE__ */ C(d, { children: [k(e).map((e) => /* @__PURE__ */ S(K, {
+				field: e,
+				save: O
+			}, e.name)), v ? /* @__PURE__ */ S(q, {
+				save: O,
+				done: () => y(!1)
+			}) : /* @__PURE__ */ C("button", {
+				className: "flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm font-medium outline-none hover:bg-accent/50 focus-visible:bg-accent/50",
+				onClick: () => y(!0),
+				children: [/* @__PURE__ */ S(c, { name: "plus" }), "Add Field"]
+			})] }),
+			E && /* @__PURE__ */ S(W, {
+				title: "Sent only to",
+				children: /* @__PURE__ */ S(J, {
+					hosts: e.hosts,
+					save: O
+				}, e.hosts.join())
+			}),
+			!!w.length && /* @__PURE__ */ S(W, {
+				title: "Used by",
+				children: /* @__PURE__ */ S(d, { children: w.map((n) => /* @__PURE__ */ S(X, {
+					app: t.app(n) || { name: n },
+					title: t.label(n),
+					on: e.apps.includes(n),
+					set: (t) => O({ apps: [...e.apps.filter((e) => e !== n), ...t ? [n] : []] })
+				}, n)) })
+			}),
+			f && /* @__PURE__ */ S("p", {
+				role: "alert",
+				className: "text-sm text-destructive",
+				children: f
+			}),
+			/* @__PURE__ */ S(o, {
+				variant: "destructive",
+				className: "self-start",
+				disabled: g === "delete",
+				onClick: M,
+				children: e.account ? "Sign Out" : "Delete Item"
+			})
+		]
+	});
+}
+function K(t) {
+	let n = e(44), { field: i, save: a } = t, [s, u] = r(!1), [d, f] = r(!1), p;
+	n[0] === i.name ? p = n[1] : (p = j(i.name), n[0] = i.name, n[1] = p);
+	let m = p;
+	if (s) {
+		let e;
+		n[2] !== i.name || n[3] !== i.secret || n[4] !== a ? (e = async (e) => {
+			if (!e.value) return;
+			let t = e.value;
+			e.value = "", await a({ fields: { [i.name]: { value: t } } }) ? u(!1) : i.secret || (e.value = t);
+		}, n[2] = i.name, n[3] = i.secret, n[4] = a, n[5] = e) : e = n[5];
+		let t = e, r;
+		n[6] === t ? r = n[7] : (r = (e) => (e.preventDefault(), t(e.currentTarget.elements.value)), n[6] = t, n[7] = r);
+		let s;
+		n[8] === m ? s = n[9] : (s = /* @__PURE__ */ S("span", {
+			className: "shrink-0 text-sm font-medium",
+			children: m
+		}), n[8] = m, n[9] = s);
+		let c = i.secret ? "password" : "text", d = i.secret ? "New value" : void 0, f = i.secret ? void 0 : i.value || "", p;
+		n[10] === Symbol.for("react.memo_cache_sentinel") ? (p = (e) => e.key === "Escape" && u(!1), n[10] = p) : p = n[10];
+		let h;
+		n[11] !== m || n[12] !== c || n[13] !== d || n[14] !== f ? (h = /* @__PURE__ */ S(l, {
+			name: "value",
+			autoFocus: !0,
+			type: c,
+			autoComplete: "off",
+			...G,
+			"aria-label": m,
+			placeholder: d,
+			defaultValue: f,
+			className: "h-8 min-w-0 flex-1",
+			onKeyDown: p
+		}), n[11] = m, n[12] = c, n[13] = d, n[14] = f, n[15] = h) : h = n[15];
+		let g;
+		n[16] === Symbol.for("react.memo_cache_sentinel") ? (g = /* @__PURE__ */ S(o, {
+			type: "submit",
+			size: "sm",
+			children: "Save"
+		}), n[16] = g) : g = n[16];
+		let _;
+		n[17] !== i.name || n[18] !== a ? (_ = /* @__PURE__ */ S(o, {
+			type: "button",
+			size: "sm",
+			variant: "ghost",
+			className: "text-destructive",
+			onClick: () => a({ fields: { [i.name]: null } }),
+			children: "Remove"
+		}), n[17] = i.name, n[18] = a, n[19] = _) : _ = n[19];
+		let v;
+		return n[20] !== _ || n[21] !== r || n[22] !== s || n[23] !== h ? (v = /* @__PURE__ */ C("form", {
+			className: "flex items-center gap-2 px-3 py-2",
+			onSubmit: r,
+			children: [
+				s,
+				h,
+				g,
+				_
+			]
+		}), n[20] = _, n[21] = r, n[22] = s, n[23] = h, n[24] = v) : v = n[24], v;
+	}
+	let h;
+	n[25] === i.value ? h = n[26] : (h = async (e) => {
+		e.stopPropagation(), await one.copy(i.value || ""), one.tap("success"), f(!0), setTimeout(() => f(!1), 1500);
+	}, n[25] = i.value, n[26] = h);
+	let g = h, _ = `flex min-h-12 items-center gap-3 px-3 py-1.5 text-sm ${i.secret ? "" : "cursor-pointer hover:bg-accent/50"}`, v;
+	n[27] === i.secret ? v = n[28] : (v = i.secret ? void 0 : () => u(!0), n[27] = i.secret, n[28] = v);
+	let y;
+	n[29] === m ? y = n[30] : (y = /* @__PURE__ */ S("span", {
+		className: "shrink-0 font-medium",
+		children: m
+	}), n[29] = m, n[30] = y);
+	let b = i.secret ? "••••••••" : i.value, x;
+	n[31] === b ? x = n[32] : (x = /* @__PURE__ */ S("span", {
+		className: "min-w-0 flex-1 truncate text-right text-muted-foreground select-text",
+		children: b
+	}), n[31] = b, n[32] = x);
+	let w;
+	n[33] !== d || n[34] !== g || n[35] !== i.secret || n[36] !== m ? (w = i.secret ? /* @__PURE__ */ S(o, {
+		variant: "ghost",
+		size: "sm",
+		onClick: () => u(!0),
+		children: "Replace"
+	}) : /* @__PURE__ */ S(o, {
+		variant: "ghost",
+		size: "icon-sm",
+		"aria-label": d ? "Copied" : `Copy ${m}`,
+		onClick: g,
+		children: /* @__PURE__ */ S(c, { name: d ? "check" : "copy" })
+	}), n[33] = d, n[34] = g, n[35] = i.secret, n[36] = m, n[37] = w) : w = n[37];
+	let T;
+	return n[38] !== _ || n[39] !== v || n[40] !== y || n[41] !== x || n[42] !== w ? (T = /* @__PURE__ */ C("div", {
+		className: _,
+		onClick: v,
+		children: [
+			y,
+			x,
+			w
+		]
+	}), n[38] = _, n[39] = v, n[40] = y, n[41] = x, n[42] = w, n[43] = T) : T = n[43], T;
+}
+function q(t) {
+	let i = e(18), { save: a, done: s } = t, [c, d] = r(!0), f = n(null), p = n(null), m;
+	i[0] !== s || i[1] !== a || i[2] !== c ? (m = async () => f.current.value.trim() && p.current.value && await a({ fields: { [f.current.value.trim()]: {
+		value: p.current.value,
+		secret: c
+	} } }) && s(), i[0] = s, i[1] = a, i[2] = c, i[3] = m) : m = i[3];
+	let h = m, g;
+	i[4] === Symbol.for("react.memo_cache_sentinel") ? (g = /* @__PURE__ */ S(l, {
+		ref: f,
+		autoFocus: !0,
+		placeholder: "Name",
+		"aria-label": "Name",
+		...G
+	}), i[4] = g) : g = i[4];
+	let v = c ? "password" : "text", y;
+	i[5] === h ? y = i[6] : (y = (e) => e.key === "Enter" && h(), i[5] = h, i[6] = y);
+	let b;
+	i[7] !== v || i[8] !== y ? (b = /* @__PURE__ */ S(l, {
+		ref: p,
+		type: v,
+		placeholder: "Value",
+		"aria-label": "Value",
+		autoComplete: "off",
+		onKeyDown: y
+	}), i[7] = v, i[8] = y, i[9] = b) : b = i[9];
+	let x;
+	i[10] === c ? x = i[11] : (x = /* @__PURE__ */ C(u, {
+		className: "justify-between py-1 font-normal",
+		children: ["Secret", /* @__PURE__ */ S(_, {
+			checked: c,
+			onCheckedChange: d
+		})]
+	}), i[10] = c, i[11] = x);
+	let w;
+	i[12] === h ? w = i[13] : (w = /* @__PURE__ */ S(o, {
+		variant: "secondary",
+		className: "self-start",
+		onClick: h,
+		children: "Save Field"
+	}), i[12] = h, i[13] = w);
+	let T;
+	return i[14] !== b || i[15] !== x || i[16] !== w ? (T = /* @__PURE__ */ C("div", {
+		className: "flex flex-col gap-2 p-3",
+		children: [
+			g,
+			b,
+			x,
+			w
+		]
+	}), i[14] = b, i[15] = x, i[16] = w, i[17] = T) : T = i[17], T;
+}
+function J(t) {
+	let n = e(8), { hosts: r, save: i } = t, a;
+	n[0] === r ? a = n[1] : (a = r.join(", "), n[0] = r, n[1] = a);
+	let o;
+	n[2] !== r || n[3] !== i ? (o = async (e) => {
+		let t = e.currentTarget, n = M(t.value);
+		n.join() !== r.join() && !await i({ hosts: n }) && (t.value = r.join(", "));
+	}, n[2] = r, n[3] = i, n[4] = o) : o = n[4];
+	let s;
+	return n[5] !== a || n[6] !== o ? (s = /* @__PURE__ */ S(l, {
+		defaultValue: a,
+		placeholder: "api.example.com",
+		"aria-label": "Sent only to",
+		inputMode: "url",
+		...G,
+		onKeyDown: Y,
+		onBlur: o
+	}), n[5] = a, n[6] = o, n[7] = s) : s = n[7], s;
+}
+function Y(e) {
+	return e.key === "Enter" && e.currentTarget.blur();
+}
+function X(t) {
+	let n = e(14), { app: i, title: o, on: s, set: c } = t, [l, u] = r(null), d;
+	n[0] === i ? d = n[1] : (d = /* @__PURE__ */ S(a, {
+		app: i,
+		size: 28
+	}), n[0] = i, n[1] = d);
+	let f;
+	n[2] === o ? f = n[3] : (f = /* @__PURE__ */ S("span", {
+		className: "min-w-0 flex-1 truncate font-medium",
+		children: o
+	}), n[2] = o, n[3] = f);
+	let p = l ?? s, m = l !== null || void 0, h;
+	n[4] === c ? h = n[5] : (h = async (e) => {
+		u(e), await c(e), u(null);
+	}, n[4] = c, n[5] = h);
+	let g;
+	n[6] !== p || n[7] !== m || n[8] !== h ? (g = /* @__PURE__ */ S(_, {
+		checked: p,
+		"aria-busy": m,
+		onCheckedChange: h
+	}), n[6] = p, n[7] = m, n[8] = h, n[9] = g) : g = n[9];
+	let v;
+	return n[10] !== d || n[11] !== f || n[12] !== g ? (v = /* @__PURE__ */ C("label", {
+		className: "flex cursor-pointer items-center gap-3 px-3 py-2 text-sm",
+		children: [
+			d,
+			f,
+			g
+		]
+	}), n[10] = d, n[11] = f, n[12] = g, n[13] = v) : v = n[13], v;
+}
+function ne(t) {
+	let n = e(20), { k: r, made: i, open: s, setOpen: c, pick: l } = t, u;
+	n[0] === c ? u = n[1] : (u = /* @__PURE__ */ S(o, {
+		variant: "secondary",
+		size: "sm",
+		onClick: () => c(!1),
+		children: "Cancel"
+	}), n[0] = c, n[1] = u);
+	let p;
+	n[2] === Symbol.for("react.memo_cache_sentinel") ? (p = /* @__PURE__ */ S(a, {
+		app: P,
+		size: 30
+	}), n[2] = p) : p = n[2];
+	let h;
+	n[3] === l ? h = n[4] : (h = /* @__PURE__ */ S(f, {
+		leading: p,
+		title: "Item",
+		onClick: () => l(null)
+	}), n[3] = l, n[4] = h);
+	let g;
+	if (n[5] !== r || n[6] !== i || n[7] !== l) {
+		let e;
+		n[9] !== r || n[10] !== l ? (e = (e) => /* @__PURE__ */ S(f, {
+			leading: /* @__PURE__ */ S(a, {
+				app: r.app(e.app) || { name: e.app },
+				size: 30
+			}),
+			title: e.type,
+			onClick: () => l(e)
+		}, `${e.app}.${e.type}`), n[9] = r, n[10] = l, n[11] = e) : e = n[11], g = i.map(e), n[5] = r, n[6] = i, n[7] = l, n[8] = g;
+	} else g = n[8];
+	let _;
+	n[12] !== h || n[13] !== g ? (_ = /* @__PURE__ */ S("div", {
+		className: "overflow-y-auto p-4",
+		children: /* @__PURE__ */ C(d, { children: [h, g] })
+	}), n[12] = h, n[13] = g, n[14] = _) : _ = n[14];
+	let v;
+	return n[15] !== s || n[16] !== c || n[17] !== u || n[18] !== _ ? (v = /* @__PURE__ */ S(m, {
+		open: s,
+		onOpenChange: c,
+		title: "New",
+		action: u,
+		children: _
+	}), n[15] = s, n[16] = c, n[17] = u, n[18] = _, n[19] = v) : v = n[19], v;
+}
+function re(t) {
+	let i = e(32), { pages: a, scope: s, open: u, setOpen: d, done: f } = t, [p, h] = r(s), g;
+	i[0] === Symbol.for("react.memo_cache_sentinel") ? (g = [{
+		n: 0,
+		secret: !0
+	}], i[0] = g) : g = i[0];
+	let [_, v] = r(g), [y, b] = r(""), [x, w] = r(!1), T = n(null), E;
+	i[1] !== f || i[2] !== _ || i[3] !== p ? (E = async function() {
+		let e = T.current, t = e.elements.title.value.trim(), n = {};
+		for (let t of _) {
+			let r = e.elements[`name${t.n}`].value.trim(), i = e.elements[`value${t.n}`].value;
+			r && i && (n[r] = {
+				value: i,
+				secret: t.secret
+			});
+		}
+		if (!t || !Object.keys(n).length) return b(t ? "Give a field a name and a value" : "Give it a title");
+		w(!0), b("");
+		try {
+			await D(p, null, {
+				title: t,
+				fields: n,
+				hosts: M(e.elements.hosts.value),
+				apps: []
+			}), e.reset(), f(p);
+		} catch (e) {
+			let t = e;
+			w(!1), b(N(t));
+		}
+	}, i[1] = f, i[2] = _, i[3] = p, i[4] = E) : E = i[4];
+	let O = E, k = Q, A;
+	i[5] !== O || i[6] !== x ? (A = /* @__PURE__ */ S(o, {
+		size: "sm",
+		disabled: x,
+		onClick: O,
+		children: "Save"
+	}), i[5] = O, i[6] = x, i[7] = A) : A = i[7];
+	let j;
+	i[8] === O ? j = i[9] : (j = (e) => (e.preventDefault(), O()), i[8] = O, i[9] = j);
+	let P;
+	i[10] === Symbol.for("react.memo_cache_sentinel") ? (P = /* @__PURE__ */ S(l, {
+		name: "title",
+		autoFocus: !0,
+		placeholder: "Title",
+		"aria-label": "Title"
+	}), i[10] = P) : P = i[10];
+	let F;
+	i[11] !== p || i[12] !== a ? (F = a.length > 1 && /* @__PURE__ */ S(H, {
+		pages: a,
+		value: p,
+		onChange: h
+	}), i[11] = p, i[12] = a, i[13] = F) : F = i[13];
+	let I;
+	if (i[14] !== _) {
+		let e;
+		i[16] === Symbol.for("react.memo_cache_sentinel") ? (e = (e) => k(e, (t) => v((n) => n.map((n) => n.n === e.n ? {
+			...n,
+			secret: t
+		} : n))), i[16] = e) : e = i[16], I = _.map(e), i[14] = _, i[15] = I;
+	} else I = i[15];
+	let L;
+	i[17] === Symbol.for("react.memo_cache_sentinel") ? (L = /* @__PURE__ */ C(o, {
+		type: "button",
+		variant: "ghost",
+		className: "self-start",
+		onClick: () => v(Z),
+		children: [/* @__PURE__ */ S(c, { name: "plus" }), "Add Field"]
+	}), i[17] = L) : L = i[17];
+	let R;
+	i[18] === Symbol.for("react.memo_cache_sentinel") ? (R = /* @__PURE__ */ S(W, {
+		title: "Sent only to",
+		children: /* @__PURE__ */ S(l, {
+			name: "hosts",
+			placeholder: "api.example.com",
+			"aria-label": "Sent only to",
+			inputMode: "url",
+			...G
+		})
+	}), i[18] = R) : R = i[18];
+	let z;
+	i[19] === y ? z = i[20] : (z = y && /* @__PURE__ */ S("p", {
+		role: "alert",
+		className: "text-sm text-destructive",
+		children: y
+	}), i[19] = y, i[20] = z);
+	let B;
+	i[21] === Symbol.for("react.memo_cache_sentinel") ? (B = /* @__PURE__ */ S("button", {
+		type: "submit",
+		hidden: !0
+	}), i[21] = B) : B = i[21];
+	let V;
+	i[22] !== z || i[23] !== j || i[24] !== F || i[25] !== I ? (V = /* @__PURE__ */ C("form", {
+		ref: T,
+		className: "flex flex-col gap-4 overflow-y-auto p-4",
+		onSubmit: j,
+		children: [
+			P,
+			F,
+			I,
+			L,
+			R,
+			z,
+			B
+		]
+	}), i[22] = z, i[23] = j, i[24] = F, i[25] = I, i[26] = V) : V = i[26];
+	let U;
+	return i[27] !== u || i[28] !== d || i[29] !== V || i[30] !== A ? (U = /* @__PURE__ */ S(m, {
+		open: u,
+		onOpenChange: d,
+		title: "New Item",
+		action: A,
+		children: V
+	}), i[27] = u, i[28] = d, i[29] = V, i[30] = A, i[31] = U) : U = i[31], U;
+}
+function Z(e) {
+	return [...e, {
+		n: e.length,
+		secret: !1
+	}];
+}
+function Q(e, t) {
+	return /* @__PURE__ */ C(d, { children: [
+		/* @__PURE__ */ S("div", {
+			className: "p-2",
+			children: /* @__PURE__ */ S(l, {
+				name: `name${e.n}`,
+				autoFocus: e.n > 0,
+				placeholder: "Name",
+				"aria-label": "Name",
+				...G,
+				className: "border-0 shadow-none focus-visible:ring-0"
+			})
+		}),
+		/* @__PURE__ */ S("div", {
+			className: "p-2",
+			children: /* @__PURE__ */ S(l, {
+				name: `value${e.n}`,
+				type: e.secret ? "password" : "text",
+				placeholder: "Value",
+				"aria-label": "Value",
+				autoComplete: "off",
+				className: "border-0 shadow-none focus-visible:ring-0"
+			})
+		}),
+		/* @__PURE__ */ C(u, {
+			className: "justify-between px-3 py-3 font-normal",
+			children: ["Secret", /* @__PURE__ */ S(_, {
+				checked: e.secret,
+				onCheckedChange: t
+			})]
+		})
+	] }, e.n);
+}
+function ie(t) {
+	let i = e(21), { maker: a, open: s, setOpen: c, done: u } = t, [d, f] = r(""), [p, h] = r(!1), g = n(null), _;
+	i[0] !== p || i[1] !== u || i[2] !== a.app || i[3] !== a.op ? (_ = async function() {
+		let e = g.current.value.trim();
+		if (e && !p) {
+			h(!0), f("");
+			try {
+				await T(a.app, a.op, { title: e }), u();
+			} catch (e) {
+				let t = e;
+				h(!1), f(N(t));
+			}
+		}
+	}, i[0] = p, i[1] = u, i[2] = a.app, i[3] = a.op, i[4] = _) : _ = i[4];
+	let v = _, y = `New ${a.type}`, b;
+	i[5] !== p || i[6] !== v ? (b = /* @__PURE__ */ S(o, {
+		size: "sm",
+		disabled: p,
+		onClick: v,
+		children: "Add"
+	}), i[5] = p, i[6] = v, i[7] = b) : b = i[7];
+	let x;
+	i[8] === v ? x = i[9] : (x = /* @__PURE__ */ S(l, {
+		ref: g,
+		autoFocus: !0,
+		placeholder: "Name",
+		"aria-label": "Name",
+		onKeyDown: (e) => e.key === "Enter" && v()
+	}), i[8] = v, i[9] = x);
+	let w;
+	i[10] === d ? w = i[11] : (w = d && /* @__PURE__ */ S("p", {
+		role: "alert",
+		className: "text-sm text-destructive",
+		children: d
+	}), i[10] = d, i[11] = w);
+	let E;
+	i[12] !== x || i[13] !== w ? (E = /* @__PURE__ */ C("div", {
+		className: "flex flex-col gap-4 p-4",
+		children: [x, w]
+	}), i[12] = x, i[13] = w, i[14] = E) : E = i[14];
+	let D;
+	return i[15] !== s || i[16] !== c || i[17] !== y || i[18] !== b || i[19] !== E ? (D = /* @__PURE__ */ S(m, {
+		open: s,
+		onOpenChange: c,
+		title: y,
+		action: b,
+		children: E
+	}), i[15] = s, i[16] = c, i[17] = y, i[18] = b, i[19] = E, i[20] = D) : D = i[20], D;
+}
+i(document.getElementById("root")).render(/* @__PURE__ */ S(z, {}));
+</script>

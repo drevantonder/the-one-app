@@ -1,0 +1,67 @@
+// React screens, each <name>.jsx or .tsx in a folder built into <name>.html: one screen's HTML with its own styles and
+// module in it. React and @one/ui (`shared`) are left to the page's import map, so a screen never brings its own copy.
+// The one way a screen is built: an app's (`one deploy`, src/deploy.rs, which runs this with the deploying machine's
+// Bun or Node from a folder holding these tools), and the client's own Settings screens (build.js, here).
+//
+// node screens.mjs <screens folder> <out folder> <folder their classes are in> <the tag a screen opts in with> <shared name>...
+import { mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs"
+import path from "node:path"
+import { fileURLToPath } from "node:url"
+import tailwindcss from "@tailwindcss/vite"
+import react from "@vitejs/plugin-react"
+import { build } from "vite"
+
+const here = import.meta.dirname
+
+export async function buildScreens(from, to, source, tag, shared) {
+  const screens = readdirSync(from).filter((f) => /^[a-z0-9-]+\.[jt]sx$/.test(f))
+  if (!screens.length) return
+  // The screens' own Tailwind utilities, from the theme's names (src/theme.css) and the classes in `source` (an app's
+  // folder, whose screens may import its other files), and none of the base the page's ui.css already gave them.
+  const scratch = path.join(here, `run-${process.pid}`)
+  mkdirSync(scratch, { recursive: true })
+  const css = path.join(scratch, "screen.css")
+  const tailwind = path.join(here, "node_modules", "tailwindcss")
+  writeFileSync(css, `@layer theme, base, components, utilities;
+@import ${JSON.stringify(path.join(tailwind, "theme.css"))} layer(theme) theme(reference);
+@import ${JSON.stringify(path.join(tailwind, "utilities.css"))} layer(utilities) source(${JSON.stringify(path.resolve(source))});
+@import ${JSON.stringify(path.join(here, "src", "theme.css"))};
+`)
+  try {
+    mkdirSync(to, { recursive: true })
+    for (const file of screens) {
+      const name = file.replace(/\.[jt]sx$/, "")
+      const entry = path.join(scratch, `${name}.js`)
+      writeFileSync(entry, `import ${JSON.stringify(css)};\nimport ${JSON.stringify(path.resolve(from, file))};\n`)
+      const out = await build({
+        configFile: false,
+        root: path.resolve(from),
+        publicDir: false,
+        logLevel: "warn",
+        plugins: [react({ compiler: true }), tailwindcss()],
+        define: { "process.env.NODE_ENV": JSON.stringify("production") },
+        build: {
+          write: false,
+          reportCompressedSize: false,
+          minify: true,
+          assetsInlineLimit: () => true,
+          lib: { entry, formats: ["es"], fileName: () => `${name}.js`, cssFileName: name },
+          rolldownOptions: { external: shared, output: { codeSplitting: false } },
+        },
+      })
+      const files = (Array.isArray(out) ? out : [out]).flatMap((o) => o.output)
+      const module = files.filter((f) => f.type === "chunk").map((f) => f.code).join("\n")
+      const styles = files.filter((f) => f.type === "asset" && f.fileName.endsWith(".css")).map((f) => String(f.source)).join("\n")
+      // `</script` and `</style` can't appear inside them, so neither ends early.
+      const html = `${tag}\n<style>${styles.replace(/<\/style/gi, "<\\/style")}</style>\n<div id="root"></div>\n<script type="module">${module.replace(/<\/script/gi, "<\\/script")}</script>\n`
+      writeFileSync(path.join(to, `${name}.html`), html)
+    }
+  } finally {
+    rmSync(scratch, { recursive: true, force: true })
+  }
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const [from, to, source, tag, ...shared] = process.argv.slice(2)
+  await buildScreens(from, to, source, tag, shared)
+}
