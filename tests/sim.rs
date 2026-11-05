@@ -20,8 +20,8 @@
 //!
 //! Throughout, a device without the key forges the newest hint (past every step, at nothing, at junk, at a copy that's
 //! gone) and leaves junk where copies go, while a tidier deletes the copies no reader needs. In seeds whose second bit
-//! is set, phase 2 is switched on: every step is signed in it (`db::SIGNED_STEPS`) and the tidier deletes the steps a
-//! copy covers too (`db::DELETE_COVERED_STEPS`), counting a step as kept long enough once it's been there a few
+//! is set, phase 2 is switched on (`Db::open_switched`): every step is signed in it (`db::SIGNED_STEPS`) and the tidier
+//! deletes the steps a copy covers too (`db::DELETE_COVERED_STEPS`), counting a step as kept long enough once it's been there a few
 //! minutes, and at the end everything a copy covers, before a device that's been away since the start reads on.
 
 use std::collections::BTreeMap;
@@ -256,6 +256,14 @@ fn phase_two(seed: u64) -> bool {
     seed & 2 != 0
 }
 
+/// Opens the database as a device does, with phase 2's switch on for it in a seed that switches it.
+async fn opened(bucket: &impl Bucket, keys: &Keys, phase2: bool) -> Result<Db> {
+    match phase2 {
+        true => Db::open_switched(bucket, PREFIX, keys.clone()).await,
+        false => Db::open(bucket, PREFIX, keys.clone()).await,
+    }
+}
+
 /// A device without the key, now and then until `done`: replacing the newest hint with one that says a step past every
 /// step, nothing, junk, or a copy that's gone, and leaving junk where the next copies go.
 async fn forge(link: Link, seed: u64, done: Arc<std::sync::atomic::AtomicBool>) {
@@ -352,7 +360,7 @@ async fn open(link: &Link, older: &Keys, newer: Option<&Keys>, signed_in: bool) 
     let ahead = |e: &anyhow::Error| e.is::<one::db::Ahead>();
     let mut keys = older.clone();
     let mut db = loop {
-        match retry(async || match Db::open(link, "global/sim/main", keys.clone()).await {
+        match retry(async || match opened(link, &keys, signed_in).await {
             Err(e) if ahead(&e) && keys.len() == 1 => Ok(None),
             other => other.map(Some),
         })
@@ -363,9 +371,6 @@ async fn open(link: &Link, older: &Keys, newer: Option<&Keys>, signed_in: bool) 
         }
     };
     db.sign_as(ed25519_dalek::SigningKey::from_bytes(&rand::random()));
-    if signed_in {
-        db.sign_in_steps();
-    }
     while !retry(async || match db.migrate(link, &[SCHEMA.to_string()]).await {
         Err(e) if ahead(&e) && db.keys().len() == 1 => Ok(false),
         other => other.map(|()| true),
@@ -408,7 +413,7 @@ async fn run(seed: u64) {
     let (older, newer) = keys(seed);
     let all = if changes { newer.clone() } else { older.clone() };
     // A device that reads the start, and is away until the end.
-    let mut away = retry(async || Db::open(&link, PREFIX, all.clone()).await).await;
+    let mut away = retry(async || opened(&link, &all, phase2).await).await;
     let done = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let forger = tokio::task::spawn_local(forge(link.clone(), seed, done.clone()));
     let tidying = tokio::task::spawn_local(tidier(link.clone(), all.clone(), phase2, done.clone()));
@@ -472,7 +477,7 @@ async fn run(seed: u64) {
     }
     link.objects.lock().unwrap().insert(one::db::newest_name(PREFIX), serde_json::to_vec(&json!({ "at": 999_999_999u64, "copy": 0 })).unwrap());
     retry(async || away.catch_up(&link).await).await;
-    let fresh = Db::open(&link.steady(), PREFIX, all.clone()).await.unwrap();
+    let fresh = opened(&link.steady(), &all, phase2).await.unwrap();
     link.none_failed_landed(&fresh, seed);
     signed(&link, &fresh, seed);
     assert_eq!(state(&away), state(&fresh), "seed {seed}: the device away since the start reads what a new device does");
@@ -486,11 +491,11 @@ async fn run(seed: u64) {
     }
     assert!(link.objects.lock().unwrap().keys().any(|k| k.contains("/copy/")), "seed {seed}: copies were written as steps piled up");
     // And a write after it all lands after every step.
-    let mut last = Db::open(&link.steady(), PREFIX, all.clone()).await.unwrap();
+    let mut last = opened(&link.steady(), &all, phase2).await.unwrap();
     last.sign_as(ed25519_dalek::SigningKey::from_bytes(&rand::random()));
     let before = last.at();
     link.steady().write(&mut last, &link.steady(), u64::MAX >> 2, 0).await.unwrap();
-    assert!(last.at() > before && state(&Db::open(&link.steady(), PREFIX, all).await.unwrap()) == state(&last), "seed {seed}: a write after the steps went lands after the last");
+    assert!(last.at() > before && state(&opened(&link.steady(), &all, phase2).await.unwrap()) == state(&last), "seed {seed}: a write after the steps went lands after the last");
 }
 
 /// Runs each seed on a paused clock of its own, as many at once as there are cores: each is its own run, so the order
@@ -553,11 +558,8 @@ async fn run_copied(seed: u64) {
         let (link, copies, seen, key) = (link.clone(), copies.clone(), seen.clone(), key.clone());
         devices.push(tokio::task::spawn_local(async move {
             let here = &copies[device];
-            let mut db = retry(async || Db::open(here, "global/sim/main", key.clone()).await).await;
+            let mut db = retry(async || opened(here, &key, phase_two(seed)).await).await;
             db.sign_as(ed25519_dalek::SigningKey::from_bytes(&rand::random()));
-            if phase_two(seed) {
-                db.sign_in_steps();
-            }
             retry(async || db.migrate(here, &[SCHEMA.to_string()]).await).await;
             for i in 0..WRITES {
                 let id = (device * WRITES + i) as u64;
@@ -599,7 +601,7 @@ async fn run_copied(seed: u64) {
         dbs.push(s.await.unwrap());
     }
     link.settle().await;
-    let fresh = Db::open(&link.steady(), "global/sim/main", key.clone()).await.unwrap();
+    let fresh = opened(&link.steady(), &key, phase_two(seed)).await.unwrap();
     link.none_failed_landed(&fresh, seed);
     signed(&link, &fresh, seed);
     for (db, copy) in dbs.iter_mut().zip(&copies) {
@@ -609,7 +611,7 @@ async fn run_copied(seed: u64) {
         assert_eq!(state(db), state(&fresh), "seed {seed}: device {i} caught up with the bucket");
         assert_eq!(db.checks().wrong, 0, "seed {seed}: device {i} read a signature that didn't hold");
         // Its copy alone opens to a step some device read, with the key and only with it.
-        let alone = Db::open(&copy.here_only(), "global/sim/main", key.clone()).await.unwrap_or_else(|e| panic!("seed {seed}: device {i}'s copy didn't open: {e:#}"));
+        let alone = opened(&copy.here_only(), &key, phase_two(seed)).await.unwrap_or_else(|e| panic!("seed {seed}: device {i}'s copy didn't open: {e:#}"));
         saw(&seen, &alone, seed);
         let other = Keys::from([(1, one::kernel::database_key(&[!(seed as u8); 32], "main"))]);
         assert!(Db::open(&copy.here_only(), "global/sim/main", other).await.is_ok_and(|db| db.version().unwrap() == 0), "seed {seed}: another key opened device {i}'s copy");

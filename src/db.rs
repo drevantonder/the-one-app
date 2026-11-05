@@ -23,26 +23,28 @@
 //! writer signs a step in it (`SIGNED`), one write, so no step is ever without one: readers from R1 on read both kinds,
 //! and older ones pass over the new kind, which is why it waits for the gate.
 //!
-//! The first step a writer signs in it says its own position, and every step signed in it after says the same
-//! (`Sig::from`), so the database records where its steps are signed in them from, a copy's step saying it for those
-//! that start there. Before that position a step and a copy count whatever their signatures say, as they do on older
-//! readers: older steps, and those whose signature beside them never landed, have none for good, and anyone with the
-//! key can write one beside an older writer's. From it, `refused` and `copy_holds` are the one check every device makes,
-//! readers, `tidy`, backups and writers of steps and copies alike: a step counts only if it's signed in it, its
-//! signature holds and says that position, the database it reads comes to the state hash it signs, and, for a database
-//! whose writers' rights are checked (`Signers`), its signer may make it; a copy only if it comes to its step's hash.
-//! A step that doesn't is passed over by every reader, its position taken. A key-holding writer is all an app
-//! database asks: a removed device gets no key to the next epoch, and its steps under an older one are passed over.
+//! Once phase 2's switch is on (`switch::SWITCH`), the first step a writer signs in it says its own position, and every
+//! step signed in it after says the same (`Sig::from`), so the database records where its steps are signed in them
+//! from, a copy's step saying it for those that start there; before, every reader ignores what any step says of it.
+//! Before that position a step and a copy count whatever their signatures say, as they do on older readers: older
+//! steps, and those whose signature beside them never landed, have none for good, and anyone with the key can write one
+//! beside an older writer's. From it, `refused` and `copy_holds` are the one check every device makes, readers, `tidy`,
+//! backups and writers of steps and copies alike: a step counts only if it's signed in it, its signature holds and says
+//! that position, the database it reads comes to the state hash it signs, and, for a database whose writers' rights are
+//! checked (`Signers`), its signer may make it; a copy only if it comes to its step's hash. A step that doesn't is
+//! passed over by every reader, its position taken. A key-holding writer is all an app database asks: a removed device
+//! gets no key to the next epoch, and its steps under an older one are passed over.
 //!
 //! What no reader needs goes from the bucket (`tidy`): copies before the newest that holds, once that has been there a
 //! day; and, once phase 2 switches it on (`DELETE_COVERED_STEPS`), the steps before it, kept `KEEP_STEPS_FOR` first,
-//! saying so first (`tidied`). A reader that doesn't find the next step where steps were deleted (`gap`), as when it
-//! read the start long ago, or opened with no copy to start from, goes on from the newest copy above it that holds, or
-//! with none says so (`Gone`), rather than read what's left as the whole database, or write its next step where a
-//! deleted one was. The bucket decides that, never the newest hint, which any device can write, even one without the
-//! key: a reader starts from the hint's copy only if it holds, and from the newest that does otherwise. Steps aren't
-//! merged in levels: a reader reads at most `COPY_EVERY` steps after a copy, so merging would save little, for a
-//! second kind of object to write, check and delete.
+//! saying so first (`tidied`). Until then a missing step is the end, and a reader never looks for `tidied` or lists
+//! copies. A reader that doesn't find the next step where steps were deleted (`gap`), as when it read the start long
+//! ago, or opened with no copy to start from, goes on from the newest copy above it that holds, or with none says so
+//! (`Gone`), rather than read what's left as the whole database, or write its next step where a deleted one was. The
+//! bucket decides that, never the newest hint, which any device can write, even one without the key: a reader starts
+//! from the hint's copy only if it holds, and from the newest that does otherwise, or, before the switch, from the
+//! first step. Steps aren't merged in levels: a reader reads at most `COPY_EVERY` steps after a copy, so merging would
+//! save little, for a second kind of object to write, check and delete.
 //!
 //! Along a database's positions epochs never go down: a step under an epoch lower than the step before it, or that
 //! doesn't open with the key of the epoch it names, is skipped by every reader, its position taken, and the next write
@@ -197,7 +199,8 @@ async fn start_at(bucket: &impl Bucket, prefix: &str, keys: &Keys, junk: &BTreeS
 /// bytes.
 fn open_copy(prefix: &str, keys: &Keys, copy: u64, sealed: &[u8], step: Option<&[u8]>) -> Result<Option<(u32, Vec<u8>)>> {
     let name = copy_name(prefix, copy);
-    let Ok(epoch) = crate::keys::epoch_of(sealed) else { return Ok(None) };
+    // Epoch 0 is never given: what's under it is anyone's junk, even a device's without the key.
+    let Some(epoch) = crate::keys::epoch_of(sealed).ok().filter(|e| *e > 0) else { return Ok(None) };
     let step = step.and_then(|s| crate::keys::epoch_of(s).ok());
     let given = keys.keys().next_back().copied().unwrap_or(0);
     if let Some(step) = step.filter(|s| *s > given && *s <= epoch) {
@@ -226,7 +229,7 @@ pub fn sealed_copy_holds(prefix: &str, keys: &Keys, at: u64, copy: &[u8], step: 
     let Some((step, key)) = step.and_then(|s| Some((s, keys.get(&crate::keys::epoch_of(s).ok()?)?))) else { return false };
     let Ok(opened) = crate::keys::open(key, &name, step) else { return false };
     let signed = Sig::unwrap(&name, &opened).or_else(|| beside.map(|b| Sig::check(key, &name, step, b)));
-    copy_holds(at, &bytes, &opened, signed.as_ref()).holds
+    copy_holds(at, &bytes, &opened, signed.as_ref(), crate::database::switch::SWITCH).holds
 }
 
 /// The keys a node uses, of those a caller handed it, for a database of a scope whose current epoch is `current`, as
@@ -281,6 +284,10 @@ pub struct Db {
     signer: Option<ed25519_dalek::SigningKey>,
     /// Whether it signs a step in it (`SIGNED`), rather than beside it: `SIGNED_STEPS`, or once the database's steps are.
     in_step: bool,
+    /// Whether phase 2's switch is on for it (`switch::SWITCH`, or `open_switched`): only then does it refuse steps from
+    /// where they're signed in them (`Sig::from`), and look for steps `tidy` deleted. Before, nothing is deleted, and
+    /// what anyone with the key, or without it, writes changes nothing a reader reads.
+    switched: bool,
     /// Where the database's steps are signed in them from, as what it read says (`Sig::from`).
     signed_from: Option<u64>,
     /// Who may write each step from there, if the database checks it.
@@ -308,15 +315,22 @@ impl Db {
     /// `open`, checking who wrote each step from where steps are signed in them with `signers`, as the database's
     /// writers must be.
     pub async fn open_checking(bucket: &impl Bucket, prefix: &str, keys: Keys, signers: std::sync::Arc<dyn Signers>) -> Result<Db> {
-        Db::open_as(bucket, prefix, keys, BTreeSet::new(), Some(signers)).await
+        Db::open_as(bucket, prefix, keys, BTreeSet::new(), Some(signers), crate::database::switch::SWITCH).await
     }
 
     /// `open`, passing over the steps at `junk`.
     pub async fn open_passing(bucket: &impl Bucket, prefix: &str, keys: Keys, junk: BTreeSet<u64>) -> Result<Db> {
-        Db::open_as(bucket, prefix, keys, junk, None).await
+        Db::open_as(bucket, prefix, keys, junk, None, crate::database::switch::SWITCH).await
     }
 
-    async fn open_as(bucket: &impl Bucket, prefix: &str, keys: Keys, junk: BTreeSet<u64>, signers: Option<std::sync::Arc<dyn Signers>>) -> Result<Db> {
+    /// `open`, with phase 2's switch on for this database, as `switch::SWITCH` puts it for every one: it signs the steps
+    /// it writes in them, refuses from where they're signed in them, and finds steps `tidy` deleted. For the simulator,
+    /// before the switch.
+    pub async fn open_switched(bucket: &impl Bucket, prefix: &str, keys: Keys) -> Result<Db> {
+        Db::open_as(bucket, prefix, keys, BTreeSet::new(), None, true).await
+    }
+
+    async fn open_as(bucket: &impl Bucket, prefix: &str, keys: Keys, junk: BTreeSet<u64>, signers: Option<std::sync::Arc<dyn Signers>>, switched: bool) -> Result<Db> {
         let mut db = Db {
             prefix: prefix.into(),
             keys,
@@ -329,14 +343,16 @@ impl Db {
             junk,
             junk_copies: BTreeSet::new(),
             signer: None,
-            in_step: SIGNED_STEPS,
+            in_step: SIGNED_STEPS || switched,
+            switched,
             signed_from: None,
             signers,
             checks: Checks::default(),
         };
-        // From the newest copy that holds, the hint's first; or from the first step, where `gap` finds any deleted.
+        // From the hint's copy, if it holds; or, once steps may be deleted and it names one, the newest copy that does;
+        // or from the first step, where `gap` finds any deleted.
         let hinted = hinted_copy(bucket, prefix).await?;
-        match holding(bucket, prefix, &db.keys, &db.junk, &mut db.junk_copies, 0, hinted, hinted > 0).await?.0 {
+        match holding(bucket, prefix, &db.keys, &db.junk, &mut db.junk_copies, 0, hinted, db.switched && hinted > 0, db.switched).await?.0 {
             Some(held) => db.start_from(held)?,
             None => confine(&mut db.conn)?,
         }
@@ -359,12 +375,6 @@ impl Db {
     /// Signs the steps it writes from now on with this endpoint key.
     pub fn sign_as(&mut self, key: ed25519_dalek::SigningKey) {
         self.signer = Some(key);
-    }
-
-    /// Signs the steps it writes from now on in them (`SIGNED`), as `SIGNED_STEPS` does for every database: phase 2's
-    /// switch, for one. From the first it writes, every writer signs in them, and readers refuse what isn't (`refused`).
-    pub fn sign_in_steps(&mut self) {
-        self.in_step = true;
     }
 
     /// Where the database's steps are signed in them from, as far as it has read.
@@ -467,7 +477,9 @@ impl Db {
     /// (`refused`, `Signers`, and, from where steps are signed in them, a state hash it signs that what it reads doesn't
     /// come to): whether it counts.
     fn take(&mut self, at: u64, step: &[u8], signed: Option<Result<Sig>>) -> Result<bool> {
-        let from = signed_from(self.signed_from, at, step, signed.as_ref());
+        // Before the switch nothing is refused: a step any key holder signs in it mustn't make this device refuse what
+        // older devices write.
+        let from = signed_from(self.signed_from, at, step, signed.as_ref()).filter(|_| self.switched);
         let checked = from.is_some_and(|f| at >= f);
         if refused(from, at, step, signed.as_ref()) || checked && !self.may(step, signed.as_ref())? {
             self.checks.refused += 1;
@@ -525,14 +537,15 @@ impl Db {
     }
 
     /// When the step after the last it read isn't there: whether steps it hasn't read were deleted, as when it read
-    /// the start long ago, or opened with no copy to start from. Only `tidy` deletes them, and it says so first
-    /// (`tidied`), so until then a missing step is the end; after, the reader goes on from the newest copy above it
-    /// that holds (true), or, with one there it can't use and none newer that holds, fails with `Gone`, rather than take
-    /// what it has for the whole database, and write its next step where one was. Copies that don't open with its keys
-    /// are anyone's junk, passed over. A bucket it can't list (a client's, which only reads) has only the newest hint's.
+    /// the start long ago, or opened with no copy to start from. Only `tidy` deletes them, once the switch is on, and it
+    /// says so first (`tidied`), so until then a missing step is the end, whatever is in the bucket; after, the reader
+    /// goes on from the newest copy above it that holds (true), or, with one there it can't use and none newer that
+    /// holds, fails with `Gone`, rather than take what it has for the whole database, and write its next step where one
+    /// was. Copies that don't open with its keys are anyone's junk, passed over. A bucket it can't list (a client's,
+    /// which only reads) has only the newest hint's.
     async fn gap(&mut self, bucket: &impl Bucket) -> Result<bool> {
         let next = self.at + 1;
-        if bucket.get(&tidied_name(&self.prefix)).await?.is_none() {
+        if !self.switched || bucket.get(&tidied_name(&self.prefix)).await?.is_none() {
             return Ok(false);
         }
         // Written since it looked: it reads on.
@@ -540,7 +553,7 @@ impl Db {
             return Ok(true);
         }
         let hinted = hinted_copy(bucket, &self.prefix).await?;
-        match holding(bucket, &self.prefix, &self.keys, &self.junk, &mut self.junk_copies, self.at, hinted, true).await? {
+        match holding(bucket, &self.prefix, &self.keys, &self.junk, &mut self.junk_copies, self.at, hinted, true, true).await? {
             (Some(held), _) => {
                 tracing::info!("{}: the steps after {} were deleted: read on from the copy at {}", self.prefix, self.at, held.at);
                 self.start_from(held)?;
@@ -580,7 +593,8 @@ impl Db {
     /// Step `at`, opened: None for one every reader passes over, under an epoch lower than the step before it or that
     /// doesn't open with the key of the epoch it names.
     fn unseal(&self, at: u64, name: &str, sealed: &[u8]) -> Result<Option<(u32, Vec<u8>)>> {
-        let Ok(epoch) = crate::keys::epoch_of(sealed) else { return Ok(None) };
+        // Epoch 0 is never given: anyone's junk.
+        let Some(epoch) = crate::keys::epoch_of(sealed).ok().filter(|e| *e > 0) else { return Ok(None) };
         if epoch < self.epoch {
             tracing::debug!("{name} is under epoch {epoch}, after {}: passed over", self.epoch);
             return Ok(None);
@@ -780,7 +794,7 @@ impl Db {
             let name = copy_name(&self.prefix, self.at);
             let bytes = self.conn.serialize("main")?.to_vec();
             let signed = Sig::unwrap(&step_name(&self.prefix, self.at), step);
-            if copy_holds(self.at, &bytes, step, signed.as_ref()).holds {
+            if copy_holds(self.at, &bytes, step, signed.as_ref(), self.switched).holds {
                 let sealed = crate::keys::seal(self.epoch, key, &name, &bytes);
                 let ours = match bucket.create(&name, &sealed).await {
                     Ok(true) => true,
@@ -820,16 +834,19 @@ impl Db {
 
 /// Deletes from the bucket, at `now` (ms), what no reader of the database at `prefix` needs: copies before the newest
 /// that holds (`holding`: opens with `keys`, passing over `junk`, and `copy_holds`), once that one has been there
-/// `KEEP_OLDER_COPIES_FOR`, and with `steps` (`DELETE_COVERED_STEPS`), the steps before it and their signatures, each
-/// once it's been there `KEEP_STEPS_FOR`, if it comes to the state hash signed at its step, and once it has said so
-/// (`tidied`). → how many objects went.
-pub async fn tidy(bucket: &impl Bucket, prefix: &str, keys: &Keys, junk: &BTreeSet<u64>, now: u64, steps: bool) -> Result<usize> {
+/// `KEEP_OLDER_COPIES_FOR`, and with `switched` (phase 2's switch: `DELETE_COVERED_STEPS`), the steps before it and their
+/// signatures, each once it's been there `KEEP_STEPS_FOR`, if it comes to the state hash signed at its step, and once it
+/// has said so (`tidied`). → how many objects went.
+pub async fn tidy(bucket: &impl Bucket, prefix: &str, keys: &Keys, junk: &BTreeSet<u64>, now: u64, switched: bool) -> Result<usize> {
     let hinted = hinted_copy(bucket, prefix).await?;
-    let Some(held) = holding(bucket, prefix, keys, junk, &mut BTreeSet::new(), 0, hinted, true).await?.0 else { return Ok(0) };
-    // Nor one whose signature is wrong, which a reader starts from until steps are signed in them, but nothing older
-    // goes for.
+    let Some(held) = holding(bucket, prefix, keys, junk, &mut BTreeSet::new(), 0, hinted, true, switched).await?.0 else { return Ok(0) };
+    // One whose signature is wrong, which a reader starts from until the switch: with it, nothing older goes for it;
+    // before, a signature anyone could write beside its step mustn't keep every older copy, so it's only said.
     if held.check.hash == Some(false) || matches!(held.signed, Some(Err(_))) {
-        return Ok(0);
+        if switched {
+            return Ok(0);
+        }
+        tracing::warn!("{prefix}: the copy at {}'s step's signature doesn't hold: the copies before it go all the same", held.at);
     }
     let copy = held.at;
     let copies = bucket.objects(&format!("{}/copy", prefix)).await?;
@@ -842,7 +859,7 @@ pub async fn tidy(bucket: &impl Bucket, prefix: &str, keys: &Keys, junk: &BTreeS
         bucket.delete(&format!("{}/copy/{n}", prefix)).await?;
         gone += 1;
     }
-    if !(steps && held.check.hash == Some(true)) {
+    if !(switched && held.check.hash == Some(true)) {
         return Ok(gone);
     }
     let old: Vec<String> = bucket.objects(prefix).await?.into_iter().map(|(n, written)| (format!("{prefix}/{n}"), written)).filter(|(full, written)| position(full).is_some_and(|(_, at)| at < copy) && written + KEEP_STEPS_FOR <= now).map(|(full, _)| full).collect();
@@ -863,35 +880,44 @@ async fn hinted_copy(bucket: &impl Bucket, prefix: &str) -> Result<u64> {
     Ok(bucket.get(&newest_name(prefix)).await?.map_or(0, |o| newest(&o.bytes).1))
 }
 
-/// The newest copy above `above` that holds: the newest hint's, `hinted`, first, then, if `list`, the others the
-/// bucket has, newest first. → it, or none, and the newest of those above it a reader can't use that aren't junk (they
-/// open with a key it was given and don't hold, or need one it wasn't given). Junk is anyone's to write, as the hint
-/// is, so it's passed over, and kept in `junk_copies`, since a copy, written once, never comes to hold. A bucket that
-/// isn't listed from here (a client's, which only reads) has only the hint's.
+/// The newest copy above `above` that holds, `switched` as phase 2's switch is: the newest hint's, `hinted`, first, then,
+/// if it doesn't and `list`, the others the bucket has, newest first. → it, or none, and the newest of those above it a
+/// reader can't use that aren't junk (they open with a key it was given and don't hold). Junk is anyone's to write, as
+/// the hint is, so it's passed over, and kept in `junk_copies`, since a copy, written once, never comes to hold; and so
+/// is a copy that doesn't open with the keys it was given, which never stops a reader. A bucket that isn't listed from
+/// here (a client's, which only reads) has only the hint's.
 #[allow(clippy::too_many_arguments)]
-async fn holding(bucket: &impl Bucket, prefix: &str, keys: &Keys, junk: &BTreeSet<u64>, junk_copies: &mut BTreeSet<u64>, above: u64, hinted: u64, list: bool) -> Result<(Option<Held>, Option<u64>)> {
-    let mut copies = vec![hinted];
-    if list {
-        match bucket.objects(&format!("{prefix}/copy")).await {
-            Ok(listed) => {
-                let mut listed: Vec<u64> = listed.iter().filter_map(|(n, _)| n.parse().ok()).filter(|n| *n != hinted).collect();
-                listed.sort_unstable_by(|a, b| b.cmp(a));
-                copies.extend(listed);
-            }
-            Err(err) if unanswered(&err) => return Err(err),
-            Err(err) => tracing::debug!("{prefix}'s copies: {err:#}"),
-        }
-    }
+async fn holding(bucket: &impl Bucket, prefix: &str, keys: &Keys, junk: &BTreeSet<u64>, junk_copies: &mut BTreeSet<u64>, above: u64, hinted: u64, list: bool, switched: bool) -> Result<(Option<Held>, Option<u64>)> {
     let mut unusable = None;
-    copies.retain(|c| *c > above && !junk_copies.contains(c));
-    for copy in copies {
-        match check_copy(bucket, prefix, keys, junk, copy).await {
-            Ok(Checked::Held(held)) if held.check.holds => return Ok((Some(held), unusable)),
-            Ok(Checked::Held(_)) => unusable = unusable.max(Some(copy)),
-            Ok(Checked::Junk) => drop(junk_copies.insert(copy)),
-            Ok(Checked::Absent) => {}
-            Err(err) if err.is::<Missing>() => unusable = unusable.max(Some(copy)),
-            Err(err) => return Err(err),
+    for listed in [false, true] {
+        let copies = match (listed, list) {
+            (false, _) => vec![hinted],
+            (true, false) => break,
+            (true, true) => match bucket.objects(&format!("{prefix}/copy")).await {
+                Ok(listed) => {
+                    let mut listed: Vec<u64> = listed.iter().filter_map(|(n, _)| n.parse().ok()).filter(|n| *n != hinted).collect();
+                    listed.sort_unstable_by(|a, b| b.cmp(a));
+                    listed
+                }
+                Err(err) if unanswered(&err) => return Err(err),
+                Err(err) => {
+                    tracing::debug!("{prefix}'s copies: {err:#}");
+                    break;
+                }
+            },
+        };
+        for copy in copies {
+            if copy <= above || junk_copies.contains(&copy) {
+                continue;
+            }
+            match check_copy(bucket, prefix, keys, junk, copy, switched).await {
+                Ok(Checked::Held(held)) if held.check.holds => return Ok((Some(held), unusable)),
+                Ok(Checked::Held(_)) => unusable = unusable.max(Some(copy)),
+                Ok(Checked::Junk) => drop(junk_copies.insert(copy)),
+                Ok(Checked::Absent) => {}
+                Err(err) if err.is::<Missing>() => tracing::debug!("{prefix}'s copy at {copy}: {err:#}: passed over"),
+                Err(err) => return Err(err),
+            }
         }
     }
     Ok((None, unusable))
@@ -909,7 +935,7 @@ enum Checked {
 
 /// The copy at `copy`, if it's one to start from (`open_copy`), with what its step's signature says of it
 /// (`copy_holds`). A signature it can't fetch stops it, rather than count as none.
-async fn check_copy(bucket: &impl Bucket, prefix: &str, keys: &Keys, junk: &BTreeSet<u64>, copy: u64) -> Result<Checked> {
+async fn check_copy(bucket: &impl Bucket, prefix: &str, keys: &Keys, junk: &BTreeSet<u64>, copy: u64, switched: bool) -> Result<Checked> {
     if copy == 0 || junk.contains(&copy) {
         return Ok(Checked::Junk);
     }
@@ -917,7 +943,7 @@ async fn check_copy(bucket: &impl Bucket, prefix: &str, keys: &Keys, junk: &BTre
     let step = bucket.get(&step_name(prefix, copy)).await?;
     let Some((epoch, bytes)) = open_copy(prefix, keys, copy, &sealed.bytes, step.as_ref().map(|s| s.bytes.as_slice()))? else { return Ok(Checked::Junk) };
     let Some((step, signed)) = opened_at(bucket, prefix, keys, copy).await? else { return Ok(Checked::Junk) };
-    let check = copy_holds(copy, &bytes, &step, signed.as_ref());
+    let check = copy_holds(copy, &bytes, &step, signed.as_ref(), switched);
     Ok(Checked::Held(Held { at: copy, epoch, bytes, signed, check }))
 }
 
@@ -936,11 +962,11 @@ pub struct CopyCheck {
 /// or beside it, the same on every device and for every use: readers, `tidy`, backups, and the writer of the copy. A
 /// copy holds only if it's a database; one whose step is signed in it only if that signature holds; and, once steps
 /// are signed in them, only if it comes to the state hash signed. Before, it holds whatever that says, as it does on
-/// older readers.
-pub fn copy_holds(at: u64, copy: &[u8], step: &[u8], signed: Option<&Result<Sig>>) -> CopyCheck {
+/// older readers, and before phase 2's switch (`switched`) steps are signed in them from nowhere, whatever any says.
+pub fn copy_holds(at: u64, copy: &[u8], step: &[u8], signed: Option<&Result<Sig>>, switched: bool) -> CopyCheck {
     let inside = step.first() == Some(&SIGNED);
     let from = match signed {
-        Some(Ok(sig)) if inside => sig.from.filter(|f| *f <= at),
+        Some(Ok(sig)) if inside && switched => sig.from.filter(|f| *f <= at),
         _ => None,
     };
     let database = copied(copy).ok();
@@ -1488,6 +1514,13 @@ mod tests {
         db.query("select text from notes order by rowid", &[]).unwrap().into_iter().map(|r| r["text"].as_str().unwrap().to_string()).collect()
     }
 
+    /// A device with phase 2's switch on, so it finds steps `tidy` deleted, writing beside its steps as today's do.
+    async fn switched(bucket: &impl Bucket, key: &Keys) -> Result<Db> {
+        let mut db = Db::open_switched(bucket, "p", key.clone()).await?;
+        db.in_step = false;
+        Ok(db)
+    }
+
     #[test]
     fn what_the_bucket_keeps_is_sealed_to_its_name() {
         rt().block_on(async {
@@ -1617,11 +1650,11 @@ mod tests {
             let (_, copy, _) = newest(&bucket.objects.lock().unwrap()["p/newest"]);
             assert_eq!(tidy(&bucket, "p", &key, &BTreeSet::new(), now, true).await.unwrap(), 2 * (copy as usize - 1));
             assert!(bucket.objects.lock().unwrap().contains_key(&step_name("p", copy)) && !bucket.objects.lock().unwrap().contains_key(&step_name("p", 1)));
-            let read = Db::open(&bucket, "p", key.clone()).await.unwrap();
+            let read = switched(&bucket, &key).await.unwrap();
             assert_eq!(notes(&read), all);
             assert_eq!(read.checks().wrong, 0);
             // Not with a copy that isn't what its step's signer says it comes to.
-            let mut b = Db::open(&bucket, "p", key.clone()).await.unwrap();
+            let mut b = switched(&bucket, &key).await.unwrap();
             b.sign_as(ed25519_dalek::SigningKey::from_bytes(&rand::random()));
             for n in 0..COPY_EVERY {
                 note(&mut b, &bucket, &format!("more {n}")).await;
@@ -1636,11 +1669,11 @@ mod tests {
             assert_eq!((read.at(), read.checks().wrong), (b.at(), 1));
             // Without it, a reader starts from the copy before, and reads every step since.
             bucket.objects.lock().unwrap().remove(&copy_name("p", newer));
-            let read = Db::open(&bucket, "p", key.clone()).await.unwrap();
+            let read = switched(&bucket, &key).await.unwrap();
             assert_eq!((read.copy, notes(&read)), (copy, notes(&b)));
             // With no copy that holds, and the steps before it gone, a reader says so rather than reading what's left.
             bucket.objects.lock().unwrap().insert(copy_name("p", copy), crate::keys::seal(1, &key[&1], &copy_name("p", copy), b"not the database"));
-            let err = Db::open(&bucket, "p", key).await.err().expect("it can't read");
+            let err = switched(&bucket, &key).await.err().expect("it can't read");
             assert_eq!(err.downcast_ref::<Gone>(), Some(&Gone { copy }), "{err:#}");
         });
     }
@@ -1657,7 +1690,7 @@ mod tests {
             // A writer of phase 2's, signing in the step, beside one of today's.
             let mut b = Db::open(&bucket, "p", key.clone()).await.unwrap();
             b.sign_as(inside.clone());
-            b.in_step = true;
+            (a.switched, b.switched, b.in_step) = (true, true, true);
             for n in 0..COPY_EVERY + 10 {
                 let db = if n % 2 == 0 { &mut a } else { &mut b };
                 note(db, &bucket, &format!("note {n}")).await;
@@ -1706,14 +1739,14 @@ mod tests {
         rt().block_on(async {
             let bucket = Memory::default();
             let key = keys(&[(1, rand::random())]);
-            let mut a = Db::open(&bucket, "p", key.clone()).await.unwrap();
+            let mut a = switched(&bucket, &key).await.unwrap();
             a.sign_as(ed25519_dalek::SigningKey::from_bytes(&rand::random()));
             a.migrate(&bucket, &[SCHEMA.into()]).await.unwrap();
             for n in 0..50 {
                 note(&mut a, &bucket, &format!("note {n}")).await;
             }
             // A device that read this far, and was away while the rest was written, and the steps it hasn't read deleted.
-            let mut away = Db::open(&bucket, "p", key.clone()).await.unwrap();
+            let mut away = switched(&bucket, &key).await.unwrap();
             for n in 50..204 {
                 note(&mut a, &bucket, &format!("note {n}")).await;
             }
@@ -1726,21 +1759,21 @@ mod tests {
             assert_eq!(away.at(), 206);
             all.push("back".into());
             assert_eq!(notes(&away), all);
-            assert_eq!(notes(&Db::open(&bucket, "p", key.clone()).await.unwrap()), all);
+            assert_eq!(notes(&switched(&bucket, &key).await.unwrap()), all);
             // A reader whose hint names a copy that isn't there, with the steps before the newest gone, reads it from the
             // newest copy that holds, rather than reading it as empty; with none that holds, it says so.
             bucket.objects.lock().unwrap().insert(newest_name("p"), serde_json::to_vec(&json!({ "at": 206, "copy": 101, "epoch": 1 })).unwrap());
-            assert_eq!(notes(&Db::open(&bucket, "p", key.clone()).await.unwrap()), all);
+            assert_eq!(notes(&switched(&bucket, &key).await.unwrap()), all);
             let copy = away.copy;
             let mut objects = bucket.objects.lock().unwrap();
             let held = objects[&copy_name("p", copy)].clone();
             objects.insert(copy_name("p", copy), crate::keys::seal(1, &key[&1], &copy_name("p", copy), b"not the database"));
             drop(objects);
-            assert!(Db::open(&bucket, "p", key.clone()).await.is_err(), "it can't read");
+            assert!(switched(&bucket, &key).await.is_err(), "it can't read");
             // Nor does a hint that says nothing was written make it start a database where one was.
             bucket.objects.lock().unwrap().insert(copy_name("p", copy), held);
             bucket.objects.lock().unwrap().insert(newest_name("p"), serde_json::to_vec(&json!({ "at": 0, "copy": 0, "epoch": 0 })).unwrap());
-            assert_eq!(notes(&Db::open(&bucket, "p", key.clone()).await.unwrap()), all);
+            assert_eq!(notes(&switched(&bucket, &key).await.unwrap()), all);
         });
     }
 
@@ -1751,7 +1784,7 @@ mod tests {
         rt().block_on(async {
             let bucket = Memory::default();
             let key = keys(&[(1, rand::random())]);
-            let mut a = Db::open(&bucket, "p", key.clone()).await.unwrap();
+            let mut a = switched(&bucket, &key).await.unwrap();
             a.sign_as(ed25519_dalek::SigningKey::from_bytes(&rand::random()));
             a.migrate(&bucket, &[SCHEMA.into()]).await.unwrap();
             for n in 0..2 * COPY_EVERY + 5 {
@@ -1762,14 +1795,14 @@ mod tests {
             let mut all = notes(&a);
             // A hint past every step, naming no copy: a new reader reads it all, and its writes land after the last.
             hint(999_999_999, 0);
-            let mut b = Db::open(&bucket, "p", key.clone()).await.unwrap();
+            let mut b = switched(&bucket, &key).await.unwrap();
             assert_eq!(notes(&b), all);
             note(&mut b, &bucket, "after").await;
             note(&mut b, &bucket, "and after").await;
             assert_eq!(b.at(), a.at() + 2);
             all.extend(["after".to_string(), "and after".to_string()]);
             a.catch_up(&bucket).await.unwrap();
-            assert_eq!((notes(&a), notes(&Db::open(&bucket, "p", key.clone()).await.unwrap())), (all.clone(), all.clone()));
+            assert_eq!((notes(&a), notes(&switched(&bucket, &key).await.unwrap())), (all.clone(), all.clone()));
             // Junk where the next copy goes, from a device without the key: the writer's hint never names it.
             let next = newest(&bucket.objects.lock().unwrap()[&newest_name("p")]).1 + COPY_EVERY;
             let junk = crate::keys::seal(1, &rand::random(), &copy_name("p", next), b"junk");
@@ -1784,7 +1817,7 @@ mod tests {
             // goes on from it.
             for copy in [next, 1, 999_999_999] {
                 hint(a.at(), copy);
-                assert_eq!(notes(&Db::open(&bucket, "p", key.clone()).await.unwrap()), all, "a hint naming copy {copy}");
+                assert_eq!(notes(&switched(&bucket, &key).await.unwrap()), all, "a hint naming copy {copy}");
             }
             assert!(tidy(&bucket, "p", &key, &BTreeSet::new(), 10 * KEEP_STEPS_FOR, true).await.unwrap() > 0);
             assert!(!bucket.objects.lock().unwrap().contains_key(&step_name("p", next - 1)));
@@ -1793,7 +1826,7 @@ mod tests {
             note(&mut a, &bucket, "last").await;
             all.push("last".into());
             assert_eq!(newest(&bucket.objects.lock().unwrap()[&newest_name("p")]).1, 999_999_999);
-            assert_eq!(notes(&Db::open(&bucket, "p", key.clone()).await.unwrap()), all);
+            assert_eq!(notes(&switched(&bucket, &key).await.unwrap()), all);
         });
     }
 
@@ -1809,7 +1842,7 @@ mod tests {
             a.sign_as(ed25519_dalek::SigningKey::from_bytes(&rand::random()));
             a.migrate(&bucket, &[SCHEMA.into()]).await.unwrap();
             note(&mut a, &bucket, "before").await;
-            a.sign_in_steps();
+            (a.in_step, a.switched) = (true, true);
             note(&mut a, &bucket, "signed").await;
             assert_eq!(a.signed_from(), Some(3));
             // Another device's steps, as one that ignores that would write them: unsigned, signed beside, signed in them
@@ -1838,15 +1871,15 @@ mod tests {
             let all = notes(&a);
             assert_eq!(all.iter().filter(|n| *n == "before").count(), 1);
             assert!(a.checks().refused >= 4, "{:?}", a.checks());
-            let from_copy = Db::open(&bucket, "p", key.clone()).await.unwrap();
+            let from_copy = Db::open_switched(&bucket, "p", key.clone()).await.unwrap();
             assert!(from_copy.copy > 7 && from_copy.signed_from() == Some(3));
             bucket.objects.lock().unwrap().retain(|n, _| !n.contains("/copy/"));
-            let from_start = Db::open(&bucket, "p", key.clone()).await.unwrap();
+            let from_start = Db::open_switched(&bucket, "p", key.clone()).await.unwrap();
             assert_eq!((notes(&from_copy), notes(&from_start)), (all.clone(), all.clone()));
             assert_eq!((from_start.checks().refused, from_start.signed_from()), (a.checks().refused, Some(3)));
             // A writer with no key to sign with doesn't write; one whose signer the database's check says no to
             // doesn't either, and every reader passes over a step by it.
-            let mut unsigned = Db::open(&bucket, "p", key.clone()).await.unwrap();
+            let mut unsigned = Db::open_switched(&bucket, "p", key.clone()).await.unwrap();
             assert!(unsigned.write(&bucket, |c| execute(c, "insert into notes values ('x')", &[]).map(|_| ())).await.is_err());
             let only: [u8; 32] = a.signer.as_ref().unwrap().verifying_key().to_bytes();
             struct Only([u8; 32]);
@@ -1856,17 +1889,142 @@ mod tests {
                 }
             }
             let signers: std::sync::Arc<dyn Signers> = std::sync::Arc::new(Only(only));
-            let mut stranger = Db::open_checking(&bucket, "p", key.clone(), signers.clone()).await.unwrap();
+            let mut stranger = Db::open_as(&bucket, "p", key.clone(), BTreeSet::new(), Some(signers.clone()), true).await.unwrap();
             stranger.sign_as(other.clone());
             assert!(stranger.write(&bucket, |c| execute(c, "insert into notes values ('x')", &[]).map(|_| ())).await.is_err());
-            let mut ignored = Db::open(&bucket, "p", key.clone()).await.unwrap();
+            let mut ignored = Db::open_switched(&bucket, "p", key.clone()).await.unwrap();
             ignored.sign_as(other);
             note(&mut ignored, &bucket, "by another").await;
             // As a device that doesn't check would copy it, which every device checks before writing one.
             bucket.objects.lock().unwrap().retain(|n, _| !n.contains("/copy/"));
-            let checked = Db::open_checking(&bucket, "p", key.clone(), signers).await.unwrap();
+            let checked = Db::open_as(&bucket, "p", key.clone(), BTreeSet::new(), Some(signers), true).await.unwrap();
             assert_eq!((notes(&checked), checked.checks().refused), (all, from_start.checks().refused + 1));
         });
     }
 
+    /// A bucket that notes the objects and folders asked of it.
+    struct Counted<'a> {
+        bucket: &'a Memory,
+        asked: std::sync::Mutex<Vec<String>>,
+    }
+
+    impl Bucket for Counted<'_> {
+        async fn get(&self, name: &str) -> Result<Option<crate::bucket::Object>> {
+            self.asked.lock().unwrap().push(name.into());
+            self.bucket.get(name).await
+        }
+        async fn create(&self, name: &str, bytes: &[u8]) -> Result<bool> {
+            self.bucket.create(name, bytes).await
+        }
+        async fn replace(&self, name: &str, bytes: &[u8], tag: Option<&str>) -> Result<bool> {
+            self.bucket.replace(name, bytes, tag).await
+        }
+        async fn wait(&self, ms: u64) {
+            self.bucket.wait(ms).await
+        }
+        async fn objects(&self, folder: &str) -> Result<Vec<(String, u64)>> {
+            self.asked.lock().unwrap().push(format!("{folder}/"));
+            self.bucket.objects(folder).await
+        }
+    }
+
+    /// A device of the install without the key can write `tidied`, and steps and copies far ahead under an epoch
+    /// nobody was given: before the switch, readers and writers never look for either, and read and write as before;
+    /// with it, a copy that doesn't open stops nobody.
+    #[test]
+    fn junk_from_a_device_without_the_key_stops_no_reader() {
+        rt().block_on(async {
+            let bucket = Memory::default();
+            let key = keys(&[(1, rand::random()), (3, rand::random())]);
+            let mut a = Db::open(&bucket, "p", key.clone()).await.unwrap();
+            a.sign_as(ed25519_dalek::SigningKey::from_bytes(&rand::random()));
+            a.migrate(&bucket, &[SCHEMA.into()]).await.unwrap();
+            for n in 0..COPY_EVERY + 5 {
+                note(&mut a, &bucket, &format!("note {n}")).await;
+            }
+            let mut all = notes(&a);
+            let far = 1_000_000;
+            {
+                let mut objects = bucket.objects.lock().unwrap();
+                objects.insert(tidied_name("p"), b"{}".to_vec());
+                // Under epoch 0, never given, and under epoch 2, which this reader wasn't.
+                for (at, epoch) in [(far, 0), (far + 1, 2)] {
+                    for name in [step_name("p", at), copy_name("p", at)] {
+                        objects.insert(name.clone(), crate::keys::seal(epoch, &rand::random(), &name, b"junk"));
+                    }
+                }
+            }
+            let counted = Counted { bucket: &bucket, asked: Default::default() };
+            let mut b = Db::open(&counted, "p", key.clone()).await.unwrap();
+            assert_eq!(notes(&b), all);
+            note(&mut b, &counted, "after").await;
+            all.push("after".into());
+            a.catch_up(&counted).await.unwrap();
+            assert_eq!((notes(&a), notes(&Db::open(&counted, "p", key.clone()).await.unwrap())), (all.clone(), all.clone()));
+            // Nor does it cost a reader more than it did: no `tidied`, no listing, and a catch-up with nothing new is
+            // one step asked for.
+            let asked = std::mem::take(&mut *counted.asked.lock().unwrap());
+            assert!(!asked.iter().any(|n| *n == tidied_name("p") || n.ends_with('/')), "{asked:?}");
+            a.catch_up(&counted).await.unwrap();
+            assert_eq!(*counted.asked.lock().unwrap(), vec![step_name("p", a.at() + 1)]);
+            // With the switch, it finds the junk copies, and passes over them.
+            assert_eq!(notes(&switched(&bucket, &key).await.unwrap()), all);
+            bucket.objects.lock().unwrap().insert(newest_name("p"), serde_json::to_vec(&json!({ "at": far + 1, "copy": 0 })).unwrap());
+            assert_eq!(notes(&switched(&bucket, &key).await.unwrap()), all);
+        });
+    }
+
+    /// Before the switch, a step any key holder signs in it, saying steps are signed in them from it, makes no device
+    /// refuse what older devices write, nor sign its own in them, nor stops one with no key to sign with.
+    #[test]
+    fn before_the_switch_a_step_signed_in_it_refuses_nothing() {
+        rt().block_on(async {
+            let bucket = Memory::default();
+            let key = keys(&[(1, rand::random())]);
+            let mut a = Db::open(&bucket, "p", key.clone()).await.unwrap();
+            a.sign_as(ed25519_dalek::SigningKey::from_bytes(&rand::random()));
+            a.migrate(&bucket, &[SCHEMA.into()]).await.unwrap();
+            note(&mut a, &bucket, "before").await;
+            let name = step_name("p", 2);
+            let plain = crate::keys::open(&key[&1], &name, &bucket.objects.lock().unwrap()[&name]).unwrap();
+            let at = a.at() + 1;
+            let early = ed25519_dalek::SigningKey::from_bytes(&rand::random());
+            let signed_in = Sig::wrap(&early, &step_name("p", at), &plain, None, Some(at));
+            bucket.objects.lock().unwrap().insert(step_name("p", at), crate::keys::seal(1, &key[&1], &step_name("p", at), &signed_in));
+            let mut older = Db::open(&bucket, "p", key.clone()).await.unwrap();
+            note(&mut older, &bucket, "unsigned").await;
+            note(&mut a, &bucket, "beside").await;
+            assert!(bucket.objects.lock().unwrap().contains_key(&sig_name("p", a.at())), "it signs beside its step, as before");
+            older.catch_up(&bucket).await.unwrap();
+            let read = Db::open(&bucket, "p", key).await.unwrap();
+            assert_eq!((notes(&read), notes(&a)), (notes(&older), notes(&older)));
+            assert!(notes(&read).ends_with(&["unsigned".to_string(), "beside".to_string()]));
+            for db in [&a, &older, &read] {
+                assert_eq!((db.checks().refused, db.signed_from()), (0, None));
+            }
+        });
+    }
+
+    /// Before the switch, junk where the signature beside a copy's step goes, which anyone can write there before its
+    /// writer does, keeps no older copy.
+    #[test]
+    fn before_the_switch_a_junk_signature_keeps_no_older_copy() {
+        rt().block_on(async {
+            let bucket = Memory::default();
+            let key = keys(&[(1, rand::random())]);
+            let mut a = Db::open(&bucket, "p", key.clone()).await.unwrap();
+            a.sign_as(ed25519_dalek::SigningKey::from_bytes(&rand::random()));
+            a.migrate(&bucket, &[SCHEMA.into()]).await.unwrap();
+            for n in 0..2 * COPY_EVERY + 5 {
+                note(&mut a, &bucket, &format!("note {n}")).await;
+            }
+            let (_, copy, _) = newest(&bucket.objects.lock().unwrap()[&newest_name("p")]);
+            let sig = sig_name("p", copy);
+            bucket.objects.lock().unwrap().insert(sig.clone(), crate::keys::seal(1, &rand::random(), &sig, b"junk"));
+            assert_eq!(tidy(&bucket, "p", &key, &BTreeSet::new(), 10 * KEEP_STEPS_FOR, false).await.unwrap(), 1);
+            let copies: Vec<String> = bucket.objects.lock().unwrap().keys().filter(|n| n.contains("/copy/")).cloned().collect();
+            assert_eq!(copies, vec![copy_name("p", copy)]);
+            assert_eq!(notes(&Db::open(&bucket, "p", key).await.unwrap()), notes(&a));
+        });
+    }
 }
