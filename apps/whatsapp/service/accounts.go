@@ -6,7 +6,6 @@ package main
 
 import (
 	"context"
-	_ "embed"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -19,9 +18,6 @@ import (
 
 	"github.com/skip2/go-qrcode"
 )
-
-//go:embed settings.html
-var settingsHTML string
 
 // whatsapp is every link this device keeps, the first first.
 type whatsapp struct {
@@ -74,11 +70,6 @@ func (w *whatsapp) run(ctx context.Context, op string, raw json.RawMessage) (any
 		}
 	}
 	switch op {
-	case "_screen":
-		if in.Name != "settings" {
-			return nil, fmt.Errorf("WhatsApp has no screen %q", in.Name)
-		}
-		return settingsHTML, nil
 	case "accounts":
 		all, _, err := w.accounts()
 		return all, err

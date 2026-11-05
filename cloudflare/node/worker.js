@@ -934,7 +934,7 @@ function answered(out, app) {
 /// An app's screen, as its page (src/screen.rs).
 async function screenOf(request, person, who, view, app, name, params, scope) {
   const reply = await person.appWorker(who, app).getEntrypoint("Call").run("screen", name, {}, null);
-  const body = reply.ok ?? '<div id="missing"></div><script>missing.innerHTML = one.notFound()</script>';
+  const body = reply.ok ?? "";
   const context = { app: app.name, screen: name, params, me: view.me, scope, config: { name: CONFIG.name, cli: CONFIG.cli, api: `http://localhost:${CONFIG.port}`, made_here: CONFIG.made_here } };
   return screenPage(request, screen(JSON.stringify(context), body, new URL(request.url).searchParams.get("linked") === "true"));
 }

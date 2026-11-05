@@ -63,35 +63,6 @@
     `<div class="problem-title">${esc(title)}</div>${text ? `<div class="problem-text">${esc(text)}</div>` : ""}` +
     (action ? button(action, "problem-action") : "") + "</div></div>";
 
-  // Errors and statuses are written for people and agents at once: what happened and what to do, in people's words,
-  // then after a colon or in brackets what an agent needs (a tool to call, an id, a code). A sentence with any of
-  // those is for agents only.
-  const forAgents = /\b[a-z][a-z0-9-]*_[a-z0-9_]+\b|\b(user|group):[0-9a-f]{6,}|\b(kernel|node|deploy|scope|token|provider|workerd|bucket|lease|ctx)s?\b|\b(an|the|this|that) install\b|install's|[\w.-]*\/[\w.-]+\/|\b[1-5]\d\d\b/i;
-
-  // What a failure means for someone: what happened, in plain words, whether anything was lost, and what to do next.
-  // `app` is the title of the app that failed, where a screen knows it.
-  one.plain = (err, { app } = {}) => {
-    let msg = String(err?.message ?? err ?? "").replace(/^(Uncaught )?\w*Error:\s*/, "").trim();
-    while (/\([^()]*\)/.test(msg)) msg = msg.replace(/\s*\([^()]*\)/g, "");
-    if (/failed to fetch|load failed|networkerror|not connected|offline|unreachable|no route|connection (refused|reset|lost)/i.test(msg))
-      return { title: "Couldn't reach your devices.", safe: "Nothing was lost.", next: "Check your connection." };
-    if (/timed? ?out|took too long|took longer than/i.test(msg))
-      return { title: app ? `${app} took too long, so it stopped.` : "That took too long, so it stopped.", safe: "Nothing was lost.", next: "" };
-    if (/may already be done/i.test(msg)) return { title: "This may already be done.", safe: "", next: "Check before trying again." };
-    // The leading sentences before any colon that are for people; none if the first is for agents.
-    const parts = [];
-    for (const part of msg.split(/:\s/)[0].split(/(?<=[.!?])\s+|;\s+/)) {
-      if (!part || forAgents.test(part)) break;
-      parts.push(part);
-    }
-    const said = parts.map((s) => (/^\S*@/.test(s) ? s : s[0].toUpperCase() + s.slice(1)).replace(/([^.!?])$/, "$1.")).join(" ");
-    if (!said || said.length > 200 || /something went wrong|internal (server )?error|unexpected|undefined|null|is not a function|\[object/i.test(said))
-      return { title: "That didn't work.", safe: "Nothing was lost.", next: "" };
-    // Something that isn't there won't be there on a second try: say so, and offer the way home instead.
-    const missing = /\b(not found|no such|no \w+ named|doesn't exist|isn't here|there's no)\b/i.test(msg);
-    return { title: said, safe: "Nothing was lost.", next: "", missing };
-  };
-
   // Draws `fn()`'s HTML into `el`. The first time, if it takes longer than `wait` ms, grey shapes stand where it will
   // be (`skeleton`: rows of a list, "text" or "cards", or false for a spinner saying `loading`); a fast load shows
   // nothing in between, so nothing flashes. If it fails, the problem, with Try Again. Later draws (on "changed") replace
@@ -208,36 +179,6 @@
     };
     clear.hidden = !value;
     return input;
-  };
-
-  // A large title at the top of a screen, as iOS draws one: the shell's own title stays empty while it shows, and is
-  // its text once it scrolls away, so the name shows once. The screen's `.large-title` is followed as it redraws, so
-  // calling it once is enough; put what it returns first, or draw a `.large-title` of its own. A shell whose bar always
-  // shows the title (Android's, `__oneShell.bar`) hides it and takes the text.
-  let titled = false;
-  one.largeTitle = (text) => {
-    const follows = window.IntersectionObserver && !window.__oneShell?.bar;
-    if (window.__oneShell?.bar) one.title(text);
-    if (!titled) {
-      titled = true;
-      one.title(follows ? "" : text, text);
-      if (follows) {
-        let el = null;
-        const seen = new IntersectionObserver((all) => {
-          const e = all.filter((x) => x.target === el).pop();
-          if (e) one.title(e.isIntersecting ? "" : el.textContent, el.textContent);
-        });
-        const follow = () => {
-          const now = document.querySelector(".large-title");
-          if (now === el) return;
-          if (el) seen.unobserve(el);
-          if ((el = now)) seen.observe(el);
-        };
-        setTimeout(follow);
-        new MutationObserver(follow).observe(document.documentElement, { childList: true, subtree: true });
-      }
-    }
-    return `<h1 class="large-title">${esc(text)}</h1>`;
   };
 
   // Information, as at the bottom of an App Store page: `[label, value]` pairs, plain text, each value on one line.

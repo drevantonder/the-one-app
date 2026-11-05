@@ -32,7 +32,6 @@ pub fn read(uri: &str) -> Result<Value, Value> {
     for (name, text) in [
         ("ui.css", include_str!("screen/ui/dist/ui.css")),
         ("bridge.js", include_str!("screen/bridge.js")),
-        ("kit.js", include_str!("screen/kit.js")),
         ("host.js", include_str!("screen/host.js")),
         ("ui.js", include_str!("screen/ui/dist/ui.js")),
     ] {

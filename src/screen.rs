@@ -25,6 +25,16 @@ const KIT: &[(&str, &str)] = &[
 /// `@one/ui` and the rest (`UI_IMPORTS`), and ui.js, which they come from; the bridge and kit.js's helpers stay.
 pub const UI: &str = r#"<meta name="@one/ui">"#;
 
+/// What a screen that isn't there shows (a body of no text: an old or mistyped link): a grey line and the way home.
+const MISSING: &str = r#"<meta name="@one/ui">
+<div id="root"></div>
+<script type="module">
+import { createElement as h } from "react";
+import { createRoot } from "react-dom/client";
+import { Empty } from "@one/ui";
+createRoot(document.getElementById("root")).render(h(Empty, { action: { label: "Go to Home", run: () => one.open("main") } }, "This page isn't here. The link may be old or mistyped."));
+</script>"#;
+
 /// `@one/ui` as `bun run build` in `src/screen/ui/` made it, whose sources `cargo test` checks it was made from.
 const UI_CSS: (&str, &str) = ("ui/ui.css", include_str!("screen/ui/dist/ui.css"));
 const UI_JS: (&str, &str) = ("ui/ui.js", include_str!("screen/ui/dist/ui.js"));
@@ -41,6 +51,7 @@ pub fn page(context: &serde_json::Value, body: &str, own: bool, linked: bool) ->
 
 /// `page`, with a client's own screen's `nonce`, or none for an app's.
 fn page_with(context: &serde_json::Value, body: &str, nonce: Option<String>, linked: bool) -> String {
+    let body = if body.is_empty() { MISSING } else { body };
     let mut context = context.clone();
     // What a person joins, in their words: "your One App", or a workplace's, "the PTC App".
     context["config"]["yours"] = crate::config::YOURS.into();
@@ -118,9 +129,9 @@ const CLIENT_SCREENS: &[(&str, &str)] = &[
     ("devtools", include_str!("screen/settings/dist/devtools.html")),
 ];
 
-/// A client's own screen's HTML, or a note that it isn't there.
+/// A client's own screen's HTML, or none for a name that's none of them, which a page shows as not there (`MISSING`).
 pub fn client_screen(name: &str) -> &'static str {
-    CLIENT_SCREENS.iter().find(|(n, _)| *n == name).map_or("<div id=\"missing\"></div><script>missing.innerHTML = one.notFound()</script>", |(_, html)| html)
+    CLIENT_SCREENS.iter().find(|(n, _)| *n == name).map_or("", |(_, html)| html)
 }
 
 /// A client's own screen as its page, as each client makes it from the screens built into it, never a node's: one a

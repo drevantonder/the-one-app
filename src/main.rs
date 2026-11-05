@@ -2387,7 +2387,7 @@ fn tools() -> Result<Vec<Value>, Value> {
     }
     for app in apps.as_array().into_iter().flatten() {
         let name = app["name"].as_str().unwrap_or("");
-        // Tools starting with `_` are for the node, such as a service's `_screen`.
+        // Tools starting with `_` are for the screens, and the node's own.
         for tool in app["ops"].as_array().into_iter().flatten().filter(|tool| !tool["name"].as_str().unwrap_or("").starts_with('_')) {
             tools.push(json!({ "name": format!("{name}_{}", tool["name"].as_str().unwrap_or("")), "description": tool["description"], "inputSchema": tools::mcp_schema(app, tool), "annotations": tools::mcp_annotations(tool) }));
         }

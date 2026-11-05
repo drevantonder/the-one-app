@@ -136,17 +136,8 @@ impl Node {
     /// `scope` is the page a shell opened it from, a hint the app may follow or not.
     pub async fn screen(&self, viewer: Caller, app: &str, name: &str, params: Value, scope: Option<&str>, linked: bool) -> Result<String> {
         let deployed = self.with(|i| Ok(i.r.db().app(app).is_some_and(|a| a.bundle.is_some())))?;
-        let body = match deployed {
-            // A screen the app doesn't have (an old or mistyped link) is a page that says so.
-            true => self.0.apps.screen(app, name).await?.unwrap_or_else(|| "<div id=\"missing\"></div><script>missing.innerHTML = one.notFound()</script>".into()),
-            // A service's screen, for now: its `_screen` operation gives the body, wherever the service runs.
-            false => {
-                let input = json!({ "name": name, "params": params });
-                let req = CallRequest { app: app.into(), service: Some(app.into()), op: "_screen".into(), input, ..Default::default() };
-                let body = self.route(req, viewer.clone()).await?;
-                body.as_str().context("the screen isn't text")?.to_string()
-            }
-        };
+        // A screen the app doesn't have (an old or mistyped link), or an app not deployed here, is a page that says so.
+        let body = if deployed { self.0.apps.screen(app, name).await?.unwrap_or_default() } else { String::new() };
         self.page(&viewer, json!({ "app": app, "screen": name, "params": params, "scope": scope }), &body, false, linked)
     }
 

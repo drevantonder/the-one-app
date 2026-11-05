@@ -3,7 +3,7 @@
 // frame, and this page answers its bridge as the Mac app's web view does, making each call itself. It draws at once
 // what it showed last (the sidebar, and a still of the screen) and then what the node says now.
 
-// The bridge and kit (src/screen/), loaded after this, give `one`; this page answers it for its own use (`__one.host`).
+// The bridge (src/screen/), loaded after this, gives `one`; this page answers it for its own use (`__one.host`).
 // The window itself, and what it shows over screens (menus, alerts, sheets), is @one/ui's (src/screen/ui), whose
 // ui.js, loaded before this, keeps it on `OneUI`.
 // This browser is a device of its person (device.js): it signs what changes who can do what, and hands each call the
