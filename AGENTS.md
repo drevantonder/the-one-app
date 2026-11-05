@@ -4,7 +4,7 @@ Your devices, and your team's, as one place for apps and agents. Read `ARCHITECT
 
 ## Principles
 
-- Six primitives: key, log, view, blob, call, app. Scopes, devices, deploys, services, the Vault and backups are made of them. A feature that needs a seventh is designed wrong until proven otherwise.
+- GLOSSARY.md's words are the domain. A feature that needs a new one is designed wrong until proven otherwise.
 - The core never names an app. The starter apps use exactly what anyone's app can.
 - The kernel, nodes and clients. Clients are devices, what people and their agents use, and the only place keys are opened; nodes run calls with the keys a caller hands them and hold none; the kernel is a few small Workers that route, sign in, relay, carry pushes and sign bucket URLs, and open nothing. A hacked node gets only the calls it ran while it was hacked; a hacked kernel reads no data, though the Workers serving browsers' code could take what browsers open, which is why they stay small. ARCHITECTURE.md's rules are the design.
 - Each app's database for a scope is the truth, kept sealed in the install's bucket; who can do what is a signed log kept forever.

@@ -19,7 +19,7 @@ Only the scope's own members can write a step that opens (AES-GCM, with the step
 
 ## The end state
 
-**Primitives: key, database, permissions, blob, call, app.** The list is the current design, and it changes whenever a new primitive replaces more than it adds. Here, database replaces log, permissions is new, and view goes.
+**The domain is GLOSSARY.md's words**, and a new one comes only when it replaces more than it adds. Here, the database replaces the log, permissions are new, and views go.
 
 **One storage model.** Every scope has SQLite databases:
 - each app's;
@@ -71,11 +71,11 @@ A removed device's later steps fail rule 3, because they come after its removal 
 In the files affected, roughly 4,800 lines become about 3,000.
 
 **Code layout:**
-- the primitives: `src/key/`, `src/database/`, `src/permissions/`, `src/blob/`, `src/call/`, `src/app/`;
+- the domain's parts: `src/key/`, `src/database/`, `src/permissions/`, `src/blob/`, `src/call/`, `src/app/`;
 - what's made of them: devices, the Vault, backups, services and schedules;
 - where they run: node, kernel, serverless and clients.
 
-Each folder's module doc is its architecture. The file map is generated from those docs, and a test fails if a folder has none. ARCHITECTURE.md comes down to one page: what the product is, the primitives, the trust model, the three rules, and what's designed but not built.
+Each folder's module doc is its architecture. The file map is generated from those docs, and a test fails if a folder has none. ARCHITECTURE.md comes down to one page: what the product is, the trust model, the three rules, and what's designed but not built.
 
 ## How we get there without half-implementing: expand, switch, contract
 
@@ -128,9 +128,8 @@ This phase has one owner. It starts only once **every device listed in the insta
 These are separate pieces of work, in parallel:
 - delete the log's code and its JavaScript copies, and trim `tests/contracts.rs`;
 - rename grants to keep everywhere: code, CLI, MCP, screens and data, in one change, as AGENTS.md requires;
-- move to the primitive folders one at a time, each move a quick commit announced on the board;
+- move to those folders one at a time, each move a quick commit announced on the board;
 - generate the file map, and finish ARCHITECTURE.md;
-- update AGENTS.md's line on primitives.
 
 ## The scope database's tables
 
@@ -179,5 +178,5 @@ Each workstream follows AGENTS.md:
 ## Risks
 
 - **Phase 1's builder and reader switch must agree with replay exactly.** C's test builds the scope database from every replay test's entries and checks that `may` agrees with replay's answers.
-- **Several threads push to main all day.** Moving folders waits for phase 3 and goes one primitive at a time.
+- **Several threads push to main all day.** Moving folders waits for phase 3 and goes one folder at a time.
 - **Phase 2 is the one step that can't be undone easily.** It's gated, it has one owner, and it's tried in `one try`, including a device on R0 that comes back afterwards.

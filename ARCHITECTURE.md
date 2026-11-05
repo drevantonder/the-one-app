@@ -2,19 +2,11 @@
 
 Your devices, and your team's, as one place for apps and agents. An install is one person's or one workplace's: its people, their devices, their apps, and a bucket (a folder or S3-compatible storage) holding everything, sealed. Every machine in it runs the same program; the kernel, a few small Workers on Cloudflare, only routes, signs in, relays and carries pushes. This page holds only what the code can't say: where to look, and the rules that span many files. How a piece works is in its module doc (`//!` at the top of each file in `src/`, a comment at the top of each Worker, `client/`, `serverless/` and `services/`) and its tests.
 
-## Primitives
-
-Key, log, view, blob, call, app. Scopes, devices, deploys, services, the Vault and backups are made of them.
-- **Key:** every device has its own key, never shared. Each scope (a person's, a group's, or the install's `global`) has numbered epochs of keys, sealed to the devices that may open it and to the install's recovery key.
-- **Log:** who can do what is signed entries kept in the bucket, replayed in causal order on every device. A change counts by who signed it, never by the time it claims.
-- **Blob:** bytes an entry names, kept in the bucket sealed with their scope's key.
-- **Call:** runs once, on a node that runs every scope it reaches, chosen by run priority.
-- **App:** deployed code. Its data in a scope is one SQLite database, the truth, kept sealed in the bucket as steps at numbered positions; a write is a step created only if its position is free, so the bucket gives the order. How things went (usage, errors, runs, builds) is the node's own database of a scope, changed in place.
-
 ## Trust
 
 - **Keys are opened only on clients**, the devices of people and their agents (apps, browsers, the CLI, the MCP Worker). **Nodes** run calls and hold no keys: a caller hands a node the database keys one call needs, which expire with its sign-in. The only exceptions are standing work and the Vault, where a person or an admin chooses a machine to hold keys and can take them back.
 - **The kernel opens nothing.** A hacked node gets only the calls it ran while it was hacked; a hacked kernel reads no data. The Workers that serve browsers' code could take what browsers open, which is why they stay small, and why the Cloudflare account is guarded with a hardware security key. The MCP Worker is the same: its devices' secrets are sealed under their MCP clients' tokens, which reach it on every call, so whoever can change its code could open the keys of the scopes those devices were approved for. We consider it as secure as our Cloudflare account (Andre, 2026-11-05).
+- **Who can do what is signed, and kept in the bucket**, replayed in causal order on every device. A change counts by who signed it, never by the time it claims.
 - **Clients take who's who from the signed entries themselves**, never from what a node or the relay says, and seal or hand keys only to whom they list.
 - **Signing in proves who you are, nothing more.** It never opens a key. A new device gets in only when one of its person's devices approves it: by its code, or by itself when the sign-in is one it checks without trusting the kernel, an OIDC provider's ID token for the install's own client or a passkey's assertion naming the new device and the install, from an account their own devices recorded (`src/sign_in_proof.rs`), and only when it signed in itself: one finished from a link opened elsewhere (the CLI's, or one sent to the person) waits for a tap. Every device of theirs then shows it joined, with Remove.
 - **One install, forever.** A key belongs to one install; installs never talk to each other.
@@ -27,7 +19,8 @@ Key, log, view, blob, call, app. Scopes, devices, deploys, services, the Vault a
 
 - **The core never names an app or service.** Apps are deployed into the install while it runs; services run only where a device's owner turned them on. `config.toml` is the one place that names the product (the custom build).
 - **Devices reach each other over iroh,** each an endpoint of its own key, through the relay at the install's address when no direct path opens. A device answers only the install's devices.
-- **The bucket decides the order of writes.** Notices between devices are hints; each device reads what changed from the bucket.
+- **The bucket decides the order of writes.** A write is a step created only if its position is free. Notices between devices are hints; each device reads what changed from the bucket. Only the node's database, how things went, is changed in place.
+- **A call runs once,** on a node that runs every scope it reaches, chosen by run priority.
 - **An older device can safely ignore what newer ones send.** Phones and Macs run behind the others.
 - **Speed** is held to targets measured in `one try`, from a phone on mobile data where it matters: the web client usable within 1.5 s of a cold open; a remote MCP call adding at most 100 ms to a local one; a write seen on another device within 1 s; a call one round trip; no data rewritten when someone adds a device.
 
