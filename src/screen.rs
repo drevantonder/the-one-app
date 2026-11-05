@@ -12,13 +12,12 @@
 /// web client's, at the address, and a chat's view, by `screens_icons`.
 pub const ICONS: &[u8] = include_bytes!("../vendor/phosphor/icons.json");
 
-/// The kit and the bridge, in the order a page has them: each path under `src/screen/` and its text.
+/// The old kit and the bridge, in the order a page has them: each path under `src/screen/` and its text. kit.css is
+/// only for a screen that doesn't opt in to `@one/ui`: a plain one, as PTC's apps and WhatsApp's service still are.
 const KIT: &[(&str, &str)] = &[
     ("kit.css", include_str!("screen/kit.css")),
     ("bridge.js", include_str!("screen/bridge.js")),
     ("kit.js", include_str!("screen/kit.js")),
-    ("code.js", include_str!("screen/code.js")),
-    ("markdown.js", include_str!("screen/markdown.js")),
 ];
 
 /// What a screen's HTML has in it to use `@one/ui` (`src/screen/ui/`: React, and shadcn's components and theme)
