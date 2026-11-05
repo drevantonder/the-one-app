@@ -1,6 +1,6 @@
 # Architecture
 
-Your devices, and your team's, as one place for apps and agents. An install is one person's or one workplace's: its people, their devices, their apps, and a bucket (a folder or S3-compatible storage) holding everything, sealed. Every machine in it runs the same program; at its address, a few small Workers on Cloudflare (`cloudflare/`), each named by its job, only route, sign in, relay and carry pushes. This page holds only what the code can't say: where to look, and the rules that span many files. How a piece works is in its module doc (`//!` at the top of each file in `src/`, a comment at the top of each Worker, `client/`, `serverless/` and `services/`) and its tests.
+Your devices, and your team's, as one place for apps and agents. An install is one person's or one workplace's: its people, their devices, their apps, and a bucket (a folder or S3-compatible storage) holding everything, sealed. Every machine in it runs the same program; at its address, a few small Workers on Cloudflare (`cloudflare/`), each named by its job, only route, sign in, relay and carry pushes. This page holds only what the code can't say: where to look, and the rules that span many files. How a piece works is in its module doc (`//!` at the top of each file in `src/`, a comment at the top of each Worker, `client/`, `serverless/` and each app's `service/`) and its tests.
 
 ## Trust
 

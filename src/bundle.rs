@@ -6,10 +6,12 @@ use std::path::Path;
 
 use anyhow::{Context, Result, bail, ensure};
 
-/// An app folder's files, as written: everything but `node_modules` and dot files, sorted.
+/// An app folder's files, as written: everything but `node_modules`, dot files and its service's source (`service/`,
+/// built apart), sorted.
 pub fn sources(dir: &Path) -> Result<Vec<(String, Vec<u8>)>> {
     let mut files = Vec::new();
     walk(dir, dir, &mut files)?;
+    files.retain(|(path, _)| !path.starts_with("service/"));
     files.sort();
     Ok(files)
 }

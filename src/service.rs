@@ -761,7 +761,7 @@ fn host(name: &str, program: &Path, data: &Path, at: std::net::SocketAddr, servi
                 std::thread::sleep(Duration::from_secs(2));
                 break;
             }
-            // Stopped for good, or for its new build, put in its place (`services/install.sh`).
+            // Stopped for good, or for its new build, put in its place (`<cli> services try`).
             let renewed = built() != started;
             if stop() || renewed {
                 end(&mut child);

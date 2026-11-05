@@ -1,4 +1,4 @@
-module github.com/drevantonder/the-one-app/services/whatsapp
+module github.com/drevantonder/the-one-app/apps/whatsapp/service
 
 go 1.26.10
 

@@ -76,6 +76,8 @@ fn main() {
         println!("cargo:rerun-if-changed={}", dir.display());
         let mut files = Vec::new();
         collect(dir, dir, &mut files);
+        // Its service's source is built apart (`one update`), not shipped in its bundle.
+        files.retain(|(rel, _)| !rel.starts_with("service/"));
         files.sort();
         let name = dir.file_name().unwrap().to_string_lossy().to_string();
         // A React screen ships as its `dist/` has it, which `one deploy apps/<name>` builds, so each has one.

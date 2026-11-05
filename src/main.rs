@@ -127,8 +127,12 @@ fn every_command() -> String {
   {CLI} services                       what each of your devices can run, each on or off, and what it's doing
   {CLI} services on|off <name> [--device <name>]
                                        switch a service on or off on a device of yours (here by default), which its
-                                       oned starts or stops ({hosted} are in this program; one in another language is
-                                       put there first by services/install.sh <name> <device>); apps is its app service
+                                       oned starts or stops ({hosted} are in this program; an app's own is fetched as
+                                       it's published); apps is its app service
+  {CLI} services try apps/<name> [--device <name>]
+                                       put your checkout's build of an app's service on a device of yours (here by
+                                       default, else over ssh by its name) and switch it on, until a newer one is
+                                       published
   {CLI} devices keep|stop <app> on <device> [--scope user|global|<group>] [--days <n>]
                                        keep an app running on one of your devices (its schedules run there, with that
                                        app's keys alone, for 30 days and longer as you use it), or stop it
@@ -822,6 +826,7 @@ fn run(args: Vec<String>) -> Result<()> {
                 }
             }
         }
+        ["services", "try", dir] => update::try_service(std::path::Path::new(dir), flags.get("device").and_then(Value::as_str))?,
         ["services", how @ ("on" | "off"), name] => {
             let device = flags.get("device").and_then(Value::as_str);
             post("/v1/service", json!({ "name": name, "device": device, "on": *how == "on" }))?;

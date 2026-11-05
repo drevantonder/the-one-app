@@ -131,7 +131,7 @@ Docs only.
 ### Phase 1: each service's source in its app's folder
 
 - `services/whatsapp` moves to `apps/whatsapp/service/`; `update.rs` finds services as `apps/*/service/` with a
-  `go.mod` or `Cargo.toml`; `services/install.sh` becomes `one service try apps/<name>` (puts your build on a device).
+  `go.mod` or `Cargo.toml`; `services/install.sh` becomes `one services try apps/<name>` (puts your build on a device).
 - `app.js` gains the `service` declaration. Today's runtime reads none of it; `uses.services` stays until phase 5.
 - Nothing on the wire changes: builds are still `service-release` entries.
 

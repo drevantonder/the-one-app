@@ -43,7 +43,7 @@ pub fn command(args: &[&str]) -> std::io::Result<std::process::Command> {
     Ok(command)
 }
 
-/// The program in another language that offers the service `name`, where `services/install.sh` puts it.
+/// The program in another language that offers the service `name`, where `<cli> services try` puts it.
 pub fn program(name: &str) -> PathBuf {
     let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
     home.join(".local/bin").join(format!("{CLI}-{name}"))

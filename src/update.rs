@@ -69,7 +69,7 @@ pub fn run(tag: Option<&str>) -> Result<()> {
             parts.services.push(name);
         }
     }
-    parts.services.retain(|n| src.join("services").join(n).join("go.mod").is_file());
+    parts.services.retain(|n| service_dir(&src, n).join("go.mod").is_file());
     let macs: Vec<Value> =
         if parts.mac { devices().into_iter().filter(|d| d["target"].as_str().is_some_and(|t| t.ends_with("-apple-darwin"))).collect() } else { Vec::new() };
 
@@ -216,7 +216,7 @@ struct Parts {
     apps: Vec<String>,
     /// Built-in apps renamed: (old name, new name).
     renamed: Vec<(String, String)>,
-    /// Services in another language (`services/<name>`), each built for every platform and published.
+    /// Apps' services (`apps/<name>/service/`), each built for every platform and published.
     services: Vec<String>,
 }
 
@@ -258,6 +258,13 @@ impl Parts {
         for file in files {
             let top = file.split_once('/').map(|(top, _)| top);
             match top {
+                // An app's service is built apart from its app (`service_dir`), which its deploy leaves out.
+                Some("apps") if file.split('/').nth(2) == Some("service") && file.matches('/').count() >= 3 => {
+                    let app = file.split('/').nth(1).unwrap_or("").to_string();
+                    if !parts.services.contains(&app) {
+                        parts.services.push(app);
+                    }
+                }
                 Some("apps") => {
                     let app = file.split('/').nth(1).unwrap_or("").to_string();
                     if !parts.apps.contains(&app) {
@@ -270,12 +277,6 @@ impl Parts {
                 Some("serverless") => parts.node = true,
                 // The client is the Macs', and in the node too: its WebAssembly is the web client's, and the serverless node's.
                 Some("client") => (parts.node, parts.mac) = (true, true),
-                Some("services") => {
-                    let service = file.split('/').nth(1).filter(|_| file.matches('/').count() >= 2).unwrap_or("").to_string();
-                    if !service.is_empty() && !parts.services.contains(&service) {
-                        parts.services.push(service);
-                    }
-                }
                 Some("docs" | "tests" | "android" | "windows" | "cloudflare") => {}
                 None if file.ends_with(".md") || file == "LICENSE" || file == ".gitignore" => {}
                 _ => (parts.node, parts.mac) = (true, true),
@@ -285,11 +286,63 @@ impl Parts {
     }
 }
 
-/// The services in another language in `src`: each folder of `services/` with a Go module.
+/// The app `name`'s service's source in `src`.
+fn service_dir(src: &Path, name: &str) -> PathBuf {
+    src.join("apps").join(name).join("service")
+}
+
+/// The apps in `src` with a service in Go: each `apps/<name>/service/` with a Go module.
 fn go_services(src: &Path) -> Vec<String> {
-    let mut names: Vec<String> = std::fs::read_dir(src.join("services")).into_iter().flatten().flatten().filter(|e| e.path().join("go.mod").is_file()).map(|e| e.file_name().to_string_lossy().to_string()).collect();
+    let mut names: Vec<String> = std::fs::read_dir(src.join("apps")).into_iter().flatten().flatten().filter(|e| e.path().join("service/go.mod").is_file()).map(|e| e.file_name().to_string_lossy().to_string()).collect();
     names.sort();
     names
+}
+
+/// Builds the Go service in `dir` for `os` and `arch` (Go's names) at `out`, saying it was built from `built`.
+fn go_build(dir: &Path, os: &str, arch: &str, built: &str, out: &Path) -> Result<()> {
+    let mut go = Command::new("go");
+    go.current_dir(dir).env("CGO_ENABLED", "0").env("GOOS", os).env("GOARCH", arch);
+    go.args(["build", "-trimpath", "-ldflags", &format!("-X main.built={built}"), "-o"]).arg(out).arg(".");
+    run_quiet(&mut go)
+}
+
+/// Puts your checkout's build of the app's service in `dir` (`apps/<name>`) on `device` (here by default, else reached
+/// by ssh as its name) and switches it on there, for trying it before it's sent out. oned runs it until a release of it
+/// newer than this build is published.
+pub fn try_service(dir: &Path, device: Option<&str>) -> Result<()> {
+    let dir = std::fs::canonicalize(dir).with_context(|| format!("{} isn't here", dir.display()))?;
+    let name = dir.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+    let source = dir.join("service");
+    ensure!(source.join("go.mod").is_file(), "{} has no service in Go (service/go.mod)", dir.display());
+    let on = |args: &str| -> Result<String> {
+        let out = match device {
+            Some(device) => Command::new("ssh").args([device, args]).stdin(std::process::Stdio::null()).output(),
+            None => Command::new("sh").args(["-c", args]).output(),
+        }?;
+        ensure!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr).trim());
+        Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+    };
+    let there = device.unwrap_or("this device");
+    on(&format!("test -x ~/.local/bin/{CLI}")).map_err(|_| anyhow::anyhow!("{CLI} isn't on {there}: install it there first"))?;
+    let uname = on("uname -sm")?;
+    let (os, arch) = uname.split_once(' ').unwrap_or_default();
+    let arch = if arch == "x86_64" { "amd64" } else { "arm64" };
+    let commit = git(&source, &["rev-parse", "--short=12", "HEAD"])?.trim().to_string();
+    let dirty = if quiet(Command::new("git").current_dir(&source).args(["diff", "--quiet", "HEAD", "--", "."])) { "" } else { "+dirty" };
+    let out = std::env::temp_dir().join(format!("{CLI}-{name}-{}", std::process::id()));
+    go_build(&source, &os.to_lowercase(), arch, &format!("{commit}{dirty}"), &out)?;
+    // Put in place in one step, so oned never starts half of it.
+    let program = format!("{CLI}-{name}");
+    let copied = match device {
+        Some(device) => quiet(Command::new("scp").arg("-q").arg(&out).arg(format!("{device}:.local/bin/{program}.new"))),
+        None => std::env::var_os("HOME").is_some_and(|home| std::fs::copy(&out, PathBuf::from(home).join(format!(".local/bin/{program}.new"))).is_ok()),
+    };
+    let _ = std::fs::remove_file(&out);
+    ensure!(copied, "couldn't copy it to {there}");
+    on(&format!("chmod 755 ~/.local/bin/{program}.new && mv ~/.local/bin/{program}.new ~/.local/bin/{program}"))?;
+    post("/v1/service", json!({ "name": name, "device": device, "on": true }))?;
+    println!("{name}'s service {commit}{dirty} is on {there}: its oned starts it; {CLI} services says when it's running.");
+    Ok(())
 }
 
 /// Each service's program last published from here, and the commit it was built from.
@@ -304,7 +357,7 @@ fn publish_services(src: &Path, names: &[String], key: &ssh_key::PrivateKey, com
     let committed: u64 = git(src, &["log", "-1", "--format=%ct", commit]).ok().and_then(|t| t.trim().parse().ok()).unwrap_or(0);
     let mut released = services_released();
     for name in names {
-        let dir = src.join("services").join(name);
+        let dir = service_dir(src, name);
         let each = || -> Result<()> {
             for target in PLATFORMS {
                 let (os, arch) = match target {
@@ -314,10 +367,7 @@ fn publish_services(src: &Path, names: &[String], key: &ssh_key::PrivateKey, com
                 };
                 let out = cache().join("services").join(format!("{name}-{target}"));
                 std::fs::create_dir_all(out.parent().unwrap_or(&out))?;
-                let mut go = Command::new("go");
-                go.current_dir(&dir).env("CGO_ENABLED", "0").env("GOOS", os).env("GOARCH", arch);
-                go.args(["build", "-trimpath", "-ldflags", &format!("-X main.built={}", &commit[..12]), "-o"]).arg(&out).arg(".");
-                run_quiet(&mut go).with_context(|| format!("build it for {target}"))?;
+                go_build(&dir, os, arch, &commit[..12], &out).with_context(|| format!("build it for {target}"))?;
                 let signature = release::sign(key, &std::fs::read(&out)?)?;
                 let body = json!({ "path": out, "service": name, "commit": commit, "target": target, "committed": committed, "signature": signature });
                 post("/v1/service-release", body).with_context(|| format!("publish it for {target}"))?;
