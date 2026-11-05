@@ -113,24 +113,29 @@ pub struct Started {
     meta: Value,
 }
 
-/// Starts signing in to the install at `address`: → the code the person approves, and its link.
-pub fn start(address: &str) -> Result<Started> {
+/// Starts signing in to the install at `address`, for the device `join` names (its key ‖ seal key, hex), if it's one
+/// that then asks to be let in: → the code the person approves, and its link.
+pub fn start(address: &str, join: Option<&str>) -> Result<Started> {
     let address = address.trim_end_matches('/').to_string();
     let meta = meta(&address)?;
     let client = client(&address, &meta)?;
     let verifier = B64U.encode(&rand::random::<[u8; 32]>());
     let state = B64U.encode(&rand::random::<[u8; 32]>());
     let challenge = B64U.encode(&sha2::Sha256::digest(verifier.as_bytes()));
-    let query = form(&[
+    let redirect = back(&address);
+    let mut asked = vec![
         ("response_type", "code"),
         ("client_id", &client),
-        ("redirect_uri", &back(&address)),
+        ("redirect_uri", &redirect),
         ("scope", "openid profile offline_access"),
         ("code_challenge", &challenge),
         ("code_challenge_method", "S256"),
         ("state", &state),
         ("prompt", "consent"),
-    ]);
+    ];
+    // Its sign-in names it, so the person's devices can let it in by it.
+    asked.extend(join.map(|j| ("join", j)));
+    let query = form(&asked);
     let mut resp = agent().post(format!("{address}/sign-in/code")).send_json(serde_json::json!({ "query": query }))?;
     let out: Value = resp.body_mut().read_json().unwrap_or(Value::Null);
     let (Some(code), Some(url)) = (out["code"].as_str(), out["url"].as_str()) else {

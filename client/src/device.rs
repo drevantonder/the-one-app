@@ -36,6 +36,12 @@ const REREAD: u64 = 30_000;
 /// How many requests' traces it keeps, in developer mode, for screens to show.
 const TRACES_KEPT: usize = 100;
 
+/// What a sign-in for the device whose key is `secret` names it by (`join`), before it's made: its key ‖ seal key, hex.
+pub fn join_of(secret: [u8; 32]) -> String {
+    let me = Endpoint::of(&SigningKey::from_bytes(&secret));
+    format!("{}{}", hex(&me.key), hex(&me.seal))
+}
+
 /// A new device's key: 32 random bytes, which its app keeps.
 pub fn new_secret() -> [u8; 32] {
     rand::random()
@@ -183,6 +189,11 @@ impl Device {
     /// Its key, hex: its id.
     pub fn key(&self) -> String {
         hex(&self.me.key)
+    }
+
+    /// What a sign-in for it names it by (`join`): its key ‖ seal key, hex.
+    pub fn join(&self) -> String {
+        format!("{}{}", self.key(), hex(&self.me.seal))
     }
 
     /// The code it shows to be approved: "ABCD EFGH".

@@ -80,7 +80,9 @@ const webauthn = `
   }
   /// A passkey prompt's options, asked for before the tap (\`ready\`), so the prompt comes the moment it's tapped. Each
   /// is used once, and only while it's fresh: the auth service keeps one challenge, for five minutes.
-  const ASK = { in: "/api/auth/passkey/generate-authenticate-options", new: "/api/auth/passkey/generate-register-options" };
+  // A sign-in for a device (\`join\`, in its client's authorization) has the passkey sign a challenge naming it.
+  const JOIN = new URLSearchParams(location.search).get("join");
+  const ASK = { in: "/api/auth/passkey/generate-authenticate-options" + (/^[0-9a-f]{128}$/.test(JOIN || "") ? "?join=" + JOIN : ""), new: "/api/auth/passkey/generate-register-options" };
   let early = null;
   function ready(path) {
     const asked = api(path);
@@ -262,7 +264,7 @@ export function tryPage(look) {
       say();
       const undo = busy(button, "Signing In…");
       try {
-        const { person } = await api("/api/auth/try/sign-in", params.get("as") ? { person: params.get("as") } : {});
+        const { person } = await api("/api/auth/try/sign-in", params.get("as") ? { person: params.get("as") } : { join: params.get("join") || undefined });
         if (params.get("as")) {
           undo();
           button.textContent = "Sign In as " + person;

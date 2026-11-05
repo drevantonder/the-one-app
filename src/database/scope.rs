@@ -65,6 +65,9 @@ CREATE TABLE devices (
   device TEXT,
   listed_by TEXT NOT NULL,
   listed_at INTEGER NOT NULL,
+  -- What it signed in with, as JSON (`sign_in_proof::Account`), when that was checked as it was let in.
+  sign_in TEXT,
+  place TEXT,
   removed INTEGER NOT NULL
 ) STRICT;
 CREATE TABLE runs (
@@ -284,7 +287,7 @@ fn install(db: &Connection, m: &Members) -> Result<()> {
     }
     for d in m.machines.values() {
         db.execute(
-            "INSERT INTO devices VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO devices VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             params![
                 hex(&d.key),
                 hex(&d.seal),
@@ -298,6 +301,8 @@ fn install(db: &Connection, m: &Members) -> Result<()> {
                 d.device.as_ref().map(hex),
                 person(&d.by),
                 int(d.since),
+                d.sign_in.as_ref().map(|a| json!(a).to_string()),
+                d.place,
                 d.removed
             ],
         )?;

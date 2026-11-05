@@ -266,6 +266,15 @@ export function server(version) {
           }
           case "global":
             return post({ id, members: await global(m.user, m.given && new Uint8Array(m.given)) });
+          // A new device's sign-in, checked by the client (`signedInWith`), its issuer's keys fetched from where it
+          // publishes them.
+          case "signedInWith": {
+            const { issuerKeysAt, signedInWith } = await glue;
+            const proof = JSON.stringify(m.proof);
+            const at = issuerKeysAt(proof, m.address);
+            const keys = at ? await (await fetch(at)).text() : "";
+            return post({ id, account: JSON.parse(signedInWith(proof, m.key, m.seal, m.address, keys, m.accounts ? JSON.stringify(m.accounts) : undefined, Date.now())) });
+          }
           case "reconnect": {
             const s = await session?.ready;
             if (!s) return;

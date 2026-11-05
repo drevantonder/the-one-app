@@ -93,6 +93,9 @@ fn the_kernel_and_nodes_agree_on_keys_and_seals() {
         assert_eq!(out["joinCode"], keys::join_code(&keys::Endpoint { key: device, seal: device_seal }));
         assert_eq!(out["twin"], data_encoding::HEXLOWER.encode(&kernel::twin_public(&device).unwrap()), "an Ed25519 key's twin to seal to");
         assert_eq!(out["proof"], keys::invite_proof(b"an invite's secret", &keys::Endpoint { key: device, seal: device_seal }));
+        let asking = keys::Endpoint { key: device, seal: device_seal };
+        assert_eq!(out["nonce"], one::sign_in_proof::nonce(&asking), "the OIDC nonce auth asks for a device");
+        assert_eq!(b(&out["challenge"]), one::sign_in_proof::challenge(&asking, 1_800_000_000_123), "and the challenge its passkey signs");
         let (passkey, seal_secret) = keys::passkey_keys(&prf);
         assert_eq!(out["passkey"]["sign"], data_encoding::HEXLOWER.encode(passkey.verifying_key().as_bytes()), "a passkey's signing key");
         assert_eq!(b(&out["passkey"]["seal"]), seal_secret, "and the secret sealed to");
@@ -176,6 +179,16 @@ fn the_kernel_and_nodes_agree_on_keys_and_seals() {
                     c
                 },
                 json!(["device", { "key": key, "seal": seal, "user": user, "name": "phone", "device": seal }]),
+            ),
+            (
+                {
+                    // Let in by its sign-in, from where it asked.
+                    let mut c = members::device(&endpoint, user, "phone", &[Kind::Client], None);
+                    c.data["sign_in"] = json!({ "provider": { "issuer": "https://accounts.google.com", "audience": "ours", "subject": "1" } });
+                    c.data["place"] = json!("Sydney");
+                    c
+                },
+                json!(["device", { "key": key, "seal": seal, "user": user, "name": "phone", "signIn": { "provider": { "issuer": "https://accounts.google.com", "audience": "ours", "subject": "1" } }, "place": "Sydney" }]),
             ),
             (members::device(&endpoint, user, "Sam's Chrome", &[Kind::Client], Some(("Sam", Role::Member))), json!(["device", { "key": key, "seal": seal, "user": user, "name": "Sam's Chrome", "newUser": { "name": "Sam", "role": "member" } }])),
             (members::passkey(&endpoint, user, "Passkey", "cred-1"), json!(["passkey", { "key": key, "seal": seal, "user": user, "name": "Passkey", "credential": "cred-1" }])),

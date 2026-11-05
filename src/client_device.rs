@@ -127,6 +127,16 @@ pub fn join(address: &str, invite: Option<&str>) -> Result<()> {
     }
 }
 
+/// The device this computer signs in at `address` for, its key ‖ seal key (hex), which its sign-in names: the one it
+/// has for that install, or a new one.
+pub fn signing_in_for(address: &str) -> Result<String> {
+    let address = address.trim_end_matches('/');
+    if std::fs::read_to_string(dir().join("address")).ok().as_deref().map(str::trim) != Some(address) {
+        forget();
+    }
+    Ok(kept_or_new(address)?.join())
+}
+
 /// This computer's device, made with a new key if it has none.
 fn kept_or_new(address: &str) -> Result<Arc<Device>> {
     if kept().is_none() {

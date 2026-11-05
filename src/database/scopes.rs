@@ -71,7 +71,7 @@ pub fn owner_object(p: &Principal) -> String {
 }
 
 const MACHINE: &str = "SELECT d.key, d.seal, d.principal, d.name, d.client, d.compute, d.service, d.shared, d.passkey, d.device, d.listed_by, d.listed_at,
-    d.removed OR coalesce(p.removed, 1) FROM devices d LEFT JOIN principals p ON p.id = d.principal";
+    d.removed OR coalesce(p.removed, 1), d.sign_in, d.place FROM devices d LEFT JOIN principals p ON p.id = d.principal";
 
 fn machine(r: &rusqlite::Row) -> rusqlite::Result<Machine> {
     let mut roles = BTreeSet::new();
@@ -94,6 +94,8 @@ fn machine(r: &rusqlite::Row) -> rusqlite::Result<Machine> {
         by: id(&r.get::<_, String>(10)?),
         since: r.get::<_, i64>(11)? as u64,
         removed: r.get(12)?,
+        sign_in: r.get::<_, Option<String>>(13)?.and_then(|a| serde_json::from_str(&a).ok()),
+        place: r.get(14)?,
     })
 }
 
@@ -472,6 +474,13 @@ impl ScopeDb {
         self.machine(k).filter(|m| m.is(Kind::Service))
     }
 
+    /// What `user` signs in with, as their devices listed now record it: what a new device's sign-in is checked against.
+    pub fn sign_ins(&self, user: &str) -> Vec<crate::sign_in_proof::Account> {
+        let mut out: Vec<_> = self.machines().into_iter().filter(|m| !m.removed && m.user == user).filter_map(|m| m.sign_in).collect();
+        out.dedup();
+        out
+    }
+
     pub fn clients(&self) -> Vec<Machine> {
         self.listed(Kind::Client)
     }
@@ -681,6 +690,9 @@ pub(crate) mod tests {
             assert_eq!(db.runs(&u.id), m.runs.get(&u.id).cloned());
             let unchosen: Vec<Key> = if m.runs.contains_key(&u.id) { Vec::new() } else { m.computes().filter(|c| c.user != u.id && m.runs_for(&c.key, &Scope::Global)).map(|c| c.key).collect() };
             assert_eq!(db.runs_until_chosen(&u.id), unchosen);
+            let mut signs_in: Vec<_> = m.machines.keys().filter_map(|k| m.machine(k)).filter(|d| d.user == u.id).filter_map(|d| d.sign_in.clone()).collect();
+            signs_in.dedup();
+            assert_eq!(db.sign_ins(&u.id), signs_in);
             for s in m.scopes() {
                 assert_eq!(db.role_in(&u.id, &s), m.role_in(&u.id, &s));
                 assert_eq!(dbg(&db.runners(&u.id, std::slice::from_ref(&s))), dbg(&m.runners(&u.id, std::slice::from_ref(&s))));

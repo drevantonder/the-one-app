@@ -269,6 +269,16 @@
       `<div class="answers"><button class="button" data-refuse="${code}">${r.yours ? "Not Me" : "Not Them"}</button><button class="button primary" data-let="${code}">Approve</button></div></div>`;
   }
 
+  // A device of theirs let in within the day, by its sign-in or by someone approving it: "MacBook Pro joined ·
+  // Sydney", with Remove, in case it isn't theirs.
+  function justJoined() {
+    const day = Date.now() - 86_400_000;
+    return (state.install?.clients || []).filter((c) => c.user === me() && !c.passkey && !c.me && (c.since || 0) > day && ![device.key, state.me?.key].includes(c.key)).sort((a, b) => b.since - a.since);
+  }
+  const joinedCard = (c) =>
+    `<div class="list"><div class="row plain">${iconByName(c.name)}<div class="main"><div class="title"><span>${one.esc(c.name)} joined</span></div>${subs([c.place, ago(c.since)].filter(Boolean).join(" · "))}</div>` +
+    `<button class="button plain small" data-joined="${one.esc(c.key)}">Remove</button></div></div>`;
+
   // ---- Devices ----
 
   // A device of theirs: what it is, a grey line only when it says something, a ⚠ for a problem (tapped, it says what
@@ -548,6 +558,7 @@
     drawn = grouped();
     let html = '<div class="large-title">Devices</div>';
     if (waiting.length) html += '<h2 class="section">Waiting for you</h2>' + waiting.map(waitingCard).join("");
+    html += justJoined().map(joinedCard).join("");
     html += '<div id="approve"></div>';
     html += `<div class="segmented tabs" role="tablist">${TABS.map(([id, title]) => `<button role="tab" data-tab="${id}" aria-selected="${tab === id}" class="${tab === id ? "on" : ""}">${title}</button>`).join("")}</div>`;
     html += `<div role="tabpanel">${tab === "priority" ? priorityTab() : tab === "services" ? servicesTab() : devicesTab()}</div>`;
@@ -589,7 +600,7 @@
 
   document.addEventListener("click", (e) => {
     if (e.target.closest(".sheet")) return;
-    const t = e.target.closest?.("[data-tab], [data-flag], [data-cell], [data-move], [data-more], [data-add], [data-out], [data-passkey], [data-grant], [data-keep], [data-let], [data-refuse], [data-old]");
+    const t = e.target.closest?.("[data-tab], [data-flag], [data-cell], [data-move], [data-more], [data-add], [data-out], [data-passkey], [data-grant], [data-keep], [data-let], [data-refuse], [data-old], [data-joined]");
     if (!t) return;
     const d = t.dataset;
     if (d.tab) (tab = d.tab), now();
@@ -598,6 +609,7 @@
     else if (d.move) quiet ? (quiet = false) : moveMenu(d.move, t);
     else if (d.let) busy(t, () => one.api("POST", "/v1/devices/approve", { code: d.let, confirm: true }));
     else if (d.refuse) busy(t, () => one.api("POST", "/v1/devices/refuse", { code: d.refuse }));
+    else if (d.joined) remove((state.install?.clients || []).find((c) => c.key === d.joined)?.name || "that device", [d.joined], null);
     else if (d.old) removeOld(d.old === "stale" ? { old: drawn.stale } : drawn.cards[d.old]);
     else if (d.more) menu(d.more, t);
     else if (d.grant) act(() => one.api("POST", "/v1/grant", { ...JSON.parse(d.grant), days: 0 }));

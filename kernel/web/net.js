@@ -201,6 +201,14 @@ export const net = {
     return (await ask({ op: "global", user, given: buffer }, buffer ? [buffer] : [])).members;
   },
 
+  /// What a new device (`key`, `seal`) signed in with, as its sign-in (`proof`, as auth passed it on) shows, checked
+  /// by the client at the install's `address`: against `accounts`, its person's, for one let in by it, or with none, for
+  /// one approved by its code. → the account; throws why it doesn't check out.
+  async signedInWith(proof, key, seal, address, accounts) {
+    if (!net.has) throw new Error("This device can't check a sign-in.");
+    return (await ask({ op: "signedInWith", proof, key, seal, address, accounts })).account;
+  },
+
   /// Whether the relay still lets this browser in, as one of its person's devices: false once it's taken out.
   still() {
     return net.has ? ask({ op: "still" }).then((m) => m.device) : Promise.resolve(true);

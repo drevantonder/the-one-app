@@ -104,6 +104,11 @@ pub struct Machine {
     pub by: String,
     /// When it was listed, as its entry says (ms).
     pub since: u64,
+    /// What it signed in with, when that was checked as it was let in (`sign_in_proof`): one of its person's accounts,
+    /// which their next device's sign-in is checked against. None for a shape this release doesn't know.
+    pub sign_in: Option<crate::sign_in_proof::Account>,
+    /// The city it asked to join from, as its request said.
+    pub place: Option<String>,
     pub removed: bool,
 }
 
@@ -949,6 +954,8 @@ fn listed(data: &Value, user: &str, since: u64) -> Result<Machine> {
         device: data["device"].as_str().map(unhex).transpose().context("device is the key of the device it's part of")?,
         by: user.to_string(),
         since,
+        sign_in: serde_json::from_value(data["sign_in"].clone()).ok(),
+        place: data["place"].as_str().map(|p| p.chars().take(64).collect()),
         removed: false,
     })
 }
@@ -1398,6 +1405,28 @@ mod tests {
         let e = dev.write("global", user, content, &entries.clone());
         entries.push(e.clone());
         e
+    }
+
+    /// What a device signed in with is recorded with its listing, for its person's next device to be checked against;
+    /// a device taken out takes its record with it, and a shape this release doesn't know records nothing.
+    #[test]
+    fn a_devices_sign_in_is_its_persons_while_it_is_listed() {
+        let (mut mac, mut entries) = setup();
+        let google = json!({ "provider": { "issuer": "https://accounts.google.com", "audience": "ours", "subject": "1" } });
+        let listed = |d: &Dev, sign_in: Value| {
+            let mut c = device(&d.endpoint(), ANDRE, "phone", &[Kind::Client], None);
+            c.data["sign_in"] = sign_in;
+            c
+        };
+        let (phone, laptop) = (Dev::new(3), Dev::new(4));
+        add(&mut entries, &mut mac, ANDRE, listed(&phone, google.clone()));
+        add(&mut entries, &mut mac, ANDRE, listed(&laptop, json!({ "password": "hunter2" })));
+        let m = members(&entries);
+        assert_eq!(m.machines[&phone.id()].sign_in, serde_json::from_value(google).ok());
+        assert_eq!(m.machines[&laptop.id()].sign_in, None);
+        add(&mut entries, &mut mac, ANDRE, remove_device(&phone.id(), None));
+        let m = members(&entries);
+        assert!(m.machine(&phone.id()).is_none(), "taken out, and the scope database's sign_ins agree it's gone (agrees)");
     }
 
     #[test]

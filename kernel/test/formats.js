@@ -1,5 +1,5 @@
 // The kernel's formats, for tests/contracts.rs to check against the Rust that reads them: POST { op, ... } → result.
-import { appOf, askedFor, b64u, BEHIND, canonical, certify, checkCertificate, epochHash, checkEntry, checkRequest, databaseKey, ed25519Public, epochOf, hex, idOf, inviteProof, joinCode, keyPair, mayHand, MOST_NEEDED, oldestNeeded, open, openAppKey, openHandoff, openSealed, openUnder, passkeyKeys, seal, sealAppKey, sealHandoff, sealTo, sealUnder, signEntry, signedRequest, tokenId, twinPublic, waited, x25519Public } from "../shared/crypto.js";
+import { appOf, askedFor, b64u, BEHIND, canonical, certify, checkCertificate, epochHash, checkEntry, checkRequest, databaseKey, ed25519Public, epochOf, hex, idOf, inviteProof, joinChallenge, joinCode, joinNonce, keyPair, mayHand, MOST_NEEDED, oldestNeeded, open, openAppKey, openHandoff, openSealed, openUnder, passkeyKeys, seal, sealAppKey, sealHandoff, sealTo, sealUnder, signEntry, signedRequest, tokenId, twinPublic, waited, x25519Public } from "../shared/crypto.js";
 import { members } from "../web/members.js";
 
 const ops = {
@@ -48,6 +48,8 @@ const ops = {
       twin: hex.encode(twinPublic(hex.decode(pair.key))),
       joinCode: await joinCode(hex.decode(pair.key), hex.decode(pair.seal)),
       proof: await inviteProof(b64u.decode(secret), hex.decode(pair.key), hex.decode(pair.seal)),
+      nonce: await joinNonce(hex.decode(pair.key), hex.decode(pair.seal)),
+      challenge: b64u.encode(joinChallenge(hex.decode(pair.key), hex.decode(pair.seal), 1_800_000_000_123)),
       passkey: { sign: hex.encode(await ed25519Public(pk.sign)), seal: b64u.encode(pk.seal), sealPublic: hex.encode(await x25519Public(pk.seal)) },
     };
   },

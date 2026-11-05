@@ -462,6 +462,8 @@ pub struct Inner {
     standing: standing::Standing,
     /// What `Node::start_owed_keys` knows between its looks.
     owed: Mutex<devices::Owed>,
+    /// What `Node::sign_in_loop` knows between its looks.
+    sign_ins: Mutex<devices::SignIns>,
     /// This device's iroh endpoint.
     net: net::Net,
     /// How many times its deploys were settled (`settle`), the first once its apps are loaded.
@@ -595,6 +597,7 @@ impl Node {
             broken: Default::default(),
             standing: Default::default(),
             owed: Default::default(),
+            sign_ins: Default::default(),
             net: Default::default(),
             settled: tokio::sync::watch::channel(0).0,
             settling: tokio::sync::Mutex::new(()),
@@ -629,6 +632,7 @@ impl Node {
         tokio::spawn(node.clone().backup_loop());
         tokio::spawn(node.clone().schedule_loop());
         tokio::spawn(node.clone().update_loop());
+        tokio::spawn(node.clone().sign_in_loop());
         let worker = node.clone();
         tokio::spawn(async move {
             loop {

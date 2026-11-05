@@ -371,6 +371,61 @@ fn an_admin_signs_in_only_with_a_passkey() {
     assert_eq!(signed_in_as(&mut elsewhere).as_deref(), Some(andre.as_str()));
 }
 
+/// A sign-in for a device names it, and auth passes what it showed on with that device's request to join, unchanged,
+/// for the person's devices to check themselves (src/sign_in_proof.rs): a passkey's assertion signs a challenge naming
+/// the device and when, which checks; a sign-in for no device, or one for another device, lets nothing in; and with
+/// Google, the ID token asked for names the device.
+#[test]
+fn a_sign_in_for_a_device_names_it_and_auth_passes_it_on() {
+    use one::sign_in_proof::{self, Account, Proof};
+    let (admin, admin_hex) = endpoint();
+    let k = Kernel::for_devices(vec![admin_hex.clone()]);
+    let (secret, andre) = invited(&k, &admin, "Andre", None);
+    let passkey = k.passkey();
+    let mut first = k.browser();
+    let (status, options, _) = first.get(&format!("/api/auth/passkey/generate-register-options?context={secret}"));
+    assert_eq!(status, 200, "{options}");
+    let (status, out) = first.post("/api/auth/passkey/verify-registration", json!({ "response": passkey.create(&options), "createSession": true }));
+    assert_eq!(status, 200, "{out}");
+    let device = one::keys::Endpoint::of(&ed25519_dalek::SigningKey::from_bytes(&rand::random()));
+    let join = format!("{}{}", data_encoding::HEXLOWER.encode(&device.key), data_encoding::HEXLOWER.encode(&device.seal));
+    // Signing in for the device: the passkey signs a challenge naming it.
+    let mut new = k.browser();
+    let (status, options, _) = new.get(&format!("/api/auth/passkey/generate-authenticate-options?join={join}"));
+    assert_eq!(status, 200, "{options}");
+    let challenge = B64U.decode(options["challenge"].as_str().unwrap().as_bytes()).unwrap();
+    assert_eq!(challenge[..challenge.len() - 8], sign_in_proof::challenge(&device, 0)[..challenge.len() - 8], "the challenge names the device");
+    assert_eq!(new.post("/api/auth/passkey/verify-authentication", json!({ "response": passkey.get(&options) })).0, 200);
+    assert_eq!(signed_in_as(&mut new).as_deref(), Some(andre.as_str()));
+    let asked = |b: &mut Browser, d: &one::keys::Endpoint| {
+        let (status, out) = b.post("/api/auth/devices/requests", json!({ "key": data_encoding::HEXLOWER.encode(&d.key), "seal": data_encoding::HEXLOWER.encode(&d.seal), "name": "MacBook Pro" }));
+        assert_eq!(status, 200, "{out}");
+        let (_, out, _) = b.get(&format!("/api/auth/devices/requests/{}", data_encoding::HEXLOWER.encode(&d.key)));
+        out["sign_in"].clone()
+    };
+    let proof: Proof = serde_json::from_value(asked(&mut new, &device)).expect("its request carries the assertion");
+    let account = sign_in_proof::check(&proof, &device, &k.address, None, now()).expect("the person's devices check it");
+    let Account::Passkey { public_key, .. } = &account else { panic!("{account:?}") };
+    let checked = sign_in_proof::vouches(&proof, &device, &k.address, None, std::slice::from_ref(&account), now());
+    assert!(checked.is_ok() && !public_key.is_empty(), "and let it in by it, once it's recorded: {checked:?}");
+    // Another device asking as them carries none, nor does one signed in for no device.
+    assert_eq!(asked(&mut new, &one::keys::Endpoint::of(&ed25519_dalek::SigningKey::from_bytes(&rand::random()))), Value::Null);
+    let mut plain = k.browser();
+    assert_eq!(signs_in_with_passkey(&mut plain, &passkey), 200);
+    assert_eq!(asked(&mut plain, &one::keys::Endpoint::of(&ed25519_dalek::SigningKey::from_bytes(&rand::random()))), Value::Null);
+
+    // With Google, the ID token it asks for names the device.
+    let g = Kernel::google(vec![admin_hex]);
+    let mut browser = g.browser();
+    let (status, client) = browser.post("/api/auth/oauth2/register", json!({ "client_name": "Chrome on Mac", "redirect_uris": [format!("{}/callback", g.address)], "token_endpoint_auth_method": "none", "grant_types": ["authorization_code"], "response_types": ["code"] }));
+    assert_eq!(status, 201, "{client}");
+    let query = format!("response_type=code&client_id={}&redirect_uri={}/callback&scope=openid&state=s&join={join}", client["client_id"].as_str().unwrap(), g.address);
+    assert_eq!(browser.post("/sign-in/google", json!({ "oauth_query": query })).0, 200);
+    let (status, out) = browser.post("/api/auth/sign-in/social", json!({ "provider": "google", "callbackURL": "/", "errorCallbackURL": "/" }));
+    assert_eq!(status, 200, "{out}");
+    assert_eq!(url_query(out["url"].as_str().unwrap()).get("nonce"), Some(&sign_in_proof::nonce(&device)), "Google is asked for an ID token naming the device");
+}
+
 /// iroh endpoints, as nodes are, through the relay at a kernel's address and nothing else: its relay protocol is
 /// iroh-relay's Rust as WebAssembly in a Durable Object (kernel/relay/), which must agree with iroh's own.
 mod relay {

@@ -123,7 +123,7 @@ pub fn try_install(rest: &[String]) -> Result<()> {
     if rest.first().map(String::as_str) == Some("sign-in") {
         // As its person, with no passkey: the try install's kernel asks for none.
         let address = get("/v1/state")?["install"]["settings"]["address"].as_str().context("the try install has no address")?.to_string();
-        let started = one::sign_in::start(&address)?;
+        let started = one::sign_in::start(&address, None)?;
         one::sign_in::approve_on_try(&started)?;
         one::sign_in::finish(started)?;
         let me = get("/v1/state")?["user"]["name"].as_str().unwrap_or("you").to_string();
@@ -760,8 +760,7 @@ fn joined(dir: &Path, settings: &one::kernel::Settings, name: &str) -> Result<(u
 /// person's device or as the device of the admin who invited them; then its window is pictured.
 fn approve(dir: &Path, settings: &one::kernel::Settings, port: u16, picture: &Path, code: &str) -> Result<()> {
     if !code.is_empty() {
-        let node = std::fs::read_to_string(dir.join("addr"))?;
-        crate::request(try_agent(dir).post(format!("http://{}/v1/devices/approve", node.trim())).send_json(json!({ "code": code, "confirm": true })))?;
+        approve_code(dir, code)?;
     }
     web_script(dir, &["picture", &port.to_string(), &settings.address, &picture.display().to_string()])?;
     Ok(())
@@ -977,8 +976,12 @@ fn is_code(text: &str) -> bool {
 fn approve_code(dir: &Path, code: &str) -> Result<()> {
     eprintln!("Approving the device that shows {code}…");
     let node = std::fs::read_to_string(dir.join("addr"))?;
-    crate::request(try_agent(dir).post(format!("http://{}/v1/devices/approve", node.trim())).send_json(json!({ "code": code.replace(' ', ""), "confirm": true })))?;
-    Ok(())
+    let approved = crate::request(try_agent(dir).post(format!("http://{}/v1/devices/approve", node.trim())).send_json(json!({ "code": code.replace(' ', ""), "confirm": true })));
+    // Let in already, by its sign-in, by that same machine: nothing waits.
+    match approved {
+        Err(err) if format!("{err:#}").contains("no device is waiting") => Ok(()),
+        r => r.map(drop),
+    }
 }
 
 /// A view on an Android screen, as uiautomator dumps it: its text, class and package, and its middle.

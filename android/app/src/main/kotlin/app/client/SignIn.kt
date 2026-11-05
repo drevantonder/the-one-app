@@ -68,10 +68,23 @@ class SignIn(private val context: Context) {
      *  keystore: it's what the person's other devices approve, and what reaches their nodes. */
     fun deviceSecret(id: String): ByteArray {
         val name = "device:" + b64u(MessageDigest.getInstance("SHA-256").digest(id.toByteArray()))
-        prefs.getString(name, null)?.let { sealed -> runCatching { Base64.decode(Keystore.open(sealed), Base64.NO_WRAP) }.getOrNull()?.takeIf { it.size == 32 }?.let { return it } }
-        val secret = uniffi.one_client_ffi.newDeviceSecret()
-        prefs.edit().putString(name, Keystore.seal(Base64.encodeToString(secret, Base64.NO_WRAP))).commit()
+        kept(name)?.let { return it }
+        // The key its sign-in was for, made before it knew whose.
+        val secret = kept(SIGNING_IN_FOR) ?: uniffi.one_client_ffi.newDeviceSecret()
+        prefs.edit().putString(name, Keystore.seal(Base64.encodeToString(secret, Base64.NO_WRAP))).remove(SIGNING_IN_FOR).commit()
         return secret
+    }
+
+    private fun kept(name: String): ByteArray? =
+        prefs.getString(name, null)?.let { sealed -> runCatching { Base64.decode(Keystore.open(sealed), Base64.NO_WRAP) }.getOrNull()?.takeIf { it.size == 32 } }
+
+    /** The device a sign-in here is for, which its sign-in names (its key ‖ seal key, hex): the key the first person
+     *  it signs in as takes ([deviceSecret]), made before it knows whose. */
+    private fun signingInFor(): String {
+        val secret = kept(SIGNING_IN_FOR) ?: uniffi.one_client_ffi.newDeviceSecret().also {
+            prefs.edit().putString(SIGNING_IN_FOR, Keystore.seal(Base64.encodeToString(it, Base64.NO_WRAP))).commit()
+        }
+        return uniffi.one_client_ffi.deviceJoin(secret)
     }
 
     /** `id`'s device key goes: a key the install removed can't be let in again, so the next sign-in makes a new one. */
@@ -127,7 +140,7 @@ class SignIn(private val context: Context) {
             .appendQueryParameter("response_type", "code").appendQueryParameter("client_id", client)
             .appendQueryParameter("redirect_uri", redirect).appendQueryParameter("scope", "openid profile offline_access")
             .appendQueryParameter("code_challenge", challenge).appendQueryParameter("code_challenge_method", "S256")
-            .appendQueryParameter("state", state).build()
+            .appendQueryParameter("state", state).appendQueryParameter("join", signingInFor()).build()
         withContext(Dispatchers.Main) { openInTab(activity, url) }
     }
 
@@ -217,6 +230,9 @@ class SignIn(private val context: Context) {
     }
 
     companion object {
+        /** Where the key a sign-in here is for is kept until it knows whose ([signingInFor]). */
+        private const val SIGNING_IN_FOR = "device:"
+
         /** Opens a page of the install's in a Custom Tab: Chrome's if it's here, since that's where passkeys work. */
         fun openInTab(context: Context, url: Uri) {
             val tab = CustomTabsIntent.Builder().setShowTitle(true).setShareState(CustomTabsIntent.SHARE_STATE_OFF).build()

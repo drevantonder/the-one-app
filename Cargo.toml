@@ -21,10 +21,13 @@ doctest = false
 # (client/) share with it: entries, members, logs, databases and keys.
 [features]
 default = ["node"]
-node = ["dep:axum", "dep:futures-util", "dep:iroh", "dep:jiff", "dep:md-5", "dep:libc", "dep:ssh-key", "dep:tokio", "dep:tokio-stream", "dep:tracing-subscriber", "dep:ureq", "dep:flate2", "dep:jsonc-parser", "dep:toml_edit", "dep:hyper", "dep:hyper-util", "dep:http-body-util", "dep:tokio-rustls", "dep:webpki-roots", "dep:ring", "db"]
+node = ["dep:axum", "dep:futures-util", "dep:iroh", "dep:jiff", "dep:md-5", "dep:libc", "dep:ssh-key", "dep:tokio", "dep:tokio-stream", "dep:tracing-subscriber", "dep:ureq", "dep:flate2", "dep:jsonc-parser", "dep:toml_edit", "dep:hyper", "dep:hyper-util", "dep:http-body-util", "dep:tokio-rustls", "dep:webpki-roots", "sign-in-proof", "db"]
 # `db`, apps' databases and logs (src/db.rs, src/log.rs, src/vault.rs: SQLite), which nodes and native apps' client
 # have; browsers' client (client/, WebAssembly) builds this crate without it, which SQLite would make a megabyte bigger.
 db = ["dep:rusqlite"]
+# `sign-in-proof`, checking a new device's sign-in (src/sign_in_proof.rs), which nodes and every client have; the
+# serverless node approves no one, so it goes without.
+sign-in-proof = ["dep:ring"]
 
 [dependencies]
 anyhow = "1"
@@ -47,6 +50,9 @@ rusqlite = { version = "0.41", features = ["bundled", "hooks", "limits", "serial
 serde = { version = "1", features = ["derive"] }
 sha2 = "0.11"
 serde_json = "1"
+# Push signs its ES256 tokens with ring (src/push.rs), and devices check a provider's RS256 ID tokens and a passkey's
+# ES256 or RS256 assertion with it (src/sign_in_proof.rs): rustls and iroh build it already, browsers' client too.
+ring = { version = "0.17", optional = true }
 tracing = "0.1"
 
 # On Workers (the serverless node, serverless/), rand gets its randomness from the runtime's crypto.getRandomValues.
@@ -87,7 +93,7 @@ flate2 = { version = "1", optional = true }
 jsonc-parser = { version = "0.34", features = ["cst", "serde"], optional = true }
 toml_edit = { version = "0.25", optional = true }
 # Push (src/push.rs) reaches Apple's push service, which speaks only HTTP/2: hyper's (axum already builds hyper; this
-# adds h2) over the rustls ureq and iroh already build, and signs its ES256 tokens with ring, which rustls builds.
+# adds h2) over the rustls ureq and iroh already build.
 # Client devices ask a node's local API over iroh, HTTP/1.1 on each stream (src/node/net.rs), which hyper's server
 # answers as axum's does over TCP.
 hyper = { version = "1", features = ["client", "http2", "server", "http1"], optional = true }
@@ -95,8 +101,6 @@ hyper-util = { version = "0.1", features = ["tokio", "service"], optional = true
 http-body-util = { version = "0.1", optional = true }
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"], optional = true }
 webpki-roots = { version = "1", optional = true }
-ring = { version = "0.17", optional = true }
-
 
 
 [build-dependencies]

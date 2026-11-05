@@ -395,6 +395,20 @@ export async function inviteProof(secret, key, seal) {
   return hex.encode(await hkdf(secret, concat(text.encode("one/invite\0"), bytes(key), bytes(seal))));
 }
 
+/// The OIDC nonce a sign-in for a device asks its provider for (`sign_in_proof::nonce`): base64url(sha256("one/join\0" ‖
+/// key ‖ seal)).
+export async function joinNonce(key, seal) {
+  return b64u.encode(await sha256(concat(text.encode("one/join\0"), bytes(key), bytes(seal))));
+}
+
+/// The challenge a passkey signs for a device at `at` (ms) (`sign_in_proof::challenge`): "one/join\0" ‖ key ‖ seal ‖
+/// `at`, 8 bytes big-endian.
+export function joinChallenge(key, seal, at) {
+  const time = new Uint8Array(8);
+  new DataView(time.buffer).setBigUint64(0, BigInt(at));
+  return concat(text.encode("one/join\0"), bytes(key), bytes(seal), time);
+}
+
 /// A passkey's device keys from its PRF output: `{ sign: Ed25519 seed, seal: X25519 secret }`.
 export async function passkeyKeys(prf) {
   return { sign: await hkdf(prf, "one/passkey-device/sign"), seal: await hkdf(prf, "one/passkey-device/seal") };

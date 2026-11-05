@@ -9,7 +9,7 @@
 import * as answers from "./answers.js";
 import { del, put } from "./kept.js";
 import { BEHIND, waited } from "../shared/crypto.js";
-import { answer, browserKeys, browserName, codeOf, Device, joinAsk, passkeyKeysOf } from "./device.js";
+import { answer, browserKeys, browserName, codeOf, Device, joinAsk, passkeyKeysOf, signingInFor } from "./device.js";
 import { members } from "./members.js";
 import { net } from "./net.js";
 import { qrSvg } from "./qr.js";
@@ -81,6 +81,8 @@ window.__one = {};
       const q = new URLSearchParams({
         response_type: "code", client_id: client, redirect_uri: `${location.origin}/callback`, scope: "openid profile offline_access",
         code_challenge: challenge, code_challenge_method: "S256", state,
+        // The device it signs in for, which its sign-in then names, so the person's devices can let it in by it.
+        join: await signingInFor(),
       });
       location.href = `${meta.authorization_endpoint}?${q}`;
     },
@@ -1189,7 +1191,7 @@ window.__one = {};
       if (found.length > 1) throw new Error("Two devices are waiting with that code, so neither was let in. Start again on yours, for a new code.");
       const [r] = found;
       if (b.confirm !== true) return { device: r.name, person: r.person, new: !r.mine };
-      await device.approve(r);
+      await device.approve(r, undefined, { signIn: await signedInWith(r, undefined) });
     },
     "POST /v1/devices/passkey": async () => {
       const p = passkeyToList();
@@ -1209,9 +1211,37 @@ window.__one = {};
   const seen = new Set();
   let prompting = false;
 
+  /// What a device waiting signed in with, checked here: against `accounts`, its person's as their devices record them,
+  /// for one this browser lets in by it, or with none, for one approved by its code. → null if it doesn't check out.
+  const signedInWith = (r, accounts) => (r.sign_in ? net.signedInWith(r.sign_in, r.key, r.seal, location.origin, accounts).catch(() => null) : Promise.resolve(null));
+
+  /// Requests whose sign-in was checked here and didn't let them in, with the accounts it was checked against: left
+  /// for the person, by code, unless their accounts change.
+  const notBySignIn = new Set();
+
+  /// Lets in each of this person's devices waiting whose sign-in shows it's theirs, as approving it would. → those it
+  /// didn't.
+  async function bySignIn(waiting) {
+    const asked = waiting.filter((r) => r.mine && r.sign_in);
+    if (!asked.length) return waiting;
+    const accounts = await device.checked(true).then((k) => k.people[device.user]?.sign_ins || [], () => []);
+    const left = [];
+    for (const r of waiting) {
+      const tried = `${r.key} ${JSON.stringify(accounts)}`;
+      const account = accounts.length && asked.includes(r) && !notBySignIn.has(tried) ? await signedInWith(r, accounts) : null;
+      if (!account) {
+        if (accounts.length && asked.includes(r)) notBySignIn.add(tried);
+        left.push(r);
+        continue;
+      }
+      await device.approve(r, undefined, { signIn: account }).catch((err) => (console.warn(`letting ${r.name} in by its sign-in: ${err.message}`), left.push(r)));
+    }
+    return left;
+  }
+
   /// Asks auth which devices wait now, and tells the window and its screens if that changed. → them.
   async function waitingNow() {
-    const now = (await device.requests()).filter((r) => !notMine.has(r.key));
+    const now = await bySignIn((await device.requests()).filter((r) => !notMine.has(r.key)));
     const changed = now.map((r) => r.key).join() !== waiting.map((r) => r.key).join();
     waiting = now;
     if (changed) {

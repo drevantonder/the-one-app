@@ -11,7 +11,7 @@
 // keys, and gets none this way.
 
 import { askedFor, b64u, databaseKey, ed25519Public, epochHash, hex, hkdfKey, inviteProof, joinCode, oldestNeeded, openAppKey, openSealed, passkeyKeys, random, sealAppKey, sealHandoff, sealTo, sha256, signEntry, signedRequest, twinPublic, untilTaken, x25519Public } from "../shared/crypto.js";
-import { get, put } from "./kept.js";
+import { del, get, put } from "./kept.js";
 import { members } from "./members.js";
 
 const text = new TextEncoder();
@@ -28,12 +28,26 @@ const raw = async (key) => new Uint8Array(await crypto.subtle.exportKey("raw", k
 export async function browserKeys(user) {
   let d = await get(`device:${user}`);
   if (!d) {
-    const sign = await crypto.subtle.generateKey({ name: "Ed25519" }, false, ["sign", "verify"]);
-    const seal = await crypto.subtle.generateKey({ name: "X25519" }, false, ["deriveBits"]);
-    d = { sign: sign.privateKey, key: hex.encode(await raw(sign.publicKey)), seal: seal.privateKey, sealKey: hex.encode(await raw(seal.publicKey)) };
+    // The keys its sign-in was for, made before it knew whose.
+    d = (await get("device:")) || (await newKeys());
     await put(`device:${user}`, d);
+    await del("device:");
   }
   return { key: d.key, seal: d.sealKey, sign: d.sign, opens: { secret: d.seal, public: hex.decode(d.sealKey) } };
+}
+
+async function newKeys() {
+  const sign = await crypto.subtle.generateKey({ name: "Ed25519" }, false, ["sign", "verify"]);
+  const seal = await crypto.subtle.generateKey({ name: "X25519" }, false, ["deriveBits"]);
+  return { sign: sign.privateKey, key: hex.encode(await raw(sign.publicKey)), seal: seal.privateKey, sealKey: hex.encode(await raw(seal.publicKey)) };
+}
+
+/// The device a sign-in in this browser is for (`join`, its key ‖ seal key): the keys the first person it signs in as
+/// takes, made before it knows whose (`browserKeys`).
+export async function signingInFor() {
+  let d = await get("device:");
+  if (!d) await put("device:", (d = await newKeys()));
+  return d.key + d.sealKey;
 }
 
 /// A passkey as a device, from its PRF output (`keys::passkey_keys`).
@@ -451,7 +465,7 @@ export class Device {
 
   /// Lets in a device that asked: lists it (and for a newcomer, them), seals it the epochs it may open, lets it onto the
   /// network and clears its request.
-  async approve(r, as = this.me) {
+  async approve(r, as = this.me, { signIn } = {}) {
     const k = await this.checked(true);
     const may = k.people[this.user];
     const known = !!k.people[r.user];
@@ -465,7 +479,7 @@ export class Device {
       if (!(await this.invitedHere(r))) throw new Error("That device didn’t come from an invite made here.");
       newUser = { name: (await get(`invite:${r.user}`)).name || r.person, role: "member" };
     }
-    if (!listed) await this.write("global", members.device({ key: r.key, seal: r.seal, user: r.user, name: r.name, newUser, device: r.device }), as);
+    if (!listed) await this.write("global", members.device({ key: r.key, seal: r.seal, user: r.user, name: r.name, newUser, device: r.device, signIn, place: r.place }), as);
     await this.sealTo(r, newUser ? ["global"] : scopesOf(k, r.user), as);
     await this.tell({ add: r.key, role: "client", ...(!newUser && may.invites ? { admin: true } : {}) }, as).catch((err) => {
       if (!(listed && /in already/.test(err.message))) throw err;

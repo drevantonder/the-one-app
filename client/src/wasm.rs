@@ -211,3 +211,31 @@ impl Global {
         self.members.clone()
     }
 }
+
+/// Where the issuer of a new device's sign-in (`proof`, as auth passed it on, JSON) publishes its keys, for the issuers
+/// devices of the install at `address` take: "" for a passkey's, or any other issuer.
+#[wasm_bindgen(js_name = issuerKeysAt)]
+pub fn issuer_keys_at(proof: String, address: String) -> String {
+    let proof: Option<one::sign_in_proof::Proof> = serde_json::from_str(&proof).ok();
+    proof.and_then(|p| p.issuer()).and_then(|i| one::sign_in_proof::keys_at(&i, &address)).unwrap_or_default()
+}
+
+/// What a new device (`key`, `seal`, hex) signed in with, as its sign-in (`proof`, JSON) shows, checked here
+/// (`one::sign_in_proof`): with its issuer's `keys` (JSON, or "" for a passkey's), at the install's `address`; against
+/// `accounts` (its person's, as their devices record them, JSON), for one let in by it, or with none, for one approved
+/// by its code. → the account, as JSON, to record with it; throws why it doesn't check out.
+#[wasm_bindgen(js_name = signedInWith)]
+pub fn signed_in_with(proof: String, key: String, seal: String, address: String, keys: String, accounts: Option<String>, now: f64) -> Result<String, JsError> {
+    let proof: one::sign_in_proof::Proof = serde_json::from_str(&proof).map_err(js)?;
+    let device = one::keys::Endpoint { key: self::key(&key)?, seal: self::key(&seal)? };
+    let keys: Option<serde_json::Value> = (!keys.is_empty()).then(|| serde_json::from_str(&keys)).transpose().map_err(js)?;
+    let now = now as u64;
+    let account = match accounts {
+        Some(theirs) => {
+            let theirs: Vec<one::sign_in_proof::Account> = serde_json::from_str(&theirs).map_err(js)?;
+            one::sign_in_proof::vouches(&proof, &device, &address, keys.as_ref(), &theirs, now)
+        }
+        None => one::sign_in_proof::check(&proof, &device, &address, keys.as_ref(), now),
+    };
+    Ok(serde_json::to_string(&account.map_err(js)?).map_err(js)?)
+}

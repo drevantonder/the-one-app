@@ -44,6 +44,22 @@ pub(super) fn may_list(db: &ScopeDb, who: &str, user: &str, kinds: &[members::Ki
     db.may(who, if theirs { "add-devices" } else { "add-machines" }, &scopes::person(user))
 }
 
+/// How often a client of its person's looks for their new devices whose sign-in lets them in.
+const SIGN_INS_EVERY: Duration = Duration::from_secs(4);
+
+/// How long an issuer's keys are kept before they're fetched again: a key it no longer signs with goes within the hour.
+const ISSUER_KEYS_FOR: Duration = Duration::from_secs(3600);
+
+/// What `Node::sign_in_loop` knows between its looks.
+#[derive(Default)]
+pub(super) struct SignIns {
+    /// Each issuer's keys, by where they're published, and when they were fetched.
+    keys: HashMap<String, (Value, Instant)>,
+    /// Requests whose sign-in was checked and didn't let them in, by key and the accounts they were checked against:
+    /// left for the person, by code, unless their accounts change.
+    refused: std::collections::HashSet<String>,
+}
+
 /// Whether `user` may start a scope's new epoch: they may `remove` from it, and it's a group that's there.
 fn starts_epochs(db: &ScopeDb, user: &str, scope: &Scope) -> bool {
     !matches!(scope, Scope::Group(g) if db.group(g).is_none()) && db.may(user, "remove", &scopes::object(scope))
@@ -180,9 +196,17 @@ pub struct DeviceRequest {
     /// The city it asked from, as Cloudflare placed it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub place: Option<String>,
+    /// What its sign-in showed (`sign_in_proof::Proof`), as auth passed it on: unchecked, and read only as a proof.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sign_in: Option<Value>,
 }
 
 impl DeviceRequest {
+    /// What its sign-in showed, if it's a proof this release reads.
+    pub fn proof(&self) -> Option<crate::sign_in_proof::Proof> {
+        serde_json::from_value(self.sign_in.clone()?).ok()
+    }
+
     /// The device that asks: its key and seal key, which its join code and proof cover both of.
     pub fn endpoint(&self) -> Result<crate::keys::Endpoint> {
         Ok(crate::keys::Endpoint { key: crate::keys::unhex(&self.key)?, seal: crate::keys::unhex(&self.seal)? })
@@ -546,6 +570,13 @@ impl Node {
         if let Some(on) = &on {
             listed.data["device"] = json!(hex(on));
         }
+        // What it signed in with, checked here, recorded with it: their next device's sign-in is checked against it.
+        if let Some(account) = self.signed_in_with(r, None).await {
+            listed.data["sign_in"] = json!(account);
+        }
+        if let Some(place) = &r.place {
+            listed.data["place"] = json!(place);
+        }
         // Approved before, but its request wasn't marked so (the device still waits on it): what's left is done again.
         let already = self.with(|i| Ok(i.r.db().client(&endpoint.key).is_some_and(|c| c.user == r.user && c.seal == endpoint.seal)))?;
         if !already {
@@ -589,6 +620,99 @@ impl Node {
             told.with_context(|| format!("{} is let in, but your One App's network didn't take it yet: approve it again", r.name))?;
         }
         Ok(json!({ "device": r.name, "sealed": sealed, "not_sealed": not }))
+    }
+
+    /// What `r`'s sign-in shows it signed in with, checked here: against `accounts` (the person's, as their devices
+    /// record them) for one let in by it, else for one approved by its code. None if it shows nothing that checks out.
+    async fn signed_in_with(&self, r: &DeviceRequest, accounts: Option<&[crate::sign_in_proof::Account]>) -> Option<crate::sign_in_proof::Account> {
+        let proof = r.proof()?;
+        let (endpoint, address) = (r.endpoint().ok()?, self.address().ok()?);
+        let jwks = match proof.issuer().and_then(|i| crate::sign_in_proof::keys_at(&i, &address)) {
+            Some(at) => match self.issuer_keys(&at).await {
+                Ok(keys) => Some(keys),
+                Err(err) => {
+                    tracing::warn!("fetching {at}, to check {}'s sign-in: {err:#}", r.name);
+                    return None;
+                }
+            },
+            None => None,
+        };
+        let checked = match accounts {
+            Some(theirs) => crate::sign_in_proof::vouches(&proof, &endpoint, &address, jwks.as_ref(), theirs, now_ms()),
+            None => crate::sign_in_proof::check(&proof, &endpoint, &address, jwks.as_ref(), now_ms()),
+        };
+        checked.map_err(|err| tracing::info!("{}'s sign-in doesn't let it in by itself: {err:#}", r.name)).ok()
+    }
+
+    /// An issuer's keys, published at `at`: kept for an hour.
+    async fn issuer_keys(&self, at: &str) -> Result<Value> {
+        if let Some((keys, when)) = self.0.sign_ins.lock().unwrap().keys.get(at)
+            && when.elapsed() < ISSUER_KEYS_FOR
+        {
+            return Ok(keys.clone());
+        }
+        let url = at.to_string();
+        let keys: Value = tokio::task::spawn_blocking(move || -> Result<Value> {
+            let agent: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(10))).build().into();
+            Ok(agent.get(&url).call()?.body_mut().read_json()?)
+        })
+        .await??;
+        self.0.sign_ins.lock().unwrap().keys.insert(at.to_string(), (keys.clone(), Instant::now()));
+        Ok(keys)
+    }
+
+    /// Every few seconds, on a client of its person's, lets in each of their new devices whose sign-in shows it's
+    /// theirs (`sign_in_proof::vouches`), as their approving it would, with no one tapping; any other waits for them to
+    /// approve it by its code. Nodes that only run calls let in no one.
+    pub(super) async fn sign_in_loop(self) {
+        loop {
+            tokio::time::sleep(SIGN_INS_EVERY).await;
+            if let Err(err) = self.approve_by_sign_in().await {
+                tracing::debug!("looking for devices let in by their sign-in: {err:#}");
+            }
+        }
+    }
+
+    async fn approve_by_sign_in(&self) -> Result<()> {
+        let me = self.with(|i| Ok(i.r.db().client(&self.0.id).map(|c| c.user)))?;
+        let Some(user) = me else { return Ok(()) };
+        if self.address().is_err() {
+            return Ok(());
+        }
+        let asked: Value = self.ask_auth("GET", "/api/auth/devices/requests", json!({})).await?;
+        let asked: Vec<DeviceRequest> = serde_json::from_value(asked["requests"].clone()).context("auth's requests aren't requests")?;
+        let theirs = asked.into_iter().filter(|r| r.user == user && r.proof.is_none() && r.sign_in.is_some());
+        for r in theirs {
+            let accounts = self.with(|i| Ok(i.r.db().sign_ins(&user)))?;
+            // Checked once against the accounts they have now, and again if those change.
+            let tried = format!("{} {}", r.key, json!(accounts));
+            let done = self.0.refused.lock().unwrap().contains(&r.key) || self.0.sign_ins.lock().unwrap().refused.contains(&tried);
+            if done || accounts.is_empty() {
+                continue;
+            }
+            if self.signed_in_with(&r, Some(&accounts)).await.is_none() {
+                let mut kept = self.0.sign_ins.lock().unwrap();
+                if kept.refused.len() >= 100 {
+                    kept.refused.clear();
+                }
+                kept.refused.insert(tried);
+                continue;
+            }
+            // Another device of theirs may have just let it in.
+            self.read_log_now(&Scope::Global).await?;
+            let caller = Caller { key: self.0.id, user: user.clone(), agent: None, token: None };
+            let approved = self.approve_request(&caller, &r, None).await;
+            match approved {
+                Ok(_) => {
+                    tracing::info!("let {} in by its sign-in", r.name);
+                    if let Err(err) = self.ask_auth("DELETE", &self.approved_path(&r.key)?, json!({})).await {
+                        tracing::warn!("marking a request approved at auth: {err:#}");
+                    }
+                }
+                Err(err) => tracing::warn!("letting {} in by its sign-in: {err:#}", r.name),
+            }
+        }
+        Ok(())
     }
 
     /// Lists one of this device's parts, the service `service`, as its person's, a part of this device (oned turned it

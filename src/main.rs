@@ -1120,7 +1120,8 @@ fn sign_in(flags: &Map<String, Value>) -> Result<()> {
             state["install"]["settings"]["address"].as_str().context(format!("this install has no address to sign in at yet: give one with --address, or an admin sets it with {CLI} kernel use"))?.to_string()
         }
     };
-    let started = one::sign_in::start(&address)?;
+    let join = (!client_device::node_here()).then(|| client_device::signing_in_for(&address)).transpose()?;
+    let started = one::sign_in::start(&address, join.as_deref())?;
     let with = if one::config::SIGN_IN == "google" { "Google" } else { "your passkey" };
     // Someone new joins first, in a browser, which then signs this in as them.
     let link = match &invite {

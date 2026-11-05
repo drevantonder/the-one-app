@@ -127,7 +127,7 @@ pub fn view(m: &Members) -> Result<Value> {
     let db = who(m)?;
     let scopes = db.scopes();
     let listed = db.machines().into_iter().filter(|d| !d.removed).collect::<Vec<_>>();
-    let mut devices: Vec<Value> = listed.iter().map(|d| json!({ "key": hex(&d.key), "seal": hex(&d.seal), "user": d.user, "name": d.name, "roles": d.roles, "passkey": d.passkey, "device": d.device.as_ref().map(hex) })).collect();
+    let mut devices: Vec<Value> = listed.iter().map(|d| json!({ "key": hex(&d.key), "seal": hex(&d.seal), "user": d.user, "name": d.name, "roles": d.roles, "passkey": d.passkey, "device": d.device.as_ref().map(hex), "since": d.since, "place": d.place })).collect();
     let nodes = db.nodes();
     if let Some(k) = db.serverless()
         && let Some((_, seal)) = nodes.iter().find(|(n, _)| *n == k)
@@ -168,6 +168,7 @@ pub fn view(m: &Members) -> Result<Value> {
                 "removes_people": db.may(u, "remove", INSTALL),
                 "removes": listed.iter().filter(|d| db.may(u, "remove", &device(&d.key))).map(|d| hex(&d.key)).collect::<Vec<_>>(),
                 "keeps": keeps,
+                "sign_ins": db.sign_ins(u),
             }),
         );
     }
