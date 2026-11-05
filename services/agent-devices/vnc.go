@@ -131,7 +131,13 @@ func vncHello(r *bufio.Reader, w io.Writer) error {
 		return err
 	}
 	name := make([]byte, binary.BigEndian.Uint32(init[20:]))
-	_, err = io.ReadFull(r, name)
+	if _, err = io.ReadFull(r, name); err != nil {
+		return err
+	}
+	// SetEncodings: raw, and pointer type change. QEMU takes a client's pointer for a mouse's movements until it hears
+	// the client knows pointers can be absolute: then each move reaches its USB tablet as that many pixels more, which
+	// Windows reads as the screen's bottom-right corner, wherever it was sent.
+	_, err = w.Write([]byte{2, 0, 0, 2, 0, 0, 0, 0, 0xff, 0xff, 0xfe, 0xff})
 	return err
 }
 
