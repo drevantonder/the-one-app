@@ -3,6 +3,9 @@
 // "group:<id>"); without one it's the install's board where it's installed there, else the caller's own, else a
 // group's (as a group's page shows its widget).
 
+import main from "./dist/main.html" with { type: "text" };
+import topic from "./dist/topic.html" with { type: "text" };
+
 const LIMIT = 280; // bytes in a post, a topic's description or a who
 const RULES = 4000; // bytes in the board's rules
 const SUMMARY = 2 * LIMIT; // bytes in a summary
@@ -523,71 +526,8 @@ The board's rules, which every agent follows and anyone may change with board_ru
   },
 
   screens: {
-    main: {
-      title: "Agent Board",
-      html: `
-<div id="list"></div>
-<script>
-async function show() {
-  const topics = await one.call("topics", { format: "json", ...(one.scope ? { scope: one.scope } : {}) });
-  const row = (t) => {
-    const top = t.path === "";
-    const n = t.newest;
-    return \`<a class="row" onclick='one.open("topic", \${JSON.stringify({ path: t.path })})'>
-      <div class="icon\${top ? "" : " grey"}">\${top ? "★" : "#"}</div>
-      <div class="main">
-        <div class="title"><span>\${top ? "Top of the board" : one.esc(t.path)}</span><span class="when">\${n ? one.ago(n.time) : ""}</span></div>
-        <div class="sub">\${n ? one.esc(n.name) + ": " + one.esc(n.text) : one.esc(t.description || "Nothing here yet")}</div>
-      </div>
-      <div class="chev">›</div>
-    </a>\`;
-  };
-  const rest = topics.slice(1);
-  return \`<div class="list">\${row(topics[0])}</div>
-     <h2 class="section">Topics</h2>
-     \${rest.length ? \`<div class="list">\${rest.map(row).join("")}</div>\` : one.empty("No topics yet")}\`;
-}
-const draw = () => one.render("#list", show, { loading: "Loading topics" });
-one.on("changed", draw);
-draw();
-</script>`,
-    },
-    topic: {
-      title: "Topic",
-      html: `
-<p id="about" class="muted small"></p>
-<div id="feed" class="feed"></div>
-<script>
-const path = one.params.path || "";
-one.title(path || "Top of the board");
-let posts = [];
-function feed() {
-  let html = "", last = null;
-  for (const p of posts) {
-    const day = new Date(p.time).toDateString();
-    if (!last || new Date(last.time).toDateString() !== day) html += \`<div class="day">\${new Date(p.time).toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" })}</div>\`;
-    const same = last && last.user === p.user && last.credit === p.credit && p.time - last.time < 10 * 60000;
-    html += same
-      ? \`<div class="post more"><div class="text">\${one.esc(p.text)}</div></div>\`
-      : \`<div class="post">\${one.avatar(p.user, p.name)}<div><div class="who">\${one.esc(p.credit || p.name)}<span class="when">\${one.ago(p.time)}</span></div><div class="text">\${one.esc(p.text)}</div></div></div>\`;
-    last = p;
-  }
-  return html || one.empty("No posts yet");
-}
-const show = () => one.render("#feed", async () => {
-  const r = await one.call("read", { format: "json", ...(path ? { topic: path } : {}), ...(one.scope ? { scope: one.scope } : {}) });
-  document.getElementById("about").textContent = r.description || "";
-  posts = r.posts;
-  return feed();
-}, { skeleton: "text" }).then(() => pinned && window.scrollTo(0, document.body.scrollHeight));
-// The feed stays on its newest post while the view resizes (a shell's navigation), unless scrolled up.
-let pinned = true;
-addEventListener("scroll", () => { pinned = innerHeight + scrollY >= document.body.scrollHeight - 40; });
-new ResizeObserver(() => { if (pinned) window.scrollTo(0, document.body.scrollHeight); }).observe(document.documentElement);
-one.on("changed", show);
-show();
-</script>`,
-    },
+    main: { title: "Agent Board", html: main },
+    topic: { title: "Topic", html: topic },
   },
 
   widgets: {

@@ -1,0 +1,171 @@
+<meta name="@one/ui">
+<style>/*! tailwindcss v4.3.4 | MIT License | https://tailwindcss.com */
+@layer properties{@supports (((-webkit-hyphens:none)) and (not (margin-trim:block))) or ((-moz-orient:inline) and (not (color:rgb(from red r g b)))){*,:before,:after,::backdrop{--tw-space-y-reverse:0;--tw-font-weight:initial}}}@layer theme,base,components;@layer utilities{.mx-auto{margin-inline:auto}.-mt-3{margin-top:calc(var(--spacing,.25rem) * -3)}.ml-2{margin-left:calc(var(--spacing,.25rem) * 2)}.flex{display:flex}.grid{display:grid}.table{display:table}.size-8{width:calc(var(--spacing,.25rem) * 8);height:calc(var(--spacing,.25rem) * 8)}.h-4{height:calc(var(--spacing,.25rem) * 4)}.h-\[calc\(100svh-2rem\)\]{height:calc(100svh - 2rem)}.min-h-0{min-height:0}.w-1{width:var(--spacing,.25rem)}.w-1\/3{width:33.3333%}.w-full{width:100%}.max-w-2xl{max-width:var(--container-2xl,42rem)}.min-w-0{min-width:0}.flex-1{flex:1}.shrink-0{flex-shrink:0}.grow{flex-grow:1}.resize{resize:both}.flex-col{flex-direction:column}.place-items-center{place-items:center}.items-baseline{align-items:baseline}.items-start{align-items:flex-start}.justify-between{justify-content:space-between}.gap-2{gap:calc(var(--spacing,.25rem) * 2)}.gap-3{gap:calc(var(--spacing,.25rem) * 3)}.gap-4{gap:calc(var(--spacing,.25rem) * 4)}:where(.space-y-2>:not(:last-child)){--tw-space-y-reverse:0;margin-block-start:calc(calc(var(--spacing,.25rem) * 2) * var(--tw-space-y-reverse));margin-block-end:calc(calc(var(--spacing,.25rem) * 2) * calc(1 - var(--tw-space-y-reverse)))}.truncate{text-overflow:ellipsis;white-space:nowrap;overflow:hidden}.overflow-y-auto{overflow-y:auto}.rounded-full{border-radius:2147483647px}.bg-muted{background-color:var(--muted)}.p-4{padding:calc(var(--spacing,.25rem) * 4)}.px-1{padding-inline:var(--spacing,.25rem)}.px-6{padding-inline:calc(var(--spacing,.25rem) * 6)}.py-12{padding-block:calc(var(--spacing,.25rem) * 12)}.pt-4{padding-top:calc(var(--spacing,.25rem) * 4)}.pl-11{padding-left:calc(var(--spacing,.25rem) * 11)}.text-center{text-align:center}.text-base{font-size:var(--text-base,1rem);line-height:var(--tw-leading,var(--text-base--line-height,calc(1.5 / 1)))}.text-sm{font-size:var(--text-sm,.875rem);line-height:var(--tw-leading,var(--text-sm--line-height,calc(1.25 / .875)))}.text-xs{font-size:var(--text-xs,.75rem);line-height:var(--tw-leading,var(--text-xs--line-height,calc(1 / .75)))}.font-medium{--tw-font-weight:var(--font-weight-medium,500);font-weight:var(--font-weight-medium,500)}.font-normal{--tw-font-weight:var(--font-weight-normal,400);font-weight:var(--font-weight-normal,400)}.font-semibold{--tw-font-weight:var(--font-weight-semibold,600);font-weight:var(--font-weight-semibold,600)}.break-words{overflow-wrap:break-word}.whitespace-nowrap{white-space:nowrap}.text-muted-foreground{color:var(--muted-foreground)}.lowercase{text-transform:lowercase}.first\:pt-0:first-child{padding-top:0}}@property --tw-space-y-reverse{syntax:"*";inherits:false;initial-value:0}@property --tw-font-weight{syntax:"*";inherits:false}
+/*$vite$:1*/</style>
+<div id="root"></div>
+<script type="module">import { c as e } from "react/compiler-runtime";
+import { useEffect as t, useLayoutEffect as n, useRef as r, useState as i } from "react";
+import { createRoot as a } from "react-dom/client";
+import { Problem as o, Skeleton as s, cn as c } from "@one/ui";
+import { Fragment as l, jsx as u, jsxs as d } from "react/jsx-runtime";
+// ../../../../../.t3/worktrees/the-one-app/board-react-build/apps/board/lib/board.jsx
+var f = () => one.scope ? { scope: one.scope } : {};
+function p(e) {
+	let [n, a] = i({}), o = r(e);
+	return o.current = e, t(() => {
+		let e = () => o.current().then((e) => a({ data: e }), (t) => a((n) => n.data ? n : {
+			problem: one.plain(t),
+			retry: e
+		}));
+		one.on("changed", e), e();
+	}, []), n;
+}
+var m = (e) => one.call("read", {
+	format: "json",
+	...e ? { topic: e } : {},
+	...f()
+});
+function h(t) {
+	let n = e(6), { problem: r, retry: i } = t, a;
+	n[0] === i ? a = n[1] : (a = {
+		label: "Try Again",
+		run: i
+	}, n[0] = i, n[1] = a);
+	let s;
+	return n[2] !== r.next || n[3] !== r.title || n[4] !== a ? (s = /* @__PURE__ */ u(o, {
+		title: r.title,
+		text: r.next,
+		action: a
+	}), n[2] = r.next, n[3] = r.title, n[4] = a, n[5] = s) : s = n[5], s;
+}
+var g = (e) => new Date(e).toDateString(), _ = (e) => String(e || "?").split(/\s+/).map((e) => e[0]).join("").slice(0, 2).toUpperCase();
+function v(t) {
+	let n = e(4), { name: r } = t, i;
+	n[0] === r ? i = n[1] : (i = _(r), n[0] = r, n[1] = i);
+	let a;
+	return n[2] === i ? a = n[3] : (a = /* @__PURE__ */ u("span", {
+		className: "grid size-8 shrink-0 place-items-center rounded-full bg-muted text-xs font-semibold text-muted-foreground",
+		children: i
+	}), n[2] = i, n[3] = a), a;
+}
+function y(i) {
+	let a = e(28), { posts: o, own: s, className: l } = i, f = s !== void 0 && s, p = r(null), m = r(!0), h;
+	a[0] === f ? h = a[1] : (h = () => f ? p.current : null, a[0] = f, a[1] = h);
+	let _ = h, y;
+	a[2] === f ? y = a[3] : (y = () => f ? p.current.scrollTo({ top: p.current.scrollHeight }) : window.scrollTo(0, document.body.scrollHeight), a[2] = f, a[3] = y);
+	let b = y, x;
+	a[4] === f ? x = a[5] : (x = () => f ? p.current.scrollTop + p.current.clientHeight >= p.current.scrollHeight - 40 : innerHeight + scrollY >= document.body.scrollHeight - 40, a[4] = f, a[5] = x);
+	let S = x, C;
+	a[6] !== S || a[7] !== b || a[8] !== f || a[9] !== _ ? (C = () => {
+		let e = _() || window, t = () => m.current = S();
+		e.addEventListener("scroll", t, { passive: !0 });
+		let n = new ResizeObserver(() => m.current && b());
+		return n.observe(f ? p.current.firstElementChild : document.documentElement), () => {
+			e.removeEventListener("scroll", t), n.disconnect();
+		};
+	}, a[6] = S, a[7] = b, a[8] = f, a[9] = _, a[10] = C) : C = a[10];
+	let w;
+	a[11] === f ? w = a[12] : (w = [f], a[11] = f, a[12] = w), t(C, w);
+	let T;
+	a[13] === b ? T = a[14] : (T = () => {
+		m.current && b();
+	}, a[13] = b, a[14] = T);
+	let E;
+	a[15] === o ? E = a[16] : (E = [o], a[15] = o, a[16] = E), n(T, E);
+	let D;
+	a[17] === o ? D = a[18] : (D = [], o.forEach((e, t) => {
+		let n = o[t - 1];
+		n && g(n.time) === g(e.time) || D.push(/* @__PURE__ */ u("div", {
+			className: "pt-4 text-center text-xs font-medium text-muted-foreground first:pt-0",
+			children: new Date(e.time).toLocaleDateString(void 0, {
+				weekday: "long",
+				day: "numeric",
+				month: "long"
+			})
+		}, `day-${e.id}`));
+		let r = n && g(n.time) === g(e.time) && n.user === e.user && n.credit === e.credit && e.time - n.time < 6e5;
+		D.push(r ? /* @__PURE__ */ u("p", {
+			className: "-mt-3 break-words pl-11 text-sm",
+			children: e.text
+		}, e.id) : /* @__PURE__ */ d("div", {
+			className: "flex items-start gap-3",
+			children: [/* @__PURE__ */ u(v, { name: e.name }), /* @__PURE__ */ d("div", {
+				className: "min-w-0 flex-1",
+				children: [/* @__PURE__ */ d("div", {
+					className: "text-sm",
+					children: [/* @__PURE__ */ u("span", {
+						className: "font-semibold",
+						children: e.credit || e.name
+					}), /* @__PURE__ */ u("span", {
+						className: "ml-2 whitespace-nowrap text-xs text-muted-foreground",
+						children: one.ago(e.time)
+					})]
+				}), /* @__PURE__ */ u("p", {
+					className: "break-words text-sm",
+					children: e.text
+				})]
+			})]
+		}, e.id));
+	}), a[17] = o, a[18] = D);
+	let O;
+	a[19] !== o.length || a[20] !== D ? (O = o.length ? D : /* @__PURE__ */ u("p", {
+		className: "px-6 py-12 text-center text-sm text-muted-foreground",
+		children: "No posts yet"
+	}), a[19] = o.length, a[20] = D, a[21] = O) : O = a[21];
+	let k;
+	a[22] === O ? k = a[23] : (k = /* @__PURE__ */ u("div", {
+		className: "flex flex-col gap-4",
+		children: O
+	}), a[22] = O, a[23] = k);
+	let A = k, j;
+	return a[24] !== l || a[25] !== A || a[26] !== f ? (j = f ? /* @__PURE__ */ u("div", {
+		ref: p,
+		className: c("overflow-y-auto", l),
+		children: A
+	}) : A, a[24] = l, a[25] = A, a[26] = f, a[27] = j) : j = a[27], j;
+}
+function b() {
+	let t = e(1), n;
+	return t[0] === Symbol.for("react.memo_cache_sentinel") ? (n = /* @__PURE__ */ u("div", {
+		className: "flex flex-col gap-4",
+		children: [
+			0,
+			1,
+			2
+		].map(x)
+	}), t[0] = n) : n = t[0], n;
+}
+function x(e) {
+	return /* @__PURE__ */ d("div", {
+		className: "flex gap-3",
+		children: [/* @__PURE__ */ u(s, { className: "size-8 rounded-full" }), /* @__PURE__ */ d("div", {
+			className: "flex-1 space-y-2",
+			children: [/* @__PURE__ */ u(s, { className: "h-4 w-1/3" }), /* @__PURE__ */ u(s, { className: "h-4 w-full" })]
+		})]
+	}, e);
+}
+// ../../../../../.t3/worktrees/the-one-app/board-react-build/apps/board/screens/topic.jsx
+var S = one.params.path || "";
+function C() {
+	let n = e(5), { data: r, problem: i, retry: a } = p(T), o;
+	n[0] === Symbol.for("react.memo_cache_sentinel") ? (o = [], n[0] = o) : o = n[0], t(w, o);
+	let s;
+	return n[1] !== r || n[2] !== i || n[3] !== a ? (s = /* @__PURE__ */ u("div", {
+		className: "flex max-w-2xl flex-col gap-4",
+		children: i ? /* @__PURE__ */ u(h, {
+			problem: i,
+			retry: a
+		}) : r ? /* @__PURE__ */ d(l, { children: [r.description && /* @__PURE__ */ u("p", {
+			className: "text-sm text-muted-foreground",
+			children: r.description
+		}), /* @__PURE__ */ u(y, { posts: r.posts })] }) : /* @__PURE__ */ u(b, {})
+	}), n[1] = r, n[2] = i, n[3] = a, n[4] = s) : s = n[4], s;
+}
+function w() {
+	one.title(S || "Top of the board");
+}
+function T() {
+	return m(S);
+}
+a(document.getElementById("root")).render(/* @__PURE__ */ u(C, {}));
+</script>
