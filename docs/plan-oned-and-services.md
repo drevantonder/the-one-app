@@ -150,6 +150,21 @@ Check: `one throwaway`, switch WhatsApp on, link a phone, send a message.
 Check: `one throwaway shell run`, `one throwaway models chat`, `one throwaway agents get`, borrow and give back an agent device, AI Usage's
 status, on a fresh throwaway network where each is switched on from nothing.
 
+Done for Shell, Models, AI Usage and Agent Devices (6bead05..2368cbc): each is `apps/<name>/service/`, a crate on
+`service/`; `one update` builds it here for Linux and publishes it before the node; a Mac app carries its own inside it
+(`Contents/MacOS/<cli>-<name>`, built by `apple/build.sh` with its node), which oned runs and never fetches
+(`oned::carried`), as a checkout's build does for `one throwaway`. Since nothing is built in any more, each runs only
+where an entry switches it on: every device of both networks got one for Shell, Models and AGENTS.md before the node
+stopped carrying them, and a new device is switched on in Settings › Devices, as phase 6 will ask.
+
+Left: **AGENTS.md**, still `services::built_in`. It is two things. One is the node wiring its machine's harnesses to
+itself (its MCP server, the board's prompt hook, git's token for Repos, the built-in skills from `src/skills.rs`), which
+belongs to the node, on every device, not to a service. The other is the app's own: AGENTS.md and the person's skills,
+kept as records in the person's sealed `agents/sidecar` database, which a program holding no keys can't read. So: the
+wiring moves into the node proper; the records move into the app's own database (app.js and `ctx.db`, copied once from
+the sidecar); and the service becomes a program that asks its own app for them (`/v1/call`, which a service may make for
+its own app) and writes the files. Then `built_in`, `Record`, `RECORDS` and the node's records path go.
+
 ### Phase 3: the Mac's Swift services become helper apps
 
 - Spike first, on a real Mac: one helper (Contacts) as its own bundle, started by oned as its own launch agent. Confirm
