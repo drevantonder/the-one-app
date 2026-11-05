@@ -262,11 +262,13 @@ fn start(dir: &Path) -> Result<String> {
     eprintln!("Starting this checkout's throwaway network again…");
     stop_some(dir, false, false)?;
     let was = std::fs::read_to_string(dir.join("addr"))?.trim().to_string();
-    // Its own statement: a listener made in spawn_node's arguments would hold the port while the node starts.
+    // Its own statement: a listener made in the arguments would hold the port while the node starts.
     let free = std::net::TcpListener::bind(&was).is_ok();
-    let addr = spawn_node(dir, free.then_some(was.as_str()))?;
+    let addr = if free { was } else { std::net::TcpListener::bind("127.0.0.1:0")?.local_addr()?.to_string() };
+    // Its Workers first, so its node's relay finds them the first time it asks: found later, it waits out a backoff of
+    // about half a minute, while the Cloudflare node says none of the install's devices is on.
     spawn_cloudflare(dir, &load_cloudflare(dir)?, &addr)?;
-    Ok(addr)
+    spawn_node(dir, Some(&addr))
 }
 
 /// A new throwaway network, and its Workers.
