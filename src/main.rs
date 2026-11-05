@@ -127,8 +127,8 @@ fn every_command() -> String {
   {CLI} services                       what each of your devices can run, each on or off, and what it's doing
   {CLI} services on|off <name> [--device <name>]
                                        switch a service on or off on a device of yours (here by default), which its
-                                       oned starts or stops ({hosted} are in this program; an app's own is fetched as
-                                       it's published); apps is its app service
+                                       oned starts or stops, fetching its program as it's published (a Mac app
+                                       carries its own); apps is its app service
   {CLI} services try apps/<name> [--device <name>]
                                        put your checkout's build of an app's service on a device of yours (here by
                                        default, else over ssh by its name) and switch it on, until a newer one is
@@ -165,8 +165,7 @@ fn every_command() -> String {
   {CLI} mcp [--code]                   the local MCP server, over stdio, for agents: every tool, or with --code, search and execute
   {CLI} help [all]                     what to start with; with all, this
 
-{NAME} holds one install. For another context, run that context's own app.",
-        hosted = one::services::hosted().iter().map(|h| h.name).collect::<Vec<_>>().join(", ")
+{NAME} holds one install. For another context, run that context's own app."
     )
 }
 

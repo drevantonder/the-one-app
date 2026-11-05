@@ -432,10 +432,14 @@ fn stop_some(dir: &Path, delete: bool, clients: bool) -> Result<()> {
     let _ = std::fs::remove_file(dir.join("pid"));
     if delete {
         // Its Linux devices, borrowed or spare, are its own containers on the machine's runtime, outside its folder.
-        if dir.join("agent-devices").exists()
-            && let Err(err) = one::agent_devices::delete_all(&dir.join("agent-devices"))
-        {
-            eprintln!("Couldn't delete its Linux devices: {err:#}");
+        // By Agent Devices' own program, which knows where they are.
+        let program = one::oned::program("agent-devices");
+        if dir.join("agent-devices").exists() && program.exists() {
+            match std::process::Command::new(&program).arg("delete-all").arg(dir.join("agent-devices")).output() {
+                Ok(out) if out.status.success() => {}
+                Ok(out) => eprintln!("Couldn't delete its Linux devices: {}", String::from_utf8_lossy(&out.stderr).trim()),
+                Err(err) => eprintln!("Couldn't delete its Linux devices: {err}"),
+            }
         }
         for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
             if entry.file_name() != "cache" {

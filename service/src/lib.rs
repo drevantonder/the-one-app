@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
 use std::time::Duration;
 
-use anyhow::{Result, anyhow, bail};
+use anyhow::{Result, anyhow, bail, ensure};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -54,8 +54,8 @@ pub struct Answer {
     pub blobs: Vec<String>,
 }
 
-impl From<Value> for Answer {
-    fn from(ok: Value) -> Self {
+impl Answer {
+    pub fn new(ok: Value) -> Self {
         Answer { ok, blobs: Vec::new() }
     }
 }
@@ -171,12 +171,18 @@ fn answer(resp: Result<ureq::http::Response<ureq::Body>, ureq::Error>) -> Result
     Ok(Some(body))
 }
 
+/// The folder the service `name` keeps its data in, as oned says (`<NAME>_DATA`).
+pub fn dir(name: &str) -> PathBuf {
+    std::env::var_os(format!("{}_DATA", name.to_uppercase().replace('-', "_"))).map(PathBuf::from).unwrap_or_default()
+}
+
 /// Answers `service`'s calls, as oned's environment says, until oned stops this program.
 pub fn serve(service: Service) -> Result<()> {
     let name = service.name;
     let at = std::env::var("ONE_ADDR").map_err(|_| anyhow!("{name} is a service: its device's oned starts it"))?;
     let home = std::env::var_os("ONE_HOME").map(PathBuf::from).ok_or_else(|| anyhow!("ONE_HOME isn't set"))?;
-    let dir = std::env::var_os(format!("{}_DATA", name.to_uppercase().replace('-', "_"))).map(PathBuf::from).unwrap_or_else(|| home.join("data"));
+    let dir = dir(name);
+    ensure!(!dir.as_os_str().is_empty(), "{name}'s oned says where its data goes");
     std::fs::create_dir_all(&dir)?;
     // Read for each request, as Go's service does, so a node that starts after it still lets it in.
     let token = home.join("local-token");

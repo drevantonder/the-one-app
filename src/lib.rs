@@ -52,8 +52,6 @@ pub mod replica;
 #[cfg(feature = "node")]
 pub mod agents;
 #[cfg(feature = "node")]
-pub mod agent_devices;
-#[cfg(feature = "node")]
 pub mod api;
 #[cfg(feature = "node")]
 pub mod apps;

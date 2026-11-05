@@ -3,10 +3,9 @@
 //! it as its person's, a part of that device (`Node::list_part`), which tells the relay to let it in. It holds no keys
 //! and reads no bucket: the nodes that call it bring it `global`'s entries, whose member entries it replays from the
 //! install's first entry (given by oned, so nothing on the way can make it another install's) and checks each caller by
-//! itself: a compute endpoint of the install that runs the calls of a person it serves. The program offering it
-//! registers over a loopback with the services' API and long-polls for calls, whether it's this one
-//! (`services::answer_hosted`) or one in another language (`~/.local/bin/<cli>-<name>`, which it starts). A service
-//! writes nothing itself: what it asks for is a call, which a node of its person's runs (`/v1/call` on the loopback).
+//! itself: a compute endpoint of the install that runs the calls of a person it serves. The program offering it, its
+//! app's own (`oned::program`), which this starts, registers over a loopback with the services' API and long-polls for
+//! calls. A service writes nothing itself: what it asks for is a call, which a node of its person's runs (`/v1/call` on the loopback).
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -693,8 +692,7 @@ fn stop_check(parent: u32) -> Result<impl Fn() -> bool> {
 static ASKED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// `oned <name>`: the service `name` as a part of this device's oned, which started it, until oned stops or this
-/// program is replaced: this program's own (`services::hosted`), or the program `~/.local/bin/<cli>-<name>`, started
-/// here and again whenever it stops, told where to register (`ONE_ADDR`), where the token it sends is (`ONE_HOME`,
+/// program is replaced: its program (`oned::program`), started here and again whenever it stops, told where to register (`ONE_ADDR`), where the token it sends is (`ONE_HOME`,
 /// the service's folder) and where its data goes (`<NAME>_DATA`). One runs at a time: a part an update's oned starts
 /// waits for the one before to stop.
 pub fn run(name: &str) -> Result<()> {
@@ -712,21 +710,13 @@ pub fn run(name: &str) -> Result<()> {
     }
     let stop = stop_check(parent)?;
     let program = crate::oned::program(name);
-    let hosted = crate::services::hosted().iter().any(|h| h.name == name);
-    ensure!(hosted || program.exists(), "{name} isn't a service this program offers, and {} isn't there", program.display());
+    ensure!(program.exists(), "{name}'s program, {}, isn't there", program.display());
     let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
     let service = Service::open(&dir, name)?;
     let at = runtime.block_on(service.start())?;
     let data = crate::home().join(name);
     std::fs::create_dir_all(&data)?;
-    if hosted {
-        // A program in another language that offered it before this one hosted it, and the release it came from.
-        let _ = std::fs::remove_file(crate::oned::fetched(name));
-        let _ = std::fs::remove_file(dir.join("release"));
-        crate::services::answer_hosted(name, data, at.to_string(), service.token().to_string(), &stop)?;
-    } else {
-        host(name, &program, &data, at, &service, &stop)?;
-    }
+    host(name, &program, &data, at, &service, &stop)?;
     eprintln!("{name}: stopping, for oned to start it again");
     Ok(())
 }

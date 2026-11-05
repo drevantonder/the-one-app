@@ -1,9 +1,9 @@
 //! Device services: native code a device runs beside its node, for what apps can't reach from workerd (a shell, local
 //! models, WhatsApp's linked phone, a Mac's own apps). A service serves its device's users, and the node says so in its
 //! hello to the other devices; its app, and only its app, calls it with `ctx.services`. Some are built into the node
-//! (AGENTS.md: `built_in`); the rest are programs that register over the local API and long-poll for calls:
-//! this program itself, hosting one (`Hosted`), or its app's own (`apps/<name>/service/`, in Rust on the `service`
-//! crate or in Go; Swift in the Mac app). The core never names one: only `built_in` and `hosted` do, for the binary.
+//! (AGENTS.md: `built_in`); the rest are programs that register over the local API and long-poll for calls: an app's
+//! own (`apps/<name>/service/`, in Rust on the `service` crate or in Go), or Swift in the Mac app. The core never names
+//! one: only `built_in` does, for the binary.
 
 use std::collections::HashMap;
 use std::future::Future;
@@ -217,88 +217,6 @@ impl Services {
     }
 }
 
-/// A service this program hosts as a service endpoint of its own, a part of oned (`oned <name>`, src/service.rs), on a
-/// device whose person switched it on. It registers with its endpoint over a loopback as any hosted service does
-/// (`answer_hosted` is the one place it meets its callers), keeps what it keeps in its folder, and runs only where
-/// it's switched on, unlike those `built_in`.
-pub struct Hosted {
-    pub name: &'static str,
-    /// What it says it is; it registers again when this changes (as Agent Devices' browser tools, read from a device).
-    pub describe: fn() -> Value,
-    /// Runs one call, on a thread of its own: its answer, and blobs the caller's scope keeps.
-    pub call: fn(host: &Host, call: &Call) -> Result<Answer>,
-    /// Starts what it does between calls, once, before it registers.
-    pub start: Option<fn(host: &Host)>,
-}
-
-/// The services this program hosts.
-pub fn hosted() -> Vec<Hosted> {
-    vec![
-        Hosted { name: crate::agent_devices::NAME, describe: crate::agent_devices::describe, call: crate::agent_devices::call, start: Some(crate::agent_devices::start) },
-    ]
-}
-
-/// What a hosted service has: its folder, and its machine's node.
-#[derive(Clone)]
-pub struct Host {
-    pub name: &'static str,
-    pub dir: std::path::PathBuf,
-    node: String,
-    agent: ureq::Agent,
-}
-
-impl Host {
-    pub fn get(&self, path: &str) -> Result<Value> {
-        Ok(answer(self.agent.get(format!("{}{path}", self.node)).call())?.unwrap_or_default())
-    }
-
-    pub fn post(&self, path: &str, body: &Value) -> Result<Value> {
-        Ok(answer(self.agent.post(format!("{}{path}", self.node)).send_json(body))?.unwrap_or_default())
-    }
-
-    /// `post`, given up on after `limit`.
-    pub fn post_within(&self, path: &str, body: &Value, limit: Duration) -> Result<Value> {
-        Ok(answer(self.agent.post(format!("{}{path}", self.node)).config().timeout_global(Some(limit)).build().send_json(body))?.unwrap_or_default())
-    }
-
-    /// The port of its node's local API.
-    pub fn port(&self) -> u16 {
-        self.node.rsplit(':').next().and_then(|p| p.parse().ok()).unwrap_or(0)
-    }
-
-    /// One with `dir` and no node, for tests.
-    #[cfg(test)]
-    pub fn for_test(dir: &std::path::Path) -> Host {
-        Host { name: "test", dir: dir.to_path_buf(), node: "http://127.0.0.1:1".into(), agent: ureq::Agent::new_with_defaults() }
-    }
-
-    /// Keeps bytes, read from `body` as they come, as a blob the caller's scope keeps once the call names it in its
-    /// answer: its hash and size.
-    pub fn put_blob(&self, body: impl std::io::Read + Send + 'static) -> Result<(String, u64)> {
-        let resp = self.agent.post(format!("{}/v1/blobs", self.node)).header("content-type", "application/octet-stream").send(ureq::SendBody::from_owned_reader(body));
-        let put = answer(resp)?.unwrap_or_default();
-        let blob = put["blob"].as_str().filter(|b| !b.is_empty()).ok_or_else(|| anyhow!("the node kept no blob"))?;
-        Ok((blob.to_string(), put["size"].as_u64().unwrap_or(0)))
-    }
-
-    /// A blob's bytes, as they come, from whichever device has it.
-    pub fn get_blob(&self, hash: &str) -> Result<impl std::io::Read + Send + 'static> {
-        let resp = self.agent.get(format!("{}/v1/blobs/{hash}", self.node)).call()?;
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let body = resp.into_body().read_to_string().unwrap_or_default();
-            bail!("{status}: {}", body.trim());
-        }
-        Ok(resp.into_body().into_reader())
-    }
-
-    /// `text` with the Vault's fields (`{{name}}`) filled in by the node for call `id`, which only `host` may be sent.
-    pub fn fill(&self, id: u64, text: &str, host: &str) -> Result<String> {
-        let out = self.post(&format!("/v1/services/{}/calls/{id}/vault", self.name), &json!({ "text": text, "host": host })).map_err(|err| anyhow!("the Vault: {err}"))?;
-        Ok(out["text"].as_str().unwrap_or_default().to_string())
-    }
-}
-
 /// A call's input as `T`, where none is an empty one and a field that's null is one not given, as Go's services read them.
 pub fn input<T: serde::de::DeserializeOwned + Default>(input: &Value) -> Result<T> {
     fn given(v: &Value) -> Value {
@@ -309,92 +227,4 @@ pub fn input<T: serde::de::DeserializeOwned + Default>(input: &Value) -> Result<
         }
     }
     Ok(if input.is_null() { T::default() } else { serde_json::from_value(given(input)).map_err(|err| anyhow!("bad input: {err}"))? })
-}
-
-/// The node's answer: None for no content.
-fn answer(resp: Result<ureq::http::Response<ureq::Body>, ureq::Error>) -> Result<Option<Value>> {
-    let mut resp = resp?;
-    if resp.status() == 204 {
-        return Ok(None);
-    }
-    let body: Value = resp.body_mut().read_json().unwrap_or_default();
-    if let Some(err) = body["error"].as_str().filter(|e| !e.is_empty()) {
-        bail!("{err}");
-    }
-    if !resp.status().is_success() {
-        bail!("{}", resp.status());
-    }
-    Ok(Some(body))
-}
-
-/// Answers the calls for the hosted service `name`, from the service endpoint at `at` (src/service.rs), on the
-/// loopback its local token lets this program in at, until `replaced` says this program was: registers and answers its
-/// calls, registering again whenever it's forgotten (services are kept in memory).
-pub fn answer_hosted(name: &str, dir: std::path::PathBuf, at: String, token: String, replaced: impl Fn() -> bool) -> Result<()> {
-    let hosted = hosted().into_iter().find(|h| h.name == name).ok_or_else(|| anyhow!("{name} isn't a service this program hosts"))?;
-    let as_this_program = move |mut req: ureq::http::Request<ureq::SendBody>, next: ureq::middleware::MiddlewareNext| {
-        if let Ok(value) = token.parse() {
-            req.headers_mut().insert(crate::api::LOCAL_TOKEN_HEADER, value);
-        }
-        next.handle(req)
-    };
-    let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).middleware(as_this_program.clone()).build().into();
-    let poll: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).timeout_global(Some(Duration::from_secs(40))).middleware(as_this_program).build().into();
-    let host = std::sync::Arc::new(Host { name: hosted.name, dir, node: format!("http://{at}"), agent });
-    if let Some(start) = hosted.start {
-        start(&host);
-    }
-    let described = || {
-        let mut describe = (hosted.describe)();
-        describe["version"] = json!(crate::config::BUILD);
-        describe
-    };
-    // Calls being answered: registering again forgets them, so it waits for none.
-    let running = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    while !replaced() {
-        let describe = described();
-        if let Err(err) = host.post(&format!("/v1/services/{name}"), &describe) {
-            eprintln!("registering: {err:#}");
-            std::thread::sleep(Duration::from_secs(3));
-            continue;
-        }
-        while !replaced() {
-            let call = match answer(poll.get(format!("{}/v1/services/{name}/calls", host.node)).call()) {
-                Ok(Some(call)) => match serde_json::from_value::<Call>(call) {
-                    Ok(call) => call,
-                    Err(err) => {
-                        eprintln!("a call it can't read: {err}");
-                        continue;
-                    }
-                },
-                Ok(None) => {
-                    if running.load(std::sync::atomic::Ordering::SeqCst) == 0 && described() != describe {
-                        break;
-                    }
-                    continue;
-                }
-                Err(err) => {
-                    eprintln!("waiting for calls: {err:#}");
-                    std::thread::sleep(Duration::from_secs(1));
-                    break;
-                }
-            };
-            let (host, run, running) = (host.clone(), hosted.call, running.clone());
-            running.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            std::thread::spawn(move || {
-                // One that panics is answered as failed, not left for its caller to wait out.
-                let reply = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(&host, &call))) {
-                    Ok(Ok(answer)) if answer.blobs.is_empty() => json!({ "ok": answer.ok }),
-                    Ok(Ok(answer)) => json!({ "ok": answer.ok, "blobs": answer.blobs }),
-                    Ok(Err(err)) => json!({ "error": format!("{err:#}") }),
-                    Err(_) => json!({ "error": format!("{} failed: it panicked", host.name) }),
-                };
-                running.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
-                if let Err(err) = host.post(&format!("/v1/services/{}/calls/{}", host.name, call.id), &reply) {
-                    eprintln!("answering {}: {err:#}", call.op);
-                }
-            });
-        }
-    }
-    Ok(())
 }

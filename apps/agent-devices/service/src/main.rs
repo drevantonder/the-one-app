@@ -1,5 +1,4 @@
-//! Agent Devices: devices for agents. A hosted service (`services::Hosted`), as a part of oned of its own, keeping what
-//! it keeps in its folder (`<home>/agent-devices`). Linux ones (kind linux) are each a container running Cua's desktop
+//! Agent Devices' service: devices for agents, keeping what it keeps in its folder (`<home>/agent-devices`). Linux ones (kind linux) are each a container running Cua's desktop
 //! image (github.com/trycua/cua) with Google Chrome, which keeps its sign-ins (linux.rs); the server inside each device
 //! speaks MCP (mcp.rs), and its browser tools become this service's operations. Chrome ones (kind chrome, chrome.rs)
 //! are this machine's own Chrome, whose browser tools this service answers itself (browse.rs). Windows, Android and
@@ -41,7 +40,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Result, anyhow, bail};
 use serde_json::{Map, Value, json};
 
-use crate::services::{Answer, Call, Host};
+use one_service::{Answer, Call, Host, Service};
 use latest::{Latest, Pictures};
 use linux::{Containers, Device};
 use mcp::{Conn, Tool};
@@ -100,11 +99,6 @@ pub struct Devices {
     traffic: Mutex<HashMap<String, i64>>,
 }
 
-/// Deletes the Linux devices of the install whose data folder is `dir`: those a `one throwaway` made, when it's deleted.
-pub fn delete_all(dir: &std::path::Path) -> anyhow::Result<()> {
-    linux::delete_all(dir)
-}
-
 static DEVICES: OnceLock<Arc<Devices>> = OnceLock::new();
 
 /// This service's state, made the first time it's needed.
@@ -153,8 +147,21 @@ impl Devices {
     }
 }
 
+/// Serves, or given `delete-all <folder>` (`one throwaway stop`), deletes the Linux devices a folder of its kept.
+fn main() -> Result<()> {
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into());
+    tracing_subscriber::fmt().with_writer(std::io::stderr).with_env_filter(filter).init();
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if let [op, dir] = args.as_slice()
+        && op == "delete-all"
+    {
+        return linux::delete_all(std::path::Path::new(dir));
+    }
+    one_service::serve(Service { name: NAME, describe, call, start: Some(start) })
+}
+
 /// Starts what it does between calls: reading the devices' tools, tending them, and serving the viewer.
-pub fn start(host: &Host) {
+fn start(host: &Host) {
     let ds = devices(host);
     let d = ds.clone();
     std::thread::spawn(move || {
@@ -165,7 +172,7 @@ pub fn start(host: &Host) {
     std::thread::spawn(move || ds.serve_viewer());
 }
 
-pub fn call(host: &Host, call: &Call) -> Result<Answer> {
+fn call(host: &Host, call: &Call) -> Result<Answer> {
     let ds = devices(host);
     let caller = Caller { name: call.caller.name.clone(), user: call.caller.user.clone() };
     let input = match &call.input {
@@ -176,10 +183,10 @@ pub fn call(host: &Host, call: &Call) -> Result<Answer> {
     ds.run(&caller, &call.op, input)
 }
 
-pub fn describe() -> Value {
+fn describe() -> Value {
     let mut ops = own_ops();
     let tools: Vec<Tool> = DEVICES.get().map(|ds| ds.tools.lock().unwrap().clone()).unwrap_or_else(|| {
-        std::fs::read(crate::home().join(NAME).join("tools.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
+        std::fs::read(one_service::dir(NAME).join("tools.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
     });
     for t in &tools {
         if BROWSING.contains(&t.name.as_str()) {
@@ -621,7 +628,7 @@ impl Devices {
                 let d = self.running(name)?;
                 let rec = self.backup(&d)?;
                 let said = format!("Backed up device {} ({}). Restore it on any of your devices with restore.", d.name, bytes_text(rec.bytes));
-                Ok(Answer { ok: json!({ "backup": rec, "text": said }), records: Vec::new(), blobs: vec![rec.blob.clone()] })
+                Ok(Answer { ok: json!({ "backup": rec, "text": said }), blobs: vec![rec.blob.clone()] })
             }
             "backups" => {
                 if here {

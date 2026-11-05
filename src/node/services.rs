@@ -128,8 +128,7 @@ impl Node {
         let switched = |name: &str| m.switch(&self.0.id, name).is_some_and(|s| s.on);
         let (processes, now) = crate::oned::parts();
         for name in &processes {
-            let title = crate::services::hosted().iter().find(|h| h.name == name.as_str()).map(|h| (h.describe)()["title"].clone()).unwrap_or(Value::Null);
-            out.insert(name.clone(), json!({ "name": name, "title": title, "on": switched(&name) }));
+            out.insert(name.clone(), json!({ "name": name, "on": switched(&name) }));
         }
         for (name, now) in now {
             if let (Some(Value::Object(part)), Value::Object(now)) = (out.get_mut(&name), json!(now)) {

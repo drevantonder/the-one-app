@@ -2816,6 +2816,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "one-agent-devices"
+version = "0.1.0"
+dependencies = [
+ "aes-gcm",
+ "anyhow",
+ "axum",
+ "data-encoding",
+ "flate2",
+ "hkdf",
+ "image",
+ "jiff",
+ "libc",
+ "one-service",
+ "rand 0.8.8",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2 0.11.1",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "ureq",
+]
+
+[[package]]
 name = "one-ai-usage"
 version = "0.1.0"
 dependencies = [

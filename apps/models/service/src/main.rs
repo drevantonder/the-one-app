@@ -98,7 +98,7 @@ fn call(_: &Host, call: &Call) -> Result<Answer> {
         }
         other => bail!("models has no operation {other}"),
     };
-    Ok(result?.into())
+    Ok(Answer::new(result?))
 }
 
 /// Whether this device has `model`; if not, the call goes on to a device that might.

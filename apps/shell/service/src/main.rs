@@ -83,7 +83,7 @@ fn call(host: &Host, call: &Call) -> Result<Answer> {
     if let Err(err) = std::fs::OpenOptions::new().create(true).append(true).open(host.dir.join("ran.jsonl")).and_then(|mut f| writeln!(f, "{ran}")) {
         eprintln!("logging it: {err}");
     }
-    Ok(json!({ "exit": exit, "stdout": stdout, "stderr": stderr }).into())
+    Ok(Answer::new(json!({ "exit": exit, "stdout": stdout, "stderr": stderr })))
 }
 
 fn read_into(pipe: Option<impl Read + Send + 'static>, into: Arc<Mutex<Vec<u8>>>) -> std::thread::JoinHandle<()> {

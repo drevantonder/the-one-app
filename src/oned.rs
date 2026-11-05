@@ -6,10 +6,10 @@
 //! Only the device's person writes that entry (its switch in Settings' Devices), and oned starts and stops the parts as
 //! it changes. Each process part keeps its own key in its folder (`<home>/services/<name>`), so it answers only its own
 //! person whoever else's calls the device runs, and one failing leaves the rest; nothing approves it by a code, since
-//! its device lists it. Services in other languages come as the node does: `<cli> update` builds one for each platform
-//! and publishes it signed with the release key (a `service-release` entry, which an older device ignores), and oned
-//! fetches it, checks the signature and puts it at `~/.local/bin/<cli>-<name>` when it's switched on and again when a
-//! newer one's published. Its hello says what the device can run (`parts`) and each part's state (on, off, starting,
+//! its device lists it. Its program is its app's own (`apps/<name>/service/`): `<cli> update` builds it for each
+//! platform it can and publishes it signed with the release key (a `service-release` entry, which an older device
+//! ignores), and oned fetches it, checks the signature and puts it at `~/.local/bin/<cli>-<name>` when it's switched on
+//! and again when a newer one's published; a Mac app carries those in Rust inside it, built with it. Its hello says what the device can run (`parts`) and each part's state (on, off, starting,
 //! stopping, failed and why), which is what Settings' Devices shows. Removing a device removes its parts, and can erase
 //! what it keeps, which the device does itself, so only while it's reachable. On a Mac the app is oned; a phone runs
 //! none, its app is the device.
@@ -62,11 +62,11 @@ pub fn carried(name: &str) -> Option<PathBuf> {
     (path.exists() && path != fetched(name)).then_some(path)
 }
 
-/// The services this device could run as processes of oned's: this program's own, those with a release for its
-/// platform (`released`), which it fetches when one is switched on, and those whose programs are here that ran here
+/// The services this device could run as processes of oned's: those with a release for its platform (`released`),
+/// which it fetches when one is switched on, and those whose programs are here (carried or fetched) that ran here
 /// before or are switched on (`on`), not every `<cli>-` program there.
 fn offered(released: &BTreeSet<String>, on: &BTreeMap<String, u64>) -> BTreeSet<String> {
-    let mut names: BTreeSet<String> = crate::services::hosted().iter().map(|h| h.name.to_string()).collect();
+    let mut names = BTreeSet::new();
     let dirs = [fetched("x"), std::env::current_exe().unwrap_or_default()].map(|p| p.parent().map(|p| p.to_path_buf()).unwrap_or_default());
     let prefix = format!("{CLI}-");
     for entry in dirs.iter().flat_map(std::fs::read_dir).flatten().flatten() {
@@ -207,11 +207,10 @@ pub fn keep_parts(node: Node, runtime: tokio::runtime::Handle) {
                                 stop(name, child);
                             }
                         }
-                        let hosted = crate::services::hosted().iter().any(|h| h.name == name.as_str());
                         let here = program(name);
                         // Its program, fetched: none is here, or a newer release is out than the one here (or than
                         // one put here by hand, by when it was).
-                        if wanted && !hosted && carried(name).is_none() && let Some(r) = released.get(name) {
+                        if wanted && carried(name).is_none() && let Some(r) = released.get(name) {
                             let (committed, blob) = taken(name);
                             let had = std::fs::metadata(&here).ok().and_then(|m| m.modified().ok()).map(|t| t.duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs());
                             let newer = match (had, blob.is_empty()) {
@@ -244,7 +243,7 @@ pub fn keep_parts(node: Node, runtime: tokio::runtime::Handle) {
                                 });
                             }
                         }
-                        if wanted && !running.contains_key(name) && (hosted || here.exists()) && !fetching.lock().unwrap().contains(name) {
+                        if wanted && !running.contains_key(name) && here.exists() && !fetching.lock().unwrap().contains(name) {
                             match start(&install, name) {
                                 Ok(child) => {
                                     tracing::info!("oned started {name}");

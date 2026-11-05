@@ -11,14 +11,14 @@ use std::time::Duration;
 use anyhow::{Result, anyhow, bail};
 use serde_json::{Value, json};
 
-use one_service::{Call, Host, Service};
+use one_service::{Answer, Call, Host, Service};
 
 
 /// How long a provider may take to answer.
 const ASK: Duration = Duration::from_secs(15);
 
 fn main() -> Result<()> {
-    one_service::serve(Service { name: "ai-usage", describe, call: |h, c| call(h, c).map(Into::into), start: None })
+    one_service::serve(Service { name: "ai-usage", describe, call: |h, c| call(h, c).map(Answer::new), start: None })
 }
 
 fn describe() -> Value {

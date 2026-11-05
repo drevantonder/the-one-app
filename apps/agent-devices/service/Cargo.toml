@@ -1,0 +1,33 @@
+[package]
+name = "one-agent-devices"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[dependencies]
+one-service = { path = "../../../service" }
+anyhow = "1"
+# A Chrome profile is kept sealed, and Chrome's own cookies are read, with AES (profiles.rs, cookies.rs).
+aes-gcm = "0.10"
+# The viewer, a page on this machine that shows a device's screen and takes its input (viewer.rs).
+axum = "0.8"
+data-encoding = "2"
+# A profile comes from a Linux device as a gzipped tarball (chrome.rs).
+flate2 = "1"
+# Screens come as PNG or JPEG and go out as JPEG at the width asked (picture.rs).
+# A profile's key, derived from its secret (profiles.rs).
+hkdf = "0.13"
+image = { version = "0.24", default-features = false, features = ["png", "jpeg"] }
+jiff = "0.2"
+libc = "0.2"
+rand = "0.8"
+# Chrome keeps its cookies in SQLite (cookies.rs).
+rusqlite = { version = "0.41", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.11"
+tokio = { version = "1", features = ["rt", "net"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+ureq = { version = "3", features = ["json"] }
