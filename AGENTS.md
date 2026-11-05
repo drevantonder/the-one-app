@@ -14,9 +14,9 @@ Your devices, and your team's, as one place for apps and agents. Read `ARCHITECT
 
 ## Design
 
-- Three layers. Principles, the same everywhere: content first; order from type size and weight, not boxes, outlines or shadows; colour has two jobs, the tint for "tap this" and warn or danger for "this needs you"; fine is silent (no "Connected" or green); a problem shows on the thing itself, as one problem box (symbol, title, one sentence, the action that fixes it); an empty screen is one grey line, with a button only for an obvious first step; one component per job.
-- Our look, the same on every client: plain neutrals, soft rounded cards with rows inside, app icons as gradient tiles, external brands' real logos, red count badges. Its values are `src/screen/kit.css`'s, the one list every client copies.
-- The platform's own: the tint (each client passes its system tint as `--tint`), font, menus, sheets, alerts, Back and window material.
+- Three layers. Principles, the same everywhere: content first; order from type size and weight, not boxes, outlines or shadows; colour is for app icons and for warn or danger ("this needs you"), never for "tap this": a button's weight says how much it matters; fine is silent (no "Connected" or green); a problem shows on the thing itself, as one problem box (symbol, title, one sentence, the action that fixes it); an empty screen is one grey line, with a button only for an obvious first step; one component per job.
+- Our look, the same on every client: shadcn's design principles, language and component names, with its neutral theme. One `default` button per view, then `secondary`, `outline` and `ghost`; red only for `destructive`. App icons as gradient tiles, external brands' real logos, red count badges, Phosphor icons. Layout by container queries: each part sizes itself, grids fill the room, lists stop at a readable width, and what a list opens shows beside it where there's room. Never a page width. Screens are React + shadcn by choice, not by rule: a screen is HTML and JS. Screens still on `src/screen/kit.css` are moving to it, and the kit's values and native UI go once they have.
+- The platform's own: only what a web view can't do (passkeys, keychain, push, the scanner, files, home-screen widgets, the Mac's menu bar item). The sidebar, sheets, menus and alerts are the web's, the same everywhere.
 
 ## Work
 
