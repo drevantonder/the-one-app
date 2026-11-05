@@ -233,7 +233,13 @@ impl Node {
         // A service, or one of its operations, that's about its own machine (`"prefer": "here"`: Shell, models_here) runs
         // on the caller's first.
         let about_here = |d: &Value| d["prefer"] == "here" || d["ops"].as_array().is_some_and(|ops| ops.iter().any(|o| o["name"] == req.op.as_str() && o["prefer"] == "here"));
-        let here_first = here && req.service.is_some() && self.with(|i| Ok(self.services_here(i).iter().any(|d| d.0 == req.app && about_here(&d.2))))?;
+        // This device: its node, or a part of it (a service endpoint of oned's own).
+        let ours = |i: &Install, k: &Key| *k == self.0.id || i.r.db().machine(k).is_some_and(|m| m.device == Some(self.0.id));
+        let here_first = req.service.is_some()
+            && self.with(|i| {
+                let part = i.peers.iter().any(|(k, p)| ours(i, k) && i.online(k) && p.services.iter().any(|d| d.0 == req.app && about_here(&d.2)));
+                Ok(part || (here && self.services_here(i).iter().any(|d| d.0 == req.app && about_here(&d.2))))
+            })?;
         self.with(|i| {
             let m = i.r.db();
             let mut devices: Vec<Key> = if req.service.is_none() {
@@ -252,7 +258,7 @@ impl Node {
                 let here = *k == self.0.id;
                 let load = if here { Some(&here_load) } else { i.peers.get(k).and_then(|p| p.load.as_ref()) };
                 let far = !here && i.far.get(k).is_some_and(|d| *d > FAR);
-                (!here && !i.online(k), here_first && !here, load.is_some_and(full), far, rank::priority(&set, &hex(k)), !here, i.nearest.get(k).copied().unwrap_or(Duration::from_secs(1)))
+                (!here && !i.online(k), here_first && !ours(i, k), load.is_some_and(full), far, rank::priority(&set, &hex(k)), !here, i.nearest.get(k).copied().unwrap_or(Duration::from_secs(1)))
             };
             devices.sort_by_cached_key(rank);
             Ok(devices)
