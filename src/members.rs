@@ -1386,7 +1386,11 @@ mod tests {
 
     fn members(entries: &[Entry]) -> Members {
         let sorted = causal(entries.to_vec(), &Default::default());
-        Members::replay(Some(entries[0].hash()), &sorted, &Cuts::new())
+        let m = Members::replay(Some(entries[0].hash()), &sorted, &Cuts::new());
+        // Phase 1 changes nothing: the scope database says what replay does.
+        #[cfg(feature = "db")]
+        crate::database::scope::tests::agrees(&m);
+        m
     }
 
     /// Writes `content` as `user` from `dev` after everything in `entries`, and keeps it there.
@@ -1523,6 +1527,8 @@ mod tests {
         for m in [&a, &b] {
             assert_eq!(m.settings.keys().collect::<Vec<_>>(), ["before", "mac"], "nothing from the fork on");
             assert!(m.machine(&laptop.id()).is_none(), "it's removed");
+            #[cfg(feature = "db")]
+            crate::database::scope::tests::agrees(m);
         }
     }
 
@@ -1624,6 +1630,11 @@ mod tests {
         add(&mut entries, &mut mac, ANDRE, epoch(&work, 1, &[mac_id], &H.repeat(64)));
         add(&mut entries, &mut mac, ANDRE, invite("c000000000000003", BOB, Role::Member));
         add(&mut entries, &mut bobs, BOB, accept("c000000000000003"));
+        // Apps of the group's, the admins' and Bob's, and a serverless node, which change nothing owed.
+        add(&mut entries, &mut mac, ANDRE, node("app", json!({ "name": "notes", "owner": "group:c000000000000003" })));
+        add(&mut entries, &mut mac, ANDRE, node("app", json!({ "name": "board", "owner": "admins" })));
+        add(&mut entries, &mut bobs, BOB, node("app", json!({ "name": "bobs", "owner": format!("user:{BOB}") })));
+        add(&mut entries, &mut mac, ANDRE, setting("serverless", Some(&hex(&Dev::new(14).id()))));
         let (mut laptop, tablet) = (Dev::new(5), Dev::new(6));
         add(&mut entries, &mut bobs, BOB, device(&laptop.endpoint(), BOB, "laptop", &[Kind::Client], None));
         add(&mut entries, &mut bobs, BOB, device(&tablet.endpoint(), BOB, "tablet", &[Kind::Client], None));

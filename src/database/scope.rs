@@ -1,12 +1,18 @@
-//! The scope database: who and what a scope has (people, groups, devices, epochs, keeps, apps, deploys, installs,
-//! services, settings, the Vault's bookkeeping, recovery) as SQLite rows. Until the log is frozen it's built, never
-//! written: `build` makes it from what replay made (`Members`, and the scope's `ScopeState`), so replay stays the
-//! truth and this is its projection, the same on every reader. It's small, so it's built again as entries arrive.
+//! The scope database: who and what a scope has (people, groups, devices, who holds which role, epochs, keeps, apps,
+//! deploys, installs, services, settings, the Vault's bookkeeping, recovery) as SQLite rows. Until the log is frozen
+//! it's built, never written: `build` makes it from what replay made (`Members`, and the scope's `ScopeState`), so
+//! replay stays the truth and this is its projection, the same on every reader. It's small, so it's built again as
+//! entries arrive.
 //!
-//! Every scope's database has the same tables. What `global`'s entries say of the whole install (people, groups,
-//! devices, epochs and keeps of every scope, apps, services, settings, Vault keys, recovery) is filled in only in
-//! `global`'s, which everyone in the install reads; a person's or group's has only its own state (installs,
-//! schedules, Vault requests, pages, forgotten blobs), which only those who use it may read.
+//! Every scope's database has the same tables, `permissions`' among them with its defaults. What `global`'s entries
+//! say of the whole install (people, groups, invites, devices, relations, epochs and keeps of every scope, apps,
+//! services, settings, Vault keys, recovery) is filled in only in `global`'s, which everyone in the install reads; a
+//! person's or group's has only its own state (installs, schedules, Vault requests, pages, forgotten blobs), which
+//! only those who use it may read.
+//!
+//! Who may do what is `permissions::may` over `relations`, whose objects are `object(scope)`, `device(key)`,
+//! `service(key)` and `app(name)`. Whether an object exists (a device still listed, a group made) is the tables' to
+//! say, not `may`'s: the install's admins may remove every device, listed or not.
 //!
 //! People and groups are named as `person:<id>` and `group:<id>`; an app owned by the install's admins as `admins`.
 //! Keys and hashes are lowercase hex, times milliseconds, flags 0 or 1, and lists and arrangements JSON.
@@ -18,10 +24,11 @@ use rusqlite::{Connection, params, types::ValueRef};
 use serde_json::json;
 
 use crate::entry::{Key, Scope, hex};
-use crate::members::{Kind, Members, Principal, ScopeState};
+use crate::members::{Kind, Members, Principal, Role, ScopeState};
+use crate::permissions;
 
-/// The tables, the same in every scope's database. STRICT, so a value is stored as the type it was given, and every
-/// table has a primary key, which changesets need.
+/// The tables, the same in every scope's database, besides the permissions' (`permissions::SCHEMA`). STRICT, so a
+/// value is stored as the type it was given, and every table has a primary key, which changesets need.
 pub const SCHEMA: &str = "
 CREATE TABLE install (
   id INTEGER PRIMARY KEY CHECK (id = 0),
@@ -37,6 +44,12 @@ CREATE TABLE principals (
   name TEXT NOT NULL,
   handle TEXT NOT NULL,
   removed INTEGER NOT NULL
+) STRICT;
+CREATE TABLE invites (
+  principal TEXT NOT NULL,
+  invited_to TEXT NOT NULL,
+  role TEXT NOT NULL,
+  PRIMARY KEY (principal, invited_to)
 ) STRICT;
 CREATE TABLE devices (
   key TEXT PRIMARY KEY,
@@ -184,6 +197,38 @@ pub fn group(id: &str) -> String {
     format!("group:{id}")
 }
 
+/// A device, as an object or subject of permissions.
+pub fn device(key: &Key) -> String {
+    format!("device:{}", hex(key))
+}
+
+/// A service endpoint, as an object of permissions.
+pub fn service(key: &Key) -> String {
+    format!("service:{}", hex(key))
+}
+
+/// An app, as an object of permissions.
+pub fn app(name: &str) -> String {
+    format!("app:{name}")
+}
+
+/// A scope, as an object of permissions: the install, a group, or a person's own.
+pub fn object(scope: &Scope) -> String {
+    match scope {
+        Scope::Global => permissions::INSTALL.into(),
+        Scope::Group(g) => group(g),
+        Scope::User(u) => person(u),
+    }
+}
+
+/// A role in the install or a group, as `permissions` names it.
+pub fn role(r: Role) -> &'static str {
+    match r {
+        Role::Admin => "admin",
+        Role::Member => "member",
+    }
+}
+
 /// An app's owner, as the scope database names it.
 pub fn owner(p: &Principal) -> String {
     match p {
@@ -203,9 +248,12 @@ fn int(n: u64) -> i64 {
 pub fn build(members: &Members, scope: &Scope, state: &ScopeState) -> Result<Connection> {
     let db = Connection::open_in_memory()?;
     db.execute_batch(SCHEMA)?;
+    db.execute_batch(permissions::SCHEMA)?;
     let tx = db.unchecked_transaction()?;
+    tx.execute_batch(permissions::DEFAULTS)?;
     if *scope == Scope::Global {
         install(&tx, members)?;
+        relations(&tx, members)?;
     }
     own(&tx, state)?;
     tx.commit()?;
@@ -224,6 +272,9 @@ fn install(db: &Connection, m: &Members) -> Result<()> {
     }
     for g in m.groups.values() {
         db.execute("INSERT INTO principals VALUES (?, 'group', ?, ?, 0)", params![group(&g.id), g.name, g.handle])?;
+        for (user, r) in g.invited.iter().filter(|(u, _)| m.user(u).is_some()) {
+            db.execute("INSERT INTO invites VALUES (?, ?, ?)", params![person(user), group(&g.id), role(*r)])?;
+        }
     }
     for d in m.machines.values() {
         db.execute(
@@ -296,6 +347,45 @@ fn install(db: &Connection, m: &Members) -> Result<()> {
     for (n, key) in (0i64..).zip(&keys) {
         let current = n as usize + 1 == keys.len() && m.recovery.is_some();
         db.execute("INSERT INTO recovery VALUES (?, ?, ?)", params![n, hex(key), current.then(|| int(m.recovery_set))])?;
+    }
+    Ok(())
+}
+
+/// Who holds which role on what, in `permissions`' words, as replay says now: only people still in, and devices
+/// still listed, hold any. Which devices run a scope's calls is a `runner` row for each, as `Members::runs_for`
+/// says: for a group or `global` that follows from its admins, so it's worked out here rather than kept as a rule.
+fn relations(db: &Connection, m: &Members) -> Result<()> {
+    let add = |subject: &str, relation: &str, object: &str| db.execute("INSERT OR IGNORE INTO relations VALUES (?, ?, ?, NULL)", params![subject, relation, object]);
+    for u in m.users.values().filter(|u| !u.removed) {
+        add(&person(&u.id), role(u.role), permissions::INSTALL)?;
+        add(&person(&u.id), "owner", &person(&u.id))?;
+    }
+    for g in m.groups.values() {
+        for (user, r) in g.members.iter().filter(|(u, _)| m.user(u).is_some()) {
+            add(&person(user), role(*r), &group(&g.id))?;
+        }
+    }
+    for d in m.machines.values().filter(|d| m.machine(&d.key).is_some()) {
+        add(&person(&d.user), "owner", &device(&d.key))?;
+        if m.service(&d.key).is_some() {
+            let users = if d.shared { format!("{}#member", permissions::INSTALL) } else { person(&d.user) };
+            add(&users, "user", &service(&d.key))?;
+        }
+    }
+    let runners = m.computes().map(|c| c.key).chain(m.serverless());
+    for key in runners {
+        for scope in m.scopes().iter().filter(|s| m.runs_for(&key, s)) {
+            add(&device(&key), "runner", &object(scope))?;
+        }
+    }
+    for a in m.apps.values() {
+        let owners = match &a.owner {
+            Principal::User(u) if m.user(u).is_some() => person(u),
+            Principal::User(_) => continue,
+            Principal::Group(g) => format!("{}#admin", group(g)),
+            Principal::Admins => format!("{}#admin", permissions::INSTALL),
+        };
+        add(&owners, "owner", &app(&a.name))?;
     }
     Ok(())
 }
@@ -381,4 +471,67 @@ pub fn state_hash(db: &Connection) -> Result<[u8; 32]> {
         }
     }
     Ok(*h.finalize().as_bytes())
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use super::*;
+    use crate::members::manages_scope;
+
+    /// That `may` over `global`'s scope database says what replay's `members` says, of everyone, every scope, device,
+    /// service and app; and that its state hash is the same however its rows were written.
+    pub(crate) fn agrees(m: &Members) {
+        let db = build(m, &Scope::Global, &ScopeState::default()).unwrap();
+        let may = |who: &str, what: &str, on: &str| permissions::may(&db, who, what, on, 0).unwrap();
+        let scopes = m.scopes();
+        for u in m.users.values().filter(|u| !u.removed).map(|u| u.id.as_str()) {
+            let p = person(u);
+            assert_eq!(may(&p, "change-settings", permissions::INSTALL), m.is_admin(u), "{u} is an admin");
+            for s in &scopes {
+                let o = object(s);
+                assert_eq!(may(&p, "use", &o), m.may_use(u, s), "{u} uses {s}");
+                assert_eq!(may(&p, "keep", &o), m.grants_in(u, s), "{u} keeps apps running in {s}");
+                assert_eq!(may(&p, "add-apps", &o), manages_scope(m, u, s), "{u} adds apps to {s}");
+            }
+            for g in m.groups.keys() {
+                assert_eq!(may(&p, "invite", &group(g)), m.manages(u, g), "{u} manages {g}");
+                assert_eq!(may(&p, "remove", &group(g)), m.manages(u, g), "{u} removes from {g}");
+            }
+            for k in m.machines.keys() {
+                assert_eq!(may(&p, "remove", &device(k)), m.looks_after(u, k), "{u} looks after {}", hex(k));
+                assert_eq!(may(&p, "switch", &device(k)), m.machine(k).is_some_and(|d| d.user == u), "{u} switches {}'s parts", hex(k));
+                assert_eq!(may(&p, "use", &service(k)), m.service_serves(k, u), "{} serves {u}", hex(k));
+            }
+            for a in m.apps.values() {
+                assert_eq!(may(&p, "deploy", &app(&a.name)), m.acts_for(u, &a.owner), "{u} acts for {}", a.name);
+            }
+        }
+        let rows = |sql: &str| -> Vec<String> { db.prepare(sql).unwrap().query_map([], |r| r.get(0)).unwrap().map(Result::unwrap).collect() };
+        let listed = rows("SELECT d.key FROM devices d JOIN principals p ON p.id = d.principal WHERE d.removed = 0 AND p.removed = 0 ORDER BY d.key");
+        assert_eq!(listed, m.machines.keys().filter(|k| m.machine(k).is_some()).map(hex).collect::<Vec<_>>(), "the devices listed");
+        let clients = rows("SELECT d.key FROM devices d JOIN principals p ON p.id = d.principal WHERE d.removed = 0 AND p.removed = 0 AND d.client = 1 ORDER BY d.key");
+        assert_eq!(clients, m.clients().map(|c| hex(&c.key)).collect::<Vec<_>>(), "the clients, which sign for their people");
+        for k in m.machines.keys().chain(m.serverless().as_ref()) {
+            for s in &scopes {
+                assert_eq!(may(&device(k), "run", &object(s)), m.runs_for(k, s), "{} runs {s}", hex(k));
+            }
+        }
+        // The same rows written the other way round hash the same, and building again gives the same database.
+        let hash = state_hash(&db).unwrap();
+        assert_eq!(hash, state_hash(&build(m, &Scope::Global, &ScopeState::default()).unwrap()).unwrap());
+        let copy = Connection::open_in_memory().unwrap();
+        copy.execute_batch(SCHEMA).unwrap();
+        copy.execute_batch(permissions::SCHEMA).unwrap();
+        for t in rows("SELECT name FROM sqlite_schema WHERE type = 'table'") {
+            let mut rows = db.prepare(&format!("SELECT * FROM \"{t}\" ORDER BY rowid DESC")).unwrap();
+            let n = rows.column_count();
+            let insert = format!("INSERT INTO \"{t}\" VALUES ({})", vec!["?"; n].join(", "));
+            let mut rows = rows.query([]).unwrap();
+            while let Some(row) = rows.next().unwrap() {
+                let values: Vec<rusqlite::types::Value> = (0..n).map(|i| row.get(i).unwrap()).collect();
+                copy.execute(&insert, rusqlite::params_from_iter(values)).unwrap();
+            }
+        }
+        assert_eq!(state_hash(&copy).unwrap(), hash, "the state hash is the rows', not the order they came in");
+    }
 }
