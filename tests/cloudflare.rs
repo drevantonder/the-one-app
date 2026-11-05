@@ -966,6 +966,33 @@ mod relay {
     }
 
     #[test]
+    fn once_switched_a_device_that_reads_less_is_told_to_update_by_the_relay() {
+        let first = SecretKey::generate();
+        let k = super::Workers::for_devices(vec![hex(&first)]);
+        let address = k.address.replace("localhost", "127.0.0.1");
+        let phone = SecretKey::generate();
+        let signer = |k: &SecretKey| ed25519_dalek::SigningKey::from_bytes(&k.to_bytes());
+        let computes = |by: &SecretKey, fields: Value| super::post(&format!("{address}/relay/computes"), &[], one::keys::signed_request(&signer(by), "one/relay", fields, at()));
+        assert_eq!(tell(&address, &first, json!({ "add": hex(&phone), "role": "client" })), 204);
+        // Before it's switched, an older device, which says nothing of what it reads, is told the computes.
+        assert_eq!(computes(&phone, json!({ "computes": true })).0, 200);
+        // Only an admin's device says it was switched.
+        assert_eq!(tell(&address, &phone, json!({ "switched": 2 })), 403, "a device that isn't an admin's said who's who was switched");
+        assert_eq!(tell(&address, &first, json!({ "switched": 0 })), 403);
+        assert_eq!(tell(&address, &first, json!({ "switched": 2 })), 204);
+        for older in [json!({ "computes": true }), json!({ "computes": true, "reads": 1 })] {
+            let (status, said) = computes(&phone, older);
+            assert_eq!(status, 426, "a device that reads less than the switch wasn't told to update");
+            assert!(said["error"].as_str().is_some_and(|e| e.starts_with("Update this device")), "{said}");
+        }
+        assert_eq!(computes(&phone, json!({ "computes": true, "reads": 2 })).0, 200);
+        // A browser's session runs the code the address serves, the newest: it isn't asked.
+        let session = SecretKey::generate();
+        let cert = one::keys::certify(&signer(&phone), session.public().as_bytes(), super::now() + 60_000, super::now());
+        assert_eq!(computes(&session, json!({ "computes": true, "certificate": cert })).0, 200);
+    }
+
+    #[test]
     fn a_session_endpoint_gets_in_only_as_its_device_vouches() {
         let first = SecretKey::generate();
         let k = super::Workers::for_devices(vec![hex(&first)]);

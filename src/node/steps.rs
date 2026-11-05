@@ -66,6 +66,11 @@ impl Node {
             }
             if crate::bucket::Bucket::create(&bucket, &name, &crate::log::seal(&keys, &name, &steps::encode(&mark, None))?).await? {
                 self.put_first(&user, content, Some(&copy), Some(deadline)).await?;
+                // So a device of an older build is told to update when it next asks the relay, rather than wait for
+                // good to find itself in the frozen log.
+                if self.frozen() {
+                    self.tell_relay(json!({ "switched": switch::GATE.min(switch::READS) }));
+                }
                 return Ok(self.frozen());
             }
             // Written on since: freeze where it ends now.

@@ -28,7 +28,10 @@
 // (`one/relay`, `{ computes: true, certificate? }`, each `(by, at)` taken once, as a tell is), with the compute
 // endpoints' keys, the Cloudflare node's among them, in no order: a new client's first nodes to ask; and `online`, those
 // of them connected here now, which a client races first. 403 is only for a key that isn't let in; a request
-// that's wrong, or signed by a clock that's off, is 400, so a client keeps the nodes it knows.
+// that's wrong, or signed by a clock that's off, is 400, so a client keeps the nodes it knows. Once an admin's device
+// said who's who was switched (`switched`, below), a device's own request that says it reads less (`reads`, an older
+// build's says nothing) is 426, telling it to update: the one thing an older build shows before it would wait for good
+// to find itself in the log. A browser's session runs the code the address serves, the newest, so it isn't asked.
 //
 // What a device tells it is `POST /relay/tell`, its body a request signed by a key on the list (`signedRequest` in
 // shared/crypto.js, domain `one/relay`, each `(by, at)` taken once) with one of:
@@ -40,6 +43,8 @@
 //   the same way, by its code's maker too.
 // - `{ pairing: { hash, until } }`: the SHA-256 (hex) of a pairing code's ticket and until when it works (ms).
 // - `{ unpair }`: a pairing code's hash, to end it, by its maker or an admin.
+// - `{ switched }`: what a device must read of who's who from now on (`database::switch`), by an admin's device that
+//   switched it.
 //
 // One endpoint isn't a socket: the Cloudflare node (`BOUND`, its key), a Durable Object of its own Worker (`NODE`) that
 // sleeps until someone calls it. Datagrams sent to it go to it by RPC, gathered each turn, waking it; what it sends
@@ -156,7 +161,7 @@ export default class extends WorkerEntrypoint {
       if (body.byteLength > TELL_BYTES) throw new Error("that's too big");
       const { by, fields } = await checkRequest(TELL, JSON.parse(new TextDecoder().decode(body)));
       if (fields[what] !== true) throw new Error(`ask with { ${what}: true }, signed`);
-      asked = { by, at: fields.at };
+      asked = { by, at: fields.at, reads: Number.isSafeInteger(fields.reads) ? fields.reads : 0 };
       if (fields.certificate !== undefined) {
         const session = await checkCertificate(fields.certificate);
         if (session.endpoint !== by) throw new Error("sign with the key your certificate names");
@@ -166,6 +171,7 @@ export default class extends WorkerEntrypoint {
       return refuse(400, String(e.message || e));
     }
     const said = await this.relay()[what](asked.by, asked);
+    if (said?.update) return refuse(426, `Update this device: ${this.env.YOURS}'s other devices have moved on to what this one doesn't read yet.`);
     // Which computes are connected now, which a client races first (an older one reads only `computes`).
     if (what === "computes" && Array.isArray(said)) return Response.json({ computes: said, online: await this.relay().connected(said) });
     if (said && typeof said === "object") return Response.json({ [what]: said });
@@ -240,7 +246,8 @@ export class Relay extends DurableObject {
       CREATE TABLE IF NOT EXISTS tells (by TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (by, at));
       CREATE TABLE IF NOT EXISTS proofs (nonce TEXT PRIMARY KEY, at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS bound (key TEXT PRIMARY KEY, name TEXT NOT NULL, until INTEGER NOT NULL, ticket TEXT NOT NULL DEFAULT '');
-      CREATE TABLE IF NOT EXISTS seen (key TEXT PRIMARY KEY, at INTEGER NOT NULL);`);
+      CREATE TABLE IF NOT EXISTS seen (key TEXT PRIMARY KEY, at INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS switched (reads INTEGER NOT NULL);`);
     // A binding made before tickets: none shows one, so each is made again.
     try {
       this.sql.exec("ALTER TABLE bound ADD COLUMN ticket TEXT NOT NULL DEFAULT ''");
@@ -296,6 +303,8 @@ export class Relay extends DurableObject {
   computes(by, asked) {
     const may = this.asks(by, asked);
     if (may !== true) return may;
+    const reads = this.sql.exec("SELECT reads FROM switched").toArray()[0]?.reads ?? 0;
+    if (asked && !asked.session && asked.reads < reads) return { update: true };
     const keys = this.sql.exec("SELECT key FROM keys WHERE ' ' || role || ' ' LIKE '% compute %'").toArray().map((r) => r.key);
     return this.env.BOUND ? [...keys, this.env.BOUND] : keys;
   }
@@ -696,6 +705,13 @@ export class Relay extends DurableObject {
       if (this.sql.exec("SELECT count(*) AS n FROM pairings WHERE by = ?", told.by).one().n >= PAIRINGS_PER_DEVICE) return "that device has made too many pairing codes that still work";
       if (this.pairing(hash)) return "that pairing code is made already";
       this.sql.exec("INSERT INTO pairings VALUES (?, ?, ?, NULL)", hash, Math.min(until, now + PAIRING_FOR), told.by);
+      return null;
+    }
+    if (told.switched !== undefined) {
+      if (!admin) return "only an admin's device says who's who was switched";
+      if (!Number.isSafeInteger(told.switched) || told.switched < 1) return "switched is what a device must read from now on";
+      this.sql.exec("DELETE FROM switched");
+      this.sql.exec("INSERT INTO switched VALUES (?)", told.switched);
       return null;
     }
     if (told.unpair !== undefined) {
