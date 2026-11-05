@@ -207,16 +207,20 @@ class Bucket {
       const wanted = (this.wanted = new Map());
       queueMicrotask(() => {
         this.wanted = null;
-        const names = [...wanted.keys()];
-        this.sign({ read: names }).then(
-          (out) => {
-            for (const n of names) {
-              this.urls.set(n, { url: out.read[n], until: out.until });
-              wanted.get(n).resolve(out.read[n]);
-            }
-          },
-          (err) => wanted.forEach((w) => w.reject(err)),
-        );
+        // At most as many as the URL signer signs at once.
+        const all = [...wanted.keys()];
+        for (let at = 0; at < all.length; at += 256) {
+          const names = all.slice(at, at + 256);
+          this.sign({ read: names }).then(
+            (out) => {
+              for (const n of names) {
+                this.urls.set(n, { url: out.read[n], until: out.until });
+                wanted.get(n).resolve(out.read[n]);
+              }
+            },
+            (err) => names.forEach((n) => wanted.get(n).reject(err)),
+          );
+        }
       });
     }
     if (!this.wanted.has(name)) {
@@ -245,9 +249,10 @@ class Bucket {
 
   get(name) {
     // The steps after one aren't in the bucket yet, mostly: their URLs come with its, and only those read are fetched.
+    // A step's signature is fetched when it's read: one fetched ahead may not be written yet, and would be kept missing.
     this.prefetch([name]);
     for (const n of following(name, 15)) if (!this.urls.has(n) && !this.sealed.has(n)) this.readUrl(n).catch(() => {});
-    for (const n of following(name, 5)) this.prefetch([n]);
+    for (const n of following(name, 5)) if (!n.endsWith(".sig")) this.prefetch([n]);
     const got = this.fetched.get(name);
     this.fetched.delete(name);
     return got;

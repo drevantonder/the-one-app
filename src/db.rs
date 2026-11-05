@@ -710,6 +710,12 @@ pub fn sig_name(prefix: &str, n: u64) -> String {
     format!("{}.sig", step_name(prefix, n))
 }
 
+/// Whether the steps at `prefix` are a database's, with signatures beside them, rather than a scope's log's
+/// (`log::prefix`), whose entries are signed by their authors already.
+pub fn signed_beside(prefix: &str) -> bool {
+    !prefix.ends_with(&format!("/{}/{}", crate::members::APP, crate::log::NAME))
+}
+
 /// A database's prefix and position, from the name of one of its steps or the signature beside one.
 pub fn position(name: &str) -> Option<(&str, u64)> {
     let (prefix, last) = name.rsplit_once('/')?;

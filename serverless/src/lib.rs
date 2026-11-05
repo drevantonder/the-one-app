@@ -393,11 +393,12 @@ pub fn prefix(scope: &str, app: &str, database: &str) -> Result<String, JsError>
 }
 
 /// If `name` is a database's step, or the signature beside one: the signature beside it, and the `n` steps after it,
-/// each with the signature beside it, as JSON: what's read next.
+/// each with the signature beside it, as JSON: what's read next. A scope's log's steps have none.
 #[wasm_bindgen]
 pub fn following(name: &str, n: u32) -> String {
     let Some((prefix, at)) = one::db::position(name) else { return "[]".into() };
-    let names = (at..=at + n as u64).flat_map(|i| [one::db::step_name(prefix, i), one::db::sig_name(prefix, i)]);
+    let signed = one::db::signed_beside(prefix);
+    let names = (at..=at + n as u64).flat_map(|i| [Some(one::db::step_name(prefix, i)), signed.then(|| one::db::sig_name(prefix, i))]).flatten();
     Value::from(names.filter(|other| other.as_str() > name).collect::<Vec<_>>()).to_string()
 }
 

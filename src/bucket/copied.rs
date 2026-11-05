@@ -107,7 +107,9 @@ impl<B: Bucket + Clone> Copied<B> {
     pub async fn fill(&self, prefix: &str, at: u64) -> Result<u64> {
         let mut n = at;
         while Bucket::get(self, &crate::db::step_name(prefix, n + 1)).await?.is_some() {
-            Bucket::get(self, &crate::db::sig_name(prefix, n + 1)).await?;
+            if crate::db::signed_beside(prefix) {
+                Bucket::get(self, &crate::db::sig_name(prefix, n + 1)).await?;
+            }
             n += 1;
         }
         Ok(n - at)
