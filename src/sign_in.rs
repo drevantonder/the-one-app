@@ -146,23 +146,24 @@ pub fn start(address: &str, join: Option<&str>) -> Result<Started> {
 
 /// Approves a code as a throwaway network's first person would in a browser, with no passkey: only a throwaway network's sign-in
 /// signs anyone in this way (`cloudflare/auth`'s `throwawayInstall`).
-pub fn approve_on_throwaway(started: &Started) -> Result<()> {
+pub fn approve_on_throwaway(address: &str, url: &str) -> Result<()> {
+    let address = address.trim_end_matches('/');
     let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).max_redirects(0).timeout_global(Some(Duration::from_secs(30))).build().into();
     let went = |resp: &ureq::http::Response<ureq::Body>| resp.headers().get("location").and_then(|l| l.to_str().ok()).map(str::to_string);
-    let to = |l: String| if l.starts_with('/') { format!("{}{l}", started.address) } else { l };
+    let to = |l: String| if l.starts_with('/') { format!("{address}{l}") } else { l };
     // The code's link goes on to its authorization, which, with nobody signed in, goes on to the sign-in page with it.
-    let authorize = went(&agent.get(&started.url).call()?).context("the sign-in code's link went nowhere")?;
+    let authorize = went(&agent.get(url).call()?).context("the sign-in code's link went nowhere")?;
     let page = went(&agent.get(to(authorize)).call()?).context("its authorization went nowhere")?;
     let oauth_query = page.split_once('?').map(|(_, q)| q.to_string()).context("its sign-in page had no authorization")?;
     // For the device its authorization names, as a throwaway network's sign-in page signs in for it.
     let join = oauth_query.split('&').find_map(|p| p.strip_prefix("join="));
-    let mut resp = agent.post(format!("{}/api/auth/throwaway/sign-in", started.address)).header("origin", &started.address).send_json(serde_json::json!({ "join": join }))?;
+    let mut resp = agent.post(format!("{address}/api/auth/throwaway/sign-in")).header("origin", address).send_json(serde_json::json!({ "join": join }))?;
     let cookie = resp.headers().get_all("set-cookie").iter().filter_map(|c| c.to_str().ok()?.split(';').next().map(str::to_string)).collect::<Vec<_>>().join("; ");
     if resp.status() != 200 || cookie.is_empty() {
         let out: Value = resp.body_mut().read_json().unwrap_or(Value::Null);
         bail!("only a throwaway network signs in with no passkey: {}", said(&out, "this one didn't"));
     }
-    let mut resp = agent.post(format!("{}/sign-in/accept", started.address)).header("origin", &started.address).header("cookie", &cookie).send_json(serde_json::json!({ "oauth_query": oauth_query }))?;
+    let mut resp = agent.post(format!("{address}/sign-in/accept")).header("origin", address).header("cookie", &cookie).send_json(serde_json::json!({ "oauth_query": oauth_query }))?;
     let out: Value = resp.body_mut().read_json().unwrap_or(Value::Null);
     let done = out["url"].as_str().with_context(|| said(&out, "signing in didn't work"))?;
     agent.get(to(done.to_string())).call()?;

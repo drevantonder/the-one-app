@@ -124,7 +124,7 @@ pub fn run(rest: &[String]) -> Result<()> {
         // As its person, with no passkey: the throwaway network's sign-in asks for none.
         let address = get("/v1/state")?["install"]["settings"]["address"].as_str().context("the throwaway network has no address")?.to_string();
         let started = one::sign_in::start(&address, None)?;
-        one::sign_in::approve_on_throwaway(&started)?;
+        one::sign_in::approve_on_throwaway(&address, &started.url)?;
         one::sign_in::finish(started)?;
         let me = get("/v1/state")?["user"]["name"].as_str().unwrap_or("you").to_string();
         println!("Signed in as {me}. {CLI} throwaway and {CLI} throwaway mcp act as them until {CLI} throwaway sign-out.");
@@ -214,6 +214,9 @@ fn usage() -> String {
   {CLI} throwaway cloudflare node deploy    run its Cloudflare node beside its Workers, as Cloudflare would
   {CLI} throwaway client <kind>    a signed-in client of this checkout's build: web, android or windows
   {CLI} throwaway client <kind> --as sam    the same, as someone else, invited by you with Add Someone's link
+  {CLI} throwaway client cli <command>    a command from a computer that's only a device of its person's (no node), asking
+                                   their nodes over iroh in run priority's order, as every client does: the Cloudflare
+                                   node, once deployed, with {CLI} throwaway device-activity priority --device cloudflare --priority 1
   {CLI} throwaway stop             stop and delete it, and give back its devices; {CLI} throwaway then starts a new one"
     )
 }
@@ -645,6 +648,7 @@ fn client(dir: &Path, checkout: &Path, settings: &one::cloudflare::Settings, res
             );
             web(dir, settings, person.as_deref())?
         }
+        Some("cli") => return cli(dir, settings, &rest[1..]),
         Some(kind @ ("android" | "windows")) => {
             if let Some(name) = &person {
                 // They join where anyone does, in a browser: the throwaway network's own here.
@@ -652,9 +656,51 @@ fn client(dir: &Path, checkout: &Path, settings: &one::cloudflare::Settings, res
             }
             device_client(dir, checkout, settings, kind, person.as_deref())?
         }
-        _ => bail!("which client? {CLI} throwaway client web, android or windows, with --as <name> for someone else"),
+        _ => bail!("which client? {CLI} throwaway client web, android, windows or cli, with --as <name> for someone else"),
     }
     println!("Ready in {}s.", started.elapsed().as_secs());
+    Ok(())
+}
+
+/// `command`, run by this build's CLI as on a computer where no node runs: a client device of the throwaway network's
+/// person, with a home of its own beside it (`cli/`), which asks their nodes over iroh as every client does, in run
+/// priority's order (`client_device`). The first time it signs in with no passkey, and the throwaway network's machine
+/// approves the code it shows.
+fn cli(dir: &Path, settings: &one::cloudflare::Settings, command: &[String]) -> Result<()> {
+    let home = dir.join("cli");
+    std::fs::create_dir_all(&home)?;
+    // No node answers at its address, nor anything of this machine's in its home.
+    let as_device = |args: &[String]| {
+        let mut c = std::process::Command::new(std::env::current_exe().unwrap_or_else(|_| CLI.into()));
+        c.args(args).env(addr_var(), "127.0.0.1:1").env(format!("{}_HOME", CLI.to_uppercase()), &home).env("XDG_CONFIG_HOME", &home).env_remove("DISPLAY").env_remove("WAYLAND_DISPLAY");
+        c
+    };
+    let joined = home.join("joined");
+    if !joined.exists() {
+        use std::io::BufRead;
+        eprintln!("Signing in a CLI as a device of the throwaway network's person…");
+        let mut child = as_device(&["sign-in".into(), "--address".into(), settings.address.clone()]).stdout(std::process::Stdio::piped()).spawn()?;
+        for line in std::io::BufReader::new(child.stdout.take().context("no output from signing in")?).lines() {
+            let line = line?;
+            let said = line.trim();
+            eprintln!("{line}");
+            if said.starts_with(&settings.address) && said.contains("/sign-in") {
+                one::sign_in::approve_on_throwaway(&settings.address, said)?;
+            } else if is_code(said) {
+                approve_code(dir, said)?;
+            }
+        }
+        anyhow::ensure!(child.wait()?.success(), "the CLI didn't sign in as a device");
+        std::fs::write(&joined, "")?;
+    }
+    if command.is_empty() {
+        println!("A CLI that's only a device of the throwaway network's person is signed in: {CLI} throwaway client cli <command> runs one as it.");
+        return Ok(());
+    }
+    let status = as_device(command).status()?;
+    if !status.success() {
+        std::process::exit(status.code().unwrap_or(1));
+    }
     Ok(())
 }
 
