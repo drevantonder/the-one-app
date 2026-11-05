@@ -2,9 +2,7 @@
 // or makes one, and opens messenger.com in it to sign in.
 import { useEffect, useRef, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { Empty, Input, List, ListRow, Problem } from "@one/ui"
-import { AccountList, Footer, Step, Trouble, useAccounts, Waiting, Working } from "../lib/accounts.jsx"
-import { Choose } from "../lib/choose.jsx"
+import { AccountList, Empty, Hint, Input, List, ListNote, ListRow, ListSkeleton, LoadFailure, LoadingButton, Problem, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, useAccounts } from "@one/ui"
 
 const BLURB = "Link Messenger to a browser profile signed in to messenger.com, and your agents can read your chats and, when you ask, send."
 // The choice that makes a profile of its own, not one already there.
@@ -35,7 +33,15 @@ function Pick({ free, onSigningIn }) {
       <List>
         <ListRow
           title="Profile"
-          trailing={<Choose label="Browser profile" value={choice} onChange={setChoice} options={[...free.map((p) => ({ value: p, label: p })), { value: NEW, label: "New profile…" }]} />}
+          trailing={
+            <Select value={choice} onValueChange={setChoice}>
+              <SelectTrigger size="sm" aria-label="Browser profile"><SelectValue /></SelectTrigger>
+              <SelectContent align="end" position="popper">
+                {free.map((p) => <SelectItem key={p} value={p}>{p}</SelectItem>)}
+                <SelectItem value={NEW}>New profile…</SelectItem>
+              </SelectContent>
+            </Select>
+          }
         />
         {choice === NEW && (
           <div className="px-3 py-2.5">
@@ -43,9 +49,9 @@ function Pick({ free, onSigningIn }) {
           </div>
         )}
       </List>
-      <Footer>Each has its own sign-ins, like Personal or Work.</Footer>
+      <Hint>Each has its own sign-ins, like Personal or Work.</Hint>
       {why && <Problem title={why} action={{ label: "Try Again", run: go }} />}
-      <Working className="self-start" run={go}>Sign In to Messenger</Working>
+      <LoadingButton className="self-start" run={go}>Sign In to Messenger</LoadingButton>
     </section>
   )
 }
@@ -67,12 +73,12 @@ function SigningIn({ link, onDone }) {
       <h2 className="text-sm font-medium text-muted-foreground">Sign In</h2>
       <List>
         <ListRow title="Open the device" onClick={() => one.link(link.url)} />
-        <Step>{`Its browser is on messenger.com, in the ${link.profile} profile.`}</Step>
-        <Step>Sign in there, and tick Keep me signed in.</Step>
+        <ListNote>{`Its browser is on messenger.com, in the ${link.profile} profile.`}</ListNote>
+        <ListNote>Sign in there, and tick Keep me signed in.</ListNote>
       </List>
-      <Footer>Come back and press Done.</Footer>
+      <Hint>Come back and press Done.</Hint>
       {why && <Problem title={why} action={{ label: "Try Again", run: done }} />}
-      <Working className="self-start" run={done}>Done</Working>
+      <LoadingButton className="self-start" run={done}>Done</LoadingButton>
     </section>
   )
 }
@@ -97,8 +103,8 @@ function Settings() {
     one.call("_running").then(({ devices }) => devices.length || setNowhere(true), () => {})
   }, [])
 
-  if (problem && !accounts) return <Trouble problem={problem} retry={retry} />
-  if (!accounts) return <Waiting />
+  if (problem && !accounts) return <LoadFailure problem={problem} retry={retry} />
+  if (!accounts) return <ListSkeleton />
 
   const picking = !!step
   const needs = accounts.filter((a) => !a.ok)
@@ -123,7 +129,7 @@ function Settings() {
           signOut={signOut}
           line={(a, i) => (a.ok ? (i ? null : { text: "Used first" }) : { text: "Sign in again", warn: true })}
         >
-          {!nowhere && !picking && <Working variant="secondary" className="self-start" run={pick}>Add Account</Working>}
+          {!nowhere && !picking && <LoadingButton variant="secondary" className="self-start" run={pick}>Add Account</LoadingButton>}
         </AccountList>
       )}
       {step?.picking && (

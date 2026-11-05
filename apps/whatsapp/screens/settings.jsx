@@ -1,9 +1,7 @@
 // Settings: each WhatsApp account is a phone linked to one of your devices, as WhatsApp Desktop is linked.
 import { useEffect, useRef, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { Input, List, ListRow, Problem } from "@one/ui"
-import { AccountList, Footer, Step, Trouble, useAccounts, Waiting, Working } from "../lib/accounts.jsx"
-import { Choose } from "../lib/choose.jsx"
+import { AccountList, Hint, Input, List, ListNote, ListRow, ListSkeleton, LoadFailure, LoadingButton, Problem, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, useAccounts } from "@one/ui"
 
 const NOTE = "The code changes every 20 seconds. WhatsApp then sends recent chats, which takes a few minutes."
 
@@ -35,12 +33,12 @@ function Pairing({ phone, device, had, done }) {
     <section className="flex flex-col gap-2">
       <h2 className="text-sm font-medium text-muted-foreground">Link a Device</h2>
       <List>
-        <Step>On the phone, open WhatsApp › Settings › Linked devices › Link a device.</Step>
-        <Step>{`Scan this code${phone ? ", or tap Link with phone number instead and type the code under it" : ""}.`}</Step>
+        <ListNote>On the phone, open WhatsApp › Settings › Linked devices › Link a device.</ListNote>
+        <ListNote>{`Scan this code${phone ? ", or tap Link with phone number instead and type the code under it" : ""}.`}</ListNote>
       </List>
       {codes.qr && <img alt="" src={codes.qr} className="mx-auto my-2 block size-[220px] rounded-xl bg-white [image-rendering:pixelated]" />}
       {codes.code && <p className="text-center font-mono text-2xl font-semibold tracking-widest">{codes.code}</p>}
-      <Footer>{note}</Footer>
+      <Hint>{note}</Hint>
     </section>
   )
 }
@@ -82,8 +80,8 @@ function Settings() {
   }
   const paired = () => (setStep(null), reload())
 
-  if (problem && !accounts) return <Trouble problem={problem} retry={retry} />
-  if (!ready) return <Waiting />
+  if (problem && !accounts) return <LoadFailure problem={problem} retry={retry} />
+  if (!ready) return <ListSkeleton />
   // None of their devices has it: what to do, on the App Store's WhatsApp page, which says where it can go.
   if (!running.length && !unknown)
     return (
@@ -98,7 +96,7 @@ function Settings() {
   const needs = accounts.filter((a) => !a.ok)
   return (
     <div className="flex flex-col gap-6">
-      {!accounts.length && <Footer>Link WhatsApp, and your agents can read your chats and, when you ask, send.</Footer>}
+      {!accounts.length && <Hint>Link WhatsApp, and your agents can read your chats and, when you ask, send.</Hint>}
       {needs.map((a) => (
         <Problem
           key={a.account}
@@ -131,14 +129,24 @@ function Settings() {
         <section className="flex flex-col gap-2">
           <List>
             {running.length > 1 && (
-              <ListRow title="Link on" trailing={<Choose label="Link on" value={device} onChange={setOn} options={running.map((d) => ({ value: d, label: d }))} />} />
+              <ListRow
+                title="Link on"
+                trailing={
+                  <Select value={device} onValueChange={setOn}>
+                    <SelectTrigger size="sm" aria-label="Link on"><SelectValue /></SelectTrigger>
+                    <SelectContent align="end" position="popper">
+                      {running.map((d) => <SelectItem key={d} value={d}>{d}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                }
+              />
             )}
             <div className="px-3 py-2.5">
               <Input ref={field} type="tel" placeholder="Its number, for a code to type instead (optional)" aria-label="Its number" value={phone} onChange={(e) => setPhone(e.target.value)} />
             </div>
           </List>
           {step?.why && <Problem title={step.why} action={{ label: "Try Again", run: step.retry }} />}
-          <Working className="self-start" run={start}>Add Account</Working>
+          <LoadingButton className="self-start" run={start}>Add Account</LoadingButton>
         </section>
       )}
     </div>

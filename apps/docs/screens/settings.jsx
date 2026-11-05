@@ -3,8 +3,7 @@
 // to finish. Opened with { add: true } (a shell's Add Account), it starts signing in at once.
 import { useEffect, useRef, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { Empty, List, ListRow, Problem } from "@one/ui"
-import { AccountList, Footer, Loading, sentence, Trouble, useAccounts, Waiting, Working } from "../lib/accounts.jsx"
+import { AccountList, Empty, Hint, List, ListRow, ListSkeleton, LoadFailure, Loading, LoadingButton, Problem, failureSentence, useAccounts } from "@one/ui"
 
 const TITLE = "Google Docs"
 const BLURB = "Sign in to Google, and your agents can read your documents and, when you ask, write in them."
@@ -35,7 +34,7 @@ function Settings() {
       }
       const ask = /Ask (.+?) to set up (.+?)(?::|$)/.exec(e.message)
       if (ask) return setBlocked({ title: ask[2] + " isn't set up", text: "Ask " + ask[1] + " to set it up. It's done once for everyone." })
-      return setStep({ why: sentence(e), retry: () => start(account) })
+      return setStep({ why: failureSentence(e), retry: () => start(account) })
     }
     setSigning(true)
     setStep({ link: url })
@@ -51,7 +50,7 @@ function Settings() {
     } catch (e) {
       // Finished already: this screen opened again at the same address.
       if (/no sign-in is waiting/.test(e.message)) return stop(), reload()
-      return setStep({ why: sentence(e), retry: () => start() })
+      return setStep({ why: failureSentence(e), retry: () => start() })
     }
     stop()
     reload()
@@ -70,8 +69,8 @@ function Settings() {
     if (key !== null) seen.current = key
   }, [key])
 
-  if (problem && !accounts) return <Trouble problem={problem} retry={retry} />
-  if (!accounts) return <Waiting />
+  if (problem && !accounts) return <LoadFailure problem={problem} retry={retry} />
+  if (!accounts) return <ListSkeleton />
 
   const needs = blocked ? [] : accounts.filter((a) => !a.ok)
   return (
@@ -96,14 +95,14 @@ function Settings() {
           signOut={signOut}
           line={(a, i) => (a.ok ? (i ? null : { text: "Used first" }) : { text: "Sign in again", warn: true })}
         >
-          {!blocked && <Working variant="secondary" className="self-start" run={() => start()}>Add Account</Working>}
+          {!blocked && <LoadingButton variant="secondary" className="self-start" run={() => start()}>Add Account</LoadingButton>}
         </AccountList>
       )}
       {step?.link && (
         <section className="flex flex-col gap-2">
           <h2 className="text-sm font-medium text-muted-foreground">Sign In</h2>
           <List><ListRow title="Sign in to Google" sub={`and allow ${TITLE}`} onClick={() => one.link(step.link)} /></List>
-          <Footer>Google brings you back here when you're done.</Footer>
+          <Hint>Google brings you back here when you're done.</Hint>
         </section>
       )}
       {step?.finishing && <Loading>Signing In</Loading>}
