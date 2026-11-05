@@ -26,6 +26,10 @@ pub type Key = [u8; 32];
 /// What an entry's signature is for.
 pub const DOMAIN: &str = "one/entry";
 
+/// What a scope database's step is signed for (`database::steps`): a step is never taken for an entry, nor one for a
+/// step, though both are signed the same way.
+pub const STEP_DOMAIN: &str = "one/step";
+
 /// The most any number in an entry's header may be: 2^53 - 1, the most JavaScript's JSON keeps exactly.
 pub const NUMBER_MAX: u64 = (1 << 53) - 1;
 
@@ -201,6 +205,15 @@ pub type Head = (u32, Hash);
 impl Entry {
     /// Signs an entry after `prev`, the end of its author's log.
     pub fn create(key: &SigningKey, ext: Ext, prev: Option<Head>, content: Content) -> Self {
+        Entry::sign(key, DOMAIN, ext, prev.map_or(0, |p| p.0 + 1), prev.map(|p| p.1), content)
+    }
+
+    /// Signs a step of a scope's database (`database::steps`): its change, for position `at`, following nothing.
+    pub fn create_step(key: &SigningKey, ext: Ext, at: u32, content: Content) -> Self {
+        Entry::sign(key, STEP_DOMAIN, Ext { previous: Vec::new(), ..ext }, at, None, content)
+    }
+
+    fn sign(key: &SigningKey, domain: &str, ext: Ext, seq: u32, backlink: Option<Hash>, content: Content) -> Self {
         let body = serde_json::to_vec(&content).expect("json");
         let mut previous = ext.previous;
         previous.sort();
@@ -208,8 +221,8 @@ impl Entry {
         let header = Header {
             author: key.verifying_key().to_bytes(),
             log: ext.log,
-            seq: prev.map_or(0, |p| p.0 + 1),
-            backlink: prev.map(|p| p.1),
+            seq,
+            backlink,
             previous,
             time: ext.time,
             user: ext.user,
@@ -218,21 +231,33 @@ impl Entry {
             size: body.len() as u64,
         };
         let v = header.json();
-        let signature = keys::sign(key, DOMAIN, &v);
+        let signature = keys::sign(key, domain, &v);
         let raw = keys::canonical(&v);
         Entry { hash: Hash(keys::sha256(&raw)), header, raw, signature, body, content, depth: 0 }
     }
 
     /// Decodes and checks an entry from the wire: its header canonical, its signature, body and content.
     pub fn decode(header: &[u8], signature: &[u8], body: &[u8]) -> Result<Self> {
+        let e = Entry::check(DOMAIN, header, signature, body)?;
+        ensure!((e.seq() == 0) == e.backlink().is_none(), "only an entry that starts its log has no backlink");
+        Ok(e)
+    }
+
+    /// Decodes and checks a step of a scope's database (`create_step`): one that follows nothing.
+    pub fn decode_step(header: &[u8], signature: &[u8], body: &[u8]) -> Result<Self> {
+        let e = Entry::check(STEP_DOMAIN, header, signature, body)?;
+        ensure!(e.backlink().is_none() && e.previous().is_empty(), "a step follows nothing but its position");
+        Ok(e)
+    }
+
+    fn check(domain: &str, header: &[u8], signature: &[u8], body: &[u8]) -> Result<Self> {
         let v: Value = serde_json::from_slice(header).context("decode header")?;
         ensure!(keys::canonical(&v) == header, "its header isn't canonical JSON");
         let h = Header::parse(&v)?;
-        keys::verify(&h.author, DOMAIN, &v, signature).context("bad signature")?;
+        keys::verify(&h.author, domain, &v, signature).context("bad signature")?;
         Scope::parse(&h.log)?;
         ensure!(h.size == body.len() as u64, "body size mismatch");
         ensure!(h.body == keys::sha256(body), "body hash mismatch");
-        ensure!((h.seq == 0) == h.backlink.is_none(), "only an entry that starts its log has no backlink");
         let content: Content = serde_json::from_slice(body).context("decode body")?;
         Ok(Entry { hash: Hash(keys::sha256(header)), header: h, raw: header.to_vec(), signature: signature.try_into().expect("checked"), body: body.to_vec(), content, depth: 0 })
     }

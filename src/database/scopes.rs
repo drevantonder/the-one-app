@@ -105,6 +105,17 @@ impl ScopeDb {
         Ok(ScopeDb { db: super::scope::build(m, scope, state)?, now })
     }
 
+    /// A scope database read as it is (a copy, or one its steps made): who holds what worked out again.
+    pub fn open(db: Connection, now: u64) -> Result<ScopeDb> {
+        permissions::close(&db, None)?;
+        Ok(ScopeDb { db, now })
+    }
+
+    /// The time it answers `may` as of.
+    pub fn now(&self) -> u64 {
+        self.now
+    }
+
     /// Its connection, for reading it as it is.
     pub fn conn(&self) -> &Connection {
         &self.db
@@ -650,6 +661,97 @@ impl ScopeDb {
     /// The apps installed in this scope.
     pub fn installed(&self) -> BTreeSet<String> {
         self.rows("SELECT app FROM installs WHERE installed = 1", [], |r| r.get(0)).into_iter().collect()
+    }
+
+    /// `global`'s database as replay's members, for applying a step to them as replay applies an entry
+    /// (`steps::apply`): what building it from them (`scope::build`) wrote back, so building again gives the same rows.
+    /// No cuts or forks: a step's place is its position, not a causal order.
+    pub fn members(&self) -> Members {
+        let mut m = Members::new(self.root());
+        m.name = self.name();
+        m.devices_at = self.devices_at();
+        m.recovery = self.recovery();
+        m.recovery_set = self.recovery_set();
+        m.recovery_was = self.recovery_was();
+        m.recovery_used = self.recovery_used();
+        m.users = self.users().into_iter().map(|u| (u.id.clone(), u)).collect();
+        m.groups = self.groups().into_iter().map(|g| (g.id.clone(), g)).collect();
+        // Each device as it was listed, its own `removed`: not as its person's removal leaves it.
+        let raw = self.rows(&format!("{} ORDER BY d.key", MACHINE.replace("d.removed OR coalesce(p.removed, 1)", "d.removed")), [], machine);
+        m.machines = raw.into_iter().map(|d| (d.key, d)).collect();
+        m.settings = self.settings();
+        m.services = self.switches();
+        m.apps = self.apps().into_iter().map(|a| (a.name.clone(), a)).collect();
+        for (scope, n) in self.epochs() {
+            for (e, hash) in self.epoch_hashes(&scope) {
+                m.epoch_hashes.insert((scope.clone(), e), hash);
+            }
+            let hash = self.epoch_hash(&scope, n).unwrap_or_default();
+            let mut to = self.rows("SELECT device FROM sealed WHERE scope = ?1 AND epoch = ?2 ORDER BY device", params![scope.to_string(), n], |r| r.get::<_, String>(0)).iter().map(|k| key(k)).collect::<Vec<_>>();
+            to.dedup();
+            m.epochs.insert(scope, crate::members::Epoch { n, to, hash });
+        }
+        m.owed = self.owed().into_iter().collect();
+        m.grants = self.keeps();
+        for (scope, v) in self.vaults() {
+            for (n, public) in self.vault_publics(&scope) {
+                m.vault_publics.insert((scope.clone(), n), public);
+            }
+            m.vaults.insert(scope, v);
+        }
+        let chosen = self.rows("SELECT principal FROM runs_chosen", [], |r| r.get::<_, String>(0));
+        for p in chosen {
+            let user = id(&p);
+            m.runs.insert(user.clone(), self.runs(&user).unwrap_or_default());
+        }
+        m
+    }
+
+    /// A scope's own state, as its own tables keep it: what `scope::build` wrote of it (`members`'s counterpart).
+    pub fn state(&self) -> ScopeState {
+        let mut s = ScopeState::default();
+        for (app, installed, by, at) in self.rows("SELECT app, installed, installed_by, installed_at FROM installs", [], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, bool>(1)?, id(&r.get::<_, String>(2)?), r.get::<_, i64>(3)? as u64))
+        }) {
+            if installed {
+                s.installed.insert(app.clone());
+            }
+            s.installers.insert(app, (by, at));
+        }
+        for (app, schedule, on, by, at) in self.rows("SELECT app, schedule, switched_on, switched_by, switched_at FROM schedules", [], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, bool>(2)?, id(&r.get::<_, String>(3)?), r.get::<_, i64>(4)? as u64))
+        }) {
+            s.switches.insert((app, schedule), (on, by, at));
+        }
+        let requests = self.rows("SELECT id, app, title, fields, hosts, why, need, asked_by, agent, asked_at, answer, answered_by, answered_at FROM vault_requests", [], |r| {
+            let fields: Value = serde_json::from_str(&r.get::<_, String>(3)?).unwrap_or_default();
+            let hosts: Value = serde_json::from_str(&r.get::<_, String>(4)?).unwrap_or_default();
+            let answer = match (r.get::<_, Option<String>>(10)?, r.get::<_, Option<String>>(11)?, r.get::<_, Option<i64>>(12)?) {
+                (Some(how), Some(by), Some(at)) => Some((how, id(&by), at as u64)),
+                _ => None,
+            };
+            Ok((
+                r.get::<_, String>(0)?,
+                crate::members::VaultRequest {
+                    app: r.get(1)?,
+                    title: r.get(2)?,
+                    fields: fields.as_array().into_iter().flatten().map(|f| (f["name"].as_str().unwrap_or("").to_string(), f["secret"] == true)).collect(),
+                    hosts: hosts.as_array().into_iter().flatten().filter_map(|h| h.as_str().map(str::to_string)).collect(),
+                    why: r.get(5)?,
+                    need: r.get(6)?,
+                    user: id(&r.get::<_, String>(7)?),
+                    agent: r.get(8)?,
+                    time: r.get::<_, i64>(9)? as u64,
+                    answer,
+                },
+            ))
+        });
+        s.requests = requests.into_iter().collect();
+        for (page, arrangement) in self.rows("SELECT page, arrangement FROM pages", [], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))) {
+            s.arrangements.insert(page, serde_json::from_str(&arrangement).unwrap_or_default());
+        }
+        s.forgotten = self.rows("SELECT blob FROM forgotten", [], |r| r.get(0)).into_iter().collect();
+        s
     }
 }
 

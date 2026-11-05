@@ -3,4 +3,5 @@
 
 pub mod scope;
 pub mod scopes;
+pub mod steps;
 pub mod switch;

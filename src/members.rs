@@ -1077,7 +1077,8 @@ pub fn applies_in_scope(m: &Members, state: &ScopeState, e: &Entry) -> Result<()
     apply_in_scope(m, &mut state.clone(), e)
 }
 
-fn apply_in_scope(m: &Members, state: &mut ScopeState, e: &Entry) -> Result<()> {
+/// Applies one of a scope's own node entries to its state, by replay's rules: whether it counted.
+pub fn apply_in_scope(m: &Members, state: &mut ScopeState, e: &Entry) -> Result<()> {
     let scope = e.scope();
     let w = e.user();
     match e.content.kind.as_str() {
@@ -1397,6 +1398,9 @@ mod tests {
         // Phase 1 changes nothing: the scope database says what replay does.
         #[cfg(feature = "db")]
         crate::database::scope::tests::agrees(&m);
+        // Phase 2 changes nothing either: the same changes as steps, in that order, leave the database replay made.
+        #[cfg(feature = "db")]
+        crate::database::steps::tests::agrees(&sorted, &m);
         m
     }
 
