@@ -2,31 +2,30 @@
 // passkeys. Plain HTML with a little script, served from sign-in at the install's address, so passkeys
 // belong to its name.
 
-import kit from "../web/screen/kit.css" with { type: "text" };
+import css from "../web/screen/ui/sign-in.css" with { type: "text" };
 
 const escape = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
-// The look of the web client's welcome: the screens' design kit (src/screen/kit.css, which the Workers are built with),
-// the custom build's logo, light or dark with the system. Inline, as the page's policy allows nothing else.
-const style = `${kit}
-  /* Near the top, not centred: text that comes in later (a client's name, a note) grows the page down, never moving
-     what's already there. Sized as the web client's welcome is (web.css): its mark, title and button. */
-  body { max-width: none; min-height: 100vh; padding: max(40px, 14vh) 24px 40px; display: grid; place-items: start center; background: var(--bg); }
-  main { width: min(380px, 100%); text-align: center; }
-  .mark { display: block; width: 120px; height: 120px; margin: 0 auto 10px; }
-  h1 { font-size: 28px; font-weight: 600; margin: 10px 0 8px; text-wrap: balance; }
-  p { margin: 0 0 22px; color: var(--muted); }
-  main .button { display: flex; width: fit-content; min-width: 220px; margin: 0 auto 10px; font-size: 15px; padding: 9px 22px; }
-  input { display: block; width: 100%; font: inherit; text-align: center; padding: 11px 16px; margin: 0 0 10px; border-radius: 10px; border: 0; background: var(--fill); color: var(--text); outline: none; }
-  .note { font-size: 13px; margin: 8px 0 0; }
-  .callout { color: var(--text); font-size: 15px; text-align: left; padding: 14px 16px; border-radius: var(--radius); background: var(--card); }
-  .list { text-align: left; margin: 0 0 22px; }
-  .list .button { width: auto; min-width: 0; font-size: 15px; padding: 4px 8px; margin: 0; background: none; }
-  .problems:not(:empty) { margin-top: 14px; }
-  [hidden] { display: none !important; }
-  .framed body { min-height: 0; place-items: start center; padding-top: 24px; }
-  .framed .mark, .framed h1 { display: none; }
-`;
+// The look of these pages is @one/ui's (src/screen/ui): its theme (shadcn's neutral, light or dark with the system) and,
+// of Tailwind's utilities, only those these pages use, which @one/ui's build (bun run build there) finds in this file's
+// class names and writes as sign-in.css. Not React, as the screens are: the Worker that serves a browser's code before it
+// is signed in stays small, a few KB of CSS and this script, and nothing here has to be drawn again after it's drawn.
+// Inline, as the page's policy allows nothing else. The classes are shadcn's own, as the components have them (button.tsx,
+// input.tsx, problem.tsx, ListRow), written out since there's no component to ask.
+const BUTTON = "mx-auto mb-2.5 flex h-10 w-fit min-w-56 shrink-0 items-center justify-center gap-2 rounded-md px-6 text-sm font-medium whitespace-nowrap outline-none transition-all focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50";
+const DEFAULT = `${BUTTON} bg-primary text-primary-foreground hover:bg-primary/90`;
+const SECONDARY = `${BUTTON} bg-secondary text-secondary-foreground hover:bg-secondary/80`;
+const GHOST = "inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-md px-3 text-sm font-medium whitespace-nowrap outline-none transition-all hover:bg-accent hover:text-accent-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50 dark:hover:bg-accent/50";
+const INPUT = "mb-2.5 h-9 w-full min-w-0 rounded-md border border-input bg-transparent px-3 py-1 text-center text-base shadow-xs outline-none placeholder:text-muted-foreground selection:bg-primary selection:text-primary-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 md:text-sm dark:bg-input/30";
+const HEADING = "mt-2.5 text-3xl font-semibold tracking-tight text-balance framed:hidden";
+const TITLE = `${HEADING} mb-2`;
+// A title with a button straight under it, no line between.
+const TITLE_THEN_BUTTON = `${HEADING} mb-5`;
+const TEXT = "mb-5 text-sm text-muted-foreground";
+const NOTE = "mt-2 text-sm text-muted-foreground";
+const CALLOUT = "mb-5 text-left text-sm";
+const LIST = "mb-5 w-full divide-y overflow-hidden rounded-xl border bg-card text-left text-card-foreground";
+const SPINNER = (size) => `<svg class="${size} animate-spin" viewBox="0 0 256 256" fill="currentColor" role="status" aria-label="Loading"><path d="M232,128a104,104,0,0,1-208,0c0-41,23.81-78.36,60.66-95.27a8,8,0,0,1,6.68,14.54C60.15,61.59,40,93.27,40,128a88,88,0,0,0,176,0c0-34.73-20.15-66.41-51.34-80.73a8,8,0,0,1,6.68-14.54C208.19,49.64,232,87,232,128Z"/></svg>`;
 
 // WebAuthn's binary fields, to and from the base64url its JSON uses; and asking a passkey for its PRF output, where it
 // has PRF, under the salt sha256("one/passkey-device"), from which the web client derives the passkey's device keys
@@ -38,10 +37,10 @@ const webauthn = `
     encode: (b) => btoa(String.fromCharCode(...new Uint8Array(b))).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, ""),
   };
   const PRF_SALT = crypto.subtle.digest("SHA-256", new TextEncoder().encode("one/passkey-device")).then((h) => new Uint8Array(h));
-  // A problem, as the kit draws one: its symbol, what happened, and what to do after the first sentence.
+  // A problem, as @one/ui draws one (problem.tsx): its symbol, what happened, and what to do after the first sentence.
   const say = (text) => {
     const [title, ...rest] = String(text || "").split(/(?<=[.!?])\\s+/);
-    document.querySelector(".problems").innerHTML = text ? '<div class="problem" role="alert"><svg class="problem-icon" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true"><path d="M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm-8,56a8,8,0,0,1,16,0v56a8,8,0,0,1-16,0Zm8,104a12,12,0,1,1,12-12A12,12,0,0,1,128,184Z"/></svg><div class="problem-main"><div class="problem-title"></div><div class="problem-text"></div></div></div>' : "";
+    document.querySelector(".problems").innerHTML = text ? '<div class="relative grid w-full grid-cols-[1rem_1fr] items-start gap-x-3 gap-y-0.5 rounded-lg border bg-card px-4 py-3 text-left text-sm text-destructive" role="alert"><svg class="size-4 translate-y-0.5" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true"><path d="M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm-8,56a8,8,0,0,1,16,0v56a8,8,0,0,1-16,0Zm8,104a12,12,0,1,1,12-12A12,12,0,0,1,128,184Z"/></svg><div class="problem-title col-start-2 font-medium tracking-tight"></div><div class="problem-text col-start-2 text-muted-foreground"></div></div>' : "";
     if (!text) return;
     document.querySelector(".problem-title").textContent = title;
     document.querySelector(".problem-text").textContent = rest.join(" ");
@@ -72,7 +71,7 @@ const webauthn = `
   function busy(b, label) {
     const was = b.innerHTML;
     b.disabled = true;
-    b.innerHTML = '<span class="spinner small" aria-hidden="true"></span>' + label;
+    b.innerHTML = ${JSON.stringify(SPINNER("size-4"))} + label;
     const undo = () => { b.innerHTML = was; b.disabled = false; };
     // Come back to with Back, after it went on, it's ready again.
     addEventListener("pageshow", (e) => e.persisted && undo(), { once: true });
@@ -125,17 +124,19 @@ const acts = `
     const what = document.getElementById("what");
     what.textContent = about.client + " will act as you, with everything you can use in " + install + ", until you sign it out.";
     const where = document.createElement("p");
-    where.className = "callout";
+    where.className = ${JSON.stringify(CALLOUT)};
     where.textContent = about.goes === "an app on this device" ? "It's an app on this device." : about.goes === "where you got your code" ? "It's where you got your code. Only go on if you got it yourself, on your own device." : "It goes to " + about.goes + ". Only go on if that's who you meant to sign in to.";
     what.after(where);
   }
 `;
 
-/// A page, its colours for the browser's bar the kit's page colour.
+/// A page, its colours for the browser's bar the theme's page colour. Near the top, not centred: text that comes in
+/// later (a client's name, a note) grows the page down, never moving what's already there. In the web client's frame
+/// (the passkeys' page, beside its sidebar, whose bar already says Passkeys) it has no mark or title.
 const page = (title, body, script) => `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
-<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#141414"><title>${escape(title)}</title><link rel="icon" href="/logo.png"><style>${style}</style></head>
-<body><main><img class="mark" src="/logo.png" alt="">${body}<div class="problems" role="status"></div></main><script>${webauthn}${script}</script></body></html>`;
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#141414"><title>${escape(title)}</title><link rel="icon" href="/logo.png"><style>${css}</style></head>
+<body class="grid min-h-screen items-start justify-items-center px-6 pt-[max(40px,14vh)] pb-10 framed:min-h-0 framed:pt-6"><main class="w-[min(380px,100%)] text-center"><img class="mx-auto block size-28 framed:hidden" src="/logo.png" alt="">${body}<div class="problems empty:hidden mt-3.5" role="status"></div></main><script>${webauthn}${script}</script></body></html>`;
 
 /// Which passkeys work, in plain words, for the pages that make or ask for one.
 const WORKS = "Passkeys saved in iCloud Keychain, Google Password Manager or a security key work, on a current system.";
@@ -147,10 +148,10 @@ export function signInPage(look) {
   const { name, google } = look;
   if (google) return googlePage(look);
   const body = `
-    <h1 id="title">Sign in to ${escape(name)}</h1>
-    <p id="what">With your passkey.</p>
-    <button class="button primary" id="passkey">Sign In with a Passkey</button>
-    <p class="note">No passkey here yet? Use one from another device, or ask whoever runs ${escape(name)} for an invite link.</p>`;
+    <h1 class="${TITLE}" id="title">Sign in to ${escape(name)}</h1>
+    <p class="${TEXT}" id="what">With your passkey.</p>
+    <button class="${DEFAULT}" id="passkey">Sign In with a Passkey</button>
+    <p class="${NOTE}">No passkey here yet? Use one from another device, or ask whoever runs ${escape(name)} for an invite link.</p>`;
   const script = `${acts}
     const oauth_query = location.search.slice(1);
     const client_id = new URLSearchParams(oauth_query).get("client_id");
@@ -183,11 +184,11 @@ export function signInPage(look) {
 function googlePage(look) {
   const { name, google } = look;
   const body = `
-    <h1 id="title">Sign in to ${escape(name)}</h1>
-    <p id="what">With your Google account at ${escape(google)}.</p>
-    <button class="button primary" id="google">Sign In with Google</button>
-    <button class="button" id="passkey">Sign In with a Passkey</button>
-    <p class="note">Admins sign in with a passkey.</p>`;
+    <h1 class="${TITLE}" id="title">Sign in to ${escape(name)}</h1>
+    <p class="${TEXT}" id="what">With your Google account at ${escape(google)}.</p>
+    <button class="${DEFAULT}" id="google">Sign In with Google</button>
+    <button class="${SECONDARY}" id="passkey">Sign In with a Passkey</button>
+    <p class="${NOTE}">Admins sign in with a passkey.</p>`;
   const script = `${acts}
     // Google's answer comes back here, with an error added to the query if it said no.
     const raw = location.search.slice(1);
@@ -253,9 +254,9 @@ function googlePage(look) {
 export function throwawayPage(look) {
   const { name, person } = look;
   const body = `
-    <h1 id="title">Sign in to ${escape(name)}</h1>
-    <p id="what">For testing: no passkey needed.</p>
-    <button class="button primary" id="go">Sign In as ${escape(person)}</button>`;
+    <h1 class="${TITLE}" id="title">Sign in to ${escape(name)}</h1>
+    <p class="${TEXT}" id="what">For testing: no passkey needed.</p>
+    <button class="${DEFAULT}" id="go">Sign In as ${escape(person)}</button>`;
   const script = `
     const oauth_query = location.search.slice(1);
     const params = new URLSearchParams(oauth_query);
@@ -288,22 +289,22 @@ export function invitePage(look) {
   const { name, yours, throwaway, google } = look;
   const body = `
     <section id="join">
-      <h1 id="title">Join ${escape(name)}</h1>
+      <h1 class="${TITLE}" id="title">Join ${escape(name)}</h1>
       ${throwaway
-        ? `<p id="what">For testing: no passkey needed.</p>
-      <button class="button primary" id="go" disabled>Join</button>`
+        ? `<p class="${TEXT}" id="what">For testing: no passkey needed.</p>
+      <button class="${DEFAULT}" id="go" disabled>Join</button>`
         : google
-        ? `<p id="what">With your Google account.</p>
-      <button class="button primary" id="go" disabled>Sign In with Google</button>`
-        : `<p id="what">Make a passkey to join. It's how you sign in.</p>
-      <button class="button primary" id="go" disabled>Make a Passkey</button>
-      <p class="note">${escape(WORKS)}</p>`}
+        ? `<p class="${TEXT}" id="what">With your Google account.</p>
+      <button class="${DEFAULT}" id="go" disabled>Sign In with Google</button>`
+        : `<p class="${TEXT}" id="what">Make a passkey to join. It's how you sign in.</p>
+      <button class="${DEFAULT}" id="go" disabled>Make a Passkey</button>
+      <p class="${NOTE}">${escape(WORKS)}</p>`}
     </section>
     <section id="done" hidden>
-      <h1>You've joined ${escape(yours)}</h1>
-      ${throwaway ? "" : `<p class="callout">Add a second passkey, on another device or a security key, so losing this one doesn't lock you out.</p>
-      <a class="button primary" href="/passkeys">Add Another Passkey</a>`}
-      <a class="button${throwaway ? " primary" : ""}" href="/">Open ${escape(name)}</a>
+      <h1 class="${throwaway ? TITLE_THEN_BUTTON : TITLE}">You've joined ${escape(yours)}</h1>
+      ${throwaway ? "" : `<p class="${CALLOUT}">Add a second passkey, on another device or a security key, so losing this one doesn't lock you out.</p>
+      <a class="${DEFAULT}" href="/passkeys">Add Another Passkey</a>`}
+      <a class="${throwaway ? DEFAULT : SECONDARY}" href="/">Open ${escape(name)}</a>
     </section>`;
   const script = `
     const secret = location.hash.slice(1);
@@ -355,15 +356,15 @@ export function invitePage(look) {
 export function passkeysPage(look) {
   const { name } = look;
   const body = `
-    <h1>Passkeys</h1>
-    <p id="what">Each one signs you in to ${escape(name)}.</p>
-    <div class="loading" id="wait" role="status" aria-label="Loading"><span class="spinner" aria-hidden="true"></span></div>
-    <button class="button primary" id="signin" hidden>Sign In with a Passkey</button>
+    <h1 class="${TITLE}">Passkeys</h1>
+    <p class="${TEXT}" id="what">Each one signs you in to ${escape(name)}.</p>
+    <div class="mb-5 flex justify-center text-muted-foreground" id="wait">${SPINNER("size-5")}</div>
+    <button class="${DEFAULT}" id="signin" hidden>Sign In with a Passkey</button>
     <section id="mine" hidden>
-      <div class="list" id="list"></div>
-      <p class="callout" id="suggest" hidden>Add a second passkey, on another device or a security key, so losing one doesn't lock you out.</p>
-      <button class="button primary" id="add">Add a Passkey</button>
-      <p class="note" id="step">${escape(WORKS)}</p>
+      <div class="${LIST}" id="list"></div>
+      <p class="${CALLOUT}" id="suggest" hidden>Add a second passkey, on another device or a security key, so losing one doesn't lock you out.</p>
+      <button class="${DEFAULT}" id="add">Add a Passkey</button>
+      <p class="${NOTE}" id="step">${escape(WORKS)}</p>
     </section>`;
   const script = `
     // In the web client, beside its sidebar, whose bar already says Passkeys.
@@ -384,8 +385,8 @@ export function passkeysPage(look) {
       document.getElementById("signin").hidden = true;
       document.getElementById("mine").hidden = false;
       document.getElementById("suggest").hidden = list.length > 1;
-      document.getElementById("list").innerHTML = list.map((p) => '<div class="row plain"><div class="main"><div class="title"><span>' + esc(p.name || "Passkey") + '</span></div><div class="sub">Added ' + esc(when(p.createdAt)) + '</div></div>' +
-        (list.length > 1 ? '<button class="button" data-id="' + esc(p.id) + '">Remove</button>' : '') + '</div>').join("");
+      document.getElementById("list").innerHTML = list.map((p) => '<div class="flex w-full min-w-0 items-center gap-3 px-3 py-2.5 text-left text-sm"><span class="min-w-0 flex-1"><span class="block truncate font-medium">' + esc(p.name || "Passkey") + '</span><span class="block truncate text-muted-foreground">Added ' + esc(when(p.createdAt)) + '</span></span>' +
+        (list.length > 1 ? '<button class="${GHOST}" data-id="' + esc(p.id) + '">Remove</button>' : '') + '</div>').join("");
     }
     // Both buttons start with a passkey they have: its prompt's options are asked for now, so it comes at once.
     show();
@@ -431,15 +432,15 @@ export function codePage(look) {
   const { name, google, error = "", done } = look;
   if (done !== undefined) {
     const body = done
-      ? `<h1>You're signed in</h1><p>Go back to where you got the code: it carries on by itself.</p>`
-      : `<h1>That didn't sign in</h1><p>Start signing in again where you got the code.</p>`;
+      ? `<h1 class="${TITLE}">You're signed in</h1><p class="${TEXT}">Go back to where you got the code: it carries on by itself.</p>`
+      : `<h1 class="${TITLE}">That didn't sign in</h1><p class="${TEXT}">Start signing in again where you got the code.</p>`;
     return page(`Sign in to ${name}`, body, "");
   }
   const body = `
-    <h1>Sign in with a code</h1>
-    <p>Type the code you were shown, then sign in with ${google ? "Google or your passkey" : "your passkey"}. Only use a code you got yourself, on your own device.</p>
-    <form id="form"><input id="code" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="BCDF-GHJK" aria-label="Code">
-    <button class="button primary">Continue</button></form>`;
+    <h1 class="${TITLE}">Sign in with a code</h1>
+    <p class="${TEXT}">Type the code you were shown, then sign in with ${google ? "Google or your passkey" : "your passkey"}. Only use a code you got yourself, on your own device.</p>
+    <form id="form"><input class="${INPUT}" id="code" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="BCDF-GHJK" aria-label="Code">
+    <button class="${DEFAULT}">Continue</button></form>`;
   const script = `
     say(${JSON.stringify(error).replaceAll("<", "\\u003c")});
     document.getElementById("code").focus();

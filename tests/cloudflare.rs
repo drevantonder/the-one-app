@@ -265,13 +265,8 @@ impl Workers {
         let modules = cloudflare::WORKERS.iter().map(|(_, entry, _)| module(entry)).collect();
         let sites = port();
         let web = crate::temp("web");
-        std::fs::create_dir_all(web.join("screen")).unwrap();
         std::fs::write(web.join("index.html"), "<!doctype html><title>The web client</title>").unwrap();
         std::fs::write(web.join("frame.html"), "<!doctype html><title>A screen's frame</title>").unwrap();
-        std::fs::write(web.join("screen/kit.css"), include_str!("../src/screen/kit.css")).unwrap();
-        for (path, bytes) in cloudflare::precompressed(&[("screen/kit.css".into(), include_bytes!("../src/screen/kit.css").to_vec())]).unwrap() {
-            std::fs::write(web.join(path), bytes).unwrap();
-        }
         let mut served = cloudflare::served_with(&settings, modules, &web, None);
         for s in served.iter_mut().filter(|s| ["signer", "mcp", "push"].contains(&s.name.as_str())) {
             s.outbound = Some("sites".into());

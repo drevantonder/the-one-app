@@ -1,11 +1,13 @@
 // After Vite's builds (package.json's build): the import map every page that opts in gets (src/screen.rs), the
-// gallery's page, the client's own Settings screens written in React (../settings/<name>.jsx into
+// sign-in pages' small stylesheet, the gallery's page, the client's own Settings screens written in React (../settings/<name>.jsx into
 // ../settings/dist/<name>.html, built as an app's screens are), and the sources' hash, which `cargo test` checks the
 // built files were made from.
 import { createHash } from "node:crypto"
-import { readdirSync, readFileSync, writeFileSync } from "node:fs"
+import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import path from "node:path"
 import vm from "node:vm"
+import tailwindcss from "@tailwindcss/vite"
+import { build } from "vite"
 import { buildScreens } from "./screens.mjs"
 import { shared } from "./vite.config.ts"
 
@@ -28,6 +30,27 @@ for (const name of shared) {
 const map = JSON.stringify({ imports })
 writeFileSync(dist("importmap.json"), map + "\n")
 
+// The sign-in Worker's pages (../../../cloudflare/sign-in/pages.js) are plain HTML, not React: this theme and the utilities
+// their class names use, as one stylesheet (src/sign-in.css), which the Worker imports as text.
+const scratch = path.join(here, `run-${process.pid}`)
+mkdirSync(scratch, { recursive: true })
+try {
+  const entry = path.join(scratch, "sign-in.js")
+  writeFileSync(entry, `import ${JSON.stringify(path.join(here, "src", "sign-in.css"))};\n`)
+  const out = await build({
+    configFile: false,
+    root: here,
+    publicDir: false,
+    logLevel: "warn",
+    plugins: [tailwindcss()],
+    build: { write: false, reportCompressedSize: false, lib: { entry, formats: ["es"], fileName: () => "sign-in.js", cssFileName: "sign-in" } },
+  })
+  const css = (Array.isArray(out) ? out : [out]).flatMap((o) => o.output).filter((f) => f.type === "asset" && f.fileName.endsWith(".css")).map((f) => String(f.source)).join("\n")
+  writeFileSync(dist("sign-in.css"), css)
+} finally {
+  rmSync(scratch, { recursive: true, force: true })
+}
+
 // The gallery, a page of its own beside @one/ui's files (the address's /screen/ui/gallery.html): every component and
 // layout part, with a host that answers only for icons, from the address's set.
 writeFileSync(dist("gallery.html"), `<!doctype html>
@@ -49,7 +72,7 @@ await buildScreens(settings, path.join(settings, "dist"), settings, `<meta name=
 await buildScreens(home, path.join(home, "dist"), home, `<meta name="@one/ui">`, shared)
 
 // What the built files were made from: every source file, by path and content, in order: @one/ui's, the Settings
-// screens', and everything in the pages' folder but its dist/.
+// screens', everything in the pages' folder but its dist/, and the sign-in pages.
 const sources = readdirSync(settings).filter((f) => /\.[jt]sx$/.test(f)).map((f) => `../settings/${f}`)
 const walk = (dir, root = here, prefix = "") => {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -60,6 +83,8 @@ const walk = (dir, root = here, prefix = "") => {
 }
 walk(here)
 walk(home, home, "../home/")
+// The sign-in pages, whose class names sign-in.css is made of.
+sources.push("../../../cloudflare/sign-in/pages.js")
 const hash = createHash("sha256")
 for (const file of sources.sort()) hash.update(file).update("\0").update(readFileSync(path.join(here, file))).update("\0")
 writeFileSync(dist("sources.txt"), hash.digest("hex") + "\n")
