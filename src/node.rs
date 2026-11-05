@@ -150,6 +150,9 @@ struct Install {
     builds: HashMap<Key, release::Running>,
     /// What each device last said it reads of who's who (`database::switch`).
     reads: HashMap<Key, crate::database::switch::Reads>,
+    /// Once `global`'s log is frozen, each other scope's own database as its steps leave it (`database::steps`): the
+    /// last position read, and the database, once its anchor checked out here.
+    scope_dbs: HashMap<Scope, (u64, Option<ScopeDb>)>,
     /// Each scope's rows of how things went, as this device last read them.
     status: HashMap<String, status::Status>,
     /// Each scope's views: how far they've replayed, and what the scope's node entries add up to.
@@ -747,7 +750,7 @@ impl Node {
         let root: [u8; 32] = data_encoding::HEXLOWER.decode(file.root.as_bytes())?.try_into().map_err(|_| anyhow!("bad root"))?;
         let r = Replica::new(self.0.key.clone(), store, Some(Hash::from_bytes(root)), now_ms())?;
         let bucket = file.bucket.map(|f| Ok::<_, anyhow::Error>((self.install_place(&f)?, f))).transpose()?;
-        let install = Install { r, user: file.user, bucket, folders: file.folders, peers: HashMap::new(), builds: HashMap::new(), reads: HashMap::new(), status: HashMap::new(), views: HashMap::new(), vault: Default::default(), nearest: HashMap::new(), far: HashMap::new(), read: false };
+        let install = Install { r, user: file.user, bucket, folders: file.folders, peers: HashMap::new(), builds: HashMap::new(), reads: HashMap::new(), scope_dbs: HashMap::new(), status: HashMap::new(), views: HashMap::new(), vault: Default::default(), nearest: HashMap::new(), far: HashMap::new(), read: false };
         *self.0.install.lock()? = Some(install);
         Ok(())
     }
@@ -869,9 +872,12 @@ impl Node {
 
     /// Writes an entry to this device's log of `scope`, signed by this device, as `user`.
     async fn append_as(&self, scope: &Scope, user: &str, content: Content) -> Result<Entry> {
-        // Once `global`'s log is frozen, what it said is a step of its scope database (`database::steps`).
-        if *scope == Scope::Global && self.frozen() {
-            return self.write_step(user, content).await;
+        // Once `global`'s log is frozen, what it said is a step of its scope's database (`database::steps`).
+        if self.frozen() {
+            return match scope {
+                Scope::Global => self.write_step(user, content).await,
+                _ => self.write_scope_step(scope, user, content).await,
+            };
         }
         self.first_epoch(scope).await?;
         let _write = self.0.writes.lock().await;
@@ -972,8 +978,8 @@ impl Node {
     pub(super) async fn put_checked(&self, entries: Vec<Entry>) -> Result<()> {
         for entry in entries {
             let scope = entry.scope();
-            // An older device's, which writes who's who to the frozen log, where it changes nothing.
-            ensure!(!(scope == Scope::Global && self.frozen()), "update this device to change who's in: your One App's other devices have moved on");
+            // An older device's, which writes to the frozen logs, where it changes nothing.
+            ensure!(!self.frozen(), "update this device to change who's in: your One App's other devices have moved on");
             self.first_epoch(&scope).await?;
             {
                 let _write = self.0.writes.lock().await;
@@ -1192,7 +1198,8 @@ fn update_views(i: &mut Install, new: &[Entry]) -> Result<()> {
     logs.dedup();
     for log in logs {
         let Ok(scope) = Scope::parse(&log) else { continue };
-        if !i.r.holds(&scope) {
+        // Once its own database's steps say its state, its entries change nothing (`Node::read_scope_steps_now`).
+        if !i.r.holds(&scope) || i.scope_dbs.get(&scope).is_some_and(|(_, db)| db.is_some()) {
             continue;
         }
         let mut fresh: Vec<Entry> = new.iter().filter(|e| e.log() == log).cloned().collect();

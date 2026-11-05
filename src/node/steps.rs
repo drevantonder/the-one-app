@@ -157,4 +157,85 @@ impl Node {
         }
         Ok(json!({ "frozen": frozen.to_hex(), "at": at, "steps": list }))
     }
+
+    /// Reads a scope's own steps after the last this device applied, once `global`'s log is frozen: its first, the
+    /// anchor, checked against what this device's copy of the scope's log comes to, then each applied if it counts
+    /// there with `global`'s scope database as it is now. Its state is the scope's view from then on.
+    pub(super) async fn read_scope_steps_now(&self, scope: &Scope) -> Result<bool> {
+        if *scope == Scope::Global || !self.frozen() || !self.with(|i| Ok(i.r.holds(scope)))? {
+            return Ok(false);
+        }
+        let from = self.with(|i| Ok(i.scope_dbs.get(scope).map_or(0, |(at, _)| *at)))?;
+        let keys = self.log_key(scope).await?;
+        let read = steps::read(&self.bucket()?, &keys, scope, from).await?;
+        if read.is_empty() {
+            return Ok(false);
+        }
+        self.with(|i| {
+            let entries = i.r.store.scope(&scope.to_string())?;
+            let (mut at, mut db) = i.scope_dbs.remove(scope).unwrap_or((0, None));
+            for step in read {
+                at += 1;
+                let Some(step) = step else { continue };
+                let applied = match &db {
+                    None if at == 1 => steps::apply_anchor(i.r.db(), &i.r.members, &i.r.member_entries, &entries, scope, &step),
+                    None => Err(anyhow!("{scope}'s anchor didn't check out here")),
+                    Some(d) => steps::apply(d, Some(i.r.db()), scope, &step),
+                };
+                match applied {
+                    Ok(a) => db = Some(ScopeDb::open(a.db, now_ms())?),
+                    Err(err) => tracing::info!("{scope}'s step {at} doesn't count: {err:#}"),
+                }
+            }
+            if let Some(d) = &db {
+                let position = i.views.get(&scope.to_string()).map(|(p, _)| p.clone()).unwrap_or((0, Hash::from_bytes([0; 32])));
+                i.views.insert(scope.to_string(), (position, d.state()));
+            }
+            i.scope_dbs.insert(scope.clone(), (at, db));
+            Ok(())
+        })?;
+        Ok(true)
+    }
+
+    /// Writes `content` to a scope's own database (not `global`'s) as a step this device signs as `user`, once
+    /// `global`'s log is frozen: its anchor first, if it has none yet, at the final position of the scope's log this
+    /// device holds.
+    pub(super) async fn write_scope_step(&self, scope: &Scope, user: &str, content: Content) -> Result<Entry> {
+        self.first_epoch(scope).await?;
+        let _write = self.0.writes.lock().await;
+        self.read_log_now(scope).await?;
+        for _ in 0..50 {
+            self.read_scope_steps_now(scope).await?;
+            let (at, anchored) = self.with(|i| Ok(i.scope_dbs.get(scope).map_or((0, false), |(at, db)| (*at, db.is_some()))))?;
+            let content = match (at, anchored) {
+                (0, _) => self.with(|i| {
+                    let entries = i.r.store.scope(&scope.to_string())?;
+                    let (_, hash, frontier) = steps::anchor(&i.r.members, &i.r.member_entries, &entries, scope)?;
+                    Ok(steps::anchor_content(&hash, &frontier))
+                })?,
+                (_, true) => content.clone(),
+                (_, false) => bail!("{scope}'s first step didn't check out on this device, so it writes nothing there"),
+            };
+            let step = self.with(|i| {
+                let step = steps::sign(&i.r.key, scope, at + 1, user, i.r.db().epoch(scope), now_ms(), content.clone())?;
+                if let Some((_, Some(d))) = i.scope_dbs.get(scope) {
+                    steps::apply(d, Some(i.r.db()), scope, &step)?;
+                }
+                Ok(step)
+            })?;
+            for blob in &step.content.blobs {
+                self.share_blob(scope, blob, false).await.with_context(|| format!("blob {} isn't here: put it first", &blob[..12.min(blob.len())]))?;
+            }
+            let keys = self.log_key(scope).await?;
+            let name = crate::db::step_name(&steps::prefix(&scope.to_string()), at + 1);
+            if crate::bucket::Bucket::create(&self.bucket()?, &name, &crate::log::seal(&keys, &name, &steps::encode(&step))?).await? {
+                self.read_scope_steps_now(scope).await?;
+                self.ping(scope, None);
+                if step.content.kind != steps::ANCHOR {
+                    return Ok(step);
+                }
+            }
+        }
+        bail!("{scope} changed too often to write to")
+    }
 }

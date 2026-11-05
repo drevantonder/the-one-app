@@ -520,14 +520,13 @@ pub async fn read_log(owner: String, bucket: JsValue, scope: String, keys: Strin
 
 /// Once `global`'s log is frozen, its scope database's steps after those read, with the log's keys.
 async fn read_steps(id: &(String, String), bucket: &Js) -> Result<()> {
-    if id.1 != "global" {
-        return Ok(());
-    }
-    let Some((keys, from, frozen)) = LOGS.with(|l| l.borrow().get(id).map(|g| (g.keys.clone(), g.steps.len() as u64, members::frozen(root(&g.entries), &g.entries, &Default::default()).is_some()))) else { return Ok(()) };
+    let global = (id.0.clone(), "global".to_string());
+    let frozen = LOGS.with(|l| l.borrow().get(&global).is_some_and(|g| members::frozen(root(&g.entries), &g.entries, &Default::default()).is_some()));
+    let Some((keys, from)) = LOGS.with(|l| l.borrow().get(id).map(|g| (g.keys.clone(), g.steps.len() as u64))) else { return Ok(()) };
     if !frozen {
         return Ok(());
     }
-    let read = one::database::steps::read(bucket, &keys, &Scope::Global, from).await?;
+    let read = one::database::steps::read(bucket, &keys, &Scope::parse(&id.1)?, from).await?;
     if !read.is_empty() {
         LOGS.with(|l| {
             if let Some(log) = l.borrow_mut().get_mut(id).filter(|g| g.steps.len() as u64 == from) {
@@ -537,6 +536,23 @@ async fn read_steps(id: &(String, String), bucket: &Js) -> Result<()> {
         });
     }
     Ok(())
+}
+
+/// A scope's own database from its steps (`one::database::steps`): its anchor, then each that counts with `global`'s
+/// scope database `truth`. One whose anchor doesn't check out here is the scope's state at nobody's.
+fn scope_truth(truth: &ScopeDb, known: &Members, member_entries: &[Entry], entries: &[Entry], scope: &Scope, steps: &[Option<Entry>]) -> Result<ScopeDb> {
+    use one::database::steps;
+    let Some(Some(first)) = steps.first() else { return ScopeDb::build(&Members::default(), scope, &Default::default(), now()) };
+    let mut db = match steps::apply_anchor(truth, known, member_entries, entries, scope, first) {
+        Ok(a) => ScopeDb::open(a.db, now())?,
+        Err(_) => return ScopeDb::build(&Members::default(), scope, &Default::default(), now()),
+    };
+    for step in steps[1..].iter().flatten() {
+        if let Ok(a) = steps::apply(&db, Some(truth), scope, step) {
+            db = ScopeDb::open(a.db, now())?;
+        }
+    }
+    Ok(db)
 }
 
 /// The install's genesis, which its members are replayed from.
@@ -574,13 +590,19 @@ fn replayed<R>(owner: &str, scopes: &[String], f: impl FnOnce(&Replays) -> R) ->
                         "global" => log.entries.clone(),
                         _ => causal(log.entries.clone(), &global.entries.iter().map(|e| (e.hash(), e.depth)).collect()),
                     };
-                    // Once `global`'s log is frozen, who's who is its scope database: its freeze's, and the steps after.
-                    let frozen = (scope == "global").then(|| members::frozen(root, &global.entries, &Default::default())).flatten();
-                    let db = match frozen {
-                        Some(f) => one::database::steps::truth(&f, &global.steps, now())?,
-                        None => {
+                    // Once `global`'s log is frozen, who's who is its scope database: its freeze's, and the steps after;
+                    // and a scope's own state its own steps', from its anchor on.
+                    let frozen = members::frozen(root, &global.entries, &Default::default());
+                    let s = Scope::parse(scope)?;
+                    let db = match (&frozen, scope.as_str()) {
+                        (Some(f), "global") => one::database::steps::truth(f, &global.steps, now())?,
+                        (Some(f), _) if !log.steps.is_empty() => {
+                            let truth = one::database::steps::truth(f, &global.steps, now())?;
+                            scope_truth(&truth, &f.members, &member_entries, &entries, &s, &log.steps)?
+                        }
+                        _ => {
                             let (members, state) = members::replay(&known, &member_entries, &entries, |_, _, _| {});
-                            ScopeDb::build(&members, &Scope::parse(scope)?, &state, now())?
+                            ScopeDb::build(&members, &s, &state, now())?
                         }
                     };
                     r.insert(id.clone(), Replayed { at, db });

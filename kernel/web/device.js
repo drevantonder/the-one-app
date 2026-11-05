@@ -129,8 +129,11 @@ export class Device {
       // What an older release kept, without all its answers (each person's `keeps` came last), is replayed again.
       const given = r && r.status !== 204 ? new Uint8Array(await r.arrayBuffer()) : undefined;
       // Once the log is frozen, who's who is its scope database's steps after those kept; a node that isn't says so.
-      const steps = await this.api(`/v1/steps/global?from=${kept?.at || 0}`).catch(() => null);
-      const k = !given && !steps?.steps?.length && kept?.members?.people?.[this.user]?.keeps ? kept.members : await this.replay(this.user, given, steps);
+      const frozen = kept?.at || this.state()?.install?.frozen;
+      const steps = frozen ? await this.api(`/v1/steps/global?from=${kept?.at || 0}`).catch(() => null) : null;
+      let k = !given && !steps?.steps?.length && kept?.members?.people?.[this.user]?.keeps ? kept.members : await this.replay(this.user, given, steps);
+      // The entries say the log froze, which this browser didn't know: the steps since, then.
+      if (k.frozen && !steps) k = await this.replay(this.user, undefined, await this.api(`/v1/steps/global?from=${kept?.at || 0}`));
       if (!k.people[this.user]) throw new Error("Your One App doesn't list you yet, so this device didn't use it.");
       this.known = k;
     }

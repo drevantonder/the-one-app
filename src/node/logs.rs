@@ -80,9 +80,12 @@ impl Node {
             }
             let Some(ahead) = read.ahead else {
                 self.hint_log(scope, &bucket, &key, at).await;
-                // Once `global`'s log is frozen, its scope database's steps: who's who from there.
+                // Once `global`'s log is frozen, its scope database's steps: who's who from there; and each other
+                // scope's own.
                 if *scope == Scope::Global {
                     self.read_steps_now().await?;
+                } else {
+                    self.read_scope_steps_now(scope).await?;
                 }
                 return Ok(gained);
             };

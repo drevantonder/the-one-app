@@ -111,6 +111,53 @@ pub async fn read(bucket: &impl crate::bucket::Bucket, keys: &crate::db::Keys, s
     Ok(out)
 }
 
+/// The kind of a scope's first step once `global`'s log is frozen, but `global`'s: its own log's final position, the
+/// last of each device's entries there its writer held (`frontier`), and the state hash the scope's database built
+/// from those comes to (`hash`). Every reader builds that itself from the entries it checked, and refuses the scope's
+/// steps if it doesn't come to it.
+pub const ANCHOR: &str = "anchor";
+
+/// A scope's anchor (`ANCHOR`): what `entries`, the scope's own in replay order, up to the last of each device's in
+/// `frontier`, add up to with `global`'s frozen members, and its state hash.
+pub fn anchor(known: &Members, member_entries: &[Entry], entries: &[Entry], scope: &Scope) -> Result<(Connection, String, std::collections::BTreeMap<crate::entry::Key, u32>)> {
+    let mut frontier = std::collections::BTreeMap::new();
+    for e in entries {
+        let n = frontier.entry(e.author()).or_insert(0);
+        *n = (*n).max(e.seq());
+    }
+    let (db, hash) = anchored(known, member_entries, entries, scope, &frontier)?;
+    Ok((db, hash, frontier))
+}
+
+/// The scope's database at the final position `frontier` of its own log, `entries` in replay order, and its hash.
+fn anchored(known: &Members, member_entries: &[Entry], entries: &[Entry], scope: &Scope, frontier: &std::collections::BTreeMap<crate::entry::Key, u32>) -> Result<(Connection, String)> {
+    let before: Vec<Entry> = entries.iter().filter(|e| frontier.get(&e.author()).is_some_and(|n| e.seq() <= *n)).cloned().collect();
+    let (_, state) = members::replay_from(known, member_entries, &before, ScopeState::default(), |_, _, _| {});
+    let db = super::scope::build(&Members::default(), scope, &state)?;
+    let hash = crate::db::state_hash(&db)?;
+    Ok((db, hash))
+}
+
+/// The step that anchors a scope's database (`ANCHOR`).
+pub fn anchor_content(hash: &str, frontier: &std::collections::BTreeMap<crate::entry::Key, u32>) -> Content {
+    let frontier: serde_json::Map<String, serde_json::Value> = frontier.iter().map(|(k, n)| (crate::entry::hex(k), serde_json::json!(n))).collect();
+    Content::new(members::APP, ANCHOR, serde_json::json!({ "hash": hash, "frontier": frontier }))
+}
+
+/// Applies a scope's first step, its anchor, with `global`'s scope database as it is now and its frozen log's members:
+/// → the scope's database it says, if its signer may write there and what it names comes to its hash here.
+pub fn apply_anchor(global: &ScopeDb, known: &Members, member_entries: &[Entry], entries: &[Entry], scope: &Scope, step: &Entry) -> Result<Applied> {
+    ensure!(step.content.app == members::APP && step.content.kind == ANCHOR && step.scope() == *scope && *scope != Scope::Global, "a scope's first step is its anchor");
+    ensure!(global.may(step.user(), "use", &scopes::object(scope)) && (global.client(&step.author()).is_some_and(|c| c.user == step.user()) || global.runs_for(&step.author(), scope)), "{} may not write in {scope}", step.user());
+    let mut frontier = std::collections::BTreeMap::new();
+    for (k, n) in step.content.data["frontier"].as_object().into_iter().flatten() {
+        frontier.insert(unhex(k)?, u32::try_from(n.as_u64().context("a frontier is seqs")?)?);
+    }
+    let (db, hash) = anchored(known, member_entries, entries, scope, &frontier)?;
+    ensure!(step.content.data["hash"].as_str() == Some(hash.as_str()), "{scope}'s anchor isn't what its log here comes to");
+    Ok(Applied { db })
+}
+
 /// What a step that counts made of the database it was applied to: the database it leaves.
 pub struct Applied {
     pub db: Connection,

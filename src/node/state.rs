@@ -120,6 +120,10 @@ impl Node {
             client_now: &client_now,
         };
         let mut state = crate::state::state(install.as_ref().map(|i| i.r.db()), me, here);
+        // Whether who's who is the scope database's steps now (`database::switch`), which a client reads them from.
+        if let Some(i) = install.as_ref().filter(|_| state["install"].is_object()) {
+            state["install"]["frozen"] = json!(i.r.frozen.is_some());
+        }
         // Where phase 2's switch is, for the install's admins, who skip a device gone for good.
         if let Some(i) = install.as_ref().filter(|i| i.r.db().may(me, "change-settings", scopes::INSTALL))
             && state["install"].is_object()
