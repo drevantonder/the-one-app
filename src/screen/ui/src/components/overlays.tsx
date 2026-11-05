@@ -5,12 +5,11 @@ import {
   AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
-import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog"
 import {
   DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet"
 import { Icon } from "@/components/icon"
+import { ResponsiveDialog } from "@/components/responsive-dialog"
 import { cn } from "@/lib/utils"
 
 // What a page that holds screens shows over them when a screen asks (bridge.js's one.menu, one.alert, and a screen
@@ -141,28 +140,10 @@ function ScreenSheet({ open, body, title: first, done, close, titled }: {
 }) {
   const [title, setTitle] = React.useState(first)
   React.useLayoutEffect(() => titled(setTitle), [titled])
-  // The window's own width: the sheet sits over the whole window.
-  const wide = useWindowWidth() >= 640
-  const head = (
-    <div className="flex shrink-0 items-center gap-2 border-b px-4 py-3">
-      {wide ? <DialogTitle className="min-w-0 flex-1 truncate text-base">{title}</DialogTitle> : <SheetTitle className="min-w-0 flex-1 truncate">{title}</SheetTitle>}
-      {wide ? <DialogDescription className="sr-only">{title}</DialogDescription> : <SheetDescription className="sr-only">{title}</SheetDescription>}
-      <Button variant="secondary" size="sm" onClick={close}>{done}</Button>
-    </div>
-  )
-  const content = <>{head}<KeptBody element={body} /></>
-  return wide ? (
-    <Dialog open={open} onOpenChange={(o) => !o && close()}>
-      <DialogContent showCloseButton={false} className="flex h-[min(620px,88vh)] flex-col gap-0 overflow-hidden p-0 sm:max-w-[480px]">
-        {content}
-      </DialogContent>
-    </Dialog>
-  ) : (
-    <Sheet open={open} onOpenChange={(o) => !o && close()}>
-      <SheetContent side="bottom" showCloseButton={false} className="h-[92svh] gap-0 overflow-hidden rounded-t-xl">
-        {content}
-      </SheetContent>
-    </Sheet>
+  return (
+    <ResponsiveDialog open={open} onOpenChange={(o) => !o && close()} title={title} tall action={<Button variant="secondary" size="sm" onClick={close}>{done}</Button>}>
+      <KeptBody element={body} />
+    </ResponsiveDialog>
   )
 }
 
@@ -172,16 +153,6 @@ function KeptBody({ element }: { element: HTMLElement }) {
     if (element.parentElement !== ref.current) ref.current?.append(element)
   }, [element])
   return <div ref={ref} className="flex min-h-0 flex-1 flex-col" />
-}
-
-function useWindowWidth() {
-  const [width, setWidth] = React.useState(() => window.innerWidth)
-  React.useEffect(() => {
-    const resized = () => setWidth(window.innerWidth)
-    addEventListener("resize", resized)
-    return () => removeEventListener("resize", resized)
-  }, [])
-  return width
 }
 
 export { showMenu, showAlert, showSheet, type MenuItem }

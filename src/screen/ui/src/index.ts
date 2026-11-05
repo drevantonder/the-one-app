@@ -1,4 +1,5 @@
-// @one/ui: its components, by shadcn's names, and ours (Problem, Empty, AppIcon, Icon, and the layout parts).
+// @one/ui: its components, by shadcn's names, and ours (Problem, Empty, AppIcon, Icon, the layout parts, and
+// shadcn's responsive dialog pattern as ResponsiveDialog).
 export * from "@/components/ui/alert"
 export * from "@/components/ui/alert-dialog"
 export * from "@/components/ui/badge"
@@ -7,6 +8,7 @@ export * from "@/components/ui/card"
 export * from "@/components/ui/dialog"
 export * from "@/components/ui/dropdown-menu"
 export * from "@/components/ui/input"
+export * from "@/components/ui/label"
 export * from "@/components/ui/separator"
 export * from "@/components/ui/sheet"
 export * from "@/components/ui/sidebar"
@@ -20,6 +22,7 @@ export * from "@/components/empty"
 export * from "@/components/icon"
 export * from "@/components/app-icon"
 export * from "@/components/layout"
+export * from "@/components/responsive-dialog"
 export { cn } from "@/lib/utils"
 export * from "@/components/shell"
 export * from "@/components/overlays"

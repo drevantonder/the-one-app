@@ -84,3 +84,9 @@
     -webkit-tap-highlight-color: transparent;
   }
 }
+
+/* Radix's scroll lock, while a sheet or dialog is open, zeroes the body's padding: keep it, so what's under doesn't
+   jump to the window's edge. Unlayered and more specific than its rule. */
+html body[data-scroll-locked] {
+  padding: 1rem 1rem calc(1rem + env(safe-area-inset-bottom));
+}
