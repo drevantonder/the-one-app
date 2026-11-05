@@ -2,44 +2,114 @@
 <style>
   /* A device's type, with its OS's glyph at its corner: nothing behind the glyph. */
   .device-icon { position: relative; width: 28px; height: 28px; flex: none; color: var(--text); }
-  .device-icon > .i { width: 28px; height: 28px; }
+  .device-icon > .i, .device-icon > .brand { width: 28px; height: 28px; }
   .device-icon .os { position: absolute; right: -6px; bottom: -4px; width: 15px; height: 15px; }
   .device-icon.off { color: var(--muted); }
-  .devices > .list { margin-bottom: 12px; }
-  .devices .head .title { font-weight: 600; }
-  .devices .row.plain + .row.plain::before { left: 56px; }
-  .devices .row.head + .row.plain::before, .devices .row.plain + .row.old::before { left: 16px; }
+  /* Wide enough, the tabs spread out: Add a Device and Browsers beside the devices, the board's columns side by side. */
+  @media (min-width: 900px) { body { max-width: 1040px; } }
+  .tabs { margin: 4px 0 16px; }
+  @media (min-width: 720px) { .tabs { max-width: 420px; margin: 4px auto 20px; } }
+  #page .list { margin-bottom: 12px; }
   .more { width: 28px; height: 28px; flex: none; border: 0; border-radius: 14px; background: var(--fill); color: var(--tint); display: grid; place-items: center; font-size: 18px; cursor: pointer; }
-  .pick.chip { font: inherit; font-size: 15px; border: 0; }
   .row .tile { width: 28px; height: 28px; display: grid; place-items: center; flex: none; }
   .row .tile .i { width: 22px; height: 22px; color: var(--tint); }
   /* A device waiting to be let in: which it is, its code large, to check against its screen, and the answers. */
   .waiting-device { padding: 14px 16px 16px; }
-  .waiting-device .head { padding: 0; }
+  .waiting-device .row { padding: 0; }
   .waiting-device .code { font: 600 30px var(--mono); letter-spacing: 0.08em; text-align: center; margin: 14px 0 16px; user-select: all; -webkit-user-select: all; }
   .waiting-device .answers { display: flex; gap: 10px; }
   .waiting-device .answers .button { flex: 1; padding: 10px 14px; }
+  @media (min-width: 720px) {
+    .waiting-device { display: flex; align-items: center; gap: 20px; padding: 14px 16px; }
+    .waiting-device .row { flex: 1; min-width: 0; }
+    .waiting-device .code { margin: 0; }
+    .waiting-device .answers .button { min-width: 110px; }
+  }
+
+  /* Devices: the rows, then (beside them on a wide window) Add a Device and Browsers. */
+  .columns { display: grid; grid-template-areas: "main" "side" "foot"; }
+  @media (min-width: 860px) {
+    .columns { grid-template-columns: 1.4fr 1fr; grid-template-rows: auto 1fr; grid-template-areas: "main side" "foot side"; gap: 0 20px; align-items: start; }
+    .columns .side > h2.section:first-child { margin-top: 0; }
+  }
+  .columns > .main { grid-area: main; } .columns > .side { grid-area: side; } .columns > .foot { grid-area: foot; }
+  .row.device + .row.device::before { left: 56px; }
+  .flag { width: 28px; height: 28px; flex: none; border: 0; padding: 0; background: none; color: var(--warn); display: grid; place-items: center; cursor: pointer; }
+  .flag .i { width: 22px; height: 22px; }
+  .list .problem { background: none; margin: 0; padding: 2px 16px 14px 56px; }
   .add-way .line { display: flex; align-items: center; gap: 8px; margin-top: 8px; padding: 4px 4px 4px 12px; border-radius: 12px; background: var(--fill); }
   .add-way .line span { flex: 1; min-width: 0; font: 13px var(--mono); color: var(--text); overflow-x: auto; white-space: nowrap; user-select: all; -webkit-user-select: all; }
   .add-way .sub { white-space: normal; }
   .action-row { color: var(--tint); cursor: pointer; }
-  /* A part's problem, on its row, inside its device's card. */
-  .devices .list .problem { background: none; margin: 0; padding: 4px 16px 14px 56px; }
   .action-row .i { width: 22px; height: 22px; }
-  .list.passkey { margin-top: 20px; }
   .row.out { justify-content: center; color: var(--danger); font: inherit; border: 0; background: none; width: 100%; }
+
+  /* Priority: a board of columns, first to last, stacked on a phone. */
+  .question { font-size: 22px; font-weight: 700; margin: 4px 4px 14px; line-height: 1.2; }
+  .board { display: flex; flex-direction: column; }
+  .pcol { background: var(--card); border-radius: 20px; padding: 8px 8px 2px; min-height: 60px; transition: box-shadow 0.15s; }
+  .pcol h3 { font-size: 15px; font-weight: 600; margin: 4px 8px 4px; }
+  .pcol.new { background: none; border: 1.5px dashed var(--faint); display: grid; place-items: center; color: var(--muted); padding: 8px; min-height: 48px; }
+  .pcol.new .i { width: 22px; height: 22px; }
+  .pcol.over { box-shadow: inset 0 0 0 2px var(--tint); }
+  .then { display: grid; place-items: center; height: 26px; color: var(--faint); }
+  .then .i { transform: rotate(90deg); }
+  @media (min-width: 640px) {
+    .board { flex-direction: row; align-items: stretch; overflow-x: auto; padding-bottom: 4px; }
+    .pcol { flex: 1 1 0; min-width: 150px; min-height: 180px; }
+    .pcol.new { flex: 0 0 64px; min-width: 64px; }
+    .then { height: auto; width: 22px; flex: none; }
+    .then .i { transform: none; }
+  }
+  .pcard { display: flex; align-items: center; gap: 10px; width: 100%; margin-bottom: 6px; padding: 10px 12px; border: 0; border-radius: 14px; background: var(--raised); color: var(--text); font: inherit; text-align: left; touch-action: pan-y; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+  button.pcard { cursor: grab; }
+  .pcard .name { flex: 1; min-width: 0; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pcard .name small { display: block; font-size: 13px; font-weight: 400; color: var(--muted); }
+  .pcard .grip { color: var(--faint); touch-action: none; padding: 6px; margin: -6px; }
+  .pcard .grip .i { width: 20px; height: 20px; display: block; }
+  .pcard.ghost { opacity: 0.3; }
+  .pcard.lifted { position: fixed; z-index: 60; margin: 0; pointer-events: none; box-shadow: 0 10px 28px rgba(0, 0, 0, 0.2); transform: rotate(-1.5deg); }
+  .brand { display: block; }
+
+  /* Services: what runs where, services down and devices across, a dot each; on a phone it scrolls sideways under the
+     names, which stay. */
+  .grid-wrap { background: var(--card); border-radius: var(--radius); overflow-x: auto; margin: 0 auto 12px; width: fit-content; max-width: 100%; }
+  .grid { border-collapse: separate; border-spacing: 0; min-width: 100%; }
+  .grid th, .grid td { padding: 6px 4px; text-align: center; border-top: 0.5px solid var(--line); }
+  .grid thead th { border-top: 0; padding-top: 14px; font-size: 13px; font-weight: 500; color: var(--muted); vertical-align: bottom; }
+  .grid thead .device-icon { display: block; margin: 0 auto 6px; }
+  @media (min-width: 720px) { .grid thead th:not(.svc) { min-width: 96px; } }
+  .grid thead .nm { display: block; max-width: 84px; margin: 0 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .grid th.svc { position: sticky; left: 0; z-index: 1; background: var(--card); text-align: left; font-weight: 500; padding: 8px 10px 8px 16px; }
+  .grid th.svc > span { display: flex; align-items: center; gap: 10px; max-width: 150px; }
+  .grid th.svc b { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .grid thead th.svc { padding: 0; }
+  .grid td:last-child, .grid thead th:last-child { padding-right: 12px; }
+  .cell { width: 44px; height: 40px; border: 0; padding: 0; background: none; display: inline-grid; place-items: center; cursor: pointer; }
+  .cell[aria-disabled="true"] { cursor: default; }
+  .dot { width: 20px; height: 20px; border-radius: 50%; border: 2px solid var(--faint); display: grid; place-items: center; font-size: 13px; font-weight: 800; color: #fff; }
+  .dot.on { background: var(--tint); border-color: var(--tint); }
+  .dot.doing { animation: breathe 1.6s ease-in-out infinite; }
+  .dot.warn { background: var(--warn); border-color: var(--warn); }
+  .cell:active .dot { opacity: 0.6; }
+  @media (prefers-reduced-motion: reduce) { .dot.doing { animation: none; } }
 </style>
 <script>
-  // This person's devices as cards, in run priority's order: each with what it runs (Runs apps, its services), its
-  // priority (an admin's to change), and Rename and Remove for its owner; then Cloudflare, their browsers, and devices
-  // waiting to be let in on top, approved by tapping (where this device holds its own keys, `device.keys`). Under them,
-  // what their devices keep running for them, and a passkey to get back in with.
+  // This person's devices, in three tabs: Devices (each of theirs, with Rename and Remove, Add a Device, their
+  // browsers), Priority (the order every device runs apps in, an admin's to change) and Services (what each of their
+  // devices runs, switched by tapping). Devices waiting to be let in show on top of every tab, approved by tapping
+  // (where this device holds its own keys, `device.keys`); under Devices, what their devices keep running for them,
+  // and a passkey to get back in with.
   let state, device, apps = [], passkey = false, waiting = [], seen = {}, seenRead = false;
   let error = "";
+  let tab = ["devices", "priority", "services"].includes(one.params?.tab) ? one.params.tab : "devices";
   // A new device's code, from its QR's link (`/approve#CODE`), asked about once.
   let scanned = one.params?.approve || "";
   // An app's screen sends its person here to choose a device to keep it running (`keep`, in `scope`), asked once.
   let keepAsked = one.params?.keep ? { app: String(one.params.keep), scope: one.params.scope && String(one.params.scope) } : null;
+  // Which devices' problems are open (Devices), and which cell's (Services).
+  const opened = new Set();
+  let cellOpen = "";
 
   const me = () => state.user?.id;
   const admin = () => state.user?.role === "admin";
@@ -55,6 +125,7 @@
     const s = one.ago(t);
     return /^\d/.test(s) ? `${s} ago` : s;
   };
+  const ordinal = (n) => n + (n % 100 > 10 && n % 100 < 14 ? "th" : ["th", "st", "nd", "rd"][n % 10] || "th");
 
   // What a device is, from what it says: its kind and build for a machine, its name for the rest, which our own apps
   // give ("iPhone", "The One App on Andre’s MacBook Air", "Chrome on Mac").
@@ -74,10 +145,11 @@
   };
   const deviceIcon = (type, os, off) =>
     `<span class="device-icon${off ? " off" : ""}">${one.icon(type)}${os ? one.icon(os, "os") : ""}</span>`;
-
-  // Run priority: a number from 1, or "last", always after every number.
-  const rank = (p) => (p === "last" ? 1000 : Number(p) || 1);
-  const said = (p) => (p === "last" ? "Always last" : `Priority ${p}`);
+  // Cloudflare's own logo, its orange cloud.
+  const cloudflareIcon = () =>
+    '<span class="device-icon"><svg class="brand" viewBox="0 0 24 24" aria-hidden="true">' +
+    '<path fill="#F38020" d="M16.5088 16.8447c.1475-.5068.0908-.9707-.1553-1.3154-.2246-.3164-.6045-.499-1.0615-.5205l-8.6592-.1123a.1559.1559 0 0 1-.1333-.0713c-.0283-.042-.0351-.0986-.021-.1553.0278-.084.1123-.1484.2036-.1562l8.7359-.1123c1.0351-.0489 2.1601-.8868 2.5537-1.9136l.499-1.3013c.0215-.0561.0293-.1128.0147-.168-.5625-2.5463-2.835-4.4453-5.5499-4.4453-2.5039 0-4.6284 1.6177-5.3876 3.8614-.4927-.3658-1.1187-.5625-1.794-.499-1.2026.119-2.1665 1.083-2.2861 2.2856-.0283.31-.0069.6128.0635.894C1.5683 13.171 0 14.7754 0 16.752c0 .1748.0142.3515.0352.5273.0141.083.0844.1475.1689.1475h15.9814c.0909 0 .1758-.0645.2032-.1553l.12-.4268z"/>' +
+    '<path fill="#FBAE40" d="M19.2656 11.2813c-.0771 0-.1611 0-.2383.0112-.0566 0-.1054.0415-.127.0976l-.3378 1.1744c-.1475.5068-.0918.9707.1543 1.3164.2256.3164.6055.498 1.0625.5195l1.8437.1133c.0557 0 .1055.0263.1329.0703.0283.043.0351.1074.0214.1562-.0283.084-.1132.1485-.204.1553l-1.921.1123c-1.041.0488-2.1582.8867-2.5527 1.914l-.1406.3585c-.0283.0713.0215.1416.0986.1416h6.5977c.0771 0 .1474-.0489.169-.126.1122-.4082.1757-.837.1757-1.2803 0-2.6025-2.125-4.727-4.7344-4.727"/></svg></span>';
 
   // What exists, grouped by the device it's on, as each says by its key: a machine's oned and its services, the
   // sign-ins of its apps, and each browser on its own.
@@ -114,6 +186,7 @@
     }
     for (const c of cards) {
       const ends = [c.node, ...c.services].filter(Boolean);
+      c.id = ends[0]?.key || c.clients[0]?.key;
       // Its oned last: removing it takes what's part of it, which goes first here, as a browser removes each itself.
       c.keys = [...c.services, ...c.clients, c.node].filter(Boolean).map((e) => e.key);
       c.me = [...ends, ...c.clients].some((e) => e.me);
@@ -136,38 +209,18 @@
     shownCards.sort((a, b) => (a.runs ? rank(a.priority) : 2000) - (b.runs ? rank(b.priority) : 2000) || a.name.localeCompare(b.name));
     return { cards: shownCards, browsers: browsers.filter((b) => b.user === me()), stale: stale.filter((c) => c.user === me()) };
   }
+  // Run priority: a number from 1, or "last", always after every number.
+  const rank = (p) => (p === "last" ? 1000 : Number(p) || 1);
 
-  // The numbers devices have now, from 1, and the next, to choose from.
-  function priorities() {
-    const all = [1, ...(state.install?.devices || []).map((d) => d.priority), state.install?.serverless?.priority].filter((p) => p != null && p !== "last").map(Number);
-    return [...new Set([...all, Math.max(...all) + 1])].sort((a, b) => a - b);
-  }
-  const chip = (id, p) =>
-    admin()
-      ? `<button class="pick chip" data-priority="${one.esc(id)}" aria-label="Run priority: ${one.esc(said(p))}">${one.esc(said(p))}</button>`
-      : `<span class="note">${one.esc(said(p))}</span>`;
   const more = (i, name) => `<button class="more" data-more="${i}" aria-label="More for ${one.esc(name)}">${one.icon("dots-three-outline-fill")}</button>`;
-
-  // A thing a device runs: its app's icon, its name, and a switch for the device's owner.
-  const tile = (icon) => `<span class="tile">${one.icon(icon)}</span>`;
-  function thing({ icon, title, sub = "", on = true, mine, part, disabled }) {
-    const toggle = mine
-      ? `<input type="checkbox" class="switch" aria-label="${one.esc(title)}"${on ? " checked" : ""}${disabled ? " disabled" : ""}${part ? ` data-part='${one.esc(JSON.stringify(part))}'` : ""}>`
-      : "";
-    return `<label class="row plain">${icon}<div class="main"><div class="title"><span>${one.esc(title)}</span></div>${subs(sub)}</div>${toggle}</label>`;
-  }
-  function serviceRow(c, mine, s) {
-    const a = appOf(s.name) || s;
-    return thing({ icon: one.appIcon({ ...a, name: s.name, title: a.title || s.name }, 28), title: a.title || s.name, mine, part: s.off, on: true });
-  }
 
   // Each switch flipped here, by device and part: what was asked (`on`, and for Try Again the problem it retries), and
   // how far it got: `sent`, then `written` once the node wrote it or `failed` with why it couldn't. Shown as asked until
-  // its device says it did, or for `LATE`; then, if it still hasn't, the row says so.
+  // its device says it did, or for `LATE`; then, if it still hasn't, its dot says so.
   const asked = {};
   // Try Again's restart can come and go between two draws, so the same problem a few seconds on is its answer.
   const LATE = 30_000, AGAIN = 10_000;
-  /// A part as its row shows it, from what its device says and what was asked here.
+  /// A part as its dot shows it, from what its device says and what was asked here.
   function partNow(c, p) {
     const k = `${c.node.key} ${p.name}`, a = asked[k];
     if (!a) return p;
@@ -179,69 +232,64 @@
     return { ...p, on: a.on, doing: null, problem: null, late: true };
   }
   const partTitle = (p) => (p.name === "apps" ? "Runs apps" : appOf(p.name)?.title || p.title || p.name);
-  // What a device can run, as it says: Runs apps first, then its services by name, each with a switch for its person,
-  // and only those on for an admin. While one's being set up, starting or stopping, its row says so; a problem shows
-  // on it, with what fixes it.
-  function partRows(c, mine) {
-    const parts = c.node.parts.map((p) => partNow(c, p));
-    return parts
-      .filter((p) => mine || p.on)
-      .sort((a, b) => (b.name === "apps") - (a.name === "apps") || partTitle(a).localeCompare(partTitle(b)))
-      .map((p) => {
-        const title = partTitle(p), part = { device: c.node.key, name: p.name };
-        const icon = p.name === "apps" ? tile("squares-four") : one.appIcon({ ...(appOf(p.name) || {}), name: p.name, title }, 28);
-        const row = thing({ icon, title, sub: p.on && p.doing ? `${p.doing}…` : "", on: p.on, mine, part });
-        const again = (on, retried) => (mine ? { label: "Try Again", run: () => act(() => setPart(part, on, retried)) } : null);
-        if (p.failed) return row + one.problem({ title: `Couldn’t switch ${title} ${p.wanted ? "on" : "off"}`, text: p.failed, action: again(p.wanted) });
-        if (p.late) return row + one.problem({ title: `${c.name} hasn’t switched ${title} ${p.on ? "on" : "off"} yet`, text: "It does once it hears, so it may be offline.", action: again(p.on) });
-        if (!p.on || !p.problem) return row;
-        return row + one.problem({ title: `${title} isn’t running on ${c.name}`, text: p.problem, action: again(true, p.problem) });
-      })
-      .join("");
-  }
-  function deviceCard(c, i) {
-    const mine = c.user === me();
-    const sub = [c.me ? "This device" : !mine ? `${userName(c.user)}’s` : "", !c.me && (c.runs ? !c.online : c.seen && Date.now() - c.seen > 3_600_000) ? (c.seen ? ago(c.seen) : "Offline") : ""].filter(Boolean).join(" · ");
-    let html = `<div class="list"><div class="row still head">${c.icon}<div class="main"><div class="title"><span>${one.esc(c.name)}</span></div>${subs(sub)}</div>` +
-      (c.runs ? chip(i, c.priority) : "") + (mine ? more(i, c.name) : "") + "</div>";
-    // What it can run, as a device that says so does; one that doesn't yet, Runs apps as it is and its services on.
-    if (Array.isArray(c.node?.parts)) return html + partRows(c, mine) + oldSignIns(c, i, mine) + "</div>";
-    if (c.node) html += thing({ icon: tile("squares-four"), title: "Runs apps", mine, disabled: true });
-    const services = [
-      ...(c.node?.installed_services || []).map((s) => ({ ...s, off: { service: s.name, device: c.node.key } })),
-      ...c.services.filter((s) => mine || s.serves_me).map((s) => ({ name: s.service, off: { service: s.service, device: s.device } })),
+  /// What a device can run, as it says (Runs apps, then its services), each as asked here, with how to switch it. One
+  /// that doesn't list them yet: Runs apps as it is, and its services, on.
+  function partsOf(c) {
+    if (Array.isArray(c.node?.parts)) return c.node.parts.map((p) => ({ ...partNow(c, p), part: { device: c.node.key, name: p.name } }));
+    return [
+      ...(c.node ? [{ name: "apps", on: true, fixed: true }] : []),
+      ...(c.node?.installed_services || []).map((s) => ({ name: s.name, on: true, part: { service: s.name, device: c.node.key } })),
+      ...c.services.map((s) => ({ name: s.service, on: true, part: { service: s.service, device: s.device } })),
     ];
-    if (mine || admin()) html += services.sort((a, b) => appTitle(a.name).localeCompare(appTitle(b.name))).map((s) => serviceRow(c, mine, s)).join("");
-    return html + oldSignIns(c, i, mine) + "</div>";
   }
-  const oldSignIns = (c, i, mine) =>
-    mine && c.old.length
-      ? `<div class="row plain old"><div class="main"><div class="sub">${c.old.length} old sign-in${c.old.length > 1 ? "s" : ""}</div></div>` +
-        `<button class="button plain small" data-old="${i}">Remove</button></div>`
-      : "";
-  function cloudflareCard() {
-    const s = state.install?.serverless;
-    if (!s) return "";
-    return `<div class="list"><div class="row still head">${deviceIcon("cloud")}<div class="main"><div class="title"><span>Cloudflare</span></div>` +
-      `${subs("Runs apps · when none of yours answer")}</div>${chip("cloudflare", s.priority ?? "last")}</div></div>`;
+  /// What's wrong with a part, as one problem with what fixes it: a switch that failed or is late, or a part that
+  /// isn't running.
+  function problemOf(c, p) {
+    const title = partTitle(p), part = p.part;
+    const again = (on, retried) => ({ label: "Try Again", run: () => act(() => setPart(part, on, retried)) });
+    if (p.failed) return { title: `Couldn’t switch ${title} ${p.wanted ? "on" : "off"}`, text: p.failed, action: again(p.wanted), warn: true };
+    if (p.late) return { title: `${c.name} hasn’t switched ${title} ${p.on ? "on" : "off"} yet`, text: "It does once it hears, so it may be offline.", action: again(p.on), warn: true };
+    if (p.on && p.problem) return { title: `${title} isn’t running on ${c.name}`, text: p.problem, action: again(true, p.problem), warn: true };
+    return null;
   }
+  const problemsOf = (c) => (c.user === me() ? partsOf(c).map((p) => problemOf(c, p)).filter(Boolean) : []);
+
   // A browser's logo with its OS's glyph, from its name ("Chrome on Mac"); a device's type, from its name, for the rest.
   const iconByName = (name) => {
     const [browsing, browser, , on] = name.match(BROWSER) || [];
     return browsing ? deviceIcon({ Chrome: "google-chrome-logo", Safari: "compass" }[browser] || "browser", osOf("", on || "")) : deviceIcon(typeOf(name), osOf("", name));
   };
+
+  // A device waiting to be let in: which it is, where from, its code to check, and the answers.
+  function waitingCard(r) {
+    const code = one.esc(r.code);
+    const sub = [r.yours ? "" : `${r.person}’s first device`, r.place].filter(Boolean).join(" · ");
+    return `<div class="list waiting-device" role="group" aria-label="${one.esc(r.device)} wants to join"><div class="row plain">${iconByName(r.device)}` +
+      `<div class="main"><div class="title"><span>${one.esc(r.device)}</span></div>${subs(sub)}</div></div><div class="code">${code}</div>` +
+      `<div class="answers"><button class="button" data-refuse="${code}">${r.yours ? "Not Me" : "Not Them"}</button><button class="button primary" data-let="${code}">Approve</button></div></div>`;
+  }
+
+  // ---- Devices ----
+
+  // A device of theirs: what it is, a grey line only when it says something, a ⚠ for a problem (tapped, it says what
+  // and what fixes it), and Rename and Remove.
+  function deviceRow(c, i) {
+    const sub = c.me ? "This device" : c.seen && Date.now() - c.seen > 3_600_000 ? ago(c.seen) : "";
+    const problems = problemsOf(c), open = problems.length && opened.has(c.id);
+    const flag = problems.length
+      ? `<button class="flag" data-flag="${one.esc(c.id)}" aria-expanded="${open ? "true" : "false"}" aria-label="${problems.length > 1 ? `${problems.length} problems` : "A problem"} on ${one.esc(c.name)}">${one.icon("warning-fill")}</button>`
+      : "";
+    return `<div class="row still device">${c.icon}<div class="main"><div class="title"><span>${one.esc(c.name)}</span></div>${subs(sub)}</div>${flag}${more(i, c.name)}</div>` +
+      (open ? problems.map(one.problem).join("") : "") + oldSignIns(c, i);
+  }
+  const oldSignIns = (c, i) =>
+    c.old.length
+      ? `<div class="row plain old"><div class="main"><div class="sub">${c.old.length} old sign-in${c.old.length > 1 ? "s" : ""}</div></div>` +
+        `<button class="button plain small" data-old="${i}">Remove</button></div>`
+      : "";
   function browserRow(b, i) {
     const sub = b.me ? "This browser" : seen[b.key] && Date.now() - seen[b.key] > 3_600_000 ? ago(seen[b.key]) : "";
     return `<div class="row still">${b.passkey ? deviceIcon("key") : iconByName(b.name)}<div class="main"><div class="title"><span>${one.esc(b.name)}</span></div>${subs(sub)}</div>${more(`b${i}`, b.name)}</div>`;
-  }
-
-  // A device waiting to be let in: which it is, where and when it asked, its code to check, and the answers.
-  function waitingCard(r) {
-    const code = one.esc(r.code);
-    const sub = [r.yours ? "" : `${r.person}’s first device`, r.place, r.made && ago(r.made)].filter(Boolean).join(" · ");
-    return `<div class="list waiting-device" role="group" aria-label="${one.esc(r.device)} wants to join"><div class="row plain head">${iconByName(r.device)}` +
-      `<div class="main"><div class="title"><span>${one.esc(r.device)}</span></div>${subs(sub)}</div></div><div class="code">${code}</div>` +
-      `<div class="answers"><button class="button" data-refuse="${code}">${r.yours ? "Not Me" : "Not Them"}</button><button class="button primary" data-let="${code}">Approve</button></div></div>`;
   }
 
   // Standing work: "linux keeps WhatsApp running for you", until when, with Stop. It lasts 30 days, and longer as
@@ -260,7 +308,215 @@
   // The devices that may keep an app running in a scope: those that hold it.
   const keepers = (scope) => (state.install?.devices || []).filter((d) => (d.runs_for || []).includes(scope));
 
-  /// Asks which app (unless it's given) and which device keeps it running, then grants it.
+  function devicesTab() {
+    const mine = drawn.cards.map((c, i) => [c, i]).filter(([c]) => c.user === me());
+    let main = mine.length ? `<div class="list">${mine.map(([c, i]) => deviceRow(c, i)).join("")}</div>` : "";
+    if (drawn.stale.length) main += `<div class="list">${oldSignIns({ old: drawn.stale }, "stale")}</div>`;
+    // A device that isn't listed yet still signs out.
+    if (device.signOut && ![...drawn.cards, ...drawn.browsers].some((c) => c.me)) main += '<div class="list"><button class="row plain out" data-out>Sign Out</button></div>';
+    let side = `<div class="list"><a class="row plain action-row" data-add>${one.icon("plus-circle")}<span>Add a Device</span></a></div>`;
+    if (drawn.browsers.length) side += '<h2 class="section">Browsers</h2><div class="list">' + drawn.browsers.map(browserRow).join("") + "</div>";
+    let foot = "";
+    if (device.keys) {
+      // Only for someone with something kept running, or an app that runs on its own: an app's screen asks for the rest.
+      const grants = (state.install?.grants || []).filter((g) => g.until > Date.now());
+      if (grants.length || scheduled().length) {
+        foot += '<h2 class="section">Kept Running</h2><div class="list">' + grants.map(grantRow).join("") +
+          `<a class="row plain action-row" data-keep>${one.icon("arrows-clockwise")}<span>Keep an App Running…</span></a></div>` +
+          (grants.length ? '<p class="footer">When one stops or runs out, that device can’t open the app’s things any more.</p>' : "");
+      }
+      if (passkey) foot += `<div class="list" style="margin-top:20px"><a class="row plain action-row" data-passkey>${one.icon("key")}<span>Use this passkey to get back in if you lose your devices</span></a></div>`;
+    }
+    const day = (t) => new Date(t).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+    if (admin() && state.install?.recovery_set) foot += `<p class="footer">Recovery key set ${one.esc(day(state.install.recovery_set))}.</p>`;
+    if (state.install?.recovery_used && (admin() || state.install.recovery_used.user === me())) {
+      const r = state.install.recovery_used;
+      foot += `<p class="footer">The recovery key last let in a device of ${one.esc(r.user === me() ? "yours" : `${userName(r.user)}’s`)}, ${one.esc(day(r.time))}.</p>`;
+    }
+    return `<div class="columns"><div class="main">${main}</div><div class="side">${side}</div><div class="foot">${foot}</div></div>`;
+  }
+
+  // ---- Priority ----
+
+  /// Every device that runs apps, and Cloudflare, in columns: one per number in use, first first, then Last.
+  function board() {
+    const entries = drawn.cards.filter((c) => c.runs).map((c) => ({
+      id: c.id, name: c.name, icon: c.icon, whose: c.user === me() ? "" : `${userName(c.user)}’s`, p: c.priority,
+      keys: [c.node, ...c.services].filter(Boolean).map((e) => e.key),
+    }));
+    const s = state.install?.serverless;
+    if (s) entries.push({ id: "cloudflare", name: "Cloudflare", icon: cloudflareIcon(), whose: "", p: s.priority ?? "last", keys: ["cloudflare"] });
+    const numbers = [...new Set(entries.filter((e) => e.p !== "last").map((e) => rank(e.p)))].sort((a, b) => a - b);
+    return { cols: numbers.map((n) => entries.filter((e) => e.p !== "last" && rank(e.p) === n)), last: entries.filter((e) => e.p === "last") };
+  }
+
+  function priorityTab() {
+    const { cols, last } = board(), can = admin();
+    const card = (e, where) => {
+      const inner = `${e.icon}<span class="name">${one.esc(e.name)}${e.whose ? `<small>${one.esc(e.whose)}</small>` : ""}</span>`;
+      return can
+        ? `<button class="pcard" data-move="${one.esc(e.id)}" aria-haspopup="menu" aria-label="${one.esc(`${e.name}${e.whose ? `, ${e.whose}` : ""}, ${where}. Move`)}">${inner}<span class="grip" aria-hidden="true">${one.icon("dots-six-vertical")}</span></button>`
+        : `<div class="pcard">${inner}</div>`;
+    };
+    const col = (id, title, list) =>
+      `<section class="pcol" data-col="${id}" aria-label="${title}"><h3>${title}</h3>${list.map((e) => card(e, title)).join("")}</section>`;
+    const then = `<div class="then" aria-hidden="true">${one.icon("caret-right")}</div>`;
+    const parts = cols.map((c, i) => col(i, ordinal(i + 1), c));
+    if (can) parts.push(`<section class="pcol new" data-col="new" aria-label="New">${one.icon("plus")}</section>`);
+    if (can || last.length) parts.push(col("last", "Last", last));
+    return `<h2 class="question">Which devices run your apps first?</h2><div class="board">${parts.join(then)}</div>`;
+  }
+
+  /// Puts a device (or Cloudflare) in a column (its index, "new" or "last"), and numbers the columns again from 1, so
+  /// one emptied closes up: written into the install's `priority` setting, each of a device's endpoints alike.
+  function place(id, to) {
+    const { cols, last } = board();
+    const e = [...cols.flat(), ...last].find((x) => x.id === id);
+    if (!e) return;
+    let order = cols.map((c) => c.filter((x) => x.id !== id));
+    const end = last.filter((x) => x.id !== id);
+    if (to === "last") end.push(e);
+    else if (to === "new") order.push([e]);
+    else order[Number(to)]?.push(e);
+    order = order.filter((c) => c.length);
+    let set = {};
+    try {
+      set = JSON.parse(state.install.settings?.priority || "{}") || {};
+    } catch {}
+    // Only what's still a device of the install, or Cloudflare.
+    const known = new Set([...(state.install.devices || []).map((d) => d.key), "cloudflare"]);
+    set = Object.fromEntries(Object.entries(set).filter(([k]) => known.has(k)));
+    order.forEach((c, i) => c.forEach((x) => x.keys.forEach((k) => (set[k] = i + 1))));
+    end.forEach((x) => x.keys.forEach((k) => (set[k] = "last")));
+    const value = JSON.stringify(set);
+    if (value === state.install.settings?.priority) return;
+    // Shown at once, as it will be.
+    for (const d of state.install.devices || []) if (d.key in set) d.priority = set[d.key];
+    if (state.install.serverless && "cloudflare" in set) state.install.serverless.priority = set.cloudflare;
+    state.install.settings = { ...state.install.settings, priority: value };
+    one.tap();
+    now();
+    act(() => one.api("POST", "/v1/settings", { name: "priority", value }));
+  }
+
+  /// The way to move a device without dragging: 1st, 2nd…, New, Last.
+  let menuAt = 0;
+  async function moveMenu(id, at) {
+    if (Date.now() - menuAt < 800) return;
+    menuAt = Date.now();
+    const { cols } = board();
+    const from = cols.findIndex((c) => c.some((x) => x.id === id));
+    // A new column is the same place for one alone in the last.
+    const fresh = !(from === cols.length - 1 && cols[from].length === 1);
+    const choices = [...cols.map((_, i) => i), ...(fresh ? ["new"] : []), "last"];
+    const items = choices.map((c) =>
+      c === "last" ? { title: "Last", checked: from < 0, section: true } : c === "new" ? { title: "New", icon: "plus" } : { title: ordinal(c + 1), checked: c === from });
+    const i = await one.menu(items, at).catch(() => null);
+    menuAt = Date.now();
+    if (i != null) place(id, choices[i]);
+  }
+
+  // Dragging a device between columns: by its grip, or anywhere on it with a mouse. Pressed and held on a touch
+  // screen, it gives the Move menu instead.
+  // `quiet`: the click that ends a drag or a long press isn't a tap.
+  let drag = null, quiet = false;
+  document.addEventListener("pointerdown", (e) => {
+    quiet = false;
+    const card = e.target.closest?.("button.pcard");
+    if (!card || e.button !== 0) return;
+    const now = e.pointerType === "mouse" || !!e.target.closest(".grip");
+    drag = { card, id: card.dataset.move, x: e.clientX, y: e.clientY, now, lifted: null, over: null };
+    if (!now) drag.press = setTimeout(() => {
+      const d = drag;
+      drag = null;
+      if (d) (quiet = true), moveMenu(d.id, d.card);
+    }, 500);
+  });
+  document.addEventListener("pointermove", (e) => {
+    if (!drag) return;
+    if (!drag.lifted) {
+      if (Math.hypot(e.clientX - drag.x, e.clientY - drag.y) < 6) return;
+      clearTimeout(drag.press);
+      if (!drag.now) return void (drag = null);
+      const r = drag.card.getBoundingClientRect();
+      const el = drag.card.cloneNode(true);
+      el.classList.add("lifted");
+      Object.assign(el.style, { width: `${r.width}px`, left: `${r.left}px`, top: `${r.top}px` });
+      document.body.append(el);
+      Object.assign(drag, { lifted: el, dx: drag.x - r.left, dy: drag.y - r.top });
+      drag.card.classList.add("ghost");
+      one.tap();
+    }
+    e.preventDefault();
+    Object.assign(drag.lifted.style, { left: `${e.clientX - drag.dx}px`, top: `${e.clientY - drag.dy}px` });
+    const over = document.elementFromPoint(e.clientX, e.clientY)?.closest(".pcol[data-col]") || null;
+    if (over !== drag.over) drag.over?.classList.remove("over"), over?.classList.add("over"), (drag.over = over);
+    if (e.clientY < 60) scrollBy(0, -12);
+    else if (e.clientY > innerHeight - 60) scrollBy(0, 12);
+  }, { passive: false });
+  const letGo = (e) => {
+    const d = drag;
+    drag = null;
+    if (!d) return;
+    clearTimeout(d.press);
+    if (!d.lifted) return;
+    d.lifted.remove();
+    d.card.classList.remove("ghost");
+    d.over?.classList.remove("over");
+    quiet = true;
+    if (e.type === "pointerup" && d.over) place(d.id, d.over.dataset.col);
+  };
+  document.addEventListener("pointerup", letGo);
+  document.addEventListener("keydown", () => (quiet = false));
+  document.addEventListener("pointercancel", letGo);
+
+  // ---- Services ----
+
+  /// Their own devices that can run something, and Cloudflare, which runs apps, each with what it can run.
+  function gridColumns() {
+    const cols = drawn.cards.filter((c) => c.user === me() && c.runs).map((c) => ({ c, name: c.name, icon: c.icon, parts: partsOf(c) }));
+    if (cols.length && state.install?.serverless) cols.push({ c: null, name: "Cloudflare", icon: cloudflareIcon(), parts: [{ name: "apps", on: true, fixed: true }] });
+    return cols;
+  }
+  function servicesTab() {
+    const cols = gridColumns();
+    if (!cols.length) return one.empty("None of your devices runs services.");
+    const titles = {};
+    for (const p of cols.flatMap((x) => x.parts)) titles[p.name] ||= partTitle(p);
+    const names = Object.keys(titles).sort((a, b) => (b === "apps") - (a === "apps") || titles[a].localeCompare(titles[b]));
+    const icon = (name) =>
+      name === "apps" ? one.appIcon({ name: "apps", title: "Runs apps", icon: "squares-four", color: "#007aff" }, 28) : one.appIcon({ ...(appOf(name) || {}), name, title: titles[name] }, 28);
+    let open = null;
+    const cell = (x, ci, name) => {
+      const p = x.parts.find((q) => q.name === name);
+      if (!p) return "<td></td>";
+      const where = `${titles[name]} on ${x.name}`, key = `${ci} ${name}`;
+      const problem = x.c && problemOf(x.c, p);
+      if (problem && cellOpen === key) open = problem;
+      const look = problem ? "warn" : `${p.on ? "on" : ""}${p.doing ? " doing" : ""}`;
+      const said = problem ? `${where}: ${problem.title}` : `${where}${p.doing ? `: ${p.doing}…` : ""}`;
+      const fixed = p.fixed || !p.part;
+      return `<td><button class="cell" data-cell="${one.esc(key)}" ${problem ? `aria-expanded="${cellOpen === key}"` : `role="switch" aria-checked="${!!p.on}"`}${fixed && !problem ? ' aria-disabled="true"' : ""} aria-label="${one.esc(said)}">` +
+        `<span class="dot ${look}" aria-hidden="true">${problem ? "!" : ""}</span></button></td>`;
+    };
+    const head = cols.map((x) => `<th scope="col">${x.icon}<span class="nm">${one.esc(x.name)}</span></th>`).join("");
+    const rows = names.map((n) => `<tr><th scope="row" class="svc"><span>${icon(n)}<b>${one.esc(titles[n])}</b></span></th>${cols.map((x, ci) => cell(x, ci, n)).join("")}</tr>`).join("");
+    if (!open) cellOpen = "";
+    return `<div class="grid-wrap"><table class="grid"><thead><tr><th class="svc"></th>${head}</tr></thead><tbody>${rows}</tbody></table></div>` + (open ? one.problem(open) : "");
+  }
+
+  /// A dot tapped: its problem opened or closed, or its part switched.
+  function tapCell(key) {
+    const [ci, name] = [key.slice(0, key.indexOf(" ")), key.slice(key.indexOf(" ") + 1)];
+    const x = gridColumns()[ci], p = x?.parts.find((q) => q.name === name);
+    if (!p) return;
+    if (x.c && problemOf(x.c, p)) return (cellOpen = cellOpen === key ? "" : key), now();
+    if (p.fixed || !p.part) return;
+    one.tap();
+    act(() => setPart(p.part, !p.on));
+  }
+
+  /// Keeps which app (unless it's given) running on which device, asked, then granted.
   function keep({ app, scope } = {}) {
     scope ||= `user:${me()}`;
     const { body, close } = one.sheet({ title: app ? `Keep ${appTitle(app)} Running` : "Keep an App Running", done: "Cancel", onClose: draw });
@@ -286,33 +542,15 @@
   }
 
   let drawn = { cards: [], browsers: [], stale: [] };
+  const TABS = [["devices", "Devices"], ["priority", "Priority"], ["services", "Services"]];
   function page() {
     one.largeTitle("Devices");
     drawn = grouped();
     let html = '<div class="large-title">Devices</div>';
-    if (waiting.length) html += '<h2 class="section">Waiting for you</h2><div class="devices">' + waiting.map(waitingCard).join("") + "</div>";
-    html += '<div id="approve"></div><div class="devices">' + drawn.cards.map(deviceCard).join("") + cloudflareCard() + "</div>";
-    if (drawn.stale.length) html += `<div class="list">${oldSignIns({ old: drawn.stale }, "stale", true)}</div>`;
-    html += `<div class="list"><a class="row plain action-row" data-add>${one.icon("plus-circle")}<span>Add a Device</span></a></div>`;
-    if (drawn.browsers.length) html += '<h2 class="section">Browsers</h2><div class="list">' + drawn.browsers.map(browserRow).join("") + "</div>";
-    // A device that isn't listed yet still signs out.
-    if (device.signOut && ![...drawn.cards, ...drawn.browsers].some((c) => c.me)) html += '<div class="list" style="margin-top:20px"><button class="row plain out" data-out>Sign Out</button></div>';
-    if (device.keys) {
-      if (passkey) html += `<div class="list passkey"><a class="row plain action-row" data-passkey>${one.icon("key")}<span>Use this passkey to get back in if you lose your devices</span></a></div>`;
-      // Only for someone with something kept running, or an app that runs on its own: an app's screen asks for the rest.
-      const grants = (state.install?.grants || []).filter((g) => g.until > Date.now());
-      if (grants.length || scheduled().length) {
-        html += '<h2 class="section">Kept Running</h2><div class="list">' + grants.map(grantRow).join("") +
-          `<a class="row plain action-row" data-keep>${one.icon("arrows-clockwise")}<span>Keep an App Running…</span></a></div>` +
-          (grants.length ? '<p class="footer">When one stops or runs out, that device can’t open the app’s things any more.</p>' : "");
-      }
-    }
-    const day = (t) => new Date(t).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
-    if (admin() && state.install?.recovery_set) html += `<p class="footer">Recovery key set ${one.esc(day(state.install.recovery_set))}.</p>`;
-    if (state.install?.recovery_used && (admin() || state.install.recovery_used.user === me())) {
-      const r = state.install.recovery_used;
-      html += `<p class="footer">The recovery key last let in a device of ${one.esc(r.user === me() ? "yours" : `${userName(r.user)}’s`)}, ${one.esc(day(r.time))}.</p>`;
-    }
+    if (waiting.length) html += '<h2 class="section">Waiting for you</h2>' + waiting.map(waitingCard).join("");
+    html += '<div id="approve"></div>';
+    html += `<div class="segmented tabs" role="tablist">${TABS.map(([id, title]) => `<button role="tab" data-tab="${id}" aria-selected="${tab === id}" class="${tab === id ? "on" : ""}">${title}</button>`).join("")}</div>`;
+    html += `<div role="tabpanel">${tab === "priority" ? priorityTab() : tab === "services" ? servicesTab() : devicesTab()}</div>`;
     if (error) html += one.problem({ title: error });
     return html;
   }
@@ -328,10 +566,9 @@
       );
     }
     await Promise.all(asks);
-    const html = page();
-    // Not while they're answering a question.
-    if (document.querySelector("#approve .confirm")) return;
-    return html;
+    // Not while they're answering a question, or dragging.
+    if (document.querySelector("#approve .confirm") || drag?.lifted) return;
+    return page();
   });
   // A change shown at once (the page drawn as it will be), before it's sent; the page is drawn from what's true after.
   const now = () => one.render("#page", async () => page());
@@ -347,18 +584,17 @@
     await draw();
   }
 
-  document.addEventListener("change", (e) => {
-    const t = e.target;
-    if (t.dataset.part) one.tap(), act(() => setPart(JSON.parse(t.dataset.part), t.checked));
-  });
   document.addEventListener("click", (e) => {
     if (e.target.closest(".sheet")) return;
-    const t = e.target.closest?.("[data-more], [data-add], [data-out], [data-passkey], [data-grant], [data-keep], [data-let], [data-refuse], [data-priority], [data-old]");
+    const t = e.target.closest?.("[data-tab], [data-flag], [data-cell], [data-move], [data-more], [data-add], [data-out], [data-passkey], [data-grant], [data-keep], [data-let], [data-refuse], [data-old]");
     if (!t) return;
     const d = t.dataset;
-    if (d.let) busy(t, () => one.api("POST", "/v1/devices/approve", { code: d.let, confirm: true }));
+    if (d.tab) (tab = d.tab), now();
+    else if (d.flag) (opened.has(d.flag) ? opened.delete(d.flag) : opened.add(d.flag)), now();
+    else if (d.cell) tapCell(d.cell);
+    else if (d.move) quiet ? (quiet = false) : moveMenu(d.move, t);
+    else if (d.let) busy(t, () => one.api("POST", "/v1/devices/approve", { code: d.let, confirm: true }));
     else if (d.refuse) busy(t, () => one.api("POST", "/v1/devices/refuse", { code: d.refuse }));
-    else if (d.priority) choosePriority(d.priority, t);
     else if (d.old) removeOld(d.old === "stale" ? { old: drawn.stale } : drawn.cards[d.old]);
     else if (d.more) menu(d.more, t);
     else if (d.grant) act(() => one.api("POST", "/v1/grant", { ...JSON.parse(d.grant), days: 0 }));
@@ -368,6 +604,8 @@
     else if (t.hasAttribute("data-add")) addDevice();
   });
   document.addEventListener("contextmenu", (e) => {
+    const card = e.target.closest?.("button.pcard");
+    if (card) return e.preventDefault(), (drag = null), moveMenu(card.dataset.move, { x: e.clientX, y: e.clientY });
     const t = e.target.closest?.(".row.still")?.querySelector("[data-more]");
     if (t) e.preventDefault(), menu(t.dataset.more, { x: e.clientX, y: e.clientY });
   });
@@ -379,36 +617,10 @@
     await act(fn);
   }
 
-  /// A device's run priority, from the numbers in use, the next, or Always last; for an admin. Every endpoint of the
-  /// device gets it, written into the install's `priority` setting, the others kept as set.
-  async function choosePriority(which, at) {
-    const card = which === "cloudflare" ? null : drawn.cards[which];
-    const was = card ? card.priority : state.install.serverless?.priority ?? "last";
-    const choices = [...priorities(), "last"];
-    const items = choices.map((p) => ({ title: p === "last" ? "Always last" : String(p), checked: p === was, ...(p === "last" ? { section: true } : {}) }));
-    const i = await one.menu(items, at).catch(() => null);
-    if (i == null || choices[i] === was) return;
-    const to = choices[i];
-    const keys = card ? [card.node, ...card.services].filter(Boolean).map((e) => e.key) : ["cloudflare"];
-    let set = {};
-    try {
-      set = JSON.parse(state.install.settings?.priority || "{}") || {};
-    } catch {}
-    // Only what's still a device of the install, or Cloudflare.
-    const known = new Set([...(state.install.devices || []).map((d) => d.key), "cloudflare"]);
-    set = Object.fromEntries(Object.entries(set).filter(([k]) => known.has(k)));
-    for (const k of keys) set[k] = to;
-    one.tap();
-    for (const d of state.install.devices || []) if (keys.includes(d.key)) d.priority = to;
-    if (!card && state.install.serverless) state.install.serverless.priority = to;
-    now();
-    act(() => one.api("POST", "/v1/settings", { name: "priority", value: JSON.stringify(set) }));
-  }
-
   /// A part of a device switched on or off, which its oned then sets up and starts, or stops: nothing's lost by
   /// switching one off (a WhatsApp link stays, and runs again when it's back on), so nothing asks first.
   /// Switched on again while it's on (`again`, the problem it had), it starts afresh, as Try Again does. What
-  /// happens to it shows on its row (`partNow`), which is drawn again once it's late.
+  /// happens to it shows on its dot (`partNow`), which is drawn again once it's late.
   async function setPart(part, on, again = null) {
     const k = `${part.device} ${part.name ?? part.service}`, at = Date.now();
     asked[k] = { on, again, at, state: "sent" };
@@ -419,7 +631,7 @@
       if (asked[k]?.at === at) asked[k].state = "written";
     } catch (err) {
       if (asked[k]?.at === at) asked[k] = { ...asked[k], state: "failed", error: one.plain(err).title };
-      // A device that doesn't list its parts shows no row for it: the page says it instead.
+      // A device that doesn't list its parts shows nothing for it: the page says it instead.
       if (part.service) throw err;
       one.tap("error");
     }
@@ -468,8 +680,7 @@
   function remove(name, keys, erasable) {
     const sheet = one.sheet({ title: `Remove ${name}?`, done: "Cancel" });
     sheet.body.innerHTML = (erasable
-      ? `<div class="list"><label class="row plain"><input type="checkbox" id="erase"><div class="main"><div class="title"><span>Also erase the data</span></div>` +
-        `<div class="sub" style="white-space:normal">${one.esc(`${name} deletes what it keeps: its copy of your data, the pages it kept, and each service’s data.`)}</div></div></label></div>`
+      ? `<div class="list"><label class="row plain"><input type="checkbox" id="erase"><div class="main"><div class="title"><span>Also erase the data</span></div></div></label></div>`
       : "") + `<div id="problem"></div><div style="text-align:center;margin-top:18px"><button class="button primary danger" id="go">Remove</button></div>`;
     const go = sheet.body.querySelector("#go");
     go.onclick = async () => {
