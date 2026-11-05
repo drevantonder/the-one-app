@@ -642,9 +642,94 @@ fn scope_truth(truth: &one::database::steps::Truth, root: Option<Hash>, frozen: 
     Ok(took.db)
 }
 
-/// The install's genesis, which its members are replayed from.
+thread_local! {
+    /// The install's genesis, as the device that deployed this node holds it (`GENESIS`, `pin_genesis`).
+    static GENESIS: RefCell<Option<Hash>> = const { RefCell::new(None) };
+}
+
+/// Pins the install's genesis to `genesis` (hex, the Worker's `GENESIS`), as sign-in pins it: an entry shaped like a
+/// genesis that any device writes into a step of its log is never taken for it.
+#[wasm_bindgen]
+pub fn pin_genesis(genesis: &str) -> Result<(), JsError> {
+    let hash = Hash::from_hex(genesis).map_err(|_| JsError::new("GENESIS isn't a hash"))?;
+    GENESIS.with(|g| *g.borrow_mut() = Some(hash));
+    Ok(())
+}
+
+/// The install's genesis, which its members are replayed from: the one pinned (`pin_genesis`, `steps::genesis_of`).
 fn root(global: &[Entry]) -> Option<Hash> {
-    global.iter().find(|e| e.content.app == members::APP && e.content.kind == "genesis").map(Entry::hash)
+    one::database::steps::genesis_of(GENESIS.with(|g| *g.borrow()), global)
+}
+
+/// `global`'s entries `owner`'s object read (`read_log`), for `user`, as a node on a machine gives them
+/// (`Node::global_entries`): packed (`entry::pack`), but those below each author's seq in `have` (`<key>.<seq>,…`),
+/// which the caller holds, with every entry of a device that forked from where it did; empty if there's nothing new.
+/// The caller checks them all: this trusts the node with nothing.
+#[wasm_bindgen]
+pub fn global_entries(owner: &str, user: &str, have: &str) -> Result<Vec<u8>, JsError> {
+    let mut held = HashMap::new();
+    for h in have.split(',').filter(|h| !h.is_empty()) {
+        let (key, seq) = h.split_once('.').ok_or_else(|| JsError::new("have is <key>.<seq>, each"))?;
+        held.insert(one::entry::unhex(key).map_err(thrown)?, seq.parse::<u32>()?);
+    }
+    let people = replayed(owner, &[], |r| r.global().may(user, "use", one::database::scopes::INSTALL)).map_err(thrown)?;
+    if !people {
+        return Err(JsError::new("you aren't one of this install's people"));
+    }
+    LOGS.with(|l| {
+        let logs = l.borrow();
+        let global = logs.get(&(owner.to_string(), "global".to_string())).ok_or_else(|| JsError::new("read global's entries first"))?;
+        let cuts = one::database::steps::forks(&global.entries);
+        let forked = |e: &Entry| cuts.get(&(e.author(), "global".to_string())).is_some_and(|c| e.seq() >= *c);
+        let new = |e: &&Entry| held.get(&e.author()).is_none_or(|n| e.seq() >= *n);
+        if !global.entries.iter().any(|e| new(&e)) {
+            return Ok(Vec::new());
+        }
+        Ok(one::entry::pack(&global.entries.iter().filter(|e| new(e) || forked(e)).collect::<Vec<_>>()))
+    })
+}
+
+/// `global`'s scope database's steps after `from` as the bucket holds them, sealed, for `user`, as a node on a machine
+/// gives them (`Node::global_steps`): `{ at, steps: [{ at, sealed }] }` (base64url), and for a device that starts
+/// from its `welcome` (`steps::Welcome`), its freeze's step and the copy before its step, `{ welcome, freeze, start }`.
+/// Fails before the log is frozen. The caller opens and checks them all itself: this trusts the node with nothing.
+#[wasm_bindgen]
+pub async fn global_steps(owner: String, user: String, bucket: JsValue, from: f64, welcome: Option<String>) -> Result<String, JsValue> {
+    use one::database::steps;
+    let bucket = Js(bucket);
+    let people = replayed(&owner, &[], |r| r.global().may(&user, "use", one::database::scopes::INSTALL)).map_err(failed)?;
+    if !people {
+        return Err(failed(anyhow!("you aren't one of this install's people")));
+    }
+    let read = LOGS.with(|l| l.borrow().get(&(owner.clone(), "global".to_string())).map(|g| g.truth().map(|t| t.map(|t| t.at)))).transpose().map_err(failed)?.flatten();
+    let read = read.ok_or_else(|| failed(anyhow!("global's log isn't frozen")))?;
+    let prefix = steps::prefix("global");
+    let sealed = |at: u64, o: Object| json!({ "at": at, "sealed": data_encoding::BASE64URL_NOPAD.encode(&o.bytes) });
+    let mut out = json!({});
+    let mut from = from as u64;
+    if let Some(w) = welcome.as_deref().and_then(steps::Welcome::parse).filter(|w| w.at <= read)
+        && let Some(freeze) = bucket.get(&one::db::step_name(&prefix, w.freeze)).await.map_err(failed)?
+    {
+        out = json!({ "welcome": w.to_string(), "freeze": sealed(w.freeze, freeze) });
+        from = w.freeze;
+        if let Some(c) = w.copy()
+            && let Some(copy) = bucket.get(&one::db::copy_name(&prefix, c)).await.map_err(failed)?
+        {
+            out["start"] = sealed(c, copy);
+            from = c;
+        }
+    }
+    let mut list = Vec::new();
+    let mut at = from.min(read);
+    while let Some(o) = bucket.get(&one::db::step_name(&prefix, at + 1)).await.map_err(failed)? {
+        at += 1;
+        if at > from {
+            list.push(sealed(at, o));
+        }
+    }
+    out["at"] = json!(at);
+    out["steps"] = json!(list);
+    Ok(out.to_string())
 }
 
 /// The time now (ms), which a scope database built now answers who may as of.

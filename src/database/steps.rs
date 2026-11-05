@@ -434,6 +434,19 @@ pub fn recovery_keys<'a>(root: Option<Hash>, entries: impl IntoIterator<Item = &
     keys
 }
 
+/// The install's genesis, for a reader that holds no genesis of its own and reads `global`'s `entries` as the bucket
+/// has them (the Cloudflare node): `pinned`, as the device that deployed it holds it, whatever genesis a device writes
+/// into a step of the log; or, unpinned (deployed before its install was), the one genesis among them, and none
+/// while there are two, until it's deployed again beside its install.
+pub fn genesis_of(pinned: Option<Hash>, entries: &[Entry]) -> Option<Hash> {
+    if pinned.is_some() {
+        return pinned;
+    }
+    let mut found = entries.iter().filter(|e| e.content.app == members::APP && e.content.kind == "genesis").map(Entry::hash);
+    let first = found.next()?;
+    found.next().is_none().then_some(first)
+}
+
 /// The newest epoch of `scope` that `entries` of `global`'s make, of the install at `root`, with the forks among them.
 fn made_by(root: Option<Hash>, entries: &[Entry], scope: &Scope) -> u32 {
     members_of(root, entries).epoch(scope)
@@ -1473,6 +1486,23 @@ pub(crate) mod tests {
         assert!(!members_of(Some(h.root()), &h.entries).gate, "not a member's");
         let f = h.freeze(&r1, ANDRE, 1);
         assert!(h.read(&[f]).unwrap().is_none());
+    }
+
+    /// A genesis a device writes into the log is never the install's for a reader that holds none of its own (the
+    /// Cloudflare node): the one pinned is, and unpinned, none while there are two.
+    #[test]
+    fn a_planted_genesis_is_never_the_install_s() {
+        use crate::keys::Endpoint;
+        use crate::members::{Kind, genesis};
+        let (h, _, laptop, _) = two_admins();
+        let mine = SigningKey::from_bytes(&[3; 32]);
+        let planted = Entry::create(&laptop, Ext { log: "global".into(), time: 0, user: BOB.into(), epoch: 1, previous: Vec::new() }, None, genesis("Mine", BOB, "Bob", &Endpoint::of(&laptop), "laptop", &[Kind::Client], &mine.verifying_key().to_bytes(), &"f".repeat(64)));
+        let mut entries = vec![planted.clone()];
+        entries.extend(h.entries.iter().cloned());
+        assert_eq!(genesis_of(Some(h.root()), &entries), Some(h.root()), "the one pinned");
+        assert_eq!(genesis_of(None, &entries), None, "unpinned, neither");
+        assert_eq!(genesis_of(None, &h.entries), Some(h.root()));
+        assert_eq!(members_of(genesis_of(Some(h.root()), &entries), &entries).recovery, Some(SigningKey::from_bytes(&[7; 32]).verifying_key().to_bytes()));
     }
 
     /// A freeze naming a log's end past 2⁵³ isn't one, so no reader reads to the step after it, which wraps.

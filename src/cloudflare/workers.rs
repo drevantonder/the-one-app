@@ -496,6 +496,8 @@ impl Settings {
                 ("NODE_KEY".into(), self.cloudflare_node_key.clone(), true),
                 ("RELAY".into(), "service:relay:ServerlessNode".into(), false),
             ];
+            // The install's genesis, as sign-in's: its members are replayed from no other.
+            out.extend(self.genesis.clone().map(|g| ("GENESIS".into(), g, false)));
             out.extend(location);
             return out;
         }
