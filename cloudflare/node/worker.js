@@ -1002,6 +1002,15 @@ async function route(p, request) {
     if (path === "/v1/widgets") return json(await run.widgets(scope));
     return json(await run.badges(scope));
   }
+  // Anything else only a machine does: to a client that asks one itself (`x-one-elsewhere`), the machines of its
+  // person's that are on, as a node on a machine names those that run a call it can't (421).
+  if (request.headers.get("x-one-elsewhere")) {
+    const view = await p.installFor(p.whom(request));
+    const theirs = view.state.install.devices.filter((d) => d.serves_me && !d.service).sort((a, b) => a.order - b.order).map((d) => d.key);
+    const on = new Set(await p.env.RELAY.connected(theirs));
+    const elsewhere = theirs.filter((k) => on.has(k));
+    if (elsewhere.length) return json({ error: "a machine does that", elsewhere }, 421);
+  }
   refuse(503, `That needs one of your devices, and ${OFF}.`);
 }
 
