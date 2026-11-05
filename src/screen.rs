@@ -13,7 +13,7 @@
 pub const ICONS: &[u8] = include_bytes!("../vendor/phosphor/icons.json");
 
 /// The old kit and the bridge, in the order a page has them: each path under `src/screen/` and its text. kit.css is
-/// only for a screen that doesn't opt in to `@one/ui`: a plain one, as PTC's apps and Agent Devices' Device and Settings still are.
+/// only for a screen that doesn't opt in to `@one/ui`: a plain one, as PTC's apps still are.
 const KIT: &[(&str, &str)] = &[
     ("kit.css", include_str!("screen/kit.css")),
     ("bridge.js", include_str!("screen/bridge.js")),

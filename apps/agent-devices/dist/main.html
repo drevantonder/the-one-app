@@ -1,0 +1,213 @@
+<meta name="@one/ui">
+<style>/*! tailwindcss v4.3.4 | MIT License | https://tailwindcss.com */
+@layer properties{@supports (((-webkit-hyphens:none)) and (not (margin-trim:block))) or ((-moz-orient:inline) and (not (color:rgb(from red r g b)))){*,:before,:after,::backdrop{--tw-translate-x:0;--tw-translate-y:0;--tw-translate-z:0;--tw-border-style:solid;--tw-font-weight:initial;--tw-shadow:0 0 #0000;--tw-shadow-color:initial;--tw-shadow-alpha:100%;--tw-inset-shadow:0 0 #0000;--tw-inset-shadow-color:initial;--tw-inset-shadow-alpha:100%;--tw-ring-color:initial;--tw-ring-shadow:0 0 #0000;--tw-inset-ring-color:initial;--tw-inset-ring-shadow:0 0 #0000;--tw-ring-inset:initial;--tw-ring-offset-width:0px;--tw-ring-offset-color:#fff;--tw-ring-offset-shadow:0 0 #0000;--tw-outline-style:solid;--tw-blur:initial;--tw-brightness:initial;--tw-contrast:initial;--tw-grayscale:initial;--tw-hue-rotate:initial;--tw-invert:initial;--tw-opacity:initial;--tw-saturate:initial;--tw-sepia:initial;--tw-drop-shadow:initial;--tw-drop-shadow-color:initial;--tw-drop-shadow-alpha:100%;--tw-drop-shadow-size:initial}}}@layer theme,base,components;@layer utilities{.absolute{position:absolute}.fixed{position:fixed}.relative{position:relative}.static{position:static}.inset-0{inset:0}.top-2{top:calc(var(--spacing,.25rem) * 2)}.left-1{left:var(--spacing,.25rem)}.left-1\/2{left:50%}.container{width:100%}@media (width>=40rem){.container{max-width:40rem}}@media (width>=48rem){.container{max-width:48rem}}@media (width>=64rem){.container{max-width:64rem}}@media (width>=80rem){.container{max-width:80rem}}@media (width>=96rem){.container{max-width:96rem}}.mt-2{margin-top:calc(var(--spacing,.25rem) * 2)}.block{display:block}.flex{display:flex}.grid{display:grid}.hidden{display:none}.inline{display:inline}.table{display:table}.aspect-\[16\/10\]{aspect-ratio:16/10}.size-full{width:100%;height:100%}.h-\[52px\]{height:52px}.h-\[calc\(100\%-1rem\)\]{height:calc(100% - 1rem)}.min-h-0{min-height:0}.min-h-5{min-height:calc(var(--spacing,.25rem) * 5)}.w-auto{width:auto}.w-full{width:100%}.min-w-0{min-width:0}.flex-1{flex:1}.shrink-0{flex-shrink:0}.-translate-x-1{--tw-translate-x:calc(var(--spacing,.25rem) * -1);translate:var(--tw-translate-x) var(--tw-translate-y)}.-translate-x-1\/2{--tw-translate-x:calc(calc(1 / 2 * 100%) * -1);translate:var(--tw-translate-x) var(--tw-translate-y)}.cursor-pointer{cursor:pointer}.resize{resize:both}.flex-col{flex-direction:column}.place-items-center{place-items:center}.items-center{align-items:center}.gap-1{gap:var(--spacing,.25rem)}.gap-2{gap:calc(var(--spacing,.25rem) * 2)}.gap-2\.5{gap:calc(var(--spacing,.25rem) * 2.5)}.gap-3{gap:calc(var(--spacing,.25rem) * 3)}.gap-4{gap:calc(var(--spacing,.25rem) * 4)}.truncate{text-overflow:ellipsis;white-space:nowrap;overflow:hidden}.overflow-hidden{overflow:hidden}.rounded-xl{border-radius:calc(var(--radius) + 4px)}.border-0{border-style:var(--tw-border-style);border-width:0}.bg-background{background-color:var(--background)}.bg-black{background-color:var(--color-black,#000)}.bg-muted{background-color:var(--muted)}.object-cover{object-fit:cover}.p-4{padding:calc(var(--spacing,.25rem) * 4)}.px-3{padding-inline:calc(var(--spacing,.25rem) * 3)}.px-4{padding-inline:calc(var(--spacing,.25rem) * 4)}.py-2{padding-block:calc(var(--spacing,.25rem) * 2)}.py-2\.5{padding-block:calc(var(--spacing,.25rem) * 2.5)}.text-left{text-align:left}.text-sm{font-size:var(--text-sm,.875rem);line-height:var(--tw-leading,var(--text-sm--line-height,calc(1.25 / .875)))}.text-xl{font-size:var(--text-xl,1.25rem);line-height:var(--tw-leading,var(--text-xl--line-height,calc(1.75 / 1.25)))}.font-medium{--tw-font-weight:var(--font-weight-medium,500);font-weight:var(--font-weight-medium,500)}.font-semibold{--tw-font-weight:var(--font-weight-semibold,600);font-weight:var(--font-weight-semibold,600)}.text-muted-foreground{color:var(--muted-foreground)}.lowercase{text-transform:lowercase}.\[color-scheme\:dark\]{--lightningcss-light: ;--lightningcss-dark:initial;color-scheme:dark}.ring-1{--tw-ring-shadow:var(--tw-ring-inset, ) 0 0 0 calc(1px + var(--tw-ring-offset-width)) var(--tw-ring-color,currentcolor);box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)}.ring-border{--tw-ring-color:var(--border)}.outline{outline-style:var(--tw-outline-style);outline-width:1px}.filter{filter:var(--tw-blur, ) var(--tw-brightness, ) var(--tw-contrast, ) var(--tw-grayscale, ) var(--tw-hue-rotate, ) var(--tw-invert, ) var(--tw-saturate, ) var(--tw-sepia, ) var(--tw-drop-shadow, )}.outline-none{--tw-outline-style:none;outline-style:none}.ring-inset{--tw-ring-inset:inset}:is(:where(.group):focus-visible .group-focus-visible\:outline-3){outline-style:var(--tw-outline-style);outline-width:3px}:is(:where(.group):focus-visible .group-focus-visible\:outline-ring\/50){outline-color:var(--ring)}@supports (color:color-mix(in lab, red, red)){:is(:where(.group):focus-visible .group-focus-visible\:outline-ring\/50){outline-color:color-mix(in oklab, var(--ring) 50%, transparent)}}.has-\[button\:disabled\]\:cursor-default:has(:is(button:disabled)){cursor:default}}@property --tw-translate-x{syntax:"*";inherits:false;initial-value:0}@property --tw-translate-y{syntax:"*";inherits:false;initial-value:0}@property --tw-translate-z{syntax:"*";inherits:false;initial-value:0}@property --tw-border-style{syntax:"*";inherits:false;initial-value:solid}@property --tw-font-weight{syntax:"*";inherits:false}@property --tw-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-shadow-color{syntax:"*";inherits:false}@property --tw-shadow-alpha{syntax:"<percentage>";inherits:false;initial-value:100%}@property --tw-inset-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-inset-shadow-color{syntax:"*";inherits:false}@property --tw-inset-shadow-alpha{syntax:"<percentage>";inherits:false;initial-value:100%}@property --tw-ring-color{syntax:"*";inherits:false}@property --tw-ring-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-inset-ring-color{syntax:"*";inherits:false}@property --tw-inset-ring-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-ring-inset{syntax:"*";inherits:false}@property --tw-ring-offset-width{syntax:"<length>";inherits:false;initial-value:0}@property --tw-ring-offset-color{syntax:"*";inherits:false;initial-value:#fff}@property --tw-ring-offset-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-outline-style{syntax:"*";inherits:false;initial-value:solid}@property --tw-blur{syntax:"*";inherits:false}@property --tw-brightness{syntax:"*";inherits:false}@property --tw-contrast{syntax:"*";inherits:false}@property --tw-grayscale{syntax:"*";inherits:false}@property --tw-hue-rotate{syntax:"*";inherits:false}@property --tw-invert{syntax:"*";inherits:false}@property --tw-opacity{syntax:"*";inherits:false}@property --tw-saturate{syntax:"*";inherits:false}@property --tw-sepia{syntax:"*";inherits:false}@property --tw-drop-shadow{syntax:"*";inherits:false}@property --tw-drop-shadow-color{syntax:"*";inherits:false}@property --tw-drop-shadow-alpha{syntax:"<percentage>";inherits:false;initial-value:100%}@property --tw-drop-shadow-size{syntax:"*";inherits:false}
+/*$vite$:1*/</style>
+<div id="root"></div>
+<script type="module">import { c as e } from "react/compiler-runtime";
+import { useEffect as t, useRef as n, useState as r } from "react";
+import { createRoot as i } from "react-dom/client";
+import { Empty as a, Grid as o, Problem as s } from "@one/ui";
+import { jsx as c, jsxs as l } from "react/jsx-runtime";
+var u = (e) => `${e.on || ""}/${e.name}`, d = (e) => e.on ? {
+	device: e.name,
+	on: e.on
+} : { device: e.name }, f = (e) => String(e || "").split(".")[0], p = (e) => e.state !== "running", m = (e) => e.borrowed?.no_screen, h = (e) => e.charAt(0).toUpperCase() + e.slice(1), g = {
+	windows: "Windows",
+	android: "Android",
+	iphone: "iPhone"
+}, _ = (e) => g[e.name] || h(e.name), v = (e) => e.state === "paused" ? "Paused" : "Off", y = (e) => e.kind === "android" || e.kind === "iphone";
+function b(t) {
+	let n = e(4), { browser: r, c: i } = t, a;
+	n[0] === Symbol.for("react.memo_cache_sentinel") ? (a = {
+		fill: "none",
+		stroke: "currentColor",
+		strokeWidth: 1.2,
+		viewBox: "0 0 24 24"
+	}, n[0] = a) : a = n[0];
+	let o = a;
+	if (y(i)) {
+		let e;
+		return n[1] === Symbol.for("react.memo_cache_sentinel") ? (e = /* @__PURE__ */ l("svg", {
+			width: "40",
+			height: "40",
+			...o,
+			children: [/* @__PURE__ */ c("rect", {
+				x: "7",
+				y: "2.5",
+				width: "10",
+				height: "19",
+				rx: "2"
+			}), /* @__PURE__ */ c("path", { d: "M11 18.5h2" })]
+		}), n[1] = e) : e = n[1], e;
+	}
+	if (r) {
+		let e;
+		return n[2] === Symbol.for("react.memo_cache_sentinel") ? (e = /* @__PURE__ */ l("svg", {
+			width: "44",
+			height: "44",
+			...o,
+			children: [/* @__PURE__ */ c("rect", {
+				x: "3",
+				y: "4.5",
+				width: "18",
+				height: "15",
+				rx: "2"
+			}), /* @__PURE__ */ c("path", { d: "M3 8.5h18" })]
+		}), n[2] = e) : e = n[2], e;
+	}
+	let s;
+	return n[3] === Symbol.for("react.memo_cache_sentinel") ? (s = /* @__PURE__ */ l("svg", {
+		width: "48",
+		height: "48",
+		...o,
+		children: [/* @__PURE__ */ c("rect", {
+			x: "4",
+			y: "5",
+			width: "16",
+			height: "11",
+			rx: "1.5"
+		}), /* @__PURE__ */ c("path", { d: "M2 19h20" })]
+	}), n[3] = s) : s = n[3], s;
+}
+function x(t) {
+	let n = e(34), { c: r, hosts: i, src: a } = t, o = r.borrowed, s;
+	n[0] !== o || n[1] !== r ? (s = o?.signing_in ? "Signing in to sites" : o ? o.for || "In use" : _(r), n[0] = o, n[1] = r, n[2] = s) : s = n[2];
+	let h = s, g;
+	n[3] !== o || n[4] !== r ? (g = o ? o.signing_in ? o.profile || "" : o.by || "An agent" : p(r) ? v(r) : "", n[3] = o, n[4] = r, n[5] = g) : g = n[5];
+	let x;
+	n[6] !== r.on || n[7] !== i ? (x = i > 1 ? f(r.on) : "", n[6] = r.on, n[7] = i, n[8] = x) : x = n[8];
+	let S;
+	n[9] !== g || n[10] !== x ? (S = [g, x].filter(Boolean), n[9] = g, n[10] = x, n[11] = S) : S = n[11];
+	let C = S.join(" · "), w;
+	n[12] === r ? w = n[13] : (w = !m(r) && (!p(r) || r.kind !== "linux"), n[12] = r, n[13] = w);
+	let T = w, E = T ? "button" : "div", D;
+	n[14] === r ? D = n[15] : (D = u(r), n[14] = r, n[15] = D);
+	let O;
+	n[16] !== r || n[17] !== T ? (O = T ? () => one.open("device", d(r)) : void 0, n[16] = r, n[17] = T, n[18] = O) : O = n[18];
+	let k = `group block w-full min-w-0 text-left outline-none ${T ? "cursor-pointer" : ""}`, A;
+	n[19] !== r || n[20] !== a ? (A = /* @__PURE__ */ c("div", {
+		className: "relative grid aspect-[16/10] place-items-center overflow-hidden rounded-xl bg-muted text-muted-foreground ring-1 ring-border ring-inset group-focus-visible:outline-3 group-focus-visible:outline-ring/50",
+		children: a ? /* @__PURE__ */ c("img", {
+			src: a,
+			alt: "",
+			className: y(r) ? "absolute left-1/2 top-2 h-[calc(100%-1rem)] w-auto -translate-x-1/2 rounded-xl" : "size-full object-cover",
+			style: p(r) ? { filter: "grayscale(0.9) brightness(0.5)" } : void 0
+		}) : /* @__PURE__ */ c(b, {
+			browser: m(r),
+			c: r
+		})
+	}), n[19] = r, n[20] = a, n[21] = A) : A = n[21];
+	let j;
+	n[22] === h ? j = n[23] : (j = /* @__PURE__ */ c("div", {
+		className: "mt-2 truncate text-sm font-medium",
+		children: h
+	}), n[22] = h, n[23] = j);
+	let M;
+	n[24] === C ? M = n[25] : (M = /* @__PURE__ */ c("div", {
+		className: "min-h-5 truncate text-sm text-muted-foreground",
+		children: C
+	}), n[24] = C, n[25] = M);
+	let N;
+	return n[26] !== E || n[27] !== j || n[28] !== M || n[29] !== D || n[30] !== O || n[31] !== k || n[32] !== A ? (N = /* @__PURE__ */ l(E, {
+		"data-k": D,
+		onClick: O,
+		className: k,
+		children: [
+			A,
+			j,
+			M
+		]
+	}), n[26] = E, n[27] = j, n[28] = M, n[29] = D, n[30] = O, n[31] = k, n[32] = A, n[33] = N) : N = n[33], N;
+}
+function S() {
+	let [e, i] = r(null), [l, f] = r(null), [h, g] = r(!1), [_, v] = r({}), b = n({
+		devices: null,
+		hashes: {},
+		asked: {},
+		retried: {},
+		listed: "",
+		busy: !1
+	}), S = (e) => {
+		let t = [...document.querySelectorAll("[data-k]")].find((t) => t.dataset.k === e);
+		if (!t) return !1;
+		let n = t.getBoundingClientRect();
+		return n.bottom > 0 && n.top < innerHeight;
+	};
+	function C() {
+		let e = b.current;
+		for (let t of e.devices || []) {
+			let n = u(t);
+			p(t) || m(t) || Date.now() - (e.asked[n] || 0) < 2e4 || !S(n) || (e.asked[n] = Date.now(), one.call("_screen", {
+				...d(t),
+				width: y(t) ? 160 : 480,
+				have: e.hashes[n] || ""
+			}).then((t) => {
+				if (t.age > 20 && !e.retried[n] && ([e.retried[n], e.asked[n]] = [!0, Date.now() - 16e3]), t.same) return;
+				let r = (t.content || []).find((e) => e.type === "image");
+				r && (e.hashes[n] = t.hash, v((e) => ({
+					...e,
+					[n]: `data:${r.mimeType};base64,${r.data}`
+				})));
+			}).catch(() => {}));
+		}
+	}
+	async function w() {
+		let e = b.current;
+		try {
+			let t = await one.call("_list", { have: e.listed });
+			t.same || (e.devices = (t.devices || []).filter((e) => !e.spare || e.borrowed), e.listed = t.hash || "", i(e.devices)), f(null);
+		} catch (t) {
+			e.listed = "", f(one.plain(t));
+			return;
+		}
+		requestAnimationFrame(C);
+	}
+	async function T() {
+		let e = b.current;
+		if (!(e.busy || document.visibilityState === "hidden")) {
+			e.busy = !0;
+			try {
+				await w();
+			} finally {
+				e.busy = !1;
+			}
+		}
+	}
+	if (t(() => {
+		one.title("Agent Devices"), T();
+		let e = setInterval(T, 5e3);
+		return document.addEventListener("visibilitychange", T), addEventListener("scroll", C, { passive: !0 }), one.call("_running").then(({ devices: e }) => {
+			e.length || g(!0);
+		}), () => {
+			clearInterval(e), document.removeEventListener("visibilitychange", T), removeEventListener("scroll", C);
+		};
+	}, []), t(() => {
+		requestAnimationFrame(C);
+	}, [e]), h) return /* @__PURE__ */ c(s, {
+		warn: !0,
+		title: "None of your devices runs Agent Devices.",
+		text: "It needs a Mac, or a Linux device with Podman.",
+		action: {
+			label: "Open App Store",
+			run: () => one.open("app", { app: "agent-devices" }, "apps")
+		}
+	});
+	if (l) return /* @__PURE__ */ c(s, {
+		title: l.title,
+		text: l.next
+	});
+	if (!e) return /* @__PURE__ */ c(a, { children: "Loading…" });
+	if (!e.length) return /* @__PURE__ */ c(a, { children: "None yet. Agents make one when they need a browser." });
+	let E = new Set(e.map((e) => e.on)).size, D = (e) => e.borrowed ? 0 : p(e) ? 2 : 1, O = [...e].sort((e, t) => D(e) - D(t) || (Date.parse(e.borrowed?.since) || 0) - (Date.parse(t.borrowed?.since) || 0) || e.name.localeCompare(t.name));
+	return /* @__PURE__ */ c(o, {
+		min: "16rem",
+		max: 4,
+		children: O.map((e) => /* @__PURE__ */ c(x, {
+			c: e,
+			hosts: E,
+			src: _[u(e)]
+		}, u(e)))
+	});
+}
+i(document.getElementById("root")).render(/* @__PURE__ */ c(S, {}));
+</script>

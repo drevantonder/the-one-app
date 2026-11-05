@@ -1,0 +1,201 @@
+<meta name="@one/ui">
+<style>/*! tailwindcss v4.3.4 | MIT License | https://tailwindcss.com */
+@layer properties{@supports (((-webkit-hyphens:none)) and (not (margin-trim:block))) or ((-moz-orient:inline) and (not (color:rgb(from red r g b)))){*,:before,:after,::backdrop{--tw-translate-x:0;--tw-translate-y:0;--tw-translate-z:0;--tw-border-style:solid;--tw-font-weight:initial;--tw-shadow:0 0 #0000;--tw-shadow-color:initial;--tw-shadow-alpha:100%;--tw-inset-shadow:0 0 #0000;--tw-inset-shadow-color:initial;--tw-inset-shadow-alpha:100%;--tw-ring-color:initial;--tw-ring-shadow:0 0 #0000;--tw-inset-ring-color:initial;--tw-inset-ring-shadow:0 0 #0000;--tw-ring-inset:initial;--tw-ring-offset-width:0px;--tw-ring-offset-color:#fff;--tw-ring-offset-shadow:0 0 #0000;--tw-outline-style:solid;--tw-blur:initial;--tw-brightness:initial;--tw-contrast:initial;--tw-grayscale:initial;--tw-hue-rotate:initial;--tw-invert:initial;--tw-opacity:initial;--tw-saturate:initial;--tw-sepia:initial;--tw-drop-shadow:initial;--tw-drop-shadow-color:initial;--tw-drop-shadow-alpha:100%;--tw-drop-shadow-size:initial}}}@layer theme,base,components;@layer utilities{.absolute{position:absolute}.fixed{position:fixed}.relative{position:relative}.static{position:static}.inset-0{inset:0}.top-2{top:calc(var(--spacing,.25rem) * 2)}.left-1{left:var(--spacing,.25rem)}.left-1\/2{left:50%}.container{width:100%}@media (width>=40rem){.container{max-width:40rem}}@media (width>=48rem){.container{max-width:48rem}}@media (width>=64rem){.container{max-width:64rem}}@media (width>=80rem){.container{max-width:80rem}}@media (width>=96rem){.container{max-width:96rem}}.mt-2{margin-top:calc(var(--spacing,.25rem) * 2)}.block{display:block}.flex{display:flex}.grid{display:grid}.hidden{display:none}.inline{display:inline}.table{display:table}.aspect-\[16\/10\]{aspect-ratio:16/10}.size-full{width:100%;height:100%}.h-\[52px\]{height:52px}.h-\[calc\(100\%-1rem\)\]{height:calc(100% - 1rem)}.min-h-0{min-height:0}.min-h-5{min-height:calc(var(--spacing,.25rem) * 5)}.w-auto{width:auto}.w-full{width:100%}.min-w-0{min-width:0}.flex-1{flex:1}.shrink-0{flex-shrink:0}.-translate-x-1{--tw-translate-x:calc(var(--spacing,.25rem) * -1);translate:var(--tw-translate-x) var(--tw-translate-y)}.-translate-x-1\/2{--tw-translate-x:calc(calc(1 / 2 * 100%) * -1);translate:var(--tw-translate-x) var(--tw-translate-y)}.cursor-pointer{cursor:pointer}.resize{resize:both}.flex-col{flex-direction:column}.place-items-center{place-items:center}.items-center{align-items:center}.gap-1{gap:var(--spacing,.25rem)}.gap-2{gap:calc(var(--spacing,.25rem) * 2)}.gap-2\.5{gap:calc(var(--spacing,.25rem) * 2.5)}.gap-3{gap:calc(var(--spacing,.25rem) * 3)}.gap-4{gap:calc(var(--spacing,.25rem) * 4)}.truncate{text-overflow:ellipsis;white-space:nowrap;overflow:hidden}.overflow-hidden{overflow:hidden}.rounded-xl{border-radius:calc(var(--radius) + 4px)}.border-0{border-style:var(--tw-border-style);border-width:0}.bg-background{background-color:var(--background)}.bg-black{background-color:var(--color-black,#000)}.bg-muted{background-color:var(--muted)}.object-cover{object-fit:cover}.p-4{padding:calc(var(--spacing,.25rem) * 4)}.px-3{padding-inline:calc(var(--spacing,.25rem) * 3)}.px-4{padding-inline:calc(var(--spacing,.25rem) * 4)}.py-2{padding-block:calc(var(--spacing,.25rem) * 2)}.py-2\.5{padding-block:calc(var(--spacing,.25rem) * 2.5)}.text-left{text-align:left}.text-sm{font-size:var(--text-sm,.875rem);line-height:var(--tw-leading,var(--text-sm--line-height,calc(1.25 / .875)))}.text-xl{font-size:var(--text-xl,1.25rem);line-height:var(--tw-leading,var(--text-xl--line-height,calc(1.75 / 1.25)))}.font-medium{--tw-font-weight:var(--font-weight-medium,500);font-weight:var(--font-weight-medium,500)}.font-semibold{--tw-font-weight:var(--font-weight-semibold,600);font-weight:var(--font-weight-semibold,600)}.text-muted-foreground{color:var(--muted-foreground)}.lowercase{text-transform:lowercase}.\[color-scheme\:dark\]{--lightningcss-light: ;--lightningcss-dark:initial;color-scheme:dark}.ring-1{--tw-ring-shadow:var(--tw-ring-inset, ) 0 0 0 calc(1px + var(--tw-ring-offset-width)) var(--tw-ring-color,currentcolor);box-shadow:var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)}.ring-border{--tw-ring-color:var(--border)}.outline{outline-style:var(--tw-outline-style);outline-width:1px}.filter{filter:var(--tw-blur, ) var(--tw-brightness, ) var(--tw-contrast, ) var(--tw-grayscale, ) var(--tw-hue-rotate, ) var(--tw-invert, ) var(--tw-saturate, ) var(--tw-sepia, ) var(--tw-drop-shadow, )}.outline-none{--tw-outline-style:none;outline-style:none}.ring-inset{--tw-ring-inset:inset}:is(:where(.group):focus-visible .group-focus-visible\:outline-3){outline-style:var(--tw-outline-style);outline-width:3px}:is(:where(.group):focus-visible .group-focus-visible\:outline-ring\/50){outline-color:var(--ring)}@supports (color:color-mix(in lab, red, red)){:is(:where(.group):focus-visible .group-focus-visible\:outline-ring\/50){outline-color:color-mix(in oklab, var(--ring) 50%, transparent)}}.has-\[button\:disabled\]\:cursor-default:has(:is(button:disabled)){cursor:default}}@property --tw-translate-x{syntax:"*";inherits:false;initial-value:0}@property --tw-translate-y{syntax:"*";inherits:false;initial-value:0}@property --tw-translate-z{syntax:"*";inherits:false;initial-value:0}@property --tw-border-style{syntax:"*";inherits:false;initial-value:solid}@property --tw-font-weight{syntax:"*";inherits:false}@property --tw-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-shadow-color{syntax:"*";inherits:false}@property --tw-shadow-alpha{syntax:"<percentage>";inherits:false;initial-value:100%}@property --tw-inset-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-inset-shadow-color{syntax:"*";inherits:false}@property --tw-inset-shadow-alpha{syntax:"<percentage>";inherits:false;initial-value:100%}@property --tw-ring-color{syntax:"*";inherits:false}@property --tw-ring-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-inset-ring-color{syntax:"*";inherits:false}@property --tw-inset-ring-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-ring-inset{syntax:"*";inherits:false}@property --tw-ring-offset-width{syntax:"<length>";inherits:false;initial-value:0}@property --tw-ring-offset-color{syntax:"*";inherits:false;initial-value:#fff}@property --tw-ring-offset-shadow{syntax:"*";inherits:false;initial-value:0 0 #0000}@property --tw-outline-style{syntax:"*";inherits:false;initial-value:solid}@property --tw-blur{syntax:"*";inherits:false}@property --tw-brightness{syntax:"*";inherits:false}@property --tw-contrast{syntax:"*";inherits:false}@property --tw-grayscale{syntax:"*";inherits:false}@property --tw-hue-rotate{syntax:"*";inherits:false}@property --tw-invert{syntax:"*";inherits:false}@property --tw-opacity{syntax:"*";inherits:false}@property --tw-saturate{syntax:"*";inherits:false}@property --tw-sepia{syntax:"*";inherits:false}@property --tw-drop-shadow{syntax:"*";inherits:false}@property --tw-drop-shadow-color{syntax:"*";inherits:false}@property --tw-drop-shadow-alpha{syntax:"<percentage>";inherits:false;initial-value:100%}@property --tw-drop-shadow-size{syntax:"*";inherits:false}
+/*$vite$:1*/</style>
+<div id="root"></div>
+<script type="module">import { c as e } from "react/compiler-runtime";
+import { useEffect as t, useState as n } from "react";
+import { createRoot as r } from "react-dom/client";
+import { Empty as i, Hint as a, List as o, ListSkeleton as s, Problem as c, Switch as l } from "@one/ui";
+import { Fragment as u, jsx as d, jsxs as f } from "react/jsx-runtime";
+var p = () => {
+	let t = e(3), n;
+	t[0] === Symbol.for("react.memo_cache_sentinel") ? (n = /* @__PURE__ */ f("linearGradient", {
+		id: "a",
+		x1: "3.2173",
+		y1: "15",
+		x2: "44.7812",
+		y2: "15",
+		gradientUnits: "userSpaceOnUse",
+		children: [/* @__PURE__ */ d("stop", {
+			offset: "0",
+			stopColor: "#d93025"
+		}), /* @__PURE__ */ d("stop", {
+			offset: "1",
+			stopColor: "#ea4335"
+		})]
+	}), t[0] = n) : n = t[0];
+	let r;
+	t[1] === Symbol.for("react.memo_cache_sentinel") ? (r = /* @__PURE__ */ f("linearGradient", {
+		id: "b",
+		x1: "20.7219",
+		y1: "47.6791",
+		x2: "41.5039",
+		y2: "11.6837",
+		gradientUnits: "userSpaceOnUse",
+		children: [/* @__PURE__ */ d("stop", {
+			offset: "0",
+			stopColor: "#fcc934"
+		}), /* @__PURE__ */ d("stop", {
+			offset: "1",
+			stopColor: "#fbbc04"
+		})]
+	}), t[1] = r) : r = t[1];
+	let i;
+	return t[2] === Symbol.for("react.memo_cache_sentinel") ? (i = /* @__PURE__ */ f("svg", {
+		xmlns: "http://www.w3.org/2000/svg",
+		viewBox: "0 0 48 48",
+		width: "28",
+		height: "28",
+		"aria-hidden": "true",
+		children: [
+			/* @__PURE__ */ f("defs", { children: [
+				n,
+				r,
+				/* @__PURE__ */ f("linearGradient", {
+					id: "c",
+					x1: "26.5981",
+					y1: "46.5015",
+					x2: "5.8161",
+					y2: "10.506",
+					gradientUnits: "userSpaceOnUse",
+					children: [/* @__PURE__ */ d("stop", {
+						offset: "0",
+						stopColor: "#1e8e3e"
+					}), /* @__PURE__ */ d("stop", {
+						offset: "1",
+						stopColor: "#34a853"
+					})]
+				})
+			] }),
+			/* @__PURE__ */ d("circle", {
+				cx: "24",
+				cy: "23.9947",
+				r: "12",
+				fill: "#fff"
+			}),
+			/* @__PURE__ */ d("path", {
+				d: "M24,12H44.7812a23.9939,23.9939,0,0,0-41.5639.0029L13.6079,30l.0093-.0024A11.9852,11.9852,0,0,1,24,12Z",
+				fill: "url(#a)"
+			}),
+			/* @__PURE__ */ d("circle", {
+				cx: "24",
+				cy: "24",
+				r: "9.5",
+				fill: "#1a73e8"
+			}),
+			/* @__PURE__ */ d("path", {
+				d: "M34.3913,30.0029,24.0007,48A23.994,23.994,0,0,0,44.78,12.0031H23.9989l-.0025.0093A11.985,11.985,0,0,1,34.3913,30.0029Z",
+				fill: "url(#b)"
+			}),
+			/* @__PURE__ */ d("path", {
+				d: "M13.6086,30.0031,3.218,12.006A23.994,23.994,0,0,0,24.0025,48L34.3931,30.0029l-.0067-.0068a11.9852,11.9852,0,0,1-20.7778.007Z",
+				fill: "url(#c)"
+			})
+		]
+	}), t[2] = i) : i = t[2], i;
+};
+function m(t) {
+	let n = e(17), { d: r, set: i } = t, a;
+	n[0] === r.on ? a = n[1] : (a = /* @__PURE__ */ d("span", {
+		className: "block truncate font-medium",
+		children: r.on
+	}), n[0] = r.on, n[1] = a);
+	let o;
+	n[2] === r.can ? o = n[3] : (o = r.can && /* @__PURE__ */ d("span", {
+		className: "block text-muted-foreground",
+		children: r.can
+	}), n[2] = r.can, n[3] = o);
+	let s;
+	n[4] !== a || n[5] !== o ? (s = /* @__PURE__ */ f("span", {
+		className: "min-w-0 flex-1",
+		children: [a, o]
+	}), n[4] = a, n[5] = o, n[6] = s) : s = n[6];
+	let c = !!r.allowed, u = !!r.can, p;
+	n[7] !== r.on || n[8] !== i ? (p = (e) => i(r.on, e), n[7] = r.on, n[8] = i, n[9] = p) : p = n[9];
+	let m;
+	n[10] !== c || n[11] !== u || n[12] !== p ? (m = /* @__PURE__ */ d(l, {
+		checked: c,
+		disabled: u,
+		onCheckedChange: p
+	}), n[10] = c, n[11] = u, n[12] = p, n[13] = m) : m = n[13];
+	let h;
+	return n[14] !== s || n[15] !== m ? (h = /* @__PURE__ */ f("label", {
+		className: "flex cursor-pointer items-center gap-3 px-3 py-2.5 text-sm has-[button:disabled]:cursor-default",
+		children: [s, m]
+	}), n[14] = s, n[15] = m, n[16] = h) : h = n[16], h;
+}
+function h() {
+	let r = e(20), [l, h] = n(null), [g, _] = n(null), [v, y] = n(""), b;
+	r[0] === Symbol.for("react.memo_cache_sentinel") ? (b = async function() {
+		try {
+			h((await one.call("_chrome", {})).devices), _(null);
+		} catch (e) {
+			let t = e;
+			_(one.plain(t));
+		}
+	}, r[0] = b) : b = r[0];
+	let x = b, S;
+	r[1] === Symbol.for("react.memo_cache_sentinel") ? (S = async function(e, t) {
+		y("");
+		try {
+			await one.call("_set_chrome", {
+				on: e,
+				allowed: t
+			});
+		} catch (e) {
+			let t = e;
+			y(one.plain(t).title);
+		}
+		x();
+	}, r[1] = S) : S = r[1];
+	let C = S, w, T;
+	r[2] === Symbol.for("react.memo_cache_sentinel") ? (w = () => {
+		x();
+	}, T = [], r[2] = w, r[3] = T) : (w = r[2], T = r[3]), t(w, T);
+	let E;
+	if (!l) {
+		let e;
+		r[4] === g ? e = r[5] : (e = g ? /* @__PURE__ */ d(c, {
+			title: g.title,
+			text: g.next,
+			action: {
+				label: "Try Again",
+				run: x
+			}
+		}) : /* @__PURE__ */ d(s, {}), r[4] = g, r[5] = e), E = e;
+	} else if (l.length) {
+		let e;
+		if (r[7] !== l) {
+			let t;
+			r[9] === Symbol.for("react.memo_cache_sentinel") ? (t = (e) => /* @__PURE__ */ d(m, {
+				d: e,
+				set: C
+			}, e.on), r[9] = t) : t = r[9], e = l.map(t), r[7] = l, r[8] = e;
+		} else e = r[8];
+		let t;
+		r[10] === e ? t = r[11] : (t = /* @__PURE__ */ d(o, { children: e }), r[10] = e, r[11] = t);
+		let n;
+		r[12] === v ? n = r[13] : (n = v && /* @__PURE__ */ d(c, { title: v }), r[12] = v, r[13] = n);
+		let i;
+		r[14] !== t || r[15] !== n ? (i = /* @__PURE__ */ f(u, { children: [t, n] }), r[14] = t, r[15] = n, r[16] = i) : i = r[16], E = i;
+	} else {
+		let e;
+		r[6] === Symbol.for("react.memo_cache_sentinel") ? (e = /* @__PURE__ */ d(i, { children: "None of your devices runs Agent Devices." }), r[6] = e) : e = r[6], E = e;
+	}
+	let D;
+	r[17] === Symbol.for("react.memo_cache_sentinel") ? (D = /* @__PURE__ */ f("div", {
+		className: "flex flex-col gap-1",
+		children: [/* @__PURE__ */ f("h2", {
+			className: "flex items-center gap-2.5 text-xl font-semibold",
+			children: [/* @__PURE__ */ d(p, {}), "Google Chrome"]
+		}), /* @__PURE__ */ d(a, { children: "Chrome runs without a container. This is fine if you trust the workload." })]
+	}), r[17] = D) : D = r[17];
+	let O;
+	return r[18] === E ? O = r[19] : (O = /* @__PURE__ */ f("div", {
+		className: "flex flex-col gap-4",
+		children: [D, E]
+	}), r[18] = E, r[19] = O), O;
+}
+r(document.getElementById("root")).render(/* @__PURE__ */ d(h, {}));
+</script>
