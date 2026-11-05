@@ -6,7 +6,9 @@
 use super::*;
 use crate::database::{steps, switch};
 
-/// How long a writer of the log waits for the freeze a `FREEZING` step says is coming, before it gives up.
+/// How long a writer of the log waits for the freeze a `FREEZING` step says is coming, from when it first sees it,
+/// before it writes on: its admin's device writes the freeze within half of it, or not at all, so a writer that has
+/// waited this long finds it, if it's ever written.
 const FREEZE_WAIT: Duration = Duration::from_secs(30);
 
 impl Node {
@@ -15,11 +17,11 @@ impl Node {
         self.with(|i| Ok(i.r.frozen.is_some())).unwrap_or(false)
     }
 
-    /// Freezes `global`'s log, if the switch is on and the gate is open (or `forced`, in a throwaway network), it isn't frozen
-    /// yet, and this device signs for an admin: a `FREEZING` step first, so writers of the log look whether the freeze
-    /// holds what they write from then on; then where every log ends, and the freeze (`steps::freeze`), at the next
-    /// free position. Another admin's device may freeze it first: the first freeze that checks out is the one. Then the
-    /// release's types, roles and rules as a step. → whether it's frozen.
+    /// Freezes `global`'s log, if the switch is on and the gate is open (or `forced`, in a throwaway network), it isn't
+    /// frozen yet, and this device signs for an admin: a `FREEZING` step first, so writers of the log look whether the
+    /// freeze holds what they write from then on; then where every log ends, and the freeze (`steps::freeze`), at the
+    /// next free position, within half of `FREEZE_WAIT` of the `FREEZING`, or not at all. Another admin's device may
+    /// freeze it first: the first freeze an admin's device signed is the one. → whether it's frozen.
     pub async fn freeze(&self, forced: bool) -> Result<bool> {
         if !(switch::SWITCH || (forced && switch::FORCEABLE.load(std::sync::atomic::Ordering::Relaxed))) || self.frozen() {
             return Ok(self.frozen());
@@ -33,23 +35,32 @@ impl Node {
         if !signs {
             return Ok(false);
         }
-        {
-            let _write = self.0.writes.lock().await;
-            if !self.put_first(&user, Content::new(members::APP, steps::FREEZING, json!({})), None).await? {
-                return Ok(self.frozen());
-            }
-            // Every log as it is now, which no writer that looks after this adds to unawares.
-            self.read_log_now(&Scope::Global).await?;
-            let bucket = self.bucket()?;
-            let mut logs = BTreeMap::new();
-            for scope in self.with(|i| Ok(i.r.db().scopes()))?.into_iter().filter(|s| *s != Scope::Global) {
-                let listed = crate::bucket::Bucket::objects(&bucket, &crate::log::prefix(&scope.to_string())).await?;
-                let last = listed.iter().filter_map(|(n, _)| n.parse::<u64>().ok()).max().unwrap_or(0);
-                logs.insert(scope.to_string(), last);
-            }
-            let (content, copy) = self.with(|i| i.r.freeze_now(logs, now_ms()))?;
-            self.put_first(&user, content, Some(&copy)).await?;
+        let _write = self.0.writes.lock().await;
+        // `global`'s log as the bucket has it, read before the `FREEZING`, so only what's written since is read after.
+        let (bucket, keys, prefix) = (self.bucket()?, self.log_key(&Scope::Global).await?, crate::log::prefix("global"));
+        let before = crate::log::read(&bucket, &keys, &prefix, "global", 0, 0).await?;
+        if !self.put_first(&user, Content::new(members::APP, steps::FREEZING, json!({})), None).await? {
+            return Ok(self.frozen());
         }
+        let started = std::time::Instant::now();
+        // Every log as it is now, which no writer that looks after this adds to unawares.
+        self.read_entries_now(&Scope::Global).await?;
+        let after = crate::log::read(&bucket, &keys, &prefix, "global", before.at, before.floor).await?;
+        ensure!(before.ahead.is_none() && after.ahead.is_none(), "global's log has a step under an epoch this device hasn't opened yet: it freezes the log once it has");
+        let log = steps::Log { to: after.at, entries: [before.entries, after.entries].concat() };
+        let mut logs = BTreeMap::new();
+        for scope in self.with(|i| Ok(i.r.db().scopes()))?.into_iter().filter(|s| *s != Scope::Global) {
+            let listed = crate::bucket::Bucket::objects(&bucket, &crate::log::prefix(&scope.to_string())).await?;
+            let last = listed.iter().filter_map(|(n, _)| n.parse::<u64>().ok()).max().unwrap_or(0);
+            logs.insert(scope.to_string(), last);
+        }
+        let (content, copy) = self.with(|i| i.r.freeze_now(&log, logs, now_ms()))?;
+        if started.elapsed() > FREEZE_WAIT / 2 {
+            tracing::warn!("freezing the log took too long, so writers may have written on: it's tried again");
+            return Ok(false);
+        }
+        *self.0.frozen_log.lock().unwrap() = Some(Arc::new(log));
+        self.put_first(&user, content, Some(&copy)).await?;
         Ok(self.frozen())
     }
 
@@ -75,19 +86,26 @@ impl Node {
     }
 
     /// After this device wrote `entry` at step `at` of its scope's log: whether a freeze leaves it out, so it never
-    /// counts. Looks only once a `FREEZING` step is there, and waits for the freeze it says is coming.
+    /// counts. Looks only once an admin's `FREEZING` step is there, and waits for the freeze it says is coming, up to
+    /// `FREEZE_WAIT` from when it first saw that one: after that it has lapsed, and the entry counts.
     pub(super) async fn left_out(&self, entry: &Entry, at: u64) -> Result<bool> {
-        let deadline = std::time::Instant::now() + FREEZE_WAIT;
         loop {
             self.read_steps_now().await?;
             let (frozen, freezing) = self.with(|i| Ok((i.r.frozen.clone(), i.r.freezing)))?;
             if let Some((freeze, _)) = frozen {
                 return Ok(!freeze.holds(entry, at));
             }
-            if !freezing {
+            let Some(freezing) = freezing else { return Ok(false) };
+            let seen = {
+                let mut seen = self.0.freezing_seen.lock().unwrap();
+                if seen.is_none_or(|(p, _)| p != freezing) {
+                    *seen = Some((freezing, std::time::Instant::now()));
+                }
+                seen.map(|(_, t)| t).expect("just set")
+            };
+            if seen.elapsed() >= FREEZE_WAIT {
                 return Ok(false);
             }
-            ensure!(std::time::Instant::now() < deadline, "your One App is switching over as this was written: try again in a minute");
             tokio::time::sleep(Duration::from_secs(1)).await;
         }
     }
@@ -109,15 +127,18 @@ impl Node {
     }
 
     /// Reads `global`'s steps in the bucket after the last this device applied, once its log is frozen: each applied if
-    /// it counts, passed over if not. A step under an epoch above every key this device opens waits for that epoch's
-    /// step; with none, it's junk, passed over. → whether there were any.
+    /// it counts, passed over if not. Before, it looks at each for its freeze. A step under an epoch above every key this
+    /// device opens waits for that epoch's key; one above every epoch made is looked at again once `global`'s log is
+    /// read to its end, and only then, if still above, junk, passed over: an epoch's entry or step is always written
+    /// before anything is sealed under it. → whether there were any.
     pub(super) async fn read_steps(&self) -> Result<bool> {
         let _write = self.0.writes.lock().await;
         self.read_steps_now().await
     }
 
     /// `read_steps`, while this device holds its writes. Before the log is frozen, it looks at each step for the
-    /// freeze (`Replica::take_first`).
+    /// freeze (`Replica::take_first`): one an admin's own device signed is taken once `global`'s log is read to its end
+    /// (so its signer is checked against everything in the bucket) and from its steps up to the freeze's end of it.
     pub(super) async fn read_steps_now(&self) -> Result<bool> {
         // A build the switch is off in never freezes, and holds the gate back, so nothing it reads is frozen.
         if !self.frozen() && !(switch::SWITCH || switch::FORCEABLE.load(std::sync::atomic::Ordering::Relaxed)) {
@@ -127,6 +148,7 @@ impl Node {
         let prefix = steps::prefix("global");
         let from = self.with(|i| Ok(i.r.at().unwrap_or(i.r.looked)))?;
         let mut at = from;
+        let mut log_read = false;
         loop {
             let name = crate::db::step_name(&prefix, at + 1);
             let Some(o) = crate::bucket::Bucket::get(&bucket, &name).await? else {
@@ -142,19 +164,51 @@ impl Node {
                     self.forget_epochs(&Scope::Global);
                     break;
                 }
+                // Before the freeze, `global`'s epochs are its log's: read it to its end, and look again.
+                steps::Opened::Waits(_) if !self.frozen() && !log_read => {
+                    self.read_entries_now(&Scope::Global).await?;
+                    log_read = true;
+                    continue;
+                }
                 steps::Opened::Waits(_) => None,
+            };
+            let claimed = self.with(|i| match i.r.frozen {
+                Some(_) => Ok(None),
+                None => i.r.claimed(at + 1, given.as_ref()),
+            })?;
+            let log = match claimed {
+                Some(end) => {
+                    // Its signer is checked against everything in the bucket, so the log first, to its end.
+                    if !log_read {
+                        self.read_entries_now(&Scope::Global).await?;
+                    }
+                    Some(self.global_log(end).await?)
+                }
+                None => None,
             };
             let handled = self.with(|i| match i.r.frozen {
                 Some(_) => i.r.take_step(at + 1, given.as_ref().map(|g| &g.step), now_ms()),
-                None => i.r.take_first(at + 1, given.as_ref(), now_ms()),
+                None => i.r.take_first(at + 1, given.as_ref(), log.as_deref(), now_ms()),
             })?;
             at += 1;
+            log_read = false;
             self.after(handled).await?;
         }
         if at > from {
             self.keep_global();
         }
         Ok(at > from)
+    }
+
+    /// `global`'s log up to step `end`, where its freeze says it ends, from the bucket's steps (`steps::log_to`): read
+    /// once, and kept while this device runs, for each scope's database to start from.
+    async fn global_log(&self, end: u64) -> Result<Arc<steps::Log>> {
+        if let Some(log) = self.0.frozen_log.lock().unwrap().clone().filter(|l| l.to == end) {
+            return Ok(log);
+        }
+        let log = Arc::new(steps::log_to(&self.bucket()?, &self.log_key(&Scope::Global).await?, end).await?);
+        *self.0.frozen_log.lock().unwrap() = Some(log.clone());
+        Ok(log)
     }
 
     /// Where this device read `global`'s scope database to, and the database there, kept in its folder: what it starts
@@ -322,7 +376,8 @@ impl Node {
             let freeze = self.with(|i| Ok(i.r.frozen.clone().map(|(f, _)| f)))?.context("global's log isn't frozen")?;
             let end = freeze.logs.get(&scope.to_string()).copied().unwrap_or(0);
             let entries = crate::log::read_to(&bucket, &keys, &crate::log::prefix(&scope.to_string()), &scope.to_string(), end).await?;
-            let db = self.with(|i| steps::scope_anchor(&freeze, i.r.root, &i.r.store.scope("global")?, &i.r.store.forks()?, scope, &entries, now_ms()))?;
+            let global = self.global_log(freeze.global()).await?;
+            let db = self.with(|i| steps::scope_anchor(&freeze, i.r.root, &global, scope, &entries, now_ms()))?;
             self.with(|i| Ok(i.scope_dbs.insert(scope.clone(), (0, db))))?;
         }
         let from = self.with(|i| Ok(i.scope_dbs.get(scope).map_or(0, |(at, _)| *at)))?;

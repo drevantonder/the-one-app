@@ -93,15 +93,17 @@ export function server(version) {
     if (!given && !steps?.steps?.length && kept?.members?.people?.[user]?.keeps) return kept.members;
     const { Global } = await glue;
     const root = kept?.root || (await get(`genesis:${user}`)) || "";
-    // Its scope database's steps: where they were read to, as kept, then those a node passed on since, sealed, with
-    // the keys this browser opens them with itself.
+    // Its scope database's steps: where they were read to, as kept, then those this browser read since from the
+    // bucket, sealed, its log's to where a freeze says it ends, and a Welcome's freeze and copy, with the keys it opens
+    // them with itself.
     const { welcome, freeze, start } = steps || {};
-    const held = { kept: kept?.steps || null, given: { steps: steps?.steps || [], welcome, freeze, start }, epochs: steps?.keys?.epochs || {}, apps: steps?.keys?.apps || {} };
+    const held = { kept: kept?.steps || null, given: { steps: steps?.steps || [], log: steps?.log || null, welcome, freeze, start }, epochs: steps?.keys?.epochs || {}, apps: steps?.keys?.apps || {} };
     const g = new Global(root, kept?.pack || new Uint8Array(), given || new Uint8Array(), JSON.stringify(held));
     const members = JSON.parse(g.members);
+    const wants_log = g.wants_log;
     await put(`global:${user}`, { root: g.root, pack: g.pack, have: g.have, steps: JSON.parse(g.steps), at: g.at, members });
     g.free();
-    return members;
+    return wants_log ? { ...members, wants_log } : members;
   }
 
   /// The session: none until a tab starts it (this worker, or this tab leading the others, is new); then its person, and

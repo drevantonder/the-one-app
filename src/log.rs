@@ -75,21 +75,36 @@ pub async fn read(bucket: &impl Bucket, keys: &Keys, prefix: &str, log: &str, fr
 /// those a freeze that ends the log there holds (`database::steps::Freeze`). Fails at one that isn't there, or that
 /// waits for a key `keys` doesn't have.
 pub async fn read_to(bucket: &impl Bucket, keys: &Keys, prefix: &str, log: &str, to: u64) -> Result<Vec<Entry>> {
-    let mut entries = Vec::new();
-    let mut floor = 0;
+    let mut read = ReadTo::default();
     for at in 1..=to {
         let name = step_name(prefix, at);
         let o = bucket.get(&name).await?.with_context(|| format!("{name} isn't in the bucket"))?;
-        match step(keys, &name, &o.bytes, log, floor)? {
+        read.take(keys, &name, &o.bytes, log)?;
+    }
+    Ok(read.entries)
+}
+
+/// `read_to` one step at a time, for a reader of a place that isn't a bucket (a backup's): each step from the first,
+/// as `take` is given it.
+#[derive(Default)]
+pub struct ReadTo {
+    pub entries: Vec<Entry>,
+    floor: u32,
+}
+
+impl ReadTo {
+    /// The next step, `name`, sealed as the bucket holds it.
+    pub fn take(&mut self, keys: &Keys, name: &str, sealed: &[u8], log: &str) -> Result<()> {
+        match step(keys, name, sealed, log, self.floor)? {
             Step::Took(epoch, list) => {
-                entries.extend(list);
-                floor = epoch;
+                self.entries.extend(list);
+                self.floor = epoch;
             }
             Step::Passed => {}
             Step::Ahead(epoch) => anyhow::bail!(Missing { epoch }),
         }
+        Ok(())
     }
-    Ok(entries)
 }
 
 /// Every one of `log`'s entries: its newest copy's, if it holds (`db::start`), and those in the steps after it, each

@@ -171,18 +171,20 @@ pub struct Global {
     steps: String,
     at: u64,
     members: String,
+    wants_log: u64,
 }
 
 #[wasm_bindgen]
 impl Global {
     #[wasm_bindgen(constructor)]
     /// `steps`, as JSON: `{ kept, given, epochs, apps }`, where its scope database's steps were read to as it kept that
-    /// (`members::Global::kept`), and those a node passed on since (`GET /v1/steps/global`) with the keys to open
-    /// them: `global`'s epochs sealed to this device, opened (hex, by number), and the node's key sealed in each
-    /// (base64url, by number) (`members::Global::add_sealed`).
+    /// (`members::Global::kept`), and those this browser read since from the bucket itself (`{ steps, log }`, through
+    /// the URL signer's `get`) with the keys to open them: `global`'s epochs sealed to this device, opened (hex, by
+    /// number), and the node's key sealed in each (base64url, by number) (`members::Global::add_sealed`).
     pub fn new(root: String, kept: Vec<u8>, given: Vec<u8>, steps: Option<String>) -> Result<Global, JsError> {
         let root = (!root.is_empty()).then(|| one::entry::Hash::from_hex(&root)).transpose().map_err(js)?;
         let mut g = crate::members::Global::new(root);
+        let mut wants_log = 0;
         if !kept.is_empty() {
             g.add(&kept).map_err(js)?;
         }
@@ -196,13 +198,20 @@ impl Global {
             }
             let epochs = steps["epochs"].as_object().into_iter().flatten().filter_map(|(n, k)| Some((n.parse().ok()?, key(k.as_str()?).ok()?))).collect();
             let apps = steps["apps"].as_object().into_iter().flatten().filter_map(|(n, k)| Some((n.parse().ok()?, data_encoding::BASE64URL_NOPAD.decode(k.as_str()?.as_bytes()).ok()?))).collect();
-            g.add_sealed(&steps["given"], &epochs, &apps).map_err(js)?;
+            wants_log = g.add_sealed(&steps["given"], &epochs, &apps).map_err(js)?.unwrap_or(0);
         }
         let mut view = crate::members::view_of(&g.who().map_err(js)?).map_err(js)?;
         // Whether who's who is written as steps now (`cloudflare/web/device.js` `write`).
         view["frozen"] = serde_json::json!(g.frozen());
         let members = view.to_string();
-        Ok(Global { root: g.root().map(|r| r.to_hex()).unwrap_or_default(), pack: g.pack(), have: g.have(), steps: g.kept().map_err(js)?.to_string(), at: g.at(), members })
+        Ok(Global { root: g.root().map(|r| r.to_hex()).unwrap_or_default(), pack: g.pack(), have: g.have(), steps: g.kept().map_err(js)?.to_string(), at: g.at(), members, wants_log })
+    }
+
+    /// The step of `global`'s log a freeze an admin's device signed says the log ends at, which this browser reads its
+    /// log's steps to and gives again (`given.log`), before it reads on: 0 for none.
+    #[wasm_bindgen(getter)]
+    pub fn wants_log(&self) -> f64 {
+        self.wants_log as f64
     }
 
     /// Where its scope database's steps were read to, as JSON (`members::Global::kept`): to keep, and give again.

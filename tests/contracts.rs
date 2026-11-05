@@ -172,9 +172,10 @@ fn the_workers_and_nodes_agree_on_keys_and_seals() {
 
     // Who's who as steps (src/database/steps.rs), as a browser reads it: the node's key sealed under an epoch as a
     // browser that makes one seals it, a step a browser signed and the freeze, sealed as a node puts them in the bucket
-    // and passed on as `GET /v1/steps/global` gives them (src/node/steps.rs `global_steps`), opened and applied by the
-    // client (its WebAssembly's `Global`, cloudflare/web/net-worker.js); and from a Welcome, sign-in's word passed on as
-    // JavaScript reads it, with no entry but the genesis.
+    // and read from it as the URL signer's `get` gives them (cloudflare/web/device.js `bucketSteps`), with the log's
+    // steps up to where the freeze says it ends once the client asks for them, opened and applied by the client (its
+    // WebAssembly's `Global`, cloudflare/web/net-worker.js); and from a Welcome, sign-in's word passed on as JavaScript
+    // reads it, with no entry but the genesis.
     {
         use ed25519_dalek::SigningKey;
         use one::database::steps;
@@ -189,7 +190,8 @@ fn the_workers_and_nodes_agree_on_keys_and_seals() {
         let ext = |epoch: u32| Ext { log: "global".into(), time: 0, user: ANDRE.into(), epoch, previous: vec![] };
         let g = Entry::create(&mac, ext(0), None, members::genesis("Home", ANDRE, "Andre", &Endpoint::of(&mac), "mac", &[Kind::Client], &[7; 32], &one::keys::epoch_hash(&epoch)));
         let listed = Entry::create(&mac, ext(1), Some(g.head()), members::device(&Endpoint::of(&browser), ANDRE, "browser", &[Kind::Client], None));
-        let (content, copy) = steps::freeze(Some(g.hash()), &[g.clone(), listed.clone()], &Default::default(), Default::default(), 0).unwrap();
+        let log = steps::Log { to: 2, entries: vec![g.clone(), listed.clone()] };
+        let (content, copy) = steps::freeze(Some(g.hash()), &log, Default::default(), 0).unwrap();
         let freeze = steps::sign(&mac, &Scope::Global, 1, ANDRE, 1, 0, content).unwrap();
         let (_, _, body) = steps::sign(&browser, &Scope::Global, 2, ANDRE, 1, 5, members::setting("greeting", Some("hi"))).unwrap().encode();
         let fields = json!({ "log": "global", "at": 2, "time": 5, "user": ANDRE, "epoch": 1 });
@@ -207,7 +209,16 @@ fn the_workers_and_nodes_agree_on_keys_and_seals() {
         let (epochs, apps) = (std::collections::BTreeMap::from([(1, epoch)]), std::collections::BTreeMap::from([(1, sealed_app)]));
         let mut client = Global::new(Some(g.hash()));
         client.add(&pack(&[&g, &listed])).unwrap();
-        client.add_sealed(&json!({ "at": 3, "steps": [s1, s2, junk] }), &epochs, &apps).unwrap();
+        let read = json!({ "steps": [s1, s2, junk] });
+        assert_eq!(client.add_sealed(&read, &epochs, &apps).unwrap(), Some(2), "the freeze waits for global's log to where it says it ends");
+        assert!(!client.frozen());
+        let log_steps: Vec<Value> = [&g, &listed].iter().enumerate().map(|(i, e)| {
+            let name = one::db::step_name(&one::log::prefix("global"), i as u64 + 1);
+            json!({ "at": i + 1, "sealed": B64U.encode(&one::log::seal(&keys, &name, &pack(&[*e])).unwrap()) })
+        }).collect();
+        let mut with_log = read.clone();
+        with_log["log"] = json!({ "to": 2, "steps": log_steps });
+        assert_eq!(client.add_sealed(&with_log, &epochs, &apps).unwrap(), None);
         assert!(client.frozen() && client.at() == 3, "frozen, the browser's step taken and the junk passed over");
         let who = client.who().unwrap();
         assert_eq!(who.setting("greeting").as_deref(), Some("hi"), "the step a browser signed counts");

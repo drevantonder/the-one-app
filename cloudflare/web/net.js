@@ -195,8 +195,8 @@ export const net = {
   /// `user`'s members as `global`'s entries say them, checked here: those kept and those `given` (a pack a node sent,
   /// or none), replayed by the client's WebAssembly, and kept. Throws if one doesn't check, or they're another install's
   /// than the one first kept.
-  /// Once `global`'s log is frozen, `steps` are its scope database's a node sent (`GET /v1/steps/global`), applied
-  /// the same way.
+  /// `steps` are its scope database's this browser read from the bucket (`Device.bucketSteps`), with its log's to
+  /// where a freeze says it ends once it says so (`wants_log`), applied the same way.
   async global(user, given, steps) {
     if (!net.has) throw new Error("This device can't check who's who in your One App.");
     const buffer = given && given.buffer.slice(given.byteOffset, given.byteOffset + given.byteLength);

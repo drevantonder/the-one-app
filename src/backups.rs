@@ -629,7 +629,21 @@ fn steps_of(replayed: ScopeDb, store: &crate::store::Store, root: Option<crate::
             crate::database::steps::Opened::Waits(_) => break,
         }
     }
-    match crate::database::steps::Truth::read(&steps, root, &global, &store.forks()?, crate::node::now_ms())? {
+    let (view, cuts) = crate::database::steps::view(root, &global, crate::node::now_ms())?;
+    // `global`'s log to where its freeze says it ends, from the place's copy of its steps.
+    let log = match crate::database::steps::wants_log(&steps, &view, &cuts) {
+        Some(end) => {
+            let mut read = crate::log::ReadTo::default();
+            for at in 1..=end {
+                let name = crate::db::step_name(&crate::log::prefix("global"), at);
+                let sealed = place.get(&format!("{install}/bucket/{name}"))?.with_context(|| format!("{name} isn't in this backup"))?;
+                read.take(&log_keys, &name, &sealed, "global")?;
+            }
+            Some(crate::database::steps::Log { to: end, entries: read.entries })
+        }
+        None => None,
+    };
+    match crate::database::steps::Truth::read(&steps, root, &view, &cuts, log.as_ref(), crate::node::now_ms())? {
         Some(t) => Ok(t.db),
         None => Ok(replayed),
     }

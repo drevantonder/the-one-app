@@ -13,7 +13,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use anyhow::{Result, bail, ensure};
+use anyhow::{Context, Result, bail, ensure};
 use serde_json::{Map, Value, json};
 
 pub use one::database::scopes::ScopeDb;
@@ -32,13 +32,16 @@ pub struct Global {
     truth: Option<steps::Truth>,
     /// Before it's frozen, the last step looked at, none of them its freeze.
     looked: u64,
+    /// `global`'s log up to where a freeze an admin's device signed says it ends, read from its steps
+    /// (`steps::log_to`): what that freeze is checked against.
+    log: Option<steps::Log>,
 }
 
 impl Global {
     /// For the install whose genesis is `root`, or, for a device that's only now joined, whichever one genesis the
     /// first entries it's given hold.
     pub fn new(root: Option<Hash>) -> Global {
-        Global { root, entries: BTreeMap::new(), truth: None, looked: 0 }
+        Global { root, entries: BTreeMap::new(), truth: None, looked: 0, log: None }
     }
 
     /// Starts from what `kept` (`kept`'s, as a device keeps it) says: who's who once frozen, checked against the hash
@@ -57,8 +60,9 @@ impl Global {
     }
 
     /// Takes step `at`, the next, as this device opened it (none for one that will never be a step): before the log is
-    /// frozen, the freeze if it's one that checks out against the entries held; after, applied if it counts. Fails
-    /// while the entries a freeze names aren't all here, so it's taken again once they are.
+    /// frozen, the freeze if an admin's own device signed it (`steps::claimed`), checked against `global`'s log to the
+    /// end it names (`with_log`); after, applied if it counts. Fails at a freeze an admin signed that doesn't check out
+    /// or whose log isn't here, so it's never passed over.
     pub fn take(&mut self, at: u64, given: Option<&steps::Given>) -> Result<()> {
         ensure!(at == self.at() + 1, "step {at} isn't the next");
         match &mut self.truth {
@@ -66,14 +70,36 @@ impl Global {
             None => {
                 let Some(root) = self.root else { bail!("no entries of your One App yet") };
                 let ordered = causal(self.entries.values().cloned().collect(), &HashMap::new());
-                self.truth = steps::Truth::first(at, given, Some(root), &ordered, &self.forks(), now())?;
+                let (view, cuts) = steps::view(Some(root), &ordered, now())?;
+                self.truth = steps::Truth::first(at, given, Some(root), &view, &cuts, self.log.as_ref(), now())?;
                 self.looked = at;
             }
         }
         Ok(())
     }
 
-    /// Takes steps read from the bucket with this device's own keys (`steps::read`), after those held.
+    /// Of `read`, steps after those held, the end of `global`'s log the freeze an admin's own device signed among them
+    /// names (`steps::wants_log`), if this device hasn't read the log to it yet: read it (`steps::log_to`), and give it
+    /// (`with_log`), before taking them.
+    pub fn wants_log(&self, read: &[Option<steps::Given>]) -> Result<Option<u64>> {
+        if self.truth.is_some() {
+            return Ok(None);
+        }
+        let ordered = causal(self.entries.values().cloned().collect(), &HashMap::new());
+        let (view, cuts) = steps::view(self.root, &ordered, now())?;
+        // Placed where they are: the ones before were looked at already, and none was a freeze an admin signed.
+        let mut placed: Vec<Option<steps::Given>> = vec![None; self.looked as usize];
+        placed.extend(read.iter().cloned());
+        Ok(steps::wants_log(&placed, &view, &cuts).filter(|end| self.log.as_ref().is_none_or(|l| l.to != *end)))
+    }
+
+    /// `global`'s log to the end a freeze names, read from its steps (`wants_log`).
+    pub fn with_log(&mut self, log: steps::Log) {
+        self.log = Some(log);
+    }
+
+    /// Takes steps read from the bucket with this device's own keys (`steps::read`), after those held, with `global`'s
+    /// log to the end a freeze among them names, if one does (`wants_log`).
     pub fn add_read(&mut self, read: Vec<Option<steps::Given>>) -> Result<()> {
         for given in read {
             self.take(self.at() + 1, given.as_ref())?;
@@ -81,41 +107,66 @@ impl Global {
         Ok(())
     }
 
-    /// Takes steps as a node passes them on, sealed (`GET /v1/steps/global`: `{ steps: [{ at, sealed }] }`, base64url),
-    /// opened here with `epochs`, `global`'s epochs' keys sealed to this device (raw, by number), each used only once
-    /// who's who as the steps before it leave it says it's that epoch's, and `apps`, the node's key in each epoch
-    /// sealed under it (base64url, by number). Stops at one under an epoch this device has no key for yet, or whose
-    /// freeze waits for entries. With `welcome` (`steps::Welcome`), before it's read to its freeze, it starts from
-    /// there (`add_welcomed`).
-    pub fn add_sealed(&mut self, given: &Value, epochs: &BTreeMap<u32, [u8; 32]>, apps: &BTreeMap<u32, Vec<u8>>) -> Result<()> {
+    /// Takes steps as this device read them from the bucket itself, sealed (`{ steps: [{ at, sealed }], log }`,
+    /// base64url, through the URL signer's `get`, never a node), opened here with `epochs`, `global`'s epochs' keys
+    /// sealed to this device (raw, by number), each used only once who's who as the steps before it leave it says it's
+    /// that epoch's, and `apps`, the node's key in each epoch sealed under it (base64url, by number). One the bucket
+    /// holds that doesn't open is junk, passed over as every reader passes it over; one whose bytes didn't come stops
+    /// it, to be asked again. Stops at one under an epoch this device has no key for yet, and at a freeze an admin's
+    /// device signed until `log`, `global`'s log's steps to the end it names (`{ to, steps }`), is given: → that end, to
+    /// read them to, and give again. With `welcome` (`steps::Welcome`), before it's read to its freeze, it starts from
+    /// there (`add_welcomed`): what it's given for that is checked against the Welcome's hash, wherever it came from.
+    pub fn add_sealed(&mut self, given: &Value, epochs: &BTreeMap<u32, [u8; 32]>, apps: &BTreeMap<u32, Vec<u8>>) -> Result<Option<u64>> {
         // Welcomed: from the copy a node passed on with them. One that doesn't check out is read from the freeze on.
         if let Some(welcome) = given["welcome"].as_str().and_then(steps::Welcome::parse) {
             let _ = self.add_welcomed(&welcome, given, epochs, apps);
         }
         let mut keys = one::db::Keys::new();
-        for s in given["steps"].as_array().into_iter().flatten() {
-            let Some(at) = s["at"].as_u64().filter(|at| *at == self.at() + 1) else { continue };
-            let Some(sealed) = s["sealed"].as_str().and_then(|b| data_encoding::BASE64URL_NOPAD.decode(b.as_bytes()).ok()) else { break };
-            if let Ok(e) = one::keys::epoch_of(&sealed)
-                && !keys.contains_key(&e)
+        let key = |keys: &mut one::db::Keys, who: &ScopeDb, e: u32| {
+            if !keys.contains_key(&e)
                 && let Some(epoch) = epochs.get(&e)
-                && self.who()?.epoch_hash(&Scope::Global, e) == Some(one::keys::epoch_hash(epoch))
+                && who.epoch_hash(&Scope::Global, e) == Some(one::keys::epoch_hash(epoch))
                 && let Some(app) = apps.get(&e).and_then(|a| one::cloudflare::open_app_key(epoch, one::members::APP, a).ok())
             {
                 keys.insert(e, one::cloudflare::database_key(&app, one::log::NAME));
+            }
+        };
+        if self.truth.is_none()
+            && let Some(log) = given["log"].as_object()
+            && let Some(to) = log.get("to").and_then(Value::as_u64)
+        {
+            // Opened with the keys of every epoch the entries made, which its steps are sealed under.
+            let who = self.who()?;
+            for e in who.epoch_hashes(&Scope::Global).into_keys() {
+                key(&mut keys, &who, e);
+            }
+            let mut read = one::log::ReadTo::default();
+            let prefix = one::log::prefix("global");
+            let sealed: BTreeMap<u64, &str> = log.get("steps").and_then(Value::as_array).into_iter().flatten().filter_map(|s| Some((s["at"].as_u64()?, s["sealed"].as_str()?))).collect();
+            for at in 1..=to {
+                let bytes = sealed.get(&at).and_then(|b| data_encoding::BASE64URL_NOPAD.decode(b.as_bytes()).ok()).with_context(|| format!("global's log's step {at} didn't come"))?;
+                read.take(&keys, &one::db::step_name(&prefix, at), &bytes, "global")?;
+            }
+            self.log = Some(steps::Log { to, entries: read.entries });
+        }
+        for s in given["steps"].as_array().into_iter().flatten() {
+            let Some(at) = s["at"].as_u64().filter(|at| *at == self.at() + 1) else { continue };
+            let Some(sealed) = s["sealed"].as_str().and_then(|b| data_encoding::BASE64URL_NOPAD.decode(b.as_bytes()).ok()) else { break };
+            if let Ok(e) = one::keys::epoch_of(&sealed) {
+                let who = self.who()?;
+                key(&mut keys, &who, e);
             }
             let opened = match steps::open(&keys, &Scope::Global, at, &sealed) {
                 steps::Opened::Step(g) => Some(g),
                 steps::Opened::Junk => None,
                 steps::Opened::Waits(_) => break,
             };
-            match self.take(at, opened.as_ref()) {
-                Ok(()) => {}
-                Err(err) if err.is::<steps::Newer>() => return Err(err),
-                Err(_) => break,
+            if let Some(end) = self.wants_log(std::slice::from_ref(&opened))? {
+                return Ok(Some(end));
             }
+            self.take(at, opened.as_ref())?;
         }
-        Ok(())
+        Ok(None)
     }
 
     /// Starts from `truth`, worked out from where the device that let this one in read who's who to
@@ -190,15 +241,7 @@ impl Global {
 
     /// Each device that signed two entries at one seq, cut from the first.
     fn forks(&self) -> Cuts {
-        let mut seen: HashMap<(Key, u32), Hash> = HashMap::new();
-        let mut forks = Cuts::new();
-        for e in self.entries.values() {
-            if seen.insert((e.author(), e.seq()), e.hash()).is_some_and(|h| h != e.hash()) {
-                let at = forks.entry((e.author(), "global".into())).or_insert(u32::MAX);
-                *at = (*at).min(e.seq());
-            }
-        }
-        forks
+        steps::forks(&self.entries.values().cloned().collect::<Vec<_>>())
     }
 
     /// The install's genesis, once known.
@@ -404,7 +447,7 @@ mod tests {
         i.write(&mac, ANDRE, members::device(&at(&boxed), ANDRE, "box", &[Kind::Compute], None));
         i.write(&mac, ANDRE, members::device(&at(&laptop), BOB, "laptop", &[Kind::Client], Some(("Bob", Role::Member))));
         i.write(&mac, ANDRE, members::device(&at(&carols), CAROL, "phone", &[Kind::Client], Some(("Carol", Role::Member))));
-        i.write(&mac, ANDRE, members::setting("serverless", Some(&hex(&serverless.verifying_key().to_bytes()))));
+        i.write(&mac, ANDRE, members::setting("serverless", Some(&hex(&cloudflare_node.verifying_key().to_bytes()))));
         i.write(&laptop, BOB, members::device(&at(&bobs_box), BOB, "bob's box", &[Kind::Compute], None));
         i.write(&laptop, BOB, members::runs(&[]));
         i.write(&laptop, BOB, members::epoch(&Scope::User(BOB.into()), 1, &[laptop.verifying_key().to_bytes()], &hash('b')));

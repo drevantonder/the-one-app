@@ -404,8 +404,12 @@ impl Device {
                 Err(_) => drop(std::fs::remove_file(self.dir.join("welcome"))),
             }
         }
-        let at = global.at();
-        global.add_read(one::database::steps::read(&bucket, &log_keys, &Scope::Global, at).await.map_err(failed)?).map_err(failed)?;
+        let steps = one::database::steps::read(&bucket, &log_keys, &Scope::Global, global.at()).await.map_err(failed)?;
+        // A freeze an admin's device signed among them: checked against global's log up to where it says it ends.
+        if let Some(end) = global.wants_log(&steps).map_err(failed)? {
+            global.with_log(one::database::steps::log_to(&bucket, &log_keys, end).await.map_err(failed)?);
+        }
+        global.add_read(steps).map_err(failed)?;
         let who = global.who().map_err(failed)?;
         if kept.is_none()
             && let Some(root) = global.root()

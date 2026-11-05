@@ -31,6 +31,9 @@ pub const READS: u32 = 1;
 /// What every listed device must read before the log is frozen.
 pub const GATE: u32 = 2;
 
+// The switch on in a build that reads less than its gate waits for would never open it.
+const _: () = assert!(!SWITCH || READS >= GATE, "SWITCH is on, so this build must read what the gate waits for: READS >= GATE");
+
 /// The header a client says what it reads in, with its build: `<reads> <build>`. A node before the gate ignores it.
 pub const HEADER: &str = "x-one-reads";
 
@@ -104,8 +107,9 @@ pub fn gate_at(db: &ScopeDb, reads: &HashMap<Key, Reads>, at_least: u32) -> Gate
             continue;
         }
         // Only a client is skipped: a machine that runs things writes to the bucket itself, under epochs it no longer
-        // knows once its install switched, so one gone for good is removed, which the bucket's URLs stop for.
-        if skips.contains(&key) && db.compute(&key).is_none() {
+        // knows once its install switched, so one gone for good is removed, which the bucket's URLs stop for; and the
+        // Cloudflare node never is, which no one removes.
+        if skips.contains(&key) && db.compute(&key).is_none() && db.cloudflare_node() != Some(key) {
             gate.skipped.push(key);
         } else {
             gate.waiting.push((key, said.cloned()));

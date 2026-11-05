@@ -447,6 +447,10 @@ pub struct Inner {
     making_keys: tokio::sync::Mutex<()>,
     /// Positions of each database (by prefix) holding a step under an epoch no entry made, which every read passes over.
     junk: Mutex<HashMap<String, std::collections::BTreeSet<u64>>>,
+    /// The `FREEZING` step a writer of the log last waited on, and when it first saw it (`node::steps`).
+    freezing_seen: Mutex<Option<(u64, std::time::Instant)>>,
+    /// `global`'s log up to its freeze's end of it, once read: what each scope's database starts from (`node::steps`).
+    frozen_log: Mutex<Option<Arc<crate::database::steps::Log>>>,
     /// When this device last tidied each database (by prefix), ms.
     tidied: Mutex<HashMap<String, u64>>,
     /// The last position this device wrote an entry of each scope at.
@@ -593,6 +597,8 @@ impl Node {
             moved: Arc::default(),
             making_keys: tokio::sync::Mutex::new(()),
             junk: Mutex::new(HashMap::new()),
+            freezing_seen: Mutex::new(None),
+            frozen_log: Mutex::new(None),
             tidied: Mutex::new(HashMap::new()),
             written: Mutex::new(HashMap::new()),
             hinted: Mutex::new(HashMap::new()),

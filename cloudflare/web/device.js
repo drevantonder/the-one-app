@@ -128,14 +128,20 @@ export class Device {
       });
       // What an older release kept, without all its answers (each person's `keeps` came last), is replayed again.
       const given = r && r.status !== 204 ? new Uint8Array(await r.arrayBuffer()) : undefined;
-      // Once the log is frozen, who's who is its scope database's steps after those kept, which this browser opens
-      // itself; a node that isn't says so.
-      const frozen = kept?.members?.frozen || this.state()?.install?.frozen;
-      // A browser that hasn't read to its freeze starts from where the device that let it in had (its Welcome).
-      const welcome = !kept?.steps?.truth && (await get(`welcome:${this.user}`));
-      const steps = frozen ? await this.api(`/v1/steps/global?from=${kept?.at || 0}${welcome ? `&welcome=${welcome}` : ""}`).catch(() => null) : null;
-      if (steps?.steps?.length || steps?.freeze) steps.keys = await this.logKeys();
-      const k = !given && !steps?.steps?.length && !steps?.freeze && kept?.members?.people?.[this.user]?.keeps ? kept.members : await this.replay(this.user, given, steps);
+      // Who's who's scope database's steps after those kept, its freeze among them, which this browser reads from the
+      // bucket and opens itself, never as a node passes them on.
+      const read = await this.bucketSteps("scope", kept?.at || 0).catch((err) => {
+        if (fresh || !kept) throw err;
+        return [];
+      });
+      // A browser that hasn't read to its freeze starts from where the device that let it in had (its Welcome): the
+      // freeze and copy a node passes on, checked against the Welcome's hash.
+      const welcome = !kept?.steps?.truth && read.length && (await get(`welcome:${this.user}`));
+      const welcomed = welcome ? await this.api(`/v1/steps/global?from=0&welcome=${welcome}`).catch(() => null) : null;
+      const steps = read.length ? { steps: read, welcome: welcomed?.welcome, freeze: welcomed?.freeze, start: welcomed?.start, keys: await this.logKeys() } : null;
+      let k = !given && !steps && kept?.members?.people?.[this.user]?.keeps ? kept.members : await this.replay(this.user, given, steps);
+      // A freeze an admin's device signed: checked against the log's steps up to where it says the log ends.
+      if (k.wants_log) k = await this.replay(this.user, undefined, { ...steps, log: { to: k.wants_log, steps: await this.bucketSteps("log", 0, k.wants_log) } });
       // One that didn't check out is read from the freeze on, the next time.
       if (welcome && !(await get(`global:${this.user}`))?.steps?.truth) await del(`welcome:${this.user}`).catch(() => {});
       if (!k.people[this.user]) throw new Error("Your One App doesn't list you yet, so this device didn't use it.");
@@ -399,6 +405,27 @@ export class Device {
     await Promise.all(handed.map((n) => this.databaseKey(n, note)));
     this.needs[route] = { need: handed };
     try { localStorage.setItem("one.needs", JSON.stringify(this.needs)); } catch {}
+  }
+
+  /// `global`'s `database`'s steps after `from` (`scope`, its scope database's, or `log`, its log's, up to `to`), as
+  /// the bucket holds them, read through the URL signer's `get`, 32 at a time: `[{ at, sealed }]`, base64url, to the
+  /// first that isn't there. One missing before another that is, or before `to`, throws: it was written.
+  async bucketSteps(database, from, to = Infinity) {
+    const prefix = prefixOf({ scope: "global", app: "node", database });
+    const out = [];
+    for (let at = from + 1; at <= to; at += 32) {
+      const r = await fetch("/urls", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(await this.signed("one/urls", { get: [{ steps: prefix, from: at, to: Math.min(at + 31, to) }] })) });
+      const body = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(body.error || "Your One App's storage didn't answer. Try again.");
+      // A URL signer older than its `get`, which only Workers deployed before the switch are.
+      if (!body.get) return out;
+      const sealed = Object.keys(body.get).sort().map((name) => body.get[name]);
+      const end = sealed.indexOf(null);
+      if ((end >= 0 && sealed.slice(end).some((b) => b !== null)) || (end >= 0 && to !== Infinity)) throw new Error("Part of who's who is missing from your One App's storage, so this device read no further.");
+      out.push(...sealed.slice(0, end >= 0 ? end : sealed.length).map((b, i) => ({ at: at + i, sealed: b })));
+      if (end >= 0) break;
+    }
+    return out;
   }
 
   /// Each database of `needs`' newest hint, by its prefix in the bucket (`prefixOf`): its text, or null if it has

@@ -3,19 +3,20 @@
 // asked `allowed(key)`), for a request each signs with its own key (src/keys.rs `signed_request`, domain `one/urls`):
 //
 //   POST /urls { read, head, create: [item], replace: [{ name, etag }], remove: [name],
-//                list: [{ prefix, delimiter?, token? }], confirm: [{ name, etag }], newest: [prefix], at, by, sig }
+//                list: [{ prefix, delimiter?, token? }], confirm: [{ name, etag }], newest: [prefix], get: [item],
+//                at, by, sig }
 //   → { read, head, create, replace, remove: { name: url }, list: [url], confirm: { name: bool },
-//       newest: { prefix: text | null }, until }
+//       newest: { prefix: text | null }, get: { name: base64url | null }, until }
 //
 // An item is a name, or a database's steps from one position to another (`{ steps: prefix, from, to }`), so a node
 // asks for the positions it reads or writes next in one trip. Any endpoint of the install may read, list and create
 // (only if absent: `If-None-Match: *` is signed in); a `…/newest` is replaced only by its ETag (`If-Match`); only an
-// admin's endpoint removes. `confirm` says whether each object is there with that ETag, and `newest` what each
-// database's newest hint says (`<prefix>/newest`, never sealed), for browsers, which can't read the bucket: both open
-// nothing. It knows
+// admin's endpoint removes. `confirm` says whether each object is there with that ETag, `newest` what each
+// database's newest hint says (`<prefix>/newest`, never sealed), and `get` each object's bytes, sealed as they are, for
+// browsers, which can't read the bucket: all open nothing. It knows
 // nobody's scopes and checks none: everything in the bucket is sealed, so what it hands out opens nothing without keys.
 
-import { checkRequest } from "../shared/crypto.js";
+import { b64u, checkRequest } from "../shared/crypto.js";
 import { bucketUrls } from "../shared/s3.js";
 
 /// How long URLs work, in seconds, the most it signs at once, and the most objects it confirms at once.
@@ -91,6 +92,21 @@ async function newest(env, bucket, prefixes) {
   return out;
 }
 
+/// Each object's bytes, by its name, base64url: null for one that isn't there.
+async function got(env, bucket, names) {
+  const reads = env.R2 ? null : (await bucketUrls(bucket, { read: names }, 60)).read;
+  const out = {};
+  await Promise.all(names.map(async (name) => {
+    const bytes = env.R2 ? await (await env.R2.get(name))?.arrayBuffer() : await (async () => {
+      const r = await fetch(reads[name]);
+      if (!r.ok && r.status !== 404) throw new Error(`the bucket said ${r.status}`);
+      return r.ok ? r.arrayBuffer() : null;
+    })();
+    out[name] = bytes ? b64u.encode(new Uint8Array(bytes)) : null;
+  }));
+  return out;
+}
+
 async function urls(request, env) {
   if (!env.BUCKET) fail(503, "your One App has no bucket yet");
   const body = await request.json().catch(() => fail(400, "the body isn't JSON"));
@@ -111,6 +127,8 @@ async function urls(request, env) {
   const pages = list(fields.list);
   const confirms = list(fields.confirm);
   const hints = list(fields.newest);
+  const gets = list(fields.get).flatMap(names);
+  if (gets.length > 32) fail(400, "at most 32 objects got at once");
   if (read.length + head.length + create.length + replace.length + remove.length + pages.length > MOST) fail(400, `at most ${MOST} URLs at once`);
   if (confirms.length + hints.length > CONFIRM) fail(400, `at most ${CONFIRM} objects confirmed or hints read at once`);
   if (!hints.every(isName)) fail(400, "each newest is a database's prefix");
@@ -125,7 +143,7 @@ async function urls(request, env) {
   const bucket = JSON.parse(env.BUCKET);
   const until = Date.now() + EXPIRES * 1000;
   const out = await bucketUrls(bucket, { read, head, create, replace, remove, list: pages }, EXPIRES);
-  return { ...out, confirm: confirms.length ? await confirm(env, bucket, confirms) : {}, newest: hints.length ? await newest(env, bucket, hints) : {}, until };
+  return { ...out, confirm: confirms.length ? await confirm(env, bucket, confirms) : {}, newest: hints.length ? await newest(env, bucket, hints) : {}, get: gets.length ? await got(env, bucket, gets) : {}, until };
 }
 
 export default {

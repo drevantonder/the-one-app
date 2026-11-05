@@ -7,12 +7,15 @@
 //! but where its writer meant it: one that loses its position to another is signed again for the next. A node only
 //! carries a client's step to the bucket: it can hold one back, but change none.
 //!
-//! The cut-over is `global`'s first step that is a freeze that checks out (`FREEZE`, `anchor`): signed by an admin's
-//! own device, it names the log's final position (the last of each device's entries in `global`, and of every other
-//! scope's log the last step in the bucket) and carries the database at it, its first copy. Every reader checks that
-//! copy once against what the entries it names add up to here, in its own release's form (`normalize`), and keeps it:
-//! from then on it reads the copy it keeps and the steps after, never the entries again. Being a step, exactly one
-//! freeze wins; a `FREEZING` step before it tells writers of the log to look whether what they wrote is inside it.
+//! The cut-over is `global`'s first step that is a freeze an admin's own device signed (`FREEZE`, `claimed`): it names
+//! the step of `global`'s log where the log ends (and of every other scope's log the last step in the bucket), and
+//! carries the database there, its first copy. Every reader replays exactly the entries in `global`'s log's steps up to
+//! it (`Log`), forks only among those, so every reader replays the same ones whatever it holds or reads later; checks
+//! the signer was an admin's own device there, and still is in everything the reader holds; and that the copy says
+//! what those entries add up to (`anchor`). Then it keeps it: from then on it reads the copy it keeps and the steps
+//! after, never the entries again. A freeze an admin signed that doesn't check out stops the reader there, as a newer
+//! release's step does, never passed over for the next; anyone else's is nothing. A `FREEZING` step before it tells
+//! writers of the log to look whether what they wrote is inside it.
 //! Every other scope's database starts, before its first step, from what its log's entries up to the freeze's position
 //! there add up to (`scope_anchor`), which every reader of it works out itself: no writer chooses it.
 //!
@@ -45,7 +48,7 @@ use ed25519_dalek::SigningKey;
 use rusqlite::Connection;
 use serde_json::{Value, json};
 
-use crate::entry::{Content, Entry, Ext, Hash, Key, Scope, hex, unhex};
+use crate::entry::{Content, Entry, Ext, Hash, Key, Scope, unhex};
 use crate::members::{self, Cuts, Members, Principal, Role, ScopeState};
 use crate::permissions;
 
@@ -107,17 +110,6 @@ pub fn encoded(given: &Given) -> Vec<u8> {
     encode(&given.step, given.copy.as_deref())
 }
 
-/// Who's who as a reader that keeps nothing of its own works it out from `global`'s entries it has (in replay order,
-/// with `forks`, of the install at `root`) and its scope database's steps, by position from the first: the steps'
-/// once its log is frozen (`Truth::read`), replay's before.
-pub fn who(steps: &[Option<Given>], root: Option<Hash>, entries: &[Entry], forks: &Cuts, now: u64) -> Result<ScopeDb> {
-    if let Some(t) = Truth::read(steps, root, entries, forks, now)? {
-        return Ok(t.db);
-    }
-    let member_entries: Vec<Entry> = entries.iter().filter(|e| members::is_member_entry(e)).cloned().collect();
-    ScopeDb::build(&Members::replay(root, &member_entries, forks), &Scope::Global, &ScopeState::default(), now)
-}
-
 /// What a sealed step is to a reader with `keys`, its log's keys by epoch.
 pub enum Opened {
     /// A step.
@@ -144,8 +136,8 @@ pub fn open(keys: &crate::db::Keys, scope: &Scope, at: u64, sealed: &[u8]) -> Op
 
 /// Reads `scope`'s steps after `from` from the bucket, opened with the keys of its log by epoch: each by position, none
 /// for one that will never be a step. Stops at the first position with nothing, or one under an epoch it has no key
-/// for, which waits for it; fails at a position with nothing that a later step or the newest hint says was written,
-/// rather than read on as if the steps ended there.
+/// for, which waits for it; fails at a position with nothing that a later step says was written, rather than read on
+/// as if the steps ended there.
 pub async fn read(bucket: &impl crate::bucket::Bucket, keys: &crate::db::Keys, scope: &Scope, from: u64) -> Result<Vec<Option<Given>>> {
     let prefix = prefix(&scope.to_string());
     let mut out = Vec::new();
@@ -164,22 +156,22 @@ pub async fn read(bucket: &impl crate::bucket::Bucket, keys: &crate::db::Keys, s
     Ok(out)
 }
 
-/// Fails if step `at` at `prefix`, which isn't in the bucket, was written: a later one is, or the newest hint says so.
-/// Steps are written one after another, so one gone is one deleted, and reading on as if it never was would pass over
-/// whatever it and those after it changed.
+/// Fails if step `at` at `prefix`, which isn't in the bucket, was written: a later one is. Steps are written one after
+/// another, so one gone is one deleted, and reading on as if it never was would pass over whatever it and those after
+/// it changed. The newest hint is anyone's to write, so it says nothing here: one above the last step is junk.
 pub async fn missing(bucket: &impl crate::bucket::Bucket, prefix: &str, at: u64) -> Result<()> {
-    let hinted = bucket.get(&crate::db::newest_name(prefix)).await?.map_or(0, |o| crate::db::newest(&o.bytes).0);
     let later = bucket.get(&crate::db::step_name(prefix, at + 1)).await?.is_some();
-    ensure!(hinted < at && !later, "step {at} of {prefix} isn't in the bucket, though later ones were written: this device reads no further until it's back");
+    ensure!(!later, "step {at} of {prefix} isn't in the bucket, though later ones were written: this device reads no further until it's back");
     Ok(())
 }
 
 /// The kind of step that tells writers of the log that it's being frozen: the first a device of an admin's writes,
 /// before it works out where the log ends. Changes nothing; a writer that finds one after it wrote an entry looks
-/// whether the freeze that follows holds it (`Freeze::holds`).
+/// whether the freeze that follows holds it (`Freeze::holds`), and once it has waited `node::steps`' while for one
+/// that doesn't come, writes on: its admin's device writes the freeze within half that, or not at all.
 pub const FREEZING: &str = "freezing";
 
-/// The kind of step that freezes the log (`anchor`): `{ hash, frontier, logs }`, with its copy.
+/// The kind of step that freezes the log (`anchor`): `{ hash, logs }`, with its copy.
 pub const FREEZE: &str = "freeze";
 
 /// Where the log was frozen, as its freeze says it.
@@ -189,9 +181,7 @@ pub struct Freeze {
     pub at: u64,
     /// The state hash its copy comes to, as it is (`db::state_hash`).
     pub hash: String,
-    /// The last of each device's entries in `global` that count.
-    pub frontier: BTreeMap<Key, u32>,
-    /// The last step of every other scope's log that counts, by scope.
+    /// The last step of every scope's log that counts, by scope: `global`'s among them.
     pub logs: BTreeMap<String, u64>,
 }
 
@@ -203,53 +193,129 @@ impl Freeze {
     }
 
     fn from_data(data: &Value, at: u64) -> Result<Freeze> {
-        let mut frontier = BTreeMap::new();
-        for (k, n) in data["frontier"].as_object().context("a freeze names its frontier")? {
-            frontier.insert(unhex(k)?, u32::try_from(n.as_u64().context("a frontier is seqs")?)?);
-        }
         let mut logs = BTreeMap::new();
         for (scope, n) in data["logs"].as_object().context("a freeze names every scope's log")? {
             Scope::parse(scope)?;
             logs.insert(scope.clone(), n.as_u64().context("a log's end is a position")?);
         }
-        Ok(Freeze { at, hash: data["hash"].as_str().context("a freeze names its copy's hash")?.to_string(), frontier, logs })
+        ensure!(logs.get("global").is_some_and(|n| *n > 0), "a freeze names where global's log ends");
+        Ok(Freeze { at, hash: data["hash"].as_str().context("a freeze names its copy's hash")?.to_string(), logs })
     }
 
     /// As a freeze says it, and as a reader keeps it.
     pub fn content(&self) -> Content {
-        let frontier: serde_json::Map<String, Value> = self.frontier.iter().map(|(k, n)| (hex(k), json!(n))).collect();
-        Content::new(members::APP, FREEZE, json!({ "hash": self.hash, "frontier": frontier, "logs": self.logs }))
+        Content::new(members::APP, FREEZE, json!({ "hash": self.hash, "logs": self.logs }))
+    }
+
+    /// The last step of `global`'s log it holds: every reader replays exactly the entries up to it.
+    pub fn global(&self) -> u64 {
+        self.logs.get("global").copied().unwrap_or(0)
     }
 
     /// Whether `entry`, written at step `step` of its scope's log, counts: the freeze holds it.
     pub fn holds(&self, entry: &Entry, step: u64) -> bool {
-        match entry.scope() {
-            Scope::Global => self.frontier.get(&entry.author()).is_some_and(|n| entry.seq() <= *n),
-            scope => self.logs.get(&scope.to_string()).is_some_and(|n| step <= *n),
-        }
-    }
-
-    /// Of `entries` (`global`'s, in replay order), those it holds; or none while one is missing, which a reader waits for.
-    pub fn entries(&self, entries: &[Entry]) -> Option<Vec<Entry>> {
-        let held: Vec<Entry> = entries.iter().filter(|e| self.frontier.get(&e.author()).is_some_and(|n| e.seq() <= *n)).cloned().collect();
-        let mut seqs: BTreeMap<Key, BTreeSet<u32>> = BTreeMap::new();
-        for e in &held {
-            seqs.entry(e.author()).or_default().insert(e.seq());
-        }
-        self.frontier.iter().all(|(k, n)| seqs.get(k).is_some_and(|s| s.len() as u64 == u64::from(*n) + 1)).then_some(held)
-    }
-
-    /// Who's who at the freeze, as replay makes it of `entries` (`global`'s, in replay order): its members, member
-    /// entries and state.
-    fn replayed(&self, root: Option<Hash>, entries: &[Entry], forks: &Cuts) -> Option<(Members, Vec<Entry>, ScopeState)> {
-        let held = self.entries(entries)?;
-        let member_entries: Vec<Entry> = held.iter().filter(|e| members::is_member_entry(e)).cloned().collect();
-        let known = Members::replay(root, &member_entries, forks);
-        let (m, state) = members::replay(&known, &member_entries, &held, |_, _, _| {});
-        Some((m, member_entries, state))
+        self.logs.get(entry.log()).is_some_and(|n| step <= *n)
     }
 }
 
+/// `global`'s log up to a freeze's end of it: the entries in its steps 1 to `to`, read from the steps themselves
+/// (`log_to`), never a copy, nor what a reader happens to hold. Every reader of the freeze replays exactly these.
+#[derive(Clone, Debug, Default)]
+pub struct Log {
+    pub to: u64,
+    pub entries: Vec<Entry>,
+}
+
+/// `global`'s log up to step `to`, from the bucket (`Log`).
+pub async fn log_to(bucket: &impl crate::bucket::Bucket, keys: &crate::db::Keys, to: u64) -> Result<Log> {
+    let entries = crate::log::read_to(bucket, keys, &crate::log::prefix("global"), "global", to).await?;
+    Ok(Log { to, entries })
+}
+
+/// `global`'s log to the end the freeze an admin signed among `steps` names (`wants_log`), as a reader that keeps
+/// nothing and holds `ordered`, `global`'s entries in replay order (`view`), finds it, from the bucket: none before
+/// there's one.
+pub async fn log_for(bucket: &impl crate::bucket::Bucket, keys: &crate::db::Keys, steps: &[Option<Given>], root: Option<Hash>, ordered: &[Entry], now: u64) -> Result<Option<Log>> {
+    let end = {
+        let (view, cuts) = view(root, ordered, now)?;
+        wants_log(steps, &view, &cuts)
+    };
+    match end {
+        Some(end) => Ok(Some(log_to(bucket, keys, end).await?)),
+        None => Ok(None),
+    }
+}
+
+/// Each device that signed two entries at one seq of a log among `entries`, cut from the first: the forks a reader
+/// that holds just those finds, as a node's store finds them (`Store::forks`).
+pub fn forks(entries: &[Entry]) -> Cuts {
+    let mut seen: BTreeMap<(Key, String, u32), Hash> = BTreeMap::new();
+    let mut cuts = Cuts::new();
+    for e in entries {
+        if seen.insert((e.author(), e.log().to_string(), e.seq()), e.hash()).is_some_and(|h| h != e.hash()) {
+            let at = cuts.entry((e.author(), e.log().to_string())).or_insert(u32::MAX);
+            *at = (*at).min(e.seq());
+        }
+    }
+    cuts
+}
+
+/// What `entries` of `global`'s (in any order) replay to, of the install at `root`: in causal order, with only the forks
+/// among them.
+fn replay_all(root: Option<Hash>, entries: &[Entry]) -> Replayed {
+    let ordered = crate::entry::causal(entries.to_vec(), &Default::default());
+    let member_entries: Vec<Entry> = ordered.iter().filter(|e| members::is_member_entry(e)).cloned().collect();
+    let known = Members::replay(root, &member_entries, &forks(entries));
+    let (members, state) = members::replay(&known, &member_entries, &ordered, |_, _, _| {});
+    Replayed { known, members, member_entries, state, ordered }
+}
+
+/// What `replay_all` makes: the members as the member entries replay (`known`), and as the whole replay leaves them
+/// with its state; the member entries, and every entry, in order, each with its depth.
+struct Replayed {
+    known: Members,
+    members: Members,
+    member_entries: Vec<Entry>,
+    state: ScopeState,
+    ordered: Vec<Entry>,
+}
+
+/// Who's who before the freeze, as a reader that keeps nothing of its own works it out from `ordered`, `global`'s
+/// entries it holds in replay order, of the install at `root`: with the forks among them, as a node replays them.
+/// → it, and those forks: what a freeze's signer is checked against (`claimed`).
+pub fn view(root: Option<Hash>, ordered: &[Entry], now: u64) -> Result<(ScopeDb, Cuts)> {
+    let member_entries: Vec<Entry> = ordered.iter().filter(|e| members::is_member_entry(e)).cloned().collect();
+    let cuts = forks(ordered);
+    Ok((ScopeDb::build(&Members::replay(root, &member_entries, &cuts), &Scope::Global, &ScopeState::default(), now)?, cuts))
+}
+
+/// Who's who as a reader that keeps nothing of its own works it out from `ordered`, `global`'s entries it holds in
+/// replay order, of the install at `root`, its scope database's steps by position from the first, and `global`'s log
+/// up to the freeze an admin signed among them (`log_for`): the steps' once its log is frozen (`Truth::read`),
+/// replay's before.
+pub fn who(steps: &[Option<Given>], root: Option<Hash>, ordered: &[Entry], log: Option<&Log>, now: u64) -> Result<ScopeDb> {
+    let (view, cuts) = view(root, ordered, now)?;
+    Ok(Truth::read(steps, root, &view, &cuts, log, now)?.map_or(view, |t| t.db))
+}
+
+/// Whether `given`, step `at` of `global`'s database before its freeze, is a freeze an admin's own device signed, as
+/// `view` says (who's who from everything the reader holds, once it read the log to its end; `cuts` its forks): the
+/// freeze it says. One that isn't (a node's, a member's, a removed device's, a demoted admin's) is nothing, passed
+/// over. One that is binds: it checks out (`anchor`) or the reader stops there. A device of theirs cut by a fork is
+/// still theirs here: forks count only among the entries the freeze holds.
+pub fn claimed(given: Option<&Given>, at: u64, view: &ScopeDb, cuts: &Cuts) -> Option<Freeze> {
+    let step = &given.filter(|g| g.step.content.kind == FREEZE)?.step;
+    let freeze = Freeze::of(step, at).ok()?;
+    let forked = cuts.contains_key(&(step.author(), "global".to_string()));
+    let theirs = view.client(&step.author()).is_some_and(|c| c.user == step.user()) || (forked && view.machine_ever(&step.author()).is_some_and(|m| m.user == step.user() && m.is(members::Kind::Client)));
+    (theirs && view.may(step.user(), "change-settings", scopes::INSTALL)).then_some(freeze)
+}
+
+/// Of `steps`, `global`'s database's by position from the first, the end of `global`'s log the first freeze an admin
+/// signed names (`claimed`): what a reader reads the log to (`log_to`) before it takes the steps.
+pub fn wants_log(steps: &[Option<Given>], view: &ScopeDb, cuts: &Cuts) -> Option<u64> {
+    steps.iter().enumerate().find_map(|(i, g)| claimed(g.as_ref(), i as u64 + 1, view, cuts)).map(|f| f.global())
+}
 /// The database a copy is, as bytes.
 pub fn connection(bytes: &[u8]) -> Result<Connection> {
     let mut conn = Connection::open_in_memory()?;
@@ -259,8 +325,7 @@ pub fn connection(bytes: &[u8]) -> Result<Connection> {
 }
 
 /// A scope's database another device wrote (a copy), or one this device kept from an older release, in this release's
-/// form: what it says, built again here, with what only its steps said carried over (`carry`). Two devices' databases
-/// are compared only in one form.
+/// form: what it says, built again here, with what only its steps said carried over (`carry`).
 pub fn normalize(copy: Connection, scope: &Scope, now: u64) -> Result<ScopeDb> {
     ensure!(version(&copy)? <= switch::READS, Newer);
     let copy = ScopeDb::open(copy, now)?;
@@ -269,54 +334,79 @@ pub fn normalize(copy: Connection, scope: &Scope, now: u64) -> Result<ScopeDb> {
     ScopeDb::open(built, now)
 }
 
-/// The freeze `given` is, at position `at`, as checked here: an admin's own device signed it, its copy comes to the
-/// hash it names, and `global`'s entries it names (of `entries`, every one this reader has, in replay order, with
-/// `forks` as `Store::forks` found them, of the install whose genesis is `root`) add up to what the copy says, in this
-/// release's form. → the database it anchors, this release's form of its copy; none while an entry it names isn't
-/// here, which a reader waits for.
-pub fn anchor(given: &Given, at: u64, root: Option<Hash>, entries: &[Entry], forks: &Cuts, now: u64) -> Result<Option<ScopeDb>> {
+/// Whether `own` says everything `copy` says: each of the copy's tables, by the columns both have, holds the same rows.
+/// Only what the copy says is compared, so a later release that works out more from the entries (a column, a table)
+/// still finds an older release's copy is what they add up to.
+fn says(copy: &Connection, own: &Connection) -> Result<bool> {
+    let quote = |name: &str| format!("\"{}\"", name.replace('"', "\"\""));
+    let tables = |c: &Connection| -> Result<BTreeSet<String>> {
+        let mut q = c.prepare("select name from sqlite_schema where type = 'table' and name not like 'sqlite\\_%' escape '\\'")?;
+        Ok(q.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?)
+    };
+    let columns = |c: &Connection, t: &str| -> Result<Vec<String>> {
+        let mut q = c.prepare("select name from pragma_table_info(?1) order by cid")?;
+        Ok(q.query_map([t], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?)
+    };
+    let rows = |c: &Connection, t: &str, cols: &[String]| -> Result<Vec<Vec<rusqlite::types::Value>>> {
+        let list = cols.iter().map(|c| quote(c)).collect::<Vec<_>>().join(", ");
+        let mut q = c.prepare(&format!("select {list} from {} order by {list}", quote(t)))?;
+        let n = q.column_count();
+        let out = q.query_map([], |r| (0..n).map(|i| r.get(i)).collect::<rusqlite::Result<Vec<_>>>())?.collect::<rusqlite::Result<_>>()?;
+        Ok(out)
+    };
+    let theirs = tables(own)?;
+    for t in tables(copy)?.iter().filter(|t| theirs.contains(*t)) {
+        let has = columns(own, t)?;
+        let cols: Vec<String> = columns(copy, t)?.into_iter().filter(|c| has.contains(c)).collect();
+        if !cols.is_empty() && rows(copy, t, &cols)? != rows(own, t, &cols)? {
+            tracing::info!("the freeze's copy says otherwise in {t}");
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+/// The freeze `given` is, at position `at`, as checked here against `log`, `global`'s log up to the end it names
+/// (`log_to`), of the install whose genesis is `root`: its copy comes to the hash it names; an admin's own device
+/// signed it, as those entries say; and they add up to what the copy says (`says`). → the database it anchors, this
+/// release's form of its copy. Everyone replays exactly those entries, forks among them only, so later entries,
+/// forks or releases change nothing.
+pub fn anchor(given: &Given, at: u64, root: Option<Hash>, log: &Log, now: u64) -> Result<ScopeDb> {
     let step = &given.step;
     let freeze = Freeze::of(step, at)?;
+    ensure!(log.to == freeze.global(), "global's log was read to {}, not to the freeze's {}", log.to, freeze.global());
     let copy = connection(given.copy.as_deref().context("a freeze carries its copy")?)?;
     ensure!(crate::db::state_hash(&copy)? == freeze.hash, "a freeze's copy isn't what it says");
-    let Some((m, _, state)) = freeze.replayed(root, entries, forks) else { return Ok(None) };
-    let copy = normalize(copy, &Scope::Global, now)?;
-    let own = super::scope::build(&m, &Scope::Global, &state)?;
-    carry(copy.conn(), &own)?;
+    ensure!(version(&copy)? <= switch::READS, Newer);
+    let r = replay_all(root, &log.entries);
+    let own = super::scope::build(&r.members, &Scope::Global, &r.state)?;
+    carry(&copy, &own)?;
     let own = ScopeDb::open(own, now)?;
     ensure!(own.client(&step.author()).is_some_and(|c| c.user == step.user()) && own.may(step.user(), "change-settings", scopes::INSTALL), "only an admin's own device freezes the log");
-    ensure!(crate::db::state_hash(own.conn())? == crate::db::state_hash(copy.conn())?, "who's who at your One App's freeze isn't what its admin's device said it was: this device used none of it");
-    Ok(Some(copy))
+    ensure!(says(&copy, own.conn())?, "who's who at your One App's freeze isn't what its admin's device said it was");
+    normalize(copy, &Scope::Global, now)
 }
 
 /// The freeze a device of an admin's writes, at `logs`' ends (every scope's log but `global`'s, by its last step in
-/// the bucket) and `global`'s entries it holds (`entries`, in replay order, with `forks`, of the install at `root`):
-/// its content, and its copy.
-pub fn freeze(root: Option<Hash>, entries: &[Entry], forks: &Cuts, logs: BTreeMap<String, u64>, now: u64) -> Result<(Content, Vec<u8>)> {
-    let mut frontier = BTreeMap::new();
-    for e in entries {
-        let n = frontier.entry(e.author()).or_insert(0);
-        *n = (*n).max(e.seq());
-    }
-    let mut freeze = Freeze { at: 0, hash: String::new(), frontier, logs };
-    let (m, _, state) = freeze.replayed(root, entries, forks).context("not every entry of global's is here")?;
-    let mut db = ScopeDb::build(&m, &Scope::Global, &state, now)?;
+/// the bucket) and `log`, `global`'s log to its end, of the install at `root`: its content, and its copy.
+pub fn freeze(root: Option<Hash>, log: &Log, mut logs: BTreeMap<String, u64>, now: u64) -> Result<(Content, Vec<u8>)> {
+    logs.insert("global".into(), log.to);
+    let r = replay_all(root, &log.entries);
+    let mut db = ScopeDb::build(&r.members, &Scope::Global, &r.state, now)?;
     db.conn().pragma_update(None, "user_version", switch::READS)?;
-    freeze.hash = crate::db::state_hash(db.conn())?;
+    let freeze = Freeze { at: 0, hash: crate::db::state_hash(db.conn())?, logs };
     Ok((freeze.content(), db.bytes()?))
 }
 
 /// A scope's database before its first step (not `global`'s): what its log's entries up to the freeze's position there
-/// (`entries`, read from its steps up to `Freeze::logs`') add up to with `global`'s at the freeze (`global`, every one
-/// of its entries this reader has, in replay order, with `forks`, of the install at `root`). Every reader works it out
-/// itself. Fails while an entry of `global`'s the freeze names isn't here.
-pub fn scope_anchor(freeze: &Freeze, root: Option<Hash>, global: &[Entry], forks: &Cuts, scope: &Scope, entries: &[Entry], now: u64) -> Result<ScopeDb> {
+/// (`entries`, read from its steps up to `Freeze::logs`') add up to with `global`'s at the freeze (`global`, its log up
+/// to the freeze's end of it, of the install at `root`). Every reader works it out itself.
+pub fn scope_anchor(freeze: &Freeze, root: Option<Hash>, global: &Log, scope: &Scope, entries: &[Entry], now: u64) -> Result<ScopeDb> {
     ensure!(*scope != Scope::Global, "global's database starts from its freeze");
-    let held = freeze.entries(global).context("not every entry of global's the freeze names is here yet")?;
-    let member_entries: Vec<Entry> = held.iter().filter(|e| members::is_member_entry(e)).cloned().collect();
-    let known = Members::replay(root, &member_entries, forks);
-    let ordered = crate::entry::causal(entries.to_vec(), &held.iter().map(|e| (e.hash(), e.depth)).collect());
-    let (_, state) = members::replay_from(&known, &member_entries, &ordered, ScopeState::default(), |_, _, _| {});
+    ensure!(global.to == freeze.global(), "global's log was read to {}, not to the freeze's {}", global.to, freeze.global());
+    let r = replay_all(root, &global.entries);
+    let ordered = crate::entry::causal(entries.to_vec(), &r.ordered.iter().map(|e| (e.hash(), e.depth)).collect());
+    let (_, state) = members::replay_from(&r.known, &r.member_entries, &ordered, ScopeState::default(), |_, _, _| {});
     ScopeDb::open(super::scope::build(&Members::default(), scope, &state)?, now)
 }
 
@@ -329,34 +419,51 @@ pub struct Truth {
 }
 
 impl Truth {
-    /// From the steps a reader has, by position from the first (none for one that will never be a step), and
-    /// `global`'s entries to check a freeze against (`anchor`): none before a freeze that checks out. Fails while an
-    /// entry the first freeze names isn't here.
-    pub fn read(steps: &[Option<Given>], root: Option<Hash>, entries: &[Entry], forks: &Cuts, now: u64) -> Result<Option<Truth>> {
+    /// From the steps a reader has, by position from the first (none for one that will never be a step), with `view`
+    /// and `cuts`, who's who before the freeze from everything it holds and its forks, to say which freeze an admin
+    /// signed (`claimed`), and `log`, `global`'s log to the end that freeze names (`wants_log`): none before it.
+    /// Fails there if it doesn't check out, or `log` isn't given.
+    pub fn read(steps: &[Option<Given>], root: Option<Hash>, view: &ScopeDb, cuts: &Cuts, log: Option<&Log>, now: u64) -> Result<Option<Truth>> {
         let mut truth: Option<Truth> = None;
         for (i, given) in steps.iter().enumerate() {
             let at = i as u64 + 1;
             match &mut truth {
                 Some(t) => drop(t.take(at, given.as_ref().map(|g| &g.step))?),
-                None => truth = Truth::first(at, given.as_ref(), root, entries, forks, now)?,
+                None => truth = Truth::first(at, given.as_ref(), root, view, cuts, log, now)?,
             }
         }
         Ok(truth)
     }
 
-    /// Step `at` of `global`'s database, before its freeze: the freeze, if it is one that checks out. Fails while an
-    /// entry it names isn't here.
-    pub fn first(at: u64, given: Option<&Given>, root: Option<Hash>, entries: &[Entry], forks: &Cuts, now: u64) -> Result<Option<Truth>> {
-        let Some(g) = given.filter(|g| g.step.content.kind == FREEZE) else { return Ok(None) };
-        match anchor(g, at, root, entries, forks, now) {
-            Ok(Some(db)) => Ok(Some(Truth { freeze: Freeze::of(&g.step, at)?, at, db })),
-            Ok(None) => bail!("who's who waits for entries of your One App's that its freeze names, which this device doesn't have yet"),
-            Err(err) if err.is::<Newer>() => Err(err),
-            Err(err) => {
-                tracing::info!("global's step {at} isn't its freeze: {err:#}");
-                Ok(None)
+    /// `read`, for a service endpoint, which holds no keys and takes its steps from its own device's node, which
+    /// checked the freeze: the first an admin's own device signed (`claimed`) is taken as its copy says, unchecked
+    /// against the log, which it can't read.
+    pub fn read_given(steps: &[Option<Given>], view: &ScopeDb, cuts: &Cuts, now: u64) -> Result<Option<Truth>> {
+        let mut truth: Option<Truth> = None;
+        for (i, given) in steps.iter().enumerate() {
+            let at = i as u64 + 1;
+            match (&mut truth, claimed(given.as_ref(), at, view, cuts), given) {
+                (Some(t), _, _) => drop(t.take(at, given.as_ref().map(|g| &g.step))?),
+                (None, Some(freeze), Some(g)) => {
+                    let copy = connection(g.copy.as_deref().context("a freeze carries its copy")?)?;
+                    ensure!(crate::db::state_hash(&copy)? == freeze.hash, "a freeze's copy isn't what it says");
+                    truth = Some(Truth { freeze, at, db: normalize(copy, &Scope::Global, now)? });
+                }
+                _ => {}
             }
         }
+        Ok(truth)
+    }
+
+    /// Step `at` of `global`'s database, before its freeze: the freeze, if an admin's own device signed it as `view`
+    /// says (`claimed`), checked against `log`, `global`'s log to the end it names (`anchor`). Any other step is
+    /// nothing. A freeze an admin signed that doesn't check out stops the reader here, as a newer release's does
+    /// (`Newer`): it's never passed over for another, which a reader that it did check out for would never take.
+    pub fn first(at: u64, given: Option<&Given>, root: Option<Hash>, view: &ScopeDb, cuts: &Cuts, log: Option<&Log>, now: u64) -> Result<Option<Truth>> {
+        let (Some(freeze), Some(g)) = (claimed(given, at, view, cuts), given) else { return Ok(None) };
+        let log = log.filter(|l| l.to == freeze.global()).with_context(|| format!("who's who waits for global's log to step {}, where its freeze says it ends", freeze.global()))?;
+        let db = anchor(g, at, root, log, now).with_context(|| format!("your One App's freeze at step {at}, which an admin's device signed, doesn't check out: this device reads who's who no further"))?;
+        Ok(Some(Truth { freeze, at, db }))
     }
 
     /// Takes step `at`, the next: applied if it counts, passed over if not (or none). → whether it counted.
@@ -874,6 +981,139 @@ pub(crate) mod tests {
             };
             panic!("steps left\n{}\nreplay made\n{}", dump(&db), dump(&replayed));
         }
+    }
+
+    /// `global`'s entries, each written after every one before it, as they'd be in its log's steps, one a step.
+    #[derive(Default)]
+    struct History {
+        entries: Vec<Entry>,
+        heads: std::collections::HashMap<Key, crate::entry::Head>,
+    }
+
+    impl History {
+        fn write(&mut self, key: &SigningKey, user: &str, content: Content) -> Entry {
+            let me = key.verifying_key().to_bytes();
+            let previous = self.entries.iter().filter(|e| e.author() != me).map(Entry::hash).collect();
+            let e = Entry::create(key, Ext { log: "global".into(), time: 0, user: user.into(), epoch: 1, previous }, self.heads.get(&me).copied(), content);
+            self.heads.insert(me, e.head());
+            self.entries.push(e.clone());
+            e
+        }
+
+        /// Its log up to step `to`.
+        fn log(&self, to: usize) -> Log {
+            Log { to: to as u64, entries: self.entries[..to].to_vec() }
+        }
+
+        /// Who's who as a reader that holds every entry so far finds it, before the freeze: its view, and its forks.
+        fn view(&self) -> (ScopeDb, Cuts) {
+            let ordered = crate::entry::causal(self.entries.clone(), &Default::default());
+            view(Some(self.entries[0].hash()), &ordered, 0).unwrap()
+        }
+    }
+
+    /// A freeze `key` signs as `user` at step `at` of `global`'s database, of `log`: as an admin's device writes one.
+    fn freeze_of(key: &SigningKey, user: &str, at: u64, root: Hash, log: &Log) -> Given {
+        let (content, copy) = freeze(Some(root), log, BTreeMap::new(), 0).unwrap();
+        Given { step: sign(key, &Scope::Global, at, user, 1, 0, content).unwrap(), copy: Some(copy) }
+    }
+
+    const ANDRE: &str = "a000000000000001";
+    const BOB: &str = "b000000000000002";
+
+    /// Andre's Mac starts the install and lists Bob's laptop, Bob an admin too.
+    fn two_admins() -> (History, SigningKey, SigningKey) {
+        use crate::keys::Endpoint;
+        use crate::members::{Kind, device, genesis};
+        let (mac, laptop) = (SigningKey::from_bytes(&[1; 32]), SigningKey::from_bytes(&[2; 32]));
+        let mut h = History::default();
+        h.write(&mac, ANDRE, genesis("Home", ANDRE, "Andre", &Endpoint::of(&mac), "mac", &[Kind::Client], &[7; 32], &"e".repeat(64)));
+        h.write(&mac, ANDRE, device(&Endpoint::of(&laptop), BOB, "laptop", &[Kind::Client], Some(("Bob", Role::Admin))));
+        (h, mac, laptop)
+    }
+
+    /// An admin demoted (or a device taken out) can't freeze the log to before it was, to be an admin again: its freeze
+    /// is checked against everything the reader holds, so it's nothing, and the next an admin signs is the freeze.
+    #[test]
+    fn a_demoted_admin_s_freeze_makes_no_one_an_admin_again() {
+        let (mut h, mac, laptop) = two_admins();
+        let root = h.entries[0].hash();
+        let before = h.entries.len();
+        h.write(&mac, ANDRE, members::role(BOB, Role::Member));
+        h.write(&mac, ANDRE, members::setting("name", Some("Ours")));
+        let (view, cuts) = h.view();
+        // Bob's laptop freezes the log where Bob was still an admin.
+        let bobs = freeze_of(&laptop, BOB, 1, root, &h.log(before));
+        assert!(claimed(Some(&bobs), 1, &view, &cuts).is_none(), "a demoted admin's freeze is nothing");
+        let andres = freeze_of(&mac, ANDRE, 2, root, &h.log(h.entries.len()));
+        let truth = Truth::read(&[Some(bobs.clone()), Some(andres)], Some(root), &view, &cuts, Some(&h.log(h.entries.len())), 0).unwrap().unwrap();
+        assert_eq!((truth.at, truth.db.user(BOB).map(|u| u.role), truth.db.setting("name")), (2, Some(Role::Member), Some("Ours".into())), "Andre's freeze is the one");
+        // Nor does one naming the log's end count while its signer isn't an admin.
+        let bobs_late = freeze_of(&laptop, BOB, 1, root, &h.log(h.entries.len()));
+        assert!(claimed(Some(&bobs_late), 1, &view, &cuts).is_none());
+    }
+
+    /// A fork, or anything else written after the freeze, changes nothing about it: every reader replays exactly the
+    /// log's steps up to where it says the log ends, forks among those only, so a reader that reads it later anchors
+    /// the same who's who as one that read it at once, never passing over it for another.
+    #[test]
+    fn a_fork_after_the_freeze_changes_no_reader_s_freeze() {
+        let (mut h, mac, laptop) = two_admins();
+        let root = h.entries[0].hash();
+        h.write(&laptop, BOB, members::setting("name", Some("Ours")));
+        let at = h.entries.len();
+        let freeze = freeze_of(&mac, ANDRE, 1, root, &h.log(at));
+        let (view, cuts) = h.view();
+        let soon = Truth::read(&[Some(freeze.clone())], Some(root), &view, &cuts, Some(&h.log(at)), 0).unwrap().unwrap();
+        // Then Bob's laptop, and Andre's Mac, restored from older backups, each sign another entry at a seq they
+        // signed before: forks, in the log after the freeze's end.
+        for (key, user) in [(&laptop, BOB), (&mac, ANDRE)] {
+            let me = key.verifying_key().to_bytes();
+            let mine: Vec<Entry> = h.entries[..at].iter().filter(|e| e.author() == me).cloned().collect();
+            let last = mine.last().unwrap();
+            let head = mine.len().checked_sub(2).map(|i| mine[i].head());
+            let again = Entry::create(key, Ext { log: "global".into(), time: 1, user: user.into(), epoch: 1, previous: last.previous().to_vec() }, head, members::setting("name", Some("Forked")));
+            assert_eq!(again.seq(), last.seq());
+            h.entries.push(again);
+        }
+        let (later, later_cuts) = h.view();
+        assert_eq!(later_cuts.len(), 2, "the later reader holds both forks");
+        let late = Truth::read(&[Some(freeze)], Some(root), &later, &later_cuts, Some(&h.log(at)), 0).unwrap().unwrap();
+        let hash = |t: &Truth| crate::db::state_hash(t.db.conn()).unwrap();
+        assert_eq!(hash(&late), hash(&soon), "the same who's who, whenever it's read");
+    }
+
+    /// A freeze an admin's device signed that doesn't check out stops its reader there: never passed over for the next,
+    /// which a reader it did check out for would never take.
+    #[test]
+    fn a_freeze_an_admin_signed_that_doesn_t_check_out_stops_its_reader() {
+        let (h, mac, _) = two_admins();
+        let root = h.entries[0].hash();
+        let mut forged = freeze_of(&mac, ANDRE, 1, root, &h.log(h.entries.len()));
+        let mut db = connection(forged.copy.as_deref().unwrap()).unwrap();
+        db.execute_batch("UPDATE devices SET name = 'mine' WHERE name = 'laptop'").unwrap();
+        let mut data = forged.step.content.data.clone();
+        data["hash"] = json!(crate::db::state_hash(&db).unwrap());
+        forged = Given { step: sign(&mac, &Scope::Global, 1, ANDRE, 1, 0, Content::new(members::APP, FREEZE, data)).unwrap(), copy: Some(db.serialize("main").unwrap().to_vec()) };
+        let (view, cuts) = h.view();
+        let next = freeze_of(&mac, ANDRE, 2, root, &h.log(h.entries.len()));
+        assert!(Truth::read(&[Some(forged.clone()), Some(next)], Some(root), &view, &cuts, Some(&h.log(h.entries.len())), 0).is_err(), "a copy that isn't what the log says stops it");
+        assert!(Truth::read(&[Some(freeze_of(&mac, ANDRE, 1, root, &h.log(h.entries.len())))], Some(root), &view, &cuts, None, 0).is_err(), "as does one whose log it hasn't read");
+    }
+
+    /// A newest hint is anyone's to write: one far above the last step jams no reader, which reads on to the steps'
+    /// own end; only a step missing before a later one that's there stops it.
+    #[test]
+    fn a_forged_newest_hint_jams_no_reader() {
+        use crate::bucket::Bucket;
+        let bucket = crate::bucket::Memory::default();
+        let prefix = prefix("global");
+        tokio::runtime::Builder::new_current_thread().build().unwrap().block_on(async {
+            bucket.create(&crate::db::newest_name(&prefix), br#"{"at": 1000000000, "copy": 0, "epoch": 1}"#).await.unwrap();
+            assert!(read(&bucket, &crate::db::Keys::new(), &Scope::Global, 0).await.unwrap().is_empty(), "nothing written, nothing read, and no failure");
+            bucket.create(&crate::db::step_name(&prefix, 2), b"x").await.unwrap();
+            assert!(missing(&bucket, &prefix, 1).await.is_err(), "but a step gone before one that's there stops it");
+        });
     }
 
     /// A release's types, roles and rules move a database on only to a newer release's, by an admin's own device, and a

@@ -1,5 +1,6 @@
 // The Workers' own tests, run by `workerd test` (tests/cloudflare.rs runs them with cargo test).
-import { b64u, databaseKey, idOf, keyPair, openAppKey, openSealed, openUnder, random, sealAppKey, sealTo, sealUnder } from "../shared/crypto.js";
+import { b64u, databaseKey, idOf, keyPair, openAppKey, openSealed, openUnder, ed25519Public, random, sealAppKey, sealTo, sealUnder, signedRequest } from "../shared/crypto.js";
+import signer from "../signer/worker.js";
 import { presign } from "../shared/s3.js";
 import { verify } from "../shared/token.js";
 import { Copies } from "../mcp/copies.js";
@@ -84,12 +85,35 @@ export default {
     await fails(async () => verify(await sign({ iss: "https://a", sub: "u", exp: exp - 120 }), { keys: [jwk] }, "https://a"), "an expired token");
     await fails(async () => verify(await sign({ iss: "https://a", sub: "u", exp }, "k2"), { keys: [jwk] }, "https://a"), "a token from an unknown key");
     await remoteMcpClientsSecrets();
+    await browsersReadStepsFromTheBucket();
     await pushRequests();
     const token = await sign({ iss: "https://a", sub: "u", exp });
     const forged = token.slice(0, token.lastIndexOf(".") + 1) + b64u.encode(new Uint8Array(64));
     await fails(() => verify(forged, { keys: [jwk] }, "https://a"), "a forged token");
   },
 };
+
+/// A browser reads a database's steps from the bucket itself, through the URL signer's `get`, as the bucket holds them
+/// (sealed: it opens nothing), each by its name and null past the last: never as a node passes them on, which could
+/// hand it junk for a real step. Only a device of the install's reaches it.
+async function browsersReadStepsFromTheBucket() {
+  const objects = new Map([["global/node/scope/000000000001", new Uint8Array([1, 2, 3])], ["global/node/scope/000000000002", new Uint8Array([4])]]);
+  const R2 = { get: async (name) => (objects.has(name) ? { arrayBuffer: async () => objects.get(name).buffer } : null) };
+  const device = random(32);
+  const env = { R2, BUCKET: JSON.stringify({ endpoint: "https://s3.test", bucket: "b", region: "auto", key_id: "k", secret: "s" }), RELAY: { allowed: async () => ({}) } };
+  const ask = async (fields, e = env, key = device) => {
+    const body = await signedRequest(key, await ed25519Public(key), "one/urls", fields, Date.now());
+    return signer.fetch(new Request("https://one.test/urls", { method: "POST", body: JSON.stringify(body) }), e);
+  };
+  const r = await ask({ get: [{ steps: "global/node/scope", from: 1, to: 3 }] });
+  const answer = await r.json();
+  if (!answer.get) throw new Error(`the signer said ${r.status}: ${JSON.stringify(answer)}`);
+  const got = answer.get;
+  equal(Object.keys(got), ["global/node/scope/000000000001", "global/node/scope/000000000002", "global/node/scope/000000000003"], "a range's names");
+  equal([b64u.decode(got["global/node/scope/000000000001"]).join(), b64u.decode(got["global/node/scope/000000000002"]).join(), got["global/node/scope/000000000003"]], ["1,2,3", "4", null], "each step's bytes as the bucket holds them, and null past the last");
+  equal((await ask({ get: [{ steps: "global/node/scope", from: 1, to: 33 }] })).status, 400, "at most 32 at once");
+  equal((await ask({ get: ["global/node/scope/000000000001"] }, { ...env, RELAY: { allowed: async () => null } }, random(32))).status, 403, "only the install's devices");
+}
 
 /// A remote MCP client's device secret opens only with its current refresh token or a live access token; a refresh
 /// token used once opens nothing after, nor rotates anything.

@@ -187,7 +187,11 @@ fn built(entries: &mut Global) -> Result<ScopeDb> {
 
 /// `global`'s scope database's steps after those `entries` took, with the log's keys: who's who once it's frozen.
 async fn steps(bucket: &crate::Js, keys: &one::db::Keys, entries: &mut Global) -> Result<()> {
-    entries.add_read(one::database::steps::read(bucket, keys, &Scope::Global, entries.at()).await?)
+    let read = one::database::steps::read(bucket, keys, &Scope::Global, entries.at()).await?;
+    if let Some(end) = entries.wants_log(&read)? {
+        entries.with_log(one::database::steps::log_to(bucket, keys, end).await?);
+    }
+    entries.add_read(read)
 }
 
 impl View {

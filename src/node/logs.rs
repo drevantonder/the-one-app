@@ -44,6 +44,18 @@ impl Node {
     /// device opens is read once that epoch's entry is (in `global`, which is read again for it), or if no entry made
     /// it, passed over as junk: an epoch's entry is always written before anything is sealed under it.
     pub(super) async fn read_log_now(&self, scope: &Scope) -> Result<bool> {
+        let gained = self.read_entries_now(scope).await?;
+        // Once `global`'s log is frozen, its scope database's steps: who's who from there; and each other scope's own.
+        if *scope == Scope::Global {
+            self.read_steps_now().await?;
+        } else {
+            self.read_scope_steps_now(scope).await?;
+        }
+        Ok(gained)
+    }
+
+    /// `read_log_now`'s entries alone: what a freeze's signer is checked against, read to the log's end first.
+    pub(super) async fn read_entries_now(&self, scope: &Scope) -> Result<bool> {
         let log = scope.to_string();
         let (genesis, epoch) = self.with(|i| Ok((!i.r.db().users().is_empty(), i.r.db().epoch(scope))))?;
         if *scope != Scope::Global && epoch == 0 {
@@ -80,13 +92,6 @@ impl Node {
             }
             let Some(ahead) = read.ahead else {
                 self.hint_log(scope, &bucket, &key, at).await;
-                // Once `global`'s log is frozen, its scope database's steps: who's who from there; and each other
-                // scope's own.
-                if *scope == Scope::Global {
-                    self.read_steps_now().await?;
-                } else {
-                    self.read_scope_steps_now(scope).await?;
-                }
                 return Ok(gained);
             };
             if *scope != Scope::Global {
