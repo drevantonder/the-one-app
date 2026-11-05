@@ -216,7 +216,8 @@ fn usage() -> String {
   {CLI} throwaway client <kind> --as sam    the same, as someone else, invited by you with Add Someone's link
   {CLI} throwaway client cli <command>    a command from a computer that's only a device of its person's (no node), asking
                                    their nodes over iroh in run priority's order, as every client does: the Cloudflare
-                                   node, once deployed, with {CLI} throwaway device-activity priority --device cloudflare --priority 1
+                                   node, once deployed, with {CLI} throwaway device-activity priority --name Cloudflare --priority 1;
+                                   --build <program> first runs another build of {CLI} (an older release's) as that device
   {CLI} throwaway stop             stop and delete it, and give back its devices; {CLI} throwaway then starts a new one"
     )
 }
@@ -665,13 +666,21 @@ fn client(dir: &Path, checkout: &Path, settings: &one::cloudflare::Settings, res
 /// `command`, run by this build's CLI as on a computer where no node runs: a client device of the throwaway network's
 /// person, with a home of its own beside it (`cli/`), which asks their nodes over iroh as every client does, in run
 /// priority's order (`client_device`). The first time it signs in with no passkey, and the throwaway network's machine
-/// approves the code it shows.
+/// approves the code it shows. `--build <program>` runs another build of the CLI (an older release's, say) as that
+/// device, with a home of its own (`cli-<its name>/`).
 fn cli(dir: &Path, settings: &one::cloudflare::Settings, command: &[String]) -> Result<()> {
-    let home = dir.join("cli");
+    let (program, command) = match command {
+        [flag, program, rest @ ..] if flag == "--build" => (PathBuf::from(program).canonicalize().with_context(|| format!("no program {program}"))?, rest),
+        _ => (std::env::current_exe()?, command),
+    };
+    let home = match program == std::env::current_exe()? {
+        true => dir.join("cli"),
+        false => dir.join(format!("cli-{}", program.file_name().unwrap_or_default().to_string_lossy())),
+    };
     std::fs::create_dir_all(&home)?;
     // No node answers at its address, nor anything of this machine's in its home.
     let as_device = |args: &[String]| {
-        let mut c = std::process::Command::new(std::env::current_exe().unwrap_or_else(|_| CLI.into()));
+        let mut c = std::process::Command::new(&program);
         c.args(args).env(addr_var(), "127.0.0.1:1").env(format!("{}_HOME", CLI.to_uppercase()), &home).env("XDG_CONFIG_HOME", &home).env_remove("DISPLAY").env_remove("WAYLAND_DISPLAY");
         c
     };
