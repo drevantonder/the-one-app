@@ -502,5 +502,6 @@ pub(crate) mod tests {
             }
         }
         assert_eq!(state_hash(&copy).unwrap(), hash, "the state hash is the rows', not the order they came in");
+        super::super::scopes::tests::reads(m);
     }
 }
