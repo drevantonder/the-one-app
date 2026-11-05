@@ -1,5 +1,6 @@
 //! Pairing: a code that lets a new device join the install, and admitting it.
 
+use crate::config::YOURS;
 use super::*;
 
 impl Node {
@@ -20,7 +21,7 @@ impl Node {
             ensure!(m.serves(&self.0.id, &asker.user), "{} doesn't serve you", self.device_name());
             Ok(())
         })?;
-        let address = self.with(|i| Ok(i.r.db().setting("address")))?.context("a computer joins through your One App's address, and it has none yet: an admin sets it with cloudflare use")?;
+        let address = self.with(|i| Ok(i.r.db().setting("address")))?.with_context(|| format!("a computer joins through {YOURS}'s address, and it has none yet: an admin sets it with cloudflare use"))?;
         let joins_as = user.clone().unwrap_or_else(|| asker.user.clone());
         let secret: [u8; 16] = rand::random();
         let by = (asker.key != self.0.id).then(|| hex(&asker.key));
@@ -116,7 +117,7 @@ impl Node {
 
     async fn admit_with(&self, key: Key, request: &JoinRequest, pairing: &Pairing) -> Result<JoinReply> {
         // Phones joined as clients before they signed in at your One App's address: only devices join now.
-        ensure!(request.as_ == "device", "only computers join with a pairing code: sign in at your One App's address instead");
+        ensure!(request.as_ == "device", "only computers join with a pairing code: sign in at {YOURS}'s address instead");
         let user = pairing.admits.clone().unwrap_or_else(|| pairing.user.clone());
         let (root, bucket) = self.with(|i| Ok((i.r.root.map(|r| r.to_hex()).context("no install")?, i.bucket.as_ref().map(|(_, f)| f.clone()))))?;
         let by = pairing.by.as_deref().map(unhex).transpose()?;
@@ -133,7 +134,7 @@ impl Node {
         // Waited for: until the relay lets it in, the machine that joined reaches nothing.
         if self.address().is_ok() {
             let admin = self.with(|i| Ok(i.r.db().may(&user, "invite", scopes::INSTALL)))?;
-            self.tell_relay_now(json!({ "add": hex(&key), "admin": admin, "role": "compute" })).await.context("your One App's network didn't take this machine: try again with the same code")?;
+            self.tell_relay_now(json!({ "add": hex(&key), "admin": admin, "role": "compute" })).await.with_context(|| format!("{YOURS}'s network didn't take this machine: try again with the same code"))?;
         }
         Ok(JoinReply { root, user, bucket })
     }

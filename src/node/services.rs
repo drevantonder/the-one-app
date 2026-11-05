@@ -1,6 +1,7 @@
 //! Device services, as the node knows them: which run on which device, registering them, switching a device's parts on
 //! and off, and the built-in ones' records.
 
+use crate::config::YOURS;
 use super::*;
 
 /// What registered with this device before, in its home.
@@ -55,7 +56,7 @@ impl Node {
     pub fn parts_on(&self) -> Result<(crate::service::Install, BTreeMap<String, u64>)> {
         let address = self.address()?;
         self.with(|i| {
-            let root = i.r.root.context("this device isn't in your One App yet")?.to_hex();
+            let root = i.r.root.with_context(|| format!("this device isn't in {YOURS} yet"))?.to_hex();
             let on = i.r.db().switches().into_iter().filter(|((k, _), s)| *k == self.0.id && s.on).map(|((_, name), s)| (name, s.time)).collect();
             Ok((crate::service::Install { address: address.clone(), root, user: i.user.clone() }, on))
         })

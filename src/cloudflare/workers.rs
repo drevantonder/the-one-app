@@ -468,7 +468,8 @@ impl Settings {
             let bound = self.cloudflare_node_endpoint().filter(|_| self.cloudflare_node).map(|key| [("BOUND".into(), key, false), ("NODE".into(), format!("object:{}:Node", crate::cloudflare::node::SERVICE), false)]);
             // And the remote MCP server's devices, each bound to its object while it runs.
             let mcp = ("MCP".into(), "object:mcp:Client".into(), false);
-            return devices.into_iter().chain(bound.into_iter().flatten()).chain([mcp]).chain(location).collect();
+            let yours = ("YOURS".into(), crate::config::YOURS.into(), false);
+            return devices.into_iter().chain(bound.into_iter().flatten()).chain([mcp, yours]).chain(location).collect();
         }
         // The remote MCP server: remote MCP clients' devices, whose secrets open only with their clients' tokens. It reaches
         // the relay only by its entrypoint for them, and reads the bucket through the URL signer as any device does.
@@ -479,6 +480,7 @@ impl Settings {
                 ("SIGNER".into(), "service:signer".into(), false),
                 ("ADDRESS".into(), self.address.clone(), false),
                 ("NAME".into(), self.name.clone(), false),
+                ("YOURS".into(), crate::config::YOURS.into(), false),
             ];
             out.extend(location);
             return out;
@@ -499,7 +501,7 @@ impl Settings {
         }
         // The URL signer holds only the bucket's credentials, and asks the relay who's allowed.
         if service == "signer" {
-            let mut out = vec![("RELAY".into(), "service:relay".into(), false)];
+            let mut out = vec![("RELAY".into(), "service:relay".into(), false), ("YOURS".into(), crate::config::YOURS.into(), false)];
             if let Some(bucket) = &self.bucket {
                 out.push(("BUCKET".into(), bucket.to_string(), true));
                 let endpoint = bucket["endpoint"].as_str().unwrap_or("");

@@ -6,6 +6,7 @@
 //! trip, a new connection more, so reading a step also reads the ones after it, all at once (one signing, their
 //! downloads side by side), and the next reads are answered from those.
 
+use one::config::YOURS;
 use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
 
@@ -35,14 +36,14 @@ impl Signed {
 
 /// An object, from its signed `url`.
 fn download(url: &str) -> Result<Option<Object>> {
-    let mut r = AGENT.get(url).call().context("Couldn't reach your One App's storage")?;
+    let mut r = AGENT.get(url).call().with_context(|| format!("Couldn't reach {YOURS}'s storage"))?;
     match r.status().as_u16() {
         404 => Ok(None),
         200 => {
             let tag = r.headers().get("etag").and_then(|t| t.to_str().ok()).unwrap_or_default().to_string();
             Ok(Some(Object { bytes: r.body_mut().with_config().limit(256 << 20).read_to_vec()?, tag }))
         }
-        status => bail!("your One App's storage said {status}"),
+        status => bail!("{YOURS}'s storage said {status}"),
     }
 }
 
@@ -66,12 +67,12 @@ impl Bucket for Signed {
             };
             let key = ed25519_dalek::SigningKey::from_bytes(&secret);
             let body = one::keys::signed_request(&key, "one/urls", json!({ "read": [item] }), crate::device::now());
-            let mut r = AGENT.post(format!("{address}/urls")).send_json(body).context("Couldn't reach your One App")?;
+            let mut r = AGENT.post(format!("{address}/urls")).send_json(body).with_context(|| format!("Couldn't reach {YOURS}"))?;
             let status = r.status().as_u16();
             let out: serde_json::Value = r.body_mut().read_json().unwrap_or_default();
-            ensure!(status == 200, "your One App didn't let this device read its data ({status}): {}", out["error"].as_str().unwrap_or(""));
+            ensure!(status == 200, "{YOURS} didn't let this device read its data ({status}): {}", out["error"].as_str().unwrap_or(""));
             let urls: Vec<(String, String)> = out["read"].as_object().into_iter().flatten().filter_map(|(n, u)| Some((n.clone(), u.as_str()?.to_string()))).collect();
-            let url = urls.iter().find(|(n, _)| n == name).map(|(_, u)| u.clone()).context("your One App didn't sign that")?;
+            let url = urls.iter().find(|(n, _)| n == name).map(|(_, u)| u.clone()).with_context(|| format!("{YOURS} didn't sign that"))?;
             // The ones after it, side by side with it; what they come to is for later, and a failure of theirs only theirs.
             Ok(std::thread::scope(|scope| {
                 let rest: Vec<_> = urls.iter().filter(|(n, _)| n != name).map(|(n, u)| scope.spawn(move || (n.clone(), download(u).ok()))).collect();

@@ -11,6 +11,7 @@
 //! (`one::database::scopes::ScopeDb`, as nodes ask theirs): native apps directly, browsers as JSON (`view`). Replay
 //! stays the truth, and this only its answers.
 
+use one::config::YOURS;
 use std::collections::{BTreeMap, HashMap};
 
 use anyhow::{Context, Result, bail, ensure};
@@ -68,7 +69,7 @@ impl Global {
         match &mut self.truth {
             Some(t) => drop(t.take(at, given.map(|g| &g.step))?),
             None => {
-                let Some(root) = self.root else { bail!("no entries of your One App yet") };
+                let Some(root) = self.root else { bail!("no entries of {YOURS} yet") };
                 let ordered = causal(self.entries.values().cloned().collect(), &HashMap::new());
                 let (view, cuts) = steps::view(Some(root), &ordered, now())?;
                 self.truth = steps::Truth::first(at, given, Some(root), &view, &cuts, self.log.as_ref(), now())?;
@@ -269,7 +270,7 @@ impl Global {
                 _ => bail!("those entries start more than one install"),
             },
         };
-        ensure!(geneses.iter().all(|g| *g == root), "those entries are another install's, not your One App's");
+        ensure!(geneses.iter().all(|g| *g == root), "those entries are another install's, not {YOURS}'s");
         self.root = Some(root);
         for e in entries {
             self.entries.entry(e.hash()).or_insert(e);
@@ -296,11 +297,11 @@ impl Global {
     /// says, a device that signed two entries at one seq cut from there and removed. Refused if they aren't the
     /// install's, or its genesis isn't among them.
     pub fn members(&self) -> Result<Members> {
-        let Some(root) = self.root else { bail!("no entries of your One App yet") };
+        let Some(root) = self.root else { bail!("no entries of {YOURS} yet") };
         let forks = self.forks();
         let ordered: Vec<Entry> = causal(self.entries.values().cloned().collect(), &HashMap::new()).into_iter().filter(is_member_entry).collect();
         let m = Members::replay(Some(root), &ordered, &forks);
-        ensure!(!m.users.is_empty(), "your One App's first entry isn't among those");
+        ensure!(!m.users.is_empty(), "{YOURS}'s first entry isn't among those");
         Ok(m)
     }
 }

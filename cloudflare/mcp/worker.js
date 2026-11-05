@@ -429,7 +429,7 @@ export class Client extends DurableObject {
     ended();
     await this.see(me);
     ended();
-    if (!this.view.listed) throw new Error("this device is not listed as one of your One App's");
+    if (!this.view.listed) throw new Error(`this device is not listed as one of ${this.env.YOURS}'s`);
     run.phase = "running";
     console.log(JSON.stringify({ started: me.key.slice(0, 8), ms: Date.now() - began, listed: this.view.nodes.size, on: this.order.length }));
   }
@@ -531,7 +531,7 @@ export class Client extends DurableObject {
         return answerAll(body, "None of your devices is on right now.");
       }
       const node = this.view.nodes.get(r.node);
-      if (!node) return answerAll(body, "A device your One App doesn't list as running your calls answered: it was given nothing.");
+      if (!node) return answerAll(body, `A device ${this.env.YOURS} doesn't list as running your calls answered: it was given nothing.`);
       this.ctx.waitUntil(this.learnOrder(me));
       // Keys sealed to a node other than the one that answered: it says what it needs, sealed to it.
       if (r.status === 400 && handing && handing.to !== r.node && tries === 0) {

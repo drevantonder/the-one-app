@@ -11,6 +11,7 @@
 //! only by whoever put it or may use a scope that names it, up to 512 MiB each and 2 GiB per person that nothing keeps
 //! yet, deleted an hour on (or once its request is answered) unless something does.
 
+use crate::config::YOURS;
 use std::convert::Infallible;
 
 use axum::extract::{Path, Query, State};
@@ -504,7 +505,7 @@ async fn from_client(node: &Node, key: crate::entry::Key, until: u64, path: &str
     // this build, before a release that reads it) is told to update before it does anything: whatever it would seal or
     // write it takes from the frozen log.
     if said.is_none_or(|(reads, _)| reads < crate::database::switch::GATE.min(crate::database::switch::READS)) && node.frozen() {
-        return refuse(req, (StatusCode::UPGRADE_REQUIRED, Json(json!({ "error": "Update this device: your One App's other devices have moved on to what this one doesn't read yet.", "code": "update" }))).into_response()).await;
+        return refuse(req, (StatusCode::UPGRADE_REQUIRED, Json(json!({ "error": format!("Update this device: {YOURS}'s other devices have moved on to what this one doesn't read yet."), "code": "update" }))).into_response()).await;
     }
     req.extensions_mut().insert(Me { caller: Caller { key, user, agent: None, token: Some(token) }, sign_in: Some(name) });
     next.run(req).await

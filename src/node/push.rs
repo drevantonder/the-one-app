@@ -1,6 +1,7 @@
 //! The `push` ops (`crate::push`), which every node answers itself for any caller, through the install's push Worker:
 //! never a service a device runs.
 
+use crate::config::YOURS;
 use super::*;
 use data_encoding::BASE64URL_NOPAD as B64U;
 
@@ -83,7 +84,7 @@ impl Node {
             let signed = crate::keys::signed_request(&key, push::DOMAIN, fields, crate::keys::next_at(now_ms()));
             let mut resp = agent().post(format!("{address}{path}")).send_json(&signed)?;
             let out: Value = resp.body_mut().read_json().unwrap_or(Value::Null);
-            ensure!(resp.status().is_success(), "{}", out["error"].as_str().unwrap_or("your One App's push service didn't answer"));
+            ensure!(resp.status().is_success(), "{}", out["error"].as_str().map(str::to_string).unwrap_or_else(|| format!("{YOURS}'s push service didn't answer")));
             Ok(out)
         })
         .await?

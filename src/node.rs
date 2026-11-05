@@ -1,6 +1,7 @@
 //! A node: this device's install (a custom build holds one), its replica and views, its socket to the relay, and where
 //! calls run.
 
+use crate::config::YOURS;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -1008,7 +1009,7 @@ impl Node {
         for entry in entries {
             let scope = entry.scope();
             // An older device's, which writes to the frozen logs, where it changes nothing.
-            ensure!(!self.frozen(), "update this device to change who's in: your One App's other devices have moved on");
+            ensure!(!self.frozen(), "update this device to change who's in: {YOURS}'s other devices have moved on");
             self.first_epoch(&scope).await?;
             {
                 let _write = self.0.writes.lock().await;
@@ -1021,7 +1022,7 @@ impl Node {
                 let at = self.put_entry(&scope, &entry).await?;
                 let handled = self.with(|i| i.r.receive(vec![entry.clone()], now_ms()))?;
                 self.after(handled).await?;
-                ensure!(!self.left_out(&entry, at).await?, "update this device to change who's in: your One App's other devices moved on as it wrote that");
+                ensure!(!self.left_out(&entry, at).await?, "update this device to change who's in: {YOURS}'s other devices moved on as it wrote that");
             }
             self.ping(&scope, None);
         }

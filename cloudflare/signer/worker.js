@@ -108,7 +108,7 @@ async function got(env, bucket, names) {
 }
 
 async function urls(request, env) {
-  if (!env.BUCKET) fail(503, "your One App has no bucket yet");
+  if (!env.BUCKET) fail(503, `${env.YOURS} has no bucket yet`);
   const body = await request.json().catch(() => fail(400, "the body isn't JSON"));
   let checked;
   try {
@@ -118,7 +118,7 @@ async function urls(request, env) {
   }
   const { by, fields } = checked;
   const who = await allowed(env, by);
-  if (!who) fail(403, "only your One App's devices reach its bucket");
+  if (!who) fail(403, `only ${env.YOURS}'s devices reach its bucket`);
   const read = list(fields.read).flatMap(names);
   const head = list(fields.head).flatMap(names);
   const create = list(fields.create).flatMap(names);

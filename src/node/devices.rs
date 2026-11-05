@@ -2,6 +2,7 @@
 //! read, sealed as they are), approving a device's request to join (its own person's, or a newcomer's by invite), invites,
 //! and removing a device.
 
+use crate::config::YOURS;
 use super::*;
 use crate::bucket::Bucket;
 use data_encoding::BASE64URL_NOPAD as B64U;
@@ -260,7 +261,7 @@ fn code_of(typed: &str) -> String {
 impl Node {
     /// The install's address, where people sign in.
     pub fn address(&self) -> Result<String> {
-        self.with(|i| Ok(super::calls::address(i.r.db())))?.context("your One App has no address yet, so it has no sign-ins or requests to join")
+        self.with(|i| Ok(super::calls::address(i.r.db())))?.with_context(|| format!("{YOURS} has no address yet, so it has no sign-ins or requests to join"))
     }
 
     /// Asks the install's sign-in something as this device, signed with its key (`one/auth`): a POST's body is
@@ -456,14 +457,14 @@ impl Node {
     pub async fn approve_with_recovery(&self, caller: &Caller, code: &str, recovery: &ed25519_dalek::SigningKey, confirm: bool) -> Result<Value> {
         ensure!(caller.token.is_none() && caller.key == self.0.id, "the recovery key is used only on the machine it's kept on");
         let at = recovery.verifying_key().to_bytes();
-        ensure!(self.with(|i| Ok(i.r.db().recovery() == Some(at)))?, "that isn't your One App's recovery key");
+        ensure!(self.with(|i| Ok(i.r.db().recovery() == Some(at)))?, "that isn't {YOURS}'s recovery key");
         let code = code_of(code);
         ensure!(code.len() == 8, "a code is the 8 letters and digits the new device shows");
         let asked: Value = self.ask_sign_in("GET", "/api/auth/devices/requests", json!({})).await?;
         let asked: Vec<DeviceRequest> = serde_json::from_value(asked["requests"].clone()).context("sign-in's requests aren't requests")?;
         let r = waiting(asked, &code)?;
-        ensure!(r.proof.is_none(), "the recovery key lets in a device of someone already in your One App");
-        let person = self.with(|i| Ok(i.r.db().user(&r.user).map(|u| u.name)))?.context("the recovery key lets in a device of someone already in your One App")?;
+        ensure!(r.proof.is_none(), "the recovery key lets in a device of someone already in {YOURS}");
+        let person = self.with(|i| Ok(i.r.db().user(&r.user).map(|u| u.name)))?.with_context(|| format!("the recovery key lets in a device of someone already in {YOURS}"))?;
         if !confirm {
             return Ok(json!({ "device": r.name, "person": person, "recovery": true }));
         }
@@ -500,7 +501,7 @@ impl Node {
     /// to, which that device starts from (`steps::Welcome`).
     fn approved_path(&self, key: &str) -> Result<String> {
         let (root, welcome) = self.with(|i| Ok((i.r.root.map(|r| r.to_hex()), i.r.welcome()?)))?;
-        let root = root.context("this device isn't in your One App yet")?;
+        let root = root.with_context(|| format!("this device isn't in {YOURS} yet"))?;
         let welcome = welcome.map(|w| format!("&welcome={w}")).unwrap_or_default();
         Ok(format!("/api/auth/devices/requests/{key}?approved&genesis={root}{welcome}"))
     }
@@ -631,7 +632,7 @@ impl Node {
         // reaches nothing and keeps waiting. Approving it again finishes this, as it's listed already.
         if self.address().is_ok() {
             let told = self.tell_relay_now(json!({ "add": r.key, "admin": admin, "role": "client" })).await;
-            told.with_context(|| format!("{} is let in, but your One App's network didn't take it yet: approve it again", r.name))?;
+            told.with_context(|| format!("{} is let in, but {YOURS}'s network didn't take it yet: approve it again", r.name))?;
         }
         Ok(json!({ "device": r.name, "sealed": sealed, "not_sealed": not }))
     }
@@ -662,7 +663,7 @@ impl Node {
     fn sign_in_install(&self) -> Result<crate::sign_in_proof::Install> {
         let address = self.address()?;
         self.with(|i| {
-            let root = i.r.root.context("this device isn't in your One App yet")?;
+            let root = i.r.root.with_context(|| format!("this device isn't in {YOURS} yet"))?;
             Ok(crate::sign_in_proof::Install::new(&address, *root.as_bytes(), i.r.db().setting(crate::sign_in_proof::CLIENTS).as_deref()))
         })
     }
@@ -768,7 +769,7 @@ impl Node {
         if listed.is_none() {
             // Told first: a service the relay won't let in is never reached.
             if let Err(err) = self.tell_relay_now(json!({ "add": hex(&endpoint.key), "admin": false, "role": "service" })).await {
-                ensure!(format!("{err:#}").contains("in already"), "your One App's relay won't let {service} in: {err:#}");
+                ensure!(format!("{err:#}").contains("in already"), "{YOURS}'s relay won't let {service} in: {err:#}");
             }
         }
         if listed != Some(true) {

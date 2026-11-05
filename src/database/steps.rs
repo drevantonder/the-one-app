@@ -41,6 +41,7 @@
 //! <prefix>/newest            the newest hint, as a database's
 //! ```
 
+use crate::config::YOURS;
 use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::{Context, Result, bail, ensure};
@@ -383,7 +384,7 @@ pub fn anchor(given: &Given, at: u64, root: Option<Hash>, log: &Log, now: u64) -
     carry(&copy, &own)?;
     let own = ScopeDb::open(own, now)?;
     ensure!(own.client(&step.author()).is_some_and(|c| c.user == step.user()) && own.may(step.user(), "change-settings", scopes::INSTALL), "only an admin's own device freezes the log");
-    ensure!(says(&copy, own.conn())?, "who's who at your One App's freeze isn't what its admin's device said it was");
+    ensure!(says(&copy, own.conn())?, "who's who at {YOURS}'s freeze isn't what its admin's device said it was");
     normalize(copy, &Scope::Global, now)
 }
 
@@ -462,7 +463,7 @@ impl Truth {
     pub fn first(at: u64, given: Option<&Given>, root: Option<Hash>, view: &ScopeDb, cuts: &Cuts, log: Option<&Log>, now: u64) -> Result<Option<Truth>> {
         let (Some(freeze), Some(g)) = (claimed(given, at, view, cuts), given) else { return Ok(None) };
         let log = log.filter(|l| l.to == freeze.global()).with_context(|| format!("who's who waits for global's log to step {}, where its freeze says it ends", freeze.global()))?;
-        let db = anchor(g, at, root, log, now).with_context(|| format!("your One App's freeze at step {at}, which an admin's device signed, doesn't check out: this device reads who's who no further"))?;
+        let db = anchor(g, at, root, log, now).with_context(|| format!("{YOURS}'s freeze at step {at}, which an admin's device signed, doesn't check out: this device reads who's who no further"))?;
         Ok(Some(Truth { freeze, at, db }))
     }
 
@@ -684,7 +685,7 @@ pub struct Newer;
 
 impl std::fmt::Display for Newer {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "update this device: your One App's who's who is from a newer release than this one reads")
+        write!(f, "update this device: {YOURS}'s who's who is from a newer release than this one reads")
     }
 }
 

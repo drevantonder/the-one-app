@@ -4,6 +4,7 @@
 //! a machine that holds one opens that app's databases there with the grant's keys alone, as a call opens what it was
 //! handed, and never its other apps'.
 
+use crate::config::YOURS;
 use super::*;
 
 /// How long a grant lasts, unless its person's device renews it as they use the app.
@@ -67,7 +68,7 @@ impl Node {
         })?;
         ensure!(mine, "{} isn't one of its person's own devices, which are what grant", self.device_name());
         ensure!(may, "only {scope}'s person, or its group's admins, keep its apps running");
-        let seal = seal.context("that device isn't one of your One App's")?;
+        let seal = seal.with_context(|| format!("that device isn't one of {YOURS}'s"))?;
         let mut hashes = BTreeMap::new();
         if until > 0 {
             let epochs = self.epoch_keys(scope, true).await?;

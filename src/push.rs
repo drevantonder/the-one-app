@@ -144,7 +144,7 @@ pub fn describe() -> Value {
             { "name": "unregister", "reads": false, "description": "A phone from before notes stops getting pushes.",
               "input": { "type": "object", "required": ["token"], "properties": { "token": { "type": "string", "description": "the phone's APNs device token, in hex, as it registered" } }}},
             { "name": "devices", "reads": true, "description": "Your devices that get notifications.", "input": { "type": "object", "properties": {} }},
-            { "name": "status", "reads": true, "description": "Which push services your One App sends through: apns, fcm, wns, webpush.", "input": { "type": "object", "properties": {} }},
+            { "name": "status", "reads": true, "description": format!("Which push services {} sends through: apns, fcm, wns, webpush.", crate::config::YOURS), "input": { "type": "object", "properties": {} }},
         ],
     })
 }

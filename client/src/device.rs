@@ -12,6 +12,7 @@
 //! from each one's newest copy (`keys::oldest_needed`); and hands what it named to the one node each request is sent
 //! to, of the scopes they say that node runs, sealed to the seal key they list for it.
 
+use one::config::YOURS;
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -380,7 +381,7 @@ impl Device {
             }
             n += 1;
             if n > 8 && epochs.is_empty() {
-                return Err(failed("This device hasn't been given your One App's keys yet."));
+                return Err(failed(format!("This device hasn't been given {YOURS}'s keys yet.")));
             }
         }
         let mut log_keys = one::db::Keys::new();
@@ -1126,7 +1127,7 @@ async fn http(method: &str, url: &str, token: Option<&str>, body: Option<Value>)
             Some(body) => crate::bucket::AGENT.run(request.header("content-type", "application/json").body(keys::canonical(&body)).map_err(failed)?),
             None => crate::bucket::AGENT.run(request.body(()).map_err(failed)?),
         };
-        let mut response = response.map_err(|e| failed(format!("Couldn't reach your One App: {e}")))?;
+        let mut response = response.map_err(|e| failed(format!("Couldn't reach {YOURS}: {e}")))?;
         let status = response.status().as_u16();
         Ok((status, response.body_mut().read_json().unwrap_or(Value::Null)))
     })

@@ -4,6 +4,7 @@
 //! device follows: it reaches it through the URL signer, copies there what it reaches of the old one, and keeps its
 //! data there from then on. A folder is only ever a machine's own choice, never taken from what others write.
 
+use crate::config::YOURS;
 use super::*;
 
 /// The setting that says where the install keeps its data: S3's `endpoint`, `bucket` and `region`, as JSON.
@@ -38,7 +39,7 @@ impl Node {
         let joined = fields.get("address").cloned();
         let address: crate::bucket::Address = Arc::new(move || {
             let node = Node(node.upgrade().context("this device stopped")?);
-            node.with(|i| Ok(i.r.db().setting("address")))?.or_else(|| joined.clone()).context("your One App has no address yet, where its bucket is reached: an admin sets one with cloudflare use")
+            node.with(|i| Ok(i.r.db().setting("address")))?.or_else(|| joined.clone()).with_context(|| format!("{YOURS} has no address yet, where its bucket is reached: an admin sets one with cloudflare use"))
         });
         Place::install(fields, address, ed25519_dalek::SigningKey::from_bytes(self.0.key.as_bytes()))
     }

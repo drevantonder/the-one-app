@@ -225,7 +225,7 @@ fn devices_here(settings: one::cloudflare::Settings, needed: bool) -> Result<one
             json!({ "key": d["key"], "role": roles.join(" "), "admin": admin(&d["user"]) })
         })
         .collect();
-    anyhow::ensure!(!needed || !devices.is_empty(), "no node of your One App answers on this machine, so its relay would take none of its devices: run this where one does, or with --new for a new install, whose relay takes devices once this runs again beside one");
+    anyhow::ensure!(!needed || !devices.is_empty(), "no node of {YOURS} answers on this machine, so its relay would take none of its devices: run this where one does, or with --new for a new install, whose relay takes devices once this runs again beside one");
     // The install's recovery key too, as a client, not an admin's and not a node: what it lets in, the relay takes.
     devices.extend(install["recovery"].as_str().map(|k| json!({ "key": k, "role": "client", "admin": false })));
     let genesis = install["root"].as_str().filter(|r| r.len() == 64).map(str::to_string);

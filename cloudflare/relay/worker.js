@@ -169,7 +169,7 @@ export default class extends WorkerEntrypoint {
     // Which computes are connected now, which a client races first (an older one reads only `computes`).
     if (what === "computes" && Array.isArray(said)) return Response.json({ computes: said, online: await this.relay().connected(said) });
     if (said && typeof said === "object") return Response.json({ [what]: said });
-    return said === null ? refuse(403, "the relay takes only your One App's devices") : refuse(400, said);
+    return said === null ? refuse(403, `the relay takes only ${this.env.YOURS}'s devices`) : refuse(400, said);
   }
 
   /// Whether `key` (hex) is one of the install's endpoints: `{ admin }` if it is, for the URL signer, by its binding.
@@ -562,7 +562,7 @@ export class Relay extends DurableObject {
     }
     if (!attachment) {
       ws.serializeAttachment({});
-      ws.send(deny("the relay takes only your One App's devices"));
+      ws.send(deny(`the relay takes only ${this.env.YOURS}'s devices`));
       return ws.close(1008, "not allowed");
     }
     await this.admit(ws, id, attachment);
@@ -645,7 +645,7 @@ export class Relay extends DurableObject {
       return String(e.message || e);
     }
     const by = this.key(told.by);
-    if (!by) return "only your One App's devices tell the relay";
+    if (!by) return `only ${this.env.YOURS}'s devices tell the relay`;
     if (!this.take(told.by, told.at)) return "that tell was taken already";
     const admin = by.admin === 1;
     if (told.add !== undefined) {

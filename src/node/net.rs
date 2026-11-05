@@ -4,6 +4,7 @@
 //! both ends' keys, so what devices say needs no sealing of its own: an ask is one stream, its answer the same stream
 //! back. Devices are found by the install's list of them, never n0's discovery.
 
+use crate::config::YOURS;
 use iroh::endpoint::{Connection, QuicTransportConfig, presets};
 use iroh::{Endpoint, EndpointAddr, PublicKey, RelayConfig, RelayMap, RelayMode, RelayUrl, SecretKey};
 
@@ -448,7 +449,7 @@ impl Node {
     /// and by a client device the install still lists, with its `until`. `kept` is the last checked, so a connection
     /// checks one signature.
     fn vouched(&self, remote: &Key, certificate: Option<&str>, kept: &Mutex<Option<(String, crate::keys::Session)>>) -> Result<(Key, u64)> {
-        let certificate = certificate.context("that key isn't one of your One App's devices, and no device vouched for it")?;
+        let certificate = certificate.with_context(|| format!("that key isn't one of {YOURS}'s devices, and no device vouched for it"))?;
         let now = now_ms();
         let mut kept = kept.lock().unwrap();
         let session = match kept.as_ref().filter(|(c, _)| c == certificate) {
@@ -461,7 +462,7 @@ impl Node {
             }
         };
         ensure!(session.until > now, "that session has ended");
-        ensure!(self.client(&session.by).is_some(), "the device that vouched for this endpoint isn't one of your One App's");
+        ensure!(self.client(&session.by).is_some(), "the device that vouched for this endpoint isn't one of {YOURS}'s");
         Ok((session.by, session.until))
     }
 
@@ -474,7 +475,7 @@ impl Node {
             if pairing {
                 self.0.net.joining.fetch_sub(1, SeqCst);
             }
-            tracing::debug!("{} isn't a device of your One App", short(&remote));
+            tracing::debug!("{} isn't a device of {YOURS}", short(&remote));
             return conn.close(1u32.into(), b"not a device of this install");
         }
         let answered = tokio::time::timeout(Duration::from_secs(30), async {
@@ -482,7 +483,7 @@ impl Node {
             let msg: Value = serde_json::from_slice(&recv.read_to_end(JOIN_LIMIT).await?)?;
             let answer = match msg["body"].get("join") {
                 Some(join) if msg["kind"] == "ask" => self.joining(remote, join).await,
-                _ => json!({ "error": "only your One App's devices are answered" }),
+                _ => json!({ "error": format!("only {YOURS}'s devices are answered") }),
             };
             send.write_all(answer.to_string().as_bytes()).await?;
             send.finish()?;
@@ -562,7 +563,7 @@ impl Node {
     /// A connection to `to`: the one open, or a new one (`fresh`, or if that one closed). A `NotThere` if it can't
     /// be reached.
     async fn conn(&self, to: &Key, fresh: bool) -> Result<Connection> {
-        let (address, endpoint) = self.0.net.endpoint.lock().unwrap().clone().ok_or_else(|| NotThere("this device isn't connected to your One App's relay".into()))?;
+        let (address, endpoint) = self.0.net.endpoint.lock().unwrap().clone().ok_or_else(|| NotThere(format!("this device isn't connected to {YOURS}'s relay")))?;
         let slot = self.conn_slot(to);
         let mut held = slot.lock().await;
         if let Some(conn) = held.as_ref().filter(|c| !fresh && c.close_reason().is_none()) {
@@ -570,7 +571,7 @@ impl Node {
         }
         // Off the relay, a device is reached only on a connection it opened: one just started waits to be on it.
         if tokio::time::timeout(CONNECT, endpoint.online()).await.is_err() {
-            bail!(NotThere("this device isn't connected to your One App's relay".into()));
+            bail!(NotThere(format!("this device isn't connected to {YOURS}'s relay")));
         }
         let (url, _) = relay(&address, None)?;
         let addr = EndpointAddr::new(PublicKey::from_bytes(to)?).with_relay_url(url);
@@ -754,7 +755,7 @@ impl Node {
     /// pairing code it made (`pairing`, the hash of its ticket, and `until`). Tried a few times, in the background.
     pub(super) fn tell_relay(&self, fields: Value) {
         let Some(address) = self.with(|i| Ok(i.r.db().setting("address"))).ok().flatten() else {
-            return tracing::debug!("telling the relay: your One App has no address yet");
+            return tracing::debug!("telling the relay: {YOURS} has no address yet");
         };
         let key = ed25519_dalek::SigningKey::from_bytes(self.0.key.as_bytes());
         let url = format!("{}/relay/tell", address.trim_end_matches('/'));

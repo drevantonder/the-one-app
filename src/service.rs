@@ -7,6 +7,7 @@
 //! app's own (`oned::program`), which this starts, registers over a loopback with the services' API and long-polls for
 //! calls. A service writes nothing itself: what it asks for is a call, which a node of its person's runs (`/v1/call` on the loopback).
 
+use crate::config::YOURS;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
@@ -324,7 +325,7 @@ impl Service {
                 Err(err) => json!({ "error": format!("{err:#}") }),
             },
             Some("ask") if self.is_node(&remote) => self.run(remote, &body["call"]).await,
-            _ => json!({ "error": "only your One App's devices are answered" }),
+            _ => json!({ "error": format!("only {YOURS}'s devices are answered") }),
         }
     }
 
@@ -339,7 +340,7 @@ impl Service {
             return json!({ "behind": true });
         }
         if !may {
-            return json!({ "error": "only your One App's devices are answered" });
+            return json!({ "error": format!("only {YOURS}'s devices are answered") });
         }
         let Some(mut describe) = self.0.services.describe().into_iter().next() else {
             return json!({ "error": format!("{} isn't running here yet", self.0.name) });
@@ -360,7 +361,7 @@ impl Service {
         let given = crate::entry::unpack(&bytes)?;
         let root = Hash::from_hex(&self.0.install.root)?;
         let mut known = self.0.known.lock().unwrap();
-        ensure!(known.1.computes().is_empty() || known.1.compute(remote).is_some(), "only your One App's devices bring its entries");
+        ensure!(known.1.computes().is_empty() || known.1.compute(remote).is_some(), "only {YOURS}'s devices bring its entries");
         let mut depths_known = self.0.depths.lock().unwrap();
         let mut grown = depths_known.clone();
         for (hash, depth) in depths.as_object().into_iter().flatten() {
@@ -376,7 +377,7 @@ impl Service {
             None if more_depths => placed(root, known.0.clone(), &grown, &steps),
             None => return Ok(()),
         };
-        ensure!(!members.users().is_empty(), "those aren't your One App's entries");
+        ensure!(!members.users().is_empty(), "those aren't {YOURS}'s entries");
         write_private(&self.0.dir.join("entries"), &crate::entry::pack(&entries.iter().collect::<Vec<_>>()))?;
         let text: HashMap<String, u64> = grown.iter().map(|(h, d)| (h.to_hex(), *d)).collect();
         write_private(&self.0.dir.join("depths"), &serde_json::to_vec(&text)?)?;
@@ -391,7 +392,7 @@ impl Service {
     fn take_steps(&self, remote: &Key, given: &Value) -> Result<()> {
         let root = Hash::from_hex(&self.0.install.root)?;
         let mut known = self.0.known.lock().unwrap();
-        ensure!(known.1.compute(remote).is_some(), "only your One App's devices bring its steps");
+        ensure!(known.1.compute(remote).is_some(), "only {YOURS}'s devices bring its steps");
         let mut steps = self.0.steps.lock().unwrap();
         for s in given.as_array().into_iter().flatten() {
             let at = s["at"].as_u64().unwrap_or(0);
@@ -481,7 +482,7 @@ impl Service {
     }
 
     async fn send(&self, to: Key, msg: &Value) -> Result<Value> {
-        let endpoint = self.0.endpoint.lock().unwrap().clone().context("this service isn't connected to your One App's relay yet")?;
+        let endpoint = self.0.endpoint.lock().unwrap().clone().with_context(|| format!("this service isn't connected to {YOURS}'s relay yet"))?;
         let held = self.0.conns.lock().unwrap().get(&to).filter(|c| c.close_reason().is_none()).cloned();
         let conn = match held {
             Some(conn) => conn,
@@ -538,8 +539,8 @@ impl Service {
 /// own person; or, for a service that serves everyone, a node that runs their calls bringing their sign-in, which this
 /// service checked (`signed_in`). A node of someone else's, an admin's too, never calls as them otherwise.
 pub fn may_call(m: &ScopeDb, me: &Key, remote: &Key, key: &Key, user: &str, signed_in: bool) -> Result<()> {
-    let service = m.service(me).context("this service isn't one of your One App's yet")?;
-    let node = m.compute(remote).context("only your One App's devices are answered")?;
+    let service = m.service(me).with_context(|| format!("this service isn't one of {YOURS}'s yet"))?;
+    let node = m.compute(remote).with_context(|| format!("only {YOURS}'s devices are answered"))?;
     ensure!(m.may(user, "use", &scopes::service(me)), "{} serves only its own person", service.service.as_deref().unwrap_or("this service"));
     let own = node.user == user && (*key == *remote || m.client(key).is_some_and(|c| c.user == user));
     ensure!(own || (service.shared && signed_in && m.serves(remote, user)), "{} may not call as that person", short(remote));
