@@ -884,6 +884,32 @@ impl Node {
         Ok(out.join("\n\n"))
     }
 
+    /// `scope`'s database of the app a call runs, as the call reads it: caught up at its first read, so it reads one
+    /// state of the scope throughout, and that read traced (where its data came from, and how long getting it took).
+    async fn call_db(&self, token: &str, grant: &Grant, scope: &Scope) -> Result<tokio::sync::OwnedMutexGuard<crate::db::Db>> {
+        ensure!(grant.scopes.contains(scope), "the call didn't name {scope}");
+        let started = Instant::now();
+        let first = !grant.caught_up.contains(scope);
+        let traced = grant.trace.clone().filter(|_| first);
+        let (db, at) = trace::within(traced.clone(), async {
+            let (db, bucket) = self.call_database(&grant.caller, scope, &grant.app, DATABASE, None).await?;
+            let mut db = db.lock_owned().await;
+            let at = db.at();
+            if first {
+                self.read_ready(&(scope.clone(), format!("{}/{DATABASE}", grant.app)), &mut db, &bucket).await?;
+                if let Some(g) = self.0.grants.lock().unwrap().get_mut(token) {
+                    g.caught_up.push(scope.clone());
+                }
+            }
+            anyhow::Ok((db, at))
+        })
+        .await?;
+        if let Some(t) = traced {
+            t.note(json!({ "step": "data", "app": grant.app, "scope": trace::kind(scope), "steps": db.at(), "new": db.at() - at }), started.elapsed());
+        }
+        Ok(db)
+    }
+
     /// What the shim asks the node for a running call (`src/outbound.rs`): `POST /call { app, op, input }` runs an
     /// operation of an app or service the calling app uses, as its caller; `POST /blob` keeps a blob, `GET
     /// /blob/<hash>` gets one the caller may read; `GET /catalog` lists the install's apps, `GET /devices` its devices.
@@ -912,30 +938,21 @@ impl Node {
             ("POST", "/query") => {
                 let req: Value = serde_json::from_slice(&body)?;
                 let scope = Scope::parse(req["scope"].as_str().unwrap_or(""))?;
-                ensure!(grant.scopes.contains(&scope), "the call didn't name {scope}");
                 let params = req["params"].as_array().cloned().unwrap_or_default();
-                let started = Instant::now();
-                // The first read of each scope, traced: where its data came from, and how long getting it took.
-                let first = !grant.caught_up.contains(&scope);
-                let traced = grant.trace.clone().filter(|_| first);
-                let (db, at) = trace::within(traced.clone(), async {
-                    let (db, bucket) = self.call_database(&grant.caller, &scope, &grant.app, DATABASE, None).await?;
-                    let mut db = db.lock_owned().await;
-                    let at = db.at();
-                    // Once a call, so it reads one state of the scope throughout.
-                    if first {
-                        self.read_ready(&(scope.clone(), format!("{}/{DATABASE}", grant.app)), &mut db, &bucket).await?;
-                        if let Some(g) = self.0.grants.lock().unwrap().get_mut(token) {
-                            g.caught_up.push(scope.clone());
-                        }
-                    }
-                    anyhow::Ok((db, at))
-                })
-                .await?;
-                if let Some(t) = traced {
-                    t.note(json!({ "step": "data", "app": grant.app, "scope": trace::kind(&scope), "steps": db.at(), "new": db.at() - at }), started.elapsed());
-                }
-                ok(json!({ "ok": db.query(req["sql"].as_str().unwrap_or(""), &params)? }))
+                ok(json!({ "ok": self.call_db(token, grant, &scope).await?.query(req["sql"].as_str().unwrap_or(""), &params)? }))
+            }
+            // Whether the caller may do a permission to an object (`ctx.<scope>.may`): the core's rows, and the app's
+            // own types (its `types`) and rows (its database's `relations` in that scope).
+            ("POST", "/may") => {
+                let req: Value = serde_json::from_slice(&body)?;
+                let scope = Scope::parse(req["scope"].as_str().unwrap_or(""))?;
+                let (verb, object) = (req["permission"].as_str().unwrap_or(""), req["object"].as_str().unwrap_or(""));
+                let types = self.0.apps.describe(&grant.app).await?["types"].clone();
+                let rows = match types.as_object().is_some_and(|t| !t.is_empty()) {
+                    true => crate::database::scopes::app_relations(self.call_db(token, grant, &scope).await?.connection()),
+                    false => Vec::new(),
+                };
+                ok(json!({ "ok": self.with(|i| Ok(i.r.db().app_may(&grant.caller.user, verb, object, &types, &rows, now_ms())))? }))
             }
             ("GET", "/vault") => ok(json!(self.lookup(&grant.caller, &grant.app, &grant.scopes).await?.for_app())),
             ("POST", "/vault/match") => {

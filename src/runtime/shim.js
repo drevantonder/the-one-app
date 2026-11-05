@@ -50,6 +50,13 @@ function describe() {
     schedules: Object.entries(app.schedules || {}).map(([name, s]) => ({ name, ...s })),
     // Each kind of scope's schema (user, group, global), as the changes that make it, oldest first.
     schema: Object.fromEntries(Object.entries(app.schema || {}).map(([kind, sql]) => [kind, [].concat(sql)])),
+    // Its own types of object, as the core's (src/permissions): each one's verbs, and its roles, each a list of them.
+    // Who holds a role on one is a row of its database's `relations` (subject, relation, object, until, as the core's),
+    // which `may` reads. A type the core has stays the core's.
+    ...(app.types && Object.keys(app.types).length ? { types: Object.fromEntries(Object.entries(app.types).map(([type, t]) => [type, {
+      permissions: [].concat(t.permissions || []).map(String),
+      roles: Object.fromEntries(Object.entries(t.roles || {}).map(([role, verbs]) => [role, [].concat(verbs).map(String)])),
+    }])) } : {}),
   };
 }
 
@@ -104,6 +111,9 @@ function context(ask, body, appends, later) {
     /// Reads this scope's database: the rows, each an object by column. It sees what the call writes only once the
     /// call has returned.
     query: async (q, params = []) => (await (await ask("query", { method: "POST", body: JSON.stringify({ scope: s.id, sql: q, params }) })).json()).ok,
+    /// Whether the caller may do `permission` (a verb) to `object` (`<type>:<id>`), as the core's rows and this scope's
+    /// `relations`, by the app's own `types`, say: `may("push", "repo:" + id)`, `may("use", "group:" + id)`.
+    may: async (permission, object) => (await (await ask("may", { method: "POST", body: JSON.stringify({ scope: s.id, permission, object }) })).json()).ok === true,
     /// Writes this scope's database once the call returns, with every other statement it ran, as one transaction;
     /// `blobs` are blobs the scope keeps from now on.
     exec: (q, params = [], blobs = []) => {

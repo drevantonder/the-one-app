@@ -87,6 +87,17 @@ pub struct ScopeDb {
     now: u64,
 }
 
+/// A row of an app's own relations: subject, relation, object, until (ms; None for good), as the engine's.
+pub type Relation = (String, String, String, Option<i64>);
+
+/// An app's own relation rows: the engine's columns of its database's `relations`; none if it has no such table.
+pub fn app_relations(app: &Connection) -> Vec<Relation> {
+    let read = || -> rusqlite::Result<Vec<Relation>> {
+        app.prepare("SELECT subject, relation, object, until FROM relations")?.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?.collect()
+    };
+    read().unwrap_or_default()
+}
+
 /// A text column that names a person (`person:<id>`), as an id.
 fn id(of: &str) -> String {
     of.strip_prefix("person:").or_else(|| of.strip_prefix("group:")).unwrap_or(of).to_string()
@@ -198,6 +209,41 @@ impl ScopeDb {
     /// Whether `taker` may take the role `relation` on `object` from `user`.
     pub fn may_take(&self, taker: &str, user: &str, relation: &str, object: &str) -> bool {
         permissions::may_take(&self.db, &person(taker), &person(user), relation, object, self.now).unwrap_or(false)
+    }
+
+    /// Whether `user` may do `verb` to `object` (`ctx.<scope>.may` in an app), by the core's rows and an app's own:
+    /// `types` as its code declares them (`{ <type>: { permissions: [verbs], roles: { <role>: [verbs] } } }`), and
+    /// `rows` its relations (`app_relations`). An app's types follow the core's rules but never touch the core's: a
+    /// type the core has is the core's, so an app's of that name counts for nothing; only its rows on its own types
+    /// count, and never a rule (`#…`, `@`, `*`). Asked in a transaction that's rolled back, so the database stays as
+    /// replay built it.
+    pub fn app_may(&self, user: &str, verb: &str, object: &str, types: &Value, rows: &[Relation], now: u64) -> bool {
+        let ask = || -> Result<bool> {
+            let tx = self.db.unchecked_transaction()?;
+            let mut own = BTreeSet::new();
+            for (name, t) in types.as_object().into_iter().flatten() {
+                let core: bool = tx.query_row("SELECT exists (SELECT 1 FROM types WHERE name = ?1)", [name], |r| r.get(0))?;
+                if core || name.is_empty() || name.contains([':', '#', '*', '@']) {
+                    continue;
+                }
+                tx.execute("INSERT INTO types (name, permissions) VALUES (?1, ?2)", params![name, t["permissions"].to_string()])?;
+                for (role, verbs) in t["roles"].as_object().into_iter().flatten() {
+                    tx.execute("INSERT INTO roles (type, name, permissions, builtin) VALUES (?1, ?2, ?3, 1)", params![name, role, verbs.to_string()])?;
+                }
+                own.insert(name.as_str());
+            }
+            for (subject, relation, on, until) in rows {
+                let rule = subject.starts_with(['#', '@']) || subject.contains('*') || on.contains('*');
+                if !rule && on.split_once(':').is_some_and(|(ty, _)| own.contains(ty)) {
+                    tx.execute("INSERT OR IGNORE INTO relations VALUES (?1, ?2, ?3, ?4)", params![subject, relation, on, until])?;
+                }
+            }
+            permissions::may(&tx, &person(user), verb, object, now)
+        };
+        ask().unwrap_or_else(|err| {
+            tracing::warn!("asking who may {verb} {object} in an app: {err:#}");
+            false
+        })
     }
 
     /// Whether the device `key` runs `scope`'s calls.
@@ -713,5 +759,55 @@ pub(crate) mod tests {
         for s in m.scopes() {
             assert_eq!(db.vault_publics(&s), m.vault_publics.iter().filter(|((v, _), _)| *v == s).map(|((_, n), p)| (*n, *p)).collect());
         }
+    }
+
+    /// An app's own types and rows answer only for its own objects: Alice is group g's admin, Bob its member, Dave a
+    /// collaborator, Carol owns repo 2, and Erin is out of the install. Rows that would give a core role, make a rule,
+    /// or that a type of the core's name declares, count for nothing, and nothing stays in the database.
+    #[test]
+    fn app_may() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(permissions::SCHEMA).unwrap();
+        db.execute_batch(permissions::DEFAULTS).unwrap();
+        for (s, r, o) in [
+            ("person:alice", "member", INSTALL),
+            ("person:bob", "member", INSTALL),
+            ("person:carol", "member", INSTALL),
+            ("person:dave", "member", INSTALL),
+            ("person:alice", "admin", "group:g"),
+            ("person:bob", "member", "group:g"),
+        ] {
+            db.execute("INSERT INTO relations VALUES (?1, ?2, ?3, NULL)", [s, r, o]).unwrap();
+        }
+        let db = ScopeDb { db, now: 0 };
+        let types = json!({
+            "repo": { "permissions": ["push", "manage"], "roles": { "owner": ["push", "manage"], "collaborator": ["push"] } },
+            "group": { "permissions": ["use"], "roles": { "fan": ["use"] } },
+        });
+        let rows: Vec<Relation> = [
+            ("group:g#admin", "owner", "repo:1"),
+            ("group:g#member", "collaborator", "repo:1"),
+            ("person:dave", "collaborator", "repo:1"),
+            ("person:carol", "owner", "repo:2"),
+            ("person:erin", "owner", "repo:1"),
+            ("person:carol", "admin", INSTALL),
+            ("person:carol", "fan", "group:g"),
+            ("#collaborator", "owner", "repo:1"),
+            ("@", "owner", "repo:*"),
+        ]
+        .into_iter()
+        .map(|(s, r, o)| (s.to_string(), r.to_string(), o.to_string(), None))
+        .collect();
+        let count = |table: &str| db.db.query_row(&format!("SELECT count(*) FROM {table}"), [], |r| r.get::<_, i64>(0)).unwrap();
+        let before = (count("types"), count("roles"), count("relations"));
+        let may = |who: &str, verb: &str, object: &str| db.app_may(who, verb, object, &types, &rows, 0);
+        assert!(may("alice", "push", "repo:1") && may("alice", "manage", "repo:1"));
+        assert!(may("bob", "push", "repo:1") && !may("bob", "manage", "repo:1"));
+        assert!(may("dave", "push", "repo:1") && !may("dave", "manage", "repo:1"));
+        assert!(may("carol", "manage", "repo:2") && !may("carol", "push", "repo:1"));
+        assert!(!may("erin", "push", "repo:1"));
+        assert!(!may("carol", "change-roles", INSTALL) && !may("carol", "use", "group:g"));
+        assert!(may("alice", "use", "group:g") && !may("dave", "push", "repo:2"));
+        assert_eq!((count("types"), count("roles"), count("relations")), before);
     }
 }

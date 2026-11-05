@@ -273,6 +273,19 @@ pub fn query(handle: u32, sql: &str, params: &str) -> Result<String, JsError> {
     })
 }
 
+/// Whether `user` may do `permission` to `object`, by `owner`'s scope database and an app's own `types` (JSON, as it declares
+/// them) and relation rows in its open database `handle`, if it declares any (`ScopeDb::app_may`), as a node on a
+/// machine answers.
+#[wasm_bindgen]
+pub fn may(owner: &str, handle: Option<u32>, user: &str, permission: &str, object: &str, types: &str, now: f64) -> Result<bool, JsError> {
+    let types: Value = serde_json::from_str(types)?;
+    let rows = match handle {
+        Some(h) => OPEN.with(|o| o.borrow().1.get(&h).map(|(_, db)| one::database::scopes::app_relations(db.connection()))).context("that database isn't open").map_err(thrown)?,
+        None => Vec::new(),
+    };
+    replayed(owner, &[], |r| r.global().app_may(user, permission, object, &types, &rows, now as u64)).map_err(thrown)
+}
+
 /// Writes a call's statements (JSON, `[[sql, params, check]]`) as one step: → its position, or 0 if they changed
 /// nothing.
 #[wasm_bindgen]

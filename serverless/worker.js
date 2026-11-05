@@ -29,7 +29,7 @@
 // install's) and NAME (its name). `built.js`, made when it's deployed, is the shim.
 
 import { DurableObject, RpcTarget } from "cloudflare:workers";
-import { initSync, check_certificate, open, opens, refresh, query, write, close, statements, vault_items, vault_fill, vault_schema, screen, client_screen, config, prefix, following as after, read_log, groups, scopes_of, epochs as epochsOf, runners, forward, install, bundle, endpoint_of, signed, handoff, epoch_name, app_key_name, needs as needed, endpoint_start, endpoint_deliver, endpoint_ask, endpoint_close } from "./one_serverless.js";
+import { initSync, check_certificate, open, opens, refresh, query, may, write, close, statements, vault_items, vault_fill, vault_schema, screen, client_screen, config, prefix, following as after, read_log, groups, scopes_of, epochs as epochsOf, runners, forward, install, bundle, endpoint_of, signed, handoff, epoch_name, app_key_name, needs as needed, endpoint_start, endpoint_deliver, endpoint_ask, endpoint_close } from "./one_serverless.js";
 import wasm from "./one_serverless_bg.wasm";
 import { shim, compatibilityDate } from "./built.js";
 
@@ -643,6 +643,15 @@ class Call {
     return this.on(scope, (handle) => JSON.parse(query(handle, sql, JSON.stringify(params))));
   }
 
+  /// Whether the caller may do `permission` to `object`: the core's rows, and the app's own types and its rows in
+  /// `scope` (src/node/calls.rs: `/may`).
+  async may(scope, permission, object) {
+    if (!this.scopes.includes(scope)) refuse(403, `the call didn't name ${scope}`);
+    const types = (await this.person.describe(this.who, this.app)).types;
+    const ask = (handle) => may(this.person.owner, handle, this.who.user, permission, object, JSON.stringify(types || {}), Date.now());
+    return types ? this.on(scope, ask) : ask(undefined);
+  }
+
   /// Writes a call's appends: each scope's statements as one step. Nobody is told: this node runs only while no
   /// machine's answers, and devices read what changed from the bucket. → the databases it wrote.
   async write(appends) {
@@ -834,6 +843,8 @@ class ForCall extends RpcTarget {
       switch (`${method} ${path}`) {
         case "POST query":
           return Response.json({ ok: await this.call.query(q.scope, q.sql, q.params || []) });
+        case "POST may":
+          return Response.json({ ok: await this.call.may(q.scope, q.permission, q.object) });
         case "POST appends":
           await this.call.write(q.appends || []);
           return Response.json({});
