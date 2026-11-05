@@ -1,4 +1,4 @@
-//! The MCP Worker's devices (cloudflare/mcp/), each a client of the install as any app is (one-client, over `<cli>/http/1`),
+//! The remote MCP server's devices (cloudflare/mcp/), each a client of the install as any app is (one-client, over `<cli>/http/1`),
 //! with no socket: one per remote MCP client, in its own Durable Object, which may share this isolate with others'.
 //! What one sends goes to its object's `send(dst, segment size, contents)`, and the relay hands it what's sent to its
 //! key, by RPC, which comes in at `device_deliver`. It lives while its object does, and holds its key only while it

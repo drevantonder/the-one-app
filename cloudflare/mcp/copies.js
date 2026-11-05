@@ -1,5 +1,5 @@
 // A remote MCP client's device secret, kept only sealed under that client's own tokens (shared/crypto.js `sealUnder`),
-// each copy by its token's id, so the MCP Worker opens it only while the client calls, and with nothing of its own.
+// each copy by its token's id, so the remote MCP server opens it only while the client calls, and with nothing of its own.
 //
 // A sign-in seals it under the client's refresh token and its access token, until each expires. Refresh tokens are
 // single-use (sign-in answers one used again only with the same new pair, for a minute, in case that answer was lost): a

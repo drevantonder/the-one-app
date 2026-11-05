@@ -13,7 +13,7 @@ publish = false
 doctest = false
 
 [features]
-# A client with no socket, in a Worker's Durable Object (src/relayed.rs): the MCP Worker's devices.
+# A client with no socket, in a Worker's Durable Object (src/relayed.rs): the remote MCP server's devices.
 relayed = ["iroh/unstable-custom-transports", "dep:iroh-base", "dep:n0-watcher", "dep:noq-udp"]
 
 [dependencies]

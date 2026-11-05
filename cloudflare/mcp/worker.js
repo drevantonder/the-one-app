@@ -1,4 +1,4 @@
-// The MCP Worker: remote MCP clients' device. ChatGPT, Claude.ai and the like can't run our code, so each one a person
+// The remote MCP server: remote MCP clients' device. ChatGPT, Claude.ai and the like can't run our code, so each one a person
 // signs in with is a device of theirs here, a client of the install like any app, which the person approves like any
 // device. It speaks MCP to them over HTTPS at `<address>/mcp`, and asks a node's own `/mcp` as that device, over iroh
 // (`<cli>/http/1`, one-client in serverless/src/clients.rs), handing it the keys a call needs, sealed to that node and
@@ -286,7 +286,7 @@ export class Client extends DurableObject {
     this.run = null;
   }
 
-  /// The relay, by its entrypoint for the MCP Worker's devices.
+  /// The relay, by its entrypoint for the remote MCP server's devices.
   relay() {
     return this.env.RELAY;
   }

@@ -89,7 +89,7 @@ This phase is docs only.
 
 1. **The permissions engine.** It's pure Rust: types, relations, roles as data, default roles, `may`, unknown means no, no escalation, and the last admin.
 2. **The scope database**, built deterministically from the existing log on every reader (node, serverless and client crate) and kept up to date as entries arrive. Its tables are listed under "The scope database's tables" below.
-3. **Readers switch to it.** Every use of `Members` or `is_admin`, the client crate's checks, the browser's checks (through the client crate's WebAssembly) and the MCP worker's reading all query the scope database and `may`. Nothing writes to it yet. **Phase 1 is done when nothing but the builder reads entries.**
+3. **Readers switch to it.** Every use of `Members` or `is_admin`, the client crate's checks, the browser's checks (through the client crate's WebAssembly) and the remote MCP server's reading all query the scope database and `may`. Nothing writes to it yet. **Phase 1 is done when nothing but the builder reads entries.**
 4. **Storage, for every database:**
    - signatures and state hashes go in an object beside each step (`<prefix>/<n>.sig`), which older readers ignore;
    - merging in levels;
@@ -163,7 +163,7 @@ Every row change is in a signed step, so "who did what" for seven years is the s
 | E | 1.6 | Clients sync with TanStack DB | none | the screens' shared JavaScript |
 | F1 | 1.3 | The node reads the scope database and `may` | B, C | `src/node/`, `src/*.rs` callers |
 | F2 | 1.3 | The client crate and the browser | B, C | `client/`, `cloudflare/web/` |
-| F3 | 1.3 | The MCP Worker and the serverless node | B, C | `cloudflare/mcp/`, `serverless/` |
+| F3 | 1.3 | The remote MCP server and the serverless node | B, C | `cloudflare/mcp/`, `serverless/` |
 | G | 1.5 | Apps' `ctx.may` and Repos | F1 | `src/apps.rs`, `apps/repos/` |
 | H | 2 | Switching over, with its gate | all of phase 1, and every device on R1 | one owner |
 | I1–I4 | 3 | Delete, rename to keep, move folders, finish the docs | H | split by area |

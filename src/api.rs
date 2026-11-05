@@ -39,7 +39,7 @@ pub fn router(node: Node) -> Router {
 /// MCP over HTTP, at `/mcp` (the CLI's `mcp_http`), which this crate can't name: set once, before the node serves.
 static MCP: std::sync::OnceLock<axum::routing::MethodRouter<Node>> = std::sync::OnceLock::new();
 
-/// Serves MCP at `/mcp`, for this machine's own programs and the install's client devices over iroh: the MCP Worker,
+/// Serves MCP at `/mcp`, for this machine's own programs and the install's client devices over iroh: the remote MCP server,
 /// remote MCP clients' device, among them (cloudflare/mcp/).
 pub fn serve_mcp(handler: axum::routing::MethodRouter<Node>) {
     let _ = MCP.set(handler);
@@ -654,7 +654,7 @@ async fn signed_in(node: &Node, token: String) -> anyhow::Result<Me> {
     let claims = tokio::task::spawn_blocking(move || {
         let claims = issuer.verify(&asked, now)?;
         // Only the install's own apps sign in for its address; a remote MCP client's token is for `<address>/mcp`, the
-        // MCP Worker, whose device it is, and never a sign-in here.
+        // remote MCP server, whose device it is, and never a sign-in here.
         let address = address.trim_end_matches('/');
         anyhow::ensure!(claims.for_resource(address), "that sign-in isn't for {address}");
         Ok::<_, anyhow::Error>(claims)

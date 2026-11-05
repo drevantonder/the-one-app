@@ -4,7 +4,7 @@
 //! database (`READS`), or an admin said it's gone for good (`SKIPS`).
 //!
 //! A device says what it reads as it asks: a client in every request (`HEADER`, from the client crate, which every
-//! client is made of: browsers, phones, Macs, Windows and the MCP Worker's devices), and a node of itself, as it says
+//! client is made of: browsers, phones, Macs, Windows and the remote MCP server's devices), and a node of itself, as it says
 //! its build. The node asked keeps it in `global`'s node database, where every node reads it (`src/node/status.rs`).
 
 use std::collections::{BTreeSet, HashMap};

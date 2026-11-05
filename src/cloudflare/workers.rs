@@ -46,7 +46,7 @@ pub fn wasm(entry: &str) -> Vec<(String, Vec<u8>)> {
 /// The serverless node's modules, as `serverless::modules` gives them.
 pub type Modules = Vec<(String, &'static str, Vec<u8>)>;
 
-/// A service's modules besides its own, (name, bytes): its WebAssembly, and for the MCP Worker the serverless node's
+/// A service's modules besides its own, (name, bytes): its WebAssembly, and for the remote MCP server the serverless node's
 /// build (`serverless`), which runs its devices' endpoints. None if there's none.
 pub fn modules_of(service: &str, entry: &str, serverless: Option<&Modules>) -> Option<Vec<(String, Vec<u8>)>> {
     let mut out = wasm(entry);
@@ -432,11 +432,11 @@ impl Settings {
         if service == "relay" {
             let devices = (!self.devices.is_empty()).then(|| ("DEVICES".into(), json!(self.devices).to_string(), false));
             let bound = self.serverless_endpoint().filter(|_| self.serverless).map(|key| [("BOUND".into(), key, false), ("NODE".into(), format!("object:{}:Node", crate::serverless::SERVICE), false)]);
-            // And the MCP Worker's devices, each bound to its object while it runs.
+            // And the remote MCP server's devices, each bound to its object while it runs.
             let mcp = ("MCP".into(), "object:mcp:Client".into(), false);
             return devices.into_iter().chain(bound.into_iter().flatten()).chain([mcp]).chain(location).collect();
         }
-        // The MCP Worker: remote MCP clients' devices, whose secrets open only with their clients' tokens. It reaches
+        // The remote MCP server: remote MCP clients' devices, whose secrets open only with their clients' tokens. It reaches
         // the relay only by its entrypoint for them, and reads the bucket through the URL signer as any device does.
         if service == "mcp" {
             let mut out = vec![
@@ -532,7 +532,7 @@ pub fn served(settings: &Settings, modules: Vec<Vec<u8>>, web: &Path) -> Vec<Ser
 /// `served`, with the serverless node's build `serverless` (this build's, or a test's).
 pub fn served_with(settings: &Settings, modules: Vec<Vec<u8>>, web: &Path, serverless: Option<Modules>) -> Vec<Served> {
     let node = serverless.clone().filter(|_| settings.serverless).map(|modules| crate::serverless::served(settings, modules));
-    // A build without the serverless node's WebAssembly has no MCP Worker, and nothing binds one.
+    // A build without the serverless node's WebAssembly has no remote MCP server, and nothing binds one.
     let mcp = serverless.is_some();
     WORKERS
         .iter()
@@ -546,7 +546,7 @@ pub fn served_with(settings: &Settings, modules: Vec<Vec<u8>>, web: &Path, serve
             listen: settings.place(name).map(|(_, port)| format!("127.0.0.1:{port}")),
             bindings: settings.bindings(name).into_iter().filter(|(_, v, _)| mcp || !v.starts_with("service:mcp") && !v.starts_with("object:mcp:")).map(|(n, v, _)| (n, v)).collect(),
             assets: (*name == "gateway").then(|| web.to_path_buf()),
-            // A throwaway network's URL signer, and the MCP Worker's devices reading by its URLs, reach its bucket on this machine.
+            // A throwaway network's URL signer, and the remote MCP server's devices reading by its URLs, reach its bucket on this machine.
             outbound: (matches!(*name, "signer" | "mcp") && settings.throwaway_person.is_some()).then(|| NEARBY.to_string()),
         })
         .chain(node)

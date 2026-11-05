@@ -46,11 +46,11 @@
 // comes back by RPC (`fromNode`, on the `ServerlessNode` entrypoint, which only its Worker binds) and goes out as from
 // it. It's one of the install's endpoints, as compute.
 //
-// Nor are the MCP Worker's devices (cloudflare/mcp/), one per remote MCP client, each in a Durable Object of that Worker's
+// Nor are the remote MCP server's devices (cloudflare/mcp/), one per remote MCP client, each in a Durable Object of that Worker's
 // (`MCP`) while it runs: one binds its key (`bind`, a request signed by that key, which must be on the list) to its
 // object, which then gets the datagrams sent to that key by RPC (`deliver`), and passes back by RPC what it sends
 // (`fromClient`), until it unbinds or its binding lapses. Binding gives it a ticket, which sending and unbinding must
-// show, so one device's object sends only as itself. The MCP Worker binds the `McpDevices` entrypoint, never the
+// show, so one device's object sends only as itself. The remote MCP server binds the `McpDevices` entrypoint, never the
 // relay's object, so it can't tell the relay anything a device didn't sign.
 import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
 import wasm from "./relay_protos_bg.wasm";
@@ -187,8 +187,8 @@ export default class extends WorkerEntrypoint {
 const near = (env) => (env.LOCATION ? { locationHint: env.LOCATION } : {});
 const relay = (env) => env.RELAY.get(env.RELAY.idFromName("relay"), near(env));
 
-/// What the MCP Worker asks the relay, by its binding: its devices' own bindings, and who's here. Nothing else of the
-/// relay's object, so a hacked MCP Worker tells it nothing and sends as no endpoint but a device it holds the key of.
+/// What the remote MCP server asks the relay, by its binding: its devices' own bindings, and who's here. Nothing else of the
+/// relay's object, so a hacked remote MCP server tells it nothing and sends as no endpoint but a device it holds the key of.
 export class McpDevices extends WorkerEntrypoint {
   /// Binds a device's key to its object, by `request` signed with that key: → `{ ticket, until }`, or `{ error }`.
   bind(request, name) {
@@ -257,7 +257,7 @@ export class Relay extends DurableObject {
       const said = ws.deserializeAttachment();
       if (said?.id) this.sockets.set(said.id, ws);
     }
-    /// The MCP Worker's devices bound here: key → `{ name, until, ticket }`, its object's name, and what it shows.
+    /// The remote MCP server's devices bound here: key → `{ name, until, ticket }`, its object's name, and what it shows.
     this.bound = new Map();
     for (const b of this.sql.exec("SELECT key, name, until, ticket FROM bound WHERE until > ?", Date.now()).toArray()) this.bound.set(b.key, { name: b.name, until: b.until, ticket: b.ticket });
     /// When each sender was last told an endpoint isn't here, `<from> <to>` → ms; lost on hibernation, which is fine.
@@ -457,7 +457,7 @@ export class Relay extends DurableObject {
     return keys.filter((k) => this.sockets.has(k));
   }
 
-  /// The MCP Worker's object a key is bound to, if it is: its name.
+  /// The remote MCP server's object a key is bound to, if it is: its name.
   boundTo(key) {
     const b = this.env.MCP && this.bound.get(key);
     if (!b) return null;
@@ -466,7 +466,7 @@ export class Relay extends DurableObject {
     return null;
   }
 
-  /// Binds a key to the MCP Worker's object `name` for an hour: `request` signed by that key (`{ bind: true }`, as a
+  /// Binds a key to the remote MCP server's object `name` for an hour: `request` signed by that key (`{ bind: true }`, as a
   /// tell is), which is on the list. → `{ ticket, until }`, what sending as it and unbinding it show, and when it lapses
   /// (ms), or `{ error }`; bound again, it's given a new ticket.
   async bind(request, name) {
@@ -487,7 +487,7 @@ export class Relay extends DurableObject {
     return { ticket, until };
   }
 
-  /// Unbinds `key`: by the MCP Worker, with its binding's ticket, or here, as it's taken out or its binding lapses.
+  /// Unbinds `key`: by the remote MCP server, with its binding's ticket, or here, as it's taken out or its binding lapses.
   unbind(key, ticket) {
     if (ticket !== undefined && !this.ticketed(key, ticket)) return;
     this.bound.delete(key);
@@ -500,7 +500,7 @@ export class Relay extends DurableObject {
     return !!b && typeof ticket === "string" && ticket.length === 64 && b.ticket === ticket;
   }
 
-  /// Datagrams for one of the MCP Worker's devices, `to`, from `src`: gathered this turn, then handed to its object.
+  /// Datagrams for one of the remote MCP server's devices, `to`, from `src`: gathered this turn, then handed to its object.
   toClient(to, name, src, frame) {
     let d;
     try {
@@ -521,7 +521,7 @@ export class Relay extends DurableObject {
     waiting.get(to).push([src, (d[0] << 8) | d[1], d.slice(2)]);
   }
 
-  /// Datagrams one of the MCP Worker's devices sends, `[dst, segment size, contents]` each, passed on as from it, if
+  /// Datagrams one of the remote MCP server's devices sends, `[dst, segment size, contents]` each, passed on as from it, if
   /// it's bound: → the keys of those not here.
   fromClient(key, ticket, items) {
     if (!Array.isArray(items)) return [];

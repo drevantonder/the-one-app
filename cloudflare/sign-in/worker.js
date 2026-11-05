@@ -684,7 +684,7 @@ export class Auth extends DurableObject {
 
   /// What a client's tokens are for, whatever it asks: the install's address (a sign-in at its nodes, through the
   /// gateway) only for its own apps, each a client whose every redirect comes back to one of them (`firstParty`);
-  /// any other, a remote MCP client, gets `<address>/mcp`, the MCP Worker's, where it's a device of its person's,
+  /// any other, a remote MCP client, gets `<address>/mcp`, the remote MCP server's, where it's a device of its person's,
   /// which nodes refuse.
   async audience(clientId) {
     const address = JSON.parse(this.env.RESOURCES || "[]")[0] || this.env.ADDRESS;

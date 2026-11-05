@@ -234,7 +234,7 @@ fn the_workers_and_nodes_agree_on_keys_and_seals() {
     }
 
     // What a node is handed with each kind of request (`keys::may_hand`), and how old an epoch (`keys::oldest_needed`):
-    // browsers and the MCP Worker hand by the same rule as native apps.
+    // browsers and the remote MCP server hand by the same rule as native apps.
     {
         use one::keys::{Need, app_of, may_hand, oldest_needed};
         let routes = ["call board", "call node", "/v1/screens/board", "/v1/screens/board/main", "/mcp", "/v1/widgets", "/v1/badges", "/v1/vault", "/v1/vault/requests", "/v1/state", "/v1/entries", "/v1/apps", "call "];

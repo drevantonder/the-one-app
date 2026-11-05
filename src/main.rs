@@ -162,7 +162,7 @@ fn every_command() -> String {
   {CLI} search <words>                 the operations for a task in every app: how to call each, and its app's guide
   {CLI} run <file>                     run a short script that calls operations, as tools.<app>.<op>({{ ... }}) (- reads
                                        it from stdin), and print what it returns; {CLI} search gives each call
-  {CLI} mcp [--code]                   serve MCP over stdio, for agents: every tool, or with --code, search and execute
+  {CLI} mcp [--code]                   the local MCP server, over stdio, for agents: every tool, or with --code, search and execute
   {CLI} help [all]                     what to start with; with all, this
 
 {NAME} holds one install. For another context, run that context's own app.",
@@ -196,7 +196,7 @@ fn help() -> String {
   {CLI} run <file>            a script that calls several operations; {CLI} search gives each call
   {CLI} skills                the guides agents load
   {CLI} status                who you are, and your devices
-  {CLI} mcp [--code]          MCP over stdio, for agents
+  {CLI} mcp [--code]          the local MCP server, for agents
 {yours}
 An operation's words fill its main inputs in order, a list repeats its flag, and inputs not given are read as JSON
 from stdin. --file <input>=<path> gives a file, --out <path> saves what comes back, --device <name> runs it there,
@@ -1611,7 +1611,7 @@ async fn listen(dir: &std::path::Path) -> Result<tokio::net::TcpListener> {
     bind().await.with_context(|| format!("listen on {}: the node there didn't stop", addr()))
 }
 
-/// MCP over stdio: every app operation is a tool, with `search` to find them; or in code mode (`--code`), `search` and
+/// The local MCP server, over stdio: every app operation is a tool, with `search` to find them; or in code mode (`--code`), `search` and
 /// `execute`, which runs scripts with them, and the few tools every agent needs from the start.
 fn mcp(mode: Mode) -> Result<()> {
     let stdin = std::io::stdin();
@@ -1643,7 +1643,7 @@ fn mcp(mode: Mode) -> Result<()> {
 }
 
 /// MCP over Streamable HTTP, at `/mcp`: what `mcp` answers over stdio, for a client device over iroh, as its person (the
-/// MCP Worker, cloudflare/mcp/, is remote MCP clients' device), or for a program on this machine, as its person. Each POST
+/// remote MCP server, cloudflare/mcp/, is remote MCP clients' device), or for a program on this machine, as its person. Each POST
 /// is answered with JSON; the server sends nothing unasked, so there's no stream to GET. A tool that needs keys it
 /// wasn't handed is answered 428 with what it needs, as `/v1/call` is, for its caller to hand them and ask again.
 /// Nothing is kept between requests, since the next may reach another node: the session id carries only the client's
