@@ -65,8 +65,6 @@ pub mod bundle;
 #[cfg(feature = "node")]
 pub mod deploy;
 #[cfg(feature = "node")]
-pub mod models;
-#[cfg(feature = "node")]
 pub mod load;
 #[cfg(feature = "node")]
 pub mod logos;

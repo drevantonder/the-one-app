@@ -2909,6 +2909,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "one-models"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "one-service",
+ "serde_json",
+ "ureq",
+]
+
+[[package]]
 name = "one-service"
 version = "0.1.0"
 dependencies = [

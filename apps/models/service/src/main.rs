@@ -1,18 +1,20 @@
-//! Models: the local models a device serves with Ollama, for apps and agents on any of the user's devices.
+//! Models' service: the local models its device serves with Ollama, for apps and agents on any of its person's devices.
 
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail, ensure};
+use one_service::{Answer, Call, Elsewhere, Host, Service};
 use serde_json::{Value, json};
-
-use crate::apps::Me;
-use crate::services::{Answer, Elsewhere, Record, Reply};
 
 const OLLAMA: &str = "http://127.0.0.1:11434";
 
-pub fn describe() -> Value {
+fn main() -> Result<()> {
+    one_service::serve(Service { name: "models", describe, call, start: None })
+}
+
+fn describe() -> Value {
     json!({
-        "name": "models", "title": "Models", "icon": "cpu", "color": "#32ade6", "runs": "here", "description": "Runs AI models on your own devices",
+        "title": "Models", "icon": "cpu", "color": "#32ade6", "description": "Runs AI models on your own devices",
         "instructions": "Local models run on the device that has them. models_here lists this device's models; give device \"all\" for every device's, and which are loaded. models_chat asks one and returns its answer, on whichever of your devices has it; use it for private or bulk work instead of a hosted model. models_decide asks a decision model (like clef-flash) typed questions and answers with probabilities, fast.",
         "ops": [
             { "name": "here", "reads": true, "prefer": "here", "description": "This device's local models, and whether each is loaded; give device \"all\" for every device's.", "input": { "type": "object", "properties": {} } },
@@ -39,68 +41,64 @@ pub fn describe() -> Value {
     })
 }
 
-pub fn call(op: String, input: Value, _caller: Me, _records: Vec<Record>) -> Reply {
-    Box::pin(async move {
-        let result = tokio::task::spawn_blocking(move || -> Result<Value> {
-            match op.as_str() {
-                "here" => {
-                    let tags: Value = get("/api/tags")?;
-                    let loaded: Vec<Value> = get("/api/ps").map(|ps| ps["models"].as_array().cloned().unwrap_or_default()).unwrap_or_default();
-                    Ok(json!(tags["models"].as_array().into_iter().flatten().map(|m| json!({
-                        "name": m["name"], "size": m["size"], "family": m["details"]["family"], "parameters": m["details"]["parameter_size"],
-                        "loaded": loaded.iter().any(|l| l["name"] == m["name"]),
-                    })).collect::<Vec<_>>()))
+fn call(_: &Host, call: &Call) -> Result<Answer> {
+    let input = &call.input;
+    let result: Result<Value> = match call.op.as_str() {
+        "here" => {
+            let tags: Value = get("/api/tags")?;
+            let loaded: Vec<Value> = get("/api/ps").map(|ps| ps["models"].as_array().cloned().unwrap_or_default()).unwrap_or_default();
+            Ok(json!(tags["models"].as_array().into_iter().flatten().map(|m| json!({
+                "name": m["name"], "size": m["size"], "family": m["details"]["family"], "parameters": m["details"]["parameter_size"],
+                "loaded": loaded.iter().any(|l| l["name"] == m["name"]),
+            })).collect::<Vec<_>>()))
+        }
+        "chat" => {
+            let model = input["model"].as_str().context("give a model; models_here lists them")?;
+            here(model)?;
+            let mut messages: Vec<Value> = input["messages"].as_array().cloned().unwrap_or_default();
+            if let Some(p) = input["prompt"].as_str() {
+                let mut m = json!({ "role": "user", "content": p });
+                if let Some(images) = input["images"].as_array() {
+                    m["images"] = json!(images);
                 }
-                "chat" => {
-                    let model = input["model"].as_str().context("give a model; models_here lists them")?;
-                    here(model)?;
-                    let mut messages: Vec<Value> = input["messages"].as_array().cloned().unwrap_or_default();
-                    if let Some(p) = input["prompt"].as_str() {
-                        let mut m = json!({ "role": "user", "content": p });
-                        if let Some(images) = input["images"].as_array() {
-                            m["images"] = json!(images);
-                        }
-                        messages.push(m);
-                    }
-                    if messages.is_empty() {
-                        bail!("give a prompt or messages");
-                    }
-                    if let Some(s) = input["system"].as_str() {
-                        messages.insert(0, json!({ "role": "system", "content": s }));
-                    }
-                    let mut body = json!({ "model": model, "messages": messages, "stream": false });
-                    for key in ["format", "think", "options"] {
-                        if !input[key].is_null() {
-                            body[key] = input[key].clone();
-                        }
-                    }
-                    let reply = post("/api/chat", &body)?;
-                    if let Some(err) = reply.get("error") {
-                        bail!("{}", err.as_str().unwrap_or("the model failed"));
-                    }
-                    Ok(reply["message"]["content"].clone())
-                }
-                "decide" => {
-                    let model = input["model"].as_str().context("give a decision model, like clef-flash")?;
-                    here(model)?;
-                    ensure!(input["questions"].is_object(), "give questions");
-                    let mut body = json!({ "model": model, "state": input.get("state").cloned().unwrap_or(json!({})), "questions": input["questions"] });
-                    // Ollama takes each image as its base64; [{ content_type, base64 }] (Workers AI's way) works too.
-                    if let Some(images) = input["images"].as_array() {
-                        body["images"] = json!(images.iter().map(|i| i.get("base64").unwrap_or(i).clone()).collect::<Vec<_>>());
-                    }
-                    let reply = post("/v1/systemone", &body)?;
-                    if let Some(err) = reply.get("error") {
-                        bail!("{}", err.as_str().map(str::to_string).unwrap_or_else(|| err.to_string()));
-                    }
-                    Ok(json!({ "answers": reply["answers"], "usage": reply["usage"] }))
-                }
-                other => bail!("models has no operation {other}"),
+                messages.push(m);
             }
-        })
-        .await??;
-        Ok(Answer::new(result))
-    })
+            if messages.is_empty() {
+                bail!("give a prompt or messages");
+            }
+            if let Some(s) = input["system"].as_str() {
+                messages.insert(0, json!({ "role": "system", "content": s }));
+            }
+            let mut body = json!({ "model": model, "messages": messages, "stream": false });
+            for key in ["format", "think", "options"] {
+                if !input[key].is_null() {
+                    body[key] = input[key].clone();
+                }
+            }
+            let reply = post("/api/chat", &body)?;
+            if let Some(err) = reply.get("error") {
+                bail!("{}", err.as_str().unwrap_or("the model failed"));
+            }
+            Ok(reply["message"]["content"].clone())
+        }
+        "decide" => {
+            let model = input["model"].as_str().context("give a decision model, like clef-flash")?;
+            here(model)?;
+            ensure!(input["questions"].is_object(), "give questions");
+            let mut body = json!({ "model": model, "state": input.get("state").cloned().unwrap_or(json!({})), "questions": input["questions"] });
+            // Ollama takes each image as its base64; [{ content_type, base64 }] (Workers AI's way) works too.
+            if let Some(images) = input["images"].as_array() {
+                body["images"] = json!(images.iter().map(|i| i.get("base64").unwrap_or(i).clone()).collect::<Vec<_>>());
+            }
+            let reply = post("/v1/systemone", &body)?;
+            if let Some(err) = reply.get("error") {
+                bail!("{}", err.as_str().map(str::to_string).unwrap_or_else(|| err.to_string()));
+            }
+            Ok(json!({ "answers": reply["answers"], "usage": reply["usage"] }))
+        }
+        other => bail!("models has no operation {other}"),
+    };
+    Ok(result?.into())
 }
 
 /// Whether this device has `model`; if not, the call goes on to a device that might.

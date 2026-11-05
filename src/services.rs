@@ -1,7 +1,7 @@
 //! Device services: native code a device runs beside its node, for what apps can't reach from workerd (a shell, local
 //! models, WhatsApp's linked phone, a Mac's own apps). A service serves its device's users, and the node says so in its
 //! hello to the other devices; its app, and only its app, calls it with `ctx.services`. Some are built into the node
-//! (AGENTS.md, Models: `built_in`); the rest are programs that register over the local API and long-poll for calls:
+//! (AGENTS.md: `built_in`); the rest are programs that register over the local API and long-poll for calls:
 //! this program itself, hosting one (`Hosted`), or its app's own (`apps/<name>/service/`, in Rust on the `service`
 //! crate or in Go; Swift in the Mac app). The core never names one: only `built_in` and `hosted` do, for the binary.
 
@@ -78,7 +78,6 @@ pub struct BuiltIn {
 pub fn built_in() -> Vec<BuiltIn> {
     vec![
         BuiltIn { name: crate::agents::NAME, describe: crate::agents::describe, records: true, call: crate::agents::call, sync: Some(crate::agents::sync) },
-        BuiltIn { name: "models", describe: crate::models::describe, records: false, call: crate::models::call, sync: None },
     ]
 }
 

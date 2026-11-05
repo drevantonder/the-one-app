@@ -1,5 +1,5 @@
-// Models: the local AI models on the person's devices. The models service, built into every device's node, asks the
-// ones on its machine, and a call goes on to the next device when a model isn't there; this app is what people,
+// Models: the local AI models on the person's devices. Its service (service/), on each device it's switched on for, asks
+// the ones on its machine, and a call goes on to the next device when a model isn't there; this app is what people,
 // agents and other apps use.
 
 /// Runs one of the models service's operations, on `device` if it's given, else wherever it runs for the caller. When
@@ -29,6 +29,7 @@ export default {
   needs: "Needs a device with a GPU",
   instructions: "Local models run on the device that has them. models_here lists this device's models; give device \"all\" for every device's, and which are loaded. models_chat asks one and returns its answer, on whichever of your devices has it; use it for private or bulk work instead of a hosted model. models_decide asks a decision model (like clef-flash) typed questions and answers with probabilities, fast.",
   uses: { services: ["models"] },
+  service: { network: ["127.0.0.1"], person: false, platforms: ["linux", "mac"] },
 
   ops: {
     devices: {
