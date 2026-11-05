@@ -103,7 +103,9 @@ pub fn gate_at(db: &ScopeDb, reads: &HashMap<Key, Reads>, at_least: u32) -> Gate
         if said.is_some_and(|r| r.reads >= at_least) {
             continue;
         }
-        if skips.contains(&key) {
+        // Only a client is skipped: a machine that runs things writes to the bucket itself, under epochs it no longer
+        // knows once its install switched, so one gone for good is removed, which the bucket's URLs stop for.
+        if skips.contains(&key) && db.compute(&key).is_none() {
             gate.skipped.push(key);
         } else {
             gate.waiting.push((key, said.cloned()));

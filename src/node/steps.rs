@@ -15,7 +15,7 @@ impl Node {
         self.with(|i| Ok(i.r.frozen.is_some())).unwrap_or(false)
     }
 
-    /// Freezes `global`'s log, if the switch is on (or `forced`, in a try install), the gate is open, it isn't frozen
+    /// Freezes `global`'s log, if the switch is on and the gate is open (or `forced`, in a try install), it isn't frozen
     /// yet, and this device signs for an admin: a `FREEZING` step first, so writers of the log look whether the freeze
     /// holds what they write from then on; then where every log ends, and the freeze (`steps::freeze`), at the next
     /// free position. Another admin's device may freeze it first: the first freeze that checks out is the one. Then the
@@ -28,7 +28,7 @@ impl Node {
         self.read_log(&Scope::Global).await?;
         let signs = self.with(|i| {
             let db = i.r.db();
-            Ok(switch::gate(db, &i.reads).open() && db.client(&self.0.id).is_some_and(|c| c.user == user) && db.may(&user, "change-settings", scopes::INSTALL))
+            Ok((forced || switch::gate(db, &i.reads).open()) && db.client(&self.0.id).is_some_and(|c| c.user == user) && db.may(&user, "change-settings", scopes::INSTALL))
         })?;
         if !signs {
             return Ok(false);

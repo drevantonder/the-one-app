@@ -1292,7 +1292,7 @@ fn switch_gate(gate: &Value, name: &dyn Fn(&str) -> String) {
         println!("  Skipped, gone for good: {}", device(d));
     }
     if !waiting.is_empty() {
-        println!("  A device gone for good: {CLI} settings {} \"<its key> ...\" skips it.", one::database::switch::SKIPS);
+        println!("  A phone, browser or computer gone for good: {CLI} settings {} \"<its key> ...\" skips it. A machine that runs things, remove it.", one::database::switch::SKIPS);
     }
 }
 
