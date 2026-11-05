@@ -5,10 +5,11 @@
 //! runs.
 //!
 //! A device trusts no node for who's who or for its keys: it reads `global`'s entries from the bucket itself, through
-//! the URL signer, with the epochs sealed to it that those entries made, and replays them as every client device does
-//! (one-client's `members::Global`, the nodes' own replay) (`device_view`); it opens the keys a call needs from the bucket too, each epoch checked against its entry's hash
-//! (`device_keys`). So it asks only the compute endpoints the entries list as running its person's calls, and hands
-//! each only the keys of scopes it runs.
+//! the URL signer, with the epochs sealed to it that those entries made, replays them as every client device does
+//! (one-client's `members::Global`, the nodes' own replay), and asks who's who and who may of `global`'s scope
+//! database built from that (`one::database::scopes`) (`device_view`); it opens the keys a call needs from the bucket
+//! too, each epoch checked against its entry's hash (`device_keys`). So it asks only the compute endpoints the install
+//! lists as running its person's calls, and hands each only the keys of scopes it runs.
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
@@ -16,9 +17,10 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow, ensure};
 use js_sys::{Function, Uint8Array};
+use one::database::scopes::{ScopeDb, object};
 use one::entry::Scope;
+use one::members;
 use one_client::members::Global;
-use one::members::{self, Members};
 use serde_json::{Value, json};
 use wasm_bindgen::prelude::*;
 
@@ -163,8 +165,9 @@ pub async fn device_close(me: String) {
 
 // Who's who, as the device reads it itself.
 
-/// What a device knows of who's who: `global`'s entries as its epochs open them in the bucket, the members they add up
-/// to, and the keys it opened, each epoch's only while it's the key its entry made.
+/// What a device knows of who's who: `global`'s entries as its epochs open them in the bucket, `global`'s scope
+/// database built from what they add up to, and the keys it opened, each epoch's only while it's the key its entry
+/// made.
 struct View {
     user: String,
     seal: Key,
@@ -172,9 +175,14 @@ struct View {
     at: u64,
     floor: u32,
     entries: Global,
-    members: Members,
+    db: ScopeDb,
     epochs: HashMap<Scope, one::db::Keys>,
     apps: HashMap<(Scope, String, u32), Key>,
+}
+
+/// `global`'s scope database, from its entries.
+fn built(entries: &Global) -> Result<ScopeDb> {
+    ScopeDb::build(&entries.members()?, &Scope::Global, &Default::default(), now() as u64)
 }
 
 impl View {
@@ -201,10 +209,10 @@ impl View {
             let read = one::log::open(bucket, &log_keys, &one::log::prefix("global"), "global").await?;
             let mut entries = Global::new(None);
             entries.add_entries(read.entries)?;
-            let members = entries.members()?;
-            let wrong: Vec<u32> = candidates.iter().filter(|(n, k)| members.epoch_hash(&Scope::Global, **n) != Some(one::keys::epoch_hash(k).as_str())).map(|(n, _)| *n).collect();
+            let db = built(&entries)?;
+            let wrong: Vec<u32> = candidates.iter().filter(|(n, k)| db.epoch_hash(&Scope::Global, **n) != Some(one::keys::epoch_hash(k))).map(|(n, _)| *n).collect();
             if wrong.is_empty() {
-                return Ok(View { user: user.into(), seal: *seal, global: log_keys, at: read.at, floor: read.floor, entries, members, epochs: HashMap::from([(Scope::Global, candidates)]), apps: HashMap::new() });
+                return Ok(View { user: user.into(), seal: *seal, global: log_keys, at: read.at, floor: read.floor, entries, db, epochs: HashMap::from([(Scope::Global, candidates)]), apps: HashMap::new() });
             }
             for n in wrong {
                 candidates.remove(&n);
@@ -221,7 +229,7 @@ impl View {
         (self.at, self.floor) = (read.at, read.floor);
         if !read.entries.is_empty() {
             self.entries.add_entries(read.entries)?;
-            self.members = self.entries.members()?;
+            self.db = built(&self.entries)?;
         }
         Ok(true)
     }
@@ -229,8 +237,8 @@ impl View {
     /// A scope's epochs this device opens, by number: each one its entry made, from its copy in the bucket sealed to
     /// this device whose hash is the one the entry names (`Node::epoch_keys`).
     async fn epoch_keys(&mut self, bucket: &crate::Js, me: &Key, scope: &Scope) -> Result<one::db::Keys> {
-        let m = &self.members;
-        let hashes: BTreeMap<u32, String> = (1..=m.epoch(scope)).filter_map(|n| Some((n, m.epoch_hash(scope, n)?.to_string()))).collect();
+        let m = &self.db;
+        let hashes: BTreeMap<u32, String> = (1..=m.epoch(scope)).filter_map(|n| Some((n, m.epoch_hash(scope, n)?))).collect();
         let kept = self.epochs.get(scope).cloned().unwrap_or_default();
         let mut keys: one::db::Keys = kept.into_iter().filter(|(n, k)| hashes.get(n) == Some(&one::keys::epoch_hash(k))).collect();
         let mine = data_encoding::HEXLOWER.encode(me);
@@ -247,12 +255,13 @@ impl View {
         Ok(keys)
     }
 
-    /// The compute endpoints the entries list as running some of its person's calls: `{ key, seal, scopes }` each, hex,
-    /// `scopes` the ones of theirs it runs.
+    /// The compute endpoints the install lists as running some of its person's calls: `{ key, seal, scopes }` each,
+    /// hex, `scopes` the ones of theirs it runs.
     fn nodes(&self) -> Vec<Value> {
-        let m = &self.members;
-        let theirs: Vec<Scope> = m.scopes().into_iter().filter(|s| m.may_use(&self.user, s)).collect();
+        let m = &self.db;
+        let theirs: Vec<Scope> = m.scopes().into_iter().filter(|s| m.may(&self.user, "use", &object(s))).collect();
         m.computes()
+            .into_iter()
             .filter(|c| m.serves(&c.key, &self.user))
             .map(|c| {
                 let scopes: Vec<String> = theirs.iter().filter(|s| m.runs_for(&c.key, s)).map(|s| s.to_string()).collect();
@@ -290,7 +299,7 @@ pub async fn device_view(me: String, user: String, seal: Vec<u8>, bucket: JsValu
             },
             None => View::read(&bucket, &me, &user, &seal).await?,
         };
-        let listed = fresh.members.client(&me).is_some_and(|c| c.user == user);
+        let listed = fresh.db.client(&me).is_some_and(|c| c.user == user);
         let out = json!({ "listed": listed, "nodes": fresh.nodes() });
         *view = Some(fresh);
         Ok(out)
@@ -317,12 +326,12 @@ pub async fn device_keys(me: String, need: String, bucket: JsValue) -> Result<St
             let (scope, app, database) = (field("scope")?, field("app")?, field("database")?);
             let prefix = crate::prefix_of(scope, app, database)?;
             let scope = Scope::parse(scope)?;
-            ensure!(view.members.may_use(&view.user, &scope), "you don't use {scope}");
+            ensure!(view.db.may(&view.user, "use", &object(&scope)), "you don't use {scope}");
             let epochs = view.epoch_keys(&bucket, &me, &scope).await?;
             let newest = epochs.keys().next_back().copied().unwrap_or(0);
             // From the epoch its newest copy is under: older ones open only its history.
             let hint = one::bucket::Bucket::get(&bucket, &one::db::newest_name(&prefix)).await?;
-            let oldest = one::keys::oldest_needed(hint.as_ref().map(|o| &o.bytes[..]), view.members.epoch(&scope));
+            let oldest = one::keys::oldest_needed(hint.as_ref().map(|o| &o.bytes[..]), view.db.epoch(&scope));
             for (epoch, epoch_key) in epochs.range(oldest..) {
                 let id = (scope.clone(), app.to_string(), *epoch);
                 let app_key = match view.apps.get(&id) {

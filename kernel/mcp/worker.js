@@ -18,10 +18,10 @@
 // closes its endpoint, forgets its keys and ends itself.
 //
 // It trusts no node for who's who or for keys: it reads the install's signed entries from the bucket itself, through
-// the URL signer, and replays them as nodes do (serverless/src/clients.rs). It asks only the compute endpoints they
-// list as running its person's calls, hands each only the keys of the scopes it runs, of databases an MCP request uses
-// (`mayHand`) and epochs from each one's newest copy, and takes a 428 only from the node that answered, for its own
-// listed seal key. What a tool needed is kept per tool, so a call hands only its own.
+// the URL signer, replays them as nodes do, and asks the scope database it builds from them, with the same Rust as
+// every node (serverless/src/clients.rs). It asks only the compute endpoints that lists as running its person's
+// calls, hands each only the keys of the scopes it runs, of databases an MCP request uses (`mayHand`) and epochs from
+// each one's newest copy, and takes a 428 only from the node that answered, for its own listed seal key. What a tool needed is kept per tool, so a call hands only its own.
 //
 // Bindings: AUTH (the auth service), RELAY (the relay's `McpDevices` entrypoint), SIGNER (the URL signer), CLIENT
 // (this Worker's `Client`), ADDRESS (the install's), NAME (its name), LOCATION (where objects are made), IDLE (ms,

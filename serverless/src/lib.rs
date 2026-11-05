@@ -15,7 +15,8 @@ use one::bucket::{Bucket, Failed, Object, Trouble};
 use one::call::Append;
 use one::db::Db;
 use one::entry::{Entry, Hash, Scope, causal};
-use one::members::{self, Members, ScopeState};
+use one::database::scopes::{ScopeDb, app, object};
+use one::members::{self, Members};
 use serde_json::{Value, json};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
@@ -402,7 +403,8 @@ pub fn following(name: &str, n: u32) -> String {
     Value::from(names.filter(|other| other.as_str() > name).collect::<Vec<_>>()).to_string()
 }
 
-// Who can do what: each scope's entries (`src/log.rs`), and what they add up to (`src/members.rs`).
+// Who can do what: each scope's entries (`src/log.rs`), what they add up to (`src/members.rs`), and each scope's
+// database built from that (`src/database/scopes.rs`), which every question of who's who and who may is asked of.
 
 /// A scope's entries this isolate read for one person's object: the keys they were read with, the last step read, the
 /// entries (in replay order for `global`; another scope's are put in order with `global`'s when replayed, as they
@@ -414,12 +416,24 @@ struct Log {
     read: u64,
 }
 
-/// What a scope's entries add up to, as of the readings of them and of `global`'s: `global`'s members, and the
-/// scope's state.
+/// What a scope's entries add up to, as of the readings of them and of `global`'s: the scope's database, built from
+/// `global`'s members and its own state.
 struct Replayed {
     at: (u64, u64),
-    members: Members,
-    state: ScopeState,
+    db: ScopeDb,
+}
+
+/// Each scope's database `replayed` read, `global`'s among them, which says who's who in the whole install.
+struct Replays<'a>(BTreeMap<String, &'a ScopeDb>);
+
+impl Replays<'_> {
+    fn global(&self) -> &ScopeDb {
+        self.0["global"]
+    }
+
+    fn get(&self, scope: &Scope) -> Option<&ScopeDb> {
+        self.0.get(&scope.to_string()).copied()
+    }
 }
 
 thread_local! {
@@ -480,8 +494,14 @@ fn root(global: &[Entry]) -> Option<Hash> {
     global.iter().find(|e| e.content.app == members::APP && e.content.kind == "genesis").map(Entry::hash)
 }
 
-/// `global`'s members and each of `scopes`' state, from the entries `owner`'s object read (`read_log`).
-fn replayed<R>(owner: &str, scopes: &[String], f: impl FnOnce(&Members, &BTreeMap<String, ScopeState>) -> R) -> Result<R> {
+/// The time now (ms), which a scope database built now answers who may as of.
+fn now() -> u64 {
+    js_sys::Date::now() as u64
+}
+
+/// `global`'s database and each of `scopes`', from the entries `owner`'s object read (`read_log`), built again only
+/// once what was read of them changed.
+fn replayed<R>(owner: &str, scopes: &[String], f: impl FnOnce(&Replays) -> R) -> Result<R> {
     touch(owner);
     LOGS.with(|logs| {
         let logs = logs.borrow();
@@ -493,10 +513,10 @@ fn replayed<R>(owner: &str, scopes: &[String], f: impl FnOnce(&Members, &BTreeMa
         let known = Members::replay(root, &member_entries, &Default::default());
         REPLAYED.with(|r| {
             let mut r = r.borrow_mut();
-            let mut states = BTreeMap::new();
-            let mut m = None;
-            for scope in scopes {
-                let Some(log) = log_of(scope) else { continue };
+            let mut read = vec!["global".to_string()];
+            read.extend(scopes.iter().filter(|s| *s != "global" && log_of(s).is_some()).cloned());
+            for scope in &read {
+                let log = log_of(scope).context("read global's entries first")?;
                 let at = (global.read, log.read);
                 let id = (owner.to_string(), scope.clone());
                 if r.get(&id).is_none_or(|x| x.at != at) {
@@ -505,14 +525,10 @@ fn replayed<R>(owner: &str, scopes: &[String], f: impl FnOnce(&Members, &BTreeMa
                         _ => causal(log.entries.clone(), &global.entries.iter().map(|e| (e.hash(), e.depth)).collect()),
                     };
                     let (members, state) = members::replay(&known, &member_entries, &entries, |_, _, _| {});
-                    r.insert(id.clone(), Replayed { at, members, state });
+                    r.insert(id.clone(), Replayed { at, db: ScopeDb::build(&members, &Scope::parse(scope)?, &state, now())? });
                 }
-                let x = &r[&id];
-                m.get_or_insert_with(|| x.members.clone());
-                states.insert(scope.clone(), x.state.clone());
             }
-            let m = m.unwrap_or(known);
-            Ok(f(&m, &states))
+            Ok(f(&Replays(read.iter().map(|s| (s.clone(), &r[&(owner.to_string(), s.clone())].db)).collect())))
         })
     })
 }
@@ -520,7 +536,7 @@ fn replayed<R>(owner: &str, scopes: &[String], f: impl FnOnce(&Members, &BTreeMa
 /// The groups `user` is in, as scopes: whose entries to read next.
 #[wasm_bindgen]
 pub fn groups(owner: &str, user: &str) -> Result<String, JsError> {
-    let groups = replayed(owner, &["global".into()], |m, _| m.groups_of(user).into_keys().map(|g| format!("group:{g}")).collect::<Vec<_>>()).map_err(thrown)?;
+    let groups = replayed(owner, &[], |r| r.global().groups_of(user).into_keys().map(|g| format!("group:{g}")).collect::<Vec<_>>()).map_err(thrown)?;
     Ok(json!(groups).to_string())
 }
 
@@ -530,11 +546,14 @@ pub fn groups(owner: &str, user: &str) -> Result<String, JsError> {
 #[wasm_bindgen]
 pub fn scopes_of(owner: &str, user: &str, device: &str) -> Result<String, JsError> {
     let key = one::keys::unhex(device).ok();
-    let out = replayed(owner, &["global".into()], |m, _| {
-        let scopes: Vec<String> = m.scopes().into_iter().filter(|s| m.may_use(user, s)).map(|s| s.to_string()).collect();
-        let device = key.and_then(|k| m.client(&k)).filter(|d| d.user == user).map(|d| d.name.clone());
-        let runs: Vec<&String> = scopes.iter().filter(|s| m.serverless().zip(Scope::parse(s).ok()).is_some_and(|(k, s)| m.runs_for(&k, &s))).collect();
-        json!({ "scopes": scopes, "joined": m.user(user).is_some(), "removed": m.removed_user(user), "device": device, "runs": runs })
+    let out = replayed(owner, &[], |r| {
+        let m = r.global();
+        let scopes: Vec<Scope> = m.scopes().into_iter().filter(|s| m.may(user, "use", &object(s))).collect();
+        let device = key.and_then(|k| m.client(&k)).filter(|d| d.user == user).map(|d| d.name);
+        let runs: Vec<String> = scopes.iter().filter(|s| m.serverless().is_some_and(|k| m.runs_for(&k, s))).map(Scope::to_string).collect();
+        let scopes: Vec<String> = scopes.iter().map(Scope::to_string).collect();
+        let removed = m.user_ever(user).is_some_and(|u| u.removed);
+        json!({ "scopes": scopes, "joined": m.user(user).is_some(), "removed": removed, "device": device, "runs": runs })
     })
     .map_err(thrown)?;
     Ok(out.to_string())
@@ -545,20 +564,20 @@ pub fn scopes_of(owner: &str, user: &str, device: &str) -> Result<String, JsErro
 #[wasm_bindgen]
 pub fn epochs(owner: &str, scopes: &str) -> Result<String, JsError> {
     let scopes: Vec<String> = serde_json::from_str(scopes)?;
-    let out = replayed(owner, &["global".into()], |m, _| {
-        scopes.iter().filter_map(|s| Some((s.clone(), Value::from(m.epoch(&Scope::parse(s).ok()?).max(1))))).collect::<serde_json::Map<_, _>>()
+    let out = replayed(owner, &[], |r| {
+        scopes.iter().filter_map(|s| Some((s.clone(), Value::from(r.global().epoch(&Scope::parse(s).ok()?).max(1))))).collect::<serde_json::Map<_, _>>()
     })
     .map_err(thrown)?;
     Ok(Value::Object(out).to_string())
 }
 
-/// The nodes on machines a call of `user`'s reaching `scopes` (JSON) may be passed on to (`Members::runners`), each
+/// The nodes on machines a call of `user`'s reaching `scopes` (JSON) may be passed on to (`ScopeDb::runners`), each
 /// `{ key, seal }` in hex.
 #[wasm_bindgen]
 pub fn runners(owner: &str, user: &str, scopes: &str) -> Result<String, JsError> {
     let scopes = serde_json::from_str::<Vec<String>>(scopes)?.iter().map(|s| Scope::parse(s)).collect::<Result<Vec<_>>>().map_err(thrown)?;
-    let out = replayed(owner, &["global".into()], |m, _| {
-        m.runners(user, &scopes).iter().map(|r| json!({ "key": one::entry::hex(&r.key), "seal": one::entry::hex(&r.seal) })).collect::<Vec<_>>()
+    let out = replayed(owner, &[], |r| {
+        r.global().runners(user, &scopes).iter().map(|r| json!({ "key": one::entry::hex(&r.key), "seal": one::entry::hex(&r.seal) })).collect::<Vec<_>>()
     })
     .map_err(thrown)?;
     Ok(Value::from(out).to_string())
@@ -583,20 +602,30 @@ pub fn forward(seed: &str, user: &str, client: &str, call: &str, seal: &str, unt
 #[wasm_bindgen]
 pub fn install(owner: &str, user: &str, client: &str, scopes: &str, now: f64) -> Result<String, JsError> {
     let scopes: Vec<String> = serde_json::from_str(scopes)?;
-    let out = replayed(owner, &scopes, |m, states| view(m, states, user, client, now as u64)).map_err(thrown)?;
+    let out = replayed(owner, &scopes, |r| view(r, user, client, now as u64)).map_err(thrown)?;
     Ok(out.to_string())
 }
 
-fn view(m: &Members, states: &BTreeMap<String, ScopeState>, me: &str, client: &str, now: u64) -> Value {
-    let mine = states.get(&Scope::User(me.into()).to_string());
+fn view(r: &Replays, me: &str, client: &str, now: u64) -> Value {
+    let m = r.global();
     // Requests for an item waiting for `me` to answer, as src/node.rs's `item_requests` counts them.
-    let manages = |s: &String| Scope::parse(s).is_ok_and(|s| members::manages_scope(m, me, &s));
-    let waiting = states.iter().filter(|(s, _)| manages(s)).flat_map(|(_, s)| s.requests.values()).filter(|r| r.answer.is_none() && now < r.time + 86_400_000).count();
+    let since = i64::try_from(now).unwrap_or(i64::MAX) - 86_400_000;
+    let waiting: i64 = r
+        .0
+        .iter()
+        .filter(|(s, _)| Scope::parse(s).is_ok_and(|s| m.may(me, "add-apps", &object(&s))))
+        .map(|(_, d)| d.conn().query_row("SELECT count(*) FROM vault_requests WHERE answer IS NULL AND asked_at > ?", [since], |r| r.get(0)).unwrap_or(0))
+        .sum();
+    let mut arrangements = serde_json::Map::new();
+    if let Some(d) = r.get(&Scope::User(me.into())) {
+        let pages = d.conn().prepare("SELECT page, arrangement FROM pages ORDER BY page").and_then(|mut q| q.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?.collect::<Result<Vec<_>, _>>());
+        for (page, arrangement) in pages.unwrap_or_default() {
+            arrangements.insert(page, serde_json::from_str(&arrangement).unwrap_or(Value::Null));
+        }
+    }
     // It knows of no device being on, nor of who else is looking.
-    // This node replays the members itself: `/v1/state` reads the scope database built from them.
-    let db = one::database::scopes::ScopeDb::build(m, &Scope::Global, &ScopeState::default(), now).ok();
     let state = one::state::state(
-        db.as_ref(),
+        Some(m),
         me,
         one::state::Here {
             me: json!({ "key": "", "name": client, "user": me }),
@@ -604,8 +633,8 @@ fn view(m: &Members, states: &BTreeMap<String, ScopeState>, me: &str, client: &s
             device: json!({ "key": "", "name": "", "ready": true, "guide": null }),
             member: false,
             entries: 0,
-            waiting,
-            arrangements: json!(mine.map(|s| s.arrangements.clone()).unwrap_or_default()),
+            waiting: waiting as usize,
+            arrangements: Value::Object(arrangements),
             backups: None,
             guide: None,
             // No try install has a serverless node.
@@ -614,38 +643,38 @@ fn view(m: &Members, states: &BTreeMap<String, ScopeState>, me: &str, client: &s
             client_now: &|_| Default::default(),
         },
     );
-    let user_name = m.user(me).map(|u| u.name.clone()).unwrap_or_default();
-    let installed_in = |app: &str, scope: &Scope| states.get(&scope.to_string()).is_some_and(|s| s.installed.contains(app));
+    let me_user = m.user(me);
+    let installed_in = |app: &str, scope: &Scope| r.get(scope).is_some_and(|d| d.installed().contains(app));
     let handle = |s: &Scope| {
         let name = match s {
-            Scope::Global => m.name.clone(),
-            Scope::Group(g) => m.groups.get(g).map(|g| g.name.clone()).unwrap_or_default(),
-            Scope::User(u) => m.users.get(u).map(|u| u.name.clone()).unwrap_or_default(),
+            Scope::Global => m.name(),
+            Scope::Group(g) => m.group(g).map(|g| g.name).unwrap_or_default(),
+            Scope::User(u) => m.user_ever(u).map(|u| u.name).unwrap_or_default(),
         };
         json!({ "id": s.to_string(), "name": name, "role": m.role_in(me, s) })
     };
-    let apps: Vec<Value> = m
-        .apps
-        .values()
+    let every = m.apps();
+    let apps: Vec<Value> = every
+        .iter()
         .filter(|a| !a.erased)
         .map(|a| {
-            let mut installed: Vec<String> = states.keys().filter(|s| Scope::parse(s).is_ok_and(|s| installed_in(&a.name, &s) && m.may_use(me, &s))).cloned().collect();
+            let mut installed: Vec<String> = r.0.keys().filter(|s| Scope::parse(s).is_ok_and(|s| installed_in(&a.name, &s) && m.may(me, "use", &object(&s)))).cloned().collect();
             installed.sort_by_key(|s| (!s.starts_with("user:"), s == "global", s.clone()));
             let history: Vec<Value> = a.history.iter().map(|(bundle, time, user)| json!({ "bundle": bundle, "time": time, "user": user })).collect();
-            let forks: Vec<&String> = m.apps.values().filter(|f| f.from.as_ref() == Some(&a.name)).map(|f| &f.name).collect();
+            let forks: Vec<&String> = every.iter().filter(|f| f.from.as_ref() == Some(&a.name)).map(|f| &f.name).collect();
             let mut info = json!({ "name": a.name, "owner": a.owner.to_string(), "from": a.from, "forks": forks, "deploys": a.deploys, "bundle": a.bundle, "history": history, "installed": installed });
             if let Some(link) = a.source.as_ref().filter(|l| !l.is_empty()) {
                 info["source"] = json!(link);
             }
             if let Some((time, by)) = &a.deleted {
                 info["installed"] = json!([]);
-                info["deleted"] = json!({ "time": time, "by": m.users.get(by).map(|u| &u.name), "yours": m.acts_for(me, &a.owner) });
+                info["deleted"] = json!({ "time": time, "by": m.user_ever(by).map(|u| u.name), "yours": m.may(me, "delete", &app(&a.name)) });
                 info["reach"] = json!([]);
                 return info;
             }
             // As a node on a machine reaches them (src/node.rs: `reachable`), of the scopes read here.
             let global = installed_in(&a.name, &Scope::Global);
-            let mut reach: Vec<Scope> = m.groups_of(me).into_keys().map(Scope::Group).filter(|s| states.contains_key(&s.to_string()) && (global || installed_in(&a.name, s))).collect();
+            let mut reach: Vec<Scope> = m.groups_of(me).into_keys().map(Scope::Group).filter(|s| r.get(s).is_some() && (global || installed_in(&a.name, s))).collect();
             let own = Scope::User(me.into());
             if global || installed_in(&a.name, &own) || !reach.is_empty() {
                 reach.insert(0, own);
@@ -657,8 +686,8 @@ fn view(m: &Members, states: &BTreeMap<String, ScopeState>, me: &str, client: &s
             info
         })
         .collect();
-    let me_ = json!({ "key": "", "user": me, "name": client, "role": m.user(me).map(|u| u.role), "user_name": user_name, "handle": m.user(me).map(|u| u.handle.clone()), "agent": null });
-    let erased: Vec<&String> = m.apps.values().filter(|a| a.erased).map(|a| &a.name).collect();
+    let me_ = json!({ "key": "", "user": me, "name": client, "role": me_user.as_ref().map(|u| u.role), "user_name": me_user.as_ref().map(|u| u.name.clone()).unwrap_or_default(), "handle": me_user.as_ref().map(|u| u.handle.clone()), "agent": null });
+    let erased: Vec<&String> = every.iter().filter(|a| a.erased).map(|a| &a.name).collect();
     json!({ "state": state, "apps": apps, "me": me_, "erased": erased, "handles": m.handles() })
 }
 
