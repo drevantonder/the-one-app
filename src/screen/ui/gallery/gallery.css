@@ -1,0 +1,6 @@
+/* The gallery's own utilities, as a screen with a build of its own makes them: the theme's names, none of the kit's
+   base, which ui.css already gave the page. */
+@layer theme, base, components, utilities;
+@import "tailwindcss/theme.css" layer(theme) theme(reference);
+@import "tailwindcss/utilities.css" layer(utilities) source(".");
+@import "../src/theme.css";

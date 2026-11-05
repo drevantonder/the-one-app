@@ -29,7 +29,11 @@ fn files() -> Vec<(String, Vec<u8>)> {
     let screen = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/..")).join("src/screen");
     let mut kit = Vec::new();
     walk(&screen, &screen, &mut kit);
-    out.extend(kit.into_iter().map(|(path, bytes)| (format!("web/screen/{path}"), bytes)));
+    let kit = kit.into_iter().filter_map(|(path, bytes)| match path.strip_prefix("ui/") {
+        Some(ui) => ui.strip_prefix("dist/").map(|built| (format!("ui/{built}"), bytes)),
+        None => Some((path, bytes)),
+    });
+    out.extend(kit.map(|(path, bytes)| (format!("web/screen/{path}"), bytes)));
     out
 }
 

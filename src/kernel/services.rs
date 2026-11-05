@@ -808,7 +808,8 @@ pub fn parses(web: &[(String, Vec<u8>)]) -> Result<()> {
                 let tag = &rest[start..start + open];
                 let body = &rest[start + open + 1..];
                 let end = body.find("</script>").unwrap_or(body.len());
-                if !tag.contains("src=") {
+                // An import map is JSON, not a script.
+                if !tag.contains("src=") && !tag.contains("importmap") {
                     scripts.push((format!("{path}.{}.js", scripts.len()), body[..end].to_string()));
                 }
                 rest = &body[end..];

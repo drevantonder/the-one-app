@@ -21,6 +21,16 @@ const KIT: &[(&str, &str)] = &[
     ("markdown.js", include_str!("screen/markdown.js")),
 ];
 
+/// What a screen's HTML has in it to use the new kit (`src/screen/ui/`: React, and shadcn's components and theme)
+/// in place of the old one (`kit.css`): its page then has ui.css, an import map giving `react`, `react-dom/client`,
+/// `@one/ui` and the rest (`UI_IMPORTS`), and ui.js, which they come from; the bridge and kit.js's helpers stay.
+pub const UI: &str = r#"<meta name="kit" content="ui">"#;
+
+/// The new kit as `bun run build` in `src/screen/ui/` made it, whose sources `cargo test` checks it was made from.
+const UI_CSS: (&str, &str) = ("ui/ui.css", include_str!("screen/ui/dist/ui.css"));
+const UI_JS: (&str, &str) = ("ui/ui.js", include_str!("screen/ui/dist/ui.js"));
+const UI_IMPORTS: &str = include_str!("screen/ui/dist/importmap.json");
+
 /// A screen's page: `context` is `{ app, screen, params, me, scope, config }` (a Settings screen has no app or scope), `body` its HTML.
 /// A client's own (`own`) acts as the person, and draws what apps say, so it runs only its own scripts: they carry this
 /// page's nonce, and its policy refuses every other, inline event handlers too. `linked`, the kit and bridge are links
@@ -49,14 +59,21 @@ fn page_with(context: &serde_json::Value, body: &str, nonce: Option<String>, lin
     } else {
         (String::new(), "<script>".into(), body.to_string())
     };
+    let ui = body.contains(UI);
+    let css = if ui { UI_CSS } else { KIT[0] };
+    let tag = &script[..script.len() - 1];
     let head = if linked {
-        let tag = &script[..script.len() - 1];
-        let (kit, scripts) = KIT.split_first().unwrap();
-        let scripts: String = scripts.iter().map(|(path, text)| format!("{tag} src=\"{}\"></script>", named(path, text))).collect();
-        format!("<link rel=\"stylesheet\" href=\"{}\">{script}window.__one={context};</script>{scripts}", named(kit.0, kit.1))
+        let scripts: String = KIT[1..].iter().map(|(path, text)| format!("{tag} src=\"{}\"></script>", named(path, text))).collect();
+        format!("<link rel=\"stylesheet\" href=\"{}\">{script}window.__one={context};</script>{scripts}", named(css.0, css.1))
     } else {
         let bridge: String = KIT[1..].iter().map(|(_, text)| *text).collect();
-        format!("<style>{}</style>{script}window.__one={context};{bridge}</script>", KIT[0].1)
+        format!("<style>{}</style>{script}window.__one={context};{bridge}</script>", css.1)
+    };
+    // The import map before the screen's own modules, and ui.js, which runs before them, as they're modules.
+    let head = match (ui, linked) {
+        (false, _) => head,
+        (true, true) => format!("{head}{tag} type=\"importmap\">{UI_IMPORTS}</script>{tag} src=\"{}\"></script>", named(UI_JS.0, UI_JS.1)),
+        (true, false) => format!("{head}{tag} type=\"importmap\">{UI_IMPORTS}</script>{script}{}</script>", UI_JS.1),
     };
     format!(
         "<!doctype html><html><head><meta charset=\"utf-8\">{policy}<meta name=\"viewport\" content=\"width=device-width,initial-scale=1,viewport-fit=cover\">\
@@ -130,4 +147,58 @@ pub const TEMPLATE_PARAMS: &str = "\"__params__\"";
 /// (kernel/web/web.js).
 pub fn client_template(name: &str) -> String {
     page_with(&client_context(name, &TEMPLATE_PARAMS.trim_matches('"').into()), client_screen(name), Some(TEMPLATE_NONCE.into()), false)
+}
+
+#[cfg(test)]
+mod tests {
+    use sha2::Digest;
+
+    /// The new kit's built files are made from its sources as they are (src/screen/ui/build.js hashes them the same
+    /// way), so a change to a component reaches devices only built: run `bun run build` in src/screen/ui/.
+    #[test]
+    fn ui_is_built_from_its_sources() {
+        fn walk(root: &std::path::Path, dir: &std::path::Path, out: &mut Vec<String>) {
+            for entry in std::fs::read_dir(dir).unwrap().flatten() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if name.starts_with('.') || name == "node_modules" || name == "dist" {
+                    continue;
+                }
+                let path = entry.path();
+                if path.is_dir() {
+                    walk(root, &path, out);
+                } else {
+                    out.push(path.strip_prefix(root).unwrap().to_string_lossy().replace('\\', "/"));
+                }
+            }
+        }
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/screen/ui");
+        let mut files = Vec::new();
+        walk(&root, &root, &mut files);
+        files.sort();
+        let mut hash = sha2::Sha256::new();
+        for file in &files {
+            hash.update(file.as_bytes());
+            hash.update([0]);
+            hash.update(std::fs::read(root.join(file)).unwrap());
+            hash.update([0]);
+        }
+        let built = std::fs::read_to_string(root.join("dist/sources.txt")).unwrap();
+        assert_eq!(data_encoding::HEXLOWER.encode(&hash.finalize()), built.trim(), "src/screen/ui changed since it was built: run `bun run build` there");
+        // ui.js goes into pages as it is, inside a script.
+        assert!(!super::UI_JS.1.to_ascii_lowercase().contains("</script"), "ui.js can't be put in a page's script");
+    }
+
+    /// A screen that opts in gets the new kit, and its import map, in place of the old kit's styles; one that doesn't
+    /// gets none of it.
+    #[test]
+    fn ui_only_for_screens_that_opt_in() {
+        let context = serde_json::json!({ "app": "a", "screen": "main" });
+        for linked in [false, true] {
+            let old = super::page(&context, "<p>hi</p>", false, linked);
+            assert!(!old.contains("importmap") && !old.contains("OneUI"));
+            let new = super::page(&context, &format!("{}<div id=root></div>", super::UI), false, linked);
+            assert!(new.contains(r#"<script type="importmap">{"imports":{"react":"#) && !new.contains("--squircle") && !new.contains("/screen/kit.css"));
+            assert!(new.find("importmap").unwrap() < new.find("<div id=root>").unwrap());
+        }
+    }
 }
