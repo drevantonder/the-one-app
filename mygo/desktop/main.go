@@ -38,6 +38,7 @@ var web embed.FS
 var (
 	address   = flag.String("address", os.Getenv("ONE_ADDRESS"), "your One App's address")
 	inWindow  = flag.Bool("sign-in-here", os.Getenv("ONE_SIGN_IN_HERE") != "", "sign in in a window of this app, not the browser (a throwaway network's sign-in, which needs no passkey)")
+	forget    = flag.Bool("forget", false, "forget what this computer keeps for -address in the secret store (its device key and sign-in), then quit")
 	openApp   = flag.String("open", os.Getenv("ONE_OPEN"), "an app whose main screen opens once signed in")
 	started   = time.Now()
 	dataDir   string
@@ -73,9 +74,9 @@ func setState(f func(s *State)) {
 // secrets is mygo.Secrets as the sign-in's Store.
 type secrets struct{}
 
-func (secrets) Get(k string) ([]byte, error)  { return mygo.Secrets.Get(k) }
-func (secrets) Set(k string, v []byte) error  { return mygo.Secrets.Set(k, v) }
-func (secrets) Delete(k string) error         { return mygo.Secrets.Delete(k) }
+func (secrets) Get(k string) ([]byte, error) { return mygo.Secrets.Get(k) }
+func (secrets) Set(k string, v []byte) error { return mygo.Secrets.Set(k, v) }
+func (secrets) Delete(k string) error        { return mygo.Secrets.Delete(k) }
 
 // Service is the `one` plugin: what the home page asks of Go.
 type Service struct{}
@@ -88,14 +89,28 @@ func (Service) State() State {
 }
 
 // Open opens an app's main screen in a window of its own.
-func (Service) Open(app string) { openScreen(bridge.Route{App: app, Screen: "main", Params: "{}"}, nil) }
+func (Service) Open(app string) {
+	openScreen(bridge.Route{App: app, Screen: "main", Params: "{}"}, nil)
+}
 
 // SignOut signs this computer out.
 func (Service) SignOut() error { return signOut() }
 
 func main() {
 	flag.Parse()
+	if p := os.Getenv("ONE_LOG"); p != "" {
+		if f, err := os.OpenFile(p, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600); err == nil {
+			log.SetOutput(f)
+		}
+	}
 	mygo.App.SetName("The One App")
+	if *forget {
+		a := strings.TrimRight(*address, "/")
+		for _, k := range []string{"device " + a, a + " refresh", a + " client"} {
+			fmt.Printf("%s: %v\n", strings.SplitN(k, " ", 2)[0], mygo.Secrets.Delete(k))
+		}
+		return
+	}
 	if err := client.Load(""); err != nil {
 		log.Fatal(err)
 	}
@@ -162,8 +177,15 @@ func start() {
 			if !*inWindow {
 				return mygo.Shell.OpenExternal(u)
 			}
-			win = mygo.NewWindow(mygo.WindowOptions{Title: "Sign In", URL: u, Width: 480, Height: 640, Page: mygo.PageOptions{Untrusted: true}})
-			debugPage("sign-in", win)
+			// An untrusted page leaves its origin (sign-in's pages, then this machine's loopback callback) only while a
+			// listener says it may: so the listener comes first, then the page.
+			win = mygo.NewWindow(mygo.WindowOptions{Title: "Sign In", Width: 480, Height: 640, Page: mygo.PageOptions{Untrusted: true}})
+			win.Page().OnWillNavigate(func(e *mygo.NavigateEvent) {
+				if os.Getenv("ONE_DEBUG") != "" {
+					log.Printf("debug sign-in: to %s", e.URL)
+				}
+			})
+			win.Page().LoadURL(u)
 			return nil
 		})
 		if win != nil {
