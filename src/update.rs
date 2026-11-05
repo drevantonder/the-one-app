@@ -870,7 +870,7 @@ exec > "$c/update.log" 2>&1
 trap 'echo $? > "$c/update.status"' EXIT
 set -e
 {checkout}
-CONFIG="$config" apple/build.sh --release
+CONFIG="$config" apple/disk.sh retry apple/build.sh --release
 {assets}
 JOB
 {start}"#,
@@ -903,7 +903,7 @@ cat > build.sh <<'JOB'
 set -e
 c="$HOME/Library/Caches/{CLI}"
 {checkout}
-CONFIG="$config" apple/build.sh
+CONFIG="$config" apple/disk.sh retry apple/build.sh
 JOB
 cat > phone.sh <<'JOB'
 set -e
@@ -912,7 +912,7 @@ c="$HOME/Library/Caches/{CLI}"
 # Only what the iPhone app is made of: the node isn't in it, and each install closes the app on the phone.
 last=$(cat "$c/phone.built" 2>/dev/null || true)
 if [ "${{last#* }}" = "${{2:-}}" ] && git diff --quiet "${{last%% *}}" "$1" -- apple ':!apple/Mac' vendor/phosphor {CONFIG_FILE} 2>/dev/null; then exit 3; fi
-CONFIG="$config" apple/build-phone.sh device "$c/phone"
+CONFIG="$config" apple/disk.sh retry apple/build-phone.sh device "$c/phone"
 JOB
 cat > follow.sh <<'JOB'
 # launchd runs this in the login shell, zsh on a Mac; the job control it uses is bash's.
@@ -990,6 +990,8 @@ cd "$c/src"
 git fetch -q --tags --force origin
 git checkout -q --detach --force "{commit}"
 git clean -qfdx -e /target -e /apple/build
+# What the builds leave in target/ is kept in bounds, and a Mac with no room says so here, not in a link step.
+apple/disk.sh prune
 {config}"#
     )
 }
