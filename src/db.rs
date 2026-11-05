@@ -173,8 +173,20 @@ impl Db {
         }
         // After the copy, which SQLite reads in by attaching it.
         confine(&mut db.conn)?;
-        db.catch_up(bucket).await?;
-        Ok(db)
+        // A bucket that stops answering partway: it goes on from what it read while that gets it further, rather than
+        // failing and its caller reading it all again, which over a bad link may never get to the end.
+        let mut stuck = 0;
+        loop {
+            let from = db.at;
+            match db.catch_up(bucket).await {
+                Ok(_) => return Ok(db),
+                Err(err) if unanswered(&err) && stuck < 3 => {
+                    stuck = if db.at > from { 0 } else { stuck + 1 };
+                    bucket.wait(100).await;
+                }
+                Err(err) => return Err(err),
+            }
+        }
     }
 
     /// Passes over step `at`, under an epoch no entry made, as every reader does.
