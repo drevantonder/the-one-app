@@ -127,8 +127,7 @@ This is a draft. Workstreams B and C agree it before writing code.
 
 - `principals(id, kind: person|group|system, name, handle, removed)`
 - `devices(key, seal, principal, name, kinds, passkey, removed)`
-- `relations(subject, relation, object, until)`. A subject is `person:x`, `group:y#member` or `device:k`.
-- `types(name, permissions)` and `roles(type, name, permissions, builtin)`
+- `types`, `roles` and `relations`: `permissions::SCHEMA` (`src/permissions/mod.rs`), whose doc says what a subject and an object are. Settled by B.
 - `epochs(scope, epoch, key_hash)` and `sealed(scope, epoch, device)`
 - `keeps(device, principal, scope, app, until)`
 - `apps`, `deploys`, `installs`, `services`, `settings(name, value)`, `vault`, `recovery(key, set_at)`

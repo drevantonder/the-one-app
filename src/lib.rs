@@ -41,6 +41,8 @@ pub mod sign_in;
 pub mod skills;
 pub mod labs;
 pub mod members;
+#[cfg(feature = "db")]
+pub mod permissions;
 pub mod rank;
 #[cfg(feature = "node")]
 pub mod store;
