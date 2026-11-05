@@ -171,6 +171,19 @@ async function mayHere(ctx, asks) {
   });
 }
 
+/// Whether the caller may do each of `asks` ([verb, object]), in order, asked of the node at once.
+async function mays(g, asks) {
+  // Phase 3: just g.may(asks), once every node takes a list (it answers one with false, or refuses it).
+  const all = await g.may(asks).catch(() => null);
+  return Array.isArray(all) ? all : Promise.all(asks.map(([verb, obj]) => g.may(verb, obj)));
+}
+
+/// Whether the caller manages `r` (`yours`) and pushes to it (`push`), asked at once.
+async function rights(g, r) {
+  const [yours, push] = await mays(g, [["manage", object(r)], ["push", object(r)]]);
+  return { yours, push };
+}
+
 /// Where git reaches a repo, the same on every computer: <the install's address>/repos/<owner>/<name>.git; null on a
 /// node from before it was given the address.
 const address = (ctx, path) => (ctx.address ? `${ctx.address}/repos/${path}.git` : null);
@@ -202,11 +215,11 @@ async function ownList(ctx) {
        from repos r order by coalesce(updated, r.created) desc`,
   );
   const from = await paths(ctx, g, repos.map((r) => r.from));
-  const out = await Promise.all(repos.map(async (r) => ({
+  const may = await mays(g, repos.flatMap((r) => [["manage", object(r)], ["push", object(r)]]));
+  return iso(repos.map((r, i) => ({
     repo: pathOf(ctx, r), name: r.name, owner: who(ctx, r.owner), from: from[r.from] ?? null, branch: r.branch, branches: r.branches,
-    created: r.created, updated: r.updated, open_issues: r.open_issues, deleted: deletedOf(r), yours: await g.may("manage", object(r)), push: await g.may("push", object(r)),
+    created: r.created, updated: r.updated, open_issues: r.open_issues, deleted: deletedOf(r), yours: may[2 * i], push: may[2 * i + 1],
   })));
-  return iso(out);
 }
 
 const app = {
@@ -299,7 +312,7 @@ const app = {
         const packs = (await g.query("select hash from packs where repo = ? order by time, hash", [r.id])).map((p) => p.hash);
         const pushes = (await g.query("select branch, base, head, user, name, time from pushes where repo = ? order by time desc limit 30", [r.id]));
         const from = (await paths(ctx, g, [r.from]))[r.from] ?? null;
-        return iso({ repo: r.path, name: r.name, address: address(ctx, r.path), owner: who(ctx, r.owner), from, created: r.created, yours: await g.may("manage", object(r)), push: await g.may("push", object(r)), branches, packs, forks: await forksOf(ctx, g, r), pushes });
+        return iso({ repo: r.path, name: r.name, address: address(ctx, r.path), owner: who(ctx, r.owner), from, created: r.created, ...(await rights(g, r)), branches, packs, forks: await forksOf(ctx, g, r), pushes });
       },
     },
     tree: {
@@ -310,7 +323,7 @@ const app = {
         const g = global(ctx);
         const r = (await repoAt(ctx, g, input.repo)) || (await named(ctx, input.repo));
         const open = (await g.query("select count(*) as n from issues where repo = ? and state = 'open'", [r.id]))[0].n;
-        const about = { owner: who(ctx, r.owner), yours: await g.may("manage", object(r)), push: await g.may("push", object(r)), from: (await paths(ctx, g, [r.from]))[r.from] ?? null, open_issues: open };
+        const about = { owner: who(ctx, r.owner), ...(await rights(g, r)), from: (await paths(ctx, g, [r.from]))[r.from] ?? null, open_issues: open };
         // A deleted one shows only that it was, for its owners to restore or erase.
         if (r.deleted) return iso({ repo: r.path, name: r.name, ...about, deleted: deletedOf(r), branches: [], entries: [] });
         const t = await browse.tree(ctx, g, { ...input, repo: r });
@@ -478,7 +491,7 @@ const app = {
         return `Erased ${r.path}.`;
       },
     },
-    ...issues.ops({ global, named, object, who, byHandle, handles, randomId, iso, REPO }),
+    ...issues.ops({ global, named, object, rights, who, byHandle, handles, randomId, iso, REPO }),
     ...github.ops({ global }),
     _address: {
       reads: true,

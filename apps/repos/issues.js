@@ -52,7 +52,7 @@ const like = (q) => `%${q.replace(/[\\%_]/g, (c) => "\\" + c)}%`;
 
 /// The issue operations, given what app.js knows of repos: finding one, it as an object of permissions, and people.
 export function ops(R) {
-  const { global, named, object, who, byHandle, handles, randomId, iso, REPO } = R;
+  const { global, named, object, rights, who, byHandle, handles, randomId, iso, REPO } = R;
   const person = (ctx, id) => who(ctx, `user:${id}`);
   const COMMENT_ID = { type: "string", description: "a comment's id, from repos_issue's comments" };
   const CONFIRM = { type: "boolean", description: "true once the person agreed: it can't be undone" };
@@ -179,8 +179,7 @@ export function ops(R) {
           closed_issues: counts.find((c) => c.state === "closed")?.n ?? 0,
           issues: await shape(ctx, g, r, rows.slice(0, PAGE)),
           more: rows.length > PAGE,
-          push: await g.may("push", object(r)),
-          yours: await g.may("manage", object(r)),
+          ...(await rights(g, r)),
         });
       },
     },
@@ -192,16 +191,16 @@ export function ops(R) {
         const g = global(ctx);
         const r = await named(ctx, repo);
         const i = await issueAt(g, r, n);
-        const [[shaped], comments, push] = await Promise.all([
+        const [[shaped], comments, { yours, push }] = await Promise.all([
           shape(ctx, g, r, [i]),
           g.query("select id, user, body, created, updated from comments where repo = ? and number = ? order by created, id", [r.id, i.number]),
-          g.may("push", object(r)),
+          rights(g, r),
         ]);
         const author = i.user === ctx.me.user;
         return iso({
           repo: r.path, ...shaped, body: i.body,
           comments: comments.map((c) => ({ id: c.id, author: person(ctx, c.user), body: c.body, created: c.created, updated: c.updated, yours: c.user === ctx.me.user })),
-          can: { edit: author || push, close: author || push, triage: push, delete: await g.may("manage", object(r)) },
+          can: { edit: author || push, close: author || push, triage: push, delete: yours },
         });
       },
     },
