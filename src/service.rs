@@ -85,7 +85,7 @@ struct Inner {
     known: Mutex<(Vec<Entry>, ScopeDb)>,
     /// Once `global`'s log is frozen, its scope database's steps nodes brought, by position from the first
     /// (`database::steps`), kept in its folder as `steps`.
-    steps: Mutex<Vec<Option<Entry>>>,
+    steps: Mutex<Vec<Option<crate::database::steps::Given>>>,
     /// The depths in `global`'s replay order of the entries its member entries follow that nodes didn't bring: a service
     /// is brought only member entries, and orders them as the nodes do with these.
     depths: Mutex<HashMap<Hash, u64>>,
@@ -401,7 +401,7 @@ impl Service {
                 steps.push(crate::database::steps::given(&crate::entry::Scope::Global, at, bytes.as_deref()));
             }
         }
-        let kept: Vec<Value> = steps.iter().enumerate().map(|(i, s)| json!({ "at": i + 1, "step": s.as_ref().map(|s| data_encoding::BASE64URL_NOPAD.encode(&crate::database::steps::encode(s))) })).collect();
+        let kept: Vec<Value> = steps.iter().enumerate().map(|(i, s)| json!({ "at": i + 1, "step": s.as_ref().map(|s| data_encoding::BASE64URL_NOPAD.encode(&crate::database::steps::encoded(s))) })).collect();
         write_private(&self.0.dir.join("steps"), &serde_json::to_vec(&kept)?)?;
         let depths = self.0.depths.lock().unwrap().clone();
         *known = placed(root, known.0.clone(), &depths, &steps);
@@ -569,7 +569,7 @@ pub fn limited(name: &str, call: &Value) -> Result<Value> {
 /// `known` with `given`'s member entries added, if any are new: → them, replayed from the install's first entry, with
 /// those signed by no endpoint it ever listed passed over (junk anyone could sign counts for nothing, and isn't kept).
 /// `depths` are those of the entries they follow that nodes don't bring.
-fn merged(root: Hash, known: &[Entry], given: Vec<Entry>, depths: &HashMap<Hash, u64>, steps: &[Option<Entry>]) -> Option<(Vec<Entry>, ScopeDb)> {
+fn merged(root: Hash, known: &[Entry], given: Vec<Entry>, depths: &HashMap<Hash, u64>, steps: &[Option<crate::database::steps::Given>]) -> Option<(Vec<Entry>, ScopeDb)> {
     let mut all: HashMap<String, Entry> = known.iter().map(|e| (e.hash().to_hex(), e.clone())).collect();
     let before = all.len();
     for e in given.into_iter().filter(members::is_member_entry) {
@@ -583,15 +583,10 @@ fn merged(root: Hash, known: &[Entry], given: Vec<Entry>, depths: &HashMap<Hash,
 
 /// `entries` in the nodes' replay order, those that can be placed in it and are signed by an endpoint the install
 /// listed, and the scope database they add up to.
-fn placed(root: Hash, entries: Vec<Entry>, depths: &HashMap<Hash, u64>, steps: &[Option<Entry>]) -> (Vec<Entry>, ScopeDb) {
+fn placed(root: Hash, entries: Vec<Entry>, depths: &HashMap<Hash, u64>, steps: &[Option<crate::database::steps::Given>]) -> (Vec<Entry>, ScopeDb) {
     let ordered = crate::entry::causal(entries, depths);
-    let member_entries: Vec<Entry> = ordered.iter().filter(|e| members::is_member_entry(e)).cloned().collect();
-    let members = Members::replay(Some(root), &member_entries, &Default::default());
     // Once the log is frozen, who's who is the scope database its freeze anchors, and the steps after.
-    let built = match members::frozen(Some(root), &ordered, &Default::default()) {
-        Some(f) => crate::database::steps::truth(&f, steps, now_ms()),
-        None => ScopeDb::build(&members, &crate::entry::Scope::Global, &Default::default(), now_ms()),
-    };
+    let built = crate::database::steps::who(steps, Some(root), &ordered, &Default::default(), now_ms());
     let db = built.unwrap_or_else(|err| {
         tracing::warn!("building the scope database: {err:#}");
         ScopeDb::build(&Members::default(), &crate::entry::Scope::Global, &Default::default(), 0).expect("an empty scope database builds")
@@ -796,7 +791,7 @@ fn end(child: &mut std::process::Child) {
 }
 
 /// The steps a service kept (`take_steps`).
-fn read_steps(path: &Path) -> Vec<Option<Entry>> {
+fn read_steps(path: &Path) -> Vec<Option<crate::database::steps::Given>> {
     let kept: Vec<Value> = std::fs::read(path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
     kept.iter()
         .enumerate()

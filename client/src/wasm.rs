@@ -176,7 +176,10 @@ pub struct Global {
 #[wasm_bindgen]
 impl Global {
     #[wasm_bindgen(constructor)]
-    /// `steps`: once the log is frozen, its scope database's steps kept and given, as JSON (`members::Global::steps`).
+    /// `steps`, as JSON: `{ kept, given, epochs, apps }`, where its scope database's steps were read to as it kept that
+    /// (`members::Global::kept`), and those a node passed on since (`GET /v1/steps/global`) with the keys to open
+    /// them: `global`'s epochs sealed to this device, opened (hex, by number), and the node's key sealed in each
+    /// (base64url, by number) (`members::Global::add_sealed`).
     pub fn new(root: String, kept: Vec<u8>, given: Vec<u8>, steps: Option<String>) -> Result<Global, JsError> {
         let root = (!root.is_empty()).then(|| one::entry::Hash::from_hex(&root)).transpose().map_err(js)?;
         let mut g = crate::members::Global::new(root);
@@ -187,16 +190,22 @@ impl Global {
             g.add(&given).map_err(js)?;
         }
         if let Some(steps) = steps.filter(|s| !s.is_empty()) {
-            g.add_steps(&serde_json::from_str(&steps).map_err(js)?).map_err(js)?;
+            let steps: serde_json::Value = serde_json::from_str(&steps).map_err(js)?;
+            if steps["kept"].is_object() {
+                g.restart(&steps["kept"]).map_err(js)?;
+            }
+            let epochs = steps["epochs"].as_object().into_iter().flatten().filter_map(|(n, k)| Some((n.parse().ok()?, key(k.as_str()?).ok()?))).collect();
+            let apps = steps["apps"].as_object().into_iter().flatten().filter_map(|(n, k)| Some((n.parse().ok()?, data_encoding::BASE64URL_NOPAD.decode(k.as_str()?.as_bytes()).ok()?))).collect();
+            g.add_sealed(&steps["given"], &epochs, &apps).map_err(js)?;
         }
         let mut view = crate::members::view_of(&g.who().map_err(js)?).map_err(js)?;
         // Whether who's who is written as steps now (`kernel/web/device.js` `write`).
-        view["frozen"] = serde_json::json!(g.at() > 0 || g.frozen().map_err(js)?.is_some());
+        view["frozen"] = serde_json::json!(g.frozen());
         let members = view.to_string();
-        Ok(Global { root: g.root().map(|r| r.to_hex()).unwrap_or_default(), pack: g.pack(), have: g.have(), steps: g.steps().to_string(), at: g.at(), members })
+        Ok(Global { root: g.root().map(|r| r.to_hex()).unwrap_or_default(), pack: g.pack(), have: g.have(), steps: g.kept().map_err(js)?.to_string(), at: g.at(), members })
     }
 
-    /// The scope database's steps held, as JSON: to keep, and give again.
+    /// Where its scope database's steps were read to, as JSON (`members::Global::kept`): to keep, and give again.
     #[wasm_bindgen(getter)]
     pub fn steps(&self) -> String {
         self.steps.clone()

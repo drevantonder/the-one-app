@@ -181,16 +181,13 @@ struct View {
 }
 
 /// `global`'s scope database, from its entries.
-fn built(entries: &Global) -> Result<ScopeDb> {
+fn built(entries: &mut Global) -> Result<ScopeDb> {
     entries.who()
 }
 
-/// Once `global`'s log is frozen, its scope database's steps after those `entries` hold, with the log's keys.
+/// `global`'s scope database's steps after those `entries` took, with the log's keys: who's who once it's frozen.
 async fn steps(bucket: &crate::Js, keys: &one::db::Keys, entries: &mut Global) -> Result<()> {
-    if entries.frozen()?.is_some() {
-        entries.add_read(one::database::steps::read(bucket, keys, &Scope::Global, entries.at()).await?);
-    }
-    Ok(())
+    entries.add_read(one::database::steps::read(bucket, keys, &Scope::Global, entries.at()).await?)
 }
 
 impl View {
@@ -218,7 +215,7 @@ impl View {
             let mut entries = Global::new(None);
             entries.add_entries(read.entries)?;
             steps(bucket, &log_keys, &mut entries).await?;
-            let db = built(&entries)?;
+            let db = built(&mut entries)?;
             let wrong: Vec<u32> = candidates.iter().filter(|(n, k)| db.epoch_hash(&Scope::Global, **n) != Some(one::keys::epoch_hash(k))).map(|(n, _)| *n).collect();
             if wrong.is_empty() {
                 return Ok(View { user: user.into(), seal: *seal, global: log_keys, at: read.at, floor: read.floor, entries, db, epochs: HashMap::from([(Scope::Global, candidates)]), apps: HashMap::new() });
@@ -242,7 +239,7 @@ impl View {
         }
         steps(bucket, &self.global, &mut self.entries).await?;
         if new || had != self.entries.at() {
-            self.db = built(&self.entries)?;
+            self.db = built(&mut self.entries)?;
         }
         Ok(true)
     }

@@ -655,7 +655,7 @@ impl Node {
             }
             Ok((entries, Value::Object(depths)))
         })?;
-        // Once `global`'s log is frozen, its scope database's steps too (`database::steps`).
+        // Once `global`'s log is frozen, its scope database's steps too (`database::steps`), its freeze among them.
         let steps = match self.frozen() {
             true => crate::database::steps::read(&self.bucket()?, &self.log_key(&Scope::Global).await?, &Scope::Global, 0).await?,
             false => Vec::new(),
@@ -671,7 +671,7 @@ impl Node {
             answer = self.send(&to, "hello", &hello, true, CONNECT).await?;
         }
         if answer["behind"] == true && !steps.is_empty() {
-            let list: Vec<Value> = steps.iter().enumerate().map(|(i, s)| json!({ "at": i + 1, "step": s.as_ref().map(|s| data_encoding::BASE64URL_NOPAD.encode(&crate::database::steps::encode(s))) })).collect();
+            let list: Vec<Value> = steps.iter().enumerate().map(|(i, s)| json!({ "at": i + 1, "step": s.as_ref().map(|s| data_encoding::BASE64URL_NOPAD.encode(&crate::database::steps::encoded(s))) })).collect();
             let taken = self.send(&to, "steps", &json!({ "steps": list }), true, CONNECT).await?;
             if let Some(err) = taken["error"].as_str() {
                 bail!("{} didn't take the scope database's steps: {err}", short(&to));

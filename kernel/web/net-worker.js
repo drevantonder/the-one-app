@@ -93,8 +93,9 @@ export function server(version) {
     if (!given && !steps?.steps?.length && kept?.members?.people?.[user]?.keeps) return kept.members;
     const { Global } = await glue;
     const root = kept?.root || (await get(`genesis:${user}`)) || "";
-    // Once the log is frozen, its scope database's steps: those kept, then those given after them.
-    const held = { steps: [...(kept?.steps?.steps || []), ...(steps?.steps || [])] };
+    // Its scope database's steps: where they were read to, as kept, then those a node passed on since, sealed, with
+    // the keys this browser opens them with itself.
+    const held = { kept: kept?.steps || null, given: { steps: steps?.steps || [] }, epochs: steps?.keys?.epochs || {}, apps: steps?.keys?.apps || {} };
     const g = new Global(root, kept?.pack || new Uint8Array(), given || new Uint8Array(), JSON.stringify(held));
     const members = JSON.parse(g.members);
     await put(`global:${user}`, { root: g.root, pack: g.pack, have: g.have, steps: JSON.parse(g.steps), at: g.at, members });

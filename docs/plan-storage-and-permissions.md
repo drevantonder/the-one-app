@@ -112,8 +112,8 @@ This phase has one owner. It starts only once **every device listed in the insta
 
 1. **The cut-over.**
    - The first copy of the scope database is the one built from the log at a final position.
-   - Every R1 device checks that copy by building it itself, from the entries it has already checked. That's the anchor for existing installs.
-   - A last entry marks the log frozen.
+   - Every R1 device checks that copy once by building it itself, from the entries it has already checked, in its own release's form, and keeps it. That's the anchor for existing installs.
+   - The scope database's first step marks the log frozen: an admin's device signs it, with the copy and the final position (each device's last entry in `global`, and each other scope's log's last step), so exactly one counts.
 2. **Changes to who may do what are written as signed steps to the scope database**, from every client through the client crate's code. The log is never written again.
 3. **A device that missed the gate and comes back older** still reads the frozen log, so it can't change who's in until it updates. It can't leak anything either:
    - epochs it makes don't count, and steps under them are skipped, which is the rule already;

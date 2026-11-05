@@ -393,10 +393,8 @@ impl Device {
         let kept = std::fs::read_to_string(&pinned).ok().and_then(|had| Hash::from_hex(had.trim()).ok());
         let mut global = crate::members::Global::new(kept);
         global.add_entries(read.entries).map_err(|_| failed("This isn't the One App this device joined."))?;
-        // Once the log is frozen, its scope database's steps too, opened with the same keys (`one::database::steps`).
-        if global.frozen().map_err(failed)?.is_some() {
-            global.add_read(one::database::steps::read(&bucket, &log_keys, &Scope::Global, 0).await.map_err(failed)?);
-        }
+        // Its scope database's steps too, opened with the same keys (`one::database::steps`): who's who once it's frozen.
+        global.add_read(one::database::steps::read(&bucket, &log_keys, &Scope::Global, 0).await.map_err(failed)?).map_err(failed)?;
         let who = global.who().map_err(failed)?;
         if kept.is_none()
             && let Some(root) = global.root()

@@ -1,5 +1,5 @@
-//! A scope database's steps, once its log is frozen (`switch`): the database is the truth, and every change to it is a
-//! step at the next free position of its own in the bucket, which the bucket keeps in one order.
+//! A scope database's steps, once `global`'s log is frozen (`switch`): the database is the truth, and every change to
+//! it is a step at the next free position of its own in the bucket, which the bucket keeps in one order.
 //!
 //! A step is one change, signed by the device that made it as its person: the same content an entry of the log carried
 //! (`members`' kinds, and a scope's own), for one position, under `entry::STEP_DOMAIN`, so it's never taken for an
@@ -7,10 +7,19 @@
 //! but where its writer meant it: one that loses its position to another is signed again for the next. A node only
 //! carries a client's step to the bucket: it can hold one back, but change none.
 //!
-//! Every reader applies each step to the database as the steps before it left it, and counts it only if all three of
-//! the protocol's rules hold there:
-//! 1. the install's first step and its recovery key: the database's first copy is replay's at the frozen log's end
-//!    (`anchor`), which every reader builds itself; and only the recovery key lets a device in by itself;
+//! The cut-over is `global`'s first step that is a freeze that checks out (`FREEZE`, `anchor`): signed by an admin's
+//! own device, it names the log's final position (the last of each device's entries in `global`, and of every other
+//! scope's log the last step in the bucket) and carries the database at it, its first copy. Every reader checks that
+//! copy once against what the entries it names add up to here, in its own release's form (`normalize`), and keeps it:
+//! from then on it reads the copy it keeps and the steps after, never the entries again. Being a step, exactly one
+//! freeze wins; a `FREEZING` step before it tells writers of the log to look whether what they wrote is inside it.
+//! Every other scope's database starts, before its first step, from what its log's entries up to the freeze's position
+//! there add up to (`scope_anchor`), which every reader of it works out itself: no writer chooses it.
+//!
+//! Every reader applies each step after to the database as the steps before it left it, and counts it only if all
+//! three of the protocol's rules hold there:
+//! 1. the install's first step and its recovery key: the freeze's copy, checked as above; and only the recovery key
+//!    lets a device in by itself;
 //! 2. epochs never go down: a step names its scope's epoch its writer knew, never one above the database's;
 //! 3. its signer holds the permission the change needs, at that step (`allowed`): `may`, `may_give`, `may_take` and
 //!    `may_make` over the database's rows; and is one of its person's own devices still listed, or for a scope's own
@@ -21,18 +30,23 @@
 //! the database and built back into it), so the database a step leaves is the one replay would have made.
 //!
 //! Its steps are sealed as the scope's log was, with the key of the log in each epoch (`log::seal`), under their own
-//! names, so whoever was handed the log's key reads them.
+//! names, so whoever was handed the log's key reads them. A reader opens them itself: a node passes them on sealed.
 //!
 //! ```text
-//! <prefix>/<n>               step n, from 1: one signed step, its header, signature and body (`encode`)
+//! <prefix>/<n>               step n, from 1: one signed step, its header, signature and body, and a freeze's copy
+//! <prefix>/copy/<n>          the database after step n, every `db::COPY_EVERY` steps
+//! <prefix>/newest            the newest hint, as a database's
 //! ```
+
+use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::{Context, Result, bail, ensure};
 use ed25519_dalek::SigningKey;
 use rusqlite::Connection;
+use serde_json::{Value, json};
 
-use crate::entry::{Content, Entry, Ext, Scope, unhex};
-use crate::members::{self, Members, Principal, Role, ScopeState};
+use crate::entry::{Content, Entry, Ext, Hash, Key, Scope, hex, unhex};
+use crate::members::{self, Cuts, Members, Principal, Role, ScopeState};
 use crate::permissions;
 
 use super::scopes::{self, ScopeDb};
@@ -45,182 +59,357 @@ pub fn prefix(scope: &str) -> String {
     format!("{}/{}/{}", crate::bucket::folder(scope), members::APP, NAME)
 }
 
-/// The first position a step is written at.
-pub const FIRST: u64 = 1;
-
 /// A step of `scope`'s database for position `at`, signed by `key` as `user`, the scope at `epoch`.
 pub fn sign(key: &SigningKey, scope: &Scope, at: u64, user: &str, epoch: u32, time: u64, content: Content) -> Result<Entry> {
     let at = u32::try_from(at).context("that database has more steps than a step can name")?;
     Ok(Entry::create_step(key, Ext { log: scope.to_string(), time, user: user.into(), epoch, previous: Vec::new() }, at, content))
 }
 
-/// A step as the bucket holds it, before it's sealed: its header, signature and body, as CBOR.
-pub fn encode(step: &Entry) -> Vec<u8> {
+/// A step as a reader has it: the step, and the copy a freeze carries.
+#[derive(Clone)]
+pub struct Given {
+    pub step: Entry,
+    pub copy: Option<Vec<u8>>,
+}
+
+/// A step as the bucket holds it, before it's sealed: its header, signature and body, and a freeze's copy, as CBOR.
+pub fn encode(step: &Entry, copy: Option<&[u8]>) -> Vec<u8> {
     let (h, s, b) = step.encode();
+    let mut parts = vec![ciborium::Value::Bytes(h), ciborium::Value::Bytes(s), ciborium::Value::Bytes(b)];
+    parts.extend(copy.map(|c| ciborium::Value::Bytes(c.to_vec())));
     let mut out = Vec::new();
-    ciborium::into_writer(&ciborium::Value::Array(vec![ciborium::Value::Bytes(h), ciborium::Value::Bytes(s), ciborium::Value::Bytes(b)]), &mut out).expect("cbor in memory");
+    ciborium::into_writer(&ciborium::Value::Array(parts), &mut out).expect("cbor in memory");
     out
 }
 
 /// A step as `encode` wrote it, its signature checked, for position `at` of `scope`'s database.
-pub fn decode(scope: &Scope, at: u64, bytes: &[u8]) -> Result<Entry> {
-    let ciborium::Value::Array(hsb) = ciborium::from_reader(bytes)? else { bail!("not a step") };
-    let [ciborium::Value::Bytes(h), ciborium::Value::Bytes(s), ciborium::Value::Bytes(b)] = hsb.as_slice() else { bail!("not a step") };
+pub fn decode(scope: &Scope, at: u64, bytes: &[u8]) -> Result<Given> {
+    let ciborium::Value::Array(parts) = ciborium::from_reader(bytes)? else { bail!("not a step") };
+    let (h, s, b, copy) = match parts.as_slice() {
+        [ciborium::Value::Bytes(h), ciborium::Value::Bytes(s), ciborium::Value::Bytes(b)] => (h, s, b, None),
+        [ciborium::Value::Bytes(h), ciborium::Value::Bytes(s), ciborium::Value::Bytes(b), ciborium::Value::Bytes(c)] => (h, s, b, Some(c.clone())),
+        _ => bail!("not a step"),
+    };
     let step = Entry::decode_step(h, s, b)?;
     ensure!(step.log() == scope.to_string() && u64::from(step.seq()) == at, "a step for another place");
-    Ok(step)
+    Ok(Given { step, copy })
 }
 
-/// `global`'s scope database as a reader that holds no copy of its own makes it, at `now`: the one the log's freeze
-/// anchors, built from the entries it follows (refused if that isn't what the freeze says it comes to), then each of
-/// `steps`, by position from the first, applied if it counts there (none: one that isn't a step, passed over).
-pub fn truth(frozen: &members::Frozen, steps: &[Option<Entry>], now: u64) -> Result<ScopeDb> {
-    let mut db = ScopeDb::build(&frozen.members, &Scope::Global, &frozen.state, now)?;
-    ensure!(crate::db::state_hash(db.conn())? == frozen.hash, "who's who at your One App's freeze isn't what its admin's device said it was: this device used none of it");
-    for step in steps.iter().flatten() {
-        if let Ok(a) = apply(&db, None, &Scope::Global, step) {
-            db = ScopeDb::open(a.db, now)?;
-        }
-    }
-    Ok(db)
-}
-
-/// A step as a node gives it (`GET /v1/steps/global`'s `{ at, step }`, or as a bucket holds it opened), for position
-/// `at` of `scope`'s database: none if it isn't one, which every reader passes over.
-pub fn given(scope: &Scope, at: u64, opened: Option<&[u8]>) -> Option<Entry> {
+/// A step a device of the install's own passed on opened (`encode`'s bytes): none if it isn't one. Only a service
+/// endpoint takes them so, from its own device's node, holding no keys of its own.
+pub fn given(scope: &Scope, at: u64, opened: Option<&[u8]>) -> Option<Given> {
     opened.and_then(|b| decode(scope, at, b).ok())
 }
 
-/// Reads `scope`'s steps after `from` from the bucket, opened with the keys of its log by epoch: each by position,
-/// none for one that isn't a step or doesn't open. Stops at the first position with nothing, or one under an epoch
-/// above every key given, which waits for that epoch's key.
-pub async fn read(bucket: &impl crate::bucket::Bucket, keys: &crate::db::Keys, scope: &Scope, from: u64) -> Result<Vec<Option<Entry>>> {
+/// A step as `given` takes it.
+pub fn encoded(given: &Given) -> Vec<u8> {
+    encode(&given.step, given.copy.as_deref())
+}
+
+/// Who's who as a reader that keeps nothing of its own works it out from `global`'s entries it has (in replay order,
+/// with `forks`, of the install at `root`) and its scope database's steps, by position from the first: the steps'
+/// once its log is frozen (`Truth::read`), replay's before.
+pub fn who(steps: &[Option<Given>], root: Option<Hash>, entries: &[Entry], forks: &Cuts, now: u64) -> Result<ScopeDb> {
+    if let Some(t) = Truth::read(steps, root, entries, forks, now)? {
+        return Ok(t.db);
+    }
+    let member_entries: Vec<Entry> = entries.iter().filter(|e| members::is_member_entry(e)).cloned().collect();
+    ScopeDb::build(&Members::replay(root, &member_entries, forks), &Scope::Global, &ScopeState::default(), now)
+}
+
+/// What a sealed step is to a reader with `keys`, its log's keys by epoch.
+pub enum Opened {
+    /// A step.
+    Step(Given),
+    /// Nothing that will ever be one: it doesn't open with its epoch's key, or isn't a step for its place.
+    Junk,
+    /// Under an epoch whose key the reader doesn't have: it reads on from here once it does.
+    Waits(u32),
+}
+
+/// Step `at` of `scope`'s database, sealed as the bucket holds it, opened with `keys`.
+pub fn open(keys: &crate::db::Keys, scope: &Scope, at: u64, sealed: &[u8]) -> Opened {
+    let name = crate::db::step_name(&prefix(&scope.to_string()), at);
+    let Ok(epoch) = crate::keys::epoch_of(sealed) else { return Opened::Junk };
+    let Some(key) = keys.get(&epoch) else { return Opened::Waits(epoch) };
+    match crate::keys::open(key, &name, sealed).and_then(|b| decode(scope, at, &b)) {
+        Ok(given) => Opened::Step(given),
+        Err(err) => {
+            tracing::debug!("{name}: {err:#}");
+            Opened::Junk
+        }
+    }
+}
+
+/// Reads `scope`'s steps after `from` from the bucket, opened with the keys of its log by epoch: each by position, none
+/// for one that will never be a step. Stops at the first position with nothing, or one under an epoch it has no key
+/// for, which waits for it; fails at a position with nothing that a later step or the newest hint says was written,
+/// rather than read on as if the steps ended there.
+pub async fn read(bucket: &impl crate::bucket::Bucket, keys: &crate::db::Keys, scope: &Scope, from: u64) -> Result<Vec<Option<Given>>> {
     let prefix = prefix(&scope.to_string());
     let mut out = Vec::new();
     loop {
         let at = from + out.len() as u64 + 1;
-        let name = crate::db::step_name(&prefix, at);
-        let Some(o) = bucket.get(&name).await? else { break };
-        let epoch = crate::keys::epoch_of(&o.bytes).ok();
-        if epoch.is_some_and(|e| keys.keys().next_back().is_some_and(|newest| e > *newest)) {
+        let Some(o) = bucket.get(&crate::db::step_name(&prefix, at)).await? else {
+            missing(bucket, &prefix, at).await?;
             break;
+        };
+        match open(keys, scope, at, &o.bytes) {
+            Opened::Step(given) => out.push(Some(given)),
+            Opened::Junk => out.push(None),
+            Opened::Waits(_) => break,
         }
-        let opened = epoch.and_then(|e| keys.get(&e)).and_then(|k| crate::keys::open(k, &name, &o.bytes).ok());
-        out.push(given(scope, at, opened.as_deref()));
     }
     Ok(out)
 }
 
-/// The kind of a scope's first step once `global`'s log is frozen, but `global`'s: its own log's final position, the
-/// last of each device's entries there its writer held (`frontier`), and the state hash the scope's database built
-/// from those comes to (`hash`). Every reader builds that itself from the entries it checked, and refuses the scope's
-/// steps if it doesn't come to it.
-pub const ANCHOR: &str = "anchor";
+/// Fails if step `at` at `prefix`, which isn't in the bucket, was written: a later one is, or the newest hint says so.
+/// Steps are written one after another, so one gone is one deleted, and reading on as if it never was would pass over
+/// whatever it and those after it changed.
+pub async fn missing(bucket: &impl crate::bucket::Bucket, prefix: &str, at: u64) -> Result<()> {
+    let hinted = bucket.get(&crate::db::newest_name(prefix)).await?.map_or(0, |o| crate::db::newest(&o.bytes).0);
+    let later = bucket.get(&crate::db::step_name(prefix, at + 1)).await?.is_some();
+    ensure!(hinted < at && !later, "step {at} of {prefix} isn't in the bucket, though later ones were written: this device reads no further until it's back");
+    Ok(())
+}
 
-/// A scope's anchor (`ANCHOR`): what `entries`, the scope's own in replay order, up to the last of each device's in
-/// `frontier`, add up to with `global`'s frozen members, and its state hash.
-pub fn anchor(known: &Members, member_entries: &[Entry], entries: &[Entry], scope: &Scope) -> Result<(Connection, String, std::collections::BTreeMap<crate::entry::Key, u32>)> {
-    let mut frontier = std::collections::BTreeMap::new();
+/// The kind of step that tells writers of the log that it's being frozen: the first a device of an admin's writes,
+/// before it works out where the log ends. Changes nothing; a writer that finds one after it wrote an entry looks
+/// whether the freeze that follows holds it (`Freeze::holds`).
+pub const FREEZING: &str = "freezing";
+
+/// The kind of step that freezes the log (`anchor`): `{ hash, frontier, logs }`, with its copy.
+pub const FREEZE: &str = "freeze";
+
+/// Where the log was frozen, as its freeze says it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Freeze {
+    /// The freeze's position.
+    pub at: u64,
+    /// The state hash its copy comes to, as it is (`db::state_hash`).
+    pub hash: String,
+    /// The last of each device's entries in `global` that count.
+    pub frontier: BTreeMap<Key, u32>,
+    /// The last step of every other scope's log that counts, by scope.
+    pub logs: BTreeMap<String, u64>,
+}
+
+impl Freeze {
+    /// The freeze `step` at position `at` says.
+    pub fn of(step: &Entry, at: u64) -> Result<Freeze> {
+        ensure!(step.content.app == members::APP && step.content.kind == FREEZE && step.scope() == Scope::Global, "not a freeze");
+        Freeze::from_data(&step.content.data, at)
+    }
+
+    fn from_data(data: &Value, at: u64) -> Result<Freeze> {
+        let mut frontier = BTreeMap::new();
+        for (k, n) in data["frontier"].as_object().context("a freeze names its frontier")? {
+            frontier.insert(unhex(k)?, u32::try_from(n.as_u64().context("a frontier is seqs")?)?);
+        }
+        let mut logs = BTreeMap::new();
+        for (scope, n) in data["logs"].as_object().context("a freeze names every scope's log")? {
+            Scope::parse(scope)?;
+            logs.insert(scope.clone(), n.as_u64().context("a log's end is a position")?);
+        }
+        Ok(Freeze { at, hash: data["hash"].as_str().context("a freeze names its copy's hash")?.to_string(), frontier, logs })
+    }
+
+    /// As a freeze says it, and as a reader keeps it.
+    pub fn content(&self) -> Content {
+        let frontier: serde_json::Map<String, Value> = self.frontier.iter().map(|(k, n)| (hex(k), json!(n))).collect();
+        Content::new(members::APP, FREEZE, json!({ "hash": self.hash, "frontier": frontier, "logs": self.logs }))
+    }
+
+    /// Whether `entry`, written at step `step` of its scope's log, counts: the freeze holds it.
+    pub fn holds(&self, entry: &Entry, step: u64) -> bool {
+        match entry.scope() {
+            Scope::Global => self.frontier.get(&entry.author()).is_some_and(|n| entry.seq() <= *n),
+            scope => self.logs.get(&scope.to_string()).is_some_and(|n| step <= *n),
+        }
+    }
+
+    /// Of `entries` (`global`'s, in replay order), those it holds; or none while one is missing, which a reader waits for.
+    pub fn entries(&self, entries: &[Entry]) -> Option<Vec<Entry>> {
+        let held: Vec<Entry> = entries.iter().filter(|e| self.frontier.get(&e.author()).is_some_and(|n| e.seq() <= *n)).cloned().collect();
+        let mut seqs: BTreeMap<Key, BTreeSet<u32>> = BTreeMap::new();
+        for e in &held {
+            seqs.entry(e.author()).or_default().insert(e.seq());
+        }
+        self.frontier.iter().all(|(k, n)| seqs.get(k).is_some_and(|s| s.len() as u64 == u64::from(*n) + 1)).then_some(held)
+    }
+
+    /// Who's who at the freeze, as replay makes it of `entries` (`global`'s, in replay order): its members, member
+    /// entries and state.
+    fn replayed(&self, root: Option<Hash>, entries: &[Entry], forks: &Cuts) -> Option<(Members, Vec<Entry>, ScopeState)> {
+        let held = self.entries(entries)?;
+        let member_entries: Vec<Entry> = held.iter().filter(|e| members::is_member_entry(e)).cloned().collect();
+        let known = Members::replay(root, &member_entries, forks);
+        let (m, state) = members::replay(&known, &member_entries, &held, |_, _, _| {});
+        Some((m, member_entries, state))
+    }
+}
+
+/// The database a copy is, as bytes.
+pub fn connection(bytes: &[u8]) -> Result<Connection> {
+    let mut conn = Connection::open_in_memory()?;
+    conn.deserialize_read_exact("main", bytes, bytes.len(), false)?;
+    conn.query_row("select count(*) from sqlite_schema", [], |_| Ok(()))?;
+    Ok(conn)
+}
+
+/// A scope's database another device wrote (a copy), or one this device kept from an older release, in this release's
+/// form: what it says, built again here, with what only its steps said carried over (`carry`). Two devices' databases
+/// are compared only in one form.
+pub fn normalize(copy: Connection, scope: &Scope, now: u64) -> Result<ScopeDb> {
+    let copy = ScopeDb::open(copy, now)?;
+    let built = super::scope::build(&if *scope == Scope::Global { copy.members() } else { Members::default() }, scope, &copy.state())?;
+    carry(copy.conn(), &built)?;
+    ScopeDb::open(built, now)
+}
+
+/// The freeze `given` is, at position `at`, as checked here: an admin's own device signed it, its copy comes to the
+/// hash it names, and `global`'s entries it names (of `entries`, every one this reader has, in replay order, with
+/// `forks` as `Store::forks` found them, of the install whose genesis is `root`) add up to what the copy says, in this
+/// release's form. → the database it anchors, this release's form of its copy; none while an entry it names isn't
+/// here, which a reader waits for.
+pub fn anchor(given: &Given, at: u64, root: Option<Hash>, entries: &[Entry], forks: &Cuts, now: u64) -> Result<Option<ScopeDb>> {
+    let step = &given.step;
+    let freeze = Freeze::of(step, at)?;
+    let copy = connection(given.copy.as_deref().context("a freeze carries its copy")?)?;
+    ensure!(crate::db::state_hash(&copy)? == freeze.hash, "a freeze's copy isn't what it says");
+    let Some((m, _, state)) = freeze.replayed(root, entries, forks) else { return Ok(None) };
+    let copy = normalize(copy, &Scope::Global, now)?;
+    let own = super::scope::build(&m, &Scope::Global, &state)?;
+    carry(copy.conn(), &own)?;
+    let own = ScopeDb::open(own, now)?;
+    ensure!(own.client(&step.author()).is_some_and(|c| c.user == step.user()) && own.may(step.user(), "change-settings", scopes::INSTALL), "only an admin's own device freezes the log");
+    ensure!(crate::db::state_hash(own.conn())? == crate::db::state_hash(copy.conn())?, "who's who at your One App's freeze isn't what its admin's device said it was: this device used none of it");
+    Ok(Some(copy))
+}
+
+/// The freeze a device of an admin's writes, at `logs`' ends (every scope's log but `global`'s, by its last step in
+/// the bucket) and `global`'s entries it holds (`entries`, in replay order, with `forks`, of the install at `root`):
+/// its content, and its copy.
+pub fn freeze(root: Option<Hash>, entries: &[Entry], forks: &Cuts, logs: BTreeMap<String, u64>, now: u64) -> Result<(Content, Vec<u8>)> {
+    let mut frontier = BTreeMap::new();
     for e in entries {
         let n = frontier.entry(e.author()).or_insert(0);
         *n = (*n).max(e.seq());
     }
-    let (db, hash) = anchored(known, member_entries, entries, scope, &frontier)?;
-    Ok((db, hash, frontier))
+    let mut freeze = Freeze { at: 0, hash: String::new(), frontier, logs };
+    let (m, _, state) = freeze.replayed(root, entries, forks).context("not every entry of global's is here")?;
+    let mut db = ScopeDb::build(&m, &Scope::Global, &state, now)?;
+    freeze.hash = crate::db::state_hash(db.conn())?;
+    Ok((freeze.content(), db.bytes()?))
 }
 
-/// The scope's database at the final position `frontier` of its own log, `entries` in replay order, and its hash.
-fn anchored(known: &Members, member_entries: &[Entry], entries: &[Entry], scope: &Scope, frontier: &std::collections::BTreeMap<crate::entry::Key, u32>) -> Result<(Connection, String)> {
-    let before: Vec<Entry> = entries.iter().filter(|e| frontier.get(&e.author()).is_some_and(|n| e.seq() <= *n)).cloned().collect();
-    let (_, state) = members::replay_from(known, member_entries, &before, ScopeState::default(), |_, _, _| {});
-    let db = super::scope::build(&Members::default(), scope, &state)?;
-    let hash = crate::db::state_hash(&db)?;
-    Ok((db, hash))
+/// A scope's database before its first step (not `global`'s): what its log's entries up to the freeze's position there
+/// (`entries`, read from its steps up to `Freeze::logs`') add up to with `global`'s at the freeze (`global`, every one
+/// of its entries this reader has, in replay order, with `forks`, of the install at `root`). Every reader works it out
+/// itself. Fails while an entry of `global`'s the freeze names isn't here.
+pub fn scope_anchor(freeze: &Freeze, root: Option<Hash>, global: &[Entry], forks: &Cuts, scope: &Scope, entries: &[Entry], now: u64) -> Result<ScopeDb> {
+    ensure!(*scope != Scope::Global, "global's database starts from its freeze");
+    let held = freeze.entries(global).context("not every entry of global's the freeze names is here yet")?;
+    let member_entries: Vec<Entry> = held.iter().filter(|e| members::is_member_entry(e)).cloned().collect();
+    let known = Members::replay(root, &member_entries, forks);
+    let ordered = crate::entry::causal(entries.to_vec(), &held.iter().map(|e| (e.hash(), e.depth)).collect());
+    let (_, state) = members::replay_from(&known, &member_entries, &ordered, ScopeState::default(), |_, _, _| {});
+    ScopeDb::open(super::scope::build(&Members::default(), scope, &state)?, now)
 }
 
-/// The step that anchors a scope's database (`ANCHOR`).
-pub fn anchor_content(hash: &str, frontier: &std::collections::BTreeMap<crate::entry::Key, u32>) -> Content {
-    let frontier: serde_json::Map<String, serde_json::Value> = frontier.iter().map(|(k, n)| (crate::entry::hex(k), serde_json::json!(n))).collect();
-    Content::new(members::APP, ANCHOR, serde_json::json!({ "hash": hash, "frontier": frontier }))
+/// `global`'s scope database as a reader has it once its log is frozen: the freeze, the last position applied (or
+/// passed over), and the database there.
+pub struct Truth {
+    pub freeze: Freeze,
+    pub at: u64,
+    pub db: ScopeDb,
 }
 
-/// Applies a scope's first step, its anchor, with `global`'s scope database as it is now and its frozen log's members:
-/// → the scope's database it says, if its signer may write there and what it names comes to its hash here.
-pub fn apply_anchor(global: &ScopeDb, known: &Members, member_entries: &[Entry], entries: &[Entry], scope: &Scope, step: &Entry) -> Result<Applied> {
-    ensure!(step.content.app == members::APP && step.content.kind == ANCHOR && step.scope() == *scope && *scope != Scope::Global, "a scope's first step is its anchor");
-    ensure!(global.may(step.user(), "use", &scopes::object(scope)) && (global.client(&step.author()).is_some_and(|c| c.user == step.user()) || global.runs_for(&step.author(), scope)), "{} may not write in {scope}", step.user());
-    let mut frontier = std::collections::BTreeMap::new();
-    for (k, n) in step.content.data["frontier"].as_object().into_iter().flatten() {
-        frontier.insert(unhex(k)?, u32::try_from(n.as_u64().context("a frontier is seqs")?)?);
+impl Truth {
+    /// From the steps a reader has, by position from the first (none for one that will never be a step), and
+    /// `global`'s entries to check a freeze against (`anchor`): none before a freeze that checks out. Fails while an
+    /// entry the first freeze names isn't here.
+    pub fn read(steps: &[Option<Given>], root: Option<Hash>, entries: &[Entry], forks: &Cuts, now: u64) -> Result<Option<Truth>> {
+        let mut truth: Option<Truth> = None;
+        for (i, given) in steps.iter().enumerate() {
+            let at = i as u64 + 1;
+            match &mut truth {
+                Some(t) => drop(t.take(at, given.as_ref().map(|g| &g.step))?),
+                None => truth = Truth::first(at, given.as_ref(), root, entries, forks, now)?,
+            }
+        }
+        Ok(truth)
     }
-    let (db, hash) = anchored(known, member_entries, entries, scope, &frontier)?;
-    ensure!(step.content.data["hash"].as_str() == Some(hash.as_str()), "{scope}'s anchor isn't what its log here comes to");
-    Ok(Applied { db })
-}
 
-/// How long a scope database's steps are kept once a copy covers them, before they may be deleted: the plan's 7 years,
-/// "who did what" being the steps themselves.
-pub const KEEP_STEPS_FOR: u64 = 7 * 365 * 24 * 60 * 60 * 1000;
-
-/// After its writer wrote step `at` of a scope's database: a copy of the database it leaves (`db`'s bytes), sealed
-/// as its steps are, once `COPY_EVERY` steps follow the last copy; and the newest hint moved on, as a database's
-/// (`db::hint`), so backups and readers find both. Only saves readers work, so a link that fails it fails nothing.
-pub async fn written(bucket: &impl crate::bucket::Bucket, keys: &crate::db::Keys, scope: &Scope, at: u64, bytes: Vec<u8>) -> Result<()> {
-    let prefix = prefix(&scope.to_string());
-    let (_, mut copy, mut epoch) = match bucket.get(&crate::db::newest_name(&prefix)).await? {
-        Some(o) => crate::db::newest(&o.bytes),
-        None => (0, 0, 0),
-    };
-    if at >= copy + crate::db::COPY_EVERY {
-        let name = crate::db::copy_name(&prefix, at);
-        bucket.create(&name, &crate::log::seal(keys, &name, &bytes)?).await?;
-        (copy, epoch) = (at, *keys.keys().next_back().context("no key")?);
-    }
-    crate::db::hint(bucket, &prefix, at, copy, epoch).await
-}
-
-/// A scope's database at step `at`, from its newest copy at or before it and the steps after, as a device that read to
-/// `at` before and kept what it came to (`hash`) starts again once the steps before a copy are deleted: refused unless
-/// it comes to that hash. `global`'s.
-pub async fn from_copy(bucket: &impl crate::bucket::Bucket, keys: &crate::db::Keys, at: u64, hash: &str, now: u64) -> Result<ScopeDb> {
-    let scope = &Scope::Global;
-    let prefix = prefix(&scope.to_string());
-    let copy = bucket.get(&crate::db::newest_name(&prefix)).await?.map(|o| crate::db::newest(&o.bytes).1).unwrap_or(0);
-    ensure!(copy > 0 && copy <= at, "{scope} has no copy this device can check from what it read before");
-    let name = crate::db::copy_name(&prefix, copy);
-    let o = bucket.get(&name).await?.with_context(|| format!("{scope}'s copy at {copy} isn't there"))?;
-    let key = keys.get(&crate::keys::epoch_of(&o.bytes)?).context("its copy is under a key this device wasn't given")?;
-    let bytes = crate::keys::open(key, &name, &o.bytes)?;
-    let mut conn = Connection::open_in_memory()?;
-    conn.deserialize_read_exact("main", &bytes[..], bytes.len(), false)?;
-    let after = read(bucket, keys, scope, copy).await?;
-    let mut db = ScopeDb::open(conn, now)?;
-    for step in after.into_iter().take((at - copy) as usize).flatten() {
-        if let Ok(a) = apply(&db, None, scope, &step) {
-            db = ScopeDb::open(a.db, now)?;
+    /// Step `at` of `global`'s database, before its freeze: the freeze, if it is one that checks out. Fails while an
+    /// entry it names isn't here.
+    pub fn first(at: u64, given: Option<&Given>, root: Option<Hash>, entries: &[Entry], forks: &Cuts, now: u64) -> Result<Option<Truth>> {
+        let Some(g) = given.filter(|g| g.step.content.kind == FREEZE) else { return Ok(None) };
+        match anchor(g, at, root, entries, forks, now) {
+            Ok(Some(db)) => Ok(Some(Truth { freeze: Freeze::of(&g.step, at)?, at, db })),
+            Ok(None) => bail!("who's who waits for entries of your One App's that its freeze names, which this device doesn't have yet"),
+            Err(err) => {
+                tracing::info!("global's step {at} isn't its freeze: {err:#}");
+                Ok(None)
+            }
         }
     }
-    ensure!(crate::db::state_hash(db.conn())? == hash, "{scope}'s copy and the steps after don't come to what this device read before");
-    Ok(db)
+
+    /// Takes step `at`, the next: applied if it counts, passed over if not (or none). → whether it counted.
+    pub fn take(&mut self, at: u64, step: Option<&Entry>) -> Result<bool> {
+        ensure!(at == self.at + 1, "step {at} isn't the next");
+        self.at = at;
+        let Some(step) = step else { return Ok(false) };
+        match apply(&self.db, None, &Scope::Global, step) {
+            Ok(a) => {
+                self.db = ScopeDb::open(a.db, self.db.now())?;
+                Ok(true)
+            }
+            Err(err) => {
+                tracing::info!("global's step {at} doesn't count: {err:#}");
+                Ok(false)
+            }
+        }
+    }
+
+    /// As a reader keeps it, to start from again: `{ freeze, freeze_at, at, hash, db }`, the database's bytes base64.
+    pub fn keep(&mut self) -> Result<Value> {
+        let bytes = self.db.bytes()?;
+        Ok(json!({ "freeze": self.freeze.content().data, "freeze_at": self.freeze.at, "at": self.at, "hash": crate::db::state_hash(self.db.conn())?, "db": data_encoding::BASE64.encode(&bytes) }))
+    }
+
+    /// What `keep` kept, checked against the hash it kept with it, in this release's form.
+    pub fn kept(kept: &Value, now: u64) -> Result<Truth> {
+        let bytes = data_encoding::BASE64.decode(kept["db"].as_str().context("no database kept")?.as_bytes())?;
+        let conn = connection(&bytes)?;
+        ensure!(Some(crate::db::state_hash(&conn)?.as_str()) == kept["hash"].as_str(), "who's who this device kept isn't what it was");
+        let freeze = Freeze::from_data(&kept["freeze"], kept["freeze_at"].as_u64().context("no freeze kept")?)?;
+        Ok(Truth { freeze, at: kept["at"].as_u64().context("no position kept")?, db: normalize(conn, &Scope::Global, now)? })
+    }
 }
 
-/// Deletes a scope database's steps its newest copy covers, each once it's been in the bucket `KEEP_STEPS_FOR`, with
-/// `steps` (`db::DELETE_COVERED_STEPS`, on with the switch), at `now`: → how many went.
-pub async fn tidy(bucket: &impl crate::bucket::Bucket, scope: &Scope, now: u64, steps: bool) -> Result<usize> {
+/// After its writer wrote step `at` of a scope's database: a copy of the database it leaves (`db`'s bytes), sealed
+/// as its steps are, at every `COPY_EVERY`th step; and the newest hint moved on, as a database's (`db::hint`). Only
+/// saves readers work, so a link that fails it fails nothing. The hint is anyone's to write, so nothing here trusts it.
+pub async fn written(bucket: &impl crate::bucket::Bucket, keys: &crate::db::Keys, scope: &Scope, at: u64, bytes: Vec<u8>) -> Result<()> {
     let prefix = prefix(&scope.to_string());
-    let Some(hint) = bucket.get(&crate::db::newest_name(&prefix)).await?.filter(|_| steps) else { return Ok(0) };
-    let copy = crate::db::newest(&hint.bytes).1;
-    let old: Vec<String> = bucket
-        .objects(&prefix)
-        .await?
-        .into_iter()
-        .filter(|(n, written)| n.parse::<u64>().is_ok_and(|at| at < copy) && written + KEEP_STEPS_FOR <= now)
-        .map(|(n, _)| format!("{prefix}/{n}"))
-        .collect();
-    for name in &old {
-        bucket.delete(name).await?;
+    let epoch = *keys.keys().next_back().context("no key")?;
+    if at % crate::db::COPY_EVERY == 0 {
+        let name = crate::db::copy_name(&prefix, at);
+        bucket.create(&name, &crate::log::seal(keys, &name, &bytes)?).await?;
     }
-    Ok(old.len())
+    crate::db::hint(bucket, &prefix, at, at - at % crate::db::COPY_EVERY, epoch).await
+}
+
+/// The copy of `scope`'s database at step `at`, if one is there that opens with `keys` and comes to `hash`, as the
+/// device that let a new one in says (its Welcome): in this release's form.
+pub async fn copy_at(bucket: &impl crate::bucket::Bucket, keys: &crate::db::Keys, scope: &Scope, at: u64, hash: &str, now: u64) -> Result<ScopeDb> {
+    let name = crate::db::copy_name(&prefix(&scope.to_string()), at);
+    let o = bucket.get(&name).await?.with_context(|| format!("{scope}'s copy at {at} isn't there"))?;
+    let key = keys.get(&crate::keys::epoch_of(&o.bytes)?).context("its copy is under a key this device wasn't given")?;
+    let conn = connection(&crate::keys::open(key, &name, &o.bytes)?)?;
+    ensure!(crate::db::state_hash(&conn)? == hash, "{scope}'s copy at {at} isn't the one this device was told to start from");
+    normalize(conn, scope, now)
 }
 
 /// What a step that counts made of the database it was applied to: the database it leaves.
@@ -566,7 +755,7 @@ pub(crate) mod tests {
         let mut step = |db: &mut ScopeDb, key: &SigningKey, user: &str, epoch: u32, content: Content| -> bool {
             at += 1;
             let s = sign(key, &Scope::Global, at, user, epoch, 0, content).unwrap();
-            let s = decode(&Scope::Global, at, &encode(&s)).unwrap();
+            let s = decode(&Scope::Global, at, &encode(&s, None)).unwrap().step;
             match apply(db, None, &Scope::Global, &s) {
                 Ok(a) => {
                     *db = ScopeDb::open(a.db, 0).unwrap();
@@ -585,7 +774,7 @@ pub(crate) mod tests {
         assert!(db.group("c000000000000003").is_some() && db.setting("name").is_none());
         // Signed for one place, it's nowhere else; and an entry, signed the same way, is never a step.
         let s = sign(&mac, &Scope::Global, 9, ANDRE, 1, 0, setting("name", Some("x"))).unwrap();
-        assert!(decode(&Scope::Global, 10, &encode(&s)).is_err() && decode(&Scope::User(ANDRE.into()), 9, &encode(&s)).is_err());
-        assert!(decode(&Scope::Global, 0, &encode(&g)).is_err());
+        assert!(decode(&Scope::Global, 10, &encode(&s, None)).is_err() && decode(&Scope::User(ANDRE.into()), 9, &encode(&s, None)).is_err());
+        assert!(decode(&Scope::Global, 0, &encode(&g, None)).is_err());
     }
 }

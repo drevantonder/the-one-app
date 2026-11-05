@@ -610,7 +610,6 @@ pub fn check(c: &Check) -> Result<(Value, Vec<Restored>)> {
 /// (`database::steps`), opened with `keys`, its epochs' keys; `replayed`, as the entries say it, before.
 fn steps_of(replayed: ScopeDb, store: &crate::store::Store, root: Option<crate::entry::Hash>, place: &Place, install: &str, keys: &[[u8; 32]]) -> Result<ScopeDb> {
     let global: Vec<Entry> = store.ordered()?.into_iter().filter(|e| e.log() == "global").collect();
-    let Some(frozen) = crate::members::frozen(root, &global, &store.forks()?) else { return Ok(replayed) };
     // The log's key in each epoch: the node's app key there, opened with whichever of the epochs' keys does.
     let mut log_keys: BTreeMap<u32, [u8; 32]> = BTreeMap::new();
     for n in 1..=(keys.len() as u32 + 8) {
@@ -624,10 +623,16 @@ fn steps_of(replayed: ScopeDb, store: &crate::store::Store, root: Option<crate::
     for at in 1.. {
         let name = crate::db::step_name(&prefix, at);
         let Some(sealed) = place.get(&format!("{install}/bucket/{name}"))? else { break };
-        let opened = crate::keys::epoch_of(&sealed).ok().and_then(|e| log_keys.get(&e)).and_then(|k| crate::keys::open(k, &name, &sealed).ok());
-        steps.push(crate::database::steps::given(&crate::entry::Scope::Global, at, opened.as_deref()));
+        match crate::database::steps::open(&log_keys, &crate::entry::Scope::Global, at, &sealed) {
+            crate::database::steps::Opened::Step(given) => steps.push(Some(given)),
+            crate::database::steps::Opened::Junk => steps.push(None),
+            crate::database::steps::Opened::Waits(_) => break,
+        }
     }
-    crate::database::steps::truth(&frozen, &steps, crate::node::now_ms())
+    match crate::database::steps::Truth::read(&steps, root, &global, &store.forks()?, crate::node::now_ms())? {
+        Some(t) => Ok(t.db),
+        None => Ok(replayed),
+    }
 }
 
 /// Who's who, as the member entries in a store replay: `global`'s scope database.
@@ -730,8 +735,9 @@ pub async fn check_databases(place: &Place, install: &str, snapshot: &Snapshot, 
             out.push(wrong);
             continue;
         }
-        // The node's log of a scope is entries, which `check` restored; the rest are SQLite.
-        if database == &format!("{}/{}", crate::members::APP, crate::log::NAME) || keys.is_empty() {
+        // The node's log of a scope is entries, which `check` restored, and its scope database's steps who's who, which
+        // it checked too (`steps_of`); the rest are SQLite.
+        if [crate::log::NAME, crate::database::steps::NAME].map(|db| format!("{}/{db}", crate::members::APP)).contains(database) || keys.is_empty() {
             continue;
         }
         match crate::db::Db::open(&copy, &prefix, keys).await {

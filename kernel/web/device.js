@@ -128,12 +128,12 @@ export class Device {
       });
       // What an older release kept, without all its answers (each person's `keeps` came last), is replayed again.
       const given = r && r.status !== 204 ? new Uint8Array(await r.arrayBuffer()) : undefined;
-      // Once the log is frozen, who's who is its scope database's steps after those kept; a node that isn't says so.
-      const frozen = kept?.at || this.state()?.install?.frozen;
+      // Once the log is frozen, who's who is its scope database's steps after those kept, which this browser opens
+      // itself; a node that isn't says so.
+      const frozen = kept?.members?.frozen || this.state()?.install?.frozen;
       const steps = frozen ? await this.api(`/v1/steps/global?from=${kept?.at || 0}`).catch(() => null) : null;
-      let k = !given && !steps?.steps?.length && kept?.members?.people?.[this.user]?.keeps ? kept.members : await this.replay(this.user, given, steps);
-      // The entries say the log froze, which this browser didn't know: the steps since, then.
-      if (k.frozen && !steps) k = await this.replay(this.user, undefined, await this.api(`/v1/steps/global?from=${kept?.at || 0}`));
+      if (steps?.steps?.length) steps.keys = await this.logKeys();
+      const k = !given && !steps?.steps?.length && kept?.members?.people?.[this.user]?.keeps ? kept.members : await this.replay(this.user, given, steps);
       if (!k.people[this.user]) throw new Error("Your One App doesn't list you yet, so this device didn't use it.");
       this.known = k;
     }
@@ -147,6 +147,16 @@ export class Device {
   }
 
   // Epochs and keys.
+
+  /// `global`'s epochs sealed to this browser, opened (hex, by number), and the node's key in each, sealed under it
+  /// (base64url, by number): what it opens `global`'s scope database's steps with. Unchecked here: who's who checks
+  /// each epoch against the steps before it, before it's used (client/src/members.rs `add_sealed`).
+  async logKeys() {
+    const [{ sealed: epochs }, { sealed: apps }] = await Promise.all([this.api(`/v1/keys?scope=global&to=${this.me.key}`), this.api("/v1/keys?scope=global&app=node")]);
+    const opened = {};
+    for (const [n, s] of Object.entries(epochs || {})) opened[n] = hex.encode(await openSealed(this.me.opens, b64u.decode(s)));
+    return { epochs: opened, apps: apps || {} };
+  }
 
   /// Opens epoch `n`'s key sealed to `as` from what the node gave, if its hash is the one its epoch entry gave.
   async openEpoch(scope, n, sealed, as = this.me) {

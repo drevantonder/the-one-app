@@ -152,7 +152,7 @@ struct Install {
     reads: HashMap<Key, crate::database::switch::Reads>,
     /// Once `global`'s log is frozen, each other scope's own database as its steps leave it (`database::steps`): the
     /// last position read, and the database, once its anchor checked out here.
-    scope_dbs: HashMap<Scope, (u64, Option<ScopeDb>)>,
+    scope_dbs: HashMap<Scope, (u64, ScopeDb)>,
     /// Each scope's rows of how things went, as this device last read them.
     status: HashMap<String, status::Status>,
     /// Each scope's views: how far they've replayed, and what the scope's node entries add up to.
@@ -752,6 +752,7 @@ impl Node {
         let bucket = file.bucket.map(|f| Ok::<_, anyhow::Error>((self.install_place(&f)?, f))).transpose()?;
         let install = Install { r, user: file.user, bucket, folders: file.folders, peers: HashMap::new(), builds: HashMap::new(), reads: HashMap::new(), scope_dbs: HashMap::new(), status: HashMap::new(), views: HashMap::new(), vault: Default::default(), nearest: HashMap::new(), far: HashMap::new(), read: false };
         *self.0.install.lock()? = Some(install);
+        self.start_kept();
         Ok(())
     }
 
@@ -895,10 +896,15 @@ impl Node {
         // An entry that wouldn't count is never written: it would say it was done.
         self.with(|i| i.r.check(&entry))?;
         self.check_in_scope(&entry)?;
-        self.put_entry(scope, &entry).await?;
+        let at = self.put_entry(scope, &entry).await?;
         let handled = self.with(|i| i.r.add_own(&entry, now_ms()))?;
         self.after(handled).await?;
         self.ping(scope, None);
+        // The log froze as it was written, without it: a step, then.
+        if self.left_out(&entry, at).await? {
+            drop(_write);
+            return Box::pin(self.append_as(scope, user, entry.content.clone())).await;
+        }
         Ok(entry)
     }
 
@@ -989,9 +995,10 @@ impl Node {
                 }
                 self.with(|i| i.r.check_signed(&entry))?;
                 self.check_in_scope(&entry)?;
-                self.put_entry(&scope, &entry).await?;
+                let at = self.put_entry(&scope, &entry).await?;
                 let handled = self.with(|i| i.r.receive(vec![entry.clone()], now_ms()))?;
                 self.after(handled).await?;
+                ensure!(!self.left_out(&entry, at).await?, "update this device to change who's in: your One App's other devices moved on as it wrote that");
             }
             self.ping(&scope, None);
         }
@@ -1199,7 +1206,7 @@ fn update_views(i: &mut Install, new: &[Entry]) -> Result<()> {
     for log in logs {
         let Ok(scope) = Scope::parse(&log) else { continue };
         // Once its own database's steps say its state, its entries change nothing (`Node::read_scope_steps_now`).
-        if !i.r.holds(&scope) || i.scope_dbs.get(&scope).is_some_and(|(_, db)| db.is_some()) {
+        if !i.r.holds(&scope) || i.scope_dbs.contains_key(&scope) {
             continue;
         }
         let mut fresh: Vec<Entry> = new.iter().filter(|e| e.log() == log).cloned().collect();

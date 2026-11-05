@@ -17,71 +17,117 @@ use anyhow::{Result, bail, ensure};
 use serde_json::{Map, Value, json};
 
 pub use one::database::scopes::ScopeDb;
+use one::database::steps;
 use one::database::scopes::{INSTALL, device, object, person};
 use one::entry::{Entry, Hash, Key, Scope, causal, hex, pack, unpack};
 use one::members::{Cuts, Kind, Members, Role, ScopeState, is_member_entry};
 
-/// `global`'s entries a device holds, checked, and the install they're of; and once its log is frozen, its scope
-/// database's steps (`one::database::steps`), each checked as from anyone, by position from the first: none for one
-/// that isn't a step, which every reader passes over.
+/// `global`'s entries a device holds, checked, and the install they're of; and its scope database's steps
+/// (`one::database::steps`) as far as it read them: once its log is frozen, the database its freeze anchors, checked
+/// here once against the entries, and the steps after, each opened here with the device's own keys and applied only
+/// if it counts. Never what a node says of a step: a node passes them on sealed.
 pub struct Global {
     root: Option<Hash>,
     entries: BTreeMap<Hash, Entry>,
-    steps: Vec<Option<Entry>>,
+    truth: Option<steps::Truth>,
+    /// Before it's frozen, the last step looked at, none of them its freeze.
+    looked: u64,
 }
 
 impl Global {
     /// For the install whose genesis is `root`, or, for a device that's only now joined, whichever one genesis the
     /// first entries it's given hold.
     pub fn new(root: Option<Hash>) -> Global {
-        Global { root, entries: BTreeMap::new(), steps: Vec::new() }
+        Global { root, entries: BTreeMap::new(), truth: None, looked: 0 }
     }
 
-    /// Adds steps as a node gives them (`GET /v1/steps/global`, or as `steps` kept them): `{ steps: [{ at, step }] }`,
-    /// each step base64url (`steps::encode`) or none, its signature checked. Those after the next it lacks wait.
-    pub fn add_steps(&mut self, given: &Value) -> Result<()> {
-        for s in given["steps"].as_array().into_iter().flatten() {
-            let Some(at) = s["at"].as_u64() else { continue };
-            if at != self.steps.len() as u64 + 1 {
-                continue;
-            }
-            let bytes = s["step"].as_str().and_then(|b| data_encoding::BASE64URL_NOPAD.decode(b.as_bytes()).ok());
-            self.steps.push(one::database::steps::given(&Scope::Global, at, bytes.as_deref()));
+    /// Starts from what `kept` (`kept`'s, as a device keeps it) says: who's who once frozen, checked against the hash
+    /// kept with it, or where it looked to before.
+    pub fn restart(&mut self, kept: &Value) -> Result<()> {
+        match kept.get("truth").filter(|t| !t.is_null()) {
+            Some(t) => self.truth = Some(steps::Truth::kept(t, now())?),
+            None => self.looked = kept["looked"].as_u64().unwrap_or(0),
         }
         Ok(())
     }
 
-    /// Adds steps read from the bucket (`steps::read`), the next after those held.
-    pub fn add_read(&mut self, read: Vec<Option<Entry>>) {
-        self.steps.extend(read);
+    /// Where it read to, to keep and start again from (`restart`).
+    pub fn kept(&mut self) -> Result<Value> {
+        Ok(json!({ "truth": self.truth.as_mut().map(steps::Truth::keep).transpose()?, "looked": self.looked }))
     }
 
-    /// The steps held, as `add_steps` takes them: to keep.
-    pub fn steps(&self) -> Value {
-        let list: Vec<Value> = self.steps.iter().enumerate().map(|(i, s)| json!({ "at": i + 1, "step": s.as_ref().map(|s| data_encoding::BASE64URL_NOPAD.encode(&one::database::steps::encode(s))) })).collect();
-        json!({ "steps": list })
+    /// Takes step `at`, the next, as this device opened it (none for one that will never be a step): before the log is
+    /// frozen, the freeze if it's one that checks out against the entries held; after, applied if it counts. Fails
+    /// while the entries a freeze names aren't all here, so it's taken again once they are.
+    pub fn take(&mut self, at: u64, given: Option<&steps::Given>) -> Result<()> {
+        ensure!(at == self.at() + 1, "step {at} isn't the next");
+        match &mut self.truth {
+            Some(t) => drop(t.take(at, given.map(|g| &g.step))?),
+            None => {
+                let Some(root) = self.root else { bail!("no entries of your One App yet") };
+                let ordered = causal(self.entries.values().cloned().collect(), &HashMap::new());
+                self.truth = steps::Truth::first(at, given, Some(root), &ordered, &self.forks(), now())?;
+                self.looked = at;
+            }
+        }
+        Ok(())
     }
 
-    /// The last step held: what to ask a node for those after (`?from=`).
+    /// Takes steps read from the bucket with this device's own keys (`steps::read`), after those held.
+    pub fn add_read(&mut self, read: Vec<Option<steps::Given>>) -> Result<()> {
+        for given in read {
+            self.take(self.at() + 1, given.as_ref())?;
+        }
+        Ok(())
+    }
+
+    /// Takes steps as a node passes them on, sealed (`GET /v1/steps/global`: `{ steps: [{ at, sealed }] }`, base64url),
+    /// opened here with `epochs`, `global`'s epochs' keys sealed to this device (raw, by number), each used only once
+    /// who's who as the steps before it leave it says it's that epoch's, and `apps`, the node's key in each epoch
+    /// sealed under it (base64url, by number). Stops at one under an epoch this device has no key for yet, or whose
+    /// freeze waits for entries.
+    pub fn add_sealed(&mut self, given: &Value, epochs: &BTreeMap<u32, [u8; 32]>, apps: &BTreeMap<u32, Vec<u8>>) -> Result<()> {
+        let mut keys = one::db::Keys::new();
+        for s in given["steps"].as_array().into_iter().flatten() {
+            let Some(at) = s["at"].as_u64().filter(|at| *at == self.at() + 1) else { continue };
+            let Some(sealed) = s["sealed"].as_str().and_then(|b| data_encoding::BASE64URL_NOPAD.decode(b.as_bytes()).ok()) else { break };
+            if let Ok(e) = one::keys::epoch_of(&sealed)
+                && !keys.contains_key(&e)
+                && let Some(epoch) = epochs.get(&e)
+                && self.who()?.epoch_hash(&Scope::Global, e) == Some(one::keys::epoch_hash(epoch))
+                && let Some(app) = apps.get(&e).and_then(|a| one::kernel::open_app_key(epoch, one::members::APP, a).ok())
+            {
+                keys.insert(e, one::kernel::database_key(&app, one::log::NAME));
+            }
+            let opened = match steps::open(&keys, &Scope::Global, at, &sealed) {
+                steps::Opened::Step(g) => Some(g),
+                steps::Opened::Junk => None,
+                steps::Opened::Waits(_) => break,
+            };
+            if self.take(at, opened.as_ref()).is_err() {
+                break;
+            }
+        }
+        Ok(())
+    }
+
+    /// The last step taken: what to ask a node for those after (`?from=`).
     pub fn at(&self) -> u64 {
-        self.steps.len() as u64
+        self.truth.as_ref().map_or(self.looked, |t| t.at)
     }
 
-    /// Who's who: once the log is frozen, the scope database its freeze anchors (built here from the entries it
-    /// follows, and refused if that isn't what the freeze says), and the steps after, each applied only if it counts
-    /// there; before, built from replay's members.
-    pub fn who(&self) -> Result<ScopeDb> {
-        match self.frozen()? {
-            Some(frozen) => one::database::steps::truth(&frozen, &self.steps, now()),
+    /// Whether `global`'s log is frozen here: who's who is written as steps.
+    pub fn frozen(&self) -> bool {
+        self.truth.is_some()
+    }
+
+    /// Who's who: once the log is frozen, its scope database as its steps leave it; before, built from replay's
+    /// members.
+    pub fn who(&mut self) -> Result<ScopeDb> {
+        match &mut self.truth {
+            Some(t) => ScopeDb::open(steps::connection(&t.db.bytes()?)?, now()),
             None => who(&self.members()?),
         }
-    }
-
-    /// The log's freeze, if one counts among the entries held (`members::frozen`).
-    pub fn frozen(&self) -> Result<Option<one::members::Frozen>> {
-        let Some(root) = self.root else { bail!("no entries of your One App yet") };
-        let ordered = causal(self.entries.values().cloned().collect(), &HashMap::new());
-        Ok(one::members::frozen(Some(root), &ordered, &self.forks()))
     }
 
     /// Each device that signed two entries at one seq, cut from the first.

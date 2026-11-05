@@ -117,7 +117,8 @@ impl Node {
     }
 
     /// Writes an entry this device made to its scope's entries in the bucket, at the first position free.
-    pub(super) async fn put_entry(&self, scope: &Scope, entry: &Entry) -> Result<()> {
+    /// → the position it was written at.
+    pub(super) async fn put_entry(&self, scope: &Scope, entry: &Entry) -> Result<u64> {
         use crate::bucket::Bucket;
         let (bucket, key, prefix) = (self.bucket()?, self.log_key(scope).await?, crate::log::prefix(&scope.to_string()));
         let bytes = crate::entry::pack(&[entry]);
@@ -128,7 +129,7 @@ impl Node {
             let name = crate::db::step_name(&prefix, at);
             if Bucket::create(&bucket, &name, &crate::log::seal(&key, &name, &bytes)?).await? {
                 self.0.written.lock().unwrap().insert(scope.clone(), at);
-                return Ok(());
+                return Ok(at);
             }
         }
         bail!("{scope} changed too often to write to")

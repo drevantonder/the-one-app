@@ -33,9 +33,13 @@ pub struct Replica {
     pub member_entries: Vec<Entry>,
     /// Whether an entry arrived that sorts before the newest of `member_entries`, so the members need replaying.
     stale: bool,
-    /// Once `global`'s log is frozen (`database::switch`): the entry that froze it, and the last of the scope
-    /// database's steps applied to `db` (or passed over). From then on `db` is the truth, and entries change nothing.
-    pub frozen: Option<(Hash, u64)>,
+    /// Once `global`'s log is frozen (`database::switch`): its freeze, and the last of the scope database's steps
+    /// applied to `db` (or passed over). From then on `db` is the truth, and entries change nothing.
+    pub frozen: Option<(crate::database::steps::Freeze, u64)>,
+    /// Before it's frozen, the last of the scope database's steps this device looked at that wasn't its freeze.
+    pub looked: u64,
+    /// Whether one of those says an admin's device is freezing the log (`steps::FREEZING`).
+    pub freezing: bool,
 }
 
 /// What taking new entries did.
@@ -68,52 +72,51 @@ impl Replica {
                 (nobody(now), Some(nobody(now)))
             }
         };
-        let mut r = Replica { key, id, store, root, members, db, built, #[cfg(test)] fail: false, member_entries, stale: false, frozen: None };
-        if r.built.is_none() {
-            r.freeze(now)?;
-        }
-        Ok(r)
+        Ok(Replica { key, id, store, root, members, db, built, #[cfg(test)] fail: false, member_entries, stale: false, frozen: None, looked: 0, freezing: false })
     }
 
-    /// Takes the scope database built at the log's freeze as `db` (`members::frozen`), if a freeze counts and this
-    /// device has every entry it follows: its anchor, which it built itself from entries it checked. One that doesn't
-    /// come to the hash the freeze says leaves this device answering nobody: its who's who isn't its install's.
-    fn freeze(&mut self, now: u64) -> Result<bool> {
-        if self.frozen.is_some() {
-            return Ok(false);
-        }
-        let Some(f) = members::frozen(self.root, &self.store.scope("global")?, &self.store.forks()?) else { return Ok(false) };
-        let built = ScopeDb::build(&f.members, &Scope::Global, &f.state, now)?;
-        if crate::db::state_hash(built.conn())? != f.hash {
-            self.db = nobody(now);
-            anyhow::bail!("who's who at the log's freeze isn't what its admin's device said it was, so this device answers nobody: update it, or ask an admin");
-        }
-        tracing::info!("global's log is frozen at {}: the scope database is the truth", f.entry.id());
-        self.db = built;
-        self.frozen = Some((f.entry.hash(), 0));
-        Ok(true)
+    /// The freeze a device of an admin's writes now (`steps::freeze`), at `logs`' ends, every other scope's log by its
+    /// last step: from everything this device holds of `global`. → its content, and its copy.
+    pub fn freeze_now(&self, logs: BTreeMap<String, u64>, now: u64) -> Result<(Content, Vec<u8>)> {
+        crate::database::steps::freeze(self.root, &self.store.scope("global")?, &self.store.forks()?, logs, now)
     }
 
-    /// The state hash of the scope database a freeze written now would anchor (`members::frozen`): built from
-    /// everything this device holds of `global`, its own state too.
-    /// → it, and the last of each device's entries it holds there, which the freeze names (`members::freeze`).
-    pub fn anchor(&self, now: u64) -> Result<(String, BTreeMap<Key, u32>)> {
-        let all = self.store.scope("global")?;
-        let (members, state) = members::replay(&self.members, &self.member_entries, &all, |_, _, _| {});
-        let mut frontier = BTreeMap::new();
-        for e in &all {
-            let n = frontier.entry(e.author()).or_insert(0);
-            *n = (*n).max(e.seq());
+    /// Step `at` of `global`'s scope database before its log is frozen, the next this device looks at: if it's the
+    /// freeze, and checks out against the entries this device holds (`steps::anchor`), the database it anchors is
+    /// who's who from here. Fails while an entry it names isn't here, so it's looked at again once it is.
+    pub fn take_first(&mut self, at: u64, given: Option<&crate::database::steps::Given>, now: u64) -> Result<Handled> {
+        ensure!(self.frozen.is_none() && at == self.looked + 1, "step {at} isn't the next");
+        let mut handled = Handled::default();
+        let truth = crate::database::steps::Truth::first(at, given, self.root, &self.store.scope("global")?, &self.store.forks()?, now)?;
+        self.looked = at;
+        let admins = |s: &Entry| self.db.client(&s.author()).is_some_and(|c| c.user == s.user()) && self.db.may(s.user(), "change-settings", crate::database::scopes::INSTALL);
+        self.freezing |= given.is_some_and(|g| g.step.content.kind == crate::database::steps::FREEZING && admins(&g.step));
+        if let Some(t) = truth {
+            tracing::info!("global's log is frozen at step {at}: the scope database is the truth");
+            self.frozen = Some((t.freeze, at));
+            let was = std::mem::replace(&mut self.db, t.db);
+            self.built = None;
+            handled.members = true;
+            self.changed(&was, &mut handled)?;
         }
-        Ok((crate::db::state_hash(ScopeDb::build(&members, &Scope::Global, &state, now)?.conn())?, frontier))
+        Ok(handled)
     }
 
-    /// `global`'s scope database at `at`, as a device that read there before starts again from a copy once the steps
-    /// before it are deleted (`steps::from_copy`).
-    pub fn restart_at(&mut self, at: u64, db: ScopeDb) -> Result<()> {
-        let (hash, _) = self.frozen.context("global's log isn't frozen")?;
-        self.db = db;
-        self.frozen = Some((hash, at));
+    /// Where this device is in `global`'s scope database once it's frozen, to keep and start again from (`restart`).
+    pub fn keep(&mut self) -> Result<Option<serde_json::Value>> {
+        let Some((freeze, at)) = self.frozen.clone() else { return Ok(None) };
+        let mut t = crate::database::steps::Truth { freeze, at, db: std::mem::replace(&mut self.db, nobody(0)) };
+        let kept = t.keep();
+        self.db = t.db;
+        kept.map(Some)
+    }
+
+    /// Starts again from what `keep` kept, checked against its hash (`steps::Truth::kept`), as this device started.
+    pub fn restart(&mut self, kept: &serde_json::Value, now: u64) -> Result<()> {
+        let t = crate::database::steps::Truth::kept(kept, now)?;
+        self.frozen = Some((t.freeze, t.at));
+        self.db = t.db;
+        self.built = None;
         Ok(())
     }
 
@@ -124,17 +127,17 @@ impl Replica {
 
     /// The position of `global`'s scope database this device has applied its steps to, once its log is frozen.
     pub fn at(&self) -> Option<u64> {
-        self.frozen.map(|(_, at)| at)
+        self.frozen.as_ref().map(|(_, at)| *at)
     }
 
     /// A step of `global`'s scope database another device wrote, at the position after the last this device applied
     /// (`database::steps`): applied if it counts, passed over if not; either way its position is taken.
     pub fn take_step(&mut self, at: u64, step: Option<&Entry>, now: u64) -> Result<Handled> {
-        let (hash, last) = self.frozen.context("global's log isn't frozen")?;
+        let (freeze, last) = self.frozen.clone().context("global's log isn't frozen")?;
         ensure!(at == last + 1, "step {at} isn't the next");
         let mut handled = Handled::default();
         let applied = step.map(|s| crate::database::steps::apply(&self.db, None, &Scope::Global, s));
-        self.frozen = Some((hash, at));
+        self.frozen = Some((freeze, at));
         match applied {
             Some(Ok(a)) => {
                 let was = std::mem::replace(&mut self.db, ScopeDb::open(a.db, now)?);
@@ -274,11 +277,6 @@ impl Replica {
         if std::mem::take(&mut self.stale) {
             self.members = Members::replay(self.root, &self.member_entries, &self.store.forks()?);
         }
-        if self.freeze(now)? {
-            let was = nobody(now);
-            handled.members = true;
-            return self.changed(&was, handled);
-        }
         let built = ScopeDb::build(&self.members, &Scope::Global, &Default::default(), now);
         #[cfg(test)]
         let built = if self.fail { Err(anyhow::anyhow!("made to fail")) } else { built };
@@ -365,12 +363,16 @@ fn nobody(now: u64) -> ScopeDb {
 mod tests {
     use super::*;
     use crate::keys::Endpoint;
-    use crate::members::{Kind, Role, device, freeze, genesis, setting};
+    use crate::database::steps::{self, Given};
+    use crate::members::{Kind, Role, device, genesis, setting};
 
-    /// Once `global`'s log is frozen, an older device's entries there change nothing, wherever they sort, and a step
-    /// changes who's who: who may do what is the scope database's alone.
+    /// The log's freeze is a step, and exactly one counts: the first that an admin's own device signed and whose copy
+    /// says what the entries it names add up to here, compared in this release's form, so a freezer whose release had
+    /// other rules (as one that flips `INSTALL_ADMINS_MAKE_GROUP_ADMINS`) still anchors it, its rules kept. A copy that
+    /// says otherwise, or a freeze naming entries not here yet, anchors nothing. Once frozen, an older device's
+    /// entries change nothing, a step does, and who's who is kept and started again from, never the entries.
     #[test]
-    fn once_frozen_the_log_changes_nothing_and_steps_do() {
+    fn one_freeze_anchors_who_s_who_and_the_log_changes_nothing_after() {
         const ANDRE: &str = "a000000000000001";
         let (mac, old) = (SigningKey::from_bytes(&[1; 32]), SigningKey::from_bytes(&[2; 32]));
         let ext = |user: &str| Ext { log: "global".into(), time: 0, user: user.into(), epoch: 1, previous: Vec::new() };
@@ -378,18 +380,47 @@ mod tests {
         let listed = Entry::create(&mac, ext(ANDRE), Some(g.head()), device(&Endpoint::of(&old), ANDRE, "old laptop", &[Kind::Client], None));
         let mut r = Replica::new(mac.clone(), Store::memory().unwrap(), Some(g.hash()), 0).unwrap();
         r.receive(vec![g.clone(), listed.clone()], 0).unwrap();
-        let (hash, frontier) = r.anchor(0).unwrap();
-        let frozen = Entry::create(&mac, Ext { previous: vec![], ..ext(ANDRE) }, Some(listed.head()), freeze(&hash, &frontier));
-        r.receive(vec![frozen], 0).unwrap();
-        assert_eq!(r.at(), Some(0), "frozen, at its anchor");
+        // Signed with its copy changed as `edit` changes it, at `at`.
+        let freeze = |at: u64, (content, copy): &(Content, Vec<u8>), edit: &str| {
+            let mut db = steps::connection(copy).unwrap();
+            db.execute_batch(edit).unwrap();
+            let mut data = content.data.clone();
+            data["hash"] = serde_json::json!(crate::db::state_hash(&db).unwrap());
+            let step = steps::sign(&mac, &Scope::Global, at, ANDRE, 1, 0, Content::new(members::APP, steps::FREEZE, data)).unwrap();
+            Given { step, copy: Some(db.serialize("main").unwrap().to_vec()) }
+        };
+        let now = r.freeze_now(Default::default(), 0).unwrap();
+        assert!(r.take_first(1, Some(&freeze(1, &now, "UPDATE devices SET name = 'mine' WHERE name = 'old laptop'")), 0).is_ok() && r.at().is_none(), "a copy that isn't what the entries say anchors nothing");
+        let mut ahead = now.clone();
+        ahead.0.data["frontier"][crate::entry::hex(&mac.verifying_key().to_bytes())] = serde_json::json!(5);
+        assert!(r.take_first(2, Some(&freeze(2, &ahead, "")), 0).is_err() && r.looked == 1, "nor one naming entries not here yet, which waits for them");
+        r.take_first(2, None, 0).unwrap();
+        let other_rules = "DELETE FROM relations WHERE rowid = (SELECT max(rowid) FROM relations WHERE substr(subject, 1, 1) IN ('#', '@'))";
+        r.take_first(3, Some(&freeze(3, &now, other_rules)), 0).unwrap();
+        assert_eq!(r.at(), Some(3), "frozen, at its freeze");
+        let rules = steps::rules_of(r.db().conn()).unwrap();
+        assert_eq!(rules, steps::rules_of(&{
+            let db = steps::connection(&now.1).unwrap();
+            db.execute_batch(other_rules).unwrap();
+            db
+        }).unwrap(), "with the freezer's rules, not this release's");
+        assert!(r.take_step(4, Some(&freeze(4, &now, "").step), 0).is_ok() && r.at() == Some(4) && steps::rules_of(r.db().conn()).unwrap() == rules, "a second freeze counts for nothing");
         // The old laptop, still on a build that writes the log, makes Mal an admin: nothing changes.
         let late = Entry::create(&old, ext(ANDRE), None, device(&Endpoint::of(&SigningKey::from_bytes(&[3; 32])), "c000000000000003", "mal's", &[Kind::Client], Some(("Mal", Role::Admin))));
         r.receive(vec![late], 0).unwrap();
         assert!(r.db().user("c000000000000003").is_none(), "an entry after the freeze changes nothing");
         // A step does.
         let step = r.make_step(&Scope::Global, ANDRE, setting("greeting", Some("hi")), 0).unwrap();
-        r.take_step(1, Some(&step), 0).unwrap();
+        r.take_step(5, Some(&step), 0).unwrap();
         assert_eq!(r.db().setting("greeting").as_deref(), Some("hi"));
-        assert!(r.take_step(1, Some(&step), 0).is_err(), "a position is taken once");
+        assert!(r.take_step(5, Some(&step), 0).is_err(), "a position is taken once");
+        // Kept, and started again from: the same who's who, its rules too; one changed since isn't used.
+        let kept = r.keep().unwrap().unwrap();
+        let mut again = Replica::new(mac.clone(), Store::memory().unwrap(), Some(g.hash()), 0).unwrap();
+        again.restart(&kept, 0).unwrap();
+        assert_eq!((again.at(), again.db().setting("greeting"), steps::rules_of(again.db().conn()).unwrap()), (Some(5), Some("hi".into()), rules));
+        let mut changed = kept.clone();
+        changed["hash"] = serde_json::json!("0".repeat(64));
+        assert!(again.restart(&changed, 0).is_err());
     }
 }

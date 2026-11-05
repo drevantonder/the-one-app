@@ -161,13 +161,9 @@ impl Node {
             }
             let read = crate::log::open(&bucket, &log_keys, &prefix, "global").await?;
             let ordered = crate::entry::causal(read.entries.clone(), &HashMap::new());
-            let member_entries: Vec<Entry> = ordered.iter().filter(|e| members::is_member_entry(e)).cloned().collect();
-            let m = crate::members::Members::replay(root, &member_entries, &Default::default());
             // Once the log is frozen, the epochs its scope database's steps made since (`database::steps`).
-            let hashes = match crate::members::frozen(root, &ordered, &Default::default()) {
-                Some(f) => crate::database::steps::truth(&f, &crate::database::steps::read(&bucket, &log_keys, &Scope::Global, 0).await?, now_ms())?.epoch_hashes(&Scope::Global),
-                None => m.epoch_hashes.iter().filter(|((s, _), _)| *s == Scope::Global).map(|((_, n), h)| (*n, h.clone())).collect(),
-            };
+            let steps = crate::database::steps::read(&bucket, &log_keys, &Scope::Global, 0).await?;
+            let hashes = crate::database::steps::who(&steps, root, &ordered, &Default::default(), now_ms())?.epoch_hashes(&Scope::Global);
             let wrong: Vec<u32> = candidates.iter().filter(|(n, k)| hashes.get(*n) != Some(&crate::keys::epoch_hash(k))).map(|(n, _)| *n).collect();
             if wrong.is_empty() {
                 self.0.epochs.lock().unwrap().insert(Scope::Global, candidates.clone());
@@ -362,20 +358,6 @@ impl Node {
             match crate::db::tidy(&bucket, &prefix, &keys, &junk, now, crate::db::DELETE_COVERED_STEPS).await {
                 Ok(0) => {}
                 Ok(n) => tracing::info!("{prefix}: deleted {n} objects no reader needs"),
-                Err(err) => tracing::debug!("{prefix}: tidying: {err:#}"),
-            }
-        }
-        // And each scope database's steps its newest copy covers, once they're old enough (`database::steps`).
-        let held = self.with(|i| Ok(i.r.db().scopes().into_iter().filter(|s| i.r.holds(s)).collect::<Vec<_>>())).unwrap_or_default();
-        for scope in held.iter().filter(|_| self.frozen()) {
-            let prefix = crate::database::steps::prefix(&scope.to_string());
-            if self.0.tidied.lock().unwrap().get(&prefix).is_some_and(|t| now < t + TIDY_EVERY) {
-                continue;
-            }
-            self.0.tidied.lock().unwrap().insert(prefix.clone(), now);
-            match crate::database::steps::tidy(&bucket, scope, now, crate::db::DELETE_COVERED_STEPS).await {
-                Ok(0) => {}
-                Ok(n) => tracing::info!("{prefix}: deleted {n} steps a copy covers"),
                 Err(err) => tracing::debug!("{prefix}: tidying: {err:#}"),
             }
         }
