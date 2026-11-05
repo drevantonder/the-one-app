@@ -196,6 +196,9 @@ pub fn routes() -> Router<Node> {
         .route("/v1/role", post(role))
         .route("/v1/settings", post(settings))
         .route("/v1/reads", post(reads))
+        .route("/v1/switch", post(switch))
+        .route("/v1/steps", post(steps))
+        .route("/v1/steps/global", get(global_steps))
         .route("/v1/entries", get(heads).post(entries))
         .route("/v1/entries/global", get(global_entries))
         .route("/v1/runs", post(runs))
@@ -320,6 +323,8 @@ pub const SIGNED_IN: &[&str] = &[
     "/v1/settings",
     "/v1/entries",
     "/v1/entries/global",
+    "/v1/steps",
+    "/v1/steps/global",
     "/v1/name",
     "/v1/service",
     "/v1/runs",
@@ -881,6 +886,30 @@ async fn reads(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
     let reads = anyhow::Context::context(body["reads"].as_u64(), "reads is a number")? as u32;
     node.said_reads(device, reads, &text(&body, "build")?).await;
     done()
+}
+
+/// `{ force? }`: freezes `global`'s log, so its scope database is the truth (`database::switch`), if the switch is on
+/// (or `force`, in a try install), every device reads it, and this device signs for an admin: → `{ frozen }`.
+async fn switch(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
+    only(&body, &["force"])?;
+    node.freeze(body["force"] == true).await?;
+    Ok(Json(json!({ "frozen": node.frozen() })))
+}
+
+/// `[{ header, signature, body }]` (each base64url): steps of `global`'s scope database the caller's own device
+/// signed, each for the next position, which this device checks count and writes (`database::steps`).
+async fn steps(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
+    let list = body.as_array().ok_or_else(|| anyhow::anyhow!("give a list of steps"))?;
+    let b = |v: &Value, k: &str| data_encoding::BASE64URL_NOPAD.decode(v[k].as_str().unwrap_or("").as_bytes()).map_err(|_| anyhow::anyhow!("{k} isn't base64url"));
+    let list = list.iter().map(|v| crate::entry::Entry::decode_step(&b(v, "header")?, &b(v, "signature")?, &b(v, "body")?)).collect::<anyhow::Result<Vec<_>>>()?;
+    node.put_signed_steps(&me.caller, list).await?;
+    done()
+}
+
+/// `?from=<n>`: `global`'s scope database's steps after position n (`Node::global_steps`).
+async fn global_steps(State(node): State<Node>, me: Me, axum::extract::Query(q): axum::extract::Query<std::collections::HashMap<String, String>>) -> Reply {
+    let from = q.get("from").map(|f| f.parse()).transpose()?.unwrap_or(0);
+    Ok(Json(node.global_steps(&me.caller, from).await?))
 }
 
 /// `?scope=`: what a device signing an entry there needs: `{ epoch, previous, logs }` (`Node::entry_heads`).

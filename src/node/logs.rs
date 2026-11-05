@@ -27,6 +27,8 @@ impl Node {
                 break;
             }
         }
+        // Once `global`'s log is frozen, its scope database's steps: who's who from here.
+        self.read_steps().await?;
         self.with(|i| {
             i.read = true;
             Ok(())

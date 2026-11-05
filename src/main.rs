@@ -389,6 +389,12 @@ fn run(args: Vec<String>) -> Result<()> {
             post("/v1/settings", json!({ "name": name, "value": value }))?;
             println!("Set {name}.");
         }
+        ["switch"] => {
+            // Freezes the log, so the scope database is the truth: only once the switch is on and every device reads
+            // it, or in a try install, which may be switched to prove it (`database::switch`).
+            let r = post("/v1/switch", json!({ "force": true }))?;
+            println!("{}", if r["frozen"] == true { "Who's who is the scope database now." } else { "Not switched: the switch is off in this build, or a device still reads the log (status says which)." });
+        }
         ["role", user, role] => {
             post("/v1/role", json!({ "user": user, "role": role }))?;
             println!("{user} is now {role}.");
@@ -1236,7 +1242,7 @@ fn switch_gate(gate: &Value, name: &dyn Fn(&str) -> String) {
         return;
     }
     let device = |d: &Value| format!("{} ({}'s, {})", d["name"].as_str().unwrap_or(&d["key"].as_str().unwrap_or("")[..8]), name(d["user"].as_str().unwrap_or("")), &d["key"].as_str().unwrap_or("")[..8]);
-    let switch = if gate["switch"] == true { "on once every device reads it" } else { "off in this build" };
+    let switch = if gate["frozen"] == true { "switched: the scope database is the truth" } else if gate["switch"] == true { "on once every device reads it" } else { "off in this build" };
     println!("\nSwitch to the scope database ({switch})");
     let waiting = gate["waiting"].as_array().cloned().unwrap_or_default();
     if waiting.is_empty() {
@@ -1414,6 +1420,7 @@ async fn serve(is_try: bool, args: &[String]) -> Result<()> {
     api::serve_mcp(axum::routing::post(mcp_http));
     let mut routes = api::guarded(api::routes(), node.clone());
     if is_try {
+        one::database::switch::FORCEABLE.store(true, std::sync::atomic::Ordering::Relaxed);
         let home = dir.clone();
         tokio::spawn(async move {
             if let Err(err) = try_install::bucket(home).await {

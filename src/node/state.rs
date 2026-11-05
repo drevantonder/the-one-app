@@ -125,6 +125,7 @@ impl Node {
             && state["install"].is_object()
         {
             state["install"]["switch"] = crate::database::switch::gate_json(i.r.db(), &i.reads);
+            state["install"]["switch"]["frozen"] = json!(i.r.frozen.is_some());
         }
         state
     }

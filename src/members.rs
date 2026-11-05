@@ -918,11 +918,58 @@ impl Members {
                 ensure!(w == owner, "only a device's person switches what it runs");
                 self.services.insert((device, name), Switch { on: data["on"] == true, by: w, time: e.time() });
             }
+            // The log's last entry (`frozen`): from here the scope database is the truth. An admin's, and it changes
+            // nothing here; which one freezes the log, and at what, is `frozen`'s to say.
+            "freeze" => ensure!(self.is_admin(&w), "only the install's admins freeze the log"),
             "install" | "uninstall" | "node-release" | "service-release" => {}
             other => bail!("unknown kind {other}"),
         }
         Ok(())
     }
+}
+
+/// Where `global`'s log was frozen (`database::switch`): its first `freeze` entry, in replay order, that counts among
+/// the entries it follows, which are the log's final position. Entries it doesn't follow never count, wherever they
+/// sort: the scope database is the truth from there.
+pub struct Frozen {
+    /// The freeze entry.
+    pub entry: Entry,
+    /// What the entries it follows add up to: the scope database's first copy.
+    pub members: Members,
+    pub state: ScopeState,
+    /// The state hash that copy comes to, as its admin's device said it (`db::state_hash`).
+    pub hash: String,
+}
+
+/// The freeze `global`'s entries hold, if one counts: `entries` every one of `global`'s, in replay order (scope-only
+/// ones too, since what a freeze follows may be reached through them), `forks` as `Store::forks` found them.
+pub fn frozen(root: Option<Hash>, entries: &[Entry], forks: &Cuts) -> Option<Frozen> {
+    let freezes = entries.iter().filter(|e| e.content.app == APP && e.content.kind == "freeze" && e.log() == "global");
+    let by_hash: BTreeMap<Hash, &Entry> = entries.iter().map(|e| (e.hash(), e)).collect();
+    for f in freezes {
+        let mut follows = BTreeSet::new();
+        let mut next: Vec<Hash> = f.follows_all().collect();
+        while let Some(h) = next.pop() {
+            if follows.insert(h)
+                && let Some(e) = by_hash.get(&h)
+            {
+                next.extend(e.follows_all());
+            }
+        }
+        let before: Vec<Entry> = entries.iter().filter(|e| follows.contains(&e.hash())).cloned().collect();
+        let member_entries: Vec<Entry> = before.iter().filter(|e| is_member_entry(e)).cloned().collect();
+        let known = Members::replay(root, &member_entries, forks);
+        let (members, state) = replay(&known, &member_entries, &before, |_, _, _| {});
+        let Some(hash) = f.content.data["hash"].as_str().filter(|_| members.clone().try_step(f).is_ok()) else { continue };
+        return Some(Frozen { entry: f.clone(), members, state, hash: hash.to_string() });
+    }
+    None
+}
+
+/// The entry that freezes `global`'s log, once the scope database built from everything its admin's device holds comes
+/// to `hash` (`frozen`).
+pub fn freeze(hash: &str) -> Content {
+    node("freeze", json!({ "hash": hash }))
 }
 
 /// The `hash` an `epoch` entry (or `epoch`, the genesis) names its key by: `keys::epoch_hash`, 64 hex characters.

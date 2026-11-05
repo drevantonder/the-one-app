@@ -49,6 +49,7 @@ mod standing;
 pub use standing::GRANT_DAYS;
 mod state;
 mod status;
+mod steps;
 mod storage;
 pub mod trace;
 mod vault;
@@ -868,6 +869,10 @@ impl Node {
 
     /// Writes an entry to this device's log of `scope`, signed by this device, as `user`.
     async fn append_as(&self, scope: &Scope, user: &str, content: Content) -> Result<Entry> {
+        // Once `global`'s log is frozen, what it said is a step of its scope database (`database::steps`).
+        if *scope == Scope::Global && self.frozen() {
+            return self.write_step(user, content).await;
+        }
         self.first_epoch(scope).await?;
         let _write = self.0.writes.lock().await;
         // What's in the bucket first, so the entry comes after all of it.
@@ -967,6 +972,8 @@ impl Node {
     pub(super) async fn put_checked(&self, entries: Vec<Entry>) -> Result<()> {
         for entry in entries {
             let scope = entry.scope();
+            // An older device's, which writes who's who to the frozen log, where it changes nothing.
+            ensure!(!(scope == Scope::Global && self.frozen()), "update this device to change who's in: your One App's other devices have moved on");
             self.first_epoch(&scope).await?;
             {
                 let _write = self.0.writes.lock().await;
@@ -1112,6 +1119,15 @@ impl Node {
             self.say(&Scope::Global, status::Said::Build { device: self.0.id, build: crate::config::BUILD.into(), target: crate::config::TARGET.into() }).await?;
         }
         self.said_reads(self.0.id, crate::database::switch::READS, crate::config::BUILD).await;
+        // An admin's device freezes the log once every device reads the scope database (`database::switch`).
+        if crate::database::switch::SWITCH && !self.frozen() {
+            let node = self.clone();
+            tokio::spawn(async move {
+                if let Err(err) = node.freeze(false).await {
+                    tracing::warn!("freezing the log: {err:#}");
+                }
+            });
+        }
         Ok(())
     }
 

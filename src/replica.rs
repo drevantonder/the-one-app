@@ -33,6 +33,9 @@ pub struct Replica {
     pub member_entries: Vec<Entry>,
     /// Whether an entry arrived that sorts before the newest of `member_entries`, so the members need replaying.
     stale: bool,
+    /// Once `global`'s log is frozen (`database::switch`): the entry that froze it, and the last of the scope
+    /// database's steps applied to `db` (or passed over). From then on `db` is the truth, and entries change nothing.
+    pub frozen: Option<(Hash, u64)>,
 }
 
 /// What taking new entries did.
@@ -65,7 +68,72 @@ impl Replica {
                 (nobody(now), Some(nobody(now)))
             }
         };
-        Ok(Replica { key, id, store, root, members, db, built, #[cfg(test)] fail: false, member_entries, stale: false })
+        let mut r = Replica { key, id, store, root, members, db, built, #[cfg(test)] fail: false, member_entries, stale: false, frozen: None };
+        if r.built.is_none() {
+            r.freeze(now)?;
+        }
+        Ok(r)
+    }
+
+    /// Takes the scope database built at the log's freeze as `db` (`members::frozen`), if a freeze counts and this
+    /// device has every entry it follows: its anchor, which it built itself from entries it checked. One that doesn't
+    /// come to the hash the freeze says leaves this device answering nobody: its who's who isn't its install's.
+    fn freeze(&mut self, now: u64) -> Result<bool> {
+        if self.frozen.is_some() {
+            return Ok(false);
+        }
+        let Some(f) = members::frozen(self.root, &self.store.scope("global")?, &self.store.forks()?) else { return Ok(false) };
+        let built = ScopeDb::build(&f.members, &Scope::Global, &f.state, now)?;
+        if crate::db::state_hash(built.conn())? != f.hash {
+            self.db = nobody(now);
+            anyhow::bail!("who's who at the log's freeze isn't what its admin's device said it was, so this device answers nobody: update it, or ask an admin");
+        }
+        tracing::info!("global's log is frozen at {}: the scope database is the truth", f.entry.id());
+        self.db = built;
+        self.frozen = Some((f.entry.hash(), 0));
+        Ok(true)
+    }
+
+    /// The state hash of the scope database a freeze written now would anchor (`members::frozen`): built from
+    /// everything this device holds of `global`, its own state too.
+    pub fn anchor_hash(&self, now: u64) -> Result<String> {
+        let (members, state) = members::replay(&self.members, &self.member_entries, &self.store.scope("global")?, |_, _, _| {});
+        crate::db::state_hash(ScopeDb::build(&members, &Scope::Global, &state, now)?.conn())
+    }
+
+    /// The position of `global`'s scope database this device has applied its steps to, once its log is frozen.
+    pub fn at(&self) -> Option<u64> {
+        self.frozen.map(|(_, at)| at)
+    }
+
+    /// A step of `global`'s scope database another device wrote, at the position after the last this device applied
+    /// (`database::steps`): applied if it counts, passed over if not; either way its position is taken.
+    pub fn take_step(&mut self, at: u64, step: Option<&Entry>, now: u64) -> Result<Handled> {
+        let (hash, last) = self.frozen.context("global's log isn't frozen")?;
+        ensure!(at == last + 1, "step {at} isn't the next");
+        let mut handled = Handled::default();
+        let applied = step.map(|s| crate::database::steps::apply(&self.db, None, &Scope::Global, s));
+        self.frozen = Some((hash, at));
+        match applied {
+            Some(Ok(a)) => {
+                let was = std::mem::replace(&mut self.db, ScopeDb::open(a.db, now)?);
+                self.changed(&was, &mut handled)?;
+                handled.members = true;
+            }
+            Some(Err(err)) => tracing::info!("global's step {at} doesn't count: {err:#}"),
+            None => tracing::debug!("global's step {at} isn't one: passed over"),
+        }
+        Ok(handled)
+    }
+
+    /// A step of `scope`'s database signed by this device as `user`, for the position after the last it applied, once
+    /// it would count there: `global`'s only, until other scopes' databases are steps too.
+    pub fn make_step(&self, scope: &Scope, user: &str, content: Content, now: u64) -> Result<Entry> {
+        let at = self.at().context("global's log isn't frozen")? + 1;
+        ensure!(*scope == Scope::Global, "only global's database is written as steps yet");
+        let step = crate::database::steps::sign(&self.key, scope, at, user, self.db.epoch(scope), now, content)?;
+        crate::database::steps::apply(&self.db, None, scope, &step)?;
+        Ok(step)
     }
 
     /// `global`'s scope database: who's who, and who may do what.
@@ -76,6 +144,9 @@ impl Replica {
     /// `global`'s epochs' hashes by number, as replay says: which key opens which of its steps, not who may have them,
     /// so they're asked even while who's who doesn't build, since reading `global` is how it builds again.
     pub fn global_epochs(&self) -> BTreeMap<u32, String> {
+        if self.frozen.is_some() {
+            return self.db.epoch_hashes(&Scope::Global);
+        }
         self.members.epoch_hashes.iter().filter(|((s, _), _)| *s == Scope::Global).map(|((_, n), h)| (*n, h.clone())).collect()
     }
 
@@ -83,6 +154,9 @@ impl Replica {
     /// `global` says otherwise. Not who may have it, so asked even while who's who doesn't build, when every scope
     /// would have none and real steps would be passed over for good.
     pub fn epoch_made(&self, scope: &Scope) -> u32 {
+        if self.frozen.is_some() {
+            return self.db.epoch(scope);
+        }
         self.members.epoch(scope)
     }
 
@@ -172,8 +246,17 @@ impl Replica {
     /// longer holds, and says what changed since the members had the cuts `before`. If it doesn't build, the device
     /// answers nobody until it does, rather than as the members were.
     fn refresh(&mut self, before: &members::Cuts, handled: &mut Handled, now: u64) -> Result<()> {
+        // Once the log is frozen its entries change nothing: an older device's, which it wrote unaware.
+        if self.frozen.is_some() {
+            return Ok(());
+        }
         if std::mem::take(&mut self.stale) {
             self.members = Members::replay(self.root, &self.member_entries, &self.store.forks()?);
+        }
+        if self.freeze(now)? {
+            let was = nobody(now);
+            handled.members = true;
+            return self.changed(&was, handled);
         }
         let built = ScopeDb::build(&self.members, &Scope::Global, &Default::default(), now);
         #[cfg(test)]
@@ -192,6 +275,12 @@ impl Replica {
         };
         handled.members = true;
         handled.recount |= *before != self.members.cuts;
+        self.changed(&was, handled)
+    }
+
+    /// What changed from `was`, who's who before, to `db`: scopes this device no longer holds, and deletes; whether it
+    /// holds one it didn't; and people who may no longer use a scope they could.
+    fn changed(&mut self, was: &ScopeDb, handled: &mut Handled) -> Result<()> {
         let logs = self.store.logs()?;
         for log in &logs {
             if !self.holds_log(log) {

@@ -16,6 +16,10 @@ use crate::entry::{Key, hex, unhex};
 /// until every device runs a build that reads it and the switch is decided: the one place to switch it on.
 pub const SWITCH: bool = false;
 
+/// Whether this node may be told to switch though `SWITCH` is off: only a try install's (`one try switch`), to prove
+/// the switch end to end before it's on.
+pub static FORCEABLE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 /// What this build reads of who's who: 1, the log, replayed (R1 and before, which say nothing); 2, the scope database,
 /// once the log is frozen. A device that reads less than `GATE` holds the switch back.
 pub const READS: u32 = 1;
