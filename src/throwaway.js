@@ -52,7 +52,7 @@ if (invite) {
   await evaluate(`document.querySelector("#go").click()`);
   await until(`!document.querySelector("#done").hidden`, "joining didn't work");
   await shoot(named("joined"));
-  await evaluate(`document.querySelector("#done a.button").click()`);
+  await evaluate(`document.querySelector("#done a").click()`);
   await sleep(500);
 }
 if (!(await evaluate("location.href")).startsWith(address)) await send("Page.navigate", { url: address });
