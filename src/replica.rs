@@ -18,8 +18,11 @@ pub struct Replica {
     /// The install's genesis, once this device created or joined it.
     pub root: Option<Hash>,
     pub members: Members,
-    /// `global`'s scope database, built again whenever the members change: what everything but replay asks.
+    /// `global`'s scope database, built again whenever the members change: what everything but replay asks. While the
+    /// last build failed, one of nobody (`built`), so nothing is sealed or handed to anyone the members no longer list.
     db: ScopeDb,
+    /// The last that built, while `db` is that one of nobody.
+    built: Option<ScopeDb>,
     /// `global`'s node entries, in replay order.
     pub member_entries: Vec<Entry>,
     /// Whether an entry arrived that sorts before the newest of `member_entries`, so the members need replaying.
@@ -49,7 +52,7 @@ impl Replica {
         let member_entries: Vec<Entry> = store.scope("global")?.into_iter().filter(members::is_member_entry).collect();
         let members = Members::replay(root, &member_entries, &store.forks()?);
         let db = ScopeDb::build(&members, &Scope::Global, &Default::default(), now)?;
-        Ok(Replica { key, id, store, root, members, db, member_entries, stale: false })
+        Ok(Replica { key, id, store, root, members, db, built: None, member_entries, stale: false })
     }
 
     /// `global`'s scope database: who's who, and who may do what.
@@ -140,12 +143,25 @@ impl Replica {
     }
 
     /// Replays the members again and builds `global`'s scope database from them, deletes every scope this device no
-    /// longer holds, and says what changed since the members had the cuts `before`.
+    /// longer holds, and says what changed since the members had the cuts `before`. If it doesn't build, the device
+    /// answers nobody until it does, rather than as the members were.
     fn refresh(&mut self, before: &members::Cuts, handled: &mut Handled, now: u64) -> Result<()> {
         if std::mem::take(&mut self.stale) {
             self.members = Members::replay(self.root, &self.member_entries, &self.store.forks()?);
         }
-        let was = std::mem::replace(&mut self.db, ScopeDb::build(&self.members, &Scope::Global, &Default::default(), now)?);
+        let was = match ScopeDb::build(&self.members, &Scope::Global, &Default::default(), now) {
+            Ok(db) => {
+                let was = std::mem::replace(&mut self.db, db);
+                self.built.take().unwrap_or(was)
+            }
+            Err(err) => {
+                if self.built.is_none() {
+                    let nobody = ScopeDb::build(&Members::default(), &Scope::Global, &Default::default(), now)?;
+                    self.built = Some(std::mem::replace(&mut self.db, nobody));
+                }
+                return Err(err.context("who's who didn't build, so this device answers nobody until it does"));
+            }
+        };
         handled.members = true;
         handled.recount |= *before != self.members.cuts;
         let logs = self.store.logs()?;
@@ -179,7 +195,8 @@ impl Replica {
         Ok(handled)
     }
 
-    /// Keeps entries, with any that waited for them, and follows the members if they changed.
+    /// Keeps entries, with any that waited for them, and follows the members if they changed, or builds them again if
+    /// they last didn't.
     fn took(&mut self, entries: Vec<Entry>, handled: &mut Handled, now: u64) -> Result<()> {
         let before = self.members.cuts.clone();
         let (taken, forked) = self.store.take(entries)?;
@@ -193,7 +210,7 @@ impl Replica {
             }
             handled.new.push(entry);
         }
-        if changed {
+        if changed || self.built.is_some() {
             self.refresh(&before, handled, now)?;
         }
         Ok(())
