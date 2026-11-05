@@ -33,7 +33,7 @@ mod device;
 #[cfg(not(target_family = "wasm"))]
 pub use answers::Answers;
 #[cfg(not(target_family = "wasm"))]
-pub use device::{Device, join_of, new_secret, open_note};
+pub use device::{Device, join_of, new_secret, open_note, switch_check};
 /// What a push carries and where a device gets them (`one::push`), as the apps' libraries hand them on.
 #[cfg(not(target_family = "wasm"))]
 pub use one::push;

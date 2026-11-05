@@ -126,6 +126,57 @@ pub struct Device {
     answers: Option<Answers>,
 }
 
+/// `global`'s epochs sealed to the device whose key is `key`, opened, by number, and its log's key in each, from
+/// `bucket`.
+async fn global_keys(bucket: &Signed, key: &SigningKey) -> Result<(BTreeMap<u32, [u8; 32]>, one::db::Keys), Error> {
+    let me = hex(&key.verifying_key().to_bytes());
+    let opens = keys::seal_secret(key);
+    let mut epochs: BTreeMap<u32, [u8; 32]> = BTreeMap::new();
+    let mut n = 1;
+    loop {
+        let read = async |n: u32| -> Result<Option<[u8; 32]>, Error> {
+            let Some(o) = one::bucket::Bucket::get(bucket, &keys::epoch_name("global", n, &me)).await.map_err(failed)? else { return Ok(None) };
+            one::cloudflare::open_sealed(&opens, &o.bytes).ok().and_then(|k| k.try_into().ok()).map(Some).ok_or_else(|| failed("A key for this didn't open."))
+        };
+        match read(n).await? {
+            Some(key) => drop(epochs.insert(n, key)),
+            None if epochs.is_empty() && n < 8 => {}
+            None => break,
+        }
+        n += 1;
+        if n > 8 && epochs.is_empty() {
+            return Err(failed(format!("This device hasn't been given {YOURS}'s keys yet.")));
+        }
+    }
+    let mut log_keys = one::db::Keys::new();
+    for (n, epoch) in &epochs {
+        let Some(o) = one::bucket::Bucket::get(bucket, &keys::app_key_name("global", members::APP, *n)).await.map_err(failed)? else { continue };
+        let app = one::cloudflare::open_app_key(epoch, members::APP, &o.bytes).map_err(failed)?;
+        log_keys.insert(*n, one::cloudflare::database_key(&app, one::log::NAME));
+    }
+    Ok((epochs, log_keys))
+}
+
+/// Read-only, before the switch, as the device whose key is `key` at the network's `address` (`one switch check`),
+/// whatever build its node runs: which of the first positions of `global`'s scope database the bucket holds (none,
+/// before the ceremony), and every step of `global`'s log, of the install whose genesis is `root`, that opens to a
+/// step rather than entries (a freeze's mark is one). → `{ database: [names], log: n, steps: [{ at, kind, by }] }`.
+pub async fn switch_check(address: String, key: &SigningKey, root: Option<one::entry::Hash>) -> Result<Value, Error> {
+    let bucket = Signed::new(address, key.to_bytes());
+    let prefix = one::database::steps::prefix("global");
+    let mut database = Vec::new();
+    for name in [one::db::step_name(&prefix, 1), one::db::step_name(&prefix, 2), format!("{prefix}/newest")] {
+        if one::bucket::Bucket::get(&bucket, &name).await.map_err(failed)?.is_some() {
+            database.push(name);
+        }
+    }
+    let (_, log_keys) = global_keys(&bucket, key).await?;
+    let mut log = one::database::steps::Log::new(root);
+    one::database::steps::log_on(&bucket, &log_keys, &mut log).await.map_err(failed)?;
+    let shaped: Vec<Value> = log.steps().map(|(at, e)| json!({ "at": at, "kind": e.content.kind, "by": hex(&e.author()) })).collect();
+    Ok(json!({ "database": database, "log": log.last(), "steps": shaped }))
+}
+
 impl Device {
     /// The device whose key is `secret`, of the install at `address`, keeping what it needs to in `dir`.
     pub fn new(secret: [u8; 32], address: &str, dir: &str) -> Device {
@@ -370,30 +421,7 @@ impl Device {
     /// after.
     async fn read_members(&self) -> Result<HashMap<[u8; 32], [u8; 32]>, Error> {
         let bucket = Signed::new(self.address.clone(), self.key.to_bytes());
-        let me = self.key();
-        let mut epochs: BTreeMap<u32, [u8; 32]> = BTreeMap::new();
-        let mut n = 1;
-        loop {
-            let read = async |n: u32| -> Result<Option<[u8; 32]>, Error> {
-                let Some(o) = one::bucket::Bucket::get(&bucket, &keys::epoch_name("global", n, &me)).await.map_err(failed)? else { return Ok(None) };
-                one::cloudflare::open_sealed(&self.opens(), &o.bytes).ok().and_then(|k| k.try_into().ok()).map(Some).ok_or_else(|| failed("A key for this didn't open."))
-            };
-            match read(n).await? {
-                Some(key) => drop(epochs.insert(n, key)),
-                None if epochs.is_empty() && n < 8 => {}
-                None => break,
-            }
-            n += 1;
-            if n > 8 && epochs.is_empty() {
-                return Err(failed(format!("This device hasn't been given {YOURS}'s keys yet.")));
-            }
-        }
-        let mut log_keys = one::db::Keys::new();
-        for (n, epoch) in &epochs {
-            let Some(o) = one::bucket::Bucket::get(&bucket, &keys::app_key_name("global", members::APP, *n)).await.map_err(failed)? else { continue };
-            let app = one::cloudflare::open_app_key(epoch, members::APP, &o.bytes).map_err(failed)?;
-            log_keys.insert(*n, one::cloudflare::database_key(&app, one::log::NAME));
-        }
+        let (epochs, log_keys) = global_keys(&bucket, &self.key).await?;
         let read = one::log::open(&bucket, &log_keys, &one::log::prefix("global"), "global").await.map_err(failed)?;
         // Replayed as every client device replays them (crate::members), of the install whose genesis it kept.
         let pinned = self.dir.join("genesis");

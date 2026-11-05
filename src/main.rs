@@ -402,7 +402,12 @@ fn run(args: Vec<String>) -> Result<()> {
         ["switch", "check"] => {
             // Read-only, before the switch: nothing in the bucket is a step of who's who yet, nor a freeze's mark.
             takes_only(&flags, &[])?;
-            let r = get("/v1/switch/check")?;
+            // As this machine's device, reading the bucket itself through the URL signer, whatever build its node runs.
+            let state = get("/v1/state")?;
+            let address = state["install"]["settings"]["address"].as_str().context("this machine's node knows no address for its network yet")?.trim_end_matches('/').to_string();
+            let root = state["install"]["root"].as_str().and_then(|r| one::entry::Hash::from_hex(r).ok());
+            let key = one::node::device_key(&one::home())?;
+            let r = tokio::runtime::Builder::new_multi_thread().enable_all().build()?.block_on(one_client::switch_check(address, &key, root)).map_err(|e| anyhow::anyhow!("{e}"))?;
             let database: Vec<&str> = r["database"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
             match database.len() {
                 0 => println!("Who's who as the scope database: nothing in the bucket yet."),

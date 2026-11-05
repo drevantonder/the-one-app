@@ -66,21 +66,6 @@ impl Node {
         anyhow::anyhow!("{YOURS}'s log is frozen already, by a freeze at step {at} of who's who that this didn't write, so it froze nothing. If no one ran {CLI} switch for it before, find out who did before turning the switch on")
     }
 
-    /// Read-only, before the switch: whether `global`'s scope database has any step in the bucket, and which of its
-    /// log's steps open to a step rather than entries (a freeze's mark is one): none of either, before the ceremony.
-    /// → `{ database: [names], log: n, steps: [{ at, kind, by }] }`.
-    pub async fn switch_check(&self, caller: &Caller) -> Result<Value> {
-        ensure!(caller.token.is_none() && caller.key == self.0.id, "this checks the bucket from the machine it's asked on only");
-        self.read_log(&Scope::Global).await?;
-        let bucket = self.bucket()?;
-        let listed = crate::bucket::Bucket::objects(&bucket, &steps::prefix("global")).await?;
-        let keys = self.log_key(&Scope::Global).await?;
-        let mut log = steps::Log::new(self.with(|i| Ok(i.r.root))?);
-        steps::log_on(&bucket, &keys, &mut log).await?;
-        let shaped: Vec<Value> = log.steps().map(|(at, e)| json!({ "at": at, "kind": e.content.kind, "by": hex(&e.author()) })).collect();
-        Ok(json!({ "database": listed.into_iter().map(|(n, _)| n).collect::<Vec<_>>(), "log": log.last(), "steps": shaped }))
-    }
-
     /// One try at the ceremony's steps (`switch`). → whether it's frozen.
     async fn freeze_once(&self, user: &str, recovery: &SigningKey) -> Result<bool> {
         let _write = self.own_writes().await?;
