@@ -37,6 +37,9 @@ Key, log, view, blob, call, app. Scopes, devices, deploys, services, the Vault a
 - One key per scope at a time, changed only when a person or a lost device is removed, every database copied under the new key and the old one dropped. Today a scope has numbered epochs, and a new one is made when someone loses the right to open it.
 - Backups' recovery from nothing: a device restoring with no one left to pair with admits itself with the recovery key's countersignature.
 - Services each running as their own OS user per scope, and Shell and Computer Use only with a grant for that device and session, approved by the person.
+- A service in a wrapper of ours: its own OS user, only its own folder, no keys, the network only where it says, so the sandbox protects a node, not who wrote the code. The release key signs only what we ship (oned, the node, built-in apps), never a network's own code: an app's deploy, signed by whoever deployed it, carries the hash of each platform's build of its service, and a node runs only a build whose hash matches.
+- Each app one folder in `apps/`, its service's source beside its `app.js`, and each service its own program: none built into the node (today Shell, Models, AGENTS.md and Agent Devices are) or the Mac app (iMessage, Calendar, Contacts and Reminders, whose macOS permissions belong to the Mac app, so they may ship as helpers inside it).
+- Adding an app as desired state: the App Store only records it, and the core deploys it and runs its service on the node the person chose while adding it.
 - The rest of `docs/plan-device-approval.md`: a push that wakes the phone to check a new device's sign-in, one that asks "wants in" when nothing let it in, and "joined" as a push.
 - Native apps keeping their own sealed copy, for reads with no network; writes while offline, replayed like a rebase, never repeating what went outside.
 

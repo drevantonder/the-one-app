@@ -50,7 +50,7 @@ the same commit. "Avoid" lists the words not to use for that thing, in code, doc
   linked phone, run a local model), run on one of the nodes of whoever added the app, which they choose while adding it,
   as its own process, an endpoint of its own key. Adding WhatsApp asks which of your nodes runs its service. A service
   is its app's alone: only that app calls it, and other apps call that app's tools. Built-in apps' services ship with
-  each release, signed with its key. Avoid: part, native component, device service.
+  each release. Avoid: part, native component, device service.
 - **Added**: an app recorded as added to a scope, by a person, or for a group or everyone by its admin: the state the
   network should be in. The App Store only records it, like any app could; the core makes it so, deploying the app and
   running its service on the node the person chose while adding it, and takes it all away when it's removed.
