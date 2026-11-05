@@ -27,21 +27,28 @@ impl Node {
     /// it's frozen.
     pub async fn switch(&self, caller: &Caller, recovery: &SigningKey, forced: bool) -> Result<bool> {
         ensure!(caller.token.is_none() && caller.key == self.0.id, "the recovery key is used only on the machine it's kept on");
-        if self.frozen() {
-            return Ok(true);
-        }
         let forced = forced && switch::FORCEABLE.load(std::sync::atomic::Ordering::Relaxed);
         ensure!(switch::SWITCH || forced, "the switch is off in this build: who's who stays the log until a release turns it on");
-        let user = self.user()?;
         self.read_log(&Scope::Global).await?;
-        self.with(|i| {
+        self.read_steps().await?;
+        if self.frozen() {
+            return Err(self.frozen_already());
+        }
+        let user = self.user()?;
+        let gate = self.with(|i| {
             let db = i.r.db();
             ensure!(db.recovery() == Some(recovery.verifying_key().to_bytes()), "that isn't {YOURS}'s recovery key");
             ensure!(db.may(&user, "change-settings", scopes::INSTALL), "only an admin of {YOURS} freezes its log");
             let gate = switch::gate(db, &i.reads);
             ensure!(forced || gate.open(), "not every device reads who's who as the scope database yet: {CLI} status says which");
-            Ok(())
+            Ok(i.r.members.gate)
         })?;
+        // That the gate is open, from this admin's own device, in the log: a freeze counts only if the log it names
+        // ends after it (`steps::claimed`), so none signed before this release, by a recovery key since replaced, ever
+        // does.
+        if !gate {
+            self.member_content(caller, members::gate()).await?;
+        }
         for _ in 0..5 {
             if self.freeze_once(&user, recovery).await? {
                 // So a device of an older build is told to update when it next asks the relay, rather than wait for
@@ -53,6 +60,27 @@ impl Node {
         Ok(self.frozen())
     }
 
+    /// What the ceremony says when the log is frozen already, by a freeze it didn't write.
+    fn frozen_already(&self) -> anyhow::Error {
+        let at = self.with(|i| Ok(i.r.frozen.as_ref().map(|(f, _)| f.at))).ok().flatten().unwrap_or(0);
+        anyhow::anyhow!("{YOURS}'s log is frozen already, by a freeze at step {at} of who's who that this didn't write, so it froze nothing. If no one ran {CLI} switch for it before, find out who did before turning the switch on")
+    }
+
+    /// Read-only, before the switch: whether `global`'s scope database has any step in the bucket, and which of its
+    /// log's steps open to a step rather than entries (a freeze's mark is one): none of either, before the ceremony.
+    /// → `{ database: [names], log: n, steps: [{ at, kind, by }] }`.
+    pub async fn switch_check(&self, caller: &Caller) -> Result<Value> {
+        ensure!(caller.token.is_none() && caller.key == self.0.id, "this checks the bucket from the machine it's asked on only");
+        self.read_log(&Scope::Global).await?;
+        let bucket = self.bucket()?;
+        let listed = crate::bucket::Bucket::objects(&bucket, &steps::prefix("global")).await?;
+        let keys = self.log_key(&Scope::Global).await?;
+        let mut log = steps::Log::new(self.with(|i| Ok(i.r.root))?);
+        steps::log_on(&bucket, &keys, &mut log).await?;
+        let shaped: Vec<Value> = log.steps().map(|(at, e)| json!({ "at": at, "kind": e.content.kind, "by": hex(&e.author()) })).collect();
+        Ok(json!({ "database": listed.into_iter().map(|(n, _)| n).collect::<Vec<_>>(), "log": log.last(), "steps": shaped }))
+    }
+
     /// One try at the ceremony's steps (`switch`). → whether it's frozen.
     async fn freeze_once(&self, user: &str, recovery: &SigningKey) -> Result<bool> {
         let _write = self.own_writes().await?;
@@ -62,8 +90,8 @@ impl Node {
         let mut log = steps::Log::new(self.with(|i| Ok(i.r.root))?);
         let unopened = "global's log has a step under an epoch this device hasn't opened yet: freeze it once it has";
         steps::log_on(&bucket, &keys, &mut log).await.context(unopened)?;
-        if !self.put_first(user, recovery, Content::new(members::APP, steps::FREEZING, json!({})), None, None).await? {
-            return Ok(self.frozen());
+        if self.put_first(user, recovery, Content::new(members::APP, steps::FREEZING, json!({})), None, None).await?.is_none() {
+            return Err(self.frozen_already());
         }
         let deadline = std::time::Instant::now() + FREEZE_WAIT / 2;
         // Every log as it is now, which no writer that looks after this adds to unawares.
@@ -84,8 +112,13 @@ impl Node {
                 return Ok(false);
             }
             if crate::bucket::Bucket::create(&bucket, &name, &crate::log::seal(&keys, &name, &steps::encode(&mark, None))?).await? {
-                self.put_first(user, recovery, content, Some(&copy), Some(deadline)).await?;
-                return Ok(self.frozen());
+                let wrote = self.put_first(user, recovery, content, Some(&copy), Some(deadline)).await?;
+                let at = self.with(|i| Ok(i.r.frozen.as_ref().map(|(f, _)| f.at)))?;
+                return match (wrote, at) {
+                    (Some(wrote), Some(at)) if wrote == at => Ok(true),
+                    (_, Some(_)) => Err(self.frozen_already()),
+                    (_, None) => Ok(false),
+                };
             }
             // Written on since: freeze where it ends now.
             steps::log_on(&bucket, &keys, &mut log).await.context(unopened)?;
@@ -94,12 +127,12 @@ impl Node {
 
     /// Writes a step of `global`'s scope database before its log is frozen (`FREEZING`, or the freeze with its `copy`),
     /// signed by `recovery`, at the next free position, while this device holds its writes, unless it's `deadline` by
-    /// the moment it would. → whether it was written: not if the log froze, or the deadline came.
-    async fn put_first(&self, user: &str, recovery: &SigningKey, content: Content, copy: Option<&[u8]>, deadline: Option<std::time::Instant>) -> Result<bool> {
+    /// the moment it would. → where it was written: nowhere if the log froze, or the deadline came.
+    async fn put_first(&self, user: &str, recovery: &SigningKey, content: Content, copy: Option<&[u8]>, deadline: Option<std::time::Instant>) -> Result<Option<u64>> {
         for _ in 0..50 {
             self.read_steps_now().await?;
             if self.frozen() {
-                return Ok(false);
+                return Ok(None);
             }
             let (at, epoch) = self.with(|i| Ok((i.r.looked + 1, i.r.db().epoch(&Scope::Global))))?;
             let step = steps::sign(recovery, &Scope::Global, at, user, epoch, now_ms(), content.clone())?;
@@ -108,12 +141,12 @@ impl Node {
             let sealed = crate::log::seal(&keys, &name, &steps::encode(&step, copy))?;
             if deadline.is_some_and(|d| std::time::Instant::now() >= d) {
                 tracing::warn!("freezing the log took too long, so writers may have written on: it's tried again");
-                return Ok(false);
+                return Ok(None);
             }
             if crate::bucket::Bucket::create(&self.bucket()?, &name, &sealed).await? {
                 self.read_steps_now().await?;
                 self.ping(&Scope::Global, None);
-                return Ok(true);
+                return Ok(Some(at));
             }
         }
         bail!("who's who changed too often to write to")

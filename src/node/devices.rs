@@ -1022,20 +1022,23 @@ impl Node {
     }
 
     /// A scope's next epoch: its `epoch` entry first, naming its key's hash (which, first in causal order, makes it),
-    /// then the key sealed to the recovery key and to every client device of someone who uses the scope, before
+    /// then the key sealed to the recovery key, if there is one, and to every client device of someone who uses the scope, before
     /// anything uses it. → its number.
     pub(super) async fn new_epoch(&self, caller: &Caller, scope: &Scope) -> Result<u32> {
         let newest = self.newest_epoch(scope).await?;
         ensure!(newest >= 1, "{scope} has no keys yet");
         let n = newest + 1;
         let (recovery, to) = self.with(|i| Ok((i.r.db().recovery(), i.r.db().openers(scope))))?;
-        let recovery = recovery.context("the install has no recovery key to seal its keys to")?;
         let (bucket, name) = (self.bucket()?, scope.to_string());
         let key: [u8; 32] = rand::random();
         let hash = crate::keys::epoch_hash(&key);
         self.member_content(caller, members::epoch(scope, n, &to.iter().map(|c| c.key).collect::<Vec<_>>(), &hash)).await?;
         ensure!(self.with(|i| Ok(i.r.db().epoch_hash(scope, n).as_deref() == Some(hash.as_str())))?, "another device started {scope}'s epoch {n} just now");
-        if !crate::db::created(&bucket, &crate::keys::epoch_name(&name, n, "recovery"), &crate::cloudflare::seal_to(&crate::cloudflare::twin_public(&recovery)?, &key)?).await? {
+        // Not while there's none (the one there was forked `global`), until an admin names the next: a removal still
+        // takes keys away from whoever it removes.
+        if let Some(recovery) = recovery
+            && !crate::db::created(&bucket, &crate::keys::epoch_name(&name, n, "recovery"), &crate::cloudflare::seal_to(&crate::cloudflare::twin_public(&recovery)?, &key)?).await?
+        {
             tracing::warn!("{scope}'s epoch {n} was sealed to the recovery key already, not with its key: the recovery key won't open it");
         }
         for c in &to {

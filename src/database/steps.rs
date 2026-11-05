@@ -105,6 +105,15 @@ pub fn decode(scope: &Scope, at: u64, bytes: &[u8]) -> Result<Given> {
     Ok(Given { step, copy })
 }
 
+/// A step as `encode` wrote it, its signature checked, whatever place it says it's for.
+fn shaped(bytes: &[u8]) -> Option<Entry> {
+    let ciborium::Value::Array(parts) = ciborium::from_reader(bytes).ok()? else { return None };
+    match parts.as_slice() {
+        [ciborium::Value::Bytes(h), ciborium::Value::Bytes(s), ciborium::Value::Bytes(b), ..] => Entry::decode_step(h, s, b).ok(),
+        _ => None,
+    }
+}
+
 /// A step a device of the install's own passed on opened (`encode`'s bytes): none if it isn't one. Only a service
 /// endpoint takes them so, from its own device's node, holding no keys of its own.
 pub fn given(scope: &Scope, at: u64, opened: Option<&[u8]>) -> Option<Given> {
@@ -207,6 +216,9 @@ pub const FREEZING: &str = "freezing";
 /// The kind of step that freezes the log (`anchor`): `{ hash, logs }`, with its copy.
 pub const FREEZE: &str = "freeze";
 
+/// The furthest a freeze may say a log ends: 2⁵³, as far as a JSON number holds exactly, past any log's end.
+pub const MOST_STEPS: u64 = 1 << 53;
+
 /// Where the log was frozen, as its freeze says it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Freeze {
@@ -229,7 +241,10 @@ impl Freeze {
         let mut logs = BTreeMap::new();
         for (scope, n) in data["logs"].as_object().context("a freeze names every scope's log")? {
             Scope::parse(scope)?;
-            logs.insert(scope.clone(), n.as_u64().context("a log's end is a position")?);
+            let n = n.as_u64().context("a log's end is a position")?;
+            // No log gets near it, and every reader reads to the step after the end it names.
+            ensure!(n <= MOST_STEPS, "a log's end is a position a log can reach");
+            logs.insert(scope.clone(), n);
         }
         ensure!(logs.get("global").is_some_and(|n| *n > 0), "a freeze names where global's log ends");
         Ok(Freeze { at, hash: data["hash"].as_str().context("a freeze names its copy's hash")?.to_string(), logs })
@@ -261,6 +276,8 @@ pub struct Log {
     ends: Vec<usize>,
     /// The steps that are a freeze, as the step after the log's end holds it, by position.
     marks: BTreeMap<u64, Entry>,
+    /// Every step that opens to a step, by position (`steps`).
+    shaped: BTreeMap<u64, Entry>,
     /// Whether the bucket held nothing after its last step when it was read.
     pub ended: bool,
     /// The install's genesis, which the entries before each step are replayed from (`take`).
@@ -294,13 +311,21 @@ impl Log {
         let name = crate::db::step_name(&crate::log::prefix("global"), at);
         let made = self.made(sealed);
         if let Some(opened) = self.read.take(keys, made, &name, sealed, "global")?
-            && let Ok(g) = decode(&Scope::Global, at, &opened)
-            && g.step.content.kind == FREEZE
+            && let Some(step) = shaped(&opened)
         {
-            self.marks.insert(at, g.step);
+            if step.content.kind == FREEZE && step.log() == "global" && u64::from(step.seq()) == at {
+                self.marks.insert(at, step.clone());
+            }
+            self.shaped.insert(at, step);
         }
         self.ends.push(self.read.entries.len());
         Ok(())
+    }
+
+    /// Each of its steps that opens to a step, rather than entries, whatever it says or wherever it says it's for: a
+    /// freeze's mark is one.
+    pub fn steps(&self) -> impl Iterator<Item = (u64, &Entry)> {
+        self.shaped.iter().map(|(at, e)| (*at, e))
     }
 
     /// The newest epoch of `global` the entries in its steps so far make, for `sealed`, its next step: worked out again
@@ -342,7 +367,7 @@ impl Log {
 pub async fn log_to(bucket: &impl crate::bucket::Bucket, keys: &crate::db::Keys, root: Option<Hash>, to: u64) -> Result<Log> {
     let prefix = crate::log::prefix("global");
     let mut log = Log::new(root);
-    for at in 1..=to + 1 {
+    for at in 1..=to.checked_add(1).context("no log ends there")? {
         match bucket.get(&crate::db::step_name(&prefix, at)).await? {
             Some(o) => log.take(keys, &o.bytes)?,
             None => {
@@ -376,33 +401,49 @@ pub async fn log_for(bucket: &impl crate::bucket::Bucket, keys: &crate::db::Keys
 }
 
 /// Every key that was ever the install's recovery key, as far as a reader knows: the one the genesis names (the entry
-/// whose hash is `root`), and each a `recovery` entry signed by one of those names. Only a freeze one of them signed
-/// is looked at, and its log read; which of them counts is judged at the end of the log it names (`claimed`).
+/// whose hash is `root`), each a `recovery` entry signed by one of those names, and each one replay made the recovery
+/// key (one an admin's own device named while there was none, `Members::recovery_lost`). Only a freeze one of them
+/// signed is looked at, and its log read; which of them counts is judged at the end of the log it names (`claimed`).
 pub type Recovery = BTreeSet<Key>;
 
 /// `Recovery` from `entries`, `global`'s, in any order, of the install at `root`.
 pub fn recovery_keys<'a>(root: Option<Hash>, entries: impl IntoIterator<Item = &'a Entry>) -> Recovery {
+    let entries: Vec<&Entry> = entries.into_iter().filter(|e| e.content.app == members::APP && e.log() == "global").collect();
     let named = |e: &Entry, field: &str| e.content.data[field].as_str().and_then(|k| unhex(k).ok());
     let mut handed = Vec::new();
     let mut keys = Recovery::new();
-    for e in entries.into_iter().filter(|e| e.content.app == members::APP && e.log() == "global") {
+    for e in &entries {
         match e.content.kind.as_str() {
             "genesis" if Some(e.hash()) == root => keys.extend(named(e, "recovery")),
             "recovery" => handed.extend(named(e, "key").map(|k| (e.author(), k))),
             _ => {}
         }
     }
-    while let Some(i) = handed.iter().position(|(by, _)| keys.contains(by)) {
-        keys.insert(handed.swap_remove(i).1);
+    let chain = |keys: &mut Recovery, handed: &mut Vec<(Key, Key)>| {
+        while let Some(i) = handed.iter().position(|(by, _)| keys.contains(by)) {
+            keys.insert(handed.swap_remove(i).1);
+        }
+    };
+    chain(&mut keys, &mut handed);
+    // A `recovery` entry no such key signed: an admin's, which counts only where replay says so.
+    if !handed.is_empty() {
+        let replayed = members_of(root, &entries.into_iter().cloned().collect::<Vec<_>>());
+        keys.extend(replayed.recovery_was.iter().chain(&replayed.recovery));
+        chain(&mut keys, &mut handed);
     }
     keys
 }
 
 /// The newest epoch of `scope` that `entries` of `global`'s make, of the install at `root`, with the forks among them.
 fn made_by(root: Option<Hash>, entries: &[Entry], scope: &Scope) -> u32 {
+    members_of(root, entries).epoch(scope)
+}
+
+/// What `entries` of `global`'s (in any order) replay to, of the install at `root`, with the forks among them.
+fn members_of(root: Option<Hash>, entries: &[Entry]) -> Members {
     let ordered = crate::entry::causal(entries.to_vec(), &Default::default());
     let member_entries: Vec<Entry> = ordered.into_iter().filter(members::is_member_entry).collect();
-    Members::replay(root, &member_entries, &forks(entries)).epoch(scope)
+    Members::replay(root, &member_entries, &forks(entries))
 }
 
 /// Each device that signed two entries at one seq of a log among `entries`, cut from the first: the forks a reader
@@ -501,15 +542,11 @@ pub fn claimed(given: Option<&Given>, at: u64, root: Option<Hash>, log: &Log, re
     }
     let step = &g.step;
     let marked = log.marks.get(&(end + 1)).is_some_and(|m| m.author() == step.author() && m.content == step.content);
-    Ok((marked && recovery_at(root, log, end) == Some(step.author())).then_some(freeze))
-}
-
-/// The install's recovery key at step `end` of `global`'s `log`, as its entries up to there replay.
-fn recovery_at(root: Option<Hash>, log: &Log, end: u64) -> Option<Key> {
-    let entries = log.entries(end);
-    let ordered = crate::entry::causal(entries.to_vec(), &Default::default());
-    let member_entries: Vec<Entry> = ordered.into_iter().filter(members::is_member_entry).collect();
-    Members::replay(root, &member_entries, &forks(entries)).recovery
+    // Who's who where it ends: its signer is the recovery key there, and an admin's own device said the gate was open
+    // before, so nothing written before this release's ceremony, while a key since replaced was the recovery key, is
+    // ever one.
+    let there = members_of(root, log.entries(end));
+    Ok((marked && there.recovery == Some(step.author()) && there.gate).then_some(freeze))
 }
 
 /// Of `steps`, `global`'s database's by position from the first, the step of `global`'s log a reader reads to the step
@@ -1160,7 +1197,8 @@ pub fn allowed(db: &ScopeDb, scope: &Scope, step: &Entry) -> Result<()> {
             }
         }
         (members::APP, "setting") => may("change-settings", scopes::INSTALL),
-        (members::APP, "recovery") => false,
+        // Only while there's no recovery key (the one there was forked `global`): an admin names the next.
+        (members::APP, "recovery") => db.recovery().is_none() && may("change-settings", scopes::INSTALL),
         (members::APP, "app") => {
             let name = text("name")?;
             let owner = Principal::parse(&text("owner")?)?;
@@ -1345,7 +1383,111 @@ pub(crate) mod tests {
         h.write(&mac, ANDRE, genesis("Home", ANDRE, "Andre", &Endpoint::of(&mac), "mac", &[Kind::Client], &recovery.verifying_key().to_bytes(), &"e".repeat(64)));
         h.log.root = Some(h.root());
         h.write(&mac, ANDRE, device(&Endpoint::of(&laptop), BOB, "laptop", &[Kind::Client], Some(("Bob", Role::Admin))));
+        h.write(&mac, ANDRE, members::gate());
         (h, mac, laptop, recovery)
+    }
+
+    /// `two_admins`, before an admin's device said the gate is open.
+    fn before_the_gate() -> (History, SigningKey, SigningKey, SigningKey) {
+        let (mut h, mac, laptop, recovery) = two_admins();
+        h.entries.pop();
+        h.heads.insert(mac.verifying_key().to_bytes(), h.entries[1].head());
+        h.log = Log { root: h.log.root, ..Log::default() };
+        h.log.push(vec![h.entries[0].clone()]);
+        h.log.push(vec![h.entries[1].clone()]);
+        (h, mac, laptop, recovery)
+    }
+
+    fn key_of(k: &SigningKey) -> String {
+        crate::entry::hex(&k.verifying_key().to_bytes())
+    }
+
+    /// A recovery key that forked `global` is none: R1, replaced by R2, signs another handover at the same seq, so every
+    /// reader cuts it from there and its handover to R2 never counts. It isn't the recovery key again: it freezes
+    /// nothing, and nothing is sealed to it. With none, an admin's own device names R3, once, and R3's freeze counts.
+    #[test]
+    fn a_recovery_key_that_forked_is_none_and_an_admin_names_the_next() {
+        let (mut h, mac, laptop, r1) = two_admins();
+        let (r2, thief, r3) = (SigningKey::from_bytes(&[8; 32]), SigningKey::from_bytes(&[6; 32]), SigningKey::from_bytes(&[5; 32]));
+        h.write(&r1, ANDRE, members::node("recovery", json!({ "key": key_of(&r2) })));
+        h.fork(&r1, ANDRE, members::node("recovery", json!({ "key": key_of(&thief) })));
+        let root = Some(h.root());
+        let m = members_of(root, &h.entries);
+        assert_eq!(m.recovery, None, "no recovery key");
+        assert!(m.recovery_was.contains(&r1.verifying_key().to_bytes()), "R1 is one no more");
+        let db = ScopeDb::build(&m, &Scope::Global, &ScopeState::default(), 0).unwrap();
+        assert_eq!(db.recovery(), None, "so no epoch is sealed to it");
+        let r1s = h.freeze(&r1, ANDRE, 1);
+        assert!(claimed(Some(&r1s), 1, root, &h.log(), &h.recovery()).unwrap().is_none(), "R1 freezes nothing");
+        let thiefs = h.freeze(&thief, ANDRE, 2);
+        assert!(claimed(Some(&thiefs), 2, root, &h.log(), &h.recovery()).unwrap().is_none(), "nor does the key it forked to");
+        // Bob, an admin, names R3 from his own device; Andre's, after, names none: there's one.
+        h.write(&laptop, BOB, members::node("recovery", json!({ "key": key_of(&r3) })));
+        h.write(&mac, ANDRE, members::node("recovery", json!({ "key": key_of(&r2) })));
+        let m = members_of(root, &h.entries);
+        assert_eq!(m.recovery, Some(r3.verifying_key().to_bytes()), "an admin named R3");
+        assert!(h.recovery().contains(&r3.verifying_key().to_bytes()), "and its freeze is looked at");
+        let r3s = h.freeze(&r3, ANDRE, 3);
+        assert_eq!(h.read(&[r1s, thiefs, r3s]).unwrap().unwrap().at, 3, "R3's is the freeze");
+    }
+
+    /// Once frozen, with no recovery key, the scope database keeps the same: an admin's own device names the next, and
+    /// only while there's none.
+    #[test]
+    fn with_no_recovery_key_an_admin_s_step_names_the_next() {
+        let (mut h, mac, laptop, r1) = two_admins();
+        let (r2, r3) = (SigningKey::from_bytes(&[8; 32]), SigningKey::from_bytes(&[5; 32]));
+        h.write(&r1, ANDRE, members::node("recovery", json!({ "key": key_of(&r2) })));
+        h.fork(&r1, ANDRE, members::node("recovery", json!({ "key": key_of(&r1) })));
+        let (content, copy) = freeze(Some(h.root()), &h.entries, h.log.last(), BTreeMap::new(), 0).unwrap();
+        let db = ScopeDb::open(connection(&copy).unwrap(), 0).unwrap();
+        let mut t = Truth { freeze: Freeze::from_data(&content.data, 1).unwrap(), at: 1, db };
+        assert_eq!(t.db.recovery(), None);
+        let step = |key: &SigningKey, user: &str, at: u64, content: Content| sign(key, &Scope::Global, at, user, 1, 0, content).unwrap();
+        assert!(!t.take(2, Some(&step(&r1, ANDRE, 2, members::node("recovery", json!({ "key": key_of(&r1) }))))).unwrap(), "not R1");
+        assert!(t.take(3, Some(&step(&laptop, BOB, 3, members::node("recovery", json!({ "key": key_of(&r3) }))))).unwrap(), "an admin's");
+        assert_eq!(t.db.recovery(), Some(r3.verifying_key().to_bytes()));
+        assert!(!t.take(4, Some(&step(&mac, ANDRE, 4, members::node("recovery", json!({ "key": key_of(&r2) }))))).unwrap(), "only while there's none");
+    }
+
+    /// A freeze counts only if the log it names ends after an admin's own device said the gate is open: one R1 planted
+    /// before, marked and all, while it was the recovery key, counts for nothing once it's replaced, nor ever.
+    #[test]
+    fn a_freeze_from_before_the_gate_counts_for_nothing() {
+        let (mut h, mac, _, r1) = before_the_gate();
+        let planted = h.freeze(&r1, ANDRE, 1);
+        assert!(claimed(Some(&planted), 1, Some(h.root()), &h.log(), &h.recovery()).unwrap().is_none(), "before the gate");
+        let r2 = SigningKey::from_bytes(&[8; 32]);
+        h.write(&r1, ANDRE, members::node("recovery", json!({ "key": key_of(&r2) })));
+        h.write(&mac, ANDRE, members::gate());
+        let theirs = h.freeze(&r2, ANDRE, 2);
+        assert_eq!(h.read(&[planted, theirs]).unwrap().unwrap().at, 2, "R2's, after the gate, is the freeze");
+    }
+
+    /// Only an admin's own device opens the gate.
+    #[test]
+    fn only_an_admin_opens_the_gate() {
+        let (mut h, mac, laptop, r1) = before_the_gate();
+        h.write(&mac, ANDRE, members::role(BOB, Role::Member));
+        h.write(&laptop, BOB, members::gate());
+        assert!(!members_of(Some(h.root()), &h.entries).gate, "not a member's");
+        let f = h.freeze(&r1, ANDRE, 1);
+        assert!(h.read(&[f]).unwrap().is_none());
+    }
+
+    /// A freeze naming a log's end past 2⁵³ isn't one, so no reader reads to the step after it, which wraps.
+    #[test]
+    fn a_freeze_naming_an_end_past_any_log_is_none() {
+        let (mut h, _, _, recovery) = two_admins();
+        let mut far = h.freeze(&recovery, ANDRE, 1);
+        let mut data = far.step.content.data.clone();
+        data["logs"]["global"] = json!(u64::MAX);
+        far.step = sign(&recovery, &Scope::Global, 1, ANDRE, 1, 0, Content::new(members::APP, FREEZE, data.clone())).unwrap();
+        assert!(Freeze::of(&far.step, 1).is_err());
+        assert_eq!(wants_log(&[Some(far.clone())], Some(h.root()), None, &h.recovery()), None, "no log is read for it");
+        assert!(Truth::read(&[Some(far)], Some(h.root()), None, &h.recovery(), 0).unwrap().is_none());
+        data["logs"]["global"] = json!(MOST_STEPS);
+        assert!(Freeze::from_data(&data, 1).is_ok() && Freeze::from_data(&json!({ "hash": "", "logs": { "global": MOST_STEPS + 1 } }), 1).is_err());
     }
 
     /// An admin's own device can't freeze the log: one Bob's laptop plants while he's an admin, marked and all, is

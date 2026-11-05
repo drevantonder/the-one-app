@@ -201,6 +201,9 @@ pub struct Members {
     pub recovery_set: u64,
     /// The install's recovery keys before this one, which the relay lets in no more.
     pub recovery_was: Vec<Key>,
+    /// Whether an admin's own device said the gate to the scope database is open (`GATE`), before the log's freeze:
+    /// only a freeze of the log from there on counts (`database::steps::claimed`).
+    pub gate: bool,
     /// Where each endpoint's entries stop counting, by (endpoint, log): the first seq that doesn't, wherever it sorts.
     /// A removed device's in `global` after the last its remover had seen (`remove`'s `seq`), and a device's in a log
     /// it forked from the fork on (`Store::forks`).
@@ -304,13 +307,24 @@ impl Members {
         Members { root, cuts: cuts.clone(), forked: forked.clone(), ..Default::default() }
     }
 
-    /// Once every member entry is replayed: a device that forked `global` is removed.
+    /// Once every member entry is replayed: a device that forked `global` is removed, and a recovery key that did is
+    /// no recovery key: whoever forked it could fork away its own replacement, so an admin's own device names the
+    /// next (`recovery_lost`).
     pub fn end(&mut self) {
         for key in &self.forked {
             if let Some(m) = self.machines.get_mut(key) {
                 m.removed = true;
             }
         }
+        if self.recovery_lost() {
+            self.recovery_was.extend(self.recovery.take());
+        }
+    }
+
+    /// Whether the install has no recovery key, or one that forked `global`, which `end` takes away: only then does
+    /// an admin's own device name the next.
+    pub fn recovery_lost(&self) -> bool {
+        self.recovery.is_none_or(|k| self.forked.contains(&k))
     }
 
     /// Applies one of `global`'s node entries, if it counts. Returns whether it did.
@@ -887,12 +901,20 @@ impl Members {
             }
             "recovery" => {
                 // Only the recovery key itself hands over to a new one: no admin's device can, since every epoch is
-                // sealed to it, own scopes too.
-                ensure!(self.recovery == Some(author), "only the install's recovery key changes it");
+                // sealed to it, own scopes too. Unless there's none, since the one there was forked `global`: then an
+                // admin's own device names the next.
+                let named = self.recovery_lost() && self.is_admin(&w) && self.client(&author).is_some_and(|c| c.user == w);
+                ensure!(self.recovery == Some(author) || named, "only the install's recovery key changes it");
                 let key = key_of("key")?;
-                ensure!(Some(key) != self.recovery && !self.machines.contains_key(&key), "a new recovery key is a key of its own");
+                ensure!(Some(key) != self.recovery && !self.recovery_was.contains(&key) && !self.machines.contains_key(&key), "a new recovery key is a key of its own");
                 self.recovery_was.extend(self.recovery.replace(key));
                 self.recovery_set = e.time();
+            }
+            "gate" => {
+                // The gate to the scope database is open: said by an admin's own device in the ceremony that freezes the
+                // log (`Node::switch`), before it. An older device skips it.
+                ensure!(self.is_admin(&w), "admins only");
+                self.gate = true;
             }
             "app" => {
                 let name = text("name")?;
@@ -1289,6 +1311,11 @@ pub fn remove_device(key: &Key, seq: Option<u32>) -> Content {
 /// One of the install's settings; `None` puts back the custom build's default.
 pub fn setting(name: &str, value: Option<&str>) -> Content {
     node("setting", json!({ "name": name, "value": value }))
+}
+
+/// The gate to the scope database is open, as an admin's own device says in the ceremony that freezes the log.
+pub fn gate() -> Content {
+    node("gate", json!({}))
 }
 
 pub fn group(id: &str, name: &str) -> Content {

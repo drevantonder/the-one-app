@@ -403,14 +403,16 @@ mod tests {
         let ext = |user: &str| Ext { log: "global".into(), time: 0, user: user.into(), epoch: 1, previous: Vec::new() };
         let g = Entry::create(&mac, Ext { epoch: 0, ..ext(ANDRE) }, None, genesis("Home", ANDRE, "Andre", &Endpoint::of(&mac), "mac", &[Kind::Client], &recovery.verifying_key().to_bytes(), &"e".repeat(64)));
         let listed = Entry::create(&mac, ext(ANDRE), Some(g.head()), device(&Endpoint::of(&old), ANDRE, "old laptop", &[Kind::Client], None));
+        let gated = Entry::create(&mac, ext(ANDRE), Some(listed.head()), members::gate());
         let mut r = Replica::new(mac.clone(), Store::memory().unwrap(), Some(g.hash()), 0).unwrap();
-        r.receive(vec![g.clone(), listed.clone()], 0).unwrap();
-        // The log as a reader of `given` reads it: its two entries, then `given`'s mark, which `key` signed.
+        r.receive(vec![g.clone(), listed.clone(), gated.clone()], 0).unwrap();
+        // The log as a reader of `given` reads it: its three entries, then `given`'s mark, which `key` signed.
         let log = |key: &SigningKey, given: &Given| {
             let mut log = steps::Log::default();
             log.push(vec![g.clone()]);
             log.push(vec![listed.clone()]);
-            log.push_mark(steps::sign(key, &Scope::Global, 3, ANDRE, 1, 0, given.step.content.clone()).unwrap());
+            log.push(vec![gated.clone()]);
+            log.push_mark(steps::sign(key, &Scope::Global, 4, ANDRE, 1, 0, given.step.content.clone()).unwrap());
             log
         };
         // Signed by `key` with its copy changed as `edit` changes it, at `at`.
@@ -423,7 +425,7 @@ mod tests {
             Given { step, copy: Some(db.serialize("main").unwrap().to_vec()) }
         };
         let freeze = |at: u64, now: &(Content, Vec<u8>), edit: &str| signed(&recovery, at, now, edit);
-        let now = r.freeze_now(&[g.clone(), listed.clone()], 2, Default::default(), 0).unwrap();
+        let now = r.freeze_now(&[g.clone(), listed.clone(), gated.clone()], 3, Default::default(), 0).unwrap();
         let admins = signed(&mac, 1, &now, "");
         r.take_first(1, Some(&admins), Some(&log(&mac, &admins)), 0).unwrap();
         assert!(r.at().is_none() && r.looked == 1, "a freeze an admin's own device signed is nothing");
@@ -471,20 +473,22 @@ mod tests {
         let (mac, recovery) = (SigningKey::from_bytes(&[1; 32]), SigningKey::from_bytes(&[7; 32]));
         let g = Entry::create(&mac, Ext { log: "global".into(), time: 0, user: ANDRE.into(), epoch: 0, previous: Vec::new() }, None, genesis("Home", ANDRE, "Andre", &Endpoint::of(&mac), "mac", &[Kind::Client], &recovery.verifying_key().to_bytes(), &"e".repeat(64)));
         let mut r = Replica::new(mac.clone(), Store::memory().unwrap(), Some(g.hash()), 0).unwrap();
-        r.receive(vec![g.clone()], 0).unwrap();
-        let (content, copy) = r.freeze_now(std::slice::from_ref(&g), 1, Default::default(), 0).unwrap();
-        let mark = steps::sign(&recovery, &Scope::Global, 2, ANDRE, 1, 0, content.clone()).unwrap();
+        let gated = Entry::create(&mac, Ext { log: "global".into(), time: 0, user: ANDRE.into(), epoch: 1, previous: Vec::new() }, Some(g.head()), members::gate());
+        r.receive(vec![g.clone(), gated.clone()], 0).unwrap();
+        let (content, copy) = r.freeze_now(&[g.clone(), gated.clone()], 2, Default::default(), 0).unwrap();
+        let mark = steps::sign(&recovery, &Scope::Global, 3, ANDRE, 1, 0, content.clone()).unwrap();
         let freeze = Given { step: steps::sign(&recovery, &Scope::Global, 1, ANDRE, 1, 0, content).unwrap(), copy: Some(copy) };
         let mut log = steps::Log::new(Some(g.hash()));
         log.push(vec![g.clone()]);
+        log.push(vec![gated.clone()]);
         log.push_mark(mark.clone());
         r.take_first(1, Some(&freeze), Some(&log), 0).unwrap();
         let bucket = crate::bucket::Memory::default();
         let keys: crate::db::Keys = [(1, [9; 32])].into();
         let prefix = steps::prefix("global");
         let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
-        // The log as the bucket holds it: the genesis, then the freeze's mark.
-        for (at, bytes) in [(1, crate::entry::pack(&[&g])), (2, steps::encode(&mark, None))] {
+        // The log as the bucket holds it: the genesis, the gate, then the freeze's mark.
+        for (at, bytes) in [(1, crate::entry::pack(&[&g])), (2, crate::entry::pack(&[&gated])), (3, steps::encode(&mark, None))] {
             let name = crate::db::step_name(&crate::log::prefix("global"), at);
             bucket.objects.lock().unwrap().insert(name.clone(), crate::log::seal(&keys, &name, &bytes).unwrap());
         }
@@ -534,7 +538,8 @@ mod tests {
         };
         let mut outside_log = steps::Log::new(Some(g.hash()));
         outside_log.push(vec![g.clone()]);
-        outside_log.push_mark(steps::sign(&outside, &Scope::Global, 2, ANDRE, 1, 0, forged.step.content.clone()).unwrap());
+        outside_log.push(vec![gated.clone()]);
+        outside_log.push_mark(steps::sign(&outside, &Scope::Global, 3, ANDRE, 1, 0, forged.step.content.clone()).unwrap());
         let said = steps::Welcome { freeze: 1, at: 1, hash: crate::db::state_hash(&steps::connection(forged.copy.as_deref().unwrap()).unwrap()).unwrap() };
         let err = welcomed(&said, &forged, &outside_log, None, &[]).err().unwrap();
         assert!(err.to_string().contains("isn't a freeze its recovery key signed"), "{err:#}");

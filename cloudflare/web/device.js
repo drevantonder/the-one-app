@@ -142,7 +142,12 @@ export class Device {
       let k = !given && !steps && kept?.members?.people?.[this.user]?.keeps ? kept.members : await this.replay(this.user, given, steps);
       // A freeze among them: judged and checked against the log's steps from the bucket, to the step after where it
       // says the log ends (its mark), or the log's end.
-      if (k.wants_log) k = await this.replay(this.user, undefined, { ...steps, log: { to: k.wants_log, steps: await this.bucketSteps("log", 0, k.wants_log + 1, k.wants_log) } });
+      // Or to its end, when it says the most a log may (2⁵³): a step shaped like a freeze, judged once every key that
+      // was ever the recovery key is known.
+      if (k.wants_log) {
+        const all = k.wants_log >= 2 ** 53;
+        k = await this.replay(this.user, undefined, { ...steps, log: { to: k.wants_log, steps: await this.bucketSteps("log", 0, all ? Infinity : k.wants_log + 1, all ? 0 : k.wants_log) } });
+      }
       // One that didn't check out is read from the freeze on, the next time.
       if (welcome && !(await get(`global:${this.user}`))?.steps?.truth) await del(`welcome:${this.user}`).catch(() => {});
       if (!k.people[this.user]) throw new Error("Your One App doesn't list you yet, so this device didn't use it.");
@@ -206,18 +211,18 @@ export class Device {
   }
 
   /// Starts a scope's epoch `n`: a random key, written first as an `epoch` entry naming its hash (which, first in
-  /// causal order, makes it), then sealed to the recovery key and each client device of the people who may open it but
+  /// causal order, makes it), then sealed to the recovery key, if there is one, and each client device of the people who may open it but
   /// those in `except` (keys being taken out), before it's used.
   async newEpoch(scope, n, { except = [] } = {}) {
     const k = await this.checked(true);
-    if (!k.recovery) throw new Error("Your One App has no recovery key to keep its keys with.");
     const key = random(32);
     const hash = await epochHash(key);
     const to = openers(k, scope).filter((e) => !except.includes(e.key));
     if (!to.some((e) => e.key === this.me.key) && !except.includes(this.me.key)) to.push({ key: this.me.key, seal: this.me.seal });
     await this.write("global", members.epoch({ scope, n, to: to.map((e) => e.key), hash }));
     if ((await this.checked(true)).epochs[scope]?.hashes?.[n] !== hash) throw new Error("Another device made new keys for this just now. Try again.");
-    await this.api("/v1/keys", { method: "POST", body: { scope, n, to: "recovery", sealed: b64u.encode(await sealTo(twinPublic(hex.decode(k.recovery)), key)) } });
+    // Not while there's none (the one there was forked `global`), until an admin names the next.
+    if (k.recovery) await this.api("/v1/keys", { method: "POST", body: { scope, n, to: "recovery", sealed: b64u.encode(await sealTo(twinPublic(hex.decode(k.recovery)), key)) } });
     for (const e of to) await this.api("/v1/keys", { method: "POST", body: { scope, n, to: e.key, sealed: b64u.encode(await sealTo(hex.decode(e.seal), key)) } });
     const all = this.epochs.get(scope) || new Map();
     all.set(n, await hkdfKey(key));

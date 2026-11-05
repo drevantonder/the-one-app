@@ -987,7 +987,6 @@ impl Device {
             Ok((who.recovery(), to))
         };
         let (recovery, to) = to(self)?;
-        let recovery = recovery.ok_or_else(|| failed("Your One App has no recovery key to keep its keys with."))?;
         let key: [u8; 32] = rand::random();
         let hash = keys::epoch_hash(&key);
         self.write("global", user, members::epoch(&parsed, 1, &to.iter().map(|e| e.key).collect::<Vec<_>>(), &hash)).await?;
@@ -995,9 +994,12 @@ impl Device {
         if self.known.lock().unwrap().as_ref().and_then(|k| k.who.epoch_hash(&parsed, 1)) != Some(hash) {
             return Err(failed("Another device made new keys for this just now. Try again."));
         }
-        let recovery = one::cloudflare::twin_public(&recovery).map_err(failed)?;
         let sealed = |to: &[u8; 32]| one::cloudflare::seal_to(to, &key).map(|s| B64U.encode(&s)).map_err(failed);
-        self.json("POST", "/v1/keys", Some(json!({ "scope": scope, "n": 1, "to": "recovery", "sealed": sealed(&recovery)? }))).await?;
+        // Not while there's none (the one there was forked `global`), until an admin names the next.
+        if let Some(recovery) = recovery {
+            let recovery = one::cloudflare::twin_public(&recovery).map_err(failed)?;
+            self.json("POST", "/v1/keys", Some(json!({ "scope": scope, "n": 1, "to": "recovery", "sealed": sealed(&recovery)? }))).await?;
+        }
         for e in &to {
             self.json("POST", "/v1/keys", Some(json!({ "scope": scope, "n": 1, "to": hex(&e.key), "sealed": sealed(&e.seal)? }))).await?;
         }

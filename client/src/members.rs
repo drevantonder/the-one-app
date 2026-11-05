@@ -89,10 +89,16 @@ impl Global {
 
     /// Of `read`, steps after those held, the step of `global`'s log this device reads to the step after, to judge the
     /// freezes among them (`steps::wants_log`), if it hasn't yet: read it (`steps::log_to`), and give it (`with_log`),
-    /// before taking them.
+    /// before taking them. `steps::MOST_STEPS` for its end.
     pub fn wants_log(&self, read: &[Option<steps::Given>]) -> Result<Option<u64>> {
         if self.truth.is_some() {
             return Ok(None);
+        }
+        // A step shaped like a freeze: `global`'s log read to its end first, as a node reads it, so every key that was
+        // ever the recovery key is known (`recovery`), whatever entries this device holds, and a freeze isn't passed
+        // over for good because they're behind.
+        if read.iter().flatten().any(|g| g.step.content.kind == steps::FREEZE) && self.log.as_ref().is_none_or(|l| !l.ended) {
+            return Ok(Some(steps::MOST_STEPS));
         }
         // Placed where they are: the ones before were looked at already, and none was a freeze the recovery key signed.
         let mut placed: Vec<Option<steps::Given>> = vec![None; self.looked as usize];
@@ -100,10 +106,11 @@ impl Global {
         Ok(steps::wants_log(&placed, self.root, self.log.as_ref(), &self.recovery()))
     }
 
-    /// Every key the entries this device holds say was ever the install's recovery key (`steps::recovery_keys`): only
-    /// a freeze one of them signed is looked at.
+    /// Every key the entries this device holds, and those in `global`'s log as read from its steps, say was ever the
+    /// install's recovery key (`steps::recovery_keys`): only a freeze one of them signed is looked at.
     fn recovery(&self) -> steps::Recovery {
-        steps::recovery_keys(self.root, self.entries.values())
+        let read = self.log.iter().flat_map(|l| l.entries(l.last()));
+        steps::recovery_keys(self.root, self.entries.values().chain(read))
     }
 
     /// `global`'s log past the end a freeze names, read from its steps (`wants_log`).
@@ -178,6 +185,11 @@ impl Global {
             };
             let sealed: BTreeMap<u64, &str> = log.get("steps").and_then(Value::as_array).into_iter().flatten().filter_map(|s| Some((s["at"].as_u64()?, s["sealed"].as_str()?))).collect();
             let mut read = steps::Log::new(self.root);
+            // To its end (`wants_log`'s `MOST_STEPS`): those there, in order.
+            let to = match to >= steps::MOST_STEPS {
+                true => (0..).find(|n| !sealed.contains_key(&(n + 1))).unwrap_or(0),
+                false => to,
+            };
             for at in 1..=to + 1 {
                 match sealed.get(&at).and_then(|b| data_encoding::BASE64URL_NOPAD.decode(b.as_bytes()).ok()) {
                     Some(bytes) => read.take(&log_keys, &bytes)?,
@@ -569,6 +581,35 @@ mod tests {
                 assert_eq!(k["epochs"][s.to_string()]["hashes"][n.to_string()].as_str(), m.epoch_hash(s, n), "{s}'s epoch {n}");
             }
         }
+    }
+
+    /// A device whose entries are behind the log (it holds none of R1's handover to R2) reads `global`'s log to its end
+    /// before it judges a step shaped like a freeze, so R2's freeze counts, never passed over for good.
+    #[test]
+    fn a_device_behind_the_log_still_takes_the_recovery_key_s_freeze() {
+        let key = |n: u8| SigningKey::from_bytes(&[n; 32]);
+        let (mac, r1, r2) = (key(1), key(9), key(8));
+        let mut i = Install::default();
+        i.write(&mac, ANDRE, members::genesis("Home", ANDRE, "Andre", &Endpoint::of(&mac), "mac", &[Kind::Client], &r1.verifying_key().to_bytes(), &"e".repeat(64)));
+        i.write(&mac, ANDRE, members::gate());
+        let held = i.entries.clone();
+        i.write(&r1, ANDRE, members::node("recovery", json!({ "key": hex(&r2.verifying_key().to_bytes()) })));
+        let root = i.entries[0].hash();
+        let mut log = steps::Log::new(Some(root));
+        for e in &i.entries {
+            log.push(vec![e.clone()]);
+        }
+        let (content, copy) = steps::freeze(Some(root), &i.entries, log.last(), Default::default(), 0).unwrap();
+        log.push_mark(steps::sign(&r2, &Scope::Global, log.last() + 1, ANDRE, 1, 0, content.clone()).unwrap());
+        log.ended = true;
+        let freeze = steps::Given { step: steps::sign(&r2, &Scope::Global, 1, ANDRE, 1, 0, content).unwrap(), copy: Some(copy) };
+        let mut g = Global::new(Some(root));
+        g.add_entries(held).unwrap();
+        assert_eq!(g.wants_log(&[Some(freeze.clone())]).unwrap(), Some(steps::MOST_STEPS), "the log to its end first");
+        g.with_log(log);
+        assert_eq!(g.wants_log(&[Some(freeze.clone())]).unwrap(), None);
+        g.take(1, Some(&freeze)).unwrap();
+        assert!(g.frozen(), "R2's freeze counts");
     }
 
     /// A browser renews only the keeps its own replay holds: a grant a node lists, or signs for someone else's scope,

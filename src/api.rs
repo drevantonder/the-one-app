@@ -198,6 +198,7 @@ pub fn routes() -> Router<Node> {
         .route("/v1/settings", post(settings))
         .route("/v1/reads", post(reads))
         .route("/v1/switch", post(switch))
+        .route("/v1/switch/check", get(switch_check))
         .route("/v1/steps", post(steps))
         .route("/v1/steps/global", get(global_steps))
         .route("/v1/entries", get(heads).post(entries))
@@ -907,6 +908,12 @@ async fn switch(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Re
     let secret: [u8; 32] = crate::keys::unhex(text(&body, "recovery")?.trim()).map_err(|_| anyhow::anyhow!("a recovery key is 64 hex characters"))?;
     let frozen = node.switch(&me.caller, &ed25519_dalek::SigningKey::from_bytes(&secret), body["force"] == true).await?;
     Ok(Json(json!({ "frozen": frozen })))
+}
+
+/// Read-only, before the switch: `global`'s scope database's objects in the bucket, and its log's steps that open to a
+/// step (`Node::switch_check`), from this machine only. → `{ database, log, steps }`.
+async fn switch_check(State(node): State<Node>, me: Me) -> Reply {
+    Ok(Json(node.switch_check(&me.caller).await?))
 }
 
 /// `[{ header, signature, body }]` (each base64url): steps of `global`'s scope database the caller's own device

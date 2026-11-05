@@ -190,9 +190,10 @@ fn the_workers_and_nodes_agree_on_keys_and_seals() {
         let ext = |epoch: u32| Ext { log: "global".into(), time: 0, user: ANDRE.into(), epoch, previous: vec![] };
         let g = Entry::create(&mac, ext(0), None, members::genesis("Home", ANDRE, "Andre", &Endpoint::of(&mac), "mac", &[Kind::Client], &recovery.verifying_key().to_bytes(), &one::keys::epoch_hash(&epoch)));
         let listed = Entry::create(&mac, ext(1), Some(g.head()), members::device(&Endpoint::of(&browser), ANDRE, "browser", &[Kind::Client], None));
-        let (content, copy) = steps::freeze(Some(g.hash()), &[g.clone(), listed.clone()], 2, Default::default(), 0).unwrap();
+        let gated = Entry::create(&mac, ext(1), Some(listed.head()), members::gate());
+        let (content, copy) = steps::freeze(Some(g.hash()), &[g.clone(), listed.clone(), gated.clone()], 3, Default::default(), 0).unwrap();
         // Signed by the recovery key in the ceremony, its mark first: the same freeze as the log's step after its end.
-        let mark = steps::sign(&recovery, &Scope::Global, 3, ANDRE, 1, 0, content.clone()).unwrap();
+        let mark = steps::sign(&recovery, &Scope::Global, 4, ANDRE, 1, 0, content.clone()).unwrap();
         let mut far = content.clone();
         far.data["logs"]["global"] = json!(1_000_000_000_000u64);
         let freeze = steps::sign(&recovery, &Scope::Global, 1, ANDRE, 1, 0, content).unwrap();
@@ -210,25 +211,30 @@ fn the_workers_and_nodes_agree_on_keys_and_seals() {
         let (s1, s2) = (sealed(1, &freeze, Some(&copy)), sealed(2, &signed, None));
         let junk = json!({ "at": 3, "sealed": B64U.encode(&one::log::seal(&[(1, rand::random())].into(), &one::db::step_name(&prefix, 3), b"not a step").unwrap()) });
         let (epochs, apps) = (std::collections::BTreeMap::from([(1, epoch)]), std::collections::BTreeMap::from([(1, sealed_app)]));
-        // An admin's device's, naming a log end of 10¹², is passed over before any log is read: it holds no browser up.
-        let mut client = Global::new(Some(g.hash()));
-        client.add(&pack(&[&g, &listed])).unwrap();
-        let planted = sealed(1, &steps::sign(&mac, &Scope::Global, 1, ANDRE, 1, 0, far).unwrap(), Some(&copy));
-        assert_eq!(client.add_sealed(&json!({ "steps": [planted] }), &epochs, &apps).unwrap(), None, "no log is asked for");
-        assert!(!client.frozen() && client.at() == 1, "and it's passed over");
-        let mut client = Global::new(Some(g.hash()));
-        client.add(&pack(&[&g, &listed])).unwrap();
-        let read = json!({ "steps": [s1, s2, junk] });
-        assert_eq!(client.add_sealed(&read, &epochs, &apps).unwrap(), Some(2), "the freeze waits for global's log to where it says it ends");
-        assert!(!client.frozen());
-        let mut log_steps: Vec<Value> = [&g, &listed].iter().enumerate().map(|(i, e)| {
+        // The log's steps as the URL signer's `get` gives them, to its end.
+        let mut log_steps: Vec<Value> = [&g, &listed, &gated].iter().enumerate().map(|(i, e)| {
             let name = one::db::step_name(&one::log::prefix("global"), i as u64 + 1);
             json!({ "at": i + 1, "sealed": B64U.encode(&one::log::seal(&keys, &name, &pack(&[*e])).unwrap()) })
         }).collect();
-        let mark_name = one::db::step_name(&one::log::prefix("global"), 3);
-        log_steps.push(json!({ "at": 3, "sealed": B64U.encode(&one::log::seal(&keys, &mark_name, &steps::encode(&mark, None)).unwrap()) }));
+        let mark_name = one::db::step_name(&one::log::prefix("global"), 4);
+        log_steps.push(json!({ "at": 4, "sealed": B64U.encode(&one::log::seal(&keys, &mark_name, &steps::encode(&mark, None)).unwrap()) }));
+        // An admin's device's, naming a log end of 10¹², is judged once the log is read to its end, never to 10¹²: it
+        // holds no browser up, and is passed over.
+        let mut client = Global::new(Some(g.hash()));
+        client.add(&pack(&[&g, &listed, &gated])).unwrap();
+        let planted = json!({ "steps": [sealed(1, &steps::sign(&mac, &Scope::Global, 1, ANDRE, 1, 0, far).unwrap(), Some(&copy))] });
+        assert_eq!(client.add_sealed(&planted, &epochs, &apps).unwrap(), Some(steps::MOST_STEPS), "the log to its end");
+        let mut planted = planted;
+        planted["log"] = json!({ "to": steps::MOST_STEPS, "steps": log_steps });
+        assert_eq!(client.add_sealed(&planted, &epochs, &apps).unwrap(), None);
+        assert!(!client.frozen() && client.at() == 1, "and it's passed over");
+        let mut client = Global::new(Some(g.hash()));
+        client.add(&pack(&[&g, &listed, &gated])).unwrap();
+        let read = json!({ "steps": [s1, s2, junk] });
+        assert_eq!(client.add_sealed(&read, &epochs, &apps).unwrap(), Some(steps::MOST_STEPS), "the freeze waits for global's log to its end");
+        assert!(!client.frozen());
         let mut with_log = read.clone();
-        with_log["log"] = json!({ "to": 2, "steps": log_steps });
+        with_log["log"] = json!({ "to": steps::MOST_STEPS, "steps": log_steps });
         assert_eq!(client.add_sealed(&with_log, &epochs, &apps).unwrap(), None);
         assert!(client.frozen() && client.at() == 3, "frozen, the browser's step taken and the junk passed over");
         let who = client.who().unwrap();
@@ -238,9 +244,9 @@ fn the_workers_and_nodes_agree_on_keys_and_seals() {
         let said = js(json!({ "op": "joining", "asked": [], "said": [[200, { "approved": true, "genesis": g.hash().to_hex(), "welcome": welcome.to_string() }]] }));
         let given = json!({ "welcome": said["said"][0]["welcome"], "freeze": s1, "at": 2, "steps": [s2] });
         let mut new = Global::new(Some(g.hash()));
-        assert_eq!(new.add_sealed(&given, &epochs, &apps).unwrap(), Some(2), "its freeze waits for global's log, as any reader's does");
+        assert_eq!(new.add_sealed(&given, &epochs, &apps).unwrap(), Some(3), "its freeze waits for global's log, as any reader's does");
         let mut given = given;
-        given["log"] = json!({ "to": 2, "steps": log_steps });
+        given["log"] = json!({ "to": 3, "steps": log_steps });
         new.add_sealed(&given, &epochs, &apps).unwrap();
         assert!(new.frozen() && new.at() == 2, "a new device starts where it was welcomed, with no entry but its genesis");
         assert_eq!(one::db::state_hash(new.who().unwrap().conn()).unwrap(), welcome.hash);
@@ -253,7 +259,7 @@ fn the_workers_and_nodes_agree_on_keys_and_seals() {
         let name = one::db::step_name(&prefix, 1);
         let junk = json!({ "at": 1, "sealed": B64U.encode(&one::keys::seal(0xFFFF_FFFF, &rand::random(), &name, b"junk")) });
         let mut fresh = Global::new(Some(g.hash()));
-        fresh.add(&pack(&[&g, &listed])).unwrap();
+        fresh.add(&pack(&[&g, &listed, &gated])).unwrap();
         assert_eq!(fresh.add_sealed(&json!({ "steps": [junk, s2] }), &epochs, &apps).unwrap(), None);
         assert_eq!(fresh.at(), 2, "a browser reads past junk under an epoch above every one made");
     }
