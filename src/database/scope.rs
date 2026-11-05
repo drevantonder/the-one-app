@@ -258,7 +258,7 @@ pub fn build(members: &Members, scope: &Scope, state: &ScopeState) -> Result<Con
     db.execute_batch(SCHEMA)?;
     db.execute_batch(permissions::SCHEMA)?;
     let tx = db.unchecked_transaction()?;
-    tx.execute_batch(permissions::DEFAULTS)?;
+    permissions::defaults(&tx)?;
     if *scope == Scope::Global {
         install(&tx, members)?;
         relations(&tx, members)?;

@@ -35,13 +35,14 @@ pub(super) struct Owed {
     unsealed: BTreeSet<(Owing, u32)>,
 }
 
-/// Whether `who` may list a device of `user`'s that does `kinds`, as replay counts a `device` entry: a client or a
-/// service only from their own devices (`add-devices`), a machine that runs calls also by an admin (`add-machines`),
-/// which runs only what that admin's listing may, never their own scope. The rows give the verbs; which kind of device
-/// takes which is replay's rule, kept here until the scope database is the truth.
+/// Whether `who` may list a device of `user`'s that does `kinds`, as replay counts a `device` entry: only of someone in
+/// the install now (one removed, or not in it yet, is added with their first device, by an invite's approval); a
+/// client or a service only from their own devices (`add-devices`), a machine that runs calls also by an admin
+/// (`add-machines`), which runs only what that admin's listing may, never their own scope. The rows give the verbs;
+/// which kind of device takes which is replay's rule.
 pub(super) fn may_list(db: &ScopeDb, who: &str, user: &str, kinds: &[members::Kind]) -> bool {
     let theirs = kinds.iter().any(|k| matches!(k, members::Kind::Client | members::Kind::Service));
-    db.may(who, if theirs { "add-devices" } else { "add-machines" }, &scopes::person(user))
+    db.user(user).is_some() && db.may(who, if theirs { "add-devices" } else { "add-machines" }, &scopes::person(user))
 }
 
 /// How often a client of its person's looks for their new devices whose sign-in lets them in.

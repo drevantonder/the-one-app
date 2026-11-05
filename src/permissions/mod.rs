@@ -139,6 +139,21 @@ insert into relations (subject, relation, object, until) values
     ('install:global#admin', 'admin', 'device:*', null);
 "#;
 
+/// Whether the install's admins make someone a group's admin, as replay always let them (`members.rs` `manages`), so
+/// a group whose admins have all gone gets a new one: their `manager` role then gives a group's `admin` as well as its
+/// `member`. Not decided yet (the plan's open question on default roles): flip it here, and nowhere else.
+pub const INSTALL_ADMINS_MAKE_GROUP_ADMINS: bool = true;
+
+/// The release's types, roles and rules (`DEFAULTS`), with `INSTALL_ADMINS_MAKE_GROUP_ADMINS`'s rule: run on a database
+/// `SCHEMA` made, after it.
+pub fn defaults(conn: &Connection) -> Result<()> {
+    conn.execute_batch(DEFAULTS)?;
+    if INSTALL_ADMINS_MAKE_GROUP_ADMINS {
+        conn.execute("update roles set gives = '[\"member\",\"admin\"]' where type = 'group' and name = 'manager' and builtin = 1", [])?;
+    }
+    Ok(())
+}
+
 /// The type of an object (`group` of `group:…`), if it's one: a principal or object is `<type>:<id>`, and never a
 /// userset (`#`).
 fn type_of(object: &str) -> Option<&str> {
@@ -438,8 +453,8 @@ mod tests {
     fn who_may_do_what() {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(SCHEMA).unwrap();
-        conn.execute_batch(DEFAULTS).unwrap();
-        conn.execute_batch(DEFAULTS).unwrap();
+        defaults(&conn).unwrap();
+        defaults(&conn).unwrap();
         conn.execute_batch(
             r#"insert into roles values ('group', 'host', '["use","invite","leave"]', '[]', 0);
             insert into roles values ('rocket', 'admin', '["use"]', '[]', 0);
@@ -555,9 +570,9 @@ mod tests {
             ("person:gina", "person:erin", "host", "group:g", None, true),
             ("person:gina", "person:gina", "member", "group:g", None, false),
             ("person:gina", "person:erin", "member", "group:g", None, false),
-            // the install's admins add people to every group, and make no one its admin
+            // the install's admins add people to every group, and make someone its admin only as the release says
             ("person:alice", "person:erin", "member", "group:g", None, true),
-            ("person:alice", "person:erin", "admin", "group:g", None, false),
+            ("person:alice", "person:erin", "admin", "group:g", None, INSTALL_ADMINS_MAKE_GROUP_ADMINS),
             ("person:alice", "person:erin", "member", "group:h", None, true),
             ("person:hana", "person:erin", "member", "group:h", None, false),
             ("person:hana", "person:erin", "member", "group:h", Some(2000), true),

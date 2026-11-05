@@ -759,7 +759,7 @@ pub(crate) mod tests {
     fn app_may() {
         let db = Connection::open_in_memory().unwrap();
         db.execute_batch(permissions::SCHEMA).unwrap();
-        db.execute_batch(permissions::DEFAULTS).unwrap();
+        permissions::defaults(&db).unwrap();
         for (s, r, o) in [
             ("person:alice", "member", INSTALL),
             ("person:bob", "member", INSTALL),
