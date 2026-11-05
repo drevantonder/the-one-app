@@ -11,19 +11,19 @@ one.title("Collaborators");
 let d;
 let trouble = "";
 
-const person = (p, trailing = "") =>
+const personRow = (p, trailing = "") =>
   `<div class="row still">${one.avatar(p.handle || p.name, p.name)}<div class="main"><div class="title"><span>${esc(p.name)}</span></div>${p.handle ? `<div class="sub">@${esc(p.handle)}</div>` : ""}</div>${trailing}</div>`;
 
 function show() {
   let html = trouble ? one.problem({ title: trouble }) : "";
-  html += `<h2 class="section">Owner</h2><div class="list">${person(d.owner)}</div>`;
+  html += `<h2 class="section">Owner</h2><div class="list">${personRow(d.owner)}</div>`;
   if (d.group) {
-    html += `<h2 class="section">Members of ${esc(d.owner.name)}</h2><div class="list">${d.members.map((m) => person(m, `<span class="note">${m.role === "admin" ? "Admin" : "Member"}</span>`)).join("")}</div>`;
+    html += `<h2 class="section">Members of ${esc(d.owner.name)}</h2><div class="list">${d.members.map((m) => personRow(m, `<span class="note">${m.role === "admin" ? "Admin" : "Member"}</span>`)).join("")}</div>`;
     html += `<p class="footer">Its admins own it, and its members push to it.</p>`;
   }
   html += `<h2 class="section">Collaborators</h2>`;
   html += d.collaborators.length
-    ? `<div class="list">${d.collaborators.map((c) => person(c, d.yours ? `<button class="button plain remove" data-remove="${esc(c.handle)}" aria-label="Remove ${esc(c.name)}">Remove</button>` : "")).join("")}</div>`
+    ? `<div class="list">${d.collaborators.map((c) => personRow(c, d.yours ? `<button class="button plain remove" data-remove="${esc(c.handle)}" aria-label="Remove ${esc(c.name)}">Remove</button>` : "")).join("")}</div>`
     : `<p class="footer">No one else pushes to it.</p>`;
   if (d.yours) html += `<div class="list" style="margin-top:20px"><a class="row plain action-row" data-add>Add Collaborator…</a></div>`;
   return html + '<div id="ask"></div>';
