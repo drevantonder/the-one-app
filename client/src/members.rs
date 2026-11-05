@@ -21,17 +21,81 @@ use one::database::scopes::{INSTALL, device, object, person};
 use one::entry::{Entry, Hash, Key, Scope, causal, hex, pack, unpack};
 use one::members::{Cuts, Kind, Members, Role, ScopeState, is_member_entry};
 
-/// `global`'s entries a device holds, checked, and the install they're of.
+/// `global`'s entries a device holds, checked, and the install they're of; and once its log is frozen, its scope
+/// database's steps (`one::database::steps`), each checked as from anyone, by position from the first: none for one
+/// that isn't a step, which every reader passes over.
 pub struct Global {
     root: Option<Hash>,
     entries: BTreeMap<Hash, Entry>,
+    steps: Vec<Option<Entry>>,
 }
 
 impl Global {
     /// For the install whose genesis is `root`, or, for a device that's only now joined, whichever one genesis the
     /// first entries it's given hold.
     pub fn new(root: Option<Hash>) -> Global {
-        Global { root, entries: BTreeMap::new() }
+        Global { root, entries: BTreeMap::new(), steps: Vec::new() }
+    }
+
+    /// Adds steps as a node gives them (`GET /v1/steps/global`, or as `steps` kept them): `{ steps: [{ at, step }] }`,
+    /// each step base64url (`steps::encode`) or none, its signature checked. Those after the next it lacks wait.
+    pub fn add_steps(&mut self, given: &Value) -> Result<()> {
+        for s in given["steps"].as_array().into_iter().flatten() {
+            let Some(at) = s["at"].as_u64() else { continue };
+            if at != self.steps.len() as u64 + 1 {
+                continue;
+            }
+            let bytes = s["step"].as_str().and_then(|b| data_encoding::BASE64URL_NOPAD.decode(b.as_bytes()).ok());
+            self.steps.push(bytes.and_then(|b| one::database::steps::decode(&Scope::Global, at, &b).ok()));
+        }
+        Ok(())
+    }
+
+    /// The steps held, as `add_steps` takes them: to keep.
+    pub fn steps(&self) -> Value {
+        let list: Vec<Value> = self.steps.iter().enumerate().map(|(i, s)| json!({ "at": i + 1, "step": s.as_ref().map(|s| data_encoding::BASE64URL_NOPAD.encode(&one::database::steps::encode(s))) })).collect();
+        json!({ "steps": list })
+    }
+
+    /// The last step held: what to ask a node for those after (`?from=`).
+    pub fn at(&self) -> u64 {
+        self.steps.len() as u64
+    }
+
+    /// Who's who: once the log is frozen, the scope database its freeze anchors (built here from the entries it
+    /// follows, and refused if that isn't what the freeze says), and the steps after, each applied only if it counts
+    /// there; before, built from replay's members.
+    pub fn who(&self) -> Result<ScopeDb> {
+        let Some(frozen) = self.frozen()? else { return who(&self.members()?) };
+        let now = now();
+        let mut db = ScopeDb::build(&frozen.members, &Scope::Global, &frozen.state, now)?;
+        ensure!(one::db::state_hash(db.conn())? == frozen.hash, "who's who at your One App's freeze isn't what its admin's device said: this device used none of it");
+        for step in self.steps.iter().flatten() {
+            if let Ok(a) = one::database::steps::apply(&db, None, &Scope::Global, step) {
+                db = ScopeDb::open(a.db, now)?;
+            }
+        }
+        Ok(db)
+    }
+
+    /// The log's freeze, if one counts among the entries held (`members::frozen`).
+    pub fn frozen(&self) -> Result<Option<one::members::Frozen>> {
+        let Some(root) = self.root else { bail!("no entries of your One App yet") };
+        let ordered = causal(self.entries.values().cloned().collect(), &HashMap::new());
+        Ok(one::members::frozen(Some(root), &ordered, &self.forks()))
+    }
+
+    /// Each device that signed two entries at one seq, cut from the first.
+    fn forks(&self) -> Cuts {
+        let mut seen: HashMap<(Key, u32), Hash> = HashMap::new();
+        let mut forks = Cuts::new();
+        for e in self.entries.values() {
+            if seen.insert((e.author(), e.seq()), e.hash()).is_some_and(|h| h != e.hash()) {
+                let at = forks.entry((e.author(), "global".into())).or_insert(u32::MAX);
+                *at = (*at).min(e.seq());
+            }
+        }
+        forks
     }
 
     /// The install's genesis, once known.
@@ -87,14 +151,7 @@ impl Global {
     /// install's, or its genesis isn't among them.
     pub fn members(&self) -> Result<Members> {
         let Some(root) = self.root else { bail!("no entries of your One App yet") };
-        let mut seen: HashMap<(Key, u32), Hash> = HashMap::new();
-        let mut forks = Cuts::new();
-        for e in self.entries.values() {
-            if seen.insert((e.author(), e.seq()), e.hash()).is_some_and(|h| h != e.hash()) {
-                let at = forks.entry((e.author(), "global".into())).or_insert(u32::MAX);
-                *at = (*at).min(e.seq());
-            }
-        }
+        let forks = self.forks();
         let ordered: Vec<Entry> = causal(self.entries.values().cloned().collect(), &HashMap::new()).into_iter().filter(is_member_entry).collect();
         let m = Members::replay(Some(root), &ordered, &forks);
         ensure!(!m.users.is_empty(), "your One App's first entry isn't among those");
@@ -104,8 +161,11 @@ impl Global {
 
 /// `global`'s scope database, built from replay's members, as of now.
 pub fn who(m: &Members) -> Result<ScopeDb> {
-    let now = n0_future::time::SystemTime::now().duration_since(n0_future::time::SystemTime::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64);
-    ScopeDb::build(m, &Scope::Global, &ScopeState::default(), now)
+    ScopeDb::build(m, &Scope::Global, &ScopeState::default(), now())
+}
+
+fn now() -> u64 {
+    n0_future::time::SystemTime::now().duration_since(n0_future::time::SystemTime::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64)
 }
 
 /// What a browser seals, hands and signs by, as JSON for it to keep and look up (`kernel/web/device.js`,
@@ -124,7 +184,11 @@ pub fn who(m: &Members) -> Result<ScopeDb> {
 /// - `roles` and `runs`, as an older release's tabs read them (each scope's people's roles, and the machines each
 ///   person who chose runs their things on): kept for those tabs, which share this record; phase 3 removes them
 pub fn view(m: &Members) -> Result<Value> {
-    let db = who(m)?;
+    view_of(&who(m)?)
+}
+
+/// `view`, of who's who as it is (`Global::who`).
+pub fn view_of(db: &ScopeDb) -> Result<Value> {
     let scopes = db.scopes();
     let listed = db.machines().into_iter().filter(|d| !d.removed).collect::<Vec<_>>();
     let mut devices: Vec<Value> = listed.iter().map(|d| json!({ "key": hex(&d.key), "seal": hex(&d.seal), "user": d.user, "name": d.name, "roles": d.roles, "passkey": d.passkey, "device": d.device.as_ref().map(hex), "since": d.since, "place": d.place })).collect();

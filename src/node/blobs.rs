@@ -220,6 +220,10 @@ impl Node {
     /// never does.
     pub(super) fn blob_named(&self, hash: &str, holds: impl Fn(&Scope) -> bool) -> Result<bool> {
         self.with(|i| {
+            // Once `global`'s log is frozen, its steps name blobs too (`database::steps`).
+            if holds(&Scope::Global) && i.r.db().names_blob(hash) {
+                return Ok(true);
+            }
             for log in i.r.store.logs()? {
                 let forgotten = i.views.get(&log).is_some_and(|(_, s)| s.forgotten.contains(hash));
                 let names = |e: &Entry| e.content.blobs.iter().any(|b| b == hash) && (!forgotten || (e.content.app == members::APP && e.content.kind != "keep"));

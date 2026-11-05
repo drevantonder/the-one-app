@@ -663,6 +663,26 @@ impl ScopeDb {
         self.rows("SELECT app FROM installs WHERE installed = 1", [], |r| r.get(0)).into_iter().collect()
     }
 
+    /// The releases steps said (`steps`), oldest first, as entries of their author's (`release::latest` reads them as
+    /// it reads the log's): their content, author and time.
+    pub fn releases(&self) -> Vec<(crate::entry::Content, Key, u64)> {
+        self.rows("SELECT content, author, time FROM releases ORDER BY at", [], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?)))
+            .into_iter()
+            .filter_map(|(c, a, t)| Some((serde_json::from_str(&c).ok()?, key(&a), t as u64)))
+            .collect()
+    }
+
+    /// Whether a step named `blob` and the scope still needs it: forgotten, only if a node entry other than a keep
+    /// named it.
+    pub fn names_blob(&self, blob: &str) -> bool {
+        self.row("SELECT pinned OR NOT EXISTS (SELECT 1 FROM forgotten WHERE blob = ?1) FROM blobs WHERE blob = ?1", [blob], |r| r.get::<_, bool>(0)).unwrap_or(false)
+    }
+
+    /// Every blob steps named that the scope still needs (`names_blob`).
+    pub fn blobs(&self) -> BTreeSet<String> {
+        self.rows("SELECT blob FROM blobs WHERE pinned OR blob NOT IN (SELECT blob FROM forgotten)", [], |r| r.get(0)).into_iter().collect()
+    }
+
     /// `global`'s database as replay's members, for applying a step to them as replay applies an entry
     /// (`steps::apply`): what building it from them (`scope::build`) wrote back, so building again gives the same rows.
     /// No cuts or forks: a step's place is its position, not a causal order.

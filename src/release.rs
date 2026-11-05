@@ -10,6 +10,8 @@ use ssh_key::{HashAlg, LineEnding, PrivateKey, PublicKey, SshSig};
 use crate::entry::{Content, Entry, Key};
 
 pub const APP: &str = "node";
+/// The kind of entry, or step, that says a release of the node.
+pub const NODE_KIND: &str = "node-release";
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Release {
@@ -35,7 +37,7 @@ pub const NAMESPACE: &str = "release";
 pub const SERVICE_KIND: &str = "service-release";
 
 pub fn content(release: &Release) -> Content {
-    let kind = if release.service.is_some() { SERVICE_KIND } else { "node-release" };
+    let kind = if release.service.is_some() { SERVICE_KIND } else { NODE_KIND };
     Content { blobs: vec![release.blob.clone()], ..Content::new(APP, kind, json!(release)) }
 }
 
@@ -65,22 +67,41 @@ pub fn latest(key: &str, entries: &[Entry], target: &str) -> Option<(Release, Ke
 
 /// The same for the service `service` (`None`: the node).
 pub fn latest_of(key: &str, entries: &[Entry], target: &str, service: Option<&str>) -> Option<(Release, Key)> {
-    let kind = if service.is_some() { SERVICE_KIND } else { "node-release" };
-    let releases = entries.iter().rev().filter(|e| e.content.app == APP && e.content.kind == kind);
+    latest_said(key, &said(entries, &[]), target, service)
+}
+
+/// What `global` said of releases, oldest first, as each release's content and who published it: in its log's
+/// `entries`, then once it's frozen, in its scope database's steps (`ScopeDb::releases`).
+pub fn said(entries: &[Entry], steps: &[(crate::entry::Content, Key, u64)]) -> Vec<(crate::entry::Content, Key)> {
+    let logged = entries.iter().filter(|e| e.content.app == APP && [NODE_KIND, SERVICE_KIND].contains(&e.content.kind.as_str())).map(|e| (e.content.clone(), e.author()));
+    logged.chain(steps.iter().map(|(c, k, _)| (c.clone(), *k))).collect()
+}
+
+/// `latest_of`, of what `said` gives.
+pub fn latest_said(key: &str, said: &[(crate::entry::Content, Key)], target: &str, service: Option<&str>) -> Option<(Release, Key)> {
+    let kind = if service.is_some() { SERVICE_KIND } else { NODE_KIND };
+    let releases = said.iter().rev().filter(|(c, _)| c.app == APP && c.kind == kind);
     let mut logged = false;
-    for e in releases {
+    for (content, author) in releases {
+        let e = Said { content, author: *author };
         let Ok(r) = serde_json::from_value::<Release>(e.content.data.clone()) else { continue };
         if r.target != target || r.service.as_deref() != service {
             continue;
         }
         if signed_by(key, &r.signature) {
-            return Some((r, e.author()));
+            return Some((r, e.author));
         }
         if !std::mem::replace(&mut logged, true) {
-            tracing::warn!("ignoring the release of {} by {}: it isn't signed by this build's release key", r.commit, &crate::entry::hex(&e.author())[..8]);
+            tracing::warn!("ignoring the release of {} by {}: it isn't signed by this build's release key", r.commit, &crate::entry::hex(&e.author)[..8]);
         }
     }
     None
+}
+
+/// A release as `global` said it.
+struct Said<'a> {
+    content: &'a crate::entry::Content,
+    author: Key,
 }
 
 /// Whether a node running `build`, committed at `committed`, takes `r`: a different build, and not an older one.

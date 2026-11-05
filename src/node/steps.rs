@@ -40,7 +40,7 @@ impl Node {
     }
 
     /// `read_steps`, while this device holds its writes.
-    async fn read_steps_now(&self) -> Result<bool> {
+    pub(super) async fn read_steps_now(&self) -> Result<bool> {
         let Some(from) = self.with(|i| Ok(i.r.at()))? else { return Ok(false) };
         let bucket = self.bucket()?;
         let prefix = steps::prefix("global");
@@ -128,7 +128,7 @@ impl Node {
         let keys = self.log_key(&Scope::Global).await?;
         let prefix = steps::prefix("global");
         let mut list = Vec::new();
-        for n in from + 1..=at {
+        for n in from.saturating_add(1)..=at {
             let name = crate::db::step_name(&prefix, n);
             let opened = match crate::bucket::Bucket::get(&bucket, &name).await? {
                 Some(o) => crate::keys::epoch_of(&o.bytes).ok().and_then(|e| keys.get(&e)).and_then(|k| crate::keys::open(k, &name, &o.bytes).ok()),

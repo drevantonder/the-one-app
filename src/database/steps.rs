@@ -99,7 +99,39 @@ pub fn apply(db: &ScopeDb, global: Option<&ScopeDb>, scope: &Scope, step: &Entry
         }
     }
     let built = super::scope::build(&if *scope == Scope::Global { m } else { Members::default() }, scope, &state)?;
+    carry(db.conn(), &built)?;
+    named(&built, step)?;
     Ok(Applied { db: built })
+}
+
+/// What only steps say, which building from replay's members leaves out: copied from the database before.
+fn carry(from: &Connection, to: &Connection) -> Result<()> {
+    for table in ["blobs", "releases"] {
+        let mut q = from.prepare(&format!("SELECT * FROM {table}"))?;
+        let n = q.column_count();
+        let insert = format!("INSERT INTO {table} VALUES ({})", vec!["?"; n].join(", "));
+        let mut rows = q.query([])?;
+        while let Some(row) = rows.next()? {
+            let values: Vec<rusqlite::types::Value> = (0..n).map(|i| row.get(i)).collect::<rusqlite::Result<_>>()?;
+            to.execute(&insert, rusqlite::params_from_iter(values))?;
+        }
+    }
+    Ok(())
+}
+
+/// What a counted step names that no other table keeps: its blobs, and a release.
+fn named(db: &Connection, step: &Entry) -> Result<()> {
+    let pinned = step.content.app == members::APP && step.content.kind != "keep";
+    for blob in &step.content.blobs {
+        db.execute("INSERT INTO blobs VALUES (?1, ?2) ON CONFLICT (blob) DO UPDATE SET pinned = max(pinned, ?2)", rusqlite::params![blob, pinned])?;
+    }
+    if step.content.app == members::APP && members::RELEASES.contains(&step.content.kind.as_str()) {
+        db.execute(
+            "INSERT INTO releases VALUES (?, ?, ?, ?, ?)",
+            rusqlite::params![step.seq(), step.content.kind, serde_json::to_string(&step.content)?, crate::entry::hex(&step.author()), i64::try_from(step.time()).unwrap_or(i64::MAX)],
+        )?;
+    }
+    Ok(())
 }
 
 /// A scope's own state after `step`, a node entry of its own: replay's rules for it, and what it does.
@@ -199,6 +231,8 @@ pub fn allowed(db: &ScopeDb, scope: &Scope, step: &Entry) -> Result<()> {
         (members::APP, "service") => may("switch", &scopes::device(&unhex(&text("device")?)?)),
         (members::APP, "install" | "uninstall" | "schedule" | "vault-request") => may("add-apps", &scopes::object(scope)) || runs_it(db, scope, step),
         (members::APP, "keep" | "forget") => may("use", &scopes::object(scope)) || runs_it(db, scope, step),
+        // A release, which every node checks is signed with the release key before it takes it.
+        (members::APP, kind) if members::RELEASES.contains(&kind) => true,
         (members::APP, "arrange") => *scope == Scope::User(w.to_string()) && may("use", &scopes::object(scope)),
         // An app's own entries, and the release's: as replay counts them, by who signed them.
         (members::APP, _) => false,

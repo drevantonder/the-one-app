@@ -301,6 +301,14 @@ export async function signEntry(key, by, fields, body) {
   return { header: raw, signature: await sign(key, "one/entry", header), body, hash: hex.encode(await sha256(raw)) };
 }
 
+/// Signs a step of a scope's database for position `at` (src/database/steps.rs): an entry's header, following nothing,
+/// under a domain of its own, so neither is ever taken for the other.
+export async function signStep(key, by, { log, at, time, user, epoch }, body) {
+  body = bytes(body);
+  const header = { v: 1, author: hex.encode(by), log, seq: at, backlink: null, previous: [], time, user, epoch, body: hex.encode(await sha256(body)), size: body.length };
+  return { header: canonical(header), signature: await sign(key, "one/step", header), body };
+}
+
 const isHash = (s) => typeof s === "string" && /^[0-9a-f]{64}$/.test(s);
 /// A number an entry may hold: a whole one from 0 to `max`, and never above 2^53 - 1, which JSON keeps exactly here.
 const isCount = (n, max = Number.MAX_SAFE_INTEGER) => Number.isSafeInteger(n) && n >= 0 && n <= max;

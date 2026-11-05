@@ -1,5 +1,5 @@
 // The kernel's formats, for tests/contracts.rs to check against the Rust that reads them: POST { op, ... } → result.
-import { appOf, askedFor, b64u, BEHIND, canonical, certify, checkCertificate, epochHash, checkEntry, checkRequest, databaseKey, ed25519Public, epochOf, hex, idOf, inviteProof, joinChallenge, joinCode, joinNonce, keyPair, mayHand, MOST_NEEDED, oldestNeeded, open, openAppKey, openHandoff, openSealed, openUnder, passkeyKeys, seal, sealAppKey, sealHandoff, sealTo, sealUnder, signEntry, signedRequest, tokenId, twinPublic, waited, x25519Public } from "../shared/crypto.js";
+import { appOf, askedFor, b64u, BEHIND, canonical, certify, checkCertificate, epochHash, checkEntry, checkRequest, databaseKey, ed25519Public, epochOf, hex, idOf, inviteProof, joinChallenge, joinCode, joinNonce, keyPair, mayHand, MOST_NEEDED, oldestNeeded, open, openAppKey, openHandoff, openSealed, openUnder, passkeyKeys, seal, sealAppKey, sealHandoff, sealTo, sealUnder, signEntry, signStep, signedRequest, tokenId, twinPublic, waited, x25519Public } from "../shared/crypto.js";
 import { members } from "../web/members.js";
 
 const ops = {
@@ -60,6 +60,11 @@ const ops = {
     const tampered = await checkEntry({ header: b64u.decode(entry.header), signature: b64u.decode(entry.signature), body: new TextEncoder().encode("{}") }).then(() => "checked", (err) => String(err));
     const b = (v) => b64u.encode(v);
     return { signed: { header: b(signed.header), signature: b(signed.signature), body: b(signed.body) }, hash: signed.hash, checked, tampered };
+  },
+  /// A step signed with `seed` for `fields`' position: → it, as POST /v1/steps takes it.
+  async step({ seed, fields, body }) {
+    const signed = await signStep(b64u.decode(seed), await ed25519Public(b64u.decode(seed)), fields, body);
+    return { signed: { header: b64u.encode(signed.header), signature: b64u.encode(signed.signature), body: b64u.encode(signed.body) } };
   },
   /// Member entries' content as the web client builds it: `[[builder, args]]` → each content.
   async members({ calls }) {

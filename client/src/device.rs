@@ -393,7 +393,19 @@ impl Device {
         let kept = std::fs::read_to_string(&pinned).ok().and_then(|had| Hash::from_hex(had.trim()).ok());
         let mut global = crate::members::Global::new(kept);
         global.add_entries(read.entries).map_err(|_| failed("This isn't the One App this device joined."))?;
-        let who = crate::members::who(&global.members().map_err(failed)?).map_err(failed)?;
+        // Once the log is frozen, its scope database's steps too, opened with the same keys (`one::database::steps`).
+        if global.frozen().map_err(failed)?.is_some() {
+            let prefix = one::database::steps::prefix("global");
+            let mut list = Vec::new();
+            for n in 1.. {
+                let name = one::db::step_name(&prefix, n);
+                let Some(o) = one::bucket::Bucket::get(&bucket, &name).await.map_err(failed)? else { break };
+                let opened = keys::epoch_of(&o.bytes).ok().and_then(|e| log_keys.get(&e)).and_then(|k| keys::open(k, &name, &o.bytes).ok());
+                list.push(json!({ "at": n, "step": opened.map(|b| data_encoding::BASE64URL_NOPAD.encode(&b)) }));
+            }
+            global.add_steps(&json!({ "steps": list })).map_err(failed)?;
+        }
+        let who = global.who().map_err(failed)?;
         if kept.is_none()
             && let Some(root) = global.root()
         {
@@ -980,6 +992,23 @@ impl Device {
 
     /// Signs an entry of `content` in `log`, after what the node has, and writes it.
     async fn write(&self, log: &str, user: &str, content: one::entry::Content) -> Result<(), Error> {
+        // Once `global`'s log is frozen, a step of its scope database for the next position (`one::database::steps`).
+        if log == "global"
+            && let Ok(steps) = self.json("GET", "/v1/steps/global?from=9007199254740991", None).await
+        {
+            let mut at = steps["at"].as_u64().unwrap_or(0);
+            for _ in 0..5 {
+                let heads = self.json("GET", "/v1/entries?scope=global", None).await?;
+                let epoch = heads["epoch"].as_u64().unwrap_or(0) as u32;
+                let step = one::database::steps::sign(&self.key, &Scope::Global, at + 1, user, epoch, now(), content.clone()).map_err(failed)?;
+                match self.json("POST", "/v1/steps", Some(json!([step.to_json()]))).await {
+                    Ok(_) => return Ok(()),
+                    Err(err) if err.to_string().contains("taken") => at = self.json("GET", "/v1/steps/global?from=9007199254740991", None).await?["at"].as_u64().unwrap_or(at + 1),
+                    Err(err) => return Err(err),
+                }
+            }
+            return Err(failed("Who's who changed too often to write to: try again."));
+        }
         let heads = self.json("GET", &format!("/v1/entries?scope={}", query(log)), None).await?;
         let last = &heads["logs"][self.key()];
         let prev = match (last["seq"].as_u64(), last["hash"].as_str()) {

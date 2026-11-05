@@ -464,7 +464,12 @@ impl Node {
         let (entries, blobs) = self.with(|i| {
             let entries = i.r.store.scope(&d.scope)?;
             let forgotten = i.views.get(&d.scope).map(|(_, s)| s.forgotten.clone()).unwrap_or_default();
-            Ok((entries.clone(), backed_blobs(&entries, &forgotten)))
+            let mut blobs = backed_blobs(&entries, &forgotten);
+            // And once `global`'s log is frozen, what its steps name (`database::steps`).
+            if d.scope == "global" {
+                blobs.extend(i.r.db().blobs());
+            }
+            Ok((entries.clone(), blobs))
         })?;
         let (node, runtime) = (self.clone(), tokio::runtime::Handle::current());
         let bucket = self.bucket().ok().map(|b| b.place);

@@ -86,16 +86,18 @@ export function server(version) {
   /// `user`'s members from `global`'s entries kept and those `given` (a pack), checked and replayed by the client
   /// (src/members.rs), then kept: the entries, the install's first, what to ask for next, and the members. The first
   /// time, of the install its approval named (`genesis:<user>`), if it named one.
-  async function global(user, given) {
+  async function global(user, given, steps) {
     const [, { get, put }] = await code;
     const kept = await get(`global:${user}`);
     // What an older release kept, without all its answers (each person's `keeps` came last), is replayed again.
-    if (!given && kept?.members?.people?.[user]?.keeps) return kept.members;
+    if (!given && !steps?.steps?.length && kept?.members?.people?.[user]?.keeps) return kept.members;
     const { Global } = await glue;
     const root = kept?.root || (await get(`genesis:${user}`)) || "";
-    const g = new Global(root, kept?.pack || new Uint8Array(), given || new Uint8Array());
+    // Once the log is frozen, its scope database's steps: those kept, then those given after them.
+    const held = { steps: [...(kept?.steps?.steps || []), ...(steps?.steps || [])] };
+    const g = new Global(root, kept?.pack || new Uint8Array(), given || new Uint8Array(), JSON.stringify(held));
     const members = JSON.parse(g.members);
-    await put(`global:${user}`, { root: g.root, pack: g.pack, have: g.have, members });
+    await put(`global:${user}`, { root: g.root, pack: g.pack, have: g.have, steps: JSON.parse(g.steps), at: g.at, members });
     g.free();
     return members;
   }
@@ -265,7 +267,7 @@ export function server(version) {
             return s?.client.nodes(nodes);
           }
           case "global":
-            return post({ id, members: await global(m.user, m.given && new Uint8Array(m.given)) });
+            return post({ id, members: await global(m.user, m.given && new Uint8Array(m.given), m.steps) });
           // A new device's sign-in, checked by the client (`signedInWith`), its issuer's keys fetched from where it
           // publishes them.
           case "signedInWith": {

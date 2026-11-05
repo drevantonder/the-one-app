@@ -195,10 +195,12 @@ export const net = {
   /// `user`'s members as `global`'s entries say them, checked here: those kept and those `given` (a pack a node sent,
   /// or none), replayed by the client's WebAssembly, and kept. Throws if one doesn't check, or they're another install's
   /// than the one first kept.
-  async global(user, given) {
+  /// Once `global`'s log is frozen, `steps` are its scope database's a node sent (`GET /v1/steps/global`), applied
+  /// the same way.
+  async global(user, given, steps) {
     if (!net.has) throw new Error("This device can't check who's who in your One App.");
     const buffer = given && given.buffer.slice(given.byteOffset, given.byteOffset + given.byteLength);
-    return (await ask({ op: "global", user, given: buffer }, buffer ? [buffer] : [])).members;
+    return (await ask({ op: "global", user, given: buffer, steps }, buffer ? [buffer] : [])).members;
   },
 
   /// What a new device (`key`, `seal`) signed in with, as its sign-in (`proof`, as auth passed it on) shows, checked

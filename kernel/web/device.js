@@ -10,7 +10,7 @@
 // scope database and its permissions (client/src/members.rs, `Who`), and only looked up here. A hacked node holds no
 // keys, and gets none this way.
 
-import { askedFor, b64u, databaseKey, ed25519Public, epochHash, hex, hkdfKey, inviteProof, joinCode, oldestNeeded, openAppKey, openSealed, passkeyKeys, random, sealAppKey, sealHandoff, sealTo, sha256, signEntry, signedRequest, twinPublic, untilTaken, x25519Public } from "../shared/crypto.js";
+import { askedFor, b64u, databaseKey, ed25519Public, epochHash, hex, hkdfKey, inviteProof, joinCode, oldestNeeded, openAppKey, openSealed, passkeyKeys, random, sealAppKey, sealHandoff, sealTo, sha256, signEntry, signStep, signedRequest, twinPublic, untilTaken, x25519Public } from "../shared/crypto.js";
 import { del, get, put } from "./kept.js";
 import { members } from "./members.js";
 
@@ -128,7 +128,9 @@ export class Device {
       });
       // What an older release kept, without all its answers (each person's `keeps` came last), is replayed again.
       const given = r && r.status !== 204 ? new Uint8Array(await r.arrayBuffer()) : undefined;
-      const k = !given && kept?.members?.people?.[this.user]?.keeps ? kept.members : await this.replay(this.user, given);
+      // Once the log is frozen, who's who is its scope database's steps after those kept; a node that isn't says so.
+      const steps = await this.api(`/v1/steps/global?from=${kept?.at || 0}`).catch(() => null);
+      const k = !given && !steps?.steps?.length && kept?.members?.people?.[this.user]?.keeps ? kept.members : await this.replay(this.user, given, steps);
       if (!k.people[this.user]) throw new Error("Your One App doesn't list you yet, so this device didn't use it.");
       this.known = k;
     }
@@ -397,6 +399,7 @@ export class Device {
   /// Signs an entry of `content` in `log` as `as` (this browser, or a passkey), after what the node has, and writes it.
   /// `content` may be a function of the entry's seq, for one that says which entry it is.
   async write(log, content, as = this.me) {
+    if (log === "global" && (await this.checked()).frozen) return this.step(content, as);
     for (let tries = 0; ; tries++) {
       const heads = await this.api(`/v1/entries?scope=${encodeURIComponent(log)}`);
       const last = heads.logs?.[as.key];
@@ -405,8 +408,26 @@ export class Device {
       try {
         return await this.api("/v1/entries", { method: "POST", body: [{ header: b64u.encode(e.header), signature: b64u.encode(e.signature), body: b64u.encode(e.body) }] });
       } catch (err) {
+        // The log froze since this browser last looked: a step, then.
+        if (log === "global" && /update this device/.test(err.message) && (await this.checked(true)).frozen) return this.step(content, as);
         // Another of the person's writes went first: once more, after it.
         if (tries || !/already|follow/.test(err.message)) throw err;
+      }
+    }
+  }
+
+  /// Once `global`'s log is frozen: `content` as a step of its scope database, signed by `as` for the next position
+  /// (src/database/steps.rs), and again for the one after while another device's goes first.
+  async step(content, as = this.me) {
+    for (let tries = 0; ; tries++) {
+      const { at } = await this.api(`/v1/steps/global?from=${Number.MAX_SAFE_INTEGER}`);
+      const { epoch } = await this.api("/v1/entries?scope=global");
+      const fields = { log: "global", at: at + 1, time: Date.now(), user: this.user, epoch };
+      const s = await signStep(as.sign, hex.decode(as.key), fields, JSON.stringify(typeof content === "function" ? content(null) : content));
+      try {
+        return await this.api("/v1/steps", { method: "POST", body: [{ header: b64u.encode(s.header), signature: b64u.encode(s.signature), body: b64u.encode(s.body) }] });
+      } catch (err) {
+        if (tries > 3 || !/taken/.test(err.message)) throw err;
       }
     }
   }

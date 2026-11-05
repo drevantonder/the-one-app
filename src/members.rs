@@ -21,6 +21,8 @@ use crate::entry::{Content, Entry, Hash, Key, Scope, hex, is_id, unhex};
 pub const APP: &str = "node";
 /// The app service, as a part of a device's oned its `service` entries switch: running apps' calls.
 pub const APPS_PART: &str = "apps";
+/// The kinds of node entry that say a release of the node's or a service's program (`release`).
+pub const RELEASES: [&str; 2] = ["node-release", "service-release"];
 /// Agents' built-in service (`src/agents.rs`), whose Vault requests are theirs: here too for the serverless node.
 pub const AGENTS: &str = "agents";
 

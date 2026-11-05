@@ -161,6 +161,13 @@ fn the_kernel_and_nodes_agree_on_keys_and_seals() {
             assert_ne!(why, "checked", "JavaScript refuses what Rust does");
         }
         assert_eq!(js(json!({ "op": "refused", "entries": [made("global", (1 << 53) - 1)] }))["refused"], json!(["checked"]));
+        // A step (src/database/steps.rs): signed alike for its position, and never taken for an entry.
+        let step = one::database::steps::sign(&key, &one::entry::Scope::Global, 7, "0123456789abcdef", 2, 1_700_000_000_123, rust.content.clone()).unwrap();
+        let fields = json!({ "log": "global", "at": 7, "time": 1_700_000_000_123u64, "user": "0123456789abcdef", "epoch": 2 });
+        let out = js(json!({ "op": "step", "seed": B64U.encode(&seed), "fields": fields, "body": String::from_utf8(rust.body.clone()).unwrap() }));
+        assert_eq!(out["signed"], step.to_json(), "the same step signed the same");
+        let b = |k: &str| B64U.decode(out["signed"][k].as_str().unwrap().as_bytes()).unwrap();
+        assert!(Entry::decode_step(&b("header"), &b("signature"), &b("body")).is_ok() && Entry::from_json(&out["signed"]).is_err(), "Rust checks it as a step, never an entry");
     }
 
     // Member entries' content (src/members.rs), as the web client builds what a browser signs (kernel/web/members.js).

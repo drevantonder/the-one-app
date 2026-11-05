@@ -168,13 +168,16 @@ pub struct Global {
     root: String,
     pack: Vec<u8>,
     have: String,
+    steps: String,
+    at: u64,
     members: String,
 }
 
 #[wasm_bindgen]
 impl Global {
     #[wasm_bindgen(constructor)]
-    pub fn new(root: String, kept: Vec<u8>, given: Vec<u8>) -> Result<Global, JsError> {
+    /// `steps`: once the log is frozen, its scope database's steps kept and given, as JSON (`members::Global::steps`).
+    pub fn new(root: String, kept: Vec<u8>, given: Vec<u8>, steps: Option<String>) -> Result<Global, JsError> {
         let root = (!root.is_empty()).then(|| one::entry::Hash::from_hex(&root)).transpose().map_err(js)?;
         let mut g = crate::members::Global::new(root);
         if !kept.is_empty() {
@@ -183,8 +186,26 @@ impl Global {
         if !given.is_empty() {
             g.add(&given).map_err(js)?;
         }
-        let members = crate::members::view(&g.members().map_err(js)?).map_err(js)?.to_string();
-        Ok(Global { root: g.root().map(|r| r.to_hex()).unwrap_or_default(), pack: g.pack(), have: g.have(), members })
+        if let Some(steps) = steps.filter(|s| !s.is_empty()) {
+            g.add_steps(&serde_json::from_str(&steps).map_err(js)?).map_err(js)?;
+        }
+        let mut view = crate::members::view_of(&g.who().map_err(js)?).map_err(js)?;
+        // Whether who's who is written as steps now (`kernel/web/device.js` `write`).
+        view["frozen"] = serde_json::json!(g.at() > 0 || g.frozen().map_err(js)?.is_some());
+        let members = view.to_string();
+        Ok(Global { root: g.root().map(|r| r.to_hex()).unwrap_or_default(), pack: g.pack(), have: g.have(), steps: g.steps().to_string(), at: g.at(), members })
+    }
+
+    /// The scope database's steps held, as JSON: to keep, and give again.
+    #[wasm_bindgen(getter)]
+    pub fn steps(&self) -> String {
+        self.steps.clone()
+    }
+
+    /// The last of them: what to ask a node for those after (`GET /v1/steps/global?from=`).
+    #[wasm_bindgen(getter)]
+    pub fn at(&self) -> f64 {
+        self.at as f64
     }
 
     /// The install's genesis, hex: to keep, and give again.

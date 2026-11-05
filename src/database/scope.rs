@@ -193,6 +193,20 @@ CREATE TABLE pages (
 CREATE TABLE forgotten (
   blob TEXT PRIMARY KEY
 ) STRICT;
+-- Once the log is frozen, what its steps name that no other table says (`steps::apply`): each blob the scope keeps,
+-- and whether a node entry other than a keep named it (a deploy's bundle), which forgetting it doesn't drop.
+CREATE TABLE blobs (
+  blob TEXT PRIMARY KEY,
+  pinned INTEGER NOT NULL
+) STRICT;
+-- And each release of the node's and services' programs a step said, its whole content (JSON), at its position.
+CREATE TABLE releases (
+  at INTEGER PRIMARY KEY,
+  kind TEXT NOT NULL,
+  content TEXT NOT NULL,
+  author TEXT NOT NULL,
+  time INTEGER NOT NULL
+) STRICT;
 ";
 
 /// A person, as the scope database names them.
