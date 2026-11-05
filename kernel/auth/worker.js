@@ -34,6 +34,12 @@
 // any other's (the sign-in code's page, a site) came back elsewhere, and its proof is passed on as `{ by_link: proof }`,
 // which the person's devices approve only by a tap, and older ones read as nothing.
 //
+// It pushes (`PUSH`, the push Worker's entrypoint for the kernel) to the person's devices, never the one asking: "<device>
+// wants in · <place>", with the action `{ join: <code> }`, when nothing approved a request within `WANTS_IN`; and
+// "<device> joined · <place>" once one is approved, opening Settings › Devices. It knows a person's devices as those that
+// asked to join as them here, or said they're theirs as they asked which wait (`devices`): only for whom to push to,
+// since a device opens a note, and acts on its code, only as the install's signed entries say.
+//
 // What an endpoint signs (`signedRequest` in shared/crypto.js, domain `one/auth`) names its route (`route: "POST
 // /api/auth/invites"`), is taken once, and counts only from one of the install's endpoints, as the relay's list says
 // (`RELAY.allowed(key)`), an admin's for what only admins do. A POST's body is the signed request; a GET's or DELETE's
@@ -53,7 +59,7 @@ import { APIError, createAuthEndpoint, createAuthMiddleware, getSessionFromCtx }
 import { setSessionCookie } from "better-auth/cookies";
 import { getMigrations } from "better-auth/db/migration";
 import { jwt } from "better-auth/plugins";
-import { b64u, checkRequest, hex, joinChallenge, joinNonce } from "../shared/crypto.js";
+import { b64u, checkRequest, hex, joinChallenge, joinCode, joinNonce } from "../shared/crypto.js";
 import { bearer, verify } from "../shared/token.js";
 import { codePage, invitePage, passkeysPage, signInPage, tryPage } from "./pages.js";
 import { DurableObjectDialect } from "./sql.js";
@@ -90,6 +96,10 @@ const refuse = (status, message) => {
 const INVITE = 30 * 86_400_000;
 /// How long a device's request to join waits.
 const REQUEST = 15 * 60_000;
+/// How long a request waits for a device to let it in by itself before its person is pushed "wants in".
+const WANTS_IN = 10_000;
+/// The most devices of one person pushed to, the newest.
+const PUSHED_TO = 20;
 /// How long a sign-in code works.
 const CODE = 10 * 60_000;
 /// How lately someone signed in for a client to be added as them, or a passkey added.
@@ -169,8 +179,14 @@ export class Auth extends DurableObject {
     if (!columns.includes("genesis")) sql.exec("alter table requests add column genesis text");
     if (!columns.includes("place")) sql.exec("alter table requests add column place text");
     if (!columns.includes("device")) sql.exec("alter table requests add column device text");
-    // Whether its sign-in was finished from a link opened elsewhere (`signsInHere`).
+    // Whether its sign-in was finished from a link opened elsewhere (`signsInHere`), and when its person was pushed
+    // that it wants in.
     if (!columns.includes("by_link")) sql.exec("alter table requests add column by_link integer");
+    if (!columns.includes("told")) sql.exec("alter table requests add column told integer");
+    // A person's devices, by key, as they asked to join here or said they're theirs, for pushes.
+    sql.exec("create table if not exists devices (key text primary key, user text not null, at integer not null)");
+    // Devices whose request was turned down, whose person isn't pushed again when they ask again.
+    sql.exec("create table if not exists refused (key text primary key, at integer not null)");
     // Services asked to join here before oned listed them itself.
     for (const old of ["services", "enrollments", "service_requests", "service_asks"]) sql.exec(`drop table if exists ${old}`);
     // The people who sign in only with a passkey: admins.
@@ -533,7 +549,7 @@ export class Auth extends DurableObject {
     if (device != null && !KEY.test(device)) refuse(400, "a device is 64 hex characters");
     this.expire();
     const sql = this.ctx.storage.sql;
-    const [had] = sql.exec("select user, seal, approved from requests where key = ?", key).toArray();
+    const [had] = sql.exec("select user, seal, approved, told from requests where key = ?", key).toArray();
     if (had && had.user !== user) refuse(409, "Another person's device asked with that key.");
     // Asked again once it's approved (it restarted while waiting): still approved, for it to see.
     if (had?.approved && had.seal === seal) return { until: had.approved + REQUEST };
@@ -545,8 +561,51 @@ export class Auth extends DurableObject {
     const made = Date.now();
     // Where it asked from, as Cloudflare places it: its city, shown beside its code.
     const place = typeof request.cf?.city === "string" ? request.cf.city.slice(0, 64) : null;
-    sql.exec("insert or replace into requests (key, seal, name, user, proof, invite, made, approved, place, device, by_link) values (?, ?, ?, ?, ?, ?, ?, null, ?, ?, ?)", key, seal, name.trim(), user, proof ?? null, invite?.id ?? null, made, place, device ?? null, here ? null : 1);
+    // Asked again while it waits: its person isn't pushed again.
+    const told = had && had.user === user && had.seal === seal ? had.told : null;
+    sql.exec("insert or replace into requests (key, seal, name, user, proof, invite, made, approved, place, device, by_link, told) values (?, ?, ?, ?, ?, ?, ?, null, ?, ?, ?, ?)", key, seal, name.trim(), user, proof ?? null, invite?.id ?? null, made, place, device ?? null, here ? null : 1, told);
+    this.theirs(key, user);
+    if (!told) await this.wantsInBy(made + WANTS_IN);
     return { until: made + REQUEST };
+  }
+
+  /// Keeps `key` as one of `user`'s devices, for pushes.
+  theirs(key, user) {
+    this.ctx.storage.sql.exec("insert or replace into devices (key, user, at) values (?, ?, ?)", key, user, Date.now());
+  }
+
+  /// Wakes by `at` to push "wants in" for requests still waiting then.
+  async wantsInBy(at) {
+    const now = await this.ctx.storage.getAlarm();
+    if (now == null || now > at) await this.ctx.storage.setAlarm(at);
+  }
+
+  /// Pushes "wants in" for each request nothing approved within `WANTS_IN`, once, and wakes again for the next.
+  async alarm() {
+    this.expire();
+    const sql = this.ctx.storage.sql;
+    const due = Date.now() - WANTS_IN;
+    for (const r of sql.exec("select * from requests where approved is null and told is null and made <= ?", due).toArray()) {
+      sql.exec("update requests set told = ? where key = ?", Date.now(), r.key);
+      if (sql.exec("select 1 from refused where key = ?", r.key).toArray().length) continue;
+      await this.push(r, { title: `${r.name} wants in${r.place ? ` · ${r.place}` : ""}`, action: { join: await joinCode(hex.decode(r.key), hex.decode(r.seal)) } });
+    }
+    const [next] = sql.exec("select min(made) as at from requests where approved is null and told is null").toArray();
+    if (next?.at != null) await this.ctx.storage.setAlarm(Math.max(next.at + WANTS_IN, Date.now() + 1000));
+  }
+
+  /// Pushes a note about the request `r` to its person's devices, but the one asking: tapping it opens Settings ›
+  /// Devices. Never fails what it's said with.
+  async push(r, note) {
+    if (!this.env.PUSH) return;
+    const to = this.ctx.storage.sql.exec("select key from devices where user = ? and key != ? order by at desc limit ?", r.user, r.key, PUSHED_TO).toArray();
+    if (!to.length) return;
+    const plain = { id: hex16(), app: "settings", screen: "devices", ...note };
+    try {
+      await this.env.PUSH.send(to.map(({ key }) => ({ to: key, plain })));
+    } catch (err) {
+      console.error(`pushing "${note.title}": ${err.stack || err}`);
+    }
   }
 
   /// Requests to join, as they're shown: with the person's name, and whether one was approved.
@@ -562,16 +621,19 @@ export class Auth extends DurableObject {
 
   /// Requests waiting: the signed-in person's own devices', or, for a signed request from one of the install's
   /// devices, every one: a device approves only its own person's, or a newcomer's whose invite its person keeps, as
-  /// the entries it writes count only then.
+  /// the entries it writes count only then. Signed in and signed both, it's their device asking: kept as theirs, for
+  /// pushes, and shown their own.
   async requests(request) {
     this.expire();
     const sql = this.ctx.storage.sql;
-    const signed = await this.signed(request);
-    if (signed) {
+    const user = bearer(request) ? await this.person(request) : null;
+    const signed = user ? await this.signed(request).catch(() => null) : await this.signed(request);
+    if (signed && !user) {
       return { requests: this.shown(sql.exec("select * from requests where approved is null order by made").toArray()) };
     }
-    const user = (await this.person(request)) || refuse(401, "Sign in first.");
-    return { requests: this.shown(sql.exec("select * from requests where user = ? and approved is null order by made", user).toArray()) };
+    if (signed) this.theirs(signed.by, user);
+    const theirs = user || (await this.person(request)) || refuse(401, "Sign in first.");
+    return { requests: this.shown(sql.exec("select * from requests where user = ? and approved is null order by made", theirs).toArray()) };
   }
 
   /// A request by its device's key, if the asker may see it: its person, or one of the install's devices.
@@ -597,12 +659,18 @@ export class Auth extends DurableObject {
     const row = await this.mayTouch(request, key);
     // Approved again (a retry, or a second approving device): marked once, never forgotten by it.
     if (approved) {
-      if (!row.approved) this.ctx.storage.sql.exec("update requests set approved = ?, genesis = ? where key = ?", Date.now(), /^[0-9a-f]{64}$/.test(genesis || "") ? genesis : null, key);
+      if (!row.approved) {
+        this.ctx.storage.sql.exec("update requests set approved = ?, genesis = ? where key = ?", Date.now(), /^[0-9a-f]{64}$/.test(genesis || "") ? genesis : null, key);
+        await this.push(row, { title: `${row.name} joined${row.place ? ` · ${row.place}` : ""}` });
+      }
       return {};
     }
-    // Refused: what its sign-in showed goes too, so asking again shows nothing a device lets it in by.
+    // Refused: what its sign-in showed goes too, so asking again shows nothing a device lets it in by, nor pushes.
     this.ctx.storage.sql.exec("delete from requests where key = ?", key);
     this.ctx.storage.sql.exec("delete from proofs where key = ?", key);
+    this.ctx.storage.sql.exec("delete from devices where key = ?", key);
+    this.ctx.storage.sql.exec("delete from refused where at <= ?", Date.now() - 30 * 86_400_000);
+    this.ctx.storage.sql.exec("insert or replace into refused (key, at) values (?, ?)", key, Date.now());
     return {};
   }
 

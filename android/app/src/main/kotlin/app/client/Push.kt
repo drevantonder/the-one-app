@@ -66,6 +66,8 @@ object Push {
         // A join's taps open Settings › Devices, where it waits too; anything else the app screen it names, or the app.
         val link = when {
             join != null -> "${BuildConfig.CLI}://settings/devices"
+            // Settings' own screens (Settings › Devices, where a device that joined is) are this app's, not an app's.
+            note.app == "settings" -> "${BuildConfig.CLI}://settings/${enc(note.screen)}"
             note.app.isNotEmpty() -> "${BuildConfig.CLI}://app/${enc(note.app)}/${enc(note.screen.ifEmpty { "main" })}" +
                 if (note.params == "{}") "" else "?params=${enc(note.params)}"
             else -> null

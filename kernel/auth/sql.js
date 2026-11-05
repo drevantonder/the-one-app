@@ -3,13 +3,18 @@
 
 import { SqliteAdapter, SqliteIntrospector, SqliteQueryCompiler } from "kysely";
 
+/// A query as it's run here: one that lists the tables (Better Auth's migrations, as they compare its tables and their
+/// indexes with its own) lists only the database's, not the Durable Object's (`_cf_…`, where its alarm is kept), which
+/// it may not read: listing their columns or indexes would fail it all.
+const ours = (sql) => sql.replace(/"?sqlite_master"?/g, "(select * from sqlite_master where substr(name, 1, 4) != '_cf_')");
+
 class Connection {
   constructor(sql) {
     this.sql = sql;
   }
 
   async executeQuery({ sql, parameters }) {
-    const cursor = this.sql.exec(sql, ...parameters.map((p) => (p instanceof Date ? p.toISOString() : typeof p === "boolean" ? Number(p) : p)));
+    const cursor = this.sql.exec(ours(sql), ...parameters.map((p) => (p instanceof Date ? p.toISOString() : typeof p === "boolean" ? Number(p) : p)));
     const rows = cursor.toArray();
     return { rows, numAffectedRows: BigInt(cursor.rowsWritten) };
   }

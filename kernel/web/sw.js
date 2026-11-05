@@ -5,7 +5,7 @@
 //
 // And its notifications: a push (kernel/push/) carries a note sealed to one of this browser's devices (one per person
 // signed in here), which it opens with that device's seal key, kept in IndexedDB where it can't be read out
-// (device.js), and shows; tapping it opens the app screen it names. A note it can't open still shows that one came, as
+// (device.js), and shows; tapping it opens the screen it names. A note it can't open still shows that one came, as
 // browsers require of every push.
 const KEPT = "one.page";
 const PLACES = /^\/($|page\/|services\/|app\/|settings($|\/)|vault$)/;
@@ -41,7 +41,9 @@ addEventListener("notificationclick", (e) => {
   const link = e.notification.data?.link;
   const q = new URLSearchParams();
   if (link && Object.keys(link.params).length) q.set("params", JSON.stringify(link.params));
-  const to = link ? `/app/${encodeURIComponent(link.app)}/${encodeURIComponent(link.screen)}${q.size ? `?${q}` : ""}` : "/";
+  // Settings' own screens (Settings › Devices, which a device asking to join opens) are the client's, not an app's.
+  const place = link?.app === "settings" ? `/settings/${encodeURIComponent(link.screen)}` : link ? `/app/${encodeURIComponent(link.app)}/${encodeURIComponent(link.screen)}` : "/";
+  const to = `${place}${link && q.size ? `?${q}` : ""}`;
   e.waitUntil(
     clients.matchAll({ type: "window", includeUncontrolled: true }).then(async (open) => {
       const here = open.find((c) => new URL(c.url).origin === location.origin);

@@ -1,9 +1,10 @@
 # Plan: a new device gets in by its sign-in
 
-Andre's decision, 2026-11-05. Built on 2026-11-05 but for what's left below: the code is `src/sign_in_proof.rs` (the checks), `kernel/auth/worker.js` (the nonce, the challenge, passing the proof on, telling a sign-in from a link), `src/node/devices.rs` and `kernel/web/web.js` (approving by it), and Settings › Devices (joined).
+Andre's decision, 2026-11-05. Built on 2026-11-05 but for what's left below: the code is `src/sign_in_proof.rs` (the checks), `kernel/auth/worker.js` (the nonce, the challenge, passing the proof on, telling a sign-in from a link, and the pushes), `src/node/devices.rs` and `kernel/web/web.js` (approving by it), and Settings › Devices (joined).
 
 Left:
-- Push: a silent push that wakes the phone to check, "wants in" when nothing let it in within a few seconds, and "joined" as a push. The iPhone, iPad, Mac, Android and Windows apps already show a note whose action is `{ "join": "<code>" }` with Approve and Not Me (`apple/Shared/Notes.swift`, `android/…/Push.kt`, `windows/Notes.cs`); nothing sends one yet.
+- Push: a silent push that wakes the phone to check. Auth pushes "wants in" (with the action `{ "join": "<code>" }`, which the apps show with Approve and Not Me: `apple/Shared/Notes.swift`, `android/…/Push.kt`, `windows/Notes.cs`) when nothing let a device in within 10 seconds, and "joined" once one is; a phone woken by "wants in" approves only through its normal approval path.
+- Auth knows whom to push to as the devices that asked to join as that person, and browsers that say they're theirs as they look for devices waiting. Native apps that joined before 2026-11-05's pushes aren't known until they sign in again.
 - A passkey's public key is recorded from what auth holds when a device that signed in with it is approved by its code, so a tampered auth then could slip in its own: as with a tampered auth deploy, "joined · Remove" is what shows it.
 
 ## Today

@@ -486,7 +486,9 @@ export class Device {
   /// Devices waiting to be let in that this browser may approve: its person's own, and for an admin, those of people
   /// they invited from this browser, whose proof is right. Each with its code.
   async requests() {
-    const own = (await answer(await this.bearer("/api/auth/devices/requests"))).requests || [];
+    // Signed too, so auth knows this browser's device as its person's, to push to.
+    const mine = await this.signed("one/auth", { route: "GET /api/auth/devices/requests" });
+    const own = (await answer(await this.bearer("/api/auth/devices/requests", { headers: { "x-one-request": b64u.encode(text.encode(JSON.stringify(mine))) } }))).requests || [];
     const invited = (await this.checked()).people[this.user]?.invites ? (await this.authSigned("GET", "/api/auth/devices/requests").catch(() => ({}))).requests || [] : [];
     const all = [...own, ...invited].filter((r, i, a) => !r.service && r.key !== this.me.key && a.findIndex((x) => x.key === r.key) === i);
     const ours = await Promise.all(all.map(async (r) => r.user === this.user || (await this.invitedHere(r))));

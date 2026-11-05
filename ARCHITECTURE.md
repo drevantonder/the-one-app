@@ -40,7 +40,7 @@ Key, log, view, blob, call, app. Scopes, devices, deploys, services, the Vault a
 - A service in a wrapper of ours: its own OS user, only its own folder, no keys, the network only where it says, so the sandbox protects a node, not who wrote the code. The release key signs only what we ship (oned, the node, built-in apps), never a network's own code: an app's deploy, signed by whoever deployed it, carries the hash of each platform's build of its service, and a node runs only a build whose hash matches.
 - Each app one folder in `apps/`, its service's source beside its `app.js`, and each service its own program: none built into the node (today Shell, Models, AGENTS.md and Agent Devices are) or the Mac app (iMessage, Calendar, Contacts and Reminders, whose macOS permissions belong to the Mac app, so they may ship as helpers inside it).
 - Adding an app as desired state: the App Store only records it, and the core deploys it and runs its service on the node the person chose while adding it.
-- The rest of `docs/plan-device-approval.md`: a push that wakes the phone to check a new device's sign-in, one that asks "wants in" when nothing let it in, and "joined" as a push.
+- The rest of `docs/plan-device-approval.md`: a push that wakes the phone to check a new device's sign-in.
 - Native apps keeping their own sealed copy, for reads with no network; writes while offline, replayed like a rebase, never repeating what went outside.
 
 ## Where to look

@@ -102,6 +102,8 @@ public static class Notes
     static string Opens(uniffi.one_client_ffi.Note note)
     {
         if (Join(note) != null) return $"{WhiteLabel.Cli}://settings/devices";
+        // Settings' own screens (Settings › Devices, where a device that joined is) are this app's, not an app's.
+        if (note.App == "settings") return $"{WhiteLabel.Cli}://settings/{Uri.EscapeDataString(note.Screen)}";
         if (note.App.Length == 0) return $"{WhiteLabel.Cli}://open";
         var screen = note.Screen.Length > 0 ? note.Screen : "main";
         var link = $"{WhiteLabel.Cli}://open?app={Uri.EscapeDataString(note.App)}&screen={Uri.EscapeDataString(screen)}";

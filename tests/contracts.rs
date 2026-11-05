@@ -443,11 +443,9 @@ async fn what_a_native_app_keeps_of_its_calls_is_its_persons_alone() {
 /// sealed. Only the install's devices register or send, each request once.
 #[test]
 fn a_note_reaches_only_the_device_it_was_sealed_to() {
-    use aes_gcm::aead::{Aead, KeyInit};
     use data_encoding::{BASE64, BASE64URL_NOPAD as B64U, HEXLOWER};
     use ed25519_dalek::SigningKey;
-    use one::push::{self, Address, Note};
-    use ring::agreement;
+    use one::push::{self, Note};
 
     let node = SigningKey::from_bytes(&rand::random());
     let phone = SigningKey::from_bytes(&rand::random());
@@ -456,12 +454,9 @@ fn a_note_reaches_only_the_device_it_was_sealed_to() {
     let post = |path: &str, body: serde_json::Value| crate::kernel::post(&format!("{}{path}", k.address), &[], body);
 
     // A browser's subscription: its key pair and secret, as the push service would hand them to the Worker.
-    let rng = ring::rand::SystemRandom::new();
-    let ua = agreement::EphemeralPrivateKey::generate(&agreement::ECDH_P256, &rng).unwrap();
-    let ua_public = ua.compute_public_key().unwrap().as_ref().to_vec();
-    let auth: [u8; 16] = rand::random();
+    let subscription = crate::kernel::Subscription::new();
     let endpoint = "https://fcm.googleapis.com/fcm/send/the-phone";
-    let address = Address { via: "webpush".into(), address: endpoint.into(), keys: Some(json!({ "p256dh": B64U.encode(&ua_public), "auth": B64U.encode(&auth) })), ..Default::default() };
+    let address = subscription.address(endpoint);
     let phone_seal = one::keys::Endpoint::of(&phone).seal;
     let register = push::register_request(&phone, &phone_seal, &address, now()).unwrap();
     assert_eq!(post("/push/register", register.clone()), (200, json!({ "registered": true })), "the install's device registers");
@@ -486,17 +481,7 @@ fn a_note_reaches_only_the_device_it_was_sealed_to() {
     assert_eq!((got["url"].as_str(), got["headers"]["content-encoding"].as_str()), (Some(endpoint), Some("aes128gcm")));
     let vapid: serde_json::Value = agent.get(format!("{}/push/key", k.address)).call().unwrap().body_mut().read_json().unwrap();
     assert!(got["headers"]["authorization"].as_str().unwrap().ends_with(&format!(", k={}", vapid["vapid"].as_str().unwrap())), "signed with the install's VAPID key");
-    let body = BASE64.decode(got["body"].as_str().unwrap().as_bytes()).unwrap();
-    let (salt, id_len) = (&body[..16], body[20] as usize);
-    let as_public = &body[21..21 + id_len];
-    let hkdf = |salt: &[u8], ikm: &[u8], info: &[u8], out: &mut [u8]| hkdf::Hkdf::<sha2::Sha256>::new(Some(salt), ikm).expand(info, out).unwrap();
-    let shared = agreement::agree_ephemeral(ua, &agreement::UnparsedPublicKey::new(&agreement::ECDH_P256, as_public), |s| s.to_vec()).unwrap();
-    let (mut ikm, mut cek, mut nonce) = ([0u8; 32], [0u8; 16], [0u8; 12]);
-    hkdf(&auth, &shared, &[b"WebPush: info\0".as_slice(), &ua_public, as_public].concat(), &mut ikm);
-    hkdf(salt, &ikm, b"Content-Encoding: aes128gcm\0", &mut cek);
-    hkdf(salt, &ikm, b"Content-Encoding: nonce\0", &mut nonce);
-    let mut plain = aes_gcm::Aes128Gcm::new(&cek.into()).decrypt(&nonce.into(), &body[21 + id_len..]).unwrap();
-    assert_eq!(plain.pop(), Some(2), "one record, the last");
+    let plain = subscription.open(&BASE64.decode(got["body"].as_str().unwrap().as_bytes()).unwrap());
     let plain = B64U.decode(&plain).expect("Web Push carries the note as base64url text");
     assert_eq!(plain, sealed, "the Worker carried the sealed note as it was");
     let (opened, by) = push::open_note(&one::keys::seal_secret(&phone), &plain).unwrap();

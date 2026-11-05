@@ -51,6 +51,14 @@ enum Push {
             return nil
         }
         guard let link = info["link"] as? [String: Any], let app = link["app"] as? String else { return nil }
+        // Settings' own screens (Settings › Devices, where a device that joined is) are this app's, not an app's.
+        if app == "settings" {
+            var url = URLComponents()
+            url.scheme = Auth.cli
+            url.host = "settings"
+            url.path = "/\(link["screen"] as? String ?? "")"
+            return url.url
+        }
         let params = (link["params"] as? [String: Any]).flatMap { try? JSONSerialization.data(withJSONObject: $0) }.map { String(decoding: $0, as: UTF8.self) } ?? "{}"
         var url = URLComponents()
         url.scheme = Auth.cli

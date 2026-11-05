@@ -508,6 +508,99 @@ fn a_sign_in_finished_from_a_link_lets_its_device_in_only_by_a_tap() {
     assert_eq!(carried("/elsewhere")["lets_in"], false);
 }
 
+/// A browser's push subscription, as its push service hands it to the push Worker and decrypts what's pushed to it
+/// (RFC 8291): good for one push, as its key pair is.
+pub(crate) struct Subscription {
+    key: ring::agreement::EphemeralPrivateKey,
+    pub(crate) public: Vec<u8>,
+    pub(crate) auth: [u8; 16],
+}
+
+impl Subscription {
+    pub(crate) fn new() -> Subscription {
+        let key = ring::agreement::EphemeralPrivateKey::generate(&ring::agreement::ECDH_P256, &ring::rand::SystemRandom::new()).unwrap();
+        Subscription { public: key.compute_public_key().unwrap().as_ref().to_vec(), key, auth: rand::random() }
+    }
+
+    /// Where the push Worker reaches it, at `endpoint`.
+    pub(crate) fn address(&self, endpoint: &str) -> one::push::Address {
+        one::push::Address { via: "webpush".into(), address: endpoint.into(), keys: Some(json!({ "p256dh": B64U.encode(&self.public), "auth": B64U.encode(&self.auth) })), ..Default::default() }
+    }
+
+    /// What the push service got (`body`, aes128gcm), decrypted: the push's text.
+    pub(crate) fn open(self, body: &[u8]) -> Vec<u8> {
+        use aes_gcm::aead::{Aead, KeyInit};
+        let (salt, id_len) = (&body[..16], body[20] as usize);
+        let as_public = &body[21..21 + id_len];
+        let hkdf = |salt: &[u8], ikm: &[u8], info: &[u8], out: &mut [u8]| hkdf::Hkdf::<sha2::Sha256>::new(Some(salt), ikm).expand(info, out).unwrap();
+        let shared = ring::agreement::agree_ephemeral(self.key, &ring::agreement::UnparsedPublicKey::new(&ring::agreement::ECDH_P256, as_public), |s| s.to_vec()).unwrap();
+        let (mut ikm, mut cek, mut nonce) = ([0u8; 32], [0u8; 16], [0u8; 12]);
+        hkdf(&self.auth, &shared, &[b"WebPush: info\0".as_slice(), &self.public, as_public].concat(), &mut ikm);
+        hkdf(salt, &ikm, b"Content-Encoding: aes128gcm\0", &mut cek);
+        hkdf(salt, &ikm, b"Content-Encoding: nonce\0", &mut nonce);
+        let mut plain = aes_gcm::Aes128Gcm::new(&cek.into()).decrypt(&nonce.into(), &body[21 + id_len..]).unwrap();
+        assert_eq!(plain.pop(), Some(2), "one record, the last");
+        plain
+    }
+}
+
+/// What auth pushes about a device asking to join is what the apps read (src/push.rs's `Note`): to its person's other
+/// devices, never the one asking, "<device> wants in" with the action `{ join: <code> }` (`keys::join_code`, which the
+/// apps' Approve and Not Me send their node) once nothing let it in within a few seconds, and "<device> joined" once
+/// one did, each opening Settings › Devices.
+#[test]
+fn a_device_asking_to_join_is_pushed_to_its_persons_other_devices() {
+    use data_encoding::{BASE64, HEXLOWER};
+    let (admin, admin_hex) = endpoint();
+    let (phone, phone_hex) = endpoint();
+    let k = Kernel::for_devices(vec![admin_hex, phone_hex.clone()]);
+    let (secret, _) = invited(&k, &admin, "Andre", None);
+    let passkey = k.passkey();
+    let mut andre = k.browser();
+    let (_, options, _) = andre.get(&format!("/api/auth/passkey/generate-register-options?context={secret}"));
+    assert_eq!(andre.post("/api/auth/passkey/verify-registration", json!({ "response": passkey.create(&options), "createSession": true })).0, 200);
+    let ask = |b: &mut Browser, d: &one::keys::Endpoint| {
+        let (status, out) = b.post("/api/auth/devices/requests", json!({ "key": HEXLOWER.encode(&d.key), "seal": HEXLOWER.encode(&d.seal), "name": "MacBook Pro" }));
+        assert_eq!(status, 200, "{out}");
+    };
+    // Their phone joined as theirs, and gets pushes.
+    let phone_at = one::keys::Endpoint::of(&phone);
+    ask(&mut andre, &phone_at);
+    let endpoint = "https://fcm.googleapis.com/fcm/send/the-phone";
+    let register = |sub: &Subscription| {
+        let body = one::push::register_request(&phone, &phone_at.seal, &sub.address(endpoint), now()).unwrap();
+        assert_eq!(post(&format!("{}/push/register", k.address), &[], body).0, 200);
+    };
+    let pushed = |sub: Subscription| -> Vec<one::push::Note> {
+        let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).build().into();
+        let got: Value = agent.get(format!("{}/pushes", k.sites)).call().unwrap().body_mut().read_json().unwrap();
+        let mut sub = Some(sub);
+        got.as_array().unwrap().iter().filter(|p| p["url"] == endpoint).map(|p| {
+            let text = sub.take().expect("one push to the phone").open(&BASE64.decode(p["body"].as_str().unwrap().as_bytes()).unwrap());
+            let (note, by) = one::push::open_note(&one::keys::seal_secret(&phone), &B64U.decode(&text).unwrap()).unwrap();
+            assert_eq!(by, None, "from the kernel");
+            note
+        }).collect()
+    };
+    let sub = Subscription::new();
+    register(&sub);
+    // A new device asks, and nothing lets it in.
+    let mac = one::keys::Endpoint::of(&ed25519_dalek::SigningKey::from_bytes(&rand::random()));
+    ask(&mut andre, &mac);
+    assert!(pushed(Subscription::new()).is_empty(), "not before nothing let it in");
+    std::thread::sleep(std::time::Duration::from_secs(12));
+    let notes = pushed(sub);
+    assert_eq!(notes.len(), 1, "{notes:?}");
+    assert_eq!((notes[0].title.as_str(), notes[0].app.as_str(), notes[0].screen.as_str()), ("MacBook Pro wants in", "settings", "devices"));
+    assert_eq!(notes[0].action, Some(json!({ "join": one::keys::join_code(&mac) })));
+    // Approved: it joined.
+    let sub = Subscription::new();
+    register(&sub);
+    assert_eq!(andre.delete(&format!("/api/auth/devices/requests/{}?approved", HEXLOWER.encode(&mac.key))).0, 200);
+    let notes = pushed(sub);
+    assert_eq!(notes.iter().map(|n| (n.title.as_str(), n.screen.as_str(), n.action.is_none())).collect::<Vec<_>>(), [("MacBook Pro joined", "devices", true)]);
+}
+
 /// The install the test kernels are for: its first entry's hash, as the device deploying them holds it.
 const GENESIS: [u8; 32] = [5; 32];
 
