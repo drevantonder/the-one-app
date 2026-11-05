@@ -29,7 +29,7 @@ pub(super) struct Session {
 pub(super) struct Sessions {
     /// By a hash of the token.
     pub kept: Mutex<HashMap<[u8; 32], Session>>,
-    /// The auth service at the install's address, whose keys check the tokens calls come with.
+    /// Sign-in at the install's address, whose keys check the tokens calls come with.
     issuer: Mutex<Option<Arc<crate::cloudflare::Issuer>>>,
     /// The databases opened with keys a caller handed (or standing work's grant), each kept open for calls handed
     /// exactly those keys, and forgotten with them: once their last session or grant ends, or no live session holds
@@ -76,7 +76,7 @@ impl Session {
 }
 
 /// What a client device's calls over iroh are kept by here, as a sign-in's are by its token: its key, proven by QUIC.
-/// It's never a token anyone sends: no auth service signs it, and the API takes a bearer token only as a sign-in it
+/// It's never a token anyone sends: no sign-in signs it, and the API takes a bearer token only as a sign-in it
 /// checks (or its own MCP's ticket, `api::AskingAs`), so no request reaches what a device was handed by naming it.
 pub fn client_token(key: &Key) -> String {
     format!("{CLIENT}{}", hex(key))
@@ -100,7 +100,7 @@ fn client_of(token: &str) -> Option<Key> {
 
 /// What calls another node passed on for `user` with no sign-in are kept by here (the serverless node's, or a
 /// machine's): that node's endpoint key, proven by QUIC, and the person it says the call is for. Like a client
-/// device's, no auth service signs it, so it's never a token anyone sends, and what it was handed (sealed here for
+/// device's, no sign-in signs it, so it's never a token anyone sends, and what it was handed (sealed here for
 /// that node's key) opens only that person's calls from it.
 pub fn passed_token(key: &Key, user: &str) -> String {
     format!("{PASSED}{}/{user}", hex(key))
@@ -143,7 +143,7 @@ fn hash(token: &str) -> [u8; 32] {
 }
 
 impl Node {
-    /// The auth service at the install's address, as this device checks the tokens it's given.
+    /// Sign-in at the install's address, as this device checks the tokens it's given.
     pub fn issuer(&self) -> Result<Arc<crate::cloudflare::Issuer>> {
         let address = self.address()?;
         let iss = crate::cloudflare::Issuer::new(&address).iss;
@@ -154,7 +154,7 @@ impl Node {
         })
     }
 
-    /// A token another device passed on with a call as `user`'s, if it is theirs: an access token the install's auth
+    /// A token another device passed on with a call as `user`'s, if it is theirs: an access token the install's sign-in
     /// service signed for them, not yet expired.
     pub(super) async fn token_of(&self, token: &str, user: &str) -> Option<String> {
         let issuer = self.issuer().ok()?;
@@ -242,7 +242,7 @@ impl Node {
         Ok(())
     }
 
-    /// When an access token expires, if the install's auth service signed it: milliseconds.
+    /// When an access token expires, if the install's sign-in signed it: milliseconds.
     fn token_expiry(&self, token: &str) -> Option<u64> {
         let claims = self.issuer().ok()?.verify(token, now_ms()).ok()?;
         Some(claims.exp.saturating_mul(1000))

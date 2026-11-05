@@ -14,8 +14,13 @@ use super::*;
 
 /// The install's Workers: each one's name, its module, and its Durable Object's class, if it keeps anything. Each
 /// one's WebAssembly is the `.wasm` files in its module's folder, modules of its own (Workers can't compile it).
+///
+/// Sign-in's Worker is still called `auth` on Cloudflare (`<cli>-auth`, its address's host, its `AUTH` bindings) and
+/// its Durable Object `Auth`, which holds every person's passkeys and accounts, as are the paths under `/api/auth` that
+/// passkeys, Google's redirect URI, OAuth clients and access tokens' issuer name, and `one/auth`, what devices sign
+/// their requests to it under: renaming them would move every install's sign-in, and older devices would stop reaching it.
 pub const WORKERS: &[(&str, &str, Option<&str>)] = &[
-    ("auth", "auth/worker.js", Some("Auth")),
+    ("auth", "sign-in/worker.js", Some("Auth")),
     ("relay", "relay/worker.js", Some("Relay")),
     ("signer", "signer/worker.js", None),
     ("mcp", "mcp/worker.js", Some("Client")),
@@ -59,16 +64,16 @@ pub fn modules_of(service: &str, entry: &str, serverless: Option<&Modules>) -> O
 pub struct Settings {
     /// The install's name, as sign-in screens say it.
     pub name: String,
-    /// The install's address, the one people use: the gateway's, which sends sign-in to the auth service, MCP to the MCP
+    /// The install's address, the one people use: the gateway's, which sends sign-in to the sign-in, MCP to the MCP
     /// Worker, the relay's paths to the relay and the rest to the web client. Passkeys belong to its host name, so it
     /// doesn't change.
     pub address: String,
-    /// Where the CLI's Cloudflare commands reach the auth service; people reach it at the address.
-    pub auth_url: String,
+    /// Where the CLI's Cloudflare commands reach sign-in; people reach it at the address.
+    pub sign_in_url: String,
     /// Whether the install has a serverless node (`serverless deploy`), which the relay wakes.
     #[serde(default)]
     pub serverless: bool,
-    /// The local ports the auth service and the gateway listen on, when this machine runs them. The other services
+    /// The local ports the sign-in and the gateway listen on, when this machine runs them. The other services
     /// have none: other Workers reach them by binding.
     pub ports: [u16; 2],
     /// The install's devices (`{ key, role, admin }`: key in hex, roles joined by spaces), and its recovery key as a
@@ -314,7 +319,7 @@ impl Settings {
         Settings {
             name: name.into(),
             address: address.trim_end_matches('/').into(),
-            auth_url: format!("http://127.0.0.1:{}", ports[0]),
+            sign_in_url: format!("http://127.0.0.1:{}", ports[0]),
             serverless: false,
             serverless_key: data_encoding::HEXLOWER.encode(&rand::random::<[u8; 32]>()),
             ports,
@@ -338,7 +343,7 @@ impl Settings {
         let free = || -> Result<u16> { Ok(std::net::TcpListener::bind("127.0.0.1:0")?.local_addr()?.port()) };
         let ports = [free()?, free()?];
         let mut settings = Settings::new("Throwaway", &format!("http://127.0.0.1:{}", ports[1]));
-        settings.auth_url = format!("http://127.0.0.1:{}", ports[0]);
+        settings.sign_in_url = format!("http://127.0.0.1:{}", ports[0]);
         settings.ports = ports;
         settings.throwaway_person = Some(person);
         // Its node serves its data there (throwaway::bucket), signatures unchecked: the URL signer holds these.
@@ -395,7 +400,7 @@ impl Settings {
     /// other Workers' bindings reach.
     pub fn place(&self, service: &str) -> Option<(&str, u16)> {
         let i = ["auth", "gateway"].iter().position(|s| *s == service)?;
-        Some(([&self.auth_url, &self.address][i].as_str(), self.ports[i]))
+        Some(([&self.sign_in_url, &self.address][i].as_str(), self.ports[i]))
     }
 
     /// Each service's bindings: (name, value, whether it's secret). A value `service:<name>` is another service,
@@ -1163,7 +1168,7 @@ pub const INVITE_DAYS: u64 = 3;
 
 /// Invites someone to join the install at `address`, `name` only a label, as `user` (who they'll be in the install; a
 /// new id if not given), and where people sign in with Google, as the Google account `email`. The link's secret is
-/// made here and never leaves but in the link: the auth service is told only its hash, in a request signed with
+/// made here and never leaves but in the link: sign-in is told only its hash, in a request signed with
 /// `key`, an admin's device's.
 pub fn invite(address: &str, key: &ed25519_dalek::SigningKey, name: &str, user: Option<&str>, email: Option<&str>) -> Result<Invite> {
     ensure!(!name.trim().is_empty(), "give their name");
@@ -1179,7 +1184,7 @@ pub fn invite(address: &str, key: &ed25519_dalek::SigningKey, name: &str, user: 
     let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).timeout_global(Some(Duration::from_secs(30))).build().into();
     let mut resp = agent.post(format!("{address}/api/auth/invites")).send_json(crate::keys::signed_request(key, "one/auth", fields, now))?;
     let out: Value = resp.body_mut().read_json().unwrap_or(Value::Null);
-    ensure!(resp.status() == 200, "{}", out["error"].as_str().unwrap_or("the auth service made no invite"));
+    ensure!(resp.status() == 200, "{}", out["error"].as_str().unwrap_or("sign-in made no invite"));
     Ok(Invite { link: format!("{address}/invite#{secret}"), user, until })
 }
 

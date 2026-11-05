@@ -29,8 +29,8 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
-// Signing in, as every client of the install's auth service does (cloudflare/web/web.js is the same in a browser): this
-// app registers itself as an OAuth client, sends the person to the auth service's sign-in and consent in a Custom Tab
+// Signing in, as every client of the install's sign-in does (cloudflare/web/web.js is the same in a browser): this
+// app registers itself as an OAuth client, sends the person to signing in and consent at sign-in in a Custom Tab
 // (Chrome, where a passkey's PRF works), and comes back at <cli>://signed-in/ with a code that PKCE turns into tokens.
 // The refresh token is kept sealed by a key in this device's keystore, which never leaves it.
 
@@ -103,14 +103,14 @@ class SignIn(private val context: Context) {
         val revocation_endpoint: String? = null,
     )
 
-    /** The auth service's endpoints, as it says them. */
+    /** Sign-in's endpoints, as it says them. */
     private suspend fun meta(): Meta {
         val r = http("GET", "${address ?: throw NodeError("Enter the address first.")}/.well-known/oauth-authorization-server")
         if (r.status != 200) throw NodeError("Can’t reach that address. Check it, and that you’re online.")
         return json.decodeFromString(r.text)
     }
 
-    /** This app, as a client of the auth service: registered the first time it signs in at an address. */
+    /** This app, as a client of sign-in: registered the first time it signs in at an address. */
     private suspend fun client(meta: Meta): String {
         prefs.getString("client", null)?.takeIf { prefs.getString("client.at", null) == address }?.let { return it }
         val body = JsonObject(mapOf(
@@ -131,7 +131,7 @@ class SignIn(private val context: Context) {
         return id
     }
 
-    /** Off to the auth service's sign-in and consent, in a Custom Tab; it comes back to [finish]. */
+    /** Off to signing in and consent at sign-in, in a Custom Tab; it comes back to [finish]. */
     suspend fun start(activity: android.app.Activity) {
         val meta = meta()
         val client = client(meta)
@@ -203,7 +203,7 @@ class SignIn(private val context: Context) {
         }
     }
 
-    /** A refresh token's grant. An answer lost on the way back leaves the token it sent, which the auth service still
+    /** A refresh token's grant. An answer lost on the way back leaves the token it sent, which sign-in still
      *  takes for a moment: so it's sent again at once, and only a refusal signs this phone out. */
     private suspend fun refreshed(meta: Meta, fields: Map<String, String>): Tokens {
         for (attempt in 0 until 3) {

@@ -10,7 +10,7 @@ use super::*;
 pub const GRANT_DAYS: u64 = 30;
 const DAY: u64 = 86_400_000;
 
-/// What standing work's calls are kept by here, in place of a sign-in's token: `grant.<scope> <app>`. No auth service
+/// What standing work's calls are kept by here, in place of a sign-in's token: `grant.<scope> <app>`. No sign-in
 /// signs one and it's never passed on, so a device that's sent one gets nothing with it.
 pub(super) const GRANT: &str = "grant.";
 

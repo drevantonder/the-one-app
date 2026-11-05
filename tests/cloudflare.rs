@@ -1,4 +1,4 @@
-//! The install's Workers (`cloudflare/`) running in the pinned workerd, as nodes and the auth service use them.
+//! The install's Workers (`cloudflare/`) running in the pinned workerd, as nodes and the sign-in use them.
 
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -133,7 +133,7 @@ fn url_query(url: &str) -> std::collections::BTreeMap<String, String> {
     query.split('&').map(|p| p.split_once('=').unwrap()).map(|(k, v)| (k.to_string(), v.replace("%3B", ";"))).collect()
 }
 
-/// A browser's cookies and Origin, for asking the auth service as its screens do.
+/// A browser's cookies and Origin, for asking sign-in as its screens do.
 struct Browser {
     origin: String,
     cookies: std::collections::BTreeMap<String, String>,
@@ -257,7 +257,7 @@ impl Workers {
         let gateway = port();
         let mut settings = cloudflare::Settings::new("Test", &format!("http://localhost:{gateway}"));
         settings.ports = [port(), gateway];
-        settings.auth_url = format!("http://127.0.0.1:{}", settings.ports[0]);
+        settings.sign_in_url = format!("http://127.0.0.1:{}", settings.ports[0]);
         // The install's first devices, its admin's machines that run its calls.
         settings.devices = devices.into_iter().map(|key| json!({ "key": key, "role": "compute", "admin": true })).collect();
         settings.genesis = Some(data_encoding::HEXLOWER.encode(&GENESIS));
@@ -303,7 +303,7 @@ fn endpoint() -> (ed25519_dalek::SigningKey, String) {
     (key, hex)
 }
 
-/// What `key`'s device signs for auth's `route`: `fields`, with the route, as devices sign requests.
+/// What `key`'s device signs for sign-in's `route`: `fields`, with the route, as devices sign requests.
 fn signed(key: &ed25519_dalek::SigningKey, route: &str, mut fields: Value) -> Value {
     fields["route"] = json!(route);
     one::keys::signed_request(key, "one/auth", fields, now())
@@ -383,7 +383,7 @@ fn an_admin_signs_in_only_with_a_passkey() {
     assert_eq!(signed_in_as(&mut elsewhere).as_deref(), Some(andre.as_str()));
 }
 
-/// A sign-in for a device names it, and auth passes what it showed on with that device's request to join, unchanged,
+/// A sign-in for a device names it, and sign-in passes what it showed on with that device's request to join, unchanged,
 /// for the person's devices to check themselves (src/sign_in_proof.rs): a passkey's assertion signs a challenge naming
 /// the device and when, which checks; a sign-in for no device, or one for another device, lets nothing in; and with
 /// Google, the ID token asked for names the device.
@@ -447,7 +447,7 @@ fn a_sign_in_for_a_device_names_it_and_auth_passes_it_on() {
 
 /// A device is let in by its sign-in only when it signed in itself: one whose sign-in was finished from a link opened
 /// elsewhere (the CLI's sign-in code page, or a site that sent the person a link) could have been started by whoever
-/// sent it, who'd hold the token it gave. Auth passes that one's proof on as `by_link`, which records what it signed in
+/// sent it, who'd hold the token it gave. Sign-in passes that one's proof on as `by_link`, which records what it signed in
 /// with when the person taps Approve but lets nothing in by itself; a release before it reads it as nothing.
 #[test]
 fn a_sign_in_finished_from_a_link_lets_its_device_in_only_by_a_tap() {
@@ -544,7 +544,7 @@ impl Subscription {
     }
 }
 
-/// What auth pushes about a device asking to join is what the apps read (src/push.rs's `Note`): to its person's other
+/// What sign-in pushes about a device asking to join is what the apps read (src/push.rs's `Note`): to its person's other
 /// devices, never the one asking, "<device> wants in" with the action `{ join: <code> }` (`keys::join_code`, which the
 /// apps' Approve and Not Me send their node) once nothing let it in within a few seconds, and "<device> joined" once
 /// one did, each opening Settings › Devices.

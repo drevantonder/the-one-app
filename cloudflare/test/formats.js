@@ -81,7 +81,7 @@ const ops = {
   async handed({ hands, hints }) {
     return { hands: hands.map(([route, need]) => mayHand(route, need)), oldest: hints.map(([hint, newest]) => oldestNeeded(hint, newest)), apps: hands.map(([route]) => appOf(route)) };
   },
-  /// What a client does with a node's 428 and auth's word while it waits to be let in: `[[route, node, answer]]` → what
+  /// What a client does with a node's 428 and sign-in's word while it waits to be let in: `[[route, node, answer]]` → what
   /// each asks it to hand, or null; `[[status, said]]` → what each says.
   async joining({ asked, said }) {
     return { asked: asked.map(([route, node, answer]) => askedFor(route, node, answer)), said: said.map(([status, body]) => waited(status, body)), most: MOST_NEEDED, behind: BEHIND };

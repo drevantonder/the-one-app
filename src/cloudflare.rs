@@ -1,4 +1,4 @@
-//! The install's Workers on Cloudflare (`cloudflare/`: auth, the relay, the URL signer) as nodes meet them: the formats they agree on
+//! The install's Workers on Cloudflare (`cloudflare/`: sign-in, the relay, the URL signer) as nodes meet them: the formats they agree on
 //! (`cloudflare/shared/crypto.js` writes the same ones, and `tests/contracts.rs` checks they do), checking access tokens,
 //! and building and running the Workers in workerd.
 
@@ -126,7 +126,7 @@ pub struct Claims {
     pub exp: u64,
     #[serde(default)]
     pub jti: String,
-    /// The person's name, as the auth service knows them.
+    /// The person's name, as sign-in knows them.
     #[serde(default)]
     pub name: String,
 }
@@ -142,7 +142,7 @@ impl Claims {
     }
 }
 
-/// An access token's claims, if a key in `jwks` (the auth service's) signed it, `iss` issued it, and it hasn't expired
+/// An access token's claims, if a key in `jwks` (sign-in's) signed it, `iss` issued it, and it hasn't expired
 /// at `now` (milliseconds).
 pub fn verify(token: &str, jwks: &Value, iss: &str, now: u64) -> Result<Claims> {
     let parts: Vec<&str> = token.split('.').collect();
@@ -154,7 +154,7 @@ pub fn verify(token: &str, jwks: &Value, iss: &str, now: u64) -> Result<Claims> 
         .into_iter()
         .flatten()
         .find(|k| k["kid"] == header["kid"] && k["kty"] == "OKP" && k["crv"] == "Ed25519")
-        .context("signed by a key the auth service doesn't publish")?;
+        .context("signed by a key sign-in doesn't publish")?;
     let public: [u8; 32] = B64U.decode(jwk["x"].as_str().unwrap_or("").as_bytes())?.try_into().map_err(|_| anyhow!("not an Ed25519 key"))?;
     let key = ed25519_dalek::VerifyingKey::from_bytes(&public)?;
     let signature = ed25519_dalek::Signature::from_slice(&B64U.decode(parts[2].as_bytes())?)?;
@@ -165,7 +165,7 @@ pub fn verify(token: &str, jwks: &Value, iss: &str, now: u64) -> Result<Claims> 
     Ok(claims)
 }
 
-/// The auth service at an install's address, as nodes check its tokens: its keys fetched and kept five minutes, or
+/// Sign-in at an install's address, as nodes check its tokens: its keys fetched and kept five minutes, or
 /// until a token names a key that isn't among them (as `cloudflare/shared/token.js`'s `Issuer` does).
 #[cfg(feature = "node")]
 pub struct Issuer {
@@ -187,13 +187,13 @@ impl Issuer {
                 Some((jwks, _)) => jwks,
                 None => {
                     let agent: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(30))).build().into();
-                    let jwks: Value = agent.get(format!("{}/jwks", self.iss)).call().context("the auth service didn't give its keys")?.body_mut().read_json()?;
+                    let jwks: Value = agent.get(format!("{}/jwks", self.iss)).call().context("sign-in didn't give its keys")?.body_mut().read_json()?;
                     *self.keys.lock().unwrap() = Some((jwks.clone(), std::time::Instant::now()));
                     jwks
                 }
             };
             match verify(token, &jwks, &self.iss, now) {
-                Err(err) if !fresh && err.to_string().contains("key the auth service") => continue,
+                Err(err) if !fresh && err.to_string().contains("key the sign-in") => continue,
                 other => return other,
             }
         }

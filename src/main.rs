@@ -81,7 +81,7 @@ fn every_command() -> String {
                                        answers one, a new item's values on stdin (one line, or a JSON object)
   {CLI} cloudflare                     the install's Workers on Cloudflare, as this machine has them: their addresses and settings
   {CLI} cloudflare serve [--address <url>]
-                                       run the install's Workers in workerd (auth, the relay, the URL signer, and the gateway people reach
+                                       run the install's Workers in workerd (sign-in, the relay, the URL signer, and the gateway people reach
                                        at the install's address) on this machine; the first time, with that address
   {CLI} cloudflare deploy [--domain <domain>] [--address <url>] [--account <id>] [--new]
                                        deploy the install's Workers to Cloudflare, with an API token that
@@ -100,7 +100,7 @@ fn every_command() -> String {
                                        put the install's serverless node in its Workers' Cloudflare account (a node as
                                        a Worker, with the API token in CLOUDFLARE_API_TOKEN), which devices ask over
                                        iroh when none of your machines answers
-  {CLI} cloudflare set <setting> <value>  change one: auth-url, resources (nodes' own addresses, comma-separated), bucket (its JSON object piped, with - as its value) or
+  {CLI} cloudflare set <setting> <value>  change one: sign-in-url, resources (nodes' own addresses, comma-separated), bucket (its JSON object piped, with - as its value) or
                                        android (the SHA-256 fingerprints of the certificates the Android app is signed
                                        with, comma-separated, or -: links to the address open the app)
   {CLI} cloudflare use <address>
@@ -507,7 +507,7 @@ fn run(args: Vec<String>) -> Result<()> {
                     let at = |service: &str| format!("https://{}.{domain}", one::cloudflare::worker_name(service));
                     let address = flags.get("address").and_then(Value::as_str).map(|a| a.trim_end_matches('/').to_string()).unwrap_or(address);
                     let mut settings = one::cloudflare::Settings::new(NAME, &address);
-                    settings.auth_url = at("auth");
+                    settings.sign_in_url = at("auth");
                     settings.save()?;
                     println!("Keep {} too: the Workers' secrets are in it, and a deploy without them can't read what's there. Better, move each to 1Password and leave an op(op://…) reference in its place.\n", one::cloudflare::Settings::path().with_file_name(".env.local").display());
                     // People signing in with Google need its OAuth client, which is put beside the secrets first.
@@ -527,7 +527,7 @@ fn run(args: Vec<String>) -> Result<()> {
                 serverless_reads(&settings);
             }
             // The Google client its people sign in with, signed by this admin's device: a new device's sign-in counts
-            // only for it (`sign_in_proof::CLIENTS`), whatever auth says.
+            // only for it (`sign_in_proof::CLIENTS`), whatever sign-in says.
             if let Some((id, _)) = &settings.google {
                 let clients = format!("https://accounts.google.com {id}");
                 let had = get("/v1/state").ok().and_then(|s| s["install"]["settings"][one::sign_in_proof::CLIENTS].as_str().map(str::to_string));
@@ -587,7 +587,7 @@ fn run(args: Vec<String>) -> Result<()> {
             let mut settings = one::cloudflare::Settings::load()?;
             let piped = || -> Result<Value> { serde_json::from_reader(std::io::stdin()).context("pipe its JSON object on stdin") };
             match *name {
-                "auth-url" => settings.auth_url = value.trim_end_matches('/').to_string(),
+                "sign-in-url" => settings.sign_in_url = value.trim_end_matches('/').to_string(),
                 "resources" => settings.resources = value.split(',').map(|r| r.trim().to_string()).filter(|r| !r.is_empty()).collect(),
                 "bucket" if *value == "-" => {
                     let bucket = piped()?;
@@ -605,7 +605,7 @@ fn run(args: Vec<String>) -> Result<()> {
                     }
                     settings.android = prints;
                 }
-                _ => bail!("no Cloudflare setting {name}: auth-url, resources, bucket or android"),
+                _ => bail!("no Cloudflare setting {name}: sign-in-url, resources, bucket or android"),
             }
             settings.save()?;
             println!("Set {name}. {CLI} cloudflare serve takes it at its next start, and {CLI} cloudflare deploy when it next runs.");
@@ -2001,8 +2001,8 @@ fn cloudflare(flags: &Map<String, Value>, settings: Option<&one::cloudflare::Set
 /// Where an install's Workers are, and what they're set to, without their secrets.
 fn cloudflare_said(s: &one::cloudflare::Settings) -> String {
     let mut out = format!("{} on Cloudflare\n  address   {}\n", s.name, s.address);
-    if s.auth_url.starts_with("http://127.0.0.1") {
-        out += &format!("  here on   127.0.0.1:{} (the address), :{} (auth)\n", s.ports[1], s.ports[0]);
+    if s.sign_in_url.starts_with("http://127.0.0.1") {
+        out += &format!("  here on   127.0.0.1:{} (the address), :{} (sign-in)\n", s.ports[1], s.ports[0]);
     }
     if !s.resources.is_empty() {
         out += &format!("  nodes     {}\n", s.resources.join(", "));

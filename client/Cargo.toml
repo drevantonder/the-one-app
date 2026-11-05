@@ -39,7 +39,7 @@ n0-watcher = { version = "1", optional = true }
 noq-udp = { version = "1.4", optional = true }
 
 # Natively, the app is a device of its person (src/device.rs), with the node's own formats and rules (entries, members,
-# logs, keys); ureq, which that crate's node uses too, to ask auth, the relay and the URL signer at the install's
+# logs, keys); ureq, which that crate's node uses too, to ask sign-in, the relay and the URL signer at the install's
 # address.
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 ed25519-dalek = "3"

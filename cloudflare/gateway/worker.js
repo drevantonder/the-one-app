@@ -1,11 +1,11 @@
 // The gateway: the install's address, the one people use. It holds no keys and runs no app code; it only sends each
-// request where its path says: sign-in to the auth service (with the gateway's host kept, since passkeys belong to
+// request where its path says: signing in to sign-in (with the gateway's host kept, since passkeys belong to
 // it), `/urls` to the URL signer, `/push/…` to the push Worker, `/mcp` and what MCP clients read to sign in to the MCP Worker, `/relay` (and iroh's
 // `/ping` and `/generate_204`) to the relay, and everything else to the web client's files. Devices reach the
 // install's nodes over iroh, never through here, and so does git: `/repos/…` here is git on a computer without the CLI,
 // told how to get it.
 
-/// Paths the auth service answers: exactly these, or under the ones ending in `/`.
+/// Paths the sign-in answers: exactly these, or under the ones ending in `/`.
 const AUTH = ["/api/auth/", "/sign-in", "/invite", "/passkeys", "/.well-known/oauth-authorization-server", "/.well-known/openid-configuration"];
 /// The MCP Worker's: MCP, its token endpoint, the resource's metadata, and the authorization server's as MCP clients
 /// find it (RFC 8414's path for the issuer `<address>/api/auth`), which names its token endpoint.

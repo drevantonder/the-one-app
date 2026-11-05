@@ -1,4 +1,6 @@
-// The auth service: who you are, and nothing more. Better Auth, in a Durable Object: sign-in by passkey, or, on an
+// Sign-in keeps its old name, auth, where machines depend on it: its Worker on Cloudflare (`<cli>-auth`), its
+// Durable Object (`Auth`), the paths under /api/auth and `one/auth` (src/cloudflare/workers.rs says why).
+// Sign-in: who you are, and nothing more. Better Auth, in a Durable Object: sign-in by passkey, or, on an
 // install whose people sign in with their work Google account (`SIGN_IN`), by Google at the install's domain
 // (`JOIN_DOMAIN`) too, though never for an admin (`passkey_only`), who signs in with a passkey; and an OAuth server (per
 // MCP's authorization spec) that every client signs in through: the iPhone and Mac apps, and MCP clients like Claude
@@ -6,7 +8,7 @@
 // offline. It opens nothing: keys are only on people's devices, so faking a sign-in opens nothing either. A passkey's
 // PRF output stays in the browser (pages.js).
 //
-// Nobody signs up uninvited, the install's first person too: an admin's device makes a secret, and tells auth its hash,
+// Nobody signs up uninvited, the install's first person too: an admin's device makes a secret, and tells sign-in its hash,
 // who it's for and until when, signed with its endpoint key (`POST /api/auth/invites`); opening `<address>/invite#
 // <secret>` lets that person sign up once, as the id and name the invite gives them. At a workplace too: signing in
 // with Google makes someone only with an invite for that Google account's email.
@@ -20,16 +22,16 @@
 //
 // A sign-in for a client names the device it's for (`join` in its authorization's query: its key and seal key, 128
 // hex), so a device of the person's can check it themselves (src/sign_in_proof.rs) and let the device in with no one
-// tapping: with Google, auth asks for an ID token whose `nonce` names it in this install (`joinNonce`, with `GENESIS`),
+// tapping: with Google, sign-in asks for an ID token whose `nonce` names it in this install (`joinNonce`, with `GENESIS`),
 // and keeps the token Google gave; with a passkey, the prompt's challenge names it, the install and when
-// (`joinChallenge`), and auth keeps the assertion. Either is kept (`proofs`) and passed on unchanged with that device's
+// (`joinChallenge`), and sign-in keeps the assertion. Either is kept (`proofs`) and passed on unchanged with that device's
 // request to join (`sign_in`), never checked here: only the person's devices count it, and only for an account their
 // own devices recorded. Refusing a request forgets its proof too. A throwaway network's sign-in signs its own ID token, with
 // nothing else to show.
 //
 // Only a device that signed in itself is let in by its sign-in: a sign-in finished from a link opened on another device
 // (the CLI's sign-in link, or any link sent to the person) could have been started by anyone, who'd then hold the token
-// it gave. Auth tells them apart by the client whose token asks to join: one whose every sign-in comes back to the
+// it gave. Sign-in tells them apart by the client whose token asks to join: one whose every sign-in comes back to the
 // device it was made on (the web client's page, the native apps' `<cli>://signed-in/` or loopback) signed in itself;
 // any other's (the sign-in code's page, a site) came back elsewhere, and its proof is passed on as `{ by_link: proof }`,
 // which the person's devices approve only by a tap, and older ones read as nothing.
@@ -108,7 +110,7 @@ const FRESH = 5 * 60_000;
 const STARTED = 15 * 60_000;
 /// A sign-in code's letters: no vowels, so it spells no word, and none that look alike.
 const LETTERS = "BCDFGHJKLMNPQRSTVWXZ";
-/// What endpoints sign for auth.
+/// What endpoints sign for sign-in.
 const DOMAIN = "one/auth";
 /// Where Better Auth makes a session with a passkey: the only places an admin's is made.
 const BY_PASSKEY = ["/passkey/verify-authentication", "/passkey/verify-registration"];
@@ -308,8 +310,8 @@ export class Auth extends DurableObject {
           enforcePerClientResources: false,
           accessTokenExpiresIn: 3600,
           // A refresh token used again within a minute of its rotation gets the same answer again (kept sealed under
-          // auth's secret), so an answer lost on the way (a dropped connection, a tab closed, a proxy that failed after
-          // auth rotated) signs no one out; used again after that, it's taken as stolen, and its whole family ends.
+          // sign-in's secret), so an answer lost on the way (a dropped connection, a tab closed, a proxy that failed after
+          // sign-in rotated) signs no one out; used again after that, it's taken as stolen, and its whole family ends.
           refreshTokenReuseInterval: 60,
           storeTokens: "hashed",
           // Who a token is for, by name, so a node lets someone new in as who they are.
@@ -358,11 +360,11 @@ export class Auth extends DurableObject {
       const status = typeof err.status === "number" ? err.status : err.statusCode;
       if (status >= 400 && status < 500 || status === 503) return json({ error: err.body?.error_description || err.body?.message || err.message }, status);
       console.error(err.stack || err);
-      return json({ error: "the auth service failed" }, 500);
+      return json({ error: "the sign-in failed" }, 500);
     }
   }
 
-  /// The routes of auth's own under /api/auth/: invites, admins and devices' requests to join. → their answer, or
+  /// The routes of sign-in's own under /api/auth/: invites, admins and devices' requests to join. → their answer, or
   /// nothing for any other path.
   async route(request, url) {
     const path = url.pathname;
@@ -406,7 +408,7 @@ export class Auth extends DurableObject {
     sql.exec("insert into signed (sig, at) values (?, ?)", sig, Date.now());
   }
 
-  /// Someone signed in: by a session here, or an access token auth signed. → their user id, or null.
+  /// Someone signed in: by a session here, or an access token sign-in signed. → their user id, or null.
   async person(request) {
     return (await this.asker(request))?.user || null;
   }

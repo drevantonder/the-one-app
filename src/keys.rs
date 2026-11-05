@@ -385,7 +385,7 @@ pub fn asked_for(route: &str, node: &str, answer: &Value) -> Option<Vec<Need>> {
 /// still lets it in: a node may not have read its approval yet. After the last, it says so.
 pub const BEHIND: [u64; 2] = [2_000, 4_000];
 
-/// What auth said of a device's request to be let in (`GET /api/auth/devices/requests/<key>`: its status, 0 if it
+/// What sign-in said of a device's request to be let in (`GET /api/auth/devices/requests/<key>`: its status, 0 if it
 /// didn't answer, and its JSON), which every client acts on the same way (`cloudflare/shared/crypto.js`'s `waited`).
 #[derive(Debug, PartialEq)]
 pub enum Waited {
@@ -394,10 +394,10 @@ pub enum Waited {
     /// Approved, in the install whose first entry (hex) the device that approved it named, if it named one: the only
     /// one it then takes. It's in once the relay lets it.
     Approved(Option<String>),
-    /// Gone from auth (approved and cleared, turned down, or waited too long): it's in if the relay lets it, else it
+    /// Gone from sign-in (approved and cleared, turned down, or waited too long): it's in if the relay lets it, else it
     /// asks again.
     Gone,
-    /// Still waiting, or auth didn't answer.
+    /// Still waiting, or sign-in didn't answer.
     Waiting,
 }
 

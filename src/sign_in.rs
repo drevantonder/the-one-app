@@ -1,4 +1,4 @@
-//! This machine's CLI and MCP signed in at the install's address, as every other client is: an OAuth client of its auth
+//! This machine's CLI and MCP signed in at the install's address, as every other client is: an OAuth client of its sign-in
 //! service, registered the first time it signs in. The person approves a short code by signing in on any device
 //! (`cloudflare/auth`'s `/sign-in/code`), here in the browser if this machine has a screen. The refresh token is kept in a
 //! file only this machine's user reads, outside the node's data: the node is only ever sent access tokens.
@@ -64,7 +64,7 @@ fn agent() -> ureq::Agent {
     ureq::Agent::config_builder().http_status_as_error(false).timeout_global(Some(Duration::from_secs(30))).build().into()
 }
 
-/// The auth service's endpoints, as it says them.
+/// Sign-in's endpoints, as it says them.
 fn meta(address: &str) -> Result<Value> {
     let mut resp = agent().get(format!("{address}/.well-known/oauth-authorization-server")).call().with_context(|| format!("the sign-in service at {address} isn't answering"))?;
     if resp.status() != 200 {
@@ -82,7 +82,7 @@ fn back(address: &str) -> String {
     format!("{address}/sign-in/code/done")
 }
 
-/// This machine, as a client of the auth service: registered the first time it signs in there.
+/// This machine, as a client of sign-in: registered the first time it signs in there.
 fn client(address: &str, meta: &Value) -> Result<String> {
     if let Some(kept) = kept().filter(|k| k.address == address && !k.client.is_empty()) {
         return Ok(kept.client);

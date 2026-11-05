@@ -1,11 +1,11 @@
 //! A sign-in a person's own devices check themselves, without trusting the install's Workers, before one of them lets a new device
 //! in with no one tapping anything (docs/plan-device-approval.md). The new device's sign-in names it: an OIDC
-//! provider's ID token carries `nonce(device)`, which auth puts in the request it sends the provider, and a passkey's
-//! assertion signs `challenge(device, time)`, which auth makes the passkey prompt's challenge. Auth passes the token or
+//! provider's ID token carries `nonce(device)`, which sign-in puts in the request it sends the provider, and a passkey's
+//! assertion signs `challenge(device, time)`, which sign-in makes the passkey prompt's challenge. Sign-in passes the token or
 //! the assertion on with the device's request to join, unchanged (`Proof`), and a device of the person's checks it:
 //!
 //! - an ID token: signed by a key its issuer publishes (`keys_at`, only issuers named here), for one of the OIDC
-//!   clients the install's admins said its people sign in with (`CLIENTS`, a setting their device signs, never auth's
+//!   clients the install's admins said its people sign in with (`CLIENTS`, a setting their device signs, never sign-in's
 //!   word), issued just now (`FRESH`), and naming this device in this install;
 //! - a passkey's assertion: of this install's address, the person present, naming this device in this install just now,
 //!   and signed by the passkey's public key.
@@ -14,17 +14,17 @@
 //! an older release that names none, lets no device in by itself: it's approved by its code.
 //!
 //! Only a device that signed in itself is let in by its sign-in. One whose sign-in was finished from a link opened
-//! elsewhere (the CLI's sign-in link, or any link sent to the person) could be anyone's who sent it, so auth passes its
+//! elsewhere (the CLI's sign-in link, or any link sent to the person) could be anyone's who sent it, so sign-in passes its
 //! proof on as `Proof::ByLink`, which is checked to record what it signed in with but never vouches: it's approved by a
-//! tap on its card, which names it and where it is. Auth tells the two apart by where the sign-in that asked came back
-//! to, which phishing can't change; a tampered auth could lie, which is the Cloudflare account's trust, as below.
+//! tap on its card, which names it and where it is. Sign-in tells the two apart by where the sign-in that asked came back
+//! to, which phishing can't change; a tampered sign-in could lie, which is the Cloudflare account's trust, as below.
 //!
 //! What it signs in with (`Account`) is recorded in the `device` entry that lists the device (`sign_in`), so the next
 //! device's proof is checked against the accounts the signed entries record for that person (`vouches`), never against
-//! what auth says. The first is recorded when a person, or for a newcomer the inviting admin, approves a device by its
+//! what sign-in says. The first is recorded when a person, or for a newcomer the inviting admin, approves a device by its
 //! code: what that device signed in with is then theirs, and their devices show it (and forget it) under its Sign-ins.
-//! A passkey's public key then comes from auth, which keeps it: passkeys are made on auth's own page, so no client sees
-//! one made without auth's code in between. Email links and passwords make no proof: only auth can check those, so
+//! A passkey's public key then comes from sign-in, which keeps it: passkeys are made on sign-in's own page, so no client sees
+//! one made without sign-in's code in between. Email links and passwords make no proof: only sign-in can check those, so
 //! they're approved by code.
 //!
 //! What's checked needs `sign-in-proof` (ring), which the serverless node, approving no one, goes without.
@@ -111,13 +111,13 @@ impl Account {
     }
 }
 
-/// A new device's sign-in, as auth passes it on with its request to join.
+/// A new device's sign-in, as sign-in passes it on with its request to join.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Proof {
     /// The provider's ID token, as it gave it.
     IdToken(String),
-    /// A passkey's assertion, each part base64url as WebAuthn's JSON has it, and the public key auth holds for it,
+    /// A passkey's assertion, each part base64url as WebAuthn's JSON has it, and the public key sign-in holds for it,
     /// which counts only when a person approves the device by its code.
     Passkey { credential: String, authenticator_data: String, client_data: String, signature: String, public_key: String },
     /// A sign-in finished from a link opened on another device, not on the device asking: what it shows counts only for
@@ -157,7 +157,7 @@ pub fn keys_at(issuer: &str, address: &str) -> Option<String> {
 }
 
 /// What `proof` shows `device` signed in with, checked: an ID token against its issuer's keys `jwks` and the install's
-/// own clients, a passkey's assertion against the public key auth gave with it. For a device approved by its code,
+/// own clients, a passkey's assertion against the public key sign-in gave with it. For a device approved by its code,
 /// whose account is then recorded.
 #[cfg(feature = "sign-in-proof")]
 pub fn check(proof: &Proof, device: &Endpoint, install: &Install, jwks: Option<&Value>, now: u64) -> Result<Account> {
@@ -509,7 +509,7 @@ mod tests {
         refused(ok.clone(), &[], "isn't one they've signed in with");
         refused(Proof::ByLink(Box::new(ok.clone())), &accounts, "from a link");
         assert_eq!(check(&Proof::ByLink(Box::new(ok.clone())), &d, &ours(), None, NOW).unwrap(), accounts[0]);
-        // Another passkey's key recorded for that credential, as auth might say it has: its signature isn't that key's.
+        // Another passkey's key recorded for that credential, as sign-in might say it has: its signature isn't that key's.
         let other = Passkey::new();
         refused(ok.clone(), &[Account::Passkey { credential: pk.credential.clone(), public_key: other.public_key() }], "signature");
         // Changed after it was signed.
@@ -524,7 +524,7 @@ mod tests {
             *authenticator_data = B64U.encode(&a);
         }
         refused(changed, &accounts, "signature");
-        // Approved by code, it's checked with the key auth gave, and that's what's recorded.
+        // Approved by code, it's checked with the key sign-in gave, and that's what's recorded.
         assert_eq!(check(&ok, &d, &ours(), None, NOW).unwrap(), accounts[0]);
     }
 
@@ -536,7 +536,7 @@ mod tests {
         assert!(serde_json::from_value::<Account>(json!({ "password": {} })).is_err());
         let p: Proof = serde_json::from_value(json!({ "id_token": "a.b.c" })).unwrap();
         assert_eq!(p, Proof::IdToken("a.b.c".into()));
-        // As auth passes on a sign-in finished from a link.
+        // As sign-in passes on a sign-in finished from a link.
         let p: Proof = serde_json::from_value(json!({ "by_link": { "id_token": "a.b.c" } })).unwrap();
         assert_eq!(p, Proof::ByLink(Box::new(Proof::IdToken("a.b.c".into()))));
     }

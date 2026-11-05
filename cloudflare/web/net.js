@@ -203,7 +203,7 @@ export const net = {
     return (await ask({ op: "global", user, given: buffer, steps }, buffer ? [buffer] : [])).members;
   },
 
-  /// What a new device (`key`, `seal`) signed in with, as its sign-in (`proof`, as auth passed it on) shows, checked
+  /// What a new device (`key`, `seal`) signed in with, as its sign-in (`proof`, as sign-in passed it on) shows, checked
   /// by the client at the install's `address`, whose first entry's hash is `genesis` (hex) and whose people sign in
   /// with `clients` (its `sign_in_clients` setting, as its entries say): against `accounts`, its person's, for one let in
   /// by it, or with none, for one approved by its code. → the account; throws why it doesn't check out.

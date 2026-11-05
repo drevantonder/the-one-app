@@ -57,7 +57,7 @@ export async function passkeyKeysOf(prf) {
   return { key: hex.encode(await ed25519Public(pk.sign)), seal: hex.encode(seal), sign: pk.sign, opens: { secret: pk.seal, public: seal } };
 }
 
-/// What this browser asks auth to let it in with: its keys and name, and for someone new, proof of their invite.
+/// What this browser asks sign-in to let it in with: its keys and name, and for someone new, proof of their invite.
 export async function joinAsk(keys, name, invite) {
   return { key: keys.key, seal: keys.seal, name, ...(invite ? { proof: await inviteProof(text.encode(invite), hex.decode(keys.key), hex.decode(keys.seal)) } : {}) };
 }
@@ -474,7 +474,7 @@ export class Device {
     return r.ok ? (await r.json()).seen || {} : {};
   }
 
-  /// One of auth's routes, signed by this browser: a GET's or DELETE's request in `x-one-request`, `query` after it.
+  /// One of sign-in's routes, signed by this browser: a GET's or DELETE's request in `x-one-request`, `query` after it.
   async authSigned(method, path, fields = {}, query = "") {
     const request = await this.signed("one/auth", { route: `${method} ${path}`, ...fields });
     const init = method === "POST" ? { method, headers: { "content-type": "application/json" }, body: JSON.stringify(request) } : { method, headers: { "x-one-request": b64u.encode(text.encode(JSON.stringify(request))) } };
@@ -486,7 +486,7 @@ export class Device {
   /// Devices waiting to be let in that this browser may approve: its person's own, and for an admin, those of people
   /// they invited from this browser, whose proof is right. Each with its code.
   async requests() {
-    // Signed too, so auth knows this browser's device as its person's, to push to.
+    // Signed too, so sign-in knows this browser's device as its person's, to push to.
     const mine = await this.signed("one/auth", { route: "GET /api/auth/devices/requests" });
     const own = (await answer(await this.bearer("/api/auth/devices/requests", { headers: { "x-one-request": b64u.encode(text.encode(JSON.stringify(mine))) } }))).requests || [];
     const invited = (await this.checked()).people[this.user]?.invites ? (await this.authSigned("GET", "/api/auth/devices/requests").catch(() => ({}))).requests || [] : [];
@@ -520,7 +520,7 @@ export class Device {
     if ((k.removed || []).includes(r.key)) throw new Error(`${r.name} was turned down or taken out, so it isn’t let in again. Start again on it, for a new code.`);
     const may = k.people[this.user];
     const known = !!k.people[r.user];
-    // Listed already by an approval that didn't finish (its mark at auth failed): the rest is done again.
+    // Listed already by an approval that didn't finish (its mark at sign-in failed): the rest is done again.
     const listed = k.devices.some((d) => d.key === r.key && d.user === r.user && d.seal === r.seal);
     const own = may.approves.includes(r.user);
     if (!own && known && !listed) throw new Error("Only their own devices approve one of theirs.");

@@ -94,7 +94,7 @@ fn the_workers_and_nodes_agree_on_keys_and_seals() {
         assert_eq!(out["twin"], data_encoding::HEXLOWER.encode(&cloudflare::twin_public(&device).unwrap()), "an Ed25519 key's twin to seal to");
         assert_eq!(out["proof"], keys::invite_proof(b"an invite's secret", &keys::Endpoint { key: device, seal: device_seal }));
         let asking = keys::Endpoint { key: device, seal: device_seal };
-        assert_eq!(out["nonce"], one::sign_in_proof::nonce(&device_seal, &asking), "the OIDC nonce auth asks for a device in its install");
+        assert_eq!(out["nonce"], one::sign_in_proof::nonce(&device_seal, &asking), "the OIDC nonce sign-in asks for a device in its install");
         assert_eq!(b(&out["challenge"]), one::sign_in_proof::challenge(&device_seal, &asking, 1_800_000_000_123), "and the challenge its passkey signs");
         let (passkey, seal_secret) = keys::passkey_keys(&prf);
         assert_eq!(out["passkey"]["sign"], data_encoding::HEXLOWER.encode(passkey.verifying_key().as_bytes()), "a passkey's signing key");
@@ -269,7 +269,7 @@ fn the_workers_and_nodes_agree_on_keys_and_seals() {
     }
 
     // A client device's way in, the same in a browser (cloudflare/web) as in a native app and the CLI (one-client): what a
-    // node's 428 may ask it to hand (`keys::asked_for`), what auth's word on its request to be let in means
+    // node's 428 may ask it to hand (`keys::asked_for`), what sign-in's word on its request to be let in means
     // (`keys::waited`), and how long it waits for a node that doesn't list it yet (`keys::BEHIND`).
     {
         use one::keys::{BEHIND, MOST_NEEDED, Need, Waited, asked_for, waited};

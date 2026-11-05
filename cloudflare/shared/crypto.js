@@ -461,7 +461,7 @@ export function askedFor(route, node, answer) {
 /// How long a client waits, each time, to ask again a node that doesn't list it yet. As src/keys.rs `BEHIND`.
 export const BEHIND = [2_000, 4_000];
 
-/// What auth said of this device's request to be let in (its status, 0 if it didn't answer, and its JSON): `{ signedOut }`,
+/// What sign-in said of this device's request to be let in (its status, 0 if it didn't answer, and its JSON): `{ signedOut }`,
 /// `{ approved, genesis? }`, `{ gone }`, or `{}` while it waits. As src/keys.rs `waited`, which says what each means.
 export function waited(status, said) {
   if (status === 401) return { signedOut: true };

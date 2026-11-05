@@ -83,7 +83,7 @@ struct Known {
 /// `join`, `start`, `takenOut` and `signOut`). Whether this key was ever let in here is kept on disk (`joined`), as it
 /// outlives the program: `removed` asks it.
 enum Stage {
-    /// Not reaching its nodes: not let in yet, having asked auth with `asked` if it has since it started (`ask`, then
+    /// Not reaching its nodes: not let in yet, having asked sign-in with `asked` if it has since it started (`ask`, then
     /// `wait`); or let in, and its connections closed until it's asked again (`disconnect`: its app in the background,
     /// or a program ending).
     Off { asked: Option<Value> },
@@ -215,7 +215,7 @@ impl Device {
 
     // Joining.
 
-    /// Asks auth to let it in, as the person signed in with `token`, calling it `name` (and with someone new's invite
+    /// Asks sign-in to let it in, as the person signed in with `token`, calling it `name` (and with someone new's invite
     /// secret, its proof).
     pub async fn ask(&self, token: &str, name: &str, invite: Option<&str>) -> Result<(), Error> {
         let mut asked = json!({ "key": self.key(), "seal": hex(&self.me.seal), "name": name });
@@ -235,10 +235,10 @@ impl Device {
         Ok(())
     }
 
-    /// Whether it's been let in: it reaches a node as itself. While it waits, what auth says of its request
+    /// Whether it's been let in: it reaches a node as itself. While it waits, what sign-in says of its request
     /// (`keys::waited`) is acted on as every client does: once approved, the install the device that approved it said it's
     /// in (its genesis) is the only one it takes, kept before it reads any, so none it's shown first can be another; one
-    /// gone from auth is asked again unless it's in; a sign-in that's no more fails, to sign in again.
+    /// gone from sign-in is asked again unless it's in; a sign-in that's no more fails, to sign in again.
     pub async fn wait(&self, token: &str) -> Result<bool, Error> {
         let at = format!("{}/api/auth/devices/requests/{}", self.address, self.key());
         let (status, said) = http("GET", &at, Some(token), None).await.unwrap_or((0, Value::Null));
@@ -1099,7 +1099,7 @@ fn error(out: &Value) -> Option<String> {
     out["error"].as_str().or(out["message"].as_str()).map(str::to_string)
 }
 
-/// A request to the install's address (auth, the relay), JSON in and out: → its status and JSON.
+/// A request to the install's address (sign-in, the relay), JSON in and out: → its status and JSON.
 async fn http(method: &str, url: &str, token: Option<&str>, body: Option<Value>) -> Result<(u16, Value), Error> {
     let (method, url, token) = (method.to_string(), url.to_string(), token.map(str::to_string));
     tokio::task::spawn_blocking(move || {

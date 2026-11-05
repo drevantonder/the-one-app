@@ -109,7 +109,7 @@ async function remoteMcpClientsSecrets() {
   same(await copies.open("access token two"), "the new access token opens it");
   same(await copies.open("access token one"), "an access token opens it until it expires");
   equal(await copies.open("refresh token one"), null, "the old refresh token opens it once used");
-  same(await copies.rotate("refresh token one", "refresh token two", "access token two", now + 3_600_000), "auth's answer to a refresh, given again, opens it");
+  same(await copies.rotate("refresh token one", "refresh token two", "access token two", now + 3_600_000), "sign-in's answer to a refresh, given again, opens it");
   equal(await copies.rotate("refresh token one", "refresh token stolen", "access token stolen", now + 3_600_000), null, "an old refresh token reused rotates it");
   equal(await copies.open("refresh token stolen"), null, "a reused refresh token's new tokens open it");
 

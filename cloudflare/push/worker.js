@@ -21,7 +21,7 @@
 // badge }` reaches them as the plain alert they understand, until each registers itself with the same token, which
 // replaces it.
 //
-// The install's own Workers send through the `Sender` entrypoint, by binding: auth, for a device asking to join, whose
+// The install's own Workers send through the `Sender` entrypoint, by binding: sign-in, for a device asking to join, whose
 // note it seals here to the seal key the device registered (`{ to, plain }`), or sends sealed (`{ to, note }`).
 //
 // Sends are limited: each sender `SENDS` requests a minute, each device `NOTES` notes a minute.

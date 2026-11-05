@@ -633,7 +633,7 @@ impl std::error::Error for NotJoined {}
 /// Sign-ins checked lately, by their token's hash, until they expire.
 static SIGNED_INS: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<[u8; 32], (Me, u64)>>> = std::sync::LazyLock::new(Default::default);
 
-/// Whom an access token from sign-in is for: one the auth service at the install's address signed for it, for a person of
+/// Whom an access token from sign-in is for: one sign-in at the install's address signed for it, for a person of
 /// the install.
 async fn signed_in(node: &Node, token: String) -> anyhow::Result<Me> {
     use sha2::Digest;

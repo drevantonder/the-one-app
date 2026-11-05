@@ -3,7 +3,7 @@ import AuthenticationServices
 import CryptoKit
 import Security
 
-/// Signing in, as every client of the install's auth service does (cloudflare/web/web.js is the same in a browser): this
+/// Signing in, as every client of the install's sign-in does (cloudflare/web/web.js is the same in a browser): this
 /// app registers itself as an OAuth client, the person signs in with their passkey, and it comes back with a code that
 /// PKCE turns into tokens. On the iPhone that's the system's sign-in sheet, back at `<cli>://signed-in/`; on the Mac,
 /// the person's own default browser, where their passkey is, back at a port on this Mac (`Loopback`). The refresh
@@ -112,7 +112,7 @@ actor Auth {
         }
     }
 
-    /// This app, as a client of the auth service: registered the first time it signs in at an address.
+    /// This app, as a client of sign-in: registered the first time it signs in at an address.
     private func client(_ meta: Meta, name: String) async throws -> String {
         if let id = Self.defaults.string(forKey: "client"), Self.defaults.string(forKey: "clientRedirect") == Self.redirect { return id }
         var request = URLRequest(url: URL(string: meta.registration_endpoint)!)
@@ -200,7 +200,7 @@ actor Auth {
             guard let refresh = Keychain.read() else { throw SignedOut(message: String(localized: "Sign in again.")) }
             let meta = try await meta()
             let fields = ["grant_type": "refresh_token", "refresh_token": refresh, "client_id": Self.defaults.string(forKey: "client") ?? ""]
-            // An answer lost on the way back leaves the token this one sent, which the auth service still takes for a
+            // An answer lost on the way back leaves the token this one sent, which sign-in still takes for a
             // moment: so it's sent again at once, and only a refusal signs this device out.
             var attempt = 0
             while true {

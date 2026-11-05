@@ -17,7 +17,7 @@ apps = ["board", "repos", "apps", "device-activity"]
 # The apps every agent needs from the start: MCP's instructions carry their guide in full (the rest come with search),
 # and `one mcp --code` keeps their tools as tools, beside search and execute.
 always_on = ["board"]
-# How people sign in, which says who they are and opens no key (cloudflare/auth/worker.js): keys are only on their devices,
+# How people sign in, which says who they are and opens no key (cloudflare/sign-in/worker.js): keys are only on their devices,
 # and a new device gets in only when one of theirs approves it. "passkey": a passkey, whose PRF output, kept in the
 # browser, makes it a device of its own there. "google": for a workplace whose people sign in with their Google account
 # at join_domain, joining with an invite for its email; admins still sign in with a passkey.

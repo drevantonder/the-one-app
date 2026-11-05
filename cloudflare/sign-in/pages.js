@@ -1,5 +1,5 @@
-// The auth service's screens: signing in, to the install or to a client, joining with an invite link, and a person's
-// passkeys. Plain HTML with a little script, served from the auth service at the install's address, so passkeys
+// Sign-in's screens: signing in, to the install or to a client, joining with an invite link, and a person's
+// passkeys. Plain HTML with a little script, served from sign-in at the install's address, so passkeys
 // belong to its name.
 
 import kit from "../web/screen/kit.css" with { type: "text" };
@@ -79,7 +79,7 @@ const webauthn = `
     return undo;
   }
   /// A passkey prompt's options, asked for before the tap (\`ready\`), so the prompt comes the moment it's tapped. Each
-  /// is used once, and only while it's fresh: the auth service keeps one challenge, for five minutes.
+  /// is used once, and only while it's fresh: sign-in keeps one challenge, for five minutes.
   // A sign-in for a device (\`join\`, in its client's authorization) has the passkey sign a challenge naming it.
   const JOIN = new URLSearchParams(location.search).get("join");
   const ASK = { in: "/api/auth/passkey/generate-authenticate-options" + (/^[0-9a-f]{128}$/.test(JOIN || "") ? "?join=" + JOIN : ""), new: "/api/auth/passkey/generate-register-options" };
@@ -96,7 +96,7 @@ const webauthn = `
   }
   const register = (context) => ASK.new + (context ? "?context=" + encodeURIComponent(context) : "");
   /// Makes a passkey, for someone signed in, or with an invite link's secret as \`context\` (which signs them in): →
-  /// its credential id and its id in the auth service.
+  /// its credential id and its id in the sign-in.
   async function newPasskey(context) {
     const o = await options(register(context));
     const publicKey = { ...o, challenge: b64u.decode(o.challenge), user: { ...o.user, id: b64u.decode(o.user.id) },
@@ -281,7 +281,7 @@ export function throwawayPage(look) {
   return page(`Sign in to ${name}`, body, script);
 }
 
-/// Joining with an invite link, its secret in the fragment, which goes only to auth's sign-up: making a first passkey,
+/// Joining with an invite link, its secret in the fragment, which goes only to sign-in's sign-up: making a first passkey,
 /// or signing in with Google (`google`) as the email it's for, or on a throwaway network (`throwaway`), with nothing to make. With
 /// `?code=`, the CLI's (`sign-in --invite`), it goes on to sign that in, as the person who just joined.
 export function invitePage(look) {

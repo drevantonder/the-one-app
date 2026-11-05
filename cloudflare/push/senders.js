@@ -3,7 +3,7 @@
 // documents. `fetch` is given, so tests see each request as it would go out. Each says `sent`, `gone` (the address no
 // longer works: the app was deleted, say, so it's forgotten) or `failed` with why.
 //
-// - APNs (iPhone, iPad, Mac): token-based provider auth, an ES256 JWT of the team's .p8 key, kept 50 minutes (Apple
+// - APNs (iPhone, iPad, Mac): token-based provider sign-in, an ES256 JWT of the team's .p8 key, kept 50 minutes (Apple
 //   refuses one older than an hour, or made more often than every 20). A note goes as a visible alert with
 //   `mutable-content`, so the app's Notification Service Extension opens it before it shows; what Apple sees is only
 //   the install's name and a fixed line. A quiet one is a background push that wakes the app.

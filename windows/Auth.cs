@@ -1,6 +1,6 @@
-// Signing in, as the web client does (cloudflare/web/web.js): this app is an OAuth client of the install's auth service,
+// Signing in, as the web client does (cloudflare/web/web.js): this app is an OAuth client of the install's sign-in,
 // registered the first time it signs in. Sign-in and consent happen in the person's own browser, where their passkey
-// works, and come back to a port on this machine (RFC 8252's loopback redirect), any port, since auth matches loopback
+// works, and come back to a port on this machine (RFC 8252's loopback redirect), any port, since sign-in matches loopback
 // redirects without theirs. The refresh token is kept in Windows' Credential Locker; access tokens only in memory.
 using System;
 using System.Collections.Generic;
@@ -141,7 +141,7 @@ public sealed class Auth
         catch { }
     }
 
-    /// The auth service's endpoints, as it says them.
+    /// Sign-in's endpoints, as it says them.
     async Task<JsonNode> Meta()
     {
         try
@@ -158,7 +158,7 @@ public sealed class Auth
 
     const string Redirect = "http://127.0.0.1/callback";
 
-    /// This app, as a client of the auth service: registered the first time it signs in.
+    /// This app, as a client of sign-in: registered the first time it signs in.
     async Task<string> Client(JsonNode meta)
     {
         if (client != null && clientFor == Address) return client;
@@ -184,7 +184,7 @@ public sealed class Auth
 
     static string B64u(byte[] bytes) => Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
 
-    /// Signs in: the person's browser goes to the auth service's sign-in and consent, and comes back here.
+    /// Signs in: the person's browser goes to signing in and consent at sign-in, and comes back here.
     public async Task SignIn(CancellationToken cancel)
     {
         var meta = await Meta();
@@ -303,7 +303,7 @@ public sealed class Auth
         }
     }
 
-    /// A refresh token's grant. An answer lost on the way back leaves the token it sent, which the auth service still
+    /// A refresh token's grant. An answer lost on the way back leaves the token it sent, which sign-in still
     /// takes for a moment: so it's sent again at once, and only a refusal signs this computer out.
     async Task Refreshed(JsonNode meta, Dictionary<string, string> fields)
     {
