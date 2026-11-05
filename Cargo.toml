@@ -21,7 +21,7 @@ doctest = false
 # (client/) share with it: entries, members, logs, databases and keys.
 [features]
 default = ["node"]
-node = ["dep:axum", "dep:futures-util", "dep:iroh", "dep:jiff", "dep:md-5", "dep:libc", "dep:ssh-key", "dep:tokio", "dep:tokio-stream", "dep:tracing-subscriber", "dep:ureq", "dep:flate2", "dep:jsonc-parser", "dep:toml_edit", "dep:hyper", "dep:hyper-util", "sign-in-proof", "db"]
+node = ["dep:axum", "dep:futures-util", "dep:iroh", "dep:jiff", "dep:md-5", "dep:libc", "dep:ssh-key", "dep:tokio", "dep:tokio-stream", "dep:tracing-subscriber", "dep:ureq", "dep:flate2", "dep:image", "dep:jsonc-parser", "dep:toml_edit", "dep:hyper", "dep:hyper-util", "sign-in-proof", "db"]
 # `db`, apps' databases and logs (src/db.rs, src/log.rs, src/vault.rs: SQLite), which nodes and native apps' client
 # have; browsers' client (client/, WebAssembly) builds this crate without it, which SQLite would make a megabyte bigger.
 db = ["dep:rusqlite"]
@@ -90,6 +90,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"], optional = tr
 ureq = { version = "3", features = ["json"], optional = true }
 # A site's favicon.ico becomes a PNG for shells (src/logos.rs); ureq already brings it in.
 flate2 = { version = "1", optional = true }
+# Agent devices' screens come as PNG or JPEG and go out as JPEG at the width asked (src/agent_devices/picture.rs).
+image = { version = "0.24", default-features = false, features = ["png", "jpeg"], optional = true }
 jsonc-parser = { version = "0.34", features = ["cst", "serde"], optional = true }
 toml_edit = { version = "0.25", optional = true }
 # Client devices ask a node's local API over iroh, HTTP/1.1 on each stream (src/node/net.rs), which hyper's server

@@ -237,6 +237,7 @@ pub struct Hosted {
 pub fn hosted() -> Vec<Hosted> {
     vec![
         Hosted { name: crate::ai_usage::NAME, describe: crate::ai_usage::describe, call: |h, c| crate::ai_usage::call(h, c).map(Answer::new), start: None },
+        Hosted { name: crate::agent_devices::NAME, describe: crate::agent_devices::describe, call: crate::agent_devices::call, start: Some(crate::agent_devices::start) },
     ]
 }
 
