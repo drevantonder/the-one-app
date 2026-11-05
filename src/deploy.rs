@@ -1,5 +1,6 @@
 //! `one deploy <dir>` and the deploy tool: build an app with a pinned Bun, npm packages and all, into a bundle that
-//! holds the built module and the files it was built from, as written.
+//! holds the built module and the files it was built from, as written. An app with React screens has them built first,
+//! with the deploying machine's own Bun or Node (`screens`).
 
 use std::path::{Path, PathBuf};
 
@@ -82,6 +83,7 @@ pub fn build(dir: &Path) -> Result<Vec<u8>> {
     if dir.join("package.json").is_file() {
         run(&["install", "--ignore-scripts"], "bun install")?;
     }
+    screens(dir)?;
     let out = tempdir()?;
     let outfile = out.join("app.js");
     let meta = out.join("meta.json");
@@ -112,6 +114,97 @@ pub fn build(dir: &Path) -> Result<Vec<u8>> {
     let mut files = vec![("app.js".to_string(), module?)];
     files.extend(crate::bundle::sources(dir)?.into_iter().map(|(path, bytes)| (format!("src/{path}"), bytes)));
     crate::bundle::pack(&files)
+}
+
+/// Whether an app's files, by path, have a React screen: `screens/<name>.jsx` or `.tsx`, which `screens` builds.
+pub fn has_screens<'a>(paths: impl IntoIterator<Item = &'a str>) -> bool {
+    paths.into_iter().any(|p| p.strip_prefix("screens/").is_some_and(screen_name))
+}
+
+/// A React screen's file name: lowercase words joined by -, then `.jsx` or `.tsx`.
+fn screen_name(file: &str) -> bool {
+    let stem = file.strip_suffix(".jsx").or_else(|| file.strip_suffix(".tsx")).unwrap_or("");
+    !stem.is_empty() && stem.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+}
+
+/// Builds the app's React screens, if it has any: each `screens/<name>.jsx` or `.tsx` into `dist/<name>.html`, the
+/// screen's HTML that app.js imports as text (`with { type: "text" }`), opted in to @one/ui, with its own styles and
+/// module in it and React and @one/ui left to the page (src/screen.rs). Built by this machine's Bun, or else Node: the
+/// pinned Bun is only for bundling app.js, not for running build tools.
+fn screens(dir: &Path) -> Result<()> {
+    let some = std::fs::read_dir(dir.join("screens")).into_iter().flatten().flatten().any(|e| screen_name(&e.file_name().to_string_lossy()));
+    if !some {
+        return Ok(());
+    }
+    // One that runs: a version manager's shim (mise's, asdf's) can be on PATH with no version behind it.
+    let runs = |name: &str| {
+        let path = std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()).map(|d| d.join(name)).find(|p| p.is_file())?;
+        let ran = std::process::Command::new(&path).arg("--version").stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).status();
+        ran.is_ok_and(|s| s.success()).then_some(path)
+    };
+    // Bun runs the build and installs its tools; Node runs it, and npm, which comes with it, installs them.
+    let (runtime, install): (PathBuf, (PathBuf, &[&str])) = match (runs("bun"), runs("node"), runs("npm")) {
+        (Some(bun), _, _) => (bun.clone(), (bun, &["install", "--frozen-lockfile", "--ignore-scripts"])),
+        (None, Some(node), Some(npm)) => (node, (npm, &["install", "--ignore-scripts", "--no-audit", "--no-fund"])),
+        _ => bail!(
+            "{}'s React screens (screens/*.jsx) are built on the machine that deploys it, which needs Bun (bun.sh, recommended) or Node (nodejs.org): install one and deploy again",
+            dir.canonicalize().ok().and_then(|d| Some(d.file_name()?.to_string_lossy().to_string())).unwrap_or_else(|| "this app".into())
+        ),
+    };
+    let tools = screen_tools(&install.0, install.1)?;
+    let shared: serde_json::Value = serde_json::from_str(include_str!("screen/ui/dist/importmap.json"))?;
+    let shared: Vec<&String> = shared["imports"].as_object().context("@one/ui's import map has no imports")?.keys().collect();
+    let out = std::process::Command::new(&runtime)
+        .arg(tools.join("screens.mjs"))
+        .arg(dir.canonicalize()?)
+        .arg(crate::screen::UI)
+        .args(shared)
+        .current_dir(&tools)
+        .env("DO_NOT_TRACK", "1")
+        .output()
+        .with_context(|| format!("couldn't run {}", runtime.display()))?;
+    if !out.status.success() {
+        bail!("building its React screens failed:\n{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+    }
+    Ok(())
+}
+
+/// The tools that build React screens, as @one/ui is built with them (its package.json, and bun.lock where Bun installs
+/// them), installed by `install` once per version of them, beside `screens.mjs` and the theme's names it imports.
+fn screen_tools(installer: &Path, install: &[&str]) -> Result<PathBuf> {
+    use sha2::Digest;
+    let files: [(&str, &str); 4] = [
+        ("package.json", include_str!("screen/ui/package.json")),
+        ("bun.lock", include_str!("screen/ui/bun.lock")),
+        ("theme.css", include_str!("screen/ui/src/theme.css")),
+        ("screens.mjs", include_str!("deploy/screens.mjs")),
+    ];
+    let mut hash = sha2::Sha256::new();
+    for (path, text) in files {
+        hash.update(format!("{path}\0{}\0", text.len()));
+        hash.update(text);
+    }
+    let dir = crate::cache().join(format!("screen-tools-{}", &data_encoding::HEXLOWER.encode(&hash.finalize())[..16]));
+    if dir.join("node_modules").is_dir() {
+        return Ok(dir);
+    }
+    // Installed beside it, then moved in whole, so a build never finds it half installed.
+    let part = dir.with_extension(format!("part-{}", rand::random::<u64>()));
+    std::fs::create_dir_all(&part)?;
+    let installed = (|| {
+        for (path, text) in files {
+            std::fs::write(part.join(path), text)?;
+        }
+        let out = std::process::Command::new(installer).args(install).current_dir(&part).env("DO_NOT_TRACK", "1").output().with_context(|| format!("couldn't run {}", installer.display()))?;
+        if !out.status.success() {
+            bail!("installing the tools that build React screens failed:\n{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        }
+        Ok(())
+    })();
+    if installed.is_err() || std::fs::rename(&part, &dir).is_err() {
+        let _ = std::fs::remove_dir_all(&part);
+    }
+    installed.map(|_| dir)
 }
 
 /// An app's bundle, built from its files as `build` builds a folder, once per version of them: the build is kept in

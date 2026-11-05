@@ -156,10 +156,24 @@ pub fn deeper(apps: &[Value]) -> Vec<Skill> {
         })
         .collect();
     // The build skill carries the code that says what an app gets, as it is in this build, so an agent with only MCP
-    // reads it here rather than on the web: what a call's ctx has, a screen's one and its kit, and the widget nodes.
+    // reads it here rather than on the web: what a call's ctx has, a screen's one, @one/ui and the old kit, the widget
+    // nodes, and the app with a React screen to copy.
     if let Some(build) = skills.iter_mut().find(|s| s.name.ends_with("-build")) {
-        build.files = [("ctx.js", include_str!("runtime/shim.js")), ("one.js", include_str!("screen/bridge.js")), ("kit.js", include_str!("screen/kit.js")), ("widgets.js", include_str!("screen/widgets.js"))]
-            .into_iter()
+        build.files = [
+            ("ctx.js", include_str!("runtime/shim.js")),
+            ("one.js", include_str!("screen/bridge.js")),
+            ("ui/index.ts", include_str!("screen/ui/src/index.ts")),
+            ("ui/layout.tsx", include_str!("screen/ui/src/components/layout.tsx")),
+            ("ui/problem.tsx", include_str!("screen/ui/src/components/problem.tsx")),
+            ("ui/empty.tsx", include_str!("screen/ui/src/components/empty.tsx")),
+            ("ui/icon.tsx", include_str!("screen/ui/src/components/icon.tsx")),
+            ("ui/app-icon.tsx", include_str!("screen/ui/src/components/app-icon.tsx")),
+            ("kit.js", include_str!("screen/kit.js")),
+            ("widgets.js", include_str!("screen/widgets.js")),
+            ("react/app.js", include_str!("../skills/build/react/app.js")),
+            ("react/screens/main.jsx", include_str!("../skills/build/react/screens/main.jsx")),
+        ]
+        .into_iter()
             .map(|(p, t)| (p.to_string(), t.to_string()))
             .collect();
     }

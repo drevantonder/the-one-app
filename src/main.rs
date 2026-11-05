@@ -44,7 +44,9 @@ fn every_command() -> String {
   {CLI} apps                           every app and its operations
   {CLI} deploy <dir> [--name <app>] [--owner <owner>]
                                        build the app in <dir> (app.ts or app.js, and its npm packages) with Bun and
-                                       deploy it, with its source; makes the app if it's new (owner: you, a group or admins)
+                                       deploy it, with its source; makes the app if it's new (owner: you, a group or admins).
+                                       React screens (screens/<name>.jsx) are built first, into dist/<name>.html, with
+                                       this machine's Bun or Node
   {CLI} deploy <app> --version <hash>  deploy an earlier version again (deploys lists them): a rollback
   {CLI} deploys <app>                  an app's deploys, newest last
   {CLI} source <app> [path] [--version <hash>]
@@ -947,11 +949,22 @@ fn deploy(dir: &std::path::Path, flags: &Map<String, Value>) -> Result<()> {
         Some(name) => name.to_string(),
         None => dir.canonicalize()?.file_name().context("which app?")?.to_string_lossy().to_string(),
     };
-    let bundle = one::deploy::build(dir)?;
-    let blob = request(agent().post(format!("http://{}/v1/blobs", addr())).send(&bundle[..]))?["blob"].as_str().unwrap_or("").to_string();
-    let here = post("/v1/deploy", json!({ "app": name, "bundle": blob, "owner": flags.get("owner"), "wait": true }))?["here"] == true;
+    let blob = put_blob(&one::deploy::build(dir)?)?;
+    let here =post("/v1/deploy", json!({ "app": name, "bundle": blob, "owner": flags.get("owner"), "wait": true }))?["here"] == true;
     println!("{}", deployed_said(&format!("Deployed {name} ({}).", &blob[..12]), here));
     Ok(())
+}
+
+/// Keeps `bytes` as a blob on this machine's node, giving its hash.
+fn put_blob(bytes: &[u8]) -> Result<String> {
+    Ok(request(agent().post(format!("http://{}/v1/blobs", addr())).send(bytes))?["blob"].as_str().unwrap_or("").to_string())
+}
+
+/// The deploy tool's files built into a bundle on this machine, as a blob of its node's: for React screens, which only
+/// the machine that deploys builds.
+fn built_here(files: &Map<String, Value>) -> Result<String> {
+    let files = one::deploy::given(files)?;
+    put_blob(&one::deploy::build_files(&files.iter().map(|(p, b)| (p.as_str(), b.as_slice())).collect::<Vec<_>>())?)
 }
 
 /// What a deploy did, after `done`: which devices run it yet, as far as this one knows (`here`, whether it does).
@@ -2234,7 +2247,7 @@ fn vault_tool(op: &str, input: &Map<String, Value>, agent: Option<&str>) -> Resu
 fn deploy_tool() -> Value {
     json!({
         "name": "deploy",
-        "description": format!("Deploy an app from its files: builds it as {CLI} deploy builds a folder, npm packages and all, and makes the app if the name is new, owned by you. Or put back an earlier version. Answers with its tools and how to put it on your page."),
+        "description": format!("Deploy an app from its files: builds it as {CLI} deploy builds a folder, npm packages, React screens (screens/<name>.jsx, into dist/<name>.html, with this machine's Bun or Node) and all, and makes the app if the name is new, owned by you. Or put back an earlier version. Answers with its tools and how to put it on your page."),
         "inputSchema": { "type": "object", "required": ["app"], "properties": {
             "app": { "type": "string", "description": "the app's name, lowercase words joined by -, like water-log; a new name makes a new app" },
             "files": { "type": "object", "additionalProperties": { "type": "string" }, "description": "every file of the app, each path → its text: { \"app.js\": \"export default { … }\" }, and package.json for npm packages" },
@@ -2325,6 +2338,11 @@ fn answer_tool(params: &Value, agent: Option<&str>, mode: Mode) -> Value {
         "deploy" => {
             let app = input.get("app").and_then(Value::as_str).unwrap_or("");
             let body = match (input.get("files"), input.get("version")) {
+                // React screens are built here, on the machine that deploys, as `deploy <folder>` builds them.
+                (Some(Value::Object(files)), None) if !signed_in() && one::deploy::has_screens(files.keys().map(String::as_str)) => match built_here(files) {
+                    Ok(bundle) => json!({ "app": app, "bundle": bundle, "wait": true }),
+                    Err(e) => return failed(format!("{e:#}")),
+                },
                 (Some(files), None) => json!({ "app": app, "files": files, "wait": true }),
                 (None, Some(version)) => json!({ "app": app, "bundle": version, "wait": true }),
                 _ => return failed("give files, the app's files, or version, an earlier one to put back".into()),
