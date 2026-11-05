@@ -558,13 +558,24 @@ function Cell({ page, at, editing, refreshing, nth, icon }) {
   )
 }
 
+/// How many columns a grid of `width` has: four across a phone's width, more where there's room, each cell at least
+/// 92 wide. Widgets are 2, 4 or 8 columns wide, so the columns are a multiple of 4 (a strip of 2 beside a row of them
+/// is a hole), unless that makes the cells larger than 132: then the most even ones.
+function columnsFor(width, gap) {
+  const cellOf = (columns) => (width - gap * (columns - 1)) / columns
+  let columns = 4
+  while (cellOf(columns + 2) >= 92) columns += 2
+  const four = columns - (columns % 4)
+  return cellOf(four) <= 132 ? four : columns
+}
+
 /// A grid as a home screen's: cells as many as the room has, their size filling it, four across a phone's width; each
 /// item in the first place it fits.
 function Grid({ page, editing, refreshing }) {
   const [ref, width] = useWidth()
   const narrow = width < 500
   const gap = narrow ? 14 : 18
-  const columns = narrow ? 4 : Math.max(4, 2 * Math.floor((width + gap) / (2 * (96 + gap))))
+  const columns = narrow ? 4 : columnsFor(width, gap)
   const cell = (width - gap * (columns - 1)) / columns
   // An icon and its name fit a cell, however large the text is.
   const icon = Math.round(Math.max(32, Math.min(68, cell - 24)))
@@ -738,19 +749,19 @@ function AddWidget({ p, only, columns, close }) {
   return (
     <ResponsiveDialog open onOpenChange={(open) => !open && close()} title={only ? `Add Widget · ${home.label(only)}` : `Add Widget · ${p.title}`} action={<Button size="sm" variant="ghost" onClick={close}>Cancel</Button>}>
       <div className="flex flex-col divide-y overflow-y-auto">
-        {shown.length ? shown.map(({ w, sizes }) => <Addable key={`${w.app}:${w.widget}`} w={w} sizes={sizes} p={p} columns={columns} close={close} />) : <Empty>{`No app on ${p.title} has a widget.`}</Empty>}
+        {shown.length ? shown.map(({ w, sizes }) => <Addable key={`${w.app}:${w.widget}`} w={w} sizes={sizes} p={p} close={close} />) : <Empty>{`No app on ${p.title} has a widget.`}</Empty>}
       </div>
     </ResponsiveDialog>
   )
 }
 
-function Addable({ w, sizes, p, columns, close }) {
+function Addable({ w, sizes, p, close }) {
   const a = home.app(w.app), title = w.title || home.label(a) || w.widget
   const [size, setSize] = useState(sizes.includes(w.size) ? w.size : sizes[0])
   const [ref, room] = useWidth()
-  // As big as on the page: its cells, four to a phone's width.
-  const gap = 14, [cw, ch] = CELLS[size]
-  const cell = Math.min(90, ((room || 320) - gap * (Math.max(4, cw) - 1)) / Math.max(4, cw))
+  // As big as on the page: its cells, as that grid has them, drawn at that size and no larger than the room there is.
+  const { cell = 80, gap = 14 } = S.geometry[p.scope] || {}, [cw, ch] = CELLS[size]
+  const width = cw * cell + (cw - 1) * gap, height = ch * cell + (ch - 1) * gap, fit = Math.min(1, Math.max(0, room - 32) / width || 1)
   const quietHost = { run: async () => {}, follow: () => {} }
   const add = () => {
     const id = [...crypto.getRandomValues(new Uint8Array(5))].map((b) => b.toString(16).padStart(2, "0")).join("")
@@ -769,8 +780,8 @@ function Addable({ w, sizes, p, columns, close }) {
           <TabsList className="w-full">{sizes.map((s) => <TabsTrigger key={s} value={s}>{NAMES[s]}</TabsTrigger>)}</TabsList>
         </Tabs>
       )}
-      <div className="pointer-events-none flex justify-center py-1">
-        <WidgetCard w={{ ...w, title }} host={quietHost} tree={home.tree(w, size)} style={{ width: cw * cell + (cw - 1) * gap, height: ch * cell + (ch - 1) * gap }} />
+      <div className="pointer-events-none mx-auto py-1" style={{ width: width * fit, height: height * fit + 8 }}>
+        <WidgetCard w={{ ...w, title }} host={quietHost} tree={home.tree(w, size)} style={{ width, height, transform: `scale(${fit})`, transformOrigin: "0 0" }} />
       </div>
       <Button variant="secondary" className="w-full" onClick={add}>Add Widget</Button>
     </section>

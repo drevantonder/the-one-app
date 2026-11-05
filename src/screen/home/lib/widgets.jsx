@@ -3,7 +3,7 @@
 // HTML until it's moved. A tree is the app's, so nothing in it is ever markup: what's drawn is text, a number (`num`),
 // or one of the names here. `host` is what buttons, toggles and links act through: `run(app, op, input, widget)` → the
 // error's text for people if it failed, and `follow(link, widget)` for a web page's address or `{ screen, params }`.
-import { useState } from "react"
+import { useLayoutEffect, useRef, useState } from "react"
 import { Button, Icon, Spinner, Switch, cn } from "@one/ui"
 
 // Colour only where it means something: fine is plain text, warn and bad need you.
@@ -91,20 +91,24 @@ function Node({ n, w, host }) {
       break
     case "stat":
       el = (
-        <div style={colored}>
-          <b className="text-[26px] font-semibold tabular-nums">{fmt(n.value) + (n.unit ? " " + n.unit : "")}</b>
-          {n.label && <small className="block text-[11px] text-muted-foreground">{n.label}</small>}
+        <div className="flex min-w-0 flex-col" style={colored}>
+          <div className="flex min-w-0 items-baseline gap-[3px]">
+            <Fit className="text-[26px] font-semibold tabular-nums">{fmt(n.value)}</Fit>
+            {n.unit && <span className="shrink-0 text-[15px] font-medium text-muted-foreground">{n.unit}</span>}
+          </div>
+          {n.label && <small className="truncate text-[11px] text-muted-foreground">{n.label}</small>}
         </div>
       )
       break
     case "gauge": {
-      const f = Math.max(0, Math.min(1, num(n.value, 0) / (num(n.max) || 1))), r = 18, c = 2 * Math.PI * r
-      const size = num(n.w) || 46
+      // Drawn at its own size, as the other widgets draw it: its ring no thicker than a sixth of it.
+      const f = Math.max(0, Math.min(1, num(n.value, 0) / (num(n.max) || 1))), size = num(n.w) || 46
+      const line = Math.min(5, size / 6), r = (size - line) / 2, c = 2 * Math.PI * r, mid = size / 2
       el = (
-        <svg viewBox="0 0 46 46" width={size} height={size} className="shrink-0">
-          <circle cx="23" cy="23" r={r} fill="none" stroke="var(--foreground)" strokeOpacity=".15" strokeWidth="5" />
-          <circle cx="23" cy="23" r={r} fill="none" stroke={color || "var(--foreground)"} strokeWidth="5" strokeLinecap="round" strokeDasharray={`${c * f} ${c}`} transform="rotate(-90 23 23)" />
-          <text x="23" y="27" textAnchor="middle" fontSize="10" fontWeight="600" fill="currentColor">{n.label ?? Math.round(f * 100) + "%"}</text>
+        <svg viewBox={`0 0 ${size} ${size}`} width={size} height={size} className="shrink-0">
+          <circle cx={mid} cy={mid} r={r} fill="none" stroke="var(--foreground)" strokeOpacity=".15" strokeWidth={line} />
+          <circle cx={mid} cy={mid} r={r} fill="none" stroke={color || "var(--foreground)"} strokeWidth={line} strokeLinecap="round" strokeDasharray={`${c * f} ${c}`} transform={`rotate(-90 ${mid} ${mid})`} />
+          {n.label !== "" && <text x={mid} y={mid + 3.5} textAnchor="middle" fontSize={Math.min(10, size / 4.6)} fontWeight="600" fill="currentColor">{n.label ?? Math.round(f * 100) + "%"}</text>}
         </svg>
       )
       break
@@ -202,12 +206,24 @@ function Glyph({ n, color }) {
   )
 }
 
+/// A chart or sparkline at the size the tree gave it: its height in pixels (`h`), and the width it has (or its `w`), so
+/// its labels and strokes are drawn as they are and never grow with the card.
 function Chart({ n, color }) {
-  const labels = Array.isArray(n.labels) ? n.labels : []
+  const ref = useRef(null)
+  const [room, setRoom] = useState(0)
+  // The width its box has, in its own units (not the page's, which a zoom changes).
+  useLayoutEffect(() => {
+    const box = ref.current
+    setRoom(box.clientWidth)
+    const seen = new ResizeObserver(() => setRoom(box.clientWidth))
+    seen.observe(box)
+    return () => seen.disconnect()
+  }, [])
+  const spark = n.t === "spark", labels = Array.isArray(n.labels) ? n.labels : []
   const v = (Array.isArray(n.values) ? n.values : []).map((y) => num(y, 0)), max = num(n.max) || Math.max(...v, 1)
-  const spark = n.t === "spark"
-  const h = num(n.h) || (spark ? 28 : 70), wd = (spark && num(n.w)) || 240
-  const fill = color || "var(--foreground)", step = wd / Math.max(v.length, 1)
+  const h = num(n.h) || (spark ? 28 : 70), fixed = spark && num(n.w) ? num(n.w) : 0
+  const wd = fixed || room, step = wd / Math.max(v.length, 1), fill = color || "var(--foreground)"
+  const total = h + (n.labels ? 14 : 0)
   let body
   if (spark && !v.length) {
     body = <line x1="2" y1={h / 2} x2={wd - 2} y2={h / 2} stroke="var(--muted-foreground)" strokeOpacity=".5" strokeWidth="1.5" strokeDasharray="2 3" />
@@ -226,11 +242,33 @@ function Chart({ n, color }) {
     body = v.map((y, i) => <rect key={i} x={i * step + step * 0.15} y={h - (y / max) * h} width={step * 0.7} height={(y / max) * h} rx="3" fill={fill} />)
   }
   return (
-    <svg viewBox={`0 0 ${wd} ${h + (Array.isArray(n.labels) ? 14 : 0)}`} width={spark && num(n.w) ? wd : "100%"} preserveAspectRatio={spark ? "none" : undefined} className="shrink-0">
-      {body}
-      {labels.map((l, i) => <text key={i} x={(i + 0.5) * step} y={h + 12} textAnchor="middle" fontSize="10" fill="var(--muted-foreground)">{String(l ?? "")}</text>)}
-    </svg>
+    <div ref={ref} className="min-w-0 shrink-0" style={{ width: fixed || "100%", height: total }}>
+      {wd > 0 && (
+        <svg viewBox={`0 0 ${wd} ${total}`} width={wd} height={total} className="block">
+          {body}
+          {labels.map((l, i) => <text key={i} x={(i + 0.5) * step} y={h + 12} textAnchor="middle" fontSize="10" fill="var(--muted-foreground)">{String(l ?? "")}</text>)}
+        </svg>
+      )}
+    </div>
   )
+}
+
+/// Text on one line that gives up size before it gives up words, down to 0.6 of it, then is cut short.
+function Fit({ children, className }) {
+  const box = useRef(null), text = useRef(null)
+  useLayoutEffect(() => {
+    const outer = box.current, inner = text.current
+    const fit = () => {
+      inner.style.fontSize = ""
+      const need = inner.scrollWidth, room = outer.clientWidth
+      if (need > room && room > 0) inner.style.fontSize = `${Math.max(0.6, room / need)}em`
+    }
+    fit()
+    const seen = new ResizeObserver(fit)
+    seen.observe(outer)
+    return () => seen.disconnect()
+  }, [children])
+  return <span ref={box} className={cn("block min-w-0 truncate whitespace-nowrap", className)}><span ref={text} className="inline-block">{children}</span></span>
 }
 
 // A button or toggle runs the app's tool as the person, pressed with a spinner meanwhile; the host draws the
