@@ -9,7 +9,7 @@
 // browsers require of every push.
 const KEPT = "one.page";
 const PLACES = /^\/($|page\/|services\/|app\/|settings($|\/)|vault$)/;
-/// The white label's name, which the kernel writes in (Settings::web).
+/// The custom build's name, which the kernel writes in (Settings::web).
 const NAME = "";
 
 addEventListener("install", (e) => e.waitUntil(caches.open(KEPT).then((c) => c.add("/index.html")).catch(() => {}).then(() => skipWaiting())));

@@ -454,7 +454,7 @@ impl Node {
 }
 
 /// Where a built-in app's code is: its folder of `apps/` in the repo releases come from, at this build's commit when
-/// it's one (else main); none for a white label with no repo.
+/// it's one (else main); none for a custom build with no repo.
 fn built_in_source(app: &str) -> Option<String> {
     let repo = crate::config::REPO;
     let commit = crate::config::BUILD.split(['-', '+']).next().filter(|c| !crate::config::BUILD.contains('+') && c.len() >= 7 && c.bytes().all(|b| b.is_ascii_hexdigit()));

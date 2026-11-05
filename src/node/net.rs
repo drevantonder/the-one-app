@@ -89,17 +89,17 @@ impl std::fmt::Display for NotThere {
 
 impl std::error::Error for NotThere {}
 
-/// What devices of this white label speak: another's never meet them.
+/// What devices of this custom build speak: another's never meet them.
 pub fn alpn() -> Vec<u8> {
     format!("{}/1", crate::config::CLI).into_bytes()
 }
 
-/// What client devices of this white label speak to a node: HTTP/1.1, one request on each stream, to its local API.
+/// What client devices of this custom build speak to a node: HTTP/1.1, one request on each stream, to its local API.
 fn http_alpn() -> Vec<u8> {
     format!("{}/http/1", crate::config::CLI).into_bytes()
 }
 
-/// What service endpoints of this white label answer (src/service.rs): a node asks one with it.
+/// What service endpoints of this custom build answer (src/service.rs): a node asks one with it.
 pub fn service_alpn() -> Vec<u8> {
     format!("{}/service/1", crate::config::CLI).into_bytes()
 }

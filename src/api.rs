@@ -875,7 +875,7 @@ async fn role(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Repl
     done()
 }
 
-/// `{ name, value }`: one of the install's settings, for admins; `value: null` puts back the white label's default.
+/// `{ name, value }`: one of the install's settings, for admins; `value: null` puts back the custom build's default.
 async fn settings(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
     node.member_as(&me.caller, "setting", json!({ "name": text(&body, "name")?, "value": body["value"] })).await?;
     done()

@@ -158,7 +158,7 @@ fn install(m: &ScopeDb, me: &str, settings: &Map<String, Value>, here: &Here) ->
     })
 }
 
-/// The install's settings: the white label's defaults (config.toml's `[settings]`), and what its admins set over them
+/// The install's settings: the custom build's defaults (config.toml's `[settings]`), and what its admins set over them
 /// (`ScopeDb::settings`).
 pub fn settings(set: &BTreeMap<String, String>) -> Map<String, Value> {
     let mut out: Map<String, Value> = crate::config::SETTINGS.iter().map(|(k, v)| (k.to_string(), json!(v))).collect();
@@ -167,7 +167,7 @@ pub fn settings(set: &BTreeMap<String, String>) -> Map<String, Value> {
     out
 }
 
-/// The one line that installs this white label's latest release on a machine, if it publishes releases.
+/// The one line that installs this custom build's latest release on a machine, if it publishes releases.
 pub fn install_line() -> Option<String> {
     let repo = crate::config::REPO;
     (!repo.is_empty()).then(|| format!("curl -fsSL https://github.com/{repo}/releases/latest/download/install.sh | sh"))

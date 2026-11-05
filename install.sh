@@ -67,7 +67,7 @@ else
 	ln -sf "$cli" "$HOME/.local/bin/git-remote-$cli"
 	ln -sf "$cli" "$HOME/.local/bin/${cli}d"
 	if [ -d /run/systemd/system ]; then
-		# Its environment (a white label's <CLI>_HOME) as it was, when installed again.
+		# Its environment (a custom build's <CLI>_HOME) as it was, when installed again.
 		env=$(sed -n 's/^Environment=//p' "$units/${cli}d.service" 2>/dev/null | grep -v '^HOME=' || true)
 		# The node answers every client of the install, so it keeps its memory and, outside a container (where it can't
 		# be lowered), is the last thing killed when the machine runs short.

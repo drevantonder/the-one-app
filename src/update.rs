@@ -19,9 +19,9 @@ const PLATFORMS: [&str; 3] = ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux
 /// An update sends out only what changed since the last one here: apps by their deploy, the Mac app by each Mac building
 /// it at once, then the iPhone app for the iPhone it reaches, and the node by building it, which every Linux device then
 /// takes, and which deploys the kernel (and the serverless node with it) from the device with the kernel's settings. Beside it runs `after-update` in this
-/// device's home, if there is one: what else is built from main here, like another white label's update.
+/// device's home, if there is one: what else is built from main here, like another custom build's update.
 pub fn run(tag: Option<&str>) -> Result<()> {
-    ensure!(!REPO.is_empty(), "this white label names no repo, so it has nothing to update from");
+    ensure!(!REPO.is_empty(), "this custom build names no repo, so it has nothing to update from");
     ensure!(cfg!(target_os = "linux"), "run this on one of your Linux devices");
     // It runs from its own cache, not the folder it was started in, which (an agent's worktree) may be gone before it ends.
     ensure!(cache().is_absolute(), "give {}_HOME as a full path", CLI.to_uppercase());
@@ -29,7 +29,7 @@ pub fn run(tag: Option<&str>) -> Result<()> {
     std::env::set_current_dir(cache())?;
     if let Some(tag) = tag {
         ensure!(version_tag(tag), "a release is named like v1.2.3");
-        ensure!(installer_is_ours(), "install.sh installs another white label, so {NAME} isn't released on GitHub; {CLI} update runs main on its devices");
+        ensure!(installer_is_ours(), "install.sh installs another custom build, so {NAME} isn't released on GitHub; {CLI} update runs main on its devices");
         ensure!(quiet(Command::new("gh").args(["auth", "status"])), "sign in to GitHub first: gh auth login");
     }
     // Updates here take turns: they share one checkout, and each would test one commit and send out another.
@@ -129,7 +129,7 @@ pub fn run(tag: Option<&str>) -> Result<()> {
     run_quiet(&mut build)?;
 
     let binary = src.join("target/release").join(env!("CARGO_BIN_NAME"));
-    // The build devices say they run: main's commit, and a white label's config's.
+    // The build devices say they run: main's commit, and a custom build's config's.
     let version: Value = serde_json::from_slice(&Command::new(&binary).args(["version", "--json"]).output()?.stdout).context("ask the new build what it is")?;
     let short = version["commit"].as_str().context("the new build doesn't say what it is")?.to_string();
     let short = short.as_str();
@@ -590,7 +590,7 @@ fn version_tag(tag: &str) -> bool {
     parts.len() == 3 && parts.iter().all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))
 }
 
-/// Whether install.sh, which gets releases from GitHub, installs this white label. Only that white label is released there.
+/// Whether install.sh, which gets releases from GitHub, installs this custom build. Only that custom build is released there.
 fn installer_is_ours() -> bool {
     include_str!("../install.sh").contains(&format!("\ncli={CLI}\n"))
 }
@@ -603,7 +603,7 @@ fn app_zip() -> String {
 /// The release key's private half, from the publisher's password manager by way of the config's release_signer, kept
 /// only in memory. It must be the key every build checks releases against.
 pub fn release_key() -> Result<ssh_key::PrivateKey> {
-    ensure!(!RELEASE_KEY.is_empty() && !RELEASE_SIGNER.is_empty(), "this white label has no release key, so nothing it builds can be released");
+    ensure!(!RELEASE_KEY.is_empty() && !RELEASE_SIGNER.is_empty(), "this custom build has no release key, so nothing it builds can be released");
     let out = Command::new("sh").args(["-c", RELEASE_SIGNER]).stdin(std::process::Stdio::null()).output().context("run release_signer")?;
     ensure!(
         out.status.success(),
@@ -628,7 +628,7 @@ fn checkout() -> Result<PathBuf> {
     Ok(dir)
 }
 
-/// The config to build with: this checkout's own, or, for a white label whose config lives in its own repo, that repo's
+/// The config to build with: this checkout's own, or, for a custom build whose config lives in its own repo, that repo's
 /// latest, fetched beside it; and then the commit it's at.
 fn config(src: &Path) -> Result<(PathBuf, Option<String>)> {
     if CONFIG_REPO.is_empty() {
@@ -892,7 +892,7 @@ JOB
 }
 
 /// Shell that puts the Mac's clean clone at `commit` and sets `config` to the config to build with: the clone's own, or
-/// for a white label whose config is in its own repo, that repo at `config_commit`.
+/// for a custom build whose config is in its own repo, that repo at `config_commit`.
 fn mac_checkout(commit: &str, config_commit: &str) -> String {
     let config = if CONFIG_REPO.is_empty() {
         format!(r#"config="$c/src/{CONFIG_FILE}""#)

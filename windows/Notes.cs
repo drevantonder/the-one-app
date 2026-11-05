@@ -1,6 +1,6 @@
 // Notifications. The install's push Worker (kernel/push/) carries each note, sealed to this computer's device, through
 // WNS as a raw notification, its body the sealed bytes, which wakes this app (the Windows App SDK's
-// PushNotificationManager, by the white label's Microsoft Entra app: WhiteLabel.WnsApp and WnsObject, empty for none,
+// PushNotificationManager, by the custom build's Microsoft Entra app: CustomBuild.WnsApp and WnsObject, empty for none,
 // and then nothing registers). The app opens the note with the device's key (client/ffi's OpenNote), asking nothing of
 // the network, and shows it as a toast; clicking one opens the app screen it names. A device asking its person to join
 // shows Approve and Not Me, answered from here as Settings › Devices answers them, with no window.
@@ -18,7 +18,7 @@ namespace One;
 
 public static class Notes
 {
-    static bool Pushes => WhiteLabel.WnsApp.Length > 0 && WhiteLabel.WnsObject.Length > 0 && PushNotificationManager.IsSupported();
+    static bool Pushes => CustomBuild.WnsApp.Length > 0 && CustomBuild.WnsObject.Length > 0 && PushNotificationManager.IsSupported();
 
     /// As the program starts, before it asks how it was started: toasts' clicks and pushes come here while it runs.
     public static void Start()
@@ -66,7 +66,7 @@ public static class Notes
         if (!Pushes) return;
         try
         {
-            var made = await PushNotificationManager.Default.CreateChannelAsync(Guid.Parse(WhiteLabel.WnsObject));
+            var made = await PushNotificationManager.Default.CreateChannelAsync(Guid.Parse(CustomBuild.WnsObject));
             if (made.Status != PushNotificationChannelStatus.CompletedSuccess) throw made.ExtendedError ?? new Exception($"WNS gave no channel: {made.Status}");
             await Client.RegisterPush("wns", made.Channel.Uri.ToString());
         }
@@ -101,12 +101,12 @@ public static class Notes
     /// names, or the app.
     static string Opens(uniffi.one_client_ffi.Note note)
     {
-        if (Join(note) != null) return $"{WhiteLabel.Cli}://settings/devices";
+        if (Join(note) != null) return $"{CustomBuild.Cli}://settings/devices";
         // Settings' own screens (Settings › Devices, where a device that joined is) are this app's, not an app's.
-        if (note.App == "settings") return $"{WhiteLabel.Cli}://settings/{Uri.EscapeDataString(note.Screen)}";
-        if (note.App.Length == 0) return $"{WhiteLabel.Cli}://open";
+        if (note.App == "settings") return $"{CustomBuild.Cli}://settings/{Uri.EscapeDataString(note.Screen)}";
+        if (note.App.Length == 0) return $"{CustomBuild.Cli}://open";
         var screen = note.Screen.Length > 0 ? note.Screen : "main";
-        var link = $"{WhiteLabel.Cli}://open?app={Uri.EscapeDataString(note.App)}&screen={Uri.EscapeDataString(screen)}";
+        var link = $"{CustomBuild.Cli}://open?app={Uri.EscapeDataString(note.App)}&screen={Uri.EscapeDataString(screen)}";
         return note.Params == "{}" ? link : $"{link}&params={Uri.EscapeDataString(note.Params)}";
     }
 
@@ -148,7 +148,7 @@ public static class Notes
         }
         catch (Exception ex)
         {
-            Show(id, a.TryGetValue("title", out var t) ? t : "", "", a.TryGetValue("open", out var o) ? o : $"{WhiteLabel.Cli}://settings/devices", code,
+            Show(id, a.TryGetValue("title", out var t) ? t : "", "", a.TryGetValue("open", out var o) ? o : $"{CustomBuild.Cli}://settings/devices", code,
                 (approve ? "Couldn’t approve it: " : "Couldn’t turn it down: ") + ex.Message);
         }
     }

@@ -257,7 +257,7 @@ public static class Look
 /// Light, Dark or Automatic, as chosen on this computer.
 public static class Appearance
 {
-    static string File => Path.Combine(WhiteLabel.Folder, "appearance");
+    static string File => Path.Combine(CustomBuild.Folder, "appearance");
 
     public static string Chosen
     {
@@ -272,7 +272,7 @@ public static class Appearance
 
     public static void Choose(string a, MainWindow window)
     {
-        Directory.CreateDirectory(WhiteLabel.Folder);
+        Directory.CreateDirectory(CustomBuild.Folder);
         System.IO.File.WriteAllText(File, a);
         window.Restyle();
     }

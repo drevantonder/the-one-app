@@ -106,7 +106,7 @@ pub struct Settings {
     #[serde(default, skip_serializing)]
     pub cloudflare_token: Option<String>,
     /// The push Worker's secrets, by their names in `SCHEMA` (`PUSH_SECRETS`): the install's VAPID key, which is made
-    /// with the kernel, and the white label's APNs, FCM and WNS credentials, as its admin adds them.
+    /// with the kernel, and the custom build's APNs, FCM and WNS credentials, as its admin adds them.
     #[serde(default, skip)]
     pub push: std::collections::BTreeMap<String, String>,
     /// A try install's one person, `(id, name)`, whom its kernel signs in with no passkey and no Google, so clients
@@ -147,14 +147,14 @@ SERVERLESS_KEY=
 # are signed with.
 # @optional
 VAPID_KEY=
-# The white label's APNs key: its .p8 file's text, its key id and the Apple developer team's id.
+# The custom build's APNs key: its .p8 file's text, its key id and the Apple developer team's id.
 # @optional
 APNS_KEY=
 # @optional
 APNS_KEY_ID=
 # @optional
 APNS_TEAM_ID=
-# The white label's Firebase project's service account key (its JSON), which Android's pushes are sent with.
+# The custom build's Firebase project's service account key (its JSON), which Android's pushes are sent with.
 # @optional
 FCM_ACCOUNT=
 # The Windows app's Microsoft Entra app registration, which Windows' pushes are sent with.
@@ -626,7 +626,7 @@ impl Settings {
     pub fn web(&self) -> Vec<(String, Vec<u8>)> {
         let mut files: Vec<(String, Vec<u8>)> =
             crate::config::KERNEL.iter().filter_map(|(path, bytes)| Some((path.strip_prefix("web/")?.to_string(), bytes.to_vec()))).collect();
-        // The page says whose it is before anyone signs in: the white label's name.
+        // The page says whose it is before anyone signs in: the custom build's name.
         let attr = |v: &str| v.replace('&', "&amp;").replace('"', "&quot;").replace('<', "&lt;");
         files.push(("icons.json".into(), crate::screen::ICONS.to_vec()));
         // Installed from Chrome or Edge, it's an app of its own: the desktop's, where there's no native one.
@@ -636,7 +636,7 @@ impl Settings {
             "icons": [{ "src": "/icon.png", "sizes": "192x192 512x512 1024x1024", "type": "image/png", "purpose": "any" }],
         });
         files.push(("manifest.webmanifest".into(), manifest.to_string().into_bytes()));
-        // The service worker shows a note it can't open with the white label's name.
+        // The service worker shows a note it can't open with the custom build's name.
         if let Some((_, sw)) = files.iter_mut().find(|(path, _)| path == "sw.js") {
             *sw = String::from_utf8_lossy(sw).replacen("const NAME = \"\";", &format!("const NAME = {};", json!(crate::config::NAME)), 1).into_bytes();
         }
@@ -1197,7 +1197,7 @@ fn mime(path: &str) -> &'static str {
     }
 }
 
-/// A kernel service's Worker's name on Cloudflare: `<cli>-<service>`, so white labels sharing an account don't clash.
+/// A kernel service's Worker's name on Cloudflare: `<cli>-<service>`, so custom builds sharing an account don't clash.
 pub fn worker_name(service: &str) -> String {
     format!("{}-{service}", crate::config::CLI)
 }

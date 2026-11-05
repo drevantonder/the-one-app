@@ -77,7 +77,7 @@ const MOST_ELSEWHERE: usize = 2;
 /// What a request in developer mode asks for a trace with, and a node answers its own part in (src/node/trace.rs).
 pub const TRACE_HEADER: &str = "x-one-trace";
 
-/// What this white label's clients speak to its nodes.
+/// What this custom build's clients speak to its nodes.
 fn alpn() -> Vec<u8> {
     format!("{}/http/1", config::CLI).into_bytes()
 }

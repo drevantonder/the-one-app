@@ -17,7 +17,7 @@ use crate::services::{Answer, Record, Reply};
 /// The built-in service's name, which agents act as when the Vault fills their requests (`vault_fetch`).
 pub const NAME: &str = crate::members::AGENTS;
 
-/// Marks a skill folder as this white label's to replace, so the nodes of two white labels on one machine leave each other's alone.
+/// Marks a skill folder as this custom build's to replace, so the nodes of two custom builds on one machine leave each other's alone.
 fn marker() -> String {
     format!(".synced-{}", crate::config::CLI)
 }
@@ -377,7 +377,7 @@ fn harnesses(home: &Path, written: &mut Written) {
     // Asked as one of this machine's own programs: with the token only its user can read.
     let token = crate::home().join(crate::api::LOCAL_TOKEN);
     let hook = format!("curl -sf --max-time 3 -H \"{}: $(cat '{}')\" --data-binary @- http://{addr}{HOOK_PATH} || true", crate::api::LOCAL_TOKEN_HEADER, token.display());
-    // Another white label's node on this machine has a hook of its own, on its own port; the board's before is replaced.
+    // Another custom build's node on this machine has a hook of its own, on its own port; the board's before is replaced.
     let port = format!(":{}/hooks/", addr.rsplit(':').next().unwrap_or_default());
     let server = crate::skills::server_name();
     // A stable path, so harnesses started without the user's PATH (by launchd, say) still find it after an update; but

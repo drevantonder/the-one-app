@@ -399,7 +399,7 @@ pub fn client_screen(context: &str, name: &str, linked: bool) -> Result<String, 
     Ok(one::screen::page(&serde_json::from_str(context)?, one::screen::client_screen(name), true, linked))
 }
 
-/// The white label this node is: `{ name, cli, port, made_here }`.
+/// The custom build this node is: `{ name, cli, port, made_here }`.
 #[wasm_bindgen]
 pub fn config() -> String {
     json!({ "name": one::config::NAME, "cli": one::config::CLI, "port": one::config::PORT, "made_here": one::config::MADE_HERE }).to_string()

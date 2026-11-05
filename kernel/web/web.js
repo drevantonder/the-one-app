@@ -432,9 +432,9 @@ const h = OneUI.react.createElement;
 
   const me = () => store.state?.user;
   const install = () => store.state?.install;
-  // The white label's name, as the gateway's index.html says it, until the install's state does.
-  const whiteLabel = { name: document.querySelector('meta[name="application-name"]')?.content || "", cli: document.querySelector('meta[name="one-cli"]')?.content || "" };
-  const config = () => store.state?.config || whiteLabel;
+  // The custom build's name, as the gateway's index.html says it, until the install's state does.
+  const customBuild = { name: document.querySelector('meta[name="application-name"]')?.content || "", cli: document.querySelector('meta[name="one-cli"]')?.content || "" };
+  const config = () => store.state?.config || customBuild;
   const app = (name) => store.apps.find((a) => a.name === name);
   /// Whether an app's operation only reads, as its app says: only what such a call answered is kept (answers.js).
   const reads = (name, op) => !!app(name)?.ops?.some((o) => o.name === op && o.reads === true);

@@ -336,7 +336,7 @@ export class Auth extends DurableObject {
         return new Response(meta.body, { status: meta.status, headers: { "content-type": "application/json", "access-control-allow-origin": "*" } });
       }
       const name = this.auth.options.appName;
-      // What its pages say: the white label's name, and what a person joins ("your One App").
+      // What its pages say: the custom build's name, and what a person joins ("your One App").
       const look = { name, yours: this.env.YOURS };
       const google = this.env.SIGN_IN === "google" ? this.env.JOIN_DOMAIN : null;
       const tried = this.env.SIGN_IN === "try";

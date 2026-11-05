@@ -33,7 +33,7 @@ public static class WidgetCache
     /// they're read again.
     public sealed record Kept(List<Item> Items, DateTime At);
 
-    static string File => System.IO.Path.Combine(WhiteLabel.Folder, "Widgets.json");
+    static string File => System.IO.Path.Combine(CustomBuild.Folder, "Widgets.json");
 
     public static Kept? Last()
     {
@@ -45,7 +45,7 @@ public static class WidgetCache
     {
         try
         {
-            System.IO.Directory.CreateDirectory(WhiteLabel.Folder);
+            System.IO.Directory.CreateDirectory(CustomBuild.Folder);
             System.IO.File.WriteAllText(File, JsonSerializer.Serialize(new Kept(items, at)));
         }
         catch { }
@@ -132,7 +132,7 @@ public sealed partial class Widgets : IWidgetProvider, IWidgetProvider2
                 // Those pinned before it started, as they were left; the board's calls come only once it's registered.
                 foreach (var info in WidgetManager.GetDefault().GetWidgetInfos())
                     pinned.TryAdd(info.WidgetContext.Id, Pinned.Of(info.WidgetContext, info.CustomState));
-                Marshal.ThrowExceptionForHR(CoRegisterClassObject(Guid.Parse(WhiteLabel.WidgetClass), new Factory(), 0x4 /* local server */, 0x1 /* multiple use */, out var cookie));
+                Marshal.ThrowExceptionForHR(CoRegisterClassObject(Guid.Parse(CustomBuild.WidgetClass), new Factory(), 0x4 /* local server */, 0x1 /* multiple use */, out var cookie));
                 done.Wait();
                 CoRevokeClassObject(cookie);
             }
@@ -339,9 +339,9 @@ public sealed partial class Widgets : IWidgetProvider, IWidgetProvider2
         // One never chosen shows the first, as the iPhone's does.
         var item = p.Chosen == null ? list?.FirstOrDefault() : list?.FirstOrDefault(i => i.Id == p.Chosen);
         if (why == "signed out")
-            card = WidgetCard.Saying($"Sign in to {WhiteLabel.Name} to see your pages.");
+            card = WidgetCard.Saying($"Sign in to {CustomBuild.Name} to see your pages.");
         else if (list == null)
-            card = WidgetCard.Saying(why == null ? "Getting your widgets…" : $"Can’t reach {WhiteLabel.Name} right now. This tries again by itself.");
+            card = WidgetCard.Saying(why == null ? "Getting your widgets…" : $"Can’t reach {CustomBuild.Name} right now. This tries again by itself.");
         else if (p.Choosing)
             card = WidgetCard.Chooser(list, p.Chosen);
         else if (item != null)
@@ -349,7 +349,7 @@ public sealed partial class Widgets : IWidgetProvider, IWidgetProvider2
         else if (p.Chosen != null && list.Count > 0)
             card = WidgetCard.Saying($"{p.Title ?? "This widget"} isn’t on your pages any more. Choose another with Customize, in this widget’s menu.");
         else
-            card = WidgetCard.Saying($"Open {WhiteLabel.Name} to see your pages.");
+            card = WidgetCard.Saying($"Open {CustomBuild.Name} to see your pages.");
         p.Problem = null;
         try
         {

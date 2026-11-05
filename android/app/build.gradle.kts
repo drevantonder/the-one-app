@@ -11,7 +11,7 @@ plugins {
     id("org.jetbrains.kotlin.plugin.serialization")
 }
 
-// The white label this build is: config.toml beside android/, or $CONFIG's.
+// The custom build this build is: config.toml beside android/, or $CONFIG's.
 val repo = rootDir.parentFile
 val config = file(System.getenv("CONFIG") ?: repo.resolve("config.toml").path).absoluteFile
 
@@ -25,14 +25,14 @@ fun quoted(s: String) = "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"") + "
 val commit = providers.exec { commandLine("git", "-C", repo.path, "rev-parse", "--short=12", "HEAD"); isIgnoreExitValue = true }
     .standardOutput.asText.get().trim().ifEmpty { "unknown" }
 val cli = field("cli")
-// What a person calls the install where they read: a workplace's white label, which its people join with their work
+// What a person calls the install where they read: a workplace's custom build, which its people join with their work
 // email (join_domain), is shared, "the PTC App"; anyone else's is "your One App".
 val yours = field("name").let { if (field("join_domain").isNotEmpty()) it.replaceFirst(Regex("^The "), "the ") else "your " + it.removePrefix("The ") }
 
 // The launcher icon from the config's, and the logo the app shows; and Phosphor's icons, which apps name, as every
 // device draws them.
-val generated = layout.buildDirectory.dir("generated/white-label")
-val whiteLabel = tasks.register("whiteLabel") {
+val generated = layout.buildDirectory.dir("generated/custom-build")
+val customBuild = tasks.register("customBuild") {
     val icon = art("icon")
     val logo = art("logo")
     val icons = repo.resolve("vendor/phosphor/icons.json")
@@ -74,7 +74,7 @@ val whiteLabel = tasks.register("whiteLabel") {
         // A notification's small icon is drawn from its shape alone: the menu bar's template, which is just that.
         out.resolve("res/drawable-xhdpi").mkdirs()
         menubar.copyTo(out.resolve("res/drawable-xhdpi/notification.png"))
-        // The white label's Firebase project, which this app gets its pushes through, as Firebase reads it at start:
+        // The custom build's Firebase project, which this app gets its pushes through, as Firebase reads it at start:
         // its google-services.json's values for this app, as Google's own Gradle plugin would write them. None, none.
         if (firebase != null) {
             @Suppress("UNCHECKED_CAST")
@@ -98,7 +98,7 @@ val whiteLabel = tasks.register("whiteLabel") {
     }
 }
 
-// Links to the install's address open the app (App Links), at the addresses it's built for: the white label's own, and
+// Links to the install's address open the app (App Links), at the addresses it's built for: the custom build's own, and
 // $LINKS's (comma-separated), for one that asks where. Android takes them only from the manifest, and opens the app
 // only where the address lists it (kernel set android), so they're in a manifest of their own, merged into the app's.
 val links = (listOf(field("address")) + (System.getenv("LINKS") ?: "").split(","))
@@ -141,7 +141,7 @@ android {
         buildConfigField("String", "NAME", quoted(field("name")))
         buildConfigField("String", "CLI", quoted(cli))
         buildConfigField("String", "YOURS", quoted(yours))
-        // A white label with one install signs in there; otherwise the first screen asks where.
+        // A custom build with one install signs in there; otherwise the first screen asks where.
         buildConfigField("String", "ADDRESS", quoted(field("address")))
         manifestPlaceholders["scheme"] = cli
         resValue("string", "app_name", field("name"))
@@ -185,7 +185,7 @@ kotlin {
     compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17) }
 }
 
-tasks.named("preBuild") { dependsOn(whiteLabel) }
+tasks.named("preBuild") { dependsOn(customBuild) }
 
 dependencies {
     val compose = platform("androidx.compose:compose-bom:2025.10.01")

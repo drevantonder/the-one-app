@@ -53,7 +53,7 @@ public sealed class WidgetCard
         {
             body.Add(card.Text(w.Title, "small", subtle: true));
             body.Add(card.Text("This widget stopped working.", "default", color: "warning", weight: "bolder"));
-            body.Add(card.Text($"Open {WhiteLabel.Name} to see why.", "small", subtle: true, wrap: true));
+            body.Add(card.Text($"Open {CustomBuild.Name} to see why.", "small", subtle: true, wrap: true));
         }
         else
         {
@@ -76,7 +76,7 @@ public sealed class WidgetCard
     {
         var card = new WidgetCard("", null);
         var body = new JsonArray { card.Text(text, "small", subtle: true, wrap: true) };
-        return (Card(body, new JsonObject { ["type"] = "Action.OpenUrl", ["url"] = $"{WhiteLabel.Cli}://open" }).ToJsonString(), card.data.ToJsonString());
+        return (Card(body, new JsonObject { ["type"] = "Action.OpenUrl", ["url"] = $"{CustomBuild.Cli}://open" }).ToJsonString(), card.data.ToJsonString());
     }
 
     /// Choosing which widget it shows: every widget on the person's pages, by page.
@@ -86,7 +86,7 @@ public sealed class WidgetCard
         var body = new JsonArray { card.Text("Choose a Widget", "default", weight: "bolder") };
         if (items.Count == 0)
         {
-            body.Add(card.Text($"Open {WhiteLabel.Name} to see your pages.", "small", subtle: true, wrap: true));
+            body.Add(card.Text($"Open {CustomBuild.Name} to see your pages.", "small", subtle: true, wrap: true));
             return (Card(body, null).ToJsonString(), card.data.ToJsonString());
         }
         body.Add(card.Text("Pick which of your pages’ widgets this shows.", "small", subtle: true, wrap: true));
@@ -242,14 +242,14 @@ public sealed class WidgetCard
 
     JsonObject? OpenScreen(string screen, string? parameters)
     {
-        if (app.Length == 0) return new JsonObject { ["type"] = "Action.OpenUrl", ["url"] = $"{WhiteLabel.Cli}://open" };
+        if (app.Length == 0) return new JsonObject { ["type"] = "Action.OpenUrl", ["url"] = $"{CustomBuild.Cli}://open" };
         var q = $"app={Uri.EscapeDataString(app)}&screen={Uri.EscapeDataString(screen)}&params={Uri.EscapeDataString(parameters ?? "{}")}";
         if (scope != null) q += $"&scope={Uri.EscapeDataString(scope)}";
-        return new JsonObject { ["type"] = "Action.OpenUrl", ["url"] = $"{WhiteLabel.Cli}://open?{q}" };
+        return new JsonObject { ["type"] = "Action.OpenUrl", ["url"] = $"{CustomBuild.Cli}://open?{q}" };
     }
 
     /// The widget's page.
-    JsonObject OpenPage() => new() { ["type"] = "Action.OpenUrl", ["url"] = scope == null ? $"{WhiteLabel.Cli}://open" : $"{WhiteLabel.Cli}://open?scope={Uri.EscapeDataString(scope)}" };
+    JsonObject OpenPage() => new() { ["type"] = "Action.OpenUrl", ["url"] = scope == null ? $"{CustomBuild.Cli}://open" : $"{CustomBuild.Cli}://open?scope={Uri.EscapeDataString(scope)}" };
 
     static JsonObject Wrap(JsonNode el, JsonObject action) => new() { ["type"] = "Container", ["items"] = new JsonArray(el), ["selectAction"] = action };
 

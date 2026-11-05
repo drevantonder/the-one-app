@@ -1,4 +1,4 @@
-//! A node: this device's install (a white label holds one), its replica and views, its socket to the relay, and where
+//! A node: this device's install (a custom build holds one), its replica and views, its socket to the relay, and where
 //! calls run.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -712,7 +712,7 @@ impl Node {
         self.with(|i| Ok(i.user.clone()))
     }
 
-    /// Refuses a second install: a white label holds one install, and another context is another white label.
+    /// Refuses a second install: a custom build holds one install, and another context is another custom build.
     fn ensure_no_install(&self) -> Result<()> {
         if self.has_install() {
             bail!("this device already belongs to an install, and {} holds one; for another, install that context's own app", crate::config::NAME);

@@ -26,7 +26,7 @@ import kotlinx.coroutines.withContext
 // Firebase Cloud Messaging as a data message alone (`n`, base64url), which wakes this app; the app opens it with the
 // device's key (client/ffi's openNote), asking nothing of the network, and shows it. Tapping one opens the app screen
 // it names. A device asking its person to join shows Approve and Not Me, answered from here (PushActions) as Settings ›
-// Devices answers them. Firebase is the white label's own project (config.toml's `firebase`), which a build without
+// Devices answers them. Firebase is the custom build's own project (config.toml's `firebase`), which a build without
 // one leaves out: then this phone registers nothing and gets no notifications.
 
 object Push {
@@ -34,7 +34,7 @@ object Push {
     private val prefs = { context: Context -> context.getSharedPreferences("push", Context.MODE_PRIVATE) }
 
     /** This phone's FCM token, registered with the push Worker as its device's: as the app starts let in, and whenever
-     *  FCM gives it a new one. Nothing without the white label's Firebase. */
+     *  FCM gives it a new one. Nothing without the custom build's Firebase. */
     suspend fun register(context: Context, client: Client) {
         if (FirebaseApp.getApps(context).isEmpty()) return
         val token = withContext(Dispatchers.IO) { Tasks.await(FirebaseMessaging.getInstance().token) }

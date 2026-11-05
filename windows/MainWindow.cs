@@ -46,7 +46,7 @@ public sealed class MainWindow : Window
 
     public MainWindow()
     {
-        Title = WhiteLabel.Name;
+        Title = CustomBuild.Name;
         SystemBackdrop = new MicaBackdrop();
         ExtendsContentIntoTitleBar = true;
         AppWindow.SetIcon(System.IO.Path.Combine(AppContext.BaseDirectory, "Assets", "App.ico"));
@@ -60,7 +60,7 @@ public sealed class MainWindow : Window
         root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         var bar = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, Padding = new Thickness(16, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
         bar.Children.Add(new Image { Source = new BitmapImage(new Uri(System.IO.Path.Combine(AppContext.BaseDirectory, "Assets", "Logo.png"))), Width = 16, Height = 16 });
-        bar.Children.Add(new TextBlock { Text = WhiteLabel.Name, FontSize = 12, VerticalAlignment = VerticalAlignment.Center });
+        bar.Children.Add(new TextBlock { Text = CustomBuild.Name, FontSize = 12, VerticalAlignment = VerticalAlignment.Center });
         // What's dragged: all of the title bar but Back and the path, which are pressed.
         var titleBar = new Grid { Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent) };
         titleBar.Children.Add(bar);
@@ -336,7 +336,7 @@ public sealed class MainWindow : Window
         var starting = Centered(new StackPanel
         {
             Spacing = 12, Visibility = Visibility.Collapsed,
-            Children = { new ProgressRing { IsActive = true, Width = 24, Height = 24 }, Look.Text($"Starting {WhiteLabel.Name}…", 13, Look.Secondary) },
+            Children = { new ProgressRing { IsActive = true, Width = 24, Height = 24 }, Look.Text($"Starting {CustomBuild.Name}…", 13, Look.Secondary) },
         });
         body.Content = starting;
         _ = Task.Delay(400).ContinueWith(_ => starting.Visibility = Visibility.Visible, TaskScheduler.FromCurrentSynchronizationContext());
@@ -453,12 +453,12 @@ public sealed class MainWindow : Window
         var panel = new StackPanel { Spacing = 14, MaxWidth = 520, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
         var logo = new Image { Source = new BitmapImage(new Uri(System.IO.Path.Combine(AppContext.BaseDirectory, "Assets", "Logo.png"))), Width = 112, Height = 112, HorizontalAlignment = HorizontalAlignment.Center };
         panel.Children.Add(logo);
-        panel.Children.Add(new TextBlock { Text = WhiteLabel.Name, FontSize = 32, FontWeight = FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Center, TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.WrapWholeWords, Margin = new Thickness(0, 0, 0, 14) });
+        panel.Children.Add(new TextBlock { Text = CustomBuild.Name, FontSize = 32, FontWeight = FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Center, TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.WrapWholeWords, Margin = new Thickness(0, 0, 0, 14) });
         var problem = new TextBlock { Text = error ?? "", Foreground = Look.Critical, HorizontalAlignment = HorizontalAlignment.Center, TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.WrapWholeWords, Visibility = error == null ? Visibility.Collapsed : Visibility.Visible };
 
         if (Auth.Shared.Address == null)
         {
-            var whose = char.ToUpperInvariant(WhiteLabel.Yours[0]) + WhiteLabel.Yours[1..];
+            var whose = char.ToUpperInvariant(CustomBuild.Yours[0]) + CustomBuild.Yours[1..];
             var address = new TextBox { PlaceholderText = "one.example.com, or an invite link", Width = 340, HorizontalAlignment = HorizontalAlignment.Center, IsSpellCheckEnabled = false };
             // The touch keyboard's for web addresses.
             address.InputScope = new Microsoft.UI.Xaml.Input.InputScope { Names = { new Microsoft.UI.Xaml.Input.InputScopeName(Microsoft.UI.Xaml.Input.InputScopeNameValue.Url) } };
@@ -529,7 +529,7 @@ public sealed class MainWindow : Window
             panel.Children.Add(stop);
             panel.Children.Add(problem);
             panel.Children.Add(new TextBlock { Text = new Uri(Auth.Shared.Address).Host, FontSize = 12, Foreground = Look.Tertiary, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 16, 0, 0) });
-            if (string.IsNullOrEmpty(WhiteLabel.Address))
+            if (string.IsNullOrEmpty(CustomBuild.Address))
             {
                 var other = Look.Link("Use another address…", () =>
                 {
@@ -713,7 +713,7 @@ public sealed class MainWindow : Window
     DockEdge? dockEdge;
     /// Its height, kept on this computer for next time, and used on every screen; none kept is 45% of the window's, to 440.
     double? dockHeight = KeptDockHeight();
-    static string DockHeightFile => System.IO.Path.Combine(WhiteLabel.Folder, "developer-height");
+    static string DockHeightFile => System.IO.Path.Combine(CustomBuild.Folder, "developer-height");
 
     static double? KeptDockHeight()
     {
@@ -787,7 +787,7 @@ public sealed class MainWindow : Window
             edge.ReleasePointerCapture(e.Pointer);
             try
             {
-                System.IO.Directory.CreateDirectory(WhiteLabel.Folder);
+                System.IO.Directory.CreateDirectory(CustomBuild.Folder);
                 System.IO.File.WriteAllText(DockHeightFile, dockBox?.Height.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "");
             }
             catch { }

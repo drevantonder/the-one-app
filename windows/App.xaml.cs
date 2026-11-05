@@ -23,7 +23,7 @@ public partial class App : Application
         AppDomain.CurrentDomain.UnhandledException += (_, e) => Problem(e.ExceptionObject as Exception);
         TaskScheduler.UnobservedTaskException += (_, e) => Problem(e.Exception);
         // Each app screen's WebView2 keeps its storage with this app's, not beside its program.
-        Environment.SetEnvironmentVariable("WEBVIEW2_USER_DATA_FOLDER", System.IO.Path.Combine(WhiteLabel.Folder, "Screens"));
+        Environment.SetEnvironmentVariable("WEBVIEW2_USER_DATA_FOLDER", System.IO.Path.Combine(CustomBuild.Folder, "Screens"));
     }
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
@@ -60,8 +60,8 @@ public partial class App : Application
     {
         try
         {
-            System.IO.Directory.CreateDirectory(WhiteLabel.Folder);
-            System.IO.File.AppendAllText(System.IO.Path.Combine(WhiteLabel.Folder, "What went wrong.txt"), $"{DateTime.Now:u} {e}\n\n");
+            System.IO.Directory.CreateDirectory(CustomBuild.Folder);
+            System.IO.File.AppendAllText(System.IO.Path.Combine(CustomBuild.Folder, "What went wrong.txt"), $"{DateTime.Now:u} {e}\n\n");
         }
         catch { }
     }

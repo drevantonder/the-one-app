@@ -11,12 +11,12 @@ fn main() {
         get("name").as_str().unwrap(),
         get("cli").as_str().unwrap(),
         get("port").as_integer().unwrap(),
-        // The GitHub repo releases come from; a white label without one isn't released.
+        // The GitHub repo releases come from; a custom build without one isn't released.
         config.get("repo").and_then(|r| r.as_str()).unwrap_or(""),
     );
     let optional = |key: &str| config.get(key).and_then(|v| v.as_str()).unwrap_or("").to_string();
-    // Where the config file is, so `update` builds the same white label from fresh checkouts: inside this repo, or inside
-    // the git repo it's in (another white label's own, `CONFIG_REPO`), or else wherever it is on this machine.
+    // Where the config file is, so `update` builds the same custom build from fresh checkouts: inside this repo, or inside
+    // the git repo it's in (another custom build's own, `CONFIG_REPO`), or else wherever it is on this machine.
     let manifest = std::fs::canonicalize(std::env::var("CARGO_MANIFEST_DIR").unwrap()).unwrap();
     let file = std::fs::canonicalize(&path).unwrap();
     let git = |args: &[&str]| {
@@ -114,7 +114,7 @@ fn main() {
     files.extend(kit.map(|(rel, abs)| (format!("web/screen/{rel}"), abs)));
     // And the formats devices hold keys in, which the web client imports as ../shared/crypto.js.
     files.push(("web/shared/crypto.js".into(), kernel.join("shared/crypto.js").to_string_lossy().into()));
-    // The white label's logo, which the web client shows where the apps show it.
+    // The custom build's logo, which the web client shows where the apps show it.
     let logo = std::path::Path::new(&path).parent().unwrap().join(get("logo").as_str().unwrap());
     println!("cargo:rerun-if-changed={}", logo.display());
     files.push(("web/logo.png".into(), std::fs::canonicalize(&logo).unwrap_or_else(|e| panic!("{}: {e}", logo.display())).to_string_lossy().into()));
@@ -191,7 +191,7 @@ fn main() {
     // A build with uncommitted changes isn't that commit; say so, so it can't be released as it.
     let dirty = std::process::Command::new("git").args(["status", "--porcelain", "--untracked-files=no"]).output().is_ok_and(|o| !o.stdout.is_empty());
     let dirty = dirty || config_commit.as_ref().is_some_and(|c| c.2);
-    // A white label's build is main's commit and its config's, so a change to either is a new build that nodes take.
+    // A custom build's build is main's commit and its config's, so a change to either is a new build that nodes take.
     let commit = match &config_commit {
         Some((config, ..)) => format!("{commit}-{config}"),
         None => commit,

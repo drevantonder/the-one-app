@@ -165,7 +165,7 @@ function context(ask, body, appends, later) {
     labs: Object.fromEntries(Object.keys(app.labs || {}).map((name) => [name, body.labs?.[name] === true])),
     /// The app whose ctx.apps made this call, if one did.
     from: body.from ?? null,
-    /// The port this node's local API answers on at 127.0.0.1, the white label's (config.toml) unless it was started
+    /// The port this node's local API answers on at 127.0.0.1, the custom build's (config.toml) unless it was started
     /// on another: where a sign-in sends the person's browser back. Null on a node with none (the serverless one).
     port: body.port ?? null,
     /// The install's address (`https://…`, no last `/`), or null on a node from before it was given: a sign-in at

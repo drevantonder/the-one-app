@@ -1,4 +1,4 @@
-// The white label's CLI name, from config.toml (or the one CONFIG names), as the node's build reads it: what its
+// The custom build's CLI name, from config.toml (or the one CONFIG names), as the node's build reads it: what its
 // clients' ALPN is named after.
 fn main() {
     // A relative CONFIG is from the workspace's root, where the node's build reads it.

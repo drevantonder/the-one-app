@@ -490,7 +490,7 @@ public sealed class AppScreen : Grid
 
     /// Where the client's own screens keep what they ask to (`one.cache`), by key; forgotten when it signs out. (Not
     /// "Screens", the web views' own folder, which is the same name on Windows.)
-    public static string Kept => Path.Combine(WhiteLabel.Folder, "Kept for screens");
+    public static string Kept => Path.Combine(CustomBuild.Folder, "Kept for screens");
 
     static string? KeptFile(string key) => key.Length is > 0 and <= 40 && key.All(c => char.IsAsciiLetterOrDigit(c) || c == '-') ? Path.Combine(Kept, key + ".json") : null;
 
@@ -611,7 +611,7 @@ public sealed class AppScreen : Grid
         if (file != null) await Windows.Storage.FileIO.WriteBytesAsync(file, bytes);
     }
 
-    static string Previewed => Path.Combine(Path.GetTempPath(), WhiteLabel.Cli);
+    static string Previewed => Path.Combine(Path.GetTempPath(), CustomBuild.Cli);
 
     /// What screens kept on this computer, gone: their copies, what they asked to keep and the files they showed.
     public static void Forget()
@@ -637,7 +637,7 @@ public sealed class AppScreen : Grid
 /// reached; gone once the person signs out.
 static class ScreenCopies
 {
-    static string Dir => Path.Combine(WhiteLabel.Folder, "Screen copies");
+    static string Dir => Path.Combine(CustomBuild.Folder, "Screen copies");
 
     static string FileOf(Route r)
     {

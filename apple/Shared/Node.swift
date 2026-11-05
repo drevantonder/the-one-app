@@ -91,7 +91,7 @@ struct Install: Codable, Sendable, Equatable {
     var clients: [ClientInfo]
     /// Whether the device that answered is in the install yet: a new one isn't until its admit reaches it.
     var member: Bool?
-    /// The install's settings, as its admins set them over the white label's defaults.
+    /// The install's settings, as its admins set them over the custom build's defaults.
     var settings: [String: String]?
 
     var joining: Bool { member == false }

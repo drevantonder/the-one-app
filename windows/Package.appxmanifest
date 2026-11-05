@@ -47,8 +47,8 @@
             </com:ExeServer>
           </com:ComServer>
         </com:Extension>
-        <!-- Its toasts' clicks and buttons start it (Notes.cs); and WNS's pushes, by the white label's Microsoft Entra app
-             (config.toml's wns_app), which build.sh leaves out for a white label without one. -->
+        <!-- Its toasts' clicks and buttons start it (Notes.cs); and WNS's pushes, by the custom build's Microsoft Entra app
+             (config.toml's wns_app), which build.sh leaves out for a custom build without one. -->
         <desktop:Extension Category="windows.toastNotificationActivation">
           <desktop:ToastNotificationActivation ToastActivatorCLSID="@NOTES@" />
         </desktop:Extension>

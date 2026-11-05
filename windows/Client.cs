@@ -23,7 +23,7 @@ public static class Client
     static readonly SemaphoreSlim gate = new(1, 1);
 
     /// The Credential Locker's name for this app's device keys.
-    static string Locker => $"{WhiteLabel.Name} device";
+    static string Locker => $"{CustomBuild.Name} device";
 
     /// The computer this app is on, which signing in here again replaces its sign-in under: Windows' own id for it,
     /// which outlives reinstalling, hashed.
@@ -44,7 +44,7 @@ public static class Client
         {
             if (device != null && deviceFor == id) return device;
             var name = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(id)))[..16].ToLowerInvariant();
-            var made = await Off(() => new ThisDevice(Secret(name), address, Path.Combine(WhiteLabel.Folder, "client", name)));
+            var made = await Off(() => new ThisDevice(Secret(name), address, Path.Combine(CustomBuild.Folder, "client", name)));
             if (OnDevice() is { } on) made.On(on);
             var old = device;
             if (old != null) await Off(() => { old.Disconnect(); return 0; });

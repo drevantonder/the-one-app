@@ -57,7 +57,7 @@ pub fn mcp_entries() -> String {
     )
 }
 
-/// How to get the command onto a device, for this white label.
+/// How to get the command onto a device, for this custom build.
 fn install() -> String {
     match crate::state::install_line() {
         Some(line) => format!("install it with `{line}`"),

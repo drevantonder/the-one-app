@@ -10,7 +10,7 @@ export BUILD_COMMIT=$(git -C "$root" rev-parse --short=12 HEAD 2>/dev/null || ec
 # The build number, the commits up to it, so devicectl tells which commit an iPhone has.
 export BUILD_NUMBER=$(git -C "$root" rev-list --count HEAD 2>/dev/null || echo 1)
 export CONFIG_NAME=$(field name) CONFIG_CLI=$(field cli) CONFIG_PORT=$(field port)
-# What a person calls the install where they read: a workplace's white label, which its people join with their work
+# What a person calls the install where they read: a workplace's custom build, which its people join with their work
 # email (join_domain), is shared, "the PTC App"; anyone else's is "your One App".
 if [ -n "$(field join_domain)" ]; then CONFIG_YOURS=${CONFIG_NAME/#The /the }; else CONFIG_YOURS="your ${CONFIG_NAME#The }"; fi
 export CONFIG_YOURS

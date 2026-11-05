@@ -25,7 +25,7 @@ Key, log, view, blob, call, app. Scopes, devices, deploys, services, the Vault a
 
 ## Rules that span files
 
-- **The core never names an app or service.** Apps are deployed into the install while it runs; services run only where a device's owner turned them on. `config.toml` is the one place that names the product (the white label).
+- **The core never names an app or service.** Apps are deployed into the install while it runs; services run only where a device's owner turned them on. `config.toml` is the one place that names the product (the custom build).
 - **Devices reach each other over iroh,** each an endpoint of its own key, through the relay at the install's address when no direct path opens. A device answers only the install's devices.
 - **The bucket decides the order of writes.** Notices between devices are hints; each device reads what changed from the bucket.
 - **An older device can safely ignore what newer ones send.** Phones and Macs run behind the others.

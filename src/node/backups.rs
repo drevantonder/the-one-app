@@ -820,7 +820,7 @@ fn releases(entries: &[Entry]) -> BTreeSet<String> {
 }
 
 /// The blobs a scope's backup keeps: every blob its entries name but those its apps forgot, and of the node's releases
-/// only the newest for each platform (and each service's), so a white label with no published releases can still
+/// only the newest for each platform (and each service's), so a custom build with no published releases can still
 /// recover.
 fn backed_blobs(entries: &[Entry], forgotten: &BTreeSet<String>) -> BTreeSet<String> {
     let mut newest: BTreeMap<String, (u64, String)> = BTreeMap::new();

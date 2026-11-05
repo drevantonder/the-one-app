@@ -166,7 +166,7 @@ pub struct Members {
     pub users: BTreeMap<String, User>,
     pub machines: BTreeMap<Key, Machine>,
     pub groups: BTreeMap<String, Group>,
-    /// The install's settings its admins set: each name's latest value. The rest are the white label's defaults.
+    /// The install's settings its admins set: each name's latest value. The rest are the custom build's defaults.
     pub settings: BTreeMap<String, String>,
     pub apps: BTreeMap<String, App>,
     /// The latest `service` entry of each part on each device: (device, part).
@@ -1286,7 +1286,7 @@ pub fn remove_device(key: &Key, seq: Option<u32>) -> Content {
     node("remove", json!({ "key": hex(key), "seq": seq }))
 }
 
-/// One of the install's settings; `None` puts back the white label's default.
+/// One of the install's settings; `None` puts back the custom build's default.
 pub fn setting(name: &str, value: Option<&str>) -> Content {
     node("setting", json!({ "name": name, "value": value }))
 }

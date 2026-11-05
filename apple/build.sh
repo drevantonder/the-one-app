@@ -1,6 +1,6 @@
 #!/bin/bash
 # Builds the Mac app with this checkout's program inside it, which its launch agent runs as oned, signs it and installs it to ~/Applications; with --release, it
-# also notarizes it. CONFIG=path/to/config.toml builds another white label.
+# also notarizes it. CONFIG=path/to/config.toml builds another custom build.
 set -euo pipefail
 cd "$(dirname "$0")"
 CLIENT_TARGETS=aarch64-apple-darwin
@@ -13,7 +13,7 @@ label=$BUNDLE_ID.oned
 xcodebuild -project Shells.xcodeproj -scheme Mac -configuration Release -destination generic/platform=macOS -derivedDataPath build/derived build -quiet
 
 app="build/derived/Build/Products/Release/$CONFIG_NAME.app"
-# Cargo names the binary after the package, whatever the white label.
+# Cargo names the binary after the package, whatever the custom build.
 cp "$root/target/release/one" "$app/Contents/MacOS/$CONFIG_CLI"
 # Run by this name, it's oned, the Mac as a device.
 ln -sf "$CONFIG_CLI" "$app/Contents/MacOS/${CONFIG_CLI}d"

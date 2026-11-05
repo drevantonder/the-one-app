@@ -13,7 +13,7 @@ impl Node {
         self.with(|i| Ok(i.r.db().user(user).is_some())).unwrap_or(false)
     }
 
-    /// Sets one of the install's settings, for an admin; `None` puts back the white label's default.
+    /// Sets one of the install's settings, for an admin; `None` puts back the custom build's default.
     pub async fn set_setting(&self, caller: &Caller, name: &str, value: Option<&str>) -> Result<()> {
         self.member_as(caller, "setting", json!({ "name": name, "value": value })).await
     }

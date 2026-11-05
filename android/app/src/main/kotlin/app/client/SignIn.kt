@@ -46,7 +46,7 @@ class SignIn(private val context: Context) {
     @Volatile private var state = State.Idle
     private val swapping = Mutex()
 
-    /** Where the install is: the build's, if the white label has one, or the one the person gave. */
+    /** Where the install is: the build's, if the custom build has one, or the one the person gave. */
     var address: String?
         get() = BuildConfig.ADDRESS.ifEmpty { null } ?: prefs.getString("address", null)
         set(value) = prefs.edit().putString("address", value).apply()
