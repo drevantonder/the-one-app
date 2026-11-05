@@ -161,10 +161,23 @@ impl Node {
             }
             let read = crate::log::open(&bucket, &log_keys, &prefix, "global").await?;
             // Once the log is frozen, the epochs its scope database's steps made since (`database::steps`).
-            let steps = crate::database::steps::read(&bucket, &log_keys, &Scope::Global, 0).await?;
             let ordered = crate::entry::causal(read.entries.clone(), &HashMap::new());
-            let log = crate::database::steps::log_for(&bucket, &log_keys, &steps, root, &ordered, now_ms()).await?;
-            let hashes = crate::database::steps::who(&steps, root, &ordered, log.as_ref(), now_ms())?.epoch_hashes(&Scope::Global);
+            let made = crate::database::steps::view(root, &ordered, now_ms())?.epoch(&Scope::Global);
+            let (mut steps, mut log) = (Vec::new(), None);
+            let who = loop {
+                let more = crate::database::steps::read(&bucket, &log_keys, &Scope::Global, steps.len() as u64).await?;
+                steps.extend(more.steps.iter().cloned());
+                log = match crate::database::steps::wants_log(&steps, root, log.as_ref(), now_ms()) {
+                    Some(_) => crate::database::steps::log_for(&bucket, &log_keys, made, &steps, root, now_ms()).await?,
+                    None => log,
+                };
+                let who = crate::database::steps::who(&steps, root, &ordered, log.as_ref(), now_ms())?;
+                if !more.junk_at_end(who.epoch(&Scope::Global)) {
+                    break who;
+                }
+                steps.push(None);
+            };
+            let hashes = who.epoch_hashes(&Scope::Global);
             let wrong: Vec<u32> = candidates.iter().filter(|(n, k)| hashes.get(*n) != Some(&crate::keys::epoch_hash(k))).map(|(n, _)| *n).collect();
             if wrong.is_empty() {
                 self.0.epochs.lock().unwrap().insert(Scope::Global, candidates.clone());

@@ -190,8 +190,9 @@ fn the_workers_and_nodes_agree_on_keys_and_seals() {
         let ext = |epoch: u32| Ext { log: "global".into(), time: 0, user: ANDRE.into(), epoch, previous: vec![] };
         let g = Entry::create(&mac, ext(0), None, members::genesis("Home", ANDRE, "Andre", &Endpoint::of(&mac), "mac", &[Kind::Client], &[7; 32], &one::keys::epoch_hash(&epoch)));
         let listed = Entry::create(&mac, ext(1), Some(g.head()), members::device(&Endpoint::of(&browser), ANDRE, "browser", &[Kind::Client], None));
-        let log = steps::Log { to: 2, entries: vec![g.clone(), listed.clone()] };
-        let (content, copy) = steps::freeze(Some(g.hash()), &log, Default::default(), 0).unwrap();
+        let (content, copy) = steps::freeze(Some(g.hash()), &[g.clone(), listed.clone()], 2, Default::default(), 0).unwrap();
+        // Its mark, the same freeze as the log's step after its end.
+        let mark = steps::sign(&mac, &Scope::Global, 3, ANDRE, 1, 0, content.clone()).unwrap();
         let freeze = steps::sign(&mac, &Scope::Global, 1, ANDRE, 1, 0, content).unwrap();
         let (_, _, body) = steps::sign(&browser, &Scope::Global, 2, ANDRE, 1, 5, members::setting("greeting", Some("hi"))).unwrap().encode();
         let fields = json!({ "log": "global", "at": 2, "time": 5, "user": ANDRE, "epoch": 1 });
@@ -212,10 +213,12 @@ fn the_workers_and_nodes_agree_on_keys_and_seals() {
         let read = json!({ "steps": [s1, s2, junk] });
         assert_eq!(client.add_sealed(&read, &epochs, &apps).unwrap(), Some(2), "the freeze waits for global's log to where it says it ends");
         assert!(!client.frozen());
-        let log_steps: Vec<Value> = [&g, &listed].iter().enumerate().map(|(i, e)| {
+        let mut log_steps: Vec<Value> = [&g, &listed].iter().enumerate().map(|(i, e)| {
             let name = one::db::step_name(&one::log::prefix("global"), i as u64 + 1);
             json!({ "at": i + 1, "sealed": B64U.encode(&one::log::seal(&keys, &name, &pack(&[*e])).unwrap()) })
         }).collect();
+        let mark_name = one::db::step_name(&one::log::prefix("global"), 3);
+        log_steps.push(json!({ "at": 3, "sealed": B64U.encode(&one::log::seal(&keys, &mark_name, &steps::encode(&mark, None)).unwrap()) }));
         let mut with_log = read.clone();
         with_log["log"] = json!({ "to": 2, "steps": log_steps });
         assert_eq!(client.add_sealed(&with_log, &epochs, &apps).unwrap(), None);
@@ -227,6 +230,9 @@ fn the_workers_and_nodes_agree_on_keys_and_seals() {
         let said = js(json!({ "op": "joining", "asked": [], "said": [[200, { "approved": true, "genesis": g.hash().to_hex(), "welcome": welcome.to_string() }]] }));
         let given = json!({ "welcome": said["said"][0]["welcome"], "freeze": s1, "at": 2, "steps": [s2] });
         let mut new = Global::new(Some(g.hash()));
+        assert_eq!(new.add_sealed(&given, &epochs, &apps).unwrap(), Some(2), "its freeze waits for global's log, as any reader's does");
+        let mut given = given;
+        given["log"] = json!({ "to": 2, "steps": log_steps });
         new.add_sealed(&given, &epochs, &apps).unwrap();
         assert!(new.frozen() && new.at() == 2, "a new device starts where it was welcomed, with no entry but its genesis");
         assert_eq!(one::db::state_hash(new.who().unwrap().conn()).unwrap(), welcome.hash);
@@ -235,6 +241,13 @@ fn the_workers_and_nodes_agree_on_keys_and_seals() {
         let mut new = Global::new(Some(g.hash()));
         new.add_sealed(&other, &epochs, &apps).unwrap();
         assert!(!new.frozen(), "nor from a Welcome its steps don't come to");
+        // Junk at the first position, under an epoch no one made, and anything after it: passed over, not waited for.
+        let name = one::db::step_name(&prefix, 1);
+        let junk = json!({ "at": 1, "sealed": B64U.encode(&one::keys::seal(0xFFFF_FFFF, &rand::random(), &name, b"junk")) });
+        let mut fresh = Global::new(Some(g.hash()));
+        fresh.add(&pack(&[&g, &listed])).unwrap();
+        assert_eq!(fresh.add_sealed(&json!({ "steps": [junk, s2] }), &epochs, &apps).unwrap(), None);
+        assert_eq!(fresh.at(), 2, "a browser reads past junk under an epoch above every one made");
     }
 
     // Member entries' content (src/members.rs), as the web client builds what a browser signs (cloudflare/web/members.js).

@@ -49,18 +49,18 @@ pub struct Read {
 }
 
 /// The entries in the steps after `from` of `log`'s entries at `prefix`, from `floor`, the epoch of the last step
-/// read before. A step that doesn't open, is under an epoch lower than the one before it, or holds another scope's
-/// entries, is passed over; one under an epoch above every key in `keys` stops it there (`Read::ahead`); one under an
-/// epoch below that `keys` lacks fails with `Missing`.
-pub async fn read(bucket: &impl Bucket, keys: &Keys, prefix: &str, log: &str, from: u64, floor: u32) -> Result<Read> {
+/// read before. A step that doesn't open, is under an epoch lower than the one before it or above `made` (the newest
+/// epoch of the scope made: junk), or holds another scope's entries, is passed over; one under an epoch above every key
+/// in `keys` stops it there (`Read::ahead`); one under an epoch below that `keys` lacks fails with `Missing`.
+pub async fn read(bucket: &impl Bucket, keys: &Keys, made: u32, prefix: &str, log: &str, from: u64, floor: u32) -> Result<Read> {
     let mut read = Read { at: from, floor, ..Default::default() };
     while let Some(o) = bucket.get(&step_name(prefix, read.at + 1)).await? {
-        match step(keys, &step_name(prefix, read.at + 1), &o.bytes, log, read.floor)? {
+        match step(keys, made, &step_name(prefix, read.at + 1), &o.bytes, log, read.floor)? {
             Step::Took(epoch, list) => {
                 read.entries.extend(list);
                 read.floor = epoch;
             }
-            Step::Passed => {}
+            Step::Passed(_) => {}
             Step::Ahead(epoch) => {
                 read.ahead = Some(Ahead { epoch, at: read.at + 1 });
                 break;
@@ -72,38 +72,39 @@ pub async fn read(bucket: &impl Bucket, keys: &Keys, prefix: &str, log: &str, fr
 }
 
 /// The entries in steps 1 to `to` of `log`'s entries at `prefix`, read from the steps themselves, never a copy: exactly
-/// those a freeze that ends the log there holds (`database::steps::Freeze`). Fails at one that isn't there, or that
-/// waits for a key `keys` doesn't have.
-pub async fn read_to(bucket: &impl Bucket, keys: &Keys, prefix: &str, log: &str, to: u64) -> Result<Vec<Entry>> {
+/// those a freeze that ends the log there holds (`database::steps::Freeze`), under `made`, the newest epoch of the
+/// scope made, above which a step is junk. Fails at one that isn't there, or that waits for a key `keys` doesn't have.
+pub async fn read_to(bucket: &impl Bucket, keys: &Keys, made: u32, prefix: &str, log: &str, to: u64) -> Result<Vec<Entry>> {
     let mut read = ReadTo::default();
     for at in 1..=to {
         let name = step_name(prefix, at);
         let o = bucket.get(&name).await?.with_context(|| format!("{name} isn't in the bucket"))?;
-        read.take(keys, &name, &o.bytes, log)?;
+        read.take(keys, made, &name, &o.bytes, log)?;
     }
     Ok(read.entries)
 }
 
 /// `read_to` one step at a time, for a reader of a place that isn't a bucket (a backup's): each step from the first,
 /// as `take` is given it.
-#[derive(Default)]
+#[derive(Clone, Debug, Default)]
 pub struct ReadTo {
     pub entries: Vec<Entry>,
     floor: u32,
 }
 
 impl ReadTo {
-    /// The next step, `name`, sealed as the bucket holds it.
-    pub fn take(&mut self, keys: &Keys, name: &str, sealed: &[u8], log: &str) -> Result<()> {
-        match step(keys, name, sealed, log, self.floor)? {
+    /// The next step, `name`, sealed as the bucket holds it, under `made`: → what it opened to, if that isn't entries
+    /// (a freeze's mark, `database::steps::Log`).
+    pub fn take(&mut self, keys: &Keys, made: u32, name: &str, sealed: &[u8], log: &str) -> Result<Option<Vec<u8>>> {
+        match step(keys, made, name, sealed, log, self.floor)? {
             Step::Took(epoch, list) => {
                 self.entries.extend(list);
                 self.floor = epoch;
+                Ok(None)
             }
-            Step::Passed => {}
+            Step::Passed(opened) => Ok(opened),
             Step::Ahead(epoch) => anyhow::bail!(Missing { epoch }),
         }
-        Ok(())
     }
 }
 
@@ -123,7 +124,7 @@ pub async fn open(bucket: &impl Bucket, keys: &Keys, prefix: &str, log: &str) ->
         None => None,
     };
     let (copy, floor, entries) = copied.unwrap_or_default();
-    let mut read = read(bucket, keys, prefix, log, copy, floor).await?;
+    let mut read = read(bucket, keys, u32::MAX, prefix, log, copy, floor).await?;
     let mut seen: BTreeSet<crate::entry::Hash> = entries.iter().map(Entry::hash).collect();
     let after = std::mem::take(&mut read.entries);
     read.entries = entries;
@@ -133,31 +134,41 @@ pub async fn open(bucket: &impl Bucket, keys: &Keys, prefix: &str, log: &str) ->
 
 enum Step {
     Took(u32, Vec<Entry>),
-    Passed,
+    /// Passed over: with what it opened to, if it opened.
+    Passed(Option<Vec<u8>>),
     Ahead(u32),
 }
 
-/// A step's entries and epoch, after `floor`.
-fn step(keys: &Keys, name: &str, sealed: &[u8], log: &str, floor: u32) -> Result<Step> {
-    let Ok(epoch) = crate::keys::epoch_of(sealed) else { return Ok(Step::Passed) };
+/// A step's entries and epoch, after `floor`, under `made`.
+fn step(keys: &Keys, made: u32, name: &str, sealed: &[u8], log: &str, floor: u32) -> Result<Step> {
+    let Ok(epoch) = crate::keys::epoch_of(sealed) else { return Ok(Step::Passed(None)) };
     if epoch < floor {
         tracing::debug!("{name} is under epoch {epoch}, after {floor}: passed over");
-        return Ok(Step::Passed);
+        return Ok(Step::Passed(None));
+    }
+    // An epoch's entry is always written before anything is sealed under it.
+    if epoch > made {
+        tracing::debug!("{name} is under epoch {epoch}, which no entry made: passed over");
+        return Ok(Step::Passed(None));
     }
     if keys.keys().next_back().is_none_or(|newest| epoch > *newest) {
         return Ok(Step::Ahead(epoch));
     }
     let key = keys.get(&epoch).ok_or(Missing { epoch })?;
-    match crate::keys::open(key, name, sealed).and_then(|b| unpack(&b)) {
+    let opened = match crate::keys::open(key, name, sealed) {
+        Ok(b) => b,
+        Err(err) => {
+            tracing::debug!("{name}: {err:#}");
+            return Ok(Step::Passed(None));
+        }
+    };
+    match unpack(&opened) {
         Ok(list) if list.iter().all(|e| e.log() == log) => Ok(Step::Took(epoch, list)),
         Ok(_) => {
             tracing::debug!("{name} is another scope's");
-            Ok(Step::Passed)
+            Ok(Step::Passed(None))
         }
-        Err(err) => {
-            tracing::debug!("{name}: {err:#}");
-            Ok(Step::Passed)
-        }
+        Err(_) => Ok(Step::Passed(Some(opened))),
     }
 }
 

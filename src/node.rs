@@ -906,6 +906,12 @@ impl Node {
         }
         self.first_epoch(scope).await?;
         let _write = self.own_writes().await?;
+        // Whether the log froze, before writing to it: then it's a step.
+        self.read_steps_now().await?;
+        if self.frozen() {
+            drop(_write);
+            return Box::pin(self.append_as(scope, user, content)).await;
+        }
         // What's in the bucket first, so the entry comes after all of it.
         self.read_log_now(scope).await?;
         // Its blobs first, so a device that reads the entry finds them; one the bucket doesn't take now is tried again
@@ -925,7 +931,7 @@ impl Node {
         self.after(handled).await?;
         self.ping(scope, None);
         // The log froze as it was written, without it: a step, then.
-        if self.left_out(&entry, at).await? {
+        if self.left_out(&entry, at).await {
             drop(_write);
             return Box::pin(self.append_as(scope, user, entry.content.clone())).await;
         }
@@ -1019,10 +1025,12 @@ impl Node {
                 }
                 self.with(|i| i.r.check_signed(&entry))?;
                 self.check_in_scope(&entry)?;
+                self.read_steps_now().await?;
+                ensure!(!self.frozen(), "update this device to change who's in: {YOURS}'s other devices have moved on");
                 let at = self.put_entry(&scope, &entry).await?;
                 let handled = self.with(|i| i.r.receive(vec![entry.clone()], now_ms()))?;
                 self.after(handled).await?;
-                ensure!(!self.left_out(&entry, at).await?, "update this device to change who's in: {YOURS}'s other devices moved on as it wrote that");
+                ensure!(!self.left_out(&entry, at).await, "update this device to change who's in: {YOURS}'s other devices moved on as it wrote that");
             }
             self.ping(&scope, None);
         }

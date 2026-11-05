@@ -140,8 +140,9 @@ export class Device {
       const welcomed = welcome ? await this.api(`/v1/steps/global?from=0&welcome=${welcome}`).catch(() => null) : null;
       const steps = read.length ? { steps: read, welcome: welcomed?.welcome, freeze: welcomed?.freeze, start: welcomed?.start, keys: await this.logKeys() } : null;
       let k = !given && !steps && kept?.members?.people?.[this.user]?.keeps ? kept.members : await this.replay(this.user, given, steps);
-      // A freeze an admin's device signed: checked against the log's steps up to where it says the log ends.
-      if (k.wants_log) k = await this.replay(this.user, undefined, { ...steps, log: { to: k.wants_log, steps: await this.bucketSteps("log", 0, k.wants_log) } });
+      // A freeze among them: judged and checked against the log's steps from the bucket, to the step after where it
+      // says the log ends (its mark), or the log's end.
+      if (k.wants_log) k = await this.replay(this.user, undefined, { ...steps, log: { to: k.wants_log, steps: await this.bucketSteps("log", 0, k.wants_log + 1, k.wants_log) } });
       // One that didn't check out is read from the freeze on, the next time.
       if (welcome && !(await get(`global:${this.user}`))?.steps?.truth) await del(`welcome:${this.user}`).catch(() => {});
       if (!k.people[this.user]) throw new Error("Your One App doesn't list you yet, so this device didn't use it.");
@@ -409,8 +410,9 @@ export class Device {
 
   /// `global`'s `database`'s steps after `from` (`scope`, its scope database's, or `log`, its log's, up to `to`), as
   /// the bucket holds them, read through the URL signer's `get`, 32 at a time: `[{ at, sealed }]`, base64url, to the
-  /// first that isn't there. One missing before another that is, or before `to`, throws: it was written.
-  async bucketSteps(database, from, to = Infinity) {
+  /// first that isn't there, and the one after that, if it is: who's who says whether it's a step, which would mean
+  /// the one missing was written (client/src/members.rs `add_sealed`). One missing up to `must` throws.
+  async bucketSteps(database, from, to = Infinity, must = 0) {
     const prefix = prefixOf({ scope: "global", app: "node", database });
     const out = [];
     for (let at = from + 1; at <= to; at += 32) {
@@ -421,9 +423,12 @@ export class Device {
       if (!body.get) return out;
       const sealed = Object.keys(body.get).sort().map((name) => body.get[name]);
       const end = sealed.indexOf(null);
-      if ((end >= 0 && sealed.slice(end).some((b) => b !== null)) || (end >= 0 && to !== Infinity)) throw new Error("Part of who's who is missing from your One App's storage, so this device read no further.");
+      if (end >= 0 && at + end <= must) throw new Error("Part of who's who is missing from your One App's storage, so this device read no further.");
       out.push(...sealed.slice(0, end >= 0 ? end : sealed.length).map((b, i) => ({ at: at + i, sealed: b })));
-      if (end >= 0) break;
+      if (end >= 0) {
+        if (sealed[end + 1]) out.push({ at: at + end + 1, sealed: sealed[end + 1] });
+        break;
+      }
     }
     return out;
   }

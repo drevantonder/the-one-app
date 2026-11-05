@@ -187,11 +187,7 @@ fn built(entries: &mut Global) -> Result<ScopeDb> {
 
 /// `global`'s scope database's steps after those `entries` took, with the log's keys: who's who once it's frozen.
 async fn steps(bucket: &crate::Js, keys: &one::db::Keys, entries: &mut Global) -> Result<()> {
-    let read = one::database::steps::read(bucket, keys, &Scope::Global, entries.at()).await?;
-    if let Some(end) = entries.wants_log(&read)? {
-        entries.with_log(one::database::steps::log_to(bucket, keys, end).await?);
-    }
-    entries.add_read(read)
+    entries.read_steps(bucket, keys).await
 }
 
 impl View {
@@ -232,7 +228,7 @@ impl View {
 
     /// The entries written since it last read: false if one is under an epoch it hasn't opened, so it must read again.
     async fn refresh(&mut self, bucket: &crate::Js) -> Result<bool> {
-        let read = one::log::read(bucket, &self.global, &one::log::prefix("global"), "global", self.at, self.floor).await?;
+        let read = one::log::read(bucket, &self.global, u32::MAX, &one::log::prefix("global"), "global", self.at, self.floor).await?;
         if read.ahead.is_some() {
             return Ok(false);
         }

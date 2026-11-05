@@ -75,7 +75,7 @@ impl Node {
                     let key = self.log_key(scope).await?;
                     let read = match from {
                         0 => crate::log::open(&bucket, &key, &prefix, &log).await?,
-                        _ => crate::log::read(&bucket, &key, &prefix, &log, from, floor).await?,
+                        _ => crate::log::read(&bucket, &key, u32::MAX, &prefix, &log, from, floor).await?,
                     };
                     (key, read)
                 }

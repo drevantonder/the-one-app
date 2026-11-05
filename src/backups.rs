@@ -584,12 +584,12 @@ pub fn check(c: &Check) -> Result<(Value, Vec<Restored>)> {
     }
     let root = c.root.or_else(|| store.ordered().ok()?.iter().find(|e| e.content.app == crate::members::APP && e.content.kind == "genesis").map(|e| e.hash()));
     let global_keys = c.keys.get("global").map(Vec::as_slice).unwrap_or(&[]);
-    let m = steps_of(members_of(&store, root)?, &store, root, place, install, global_keys)?;
+    let m = steps_of(members_of(&store, root)?, root, place, install, global_keys)?;
     // The same entries say the same on every device: the backup's, replayed, are who's who as this device had it.
     if c.live.is_some() && problems.is_empty() {
         let here = crate::store::Store::memory()?;
         here.take(expected)?;
-        if said(&steps_of(members_of(&here, root)?, &here, root, place, install, global_keys)?) != said(&m) {
+        if said(&steps_of(members_of(&here, root)?, root, place, install, global_keys)?) != said(&m) {
             problems.push("its entries don't replay to the people, devices and apps this device had then".into());
         }
     }
@@ -608,8 +608,7 @@ pub fn check(c: &Check) -> Result<(Value, Vec<Restored>)> {
 
 /// Who's who once `global`'s log is frozen, as its scope database's steps the place's copy of the bucket holds say it
 /// (`database::steps`), opened with `keys`, its epochs' keys; `replayed`, as the entries say it, before.
-fn steps_of(replayed: ScopeDb, store: &crate::store::Store, root: Option<crate::entry::Hash>, place: &Place, install: &str, keys: &[[u8; 32]]) -> Result<ScopeDb> {
-    let global: Vec<Entry> = store.ordered()?.into_iter().filter(|e| e.log() == "global").collect();
+fn steps_of(replayed: ScopeDb, root: Option<crate::entry::Hash>, place: &Place, install: &str, keys: &[[u8; 32]]) -> Result<ScopeDb> {
     // The log's key in each epoch: the node's app key there, opened with whichever of the epochs' keys does.
     let mut log_keys: BTreeMap<u32, [u8; 32]> = BTreeMap::new();
     for n in 1..=(keys.len() as u32 + 8) {
@@ -619,31 +618,46 @@ fn steps_of(replayed: ScopeDb, store: &crate::store::Store, root: Option<crate::
         }
     }
     let prefix = crate::database::steps::prefix("global");
-    let mut steps = Vec::new();
+    let now = crate::node::now_ms();
+    let get = |name: &str| place.get(&format!("{install}/bucket/{name}"));
+    // `global`'s log as far as its freezes need, from the place's copy of its steps (`steps::log_to`).
+    let made = replayed.epoch(&crate::entry::Scope::Global);
+    let log_to = |end: u64| -> Result<crate::database::steps::Log> {
+        let mut log = crate::database::steps::Log::default();
+        for at in 1..=end + 1 {
+            match get(&crate::db::step_name(&crate::log::prefix("global"), at))? {
+                Some(sealed) => log.take(&log_keys, made, &sealed)?,
+                None => {
+                    log.ended = true;
+                    break;
+                }
+            }
+        }
+        Ok(log)
+    };
+    let (mut steps, mut log) = (Vec::new(), None);
     for at in 1.. {
-        let name = crate::db::step_name(&prefix, at);
-        let Some(sealed) = place.get(&format!("{install}/bucket/{name}"))? else { break };
-        match crate::database::steps::open(&log_keys, &crate::entry::Scope::Global, at, &sealed) {
+        let Some(sealed) = get(&crate::db::step_name(&prefix, at))? else { break };
+        match crate::database::steps::open(&log_keys, u32::MAX, &crate::entry::Scope::Global, at, &sealed) {
             crate::database::steps::Opened::Step(given) => steps.push(Some(given)),
             crate::database::steps::Opened::Junk => steps.push(None),
-            crate::database::steps::Opened::Waits(_) => break,
+            crate::database::steps::Opened::Waits(epoch) => {
+                while let Some(end) = crate::database::steps::wants_log(&steps, root, log.as_ref(), now) {
+                    log = Some(log_to(end)?);
+                }
+                // Junk, under an epoch above every one made by the steps before it.
+                let held = crate::database::steps::Truth::read(&steps, root, log.as_ref(), now)?.map_or(made, |t| t.db.epoch(&crate::entry::Scope::Global));
+                if epoch <= held {
+                    break;
+                }
+                steps.push(None);
+            }
         }
     }
-    let (view, cuts) = crate::database::steps::view(root, &global, crate::node::now_ms())?;
-    // `global`'s log to where its freeze says it ends, from the place's copy of its steps.
-    let log = match crate::database::steps::wants_log(&steps, &view, &cuts) {
-        Some(end) => {
-            let mut read = crate::log::ReadTo::default();
-            for at in 1..=end {
-                let name = crate::db::step_name(&crate::log::prefix("global"), at);
-                let sealed = place.get(&format!("{install}/bucket/{name}"))?.with_context(|| format!("{name} isn't in this backup"))?;
-                read.take(&log_keys, &name, &sealed, "global")?;
-            }
-            Some(crate::database::steps::Log { to: end, entries: read.entries })
-        }
-        None => None,
-    };
-    match crate::database::steps::Truth::read(&steps, root, &view, &cuts, log.as_ref(), crate::node::now_ms())? {
+    while let Some(end) = crate::database::steps::wants_log(&steps, root, log.as_ref(), now) {
+        log = Some(log_to(end)?);
+    }
+    match crate::database::steps::Truth::read(&steps, root, log.as_ref(), now)? {
         Some(t) => Ok(t.db),
         None => Ok(replayed),
     }

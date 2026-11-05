@@ -400,17 +400,13 @@ impl Device {
         // from where the device that let it in read them to, if it said (its Welcome), else from the first.
         let welcome = std::fs::read_to_string(self.dir.join("welcome")).ok().and_then(|w| one::database::steps::Welcome::parse(w.trim()));
         if let Some(welcome) = welcome {
-            match one::database::steps::welcomed(&bucket, &log_keys, &welcome, now()).await {
+            match one::database::steps::welcomed(&bucket, &log_keys, global.root(), &welcome, now()).await {
                 Ok(truth) => global.welcomed(truth),
                 Err(_) => drop(std::fs::remove_file(self.dir.join("welcome"))),
             }
         }
-        let steps = one::database::steps::read(&bucket, &log_keys, &Scope::Global, global.at()).await.map_err(failed)?;
-        // A freeze an admin's device signed among them: checked against global's log up to where it says it ends.
-        if let Some(end) = global.wants_log(&steps).map_err(failed)? {
-            global.with_log(one::database::steps::log_to(&bucket, &log_keys, end).await.map_err(failed)?);
-        }
-        global.add_read(steps).map_err(failed)?;
+        // A freeze an admin's device signed among them: judged and checked against global's log past where it says it ends.
+        global.read_steps(&bucket, &log_keys).await.map_err(failed)?;
         let who = global.who().map_err(failed)?;
         if kept.is_none()
             && let Some(root) = global.root()

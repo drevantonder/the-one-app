@@ -33,8 +33,8 @@ pub struct Global {
     truth: Option<steps::Truth>,
     /// Before it's frozen, the last step looked at, none of them its freeze.
     looked: u64,
-    /// `global`'s log up to where a freeze an admin's device signed says it ends, read from its steps
-    /// (`steps::log_to`): what that freeze is checked against.
+    /// `global`'s log past where the freezes among its steps say it ends, read from its steps (`steps::log_to`): what
+    /// each is judged and checked against.
     log: Option<steps::Log>,
 }
 
@@ -61,51 +61,74 @@ impl Global {
     }
 
     /// Takes step `at`, the next, as this device opened it (none for one that will never be a step): before the log is
-    /// frozen, the freeze if an admin's own device signed it (`steps::claimed`), checked against `global`'s log to the
-    /// end it names (`with_log`); after, applied if it counts. Fails at a freeze an admin signed that doesn't check out
-    /// or whose log isn't here, so it's never passed over.
+    /// frozen, the freeze if an admin's own device signed it (`steps::claimed`), judged and checked against `global`'s
+    /// log past the end it names (`with_log`); after, applied if it counts. Fails at a freeze an admin signed that
+    /// doesn't check out or whose log isn't here, so it's never passed over.
     pub fn take(&mut self, at: u64, given: Option<&steps::Given>) -> Result<()> {
         ensure!(at == self.at() + 1, "step {at} isn't the next");
         match &mut self.truth {
             Some(t) => drop(t.take(at, given.map(|g| &g.step))?),
             None => {
                 let Some(root) = self.root else { bail!("no entries of {YOURS} yet") };
-                let ordered = causal(self.entries.values().cloned().collect(), &HashMap::new());
-                let (view, cuts) = steps::view(Some(root), &ordered, now())?;
-                self.truth = steps::Truth::first(at, given, Some(root), &view, &cuts, self.log.as_ref(), now())?;
+                match steps::Truth::first(at, given, Some(root), self.log.as_ref(), now()) {
+                    Ok(t) => self.truth = t,
+                    Err(err) => {
+                        // Nothing where its mark would be when the log was read: read it again the next time.
+                        if err.is::<steps::Unmarked>() {
+                            self.log = None;
+                        }
+                        return Err(err);
+                    }
+                }
                 self.looked = at;
             }
         }
         Ok(())
     }
 
-    /// Of `read`, steps after those held, the end of `global`'s log the freeze an admin's own device signed among them
-    /// names (`steps::wants_log`), if this device hasn't read the log to it yet: read it (`steps::log_to`), and give it
-    /// (`with_log`), before taking them.
+    /// Of `read`, steps after those held, the step of `global`'s log this device reads to the step after, to judge the
+    /// freezes among them (`steps::wants_log`), if it hasn't yet: read it (`steps::log_to`), and give it (`with_log`),
+    /// before taking them.
     pub fn wants_log(&self, read: &[Option<steps::Given>]) -> Result<Option<u64>> {
         if self.truth.is_some() {
             return Ok(None);
         }
-        let ordered = causal(self.entries.values().cloned().collect(), &HashMap::new());
-        let (view, cuts) = steps::view(self.root, &ordered, now())?;
         // Placed where they are: the ones before were looked at already, and none was a freeze an admin signed.
         let mut placed: Vec<Option<steps::Given>> = vec![None; self.looked as usize];
         placed.extend(read.iter().cloned());
-        Ok(steps::wants_log(&placed, &view, &cuts).filter(|end| self.log.as_ref().is_none_or(|l| l.to != *end)))
+        Ok(steps::wants_log(&placed, self.root, self.log.as_ref(), now()))
     }
 
-    /// `global`'s log to the end a freeze names, read from its steps (`wants_log`).
+    /// `global`'s log past the end a freeze names, read from its steps (`wants_log`).
     pub fn with_log(&mut self, log: steps::Log) {
         self.log = Some(log);
     }
 
     /// Takes steps read from the bucket with this device's own keys (`steps::read`), after those held, with `global`'s
-    /// log to the end a freeze among them names, if one does (`wants_log`).
+    /// log past the end the freezes among them name (`wants_log`).
     pub fn add_read(&mut self, read: Vec<Option<steps::Given>>) -> Result<()> {
         for given in read {
             self.take(self.at() + 1, given.as_ref())?;
         }
         Ok(())
+    }
+
+    /// Reads `global`'s steps after those held from `bucket`, opened with `keys`, its log's keys by epoch, with its log
+    /// as far as the freezes among them need (`wants_log`), and takes them: one under an epoch above every one made, as
+    /// the steps before it leave it, is junk, passed over.
+    pub async fn read_steps(&mut self, bucket: &impl one::bucket::Bucket, keys: &one::db::Keys) -> Result<()> {
+        loop {
+            let read = steps::read(bucket, keys, &Scope::Global, self.at()).await?;
+            while let Some(end) = self.wants_log(&read.steps)? {
+                let made = self.who()?.epoch(&Scope::Global);
+                self.with_log(steps::log_to(bucket, keys, made, end).await?);
+            }
+            self.add_read(read.steps.clone())?;
+            if !read.junk_at_end(self.who()?.epoch(&Scope::Global)) {
+                return Ok(());
+            }
+            self.take(self.at() + 1, None)?;
+        }
     }
 
     /// Takes steps as this device read them from the bucket itself, sealed (`{ steps: [{ at, sealed }], log }`,
@@ -118,10 +141,7 @@ impl Global {
     /// read them to, and give again. With `welcome` (`steps::Welcome`), before it's read to its freeze, it starts from
     /// there (`add_welcomed`): what it's given for that is checked against the Welcome's hash, wherever it came from.
     pub fn add_sealed(&mut self, given: &Value, epochs: &BTreeMap<u32, [u8; 32]>, apps: &BTreeMap<u32, Vec<u8>>) -> Result<Option<u64>> {
-        // Welcomed: from the copy a node passed on with them. One that doesn't check out is read from the freeze on.
-        if let Some(welcome) = given["welcome"].as_str().and_then(steps::Welcome::parse) {
-            let _ = self.add_welcomed(&welcome, given, epochs, apps);
-        }
+        let welcome = given["welcome"].as_str().and_then(steps::Welcome::parse).filter(|_| self.truth.is_none());
         let mut keys = one::db::Keys::new();
         let key = |keys: &mut one::db::Keys, who: &ScopeDb, e: u32| {
             if !keys.contains_key(&e)
@@ -136,28 +156,52 @@ impl Global {
             && let Some(log) = given["log"].as_object()
             && let Some(to) = log.get("to").and_then(Value::as_u64)
         {
-            // Opened with the keys of every epoch the entries made, which its steps are sealed under.
-            let who = self.who()?;
-            for e in who.epoch_hashes(&Scope::Global).into_keys() {
-                key(&mut keys, &who, e);
-            }
-            let mut read = one::log::ReadTo::default();
-            let prefix = one::log::prefix("global");
+            // Opened with the keys of every epoch the entries made, which its steps are sealed under; or, for a device
+            // welcomed with no entries, every one sealed to it, each checked once who's who is worked out.
+            let (log_keys, made) = match &welcome {
+                Some(_) => {
+                    let keys = welcome_keys(epochs, apps);
+                    let made = keys.keys().next_back().copied().unwrap_or(0);
+                    (keys, made)
+                }
+                None => {
+                    let who = self.who()?;
+                    let mut keys = one::db::Keys::new();
+                    for e in who.epoch_hashes(&Scope::Global).into_keys() {
+                        key(&mut keys, &who, e);
+                    }
+                    (keys, who.epoch(&Scope::Global))
+                }
+            };
             let sealed: BTreeMap<u64, &str> = log.get("steps").and_then(Value::as_array).into_iter().flatten().filter_map(|s| Some((s["at"].as_u64()?, s["sealed"].as_str()?))).collect();
-            for at in 1..=to {
-                let bytes = sealed.get(&at).and_then(|b| data_encoding::BASE64URL_NOPAD.decode(b.as_bytes()).ok()).with_context(|| format!("global's log's step {at} didn't come"))?;
-                read.take(&keys, &one::db::step_name(&prefix, at), &bytes, "global")?;
+            let mut read = steps::Log::default();
+            for at in 1..=to + 1 {
+                match sealed.get(&at).and_then(|b| data_encoding::BASE64URL_NOPAD.decode(b.as_bytes()).ok()) {
+                    Some(bytes) => read.take(&log_keys, made, &bytes)?,
+                    None if at == to + 1 => read.ended = true,
+                    None => bail!("global's log's step {at} didn't come"),
+                }
             }
-            self.log = Some(steps::Log { to, entries: read.entries });
+            self.log = Some(read);
+        }
+        // Welcomed: from the copy a node passed on with them.
+        if let Some(welcome) = &welcome {
+            match self.add_welcomed(welcome, given, epochs, apps) {
+                Ok(Some(end)) => return Ok(Some(end)),
+                Ok(None) => {}
+                // One that doesn't check out is read from the freeze on.
+                Err(_) => {}
+            }
         }
         for s in given["steps"].as_array().into_iter().flatten() {
             let Some(at) = s["at"].as_u64().filter(|at| *at == self.at() + 1) else { continue };
             let Some(sealed) = s["sealed"].as_str().and_then(|b| data_encoding::BASE64URL_NOPAD.decode(b.as_bytes()).ok()) else { break };
+            let who = self.who()?;
             if let Ok(e) = one::keys::epoch_of(&sealed) {
-                let who = self.who()?;
                 key(&mut keys, &who, e);
             }
-            let opened = match steps::open(&keys, &Scope::Global, at, &sealed) {
+            // Under an epoch above every one made, as the steps before it leave it: junk.
+            let opened = match steps::open(&keys, who.epoch(&Scope::Global), &Scope::Global, at, &sealed) {
                 steps::Opened::Step(g) => Some(g),
                 steps::Opened::Junk => None,
                 steps::Opened::Waits(_) => break,
@@ -166,6 +210,18 @@ impl Global {
                 return Ok(Some(end));
             }
             self.take(at, opened.as_ref())?;
+        }
+        // Nothing at the next position, but a step after it: the one missing was written (`steps::missing`).
+        let given_at = |n: u64| given["steps"].as_array().into_iter().flatten().find(|s| s["at"].as_u64() == Some(n));
+        let next = self.at() + 1;
+        if given_at(next).is_none()
+            && let Some(sealed) = given_at(next + 1).and_then(|s| s["sealed"].as_str()).and_then(|b| data_encoding::BASE64URL_NOPAD.decode(b.as_bytes()).ok())
+            && let Ok(who) = self.who()
+        {
+            if let Ok(e) = one::keys::epoch_of(&sealed) {
+                key(&mut keys, &who, e);
+            }
+            ensure!(!matches!(steps::open(&keys, u32::MAX, &Scope::Global, next + 1, &sealed), steps::Opened::Step(_)), "global's step {next} isn't in the bucket, though later ones were written: this device reads no further until it's back");
         }
         Ok(None)
     }
@@ -183,21 +239,21 @@ impl Global {
     /// them on with `?welcome=`) and its steps up to the Welcome's, opened with every key of `global`'s sealed to this
     /// device, each then checked against who's who as they make it. Fails if they don't come to the Welcome's hash, or
     /// a key isn't the one it says.
-    fn add_welcomed(&mut self, welcome: &steps::Welcome, given: &Value, epochs: &BTreeMap<u32, [u8; 32]>, apps: &BTreeMap<u32, Vec<u8>>) -> Result<()> {
-        let (Some(freeze), true) = (given.get("freeze"), self.truth.is_none()) else { return Ok(()) };
-        let mut keys = one::db::Keys::new();
-        for (e, epoch) in epochs {
-            if let Some(app) = apps.get(e).and_then(|a| one::cloudflare::open_app_key(epoch, one::members::APP, a).ok()) {
-                keys.insert(*e, one::cloudflare::database_key(&app, one::log::NAME));
-            }
-        }
+    fn add_welcomed(&mut self, welcome: &steps::Welcome, given: &Value, epochs: &BTreeMap<u32, [u8; 32]>, apps: &BTreeMap<u32, Vec<u8>>) -> Result<Option<u64>> {
+        let (Some(freeze), true) = (given.get("freeze"), self.truth.is_none()) else { return Ok(None) };
+        let keys = welcome_keys(epochs, apps);
+        let made = keys.keys().next_back().copied().unwrap_or(0);
         let sealed = |v: &Value| v["sealed"].as_str().and_then(|b| data_encoding::BASE64URL_NOPAD.decode(b.as_bytes()).ok());
-        let opened = |at: u64, v: &Value| match sealed(v).map(|b| steps::open(&keys, &Scope::Global, at, &b)) {
+        let opened = |at: u64, v: &Value| match sealed(v).map(|b| steps::open(&keys, made, &Scope::Global, at, &b)) {
             Some(steps::Opened::Step(g)) => Ok(Some(g)),
             Some(steps::Opened::Junk) => Ok(None),
             _ => bail!("global's step {at} isn't one this device opens"),
         };
         let Some(freeze) = opened(welcome.freeze, freeze)? else { bail!("the step it was welcomed with isn't a freeze") };
+        let end = steps::candidate(Some(&freeze), welcome.freeze).context("the step it was welcomed with isn't a freeze")?.global();
+        if self.log.as_ref().is_none_or(|l| !l.reaches(end)) {
+            return Ok(Some(end));
+        }
         let start = match given.get("start").filter(|s| s["at"].as_u64().is_some() && s["at"].as_u64() == welcome.copy()) {
             Some(s) => {
                 let name = one::db::copy_name(&steps::prefix("global"), s["at"].as_u64().unwrap_or(0));
@@ -213,12 +269,12 @@ impl Global {
             let s = given["steps"].as_array().into_iter().flatten().find(|s| s["at"].as_u64() == Some(at)).ok_or_else(|| anyhow::anyhow!("global's step {at} wasn't given"))?;
             after.push(opened(at, s)?);
         }
-        let truth = steps::Truth::welcomed(welcome, &freeze, start.as_deref(), &after, now())?;
+        let truth = steps::Truth::welcomed(welcome, &freeze, self.root, self.log.as_ref(), start.as_deref(), &after, now())?;
         for (e, epoch) in epochs {
             ensure!(truth.db.epoch_hash(&Scope::Global, *e) == Some(one::keys::epoch_hash(epoch)), "a key for this didn't check out, so it wasn't used");
         }
         self.truth = Some(truth);
-        Ok(())
+        Ok(None)
     }
 
     /// The last step taken: what to ask a node for those after (`?from=`).
@@ -304,6 +360,19 @@ impl Global {
         ensure!(!m.users.is_empty(), "{YOURS}'s first entry isn't among those");
         Ok(m)
     }
+}
+
+/// `global`'s log's key in each of `epochs` sealed to this device (raw, by number), from `apps`, the node's key sealed
+/// under each (`Global::add_sealed`): unchecked, so what they open is used only once who's who it comes to says
+/// they're its.
+fn welcome_keys(epochs: &BTreeMap<u32, [u8; 32]>, apps: &BTreeMap<u32, Vec<u8>>) -> one::db::Keys {
+    let mut keys = one::db::Keys::new();
+    for (e, epoch) in epochs {
+        if let Some(app) = apps.get(e).and_then(|a| one::cloudflare::open_app_key(epoch, one::members::APP, a).ok()) {
+            keys.insert(*e, one::cloudflare::database_key(&app, one::log::NAME));
+        }
+    }
+    keys
 }
 
 /// `global`'s scope database, built from replay's members, as of now.

@@ -657,10 +657,18 @@ impl Node {
             Ok((entries, Value::Object(depths)))
         })?;
         // Once `global`'s log is frozen, its scope database's steps too (`database::steps`), its freeze among them.
-        let steps = match self.frozen() {
-            true => crate::database::steps::read(&self.bucket()?, &self.log_key(&Scope::Global).await?, &Scope::Global, 0).await?,
-            false => Vec::new(),
-        };
+        let mut steps = Vec::new();
+        if self.frozen() {
+            let (bucket, keys) = (self.bucket()?, self.log_key(&Scope::Global).await?);
+            loop {
+                let read = crate::database::steps::read(&bucket, &keys, &Scope::Global, steps.len() as u64).await?;
+                steps.extend(read.steps.iter().cloned());
+                if !read.junk_at_end(self.with(|i| Ok(i.r.epoch_made(&Scope::Global)))?) {
+                    break;
+                }
+                steps.push(None);
+            }
+        }
         let hello = json!({ "entries": entries.len(), "steps": steps.len() });
         let mut answer = self.send(&to, "hello", &hello, true, CONNECT).await?;
         if answer["behind"] == true {
