@@ -137,13 +137,21 @@ pub fn signing_in_for(address: &str) -> Result<String> {
     Ok(kept_or_new(address)?.join())
 }
 
-/// This computer's device, made with a new key if it has none.
+/// This computer's device for the install at `address`, made with a new key if it has none: signed in or not yet, as its
+/// sign-in names it before it's signed in.
 fn kept_or_new(address: &str) -> Result<Arc<Device>> {
-    if kept().is_none() {
-        forget();
-        keep(&dir(), address)?;
+    if let Some(device) = kept() {
+        return Ok(device);
     }
-    kept().context("this computer's device wasn't kept")
+    let dir = dir();
+    let secret = || std::fs::read_to_string(dir.join("secret")).ok().and_then(|s| one::keys::unhex(s.trim()).ok());
+    let here = std::fs::read_to_string(dir.join("address")).is_ok_and(|a| a.trim() == address);
+    if secret().is_none() || !here {
+        forget();
+        keep(&dir, address)?;
+    }
+    let secret = secret().context("this computer's device wasn't kept")?;
+    Ok(Arc::new(Device::new(secret, address, &dir.to_string_lossy())))
 }
 
 /// A new key for this computer, readable only by its user, for the install at `address`.
