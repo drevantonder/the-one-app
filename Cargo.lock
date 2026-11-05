@@ -2841,6 +2841,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "one-agents"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "blake3",
+ "one-service",
+ "serde_json",
+]
+
+[[package]]
 name = "one-ai-usage"
 version = "0.1.0"
 dependencies = [

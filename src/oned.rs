@@ -1,8 +1,7 @@
 //! oned (`<cli>d`): a device's always-on program, this program run by that name; the `<cli>` command line runs, answers
 //! and exits. Its key is the device's, and its parts are the app service (the node: running calls) and each service:
-//! those built into the node, answering at the device's endpoint, and the rest, each a process of oned's own
-//! (`oned <name>`, `service::run`) with its own key, which oned lists as its device's. Each is on while the device's
-//! latest `service` entry for it says so; with none, the app service and the built-in services are on, the rest off.
+//! each a process of oned's own (`oned <name>`, `service::run`) with its own key, which oned lists as its device's.
+//! Each is on while the device's latest `service` entry for it says so; with none, the app service is on, the rest off.
 //! Only the device's person writes that entry (its switch in Settings' Devices), and oned starts and stops the parts as
 //! it changes. Each process part keeps its own key in its folder (`<home>/services/<name>`), so it answers only its own
 //! person whoever else's calls the device runs, and one failing leaves the rest; nothing approves it by a code, since

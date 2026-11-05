@@ -99,9 +99,8 @@ const PRESENCE_EVERY: Duration = Duration::from_secs(15);
 const REFETCH_AFTER: Duration = Duration::from_secs(30);
 /// What an app's own database is called: SQLite's name for a connection's first.
 const DATABASE: &str = "main";
-/// What a built-in service's database of its records is called, under its name.
-// Named before services were called services: it holds sealed records (AGENTS.md's history among them), which only
-// clients could copy under a new name.
+/// What the database is called where services built into nodes kept their records, under their app's name, until each
+/// person's node moved them into the app's own (`move_records`).
 const RECORDS_DATABASE: &str = "sidecar";
 
 pub fn now_ms() -> u64 {
@@ -375,7 +374,6 @@ pub struct Inner {
     id: Key,
     name: Mutex<String>,
     apps: Apps,
-    built_in_services: Vec<crate::services::BuiltIn>,
     pub services: crate::services::Services,
     install: Exclusive<Option<Install>>,
     pairings: Mutex<HashMap<[u8; 16], Pairing>>,
@@ -539,8 +537,8 @@ impl std::fmt::Debug for Node {
 }
 
 impl Node {
-    /// Starts this device's node, with the built-in services this build has.
-    pub async fn start(dir: &Path, built_in_services: Vec<crate::services::BuiltIn>) -> Result<Node> {
+    /// Starts this device's node.
+    pub async fn start(dir: &Path) -> Result<Node> {
         std::fs::create_dir_all(dir)?;
         let device = load_device(dir)?;
         let secret = unhex(&device.secret)?;
@@ -560,7 +558,6 @@ impl Node {
             id,
             name: Mutex::new(device.name),
             apps,
-            built_in_services,
             services: Default::default(),
             install: Exclusive::new(None),
             pairings: Mutex::new(load_pairings(dir)),
@@ -662,10 +659,8 @@ impl Node {
             }
         });
         if node.has_install() {
-            for service in node.0.built_in_services.iter().filter(|n| n.sync.is_some()) {
-                node.sync_built_in(service.name);
-            }
             tokio::task::spawn_blocking(crate::harnesses::set_up);
+            node.move_records();
         }
         Ok(node)
     }
@@ -1197,11 +1192,11 @@ impl Node {
         .unwrap_or(false)
     }
 
-    /// Now and then, reads what other devices wrote and said, and syncs built-in services' records.
+    /// Now and then, reads what other devices wrote and said, and hooks this machine's harnesses up.
     async fn tick_loop(self) {
         for tick in 1u64.. {
             tokio::time::sleep(TICK).await;
-            // What other devices wrote and said, every tick; and wrote of a built-in service's records, every minute.
+            // What other devices wrote and said, every tick; and the harnesses, every minute.
             if self.has_install() {
                 if let Err(err) = self.read_logs().await {
                     tracing::debug!("reading the bucket: {err:#}");
@@ -1216,10 +1211,8 @@ impl Node {
                 self.take_forgotten().await;
                 self.tidy_databases().await;
                 self.sweep_remote_puts();
-                for service in self.0.built_in_services.iter().filter(|n| n.sync.is_some()) {
-                    self.sync_built_in(service.name);
-                }
                 tokio::task::spawn_blocking(crate::harnesses::set_up);
+                self.move_records();
             }
         }
     }

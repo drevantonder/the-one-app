@@ -23,7 +23,7 @@ pub const APP: &str = "node";
 pub const APPS_PART: &str = "apps";
 /// The kinds of node entry that say a release of the node's or a service's program (`release`).
 pub const RELEASES: [&str; 2] = ["node-release", "service-release"];
-/// Agents' built-in service (`src/agents.rs`), whose Vault requests are theirs: here too for the Cloudflare node.
+/// Who agents act as when the Vault fills their requests (`vault_fetch`): here too for the Cloudflare node.
 pub const AGENTS: &str = "agents";
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]

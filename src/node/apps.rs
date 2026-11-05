@@ -13,8 +13,7 @@ impl Node {
 
     /// What people call the service `name`: its title, else its name.
     pub(super) fn service_title(&self, name: &str) -> String {
-        let built_in = self.0.built_in_services.iter().find(|b| b.name == name).and_then(|b| (b.describe)()["title"].as_str().map(str::to_string));
-        built_in.or_else(|| self.0.services.title(name)).unwrap_or_else(|| name.to_string())
+        self.0.services.title(name).unwrap_or_else(|| name.to_string())
     }
 
     pub(super) fn deployed(&self, app: &str) -> bool {

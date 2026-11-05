@@ -10,7 +10,7 @@ use crate::temp;
 async fn start(name: &str) -> Node {
     let dir = temp(name);
     std::fs::write(dir.join("device.json"), json!({ "secret": one::entry::hex(&rand::random()), "name": name }).to_string()).unwrap();
-    Node::start(&dir, one::services::built_in()).await.unwrap()
+    Node::start(&dir).await.unwrap()
 }
 
 /// Workers whose relay the devices of `a`'s install reach each other through, taking only `a` and those it
@@ -185,7 +185,7 @@ async fn only_a_persons_own_device_or_their_inviter_lets_a_device_in() {
     use one::node::{DeviceRequest, Invited};
     let dir = temp("approve");
     std::fs::write(dir.join("device.json"), json!({ "secret": one::entry::hex(&rand::random()), "name": "mac" }).to_string()).unwrap();
-    let a = Node::start(&dir, one::services::built_in()).await.unwrap();
+    let a = Node::start(&dir).await.unwrap();
     a.create("Home", "Andre").await.unwrap();
     let me = one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None, token: None };
     eventually("the board to run", async || a.call(board("post", json!({ "text": "hi" }))).await.is_ok()).await;
@@ -538,7 +538,7 @@ async fn a_service_runs_only_the_build_its_apps_deploy_names() {
     use one::node::Build;
     let dir = temp("service-build");
     std::fs::write(dir.join("device.json"), json!({ "secret": one::entry::hex(&rand::random()), "name": "linux" }).to_string()).unwrap();
-    let a = Node::start(&dir, one::services::built_in()).await.unwrap();
+    let a = Node::start(&dir).await.unwrap();
     a.create("Home", "Andre").await.unwrap();
     let me = one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None, token: None };
     let build = a.put_blob(b"a program").unwrap();

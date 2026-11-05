@@ -685,7 +685,7 @@ impl Node {
         });
     }
 
-    /// Runs a service here, built in or registered, for this device's local user.
+    /// Runs a service registered here, for this device's local user.
     pub(super) async fn run_service(&self, app: &str, op: &str, input: Value, me: &Caller, from: Option<String>) -> Result<Value> {
         let everyone = self.0.services.serves_everyone(app) && self.with(|i| Ok(i.r.db().serves(&self.0.id, &me.user)))?;
         let user = if everyone { me.user.clone() } else { self.user()? };
@@ -709,31 +709,9 @@ impl Node {
                 found
             })?;
         }
-        let built_in = self.0.built_in_services.iter().find(|n| n.name == app);
-        let mut answer = match built_in {
-            Some(n) => (n.call)(op.to_string(), input, caller.clone(), if n.records { self.records(app).await? } else { vec![] }).await?,
-            None => self.0.services.call(app, op, input, caller.clone(), from).await?,
-        };
+        let mut answer = self.0.services.call(app, op, input, caller.clone(), from).await?;
         crate::vault::blot(&mut answer.ok, &used.into_inner().unwrap());
         let scope = Scope::User(user.clone());
-        if !answer.records.is_empty() {
-            let (db, bucket) = self.call_database(me, &scope, app, RECORDS_DATABASE, Some(vec![crate::services::RECORDS.into()])).await?;
-            let (time, by, device) = (now_ms(), caller.user_name.clone(), caller.name.clone());
-            let mut db = db.lock().await;
-            self.write_in(&scope, &mut db, &bucket, |c| {
-                for (kind, data) in &answer.records {
-                    let row = [json!(kind), json!(data.to_string()), json!(time), json!(by), json!(device)];
-                    crate::db::execute(c, "insert into records (kind, data, time, by, device) values (?, ?, ?, ?, ?)", &row)?;
-                }
-                Ok(())
-            })
-            .await?;
-            self.ping(&scope, Some((app, RECORDS_DATABASE, db.at())));
-            drop(db);
-            if let Some(n) = built_in.filter(|n| n.sync.is_some()) {
-                self.sync_built_in(n.name);
-            }
-        }
         if !answer.blobs.is_empty() {
             self.append_as(&scope, &user, Content { blobs: answer.blobs, ..members::node("keep", json!({})) }).await?;
         }

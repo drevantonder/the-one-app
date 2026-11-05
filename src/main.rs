@@ -1516,7 +1516,7 @@ async fn serve(is_try: bool, args: &[String]) -> Result<()> {
         Some(h) => tokio::net::TcpListener::from_std(h.listener.try_clone()?)?,
         None => listen(&dir).await?,
     };
-    let node = Node::start(&dir, one::services::built_in()).await?;
+    let node = Node::start(&dir).await?;
     // Its parts that run as processes of their own, as its entries switch them.
     one::oned::keep_parts(node.clone(), tokio::runtime::Handle::current());
     // Git here reaches the install's repos at their address, as on every computer of its person's.
@@ -1995,7 +1995,7 @@ fn vault_set(scope: &str, item: &str, field: &str, value: &str, secret: Option<b
         false => format!("Set {item}'s {field}."),
     };
     // Whether an agent may use it now, since only the person lets agents use an item.
-    let agents = found.as_ref().is_some_and(|it| it["apps"].as_array().is_some_and(|a| a.iter().any(|a| a == one::agents::NAME))) || app == Some(one::agents::NAME);
+    let agents = found.as_ref().is_some_and(|it| it["apps"].as_array().is_some_and(|a| a.iter().any(|a| a == one::members::AGENTS))) || app == Some(one::members::AGENTS);
     Ok(match (agents, app) {
         (true, _) => format!("{done} Agents use it with vault_fetch, as {{{{{id}:{field}}}}}."),
         (false, None) => format!("{done} Agents may not use it yet: vault_request, leaving out app, asks the person to let you, and they pick it."),

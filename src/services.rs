@@ -1,13 +1,10 @@
 //! Device services: native code a device runs beside its node, for what apps can't reach from workerd (a shell, local
 //! models, WhatsApp's linked phone, a Mac's own apps). A service serves its device's users, and the node says so in its
-//! hello to the other devices; its app, and only its app, calls it with `ctx.services`. Some are built into the node
-//! (AGENTS.md: `built_in`); the rest are programs that register over the local API and long-poll for calls: an app's
-//! own (`apps/<name>/service/`, in Rust on the `service` crate or in Go), or Swift in the Mac app. The core never names
-//! one: only `built_in` does, for the binary.
+//! hello to the other devices; its app, and only its app, calls it with `ctx.services`. Each is a program that
+//! registers over the local API and long-polls for calls: an app's own (`apps/<name>/service/`, in Rust on the
+//! `service` crate or in Go), or Swift in the Mac app. The core never names one.
 
 use std::collections::HashMap;
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -18,14 +15,10 @@ use tokio::sync::{mpsc, oneshot};
 
 use crate::apps::Me;
 
-pub type Reply = Pin<Box<dyn Future<Output = Result<Answer>> + Send>>;
-
-/// What a service's call gives back: its answer; for a built-in one, records it keeps, each its kind and data; and
-/// blobs the caller's scope keeps.
+/// What a service's call gives back: its answer, and blobs the caller's scope keeps.
 #[derive(Debug, Default)]
 pub struct Answer {
     pub ok: Value,
-    pub records: Vec<(String, Value)>,
     pub blobs: Vec<String>,
 }
 
@@ -34,21 +27,6 @@ impl Answer {
         Answer { ok, ..Default::default() }
     }
 }
-
-/// What a built-in service kept, in its own database of its device's local user: one thing it did or was told.
-#[derive(Clone, Debug)]
-pub struct Record {
-    pub id: String,
-    pub kind: String,
-    pub data: Value,
-    pub time: u64,
-    /// The person's name, and their device's.
-    pub by: String,
-    pub device: String,
-}
-
-/// The schema of a built-in service's database.
-pub const RECORDS: &str = "create table records (n integer primary key, kind text not null, data text not null, time integer not null, by text not null, device text not null)";
 
 /// A service's answer that it can't serve this call here (a model it lacks), so the call goes on to the next device.
 #[derive(Debug)]
@@ -61,25 +39,6 @@ impl std::fmt::Display for Elsewhere {
 }
 
 impl std::error::Error for Elsewhere {}
-
-/// A service built into the node.
-pub struct BuiltIn {
-    pub name: &'static str,
-    pub describe: fn() -> Value,
-    /// Whether `call` needs its records (reading them all costs a pass over its database).
-    pub records: bool,
-    /// Runs an operation, given every record it kept, oldest first.
-    pub call: fn(op: String, input: Value, caller: Me, records: Vec<Record>) -> Reply,
-    /// Brings this machine in line with its records, after they change and when the node starts.
-    pub sync: Option<fn(records: &[Record])>,
-}
-
-/// The services built into this binary: they run on every device, for its local user.
-pub fn built_in() -> Vec<BuiltIn> {
-    vec![
-        BuiltIn { name: crate::agents::NAME, describe: crate::agents::describe, records: true, call: crate::agents::call, sync: Some(crate::agents::sync) },
-    ]
-}
 
 /// A registered service that hasn't asked for calls in this long is gone.
 const GONE_AFTER: Duration = Duration::from_secs(60);
@@ -185,7 +144,7 @@ impl Services {
             bail!("{}", err.as_str().unwrap_or("failed"));
         }
         let blobs = reply["blobs"].as_array().into_iter().flatten().filter_map(|b| b.as_str().map(str::to_string)).collect();
-        Ok(Answer { ok: reply["ok"].clone(), records: Vec::new(), blobs })
+        Ok(Answer { ok: reply["ok"].clone(), blobs })
     }
 
     /// The next call for `app`, waiting up to 25 seconds; None if there was none.

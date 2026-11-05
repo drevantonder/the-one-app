@@ -50,8 +50,6 @@ pub mod store;
 #[cfg(feature = "node")]
 pub mod replica;
 #[cfg(feature = "node")]
-pub mod agents;
-#[cfg(feature = "node")]
 pub mod harnesses;
 #[cfg(feature = "node")]
 pub mod api;

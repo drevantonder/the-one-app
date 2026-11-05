@@ -1,5 +1,5 @@
-//! Device services, as the node knows them: which run on which device, registering them, switching a device's parts on
-//! and off, and the built-in ones' records.
+//! Device services, as the node knows them: which run on which device, registering them, and switching a device's
+//! parts on and off.
 
 use crate::config::YOURS;
 use super::*;
@@ -86,24 +86,17 @@ impl Node {
         self.with(|i| Ok(!Self::off(i.r.db(), &self.0.id, crate::members::APPS_PART))).unwrap_or(true)
     }
 
-    /// The services serving on this device, whom each serves, and what each says it is: those built into the node,
-    /// then those registered. One its person switched off here isn't served.
+    /// The services serving on this device, whom each serves, and what each says it is. One its person switched off
+    /// here isn't served.
     pub(super) fn services_here(&self, i: &Install) -> Vec<Service> {
         let m = i.r.db();
         let everyone: Vec<String> = m.users().into_iter().map(|u| u.id).filter(|u| m.serves(&self.0.id, u)).collect();
         let removed = |name: &str| Self::off(m, &self.0.id, name);
-        let built_in = |n: &crate::services::BuiltIn| {
-            let mut d = (n.describe)();
-            d["name"] = json!(n.name);
-            d["built_in"] = json!(true);
-            d
-        };
-        let mut services: Vec<Service> = self.0.built_in_services.iter().filter(|n| !removed(n.name)).map(|n| (n.name.to_string(), vec![i.user.clone()], built_in(n))).collect();
-        services.extend(self.0.services.describe().into_iter().filter(|d| !removed(d["name"].as_str().unwrap_or(""))).map(|d| {
+        let services = self.0.services.describe().into_iter().filter(|d| !removed(d["name"].as_str().unwrap_or(""))).map(|d| {
             let users = if d["serves"] == "everyone" { everyone.clone() } else { vec![i.user.clone()] };
             (d["name"].as_str().unwrap_or("").to_string(), users, d)
-        }));
-        services
+        });
+        services.collect()
     }
 
     /// What this device can run, as its hello says: each part (`apps`, the app service; the services built into it;
@@ -116,9 +109,6 @@ impl Node {
         let on = |name: &str| !Self::off(m, &self.0.id, name);
         let mut out: BTreeMap<String, Value> = BTreeMap::new();
         out.insert(members::APPS_PART.into(), json!({ "name": members::APPS_PART, "on": on(members::APPS_PART) }));
-        for n in &self.0.built_in_services {
-            out.insert(n.name.into(), json!({ "name": n.name, "title": (n.describe)()["title"], "on": on(n.name) }));
-        }
         for (name, title) in self.offered_before() {
             out.insert(name.clone(), json!({ "name": name, "title": title, "on": on(&name) }));
         }
@@ -172,42 +162,70 @@ impl Node {
     }
 
     pub(super) fn runs_service_here(&self, app: &str) -> bool {
-        (self.0.built_in_services.iter().any(|n| n.name == app) || self.0.services.has(app)) && self.removed_here(app).is_none()
+        self.0.services.has(app) && self.removed_here(app).is_none()
     }
 
-    /// Every entry a built-in service has in the local user's scope, oldest first.
-    /// A built-in service's records, in its database of this device's local user, oldest first.
-    pub(super) async fn records(&self, app: &str) -> Result<Vec<crate::services::Record>> {
-        let user = self.user()?;
-        let scope = Scope::User(user);
-        let db = self.database(&scope, app, RECORDS_DATABASE, Some(vec![crate::services::RECORDS.into()]), None).await?;
-        let mut db = db.lock().await;
-        self.read_ready(&(scope, format!("{app}/{RECORDS_DATABASE}")), &mut db, &self.bucket()?).await?;
-        let rows = db.query("select * from records order by n", &[])?;
-        Ok(rows
-            .into_iter()
-            .map(|r| crate::services::Record {
-                id: r["n"].to_string(),
-                kind: r["kind"].as_str().unwrap_or("").into(),
-                data: serde_json::from_str(r["data"].as_str().unwrap_or("null")).unwrap_or_default(),
-                time: r["time"].as_u64().unwrap_or(0),
-                by: r["by"].as_str().unwrap_or("").into(),
-                device: r["device"].as_str().unwrap_or("").into(),
-            })
-            .collect())
-    }
-
-    /// Brings this machine in line with a built-in service's records, in the background.
-    pub(super) fn sync_built_in(&self, app: &'static str) {
-        let Some(sync) = self.0.built_in_services.iter().find(|n| n.name == app).and_then(|n| n.sync) else { return };
+    /// Copies what services built into nodes kept, once, for this device's person, into their apps' own databases.
+    /// Those services kept their records in a database of their app's, `sidecar`, which their programs, holding no keys,
+    /// can't read now that they're programs of their own. An app whose schema has a `moved` table gets every record as it
+    /// was, by its number, in its `records`, and `moved` says how many there were, which the app waits for. The old ones
+    /// stay as they were, for older devices; this goes once every device has run it.
+    pub(super) fn move_records(&self) {
         let node = self.clone();
         tokio::spawn(async move {
-            match node.records(app).await {
-                Ok(records) => {
-                    let _ = tokio::task::spawn_blocking(move || sync(&records)).await;
+            let apps = node.with(|i| Ok(i.r.db().apps().into_iter().filter(|a| a.bundle.is_some() && !a.erased).map(|a| a.name).collect::<Vec<_>>())).unwrap_or_default();
+            for app in apps {
+                let wants = node.0.apps.describe(&app).await.is_ok_and(|d| d["schema"]["user"].as_array().is_some_and(|s| s.iter().any(|s| s.as_str().is_some_and(|s| s.contains("create table moved")))));
+                if wants && let Err(err) = node.move_records_of(&app).await {
+                    tracing::warn!("{app}'s records didn't move: {err:#}");
                 }
-                Err(err) => tracing::debug!("{app}'s records: {err:#}"),
             }
         });
+    }
+
+    async fn move_records_of(&self, app: &str) -> Result<()> {
+        let scope = Scope::User(self.user()?);
+        let bucket = self.bucket()?;
+        let new = self.database(&scope, app, DATABASE, None, None).await?;
+        let mut new = new.lock().await;
+        self.read_ready(&(scope.clone(), format!("{app}/{DATABASE}")), &mut new, &bucket).await?;
+        if !new.query("select records from moved", &[])?.is_empty() {
+            return Ok(());
+        }
+        // Opened as it is: one that was never written stays unwritten, with no records.
+        let old = self.database(&scope, app, RECORDS_DATABASE, Some(vec![]), None).await?;
+        let mut old = old.lock().await;
+        self.read_ready(&(scope.clone(), format!("{app}/{RECORDS_DATABASE}")), &mut old, &bucket).await?;
+        const ROWS: &str = "select n, kind, data, time, by, device from records order by n";
+        let rows = old.query(ROWS, &[]).unwrap_or_default();
+        drop(old);
+        let at = new.at();
+        let copied = self
+            .write_in(&scope, &mut new, &bucket, |c| {
+                if !crate::db::execute(c, "select records from moved", &[])?.is_empty() {
+                    return Ok(false);
+                }
+                for r in &rows {
+                    let row = ["n", "kind", "data", "time", "by", "device"].map(|k| r[k].clone());
+                    crate::db::execute(c, "insert or replace into records (n, kind, data, time, by, device) values (?, ?, ?, ?, ?, ?)", &row)?;
+                }
+                crate::db::execute(c, "insert into moved (records) values (?)", &[json!(rows.len())])?;
+                Ok(true)
+            })
+            .await?;
+        if new.at() > at {
+            self.ping(&scope, Some((app, DATABASE, new.at())));
+            self.emit(Event::Changed { apps: vec![app.to_string()] });
+        }
+        // Checked as it's kept now: every record the same, and as many.
+        let now = new.query(ROWS, &[])?;
+        let moved = new.query("select records from moved", &[])?;
+        let count = moved.first().and_then(|m| m["records"].as_u64());
+        match copied {
+            true if now == rows && count == Some(rows.len() as u64) => tracing::info!("moved {}'s {} records into its own database, every one the same", app, rows.len()),
+            true => bail!("its copy differs: {} records, {} copied, moved says {count:?}", rows.len(), now.len()),
+            false => {}
+        }
+        Ok(())
     }
 }

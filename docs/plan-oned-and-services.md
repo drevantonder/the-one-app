@@ -157,13 +157,12 @@ Done for Shell, Models, AI Usage and Agent Devices (6bead05..2368cbc): each is `
 where an entry switches it on: every device of both networks got one for Shell, Models and AGENTS.md before the node
 stopped carrying them, and a new device is switched on in Settings › Devices, as phase 6 will ask.
 
-Left: **AGENTS.md**, still `services::built_in`. It is two things. One is the node wiring its machine's harnesses to
-itself (its MCP server, the board's prompt hook, git's token for Repos, the built-in skills from `src/skills.rs`), which
-belongs to the node, on every device, not to a service. The other is the app's own: AGENTS.md and the person's skills,
-kept as records in the person's sealed `agents/sidecar` database, which a program holding no keys can't read. So: the
-wiring moves into the node proper; the records move into the app's own database (app.js and `ctx.db`, copied once from
-the sidecar); and the service becomes a program that asks its own app for them (`/v1/call`, which a service may make for
-its own app) and writes the files. Then `built_in`, `Record`, `RECORDS` and the node's records path go.
+AGENTS.md too: the node hooks its machine's harnesses up itself (`src/harnesses.rs`: its MCP server, the board's
+prompt hook, git's token for Repos, the built-in skills), on every device; AGENTS.md and the person's skills are
+records in the app's own database, which each person's node copied once from the sealed `agents/sidecar`
+(`Node::move_records`, checked by count and every record's contents), and its service asks its app for them
+(`_files`) and writes them. Left for phase 7's contract: `move_records` and the `sidecar` databases, once no device
+older than this runs.
 
 ### Phase 3: the Mac's Swift services become helper apps
 

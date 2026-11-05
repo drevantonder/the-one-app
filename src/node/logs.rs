@@ -392,7 +392,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("one-whos-who-{}", rand::random::<u64>()));
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("device.json"), json!({ "secret": hex(&rand::random()), "name": "a" }).to_string()).unwrap();
-        let a = Node::start(&dir, crate::services::built_in()).await.unwrap();
+        let a = Node::start(&dir).await.unwrap();
         a.create("Home", "Andre").await.unwrap();
         let me = Caller { key: a.id(), user: a.user().unwrap(), agent: None, token: None };
         let may = || a.with(|i| Ok(i.r.db().may(&me.user, "use", scopes::INSTALL))).unwrap();

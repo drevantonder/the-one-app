@@ -191,7 +191,7 @@ impl Node {
     /// Whether `host` is the name of an app or service, which an item's hosts name to let its fields into calls to
     /// that service: never a site's, so a web request to it gets none.
     pub fn names_app(&self, host: &str) -> bool {
-        self.0.built_in_services.iter().any(|n| n.name == host) || self.0.services.has(host) || self.with(|i| Ok(i.r.db().app(host).is_some() || i.r.db().switches().keys().any(|(_, name)| name == host))).unwrap_or(false)
+        self.0.services.has(host) || self.with(|i| Ok(i.r.db().app(host).is_some() || i.r.db().switches().keys().any(|(_, name)| name == host))).unwrap_or(false)
     }
 
     /// Fills `text` for a service's call while it waits for the service's answer, as its app's requests are filled: from
@@ -220,7 +220,7 @@ impl Node {
         let port = uri.port_u16().unwrap_or(if uri.scheme_str() == Some("https") { 443 } else { 80 });
         ensure!(!crate::outbound::own_port(self, &host, port), "that's this device's own port");
         ensure!(!self.names_app(&host), "{host} is an app's name, not a site's");
-        let lookup = self.lookup(caller, crate::agents::NAME, &self.usable_scopes(&caller.user)?).await?;
+        let lookup = self.lookup(caller, members::AGENTS, &self.usable_scopes(&caller.user)?).await?;
         let used = std::sync::Mutex::new(Vec::<String>::new());
         let missing = std::sync::Mutex::new(Vec::<String>::new());
         let fill = |text: &str| {
@@ -275,7 +275,7 @@ impl Node {
         let found = name.split_once(':').map(|(id, field)| (id, field, lookup.scopes.iter().find_map(|(_, items)| items.get(id).cloned())));
         match found {
             Some((id, _, None)) => format!("no item {id} is in a Vault you may use: vault_list shows them, and {ask} use one"),
-            Some((_, _, Some(it))) if !it.apps.contains(crate::agents::NAME) => format!("agents may not use {} yet: {ask}", it.title),
+            Some((_, _, Some(it))) if !it.apps.contains(members::AGENTS) => format!("agents may not use {} yet: {ask}", it.title),
             Some((_, field, Some(it))) => {
                 let fields: Vec<&str> = it.fields.keys().map(String::as_str).collect();
                 format!("{} has no field {field}; it has {}", it.title, fields.join(", "))
@@ -397,10 +397,10 @@ impl Node {
         crate::vault::generate(&mut data);
         // Only the node says which app's call made an item.
         data.as_object_mut().context("an item is an object")?.remove("app");
-        let wants = data["apps"].as_array().is_some_and(|a| a.iter().any(|a| a == crate::agents::NAME));
+        let wants = data["apps"].as_array().is_some_and(|a| a.iter().any(|a| a == members::AGENTS));
         self.write_item(caller, scope, |items| {
             // Agents use an item (vault_fetch) only once its person lets agents use it, never by themselves.
-            let had = items.get(&id).is_some_and(|it| it.apps.contains(crate::agents::NAME));
+            let had = items.get(&id).is_some_and(|it| it.apps.contains(members::AGENTS));
             ensure!(caller.agent.is_none() || had || !wants, "only the person lets agents use an item: ask them with vault_request, leaving out app, and they pick or make it");
             Ok(data.clone())
         })
@@ -478,7 +478,7 @@ impl Node {
     pub async fn request_item(&self, caller: &Caller, scope: &Scope, app: &str, need: Option<&str>, ask: &Value, why: &str) -> Result<Value> {
         let own = Scope::User(caller.user.clone());
         let shared = match need {
-            Some(need) if app != crate::agents::NAME && app != members::APP => self.0.apps.describe(app).await.ok().map(|d| d["vault"][need].clone()).filter(|d| d["shared"] == true),
+            Some(need) if app != members::AGENTS && app != members::APP => self.0.apps.describe(app).await.ok().map(|d| d["vault"][need].clone()).filter(|d| d["shared"] == true),
             _ => None,
         };
         let manages = |scope: &Scope| self.with(|i| Ok(i.r.db().may(&caller.user, "add-apps", &scopes::object(&scope))));
@@ -489,7 +489,7 @@ impl Node {
             None => &own,
         };
         let mut data = match need {
-            Some(_) if app == crate::agents::NAME => bail!(
+            Some(_) if app == members::AGENTS => bail!(
                 "Not asked: need names what an app declares it needs, like app gmail, need client. For an item you use yourself, leave out need and give title, fields and hosts, and why for the person"
             ),
             Some(need) if app != members::APP => {
@@ -525,7 +525,7 @@ impl Node {
         data["agent"] = json!(caller.agent);
         self.with(|i| {
             ensure!(i.r.db().may(&caller.user, "add-apps", &scopes::object(&scope)), "Only its admins change {}’s Vault.", scope_name(i, &scope.to_string()));
-            ensure!(i.r.db().app(app).is_some_and(|a| !a.erased) || app == members::APP || app == crate::agents::NAME, "no app named {app}");
+            ensure!(i.r.db().app(app).is_some_and(|a| !a.erased) || app == members::APP || app == members::AGENTS, "no app named {app}");
             Ok(())
         })?;
         self.append_as(scope, &caller.user, members::node("vault-request", data)).await?;
@@ -554,7 +554,7 @@ impl Node {
     /// app that declares a shared need of the same type, so one item an admin sets counts for them all.
     async fn sharing(&self, app: &str, need: Option<&str>) -> Vec<String> {
         let mut out = vec![app.to_string()];
-        let Some(need) = need.filter(|_| app != crate::agents::NAME && app != members::APP) else { return out };
+        let Some(need) = need.filter(|_| app != members::AGENTS && app != members::APP) else { return out };
         let Ok(d) = self.0.apps.describe(app).await else { return out };
         let d = &d["vault"][need];
         if d["shared"] != true || d["type"].as_str().is_none_or(str::is_empty) {
@@ -577,7 +577,7 @@ impl Node {
         let asked = self.with(|i| Ok(i.views.get(&scope.to_string()).and_then(|(_, s)| s.requests.get(id)).map(|r| (r.app.clone(), r.need.clone()))))?;
         let (sharing, kind) = match &asked {
             Some((app, need)) => {
-                let kind = match need.as_deref().filter(|_| app != crate::agents::NAME && app != members::APP) {
+                let kind = match need.as_deref().filter(|_| app != members::AGENTS && app != members::APP) {
                     Some(need) => self.0.apps.describe(app).await.ok().and_then(|d| d["vault"][need]["type"].as_str().map(str::to_string)),
                     None => None,
                 };

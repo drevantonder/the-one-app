@@ -281,7 +281,7 @@ impl Node {
 }
 
 /// What a device says of each service serving there, as `GET /v1/state` lists it: what it is, its version (a
-/// service's own, or for one built into the node, the node's build), whom it serves, and who installed it.
+/// service's own), whom it serves, and who installed it.
 /// Whether this node's install is a throwaway network (`one throwaway`), whose Workers beside it sign its person in with no passkey.
 fn throwaway() -> bool {
     let settings = std::fs::read_to_string(crate::cloudflare::Settings::path()).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok());

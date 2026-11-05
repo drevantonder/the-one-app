@@ -1,8 +1,8 @@
 //! The node hooks this machine's agent harnesses up to itself, on every device: each harness installed here gets this
 //! network's MCP server and the node's prompt hook, git sends Repos the node's token, and the built-in skills
 //! (`src/skills.rs`) go in each skills folder. A file is written only if it's missing or unchanged since the node last
-//! wrote it, so an edit made on disk is never overwritten. The person's own AGENTS.md and skills are the AGENTS.md
-//! app's, which its service writes beside these.
+//! wrote it, so an edit made on disk is never overwritten. The person's own AGENTS.md and skills are an app's, whose
+//! service writes them beside these, and marks them as its own.
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
@@ -21,9 +21,8 @@ fn marker() -> String {
 /// What earlier versions marked their folders with: taken over by the next write, never removed.
 const OLD_MARKERS: [&str; 2] = [".synced", ".theoneapp"];
 
-/// Whether a skill's name is one of the built-in skills', which only the node writes: the person's own skills never
-/// take one.
-pub fn built_in(name: &str) -> bool {
+/// Whether a skill's name is one of the built-in skills'.
+fn built_in(name: &str) -> bool {
     let server = crate::skills::server_name();
     name == server || name.starts_with(&format!("{server}-"))
 }
@@ -62,13 +61,13 @@ pub fn set_up() {
 }
 
 /// One writer at a time of the harnesses' files on this machine.
-pub fn turn() -> std::sync::MutexGuard<'static, ()> {
+fn turn() -> std::sync::MutexGuard<'static, ()> {
     static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
     ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 /// Each harness's skills folder whose harness is installed here, made if it isn't there yet.
-pub fn skill_roots(home: &Path) -> Vec<PathBuf> {
+fn skill_roots(home: &Path) -> Vec<PathBuf> {
     let roots = [home.join(".claude/skills"), home.join(".agents/skills")];
     roots.into_iter().filter(|r| r.parent().is_some_and(Path::is_dir) && std::fs::create_dir_all(r).is_ok()).collect()
 }
@@ -250,7 +249,7 @@ fn edit(file: &Path, create: bool, change: impl FnOnce(&str) -> Result<Option<St
 }
 
 /// Says why something was left alone once, not every minute.
-pub fn once(said: String) {
+fn once(said: String) {
     static TOLD: Mutex<Vec<String>> = Mutex::new(Vec::new());
     let mut told = TOLD.lock().unwrap_or_else(|e| e.into_inner());
     if !told.contains(&said) {
@@ -382,11 +381,11 @@ fn with_codex_mcp(text: &str, name: &str, cli: &str, args: &[&str]) -> Result<Op
     Ok(Some(doc.to_string()))
 }
 
-pub fn ours(dir: &Path) -> bool {
+fn ours(dir: &Path) -> bool {
     dir.join(marker()).is_file()
 }
 
-pub fn write_skill(dir: &Path, files: &BTreeMap<String, String>) -> Result<()> {
+fn write_skill(dir: &Path, files: &BTreeMap<String, String>) -> Result<()> {
     if dir.exists() && !ours(dir) && !OLD_MARKERS.iter().any(|m| dir.join(m).is_file()) {
         once(format!("left {} alone: it isn't a synced skill", dir.display()));
         return Ok(());
@@ -411,19 +410,19 @@ pub fn write_skill(dir: &Path, files: &BTreeMap<String, String>) -> Result<()> {
 }
 
 /// What this app last wrote to each file, so it never overwrites an edit made on disk.
-pub struct Written {
+struct Written {
     path: PathBuf,
     hashes: HashMap<String, String>,
 }
 
 impl Written {
-    pub fn load() -> Self {
+    fn load() -> Self {
         let path = crate::home().join("agents-written.json");
         let hashes = std::fs::read(&path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
         Written { path, hashes }
     }
 
-    pub fn write(&mut self, file: &Path, text: &str) {
+    fn write(&mut self, file: &Path, text: &str) {
         let key = file.to_string_lossy().to_string();
         let now = std::fs::read_to_string(file).ok();
         let hash = |s: &str| blake3::hash(s.as_bytes()).to_hex().to_string();
@@ -450,7 +449,7 @@ impl Written {
         }
     }
 
-    pub fn save(&self) {
+    fn save(&self) {
         if let Some(dir) = self.path.parent() {
             let _ = std::fs::create_dir_all(dir);
         }
