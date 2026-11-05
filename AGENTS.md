@@ -1,6 +1,6 @@
 # The One App
 
-Your devices, and your team's, as one place for apps and agents. Read `ARCHITECTURE.md` before changing code. What machines say to each other is in the code that says it and its tests (`tests/contracts.rs` where two languages must agree): read those before changing anything that crosses a machine boundary.
+Your devices, and your team's, as one place for apps and agents. Read `ARCHITECTURE.md`, and `GLOSSARY.md` for what our words mean, before changing code. What machines say to each other is in the code that says it and its tests (`tests/contracts.rs` where two languages must agree): read those before changing anything that crosses a machine boundary.
 
 ## Principles
 
