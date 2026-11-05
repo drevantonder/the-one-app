@@ -772,7 +772,7 @@ class Run {
     const key = page === `user:${this.who.user}` ? "user" : page;
     const placed = (this.view.state.arrangements?.[key]?.items || []).filter((i) => typeof i.widget === "string" && i.options && Object.keys(i.options).length);
     const each = await Promise.all(this.pages(page).map(async ({ app, scopes }) => {
-      const d = await this.person.describe(this.who, app).catch(() => null);
+      const d = await this.person.describe(this.who, app).catch(keysFirst);
       return Promise.all((d?.widgets || []).map(async (w) => {
         const size = w.size || "medium";
         const draw = (at, options) => this.run(app, "widget", { name: w.name, size: at, options }, scopes);
@@ -804,7 +804,7 @@ class Run {
   async badges(page) {
     const out = {};
     await Promise.all(this.pages(page).map(async ({ app, scopes }) => {
-      const d = await this.person.describe(this.who, app).catch(() => null);
+      const d = await this.person.describe(this.who, app).catch(keysFirst);
       if (d?.badge !== true || d.uses?.services?.length) return;
       const n = await this.run(app, "badge", {}, scopes).catch(() => 0);
       if (n > 0) out[app.name] = n;
@@ -819,7 +819,7 @@ class Run {
     const drawn = ["name", "title", "icon", "color", "domain", "image", "image_kind", "installed", "deleted", "screens", "widgets", "owner"];
     return Promise.all(this.view.apps.map(async ({ reach, ...info }) => {
       const app = deployed(this.view, info.name);
-      const d = app && (await this.person.describe(this.who, app).catch(() => null));
+      const d = app && (await this.person.describe(this.who, app).catch(keysFirst));
       const mine = reach.length > 0;
       const shown = ["title", "icon", "color", "domain", "tagline", "description", "uses", "connector", "needs"];
       for (const [k, v] of Object.entries(d || {})) if (k !== "name" && k !== "schedules" && (mine || shown.includes(k))) info[k] = v;
@@ -830,6 +830,12 @@ class Run {
 
 /// An app in the install with a deploy, as `view` has it; or null.
 const deployed = (view, name) => view.apps.find((a) => a.name === name && a.bundle && !a.deleted) || null;
+
+/// A describe that failed: for keys the device didn't hand, said (428), so it hands them with the next; else none.
+const keysFirst = (err) => {
+  if (err?.status === 428) throw err;
+  return null;
+};
 
 /// Whether an app keeps to its own data: it uses no other app, service or Vault item.
 const plain = (d) => !d.uses?.apps?.length && !d.uses?.services?.length && !d.vault;

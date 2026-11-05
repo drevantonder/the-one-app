@@ -441,6 +441,7 @@ export function mayHand(route, need) {
   const app = appOf(route);
   if (app) return need.app === app || node(["vault", "log"]) || code;
   if (["/mcp", "/v1/widgets", "/v1/badges"].includes(route)) return (need.app !== "node" && ["main", "sidecar"].includes(need.database)) || node(["vault", "log"]) || code;
+  if (route === "/v1/apps") return node(["log"]) || code;
   if (route === "/v1/vault" || route.startsWith("/v1/vault/")) return node(["vault", "log"]);
   return node(["log"]);
 }

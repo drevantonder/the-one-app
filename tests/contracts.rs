@@ -343,7 +343,8 @@ fn the_workers_and_nodes_agree_on_keys_and_seals() {
         // Apps' code, `global`'s blobs, goes to a node running an app (the Cloudflare node keeps none); a scope's own
         // blobs, its people's files, never.
         let blobs = |scope: &str| Need { scope: scope.into(), epoch: 1, app: "node".into(), database: "blobs".into() };
-        assert!(may_hand("call board", &blobs("global")) && may_hand("/v1/screens/board", &blobs("global")) && may_hand("/v1/badges", &blobs("global")));
+        assert!(may_hand("call board", &blobs("global")) && may_hand("/v1/screens/board", &blobs("global")) && may_hand("/v1/badges", &blobs("global")) && may_hand("/v1/apps", &blobs("global")));
+        assert!(!may_hand("/v1/apps", &need("board", "main")) && !may_hand("/v1/apps", &blobs("user:ab")));
         assert!(!may_hand("call board", &blobs("user:ab")) && !may_hand("/mcp", &blobs("group:cd")) && !may_hand("/v1/state", &blobs("global")));
         assert_eq!(oldest_needed(Some(br#"{"at":9,"copy":7,"epoch":2}"#), 3), 2, "from the epoch its newest copy is under");
     }

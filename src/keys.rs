@@ -330,8 +330,9 @@ pub fn app_of(route: &str) -> Option<&str> {
 /// when the node asks (428): only what that kind of request can use. One that runs an app, that app's databases; an
 /// MCP request (`/mcp`), which may run any, or widgets and badges, which run every app's, apps' own databases; and each
 /// of those the node's Vault and log of a scope too (which fill in its items, and say who's who there), and `global`'s
-/// blobs, where apps' deployed code is (a node that keeps nothing, the Cloudflare node, reads it there). The Vault's
-/// routes, its Vault and log; any other, the log alone. `cloudflare/shared/crypto.js`'s `mayHand` is the same.
+/// blobs, where apps' deployed code is (a node that keeps nothing, the Cloudflare node, reads it there). The list of
+/// apps, which says what each does from its code, the log and that code. The Vault's routes, its Vault and log; any
+/// other, the log alone. `cloudflare/shared/crypto.js`'s `mayHand` is the same.
 ///
 /// `global`'s blobs are those its entries name (deploys' bundles, releases, apps' icons), which everyone in the install
 /// may read already: any of them may add any app, and read its code. Another scope's are its own people's files, and
@@ -343,6 +344,7 @@ pub fn may_hand(route: &str, need: &Need) -> bool {
     match (app_of(route), route) {
         (Some(app), _) => need.app == app || node(&[VAULT, LOG]) || code,
         (None, "/mcp" | "/v1/widgets" | "/v1/badges") => apps || node(&[VAULT, LOG]) || code,
+        (None, "/v1/apps") => node(&[LOG]) || code,
         (None, r) if r == "/v1/vault" || r.starts_with("/v1/vault/") => node(&[VAULT, LOG]),
         (None, _) => node(&[LOG]),
     }
