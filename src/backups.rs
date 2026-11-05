@@ -126,6 +126,8 @@ pub struct Job<'a> {
     pub scope: &'a str,
     /// The key of the scope's newest epoch, and that key sealed to the recovery key, as the bucket keeps it.
     pub key: [u8; 32],
+    /// Every epoch's key the device holds of the scope, which open its databases' copies to choose one that holds.
+    pub epochs: crate::db::Keys,
     pub sealed: Vec<u8>,
     pub device: Key,
     pub now: u64,
@@ -142,10 +144,10 @@ pub struct Job<'a> {
 /// Sends a scope what its backup lacks: its key, sealed, the first time; a pack of its new entries, its new blobs,
 /// and a snapshot. Returns the snapshot, or None when nothing new would be in it. `blob` reads a blob here.
 pub fn back_up(job: Job, blob: impl Fn(&str) -> Option<Vec<u8>>) -> Result<Option<Snapshot>> {
-    let Job { place, install, scope, key, sealed, device, now, previous, entries, blobs, bucket } = job;
+    let Job { place, install, scope, key, epochs, sealed, device, now, previous, entries, blobs, bucket } = job;
     let mut snap = previous.clone().unwrap_or_else(|| Snapshot { scope: scope.to_string(), ..Default::default() });
     if let Some(bucket) = bucket {
-        copy_bucket(bucket, place, install, scope, &mut snap)?;
+        copy_bucket(bucket, place, install, scope, &epochs, &mut snap)?;
     }
     let new: Vec<&Entry> = entries.iter().filter(|e| e.seq() >= snap.frontier.get(&hex(&e.author())).copied().unwrap_or(0)).collect();
     // Blobs the scope no longer keeps (a release that's been superseded, a blob its scope forgot) leave the snapshot,
@@ -193,8 +195,8 @@ pub fn back_up(job: Job, blob: impl Fn(&str) -> Option<Vec<u8>>) -> Result<Optio
 /// Copies what a scope's folder in the install's bucket has that the place lacks, into `<install>/bucket/`, laid out
 /// as the bucket is: each epoch's key and Vault key sealed to the recovery key, each app's key in each epoch (sealed under it), and
 /// each database's new steps, the signatures beside them (and those of the last few steps it copied before, which may
-/// have come just after their steps), and newest copy (sealed as they are), past what `snap` says it has.
-fn copy_bucket(bucket: &Place, place: &Place, install: &str, scope: &str, snap: &mut Snapshot) -> Result<()> {
+/// have come just after their steps), and newest copy that holds (sealed as they are), past what `snap` says it has.
+fn copy_bucket(bucket: &Place, place: &Place, install: &str, scope: &str, epochs: &crate::db::Keys, snap: &mut Snapshot) -> Result<()> {
     /// How many of the last steps a run copied the next looks for signatures of again.
     const SIGNED_LATE: u64 = 4;
     let folder = folder(scope);
@@ -221,11 +223,17 @@ fn copy_bucket(bucket: &Place, place: &Place, install: &str, scope: &str, snap: 
         for database in bucket.list(&format!("{folder}/{app}"))?.into_iter().filter(|d| !d.starts_with('_')) {
             let prefix = format!("{folder}/{app}/{database}");
             let Some(hint) = bucket.get(&crate::db::newest_name(&prefix))? else { continue };
-            let (_, newest_copy, epoch) = crate::db::newest(&hint);
+            let (_, hinted, epoch) = crate::db::newest(&hint);
             let (mut at, mut copied) = snap.databases.get(&format!("{app}/{database}")).copied().unwrap_or((0, 0));
+            let newest_copy = newest_holding(bucket, scope, &prefix, &app, &database, epochs, hinted, copied)?;
             if newest_copy > copied && copy(&crate::db::copy_name(&prefix, newest_copy), false)? {
                 copied = newest_copy;
                 at = at.max(newest_copy);
+            }
+            // The steps before the copy aren't kept here, so a reader of a restored bucket goes on from it.
+            let tidied = crate::db::tidied_name(&prefix);
+            if copied > 0 && !copy(&tidied, true)? {
+                place.put(&format!("{install}/bucket/{tidied}"), b"{}")?;
             }
             let signed = crate::db::signed_beside(&prefix);
             // And the step at the copy's position, without which a reader doesn't start from it (`db::start`), with the
@@ -246,11 +254,39 @@ fn copy_bucket(bucket: &Place, place: &Place, install: &str, scope: &str, snap: 
                 }
                 at += 1;
             }
-            place.put(&format!("{install}/bucket/{}", crate::db::newest_name(&prefix)), &serde_json::to_vec(&serde_json::json!({ "at": at, "copy": copied, "epoch": if copied == newest_copy { epoch } else { 0 } }))?)?;
+            place.put(&format!("{install}/bucket/{}", crate::db::newest_name(&prefix)), &serde_json::to_vec(&serde_json::json!({ "at": at, "copy": copied, "epoch": if copied == hinted { epoch } else { 0 } }))?)?;
             snap.databases.insert(format!("{app}/{database}"), (at, copied));
         }
     }
     Ok(())
+}
+
+/// The newest copy of a database above `above` that holds, as a reader chooses it (`db::sealed_copy_holds`): the newest
+/// hint's, `hinted`, first, then the others, newest first; `above` if none does. A scope's log, whose copies are its
+/// entries, not a database, takes the hint's.
+#[allow(clippy::too_many_arguments)]
+fn newest_holding(bucket: &Place, scope: &str, prefix: &str, app: &str, database: &str, epochs: &crate::db::Keys, hinted: u64, above: u64) -> Result<u64> {
+    if (app, database) == (crate::members::APP, crate::log::NAME) {
+        return Ok(hinted.max(above));
+    }
+    let mut keys = crate::db::Keys::new();
+    for (n, epoch) in epochs {
+        let Some(sealed) = bucket.get(&crate::keys::app_key_name(scope, app, *n))? else { continue };
+        if let Ok(key) = crate::kernel::open_app_key(epoch, app, &sealed) {
+            keys.insert(*n, crate::kernel::database_key(&key, database));
+        }
+    }
+    let mut copies: Vec<u64> = bucket.list(&format!("{prefix}/copy"))?.iter().filter_map(|n| n.parse().ok()).filter(|n| *n != hinted).collect();
+    copies.sort_unstable_by(|a, b| b.cmp(a));
+    for at in std::iter::once(hinted).chain(copies).filter(|c| *c > above) {
+        let Some(copy) = bucket.get(&crate::db::copy_name(prefix, at))? else { continue };
+        let step = bucket.get(&crate::db::step_name(prefix, at))?;
+        let beside = bucket.get(&crate::db::sig_name(prefix, at))?;
+        if crate::db::sealed_copy_holds(prefix, &keys, at, &copy, step.as_deref(), beside.as_deref()) {
+            return Ok(at);
+        }
+    }
+    Ok(above)
 }
 
 /// Whether the device `at` places down a scope's line backs it up itself: the scope's first change the place lacks
@@ -740,11 +776,18 @@ mod tests {
         let sig = bucket.get(&late).unwrap().unwrap();
         bucket.delete(&late).unwrap();
 
+        // Junk at a copy's position, and the newest hint naming it, from a device without the key: the backup copies
+        // the copy that holds.
+        let junk = crate::db::copy_name(prefix, 10 * crate::db::COPY_EVERY);
+        bucket.put(&junk, &crate::keys::seal(1, &rand::random(), &junk, b"junk")).unwrap();
+        bucket.put(&crate::db::newest_name(prefix), &serde_json::to_vec(&json!({ "at": at, "copy": 10 * crate::db::COPY_EVERY })).unwrap()).unwrap();
+
         let job = |previous: Option<Snapshot>, now: u64| Job {
             place: &place,
             install,
             scope: "global",
             key: epoch,
+            epochs: crate::db::Keys::from([(1, epoch)]),
             sealed: crate::kernel::seal_to(&crate::kernel::twin_public(recovery.verifying_key().as_bytes()).unwrap(), &epoch).unwrap(),
             device: *device.verifying_key().as_bytes(),
             now,

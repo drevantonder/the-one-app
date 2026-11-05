@@ -17,12 +17,19 @@
 //! In odd seeds the scope's epoch changes midway: each device is handed epoch 2 when it first meets a step under it,
 //! and one device never is, writing under epoch 1 after it all the same: what it writes after is passed over, and
 //! nothing the others wrote is lost.
+//!
+//! Throughout, a device without the key forges the newest hint (past every step, at nothing, at junk, at a copy that's
+//! gone) and leaves junk where copies go, while a tidier deletes the copies no reader needs. In seeds whose second bit
+//! is set, phase 2 is switched on: every step is signed in it (`db::SIGNED_STEPS`) and the tidier deletes the steps a
+//! copy covers too (`db::DELETE_COVERED_STEPS`), counting a step as kept long enough once it's been there a few
+//! minutes, and at the end everything a copy covers, before a device that's been away since the start reads on.
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::{Result, bail};
+use std::collections::BTreeSet;
 use one::bucket::{Bucket, Copied, Failed, Object, Trouble};
 use one::db::{Db, Keys, Missing, execute};
 use rand::rngs::StdRng;
@@ -51,13 +58,16 @@ struct Link {
     refusing: Arc<Mutex<tokio::time::Instant>>,
     /// The attempts at writing that were told they failed, and not that they may have landed.
     failed: Arc<Mutex<Vec<i64>>>,
+    /// When the bucket wrote each object, in ms since `start`: none for what the forger left.
+    born: Arc<Mutex<BTreeMap<String, u64>>>,
+    start: tokio::time::Instant,
 }
 
 impl Link {
     fn new(seed: u64) -> Link {
         let rng = Arc::new(Mutex::new(StdRng::seed_from_u64(seed)));
         let now = || Arc::new(Mutex::new(tokio::time::Instant::now()));
-        Link { objects: Default::default(), rng, going: Default::default(), steady: false, down: now(), refusing: now(), failed: Default::default() }
+        Link { objects: Default::default(), rng, going: Default::default(), steady: false, down: now(), refusing: now(), failed: Default::default(), born: Default::default(), start: tokio::time::Instant::now() }
     }
 
     /// The same bucket over a link that fails nothing: a new device's read of it, which on a device's own copy goes
@@ -191,8 +201,17 @@ impl Bucket for Link {
                 return Err(Failed(Trouble::Refused, "won't let this device write".into()).into());
             }
         }
-        let (name, bytes) = (name.to_string(), bytes.to_vec());
-        let created = self.send(move |objects| !objects.contains_key(&name) && objects.insert(name, bytes).is_none()).await;
+        let (name, bytes, born, start) = (name.to_string(), bytes.to_vec(), self.born.clone(), self.start);
+        let created = self
+            .send(move |objects| {
+                let created = !objects.contains_key(&name);
+                if created {
+                    born.lock().unwrap().insert(name.clone(), start.elapsed().as_millis() as u64);
+                    objects.insert(name, bytes);
+                }
+                created
+            })
+            .await;
         if created.is_err() {
             let _ = UNANSWERED.try_with(|u| u.set(true));
         }
@@ -209,6 +228,69 @@ impl Bucket for Link {
             ok
         })
         .await
+    }
+
+    async fn objects(&self, folder: &str) -> Result<Vec<(String, u64)>> {
+        let (within, born) = (format!("{folder}/"), self.born.clone());
+        self.send(move |objects| {
+            let born = born.lock().unwrap();
+            objects.keys().filter_map(|n| Some((n.strip_prefix(&within)?, n))).filter(|(n, _)| !n.contains('/')).map(|(n, full)| (n.to_string(), born.get(full).copied().unwrap_or(0))).collect()
+        })
+        .await
+    }
+
+    async fn delete(&self, name: &str) -> Result<()> {
+        let name = name.to_string();
+        self.send(move |objects| drop(objects.remove(&name))).await
+    }
+}
+
+const PREFIX: &str = "global/sim/main";
+
+/// How long, in the simulation's time, a step counts as kept long enough to delete once a copy covers it: long past
+/// when any write that read the step before it could still land.
+const KEPT_FOR_MS: u64 = 300_000;
+
+/// Whether a seed switches phase 2 on: steps signed in them, and the steps a copy covers deleted.
+fn phase_two(seed: u64) -> bool {
+    seed & 2 != 0
+}
+
+/// A device without the key, now and then until `done`: replacing the newest hint with one that says a step past every
+/// step, nothing, junk, or a copy that's gone, and leaving junk where the next copies go.
+async fn forge(link: Link, seed: u64, done: Arc<std::sync::atomic::AtomicBool>) {
+    let mut rng = rand::rngs::StdRng::seed_from_u64(seed ^ 0xf0f0);
+    while !done.load(std::sync::atomic::Ordering::Relaxed) {
+        tokio::time::sleep(Duration::from_millis(rng.gen_range(200..3_000))).await;
+        let mut objects = link.objects.lock().unwrap();
+        let name = one::db::newest_name(PREFIX);
+        let (at, copy, _) = objects.get(&name).map_or((0, 0, 0), |o| one::db::newest(o));
+        let hint = match rng.gen_range(0..5) {
+            0 => json!({ "at": 999_999_999u64, "copy": 0 }),
+            1 => json!({ "at": 0, "copy": 0 }),
+            2 => json!({ "at": at, "copy": copy.saturating_sub(one::db::COPY_EVERY).max(1) }),
+            3 => json!({ "at": at, "copy": copy + 1 }),
+            _ => {
+                for n in at..at + 3 {
+                    let junk = one::db::copy_name(PREFIX, n.max(1) + one::db::COPY_EVERY / 2 * rng.gen_range(0..3));
+                    if !objects.contains_key(&junk) {
+                        objects.insert(junk.clone(), one::keys::seal(1, &rng.r#gen(), &junk, b"junk"));
+                    }
+                }
+                continue;
+            }
+        };
+        objects.insert(name, serde_json::to_vec(&hint).unwrap());
+    }
+}
+
+/// The tidier, until `done`: what no reader needs goes, and in phase 2 the steps a copy covers once they've been
+/// there `KEPT_FOR_MS`.
+async fn tidier(link: Link, keys: Keys, steps: bool, done: Arc<std::sync::atomic::AtomicBool>) {
+    while !done.load(std::sync::atomic::Ordering::Relaxed) {
+        tokio::time::sleep(Duration::from_millis(2_000)).await;
+        let now = link.start.elapsed().as_millis() as u64 + one::db::KEEP_STEPS_FOR - KEPT_FOR_MS;
+        let _ = one::db::tidy(&link, PREFIX, &keys, &BTreeSet::new(), now, steps).await;
     }
 }
 
@@ -244,8 +326,12 @@ async fn retry<T>(mut f: impl AsyncFnMut() -> Result<T>) -> T {
 /// only once its step is known to be there, with the state its writer read. A link may lose one, but not all.
 fn signed(link: &Link, db: &Db, seed: u64) {
     let checks = db.checks();
-    assert_eq!(checks.wrong, 0, "seed {seed}: a signature beside a step didn't hold: {checks:?}");
-    assert!(link.objects.lock().unwrap().keys().any(|n| n.ends_with(".sig")), "seed {seed}: no step was signed");
+    assert_eq!((checks.wrong, checks.refused), (0, 0), "seed {seed}: a signature didn't hold: {checks:?}");
+    let beside = link.objects.lock().unwrap().keys().any(|n| n.ends_with(".sig"));
+    match phase_two(seed) {
+        true => assert!(!beside && checks.signed > 0 && db.signed_from() == Some(1), "seed {seed}: every step is signed in it: {checks:?}"),
+        false => assert!(beside, "seed {seed}: no step was signed"),
+    }
 }
 
 fn state(db: &Db) -> (Vec<(u64, u64)>, u64) {
@@ -262,7 +348,7 @@ fn keys(seed: u64) -> (Keys, Keys) {
 
 /// Opens the database and brings it to the schema as a device does: handed `newer`, epoch 2, when it meets a step under
 /// it, as its node is once it finds that epoch's entry; never handed it, it doesn't open.
-async fn open(link: &Link, older: &Keys, newer: Option<&Keys>) -> Option<Db> {
+async fn open(link: &Link, older: &Keys, newer: Option<&Keys>, signed_in: bool) -> Option<Db> {
     let ahead = |e: &anyhow::Error| e.is::<one::db::Ahead>();
     let mut keys = older.clone();
     let mut db = loop {
@@ -277,6 +363,9 @@ async fn open(link: &Link, older: &Keys, newer: Option<&Keys>) -> Option<Db> {
         }
     };
     db.sign_as(ed25519_dalek::SigningKey::from_bytes(&rand::random()));
+    if signed_in {
+        db.sign_in_steps();
+    }
     while !retry(async || match db.migrate(link, &[SCHEMA.to_string()]).await {
         Err(e) if ahead(&e) && db.keys().len() == 1 => Ok(false),
         other => other.map(|()| true),
@@ -301,10 +390,11 @@ async fn write_handed(link: &Link, db: &mut Db, id: u64, device: usize, from: bo
 }
 
 /// A step under epoch 1, written by a device that wasn't handed epoch 2, at the first free position: its own step at
-/// `at` again, so applied twice it would move the count twice.
+/// `at` again, so applied twice it would move the count twice; unless the tidier deleted it.
 async fn stale_step(link: &Link, key: &[u8; 32], at: u64) {
     let name = one::db::step_name("global/sim/main", at);
-    let step = one::keys::open(key, &name, &link.objects.lock().unwrap()[&name]).unwrap();
+    let Some(sealed) = link.objects.lock().unwrap().get(&name).cloned() else { return };
+    let step = one::keys::open(key, &name, &sealed).unwrap();
     let mut objects = link.objects.lock().unwrap();
     let free = (at + 1..).find(|n| !objects.contains_key(&one::db::step_name("global/sim/main", *n))).unwrap();
     let name = one::db::step_name("global/sim/main", free);
@@ -314,12 +404,19 @@ async fn stale_step(link: &Link, key: &[u8; 32], at: u64) {
 async fn run(seed: u64) {
     let link = Link::new(seed);
     let changes = seed % 2 == 1;
+    let phase2 = phase_two(seed);
     let (older, newer) = keys(seed);
+    let all = if changes { newer.clone() } else { older.clone() };
+    // A device that reads the start, and is away until the end.
+    let mut away = retry(async || Db::open(&link, PREFIX, all.clone()).await).await;
+    let done = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let forger = tokio::task::spawn_local(forge(link.clone(), seed, done.clone()));
+    let tidying = tokio::task::spawn_local(tidier(link.clone(), all.clone(), phase2, done.clone()));
     let mut devices = Vec::new();
     for device in 0..DEVICES {
         let (link, older, newer) = (link.clone(), older.clone(), newer.clone());
         devices.push(tokio::task::spawn_local(async move {
-            let mut db = open(&link, &older, Some(&newer)).await.expect("handed every epoch");
+            let mut db = open(&link, &older, Some(&newer), phase2).await.expect("handed every epoch");
             for i in 0..WRITES {
                 let id = (device * WRITES + i) as u64;
                 write_handed(&link, &mut db, id, device, changes && i >= WRITES / 2, &newer).await;
@@ -332,7 +429,7 @@ async fn run(seed: u64) {
     let stale = changes.then(|| {
         let (link, older) = (link.clone(), older.clone());
         tokio::task::spawn_local(async move {
-            let mut db = open(&link, &older, None).await?;
+            let mut db = open(&link, &older, None, phase2).await?;
             let mut own = None;
             for i in 0..WRITES {
                 let at = db.at();
@@ -359,22 +456,41 @@ async fn run(seed: u64) {
             extra = 1;
         }
     }
+    done.store(true, std::sync::atomic::Ordering::Relaxed);
+    forger.await.unwrap();
+    tidying.await.unwrap();
     link.settle().await;
     // Each reads to the end, as a new device does from nothing.
     for db in &mut dbs {
         retry(async || db.catch_up(&link).await).await;
     }
-    let fresh = Db::open(&link.steady(), "global/sim/main", if changes { newer } else { older }).await.unwrap();
+    // Then everything a copy covers goes, the hint says a step past every step and no copy, and the device away since
+    // the start reads on, as a new one does.
+    if phase2 {
+        let gone = one::db::tidy(&link.steady(), PREFIX, &all, &BTreeSet::new(), u64::MAX / 2, true).await.unwrap();
+        assert!(gone > 0 && !link.objects.lock().unwrap().contains_key(&one::db::step_name(PREFIX, 1)), "seed {seed}: the steps a copy covers went");
+    }
+    link.objects.lock().unwrap().insert(one::db::newest_name(PREFIX), serde_json::to_vec(&json!({ "at": 999_999_999u64, "copy": 0 })).unwrap());
+    retry(async || away.catch_up(&link).await).await;
+    let fresh = Db::open(&link.steady(), PREFIX, all.clone()).await.unwrap();
     link.none_failed_landed(&fresh, seed);
     signed(&link, &fresh, seed);
+    assert_eq!(state(&away), state(&fresh), "seed {seed}: the device away since the start reads what a new device does");
     let (rows, n) = state(&fresh);
     assert_eq!(rows.iter().filter(|r| r.1 < DEVICES as u64).count(), DEVICES * WRITES + extra, "seed {seed}: every write landed once");
     assert_eq!(n, rows.len() as u64, "seed {seed}: the count moved once for each write, however often the link lost an answer");
     for (i, db) in dbs.iter().enumerate() {
         assert_eq!(state(db), (rows.clone(), n), "seed {seed}: device {i} reads what a new device does");
         assert_eq!(db.checks().wrong, 0, "seed {seed}: device {i} read a signature that didn't hold");
+        assert_eq!(db.checks().refused, 0, "seed {seed}: device {i} refused a step");
     }
     assert!(link.objects.lock().unwrap().keys().any(|k| k.contains("/copy/")), "seed {seed}: copies were written as steps piled up");
+    // And a write after it all lands after every step.
+    let mut last = Db::open(&link.steady(), PREFIX, all.clone()).await.unwrap();
+    last.sign_as(ed25519_dalek::SigningKey::from_bytes(&rand::random()));
+    let before = last.at();
+    link.steady().write(&mut last, &link.steady(), u64::MAX >> 2, 0).await.unwrap();
+    assert!(last.at() > before && state(&Db::open(&link.steady(), PREFIX, all).await.unwrap()) == state(&last), "seed {seed}: a write after the steps went lands after the last");
 }
 
 /// Runs each seed on a paused clock of its own, as many at once as there are cores: each is its own run, so the order
@@ -439,6 +555,9 @@ async fn run_copied(seed: u64) {
             let here = &copies[device];
             let mut db = retry(async || Db::open(here, "global/sim/main", key.clone()).await).await;
             db.sign_as(ed25519_dalek::SigningKey::from_bytes(&rand::random()));
+            if phase_two(seed) {
+                db.sign_in_steps();
+            }
             retry(async || db.migrate(here, &[SCHEMA.to_string()]).await).await;
             for i in 0..WRITES {
                 let id = (device * WRITES + i) as u64;

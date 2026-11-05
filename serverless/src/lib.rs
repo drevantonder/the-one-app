@@ -21,8 +21,9 @@ use serde_json::{Value, json};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 
-/// The bucket as `worker.js` reaches it: an object whose `get(name)`, `create(name, bytes)` and `replace(name, bytes,
-/// tag)` give promises, of `{ bytes, tag }` or null, and of whether it was written.
+/// The bucket as `worker.js` reaches it: an object whose `get(name)`, `create(name, bytes)`, `replace(name, bytes,
+/// tag)` and `objects(folder)` give promises, of `{ bytes, tag }` or null, of whether it was written, and of
+/// `[name, written]` for each object in the folder.
 struct Js(JsValue);
 
 impl Js {
@@ -57,6 +58,17 @@ impl Bucket for Js {
 
     async fn wait(&self, ms: u64) {
         let _ = self.ask("wait", &[(ms as f64).into()]).await;
+    }
+
+    async fn objects(&self, folder: &str) -> Result<Vec<(String, u64)>> {
+        let listed: js_sys::Array = self.ask("objects", &[folder.into()]).await?.dyn_into().map_err(|_| anyhow!("a listing is a list"))?;
+        listed
+            .iter()
+            .map(|o| {
+                let o: js_sys::Array = o.dyn_into().map_err(|_| anyhow!("a listed object is [name, written]"))?;
+                Ok((o.get(0).as_string().context("a listed object has its name")?, o.get(1).as_f64().unwrap_or(0.0) as u64))
+            })
+            .collect()
     }
 }
 

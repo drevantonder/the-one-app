@@ -248,14 +248,42 @@ class Bucket {
   }
 
   get(name) {
+    // One fetched ahead that wasn't there, or whose fetch failed, may be there now: it's fetched again, never kept
+    // missing, and a fetch that fails now says so, rather than that it isn't there.
+    const ahead = this.fetched.get(name);
+    this.fetched.delete(name);
+    const got = ahead ? ahead.then((o) => o ?? this.fetchObject(name)) : this.fetchObject(name);
     // The steps after one aren't in the bucket yet, mostly: their URLs come with its, and only those read are fetched.
-    // A step's signature is fetched when it's read: one fetched ahead may not be written yet, and would be kept missing.
-    this.prefetch([name]);
+    // A step's signature is fetched when it's read.
     for (const n of following(name, 15)) if (!this.urls.has(n) && !this.sealed.has(n)) this.readUrl(n).catch(() => {});
     for (const n of following(name, 5)) if (!n.endsWith(".sig")) this.prefetch([n]);
-    const got = this.fetched.get(name);
-    this.fetched.delete(name);
     return got;
+  }
+
+  /// The objects directly in `folder`, as `[name, when the bucket wrote it (ms)]`, a page at a time from URLs the URL
+  /// signer gives: a database's copies, for a reader whose steps were deleted (src/db.rs `gap`).
+  async objects(folder) {
+    const unanswered = (message) => Object.assign(new Error(message), { unanswered: true });
+    const unescape = (t) => t.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, "&");
+    const out = [];
+    let token = null;
+    for (;;) {
+      const url = (await this.sign({ list: [{ prefix: `${folder}/`, delimiter: "/", token }] })).list[0];
+      const r = await fetch(url).catch((err) => {
+        throw unanswered(`the bucket couldn't be reached to list ${folder}: ${err.message}`);
+      });
+      if (r.status >= 500) throw unanswered(`the bucket said ${r.status} to listing ${folder}`);
+      if (!r.ok) throw new Error(`the bucket said ${r.status} to listing ${folder}`);
+      const text = await r.text();
+      for (const [, item] of text.matchAll(/<Contents>([\s\S]*?)<\/Contents>/g)) {
+        const key = unescape(item.match(/<Key>([\s\S]*?)<\/Key>/)?.[1] ?? "");
+        const name = key.startsWith(`${folder}/`) ? key.slice(folder.length + 1) : "";
+        if (name && !name.includes("/")) out.push([name, Date.parse(item.match(/<LastModified>(.*?)<\/LastModified>/)?.[1] ?? "") || 0]);
+      }
+      const next = text.match(/<NextContinuationToken>(.*?)<\/NextContinuationToken>/)?.[1];
+      if (!text.includes("<IsTruncated>true</IsTruncated>") || !next) return out;
+      token = unescape(next);
+    }
   }
 
   /// Writes `bytes` to `name` at a signed URL: → its ETag, or null if the bucket refused it as already there (412).

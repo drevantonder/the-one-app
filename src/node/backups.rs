@@ -455,7 +455,8 @@ impl Node {
     /// place has a snapshot of it from within the hour, which a device that just started doesn't know of yet.
     async fn back_up_scope(&self, place: &Place, place_id: &str, install: &str, d: &Due, now: u64, force: bool) -> Result<Option<Snapshot>> {
         let scope = Scope::parse(&d.scope)?;
-        let (n, key) = self.epoch_keys(&scope, false).await?.pop_last().context("no epoch")?;
+        let epochs = self.epoch_keys(&scope, false).await?;
+        let (n, key) = epochs.last_key_value().map(|(n, k)| (*n, *k)).context("no epoch")?;
         ensure!(d.key.is_none_or(|k| k == key), "{scope}'s newest epoch changed: it's backed up on the next run");
         let name = crate::keys::epoch_name(&d.scope, n, "recovery");
         let sealed = crate::bucket::Bucket::get(&self.bucket()?, &name).await?.with_context(|| format!("{name} is missing"))?.bytes;
@@ -479,7 +480,7 @@ impl Node {
             if !force && previous.as_ref().is_some_and(|p| p.time + b::EVERY > now) {
                 return Ok((None, previous));
             }
-            let job = b::Job { place: &place, install: &install, scope: &scope_name, key, sealed, device, now, previous: previous.clone(), entries, blobs, bucket: bucket.as_ref() };
+            let job = b::Job { place: &place, install: &install, scope: &scope_name, key, epochs, sealed, device, now, previous: previous.clone(), entries, blobs, bucket: bucket.as_ref() };
             // A blob this device doesn't keep is read from the bucket, where the device that wrote it put it.
             let written = b::back_up(job, |hash| runtime.block_on(node.blob(hash)).inspect_err(|err| tracing::debug!("backing up blob {hash}: {err:#}")).ok())?;
             Ok((written.clone(), written.or(previous)))
