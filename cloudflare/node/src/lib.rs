@@ -694,7 +694,7 @@ pub fn global_entries(owner: &str, user: &str, have: &str) -> Result<Vec<u8>, Js
 /// from its `welcome` (`steps::Welcome`), its freeze's step and the copy before its step, `{ welcome, freeze, start }`.
 /// Fails before the log is frozen. The caller opens and checks them all itself: this trusts the node with nothing.
 #[wasm_bindgen]
-pub async fn global_steps(owner: String, user: String, bucket: JsValue, from: f64, welcome: Option<String>) -> Result<String, JsValue> {
+pub async fn sealed_global_steps(owner: String, user: String, bucket: JsValue, from: f64, welcome: Option<String>) -> Result<String, JsValue> {
     use one::database::steps;
     let bucket = Js(bucket);
     let people = replayed(&owner, &[], |r| r.global().may(&user, "use", one::database::scopes::INSTALL)).map_err(failed)?;

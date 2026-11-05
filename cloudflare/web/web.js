@@ -177,14 +177,15 @@ const h = OneUI.react.createElement;
   /// one of their devices asks, of their nodes, itself, over iroh (net.js), saying whose it is (`x-one-user`), which a
   /// node checks against the device its connection proves. It goes with the keys it needed last time; a node that needs
   /// others says so (428), and it goes again once with them. Asked again for a few seconds while no node answers, as
-  /// one restarting doesn't; a call carries an id, so it runs once however often it's sent.
-  async function api(path, { method = "GET", body, query, raw, signal, since } = {}) {
+  /// one restarting doesn't; a call carries an id, so it runs once however often it's sent. With `keyless`, a 428 fails
+  /// it instead, for a device that can't yet tell whom to hand keys to.
+  async function api(path, { method = "GET", body, query, raw, signal, since, keyless } = {}) {
     const url = new URL(path, location.origin);
     for (const [k, v] of Object.entries(query || {})) if (v != null) url.searchParams.set(k, typeof v === "string" ? v : JSON.stringify(v));
     if (url.pathname === "/v1/call" && body && typeof body === "object" && !body.id) body = { ...body, id: callId() };
     const trace = developer.on() ? developer.start(url.pathname, body, since) : null;
     try {
-      const out = await sending(url, method, body, raw, signal, trace);
+      const out = await sending(url, method, body, raw, signal, trace, keyless);
       if (trace) trace.status = raw ? out.status : 200;
       return out;
     } catch (err) {
@@ -196,7 +197,7 @@ const h = OneUI.react.createElement;
   }
 
   /// `api`'s request, each send's trace kept in `trace` if it has one.
-  async function sending(url, method, body, raw, signal, trace) {
+  async function sending(url, method, body, raw, signal, trace, keyless) {
     const route = Device.route(url.pathname, body);
     const user = auth.user();
     const joining = performance.now();
@@ -246,7 +247,7 @@ const h = OneUI.react.createElement;
         throw Object.assign(new NodeError("Your devices haven't caught up with this one yet. Try again in a moment."), { status: 403 });
       }
       // A node may find what it needs as it goes: the Cloudflare node, its logs' keys first, then a call's.
-      if (r.status === 428 && device && needed < 3) {
+      if (r.status === 428 && device && needed < 3 && !keyless) {
         needed++;
         if (trace) trace.keys = needed;
         // What this browser did before sending it again, each thing it asked for timed.

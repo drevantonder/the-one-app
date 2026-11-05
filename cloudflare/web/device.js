@@ -122,12 +122,15 @@ export class Device {
   async checked(fresh = false) {
     if (fresh || !this.known) {
       const kept = await get(`global:${this.user}`);
-      const r = await this.api(`/v1/entries/global?have=${kept?.have || ""}`, { raw: true }).catch((err) => {
-        if (fresh || !kept) throw err;
+      // With nothing kept, it can't yet tell whether a node that asks for keys runs Everyone's (the Cloudflare node
+      // does), so it hands none: it reads the log from the bucket itself instead, and checks it as it would a node's.
+      const r = await this.api(`/v1/entries/global?have=${kept?.have || ""}`, { raw: true, keyless: !kept }).catch((err) => {
+        if (fresh && kept) throw err;
         return null;
       });
       // What an older release kept, without all its answers (each person's `keeps` came last), is replayed again.
       const given = r && r.status !== 204 ? new Uint8Array(await r.arrayBuffer()) : undefined;
+      const entries = !kept && !given ? { steps: await this.bucketSteps("log", 0) } : null;
       // Who's who's scope database's steps after those kept, its freeze among them, which this browser reads from the
       // bucket and opens itself, never as a node passes them on.
       const read = await this.bucketSteps("scope", kept?.at || 0).catch((err) => {
@@ -137,8 +140,8 @@ export class Device {
       // A browser that hasn't read to its freeze starts from where the device that let it in had (its Welcome): the
       // freeze and copy a node passes on, checked against the Welcome's hash.
       const welcome = !kept?.steps?.truth && read.length && (await get(`welcome:${this.user}`));
-      const welcomed = welcome ? await this.api(`/v1/steps/global?from=0&welcome=${welcome}`).catch(() => null) : null;
-      const steps = read.length ? { steps: read, welcome: welcomed?.welcome, freeze: welcomed?.freeze, start: welcomed?.start, keys: await this.logKeys() } : null;
+      const welcomed = welcome ? await this.api(`/v1/steps/global?from=0&welcome=${welcome}`, { keyless: !kept }).catch(() => null) : null;
+      const steps = read.length || entries ? { steps: read, entries, welcome: welcomed?.welcome, freeze: welcomed?.freeze, start: welcomed?.start, keys: await this.logKeys() } : null;
       let k = !given && !steps && kept?.members?.people?.[this.user]?.keeps ? kept.members : await this.replay(this.user, given, steps);
       // A freeze among them: judged and checked against the log's steps from the bucket, to the step after where it
       // says the log ends (its mark), or the log's end.

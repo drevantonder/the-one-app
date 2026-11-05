@@ -29,7 +29,7 @@
 // install's) and NAME (its name). `built.js`, made when it's deployed, is the shim.
 
 import { DurableObject, RpcTarget } from "cloudflare:workers";
-import { initSync, check_certificate, open, opens, refresh, query, may, write, close, statements, vault_items, vault_fill, vault_schema, screen, client_screen, config, prefix, following as after, read_log, groups, scopes_of, epochs as epochsOf, runners, forward, install, bundle, endpoint_of, signed, handoff, epoch_name, app_key_name, needs as needed, endpoint_start, endpoint_deliver, endpoint_ask, endpoint_close, pin_genesis, global_entries, global_steps } from "./one_cloudflare_node.js";
+import { initSync, check_certificate, open, opens, refresh, query, may, write, close, statements, vault_items, vault_fill, vault_schema, screen, client_screen, config, prefix, following as after, read_log, groups, scopes_of, epochs as epochsOf, runners, forward, install, bundle, endpoint_of, signed, handoff, epoch_name, app_key_name, needs as needed, endpoint_start, endpoint_deliver, endpoint_ask, endpoint_close, pin_genesis, global_entries, sealed_global_steps } from "./one_cloudflare_node.js";
 import wasm from "./one_cloudflare_node_bg.wasm";
 import { shim, compatibilityDate } from "./built.js";
 
@@ -989,7 +989,7 @@ async function route(p, request) {
     const who = p.whom(request);
     await p.readLogs(who, ["global"]);
     p.forgetLost(who);
-    if (path === "/v1/steps/global") return json(JSON.parse(await global_steps(p.owner, who.user, p.bucket, Number(url.searchParams.get("from") || 0), url.searchParams.get("welcome") ?? undefined)));
+    if (path === "/v1/steps/global") return json(JSON.parse(await sealed_global_steps(p.owner, who.user, p.bucket, Number(url.searchParams.get("from") || 0), url.searchParams.get("welcome") ?? undefined)));
     const pack = global_entries(p.owner, who.user, url.searchParams.get("have") || "");
     return pack.length ? new Response(pack, { headers: { "content-type": "application/octet-stream" } }) : new Response(null, { status: 204 });
   }

@@ -97,7 +97,7 @@ export function server(version) {
     // bucket, sealed, its log's to where a freeze says it ends, and a Welcome's freeze and copy, with the keys it opens
     // them with itself.
     const { welcome, freeze, start } = steps || {};
-    const held = { kept: kept?.steps || null, given: { steps: steps?.steps || [], log: steps?.log || null, welcome, freeze, start }, epochs: steps?.keys?.epochs || {}, apps: steps?.keys?.apps || {} };
+    const held = { kept: kept?.steps || null, given: { steps: steps?.steps || [], log: steps?.log || null, entries: steps?.entries || null, welcome, freeze, start }, epochs: steps?.keys?.epochs || {}, apps: steps?.keys?.apps || {} };
     const g = new Global(root, kept?.pack || new Uint8Array(), given || new Uint8Array(), JSON.stringify(held));
     const members = JSON.parse(g.members);
     const wants_log = g.wants_log;

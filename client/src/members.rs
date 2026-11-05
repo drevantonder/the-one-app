@@ -154,6 +154,9 @@ impl Global {
     /// read them to, and give again. With `welcome` (`steps::Welcome`), before it's read to its freeze, it starts from
     /// there (`add_welcomed`): what it's given for that is checked against the Welcome's hash, wherever it came from.
     pub fn add_sealed(&mut self, given: &Value, epochs: &BTreeMap<u32, [u8; 32]>, apps: &BTreeMap<u32, Vec<u8>>) -> Result<Option<u64>> {
+        if let Some(log) = given["entries"]["steps"].as_array() {
+            self.add_log(log, epochs, apps)?;
+        }
         let welcome = given["welcome"].as_str().and_then(steps::Welcome::parse).filter(|_| self.truth.is_none());
         let mut keys = one::db::Keys::new();
         let key = |keys: &mut one::db::Keys, who: &ScopeDb, e: u32| {
@@ -239,6 +242,26 @@ impl Global {
             ensure!(!matches!(steps::open(&keys, u32::MAX, &Scope::Global, next + 1, &sealed), steps::Opened::Step(_)), "global's step {next} isn't in the bucket, though later ones were written: this device reads no further until it's back");
         }
         Ok(None)
+    }
+
+    /// `global`'s entries as its log's steps, read from the bucket itself (`[{ at, sealed }]`, base64url, from the
+    /// first): for a device with none kept, whose first node can't give them until it's handed keys this device can't
+    /// yet tell it may have (the Cloudflare node). Opened with every key of `global`'s sealed to it (`epochs`, `apps`),
+    /// each then checked against the epoch hashes the entries say, or none is taken.
+    fn add_log(&mut self, sealed: &[Value], epochs: &BTreeMap<u32, [u8; 32]>, apps: &BTreeMap<u32, Vec<u8>>) -> Result<()> {
+        let keys = welcome_keys(epochs, apps);
+        let sealed: BTreeMap<u64, Vec<u8>> = sealed.iter().filter_map(|s| Some((s["at"].as_u64()?, data_encoding::BASE64URL_NOPAD.decode(s["sealed"].as_str()?.as_bytes()).ok()?))).collect();
+        let mut read = steps::Log::new(self.root);
+        while let Some(bytes) = sealed.get(&(read.last() + 1)) {
+            read.take(&keys, bytes)?;
+        }
+        let mut with = Global::new(self.root);
+        with.add_entries(self.entries.values().cloned().chain(read.entries(read.last()).iter().cloned()).collect())?;
+        let who = with.who()?;
+        for (e, epoch) in epochs.iter().filter(|(e, _)| keys.contains_key(e)) {
+            ensure!(who.epoch_hash(&Scope::Global, *e) == Some(one::keys::epoch_hash(epoch)), "a key for this didn't check out, so it wasn't used");
+        }
+        self.add_entries(read.entries(read.last()).to_vec())
     }
 
     /// Starts from `truth`, worked out from where the device that let this one in read who's who to
@@ -610,6 +633,44 @@ mod tests {
         assert_eq!(g.wants_log(&[Some(freeze.clone())]).unwrap(), None);
         g.take(1, Some(&freeze)).unwrap();
         assert!(g.frozen(), "R2's freeze counts");
+    }
+
+    /// A device with nothing kept reads `global`'s entries from its log's steps in the bucket itself, opened with the
+    /// keys sealed to it, and takes none if a key isn't the one the entries made: a node that seals it another can't
+    /// have it read a log of its own.
+    #[test]
+    fn a_new_device_reads_the_log_from_the_bucket_only_with_keys_the_entries_made() {
+        let key = |n: u8| SigningKey::from_bytes(&[n; 32]);
+        let (mac, laptop) = (key(1), key(2));
+        let (epoch, app): ([u8; 32], [u8; 32]) = ([4; 32], [5; 32]);
+        let mut i = Install::default();
+        i.write(&mac, ANDRE, members::genesis("Home", ANDRE, "Andre", &Endpoint::of(&mac), "mac", &[Kind::Client], &[9; 32], &one::keys::epoch_hash(&epoch)));
+        i.write(&mac, ANDRE, members::device(&Endpoint::of(&laptop), BOB, "laptop", &[Kind::Client], Some(("Bob", Role::Member))));
+        let root = i.entries[0].hash();
+        let keys: one::db::Keys = [(1, one::cloudflare::database_key(&app, one::log::NAME))].into();
+        let log: Vec<Value> = i.entries.iter().enumerate().map(|(n, e)| {
+            let name = one::db::step_name(&one::log::prefix("global"), n as u64 + 1);
+            json!({ "at": n + 1, "sealed": data_encoding::BASE64URL_NOPAD.encode(&one::log::seal(&keys, &name, &pack(&[e])).unwrap()) })
+        }).collect();
+        let given = json!({ "entries": { "steps": log } });
+        let apps = BTreeMap::from([(1, one::cloudflare::seal_app_key(&epoch, one::members::APP, &app))]);
+        let mut g = Global::new(Some(root));
+        g.add_sealed(&given, &BTreeMap::from([(1, epoch)]), &apps).unwrap();
+        assert!(g.members().unwrap().user(BOB).is_some(), "who's who from the bucket");
+        // Another epoch key, and the node's key sealed under it, opening a log of the node's own.
+        let (other, mal) = ([6; 32], key(3));
+        let mut theirs = Install::default();
+        theirs.write(&mal, ANDRE, members::genesis("Home", ANDRE, "Andre", &Endpoint::of(&mal), "mac", &[Kind::Client], &[9; 32], &one::keys::epoch_hash(&other)));
+        let keys: one::db::Keys = [(1, one::cloudflare::database_key(&app, one::log::NAME))].into();
+        let name = one::db::step_name(&one::log::prefix("global"), 1);
+        let forged = json!({ "entries": { "steps": [{ "at": 1, "sealed": data_encoding::BASE64URL_NOPAD.encode(&one::log::seal(&keys, &name, &pack(&[&theirs.entries[0]])).unwrap()) }] } });
+        let apps = BTreeMap::from([(1, one::cloudflare::seal_app_key(&other, one::members::APP, &app))]);
+        let mut g = Global::new(Some(root));
+        assert!(g.add_sealed(&forged, &BTreeMap::from([(1, other)]), &apps).is_err(), "not a log of another install's");
+        // The log's own steps, opened, but with an epoch key that isn't the one the genesis made.
+        let mut g = Global::new(Some(root));
+        assert!(g.add_sealed(&given, &BTreeMap::from([(1, other)]), &apps).is_err(), "nor with a key the entries didn't make");
+        assert!(g.members().is_err(), "and none is taken");
     }
 
     /// A browser renews only the keeps its own replay holds: a grant a node lists, or signs for someone else's scope,
