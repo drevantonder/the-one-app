@@ -541,12 +541,12 @@ fn deploy_cloudflare(linux: &[Value], commit: &str) -> bool {
     let home = format!("${{{}_HOME:-${{XDG_DATA_HOME:-$HOME/.local/share}}/{CLI}}}", CLI.to_uppercase());
     // The node's own build deploys it (what's called the CLI there may be something else), once it's the one sent
     // out: 75 says it isn't yet. It's the node that wrote its home's pid: Shell's program, which runs this on another
-    // device, has its own folder in services/ as its home, so its home is two up. As a login there would: its profile
+    // device, has its own folder in services/ as its home, so its home is two up, and its address (`_ADDR`) is the services' registry's, not the node's. As a login there would: its profile
     // is where 1Password's sign-in, which the Cloudflare secrets are read with, usually is, and ~/.local/bin where op may be.
     let deploy = format!(
         r#"h="{home}"; [ -f "$h/pid" ] || h=$(cd "$h/../.." && pwd); [ -f "$h/cloudflare/settings.json" ] || {{ echo none; exit 0; }}; node=/proc/$(cat "$h/pid")/exe
 case "$("$node" version --json)" in *'"commit":"{commit}"'*) ;; *) echo "still on $("$node" version --json)"; exit 75 ;; esac
-. "$HOME/.profile" >/dev/null 2>&1; {var}_HOME="$h" PATH="$HOME/.local/bin:$PATH" "$node" cloudflare deploy"#,
+. "$HOME/.profile" >/dev/null 2>&1; unset {var}_ADDR; {var}_HOME="$h" PATH="$HOME/.local/bin:$PATH" "$node" cloudflare deploy"#,
         var = CLI.to_uppercase()
     );
     let (here, others): (Vec<&Value>, Vec<&Value>) = linux.iter().filter(|d| d["online"] == true).partition(|d| d["here"] == true);
