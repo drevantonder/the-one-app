@@ -419,7 +419,8 @@ class Person {
   async needs(wants, who) {
     const epochs = this.logsRead.has("global") ? this.epochs([...new Set(wants.map((w) => w.scope))]) : {};
     const need = JSON.parse(await needed(this.bucket, JSON.stringify(wants), JSON.stringify(epochs)));
-    for (const w of wants) if (w.missing && !need.some((n) => n.scope === w.scope && n.app === w.app && n.database === w.database && n.epoch === w.missing)) need.push({ scope: w.scope, epoch: w.missing, app: w.app, database: w.database });
+    // The epoch it stopped at, and those it was handed and read with, which a client hands in place of what it did.
+    for (const w of wants) for (const epoch of [w.missing, ...(w.missing ? w.have || [] : [])]) if (epoch && !need.some((n) => n.scope === w.scope && n.app === w.app && n.database === w.database && n.epoch === epoch)) need.push({ scope: w.scope, epoch, app: w.app, database: w.database });
     this.lacking(need, who);
   }
 

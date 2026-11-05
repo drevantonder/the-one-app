@@ -604,10 +604,13 @@ async fn read_steps(id: &(String, String), bucket: &Js) -> Result<()> {
                 }
             });
         }
-        // One under an epoch above every one made, as the steps before it leave it, is junk: passed over.
+        // One under an epoch made whose key it wasn't handed: asked for (428), as the log's are. One under an epoch
+        // above every one made, as the steps before it leave it, is junk: passed over.
         let made = LOGS.with(|l| l.borrow().get(&global).map(|g| Log::made(g, &scope)).transpose());
-        if !matches!(made, Ok(Some(made)) if read.junk_at_end(made)) {
-            return Ok(());
+        match (read.waits, made) {
+            (Some(epoch), Ok(Some(made))) if epoch <= made => return Err(one::db::Missing { epoch }.into()),
+            (Some(_), Ok(Some(made))) if read.junk_at_end(made) => {}
+            _ => return Ok(()),
         }
         let passed = LOGS.with(|l| {
             let mut logs = l.borrow_mut();
