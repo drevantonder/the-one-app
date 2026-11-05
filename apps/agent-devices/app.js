@@ -58,21 +58,33 @@ const named = { type: "string", description: "a browser profile's name, like Per
 
 // The page: every agent device as a picture, those in use first, each with its name and one short line.
 const PAGE = `
+<meta name="kit" content="ui">
 <style>
-  body { max-width: 1120px; }
-  .tile { display: block; color: inherit; text-decoration: none; min-width: 0; }
+  .tile { display: block; width: 100%; min-width: 0; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; }
   .tile.opens { cursor: pointer; }
+  .tile:focus-visible { outline: none; }
+  .tile:focus-visible .pic { outline: 3px solid color-mix(in oklab, var(--ring) 50%, transparent); }
+  .pic { position: relative; aspect-ratio: 16 / 10; border-radius: calc(var(--radius) + 4px); overflow: hidden; display: grid; place-items: center; background: var(--muted); color: var(--muted-foreground); box-shadow: inset 0 0 0 1px var(--border); }
+  .pic img { width: 100%; height: 100%; object-fit: cover; display: block; }
   /* A phone's whole screen, upright in the tile, like a phone. */
-  .shot-pic { position: relative; }
-  .shot-pic img.phone { position: absolute; top: 8px; left: 50%; transform: translateX(-50%); width: auto; height: calc(100% - 16px); border-radius: 12px; }
-  .tile.paused .shot-pic img { filter: grayscale(0.9) brightness(0.5); }
+  .pic img.phone { position: absolute; top: 8px; left: 50%; transform: translateX(-50%); width: auto; height: calc(100% - 16px); border-radius: 12px; }
+  .tile.paused .pic img { filter: grayscale(0.9) brightness(0.5); }
+  .name, .line { font-size: 0.875rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .name { margin-top: 0.5rem; font-weight: 500; }
+  .line { min-height: 1.25rem; color: var(--muted-foreground); }
 </style>
-<div class="shots" id="grid"><div class="empty" style="grid-column:1/-1">Loading…</div></div>
-<script>
+<div id="root"></div>
+<script type="module">
+  import { createElement as h } from "react";
+  import { createRoot } from "react-dom/client";
+  import { Empty, Grid, Problem } from "@one/ui";
+
   one.title("Agent Devices");
-  const grid = document.getElementById("grid");
+  const root = createRoot(document.getElementById("root"));
   const pics = {}; // by the device it's on/name: a data URL
-  let devices = [];
+  let devices = null; // null until first listed
+  let problem = null; // what the last list failed with
+  let none = false; // none of their devices runs it
 
   const key = (c) => \`\${c.on || ""}/\${c.name}\`;
   const at = (c) => (c.on ? { device: c.name, on: c.on } : { device: c.name });
@@ -91,47 +103,50 @@ const PAGE = `
     : '<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="4" y="5" width="16" height="11" rx="1.5"/><path d="M2 19h20"/></svg>';
 
   // Its name says what it's doing, else what it's called; its line, who's using it, or that it's paused, and where,
-  // when they're on more than one of the person's devices.
-  function tile(c, hosts) {
+  // when they're on more than one of the person's devices. A device with a screen opens to watch and use, here in the
+  // app: a phone or Windows even when off, as it starts for whoever opens it.
+  function Tile({ c, hosts }) {
     const b = c.borrowed;
     const name = b?.signing_in ? "Signing in to sites" : b ? b.for || "In use" : named(c);
     const line = [b ? (b.signing_in ? b.profile || "" : b.by || "An agent") : paused(c) ? off(c) : "", hosts > 1 ? host(c.on) : ""].filter(Boolean).join(" · ");
     const k = key(c);
-    const pic = pics[k] ? \`<img src="\${pics[k]}" alt=""\${phone(c) ? ' class="phone"' : ""}>\` : glyph(screenless(c), c);
-    // A phone or Windows opens even when off: it starts for whoever opens it.
     const opens = !screenless(c) && (!paused(c) || c.kind !== "linux");
-    return \`<div class="tile\${paused(c) ? " paused" : ""}\${opens ? " opens" : ""}" data-k="\${one.esc(k)}"><div class="shot-pic">\${pic}</div><div class="shot-name">\${one.esc(name)}</div><div class="shot-sub">\${one.esc(line)}</div></div>\`;
+    const pic = pics[k]
+      ? h("img", { src: pics[k], alt: "", className: phone(c) ? "phone" : undefined })
+      : h("span", { dangerouslySetInnerHTML: { __html: glyph(screenless(c), c) } });
+    return h(opens ? "button" : "div", {
+      className: \`tile\${paused(c) ? " paused" : ""}\${opens ? " opens" : ""}\`,
+      "data-k": k,
+      onClick: opens ? () => one.open("device", at(c)) : undefined,
+    }, h("div", { className: "pic" }, pic), h("div", { className: "name" }, name), h("div", { className: "line" }, line));
   }
 
-  function draw() {
-    if (none) return;
-    if (!devices.length) {
-      grid.innerHTML = \`<div class="empty" style="grid-column:1/-1">None yet. Agents make one when they need a browser.</div>\`;
-      return;
-    }
+  function Page() {
+    if (none) return h(Problem, { warn: true, title: "None of your devices runs Agent Devices.", text: "It needs a Mac, or a Linux device with Podman.",
+      action: { label: "Open App Store", run: () => one.open("app", { app: "agent-devices" }, "apps") } });
+    // Tried again every few seconds, so no button.
+    if (problem) return h(Problem, { title: problem.title, text: problem.next });
+    if (!devices) return h(Empty, null, "Loading…");
+    if (!devices.length) return h(Empty, null, "None yet. Agents make one when they need a browser.");
     const hosts = new Set(devices.map((c) => c.on)).size;
     const order = (c) => (c.borrowed ? 0 : paused(c) ? 2 : 1);
     const shown = [...devices].sort((a, b) => order(a) - order(b) || (Date.parse(a.borrowed?.since) || 0) - (Date.parse(b.borrowed?.since) || 0) || a.name.localeCompare(b.name));
-    grid.innerHTML = shown.map((c) => tile(c, hosts)).join("");
+    return h(Grid, { min: "16rem", max: 4 }, shown.map((c) => h(Tile, { key: key(c), c, hosts })));
   }
-
-  // A device with a screen opens to watch and use, here in the app.
-  grid.addEventListener("click", (e) => {
-    const c = devices.find((c) => key(c) === e.target.closest(".tile.opens")?.dataset.k);
-    if (c) one.open("device", at(c));
-  });
+  const draw = () => root.render(h(Page));
+  draw();
 
   // A picture of each running device with a screen that's in view, each drawn as it comes, and asked for again every
   // 20s: the service keeps the last one and takes the next in the background, and sends it only when it changed.
   const hashes = {}, asked = {}, retried = {};
   const seen = (k) => {
-    const el = [...grid.children].find((t) => t.dataset.k === k);
+    const el = [...document.querySelectorAll("[data-k]")].find((t) => t.dataset.k === k);
     if (!el) return false;
     const r = el.getBoundingClientRect();
     return r.bottom > 0 && r.top < innerHeight;
   };
   function pictures() {
-    for (const c of devices) {
+    for (const c of devices || []) {
       const k = key(c);
       if (paused(c) || screenless(c) || Date.now() - (asked[k] || 0) < 20000 || !seen(k)) continue;
       asked[k] = Date.now();
@@ -148,7 +163,6 @@ const PAGE = `
     }
   }
 
-  let none = false; // none of their devices runs it
   let listed = ""; // the list's hash: it's sent only when it changed
   async function refresh() {
     try {
@@ -156,15 +170,17 @@ const PAGE = `
       if (!r.same) {
         devices = (r.devices || []).filter((c) => !c.spare || c.borrowed);
         listed = r.hash || "";
-        draw();
       }
+      problem = null;
+      draw();
     } catch (e) {
       listed = "";
-      // Tried again every few seconds, so no button; with none of their devices running it, that says so instead.
-      if (!none) grid.innerHTML = \`<div style="grid-column:1/-1">\${one.problem({ title: one.plain(e).title, text: one.plain(e).next })}</div>\`;
+      problem = one.plain(e);
+      draw();
       return;
     }
-    pictures();
+    // Once drawn, so it's known which tiles are in view.
+    requestAnimationFrame(pictures);
   }
 
   let busy = false;
@@ -178,8 +194,7 @@ const PAGE = `
   document.addEventListener("visibilitychange", tick);
   addEventListener("scroll", pictures, { passive: true });
   one.call("_running").then(({ devices }) => {
-    if (!devices.length && (none = true)) grid.innerHTML = \`<div style="grid-column:1/-1">\${one.problem({ title: "None of your devices runs Agent Devices.", text: "It needs a Mac, or a Linux device with Podman.", warn: true,
-      action: { label: "Open App Store", run: () => one.open("app", { app: "agent-devices" }, "apps") } })}</div>\`;
+    if (!devices.length) (none = true), draw();
   });
 </script>`;
 
