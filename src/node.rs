@@ -1398,6 +1398,13 @@ pub fn device_key(dir: &Path) -> Result<ed25519_dalek::SigningKey> {
     Ok(ed25519_dalek::SigningKey::from_bytes(&unhex(&file.secret)?))
 }
 
+/// The key (hex) and name of the device whose home is `dir`, as it last was.
+pub fn device_here(dir: &Path) -> Result<(String, String)> {
+    let file = load_device(dir)?;
+    let key = ed25519_dalek::SigningKey::from_bytes(&unhex(&file.secret)?);
+    Ok((hex(&key.verifying_key().to_bytes()), file.name))
+}
+
 fn load_device(dir: &Path) -> Result<DeviceFile> {
     let path = dir.join("device.json");
     if let Ok(bytes) = std::fs::read(&path) {

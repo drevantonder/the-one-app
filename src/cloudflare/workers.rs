@@ -119,6 +119,11 @@ pub struct Settings {
     /// only on this machine; `deploy` refuses settings with it, so no Workers people use ever have it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub throwaway_person: Option<(String, String)>,
+    /// The device the Workers are deployed from, `(key in hex, name as it was)`: the first to deploy them, where their
+    /// secrets are. Another device's deploy would upload over its, and make the secrets they make for themselves
+    /// again (`at_home`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub home: Option<(String, String)>,
 }
 
 /// Whether people sign in with Google.
@@ -266,6 +271,18 @@ fn quoted(value: &str) -> String {
     format!("'{value}'")
 }
 
+/// This device isn't where the Workers are deployed from (`Settings::at_home`).
+#[derive(Debug)]
+pub struct NotHome(pub String);
+
+impl std::fmt::Display for NotHome {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for NotHome {}
+
 impl Settings {
     pub fn path() -> PathBuf {
         crate::home().join("cloudflare").join("settings.json")
@@ -305,6 +322,22 @@ impl Settings {
         Ok(settings)
     }
 
+    /// Makes this device the Workers' home if they have none yet, and refuses on any other: they're deployed from one
+    /// device only, the one with their secrets.
+    pub fn at_home(&mut self) -> Result<()> {
+        let (key, name) = crate::node::device_here(&crate::home())?;
+        match &self.home {
+            Some((home, _)) if *home != key => {
+                let name = &self.home.as_ref().unwrap().1;
+                return Err(NotHome(format!("this install's Cloudflare Workers are deployed from {name}, where their secrets are: run this there")).into());
+            }
+            Some((_, was)) if *was == name => return Ok(()),
+            _ => {}
+        }
+        self.home = Some((key, name));
+        self.save()
+    }
+
     /// Refuses unless this machine has no Workers' settings or secrets, even ones that don't load, for new ones to be
     /// made: new settings would keep earlier Workers' secrets, or replace settings that only failed to load.
     pub fn none_here() -> Result<()> {
@@ -333,6 +366,7 @@ impl Settings {
             push: [("VAPID_KEY".to_string(), vapid_key())].into(),
             genesis: None,
             throwaway_person: None,
+            home: None,
         }
     }
 

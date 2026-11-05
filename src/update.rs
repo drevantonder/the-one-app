@@ -18,7 +18,7 @@ const PLATFORMS: [&str; 3] = ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux
 /// Builds the tip of main and has every device run it; with a tag, also publishes it on GitHub.
 /// An update sends out only what changed since the last one here: apps by their deploy, the Mac app by each Mac building
 /// it at once, then the iPhone app for the iPhone it reaches, and the node by building it, which every Linux device then
-/// takes, and which deploys the Workers on Cloudflare (and the Cloudflare node with it) from the device with their settings. Beside it runs `after-update` in this
+/// takes, and which deploys the Workers on Cloudflare (and the Cloudflare node with it) from the device they're deployed from (the first to deploy them: no other does). Beside it runs `after-update` in this
 /// device's home, if there is one: what else is built from main here, like another custom build's update.
 pub fn run(tag: Option<&str>) -> Result<()> {
     ensure!(!REPO.is_empty(), "this custom build names no repo, so it has nothing to update from");
@@ -532,8 +532,9 @@ fn turn() -> Result<std::fs::File> {
     Ok(file)
 }
 
-/// Deploys to Cloudflare, with the build being sent out (`commit`), from each of `linux` that has the Cloudflare settings: only
-/// there are its secrets (`cloudflare deploy` in its home's cloudflare/). It waits for each to run that build, so it never
+/// Deploys to Cloudflare, with the build being sent out (`commit`), from the one of `linux` that is the Workers' home
+/// (`Settings::at_home`; another refuses, which says so and is passed over): only there are its secrets
+/// (`cloudflare deploy` in its home's cloudflare/). It waits for each to run that build, so it never
 /// deploys the one before, and tries again what may pass (a link dropping as nodes restart, Cloudflare). Every install
 /// has its Workers on Cloudflare, so it fails if no device deployed them. True if it failed.
 fn deploy_cloudflare(linux: &[Value], commit: &str) -> bool {
@@ -564,6 +565,8 @@ case "$("$node" version --json)" in *'"commit":"{commit}"'*) ;; *) echo "still o
             let again = match &said {
                 Err(_) => true,
                 Ok(r) if r["exit"] == 75 => true,
+                // Refused: another device is where the Workers are deployed from.
+                Ok(r) if r["exit"] == 3 => false,
                 Ok(r) if r["exit"] != 0 => {
                     failures += 1;
                     failures < 3
@@ -577,6 +580,7 @@ case "$("$node" version --json)" in *'"commit":"{commit}"'*) ;; *) echo "still o
         };
         match said {
             Ok(r) if r["exit"] == 0 && r["stdout"].as_str().is_some_and(|o| o.trim() == "none") => {}
+            Ok(r) if r["exit"] == 3 => println!("  {name}: {}", r["stderr"].as_str().unwrap_or("").trim()),
             Ok(r) if r["exit"] == 0 => {
                 deployed = true;
                 println!("  {name}: deployed to Cloudflare at {commit}");

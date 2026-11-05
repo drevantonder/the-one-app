@@ -517,6 +517,8 @@ fn run(args: Vec<String>) -> Result<()> {
                     }
                 }
             };
+            let mut settings = settings;
+            at_home(&mut settings)?;
             let settings = devices_here(settings, !flags.contains_key("new"))?;
             let modules = one::cloudflare::WORKERS.iter().map(|(_, entry, _)| one::cloudflare::module(entry)).collect::<Result<Vec<_>>>()?;
             let mut web = settings.web();
@@ -540,7 +542,9 @@ fn run(args: Vec<String>) -> Result<()> {
             print!("Deployed.\n{}", cloudflare_said(&settings));
         }
         ["cloudflare", "node", "deploy"] => {
-            let mut settings = devices_here(one::cloudflare::Settings::load()?, true)?;
+            let mut settings = one::cloudflare::Settings::load()?;
+            at_home(&mut settings)?;
+            let mut settings = devices_here(settings, true)?;
             let cf = cloudflare(&flags, Some(&settings))?;
             // Its endpoint's key, made once and kept with the Workers' secrets.
             if settings.cloudflare_node_endpoint().is_none() {
@@ -1987,6 +1991,14 @@ fn vault_remove(scope: &str, item: &str, field: Option<&str>) -> Result<String> 
 
 /// Cloudflare's API with the token in CLOUDFLARE_API_TOKEN, or else the Workers' own (their .env.local's), for the account
 /// `--account` names or the token's only one.
+/// Makes this device the Workers' home, or refuses (exit 3, which `one update` passes over) where it isn't.
+fn at_home(settings: &mut one::cloudflare::Settings) -> Result<()> {
+    settings.at_home().map_err(|err| match err.downcast::<one::cloudflare::NotHome>() {
+        Ok(not) => ops::Failed::Refused(not.0).into(),
+        Err(err) => err,
+    })
+}
+
 fn cloudflare(flags: &Map<String, Value>, settings: Option<&one::cloudflare::Settings>) -> Result<one::cloudflare::Cloudflare> {
     let token = std::env::var("CLOUDFLARE_API_TOKEN").ok().or_else(|| settings.and_then(|s| s.cloudflare_token.clone()));
     let token = token.context("give a Cloudflare API token that may edit Workers in CLOUDFLARE_API_TOKEN, or as the Workers' CLOUDFLARE_API_TOKEN in their .env.local")?;
