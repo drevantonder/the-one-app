@@ -1,6 +1,5 @@
-//! AI Usage: the AI plans signed in on this machine, read from the providers themselves. A hosted service
-//! (`services::Hosted`) named as the app is, so a machine's row reads "AI Usage on <it>": the app asks every machine's
-//! service and merges by account. Its accounts are the provider sign-ins kept here: Claude Code's own and every
+//! AI Usage's service: the AI plans signed in on its machine, read from the providers themselves. Its machine's row
+//! reads "AI Usage on <it>": the app asks every machine's service and merges by account. Its accounts are the provider sign-ins kept here: Claude Code's own and every
 //! account claude-swap keeps, Codex's and OpenCode Go's. It asks each provider for that account's numbers and gives
 //! back only those (used %, reset times, per-model windows, plan): a token never leaves it, not to the app, not in a
 //! log or an error. Read only, never a refresh (which would sign the tool it belongs to out): a sign-in whose access
@@ -12,14 +11,17 @@ use std::time::Duration;
 use anyhow::{Result, anyhow, bail};
 use serde_json::{Value, json};
 
-use crate::services::{Call, Host};
+use one_service::{Call, Host, Service};
 
-pub const NAME: &str = "ai-usage";
 
 /// How long a provider may take to answer.
 const ASK: Duration = Duration::from_secs(15);
 
-pub fn describe() -> Value {
+fn main() -> Result<()> {
+    one_service::serve(Service { name: "ai-usage", describe, call: |h, c| call(h, c).map(Into::into), start: None })
+}
+
+fn describe() -> Value {
     json!({
         "title": "AI Usage", "description": "This machine's AI plan limits, from the providers themselves", "icon": "gauge",
         "instructions": "AI Usage reads every AI plan signed in on its machine straight from the provider: ai-usage_usage gives each account's windows (used % and resets) and ai-usage_accounts just the sign-ins, no network. A token never leaves the service. It never renews one: a sign-in that's run out renews when its tool is next used.",
@@ -76,7 +78,7 @@ fn now_ms() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
 }
 
-pub fn call(_host: &Host, call: &Call) -> Result<Value> {
+fn call(_host: &Host, call: &Call) -> Result<Value> {
     match call.op.as_str() {
         "accounts" => Ok(json!({ "accounts": discover().iter().map(|a| json!({
             "provider": a.provider, "account": if a.org.is_empty() { a.email.clone() } else { format!("{} · {}", a.org, a.email) },

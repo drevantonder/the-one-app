@@ -300,6 +300,7 @@ export default {
   instructions: `Every AI plan's limits in the providers' own words: what's left, the pace against what's expected, and whether it lasts to reset. ai-usage_status is the full read (fresh when older than 5 minutes), merged from the AI Usage service on every machine that has one. Agents get the last readings with their first prompt, then a warning when a window is nearly out or outruns its reset.`,
 
   uses: { services: ["ai-usage"] },
+  service: { network: ["api.anthropic.com", "api.openai.com", "chatgpt.com", "opencode.ai"], person: true, platforms: ["linux", "mac"] },
 
   // Fresh readings for agents' prompts, from the device that keeps AI Usage running (one devices keep ai-usage on <it>).
   schedules: { refresh: { op: "status", every: "5m", description: "Reads every plan, so agents' prompts get fresh numbers" } },

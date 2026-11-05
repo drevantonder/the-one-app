@@ -2816,6 +2816,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "one-ai-usage"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "data-encoding",
+ "jiff",
+ "one-service",
+ "rusqlite",
+ "serde_json",
+ "ureq",
+]
+
+[[package]]
 name = "one-cli"
 version = "0.1.0"
 dependencies = [
