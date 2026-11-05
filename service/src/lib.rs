@@ -176,7 +176,8 @@ pub fn dir(name: &str) -> PathBuf {
     std::env::var_os(format!("{}_DATA", name.to_uppercase().replace('-', "_"))).map(PathBuf::from).unwrap_or_default()
 }
 
-/// Answers `service`'s calls, as oned's environment says, until oned stops this program.
+/// Answers `service`'s calls, as oned's environment says, until oned stops this program. Call it before starting a
+/// thread.
 pub fn serve(service: Service) -> Result<()> {
     let name = service.name;
     let at = std::env::var("ONE_ADDR").map_err(|_| anyhow!("{name} is a service: its device's oned starts it"))?;
@@ -184,6 +185,11 @@ pub fn serve(service: Service) -> Result<()> {
     let dir = dir(name);
     ensure!(!dir.as_os_str().is_empty(), "{name}'s oned says where its data goes");
     std::fs::create_dir_all(&dir)?;
+    // Not passed on to what it starts (Shell's commands): `one` there would take the service's folder as its home.
+    for var in ["ONE_ADDR", "ONE_HOME", "ONE_CLI"] {
+        // SAFETY: before this program starts a thread of its own; nothing reads the environment meanwhile.
+        unsafe { std::env::remove_var(var) };
+    }
     // Read for each request, as Go's service does, so a node that starts after it still lets it in.
     let token = home.join("local-token");
     let as_this_program = move |mut req: ureq::http::Request<ureq::SendBody>, next: ureq::middleware::MiddlewareNext| {
