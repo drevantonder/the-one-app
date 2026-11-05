@@ -243,6 +243,12 @@ async fn start() {
         s.ready_ms = ms;
     });
     tauri::async_runtime::spawn(events());
+    if std::env::var("ONE_PROBE").is_ok() {
+        // The device's seal key (public), for sealing a test push to it.
+        log(format!("seal key: {}", &one_client::join_of(secret)[64..]));
+        #[cfg(mobile)]
+        tauri::async_runtime::spawn(mobile_probes());
+    }
     if let Ok(app) = std::env::var("ONE_OPEN") {
         let r = open_screen(Route { app, screen: "main".into(), params: "{}".into(), ..Default::default() }, None).await;
         if let Err(e) = r {
@@ -401,6 +407,15 @@ impl Natives {
 }
 
 impl bridge::Natives for Natives {
+    #[cfg(mobile)]
+    async fn menu(&self, items: Vec<MenuItem>, _x: f64, _y: f64) -> Option<usize> {
+        let items: Vec<Value> = items.iter().map(|i| json!({ "title": i.title, "danger": i.danger })).collect();
+        let app = shell().app.clone();
+        let r = tauri::async_runtime::spawn_blocking(move || app.state::<tauri_plugin_one_natives::Natives<tauri::Wry>>().run("menu", json!({ "items": items }))).await.ok()?;
+        r.ok()?["index"].as_i64().filter(|i| *i >= 0).map(|i| i as usize)
+    }
+
+    #[cfg(desktop)]
     async fn menu(&self, items: Vec<MenuItem>, x: f64, y: f64) -> Option<usize> {
         let w = self.window()?;
         let app = &shell().app;
@@ -445,9 +460,11 @@ impl bridge::Natives for Natives {
         let parent = self.window();
         tauri::async_runtime::spawn_blocking(move || {
             let mut d = app.dialog().message(text).title(title);
+            #[cfg(desktop)]
             if let Some(p) = &parent {
                 d = d.parent(p);
             }
+            let _ = &parent;
             if action.is_empty() {
                 d.buttons(MessageDialogButtons::Ok).blocking_show();
                 return false;
@@ -584,21 +601,24 @@ fn control(port: u16) {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let started = Instant::now();
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![state, open, sign_out])
         .register_asynchronous_uri_scheme_protocol("screen", |ctx, req, respond| serve_screen(ctx.webview_label(), req, respond))
-        .on_menu_event(|_, e| {
+        .plugin(tauri_plugin_one_natives::init());
+    #[cfg(desktop)]
+    let builder = builder.on_menu_event(|_, e| {
             let id = e.id().0.as_str();
             if let Some((menu, i)) = id.rsplit_once('-')
                 && let Some(tx) = shell().menus.lock().unwrap().remove(menu)
             {
                 let _ = tx.send(i.parse().unwrap_or(0));
             }
-        })
+        });
+    builder
         .setup(move |app| {
             let address = std::env::var("ONE_ADDRESS").unwrap_or_else(|_| option_env!("ONE_ADDRESS").unwrap_or_default().to_string());
             let data = app.path().app_data_dir()?.join("one");
@@ -665,4 +685,27 @@ fn tray(app: &tauri::App) -> tauri::Result<()> {
         .build(app)?;
     log("tray item made");
     Ok(())
+}
+
+/// On an iPhone: the plugin's passkey, push registration (then registering the token with the push Worker) and the App
+/// Group, each logged.
+#[cfg(mobile)]
+async fn mobile_probes() {
+    let run = |method: &'static str, payload: Value| {
+        let app = shell().app.clone();
+        tauri::async_runtime::spawn_blocking(move || app.state::<tauri_plugin_one_natives::Natives<tauri::Wry>>().run(method, payload))
+    };
+    let group = std::env::var("ONE_GROUP").unwrap_or_else(|_| "group.app.one.tauri".into());
+    log(format!("group: {:?}", run("group", json!({ "group": group, "write": "written by the Tauri app" })).await));
+    let rp = std::env::var("ONE_PASSKEY_RP").unwrap_or_else(|_| "one.thevantonders.com".into());
+    log(format!("passkey: {:?}", run("passkey", json!({ "rpId": rp })).await));
+    let push = run("push", json!({})).await;
+    log(format!("push: {push:?}"));
+    if let Ok(Ok(p)) = push
+        && let Some(token) = p["token"].as_str()
+        && let Ok(d) = shell().device()
+    {
+        let address = one_client::push::Address { via: "apns".into(), address: token.into(), env: "sandbox".into(), topic: "app.one.tauri".into(), keys: None };
+        log(format!("register_push: {:?}", d.register_push(&address).await.map_err(|e| e.to_string())));
+    }
 }

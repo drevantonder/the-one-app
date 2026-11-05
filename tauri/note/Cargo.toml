@@ -1,0 +1,18 @@
+# The notification extension's Rust: opening a pushed note with the device key, as a static library with one C function,
+# since the extension isn't a Tauri app. And `seal`, which seals a note to a device for `simctl push`, for the spike.
+[package]
+name = "one-tauri-note"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+one-client = { path = "../../client" }
+one = { path = "../..", default-features = false, features = ["db", "sign-in-proof"] }
+serde_json = "1"
+data-encoding = "2"
+ed25519-dalek = "3"
+rand = "0.8"

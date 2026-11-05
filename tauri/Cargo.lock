@@ -3971,10 +3971,23 @@ dependencies = [
  "tauri-plugin-clipboard-manager",
  "tauri-plugin-dialog",
  "tauri-plugin-notification",
+ "tauri-plugin-one-natives",
  "tauri-plugin-opener",
  "tokio",
  "ureq",
  "url",
+]
+
+[[package]]
+name = "one-tauri-note"
+version = "0.1.0"
+dependencies = [
+ "data-encoding",
+ "ed25519-dalek",
+ "one",
+ "one-client",
+ "rand 0.8.8",
+ "serde_json",
 ]
 
 [[package]]
@@ -5849,6 +5862,15 @@ dependencies = [
  "time",
  "url",
  "zbus 5.19.0",
+]
+
+[[package]]
+name = "tauri-plugin-one-natives"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "tauri",
+ "tauri-plugin",
 ]
 
 [[package]]

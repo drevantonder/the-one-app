@@ -13,6 +13,7 @@ name = "one_tauri"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [workspace]
+members = [".", "note", "plugin"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -26,6 +27,8 @@ tauri-plugin-clipboard-manager = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-opener = "2"
 one-client = { path = "../client" }
+# What only Swift can do on an iPhone (menus, passkeys, push), as a Tauri plugin of our own.
+tauri-plugin-one-natives = { path = "plugin" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # Sign-in's requests, as the client's own.

@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-menu"
+description = "Enables the menu command without any pre-configured scope."
+commands.allow = ["menu"]
+
+[[permission]]
+identifier = "deny-menu"
+description = "Denies the menu command without any pre-configured scope."
+commands.deny = ["menu"]
