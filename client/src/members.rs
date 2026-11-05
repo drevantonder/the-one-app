@@ -120,6 +120,8 @@ pub fn who(m: &Members) -> Result<ScopeDb> {
 /// - `people`: each person's `uses` and `starts` (scopes they open, and whose new epochs they start), `nodes` (those
 ///   that run their calls), `runs_until_chosen`, `approves` (whose new devices they let in), `invites` (someone new),
 ///   `removes_people`, and `removes` (the devices they may take out)
+/// - `roles` and `runs`, as an older release's tabs read them (each scope's people's roles, and the machines each
+///   person who chose runs their things on): kept for those tabs, which share this record; phase 3 removes them
 pub fn view(m: &Members) -> Result<Value> {
     let db = who(m)?;
     let scopes = db.scopes();
@@ -161,9 +163,19 @@ pub fn view(m: &Members) -> Result<Value> {
             }),
         );
     }
+    // For an older release's tabs, which read these and stop working without them. Phase 3 removes them.
+    let mut roles = Map::new();
+    for s in &scopes {
+        let of: Map<String, Value> = people.iter().filter_map(|u| Some((u.clone(), json!(db.role_in(u, s)?)))).collect();
+        if !of.is_empty() {
+            roles.insert(s.to_string(), json!(of));
+        }
+    }
+    let runs: Map<String, Value> = people.iter().filter_map(|u| Some((u.clone(), json!(db.runs(u)?.iter().map(hex).collect::<Vec<_>>())))).collect();
     Ok(json!({
         "root": db.root().map(|r| r.to_hex()), "name": db.name(), "recovery": db.recovery().as_ref().map(hex),
         "devices": devices, "openers": openers, "runs_for": runs_for, "epochs": epochs, "people": answers,
+        "roles": roles, "runs": runs,
     }))
 }
 
