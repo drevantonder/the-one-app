@@ -405,15 +405,27 @@ pub fn try_service(dir: &Path, device: Option<&str>) -> Result<()> {
         }
         false => go_build(&source, &os.to_lowercase(), arch, &format!("{commit}{dirty}"), &out)?,
     }
-    // Put in place in one step, so oned never starts half of it.
+    // Put in place in one step, so oned never starts half of it. Here, where oned looks for it (`oned::fetched`: a throwaway
+    // network's own, never the real install's); on another device, in its `~/.local/bin`.
     let program = format!("{CLI}-{name}");
     let copied = match device {
         Some(device) => quiet(Command::new("scp").arg("-q").arg(&out).arg(format!("{device}:.local/bin/{program}.new"))),
-        None => std::env::var_os("HOME").is_some_and(|home| std::fs::copy(&out, PathBuf::from(home).join(format!(".local/bin/{program}.new"))).is_ok()),
+        None => {
+            let new = one::oned::fetched(&name).with_extension("new");
+            new.parent().is_some_and(|dir| std::fs::create_dir_all(dir).is_ok()) && std::fs::copy(&out, new).is_ok()
+        }
     };
     let _ = std::fs::remove_file(&out);
     ensure!(copied, "couldn't copy it to {there}");
-    on(&format!("chmod 755 ~/.local/bin/{program}.new && mv ~/.local/bin/{program}.new ~/.local/bin/{program}"))?;
+    match device {
+        Some(_) => drop(on(&format!("chmod 755 ~/.local/bin/{program}.new && mv ~/.local/bin/{program}.new ~/.local/bin/{program}"))?),
+        None => {
+            use std::os::unix::fs::PermissionsExt;
+            let path = one::oned::fetched(&name);
+            std::fs::set_permissions(path.with_extension("new"), std::fs::Permissions::from_mode(0o755))?;
+            std::fs::rename(path.with_extension("new"), path)?;
+        }
+    }
     post("/v1/service", json!({ "name": name, "device": device, "on": true }))?;
     println!("{name}'s service {commit}{dirty} is on {there}: its oned starts it; {CLI} services says when it's running.");
     Ok(())
