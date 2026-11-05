@@ -832,11 +832,7 @@ impl Node {
                 if db.client(&node.0.id).is_none_or(|c| c.user != me) || db.epoch(&Scope::User(me.clone())) > 0 {
                     return Ok(None);
                 }
-                let on: Vec<Key> = match db.runs(&me).is_some() {
-                    true => Vec::new(),
-                    false => db.computes().into_iter().filter(|c| c.user != me && db.runs_for(&c.key, &Scope::Global)).map(|c| c.key).collect(),
-                };
-                Ok(Some((me, on)))
+                Ok(Some((me.clone(), db.runs_until_chosen(&me))))
             });
             let Ok(Some((me, on))) = todo else { return };
             if !on.is_empty()
@@ -869,18 +865,18 @@ impl Node {
         let newest = self.newest_epoch(scope).await?;
         ensure!(newest >= 1, "{scope} has no keys yet");
         let n = newest + 1;
-        let (recovery, to) = self.with(|i| Ok((i.r.db().recovery(), super::databases::clients_of(i.r.db(), scope))))?;
+        let (recovery, to) = self.with(|i| Ok((i.r.db().recovery(), i.r.db().openers(scope))))?;
         let recovery = recovery.context("the install has no recovery key to seal its keys to")?;
         let (bucket, name) = (self.bucket()?, scope.to_string());
         let key: [u8; 32] = rand::random();
         let hash = crate::keys::epoch_hash(&key);
-        self.member_content(caller, members::epoch(scope, n, &to.iter().map(|(k, _)| *k).collect::<Vec<_>>(), &hash)).await?;
+        self.member_content(caller, members::epoch(scope, n, &to.iter().map(|c| c.key).collect::<Vec<_>>(), &hash)).await?;
         ensure!(self.with(|i| Ok(i.r.db().epoch_hash(scope, n).as_deref() == Some(hash.as_str())))?, "another device started {scope}'s epoch {n} just now");
         if !crate::db::created(&bucket, &crate::keys::epoch_name(&name, n, "recovery"), &crate::kernel::seal_to(&crate::kernel::twin_public(&recovery)?, &key)?).await? {
             tracing::warn!("{scope}'s epoch {n} was sealed to the recovery key already, not with its key: the recovery key won't open it");
         }
-        for (device, seal) in &to {
-            crate::db::created(&bucket, &crate::keys::epoch_name(&name, n, &hex(device)), &crate::kernel::seal_to(seal, &key)?).await?;
+        for c in &to {
+            crate::db::created(&bucket, &crate::keys::epoch_name(&name, n, &hex(&c.key)), &crate::kernel::seal_to(&c.seal, &key)?).await?;
         }
         self.forget_epochs(scope);
         Ok(n)

@@ -205,7 +205,7 @@ impl Global {
         self.have.clone()
     }
 
-    /// Who's who, as JSON (`members::Who::view`).
+    /// Who's who, as JSON (`members::view`).
     #[wasm_bindgen(getter)]
     pub fn members(&self) -> String {
         self.members.clone()

@@ -51,7 +51,7 @@ export async function joinAsk(keys, name, invite) {
 /// The code this browser shows to be approved: its key's, as 4 and 4.
 export const codeOf = async (key, seal) => (await joinCode(hex.decode(key), hex.decode(seal))).replace(/^(.{4})/, "$1 ");
 
-// MARK: Who opens what, as the install's signed entries say (`k`, one-client's `Who::view`)
+// MARK: Who opens what, as the install's signed entries say (`k`, one-client's `members::view`)
 
 /// What a scope's epochs are sealed to: the client devices of the people who may use it, and nothing that only runs
 /// calls.

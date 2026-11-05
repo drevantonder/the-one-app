@@ -219,6 +219,33 @@ impl ScopeDb {
         self.computes().into_iter().filter(|m| self.serves(&m.key, user) && scopes.iter().all(|s| self.runs_for(&m.key, s))).collect()
     }
 
+    /// Whom a scope's epochs are sealed to, besides the recovery key: the client devices of everyone who may use it,
+    /// never a machine that only runs calls.
+    pub fn openers(&self, scope: &Scope) -> Vec<Machine> {
+        self.clients().into_iter().filter(|c| self.may(&c.user, "use", &object(scope))).collect()
+    }
+
+    /// The nodes that run calls, each with the key what's handed it is sealed to: the devices listed as compute, and
+    /// the serverless node, whose seal key is its key's twin.
+    pub fn nodes(&self) -> Vec<(Key, Key)> {
+        let mut out: Vec<(Key, Key)> = self.computes().into_iter().map(|d| (d.key, d.seal)).collect();
+        if let Some(k) = self.serverless()
+            && let Ok(seal) = crate::kernel::twin_public(&k)
+        {
+            out.push((k, seal));
+        }
+        out
+    }
+
+    /// Where `user`'s own things run besides their own machines until they choose: others' machines that run
+    /// everyone's; nowhere new once they have.
+    pub fn runs_until_chosen(&self, user: &str) -> Vec<Key> {
+        if self.runs(user).is_some() {
+            return Vec::new();
+        }
+        self.computes().into_iter().filter(|c| c.user != user && self.runs_for(&c.key, &Scope::Global)).map(|c| c.key).collect()
+    }
+
     // Who's who.
 
     /// The install's name.
@@ -627,6 +654,8 @@ pub(crate) mod tests {
             assert_eq!(db.groups_of(&u.id), m.groups_of(&u.id));
             assert_eq!(db.by_handle(&u.handle), m.by_handle(&u.handle));
             assert_eq!(db.runs(&u.id), m.runs.get(&u.id).cloned());
+            let unchosen: Vec<Key> = if m.runs.contains_key(&u.id) { Vec::new() } else { m.computes().filter(|c| c.user != u.id && m.runs_for(&c.key, &Scope::Global)).map(|c| c.key).collect() };
+            assert_eq!(db.runs_until_chosen(&u.id), unchosen);
             for s in m.scopes() {
                 assert_eq!(db.role_in(&u.id, &s), m.role_in(&u.id, &s));
                 assert_eq!(dbg(&db.runners(&u.id, std::slice::from_ref(&s))), dbg(&m.runners(&u.id, std::slice::from_ref(&s))));
@@ -651,6 +680,11 @@ pub(crate) mod tests {
         assert_eq!(dbg(&db.machines().iter().map(|d| d.key).collect::<Vec<_>>()), dbg(&m.machines.keys().collect::<Vec<_>>()));
         assert_eq!(dbg(&db.clients()), dbg(&m.clients().collect::<Vec<_>>()));
         assert_eq!(dbg(&db.computes()), dbg(&m.computes().collect::<Vec<_>>()));
+        let nodes: Vec<(Key, Key)> = m.computes().map(|c| (c.key, c.seal)).chain(m.serverless().and_then(|k| Some((k, crate::kernel::twin_public(&k).ok()?)))).collect();
+        assert_eq!(db.nodes(), nodes);
+        for s in m.scopes() {
+            assert_eq!(dbg(&db.openers(&s)), dbg(&m.clients().filter(|c| m.may_use(&c.user, &s)).collect::<Vec<_>>()));
+        }
         for name in m.machines.values().filter_map(|d| d.service.as_deref()) {
             assert_eq!(dbg(&db.offering(name)), dbg(&m.offering(name).collect::<Vec<_>>()));
         }

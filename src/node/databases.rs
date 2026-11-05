@@ -201,15 +201,15 @@ impl Node {
             }
             tracing::warn!("{scope}'s first epoch was begun but no entry made it: making it here");
         }
-        let to = self.with(|i| Ok(clients_of(i.r.db(), scope)))?;
+        let to = self.with(|i| Ok(i.r.db().openers(scope)))?;
         let hash = crate::keys::epoch_hash(&key);
-        self.append(&Scope::Global, members::node("epoch", json!({ "scope": name, "n": 1, "to": to.iter().map(|(k, _)| hex(k)).collect::<Vec<_>>(), "hash": hash }))).await?;
+        self.append(&Scope::Global, members::node("epoch", json!({ "scope": name, "n": 1, "to": to.iter().map(|c| hex(&c.key)).collect::<Vec<_>>(), "hash": hash }))).await?;
         if self.with(|i| Ok(i.r.db().epoch_hash(scope, 1).as_deref() != Some(hash.as_str())))? {
             tracing::info!("another device made {scope}'s first epoch first: its key is used");
             return self.settled_first_epoch(scope).await;
         }
-        for (device, seal) in &to {
-            crate::db::created(&bucket, &crate::keys::epoch_name(&name, 1, &hex(device)), &crate::kernel::seal_to(seal, &key)?).await?;
+        for c in &to {
+            crate::db::created(&bucket, &crate::keys::epoch_name(&name, 1, &hex(&c.key)), &crate::kernel::seal_to(&c.seal, &key)?).await?;
         }
         tracing::info!("made {scope}'s first epoch");
         let keys = crate::db::Keys::from([(1, key)]);
@@ -245,12 +245,12 @@ impl Node {
     async fn seal_epoch(&self, scope: &Scope, keys: &crate::db::Keys) -> Result<()> {
         use crate::bucket::Bucket;
         let bucket = self.bucket()?;
-        let to = self.with(|i| Ok(clients_of(i.r.db(), scope).into_iter().filter(|(k, _)| *k != self.0.id).collect::<Vec<_>>()))?;
+        let to = self.with(|i| Ok(i.r.db().openers(scope).into_iter().filter(|c| c.key != self.0.id).collect::<Vec<_>>()))?;
         for (n, key) in keys {
-            for (device, seal) in &to {
-                let name = crate::keys::epoch_name(&scope.to_string(), *n, &hex(device));
+            for c in &to {
+                let name = crate::keys::epoch_name(&scope.to_string(), *n, &hex(&c.key));
                 if Bucket::get(&bucket, &name).await?.is_none() {
-                    Bucket::create(&bucket, &name, &crate::kernel::seal_to(seal, key)?).await?;
+                    Bucket::create(&bucket, &name, &crate::kernel::seal_to(&c.seal, key)?).await?;
                 }
             }
         }
@@ -480,8 +480,3 @@ impl Node {
     }
 }
 
-/// The client devices of everyone who uses a scope, with the keys they're sealed to: whom its epochs are sealed to,
-/// besides the recovery key. A machine that is its person's client is one; compute alone never is.
-pub(super) fn clients_of(db: &ScopeDb, scope: &Scope) -> Vec<(Key, [u8; 32])> {
-    db.clients().into_iter().filter(|d| db.may(&d.user, "use", &scopes::object(scope))).map(|d| (d.key, d.seal)).collect()
-}
