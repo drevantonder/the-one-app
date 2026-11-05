@@ -66,6 +66,16 @@ function ListRow({ leading, title, sub, trailing, selected, onClick, className }
   )
 }
 
+/// A grey line under what it's about.
+function Hint({ children, className }: { children: React.ReactNode; className?: string }) {
+  return <p data-slot="hint" className={cn("text-sm text-muted-foreground", className)}>{children}</p>
+}
+
+/// A line of what to do, as a row of a List: it wraps, which a ListRow's title doesn't.
+function ListNote({ children }: { children: React.ReactNode }) {
+  return <div data-slot="list-note" className="px-3 py-2.5 text-sm">{children}</div>
+}
+
 /// How wide an element is, as it changes: what the layout parts size themselves by, rather than the window.
 function useWidth<T extends HTMLElement>() {
   const ref = React.useRef<T>(null)
@@ -120,4 +130,4 @@ function Split({ list, detail, title, onClose, wide = 720, className }: {
   )
 }
 
-export { Grid, List, ListRow, Split, useWidth }
+export { Grid, Hint, List, ListNote, ListRow, Split, useWidth }

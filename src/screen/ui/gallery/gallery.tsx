@@ -4,10 +4,10 @@ import { useState } from "react"
 import { createRoot } from "react-dom/client"
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter,
-  AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger, AppIcon, Badge, Button, Card, CardContent, CardDescription,
+  AccountList, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger, AppIcon, Badge, Button, Card, CardContent, CardDescription,
   CardFooter, CardHeader, CardTitle, CodeView, CopyButton, DiffView, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
   DialogTrigger, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator,
-  DropdownMenuTrigger, Empty, Grid, Icon, Input, List, ListRow, Problem, Separator, Sheet, SheetContent,
+  DropdownMenuTrigger, Empty, Grid, Hint, Icon, Input, List, ListNote, ListRow, ListSkeleton, Loading, LoadFailure, LoadingButton, Problem, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Separator, Sheet, SheetContent,
   SheetDescription, SheetHeader, SheetTitle, SheetTrigger, Shell, type ShellSection, showAlert, showMenu, showSheet,
   Skeleton, Split, Switch, Tabs, TabsContent, TabsList, TabsTrigger,
 } from "@one/ui"
@@ -74,6 +74,53 @@ const items = [
   { id: "work", title: "andre@work", sub: "Google account · Used by Gmail and Drive", app: { name: "google", icon: "google-logo", color: "#4285f4" } },
   { id: "wifi", title: "Office Wi-Fi", sub: "network: Office-5G", app: { name: "wifi", icon: "wifi-high", color: "#8e8e93" } },
 ]
+
+const people = [
+  { account: "ana@example.org", ok: true },
+  { account: "work@example.org", ok: true },
+  { account: "old@example.org", ok: false },
+]
+
+/// The accounts of an app that keeps them: rows with Sign Out, what's wrong on the row, Add Account below.
+function Accounts() {
+  const [accounts, setAccounts] = useState(people)
+  const [profile, setProfile] = useState("personal")
+  return (
+    <div className="flex flex-col gap-6">
+      <AccountList
+        title="Accounts"
+        accounts={accounts}
+        line={(a, i) => (a.ok ? (i ? null : { text: "Used first" }) : { text: "Sign in again", warn: true })}
+        signOut={(a) => setAccounts((all) => all.filter((x) => x.account !== a.account))}
+      >
+        <LoadingButton variant="secondary" className="self-start" run={() => new Promise((r) => setTimeout(r, 1500))}>Add Account</LoadingButton>
+      </AccountList>
+      <section className="flex flex-col gap-2">
+        <h2 className="text-sm font-medium text-muted-foreground">Browser profile</h2>
+        <List>
+          <ListRow
+            title="Profile"
+            trailing={
+              <Select value={profile} onValueChange={setProfile}>
+                <SelectTrigger size="sm" aria-label="Browser profile"><SelectValue /></SelectTrigger>
+                <SelectContent align="end" position="popper">
+                  <SelectItem value="personal">personal</SelectItem>
+                  <SelectItem value="work">work</SelectItem>
+                  <SelectItem value="new">New profile…</SelectItem>
+                </SelectContent>
+              </Select>
+            }
+          />
+          <ListNote>A line of what to do, which wraps where a row's title would be cut.</ListNote>
+        </List>
+        <Hint>A grey line under what it is about.</Hint>
+      </section>
+      <Loading>Signing In</Loading>
+      <ListSkeleton rows={2} />
+      <LoadFailure problem={{ title: "Couldn't load your accounts.", next: "Check your connection." }} retry={() => {}} />
+    </div>
+  )
+}
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -190,6 +237,17 @@ function Gallery() {
           <MagnifyingGlassIcon className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input placeholder="Search" className="pl-8" />
         </div>
+      </Section>
+
+      <Section title="Select: a choice among a few things">
+        <Select defaultValue="mac">
+          <SelectTrigger className="w-48" aria-label="Device"><SelectValue placeholder="Device" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="mac">Andre's Mac</SelectItem>
+            <SelectItem value="linux">linux</SelectItem>
+            <SelectItem value="phone">iPhone</SelectItem>
+          </SelectContent>
+        </Select>
       </Section>
 
       <Section title="Tabs">
@@ -316,6 +374,10 @@ function Gallery() {
         <List>
           {apps.slice(0, 4).map((a) => <ListRow key={a.name} leading={<AppIcon app={a} size={28} />} title={a.title} sub="On every device" trailing={a.name === "devices" ? <Badge variant="destructive" className="rounded-full">1</Badge> : undefined} />)}
         </List>
+      </Section>
+
+      <Section title="Accounts: AccountList (rows with Sign Out), LoadingButton, Select in a row, ListNote, Hint, Loading, ListSkeleton, LoadFailure; useAccounts keeps them fresh from an app's accounts and sign_out calls">
+        <Accounts />
       </Section>
 
       <Section title="Split: what a list opens shows beside it where there's room, else in a sheet">
