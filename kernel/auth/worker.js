@@ -441,8 +441,10 @@ export class Auth extends DurableObject {
     const out = await resp.clone().json();
     const ours = b64u.encode(joinChallenge(...endpointOf(join), Date.now()));
     const [was, now] = [`"expectedChallenge":"${out.challenge}"`, `"expectedChallenge":"${ours}"`];
-    const changed = this.ctx.storage.sql.exec("update verification set value = replace(value, ?, ?) where instr(value, ?) > 0", was, now, was).rowsWritten;
-    if (changed !== 1) {
+    const sql = this.ctx.storage.sql;
+    sql.exec("update verification set value = replace(value, ?, ?) where instr(value, ?) > 0", was, now, was);
+    // Counted by what's there, as rowsWritten counts an index's writes too.
+    if (sql.exec("select count(*) as n from verification where instr(value, ?) > 0", now).one().n !== 1) {
       console.error("a passkey's challenge wasn't changed to name its device");
       return resp;
     }
