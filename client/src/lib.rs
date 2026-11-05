@@ -683,7 +683,7 @@ fn head(method: &str, path: &str, headers: &[(String, String)], len: u64, certif
             return Err(unsent(format!("{name} isn't a header")));
         }
         // How the request is framed, and who it's from, is this library's to say.
-        if ["host", "content-length", "transfer-encoding", "connection", ENDPOINT_HEADER, ELSEWHERE_HEADER].iter().any(|h| name.eq_ignore_ascii_case(h)) {
+        if ["host", "content-length", "transfer-encoding", "connection", ENDPOINT_HEADER, ELSEWHERE_HEADER, one::database::switch::HEADER].iter().any(|h| name.eq_ignore_ascii_case(h)) {
             continue;
         }
         head.push_str(&format!("{name}: {value}\r\n"));
@@ -691,6 +691,8 @@ fn head(method: &str, path: &str, headers: &[(String, String)], len: u64, certif
     if let Some(certificate) = certificate.filter(|c| c.bytes().all(|b| b.is_ascii_graphic())) {
         head.push_str(&format!("{ENDPOINT_HEADER}: {certificate}\r\n"));
     }
+    // What this client reads of who's who, which phase 2's switch waits for every device to read.
+    head.push_str(&format!("{}: {}\r\n", one::database::switch::HEADER, one::database::switch::header()));
     head.push_str(&format!("{ELSEWHERE_HEADER}: 1\r\ncontent-length: {len}\r\n\r\n"));
     Ok(head.into_bytes())
 }

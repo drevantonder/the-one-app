@@ -27,6 +27,8 @@ alter table builds rename column server to device;
 alter table backups rename column server to device;
 ", "
 create table checks (place text, device text, time integer, error text, report text not null, primary key (place, device, time));
+", "
+create table reads (device text primary key, reads integer not null, build text not null, time integer not null);
 "];
 
 /// How many runs of each schedule a scope keeps.
@@ -47,6 +49,8 @@ pub struct Status {
     pub changed: BTreeMap<(String, String), (Value, Value, u64)>,
     /// In `global`: the build each device runs.
     pub builds: HashMap<Key, release::Running>,
+    /// In `global`: what each device said it reads of who's who (`database::switch`).
+    pub reads: HashMap<Key, crate::database::switch::Reads>,
     /// In `global`: the latest backup runs, oldest first.
     pub backups: Vec<BackupRun>,
     /// In `global`: by (place, scope), the newest entry's time a snapshot there holds, and when it was written.
@@ -146,6 +150,8 @@ pub enum Said {
     Cost { app: String, model: String, usd: f64, input: u64, output: u64 },
     Ran { app: String, schedule: String, run: Run },
     Build { device: Key, build: String, target: String },
+    /// What a device reads of who's who, and its build (`database::switch`).
+    Reads { device: Key, reads: u32, build: String },
     BackedUp(BackupRun),
     Alerted { place: String },
     Checked(CheckRun),
@@ -187,6 +193,7 @@ impl Node {
                         )
                     }
                     Said::Build { device, build, target } => ex("insert or replace into builds values (?, ?, ?, ?)", &[json!(hex(device)), json!(build), json!(target), json!(now)]),
+                    Said::Reads { device, reads, build } => ex("insert or replace into reads values (?, ?, ?, ?)", &[json!(hex(device)), json!(reads), json!(build), json!(now)]),
                     Said::BackedUp(r) => {
                         ex(
                             "insert or replace into backups values (?, ?, ?, ?, ?, ?)",
@@ -209,6 +216,19 @@ impl Node {
             })
             .await?;
         self.read_status(scope).await
+    }
+
+    /// What a device said it reads of who's who (`database::switch`), kept in `global`'s node database when it
+    /// changed. Kept here first, so the requests that say it again while it's written don't write it again.
+    pub(crate) async fn said_reads(&self, device: Key, reads: u32, build: &str) {
+        let kept = crate::database::switch::Reads { reads, build: build.to_string(), time: now_ms() };
+        let changed = self.with(|i| Ok(i.reads.get(&device).is_none_or(|r| r.reads != reads || r.build != build).then(|| i.reads.insert(device, kept.clone())).is_some()));
+        if !changed.unwrap_or(false) {
+            return;
+        }
+        if let Err(err) = self.say(&Scope::Global, Said::Reads { device, reads, build: build.to_string() }).await {
+            tracing::debug!("keeping what {} reads: {err:#}", short(&device));
+        }
     }
 
     /// Reads a scope's rows into its `Status`, up to date.
@@ -255,6 +275,11 @@ impl Node {
                 s.builds.insert(device, release::Running { commit: text(&r["build"]), target: text(&r["target"]) });
             }
         }
+        for r in rows("select * from reads")? {
+            if let Ok(device) = unhex(r["device"].as_str().unwrap_or("")) {
+                s.reads.insert(device, crate::database::switch::Reads { reads: n(&r["reads"]) as u32, build: text(&r["build"]), time: n(&r["time"]) });
+            }
+        }
         for r in rows("select * from backups order by time")? {
             let snapshots: Vec<BackedUp> = serde_json::from_str(r["snapshots"].as_str().unwrap_or("[]")).unwrap_or_default();
             let run = BackupRun {
@@ -289,6 +314,7 @@ impl Node {
         self.with(|i| {
             if *scope == Scope::Global {
                 i.builds = s.builds.clone();
+                i.reads = s.reads.clone();
             }
             i.status.insert(scope.to_string(), s);
             Ok(())

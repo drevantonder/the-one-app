@@ -119,7 +119,14 @@ impl Node {
             device_now: &device_now,
             client_now: &client_now,
         };
-        crate::state::state(install.as_ref().map(|i| i.r.db()), me, here)
+        let mut state = crate::state::state(install.as_ref().map(|i| i.r.db()), me, here);
+        // Where phase 2's switch is, for the install's admins, who skip a device gone for good.
+        if let Some(i) = install.as_ref().filter(|i| i.r.db().may(me, "change-settings", scopes::INSTALL))
+            && state["install"].is_object()
+        {
+            state["install"]["switch"] = crate::database::switch::gate_json(i.r.db(), &i.reads);
+        }
+        state
     }
 
     /// Writes one of `global`'s node entries as the local user, after checking it would count.

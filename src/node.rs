@@ -146,6 +146,8 @@ struct Install {
     peers: HashMap<Key, Peer>,
     /// The build each device last said it runs.
     builds: HashMap<Key, release::Running>,
+    /// What each device last said it reads of who's who (`database::switch`).
+    reads: HashMap<Key, crate::database::switch::Reads>,
     /// Each scope's rows of how things went, as this device last read them.
     status: HashMap<String, status::Status>,
     /// Each scope's views: how far they've replayed, and what the scope's node entries add up to.
@@ -743,7 +745,7 @@ impl Node {
         let root: [u8; 32] = data_encoding::HEXLOWER.decode(file.root.as_bytes())?.try_into().map_err(|_| anyhow!("bad root"))?;
         let r = Replica::new(self.0.key.clone(), store, Some(Hash::from_bytes(root)), now_ms())?;
         let bucket = file.bucket.map(|f| Ok::<_, anyhow::Error>((self.install_place(&f)?, f))).transpose()?;
-        let install = Install { r, user: file.user, bucket, folders: file.folders, peers: HashMap::new(), builds: HashMap::new(), status: HashMap::new(), views: HashMap::new(), vault: Default::default(), nearest: HashMap::new(), far: HashMap::new(), read: false };
+        let install = Install { r, user: file.user, bucket, folders: file.folders, peers: HashMap::new(), builds: HashMap::new(), reads: HashMap::new(), status: HashMap::new(), views: HashMap::new(), vault: Default::default(), nearest: HashMap::new(), far: HashMap::new(), read: false };
         *self.0.install.lock()? = Some(install);
         Ok(())
     }
@@ -1108,6 +1110,7 @@ impl Node {
         if running.as_deref() != Some(crate::config::BUILD) {
             self.say(&Scope::Global, status::Said::Build { device: self.0.id, build: crate::config::BUILD.into(), target: crate::config::TARGET.into() }).await?;
         }
+        self.said_reads(self.0.id, crate::database::switch::READS, crate::config::BUILD).await;
         Ok(())
     }
 

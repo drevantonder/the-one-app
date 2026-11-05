@@ -195,6 +195,7 @@ pub fn routes() -> Router<Node> {
         .route("/v1/erase", post(erase))
         .route("/v1/role", post(role))
         .route("/v1/settings", post(settings))
+        .route("/v1/reads", post(reads))
         .route("/v1/entries", get(heads).post(entries))
         .route("/v1/entries/global", get(global_entries))
         .route("/v1/runs", post(runs))
@@ -485,6 +486,11 @@ async fn from_client(node: &Node, key: crate::entry::Key, until: u64, path: &str
         && let Err(err) = node.hand(&token, &user, handed, until)
     {
         return refuse(req, (StatusCode::BAD_REQUEST, Json(json!({ "error": format!("{err:#}") }))).into_response()).await;
+    }
+    // What it reads of who's who, which phase 2's switch waits for (`database::switch`).
+    if let Some((reads, build)) = req.headers().get(crate::database::switch::HEADER).and_then(|h| h.to_str().ok()).and_then(crate::database::switch::parse) {
+        let node = node.clone();
+        tokio::spawn(async move { node.said_reads(key, reads, &build).await });
     }
     req.extensions_mut().insert(Me { caller: Caller { key, user, agent: None, token: Some(token) }, sign_in: Some(name) });
     next.run(req).await
@@ -865,6 +871,15 @@ async fn role(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Repl
 /// `{ name, value }`: one of the install's settings, for admins; `value: null` puts back the white label's default.
 async fn settings(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
     node.member_as(&me.caller, "setting", json!({ "name": text(&body, "name")?, "value": body["value"] })).await?;
+    done()
+}
+
+/// What a device of the install reads of who's who (`database::switch`), as this machine's own program says it: the
+/// serverless node, which says nothing itself, once this machine deployed its build there.
+async fn reads(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
+    let device = crate::entry::unhex(&text(&body, "device")?)?;
+    let reads = anyhow::Context::context(body["reads"].as_u64(), "reads is a number")? as u32;
+    node.said_reads(device, reads, &text(&body, "build")?).await;
     done()
 }
 

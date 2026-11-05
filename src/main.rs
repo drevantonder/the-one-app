@@ -511,6 +511,7 @@ fn run(args: Vec<String>) -> Result<()> {
             one::kernel::deploy(&cf, &settings, &modules, &web)?;
             if settings.serverless {
                 one::serverless::deploy(&cf, &settings)?;
+                serverless_reads(&settings);
             }
             print!("Deployed.\n{}", kernel_said(&settings));
         }
@@ -525,6 +526,7 @@ fn run(args: Vec<String>) -> Result<()> {
             // The relay it deploys again binds the serverless node's endpoint only for an install that has one.
             let was = std::mem::replace(&mut settings.serverless, true);
             one::serverless::deploy(&cf, &settings)?;
+            serverless_reads(&settings);
             if !was {
                 settings.save()?;
             }
@@ -1215,6 +1217,7 @@ fn status(state: &Value) {
         println!("  {dot} {shown}{here}  {}'s{serves}{build}", name(s["user"].as_str().unwrap_or("")));
     }
     let clients = i["clients"].as_array().cloned().unwrap_or_default();
+    switch_gate(&i["switch"], &name);
     if !clients.is_empty() {
         println!("\nPhones");
         for c in &clients {
@@ -1223,6 +1226,44 @@ fn status(state: &Value) {
             let here = if client_device::me().is_some_and(|(_, key)| c["key"] == key) { " (this one)" } else { "" };
             println!("  ▯ {}{here}  {}{asked}", c["name"].as_str().unwrap_or(""), name(c["user"].as_str().unwrap_or("")));
         }
+    }
+}
+
+/// Where the switch to the scope database is (`database::switch`), for an admin: the devices it waits for, each
+/// with what it said it reads, and those skipped as gone for good.
+fn switch_gate(gate: &Value, name: &dyn Fn(&str) -> String) {
+    if gate.is_null() {
+        return;
+    }
+    let device = |d: &Value| format!("{} ({}'s, {})", d["name"].as_str().unwrap_or(&d["key"].as_str().unwrap_or("")[..8]), name(d["user"].as_str().unwrap_or("")), &d["key"].as_str().unwrap_or("")[..8]);
+    let switch = if gate["switch"] == true { "on once every device reads it" } else { "off in this build" };
+    println!("\nSwitch to the scope database ({switch})");
+    let waiting = gate["waiting"].as_array().cloned().unwrap_or_default();
+    if waiting.is_empty() {
+        println!("  Every device reads it.");
+    }
+    for d in &waiting {
+        let reads = match d["reads"].as_u64() {
+            Some(r) => format!("reads {r} of {}, build {}", gate["gate"], d["build"].as_str().unwrap_or("?")),
+            None => "hasn't said what it reads: update it, or open it".into(),
+        };
+        println!("  Waiting for {}: {reads}", device(d));
+    }
+    for d in gate["skipped"].as_array().into_iter().flatten() {
+        println!("  Skipped, gone for good: {}", device(d));
+    }
+    if !waiting.is_empty() {
+        println!("  A device gone for good: {CLI} settings {} \"<its key> ...\" skips it.", one::database::switch::SKIPS);
+    }
+}
+
+/// Tells this machine's node what the serverless node it deployed reads of who's who: this build's, which it can't
+/// say itself (`database::switch`).
+fn serverless_reads(settings: &one::kernel::Settings) {
+    let Some(key) = settings.serverless_endpoint() else { return };
+    let said = post("/v1/reads", json!({ "device": key, "reads": one::database::switch::READS, "build": one::config::BUILD }));
+    if let Err(err) = said {
+        eprintln!("Couldn't say what the serverless node reads: {err:#}");
     }
 }
 
