@@ -1253,7 +1253,8 @@ fn switch_gate(gate: &Value, name: &dyn Fn(&str) -> String) {
     if gate.is_null() {
         return;
     }
-    let device = |d: &Value| format!("{} ({}'s, {})", d["name"].as_str().unwrap_or(&d["key"].as_str().unwrap_or("")[..8]), name(d["user"].as_str().unwrap_or("")), &d["key"].as_str().unwrap_or("")[..8]);
+    // With its whole key, which an admin gives to skip it.
+    let device = |d: &Value| format!("{} ({}'s, {})", d["name"].as_str().unwrap_or(&d["key"].as_str().unwrap_or("")[..8]), name(d["user"].as_str().unwrap_or("")), d["key"].as_str().unwrap_or(""));
     let switch = if gate["frozen"] == true { "switched: the scope database is the truth" } else if gate["switch"] == true { "on once every device reads it" } else { "off in this build" };
     println!("\nSwitch to the scope database ({switch})");
     if gate["frozen"] == true {

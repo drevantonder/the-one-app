@@ -583,12 +583,13 @@ pub fn check(c: &Check) -> Result<(Value, Vec<Restored>)> {
         restored.push(r);
     }
     let root = c.root.or_else(|| store.ordered().ok()?.iter().find(|e| e.content.app == crate::members::APP && e.content.kind == "genesis").map(|e| e.hash()));
-    let m = members_of(&store, root)?;
+    let global_keys = c.keys.get("global").map(Vec::as_slice).unwrap_or(&[]);
+    let m = steps_of(members_of(&store, root)?, &store, root, place, install, global_keys)?;
     // The same entries say the same on every device: the backup's, replayed, are who's who as this device had it.
     if c.live.is_some() && problems.is_empty() {
         let here = crate::store::Store::memory()?;
         here.take(expected)?;
-        if said(&members_of(&here, root)?) != said(&m) {
+        if said(&steps_of(members_of(&here, root)?, &here, root, place, install, global_keys)?) != said(&m) {
             problems.push("its entries don't replay to the people, devices and apps this device had then".into());
         }
     }
@@ -603,6 +604,30 @@ pub fn check(c: &Check) -> Result<(Value, Vec<Restored>)> {
         "unchecked": unchecked,
     });
     Ok((report, restored))
+}
+
+/// Who's who once `global`'s log is frozen, as its scope database's steps the place's copy of the bucket holds say it
+/// (`database::steps`), opened with `keys`, its epochs' keys; `replayed`, as the entries say it, before.
+fn steps_of(replayed: ScopeDb, store: &crate::store::Store, root: Option<crate::entry::Hash>, place: &Place, install: &str, keys: &[[u8; 32]]) -> Result<ScopeDb> {
+    let global: Vec<Entry> = store.ordered()?.into_iter().filter(|e| e.log() == "global").collect();
+    let Some(frozen) = crate::members::frozen(root, &global, &store.forks()?) else { return Ok(replayed) };
+    // The log's key in each epoch: the node's app key there, opened with whichever of the epochs' keys does.
+    let mut log_keys: BTreeMap<u32, [u8; 32]> = BTreeMap::new();
+    for n in 1..=(keys.len() as u32 + 8) {
+        let Some(sealed) = place.get(&format!("{install}/bucket/{}", crate::keys::app_key_name("global", crate::members::APP, n)))? else { continue };
+        if let Some(app) = keys.iter().find_map(|k| crate::kernel::open_app_key(k, crate::members::APP, &sealed).ok()) {
+            log_keys.insert(n, crate::kernel::database_key(&app, crate::log::NAME));
+        }
+    }
+    let prefix = crate::database::steps::prefix("global");
+    let mut steps = Vec::new();
+    for at in 1.. {
+        let name = crate::db::step_name(&prefix, at);
+        let Some(sealed) = place.get(&format!("{install}/bucket/{name}"))? else { break };
+        let opened = crate::keys::epoch_of(&sealed).ok().and_then(|e| log_keys.get(&e)).and_then(|k| crate::keys::open(k, &name, &sealed).ok());
+        steps.push(crate::database::steps::given(&crate::entry::Scope::Global, at, opened.as_deref()));
+    }
+    crate::database::steps::truth(&frozen, &steps, crate::node::now_ms())
 }
 
 /// Who's who, as the member entries in a store replay: `global`'s scope database.
@@ -665,6 +690,7 @@ pub async fn check_databases(place: &Place, install: &str, snapshot: &Snapshot, 
         let said = match (app, db) {
             (crate::members::APP, "vault") => "Vault".to_string(),
             (crate::members::APP, crate::log::NAME) => "history".to_string(),
+            (crate::members::APP, crate::database::steps::NAME) => "who's who".to_string(),
             (crate::members::APP, _) => "status".to_string(),
             (app, "main") => app.to_string(),
             (app, db) => format!("{app} {db}"),
@@ -673,7 +699,8 @@ pub async fn check_databases(place: &Place, install: &str, snapshot: &Snapshot, 
         for (n, epoch) in epochs {
             let Ok(Some(sealed)) = copy.get(&crate::keys::app_key_name(scope, app, *n)).await else { continue };
             match crate::kernel::open_app_key(epoch, app, &sealed.bytes) {
-                Ok(key) => drop(keys.insert(*n, crate::kernel::database_key(&key, db))),
+                // A scope database's steps are sealed as its log is (`database::steps`).
+                Ok(key) => drop(keys.insert(*n, crate::kernel::database_key(&key, if (app, db) == (crate::members::APP, crate::database::steps::NAME) { crate::log::NAME } else { db }))),
                 Err(err) => out.push(format!("{scope} {said}: its key in epoch {n}: {err:#}")),
             }
         }

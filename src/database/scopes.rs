@@ -111,6 +111,11 @@ impl ScopeDb {
         Ok(ScopeDb { db, now })
     }
 
+    /// The whole database, as a copy of it is kept.
+    pub fn bytes(&mut self) -> Result<Vec<u8>> {
+        Ok(self.db.serialize("main")?.to_vec())
+    }
+
     /// The time it answers `may` as of.
     pub fn now(&self) -> u64 {
         self.now

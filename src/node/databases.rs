@@ -365,6 +365,20 @@ impl Node {
                 Err(err) => tracing::debug!("{prefix}: tidying: {err:#}"),
             }
         }
+        // And each scope database's steps its newest copy covers, once they're old enough (`database::steps`).
+        let held = self.with(|i| Ok(i.r.db().scopes().into_iter().filter(|s| i.r.holds(s)).collect::<Vec<_>>())).unwrap_or_default();
+        for scope in held.iter().filter(|_| self.frozen()) {
+            let prefix = crate::database::steps::prefix(&scope.to_string());
+            if self.0.tidied.lock().unwrap().get(&prefix).is_some_and(|t| now < t + TIDY_EVERY) {
+                continue;
+            }
+            self.0.tidied.lock().unwrap().insert(prefix.clone(), now);
+            match crate::database::steps::tidy(&bucket, scope, now, crate::db::DELETE_COVERED_STEPS).await {
+                Ok(0) => {}
+                Ok(n) => tracing::info!("{prefix}: deleted {n} steps a copy covers"),
+                Err(err) => tracing::debug!("{prefix}: tidying: {err:#}"),
+            }
+        }
     }
 
     /// Every database open here, by (scope, `app/database`): with this device's own keys, and with keys calls were

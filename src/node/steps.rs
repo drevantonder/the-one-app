@@ -60,9 +60,19 @@ impl Node {
 
     /// `read_steps`, while this device holds its writes.
     pub(super) async fn read_steps_now(&self) -> Result<bool> {
-        let Some(from) = self.with(|i| Ok(i.r.at()))? else { return Ok(false) };
+        let Some(mut from) = self.with(|i| Ok(i.r.at()))? else { return Ok(false) };
         let bucket = self.bucket()?;
         let prefix = steps::prefix("global");
+        // Steps this device hasn't read were deleted, a copy covering them: on from that copy, checked against what it
+        // read before (`scope-at`), as it kept it.
+        if crate::bucket::Bucket::get(&bucket, &crate::db::step_name(&prefix, from + 1)).await?.is_none()
+            && let Some((at, hash)) = self.kept_at().filter(|(at, _)| *at > from)
+        {
+            let keys = self.log_key(&Scope::Global).await?;
+            let db = steps::from_copy(&bucket, &keys, at, &hash, now_ms()).await?;
+            self.with(|i| i.r.restart_at(at, db))?;
+            from = at;
+        }
         let mut at = from;
         loop {
             let name = crate::db::step_name(&prefix, at + 1);
@@ -81,7 +91,24 @@ impl Node {
             at += 1;
             self.after(handled).await?;
         }
+        if at > from {
+            self.keep_at();
+        }
         Ok(at > from)
+    }
+
+    /// Where this device read `global`'s scope database to, and what it came to, kept in its folder (`scope-at`): what
+    /// it starts again from, from a copy, once the steps before it are deleted.
+    fn keep_at(&self) {
+        let kept = self.with(|i| Ok(json!({ "at": i.r.at(), "hash": crate::db::state_hash(i.r.db().conn())? })));
+        if let Ok(kept) = kept {
+            let _ = write_private(&self.0.dir.join("install").join("scope-at"), kept.to_string().as_bytes());
+        }
+    }
+
+    fn kept_at(&self) -> Option<(u64, String)> {
+        let kept: Value = serde_json::from_slice(&std::fs::read(self.0.dir.join("install").join("scope-at")).ok()?).ok()?;
+        Some((kept["at"].as_u64()?, kept["hash"].as_str()?.to_string()))
     }
 
     /// Writes `content` to `global`'s scope database as a step this device signs as `user`, at the next position: when
@@ -113,6 +140,12 @@ impl Node {
         }
         let handled = self.with(|i| i.r.take_step(at, Some(step), now_ms()))?;
         self.after(handled).await?;
+        self.keep_at();
+        // A copy now and then, and the newest hint: only saves readers work.
+        let bytes = self.with(|i| i.r.db_mut().bytes())?;
+        if let Err(err) = steps::written(&self.bucket()?, &keys, &Scope::Global, at, bytes).await {
+            tracing::debug!("global's copy and hint: {err:#}");
+        }
         self.ping(&Scope::Global, None);
         Ok(true)
     }
@@ -230,6 +263,15 @@ impl Node {
             let name = crate::db::step_name(&steps::prefix(&scope.to_string()), at + 1);
             if crate::bucket::Bucket::create(&self.bucket()?, &name, &crate::log::seal(&keys, &name, &steps::encode(&step))?).await? {
                 self.read_scope_steps_now(scope).await?;
+                let copy = self.with(|i| match i.scope_dbs.get_mut(scope) {
+                    Some((_, Some(d))) => d.bytes().map(Some),
+                    _ => Ok(None),
+                })?;
+                if let Some(bytes) = copy
+                    && let Err(err) = steps::written(&self.bucket()?, &keys, scope, at + 1, bytes).await
+                {
+                    tracing::debug!("{scope}'s copy and hint: {err:#}");
+                }
                 self.ping(scope, None);
                 if step.content.kind != steps::ANCHOR {
                     return Ok(step);

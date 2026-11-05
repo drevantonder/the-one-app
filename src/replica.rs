@@ -108,6 +108,20 @@ impl Replica {
         Ok((crate::db::state_hash(ScopeDb::build(&members, &Scope::Global, &state, now)?.conn())?, frontier))
     }
 
+    /// `global`'s scope database at `at`, as a device that read there before starts again from a copy once the steps
+    /// before it are deleted (`steps::from_copy`).
+    pub fn restart_at(&mut self, at: u64, db: ScopeDb) -> Result<()> {
+        let (hash, _) = self.frozen.context("global's log isn't frozen")?;
+        self.db = db;
+        self.frozen = Some((hash, at));
+        Ok(())
+    }
+
+    /// `global`'s scope database as it is, to copy (`steps::written`).
+    pub fn db_mut(&mut self) -> &mut ScopeDb {
+        &mut self.db
+    }
+
     /// The position of `global`'s scope database this device has applied its steps to, once its log is frozen.
     pub fn at(&self) -> Option<u64> {
         self.frozen.map(|(_, at)| at)
@@ -345,4 +359,37 @@ impl Replica {
 /// builds: if it didn't, this device would stop rather than answer as the members were.
 fn nobody(now: u64) -> ScopeDb {
     ScopeDb::build(&Members::default(), &Scope::Global, &Default::default(), now).expect("an empty who's who builds")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::keys::Endpoint;
+    use crate::members::{Kind, Role, device, freeze, genesis, setting};
+
+    /// Once `global`'s log is frozen, an older device's entries there change nothing, wherever they sort, and a step
+    /// changes who's who: who may do what is the scope database's alone.
+    #[test]
+    fn once_frozen_the_log_changes_nothing_and_steps_do() {
+        const ANDRE: &str = "a000000000000001";
+        let (mac, old) = (SigningKey::from_bytes(&[1; 32]), SigningKey::from_bytes(&[2; 32]));
+        let ext = |user: &str| Ext { log: "global".into(), time: 0, user: user.into(), epoch: 1, previous: Vec::new() };
+        let g = Entry::create(&mac, Ext { epoch: 0, ..ext(ANDRE) }, None, genesis("Home", ANDRE, "Andre", &Endpoint::of(&mac), "mac", &[Kind::Client], &[7; 32], &"e".repeat(64)));
+        let listed = Entry::create(&mac, ext(ANDRE), Some(g.head()), device(&Endpoint::of(&old), ANDRE, "old laptop", &[Kind::Client], None));
+        let mut r = Replica::new(mac.clone(), Store::memory().unwrap(), Some(g.hash()), 0).unwrap();
+        r.receive(vec![g.clone(), listed.clone()], 0).unwrap();
+        let (hash, frontier) = r.anchor(0).unwrap();
+        let frozen = Entry::create(&mac, Ext { previous: vec![], ..ext(ANDRE) }, Some(listed.head()), freeze(&hash, &frontier));
+        r.receive(vec![frozen], 0).unwrap();
+        assert_eq!(r.at(), Some(0), "frozen, at its anchor");
+        // The old laptop, still on a build that writes the log, makes Mal an admin: nothing changes.
+        let late = Entry::create(&old, ext(ANDRE), None, device(&Endpoint::of(&SigningKey::from_bytes(&[3; 32])), "c000000000000003", "mal's", &[Kind::Client], Some(("Mal", Role::Admin))));
+        r.receive(vec![late], 0).unwrap();
+        assert!(r.db().user("c000000000000003").is_none(), "an entry after the freeze changes nothing");
+        // A step does.
+        let step = r.make_step(&Scope::Global, ANDRE, setting("greeting", Some("hi")), 0).unwrap();
+        r.take_step(1, Some(&step), 0).unwrap();
+        assert_eq!(r.db().setting("greeting").as_deref(), Some("hi"));
+        assert!(r.take_step(1, Some(&step), 0).is_err(), "a position is taken once");
+    }
 }

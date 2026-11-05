@@ -158,6 +158,71 @@ pub fn apply_anchor(global: &ScopeDb, known: &Members, member_entries: &[Entry],
     Ok(Applied { db })
 }
 
+/// How long a scope database's steps are kept once a copy covers them, before they may be deleted: the plan's 7 years,
+/// "who did what" being the steps themselves.
+pub const KEEP_STEPS_FOR: u64 = 7 * 365 * 24 * 60 * 60 * 1000;
+
+/// After its writer wrote step `at` of a scope's database: a copy of the database it leaves (`db`'s bytes), sealed
+/// as its steps are, once `COPY_EVERY` steps follow the last copy; and the newest hint moved on, as a database's
+/// (`db::hint`), so backups and readers find both. Only saves readers work, so a link that fails it fails nothing.
+pub async fn written(bucket: &impl crate::bucket::Bucket, keys: &crate::db::Keys, scope: &Scope, at: u64, bytes: Vec<u8>) -> Result<()> {
+    let prefix = prefix(&scope.to_string());
+    let (_, mut copy, mut epoch) = match bucket.get(&crate::db::newest_name(&prefix)).await? {
+        Some(o) => crate::db::newest(&o.bytes),
+        None => (0, 0, 0),
+    };
+    if at >= copy + crate::db::COPY_EVERY {
+        let name = crate::db::copy_name(&prefix, at);
+        bucket.create(&name, &crate::log::seal(keys, &name, &bytes)?).await?;
+        (copy, epoch) = (at, *keys.keys().next_back().context("no key")?);
+    }
+    crate::db::hint(bucket, &prefix, at, copy, epoch).await
+}
+
+/// A scope's database at step `at`, from its newest copy at or before it and the steps after, as a device that read to
+/// `at` before and kept what it came to (`hash`) starts again once the steps before a copy are deleted: refused unless
+/// it comes to that hash. `global`'s.
+pub async fn from_copy(bucket: &impl crate::bucket::Bucket, keys: &crate::db::Keys, at: u64, hash: &str, now: u64) -> Result<ScopeDb> {
+    let scope = &Scope::Global;
+    let prefix = prefix(&scope.to_string());
+    let copy = bucket.get(&crate::db::newest_name(&prefix)).await?.map(|o| crate::db::newest(&o.bytes).1).unwrap_or(0);
+    ensure!(copy > 0 && copy <= at, "{scope} has no copy this device can check from what it read before");
+    let name = crate::db::copy_name(&prefix, copy);
+    let o = bucket.get(&name).await?.with_context(|| format!("{scope}'s copy at {copy} isn't there"))?;
+    let key = keys.get(&crate::keys::epoch_of(&o.bytes)?).context("its copy is under a key this device wasn't given")?;
+    let bytes = crate::keys::open(key, &name, &o.bytes)?;
+    let mut conn = Connection::open_in_memory()?;
+    conn.deserialize_read_exact("main", &bytes[..], bytes.len(), false)?;
+    let after = read(bucket, keys, scope, copy).await?;
+    let mut db = ScopeDb::open(conn, now)?;
+    for step in after.into_iter().take((at - copy) as usize).flatten() {
+        if let Ok(a) = apply(&db, None, scope, &step) {
+            db = ScopeDb::open(a.db, now)?;
+        }
+    }
+    ensure!(crate::db::state_hash(db.conn())? == hash, "{scope}'s copy and the steps after don't come to what this device read before");
+    Ok(db)
+}
+
+/// Deletes a scope database's steps its newest copy covers, each once it's been in the bucket `KEEP_STEPS_FOR`, with
+/// `steps` (`db::DELETE_COVERED_STEPS`, on with the switch), at `now`: → how many went.
+pub async fn tidy(bucket: &impl crate::bucket::Bucket, scope: &Scope, now: u64, steps: bool) -> Result<usize> {
+    let prefix = prefix(&scope.to_string());
+    let Some(hint) = bucket.get(&crate::db::newest_name(&prefix)).await?.filter(|_| steps) else { return Ok(0) };
+    let copy = crate::db::newest(&hint.bytes).1;
+    let old: Vec<String> = bucket
+        .objects(&prefix)
+        .await?
+        .into_iter()
+        .filter(|(n, written)| n.parse::<u64>().is_ok_and(|at| at < copy) && written + KEEP_STEPS_FOR <= now)
+        .map(|(n, _)| format!("{prefix}/{n}"))
+        .collect();
+    for name in &old {
+        bucket.delete(name).await?;
+    }
+    Ok(old.len())
+}
+
 /// What a step that counts made of the database it was applied to: the database it leaves.
 pub struct Applied {
     pub db: Connection,
