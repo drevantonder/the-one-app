@@ -113,7 +113,7 @@ const CLIENT_SCREENS: &[(&str, &str)] = &[
     ("backups", include_str!("screen/settings/backups.html")),
     ("labs", include_str!("screen/settings/labs.html")),
     ("devices", include_str!("screen/settings/dist/devices.html")),
-    ("connect-ai", include_str!("screen/settings/connect-ai.html")),
+    ("connect-ai", include_str!("screen/settings/dist/connect-ai.html")),
     ("developer", include_str!("screen/settings/dist/developer.html")),
     ("devtools", include_str!("screen/devtools.html")),
 ];
