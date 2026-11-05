@@ -201,11 +201,7 @@ pub struct Members {
     pub recovery_set: u64,
     /// The install's recovery keys before this one, which the relay lets in no more.
     pub recovery_was: Vec<Key>,
-    /// Whether an admin's own device said the gate to the scope database is open (`GATE`), before the log's freeze:
-    /// only a freeze of the log from there on counts (`database::steps::claimed`). Once replayed, only if one who's
-    /// still an admin did, so a device of someone demoted can't open it with an entry that sorts before their demotion.
-    pub gate: bool,
-    /// Who opened the gate, each from an admin's own device as it sorts.
+    /// Who opened the gate to the scope database, each from an admin's own device as it sorts (`gate`).
     gates: BTreeSet<String>,
     /// Where each endpoint's entries stop counting, by (endpoint, log): the first seq that doesn't, wherever it sorts.
     /// A removed device's in `global` after the last its remover had seen (`remove`'s `seq`), and a device's in a log
@@ -325,7 +321,7 @@ impl Members {
 
     /// Once every member entry is replayed: a device that forked `global` is removed, and a recovery key that did is
     /// no recovery key: whoever forked it could fork away its own replacement, so an admin's own device names the
-    /// next (`recovery_lost`). The gate is open only if someone still an admin opened it.
+    /// next (`recovery_lost`).
     pub fn end(&mut self) {
         for key in self.forked.keys() {
             if let Some(m) = self.machines.get_mut(key) {
@@ -335,7 +331,14 @@ impl Members {
         if self.recovery_lost() {
             self.recovery_was.extend(self.recovery.take());
         }
-        self.gate = self.gates.iter().any(|u| self.is_admin(u));
+    }
+
+    /// Whether an admin's own device said the gate to the scope database is open (`GATE`), before the log's freeze:
+    /// only a freeze of the log from there on counts (`database::steps::claimed`). Only if one who's still an admin
+    /// did, so a device of someone demoted can't open it with an entry that sorts before their demotion; worked out
+    /// as it's asked, so it's the same stepped one entry at a time as replayed whole.
+    pub fn gate(&self) -> bool {
+        self.gates.iter().any(|u| self.is_admin(u))
     }
 
     /// Whether the install has no recovery key, or one that forked `global` whose every entry from before its fork
@@ -942,7 +945,6 @@ impl Members {
                 // log (`Node::switch`), before it. An older device skips it.
                 ensure!(self.is_admin(&w), "admins only");
                 self.gates.insert(w);
-                self.gate = true;
             }
             "app" => {
                 let name = text("name")?;

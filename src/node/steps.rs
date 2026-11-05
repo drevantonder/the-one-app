@@ -23,9 +23,9 @@ impl Node {
     /// and the gate is open (or `forced`, in a throwaway network), and it isn't frozen yet. A `FREEZING` step first, so
     /// writers of the log look whether the freeze holds what they write from then on; then where every log ends, the
     /// freeze (`steps::freeze`) as the step of `global`'s log after its end, its mark, and the freeze at the next free
-    /// position of the scope database, within half of `FREEZE_WAIT` of the `FREEZING`, or it's tried again. → whether
-    /// it's frozen.
-    pub async fn switch(&self, caller: &Caller, recovery: &SigningKey, forced: bool) -> Result<bool> {
+    /// position of the scope database, within half of `FREEZE_WAIT` of the `FREEZING`, or it's tried again. Fails
+    /// saying why if it isn't frozen by it.
+    pub async fn switch(&self, caller: &Caller, recovery: &SigningKey, forced: bool) -> Result<()> {
         ensure!(caller.token.is_none() && caller.key == self.0.id, "the recovery key is used only on the machine it's kept on");
         let forced = forced && switch::FORCEABLE.load(std::sync::atomic::Ordering::Relaxed);
         ensure!(switch::SWITCH || forced, "the switch is off in this build: who's who stays the log until a release turns it on");
@@ -41,23 +41,24 @@ impl Node {
             ensure!(db.may(&user, "change-settings", scopes::INSTALL), "only an admin of {YOURS} freezes its log");
             let gate = switch::gate(db, &i.reads);
             ensure!(forced || gate.open(), "not every device reads who's who as the scope database yet: {CLI} status says which");
-            Ok(i.r.members.gate)
+            Ok(i.r.members.gate())
         })?;
         // That the gate is open, from this admin's own device, in the log: a freeze counts only if the log it names
         // ends after it (`steps::claimed`), so none signed before this release, by a recovery key since replaced, ever
         // does.
         if !gate {
             self.member_content(caller, members::gate()).await?;
+            ensure!(self.with(|i| Ok(i.r.members.gate()))?, "the gate this device wrote to {YOURS}'s log doesn't count, so it froze nothing");
         }
         for _ in 0..5 {
             if self.freeze_once(&user, recovery).await? {
                 // So a device of an older build is told to update when it next asks the relay, rather than wait for
                 // good to find itself in the frozen log.
                 self.tell_relay(json!({ "switched": switch::GATE.min(switch::READS) }));
-                return Ok(true);
+                return Ok(());
             }
         }
-        Ok(self.frozen())
+        bail!("devices kept writing to {YOURS}'s log, so its freeze didn't land within {} s in 5 tries: run it again", (FREEZE_WAIT / 2).as_secs())
     }
 
     /// What the ceremony says when the log is frozen already, by a freeze it didn't write.
@@ -66,7 +67,8 @@ impl Node {
         anyhow::anyhow!("{YOURS}'s log is frozen already, by a freeze at step {at} of who's who that this didn't write, so it froze nothing. If no one ran {CLI} switch for it before, find out who did before turning the switch on")
     }
 
-    /// One try at the ceremony's steps (`switch`). → whether it's frozen.
+    /// One try at the ceremony's steps (`switch`). → whether it's frozen: not if it took too long, so it's tried again;
+    /// fails if the freeze it wrote doesn't count, saying why.
     async fn freeze_once(&self, user: &str, recovery: &SigningKey) -> Result<bool> {
         let _write = self.own_writes().await?;
         // `global`'s log as the bucket has it, read before the `FREEZING`, so only what's written since is read after:
@@ -102,7 +104,12 @@ impl Node {
                 return match (wrote, at) {
                     (Some(wrote), Some(at)) if wrote == at => Ok(true),
                     (_, Some(_)) => Err(self.frozen_already()),
-                    (_, None) => Ok(false),
+                    (None, None) => Ok(false),
+                    (Some(wrote), None) => {
+                        let root = self.with(|i| Ok(i.r.root))?;
+                        steps::freezes(root, &log, end, recovery.verifying_key().to_bytes()).with_context(|| format!("the freeze it wrote at step {wrote} of who's who doesn't count"))?;
+                        bail!("the freeze it wrote at step {wrote} of who's who doesn't count: step {} of {YOURS}'s log isn't its mark", end + 1)
+                    }
                 };
             }
             // Written on since: freeze where it ends now.

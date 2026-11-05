@@ -462,6 +462,29 @@ mod tests {
         assert!(again.restart(&changed, 0).is_err());
     }
 
+    /// Bob's laptop opens the gate, then Andre demotes him: stepped one entry at a time as they arrive, who's who says
+    /// the gate isn't open, as replaying them all does, so the ceremony writes one of its own (`Node::switch`).
+    #[test]
+    fn the_gate_is_the_same_stepped_one_entry_at_a_time_as_replayed() {
+        const ANDRE: &str = "a000000000000001";
+        const BOB: &str = "b000000000000002";
+        let (mac, laptop) = (SigningKey::from_bytes(&[1; 32]), SigningKey::from_bytes(&[2; 32]));
+        let ext = |user: &str, previous: Vec<Hash>| Ext { log: "global".into(), time: 0, user: user.into(), epoch: 1, previous };
+        let g = Entry::create(&mac, Ext { epoch: 0, ..ext(ANDRE, Vec::new()) }, None, genesis("Home", ANDRE, "Andre", &Endpoint::of(&mac), "mac", &[Kind::Client], &[7; 32], &"e".repeat(64)));
+        let listed = Entry::create(&mac, ext(ANDRE, Vec::new()), Some(g.head()), device(&Endpoint::of(&laptop), BOB, "laptop", &[Kind::Client], Some(("Bob", Role::Admin))));
+        let gated = Entry::create(&laptop, ext(BOB, vec![listed.hash()]), None, members::gate());
+        let demoted = Entry::create(&mac, ext(ANDRE, vec![gated.hash()]), Some(listed.head()), members::role(BOB, Role::Member));
+        let entries = [g.clone(), listed, gated, demoted];
+        let mut r = Replica::new(mac.clone(), Store::memory().unwrap(), Some(g.hash()), 0).unwrap();
+        for (i, e) in entries.iter().enumerate() {
+            r.receive(vec![e.clone()], 0).unwrap();
+            assert!(!r.stale, "entry {i} stepped, not replayed");
+            assert_eq!(r.members.gate(), i == 2, "open from Bob's gate until his demotion");
+        }
+        let replayed = Members::replay(Some(g.hash()), &r.member_entries, &Default::default());
+        assert_eq!((r.members.gate(), replayed.gate()), (false, false));
+    }
+
     /// A device let in starts from where the device that let it in read who's who to (its Welcome), not from the
     /// freeze: the copy the bucket keeps before that step and the steps after it come to what that device has, as
     /// reading from the freeze does; a copy swapped for another, or a step held back, starts nothing, and a copy that

@@ -905,8 +905,8 @@ async fn reads(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
 async fn switch(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
     only(&body, &["recovery", "force"])?;
     let secret: [u8; 32] = crate::keys::unhex(text(&body, "recovery")?.trim()).map_err(|_| anyhow::anyhow!("a recovery key is 64 hex characters"))?;
-    let frozen = node.switch(&me.caller, &ed25519_dalek::SigningKey::from_bytes(&secret), body["force"] == true).await?;
-    Ok(Json(json!({ "frozen": frozen })))
+    node.switch(&me.caller, &ed25519_dalek::SigningKey::from_bytes(&secret), body["force"] == true).await?;
+    Ok(Json(json!({ "frozen": true })))
 }
 
 /// `[{ header, signature, body }]` (each base64url): steps of `global`'s scope database the caller's own device

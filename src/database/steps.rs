@@ -318,9 +318,9 @@ impl Log {
             }
             self.shaped.insert(at, step);
         }
-        // Read by a device that doesn't know the install yet: its genesis, as the first step holds it, so the epochs
-        // its entries make are worked out from it, not passed over.
-        if self.root.is_none() {
+        // Read by a device that doesn't know the install yet: its genesis, as its first step holds it, so the epochs
+        // its entries make are worked out from it, not passed over. Never one a later step holds.
+        if at == 1 && self.root.is_none() {
             self.root = self.read.entries.iter().find(|e| e.content.app == members::APP && e.content.kind == "genesis").map(Entry::hash);
         }
         self.ends.push(self.read.entries.len());
@@ -465,11 +465,13 @@ fn members_of(root: Option<Hash>, entries: &[Entry]) -> Members {
 }
 
 /// Each device that signed two entries at one seq of a log among `entries`, cut from the first: the forks a reader
-/// that holds just those finds, as a node's store finds them (`Store::forks`).
+/// that holds just those finds, as a node's store finds them (`Store::forks`). Only among those whose every entry they
+/// follow is there (`entry::causal`): the store keeps an entry, a fork's too, only once it is, and one that follows
+/// what no one holds waits for good.
 pub fn forks(entries: &[Entry]) -> Cuts {
     let mut seen: BTreeMap<(Key, String, u32), Hash> = BTreeMap::new();
     let mut cuts = Cuts::new();
-    for e in entries {
+    for e in &crate::entry::causal(entries.to_vec(), &Default::default()) {
         if seen.insert((e.author(), e.log().to_string(), e.seq()), e.hash()).is_some_and(|h| h != e.hash()) {
             let at = cuts.entry((e.author(), e.log().to_string())).or_insert(u32::MAX);
             *at = (*at).min(e.seq());
@@ -560,11 +562,17 @@ pub fn claimed(given: Option<&Given>, at: u64, root: Option<Hash>, log: &Log, re
     }
     let step = &g.step;
     let marked = log.marks.get(&(end + 1)).is_some_and(|m| m.author() == step.author() && m.content == step.content);
-    // Who's who where it ends: its signer is the recovery key there, and an admin's own device said the gate was open
-    // before, so nothing written before this release's ceremony, while a key since replaced was the recovery key, is
-    // ever one.
+    Ok((marked && freezes(root, log, end, step.author()).is_ok()).then_some(freeze))
+}
+
+/// Whether who's who where `global`'s log ends at `end`, from `log`, lets a freeze `signer` signed count: its signer
+/// is the recovery key there, and an admin's own device said the gate was open before, so nothing written before this
+/// release's ceremony, while a key since replaced was the recovery key, is ever one. → why not.
+pub fn freezes(root: Option<Hash>, log: &Log, end: u64, signer: Key) -> Result<()> {
     let there = members_of(root, log.entries(end));
-    Ok((marked && there.recovery == Some(step.author()) && there.gate).then_some(freeze))
+    ensure!(there.recovery == Some(signer), "the key that signed it isn't {YOURS}'s recovery key where its log ends, at step {end}");
+    ensure!(there.gate(), "no one who's still an admin where its log ends, at step {end}, opened the gate before it");
+    Ok(())
 }
 
 /// Of `steps`, `global`'s database's by position from the first, the step of `global`'s log a reader reads to the step
@@ -1506,12 +1514,34 @@ pub(crate) mod tests {
         let demoted = h.write(&mac, ANDRE, members::role(BOB, Role::Member));
         let gate = h.write_seeing(&laptop, BOB, members::gate(), 2);
         assert!(place(&h.entries, &gate) < place(&h.entries, &demoted), "it sorts before his demotion");
-        assert!(!members_of(Some(h.root()), &h.entries).gate);
+        assert!(!members_of(Some(h.root()), &h.entries).gate());
         let early = h.freeze(&r1, ANDRE, 1);
         assert!(h.read(std::slice::from_ref(&early)).unwrap().is_none());
         h.write(&mac, ANDRE, members::gate());
         let later = h.freeze(&r1, ANDRE, 2);
         assert_eq!(h.read(&[early, later]).unwrap().unwrap().at, 2, "an admin's gate opens it");
+    }
+
+    /// A device's second entry at one seq that follows an entry no one holds is no fork, to a node's store or to a
+    /// reader of the entries, since neither ever places it; one that follows what's there is one, to both.
+    #[test]
+    fn a_fork_is_the_same_to_a_node_s_store_and_a_reader_of_the_entries() {
+        let (mut h, mac, _, _) = two_admins();
+        let me = mac.verifying_key().to_bytes();
+        let mine: Vec<Entry> = h.entries.iter().filter(|e| e.author() == me).cloned().collect();
+        let ext = Ext { log: "global".into(), time: 1, user: ANDRE.into(), epoch: 1, previous: vec![Hash::from_bytes([9; 32])] };
+        let unplaced = Entry::create(&mac, ext, Some(mine[mine.len() - 2].head()), members::setting("name", Some("x")));
+        assert_eq!(unplaced.seq(), mine.last().unwrap().seq());
+        let store = |entries: &[Entry]| {
+            let store = crate::store::Store::memory().unwrap();
+            store.take(entries.to_vec()).unwrap();
+            store.forks().unwrap()
+        };
+        let entries = [h.entries.clone(), vec![unplaced]].concat();
+        assert!(store(&entries).is_empty() && forks(&entries).is_empty(), "no fork to either");
+        h.fork(&mac, ANDRE, members::setting("name", Some("y")));
+        let cut = BTreeMap::from([((me, "global".to_string()), mine.last().unwrap().seq())]);
+        assert_eq!((store(&h.entries), forks(&h.entries)), (cut.clone(), cut), "the same fork to both");
     }
 
     /// Once frozen, with no recovery key, the scope database keeps the same: an admin's own device names the next, and
@@ -1553,7 +1583,7 @@ pub(crate) mod tests {
         let (mut h, mac, laptop, r1) = before_the_gate();
         h.write(&mac, ANDRE, members::role(BOB, Role::Member));
         h.write(&laptop, BOB, members::gate());
-        assert!(!members_of(Some(h.root()), &h.entries).gate, "not a member's");
+        assert!(!members_of(Some(h.root()), &h.entries).gate(), "not a member's");
         let f = h.freeze(&r1, ANDRE, 1);
         assert!(h.read(&[f]).unwrap().is_none());
     }
