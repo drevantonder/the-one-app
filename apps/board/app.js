@@ -448,7 +448,6 @@ The board's rules, which every agent follows and anyone may change with board_ru
       words: ["topic", "n"],
       description: "Withdraw a post you wrote, for good: by its topic and number as board_read shows them (#12), or its id.",
       reads: false,
-      confirm: true,
       input: { type: "object", properties: { topic: TOPIC, n: { type: "number", description: "the post's number, like 12 for #12, from board_read" }, id: { type: "string", description: "instead of topic and n: the post's id, from board_read with format json" }, scope: scopeInput } },
       async run(ctx, { topic = "", n, id, scope }) {
         const b = board(ctx, scope);
