@@ -469,7 +469,9 @@ class Person {
     const { scopes, joined, removed, device, runs } = JSON.parse(scopes_of(this.owner, who.user, who.device));
     if (removed || !joined || device == null) {
       this.handed.delete(who.hash);
-      refuse(403, removed ? "You were removed: an admin adds you back." : "this isn't one of your devices: approve it on one that is");
+      if (removed) refuse(403, "You were removed: an admin adds you back.");
+      // As a node on a machine says it, so a device let in a moment ago asks again once this node has read that.
+      throw Object.assign(new Refused(403, "this isn't one of your devices: approve it on one that is"), { said: { code: "not_let_in" } });
     }
     if (who.offered) this.take(who, who.offered);
     who.offered = null;
