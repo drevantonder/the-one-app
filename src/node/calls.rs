@@ -337,13 +337,14 @@ impl Node {
         })
     }
 
-    /// How long a call may run: an app's, CALL_LIMIT; a service's, and that of an app that uses services (which waits
-    /// on theirs), SERVICE_LIMIT.
+    /// How long a call may run: an app's, CALL_LIMIT; a service's, and that of an app that uses services or other apps
+    /// (which wait on theirs, and may be calls of services), SERVICE_LIMIT.
     pub(super) async fn limit(&self, req: &CallRequest) -> Duration {
         if req.app == members::APP {
             return CALL_LIMIT;
         }
-        if req.service.is_some() || !self.uses_here(&req.app).await.1.is_empty() { SERVICE_LIMIT } else { CALL_LIMIT }
+        let (apps, services) = self.uses_here(&req.app).await;
+        if req.service.is_some() || !apps.is_empty() || !services.is_empty() { SERVICE_LIMIT } else { CALL_LIMIT }
     }
 
     pub(super) async fn run_here(&self, req: &CallRequest, me: &Caller, limit: Duration) -> Result<Reply> {

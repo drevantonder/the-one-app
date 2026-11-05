@@ -70,8 +70,8 @@ async function described(ctx, bundle) {
   const all = file ? new TextDecoder().decode(file.bytes) : "";
   const code = all.slice(Math.max(0, all.search(/^export default/m)));
   const field = (key) => code.match(new RegExp(`\\b${key}:\\s*"([^"]*)"`))?.[1] || null;
-  const parts = code.match(/\buses:\s*\{[^}]*\bservices:\s*\[([^\]]*)\]/)?.[1].match(/"[^"]+"/g)?.map((n) => n.slice(1, -1)) || [];
-  return { title: field("title"), icon: field("icon"), color: field("color"), tagline: field("tagline"), description: field("description"), needs: field("needs"), advanced: /\badvanced:\s*true\b/.test(code), uses: { apps: [], services: parts } };
+  const list = (kind) => code.match(new RegExp(`\\buses:\\s*\\{[^}]*\\b${kind}:\\s*\\[([^\\]]*)\\]`))?.[1].match(/"[^"]+"/g)?.map((n) => n.slice(1, -1)) || [];
+  return { title: field("title"), icon: field("icon"), color: field("color"), tagline: field("tagline"), description: field("description"), needs: field("needs"), advanced: /\badvanced:\s*true\b/.test(code), uses: { apps: list("apps"), services: list("services") } };
 }
 
 /// Whether an app is a service: it has no main screen and no widget, so shells keep it in each page's Services folder

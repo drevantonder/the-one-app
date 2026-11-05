@@ -233,7 +233,6 @@ pub struct Hosted {
 /// The services this program hosts.
 pub fn hosted() -> Vec<Hosted> {
     vec![
-        Hosted { name: crate::messenger::NAME, describe: crate::messenger::describe, call: crate::messenger::call },
         Hosted { name: crate::ai_usage::NAME, describe: crate::ai_usage::describe, call: crate::ai_usage::call },
     ]
 }
