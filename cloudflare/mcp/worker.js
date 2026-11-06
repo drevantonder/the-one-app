@@ -17,20 +17,18 @@
 // nodes kept warm between calls, and the keys it opened, all while it's asked; once nobody has asked for `IDLE`, it
 // closes its endpoint, forgets its keys and ends itself.
 //
-// It trusts no node for who's who or for keys: it reads the network's signed steps from the bucket itself, through
-// the URL signer, and asks the scope database it builds from them, with the same Rust as
-// every node (cloudflare/node/src/clients.rs). It asks only the compute endpoints that lists as running its person's
-// calls, hands each only the keys of the scopes it runs, of databases an MCP request uses (`mayHand`) and epochs from
-// each one's newest copy, and takes a 428 only from the node that answered, for its own listed seal key. What a tool needed is kept per tool, so a call hands only its own.
+// It trusts no node for who's who or for keys, as every client device: what it knows, the keys it opens and the 428s it
+// takes are one-client's keyring (client/src/keyring.rs, through cloudflare/node/src/clients.rs), which keeps what each
+// tool needed in this object's storage, so a call hands only its own.
 //
 // Bindings: AUTH (the sign-in), RELAY (the relay's `McpDevices` entrypoint), SIGNER (the URL signer), CLIENT
 // (this Worker's `Client`), ADDRESS (the network's), NAME (its name), LOCATION (where objects are made), IDLE (ms,
 // optional).
 
 import { DurableObject } from "cloudflare:workers";
-import { initSync, device_start, device_deliver, device_fetch, device_nodes, device_close, device_view, device_keys, following } from "./one_cloudflare_node.js";
+import { initSync, device_start, device_deliver, device_fetch, device_nodes, device_close, device_view, following } from "./one_cloudflare_node.js";
 import wasm from "./one_cloudflare_node_bg.wasm";
-import { b64u, ed25519Public, hex, joinCode, mayHand, random, sealHandoff, signedRequest, untilTaken } from "../shared/crypto.js";
+import { b64u, ed25519Public, hex, joinCode, random, signedRequest, untilTaken } from "../shared/crypto.js";
 import { READS, RELAY, URLS } from "../shared/protocol.js";
 import { Issuer, bearer } from "../shared/token.js";
 import { Copies } from "./copies.js";
@@ -42,11 +40,11 @@ const TO_NODE = ["content-type", "accept", "mcp-session-id", "mcp-protocol-versi
 const FROM_NODE = ["content-type", "mcp-session-id"];
 const BODY_MOST = 1 << 20;
 const VIEW_EVERY = 10_000;
-const NEEDS_MOST = 16;
-const TOOLS_MOST = 128;
 /// How long the relay keeps a device's binding, if it doesn't say, and how long before that ends it's bound again.
 const BOUND = 3_600_000;
 const BIND_AGAIN = 600_000;
+/// Where its storage keeps what its device's keyring keeps, by name.
+const KEPT = "kept:";
 /// How long before sign-in forgets a request to join it's asked again, and how soon one sign-in didn't take is.
 const JOIN_EARLY = 60_000;
 const JOIN_AGAIN = 30_000;
@@ -184,27 +182,6 @@ function answerAll(body, text) {
   return { status: 200, headers: { "content-type": "application/json" }, body: JSON.stringify(out) };
 }
 
-/// What an MCP request's needs are kept by: its tool (`tools/call <name>`), or its method; none for a batch, whose
-/// calls hand only what a 428 names.
-function toolOf(body) {
-  let msg;
-  try {
-    msg = JSON.parse(body);
-  } catch {
-    return null;
-  }
-  if (!msg || Array.isArray(msg) || typeof msg.method !== "string") return null;
-  const name = msg.method === "tools/call" && typeof msg.params?.name === "string" ? ` ${msg.params.name}` : "";
-  return `${msg.method}${name}`.slice(0, 160);
-}
-
-function needOf(n) {
-  const plain = (s, most) => typeof s === "string" && s.length > 0 && s.length <= most && /^[A-Za-z0-9:_-]+$/.test(s);
-  return n && plain(n.scope, 80) && plain(n.app, 64) && plain(n.database, 64) ? { scope: n.scope, app: n.app, database: n.database } : null;
-}
-
-const sameNeed = (a, b) => a.scope === b.scope && a.app === b.app && a.database === b.database;
-
 /// The bucket as the device's Rust reads it (cloudflare/node/src/lib.rs `Js`), through the URL signer, signed with the
 /// device's key: it gives URLs only to the network's endpoints. The steps after one are signed with it, as they're read
 /// next.
@@ -236,19 +213,6 @@ class Bucket {
     return { bytes: new Uint8Array(await r.arrayBuffer()), tag: r.headers.get("etag") || "" };
   }
 
-  /// Makes `name` if it isn't there: an app's key in an epoch, which the first to need it makes.
-  async create(name, bytes) {
-    const out = await this.sign({ create: [name] });
-    const r = await fetch(out.create[name], { method: "PUT", headers: { "if-none-match": "*" }, body: bytes });
-    if (r.status === 412) return false;
-    if (!r.ok) throw Object.assign(new Error(`the bucket said ${r.status} to writing ${name}`), { unanswered: r.status >= 500 });
-    return true;
-  }
-
-  async replace() {
-    throw new Error("a device replaces nothing in the bucket");
-  }
-
   wait(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
@@ -260,11 +224,9 @@ export class Client extends DurableObject {
     this.copies = new Copies(ctx.storage);
     this.asking = 0;
     this.out = [];
-    /// Who's who as it last read it: `{ listed, nodes: Map(key → { seal, scopes: Set }), at }`.
+    /// Who's who as it last read it: `{ nodes: Map(key → seal), at }`.
     this.view = null;
     this.viewing = Promise.resolve();
-    /// What each node was handed for this device's access token: key → `{ until, tools: Set }`.
-    this.handed = new Map();
     /// Its endpoint, while it's awake: `{ key, phase, ready, ticket, until }`, one at a time, `phase` "starting" until
     /// `ready` (it's bound at the relay, its endpoint started, and it's read who's who), then "running"; none while it's
     /// asleep. `end` takes it away at once, so what's asked after starts another, and closes it once it's started: a
@@ -295,8 +257,8 @@ export class Client extends DurableObject {
     await this.end();
     const was = await this.ctx.storage.get("device");
     const replaces = [...((await this.ctx.storage.get("replaces")) || []), ...(was?.key ? [was.key] : [])].slice(-4);
-    await this.ctx.storage.delete(["needs", "tools", "order", "join"]);
-    await this.ctx.storage.delete([...(await this.ctx.storage.list({ prefix: "needs:" })).keys()]);
+    await this.ctx.storage.delete(["order", "join"]);
+    await this.ctx.storage.delete([...(await this.ctx.storage.list({ prefix: KEPT })).keys()]);
     await this.ctx.storage.put({ device, replaces });
     await this.copies.start(new Uint8Array([...seed, ...sealSecret]), refresh, access, until);
     await this.join(device, access);
@@ -344,7 +306,7 @@ export class Client extends DurableObject {
       } catch (err) {
         // Taken out since it was approved: the relay no longer lets its key in, nor the network lists it.
         this.isApproved = false;
-        return answerAll(body, /isn't one of the network's|not listed|no keys of your/.test(err.message) ? approve : `${device.name} couldn't start: ${err.message}`);
+        return answerAll(body, err.notLetIn || /isn't one of the network's/.test(err.message) ? approve : `${device.name} couldn't start: ${err.message}`);
       }
       if (!nodes.length) nodes = await this.reorder(me);
       if (!nodes.length) return answerAll(body, "None of your devices is on right now.");
@@ -410,7 +372,6 @@ export class Client extends DurableObject {
     ended();
     await this.see(me);
     ended();
-    if (!this.view.listed) throw new Error(`this device is not listed as one of ${this.env.YOURS}'s`);
     run.phase = "running";
     console.log(JSON.stringify({ started: me.key.slice(0, 8), ms: Date.now() - began, listed: this.view.nodes.size, on: this.order.length }));
   }
@@ -431,13 +392,13 @@ export class Client extends DurableObject {
   }
 
   /// Reads who's who from the bucket (what's new, after the first time), one reading at a time, and the nodes it asks
-  /// with it: those the network lists as running its person's calls, that are on the relay now, in run priority's
+  /// with it: those who's who lists as running its person's calls, that are on the relay now, in run priority's
   /// order as it last read it.
   see(me) {
     const reading = this.viewing.then(async () => {
-      const said = JSON.parse(await device_view(me.key, me.user, me.seal.secret, new Bucket(this.env, me)));
-      const nodes = new Map(said.nodes.map((n) => [n.key, { seal: n.seal, scopes: new Set(n.scopes) }]));
-      this.view = { listed: said.listed, nodes, at: Date.now() };
+      const said = JSON.parse(await device_view(me.key, me.seal.secret, this.on(me)));
+      if (said.user !== me.user) throw Object.assign(new Error(`this device is not listed as one of ${this.env.YOURS}'s`), { notLetIn: true });
+      this.view = { nodes: new Map(said.nodes.map((n) => [n.key, n.seal])), at: Date.now() };
       await this.reorder(me);
     });
     this.viewing = reading.catch(() => {});
@@ -459,7 +420,7 @@ export class Client extends DurableObject {
     if (!this.run || this.run.learned) return;
     this.run.learned = true;
     try {
-      const r = await device_fetch(me.key, "GET", "/v1/state", [], new Uint8Array());
+      const r = await device_fetch(me.key, "GET", "/v1/state", [], new Uint8Array(), me.until, this.on(me));
       if (r.status !== 200 || !this.view?.nodes.has(r.node)) return;
       const state = JSON.parse(new TextDecoder().decode(r.body));
       const listed = this.view.nodes;
@@ -471,65 +432,33 @@ export class Client extends DurableObject {
     } catch {}
   }
 
-  async needsOf(tool) {
-    return (tool && (await this.ctx.storage.get(`needs:${tool}`))) || [];
+  /// What its device's keyring is handed (cloudflare/node/src/clients.rs `On`): the bucket, through the URL signer,
+  /// this object's storage, and whether the relay still lets it in.
+  on(me) {
+    const storage = this.ctx.storage;
+    return {
+      bucket: new Bucket(this.env, me),
+      get: async (name) => (await storage.get(KEPT + name)) ?? null,
+      put: (name, bytes) => storage.put(KEPT + name, bytes),
+      delete: (name) => storage.delete(KEPT + name),
+      letIn: async () => !!(await this.relay().allowed(me.key)),
+    };
   }
 
-  /// Keeps what `tool` needed besides what it kept, at most `NEEDS_MOST`, and `tool` among the `TOOLS_MOST` lately
-  /// used.
-  async remember(tool, needs) {
-    if (!tool) return;
-    const kept = await this.needsOf(tool);
-    for (const n of needs) if (!kept.some((k) => sameNeed(k, n)) && kept.length < NEEDS_MOST) kept.push(n);
-    const tools = ((await this.ctx.storage.get("tools")) || []).filter((t) => t !== tool);
-    tools.push(tool);
-    const gone = tools.splice(0, Math.max(0, tools.length - TOOLS_MOST));
-    if (gone.length) await this.ctx.storage.delete(gone.map((t) => `needs:${t}`));
-    await this.ctx.storage.put({ [`needs:${tool}`]: kept, tools });
-  }
-
-  /// Asks a node's `/mcp` as this device, handing the keys its tool needed before, for the scopes that node runs; a 428
-  /// says what else it needs, which it hands if the node that answered is the one it names, by its listed seal key,
-  /// and runs those scopes, asking once more.
+  /// Asks a node's `/mcp` as this device, with the keys its tool needs (the keyring's 428s); once more, if no node
+  /// answered, with the nodes on the relay now.
   async forward(me, headers, body) {
     const bytes = new TextEncoder().encode(body);
-    const tool = toolOf(body);
-    let handing = await this.handoff(me, this.order[0], tool, await this.needsOf(tool), false).catch(() => null);
     for (let tries = 0; ; tries++) {
-      const said = Object.entries(handing ? { ...headers, "x-one-keys": handing.sealed } : headers).flat();
       let r;
       try {
-        r = await device_fetch(me.key, "POST", "/mcp", said, bytes);
+        r = await device_fetch(me.key, "POST", "/mcp", Object.entries(headers).flat(), bytes, me.until, this.on(me));
       } catch (err) {
         if (err.sent) return answerAll(body, `Your device stopped answering: ${err.message}`);
-        if (tries === 0 && (await this.reorder(me)).length) {
-          handing = null;
-          continue;
-        }
-        return answerAll(body, "None of your devices is on right now.");
+        if (tries === 0 && (await this.reorder(me)).length) continue;
+        return answerAll(body, this.order.length ? err.message : "None of your devices is on right now.");
       }
-      const node = this.view.nodes.get(r.node);
-      if (!node) return answerAll(body, `A device ${this.env.YOURS} doesn't list as running your calls answered: it was given nothing.`);
       this.ctx.waitUntil(this.learnOrder(me));
-      if (r.status === 400 && handing && handing.to !== r.node && tries === 0) {
-        handing = null;
-        continue;
-      }
-      if (r.status === 428 && tries < 2) {
-        let need = {};
-        try {
-          need = JSON.parse(new TextDecoder().decode(r.body));
-        } catch {}
-        if (need.to !== r.node || need.seal !== node.seal) return answerAll(body, "A device asked for keys sealed to another than itself: it was given none.");
-        const wanted = (Array.isArray(need.need) ? need.need : []).map(needOf).filter(Boolean).slice(0, NEEDS_MOST);
-        const runs = wanted.filter((n) => node.scopes.has(n.scope));
-        if (runs.length < wanted.length) return answerAll(body, "That needs keys of a scope the device that answered doesn't run for you: it was given none.");
-        if (!wanted.every((n) => mayHand("/mcp", n))) return answerAll(body, "A device asked for keys an MCP request doesn't use: it was given none.");
-        await this.remember(tool, runs);
-        const handOver = tool ? await this.needsOf(tool) : runs;
-        handing = await this.handoff(me, r.node, tool, handOver.concat(runs.filter((n) => !handOver.some((k) => sameNeed(k, n)))), true).catch(() => null);
-        if (handing) continue;
-      }
       if (r.status === 428) {
         let error = null;
         try {
@@ -539,29 +468,8 @@ export class Client extends DurableObject {
       }
       const out = {};
       for (let i = 0; i < r.headers.length; i += 2) if (FROM_NODE.includes(r.headers[i])) out[r.headers[i]] = r.headers[i + 1];
-      if (handing?.to === r.node) {
-        const was = this.handed.get(r.node);
-        const tools = was?.until === me.until ? was.tools : new Set();
-        tools.add(tool);
-        this.handed.set(r.node, { until: me.until, tools });
-      }
       return { status: r.status, headers: out, body: r.body };
     }
-  }
-
-  /// What it hands `node` with a call of `tool`: the keys of `needs` in the scopes the network says it runs for this
-  /// device's person, each epoch it opens, sealed to that node's listed seal key, for this device's key, until its
-  /// access token expires. Null if the node has them already (unless `again`), or there's nothing to hand.
-  async handoff(me, to, tool, needs, again) {
-    const node = to && this.view?.nodes.get(to);
-    if (!node) return null;
-    const handed = this.handed.get(to);
-    if (!again && handed?.until === me.until && handed.tools.has(tool)) return null;
-    const theirs = needs.filter((n) => node.scopes.has(n.scope));
-    if (!theirs.length) return null;
-    const keys = JSON.parse(await device_keys(me.key, JSON.stringify(theirs), new Bucket(this.env, me)));
-    if (!keys.length) return null;
-    return { to, sealed: await sealHandoff(hex.decode(node.seal), { for: me.key, until: me.until, keys }) };
   }
 
   /// Removes the devices this one replaced, made by earlier sign-ins of the same client, once this one's approved: as
@@ -575,7 +483,7 @@ export class Client extends DurableObject {
     try {
       const left = [];
       for (const key of replaced) {
-        const r = await device_fetch(me.key, "POST", "/v1/remove", ["content-type", "application/json"], new TextEncoder().encode(JSON.stringify({ key }))).catch(() => null);
+        const r = await device_fetch(me.key, "POST", "/v1/remove", ["content-type", "application/json"], new TextEncoder().encode(JSON.stringify({ key })), me.until, this.on(me)).catch(() => null);
         const why = r ? new TextDecoder().decode(r.body) : "";
         if (!r || (r.status !== 200 && !/no such/.test(why))) left.push(key);
         console.log(JSON.stringify({ removed: key.slice(0, 8), status: r?.status, why: r?.status === 200 ? undefined : why.slice(0, 200) }));
@@ -637,7 +545,6 @@ export class Client extends DurableObject {
     const run = this.run;
     this.run = this.view = null;
     this.isApproved = false;
-    this.handed = new Map();
     this.order = [];
     if (!run) return this.ending;
     run.phase = "ending";
