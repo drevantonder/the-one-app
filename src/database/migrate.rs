@@ -3,7 +3,7 @@
 //! turns them into this release's names as it reads them, here and nowhere else; nothing writes the old ones (Andre,
 //! 2026-11-06). The network's table and type were `install`; app schedules' tables `keeps` and `keep_keys`, and their
 //! step `grant`; the permission to choose which devices keep a scope's apps running, run its calls and open its Vault
-//! was `keep`.
+//! was `keep`. The setting that names the Cloudflare node was `serverless`.
 
 use rusqlite::Connection;
 use serde_json::Value;
@@ -18,6 +18,9 @@ pub fn database(db: &Connection) -> rusqlite::Result<()> {
         if has(old) && !has(new) {
             db.execute_batch(&format!("ALTER TABLE {old} RENAME TO {new}"))?;
         }
+    }
+    if has("settings") {
+        db.execute_batch("UPDATE OR REPLACE settings SET name = 'cloudflare_node' WHERE name = 'serverless'")?;
     }
     if has("types") && has("roles") && has("relations") {
         db.execute_batch(
@@ -40,6 +43,7 @@ pub fn content(c: &mut Content) {
     }
     match c.kind.as_str() {
         "grant" => c.kind = crate::database::scopes::APP_SCHEDULES.to_string(),
+        "setting" if c.data["name"] == "serverless" => c.data["name"] = crate::database::scopes::CLOUDFLARE_NODE.into(),
         super::steps::DEFAULTS => renamed(&mut c.data),
         _ => {}
     }
@@ -80,6 +84,9 @@ mod tests {
         database(&old).unwrap();
         database(&new).unwrap();
         assert_eq!(crate::database::stored::state_hash(&old).unwrap(), crate::database::stored::state_hash(&new).unwrap());
+        old.execute("INSERT INTO settings VALUES ('serverless', 'abc')", []).unwrap();
+        database(&old).unwrap();
+        assert_eq!(old.query_row("SELECT value FROM settings WHERE name = 'cloudflare_node'", [], |r| r.get::<_, String>(0)).unwrap(), "abc");
         crate::permissions::close(&old, None).unwrap();
         assert!(crate::permissions::may(&old, "person:a", "choose-devices", crate::permissions::NETWORK, 0).unwrap());
     }
@@ -89,6 +96,9 @@ mod tests {
         let mut grant = Content::new(crate::database::scopes::APP, "grant", serde_json::json!({ "app": "notes" }));
         content(&mut grant);
         assert_eq!(grant.kind, crate::database::scopes::APP_SCHEDULES);
+        let mut setting = crate::database::content::setting("serverless", Some("abc"));
+        content(&mut setting);
+        assert_eq!(setting.data["name"], crate::database::scopes::CLOUDFLARE_NODE);
         let mut defaults = Content::new(crate::database::scopes::APP, super::super::steps::DEFAULTS, serde_json::json!({
             "types": [["install", "[\"use\",\"keep\"]"]], "roles": [["install", "admin", "[\"keep\"]", "[]"]], "rules": [["install:global#admin", "admin", "install:*"]],
         }));

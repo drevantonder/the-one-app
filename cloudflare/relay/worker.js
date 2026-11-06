@@ -46,7 +46,7 @@
 //
 // One endpoint isn't a socket: the Cloudflare node (`BOUND`, its key), a Durable Object of its own Worker (`NODE`) that
 // sleeps until someone calls it. Datagrams sent to it go to it by RPC, gathered each turn, waking it; what it sends
-// comes back by RPC (`fromNode`, on the `ServerlessNode` entrypoint, which only its Worker binds) and goes out as from
+// comes back by RPC (`fromNode`, on the `CloudflareNode` entrypoint, which only its Worker binds) and goes out as from
 // it. It's one of the network's endpoints, as compute.
 //
 // Nor are the remote MCP server's devices (cloudflare/mcp/), one per remote MCP client, each in a Durable Object of that Worker's
@@ -220,7 +220,7 @@ export class McpDevices extends WorkerEntrypoint {
 }
 
 /// What the Cloudflare node asks the relay, by its binding: sending as itself, and who's here.
-export class ServerlessNode extends WorkerEntrypoint {
+export class CloudflareNode extends WorkerEntrypoint {
   fromNode(items) {
     return relay(this.env).fromNode(items);
   }

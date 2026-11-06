@@ -1248,7 +1248,7 @@ impl Node {
             ("GET", "/order") => {
                 let network = self.state_for(&grant.caller)["network"].take();
                 let mut order: Vec<Value> = network["devices"].as_array().cloned().unwrap_or_default().into_iter().map(|s| json!({ "name": s["name"], "key": s["key"], "kind": s["kind"], "priority": s["priority"], "online": s["online"], "here": s["me"] })).collect();
-                if let Some(priority) = network["serverless"].get("priority") {
+                if let Some(priority) = network["cloudflare_node"].get("priority") {
                     order.push(json!({ "name": "Cloudflare", "key": rank::CLOUDFLARE, "kind": rank::CLOUDFLARE, "priority": priority, "online": true, "here": false }));
                 }
                 let set = self.with(|i| Ok(rank::set(&i.r.db().settings())))?;

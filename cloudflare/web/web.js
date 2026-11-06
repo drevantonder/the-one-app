@@ -518,11 +518,11 @@ const h = OneUI.react.createElement;
     // The nodes this browser asks itself, in the order things run on them, the Cloudflare node by its run priority
     // (last, unless an admin moved it).
     const nodes = (state.network?.devices || []).filter((d) => d.serves_me).sort((a, b) => a.order - b.order).map((d) => d.key);
-    const last = state.network?.serverless?.key;
+    const last = state.network?.cloudflare_node?.key;
     if (last && !nodes.includes(last)) nodes.push(last);
     const rank = (p) => (p === "last" ? 0xffffffff : p);
     const ranks = Object.fromEntries((state.network?.devices || []).filter((d) => d.priority != null).map((d) => [d.key, rank(d.priority)]));
-    if (last) ranks[last] = rank(state.network.serverless.priority ?? "last");
+    if (last) ranks[last] = rank(state.network.cloudflare_node.priority ?? "last");
     nodes.sort((a, b) => (ranks[a] ?? 1) - (ranks[b] ?? 1));
     if (!native && state.user && nodes.length) net.nodes(state.user.id, nodes, ranks, last);
     const regrouped = JSON.stringify([state.user, state.network?.groups]) !== JSON.stringify([store.state?.user, store.state?.network?.groups]);

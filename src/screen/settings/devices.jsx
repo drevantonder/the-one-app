@@ -174,7 +174,7 @@ function model(x, again) {
       id: c.id, name: c.name, icon: c.icon, whose: c.user === me ? "" : `${userName(c.user)}’s`, p: c.priority,
       keys: [c.node.key],
     }))
-    const s = state.network?.serverless
+    const s = state.network?.cloudflare_node
     if (s) entries.push({ id: "cloudflare", name: "Cloudflare", icon: CLOUDFLARE, whose: "", p: s.priority ?? "last", keys: ["cloudflare"] })
     const numbers = [...new Set(entries.filter((e) => e.p !== "last").map((e) => rank(e.p)))].sort((a, b) => a - b)
     return { cols: numbers.map((n) => entries.filter((e) => e.p !== "last" && rank(e.p) === n)), last: entries.filter((e) => e.p === "last") }
@@ -184,7 +184,7 @@ function model(x, again) {
   /// apps, and runs the services built for it that an admin switches on, for the apps in the network.
   function gridColumns() {
     const cols = drawn.cards.filter((c) => c.user === me && c.runs).map((c) => ({ c, name: c.name, icon: c.icon, parts: partsOf(c) }))
-    const s = state.network?.serverless
+    const s = state.network?.cloudflare_node
     if ((cols.length || admin) && s) {
       const parts = (s.parts || [{ name: "apps", on: true, fixed: true }]).filter((p) => p.name === "apps" || appOf(p.name))
       cols.push({ c: null, name: "Cloudflare", icon: CLOUDFLARE, parts: parts.map((p) => (p.fixed || !admin ? { ...p, fixed: true } : { ...p, part: { device: s.key, name: p.name } })) })
@@ -348,7 +348,7 @@ function Devices() {
         network: {
           ...network,
           devices: (network.devices || []).map((d) => (d.key in set ? { ...d, priority: set[d.key] } : d)),
-          serverless: network.serverless && "cloudflare" in set ? { ...network.serverless, priority: set.cloudflare } : network.serverless,
+          cloudflare_node: network.cloudflare_node && "cloudflare" in set ? { ...network.cloudflare_node, priority: set.cloudflare } : network.cloudflare_node,
           settings: { ...network.settings, priority: value },
         },
       },

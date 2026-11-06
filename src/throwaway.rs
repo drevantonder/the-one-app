@@ -196,7 +196,7 @@ fn cloudflare_node(dir: &Path) -> Result<()> {
     }
     let addr = running(dir).context("the throwaway network didn't start again")?;
     let key = settings.cloudflare_node_endpoint().context("the throwaway network's Workers have no Cloudflare node key")?;
-    crate::request(throwaway_agent(dir).post(format!("http://{addr}/v1/settings")).send_json(json!({ "name": "serverless", "value": key })))?;
+    crate::request(throwaway_agent(dir).post(format!("http://{addr}/v1/settings")).send_json(json!({ "name": one::database::scopes::CLOUDFLARE_NODE, "value": key })))?;
     println!("The throwaway network's Cloudflare node runs beside its Workers, its endpoint {}.", &key[..8]);
     Ok(())
 }

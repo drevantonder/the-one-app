@@ -148,7 +148,7 @@ function W(e, t) {
 			whose: e.user === s ? "" : `${f(e.user)}’s`,
 			p: e.priority,
 			keys: [e.node.key]
-		})), t = n.network?.serverless;
+		})), t = n.network?.cloudflare_node;
 		return t && e.push({
 			id: "cloudflare",
 			name: "Cloudflare",
@@ -167,7 +167,7 @@ function W(e, t) {
 			name: e.name,
 			icon: e.icon,
 			parts: _(e)
-		})), t = n.network?.serverless;
+		})), t = n.network?.cloudflare_node;
 		if ((e.length || c) && t) {
 			let n = (t.parts || [{
 				name: "apps",
@@ -320,10 +320,10 @@ function G() {
 						...e,
 						priority: u[e.key]
 					} : e),
-					serverless: l.serverless && "cloudflare" in u ? {
-						...l.serverless,
+					cloudflare_node: l.cloudflare_node && "cloudflare" in u ? {
+						...l.cloudflare_node,
 						priority: u.cloudflare
-					} : l.serverless,
+					} : l.cloudflare_node,
 					settings: {
 						...l.settings,
 						priority: f

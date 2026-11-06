@@ -1037,7 +1037,7 @@ mod tests {
         net.step(&mac, ANDRE, node("app", json!({ "name": "notes", "owner": "group:c000000000000003" })));
         net.step(&mac, ANDRE, node("app", json!({ "name": "tally", "owner": "admins" })));
         net.step(&bobs, BOB, node("app", json!({ "name": "bobs", "owner": format!("user:{BOB}") })));
-        net.step(&mac, ANDRE, setting("serverless", Some(&hex(&Dev::new(14).id()))));
+        net.step(&mac, ANDRE, setting(crate::database::scopes::CLOUDFLARE_NODE, Some(&hex(&Dev::new(14).id()))));
         let (laptop, tablet) = (Dev::new(5), Dev::new(6));
         net.step(&bobs, BOB, device(&laptop.endpoint(), BOB, "laptop", &[Kind::Client], None));
         net.step(&bobs, BOB, device(&tablet.endpoint(), BOB, "tablet", &[Kind::Client], None));

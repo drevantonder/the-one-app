@@ -513,9 +513,9 @@ impl ScopeDb {
         self.machine(k).map(|m| m.seal)
     }
 
-    /// The Cloudflare node, as an admin's `serverless` setting names it (the setting keeps its old name: every device reads it from the signed entries).
+    /// The Cloudflare node, as an admin's `CLOUDFLARE_NODE` setting names it.
     pub fn cloudflare_node(&self) -> Option<Key> {
-        self.setting("serverless").and_then(|k| unhex(&k).ok())
+        self.setting(CLOUDFLARE_NODE).and_then(|k| unhex(&k).ok())
     }
 
     /// Where a person's own things run besides their own machines, as their own device last said, if it has.
@@ -740,6 +740,8 @@ impl ScopeDb {
 
 /// The node's own steps and databases. Apps never see them.
 pub const APP: &str = "node";
+/// The setting that names the Cloudflare node's endpoint (its key, hex).
+pub const CLOUDFLARE_NODE: &str = "cloudflare_node";
 /// The kind of node entry that sets app schedules.
 pub const APP_SCHEDULES: &str = "app-schedules";
 /// The app service, as a part of a device's oned its `service` entries switch: running apps' calls.

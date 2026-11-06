@@ -154,10 +154,10 @@ fn network(m: &ScopeDb, me: &str, settings: &Map<String, Value>, here: &Here) ->
         // over.
         "app_schedules": m.app_schedules().iter().filter(|((k, s, _), g)| m.may(me, "choose-devices", &object(s)) && m.machine(k).is_some() && m.may(&g.by, "choose-devices", &object(s))).map(|((k, s, a), g)| json!({ "endpoint": hex(k), "scope": s.to_string(), "app": a, "until": g.until, "by": g.by, "keys": g.hashes })).collect::<Vec<_>>(),
         "entries": here.entries, "settings": settings,
-        // The Cloudflare node, once an admin deployed one (`cloudflare node deploy` sets `serverless`, which clients read here by that name).
+        // The Cloudflare node, once an admin deployed one (`cloudflare node deploy` sets it).
         // Its parts, as a device's oned lists its own: it always runs apps, and an admin switches on each service built
         // for it that it carries (a built-in app's `service/cloudflare.js`).
-        "serverless": m.cloudflare_node().map(|key| {
+        "cloudflare_node": m.cloudflare_node().map(|key| {
             let mut parts = vec![json!({ "name": scopes::APPS_PART, "on": true, "fixed": true })];
             parts.extend(crate::config::CLOUDFLARE_SERVICES.iter().map(|(name, _)| json!({ "name": name, "on": m.switch(&key, name).is_some_and(|s| s.on) })));
             json!({ "priority": rank::priority(&set, rank::CLOUDFLARE).to_value(), "key": hex(&key), "runs_for": m.run_by(&key).iter().map(crate::database::scopes::Scope::to_string).collect::<Vec<_>>(), "parts": parts })

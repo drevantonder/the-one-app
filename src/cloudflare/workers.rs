@@ -497,7 +497,7 @@ impl Settings {
                 ("ADDRESS".into(), self.address.clone(), false),
                 ("NAME".into(), self.name.clone(), false),
                 ("NODE_KEY".into(), self.cloudflare_node_key.clone(), true),
-                ("RELAY".into(), "service:relay:ServerlessNode".into(), false),
+                ("RELAY".into(), "service:relay:CloudflareNode".into(), false),
             ];
             // The network's root, as sign-in's: its members are replayed from no other.
             out.extend(self.root.clone().map(|g| ("ROOT".into(), g, false)));

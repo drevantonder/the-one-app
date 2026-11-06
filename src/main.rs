@@ -360,7 +360,7 @@ fn running() -> Command {
                         }
                     }
                     // The Cloudflare node, whose services an admin switches (`--device cloudflare`).
-                    if let Some(parts) = state["network"]["serverless"]["parts"].as_array() {
+                    if let Some(parts) = state["network"]["cloudflare_node"]["parts"].as_array() {
                         println!("Cloudflare");
                         for p in parts {
                             println!("  {}  {}", p["name"].as_str().unwrap_or(""), if p["on"] == true { "on" } else { "off" });
@@ -1047,7 +1047,7 @@ fn status(state: &Value) {
         }
     }
     // Not a device, but a node like the rest: woken when asked, in its place in run priority.
-    if let Some(priority) = i["serverless"].get("priority") {
+    if let Some(priority) = i["cloudflare_node"].get("priority") {
         let at = priority.as_u64().map_or("last".to_string(), |n| n.to_string());
         println!("  ● Cloudflare node  run priority {at}");
     }

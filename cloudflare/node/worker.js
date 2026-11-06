@@ -25,7 +25,7 @@
 // It ends itself once nobody has asked for a while, since iroh's timers would keep it awake, and billed, for good.
 //
 // Bindings: SIGNER (the URL signer), LOADER (Worker Loader), NODE (this Worker's `Node`), NODE_KEY (its endpoint's
-// key, a secret), RELAY (the relay's `ServerlessNode` entrypoint), LOCATION (where objects are made), ADDRESS (the
+// key, a secret), RELAY (the relay's `CloudflareNode` entrypoint), LOCATION (where objects are made), ADDRESS (the
 // network's), NAME (its name) and AI (Workers AI). `built.js`, made when it's deployed, is the shim, and the services built
 // for Cloudflare it carries (`service-<app>.js`), each run here once an admin switches it on.
 
@@ -847,8 +847,8 @@ const keysFirst = (err) => {
 const plain = (d, view) => !d.uses?.apps?.length && servedHere(view, d) && !d.vault;
 
 /// Whether the service `name`, built for Cloudflare, runs here: an admin switched it on (src/state.rs:
-/// `serverless.parts`), and this node carries its build.
-const onHere = (view, name) => Object.hasOwn(services, name) && (view.state.network.serverless?.parts || []).some((p) => p.name === name && p.on);
+/// `cloudflare_node.parts`), and this node carries its build.
+const onHere = (view, name) => Object.hasOwn(services, name) && (view.state.network.cloudflare_node?.parts || []).some((p) => p.name === name && p.on);
 
 /// Whether every service an app uses runs here.
 const servedHere = (view, d) => (d?.uses?.services || []).every((s) => onHere(view, s));
@@ -1133,7 +1133,7 @@ export class Node extends DurableObject {
     if (!this.isEndpoint) throw new Error("only the Cloudflare node's endpoint does that");
   }
 
-  /// The relay, by its `ServerlessNode` entrypoint: sending as this node, and who's here.
+  /// The relay, by its `CloudflareNode` entrypoint: sending as this node, and who's here.
   relay() {
     return this.env.RELAY;
   }

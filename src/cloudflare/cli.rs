@@ -171,7 +171,7 @@ pub fn commands() -> Command {
                     }
                     // So devices answer its endpoint, and Devices shows it, for its admins to say where it comes in the order
                     // things run in.
-                    node.post("/v1/settings", json!({ "name": "serverless", "value": settings.cloudflare_node_endpoint() }))?;
+                    node.post("/v1/settings", json!({ "name": crate::database::scopes::CLOUDFLARE_NODE, "value": settings.cloudflare_node_endpoint() }))?;
                     println!("The Cloudflare node is in your Cloudflare account: devices ask it over iroh when none of your machines answers.");
                 }
                 ["cloudflare", "invite", name] => {

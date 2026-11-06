@@ -582,7 +582,7 @@ impl Node {
 
     /// Whether `key` is the network's Cloudflare node's endpoint, as `cloudflare node deploy` set it.
     fn is_cloudflare_node(&self, key: &Key) -> bool {
-        self.with(|i| Ok(i.r.db().setting("serverless").is_some_and(|k| k == hex(key)))).unwrap_or(false)
+        self.with(|i| Ok(i.r.db().setting(crate::database::scopes::CLOUDFLARE_NODE).is_some_and(|k| k == hex(key)))).unwrap_or(false)
     }
 
     /// Closes the connections of devices the network no longer lists: client devices' to the local API, and those
@@ -593,7 +593,7 @@ impl Node {
             .with(|i| {
                 let m = i.r.db();
                 // A session's endpoint, listed nowhere, is cut off at its next request instead.
-                Ok((clients.into_iter().filter(|k| m.machine_ever(k).is_some() && m.client(k).is_none()).collect(), held.into_iter().filter(|k| m.compute(k).is_none() && m.service(k).is_none() && m.setting("serverless").is_none_or(|s| s != hex(k))).collect()))
+                Ok((clients.into_iter().filter(|k| m.machine_ever(k).is_some() && m.client(k).is_none()).collect(), held.into_iter().filter(|k| m.compute(k).is_none() && m.service(k).is_none() && m.setting(crate::database::scopes::CLOUDFLARE_NODE).is_none_or(|s| s != hex(k))).collect()))
             })
             .unwrap_or_default();
         for key in gone_clients {
