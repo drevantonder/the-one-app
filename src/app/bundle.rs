@@ -46,7 +46,6 @@ fn walk(dir: &Path, prefix: &str, repo: Option<&Path>, links: usize, out: &mut V
     Ok(())
 }
 
-/// The built module a bundle holds.
 pub fn module(bundle: &[u8]) -> Result<String> {
     let (_, bytes) = unpack(bundle)?.into_iter().find(|(path, _)| path == "app.js").context("the bundle has no app.js")?;
     Ok(String::from_utf8(bytes)?)

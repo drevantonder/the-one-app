@@ -72,7 +72,6 @@ impl Network {
     }
 }
 
-/// A service endpoint, offering one service.
 #[derive(Clone)]
 pub struct Service(Arc<Inner>);
 
@@ -590,8 +589,6 @@ fn now_ms() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
 }
 
-// The loopback's routes.
-
 fn refused(code: StatusCode, why: impl std::fmt::Display) -> Response {
     (code, Json(json!({ "error": why.to_string() }))).into_response()
 }
@@ -720,7 +717,6 @@ fn stop_check(parent: u32) -> Result<impl Fn() -> bool> {
     Ok(move || ASKED.load(SeqCst) || std::fs::metadata(&exe).map(|m| m.ino()).ok() != Some(ino) || std::os::unix::process::parent_id() != parent)
 }
 
-/// Whether this part was asked to stop.
 static ASKED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// `oned <name>`: the service `name` as a part of this device's oned, which started it, until oned stops or this
@@ -763,7 +759,6 @@ pub fn run(name: &str) -> Result<()> {
 /// Where the endpoint says why its program can't start in its sandbox, in its folder, which oned shows on it.
 pub const PROBLEM: &str = "problem";
 
-/// A service's program running: a process of this one's, or its unit.
 enum Running {
     Child(std::process::Child),
     Unit(String),
@@ -773,7 +768,6 @@ enum Running {
 }
 
 impl Running {
-    /// How it stopped, once it has.
     fn done(&mut self) -> Result<Option<String>> {
         Ok(match self {
             Running::Child(child) => child.try_wait()?.map(|s| s.to_string()),
@@ -1001,7 +995,6 @@ fn end(child: &mut std::process::Child) {
     let _ = child.wait();
 }
 
-/// The steps a service kept (`take_steps`).
 fn read_steps(path: &Path) -> Vec<Option<crate::database::steps::Given>> {
     let kept: Vec<Value> = std::fs::read(path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
     kept.iter()

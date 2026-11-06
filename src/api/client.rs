@@ -180,7 +180,6 @@ impl Via for InProcess {
     }
 }
 
-/// A body read as its chunks come.
 struct Streamed {
     chunks: std::sync::mpsc::Receiver<axum::body::Bytes>,
     part: axum::body::Bytes,

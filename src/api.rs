@@ -231,7 +231,7 @@ pub fn clients_may(path: &str) -> bool {
 }
 
 /// A request that asks for a trace (`x-one-trace`, a client in developer mode) gets what it did here in the same
-/// header of its answer, as base64 of its JSON (`node::trace`): an older node answers without it.
+/// header of its answer, as base64 of its JSON (`node::trace`).
 async fn traced(State(node): State<Node>, req: axum::extract::Request, next: axum::middleware::Next) -> Response {
     use crate::node::trace;
     if !req.headers().contains_key(trace::HEADER) {
@@ -272,7 +272,6 @@ async fn llms(State(node): State<Node>, headers: axum::http::HeaderMap) -> Respo
     markdown(crate::skills::root(&deeper, |s| format!("[{}](http://{host}/skills/{}/SKILL.md)", s.name, s.name)).body)
 }
 
-/// One of a skill's files.
 async fn skill_file(State(node): State<Node>, Path((name, path)): Path<(String, String)>) -> Response {
     match skills(&node).await.into_iter().find(|s| s.name == name).and_then(|s| s.file(&path)) {
         Some(text) => markdown(text),
@@ -280,7 +279,6 @@ async fn skill_file(State(node): State<Node>, Path((name, path)): Path<(String, 
     }
 }
 
-/// The local API's port.
 pub fn port() -> u16 {
     addr().rsplit(':').next().and_then(|p| p.parse::<u16>().ok()).unwrap_or(crate::config::PORT)
 }

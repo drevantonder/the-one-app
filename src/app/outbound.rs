@@ -36,7 +36,6 @@ async fn handle(State(node): State<Node>, req: Request) -> Response {
     }
 }
 
-/// Makes an app's request, with its call's Vault fields filled in.
 async fn out(node: Node, req: Request) -> Result<Response> {
     let (parts, body) = req.into_parts();
     let header = |name: &str| parts.headers.get(name).and_then(|v| v.to_str().ok()).map(str::to_string);

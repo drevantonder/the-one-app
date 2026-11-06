@@ -36,12 +36,10 @@ pub struct Declared {
 }
 
 impl Declared {
-    /// Whether it may reach any host.
     pub fn any_host(&self) -> bool {
         self.network.iter().any(|h| h == "*")
     }
 
-    /// Whether it may reach `host` at `port`.
     pub fn allows(&self, host: &str, port: u16) -> bool {
         let host = host.trim_start_matches('[').trim_end_matches(']').to_ascii_lowercase();
         self.network.iter().any(|d| {
@@ -103,7 +101,6 @@ pub fn unsandboxed(declared: Option<&Declared>, device: &str) -> Option<String> 
     }
 }
 
-/// The systemd template every unit is of.
 pub fn template() -> PathBuf {
     PathBuf::from(format!("/etc/systemd/system/{CLI}-service@.service"))
 }
@@ -200,7 +197,6 @@ echo \"{NAME}'s services run in their sandbox here from their next start.\"
 /// What the launcher is told, in `sandbox.json` in its folder.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Launch {
-    /// The service's name.
     pub name: String,
     /// Whether it gets a network of its own, reaching out only through its endpoint.
     pub own_network: bool,
@@ -210,7 +206,6 @@ pub struct Launch {
     pub data: Option<PathBuf>,
 }
 
-/// The program, put in the sandbox's folder as `program`.
 pub const PROGRAM: &str = "program";
 /// The socket to its endpoint, in the sandbox's folder.
 pub const SOCKET: &str = "socket";
@@ -303,8 +298,6 @@ pub fn seatbelt(declared: &Declared, endpoint: u16, data: &Path, token: &Path, p
     }
     profile
 }
-
-// The launcher, in the sandbox.
 
 /// The launcher: given its folder, gives the program in it a network of its own (if it's to have one), moves its data
 /// from before in, forwards a port to its endpoint, starts it, and stops it when asked or when its endpoint is gone.
@@ -514,8 +507,6 @@ fn forward(listener: std::net::TcpListener, socket: PathBuf, port: Option<u16>) 
         }
     });
 }
-
-// The proxy, at its endpoint.
 
 /// Answers a program's `CONNECT host:port`: a tunnel to it, if its app declares it, and it isn't this machine unless
 /// declared by its address. Anything else is refused.
