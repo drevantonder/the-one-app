@@ -29,9 +29,11 @@
 // endpoints' keys, the Cloudflare node's among them, in no order: a new client's first nodes to ask; and `online`, those
 // of them connected here now, which a client races first. 403 is only for a key that isn't let in; a request
 // that's wrong, or signed by a clock that's off, is 400, so a client keeps the nodes it knows. Once an admin's device
-// said who's who was switched (`switched`, below), a device's own request that says it reads less (`reads`, an older
-// build's says nothing) is 426, telling it to update: the one thing an older build shows before it would wait for good
-// to find itself in the log. A browser's session runs the code the address serves, the newest, so it isn't asked.
+// said who's who was switched (`switched`, below), or the Workers were deployed for an install that is (`SWITCHED`, what
+// a device must read then), a device's own request that says it reads less (`reads`, an older build's says nothing) is
+// 426, telling it to update: the one thing an older build shows before it would wait for good to find itself in the
+// log. A browser's session runs the code the address serves, the newest, so it isn't asked. The URL signer, told the
+// same by `allowed`, refuses such a device's writes the same way.
 //
 // What a device tells it is `POST /relay/tell`, its body a request signed by a key on the list (`signedRequest` in
 // shared/crypto.js, domain `one/relay`, each `(by, at)` taken once) with one of:
@@ -183,6 +185,12 @@ export default class extends WorkerEntrypoint {
     return isKey(key) ? this.relay().allowed(key) : null;
   }
 
+  /// What a device must read of who's who now (`mustRead`), for sign-in, which tells one that reads less to update
+  /// before it asks to join.
+  async mustRead() {
+    return this.relay().mustRead();
+  }
+
   relay() {
     return relay(this.env);
   }
@@ -253,6 +261,13 @@ export class Relay extends DurableObject {
       this.sql.exec("ALTER TABLE bound ADD COLUMN ticket TEXT NOT NULL DEFAULT ''");
     } catch {}
     this.sql.exec("DELETE FROM bound WHERE ticket = ''");
+    // Deployed for an install that's switched (`SWITCHED`): kept, as an admin's tell is, so a deploy that doesn't say it
+    // (one made where no node answered) changes nothing.
+    const deployed = Number(this.env.SWITCHED);
+    if (Number.isSafeInteger(deployed) && deployed > this.mustRead()) {
+      this.sql.exec("DELETE FROM switched");
+      this.sql.exec("INSERT INTO switched VALUES (?)", deployed);
+    }
     if (!this.sql.exec("SELECT 1 FROM keys LIMIT 1").toArray().length) {
       for (const { key, role, admin } of this.env.DEVICES ? JSON.parse(this.env.DEVICES) : []) {
         if (isKey(key) && String(role).split(" ").every((r) => ROLES.includes(r))) this.sql.exec("INSERT OR IGNORE INTO keys VALUES (?, 'install', ?, ?)", key, admin === true ? 1 : 0, role);
@@ -283,11 +298,18 @@ export class Relay extends DurableObject {
     return this.sql.exec("SELECT count(*) AS n FROM keys WHERE admin = 1").one().n;
   }
 
-  /// `{ admin }` if `key` is one of the install's endpoints; a computer let in by a pairing code isn't, until it's added.
+  /// `{ admin, role, reads }` if `key` is one of the install's endpoints, `reads` what it must read of who's who to
+  /// write (`mustRead`); a computer let in by a pairing code isn't, until it's added.
   allowed(key) {
-    if (key === this.env.BOUND) return { admin: false, role: "compute" };
+    if (key === this.env.BOUND) return { admin: false, role: "compute", reads: this.mustRead() };
     const it = this.key(key);
-    return it ? { admin: it.admin === 1, role: it.role } : null;
+    return it ? { admin: it.admin === 1, role: it.role, reads: this.mustRead() } : null;
+  }
+
+  /// What a device must read of who's who now (`database::switch`): what an admin's device said as it switched, or
+  /// the Workers' deploy, for an install that is; 0 before.
+  mustRead() {
+    return this.sql.exec("SELECT reads FROM switched").toArray()[0]?.reads ?? 0;
   }
 
   /// Whether `by` may be told what the install's endpoints are told: it's on the list, or is a session's a client on it
@@ -303,8 +325,7 @@ export class Relay extends DurableObject {
   computes(by, asked) {
     const may = this.asks(by, asked);
     if (may !== true) return may;
-    const reads = this.sql.exec("SELECT reads FROM switched").toArray()[0]?.reads ?? 0;
-    if (asked && !asked.session && asked.reads < reads) return { update: true };
+    if (asked && !asked.session && asked.reads < this.mustRead()) return { update: true };
     const keys = this.sql.exec("SELECT key FROM keys WHERE ' ' || role || ' ' LIKE '% compute %'").toArray().map((r) => r.key);
     return this.env.BOUND ? [...keys, this.env.BOUND] : keys;
   }

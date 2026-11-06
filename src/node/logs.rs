@@ -389,14 +389,14 @@ mod tests {
     use super::*;
 
     /// A node whose who's who stops building answers nobody, yet still reads `global`, so the entry after builds it
-    /// again: one that couldn't read it would answer nobody for good.
+    /// again: one that couldn't read it would answer nobody for good. In an install whose log isn't frozen yet.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_node_whose_whos_who_stops_building_answers_nobody_until_it_reads_global_and_builds_again() {
         let dir = std::env::temp_dir().join(format!("one-whos-who-{}", rand::random::<u64>()));
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("device.json"), json!({ "secret": hex(&rand::random()), "name": "a" }).to_string()).unwrap();
         let a = Node::start(&dir).await.unwrap();
-        a.create("Home", "Andre").await.unwrap();
+        a.create_before_the_switch("Home", "Andre").await.unwrap();
         let me = Caller { key: a.id(), user: a.user().unwrap(), agent: None, token: None };
         let may = || a.with(|i| Ok(i.r.db().may(&me.user, "use", scopes::INSTALL))).unwrap();
         assert!(may());

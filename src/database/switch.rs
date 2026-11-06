@@ -1,7 +1,9 @@
 //! Phase 2's switch (docs/plan-storage-and-permissions.md): the scope database becomes the truth, and the log is
-//! frozen. It's one constant, `SWITCH`, and it waits for its gate: every device listed in the install that reads who's
-//! who (each person's devices and each machine that runs things, and the Cloudflare node) says it reads the scope
-//! database (`READS`), or an admin said it's gone for good (`SKIPS`).
+//! frozen, by the ceremony an admin runs once on a network made before it (`one switch`, `Node::switch`); a network
+//! made since starts frozen. Once it is, a device that reads less than `GATE` is told to update, by the nodes, the
+//! relay and the URL signer. Before it, the devices listed in the network that reads who's who (each person's devices
+//! and each machine that runs things, and the Cloudflare node) and don't say they read `GATE` are those not updated
+//! yet (`gate`), unless an admin said one's gone for good (`SKIPS`).
 //!
 //! A device says what it reads as it asks: a client in every request (`HEADER`, from the client crate, which every
 //! client is made of: browsers, phones, Macs, Windows and the remote MCP server's devices), and a node of itself, as it says
@@ -12,17 +14,6 @@ use std::collections::{BTreeSet, HashMap};
 use crate::database::scopes::ScopeDb;
 use crate::entry::{Key, hex, unhex};
 
-/// Whether the ceremony that freezes the log may run once the gate is open, so the scope database becomes the truth:
-/// an admin runs it once, with the install's recovery key (`one switch`, `Node::switch`). Off until every device runs a
-/// build that reads it and the switch is decided: the one place to switch it on. It's all a build's switch does: what
-/// changes for storage and who's who changes on each device once it knows the log is frozen (`db`'s `switched`), so a
-/// release with it on changes nothing until the freeze.
-pub const SWITCH: bool = false;
-
-/// Whether this node may be told to switch though `SWITCH` is off: only a throwaway network's (`one throwaway switch`), to prove
-/// the switch end to end before it's on.
-pub static FORCEABLE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-
 /// What this build reads of who's who: 1, the log, replayed (R1 and before, which say nothing); 2 and on, the scope
 /// database, once the log is frozen, with the types, roles, rules and tables of that number. A device that reads less
 /// than `GATE` holds the switch back. Once it's switched, a release that changes `scope::SCHEMA`, `permissions::SCHEMA`
@@ -31,11 +22,10 @@ pub static FORCEABLE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicB
 /// what it reads.
 pub const READS: u32 = 2;
 
-/// What every listed device must read before the log is frozen.
+/// What a device must read once the log is frozen: one that reads less is told to update.
 pub const GATE: u32 = 2;
 
-// The switch on in a build that reads less than its gate waits for would never open it.
-const _: () = assert!(!SWITCH || READS >= GATE, "SWITCH is on, so this build must read what the gate waits for: READS >= GATE");
+const _: () = assert!(READS >= GATE, "this build must read what a frozen network asks of every device: READS >= GATE");
 
 /// The header a client says what it reads in, with its build: `<reads> <build>`. A node before the gate ignores it.
 pub const HEADER: &str = "x-one-reads";
@@ -65,10 +55,11 @@ pub fn parse(value: &str) -> Option<(u32, String)> {
     Some((reads.parse().ok()?, build.to_string()))
 }
 
-/// Where the gate is: the devices it waits for, those an admin said are gone, and whether it's open.
+/// Where the gate is: the devices that don't read what it asks, those an admin said are gone, and whether it's open.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Gate {
-    /// Each listed device that hasn't said it reads `GATE`: its key, and what it said it reads (None for nothing).
+    /// Each listed device that hasn't said it reads what the gate asks: its key, and what it said it reads (None for
+    /// nothing).
     pub waiting: Vec<(Key, Option<Reads>)>,
     /// Devices an admin said are gone for good, still listed.
     pub skipped: Vec<Key>,
@@ -80,7 +71,7 @@ impl Gate {
     }
 }
 
-/// The devices whose builds the gate waits for: every listed client (but a passkey, which runs nothing) and machine
+/// The devices whose builds the gate asks about: every listed client (but a passkey, which runs nothing) and machine
 /// that runs things, and the Cloudflare node. A service endpoint reads no who's who: its device's node asks for it.
 pub fn readers(db: &ScopeDb) -> Vec<Key> {
     let mut keys: Vec<Key> = db.machines().into_iter().filter(|m| !m.removed && m.passkey.is_none() && (m.is(crate::members::Kind::Client) || m.is(crate::members::Kind::Compute))).map(|m| m.key).collect();
@@ -121,7 +112,8 @@ pub fn gate_at(db: &ScopeDb, reads: &HashMap<Key, Reads>, at_least: u32) -> Gate
     gate
 }
 
-/// The gate as `GET /v1/state` says it, with each device's name and person.
+/// The gate as `GET /v1/state` says it, with each device's name and person: before the freeze, the devices not updated
+/// yet, which are refused once it's frozen.
 pub fn gate_json(db: &ScopeDb, reads: &HashMap<Key, Reads>) -> serde_json::Value {
     let g = gate(db, reads);
     let named = |k: &Key| {
@@ -138,5 +130,5 @@ pub fn gate_json(db: &ScopeDb, reads: &HashMap<Key, Reads>) -> serde_json::Value
             v
         })
         .collect();
-    serde_json::json!({ "switch": SWITCH, "open": g.open(), "gate": GATE, "waiting": waiting, "skipped": g.skipped.iter().map(named).collect::<Vec<_>>() })
+    serde_json::json!({ "open": g.open(), "gate": GATE, "waiting": waiting, "skipped": g.skipped.iter().map(named).collect::<Vec<_>>() })
 }

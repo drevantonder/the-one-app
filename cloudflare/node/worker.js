@@ -30,7 +30,7 @@
 // for Cloudflare it carries (`service-<app>.js`), each run here once an admin switches it on.
 
 import { DurableObject, RpcTarget } from "cloudflare:workers";
-import { initSync, check_certificate, open, opens, refresh, query, may, write, close, statements, vault_items, vault_fill, vault_schema, screen, client_screen, config, prefix, following as after, read_log, groups, scopes_of, epochs as epochsOf, runners, forward, install, bundle, endpoint_of, signed, handoff, epoch_name, app_key_name, needs as needed, endpoint_start, endpoint_deliver, endpoint_ask, endpoint_close, pin_genesis, global_entries, sealed_global_steps } from "./one_cloudflare_node.js";
+import { initSync, check_certificate, open, opens, refresh, query, may, write, close, statements, vault_items, vault_fill, vault_schema, screen, client_screen, config, prefix, following as after, read_log, groups, scopes_of, epochs as epochsOf, runners, forward, install, bundle, endpoint_of, signed, handoff, epoch_name, app_key_name, needs as needed, endpoint_start, endpoint_deliver, endpoint_ask, endpoint_close, pin_genesis, global_entries, sealed_global_steps, reads } from "./one_cloudflare_node.js";
 import wasm from "./one_cloudflare_node_bg.wasm";
 import { shim, compatibilityDate, services } from "./built.js";
 
@@ -191,9 +191,10 @@ class Bucket {
     Object.assign(this, { env, sealed, urls: new Map(), fetched: new Map(), wanted: null });
   }
 
-  /// Asks the URL signer, signed by this node's endpoint key: it gives URLs to the install's endpoints alone.
+  /// Asks the URL signer, signed by this node's endpoint key: it gives URLs to the install's endpoints alone. With what
+  /// this build reads of who's who (`reads`), which a write must.
   async sign(fields) {
-    const request = signed(this.env.NODE_KEY, "one/urls", JSON.stringify(fields), Date.now());
+    const request = signed(this.env.NODE_KEY, "one/urls", JSON.stringify({ ...fields, reads: reads() }), Date.now());
     const r = await this.env.SIGNER.fetch(`${this.env.ADDRESS}/urls`, { method: "POST", headers: { "content-type": "application/json" }, body: request });
     const out = await r.json().catch(() => ({}));
     if (!r.ok) throw Object.assign(new Error(`the URL signer said: ${out.error || r.status}`), { unanswered: r.status >= 500 });

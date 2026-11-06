@@ -234,7 +234,7 @@ fn devices_here(settings: one::cloudflare::Settings, needed: bool) -> Result<one
     // The install's recovery key too, as a client, not an admin's and not a node: what it lets in, the relay takes.
     devices.extend(install["recovery"].as_str().map(|k| json!({ "key": k, "role": "client", "admin": false })));
     let genesis = install["root"].as_str().filter(|r| r.len() == 64).map(str::to_string);
-    Ok(one::cloudflare::Settings { devices, genesis, ..settings })
+    Ok(one::cloudflare::Settings { devices, genesis, switched: install["frozen"] == true, ..settings })
 }
 
 fn addr() -> String {
@@ -427,12 +427,11 @@ fn run(args: Vec<String>) -> Result<()> {
         }
         ["switch"] => {
             // The ceremony that freezes the log, so the scope database is the truth, signed by the recovery key read
-            // from a file here and never printed: only once the switch is on and every device reads it, or in a
-            // throwaway network, which may be switched to prove it (`Node::switch`).
+            // from a file here and never printed (`Node::switch`): devices not updated yet are told to from then on.
             takes_only(&flags, &["recovery-key"])?;
             let at = flags.get("recovery-key").and_then(Value::as_str).context("give --recovery-key <file> (or - to read it from stdin): the file the install's recovery key is in")?;
-            post("/v1/switch", json!({ "recovery": recovery_key_from(at, "cli")?, "force": true }))?;
-            println!("Who's who is the scope database now.");
+            post("/v1/switch", json!({ "recovery": recovery_key_from(at, "cli")? }))?;
+            println!("Who's who is the scope database now. A device not updated yet is told to update.");
         }
         ["role", user, role] => {
             post("/v1/role", json!({ "user": user, "role": role }))?;
@@ -1391,40 +1390,25 @@ fn is_phone(name: &str) -> bool {
     ["phone", "ipad", "tablet", "android", "pixel", "galaxy"].iter().any(|w| name.contains(w))
 }
 
-/// Where the switch to the scope database is (`database::switch`), for an admin: the devices it waits for, each
-/// with what it said it reads, and those skipped as gone for good.
+/// Before the switch to the scope database (`database::switch`), for an admin: the devices not updated yet, which are
+/// told to update once it's switched, each with what it said it reads, and how to switch. Nothing once it's switched.
 fn switch_gate(gate: &Value, name: &dyn Fn(&str) -> String) {
-    if gate.is_null() {
+    if gate.is_null() || gate["frozen"] == true {
         return;
     }
-    // With its whole key, which an admin gives to skip it, and whose it is: the Cloudflare node is no one's.
+    // With its whole key, and whose it is: the Cloudflare node is no one's.
     let device = |d: &Value| {
         let key = d["key"].as_str().unwrap_or("");
         let whose = d["user"].as_str().map(|u| format!("{}'s, ", name(u))).unwrap_or_default();
         format!("{} ({whose}{key})", d["name"].as_str().unwrap_or(&key[..8.min(key.len())]))
     };
-    let switch = if gate["frozen"] == true { "switched: the scope database is the truth" } else if gate["switch"] == true { "on once every device reads it" } else { "off in this build" };
-    println!("\nSwitch to the scope database ({switch})");
-    if gate["frozen"] == true {
-        return;
-    }
-    let waiting = gate["waiting"].as_array().cloned().unwrap_or_default();
-    if waiting.is_empty() {
-        let then = if gate["switch"] == true { format!(": an admin switches it with {CLI} switch --recovery-key <file>") } else { String::new() };
-        println!("  Every device reads it{then}.");
-    }
-    for d in &waiting {
+    println!("\nNot switched to the scope database yet: an admin switches it with {CLI} switch --recovery-key <file>");
+    for d in gate["waiting"].as_array().into_iter().flatten() {
         let reads = match d["reads"].as_u64() {
             Some(r) => format!("reads {r} of {}, build {}", gate["gate"], d["build"].as_str().unwrap_or("?")),
             None => "hasn't said what it reads: update it, or open it".into(),
         };
-        println!("  Waiting for {}: {reads}", device(d));
-    }
-    for d in gate["skipped"].as_array().into_iter().flatten() {
-        println!("  Skipped, gone for good: {}", device(d));
-    }
-    if !waiting.is_empty() {
-        println!("  A phone, browser or computer gone for good: {CLI} settings {} \"<its key> ...\" skips it. A machine that runs things, remove it.", one::database::switch::SKIPS);
+        println!("  Not updated yet, told to once it's switched: {}: {reads}", device(d));
     }
 }
 
@@ -1590,7 +1574,6 @@ async fn serve(is_try: bool, args: &[String]) -> Result<()> {
     api::serve_mcp(axum::routing::post(mcp_http));
     let mut routes = api::guarded(api::routes(), node.clone());
     if is_try {
-        one::database::switch::FORCEABLE.store(true, std::sync::atomic::Ordering::Relaxed);
         let home = dir.clone();
         tokio::spawn(async move {
             if let Err(err) = throwaway::bucket(home).await {

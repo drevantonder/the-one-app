@@ -30,7 +30,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { initSync, device_start, device_deliver, device_fetch, device_nodes, device_close, device_view, device_keys, following } from "./one_cloudflare_node.js";
 import wasm from "./one_cloudflare_node_bg.wasm";
-import { b64u, ed25519Public, hex, joinCode, mayHand, random, sealHandoff, signedRequest, untilTaken } from "../shared/crypto.js";
+import { b64u, ed25519Public, hex, joinCode, mayHand, random, READS, sealHandoff, signedRequest, untilTaken } from "../shared/crypto.js";
 import { Issuer, bearer } from "../shared/token.js";
 import { Copies } from "./copies.js";
 
@@ -226,8 +226,9 @@ class Bucket {
     Object.assign(this, { env, me, urls: new Map() });
   }
 
+  /// With what this build reads of who's who (`READS`), which the URL signer asks of a client once it's switched.
   async sign(fields) {
-    const body = await signedRequest(this.me.seed, hex.decode(this.me.key), URLS, fields);
+    const body = await signedRequest(this.me.seed, hex.decode(this.me.key), URLS, { ...fields, reads: READS });
     const r = await this.env.SIGNER.fetch(`${origin(this.env)}/urls`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
     const out = await r.json().catch(() => ({}));
     if (!r.ok) throw Object.assign(new Error(`the URL signer said: ${out.error || r.status}`), { unanswered: r.status >= 500 });
@@ -328,7 +329,7 @@ export class Client extends DurableObject {
       const r = await this.env.AUTH.fetch(`${origin(this.env)}/api/auth/devices/requests`, {
         method: "POST",
         headers: { authorization: `Bearer ${access}`, "content-type": "application/json" },
-        body: JSON.stringify({ key: device.key, seal: device.seal, name: device.name }),
+        body: JSON.stringify({ key: device.key, seal: device.seal, name: device.name, reads: READS }),
       });
       if (r.ok) until = Math.max(until, Number((await r.json().catch(() => ({}))).until) - JOIN_EARLY || 0);
       else console.log(JSON.stringify({ join: "refused", status: r.status, why: (await r.text()).slice(0, 200) }));

@@ -1,5 +1,5 @@
 //! `global`'s scope database once its log is frozen (`database::switch`, `database::steps`): freezing the log in the
-//! ceremony an admin runs with the install's recovery key once the gate is open (`switch`), reading the steps others wrote in the bucket, and writing this device's own and
+//! ceremony an admin runs with the install's recovery key, or a new install runs as it's made (`switch`), reading the steps others wrote in the bucket, and writing this device's own and
 //! those its people's other devices sign. What this device has read of each it keeps in its folder, checked against
 //! its hash when it starts again (`scope-kept/`).
 
@@ -19,16 +19,15 @@ impl Node {
     }
 
     /// The ceremony that freezes `global`'s log, run once by an admin on their own machine with the install's recovery
-    /// key (`one switch`), which signs everything it writes and is never kept: only if the switch is on in this build
-    /// and the gate is open (or `forced`, in a throwaway network), and it isn't frozen yet. A `FREEZING` step first, so
+    /// key (`one switch`), which signs everything it writes and is never kept, if it isn't frozen yet: on a network made
+    /// before this release, or as a new one is made. It waits for no device: one that reads less than `switch::GATE` is
+    /// told to update once it's frozen. A `FREEZING` step first, so
     /// writers of the log look whether the freeze holds what they write from then on; then where every log ends, the
     /// freeze (`steps::freeze`) as the step of `global`'s log after its end, its mark, and the freeze at the next free
     /// position of the scope database, within half of `FREEZE_WAIT` of the `FREEZING`, or it's tried again. Fails
     /// saying why if it isn't frozen by it.
-    pub async fn switch(&self, caller: &Caller, recovery: &SigningKey, forced: bool) -> Result<()> {
+    pub async fn switch(&self, caller: &Caller, recovery: &SigningKey) -> Result<()> {
         ensure!(caller.token.is_none() && caller.key == self.0.id, "the recovery key is used only on the machine it's kept on");
-        let forced = forced && switch::FORCEABLE.load(std::sync::atomic::Ordering::Relaxed);
-        ensure!(switch::SWITCH || forced, "the switch is off in this build: who's who stays the log until a release turns it on");
         self.read_log(&Scope::Global).await?;
         self.read_steps().await?;
         if self.frozen() {
@@ -39,13 +38,11 @@ impl Node {
             let db = i.r.db();
             ensure!(db.recovery() == Some(recovery.verifying_key().to_bytes()), "that isn't {YOURS}'s recovery key");
             ensure!(db.may(&user, "change-settings", scopes::INSTALL), "only an admin of {YOURS} freezes its log");
-            let gate = switch::gate(db, &i.reads);
-            ensure!(forced || gate.open(), "not every device reads who's who as the scope database yet: {CLI} status says which");
             Ok(i.r.members.gate())
         })?;
         // That the gate is open, from this admin's own device, in the log: a freeze counts only if the log it names
-        // ends after it (`steps::claimed`), so none signed before this release, by a recovery key since replaced, ever
-        // does.
+        // ends after it (`steps::claimed`), so none signed before the release that reads it, by a recovery key since
+        // replaced, ever does.
         if !gate {
             self.member_content(caller, members::gate()).await?;
             ensure!(self.with(|i| Ok(i.r.members.gate()))?, "the gate this device wrote to {YOURS}'s log doesn't count, so it froze nothing");
@@ -64,7 +61,7 @@ impl Node {
     /// What the ceremony says when the log is frozen already, by a freeze it didn't write.
     fn frozen_already(&self) -> anyhow::Error {
         let at = self.with(|i| Ok(i.r.frozen.as_ref().map(|(f, _)| f.at))).ok().flatten().unwrap_or(0);
-        anyhow::anyhow!("{YOURS}'s log is frozen already, by a freeze at step {at} of who's who that this didn't write, so it froze nothing. If no one ran {CLI} switch for it before, find out who did before turning the switch on")
+        anyhow::anyhow!("{YOURS}'s log is frozen already, by a freeze at step {at} of who's who that this didn't write, so it froze nothing. If no one ran {CLI} switch for it before, find out who did")
     }
 
     /// One try at the ceremony's steps (`switch`). → whether it's frozen: not if it took too long, so it's tried again;
@@ -215,11 +212,6 @@ impl Node {
     /// freeze (`Replica::take_first`): one the recovery key signed is taken once `global`'s log is read to its end (so
     /// every key that was ever the recovery key is known) and from its steps up to the freeze's end of it.
     pub(super) async fn read_steps_now(&self) -> Result<bool> {
-        // A build that reads less than the gate holds it back, so no freeze it could read counts. One that reads it
-        // takes the freeze whether or not it may run the ceremony (`switch::SWITCH`), since an admin's newer build may.
-        if !self.frozen() && !(switch::READS >= switch::GATE || switch::FORCEABLE.load(std::sync::atomic::Ordering::Relaxed)) {
-            return Ok(false);
-        }
         let bucket = self.bucket()?;
         let prefix = steps::prefix("global");
         let from = self.with(|i| Ok(i.r.at().unwrap_or(i.r.looked)))?;
@@ -479,16 +471,22 @@ impl Node {
             }
             read.push(None);
         }
-        let (kept, newer) = self.with(|i| {
+        let (kept, newer, forgotten) = self.with(|i| {
             let (at, db) = i.scope_dbs.remove(scope).context("no database")?;
             let steps::TookScope { at, mut db, newer } = steps::take_scope(at, db, i.r.db(), scope, &read, now_ms())?;
-            let position = i.views.get(&scope.to_string()).map(|(p, _)| p.clone()).unwrap_or((0, Hash::from_bytes([0; 32])));
-            i.views.insert(scope.to_string(), (position, db.state()));
+            let (position, was) = i.views.get(&scope.to_string()).map(|(p, s)| (p.clone(), s.forgotten.clone())).unwrap_or(((0, Hash::from_bytes([0; 32])), Default::default()));
+            let state = db.state();
+            // The blobs its steps said its apps no longer need, as `forget` entries did.
+            let forgotten: Vec<(String, String)> = state.forgotten.iter().filter(|b| !was.contains(*b)).map(|b| (scope.to_string(), b.clone())).collect();
+            i.views.insert(scope.to_string(), (position, state));
             let kept = json!({ "at": at, "hash": crate::db::state_hash(db.conn())?, "db": data_encoding::BASE64.encode(&db.bytes()?) });
             i.scope_dbs.insert(scope.clone(), (at, db));
-            Ok((kept, newer))
+            Ok((kept, newer, forgotten))
         })?;
         self.keep_scope_db(scope, &kept);
+        if !forgotten.is_empty() {
+            self.delete_forgotten(forgotten);
+        }
         // A newer release's step: this device reads no further until it's updated.
         ensure!(!newer, steps::Newer);
         Ok(!read.is_empty())

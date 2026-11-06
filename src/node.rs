@@ -840,8 +840,19 @@ impl Node {
 
     /// Creates the install, with every built-in app added (owned by admins), so anyone may add one to their own page,
     /// and these installed in `global`. Its first person is `user` if given (who they were in an install this one
-    /// replaces, so their account at its sign-in is still theirs), else someone new.
+    /// replaces, so their account at its sign-in is still theirs), else someone new. Its log is frozen as it starts, by
+    /// the ceremony with its new recovery key (`Node::switch`): who's who is its scope database from its genesis on.
     pub async fn create_with(&self, name: &str, user_name: &str, user: Option<&str>, apps: &[&str]) -> Result<String> {
+        self.create_frozen(name, user_name, user, apps, true).await
+    }
+
+    /// An install as one made before its log could be frozen, whose admin runs the ceremony later: for tests of it.
+    #[doc(hidden)]
+    pub async fn create_before_the_switch(&self, name: &str, user_name: &str) -> Result<String> {
+        self.create_frozen(name, user_name, None, crate::config::STARTERS, false).await
+    }
+
+    async fn create_frozen(&self, name: &str, user_name: &str, user: Option<&str>, apps: &[&str], frozen: bool) -> Result<String> {
         self.ensure_no_install()?;
         ensure!(!name.trim().is_empty() && !user_name.trim().is_empty(), "give the install a name, and yourself one");
         ensure!(user.is_none_or(|u| u.len() == 16 && u.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))), "a person's id is 16 hex digits, like 976091fe8c23a057");
@@ -871,11 +882,14 @@ impl Node {
             i.read = true;
             Ok(())
         })?;
+        let me = Caller { key: self.0.id, user, agent: None, token: None };
+        if frozen {
+            self.switch(&me, &recovery).await.context("freezing the new install's log")?;
+        }
         // Its Vault and its first person's own open on this machine, so a new install fills items with no other step.
-        for scope in [Scope::Global, Scope::User(user.clone())] {
+        for scope in [Scope::Global, Scope::User(me.user.clone())] {
             self.new_vault_key(&scope, 1, &[self.0.id], recovery.verifying_key().as_bytes()).await?;
         }
-        let me = Caller { key: self.0.id, user, agent: None, token: None };
         for (app, _) in crate::config::BUILT_IN {
             self.bring_in(&me, app).await?;
         }
@@ -1041,7 +1055,9 @@ impl Node {
         if handled.new.is_empty() && handled.dropped.is_empty() && !handled.members {
             return Ok(());
         }
-        self.with(|i| {
+        // What `global`'s scope database forgets in a step, once its log is frozen, as its `forget` entries said before.
+        let forgotten_before = self.with(|i| Ok(i.views.get("global").map(|(_, s)| s.forgotten.clone()).unwrap_or_default()))?;
+        let forgotten_now = self.with(|i| {
             if handled.members {
                 let db = i.r.db();
                 i.peers.retain(|peer, _| db.compute(peer).is_some() || db.service(peer).is_some());
@@ -1052,9 +1068,11 @@ impl Node {
             if handled.recount {
                 i.views.clear();
                 let all = i.r.store.ordered()?;
-                return update_views(i, &all);
+                update_views(i, &all)?;
+            } else {
+                update_views(i, &handled.new)?;
             }
-            update_views(i, &handled.new)
+            Ok(i.r.frozen.is_some().then(|| i.views.get("global").map(|(_, s)| s.forgotten.clone()).unwrap_or_default()))
         })?;
         // A scope this device no longer holds: it forgets what it read of it.
         self.close_dbs(|scope, _| handled.dropped.contains(&scope.to_string()));
@@ -1065,7 +1083,8 @@ impl Node {
                 }
             }
         }
-        if handled.new.iter().any(|e| e.content.app == release::APP && e.content.kind == "node-release") {
+        // A release is a step once the log is frozen, which changes who's who: the updater looks again.
+        if handled.members || handled.new.iter().any(|e| e.content.app == release::APP && e.content.kind == "node-release") {
             self.0.released.notify_one();
         }
         if !handled.lost.is_empty() {
@@ -1085,7 +1104,8 @@ impl Node {
             self.follow_storage();
             self.follow_net();
         }
-        let forgotten: Vec<(String, String)> = handled.new.iter().filter(|e| e.content.app == members::APP && e.content.kind == "forget").filter_map(|e| Some((e.log().to_string(), e.content.data["blob"].as_str()?.to_string()))).collect();
+        let mut forgotten: Vec<(String, String)> = handled.new.iter().filter(|e| e.content.app == members::APP && e.content.kind == "forget").filter_map(|e| Some((e.log().to_string(), e.content.data["blob"].as_str()?.to_string()))).collect();
+        forgotten.extend(forgotten_now.into_iter().flatten().filter(|b| !forgotten_before.contains(b)).map(|b| ("global".to_string(), b)));
         self.emit(Event::Changed { apps: Vec::new() });
         if !forgotten.is_empty() {
             self.delete_forgotten(forgotten);
@@ -1247,6 +1267,12 @@ fn update_views(i: &mut Install, new: &[Entry]) -> Result<()> {
             _ => last,
         };
         i.views.insert(log.clone(), (position, state));
+    }
+    // Once `global`'s log is frozen, its state is its scope database's, written as steps, whatever its entries said:
+    // as each other scope's is its own database's (`Node::read_scope_steps_now`).
+    if i.r.frozen.is_some() {
+        let position = i.views.get("global").map(|(p, _)| p.clone()).unwrap_or((0, Hash::from_bytes([0; 32])));
+        i.views.insert("global".to_string(), (position, i.r.db().state()));
     }
     Ok(())
 }

@@ -693,6 +693,12 @@ fn scope_truth(truth: &one::database::steps::Truth, root: Option<Hash>, frozen: 
     Ok(took.db)
 }
 
+/// What this build reads of who's who (`one::database::switch::READS`), which its writes to the bucket say.
+#[wasm_bindgen]
+pub fn reads() -> u32 {
+    one::database::switch::READS
+}
+
 thread_local! {
     /// The install's genesis, as the device that deployed this node holds it (`GENESIS`, `pin_genesis`).
     static GENESIS: RefCell<Option<Hash>> = const { RefCell::new(None) };

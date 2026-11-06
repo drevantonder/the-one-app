@@ -46,9 +46,11 @@ impl Signer {
         Signer { address, key, base: base.trim_end_matches('/').to_string(), kept: Default::default() }
     }
 
-    /// Asks the signer: `fields` signed, → its answer.
-    pub fn ask(&self, fields: Value) -> Result<Value> {
+    /// Asks the signer: `fields` signed, with what this build reads of who's who, which a write must
+    /// (`database::switch`), → its answer.
+    pub fn ask(&self, mut fields: Value) -> Result<Value> {
         let address = (self.address)()?;
+        fields["reads"] = serde_json::json!(crate::database::switch::READS);
         let body = crate::keys::signed_request(&self.key, "one/urls", fields, now_ms());
         let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).timeout_global(Some(Duration::from_secs(30))).build().into();
         let mut resp = agent.post(format!("{}/urls", address.trim_end_matches('/'))).send_json(body).map_err(|e| Failed(Trouble::Unreachable, format!("couldn't be reached ({address}: {e})")))?;

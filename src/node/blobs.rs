@@ -98,13 +98,13 @@ impl Node {
         }
     }
 
-    /// The scopes this device holds whose entries name a blob.
+    /// The scopes this device holds whose entries, or once `global`'s log is frozen whose steps, name a blob.
     fn scopes_naming(&self, hash: &str) -> Result<Vec<Scope>> {
         self.with(|i| {
-            let mut out = Vec::new();
+            let mut out: Vec<Scope> = steps_naming(i, hash).collect();
             for log in i.r.store.logs()? {
                 if i.r.store.scope(&log)?.iter().any(|e| e.content.blobs.iter().any(|b| b == hash)) {
-                    out.extend(Scope::parse(&log));
+                    out.extend(Scope::parse(&log).ok().filter(|s| !out.contains(s)));
                 }
             }
             Ok(out)
@@ -220,8 +220,8 @@ impl Node {
     /// never does.
     pub(super) fn blob_named(&self, hash: &str, holds: impl Fn(&Scope) -> bool) -> Result<bool> {
         self.with(|i| {
-            // Once `global`'s log is frozen, its steps name blobs too (`database::steps`).
-            if holds(&Scope::Global) && i.r.db().names_blob(hash) {
+            // Once `global`'s log is frozen, its steps name blobs too, and each other scope's own (`database::steps`).
+            if steps_naming(i, hash).any(|s| holds(&s)) {
                 return Ok(true);
             }
             for log in i.r.store.logs()? {
@@ -345,3 +345,10 @@ impl std::fmt::Display for Full {
 }
 
 impl std::error::Error for Full {}
+
+/// The scopes whose steps name a blob the scope still needs (`ScopeDb::names_blob`), once `global`'s log is frozen:
+/// `global`'s, and each other scope's database this device reads.
+fn steps_naming<'a>(i: &'a Install, hash: &'a str) -> impl Iterator<Item = Scope> + 'a {
+    let global = (i.r.frozen.is_some() && i.r.db().names_blob(hash)).then_some(Scope::Global);
+    global.into_iter().chain(i.scope_dbs.iter().filter(|(_, (_, db))| db.names_blob(hash)).map(|(s, _)| s.clone()))
+}

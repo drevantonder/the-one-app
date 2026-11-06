@@ -34,6 +34,15 @@ async fn eventually(what: &str, mut check: impl AsyncFnMut() -> bool) {
     panic!("timed out waiting for {what}");
 }
 
+/// `content` written to `global`'s scope database as a step `caller`'s own device (`key`) signs, as a client does.
+async fn signed_by(a: &Node, caller: &one::node::Caller, key: &ed25519_dalek::SigningKey, content: one::entry::Content) {
+    let global = one::entry::Scope::Global;
+    let at = a.global_steps(caller, 9007199254740991, None).await.unwrap()["at"].as_u64().unwrap();
+    let epoch = a.entry_heads(caller, &global).await.unwrap()["epoch"].as_u64().unwrap() as u32;
+    let step = one::database::steps::sign(key, &global, at + 1, &caller.user, epoch, one::node::now_ms(), content).unwrap();
+    a.put_signed_steps(caller, vec![step]).await.unwrap();
+}
+
 fn notes(tool: &str, input: Value) -> CallRequest {
     CallRequest { app: "notes".into(), tool: tool.into(), input, ..Default::default() }
 }
@@ -159,9 +168,8 @@ async fn backups_go_to_a_folder_encrypted_and_restore_with_the_recovery_key_alon
 /// what's in it) and refuses nothing until the ceremony, and every step after is signed in it.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_node_signs_in_its_steps_only_once_it_knows_the_log_is_frozen() {
-    one::database::switch::FORCEABLE.store(true, std::sync::atomic::Ordering::Relaxed);
     let a = start("frozen-a").await;
-    let recovery = a.create("Home", "Andre").await.unwrap();
+    let recovery = a.create_before_the_switch("Home", "Andre").await.unwrap();
     add_notes(&a).await;
     let recovery = one::entry::unhex(&recovery).unwrap();
     let _relay = relay(&a).await;
@@ -181,7 +189,7 @@ async fn a_node_signs_in_its_steps_only_once_it_knows_the_log_is_frozen() {
     assert_eq!((before.signed_from(), before.checks().refused), (None, 0), "no step is signed in it, and a reader that knows the log is frozen refuses none");
     let written = before.at();
 
-    a.switch(&me, &ed25519_dalek::SigningKey::from_bytes(&recovery), true).await.unwrap();
+    a.switch(&me, &ed25519_dalek::SigningKey::from_bytes(&recovery)).await.unwrap();
     assert!(a.frozen());
     a.call(notes("post", json!({ "text": "after the freeze" }))).await.unwrap();
     let first = a.backups().unwrap()["places"][0]["last"]["time"].clone();
@@ -464,10 +472,7 @@ async fn only_a_repos_owner_and_collaborators_push_to_it_and_only_its_owners_del
     a.call(repos("create", json!({ "name": "site", "owner": "team" }))).await.unwrap();
     assert!(!sams_push(&client, "team/site", "sams", false).await);
     a.member_as(&me, "invite", json!({ "group": group, "user": sam.user, "role": "member" })).await.unwrap();
-    let heads = a.entry_heads(&client, &global).await.unwrap();
-    let previous = heads["previous"].as_array().unwrap().iter().map(|h| one::entry::Hash::from_hex(h.as_str().unwrap()).unwrap()).collect();
-    let ext = one::entry::Ext { log: "global".into(), time: one::node::now_ms(), user: sam.user.clone(), epoch: heads["epoch"].as_u64().unwrap() as u32, previous };
-    a.put_signed(&client, vec![one::entry::Entry::create(&sams, ext, None, one::members::accept(&group))]).await.unwrap();
+    signed_by(&a, &client, &sams, one::members::accept(&group)).await;
     assert!(sams_push(&client, "team/site", "sams", false).await, "a member of the group pushes to its repo");
     let refused = call(CallRequest { scopes: Some(vec!["global".into()]), ..repos("delete", json!({ "repo": "team/site" })) }, &client).await.unwrap_err();
     assert!(format!("{refused:#}").contains("only Team's admins manage team/site"), "{refused:#}");
@@ -565,10 +570,7 @@ async fn a_groups_github_organization_shows_only_to_its_members_and_a_persons_gi
 
     // Once he's in Team, he sees the organization's repo, as its installation, and never Andre's, nor with his token.
     a.member_as(&me, "invite", json!({ "group": group, "user": sam.user, "role": "member" })).await.unwrap();
-    let heads = a.entry_heads(&client, &global).await.unwrap();
-    let previous = heads["previous"].as_array().unwrap().iter().map(|h| one::entry::Hash::from_hex(h.as_str().unwrap()).unwrap()).collect();
-    let ext = one::entry::Ext { log: "global".into(), time: one::node::now_ms(), user: sam.user.clone(), epoch: heads["epoch"].as_u64().unwrap() as u32, previous };
-    a.put_signed(&client, vec![one::entry::Entry::create(&sams, ext, None, one::members::accept(&group))]).await.unwrap();
+    signed_by(&a, &client, &sams, one::members::accept(&group)).await;
     let (list, sent) = sams_list().await;
     assert_eq!(list, ["github.com/org/site"]);
     assert!(!sent.is_empty() && sent.iter().all(|(_, auth)| !auth.contains("andre-token")), "{sent:?}");

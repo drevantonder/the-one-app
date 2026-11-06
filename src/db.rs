@@ -21,11 +21,10 @@
 //! write as slow as the database is big), that the database it read comes to that state hash (`state_hash`). A copy
 //! needs no signer: it's good if it comes to the hash signed at the step it's at. From phase 2 a writer signs a step
 //! in it (`SIGNED`), one write, so no step is ever without one: readers from R1 on read both kinds, and older ones pass
-//! over the new kind, which is why it waits for the gate.
+//! over the new kind, which is why a device older than the switch is told to update once it's frozen.
 //!
-//! Phase 2 is on for a database (`switched`) once the device opening it knows the log is frozen (a freeze that counts,
-//! which only comes once the gate is open, so every device reads both kinds by then), never because of what a build
-//! is: a release that turns the switch on only lets an admin freeze it. Then the first step a writer signs in it says
+//! Phase 2 is on for a database (`switched`) once the device opening it knows the log is frozen (a freeze that counts),
+//! never because of what a build is. Then the first step a writer signs in it says
 //! its own position, and every
 //! step signed in it after says the same (`Sig::from`), so the database records where its steps are signed in them
 //! from, a copy's step saying it for those that start there; before, every reader ignores what any step says of it,

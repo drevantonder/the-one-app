@@ -465,9 +465,11 @@ impl Node {
             let entries = i.r.store.scope(&d.scope)?;
             let forgotten = i.views.get(&d.scope).map(|(_, s)| s.forgotten.clone()).unwrap_or_default();
             let mut blobs = backed_blobs(&entries, &forgotten);
-            // And once `global`'s log is frozen, what its steps name (`database::steps`).
+            // And once `global`'s log is frozen, what its steps name, and each other scope's own (`database::steps`).
             if d.scope == "global" {
                 blobs.extend(i.r.db().blobs());
+            } else if let Some((_, db)) = Scope::parse(&d.scope).ok().and_then(|s| i.scope_dbs.get(&s)) {
+                blobs.extend(db.blobs());
             }
             Ok((entries.clone(), blobs))
         })?;

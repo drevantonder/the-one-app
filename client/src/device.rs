@@ -272,7 +272,7 @@ impl Device {
     /// Asks sign-in to let it in, as the person signed in with `token`, calling it `name` (and with someone new's invite
     /// secret, its proof).
     pub async fn ask(&self, token: &str, name: &str, invite: Option<&str>) -> Result<(), Error> {
-        let mut asked = json!({ "key": self.key(), "seal": hex(&self.me.seal), "name": name });
+        let mut asked = json!({ "key": self.key(), "seal": hex(&self.me.seal), "name": name, "reads": one::database::switch::READS });
         if let Some(on) = self.on.lock().unwrap().clone() {
             asked["device"] = json!(on);
         }

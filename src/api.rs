@@ -898,14 +898,13 @@ async fn reads(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
     done()
 }
 
-/// `{ recovery, force? }`: the ceremony that freezes `global`'s log, so its scope database is the truth
-/// (`Node::switch`), signed by `recovery`, the install's recovery key (hex), read from a file here by the CLI and never
-/// kept: only on this machine, by an admin, once the switch is on and every device reads it (or `force`, in a
-/// throwaway network). → `{ frozen }`.
+/// `{ recovery }`: the ceremony that freezes `global`'s log, so its scope database is the truth (`Node::switch`), signed
+/// by `recovery`, the install's recovery key (hex), read from a file here by the CLI and never kept: only on this
+/// machine, by an admin. → `{ frozen }`.
 async fn switch(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
-    only(&body, &["recovery", "force"])?;
+    only(&body, &["recovery"])?;
     let secret: [u8; 32] = crate::keys::unhex(text(&body, "recovery")?.trim()).map_err(|_| anyhow::anyhow!("a recovery key is 64 hex characters"))?;
-    node.switch(&me.caller, &ed25519_dalek::SigningKey::from_bytes(&secret), body["force"] == true).await?;
+    node.switch(&me.caller, &ed25519_dalek::SigningKey::from_bytes(&secret)).await?;
     Ok(Json(json!({ "frozen": true })))
 }
 

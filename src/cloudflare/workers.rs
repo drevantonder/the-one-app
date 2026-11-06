@@ -85,6 +85,10 @@ pub struct Settings {
     /// device names beside it (`sign_in_proof`). None for Workers made before their install.
     #[serde(skip)]
     pub genesis: Option<String>,
+    /// Whether the install's log is frozen (`database::switch`), from the node on this machine as `devices` is: the
+    /// relay then tells a device that reads less than it must to update, whatever it was told.
+    #[serde(skip)]
+    pub switched: bool,
     /// The Cloudflare node's endpoint key (hex), which only its Worker holds: its public half is on the relay's list.
     #[serde(default, skip_serializing)]
     pub cloudflare_node_key: String,
@@ -365,6 +369,7 @@ impl Settings {
             devices: vec![],
             push: [("VAPID_KEY".to_string(), vapid_key())].into(),
             genesis: None,
+            switched: false,
             throwaway_person: None,
             home: None,
         }
@@ -465,11 +470,12 @@ impl Settings {
         // Cloudflare node's, whose datagrams it hands its Durable Object.
         if service == "relay" {
             let devices = (!self.devices.is_empty()).then(|| ("DEVICES".into(), json!(self.devices).to_string(), false));
+            let switched = self.switched.then(|| ("SWITCHED".into(), crate::database::switch::GATE.to_string(), false));
             let bound = self.cloudflare_node_endpoint().filter(|_| self.cloudflare_node).map(|key| [("BOUND".into(), key, false), ("NODE".into(), format!("object:{}:Node", crate::cloudflare::node::SERVICE), false)]);
             // And the remote MCP server's devices, each bound to its object while it runs.
             let mcp = ("MCP".into(), "object:mcp:Client".into(), false);
             let yours = ("YOURS".into(), crate::config::YOURS.into(), false);
-            return devices.into_iter().chain(bound.into_iter().flatten()).chain([mcp, yours]).chain(location).collect();
+            return devices.into_iter().chain(switched).chain(bound.into_iter().flatten()).chain([mcp, yours]).chain(location).collect();
         }
         // The remote MCP server: remote MCP clients' devices, whose secrets open only with their clients' tokens. It reaches
         // the relay only by its entrypoint for them, and reads the bucket through the URL signer as any device does.

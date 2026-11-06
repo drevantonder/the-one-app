@@ -10,7 +10,7 @@
 // scope database and its permissions (client/src/members.rs, `Who`), and only looked up here. A hacked node holds no
 // keys, and gets none this way.
 
-import { askedFor, b64u, databaseKey, ed25519Public, epochHash, hex, hkdfKey, inviteProof, joinCode, oldestNeeded, openAppKey, openSealed, passkeyKeys, random, sealAppKey, sealHandoff, sealTo, sha256, signEntry, signStep, signedRequest, twinPublic, untilTaken, x25519Public } from "../shared/crypto.js";
+import { askedFor, b64u, databaseKey, ed25519Public, epochHash, hex, hkdfKey, inviteProof, joinCode, oldestNeeded, openAppKey, openSealed, passkeyKeys, random, sealAppKey, sealHandoff, sealTo, sha256, signEntry, signStep, signedRequest, READS, twinPublic, untilTaken, x25519Public } from "../shared/crypto.js";
 import { del, get, put } from "./kept.js";
 import { members } from "./members.js";
 
@@ -59,7 +59,7 @@ export async function passkeyKeysOf(prf) {
 
 /// What this browser asks sign-in to let it in with: its keys and name, and for someone new, proof of their invite.
 export async function joinAsk(keys, name, invite) {
-  return { key: keys.key, seal: keys.seal, name, ...(invite ? { proof: await inviteProof(text.encode(invite), hex.decode(keys.key), hex.decode(keys.seal)) } : {}) };
+  return { key: keys.key, seal: keys.seal, name, reads: READS, ...(invite ? { proof: await inviteProof(text.encode(invite), hex.decode(keys.key), hex.decode(keys.seal)) } : {}) };
 }
 
 /// The code this browser shows to be approved: its key's, as 4 and 4.
@@ -425,7 +425,7 @@ export class Device {
     const prefix = prefixOf({ scope: "global", app: "node", database });
     const out = [];
     for (let at = from + 1; at <= to; at += 32) {
-      const r = await fetch("/urls", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(await this.signed("one/urls", { get: [{ steps: prefix, from: at, to: Math.min(at + 31, to) }] })) });
+      const r = await fetch("/urls", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(await this.signed("one/urls", { get: [{ steps: prefix, from: at, to: Math.min(at + 31, to) }], reads: READS })) });
       const body = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(body.error || "Your One App's storage didn't answer. Try again.");
       // A URL signer older than its `get`, which only Workers deployed before the switch are.
@@ -446,7 +446,7 @@ export class Device {
   /// none, as the URL signer reads it, which a browser can't itself. Null if the signer doesn't say (an older one).
   async hints(needs) {
     const newest = [...new Set(needs.map(prefixOf))];
-    const r = await fetch("/urls", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(await this.signed("one/urls", { newest })) });
+    const r = await fetch("/urls", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(await this.signed("one/urls", { newest, reads: READS })) });
     const out = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(out.error || "Your One App's storage didn't answer. Try again.");
     return out.newest || null;
