@@ -3,7 +3,8 @@
 //! turns them into this release's names as it reads them, here and nowhere else; nothing writes the old ones (Andre,
 //! 2026-11-06). The network's table and type were `install`; app schedules' tables `keeps` and `keep_keys`, and their
 //! step `grant`; the permission to choose which devices keep a scope's apps running, run its calls and open its Vault
-//! was `keep`. The setting that names the Cloudflare node was `serverless`.
+//! was `keep`. The setting that names the Cloudflare node was `serverless`. The Vault's agents, in an item's apps and a
+//! request's app, were `agents`, the AGENTS.md app's name, which never used the Vault.
 
 use rusqlite::Connection;
 use serde_json::Value;
@@ -18,6 +19,9 @@ pub fn database(db: &Connection) -> rusqlite::Result<()> {
         if has(old) && !has(new) {
             db.execute_batch(&format!("ALTER TABLE {old} RENAME TO {new}"))?;
         }
+    }
+    if has("vault_requests") {
+        db.execute("UPDATE vault_requests SET app = ?1 WHERE app = 'agents'", [crate::database::scopes::AGENTS])?;
     }
     if has("settings") {
         db.execute_batch("UPDATE OR REPLACE settings SET name = 'cloudflare_node' WHERE name = 'serverless'")?;
@@ -43,9 +47,17 @@ pub fn content(c: &mut Content) {
     }
     match c.kind.as_str() {
         "grant" => c.kind = crate::database::scopes::APP_SCHEDULES.to_string(),
+        "vault-request" if c.data["app"] == "agents" => c.data["app"] = crate::database::scopes::AGENTS.into(),
         "setting" if c.data["name"] == "serverless" => c.data["name"] = crate::database::scopes::CLOUDFLARE_NODE.into(),
         super::steps::DEFAULTS => renamed(&mut c.data),
         _ => {}
+    }
+}
+
+/// A Vault item's apps, as its row or its box says them.
+pub fn vault_apps(apps: &mut std::collections::BTreeSet<String>) {
+    if apps.remove("agents") {
+        apps.insert(crate::database::scopes::AGENTS.to_string());
     }
 }
 
@@ -87,6 +99,9 @@ mod tests {
         old.execute("INSERT INTO settings VALUES ('serverless', 'abc')", []).unwrap();
         database(&old).unwrap();
         assert_eq!(old.query_row("SELECT value FROM settings WHERE name = 'cloudflare_node'", [], |r| r.get::<_, String>(0)).unwrap(), "abc");
+        old.execute("INSERT INTO vault_requests VALUES ('r', 'agents', 'Key', '{}', '[]', '', NULL, 'a', NULL, 0, NULL, NULL, NULL)", []).unwrap();
+        database(&old).unwrap();
+        assert_eq!(old.query_row("SELECT app FROM vault_requests", [], |r| r.get::<_, String>(0)).unwrap(), crate::database::scopes::AGENTS);
         crate::permissions::close(&old, None).unwrap();
         assert!(crate::permissions::may(&old, "person:a", "choose-devices", crate::permissions::NETWORK, 0).unwrap());
     }
@@ -99,6 +114,9 @@ mod tests {
         let mut setting = crate::database::content::setting("serverless", Some("abc"));
         content(&mut setting);
         assert_eq!(setting.data["name"], crate::database::scopes::CLOUDFLARE_NODE);
+        let mut request = Content::new(crate::database::scopes::APP, "vault-request", serde_json::json!({ "id": "r", "app": "agents" }));
+        content(&mut request);
+        assert_eq!(request.data["app"], crate::database::scopes::AGENTS);
         let mut defaults = Content::new(crate::database::scopes::APP, super::super::steps::DEFAULTS, serde_json::json!({
             "types": [["install", "[\"use\",\"keep\"]"]], "roles": [["install", "admin", "[\"keep\"]", "[]"]], "rules": [["install:global#admin", "admin", "install:*"]],
         }));

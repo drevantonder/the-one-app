@@ -149,6 +149,7 @@ pub fn load(conn: &Connection) -> Result<Items> {
         let (Some(id), Some(item)) = (row["id"].as_str(), row["item"].as_str()) else { continue };
         let mut item: Item = serde_json::from_str(item).context("an item that isn't one")?;
         item.opened = !item.fields.values().any(|f| f.secret);
+        crate::database::migrate::vault_apps(&mut item.apps);
         out.insert(id.to_string(), item);
     }
     Ok(out)
@@ -169,6 +170,7 @@ pub fn open_all(items: &mut Items, keys: &BTreeMap<u32, [u8; 32]>) {
             f.value = s.values.get(name).cloned().unwrap_or_default();
         }
         (item.hosts, item.apps, item.opened) = (s.hosts, s.apps, true);
+        crate::database::migrate::vault_apps(&mut item.apps);
     }
 }
 
@@ -492,6 +494,13 @@ fn secrets_hosts_and_apps_open_only_with_the_vault_key() {
     let mut items = load(&conn).unwrap();
     open_all(&mut items, &keys);
     assert_eq!((items[id].hosts.clone(), items[id].fields["token"].value.as_str()), (vec!["api2.example.com".to_string()], "s3cret"));
+    // Items agents used before the Vault named them so read as theirs, from a box or a row.
+    let plain = "1111111111111111";
+    change(&conn, &json!({ "id": id, "apps": ["agents"] }), "andre", 5, |_| true, &granted).unwrap();
+    change(&conn, &json!({ "id": plain, "title": "Plain", "fields": { "user": { "value": "andre" } }, "apps": ["agents"] }), "andre", 5, |_| true, &member).unwrap();
+    let mut items = load(&conn).unwrap();
+    open_all(&mut items, &keys);
+    assert!([id, plain].iter().all(|i| items[*i].apps.iter().eq([crate::database::scopes::AGENTS])));
 }
 
 #[cfg(feature = "node")]

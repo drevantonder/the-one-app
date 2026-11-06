@@ -50,7 +50,7 @@ fn run(tool: &str, input: &Map<String, Value>, asked: &Asked) -> Result<Value> {
         "remove" => Ok(json!(remove(node, scope, text("item")?, input.get("field").and_then(Value::as_str))?)),
         "request" => {
             // With no app, it's for agents: the person's own, with vault_fetch.
-            let app = input.get("app").and_then(Value::as_str).unwrap_or("agents");
+            let app = input.get("app").and_then(Value::as_str).unwrap_or(crate::database::scopes::AGENTS);
             let r = node.post("/v1/vault/request", json!({ "scope": scope, "app": app, "need": input.get("need"), "title": input.get("title"), "fields": input.get("fields"), "hosts": input.get("hosts"), "why": input.get("why"), "agent": agent }))?;
             Ok(json!(format!("Asked. Give the person this link: {}\nIt's also waiting in their Settings, under Requests. Tell them; check vault_status with id {} when they say they've done it.", r["link"].as_str().unwrap_or(""), r["id"].as_str().unwrap_or(""))))
         }

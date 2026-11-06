@@ -748,8 +748,8 @@ pub const APP_SCHEDULES: &str = "app-schedules";
 pub const APPS_PART: &str = "apps";
 /// The kinds of node entry that say a release of the node's or a service's program (`release`).
 pub const RELEASES: [&str; 2] = ["node-release", "service-release"];
-/// Who agents act as when the Vault fills their requests (`vault_fetch`): here too for the Cloudflare node.
-pub const AGENTS: &str = "agents";
+/// Who agents act as when the Vault fills their requests (`vault_fetch`), in an item's apps: no app's name.
+pub const AGENTS: &str = "ai-agents";
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "lowercase")]
@@ -932,7 +932,7 @@ pub fn handle_from(name: &str, fallback: &str) -> String {
 }
 
 pub fn valid_app_name(name: &str) -> bool {
-    !name.is_empty() && name.len() <= 40 && name.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-') && name != APP
+    !name.is_empty() && name.len() <= 40 && name.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-') && name != APP && name != AGENTS
 }
 
 /// What a scope's own node entries add up to: the apps installed in it, every `open` of it, requests for Vault items
