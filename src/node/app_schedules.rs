@@ -11,21 +11,6 @@ use super::*;
 pub const APP_SCHEDULES_DAYS: u64 = 30;
 const DAY: u64 = 86_400_000;
 
-/// What app schedules' calls are kept by here, in place of a sign-in's token: `app-schedules.<scope> <app>`. No
-/// sign-in signs one and it's never passed on, so a device that's sent one gets nothing with it.
-pub(super) const TOKEN: &str = "app-schedules.";
-
-/// The token app schedules' calls run with here.
-pub(super) fn token(scope: &Scope, app: &str) -> String {
-    format!("{TOKEN}{scope} {app}")
-}
-
-/// The scope and app an app schedules token is for.
-fn token_of(token: &str) -> Option<(Scope, &str)> {
-    let (scope, app) = token.strip_prefix(TOKEN)?.split_once(' ')?;
-    Some((Scope::parse(scope).ok()?, app))
-}
-
 /// App schedules' state on a node.
 #[derive(Default)]
 pub(super) struct State {
@@ -110,7 +95,7 @@ impl Node {
             if !self.0.app_schedules.renewing.lock().unwrap().insert(id.clone()) {
                 continue;
             }
-            let (node, me) = (self.clone(), Caller { key: self.0.id, user: me.clone(), agent: None, token: None });
+            let (node, me) = (self.clone(), Caller::own(self.0.id, me.clone()));
             tokio::spawn(async move {
                 let (endpoint, scope, app) = id.clone();
                 let ended = async {
@@ -192,7 +177,7 @@ impl Node {
     /// there, and no others: its schedules' calls (from `client`).
     pub async fn app_schedules_call(&self, scope: &Scope, app: &str, user: &str, tool: &str, input: Value, client: &str) -> Result<Value> {
         self.app_schedules_keys(scope, app).await?;
-        let me = Caller { key: self.0.id, user: user.to_string(), agent: None, token: Some(token(scope, app)) };
+        let me = Caller { key: self.0.id, user: user.to_string(), agent: None, credential: Credential::AppSchedules { scope: scope.clone(), app: app.to_string() } };
         let req = CallRequest { app: app.to_string(), tool: tool.to_string(), input, scopes: Some(vec![scope.to_string()]), client: Some(client.into()), id: Some(new_id()), ..Default::default() };
         match self.run_or_need(&req, &me).await {
             Ok(Reply::Ok(v)) => Ok(v),
@@ -202,21 +187,20 @@ impl Node {
         }
     }
 
-    /// The keys an app schedules token opens of a database: only its app's in its scope, while they're in force.
-    pub(super) fn app_schedules_handed(&self, token: &str, scope: &Scope, app: &str, database: &str) -> crate::database::stored::Keys {
-        let Some((s, a)) = token_of(token) else { return Default::default() };
-        if s != *scope || a != app || self.app_schedules_until(token) <= now_ms() {
+    /// The keys app schedules of `theirs` in `in_` open of a database: only their app's in their scope, while they're in
+    /// force.
+    pub(super) fn app_schedules_handed(&self, in_: &Scope, theirs: &str, scope: &Scope, app: &str, database: &str) -> crate::database::stored::Keys {
+        if in_ != scope || theirs != app || self.app_schedules_until(scope, app) <= now_ms() {
             return Default::default();
         }
         let kept = self.0.app_schedules.keys.lock().unwrap();
-        kept.get(&(s, a.to_string())).map(|by| by.iter().map(|(n, k)| (*n, crate::keys::database_key(k, app, database))).collect()).unwrap_or_default()
+        kept.get(&(scope.clone(), app.to_string())).map(|by| by.iter().map(|(n, k)| (*n, crate::keys::database_key(k, app, database))).collect()).unwrap_or_default()
     }
 
-    /// Until when an app schedules token's app schedules last: 0 once they're over.
-    pub(super) fn app_schedules_until(&self, token: &str) -> u64 {
-        let Some((scope, app)) = token_of(token) else { return 0 };
+    /// Until when `app`'s schedules in `scope` here last: 0 once they're over.
+    pub(super) fn app_schedules_until(&self, scope: &Scope, app: &str) -> u64 {
         let now = now_ms();
-        self.with(|i| Ok(i.r.db().app_schedules_at(now).into_iter().find(|((k, s, a), _)| *k == self.0.id && *s == scope && a == app).map_or(0, |(_, g)| g.until))).unwrap_or(0)
+        self.with(|i| Ok(i.r.db().app_schedules_at(now).into_iter().find(|((k, s, a), _)| *k == self.0.id && s == scope && a == app).map_or(0, |(_, g)| g.until))).unwrap_or(0)
     }
 
     /// Forgets the keys of app schedules no longer in force here, and the databases they had open.

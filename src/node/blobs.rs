@@ -123,7 +123,7 @@ impl Node {
 
     /// Keeps what `body` sends as a blob, read as it comes, up to `most` bytes and with at most `IDLE` between its
     /// parts: → its hash and size. Nothing is kept of one that fails.
-    pub async fn put_blob_streamed(&self, body: axum::body::Body, most: u64) -> Result<(String, u64)> {
+    async fn put_blob_streamed(&self, body: axum::body::Body, most: u64) -> Result<(String, u64)> {
         use futures_util::StreamExt;
         use std::io::Write;
         let dir = self.0.dir.join("blobs");
@@ -163,11 +163,14 @@ impl Node {
         Ok((hash, size))
     }
 
-    /// Keeps a file someone put from elsewhere (a client device, or a sign-in on another machine), read as it comes,
-    /// which they may then read back: up to `REMOTE_PUT`, and only while what they put that nothing names yet stays
-    /// under `REMOTE_WAITING`, since anyone signed in could fill this machine's disk. One nothing names an hour on is
-    /// deleted (`sweep_remote_puts`). → its hash and size.
+    /// Keeps a file `caller` put, read as it comes. This machine's own programs put up to `LOCAL_PUT`. Someone else (a
+    /// client device, or a sign-in on another machine) may then read theirs back: up to `REMOTE_PUT`, and only while what
+    /// they put that nothing names yet stays under `REMOTE_WAITING`, since anyone signed in could fill this machine's
+    /// disk. One nothing names an hour on is deleted (`sweep_remote_puts`). → its hash and size.
     pub async fn put_blob_from(&self, caller: &Caller, body: axum::body::Body) -> Result<(String, u64)> {
+        if self.this_machine(caller) {
+            return self.put_blob_streamed(body, LOCAL_PUT).await;
+        }
         let waiting: u64 = self.0.blobs.remote_puts.lock().unwrap().iter().filter(|p| p.user == caller.user).map(|p| p.size).sum();
         let room = REMOTE_WAITING.saturating_sub(waiting);
         ensure!(room > 0, "you've put {} MiB of files from your other devices that nothing kept yet: wait an hour, when they're cleared, and try again", waiting >> 20);
@@ -215,9 +218,9 @@ impl Node {
         Ok(hash)
     }
 
-    /// A blob for someone who isn't this machine's own programs: one they put, or a scope they may use names.
+    /// A blob for `caller`: for someone who isn't this machine's own programs, one they put, or a scope they may use names.
     pub async fn blob_for(&self, caller: &Caller, hash: &str) -> Result<Vec<u8>> {
-        ensure!(self.may_read_blob(&caller.user, hash)?, "no such blob for you");
+        ensure!(self.this_machine(caller) || self.may_read_blob(&caller.user, hash)?, "no such blob for you");
         self.blob(hash).await
     }
 
@@ -314,6 +317,8 @@ impl Node {
     }
 }
 
+/// The most this machine's own programs put in one file.
+const LOCAL_PUT: u64 = 1 << 30;
 /// The most one file put from elsewhere may be.
 pub const REMOTE_PUT: u64 = 512 << 20;
 /// The most of one person's files put from elsewhere that nothing names yet this machine keeps at once.

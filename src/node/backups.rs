@@ -297,7 +297,7 @@ impl Node {
             let mut told = false;
             for admin in &admins {
                 let input = json!({ "title": p.title, "body": format!("{} {}", p.text, p.fix) });
-                match self.push("send", &input, &Caller { key: me, user: admin.clone(), agent: None, token: None }, None).await {
+                match self.push("send", &input, &Caller::own(me, admin.clone()), None).await {
                     Ok(sent) => {
                         told = true;
                         tracing::info!("told {admin} about backups: {sent}");

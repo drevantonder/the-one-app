@@ -120,11 +120,7 @@ impl Node {
     /// The apps a page shows and the context each renders with: with `scope`, those installed there, each reaching
     /// only it; without, every app, reaching all it may. Each comes with its grant, which lasts as long as it's kept.
     pub(super) fn page_contexts(&self, viewer: &Caller, scope: Option<&str>) -> Result<Vec<(String, Context, Granted)>> {
-        let scope = match scope {
-            Some("user") => Some(Scope::User(viewer.user.clone())),
-            Some(s) => Some(Scope::parse(s)?),
-            None => None,
-        };
+        let scope = scope.map(|s| Scope::parse_for(s, &viewer.user)).transpose()?;
         let mut out = Vec::new();
         for app in self.0.apps.names().into_iter().filter(|a| !self.deleted(a)) {
             let mut ctx = self.read_context(&app, viewer)?;

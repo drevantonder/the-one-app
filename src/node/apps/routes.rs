@@ -8,8 +8,8 @@ use axum::routing::{get, post};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use crate::api::{Error, Me, Reply, Routes, Who, done, local, tagged, text};
-use crate::node::Node;
+use crate::api::{Error, Me, Reply, Routes, Who, done, tagged, text};
+use crate::node::{Caller, Node};
 
 pub fn routes() -> Routes {
     Routes::default()
@@ -114,7 +114,7 @@ async fn retire(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Re
 /// `{ app, name, owner? }`: a new app called `name`, from `app`, with data of its own. `owner` as `owner` reads it.
 async fn fork(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
     let owner = body["owner"].as_str().map(|o| owner(&node, o)).transpose()?;
-    node.fork(&local(&node)?, text(&body, "app")?, text(&body, "name")?, owner.as_deref()).await?;
+    node.fork(&Caller::local(&node)?, text(&body, "app")?, text(&body, "name")?, owner.as_deref()).await?;
     done()
 }
 

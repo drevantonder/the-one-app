@@ -458,7 +458,7 @@ impl Node {
     /// (opened through the recovery key's copy), and let onto the network by the recovery key. Without `confirm`, says
     /// whose it is. → what it is, or what was done.
     pub async fn approve_with_recovery(&self, caller: &Caller, code: &str, recovery: &ed25519_dalek::SigningKey, confirm: bool) -> Result<Value> {
-        ensure!(caller.token.is_none() && caller.key == self.0.id, "the recovery key is used only on the machine it's kept on");
+        ensure!(self.this_machine(caller), "the recovery key is used only on the machine it's kept on");
         let at = recovery.verifying_key().to_bytes();
         ensure!(self.with(|i| Ok(i.r.db().recovery() == Some(at)))?, "that isn't {YOURS}'s recovery key");
         let code = code_of(code);
@@ -736,7 +736,7 @@ impl Node {
             }
             // Another device of theirs may have just let it in.
             self.read_scope_now(&Scope::Global).await?;
-            let caller = Caller { key: self.0.id, user: user.clone(), agent: None, token: None };
+            let caller = Caller::own(self.0.id, user.clone());
             let approved = self.approve_request(&caller, &r, None).await;
             match approved {
                 Ok(_) => {
@@ -757,7 +757,7 @@ impl Node {
     /// device is listed again, naming it.
     pub async fn list_part(&self, endpoint: &crate::keys::Endpoint, service: &str, shared: bool) -> Result<()> {
         let user = self.user()?;
-        let caller = Caller { key: self.0.id, user: user.clone(), agent: None, token: None };
+        let caller = Caller::own(self.0.id, user.clone());
         let listed = self.with(|i| {
             let db = i.r.db();
             ensure!(db.service(&endpoint.key).is_some() || db.machine_ever(&endpoint.key).is_none(), "that key is listed already, and not as a service");
@@ -958,7 +958,7 @@ impl Node {
             });
         }
         for owing in due {
-            let (node, me, (vaults, recovery)) = (self.clone(), Caller { key: self.0.id, user: me.clone(), agent: None, token: None }, vaults.clone());
+            let (node, me, (vaults, recovery)) = (self.clone(), Caller::own(self.0.id, me.clone()), vaults.clone());
             tokio::spawn(async move {
                 let made = match &owing {
                     Owing::Epoch(scope) => node.new_epoch(&me, scope).await.map(|_| ()),
@@ -992,7 +992,7 @@ impl Node {
             });
             let Ok(Some((me, on))) = todo else { return };
             if !on.is_empty()
-                && let Err(err) = node.member_content(&Caller { key: node.0.id, user: me.clone(), agent: None, token: None }, content::runs(&on)).await
+                && let Err(err) = node.member_content(&Caller::own(node.0.id, me.clone()), content::runs(&on)).await
             {
                 tracing::warn!("saying where {me}'s things run: {err:#}");
             }

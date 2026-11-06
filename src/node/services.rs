@@ -70,7 +70,7 @@ impl Node {
     /// Mac's helpers) with no record here yet, once its app is added: the app's added where this node runs it. Each
     /// goes on running throughout.
     pub async fn name_services_scopes(&self, carried: &[String]) {
-        let Ok(caller) = self.own_caller() else { return };
+        let Ok(caller) = Caller::local(self) else { return };
         let named = self.with(|i| {
             let m = i.r.db();
             let switches = m.switches();

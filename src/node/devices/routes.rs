@@ -5,9 +5,9 @@ use axum::extract::State;
 use axum::routing::{get, post};
 use serde_json::{Value, json};
 
-use crate::api::{Me, Reply, Routes, Who, done, local, only, text};
+use crate::api::{Me, Reply, Routes, Who, done, only, text};
 use crate::database::scopes::Role;
-use crate::node::Node;
+use crate::node::{Caller, Node};
 
 pub fn routes() -> Routes {
     Routes::default()
@@ -94,7 +94,7 @@ async fn forget_sign_in(State(node): State<Node>, me: Me, Json(body): Json<Value
 /// for `days` (30 by default; 0 stops them), as this machine's person (`Node::set_app_schedules`).
 async fn app_schedules(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
     only(&body, &["device", "app", "scope", "days"])?;
-    let me = local(&node)?;
+    let me = Caller::local(&node)?;
     let scope = node.scope_for(&me, body["scope"].as_str().unwrap_or("user"))?;
     let days = body["days"].as_u64().unwrap_or(crate::node::APP_SCHEDULES_DAYS);
     Ok(Json(node.set_app_schedules(&me, text(&body, "device")?, text(&body, "app")?, &scope, days).await?))

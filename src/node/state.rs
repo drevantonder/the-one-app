@@ -28,7 +28,7 @@ impl Node {
     /// Everything a shell needs to draw this device and its network, for this device's local user.
     pub fn state(&self) -> Value {
         let user = self.user().unwrap_or_default();
-        self.state_for(&Caller { key: self.0.id, user, agent: None, token: None })
+        self.state_for(&Caller::own(self.0.id, user))
     }
 
     /// The state as `viewer`, this device or a client it serves, sees it.
@@ -122,7 +122,7 @@ impl Node {
 
     /// Writes one of `global`'s node entries as the local user, after checking it would count.
     pub async fn member(&self, kind: &str, data: Value) -> Result<()> {
-        self.member_as(&Caller { key: self.0.id, user: self.user()?, agent: None, token: None }, kind, data).await
+        self.member_as(&Caller::local(self)?, kind, data).await
     }
 
     /// The same, as `caller`, whose rights it's checked against.
@@ -237,10 +237,7 @@ impl Node {
 
     /// A scope as someone gives it: `user` (their own), `global`, `group:<id>`, or a group's name or id.
     pub fn scope_for(&self, caller: &Caller, scope: &str) -> Result<Scope> {
-        Ok(match scope {
-            "user" => Scope::User(caller.user.clone()),
-            s => Scope::parse(s).or_else(|_| self.find_group(s).map(Scope::Group))?,
-        })
+        Scope::parse_for(scope, &caller.user).or_else(|_| self.find_group(scope).map(Scope::Group))
     }
 
     /// Finds a group by name or id.

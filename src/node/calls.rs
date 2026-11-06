@@ -110,7 +110,7 @@ impl std::error::Error for Elsewhere {}
 impl Node {
     /// Runs a tool for this device's local user: here, or on the nearest device that can.
     pub async fn call(&self, req: CallRequest) -> Result<Value> {
-        self.call_as(req, Caller { key: self.0.id, user: self.user()?, agent: None, token: None }).await
+        self.call_as(req, Caller::local(self)?).await
     }
 
     /// Runs a tool for `me`, whom this device acts for: here, or on the nearest device that can.
@@ -388,15 +388,22 @@ impl Node {
     pub(super) async fn ask_device(&self, device: Key, req: &CallRequest, me: &Caller) -> Result<(Reply, Option<Value>)> {
         // A sign-in's token goes along, with the keys it was handed: to a service only if it serves everyone, which
         // checks it itself, and never keys. A call handed keys with no sign-in passes on its keys alone (below), and
-        // app schedules' calls, kept by their token here, pass on none.
+        // app schedules' calls pass on none.
         let service = self.is_service(&device);
         let shared = self.with(|i| Ok(i.r.db().service(&device).is_some_and(|s| s.shared)))?;
-        let token = me.token.as_ref().filter(|t| !sessions::unsigned(t) && !t.starts_with(app_schedules::TOKEN) && (!service || (shared && sessions::is_sign_in(t))));
+        let token = match &me.credential {
+            Credential::SignIn(token) if !service || shared => Some(token),
+            _ => None,
+        };
         // A node listed as the caller's own client asks services as itself, for a direct client's call only — never
         // one another node passed on: forwarding another client's key, or app database keys, would make the
         // receiving device refuse its own person's call.
         let as_own_client = req.service.is_some()
-            && me.token.as_ref().is_none_or(|t| t == &client_token(&me.key))
+            && match &me.credential {
+                Credential::Own => true,
+                Credential::Client(key) => *key == me.key,
+                _ => false,
+            }
             && self.with(|i| Ok(i.r.db().client(&self.0.id).is_some_and(|c| c.user == me.user)))?;
         let key = if as_own_client { self.0.id } else { me.key };
         let mut request = json!({ "app": req.app, "service": req.service, "op": req.tool, "input": req.input, "scopes": req.scopes, "depth": req.depth, "from": req.from, "client": req.client, "me": { "key": hex(&key), "user": me.user, "agent": me.agent, "token": token } });
@@ -404,13 +411,13 @@ impl Node {
         // to it for this node's key, of the scopes the call reaches alone, which it runs on them alone: only those the
         // device runs, and only the call's app's.
         let resolved = self.resolve(req.clone());
-        if let Some(unsigned) = me.token.as_ref().filter(|t| sessions::unsigned(t))
+        if matches!(me.credential, Credential::Client(_) | Credential::Passed { .. })
             && !service
             && !as_own_client
         {
             let scopes = self.with(|i| call_scopes(i, &resolved, &me.user))?;
             let runs = self.with(|i| Ok(scopes.iter().filter(|s| i.r.db().runs_for(&device, s)).cloned().collect::<Vec<_>>()))?;
-            let (keys, until) = self.passing_on(unsigned, &runs, &resolved.app);
+            let (keys, until) = self.passing_on(&me.credential, &runs, &resolved.app);
             let seal = self.with(|i| Ok(i.r.db().seal_key(&device)))?.context("that device has no key to seal to")?;
             let named: Vec<String> = scopes.iter().map(Scope::to_string).collect();
             request = crate::keys::forwarded(&request, &me.user, req.client.as_deref().unwrap_or(""), &self.0.id, &seal, until, keys, &named)?["body"]["call"].take();
@@ -418,10 +425,10 @@ impl Node {
             request["me"]["agent"] = json!(me.agent);
         }
         // A sign-in's keys go on only of the scopes the call reaches that the device runs.
-        if let Some(token) = token
+        if token.is_some()
             && !service
             && let Some(seal) = self.with(|i| Ok(i.r.db().seal_key(&device)))?
-            && let Some(keys) = self.with(|i| Ok(call_scopes(i, &resolved, &me.user)?.into_iter().filter(|s| i.r.db().runs_for(&device, s)).collect::<Vec<_>>())).map(|scopes| self.hand_on(token, &seal, &scopes, &resolved.app))?
+            && let Some(keys) = self.with(|i| Ok(call_scopes(i, &resolved, &me.user)?.into_iter().filter(|s| i.r.db().runs_for(&device, s)).collect::<Vec<_>>())).map(|scopes| self.hand_on(&me.credential, &seal, &scopes, &resolved.app))?
         {
             request["keys"] = json!(keys);
         }
@@ -646,7 +653,7 @@ impl Node {
         };
         self.record(&req.app, req, me, None);
         // Its person using it renews the app schedules that run it for them.
-        if !me.token.as_deref().is_some_and(|t| t.starts_with(app_schedules::TOKEN)) {
+        if !matches!(me.credential, Credential::AppSchedules { .. }) {
             self.renew_app_schedules(me, &req.app);
         }
         if outcome.later {
@@ -865,7 +872,7 @@ impl Node {
             }
             for append in installs {
                 if let Append::Install { app, scope, installed, node } = append {
-                    let scope = if scope == "user" { Scope::User(me.user.clone()) } else { Scope::parse(&scope)? };
+                    let scope = Scope::parse_for(&scope, &me.user)?;
                     writes.extend(self.install_entries(me, &app, &scope, installed, node.as_deref()).await?);
                 }
             }
@@ -1062,7 +1069,7 @@ impl Node {
     /// `PROMPT_LIMIT` (the harness waits for this) is left out.
     pub async fn prompt(&self, event: Value) -> Result<String> {
         let session = event["session_id"].as_str().unwrap_or("").to_string();
-        let caller = Caller { key: self.0.id, user: self.user()?, agent: None, token: None };
+        let caller = Caller::local(self)?;
         let path = self.0.dir.join("hooks.json");
         let mut seen: serde_json::Map<String, Value> = std::fs::read(&path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
         let now = now_ms();
@@ -1188,10 +1195,7 @@ impl Node {
             ("POST", "/vault/match") => {
                 // The item a sign-in would change rather than make: one of that type whose plain field has that value.
                 let req: Value = serde_json::from_slice(&body)?;
-                let scope = match req["scope"].as_str() {
-                    None | Some("user") => Scope::User(grant.caller.user.clone()),
-                    Some(s) => Scope::parse(s)?,
-                };
+                let scope = Scope::parse_for(req["scope"].as_str().unwrap_or("user"), &grant.caller.user)?;
                 ensure!(grant.scopes.contains(&scope), "the call didn't name {scope}");
                 let (kind, field, value) = (req["type"].as_str().unwrap_or(""), req["field"].as_str().unwrap_or(""), req["value"].as_str());
                 let items = self.items(&grant.caller, &scope).await?;
@@ -1203,7 +1207,7 @@ impl Node {
                 if let Some(g) = self.0.grants.lock().unwrap().get_mut(token) {
                     g.puts.push(hash.clone());
                     // Someone not of this machine's own programs reads back what their call put, as what they put.
-                    if g.caller.token.is_some() {
+                    if g.caller.credential != Credential::Own {
                         self.0.blobs.put_by.lock().unwrap().entry(hash.clone()).or_default().insert(g.caller.user.clone());
                     }
                 }
@@ -1214,7 +1218,7 @@ impl Node {
                 let built_in = self.0.built_in.values().any(|h| h == hash);
                 // A call this machine's own programs asked may read what its local API would give them: a file put there to
                 // attach. A sign-in's asks here too, but reads only what its person may.
-                let local = grant.caller.key == self.0.id && grant.caller.token.is_none() && release::blob_path(&self.0.dir, hash).is_ok_and(|p| p.exists());
+                let local = self.this_machine(&grant.caller) && release::blob_path(&self.0.dir, hash).is_ok_and(|p| p.exists());
                 ensure!(built_in || local || grant.puts.iter().any(|h| h == hash) || self.may_read_blob(&grant.caller.user, hash)?, "no such blob for you");
                 self.blob(hash).await?.into_response()
             }
@@ -1320,13 +1324,13 @@ impl Node {
         let mut me = self.check_caller(remote, request)?;
         let passed = request["me"]["token"].is_null() && request["keys"].is_string();
         if let Some(token) = request["me"]["token"].as_str() {
-            me.token = Some(self.token_of(token, &me.user).await.context("the sign-in it came with isn't its caller's, or has expired")?);
+            me.credential = Credential::SignIn(self.token_of(token, &me.user).await.context("the sign-in it came with isn't its caller's, or has expired")?);
             if let Some(keys) = request["keys"].as_str() {
-                self.hand(token, &me.user, keys, u64::MAX)?;
+                self.hand(&me.credential, &me.user, keys, u64::MAX)?;
             }
         } else if let Some(keys) = request["keys"].as_str() {
             // Passed on with no sign-in: run on the keys it was handed alone, never this device's own.
-            me.token = Some(self.take_passed(&remote, &me.user, request, keys, true)?);
+            me.credential = self.take_passed(&remote, &me.user, request, keys, true)?;
         }
         let mut req: CallRequest = serde_json::from_value(request.clone())?;
         let (own, serves) = self.with(|i| Ok((!passed && i.r.db().client(&remote).is_some_and(|c| c.user == me.user), i.r.db().serves(&remote, &me.user))))?;
@@ -1344,7 +1348,7 @@ impl Node {
             self.with(|i| {
                 let scopes: Vec<Scope> = match &named {
                     None => reachable(i, &req.app, &me.user),
-                    Some(named) => named.iter().map(|s| if s == "user" { Ok(Scope::User(me.user.clone())) } else { Scope::parse(s) }).collect::<Result<_>>()?,
+                    Some(named) => named.iter().map(|s| Scope::parse_for(s, &me.user)).collect::<Result<_>>()?,
                 };
                 let m = i.r.db();
                 ensure!(scopes.iter().all(|s| m.runs_for(&remote, s)), "{} doesn't run every scope that call reaches", short(&remote));
@@ -1356,15 +1360,11 @@ impl Node {
 
     /// The keys a call `from` another node passed on for `user` with no sign-in was handed (`sealed`): sealed here for
     /// `from`'s key, of the scopes the call names alone, every one of which `user` may use and, for a node on a machine
-    /// (`machine`), `from` runs. → what its keys are kept by.
-    pub(crate) fn take_passed(&self, from: &Key, user: &str, call: &Value, sealed: &str, machine: bool) -> Result<String> {
+    /// (`machine`), `from` runs. → its credential.
+    pub(crate) fn take_passed(&self, from: &Key, user: &str, call: &Value, sealed: &str, machine: bool) -> Result<Credential> {
         let service = serde_json::from_value::<CallRequest>(call.clone()).map(|req| self.resolve(req).service.is_some())?;
         let named = call["scopes"].as_array().context("a call passed on names its scopes")?;
-        let scopes: Vec<Scope> = named.iter().map(|s| match s.as_str() {
-            Some("user") => Ok(Scope::User(user.to_string())),
-            Some(s) => Scope::parse(s),
-            None => bail!("a scope is its name"),
-        }).collect::<Result<_>>()?;
+        let scopes: Vec<Scope> = named.iter().map(|s| Scope::parse_for(s.as_str().context("a scope is its name")?, user)).collect::<Result<_>>()?;
         self.with(|i| {
             let m = i.r.db();
             ensure!(scopes.iter().all(|s| m.may(user, "use", &scopes::object(s))), "that call reaches a scope its person may not use");
@@ -1398,7 +1398,7 @@ impl Node {
             Ok(())
         })?;
         let agent = request["me"]["agent"].as_str().map(str::to_string);
-        Ok(Caller { key, user, agent, token: None })
+        Ok(Caller { agent, ..Caller::own(key, user) })
     }
 }
 
@@ -1409,13 +1409,13 @@ pub(super) fn address(m: &ScopeDb) -> Option<String> {
 
 /// Whether a call is one another node passed on: it runs only on what it was handed, never as this device's own person.
 fn passed(me: &Caller) -> bool {
-    me.token.as_deref().is_some_and(sessions::passed)
+    matches!(me.credential, Credential::Passed { .. })
 }
 
 /// The scopes a call reaches for `user`: those it names, or every one its app reaches; a service's, those it names or
 /// its person's own.
 fn call_scopes(i: &Network, req: &CallRequest, user: &str) -> Result<Vec<Scope>> {
-    let named = |s: &String| if s == "user" { Ok(Scope::User(user.to_string())) } else { Scope::parse(s) };
+    let named = |s: &String| Scope::parse_for(s, user);
     match (&req.scopes, &req.service) {
         (Some(named_), _) => named_.iter().map(named).collect(),
         (None, Some(_)) => Ok(vec![Scope::User(user.to_string())]),
@@ -1436,7 +1436,7 @@ fn prepare(node: &Node, i: &Network, req: &CallRequest, me: &Caller, title: &str
         Some(named) => {
             let mut out = Vec::new();
             for s in named {
-                let s = if s == "user" { Scope::User(me.user.clone()) } else { Scope::parse(s)? };
+                let s = Scope::parse_for(s, &me.user)?;
                 ensure!(reach.contains(&s), "{title} can't reach {} for you", scope_name(i, &s.to_string()));
                 out.push(s);
             }

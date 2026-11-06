@@ -48,7 +48,7 @@ pub use devices::{DeviceRequest, Invited};
 pub use net::{alpn, relay, service_alpn};
 pub use calls::Elsewhere;
 pub use releases::Build;
-pub use sessions::{Needs, client_token, passed_token};
+pub use sessions::Needs;
 pub(crate) mod services;
 mod app_schedules;
 pub use app_schedules::APP_SCHEDULES_DAYS;
@@ -237,9 +237,47 @@ pub struct Caller {
     pub user: String,
     /// The agent that asked through it, by name ("Claude Code"), when one did.
     pub agent: Option<String>,
-    /// The access token from sign-in it came with, when it's a sign-in's: a call
-    /// gets its keys and bucket URLs from the vault with it, and passes it on with the call to another device.
-    pub token: Option<String>,
+    /// What it came with, which says whose keys its calls open data with.
+    pub credential: Credential,
+}
+
+/// What a caller came with: this device's own keys, or the keys it was handed for one of these, kept here by it
+/// (sessions.rs) and never this device's own.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Credential {
+    /// None: this device's own programs, or a device or service of its own person asking as itself. Its calls use this
+    /// device's own keys, for its own person alone.
+    Own,
+    /// An access token the network's sign-in signed, passed on with its calls to another device, with the keys it was
+    /// handed.
+    SignIn(String),
+    /// A client device's calls over iroh, by its key, proven by QUIC: never a token anyone sends, so no request reaches
+    /// what a device was handed by naming it.
+    Client(Key),
+    /// A call another node (`node`, its endpoint key, proven by QUIC) passed on for `user` with no sign-in: it runs only
+    /// on the keys it was handed, sealed here for that node's key.
+    Passed { node: Key, user: String },
+    /// App schedules' calls: `app`'s in `scope`, with the keys sealed to this device for them alone. Never passed on.
+    AppSchedules { scope: Scope, app: String },
+}
+
+impl Caller {
+    /// `user` asking as `key`, with this device's own keys.
+    pub fn own(key: Key, user: impl Into<String>) -> Caller {
+        Caller { key, user: user.into(), agent: None, credential: Credential::Own }
+    }
+
+    /// This device's own person, as this device.
+    pub fn local(node: &Node) -> Result<Caller> {
+        Ok(Caller::own(node.0.id, node.user()?))
+    }
+}
+
+impl Node {
+    /// Whether `caller` is this machine's own programs: as this device, with its own keys.
+    pub fn this_machine(&self, caller: &Caller) -> bool {
+        caller.credential == Credential::Own && caller.key == self.0.id
+    }
 }
 
 /// A call to run: an app's tool, or a service's function.
@@ -818,7 +856,7 @@ impl Node {
         ensure!(crate::bucket::Bucket::create(&bucket, &name, &sealed).await?, "the new network's bucket isn't empty");
         self.read_steps().await?;
         ensure!(self.frozen(), "the new network's freeze didn't count");
-        let me = Caller { key: self.0.id, user, agent: None, token: None };
+        let me = Caller::own(self.0.id, user);
         // Its Vault and its first person's own open on this machine, so a new network fills items with no other step.
         for scope in [Scope::Global, Scope::User(me.user.clone())] {
             self.new_vault_key(&scope, 1, &[self.0.id], recovery.verifying_key().as_bytes()).await?;
@@ -1087,7 +1125,7 @@ fn node_me(node: &Node, db: &ScopeDb, caller: &Caller) -> Me {
 fn check_append(i: &Network, append: Append, scopes: &[Scope], me: &Caller, title: &str) -> Result<(Scope, Content)> {
     Ok(match append {
         Append::Switch { app, schedule, scope, on } => {
-            let scope = if scope == "user" { Scope::User(me.user.clone()) } else { Scope::parse(&scope)? };
+            let scope = Scope::parse_for(&scope, &me.user)?;
             (scope.clone(), switch_entry(i, &me.user, &scope, &app, title, &schedule, on)?)
         }
         Append::Forget { scope, blob } => {
@@ -1119,7 +1157,7 @@ fn check_append(i: &Network, append: Append, scopes: &[Scope], me: &Caller, titl
         }
         Append::Service { device, name, on, scope } => {
             let scope = match scope {
-                Some(s) => Some(if s == "user" { Scope::User(me.user.clone()) } else { Scope::parse(&s)? }),
+                Some(s) => Some(Scope::parse_for(&s, &me.user)?),
                 None if on => added_scope(i, &me.user, &name),
                 None => None,
             };

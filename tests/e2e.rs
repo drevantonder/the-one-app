@@ -22,7 +22,7 @@ async fn create(a: &Node, name: &str, user_name: &str) -> String {
 /// admits: `a` says it's the network's.
 async fn relay(a: &Node) -> crate::cloudflare::Workers {
     let k = tokio::task::block_in_place(|| crate::cloudflare::Workers::for_devices(vec![one::keys::hex(&a.id())]));
-    let me = one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None, token: None };
+    let me = one::node::Caller::own(a.id(), a.user().unwrap());
     a.set_setting(&me, "address", Some(&k.address)).await.unwrap();
     k
 }
@@ -55,7 +55,7 @@ fn notes(tool: &str, input: Value) -> CallRequest {
 /// Deploys the tests' own app, `tests/notes/app.js` (lines of text in `global`'s database), for everyone, as an admin
 /// would add an app, and waits for this device to run it.
 async fn add_notes(a: &Node) {
-    let me = one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None, token: None };
+    let me = one::node::Caller::own(a.id(), a.user().unwrap());
     let bundle = a.put_blob(&one::app::bundle::pack(&[("app.js".to_string(), include_bytes!("notes/app.js").to_vec())]).unwrap()).unwrap();
     a.deploy_making(&me, "notes", &bundle, Some("admins"), true).await.unwrap();
     a.install(&me, "notes", &one::database::scopes::Scope::Global, true, None).await.unwrap();
@@ -69,7 +69,7 @@ async fn backups_go_to_a_folder_encrypted_and_restore_with_the_recovery_key_alon
     add_notes(&a).await;
     let _relay = relay(&a).await;
     b.join(&a.pair().unwrap()).await.unwrap();
-    let me = one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None, token: None };
+    let me = one::node::Caller::own(a.id(), a.user().unwrap());
     eventually("notes to run", async || a.call(notes("post", json!({ "text": "before the backup" }))).await.is_ok()).await;
     a.set_item(&me, &one::database::scopes::Scope::User(me.user.clone()), json!({ "title": "Example key", "fields": { "token": { "value": "s3cret-value", "secret": true } }, "hosts": ["api.example.com"] })).await.unwrap();
 
@@ -218,7 +218,7 @@ async fn only_a_persons_own_device_or_their_inviter_lets_a_device_in() {
     let a = Node::start(&dir).await.unwrap();
     create(&a, "Home", "Andre").await;
     add_notes(&a).await;
-    let me = one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None, token: None };
+    let me = one::node::Caller::own(a.id(), a.user().unwrap());
     eventually("notes to run", async || a.call(notes("post", json!({ "text": "hi" }))).await.is_ok()).await;
     let global = one::database::scopes::Scope::Global;
     let new_key = || ed25519_dalek::SigningKey::from_bytes(&rand::random());
@@ -253,7 +253,7 @@ async fn only_a_persons_own_device_or_their_inviter_lets_a_device_in() {
     let refused = a.approve_request(&me, &asks(&new_key(), &sam.user, None), None).await.unwrap_err();
     assert!(format!("{refused:#}").contains("one of their own devices"), "{refused:#}");
     // Nor does Andre's machine approve anything for Sam, asked from Sam's device over the network: it isn't Sam's.
-    let from_sam = one::node::Caller { key: sams.verifying_key().to_bytes(), user: sam.user.clone(), agent: None, token: Some("Sam's".into()) };
+    let from_sam = one::node::Caller { key: sams.verifying_key().to_bytes(), user: sam.user.clone(), agent: None, credential: one::node::Credential::SignIn("Sam's".into()) };
     let refused = a.approve(&from_sam, "ABCDEFGH", true).await.unwrap_err();
     assert!(format!("{refused:#}").contains("isn't one of your devices"), "{refused:#}");
 
@@ -275,7 +275,7 @@ async fn only_a_persons_own_device_or_their_inviter_lets_a_device_in() {
 async fn a_file_put_from_elsewhere_is_read_only_by_whoever_put_it() {
     let a = start("put-from").await;
     create(&a, "Home", "Andre").await;
-    let caller = |user: &str| one::node::Caller { key: a.id(), user: user.into(), agent: None, token: Some(format!("{user}'s")) };
+    let caller = |user: &str| one::node::Caller { key: a.id(), user: user.into(), agent: None, credential: one::node::Credential::SignIn(format!("{user}'s")) };
     let (sam, andre) = (caller("sam"), caller(&a.user().unwrap()));
     let (hash, size) = a.put_blob_from(&sam, axum::body::Body::from("Sam's file")).await.unwrap();
     assert_eq!(size, 10);
@@ -297,7 +297,7 @@ async fn only_a_repos_owner_and_collaborators_push_to_it_and_only_its_owners_del
     use one::node::{Caller, DeviceRequest, Invited};
     let a = start("repos-owner").await;
     create(&a, "Home", "Andre").await;
-    let me = Caller { key: a.id(), user: a.user().unwrap(), agent: None, token: None };
+    let me = Caller::own(a.id(), a.user().unwrap());
     // Naming no scopes, as git's requests don't: Sam's own runs nowhere, as he picked nowhere, so his run without it.
     let repos = |tool: &str, input: Value| CallRequest { app: "repos".into(), tool: tool.into(), input, ..Default::default() };
     eventually("Repos to run", async || a.call(repos("list", json!({}))).await.is_ok()).await;
@@ -366,12 +366,12 @@ async fn only_a_repos_owner_and_collaborators_push_to_it_and_only_its_owners_del
         }
     }
 
-    let client = Caller { key: e.key, user: sam.user.clone(), agent: None, token: Some(one::node::client_token(&e.key)) };
-    let signed_in = Caller { key: a.id(), user: sam.user.clone(), agent: None, token: Some("Sam's sign-in".into()) };
+    let client = Caller { key: e.key, user: sam.user.clone(), agent: None, credential: one::node::Credential::Client(e.key) };
+    let signed_in = Caller { key: a.id(), user: sam.user.clone(), agent: None, credential: one::node::Credential::SignIn("Sam's sign-in".into()) };
     let mut both = Vec::new();
     for (sam, handed_for) in [(client, one::keys::hex(&e.key)), (signed_in, one::keys::token_id("Sam's sign-in"))] {
         let handoff = one::keys::Handoff { for_: handed_for, until: u64::MAX, keys: keys.clone() };
-        a.hand(sam.token.as_deref().unwrap(), &sam.user, &one::keys::seal_handoff(&a.endpoint().seal, &handoff).unwrap(), u64::MAX).unwrap();
+        a.hand(&sam.credential, &sam.user, &one::keys::seal_handoff(&a.endpoint().seal, &handoff).unwrap(), u64::MAX).unwrap();
         let call = |req: CallRequest| a.call_as(a.for_sign_in(req).unwrap(), sam.clone());
 
         // His push, deleting main and making a branch of his at its head, is refused, and nothing moves.
@@ -513,7 +513,7 @@ async fn a_groups_github_organization_shows_only_to_its_members_and_a_persons_gi
     use std::sync::{Arc, Mutex};
     let a = start("repos-github").await;
     create(&a, "Home", "Andre").await;
-    let me = Caller { key: a.id(), user: a.user().unwrap(), agent: None, token: None };
+    let me = Caller::own(a.id(), a.user().unwrap());
     let repos = |tool: &str, input: Value| CallRequest { app: "repos".into(), tool: tool.into(), input, ..Default::default() };
     eventually("Repos to run", async || a.call(repos("list", json!({}))).await.is_ok()).await;
 
@@ -578,9 +578,9 @@ async fn a_groups_github_organization_shows_only_to_its_members_and_a_persons_gi
             keys.push(one::keys::Handed { scope: "global".into(), epoch: n.parse().unwrap(), app: app.into(), database: database.into(), key });
         }
     }
-    let client = Caller { key: e.key, user: sam.user.clone(), agent: None, token: Some(one::node::client_token(&e.key)) };
+    let client = Caller { key: e.key, user: sam.user.clone(), agent: None, credential: one::node::Credential::Client(e.key) };
     let handoff = one::keys::Handoff { for_: one::keys::hex(&e.key), until: u64::MAX, keys };
-    a.hand(client.token.as_deref().unwrap(), &sam.user, &one::keys::seal_handoff(&a.endpoint().seal, &handoff).unwrap(), u64::MAX).unwrap();
+    a.hand(&client.credential, &sam.user, &one::keys::seal_handoff(&a.endpoint().seal, &handoff).unwrap(), u64::MAX).unwrap();
     let sams_list = async || {
         let req = CallRequest { scopes: Some(vec!["global".into()]), ..repos("list", json!({ "source": "github" })) };
         let before = seen.lock().unwrap().len();
@@ -625,7 +625,7 @@ async fn only_a_devices_person_or_an_admin_reads_its_logs() {
     std::fs::write(dir.join("device.json"), json!({ "secret": one::keys::hex(&rand::random()), "name": "mac" }).to_string()).unwrap();
     let a = Node::start(&dir).await.unwrap();
     create(&a, "Home", "Andre").await;
-    let andre = one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None, token: None };
+    let andre = one::node::Caller::own(a.id(), a.user().unwrap());
     let now = one::node::now_ms();
     let log: String = (0..3000).map(|i| format!("{} line {i}\n", now - 1000 + i)).collect();
     std::fs::create_dir_all(dir.join("logs")).unwrap();
@@ -643,7 +643,7 @@ async fn only_a_devices_person_or_an_admin_reads_its_logs() {
     let e = one::keys::Endpoint::of(&key);
     let request = one::node::DeviceRequest { key: one::keys::hex(&e.key), seal: one::keys::hex(&e.seal), name: "Sam's".into(), user: sam.user.clone(), person: String::new(), proof: Some(one::keys::invite_proof(b"s", &e)), device: None, made: None, place: None, sign_in: None };
     a.approve_request(&andre, &request, Some(&sam)).await.unwrap();
-    let from_sam = one::node::Caller { key: a.id(), user: sam.user.clone(), agent: None, token: None };
+    let from_sam = one::node::Caller::own(a.id(), sam.user.clone());
     let refused = a.call_as(logs(json!({})), from_sam.clone()).await.unwrap_err();
     assert!(format!("{refused:#}").contains("reads its logs"), "{refused:#}");
     assert!(!a.may_read_logs(&sam.user).unwrap() && a.may_read_logs(&andre.user).unwrap());
@@ -660,7 +660,7 @@ async fn a_service_runs_only_the_build_its_apps_deploy_names() {
     std::fs::write(dir.join("device.json"), json!({ "secret": one::keys::hex(&rand::random()), "name": "linux" }).to_string()).unwrap();
     let a = Node::start(&dir).await.unwrap();
     create(&a, "Home", "Andre").await;
-    let me = one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None, token: None };
+    let me = one::node::Caller::own(a.id(), a.user().unwrap());
     let build = a.put_blob(b"a program").unwrap();
     let bundle = |services: Value| {
         let files = vec![("app.js".to_string(), b"export default { tools: {} }".to_vec()), (one::app::bundle::SERVICES.to_string(), services.to_string().into_bytes())];
@@ -681,10 +681,10 @@ async fn a_service_runs_only_the_build_its_apps_deploy_names() {
     assert_eq!(a.service_builds().await.get("tiny"), Some(&Build::None));
 
     // Sam may not deploy Andre's app, so names no build of its service.
-    let sam = one::node::Caller { key: a.id(), user: "sam".into(), agent: None, token: Some("Sam's".into()) };
+    let sam = one::node::Caller { key: a.id(), user: "sam".into(), agent: None, credential: one::node::Credential::SignIn("Sam's".into()) };
     assert!(a.deploy(&sam, "tiny", &named, false).await.is_err());
     // Nor does Andre, from elsewhere, name a build he can't read: one Sam put, by its hash.
-    let away = one::node::Caller { key: [7; 32], token: Some("Andre's".into()), ..me.clone() };
+    let away = one::node::Caller { key: [7; 32], credential: one::node::Credential::SignIn("Andre's".into()), ..me.clone() };
     let (sams, _) = a.put_blob_from(&sam, axum::body::Body::from("Sam's program")).await.unwrap();
     let (his, _) = a.put_blob_from(&away, axum::body::Body::from(one::app::bundle::pack(&[("app.js".to_string(), b"export default {}".to_vec()), (one::app::bundle::SERVICES.to_string(), json!({ one::config::TARGET: sams }).to_string().into_bytes())]).unwrap())).await.unwrap();
     let refused = a.deploy(&away, "tiny", &his, false).await.unwrap_err();
@@ -700,7 +700,7 @@ async fn an_apps_service_call_gets_its_switched_on_items_secret_and_no_other_doe
     let a = start("vault-fill").await;
     create(&a, "Home", "Andre").await;
     add_notes(&a).await;
-    let me = one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None, token: None };
+    let me = one::node::Caller::own(a.id(), a.user().unwrap());
     let item = json!({ "title": "Work", "type": "Browser profile", "hosts": ["notes"], "apps": ["notes"], "fields": { "_key": { "value": "s3cret", "secret": true } } });
     let id = a.set_item(&me, &Scope::User(me.user.clone()), item).await.unwrap();
     let asked = || json!({ "profile": { "key": format!("{{{{{id}:_key}}}}") } });

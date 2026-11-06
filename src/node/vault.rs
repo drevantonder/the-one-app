@@ -131,7 +131,7 @@ impl Node {
         for scope in scopes {
             match self.items(me, scope).await {
                 Ok(items) => out.push((scope.clone(), items)),
-                Err(err) if me.token.is_none() && err.is::<NotGiven>() => tracing::debug!("{err:#}"),
+                Err(err) if me.credential == Credential::Own && err.is::<NotGiven>() => tracing::debug!("{err:#}"),
                 Err(err) => return Err(err),
             }
         }
@@ -159,11 +159,6 @@ impl Node {
         })
     }
 
-    /// This device's own person, as its own work opens their data.
-    pub(super) fn own_caller(&self) -> Result<Caller> {
-        Ok(Caller { key: self.0.id, user: self.user()?, agent: None, token: None })
-    }
-
     /// Reads `global`'s items with this device's own keys, in the background (`refresh_own_items`).
     pub(super) fn read_own_items(&self) {
         let node = self.clone();
@@ -175,7 +170,7 @@ impl Node {
     /// since anyone may write an item. A device that doesn't open `global` has none.
     async fn refresh_own_items(&self) {
         let read = async {
-            let me = self.own_caller()?;
+            let me = Caller::local(self)?;
             ensure!(self.with(|i| Ok(i.r.holds(&Scope::Global) && i.r.db().may(&me.user, "use", &scopes::object(&Scope::Global))))?, "this device doesn't open global");
             self.items(&me, &Scope::Global).await
         };
@@ -208,7 +203,7 @@ impl Node {
     pub async fn service_fill(&self, service: &str, call: u64, text: &str, host: &str) -> Result<String> {
         ensure!(!self.names_app(host), "{host} is an app's name, not a site's");
         let asked = self.0.services.caller_of(service, call).with_context(|| format!("no call {call} of {service}'s is waiting"))?;
-        let me = self.own_caller()?;
+        let me = Caller::local(self)?;
         ensure!(asked.user == me.user, "{} fills in only its own person's items", self.device_name());
         let lookup = self.lookup(&me, service, &self.usable_scopes(&me.user)?).await?;
         lookup.refuse_shut(text)?;
@@ -436,10 +431,7 @@ impl Node {
             Some(scope) => scope,
             None => {
                 ensure!(!release, "no such item");
-                let scope = match scope.as_deref() {
-                    None | Some("user") => Scope::User(me.user.clone()),
-                    Some(s) => Scope::parse(s)?,
-                };
+                let scope = Scope::parse_for(scope.as_deref().unwrap_or("user"), &me.user)?;
                 ensure!(scopes.contains(&scope), "the call didn't name {scope}");
                 scope
             }

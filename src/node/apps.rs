@@ -154,7 +154,7 @@ impl Node {
                     return None;
                 }
                 LAST.store(now, std::sync::atomic::Ordering::Relaxed);
-                let me = Caller { key: self.id(), user: self.user().ok()?, agent: None, token: None };
+                let me = Caller::local(self).ok()?;
                 self.apps_drawn(&me).await.ok()?;
                 found()?
             }

@@ -1050,6 +1050,14 @@ pub enum Scope {
 }
 
 impl Scope {
+    /// A scope as `user` names it: `user` is their own.
+    pub fn parse_for(s: &str, user: &str) -> Result<Scope> {
+        match s {
+            "user" => Ok(Scope::User(user.to_string())),
+            s => Scope::parse(s),
+        }
+    }
+
     pub fn parse(s: &str) -> Result<Scope> {
         Ok(match s.split_once(':') {
             None if s == "global" => Scope::Global,

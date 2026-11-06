@@ -207,7 +207,7 @@ impl Node {
     pub(super) fn say_hello(&self) {
         let Ok((devices, me, services, parts)) = self.with(|i| {
             let devices: Vec<Key> = i.r.db().computes().into_iter().map(|s| s.key).filter(|k| *k != self.0.id).collect();
-            Ok((devices, Caller { key: self.0.id, user: i.user.clone(), agent: None, token: None }, self.services_here(i), self.parts_here(i)))
+            Ok((devices, Caller::own(self.0.id, i.user.clone()), self.services_here(i), self.parts_here(i)))
         }) else {
             return;
         };

@@ -8,7 +8,7 @@ const PAIRING_LIFE: u64 = 7 * 86_400_000;
 impl Node {
     /// Makes a one-time pairing code for another of the local user's machines, which joins as a device.
     pub fn pair(&self) -> Result<String> {
-        Ok(self.pair_as(&Caller { key: self.0.id, user: self.user()?, agent: None, token: None }, None)?.0)
+        Ok(self.pair_as(&Caller::local(self)?, None)?.0)
     }
 
     /// Like `pair`, for `asker`, or for an admin, a code for another machine of `user` (an id or a name). With the id
@@ -131,7 +131,7 @@ impl Node {
         // Listed already by a join with this code that didn't finish: only the relay's left.
         if !self.with(|i| Ok(i.r.db().machine(&key).is_some_and(|m| m.user == user)))? {
             let listed = content::device(&endpoint, &user, &request.name, roles, None);
-            self.member_content(&Caller { key: by.unwrap_or(self.0.id), user: pairing.user.clone(), agent: None, token: None }, listed).await.context("this device can no longer admit that machine")?;
+            self.member_content(&Caller::own(by.unwrap_or(self.0.id), pairing.user.clone()), listed).await.context("this device can no longer admit that machine")?;
         }
         // Waited for: until the relay lets it in, the machine that joined reaches nothing.
         if self.address().is_ok() {

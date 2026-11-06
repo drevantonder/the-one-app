@@ -6,7 +6,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use serde_json::json;
 
-use crate::api::{Error, LOCAL_PUT, Me, Reply, Routes, Who};
+use crate::api::{Error, Me, Reply, Routes, Who};
 use crate::node::Node;
 
 pub fn routes() -> Routes {
@@ -17,17 +17,11 @@ pub fn routes() -> Routes {
 
 /// A file to keep, read as it comes: from elsewhere, within the room `Node::put_blob_from` gives its person.
 async fn put_blob(State(node): State<Node>, me: Me, req: axum::extract::Request) -> Reply {
-    let (hash, size) = match me.sign_in {
-        Some(_) => node.put_blob_from(&me.caller, req.into_body()).await?,
-        None => node.put_blob_streamed(req.into_body(), LOCAL_PUT).await?,
-    };
+    let (hash, size) = node.put_blob_from(&me.caller, req.into_body()).await?;
     Ok(Json(json!({ "blob": hash, "size": size })))
 }
 
 async fn blob(State(node): State<Node>, me: Me, Path(hash): Path<String>) -> Result<Response, Error> {
-    let bytes = match me.sign_in {
-        Some(_) => node.blob_for(&me.caller, &hash).await?,
-        None => node.blob(&hash).await?,
-    };
+    let bytes = node.blob_for(&me.caller, &hash).await?;
     Ok(([(axum::http::header::CONTENT_TYPE, "application/octet-stream")], bytes).into_response())
 }

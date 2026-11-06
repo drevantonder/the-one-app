@@ -1,7 +1,6 @@
-//! What a call that came with an access token from sign-in was handed: the keys of the databases it reaches, sealed to this
-//! device (`x-one-keys`, `keys::Handoff`), kept in memory for that token alone until it expires, then forgotten with
-//! the databases they opened. This device never opens a
-//! token caller's data with its own keys: a call that lacks one fails before it writes anything, saying what it needs
+//! What a caller with a `Credential` other than this device's own was handed: the keys of the databases it reaches,
+//! sealed to this device (`x-one-keys`, `keys::Handoff`), kept in memory for that caller alone until they expire, then
+//! forgotten with the databases they opened. This device never opens such a caller's data with its own keys: a call that lacks one fails before it writes anything, saying what it needs
 //! (`Needs`, which the API answers with 428), and its caller sends it again with them.
 
 use std::collections::HashSet;
@@ -11,13 +10,11 @@ use crate::keys::Need;
 
 use super::*;
 
-/// What this device keeps for one token, until it expires.
+/// What this device keeps for one caller's keys, until they expire.
 #[derive(Default)]
 pub(super) struct Session {
     /// Whose it is.
     user: String,
-    /// The client device whose calls over iroh it's for, if it's one's: forgotten once that device is removed.
-    client: Option<Key>,
     /// Until when its keys may be used: when its token expires, as its handoff says.
     pub until: u64,
     /// The database keys it was handed, by (scope, app, database), each by epoch.
@@ -27,8 +24,7 @@ pub(super) struct Session {
 /// The sessions' state on a node.
 #[derive(Default)]
 pub(super) struct Sessions {
-    /// By a hash of the token.
-    pub kept: Mutex<HashMap<[u8; 32], Session>>,
+    pub kept: Mutex<HashMap<Held, Session>>,
     /// Sign-in at the network's address, whose keys check the tokens calls come with.
     issuer: Mutex<Option<Arc<crate::cloudflare::Issuer>>>,
     /// The databases opened with keys a caller handed (or app schedules'), each kept open for calls handed
@@ -75,14 +71,37 @@ impl Session {
     }
 }
 
-/// What a client device's calls over iroh are kept by here, as a sign-in's are by its token: its key, proven by QUIC.
-/// It's never a token anyone sends: no sign-in signs it, and the API takes a bearer token only as a sign-in it
-/// checks (or its own MCP's ticket, `api::AskingAs`), so no request reaches what a device was handed by naming it.
-pub fn client_token(key: &Key) -> String {
-    format!("{CLIENT}{}", hex(key))
+/// What a caller's session is kept by: a sign-in's by its token's id (`keys::token_id`), a client device's by its key (forgotten once
+/// that device is removed), a call passed on by the node that passed it and its person.
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub(super) enum Held {
+    SignIn(String),
+    Client(Key),
+    Passed(Key, String),
 }
 
-pub(super) const CLIENT: &str = "client.";
+impl Held {
+    /// The `for` of a handoff with its calls: the sha256 of an access token, a client device's key, or the key of the
+    /// node that passed it on.
+    fn handoff_for(&self) -> String {
+        match self {
+            Held::SignIn(id) => id.clone(),
+            Held::Client(key) | Held::Passed(key, _) => hex(key),
+        }
+    }
+}
+
+impl Credential {
+    /// What its session is kept by: none for this device's own keys, or app schedules', which no session holds.
+    fn held(&self) -> Option<Held> {
+        match self {
+            Credential::SignIn(token) => Some(Held::SignIn(crate::keys::token_id(token))),
+            Credential::Client(key) => Some(Held::Client(*key)),
+            Credential::Passed { node, user } => Some(Held::Passed(*node, user.clone())),
+            Credential::Own | Credential::AppSchedules { .. } => None,
+        }
+    }
+}
 
 /// How many of a scope database's last steps a key handed for it is checked against, newest first.
 const STEPS_CHECKED: usize = 64;
@@ -92,55 +111,6 @@ const CLIENT_KEYS: u64 = 3_600_000;
 
 /// How often, at most, `global` is read for a client device this device doesn't list.
 const CATCH_UP_EVERY: std::time::Duration = std::time::Duration::from_secs(3);
-
-/// The client device a token `client_token` made is for.
-fn client_of(token: &str) -> Option<Key> {
-    data_encoding::HEXLOWER.decode(token.strip_prefix(CLIENT)?.as_bytes()).ok()?.try_into().ok()
-}
-
-/// What calls another node passed on for `user` with no sign-in are kept by here (the Cloudflare node's, or a
-/// machine's): that node's endpoint key, proven by QUIC, and the person it says the call is for. Like a client
-/// device's, no sign-in signs it, so it's never a token anyone sends, and what it was handed (sealed here for
-/// that node's key) opens only that person's calls from it.
-pub fn passed_token(key: &Key, user: &str) -> String {
-    format!("{PASSED}{}/{user}", hex(key))
-}
-
-const PASSED: &str = "passed.";
-
-/// The `for` of a handoff with calls that bring `token`: a client device's key, the key of the node that passed it
-/// on, or the sha256 of an access token.
-fn handoff_for(token: &str) -> String {
-    if let Some(key) = token.strip_prefix(CLIENT) {
-        return key.to_string();
-    }
-    if let Some((key, _)) = token.strip_prefix(PASSED).and_then(|t| t.split_once('/')) {
-        return key.to_string();
-    }
-    crate::keys::token_id(token)
-}
-
-/// Whether `token` was made here for keys handed with no sign-in: a client device's, or a call another node passed on.
-pub(super) fn unsigned(token: &str) -> bool {
-    token.starts_with(CLIENT) || token.starts_with(PASSED)
-}
-
-/// Whether `token` was made here for a call another node passed on: it runs only on what it was handed, and no service
-/// counts it as its person's own.
-pub(super) fn passed(token: &str) -> bool {
-    token.starts_with(PASSED)
-}
-
-/// Whether `token` is an access token the network's sign-in service signed, which another device can check: not a
-/// client device's, one another node passed on, or a scheduled run's.
-pub(super) fn is_sign_in(token: &str) -> bool {
-    !token.starts_with(CLIENT) && !token.starts_with(PASSED) && !token.starts_with("run.")
-}
-
-fn hash(token: &str) -> [u8; 32] {
-    use sha2::Digest;
-    sha2::Sha256::digest(token.as_bytes()).into()
-}
 
 impl Node {
     /// Sign-in at the network's address, as this device checks the tokens it's given.
@@ -191,11 +161,12 @@ impl Node {
         }
     }
 
-    /// Keeps the keys a caller handed this device with a call (`x-one-keys`) for `token`'s calls, as `user`'s: only
-    /// if they were sealed to it (any others are left), for that token (`for`: its sha256, or a client device's or the Cloudflare node's
-    /// key), and not yet expired; and no longer than `most`, until when its caller's own word lasts (a session's
-    /// certificate's).
-    pub fn hand(&self, token: &str, user: &str, sealed: &str, most: u64) -> Result<()> {
+    /// Keeps the keys a caller handed this device with a call (`x-one-keys`) for its calls with `credential`, as `user`'s:
+    /// only if they were sealed to it (any others are left), for that credential (`for`: a token's sha256, or a client
+    /// device's or the Cloudflare node's key), and not yet expired; and no longer than `most`, until when its caller's own
+    /// word lasts (a session's certificate's).
+    pub fn hand(&self, credential: &Credential, user: &str, sealed: &str, most: u64) -> Result<()> {
+        let held = credential.held().context("nothing is handed for this device's own calls, or app schedules'")?;
         // Keys this device can't open (sealed to another: the node a client asked before, say) are left, never refused:
         // the call goes on without them and asks for what it needs (428), sealed to this device, which the client
         // checks against its own entries before handing anything, an older one too. Leaving them gives nothing away.
@@ -206,14 +177,14 @@ impl Node {
                 return Ok(());
             }
         };
-        ensure!(handoff.for_ == handoff_for(token), "the keys handed are for another sign-in");
+        ensure!(handoff.for_ == held.handoff_for(), "the keys handed are for another sign-in");
         let now = now_ms();
         // Kept no longer than a sign-in's token lasts, whatever the handoff says (one that doesn't check brings no call
         // here to use them); with none (a client device's, or a call passed on), an hour at most, as they're handed
         // again with the calls.
-        let until = match token.starts_with(CLIENT) || token.starts_with(PASSED) {
-            true => handoff.until.min(now + CLIENT_KEYS),
-            false => handoff.until.min(self.token_expiry(token).unwrap_or(u64::MAX)),
+        let until = match credential {
+            Credential::SignIn(token) => handoff.until.min(self.token_expiry(token).unwrap_or(u64::MAX)),
+            _ => handoff.until.min(now + CLIENT_KEYS),
         }
         .min(most);
         // Keys that have run out are left, not refused: the call goes on and asks for what it needs (428), and its
@@ -232,9 +203,8 @@ impl Node {
         let keys: Vec<crate::keys::Handed> = handoff.keys.into_iter().filter(|k| newest.get(&k.scope).is_some_and(|n| k.epoch >= 1 && k.epoch <= *n)).collect();
         let mut kept = self.0.sessions.kept.lock().unwrap();
         kept.retain(|_, s| s.live(now));
-        let session = kept.entry(hash(token)).or_default();
+        let session = kept.entry(held).or_default();
         session.user = user.to_string();
-        session.client = client_of(token);
         session.until = session.until.max(until);
         for k in keys {
             session.keys.entry((k.scope, k.app, k.database)).or_default().insert(k.epoch, k.key);
@@ -250,44 +220,46 @@ impl Node {
 
     /// Keeps the keys another node, `from`, handed with a call it passed on for `user` with no sign-in: sealed here for
     /// `from`'s key, and only of `scopes`, those the call names; a service's call (`service`) only with some, since
-    /// a node's word alone runs no service. → what the call's keys are kept by.
-    pub(super) fn hand_passed(&self, from: &Key, user: &str, sealed: &str, scopes: &[Scope], service: bool) -> Result<String> {
+    /// a node's word alone runs no service. → the call's credential.
+    pub(super) fn hand_passed(&self, from: &Key, user: &str, sealed: &str, scopes: &[Scope], service: bool) -> Result<Credential> {
         let handoff = crate::keys::open_handoff(&self.seal_secret(), sealed)?;
         ensure!(handoff.for_ == hex(from), "the keys handed are for another node");
         ensure!(!service || !handoff.keys.is_empty(), "a service's call passed on comes with the keys its person handed");
         let named: Vec<String> = scopes.iter().map(Scope::to_string).collect();
         ensure!(handoff.keys.iter().all(|k| named.contains(&k.scope)), "the keys handed are of a scope the call doesn't name");
-        let token = passed_token(from, user);
-        self.hand(&token, user, sealed, u64::MAX)?;
-        Ok(token)
+        let credential = Credential::Passed { node: *from, user: user.to_string() };
+        self.hand(&credential, user, sealed, u64::MAX)?;
+        Ok(credential)
     }
 
     /// The keys a call of `app` was handed here, of `scopes` alone, for passing it on, until when they're kept: its
     /// app's databases', and the scopes' log and Vault, never another app's.
-    pub(super) fn passing_on(&self, token: &str, scopes: &[Scope], app: &str) -> (Vec<crate::keys::Handed>, u64) {
+    pub(super) fn passing_on(&self, credential: &Credential, scopes: &[Scope], app: &str) -> (Vec<crate::keys::Handed>, u64) {
+        let Some(held) = credential.held() else { return (Vec::new(), 0) };
         let named: Vec<String> = scopes.iter().map(Scope::to_string).collect();
         let its = |a: &str, database: &str| a == app || (a == scopes::APP && (database == crate::database::steps::KEY_NAME || database == crate::vault::DATABASE));
         let kept = self.0.sessions.kept.lock().unwrap();
-        let Some(session) = kept.get(&hash(token)).filter(|s| s.live(now_ms())) else { return (Vec::new(), 0) };
+        let Some(session) = kept.get(&held).filter(|s| s.live(now_ms())) else { return (Vec::new(), 0) };
         let keys = session.keys.iter().filter(|((scope, a, database), _)| named.contains(scope) && its(a, database)).flat_map(|((scope, app, database), by)| by.iter().map(move |(epoch, key)| crate::keys::Handed { scope: scope.clone(), epoch: *epoch, app: app.clone(), database: database.clone(), key: *key })).collect();
         (keys, session.until)
     }
 
     /// The keys of `scopes` a sign-in's calls were handed here, sealed to another device (`to`, its seal key) for a
     /// call of `app` this one passes on to it, until they're kept here.
-    pub(super) fn hand_on(&self, token: &str, to: &[u8; 32], scopes: &[Scope], app: &str) -> Option<String> {
-        let (keys, until) = self.passing_on(token, scopes, app);
-        (until > 0).then(|| crate::keys::seal_handoff(to, &crate::keys::Handoff { for_: crate::keys::token_id(token), until, keys }).ok()).flatten()
+    pub(super) fn hand_on(&self, credential: &Credential, to: &[u8; 32], scopes: &[Scope], app: &str) -> Option<String> {
+        let held = credential.held()?;
+        let (keys, until) = self.passing_on(credential, scopes, app);
+        (until > 0).then(|| crate::keys::seal_handoff(to, &crate::keys::Handoff { for_: held.handoff_for(), until, keys }).ok()).flatten()
     }
 
-    /// The keys a token caller was handed for a database, by epoch: for app schedules, theirs.
+    /// The keys a caller was handed for a database, by epoch: for app schedules, theirs.
     fn handed(&self, me: &Caller, scope: &Scope, app: &str, database: &str) -> Keys {
-        let Some(token) = &me.token else { return Keys::new() };
-        if token.starts_with(app_schedules::TOKEN) {
-            return self.app_schedules_handed(token, scope, app, database);
+        if let Credential::AppSchedules { scope: s, app: a } = &me.credential {
+            return self.app_schedules_handed(s, a, scope, app, database);
         }
+        let Some(held) = me.credential.held() else { return Keys::new() };
         let kept = self.0.sessions.kept.lock().unwrap();
-        kept.get(&hash(token)).filter(|s| s.until > now_ms()).and_then(|s| s.keys.get(&(scope.to_string(), app.to_string(), database.to_string())).cloned()).unwrap_or_default()
+        kept.get(&held).filter(|s| s.until > now_ms()).and_then(|s| s.keys.get(&(scope.to_string(), app.to_string(), database.to_string())).cloned()).unwrap_or_default()
     }
 
     /// The keys of a scope's database's steps that live sessions of people who may use it were handed, if they hold its
@@ -375,11 +347,11 @@ impl Node {
         Ok(opens)
     }
 
-    /// Reads the steps of each scope a token caller uses that this device runs but doesn't open (someone else's own, or
+    /// Reads the steps of each scope a caller with handed keys uses that this device runs but doesn't open (someone else's own, or
     /// a group its person isn't in), with the keys of its steps the caller hands, which it's asked for (428) if it
     /// didn't: what their calls are checked by (which apps are there, who may do what), and written after.
     pub(super) async fn read_callers_scopes(&self, me: &Caller) -> Result<()> {
-        if me.token.as_deref().is_none_or(|t| t.starts_with(app_schedules::TOKEN)) {
+        if matches!(me.credential, Credential::Own | Credential::AppSchedules { .. }) {
             return Ok(());
         }
         let want: Vec<(Scope, &str, &str)> = self.with(|i| {
@@ -404,10 +376,10 @@ impl Node {
         self.with(|i| Ok(i.r.db().epoch(scope)))
     }
 
-    /// The keys a token caller needs for `want`'s databases, (scope, app, database) each, that it wasn't handed: every
+    /// The keys a caller with handed keys needs for `want`'s databases, (scope, app, database) each, that it wasn't handed: every
     /// epoch from the one its newest copy is under to the scope's newest, which it writes under.
     pub(super) async fn needs(&self, me: &Caller, want: &[(Scope, &str, &str)]) -> Result<()> {
-        if me.token.is_none() {
+        if me.credential == Credential::Own {
             return Ok(());
         }
         // A caller handed every epoch from the first needs none: the hints, read from the bucket, only say how old the
@@ -449,20 +421,20 @@ impl Node {
         Needs { need, to: hex(&me.key), seal: hex(&me.seal) }
     }
 
-    /// A call's database: for a token caller, opened with the keys it was handed (app schedules: theirs), and
-    /// kept open here no longer than its token (or app schedules) lasts; else with this device's own, for its own person alone.
+    /// A call's database: opened with the keys its caller was handed (app schedules: theirs), and kept open here no
+    /// longer than they (or app schedules) last; or with this device's own, for its own person alone.
     pub(super) async fn call_database(&self, me: &Caller, scope: &Scope, app: &str, database: &str, schema: Option<Vec<String>>) -> Result<(Arc<tokio::sync::Mutex<Db>>, Copied)> {
         let bucket = self.bucket()?;
-        let Some(token) = &me.token else {
-            ensure!(me.user == self.user()?, "{} opens only its own person's data with its own keys", self.device_name());
-            return Ok((self.database(scope, app, database, schema, None).await?, bucket));
+        let (app_schedules, until) = match &me.credential {
+            Credential::Own => {
+                ensure!(me.user == self.user()?, "{} opens only its own person's data with its own keys", self.device_name());
+                return Ok((self.database(scope, app, database, schema, None).await?, bucket));
+            }
+            Credential::AppSchedules { scope, app } => (true, self.app_schedules_until(scope, app)),
+            other => (false, other.held().and_then(|h| self.0.sessions.kept.lock().unwrap().get(&h).map(|s| s.until)).unwrap_or(0)),
         };
         self.needs(me, &[(scope.clone(), app, database)]).await?;
         let keys = self.handed(me, scope, app, database);
-        let (app_schedules, until) = match token.starts_with(app_schedules::TOKEN) {
-            true => (true, self.app_schedules_until(token)),
-            false => (false, self.0.sessions.kept.lock().unwrap().get(&hash(token)).map(|s| s.until).unwrap_or(0)),
-        };
         let db = match self.database(scope, app, database, schema, Some(super::databases::Given { keys, bucket: &bucket, until, app_schedules })).await {
             Err(err) => {
                 let epoch = err.downcast_ref::<crate::database::stored::Missing>().map(|m| m.epoch).or(err.downcast_ref::<crate::database::stored::Ahead>().map(|a| a.epoch));
@@ -531,10 +503,10 @@ impl Node {
 
     /// Forgets the keys handed by client devices the network no longer lists.
     pub(super) fn forget_removed_clients(&self) {
-        let clients: Vec<Key> = self.0.sessions.kept.lock().unwrap().values().filter_map(|s| s.client).collect();
+        let clients: Vec<Key> = self.0.sessions.kept.lock().unwrap().keys().filter_map(|h| match h { Held::Client(k) => Some(*k), _ => None }).collect();
         let gone: Vec<Key> = clients.into_iter().filter(|k| self.client(k).is_none()).collect();
         if !gone.is_empty() {
-            self.0.sessions.kept.lock().unwrap().retain(|_, s| !s.client.is_some_and(|k| gone.contains(&k)));
+            self.0.sessions.kept.lock().unwrap().retain(|h, _| !matches!(h, Held::Client(k) if gone.contains(k)));
             self.forget_opened();
         }
     }

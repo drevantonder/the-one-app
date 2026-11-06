@@ -22,7 +22,7 @@ use serde_json::{Value, json};
 use tokio_stream::StreamExt;
 
 use crate::database::scopes::Role;
-use crate::node::{CallRequest, Caller, Node};
+use crate::node::{CallRequest, Caller, Credential, Node};
 
 /// Where this machine's node serves its local API: the config's port, or `<CLI>_ADDR`.
 pub fn addr() -> String {
@@ -248,9 +248,6 @@ pub fn app_route(path: &str) -> bool {
     !app.is_empty() && !rest.is_empty() && !matches!(app, "v1" | "mcp" | "hooks" | "skills")
 }
 
-/// The most this machine's own programs put in one file.
-pub(crate) const LOCAL_PUT: u64 = 1 << 30;
-
 /// `routes` as `Who` says each may be asked, with this machine's own programs asking any.
 pub fn guarded(routes: Routes, node: Node) -> Router {
     let who: std::sync::Arc<std::collections::HashMap<&'static str, Who>> = std::sync::Arc::new(routes.who.into_iter().collect());
@@ -296,7 +293,7 @@ pub const FORWARDED: &[&str] = &["forwarded", "x-forwarded-for", "x-forwarded-ho
 
 /// The skills for this machine's person (src/skills.rs).
 async fn skills(node: &Node) -> Vec<crate::skills::Skill> {
-    let apps = match local(node) {
+    let apps = match Caller::local(node) {
         Ok(me) => node.apps(&me).await.map(|a| json!(a)).unwrap_or_default(),
         Err(_) => json!([]),
     };
@@ -413,7 +410,7 @@ async fn only_this_machine(State((node, routes)): State<(Node, std::sync::Arc<st
             Ok(me) => {
                 // The keys its caller hands this device for the token's calls, sealed to it.
                 if let Some(handed) = req.headers().get(KEYS_HEADER).and_then(|h| h.to_str().ok())
-                    && let Err(err) = node.hand(&token, &me.caller.user, handed, u64::MAX)
+                    && let Err(err) = node.hand(&me.caller.credential, &me.caller.user, handed, u64::MAX)
                 {
                     return refuse(req, (StatusCode::BAD_REQUEST, Json(json!({ "error": format!("{err:#}") }))).into_response()).await;
                 }
@@ -440,9 +437,9 @@ async fn from_client(node: &Node, key: crate::keys::Key, until: u64, who: Who, m
     let Some((user, name)) = node.client_now(&key).await else {
         return refuse(req, (StatusCode::FORBIDDEN, Json(json!({ "error": "this isn't one of your devices: approve it on one that is", "code": crate::protocol::code::NOT_LET_IN }))).into_response()).await;
     };
-    let token = crate::node::client_token(&key);
+    let credential = Credential::Client(key);
     if let Some(handed) = req.headers().get(KEYS_HEADER).and_then(|h| h.to_str().ok())
-        && let Err(err) = node.hand(&token, &user, handed, until)
+        && let Err(err) = node.hand(&credential, &user, handed, until)
     {
         return refuse(req, (StatusCode::BAD_REQUEST, Json(json!({ "error": format!("{err:#}") }))).into_response()).await;
     }
@@ -450,7 +447,7 @@ async fn from_client(node: &Node, key: crate::keys::Key, until: u64, who: Who, m
     if crate::database::reads_of(req.headers().get(crate::database::HEADER).and_then(|h| h.to_str().ok())) < crate::database::READS {
         return refuse(req, (StatusCode::UPGRADE_REQUIRED, Json(json!({ "error": crate::protocol::update_refusal(YOURS), "code": crate::protocol::code::UPDATE }))).into_response()).await;
     }
-    req.extensions_mut().insert(Me { caller: Caller { key, user, agent: None, token: Some(token) }, sign_in: Some(name) });
+    req.extensions_mut().insert(Me { caller: Caller { key, user, agent: None, credential }, sign_in: Some(name) });
     next.run(req).await
 }
 
@@ -549,10 +546,6 @@ pub(crate) fn done() -> Reply {
     Ok(Json(json!({})))
 }
 
-pub(crate) fn local(node: &Node) -> Result<Caller, Error> {
-    Ok(Caller { key: node.id(), user: node.user()?, agent: None, token: None })
-}
-
 /// Who asked: this machine's own user, or someone signed in at the network's address, whom this device acts for.
 #[derive(Clone)]
 pub(crate) struct Me {
@@ -567,7 +560,7 @@ impl axum::extract::FromRequestParts<Node> for Me {
     async fn from_request_parts(parts: &mut axum::http::request::Parts, node: &Node) -> Result<Me, Error> {
         match parts.extensions.get::<Me>() {
             Some(me) => Ok(me.clone()),
-            None => Ok(Me { caller: local(node)?, sign_in: None }),
+            None => Ok(Me { caller: Caller::local(node)?, sign_in: None }),
         }
     }
 }
@@ -617,7 +610,7 @@ async fn signed_in(node: &Node, token: String) -> anyhow::Result<Me> {
     .await??;
     let (user, until) = (claims.sub.clone(), claims.exp * 1000);
     anyhow::ensure!(node.is_user(&user), NotJoined);
-    let me = Me { caller: Caller { key: node.id(), user, agent: None, token: Some(token) }, sign_in: Some(String::new()) };
+    let me = Me { caller: Caller { key: node.id(), user, agent: None, credential: Credential::SignIn(token) }, sign_in: Some(String::new()) };
     let mut kept = SIGNED_INS.lock().unwrap();
     kept.retain(|_, (_, until)| now < *until);
     kept.insert(hash, (me.clone(), until));
@@ -695,7 +688,7 @@ async fn call_for(node: &Node, me: Me, body: Value, picks: bool) -> anyhow::Resu
 
 /// A call the Cloudflare node passes on over iroh (src/node/net.rs): its person's, as `me.user` says, run with the keys
 /// of its databases they handed the Cloudflare node, which it hands this device (`keys`, sealed to it for the
-/// Cloudflare node's key, `node::passed_token`) for the scopes the call names alone, and never this device's own: no
+/// Cloudflare node's key, `Credential::Passed`) for the scopes the call names alone, and never this device's own: no
 /// access token comes with it, so none of theirs reaches a node on a machine, whose owner could use it as them.
 /// → `{ ok }`, or what failed as the API says it.
 pub(crate) async fn call_from_cloudflare_node(node: &Node, remote: crate::keys::Key, mut call: Value) -> Value {
@@ -707,10 +700,10 @@ pub(crate) async fn call_from_cloudflare_node(node: &Node, remote: crate::keys::
         let user = me["user"].as_str().filter(|u| !u.is_empty()).ok_or_else(|| anyhow::anyhow!("whose call is it?"))?.to_string();
         anyhow::ensure!(node.is_user(&user), NotJoined);
         let handed = keys.as_ref().and_then(Value::as_str).ok_or_else(|| anyhow::anyhow!("a call passed on brings the keys it was handed"))?;
-        let token = node.take_passed(&remote, &user, &call, handed, false)?;
+        let credential = node.take_passed(&remote, &user, &call, handed, false)?;
         let client = me["client"].as_str().unwrap_or_default().to_string();
         // As the Cloudflare node's, never this device's own: no service counts it as its person's own node.
-        call_for(node, Me { caller: Caller { key: remote, user, agent: None, token: Some(token) }, sign_in: Some(client) }, call, false).await
+        call_for(node, Me { caller: Caller { key: remote, user, agent: None, credential }, sign_in: Some(client) }, call, false).await
     };
     ran.await.unwrap_or_else(|err| failed(&err))
 }
@@ -798,17 +791,15 @@ async fn prompt(State(node): State<Node>, body: String) -> Response {
 async fn app_http(State(node): State<Node>, me: Me, Path((app, path)): Path<(String, String)>, req: axum::extract::Request) -> Result<Response, Error> {
     let method = req.method().to_string();
     let query = req.uri().query().unwrap_or("").to_string();
-    let remote = me.sign_in.is_some();
     let empty = matches!(method.as_str(), "GET" | "HEAD") || req.headers().get(axum::http::header::CONTENT_LENGTH).is_some_and(|l| l == "0");
-    let body = match (empty, remote) {
-        (true, _) => None,
-        (false, true) => Some(node.put_blob_from(&me.caller, req.into_body()).await?),
-        (false, false) => Some(node.put_blob_streamed(req.into_body(), LOCAL_PUT).await?),
+    let body = match empty {
+        true => None,
+        false => Some(node.put_blob_from(&me.caller, req.into_body()).await?),
     };
     let body = body.and_then(|(hash, size)| (size > 0).then_some(hash));
     let input = json!({ "method": method, "path": path, "query": query, "body": body });
     let mut call = CallRequest { app, tool: "_http".into(), input, puts: body.iter().cloned().collect(), ..Default::default() };
-    if remote {
+    if me.sign_in.is_some() {
         call = node.for_sign_in(call)?;
     }
     let out = node.call_as(call, me.caller.clone()).await;
@@ -819,8 +810,7 @@ async fn app_http(State(node): State<Node>, me: Me, Path((app, path)): Path<(Str
     let status = StatusCode::from_u16(out["status"].as_u64().unwrap_or(200) as u16)?;
     let kind = out["type"].as_str().unwrap_or("text/plain").to_string();
     let bytes = match out["blob"].as_str() {
-        Some(hash) if remote => node.blob_for(&me.caller, hash).await?,
-        Some(hash) => node.blob(hash).await?,
+        Some(hash) => node.blob_for(&me.caller, hash).await?,
         None => out["text"].as_str().unwrap_or("").as_bytes().to_vec(),
     };
     Ok((status, [(axum::http::header::CONTENT_TYPE, kind)], bytes).into_response())
