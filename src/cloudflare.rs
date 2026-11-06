@@ -149,12 +149,7 @@ pub fn verify(token: &str, jwks: &Value, iss: &str, now: u64) -> Result<Claims> 
     ensure!(parts.len() == 3, "not a token");
     let header: Value = serde_json::from_slice(&B64U.decode(parts[0].as_bytes())?)?;
     ensure!(header["alg"] == "EdDSA", "not a token signed with Ed25519");
-    let jwk = jwks["keys"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .find(|k| k["kid"] == header["kid"] && k["kty"] == "OKP" && k["crv"] == "Ed25519")
-        .context("signed by a key sign-in doesn't publish")?;
+    let jwk = published_key(jwks, &header).context("signed by a key sign-in doesn't publish")?;
     let public: [u8; 32] = B64U.decode(jwk["x"].as_str().unwrap_or("").as_bytes())?.try_into().map_err(|_| anyhow!("not an Ed25519 key"))?;
     let key = ed25519_dalek::VerifyingKey::from_bytes(&public)?;
     let signature = ed25519_dalek::Signature::from_slice(&B64U.decode(parts[2].as_bytes())?)?;
@@ -163,6 +158,17 @@ pub fn verify(token: &str, jwks: &Value, iss: &str, now: u64) -> Result<Claims> 
     ensure!(claims.iss == iss, "issued by {}, not {iss}", claims.iss);
     ensure!(claims.exp * 1000 > now, "it has expired");
     Ok(claims)
+}
+
+/// The key in `jwks` that signed a token with this header, if sign-in publishes it.
+fn published_key<'a>(jwks: &'a Value, header: &Value) -> Option<&'a Value> {
+    jwks["keys"].as_array()?.iter().find(|k| k["kid"] == header["kid"] && k["kty"] == "OKP" && k["crv"] == "Ed25519")
+}
+
+/// Whether `jwks` holds the key `token` names; nothing for what isn't a token.
+fn names_published_key(jwks: &Value, token: &str) -> Option<bool> {
+    let header: Value = serde_json::from_slice(&B64U.decode(token.split('.').next()?.as_bytes()).ok()?).ok()?;
+    Some(published_key(jwks, &header).is_some())
 }
 
 /// Sign-in at a network's address, as nodes check its tokens: its keys fetched and kept five minutes, or
@@ -192,9 +198,8 @@ impl Issuer {
                     jwks
                 }
             };
-            match verify(token, &jwks, &self.iss, now) {
-                Err(err) if !fresh && err.to_string().contains("key the sign-in") => continue,
-                other => return other,
+            if fresh || names_published_key(&jwks, token) != Some(false) {
+                return verify(token, &jwks, &self.iss, now);
             }
         }
         unreachable!("the second try returns")

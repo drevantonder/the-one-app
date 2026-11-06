@@ -6,13 +6,25 @@ import { b64u } from "./crypto.js";
 
 const json = (part) => JSON.parse(new TextDecoder().decode(b64u.decode(part)));
 
+/// The key in `jwks` that signed a token with this header, if sign-in publishes it.
+const publishedKey = (jwks, header) => (jwks.keys || []).find((k) => k.kid === header.kid && k.kty === "OKP" && k.crv === "Ed25519");
+
+/// Whether `jwks` holds the key `token` names; null for what isn't a token.
+function namesPublishedKey(jwks, token) {
+  try {
+    return !!publishedKey(jwks, json(String(token).split(".")[0]));
+  } catch {
+    return null;
+  }
+}
+
 /// The claims of `token`, if `jwks` signed it, `iss` issued it and it hasn't expired; otherwise it throws.
 export async function verify(token, jwks, iss, now = Date.now()) {
   const parts = String(token).split(".");
   if (parts.length !== 3) throw new Error("not a token");
   const header = json(parts[0]);
   if (header.alg !== "EdDSA") throw new Error("not a token signed with Ed25519");
-  const jwk = (jwks.keys || []).find((k) => k.kid === header.kid && k.kty === "OKP" && k.crv === "Ed25519");
+  const jwk = publishedKey(jwks, header);
   if (!jwk) throw new Error("signed by a key sign-in doesn't publish");
   const key = await crypto.subtle.importKey("jwk", { kty: "OKP", crv: "Ed25519", x: jwk.x }, { name: "Ed25519" }, false, ["verify"]);
   const signed = new TextEncoder().encode(`${parts[0]}.${parts[1]}`);
@@ -47,11 +59,7 @@ export class Issuer {
         this.jwks = await resp.json();
         this.at = now;
       }
-      try {
-        return await verify(token, this.jwks, this.iss, now);
-      } catch (err) {
-        if (fresh || !/key the sign-in/.test(err.message)) throw err;
-      }
+      if (fresh || namesPublishedKey(this.jwks, token) !== false) return await verify(token, this.jwks, this.iss, now);
     }
   }
 }
