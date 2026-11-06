@@ -112,7 +112,6 @@ fn relative(ms: f64) -> String {
     if s > 0 { format!("{span} ago") } else { format!("in {span}") }
 }
 
-/// Widgets' routes: the person's widgets, and their apps' badges.
 pub(crate) mod routes {
     use axum::Json;
     use axum::extract::{Query, State};

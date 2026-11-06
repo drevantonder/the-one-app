@@ -61,7 +61,6 @@ pub mod own;
 pub mod groups;
 pub mod widgets;
 
-/// How long a call may run before it's stopped.
 const CALL_LIMIT: Duration = Duration::from_secs(30);
 /// A device whose round trip is longer than this is far: a nearer one runs what it would have, whatever their order.
 const FAR: Duration = Duration::from_millis(250);
@@ -72,7 +71,6 @@ fn full(load: &crate::load::Load) -> bool {
     load.memory.is_some_and(|m| m.total > 0 && m.used * 10 > m.total * 9) || busy > 90
 }
 
-/// How often a device reads what other devices wrote and said.
 const TICK: Duration = Duration::from_secs(10);
 /// How long a read waits for the bucket, when a ping said its database changed, before it reads this device's copy.
 const BUCKET_WAIT: Duration = Duration::from_secs(5);
@@ -91,12 +89,10 @@ fn bucket_root(place: &Place) -> Result<Option<Vec<u8>>> {
     }
     Ok(old)
 }
-/// The folder in a device's home where it keeps its network, and the file there that says which.
 const NETWORK_DIR: &str = "network";
 const NETWORK_FILE: &str = "network.json";
 /// How often a device says hello to the others: which services serve there, and how loaded it is.
 const PRESENCE_EVERY: Duration = Duration::from_secs(15);
-/// How soon an app's deploy that couldn't be fetched is tried again.
 const REFETCH_AFTER: Duration = Duration::from_secs(30);
 /// What an app's own database is called: SQLite's name for a connection's first.
 const DATABASE: &str = "main";
@@ -113,9 +109,7 @@ struct DeviceFile {
 
 #[derive(Serialize, Deserialize)]
 struct NetworkFile {
-    /// The network's root, its id.
     root: String,
-    /// This device's local user.
     user: String,
     /// The network's bucket, as a place's fields: a folder's `path`, or S3's. None if this device can't reach it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -142,9 +136,7 @@ struct Network {
     user: String,
     /// The network's bucket, and its fields, which a device joining is given.
     bucket: Option<(Place, BTreeMap<String, String>)>,
-    /// Each other device, as it last said hello.
     peers: HashMap<Key, Peer>,
-    /// The build each device last said it runs.
     builds: HashMap<Key, release::Running>,
     /// Once `global`'s log is frozen, each other scope's own database as its steps leave it (`database::steps`): the
     /// last position read, and the database, once its anchor checked out here.
@@ -168,7 +160,6 @@ struct Network {
 }
 
 impl Network {
-    /// Whether another device said hello lately.
     fn online(&self, device: &Key) -> bool {
         self.peers.get(device).is_some_and(|p| p.seen.elapsed() < 3 * PRESENCE_EVERY)
     }
@@ -185,7 +176,6 @@ pub enum Event {
 
 #[derive(Serialize, Deserialize)]
 struct Pairing {
-    /// The user who asked for it.
     user: String,
     /// The client that asked for it, if one did.
     #[serde(default)]
@@ -261,19 +251,16 @@ pub enum Credential {
 }
 
 impl Caller {
-    /// `user` asking as `key`, with this device's own keys.
     pub fn own(key: Key, user: impl Into<String>) -> Caller {
         Caller { key, user: user.into(), agent: None, credential: Credential::Own }
     }
 
-    /// This device's own person, as this device.
     pub fn local(node: &Node) -> Result<Caller> {
         Ok(Caller::own(node.0.id, node.user()?))
     }
 }
 
 impl Node {
-    /// Whether `caller` is this machine's own programs: as this device, with its own keys.
     pub fn this_machine(&self, caller: &Caller) -> bool {
         caller.credential == Credential::Own && caller.key == self.0.id
     }
@@ -291,7 +278,7 @@ pub struct CallRequest {
     /// The service whose function this is, when it is one: an app and the service it wraps may share a name.
     #[serde(default)]
     pub service: Option<String>,
-    /// The tool it runs: `op` on the wire, which older devices read.
+    /// The tool it runs: `op` on the wire.
     #[serde(rename = "op")]
     pub tool: String,
     #[serde(default)]
@@ -326,7 +313,6 @@ pub struct CallRequest {
     pub unleased: bool,
 }
 
-/// What a device says to a call.
 enum Reply {
     Ok(Value),
     /// It failed, saying why and, for the kinds callers act on, which kind (`protocol::code`).
@@ -334,17 +320,15 @@ enum Reply {
     /// It can't run here; try another device.
     Elsewhere(String),
     /// It lacks keys its caller hands: said as the API says it (`{ error, need, to, seal }`), so the device that passed
-    /// it on can ask for them in turn (428). An older device reads only its `error`.
+    /// it on can ask for them in turn (428).
     Needs(Needs),
 }
 
 impl Reply {
-    /// It failed without a kind.
     fn error(why: impl Into<String>) -> Reply {
         Reply::Error(why.into(), None)
     }
 
-    /// It failed as `err` says, with the kind `err` is.
     fn failed(err: &anyhow::Error) -> Reply {
         Reply::Error(format!("{err:#}"), crate::protocol::Coded::of(err))
     }
@@ -383,7 +367,6 @@ struct Exclusive<T>(Mutex<T>);
 
 thread_local!(static HOLDING: std::cell::RefCell<Vec<usize>> = const { std::cell::RefCell::new(Vec::new()) });
 
-/// What `Exclusive::lock` gives: the value, held until it's dropped.
 struct Held<'a, T>(std::sync::MutexGuard<'a, T>, usize);
 
 impl<T> Exclusive<T> {
@@ -442,7 +425,6 @@ pub struct Inner {
     changed: tokio::sync::Notify,
     /// Wakes the task that updates this node to a newer release.
     released: tokio::sync::Notify,
-    /// The bundle each app runs here.
     bundles: Mutex<BTreeMap<String, String>>,
     /// The bundle of each app this release has built in, kept as a blob: any network may add them.
     built_in: BTreeMap<String, String>,
@@ -456,13 +438,9 @@ pub struct Inner {
     grants: Mutex<HashMap<String, Grant>>,
     /// The port apps' requests go out through.
     outbound: u16,
-    /// What calls keep while the node runs.
     calls: calls::State,
-    /// What backups keep while the node runs.
     backups: backups::State,
-    /// What blobs keep while the node runs.
     blobs: blobs::State,
-    /// What databases keep while the node runs.
     databases: databases::State,
     /// Steps other devices sent, waiting for the bucket to confirm them, while one ask of it is under way: none then.
     sent: Mutex<Option<Vec<sync::Sent>>>,
@@ -485,11 +463,8 @@ pub struct Inner {
     broken: Mutex<BTreeMap<String, String>>,
     /// The keys of the apps whose schedules this device runs for their people.
     app_schedules: app_schedules::State,
-    /// What `Node::start_owed_keys` knows between its looks.
     owed: Mutex<devices::Owed>,
-    /// What `Node::sign_in_loop` knows between its looks.
     sign_ins: Mutex<devices::SignIns>,
-    /// This device's iroh endpoint.
     net: net::Net,
     /// How many times its deploys were settled (`settle`), the first once its apps are loaded.
     settled: tokio::sync::watch::Sender<u64>,
@@ -513,7 +488,6 @@ pub struct Grant {
     pub puts: Vec<String>,
     /// The scopes whose databases it has brought up to date, which it reads as they are from then on.
     pub caught_up: Vec<Scope>,
-    /// How many app-to-app calls deep the call is.
     pub depth: u32,
     /// The app whose `ctx.apps` made the call, if one did.
     pub from: Option<String>,
@@ -540,7 +514,6 @@ impl std::fmt::Debug for Node {
 }
 
 impl Node {
-    /// Starts this device's node.
     pub async fn start(dir: &Path) -> Result<Node> {
         std::fs::create_dir_all(dir)?;
         let device = load_device(dir)?;
@@ -699,12 +672,10 @@ impl Node {
         self.close_net();
     }
 
-    /// What this machine's own programs send to say they are (`api::LOCAL_TOKEN`).
     pub fn local_token(&self) -> &str {
         &self.0.local_token
     }
 
-    /// Runs `f` on this device's network.
     fn with<R>(&self, f: impl FnOnce(&mut Network) -> Result<R>) -> Result<R> {
         let mut network = self.0.network.lock()?;
         f(network.as_mut().context("this device is in no network yet: create one, or join with a pairing code")?)
@@ -714,7 +685,6 @@ impl Node {
         self.0.network.lock().is_ok_and(|i| i.is_some())
     }
 
-    /// This device's local user.
     pub fn user(&self) -> Result<String> {
         self.with(|i| Ok(i.user.clone()))
     }
@@ -746,7 +716,6 @@ impl Node {
         let _ = self.0.events.send(event);
     }
 
-    /// Where this device keeps its network.
     fn network_dir(&self) -> PathBuf {
         self.0.dir.join(NETWORK_DIR)
     }
@@ -782,7 +751,6 @@ impl Node {
         })
     }
 
-    /// Keeps (or with `None` forgets) the folder on this device that the backup place `id` is.
     fn keep_folder(&self, id: &str, path: Option<&std::path::Path>) -> Result<()> {
         let mut file: NetworkFile = serde_json::from_slice(&std::fs::read(self.network_dir().join(NETWORK_FILE))?)?;
         match path {
@@ -872,13 +840,11 @@ impl Node {
         Ok(hex(&recovery.to_bytes()))
     }
 
-    /// Writes an entry as this device's local user.
     pub async fn append(&self, scope: &Scope, content: Content) -> Result<Step> {
         let user = self.user()?;
         self.append_as(scope, &user, content).await
     }
 
-    /// Writes an entry to this device's log of `scope`, signed by this device, as `user`.
     async fn append_as(&self, scope: &Scope, user: &str, content: Content) -> Result<Step> {
         if !self.frozen() {
             self.read_steps().await?;
@@ -919,7 +885,6 @@ impl Node {
             update_views(i);
             Ok(i.views.get("global").map(|s| s.forgotten.clone()).unwrap_or_default())
         })?;
-        // A scope this device no longer holds: it forgets what it read of it.
         self.close_dbs(|scope, _| handled.dropped.contains(&scope.to_string()));
         if let Ok(bucket) = self.bucket() {
             for log in &handled.dropped {
@@ -1033,8 +998,6 @@ impl Node {
         Ok(())
     }
 
-    /// Whether this device is ready to run calls: it's a device of the network, and has read every scope it holds
-    /// from the bucket since it woke.
     pub fn ready(&self) -> bool {
         self.with(|i| {
             let alone = i.r.db().computes().iter().all(|s| s.key == self.0.id);
@@ -1047,7 +1010,6 @@ impl Node {
     async fn tick_loop(self) {
         for tick in 1u64.. {
             tokio::time::sleep(TICK).await;
-            // What other devices wrote and said, every tick; and the harnesses, every minute.
             if self.has_network() {
                 if let Err(err) = self.read_scopes().await {
                     tracing::debug!("reading the bucket: {err:#}");
@@ -1076,7 +1038,6 @@ fn update_views(i: &mut Network) {
     }
 }
 
-/// Notes that this device saw `scope`'s database change now.
 fn note_change(i: &mut Network, scope: &Scope) {
     let now = now_ms();
     i.changed.entry(scope.clone()).and_modify(|c| c.1 = now).or_insert((now, now));
@@ -1222,7 +1183,6 @@ fn added_scope(i: &Network, user: &str, name: &str) -> Option<Scope> {
     [own, Scope::Global].into_iter().chain(groups).find(|s| added(s) && db.may(user, "add-apps", &scopes::object(s)))
 }
 
-/// A scope as people call it: Everyone, a person's name, or a group's.
 fn scope_name(i: &Network, scope: &str) -> String {
     let db = i.r.db();
     match Scope::parse(scope) {

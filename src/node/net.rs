@@ -10,7 +10,6 @@ use iroh::{Endpoint, EndpointAddr, PublicKey, RelayConfig, RelayMap, RelayMode, 
 
 use super::*;
 
-/// How long reaching a device may take.
 const CONNECT: Duration = Duration::from_secs(10);
 /// How long a device that hasn't said hello lately (`Network::online`) is waited for: it may have just started, but
 /// mostly it's off, and a call, or a service asking for every device's answer, shouldn't wait out `CONNECT` for it.
@@ -91,7 +90,6 @@ impl Drop for Held {
     }
 }
 
-/// Why an ask never reached the device.
 #[derive(Debug)]
 pub(super) struct NotThere(pub(super) String);
 
@@ -673,7 +671,6 @@ impl Node {
         conn.paths().iter().find(|p| p.is_selected()).map(|p| p.rtt())
     }
 
-    /// Forgets the connection to `to`, so the next message opens a new one.
     fn drop_conn(&self, to: &Key) {
         self.0.net.conns.lock().unwrap().remove(to);
     }
@@ -711,7 +708,7 @@ impl Node {
     /// Asks another device to run a call, waiting `limit` for its answer. An error that's a `NotThere` means it never
     /// reached that device.
     pub(super) async fn ask(&self, to: Key, call: Value, limit: Duration) -> Result<Value> {
-        // A traced request asks that device for its own part too, which an older one leaves out.
+        // A traced request asks that device for its own part too.
         let body = if trace::on() { json!({ "call": call, "trace": true }) } else { json!({ "call": call }) };
         self.send(&to, "ask", &body, true, limit).await
     }
@@ -906,7 +903,6 @@ impl tokio::io::AsyncWrite for Stream {
 mod tests {
     use super::*;
 
-    /// A device at its connections' cap gets a new one by an old idle one going, never by holding more: all busy, it's refused.
     #[test]
     fn a_device_at_its_cap_replaces_its_oldest_idle_connection_and_never_exceeds_it() {
         assert_eq!(oldest_idle([2, 0, 1, 0].into_iter()), Some(1));

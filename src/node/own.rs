@@ -8,7 +8,6 @@ use serde_json::{Map, Value, json};
 /// Who runs a node app's tool, and how.
 pub struct Asked<'a> {
     pub node: &'a crate::api::Client,
-    /// The agent credited, if one asked.
     pub agent: Option<&'a str>,
     /// `cli` or `mcp`.
     pub client: &'a str,
@@ -42,17 +41,14 @@ impl NodeApp {
     }
 }
 
-/// Every node app.
 pub fn all() -> Vec<NodeApp> {
     vec![super::vault::app::app(), super::backups::app::app(), super::groups::app(), super::devices::app::app(), super::widgets::app()]
 }
 
-/// The node app called `name`, if there's one.
 pub fn find(name: &str) -> Option<NodeApp> {
     all().into_iter().find(|a| a.name == name)
 }
 
-/// Every node app as `GET /v1/apps` describes an app (`NodeApp::listed`).
 pub fn listed() -> Vec<Value> {
     all().iter().map(NodeApp::listed).collect()
 }

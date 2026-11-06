@@ -9,7 +9,6 @@ use super::*;
 /// How long an app's page says a deploy changed or removed one of its schedules.
 const CHANGED_SHOWN: u64 = 14 * 86_400_000;
 
-/// How often the node looks for schedules that are due.
 const TICK: Duration = Duration::from_secs(10);
 
 impl Node {

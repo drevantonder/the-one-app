@@ -4,11 +4,9 @@ use super::*;
 
 pub(crate) mod routes;
 
-/// How long a page waits for an app's badge.
 const BADGE_LIMIT: Duration = Duration::from_secs(5);
 
 impl Node {
-    /// Who a caller is, as apps see them.
     pub(super) fn me_for(&self, caller: &Caller) -> Result<Me> {
         self.with(|i| Ok(node_me(self, i.r.db(), caller)))
     }

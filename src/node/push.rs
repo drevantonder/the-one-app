@@ -8,7 +8,6 @@ use data_encoding::BASE64URL_NOPAD as B64U;
 use crate::push::{self, Send};
 
 impl Node {
-    /// Runs a push tool for `me`: from app `from`, if an app asked.
     pub(super) async fn push(&self, tool: &str, input: &Value, me: &Caller, from: Option<&str>) -> Result<Value> {
         match tool {
             "send" => {

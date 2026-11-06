@@ -79,7 +79,6 @@ fn recovery_key_from(at: &str, client: &str) -> Result<String> {
     Ok(key)
 }
 
-/// What approving said, in words: whose device it is, or what it was given.
 fn approved_said(r: &Value) -> String {
     let s = |k: &str| r[k].as_str().unwrap_or("").to_string();
     if let Some(service) = r["service"].as_str() {
@@ -108,7 +107,6 @@ fn approved_said(r: &Value) -> String {
     out
 }
 
-/// What removing said, in words.
 fn removed_said(r: &Value) -> String {
     let mut out = format!("Removed {}.", r["removed"].as_str().unwrap_or("it"));
     let left: Vec<&str> = r["not_renewed"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
@@ -118,7 +116,6 @@ fn removed_said(r: &Value) -> String {
     out
 }
 
-/// An invite's link, in words.
 pub fn invited_said(name: &str, r: &Value) -> String {
     let days = crate::cloudflare::INVITE_DAYS;
     format!("Send {name} this link. It works once, for {days} days: opening it, they join. Then approve their device with its code.\n\n  {}", r["link"].as_str().unwrap_or(""))

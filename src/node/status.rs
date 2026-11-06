@@ -4,7 +4,6 @@
 
 use super::*;
 
-/// The node's own database of a scope.
 const NODE_DATABASE: (&str, &str) = (scopes::APP, "main");
 
 /// Its schema, as its changes, oldest first.
@@ -33,11 +32,9 @@ create table reads (device text primary key, reads integer not null, build text 
 alter table errors rename column op to tool;
 "];
 
-/// How many runs of each schedule a scope keeps.
 pub const RUNS_KEPT: usize = 20;
 /// How many backup runs to each place `global` keeps, besides each scope's last that backed it up.
 pub const BACKUP_RUNS_KEPT: usize = 100;
-/// How many restore checks of each place `global` keeps.
 pub const CHECKS_KEPT: usize = 20;
 
 /// A scope's rows, as this device last read them.
@@ -141,7 +138,6 @@ pub struct CheckRun {
     pub report: Value,
 }
 
-/// One change to a scope's rows.
 pub enum Said {
     /// A call of `app` by `user` from `client` (`agent` naming who asked through it), on `day`.
     Used { app: String, user: String, client: String, agent: Option<String>, day: u64 },
@@ -213,7 +209,6 @@ impl Node {
         self.read_status(scope).await
     }
 
-    /// Reads a scope's rows into its `Status`, up to date.
     pub(super) async fn read_status(&self, scope: &Scope) -> Result<()> {
         let db = self.database(scope, NODE_DATABASE.0, NODE_DATABASE.1, Some(SCHEMA.iter().map(|s| s.to_string()).collect()), None).await?;
         let mut db = db.lock().await;

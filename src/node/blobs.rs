@@ -9,7 +9,6 @@ pub(crate) mod routes;
 /// How long a blob a scope forgot stays in the bucket, in case an entry another device wrote names it again.
 const FORGOTTEN_KEPT: Duration = Duration::from_secs(600);
 
-/// What blobs keep while the node runs.
 #[derive(Default)]
 pub(super) struct State {
     /// The blobs sign-ins put here (their files in an MCP answer, say), by hash: for whom, so they may read them back.
@@ -116,7 +115,6 @@ impl Node {
         }
     }
 
-    /// The scopes this device holds whose databases name a blob.
     fn scopes_naming(&self, hash: &str) -> Result<Vec<Scope>> {
         self.with(|i| Ok(steps_naming(i, hash).collect()))
     }
@@ -336,7 +334,6 @@ pub(super) struct RemotePut {
     at: u64,
 }
 
-/// A file was bigger than it may be.
 #[derive(Debug)]
 struct Full(u64);
 

@@ -13,7 +13,6 @@ impl Node {
         }
     }
 
-    /// What people call the service `name`: its title, else its name.
     pub(super) fn service_title(&self, name: &str) -> String {
         self.0.apps.identity(name).and_then(|d| d["title"].as_str().filter(|t| !t.trim().is_empty()).map(str::to_string)).unwrap_or_else(|| name.to_string())
     }
@@ -186,7 +185,6 @@ impl Node {
                         .filter(|(scope, s)| s.installed.contains(&a.name) && Scope::parse(scope).is_ok_and(|s| m.may(&viewer.user, "use", &scopes::object(&s))))
                         .map(|(scope, _)| scope.clone())
                         .collect();
-                    // Yours, then groups', then everyone's.
                     installed.sort_by_key(|s| (!s.starts_with("user:"), s == "global", s.clone()));
                     let reach = reachable(i, &a.name, &viewer.user);
                     let history: Vec<Value> = a.history.iter().map(|(bundle, time, user)| json!({ "bundle": bundle, "time": time, "user": user })).collect();
@@ -332,7 +330,6 @@ impl Node {
         png
     }
 
-    /// The bundle this release has of `app`, if it's the built-in app of that name: owned by admins, not a fork.
     pub(super) fn built_in(&self, app: &scopes::App) -> Option<&String> {
         self.0.built_in.get(&app.name).filter(|_| app.owner == Principal::Admins && app.from.is_none())
     }
@@ -355,7 +352,6 @@ impl Node {
         self.uses_here(app).await
     }
 
-    /// Whether this device runs `app`'s latest deploy (or it has none), waiting up to `within` for it to.
     async fn runs_latest(&self, app: &str, within: Duration) -> bool {
         let started = Instant::now();
         loop {
@@ -370,7 +366,6 @@ impl Node {
         }
     }
 
-    /// What the deploy of `app` this device runs says it uses: (apps, services).
     pub(super) async fn uses_here(&self, app: &str) -> (Vec<String>, Vec<String>) {
         let d = if self.0.apps.has(app) { self.0.apps.describe(app).await.unwrap_or_default() } else { Value::Null };
         let list = |k: &str| d["uses"][k].as_array().into_iter().flatten().filter_map(|v| v.as_str().map(str::to_string)).collect();
@@ -429,7 +424,6 @@ impl Node {
         })
     }
 
-    /// Installs (or uninstalls) `app` in `scope` for `caller`, and what it uses, its services on `node`.
     pub async fn install(&self, caller: &Caller, app: &str, scope: &Scope, installed: bool, node: Option<&str>) -> Result<()> {
         self.read_callers_scopes(caller).await?;
         let entries = self.install_entries(caller, app, scope, installed, node).await?;

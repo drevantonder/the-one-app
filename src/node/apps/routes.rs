@@ -32,7 +32,6 @@ fn owner(node: &Node, named: &str) -> anyhow::Result<String> {
 
 #[derive(Deserialize)]
 struct AppsQuery {
-    /// As a window draws them (`Node::apps_drawn`).
     light: Option<bool>,
 }
 

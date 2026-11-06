@@ -10,25 +10,21 @@ use crate::vault::{Items, Lookup};
 
 use super::*;
 
-/// How long a request for an item waits for its answer.
 const REQUEST_LIFE: u64 = 86_400_000;
 
 pub mod app;
 pub mod cli;
 pub(crate) mod routes;
 
-/// The node's database of a scope's items.
 const VAULT: (&str, &str) = (scopes::APP, crate::vault::DATABASE);
 
 impl Node {
-    /// A scope's Vault database as `me`'s work opens it (`call_database`), brought up to date.
     async fn vault_db(&self, me: &Caller, scope: &Scope) -> Result<(Arc<tokio::sync::Mutex<Db>>, Copied)> {
         let (db, bucket) = self.call_database(me, scope, VAULT.0, VAULT.1, Some(vec![crate::vault::SCHEMA.into()])).await?;
         self.read_ready(&(scope.clone(), format!("{}/{}", VAULT.0, VAULT.1)), &mut *db.lock().await, &bucket).await?;
         Ok((db, bucket))
     }
 
-    /// A scope's items, as `me` opens them: their secrets too, if this machine opens the scope's Vault.
     pub(super) async fn items(&self, me: &Caller, scope: &Scope) -> Result<Items> {
         let keys = self.vault_secrets(scope).await?;
         let (db, _) = self.vault_db(me, scope).await?;
@@ -151,7 +147,6 @@ impl Node {
         })
     }
 
-    /// The scopes this device holds whose Vault `viewer` manages (or just `scope`).
     fn managed_scopes(&self, viewer: &Caller, scope: Option<&Scope>) -> Result<Vec<Scope>> {
         self.with(|i| {
             let m = i.r.db();
@@ -159,7 +154,6 @@ impl Node {
         })
     }
 
-    /// Reads `global`'s items with this device's own keys, in the background (`refresh_own_items`).
     pub(super) fn read_own_items(&self) {
         let node = self.clone();
         tokio::spawn(async move { node.refresh_own_items().await });

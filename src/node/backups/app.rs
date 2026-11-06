@@ -6,7 +6,6 @@ use serde_json::{Map, Value, json};
 use crate::node::own::{Asked, NodeApp, text};
 use crate::skills::{confirm_input, hints};
 
-/// How backups' tools are explained, as an app's guide is.
 const GUIDE: &str = "Each device backs up the data it holds, every hour that something changed, to each place: a folder on a device's disk, or S3-compatible storage. Everything is encrypted before it leaves, with keys only your devices and the recovery key open. To add S3 storage, call backups_add_place with its endpoint and give the person the link: they type the key on their own device. Snapshots are kept hourly for 2 days, daily for a month and monthly for a year. backups_status says how it's going, and what's wrong and its fix if anything is; Once a week each place's newest backup is restored into a throwaway copy and checked (entries, databases, blobs); a failed check shows on Backups like a failed backup. backups_check runs that check now and says what came back.";
 
 pub fn app() -> NodeApp {
@@ -50,7 +49,6 @@ fn run(tool: &str, input: &Map<String, Value>, asked: &Asked) -> Result<Value> {
     }
 }
 
-/// Stops backing up to the place with this id or title: → its title.
 pub fn remove_place(asked: &Asked, place: &str) -> Result<String> {
     let places = asked.node.get("/v1/backups")?["places"].as_array().cloned().unwrap_or_default();
     let p = places.iter().find(|p| p["id"] == *place || p["title"] == *place).with_context(|| format!("no place {place}; backups_status lists them"))?;

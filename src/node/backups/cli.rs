@@ -73,7 +73,6 @@ fn run(g: &Given) -> Result<bool> {
     Ok(true)
 }
 
-/// Backups' status, for people.
 fn backups_said(r: &Value) -> String {
     let mut out = String::new();
     let places = r["places"].as_array().cloned().unwrap_or_default();
@@ -94,7 +93,6 @@ fn backups_said(r: &Value) -> String {
     out
 }
 
-/// Each step of trying a place, and whether it was added.
 pub fn tried_said(r: &Value) -> String {
     let mut out = String::new();
     for s in r["tried"].as_array().into_iter().flatten() {
@@ -106,7 +104,6 @@ pub fn tried_said(r: &Value) -> String {
     out
 }
 
-/// What a check restored, by name.
 fn checked_said(r: &Value) -> String {
     let problems: Vec<&str> = r["problems"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
     if let Some(e) = r["error"].as_str().filter(|_| problems.is_empty()) {

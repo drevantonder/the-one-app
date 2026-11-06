@@ -13,7 +13,6 @@ use std::collections::BTreeSet;
 use crate::backups::{self as b, Snapshot};
 use crate::bucket::Place;
 
-/// What backups keep while the node runs.
 #[derive(Default)]
 pub(super) struct State {
     /// Wakes the backups to run now, and whether they run whether or not an hour passed.
@@ -31,7 +30,6 @@ pub(super) struct State {
     looked: Mutex<HashMap<(String, String), u64>>,
 }
 
-/// How often the node looks for backups that are due.
 const TICK: Duration = Duration::from_secs(60);
 /// How often a device prunes each place it backs up to: after its first run, then daily.
 const PRUNE_EVERY: u64 = 24 * 3_600_000;
@@ -785,7 +783,6 @@ impl Node {
         Ok(json!(out))
     }
 
-    /// Backs up now, for a member of the network.
     pub fn back_up_now_for(&self, me: &Caller) -> Result<()> {
         self.with(|i| {
             ensure!(i.r.db().may(&me.user, "use", &scopes::object(&Scope::Global)), "You aren't a member here, so you can't back up.");

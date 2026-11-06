@@ -118,7 +118,6 @@ impl Node {
     }
 
     async fn admit_with(&self, key: Key, request: &JoinRequest, pairing: &Pairing) -> Result<JoinReply> {
-        // Phones joined as clients before they signed in at your One App network's address: only devices join now.
         ensure!(request.as_ == "device", "only computers join with a pairing code: sign in at {YOURS}'s address instead");
         let user = pairing.admits.clone().unwrap_or_else(|| pairing.user.clone());
         let (root, bucket) = self.with(|i| Ok((i.r.root().map(|r| r.to_hex()).context("no network")?, i.bucket.as_ref().map(|(_, f)| f.clone()))))?;

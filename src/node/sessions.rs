@@ -13,7 +13,6 @@ use super::*;
 /// What this device keeps for one caller's keys, until they expire.
 #[derive(Default)]
 pub(super) struct Session {
-    /// Whose it is.
     user: String,
     /// Until when its keys may be used: when its token expires, as its handoff says.
     pub until: u64,
@@ -21,7 +20,6 @@ pub(super) struct Session {
     keys: HashMap<(String, String, String), Keys>,
 }
 
-/// The sessions' state on a node.
 #[derive(Default)]
 pub(super) struct Sessions {
     pub kept: Mutex<HashMap<Held, Session>>,
@@ -65,7 +63,6 @@ impl std::fmt::Display for Needs {
 impl std::error::Error for Needs {}
 
 impl Session {
-    /// Whether anything it holds still works at `now`.
     fn live(&self, now: u64) -> bool {
         self.until > now
     }
@@ -113,7 +110,6 @@ const CLIENT_KEYS: u64 = 3_600_000;
 const CATCH_UP_EVERY: std::time::Duration = std::time::Duration::from_secs(3);
 
 impl Node {
-    /// Sign-in at the network's address, as this device checks the tokens it's given.
     pub fn issuer(&self) -> Result<Arc<crate::cloudflare::Issuer>> {
         let address = self.address()?;
         let iss = crate::cloudflare::Issuer::new(&address).iss;
@@ -169,7 +165,7 @@ impl Node {
         let held = credential.held().context("nothing is handed for this device's own calls, or app schedules'")?;
         // Keys this device can't open (sealed to another: the node a client asked before, say) are left, never refused:
         // the call goes on without them and asks for what it needs (428), sealed to this device, which the client
-        // checks against its own entries before handing anything, an older one too. Leaving them gives nothing away.
+        // checks against its own entries before handing anything. Leaving them gives nothing away.
         let handoff = match crate::keys::open_handoff(&self.seal_secret(), sealed) {
             Ok(handoff) => handoff,
             Err(err) => {
@@ -501,7 +497,6 @@ impl Node {
         }
     }
 
-    /// Forgets the keys handed by client devices the network no longer lists.
     pub(super) fn forget_removed_clients(&self) {
         let clients: Vec<Key> = self.0.sessions.kept.lock().unwrap().keys().filter_map(|h| match h { Held::Client(k) => Some(*k), _ => None }).collect();
         let gone: Vec<Key> = clients.into_iter().filter(|k| self.client(k).is_none()).collect();

@@ -3,7 +3,6 @@
 use super::*;
 
 impl Node {
-    /// Whether `user` is a person of the network.
     pub fn is_user(&self, user: &str) -> bool {
         self.with(|i| Ok(i.r.db().user(user).is_some())).unwrap_or(false)
     }
@@ -179,7 +178,6 @@ impl Node {
         self.member_as(caller, "rename", json!({ "key": hex(&key), "name": name })).await
     }
 
-    /// Finds a device of the network by name or key prefix.
     pub fn find_device(&self, name: &str) -> Result<Key> {
         let found: Vec<Key> = self.with(|i| Ok(i.r.db().computes().into_iter().filter(|m| m.name.eq_ignore_ascii_case(name) || hex(&m.key).starts_with(name)).map(|m| m.key).collect()))?;
         let names = || self.with(|i| Ok(i.r.db().computes().into_iter().map(|m| m.name.clone()).collect::<Vec<_>>().join(", "))).unwrap_or_default();
@@ -225,7 +223,6 @@ impl Node {
         }
     }
 
-    /// Finds a user by name or id.
     pub fn find_user(&self, name: &str) -> Result<String> {
         let found: Vec<String> = self.with(|i| Ok(i.r.db().users().into_iter().filter(|u| !u.removed && (u.id == name || u.name.eq_ignore_ascii_case(name))).map(|u| u.id.clone()).collect()))?;
         match found.as_slice() {
@@ -240,7 +237,6 @@ impl Node {
         Scope::parse_for(scope, &caller.user).or_else(|_| self.find_group(scope).map(Scope::Group))
     }
 
-    /// Finds a group by name or id.
     pub fn find_group(&self, name: &str) -> Result<String> {
         let found: Vec<String> = self.with(|i| Ok(i.r.db().groups().into_iter().filter(|g| g.id == name || g.name.eq_ignore_ascii_case(name)).map(|g| g.id.clone()).collect()))?;
         match found.as_slice() {

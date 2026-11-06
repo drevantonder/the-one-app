@@ -256,7 +256,6 @@ fn mine_or_invited<'a>(r: &DeviceRequest, caller: &Caller, invites: &'a BTreeMap
     }
 }
 
-/// A join code as someone types it: its letters, upper case, without spaces or dashes.
 fn code_of(typed: &str) -> String {
     typed.chars().filter(char::is_ascii_alphanumeric).collect::<String>().to_ascii_uppercase()
 }
@@ -357,7 +356,6 @@ impl Node {
             .collect())
     }
 
-    /// Keeps or forgets (`None`) an invite, in this device's person's own scope.
     async fn keep_invite(&self, user: &str, invite: Option<&Invited>) -> Result<()> {
         let scope = Scope::User(self.user()?);
         let db = self.database(&scope, scopes::APP, INVITES, Some(vec![INVITES_SCHEMA.into()]), None).await?;
@@ -680,7 +678,6 @@ impl Node {
         self.member_content(caller, content::forget_sign_in(&key)).await
     }
 
-    /// An issuer's keys, published at `at`: kept for an hour.
     async fn issuer_keys(&self, at: &str) -> Result<Value> {
         if let Some((keys, when)) = self.0.sign_ins.lock().unwrap().keys.get(at)
             && when.elapsed() < ISSUER_KEYS_FOR

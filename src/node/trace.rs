@@ -1,6 +1,6 @@
 //! What a request did on this device, step by step with how long each took, for a client in developer mode: it asks
 //! with `x-one-trace` and gets it back in the same header (`api::traced`), and another device asked for a call adds its
-//! own, in its answer (`trace` beside `ok`). Older devices ignore both. Steps hold timings, device, app and tool
+//! own, in its answer (`trace` beside `ok`). Steps hold timings, device, app and tool
 //! names, never data or keys.
 
 use std::sync::{Arc, Mutex};
@@ -24,7 +24,6 @@ impl Trace {
         Trace(Arc::new((Instant::now(), Mutex::new(Vec::new()))))
     }
 
-    /// Notes a step that took `took`, ending now.
     pub fn note(&self, mut step: Value, took: std::time::Duration) {
         let (start, steps) = &*self.0;
         let at = start.elapsed().saturating_sub(took);
@@ -73,7 +72,6 @@ pub async fn within<F: Future>(trace: Option<Trace>, f: F) -> F::Output {
     }
 }
 
-/// Notes a step that took `took`, ending now.
 pub fn note(step: Value, took: std::time::Duration) {
     let _ = TRACE.try_with(|t| t.note(step, took));
 }
@@ -96,8 +94,7 @@ pub fn bucket(kind: &str, took: std::time::Duration, found: bool) {
 
 /// A call's trace as a few readable lines, in the Developer panel's words (src/screen/settings/devtools.jsx): the devices
 /// the client tried (`tries`, from the client library), what the one that answered did (`node`, its `x-one-trace`),
-/// each wait with its milliseconds, and the total. `answered` names the device when its node sent no trace, which an
-/// older one doesn't.
+/// each wait with its milliseconds, and the total. `answered` names the device when its node sent no trace.
 pub fn said(tries: Option<&Value>, node: Option<&Value>, answered: &str) -> Vec<String> {
     let mut out = Vec::new();
     let names = node.map(|n| n["names"].clone()).unwrap_or_default();

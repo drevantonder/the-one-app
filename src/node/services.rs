@@ -154,7 +154,6 @@ impl Node {
         Ok(serde_json::from_value(d["service"].clone())?)
     }
 
-    /// The app runtime this node hands apps' calls to.
     pub fn app_runtime(&self) -> &crate::app::runtime::Apps {
         &self.0.apps
     }
@@ -206,7 +205,6 @@ impl Node {
                 part.extend(now);
             }
         }
-        // How each runs: without its sandbox and why, or as the person (both new: older devices show neither).
         for (name, held) in crate::oned::held() {
             if let (Some(Value::Object(part)), Value::Object(held)) = (out.get_mut(&name), json!(held)) {
                 part.extend(held);

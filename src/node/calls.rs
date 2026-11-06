@@ -3,10 +3,10 @@
 //! A call runs once. It names the scopes it touches before it runs, so a device that can't run it says so before doing
 //! anything; one that writes takes a lease in the bucket first, so failing over never repeats it. It writes nothing if
 //! it fails, or is stopped at its limit, which happens only before it writes: what it keeps goes in the bucket first,
-//! and once it writes, it's waited for. A node a client picked runs a call itself if it runs every scope the call reaches; if it doesn't, it answers
-//! 421 with the nodes that do, and the client asks one itself, with keys for it, rather than the node passing it on,
-//! which nodes do only for a service's call and for older clients. Calls go to the devices in run priority's order
-//! (`src/rank.rs`).
+//! and once it writes, it's waited for. A node a client picked runs a call itself if it runs every scope the call
+//! reaches; if it doesn't, it answers 421 with the nodes that do, and the client asks one itself, with keys for it,
+//! rather than the node passing it on, which nodes do only for a service's call. Calls go to the devices in run
+//! priority's order (`src/rank.rs`).
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -27,7 +27,6 @@ pub const MAX_DEPTH: u32 = 3;
 /// How many calls an app may make of other apps, or runs of its schedules, a minute on one device.
 pub const RATE_LIMIT: u32 = 600;
 
-/// What calls keep while the node runs.
 #[derive(Default)]
 pub(super) struct State {
     /// What each app did in its last minute, and the apps stopped here for looping.
@@ -71,7 +70,6 @@ pub(super) struct Prepared {
     put: Vec<String>,
 }
 
-/// What a call stopped at its limit says.
 fn stopped(limit: Duration) -> String {
     format!("it took longer than {}s and was stopped, having written nothing", limit.as_secs())
 }
@@ -379,8 +377,8 @@ impl Node {
         })
     }
 
-    /// A call as the node runs it: one that names a service is that service's, whatever app shares its name. As older
-    /// machines ask for a service, so is one that names an app with no deploy, or that runs on every device.
+    /// A call as the node runs it: one that names a service is that service's, whatever app shares its name; so is one
+    /// that names an app with no deploy, or that runs on every device.
     pub(super) fn resolve(&self, mut req: CallRequest) -> CallRequest {
         if let Some(service) = &req.service {
             req.app = service.clone();
@@ -667,7 +665,7 @@ impl Node {
 
     /// Takes a write call's lease, the first try's at `base` and each next one's at `base.<n>`, the next only once the
     /// one before says it failed (`<lease>.failed`), having written nothing: → its name, or None when one is taken and
-    /// didn't fail, so the call may have run. A device before these took only `base`, so the first try's is that.
+    /// didn't fail, so the call may have run.
     async fn take_lease(&self, base: &str) -> Result<Option<String>> {
         let bucket = self.bucket()?;
         for n in 1..=LEASE_TRIES {
@@ -784,7 +782,6 @@ impl Node {
         })
     }
 
-    /// Writes a call's appends as its caller: `prepare_appends`, then `write_prepared`.
     pub(super) async fn write_appends(&self, app: &str, appends: Vec<Append>, scopes: &[Scope], me: &Caller, from: Option<&str>) -> Result<()> {
         let prepared = self.prepare_appends(app, appends, scopes, me, from).await?;
         self.write_prepared(app, prepared, scopes, me).await
@@ -906,7 +903,6 @@ impl Node {
         });
     }
 
-    /// Runs a service registered here, for this device's local user.
     pub(super) async fn run_service(&self, app: &str, function: &str, input: Value, me: &Caller, from: Option<String>) -> Result<Value> {
         let everyone = self.0.services.serves_everyone(app) && self.with(|i| Ok(i.r.db().serves(&self.0.id, &me.user)))?;
         let user = if everyone { me.user.clone() } else { self.user()? };
@@ -1014,7 +1010,6 @@ impl Node {
         vec![api, self.0.apps.port(), self.0.outbound]
     }
 
-    /// The grant of a call running now.
     pub fn grant_of(&self, token: &str) -> Option<Grant> {
         self.0.grants.lock().unwrap().get(token).cloned()
     }
@@ -1360,7 +1355,6 @@ impl Node {
     }
 }
 
-/// The network's address, without a last `/`, if it has one yet.
 pub(super) fn address(m: &ScopeDb) -> Option<String> {
     m.setting("address").map(|a| a.trim_end_matches('/').to_string())
 }
@@ -1415,8 +1409,6 @@ fn prepare(node: &Node, i: &Network, req: &CallRequest, me: &Caller, title: &str
 mod tests {
     use super::*;
 
-    /// A call is stopped at its limit only before it writes: one that's writing by then is waited for, so a call said
-    /// to be stopped wrote nothing, and one that wrote is never said to be stopped.
     #[tokio::test(start_paused = true)]
     async fn a_call_is_stopped_at_its_limit_only_before_it_writes() {
         let ran = |writing: &'static AtomicBool, writes_at: u64| async move {

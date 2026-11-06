@@ -11,7 +11,6 @@ use super::*;
 pub const APP_SCHEDULES_DAYS: u64 = 30;
 const DAY: u64 = 86_400_000;
 
-/// App schedules' state on a node.
 #[derive(Default)]
 pub(super) struct State {
     /// The app keys app schedules sealed to this device, by (scope, app), each by epoch: kept while they're in force.
@@ -222,7 +221,6 @@ impl Node {
         }
     }
 
-    /// An app's title, or its name.
     pub(super) async fn title_of(&self, app: &str) -> String {
         self.0.apps.describe(app).await.ok().and_then(|d| d["title"].as_str().map(str::to_string)).unwrap_or_else(|| app.to_string())
     }

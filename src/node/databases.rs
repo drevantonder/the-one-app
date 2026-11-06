@@ -3,7 +3,6 @@
 
 use super::*;
 
-/// What databases keep while the node runs.
 #[derive(Default)]
 pub(super) struct State {
     /// Each database of each scope, by its app and name (`tally/main`), as this device last read it.
@@ -26,7 +25,6 @@ pub(super) struct State {
 
 /// How many times a database is opened again after finding junk or a newer epoch before it gives up.
 const TRIES: usize = 20;
-/// How often each database open here is tidied (`stored::tidy`).
 const TIDY_EVERY: u64 = 24 * 60 * 60 * 1000;
 
 /// A scope this device wasn't given the newest key of: a device of someone who opens it seals it to this one.
@@ -341,7 +339,6 @@ impl Node {
         });
     }
 
-    /// Brings a database to `schema` as `Db::migrate` does.
     async fn migrate_in(&self, db: &mut Db, bucket: &Copied, schema: &[String]) -> Result<()> {
         db.migrate(bucket, schema).await
     }

@@ -8,7 +8,6 @@ use crate::api::Client;
 use crate::node::own::{Asked, NodeApp, text};
 use crate::skills::{confirm_input, hints};
 
-/// How the Vault's tools are explained, as an app's guide is.
 const GUIDE: &str = "The Vault keeps the person's keys, sign-ins and accounts as items, each a page's (theirs, a group's, everyone's): fields (secret ones never read back), the sites they're sent to, and the apps switched on for it. Never ask the person to paste a secret (an API key, a password, a token) into the chat, and never paste one yourself. To keep one, call vault_request and give them its link: they pick one of their items or type a new one into a sheet on their own device, and you never see it. To use one yourself, ask leaving out app, then call vault_fetch with {{<field>}} where it goes: a machine that opens the Vault fills it in, only for the item's sites, and you get the answer. If someone pastes a secret anyway, keep it with vault_set and don't repeat it. vault_list shows what's there.";
 
 pub fn app() -> NodeApp {
@@ -62,7 +61,6 @@ fn run(tool: &str, input: &Map<String, Value>, asked: &Asked) -> Result<Value> {
     }
 }
 
-/// A request for an item, by its id.
 pub fn request(node: &Client, id: &str) -> Result<Value> {
     let r = node.get(&format!("/v1/vault/requests?id={id}"))?;
     Ok(r.as_array().and_then(|a| a.first()).with_context(|| format!("no request {id}"))?.clone())
@@ -159,7 +157,6 @@ pub fn set(node: &Client, scope: &str, item: &str, field: &str, value: &str, sec
     })
 }
 
-/// Switches `app` on or off for `item` in `scope`.
 pub fn switch(node: &Client, scope: &str, item: &str, app: &str, on: bool, agent: Option<&str>) -> Result<String> {
     let it = find_item(node, scope, item)?.with_context(|| format!("no item {item} in {scope}"))?;
     let mut apps: Vec<Value> = it["apps"].as_array().cloned().unwrap_or_default().into_iter().filter(|a| a != app).collect();

@@ -123,7 +123,6 @@ fn cli(g: &Given) -> Result<bool> {
     Ok(true)
 }
 
-/// Groups' routes: making one, inviting, joining, who's in it, and handles.
 pub(crate) mod routes {
     use axum::Json;
     use axum::extract::State;

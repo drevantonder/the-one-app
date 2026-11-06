@@ -33,7 +33,6 @@ impl Node {
         })
     }
 
-    /// Reads a scope's steps in the bucket after the last this device read.
     pub(super) async fn read_scope(&self, scope: &Scope) -> Result<()> {
         let _write = self.0.writes.lock().await;
         self.read_scope_now(scope).await
@@ -85,7 +84,6 @@ impl Node {
             let bucket = self.bucket().ok();
             if let Some(step) = bucket.as_ref().and_then(|b| b.kept(&name).ok().flatten()).filter(|s| s.len() <= SENT_STEP) {
                 input["step"] = json!(data_encoding::BASE64.encode(&step));
-                // And the signature beside it, which an older device ignores.
                 if let Some(sig) = bucket.as_ref().and_then(|b| b.kept(&format!("{name}.sig")).ok().flatten()) {
                     input["sig"] = json!(data_encoding::BASE64.encode(&sig));
                 }
@@ -225,7 +223,6 @@ impl Node {
         self.hello_services();
     }
 
-    /// Another device's hello (`say_hello`), `from` a device of the network.
     pub(super) fn hello_from(&self, from: &Key, hello: &Value) -> Result<()> {
         let mut services: Vec<Service> = serde_json::from_value(hello["services"].clone()).unwrap_or_default();
         // Whom each serves, no more than the entries allow: that device's own person, and for one that
