@@ -8,80 +8,85 @@ import { useEffect as t, useRef as n, useState as r } from "react";
 import { createRoot as i } from "react-dom/client";
 import { AppIcon as a, Button as o, CopyButton as s, Icon as c, Input as l, List as u, ListRow as d, ListSkeleton as f, Problem as p, Spinner as m } from "@one/ui";
 import { Fragment as h, jsx as g, jsxs as _ } from "react/jsx-runtime";
-var v = one.api, { scope: y, id: b } = one.params || {}, x = () => v("GET", `/v1/vault/requests?scope=${encodeURIComponent(y || "")}&id=${encodeURIComponent(b || "")}`).then((e) => e[0]);
-function S(e) {
+var v = {
+	name: "ai-agents",
+	title: "Agents",
+	icon: "robot",
+	color: "#8e8e93"
+}, y = (e, t) => t === v.name ? v : e.find((e) => e.name === t), b = one.api, { scope: x, id: S } = one.params || {}, C = () => b("GET", `/v1/vault/requests?scope=${encodeURIComponent(x || "")}&id=${encodeURIComponent(S || "")}`).then((e) => e[0]);
+function w(e) {
 	return String(e).replace(/[_-]+/g, " ").trim().split(/\s+/).map((e, t) => /^(api|url|id|ssh|pem|aws|s3|ip)$/i.test(e) ? e.toUpperCase() : t ? e.toLowerCase() : e[0].toUpperCase() + e.slice(1).toLowerCase()).join(" ");
 }
-var C = ({ why: e }) => String(e).split(/(https?:\/\/[^\s]+)/).map((e, t) => t % 2 ? /* @__PURE__ */ _("span", { children: [/* @__PURE__ */ g("span", {
+var T = ({ why: e }) => String(e).split(/(https?:\/\/[^\s]+)/).map((e, t) => t % 2 ? /* @__PURE__ */ _("span", { children: [/* @__PURE__ */ g("span", {
 	className: "break-all text-foreground",
 	children: e
 }), /* @__PURE__ */ g(s, {
 	text: e,
 	label: "",
 	className: "-my-1 align-middle"
-})] }, t) : e), w = (t) => {
+})] }, t) : e), E = (t) => {
 	let n = e(2), { children: r } = t, i;
 	return n[0] === r ? i = n[1] : (i = /* @__PURE__ */ g("p", {
 		className: "-mt-3 px-3 text-xs text-muted-foreground",
 		children: r
 	}), n[0] = r, n[1] = i), i;
 };
-function T() {
-	let [e, i] = r(null), [s, l] = r([]), [y, b] = r(null), [T, O] = r(null), [k, A] = r({}), [j, M] = r(""), [N, P] = r(!1), F = n({
-		busy: N,
+function D() {
+	let [e, i] = r(null), [s, l] = r([]), [v, x] = r(null), [S, D] = r(null), [A, j] = r({}), [M, N] = r(""), [P, F] = r(!1), I = n({
+		busy: P,
 		request: e
 	});
-	F.current = {
-		busy: N,
+	I.current = {
+		busy: P,
 		request: e
 	};
-	async function I() {
+	async function L() {
 		try {
-			let [e, t] = await Promise.all([x(), v("GET", "/v1/apps").catch(() => [])]);
+			let [e, t] = await Promise.all([C(), b("GET", "/v1/apps").catch(() => [])]);
 			if (!e) throw Error("Can’t find this request: it may be for someone else.");
-			i(e), l(t), O(e.matches?.[0]?.id ?? null), b(null);
+			i(e), l(t), D(e.matches?.[0]?.id ?? null), x(null);
 		} catch (e) {
-			b(one.plain(e));
+			x(one.plain(e));
 		}
 	}
 	t(() => {
-		one.title("Vault"), I();
+		one.title("Vault"), L();
 		let e = setInterval(async () => {
-			let { busy: e, request: t } = F.current;
+			let { busy: e, request: t } = I.current;
 			if (e || t?.state !== "waiting") return;
-			let n = await x().catch(() => null);
+			let n = await C().catch(() => null);
 			n && n.state !== "waiting" && one.close(n.state === "set");
 		}, 2100);
 		return () => clearInterval(e);
 	}, []);
-	async function L(t) {
-		if (N) return;
-		P(t ? "decline" : "allow"), M("");
+	async function R(t) {
+		if (P) return;
+		F(t ? "decline" : "allow"), N("");
 		let n = {
 			scope: e.scope,
 			id: e.id
 		};
 		if (t) n.declined = !0;
-		else if (T) n.item = T;
+		else if (S) n.item = S;
 		else {
-			let { _title: e, ...t } = k;
+			let { _title: e, ...t } = A;
 			e?.trim() && (n.title = e.trim()), n.fields = t;
 		}
 		try {
-			await v("POST", "/v1/vault/answer", n), A({}), one.tap(t ? "selection" : "success"), one.close(!t);
+			await b("POST", "/v1/vault/answer", n), j({}), one.tap(t ? "selection" : "success"), one.close(!t);
 		} catch (e) {
-			M(one.plain(e).title), P(!1);
+			N(one.plain(e).title), F(!1);
 		}
 	}
-	if (!e) return y ? /* @__PURE__ */ g(p, {
-		title: y.title,
-		text: y.next,
+	if (!e) return v ? /* @__PURE__ */ g(p, {
+		title: v.title,
+		text: v.next,
 		action: {
 			label: "Try Again",
-			run: () => (one.tap(), b(null), I())
+			run: () => (one.tap(), x(null), L())
 		}
 	}) : /* @__PURE__ */ g(f, { rows: 3 });
-	let R = s.find((t) => t.name === e.app), z = e.fields || [], B = e.title || "", V = e.agent || e.by, H = !N && (T !== null || z.every((e) => k[e.name])), U = (e, t) => A((n) => ({
+	let z = y(s, e.app), B = e.fields || [], V = e.title || "", H = e.agent || e.by, U = !P && (S !== null || B.every((e) => A[e.name])), W = (e, t) => j((n) => ({
 		...n,
 		[e]: t
 	}));
@@ -91,33 +96,33 @@ function T() {
 			/* @__PURE__ */ g(u, { children: /* @__PURE__ */ _("div", {
 				className: "flex items-start gap-3 px-3 py-3 text-sm",
 				children: [/* @__PURE__ */ g(a, {
-					app: R || { name: e.app },
+					app: z || { name: e.app },
 					size: 44
 				}), /* @__PURE__ */ _("div", {
 					className: "min-w-0 flex-1",
 					children: [/* @__PURE__ */ g("div", {
 						className: "break-words font-semibold",
-						children: R ? `${R.title || R.name} wants ${B}` : B
+						children: z ? `${z.title || z.name} wants ${V}` : V
 					}), e.why && /* @__PURE__ */ g("div", {
 						className: "break-words text-muted-foreground",
-						children: /* @__PURE__ */ g(C, { why: e.why })
+						children: /* @__PURE__ */ g(T, { why: e.why })
 					})]
 				})]
 			}) }),
-			/* @__PURE__ */ g(w, { children: e.agent ? `${V} · ${e.scope_name}` : e.scope_name }),
+			/* @__PURE__ */ g(E, { children: e.agent ? `${H} · ${e.scope_name}` : e.scope_name }),
 			e.state === "waiting" ? /* @__PURE__ */ _(h, { children: [
-				/* @__PURE__ */ _(u, { children: [(e.matches || []).map((e) => /* @__PURE__ */ g(E, {
-					on: T === e.id,
-					run: () => O(e.id),
+				/* @__PURE__ */ _(u, { children: [(e.matches || []).map((e) => /* @__PURE__ */ g(O, {
+					on: S === e.id,
+					run: () => D(e.id),
 					leading: /* @__PURE__ */ g(a, { app: {
 						name: e.title,
 						title: e.title
 					} }),
 					title: e.title,
 					sub: e.type
-				}, e.id)), /* @__PURE__ */ g(E, {
-					on: T === null,
-					run: () => O(null),
+				}, e.id)), /* @__PURE__ */ g(O, {
+					on: S === null,
+					run: () => D(null),
 					leading: /* @__PURE__ */ g("span", {
 						className: "grid size-9 shrink-0 place-items-center",
 						children: /* @__PURE__ */ g(c, {
@@ -127,45 +132,45 @@ function T() {
 					}),
 					title: "New Item"
 				})] }),
-				T === null && /* @__PURE__ */ _(h, { children: [/* @__PURE__ */ _(u, { children: [/* @__PURE__ */ g(D, {
+				S === null && /* @__PURE__ */ _(h, { children: [/* @__PURE__ */ _(u, { children: [/* @__PURE__ */ g(k, {
 					label: "Title",
-					value: k._title ?? B,
-					onChange: (e) => U("_title", e)
-				}), z.map((e) => /* @__PURE__ */ g(D, {
-					label: S(e.name),
+					value: A._title ?? V,
+					onChange: (e) => W("_title", e)
+				}), B.map((e) => /* @__PURE__ */ g(k, {
+					label: w(e.name),
 					secret: e.secret,
-					value: k[e.name] || "",
-					onChange: (t) => U(e.name, t)
-				}, e.name))] }), !!e.hosts?.length && /* @__PURE__ */ _(w, { children: ["Sent only to ", e.hosts.join(", ")] })] }),
+					value: A[e.name] || "",
+					onChange: (t) => W(e.name, t)
+				}, e.name))] }), !!e.hosts?.length && /* @__PURE__ */ _(E, { children: ["Sent only to ", e.hosts.join(", ")] })] }),
 				/* @__PURE__ */ g(u, { children: /* @__PURE__ */ g("button", {
 					type: "button",
 					className: "flex w-full items-center justify-center gap-2 px-3 py-2.5 text-sm font-medium text-destructive outline-none hover:bg-accent/50 focus-visible:bg-accent/50 disabled:opacity-50",
-					disabled: !!N,
-					onClick: () => L(!0),
-					children: N === "decline" ? /* @__PURE__ */ _(h, { children: [/* @__PURE__ */ g(m, {}), "Declining…"] }) : "Decline"
+					disabled: !!P,
+					onClick: () => R(!0),
+					children: P === "decline" ? /* @__PURE__ */ _(h, { children: [/* @__PURE__ */ g(m, {}), "Declining…"] }) : "Decline"
 				}) }),
-				j && /* @__PURE__ */ g(p, { title: j }),
+				M && /* @__PURE__ */ g(p, { title: M }),
 				/* @__PURE__ */ g("div", {
 					className: "flex justify-end",
 					children: /* @__PURE__ */ g(o, {
 						size: "lg",
 						className: "min-w-30",
-						disabled: !H,
-						onClick: () => L(!1),
-						children: N === "allow" ? /* @__PURE__ */ _(h, { children: [/* @__PURE__ */ g(m, {}), "Allowing…"] }) : "Allow"
+						disabled: !U,
+						onClick: () => R(!1),
+						children: P === "allow" ? /* @__PURE__ */ _(h, { children: [/* @__PURE__ */ g(m, {}), "Allowing…"] }) : "Allow"
 					})
 				})
 			] }) : /* @__PURE__ */ g(u, { children: /* @__PURE__ */ g(d, {
 				title: /* @__PURE__ */ g("span", {
 					className: "font-normal text-muted-foreground",
-					children: e.state === "set" ? "Allowed." : e.state === "declined" ? "Declined." : `This request expired. Ask ${V} to ask again.`
+					children: e.state === "set" ? "Allowed." : e.state === "declined" ? "Declined." : `This request expired. Ask ${H} to ask again.`
 				}),
 				wrap: !0
 			}) })
 		]
 	});
 }
-function E(t) {
+function O(t) {
 	let n = e(15), { on: r, run: i, leading: a, title: o, sub: s } = t, l;
 	n[0] === o ? l = n[1] : (l = /* @__PURE__ */ g("span", {
 		className: "block truncate font-medium",
@@ -199,7 +204,7 @@ function E(t) {
 		]
 	}), n[9] = a, n[10] = r, n[11] = i, n[12] = d, n[13] = f, n[14] = p) : p = n[14], p;
 }
-function D(t) {
+function k(t) {
 	let n = e(12), { label: r, value: i, onChange: a, secret: o } = t, s;
 	n[0] === r ? s = n[1] : (s = /* @__PURE__ */ g("span", {
 		className: "w-28 shrink-0 text-muted-foreground",
@@ -222,5 +227,5 @@ function D(t) {
 		children: [s, f]
 	}), n[9] = s, n[10] = f, n[11] = p) : p = n[11], p;
 }
-i(document.getElementById("root")).render(/* @__PURE__ */ g(T, {}));
+i(document.getElementById("root")).render(/* @__PURE__ */ g(D, {}));
 </script>

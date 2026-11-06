@@ -6,6 +6,7 @@
 import { useEffect, useState } from "react"
 import { createRoot } from "react-dom/client"
 import { Avatar, AppIcon, Button, Empty, List, ListRow, ListSkeleton, Problem } from "@one/ui"
+import { appNamed } from "./agents.js"
 
 const api = one.api
 const names = (list) => new Intl.ListFormat(undefined, { type: "conjunction" }).format(list)
@@ -58,7 +59,7 @@ function Requests() {
   } else {
     const { state, apps, asked } = data
     const i = state.network || {}, me = state.user?.id
-    const app = (name) => apps.find((a) => a.name === name) || { name }
+    const app = (name) => appNamed(apps, name) || { name }
     const userName = (id) => (i.users || []).find((u) => u.id === id)?.name || "Someone"
     const vault = asked.filter((r) => r.state === "waiting" && !gone.includes(`request:${r.id}`))
     const invites = (i.groups || []).filter((g) => g.invited.some((x) => x.user === me) && !gone.includes(`join:${g.id}`))

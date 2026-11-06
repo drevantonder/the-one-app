@@ -183,6 +183,8 @@ mod tests {
                     if folder == "settings" {
                         files.push(format!("../settings/{name}"));
                     }
+                } else if folder == "settings" && name.ends_with(".js") {
+                    files.push(format!("../settings/{name}"));
                 }
             }
         }

@@ -485,3 +485,11 @@ fn a_note_reaches_only_the_device_it_was_sealed_to() {
     let fields = json!({ "route": "POST /push/send", "notes": [{ "to": to, "note": B64U.encode(&sealed) }] });
     assert_eq!(post("/push/send", one::keys::signed_request(&node, push::DOMAIN, fields, now())).1["to"][&to], json!({ "none": true }));
 }
+
+/// The Settings screens say who agents are in an item's apps (`src/screen/settings/agents.js`) by the name the node
+/// gives them.
+#[test]
+fn the_screens_name_agents_as_the_vault_does() {
+    let js = include_str!("../src/screen/settings/agents.js");
+    assert!(js.contains(&format!("name: \"{}\"", one::database::scopes::AGENTS)), "agents.js names agents as scopes::AGENTS does");
+}

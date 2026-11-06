@@ -8,105 +8,110 @@ import { useEffect as t, useState as n } from "react";
 import { createRoot as r } from "react-dom/client";
 import { AppIcon as i, Avatar as a, Button as o, Empty as s, List as c, ListRow as l, ListSkeleton as u, Problem as d } from "@one/ui";
 import { Fragment as f, jsx as p, jsxs as m } from "react/jsx-runtime";
-var h = one.api, g = (e) => new Intl.ListFormat(void 0, { type: "conjunction" }).format(e);
-function _() {
-	let r = e(34), [c, _] = n(null), [y, b] = n(null), [x, S] = n(""), C;
-	r[0] === Symbol.for("react.memo_cache_sentinel") ? (C = [], r[0] = C) : C = r[0];
-	let [w, T] = n(C), [E, D] = n(null), O;
-	r[1] === Symbol.for("react.memo_cache_sentinel") ? (O = async function() {
+var h = {
+	name: "ai-agents",
+	title: "Agents",
+	icon: "robot",
+	color: "#8e8e93"
+}, g = (e, t) => t === h.name ? h : e.find((e) => e.name === t), _ = one.api, v = (e) => new Intl.ListFormat(void 0, { type: "conjunction" }).format(e);
+function y() {
+	let r = e(34), [c, h] = n(null), [y, x] = n(null), [S, C] = n(""), w;
+	r[0] === Symbol.for("react.memo_cache_sentinel") ? (w = [], r[0] = w) : w = r[0];
+	let [T, E] = n(w), [D, O] = n(null), k;
+	r[1] === Symbol.for("react.memo_cache_sentinel") ? (k = async function() {
 		try {
 			let [e, t, n] = await Promise.all([
-				h("GET", "/v1/state"),
-				h("GET", "/v1/apps"),
-				h("GET", "/v1/vault/requests")
+				_("GET", "/v1/state"),
+				_("GET", "/v1/apps"),
+				_("GET", "/v1/vault/requests")
 			]);
-			_({
+			h({
 				state: e,
 				apps: t,
 				asked: n
-			}), b(null);
+			}), x(null);
 		} catch (e) {
 			let t = e;
-			b(one.plain(t));
+			x(one.plain(t));
 		}
-	}, r[1] = O) : O = r[1];
-	let k = O, A, j;
-	r[2] === Symbol.for("react.memo_cache_sentinel") ? (A = () => {
-		one.largeTitle("Requests"), k(), one.on("changed", k);
-	}, j = [], r[2] = A, r[3] = j) : (A = r[2], j = r[3]), t(A, j);
-	let M;
-	r[4] === E ? M = r[5] : (M = async function(e, t, n) {
-		if (!E) {
-			D(e), S("");
+	}, r[1] = k) : k = r[1];
+	let A = k, j, M;
+	r[2] === Symbol.for("react.memo_cache_sentinel") ? (j = () => {
+		one.largeTitle("Requests"), A(), one.on("changed", A);
+	}, M = [], r[2] = j, r[3] = M) : (j = r[2], M = r[3]), t(j, M);
+	let N;
+	r[4] === D ? N = r[5] : (N = async function(e, t, n) {
+		if (!D) {
+			O(e), C("");
 			try {
-				n && T((t) => [...t, e]), await t() && T((t) => [...t, e]);
+				n && E((t) => [...t, e]), await t() && E((t) => [...t, e]);
 			} catch (t) {
 				let n = t;
-				T((t) => t.filter((t) => t !== e)), S(one.plain(n).title);
+				E((t) => t.filter((t) => t !== e)), C(one.plain(n).title);
 			}
-			D(null), await k(), T((t) => t.filter((t) => t !== e));
+			O(null), await A(), E((t) => t.filter((t) => t !== e));
 		}
-	}, r[4] = E, r[5] = M);
-	let N = M, P;
+	}, r[4] = D, r[5] = N);
+	let P = N, F;
 	if (c) {
 		let { state: e, apps: t, asked: n } = c, u;
 		r[8] === e.network ? u = r[9] : (u = e.network || {}, r[8] = e.network, r[9] = u);
-		let _ = u, y = e.user?.id, b;
-		r[10] === t ? b = r[11] : (b = (e) => t.find((t) => t.name === e) || { name: e }, r[10] = t, r[11] = b);
-		let S = b, C;
-		r[12] === _.users ? C = r[13] : (C = (e) => (_.users || []).find((t) => t.id === e)?.name || "Someone", r[12] = _.users, r[13] = C);
-		let T = C, D;
-		if (r[14] !== N || r[15] !== S || r[16] !== n || r[17] !== E || r[18] !== x || r[19] !== w || r[20] !== _.groups || r[21] !== y || r[22] !== T) {
+		let h = u, y = e.user?.id, x;
+		r[10] === t ? x = r[11] : (x = (e) => g(t, e) || { name: e }, r[10] = t, r[11] = x);
+		let C = x, w;
+		r[12] === h.users ? w = r[13] : (w = (e) => (h.users || []).find((t) => t.id === e)?.name || "Someone", r[12] = h.users, r[13] = w);
+		let E = w, O;
+		if (r[14] !== P || r[15] !== C || r[16] !== n || r[17] !== D || r[18] !== S || r[19] !== T || r[20] !== h.groups || r[21] !== y || r[22] !== E) {
 			let e;
-			r[24] === w ? e = r[25] : (e = (e) => e.state === "waiting" && !w.includes(`request:${e.id}`), r[24] = w, r[25] = e);
+			r[24] === T ? e = r[25] : (e = (e) => e.state === "waiting" && !T.includes(`request:${e.id}`), r[24] = T, r[25] = e);
 			let t = n.filter(e), c;
-			r[26] === _.groups ? c = r[27] : (c = _.groups || [], r[26] = _.groups, r[27] = c);
+			r[26] === h.groups ? c = r[27] : (c = h.groups || [], r[26] = h.groups, r[27] = c);
 			let u;
-			r[28] !== w || r[29] !== y ? (u = (e) => e.invited.some((e) => e.user === y) && !w.includes(`join:${e.id}`), r[28] = w, r[29] = y, r[30] = u) : u = r[30];
-			let b = c.filter(u);
-			D = !t.length && !b.length ? /* @__PURE__ */ p(s, { children: "No requests." }) : /* @__PURE__ */ m(f, { children: [
-				!!t.length && /* @__PURE__ */ p(v, {
+			r[28] !== T || r[29] !== y ? (u = (e) => e.invited.some((e) => e.user === y) && !T.includes(`join:${e.id}`), r[28] = T, r[29] = y, r[30] = u) : u = r[30];
+			let g = c.filter(u);
+			O = !t.length && !g.length ? /* @__PURE__ */ p(s, { children: "No requests." }) : /* @__PURE__ */ m(f, { children: [
+				!!t.length && /* @__PURE__ */ p(b, {
 					title: "Vault",
 					children: t.map((e) => /* @__PURE__ */ p(l, {
 						wrap: !0,
 						leading: /* @__PURE__ */ p(i, {
-							app: S(e.app),
+							app: C(e.app),
 							size: 32
 						}),
-						title: `${S(e.app).title || e.app} wants ${e.title || ""}`,
+						title: `${C(e.app).title || e.app} wants ${e.title || ""}`,
 						sub: [e.agent || e.by, e.why].filter(Boolean).join(" · "),
 						trailing: /* @__PURE__ */ p(o, {
 							variant: "secondary",
 							size: "sm",
-							disabled: !!E,
-							onClick: () => N(`request:${e.id}`, () => one.request(e.scope, e.id), !1),
+							disabled: !!D,
+							onClick: () => P(`request:${e.id}`, () => one.request(e.scope, e.id), !1),
 							children: "Choose"
 						})
 					}, e.id))
 				}),
-				!!b.length && /* @__PURE__ */ p(v, {
+				!!g.length && /* @__PURE__ */ p(b, {
 					title: "Invites",
-					children: b.map((e) => /* @__PURE__ */ p(l, {
+					children: g.map((e) => /* @__PURE__ */ p(l, {
 						wrap: !0,
 						leading: /* @__PURE__ */ p(a, {
 							id: e.id,
 							name: e.name
 						}),
 						title: e.name,
-						sub: g(e.members.map((e) => T(e.user))),
+						sub: v(e.members.map((e) => E(e.user))),
 						trailing: /* @__PURE__ */ p(o, {
 							variant: "secondary",
 							size: "sm",
-							disabled: !!E,
-							onClick: () => N(`join:${e.id}`, async () => (one.tap(), await h("POST", "/v1/accept", { group: e.id }), !1), !0),
+							disabled: !!D,
+							onClick: () => P(`join:${e.id}`, async () => (one.tap(), await _("POST", "/v1/accept", { group: e.id }), !1), !0),
 							children: "Join"
 						})
 					}, e.id))
 				}),
-				x && /* @__PURE__ */ p(d, { title: x })
-			] }), r[14] = N, r[15] = S, r[16] = n, r[17] = E, r[18] = x, r[19] = w, r[20] = _.groups, r[21] = y, r[22] = T, r[23] = D;
-		} else D = r[23];
-		P = D;
+				S && /* @__PURE__ */ p(d, { title: S })
+			] }), r[14] = P, r[15] = C, r[16] = n, r[17] = D, r[18] = S, r[19] = T, r[20] = h.groups, r[21] = y, r[22] = E, r[23] = O;
+		} else O = r[23];
+		F = O;
 	} else {
 		let e;
 		r[6] === y ? e = r[7] : (e = y ? /* @__PURE__ */ p(d, {
@@ -114,22 +119,22 @@ function _() {
 			text: y.next,
 			action: {
 				label: "Try Again",
-				run: k
+				run: A
 			}
-		}) : /* @__PURE__ */ p(u, {}), r[6] = y, r[7] = e), P = e;
+		}) : /* @__PURE__ */ p(u, {}), r[6] = y, r[7] = e), F = e;
 	}
-	let F;
-	r[31] === Symbol.for("react.memo_cache_sentinel") ? (F = /* @__PURE__ */ p("h1", {
+	let I;
+	r[31] === Symbol.for("react.memo_cache_sentinel") ? (I = /* @__PURE__ */ p("h1", {
 		className: "large-title text-3xl font-bold tracking-tight",
 		children: "Requests"
-	}), r[31] = F) : F = r[31];
-	let I;
-	return r[32] === P ? I = r[33] : (I = /* @__PURE__ */ m("div", {
+	}), r[31] = I) : I = r[31];
+	let L;
+	return r[32] === F ? L = r[33] : (L = /* @__PURE__ */ m("div", {
 		className: "flex max-w-2xl flex-col gap-4",
-		children: [F, P]
-	}), r[32] = P, r[33] = I), I;
+		children: [I, F]
+	}), r[32] = F, r[33] = L), L;
 }
-var v = (t) => {
+var b = (t) => {
 	let n = e(7), { title: r, children: i } = t, a;
 	n[0] === r ? a = n[1] : (a = /* @__PURE__ */ p("h2", {
 		className: "text-sm font-medium text-muted-foreground",
@@ -143,5 +148,5 @@ var v = (t) => {
 		children: [a, o]
 	}), n[4] = a, n[5] = o, n[6] = s) : s = n[6], s;
 };
-r(document.getElementById("root")).render(/* @__PURE__ */ p(_, {}));
+r(document.getElementById("root")).render(/* @__PURE__ */ p(y, {}));
 </script>

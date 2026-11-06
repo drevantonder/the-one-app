@@ -72,8 +72,8 @@ await buildScreens(settings, path.join(settings, "dist"), settings, `<meta name=
 await buildScreens(home, path.join(home, "dist"), home, `<meta name="@one/ui">`, shared)
 
 // What the built files were made from: every source file, by path and content, in order: @one/ui's, the Settings
-// screens', everything in the pages' folder but its dist/, and the sign-in pages.
-const sources = readdirSync(settings).filter((f) => /\.[jt]sx$/.test(f)).map((f) => `../settings/${f}`)
+// screens' and what they share, everything in the pages' folder but its dist/, and the sign-in pages.
+const sources = readdirSync(settings).filter((f) => /\.([jt]sx|js)$/.test(f)).map((f) => `../settings/${f}`)
 const walk = (dir, root = here, prefix = "") => {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     if (entry.name.startsWith(".") || ["node_modules", "dist"].includes(entry.name)) continue

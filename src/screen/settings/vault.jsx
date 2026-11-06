@@ -10,6 +10,7 @@ import {
   AppIcon, Button, Empty, Icon, Input, Label, List, ListRow, ListSkeleton, Problem, ResponsiveDialog, Split, Switch, Tabs,
   TabsList, TabsTrigger,
 } from "@one/ui"
+import { appNamed } from "./agents.js"
 
 const api = one.api
 const call = async (app, op, input) => (await api("POST", "/v1/call", { app, op, input })).ok
@@ -37,7 +38,7 @@ function pagesFrom(state) {
 
 // What the screen knows of the apps: each by name, and what they say about items.
 function know(apps) {
-  const app = (name) => apps.find((a) => a.name === name)
+  const app = (name) => appNamed(apps, name)
   const label = (name) => app(name)?.title || name
   // "Gmail and Drive".
   const names = (list) => new Intl.ListFormat(undefined, { type: "conjunction" }).format(list.map(label))

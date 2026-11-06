@@ -6,6 +6,7 @@
 import { useEffect, useRef, useState } from "react"
 import { createRoot } from "react-dom/client"
 import { AppIcon, Button, CopyButton, Icon, Input, List, ListRow, ListSkeleton, Problem, Spinner } from "@one/ui"
+import { appNamed } from "./agents.js"
 
 const api = one.api
 const { scope, id } = one.params || {}
@@ -93,7 +94,7 @@ function Request() {
     return problem ? <Problem title={problem.title} text={problem.next} action={{ label: "Try Again", run: () => (one.tap(), setProblem(null), load()) }} /> : <ListSkeleton rows={3} />
   }
 
-  const a = apps.find((x) => x.name === request.app)
+  const a = appNamed(apps, request.app)
   const wanted = request.fields || []
   const what = request.title || ""
   const asker = request.agent || request.by

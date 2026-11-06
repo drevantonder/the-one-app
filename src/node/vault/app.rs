@@ -84,14 +84,19 @@ pub fn item_line(it: &Value) -> String {
         it["scope_name"].as_str().unwrap_or(""),
         fields.join(", "),
         Some(list(&it["hosts"])).filter(|h| !h.is_empty()).map(|h| format!("  → {h}")).unwrap_or_default(),
-        Some(list(&it["apps"])).filter(|a| !a.is_empty()).map(|a| format!("  used by: {a}")).unwrap_or_default(),
+        Some(used_by(&it["apps"]).join(", ")).filter(|a| !a.is_empty()).map(|a| format!("  used by: {a}")).unwrap_or_default(),
     )
+}
+
+/// The apps switched on for an item, as a person says them: Agents for agents.
+fn used_by(apps: &Value) -> Vec<&str> {
+    apps.as_array().into_iter().flatten().filter_map(Value::as_str).map(|a| if a == crate::database::scopes::AGENTS { "Agents" } else { a }).collect()
 }
 
 /// An item as an agent reads it: names, not scope ids or pictures, and when it last changed, in ISO 8601.
 fn item_said(it: &Value) -> Value {
     let mut out = json!({
-        "id": it["id"], "title": it["title"], "page": it["scope_name"], "fields": it["fields"], "hosts": it["hosts"], "apps": it["apps"], "wanted_by": it["wanted_by"],
+        "id": it["id"], "title": it["title"], "page": it["scope_name"], "fields": it["fields"], "hosts": it["hosts"], "apps": used_by(&it["apps"]), "wanted_by": it["wanted_by"],
         "changed": it["time"].as_i64().and_then(|ms| jiff::Timestamp::from_second(ms / 1000).ok()).map(|t| t.to_string()), "by": it["user"],
     });
     for k in ["type", "domain", "app"] {
