@@ -747,15 +747,12 @@ const h = OneUI.react.createElement;
 
   function drawWindow() {
     windowShown = true;
-<<<<<<< HEAD
+    const drawn = sections();
+    countBadges(drawn);
     if (phone()) {
       const r = route();
       return void show(h(ui.Shell, { phone: true, sections: [], title: barTitle, back: !(r.kind === "own" && r.name === "pages"), onBack: back, screen: detail, banner: offline.banner() }));
     }
-=======
-    const drawn = sections();
-    countBadges(drawn);
->>>>>>> 2287bbfa (wip: windows on tauri)
     show(h(ui.Shell, {
       sections: drawn,
       title: barTitle,
