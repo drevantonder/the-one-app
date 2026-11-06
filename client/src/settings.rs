@@ -27,12 +27,64 @@ const HOUR: u64 = 3_600_000;
 /// The invites this device made, by who they're for: their secret, name, role and until when.
 const INVITES: &str = "invites.json";
 
-/// The paths of a node's routes a device answers itself (`Keyring::answer`), signing what they change: a node signs
-/// what changes who can do what only for its own machine's programs.
-pub const ANSWERED: &[&str] = &[
-    "/v1/role", "/v1/remove", "/v1/settings", "/v1/group", "/v1/invite", "/v1/accept", "/v1/member", "/v1/handle", "/v1/name", "/v1/runs", "/v1/service", "/v1/retire", "/v1/add",
-    "/v1/devices/forget-sign-in", "/v1/invite-link", "/v1/app-schedules", "/v1/devices/requests", "/v1/devices/approve", "/v1/devices/refuse", "/v1/devices/passkey", "/v1/devices/seen",
+/// What a device answers itself of a node's routes, signing what they change: a node signs what changes who can do
+/// what only for its own machine's programs.
+#[derive(Clone, Copy)]
+enum Route {
+    Role,
+    Remove,
+    Settings,
+    Group,
+    Invite,
+    Accept,
+    Member,
+    Handle,
+    Name,
+    Runs,
+    Service,
+    Retire,
+    Add,
+    ForgetSignIn,
+    InviteLink,
+    AppSchedules,
+    Requests,
+    Approve,
+    Refuse,
+    Passkey,
+    Seen,
+}
+
+/// The only list of them: a route of a path and method, which `answer` runs (its `match` fails to compile for one
+/// missing here or there), and `answered` tells a request that comes by of.
+const ROUTES: &[(&str, &str, Route)] = &[
+    ("POST", "/v1/role", Route::Role),
+    ("POST", "/v1/remove", Route::Remove),
+    ("POST", "/v1/settings", Route::Settings),
+    ("POST", "/v1/group", Route::Group),
+    ("POST", "/v1/invite", Route::Invite),
+    ("POST", "/v1/accept", Route::Accept),
+    ("POST", "/v1/member", Route::Member),
+    ("POST", "/v1/handle", Route::Handle),
+    ("POST", "/v1/name", Route::Name),
+    ("POST", "/v1/runs", Route::Runs),
+    ("POST", "/v1/service", Route::Service),
+    ("POST", "/v1/retire", Route::Retire),
+    // An app on everyone's page is a change to who can do what; on yours or a group's, a node writes it.
+    ("POST", "/v1/add", Route::Add),
+    ("POST", "/v1/devices/forget-sign-in", Route::ForgetSignIn),
+    ("POST", "/v1/invite-link", Route::InviteLink),
+    ("POST", "/v1/app-schedules", Route::AppSchedules),
+    ("GET", "/v1/devices/requests", Route::Requests),
+    ("POST", "/v1/devices/approve", Route::Approve),
+    ("POST", "/v1/devices/refuse", Route::Refuse),
+    ("POST", "/v1/devices/passkey", Route::Passkey),
+    ("GET", "/v1/devices/seen", Route::Seen),
 ];
+
+/// Whether a device answers the node's route of this path itself, whatever the method.
+pub fn answered(path: &str) -> bool {
+    ROUTES.iter().any(|(_, p, _)| *p == path)
+}
 
 fn failed(message: impl std::fmt::Display) -> Error {
     unsent(message)
@@ -85,9 +137,7 @@ impl<O: Opens> Keyring<O> {
     /// `/v1/remove`, `/v1/devices/approve`, …): none for any other, which goes to a node.
     pub(crate) async fn answer(&self, client: &Client, on: &(impl Address + Keep + Signs), method: &str, path: &str, body: &[u8]) -> Option<Result<Value, Error>> {
         let path = path.split('?').next().unwrap_or(path);
-        if !ANSWERED.contains(&path) {
-            return None;
-        }
+        let (_, _, route) = ROUTES.iter().find(|(m, p, _)| *m == method && *p == path)?;
         let body: Value = if body.is_empty() { json!({}) } else { serde_json::from_slice(body).unwrap_or(Value::Null) };
         // The network's recovery key is used only on the machine it's kept on, by its node.
         if body.get("recovery").is_some() {
@@ -99,29 +149,29 @@ impl<O: Opens> Keyring<O> {
         }
         let w = |c: Content| self.write(client, on, c);
         let done = |r: Result<(), Error>| r.map(|()| json!({}));
-        Some(match (method, path) {
-            ("POST", "/v1/role") => match (self.find(|db| db.find_user(&text(&body, "user"))), serde_json::from_value::<Role>(body["role"].clone())) {
+        Some(match route {
+            Route::Role => match (self.find(|db| db.find_user(&text(&body, "user"))), serde_json::from_value::<Role>(body["role"].clone())) {
                 (Ok(user), Ok(role)) => done(w(content::role(&user, role)).await),
                 (Err(err), _) => Err(err),
                 (_, Err(_)) => Err(failed("A role is admin or member.")),
             },
-            ("POST", "/v1/remove") if body["user"].is_string() => self.remove_person(client, on, &text(&body, "user")).await,
-            ("POST", "/v1/remove") => self.remove(client, on, &text(&body, "key")).await,
-            ("POST", "/v1/settings") => done(w(content::setting(&text(&body, "name"), body["value"].as_str())).await),
-            ("POST", "/v1/group") => self.group(client, on, &text(&body, "name")).await,
-            ("POST", "/v1/invite") => match self.find(|db| Ok((db.find_group(&text(&body, "group"))?, db.find_user(&text(&body, "user"))?))) {
+            Route::Remove if body["user"].is_string() => self.remove_person(client, on, &text(&body, "user")).await,
+            Route::Remove => self.remove(client, on, &text(&body, "key")).await,
+            Route::Settings => done(w(content::setting(&text(&body, "name"), body["value"].as_str())).await),
+            Route::Group => self.group(client, on, &text(&body, "name")).await,
+            Route::Invite => match self.find(|db| Ok((db.find_group(&text(&body, "group"))?, db.find_user(&text(&body, "user"))?))) {
                 Ok((group, user)) => done(w(content::invite(&group, &user, serde_json::from_value(body["role"].clone()).unwrap_or(Role::Member))).await),
                 Err(err) => Err(err),
             },
-            ("POST", "/v1/accept") => match self.find(|db| db.find_group(&text(&body, "group"))) {
+            Route::Accept => match self.find(|db| db.find_group(&text(&body, "group"))) {
                 Ok(group) => done(w(content::accept(&group)).await),
                 Err(err) => Err(err),
             },
-            ("POST", "/v1/member") => match self.find(|db| Ok((db.find_group(&text(&body, "group"))?, db.find_user(&text(&body, "user"))?))) {
+            Route::Member => match self.find(|db| Ok((db.find_group(&text(&body, "group"))?, db.find_user(&text(&body, "user"))?))) {
                 Ok((group, user)) => done(w(content::member(&group, &user, serde_json::from_value(body["role"].clone()).ok())).await),
                 Err(err) => Err(err),
             },
-            ("POST", "/v1/handle") => {
+            Route::Handle => {
                 let handle = text(&body, "handle").trim().to_string();
                 let of = match body["group"].as_str() {
                     Some(g) => self.find(|db| db.find_group(g)).map(|g| ("group", g)),
@@ -132,7 +182,7 @@ impl<O: Opens> Keyring<O> {
                     Err(err) => Err(err),
                 }
             }
-            ("POST", "/v1/name") => {
+            Route::Name => {
                 let key = match body["key"].as_str() {
                     Some(k) => self.find(|db| db.find_machine(k)),
                     None => Ok(on.public()),
@@ -142,18 +192,18 @@ impl<O: Opens> Keyring<O> {
                     Err(err) => Err(err),
                 }
             }
-            ("POST", "/v1/runs") => {
+            Route::Runs => {
                 let on_: Result<Vec<_>, _> = body["on"].as_array().into_iter().flatten().map(|d| self.find(|db| db.find_machine(d.as_str().unwrap_or("")))).collect();
                 match on_ {
                     Ok(machines) => done(w(content::runs(&machines)).await),
                     Err(err) => Err(err),
                 }
             }
-            ("POST", "/v1/service") => match self.find(|db| db.find_machine(&text(&body, "device"))) {
+            Route::Service => match self.find(|db| db.find_machine(&text(&body, "device"))) {
                 Ok(device) => done(w(content::service(&device, &text(&body, "name"), body["on"] == true, None)).await),
                 Err(err) => Err(err),
             },
-            ("POST", "/v1/retire") => {
+            Route::Retire => {
                 let app = text(&body, "app");
                 let owner = self.find(|db| db.app(&app)?.map(|a| a.owner.to_string()).ok_or_else(|| anyhow::anyhow!("no app named {app}")));
                 match owner.and_then(|o| content::retire(&app, &o, &text(&body, "how")).map_err(failed)) {
@@ -161,23 +211,22 @@ impl<O: Opens> Keyring<O> {
                     Err(err) => Err(err),
                 }
             }
-            // An app on everyone's page is a change to who can do what; on yours or a group's, a node writes it.
-            ("POST", "/v1/add") if body["scope"] == "global" => done(w(content::added(&text(&body, "app"), body["added"] != false)).await),
-            ("POST", "/v1/devices/forget-sign-in") => match self.find(|db| db.find_machine(&text(&body, "key"))) {
+            Route::Add if body["scope"] == "global" => done(w(content::added(&text(&body, "app"), body["added"] != false)).await),
+            Route::ForgetSignIn => match self.find(|db| db.find_machine(&text(&body, "key"))) {
                 Ok(key) => done(w(content::forget_sign_in(&key)).await),
                 Err(err) => Err(err),
             },
-            ("POST", "/v1/invite-link") => self.invite(on, &text(&body, "name"), if body["admin"] == true { Role::Admin } else { Role::Member }).await,
-            ("POST", "/v1/app-schedules") => self.app_schedules_asked(client, on, &body).await,
-            ("GET", "/v1/devices/requests") => self.requests(client, on).await,
-            ("POST", "/v1/devices/approve") => self.approve_code(client, on, &text(&body, "code"), body["confirm"] == true).await,
-            ("POST", "/v1/devices/refuse") => self.refuse(client, on, &text(&body, "code")).await,
-            ("POST", "/v1/devices/passkey") => match B64U.decode(text(&body, "prf").trim_end_matches('=').as_bytes()) {
+            Route::InviteLink => self.invite(on, &text(&body, "name"), if body["admin"] == true { Role::Admin } else { Role::Member }).await,
+            Route::AppSchedules => self.app_schedules_asked(client, on, &body).await,
+            Route::Requests => self.requests(client, on).await,
+            Route::Approve => self.approve_code(client, on, &text(&body, "code"), body["confirm"] == true).await,
+            Route::Refuse => self.refuse(client, on, &text(&body, "code")).await,
+            Route::Passkey => match B64U.decode(text(&body, "prf").trim_end_matches('=').as_bytes()) {
                 Ok(prf) => done(self.list_passkey(client, on, &prf, &text(&body, "credential")).await),
                 Err(_) => Err(failed("Sign in with your passkey first.")),
             },
-            ("GET", "/v1/devices/seen") => self.seen(on).await,
-            _ => return None,
+            Route::Seen => self.seen(on).await,
+            Route::Add => return None,
         })
     }
 

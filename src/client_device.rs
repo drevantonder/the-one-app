@@ -254,7 +254,7 @@ pub fn instead(req: ureq::http::Request<ureq::SendBody>, next: ureq::middleware:
     }
     let Some(device) = kept() else { return next.handle(req) };
     let path = req.uri().path_and_query().map(|p| p.as_str().to_string()).unwrap_or_else(|| "/".into());
-    if !one::api::clients_may(req.uri().path()) && !one_client::ANSWERED.contains(&req.uri().path()) {
+    if !one::api::clients_may(req.uri().path()) && !one_client::answered(req.uri().path()) {
         return answer(403, needs_node(req.uri().path()));
     }
     let (parts, body) = req.into_parts();

@@ -20,7 +20,7 @@ use n0_future::time::{Duration, Instant, timeout};
 
 pub mod keyring;
 mod settings;
-pub use settings::ANSWERED;
+pub use settings::answered;
 #[cfg(feature = "relayed")]
 pub mod relayed;
 #[cfg(target_family = "wasm")]
