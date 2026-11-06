@@ -47,6 +47,8 @@
   addEventListener("unhandledrejection", (e) => log(`unhandled rejection: ${e.reason?.stack || e.reason?.message || e.reason}`));
 
   window.__oneNative = {
+    /// A line for this device's log (`one logs <device>`), from the page's own code.
+    log,
     /// Who and where this is, and what this platform can do: lib.rs's `native` says each.
     about: () => invoke("native"),
     /// What the person typed, an address or an invite link → the address.
