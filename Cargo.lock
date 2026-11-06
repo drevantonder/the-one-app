@@ -2927,7 +2927,6 @@ dependencies = [
  "libc",
  "one-client",
  "serde_json",
- "tokio",
  "uniffi",
 ]
 
