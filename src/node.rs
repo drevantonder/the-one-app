@@ -31,7 +31,7 @@ mod blobs;
 mod calls;
 mod databases;
 mod devices;
-mod logs;
+mod sync;
 mod net;
 mod pairing;
 mod push;
@@ -453,7 +453,7 @@ pub struct Inner {
     /// Each database's keys by epoch as this device opens them (`database_keys`), with the newest epoch they're as of.
     database_keys: Mutex<HashMap<(Scope, String), (u32, crate::db::Keys)>>,
     /// Steps other devices sent, waiting for the bucket to confirm them, while one ask of it is under way: none then.
-    sent: Mutex<Option<Vec<logs::Sent>>>,
+    sent: Mutex<Option<Vec<sync::Sent>>>,
     /// Whether this device is moving to the network's new storage now.
     moving: Mutex<bool>,
     /// The network's recovery keys this device told the relay about since it started: the old ones taken out, the

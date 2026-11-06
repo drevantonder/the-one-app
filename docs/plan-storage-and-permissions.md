@@ -61,7 +61,7 @@ Who holds what:
 A removed device's later steps fail rule 3, because they come after its removal in the one order.
 
 **What's deleted:**
-- `src/store.rs`, `src/log.rs`, and most of `src/entry.rs` and `src/node/logs.rs`;
+- `src/store.rs`, `src/log.rs`, and most of `src/entry.rs` and `src/node/logs.rs` (now `src/node/sync.rs`);
 - causal order, ties by hash, cuts and forks;
 - replay's hand-written rules;
 - grants as a right;

@@ -1,4 +1,5 @@
-//! Reading each scope this device holds from the bucket, and what devices tell each other: pings and presence.
+//! The scopes this device holds: reading each from the bucket, and what devices tell each other about them: that one
+//! changed (pings), and who is on (presence).
 
 use super::*;
 
