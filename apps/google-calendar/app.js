@@ -9,31 +9,7 @@ const APP = "google-calendar";
 const TITLE = "Google Calendar";
 const SCOPES = "openid email https://www.googleapis.com/auth/calendar";
 const API = "https://www.googleapis.com/calendar/v3/";
-const { account, token, forget, vault, schema, tools: signIn } = google({ app: APP, title: TITLE, scopes: SCOPES });
-
-const str = (description) => ({ type: "string", description });
-const accountInput = str(`which account: its address or a part of it only it has, as ${APP}_accounts lists them; default the first`);
-const withAccount = (properties, required) => ({ type: "object", properties: { ...properties, account: accountInput }, ...(required ? { required } : {}) });
-
-/// Calls Google's API as `email`; `missing` is what to say when what the path names isn't there.
-async function api(ctx, email, method, path, { query, json, missing } = {}) {
-  const q = new URLSearchParams();
-  for (const [k, v] of Object.entries(query || {})) if (v !== undefined && v !== null && v !== "") q.append(k, String(v));
-  const r = await fetch(API + path + ([...q].length ? `?${q}` : ""), {
-    method,
-    headers: { authorization: `Bearer ${await token(ctx, email)}`, ...(json ? { "content-type": "application/json" } : {}) },
-    body: json ? JSON.stringify(json) : undefined,
-  });
-  const text = await r.text();
-  if (r.status === 401) forget(ctx, email);
-  if (!r.ok) {
-    let message = text.slice(0, 300) || r.statusText;
-    try { message = JSON.parse(text).error?.message || message; } catch {}
-    if (missing && (r.status === 404 || r.status === 410)) throw new Error(missing);
-    throw new Error(`${TITLE}: ${message}`);
-  }
-  return text ? JSON.parse(text) : null;
-}
+const { account, api, str, withAccount, vault, schema, tools: signIn } = google({ app: APP, title: TITLE, scopes: SCOPES, base: API });
 
 const cal = (id) => encodeURIComponent(id || "primary");
 const noCalendar = (id) => `no calendar ${id}: calendar ids come from ${APP}_calendars`;

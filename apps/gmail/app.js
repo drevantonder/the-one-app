@@ -11,7 +11,7 @@ const API = "https://gmail.googleapis.com/gmail/v1/users/me/";
 const UPLOAD = "https://gmail.googleapis.com/upload/gmail/v1/users/me/";
 const APP = "gmail";
 const TITLE = "Gmail";
-const { account, token, forget, vault, schema, tools: signIn } = google({ app: APP, title: TITLE, scopes: SCOPES });
+const { account, api, str, withAccount, vault, schema, tools: signIn } = google({ app: APP, title: TITLE, scopes: SCOPES, base: API });
 const LONGEST = 20000;
 const MOST_FILES = 10;
 const MOST_BYTES = 25 << 20;
@@ -31,30 +31,6 @@ function fromB64(s) {
 }
 // Base64 in lines of 76, as MIME wants it.
 const wrapped = (bytes) => toB64(bytes).replace(/.{76}(?=.)/g, "$&\r\n");
-
-/// Calls Gmail's API as `email`: a path under users/me, or a whole URL.
-/// `missing` is what to say when what the path names isn't there, as Gmail answers 404 or "Invalid id value".
-async function api(ctx, email, method, path, { query, json, raw, type, missing } = {}) {
-  const q = query ? new URLSearchParams() : null;
-  for (const [k, v] of Object.entries(query || {})) {
-    for (const one of Array.isArray(v) ? v : [v]) if (one !== undefined && one !== null && one !== "") q.append(k, String(one));
-  }
-  const url = (path.startsWith("http") ? path : API + path) + (q && [...q].length ? `?${q}` : "");
-  const r = await fetch(url, {
-    method,
-    headers: { authorization: `Bearer ${await token(ctx, email)}`, ...(json ? { "content-type": "application/json" } : type ? { "content-type": type } : {}) },
-    body: json ? JSON.stringify(json) : raw,
-  });
-  const text = await r.text();
-  if (r.status === 401) forget(ctx, email);
-  if (!r.ok) {
-    let message = text.slice(0, 300) || r.statusText;
-    try { message = JSON.parse(text).error?.message || message; } catch {}
-    if (missing && (r.status === 404 || /invalid id value/i.test(message))) throw new Error(missing);
-    throw new Error(`Gmail: ${message}`);
-  }
-  return text ? JSON.parse(text) : null;
-}
 
 const header = (p, name) => (p?.headers || []).find((h) => h.name.toLowerCase() === name.toLowerCase())?.value || "";
 
@@ -281,10 +257,7 @@ async function upload(ctx, email, method, path, d, meta, missing) {
   return api(ctx, email, method, UPLOAD + path, { query: { uploadType: "multipart" }, raw, type: `multipart/related; boundary=${b}`, missing });
 }
 
-const str = (description) => ({ type: "string", description });
 const ids = (description) => ({ type: "array", items: { type: "string" }, description });
-const accountInput = str("which account: its address or a part of it only it has, as gmail_accounts lists them; default the first");
-const withAccount = (properties, required) => ({ type: "object", properties: { ...properties, account: accountInput }, ...(required ? { required } : {}) });
 const people = (what) => ({
   type: "array", items: { type: "string" },
   description: `${what}: addresses, each "a@example.org" or "Name <a@example.org>"`,

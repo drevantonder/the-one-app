@@ -8,44 +8,12 @@ import settings from "./dist/settings.html" with { type: "text" };
 import { google } from "./google/google.js";
 
 const SCOPES = "openid email https://www.googleapis.com/auth/drive";
-const API = "https://www.googleapis.com/drive/v3";
+const API = "https://www.googleapis.com/drive/v3/";
 const APP = "drive";
 const TITLE = "Google Drive";
-const { account, token, forget, vault, schema, tools: signIn } = google({ app: APP, title: TITLE, scopes: SCOPES });
-
-/// What Drive said, with its status: callers tell a missing file (404) from a refused one.
-export class DriveError extends Error {}
-// "needs connecting" is how apps that save to Drive tell this from other errors.
-const needsConnecting = () => Object.assign(new DriveError(`Drive needs connecting: sign in to a Google account first; ${APP}_sign_in signs one in`), { code: "not_signed_in" });
-
-/// Calls Drive's API as the account named (the first when none is); `missing` is what to say to a 404, `hint` what
-/// to add to a 400. Errors keep Drive's status first ("Drive 404: …"), as apps that save to Drive tell them apart by it.
-async function api(ctx, name, method, path, { query, json, raw, type, missing, hint } = {}) {
-  if (!(await accounts(ctx)).length) throw needsConnecting();
-  const email = await account(ctx, name);
-  const access = await token(ctx, email).catch((e) => { throw new DriveError(e.message); });
-  const q = query ? `?${new URLSearchParams(Object.entries(query).filter(([, v]) => v !== undefined && v !== null && v !== "").map(([k, v]) => [k, String(v)]))}` : "";
-  const r = await fetch(`${path.startsWith("http") ? "" : API}${path}${q}`, {
-    method,
-    headers: { authorization: `Bearer ${access}`, ...(json ? { "content-type": "application/json" } : type ? { "content-type": type } : {}) },
-    body: json ? JSON.stringify(json) : raw,
-  });
-  const text = await r.text();
-  if (r.status === 401) { forget(ctx, email); throw needsConnecting(); }
-  if (!r.ok) {
-    let message = text.slice(0, 200);
-    try { message = JSON.parse(text).error?.message || message; } catch {}
-    if (r.status === 404 && missing) message = missing;
-    else if (r.status === 400 && hint) message = `${message.replace(/\.$/, "")}: ${hint}`;
-    throw new DriveError(`Drive ${r.status}: ${message}`);
-  }
-  return text ? JSON.parse(text) : null;
-}
+const { account, api, str, withAccount, vault, schema, tools: signIn } = google({ app: APP, title: TITLE, scopes: SCOPES, base: API });
 
 const fromB64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
-const str = (description) => ({ type: "string", description });
-const accountInput = str(`which account: its address or a part of it only it has, as ${APP}_accounts lists them; default the first`);
-const withAccount = (properties, required) => ({ type: "object", properties: { ...properties, account: accountInput }, ...(required ? { required } : {}) });
 const noFile = (id) => `no file ${id}, or not one this account can see: file ids come from drive_files_list (root is My Drive)`;
 const FIELDS_HINT = "fields is Drive's field list, like id,name,mimeType,parents,modifiedTime,webViewLink";
 
@@ -78,7 +46,7 @@ export default {
       reads: true,
       description: `One file's or folder's metadata, as Drive's files.get gives it: by default ${FILE} (webViewLink opens it; size is in bytes; times are ISO 8601). Its contents: Google Docs and Sheets read them; other files aren't read here.`,
       input: withAccount({ fileId, fields: fields(FILE) }, ["fileId"]),
-      run: (ctx, { fileId, fields, account: a }) => api(ctx, a, "GET", `/files/${encodeURIComponent(fileId)}`, { query: { fields: fields || FILE, supportsAllDrives: true }, missing: noFile(fileId), hint: FIELDS_HINT }),
+      run: async (ctx, { fileId, fields, account: a }) => api(ctx, await account(ctx, a), "GET", `files/${encodeURIComponent(fileId)}`, { query: { fields: fields || FILE, supportsAllDrives: true }, missing: noFile(fileId), hint: FIELDS_HINT }),
     },
     files_list: {
       reads: true,
@@ -90,7 +58,7 @@ export default {
         pageSize: { type: "integer", description: "at most this many files, 1 to 1000; default 100" },
         pageToken: str("the nextPageToken the last files_list gave, with the same q, for the next page"),
       }),
-      run: (ctx, { account: a, fields, ...query }) => api(ctx, a, "GET", "/files", {
+      run: async (ctx, { account: a, fields, ...query }) => api(ctx, await account(ctx, a), "GET", "files", {
         query: { ...query, fields: fields || LIST },
         hint: "q is Drive's search syntax, like name contains 'budget' and trashed = false, with values in single quotes; orderBy is like modifiedTime desc; " + FIELDS_HINT,
       }),
@@ -99,7 +67,7 @@ export default {
       reads: false,
       description: `Make a file with no content, like a folder (files.create): body is its metadata. Gives ${MADE} by default. To upload a file's bytes, files_upload.`,
       input: withAccount({ body: metadataInput("the new file's metadata, like { name: \"Receipts\", mimeType: \"application/vnd.google-apps.folder\", parents: [\"root\"] }"), fields: fields(MADE) }, ["body"]),
-      run: (ctx, { body, fields, account: a }) => api(ctx, a, "POST", "/files", { json: body, query: { fields: fields || MADE, supportsAllDrives: true }, missing: "no folder among body.parents: folder ids come from drive_files_list (root is My Drive)", hint: FIELDS_HINT }),
+      run: async (ctx, { body, fields, account: a }) => api(ctx, await account(ctx, a), "POST", "files", { json: body, query: { fields: fields || MADE, supportsAllDrives: true }, missing: "no folder among body.parents: folder ids come from drive_files_list (root is My Drive)", hint: FIELDS_HINT }),
     },
     files_upload: {
       reads: false,
@@ -122,7 +90,7 @@ export default {
         const tail = new TextEncoder().encode(`\r\n--${boundary}--\r\n`);
         const body = new Uint8Array(head.length + bytes.length + tail.length);
         body.set(head); body.set(bytes, head.length); body.set(tail, head.length + bytes.length);
-        return api(ctx, a, "POST", "https://www.googleapis.com/upload/drive/v3/files", {
+        return api(ctx, await account(ctx, a), "POST", "https://www.googleapis.com/upload/drive/v3/files", {
           raw: body, type: `multipart/related; boundary=${boundary}`, query: { uploadType: "multipart", fields: fields || MADE, supportsAllDrives: true },
           missing: "no folder among metadata.parents: folder ids come from drive_files_list (root is My Drive)", hint: FIELDS_HINT,
         });
@@ -138,14 +106,14 @@ export default {
         removeParents: str("folder ids to take it out of, comma-separated, as files_get gives its parents"),
         fields: fields(MADE),
       }, ["fileId"]),
-      run: (ctx, { fileId, body = {}, addParents, removeParents, fields, account: a }) =>
-        api(ctx, a, "PATCH", `/files/${encodeURIComponent(fileId)}`, { json: body, query: { addParents, removeParents, fields: fields || MADE, supportsAllDrives: true }, missing: noFile(fileId), hint: FIELDS_HINT }),
+      run: async (ctx, { fileId, body = {}, addParents, removeParents, fields, account: a }) =>
+        api(ctx, await account(ctx, a), "PATCH", `files/${encodeURIComponent(fileId)}`, { json: body, query: { addParents, removeParents, fields: fields || MADE, supportsAllDrives: true }, missing: noFile(fileId), hint: FIELDS_HINT }),
     },
     generate_ids: {
       reads: true,
       description: "Ids for files not made yet ({ ids }), to give files_create or files_upload as metadata's id: making one twice with the same id (a retry) never makes two.",
       input: withAccount({ count: { type: "integer", description: "how many, 1 to 1000" } }, ["count"]),
-      run: async (ctx, { count, account: a }) => ({ ids: (await api(ctx, a, "GET", "/files/generateIds", { query: { count, space: "drive", type: "files" } })).ids }),
+      run: async (ctx, { count, account: a }) => ({ ids: (await api(ctx, await account(ctx, a), "GET", "files/generateIds", { query: { count, space: "drive", type: "files" } })).ids }),
     },
   },
 

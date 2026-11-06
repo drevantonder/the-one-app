@@ -68,10 +68,12 @@ function emailOf(idToken) {
 
 const tokens = new Map(); // `${user}/${email}` → { value, expires }, for this runtime only
 
-/// An app's Google sign-in: `scopes` what it asks for (space separated), `app` and `title` as it's named. Gives what its
-/// `export default` takes (`vault`, `schema`, `tools`), `account(ctx, name)` (the address a call's account names, the
-/// first signed in when none), `token(ctx, email)` (an access token) and `forget(ctx, email)` (when Google refused it).
-export function google({ app, title, scopes }) {
+/// An app's Google sign-in: `scopes` what it asks for (space separated), `app` and `title` as it's named, `base` the
+/// address of the Google API it calls (ending in a slash). Gives what its `export default` takes (`vault`, `schema`,
+/// `tools`), `account(ctx, name)` (the address a call's account names, the first signed in when none) and
+/// `api(ctx, email, method, path, options)` (a call to Google's API), with the `str`, `accountInput` and `withAccount`
+/// its tools' inputs are made of.
+export function google({ app, title, scopes, base }) {
   const noClient = () => new Error(`No Google sign-in is set up yet: vault_request (app ${app}, need client) asks for it. An admin sets it once, for everyone; for anyone else it says which admin to ask, which is all to tell them`);
 
   async function account(ctx, name) {
@@ -214,5 +216,36 @@ export function google({ app, title, scopes }) {
     },
   };
 
-  return { vault, schema, tools, account, token, forget };
+  /// Calls Google's API as `email`: a path under `base`, or a whole URL. `query` values may be arrays; `json` or `raw`
+  /// (of content `type`) is the body. `missing` is what to say when what the path names isn't there, or the account
+  /// can't open it; `hint` what to add to what Google says about an input it can't take.
+  async function api(ctx, email, method, path, { query, json, raw, type, missing, hint } = {}) {
+    const q = new URLSearchParams();
+    for (const [k, v] of Object.entries(query || {})) {
+      for (const one of Array.isArray(v) ? v : [v]) if (one !== undefined && one !== null && one !== "") q.append(k, String(one));
+    }
+    const r = await fetch((path.startsWith("http") ? path : base + path) + ([...q].length ? `?${q}` : ""), {
+      method,
+      headers: { authorization: `Bearer ${await token(ctx, email)}`, ...(json ? { "content-type": "application/json" } : type ? { "content-type": type } : {}) },
+      body: json ? JSON.stringify(json) : raw,
+    });
+    const text = await r.text();
+    if (r.status === 401) forget(ctx, email);
+    if (!r.ok) {
+      let message = text.slice(0, 300) || r.statusText;
+      try { message = JSON.parse(text).error?.message || message; } catch {}
+      // Gmail answers a made-up id with 400 "Invalid id value"; Calendar answers a deleted event with 410.
+      if (missing && (r.status === 404 || r.status === 410 || /invalid id value/i.test(message))) throw new Error(missing);
+      if (missing && r.status === 403) throw new Error(`${email} can't open it (${message.replace(/\.$/, "")}): use the account it's shared with (${app}_accounts lists them), or ask its owner to share it`);
+      if (hint && r.status === 400) throw new Error(`${title}: ${message.replace(/\.$/, "")}: ${hint}`);
+      throw new Error(`${title}: ${message}`);
+    }
+    return text ? JSON.parse(text) : null;
+  }
+
+  const str = (description) => ({ type: "string", description });
+  const accountInput = str(`which account: its address or a part of it only it has, as ${app}_accounts lists them; default the first`);
+  const withAccount = (properties, required) => ({ type: "object", properties: { ...properties, account: accountInput }, ...(required ? { required } : {}) });
+
+  return { vault, schema, tools, account, api, str, withAccount };
 }

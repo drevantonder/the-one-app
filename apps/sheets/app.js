@@ -8,34 +8,7 @@ const APP = "sheets";
 const TITLE = "Google Sheets";
 const SCOPES = "openid email https://www.googleapis.com/auth/spreadsheets";
 const API = "https://sheets.googleapis.com/v4/";
-const { account, token, forget, vault, schema, tools: signIn } = google({ app: APP, title: TITLE, scopes: SCOPES });
-
-const str = (description) => ({ type: "string", description });
-const accountInput = str(`which account: its address or a part of it only it has, as ${APP}_accounts lists them; default the first`);
-const withAccount = (properties, required) => ({ type: "object", properties: { ...properties, account: accountInput }, ...(required ? { required } : {}) });
-
-/// Calls Google's API as `email`. `missing` is what to say when what the path names isn't there, or the account can't
-/// open it; `hint` what to add to what Google says about an input it can't take.
-async function api(ctx, email, method, path, { query, json, missing, hint } = {}) {
-  const q = new URLSearchParams();
-  for (const [k, v] of Object.entries(query || {})) if (v !== undefined && v !== null && v !== "") q.append(k, String(v));
-  const r = await fetch(API + path + ([...q].length ? `?${q}` : ""), {
-    method,
-    headers: { authorization: `Bearer ${await token(ctx, email)}`, ...(json ? { "content-type": "application/json" } : {}) },
-    body: json ? JSON.stringify(json) : undefined,
-  });
-  const text = await r.text();
-  if (r.status === 401) forget(ctx, email);
-  if (!r.ok) {
-    let message = text.slice(0, 300) || r.statusText;
-    try { message = JSON.parse(text).error?.message || message; } catch {}
-    if (missing && r.status === 404) throw new Error(missing);
-    if (missing && r.status === 403) throw new Error(`${email} can't open it (${message.replace(/\.$/, "")}): use the account it's shared with (${APP}_accounts lists them), or ask its owner to share it`);
-    if (hint && r.status === 400) throw new Error(`${TITLE}: ${message.replace(/\.$/, "")}: ${hint}`);
-    throw new Error(`${TITLE}: ${message}`);
-  }
-  return text ? JSON.parse(text) : null;
-}
+const { account, api, str, withAccount, vault, schema, tools: signIn } = google({ app: APP, title: TITLE, scopes: SCOPES, base: API });
 
 const sheetId = (v) => {
   const s = String(v || "").trim();
