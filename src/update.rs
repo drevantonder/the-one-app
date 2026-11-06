@@ -1188,8 +1188,9 @@ JOB
 
 /// Shell for a Mac: has it build `commit`'s app now, and install it, then the iPhone app, if what that's made of changed,
 /// for the iPhone, all in one job in its logged-in session: a newer update stops the build it's on and builds that
-/// instead. It installs the iPhone app whenever the phone is reachable, and keeps trying until it is. Says how its last
-/// builds failed, once, and what the iPhone has.
+/// instead. It installs the iPhone app whenever the phone is reachable, and keeps trying until it is. A job already
+/// running takes this update's build scripts at its next build, and tries a build that failed again if they changed.
+/// Says how its last builds failed, once, and what the iPhone has.
 fn mac_follow(commit: &str, config_commit: Option<&str>) -> String {
     let short = &commit[..commit.len().min(12)];
     format!(
