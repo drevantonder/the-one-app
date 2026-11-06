@@ -31,7 +31,7 @@ Each database is stored and read the same way:
 - a step is written only if its position is free, so the bucket gives one order per database, and a write that loses the race runs again;
 - **a step is a signed changeset plus the hash of the database after it.** Readers check the signature, and that the result matches the hash;
 - steps are merged in levels (SQLite's changegroup keeps each row's final state);
-- steps that a copy covers are deleted after the retention period: 7 years for the scope database, shorter for the rest;
+- an app database's steps that a copy covers are deleted after 90 days; the scope database's are kept forever;
 - a copy needs no signer. It's good if its hash matches the hash recorded in the step it covers.
 
 Who holds what:
@@ -108,7 +108,7 @@ This release is **R1**.
 
 ### Phase 2, switch: the scope database becomes the truth (done, 2026-11-06)
 
-One cut-over release (`dc8d0351`). Each network's recovery key signed one freeze, in a ceremony Andre ran: The One App's log froze at its step 833, the PTC App's at 615. The freeze is the first step of `global`'s scope database the recovery key signed, carrying the database there; who's who has been the scope database's signed steps since, checked by `may` at each. Storage signs each step in it and refuses those that aren't (`db::SIGNED`, `db::refused`, `db::copy_holds`). Deleting the steps a copy covers (`DELETE_COVERED_STEPS`) stays off until Andre decides.
+One cut-over release (`dc8d0351`). Each network's recovery key signed one freeze, in a ceremony Andre ran: The One App's log froze at its step 833, the PTC App's at 615. The freeze is the first step of `global`'s scope database the recovery key signed, carrying the database there; who's who has been the scope database's signed steps since, checked by `may` at each. Storage signs each step in it and refuses those that aren't (`db::SIGNED`, `db::refused`, `db::copy_holds`). An app database's steps that a copy covers are deleted once 90 days old (`db::KEEP_STEPS_FOR`); a scope database's never are (`db::keeps_every_step`).
 
 ### Phase 3, contract: delete, rename, move
 
@@ -143,7 +143,6 @@ Every row change is in a signed step, so "who did what" for seven years is the s
 - **The browser's download** grows with SQLite in WebAssembly. Measure it in phase 1. The fallback is the browser building changesets itself in JavaScript.
 - **The scope database's step signer:** a person's device, by default. Nodes sign app databases' steps. Under rule 3, their steps to the scope database are those the scope's permissions allow nodes, such as a node's status.
 - **The default roles:** the core's are `permissions::DEFAULTS`; a repo's (owner, collaborator) are G's; a viewer role only once something needs it. The network's admins keep adding people to any group (their `manager` role gives a group's `member`), but, unlike replay's `manages`, make no one its admin: decide before phase 2 who makes a new admin of a group whose admins have all gone.
-- **Retention:** 7 years for the scope database, by default. Andre decides app data's.
 - **Busy app databases** that collide often: measure before changing anything (batching, then a lease).
 
 ## Workstreams

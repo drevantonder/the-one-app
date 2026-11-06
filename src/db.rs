@@ -40,9 +40,9 @@
 //! gets no key to the next epoch, and its steps under an older one are passed over.
 //!
 //! What no reader needs goes from the bucket (`tidy`): copies before the newest that holds, once that has been there a
-//! day; and, once switched on (`DELETE_COVERED_STEPS`, off until Andre decides), the steps before it, kept `KEEP_STEPS_FOR` first,
-//! saying so first (`tidied`). Until then a missing step is the end, and a reader never looks for `tidied` or lists
-//! copies. A reader that doesn't find the next step where steps were deleted (`gap`), as when it read the start long
+//! day; and an app database's steps before it, once each has been there `KEEP_STEPS_FOR`, saying so first (`tidied`).
+//! A scope database's steps, who's who and the record of who did what, are never deleted (`keeps_every_step`). Until
+//! `tidied` is there a missing step is the end, and a reader never looks for it or lists copies. A reader that doesn't find the next step where steps were deleted (`gap`), as when it read the start long
 //! ago, or opened with no copy to start from, goes on from the newest copy above it that holds, or with none says so
 //! (`Gone`), rather than read what's left as the whole database, or write its next step where a deleted one was. The
 //! bucket decides that, never the newest hint, which any device can write, even one without the key: a reader starts
@@ -75,15 +75,17 @@ pub const COPY_EVERY: u64 = 100;
 /// How many times a write runs again after losing a race before it gives up.
 const TRIES: usize = 50;
 
-/// Whether `tidy` deletes the steps the newest copy covers. Off, also once phase 2 switches, until Andre decides
-/// whether steps are deleted at all: an older reader whose copy doesn't hold reads every step from the first, and
-/// would read what's left as the whole database.
-pub const DELETE_COVERED_STEPS: bool = false;
+/// How long an app database's steps are kept, by when the bucket wrote them, before `tidy` deletes those a copy covers:
+/// how far back its history goes. A device that reads less than `database::READS` reads every step from the first
+/// when its copy doesn't hold, and is told to update.
+pub const KEEP_STEPS_FOR: u64 = 90 * DAY;
 
-/// How long an app database's steps are kept before `tidy` may delete them, by when the bucket wrote them. Andre
-/// decides how long app data's history is kept (90 days is suggested); until he does, as long as the scope database's,
-/// the plan's default for that, 7 years. A scope database's steps (`database::steps`) are never deleted yet.
-pub const KEEP_STEPS_FOR: u64 = 7 * 365 * DAY;
+/// Whether every step of the database at `prefix` is kept forever: a scope database's (`database::steps`), who's who
+/// and the record of who did what. `tidy` deletes none of its steps, whoever asks.
+pub fn keeps_every_step(prefix: &str) -> bool {
+    let mut parts = prefix.rsplit('/');
+    parts.next() == Some(crate::database::steps::NAME) && parts.next() == Some(crate::members::APP)
+}
 
 /// How long the newest copy that holds has been in the bucket before `tidy` deletes the copies before it: a reader that
 /// read an older hint a moment ago still finds the copy it named.
@@ -523,7 +525,7 @@ impl Db {
     }
 
     /// When the step after the last it read isn't there: whether steps it hasn't read were deleted, as when it read
-    /// the start long ago, or opened with no copy to start from. Only `tidy` deletes them, once the switch is on, and it
+    /// the start long ago, or opened with no copy to start from. Only `tidy` deletes them, and it
     /// says so first (`tidied`), so until then a missing step is the end, whatever is in the bucket; after, the reader
     /// goes on from the newest copy above it that holds (true), or, with one there it can't use and none newer that
     /// holds, fails with `Gone`, rather than take what it has for the whole database, and write its next step where one
@@ -820,10 +822,10 @@ impl Db {
 
 /// Deletes from the bucket, at `now` (ms), what no reader of the database at `prefix` needs: copies before the newest
 /// that holds (`holding`: opens with `keys`, passing over `junk`, and `copy_holds`), once that one has been there
-/// `KEEP_OLDER_COPIES_FOR`, and with `delete_steps` (`DELETE_COVERED_STEPS`), the steps before it and their
-/// signatures, each once it's been there `KEEP_STEPS_FOR`, if it comes to the state hash signed at its step, and once it
-/// has said so (`tidied`). → how many objects went.
-pub async fn tidy(bucket: &impl Bucket, prefix: &str, keys: &Keys, junk: &BTreeSet<u64>, now: u64, delete_steps: bool) -> Result<usize> {
+/// `KEEP_OLDER_COPIES_FOR`, and but for a database that keeps every step (`keeps_every_step`), the steps before it and
+/// their signatures, each once it's been there `KEEP_STEPS_FOR`, if it comes to the state hash signed at its step, and
+/// once it has said so (`tidied`). → how many objects went.
+pub async fn tidy(bucket: &impl Bucket, prefix: &str, keys: &Keys, junk: &BTreeSet<u64>, now: u64) -> Result<usize> {
     let hinted = hinted_copy(bucket, prefix).await?;
     let Some(held) = holding(bucket, prefix, keys, junk, &mut BTreeSet::new(), 0, hinted, true).await?.0 else { return Ok(0) };
     // One whose signature is wrong: nothing older goes for it.
@@ -841,7 +843,7 @@ pub async fn tidy(bucket: &impl Bucket, prefix: &str, keys: &Keys, junk: &BTreeS
         bucket.delete(&format!("{}/copy/{n}", prefix)).await?;
         gone += 1;
     }
-    if !(delete_steps && held.check.hash == Some(true)) {
+    if keeps_every_step(prefix) || held.check.hash != Some(true) {
         return Ok(gone);
     }
     let old: Vec<String> = bucket.objects(prefix).await?.into_iter().map(|(n, written)| (format!("{prefix}/{n}"), written)).filter(|(full, written)| position(full).is_some_and(|(_, at)| at < copy) && written + KEEP_STEPS_FOR <= now).map(|(full, _)| full).collect();
@@ -1630,14 +1632,14 @@ mod tests {
             let count = |what: &str| bucket.objects.lock().unwrap().keys().filter(|n| n.contains(what)).count();
             assert_eq!(count("/copy/"), 2);
             let now = 10 * KEEP_STEPS_FOR;
-            // Until phase 2, only the copies before the newest go.
+            // Not yet: the steps it covers are kept `KEEP_STEPS_FOR`, though the copies before the newest go.
             let steps = count(".sig");
-            assert_eq!(tidy(&bucket, "p", &key, &BTreeSet::new(), now, false).await.unwrap(), 1);
+            assert_eq!(tidy(&bucket, "p", &key, &BTreeSet::new(), KEEP_STEPS_FOR - 1).await.unwrap(), 1);
             assert_eq!((count("/copy/"), count(".sig")), (1, steps));
             assert_eq!(notes(&Db::open(&bucket, "p", key.clone()).await.unwrap().older()), all);
-            // With the steps it covers, but the one at its position, which says what it comes to.
+            // Then the steps it covers go, but the one at its position, which says what it comes to.
             let (_, copy, _) = newest(&bucket.objects.lock().unwrap()["p/newest"]);
-            assert_eq!(tidy(&bucket, "p", &key, &BTreeSet::new(), now, true).await.unwrap(), 2 * (copy as usize - 1));
+            assert_eq!(tidy(&bucket, "p", &key, &BTreeSet::new(), now).await.unwrap(), 2 * (copy as usize - 1));
             assert!(bucket.objects.lock().unwrap().contains_key(&step_name("p", copy)) && !bucket.objects.lock().unwrap().contains_key(&step_name("p", 1)));
             let read = switched(&bucket, &key).await.unwrap();
             assert_eq!(notes(&read), all);
@@ -1651,7 +1653,7 @@ mod tests {
             let (_, newer, _) = newest(&bucket.objects.lock().unwrap()["p/newest"]);
             let wrong = crate::keys::seal(1, &key[&1], &copy_name("p", newer), &bucket.objects.lock().unwrap().get(&copy_name("p", copy)).map(|c| crate::keys::open(&key[&1], &copy_name("p", copy), c).unwrap()).unwrap());
             bucket.objects.lock().unwrap().insert(copy_name("p", newer), wrong);
-            assert_eq!(tidy(&bucket, "p", &key, &BTreeSet::new(), now, true).await.unwrap(), 0);
+            assert_eq!(tidy(&bucket, "p", &key, &BTreeSet::new(), now).await.unwrap(), 0);
             // A reader starts from it all the same, in phase 1, and counts it: a signature beside a step is anyone's to
             // write who has the key.
             let read = Db::open(&bucket, "p", key.clone()).await.unwrap().older();
@@ -1664,6 +1666,29 @@ mod tests {
             bucket.objects.lock().unwrap().insert(copy_name("p", copy), crate::keys::seal(1, &key[&1], &copy_name("p", copy), b"not the database"));
             let err = switched(&bucket, &key).await.err().expect("it can't read");
             assert_eq!(err.downcast_ref::<Gone>(), Some(&Gone { copy }), "{err:#}");
+        });
+    }
+
+    #[test]
+    fn tidying_never_deletes_a_scope_database_s_steps() {
+        rt().block_on(async {
+            let bucket = Memory::default();
+            let key = keys(&[(1, rand::random())]);
+            let prefix = crate::database::steps::prefix("global");
+            assert!(keeps_every_step(&prefix) && !keeps_every_step("global/notes/main") && !keeps_every_step("global/node/main"));
+            let mut a = Db::open(&bucket, &prefix, key.clone()).await.unwrap().older();
+            a.sign_as(ed25519_dalek::SigningKey::from_bytes(&rand::random()));
+            a.migrate(&bucket, &[SCHEMA.into()]).await.unwrap();
+            for n in 0..2 * COPY_EVERY + 5 {
+                note(&mut a, &bucket, &format!("note {n}")).await;
+            }
+            let of_steps = |n: &String| position(n).is_some_and(|(p, _)| p == prefix);
+            let steps = bucket.objects.lock().unwrap().keys().filter(|n| of_steps(n)).count();
+            // The copy before the newest goes, and nothing else.
+            assert_eq!(tidy(&bucket, &prefix, &key, &BTreeSet::new(), u64::MAX / 2).await.unwrap(), 1);
+            let objects = bucket.objects.lock().unwrap().clone();
+            assert_eq!(objects.keys().filter(|n| of_steps(n)).count(), steps);
+            assert!(objects.contains_key(&step_name(&prefix, 1)) && !objects.contains_key(&tidied_name(&prefix)));
         });
     }
 
@@ -1741,7 +1766,7 @@ mod tests {
             }
             assert_eq!(a.at(), 205);
             let mut all = notes(&a);
-            assert!(tidy(&bucket, "p", &key, &BTreeSet::new(), 10 * KEEP_STEPS_FOR, true).await.unwrap() > 0);
+            assert!(tidy(&bucket, "p", &key, &BTreeSet::new(), 10 * KEEP_STEPS_FOR).await.unwrap() > 0);
             assert!(!bucket.objects.lock().unwrap().contains_key(&step_name("p", 1)));
             // Its write goes after every step, from the newest copy, and every reader reads it.
             note(&mut away, &bucket, "back").await;
@@ -1779,7 +1804,7 @@ mod tests {
             for n in 0..2 * COPY_EVERY + 5 {
                 note(&mut a, &bucket, &format!("note {n}")).await;
             }
-            assert!(tidy(&bucket, "p", &key, &BTreeSet::new(), 10 * KEEP_STEPS_FOR, true).await.unwrap() > 0);
+            assert!(tidy(&bucket, "p", &key, &BTreeSet::new(), 10 * KEEP_STEPS_FOR).await.unwrap() > 0);
             let hint = |at: u64, copy: u64| bucket.objects.lock().unwrap().insert(newest_name("p"), serde_json::to_vec(&json!({ "at": at, "copy": copy })).unwrap());
             let mut all = notes(&a);
             // A hint past every step, naming no copy: a new reader reads it all, and its writes land after the last.
@@ -1808,7 +1833,7 @@ mod tests {
                 hint(a.at(), copy);
                 assert_eq!(notes(&switched(&bucket, &key).await.unwrap()), all, "a hint naming copy {copy}");
             }
-            assert!(tidy(&bucket, "p", &key, &BTreeSet::new(), 10 * KEEP_STEPS_FOR, true).await.unwrap() > 0);
+            assert!(tidy(&bucket, "p", &key, &BTreeSet::new(), 10 * KEEP_STEPS_FOR).await.unwrap() > 0);
             assert!(!bucket.objects.lock().unwrap().contains_key(&step_name("p", next - 1)));
             assert_eq!(bucket.objects.lock().unwrap().get(&copy_name("p", next)), None, "junk below the copy that holds goes with the copies before it");
             // The writer's hint keeps the copy it names: never lowered, even from a hint that says junk.

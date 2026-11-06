@@ -379,7 +379,7 @@ impl Node {
             }
             self.0.tidied.lock().unwrap().insert(prefix.clone(), now);
             let junk = self.0.junk.lock().unwrap().get(&prefix).cloned().unwrap_or_default();
-            match crate::db::tidy(&bucket, &prefix, &keys, &junk, now, crate::db::DELETE_COVERED_STEPS).await {
+            match crate::db::tidy(&bucket, &prefix, &keys, &junk, now).await {
                 Ok(0) => {}
                 Ok(n) => tracing::info!("{prefix}: deleted {n} objects no reader needs"),
                 Err(err) => tracing::debug!("{prefix}: tidying: {err:#}"),

@@ -12,8 +12,10 @@
 // asks for the positions it reads or writes next in one trip. Any endpoint of the network may read, list and create
 // (only if absent: `If-None-Match: *` is signed in); a `…/newest` is replaced only by its ETag (`If-Match`); only an
 // admin's endpoint removes. A step at position n of a database or log (`<prefix>/<n>`, n > 1) is created only once the
-// one before it is there, or the copy of the steps up to it (`<prefix>/copy/<n-1>`), and a copy only once its step
-// is: so no endpoint without the keys leaves a gap in the steps, nor plants one past their end. Others asked for in
+// one before it is there, or the copy of the steps up to it (`<prefix>/copy/<n-1>`), or the database's older steps
+// were deleted (`<prefix>/tidied`, src/db.rs), past which its readers look for a copy that holds; and a copy only once
+// its step is: so no endpoint without the keys leaves a gap in the steps its readers take for the end, nor plants one
+// past it. Others asked for in
 // the same trip are left out, and asked for again when they're next. `confirm` says whether each object is there with that ETag, `newest` what each
 // database's newest hint says (`<prefix>/newest`, never sealed), and `get` each object's bytes, sealed as they are, for
 // browsers, which can't read the bucket: all open nothing. It knows
@@ -111,8 +113,8 @@ async function present(env, bucket, names) {
   return out;
 }
 
-/// What must be in the bucket before `name` is created: the step before a step (or the copy up to it), and a copy's
-/// own step. None for anything else, or a database's first step.
+/// What must be in the bucket before `name` is created, any one of: the step before a step, the copy up to it, or its
+/// database's `tidied`; and a copy's own step. None for anything else, or a database's first step.
 function after(name) {
   const step = /^(.+)\/(\d{12})$/.exec(name);
   if (!step) return null;
@@ -121,7 +123,7 @@ function after(name) {
   const pad = (i) => String(i).padStart(12, "0");
   const copy = /^(.+)\/copy$/.exec(prefix);
   if (copy) return [`${copy[1]}/${n}`];
-  return at > 1 ? [`${prefix}/${pad(at - 1)}`, `${prefix}/copy/${pad(at - 1)}`] : null;
+  return at > 1 ? [`${prefix}/${pad(at - 1)}`, `${prefix}/copy/${pad(at - 1)}`, `${prefix}/tidied`] : null;
 }
 
 /// Of `names` to create, those whose turn it is (`after`): → them, in their order.

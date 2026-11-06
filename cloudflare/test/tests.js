@@ -135,11 +135,11 @@ async function anOlderBuildWritesNothing() {
   equal([await ask({ ...write, reads: READS }, env("compute")), await ask({ ...read, reads: READS }, env("client"))], [200, 200], "a build that reads it does both");
 }
 
-/// The URL signer creates a step only once the one before it is there (or the copy up to it), and a copy only once its
-/// step is: an endpoint without the keys can't leave a gap in a database's or log's steps, nor plant one past their
-/// end. A writer that asks for the positions after its own in the same trip, as an older one does, is given its own.
+/// The URL signer creates a step only once the one before it is there (or the copy up to it, or the database's older
+/// steps were deleted), and a copy only once its step is: an endpoint without the keys can't leave a gap in a
+/// database's or log's steps that its readers take for the end, nor plant one past it. A writer that asks for the positions after its own in the same trip, as an older one does, is given its own.
 async function stepsAreCreatedInTurn() {
-  const there = new Set(["s/a/node/log/000000000001", "s/a/node/log/000000000002", "s/a/db/copy/000000000005"]);
+  const there = new Set(["s/a/node/log/000000000001", "s/a/node/log/000000000002", "s/a/db/copy/000000000005", "s/a/old/tidied"]);
   const R2 = { head: async (name) => (there.has(name) ? {} : null) };
   const device = random(32);
   const env = { R2, BUCKET: JSON.stringify({ endpoint: "https://s3.test", bucket: "b", region: "auto", key_id: "k", secret: "s" }), RELAY: { allowed: async () => ({}) } };
@@ -155,6 +155,7 @@ async function stepsAreCreatedInTurn() {
   equal(await created(["s/a/node/log/000000000004"]), 409, "not one past the end");
   equal(await created(["s/a/node/scope/000000000001", "s/a/db/000000000006", "s/a/node/log/000000000003.sig", "s/a/blobs/x"]), ["s/a/blobs/x", "s/a/db/000000000006", "s/a/node/log/000000000003.sig", "s/a/node/scope/000000000001"], "a first step, one after its copy, a signature and anything else");
   equal(await created(["s/a/node/log/copy/000000000002", "s/a/node/log/copy/000000000003"]), ["s/a/node/log/copy/000000000002"], "a copy only after its step");
+  equal(await created(["s/a/old/000000000300"]), ["s/a/old/000000000300"], "and any step of a database whose older steps were deleted, as when it moves to another bucket");
 }
 
 /// A remote MCP client's device secret opens only with its current refresh token or a live access token; a refresh

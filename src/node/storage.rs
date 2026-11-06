@@ -154,7 +154,9 @@ impl Node {
 /// and log's steps only up to the first position with nothing there, with the signature beside each and the copies
 /// after them; everything else as it is. The URL signer creates a step only once the one before it is there (or the
 /// copy up to it), and a copy only once its step is, and no reader reads past a position with nothing: what an older
-/// writer left past one stays behind, and the next step is written there.
+/// writer left past one stays behind, and the next step is written there. A database whose older steps were deleted
+/// (`db::tidied_name`) moves whole, that first: its readers go on past a gap from a copy that holds, and the URL signer
+/// creates any step of it.
 fn to_move(names: &[String]) -> Vec<String> {
     // A database's prefix and position, of its copy (true), or of its step or the signature beside one: a copy's name is
     // a step's of a prefix ending in `copy`, never taken for one.
@@ -169,23 +171,27 @@ fn to_move(names: &[String]) -> Vec<String> {
         crate::db::position(name).map(|(prefix, n)| (prefix, n, false))
     }
     let steps: BTreeSet<(&str, u64)> = names.iter().filter_map(|n| of(n).filter(|(p, at, copy)| !copy && crate::db::step_name(p, *at) == *n)).map(|(p, at, _)| (p, at)).collect();
+    let tidied: BTreeSet<&str> = names.iter().filter_map(|n| n.strip_suffix("/tidied")).collect();
     let mut ends: BTreeMap<&str, u64> = BTreeMap::new();
-    for (prefix, _) in &steps {
+    for (prefix, _) in steps.iter().filter(|(p, _)| !tidied.contains(p)) {
         let end = ends.entry(prefix).or_insert(0);
         while steps.contains(&(prefix, *end + 1)) {
             *end += 1;
         }
     }
-    names.iter().filter(|name| of(name).is_none_or(|(prefix, at, _)| ends.get(prefix).is_some_and(|end| at <= *end))).cloned().collect()
+    let moving = names.iter().filter(|name| of(name).is_none_or(|(prefix, at, _)| tidied.contains(prefix) || ends.get(prefix).is_some_and(|end| at <= *end)));
+    let (first, rest): (Vec<&String>, Vec<&String>) = moving.partition(|n| n.ends_with("/tidied"));
+    first.into_iter().chain(rest).cloned().collect()
 }
 
 #[cfg(test)]
 mod tests {
     /// Moving copies what every reader reads, in an order the URL signer takes: no step or copy past a position with
-    /// nothing, which an older writer left, and which no reader reads past.
+    /// nothing, which an older writer left, and which no reader reads past; and all of a database whose older steps were
+    /// deleted, which its readers read on past from a copy.
     #[test]
     fn moving_copies_each_database_s_steps_up_to_a_gap() {
-        let (log, db) = ("global/one/log", "user:a/notes/notes");
+        let (log, db, old) = ("global/one/log", "user:a/notes/notes", "user:a/notes/old");
         let mut names: Vec<String> = [
             crate::db::step_name(log, 1),
             crate::db::step_name(log, 2),
@@ -198,6 +204,12 @@ mod tests {
             crate::db::sig_name(db, 3),
             crate::db::step_name(db, 3),
             crate::db::step_name(db, 1_000_000),
+            crate::db::tidied_name(old),
+            crate::db::step_name(old, 200),
+            crate::db::sig_name(old, 200),
+            crate::db::step_name(old, 201),
+            crate::db::copy_name(old, 200),
+            crate::db::newest_name(old),
             "user:a/blobs/abc".to_string(),
             "network".to_string(),
         ]
@@ -205,13 +217,14 @@ mod tests {
         names.sort();
         let moved = super::to_move(&names);
         let want = [crate::db::step_name(log, 1), crate::db::step_name(log, 2), crate::db::copy_name(log, 2), crate::db::newest_name(log), crate::db::step_name(db, 1), crate::db::sig_name(db, 1), "user:a/blobs/abc".to_string(), "network".to_string()];
-        assert_eq!(moved.iter().collect::<std::collections::BTreeSet<_>>(), want.iter().collect());
+        let whole = names.iter().filter(|n| n.starts_with(&format!("{old}/")));
+        assert_eq!(moved.iter().collect::<std::collections::BTreeSet<_>>(), want.iter().chain(whole).collect(), "and a database whose older steps were deleted, whole");
         // As the URL signer creates them (`cloudflare/signer/worker.js`'s `after`), one after another in that order.
         let mut there = std::collections::BTreeSet::new();
         for name in &moved {
             let due = match (name.rsplit_once("/copy/"), crate::db::position(name).filter(|(p, at)| crate::db::step_name(p, *at) == *name)) {
                 (Some((prefix, n)), _) => there.contains(&crate::db::step_name(prefix, n.parse().unwrap())),
-                (None, Some((prefix, at))) => at == 1 || there.contains(&crate::db::step_name(prefix, at - 1)) || there.contains(&crate::db::copy_name(prefix, at - 1)),
+                (None, Some((prefix, at))) => at == 1 || [crate::db::step_name(prefix, at - 1), crate::db::copy_name(prefix, at - 1), crate::db::tidied_name(prefix)].iter().any(|n| there.contains(n)),
                 (None, None) => true,
             };
             assert!(due, "the URL signer refuses {name} then");
