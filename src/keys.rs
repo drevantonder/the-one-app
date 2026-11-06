@@ -83,8 +83,6 @@ pub fn seal_secret(key: &SigningKey) -> [u8; 32] {
     twin(&key.to_bytes()).0
 }
 
-// Sealing.
-
 /// An app's key in a scope's epoch is random, kept sealed under the epoch's key (`keys::app_key_name`): nonce ‖
 /// AES-256-GCM(HKDF(epoch key, "one/app\0<app>"), nonce, app key). Erasing the app deletes it, which destroys the key
 /// and so the app's data.
@@ -95,7 +93,6 @@ pub fn seal_app_key(epoch_key: &[u8; 32], app: &str, app_key: &[u8; 32]) -> Vec<
     out
 }
 
-/// An app's key, from its sealed copy and its epoch's key.
 pub fn open_app_key(epoch_key: &[u8; 32], app: &str, sealed: &[u8]) -> Result<[u8; 32]> {
     ensure!(sealed.len() == 60, "not a sealed app key");
     let plain = cipher(&hkdf(epoch_key, format!("one/app\0{app}").as_bytes())).decrypt(sealed[..12].into(), &sealed[12..]).map_err(|_| anyhow!("that epoch's key doesn't open {app}'s"))?;
@@ -157,7 +154,6 @@ fn cipher(key: &[u8; 32]) -> Aes256Gcm {
     Aes256Gcm::new(key.into())
 }
 
-/// The public half of an X25519 secret.
 pub fn public_of(secret: &[u8; 32]) -> [u8; 32] {
     MontgomeryPoint::mul_base_clamped(*secret).0
 }
@@ -168,7 +164,6 @@ pub fn twin(seed: &[u8; 32]) -> ([u8; 32], [u8; 32]) {
     (secret, public_of(&secret))
 }
 
-/// The X25519 twin of an Ed25519 public key.
 pub fn twin_public(public: &[u8; 32]) -> Result<[u8; 32]> {
     Ok(CompressedEdwardsY(*public).decompress().context("not an Ed25519 key")?.to_montgomery().0)
 }
@@ -185,7 +180,6 @@ pub fn seal_to(to: &[u8; 32], plain: &[u8]) -> Result<Vec<u8>> {
     Ok(out)
 }
 
-/// Opens what was sealed to the public half of `secret`.
 pub fn open_sealed(secret: &[u8; 32], sealed: &[u8]) -> Result<Vec<u8>> {
     ensure!(sealed.len() >= 48, "not sealed");
     let share: [u8; 32] = sealed[..32].try_into()?;
@@ -207,7 +201,6 @@ pub fn seal_under(secret: &[u8], plain: &[u8]) -> Vec<u8> {
     out
 }
 
-/// Opens what was sealed under `secret`.
 pub fn open_under(secret: &[u8], sealed: &[u8]) -> Result<Vec<u8>> {
     ensure!(sealed.len() >= 28, "not sealed");
     cipher(&hkdf(secret, b"one/sealed-under")).decrypt(sealed[..12].into(), &sealed[12..]).map_err(|_| anyhow!("that secret doesn't open it"))
@@ -216,8 +209,6 @@ pub fn open_under(secret: &[u8], sealed: &[u8]) -> Result<Vec<u8>> {
 pub fn decode_key(text: &str) -> Result<[u8; 32]> {
     B64U.decode(text.as_bytes())?.try_into().map_err(|_| anyhow!("a key is 32 bytes"))
 }
-
-// Canonical JSON and signatures.
 
 /// JSON's bytes with every object's keys in order and no spaces: what's signed and hashed. Numbers are integers.
 pub fn canonical(v: &Value) -> Vec<u8> {
@@ -291,8 +282,6 @@ fn check_signed(domain: &str, request: &Value) -> Result<([u8; 32], Value, u64)>
     Ok((by, fields, at))
 }
 
-// Session endpoints.
-
 /// What a device signs to vouch for an endpoint of a session of its own.
 pub const ENDPOINT: &str = "one/endpoint";
 /// The longest a session's endpoint is vouched for, in milliseconds.
@@ -329,8 +318,6 @@ pub fn check_certificate(certificate: &str, now: u64) -> Result<Session> {
     ensure!(until <= at.min(now) + SESSION, "a session lasts a day at most");
     Ok(Session { by, endpoint, until })
 }
-
-// Epochs.
 
 /// The folder of a scope's epochs, one folder each (`epoch_name`).
 pub fn epochs_folder(scope: &str) -> String {
@@ -391,7 +378,6 @@ pub fn seal(epoch: u32, key: &[u8; 32], name: &str, bytes: &[u8]) -> Vec<u8> {
     out
 }
 
-/// The epoch a sealed object names.
 pub fn epoch_of(sealed: &[u8]) -> Result<u32> {
     ensure!(sealed.len() >= 4 + 12 + 16, "too short to be sealed");
     Ok(u32::from_be_bytes(sealed[..4].try_into().expect("4 bytes")))
@@ -403,8 +389,6 @@ pub fn open(key: &[u8; 32], name: &str, sealed: &[u8]) -> Result<Vec<u8>> {
     let nonce: [u8; 12] = sealed[4..16].try_into().expect("12 bytes");
     Aes256Gcm::new(key.into()).decrypt(&nonce.into(), Payload { msg: &sealed[16..], aad: name.as_bytes() }).map_err(|_| anyhow!("{name} didn't open with its key"))
 }
-
-// A call's keys.
 
 /// A database key a caller hands a node for one call.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -574,8 +558,6 @@ pub fn waited(status: u16, said: &Value) -> Waited {
     }
 }
 
-// Devices joining.
-
 /// The code a new device shows, which a device of its person types or scans to approve it: the first 8 base32
 /// characters of the sha256 of its key and seal key, so whoever passes on its request can swap neither.
 pub fn join_code(device: &Endpoint) -> String {
@@ -598,8 +580,6 @@ pub fn passkey_keys(prf: &[u8]) -> (SigningKey, [u8; 32]) {
     let seed = hkdf(prf, b"one/passkey-device/sign");
     (SigningKey::from_bytes(&seed), hkdf(prf, b"one/passkey-device/seal"))
 }
-
-// Encodings.
 
 pub fn unhex(s: &str) -> Result<[u8; 32]> {
     HEXLOWER.decode(s.as_bytes()).ok().and_then(|b| b.try_into().ok()).context("not a key: 64 hex characters")

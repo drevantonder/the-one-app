@@ -67,11 +67,9 @@ create table if not exists relations (
 create index if not exists relations_by_object on relations (object, relation);
 ";
 
-/// The network, as an object.
 pub const NETWORK: &str = "network:global";
 /// The network's role that must always have someone.
 const ADMIN: &str = "admin";
-/// For good, as an until.
 const FOREVER: i64 = i64::MAX;
 
 /// The core's types and roles, and the rules between them: run on a database `SCHEMA` made, after it. Each release

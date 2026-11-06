@@ -17,10 +17,8 @@ use super::{Failed, Trouble};
 const READ_AHEAD: u64 = 15;
 const CREATE_AHEAD: u64 = 3;
 
-/// Where the network's address is, as the device knows it now.
 pub type Address = Arc<dyn Fn() -> Result<String> + Send + Sync>;
 
-/// Asks the URL signer for a device.
 pub struct Signer {
     address: Address,
     key: ed25519_dalek::SigningKey,

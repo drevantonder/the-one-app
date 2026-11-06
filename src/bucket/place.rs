@@ -19,13 +19,11 @@ fn pooled(pool: &'static std::sync::OnceLock<ureq::Agent>, timeout: u64) -> ureq
     pool.get_or_init(|| ureq::Agent::config_builder().http_status_as_error(false).timeout_global(Some(Duration::from_secs(timeout))).max_idle_connections_per_host(16).build().into()).clone()
 }
 
-/// The pool for requests to a bucket's own place.
 fn requests() -> ureq::Agent {
     static POOL: std::sync::OnceLock<ureq::Agent> = std::sync::OnceLock::new();
     pooled(&POOL, 300)
 }
 
-/// The pool for requests to the URL signer.
 pub(super) fn signer_requests() -> ureq::Agent {
     static POOL: std::sync::OnceLock<ureq::Agent> = std::sync::OnceLock::new();
     pooled(&POOL, 30)
@@ -43,7 +41,6 @@ fn disk(dir: &std::path::Path, err: std::io::Error) -> anyhow::Error {
     Failed(Trouble::Disk, said).into()
 }
 
-/// Where a bucket is.
 #[derive(Clone, Debug)]
 pub enum Place {
     /// A folder on this device's disk, like a USB disk's.
@@ -90,7 +87,6 @@ impl std::fmt::Debug for S3 {
 const UNCONDITIONAL: &[(&str, &str)] = &[("backblazeb2.com", "Backblaze B2"), ("your-objectstorage.com", "Hetzner"), ("digitaloceanspaces.com", "DigitalOcean Spaces")];
 
 impl Place {
-    /// A place from its item's fields.
     pub fn from_fields(fields: &BTreeMap<String, String>) -> Result<Place> {
         let get = |k: &str| fields.get(k).map(|v| v.trim().to_string()).filter(|v| !v.is_empty());
         if let Some(path) = get("path") {
@@ -163,7 +159,6 @@ impl Place {
         Ok(self.get_object(name)?.map(|o| o.bytes))
     }
 
-    /// An object with its tag.
     pub fn get_object(&self, name: &str) -> Result<Option<Object>> {
         match self {
             Place::Folder(dir) => match std::fs::read(within(dir, name)?) {
@@ -450,7 +445,6 @@ impl S3 {
         }
     }
 
-    /// Says what a refused request means, in words, from S3's error code.
     fn failed(&self, status: u16, body: &[u8]) -> anyhow::Error {
         let text = String::from_utf8_lossy(body);
         let code = between(&text, "<Code>", "</Code>").unwrap_or_default();
@@ -464,7 +458,6 @@ impl S3 {
         Failed(trouble, said).into()
     }
 
-    /// Every object's name in the bucket.
     fn list_all(&self) -> Result<Vec<String>> {
         Ok(self.list_under("", false)?.into_iter().map(|(name, _)| name).collect())
     }

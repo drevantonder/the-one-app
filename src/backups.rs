@@ -38,8 +38,6 @@ const OBJECT: &str = "the one app 2026-11-01 backups: an object's key";
 const SNAPSHOT: &str = "the one app 2026-11-01 backups: a scope's snapshots' key";
 const KEY_ID: &str = "the one app 2026-11-01 backups: a key's id";
 
-// Keys.
-
 /// Opens an epoch's key sealed to the recovery key, with the recovery key's secret (its Ed25519 seed).
 pub fn unseal(recovery_secret: &[u8; 32], sealed: &[u8]) -> Result<[u8; 32]> {
     let key = crate::keys::open_sealed(&crate::keys::twin(recovery_secret).0, sealed).map_err(|_| anyhow!("that recovery key doesn't open this backup"))?;
@@ -58,8 +56,6 @@ fn zero() -> aes_gcm::Nonce<aes_gcm::aead::consts::U12> {
 pub fn key_id(key: &[u8; 32]) -> String {
     hex(&blake3::derive_key(KEY_ID, key))[..16].to_string()
 }
-
-// Objects and snapshots.
 
 /// An object's name: a keyed hash of its content, so the place sees neither, and the same content is the same object
 /// whichever device sends it.
@@ -110,10 +106,6 @@ fn open_snapshot(keys: &[[u8; 32]], bytes: &[u8]) -> Result<Option<(Snapshot, [u
     let plain = cipher(&blake3::derive_key(SNAPSHOT, key)).decrypt(bytes[16..28].into(), &bytes[28..]).map_err(|_| anyhow!("a snapshot didn't decrypt"))?;
     Ok(Some((serde_json::from_slice(&plain)?, *key)))
 }
-
-// Places.
-
-// Backing up.
 
 /// One scope's backup to one place, as a device does it.
 pub struct Job<'a> {
@@ -300,8 +292,6 @@ pub fn snapshots(place: &Place, network: &str, scope: &str) -> Result<Vec<(u64, 
     Ok(names.iter().rev().filter_map(|n| n.split_once('-').and_then(|(t, s)| Some((t.parse().ok()?, s.to_string())))).collect())
 }
 
-// Pruning.
-
 const HOUR: u64 = 3_600_000;
 const DAY: u64 = 24 * HOUR;
 /// How long an object no kept snapshot names may stay, in case a run that's sending it again hasn't written its
@@ -455,8 +445,6 @@ pub fn tools() -> Vec<serde_json::Value> {
         json!({ "name": "backups_check", "description": "Restore each place's newest backup into a throwaway copy now, as the weekly check does: who's who from its steps, every database to its newest step as the network has it, and every blob's hash. Says what came back, and what's wrong.", "inputSchema": { "type": "object", "properties": {} }, "annotations": hints(true, false) }),
     ]
 }
-
-// Restoring.
 
 /// The installs a place holds backups of, by their folders.
 pub fn networks(place: &Place) -> Result<Vec<String>> {

@@ -18,7 +18,6 @@ use super::{Bucket, Object, Place};
 
 #[derive(Clone, Debug)]
 pub struct Copied<B = Place> {
-    /// The network's bucket.
     pub place: B,
     /// This device's copy: a folder of the same names.
     here: Place,
@@ -34,7 +33,6 @@ impl<B: Bucket + Clone> Copied<B> {
         Copied::moving(place, dir, Arc::default())
     }
 
-    /// The bucket `place` and this device's copy in `dir`, following each move of the network's data in `moved`.
     pub fn moving(place: B, dir: PathBuf, moved: Arc<tokio::sync::RwLock<Option<B>>>) -> Copied<B> {
         Copied { place, here: Place::Folder(dir), reach: true, moved }
     }
@@ -97,7 +95,6 @@ impl<B: Bucket + Clone> Copied<B> {
         }
     }
 
-    /// The folders of scopes kept here.
     pub fn folders(&self) -> Result<Vec<String>> {
         self.here.list("")
     }

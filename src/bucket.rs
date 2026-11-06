@@ -14,7 +14,6 @@ pub struct Object {
 
 /// What everything that keeps a network's data reads and writes it through, here or on another runtime.
 pub trait Bucket {
-    /// The object with this name, if there is one.
     fn get(&self, name: &str) -> impl Future<Output = Result<Option<Object>>>;
     /// Writes an object only if none has its name: false if one does.
     fn create(&self, name: &str, bytes: &[u8]) -> impl Future<Output = Result<bool>>;
@@ -33,7 +32,6 @@ pub trait Bucket {
         let _ = folder;
         async { anyhow::bail!("this bucket isn't listed from here") }
     }
-    /// Deletes an object, if it's there.
     fn delete(&self, name: &str) -> impl Future<Output = Result<()>> {
         let _ = name;
         async { anyhow::bail!("nothing is deleted from this bucket from here") }
@@ -117,7 +115,6 @@ pub fn blob_name(scope: &str, hash: &str) -> String {
 
 pub const BLOBS: &str = "blobs";
 
-/// The scope a folder is.
 pub fn scope_of(folder: &str) -> String {
     folder.replacen('-', ":", 1)
 }
@@ -168,7 +165,6 @@ impl Bucket for Memory {
     fn now(&self) -> u64 {
         self.clock.load(std::sync::atomic::Ordering::Relaxed)
     }
-    /// Every object was written long ago.
     async fn objects(&self, folder: &str) -> Result<Vec<(String, u64)>> {
         let within = format!("{folder}/");
         Ok(self.objects.lock().unwrap().keys().filter_map(|n| n.strip_prefix(&within)).filter(|n| !n.contains('/')).map(|n| (n.to_string(), 0)).collect())

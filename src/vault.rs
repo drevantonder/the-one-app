@@ -22,7 +22,6 @@ pub const DATABASE: &str = "vault";
 /// Its schema: each item as one row, its fields' values with it.
 pub const SCHEMA: &str = "create table items (id text primary key, item text not null)";
 
-/// A scope's items, by id.
 pub type Items = BTreeMap<String, Item>;
 
 /// An item: title, fields, hosts and the apps switched on for it.
@@ -142,7 +141,6 @@ pub fn apply(items: &mut BTreeMap<String, Item>, data: &Value, user: &str, time:
     Ok(id)
 }
 
-/// A scope's items, as its database has them.
 pub fn load(conn: &Connection) -> Result<Items> {
     let mut out = Items::new();
     for row in crate::database::stored::query(conn, "select id, item from items", &[])? {
@@ -174,7 +172,6 @@ pub fn open_all(items: &mut Items, keys: &BTreeMap<u32, [u8; 32]>) {
     }
 }
 
-/// Seals an item's secrets, hosts and apps to the Vault key `n` (`public`).
 fn seal_item(id: &str, item: &mut Item, n: u32, public: &[u8; 32]) -> Result<()> {
     let values = item.fields.iter().filter(|(_, f)| f.secret).map(|(n, f)| (n.clone(), f.value.clone())).collect();
     let s = Secrets { id: id.to_string(), values, hosts: item.hosts.clone(), apps: item.apps.clone() };
