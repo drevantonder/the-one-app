@@ -240,7 +240,7 @@ fn copy_bucket(bucket: &Place, place: &Place, network: &str, scope: &str, epochs
 /// its entries, not a database, takes the hint's.
 #[allow(clippy::too_many_arguments)]
 fn newest_holding(bucket: &Place, scope: &str, prefix: &str, app: &str, database: &str, epochs: &crate::database::stored::Keys, hinted: u64, above: u64) -> Result<u64> {
-    if (app, database) == (crate::database::scopes::APP, crate::database::steps::KEY_NAME) {
+    if crate::database::scopes::CoreDb::of(app, database) == Some(crate::database::scopes::CoreDb::Log) {
         return Ok(hinted.max(above));
     }
     let mut keys = crate::database::stored::Keys::new();
@@ -540,7 +540,7 @@ fn who(place: &Place, network: &str, root: Option<crate::keys::Hash>, keys: &[[u
     for name in place.list(&format!("{network}/bucket/{}", crate::keys::app_keys_folder("global", crate::database::scopes::APP)))? {
         let Ok(n) = name.parse::<u32>() else { continue };
         let Some(sealed) = bucket(&crate::keys::app_key_name("global", crate::database::scopes::APP, n))? else { continue };
-        if let Some(key) = keys.iter().find_map(|k| crate::keys::open_database_key(k, crate::database::scopes::APP, steps::NAME, &sealed).ok()) {
+        if let Some(key) = keys.iter().find_map(|k| crate::keys::open_database_key(k, crate::database::scopes::APP, crate::database::scopes::CoreDb::Scope.name(), &sealed).ok()) {
             step_keys.insert(n, key);
         }
     }
@@ -596,13 +596,11 @@ pub async fn check_databases(place: &Place, network: &str, snapshot: &Snapshot, 
         let Some((app, db)) = database.split_once('/') else { continue };
         let prefix = crate::bucket::database_prefix(scope, app, db);
         // What a person calls it: the app, or of the node's own, its Vault, its history (entries) or its status rows.
-        let said = match (app, db) {
-            (crate::database::scopes::APP, "vault") => "Vault".to_string(),
-            (crate::database::scopes::APP, crate::database::steps::KEY_NAME) => "history".to_string(),
-            (crate::database::scopes::APP, crate::database::steps::NAME) => "who's who".to_string(),
-            (crate::database::scopes::APP, _) => "status".to_string(),
-            (app, crate::database::scopes::APP_DATABASE) => app.to_string(),
-            (app, db) => format!("{app} {db}"),
+        let said = match (crate::database::scopes::CoreDb::of(app, db), app, db) {
+            (Some(core), ..) => core.said().to_string(),
+            (None, crate::database::scopes::APP, db) => db.to_string(),
+            (None, app, crate::database::scopes::APP_DATABASE) => app.to_string(),
+            (None, app, db) => format!("{app} {db}"),
         };
         let mut keys = crate::database::stored::Keys::new();
         for (n, epoch) in epochs {
@@ -640,7 +638,7 @@ pub async fn check_databases(place: &Place, network: &str, snapshot: &Snapshot, 
         }
         // The node's log of a scope is entries, which `check` restored, and its scope database's steps who's who, which
         // it checked too (`steps_of`); the rest are SQLite.
-        if [crate::database::steps::KEY_NAME, crate::database::steps::NAME].map(|db| format!("{}/{db}", crate::database::scopes::APP)).contains(database) || keys.is_empty() {
+        if matches!(crate::database::scopes::CoreDb::of(app, db), Some(crate::database::scopes::CoreDb::Log | crate::database::scopes::CoreDb::Scope)) || keys.is_empty() {
             continue;
         }
         match crate::database::stored::Db::open(&copy, &prefix, keys).await {
@@ -683,7 +681,7 @@ mod tests {
         // Who's who: the freeze its recovery key signed.
         const ANDRE: &str = "0123456789abcdef";
         let node = crate::keys::app_key(&bucket, &epoch, "global", crate::database::scopes::APP, 1, true).await.unwrap().unwrap();
-        let step_keys = crate::database::stored::Keys::from([(1, crate::keys::database_key(&node, crate::database::scopes::APP, crate::database::steps::NAME))]);
+        let step_keys = crate::database::stored::Keys::from([(1, crate::keys::database_key(&node, crate::database::scopes::APP, crate::database::scopes::CoreDb::Scope.name()))]);
         let start = crate::database::content::first("Home", ANDRE, "Andre", &crate::keys::Endpoint::of(&device), "mac", &[crate::database::scopes::Kind::Client], recovery.verifying_key().as_bytes(), &crate::keys::epoch_hash(&epoch));
         let root = crate::keys::Hash::from_bytes(rand::random());
         let first = crate::database::steps::first_freeze(&recovery, root, &start, ANDRE, 0).unwrap();

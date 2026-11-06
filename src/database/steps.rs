@@ -41,7 +41,7 @@
 //! A step that doesn't count is passed over, its position taken, as a database's are: nothing it says happens. What a
 //! counted one changes is its kind's rule's (`rules`), applied to a fresh copy of the database (`scope::fresh`).
 //!
-//! Its steps are sealed with the key the frozen log had in each epoch (`KEY_NAME`, `seal`), under their own names. A
+//! Its steps are sealed with the key the frozen log had in each epoch (`CoreDb::key_name`, `seal`), under their own names. A
 //! reader opens them itself: a node passes them on sealed. The frozen logs (`<prefix>/../log/`) are history, kept in the
 //! bucket and read by nothing.
 //!
@@ -65,15 +65,12 @@ use crate::database::scopes::Scope;
 use crate::keys::{Hash, Key, hex, unhex};
 use crate::permissions;
 
-use super::scopes::{self, ScopeDb};
+use super::scopes::{self, CoreDb, ScopeDb};
 use super::READS;
 use super::scope::RULE;
 
-/// The node's database of a scope that its steps are: its `scope`.
-pub const NAME: &str = "scope";
-
 pub fn prefix(scope: &str) -> String {
-    crate::bucket::database_prefix(scope, scopes::APP, NAME)
+    CoreDb::Scope.prefix(scope)
 }
 
 /// What a step's signature is for.
@@ -372,10 +369,6 @@ impl Freeze {
         self.logs.get("global").copied().unwrap_or(0)
     }
 }
-
-/// The name the steps' key goes by in each epoch (`keys::database_key`), and is asked for and handed by: the frozen
-/// log's, whose key they took over.
-pub const KEY_NAME: &str = "log";
 
 /// Seals a step or copy of a scope's database as `name` under the newest epoch `keys` has.
 pub fn seal(keys: &crate::database::stored::Keys, name: &str, bytes: &[u8]) -> Result<Vec<u8>> {
@@ -882,7 +875,7 @@ pub async fn read_sealed_to(bucket: &impl crate::bucket::Bucket, reader: &mut Re
             }
         }
         if !wanted.is_empty() {
-            keys = crate::keys::database_keys(bucket, "global", scopes::APP, NAME, &epochs, false).await?;
+            keys = crate::keys::database_keys(bucket, "global", scopes::APP, CoreDb::Scope.name(), &epochs, false).await?;
         }
         let added = reader.add(&sealed, &keys, Some(&epochs), now, |_, _, _| Ok(()));
         fetched = sealed.welcome.is_some() && reader.truth.is_none();

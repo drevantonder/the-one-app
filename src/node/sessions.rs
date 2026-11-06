@@ -293,7 +293,7 @@ impl Node {
     /// nobody's key has this device pass over the real steps or write any it can't be read by (`opens_steps`).
     pub(super) async fn handed_step_keys(&self, scope: &Scope) -> Result<Keys> {
         let (now, newest) = (now_ms(), self.with(|i| Ok(i.r.db().epoch(scope)?))?);
-        let id = (scope.to_string(), scopes::APP.to_string(), crate::database::steps::KEY_NAME.to_string());
+        let id = (scope.to_string(), scopes::APP.to_string(), scopes::CoreDb::Log.name().to_string());
         let handed: Vec<(String, Keys)> = self.0.sessions.kept.lock().unwrap().values().filter(|s| s.live(now)).filter_map(|s| s.keys.get(&id).map(|k| (s.user.clone(), k.clone()))).collect();
         let mut offered: BTreeMap<u32, Vec<[u8; 32]>> = BTreeMap::new();
         self.with(|i| {
@@ -384,7 +384,7 @@ impl Node {
             let mut want = Vec::new();
             for s in m.scopes()? {
                 if s != Scope::Global && i.r.holds(&s) && m.may(&me.user, "use", &scopes::object(&s)) && m.epoch(&s)? > 0 && !self.opens(m, &s)? {
-                    want.push((s, scopes::APP, crate::database::steps::KEY_NAME));
+                    want.push((s, scopes::APP, scopes::CoreDb::Log.name()));
                 }
             }
             Ok(want)

@@ -76,7 +76,7 @@ pub const KEEP_STEPS_FOR: u64 = 90 * DAY;
 /// and the record of who did what. `tidy` deletes none of its steps, whoever asks.
 pub fn keeps_every_step(prefix: &str) -> bool {
     let mut parts = prefix.rsplit('/');
-    parts.next() == Some(crate::database::steps::NAME) && parts.next() == Some(crate::database::scopes::APP)
+    parts.next() == Some(crate::database::scopes::CoreDb::Scope.name()) && parts.next() == Some(crate::database::scopes::APP)
 }
 
 /// How long the newest copy that holds has been in the bucket before `tidy` deletes the copies before it: a reader that

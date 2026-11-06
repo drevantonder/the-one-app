@@ -59,12 +59,12 @@ impl Node {
         if !self.with(|i| self.opens(i.r.db(), scope))? {
             return self.handed_step_keys(scope).await;
         }
-        self.database_keys(scope, scopes::APP, crate::database::steps::NAME, false).await
+        self.database_keys(scope, scopes::APP, scopes::CoreDb::Scope.name(), false).await
     }
 
     /// The keys of `global`'s steps in each of its epochs given.
     pub(super) async fn step_keys_of(&self, epochs: &crate::database::stored::Keys) -> Result<crate::database::stored::Keys> {
-        crate::keys::database_keys(&self.bucket()?, "global", scopes::APP, crate::database::steps::NAME, epochs, false).await
+        crate::keys::database_keys(&self.bucket()?, "global", scopes::APP, scopes::CoreDb::Scope.name(), epochs, false).await
     }
 
     /// Tells the devices that hold `scope` it changed, so they read it now rather than at their next look: its steps,

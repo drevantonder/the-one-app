@@ -741,7 +741,7 @@ impl Node {
         // app's database's, and the Vault's there too if it says it uses items.
         let mut want: Vec<(Scope, &str, &str)> = scopes.iter().map(|s| (s.clone(), req.app.as_str(), scopes::APP_DATABASE)).collect();
         if self.0.apps.describe(&req.app).await?["vault"].is_object() {
-            want.extend(scopes.iter().map(|s| (s.clone(), scopes::APP, crate::vault::DATABASE)));
+            want.extend(scopes.iter().map(|s| (s.clone(), scopes::APP, scopes::CoreDb::Vault.name())));
         }
         let checking = Instant::now();
         self.needs(me, &want).await?;

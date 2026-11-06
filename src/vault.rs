@@ -16,9 +16,6 @@ use serde_json::{Value, json};
 
 use crate::database::scopes::{Scope, is_id};
 
-/// The node's database of a scope's items.
-pub const DATABASE: &str = "vault";
-
 /// Its schema: each item as one row, its fields' values with it.
 pub const SCHEMA: &str = "create table items (id text primary key, item text not null)";
 

@@ -15,7 +15,7 @@ pub mod tools;
 pub mod cli;
 pub(crate) mod routes;
 
-const VAULT: (&str, &str) = (scopes::APP, crate::vault::DATABASE);
+const VAULT: (&str, &str) = (scopes::APP, scopes::CoreDb::Vault.name());
 
 /// How an agent is told to ask the person for an item it may use: a request with no app is for agents, the person's own
 /// items, which they use with `vault_fetch`.

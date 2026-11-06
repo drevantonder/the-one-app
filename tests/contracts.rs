@@ -160,7 +160,7 @@ fn a_browser_reads_whos_who_as_a_node_puts_it_in_the_bucket() -> anyhow::Result<
     let listed = steps::sign(&mac, &Scope::Global, 2, ANDRE, 1, 0, content::device(&Endpoint::of(&browser), ANDRE, "browser", &[Kind::Client], None)).unwrap();
     let signed = steps::sign(&browser, &Scope::Global, 3, ANDRE, 1, 5, content::setting("greeting", Some("hi"))).unwrap();
     let sealed_app = one::keys::seal_app_key(&epoch, scopes::APP, &app);
-    let keys: one::database::stored::Keys = [(1, one::keys::database_key(&app, one::database::scopes::APP, one::database::steps::NAME))].into();
+    let keys: one::database::stored::Keys = [(1, one::keys::database_key(&app, one::database::scopes::APP, one::database::scopes::CoreDb::Scope.name()))].into();
     let prefix = steps::prefix("global");
     let sealed = |at: u64, step: &Step, copy: Option<&[u8]>| {
         let name = one::database::stored::step_name(&prefix, at);
@@ -169,7 +169,7 @@ fn a_browser_reads_whos_who_as_a_node_puts_it_in_the_bucket() -> anyhow::Result<
     let (s1, s2, s3) = (sealed(1, &first.step, first.copy.as_deref()), sealed(2, &listed, None), sealed(3, &signed, None));
     let junk = json!({ "at": 4, "sealed": B64U.encode(&one::database::steps::seal(&[(1, rand::random())].into(), &one::database::stored::step_name(&prefix, 4), b"not a step").unwrap()) });
     let epochs = std::collections::BTreeMap::from([(1, epoch)]);
-    let step_keys: one::database::stored::Keys = [(1, one::keys::open_database_key(&epoch, scopes::APP, steps::NAME, &sealed_app)?)].into();
+    let step_keys: one::database::stored::Keys = [(1, one::keys::open_database_key(&epoch, scopes::APP, scopes::CoreDb::Scope.name(), &sealed_app)?)].into();
     let add = |r: &mut Reader, given: &serde_json::Value| r.add(&steps::Sealed::from_json(given), &step_keys, Some(&epochs), 0, |_, _, _| Ok(()));
     let frozen = |r: &Reader| r.truth().is_some();
     // A freeze an admin's device signed is nothing.

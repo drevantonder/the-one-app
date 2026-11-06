@@ -105,12 +105,9 @@ pub fn database_key(app_key: &[u8; 32], app: &str, database: &str) -> [u8; 32] {
     hkdf(app_key, format!("one/database\0{}", key_name(app, database)).as_bytes())
 }
 
-/// The name a database's key goes by: its own, but a scope's database (`steps::NAME`) seals its steps with the key
-/// its frozen log had (`steps::KEY_NAME`), which is how every bucket's steps are sealed, and how it's asked for and
-/// handed: renamed, its key would be another, which opens none of them.
+/// The name a database's key goes by: its own, but the core's (`CoreDb::key_name`).
 fn key_name<'a>(app: &str, database: &'a str) -> &'a str {
-    use crate::database::steps;
-    if app == crate::database::scopes::APP && database == steps::NAME { steps::KEY_NAME } else { database }
+    crate::database::scopes::CoreDb::of(app, database).map_or(database, |c| c.key_name())
 }
 
 /// A database's key in an epoch, from its app's key `sealed` under the epoch's key (`app_key_name`).
@@ -568,8 +565,8 @@ impl std::fmt::Display for Route {
 /// may read already: any of them may add any app, and read its code. Another scope's are its own people's files, and
 /// never go with a request.
 pub fn may_hand(route: &Route, need: &Need) -> bool {
-    use crate::{bucket::BLOBS, database::steps::KEY_NAME as LOG, protocol::path, vault::DATABASE as VAULT};
-    let node = |of: &[&str]| need.app == crate::database::scopes::APP && of.contains(&need.database.as_str());
+    use crate::{database::scopes::CoreDb::{self, Blobs as BLOBS, Log as LOG, Vault as VAULT}, protocol::path};
+    let node = |of: &[CoreDb]| CoreDb::of(&need.app, &need.database).is_some_and(|c| of.contains(&c));
     let apps = need.app != crate::database::scopes::APP && need.database == crate::database::scopes::APP_DATABASE;
     let code = need.scope == "global" && node(&[BLOBS]);
     match (route.app(), route) {
@@ -588,7 +585,8 @@ pub fn may_hand(route: &Route, need: &Need) -> bool {
 /// reader replays it from the first (`steps::Truth::read`), whatever copies there are. Nodes ask for no older, and
 /// clients hand no older.
 pub fn oldest_needed(database: &str, hint: Option<&[u8]>, newest: u32) -> u32 {
-    if database == crate::bucket::BLOBS || database == crate::database::steps::KEY_NAME {
+    use crate::database::scopes::CoreDb;
+    if [CoreDb::Blobs, CoreDb::Log].map(CoreDb::name).contains(&database) {
         return 1;
     }
     let newest = newest.max(1);

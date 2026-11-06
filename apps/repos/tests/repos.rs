@@ -75,7 +75,7 @@ async fn only_a_repos_owner_and_collaborators_push_to_it_and_only_its_owners_del
     let b64 = |v: &Value| data_encoding::BASE64URL_NOPAD.decode(v.as_str().unwrap().as_bytes()).unwrap();
     let epochs = a.sealed_keys(&me, &global, Some(&one::keys::hex(&e.key)), None).await.unwrap();
     let mut keys = Vec::new();
-    for (app, database) in [("repos", "main"), (one::database::scopes::APP, one::vault::DATABASE)] {
+    for (app, database) in [("repos", "main"), (one::database::scopes::APP, one::database::scopes::CoreDb::Vault.name())] {
         let sealed = a.sealed_keys(&me, &global, None, Some(app)).await.unwrap();
         for (n, epoch) in epochs["sealed"].as_object().unwrap() {
             let epoch: [u8; 32] = one::keys::open_sealed(&one::keys::seal_secret(&sams), &b64(epoch)).unwrap().try_into().unwrap();
@@ -275,7 +275,7 @@ async fn a_groups_github_organization_shows_only_to_its_members_and_a_persons_gi
     let b64 = |v: &Value| data_encoding::BASE64URL_NOPAD.decode(v.as_str().unwrap().as_bytes()).unwrap();
     let epochs = a.sealed_keys(&me, &global, Some(&one::keys::hex(&e.key)), None).await.unwrap();
     let mut keys = Vec::new();
-    for (app, database) in [("repos", "main"), (one::database::scopes::APP, one::vault::DATABASE)] {
+    for (app, database) in [("repos", "main"), (one::database::scopes::APP, one::database::scopes::CoreDb::Vault.name())] {
         let sealed = a.sealed_keys(&me, &global, None, Some(app)).await.unwrap();
         for (n, epoch) in epochs["sealed"].as_object().unwrap() {
             let epoch: [u8; 32] = one::keys::open_sealed(&one::keys::seal_secret(&sams), &b64(epoch)).unwrap().try_into().unwrap();

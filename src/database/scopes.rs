@@ -758,8 +758,65 @@ impl ScopeDb {
     }
 }
 
-/// The node's own steps and databases. Apps never see them.
+/// The core's own steps and databases (`CoreDb`), beside apps' in each scope's folder, where no app can be called it.
+/// Apps never see them. The core's keys are derived from it too (`keys::app_key`), so it stays.
 pub const APP: &str = "node";
+
+/// The core's own databases of a scope, under `APP`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CoreDb {
+    /// Its scope database, whose steps are who's who, permissions and keys (`steps`).
+    Scope,
+    /// Its frozen log: history, kept for backups and read by nothing else. The scope database's steps are sealed with
+    /// its key, which they took over.
+    Log,
+    /// Its Vault's items (`vault`).
+    Vault,
+    /// The blobs its steps name (`bucket::blob_name`).
+    Blobs,
+}
+
+impl CoreDb {
+    const ALL: [CoreDb; 4] = [CoreDb::Scope, CoreDb::Log, CoreDb::Vault, CoreDb::Blobs];
+
+    pub const fn name(self) -> &'static str {
+        match self {
+            CoreDb::Scope => "scope",
+            CoreDb::Log => "log",
+            CoreDb::Vault => "vault",
+            CoreDb::Blobs => "blobs",
+        }
+    }
+
+    /// Which it is, if `app`'s `database` is one.
+    pub fn of(app: &str, database: &str) -> Option<CoreDb> {
+        CoreDb::ALL.into_iter().find(|c| app == APP && database == c.name())
+    }
+
+    /// Where it is in `scope`'s folder (`bucket::database_prefix`).
+    pub fn prefix(self, scope: &str) -> String {
+        crate::bucket::database_prefix(scope, APP, self.name())
+    }
+
+    /// The name its key goes by in each epoch (`keys::database_key`), and is asked for and handed by: the scope
+    /// database's steps are sealed with the frozen log's, as every bucket's are, so its own would open none of them.
+    pub fn key_name(self) -> &'static str {
+        match self {
+            CoreDb::Scope => CoreDb::Log.name(),
+            c => c.name(),
+        }
+    }
+
+    /// What a person calls it.
+    pub fn said(self) -> &'static str {
+        match self {
+            CoreDb::Scope => "who's who",
+            CoreDb::Log => "history",
+            CoreDb::Vault => "Vault",
+            CoreDb::Blobs => "files",
+        }
+    }
+}
 /// What an app's own database is called: SQLite's name for a connection's first.
 pub const APP_DATABASE: &str = "main";
 /// The setting that names the Cloudflare node's endpoint (its key, hex).
