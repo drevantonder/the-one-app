@@ -53,10 +53,10 @@ export default {
     // An app's key opens with its scope's key, under its own name only; a database's derives from its app's.
     const scope = random(32);
     const app = random(32);
-    const sealedApp = await sealAppKey(scope, "board", app);
-    equal((await openAppKey(scope, "board", sealedApp)).join(), app.join(), "opening an app's key");
-    await fails(() => openAppKey(scope, "boards", sealedApp), "opening it as another app's");
-    await fails(() => openAppKey(random(32), "board", sealedApp), "opening it with another scope's key");
+    const sealedApp = await sealAppKey(scope, "tally", app);
+    equal((await openAppKey(scope, "tally", sealedApp)).join(), app.join(), "opening an app's key");
+    await fails(() => openAppKey(scope, "tallys", sealedApp), "opening it as another app's");
+    await fails(() => openAppKey(random(32), "tally", sealedApp), "opening it with another scope's key");
     if ((await databaseKey(app, "main")).join() === app.join()) throw new Error("a database has its app's key");
 
     // Sealing to a key pair opens only with it.

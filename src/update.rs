@@ -494,12 +494,14 @@ pub fn run_quiet(cmd: &mut Command) -> Result<()> {
 
 /// Deletes the built-in apps whose folder is gone from `src`, renamed or removed, where the install still has them:
 /// they'd stay as apps no release ships. `built_in` is the bundle the running release ships under a name, which says
-/// it whatever the update sends; `deploys` 0 is one it offers but the install never added. They wait in Recently
-/// Deleted, where an admin could restore one. Gives each renamed one's new name, with where the old one was installed.
+/// it whatever the update sends; `deploys` 0 is one it offers but the install never added. Only one still running the
+/// release's own code goes: one an admin deployed their own code to (from its own repo, say) is theirs now, and stays.
+/// They wait in Recently Deleted, where an admin could restore one. Gives each renamed one's new name, with where the old one was installed.
 fn retire_gone(src: &Path, renamed: &[(String, String)]) -> Result<Vec<(String, Vec<String>)>> {
     let mut moved = Vec::new();
     for app in get("/v1/apps")?.as_array().into_iter().flatten() {
-        let had = app["built_in"].is_string() && app["deploys"].as_u64().is_some_and(|n| n > 0);
+        let ours = app["bundle"].is_null() || app["bundle"] == app["built_in"];
+        let had = ours && app["built_in"].is_string() && app["deploys"].as_u64().is_some_and(|n| n > 0);
         let Some(name) = app["name"].as_str().filter(|_| had) else { continue };
         if app["deleted"].is_null() && !src.join("apps").join(name).join("app.js").is_file() {
             post("/v1/retire", json!({ "app": name, "how": "deleted" }))?;

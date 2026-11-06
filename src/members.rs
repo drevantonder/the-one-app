@@ -1809,7 +1809,7 @@ mod tests {
         add(&mut entries, &mut bobs, BOB, accept("c000000000000003"));
         // Apps of the group's, the admins' and Bob's, and a Cloudflare node, which change nothing owed.
         add(&mut entries, &mut mac, ANDRE, node("app", json!({ "name": "notes", "owner": "group:c000000000000003" })));
-        add(&mut entries, &mut mac, ANDRE, node("app", json!({ "name": "board", "owner": "admins" })));
+        add(&mut entries, &mut mac, ANDRE, node("app", json!({ "name": "tally", "owner": "admins" })));
         add(&mut entries, &mut bobs, BOB, node("app", json!({ "name": "bobs", "owner": format!("user:{BOB}") })));
         add(&mut entries, &mut mac, ANDRE, setting("serverless", Some(&hex(&Dev::new(14).id()))));
         let (mut laptop, tablet) = (Dev::new(5), Dev::new(6));

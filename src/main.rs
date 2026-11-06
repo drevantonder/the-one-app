@@ -144,7 +144,7 @@ fn every_command() -> String {
                                        switch an app's schedule on (it then runs as you) or off
   {CLI} <app>                          an app's tools
   {CLI} <app> <tool> [words] [--input value]
-                                       run a tool, e.g. {CLI} board post ideas \"hi there\"; --help says what
+                                       run a tool, e.g. {CLI} repos list; --help says what
                                        it takes. Words fill its main inputs in order (--help shows which), lists
                                        repeat a flag, required inputs not given are read as JSON from stdin
                                        (a last word - reads it anyway), --file
@@ -195,7 +195,7 @@ fn help() -> String {
   {CLI} <app>                 an app's tools and its guide
   {CLI} <app> <tool> --help     what a tool takes
   {CLI} <app> <tool> [words] [--input value]
-                             run one, like {CLI} board post ideas \"hi there\"
+                             run one, like {CLI} repos list
   {CLI} run <file>            a script that calls several tools; {CLI} search gives each call
   {CLI} skills                the guides agents load
   {CLI} status                who you are, and your devices

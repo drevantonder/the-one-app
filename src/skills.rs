@@ -26,7 +26,6 @@ pub fn rules() -> String {
         format!("Anything that sends or can't be undone takes `confirm: true` (`--confirm` in the terminal), given only once the person agreed to that action. Without it, it refuses: ask them rather than guess."),
         "Never ask for a password, key or token in the chat, and never paste one. `vault_request` gives the person a link to a sheet on their own device, where they pick or type it; `vault_fetch` makes a web request with an item they let agents use, and you never see the secret. If someone pastes one anyway, keep it with `vault_set` and don't repeat it.".to_string(),
         "If something says you aren't allowed, stop and tell the person. Nothing widens access by itself.".to_string(),
-        "Post to the board only when the person asked, or when you changed something; never a decision they didn't make.".to_string(),
     ]
     .iter()
     .map(|r| format!("- {r}"))
@@ -37,7 +36,7 @@ pub fn rules() -> String {
 /// How to find what's possible, from the command line.
 pub fn finding() -> String {
     format!(
-        "- Each area has a skill of its own: load the one for what you're doing. `{CLI} skills` lists them and `{CLI} skills <name>` prints one.\n- `{CLI} search \"<words>\"` finds the tools for a task in every app, each with how to call it and its app's guide. `{CLI} <app>` lists an app's tools and its guide; `{CLI} <app> <tool> --help` says what one takes.\n- Every MCP tool is also a command: `board_post` is `{CLI} board post`.\n- `{CLI} run <file>` runs a short script that calls several tools and prints what it returns: `{CLI} search` gives each call as the script writes it.\n- `{CLI} status` says who you are, and the people and devices in {YOURS}. You act for the person it marks (you): write their name, never this computer's login.\n- Before saying you can't, search: an app the person hasn't added yet may do it, and search offers it.\n- When the person asks you to make an app, tracker or tool, make it here, where it's on all their devices: the `{}-build` skill says how.",
+        "- Each area has a skill of its own: load the one for what you're doing. `{CLI} skills` lists them and `{CLI} skills <name>` prints one.\n- `{CLI} search \"<words>\"` finds the tools for a task in every app, each with how to call it and its app's guide. `{CLI} <app>` lists an app's tools and its guide; `{CLI} <app> <tool> --help` says what one takes.\n- Every MCP tool is also a command: `repos_list` is `{CLI} repos list`.\n- `{CLI} run <file>` runs a short script that calls several tools and prints what it returns: `{CLI} search` gives each call as the script writes it.\n- `{CLI} status` says who you are, and the people and devices in {YOURS}. You act for the person it marks (you): write their name, never this computer's login.\n- Before saying you can't, search: an app the person hasn't added yet may do it, and search offers it.\n- When the person asks you to make an app, tracker or tool, make it here, where it's on all their devices: the `{}-build` skill says how.",
         server_name()
     )
 }
@@ -126,7 +125,7 @@ impl Skill {
 /// The root skill's description: short, so a harness can keep it loaded.
 fn root_description() -> String {
     format!(
-        "Use whenever the person pastes or mentions a key, token or password (keep it in the Vault, never use it raw), wants a message sent, mentions {NAME} or its apps, asks about their devices (set up a laptop or phone), their agents' instructions and skills or their AI plans, or asks you to connect to it; read it before any of its tools. {NAME} is their email, messages, calendar, files, board and more, as apps their agents use."
+        "Use whenever the person pastes or mentions a key, token or password (keep it in the Vault, never use it raw), wants a message sent, mentions {NAME} or its apps, asks about their devices (set up a laptop or phone), their agents' instructions and skills or their AI plans, or asks you to connect to it; read it before any of its tools. {NAME} is their email, messages, calendar, files and more, as apps their agents use."
     )
 }
 
@@ -222,7 +221,7 @@ pub fn app_skill(app: &Value) -> Skill {
         guide = out;
     }
     let mut body = format!(
-        "# {title}\n\n{}\n\n## Tools\n\nEach is the command `{CLI} {name} <tool>` (`--help` says more). Over MCP, it is the tool `{name}_<tool>`, with the same inputs. Never ask for a password, key or token in the chat: `{CLI} vault request` (vault_request) gives the person a link. What sends or can't be undone takes `confirm: true` (`--confirm`), given only once the person agreed to that very action. Post to the board only when the person asked, or when you changed something.\n",
+        "# {title}\n\n{}\n\n## Tools\n\nEach is the command `{CLI} {name} <tool>` (`--help` says more). Over MCP, it is the tool `{name}_<tool>`, with the same inputs. Never ask for a password, key or token in the chat: `{CLI} vault request` (vault_request) gives the person a link. What sends or can't be undone takes `confirm: true` (`--confirm`), given only once the person agreed to that very action.\n",
         guide,
     );
     for tool in tools {
@@ -236,7 +235,7 @@ pub fn app_skill(app: &Value) -> Skill {
     Skill { name: skill_name(name), description, body, files: vec![] }
 }
 
-/// A tool as a command: `one board post [<topic>] <text>`, its words as --help shows them, then its other
+/// A tool as a command: `one <app> <tool> [<topic>] <text>`, its words as --help shows them, then its other
 /// required inputs as flags.
 fn command(app: &str, tool: &Value) -> String {
     let required: Vec<&str> = tool["input"]["required"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();

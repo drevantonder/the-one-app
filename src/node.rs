@@ -429,7 +429,7 @@ pub struct Inner {
     pruned: Mutex<HashMap<String, u64>>,
     /// When this device last copied each (place, scope)'s databases from the bucket.
     backup_looked: Mutex<HashMap<(String, String), u64>>,
-    /// Each database of each scope, by its app and name (`board/main`), as this device last read it.
+    /// Each database of each scope, by its app and name (`tally/main`), as this device last read it.
     dbs: Mutex<HashMap<(Scope, String), Arc<tokio::sync::Mutex<Db>>>>,
     /// The databases another device said it wrote whose step isn't in this device's copy yet, which a read catches up
     /// from the bucket.

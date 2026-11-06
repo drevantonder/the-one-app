@@ -34,8 +34,17 @@ async fn eventually(what: &str, mut check: impl AsyncFnMut() -> bool) {
     panic!("timed out waiting for {what}");
 }
 
-fn board(tool: &str, input: Value) -> CallRequest {
-    CallRequest { app: "board".into(), tool: tool.into(), input, ..Default::default() }
+fn notes(tool: &str, input: Value) -> CallRequest {
+    CallRequest { app: "notes".into(), tool: tool.into(), input, ..Default::default() }
+}
+
+/// Deploys the tests' own app, `tests/notes/app.js` (lines of text in `global`'s database), for everyone, as an admin
+/// would add an app, and waits for this device to run it.
+async fn add_notes(a: &Node) {
+    let me = one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None, token: None };
+    let bundle = a.put_blob(&one::bundle::pack(&[("app.js".to_string(), include_bytes!("notes/app.js").to_vec())]).unwrap()).unwrap();
+    a.deploy_making(&me, "notes", &bundle, Some("admins"), true).await.unwrap();
+    a.install(&me, "notes", &one::entry::Scope::Global, true).await.unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -43,10 +52,11 @@ async fn backups_go_to_a_folder_encrypted_and_restore_with_the_recovery_key_alon
     let a = start("backup-a").await;
     let b = start("backup-b").await;
     let recovery = a.create("Home", "Andre").await.unwrap();
+    add_notes(&a).await;
     let _relay = relay(&a).await;
     b.join(&a.pair().unwrap()).await.unwrap();
     let me = one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None, token: None };
-    eventually("the board to run", async || a.call(board("post", json!({ "text": "before the backup" }))).await.is_ok()).await;
+    eventually("notes to run", async || a.call(notes("post", json!({ "text": "before the backup" }))).await.is_ok()).await;
     a.set_item(&me, &one::entry::Scope::User(me.user.clone()), json!({ "title": "Example key", "fields": { "token": { "value": "s3cret-value", "secret": true } }, "hosts": ["api.example.com"] })).await.unwrap();
 
     // A place that can't be written isn't added.
@@ -78,25 +88,25 @@ async fn backups_go_to_a_folder_encrypted_and_restore_with_the_recovery_key_alon
     assert_eq!(checked["problems"], json!([]), "{checked}");
     assert_eq!(checked["install"], "Home");
     assert_eq!(checked["people"], json!(["Andre"]));
-    assert!(checked["apps"].as_array().unwrap().contains(&json!("board")), "{checked}");
+    assert!(checked["apps"].as_array().unwrap().contains(&json!("notes")), "{checked}");
     let mine = format!("user:{}", me.user);
     let items = backed_up(&dir, &install, &one::entry::unhex(&recovery).unwrap(), &mine, "node", "vault", "select item from items").await;
     assert!(items.iter().any(|i| i.contains("\"Example key\"")), "the Vault's item came back: {items:?}");
     let restored = one::backups::restore(&place, &install, "global", &keys["global"]).unwrap();
     assert!(restored.entries.iter().any(|e| e.content.kind == "genesis"));
     assert_eq!(backed_up_posts(&dir, &install, &one::entry::unhex(&recovery).unwrap()).await, ["before the backup"]);
-    let steps_then = restored.snapshot.databases["board/main"].0;
+    let steps_then = restored.snapshot.databases["notes/main"].0;
     let files: Vec<Vec<u8>> = walk(&dir).iter().map(|f| std::fs::read(f).unwrap()).collect();
     assert!(!files.iter().any(|f| f.windows(12).any(|w| w == b"s3cret-value") || f.windows(17).any(|w| w == b"before the backup")), "nothing is readable on the disk");
 
     // A change is backed up on the next run; only what's new is sent.
-    a.call(board("post", json!({ "text": "after the backup" }))).await.unwrap();
+    a.call(notes("post", json!({ "text": "after the backup" }))).await.unwrap();
     a.back_up_now();
     // A run is done once it says when it last backed up, not once its copy of the bucket has the post: it copies the
     // bucket before writing the snapshot that names the copy, and backs up every scope.
     eventually("the second backup", async || a.backups().unwrap()["places"][0]["last"]["time"] != first).await;
     let again = one::backups::restore(&place, &install, "global", &keys["global"]).unwrap();
-    assert!(again.snapshot.databases["board/main"].0 > steps_then);
+    assert!(again.snapshot.databases["notes/main"].0 > steps_then);
     assert_eq!(backed_up_posts(&dir, &install, &one::entry::unhex(&recovery).unwrap()).await, ["before the backup", "after the backup"]);
     let checked = a.check_backups().await.unwrap();
     assert_eq!(checked[0]["place"], "T7 Shield", "{checked}");
@@ -111,7 +121,7 @@ async fn backups_go_to_a_folder_encrypted_and_restore_with_the_recovery_key_alon
     std::fs::rename(&copy, dir.join("bucket-aside")).unwrap();
     std::fs::write(&copy, b"not a folder").unwrap();
     // Its failure shows once it's done: nothing writes to the disk until the next run.
-    a.call(board("post", json!({ "text": "broken" }))).await.unwrap();
+    a.call(notes("post", json!({ "text": "broken" }))).await.unwrap();
     a.back_up_now();
     eventually("a failed run", async || a.backups().unwrap()["places"][0]["problem"]["text"].as_str().is_some_and(|t| t.contains("couldn't be used") || t.contains("won't let"))).await;
     let problem = a.state()["backups"].clone();
@@ -119,7 +129,7 @@ async fn backups_go_to_a_folder_encrypted_and_restore_with_the_recovery_key_alon
     assert!(problem["text"].as_str().unwrap().starts_with("T7 Shield "), "{problem}");
     std::fs::remove_file(&copy).unwrap();
     std::fs::rename(dir.join("bucket-aside"), &copy).unwrap();
-    a.call(board("post", json!({ "text": "fixed" }))).await.unwrap();
+    a.call(notes("post", json!({ "text": "fixed" }))).await.unwrap();
     a.back_up_now();
     eventually("the badge to clear", async || a.state()["backups"].is_null()).await;
 
@@ -152,40 +162,41 @@ async fn a_node_signs_in_its_steps_only_once_it_knows_the_log_is_frozen() {
     one::database::switch::FORCEABLE.store(true, std::sync::atomic::Ordering::Relaxed);
     let a = start("frozen-a").await;
     let recovery = a.create("Home", "Andre").await.unwrap();
+    add_notes(&a).await;
     let recovery = one::entry::unhex(&recovery).unwrap();
     let _relay = relay(&a).await;
     let me = one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None, token: None };
-    eventually("the board to run", async || a.call(board("post", json!({ "text": "before the freeze" }))).await.is_ok()).await;
-    a.call(board("post", json!({ "text": "and another" }))).await.unwrap();
+    eventually("notes to run", async || a.call(notes("post", json!({ "text": "before the freeze" }))).await.is_ok()).await;
+    a.call(notes("post", json!({ "text": "and another" }))).await.unwrap();
     let dir = temp("frozen-disk").join("One Backups");
     a.add_place(&me, &json!({ "path": dir, "title": "Disk" })).await.unwrap();
     eventually("the first backup", async || !a.backups().unwrap()["places"][0]["last"].is_null()).await;
     let install = one::backups::installs(&one::bucket::Place::Folder(dir.clone())).unwrap().remove(0);
-    let board_db = async || {
-        let (copy, keys) = backed_up_keys(&dir, &install, &recovery, "global", "board", "main");
-        one::db::Db::open_switched(&copy, &format!("{}/board/main", one::bucket::folder("global")), keys).await.unwrap()
+    let notes_db = async || {
+        let (copy, keys) = backed_up_keys(&dir, &install, &recovery, "global", "notes", "main");
+        one::db::Db::open_switched(&copy, &format!("{}/notes/main", one::bucket::folder("global")), keys).await.unwrap()
     };
     assert!(!a.frozen());
-    let before = board_db().await;
+    let before = notes_db().await;
     assert_eq!((before.signed_from(), before.checks().refused), (None, 0), "no step is signed in it, and a reader that knows the log is frozen refuses none");
     let written = before.at();
 
     a.switch(&me, &ed25519_dalek::SigningKey::from_bytes(&recovery), true).await.unwrap();
     assert!(a.frozen());
-    a.call(board("post", json!({ "text": "after the freeze" }))).await.unwrap();
+    a.call(notes("post", json!({ "text": "after the freeze" }))).await.unwrap();
     let first = a.backups().unwrap()["places"][0]["last"]["time"].clone();
     a.back_up_now();
     eventually("the next backup", async || a.backups().unwrap()["places"][0]["last"]["time"] != first).await;
-    let after = board_db().await;
+    let after = notes_db().await;
     assert_eq!(after.signed_from(), Some(written + 1), "the first step after the freeze is signed in it, and says so");
     assert_eq!(after.checks().refused, 0);
     assert_eq!(backed_up_posts(&dir, &install, &recovery).await, ["before the freeze", "and another", "after the freeze"]);
 }
 
-/// The board's posts in `global` as a place's copy of the install's bucket holds them, opened with the recovery key
+/// The notes' lines in `global` as a place's copy of the install's bucket holds them, opened with the recovery key
 /// alone: each epoch's key sealed to it, each app's key in the epoch sealed under that.
 async fn backed_up_posts(dir: &std::path::Path, install: &str, recovery: &[u8; 32]) -> Vec<String> {
-    backed_up(dir, install, recovery, "global", "board", "main", "select text from posts order by time").await
+    backed_up(dir, install, recovery, "global", "notes", "main", "select text from posts order by n").await
 }
 
 /// The first column of what `sql` reads from `app`'s `database` in `scope`, as the backup's copy of the bucket has it,
@@ -232,8 +243,9 @@ async fn only_a_persons_own_device_or_their_inviter_lets_a_device_in() {
     std::fs::write(dir.join("device.json"), json!({ "secret": one::entry::hex(&rand::random()), "name": "mac" }).to_string()).unwrap();
     let a = Node::start(&dir).await.unwrap();
     a.create("Home", "Andre").await.unwrap();
+    add_notes(&a).await;
     let me = one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None, token: None };
-    eventually("the board to run", async || a.call(board("post", json!({ "text": "hi" }))).await.is_ok()).await;
+    eventually("notes to run", async || a.call(notes("post", json!({ "text": "hi" }))).await.is_ok()).await;
     let global = one::entry::Scope::Global;
     let new_key = || ed25519_dalek::SigningKey::from_bytes(&rand::random());
     let asks = |key: &ed25519_dalek::SigningKey, user: &str, proof: Option<String>| {
@@ -271,7 +283,7 @@ async fn only_a_persons_own_device_or_their_inviter_lets_a_device_in() {
     let refused = a.approve(&from_sam, "ABCDEFGH", true).await.unwrap_err();
     assert!(format!("{refused:#}").contains("isn't one of your devices"), "{refused:#}");
 
-    // The laptop, removed, opens no epoch made after; Andre's machine and Sam's device do, and the board goes on.
+    // The laptop, removed, opens no epoch made after; Andre's machine and Sam's device do, and the notes go on.
     let removed = a.remove_device(&me, &one::entry::hex(&laptop.verifying_key().to_bytes())).await.unwrap();
     assert!(removed["new_epochs"].as_array().unwrap().iter().any(|e| e["scope"] == "global" && e["epoch"] == 2), "{removed}");
     assert_eq!(opens(&laptop, &global).await, vec![1]);
@@ -279,7 +291,7 @@ async fn only_a_persons_own_device_or_their_inviter_lets_a_device_in() {
         assert!(one::cloudflare::open_sealed(&one::keys::seal_secret(&laptop), &std::fs::read(&f).unwrap()).is_err(), "{} opens for the removed laptop", f.display());
     }
     assert_eq!(opens(&sams, &global).await, vec![1, 2]);
-    a.call(board("post", json!({ "text": "after" }))).await.unwrap();
+    a.call(notes("post", json!({ "text": "after" }))).await.unwrap();
 }
 
 /// A file put from elsewhere (a client device's, a sign-in's) is read back by whoever put it alone, or by someone who
@@ -567,9 +579,10 @@ async fn a_trace_says_where_a_call_went_and_never_what_it_carried() {
     use one::node::trace;
     let a = start("trace-a").await;
     a.create("Home", "Andre").await.unwrap();
-    eventually("the board to run", async || a.call(board("post", json!({ "text": "a private thought" }))).await.is_ok()).await;
+    add_notes(&a).await;
+    eventually("notes to run", async || a.call(notes("post", json!({ "text": "a private thought" }))).await.is_ok()).await;
     let t = trace::Trace::new();
-    let read = trace::within(Some(t.clone()), a.call(board("read", json!({ "format": "json" })))).await.unwrap();
+    let read = trace::within(Some(t.clone()), a.call(notes("read", json!({ "format": "json" })))).await.unwrap();
     assert!(read.to_string().contains("a private thought"), "{read}");
     let said = t.done(&a.device_name()).to_string();
     assert!(said.contains(r#""step":"device""#) && said.contains(r#""op":"read""#) && said.contains(r#""step":"run""#), "{said}");

@@ -519,7 +519,7 @@ mod tests {
     fn a_handoff_opens_only_for_the_node_it_was_sealed_to() {
         let node = SigningKey::from_bytes(&rand::random());
         let other = SigningKey::from_bytes(&rand::random());
-        let handoff = Handoff { for_: token_id("t"), until: 5, keys: vec![Handed { scope: "global".into(), epoch: 1, app: "board".into(), database: "main".into(), key: rand::random() }] };
+        let handoff = Handoff { for_: token_id("t"), until: 5, keys: vec![Handed { scope: "global".into(), epoch: 1, app: "tally".into(), database: "main".into(), key: rand::random() }] };
         let sealed = seal_handoff(&Endpoint::of(&node).seal, &handoff).unwrap();
         assert_eq!(open_handoff(&seal_secret(&node), &sealed).unwrap(), handoff);
         assert!(open_handoff(&seal_secret(&other), &sealed).is_err());

@@ -215,7 +215,7 @@ fn usage() -> String {
     format!(
         "Usage:
   {CLI} throwaway                  start this checkout's throwaway network, if it isn't running (or runs an older build), and say where it is
-  {CLI} throwaway <command>        any command, in it: {CLI} throwaway status, {CLI} throwaway apps, {CLI} throwaway board post hello
+  {CLI} throwaway <command>        any command, in it: {CLI} throwaway status, {CLI} throwaway apps, {CLI} throwaway repos list
   {CLI} throwaway mcp              its MCP server, for an agent: claude mcp add {CLI}-throwaway -- {mcp}
   {CLI} throwaway sign-in          sign its CLI in as its person, with no browser
   {CLI} throwaway git <args>       git, reaching its repos at its address: {CLI} throwaway git clone <address>/repos/<owner>/<repo>.git, then {CLI} throwaway git push in the clone
@@ -226,7 +226,7 @@ fn usage() -> String {
   {CLI} throwaway client <kind> --as sam    the same, as someone else, invited by you with Add Someone's link
   {CLI} throwaway client cli <command>    a command from a computer that's only a device of its person's (no node), asking
                                    their nodes over iroh in run priority's order, as every client does: the Cloudflare
-                                   node, once deployed, with {CLI} throwaway device-activity priority --name Cloudflare --priority 1;
+                                   node, once deployed, with {CLI} throwaway settings priority '{{\"cloudflare\":1}}';
                                    --build <program> first runs another build of {CLI} (an older release's) as that device
   {CLI} throwaway stop             stop and delete it, and give back its devices; {CLI} throwaway then starts a new one"
     )

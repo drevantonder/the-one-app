@@ -339,7 +339,7 @@ fn places(tool: &Value) -> Vec<String> {
 }
 
 /// The tool's input from flags, words (filling `places` in order) and files. Given fewer words than places, the
-/// optional places are skipped first: `one board post "hi"` is text, `one board post ideas "hi"` a topic and text.
+/// optional places are skipped first: for a tool with a topic and a text, `"hi"` is text and `ideas "hi"` a topic and text.
 /// A word left over is an error, never folded into another input: it says to quote text, or which flag to give it as.
 /// Whether a tool takes a `device` of its own (an agent device's name, say): then that's what `device` is, and
 /// it says itself where it runs, so the CLI's and MCP's `device` (which of your devices runs it) isn't offered.

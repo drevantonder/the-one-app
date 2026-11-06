@@ -148,7 +148,7 @@ fn harnesses(home: &Path, written: &mut Written) {
     // Asked as one of this machine's own programs: with the token only its user can read.
     let token = crate::home().join(crate::api::LOCAL_TOKEN);
     let hook = format!("curl -sf --max-time 3 -H \"{}: $(cat '{}')\" --data-binary @- http://{addr}{HOOK_PATH} || true", crate::api::LOCAL_TOKEN_HEADER, token.display());
-    // Another custom build's node on this machine has a hook of its own, on its own port; the board's before is replaced.
+    // Another custom build's node on this machine has a hook of its own, on its own port; an older hook of its own is replaced.
     let port = format!(":{}/hooks/", addr.rsplit(':').next().unwrap_or_default());
     let server = crate::skills::server_name();
     // A stable path, so harnesses started without the user's PATH (by launchd, say) still find it after an update; but
@@ -277,7 +277,7 @@ fn parse_json(text: &str) -> Result<CstRootNode> {
     Ok(root)
 }
 
-/// Puts `command` among the settings' UserPromptSubmit hooks (Claude Code's and Codex's format), in place of a board
+/// Puts `command` among the settings' UserPromptSubmit hooks (Claude Code's and Codex's format), in place of an older
 /// hook already there (one whose command has `ours` in it), and says what the text becomes if that changes it.
 fn with_hook(text: &str, event: &str, command: &str, ours: &str) -> Result<Option<String>> {
     let root = parse_json(text)?;

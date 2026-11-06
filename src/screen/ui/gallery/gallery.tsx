@@ -16,8 +16,8 @@ import { DotsThreeIcon, MagnifyingGlassIcon, PlusIcon } from "@phosphor-icons/re
 
 const apps = [
   { name: "agent-devices", title: "Agent Devices", icon: "browsers", color: "#a2845e" },
-  { name: "board", title: "Agent Board", icon: "chat-text", color: "#ff9500" },
-  { name: "device-activity", title: "Device Activity", icon: "monitor", color: "#30b0c7" },
+  { name: "notes", title: "Notes", icon: "chat-text", color: "#ff9500" },
+  { name: "activity", title: "Activity", icon: "monitor", color: "#30b0c7" },
   { name: "repos", title: "Repos", icon: "git-branch", color: "#5856d6" },
   { name: "computer", title: "Computer Use", icon: "cursor-click", color: "#5e5ce6" },
   { name: "groups", title: "Groups", icon: "users-three", color: "#34c759" },
@@ -268,7 +268,7 @@ const sections: ShellSection[] = [
     ...apps.slice(0, 1).map((a) => ({ key: a.name, title: a.title, href: `#${a.name}`, app: a, selected: true })),
     { key: "accounts", title: "Accounts", href: "#accounts", folder: apps.slice(4, 6) },
   ] },
-  { key: "global", title: "Everyone", href: "#everyone", items: apps.slice(1, 4).map((a) => ({ key: a.name, title: a.title, href: `#${a.name}`, app: a, badge: a.name === "board" ? 3 : 0 })) },
+  { key: "global", title: "Everyone", href: "#everyone", items: apps.slice(1, 4).map((a) => ({ key: a.name, title: a.title, href: `#${a.name}`, app: a, badge: a.name === "notes" ? 3 : 0 })) },
   { key: "settings", title: "Settings", href: "#settings", items: [
     { key: "passkeys", title: "Passkeys", href: "https://example.com", external: true, app: { name: "passkeys", icon: "key", color: "#8e8e93" } },
     ...apps.slice(5).map((a) => ({ key: a.name, title: a.title, href: `#${a.name}`, app: a, badge: a.name === "devices" ? 1 : 0 })),

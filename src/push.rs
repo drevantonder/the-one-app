@@ -197,7 +197,7 @@ mod tests {
     fn a_note_opens_only_where_it_was_sealed() {
         let by = SigningKey::from_bytes(&rand::random());
         let (secret, public) = crate::cloudflare::twin(&rand::random());
-        let note = Note { id: "0123456789abcdef".into(), title: "Hi".into(), body: "there".into(), app: "board".into(), screen: "main".into(), ..Default::default() };
+        let note = Note { id: "0123456789abcdef".into(), title: "Hi".into(), body: "there".into(), app: "tally".into(), screen: "main".into(), ..Default::default() };
         let sealed = seal_note(&by, &public, &note, 1).unwrap();
         let (opened, from) = open_note(&secret, &sealed).unwrap();
         assert_eq!((opened, from), (note.clone(), Some(HEXLOWER.encode(by.verifying_key().as_bytes()))));

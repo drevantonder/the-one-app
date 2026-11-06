@@ -28,11 +28,11 @@ fn the_workers_and_nodes_agree_on_keys_and_seals() {
     // An app's key, sealed under its scope's: each opens what the other sealed, and derives the same database key.
     let scope: [u8; 32] = rand::random();
     let app: [u8; 32] = rand::random();
-    let opened = js(json!({ "op": "openAppKey", "scopeKey": B64U.encode(&scope), "app": "board", "sealed": B64U.encode(&cloudflare::seal_app_key(&scope, "board", &app)), "database": "main" }));
+    let opened = js(json!({ "op": "openAppKey", "scopeKey": B64U.encode(&scope), "app": "tally", "sealed": B64U.encode(&cloudflare::seal_app_key(&scope, "tally", &app)), "database": "main" }));
     assert_eq!(b(&opened["key"]), app, "JavaScript opens an app's key Rust sealed");
     assert_eq!(b(&opened["database"]), cloudflare::database_key(&app, "main"), "a database's key");
-    let sealed = js(json!({ "op": "sealAppKey", "scopeKey": B64U.encode(&scope), "app": "board", "key": B64U.encode(&app) }));
-    assert_eq!(cloudflare::open_app_key(&scope, "board", &b(&sealed["sealed"])).unwrap(), app, "Rust opens an app's key JavaScript sealed");
+    let sealed = js(json!({ "op": "sealAppKey", "scopeKey": B64U.encode(&scope), "app": "tally", "key": B64U.encode(&app) }));
+    assert_eq!(cloudflare::open_app_key(&scope, "tally", &b(&sealed["sealed"])).unwrap(), app, "Rust opens an app's key JavaScript sealed");
     assert!(cloudflare::open_app_key(&scope, "calendar", &b(&sealed["sealed"])).is_err(), "only as that app's");
 
     // Sealed to a key pair: JavaScript's pair, sealed in Rust; Rust's pair (the recovery key's twin), sealed in JavaScript.
@@ -63,9 +63,9 @@ fn the_workers_and_nodes_agree_on_keys_and_seals() {
         let request = keys::signed_request(&signer, "one/urls", fields.clone(), 1_000_000);
         let node = ed25519_dalek::SigningKey::from_bytes(&rand::random());
         let to = keys::Endpoint::of(&node).seal;
-        let handoff = keys::Handoff { for_: keys::token_id("a token"), until: 9, keys: vec![keys::Handed { scope: "global".into(), epoch: 2, app: "board".into(), database: "main".into(), key: rand::random() }] };
+        let handoff = keys::Handoff { for_: keys::token_id("a token"), until: 9, keys: vec![keys::Handed { scope: "global".into(), epoch: 2, app: "tally".into(), database: "main".into(), key: rand::random() }] };
         let epoch_key: [u8; 32] = rand::random();
-        let sealed = keys::seal(3, &epoch_key, "global/board/main/1", b"a step");
+        let sealed = keys::seal(3, &epoch_key, "global/tally/main/1", b"a step");
         let device = ed25519_dalek::SigningKey::from_bytes(&rand::random()).verifying_key().to_bytes();
         let device_seal: [u8; 32] = rand::random();
         let prf: [u8; 32] = rand::random();
@@ -73,7 +73,7 @@ fn the_workers_and_nodes_agree_on_keys_and_seals() {
         let out = js(json!({
             "op": "keys", "seed": B64U.encode(&seed), "domain": "one/urls", "fields": fields, "at": 1_000_000,
             "request": request, "now": 1_000_000 + keys::FRESH, "epoch": 4, "key": B64U.encode(&epoch_key),
-            "name": "global/board/main/1", "plain": B64U.encode(b"from js"), "sealed": B64U.encode(&sealed),
+            "name": "global/tally/main/1", "plain": B64U.encode(b"from js"), "sealed": B64U.encode(&sealed),
             "to": B64U.encode(&cloudflare::twin_public(&node.verifying_key().to_bytes()).unwrap()), "handoff": handoff,
             "pair": { "secret": B64U.encode(&my_secret), "public": B64U.encode(&my_public), "sealed": keys::seal_handoff(&my_public, &handoff).unwrap(), "key": data_encoding::HEXLOWER.encode(&device), "seal": data_encoding::HEXLOWER.encode(&device_seal) },
             "token": "a token", "secret": B64U.encode(b"an invite's secret"), "prf": B64U.encode(&prf),
@@ -82,7 +82,7 @@ fn the_workers_and_nodes_agree_on_keys_and_seals() {
         assert_eq!(out["signed"], request, "the same request signed the same, Ed25519 being deterministic");
         assert_eq!(out["checked"], json!(data_encoding::HEXLOWER.encode(signer.verifying_key().as_bytes())), "JavaScript checks a request Rust signed");
         assert!(keys::check_request("one/urls", &out["signed"], 1_000_000).is_ok(), "Rust checks one JavaScript signed");
-        assert_eq!(keys::open(&epoch_key, "global/board/main/1", &b(&out["sealed"])).unwrap(), b"from js", "Rust opens an object JavaScript sealed");
+        assert_eq!(keys::open(&epoch_key, "global/tally/main/1", &b(&out["sealed"])).unwrap(), b"from js", "Rust opens an object JavaScript sealed");
         assert_eq!(keys::epoch_of(&b(&out["sealed"])).unwrap(), 4);
         assert_eq!(b(&out["opened"]), b"a step", "JavaScript opens one Rust sealed");
         assert_eq!(out["epoch"], 3);
@@ -331,8 +331,8 @@ fn the_workers_and_nodes_agree_on_keys_and_seals() {
     // browsers and the remote MCP server hand by the same rule as native apps.
     {
         use one::keys::{Need, app_of, may_hand, oldest_needed};
-        let routes = ["call board", "call node", "/v1/screens/board", "/v1/screens/board/main", "/mcp", "/v1/widgets", "/v1/badges", "/v1/vault", "/v1/vault/requests", "/v1/state", "/v1/entries", "/v1/apps", "call "];
-        let dbs = [("board", "main"), ("board", "sidecar"), ("notes", "main"), ("board", "other"), ("node", "vault"), ("node", "log"), ("node", "main"), ("node", "blobs")];
+        let routes = ["call tally", "call node", "/v1/screens/tally", "/v1/screens/tally/main", "/mcp", "/v1/widgets", "/v1/badges", "/v1/vault", "/v1/vault/requests", "/v1/state", "/v1/entries", "/v1/apps", "call "];
+        let dbs = [("tally", "main"), ("tally", "sidecar"), ("notes", "main"), ("tally", "other"), ("node", "vault"), ("node", "log"), ("node", "main"), ("node", "blobs")];
         let mut hands: Vec<(String, Need)> = Vec::new();
         for (route, scope, (app, database)) in routes.iter().flat_map(|r| ["user:ab", "global"].map(|s| (r, s))).flat_map(|(r, s)| dbs.iter().map(move |d| (r, s, d))) {
             hands.push((route.to_string(), Need { scope: scope.into(), epoch: 1, app: app.to_string(), database: database.to_string() }));
@@ -352,15 +352,15 @@ fn the_workers_and_nodes_agree_on_keys_and_seals() {
         }
         // And what it says, for what matters most: another app's, or anything but the log with a request that runs none.
         let need = |app: &str, database: &str| Need { scope: "global".into(), epoch: 1, app: app.into(), database: database.into() };
-        assert!(may_hand("call board", &need("board", "main")) && !may_hand("call board", &need("notes", "main")));
-        assert!(may_hand("/v1/entries", &need("node", "log")) && !may_hand("/v1/entries", &need("board", "main")) && !may_hand("/v1/state", &need("node", "vault")));
-        assert!(may_hand("/v1/vault", &need("node", "vault")) && !may_hand("/v1/vault", &need("board", "main")));
+        assert!(may_hand("call tally", &need("tally", "main")) && !may_hand("call tally", &need("notes", "main")));
+        assert!(may_hand("/v1/entries", &need("node", "log")) && !may_hand("/v1/entries", &need("tally", "main")) && !may_hand("/v1/state", &need("node", "vault")));
+        assert!(may_hand("/v1/vault", &need("node", "vault")) && !may_hand("/v1/vault", &need("tally", "main")));
         // Apps' code, `global`'s blobs, goes to a node running an app (the Cloudflare node keeps none); a scope's own
         // blobs, its people's files, never.
         let blobs = |scope: &str| Need { scope: scope.into(), epoch: 1, app: "node".into(), database: "blobs".into() };
-        assert!(may_hand("call board", &blobs("global")) && may_hand("/v1/screens/board", &blobs("global")) && may_hand("/v1/badges", &blobs("global")) && may_hand("/v1/apps", &blobs("global")));
-        assert!(!may_hand("/v1/apps", &need("board", "main")) && !may_hand("/v1/apps", &blobs("user:ab")));
-        assert!(!may_hand("call board", &blobs("user:ab")) && !may_hand("/mcp", &blobs("group:cd")) && !may_hand("/v1/state", &blobs("global")));
+        assert!(may_hand("call tally", &blobs("global")) && may_hand("/v1/screens/tally", &blobs("global")) && may_hand("/v1/badges", &blobs("global")) && may_hand("/v1/apps", &blobs("global")));
+        assert!(!may_hand("/v1/apps", &need("tally", "main")) && !may_hand("/v1/apps", &blobs("user:ab")));
+        assert!(!may_hand("call tally", &blobs("user:ab")) && !may_hand("/mcp", &blobs("group:cd")) && !may_hand("/v1/state", &blobs("global")));
         assert_eq!(oldest_needed("log", Some(br#"{"at":9,"copy":7,"epoch":2}"#), 3), 2, "from the epoch its newest copy is under");
         assert_eq!(oldest_needed("blobs", None, 3), 1, "a blob is kept under the epoch it was put in");
     }
@@ -374,17 +374,17 @@ fn the_workers_and_nodes_agree_on_keys_and_seals() {
         let need = |app: &str, database: &str| json!({ "scope": "global", "epoch": 1, "app": app, "database": database });
         let every = |n: usize| (0..n).map(|i| need(&format!("app{i}"), "main")).collect::<Vec<_>>();
         let asked: Vec<(&str, Value)> = vec![
-            ("call board", json!({ "to": node, "need": [need("board", "main")] })),
-            ("call board", json!({ "to": node, "need": [need("board", "main"), need("board", "main"), need("node", "log")] })),
+            ("call tally", json!({ "to": node, "need": [need("tally", "main")] })),
+            ("call tally", json!({ "to": node, "need": [need("tally", "main"), need("tally", "main"), need("node", "log")] })),
             // The seal key it names isn't read: what's handed is sealed to the one the entries list.
-            ("call board", json!({ "to": node, "seal": "cd".repeat(32), "need": [need("board", "main")] })),
-            ("call board", json!({ "to": "cd".repeat(32), "need": [need("board", "main")] })),
-            ("call board", json!({ "need": [need("board", "main")] })),
-            ("call board", json!({ "to": node, "need": [] })),
-            ("call board", json!({ "to": node, "need": null })),
-            ("call board", json!({ "to": node, "need": [need("notes", "main")] })),
-            ("call board", json!({ "to": node, "need": [need("board", "main"), { "scope": "global", "epoch": "1", "app": "board", "database": "main" }] })),
-            ("call board", json!({ "to": node, "need": [{ "scope": "global", "epoch": -1, "app": "board", "database": "main" }] })),
+            ("call tally", json!({ "to": node, "seal": "cd".repeat(32), "need": [need("tally", "main")] })),
+            ("call tally", json!({ "to": "cd".repeat(32), "need": [need("tally", "main")] })),
+            ("call tally", json!({ "need": [need("tally", "main")] })),
+            ("call tally", json!({ "to": node, "need": [] })),
+            ("call tally", json!({ "to": node, "need": null })),
+            ("call tally", json!({ "to": node, "need": [need("notes", "main")] })),
+            ("call tally", json!({ "to": node, "need": [need("tally", "main"), { "scope": "global", "epoch": "1", "app": "tally", "database": "main" }] })),
+            ("call tally", json!({ "to": node, "need": [{ "scope": "global", "epoch": -1, "app": "tally", "database": "main" }] })),
             ("/v1/badges", json!({ "to": node, "need": every(MOST_NEEDED) })),
             ("/v1/badges", json!({ "to": node, "need": every(MOST_NEEDED + 1) })),
         ];
@@ -427,7 +427,7 @@ fn the_workers_and_nodes_agree_on_keys_and_seals() {
             });
             assert_eq!(js, asked_for(route, &node, answer), "{route}: {answer}");
         }
-        assert!(asked_for("call board", &node, &asked[1].1).is_some_and(|n| n.len() == 2), "a key asked for twice is handed once");
+        assert!(asked_for("call tally", &node, &asked[1].1).is_some_and(|n| n.len() == 2), "a key asked for twice is handed once");
         assert!(asked_for("/v1/badges", &node, &asked[10].1).is_some() && asked_for("/v1/badges", &node, &asked[11].1).is_none());
         for ((status, body), js) in said.iter().zip(out["said"].as_array().unwrap()) {
             let rust = match waited(*status, body) {
@@ -526,8 +526,8 @@ async fn what_a_native_app_keeps_of_its_calls_is_its_persons_alone() {
     let dir = crate::temp("answers");
     let (andre, sam) = ([1; 32], [2; 32]);
     // On the wire an app's tools are `ops`, and a call's tool `op`: older devices read and send those names.
-    let apps = serde_json::to_vec(&serde_json::json!([{ "name": "board", "ops": [{ "name": "topics", "reads": true }, { "name": "post", "reads": false }] }])).unwrap();
-    let call = |op: &str, input: serde_json::Value| serde_json::to_vec(&serde_json::json!({ "id": "1", "app": "board", "op": op, "input": input, "client": "mac" })).unwrap();
+    let apps = serde_json::to_vec(&serde_json::json!([{ "name": "tally", "ops": [{ "name": "topics", "reads": true }, { "name": "post", "reads": false }] }])).unwrap();
+    let call = |op: &str, input: serde_json::Value| serde_json::to_vec(&serde_json::json!({ "id": "1", "app": "tally", "op": op, "input": input, "client": "mac" })).unwrap();
     let mine = Answers::new(&dir, &SigningKey::from_bytes(&andre));
     mine.learn(&apps);
     mine.keep(&call("topics", serde_json::json!({ "scope": "user", "format": "json" })), br#"{"ok":[{"path":"kitchen-reno"}]}"#);
@@ -535,26 +535,26 @@ async fn what_a_native_app_keeps_of_its_calls_is_its_persons_alone() {
     mine.keep(&call("topics", serde_json::json!({ "scope": "global" })), br#"{"error":"no"}"#);
 
     // The same call, its input's fields in any order, gets what it answered; a write, or a failure, was never kept.
-    let (answer, at) = mine.kept("board", "topics", br#"{"format":"json","scope":"user"}"#).unwrap();
+    let (answer, at) = mine.kept("tally", "topics", br#"{"format":"json","scope":"user"}"#).unwrap();
     assert_eq!(answer, br#"[{"path":"kitchen-reno"}]"#);
     assert!(at > 0);
-    assert!(mine.kept("board", "post", br#"{"text":"hi"}"#).is_none());
-    assert!(mine.kept("board", "topics", br#"{"scope":"global"}"#).is_none());
+    assert!(mine.kept("tally", "post", br#"{"text":"hi"}"#).is_none());
+    assert!(mine.kept("tally", "topics", br#"{"scope":"global"}"#).is_none());
     // Nothing of it is in the clear.
     for file in std::fs::read_dir(dir.join("answers")).unwrap().flatten() {
         assert!(!String::from_utf8_lossy(&std::fs::read(file.path()).unwrap()).contains("kitchen-reno"));
     }
 
     // Another person's device, in the same folder, opens nothing.
-    assert!(Answers::new(&dir, &SigningKey::from_bytes(&sam)).kept("board", "topics", br#"{"format":"json","scope":"user"}"#).is_none());
+    assert!(Answers::new(&dir, &SigningKey::from_bytes(&sam)).kept("tally", "topics", br#"{"format":"json","scope":"user"}"#).is_none());
     // Only a native app's device keeps them; once it starts again, before it's read the apps, it finds them, and once
     // it signs out, they're gone.
     let cli = Device::new(andre, "https://one.invalid", dir.to_str().unwrap());
-    assert!(cli.kept("board", "topics", br#"{"format":"json","scope":"user"}"#).is_none());
+    assert!(cli.kept("tally", "topics", br#"{"format":"json","scope":"user"}"#).is_none());
     let app = Device::new(andre, "https://one.invalid", dir.to_str().unwrap()).keeping();
-    assert!(app.kept("board", "topics", br#"{"format":"json","scope":"user"}"#).is_some());
+    assert!(app.kept("tally", "topics", br#"{"format":"json","scope":"user"}"#).is_some());
     app.sign_out().await;
-    assert!(app.kept("board", "topics", br#"{"format":"json","scope":"user"}"#).is_none());
+    assert!(app.kept("tally", "topics", br#"{"format":"json","scope":"user"}"#).is_none());
     assert!(!dir.join("answers").exists());
 }
 
@@ -586,7 +586,7 @@ fn a_note_reaches_only_the_device_it_was_sealed_to() {
     assert_eq!(post("/push/register", push::register_request(&stranger, &phone_seal, &address, None, now()).unwrap()).0, 403, "only the install's devices register");
 
     // The node seals a note to the phone and sends it.
-    let note = Note { id: "0123456789abcdef".into(), title: "Board".into(), body: "Sam posted".into(), app: "board".into(), screen: "main".into(), ..Default::default() };
+    let note = Note { id: "0123456789abcdef".into(), title: "Tally".into(), body: "Sam counted".into(), app: "tally".into(), screen: "main".into(), ..Default::default() };
     let sealed = push::seal_note(&node, &phone_seal, &note, now()).unwrap();
     let unregistered = HEXLOWER.encode(node.verifying_key().as_bytes());
     let to = HEXLOWER.encode(phone.verifying_key().as_bytes());

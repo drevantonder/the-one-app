@@ -803,7 +803,7 @@ mod tests {
     fn entries(key: &SigningKey, log: &str, n: u32, blob: Option<&str>) -> Vec<Entry> {
         let mut out: Vec<Entry> = Vec::new();
         for i in 0..n {
-            let mut content = Content::new("board", "post", json!({ "text": format!("post {i}") }));
+            let mut content = Content::new("tally", "post", json!({ "text": format!("post {i}") }));
             if let Some(b) = blob {
                 content.blobs.push(b.to_string());
             }
@@ -825,8 +825,8 @@ mod tests {
         let all = entries(&device, "global", 3, Some(&hash));
 
         // A database with more steps than one copy holds, so a reader starts from its copy.
-        let prefix = "global/board/main";
-        let app = crate::db::app_key(&bucket, &epoch, "global", "board", 1, true).await.unwrap().unwrap();
+        let prefix = "global/tally/main";
+        let app = crate::db::app_key(&bucket, &epoch, "global", "tally", 1, true).await.unwrap().unwrap();
         let keys = crate::db::Keys::from([(1, crate::cloudflare::database_key(&app, "main"))]);
         let mut db = crate::db::Db::open(&bucket, prefix, keys).await.unwrap();
         db.sign_as(device.clone());
@@ -880,7 +880,7 @@ mod tests {
         let (problems, restored) = checked(Some(&live));
         assert_eq!(problems, Vec::<String>::new());
         let snapshot = restored[0].snapshot.clone();
-        assert_eq!(snapshot.databases["board/main"], (at, copy));
+        assert_eq!(snapshot.databases["tally/main"], (at, copy));
         assert_eq!(check_databases(&place, install, &snapshot, &epochs, Some(&bucket)).await, Vec::<String>::new(), "every database restores from the backup");
         assert_eq!(check_databases(&place, install, &snapshot, &epochs, None::<&Place>).await, Vec::<String>::new(), "and opens without the install's bucket");
 
@@ -891,13 +891,13 @@ mod tests {
         *bad.last_mut().unwrap() ^= 1;
         place.put(&name(at), &bad).unwrap();
         let wrong = check_databases(&place, install, &snapshot, &epochs, Some(&bucket)).await;
-        assert!(wrong.len() == 1 && wrong[0].contains(&format!("global board: step {at} isn't what your devices have")), "{wrong:?}");
+        assert!(wrong.len() == 1 && wrong[0].contains(&format!("global tally: step {at} isn't what your devices have")), "{wrong:?}");
         let wrong = check_databases(&place, install, &snapshot, &epochs, None::<&Place>).await;
         assert!(wrong.len() == 1 && wrong[0].contains("doesn't open"), "{wrong:?}");
         place.put(&name(at), &good).unwrap();
         place.delete(&name(copy)).unwrap();
         let wrong = check_databases(&place, install, &snapshot, &epochs, Some(&bucket)).await;
-        assert!(wrong.len() == 1 && wrong[0].contains(&format!("global board: step {copy} isn't there")), "{wrong:?}");
+        assert!(wrong.len() == 1 && wrong[0].contains(&format!("global tally: step {copy} isn't there")), "{wrong:?}");
 
         // A blob that's gone, then a pack that's corrupted.
         let object = |name: &str| format!("{install}/objects/{name}");

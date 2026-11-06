@@ -261,7 +261,7 @@ pub fn search_tool(mode: Mode) -> Value {
     };
     json!({
         "name": "search",
-        "description": format!("Find the tools for a task in every app: give a few words, like \"unread email\" or \"post to the board\". Answers the best matches, each with {calls} and what it does, then the guide of each app they're in. Search before guessing, and to learn an app."),
+        "description": format!("Find the tools for a task in every app: give a few words, like \"unread email\" or \"list my repos\". Answers the best matches, each with {calls} and what it does, then the guide of each app they're in. Search before guessing, and to learn an app."),
         "inputSchema": { "type": "object", "required": ["query"], "properties": {
             "query": { "type": "string", "description": "a few words for the task, or an app's name" },
             "limit": { "type": "integer", "description": "how many tools, 8 if not given" },

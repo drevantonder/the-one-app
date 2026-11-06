@@ -85,14 +85,14 @@ var J = [
 		color: "#a2845e"
 	},
 	{
-		name: "board",
-		title: "Agent Board",
+		name: "notes",
+		title: "Notes",
 		icon: "chat-text",
 		color: "#ff9500"
 	},
 	{
-		name: "device-activity",
-		title: "Device Activity",
+		name: "activity",
+		title: "Activity",
 		icon: "monitor",
 		color: "#30b0c7"
 	},
@@ -550,7 +550,7 @@ var Q = [
 			title: e.title,
 			href: `#${e.name}`,
 			app: e,
-			badge: e.name === "board" ? 3 : 0
+			badge: e.name === "notes" ? 3 : 0
 		}))
 	},
 	{
