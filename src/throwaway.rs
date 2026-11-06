@@ -37,9 +37,12 @@ fn addr_var() -> String {
     format!("{}_ADDR", CLI.to_uppercase())
 }
 
-/// The throwaway network's node's address, while it answers.
+/// The throwaway network's node's address, while its node runs and answers: an answer from the address alone could be
+/// another checkout's throwaway network, which took the port while this one was stopped.
 fn running(dir: &Path) -> Option<String> {
     let addr = std::fs::read_to_string(dir.join("addr")).ok()?.trim().to_string();
+    let node: i32 = std::fs::read_to_string(dir.join("pid")).ok()?.trim().parse().ok()?;
+    programs(dir, false).contains(&node).then_some(())?;
     agent().get(format!("http://{addr}/v1/state")).call().is_ok().then_some(addr)
 }
 
@@ -266,13 +269,33 @@ fn start(dir: &Path) -> Result<String> {
     eprintln!("Starting this checkout's throwaway network again…");
     stop_some(dir, false, false)?;
     let was = std::fs::read_to_string(dir.join("addr"))?.trim().to_string();
-    // Its own statement: a listener made in the arguments would hold the port while the node starts.
-    let free = std::net::TcpListener::bind(&was).is_ok();
-    let addr = if free { was } else { std::net::TcpListener::bind("127.0.0.1:0")?.local_addr()?.to_string() };
+    // Its address, held while its Workers start (seconds), so another checkout's throwaway network starting meanwhile
+    // can't take it: it keeps the one it had, else the system gives a free one, which the node's address file then says.
+    let (held, addr) = reserve(&was).or_else(|_| reserve("127.0.0.1:0"))?;
     // Its Workers first, so its node's relay finds them the first time it asks: found later, it waits out a backoff of
     // about half a minute, while the Cloudflare node says none of the network's devices is on.
     spawn_cloudflare(dir, &load_cloudflare(dir)?, &addr)?;
+    drop(held);
     spawn_node(dir, Some(&addr))
+}
+
+/// A TCP port held for the node, which isn't started yet: bound, not listening, so what asks for it is refused at once
+/// where a listener would leave it waiting. → what holds it, until dropped, and its address.
+fn reserve(addr: &str) -> Result<(std::os::fd::OwnedFd, String)> {
+    use std::os::fd::{FromRawFd, OwnedFd};
+    let addr: std::net::SocketAddrV4 = addr.parse().context("the throwaway network's address")?;
+    let fd = unsafe { libc::socket(libc::AF_INET, libc::SOCK_STREAM | libc::SOCK_CLOEXEC, 0) };
+    anyhow::ensure!(fd >= 0, "no socket: {}", std::io::Error::last_os_error());
+    let held = unsafe { OwnedFd::from_raw_fd(fd) };
+    let sin = libc::sockaddr_in { sin_family: libc::AF_INET as _, sin_port: addr.port().to_be(), sin_addr: libc::in_addr { s_addr: u32::from_ne_bytes(addr.ip().octets()) }, sin_zero: [0; 8] };
+    let bound = unsafe { libc::bind(fd, (&sin as *const libc::sockaddr_in).cast(), std::mem::size_of::<libc::sockaddr_in>() as _) };
+    anyhow::ensure!(bound == 0, "{addr} is taken: {}", std::io::Error::last_os_error());
+    // With port 0 the system picked one: which.
+    let mut got: libc::sockaddr_in = unsafe { std::mem::zeroed() };
+    let mut len = std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t;
+    let named = unsafe { libc::getsockname(fd, (&mut got as *mut libc::sockaddr_in).cast(), &mut len) };
+    anyhow::ensure!(named == 0, "{}", std::io::Error::last_os_error());
+    Ok((held, format!("{}:{}", addr.ip(), u16::from_be(got.sin_port))))
 }
 
 /// A new throwaway network, and its Workers.
@@ -284,11 +307,12 @@ fn start_new(dir: &Path) -> Result<String> {
     let mine = quick.get(format!("http://{}/v1/state", crate::addr())).call().ok().and_then(|mut r| r.body_mut().read_json::<Value>().ok());
     let me = mine.and_then(|s| s["user"]["name"].as_str().or(s["me"]["name"].as_str()).map(String::from));
     let me = me.or_else(|| std::env::var("USER").ok()).unwrap_or_else(|| "You".into());
-    let free = std::net::TcpListener::bind(("127.0.0.1", one::config::PORT + 100)).is_ok().then(|| format!("127.0.0.1:{}", one::config::PORT + 100));
     std::fs::create_dir_all(dir)?;
     let bucket = std::net::TcpListener::bind("127.0.0.1:0")?.local_addr()?.to_string();
     std::fs::write(dir.join("bucket-addr"), &bucket)?;
-    let addr = spawn_node(dir, free.as_deref())?;
+    // A free port the system picks, as for everything else here: never a fixed one every checkout's network would
+    // want first, which another's would hold when this one starts again.
+    let addr = spawn_node(dir, None)?;
     let agent = || throwaway_agent(dir);
     let on = |path: &str| format!("http://{addr}{path}");
     let created = crate::request(agent().post(on("/v1/create")).send_json(json!({ "name": "Throwaway", "user_name": me })))?;
@@ -368,7 +392,7 @@ fn throwaway_agent(dir: &Path) -> ureq::Agent {
 /// Starts the throwaway network's Workers, beside its node at `node`, and waits for its address to answer.
 fn spawn_cloudflare(dir: &Path, settings: &one::cloudflare::Settings, node: &str) -> Result<()> {
     for port in settings.ports {
-        anyhow::ensure!(std::net::TcpListener::bind(("127.0.0.1", port)).is_ok(), "the throwaway network's Workers' port {port} is taken now: {CLI} throwaway stop, then {CLI} throwaway for a new one");
+        anyhow::ensure!(std::net::TcpListener::bind(("127.0.0.1", port)).is_ok(), "the throwaway network's Workers' port {port} was taken by another program while it was stopped: {CLI} throwaway stop, then {CLI} throwaway for a new one on free ports");
     }
     // A sign-in kept for this node's address by an earlier throwaway network, whose Workers are gone, would be sent to this
     // node, which refuses it: its relay would find no devices, and the CLI says the key isn't published.
