@@ -1875,8 +1875,9 @@ pub(crate) mod tests {
     }
 
     /// A release's types, roles and rules move a database on only to a newer release's, by an admin's own device, and a
-    /// reader of an older one stops there rather than read on as if it didn't; and once the switch is on, each `READS`
-    /// is held to the tables, types, roles and rules it reads, so a release that changes them reads one more.
+    /// reader of an older one stops there rather than read on as if it didn't; and from the first that reads the scope
+    /// database, each `READS` is held to the tables, types, roles and rules it reads, so a release that changes them
+    /// reads one more.
     #[test]
     fn a_release_s_roles_only_move_on_and_an_older_reader_stops_at_a_newer_one() {
         use crate::keys::Endpoint;
@@ -1896,14 +1897,15 @@ pub(crate) mod tests {
         let db = ScopeDb::open(apply(&db, None, &Scope::Global, &step(1, switch::READS)).unwrap().db, 0).unwrap();
         assert_eq!(version(db.conn()).unwrap(), switch::READS);
         assert!(apply(&db, None, &Scope::Global, &step(2, switch::READS)).is_err(), "the same release's again changes nothing");
-        // What each `READS` reads, once it's switched: add `(READS, hash)` when a release changes them, and read one more.
-        const PINNED: &[(u32, &str)] = &[];
+        // What each `READS` reads, from the first that reads the scope database (`switch::GATE`): add `(READS, hash)`
+        // when a release changes them, and read one more.
+        const PINNED: &[(u32, &str)] = &[(2, "1a26a7b14a1b8998d5edcf6b6d00db14a698c6109eb865f7bd8e7c86dcd295a4")];
         let mut h = blake3::Hasher::new();
         h.update(super::super::scope::SCHEMA.as_bytes());
         h.update(permissions::SCHEMA.as_bytes());
         h.update(rules_of(db.conn()).unwrap().to_string().as_bytes());
         let hash = h.finalize().to_hex().to_string();
-        if switch::SWITCH {
+        if switch::READS >= switch::GATE {
             assert!(PINNED.contains(&(switch::READS, hash.as_str())), "the scope database's tables, types, roles or rules changed: read one more in switch::READS, and pin ({}, \"{hash}\")", switch::READS + 1);
         }
     }

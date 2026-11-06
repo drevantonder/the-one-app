@@ -29,7 +29,7 @@ pub static FORCEABLE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicB
 /// or `permissions::defaults` reads one more, has `steps::normalize` read the older tables, and its admins' devices
 /// move each database on to it once every device reads it (`steps::DEFAULTS`); `steps::tests` holds each number to
 /// what it reads.
-pub const READS: u32 = 1;
+pub const READS: u32 = 2;
 
 /// What every listed device must read before the log is frozen.
 pub const GATE: u32 = 2;
