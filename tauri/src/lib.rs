@@ -71,7 +71,17 @@ fn shell() -> &'static Arc<Shell> {
 }
 
 fn log(text: impl AsRef<str>) {
-    eprintln!("[one-tauri {:>6} ms] {}", SHELL.get().map_or(0, |s| s.started.elapsed().as_millis()), text.as_ref());
+    let line = format!("[one-tauri {:>6} ms] {}", SHELL.get().map_or(0, |s| s.started.elapsed().as_millis()), text.as_ref());
+    eprintln!("{line}");
+    // On a phone, where stderr goes nowhere an agent reads: a file in the app's data folder too.
+    #[cfg(mobile)]
+    if let Some(s) = SHELL.get() {
+        use std::io::Write;
+        let _ = std::fs::create_dir_all(&s.data);
+        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(s.data.join("shell.log")) {
+            let _ = writeln!(f, "{line}");
+        }
+    }
 }
 
 impl Shell {

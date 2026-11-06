@@ -9,8 +9,9 @@ publish = false
 
 [lib]
 name = "one_tauri"
-# A static library for the iPhone's Xcode project, a cdylib for Android's, an rlib for the desktop program.
-crate-type = ["staticlib", "cdylib", "rlib"]
+# A static library for the iPhone's Xcode project, an rlib for the desktop program. (Android would want a cdylib, which
+# on iOS fails to link: its Swift plugin is linked only into the app.)
+crate-type = ["staticlib", "rlib"]
 
 [workspace]
 members = [".", "note", "plugin"]

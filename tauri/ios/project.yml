@@ -91,6 +91,8 @@ targets:
       - sdk: MetalKit.framework
       - sdk: QuartzCore.framework
       - sdk: Security.framework
+      # The client's iroh asks the network's state.
+      - sdk: SystemConfiguration.framework
       - sdk: UIKit.framework
       - sdk: WebKit.framework
     preBuildScripts:
