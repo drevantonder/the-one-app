@@ -150,7 +150,7 @@ impl Node {
     }
 
     /// The keys of `global`'s entries in each of its epochs given.
-    async fn log_key_of(&self, epochs: &crate::db::Keys) -> Result<crate::db::Keys> {
+    pub(super) async fn log_key_of(&self, epochs: &crate::db::Keys) -> Result<crate::db::Keys> {
         let bucket = self.bucket()?;
         let mut out = crate::db::Keys::new();
         for (n, epoch) in epochs {

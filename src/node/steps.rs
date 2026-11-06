@@ -227,7 +227,13 @@ impl Node {
         let mut log_read = false;
         loop {
             let name = crate::db::step_name(&prefix, at + 1);
-            let keys = self.log_key(&Scope::Global).await?;
+            let keys = match self.log_key(&Scope::Global).await {
+                Ok(keys) => keys,
+                // Not given `global`'s newest epoch yet, as between its own new epoch's entry and its seals: it reads
+                // with those it holds, and a step under the newest waits for it, as one under any epoch not handed yet.
+                Err(err) if err.is::<NotGiven>() => self.log_key_of(&self.epochs_held(&Scope::Global).await?.0).await?,
+                Err(err) => return Err(err),
+            };
             let Some(o) = crate::bucket::Bucket::get(&bucket, &name).await? else {
                 steps::missing(&bucket, &keys, &Scope::Global, at + 1).await?;
                 break;

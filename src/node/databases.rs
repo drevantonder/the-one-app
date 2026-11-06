@@ -81,20 +81,29 @@ impl Node {
     /// epoch but its entry. The newest must be one of them. With `make`, a scope with no epoch yet gets its first here,
     /// if this device's person may make it: an admin of the group, or the person whose scope it is.
     pub(crate) async fn epoch_keys(&self, scope: &Scope, make: bool) -> Result<crate::db::Keys> {
+        let (keys, newest) = self.epochs_held(scope).await?;
+        if newest == 0 {
+            if make && *scope != Scope::Global {
+                return Box::pin(self.make_first_epoch(scope)).await;
+            }
+            bail!(NotGiven(scope.clone(), self.device_name()));
+        }
+        ensure!(keys.contains_key(&newest), NotGiven(scope.clone(), self.device_name()));
+        self.0.epochs.lock().unwrap().insert(scope.clone(), keys.clone());
+        Ok(keys)
+    }
+
+    /// The epochs of a scope this device opens, as `epoch_keys` finds them, even while it wasn't given the newest (as
+    /// between its own new epoch's entry and its seals), and the newest's number: 0 for none.
+    pub(super) async fn epochs_held(&self, scope: &Scope) -> Result<(crate::db::Keys, u32)> {
         // `global`'s as replay says, so it's read even while who's who doesn't build; another's not then.
         let hashes = self.with(|i| Ok(if *scope == Scope::Global { i.r.global_epochs() } else { i.r.db().epoch_hashes(scope) }))?;
         let newest = hashes.keys().next_back().copied().unwrap_or(0);
         let kept = self.0.epochs.lock().unwrap().get(scope).cloned().unwrap_or_default();
         // Kept only while each is still the one its entry made.
         let mut keys: crate::db::Keys = kept.into_iter().filter(|(n, k)| hashes.get(n) == Some(&crate::keys::epoch_hash(k))).collect();
-        if newest > 0 && keys.contains_key(&newest) {
-            return Ok(keys);
-        }
-        if newest == 0 {
-            if make && *scope != Scope::Global {
-                return Box::pin(self.make_first_epoch(scope)).await;
-            }
-            bail!(NotGiven(scope.clone(), self.device_name()));
+        if newest == 0 || keys.contains_key(&newest) {
+            return Ok((keys, newest));
         }
         for (n, hash) in &hashes {
             if !keys.contains_key(n)
@@ -103,9 +112,7 @@ impl Node {
                 keys.insert(*n, key);
             }
         }
-        ensure!(keys.contains_key(&newest), NotGiven(scope.clone(), self.device_name()));
-        self.0.epochs.lock().unwrap().insert(scope.clone(), keys.clone());
-        Ok(keys)
+        Ok((keys, newest))
     }
 
     /// Epoch `n` of a scope as it's sealed to this device in the bucket, if it's there and its hash is `hash`.
