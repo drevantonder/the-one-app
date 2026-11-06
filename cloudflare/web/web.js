@@ -1240,7 +1240,13 @@ const h = OneUI.react.createElement;
     const method = String(m.method || "GET").toUpperCase();
     const body = method === "GET" ? undefined : m.body ?? {};
     if (url.pathname === "/v1/call" && body && typeof body === "object") body.client = about?.client || "web";
-    // The app's client signs these itself, as it asks.
+    if (native) {
+      const out = await native.signs(method, url.pathname, body || {});
+      if (out != null) {
+        await refreshState().catch(() => {});
+        return out;
+      }
+    }
     const own = !native && signs[`${method} ${url.pathname}`];
     if (own) {
       if (!device) throw new Error("This device hasn't been approved yet.");

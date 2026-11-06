@@ -68,7 +68,7 @@ fn main() {
     println!("cargo:rustc-env=TAURI_CONFIG={config}");
     println!("cargo:rustc-env=IDENTIFIER={}", identifier(platform));
     println!("cargo:rerun-if-env-changed=CONFIG");
-    let commands = tauri_build::AppManifest::new().commands(&["native", "address", "sign_in", "join", "wait", "fetch", "read", "cancel", "removed", "sign_out", "notify", "copy", "open", "save", "changed", "main", "login", "quit", "panel", "fit", "badge", "computer_use", "pair", "haptic", "scan", "menu", "appearance", "menubar"]);
+    let commands = tauri_build::AppManifest::new().commands(&["native", "address", "sign_in", "join", "wait", "fetch", "read", "cancel", "signs", "removed", "sign_out", "notify", "copy", "open", "save", "changed", "main", "login", "quit", "panel", "fit", "badge", "computer_use", "pair", "haptic", "scan", "menu", "appearance", "menubar"]);
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(commands)).expect("the app's build")
 }
 

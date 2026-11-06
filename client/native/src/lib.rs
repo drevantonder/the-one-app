@@ -549,6 +549,17 @@ fn cancel(id: u64) {
     }
 }
 
+/// What Settings changes that this device signs itself (`Device::settings`) → its answer, or null for a path it leaves
+/// to a node.
+#[tauri::command]
+async fn signs(method: String, path: String, body: Value) -> Result<Value, String> {
+    let device = app().device()?;
+    match device.settings(&method, &path, &body).await {
+        Some(out) => out.map_err(|e| e.to_string()),
+        None => Ok(Value::Null),
+    }
+}
+
 /// Whether this device was taken out of its person's devices, as the relay says.
 #[tauri::command]
 async fn removed() -> bool {
@@ -1206,7 +1217,7 @@ fn control(port: u16) {
 
 /// Every command a page may ask the app.
 fn commands() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static {
-    tauri::generate_handler![native, address, sign_in, join, wait, fetch, read, cancel, removed, sign_out, notify, copy, open, save, changed, main, login, computer_use, pair, quit, panel, fit, badge, haptic, scan, menu, appearance, menubar]
+    tauri::generate_handler![native, address, sign_in, join, wait, fetch, read, cancel, signs, removed, sign_out, notify, copy, open, save, changed, main, login, computer_use, pair, quit, panel, fit, badge, haptic, scan, menu, appearance, menubar]
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
