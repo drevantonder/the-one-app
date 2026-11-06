@@ -243,6 +243,20 @@ export async function idx(entries, name) {
   return out;
 }
 
+/// The objects a pack's index (git's version 2) lists: each one's hash, CRC and offset, as `check` gives them.
+export function listed(index) {
+  const view = new DataView(index.buffer, index.byteOffset, index.byteLength);
+  const n = view.getUint32(8 + 4 * 255);
+  const crcs = 8 + 1024 + n * 20, offsets = crcs + n * 4, large = offsets + n * 4;
+  const entries = [];
+  for (let i = 0; i < n; i++) {
+    let offset = view.getUint32(offsets + 4 * i);
+    if (offset & 0x80000000) offset = Number(view.getBigUint64(large + 8 * (offset & 0x7fffffff)));
+    entries.push({ sha: hex(index.subarray(8 + 1024 + i * 20, 8 + 1024 + (i + 1) * 20)), crc: view.getUint32(crcs + 4 * i), offset });
+  }
+  return entries;
+}
+
 /// Someone and when, from `Name <email> 1700000000 +0100`.
 function person(line) {
   const m = /^(.*?) <([^>]*)> (\d+) ([+-]\d{4})$/.exec(line || "");

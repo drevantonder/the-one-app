@@ -8,7 +8,7 @@
 // Each push adds a pack, so the newest ones are merged while they're smaller than the one before them (sizes roughly
 // double going back), until a pack passes FROZEN: a fetch downloads whole packs, so a merge rewrites at most that much
 // of what someone behind already has.
-import { check, idx, merge, objects } from "./git.js";
+import { check, idx, listed, merge } from "./git.js";
 
 const FROZEN = 16 << 20;
 const ZERO = "0".repeat(40);
@@ -102,7 +102,6 @@ async function receive(ctx, g, api, owner, name, found, hash) {
     r = made.r;
   }
 
-  const kept = (await g.query("select hash from packs where repo = ? order by time, hash", [r.id])).map((p) => p.hash);
   let added = null;
   if (at < bytes.length) {
     const pack = bytes.subarray(at);
@@ -114,7 +113,9 @@ async function receive(ctx, g, api, owner, name, found, hash) {
     }
     if (checked.entries.length) added = { bytes: pack, ...checked };
   }
-  const have = await objects(ctx, kept);
+  // What the repo has, from its packs' indexes, read only if a branch moves to something the push doesn't hold.
+  let have;
+  const has = async (sha) => (have ??= await kept(ctx, g, r.id)).has(sha);
   const fresh = new Set(added?.entries.map((e) => e.sha));
   const branches = new Map((await g.query("select branch, head from branches where repo = ?", [r.id])).map((b) => [b.branch, b.head]));
   const lines = [];
@@ -122,7 +123,7 @@ async function receive(ctx, g, api, owner, name, found, hash) {
     const branch = ref.startsWith("refs/heads/") ? ref.slice(11) : null;
     const why = !branch || !api.BRANCH.test(branch) ? "only branches can be pushed"
       : (branches.get(branch) ?? ZERO) !== old ? `${branch} has moved: fetch, then push again`
-      : head !== ZERO && !fresh.has(head) && !have.has(head) ? `the push doesn't hold ${head.slice(0, 12)}`
+      : head !== ZERO && !fresh.has(head) && !(await has(head)) ? `the push doesn't hold ${head.slice(0, 12)}`
       : null;
     if (why) { lines.push(`ng ${ref} ${why}\n`); continue; }
     api.moveBranch(ctx, g, r.id, branch, old === ZERO ? null : old, head === ZERO ? null : head);
@@ -131,6 +132,13 @@ async function receive(ctx, g, api, owner, name, found, hash) {
   }
   if (added && lines.some((l) => l.startsWith("ok "))) await keep(ctx, g, r.id, added);
   return report("ok", lines);
+}
+
+/// The objects in the packs of the repo with id `repo`, by hash.
+async function kept(ctx, g, repo) {
+  const have = new Set();
+  for (const p of await indexed(ctx, g, repo)) for (const e of listed(await ctx.blob.get(p.idx))) have.add(e.sha);
+  return have;
 }
 
 /// Keeps a pushed pack for the repo with id `repo`, then merges its newest packs while each is smaller than twice the ones after it.
@@ -148,10 +156,7 @@ async function keep(ctx, g, repo, pack) {
   const pushed = newest.at(-1);
   let out = pushed;
   if (old.length) {
-    const parts = await Promise.all(old.map(async (r) => {
-      const bytes = await ctx.blob.get(r.pack);
-      return { bytes, entries: (await check(bytes)).entries };
-    }));
+    const parts = await Promise.all(old.map(async (r) => ({ bytes: await ctx.blob.get(r.pack), entries: listed(await ctx.blob.get(r.idx)) })));
     // The packs merged are let go of, so the merge is read back whole first: unless it holds every object they do,
     // they're kept as they are and the pushed pack beside them.
     try {
