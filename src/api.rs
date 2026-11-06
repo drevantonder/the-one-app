@@ -825,82 +825,80 @@ pub(crate) fn tagged(headers: &axum::http::HeaderMap, tag: String, answer: impl 
 
 #[cfg(test)]
 mod tests {
-    /// Who may ask each route, all of them: a route that lets in more than it should gives a sign-in, or a client
-    /// device, this machine's rights, so any change to this list is one to look at in review.
-    #[test]
-    fn who_may_ask_each_route() {
-        use super::Who::*;
-        let want = [
-            ("/mcp", Clients),
-            ("/llms.txt", ThisMachine),
-            ("/skills/{name}/{*path}", ThisMachine),
-            ("/v1/state", SignedIn),
-            ("/v1/keys", SignedIn),
-            ("/v1/apps", SignedIn),
-            ("/v1/labs", SignedIn),
-            ("/v1/images/{name}", Anyone),
-            ("/v1/call", SignedIn),
-            ("/v1/widgets", SignedIn),
-            ("/v1/badges", SignedIn),
-            ("/v1/create", ThisMachine),
-            ("/v1/pair", SignedIn),
-            ("/v1/join", ThisMachine),
-            ("/v1/name", SignedIn),
-            ("/v1/remove", SignedIn),
-            ("/v1/erase", SignedIn),
-            ("/v1/role", SignedIn),
-            ("/v1/settings", SignedIn),
-            ("/v1/steps", SignedIn),
-            ("/v1/steps/global", SignedIn),
-            ("/v1/runs", SignedIn),
-            ("/v1/group", SignedIn),
-            ("/v1/invite", SignedIn),
-            ("/v1/invite-link", SignedIn),
-            ("/v1/devices/requests", SignedIn),
-            ("/v1/devices/approve", SignedIn),
-            ("/v1/devices/refuse", SignedIn),
-            ("/v1/devices/forget-sign-in", SignedIn),
-            ("/v1/app-schedules", ThisMachine),
-            ("/v1/accept", SignedIn),
-            ("/v1/handle", SignedIn),
-            ("/v1/member", SignedIn),
-            ("/v1/deploy", SignedIn),
-            ("/v1/install", SignedIn),
-            ("/v1/schedule", ThisMachine),
-            ("/v1/arrange", SignedIn),
-            ("/v1/retire", SignedIn),
-            ("/v1/service", SignedIn),
-            ("/v1/fork", ThisMachine),
-            ("/v1/source/{app}", ThisMachine),
-            ("/v1/storage", ThisMachine),
-            ("/v1/backups", SignedIn),
-            ("/v1/backups/now", SignedIn),
-            ("/v1/backups/place", SignedIn),
-            ("/v1/backups/request", SignedIn),
-            ("/v1/backups/check", SignedIn),
-            ("/v1/vault", SignedIn),
-            ("/v1/vault/requests", SignedIn),
-            ("/v1/vault/request", SignedIn),
-            ("/v1/vault/answer", SignedIn),
-            ("/v1/vault/fetch", SignedIn),
-            ("/v1/vault/grant", ThisMachine),
-            ("/v1/node-release", ThisMachine),
-            ("/v1/service-release", ThisMachine),
-            ("/v1/blobs", SignedIn),
-            ("/v1/blobs/{hash}", SignedIn),
-            ("/v1/events", SignedIn),
-            ("/v1/screens/{app}/{screen}", SignedIn),
-            ("/hooks/prompt", ThisMachine),
-            ("/v1/services/{app}", ThisMachine),
-            ("/v1/services/{app}/calls", ThisMachine),
-            ("/v1/services/{app}/calls/{id}", ThisMachine),
-            ("/v1/services/{app}/calls/{id}/vault", ThisMachine),
-            (super::APP_ROUTE, SignedIn),
-        ];
-        let mut got = super::routes().who().to_vec();
-        let mut want = want.to_vec();
-        got.sort_by_key(|(p, _)| *p);
-        want.sort_by_key(|(p, _)| *p);
-        assert_eq!(got, want);
+    use super::Who;
+
+    /// Who asks, as `only_this_machine` tells them apart.
+    #[derive(Clone, Copy, Debug)]
+    enum Asker {
+        Nobody,
+        SignIn,
+        Client,
+        ThisMachine,
+    }
+
+    /// Every route refuses whoever its `Who` doesn't let in, and lets the rest on to who they are: a sign-in to its
+    /// token's check, a client device to whether it's one of the network's, this machine's own programs anywhere.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn each_route_refuses_whom_its_who_says() {
+        let dir = std::env::temp_dir().join(format!("one-routes-{}", rand::random::<u64>()));
+        let node = crate::node::Node::start(&dir).await.unwrap();
+        let routes = super::routes();
+        let who: Vec<(&str, Who)> = routes.who().to_vec();
+        // Only a client device's requests over iroh carry `FromClient`, which the node puts on them: here, a header.
+        let router = super::guarded(routes, node.clone()).layer(axum::middleware::from_fn(|mut req: axum::extract::Request, next: axum::middleware::Next| async move {
+            if req.headers().contains_key("x-test-client") {
+                req.extensions_mut().insert(super::FromClient([7; 32], u64::MAX));
+            }
+            next.run(req).await
+        }));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let at = listener.local_addr().unwrap();
+        tokio::spawn(super::serve(listener, router));
+        let token = node.local_token().to_string();
+        let asked = tokio::task::spawn_blocking(move || {
+            let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).build().into();
+            let mut asked = Vec::new();
+            for (route, who) in who {
+                let path: String = route.split('/').map(|s| if s.starts_with('{') { "x" } else { s }).collect::<Vec<_>>().join("/");
+                for asker in [Asker::Nobody, Asker::SignIn, Asker::Client, Asker::ThisMachine] {
+                    let said: Vec<(u16, serde_json::Value)> = ["GET", "POST"]
+                        .into_iter()
+                        .filter_map(|method| {
+                            let mut req = ureq::http::Request::builder().method(method).uri(format!("http://{at}{path}")).header("content-type", "application/json");
+                            req = match asker {
+                                Asker::Nobody => req,
+                                Asker::SignIn => req.header("authorization", "Bearer not-a-sign-in"),
+                                Asker::Client => req.header("x-test-client", "1"),
+                                Asker::ThisMachine => req.header(super::LOCAL_TOKEN_HEADER, &token).header("authorization", "Bearer not-a-sign-in"),
+                            };
+                            let mut resp = agent.run(req.body("{}".to_string()).unwrap()).unwrap();
+                            let status = resp.status().as_u16();
+                            (status != 405).then(|| (status, resp.body_mut().read_json().unwrap_or_default()))
+                        })
+                        .collect();
+                    assert!(!said.is_empty(), "{route} takes neither GET nor POST");
+                    asked.extend(said.into_iter().map(|(status, body)| (route, who, asker, status, body)));
+                }
+            }
+            asked
+        })
+        .await
+        .unwrap();
+        for (route, who, asker, status, body) in asked {
+            let refused = status == 403 && body["code"] != crate::protocol::code::NOT_LET_IN;
+            let (want_refused, then) = match (who, asker) {
+                (Who::Anyone, _) => (false, None),
+                (_, Asker::Nobody) => (true, None),
+                (Who::SignedIn, Asker::SignIn) | (_, Asker::ThisMachine) => (false, Some(401)),
+                (_, Asker::SignIn) => (true, None),
+                (Who::SignedIn | Who::Clients, Asker::Client) => (false, Some(403)),
+                (Who::ThisMachine, Asker::Client) => (true, None),
+            };
+            assert_eq!(refused, want_refused, "{route} ({who:?}) as {asker:?}: {status} {body}");
+            if let Some(then) = then {
+                assert_eq!(status, then, "{route} ({who:?}) as {asker:?} goes on to who they are: {body}");
+            }
+        }
+        std::fs::remove_dir_all(&dir).ok();
     }
 }
