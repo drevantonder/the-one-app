@@ -111,6 +111,9 @@ pub fn run(tag: Option<&str>) -> Result<()> {
         if !sends {
             println!("Nothing to send out: what changed since the last update here isn't in any build.");
         }
+        if !macs.is_empty() {
+            says_wait(short);
+        }
         if !missed {
             std::fs::write(&done, &this)?;
         }
@@ -153,6 +156,9 @@ pub fn run(tag: Option<&str>) -> Result<()> {
     let cloudflare_failed = deploy_cloudflare(&linux, short);
 
     let Some(tag) = tag else {
+        if !macs.is_empty() {
+            says_wait(short);
+        }
         let after = finish(after);
         ensure!(!failed, "not every device runs {short}");
         ensure!(!cloudflare_failed, "every device runs {short}, but it isn't deployed to Cloudflare");
@@ -609,7 +615,7 @@ fn turn() -> Result<std::fs::File> {
     let file = std::fs::File::create(cache().join("update.lock"))?;
     // SAFETY: flock on a descriptor this function owns; the lock goes when the file closes.
     if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
-        println!("Another update is running here; this one goes next, with main's tip then.");
+        println!("Another update is running here: waiting for it to end, then this one runs with main's tip (and sends nothing if that update already sent it).");
         ensure!(unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) } == 0, "couldn't wait for the other update: {}", std::io::Error::last_os_error());
     }
     Ok(file)
@@ -913,6 +919,198 @@ fn await_builds(wanted: &[Value], commit: &str, since: Instant, limit: Duration)
             return true;
         }
         std::thread::sleep(Duration::from_secs(2));
+    }
+}
+
+/// What an update says last, when the Macs are still building in the background.
+fn says_wait(short: &str) {
+    println!("The Macs build it in the background: {CLI} status --until {short} waits for them, and for every device's services.");
+}
+
+/// `status --until <commit> [--device <name>]… [--timeout <time>]`, with the words after `status`.
+pub fn wait(args: &[String]) -> Result<()> {
+    let (mut commit, mut names, mut limit) = (None, Vec::new(), Duration::from_secs(10 * 60));
+    let mut words = args.iter().skip_while(|a| *a != "status").skip(1);
+    while let Some(flag) = words.next() {
+        let typed = |m: String| anyhow::Error::from(crate::tools::Failed::Typed(m));
+        let value = words.next().filter(|v| !v.starts_with("--")).ok_or_else(|| typed(format!("{flag} takes a value: see {CLI} status --help")))?;
+        match flag.as_str() {
+            "--until" => commit = Some(value.to_lowercase()),
+            "--device" => names.extend(value.split(',').map(str::to_string)),
+            "--timeout" => {
+                let (n, unit) = value.split_at(value.find(|c: char| !c.is_ascii_digit()).unwrap_or(value.len()));
+                let n: u64 = n.parse().map_err(|_| typed("--timeout is like 90s, 10m or 1h".into()))?;
+                limit = Duration::from_secs(n * match unit { "" | "s" => 1, "m" => 60, "h" => 3600, _ => return Err(typed("--timeout is like 90s, 10m or 1h".into())) });
+            }
+            other => return Err(typed(format!("{other} isn't an input of status --until: see {CLI} status --help"))),
+        }
+    }
+    let commit = commit.unwrap_or_default();
+    ensure!(commit.len() >= 7 && commit.chars().all(|c| c.is_ascii_hexdigit()), "give the commit: {CLI} status --until $(git rev-parse HEAD)");
+    wait_until(&commit, &names, limit)
+}
+
+/// Waits until each of the user's devices (or those named) runs `commit`, or a build with it in, and its services
+/// answer, or a Mac's build of it fails; says what each did, and fails unless all made it. Shell on a Mac says how its
+/// builds went, which `follow` set up; a device that is off or restarting is waited for like the rest.
+fn wait_until(commit: &str, names: &[String], limit: Duration) -> Result<()> {
+    let short = &commit[..commit.len().min(12)];
+    // Says so when no node answers, which later polls (a node restarting on the new build) never do.
+    get("/v1/state")?;
+    let all: Vec<Value> = devices().into_iter().filter(|d| d["service"].is_null()).collect();
+    ensure!(!all.is_empty(), "no devices are listed here yet");
+    for n in names {
+        ensure!(all.iter().any(|d| d["name"] == n.as_str()), "no device named {n}: {}", all.iter().filter_map(|d| d["name"].as_str()).collect::<Vec<_>>().join(", "));
+    }
+    // A device by its key and name, as it was at the start: and the build it was on, for what it changed from.
+    let mut open: Vec<(String, String, String)> =
+        all.iter().filter(|d| names.is_empty() || names.iter().any(|n| d["name"] == n.as_str())).map(|d| (d["key"].as_str().unwrap_or("").into(), d["name"].as_str().unwrap_or("").into(), d["build"].as_str().unwrap_or("?").into())).collect();
+    let (started, deadline) = (Instant::now(), Instant::now() + limit);
+    let (mut fetched, mut reasons, mut asked, mut phones) = (std::collections::HashSet::new(), std::collections::HashMap::new(), std::collections::HashMap::<String, Instant>::new(), std::collections::HashMap::<String, String>::new());
+    let mut failed = false;
+    loop {
+        let now = devices();
+        open.retain(|(key, name, was)| {
+            let Some(d) = now.iter().find(|d| d["key"] == key.as_str()) else { return true };
+            let build = d["build"].as_str().unwrap_or("");
+            let mac = d["target"].as_str().is_some_and(|t| t.ends_with("-apple-darwin"));
+            // What the Mac's build job says, not more than every few seconds: how its build is going, and its iPhone.
+            let mut said = None;
+            let running = has(commit, build, &mut fetched);
+            if mac && d["online"] == true && asked.get(key).is_none_or(|t| t.elapsed() > Duration::from_secs(6)) {
+                asked.insert(key.clone(), Instant::now());
+                said = mac_said(d);
+                if let Some(phone) = said.as_ref().and_then(|s| s.phone.clone()) {
+                    phones.insert(key.clone(), phone);
+                }
+            }
+            if running {
+                // Switched on and not yet answering: starting, or what went wrong.
+                let troubled: Vec<String> = d["parts"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter(|p| p["on"] == true)
+                    .filter_map(|p| {
+                        let why = p["problem"].as_str().map(str::to_string).or_else(|| p["doing"].as_str().map(|d| d.to_lowercase()))?;
+                        Some(format!("{}: {}", p["name"].as_str()?, why.trim_end_matches('.')))
+                    })
+                    .collect();
+                if troubled.is_empty() {
+                    if was == build {
+                        println!("  {name}: already running {build}");
+                    } else {
+                        println!("  {name}: {was} → {build} ({}s)", started.elapsed().as_secs());
+                    }
+                    if let Some(phone) = phones.get(key) {
+                        println!("    {phone}");
+                    }
+                    return false;
+                }
+                reasons.insert(key.clone(), format!("runs {build}, but its services aren't all answering: {}", troubled.join("; ")));
+                return true;
+            }
+            if let Some(s) = said.as_ref() {
+                if let Some(log) = &s.failed_log {
+                    failed = true;
+                    println!("  {name}: its build of {} failed: the end of its log, ~/Library/Caches/{CLI}/update.log on {name}, is", &s.tried[..s.tried.len().min(12)]);
+                    for line in log.lines() {
+                        println!("      {line}");
+                    }
+                    if let Some(phone) = phones.get(key) {
+                        println!("    {phone}");
+                    }
+                    return false;
+                }
+                reasons.insert(key.clone(), s.waiting_for(commit, short, build, &mut fetched));
+            } else if d["online"] != true {
+                reasons.insert(key.clone(), format!("offline, on {build}; it updates itself when it's back"));
+            } else if !mac {
+                reasons.insert(key.clone(), format!("still on {build}"));
+            }
+            true
+        });
+        if open.is_empty() {
+            ensure!(!failed, "not every device runs {short}");
+            return Ok(());
+        }
+        if Instant::now() > deadline {
+            for (key, name, _) in &open {
+                println!("  {name}: {}", reasons.get(key).map_or("not answering".to_string(), |r| r.clone()));
+            }
+            println!("Gave up waiting for {short} after {}s.", limit.as_secs());
+            bail!("not every device runs {short}");
+        }
+        std::thread::sleep(Duration::from_secs(3));
+    }
+}
+
+/// Whether `build` (what a device runs) is `commit` or has it in: a later update sends main's tip, which holds it.
+/// Asks this folder's git, which fetches once for a build it hasn't got.
+fn has(commit: &str, build: &str, fetched: &mut std::collections::HashSet<String>) -> bool {
+    if build.is_empty() {
+        return false;
+    }
+    if commit.starts_with(build) || build.starts_with(commit) {
+        return true;
+    }
+    let ancestor = || Command::new("git").args(["merge-base", "--is-ancestor", commit, build]).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).status().ok().and_then(|s| s.code());
+    match ancestor() {
+        Some(0) => true,
+        Some(1) => false,
+        _ if fetched.insert(build.to_string()) => {
+            quiet(Command::new("git").args(["fetch", "-q", "origin"]));
+            ancestor() == Some(0)
+        }
+        _ => false,
+    }
+}
+
+/// What a Mac's update job files say: the build it was last asked for (`want`) and tried, what it built, and its iPhone.
+struct MacSaid {
+    want: String,
+    tried: String,
+    built: String,
+    failed_log: Option<String>,
+    phone: Option<String>,
+}
+
+fn mac_said(mac: &Value) -> Option<MacSaid> {
+    let script = format!(
+        r#"c="$HOME/Library/Caches/{CLI}"
+for f in want built tried phone.built phone.installed phone.failed; do printf '%s=%s\n' "$f" "$(cat "$c/$f" 2>/dev/null)"; done
+echo ---; tail -n 8 "$c/failed.log" 2>/dev/null"#
+    );
+    let r = shell(mac, &script, 30).ok().filter(|r| r["exit"] == 0)?;
+    let out = r["stdout"].as_str()?;
+    let (values, log) = out.split_once("---\n")?;
+    let get = |key: &str| values.lines().find_map(|l| l.strip_prefix(&format!("{key}="))).unwrap_or("").trim().to_string();
+    let commit_of = |v: String| v.split(' ').next().unwrap_or("").to_string();
+    let (want, tried, built) = (commit_of(get("want")), commit_of(get("tried")), commit_of(get("built")));
+    let (phone_built, installed, phone_failed) = (commit_of(get("phone.built")), commit_of(get("phone.installed")), commit_of(get("phone.failed")));
+    let twelve = |c: &str| c[..c.len().min(12)].to_string();
+    let phone = match (phone_built.is_empty(), installed.is_empty()) {
+        _ if !phone_failed.is_empty() => Some(format!("iPhone: its build of {} failed", twelve(&phone_failed))),
+        (true, true) => None,
+        _ if phone_built != installed && !phone_built.is_empty() => Some(format!("iPhone: has {}, {} built and installs when it's reachable and unlocked", if installed.is_empty() { "nothing".to_string() } else { twelve(&installed) }, twelve(&phone_built))),
+        _ => Some(format!("iPhone: has {}", twelve(&installed))),
+    };
+    // Failed: the last thing it was asked is what it tried, and that isn't what it built (a newer ask would differ).
+    let failed = !tried.is_empty() && tried == want && tried != built;
+    Some(MacSaid { failed_log: failed.then(|| log.trim_end().to_string()), want, tried, built, phone })
+}
+
+impl MacSaid {
+    /// Why a Mac that doesn't run `commit` yet doesn't.
+    fn waiting_for(&self, commit: &str, short: &str, build: &str, fetched: &mut std::collections::HashSet<String>) -> String {
+        let twelve = |c: &str| c[..c.len().min(12)].to_string();
+        if has(commit, &self.built, fetched) {
+            format!("built {}, its node is restarting on it", twelve(&self.built))
+        } else if has(commit, &self.want, fetched) {
+            format!("building {} (on {build})", twelve(&self.want))
+        } else {
+            format!("on {build}; nothing has asked it to build {short} yet: {CLI} update does")
+        }
     }
 }
 

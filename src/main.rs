@@ -20,6 +20,10 @@ fn every_command() -> String {
     format!(
         "Usage:
   {CLI} status                         this device, and the people, groups and devices in {YOURS}
+  {CLI} status --until <commit> [--device <name>[,<name>…]] [--timeout <10m>]
+                                       wait until every device (or those named) runs that commit, or a later build, and
+                                       its services answer, or a build fails; says what each did, and fails unless all
+                                       made it. After {CLI} update: {CLI} status --until $(git rev-parse HEAD)
   {CLI} sign-in [--address <url>]      sign this machine in, as you: approve its code by signing in on any of
                                        your devices; {CLI} and {CLI} mcp here then act as you. Where {NAME} doesn't
                                        run, this computer becomes one of your devices, once you approve its next
@@ -356,6 +360,7 @@ fn run(args: Vec<String>) -> Result<()> {
             let (apps, addable) = code::catalogs()?;
             println!("{}", code::search(&apps, &addable, &words.join(" "), limit, code::For::Cli));
         }
+        ["status"] if flags.contains_key("until") => update::wait(&args)?,
         ["status"] => status(&get("/v1/state")?),
         ["apps"] => {
             let groups = get("/v1/state")?["install"]["groups"].clone();
