@@ -1,7 +1,9 @@
-//! What the Workers' JavaScript and the Rust say to each other and must say the same: the names requests are signed
-//! under, how long they count, the roles a device has, the names objects have in the bucket and the answers refused
-//! requests get. Rust is where each is written; `javascript` is the module the Workers and the web client import
-//! (`shared/protocol.js`), made from it whenever they're built, so nothing is copied by hand.
+//! What the machines, and the languages they're written in, say to each other and must say the same: the names requests
+//! are signed under, how long they count, the headers and message kinds between devices, the paths more than one place
+//! names, the roles a device has, the names objects have in the bucket and the answers refused requests get. Rust is
+//! where each is written; `javascript` is the module the Workers and the web client import (`shared/protocol.js`), made
+//! from it whenever they're built, so nothing is copied by hand. Where a name can't be imported (a screen's request for a
+//! path, a Go service), `tests/contracts.rs` holds it to what's written here or in the routes.
 
 use serde_json::json;
 
