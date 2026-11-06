@@ -3,6 +3,7 @@
 mod cloudflare;
 mod contracts;
 mod e2e;
+mod map;
 mod sandbox;
 mod sim;
 

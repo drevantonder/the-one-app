@@ -1,3 +1,6 @@
+//! The One App's program, every machine's: the node, oned, the CLI and MCP, and what the Cloudflare node and clients
+//! share with them. The domain's words are GLOSSARY.md's; each module's doc says what it is.
+
 pub mod config {
     include!(concat!(env!("OUT_DIR"), "/config.rs"));
 }

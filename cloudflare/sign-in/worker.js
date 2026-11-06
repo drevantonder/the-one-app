@@ -1,5 +1,3 @@
-// Sign-in keeps its old name, auth, where machines depend on it: its Worker on Cloudflare (`<cli>-auth`), its
-// Durable Object (`Auth`), the paths under /api/auth and `one/auth` (src/cloudflare/workers.rs says why).
 // Sign-in: who you are, and nothing more. Better Auth, in a Durable Object: sign-in by passkey, or, on a
 // network whose people sign in with their work Google account (`SIGN_IN`), by Google at the network's domain
 // (`JOIN_DOMAIN`) too, though never for an admin (`passkey_only`), who signs in with a passkey; and an OAuth server (per
@@ -7,6 +5,9 @@
 // Code and ChatGPT. Its access tokens are JWTs signed with Ed25519, its keys at /api/auth/jwks, so nodes check them
 // offline. It opens nothing: keys are only on people's devices, so faking a sign-in opens nothing either. A passkey's
 // PRF output stays in the browser (pages.js).
+//
+// Sign-in keeps its old name, auth, where machines depend on it: its Worker on Cloudflare (`<cli>-auth`), its
+// Durable Object (`Auth`), the paths under /api/auth and `one/auth` (src/cloudflare/workers.rs says why).
 //
 // Nobody signs up uninvited, the network's first person too: an admin's device makes a secret, and tells sign-in its hash,
 // who it's for and until when, signed with its endpoint key (`POST /api/auth/invites`); opening `<address>/invite#
