@@ -454,7 +454,7 @@ impl Settings {
                 ("RELAY".into(), "service:relay".into(), false),
                 ("ADDRESS".into(), self.address.clone(), false),
                 ("NAME".into(), self.name.clone(), false),
-                // The Apple apps' bundle ids (apple/project.yml), which their pushes go to.
+                // The Apple apps' bundle ids (client/native/iphone/project.yml, mac/build.sh), which their pushes go to.
                 ("APNS_TOPICS".into(), json!([format!("app.{cli}.phone"), format!("app.{cli}.mac")]).to_string(), false),
             ];
             out.extend(self.push.iter().map(|(name, value)| (name.clone(), value.clone(), true)));

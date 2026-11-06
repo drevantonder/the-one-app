@@ -53,7 +53,7 @@ pub fn widgets() -> Vec<(String, String, String, String)> {
     out
 }
 
-/// A tree's most prominent text (the biggest, then the first that isn't muted), as apple/Shared/Views/WidgetTree.swift's
+/// A tree's most prominent text (the biggest, then the first that isn't muted), as the iPhone widget's (iphone/Widget/WidgetTree.swift)
 /// `headline`.
 fn headline(tree: &Value) -> Option<String> {
     fn texts(n: &Value, out: &mut Vec<(String, i32, bool)>) {

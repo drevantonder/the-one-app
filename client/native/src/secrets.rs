@@ -24,7 +24,7 @@ mod store {
     }
 }
 
-/// The Keychain, as the Mac and iPhone apps kept it (apple/Shared/DeviceKeys.swift, Auth.swift's `Keychain`): on an
+/// The Keychain, as the Mac and iPhone apps kept it (the Swift apps' DeviceKeys and Keychain, whose items this reads): on an
 /// iPhone readable once it's been unlocked since it started (a widget's button works from the lock screen), on this
 /// device only. The device keys are kept in the group Info.plist's `KeychainGroup` names, where the notification
 /// extension reads them too (the App Group's on an iPhone, the team's on a Mac built with push, in the data-protection

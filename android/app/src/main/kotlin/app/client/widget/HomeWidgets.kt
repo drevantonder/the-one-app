@@ -40,7 +40,7 @@ import java.io.File
 import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
 
-// The home screen's widgets, as the iPhone's (apple/Widget): the app leaves every page's widgets as it last saw them in
+// The home screen's widgets, as the iPhone's (client/native/iphone/Widget): the app leaves every page's widgets as it last saw them in
 // a file of its own, and has the home-screen widgets draw again whenever they change; between, they refresh themselves
 // every 15 minutes (or as the system allows) with the app's own sign-in.
 

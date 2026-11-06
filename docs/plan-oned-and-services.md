@@ -11,7 +11,7 @@ Today oned and the node are one program, and services are four different things:
 - **this program run again** as `oned <name>`: AI Usage and, since #1376, Agent Devices (`services::hosted`);
 - **a program in another language**, published with the release key: WhatsApp (`services/whatsapp`, Go,
   `service-release` entries, fetched by `oned::keep_parts`);
-- **Swift in the Mac app's process**: iMessage, Calendar, Contacts, Reminders, Computer (`apple/Mac/Services`, gone in
+- **Swift in the Mac app's process**: iMessage, Calendar, Contacts, Reminders, Computer (the old Mac app's Services, gone in
   phase 3), because macOS grants its privacy permissions to the Mac app.
 
 That costs us:
@@ -115,7 +115,7 @@ afresh (sign in to WhatsApp again), unless the service moves its own state, as W
 by itself.
 
 **What's deleted:** `services::built_in` and `hosted`, `src/shell.rs`, `src/models.rs`, `src/agents.rs`,
-`src/ai_usage.rs`, `src/agent_devices.rs` (into their apps' folders), `services/`, `apple/Mac/Services`, the Mac app's
+`src/ai_usage.rs`, `src/agent_devices.rs` (into their apps' folders), `services/`, the old Mac app's Services, the Mac app's
 TCC entitlements and usage strings, `service-release` entries, the `service` switch entries and Settings › Devices'
 per-service switches, and `apps_install_on` / `apps_remove_from`.
 
@@ -152,7 +152,7 @@ status, on a fresh throwaway network where each is switched on from nothing.
 
 Done for Shell, Models, AI Usage and Agent Devices (6bead05..2368cbc): each is `apps/<name>/service/`, a crate on
 `service/`; `one update` builds it here for Linux and publishes it before the node; a Mac app carries its own inside it
-(`Contents/MacOS/<cli>-<name>`, built by `apple/build.sh` with its node), which oned runs and never fetches
+(`Contents/MacOS/<cli>-<name>`, built by `client/native/mac/build.sh` with its node), which oned runs and never fetches
 (`oned::carried`), as a checkout's build does for `one throwaway`. Since nothing is built in any more, each runs only
 where an entry switches it on: every device of both networks got one for Shell, Models and AGENTS.md before the node
 stopped carrying them, and a new device is switched on in Settings › Devices, as phase 6 will ask.
@@ -170,12 +170,12 @@ records in the app's own database, which each person's node copied once from the
   macOS prompts in the helper's name and records it under the helper in Privacy & Security. If it records it under the
   Mac app instead, fall back to helpers started with `open -g` (LaunchServices), which are always their own.
 - Then each of iMessage, Calendar, Contacts, Reminders and Computer: source to `apps/<name>/service/` (a Swift package),
-  built by `apple/build.sh` into the helper, registered with oned as now over the loopback API.
+  built by `client/native/mac/build.sh` into the helper, registered with oned as now over the loopback API.
 - The Mac app drops its own entitlements and usage strings.
 - The person grants each permission again, once. Each app shows it as its problem box ("iMessage needs Full Disk Access.
   Allow it in System Settings." — Open Settings), which the helper already says in words today.
 
-Check: on the Mac, `apple/build.sh`, then from another device: `imessage_read`, `contacts_search`, `calendar_events`,
+Check: on the Mac, `client/native/mac/build.sh`, then from another device: `imessage_read`, `contacts_search`, `calendar_events`,
 `reminders_list`, `computer_screen`. Each permission asked once, under the helper's name.
 
 Done (2026-11-06). Unlike the above: macOS records the permissions of code inside an app as that app's, even when it's

@@ -1,4 +1,4 @@
-// The Widgets board's widgets (Win+W), as the iPhone's (apple/Widget): one kind, a widget from your pages, the one its
+// The Widgets board's widgets (Win+W), as the iPhone's (client/native/iphone/Widget): one kind, a widget from your pages, the one its
 // person chooses (another than those already pinned, until they do), drawn at the size it's placed at as an Adaptive
 // Card (WidgetCard.cs), its buttons and toggles running the widget's tools. Windows starts this helper as the
 // package's COM server for the board (Helper.cs). It draws from what the app keeps of every page's widgets for the

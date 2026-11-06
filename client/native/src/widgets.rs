@@ -1,6 +1,6 @@
 //! Every page's widgets, as the app last had them from the person's devices, kept where the platform's own widgets
 //! read them (the iPhone's home screen, the Windows Widgets board, Android's home screen, the Mac's menu bar), since
-//! those can't ask a node themselves: `widgets.json` in the iPhone widget's format (apple/Widget/Cache.swift's
+//! those can't ask a node themselves: `widgets.json` in the iPhone widget's format (iphone/Widget/Cache.swift's
 //! `WidgetCache`), `icons.json` with the Phosphor icons they draw, and `images/<first 12 bytes of the URL's SHA-256,
 //! hex>` for the pictures they show, which they can't download.
 

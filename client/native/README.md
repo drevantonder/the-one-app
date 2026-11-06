@@ -13,7 +13,7 @@ on a desktop.
 
 ## Replacing the old apps
 
-Until each platform's old app (`apple/`, `android/`) is gone, this is the list of what it does that this
+Until each platform's old app (`android/`) is gone, this is the list of what it does that this
 must too, ticked as it does and checked in `one throwaway`. Then this section goes, down to what the code can't say.
 
 Shared, every platform:
@@ -78,7 +78,7 @@ Windows VM by `windows/build.sh`; `one throwaway client windows`). The package k
       is taken as if typed on the welcome, as the old app took it: opened in the browser for its passkey, then "Made
       your passkey? Sign in with it." (web.js `opened`, e768aea5; not checked on Windows: the throwaway's address is http)
 
-Mac (`mac/build.sh`, the bundle `apple/build.sh` made, in the same identity: `app.<cli>.mac`, the Developer ID team,
+Mac (`mac/build.sh`, the old Swift app's bundle, in the same identity: `app.<cli>.mac`, the Developer ID team,
 the same designated requirement, so it reads the old app's Keychain items and defaults; `one throwaway client mac`, a
 build with its own id, folder and Keychain names beside the person's app, on the Mac `MAC` names to ssh):
 
@@ -98,7 +98,9 @@ build with its own id, folder and Keychain names beside the person's app, on the
 - [x] Per-widget menu bar items: one per widget kind, its headline as title (≤40), hidden when empty; a click shows
       it under the item (the panel's page with `widget`), a right click Open <app> / Hide from Menu Bar, which hides it
       (the old app's Hide never did); the main item's right-click menu shows a hidden one again (checked, the Mac: Repos'
-      item titled "No repos yet."). Their places in the menu bar aren't remembered (the old app's autosaveName)
+      item titled "No repos yet."). Each keeps its place in the menu bar (`widget.<kind>`, the old app's autosaveName),
+      and the panel's widget cards have a pin that shows a hidden one again or hides it (built, the Mac's build checked;
+      not seen: the Mac was locked)
 - [ ] The dock's count (Tauri's badge), the window, panel and widget popovers drawn: not yet seen (the Mac was locked)
 - [x] The old app's sign-in taken over (`mac::take_over`, the Keychain's same items): its address, sign-in client, Open
       at Login and hidden widgets from its defaults; no new sign-in, the same device key (checked on the real Mac at the
@@ -109,10 +111,43 @@ build with its own id, folder and Keychain names beside the person's app, on the
       seen, as the Mac's window was let in already
 - [ ] Join with a Pairing Code for a Mac whose node is in no network (the welcome's second button, `pair`): built, not
       checked (no Mac without a network to try it on)
-- [ ] Keyboard shortcuts: ⌘\ (fold the sidebar), ⌘⇧I (Pair a Computer), ⌘⇧J (Join) aren't carried; the Edit menu's and
-      ⌘W, ⌘Q are Tauri's own
+- [ ] Keyboard shortcuts, as the app menu's items, so a key pressed in a screen's frame works too: View › Fold Sidebar
+      (⌘\), File › Pair a Computer… (⌘⇧I, signed in: Settings › Devices with Add Device open), File › Join with a Pairing
+      Code… (⌘⇧J, while this Mac's node is in no network); the Edit menu's, ⌘W and ⌘Q are macOS's own (built, the Mac's
+      build checked; not seen: the Mac was locked)
 - Not carried: a Mac build with push (its notification extension): no custom build has one; notes show on a Mac only
   as they did, with none
 
-iPhone (`apple/Phone`, `Notifications`, `Widget`), Android (`android/`): each old app's full inventory lands here
-before that platform is written.
+iPhone (`iphone/`: its Xcode project from `project.yml`, built by `iphone/build.sh` for the simulator, the paired
+iPhone (`one update`) or TestFlight; the Swift in `Sources/` a Tauri plugin of the app's own, linked by build.rs; the
+home-screen widget in `Widget/`, the notification extension in `Notifications/`; `one throwaway client iphone`, a
+simulator of its own on the Mac). The old app's identity: `app.<cli>.phone`, `.widgets`, `.notifications`, the App
+Group `group.app.<cli>.phone`, which is also its Keychain group:
+
+- [x] Signed in and let in, in the throwaway: the welcome, then the pages side by side with dots, an app's screen with
+      a Back bar (checked, the simulator: Repos opened by `<cli>://open?app=repos`)
+- [x] Screens reach none of the app's commands: no `__TAURI_INTERNALS__` or `__oneNative` in a frame, no
+      `oneHeld` (touch and hold's handler, in a world of its own), the page out of reach, its IPC fetch refused, a post
+      to WebKit's `ipc` handler runs nothing (checked, the simulator, a frame of `frame.html`)
+- [x] The widgets kept in the App Group (`widgets.json`, `icons.json`, `images/`) for the home-screen widget, which
+      reads them as before (checked, the simulator: the files; the widget itself not added, which needs a touch)
+- [ ] Sign-in in the system's sheet (ASWebAuthenticationSession, Safari's passkeys, back at `<cli>://signed-in/`):
+      built; the throwaway signs in by the loopback instead, so not seen
+- [ ] The old app's sign-in taken over (`apple::take_over`, the same Keychain items in the group): no new sign-in on
+      the paired iPhone
+- [ ] Touch and hold lifts an icon or widget on the pages with its menu, and moving the finger carries it (`Lift`,
+      `__oneLifts`, `__oneDrag`); haptics; the document camera (`one.scan`); the share sheet and Quick Look for
+      `one.save` / `one.preview`: built; not tried (the simulator takes no touches from here, and has no camera)
+- [ ] Notification taps open their screen, Approve / Not Me answer a device asking to join (as the device), the
+      icon's count, a banner while it's open: built; not checked, as no build has push yet (below)
+- [ ] Push (`push = true` in config.toml, or PUSH=1): the notification extension opens each note with a device key from
+      the Keychain group; the token registered with the push Worker, topic `app.<cli>.phone`: built, not checked. It
+      waits on the App IDs' Push capability and an APNs key for the network's push Worker (Andre, top #87)
+- [ ] TestFlight (`iphone/build.sh testflight`, App Store Connect's API key; build number `<main's commits>.<config
+      repo's commits>`, rising with either): built, not run. It waits on an App Store Connect app for the custom
+      build's bundle id (PTC's, `app.ptc.phone`: Andre, top #87); then Google sign-in, receipt scan and photo upload in
+      Claims to check there
+- Not carried: Dynamic Type's text size in screens (the old app zoomed each screen by it); the iPhone's own menus for
+  `one.menu` (the web's, as Andre decided), but for what touch and hold lifts
+
+Android (`android/`): its old app's full inventory lands here before it's written.
