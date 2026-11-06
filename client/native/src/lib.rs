@@ -7,6 +7,7 @@
 
 mod secrets;
 mod signin;
+mod widgets;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -130,6 +131,48 @@ impl App {
     }
 }
 
+/// What a node answers at `path`, as JSON.
+async fn node_json(device: &one_client::Device, path: &str) -> Result<Value, String> {
+    let r = device.fetch("GET", path, Vec::new(), Vec::new()).await.map_err(|e| e.to_string())?;
+    let status = r.status;
+    let body = r.body.bytes().await.map_err(|e| e.to_string())?;
+    let out: Value = serde_json::from_slice(&body).map_err(|e| e.to_string())?;
+    if !(200..300).contains(&status) {
+        return Err(out["error"].as_str().unwrap_or("That didn’t work.").to_string());
+    }
+    Ok(out)
+}
+
+/// Where the platform's own widgets read the pages' widgets (`widgets`).
+fn widgets_dir() -> PathBuf {
+    app().data.join("widgets")
+}
+
+/// The widgets kept for the platform's own, again now, and every five minutes while the app runs (once it's let in).
+fn keep_widgets() {
+    static RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if RUNNING.swap(true, Ordering::Relaxed) {
+        return changed();
+    }
+    tauri::async_runtime::spawn(async {
+        loop {
+            changed();
+            tokio::time::sleep(Duration::from_secs(300)).await;
+        }
+    });
+}
+
+/// Something changed on the person's devices (the page's events say): the widgets kept for the platform's own again.
+#[tauri::command]
+fn changed() {
+    let Ok(device) = app().device() else { return };
+    tauri::async_runtime::spawn(async move {
+        if let Err(e) = widgets::refresh(&device, &widgets_dir()).await {
+            eprintln!("widgets: {e}");
+        }
+    });
+}
+
 /// An access token, from the refresh token in the secret store (a request to sign-in, so off the async threads).
 async fn token() -> Result<String, String> {
     let auth = app().auth()?;
@@ -238,6 +281,7 @@ async fn join() -> Result<Value, String> {
     };
     match device.connect().await {
         Ok(true) => {
+            keep_widgets();
             println!("Let in.");
             return Ok(json!({ "in": true }));
         }
@@ -261,6 +305,7 @@ async fn wait() -> Result<(), String> {
         let token = token().await?;
         if device.wait(&token).await.map_err(|e| e.to_string())? {
             app().keep("invite", None);
+            keep_widgets();
             println!("Let in.");
             return Ok(());
         }
@@ -326,6 +371,7 @@ async fn sign_out() -> Result<(), String> {
         secrets::forget_device(&format!("{address} {user}"));
     }
     a.keep("user", None);
+    widgets::forget(&widgets_dir());
     Ok(())
 }
 
@@ -547,7 +593,7 @@ pub fn run() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![native, address, sign_in, join, wait, fetch, read, cancel, removed, sign_out, notify, copy, open, save])
+        .invoke_handler(tauri::generate_handler![native, address, sign_in, join, wait, fetch, read, cancel, removed, sign_out, notify, copy, open, save, changed])
         .setup(|app| {
             let data = app.path().app_data_dir()?;
             #[cfg(debug_assertions)]

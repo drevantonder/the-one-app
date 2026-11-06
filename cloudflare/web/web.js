@@ -587,6 +587,8 @@ const h = OneUI.react.createElement;
     for (const f of frames) f.frame.contentWindow?.postMessage({ oneEvent: event }, "*");
     if (["devices", "install"].includes(event.type)) await refreshState();
     if (event.type === "changed") {
+      // The app's own widgets (the home screen's, the Widgets board's, the menu bar's) are drawn again too.
+      native?.changed();
       if (!(event.apps || []).length) await refreshState();
       await refreshApps();
     }

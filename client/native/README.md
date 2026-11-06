@@ -42,6 +42,9 @@ Shared, every platform:
 - [ ] Offline: last window shown at once, "Can't Reach Your Devices", trying again
 - [ ] Speed: usable within 1.5 s of a cold open (ARCHITECTURE.md), measured
 - [ ] Icons and names from config.toml (custom builds)
+- [x] Every page's widgets kept for the platform's own widgets (`src/widgets.rs`: `widgets.json` in the iPhone
+      widget's format, `icons.json`, `images/`), again on each change and every five minutes; signed out, they say
+      to sign in (checked, Linux: Everyone's three widgets with their sizes and icons)
 
 Linux (new):
 
