@@ -60,7 +60,6 @@ function Main() {
   const row = (r) => <Row key={r.repo} r={r} restoring={restoring} restore={restore} />
   const asked = githubs || github.error
 
-  // With no repo of either kind, and GitHub answered, there's nothing to find: the first step is a push.
   if (!own.data.length && !githubs?.length && asked && !githubTrouble) {
     return (
       <Frame>

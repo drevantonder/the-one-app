@@ -27,19 +27,15 @@ export function useCall(op, input, keep = false) {
   return { ...state, reload }
 }
 
-/// What a failed call says, for a person.
 export const said = (error) => one.plain(error)
 
-/// A call that failed with nothing to show yet: what happened, and Try Again.
 export function Failed({ error, retry }) {
   const p = said(error)
   return <Problem title={p.title} text={p.next} action={{ label: "Try Again", run: retry }} />
 }
 
-/// What a call's answer shows while it isn't in: its problem, or grey shapes.
 export const Pending = ({ call, rows = 4 }) => (call.error ? <Failed error={call.error} retry={call.reload} /> : <ListSkeleton rows={rows} />)
 
-/// A group of rows under its heading.
 export function Section({ title, children }) {
   return (
     <section className="flex flex-col gap-2">
@@ -49,13 +45,10 @@ export function Section({ title, children }) {
   )
 }
 
-/// How wide the window's room is where a list opens its page beside it, rather than as a screen of its own.
 export const WIDE = 720
 
 const Room = createContext(0)
 
-/// A screen's frame: its padding, and how wide its own room is, which the parts in it size themselves by (`useWide`),
-/// not the window.
 export function Frame({ children }) {
   const [ref, width] = useWidth()
   return (
@@ -67,10 +60,8 @@ export function Frame({ children }) {
   )
 }
 
-/// Whether the frame's room is wide enough for GitHub's layout: tabs, and what a list opens beside it.
 export const useWide = () => useContext(Room) >= WIDE
 
-/// A list, and what it opens beside it where there's room (nothing in `detail` while there's none, or no room).
 export function Beside({ list, detail, size = "24rem" }) {
   const wide = useWide()
   if (!wide) return list
@@ -82,29 +73,21 @@ export function Beside({ list, detail, size = "24rem" }) {
   )
 }
 
-/// A time from a tool, ISO 8601, as how long ago it was.
 export const ago = (iso) => one.ago(Date.parse(iso), { long: true })
 export const short = (sha) => String(sha || "").slice(0, 7)
 export const plural = (n, single, many) => `${n.toLocaleString()} ${n === 1 ? single : many}`
-/// The ref to keep using: the branch if there is one, else the commit.
 export const refOf = (d) => d.branch || d.sha
-/// A repo of GitHub's, connected: github.com/<owner>/<name>.
 export const isGithub = (repo) => String(repo || "").startsWith("github.com/")
 export const go = (screen, params) => one.open(screen, params)
 
-// Where git reaches a repo, the same on every computer: <address>/repos/<owner>/<repo>.git, once it's asked for; and
-// the person's handle, for a repo of theirs. Git goes through the CLI there, so on a phone or in a browser this says
-// where to run it.
 let base = "<address>/repos/"
 let mine = "<you>"
 const based = one.call("_address").then((b) => ((base = b?.base || base), (mine = b?.handle || mine)), () => {})
 
-/// Where git reaches repos: `address(repo)`, and the person's handle `mine`, which change once they're known.
 export function useAddress() {
   const [, redraw] = useState(0)
   useEffect(() => void based.then(() => redraw((n) => n + 1)), [])
   return { address: (repo) => `${base}${repo}.git`, mine }
 }
 
-/// Where to run git from, for a repo reached through the CLI.
 export const where = `On any computer where you’ve run ${one.config?.cli || "one"} sign-in`

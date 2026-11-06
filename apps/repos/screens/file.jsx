@@ -10,8 +10,6 @@ const P = one.params
 const dirOf = (path) => path.split("/").slice(0, -1).join("/")
 const isMarkdown = (path) => /\.(md|mdx|markdown)$/i.test(path)
 
-// The file's text. A Markdown one starts as a preview; MDX's import and export lines, and lines that are only a
-// component, are left out of it.
 function Body({ d, path }) {
   const [view, setView] = useState(isMarkdown(path) ? "preview" : "code")
   if (d.submodule) return <Empty>This is a submodule of commit <code>{short(d.submodule)}</code> of another repo.</Empty>
@@ -60,7 +58,6 @@ function File({ repo, rev, path }) {
   )
 }
 
-// The folder the file is in, beside it: pick a file to read it here, a folder to see its files.
 function Tree({ repo, rev, dir, path, pick, enter }) {
   const tree = useCall("tree", { repo, ref: rev, path: dir })
   const d = tree.data

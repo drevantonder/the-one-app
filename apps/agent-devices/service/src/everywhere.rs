@@ -12,7 +12,6 @@ use serde_json::{Value, json};
 use super::pool::Loan;
 use super::{Devices, Input, NAME, time};
 
-/// A device as list shows it.
 #[derive(Clone, Debug, Default, Serialize, serde::Deserialize)]
 pub struct Listed {
     #[serde(default)]
@@ -72,13 +71,11 @@ impl Devices {
         Ok(self.host.post("/v1/call", &req)?["ok"].clone())
     }
 
-    /// `call_node`, given up on after `limit`.
     fn call_node_within(&self, on: &str, function: &str, input: &Value, limit: Duration) -> Result<Value> {
         let req = json!({ "app": NAME, "service": NAME, "op": function, "input": input, "device": on });
         Ok(self.host.post_within("/v1/call", &req, limit)?["ok"].clone())
     }
 
-    /// Calls one of the app's tools, on this device's node.
     pub(super) fn call_app(&self, tool: &str, input: &Value) -> Result<Value> {
         Ok(self.host.post("/v1/call", &json!({ "app": NAME, "op": tool, "input": input }))?["ok"].clone())
     }
@@ -135,7 +132,6 @@ impl Devices {
         (got, failed)
     }
 
-    /// The agent devices on this device.
     pub(super) fn list_here(&self) -> Result<Vec<Listed>> {
         let me = self.hosts()?.0;
         let all = self.list()?;

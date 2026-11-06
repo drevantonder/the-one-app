@@ -16,13 +16,11 @@ const CAPS = "report-status delete-refs ofs-delta no-thin";
 const enc = new TextEncoder();
 const utf8 = new TextDecoder();
 
-/// One pkt-line.
 const pkt = (line) => (enc.encode(line).length + 4).toString(16).padStart(4, "0") + line;
 
 const text = (body, status = 200, type = "text/plain") => ({ status, type, text: body });
 const missing = (why = "not found") => text(why, 404);
 
-/// Answers a request for `path` (`<owner>/<repo>.git/<file>`). `api` is what app.js knows about repos and who may push.
 export async function serve(ctx, g, api, { method, path, query, body }) {
   const m = /^([^/]+)\/([^/]+?)(?:\.git)?\/(.+)$/.exec(path || "");
   if (!m || m[1].endsWith(".git")) return missing(`A repo's address is <your One App network's address>/repos/<owner>/<repo>.git, its owner a person's or group's handle: repos_list has them`);
@@ -49,8 +47,7 @@ export async function serve(ctx, g, api, { method, path, query, body }) {
   return missing();
 }
 
-/// The packs of the repo with id `repo`, oldest first, each with its name and index; a pack kept before indexes were is
-/// indexed now.
+/// A pack kept before indexes were gets its index here.
 async function indexed(ctx, g, repo) {
   const rows = await g.query(
     "select p.hash as pack, i.name, i.idx, i.size from packs p left join indexes i on i.pack = p.hash where p.repo = ? order by p.time, p.hash",
@@ -65,15 +62,12 @@ async function indexed(ctx, g, repo) {
   return rows;
 }
 
-/// What git asks before it pushes: the branches, and what this end can do.
 async function advertise(g, r) {
   const branches = r && !r.deleted ? await g.query("select branch, head from branches where repo = ? order by branch", [r.id]) : [];
   const refs = branches.length ? branches.map((b, i) => pkt(`${b.head} refs/heads/${b.branch}${i ? "" : "\0" + CAPS}\n`)) : [pkt(`${ZERO} capabilities^{}\0${CAPS}\n`)];
   return text(pkt("# service=git-receive-pack\n") + "0000" + refs.join("") + "0000", 200, "application/x-git-receive-pack-advertisement");
 }
 
-/// A push: which branches move from what to what, then the pack that holds what's new. Each branch is told ok or why
-/// not; a pack that can't be read refuses them all.
 async function receive(ctx, g, api, owner, name, found, hash) {
   const bytes = hash ? await ctx.blob.get(hash) : new Uint8Array();
   const commands = [];
@@ -89,7 +83,6 @@ async function receive(ctx, g, api, owner, name, found, hash) {
   // git checks it may push by sending nothing first.
   if (!commands.length) return text("", 200, "application/x-git-receive-pack-result");
   const report = (unpack, lines) => text(pkt(`unpack ${unpack}\n`) + lines.map(pkt).join("") + "0000", 200, "application/x-git-receive-pack-result");
-  // Refused, each branch with why; the pack too, only if it's the pack that's wrong.
   const refuse = (why, unpacked = "ok") => report(unpacked, commands.map((c) => `ng ${c.ref} ${why.replace(/\n/g, " ")}\n`));
 
   let r = found.r;
@@ -134,14 +127,12 @@ async function receive(ctx, g, api, owner, name, found, hash) {
   return report("ok", lines);
 }
 
-/// The objects in the packs of the repo with id `repo`, by hash.
 async function kept(ctx, g, repo) {
   const have = new Set();
   for (const p of await indexed(ctx, g, repo)) for (const e of listed(await ctx.blob.get(p.idx))) have.add(e.sha);
   return have;
 }
 
-/// Keeps a pushed pack for the repo with id `repo`, then merges its newest packs while each is smaller than twice the ones after it.
 async function keep(ctx, g, repo, pack) {
   const rows = await indexed(ctx, g, repo);
   let newest = [{ bytes: pack.bytes, name: pack.name, entries: pack.entries, size: pack.bytes.length }];
@@ -177,7 +168,6 @@ async function keep(ctx, g, repo, pack) {
   }
 }
 
-/// Lets go of a pack `repo` no longer has, and its index, unless another repo (a fork) still does.
 export async function forgetUnshared(g, repo, pack) {
   const shared = await g.query("select 1 from packs where hash = ? and repo != ?", [pack, repo]);
   if (shared.length) return;

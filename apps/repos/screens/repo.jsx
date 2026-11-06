@@ -42,7 +42,6 @@ function Entry({ d, e, last }) {
   )
 }
 
-// GitHub's README card; MDX's import and export lines, and lines that are only a component, are left out.
 function Readme({ d }) {
   let text = d.readme.text
   if (/\.mdx$/i.test(d.readme.name)) text = text.split("\n").filter((l) => !/^\s*(import|export)\s/.test(l) && !/^\s*<\/?[A-Z][\w.]*[^>]*\/?>\s*$/.test(l)).join("\n")
@@ -67,8 +66,6 @@ function Readme({ d }) {
   )
 }
 
-// A repo's name and what makes it: on phones its title, always where it came from, how to clone it, GitHub's link, and
-// on phones the rows for what wide windows have as tabs.
 function Head({ d }) {
   const wide = useWide()
   const { address } = useAddress()
@@ -113,7 +110,6 @@ function Head({ d }) {
   )
 }
 
-// A few names say more than a count; more than a few, the Branches screen lists them.
 const few = (names) => (names.length <= 3 ? names.join(", ") : undefined)
 
 function More({ d }) {
@@ -128,7 +124,6 @@ function More({ d }) {
   )
 }
 
-// A deleted repo's owners erase it here; a repo that's there is deleted from its Settings.
 function Erase() {
   const [error, setError] = useState("")
   const retire = async () => {
@@ -172,7 +167,6 @@ function Restore() {
 
 function Files({ d }) {
   const wide = useWide()
-  // Each row's last commit, on windows wide enough to show it.
   const latest = useCall("latest", wide && !d.empty ? { repo: d.repo, ref: refOf(d), path: at } : null)
   const last = latest.data || {}
   return d.entries.length ? (
@@ -197,7 +191,6 @@ function Repo() {
   useEffect(() => {
     one.title(at ? at.split("/").pop() : P.repo.split("/").pop())
   }, [])
-  // A path that's a file is the file's screen.
   useEffect(() => {
     if (d?.file) one.open("file", { repo: d.repo, ref: refOf(d), path: at })
   }, [d?.file])

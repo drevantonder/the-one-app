@@ -85,7 +85,6 @@ func offline(t *testing.T) {
 	t.Cleanup(func() { clear(connects) })
 }
 
-// linkAs links l as number, with a message kept.
 func linkAs(t *testing.T, l *link, number string) {
 	l.client.Store.ID = &types.JID{User: number, Device: 7, Server: types.DefaultUserServer}
 	l.client.Store.Account = &waAdv.ADVSignedDeviceIdentity{Details: []byte{1}, AccountSignature: make([]byte, 64), AccountSignatureKey: make([]byte, 32), DeviceSignature: make([]byte, 64)}

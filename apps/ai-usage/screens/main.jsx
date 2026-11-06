@@ -4,7 +4,6 @@ import { useEffect, useState } from "react"
 import { createRoot } from "react-dom/client"
 import { AppIcon, Card, Empty, Grid, Problem, Progress, Skeleton } from "@one/ui"
 
-/// One window: its name, the bar, what's used, and when it resets.
 function Meter({ label, w }) {
   if (!w || w.used == null) return null
   return (
@@ -19,7 +18,6 @@ function Meter({ label, w }) {
   )
 }
 
-/// Which of your devices keep this sign-in.
 const on = (p) => ((p.devices || []).length ? `on ${p.devices.join(", ")}` : "")
 
 function Account({ p, several }) {
@@ -53,7 +51,6 @@ function Account({ p, several }) {
 
 function Provider({ reads, mark }) {
   const p = reads[0]
-  // Reads a machine couldn't renew: one problem, on the card they're in.
   const stale = [...new Set(reads.map((r) => r.stale).filter(Boolean))]
   const sub = [p.plan, p.account ? "" : on(p), p.updatedAgo ? `updated ${p.updatedAgo}` : ""].filter(Boolean).join(" · ")
   const drawn = mark && /^data:image\/svg\+xml,/.test(mark.image)
@@ -72,7 +69,6 @@ function Provider({ reads, mark }) {
   )
 }
 
-/// A first answer that's slow shows as grey shapes, after a moment, so a quick one never flashes.
 function Waiting() {
   const [late, setLate] = useState(false)
   useEffect(() => {
@@ -90,7 +86,6 @@ function Waiting() {
 function Main() {
   const [state, setState] = useState({})
   useEffect(() => {
-    // A later failure keeps what's shown, which was right a moment ago.
     const run = () =>
       one.call("status", { format: "json" }).then(
         (data) => setState({ data }),

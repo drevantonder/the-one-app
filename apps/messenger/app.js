@@ -8,14 +8,12 @@
 import settings from "./dist/settings.html" with { type: "text" };
 
 const HOME = "https://www.messenger.com/";
-/// How long a borrowed device is kept without a call.
 const IDLE = 5 * 60 * 1000;
 /// The chat list's rows each have a button with this and the chat's name.
 const MENU = "More options for ";
 
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
 
-/// Runs a tool of Agent Devices (`agent-devices`) or Computer Use (`computer`) for the caller; a failure says which.
 async function use(ctx, app, op, input) {
   try {
     return await ctx.apps[app][op](input);
@@ -32,7 +30,6 @@ async function use(ctx, app, op, input) {
 //
 // Messenger's chat list, a conversation and search results are read from it.
 
-/// `- role "label"` lines as { role, label }, the label unquoted.
 function outline(text) {
   const nodes = [];
   for (const l of String(text).split("\n")) {
@@ -49,7 +46,6 @@ function outline(text) {
   return nodes;
 }
 
-/// The text up to the closing quote, escapes and all; null if it isn't closed.
 function quoted(s) {
   for (let i = 0; i < s.length; i++) {
     if (s[i] === "\\") i++;
@@ -58,7 +54,6 @@ function quoted(s) {
   return null;
 }
 
-/// A list's rows: each one's link, its time, and its texts before the time.
 function rows(nodes) {
   const out = [];
   let timed = false;
@@ -81,7 +76,6 @@ function rows(nodes) {
   return out;
 }
 
-/// The chat list's rows: { name, last, time, unread, link } (the link by its name among the page's refs).
 function chatsOf(nodes) {
   const out = [];
   for (const r of rows(nodes)) {
@@ -120,7 +114,6 @@ function chatsIn(parts) {
   return out;
 }
 
-/// A name whatever its spacing and emoji variants.
 const squash = (s) => s.replace(/[  ️]/g, "");
 
 /// Drops the leading texts that spell the chat's name: a group's emoji come as images between its words.
@@ -134,11 +127,9 @@ function withoutName(texts, name) {
     got = next;
   }
   if (got === want) return [];
-  // The name didn't line up: it's the first text.
   return texts.length ? texts.slice(1) : texts;
 }
 
-/// The open conversation's messages: { sender, time, text }, "You" the account's own.
 function messagesOf(nodes) {
   return nodes.filter((n) => n.role === "button").map((n) => message(n.label)).filter(Boolean)
     .map(([time, sender, text]) => ({ time, sender, text: text.trim() ? text.trim() : "(attachment)" }));
@@ -162,7 +153,6 @@ function message(label) {
   return null;
 }
 
-/// The chats a search found: { chat, matches (when it has several), text (when it has one), time }.
 function matchesOf(nodes) {
   const out = [];
   for (const r of rows(nodes)) {
@@ -175,10 +165,8 @@ function matchesOf(nodes) {
   return out;
 }
 
-/// No recent chat has the name asked for.
 class NoChat extends Error {}
 
-/// The chat called `want`: by its whole name, or by a part of it only one chat has.
 function pick(chats, want) {
   const w = want.trim().toLowerCase();
   const partial = [];
@@ -193,7 +181,6 @@ function pick(chats, want) {
   throw new Error(`${JSON.stringify(want)} matches several chats: ${names(partial)}. Give more of the name`);
 }
 
-/// A browser profile Messenger reads isn't signed in to it.
 class NotSignedIn extends Error {
   code = "not_signed_in";
   constructor() {
@@ -214,8 +201,7 @@ function structured(got) {
 
 const text = (v) => (typeof v === "string" ? v : "");
 
-/// A page as the browser tools read it: its address, its outline, in parts (a row cut between two shows in both), and
-/// its refs, by role and name.
+/// The browser tools read a page in parts: a row cut between two shows in both.
 class Page {
   constructor() {
     this.url = "";
@@ -226,7 +212,6 @@ class Page {
   find(role, name) {
     return this.refs.find((r) => r.role === role && r.name === name)?.id;
   }
-  /// Whether the page is Messenger's sign-in page.
   signedOut() {
     return !!this.find("button", "Log In") || !!this.find("textbox", "Password") || this.url.includes("/login");
   }
@@ -235,8 +220,7 @@ class Page {
   }
 }
 
-/// The browser in a device borrowed from Agent Devices, starting with a copy of a browser profile signed in to
-/// messenger.com. `row` is what the database keeps of it from the last call.
+/// `row` is what the database keeps of it from the last call.
 class Browser {
   constructor(ctx, profile, row) {
     this.ctx = ctx;
@@ -251,7 +235,6 @@ class Browser {
     this.borrowed = false;
   }
 
-  /// Keeps it for the next call, or forgets it when its device was given back.
   save() {
     if (!this.device) return this.ctx.user.exec("delete from browsers where profile = ?", [this.profile]);
     this.ctx.user.exec("insert or replace into browsers values (?, ?, ?, ?, ?, ?, ?)", [this.profile, this.device, this.session, this.target, this.tab, Date.now(), this.dirty ? 1 : 0]);
@@ -274,8 +257,6 @@ class Browser {
     this.device = "";
   }
 
-  /// Runs one of the device's tools and returns its structured answer, borrowing a device again if the last one was
-  /// given back.
   async tool(name, input) {
     try {
       return await this.tryTool(name, input);
@@ -304,7 +285,6 @@ class Browser {
     return data;
   }
 
-  /// Starts the device's browser on the profile and attaches to its tab.
   async open() {
     [this.target, this.tab] = ["", ""];
     let prepared;
@@ -318,7 +298,6 @@ class Browser {
     if (!window) throw new Error("the browser has no window");
     const bound = await this.tool("get_browser_state", { pid, window_id: window.window_id });
     this.target = text(bound.target_id);
-    // The active tab, or else the first.
     for (const t of bound.tabs || []) {
       if (t.active === true || !this.tab) this.tab = text(t.tab_id);
     }
@@ -369,7 +348,6 @@ class Browser {
       const p = await this.snapshot("").catch(() => null);
       if (p && p.url === HOME && p.chats().length) return p;
     }
-    // If the list doesn't show, load it once more.
     for (let round = 0; round < 2; round++) {
       await this.navigate(HOME);
       this.dirty = false;
@@ -388,7 +366,6 @@ class Browser {
     throw new Error("Messenger's chat list didn't show");
   }
 
-  /// Loads `url`, attaching again once if the browser closed.
   async navigate(url) {
     if (!this.target) await this.open();
     try {
@@ -405,7 +382,6 @@ class Browser {
     await this.tool("browser_click", { ref, input_route: "dom_event" });
   }
 
-  /// Marks a chat unread again from its menu in the chat list.
   async markUnread(chat) {
     const menu = MENU + chat;
     await this.click(await this.snapshot(menu), "button", menu);
@@ -558,14 +534,12 @@ async function load(ctx) {
   };
 }
 
-/// Keeps the profiles linked, and why some need signing in again.
 function saveAccounts(ctx, s) {
   ctx.user.exec("delete from accounts");
   s.linked.forEach((profile, i) => ctx.user.exec("insert into accounts values (?, ?, ?)", [profile, i, s.why[profile] || null]));
   ctx.user.exec("insert or replace into settings values ('linked', '1')");
 }
 
-/// Keeps whether a read found the profile signed in.
 function found(ctx, s, profile, why) {
   if ((s.why[profile] || null) === why) return;
   if (why) s.why[profile] = why;
@@ -573,7 +547,6 @@ function found(ctx, s, profile, why) {
   saveAccounts(ctx, s);
 }
 
-/// The linked profile an account names, or the first when none is named.
 function profileOf(s, account) {
   const [first] = s.linked;
   if (!first) throw new Error("Messenger isn't linked to a browser profile yet: messenger_sign_in links one");
@@ -595,7 +568,6 @@ async function browse(ctx, input, op, run) {
     result = await run(b);
     if (op !== "send") found(ctx, s, profile, null);
   } catch (err) {
-    // A device borrowed for this call isn't kept when it fails: give it back.
     if (!(err instanceof NotSignedIn) || op === "send") {
       if (b.borrowed) await b.giveBack();
       throw err;
@@ -614,7 +586,6 @@ const VAULT = {
   account: { title: TYPE, type: TYPE, domain: "messenger.com", accounts: true, fields: { profile: { label: "Browser profile" } } },
 };
 
-/// Makes an item for each linked profile that has none, and lets go of those whose profile isn't linked.
 async function keep(ctx, linked) {
   if (!ctx.user) return;
   const items = (await ctx.vault.items()).filter((i) => i.type === TYPE && i.scope === ctx.user.id);
@@ -700,7 +671,6 @@ export default {
         try {
           got = await ask();
         } catch (err) {
-          // A new one: added to the Vault first.
           if (!String(err.message).includes("No browser profile")) throw err;
           await use(ctx, "agent-devices", "add_profile", { profile });
           got = await ask();

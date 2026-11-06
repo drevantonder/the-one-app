@@ -81,7 +81,6 @@ struct CalendarApp: Service {
         }
     }
 
-    /// Sets the fields a call gives. Moving the start keeps the event's length unless the end is given too.
     private func edit(_ e: EKEvent, _ input: Input) throws {
         if let title = input.string("title") { e.title = title }
         if e.title?.isEmpty ?? true { throw Refusal("give title") }

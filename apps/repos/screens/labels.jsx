@@ -10,7 +10,6 @@ import { Frame, Pending, plural, said, useCall } from "../lib/use.jsx"
 const P = one.params
 const COLOURS = ["d73a4a", "0075ca", "a2eeef", "7057ff", "008672", "e4e669", "d876e3", "fbca04"]
 
-// A label to make, or `l` to change: its name, colour and description; Delete for one that's there.
 function LabelDialog({ l, done }) {
   const [name, setName] = useState(l?.name || "")
   const [description, setDescription] = useState(l?.description || "")

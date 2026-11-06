@@ -1,8 +1,6 @@
-//! What the page polls, kept. It asks for the list every few seconds and for each running device's picture now and
-//! then, and asking the devices takes a while (the other devices' services over the relay, Podman, simctl, adb, a
-//! picture taken). So the last answer is kept and given at once, and asked again in the background once it's older
-//! than fresh. One older than stale, or none yet, is waited for. A change made here forgets the list, so whoever made
-//! it sees it.
+//! What the page polls, kept. Asking the devices takes a while (the other devices' services over the relay, Podman,
+//! simctl, adb, a picture taken), so the last answer is given at once and asked again in the background once it's
+//! older than fresh; one older than stale, or none yet, is waited for. A change made here forgets the list.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -35,8 +33,6 @@ impl Latest {
         Latest { fresh, stale, now: Mutex::new(Kept::default()) }
     }
 
-    /// The answer kept, asked again in the background if it isn't fresh, or asked now if there's none or it's stale:
-    /// with when it was asked.
     fn get(self: &Arc<Self>, ask: Ask) -> Result<(Value, Instant)> {
         let mut k = self.now.lock().unwrap();
         if let (Some(v), Some(at)) = (k.val.clone(), k.at)
@@ -68,7 +64,6 @@ impl Latest {
         Ok((v, now))
     }
 
-    /// The answer it has, if any.
     fn kept(&self) -> Option<Value> {
         self.now.lock().unwrap().val.clone()
     }
@@ -80,18 +75,15 @@ impl Latest {
     }
 }
 
-/// The devices' pictures, kept by device and width.
 #[derive(Default)]
 pub struct Pictures(Mutex<HashMap<String, Arc<Latest>>>);
 
 impl Pictures {
-    /// Drops a device's pictures, when it stops or goes.
     pub fn forget(&self, name: &str) {
         self.0.lock().unwrap().retain(|key, _| !key.starts_with(&format!("{name}/")));
     }
 }
 
-/// The image in a screen's answer, if any.
 fn picture_in(v: &Value) -> Option<image::DynamicImage> {
     let item = v["content"].as_array()?.iter().find(|c| c["type"] == "image")?;
     let raw = data_encoding::BASE64.decode(item["data"].as_str()?.as_bytes()).ok()?;
@@ -99,12 +91,10 @@ fn picture_in(v: &Value) -> Option<image::DynamicImage> {
 }
 
 impl Devices {
-    /// This service's state, shared.
     fn arc(&self) -> Arc<Devices> {
         super::DEVICES.get().expect("made before its first call").clone()
     }
 
-    /// list, kept: this device's, or with others, every device's.
     pub(super) fn list_latest(&self, here: bool) -> Result<Value> {
         let ds = self.arc();
         if here {
@@ -113,9 +103,7 @@ impl Devices {
         Ok(self.latest_all.get(Box::new(move || ds.list_all(true)))?.0)
     }
 
-    /// A device's picture, kept for a little while: a page watching it asks again every so often, and gets the one
-    /// taken in the background since. Its hash says which it is: given the one it has (have), it's told it's the same
-    /// rather than sent it again. A picture that's hardly changed (a phone's clock) counts as the same.
+    /// Given the hash of the picture the page has (have), it's told it's the same rather than sent it again.
     pub(super) fn screen_latest(&self, name: &str, width: u32, have: &str) -> Result<Value> {
         let k = self.pics.0.lock().unwrap().entry(format!("{name}/{width}")).or_insert_with(|| Arc::new(Latest::new(Duration::from_secs(15), Duration::from_secs(24 * 3600)))).clone();
         let (ds, kept, name) = (self.arc(), k.clone(), name.to_string());

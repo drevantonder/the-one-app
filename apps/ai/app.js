@@ -8,7 +8,6 @@ const GEMINI = "generativelanguage.googleapis.com";
 const kinds = ["user", "global"];
 const schema = "create table settings (key text primary key, value text);";
 
-/// The settings that apply: the user's own over the network's, over the defaults.
 async function settings(ctx) {
   const out = { ...DEFAULTS };
   for (const s of [ctx.global, ctx.user]) {
@@ -18,7 +17,6 @@ async function settings(ctx) {
   return out;
 }
 
-/// Errors that mean a limit stopped the call: apps tell the person when to try again.
 const limit = (when) => new Error(when === "day" ? "AI limit: day. Today's AI is used up; more tomorrow." : "AI limit: minute. Try again in a minute.");
 
 async function gemini(ctx, s, body) {

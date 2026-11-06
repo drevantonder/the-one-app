@@ -8,10 +8,8 @@ const BLURB = "Link Messenger to a browser profile signed in to messenger.com, a
 // The choice that makes a profile of its own, not one already there.
 const NEW = "\u0000"
 
-// Asked for as the screen opens, so Add Account has them at once.
 const profiles = () => one.call("_profiles").then((r) => (r || []).map((p) => p.profile), () => [])
 
-/// Picks a profile not linked yet, or names a new one, then opens messenger.com in it.
 function Pick({ free, onSigningIn }) {
   const [choice, setChoice] = useState(free[0] ?? NEW)
   const [name, setName] = useState("")
@@ -56,7 +54,6 @@ function Pick({ free, onSigningIn }) {
   )
 }
 
-/// Sign in in the device's browser, then press Done to keep the profile.
 function SigningIn({ link, onDone }) {
   const [why, setWhy] = useState(null)
   const done = async () => {

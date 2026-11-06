@@ -8,7 +8,6 @@ import { Failed, Section, said, useCall, useList } from "../lib/store.jsx"
 
 function Add() {
   const list = useList()
-  // The switch stays where it was put, and goes back only if the change fails.
   const [put, setPut] = useState({})
   const [error, setError] = useState("")
   const name = one.params.app
@@ -27,7 +26,6 @@ function Add() {
 
   const w = where.data
   const node = picked || w?.runs_on.find((r) => r.name)?.name || w?.nodes[0]
-  // Picked where it's added already, its service moves there.
   const pick = async (n) => {
     one.tap()
     setError("")

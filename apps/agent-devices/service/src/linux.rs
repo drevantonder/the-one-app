@@ -1,7 +1,6 @@
 //! Linux devices: each a container running Cua's desktop image with Google Chrome, named `device-<name>`, its home
 //! folder on a volume of its own, so its sign-ins survive restarts and image updates. Its server's port and token are
-//! labels on the container, where the old app kept them too, so its devices carry on here. The container runtime is
-//! Podman on Linux and Apple's container on a Mac.
+//! labels on the container. The container runtime is Podman on Linux and Apple's container on a Mac.
 //!
 //! The runtime is the machine's, shared by every network on it (a `one throwaway` beside the real one), so each container
 //! carries its network's data folder as a label (`one.home`), and a network lists and touches only its own. Those made
@@ -91,8 +90,6 @@ pub fn valid_name(name: &str) -> bool {
     !b.is_empty() && b.len() <= 40 && (b[0].is_ascii_lowercase() || b[0].is_ascii_digit()) && b.iter().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == b'-')
 }
 
-// ── Sizes ──────────────────────────────────────────────────────────────────
-
 /// How much of the device it's on an agent device may use, offered by name.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Size {
@@ -164,8 +161,6 @@ fn bytes_of(s: &str) -> i64 {
     };
     (n * scale) as i64
 }
-
-// ── Commands ───────────────────────────────────────────────────────────────
 
 /// A command here, pointed at the user's own systemd, which a service has no login session for (lingering keeps it):
 /// Podman and systemd-run need it.
@@ -247,8 +242,6 @@ pub fn exec_with(mut command: Command, stdin: Option<&mut (dyn Read + Send)>, st
     Ok(())
 }
 
-// ── Container runtimes ─────────────────────────────────────────────────────
-
 /// What runs devices' containers.
 pub trait Containers: Send + Sync {
     /// Every device container on this machine, any network's.
@@ -285,7 +278,6 @@ pub trait Containers: Send + Sync {
     }
 }
 
-/// This machine's runtime for Linux devices, or why it has none.
 /// Deletes the containers of the network whose data folder is `dir`, as when a `one throwaway` is deleted.
 pub fn delete_all(dir: &Path) -> Result<()> {
     let rt: Box<dyn Containers> = if cfg!(target_os = "macos") { Box::new(Apple::new(dir)?) } else { Box::new(Podman::new()?) };
@@ -665,7 +657,7 @@ impl Containers for Apple {
             "--env".into(),
             format!("CUA_ENV_TOKEN={}", d.token),
             "--env".into(),
-            format!("HOME={HOME}"), // as Podman's
+            format!("HOME={HOME}"),
             "--volume".into(),
             format!("{vol}:{HOME}"),
             "--publish-socket".into(),
@@ -791,8 +783,6 @@ impl Containers for Apple {
     }
 }
 
-// ── The image ──────────────────────────────────────────────────────────────
-
 /// Devices run Cua's image with Google Chrome in place of its Chromium, so the person can sign in to the browser as
 /// their Google account. Chrome's terms don't let us pass it on, so each device builds the image itself, downloading
 /// Chrome from Google, and builds it again each week for Chrome's security fixes. Cua's image turns browser sign-in
@@ -825,8 +815,6 @@ pub fn image_for(now: jiff::Timestamp) -> String {
     let week = now.to_zoned(jiff::tz::TimeZone::system()).date().iso_week_date();
     format!("{IMAGE_NAME}:{}-{}-{:02}", data_encoding::HEXLOWER.encode(&sum[..4]), week.year(), week.week())
 }
-
-// ── Devices ────────────────────────────────────────────────────────────────
 
 impl Devices {
     pub(super) fn rt(&self) -> Result<&dyn Containers> {

@@ -7,7 +7,6 @@ import { Pending, ago, go, plural, said, short, useCall } from "./use.jsx"
 
 const BADGE = { added: "Added", deleted: "Deleted", renamed: "Renamed" }
 
-// What a file's body says: why there's no diff, a button to load a large one, or its diff.
 function Diff({ f, split, load, loading }) {
   if (f.failed) return <div className="p-4"><Problem title={said(f.failed).title} action={{ label: "Try Again", run: () => load(true) }} /></div>
   if (f.binary) return <p className="px-4 py-3 text-sm text-muted-foreground">Binary file not shown.</p>
@@ -37,7 +36,6 @@ function Diff({ f, split, load, loading }) {
 function DiffFile({ d, f, k, split, load, loading }) {
   const [folded, setFolded] = useState(false)
   const box = useRef(null)
-  // Files that wait (not the large ones) each load as they come near the screen.
   useEffect(() => {
     if (!f.later || f.large || f.hunks || f.failed || loading) return
     if (!window.IntersectionObserver) return void load(false)
@@ -64,16 +62,12 @@ function DiffFile({ d, f, k, split, load, loading }) {
   )
 }
 
-/// The commit `sha` of `repo`. `files` is the list of its changed files above the diffs, which History's room beside
-/// doesn't have.
 export function CommitView({ repo, sha, files = true }) {
   const commit = useCall("commit", { repo, sha })
   const d = commit.data
   const [room, width] = useWidth()
-  // Unified or split: by the room, until it's asked.
   const [asked, setAsked] = useState(null)
   const split = asked ?? width >= 720
-  // What each file's own call gave, by its place in the commit's files; and which are asking.
   const [more, setMore] = useState({})
   const [asking, setAsking] = useState({})
 

@@ -23,7 +23,6 @@ pub struct Tool {
     pub input_schema: Value,
 }
 
-/// A tool's answer, as MCP gives it.
 #[derive(Debug, Default, Deserialize)]
 pub struct Reply {
     #[serde(default)]
@@ -35,13 +34,11 @@ pub struct Reply {
 }
 
 impl Reply {
-    /// Whether the answer has `code` in it, in its structured content or its text.
     fn said(&self, code: &str) -> bool {
         (!self.structured.is_null() && self.structured.to_string().contains(code)) || self.content.iter().any(|c| c["text"].as_str().is_some_and(|t| t.contains(code)))
     }
 
-    /// The answer for the node: its content, with its structured content as text too, since that often holds what its
-    /// text leaves out.
+    /// Its structured content goes as text too, since that often holds what its text leaves out.
     pub fn content(self) -> Result<Value> {
         let mut items = self.content;
         if !self.structured.is_null() {
@@ -70,9 +67,7 @@ impl std::error::Error for Gone {}
 pub struct Conn {
     url: String,
     token: String,
-    /// The session's, from the server.
     id: String,
-    /// The session label its calls share.
     pub label: String,
     next: AtomicI64,
     agent: ureq::Agent,
@@ -118,7 +113,6 @@ impl Conn {
         Ok(reply["result"].clone())
     }
 
-    /// Posts one message: the reply to it, if it has an id, and the session's id the server gave.
     fn send(&self, msg: &Value) -> Result<(Vec<u8>, String)> {
         let mut req = self.agent.post(&self.url).header("authorization", format!("Bearer {}", self.token)).header("content-type", "application/json").header("accept", "application/json, text/event-stream");
         if !self.id.is_empty() {

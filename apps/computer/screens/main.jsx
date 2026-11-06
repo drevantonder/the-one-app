@@ -15,7 +15,6 @@ const picture = (r) => {
   return img ? `data:${img.mimeType};base64,${img.data}` : null
 }
 
-/// A device's picture while an agent uses it, else a grey tile with a laptop; filling the width its tile has.
 function Pic({ src, ratio = "16 / 10", className = "", children }) {
   return (
     <div className={`relative grid place-items-center overflow-hidden rounded-xl bg-muted text-muted-foreground ring-1 ring-border ring-inset ${className}`} style={{ aspectRatio: ratio }}>
@@ -37,13 +36,11 @@ const Phone = () => (
   </svg>
 )
 
-/// What a tile shows of a device. macOS asks that screen capture can't happen without Screen Recording, so a device
-/// missing it doesn't answer capture calls: its switch stays off and its tile says so.
+// macOS can't capture the screen without Screen Recording, so a device missing it doesn't answer capture calls.
 function look(d, { asking, note, fix }) {
   const gate = d.permissions && d.kind === "mac"
   const missing = gate && (!d.permissions.accessibility || !d.permissions.screen_recording)
   const title = d.title || d.device
-  // What needs the person is one problem box on its tile; the line under the name is only ever grey.
   const box = note ? { title: note }
     : missing ? { title: `${!d.permissions.accessibility ? "Accessibility" : "Screen Recording"} is off`, text: `Agents can't use ${title} until it's on.`, warn: true, fix }
     : d.why ? { title: "Not answering", text: `Check that ${title} is on and online.`, warn: true }
@@ -84,10 +81,7 @@ function Tile({ d, shot, mirror, mirroring, asking, note, allow, fix, openMirror
   )
 }
 
-/// What a Fix opens: the two permissions macOS asks, which is on, and how to turn on the rest. It's drawn from the
-/// device as the latest look has it, so a permission turned on shows here.
 function Fix({ device, onClose }) {
-  // Kept while the sheet slides away, so it doesn't empty first.
   const kept = useRef(null)
   if (device) kept.current = device
   const d = kept.current
@@ -139,7 +133,6 @@ function Step({ n, title, children }) {
   )
 }
 
-/// A first answer that's slow shows as grey shapes, after a moment, so a quick one never flashes.
 function Waiting() {
   const [late, setLate] = useState(false)
   useEffect(() => {
@@ -188,7 +181,6 @@ function Main() {
     ])
   }
 
-  // Whether this is the newest answer: an older look that comes back late is dropped. One that fails keeps what's shown.
   async function refresh() {
     const n = ++asked.current
     let r

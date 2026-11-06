@@ -10,9 +10,9 @@
 //! at 10.0.2.2, adb's server among it, and an iPhone simulator's share the Mac's network and files, its node's token
 //! too.
 //!
-//! What it keeps, in its folder, is what the Go service before it kept, read and written the same way: devices/ (each
-//! device of a kind other than linux), lent.json, used.json, running.json, moved.json, backups.json, tools.json,
-//! chrome.json, and each Windows device's and Android phone's files.
+//! What it keeps in its folder, in the files the Go service before it kept: devices/ (each device of a kind other than
+//! linux), lent.json, used.json, running.json, moved.json, backups.json, tools.json, chrome.json, and each Windows
+//! device's and Android phone's files.
 
 mod android;
 mod backup;
@@ -48,7 +48,6 @@ use pool::Loan;
 
 pub const NAME: &str = "agent-devices";
 
-/// A call's input, as Go's services took it: a JSON object.
 type Input = Map<String, Value>;
 
 /// Who a call is from: the device it came from, and its person's id.
@@ -59,7 +58,6 @@ pub struct Caller {
 }
 
 impl Caller {
-    /// The name of the device the call came from.
     fn name(&self) -> String {
         or(&self.name, SOMEONE)
     }
@@ -71,7 +69,6 @@ const SOMEONE: &str = "someone";
 /// This service's state, for as long as it runs.
 pub struct Devices {
     host: Host,
-    /// Its folder.
     dir: PathBuf,
     /// Linux devices' container runtime, or none where this machine has none: then it runs only devices of other kinds.
     rt: Option<Box<dyn Containers>>,
@@ -82,9 +79,7 @@ pub struct Devices {
     pool: Mutex<pool::Pool>,
     /// One borrow, or spare made, at a time.
     take: Mutex<()>,
-    /// Tends the pool now.
     kick: (Mutex<bool>, std::sync::Condvar),
-    /// When this program started.
     started: jiff::Timestamp,
     /// Two devices being made at once mustn't take the same port.
     creating: Mutex<()>,
@@ -101,7 +96,6 @@ pub struct Devices {
 
 static DEVICES: OnceLock<Arc<Devices>> = OnceLock::new();
 
-/// This service's state, made the first time it's needed.
 fn devices(host: &Host) -> Arc<Devices> {
     DEVICES
         .get_or_init(|| {
@@ -160,7 +154,6 @@ fn main() -> Result<()> {
     one_service::serve(Service { name: NAME, describe, call, start: Some(start) })
 }
 
-/// Starts what it does between calls: reading the devices' tools, tending them, and serving the viewer.
 fn start(host: &Host) {
     let ds = devices(host);
     let d = ds.clone();
@@ -203,7 +196,6 @@ fn describe() -> Value {
         "instructions": INSTRUCTIONS, "ops": functions, "widgets": [] })
 }
 
-/// A tool's input, with the device argument added.
 fn with_device(schema: &Value) -> Value {
     let mut s = if schema.is_object() { schema.clone() } else { json!({ "type": "object" }) };
     if !s["properties"].is_object() {
@@ -313,14 +305,10 @@ const LOCAL: [&str; 12] = ["list", "kinds", "chrome", "set_chrome", "adopt", "cr
 /// The functions after which the list isn't what it was.
 const CHANGES: [&str; 12] = ["adopt", "borrow", "give_back", "sign_in", "save_profile", "create", "resize", "start", "stop", "delete", "restore", "move"];
 
-// ── Inputs and answers ─────────────────────────────────────────────────────
-
-/// A string field, trimmed; "" when it isn't one.
 fn text(input: &Input, key: &str) -> String {
     input.get(key).and_then(Value::as_str).unwrap_or_default().trim().to_string()
 }
 
-/// A number field, if it's one.
 fn number(input: &Input, key: &str) -> Option<f64> {
     input.get(key).and_then(Value::as_f64)
 }
@@ -329,7 +317,6 @@ fn flag(input: &Input, key: &str) -> bool {
     input.get(key).and_then(Value::as_bool).unwrap_or(false)
 }
 
-/// `a`, or `b` if `a` is empty.
 fn or(a: &str, b: &str) -> String {
     if a.is_empty() { b.to_string() } else { a.to_string() }
 }
@@ -348,7 +335,6 @@ fn now() -> jiff::Timestamp {
     jiff::Timestamp::now()
 }
 
-/// How long since `t`.
 fn since(t: jiff::Timestamp) -> Duration {
     Duration::try_from(now().duration_since(t)).unwrap_or_default()
 }
@@ -368,7 +354,6 @@ fn bytes_text(n: u64) -> String {
     }
 }
 
-/// Random bytes as hex.
 fn random_hex(n: usize) -> String {
     use rand::RngCore;
     let mut b = vec![0u8; n];
@@ -423,15 +408,11 @@ fn contents(items: Vec<Value>) -> Value {
     json!({ "content": items })
 }
 
-/// A picture as a tool's answer: the JPEG, and what it is.
 fn picture_answer(jpeg: &[u8], said: String) -> Value {
     contents(vec![json!({ "type": "image", "mimeType": "image/jpeg", "data": data_encoding::BASE64.encode(jpeg) }), json!({ "type": "text", "text": said })])
 }
 
-// ── The functions ──────────────────────────────────────────────────────────
-
 impl Devices {
-    /// Runs a function, given its input.
     fn run(&self, caller: &Caller, function: &str, mut input: Input) -> Result<Answer> {
         let name = text(&input, "device");
         input.remove("device");
@@ -740,7 +721,6 @@ impl Devices {
         Ok(json!(format!("Moved device {} to {to}, where it's running. It's stopped here, and won't start here again; delete it here (delete) once it's fine there.", d.name)))
     }
 
-    /// Runs one of a running Linux device's tools.
     fn use_tool(&self, name: &str, tool: &str, args: Input) -> Result<Value> {
         if tool.is_empty() {
             bail!("which tool? computer_tools lists them");
@@ -769,7 +749,6 @@ impl Devices {
         Ok(json!(lines.join("\n").trim()))
     }
 
-    /// Reads the tools again if it never has.
     fn refresh_if_empty(&self) {
         if self.tools.lock().unwrap().is_empty() {
             let _ = self.refresh();
@@ -813,7 +792,6 @@ impl Devices {
         self.screen(&d, width)
     }
 
-    /// A small JPEG of a Linux device.
     fn screen(&self, d: &Device, width: u32) -> Result<Value> {
         let r = self.tool_call(d, "get_desktop_state", Map::from_iter([("max_image_dimension".to_string(), json!(width))]))?;
         for c in &r.content {
@@ -834,7 +812,6 @@ impl Devices {
         self.hosts().map(|h| h.0).unwrap_or_default()
     }
 
-    /// Tends the pool now.
     fn poke(&self) {
         *self.kick.0.lock().unwrap() = true;
         self.kick.1.notify_all();

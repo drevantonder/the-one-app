@@ -14,7 +14,6 @@ const named = (c) => titles[c.name] || capital(c.name)
 const off = (c) => (c.state === "paused" ? "Paused" : "Off")
 const phone = (c) => c.kind === "android" || c.kind === "iphone"
 
-// What a tile shows until it has a picture: a phone, a browser, or a computer.
 function Glyph({ browser, c }) {
   const svg = { fill: "none", stroke: "currentColor", strokeWidth: 1.2, viewBox: "0 0 24 24" }
   if (phone(c)) return (
@@ -37,9 +36,6 @@ function Glyph({ browser, c }) {
   )
 }
 
-// Its name says what it's doing, else what it's called; its line, who's using it, or that it's paused, and where,
-// when they're on more than one of the person's devices. A device with a screen opens to watch and use, here in the
-// app: a phone or Windows even when off, as it starts for whoever opens it.
 function Tile({ c, hosts, src }) {
   const b = c.borrowed
   const name = b?.signing_in ? "Signing in to sites" : b ? b.for || "In use" : named(c)
@@ -71,15 +67,11 @@ function Tile({ c, hosts, src }) {
 }
 
 function Page() {
-  const [devices, setDevices] = useState(null) // null until first listed
-  const [problem, setProblem] = useState(null) // what the last list failed with
+  const [devices, setDevices] = useState(null)
+  const [problem, setProblem] = useState(null)
   const [pics, setPics] = useState({}) // by the device it's on/name: a data URL
-  // What the timers read: the devices as last listed, the pictures' hashes, when each was asked for, the list's hash (the
-  // service sends it only when it changed), and whether a list is out.
   const mem = useRef({ devices: null, hashes: {}, asked: {}, retried: {}, listed: "", busy: false })
 
-  // A picture of each running device with a screen that's in view, each drawn as it comes, and asked for again every
-  // 20s: the service keeps the last one and takes the next in the background, and sends it only when it changed.
   const seen = (k) => {
     const el = [...document.querySelectorAll("[data-k]")].find((t) => t.dataset.k === k)
     if (!el) return false
@@ -93,7 +85,6 @@ function Page() {
       if (paused(c) || screenless(c) || Date.now() - (m.asked[k] || 0) < 20000 || !seen(k)) continue
       m.asked[k] = Date.now()
       one.call("_screen", { ...at(c), width: phone(c) ? 160 : 480, have: m.hashes[k] || "" }).then((r) => {
-        // One kept from a while ago: the next, taken now, is asked for soon.
         if (r.age > 20 && !m.retried[k]) [m.retried[k], m.asked[k]] = [true, Date.now() - 16000]
         if (r.same) return
         const img = (r.content || []).find((x) => x.type === "image")
@@ -119,7 +110,6 @@ function Page() {
       setProblem(one.plain(e))
       return
     }
-    // Once drawn, so it's known which tiles are in view.
     requestAnimationFrame(pictures)
   }
 
@@ -147,7 +137,6 @@ function Page() {
     }
   }, [])
 
-  // A list that changed has new tiles in view.
   useEffect(() => {
     requestAnimationFrame(pictures)
   }, [devices])

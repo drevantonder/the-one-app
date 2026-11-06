@@ -31,7 +31,6 @@ type linkState struct {
 	At    time.Time `json:"at,omitzero"`
 }
 
-// connects says whether a link in this state connects to WhatsApp.
 func (s linkState) connects() bool { return s.State == "" || s.State == unlinked }
 
 func loadState(path string) linkState {
@@ -53,8 +52,6 @@ func (l *link) setState(s linkState) error {
 	return nil
 }
 
-// writeDurably writes v as JSON to path, synced, by renaming a new file over
-// it; with none, it deletes it.
 func writeDurably(path string, v any, none bool) error {
 	if none {
 		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {

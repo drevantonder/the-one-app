@@ -1,7 +1,6 @@
 // iMessage: Messages on the person's Mac. Its service (service/) is a helper app inside the Mac app, which macOS lets reach Messages;
 // this app is what people and agents use, wherever they are.
 
-/// Runs one of the imessage service's functions; when a chat isn't found, says where to find it.
 async function service(ctx, fn, input) {
   try {
     return await ctx.services.imessage[fn](input);

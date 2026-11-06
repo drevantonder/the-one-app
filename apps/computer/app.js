@@ -8,7 +8,6 @@
 
 import main from "./dist/main.html" with { type: "text" };
 
-/// Runs one of the agent-devices service's functions through Agent Devices, whose service it is.
 const act = (ctx, fn, input) => ctx.apps["agent-devices"]._act({ function: fn, input });
 
 /// The caller's devices whose computer service serves them, by device name: `{ device, on, title, kind, using,
@@ -28,7 +27,6 @@ async function devices(ctx) {
   }));
 }
 
-/// The device of the person's a name means, if it's one: a device of the caller's running the computer service for them.
 async function device(ctx, name) {
   if (!name) return null;
   const n = String(name).toLowerCase();
@@ -36,12 +34,10 @@ async function device(ctx, name) {
   return s ? s.name : null;
 }
 
-/// A device of the person's as the list shows it among the agent devices.
 const asListed = (d) => ({ name: d.device, on: d.device, own: true, kind: d.kind, title: d.title, state: "running", use: d.using ? `${d.using.agent} is using it` : "agents may use it" });
 
 const KINDS = { linux: "Linux with a browser", chrome: "Chrome", windows: "Windows", android: "Android", iphone: "iPhone" };
 
-/// An agent device as an agent reads it: its name, kind, where it is and what it's doing, in words.
 function shown(d) {
   const b = d.borrowed;
   const use = b?.signing_in ? `the person is signing in to sites in the ${b.profile || "browser"} profile`

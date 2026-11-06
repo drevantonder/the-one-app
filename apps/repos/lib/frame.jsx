@@ -5,10 +5,7 @@ import { ago, go, isGithub, refOf, short, useCall, useWide } from "./use.jsx"
 
 const SCREENS = { code: "repo", issues: "issues", settings: "repo_settings" }
 
-/// A repo's name and GitHub's tabs over its Code, Issues and Settings (Settings for its owners), on wide windows: each
-/// tab is its own screen, opened with the repo in its params, so Back and reload return to it. On phones it's gone, and
-/// the repo's page has rows that open them. `info` is `{ open_issues, yours }`, from an issues call the page has made;
-/// else it's asked for.
+/// `info` is `{ open_issues, yours }`, from an issues call the page has made; else it's asked for.
 export function RepoTabs({ repo, on, info }) {
   const wide = useWide()
   const asked = useCall("issues", info || !wide ? null : { repo, page: 0 })
@@ -17,7 +14,6 @@ export function RepoTabs({ repo, on, info }) {
   const parts = repo.split("/")
   const name = parts.pop()
   const owner = parts.join("/")
-  // A GitHub repo's settings are GitHub's own.
   const settings = d?.yours && !isGithub(repo)
   return (
     <div className="mb-4 flex flex-col gap-3">
@@ -41,7 +37,6 @@ export function RepoTabs({ repo, on, info }) {
   )
 }
 
-/// The branch and the path, each part tappable to go up; at an older commit, the branch is its hash.
 export function PathBar({ d, file = false }) {
   const parts = (d.path || "").split("/").filter(Boolean)
   const ref = refOf(d)
@@ -84,7 +79,6 @@ function BranchButton({ d, open }) {
   )
 }
 
-/// The newest commit here, with History: one bar on wide windows, a History row under it on phones.
 export function CommitCard({ c, d }) {
   const wide = useWide()
   const history = () => go("history", { repo: d.repo, ref: refOf(d), path: d.path || "" })

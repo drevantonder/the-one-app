@@ -19,7 +19,6 @@ use super::{Devices, Input};
 /// What a call says of the browser profile a device starts with.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Profile {
-    /// The Vault item's id.
     #[serde(default)]
     pub item: String,
     /// Its title, the profile's folder in the device.
@@ -35,7 +34,6 @@ pub struct Profile {
     pub salt: String,
 }
 
-/// The profile a call's input gives, if any.
 pub fn profile_in(input: &Input) -> Result<Option<Profile>> {
     let Some(raw) = input.get("profile").filter(|p| !p.is_null()) else { return Ok(None) };
     let mut p: Profile = serde_json::from_value(strip_nulls(raw)).ok().filter(|p: &Profile| !p.item.is_empty()).ok_or_else(|| anyhow!("profile is a browser profile as the app gives it"))?;
@@ -54,15 +52,13 @@ fn strip_nulls(v: &Value) -> Value {
     }
 }
 
-/// The profile's folder in a device, named as its item is, as far as the browser tools allow: letters, digits and
-/// dashes.
+/// Named as its item is, as far as the browser tools allow: letters, digits and dashes.
 pub fn folder(title: &str) -> String {
     let b: Vec<u8> = title.trim().bytes().map(|c| if c.is_ascii_alphanumeric() || c == b'-' { c } else { b'-' }).collect();
     let name = String::from_utf8_lossy(&b[..b.len().min(40)]).trim_matches('-').to_string();
     if name.is_empty() { "profile".into() } else { name }
 }
 
-/// The cipher for a profile's save with salt.
 fn sealer(key: &str, salt: &str) -> Aes256Gcm {
     let mut k = [0u8; 32];
     hkdf::Hkdf::<sha2::Sha256>::new(Some(salt.as_bytes()), key.as_bytes()).expand(b"browser profile", &mut k).expect("32 bytes is a valid length");
@@ -115,14 +111,12 @@ print(", ".join(f"{s} {day(t)}" for s, t in sorted(last.items(), key=lambda x: -
 "#;
 
 impl Devices {
-    /// A profile's last save, opened.
     pub(super) fn opened(&self, p: &Profile) -> Result<Vec<u8>> {
         let mut sealed = Vec::new();
         self.host.get_blob(&p.blob).and_then(|mut r| Ok(r.read_to_end(&mut sealed)?)).map_err(|err| anyhow!("fetching the {} profile: {err:#}", p.name))?;
         unseal(&p.key, &p.salt, &sealed)
     }
 
-    /// Puts the profile's last save in the device's browser profiles, or an empty profile for one never saved.
     pub(super) fn unpack(&self, d: &Device, p: &Profile) -> Result<()> {
         if p.blob.is_empty() {
             return self.sh(d, &owned(&p.name));
@@ -133,8 +127,6 @@ impl Devices {
         self.exec(d, Some(&mut &plain[..]), None, &["sh", "-c", &script, "sh", &dir]).map_err(|err| anyhow!("unpacking the {} profile: {err:#}", p.name))
     }
 
-    /// Closes the device's browsers, so the profile is written out, and saves it as a new blob, encrypted with a fresh
-    /// salt; the app records it.
     pub(super) fn pack(&self, d: &Device, p: &Profile) -> Result<Save> {
         if self.sh(d, &format!("test -d {PROFILES}{}", p.name)).is_err() {
             bail!("device {}'s browser has no {} profile", d.name, p.name);
@@ -157,14 +149,11 @@ impl Devices {
         Ok(Save { item: p.item.clone(), blob, salt, sites: self.sites(d, &p.name) })
     }
 
-    /// Has the app record a save on the profile's item. A save made while a call of the app's waits (save_profile) is
-    /// recorded the same way.
     pub(super) fn saved(&self, s: &Save) -> Result<()> {
         self.call_app("_saved", &serde_json::to_value(s)?).map_err(|err| anyhow!("recording the save: {err:#}"))?;
         Ok(())
     }
 
-    /// The sites the profile was used on, as HISTORY reads them; "" if it has no history yet.
     fn sites(&self, d: &Device, name: &str) -> String {
         let file = format!("{PROFILES}{name}/Default/History");
         let mut out = Vec::new();

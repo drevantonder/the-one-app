@@ -12,8 +12,7 @@ import activityHtml from "./dist/activity.html" with { type: "text" };
 import codeHtml from "./dist/code.html" with { type: "text" };
 import fileHtml from "./dist/file.html" with { type: "text" };
 
-/// The caller's pages, where apps install: [{ scope, id, name, may, why }]; `why` says who can, in two words, when they
-/// can't.
+/// `why` says who can, in two words, where the caller can't.
 function places(ctx) {
   const out = [{ scope: "user", id: `user:${ctx.me.user}`, name: "You", may: true }];
   for (const g of ctx.groups) {
@@ -25,7 +24,6 @@ function places(ctx) {
   return out;
 }
 
-/// A place as given: its scope (user, group:<id>, global) or its name as places() gives it (You, a group's, Everyone).
 function placeOf(ctx, given) {
   const want = String(given || "").trim();
   const p = places(ctx).find((p) => [p.scope, p.id].includes(want) || p.name.toLowerCase() === want.toLowerCase());
@@ -43,7 +41,6 @@ function mine(ctx, owner) {
   return ctx.groups.some((g) => g.id === owner && g.role === "admin");
 }
 
-/// What to call a scope or owner: You, a group's name, Everyone, admins.
 function namer(ctx) {
   const groups = Object.fromEntries(ctx.groups.map((g) => [g.id, g.name]));
   return (id) => {
@@ -55,7 +52,6 @@ function namer(ctx) {
   };
 }
 
-/// Whether an app has a service.
 const hasService = (a) => !!a.nodes;
 
 /// Where an app's service runs, and where it may: `runs_on` (each node it runs on for a place where it's added, by
@@ -76,8 +72,6 @@ function where(a) {
   return { runs_on, nodes, problem };
 }
 
-/// The node an app added in `scope` runs its service on: `node` if given, or the only one it may; none for an app with
-/// no service. Asks where when there's a choice.
 function nodeFor(a, node) {
   const w = where(a);
   if (!w) return undefined;
@@ -89,7 +83,6 @@ function nodeFor(a, node) {
   return w.nodes[0];
 }
 
-/// The apps `a` uses, and those they use, that have a service.
 async function usedWithService(ctx, a) {
   const out = [];
   const seen = new Set([a.name]);
@@ -114,8 +107,7 @@ async function find(ctx, name) {
   throw new Error(`no app named ${name}: ${like.length ? `did you mean ${like.join(" or ")}?` : "apps_list gives their names"}`);
 }
 
-/// The catalog's apps, as the list and the screens say them, the ones everyone uses first: those deleted (`gone`) or not,
-/// or, for `full`, every one with its picture, which is large.
+/// Those deleted (`gone`) or not, or, for `full`, every one with its picture, which is large.
 async function listed(ctx, { full, gone }) {
   const name = namer(ctx);
   const every = await ctx.catalog();
@@ -139,7 +131,6 @@ async function listed(ctx, { full, gone }) {
 const APP = { type: "string", description: "an app's name, from apps_list, like gmail" };
 const NODE = { type: "string", description: "the node that runs its service: one of yours by name, or cloudflare, as apps_devices lists them" };
 
-/// Times in what `health` gives, ms since 1970, as ISO 8601.
 function iso(v) {
   if (Array.isArray(v)) return v.map(iso);
   if (!v || typeof v !== "object") return v;
@@ -184,8 +175,6 @@ export default {
       async run(ctx, { app, scope, node }) {
         const a = await find(ctx, app);
         const place = placeOf(ctx, scope);
-        // Each app it uses whose service runs nowhere for this place yet runs it on node too if it can, or on the one
-        // node it can; with a choice, its page asks where.
         for (const used of await usedWithService(ctx, a)) {
           const w = where(used);
           if (used.runs_on?.some((r) => r.scope === (place === "user" ? `user:${ctx.me.user}` : place))) continue;
@@ -322,9 +311,7 @@ export default {
 
   screens: {
     main: { title: "App Store", html: mainHtml },
-    // An app's page, where the list has no room to show it beside.
     app: { title: "App", html: appHtml },
-    // Sheets over them: where an app is added, and its source link.
     add: { title: "Add to…", html: addHtml },
     source: { title: "Source Link", html: sourceHtml },
     activity: { title: "Activity", html: activityHtml },

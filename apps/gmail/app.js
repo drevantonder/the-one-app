@@ -12,7 +12,6 @@ const UPLOAD = "https://gmail.googleapis.com/upload/gmail/v1/users/me/";
 const APP = "gmail";
 const TITLE = "Gmail";
 const { account, token, forget, vault, schema, tools: signIn } = google({ app: APP, title: TITLE, scopes: SCOPES });
-// How much of a body read and thread give; the rest is cut.
 const LONGEST = 20000;
 const MOST_FILES = 10;
 const MOST_BYTES = 25 << 20;
@@ -57,11 +56,8 @@ async function api(ctx, email, method, path, { query, json, raw, type, missing }
   return text ? JSON.parse(text) : null;
 }
 
-// ---- reading ----
-
 const header = (p, name) => (p?.headers || []).find((h) => h.name.toLowerCase() === name.toLowerCase())?.value || "";
 
-/// When Gmail got it, in ISO 8601 to the minute: 2026-10-31T14:23Z.
 const when = (m) => `${new Date(Number(m.internalDate)).toISOString().slice(0, 16)}Z`;
 
 function decode(data, charset) {
@@ -75,7 +71,6 @@ const ENTITIES = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: "\u00
 const unescapeHtml = (s) => s.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (all, e) =>
   e[0] === "#" ? String.fromCodePoint(e[1].toLowerCase() === "x" ? parseInt(e.slice(2), 16) : Number(e.slice(1))) : ENTITIES[e.toLowerCase()] ?? all);
 
-/// HTML made readable as plain text: no tags, a line per block.
 function htmlText(h) {
   h = h.replace(/<(head|style|script|title)\b[\s\S]*?<\/\1\s*>/gi, "")
     .replace(/<br\s*\/?>|<\/(p|div|tr|h[1-6]|table|ul|ol|blockquote)\s*>/gi, "\n")
@@ -85,8 +80,6 @@ function htmlText(h) {
   return h.split("\n").map((l) => l.trim()).join("\n").replace(/\n\s*\n\s*\n+/g, "\n\n").trim();
 }
 
-/// A message's text: its first plain-text part, else its first HTML part made plain. Parts with a filename are
-/// attachments, not text.
 function body(p) {
   let plain = "", html = "";
   const walk = (p) => {
@@ -100,7 +93,6 @@ function body(p) {
   return htmlText(html);
 }
 
-/// A message's attachments, in order: every part with a filename.
 function attachments(p, out = []) {
   if (p.filename) out.push({ name: p.filename, type: p.mimeType, size: p.body?.size || 0, id: p.body?.attachmentId, data: p.body?.data });
   for (const c of p.parts || []) attachments(c, out);
@@ -113,7 +105,6 @@ function size(n) {
   return `${n} bytes`;
 }
 
-/// Labels by name, leaving out Gmail's categories.
 const labelText = (ids, names) => (ids || []).filter((id) => !id.startsWith("CATEGORY_")).map((id) => names[id] || id).join(", ");
 
 async function labelNames(ctx, email) {
@@ -121,7 +112,6 @@ async function labelNames(ctx, email) {
   return Object.fromEntries(labels.map((l) => [l.id, l.name]));
 }
 
-/// A message as text: its headers, labels, attachments, then body.
 function show(m, names) {
   const lines = [];
   for (const h of ["Subject", "From", "To", "Cc", "Reply-To"]) {
@@ -139,7 +129,6 @@ function show(m, names) {
 
 const snippet = (s) => unescapeHtml(s || "").replace(FILLER, "").split(/\s+/).filter(Boolean).join(" ");
 
-/// Each message's headers, ten at a time, in order.
 async function metadata(ctx, email, ms) {
   const out = new Array(ms.length);
   for (let i = 0; i < ms.length; i += 10) {
@@ -150,8 +139,6 @@ async function metadata(ctx, email, ms) {
   }
   return out;
 }
-
-// ---- writing ----
 
 const ASCII = /^[\x20-\x7e]*$/;
 
@@ -168,7 +155,6 @@ function word(s) {
   return words.map((w) => `=?UTF-8?B?${toB64(utf8.encode(w))}?=`).join("\r\n ");
 }
 
-/// Splits "a@x.org, Name <b@y.org>, "Last, First" <c@z.org>" at the commas outside quotes and angle brackets.
 function splitAddresses(s) {
   const out = [];
   let cur = "", quoted = false, angle = false;
@@ -182,7 +168,6 @@ function splitAddresses(s) {
   return out.map((a) => a.trim()).filter(Boolean);
 }
 
-/// One recipient, given as "a@x.org", "Name <a@x.org>" or { name, email }.
 function address(a) {
   let name = "", email = "";
   if (typeof a === "object" && a) {
@@ -202,7 +187,6 @@ function address(a) {
   return `${name} <${email}>`;
 }
 
-/// Recipients, as an array (of strings or { name, email }) or one comma-separated string.
 const recipients = (v) => (v == null || v === "" ? [] : (Array.isArray(v) ? v : [v]).flatMap((a) => (typeof a === "string" ? splitAddresses(a) : [a])).map(address));
 
 const TYPES = {
@@ -271,8 +255,6 @@ function rfc822(d) {
   return head.join("\r\n") + "\r\n" + content;
 }
 
-/// The email `in` asks for, threaded under reply_to when it's a reply: to its sender, with its subject, unless `in`
-/// says otherwise.
 async function compose(ctx, email, input) {
   const d = {
     to: recipients(input.to), cc: recipients(input.cc), bcc: recipients(input.bcc),
@@ -298,8 +280,6 @@ async function upload(ctx, email, method, path, d, meta, missing) {
   const raw = `--${b}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(meta)}\r\n--${b}\r\nContent-Type: message/rfc822\r\n\r\n${rfc822(d)}\r\n--${b}--\r\n`;
   return api(ctx, email, method, UPLOAD + path, { query: { uploadType: "multipart" }, raw, type: `multipart/related; boundary=${b}`, missing });
 }
-
-// ---- the app ----
 
 const str = (description) => ({ type: "string", description });
 const ids = (description) => ({ type: "array", items: { type: "string" }, description });

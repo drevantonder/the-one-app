@@ -10,7 +10,6 @@
 
 const OAUTH = "oauth2.googleapis.com";
 
-// How long a sign-in waits for Google to send the browser back: past it, it's forgotten.
 const WAITS = 30 * 60_000;
 
 const b64url = (bytes) => btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
@@ -44,14 +43,11 @@ const schema = { user: [
   "drop table pending; create table pending (state text primary key, verifier text not null, client text, at integer not null);",
 ] };
 
-/// The Google sign-in (OAuth client) the app is switched on for: yours first, else your group's or everyone's (the one
-/// an admin set for everyone).
 async function googleClient(ctx, id) {
   const all = (await ctx.vault.items()).filter((i) => i.fields.client_id?.value && i.fields.client_secret);
   return all.find((i) => i.fields.client_id.value === id) || all.find((i) => i.scope.startsWith("user:")) || all[0] || null;
 }
 
-/// The Google accounts the app is switched on for, the first signed in first.
 async function accountItems(ctx) {
   return (await ctx.vault.items()).filter((i) => i.type === "Google account" && i.fields.email?.value && i.fields.refresh_token).sort((a, b) => a.time - b.time);
 }
@@ -61,7 +57,6 @@ async function accounts(ctx) {
   return (await accountItems(ctx)).map((i) => i.fields.email.value);
 }
 
-/// The address an id_token says signed in, from its base64url payload.
 function emailOf(idToken) {
   try {
     const payload = String(idToken).split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
@@ -142,7 +137,6 @@ export function google({ app, title, scopes }) {
   async function finishSignIn(ctx, given) {
     const s = String(given || "").trim();
     const params = s.includes("=") ? new URL(s.startsWith("http") ? s : `http://x/?${s.split("?").pop()}`).searchParams : null;
-    // The sign-in Google's state names; a bare code finishes the one sign-in waiting, if only one is.
     const state = params?.get("state")?.split("/")[2];
     const waiting = await ctx.user.query("select state, verifier, client from pending where at >= ?", [Date.now() - WAITS]);
     const p = state ? waiting.find((w) => w.state === state) : waiting.length === 1 ? waiting[0] : null;

@@ -62,8 +62,6 @@ func open(path, node string) (*link, error) {
 	return l, nil
 }
 
-// load opens the database, with a client for the device in it, or a new one
-// to pair.
 func (l *link) load() error {
 	db, err := sql.Open("sqlite", "file:"+l.path+"?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)")
 	if err != nil {
@@ -82,7 +80,6 @@ func (l *link) load() error {
 	return l.fresh()
 }
 
-// fresh makes a client for the stored device, or a new one to pair.
 func (l *link) fresh() error {
 	device, err := l.container.GetFirstDevice(context.Background())
 	if err != nil {
@@ -102,13 +99,10 @@ func (l *link) unload() {
 	l.db.Close()
 }
 
-// forget deletes the link and the messages kept here, leaving a new device
-// to pair.
 func (l *link) forget() error {
 	return errors.Join(l.remove(), l.load())
 }
 
-// remove disconnects and deletes the link's database, and its state.
 func (l *link) remove() error {
 	l.unload()
 	l.st = linkState{}
@@ -121,7 +115,6 @@ func (l *link) remove() error {
 	return errors.Join(errs...)
 }
 
-// run runs one of a linked account's own functions.
 func (l *link) run(ctx context.Context, function string, raw json.RawMessage) (any, error) {
 	var in struct {
 		Chat, Query, Text string
@@ -290,7 +283,6 @@ func (l *link) signIn(ctx context.Context, number string) (string, error) {
 		"or scan this QR code there within 20 seconds (sign_in again for new ones).", code) + after, nil
 }
 
-// signOut unlinks this device from the account and deletes what it kept.
 func (l *link) signOut(ctx context.Context) (string, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -401,8 +393,6 @@ func (l *link) key(ctx context.Context, jid types.JID) string {
 	return jid.String()
 }
 
-// name is a chat's or person's name: a group's subject, or the contact's
-// name, else the name they set, else their number.
 func (l *link) name(ctx context.Context, jid, group, pushName string) string {
 	if group != "" {
 		return group
@@ -554,7 +544,6 @@ func (l *link) find(ctx context.Context, want string, contacts bool) (chat, erro
 	return chat{}, fmt.Errorf("%q matches several chats: %s", want, strings.Join(names, "; "))
 }
 
-// lines shows messages one to a line; withChat says in which chat each was.
 func (l *link) lines(ctx context.Context, ms []stored, withChat bool) string {
 	var out []string
 	chats := map[string]string{}
@@ -627,7 +616,6 @@ func when(t time.Time) string {
 	return t.Format("2 Jan 2006")
 }
 
-// logger passes whatsmeow's warnings and errors to the journal.
 type logger struct{ module string }
 
 func (l logger) Errorf(msg string, args ...any) { log.Printf(l.module+": "+msg, args...) }

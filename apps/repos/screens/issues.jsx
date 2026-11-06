@@ -10,7 +10,6 @@ import { Beside, Frame, Pending, ago, go, plural, said, useCall, useWide } from 
 
 const P = one.params
 
-// A new issue: its title and what it's about; it opens once it's made.
 function NewIssue({ done }) {
   const [title, setTitle] = useState("")
   const [body, setBody] = useState("")
@@ -66,7 +65,6 @@ function Row({ i, selected, open }) {
   )
 }
 
-// A filter as a menu button: its name, or what it's set to.
 function Filter({ title, value, choices, set }) {
   const now = choices.find((c) => c.value === value)
   const pick = async (e) => {

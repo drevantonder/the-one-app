@@ -45,13 +45,11 @@ impl Devices {
         Ok(())
     }
 
-    /// Whether each device should be running, by name.
     fn wanted(&self) -> HashMap<String, bool> {
         let _life = self.life.lock().unwrap();
         self.read_life("running.json")
     }
 
-    /// Keeps whether a device should be running, once starting or stopping it worked.
     pub(super) fn want(&self, name: &str, running: bool) {
         let _life = self.life.lock().unwrap();
         let mut w: HashMap<String, bool> = self.read_life("running.json");
@@ -64,7 +62,6 @@ impl Devices {
         }
     }
 
-    /// Forgets a device that's deleted.
     pub(super) fn unwant(&self, name: &str) {
         let _life = self.life.lock().unwrap();
         let mut w: HashMap<String, bool> = self.read_life("running.json");
@@ -80,7 +77,6 @@ impl Devices {
         self.read_life("moved.json")
     }
 
-    /// Keeps a device's move, or with none, forgets it.
     pub(super) fn set_move(&self, name: &str, m: Option<&Move>) -> Result<()> {
         let _life = self.life.lock().unwrap();
         let mut all: HashMap<String, Move> = self.read_life("moved.json");
@@ -116,14 +112,12 @@ impl Devices {
         Ok(Move { to: String::new(), at: time::zero(), done: false })
     }
 
-    /// Whether machine has a device named name.
     fn has_there(&self, machine: &str, name: &str) -> Result<bool> {
         let req = json!({ "app": super::NAME, "service": super::NAME, "op": "list", "input": { "here": true }, "device": machine });
         let theirs = self.host.post_within("/v1/call", &req, Duration::from_secs(20))?["ok"].clone();
         Ok(theirs["devices"].as_array().into_iter().flatten().any(|d| d["name"] == name && d["moved_to"].as_str().unwrap_or_default().is_empty()))
     }
 
-    /// Refuses a device moved, or maybe moved, to another machine.
     pub(super) fn may_start(&self, name: &str) -> Result<()> {
         let m = self.moved_away(name)?;
         if m.done {
@@ -132,11 +126,10 @@ impl Devices {
         Ok(())
     }
 
-    /// Stops devices moved away that still run here, as after a move that stopped before stopping it.
     pub(super) fn tend_moved(&self, all: &[Device]) {
         for name in self.moves().into_keys() {
             let Some(d) = all.iter().find(|d| d.name == name) else {
-                let _ = self.set_move(&name, None); // deleted here
+                let _ = self.set_move(&name, None);
                 continue;
             };
             if d.state == "stopped" || !self.moved_away(&name).is_ok_and(|m| m.done) {
@@ -149,9 +142,7 @@ impl Devices {
         }
     }
 
-    /// Starts devices that should be running but aren't, as after the machine restarted, once their runtime answers,
-    /// and as many as have room; and stops Linux ones that shouldn't be running. Devices from before running.json
-    /// should run as their runtime kept it: Podman's restart policy, a Mac's stopped marker.
+    /// A device not yet in running.json runs as its runtime kept it: Podman's restart policy, a Mac's stopped marker.
     pub(super) fn revive(&self) {
         let mut all = Vec::new();
         if let Some(rt) = &self.rt {
@@ -210,7 +201,7 @@ impl Devices {
                 continue;
             }
             if !lent.contains_key(&v.name) && v.throwaway() {
-                continue; // a throwaway copy nobody borrows now
+                continue;
             }
             if !super::kinds::room_for(super::kinds::gb_of(Some(&v))) {
                 tracing::info!("not starting {}, which should be running: no memory to spare", v.name);

@@ -2,7 +2,6 @@
 // the ones on its machine, and a call goes on to the next device when a model isn't there; this app is what people,
 // agents and other apps use.
 
-/// Runs one of the models service's functions, on `device` if it's given, else wherever it runs for the caller.
 const service = (ctx, fn, { device, ...input }) => ctx.services.models[fn](input, device ? { device } : undefined);
 
 const IMAGES = "images (JPEG, PNG or WebP) as base64 strings, shown to the model with the prompt";

@@ -4,7 +4,6 @@ import { useState } from "react"
 import { CopyButton, Icon, Markdown, Tabs, TabsList, TabsTrigger, Textarea, cn } from "@one/ui"
 import { isGithub } from "./use.jsx"
 
-/// GitHub's own mark, which is its logo; in the text's colour.
 export function GitHubMark({ className }) {
   return (
     <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" className={cn("size-4 shrink-0", className)}>
@@ -13,11 +12,9 @@ export function GitHubMark({ className }) {
   )
 }
 
-/// A repo's symbol: GitHub's mark for GitHub's, a book for the network's own.
 export const RepoIcon = ({ repo, github = isGithub(repo), className }) =>
   github ? <GitHubMark className={className} /> : <Icon name="book" className={className} />
 
-/// A label as GitHub draws one: a pill in its colour with its name in black or white, whichever reads.
 export function LabelChip({ l, className }) {
   const c = /^[0-9a-f]{6}$/i.test(l.color) ? l.color : "ededed"
   const [r, g, b] = [0, 2, 4].map((i) => parseInt(c.slice(i, i + 2), 16))
@@ -31,7 +28,6 @@ export function LabelChip({ l, className }) {
   )
 }
 
-/// An issue's state as its symbol: open, closed as completed, or closed as not planned.
 export const StateIcon = ({ issue, className }) => (
   <Icon
     name={issue.state === "open" ? "record" : issue.state_reason === "not_planned" ? "prohibit" : "check-circle"}
@@ -39,7 +35,6 @@ export const StateIcon = ({ issue, className }) => (
   />
 )
 
-/// A change's lines added and removed, in the colours code is read in.
 export function Counts({ add, del, className }) {
   return (
     <span className={cn("whitespace-nowrap tabular-nums", className)}>
@@ -48,7 +43,6 @@ export function Counts({ add, del, className }) {
   )
 }
 
-/// A Markdown field with Write and Preview, as GitHub's.
 export function MarkdownField({ value, onChange, placeholder = "", rows = 6, autoFocus, label }) {
   const [preview, setPreview] = useState(false)
   return (
@@ -68,7 +62,6 @@ export function MarkdownField({ value, onChange, placeholder = "", rows = 6, aut
   )
 }
 
-/// A small icon-only copy button, for a hash or a path.
 export const SmallCopy = ({ text, className }) => (
   <CopyButton text={text} label="" size="sm" className={cn("size-6 [&_svg:not([class*='size-'])]:size-3", className)} />
 )

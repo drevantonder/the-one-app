@@ -1,9 +1,9 @@
-//! AI Usage's service: the AI plans signed in on its machine, read from the providers themselves. Its machine's row
-//! reads "AI Usage on <it>": the app asks every machine's service and merges by account. Its accounts are the provider sign-ins kept here: Claude Code's own and every
-//! account claude-swap keeps, Codex's and OpenCode Go's. It asks each provider for that account's numbers and gives
-//! back only those (used %, reset times, per-model windows, plan): a token never leaves it, not to the app, not in a
-//! log or an error. Read only, never a refresh (which would sign the tool it belongs to out): a sign-in whose access
-//! token ran out says so, since it renews the next time its tool is used.
+//! AI Usage's service: the AI plans signed in on its machine, read from the providers themselves; the app asks every
+//! machine's service and merges by account. Its accounts are the provider sign-ins kept here: Claude Code's own and
+//! every account claude-swap keeps, Codex's and OpenCode Go's. It asks each provider for that account's numbers and
+//! gives back only those (used %, reset times, per-model windows, plan): a token never leaves it, not to the app, not
+//! in a log or an error. Read only, never a refresh (which would sign the tool it belongs to out): a sign-in whose
+//! access token ran out says so, since it renews the next time its tool is used.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -14,7 +14,6 @@ use serde_json::{Value, json};
 use one_service::{Answer, Call, Host, Service};
 
 
-/// How long a provider may take to answer.
 const ASK: Duration = Duration::from_secs(15);
 
 fn main() -> Result<()> {
@@ -42,14 +41,12 @@ struct Account {
     active: bool,
     disabled: bool,
     plan: Option<String>,
-    /// Its access token, and when it runs out if the file says (ms).
     token: String,
     expires_at: Option<u64>,
     /// Per-provider: Codex's account id.
     account_id: String,
 }
 
-/// The answer for one account, or why it couldn't be read.
 fn reading(a: &Account) -> Value {
     // The label a person tells accounts apart by, as claude-swap's list gave them: the team (Personal for one's own
     // plan) and the email.
@@ -86,9 +83,7 @@ fn call(_host: &Host, call: &Call) -> Result<Value> {
             "expired": a.expires_at.is_some_and(|at| at < now_ms()),
         })).collect::<Vec<_>>() })),
         "usage" => {
-            // A machine with no sign-ins has none to give: that's no problem.
             let accounts = discover();
-            // One thread per account: several providers' asks at once, none held up by another's.
             let readings = std::thread::scope(|s| {
                 let asked: Vec<_> = accounts.iter().map(|a| s.spawn(move || reading(a))).collect();
                 asked.into_iter().filter_map(|t| t.join().ok()).collect::<Vec<_>>()
@@ -99,8 +94,6 @@ fn call(_host: &Host, call: &Call) -> Result<Value> {
     }
 }
 
-// ── The sign-ins on this machine ────────────────────────────────────────────
-
 fn home() -> PathBuf {
     PathBuf::from(std::env::var_os("HOME").unwrap_or_else(|| "/".into()))
 }
@@ -109,8 +102,6 @@ fn read_json(path: &Path) -> Option<Value> {
     serde_json::from_slice(&std::fs::read(path).ok()?).ok()
 }
 
-/// Every sign-in this machine keeps: claude-swap's accounts (or Claude Code's own when it isn't here), Codex's and
-/// OpenCode Go's.
 fn discover() -> Vec<Account> {
     let mut out = claude_swap_accounts();
     if out.is_empty()
@@ -170,7 +161,6 @@ fn claude_swap_accounts() -> Vec<Account> {
     let Some(seq) = read_json(&dir.join("sequence.json")) else { return Vec::new() };
     let active = seq["activeAccountNumber"].as_u64().unwrap_or(0);
     let Some(accounts) = seq["accounts"].as_object() else { return Vec::new() };
-    // The sequence lists the numbers in rotation order; every account in it, in that order.
     let mut order: Vec<String> = seq["sequence"].as_array().into_iter().flatten().filter_map(|n| n.as_u64().map(|n| n.to_string())).collect();
     for n in accounts.keys() {
         if !order.contains(n) {
@@ -280,13 +270,11 @@ fn opencode_db(db: &Path) -> Option<(String, String)> {
     Some((key, email))
 }
 
-// ── Asking the providers ────────────────────────────────────────────────────
-
 fn agent() -> ureq::Agent {
     ureq::Agent::config_builder().timeout_global(Some(ASK)).build().into()
 }
 
-/// A GET with the account's bearer token; only to its provider's own usage endpoint. → the JSON it answered.
+/// A GET with the account's bearer token; only ever to its provider's own usage endpoint.
 fn get(a: &Account, url: &str, headers: &[(&str, &str)]) -> Result<Value> {
     let mut req = agent().get(url).header("Authorization", format!("Bearer {}", a.token));
     for (name, value) in headers {
@@ -310,7 +298,6 @@ impl Account {
     }
 }
 
-/// A window as the providers give it: percent used and when it resets (ms).
 fn win(used: Option<f64>, resets_at: Option<u64>) -> Value {
     json!({ "used": used, "resetsAt": resets_at })
 }
@@ -328,7 +315,6 @@ fn pct(v: &Value) -> Option<f64> {
     v.as_f64()
 }
 
-/// Asks the account's provider for its usage now. → the windows, models, plan and extras the app keeps.
 fn fetch(a: &Account) -> Result<Value> {
     match a.provider {
         "claude" => claude_usage(a),
@@ -388,7 +374,6 @@ fn opencode_usage(a: &Account) -> Result<Value> {
 
 #[cfg(test)]
 mod tests {
-    /// A credentials file's OAuth fields, as claude-swap's base64'd .enc gives them.
     #[test]
     fn oauth_fields() {
         let creds = data_encoding::BASE64.encode(br#"{"claudeAiOauth":{"accessToken":"sk-ant-oat01-x","expiresAt":1793766965457}}"#);

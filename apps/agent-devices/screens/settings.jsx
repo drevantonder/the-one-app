@@ -20,7 +20,6 @@ const ChromeLogo = () => (
   </svg>
 )
 
-// A machine, and a switch: off and greyed, with a line saying why, where the machine's owner has locked it.
 function Machine({ d, set }) {
   return (
     <label className="flex cursor-pointer items-center gap-3 px-3 py-2.5 text-sm has-[button:disabled]:cursor-default">
@@ -35,8 +34,8 @@ function Machine({ d, set }) {
 
 function Settings() {
   const [devices, setDevices] = useState(null)
-  const [problem, setProblem] = useState(null) // the list couldn't be read
-  const [error, setError] = useState("") // a switch couldn't be changed
+  const [problem, setProblem] = useState(null)
+  const [error, setError] = useState("")
 
   async function load() {
     try {

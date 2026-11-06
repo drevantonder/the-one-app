@@ -13,7 +13,6 @@ function Source() {
   const [saving, setSaving] = useState(false)
   const field = useRef(null)
 
-  // The field starts with the link it has, once that's known, and the cursor in it.
   useEffect(() => {
     if (a && link === null) {
       setLink(a.source || "")

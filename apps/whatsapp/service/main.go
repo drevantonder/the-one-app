@@ -25,7 +25,6 @@ const app = "whatsapp"
 
 type call struct {
 	ID uint64 `json:"id"`
-	// The function it runs: "op" on the wire, which older nodes send.
 	Function string          `json:"op"`
 	Input    json.RawMessage `json:"input"`
 }
@@ -82,7 +81,6 @@ func serve(node string, w *whatsapp) {
 	}
 }
 
-// next waits for the node's next call; nil if there was none.
 func next(client *http.Client, node string) (*call, error) {
 	resp, err := client.Get(node + "/v1/services/" + app + "/calls")
 	if err != nil {
@@ -111,8 +109,6 @@ func post(url string, body any) error {
 	return err
 }
 
-// request posts body as JSON, or gets url if body is nil, and returns the
-// reply's body.
 func request(client *http.Client, url string, body any) ([]byte, error) {
 	var resp *http.Response
 	var err error
@@ -140,8 +136,6 @@ func request(client *http.Client, url string, body any) ([]byte, error) {
 	return msg, nil
 }
 
-// callOn runs one of this service's functions on another of the user's
-// devices, through this device's node, and decodes its result into out.
 func callOn(node, device, function string, input, out any) error {
 	body, err := request(&http.Client{Timeout: 28 * time.Second, Transport: toNode}, node+"/v1/call",
 		map[string]any{"app": app, "service": app, "op": function, "input": input, "device": device})

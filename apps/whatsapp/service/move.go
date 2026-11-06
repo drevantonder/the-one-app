@@ -35,8 +35,6 @@ import (
 // call may carry, even through older nodes (2 MB).
 var partSize = 1 << 20
 
-// holding is what one device's service tells another about its links: the
-// first, as when there could be only one, and all of them.
 type holding struct {
 	Phone     string    `json:"phone,omitempty"` // the linked number, if linked there
 	Connected bool      `json:"connected,omitempty"`
@@ -56,7 +54,6 @@ func (h holding) all() []holding {
 	return nil
 }
 
-// has says whether a device holds a link as number.
 func (h holding) has(number string) bool {
 	return slices.ContainsFunc(h.all(), func(o holding) bool { return o.Phone == number })
 }
@@ -70,8 +67,6 @@ func (l *link) holder() holding {
 	return holding{}
 }
 
-// devices is this device's name, and the user's other devices that run
-// WhatsApp and are online.
 type devices struct {
 	here   string
 	others []string
@@ -104,8 +99,6 @@ func (l *link) devices() (devices, error) {
 	return s, nil
 }
 
-// linkedElsewhere is the other device that holds the link, and as which
-// number; "" if none of those that answered does.
 func (l *link) linkedElsewhere(s devices) (device, phone string) {
 	for _, name := range s.others {
 		var h holding
@@ -206,8 +199,7 @@ func (w *whatsapp) move(l *link, to string) (string, error) {
 		s.here, to, number, state, s.here), nil
 }
 
-// handedOff deletes the link here once the device it went to has it, with
-// l.mu held.
+// With l.mu held.
 func (l *link) handedOff() error {
 	if l.st.State != handingOff {
 		return nil
@@ -289,8 +281,6 @@ func (w *whatsapp) settle(l *link) string {
 	return ""
 }
 
-// settling settles every link that's handing off or was replaced, every
-// minute, for as long as this runs.
 func (w *whatsapp) settling() {
 	for {
 		w.mu.Lock()
@@ -314,7 +304,6 @@ func (l *link) reconnect() {
 	}
 }
 
-// snapshot is the whole database, consistent and compressed.
 func snapshot(db *sql.DB, dir string) ([]byte, error) {
 	f, err := os.CreateTemp(dir, "moving-*.db")
 	if err != nil {
@@ -342,8 +331,6 @@ func snapshot(db *sql.DB, dir string) ([]byte, error) {
 	return b.Bytes(), nil
 }
 
-// An arrival is a link another device is moving here, its parts so far in a
-// file of its own, so two moves here at once don't mix.
 type arrival struct {
 	file string
 	next int
@@ -464,7 +451,6 @@ func (w *whatsapp) saveMoved() error {
 	return writeDurably(w.movedFile(), w.moved, false)
 }
 
-// loadMoved reads each move's answer, and the moves the links here came by.
 func (w *whatsapp) loadMoved() {
 	w.moved = map[string]string{}
 	if b, err := os.ReadFile(w.movedFile()); err == nil {
@@ -489,7 +475,6 @@ func (w *whatsapp) loadMoved() {
 	}
 }
 
-// stamp notes in a database that it came by the move named.
 func stamp(path, move string) error {
 	db, err := sql.Open("sqlite", "file:"+path)
 	if err != nil {
@@ -499,7 +484,6 @@ func stamp(path, move string) error {
 	return errors.Join(err, db.Close())
 }
 
-// unpack decodes and decompresses the parts in from into the database to.
 func unpack(from, to string) error {
 	in, err := os.Open(from)
 	if err != nil {
@@ -518,7 +502,6 @@ func unpack(from, to string) error {
 	return errors.Join(err, out.Close())
 }
 
-// hasLink checks that the database at path holds a linked device.
 func hasLink(path string) error {
 	db, err := sql.Open("sqlite", "file:"+path+"?mode=ro")
 	if err != nil {

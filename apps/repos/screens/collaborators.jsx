@@ -11,7 +11,6 @@ const Person = ({ p, trailing }) => (
   <ListRow leading={<Avatar name={p.name} size={32} />} title={p.name} sub={p.handle ? `@${p.handle}` : undefined} trailing={trailing} />
 )
 
-// Someone to add, found by name or handle; tapping them adds them.
 function Add({ d, done }) {
   const [query, setQuery] = useState("")
   const [error, setError] = useState("")
@@ -61,7 +60,6 @@ function Collaborators() {
   const d = call.data
   if (!d) return <><RepoTabs repo={P.repo} on="settings" info={issues.data || undefined} /><Pending call={call} rows={3} /></>
 
-  // Removing someone, once the owner says so.
   const remove = async (c) => {
     const ok = await one.alert({ title: `Remove ${c.name}?`, text: `They stop pushing to ${d.repo}.`, action: "Remove", danger: true })
     if (!ok) return

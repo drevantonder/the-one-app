@@ -6,15 +6,12 @@ import { AppIcon, Button, Empty, List, ListRow, Problem, Switch } from "@one/ui"
 import { Section, said, useCall } from "./store.jsx"
 
 const cap = (t) => t.charAt(0).toUpperCase() + t.slice(1)
-/// "just now", "5 min ago".
 const ago = (t) => (one.ago(t) === "now" ? "just now" : one.ago(t) + " ago")
-/// When a time in the next while is: "in 7m", "in 3h", "tomorrow".
 function soon(ms) {
   const m = Math.max(0, Math.round((ms - Date.now()) / 60000))
   return m < 1 ? "now" : m < 60 ? "in " + m + "m" : m < 1440 ? "in " + Math.round(m / 60) + "h" : "in " + Math.round(m / 1440) + "d"
 }
 
-/// Whether an app is on any of the person's pages, so its button says Manage instead of Add to….
 export const onAPage = (a, places) => a.installed.some((id) => places.some((p) => p.id === id))
 
 /// `list` is what the App Store's list call gave; `onOpen(name)` opens another app's page (a row of Works With),
@@ -28,7 +25,6 @@ export function AppPage({ name, list, onOpen, onGone, reloadList, bar = false })
   const where = useCall("devices", { app: name })
   const [error, setError] = useState("")
   const [busy, setBusy] = useState("")
-  // A switch stays where it was put while its call goes, and goes back only if it fails.
   const [flipped, setFlipped] = useState({})
   const heading = useRef(null)
 
@@ -38,7 +34,6 @@ export function AppPage({ name, list, onOpen, onGone, reloadList, bar = false })
     health.reload()
     where.reload()
   }
-  // What a button does: its failure shows on the page, and the page asks again either way.
   const run = async (key, go) => {
     setError("")
     setBusy(key)
@@ -104,7 +99,6 @@ export function AppPage({ name, list, onOpen, onGone, reloadList, bar = false })
     run("switch", () => one.call("switch", { app: name, schedule: s.name, scope: s.scope, on })).then(() => setFlipped((f) => ({ ...f, [key]: undefined })))
   }
 
-  // Where its service runs (each node it runs on), and its one problem box when none of them is on and well.
   const w = where.data
   const move = () => one.open("add", { app: name }, undefined, { sheet: true }).then(refresh)
   const owner = a.mine && a.added && !a.deleted
@@ -216,7 +210,6 @@ export function AppPage({ name, list, onOpen, onGone, reloadList, bar = false })
   )
 }
 
-/// A row that opens another app's page: its icon and name.
 function AppRow({ x, onOpen }) {
   return <ListRow leading={<AppIcon app={x} size={30} />} title={x.title} onClick={() => onOpen(x.name)} />
 }

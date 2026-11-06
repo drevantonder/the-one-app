@@ -105,7 +105,6 @@ struct MessagesApp: Service {
         s.filter(\.isNumber).count >= 7 && s.allSatisfy { $0.isNumber || " +-().".contains($0) }
     }
 
-    /// A chat by its id, a phone number or email address, its name, or a part of a name only one chat has.
     private func find(_ want: String, in chats: [Chat]) throws -> Chat {
         if let c = chats.first(where: { $0.id == want || $0.guid == want }) { return c }
         if want.contains("@") || isPhone(want) {
@@ -214,7 +213,6 @@ final class ChatDB {
 
     deinit { sqlite3_close(db) }
 
-    /// Every conversation, most recent first.
     func chats(_ names: [String: String]) throws -> [Chat] {
         let rows = try query("""
             SELECT c.ROWID, c.guid, c.chat_identifier, IFNULL(c.display_name, ''),
@@ -246,7 +244,6 @@ final class ChatDB {
         return chats
     }
 
-    /// Messages in some chats (or all), containing some text (or any), newest last.
     func messages(in chats: [Int64]?, matching text: String? = nil, since: Date?, limit: Int, skip: Int) throws -> [Message] {
         var filters = ["m.item_type = 0", "m.associated_message_type = 0", "m.date >= ?"]
         var binds: [Any] = [Int64((since?.timeIntervalSinceReferenceDate ?? 0) * 1e9)]

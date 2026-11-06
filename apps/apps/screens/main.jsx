@@ -9,7 +9,6 @@ import { Failed, Section, said, useList } from "../lib/store.jsx"
 // The sections: the apps built into the release, and those made in this network (each network words that its own way,
 // in its settings).
 const MADE_HERE = one.config?.made_here || "Made here"
-// How wide the list's room is when an app's page opens beside it, rather than over it.
 const WIDE = 720
 
 function Row({ a, places, selected, open, add, restore }) {
@@ -44,7 +43,6 @@ function Main() {
   const [accounts, setAccounts] = useState(!!one.params.accounts)
   const [query, setQuery] = useState("")
   const [shown, setShown] = useState(null)
-  // An app restored is back in its section at once, and put back if it fails.
   const [restored, setRestored] = useState([])
   const [error, setError] = useState("")
   const [ref, width] = useWidth()

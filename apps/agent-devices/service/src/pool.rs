@@ -124,7 +124,6 @@ pub fn new_pool_name() -> String {
     format!("{POOL_PREFIX}{}", super::random_hex(3))
 }
 
-/// The pool's devices nobody has borrowed.
 pub fn spares(all: &[Device], lent: &HashMap<String, Loan>) -> Vec<Device> {
     all.iter().filter(|d| d.pool && !lent.contains_key(&d.name) && d.state != "stopped").cloned().collect()
 }
@@ -185,7 +184,6 @@ impl Devices {
         self.pool.lock().unwrap().lent.clone()
     }
 
-    /// Starts a loan of the device named, preparing it.
     pub(super) fn reserve(&self, name: &str, mut l: Loan) {
         let mut pool = self.pool.lock().unwrap();
         l.state = LoanState::Preparing;
@@ -193,7 +191,6 @@ impl Devices {
         self.save_loans(&pool);
     }
 
-    /// Makes a loan the borrower's, once its device is ready.
     pub(super) fn lend(&self, name: &str) {
         let mut pool = self.pool.lock().unwrap();
         if let Some(l) = pool.lent.get_mut(name).filter(|l| l.state == LoanState::Preparing) {
@@ -202,7 +199,6 @@ impl Devices {
         }
     }
 
-    /// Changes a lent loan: false if it isn't lent.
     pub(super) fn change(&self, name: &str, f: impl FnOnce(&mut Loan)) -> bool {
         let mut pool = self.pool.lock().unwrap();
         let Some(l) = pool.lent.get_mut(name).filter(|l| l.state == LoanState::Lent) else { return false };
@@ -224,7 +220,6 @@ impl Devices {
         Ok(was)
     }
 
-    /// Makes a loan whose giving back failed lent again.
     pub(super) fn return_failed(&self, name: &str) {
         let mut pool = self.pool.lock().unwrap();
         if let Some(l) = pool.lent.get_mut(name) {
@@ -233,7 +228,6 @@ impl Devices {
         }
     }
 
-    /// Forgets a loan, with its profile's key.
     pub(super) fn end_loan(&self, name: &str) {
         let mut pool = self.pool.lock().unwrap();
         if pool.lent.remove(name).is_some() {
@@ -241,7 +235,6 @@ impl Devices {
         }
     }
 
-    /// Writes the loans to disk, so they outlive this program.
     fn save_loans(&self, pool: &Pool) {
         let write = || -> Result<()> {
             let path = self.dir.join("lent.json");
@@ -272,7 +265,6 @@ impl Devices {
         self.pool.lock().unwrap().used.insert(name.into(), super::now());
     }
 
-    /// Each device's last call.
     pub(super) fn used(&self) -> HashMap<String, jiff::Timestamp> {
         self.pool.lock().unwrap().used.clone()
     }
@@ -348,13 +340,11 @@ impl Devices {
         Ok(d)
     }
 
-    /// Gives a lent device's loan its profile, with its key.
     pub(super) fn hold_key(&self, name: &str, p: &Profile) {
         let p = p.clone();
         self.change(name, |l| l.key = Some(p));
     }
 
-    /// Opens a page in a browser on the profile, the person's to use through view.
     fn open_page(&self, d: &Device, name: &str, url: &str) -> Result<()> {
         let url = if url.is_empty() { "about:blank" } else { url };
         self.sh(
@@ -443,7 +433,6 @@ impl Devices {
         Ok((d, until))
     }
 
-    /// Whether a device here is signing in to the profile.
     pub(super) fn signing_in_here(&self, item: &str) -> bool {
         self.loans().values().any(|l| l.signing_in && l.item == item)
     }

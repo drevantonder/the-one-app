@@ -4,7 +4,6 @@
 
 const SKILL = { description: "the skill's name, from agents_skills, like writing-for-agents", type: "string" };
 
-/// The person's records, oldest first, each { id, kind, data, time, by, device }.
 async function records(ctx) {
   const db = ctx.user;
   if (!db) throw new Error("AGENTS.md is each person's own: this call reaches no one's");
@@ -12,12 +11,11 @@ async function records(ctx) {
   return rows.map((r) => ({ id: String(r.n), kind: r.kind, data: JSON.parse(r.data), time: r.time, by: r.by, device: r.device }));
 }
 
-/// Keeps a revision: written once the call returns.
+// Written once the call returns.
 function keep(ctx, kind, data) {
   ctx.user.exec("insert into records (kind, data, time, by, device) values (?, ?, ?, ?, ?)", [kind, JSON.stringify(data), ctx.now(), ctx.me.user_name, ctx.me.name]);
 }
 
-/// What the records add up to: AGENTS.md's text, and each skill's files.
 function state(all) {
   let text = "";
   const skills = new Map();
@@ -29,7 +27,6 @@ function state(all) {
   return { text, skills: new Map([...skills].sort(([a], [b]) => (a < b ? -1 : 1))) };
 }
 
-/// Why a skill can't be kept, if it can't: its name is one folder, and its files stay inside it.
 function invalid(name, files) {
   if (typeof name !== "string" || !/^[a-z0-9-]+$/.test(name)) return "Not added: skill names are lowercase words joined by -";
   if (!files || typeof files !== "object" || typeof files["SKILL.md"] !== "string") return "Not added: a skill needs a SKILL.md";
@@ -40,8 +37,8 @@ function invalid(name, files) {
   return null;
 }
 
-/// A SKILL.md's frontmatter as harnesses read it: `---` on the first line and on one after it, between them each
-/// `key: value` with a value, a folded one (`key: >`) on the indented lines after it. A string says what's missing.
+// A SKILL.md's frontmatter as harnesses read it: `---` on the first line and on one after it, between them each
+// `key: value`, a folded one (`key: >`) on the indented lines after it. A string says what's missing.
 function frontmatter(md) {
   const lines = String(md).split("\n").map((l) => l.replace(/\s+$/, ""));
   if (lines[0] !== "---") return "first line must be ---, starting its frontmatter";
@@ -67,7 +64,7 @@ function frontmatter(md) {
   return out;
 }
 
-/// Why a new skill won't be loaded, if it won't: harnesses load a skill by its frontmatter's name and description.
+// Harnesses load a skill by its frontmatter's name and description.
 function unintroduced(name, files) {
   const example = `---\nname: ${name}\ndescription: what it's for, and when to use it\n---`;
   const front = frontmatter(files["SKILL.md"]);
@@ -78,7 +75,6 @@ function unintroduced(name, files) {
   return null;
 }
 
-/// The first line of `now` that isn't the same in `before`, or what was cut.
 function firstChange(before, now) {
   const [a, b] = [before ? before.split("\n") : [], now ? now.split("\n") : []];
   for (let i = 0; ; i++) {
@@ -89,7 +85,6 @@ function firstChange(before, now) {
   }
 }
 
-/// AGENTS.md's revisions, or a skill's, newest first, each with what changed since the one before.
 function history(all, skill) {
   let before = null;
   const out = [];
@@ -106,7 +101,6 @@ function history(all, skill) {
   return out.reverse();
 }
 
-/// A skill's files, or an error naming those there are.
 function named(skills, name) {
   const files = skills.get(name);
   if (files) return files;
@@ -114,7 +108,6 @@ function named(skills, name) {
   throw new Error(`no skill ${name}: ${all.length ? `there's ${all.join(", ")}` : "there are none yet; agents_skill_set adds one"}`);
 }
 
-/// Which harnesses get AGENTS.md, which the service writes to; said with each answer that changes something.
 const EVERY_DEVICE = "every device's harnesses get it within a minute";
 
 export default {
@@ -216,7 +209,6 @@ export default {
         return `That ${r.data.name} is current again; ${EVERY_DEVICE}.`;
       },
     },
-    // The service's: what it writes into each harness, { text, skills: { name: { path: text } } }.
     _files: {
       reads: true,
       description: "AGENTS.md and every skill's files, for the service to write.",

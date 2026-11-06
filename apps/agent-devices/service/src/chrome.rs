@@ -4,11 +4,10 @@
 //! (--remote-debugging-pipe: no port, nothing else can reach it) and answers the browser tools itself (browse.rs).
 //! Chrome's own sandbox stays on.
 //!
-//! Whether a machine runs chrome devices is its owner's to say: a chrome device is the machine's own Chrome, outside
-//! any container, reaching what the machine reaches. Until they say, it does where the machine runs only its owner's
-//! own calls, and doesn't where it runs a group's, global's or another person's too (Where Things Run): their data is
-//! on it. What the owner chose is kept in chrome.json in this service's folder, and holds whatever the machine comes to
-//! run.
+//! Whether a machine runs chrome devices is its owner's to say. Until they say, it does where the machine runs only its
+//! owner's own calls, and doesn't where it runs a group's, global's or another person's too (Where Things Run): their
+//! data is on it. What the owner chose is kept in chrome.json in this service's folder, and holds whatever the machine
+//! comes to run.
 
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
@@ -34,7 +33,6 @@ pub const GB: u64 = 1;
 
 pub struct Chrome;
 
-/// This machine's Chrome, if any.
 fn chrome_path() -> Option<PathBuf> {
     if cfg!(target_os = "macos") {
         let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
@@ -44,7 +42,6 @@ fn chrome_path() -> Option<PathBuf> {
     ["google-chrome", "google-chrome-stable", "chromium", "chromium-browser"].iter().find_map(|name| std::env::split_paths(&path).map(|d| d.join(name)).find(|p| p.is_file()))
 }
 
-/// The browser tools' name for a chrome device's Chrome.
 pub fn target_of(v: &Vm) -> String {
     format!("bt-{}", v.name)
 }
@@ -82,7 +79,6 @@ impl Kind for Chrome {
         bail!("chrome devices are only borrowed: there's nothing to adopt")
     }
 
-    /// Makes the device's folder, its Chrome's user data.
     fn make(&self, _: &Devices, v: &mut Vm, _: Option<&Vm>) -> Result<()> {
         let dir = std::env::temp_dir().join(format!("agent-devices-{}-{}", v.name, super::random_hex(6)));
         std::fs::create_dir_all(&dir)?;
@@ -174,8 +170,6 @@ impl Kind for Chrome {
         bail!("a chrome device already reaches what this machine reaches")
     }
 }
-
-// ── The browser ────────────────────────────────────────────────────────────
 
 /// A chrome device's Chrome, and this program's DevTools connection to it: the browser's own, with a session for each
 /// page (flat sessions, Target.setAutoAttach).
@@ -363,7 +357,6 @@ impl Browser {
         !self.now.lock().unwrap().done
     }
 
-    /// Ends Chrome, and everything it started.
     pub fn close(&self) {
         if self.alive() {
             // SAFETY: a signal to Chrome's own process group, which it leads.
@@ -507,7 +500,6 @@ impl Browser {
         }
     }
 
-    /// The answer to a command, once it comes.
     fn answer(&self, id: i64, method: &str, limit: Duration) -> Result<Value> {
         let got = self.wait(limit, |s| s.replies.remove(&id).or_else(|| s.done.then(|| Err("Chrome closed".to_string()))));
         match got {
@@ -525,12 +517,10 @@ impl Browser {
         self.answer(id, method, limit)
     }
 
-    /// A command to the browser, or with a page's session, to it.
     pub fn call(&self, session: &str, method: &str, params: Option<Value>) -> Result<Value> {
         self.call_within(session, method, params, CALL)
     }
 
-    /// A page's state now.
     pub fn page(&self, session: &str) -> Option<Page> {
         self.now.lock().unwrap().pages.get(session).cloned()
     }
@@ -714,8 +704,6 @@ impl Browser {
     }
 }
 
-// ── A profile, unpacked ────────────────────────────────────────────────────
-
 /// The files and folders of a gzipped tarball (GNU's or POSIX's, as tar in a Linux device writes it), each put in dir:
 /// nothing outside it, and no links.
 fn untar(gz: &[u8], dir: &Path) -> Result<()> {
@@ -777,8 +765,6 @@ fn untar(gz: &[u8], dir: &Path) -> Result<()> {
     Ok(())
 }
 
-// ── Borrowing, and the owner's switch ──────────────────────────────────────
-
 /// Whether a machine runs chrome devices: as its owner chose, or by default only where it runs no one else's calls.
 fn allowed(chosen: Option<bool>, shared: bool) -> bool {
     chosen.unwrap_or(!shared)
@@ -820,7 +806,6 @@ impl Machine {
     }
 }
 
-/// This machine and the network's devices, as a `/v1/state` says.
 fn machines_in(st: &Value) -> (Machine, Vec<Machine>) {
     let all: Vec<&Value> = st["network"]["devices"].as_array().map(|a| a.iter().collect()).unwrap_or_default();
     let mut here = all.iter().find(|d| d["here"] == true).map(|d| Machine::of(d)).unwrap_or_default();
@@ -840,7 +825,6 @@ impl Devices {
         serde_json::from_slice::<Value>(&b).ok()?["allowed"].as_bool()
     }
 
-    /// This machine and the network's devices, as its node says.
     fn machines(&self) -> Result<(Machine, Vec<Machine>)> {
         Ok(machines_in(&self.host.get("/v1/state")?))
     }
@@ -871,7 +855,6 @@ impl Devices {
         format!("Chrome is off on {}, which runs others' calls too, until its owner allows it", row["on"].as_str().unwrap_or_default())
     }
 
-    /// Runs chrome and set_chrome.
     pub(super) fn run_chrome(&self, caller: &Caller, function: &str, here: bool, input: &Input) -> Result<Value> {
         let (me, all) = self.machines()?;
         let mine = self.chrome_row(&me);

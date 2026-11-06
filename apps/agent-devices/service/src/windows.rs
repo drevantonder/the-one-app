@@ -102,7 +102,6 @@ impl Kind for Windows {
         let Some(from) = from else { bail!("a new Windows device is made from scratch only by installing Windows, which isn't built yet: borrow a copy of one instead") };
         v.dir = ds.dir.join("windows").join(&v.name).to_string_lossy().to_string();
         v.display = v.port - 22220 + 10;
-        // The size of the device it copies, which its saved state is for.
         (v.cpus, v.gb) = (from.cpus, from.gb);
         std::fs::create_dir_all(&v.dir)?;
         let made = (|| -> Result<()> {
@@ -140,7 +139,6 @@ impl Kind for Windows {
             Err(err) => tracing::warn!("{} didn't carry on where it stopped, so it boots: {err:#}", v.name),
         }
         self.launch(v, None)?;
-        // Ready once it answers over SSH: it signs in by itself.
         if !super::wait_for(Duration::from_secs(240), Duration::from_secs(5), || self.ssh(v, "echo ready").is_ok()) {
             bail!("{} started but didn't answer in 4 minutes: look at it with screen", v.name);
         }
@@ -297,7 +295,6 @@ impl Windows {
                 }
             } else {
                 run("cp", &["--reflink=auto", &from.file("disk.qcow2").to_string_lossy(), &tmp.to_string_lossy()])?;
-                // Stopped, its saved state goes with this disk.
                 if let Ok(id) = std::fs::read(from.file("state.id"))
                     && std::fs::hard_link(from.file("state"), dir.join("state")).is_ok()
                 {
@@ -678,7 +675,7 @@ mod tests {
 
         ds.forget_vm("copy");
         ds.forget_vm("old-copy");
-        std::fs::remove_file(bases.join("current")).unwrap(); // it stopped
+        std::fs::remove_file(bases.join("current")).unwrap();
         ds.prune_bases();
         for gone in [bases.join("used"), bases.join("now"), lasting.file("base.qcow2")] {
             assert!(!gone.exists(), "{} stayed with no copy on it", gone.display());

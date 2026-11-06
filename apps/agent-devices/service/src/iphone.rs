@@ -79,7 +79,6 @@ impl Kind for Iphone {
             v.id = out.trim().to_string();
             return Ok(());
         }
-        // The newest iPhone Pro with the newest iOS.
         let got: Value = serde_json::from_str(&simctl(&["list", "--json", "runtimes", "devicetypes"])?)?;
         let runtime = got["runtimes"].as_array().into_iter().flatten().filter(|r| r["platform"] == "iOS" && r["isAvailable"] == true).filter_map(|r| r["identifier"].as_str()).next_back();
         let kind = got["devicetypes"].as_array().into_iter().flatten().rev().find(|d| d["name"].as_str().is_some_and(|n| n.starts_with("iPhone") && n.ends_with(" Pro"))).and_then(|d| d["identifier"].as_str());

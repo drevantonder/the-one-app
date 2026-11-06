@@ -56,7 +56,7 @@ fn marker() -> String {
     format!(".synced-{}-agents", cli())
 }
 
-/// What the node marked them with before this service wrote them: taken over by the next write, never removed.
+/// What the node marked its skills with: taken over by the next write, never removed.
 fn node_marker() -> String {
     format!(".synced-{}", cli())
 }
@@ -65,7 +65,6 @@ fn cli() -> &'static str {
     HERE.get().map_or("one", |(cli, _)| cli.as_str())
 }
 
-/// Writes AGENTS.md and the person's skills, as its app says now, into each harness installed here.
 fn sync(host: &Host) -> Result<()> {
     let files = host.post("/v1/call", &json!({ "app": "agents", "op": "_files", "input": {} }))?;
     let files = &files["ok"];
@@ -74,8 +73,6 @@ fn sync(host: &Host) -> Result<()> {
     let home = std::env::var_os("HOME").map(PathBuf::from).context("no HOME")?;
     let mut written = Written::load(host);
     if !text.is_empty() {
-        // Agents asked to change their instructions or add a skill otherwise edit this file, which then stays on this
-        // device and stops updating.
         let cli = cli();
         let text = format!(
             "<!-- Your AGENTS.md app keeps this the same on every device: change it with agents_set (`{cli} agents set`), and add a skill for every agent with agents_skill_set (`{cli} agents skill_set`). Edited here, it stays on this device and stops updating. -->\n\n{text}"
@@ -96,7 +93,6 @@ fn sync(host: &Host) -> Result<()> {
                 once(format!("skill {name}: {err:#}"));
             }
         }
-        // Skills it wrote that its app no longer has go.
         for dir in std::fs::read_dir(&root).into_iter().flatten().flatten() {
             if !skills.contains_key(&*dir.file_name().to_string_lossy()) && dir.path().join(marker()).is_file() {
                 let _ = std::fs::remove_dir_all(dir.path());
@@ -137,7 +133,6 @@ fn write_skill(dir: &Path, files: &BTreeMap<String, String>) -> Result<()> {
     Ok(())
 }
 
-/// Says why something was left alone once, not every minute.
 fn once(said: String) {
     static TOLD: Mutex<Vec<String>> = Mutex::new(Vec::new());
     let mut told = TOLD.lock().unwrap_or_else(|e| e.into_inner());
@@ -147,7 +142,6 @@ fn once(said: String) {
     }
 }
 
-/// What this service last wrote to each file, so it never overwrites an edit made on disk.
 struct Written {
     path: PathBuf,
     hashes: HashMap<String, String>,

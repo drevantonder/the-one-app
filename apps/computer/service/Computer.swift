@@ -191,7 +191,6 @@ final class ComputerUse {
         indicator.show(agent: agent, since: .now, stop: { ComputerUse.shared.turnOff() })
     }
 
-    /// When the session started, if no answer has said so yet.
     func report() -> Date? {
         guard let s = session, !s.reported else { return nil }
         session?.reported = true
@@ -204,7 +203,6 @@ final class ComputerUse {
         indicator.hide()
     }
 
-    /// Whether iPhone Mirroring is open, where it is, and when it started — so Computer Use can show it as a tile.
     func mirrorStatus() async -> Data {
         let running = NSWorkspace.shared.runningApplications.contains { $0.bundleIdentifier == "com.apple.iPhoneMirroring" }
         let frame = Mirroring.windowFrame()
@@ -212,7 +210,7 @@ final class ComputerUse {
         return (try? JSONSerialization.data(withJSONObject: status)) ?? Data("{}".utf8)
     }
 
-    /// Open iPhone Mirroring if it isn't already; pairing happens on the phone, not here.
+    /// Pairing happens on the phone, not here.
     func launchMirroring() async throws {
         let url = URL(fileURLWithPath: "/System/Applications/iPhone Mirroring.app")
         guard FileManager.default.fileExists(atPath: url.path) else { throw Refusal("iPhone Mirroring isn't installed on this Mac.") }
@@ -221,7 +219,6 @@ final class ComputerUse {
     }
 }
 
-/// The iPhone Mirroring app's window, located by its bundle and parked as the parent the agent acts in.
 enum Mirroring {
     static let bundle = "com.apple.iPhoneMirroring"
 
@@ -249,7 +246,6 @@ enum Mirroring {
     }
 }
 
-/// Shows in the menu bar while an agent uses this Mac: who, since when, and Stop, which turns it off.
 @MainActor
 private final class Indicator: NSObject {
     private var item: NSStatusItem?
@@ -302,7 +298,6 @@ actor CuaDriver {
         case stopping(Process)
     }
     private var state = State.stopped
-    /// The process a start ran, until it's running.
     private var launching: Process?
     private var gone: [CheckedContinuation<Void, Never>] = []
     private var next = 0
@@ -320,7 +315,6 @@ actor CuaDriver {
         return try JSONSerialization.data(withJSONObject: r)
     }
 
-    /// The tools, a line each, or one in full.
     func tools(_ name: String?) async throws -> String {
         if listed == nil { listed = try await rpc("tools/list", [:])["tools"] as? [[String: Any]] }
         let tools = (listed ?? []).filter { !ComputerUse.withheld.contains($0["name"] as? String ?? "") }
@@ -336,7 +330,6 @@ actor CuaDriver {
         }.joined(separator: "\n")
     }
 
-    /// Stops it, and a start on its way, failing every call waiting on it.
     func stop() {
         switch state {
         case .stopped, .stopping: return
@@ -362,7 +355,6 @@ actor CuaDriver {
 
     private func rpc(_ method: String, _ params: [String: Any]) async throws -> [String: Any] {
         try await running()
-        // Turned off while it started: nothing is sent.
         guard await ComputerUse.shared.on, case .running(_, let input) = state else { throw Refusal("Its owner stopped agents using this Mac.") }
         return try await send(method, params, to: input)
     }
@@ -463,7 +455,6 @@ actor CuaDriver {
             for c in gone { c.resume() }
             gone = []
         default:
-            // It ended while starting: its start fails.
             if ended === launching { failWaiting(Refusal("Cua Driver stopped on this Mac; try again.")) }
         }
     }

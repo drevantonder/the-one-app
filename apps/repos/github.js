@@ -32,14 +32,11 @@ export const SCHEMA = `create table github_orgs (installation integer primary ke
 
 export const isGithub = (repo) => String(repo || "").toLowerCase().startsWith(PREFIX);
 
-/// owner/name of github.com/<owner>/<name>, or how to name one.
 function fullOf(repo) {
   const m = /^github\.com\/([A-Za-z0-9-]+)\/([A-Za-z0-9._-]+?)(\.git)?$/i.exec(String(repo || "").trim());
   if (!m) throw new Error(`give a GitHub repo as github.com/<owner>/<name>, like github.com/octocat/hello-world: repos_list has them`);
   return `${m[1]}/${m[2]}`;
 }
-
-// ---- where GitHub is, and its App ----
 
 /// The network's GitHub App: an admin made it, in Everyone's Vault (or the caller's own, for one of theirs).
 async function appItem(ctx) {
@@ -59,19 +56,14 @@ function redirect(ctx) {
   return `${ctx.address}/back`;
 }
 
-// ---- credentials: a person's accounts, and organizations' installations ----
-
 async function accountItems(ctx) {
   if (!ctx.user) return [];
   return (await ctx.vault.items()).filter((i) => i.type === "GitHub account" && i.fields.login?.value && i.fields.access_token).sort((a, b) => a.time - b.time);
 }
 
-// Tokens this runtime holds, so a refreshed one is used at once: account item id → { value, expires }; installation
-// id → { value, expires }.
+// By account item id and installation id.
 const userTokens = new Map(), installTokens = new Map();
 
-/// The Authorization header for an account: its access token, as the Vault fills it in (or as just refreshed), first
-/// refreshing it once it's near expiry, which also gives a new refresh token to keep.
 async function userAuth(ctx, app, item) {
   const held = userTokens.get(item.id);
   if (held && (!held.expires || held.expires > Date.now() + 60_000)) return `Bearer ${held.value}`;
@@ -107,7 +99,6 @@ async function refreshed(ctx, app, item) {
   return `Bearer ${t.access_token}`;
 }
 
-/// Keeps an account's new tokens: in its Vault item, and here for the rest of this runtime.
 function keepTokens(ctx, id, t) {
   const expires = t.expires_in ? Date.now() + t.expires_in * 1000 : 0;
   userTokens.set(id, { value: t.access_token, expires });
@@ -116,8 +107,7 @@ function keepTokens(ctx, id, t) {
 
 const b64url = (s) => btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 
-/// The Authorization header for an organization's installation: a token GitHub gives the App for an hour, asked for
-/// with a JWT the Vault signs with the App's private key on this device.
+/// A token GitHub gives the App for an hour, asked for with a JWT the Vault signs with the App's private key.
 async function installAuth(app, installation) {
   const held = installTokens.get(installation);
   if (held && held.expires > Date.now() + 60_000) return `Bearer ${held.value}`;
@@ -133,8 +123,7 @@ async function installAuth(app, installation) {
   return `Bearer ${t.token}`;
 }
 
-/// Everything a call may use to reach GitHub, in the order it's tried: the caller's own accounts, then the
-/// organizations connected for groups they're in. Each is { kind, login | org, auth() }.
+/// In the order tried: the caller's own accounts, then the organizations connected for groups they're in.
 async function credentials(ctx) {
   const app = await appItem(ctx);
   if (!app) return { app: null, all: [] };
@@ -143,7 +132,6 @@ async function credentials(ctx) {
   return { app, all };
 }
 
-/// The organizations connected for groups the caller is in.
 async function myOrgs(ctx) {
   if (!ctx.global) return [];
   const rows = await ctx.global.query("select installation, org, owner from github_orgs order by org");
@@ -153,11 +141,8 @@ const groupOf = (ctx, id) => (ctx.handles || []).find((h) => h.id === id) || nul
 const inGroup = (ctx, id) => !!groupOf(ctx, id)?.members?.[ctx.me.user];
 const adminOf = (ctx, id) => groupOf(ctx, id)?.members?.[ctx.me.user] === "admin";
 
-// Which credential reaches a repo, as found last: `${user} ${owner/name}` → index into credentials, for 10 minutes.
 const reaches = new Map();
 
-/// A credential of the caller's that reaches owner/name: their own sign-in first, then a connected organization's
-/// installation for its owner.
 async function credFor(ctx, full) {
   const { app, all } = await credentials(ctx);
   if (!app) throw noApp(ctx);
@@ -183,9 +168,6 @@ async function credFor(ctx, full) {
   throw new Error(`GitHub has no ${PREFIX}${full} that ${all.filter((c) => c.kind === "user").map((c) => c.login).join(" or ") || "your groups' organizations"} can see`);
 }
 
-// ---- GitHub's API ----
-
-/// A request to GitHub's API as `c`: → { status, json, headers }, failing with a plain message for what GitHub refused.
 async function send(app, c, method, path, body, { accept = "application/vnd.github+json", ok = [] } = {}) {
   const url = path.startsWith("http") ? path : `${apiOf(app)}${path}`;
   const r = await fetch(url, {
@@ -217,7 +199,6 @@ const graphql = async (app, c, query, variables) => {
   return r.json.data;
 };
 
-// The repo as GitHub gives it, as found last by each credential: `${who} ${owner/name}` → { r, time }, for a minute.
 const repoMeta = new Map();
 async function repoOf(app, c, full) {
   const key = `${c.login || c.org} ${full.toLowerCase()}`;
@@ -228,7 +209,6 @@ async function repoOf(app, c, full) {
   return r;
 }
 
-/// A repo, the credential that reaches it, and what GitHub says of it.
 async function open(ctx, repo) {
   const full = fullOf(repo);
   const { app, c } = await credFor(ctx, full);
@@ -243,7 +223,6 @@ const about = (g) => ({
 });
 const enc = (path) => String(path || "").split("/").filter(Boolean).map(encodeURIComponent).join("/");
 
-/// A commit as Repos' pages show one (browse.js's summary).
 function summary(g) {
   const [subject, ...rest] = String(g.commit.message || "").replace(/\s+$/, "").split("\n");
   return {
@@ -253,7 +232,6 @@ function summary(g) {
   };
 }
 
-/// Which branch or commit `ref` names (the default branch if none), and its commit.
 async function at(o, ref) {
   ref ||= o.r.default_branch;
   const r = await send(o.app, o.c, "GET", `/repos/${o.full}/commits/${encodeURIComponent(ref)}`, null, { ok: [409, 422] });
@@ -271,7 +249,6 @@ async function branchNames(o) {
 const bytesOf = (b64) => Uint8Array.from(atob(String(b64 || "").replace(/\s+/g, "")), (ch) => ch.charCodeAt(0));
 const binary = (bytes) => bytes.subarray(0, 8000).includes(0);
 
-/// A unified diff's hunks, as GitHub gives a file's patch: [{ a, b, lines }].
 function hunks(patch) {
   const out = [];
   for (const line of String(patch || "").split("\n")) {
@@ -300,9 +277,6 @@ const signed = (ctx, o, text, verb) => (o.c.kind === "installation" ? `${text ||
 const quote = (s) => (/\s/.test(s) ? `"${s.replace(/"/g, "")}"` : s);
 const ON_GITHUB = (o, what) => new Error(`${o.name} is on GitHub: ${what} there, at ${o.r.html_url}`);
 
-// ---- the tools ----
-
-/// What each of Repos' tools does for a GitHub repo, by name: (ctx, input) → what Repos' own gives.
 export const run = {
   async get(ctx, { repo }) {
     const o = await open(ctx, repo);
@@ -511,7 +485,6 @@ export const run = {
   },
 };
 
-/// What Repos does only for its own repos, said plainly for a GitHub one.
 export const elsewhere = {
   collaborators: "see and change who pushes to it",
   add_collaborator: "add a collaborator",
@@ -526,8 +499,6 @@ export async function refuse(ctx, op, repo) {
   throw new Error(`${PREFIX}${full} is on GitHub: ${elsewhere[op]} there, at https://github.com/${full}`);
 }
 
-/// Every GitHub repo the caller's sign-ins and their groups' organizations see, as repos_list gives them, the latest
-/// pushed first. Each credential's first 100.
 export async function list(ctx) {
   const { all, app } = await credentials(ctx);
   if (!app || !all.length) return [];
@@ -542,7 +513,6 @@ export async function list(ctx) {
   pages.forEach((repos, k) => repos.forEach((g) => {
     const key = g.full_name.toLowerCase();
     if (!seen.has(key)) seen.set(key, g);
-    // The first credential that reaches it is the one its pages use.
     if (!reaches.has(`${ctx.me.user} ${key}`)) reaches.set(`${ctx.me.user} ${key}`, { who: all[k].login || all[k].org, time: Date.now() });
   }));
   return [...seen.values()].sort((a, b) => Date.parse(b.pushed_at || b.updated_at) - Date.parse(a.pushed_at || a.updated_at)).map((g) => ({
@@ -551,8 +521,6 @@ export async function list(ctx) {
     yours: !!g.permissions?.admin, push: !!g.permissions?.push, github: { url: g.html_url, private: !!g.private, fork: !!g.fork },
   }));
 }
-
-// ---- connecting: the App, a person's accounts, an organization ----
 
 const pending = async (ctx, what) => (await ctx.global.query("select value from github_pending where what = ?", [what]))[0]?.value || null;
 
@@ -698,7 +666,6 @@ export function tools({ global }) {
         if (!group || !adminOf(ctx, group)) throw new Error("No organization is waiting to be connected: start from Repos › Settings › Connect an Organization");
         const app = await appItem(ctx);
         if (!app) throw noApp(ctx);
-        // The installation is the App's to ask about: which account it's on, and that it's this App's at all.
         const auth = await installAuth(app, installation);
         const r = await fetch(`${apiOf(app)}/installation/repositories?per_page=1`, { headers: { accept: "application/vnd.github+json", authorization: auth, "user-agent": "Repos" } });
         const d = await r.json().catch(() => ({}));

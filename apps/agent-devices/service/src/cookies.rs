@@ -21,7 +21,6 @@ fn linux_key(version: &[u8]) -> Option<[u8; 16]> {
     data_encoding::HEXLOWER.decode(hex.as_bytes()).ok()?.try_into().ok()
 }
 
-/// A sealed cookie value in the clear, if it's one Linux's basic store sealed.
 fn open_cookie(sealed: &[u8], host: &str, version: i64) -> Option<String> {
     if sealed.len() < 3 + 16 || !(sealed.len() - 3).is_multiple_of(16) {
         return None;

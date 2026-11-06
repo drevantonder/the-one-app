@@ -1,7 +1,6 @@
-//! Backups: a copy of a Linux device's home folder, without caches, as a blob in the network: any of the person's
-//! devices can fetch it, so an agent device can be restored on another (move). Each keeps an index of its own backups
-//! in backups.json. These aren't kept off-site: a blob lives on the devices that have fetched it, and a backup to a
-//! bucket isn't built yet.
+//! Backups: a copy of a Linux device's home folder, without caches, as a blob in the network, so an agent device can
+//! be restored on another (move). Each device keeps an index of its own backups in backups.json. A blob lives on the
+//! devices that have fetched it, not off-site.
 
 use std::time::Duration;
 
@@ -22,7 +21,6 @@ pub struct Record {
     pub blob: String,
     #[serde(default)]
     pub bytes: u64,
-    /// The device's.
     #[serde(default)]
     pub size: String,
     #[serde(with = "time", default = "time::zero")]
@@ -36,7 +34,6 @@ impl Devices {
         std::fs::read(self.dir.join("backups.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
     }
 
-    /// Packs the device's home folder into a blob and records it, keeping the newest few in the index.
     pub(super) fn backup(&self, d: &Device) -> Result<Record> {
         let me = self.hosts()?.0;
         let limits = self.limits(std::slice::from_ref(d)).unwrap_or_default();
@@ -73,8 +70,6 @@ impl Devices {
         Ok(rec)
     }
 
-    /// The backups on every one of the person's devices, of one agent device or all, newest first; and the devices
-    /// that couldn't be asked, with why.
     pub(super) fn backups_all(&self, device: &str) -> (Vec<Record>, std::collections::BTreeMap<String, String>) {
         let mut all = self.backups_here();
         let (got, failed) = self.everywhere("backups", None);
@@ -86,8 +81,6 @@ impl Devices {
         (out, failed)
     }
 
-    /// Makes a device from a backup: a new one, its home folder unpacked from the blob, fetched from whichever device
-    /// has it.
     pub(super) fn restore(&self, name: &str, rec: &Record, size: Size) -> Result<Device> {
         if self.find(name).is_ok() {
             bail!("device {name} already exists: give as another name for the restored one");
@@ -119,14 +112,13 @@ impl Devices {
         Ok(d)
     }
 
-    /// The backup with the blob given, or else the newest of the device.
     pub(super) fn find_backup(&self, device: &str, blob: &str) -> Result<Record> {
         let (all, failed) = self.backups_all("");
         if let Some(r) = all.into_iter().find(|r| (!blob.is_empty() && r.blob == blob) || (blob.is_empty() && r.device == device)) {
             return Ok(r);
         }
         if !blob.is_empty() {
-            return Ok(Record { device: device.into(), blob: blob.into(), ..Default::default() }); // a blob from elsewhere
+            return Ok(Record { device: device.into(), blob: blob.into(), ..Default::default() });
         }
         let mut msg = format!("no backup of device {device}");
         if !failed.is_empty() {

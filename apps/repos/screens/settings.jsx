@@ -9,7 +9,6 @@ import { Frame, Pending, Section, said, useCall } from "../lib/use.jsx"
 
 const P = one.params
 
-// A link to GitHub: the shell opens it in the browser, and GitHub sends the person back here.
 function Offer({ offer }) {
   return (
     <Section title={offer.title}>
@@ -63,7 +62,6 @@ function Settings() {
       fail(err)
     }
   }
-  // Back from GitHub: the App made, an organization's install, or a person's sign-in.
   const finish = async (back) => {
     setFinishing(true)
     try {

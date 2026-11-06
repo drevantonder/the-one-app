@@ -11,7 +11,6 @@ pub fn decode_file(path: &std::path::Path) -> Result<DynamicImage> {
     decode(&std::fs::read(path)?)
 }
 
-/// An image as a JPEG of `quality`.
 pub fn jpeg(img: &DynamicImage, quality: u8) -> Result<Vec<u8>> {
     let mut out = Vec::new();
     image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, quality).encode_image(&DynamicImage::ImageRgb8(img.to_rgb8()))?;
@@ -26,7 +25,6 @@ pub fn jpeg_of(img: &DynamicImage, width: u32) -> Result<(Vec<u8>, u32, u32)> {
     Ok((jpeg(&img, 75)?, img.width(), img.height()))
 }
 
-/// An image scaled down to w by h, each pixel the average of those it covers.
 fn shrink(img: &DynamicImage, w: u32, h: u32) -> RgbImage {
     let src = img.to_rgb8();
     let (sw, sh) = src.dimensions();

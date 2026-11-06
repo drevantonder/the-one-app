@@ -37,9 +37,6 @@ async function api(ctx, email, method, path, { query, json, missing, hint } = {}
   return text ? JSON.parse(text) : null;
 }
 
-// ---- documents ----
-
-/// A document's id, given it or its address.
 const docId = (v) => {
   const s = String(v || "").trim();
   if (!s) throw new Error("give documentId: the document's id or address");
@@ -50,7 +47,6 @@ const noDoc = (v) => `no document ${docId(v)}: give its id or its address (docs.
 
 const ORDERED = /DECIMAL|ALPHA|ROMAN|ZERO/;
 
-/// A paragraph's runs as text, with markdown for bold, italic, code and links when `md`.
 function runs(p, md) {
   let out = "";
   for (const el of p.elements || []) {
@@ -79,7 +75,6 @@ function runs(p, md) {
   return out;
 }
 
-/// A document's body as markdown (headings, lists, tables, emphasis, links) or plain text.
 function render(doc, md) {
   const lines = [];
   const counters = {};

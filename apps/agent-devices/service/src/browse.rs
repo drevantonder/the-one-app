@@ -14,12 +14,10 @@ use super::chrome::{Browser, DialogOpened, live_browser, tab_id, target_of};
 use super::kinds::Vm;
 use super::{Devices, Input, or};
 
-/// How many lines of a page one read gives; continuation reads on.
 const READ_LINES: usize = 400;
 
 type Details = Map<String, Value>;
 
-/// A tool's answer: what happened, then its details.
 fn answer(said: &str, details: &Details, more: Vec<Value>) -> Value {
     let mut items = vec![json!({ "type": "text", "text": said })];
     items.extend(more);
@@ -51,7 +49,6 @@ fn q(s: &str) -> String {
     serde_json::to_string(s).unwrap_or_default()
 }
 
-/// Focuses a field, its text selected to be replaced, or the caret at its end.
 const FOCUS_FIELD: &str = r#"function(replace) {
 	this.scrollIntoView({ block: "center", inline: "center" });
 	this.focus();
@@ -65,7 +62,6 @@ const FOCUS_FIELD: &str = r#"function(replace) {
 	return true;
 }"#;
 
-/// Picks the one option of a select whose label (or value) is the one given.
 const SELECT_OPTION: &str = r#"function(label, value) {
 	if (this.tagName !== "SELECT") return { error: "not_select" };
 	const all = [...this.options];
@@ -78,7 +74,6 @@ const SELECT_OPTION: &str = r#"function(label, value) {
 	return { changed: was !== this.value, label: hit[0].text.trim(), value: this.value };
 }"#;
 
-/// Roles a ref goes on: what's clicked, typed in or picked.
 const ACTABLE: [&str; 27] = [
     "link",
     "button",
@@ -137,7 +132,6 @@ const HOLDERS: [&str; 24] = [
     "status",
 ];
 
-/// An accessibility value as text.
 fn ax_text(v: &Value) -> String {
     match &v["value"] {
         Value::String(s) => s.split_whitespace().collect::<Vec<_>>().join(" "),
@@ -182,7 +176,6 @@ impl Devices {
         if let Some(d) = open.as_ref().filter(|_| function != "browser_dialog") {
             return Ok(refused("browser_dialog_open", &format!("a {} dialog is open in {tab} ({}): answer it with browser_dialog first", d.kind, q(&d.message)), Some(with(json!({ "dialog_id": d.id })))));
         }
-        // The page's thing a ref names, or a refusal.
         let node = |r: &str| -> std::result::Result<i64, Value> {
             b.page(&session).and_then(|p| p.refs.get(r).copied()).ok_or_else(|| {
                 refused("browser_ref_stale", &format!("ref {r} is stale — the page navigated or it isn't one of this tab's; re-run get_browser_state for fresh refs"), Some(with(json!({}))))
@@ -384,7 +377,6 @@ impl Devices {
         }
     }
 
-    /// get_browser_state: the page's text as an outline, a ref on each thing to act on.
     fn state(&self, b: &Browser, session: &str, ids: &Details, input: &Input) -> Result<Value> {
         let t = |k: &str| input.get(k).and_then(Value::as_str).unwrap_or_default().to_string();
         let format = or(&t("snapshot_format"), "dom_refs_v1");
@@ -428,7 +420,6 @@ impl Devices {
             details.insert("snapshot".into(), json!({ "format": format, "id": id, "complete": to == lines.len(), "continuation": continuation }));
         }
         if let Some(refs) = refs {
-            // Only the refs in what's shown.
             let shown_refs: Vec<Value> = refs.into_iter().filter(|r| shown.contains(&format!("[ref={}]", r["ref"].as_str().unwrap_or_default()))).collect();
             details.insert("refs".into(), json!(shown_refs));
         }
@@ -470,7 +461,6 @@ fn acted(b: &Browser, session: &str, said: &str, route: &str, mode: &str, done: 
     answer(&said, &details, Vec::new())
 }
 
-/// Runs a function on a node of the page, with this as the node: what it returns.
 fn on(b: &Browser, session: &str, backend: i64, f: &str, args: &[Value]) -> Result<Value> {
     let obj = b.call(session, "DOM.resolveNode", Some(json!({ "backendNodeId": backend })))?;
     let args: Vec<Value> = args.iter().map(|a| json!({ "value": a })).collect();
@@ -481,7 +471,6 @@ fn on(b: &Browser, session: &str, backend: i64, f: &str, args: &[Value]) -> Resu
     Ok(r["result"]["value"].clone())
 }
 
-/// Where to act: the middle of the thing ref names, scrolled into view, or x and y.
 fn point(b: &Browser, session: &str, r: &str, input: Option<&Input>, node: &dyn Fn(&str) -> std::result::Result<i64, Value>) -> std::result::Result<(f64, f64), Value> {
     if r.is_empty() {
         let n = |k: &str| input.and_then(|i| i.get(k)).and_then(Value::as_f64);
@@ -500,9 +489,7 @@ fn point(b: &Browser, session: &str, r: &str, input: Option<&Input>, node: &dyn 
     Ok(((c[0] + c[2] + c[4] + c[6]) / 4.0, (c[1] + c[3] + c[5] + c[7]) / 4.0))
 }
 
-/// The page's accessibility tree, and its frames', as lines of text, with refs (named id:n) on what can be acted on,
-/// which the page keeps until it navigates; from the node ref names only, and only lines matching query's words, when
-/// given.
+/// Refs (named id:n) on what can be acted on are kept by the page until it navigates.
 fn outline(b: &Browser, session: &str, id: &str, scope: &str, query: &str) -> Result<(Vec<String>, Vec<Value>)> {
     let tree = b.call(session, "Page.getFrameTree", None)?;
     let mut frames = Vec::new();
@@ -627,7 +614,7 @@ impl Outline {
         for c in nd["childIds"].as_array().into_iter().flatten().filter_map(Value::as_str) {
             let Some(cn) = by_id.get(c) else { continue };
             if (acts || role == "heading") && ax_text(&cn["role"]).to_lowercase() == "statictext" {
-                continue; // the name says it already
+                continue;
             }
             self.walk(cn, by_id, depth, inside, within || acts, frame);
         }

@@ -16,7 +16,6 @@ import (
 // (whatsmeow) take to be an *http.Transport.
 var toNode http.RoundTripper = http.DefaultTransport
 
-// nodeAddr is where the node is, ONE_ADDR, and sets toNode up for it.
 func nodeAddr() string {
 	addr := cmp.Or(os.Getenv("ONE_ADDR"), "127.0.0.1:4747")
 	home, _ := os.UserHomeDir()

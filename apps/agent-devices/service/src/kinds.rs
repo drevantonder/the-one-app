@@ -215,8 +215,6 @@ pub fn kind_named(name: &str) -> Result<&'static dyn Kind> {
     RUNTIMES.iter().copied().find(|k| k.name() == name).ok_or_else(|| anyhow!("no kind {name:?}: there's {LINUX} and {}", RUNTIMES.map(|k| k.name()).join(", ")))
 }
 
-// ── Running things here ────────────────────────────────────────────────────
-
 /// Runs a command here, its error carrying what it said: what it said, stdout and stderr together.
 pub fn run(program: impl AsRef<std::ffi::OsStr>, args: &[&str]) -> Result<String> {
     run_in(None, program, args)
@@ -256,7 +254,6 @@ pub fn capture(mut c: Command, stdin: Option<&[u8]>, limit: Option<Duration>) ->
             let _ = std::io::Write::write_all(&mut w, &input);
         });
     }
-    // A watcher that ends it at the limit, unless the command is done first.
     let (done, wait) = std::sync::mpsc::channel::<()>();
     let timed_out = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     if let Some(limit) = limit {
@@ -575,7 +572,7 @@ impl Devices {
                         break;
                     }
                     Some(b) if b.state == LoanState::Lent && b.by == l.by && l.by != super::SOMEONE => {
-                        got = Some(v.clone()); // borrowed again by the same agent: its loan carries on
+                        got = Some(v.clone());
                         l.since = b.since;
                         carries_on = true;
                         break;
@@ -885,7 +882,6 @@ impl Devices {
                     Ok(json!(format!("Gave back {}.", v.name)))
                 }
                 "view" => {
-                    // Someone opening it means to use it: it starts, or carries on.
                     self.awake(&mut v)?;
                     let m = minutes(input, 60, 1440);
                     let url = super::viewer::vm_view_url(&v, m)?;
@@ -1054,7 +1050,7 @@ impl Devices {
                 tracing::info!("stopping {}, idle for an hour", v.name);
                 match k.stop(self, &v) {
                     Err(err) => tracing::warn!("stopping {}: {err:#}", v.name),
-                    Ok(()) => self.want(&v.name, false), // it carries on when next called
+                    Ok(()) => self.want(&v.name, false),
                 }
                 v.paused = false;
                 let _ = self.save_vm(&v);

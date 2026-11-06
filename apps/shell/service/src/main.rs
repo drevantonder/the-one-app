@@ -60,7 +60,6 @@ fn call(host: &Host, call: &Call) -> Result<Answer> {
             break (status.code().unwrap_or(-1), false);
         }
         if Instant::now() >= until {
-            // The whole group, so what the command started stops too.
             // SAFETY: a signal to the process group of a child of this process, which it hasn't reaped.
             unsafe { libc::kill(-(child.id() as i32), libc::SIGKILL) };
             let _ = child.wait();

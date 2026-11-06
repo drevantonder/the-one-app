@@ -12,7 +12,6 @@ const OFS_DELTA = 6, REF_DELTA = 7;
 const hex = (bytes) => Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 const utf8 = new TextDecoder();
 
-/// Inflates the zlib stream at `at`, `size` bytes when inflated: [bytes, where the stream ends].
 function inflate(buf, at, size) {
   const s = new ZStream();
   zlib.inflateInit(s);
@@ -27,7 +26,6 @@ function inflate(buf, at, size) {
   return [s.output.subarray(0, size), s.next_in];
 }
 
-/// Applies a git delta to its base.
 function patch(base, delta) {
   let i = 0;
   const varint = () => {
@@ -55,7 +53,6 @@ function patch(base, delta) {
   return out;
 }
 
-/// A pack: every object's place in it, by hash, and recently read objects.
 class Pack {
   constructor(bytes) {
     this.bytes = bytes;
@@ -111,7 +108,6 @@ class Pack {
     return this;
   }
 
-  /// The object at `offset`: { type, data }.
   read(offset) {
     const hit = this.recent.get(offset);
     if (hit) {
@@ -150,7 +146,6 @@ function pack(ctx, hash) {
   return packs.get(hash);
 }
 
-/// A repo's objects, from the packs that hold them (blob hashes).
 export async function objects(ctx, hashes) {
   const all = await Promise.all(hashes.map((h) => pack(ctx, h)));
   const parsed = new Map();
@@ -243,7 +238,6 @@ export async function idx(entries, name) {
   return out;
 }
 
-/// The objects a pack's index (git's version 2) lists: each one's hash, CRC and offset, as `check` gives them.
 export function listed(index) {
   const view = new DataView(index.buffer, index.byteOffset, index.byteLength);
   const n = view.getUint32(8 + 4 * 255);

@@ -27,7 +27,6 @@ const LABEL_NAMES = { type: "array", items: { type: "string" }, description: "la
 const ASSIGNEES = { type: "array", items: { type: "string" }, description: "people's handles, from groups_list, like [\"sam\"], at most 10: the issue's assignees become exactly these ([] for none)" };
 const BODY = (what) => ({ type: "string", description: `${what}, in Markdown (GitHub's), up to 65536 characters` });
 
-/// An issue's number, from 12 or "#12", or how to give one.
 function number(n) {
   const x = Number(String(n ?? "").trim().replace(/^#/, ""));
   if (!Number.isInteger(x) || x < 1) throw new Error("give an issue by its number, like 12 for #12: repos_issues lists them");
@@ -50,21 +49,18 @@ function body(b, what = "a body") {
 const placeholders = (xs) => xs.map(() => "?").join(", ");
 const like = (q) => `%${q.replace(/[\\%_]/g, (c) => "\\" + c)}%`;
 
-/// The issue tools, given what app.js knows of repos: finding one, it as an object of permissions, and people.
 export function tools(R) {
   const { global, named, object, rights, who, byHandle, handles, randomId, iso, REPO } = R;
   const person = (ctx, id) => who(ctx, `user:${id}`);
   const COMMENT_ID = { type: "string", description: "a comment's id, from repos_issue's comments" };
   const CONFIRM = { type: "boolean", description: "true once the person agreed: it can't be undone" };
 
-  /// The issue `n` of the repo `r` (a row), or an error that says where the issues are.
   async function issueAt(g, r, n) {
     const i = (await g.query("select * from issues where repo = ? and number = ?", [r.id, number(n)]))[0];
     if (!i) throw new Error(`${r.path} has no issue #${number(n)}: repos_issues lists them`);
     return i;
   }
 
-  /// Issues' rows as tools give them: with their labels, assignees and how many comments each has.
   async function shape(ctx, g, r, rows) {
     if (!rows.length) return [];
     const ns = rows.map((i) => i.number);
@@ -83,7 +79,6 @@ export function tools(R) {
     }));
   }
 
-  /// The repo's labels named, as they're spelled there, or which there are.
   async function labelsNamed(g, r, names) {
     if (!Array.isArray(names)) throw new Error('give labels as a list of names, like ["bug"]');
     const all = await g.query("select name, color, description from labels where repo = ? order by name", [r.id]);
@@ -94,7 +89,6 @@ export function tools(R) {
     });
   }
 
-  /// People's ids by their handles, for assignees.
   function people(ctx, hs) {
     if (!Array.isArray(hs)) throw new Error('give assignees as a list of handles, like ["sam"]');
     const ids = [...new Set(hs.map((h) => {
@@ -106,20 +100,17 @@ export function tools(R) {
     return ids;
   }
 
-  /// Says why the caller can't, if they can't: `ok` is whether they may.
   const may = (ok, why) => {
     if (!ok) throw new Error(why);
   };
   const pushers = (r) => `the owners and collaborators of ${r.path}`;
 
-  /// Writes a comment of the caller's on issue `n`, and moves the issue's updated time.
   function addComment(ctx, g, r, n, text) {
     const id = randomId();
     g.exec("insert into comments values (?, ?, ?, ?, ?, ?, ?)", [id, r.id, n, ctx.me.user, text, ctx.now(), ctx.now()]);
     return { id, author: person(ctx, ctx.me.user), body: text, created: ctx.now(), updated: ctx.now(), yours: true };
   }
 
-  /// The comment `id` on one of the repo's issues.
   async function commentAt(g, r, id) {
     const c = (await g.query("select * from comments where id = ? and repo = ?", [String(id ?? ""), r.id]))[0];
     if (!c) throw new Error(`${r.path} has no comment ${id}: repos_issue gives an issue's comments`);

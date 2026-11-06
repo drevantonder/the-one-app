@@ -24,7 +24,6 @@ const form = (o) => Object.entries(o).filter(([, v]) => v != null && v !== "")
 const b64url = (bytes) => btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 const random = () => b64url(crypto.getRandomValues(new Uint8Array(32)));
 
-/// A tool's name in the app: lowercase words joined by _, without the server's own name in front.
 function opName(tool) {
   let name = tool.toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "");
   const own = NAME.replace(/-/g, "_") + "_";
@@ -32,8 +31,6 @@ function opName(tool) {
   return MINE.has(name) ? `${name}_tool` : name;
 }
 
-/// The accounts signed in for the caller: their Vault items this app is switched on for, each as { id, name,
-/// client_id, token_endpoint, resource, has_secret }.
 async function accounts(ctx) {
   if (!ctx.user) return [];
   const value = (i, f) => i.fields[f]?.value ?? null;
@@ -42,7 +39,6 @@ async function accounts(ctx) {
   }));
 }
 
-/// The account a call acts as: the one named, or the only one.
 async function account(ctx, name) {
   const all = await accounts(ctx);
   if (name) {
@@ -54,7 +50,6 @@ async function account(ctx, name) {
   return all[0] || null;
 }
 
-/// A JSON-RPC message to the server, and its answer (from JSON or an event stream), with the session's headers.
 async function rpc(session, method, params, id) {
   const headers = { "content-type": "application/json", accept: "application/json, text/event-stream", ...server.headers };
   if (session.id) headers["mcp-session-id"] = session.id;
@@ -99,7 +94,6 @@ async function ask(ctx, acct, method, params) {
   }
 }
 
-/// A new access token for the account, from its refresh token.
 async function renew(ctx, acct) {
   const r = await fetch(acct.token_endpoint, {
     method: "POST",
@@ -112,7 +106,6 @@ async function renew(ctx, acct) {
   return tok.access_token;
 }
 
-/// An MCP tool result as the app's tool's result: its text, else its structured content.
 function result(res) {
   const parts = (res.content || []).map((c) =>
     c.type === "text" ? c.text
@@ -124,7 +117,6 @@ function result(res) {
   return text || res.structuredContent || "Done.";
 }
 
-/// Fetches JSON, or null if it isn't there.
 async function json(url) {
   try {
     const r = await fetch(url, { headers: { accept: "application/json" } });
@@ -152,7 +144,6 @@ async function discover(unauthorized) {
   return { issuer: issuer.href, resource: resource.resource || server.url, scope, ...meta };
 }
 
-/// The email address an OpenID Connect ID token names, if any.
 function email(idToken) {
   try {
     return JSON.parse(atob(idToken.split(".")[1].replace(/-/g, "+").replace(/_/g, "/"))).email || null;
@@ -163,7 +154,6 @@ function email(idToken) {
 
 const ACCOUNT = { type: "string", description: "which signed-in account, as accounts lists them; needed only when several are" };
 
-/// Every tool the server listed, as the app's.
 const tools = Object.fromEntries(listed.tools.map((tool) => {
   const input = { type: "object", ...(tool.inputSchema || {}) };
   const own = input.properties && "account" in input.properties;
@@ -306,7 +296,6 @@ function failed(ctx, why) {
   return { signed_in: false, why };
 }
 
-/// The second half of sign_in: trades the code the browser came back with for tokens.
 async function finish(ctx, code, name) {
   const p = (await ctx.user.query("select * from pending"))[0];
   if (!p) throw new Error("no sign-in is in progress: call sign_in without code first");

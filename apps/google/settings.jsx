@@ -20,8 +20,6 @@ export function GoogleSettings({ title, blurb }) {
     try {
       url = (await one.call("sign_in", account ? { account } : {})).url
     } catch (e) {
-      // No Google sign-in yet: an admin sets one up for everyone, then it goes on; anyone else is told whom to ask, and
-      // can't sign in until then.
       if (/No Google sign-in/.test(e.message) && one.vault) {
         try {
           if (await one.vault("client")) return start(account)
@@ -37,7 +35,6 @@ export function GoogleSettings({ title, blurb }) {
     setStep({ link: url })
   }
 
-  // Back from Google, at the address it sent the browser to.
   async function finish(back) {
     setSigning(true)
     setStep({ finishing: true })
@@ -74,7 +71,6 @@ export function GoogleSettings({ title, blurb }) {
     <div className="flex flex-col gap-6">
       {blocked && <Problem warn title={blocked.title} text={blocked.text} />}
       {!accounts.length && !blocked && !signing && <Empty className="mx-auto max-w-md" action={{ label: "Sign In to Google", run: () => start() }}>{blurb}</Empty>}
-      {/* What needs signing in again is a problem on its account, with the way to do it. */}
       {needs.map((a) => (
         <Problem
           key={a.account}

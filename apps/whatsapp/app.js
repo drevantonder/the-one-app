@@ -4,8 +4,6 @@
 
 import settings from "./dist/settings.html" with { type: "text" };
 
-/// Runs one of the whatsapp service's functions, wherever it runs for the caller, or on the device `input.device`
-/// names; when a chat isn't found, says where to find it.
 async function service(ctx, fn, input = {}) {
   const { device, ...rest } = input;
   try {
@@ -24,7 +22,6 @@ const DEVICE = { type: "string", description: "which of your devices that run Wh
 const LIMIT = { type: "integer", description: "at most this many; default 30" };
 const LINES = "one a line, \"[3 Nov 2026 09:00] Sam: text\", times in the time zone of the device it's linked on, and You for the person";
 
-/// The caller's online devices that run the service, by name.
 async function running(ctx) {
   return (await ctx.devices()).filter((s) => s.online && (s.services || []).includes("whatsapp")).map((s) => s.name);
 }
@@ -56,7 +53,6 @@ async function keep(ctx, accounts, answered) {
   }
 }
 
-/// The accounts, keeping their items as they go. The service says which devices answered.
 async function listAndKeep(ctx, input) {
   const { accounts, answered } = await service(ctx, "_accounts", input);
   await keep(ctx, accounts, answered).catch(() => {}); // a call that only reads lists them all the same
@@ -73,7 +69,6 @@ export default {
   needs: "Needs a device of yours to link your phone to",
   instructions: "WhatsApp is the person's WhatsApp accounts, each a phone linked to one of their devices, as WhatsApp Desktop is linked; calls find the device. whatsapp_accounts lists them; the others take account, the first by default. whatsapp_chats lists recent chats; whatsapp_read reads one, newest last; whatsapp_search finds messages. Each list pages back with limit and skip. whatsapp_send sends a real message to a real person: send only what the user asked to send, to whom they asked. Reading never tells WhatsApp a message was read. whatsapp_move moves a link to another of their devices; whatsapp_sign_out unlinks one and deletes its messages, only when the user asks.",
   uses: { services: ["whatsapp"] },
-  // Its service (service/), which links the phone and keeps its messages: what it may reach and where it runs.
   service: { network: ["web.whatsapp.com", "*.whatsapp.net"], person: false, platforms: ["linux", "mac"] },
   vault: VAULT,
 
@@ -82,7 +77,6 @@ export default {
       reads: true,
       description: "The WhatsApp accounts linked on any of your devices, this one's first: each { account, ok, device }, account its number and device where it's linked, with why when ok is false. Give account to the others to pick one.",
       input: { type: "object", properties: {} },
-      // No accounts, rather than a failure, where no device runs its service; its settings say why.
       async run(ctx, input) {
         if (!(await running(ctx)).length) return [];
         return listAndKeep(ctx, input);

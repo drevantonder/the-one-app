@@ -6,12 +6,10 @@ import { Empty, LoadingButton, Loading, Problem } from "@one/ui"
 
 const at = one.params.on ? { device: one.params.device, on: one.params.on } : { device: one.params.device }
 
-// What the device is doing, else what it's called.
 const nameOf = (c) => {
   const b = c.borrowed
   return b?.signing_in ? "Signing in to sites" : b ? b.for || "In use" : c.spare ? "Spare device" : c.name.charAt(0).toUpperCase() + c.name.slice(1)
 }
-// Whose it is, or the profile it's signing in to.
 const lineOf = (c) => {
   const b = c.borrowed
   return b ? (b.signing_in ? b.profile || "" : b.by || "An agent") : ""
@@ -41,12 +39,10 @@ function Frame({ url }) {
 }
 
 function Device() {
-  const [device, setDevice] = useState(null) // as last listed
-  const [url, setUrl] = useState(null) // the screen's address, while it shows
-  const [note, setNote] = useState({ text: "Opening…", loading: true }) // what shows instead: { text, error, loading }
-  const [signedIn, setSignedIn] = useState(false) // saved: no more Done Signing In
-  // What the timer and the buttons read: the device as last listed (none once it's saved), whether the screen is up,
-  // and the timer.
+  const [device, setDevice] = useState(null)
+  const [url, setUrl] = useState(null)
+  const [note, setNote] = useState({ text: "Opening…", loading: true })
+  const [signedIn, setSignedIn] = useState(false)
   const mem = useRef({ shown: null, framed: false, timer: null })
 
   function say(text, error) {

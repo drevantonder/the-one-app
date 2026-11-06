@@ -212,7 +212,6 @@ impl Kind for Android {
         v.gb = PHONE_GB;
         let src = match from {
             Some(from) => avd_dir(&from.id)?,
-            // A new phone from the system image of the first AVD here.
             None => avd_dir(avds().first().ok_or_else(|| anyhow!("there's no Android Virtual Device here to start from"))?)?,
         };
         let dst = avd_home().join(format!("{}.avd", v.id));
@@ -223,7 +222,6 @@ impl Kind for Android {
         // Stopped, and done saving its snapshot, which it does after adb stops answering.
         match from.filter(|from| !self.running(ds, from) && emulators(from).is_empty()) {
             Some(from) => {
-                // A stopped lasting device: all of it, its sign-ins and apps too.
                 run("cp", &["-a", "--reflink=auto", &src.to_string_lossy(), &dst.to_string_lossy()])?;
                 remove_locks(&dst);
                 // Its snapshots name the AVD they're of, which the emulator loads them only into: now this one.
@@ -246,7 +244,6 @@ impl Kind for Android {
                 }
             }
             None => {
-                // Only its settings: a new phone, the same model and system.
                 std::fs::create_dir_all(&dst)?;
                 run("cp", &[&src.join("config.ini").to_string_lossy(), &dst.join("config.ini").to_string_lossy()])?;
             }
@@ -311,7 +308,7 @@ impl Kind for Android {
     }
 
     fn remove(&self, ds: &Devices, v: &Vm) -> Result<()> {
-        self.kill(v); // nothing to keep
+        self.kill(v);
         if let Ok(dir) = avd_dir(&v.id) {
             let _ = std::fs::remove_dir_all(dir);
         }

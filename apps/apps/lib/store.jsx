@@ -8,8 +8,6 @@ import { Problem } from "@one/ui"
 const listening = new Set()
 one.on("changed", () => listening.forEach((reload) => reload()))
 
-/// A call's answer: { data, error, reload }. Asked for when drawn, and again whenever the app changes; a later failure
-/// keeps what's shown.
 export function useCall(op, input) {
   const [state, setState] = useState({ data: null, error: null })
   const key = JSON.stringify(input)
@@ -25,19 +23,15 @@ export function useCall(op, input) {
   return { ...state, reload }
 }
 
-/// Every app, where each is installed, and the pages the person may add them to.
 export const useList = () => useCall("_list", {})
 
-/// What a failed call says, for a person.
 export const said = (error) => one.plain(error)
 
-/// A call that failed with nothing to show yet: what happened, and Try Again.
 export function Failed({ error, retry }) {
   const p = said(error)
   return <Problem title={p.title} text={p.next} action={{ label: "Try Again", run: retry }} />
 }
 
-/// A group of rows under its heading.
 export function Section({ title, children }) {
   return (
     <section className="flex flex-col gap-2">

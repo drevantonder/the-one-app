@@ -6,7 +6,6 @@ import { Failed, useCall } from "../lib/store.jsx"
 
 const { app, dir = "" } = one.params
 
-/// What's in a folder of the source (src/ in the app's bundle): each folder and file by its name.
 function folder(files, dir) {
   const here = new Map()
   for (const f of files.filter((f) => f.path.startsWith("src/" + dir))) {

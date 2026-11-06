@@ -13,8 +13,6 @@ const SHA = /^[0-9a-f]{40}$/;
 const natural = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
 const utf8 = new TextDecoder();
 
-/// The repo (a row of repos, live, with its `path`, <owner>/<name>), its objects, and which commit `ref` (a branch, or
-/// a commit hash) names: main if none is given.
 export async function open(ctx, g, r, ref) {
   const branches = await g.query("select branch, head, name, time from branches where repo = ? order by branch", [r.id]);
   const packs = (await g.query("select hash from packs where repo = ? order by time, hash", [r.id])).map((p) => p.hash);
@@ -27,7 +25,6 @@ export async function open(ctx, g, r, ref) {
   return { r, o, branches, ref, sha, branch: b ? ref : null };
 }
 
-/// A commit as pages show it.
 export const summary = (c) => {
   const [subject, ...rest] = c.message.replace(/\s+$/, "").split("\n");
   return {
@@ -36,7 +33,6 @@ export const summary = (c) => {
   };
 };
 
-/// What's at `path` in a commit's tree: { type, sha, mode } (the root is a tree), or null.
 function at(o, commit, path) {
   let entry = { type: "tree", sha: o.commit(commit).tree, mode: "040000" };
   for (const part of path.split("/").filter(Boolean)) {
@@ -52,7 +48,6 @@ const sorted = (entries) =>
 
 const binary = (bytes) => bytes.subarray(0, 8000).includes(0);
 
-/// A folder: its entries (folders first, in natural order), its README, and the commit it's read at.
 export async function tree(ctx, g, { repo, ref, path = "" }) {
   const { r, o, branches, ref: name, sha, branch } = await open(ctx, g, repo, ref);
   const info = { repo: r.path, branches: branches.map((b) => b.branch), ref: name, branch, path };
@@ -70,7 +65,6 @@ export async function tree(ctx, g, { repo, ref, path = "" }) {
   return { ...info, sha, commit: summary(o.commit(sha)), latest: summary(o.commit(last(o, sha, path) || sha)), entries, readme };
 }
 
-/// A file at a commit: its text, or why it isn't shown.
 export async function file(ctx, g, { repo, ref, path }) {
   const { o, ref: name, sha, branch, branches } = await open(ctx, g, repo, ref);
   if (!sha) throw new Error(`${repo.path} has no code yet`);
@@ -84,7 +78,6 @@ export async function file(ctx, g, { repo, ref, path }) {
   return { ...info, size: bytes.length, text: utf8.decode(bytes) };
 }
 
-/// Commits from `heads`, newest first by commit time, as git log walks them. `keep(c)` says which to yield.
 function* walk(o, heads, keep = () => true) {
   const seen = new Set(heads);
   const queue = heads.map((s) => o.commit(s));
@@ -101,7 +94,6 @@ function* walk(o, heads, keep = () => true) {
   }
 }
 
-/// Whether `c` changed `path` (against its first parent).
 function touches(o, c, path) {
   if (!path) return true;
   const mine = at(o, c.sha, path)?.sha;
@@ -109,7 +101,6 @@ function touches(o, c, path) {
   return mine !== theirs;
 }
 
-/// The newest commit that changed `path`, looking back 500 commits at most.
 function last(o, sha, path) {
   if (!path) return sha;
   let n = 0;
@@ -120,7 +111,6 @@ function last(o, sha, path) {
   return null;
 }
 
-/// History: 25 commits a page, newest first, of the whole repo or of `path`.
 export async function log(ctx, g, { repo, ref, path = "", page = 0 }) {
   const { o, ref: name, branch, sha } = await open(ctx, g, repo, ref);
   if (!sha) return { repo: repo.path, ref: name, branch, path, page, commits: [], more: false };
@@ -133,7 +123,6 @@ export async function log(ctx, g, { repo, ref, path = "", page = 0 }) {
   return { repo: repo.path, ref: name, branch, sha, path, page, commits: commits.slice(page * PAGE, (page + 1) * PAGE).map(summary), more: commits.length > (page + 1) * PAGE };
 }
 
-/// The last commit that changed each entry of a folder, for wide windows; it looks back 300 commits at most.
 export async function latest(ctx, g, { repo, ref, path = "" }) {
   const { o, sha } = await open(ctx, g, repo, ref);
   if (!sha) return {};
@@ -158,7 +147,6 @@ export async function latest(ctx, g, { repo, ref, path = "" }) {
   return out;
 }
 
-/// Every blob under a tree: path → { sha, mode }.
 function files(o, sha, prefix = "", out = new Map()) {
   if (!sha) return out;
   for (const e of o.tree(sha)) {
@@ -169,7 +157,6 @@ function files(o, sha, prefix = "", out = new Map()) {
   return out;
 }
 
-/// What changed in a commit against its first parent: one row per file, renames found by identical contents.
 function changes(o, c) {
   const before = files(o, c.parents[0] && o.has(c.parents[0]) ? o.commit(c.parents[0]).tree : null);
   const after = files(o, c.tree);
@@ -197,7 +184,6 @@ const text = (o, side) => {
   return { text: utf8.decode(bytes) };
 };
 
-/// One file's diff: { additions, deletions, hunks: [{ a, b, lines: [" x", "-y", "+z"] }] }, or why there's none.
 function diffFile(o, row, full) {
   const a = text(o, row.old), b = text(o, row.new);
   if (a.binary || b.binary) return { binary: true, additions: 0, deletions: 0 };
@@ -205,7 +191,6 @@ function diffFile(o, row, full) {
   if (a.text === b.text) return { additions: 0, deletions: 0, hunks: [] };
   let p = structuredPatch("", "", a.text, b.text, "", "", { context: 3, maxEditLength: full ? 20000 : 4000 });
   if (!p) {
-    // Too different to diff line by line: every old line goes, every new one comes.
     const lines = (t) => (t ? t.replace(/\n$/, "").split("\n") : []);
     const old = lines(a.text), neu = lines(b.text);
     p = { hunks: [{ oldStart: 1, newStart: 1, lines: [...old.map((l) => "-" + l), ...neu.map((l) => "+" + l)] }] };
@@ -218,7 +203,6 @@ function diffFile(o, row, full) {
 
 const row = (r) => ({ path: r.path, old_path: r.old_path || null, status: r.status, old_mode: r.old?.mode || null, new_mode: r.new?.mode || null });
 
-/// A commit: its message, parents, and every file it changed with its diff (big ones wait to be asked for).
 export async function commit(ctx, g, { repo, sha }) {
   const { o } = await open(ctx, g, repo, sha);
   const c = o.commit(sha);
@@ -236,7 +220,6 @@ export async function commit(ctx, g, { repo, sha }) {
   return { repo: repo.path, ...summary(c), files: out };
 }
 
-/// One file's diff in a commit, however big.
 export async function diff(ctx, g, { repo, sha, path }) {
   const { o } = await open(ctx, g, repo, sha);
   const r = changes(o, o.commit(sha)).find((x) => x.path === path);
@@ -244,7 +227,6 @@ export async function diff(ctx, g, { repo, sha, path }) {
   return { ...row(r), ...diffFile(o, r, true) };
 }
 
-/// Branches with their head commits' subjects and authors.
 export async function branches(ctx, g, { repo }) {
   const { o, branches } = await open(ctx, g, repo);
   return branches.map((b) => {

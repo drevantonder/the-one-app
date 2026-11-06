@@ -5,7 +5,6 @@ import { AccountList, Hint, Input, List, ListNote, ListRow, ListSkeleton, LoadFa
 
 const NOTE = "The code changes every 20 seconds. WhatsApp then sends recent chats, which takes a few minutes."
 
-/// Shows the current codes until the phone links, or the codes run out. `done` is told when it's over.
 function Pairing({ phone, device, had, done }) {
   const [codes, setCodes] = useState({})
   const [note, setNote] = useState(NOTE)
@@ -50,7 +49,6 @@ function Settings() {
   const [running, setRunning] = useState(null)
   const [phone, setPhone] = useState("")
   const [on, setOn] = useState("")
-  // What's under way: why linking failed (`why`, with its retry), or the codes it shows (`pairing`).
   const [step, setStep] = useState(null)
   // Whether that's not known (the call failed): then the form shows anyway, as when it's known there are some.
   const [unknown, setUnknown] = useState(false)
@@ -62,7 +60,6 @@ function Settings() {
       () => (setUnknown(true), setRunning([])),
     )
   }, [])
-  // With WhatsApp on several of your devices, which one links it: an account may be linked on each.
   const device = running && running.length > 1 ? on || running[0] : ""
   const ready = !!accounts && !!running
   useEffect(() => {
@@ -82,7 +79,6 @@ function Settings() {
 
   if (problem && !accounts) return <LoadFailure problem={problem} retry={retry} />
   if (!ready) return <ListSkeleton />
-  // None of their devices has it: what to do, on the App Store's WhatsApp page, which says where it can go.
   if (!running.length && !unknown)
     return (
       <Problem

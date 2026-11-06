@@ -51,7 +51,7 @@ func put(db *sql.DB, m stored, history bool) error {
 		return err
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
-		return tx.Commit() // seen already
+		return tx.Commit()
 	}
 	unread, first := "unread", 0
 	switch {
@@ -102,8 +102,6 @@ type chatRow struct {
 	Last      stored
 }
 
-// chats lists the chats that have messages, most recent first, each with its
-// last message.
 func chats(db *sql.DB) ([]chatRow, error) {
 	rows, err := db.Query(`SELECT c.jid, c.name, c.unread, m.id, m.sender, m.sender_name, m.from_me, m.time, m.text
 		FROM chats c JOIN messages m ON m.chat = c.jid AND m.rowid = (
@@ -126,9 +124,6 @@ func chats(db *sql.DB) ([]chatRow, error) {
 	return out, rows.Err()
 }
 
-// messages are the limit newest messages after skipping the skip newest,
-// newest last: in one chat (or all, if chat is empty), and only those
-// containing query (case-insensitive) if it isn't empty.
 func messages(db *sql.DB, chat, query string, limit, skip int) ([]stored, error) {
 	q := `SELECT chat, id, sender, sender_name, from_me, time, text FROM messages WHERE (? = '' OR chat = ?)
 		AND (? = '' OR text LIKE '%' || ? || '%' ESCAPE '\') ORDER BY time DESC, rowid DESC LIMIT ? OFFSET ?`

@@ -8,7 +8,6 @@ import { Pending, ago, go, plural, said, useCall } from "./use.jsx"
 
 const reason = (i) => (i.state_reason === "not_planned" ? "not planned" : "completed")
 
-// A form in a dialog: its fields, then what went wrong.
 const Form = ({ children }) => <div className="flex min-h-0 flex-col gap-3 overflow-y-auto p-4">{children}</div>
 
 function Comment({ d, c, body = false, editing, edit, done, menu, reload, fail }) {
@@ -57,7 +56,6 @@ function Comment({ d, c, body = false, editing, edit, done, menu, reload, fail }
   )
 }
 
-// Closing shows where it happened among the comments, as GitHub's timeline does.
 const ClosedEvent = ({ d }) => (
   <div className="flex items-center gap-2 px-1 text-sm text-muted-foreground">
     <StateIcon issue={d} />
@@ -65,7 +63,6 @@ const ClosedEvent = ({ d }) => (
   </div>
 )
 
-// A list to tick in a dialog: each tap changes the issue at once, and goes back if that fails.
 function Ticks({ title, items, chosen, save, empty, extra, done }) {
   const [on, setOn] = useState(new Set(chosen))
   const [error, setError] = useState("")
@@ -103,7 +100,6 @@ function Ticks({ title, items, chosen, save, empty, extra, done }) {
   )
 }
 
-// Title and body, in a dialog.
 function EditDialog({ d, act, done }) {
   const [title, setTitle] = useState(d.title)
   const [body, setBody] = useState(d.body)
@@ -137,13 +133,11 @@ function EditDialog({ d, act, done }) {
   )
 }
 
-/// `onGone` is told once the issue is deleted; the screen goes back, and Issues' list shows it gone.
 export function IssueView({ repo, number, onGone }) {
   const issue = useCall("issue", { repo, number: Number(number) })
   const [room, width] = useWidth()
   const d = issue.data
   const [people, setPeople] = useState(null)
-  // What's being written, kept while the issue is drawn again.
   const [draft, setDraft] = useState("")
   const [error, setError] = useState("")
   const [busy, setBusy] = useState("")
@@ -160,13 +154,11 @@ export function IssueView({ repo, number, onGone }) {
 
   if (!d) return <div ref={room}><Pending call={issue} rows={3} /></div>
 
-  // Calls a tool on this issue, then shows it as it is now.
   const act = async (op, input) => {
     await one.call(op, { repo, number: d.number, ...input })
     one.tap("success")
     await issue.reload()
   }
-  // What's written goes with the call that sends it, and comes back if it fails.
   const sending = async (key, op, build) => {
     const text = draft
     setBusy(key)
@@ -203,7 +195,6 @@ export function IssueView({ repo, number, onGone }) {
     }
   }
 
-  // A comment's own menu: Edit for its author, Delete for its author and the repo's owners.
   const more = async (c, button) => {
     const items = [...(c.yours ? [{ title: "Edit", icon: "pencil-simple" }] : []), { title: "Delete", icon: "trash", danger: true }]
     const i = await one.menu(items, button)

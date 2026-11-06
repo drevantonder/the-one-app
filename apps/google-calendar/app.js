@@ -35,17 +35,13 @@ async function api(ctx, email, method, path, { query, json, missing } = {}) {
   return text ? JSON.parse(text) : null;
 }
 
-// ---- calendars and events ----
-
 const cal = (id) => encodeURIComponent(id || "primary");
 const noCalendar = (id) => `no calendar ${id}: calendar ids come from ${APP}_calendars`;
 const noEvent = (id, calendar) => `no event ${id} in ${calendar ? `calendar ${calendar}` : "your primary calendar"}: event ids come from ${APP}_events, with the same calendarId`;
 const DAY = 86_400_000;
 
-/// Whether an EventDateTime's dateTime needs a timeZone: it has no offset, and none was given.
 const zoneless = (t) => t?.dateTime && !t.timeZone && !/(Z|[+-]\d{2}:?\d{2})$/i.test(String(t.dateTime).trim());
 
-/// An instant for a list's bounds: given with or without an offset (then in `zone`), or a date.
 function instant(v, zone, fallback) {
   if (!v) return new Date(fallback).toISOString();
   const s = String(v).trim();

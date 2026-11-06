@@ -1,7 +1,6 @@
 //! The viewer: a page to watch and use a device of another kind than linux (Linux devices have Cua's), served on
-//! VIEWER_PORT over HTTPS on the tailnet, as theirs is. It shows the device's screen as fast as it can be taken, and
-//! sends clicks, typing and keys back, where the kind takes them. A link's ticket is what lets someone in, for as long
-//! as the link works. And VNC input, as Windows takes it.
+//! VIEWER_PORT over HTTPS on the tailnet, as theirs is. A link's ticket is what lets someone in, for as long as the
+//! link works. VNC input is how Windows takes clicks, typing and keys.
 
 use std::collections::HashMap;
 use std::io::{Read, Write};
@@ -39,7 +38,6 @@ fn refused(status: StatusCode, why: impl Into<String>) -> Response {
 }
 
 impl Devices {
-    /// Serves the viewer for as long as this runs.
     pub(super) fn serve_viewer(self: Arc<Self>) {
         let runtime = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
             Ok(r) => r,
@@ -62,12 +60,11 @@ impl Devices {
         });
     }
 
-    /// The device a ticket lets someone watch, which counts as a call to it.
     fn ticketed(&self, ticket: &str) -> Result<Vm, Box<Response>> {
         let device = TICKETS.lock().unwrap().get_or_insert_default().get(ticket).filter(|(_, until)| super::now() < *until).map(|(d, _)| d.clone());
         let Some(device) = device else { return Err(Box::new(refused(StatusCode::FORBIDDEN, "This link has expired: ask for another."))) };
         let Some(v) = self.vm_named(&device) else { return Err(Box::new(refused(StatusCode::NOT_FOUND, "That device is gone."))) };
-        self.touch(&v.name); // someone's watching it
+        self.touch(&v.name);
         Ok(v)
     }
 }
@@ -80,7 +77,7 @@ async fn page(State(ds): State<Arc<Devices>>, UrlPath(ticket): UrlPath<String>) 
         };
         let k = v.kind();
         if k.running(&ds, &v) {
-            let _ = ds.awake(&mut v); // a paused one carries on for whoever looks
+            let _ = ds.awake(&mut v);
         }
         let html = PAGE.replace("{name}", &v.name).replace("{input}", if k.input() { "true" } else { "false" }).replace("{limits}", &serde_json::to_string(k.limits()).unwrap_or_default());
         ([(header::CONTENT_TYPE, "text/html; charset=utf-8"), (header::CACHE_CONTROL, "no-store")], html).into_response()
@@ -128,7 +125,6 @@ async fn act(State(ds): State<Arc<Devices>>, UrlPath(ticket): UrlPath<String>, b
     .unwrap_or_else(|_| refused(StatusCode::INTERNAL_SERVER_ERROR, "failed"))
 }
 
-/// The page: the screen, filling the window, and what the person does on it sent back as actions.
 const PAGE: &str = r#"<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{name}</title>
 <style>
@@ -160,7 +156,6 @@ const PAGE: &str = r#"<!doctype html><meta charset="utf-8"><meta name="viewport"
     }
   }
   loop();
-  // A point on the page, in the device's pixels.
   function at(e) {
     const r = s.getBoundingClientRect(), scale = Math.min(r.width / w, r.height / h);
     const x = (e.clientX - r.left - (r.width - w * scale) / 2) / scale, y = (e.clientY - r.top - (r.height - h * scale) / 2) / scale;
@@ -187,12 +182,8 @@ const PAGE: &str = r#"<!doctype html><meta charset="utf-8"><meta name="viewport"
   });
 </script>"#;
 
-// ── VNC ────────────────────────────────────────────────────────────────────
-
-/// Gives a device input through its VNC server, as a person watching it would: the pointer goes exactly where it's
-/// sent, in the screen's pixels, and keys go as X keysyms. The connection is shared, leaving anyone else watching
-/// connected. Its server is a socket in the device's folder, which only this machine's user can open: on a port, any
-/// program reaching this machine's 127.0.0.1, one in another device among them, could drive it.
+/// Keys go as X keysyms. The server is a socket in the device's folder, which only this machine's user can open: on a
+/// port, any program reaching this machine's 127.0.0.1, one in another device among them, could drive it.
 pub fn vnc_act(socket: &Path, a: &Action) -> Result<()> {
     let mut c = UnixStream::connect(socket).map_err(|err| anyhow!("its screen: {err}"))?;
     c.set_read_timeout(Some(Duration::from_secs(60)))?;
@@ -270,7 +261,6 @@ pub fn vnc_act(socket: &Path, a: &Action) -> Result<()> {
     Ok(())
 }
 
-/// Opens an RFB session with no password, shared.
 fn vnc_hello(c: &mut UnixStream) -> Result<()> {
     let mut version = [0u8; 12];
     c.read_exact(&mut version)?;

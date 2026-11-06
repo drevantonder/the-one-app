@@ -8,8 +8,8 @@
 
 import main from "./dist/main.html" with { type: "text" };
 
-const FRESH = 5 * 60 * 1000; // a snapshot counts as now for this long
-const KEEP = 30 * 86400 * 1000; // snapshots kept this long
+const FRESH = 5 * 60 * 1000;
+const KEEP = 30 * 86400 * 1000;
 const PRUNE = () => Date.now() - KEEP;
 
 // Each brand's own mark, from its site (claude.ai, developers.openai.com, opencode.ai): a logo is inset on white,
@@ -33,7 +33,6 @@ const clock = (t) => new Date(t).toLocaleTimeString("en-US", { hour: "numeric", 
 const day = (t) => new Date(t).toLocaleDateString("en-US", { weekday: "short" });
 const monthDay = (t) => new Date(t).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 
-/// "today at 2:15 PM", "Fri at 9:00 AM": the CLI's absolute voice.
 function resets(t, now) {
   if (t == null) return "reset unknown";
   const d = t - now;
@@ -47,7 +46,6 @@ function resets(t, now) {
   return `${monthDay(t)} at ${clock(t)}`;
 }
 
-/// "in 50 min", "in 3h 53m", "in 3d 20h": the menu's countdown voice.
 function countdown(t, now) {
   if (t == null) return "";
   const m = Math.max(0, Math.round((t - now) / 60000));
@@ -59,7 +57,6 @@ function countdown(t, now) {
   return d < 14 ? `in ${d}d ${h % 24}h` : `on ${monthDay(t)}`;
 }
 
-/// A pace in the providers' own words, from two snapshots sharing a window reset.
 function paceFrom(used, resetsAt, windowMins, prev, now) {
   if (resetsAt == null || used == null) return null;
   const start = resetsAt - windowMins * 60000;
@@ -73,7 +70,7 @@ function paceFrom(used, resetsAt, windowMins, prev, now) {
   const separated = prev && prev.at > start && prev.used != null && now - prev.at > 10 * 60000;
   if (delta > 0) tail = separated ? tail : "Ahead of even pace";
   if (separated) {
-    const burn = (used - prev.used) / (now - prev.at); // % per ms
+    const burn = (used - prev.used) / (now - prev.at);
     if (burn > 0) {
       const eta = (100 - used) / burn;
       willLast = now + eta >= resetsAt;
@@ -89,12 +86,10 @@ const emptyIn = (eta) => {
   return mins < 120 ? `Projected empty in ${mins} min` : mins < 2880 ? `Projected empty in ${Math.floor(mins / 60)}h ${mins % 60}m` : `Runs out in ${Math.round(mins / 1440)}d`;
 };
 
-/// Who an account is, as a person tells them apart: the label its machine gave (org · email), else its email.
 function accountName(a) {
   return a.account || a.email || null;
 }
 
-/// Which pool to spend: the cooler weekly one. Names come from the scoped rows.
 function steer(models) {
   const used = {};
   for (const m of models || []) {
@@ -115,7 +110,6 @@ function steer(models) {
   return `${head}any model fine`;
 }
 
-/// Each account's newest read of a provider, whichever machine saw it: one snapshot per account (provider + label).
 async function latest(b, provider, before = null) {
   const rows = await b.query(
     "select * from snapshots where provider = ? and (at <= ? or ? is null) and at = (select max(at) from snapshots x where x.provider = snapshots.provider and ifnull(x.account, '') = ifnull(snapshots.account, '') and (x.at <= ? or ? is null)) order by active desc, weekly_used",
@@ -124,13 +118,11 @@ async function latest(b, provider, before = null) {
   return rows.map((r) => ({ ...r, devices: JSON.parse(r.devices || "null") || [r.device], active: !!r.active, disabled: !!r.disabled, models: JSON.parse(r.models || "[]"), pace: JSON.parse(r.pace || "{}") }));
 }
 
-/// The one before for the same account, sharing the session window, for the burn rate.
 async function previous(b, provider, account, at, resetsAt) {
   const rows = await b.query("select at, session_used, weekly_used, session_resets from snapshots where provider = ? and ifnull(account, '') is ifnull(?, '') and at < ? order by at desc limit 5", [provider, account, at]);
   return rows.map((r) => ({ at: r.at, used: r.session_used, resets: r.session_resets })).find((r) => r.resets === resetsAt) || null;
 }
 
-/// What one machine's AI Usage service answered, into our windows: one read per account it found.
 function fromService(a) {
   const win = (w) => ({ used: int(w?.used), resetsAt: w?.resetsAt ?? null, resetText: null });
   return {
@@ -140,14 +132,12 @@ function fromService(a) {
     plan: a.plan || null, account: accountName(a), email: a.email || null,
     active: !!a.active, disabled: !!a.disabled,
     notes: a.error ? [String(a.error)] : [],
-    // Extra usage only where it's on: an account without it has neither.
     extra: a.extra?.limit != null ? a.extra : null,
   };
 }
 
-/// Fresh numbers: every machine's AI Usage service reads its providers, and the newest read per account wins, on
-/// whatever machine saw it. A machine that couldn't answer is a problem only on the reads it gave before, which stay
-/// shown with their age and why; a provider no machine has shows nothing. `ask` is the one read of every machine this
+/// The newest read per account wins, on whatever machine saw it. A machine that couldn't answer is a problem only on
+/// the reads it gave before, which stay shown with their age and why. `ask` is the one read of every machine this
 /// status shares: `{ answers }`, or `{ problem }` when none could be asked.
 async function refresh(b, id, ask, now) {
   const P = PROVIDERS[id];
@@ -170,7 +160,6 @@ async function refresh(b, id, ask, now) {
       if (a.provider !== id) continue;
       const out = fromService(a);
       (has[out.account || out.email || ""] ??= []).push(machine);
-      // An account it couldn't read now (rate limited, signed out) keeps its last read, saying why.
       if (out.session.used == null && out.weekly.used == null && out.monthly.used == null) {
         if (a.error) unread[out.account || ""] ??= `${machine}: ${String(a.error).slice(0, 160)}`;
         continue;
@@ -181,7 +170,6 @@ async function refresh(b, id, ask, now) {
   const results = [];
   const seen = new Set();
   for (const { machine, out } of reads) {
-    // The same account read on two machines: the first answer wins, both were taken now.
     const key = out.account || out.email || "";
     if (seen.has(key)) continue;
     seen.add(key);
@@ -194,14 +182,11 @@ async function refresh(b, id, ask, now) {
     results.push({ provider: id, device: machine, devices, at: now, source: out.source, confidence: out.confidence, session_used: out.session.used, session_resets: out.session.resetsAt, session_resetText: out.session.resetText, weekly_used: out.weekly.used, weekly_resets: out.weekly.resetsAt, weekly_resetText: out.weekly.resetText, monthly_used: out.monthly.used, monthly_resets: out.monthly.resetsAt, models: out.models, pace: { session: out.session.pace, weekly: out.weekly.pace }, plan: out.plan, account: out.account || null, active: !!active, disabled: !!out.disabled, extra: out.extra, notes: out.notes || [], cached: false, now });
   }
   b.exec("delete from snapshots where at < ?", [PRUNE()]);
-  // Rows that can't be told which account they were (reads from before accounts had labels) go once the service
-  // answers; until then they're better kept than blank.
+  // Rows from before accounts had labels go once the service answers; until then they're better kept than blank.
   if (reads.length) b.exec("delete from snapshots where provider = ? and account is null and at < ?", [id, now]);
-  // An account its machine answered without (signed out there, or renamed) is gone: its reads go with it.
   const gone = (r) => r.device in (answers || {}) && !failed[r.device] && !unread[r.account || ""];
   for (const r of snap) if (!seen.has(r.account || "") && gone(r)) b.exec("delete from snapshots where provider = ? and ifnull(account, '') = ?", [id, r.account || ""]);
-  // The writes land when this call returns, so the merge happens here: this pass's rows, and the last read of each
-  // account it didn't see (a machine off, say), saying why if it or its machine couldn't be read.
+  // The writes land when this call returns, so the merge happens here.
   const kept = snap.filter((r) => !seen.has(r.account || "") && !gone(r)).map((r) => {
     const why = unread[r.account || ""] || failed[r.device];
     return { ...r, cached: true, now, ...(why ? { stale: why } : {}) };
@@ -209,7 +194,6 @@ async function refresh(b, id, ask, now) {
   return [...results, ...kept].sort((x, y) => (y.active - x.active) || ((x.weekly_used ?? 0) - (y.weekly_used ?? 0)));
 }
 
-/// Pace only when it's news: a deficit, or a projection short of reset. Reserve is silent.
 function paceNews(pace) {
   if (!pace?.summary) return null;
   const [head, , tail] = pace.summary.split(" | ");
@@ -224,7 +208,6 @@ function windowText(label, w, now) {
   return [`${label} ${100 - w.used}% left`, paceNews(w.pace), reset].filter(Boolean).join(", ");
 }
 
-/// What a person needs to know about a read, if anything: out until its reset, or running out before it.
 function alarm(p, now) {
   const wins = [["Session", p.session_used, p.session_resets, p.pace?.session], ["Weekly", p.weekly_used, p.weekly_resets, p.pace?.weekly], ["Monthly", p.monthly_used, p.monthly_resets, null]];
   for (const [label, used, at, pace] of wins) if (used >= 100) return { tone: "danger", text: `Out until ${resets(at, now)}` };
@@ -236,13 +219,11 @@ function alarm(p, now) {
   return null;
 }
 
-/// One provider's reads as text: the account in use in full, the others on one line.
 function section(reads, now) {
   const p = reads[0];
   const title = PROVIDERS[p.provider].title;
   const head = [title, p.account ? `${p.account}${reads.length > 1 ? ", in use" : ""}` : null, p.plan, p.devices?.length ? `on ${p.devices.join(", ")}` : null].filter(Boolean).join(" · ");
   const age = now - p.at > FRESH ? `read ${ago(p.at, now)}` : null;
-  // Why some reads are old, once: a machine that couldn't answer, or no machine asked.
   const problems = [...new Set(reads.map((r) => r.stale).filter(Boolean))];
   const steered = steer(p.models);
   const others = reads.slice(1).map((o) => `${o.account} ${o.weekly_used >= 100 ? `out, back ${resets(o.weekly_resets, now)}` : `${100 - (o.weekly_used ?? 0)}% weekly left`}${o.disabled ? ", not in rotation" : ""}${o.stale ? `, read ${ago(o.at, now)}` : ""}`);
@@ -334,7 +315,6 @@ export default {
         if (!b) throw new Error("your own data is on one of your devices: run it there");
         const now = ctx.now();
         const ids = provider === "all" ? Object.keys(PROVIDERS) : [provider];
-        // One read of every machine for all the providers it asks, once any of them is older than FRESH.
         let asked = null;
         const ask = () => (asked ??= ctx.services["ai-usage"].usage({}, { device: device || "all" }).then((answers) => ({ answers }), (err) => ({ problem: String(err?.message || err).slice(0, 160) })));
         const all = (await Promise.all(ids.map((id) => refresh(b, id, ask, now)))).flat();
@@ -400,7 +380,6 @@ export default {
           }
         }
         if (!plans.length) return { t: "text", text: "No readings yet.", size: "sm", tone: "muted" };
-        // Few fit a small or medium widget: the plans closest to their limit, in their usual order.
         const worst = (p) => Math.max(p.session ?? 0, p.week ?? 0);
         const fit = { small: 3, medium: 4, large: 8 }[ctx.size] || 4;
         const top = new Set([...plans].sort((a, b) => worst(b) - worst(a)).slice(0, fit));
@@ -425,10 +404,8 @@ export default {
           };
         };
         const body = [header, ...show.map(row)];
-        // What needs you: a plan nearly out, and when it resets.
         const out = ctx.size === "large" && show.filter((p) => worst(p) >= 85).sort((a, b) => worst(b) - worst(a))[0];
         if (out) body.push({ t: "row", gap: 6, c: [{ t: "icon", name: "warning-fill", tone: "bad", size: "xs" }, { t: "text", text: `${[out.name, out.account].filter(Boolean).join(" · ")} is at ${worst(out)}%${out.resets != null ? `, resets ${countdown(out.resets, now)}` : ""}`, size: "xs", tone: "bad", lines: 1 }] });
-        // Rows spread over the widget's height once there are enough of them; a few stay together at the top.
         const c = body.length < 4 ? [{ t: "col", gap: 8, c: body }, { t: "col", grow: true, gap: 0, c: [] }] : body.flatMap((n, i) => (i ? [{ t: "col", grow: true, gap: 0, c: [] }, n] : [n]));
         return { t: "col", header: false, next: Date.now() + 300_000, c };
       },

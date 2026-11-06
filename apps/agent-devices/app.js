@@ -10,27 +10,22 @@ import mainHtml from "./dist/main.html" with { type: "text" };
 import deviceHtml from "./dist/device.html" with { type: "text" };
 import settingsHtml from "./dist/settings.html" with { type: "text" };
 
-/// Runs one of the agent-devices service's functions, wherever it runs for the caller, or on the device `on`.
 const service = (ctx, fn, input, on) => ctx.services["agent-devices"][fn](input, on ? { device: on } : undefined);
 
-/// A short hash of a string (FNV-1a), to tell whether it changed.
 function fnv(s) {
   let h = 0x811c9dc5;
   for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 0x01000193);
   return (h >>> 0).toString(36);
 }
 
-
 /// The service's functions Computer Use acts on agent devices with (`_act`).
 const ACTS = ["list", "view", "screen", "tools", "refresh_tools", "use", "get_browser_state", "browser_prepare", "browser_navigate", "browser_click", "browser_type", "browser_select", "browser_dialog", "browser_pointer"];
 const TYPE = "Browser profile";
 
-/// The browser profiles: the Vault items of their type this app is switched on for.
 async function profiles(ctx) {
   return (await ctx.vault.items()).filter((i) => i.type === TYPE);
 }
 
-/// The browser profile named (its title, or its item's id), or the one titled default when none is named; null for "".
 async function profile(ctx, name) {
   if (name === "") return null;
   const all = await profiles(ctx);
@@ -62,8 +57,6 @@ export default {
   instructions: "Agent Devices are devices, on the person's own devices, that agents borrow (agent-devices_borrow, then agent-devices_give_back) and use through Computer Use (computer_*): Linux with a browser (the default kind), and Windows, Android and iPhone (Simulator) where one of their devices can run them, as agent-devices_kinds says. Borrow a Linux one for browsing: it's yours alone and deleted when given back. Where kinds lists chrome as available, kind chrome is quicker (under a second) and lighter: the device's own Chrome, without a container, whose borrow gives target_id and tab_id for the browser tools at once, with no browser_prepare or list_windows; its owner allows it in Agent Devices' Settings. Windows, Android and iPhone devices are the person's lasting ones (by name, like windows or android), borrowed by one agent at a time, who leaves it as they found it; for anything that changes or might break it, borrow a throwaway copy (copy: true), which is made when the lasting one is busy too if there's room. Every kind takes computer_screen, computer_view and computer_use (computer_tools lists what each kind takes), and agent-devices_open, _install and _run. Browser profiles (like Personal or Work) are Vault items of type Browser profile: a borrowed device's browser starts signed in to the sites its profile was signed in to. agent-devices_profiles lists them and the sites each was used on. When a site needs the person to sign in, agent-devices_sign_in with profile and url gives a link for them: they sign in there and it's saved when they're done (agent-devices_save_profile, or in the Vault). Never sign in for them. The rest (create, start, stop, resize, backup, restore, move, delete) is for lasting devices the person keeps.",
   uses: { services: ["agent-devices"] },
   service: { network: ["*"], person: true, platforms: ["linux", "mac"] },
-  // Browser profiles live in the Vault: the person adds one there (add_profile), signs in to sites in it (sign_in, then
-  // save_profile), renames and deletes it there.
   vault: {
     profile: { title: TYPE, type: TYPE, hosts: ["agent-devices"], fields: { _profile_key: { label: "Key", secret: true } }, make: "add_profile", actions: { sign_in: "Sign In to a Site" } },
   },
@@ -148,7 +141,6 @@ export default {
         const all = await profiles(ctx);
         if (!all.some((p) => p.id === item)) throw new Error("That browser profile was deleted from the Vault.");
         ctx.vault.update(item, { fields: { _blob: { value: blob }, _salt: { value: salt }, _saved: { value: new Date(ctx.now()).toISOString() }, ...(sites ? { sites: { value: sites } } : {}) } });
-        // The scope keeps each profile's newest save only, and none of a profile that was deleted.
         const kept = await ctx.user.query("select item, blob from saves");
         for (const s of kept) {
           if (s.item === item ? s.blob !== blob : !all.some((p) => p.id === s.item)) ctx.user.forget(s.blob);
@@ -261,7 +253,6 @@ export default {
       reads: true,
       description: "For the page: the agent devices on all of your devices, as the services last knew them: the device each is on, its kind, whether it's running, who has borrowed it and what for. None if it's the one the page has (have, its hash).",
       input: { type: "object", properties: { have: { type: "string" } } },
-      // Only what the page shows, so it's the same until something it shows changes, and then the page is sent it.
       run: async (ctx, { have }) => {
         const r = await service(ctx, "list", { kept: true });
         const devices = (r.devices || []).map(({ name, on, kind, state, borrowed, spare, of }) => ({ name, on, kind, state, borrowed, spare, of }));

@@ -37,9 +37,6 @@ async function api(ctx, email, method, path, { query, json, missing, hint } = {}
   return text ? JSON.parse(text) : null;
 }
 
-// ---- spreadsheets ----
-
-/// A spreadsheet's id, given it or its address.
 const sheetId = (v) => {
   const s = String(v || "").trim();
   if (!s) throw new Error("give spreadsheetId: the spreadsheet's id or address");
@@ -51,7 +48,6 @@ const valuesInput = { type: "array", items: { type: "array", items: {} }, descri
 const noSheet = (v) => `no spreadsheet ${sheetId(v)}: give its id or its address (docs.google.com/spreadsheets/d/…); drive_files_list finds spreadsheets`;
 const RANGE_HINT = `ranges are A1 notation, like Budget!A1:F20, Budget!A:C or Budget; ${APP}_spreadsheet lists the sheets`;
 
-/// The range asked for, or the whole first sheet.
 async function rangeOr(ctx, email, spreadsheet, range) {
   if (range) return String(range);
   const s = await api(ctx, email, "GET", ss(spreadsheet), { query: { fields: "sheets.properties.title" }, missing: noSheet(spreadsheet) });

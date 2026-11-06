@@ -19,7 +19,6 @@ import (
 	"github.com/skip2/go-qrcode"
 )
 
-// whatsapp is every link this device keeps, the first first.
 type whatsapp struct {
 	node, dir string
 
@@ -118,7 +117,6 @@ func (w *whatsapp) run(ctx context.Context, function string, raw json.RawMessage
 	return l.run(ctx, function, raw)
 }
 
-// linked are the links paired with a phone, the first first.
 func (w *whatsapp) linked() []*link {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -159,8 +157,6 @@ func (w *whatsapp) pick(account string, named bool) (*link, error) {
 	return nil, elsewhere(fmt.Sprintf("WhatsApp isn't linked here as %s", account))
 }
 
-// spare is a link to pair or to take a moved link into: the first that
-// isn't linked, else a new one.
 func (w *whatsapp) spare() (*link, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -268,8 +264,6 @@ func (w *whatsapp) status() (string, error) {
 	return strings.Join(lines, "\n"), nil
 }
 
-// pairing is the QR code of the link pairing now, as a picture, and the code
-// to type on the phone, if it was asked for one.
 func (w *whatsapp) pairing() map[string]any {
 	w.mu.Lock()
 	defer w.mu.Unlock()
