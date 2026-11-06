@@ -79,7 +79,8 @@ impl Node {
     /// devices' to send, and a sign-in's caller has this device's key.
     pub fn for_sign_in(&self, req: CallRequest) -> Result<CallRequest> {
         let req = self.resolve(req);
-        ensure!(req.app != scopes::APP, "a sign-in can't ask that");
+        // Only reading a log is one a client may ask of the node's own: it checks who asks itself.
+        ensure!(req.app != scopes::APP || req.tool == "logs", "a sign-in can't ask that");
         Ok(req)
     }
 

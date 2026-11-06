@@ -291,7 +291,9 @@ fn run(args: Vec<String>) -> Result<()> {
     if traced {
         TRACE_ASKED.with(|t| t.set(true));
     }
-    let args: Vec<String> = args.iter().enumerate().filter(|(i, a)| *i >= end || (*a != "--json" && *a != "--trace")).map(|(_, a)| a.clone()).collect();
+    // A throwaway's command is run by what it starts (a client's CLI, this again), which takes it out itself.
+    let keep_trace = args.first().map(String::as_str) == Some("throwaway");
+    let args: Vec<String> = args.iter().enumerate().filter(|(i, a)| *i >= end || (*a != "--json" && (keep_trace || *a != "--trace"))).map(|(_, a)| a.clone()).collect();
     if args.first().map(String::as_str) == Some("throwaway") {
         return throwaway::run(&args[1..]);
     }
