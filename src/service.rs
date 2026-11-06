@@ -754,6 +754,11 @@ pub fn run(name: &str) -> Result<()> {
     }
     let stop = stop_check(parent)?;
     let program = crate::oned::program(name);
+    #[cfg(target_os = "macos")]
+    let program = match crate::oned::helper(name) {
+        Some(carried) => crate::oned::placed(&carried)?,
+        None => program,
+    };
     ensure!(program.exists(), "{name}'s program, {}, isn't there", program.display());
     let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
     let service = Service::open(&dir, name)?;
@@ -926,7 +931,7 @@ fn begin(name: &str, program: &Path, data: &Path, at: std::net::SocketAddr, serv
         }
     }
     #[cfg(target_os = "macos")]
-    if crate::oned::helper(name).as_deref() == Some(program) {
+    if crate::oned::helper(name).is_some() {
         return Ok(Running::Own(disclaimed(&command).with_context(|| format!("starting {}", program.display()))?));
     }
     Ok(Running::Child(command.spawn().with_context(|| format!("starting {}", program.display()))?))

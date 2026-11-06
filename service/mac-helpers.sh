@@ -3,7 +3,7 @@
 # in target/mac-helpers: "<its CFBundleName> — <the app's name>.app", id app.<cli>.mac.<name>, with its own Info.plist
 # and entitlements, signed with the identity SIGN names (ad hoc without), so macOS asks for and records its permission
 # under its own name. The Mac app copies them into its Contents/Helpers before it's signed itself, where oned finds
-# them. CONFIG names another custom build's config.toml; ICON, an .icns for them.
+# them, and runs a copy of each outside it (oned::placed). CONFIG names another custom build's config.toml; ICON, an .icns for them.
 set -euo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
 config=${CONFIG:-$root/config.toml}

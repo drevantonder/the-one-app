@@ -79,6 +79,26 @@ pub fn helper(name: &str) -> Option<PathBuf> {
     helpers().into_iter().find(|p| p.file_name().is_some_and(|f| f.to_string_lossy() == program))
 }
 
+/// Where a helper app runs from: a copy of the one the Mac app carries (`helper`), out of the Mac app, in this device's
+/// home (`helpers/`), copied again when the Mac app's changed. macOS records the permissions of code inside an app as
+/// that app's, so only a copy outside it asks for and keeps its own, under its own name; it keeps them across builds,
+/// since they're the helper's by its id and team, not where it is. Its program.
+#[cfg(target_os = "macos")]
+pub fn placed(carried: &std::path::Path) -> anyhow::Result<PathBuf> {
+    use anyhow::Context as _;
+    let bundle = carried.ancestors().nth(3).context("a helper's program is in its app's Contents/MacOS")?;
+    let copy = crate::home().join("helpers").join(bundle.file_name().unwrap_or_default());
+    let program = copy.join(carried.strip_prefix(bundle)?);
+    let stamp = |p: &std::path::Path| std::fs::metadata(p).and_then(|m| Ok((m.len(), m.modified()?))).ok();
+    if stamp(&program).is_none() || stamp(&program) != stamp(carried) {
+        let _ = std::fs::remove_dir_all(&copy);
+        std::fs::create_dir_all(copy.parent().unwrap_or(&copy))?;
+        let done = std::process::Command::new("/usr/bin/ditto").arg(bundle).arg(&copy).status()?;
+        anyhow::ensure!(done.success(), "copying {} failed", bundle.display());
+    }
+    Ok(program)
+}
+
 /// Every helper app's program the Mac app carries.
 fn helpers() -> Vec<PathBuf> {
     let Some(dir) = std::env::current_exe().ok().and_then(|e| Some(e.parent()?.parent()?.join("Helpers"))) else { return Vec::new() };

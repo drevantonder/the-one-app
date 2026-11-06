@@ -1,9 +1,9 @@
 import AppKit
 import os
 
-/// A Mac service in Swift: a helper app of its own inside the Mac app (Contents/Helpers), which its device's oned starts
-/// (src/service.rs) as a process macOS holds responsible for itself, so macOS asks for, and records, its permission
-/// under its own name. oned tells it where to register (`ONE_ADDR`) and where the token it sends is (`ONE_HOME`). It
+/// A Mac service in Swift: a helper app of its own, carried inside the Mac app (Contents/Helpers), which its device's
+/// oned starts from a copy outside it (src/oned.rs's `placed`) as a process macOS holds responsible for itself, so
+/// macOS asks for, and records, its permission under its own name. oned tells it where to register (`ONE_ADDR`) and where the token it sends is (`ONE_HOME`). It
 /// registers only once it has what it needs from the person: until then the Mac app's own copy, if it has one, answers.
 public protocol Service: Sendable {
     var app: String { get }
