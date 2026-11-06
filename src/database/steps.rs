@@ -573,7 +573,7 @@ pub struct Applied {
 }
 
 /// The kinds of step applied by their rules as rows (`rules`): the rest are still by `members`' rules, until each moves.
-const BY_RULES: &[&str] = &["install", "uninstall", "schedule", "keep", "forget", "vault-request", "arrange", DEFAULTS];
+const BY_RULES: &[&str] = &["install", "uninstall", "schedule", "keep", "forget", "vault-request", "arrange", DEFAULTS, "device", "refuse", "forget-sign-in", "remove", "recovery", "runs", "service"];
 
 /// Applies `step` to `db`, `scope`'s database as the steps before it left it, with `global`'s as it is now (for a
 /// scope other than `global`, whose permissions are `global`'s): → the database it leaves, or why it doesn't count.
