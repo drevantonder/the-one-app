@@ -225,30 +225,12 @@ pub fn routes() -> Routes {
         .route("/v1/labs", SignedIn, get(labs))
         .route("/v1/images/{name}", Anyone, get(image))
         .route("/v1/call", SignedIn, post(call).layer(axum::extract::DefaultBodyLimit::max(64 << 20)))
-        .route("/v1/widgets", SignedIn, get(widgets))
-        .route("/v1/badges", SignedIn, get(badges))
         .route("/v1/create", ThisMachine, post(create))
-        .route("/v1/pair", SignedIn, post(pair))
         .route("/v1/join", ThisMachine, post(join))
-        .route("/v1/name", SignedIn, post(name))
-        .route("/v1/remove", SignedIn, post(remove))
-        .route("/v1/erase", SignedIn, post(erase))
         .route("/v1/role", SignedIn, post(role))
         .route("/v1/settings", SignedIn, post(settings))
         .route("/v1/steps", SignedIn, post(steps))
         .route("/v1/steps/global", SignedIn, get(global_steps))
-        .route("/v1/runs", SignedIn, post(runs))
-        .route("/v1/group", SignedIn, post(group))
-        .route("/v1/invite", SignedIn, post(invite))
-        .route("/v1/invite-link", SignedIn, post(invite_link))
-        .route("/v1/devices/requests", SignedIn, get(device_requests))
-        .route("/v1/devices/approve", SignedIn, post(approve))
-        .route("/v1/devices/refuse", SignedIn, post(refuse_device))
-        .route("/v1/devices/forget-sign-in", SignedIn, post(forget_sign_in))
-        .route("/v1/app-schedules", ThisMachine, post(app_schedules))
-        .route("/v1/accept", SignedIn, post(accept))
-        .route("/v1/handle", SignedIn, post(handle))
-        .route("/v1/member", SignedIn, post(member))
         .route("/v1/app", ThisMachine, post(app))
         .route("/v1/deploy", SignedIn, post(deploy))
         .route("/v1/install", SignedIn, post(install))
@@ -275,6 +257,9 @@ pub fn routes() -> Routes {
         .merge(crate::node::vault::routes::routes())
         .merge(crate::node::backups::routes::routes())
         .merge(crate::node::storage::routes::routes())
+        .merge(crate::node::devices::routes::routes())
+        .merge(crate::node::groups::routes::routes())
+        .merge(crate::node::widgets::routes::routes())
 }
 
 /// An app's own requests (`app_http`): how stock git reaches Repos.
@@ -752,15 +737,6 @@ async fn arrange(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> R
     done()
 }
 
-/// `{ device, app, scope?, days? }`: runs an app's schedules in a scope (`user` by default) on a device of the network,
-/// for `days` (30 by default; 0 stops them), as this machine's person (`Node::set_app_schedules`).
-async fn app_schedules(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
-    only(&body, &["device", "app", "scope", "days"])?;
-    let me = local(&node)?;
-    let scope = node.scope_for(&me, body["scope"].as_str().unwrap_or("user"))?;
-    let days = body["days"].as_u64().unwrap_or(crate::node::APP_SCHEDULES_DAYS);
-    Ok(Json(node.set_app_schedules(&me, text(&body, "device")?, text(&body, "app")?, &scope, days).await?))
-}
 
 async fn schedule(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
     let scope = node.scope_for(&me.caller, body["scope"].as_str().unwrap_or("user"))?;
@@ -813,54 +789,22 @@ pub(crate) async fn call_from_cloudflare_node(node: &Node, remote: crate::keys::
     ran.await.unwrap_or_else(|err| failed(&err))
 }
 
-#[derive(Deserialize)]
-struct WidgetsQuery {
-    scope: Option<String>,
-}
 
-async fn badges(State(node): State<Node>, me: Me, Query(q): Query<WidgetsQuery>) -> Reply {
-    Ok(Json(node.badges(me.caller, q.scope.as_deref()).await?))
-}
 
-async fn widgets(State(node): State<Node>, me: Me, Query(q): Query<WidgetsQuery>) -> Reply {
-    Ok(Json(json!(node.widgets(me.caller, q.scope.as_deref()).await?)))
-}
 
 async fn create(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
     let recovery = node.create_with(text(&body, "name")?, text(&body, "user_name")?, body["user"].as_str(), crate::config::STARTERS).await?;
     Ok(Json(json!({ "recovery": recovery })))
 }
 
-async fn pair(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
-    let (code, user) = node.pair_as(&me.caller, body["user"].as_str())?;
-    Ok(Json(json!({ "code": code, "user": user })))
-}
 
 async fn join(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
     node.join(text(&body, "code")?).await?;
     done()
 }
 
-/// `{ name, key? }`: renames one of its person's devices (by its key), or with no key, this one, for this machine's
-/// own programs.
-async fn name(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
-    node.rename(&me.caller, body["key"].as_str(), text(&body, "name")?).await?;
-    done()
-}
 
-/// `{ key }` (a device, by name or key: `Node::remove_device`) or `{ user }` (a person: `Node::remove_person`).
-async fn remove(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
-    match body["user"].as_str() {
-        Some(user) => Ok(Json(node.remove_person(&me.caller, user).await?)),
-        None => Ok(Json(node.remove_device(&me.caller, text(&body, "key")?).await?)),
-    }
-}
 
-/// `{ key }`: erases what a device keeps, asked of it directly (`Node::erase`), before it's removed.
-async fn erase(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
-    only(&body, &["key"])?;
-    Ok(Json(node.erase(&me.caller, text(&body, "key")?).await?))
-}
 
 async fn role(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
     let role: Role = serde_json::from_value(body["role"].clone())?;
@@ -892,91 +836,16 @@ async fn global_steps(State(node): State<Node>, me: Me, axum::extract::Query(q):
     Ok(Json(node.global_steps(&me.caller, from, welcome).await?))
 }
 
-/// `{ on: [device] }` (names or keys): the network's machines that run the caller's own things besides their own, as
-/// their own device says.
-async fn runs(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
-    only(&body, &["on"])?;
-    let on = body["on"].as_array().ok_or_else(|| anyhow::anyhow!("on is a list of machines"))?.iter().map(|d| node.find_machine(d.as_str().unwrap_or(""))).collect::<anyhow::Result<Vec<_>>>()?;
-    node.member_content(&me.caller, crate::database::content::runs(&on)).await?;
-    done()
-}
 
-async fn group(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
-    let group = node.make_group(&me.caller, text(&body, "name")?).await?;
-    Ok(Json(json!({ "group": group })))
-}
 
-async fn invite(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
-    let role: Role = serde_json::from_value(body.get("role").cloned().unwrap_or(json!("member")))?;
-    let (group, user) = (node.find_group(text(&body, "group")?)?, node.find_user(text(&body, "user")?)?);
-    node.member_as(&me.caller, "invite", json!({ "group": group, "user": user, "role": role })).await?;
-    done()
-}
 
-/// `{ name, admin? }`: a link that lets someone new join, for this device's person, an admin (`Node::invite_someone`):
-/// → `{ link, until }`.
-async fn invite_link(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
-    only(&body, &["name", "admin"])?;
-    let role = if body["admin"] == true { Role::Admin } else { Role::Member };
-    let (link, until) = node.invite_someone(&me.caller, text(&body, "name")?, role).await?;
-    Ok(Json(json!({ "link": link, "until": until })))
-}
 
-/// The requests to join this device's person may approve (`Node::device_requests`).
-async fn device_requests(State(node): State<Node>, me: Me) -> Reply {
-    Ok(Json(json!(node.device_requests(&me.caller).await?)))
-}
 
-/// `{ code }`: turns down the device showing `code` (`Node::refuse_device`).
-async fn refuse_device(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
-    only(&body, &["code"])?;
-    Ok(Json(node.refuse_device(&me.caller, text(&body, "code")?).await?))
-}
 
-/// `{ key }`: forgets what one of the caller's devices signed in with.
-async fn forget_sign_in(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
-    only(&body, &["key"])?;
-    node.forget_sign_in(&me.caller, text(&body, "key")?).await?;
-    Ok(Json(json!({})))
-}
 
-/// `{ code, confirm?, recovery? }`: lets in the device showing `code`, as whoever asked, or with `recovery`,
-/// the network's recovery key (hex), read from a file here by the CLI and never kept.
-async fn approve(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
-    only(&body, &["code", "confirm", "recovery"])?;
-    let (code, confirm) = (text(&body, "code")?, body["confirm"] == true);
-    if let Some(recovery) = body["recovery"].as_str() {
-        let secret: [u8; 32] = crate::keys::unhex(recovery.trim()).map_err(|_| anyhow::anyhow!("a recovery key is 64 hex characters"))?;
-        let key = ed25519_dalek::SigningKey::from_bytes(&secret);
-        return Ok(Json(node.approve_with_recovery(&me.caller, code, &key, confirm).await?));
-    }
-    Ok(Json(node.approve(&me.caller, code, confirm).await?))
-}
 
-async fn accept(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
-    node.member_as(&me.caller, "accept", json!({ "group": node.find_group(text(&body, "group")?)? })).await?;
-    done()
-}
 
-/// `{ group, user, role }`, with `role: null` to remove them.
-async fn member(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
-    let role: Option<Role> = serde_json::from_value(body["role"].clone())?;
-    let (group, user) = (node.find_group(text(&body, "group")?)?, node.find_user(text(&body, "user")?)?);
-    node.member_as(&me.caller, "member", json!({ "group": group, "user": user, "role": role })).await?;
-    done()
-}
 
-/// `{ handle, group? }`: changes the caller's handle, or with `group` (its id or name) a group's they're an admin of.
-async fn handle(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
-    only(&body, &["handle", "group"])?;
-    let handle = text(&body, "handle")?.trim().to_string();
-    let content = match body["group"].as_str() {
-        Some(group) => crate::database::content::handle("group", &node.find_group(group)?, &handle),
-        None => crate::database::content::handle("user", &me.caller.user, &handle),
-    };
-    node.member_content(&me.caller, content).await?;
-    done()
-}
 
 /// `{ name, owner, from? }`: `owner` is `user:<id>`, `group:<id>`, `admins`, or a group's name.
 async fn app(State(node): State<Node>, Json(body): Json<Value>) -> Reply {

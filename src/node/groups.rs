@@ -122,3 +122,61 @@ fn cli(g: &Given) -> Result<bool> {
     }
     Ok(true)
 }
+
+/// Groups' routes: making one, inviting, joining, who's in it, and handles.
+pub(crate) mod routes {
+    use axum::Json;
+    use axum::extract::State;
+    use axum::routing::post;
+    use serde_json::{Value, json};
+
+    use crate::api::{Me, Reply, Routes, Who, done, only, text};
+    use crate::database::scopes::Role;
+    use crate::node::Node;
+
+    pub fn routes() -> Routes {
+        Routes::default()
+            .route("/v1/group", Who::SignedIn, post(group))
+            .route("/v1/invite", Who::SignedIn, post(invite))
+            .route("/v1/accept", Who::SignedIn, post(accept))
+            .route("/v1/member", Who::SignedIn, post(member))
+            .route("/v1/handle", Who::SignedIn, post(handle))
+    }
+
+    async fn group(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
+        let group = node.make_group(&me.caller, text(&body, "name")?).await?;
+        Ok(Json(json!({ "group": group })))
+    }
+
+    async fn invite(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
+        let role: Role = serde_json::from_value(body.get("role").cloned().unwrap_or(json!("member")))?;
+        let (group, user) = (node.find_group(text(&body, "group")?)?, node.find_user(text(&body, "user")?)?);
+        node.member_as(&me.caller, "invite", json!({ "group": group, "user": user, "role": role })).await?;
+        done()
+    }
+
+    async fn accept(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
+        node.member_as(&me.caller, "accept", json!({ "group": node.find_group(text(&body, "group")?)? })).await?;
+        done()
+    }
+
+    /// `{ group, user, role }`, with `role: null` to remove them.
+    async fn member(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
+        let role: Option<Role> = serde_json::from_value(body["role"].clone())?;
+        let (group, user) = (node.find_group(text(&body, "group")?)?, node.find_user(text(&body, "user")?)?);
+        node.member_as(&me.caller, "member", json!({ "group": group, "user": user, "role": role })).await?;
+        done()
+    }
+
+    /// `{ handle, group? }`: changes the caller's handle, or with `group` (its id or name) a group's they're an admin of.
+    async fn handle(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
+        only(&body, &["handle", "group"])?;
+        let handle = text(&body, "handle")?.trim().to_string();
+        let content = match body["group"].as_str() {
+            Some(group) => crate::database::content::handle("group", &node.find_group(group)?, &handle),
+            None => crate::database::content::handle("user", &me.caller.user, &handle),
+        };
+        node.member_content(&me.caller, content).await?;
+        done()
+    }
+}

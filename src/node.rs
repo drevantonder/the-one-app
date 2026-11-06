@@ -454,19 +454,8 @@ pub struct Inner {
     seen: Mutex<std::collections::HashSet<(String, String, String, u64)>>,
     /// How many failures of each app were recorded here each hour.
     failures: Mutex<HashMap<(String, u64), u32>>,
-    /// Wakes the backups to run now, and whether they run whether or not an hour passed.
-    backup_now: tokio::sync::Notify,
-    backup_forced: Mutex<bool>,
-    /// When this device last tried telling admins about each place's problem and reached none, so it tries hourly.
-    alert_tried: Mutex<HashMap<String, u64>>,
-    /// The newest snapshot this device knows of each (place, scope), with its key's id.
-    backed: Mutex<HashMap<(String, String), (crate::backups::Snapshot, String)>>,
-    /// When each place's last run here failed, so it's tried again an hour later, not every minute.
-    backup_failed: Mutex<HashMap<String, u64>>,
-    /// When this device last pruned each place, by its id.
-    pruned: Mutex<HashMap<String, u64>>,
-    /// When this device last copied each (place, scope)'s databases from the bucket.
-    backup_looked: Mutex<HashMap<(String, String), u64>>,
+    /// What backups keep while the node runs.
+    backups: backups::State,
     /// Each database of each scope, by its app and name (`tally/main`), as this device last read it.
     dbs: Mutex<HashMap<(Scope, String), Arc<tokio::sync::Mutex<Db>>>>,
     /// The databases another device said it wrote whose step isn't in this device's copy yet, which a read catches up
@@ -619,13 +608,7 @@ impl Node {
             later: Mutex::new(HashMap::new()),
             seen: Mutex::new(Default::default()),
             failures: Mutex::new(HashMap::new()),
-            backup_now: tokio::sync::Notify::new(),
-            backup_forced: Mutex::new(false),
-            alert_tried: Mutex::new(HashMap::new()),
-            backed: Mutex::new(HashMap::new()),
-            backup_failed: Mutex::new(HashMap::new()),
-            pruned: Mutex::new(HashMap::new()),
-            backup_looked: Mutex::new(HashMap::new()),
+            backups: Default::default(),
             dbs: Mutex::new(HashMap::new()),
             behind: Mutex::new(Default::default()),
             epochs: Mutex::new(HashMap::new()),

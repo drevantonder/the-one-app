@@ -6,11 +6,30 @@ use super::*;
 pub mod app;
 pub mod cli;
 pub(crate) mod routes;
+
 use super::status::{BackedUp, BackupRun, CheckRun, Said};
 use std::collections::BTreeSet;
 
 use crate::backups::{self as b, Snapshot};
 use crate::bucket::Place;
+
+/// What backups keep while the node runs.
+#[derive(Default)]
+pub(super) struct State {
+    /// Wakes the backups to run now, and whether they run whether or not an hour passed.
+    now: tokio::sync::Notify,
+    forced: Mutex<bool>,
+    /// When this device last tried telling admins about each place's problem and reached none, so it tries hourly.
+    alert_tried: Mutex<HashMap<String, u64>>,
+    /// The newest snapshot this device knows of each (place, scope), with its key's id.
+    backed: Mutex<HashMap<(String, String), (crate::backups::Snapshot, String)>>,
+    /// When each place's last run here failed, so it's tried again an hour later, not every minute.
+    failed: Mutex<HashMap<String, u64>>,
+    /// When this device last pruned each place, by its id.
+    pruned: Mutex<HashMap<String, u64>>,
+    /// When this device last copied each (place, scope)'s databases from the bucket.
+    looked: Mutex<HashMap<(String, String), u64>>,
+}
 
 /// How often the node looks for backups that are due.
 const TICK: Duration = Duration::from_secs(60);
@@ -234,9 +253,9 @@ impl Node {
         loop {
             tokio::select! {
                 _ = tokio::time::sleep(TICK) => {}
-                _ = self.0.backup_now.notified() => {}
+                _ = self.0.backups.now.notified() => {}
             }
-            let force = std::mem::take(&mut *self.0.backup_forced.lock().unwrap());
+            let force = std::mem::take(&mut *self.0.backups.forced.lock().unwrap());
             if self.has_network() && self.ready() {
                 if let Err(err) = self.back_up(force).await {
                     tracing::warn!("backups: {err:#}");
@@ -272,7 +291,7 @@ impl Node {
         })?;
         for p in due {
             // Said only once an admin was told, so a push that didn't go is tried again, hourly.
-            if self.0.alert_tried.lock().unwrap().get(&p.place).is_some_and(|t| now < t + 3_600_000) {
+            if self.0.backups.alert_tried.lock().unwrap().get(&p.place).is_some_and(|t| now < t + 3_600_000) {
                 continue;
             }
             let mut told = false;
@@ -287,10 +306,10 @@ impl Node {
                 }
             }
             if told {
-                self.0.alert_tried.lock().unwrap().remove(&p.place);
+                self.0.backups.alert_tried.lock().unwrap().remove(&p.place);
                 self.say(&Scope::Global, Said::Alerted { place: p.place.clone() }).await?;
             } else {
-                self.0.alert_tried.lock().unwrap().insert(p.place.clone(), now);
+                self.0.backups.alert_tried.lock().unwrap().insert(p.place.clone(), now);
             }
         }
         Ok(())
@@ -306,8 +325,8 @@ impl Node {
 
     /// Backs up now, everything this device backs up, whether or not an hour has passed.
     pub fn back_up_now(&self) {
-        *self.0.backup_forced.lock().unwrap() = true;
-        self.0.backup_now.notify_one();
+        *self.0.backups.forced.lock().unwrap() = true;
+        self.0.backups.now.notify_one();
     }
 
     /// Backs up each scope to each place this device backs it up to, if an hour passed and anything changed (or
@@ -323,9 +342,9 @@ impl Node {
             }
             let network = i.r.root.map(|r| r.to_hex()[..16].to_string()).context("no network")?;
             m.recovery().context("the network has no recovery key")?;
-            let cache = self.0.backed.lock().unwrap();
-            let failed = self.0.backup_failed.lock().unwrap();
-            let pruned = self.0.pruned.lock().unwrap();
+            let cache = self.0.backups.backed.lock().unwrap();
+            let failed = self.0.backups.failed.lock().unwrap();
+            let pruned = self.0.backups.pruned.lock().unwrap();
             let mut plan = Vec::new();
             for p in places(i) {
                 if !force && failed.get(&p.id).is_some_and(|t| now - t < b::EVERY) {
@@ -365,7 +384,7 @@ impl Node {
                             let since = s.time + b::EVERY <= now || force;
                             // Its databases are looked at in the bucket once an hour, and as soon as its scope database
                             // changes.
-                            let looked = self.0.backup_looked.lock().unwrap().get(&(p.id.clone(), log.clone())).is_some_and(|t| t + b::EVERY > now);
+                            let looked = self.0.backups.looked.lock().unwrap().get(&(p.id.clone(), log.clone())).is_some_and(|t| t + b::EVERY > now);
                             since && (first_change(i, &scope, s.upto).is_some() || !looked || force)
                         }
                     };
@@ -385,7 +404,7 @@ impl Node {
                 Ok(place) => place,
                 Err(err) => {
                     if !due.is_empty() {
-                        self.0.backup_failed.lock().unwrap().insert(p.id.clone(), now);
+                        self.0.backups.failed.lock().unwrap().insert(p.id.clone(), now);
                         self.backed_up(&p.id, now, Some(err), Vec::new()).await?;
                     }
                     continue;
@@ -407,15 +426,15 @@ impl Node {
                 }
             }
             match &error {
-                Some(_) => self.0.backup_failed.lock().unwrap().insert(p.id.clone(), now),
-                None => self.0.backup_failed.lock().unwrap().remove(&p.id),
+                Some(_) => self.0.backups.failed.lock().unwrap().insert(p.id.clone(), now),
+                None => self.0.backups.failed.lock().unwrap().remove(&p.id),
             };
             let failed = error.is_some();
             if error.is_some() || !snapshots.is_empty() {
                 self.backed_up(&p.id, now, error, snapshots).await?;
             }
             if let (Some((scopes, fetchable)), false) = (prune, failed) {
-                self.0.pruned.lock().unwrap().insert(p.id.clone(), now);
+                self.0.backups.pruned.lock().unwrap().insert(p.id.clone(), now);
                 let (place, network, title) = (place.clone(), network.clone(), p.title.clone());
                 match tokio::task::spawn_blocking(move || b::prune(&place, &network, &scopes, &fetchable, now_ms())).await? {
                     Ok(pruned) if pruned != b::Pruned::default() => tracing::info!("pruned {title}: {} snapshots, {} objects, {} bytes", pruned.snapshots, pruned.objects, pruned.bytes),
@@ -454,7 +473,7 @@ impl Node {
         ensure!(d.key.is_none_or(|k| k == key), "{scope}'s newest epoch changed: it's backed up on the next run");
         let name = crate::keys::epoch_name(&d.scope, n, "recovery");
         let sealed = crate::bucket::Bucket::get(&self.bucket()?, &name).await?.with_context(|| format!("{name} is missing"))?.bytes;
-        let cached = self.0.backed.lock().unwrap().get(&(place_id.to_string(), d.scope.clone())).filter(|s| s.1 == b::key_id(&key)).map(|s| s.0.clone());
+        let cached = self.0.backups.backed.lock().unwrap().get(&(place_id.to_string(), d.scope.clone())).filter(|s| s.1 == b::key_id(&key)).map(|s| s.0.clone());
         let blobs = self.with(|i| {
             // What its database names, of the releases only the newest of each.
             let (releases, newest) = release_blobs(i.r.db());
@@ -485,13 +504,13 @@ impl Node {
         })
         .await??;
         let (written, known) = snap;
-        self.0.backup_looked.lock().unwrap().insert((place_id.to_string(), d.scope.clone()), now);
+        self.0.backups.looked.lock().unwrap().insert((place_id.to_string(), d.scope.clone()), now);
         // With nothing new, what the place holds is said anyway where the runs `global` keeps don't say it yet (they
         // were cut before each scope's last was kept), so a scope that hasn't changed isn't taken for one a day late.
         let unsaid = written.is_none() && known.as_ref().is_some_and(|k| self.with(|i| Ok(i.status.get("global").and_then(|s| s.covered.get(&(place_id.to_string(), d.scope.clone()))).is_none_or(|c| c.0 < k.upto))).unwrap_or(false));
         let said = if unsaid { known.clone() } else { written };
         if let Some(known) = known {
-            self.0.backed.lock().unwrap().insert((place_id.to_string(), d.scope.clone()), (known, b::key_id(&key)));
+            self.0.backups.backed.lock().unwrap().insert((place_id.to_string(), d.scope.clone()), (known, b::key_id(&key)));
         }
         Ok(said)
     }
