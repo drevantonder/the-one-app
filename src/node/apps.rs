@@ -72,7 +72,7 @@ impl Node {
         Ok(out)
     }
 
-    /// Every lab in the network, for an admin's Settings › Labs (`src/labs.rs`): the core's, then each app's, then each
+    /// Every lab in the network, for an admin's Settings › Labs (`src/labs.rs`): each app's, then each
     /// service's, each `{ setting, title, description, on }`, an app's or service's with `app` or `service`, its
     /// `name`, `title`, `icon` and `color`.
     pub async fn labs(&self, viewer: &Caller) -> Result<Vec<Value>> {
@@ -81,7 +81,7 @@ impl Node {
             Ok(crate::labs::on_keys(&i.r.db().settings()))
         })?;
         let lab = |setting: String, name: &str, l: &Value| json!({ "title": l["title"].as_str().unwrap_or(name), "description": l["description"].as_str().unwrap_or(""), "on": on.contains(&setting), "setting": setting });
-        let mut out: Vec<Value> = crate::labs::CORE.iter().map(|(name, title, description)| lab(format!("lab.{name}"), name, &json!({ "title": title, "description": description }))).collect();
+        let mut out: Vec<Value> = Vec::new();
         let from = |kind: &str, d: &Value, l: &mut Value| {
             l[kind] = json!({ "name": d["name"], "title": d["title"].as_str().filter(|t| !t.is_empty()).or(d["name"].as_str()), "icon": d["icon"], "color": d["color"] });
         };

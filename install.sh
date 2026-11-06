@@ -55,15 +55,9 @@ else
 		chmod +x "$bin"
 	fi
 	name=$("$bin" help | head -1 | cut -d: -f1)
-	data="$HOME/.local/share/$cli"
 	sudo=$([ "$(id -u)" = 0 ] || echo sudo)
 	units=/etc/systemd/system
 	if [ -d /run/systemd/system ]; then $sudo systemctl stop "${cli}d" 2>/dev/null || true; fi
-	# The old app's data has no device key; keep it aside rather than mistake it for this one's.
-	if [ -d "$data" ] && [ ! -f "$data/device.json" ]; then
-		mv "$data" "$data-previous"
-		echo "Kept the previous data in $data-previous"
-	fi
 	install -m 755 "$bin" "$HOME/.local/bin/$cli"
 	ln -sf "$cli" "$HOME/.local/bin/git-remote-$cli"
 	ln -sf "$cli" "$HOME/.local/bin/${cli}d"
@@ -114,6 +108,6 @@ fi
 
 case :$PATH: in *:"$HOME/.local/bin":*) ;; *) echo "Add ~/.local/bin to your PATH." ;; esac
 echo "
-Next, on your first device:  $cli create <name>
-Or, to join a space:         $cli join <pairing code>   ($cli pair on a device in it gives one)
+Next, on your first device:  $cli create <name> --as <your name>
+Or, to join a network:       $cli join <pairing code>   ($cli pair on a device in it gives one)
 Or, to look around first:    $cli throwaway             (a throwaway network to try things in; $cli throwaway stop deletes it)"

@@ -1,13 +1,10 @@
-//! Labs: features still being built, which a network's admins switch on for everyone in Settings › Labs. The core
-//! declares its own (`CORE`); an app declares its own in its module, and a service in what it describes, as
-//! `labs: { <name>: { title, description } }`. Each is off until its setting says "on": `lab.<name>` for the core's,
-//! `lab.app.<app>.<name>` for an app's, `lab.service.<service>.<name>` for a service's, which a service reads from
-//! the network's settings as any other. A lab that's done leaves its declaration, and its setting goes with it.
+//! Labs: features still being built, which a network's admins switch on for everyone in Settings › Labs. An app
+//! declares its own in its module, and a service in what it describes, as `labs: { <name>: { title, description } }`.
+//! Each is off until its setting says "on": `lab.app.<app>.<name>` for an app's, `lab.service.<service>.<name>` for a
+//! service's, which a service reads from the network's settings as any other. A lab that's done leaves its
+//! declaration, and its setting goes with it.
 
 use std::collections::BTreeMap;
-
-/// The core's own labs: (name, title, description).
-pub const CORE: &[(&str, &str, &str)] = &[];
 
 /// Whether `name` may be one of the network's settings: lowercase words joined by _, or a lab's, whose parts are an
 /// app's or service's name and a lab's. An older device ignores a lab's setting, so to it the lab is off.
