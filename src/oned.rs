@@ -137,17 +137,38 @@ pub struct Held {
     pub person: bool,
 }
 
-static HELD: std::sync::Mutex<BTreeMap<String, Held>> = std::sync::Mutex::new(BTreeMap::new());
+/// What oned's thread for a node's parts (`keep_parts`) tells the node about them, for its hello: how each part running
+/// runs, which parts could run as processes, and what each is doing; and whether it was asked to erase what the node keeps.
+#[derive(Default)]
+pub struct Parts {
+    held: std::sync::Mutex<BTreeMap<String, Held>>,
+    now: std::sync::Mutex<(BTreeMap<String, Now>, BTreeSet<String>)>,
+    erasing: std::sync::atomic::AtomicBool,
+}
 
-/// How each part running runs, as its hello says.
-pub fn held() -> BTreeMap<String, Held> {
-    HELD.lock().unwrap().clone()
+impl Parts {
+    /// How each part running runs, as its hello says.
+    pub fn held(&self) -> BTreeMap<String, Held> {
+        self.held.lock().unwrap().clone()
+    }
+
+    /// The services this device could run as processes of oned's, and what each is doing now, as its hello says.
+    pub fn now(&self) -> (BTreeSet<String>, BTreeMap<String, Now>) {
+        let now = self.now.lock().unwrap();
+        (now.1.clone(), now.0.clone())
+    }
+
+    /// Asks `keep_parts` to erase what this device keeps, once the request that asked has been answered: its parts
+    /// stopped, its apps' runtime stopped, its home deleted, then oned stops, to start again as nobody's.
+    pub fn erase(&self) {
+        self.erasing.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
 }
 
 /// Says how a part runs (none: it doesn't): changed, its device tells the others at once.
 fn hold(node: &Node, runtime: &tokio::runtime::Handle, name: &str, held: Option<Held>) {
     let changed = {
-        let mut all = HELD.lock().unwrap();
+        let mut all = node.parts().held.lock().unwrap();
         match held {
             Some(h) => all.insert(name.to_string(), h.clone()) != Some(h),
             None => all.remove(name).is_some(),
@@ -159,18 +180,10 @@ fn hold(node: &Node, runtime: &tokio::runtime::Handle, name: &str, held: Option<
     }
 }
 
-static NOW: std::sync::Mutex<(BTreeMap<String, Now>, BTreeSet<String>)> = std::sync::Mutex::new((BTreeMap::new(), BTreeSet::new()));
-
-/// The services this device could run as processes of oned's, and what each is doing now, as its hello says.
-pub fn parts() -> (BTreeSet<String>, BTreeMap<String, Now>) {
-    let now = NOW.lock().unwrap();
-    (now.1.clone(), now.0.clone())
-}
-
 /// Says what a part is doing now: changed, its device tells the others at once.
 fn say(node: &Node, runtime: &tokio::runtime::Handle, name: &str, now: Now) {
     let changed = {
-        let mut all = NOW.lock().unwrap();
+        let mut all = node.parts().now.lock().unwrap();
         let was = all.0.get(name).cloned().unwrap_or_default();
         if now == Now::default() {
             all.0.remove(name);
@@ -215,15 +228,6 @@ fn put(node: &Node, runtime: &tokio::runtime::Handle, name: &str, build: &Build)
     Ok(())
 }
 
-/// Where this device keeps what it keeps, once it was asked to erase it (`erase`).
-static ERASING: std::sync::Mutex<Option<PathBuf>> = std::sync::Mutex::new(None);
-
-/// Erases what this device keeps, in its home `dir`, once the request that asked has been answered: its parts stopped,
-/// its apps' runtime stopped, its home deleted, then oned stops, to start again as nobody's.
-pub fn erase(dir: &std::path::Path) {
-    *ERASING.lock().unwrap() = Some(dir.to_path_buf());
-}
-
 /// Keeps this device's parts that run as processes of their own running as its steps say: when one is switched on,
 /// its program fetched from the newest release for this platform if it isn't here (and again when a newer one is
 /// published), then started (and again if it stops); stopped when it's switched off; and listed as this device's once
@@ -251,7 +255,8 @@ pub fn keep_parts(node: Node, runtime: tokio::runtime::Handle) {
         let mut apps: Option<std::process::Child> = None;
         let mut apps_stops: Vec<Instant> = Vec::new();
         loop {
-            if let Some(dir) = ERASING.lock().unwrap().clone() {
+            if node.parts().erasing.load(std::sync::atomic::Ordering::SeqCst) {
+                let dir = node.dir().to_path_buf();
                 std::thread::sleep(Duration::from_secs(1));
                 for (name, (child, _)) in std::mem::take(&mut running) {
                     stop(&name, child);
@@ -282,13 +287,13 @@ pub fn keep_parts(node: Node, runtime: tokio::runtime::Handle) {
             match node.parts_on() {
                 Ok((network, on)) => {
                     let names = offered(&released.iter().filter(|(_, b)| **b != Build::None).map(|(n, _)| n.clone()).collect(), &on);
-                    NOW.lock().unwrap().1 = names.clone();
+                    node.parts().now.lock().unwrap().1 = names.clone();
                     for name in &names {
                         // A Mac service's helper the Mac app carries runs unless its person switched it off there; any other,
                         // only where it's switched on.
                         let wanted = on.contains_key(name) || (helper(name).is_some() && node.removed_here(name).is_none());
                         // Switched on again while it runs fine (its record naming its scope), it goes on running.
-                        let troubled = !running.contains_key(name) || NOW.lock().unwrap().0.get(name).is_some_and(|n| n.problem.is_some());
+                        let troubled = !running.contains_key(name) || node.parts().now.lock().unwrap().0.get(name).is_some_and(|n| n.problem.is_some());
                         if let Some(at) = on.get(name)
                             && switched.insert(name.clone(), *at).is_some_and(|was| was != *at)
                             && troubled
@@ -359,7 +364,7 @@ pub fn keep_parts(node: Node, runtime: tokio::runtime::Handle) {
                             declared.insert(name.clone(), d);
                         }
                         let said = declared.get(name).cloned().flatten();
-                        let resandbox = HELD.lock().unwrap().get(name).is_some_and(|h| h.sandbox.is_some() && crate::services::sandbox::unsandboxed(said.as_ref(), &device).is_none());
+                        let resandbox = node.parts().held.lock().unwrap().get(name).is_some_and(|h| h.sandbox.is_some() && crate::services::sandbox::unsandboxed(said.as_ref(), &device).is_none());
                         if running.contains_key(name) && (resandbox || started_with.get(name).is_some_and(|d| *d != said)) && let Some((child, _)) = running.remove(name) {
                             tracing::info!("{name}'s app declares something else of it, or this machine can sandbox it now: oned starts it again");
                             stop(name, child);
@@ -382,7 +387,7 @@ pub fn keep_parts(node: Node, runtime: tokio::runtime::Handle) {
                                     let held = Held { sandbox: crate::services::sandbox::unsandboxed(said.as_ref(), &device), person: said.as_ref().is_some_and(|d| d.person) };
                                     hold(&node, &runtime, name, Some(held));
                                     running.insert(name.clone(), (child, Instant::now()));
-                                    let problem = NOW.lock().unwrap().0.get(name).and_then(|n| n.problem.clone());
+                                    let problem = node.parts().now.lock().unwrap().0.get(name).and_then(|n| n.problem.clone());
                                     say(&node, &runtime, name, Now { doing: problem.is_none().then_some("Starting"), problem });
                                 }
                                 Err(err) => say(&node, &runtime, name, Now { doing: None, problem: Some(format!("Couldn’t start it: {err:#}")) }),
@@ -420,7 +425,7 @@ pub fn keep_parts(node: Node, runtime: tokio::runtime::Handle) {
             // that doesn't in a minute says so. One that stayed up a minute no longer keeps stopping. One that can't
             // start in its sandbox says why, and one running without one says so.
             for (name, (_, started)) in &running {
-                let now = NOW.lock().unwrap().0.get(name).cloned().unwrap_or_default();
+                let now = node.parts().now.lock().unwrap().0.get(name).cloned().unwrap_or_default();
                 if let Ok(why) = std::fs::read_to_string(crate::services::endpoint::folder(name).join(crate::services::endpoint::PROBLEM)) {
                     say(&node, &runtime, name, Now { doing: None, problem: Some(why) });
                     continue;
@@ -597,12 +602,15 @@ async fn serve(args: &[String]) -> Result<()> {
         None => listen(&dir).await?,
     };
     // Its app runtime is a program of its own, which oned starts as its parts.
-    crate::app::runtime::APART.store(true, std::sync::atomic::Ordering::SeqCst);
-    let node = Node::start(&dir).await?;
+    let node = Node::start(&dir, true).await?;
     // Its parts that run as processes of their own, as its steps switch them.
     crate::oned::keep_parts(node.clone(), tokio::runtime::Handle::current());
-    // Git here reaches the network's repos at their address, as on every computer of its person's.
+    // Git here reaches the network's repos at their address, as on every computer of its person's, and the harnesses
+    // installed here reach this node.
     let mode = crate::mode::here();
+    if matches!(mode, crate::mode::Mode::Own) {
+        tokio::spawn(crate::harnesses::keep(node.clone(), dir.clone(), api::addr()));
+    }
     if matches!(mode, crate::mode::Mode::Own) && let Ok(address) = node.address() {
         std::thread::spawn(move || {
             if let Err(err) = crate::git_wire::wire(&address) {

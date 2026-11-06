@@ -106,24 +106,25 @@ struct Runtime {
     described: Mutex<std::collections::HashMap<String, Value>>,
     /// What each app last said it is, kept when the apps load again, for a service to be listed as its app says.
     identity: Mutex<std::collections::HashMap<String, Value>>,
+    apart: bool,
 }
 
 impl Apps {
     /// Starts workerd with no apps yet, keeping its files in `dir`; apps' requests go out through the node's
-    /// `outbound` port.
-    pub async fn start(dir: PathBuf, outbound: u16) -> Result<Self> {
-        tokio::task::spawn_blocking(move || Apps::start_blocking(&dir, outbound)).await?
+    /// `outbound` port. `apart`: the runtime is a program of its own, which oned starts (`program`), not a thread of this process.
+    pub async fn start(dir: PathBuf, outbound: u16, apart: bool) -> Result<Self> {
+        tokio::task::spawn_blocking(move || Apps::start_blocking(&dir, outbound, apart)).await?
     }
 
-    fn start_blocking(dir: &Path, outbound: u16) -> Result<Self> {
+    fn start_blocking(dir: &Path, outbound: u16, apart: bool) -> Result<Self> {
         // Where apps' stores were kept before each app's databases were in the bucket.
         let _ = std::fs::remove_dir_all(dir.join("storage"));
         // Held for as long as the node runs, and handed to each workerd: no one takes the port meanwhile.
         let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
         let port = listener.local_addr()?.port();
         write_config(dir, &[], port, outbound, 0)?;
-        let runtime = Arc::new(Runtime { dir: dir.to_path_buf(), base: format!("http://127.0.0.1:{port}"), outbound, loaded: Mutex::new((Vec::new(), Vec::new(), 0)), listener, described: Mutex::new(Default::default()), identity: Mutex::new(Default::default()) });
-        if APART.load(std::sync::atomic::Ordering::SeqCst) {
+        let runtime = Arc::new(Runtime { dir: dir.to_path_buf(), base: format!("http://127.0.0.1:{port}"), outbound, loaded: Mutex::new((Vec::new(), Vec::new(), 0)), listener, described: Mutex::new(Default::default()), identity: Mutex::new(Default::default()), apart });
+        if apart {
             return Ok(Apps(runtime));
         }
         let workerd = workerd()?;
@@ -160,7 +161,7 @@ impl Apps {
                 loaded.2
             };
             // Stopped, the runtime starts with this config: there's no one to wait for.
-            if !runtime.restart() && APART.load(std::sync::atomic::Ordering::SeqCst) {
+            if !runtime.restart() && runtime.apart {
                 return Ok(());
             }
             runtime.wait_ready(generation)
@@ -384,8 +385,6 @@ fn broken_since(log: &Path, from: u64) -> Option<Broken> {
     })
 }
 
-/// Set by oned before its node starts: the app runtime is a program of its own, which oned starts (`program`).
-pub static APART: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 /// Set once this process is stopping, under `RUNNING`'s lock: no workerd starts again.
 static STOPPING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 /// The workerds this process runs, by process id.

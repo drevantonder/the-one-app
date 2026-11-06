@@ -1006,8 +1006,7 @@ impl Node {
 
     /// The ports this node serves on this machine: its local API, workerd, and apps' outbound requests.
     pub fn own_ports(&self) -> Vec<u16> {
-        let api = crate::api::addr().rsplit(':').next().and_then(|p| p.parse().ok()).unwrap_or(crate::config::PORT);
-        vec![api, self.0.apps.port(), self.0.outbound]
+        vec![crate::api::port(), self.0.apps.port(), self.0.outbound]
     }
 
     pub fn grant_of(&self, token: &str) -> Option<Grant> {

@@ -813,7 +813,7 @@ impl Node {
             Ok(())
         })?;
         tracing::warn!("asked to erase what {name} keeps: its oned does, then stops");
-        crate::oned::erase(&self.0.dir);
+        self.0.parts.erase();
         Ok(json!({ "erasing": name }))
     }
 

@@ -10,7 +10,7 @@ use crate::temp;
 pub(crate) async fn start(name: &str) -> Node {
     let dir = temp(name);
     std::fs::write(dir.join("device.json"), json!({ "secret": one::keys::hex(&rand::random()), "name": name }).to_string()).unwrap();
-    Node::start(&dir).await.unwrap()
+    Node::start(&dir, false).await.unwrap()
 }
 
 /// A new network on `a`: its recovery key's secret.
@@ -214,7 +214,7 @@ async fn only_a_persons_own_device_or_their_inviter_lets_a_device_in() {
     use one::node::{DeviceRequest, Invited};
     let dir = temp("approve");
     std::fs::write(dir.join("device.json"), json!({ "secret": one::keys::hex(&rand::random()), "name": "mac" }).to_string()).unwrap();
-    let a = Node::start(&dir).await.unwrap();
+    let a = Node::start(&dir, false).await.unwrap();
     create(&a, "Home", "Andre").await;
     add_notes(&a).await;
     let me = one::node::Caller::own(a.id(), a.user().unwrap());
@@ -308,7 +308,7 @@ async fn only_a_devices_person_or_an_admin_reads_its_logs() {
     use one::node::Invited;
     let dir = temp("logs");
     std::fs::write(dir.join("device.json"), json!({ "secret": one::keys::hex(&rand::random()), "name": "mac" }).to_string()).unwrap();
-    let a = Node::start(&dir).await.unwrap();
+    let a = Node::start(&dir, false).await.unwrap();
     create(&a, "Home", "Andre").await;
     let andre = one::node::Caller::own(a.id(), a.user().unwrap());
     let now = one::node::now_ms();
@@ -343,7 +343,7 @@ async fn a_service_runs_only_the_build_its_apps_deploy_names() {
     use one::node::Build;
     let dir = temp("service-build");
     std::fs::write(dir.join("device.json"), json!({ "secret": one::keys::hex(&rand::random()), "name": "linux" }).to_string()).unwrap();
-    let a = Node::start(&dir).await.unwrap();
+    let a = Node::start(&dir, false).await.unwrap();
     create(&a, "Home", "Andre").await;
     let me = one::node::Caller::own(a.id(), a.user().unwrap());
     let build = a.put_blob(b"a program").unwrap();

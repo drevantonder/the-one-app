@@ -131,7 +131,7 @@ pub fn relay(address: &str, ticket: Option<&str>) -> Result<(RelayUrl, RelayMap)
 impl Node {
     /// Keeps this device's endpoint, once it's a device of a network with an address.
     pub(super) fn follow_net(&self) {
-        if super::HANDING_OVER.load(std::sync::atomic::Ordering::SeqCst) {
+        if self.is_handing_over() {
             return;
         }
         self.tell_removed();
@@ -211,7 +211,7 @@ impl Node {
     /// nothing, with the process running. Waits longer each time it didn't help, so one whose others are all off
     /// doesn't keep at it. Asked now and then.
     pub(super) fn check_relay(&self) {
-        if super::HANDING_OVER.load(std::sync::atomic::Ordering::SeqCst) {
+        if self.is_handing_over() {
             return;
         }
         let Some((since, n)) = *self.0.net.bound.lock().unwrap() else { return };

@@ -471,10 +471,14 @@ pub struct Inner {
     settling: tokio::sync::Mutex<()>,
     /// Whether the last settling couldn't fetch an app's deploy, so it's tried again soon, not only at the next change.
     unfetched: std::sync::atomic::AtomicBool,
+    /// Set once this node is handing over to the next: it opens nothing only one of them may hold.
+    handing_over: std::sync::atomic::AtomicBool,
+    /// The guide's address on the tailnet, `http://<address>:<port>/llms.txt`, while this node serves it there (`api::serve_guide`).
+    guide: Mutex<Option<String>>,
+    signed_ins: crate::api::SignedIns,
+    /// What oned's thread for its parts tells it about them.
+    parts: crate::oned::Parts,
 }
-
-/// Set once this process's node is handing over to the next: it opens nothing only one of them may hold.
-static HANDING_OVER: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// What a running call may do through the node: whose it is, which app's, and which scopes it reaches.
 #[derive(Clone, Debug)]
@@ -513,14 +517,16 @@ impl std::fmt::Debug for Node {
 }
 
 impl Node {
-    pub async fn start(dir: &Path) -> Result<Node> {
+    /// Starts the node of the home `dir`. `apart`: its app runtime is a program of its own, which oned starts
+    /// (`Apps::program`), not a thread of this process.
+    pub async fn start(dir: &Path, apart: bool) -> Result<Node> {
         std::fs::create_dir_all(dir)?;
         let device = load_device(dir)?;
         let secret = unhex(&device.secret)?;
         let key = SigningKey::from(secret);
         let id = *key.verifying_key().as_bytes();
         let outbound = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
-        let apps = Apps::start(dir.join(crate::handoff::runtime()), outbound.local_addr()?.port()).await?;
+        let apps = Apps::start(dir.join(crate::handoff::runtime()), outbound.local_addr()?.port(), apart).await?;
         let (events, _) = broadcast::channel(256);
         let mut built_in = BTreeMap::new();
         for (app, files) in crate::config::BUILT_IN {
@@ -567,6 +573,10 @@ impl Node {
             settled: tokio::sync::watch::channel(0).0,
             settling: tokio::sync::Mutex::new(()),
             unfetched: Default::default(),
+            handing_over: Default::default(),
+            guide: Default::default(),
+            signed_ins: Default::default(),
+            parts: Default::default(),
         }));
         let outbound_router = crate::app::outbound::router(node.clone());
         tokio::spawn(async move {
@@ -611,9 +621,6 @@ impl Node {
                 }
             }
         });
-        if node.has_network() {
-            tokio::task::spawn_blocking(crate::harnesses::set_up);
-        }
         Ok(node)
     }
 
@@ -645,7 +652,7 @@ impl Node {
     /// key, writes from where it reads the logs, so two writing at once would fork them, and its device would count as
     /// removed.
     pub async fn handing_over(&self, handing: bool) {
-        HANDING_OVER.store(handing, std::sync::atomic::Ordering::SeqCst);
+        self.0.handing_over.store(handing, std::sync::atomic::Ordering::SeqCst);
         if handing {
             drop(self.0.writes.lock().await);
         } else {
@@ -655,7 +662,7 @@ impl Node {
 
     /// Whether this node is handing over to the next, or has: then it starts and lists no parts, and writes nothing.
     pub fn is_handing_over(&self) -> bool {
-        HANDING_OVER.load(std::sync::atomic::Ordering::SeqCst)
+        self.0.handing_over.load(std::sync::atomic::Ordering::SeqCst)
     }
 
     /// Holds this device's writes for one that it signs itself: none once it's handing over to the next node.
@@ -669,6 +676,27 @@ impl Node {
     /// and other devices reach only that one.
     pub fn handed_over(&self) {
         self.close_net();
+    }
+
+    pub fn dir(&self) -> &Path {
+        &self.0.dir
+    }
+
+    pub fn parts(&self) -> &crate::oned::Parts {
+        &self.0.parts
+    }
+
+    pub(crate) fn signed_ins(&self) -> &crate::api::SignedIns {
+        &self.0.signed_ins
+    }
+
+    /// The guide's address on the tailnet, if this node serves it there.
+    pub fn guide(&self) -> Option<String> {
+        self.0.guide.lock().unwrap().clone()
+    }
+
+    pub fn set_guide(&self, address: Option<String>) {
+        *self.0.guide.lock().unwrap() = address;
     }
 
     pub fn local_token(&self) -> &str {
@@ -1005,7 +1033,7 @@ impl Node {
         .unwrap_or(false)
     }
 
-    /// Now and then, reads what other devices wrote and said, and hooks this machine's harnesses up.
+    /// Now and then, reads what other devices wrote and said.
     async fn tick_loop(self) {
         for tick in 1u64.. {
             tokio::time::sleep(TICK).await;
@@ -1023,7 +1051,6 @@ impl Node {
                 self.take_forgotten().await;
                 self.tidy_databases().await;
                 self.sweep_remote_puts();
-                tokio::task::spawn_blocking(crate::harnesses::set_up);
             }
         }
     }

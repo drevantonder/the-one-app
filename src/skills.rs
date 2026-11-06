@@ -350,14 +350,3 @@ pub fn instructions(mode: Mode, apps: &[Value], person: Option<&str>) -> String 
 fn len(s: &str) -> usize {
     s.encode_utf16().count()
 }
-
-static ADDRESS: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
-
-/// The guide's address on the tailnet, `http://<address>:<port>/llms.txt`, if this device serves it there.
-pub fn address() -> Option<String> {
-    ADDRESS.lock().unwrap().clone()
-}
-
-pub fn set_address(address: Option<String>) {
-    *ADDRESS.lock().unwrap() = address;
-}

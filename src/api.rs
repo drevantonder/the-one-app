@@ -280,7 +280,11 @@ async fn skill_file(State(node): State<Node>, Path((name, path)): Path<(String, 
 }
 
 pub fn port() -> u16 {
-    addr().rsplit(':').next().and_then(|p| p.parse::<u16>().ok()).unwrap_or(crate::config::PORT)
+    port_of(&addr())
+}
+
+pub fn port_of(addr: &str) -> u16 {
+    addr.rsplit(':').next().and_then(|p| p.parse::<u16>().ok()).unwrap_or(crate::config::PORT)
 }
 
 /// Serves the skills, and nothing else, on this machine's Tailscale address and the local API's port, so an agent on
@@ -295,11 +299,11 @@ pub async fn serve_guide(node: Node) {
             if let Some((_, task)) = serving.take() {
                 task.abort();
             }
-            crate::skills::set_address(None);
+            node.set_guide(None);
             if let Some(ip) = ip {
                 match tokio::net::TcpListener::bind((ip, port)).await {
                     Ok(listener) => {
-                        crate::skills::set_address(Some(format!("http://{ip}:{port}/llms.txt")));
+                        node.set_guide(Some(format!("http://{ip}:{port}/llms.txt")));
                         let app = Router::new().route("/llms.txt", get(llms)).route("/skills/{name}/{*path}", get(skill_file)).with_state(node.clone());
                         serving = Some((ip, tokio::spawn(async move { axum::serve(listener, app).await.ok(); })));
                     }
@@ -529,8 +533,8 @@ impl std::fmt::Display for NotJoined {
 
 impl std::error::Error for NotJoined {}
 
-/// Sign-ins checked lately, by their token's hash, until they expire.
-static SIGNED_INS: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<[u8; 32], (Me, u64)>>> = std::sync::LazyLock::new(Default::default);
+/// A node's sign-ins checked lately, by their token's hash, until they expire.
+pub(crate) type SignedIns = std::sync::Mutex<std::collections::HashMap<[u8; 32], (Me, u64)>>;
 
 /// Whom an access token from sign-in is for: one sign-in at the network's address signed for it, for a person of
 /// the network.
@@ -538,13 +542,13 @@ async fn signed_in(node: &Node, token: String) -> anyhow::Result<Me> {
     use sha2::Digest;
     let now = crate::node::now_ms();
     let hash: [u8; 32] = sha2::Sha256::digest(token.as_bytes()).into();
-    let kept = SIGNED_INS.lock().unwrap().get(&hash).filter(|(_, until)| now < *until).map(|(me, _)| me.clone());
+    let kept = node.signed_ins().lock().unwrap().get(&hash).filter(|(_, until)| now < *until).map(|(me, _)| me.clone());
     if let Some(me) = kept {
         // Someone removed since is signed in no more, whatever their token says.
         if node.is_user(&me.caller.user) {
             return Ok(me);
         }
-        SIGNED_INS.lock().unwrap().remove(&hash);
+        node.signed_ins().lock().unwrap().remove(&hash);
         anyhow::bail!(NotJoined);
     }
     let address = node.address()?;
@@ -562,7 +566,7 @@ async fn signed_in(node: &Node, token: String) -> anyhow::Result<Me> {
     let (user, until) = (claims.sub.clone(), claims.exp * 1000);
     anyhow::ensure!(node.is_user(&user), NotJoined);
     let me = Me { caller: Caller { key: node.id(), user, agent: None, credential: Credential::SignIn(token) }, sign_in: Some(String::new()) };
-    let mut kept = SIGNED_INS.lock().unwrap();
+    let mut kept = node.signed_ins().lock().unwrap();
     kept.retain(|_, (_, until)| now < *until);
     kept.insert(hash, (me.clone(), until));
     Ok(me)
@@ -841,7 +845,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn each_route_refuses_whom_its_who_says() {
         let dir = std::env::temp_dir().join(format!("one-routes-{}", rand::random::<u64>()));
-        let node = crate::node::Node::start(&dir).await.unwrap();
+        let node = crate::node::Node::start(&dir, false).await.unwrap();
         let routes = super::routes();
         let who: Vec<(&str, Who)> = routes.who().to_vec();
         // Only a client device's requests over iroh carry `FromClient`, which the node puts on them: here, a header.

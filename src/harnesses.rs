@@ -7,6 +7,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::time::Duration;
 
 use anyhow::{Context, Result, bail, ensure};
 use jsonc_parser::ParseOptions;
@@ -23,42 +24,44 @@ fn built_in(name: &str) -> bool {
     name == server || name.starts_with(&format!("{server}-"))
 }
 
-/// Sets up every harness installed on this device: the MCP server, the prompt hook, git's token for Repos and the
-/// built-in skills. The node does it as it starts and every minute, so a harness installed later gets them too.
-pub fn set_up() {
-    if matches!(crate::mode::here(), crate::mode::Mode::Throwaway(_)) {
-        return;
-    }
-    let _turn = turn();
-    let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else { return };
-    let mut written = Written::load();
-    harnesses(&home, &mut written);
-    // The person's apps, for their skills: those already written stay until the local API lists them.
-    let apps = crate::api::agent().get(&format!("http://{}/v1/apps", crate::api::addr())).call().ok().and_then(|mut r| r.body_mut().read_json::<Value>().ok());
-    if let Some(apps) = apps.and_then(|a| a.as_array().cloned()) {
-        let skills: BTreeMap<String, BTreeMap<String, String>> = crate::skills::all(&apps).into_iter().map(|s| (s.name.clone(), s.all_files().into_iter().collect())).collect();
-        for root in skill_roots(&home) {
-            for (name, files) in &skills {
-                if let Err(err) = write_skill(&root.join(name), files) {
-                    tracing::warn!("skill {name}: {err:#}");
-                }
+/// How often a node looks again, so a harness installed later gets them too.
+const EVERY: Duration = Duration::from_secs(60);
+
+/// Sets up every harness installed on this device, as the node serving it at `addr` from `home` does as it starts and
+/// every minute: the MCP server, the prompt hook, git's token for Repos and the built-in skills of the person's apps.
+pub async fn keep(node: crate::node::Node, home: PathBuf, addr: String) {
+    loop {
+        if node.has_network() && let Ok(me) = crate::node::Caller::local(&node) {
+            let apps = node.apps(&me).await.unwrap_or_default();
+            let (home, addr) = (home.clone(), addr.clone());
+            if let Err(err) = tokio::task::spawn_blocking(move || set_up(&home, &addr, &apps)).await {
+                tracing::warn!("setting up this machine's agent harnesses: {err}");
             }
-            // Built-in skills no longer offered (an app removed) go.
-            for dir in std::fs::read_dir(&root).into_iter().flatten().flatten() {
-                let name = dir.file_name().to_string_lossy().to_string();
-                if built_in(&name) && !skills.contains_key(&name) && ours(&dir.path()) {
-                    let _ = std::fs::remove_dir_all(dir.path());
-                }
+        }
+        tokio::time::sleep(EVERY).await;
+    }
+}
+
+fn set_up(node_home: &Path, addr: &str, apps: &[Value]) {
+    let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else { return };
+    let mut written = Written::load(node_home);
+    harnesses(&home, node_home, addr, &mut written);
+    let skills: BTreeMap<String, BTreeMap<String, String>> = crate::skills::all(apps).into_iter().map(|s| (s.name.clone(), s.all_files().into_iter().collect())).collect();
+    for root in skill_roots(&home) {
+        for (name, files) in &skills {
+            if let Err(err) = write_skill(&root.join(name), files) {
+                tracing::warn!("skill {name}: {err:#}");
+            }
+        }
+        // Built-in skills no longer offered (an app removed) go.
+        for dir in std::fs::read_dir(&root).into_iter().flatten().flatten() {
+            let name = dir.file_name().to_string_lossy().to_string();
+            if built_in(&name) && !skills.contains_key(&name) && ours(&dir.path()) {
+                let _ = std::fs::remove_dir_all(dir.path());
             }
         }
     }
     written.save();
-}
-
-/// One writer at a time of the harnesses' files on this machine.
-fn turn() -> std::sync::MutexGuard<'static, ()> {
-    static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
-    ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 fn skill_roots(home: &Path) -> Vec<PathBuf> {
@@ -132,18 +135,17 @@ fn mcp_args(harness: &str) -> &'static [&'static str] {
 
 /// Gives each harness installed here the node's prompt hook and this network's MCP server, leaving everything else
 /// in its settings as it was.
-fn harnesses(home: &Path, written: &mut Written) {
+fn harnesses(home: &Path, node_home: &Path, addr: &str, written: &mut Written) {
     let dir = |var: &str, default: PathBuf| std::env::var_os(var).map(PathBuf::from).unwrap_or(default);
     let claude = dir("CLAUDE_CONFIG_DIR", home.join(".claude"));
     let codex = dir("CODEX_HOME", home.join(".codex"));
     let config = dir("XDG_CONFIG_HOME", home.join(".config"));
     let pi = dir("PI_CODING_AGENT_DIR", home.join(".pi/agent"));
-    let addr = crate::api::addr();
     // Asked as one of this machine's own programs: with the token only its user can read.
-    let token = crate::home().join(crate::api::LOCAL_TOKEN);
+    let token = node_home.join(crate::api::LOCAL_TOKEN);
     let hook = format!("curl -sf --max-time 3 -H \"{}: $(cat '{}')\" --data-binary @- http://{addr}{HOOK_PATH} || true", crate::api::LOCAL_TOKEN_HEADER, token.display());
     // Another custom build's node on this machine has a hook of its own, on its own port; an older hook of its own is replaced.
-    let port = format!(":{}/hooks/", addr.rsplit(':').next().unwrap_or_default());
+    let port = format!(":{}/hooks/", crate::api::port_of(addr));
     let server = crate::skills::server_name();
     // A stable path, so harnesses started without the user's PATH (by launchd, say) still find it after an update; but
     // not another program's that has the CLI's name (an older app's, say): then this binary, which updates in place.
@@ -155,7 +157,7 @@ fn harnesses(home: &Path, written: &mut Written) {
     };
     let token = serde_json::to_string(&token.to_string_lossy()).unwrap_or_default();
     let plugin = |text: &str| {
-        let text = text.replace("{{name}}", crate::config::NAME).replace("{{cli}}", crate::config::CLI).replace("{{addr}}", &addr);
+        let text = text.replace("{{name}}", crate::config::NAME).replace("{{cli}}", crate::config::CLI).replace("{{addr}}", addr);
         text.replace("{{header}}", crate::api::LOCAL_TOKEN_HEADER).replace("{{token}}", &token)
     };
     let s = |v: &str| CstInputValue::String(v.to_string());
@@ -185,15 +187,15 @@ fn harnesses(home: &Path, written: &mut Written) {
     if pi.is_dir() {
         written.write(&pi.join("extensions").join(format!("{}-hooks.ts", crate::config::CLI)), &plugin(PI_EXTENSION));
     }
-    git(&addr);
+    git(node_home, addr);
 }
 
 /// Git reaches Repos at the node (`git clone http://localhost:<port>/repos/<owner>/<repo>.git`) as one of this machine's own
 /// programs: the person's git config includes one of the node's, which only they can read, sending its token there.
-fn git(addr: &str) {
-    let Some(token) = crate::api::local_token(&crate::home()) else { return };
-    let port = addr.rsplit(':').next().unwrap_or_default();
-    let file = crate::home().join("git-config");
+fn git(node_home: &Path, addr: &str) {
+    let Some(token) = crate::api::local_token(node_home) else { return };
+    let port = crate::api::port_of(addr);
+    let file = node_home.join("git-config");
     let text: String = ["localhost", "127.0.0.1"].iter().map(|host| format!("[http \"http://{host}:{port}/\"]\n\textraHeader = {}: {token}\n", crate::api::LOCAL_TOKEN_HEADER)).collect();
     if std::fs::read_to_string(&file).ok().as_deref() != Some(text.as_str()) {
         use std::io::Write;
@@ -374,8 +376,8 @@ struct Written {
 }
 
 impl Written {
-    fn load() -> Self {
-        let path = crate::home().join("agents-written.json");
+    fn load(node_home: &Path) -> Self {
+        let path = node_home.join("agents-written.json");
         let hashes = std::fs::read(&path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
         Written { path, hashes }
     }
