@@ -120,7 +120,7 @@ function Accounts() {
     let soon
     one.on("changed", (e) => {
       ;(e.type === "changed" ? (e.apps?.length ? e.apps : names.current) : []).forEach((n) => stale.current.add(n))
-      if (!["changed", "devices", "install"].includes(e.type)) return
+      if (!["changed", "devices", "network"].includes(e.type)) return
       clearTimeout(soon)
       soon = setTimeout(() => show().catch(() => {}), 250)
     })

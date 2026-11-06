@@ -48,7 +48,7 @@ impl Node {
         self.note_shared(&marker)
     }
 
-    /// Notes in `install/shared` a blob put in the bucket, `<scope> <hash>`, or with `- ` before it, one taken out.
+    /// Notes in `network/shared` a blob put in the bucket, `<scope> <hash>`, or with `- ` before it, one taken out.
     fn note_shared(&self, line: &str) -> Result<()> {
         let mut file = std::fs::OpenOptions::new().create(true).append(true).open(self.network_dir().join("shared"))?;
         std::io::Write::write_all(&mut file, format!("{line}\n").as_bytes())?;
@@ -235,7 +235,7 @@ impl Node {
         })
     }
 
-    /// Notes in `install/forgotten` each blob a scope forgot, `(scope, hash)`s, to take from the bucket once
+    /// Notes in `network/forgotten` each blob a scope forgot, `(scope, hash)`s, to take from the bucket once
     /// `FORGOTTEN_KEPT` is up, and deletes the blobs here that no entry this device holds still needs.
     pub(super) fn delete_forgotten(&self, forgotten: Vec<(String, String)>) {
         let due = now_ms() + FORGOTTEN_KEPT.as_millis() as u64;
@@ -299,7 +299,7 @@ impl Node {
         }
     }
 
-    /// Adds lines to `install/forgotten`, `<due> <scope> <hash>`, and takes out the ones `done`.
+    /// Adds lines to `network/forgotten`, `<due> <scope> <hash>`, and takes out the ones `done`.
     fn note_forgotten(&self, add: &[String], done: &[String]) -> Result<()> {
         let _file = self.0.forgotten.lock().unwrap();
         let path = self.network_dir().join("forgotten");

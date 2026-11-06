@@ -125,7 +125,7 @@ pub fn run(rest: &[String]) -> Result<()> {
     unsafe { std::env::set_var(format!("{}_HOME", CLI.to_uppercase()), &dir) };
     if rest.first().map(String::as_str) == Some("sign-in") {
         // As its person, with no passkey: the throwaway network's sign-in asks for none.
-        let address = get("/v1/state")?["install"]["settings"]["address"].as_str().context("the throwaway network has no address")?.to_string();
+        let address = get("/v1/state")?["network"]["settings"]["address"].as_str().context("the throwaway network has no address")?.to_string();
         let started = one::sign_in::start(&address, None)?;
         one::sign_in::approve_on_throwaway(&address, &started.url, None)?;
         one::sign_in::finish(started)?;
@@ -141,7 +141,7 @@ pub fn run(rest: &[String]) -> Result<()> {
     }
     let state = get("/v1/state")?;
     let me = state["user"]["name"].as_str().or(state["me"]["name"].as_str()).unwrap_or("you");
-    let address = state["install"]["settings"]["address"].as_str().unwrap_or("");
+    let address = state["network"]["settings"]["address"].as_str().unwrap_or("");
     println!(
         "This checkout's throwaway network is running on this machine: a new network, Throwaway, with only what every new network
 starts with, and {me} as its admin, who signs in at {address} with no passkey. Its folder is {}, with its
@@ -158,7 +158,7 @@ recovery key; its Workers' settings are in {}.
 /// git is on a computer signed in to any network: this build's helper is linked in a folder of the throwaway network's, put
 /// first on git's PATH (the one the real network's CLI links is another build, reaching another node).
 fn git(dir: &Path, args: &[String]) -> Result<()> {
-    let address = get("/v1/state")?["install"]["settings"]["address"].as_str().context("the throwaway network has no address")?.trim_end_matches('/').to_string();
+    let address = get("/v1/state")?["network"]["settings"]["address"].as_str().context("the throwaway network has no address")?.trim_end_matches('/').to_string();
     let bin = dir.join("bin");
     std::fs::create_dir_all(&bin)?;
     let link = bin.join(crate::git_remote::helper());
@@ -487,7 +487,7 @@ pub async fn bucket(home: PathBuf) -> Result<()> {
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     };
-    let place = one::bucket::Place::Folder(home.join("install").join("bucket"));
+    let place = one::bucket::Place::Folder(home.join("network").join("bucket"));
     let answer = move |method: Method, uri: Uri, headers: HeaderMap, body: axum::body::Bytes| {
         let place = place.clone();
         async move {
@@ -495,7 +495,7 @@ pub async fn bucket(home: PathBuf) -> Result<()> {
                 let query: Vec<(String, String)> = uri.query().unwrap_or("").split('&').filter_map(|p| p.split_once('=')).map(|(k, v)| (decode(k), decode(v))).collect();
                 let get = |k: &str| query.iter().find(|(q, _)| q == k).map(|(_, v)| v.clone());
                 let (prefix, delimit) = (get("prefix").unwrap_or_default(), get("delimiter").is_some());
-                let dir = home.join("install").join("bucket");
+                let dir = home.join("network").join("bucket");
                 return match tokio::task::spawn_blocking(move || list(&dir, &prefix, delimit)).await {
                     Ok(Ok(xml)) => (StatusCode::OK, HeaderMap::new(), xml.into_bytes()),
                     _ => (StatusCode::INTERNAL_SERVER_ERROR, HeaderMap::new(), Vec::new()),

@@ -46,7 +46,7 @@ struct ScreensHome: View {
     @ViewBuilder private var content: some View {
         if case .joining(let code) = store.phase {
             ApproveView(code: code) { Task { await Phone.shared.signOut() } }
-        } else if store.install?.joining == true {
+        } else if store.network?.joining == true {
             ProgressView("Joining…").padding(24).background(.regularMaterial, in: .rect(cornerRadius: 18))
         } else if store.state == nil {
             // A spinner only after a moment; can't reach only once it's been trying a while, not a first miss.
@@ -89,7 +89,7 @@ extension Store {
         guard Phone.nodeURL != nil || Auth.signedIn, !items.isEmpty || WidgetCache.load()?.signedOut == true else { return }
         let trees = items.flatMap { [$0.root] + ($0.sizes ?? [:]).values }
         Icons.keep(Set(items.map(\.icon) + trees.flatMap(\.iconNames)))
-        WidgetCache(install: install?.name, widgets: items, fetched: widgetsFetched).save()
+        WidgetCache(network: network?.name, widgets: items, fetched: widgetsFetched).save()
         WidgetCenter.shared.reloadAllTimelines()
         let images = trees.flatMap(\.imageURLs)
         if !images.isEmpty {

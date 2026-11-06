@@ -16,7 +16,7 @@ var A = one.api, j = (e) => one.plain(e).title, M = (e) => e === "admin" ? "Admi
 	name: "groups",
 	icon: "users-three",
 	color: "#34c759"
-}, F = (e, t) => new Intl.ListFormat(void 0, { type: "conjunction" }).format(t.map((t) => I(e, t.user))), I = (e, t) => e.install?.users.find((e) => e.id === t)?.name || "Someone";
+}, F = (e, t) => new Intl.ListFormat(void 0, { type: "conjunction" }).format(t.map((t) => I(e, t.user))), I = (e, t) => e.network?.users.find((e) => e.id === t)?.name || "Someone";
 function L() {
 	let [e, r] = n(null), [a, s] = n(null), [c, l] = n(one.params?.group || null), [u, d] = n({}), [f, p] = n([]), [g, x] = n(null), [C, w] = n(""), [T, M, N] = E(), [I, L, B] = E(), [V, H, G] = E();
 	async function q() {
@@ -29,7 +29,7 @@ function L() {
 	t(() => {
 		one.largeTitle("Groups"), q(), one.on("changed", q);
 	}, []);
-	let J = e?.user?.id, Y = e?.install?.groups || [], X = Y.filter((e) => e.invited.some((e) => e.user === J)), Z = Y.filter((e) => e.role), Q = c && Y.find((e) => e.id === c && (e.role || e.invited.some((e) => e.user === J)));
+	let J = e?.user?.id, Y = e?.network?.groups || [], X = Y.filter((e) => e.invited.some((e) => e.user === J)), Z = Y.filter((e) => e.role), Q = c && Y.find((e) => e.id === c && (e.role || e.invited.some((e) => e.user === J)));
 	async function ee(e, t, n) {
 		let r = `${e}:${t}`;
 		w(""), d((e) => ({
@@ -434,11 +434,11 @@ function W(t) {
 	let r = e(49), { g: i, state: s, sent: c, open: l, setOpen: u, send: d } = t, [f, p] = n("member"), [m, y] = n(""), b;
 	r[0] !== i.id || r[1] !== i.invited || r[2] !== i.members || r[3] !== c ? (b = (e) => i.members.some((t) => t.user === e) || i.invited.some((t) => t.user === e) || c.some((t) => t.group === i.id && t.user === e), r[0] = i.id, r[1] = i.invited, r[2] = i.members, r[3] = c, r[4] = b) : b = r[4];
 	let S = b, E, D;
-	if (r[5] !== m || r[6] !== s.install.users || r[7] !== S) {
+	if (r[5] !== m || r[6] !== s.network.users || r[7] !== S) {
 		let e;
-		r[10] === S ? e = r[11] : (e = (e) => !S(e.id), r[10] = S, r[11] = e), E = [...s.install.users].sort(G).filter(e);
+		r[10] === S ? e = r[11] : (e = (e) => !S(e.id), r[10] = S, r[11] = e), E = [...s.network.users].sort(G).filter(e);
 		let t;
-		r[12] === m ? t = r[13] : (t = (e) => e.name.toLowerCase().includes(m.trim().toLowerCase()), r[12] = m, r[13] = t), D = E.filter(t), r[5] = m, r[6] = s.install.users, r[7] = S, r[8] = E, r[9] = D;
+		r[12] === m ? t = r[13] : (t = (e) => e.name.toLowerCase().includes(m.trim().toLowerCase()), r[12] = m, r[13] = t), D = E.filter(t), r[5] = m, r[6] = s.network.users, r[7] = S, r[8] = E, r[9] = D;
 	} else E = r[8], D = r[9];
 	let A = D, j;
 	r[14] !== f || r[15] !== d || r[16] !== u ? (j = (e) => (u(!1), d(e, f)), r[14] = f, r[15] = d, r[16] = u, r[17] = j) : j = r[17];

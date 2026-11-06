@@ -76,25 +76,22 @@ function model(x, again) {
   const appOf = (name) => apps.find((a) => a.name === name)
   const appTitle = (name) => appOf(name)?.title || name
   const holds = (s) => (s.runs_for || []).includes(`user:${me}`)
-  const userName = (id) => state.install?.users.find((u) => u.id === id)?.name || "someone"
+  const userName = (id) => state.network?.users.find((u) => u.id === id)?.name || "someone"
 
-  // What exists, grouped by the device it's on, as each says by its key: a machine's oned and its services, the
-  // sign-ins of its apps, and each browser on its own.
+  // What exists, grouped by the device it's on, as each says by its key: a machine's oned, the sign-ins of its apps,
+  // and each browser on its own.
   function grouped() {
     // This device, as its node says, or by its own key: a browser's, which signs in, or the one asking.
     const mark = (e) => ({ ...e, me: e.me || [device.key, state.me?.key].includes(e.key) })
-    const devices = (state.install?.devices || []).map(mark), clients = (state.install?.clients || []).map(mark)
+    const devices = (state.network?.devices || []).map(mark), clients = (state.network?.clients || []).map(mark)
     const cards = [], browsers = [], stale = []
     const card = (user, name) => {
-      const c = { user, name: shown(name), node: null, services: [], clients: [] }
+      const c = { user, name: shown(name), node: null, clients: [] }
       cards.push(c)
       return c
     }
     const byKey = new Map()
     for (const d of devices.filter((d) => (d.roles || []).includes("compute"))) byKey.set(d.key, Object.assign(card(d.user, d.name), { node: d }))
-    // A service under the device it's part of, while it's switched on there.
-    const off = (s) => (byKey.get(s.device)?.node?.off_services || []).some((o) => o.name === s.service)
-    for (const s of devices.filter((d) => d.service && !off(d))) (byKey.get(s.device) || card(s.user, s.name)).services.push(s)
     for (const c of clients) {
       if (c.passkey || BROWSER.test(c.name)) {
         browsers.push(c)
@@ -112,14 +109,13 @@ function model(x, again) {
       ;(byKey.get(c.device) || card(c.user, c.name)).clients.push(c)
     }
     for (const c of cards) {
-      const ends = [c.node, ...c.services].filter(Boolean)
-      c.id = ends[0]?.key || c.clients[0]?.key
-      // Its oned last: removing it takes what's part of it, which goes first here, as a browser removes each itself.
-      c.keys = [...c.services, ...c.clients, c.node].filter(Boolean).map((e) => e.key)
-      c.me = [...ends, ...c.clients].some((e) => e.me)
-      c.online = ends.some((e) => e.online)
-      c.runs = ends.length > 0
-      c.priority = c.node?.priority ?? c.services[0]?.priority ?? (c.runs ? 1 : null)
+      c.id = c.node?.key || c.clients[0]?.key
+      // Its oned last: removing it takes what's part of it, its apps' sign-ins first here.
+      c.keys = [...c.clients, c.node].filter(Boolean).map((e) => e.key)
+      c.me = [c.node, ...c.clients].some((e) => e?.me)
+      c.online = !!c.node?.online
+      c.runs = !!c.node
+      c.priority = c.node?.priority ?? null
       // Its sign-in now: this one, else the last seen, else the newest; the rest are old.
       const now = [...c.clients].sort((a, b) => b.me - a.me || (seen[b.key] || 0) - (seen[a.key] || 0) || (b.since || 0) - (a.since || 0))
       c.signIn = now[0] || null
@@ -157,7 +153,6 @@ function model(x, again) {
     return [
       ...(c.node ? [{ name: "apps", on: true, fixed: true }] : []),
       ...(c.node?.installed_services || []).map((s) => ({ name: s.name, on: true, part: { service: s.name, device: c.node.key } })),
-      ...c.services.map((s) => ({ name: s.service, on: true, part: { service: s.service, device: s.device } })),
     ]
   }
   /// What's wrong with a part, as one problem with what fixes it: a switch that failed or is late, or a part that
@@ -177,9 +172,9 @@ function model(x, again) {
   function board() {
     const entries = drawn.cards.filter((c) => c.runs).map((c) => ({
       id: c.id, name: c.name, icon: c.icon, whose: c.user === me ? "" : `${userName(c.user)}’s`, p: c.priority,
-      keys: [c.node, ...c.services].filter(Boolean).map((e) => e.key),
+      keys: [c.node.key],
     }))
-    const s = state.install?.serverless
+    const s = state.network?.serverless
     if (s) entries.push({ id: "cloudflare", name: "Cloudflare", icon: CLOUDFLARE, whose: "", p: s.priority ?? "last", keys: ["cloudflare"] })
     const numbers = [...new Set(entries.filter((e) => e.p !== "last").map((e) => rank(e.p)))].sort((a, b) => a - b)
     return { cols: numbers.map((n) => entries.filter((e) => e.p !== "last" && rank(e.p) === n)), last: entries.filter((e) => e.p === "last") }
@@ -189,7 +184,7 @@ function model(x, again) {
   /// apps, and runs the services built for it that an admin switches on, for the apps in the network.
   function gridColumns() {
     const cols = drawn.cards.filter((c) => c.user === me && c.runs).map((c) => ({ c, name: c.name, icon: c.icon, parts: partsOf(c) }))
-    const s = state.install?.serverless
+    const s = state.network?.serverless
     if ((cols.length || admin) && s) {
       const parts = (s.parts || [{ name: "apps", on: true, fixed: true }]).filter((p) => p.name === "apps" || appOf(p.name))
       cols.push({ c: null, name: "Cloudflare", icon: CLOUDFLARE, parts: parts.map((p) => (p.fixed || !admin ? { ...p, fixed: true } : { ...p, part: { device: s.key, name: p.name } })) })
@@ -201,19 +196,18 @@ function model(x, again) {
   // Sydney", with Remove, in case it isn't theirs.
   function justJoined() {
     const since = Date.now() - 86_400_000
-    return (state.install?.clients || []).filter((c) => c.user === me && !c.passkey && !c.me && (c.since || 0) > since && ![device.key, state.me?.key].includes(c.key)).sort((a, b) => b.since - a.since)
+    return (state.network?.clients || []).filter((c) => c.user === me && !c.passkey && !c.me && (c.since || 0) > since && ![device.key, state.me?.key].includes(c.key)).sort((a, b) => b.since - a.since)
   }
 
   // App schedules: "linux runs WhatsApp's schedules for you", until when, with Stop. They last 30 days, and longer as
   // they use the app.
-  const deviceName = (s) => (s.service ? `${appTitle(s.service)} on ${shown(s.name)}` : shown(s.name))
-  const forWhom = (scope) => (scope === `user:${me}` ? "you" : scope === "global" ? "everyone" : state.install?.groups.find((g) => `group:${g.id}` === scope)?.name || "a group")
+  const forWhom = (scope) => (scope === `user:${me}` ? "you" : scope === "global" ? "everyone" : state.network?.groups.find((g) => `group:${g.id}` === scope)?.name || "a group")
   // The apps that run on their own, every so often, in a scope (their own, unless it's said).
   const scheduled = (scope = `user:${me}`) => apps.filter((a) => (a.schedules || []).some((s) => s.scope === scope && !s.removed))
   // The devices that may run an app's schedules in a scope: those that hold it.
-  const runners = (scope) => (state.install?.devices || []).filter((d) => (d.runs_for || []).includes(scope))
+  const runners = (scope) => (state.network?.devices || []).filter((d) => (d.runs_for || []).includes(scope))
 
-  return { me, admin, appOf, appTitle, userName, drawn, partsOf, partTitle, problemOf, problemsOf, board, gridColumns, justJoined, deviceName, forWhom, scheduled, runners }
+  return { me, admin, appOf, appTitle, userName, drawn, partsOf, partTitle, problemOf, problemsOf, board, gridColumns, justJoined, forWhom, scheduled, runners }
 }
 
 // ---- The screen ----
@@ -332,7 +326,7 @@ function Devices() {
     else if (to === "new") order.push([e])
     else order[Number(to)]?.push(e)
     order = order.filter((c) => c.length)
-    const network = data.state.install
+    const network = data.state.network
     let set = {}
     try {
       set = JSON.parse(network.settings?.priority || "{}") || {}
@@ -349,7 +343,7 @@ function Devices() {
       ...data,
       state: {
         ...data.state,
-        install: {
+        network: {
           ...network,
           devices: (network.devices || []).map((d) => (d.key in set ? { ...d, priority: set[d.key] } : d)),
           serverless: network.serverless && "cloudflare" in set ? { ...network.serverless, priority: set.cloudflare } : network.serverless,
@@ -625,13 +619,13 @@ function DevicesTab({ m, data, opened, flag, menu, removeOld, signOut, add, sche
   const { cards, browsers, stale } = m.drawn
   const mine = cards.filter((c) => c.user === m.me)
   // App schedules, only for someone with some running, or an app that runs on its own: an app's screen asks for the
-  // rest. A node names them `grants`, as older clients read them.
-  const appSchedules = device.keys ? (state.install?.grants || []).filter((g) => g.until > Date.now()) : []
+  // rest.
+  const appSchedules = device.keys ? (state.network?.app_schedules || []).filter((g) => g.until > Date.now()) : []
   const scheduling = !!device.keys && (appSchedules.length > 0 || m.scheduled().length > 0)
   const recovery = []
-  if (m.admin && state.install?.recovery_set) recovery.push(`Recovery key set ${day(state.install.recovery_set)}.`)
-  if (state.install?.recovery_used && (m.admin || state.install.recovery_used.user === m.me)) {
-    const r = state.install.recovery_used
+  if (m.admin && state.network?.recovery_set) recovery.push(`Recovery key set ${day(state.network.recovery_set)}.`)
+  if (state.network?.recovery_used && (m.admin || state.network.recovery_used.user === m.me)) {
+    const r = state.network.recovery_used
     recovery.push(`The recovery key last let in a device of ${r.user === m.me ? "yours" : `${m.userName(r.user)}’s`}, ${day(r.time)}.`)
   }
   const side = scheduling || (!!device.keys && passkey) || recovery.length > 0
@@ -705,12 +699,12 @@ function DevicesTab({ m, data, opened, flag, menu, removeOld, signOut, add, sche
             <Section title="App Schedules">
               <List>
                 {appSchedules.map((g) => {
-                  const on = (state.install?.devices || []).find((d) => d.key === g.endpoint)
+                  const on = (state.network?.devices || []).find((d) => d.key === g.endpoint)
                   const until = new Date(g.until).toLocaleDateString(undefined, { day: "numeric", month: "long" })
                   return (
                     <div key={`${g.endpoint} ${g.app} ${g.scope}`} className="flex items-center gap-3 px-3 py-2.5 text-sm">
                       <span className="min-w-0 flex-1">
-                        <span className="block font-medium">{(on && m.deviceName(on)) || "A device"} runs {m.appTitle(g.app)}’s schedules for {m.forWhom(g.scope)}</span>
+                        <span className="block font-medium">{(on && shown(on.name)) || "A device"} runs {m.appTitle(g.app)}’s schedules for {m.forWhom(g.scope)}</span>
                         <span className="block text-muted-foreground">Until {until}, and longer as {g.scope === `user:${m.me}` ? "you use it" : "it’s used"}</span>
                       </span>
                       <Button variant="ghost" size="sm" className="text-destructive" onClick={() => act(() => api("POST", "/v1/app-schedules", { device: g.endpoint, app: g.app, scope: g.scope, days: 0 }))}>Stop</Button>
@@ -969,9 +963,9 @@ const Go = ({ children, busy, disabled, variant = "default", onClick }) => (
 )
 const Cancel = ({ setOpen }) => <Button variant="secondary" size="sm" onClick={() => setOpen(false)}>Cancel</Button>
 
-/// Renames a device: its node and the services named for it together, or its app's sign-ins.
+/// Renames a device: its node, or its app's sign-ins.
 function Rename({ card, open, setOpen, done }) {
-  const keys = card.runs ? [card.node, ...card.services].filter(Boolean).map((e) => e.key) : card.clients.map((c) => c.key)
+  const keys = card.runs ? [card.node.key] : card.clients.map((c) => c.key)
   const [name, setName] = useState(card.name)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState("")
@@ -1084,7 +1078,7 @@ function Line({ text }) {
 /// The three ways a device joins: an app that signs in and asks to be approved, a server by one line, a browser.
 function AddDevice({ data, open, setOpen }) {
   const { state } = data
-  const address = state.install?.settings?.address || ""
+  const address = state.network?.settings?.address || ""
   // A server's line holds a code made when this opens.
   const [line, setLine] = useState(state.config?.install ? { loading: true } : null)
   useEffect(() => {
@@ -1144,7 +1138,7 @@ function AppSchedules({ m, asked, open, setOpen, done }) {
   return (
     <ResponsiveDialog open={open} onOpenChange={setOpen} title={app ? `Run ${m.appTitle(app)}’s Schedules On…` : "Run an App’s Schedules"} action={<Cancel setOpen={setOpen} />}>
       {app
-        ? rows(m.runners(scope).map((d) => <ListRow key={d.key} title={m.deviceName(d)} onClick={() => choose(d)} />), "They run on the device you choose, while that device is on.")
+        ? rows(m.runners(scope).map((d) => <ListRow key={d.key} title={shown(d.name)} onClick={() => choose(d)} />), "They run on the device you choose, while that device is on.")
         : rows(m.scheduled(scope).map((a) => <ListRow key={a.name} title={a.title || a.name} onClick={() => setApp(a.name)} />), "Apps that run on their own, every so often.")}
     </ResponsiveDialog>
   )

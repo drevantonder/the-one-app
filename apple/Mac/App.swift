@@ -60,10 +60,10 @@ struct MacApp: App {
             CommandGroup(replacing: .newItem) {
                 Button("Pair a Computer…") { store.sheet = .pair }
                     .keyboardShortcut("i", modifiers: [.command, .shift])
-                    .disabled(store.install == nil || !store.signedIn)
+                    .disabled(store.network == nil || !store.signedIn)
                 Button("Join with a Pairing Code…") { store.sheet = .join }
                     .keyboardShortcut("j", modifiers: [.command, .shift])
-                    .disabled(store.install != nil)
+                    .disabled(store.network != nil)
             }
         }
 

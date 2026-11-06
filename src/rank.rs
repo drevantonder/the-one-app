@@ -52,7 +52,7 @@ pub fn priority(set: &BTreeMap<String, Priority>, id: &str) -> Priority {
     set.get(id).copied().unwrap_or(if id == CLOUDFLARE { Priority::Last } else { Priority::Number(1) })
 }
 
-/// The setting's value after `ids` (one device's endpoints, or `cloudflare`) get `to`, every other kept as set.
+/// The setting's value after `ids` (a device, or `cloudflare`) get `to`, every other kept as set.
 pub fn with(settings: &BTreeMap<String, String>, ids: &[String], to: Priority) -> String {
     let mut out: BTreeMap<String, Value> = set(settings).into_iter().map(|(k, p)| (k, p.to_value())).collect();
     for id in ids {

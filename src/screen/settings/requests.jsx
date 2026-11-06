@@ -57,7 +57,7 @@ function Requests() {
       : <ListSkeleton />
   } else {
     const { state, apps, asked } = data
-    const i = state.install || {}, me = state.user?.id
+    const i = state.network || {}, me = state.user?.id
     const app = (name) => apps.find((a) => a.name === name) || { name }
     const userName = (id) => (i.users || []).find((u) => u.id === id)?.name || "Someone"
     const vault = asked.filter((r) => r.state === "waiting" && !gone.includes(`request:${r.id}`))

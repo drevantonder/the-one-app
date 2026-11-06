@@ -594,8 +594,7 @@ pub fn check(c: &Check) -> Result<(Value, Vec<Restored>)> {
     }
     let bytes: u64 = place.objects(&format!("{network}/objects"))?.iter().map(|o| o.2).sum();
     let report = json!({
-        // `install`, as older command lines print it.
-        "install": m.name(),
+        "network": m.name(),
         "bytes": bytes,
         "scopes": scopes,
         "people": m.users().into_iter().filter(|u| !u.removed).map(|u| u.name).collect::<Vec<_>>(),

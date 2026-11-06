@@ -94,7 +94,7 @@ impl Devices {
     /// (the network's order).
     pub(super) fn ordered(&self) -> Result<(String, Vec<String>)> {
         let st = self.host.get("/v1/state")?;
-        let mut devices: Vec<&Value> = st["install"]["devices"].as_array().map(|a| a.iter().collect()).unwrap_or_default();
+        let mut devices: Vec<&Value> = st["network"]["devices"].as_array().map(|a| a.iter().collect()).unwrap_or_default();
         devices.sort_by_key(|d| d["order"].as_i64().unwrap_or(0));
         let all = devices
             .iter()

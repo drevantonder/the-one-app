@@ -16,7 +16,7 @@
 // A device signed in leaves a request to join here (`/api/auth/devices/requests`): its endpoint keys, which a device of
 // its person (or, for a newcomer's first, the inviting admin's) finds by its join code and approves, then clears with
 // `?approved`, which keeps it, marked, for the new device to see while it waits (it asks no node until it's in), with
-// `&genesis=`, the network's first entry's hash as the approving device holds it: the only install the new device then
+// `&genesis=`, the network's first entry's hash as the approving device holds it: the only network the new device then
 // takes, so no node it reaches first can show it another; and once its who's who is written as steps, `&welcome=`,
 // where the approving device read them to, which the new device starts from (src/database/steps.rs `Welcome`). Set
 // once, with the approval. A service asks nothing here:
@@ -729,7 +729,7 @@ export class Auth extends DurableObject {
   }
 
   /// A client names itself, so none may take the network's name, as signing in to it would read as signing in here;
-  /// nor its apps' ("<install> on <device>"), unless it comes back to the device, as they do.
+  /// nor its apps' ("<network> on <device>"), unless it comes back to the device, as they do.
   notNamedAsUs(body) {
     const plain = (s) => String(s || "").toLowerCase().replace(/[^\p{L}\p{N}]/gu, "").replace(/^the/, "");
     const [name, ours] = [plain(body.client_name), plain(this.auth.options.appName)];

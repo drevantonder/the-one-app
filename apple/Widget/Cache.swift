@@ -24,7 +24,7 @@ struct WidgetCache: Codable {
 
         func tree(_ size: String) -> WidgetNode { sizes?[size] ?? root }
     }
-    var install: String?
+    var network: String?
     var widgets: [Item]
     /// The person signed out, so the home-screen widgets say to sign in.
     var signedOut: Bool?

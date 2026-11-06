@@ -36,7 +36,7 @@ function F(e) {
 			scope: "user",
 			title: "You"
 		},
-		...((e.install || {}).groups || []).filter((e) => e.role === "admin").sort((e, t) => e.name.localeCompare(t.name)).map((e) => ({
+		...((e.network || {}).groups || []).filter((e) => e.role === "admin").sort((e, t) => e.name.localeCompare(t.name)).map((e) => ({
 			scope: `group:${e.id}`,
 			title: e.name
 		})),

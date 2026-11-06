@@ -206,7 +206,7 @@ pub fn none_said(app: &Value, tool: &str, ok: &Value, cli: bool) -> Option<Strin
     let parts: Vec<&Value> = app["uses"]["services"].as_array().into_iter().flatten().collect();
     let on_none = || {
         let state = get("/v1/state").unwrap_or_default();
-        !state["install"]["devices"].as_array().into_iter().flatten().any(|d| d["services"].as_array().into_iter().flatten().any(|s| parts.contains(&s)))
+        !state["network"]["devices"].as_array().into_iter().flatten().any(|d| d["services"].as_array().into_iter().flatten().any(|s| parts.contains(&s)))
     };
     Some(match (signs_in, app["needs"].as_str()) {
         (_, Some(needs)) if !parts.is_empty() && on_none() => format!("No {title} accounts: {title} isn't on any of your devices yet. {needs}."),

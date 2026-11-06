@@ -95,7 +95,7 @@ async fn backups_go_to_a_folder_encrypted_and_restore_with_the_recovery_key_alon
     assert!(keys.contains_key("global") && keys.contains_key(&format!("user:{}", me.user)), "{:?}", keys.keys());
     let checked = one::backups::check(&one::backups::Check { place: &place, network: &network, keys: &keys, root: None, live: None }).unwrap().0;
     assert_eq!(checked["problems"], json!([]), "{checked}");
-    assert_eq!(checked["install"], "Home");
+    assert_eq!(checked["network"], "Home");
     assert_eq!(checked["people"], json!(["Andre"]));
     assert!(checked["apps"].as_array().unwrap().contains(&json!("notes")), "{checked}");
     let mine = format!("user:{}", me.user);

@@ -484,7 +484,7 @@ export class Client extends DurableObject {
       if (r.status !== 200 || !this.view?.nodes.has(r.node)) return;
       const state = JSON.parse(new TextDecoder().decode(r.body));
       const listed = this.view.nodes;
-      const order = (state.install?.devices || []).filter((d) => listed.has(d.key) && Number.isFinite(d.order)).sort((a, b) => a.order - b.order).map((d) => d.key).slice(0, 64);
+      const order = (state.network?.devices || []).filter((d) => listed.has(d.key) && Number.isFinite(d.order)).sort((a, b) => a.order - b.order).map((d) => d.key).slice(0, 64);
       await this.ctx.storage.put("order", order);
       const online = new Set(this.order);
       this.order = [...order.filter((k) => online.has(k)), ...this.order.filter((k) => !order.includes(k))];

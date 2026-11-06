@@ -61,9 +61,9 @@ function Users() {
   const me = state?.user?.id
   const admin = state?.user?.role === "admin"
   // Them first, then everyone by name.
-  const users = [...(state?.install?.users || [])].sort((x, y) => (y.id === me) - (x.id === me) || x.name.localeCompare(y.name))
+  const users = [...(state?.network?.users || [])].sort((x, y) => (y.id === me) - (x.id === me) || x.name.localeCompare(y.name))
   const admins = users.filter((u) => u.role === "admin").length
-  const address = state?.install?.settings?.address
+  const address = state?.network?.settings?.address
   const domain = one.config.join_domain
   const handleNow = users.find((u) => u.id === me)?.handle || ""
 

@@ -849,7 +849,7 @@ extension Store {
     /// The device this app talks to: this Mac's own, or the one a phone reaches.
     var device: Device? {
         let host = state?.host ?? state?.machine
-        return install?.devices.first { $0.key == host?.key }
+        return network?.devices.first { $0.key == host?.key }
     }
 }
 

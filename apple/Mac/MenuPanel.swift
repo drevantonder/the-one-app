@@ -12,10 +12,10 @@ struct MenuPanel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if let install = store.install, store.signedIn {
+            if let network = store.network, store.signedIn {
                 HStack(spacing: 10) {
                     Image("Logo").resizable().frame(width: 26, height: 26)
-                    Text(install.name).font(.headline)
+                    Text(network.name).font(.headline)
                     Spacer()
                 }
                 .padding(.horizontal, 14)
@@ -23,12 +23,12 @@ struct MenuPanel: View {
                 .padding(.bottom, 8)
 
                 SectionTitle("Your Devices")
-                ForEach(install.devices.filter { $0.user == store.me?.id && $0.service == nil }) { device in
+                ForEach(network.devices.filter { $0.user == store.me?.id }) { device in
                     HStack(spacing: 8) {
                         Circle()
                             .fill(device.isOnline ? Kit.text : Kit.faint)
                             .frame(width: 7, height: 7)
-                        Text(deviceName(device))
+                        Text(displayName(device.name))
                         Spacer()
                         if device.key == store.device?.key {
                             Text("This device").foregroundStyle(.secondary)
@@ -60,7 +60,7 @@ struct MenuPanel: View {
                     if store.state == nil {
                         Later(.milliseconds(400)) { Text("Starting…") }
                     } else {
-                        Text(store.install == nil ? "Not set up yet" : "Signed out")
+                        Text(store.network == nil ? "Not set up yet" : "Signed out")
                     }
                 }
                 .foregroundStyle(.secondary)
@@ -99,10 +99,6 @@ struct MenuPanel: View {
         .frame(width: 340)
     }
 
-    /// A service endpoint is named for its machine; a person reads it as its service on that machine ("WhatsApp on linux").
-    private func deviceName(_ device: Device) -> String {
-        device.service.map { "\(store.label($0)) on \(displayName(device.name))" } ?? displayName(device.name)
-    }
 
     private func open() {
         openWindow(id: "main")

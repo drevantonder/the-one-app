@@ -15,7 +15,7 @@ var h = (() => {
 		widgets: {},
 		badges: {},
 		failed: /* @__PURE__ */ new Set()
-	}, t = () => e.state?.user, n = () => e.state?.install, r = () => t()?.role === "admin", i = (e) => e?.title || e?.name || "", a = (t) => e.apps.find((e) => e.name === t), o = (e, t) => !!e?.screens?.some((e) => e.name === t), s = (e) => o(e, "main"), c = (e) => !!e?.ops?.some((e) => e.name === "accounts"), l = (e) => (e.installed || []).map((e) => e.startsWith("user:") ? "user" : e), u = (e) => e === t()?.id ? "You" : n()?.users.find((t) => t.id === e)?.name || "Someone", d = (e) => e.slice().sort((e, n) => (e === t()?.id) - (n === t()?.id) || u(e).localeCompare(u(n))).map((e) => e === t()?.id ? "you" : u(e)), f = (e) => e.length < 2 ? e.join("") : `${e.slice(0, -1).join(", ")} and ${e.at(-1)}`, p = (e, n) => e.length === 1 && e[0] === t()?.id ? "" : `${e.length <= 3 ? f(d(e)).replace(/^y/, "Y") : `${e.length} people`} · ${m(n)}`;
+	}, t = () => e.state?.user, n = () => e.state?.network, r = () => t()?.role === "admin", i = (e) => e?.title || e?.name || "", a = (t) => e.apps.find((e) => e.name === t), o = (e, t) => !!e?.screens?.some((e) => e.name === t), s = (e) => o(e, "main"), c = (e) => !!e?.ops?.some((e) => e.name === "accounts"), l = (e) => (e.installed || []).map((e) => e.startsWith("user:") ? "user" : e), u = (e) => e === t()?.id ? "You" : n()?.users.find((t) => t.id === e)?.name || "Someone", d = (e) => e.slice().sort((e, n) => (e === t()?.id) - (n === t()?.id) || u(e).localeCompare(u(n))).map((e) => e === t()?.id ? "you" : u(e)), f = (e) => e.length < 2 ? e.join("") : `${e.slice(0, -1).join(", ")} and ${e.at(-1)}`, p = (e, n) => e.length === 1 && e[0] === t()?.id ? "" : `${e.length <= 3 ? f(d(e)).replace(/^y/, "Y") : `${e.length} people`} · ${m(n)}`;
 	function m(e) {
 		let t = d(e);
 		return t.length ? t.length === 1 ? `apps chosen by ${t[0]}` : t.length === 2 ? `apps chosen by ${t[0]} and ${t[1]}` : `apps chosen by ${t.length} admins` : "apps chosen by admins";
@@ -220,7 +220,7 @@ var h = (() => {
 			e.type === "changed" && e.apps?.length ? o(U(e.apps)) : [
 				"changed",
 				"devices",
-				"install"
+				"network"
 			].includes(e.type) && o();
 		}), l(), c(), e.redrawn = l, e.redraw = t;
 	}
@@ -383,7 +383,7 @@ function x() {
 			(e.type === "changed" ? e.apps?.length ? e.apps : z.current : []).forEach((e) => F.current.add(e)), [
 				"changed",
 				"devices",
-				"install"
+				"network"
 			].includes(e.type) && (clearTimeout(t), t = setTimeout(() => V().catch(w), 250));
 		}), () => (clearTimeout(e), clearTimeout(t));
 	}, G = [], i[6] = W, i[7] = G) : (W = i[6], G = i[7]), t(W, G), l === "error") {

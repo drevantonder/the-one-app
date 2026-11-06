@@ -109,7 +109,7 @@ async function where(ctx, a) {
   if (!hasService(a)) return null;
   const platforms = a.service?.platforms;
   const devices = await ctx.devices();
-  const nodes = devices.filter((d) => !d.service && d.user === ctx.me.user && (!platforms || platforms.includes(platformOf(d.target)))).map((d) => d.name);
+  const nodes = devices.filter((d) => d.user === ctx.me.user && (!platforms || platforms.includes(platformOf(d.target)))).map((d) => d.name);
   if (platforms?.includes("cloudflare") && ctx.me.role === "admin") nodes.push("cloudflare");
   const runs_on = a.runs_on || [];
   const title = a.title || a.name;

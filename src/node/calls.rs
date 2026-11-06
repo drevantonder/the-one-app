@@ -316,7 +316,9 @@ impl Node {
                 let here = *k == self.0.id;
                 let load = if here { Some(&here_load) } else { i.peers.get(k).and_then(|p| p.load.as_ref()) };
                 let far = !here && i.far.get(k).is_some_and(|d| *d > FAR);
-                (!here && !i.online(k), here_first && !ours(i, k), load.is_some_and(full), far, rank::priority(&set, &hex(k)), !here, i.nearest.get(k).copied().unwrap_or(Duration::from_secs(1)))
+                // A service with an endpoint of its own is where its device is.
+                let at = i.r.db().service(k).and_then(|s| s.device).unwrap_or(*k);
+                (!here && !i.online(k), here_first && !ours(i, k), load.is_some_and(full), far, rank::priority(&set, &hex(&at)), !here, i.nearest.get(k).copied().unwrap_or(Duration::from_secs(1)))
             };
             devices.sort_by_cached_key(rank);
             Ok(devices)
@@ -1146,11 +1148,11 @@ impl Node {
                 let input: Value = serde_json::from_slice(&body)?;
                 ok(json!({ "ok": self.push("send", &input, &grant.caller, Some(&grant.app)).await? }))
             }
-            ("GET", "/devices") => ok(self.state_for(&grant.caller)["install"]["devices"].take()),
+            ("GET", "/devices") => ok(self.state_for(&grant.caller)["network"]["devices"].take()),
             // Run priority's order, as the person the call is for: only an admin changes it.
             ("GET", "/order") => {
-                let network = self.state_for(&grant.caller)["install"].take();
-                let mut order: Vec<Value> = network["devices"].as_array().cloned().unwrap_or_default().into_iter().filter(|s| s["service"].is_null()).map(|s| json!({ "name": s["name"], "key": s["key"], "kind": s["kind"], "priority": s["priority"], "online": s["online"], "here": s["me"] })).collect();
+                let network = self.state_for(&grant.caller)["network"].take();
+                let mut order: Vec<Value> = network["devices"].as_array().cloned().unwrap_or_default().into_iter().map(|s| json!({ "name": s["name"], "key": s["key"], "kind": s["kind"], "priority": s["priority"], "online": s["online"], "here": s["me"] })).collect();
                 if let Some(priority) = network["serverless"].get("priority") {
                     order.push(json!({ "name": "Cloudflare", "key": rank::CLOUDFLARE, "kind": rank::CLOUDFLARE, "priority": priority, "online": true, "here": false }));
                 }

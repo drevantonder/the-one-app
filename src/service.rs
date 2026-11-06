@@ -55,15 +55,19 @@ pub struct Network {
 }
 
 impl Network {
-    /// Where oned keeps it, in the service's folder: still `install.json`, which services of older builds read.
+    /// Where oned keeps it, in the service's folder.
     pub fn path(dir: &Path) -> PathBuf {
-        dir.join("install.json")
+        dir.join("network.json")
     }
 
     /// Gives it to the service kept in `dir`, the first time: a service is another network's or person's only once
     /// its folder goes.
     pub fn give(&self, dir: &Path) -> Result<()> {
         std::fs::create_dir_all(dir)?;
+        // As a build from before it was called a network kept it.
+        if dir.join("install.json").exists() && !Self::path(dir).exists() {
+            std::fs::rename(dir.join("install.json"), Self::path(dir))?;
+        }
         match std::fs::read(Self::path(dir)).ok().map(|b| serde_json::from_slice::<Network>(&b)).transpose()? {
             Some(kept) => ensure!(kept == *self, "{} is someone else's, or in another network ({}): remove it to move it", dir.display(), kept.address),
             None => write_private(&Self::path(dir), &serde_json::to_vec_pretty(self)?)?,
@@ -557,17 +561,23 @@ impl Service {
         let known = self.0.known.lock().unwrap();
         let m = &known.1;
         // Whether another is on, it can't know: asked, one that isn't says so.
-        let devices: Vec<Value> = m.offering(&self.0.name).into_iter().map(|s| json!({ "key": hex(&s.key), "name": s.name, "here": s.key == self.key(), "online": true, "services": [self.0.name] })).collect();
-        // The scopes its device runs, whose part it is: a program here may reach what they hold.
+        // The devices it runs on, each the device it's part of there.
         let listed = m.service(&self.key());
         let device = listed.as_ref().and_then(|s| s.device);
+        let devices: Vec<Value> = m
+            .offering(&self.0.name)
+            .into_iter()
+            .filter_map(|s| m.machine(&s.device?))
+            .map(|d| json!({ "key": hex(&d.key), "name": d.name, "here": Some(d.key) == device, "online": true, "services": [self.0.name] }))
+            .collect();
+        // The scopes its device runs, whose part it is: a program here may reach what they hold.
         let runs_for: Vec<String> = m.scopes().into_iter().filter(|s| device.is_some_and(|d| m.runs_for(&d, s))).map(|s| s.to_string()).collect();
-        let name = listed.as_ref().map(|s| s.name.as_str()).unwrap_or("");
+        let name = device.and_then(|d| m.machine(&d)).map(|d| d.name).unwrap_or_default();
         json!({
-            "device": { "key": hex(&self.key()), "name": name, "runs_for": runs_for },
+            "device": { "key": device.map(|d| hex(&d)).unwrap_or_default(), "name": name, "runs_for": runs_for },
             "me": { "key": hex(&self.key()), "name": name },
             "user": self.owner_in(m).map(|u| json!({ "id": u, "name": m.user(&u).map(|p| p.name) })),
-            "install": { "name": m.name(), "root": self.0.network.root, "devices": devices, "settings": crate::state::settings(&m.settings()) },
+            "network": { "name": m.name(), "root": self.0.network.root, "devices": devices, "settings": crate::state::settings(&m.settings()) },
         })
     }
 }

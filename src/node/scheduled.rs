@@ -150,15 +150,14 @@ impl Node {
                 }
                 let status = i.status.get(&scope.to_string()).cloned().unwrap_or_default();
                 let scope_name = handles(m, std::slice::from_ref(&scope), &viewer.user).remove(0).name;
-                // The devices that run its schedules there: none, and they don't run. `may_keep` and `kept_by` keep their names
-                // for older App Store screens, which read them.
-                let kept_by: Vec<String> = m.app_schedules_at(now).into_iter().filter(|((_, s, a), _)| *s == scope && a == app).filter_map(|((k, ..), _)| m.machine(&k).map(|d| d.name)).collect();
+                // The devices that run its schedules there: none, and they don't run.
+                let run_by: Vec<String> = m.app_schedules_at(now).into_iter().filter(|((_, s, a), _)| *s == scope && a == app).filter_map(|((k, ..), _)| m.machine(&k).map(|d| d.name)).collect();
                 let base = |name: &str| {
                     let key = (app.to_string(), name.to_string());
                     let runs = status.runs.get(&key);
                     let last = runs.and_then(|r| r.last()).map(|r| json!({ "time": r.time, "ok": r.ok, "error": r.error }));
                     let changed = status.changed.get(&key).filter(|(.., t)| now.saturating_sub(*t) < CHANGED_SHOWN).map(|(was, is, t)| json!({ "was": schedules::say(was), "is": schedules::say(is), "time": t }));
-                    json!({ "name": name, "scope": scope.to_string(), "scope_name": scope_name, "may_switch": m.may(&viewer.user, "add-apps", &scopes::object(&scope)), "may_keep": m.may(&viewer.user, "keep", &scopes::object(&scope)), "kept_by": kept_by, "last": last, "changed": changed })
+                    json!({ "name": name, "scope": scope.to_string(), "scope_name": scope_name, "may_switch": m.may(&viewer.user, "add-apps", &scopes::object(&scope)), "may_set_app_schedules": m.may(&viewer.user, "keep", &scopes::object(&scope)), "run_by": run_by, "last": last, "changed": changed })
                 };
                 for s in declared {
                     let mut v = match s {
@@ -172,7 +171,7 @@ impl Node {
                             v["on"] = json!(switched.is_none_or(|(on, ..)| *on));
                             v["switched"] = json!(switched.map(|(on, by, t)| json!({ "on": on, "by": user_name(by), "time": t })));
                             v["runs_as"] = json!(user.as_deref().map(user_name));
-                            v["next"] = json!(user.filter(|_| !kept_by.is_empty()).and(s.next(now)));
+                            v["next"] = json!(user.filter(|_| !run_by.is_empty()).and(s.next(now)));
                             v
                         }
                         Err((name, why)) => {

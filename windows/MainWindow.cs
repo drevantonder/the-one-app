@@ -374,7 +374,7 @@ public sealed class MainWindow : Window
             }
         }
         phase = Phase.Ready;
-        if (Store.Shared.Install == null)
+        if (Store.Shared.Network == null)
         {
             body.Content = Look.Unavailable("Not Set Up Yet", "Set it up on one of your computers first.");
             return;

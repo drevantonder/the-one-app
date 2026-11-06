@@ -17,7 +17,7 @@ public sealed class NodeState
 {
     [JsonPropertyName("config")] public required Config Config { get; init; }
     [JsonPropertyName("user")] public Person? User { get; init; }
-    [JsonPropertyName("install")] public Install? Install { get; init; }
+    [JsonPropertyName("network")] public Network? Network { get; init; }
     /// What this app's sign-in opens: some scopes and apps, or (null) all of them.
     [JsonPropertyName("sign_in")] public SignedIn? SignIn { get; init; }
 
@@ -51,7 +51,7 @@ public sealed class Person
     [JsonPropertyName("name")] public required string Name { get; init; }
 }
 
-public sealed class Install
+public sealed class Network
 {
     [JsonPropertyName("name")] public required string Name { get; init; }
     [JsonPropertyName("groups")] public required List<GroupInfo> Groups { get; init; }

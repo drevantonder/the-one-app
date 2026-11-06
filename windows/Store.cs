@@ -53,14 +53,14 @@ public sealed class Store
     public event Action<JsonNode>? Event;
 
     public Person? Me => State?.User;
-    public Install? Install => State?.Install;
+    public Network? Network => State?.Network;
     public Config? Config => State?.Config;
     public AppInfo? App(string? name) => AppList.FirstOrDefault(a => a.Name == name);
 
     /// Every page this person can read that this app's sign-in opens: theirs, their groups', then everyone's.
     public List<Page> Pages()
     {
-        var i = Install;
+        var i = Network;
         var u = Me;
         if (i == null || u == null) return [];
         var out_ = new List<Page> { new("user", "You") };
@@ -101,8 +101,8 @@ public sealed class Store
     {
         var early = State == null ? Node.Apps().ContinueWith<List<AppInfo>?>(t => t.IsCompletedSuccessfully ? t.Result : null) : null;
         var state = await Node.State();
-        var regrouped = JsonSerializer.Serialize(new object?[] { state.User?.Id, state.Install?.Groups.Select(g => g.Id + g.Members.Count) })
-            != JsonSerializer.Serialize(new object?[] { State?.User?.Id, State?.Install?.Groups.Select(g => g.Id + g.Members.Count) });
+        var regrouped = JsonSerializer.Serialize(new object?[] { state.User?.Id, state.Network?.Groups.Select(g => g.Id + g.Members.Count) })
+            != JsonSerializer.Serialize(new object?[] { State?.User?.Id, State?.Network?.Groups.Select(g => g.Id + g.Members.Count) });
         var first = State == null;
         State = state;
         if (first || regrouped || AppList.Count == 0) await RefreshApps(early);
@@ -120,7 +120,7 @@ public sealed class Store
     /// `read`.
     public async Task RefreshApps(Task<List<AppInfo>?>? early = null, bool read = false)
     {
-        if (Install == null) return;
+        if (Network == null) return;
         AppList = (early == null ? null : await early) ?? await Node.Apps();
         Changed?.Invoke();
         var reading = ReadWidgets();
@@ -168,7 +168,7 @@ public sealed class Store
     public async Task CaughtUp()
     {
         try { await RefreshState(); } catch { }
-        Event?.Invoke(new JsonObject { ["type"] = "install" });
+        Event?.Invoke(new JsonObject { ["type"] = "network" });
     }
 
     async Task Handle(JsonNode e)
@@ -177,7 +177,7 @@ public sealed class Store
         var type = e["type"]?.GetValue<string>();
         try
         {
-            if (type is "devices" or "install") await RefreshState();
+            if (type is "devices" or "network") await RefreshState();
             if (type == "changed")
             {
                 if ((e["apps"] as JsonArray)?.Count is null or 0) await RefreshState();

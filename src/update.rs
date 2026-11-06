@@ -880,8 +880,8 @@ fn quiet(cmd: &mut Command) -> bool {
 /// This user's own devices, as this one sees them now: none while its node restarts.
 fn devices() -> Vec<Value> {
     let state = get("/v1/state").unwrap_or_default();
-    let me = state["install"]["user"].clone();
-    state["install"]["devices"].as_array().into_iter().flatten().filter(|d| d["user"] == me).cloned().collect()
+    let me = state["network"]["user"].clone();
+    state["network"]["devices"].as_array().into_iter().flatten().filter(|d| d["user"] == me).cloned().collect()
 }
 
 /// Waits for each of `wanted` to say it runs `commit`, and reports each. True if any didn't.
@@ -957,7 +957,7 @@ fn wait_until(commit: &str, names: &[String], limit: Duration) -> Result<()> {
     let short = &commit[..commit.len().min(12)];
     // Says so when no node answers, which later polls (a node restarting on the new build) never do.
     get("/v1/state")?;
-    let all: Vec<Value> = devices().into_iter().filter(|d| d["service"].is_null()).collect();
+    let all: Vec<Value> = devices();
     ensure!(!all.is_empty(), "no devices are listed here yet");
     for n in names {
         ensure!(all.iter().any(|d| d["name"] == n.as_str()), "no device named {n}: {}", all.iter().filter_map(|d| d["name"].as_str()).collect::<Vec<_>>().join(", "));

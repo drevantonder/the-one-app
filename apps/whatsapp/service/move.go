@@ -80,7 +80,7 @@ type devices struct {
 func (l *link) devices() (devices, error) {
 	var state struct {
 		Device  struct{ Key, Name string }
-		Install struct {
+		Network struct {
 			Devices []struct {
 				Key, Name string
 				Online    bool
@@ -96,7 +96,7 @@ func (l *link) devices() (devices, error) {
 		return devices{}, fmt.Errorf("asking this device's node: %w", err)
 	}
 	s := devices{here: state.Device.Name}
-	for _, o := range state.Install.Devices {
+	for _, o := range state.Network.Devices {
 		if o.Key != state.Device.Key && o.Online && slices.Contains(o.Services, app) {
 			s.others = append(s.others, o.Name)
 		}

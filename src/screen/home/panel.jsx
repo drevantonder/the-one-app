@@ -42,10 +42,10 @@ const host = (p) => ({
   },
 })
 
-/// The person's devices but services' own endpoints, this one first.
+/// The person's devices, this one first.
 function devices() {
   const state = home.data.state, me = state?.user?.id, here = state?.device?.key
-  const mine = (state?.install?.devices || []).filter((d) => !d.service && (!d.user || d.user === me))
+  const mine = (state?.network?.devices || []).filter((d) => !d.user || d.user === me)
   return mine.map((d) => ({ key: d.key, name: String(d.name || "").replace(/\.local$/, ""), online: d.online === true, here: d.here === true || d.key === here }))
     .sort((a, b) => b.here - a.here || a.name.localeCompare(b.name))
 }

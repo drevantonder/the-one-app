@@ -85,16 +85,15 @@ export function AppPage({ name, list, onOpen, onGone, reloadList, bar = false })
   const tag = a.deleted ? "Deleted " + ago(a.deleted.time) : [a.tagline, !a.screens && "Tools\u00a0only"].filter(Boolean).join(" · ")
 
   // Schedules run only on a device chosen for the app's schedules: one that's on with none says so, with the fix.
-  // `kept_by` and `may_keep` are what nodes, older ones too, name them.
   // One a deploy removed no longer runs: it isn't the app's any more.
   const schedules = (health.data?.schedules || []).filter((s) => !s.removed)
-  const unrun = schedules.find((s) => !s.invalid && s.on && s.runs_as && !(s.kept_by || []).length && s.may_keep)
+  const unrun = schedules.find((s) => !s.invalid && s.on && s.runs_as && !(s.run_by || []).length && s.may_set_app_schedules)
   const manyPlaces = new Set(schedules.map((s) => s.scope)).size > 1
   const line = (s) => {
     if (s.invalid) return <span className="text-destructive">{s.invalid}</span>
     if (s.last && !s.last.ok) return <span className="text-destructive">Failed {ago(s.last.time)}: {said(s.last.error).title}</span>
     if (s.on && s.runs_as) {
-      return cap(s.when) + (manyPlaces ? " · " + s.scope_name : "") + (s.next ? " · next " + soon(s.next) : "") + ((s.kept_by || []).length ? " · on " + s.kept_by.join(", ") : "")
+      return cap(s.when) + (manyPlaces ? " · " + s.scope_name : "") + (s.next ? " · next " + soon(s.next) : "") + ((s.run_by || []).length ? " · on " + s.run_by.join(", ") : "")
     }
     if (s.on) return "Off. Switch it on to run it as you."
     return cap(s.when) + (s.switched ? " · off since " + ago(s.switched.time) : "")

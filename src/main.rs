@@ -220,7 +220,7 @@ else. Data goes to stdout, messages to stderr.
 /// refuses, since that relay would take no one.
 fn devices_here(settings: one::cloudflare::Settings, needed: bool) -> Result<one::cloudflare::Settings> {
     let state = get("/v1/state").unwrap_or_default();
-    let network = &state["install"];
+    let network = &state["network"];
     let admin = |user: &Value| network["users"].as_array().into_iter().flatten().any(|u| u["id"] == *user && u["role"] == "admin");
     let mut devices: Vec<Value> = ["devices", "clients"]
         .iter()
@@ -363,7 +363,7 @@ fn run(args: Vec<String>) -> Result<()> {
         ["status"] if flags.contains_key("until") => update::wait(&args)?,
         ["status"] => status(&get("/v1/state")?),
         ["apps"] => {
-            let groups = get("/v1/state")?["install"]["groups"].clone();
+            let groups = get("/v1/state")?["network"]["groups"].clone();
             // Where it's added, as the App Store says it: you, a group by its name, everyone.
             let place = |scope: &str| match scope.split_once(':') {
                 Some(("group", id)) => groups.as_array().into_iter().flatten().find(|g| g["id"] == id).and_then(|g| g["name"].as_str()).unwrap_or(id).to_string(),
@@ -393,7 +393,7 @@ fn run(args: Vec<String>) -> Result<()> {
         }
         ["settings"] => {
             let state = get("/v1/state")?;
-            for (name, value) in state["install"]["settings"].as_object().context("not in a network yet")? {
+            for (name, value) in state["network"]["settings"].as_object().context("not in a network yet")? {
                 println!("{name} = {value}");
             }
         }
@@ -531,7 +531,7 @@ fn run(args: Vec<String>) -> Result<()> {
             // only for it (`sign_in_proof::CLIENTS`), whatever sign-in says.
             if let Some((id, _)) = &settings.google {
                 let clients = format!("https://accounts.google.com {id}");
-                let had = get("/v1/state").ok().and_then(|s| s["install"]["settings"][one::sign_in_proof::CLIENTS].as_str().map(str::to_string));
+                let had = get("/v1/state").ok().and_then(|s| s["network"]["settings"][one::sign_in_proof::CLIENTS].as_str().map(str::to_string));
                 if had.as_deref() != Some(clients.as_str())
                     && let Err(err) = post("/v1/settings", json!({ "name": one::sign_in_proof::CLIENTS, "value": clients }))
                 {
@@ -792,11 +792,9 @@ fn run(args: Vec<String>) -> Result<()> {
         }
         ["services"] => {
             let state = get("/v1/state")?;
-            let all: Vec<Value> = state["install"]["devices"].as_array().cloned().unwrap_or_default();
-            for s in all.iter().filter(|s| s["service"].is_null()) {
-                let mut installed = s["installed_services"].as_array().cloned().unwrap_or_default();
-                // Its parts with keys of their own, as they say they are.
-                installed.extend(all.iter().filter(|p| p["device"] == s["key"]).flat_map(|p| p["installed_services"].as_array().cloned().unwrap_or_default()));
+            let all: Vec<Value> = state["network"]["devices"].as_array().cloned().unwrap_or_default();
+            for s in &all {
+                let installed = s["installed_services"].as_array().cloned().unwrap_or_default();
                 let off = s["off_services"].as_array().cloned().unwrap_or_default();
                 // What a device that says it can run, each on or off, and what it's doing or what went wrong.
                 if let Some(parts) = s["parts"].as_array() {
@@ -833,7 +831,7 @@ fn run(args: Vec<String>) -> Result<()> {
                 }
             }
             // The Cloudflare node, whose services an admin switches (`--device cloudflare`).
-            if let Some(parts) = state["install"]["serverless"]["parts"].as_array() {
+            if let Some(parts) = state["network"]["serverless"]["parts"].as_array() {
                 println!("Cloudflare");
                 for p in parts {
                     println!("  {}  {}", p["name"].as_str().unwrap_or(""), if p["on"] == true { "on" } else { "off" });
@@ -1108,7 +1106,7 @@ fn connection() -> String {
         return format!("Connected as {said}. {CLI} status shows your devices; {CLI} apps what you can run.");
     }
     let device = state["device"]["name"].as_str().unwrap_or("this device");
-    let i = &state["install"];
+    let i = &state["network"];
     if i.is_null() {
         return format!("{device} isn't in {YOURS} yet: {CLI} join <code> joins it, or {CLI} create <name> --as <your name> starts a new one.");
     }
@@ -1204,7 +1202,7 @@ fn sign_in(flags: &Map<String, Value>) -> Result<()> {
         None if !client_device::node_here() => one::sign_in::kept().map(|k| k.address).with_context(|| format!("{NAME} isn't running on this computer, so it signs in as one of your devices: give {YOURS}'s address, {CLI} sign-in --address https://…"))?,
         None => {
             let state = request(agent().get(format!("http://{}/v1/state", addr())).call())?;
-            state["install"]["settings"]["address"].as_str().context(format!("this network has no address to sign in at yet: give one with --address, or an admin sets it with {CLI} cloudflare use"))?.to_string()
+            state["network"]["settings"]["address"].as_str().context(format!("this network has no address to sign in at yet: give one with --address, or an admin sets it with {CLI} cloudflare use"))?.to_string()
         }
     };
     let join = (!client_device::node_here()).then(|| client_device::signing_in_for(&address)).transpose()?;
@@ -1266,7 +1264,7 @@ fn status(state: &Value) {
         Some(said) => println!("{said}"),
         None => println!("{} ({}){}", device["name"].as_str().unwrap_or(""), &device["key"].as_str().unwrap_or("")[..8], if device["ready"] == true { "" } else { ", not ready yet" }),
     }
-    let i = &state["install"];
+    let i = &state["network"];
     if i.is_null() {
         println!("\nNot in {YOURS} yet: {CLI} join <code> joins it with a pairing code, or {CLI} create <name> --as <your name> starts a new one.");
         return;
@@ -1289,25 +1287,23 @@ fn status(state: &Value) {
     }
     let apps = get("/v1/apps").ok().and_then(|a| a.as_array().cloned()).unwrap_or_default();
     let title = |app: &str| apps.iter().find(|a| a["name"] == app).and_then(|a| a["title"].as_str()).unwrap_or(app).to_string();
-    // A service has an endpoint of its own, which the node's list gives with the machines: a person reads it as a line
-    // under the node it runs on, with the ones switched off there.
+    // Each with a line of the services it runs, and the ones switched off there.
     let all = i["devices"].as_array().cloned().unwrap_or_default();
     println!("\nDevices");
-    for s in all.iter().filter(|s| s["service"].is_null()) {
+    for s in &all {
         let dot = if s["online"] == true { "●" } else { "○" };
         // As a device, the node that answered is "here" to itself, not to this computer.
         let here = if s["here"] == true && client_device::me().is_none() { " (this one)" } else { "" };
         let serves = if s["serves_me"] == true { "" } else { ", doesn't run yours" };
         let build = s["build"].as_str().map(|b| format!("  {b}")).unwrap_or_default();
         println!("  {dot} {}{here}  {}'s{serves}{build}", s["name"].as_str().unwrap_or(""), name(s["user"].as_str().unwrap_or("")));
-        // What it runs, as its own list says (its person's and the admins' to see), the services registered with it, and
-        // those with endpoints of their own; the app runtime isn't one.
+        // What it runs, as its own list says (its person's and the admins' to see), and the services it says run there;
+        // the app runtime isn't one.
         let named = |list: &Value, field: &str| list.as_array().into_iter().flatten().filter_map(|d| d[field].as_str().map(str::to_string)).collect::<Vec<_>>();
         let parts = s["parts"].as_array().cloned().unwrap_or_default();
         let off: std::collections::BTreeSet<String> = named(&s["off_services"], "name").into_iter().chain(parts.iter().filter(|p| p["on"] != true).filter_map(|p| p["name"].as_str().map(str::to_string))).collect();
         let on: std::collections::BTreeSet<String> = named(&s["installed_services"], "name")
             .into_iter()
-            .chain(all.iter().filter(|p| p["device"] == s["key"]).filter_map(|p| p["service"].as_str().map(str::to_string)))
             .chain(parts.iter().filter(|p| p["on"] == true).filter_map(|p| p["name"].as_str().map(str::to_string)))
             .filter(|n| !off.contains(n))
             .collect();
@@ -1367,7 +1363,7 @@ fn handled(v: &Value) -> String {
 }
 
 fn groups_said(state: &Value) -> String {
-    let i = &state["install"];
+    let i = &state["network"];
     let names: std::collections::HashMap<&str, String> = i["users"].as_array().into_iter().flatten().filter_map(|u| Some((u["id"].as_str()?, handled(u)))).collect();
     let me = i["user"].as_str();
     let mut users: Vec<&Value> = i["users"].as_array().into_iter().flatten().collect();
@@ -2125,7 +2121,7 @@ fn checked_said(r: &Value) -> String {
     let mut out = format!(
         "{}: {} came back, checked, from {:.1} MB there\n  ✓ every entry signed and in order, every blob as its hash says: {}\n",
         place,
-        r["install"].as_str().unwrap_or(""),
+        r["network"].as_str().unwrap_or(""),
         r["bytes"].as_f64().unwrap_or(0.0) / 1e6,
         scopes.join("; "),
     );

@@ -27,7 +27,7 @@ struct RootView: View {
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if store.install == nil || !store.signedIn {
+            } else if store.network == nil || !store.signedIn {
                 WelcomeView()
             } else {
                 MainView()
@@ -69,7 +69,7 @@ private struct MainView: View {
                 }
             }
         } detail: {
-            if store.install?.joining == true {
+            if store.network?.joining == true {
                 ContentUnavailableView {
                     Label("Joining…", systemImage: "arrow.trianglehead.2.clockwise")
                 } description: {
@@ -121,7 +121,7 @@ private struct WelcomeView: View {
                 }
             }
             .multilineTextAlignment(.center)
-            if store.install == nil {
+            if store.network == nil {
                 join
             } else {
                 signIn
@@ -133,7 +133,7 @@ private struct WelcomeView: View {
         .sheet(isPresented: $asking) { ConnectYourAISheet(prompt: agentPrompt(address: given.isEmpty ? nil : given)) }
         .onAppear {
             // The address this Mac's node is in, unless the person gave another.
-            let known = Auth.address ?? store.install?.settings?["address"].flatMap(URL.init(string:))
+            let known = Auth.address ?? store.network?.settings?["address"].flatMap(URL.init(string:))
             if address.isEmpty, let known { address = Self.shown(known) }
         }
     }

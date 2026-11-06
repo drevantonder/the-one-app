@@ -32,7 +32,7 @@ func (f *fakeNodes) node(t *testing.T, name string) string {
 		switch r.URL.Path {
 		case "/v1/state":
 			json.NewEncoder(w).Encode(map[string]any{"device": map[string]any{"key": name, "name": name},
-				"install": map[string]any{"devices": []map[string]any{
+				"network": map[string]any{"devices": []map[string]any{
 					{"key": "a", "name": "a", "online": true, "services": []string{app}},
 					{"key": "b", "name": "b", "online": true, "services": []string{app}},
 				}}})

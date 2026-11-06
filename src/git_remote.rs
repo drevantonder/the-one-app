@@ -54,7 +54,7 @@ pub fn run(args: &[String]) -> Result<i32> {
 fn here(asked: &str) -> Result<String> {
     if crate::client_device::node_here() {
         let state = crate::get("/v1/state")?;
-        let address = state["install"]["settings"]["address"].as_str().with_context(|| format!("this computer's {NAME} has no address yet: an admin sets it with {CLI} cloudflare use"))?;
+        let address = state["network"]["settings"]["address"].as_str().with_context(|| format!("this computer's {NAME} has no address yet: an admin sets it with {CLI} cloudflare use"))?;
         return Ok(address.trim_end_matches('/').to_string());
     }
     if !crate::client_device::active() {

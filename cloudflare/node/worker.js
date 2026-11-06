@@ -596,7 +596,7 @@ class Person {
   /// to hand this node, with 428.
   async onMachine(who, view, req, wait) {
     const scopes = this.callScopes(who, view, req);
-    const order = new Map(view.state.install.devices.map((d) => [d.key, d.order]));
+    const order = new Map(view.state.network.devices.map((d) => [d.key, d.order]));
     const runs = JSON.parse(runners(this.owner, who.user, JSON.stringify(scopes))).sort((a, b) => (order.get(a.key) ?? Infinity) - (order.get(b.key) ?? Infinity));
     if (!runs.length) return null;
     // The keys it was handed earlier count only while they last: once they've run out, a call passed on says no more
@@ -847,7 +847,7 @@ const plain = (d, view) => !d.uses?.apps?.length && servedHere(view, d) && !d.va
 
 /// Whether the service `name`, built for Cloudflare, runs here: an admin switched it on (src/state.rs:
 /// `serverless.parts`), and this node carries its build.
-const onHere = (view, name) => Object.hasOwn(services, name) && (view.state.install.serverless?.parts || []).some((p) => p.name === name && p.on);
+const onHere = (view, name) => Object.hasOwn(services, name) && (view.state.network.serverless?.parts || []).some((p) => p.name === name && p.on);
 
 /// Whether every service an app uses runs here.
 const servedHere = (view, d) => (d?.uses?.services || []).every((s) => onHere(view, s));
@@ -941,7 +941,7 @@ class ForCall extends RpcTarget {
         case "GET catalog":
           return Response.json(await this.run.apps());
         case "GET devices":
-          return Response.json(view.state.install.devices);
+          return Response.json(view.state.network.devices);
       }
       return new Response(`a Cloudflare node doesn't do ${path} for apps yet, and ${OFF}`, { status: 501 });
     } catch (err) {
@@ -1048,7 +1048,7 @@ async function route(p, request) {
   // person's that are on, as a node on a machine names those that run a call it can't (421).
   if (request.headers.get("x-one-elsewhere")) {
     const view = await p.networkFor(p.whom(request));
-    const theirs = view.state.install.devices.filter((d) => d.serves_me && !d.service).sort((a, b) => a.order - b.order).map((d) => d.key);
+    const theirs = view.state.network.devices.filter((d) => d.serves_me).sort((a, b) => a.order - b.order).map((d) => d.key);
     const on = new Set(await p.env.RELAY.connected(theirs));
     const elsewhere = theirs.filter((k) => on.has(k));
     if (elsewhere.length) return json({ error: "a machine does that", elsewhere }, 421);

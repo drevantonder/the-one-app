@@ -137,7 +137,7 @@ impl Node {
         })
         .await??;
         let dir = self.network_dir();
-        let mut file: NetworkFile = serde_json::from_slice(&std::fs::read(dir.join("install.json"))?)?;
+        let mut file: NetworkFile = serde_json::from_slice(&std::fs::read(dir.join(NETWORK_FILE))?)?;
         file.bucket = Some(fields.clone());
         self.save_network(&file)?;
         self.with(|i| {
@@ -196,7 +196,7 @@ impl Node {
         // Kept as this device's bucket only once its entries are there: stopped before, it starts with none again, and
         // moving again puts what's missing.
         let dir = self.network_dir();
-        let mut file: NetworkFile = serde_json::from_slice(&std::fs::read(dir.join("install.json"))?)?;
+        let mut file: NetworkFile = serde_json::from_slice(&std::fs::read(dir.join(NETWORK_FILE))?)?;
         file.bucket = Some(fields);
         self.save_network(&file)?;
         self.with(|i| {

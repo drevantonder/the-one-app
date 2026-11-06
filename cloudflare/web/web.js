@@ -466,7 +466,7 @@ const h = OneUI.react.createElement;
   const store = { state: null, apps: [], badges: {} };
 
   const me = () => store.state?.user;
-  const network = () => store.state?.install;
+  const network = () => store.state?.network;
   // The custom build's name, as the gateway's index.html says it, until the network's state does.
   const customBuild = { name: document.querySelector('meta[name="application-name"]')?.content || "", cli: document.querySelector('meta[name="one-cli"]')?.content || "" };
   const config = () => store.state?.config || customBuild;
@@ -494,7 +494,7 @@ const h = OneUI.react.createElement;
   function lastWindow() {
     try {
       const kept = JSON.parse(localStorage.getItem(LAST) || "null");
-      if (!kept?.state?.install) return false;
+      if (!kept?.state?.network) return false;
       Object.assign(store, kept);
       return true;
     } catch {
@@ -513,15 +513,15 @@ const h = OneUI.react.createElement;
     const [state, list] = await Promise.all([shared("/v1/state"), apps && !joining ? shared("/v1/apps").catch(() => null) : null]);
     // The nodes this browser asks itself, in the order things run on them, the Cloudflare node by its run priority
     // (last, unless an admin moved it).
-    const nodes = (state.install?.devices || []).filter((d) => d.serves_me).sort((a, b) => a.order - b.order).map((d) => d.key);
-    const last = state.install?.serverless?.key;
+    const nodes = (state.network?.devices || []).filter((d) => d.serves_me).sort((a, b) => a.order - b.order).map((d) => d.key);
+    const last = state.network?.serverless?.key;
     if (last && !nodes.includes(last)) nodes.push(last);
     const rank = (p) => (p === "last" ? 0xffffffff : p);
-    const ranks = Object.fromEntries((state.install?.devices || []).filter((d) => d.priority != null).map((d) => [d.key, rank(d.priority)]));
-    if (last) ranks[last] = rank(state.install.serverless.priority ?? "last");
+    const ranks = Object.fromEntries((state.network?.devices || []).filter((d) => d.priority != null).map((d) => [d.key, rank(d.priority)]));
+    if (last) ranks[last] = rank(state.network.serverless.priority ?? "last");
     nodes.sort((a, b) => (ranks[a] ?? 1) - (ranks[b] ?? 1));
     if (!native && state.user && nodes.length) net.nodes(state.user.id, nodes, ranks, last);
-    const regrouped = JSON.stringify([state.user, state.install?.groups]) !== JSON.stringify([store.state?.user, store.state?.install?.groups]);
+    const regrouped = JSON.stringify([state.user, state.network?.groups]) !== JSON.stringify([store.state?.user, store.state?.network?.groups]);
     store.state = state;
     // While it's being let in, its apps wait: they need the keys it's about to get.
     if (joining) return;
@@ -590,7 +590,7 @@ const h = OneUI.react.createElement;
     // What changed is asked for again, never shared from before.
     for (const path in recent) delete recent[path];
     for (const f of frames) f.frame.contentWindow?.postMessage({ oneEvent: event }, "*");
-    if (["devices", "install"].includes(event.type)) await refreshState();
+    if (["devices", "network"].includes(event.type)) await refreshState();
     if (event.type === "changed") {
       // The app's own widgets (the home screen's, the Widgets board's, the menu bar's) are drawn again too.
       native?.changed();

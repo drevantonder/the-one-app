@@ -822,7 +822,7 @@ impl Machine {
 
 /// This machine and the network's devices, as a `/v1/state` says.
 fn machines_in(st: &Value) -> (Machine, Vec<Machine>) {
-    let all: Vec<&Value> = st["install"]["devices"].as_array().map(|a| a.iter().collect()).unwrap_or_default();
+    let all: Vec<&Value> = st["network"]["devices"].as_array().map(|a| a.iter().collect()).unwrap_or_default();
     let mut here = all.iter().find(|d| d["here"] == true).map(|d| Machine::of(d)).unwrap_or_default();
     here.name = or(st["me"]["name"].as_str().unwrap_or_default(), &or(st["device"]["name"].as_str().unwrap_or_default(), &here.name));
     here.user = or(&here.user, st["user"]["id"].as_str().unwrap_or_default());
@@ -1041,7 +1041,7 @@ mod tests {
     #[test]
     fn what_a_service_endpoint_says_it_runs() {
         let st = json!({ "device": { "name": "mac", "runs_for": ["user:u1", "global"] }, "me": { "name": "mac" }, "user": { "id": "u1" },
-            "install": { "devices": [{ "name": "mac", "here": true, "online": true }] } });
+            "network": { "devices": [{ "name": "mac", "here": true, "online": true }] } });
         let (me, _) = machines_in(&st);
         assert!(runs_shared(&me.user, me.runs_for.as_deref().unwrap_or_default()));
     }

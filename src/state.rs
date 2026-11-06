@@ -54,8 +54,7 @@ pub fn state(m: Option<&ScopeDb>, user: &str, here: Here) -> Value {
         "me": here.me,
         "device": here.device,
         "user": m.and_then(|m| m.user(user)).map(|u| json!({ "id": u.id, "name": u.name, "role": u.role })),
-        // Still `install`, as every client and service of every age reads it.
-        "install": network,
+        "network": network,
         // Requests for an item waiting for this user to answer (see GET /v1/vault/requests).
         "vault_requests": here.waiting,
         // How this user arranged each of their pages (see `arrange`).
@@ -76,11 +75,11 @@ pub fn state(m: Option<&ScopeDb>, user: &str, here: Here) -> Value {
 fn network(m: &ScopeDb, me: &str, settings: &Map<String, Value>, here: &Here) -> Value {
     let set = rank::set(&m.settings());
     let switches = m.switches();
-    // Service endpoints are listed as devices too, offering their service.
+    // Only devices: a service with an endpoint of its own is part of one, and its device says it runs it.
     let mut devices: Vec<Value> = m
         .machines()
         .iter()
-        .filter(|s| !s.removed && (s.is(Kind::Compute) || s.is(Kind::Service)))
+        .filter(|s| !s.removed && s.is(Kind::Compute))
         .map(|s| {
             let mut now = (here.device_now)(s);
             // A device that hasn't said what it is, as one that's always on.
@@ -88,7 +87,7 @@ fn network(m: &ScopeDb, me: &str, settings: &Map<String, Value>, here: &Here) ->
             let mut device = json!({
                 "kind": kind, "priority": rank::priority(&set, &hex(&s.key)).to_value(), "far": false, "since": s.since,
                 "key": hex(&s.key), "seal": hex(&s.seal), "name": s.name, "user": s.user, "me": false, "here": false, "online": false,
-                "roles": s.roles, "service": s.service, "device": s.device.as_ref().map(hex), "serves_me": m.serves(&s.key, me),
+                "roles": s.roles, "serves_me": m.serves(&s.key, me),
                 "runs_for": m.run_by(&s.key).iter().map(|scope| scope.to_string()).collect::<Vec<_>>(),
                 "build": null, "target": null, "services": [], "installed_services": [],
                 "off_services": switches.iter().filter(|((k, _), d)| *k == s.key && !d.on).map(|((_, name), d)| json!({ "name": name, "time": d.time })).collect::<Vec<_>>(),
@@ -152,8 +151,8 @@ fn network(m: &ScopeDb, me: &str, settings: &Map<String, Value>, here: &Here) ->
         "users": users, "groups": groups, "devices": devices, "devices_at": m.devices_at(), "clients": clients,
         // App schedules in the scopes this person may set them in: which endpoint runs which app's schedules in which
         // scope, until when, and who set them. Ones whose endpoint is gone, or whose setter may set them no more, are
-        // over. Named `grants` still, as older clients read it.
-        "grants": m.app_schedules().iter().filter(|((k, s, _), g)| m.may(me, "keep", &object(s)) && m.machine(k).is_some() && m.may(&g.by, "keep", &object(s))).map(|((k, s, a), g)| json!({ "endpoint": hex(k), "scope": s.to_string(), "app": a, "until": g.until, "by": g.by, "keys": g.hashes })).collect::<Vec<_>>(),
+        // over.
+        "app_schedules": m.app_schedules().iter().filter(|((k, s, _), g)| m.may(me, "keep", &object(s)) && m.machine(k).is_some() && m.may(&g.by, "keep", &object(s))).map(|((k, s, a), g)| json!({ "endpoint": hex(k), "scope": s.to_string(), "app": a, "until": g.until, "by": g.by, "keys": g.hashes })).collect::<Vec<_>>(),
         "entries": here.entries, "settings": settings,
         // The Cloudflare node, once an admin deployed one (`cloudflare node deploy` sets `serverless`, which clients read here by that name).
         // Its parts, as a device's oned lists its own: it always runs apps, and an admin switches on each service built

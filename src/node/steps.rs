@@ -85,7 +85,7 @@ impl Node {
     }
 
     fn kept_path(&self, scope: &Scope) -> PathBuf {
-        self.0.dir.join("install").join("scope-kept").join(data_encoding::HEXLOWER.encode(scope.to_string().as_bytes()))
+        self.network_dir().join("scope-kept").join(data_encoding::HEXLOWER.encode(scope.to_string().as_bytes()))
     }
 
     fn keep_scope_db(&self, scope: &Scope, kept: &Value) {
@@ -107,7 +107,7 @@ impl Node {
             tracing::warn!("who's who this device kept: {err:#}: it's read again from the bucket");
             return;
         }
-        let Ok(dir) = std::fs::read_dir(self.0.dir.join("install").join("scope-kept")) else { return };
+        let Ok(dir) = std::fs::read_dir(self.network_dir().join("scope-kept")) else { return };
         for file in dir.flatten() {
             let Some(scope) = data_encoding::HEXLOWER.decode(file.file_name().as_encoded_bytes()).ok().and_then(|b| String::from_utf8(b).ok()).and_then(|s| Scope::parse(&s).ok()) else { continue };
             if scope == Scope::Global {

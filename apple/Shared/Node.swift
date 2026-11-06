@@ -16,7 +16,7 @@ struct NodeState: Decodable, Sendable, Equatable {
     var host: Machine?
     /// The user this machine was admitted for, once it is in a network.
     var user: Person?
-    var install: Install?
+    var network: Network?
     /// How many requests for a Vault item wait for this user.
     var vaultRequests: Int?
     /// How this user arranged each page, by scope; nil from a device too old to keep arrangements.
@@ -31,7 +31,7 @@ struct NodeState: Decodable, Sendable, Equatable {
     var waitingRequests: Int { vaultRequests ?? 0 }
 
     enum CodingKeys: String, CodingKey {
-        case config, machine = "me", host = "device", user, install, vaultRequests = "vault_requests", arrangements, backups
+        case config, machine = "me", host = "device", user, network, vaultRequests = "vault_requests", arrangements, backups
         case settingsItems = "settings_items", agentPrompt = "agent_prompt"
     }
 }
@@ -83,7 +83,7 @@ struct Person: Codable, Sendable, Equatable, Identifiable {
     var admin: Bool { role == "admin" }
 }
 
-struct Install: Codable, Sendable, Equatable {
+struct Network: Codable, Sendable, Equatable {
     var name: String
     var users: [Person]
     var groups: [GroupInfo]
@@ -123,8 +123,6 @@ struct Device: Codable, Sendable, Equatable, Identifiable {
     var online: Bool?
     /// The scopes whose calls it runs (`user:<id>`, `group:<id>`, `global`).
     var runs_for: [String]?
-    /// For a service endpoint, the service it offers (`whatsapp`); its `name` is its machine's.
-    var service: String?
     var target: String?
 
     var id: String { key }

@@ -176,7 +176,7 @@ final class Store {
     }
 
     var config: Config? { state?.config }
-    var install: Install? { state?.install }
+    var network: Network? { state?.network }
     var me: Person? { state?.user }
 
     func app(_ name: String) -> AppInfo? { apps.first { $0.name == name } }
@@ -187,9 +187,9 @@ final class Store {
 
     /// Every page this user can read: theirs, their groups' in their order, then everyone's.
     var allPages: [Page] {
-        guard let install, let me else { return [] }
+        guard let network, let me else { return [] }
         let order = arrangements["user"]?.pages?.order ?? []
-        let mine = install.groups.filter { $0.role(of: me.id) != nil }
+        let mine = network.groups.filter { $0.role(of: me.id) != nil }
             .sorted { (order.firstIndex(of: "group:\($0.id)") ?? .max, $0.name) < (order.firstIndex(of: "group:\($1.id)") ?? .max, $1.name) }
         var pages = [Page(scope: "user", title: String(localized: "You"))]
         pages += mine.map { Page(scope: "group:\($0.id)", title: $0.name) }
@@ -386,7 +386,7 @@ final class Store {
 
     /// The window as it was last (`KeptWindow`), drawn before the node first answers.
     private func drawKept() {
-        guard state == nil, signedIn, let state = KeptWindow.read("state", as: NodeState.self), state.install != nil else { return }
+        guard state == nil, signedIn, let state = KeptWindow.read("state", as: NodeState.self), state.network != nil else { return }
         self.state = state
         apps = KeptWindow.read("apps", as: [AppInfo].self) ?? []
         widgets = KeptWindow.read("widgets", as: [String: [WidgetInfo]].self) ?? [:]
@@ -419,8 +419,8 @@ final class Store {
         let state = try kept("state", answer, since: began)
         let first = !answered
         answered = true
-        let arrived = self.state?.install?.joining != false && state.install?.joining == false
-        let regrouped = state.user != self.state?.user || state.install?.groups != self.state?.install?.groups
+        let arrived = self.state?.network?.joining != false && state.network?.joining == false
+        let regrouped = state.user != self.state?.user || state.network?.groups != self.state?.network?.groups
         self.state = state
         arrangements = state.arrangements ?? [:]
         phase = .ready
@@ -443,7 +443,7 @@ final class Store {
         if let json = try? JSONEncoder().encode(event) {
             NotificationCenter.default.post(name: .nodeEvent, object: String(decoding: json, as: UTF8.self))
         }
-        if ["devices", "install"].contains(event.type) { try? await refreshState() }
+        if ["devices", "network"].contains(event.type) { try? await refreshState() }
         // Installs, deploys and data all arrive as changes; the node's own entries (a request for an item) change no app.
         if event.type == "changed" {
             let apps = event.apps ?? []
@@ -485,7 +485,7 @@ final class Store {
     // MARK: Apps
 
     func refreshApps(early: [AppInfo]? = nil) async {
-        guard install != nil, signedIn else { return }
+        guard network != nil, signedIn else { return }
         let began = session
         do {
             let apps = if let early { early } else { try kept("apps", try await node.apps(), since: began) }
@@ -505,7 +505,7 @@ final class Store {
     }
 
     func refreshWidgets() async {
-        guard let install, !install.joining, signedIn else { return }
+        guard let network, !network.joining, signedIn else { return }
         let node = node, began = session
         var fresh: [String: [WidgetInfo]] = [:]
         var answered = true

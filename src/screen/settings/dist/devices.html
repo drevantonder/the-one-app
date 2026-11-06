@@ -48,38 +48,30 @@ function B(e) {
 }
 var V = {}, H = 3e4, U = 1e4;
 function W(e, t) {
-	let { state: n, device: r, apps: i, seen: a, seenRead: o } = e, s = n.user?.id, c = n.user?.role === "admin", l = (e) => i.find((t) => t.name === e), u = (e) => l(e)?.title || e, d = (e) => (e.runs_for || []).includes(`user:${s}`), f = (e) => n.install?.users.find((t) => t.id === e)?.name || "someone";
+	let { state: n, device: r, apps: i, seen: a, seenRead: o } = e, s = n.user?.id, c = n.user?.role === "admin", l = (e) => i.find((t) => t.name === e), u = (e) => l(e)?.title || e, d = (e) => (e.runs_for || []).includes(`user:${s}`), f = (e) => n.network?.users.find((t) => t.id === e)?.name || "someone";
 	function p() {
 		let e = (e) => ({
 			...e,
 			me: e.me || [r.key, n.me?.key].includes(e.key)
-		}), t = (n.install?.devices || []).map(e), i = (n.install?.clients || []).map(e), l = [], u = [], f = [], p = (e, t) => {
+		}), t = (n.network?.devices || []).map(e), i = (n.network?.clients || []).map(e), l = [], u = [], f = [], p = (e, t) => {
 			let n = {
 				user: e,
 				name: k(t),
 				node: null,
-				services: [],
 				clients: []
 			};
 			return l.push(n), n;
 		}, m = /* @__PURE__ */ new Map();
 		for (let e of t.filter((e) => (e.roles || []).includes("compute"))) m.set(e.key, Object.assign(p(e.user, e.name), { node: e }));
-		let h = (e) => (m.get(e.device)?.node?.off_services || []).some((t) => t.name === e.service);
-		for (let e of t.filter((e) => e.service && !h(e))) (m.get(e.device) || p(e.user, e.name)).services.push(e);
 		for (let e of i) e.passkey || P.test(e.name) ? u.push(e) : !e.device && !e.me && o && Date.now() - Math.max(a[e.key] || 0, e.since || 0) > 6048e5 ? f.push(e) : (e.device && !m.has(e.device) && m.set(e.device, p(e.user, e.name)), (m.get(e.device) || p(e.user, e.name)).clients.push(e));
 		for (let e of l) {
-			let t = [e.node, ...e.services].filter(Boolean);
-			e.id = t[0]?.key || e.clients[0]?.key, e.keys = [
-				...e.services,
-				...e.clients,
-				e.node
-			].filter(Boolean).map((e) => e.key), e.me = [...t, ...e.clients].some((e) => e.me), e.online = t.some((e) => e.online), e.runs = t.length > 0, e.priority = e.node?.priority ?? e.services[0]?.priority ?? (e.runs ? 1 : null);
-			let n = [...e.clients].sort((e, t) => t.me - e.me || (a[t.key] || 0) - (a[e.key] || 0) || (t.since || 0) - (e.since || 0));
-			e.signIn = n[0] || null, e.old = n.slice(1), e.seen = Math.max(0, ...e.keys.map((e) => a[e] || 0)), e.icon = e.node ? L(e.node.kind === "laptop" ? "laptop" : /apple|windows/.test(e.node.target || "") ? "desktop" : "hard-drives", F(e.node.target, e.name), !e.online) : e.runs ? L("hard-drives", "", !e.online) : L(I(e.signIn?.name || e.name), F("", e.signIn?.name || e.name));
+			e.id = e.node?.key || e.clients[0]?.key, e.keys = [...e.clients, e.node].filter(Boolean).map((e) => e.key), e.me = [e.node, ...e.clients].some((e) => e?.me), e.online = !!e.node?.online, e.runs = !!e.node, e.priority = e.node?.priority ?? null;
+			let t = [...e.clients].sort((e, t) => t.me - e.me || (a[t.key] || 0) - (a[e.key] || 0) || (t.since || 0) - (e.since || 0));
+			e.signIn = t[0] || null, e.old = t.slice(1), e.seen = Math.max(0, ...e.keys.map((e) => a[e] || 0)), e.icon = e.node ? L(e.node.kind === "laptop" ? "laptop" : /apple|windows/.test(e.node.target || "") ? "desktop" : "hard-drives", F(e.node.target, e.name), !e.online) : e.runs ? L("hard-drives", "", !e.online) : L(I(e.signIn?.name || e.name), F("", e.signIn?.name || e.name));
 		}
-		let g = l.filter((e) => e.user === s || e.node && (c || d(e.node)));
-		return g.sort((e, t) => (e.runs ? M(e.priority) : 2e3) - (t.runs ? M(t.priority) : 2e3) || e.name.localeCompare(t.name)), {
-			cards: g,
+		let h = l.filter((e) => e.user === s || e.node && (c || d(e.node)));
+		return h.sort((e, t) => (e.runs ? M(e.priority) : 2e3) - (t.runs ? M(t.priority) : 2e3) || e.name.localeCompare(t.name)), {
+			cards: h,
 			browsers: u.filter((e) => e.user === s),
 			stale: f.filter((e) => e.user === s)
 		};
@@ -112,29 +104,18 @@ function W(e, t) {
 				device: e.node.key,
 				name: t.name
 			}
-		})) : [
-			...e.node ? [{
-				name: "apps",
-				on: !0,
-				fixed: !0
-			}] : [],
-			...(e.node?.installed_services || []).map((t) => ({
-				name: t.name,
-				on: !0,
-				part: {
-					service: t.name,
-					device: e.node.key
-				}
-			})),
-			...e.services.map((e) => ({
-				name: e.service,
-				on: !0,
-				part: {
-					service: e.service,
-					device: e.device
-				}
-			}))
-		];
+		})) : [...e.node ? [{
+			name: "apps",
+			on: !0,
+			fixed: !0
+		}] : [], ...(e.node?.installed_services || []).map((t) => ({
+			name: t.name,
+			on: !0,
+			part: {
+				service: t.name,
+				device: e.node.key
+			}
+		}))];
 	}
 	function v(e, n) {
 		let r = g(n), i = n.part, a = (e, n) => ({
@@ -166,8 +147,8 @@ function W(e, t) {
 			icon: e.icon,
 			whose: e.user === s ? "" : `${f(e.user)}’s`,
 			p: e.priority,
-			keys: [e.node, ...e.services].filter(Boolean).map((e) => e.key)
-		})), t = n.install?.serverless;
+			keys: [e.node.key]
+		})), t = n.network?.serverless;
 		return t && e.push({
 			id: "cloudflare",
 			name: "Cloudflare",
@@ -186,7 +167,7 @@ function W(e, t) {
 			name: e.name,
 			icon: e.icon,
 			parts: _(e)
-		})), t = n.install?.serverless;
+		})), t = n.network?.serverless;
 		if ((e.length || c) && t) {
 			let n = (t.parts || [{
 				name: "apps",
@@ -213,7 +194,7 @@ function W(e, t) {
 	}
 	function S() {
 		let e = Date.now() - 864e5;
-		return (n.install?.clients || []).filter((t) => t.user === s && !t.passkey && !t.me && (t.since || 0) > e && ![r.key, n.me?.key].includes(t.key)).sort((e, t) => t.since - e.since);
+		return (n.network?.clients || []).filter((t) => t.user === s && !t.passkey && !t.me && (t.since || 0) > e && ![r.key, n.me?.key].includes(t.key)).sort((e, t) => t.since - e.since);
 	}
 	return {
 		me: s,
@@ -229,13 +210,12 @@ function W(e, t) {
 		board: b,
 		gridColumns: x,
 		justJoined: S,
-		deviceName: (e) => e.service ? `${u(e.service)} on ${k(e.name)}` : k(e.name),
-		forWhom: (e) => e === `user:${s}` ? "you" : e === "global" ? "everyone" : n.install?.groups.find((t) => `group:${t.id}` === e)?.name || "a group",
+		forWhom: (e) => e === `user:${s}` ? "you" : e === "global" ? "everyone" : n.network?.groups.find((t) => `group:${t.id}` === e)?.name || "a group",
 		scheduled: (e = `user:${s}`) => i.filter((t) => (t.schedules || []).some((t) => t.scope === e && !t.removed)),
-		runners: (e) => (n.install?.devices || []).filter((t) => (t.runs_for || []).includes(e))
+		runners: (e) => (n.network?.devices || []).filter((t) => (t.runs_for || []).includes(e))
 	};
 }
-function ee() {
+function G() {
 	let [e, i] = r(null), [a, o] = r(null), [s, c] = r(""), [l, u] = r([
 		"devices",
 		"priority",
@@ -293,7 +273,7 @@ function ee() {
 			x({ error: D(e) });
 		}
 	}
-	async function ee(e, t, n = null) {
+	async function G(e, t, n = null) {
 		let r = `${e.device} ${e.name ?? e.service}`, i = Date.now();
 		V[r] = {
 			on: t,
@@ -317,13 +297,13 @@ function ee() {
 			one.tap("error");
 		}
 	}
-	let K = e && W(e, (e, t, n) => () => z(() => ee(e, t, n)));
-	function q(t, n) {
-		let { cols: r, last: a } = K.board(), o = [...r.flat(), ...a].find((e) => e.id === t);
+	let q = e && W(e, (e, t, n) => () => z(() => G(e, t, n)));
+	function J(t, n) {
+		let { cols: r, last: a } = q.board(), o = [...r.flat(), ...a].find((e) => e.id === t);
 		if (!o) return;
 		let s = r.map((e) => e.filter((e) => e.id !== t)), c = a.filter((e) => e.id !== t);
 		n === "last" ? c.push(o) : n === "new" ? s.push([o]) : s[Number(n)]?.push(o), s = s.filter((e) => e.length);
-		let l = e.state.install, u = {};
+		let l = e.state.network, u = {};
 		try {
 			u = JSON.parse(l.settings?.priority || "{}") || {};
 		} catch {}
@@ -334,7 +314,7 @@ function ee() {
 			...e,
 			state: {
 				...e.state,
-				install: {
+				network: {
 					...l,
 					devices: (l.devices || []).map((e) => e.key in u ? {
 						...e,
@@ -355,11 +335,11 @@ function ee() {
 			value: f
 		})));
 	}
-	let J = n(0);
-	async function Y(e, t) {
-		if (Date.now() - J.current < 800) return;
-		J.current = Date.now();
-		let { cols: n } = K.board(), r = n.findIndex((t) => t.some((t) => t.id === e)), i = r !== n.length - 1 || n[r].length !== 1, a = [
+	let Y = n(0);
+	async function X(e, t) {
+		if (Date.now() - Y.current < 800) return;
+		Y.current = Date.now();
+		let { cols: n } = q.board(), r = n.findIndex((t) => t.some((t) => t.id === e)), i = r !== n.length - 1 || n[r].length !== 1, a = [
 			...n.map((e, t) => t),
 			...i ? ["new"] : [],
 			"last"
@@ -374,13 +354,13 @@ function ee() {
 			title: j(e + 1),
 			checked: e === r
 		}), s = await one.menu(o, t).catch(() => null);
-		J.current = Date.now(), s != null && q(e, a[s]);
+		Y.current = Date.now(), s != null && J(e, a[s]);
 	}
-	pe(L, (e, t) => G.current.place(e, t), (e, t) => G.current.moveMenu(e, t)), G.current = {
-		place: (...e) => q(...e),
-		moveMenu: (...e) => Y(...e)
+	pe(L, (e, t) => K.current.place(e, t), (e, t) => K.current.moveMenu(e, t)), K.current = {
+		place: (...e) => J(...e),
+		moveMenu: (...e) => X(...e)
 	};
-	async function X(e, t, n) {
+	async function Z(e, t, n) {
 		let r = t ? [] : [{
 			title: "Rename",
 			icon: "pencil-simple"
@@ -398,9 +378,9 @@ function ee() {
 			danger: !0
 		});
 		let a = await one.menu(r, n).catch(() => null);
-		a != null && (r[a].title === "Rename" ? A({ rename: e }) : r[a].title === "Sign-ins…" ? A({ signIns: i }) : e.me ? se() : Z(e.name, t ? [e.key] : e.keys, !t && e.node && e.online ? e.node.key : null));
+		a != null && (r[a].title === "Rename" ? A({ rename: e }) : r[a].title === "Sign-ins…" ? A({ signIns: i }) : e.me ? se() : ae(e.name, t ? [e.key] : e.keys, !t && e.node && e.online ? e.node.key : null));
 	}
-	async function Z(e, t, n) {
+	async function ae(e, t, n) {
 		if (n) return A({ remove: {
 			name: e,
 			keys: t,
@@ -432,10 +412,10 @@ function ee() {
 		}) && one.signOut();
 	}
 	function ce(e) {
-		let t = e.slice(0, e.indexOf(" ")), n = e.slice(e.indexOf(" ") + 1), r = K.gridColumns()[t], i = r?.parts.find((e) => e.name === n);
+		let t = e.slice(0, e.indexOf(" ")), n = e.slice(e.indexOf(" ") + 1), r = q.gridColumns()[t], i = r?.parts.find((e) => e.name === n);
 		if (i) {
-			if (r.c && K.problemOf(r.c, i)) return g(h === e ? "" : e);
-			!i.fixed && i.part && (one.tap(), z(() => ee(i.part, !i.on)));
+			if (r.c && q.problemOf(r.c, i)) return g(h === e ? "" : e);
+			!i.fixed && i.part && (one.tap(), z(() => G(i.part, !i.on)));
 		}
 	}
 	let le = async (e, t) => {
@@ -450,22 +430,22 @@ function ee() {
 		}
 	}) : /* @__PURE__ */ w(p, { rows: 3 });
 	else {
-		let { waiting: t, device: n } = e, r = K.justJoined();
+		let { waiting: t, device: n } = e, r = q.justJoined();
 		Q = /* @__PURE__ */ T(C, { children: [
-			!!t.length && /* @__PURE__ */ w(te, {
+			!!t.length && /* @__PURE__ */ w(ee, {
 				title: "Waiting for you",
-				children: t.map((e) => /* @__PURE__ */ w(ne, {
+				children: t.map((e) => /* @__PURE__ */ w(te, {
 					r: e,
 					busy: N === e.code,
 					answer: le
 				}, e.code))
 			}),
-			r.map((e) => /* @__PURE__ */ w(re, {
+			r.map((e) => /* @__PURE__ */ w(ne, {
 				c: e,
-				remove: () => Z(e.name, [e.key], null)
+				remove: () => ae(e.name, [e.key], null)
 			}, e.key)),
 			_?.error && /* @__PURE__ */ w(m, { title: _.error }),
-			_?.r && /* @__PURE__ */ w(ie, {
+			_?.r && /* @__PURE__ */ w(re, {
 				scan: _,
 				done: () => (x(null), R()),
 				cancel: () => x(null)
@@ -492,21 +472,21 @@ function ee() {
 				})
 			}),
 			l === "priority" ? /* @__PURE__ */ w(de, {
-				m: K,
-				move: Y
+				m: q,
+				move: X
 			}) : l === "services" ? /* @__PURE__ */ w(he, {
-				m: K,
+				m: q,
 				cellOpen: h,
 				tap: ce
-			}) : /* @__PURE__ */ w(ae, {
-				m: K,
+			}) : /* @__PURE__ */ w(ie, {
+				m: q,
 				data: e,
 				opened: d,
 				flag: (e) => f((t) => ({
 					...t,
 					[e]: !t[e]
 				})),
-				menu: X,
+				menu: Z,
 				removeOld: oe,
 				signOut: se,
 				add: () => A({ add: !0 }),
@@ -530,25 +510,25 @@ function ee() {
 				setOpen: M,
 				done: () => (M(!1), R())
 			}, k.n),
-			e && k.for?.remove && /* @__PURE__ */ w(Se, {
+			e && k.for?.remove && /* @__PURE__ */ w(xe, {
 				...k.for.remove,
 				open: k.open,
 				setOpen: M,
 				done: () => (M(!1), R())
 			}, k.n),
-			e && k.for?.signIns && /* @__PURE__ */ w(Ce, {
+			e && k.for?.signIns && /* @__PURE__ */ w(Se, {
 				clients: k.for.signIns,
 				open: k.open,
 				setOpen: M,
 				done: () => (M(!1), R())
 			}, k.n),
-			e && k.for?.add && /* @__PURE__ */ w(Te, {
+			e && k.for?.add && /* @__PURE__ */ w(we, {
 				data: e,
 				open: k.open,
 				setOpen: M
 			}, k.n),
-			e && k.for?.schedules && /* @__PURE__ */ w(De, {
-				m: K,
+			e && k.for?.schedules && /* @__PURE__ */ w(Ee, {
+				m: q,
 				asked: k.for.schedules,
 				open: k.open,
 				setOpen: M,
@@ -557,10 +537,10 @@ function ee() {
 		]
 	});
 }
-var G = { current: {
+var K = { current: {
 	place() {},
 	moveMenu() {}
-} }, te = (t) => {
+} }, ee = (t) => {
 	let n = e(8), { title: r, children: i, className: a } = t, o;
 	n[0] === a ? o = n[1] : (o = x("flex flex-col gap-2", a), n[0] = a, n[1] = o);
 	let s;
@@ -573,13 +553,13 @@ var G = { current: {
 		className: o,
 		children: [s, i]
 	}), n[4] = i, n[5] = o, n[6] = s, n[7] = c) : c = n[7], c;
-}, K = (t) => {
+}, q = (t) => {
 	let n = e(2), { children: r } = t, i;
 	return n[0] === r ? i = n[1] : (i = /* @__PURE__ */ w("p", {
 		className: "max-w-2xl text-sm text-muted-foreground",
 		children: r
 	}), n[0] = r, n[1] = i), i;
-}, q = (t) => {
+}, J = (t) => {
 	let n = e(6), { icon: r, onClick: i, children: a } = t, o;
 	n[0] === r ? o = n[1] : (o = /* @__PURE__ */ w(c, {
 		name: r,
@@ -592,7 +572,7 @@ var G = { current: {
 		children: [o, a]
 	}), n[2] = a, n[3] = i, n[4] = o, n[5] = s) : s = n[5], s;
 };
-function J(t) {
+function Y(t) {
 	let n = e(4), { className: r } = t, i, a;
 	n[0] === Symbol.for("react.memo_cache_sentinel") ? (i = /* @__PURE__ */ w("path", {
 		fill: "#F38020",
@@ -609,13 +589,13 @@ function J(t) {
 		children: [i, a]
 	}), n[2] = r, n[3] = o), o;
 }
-function Y(t) {
+function X(t) {
 	let n = e(16), { icon: r, className: i } = t;
 	if (r.cloud) {
 		let e;
 		n[0] === i ? e = n[1] : (e = x("grid size-8 shrink-0 place-items-center", i), n[0] = i, n[1] = e);
 		let t;
-		n[2] === Symbol.for("react.memo_cache_sentinel") ? (t = /* @__PURE__ */ w(J, { className: "size-8" }), n[2] = t) : t = n[2];
+		n[2] === Symbol.for("react.memo_cache_sentinel") ? (t = /* @__PURE__ */ w(Y, { className: "size-8" }), n[2] = t) : t = n[2];
 		let r;
 		return n[3] === e ? r = n[4] : (r = /* @__PURE__ */ w("span", {
 			className: e,
@@ -640,9 +620,9 @@ function Y(t) {
 		children: [s, l]
 	}), n[12] = o, n[13] = s, n[14] = l, n[15] = u) : u = n[15], u;
 }
-function X(t) {
+function Z(t) {
 	let n = e(13), { icon: r, title: i, sub: a, children: o } = t, s;
-	n[0] === r ? s = n[1] : (s = /* @__PURE__ */ w(Y, { icon: r }), n[0] = r, n[1] = s);
+	n[0] === r ? s = n[1] : (s = /* @__PURE__ */ w(X, { icon: r }), n[0] = r, n[1] = s);
 	let c;
 	n[2] === i ? c = n[3] : (c = /* @__PURE__ */ w("span", {
 		className: "block truncate font-medium",
@@ -668,13 +648,13 @@ function X(t) {
 		]
 	}), n[9] = o, n[10] = s, n[11] = u, n[12] = d) : d = n[12], d;
 }
-function ne(t) {
+function te(t) {
 	let n = e(46), { r, busy: i, answer: a } = t, s = r.yours ? "" : `${r.person}’s first device`, c;
 	n[0] !== r.place || n[1] !== s ? (c = [s, r.place].filter(Boolean), n[0] = r.place, n[1] = s, n[2] = c) : c = n[2];
 	let l = c.join(" · "), u = `${r.device} wants to join`, d;
 	n[3] === r.device ? d = n[4] : (d = R(r.device), n[3] = r.device, n[4] = d);
 	let f;
-	n[5] === d ? f = n[6] : (f = /* @__PURE__ */ w(Y, { icon: d }), n[5] = d, n[6] = f);
+	n[5] === d ? f = n[6] : (f = /* @__PURE__ */ w(X, { icon: d }), n[5] = d, n[6] = f);
 	let p;
 	n[7] === r.device ? p = n[8] : (p = /* @__PURE__ */ w("span", {
 		className: "block font-medium break-words",
@@ -750,7 +730,7 @@ function ne(t) {
 		]
 	}), n[41] = v, n[42] = y, n[43] = k, n[44] = u, n[45] = A) : A = n[45], A;
 }
-function re(t) {
+function ne(t) {
 	let n = e(14), { c: r, remove: i } = t, a;
 	n[0] === r.name ? a = n[1] : (a = R(r.name), n[0] = r.name, n[1] = a);
 	let s = `${r.name} joined`, c = r.place, l;
@@ -766,14 +746,14 @@ function re(t) {
 		children: "Remove"
 	}), n[7] = i, n[8] = p);
 	let m;
-	return n[9] !== a || n[10] !== s || n[11] !== f || n[12] !== p ? (m = /* @__PURE__ */ w(d, { children: /* @__PURE__ */ w(X, {
+	return n[9] !== a || n[10] !== s || n[11] !== f || n[12] !== p ? (m = /* @__PURE__ */ w(d, { children: /* @__PURE__ */ w(Z, {
 		icon: a,
 		title: s,
 		sub: f,
 		children: p
 	}) }), n[9] = a, n[10] = s, n[11] = f, n[12] = p, n[13] = m) : m = n[13], m;
 }
-function ie(t) {
+function re(t) {
 	let n = e(29), { scan: i, done: a, cancel: s } = t, { code: c, r: l } = i, [u, d] = r(!1), [f, p] = r(""), h;
 	n[0] !== c || n[1] !== a ? (h = async function() {
 		one.tap(), d(!0), p("");
@@ -836,28 +816,28 @@ function ie(t) {
 		]
 	}), n[24] = M, n[25] = v, n[26] = S, n[27] = C, n[28] = N) : N = n[28], N;
 }
-function ae(t) {
+function ie(t) {
 	let n = e(56), { m: r, data: i, opened: a, flag: s, menu: l, removeOld: u, signOut: f, add: p, schedule: m, act: h } = t, { device: g, state: _, passkey: v } = i, { cards: y, browsers: b, stale: S } = r.drawn, C;
-	if (n[0] !== h || n[1] !== p || n[2] !== b || n[3] !== y || n[4] !== i.seen || n[5] !== g || n[6] !== s || n[7] !== r || n[8] !== l || n[9] !== a || n[10] !== v || n[11] !== u || n[12] !== m || n[13] !== f || n[14] !== S || n[15] !== _.install) {
+	if (n[0] !== h || n[1] !== p || n[2] !== b || n[3] !== y || n[4] !== i.seen || n[5] !== g || n[6] !== s || n[7] !== r || n[8] !== l || n[9] !== a || n[10] !== v || n[11] !== u || n[12] !== m || n[13] !== f || n[14] !== S || n[15] !== _.network) {
 		let e;
 		n[17] === r.me ? e = n[18] : (e = (e) => e.user === r.me, n[17] = r.me, n[18] = e);
-		let t = y.filter(e), D = g.keys ? (_.install?.grants || []).filter(le) : [], O = !!g.keys && (D.length > 0 || r.scheduled().length > 0), k;
-		if (n[19] !== r || n[20] !== _.install) {
-			if (k = [], r.admin && _.install?.recovery_set) {
+		let t = y.filter(e), D = g.keys ? (_.network?.app_schedules || []).filter(le) : [], O = !!g.keys && (D.length > 0 || r.scheduled().length > 0), j;
+		if (n[19] !== r || n[20] !== _.network) {
+			if (j = [], r.admin && _.network?.recovery_set) {
 				let e;
-				n[22] === _.install.recovery_set ? e = n[23] : (e = N(_.install.recovery_set), n[22] = _.install.recovery_set, n[23] = e), k.push(`Recovery key set ${e}.`);
+				n[22] === _.network.recovery_set ? e = n[23] : (e = N(_.network.recovery_set), n[22] = _.network.recovery_set, n[23] = e), j.push(`Recovery key set ${e}.`);
 			}
-			if (_.install?.recovery_used && (r.admin || _.install.recovery_used.user === r.me)) {
-				let e = _.install.recovery_used, t;
+			if (_.network?.recovery_used && (r.admin || _.network.recovery_used.user === r.me)) {
+				let e = _.network.recovery_used, t;
 				n[24] !== r || n[25] !== e.user ? (t = e.user === r.me ? "yours" : `${r.userName(e.user)}’s`, n[24] = r, n[25] = e.user, n[26] = t) : t = n[26];
 				let i;
-				n[27] === e.time ? i = n[28] : (i = N(e.time), n[27] = e.time, n[28] = i), k.push(`The recovery key last let in a device of ${t}, ${i}.`);
+				n[27] === e.time ? i = n[28] : (i = N(e.time), n[27] = e.time, n[28] = i), j.push(`The recovery key last let in a device of ${t}, ${i}.`);
 			}
-			n[19] = r, n[20] = _.install, n[21] = k;
-		} else k = n[21];
-		let j = O || !!g.keys && v || k.length > 0, M = j && "@3xl:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]", P;
-		n[29] === M ? P = n[30] : (P = x("grid max-w-5xl items-start gap-x-8 gap-y-8", M), n[29] = M, n[30] = P);
-		let F = !!t.length && /* @__PURE__ */ w(d, { children: t.map((e) => {
+			n[19] = r, n[20] = _.network, n[21] = j;
+		} else j = n[21];
+		let M = O || !!g.keys && v || j.length > 0, P = M && "@3xl:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]", F;
+		n[29] === P ? F = n[30] : (F = x("grid max-w-5xl items-start gap-x-8 gap-y-8", P), n[29] = P, n[30] = F);
+		let I = !!t.length && /* @__PURE__ */ w(d, { children: t.map((e) => {
 			let t = e.me ? "This device" : e.seen && Date.now() - e.seen > 36e5 ? A(e.seen) : "", n = r.problemsOf(e), i = n.length > 0 && a[e.id];
 			return /* @__PURE__ */ T("div", {
 				onContextMenu: (t) => (t.preventDefault(), l(e, !1, {
@@ -865,7 +845,7 @@ function ae(t) {
 					y: t.clientY
 				})),
 				children: [
-					/* @__PURE__ */ T(X, {
+					/* @__PURE__ */ T(Z, {
 						icon: e.icon,
 						title: e.name,
 						sub: t,
@@ -892,29 +872,29 @@ function ae(t) {
 					})
 				]
 			}, e.id);
-		}) }), I;
-		n[31] !== u || n[32] !== S ? (I = !!S.length && /* @__PURE__ */ w(d, { children: /* @__PURE__ */ w(ue, {
+		}) }), z;
+		n[31] !== u || n[32] !== S ? (z = !!S.length && /* @__PURE__ */ w(d, { children: /* @__PURE__ */ w(ue, {
 			c: { old: S },
 			remove: () => u({ old: S })
-		}) }), n[31] = u, n[32] = S, n[33] = I) : I = n[33];
-		let z;
-		n[34] !== b || n[35] !== y || n[36] !== g.signOut || n[37] !== f ? (z = g.signOut && ![...y, ...b].some(se) && /* @__PURE__ */ w(o, {
+		}) }), n[31] = u, n[32] = S, n[33] = z) : z = n[33];
+		let B;
+		n[34] !== b || n[35] !== y || n[36] !== g.signOut || n[37] !== f ? (B = g.signOut && ![...y, ...b].some(se) && /* @__PURE__ */ w(o, {
 			variant: "ghost",
 			className: "self-start text-destructive",
 			onClick: f,
 			children: "Sign Out"
-		}), n[34] = b, n[35] = y, n[36] = g.signOut, n[37] = f, n[38] = z) : z = n[38];
-		let B;
-		n[39] === Symbol.for("react.memo_cache_sentinel") ? (B = /* @__PURE__ */ w(c, { name: "plus" }), n[39] = B) : B = n[39];
+		}), n[34] = b, n[35] = y, n[36] = g.signOut, n[37] = f, n[38] = B) : B = n[38];
 		let V;
-		n[40] === p ? V = n[41] : (V = /* @__PURE__ */ T(o, {
+		n[39] === Symbol.for("react.memo_cache_sentinel") ? (V = /* @__PURE__ */ w(c, { name: "plus" }), n[39] = V) : V = n[39];
+		let H;
+		n[40] === p ? H = n[41] : (H = /* @__PURE__ */ T(o, {
 			variant: "outline",
 			className: "self-start",
 			onClick: p,
-			children: [B, "Add a Device"]
-		}), n[40] = p, n[41] = V);
-		let H;
-		n[42] !== b || n[43] !== i.seen || n[44] !== l ? (H = !!b.length && /* @__PURE__ */ w(te, {
+			children: [V, "Add a Device"]
+		}), n[40] = p, n[41] = H);
+		let U;
+		n[42] !== b || n[43] !== i.seen || n[44] !== l ? (U = !!b.length && /* @__PURE__ */ w(ee, {
 			title: "Browsers",
 			className: "mt-2",
 			children: /* @__PURE__ */ w(d, { children: b.map((e) => {
@@ -924,7 +904,7 @@ function ae(t) {
 						x: t.clientX,
 						y: t.clientY
 					})),
-					children: /* @__PURE__ */ w(X, {
+					children: /* @__PURE__ */ w(Z, {
 						icon: e.passkey ? L("key") : R(e.name),
 						title: e.name,
 						sub: t,
@@ -935,34 +915,34 @@ function ae(t) {
 					})
 				}, e.key);
 			}) })
-		}), n[42] = b, n[43] = i.seen, n[44] = l, n[45] = H) : H = n[45];
-		let U;
-		n[46] !== h || n[47] !== g ? (U = g.notify === "default" && /* @__PURE__ */ T(o, {
+		}), n[42] = b, n[43] = i.seen, n[44] = l, n[45] = U) : U = n[45];
+		let W;
+		n[46] !== h || n[47] !== g ? (W = g.notify === "default" && /* @__PURE__ */ T(o, {
 			variant: "ghost",
 			className: "self-start",
 			onClick: () => h(async () => g.notify = await one.notify()),
 			children: [/* @__PURE__ */ w(c, { name: "bell" }), "Get Notifications in This Browser"]
-		}), n[46] = h, n[47] = g, n[48] = U) : U = n[48];
-		let W;
-		n[49] !== H || n[50] !== U || n[51] !== F || n[52] !== I || n[53] !== z || n[54] !== V ? (W = /* @__PURE__ */ T("div", {
+		}), n[46] = h, n[47] = g, n[48] = W) : W = n[48];
+		let G;
+		n[49] !== U || n[50] !== W || n[51] !== I || n[52] !== z || n[53] !== B || n[54] !== H ? (G = /* @__PURE__ */ T("div", {
 			className: "flex min-w-0 flex-col gap-4",
 			children: [
-				F,
 				I,
 				z,
-				V,
+				B,
 				H,
-				U
+				U,
+				W
 			]
-		}), n[49] = H, n[50] = U, n[51] = F, n[52] = I, n[53] = z, n[54] = V, n[55] = W) : W = n[55], C = /* @__PURE__ */ T("div", {
-			className: P,
-			children: [W, !!j && /* @__PURE__ */ T("div", {
+		}), n[49] = U, n[50] = W, n[51] = I, n[52] = z, n[53] = B, n[54] = H, n[55] = G) : G = n[55], C = /* @__PURE__ */ T("div", {
+			className: F,
+			children: [G, !!M && /* @__PURE__ */ T("div", {
 				className: "flex min-w-0 flex-col gap-8",
 				children: [
-					O && /* @__PURE__ */ T(te, {
+					O && /* @__PURE__ */ T(ee, {
 						title: "App Schedules",
 						children: [/* @__PURE__ */ T(d, { children: [D.map((e) => {
-							let t = (_.install?.devices || []).find((t) => t.key === e.endpoint), n = new Date(e.until).toLocaleDateString(void 0, {
+							let t = (_.network?.devices || []).find((t) => t.key === e.endpoint), n = new Date(e.until).toLocaleDateString(void 0, {
 								day: "numeric",
 								month: "long"
 							});
@@ -973,7 +953,7 @@ function ae(t) {
 									children: [/* @__PURE__ */ T("span", {
 										className: "block font-medium",
 										children: [
-											t && r.deviceName(t) || "A device",
+											t && k(t.name) || "A device",
 											" runs ",
 											r.appTitle(e.app),
 											"’s schedules for ",
@@ -1001,29 +981,29 @@ function ae(t) {
 									children: "Stop"
 								})]
 							}, `${e.endpoint} ${e.app} ${e.scope}`);
-						}), /* @__PURE__ */ w(q, {
+						}), /* @__PURE__ */ w(J, {
 							icon: "arrows-clockwise",
 							onClick: m,
 							children: "Run an App’s Schedules…"
-						})] }), !!D.length && /* @__PURE__ */ w(K, { children: "When one stops or runs out, that device can’t open the app’s things any more." })]
+						})] }), !!D.length && /* @__PURE__ */ w(q, { children: "When one stops or runs out, that device can’t open the app’s things any more." })]
 					}),
-					g.keys && v && /* @__PURE__ */ w(d, { children: /* @__PURE__ */ w(q, {
+					g.keys && v && /* @__PURE__ */ w(d, { children: /* @__PURE__ */ w(J, {
 						icon: "key",
 						onClick: () => h(oe),
 						children: "Use this passkey to get back in if you lose your devices"
 					}) }),
-					k.length > 0 && /* @__PURE__ */ w("div", {
+					j.length > 0 && /* @__PURE__ */ w("div", {
 						className: "flex flex-col gap-2",
-						children: k.map(Z)
+						children: j.map(ae)
 					})
 				]
 			})]
-		}), n[0] = h, n[1] = p, n[2] = b, n[3] = y, n[4] = i.seen, n[5] = g, n[6] = s, n[7] = r, n[8] = l, n[9] = a, n[10] = v, n[11] = u, n[12] = m, n[13] = f, n[14] = S, n[15] = _.install, n[16] = C;
+		}), n[0] = h, n[1] = p, n[2] = b, n[3] = y, n[4] = i.seen, n[5] = g, n[6] = s, n[7] = r, n[8] = l, n[9] = a, n[10] = v, n[11] = u, n[12] = m, n[13] = f, n[14] = S, n[15] = _.network, n[16] = C;
 	} else C = n[16];
 	return C;
 }
-function Z(e) {
-	return /* @__PURE__ */ w(K, { children: e }, e);
+function ae(e) {
+	return /* @__PURE__ */ w(q, { children: e }, e);
 }
 function oe() {
 	return E("POST", "/v1/devices/passkey", {});
@@ -1083,7 +1063,7 @@ function de(t) {
 		let { cols: e, last: t } = r.board(), u = r.admin, d;
 		if (n[6] !== u || n[7] !== i) {
 			let e = (e, t) => {
-				let n = /* @__PURE__ */ T(C, { children: [/* @__PURE__ */ w(Y, { icon: e.icon }), /* @__PURE__ */ T("span", {
+				let n = /* @__PURE__ */ T(C, { children: [/* @__PURE__ */ w(X, { icon: e.icon }), /* @__PURE__ */ T("span", {
 					className: "min-w-0 flex-1 text-left",
 					children: [/* @__PURE__ */ w("span", {
 						className: "block truncate font-medium",
@@ -1293,7 +1273,7 @@ function he({ m: e, cellOpen: t, tap: n }) {
 					children: [/* @__PURE__ */ w("thead", { children: /* @__PURE__ */ T("tr", { children: [/* @__PURE__ */ w("th", { className: "sticky left-0 z-10 bg-card" }), r.map((e, t) => /* @__PURE__ */ T("th", {
 						scope: "col",
 						className: "min-w-24 px-1 pt-3.5 pb-1.5 align-bottom text-[13px] font-medium text-muted-foreground",
-						children: [/* @__PURE__ */ w(Y, {
+						children: [/* @__PURE__ */ w(X, {
 							icon: e.icon,
 							className: "mx-auto mb-1.5"
 						}), /* @__PURE__ */ w("span", {
@@ -1340,12 +1320,12 @@ var ge = (e) => e.length > 1 ? `${e.slice(0, -1).join(", ")} and ${e.at(-1)}` : 
 	}), n[0] = r, n[1] = i), i;
 };
 function ye(t) {
-	let n = e(34), { card: i, open: a, setOpen: o, done: s } = t, c;
-	n[0] !== i.clients || n[1] !== i.node || n[2] !== i.runs || n[3] !== i.services ? (c = i.runs ? [i.node, ...i.services].filter(Boolean).map(xe) : i.clients.map(be), n[0] = i.clients, n[1] = i.node, n[2] = i.runs, n[3] = i.services, n[4] = c) : c = n[4];
+	let n = e(33), { card: i, open: a, setOpen: o, done: s } = t, c;
+	n[0] !== i.clients || n[1] !== i.node || n[2] !== i.runs ? (c = i.runs ? [i.node.key] : i.clients.map(be), n[0] = i.clients, n[1] = i.node, n[2] = i.runs, n[3] = c) : c = n[3];
 	let u = c, [d, f] = r(i.name), [p, g] = r(!1), [_, v] = r(""), y;
-	n[5] !== i.name || n[6] !== d ? (y = !!d.trim() && d.trim() !== i.name, n[5] = i.name, n[6] = d, n[7] = y) : y = n[7];
+	n[4] !== i.name || n[5] !== d ? (y = !!d.trim() && d.trim() !== i.name, n[4] = i.name, n[5] = d, n[6] = y) : y = n[6];
 	let b = y, x;
-	n[8] !== p || n[9] !== s || n[10] !== u || n[11] !== d || n[12] !== b ? (x = async function() {
+	n[7] !== p || n[8] !== s || n[9] !== u || n[10] !== d || n[11] !== b ? (x = async function() {
 		if (b && !p) {
 			g(!0), v("");
 			try {
@@ -1358,20 +1338,20 @@ function ye(t) {
 				v(D(e)), g(!1);
 			}
 		}
-	}, n[8] = p, n[9] = s, n[10] = u, n[11] = d, n[12] = b, n[13] = x) : x = n[13];
+	}, n[7] = p, n[8] = s, n[9] = u, n[10] = d, n[11] = b, n[12] = x) : x = n[12];
 	let S = x, C = !b, O;
-	n[14] !== p || n[15] !== S || n[16] !== C ? (O = /* @__PURE__ */ w(_e, {
+	n[13] !== p || n[14] !== S || n[15] !== C ? (O = /* @__PURE__ */ w(_e, {
 		busy: p,
 		disabled: C,
 		onClick: S,
 		children: "Save"
-	}), n[14] = p, n[15] = S, n[16] = C, n[17] = O) : O = n[17];
+	}), n[13] = p, n[14] = S, n[15] = C, n[16] = O) : O = n[16];
 	let k;
-	n[18] === Symbol.for("react.memo_cache_sentinel") ? (k = (e) => f(e.target.value), n[18] = k) : k = n[18];
+	n[17] === Symbol.for("react.memo_cache_sentinel") ? (k = (e) => f(e.target.value), n[17] = k) : k = n[17];
 	let A;
-	n[19] === S ? A = n[20] : (A = (e) => e.key === "Enter" && S(), n[19] = S, n[20] = A);
+	n[18] === S ? A = n[19] : (A = (e) => e.key === "Enter" && S(), n[18] = S, n[19] = A);
 	let j;
-	n[21] !== d || n[22] !== A ? (j = /* @__PURE__ */ w(l, {
+	n[20] !== d || n[21] !== A ? (j = /* @__PURE__ */ w(l, {
 		autoFocus: !0,
 		value: d,
 		onChange: k,
@@ -1380,30 +1360,27 @@ function ye(t) {
 		spellCheck: !1,
 		enterKeyHint: "done",
 		onKeyDown: A
-	}), n[21] = d, n[22] = A, n[23] = j) : j = n[23];
+	}), n[20] = d, n[21] = A, n[22] = j) : j = n[22];
 	let M;
-	n[24] === _ ? M = n[25] : (M = _ && /* @__PURE__ */ w(m, { title: _ }), n[24] = _, n[25] = M);
+	n[23] === _ ? M = n[24] : (M = _ && /* @__PURE__ */ w(m, { title: _ }), n[23] = _, n[24] = M);
 	let N;
-	n[26] !== j || n[27] !== M ? (N = /* @__PURE__ */ T("div", {
+	n[25] !== j || n[26] !== M ? (N = /* @__PURE__ */ T("div", {
 		className: "flex flex-col gap-4 p-4",
 		children: [j, M]
-	}), n[26] = j, n[27] = M, n[28] = N) : N = n[28];
+	}), n[25] = j, n[26] = M, n[27] = N) : N = n[27];
 	let P;
-	return n[29] !== a || n[30] !== o || n[31] !== N || n[32] !== O ? (P = /* @__PURE__ */ w(h, {
+	return n[28] !== a || n[29] !== o || n[30] !== N || n[31] !== O ? (P = /* @__PURE__ */ w(h, {
 		open: a,
 		onOpenChange: o,
 		title: "Rename",
 		action: O,
 		children: N
-	}), n[29] = a, n[30] = o, n[31] = N, n[32] = O, n[33] = P) : P = n[33], P;
+	}), n[28] = a, n[29] = o, n[30] = N, n[31] = O, n[32] = P) : P = n[32], P;
 }
 function be(e) {
 	return e.key;
 }
-function xe(e) {
-	return e.key;
-}
-function Se(t) {
+function xe(t) {
 	let n = e(26), { name: i, keys: a, erasable: o, open: s, setOpen: c, done: l } = t, [f, p] = r(!1), [g, v] = r(!1), [y, b] = r(""), x;
 	n[0] !== l || n[1] !== o || n[2] !== f || n[3] !== a ? (x = async function() {
 		v(!0), b("");
@@ -1450,7 +1427,7 @@ function Se(t) {
 		children: P
 	}), n[20] = s, n[21] = c, n[22] = O, n[23] = j, n[24] = P, n[25] = F) : F = n[25], F;
 }
-function Ce(t) {
+function Se(t) {
 	let n = e(25), { clients: i, open: a, setOpen: s, done: c } = t, [l, u] = r(null), [f, p] = r(""), g;
 	n[0] !== i || n[1] !== c ? (g = async function(e) {
 		u(e), p("");
@@ -1488,7 +1465,7 @@ function Ce(t) {
 	let b;
 	n[12] === y ? b = n[13] : (b = /* @__PURE__ */ w(d, { children: y }), n[12] = y, n[13] = b);
 	let x;
-	n[14] === Symbol.for("react.memo_cache_sentinel") ? (x = /* @__PURE__ */ w(K, { children: "A new device that signs in with one of these is let in without asking." }), n[14] = x) : x = n[14];
+	n[14] === Symbol.for("react.memo_cache_sentinel") ? (x = /* @__PURE__ */ w(q, { children: "A new device that signs in with one of these is let in without asking." }), n[14] = x) : x = n[14];
 	let S;
 	n[15] === f ? S = n[16] : (S = f && /* @__PURE__ */ w(m, { title: f }), n[15] = f, n[16] = S);
 	let C;
@@ -1509,7 +1486,7 @@ function Ce(t) {
 		children: C
 	}), n[20] = a, n[21] = s, n[22] = v, n[23] = C, n[24] = O) : O = n[24], O;
 }
-function we(t) {
+function Ce(t) {
 	let n = e(13), { text: i } = t, [a, s] = r(!1), l;
 	n[0] === i ? l = n[1] : (l = async function() {
 		await one.copy(i), one.tap("success"), s(!0), setTimeout(() => s(!1), 1500);
@@ -1535,8 +1512,8 @@ function we(t) {
 		children: [d, h]
 	}), n[10] = d, n[11] = h, n[12] = g) : g = n[12], g;
 }
-function Te(n) {
-	let i = e(22), { data: a, open: s, setOpen: c } = n, { state: l } = a, u = l.install?.settings?.address || "", f;
+function we(n) {
+	let i = e(22), { data: a, open: s, setOpen: c } = n, { state: l } = a, u = l.network?.settings?.address || "", f;
 	i[0] === l.config?.install ? f = i[1] : (f = l.config?.install ? { loading: !0 } : null, i[0] = l.config?.install, i[1] = f);
 	let [p, _] = r(f), v;
 	i[2] === l.config ? v = i[3] : (v = () => {
@@ -1547,7 +1524,7 @@ function Te(n) {
 	}, i[2] = l.config, i[3] = v);
 	let y;
 	i[4] === Symbol.for("react.memo_cache_sentinel") ? (y = [], i[4] = y) : y = i[4], t(v, y);
-	let b = Ee, x;
+	let b = Te, x;
 	i[5] === c ? x = i[6] : (x = /* @__PURE__ */ w(o, {
 		variant: "secondary",
 		size: "sm",
@@ -1563,9 +1540,9 @@ function Te(n) {
 	}) : p.error ? /* @__PURE__ */ w("div", {
 		className: "mt-2",
 		children: /* @__PURE__ */ w(m, { title: p.error })
-	}) : /* @__PURE__ */ w(we, { text: p.text })), i[9] = p, i[10] = O);
+	}) : /* @__PURE__ */ w(Ce, { text: p.text })), i[9] = p, i[10] = O);
 	let k;
-	i[11] === u ? k = i[12] : (k = u && b("browser", "A browser", "Open this and sign in. It shows up here to approve.", /* @__PURE__ */ w(we, { text: u })), i[11] = u, i[12] = k);
+	i[11] === u ? k = i[12] : (k = u && b("browser", "A browser", "Open this and sign in. It shows up here to approve.", /* @__PURE__ */ w(Ce, { text: u })), i[11] = u, i[12] = k);
 	let A;
 	i[13] !== C || i[14] !== O || i[15] !== k ? (A = /* @__PURE__ */ w("div", {
 		className: "overflow-y-auto p-4",
@@ -1584,7 +1561,7 @@ function Te(n) {
 		children: A
 	}), i[17] = s, i[18] = c, i[19] = x, i[20] = A, i[21] = j) : j = i[21], j;
 }
-function Ee(e, t, n, r) {
+function Te(e, t, n, r) {
 	return /* @__PURE__ */ T("div", {
 		className: "flex items-start gap-3 px-3 py-3 text-sm",
 		children: [/* @__PURE__ */ w(c, {
@@ -1606,7 +1583,7 @@ function Ee(e, t, n, r) {
 		})]
 	}, t);
 }
-function De(t) {
+function Ee(t) {
 	let n = e(23), { m: i, asked: a, open: o, setOpen: c, done: l } = t, u = a.scope || `user:${i.me}`, [p, g] = r(a.app || null), [_, v] = r(""), y;
 	n[0] === _ ? y = n[1] : (y = (e, t) => /* @__PURE__ */ T("div", {
 		className: "flex flex-col gap-4 overflow-y-auto p-4",
@@ -1615,7 +1592,7 @@ function De(t) {
 				className: "py-6",
 				children: "None yet"
 			}),
-			/* @__PURE__ */ w(K, { children: t }),
+			/* @__PURE__ */ w(q, { children: t }),
 			_ && /* @__PURE__ */ w(m, { title: _ })
 		]
 	}), n[0] = _, n[1] = y);
@@ -1636,22 +1613,22 @@ function De(t) {
 	n[6] !== p || n[7] !== i ? (C = p ? `Run ${i.appTitle(p)}’s Schedules On…` : "Run an App’s Schedules", n[6] = p, n[7] = i, n[8] = C) : C = n[8];
 	let O;
 	n[9] === c ? O = n[10] : (O = /* @__PURE__ */ w(ve, { setOpen: c }), n[9] = c, n[10] = O);
-	let k;
-	n[11] !== p || n[12] !== S || n[13] !== i || n[14] !== b || n[15] !== u ? (k = p ? b(i.runners(u).map((e) => /* @__PURE__ */ w(f, {
-		title: i.deviceName(e),
+	let A;
+	n[11] !== p || n[12] !== S || n[13] !== i || n[14] !== b || n[15] !== u ? (A = p ? b(i.runners(u).map((e) => /* @__PURE__ */ w(f, {
+		title: k(e.name),
 		onClick: () => S(e)
 	}, e.key)), "They run on the device you choose, while that device is on.") : b(i.scheduled(u).map((e) => /* @__PURE__ */ w(f, {
 		title: e.title || e.name,
 		onClick: () => g(e.name)
-	}, e.name)), "Apps that run on their own, every so often."), n[11] = p, n[12] = S, n[13] = i, n[14] = b, n[15] = u, n[16] = k) : k = n[16];
-	let A;
-	return n[17] !== o || n[18] !== c || n[19] !== C || n[20] !== O || n[21] !== k ? (A = /* @__PURE__ */ w(h, {
+	}, e.name)), "Apps that run on their own, every so often."), n[11] = p, n[12] = S, n[13] = i, n[14] = b, n[15] = u, n[16] = A) : A = n[16];
+	let j;
+	return n[17] !== o || n[18] !== c || n[19] !== C || n[20] !== O || n[21] !== A ? (j = /* @__PURE__ */ w(h, {
 		open: o,
 		onOpenChange: c,
 		title: C,
 		action: O,
-		children: k
-	}), n[17] = o, n[18] = c, n[19] = C, n[20] = O, n[21] = k, n[22] = A) : A = n[22], A;
+		children: A
+	}), n[17] = o, n[18] = c, n[19] = C, n[20] = O, n[21] = A, n[22] = j) : j = n[22], j;
 }
-i(document.getElementById("root")).render(/* @__PURE__ */ w(ee, {}));
+i(document.getElementById("root")).render(/* @__PURE__ */ w(G, {}));
 </script>

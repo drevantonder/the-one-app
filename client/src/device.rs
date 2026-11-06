@@ -768,7 +768,7 @@ impl Device {
     /// read `global` again (now and then), and only nodes its own reading lists are asked.
     async fn learn_order(&self, bytes: &[u8]) {
         let Ok(state) = serde_json::from_slice::<Value>(bytes) else { return };
-        let mut said: Vec<(u64, [u8; 32])> = state["install"]["devices"]
+        let mut said: Vec<(u64, [u8; 32])> = state["network"]["devices"]
             .as_array()
             .into_iter()
             .flatten()

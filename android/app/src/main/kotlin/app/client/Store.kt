@@ -343,7 +343,7 @@ class Store(private val application: android.app.Application, val signIn: SignIn
     private fun drawKept() {
         if (state != null || !signIn.signedIn) return
         val kept = runCatching { json.decodeFromString<NodeState>(keptFile("state").readText()) }.getOrNull()
-        if (kept?.install == null) return
+        if (kept?.network == null) return
         state = kept
         apps = runCatching { json.decodeFromString<List<AppInfo>>(keptFile("apps").readText()) }.getOrDefault(emptyList())
         phase = Phase.Ready
@@ -358,7 +358,7 @@ class Store(private val application: android.app.Application, val signIn: SignIn
         val early = if (!answered) async { runCatching { kept<List<AppInfo>>("apps", "/v1/apps") }.getOrNull() } else null
         val next: NodeState = kept("state", "/v1/state")
         current(began)
-        val regrouped = (next.user to next.install?.groups) != (state?.user to state?.install?.groups)
+        val regrouped = (next.user to next.network?.groups) != (state?.user to state?.network?.groups)
         val first = !answered
         answered = true
         state = next
@@ -367,7 +367,7 @@ class Store(private val application: android.app.Application, val signIn: SignIn
     }
 
     suspend fun refreshApps(early: List<AppInfo>? = null) {
-        if (state?.install == null) return
+        if (state?.network == null) return
         val began = session
         val next = early ?: kept("apps", "/v1/apps")
         current(began)
@@ -428,13 +428,13 @@ class Store(private val application: android.app.Application, val signIn: SignIn
         if (phase != Phase.Ready) return
         session.launch {
             runCatching { refreshState() }
-            events.tryEmit("""{"type":"install"}""")
+            events.tryEmit("""{"type":"network"}""")
             runCatching { refreshWidgets() }
         }
     }
 
     private suspend fun handle(e: NodeEvent) {
-        if (e.type == "devices" || e.type == "install") refreshState()
+        if (e.type == "devices" || e.type == "network") refreshState()
         if (e.type == "changed") {
             if (e.apps.isNullOrEmpty()) refreshState()
             refreshApps()
@@ -478,14 +478,14 @@ class Store(private val application: android.app.Application, val signIn: SignIn
 
     // MARK: What the home screen's widgets name
 
-    val install get() = state?.install
+    val network get() = state?.network
     val config get() = state?.config
     fun app(name: String) = apps.firstOrNull { it.name == name }
 
     /** Every page this person can read: theirs, their groups', then everyone's. */
     val pages: List<Page>
         get() {
-            val i = install ?: return emptyList()
+            val i = network ?: return emptyList()
             val u = state?.user ?: return emptyList()
             return listOf(Page("user", "You")) + i.groups.filter { g -> g.members.any { it.user == u.id } }.sortedBy { it.name }.map { Page("group:${it.id}", it.name) } +
                 Page("global", "Everyone")

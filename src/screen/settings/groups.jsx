@@ -21,7 +21,7 @@ const GROUPS = { name: "groups", icon: "users-three", color: "#34c759" }
 
 // "Ann, Bo and Cy".
 const names = (state, list) => new Intl.ListFormat(undefined, { type: "conjunction" }).format(list.map((m) => userName(state, m.user)))
-const userName = (state, id) => state.install?.users.find((u) => u.id === id)?.name || "Someone"
+const userName = (state, id) => state.network?.users.find((u) => u.id === id)?.name || "Someone"
 
 function Groups() {
   const [state, setState] = useState(null)
@@ -53,7 +53,7 @@ function Groups() {
   }, [])
 
   const me = state?.user?.id
-  const groups = state?.install?.groups || []
+  const groups = state?.network?.groups || []
   const invited = groups.filter((g) => g.invited.some((m) => m.user === me))
   const mine = groups.filter((g) => g.role)
   const selected = openId && groups.find((g) => g.id === openId && (g.role || g.invited.some((m) => m.user === me)))
@@ -305,7 +305,7 @@ function Invite({ g, state, sent, open, setOpen, send }) {
   const [role, setRole] = useState("member")
   const [query, setQuery] = useState("")
   const taken = (id) => g.members.some((m) => m.user === id) || g.invited.some((m) => m.user === id) || sent.some((s) => s.group === g.id && s.user === id)
-  const others = [...state.install.users].sort((x, y) => x.name.localeCompare(y.name)).filter((u) => !taken(u.id))
+  const others = [...state.network.users].sort((x, y) => x.name.localeCompare(y.name)).filter((u) => !taken(u.id))
   const matches = others.filter((u) => u.name.toLowerCase().includes(query.trim().toLowerCase()))
   const pick = (user) => (setOpen(false), send(user, role))
   return (

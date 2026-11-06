@@ -205,8 +205,8 @@ fun Shell(store: Store) {
             // hidden till then.
             var made by remember { mutableStateOf(false) }
             LaunchedEffect(Unit) { withFrameNanos {}; made = true }
-            val ready = store.phase == Store.Phase.Ready && store.install != null
-            if (made && (store.state == null || store.install != null)) Box(Modifier.fillMaxSize().alpha(if (ready) 1f else 0f)) {
+            val ready = store.phase == Store.Phase.Ready && store.network != null
+            if (made && (store.state == null || store.network != null)) Box(Modifier.fillMaxSize().alpha(if (ready) 1f else 0f)) {
                 key(store.opened) { ScreenView(store, Route.Own("pages", obj("swipe" to true, "scope" to store.page).toString()), ready = ready) }
             }
             // The pages have no bar of their own: its </> sits at the end of the row their dots are in, clear of the widgets.
@@ -278,7 +278,7 @@ private fun Starting(store: Store) {
     }, contentAlignment = Alignment.Center) {
         if (store.phase == Store.Phase.Joining) Approve(store)
         else if (store.phase == Store.Phase.Unreachable) Unavailable("Can’t Reach Your Devices", (store.failure ?: "") + "\nTrying again…")
-        else if (store.state != null && store.install == null) Unavailable("Not Set Up Yet", "Set it up on one of your computers first.")
+        else if (store.state != null && store.network == null) Unavailable("Not Set Up Yet", "Set it up on one of your computers first.")
         else {
             // Only if it's slow: most starts are quicker than a spinner would be worth.
             var slow by remember { mutableStateOf(false) }

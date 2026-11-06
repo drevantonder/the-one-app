@@ -96,6 +96,9 @@ const CHANGED_SHOWN: u64 = 14 * 86_400_000;
 /// The object in a network's bucket that says whose it is: the network's genesis. Still `install`, the name every older
 /// device looks for in a bucket.
 const NETWORK_OBJECT: &str = "install";
+/// The folder in a device's home where it keeps its network, and the file there that says which.
+const NETWORK_DIR: &str = "network";
+const NETWORK_FILE: &str = "network.json";
 /// How often a device says hello to the others: which services serve there, and how loaded it is.
 const PRESENCE_EVERY: Duration = Duration::from_secs(15);
 /// How soon an app's deploy that couldn't be fetched is tried again.
@@ -181,8 +184,6 @@ pub enum Event {
     Changed { apps: Vec<String> },
     Devices,
     /// This device created or joined a network.
-    /// `install` on the wire, the name older clients wait for.
-    #[serde(rename = "install")]
     Network,
 }
 
@@ -461,7 +462,7 @@ pub struct Inner {
     written: Mutex<HashMap<Scope, u64>>,
     /// The step of each scope's entries this device last moved their newest hint on to, by scope.
     hinted: Mutex<HashMap<String, u64>>,
-    /// The blobs this device has put in the bucket, as `<scope> <hash>`, kept in `install/shared` too.
+    /// The blobs this device has put in the bucket, as `<scope> <hash>`, kept in `network/shared` too.
     shared: Mutex<std::collections::HashSet<String>>,
     /// The blobs of entries this device wrote that the bucket didn't take then, tried again each minute.
     unshared: Mutex<Vec<(Scope, String)>>,
@@ -469,7 +470,7 @@ pub struct Inner {
     put_first: Mutex<std::collections::HashSet<String>>,
     /// Requests to join, by their device's key, that their person said weren't theirs, not shown again while it runs.
     refused: Mutex<std::collections::HashSet<String>>,
-    /// Held while `install/forgotten` changes.
+    /// Held while `network/forgotten` changes.
     forgotten: Mutex<()>,
     /// What the vault gave this device for the sign-ins its calls came with.
     sessions: sessions::Sessions,
@@ -627,7 +628,8 @@ impl Node {
                 tracing::warn!("apps' outbound requests stopped: {err:#}");
             }
         });
-        if dir.join("install").join("install.json").exists() {
+        move_network_folder(&dir).context("move this device's network from install/ to network/")?;
+        if dir.join(NETWORK_DIR).join(NETWORK_FILE).exists() {
             node.open_network().context("open the network")?;
             if let Err(err) = node.bucket().and_then(|b| b.forget_sent()) {
                 tracing::warn!("forgetting steps other devices sent: {err:#}");
@@ -765,15 +767,14 @@ impl Node {
         let _ = self.0.events.send(event);
     }
 
-    /// Where this device keeps its network: still `install/` (and its `install.json`), since the paths of what's in it
-    /// are written in its own files and the network's `storage` setting.
+    /// Where this device keeps its network.
     fn network_dir(&self) -> PathBuf {
-        self.0.dir.join("install")
+        self.0.dir.join(NETWORK_DIR)
     }
 
     fn open_network(&self) -> Result<()> {
         let dir = self.network_dir();
-        let file: NetworkFile = serde_json::from_slice(&std::fs::read(dir.join("install.json"))?)?;
+        let file: NetworkFile = serde_json::from_slice(&std::fs::read(dir.join(NETWORK_FILE))?)?;
         let store = Store::open(&dir.join("entries.db"))?;
         let root: [u8; 32] = data_encoding::HEXLOWER.decode(file.root.as_bytes())?.try_into().map_err(|_| anyhow!("bad root"))?;
         let r = Replica::new(self.0.key.clone(), store, Some(Hash::from_bytes(root)), now_ms())?;
@@ -791,7 +792,7 @@ impl Node {
             return Ok(());
         }
         let dir = self.network_dir();
-        let mut file: NetworkFile = serde_json::from_slice(&std::fs::read(dir.join("install.json"))?)?;
+        let mut file: NetworkFile = serde_json::from_slice(&std::fs::read(dir.join(NETWORK_FILE))?)?;
         let fields: BTreeMap<String, String> = [("path".to_string(), dir.join("bucket").display().to_string())].into();
         let place = Place::from_fields(&fields)?;
         place.create(NETWORK_OBJECT, file.root.as_bytes())?;
@@ -805,7 +806,7 @@ impl Node {
 
     /// Keeps (or with `None` forgets) the folder on this device that the backup place `id` is.
     fn keep_folder(&self, id: &str, path: Option<&std::path::Path>) -> Result<()> {
-        let mut file: NetworkFile = serde_json::from_slice(&std::fs::read(self.network_dir().join("install.json"))?)?;
+        let mut file: NetworkFile = serde_json::from_slice(&std::fs::read(self.network_dir().join(NETWORK_FILE))?)?;
         match path {
             Some(path) => drop(file.folders.insert(id.to_string(), path.display().to_string())),
             None => drop(file.folders.remove(id)),
@@ -820,7 +821,7 @@ impl Node {
     fn save_network(&self, file: &NetworkFile) -> Result<()> {
         let dir = self.network_dir();
         std::fs::create_dir_all(&dir)?;
-        write_private(&dir.join("install.json"), &serde_json::to_vec_pretty(file)?)?;
+        write_private(&dir.join(NETWORK_FILE), &serde_json::to_vec_pretty(file)?)?;
         Ok(())
     }
 
@@ -1346,4 +1347,23 @@ fn hostname() -> String {
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| "device".into())
+}
+
+/// Moves what a device kept of its network in `install/` (and its `install.json`), as a build from before it was called
+/// a network kept it, to `network/`, with the paths in that file that were inside it.
+fn move_network_folder(home: &Path) -> Result<()> {
+    let (old, new) = (home.join("install"), home.join(NETWORK_DIR));
+    if !old.join("install.json").exists() || new.exists() {
+        return Ok(());
+    }
+    std::fs::rename(&old, &new)?;
+    let path = new.join(NETWORK_FILE);
+    std::fs::rename(new.join("install.json"), &path)?;
+    let mut file: NetworkFile = serde_json::from_slice(&std::fs::read(&path)?)?;
+    for v in file.bucket.iter_mut().flat_map(|b| b.values_mut()).chain(file.folders.values_mut()) {
+        if let Ok(inside) = Path::new(v.as_str()).strip_prefix(&old) {
+            *v = new.join(inside).display().to_string();
+        }
+    }
+    write_private(&path, &serde_json::to_vec_pretty(&file)?)
 }

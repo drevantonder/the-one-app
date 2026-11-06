@@ -590,13 +590,18 @@ export class Device {
     const it = k.devices.find((e) => e.key === key);
     if (!it) throw new Error("That device isn’t listed.");
     if (!k.people[this.user].removes.includes(key)) throw new Error("Only its person or an admin takes a device out.");
-    await this.tell({ remove: key }, as).catch((err) => {
-      if (!/isn.t|not/.test(err.message)) throw err;
-    });
-    // The last of its entries this browser checked, from which on none counts.
-    const next = (await get(`global:${this.user}`))?.have.split(",").find((h) => h.startsWith(`${key}.`))?.split(".")[1];
-    await this.write("global", members.removeDevice({ key, seq: next ? Number(next) - 1 : null }), as);
-    await this.renew(scopesOf(k, it.user), [key]);
+    // It, and what's part of it: its services with endpoints of their own.
+    const keys = [key, ...k.devices.filter((d) => d.device === key && d.key !== key).map((d) => d.key)];
+    const had = (await get(`global:${this.user}`))?.have.split(",") || [];
+    for (const one of keys) {
+      await this.tell({ remove: one }, as).catch((err) => {
+        if (!/isn.t|not/.test(err.message)) throw err;
+      });
+      // The last of its entries this browser checked, from which on none counts.
+      const next = had.find((h) => h.startsWith(`${one}.`))?.split(".")[1];
+      await this.write("global", members.removeDevice({ key: one, seq: next ? Number(next) - 1 : null }), as);
+    }
+    await this.renew(scopesOf(k, it.user), keys);
   }
 
   /// Takes this browser out of its person's devices, as it signs out, so signing in again makes a new one that

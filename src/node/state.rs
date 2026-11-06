@@ -19,12 +19,7 @@ impl Node {
         let ids = if device.eq_ignore_ascii_case(rank::CLOUDFLARE) {
             vec![rank::CLOUDFLARE.to_string()]
         } else {
-            let key = self.find_device(device)?;
-            self.with(|i| {
-                let m = i.r.db();
-                let d = m.machine(&key).context("no such device")?;
-                Ok(m.machines().into_iter().filter(|s| m.machine(&s.key).is_some() && s.user == d.user && s.name.eq_ignore_ascii_case(&d.name)).map(|s| hex(&s.key)).collect())
-            })?
+            vec![hex(&self.find_device(device)?)]
         };
         let value = self.with(|i| Ok(rank::with(&i.r.db().settings(), &ids, priority)))?;
         self.set_setting(caller, rank::SETTING, Some(&value)).await
@@ -75,13 +70,20 @@ impl Node {
                 }
                 l
             });
-            let services = if s.key == self.0.id { here_services.as_slice() } else { session.map(|s| s.services.as_slice()).unwrap_or_default() };
+            let mut services: Vec<Service> = if s.key == self.0.id { here_services.clone() } else { session.map(|s| s.services.clone()).unwrap_or_default() };
+            // What its services with endpoints of their own run there, as each says: they're part of it.
+            let parts = i.peers.iter().filter(|(k, _)| i.online(k) && m.machine(k).is_some_and(|p| p.is(members::Kind::Service) && p.device == Some(s.key)));
+            for d in parts.flat_map(|(_, p)| p.services.iter()).cloned().collect::<Vec<_>>() {
+                if !services.iter().any(|h| h.0 == d.0) {
+                    services.push(d);
+                }
+            }
             let now = json!({
                 "kind": load.as_ref().map(|l| l.kind.clone()), "far": i.far.get(&s.key).is_some_and(|d| *d > FAR),
                 "me": Some(s.key) == looking, "here": s.key == self.0.id, "online": s.key == self.0.id || session.is_some(),
                 "build": i.builds.get(&s.key).map(|r| &r.commit), "target": i.builds.get(&s.key).map(|r| &r.target),
                 "services": services.iter().map(|d| d.0.clone()).collect::<Vec<_>>(),
-                "installed_services": installed_services(m, s, services, i.builds.get(&s.key).map(|r| r.commit.as_str())),
+                "installed_services": installed_services(m, s, &services, i.builds.get(&s.key).map(|r| r.commit.as_str())),
                 // What it can run, its person's and the admins' to see.
                 "parts": if !m.may(me, "remove", &scopes::device(&s.key)) { Value::Null } else if s.key == self.0.id { here_parts.clone() } else { session.and_then(|s| s.parts.clone()).unwrap_or(Value::Null) },
                 "load": load,
@@ -195,7 +197,9 @@ impl Node {
             .with(|i| {
                 let m = i.r.db();
                 let serves = |s: &members::Machine| if own { s.user == user } else { s.user != user && m.may(user, "use", &scopes::service(&s.key)) };
-                Ok(m.offering(service).into_iter().filter(|s| serves(s) && !name.is_empty() && (s.name.eq_ignore_ascii_case(name) || hex(&s.key).starts_with(name))).map(|s| s.key).collect())
+                // Named as the device it's part of.
+                let on = |s: &members::Machine| s.device.and_then(|d| m.machine(&d)).is_some_and(|d| d.name.eq_ignore_ascii_case(name) || hex(&d.key).starts_with(name));
+                Ok(m.offering(service).into_iter().filter(|s| serves(s) && !name.is_empty() && on(s)).map(|s| s.key).collect())
             })
             .ok()?;
         match found.as_slice() {
@@ -250,7 +254,9 @@ impl Node {
     }
 
     pub(super) fn name_of(&self, key: &Key) -> String {
-        self.with(|i| Ok(i.r.db().machine_ever(key).map(|m| m.name.clone()))).ok().flatten().unwrap_or_else(|| short(key))
+        // A service with an endpoint of its own, by the device it's part of.
+        let of = |m: &ScopeDb| m.service(key).and_then(|s| s.device).and_then(|d| m.machine_ever(&d)).or_else(|| m.machine_ever(key));
+        self.with(|i| Ok(of(i.r.db()).map(|m| m.name))).ok().flatten().unwrap_or_else(|| short(key))
     }
 
     /// The network's compute devices' names by key (hex), and the Cloudflare node's: what a trace's reader calls the

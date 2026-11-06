@@ -4,7 +4,7 @@ export const home = (() => {
   // `failed`: the pages whose widgets couldn't be read, so theirs stand as grey cards until they can.
   const h = { state: null, apps: [], widgets: {}, badges: {}, failed: new Set() };
   const me = () => h.state?.user;
-  const network = () => h.state?.install;
+  const network = () => h.state?.network;
   const isAdmin = () => me()?.role === "admin";
   const label = (a) => a?.title || a?.name || "";
   const app = (name) => h.apps.find((a) => a.name === name);
@@ -250,7 +250,7 @@ export const home = (() => {
     };
     one.on("changed", (e) => {
       if (e.type === "changed" && e.apps?.length) again(pagesOf(e.apps));
-      else if (["changed", "devices", "install"].includes(e.type)) again();
+      else if (["changed", "devices", "network"].includes(e.type)) again();
     });
     schedule();
     retry();

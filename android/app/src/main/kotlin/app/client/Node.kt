@@ -37,7 +37,7 @@ data class NodeState(
     val config: Config,
     @SerialName("me") val machine: Machine,
     val user: Person? = null,
-    val install: Install? = null,
+    val network: Network? = null,
 )
 
 @Serializable
@@ -53,7 +53,7 @@ data class Person(
 )
 
 @Serializable
-data class Install(
+data class Network(
     val name: String,
     val groups: List<GroupInfo>,
 )

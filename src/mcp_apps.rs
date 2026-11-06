@@ -142,7 +142,7 @@ fn screen(input: &Value) -> anyhow::Result<Value> {
         .and_then(|a| a["screens"].as_array().into_iter().flatten().find(|s| s["name"] == screen)?["title"].as_str())
         .or_else(|| found.and_then(|a| a["title"].as_str().or(a["name"].as_str())))
         .unwrap_or(app);
-    let address = get("/v1/state").ok().and_then(|s| s["install"]["settings"]["address"].as_str().map(|a| a.trim_end_matches('/').to_string()));
+    let address = get("/v1/state").ok().and_then(|s| s["network"]["settings"]["address"].as_str().map(|a| a.trim_end_matches('/').to_string()));
     let web = address.map(|a| format!("{a}/app/{}/{}?{}", urlencode(app), urlencode(screen), query.iter().map(|(k, v)| format!("{k}={}", urlencode(v))).collect::<Vec<_>>().join("&")));
     Ok(json!({
         "content": [{ "type": "text", "text": format!("Opened {app}'s {screen} screen for the person.") }],

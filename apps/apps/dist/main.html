@@ -162,7 +162,7 @@ function ie(t) {
 				": ",
 				w(e.last.error).title
 			]
-		}) : e.on && e.runs_as ? te(e.when) + (n ? " · " + e.scope_name : "") + (e.next ? " · next " + ne(e.next) : "") + ((e.kept_by || []).length ? " · on " + e.kept_by.join(", ") : "") : e.on ? "Off. Switch it on to run it as you." : te(e.when) + (e.switched ? " · off since " + E(e.switched.time) : ""), a[71] = n, a[72] = r);
+		}) : e.on && e.runs_as ? te(e.when) + (n ? " · " + e.scope_name : "") + (e.next ? " · next " + ne(e.next) : "") + ((e.run_by || []).length ? " · on " + e.run_by.join(", ") : "") : e.on ? "Off. Switch it on to run it as you." : te(e.when) + (e.switched ? " · off since " + E(e.switched.time) : ""), a[71] = n, a[72] = r);
 		let i = r, c;
 		a[73] !== l || a[74] !== V ? (c = (e, t) => {
 			let n = e.name + "|" + e.scope;
@@ -389,7 +389,7 @@ function ae(e) {
 	return e.scope;
 }
 function oe(e) {
-	return !e.invalid && e.on && e.runs_as && !(e.kept_by || []).length && e.may_keep;
+	return !e.invalid && e.on && e.runs_as && !(e.run_by || []).length && e.may_set_app_schedules;
 }
 function se(e) {
 	return !e.removed;

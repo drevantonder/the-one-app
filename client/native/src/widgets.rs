@@ -21,7 +21,7 @@ pub async fn refresh(device: &one_client::Device, dir: &Path) -> Result<(), Stri
     let apps: Vec<Value> = apps.as_array().cloned().unwrap_or_default();
     let Some(me) = state["user"]["id"].as_str() else { return Ok(()) };
     let mut pages = vec![("user".to_string(), "You".to_string())];
-    let mut groups: Vec<(String, String)> = state["install"]["groups"]
+    let mut groups: Vec<(String, String)> = state["network"]["groups"]
         .as_array()
         .into_iter()
         .flatten()
@@ -70,7 +70,7 @@ pub async fn refresh(device: &one_client::Device, dir: &Path) -> Result<(), Stri
     }
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or_default();
     let fetched = if answered { json!(now - SWIFT_EPOCH) } else { kept["fetched"].clone() };
-    let mut cache = json!({ "install": state["install"]["name"], "widgets": items, "fetched": fetched });
+    let mut cache = json!({ "network": state["network"]["name"], "widgets": items, "fetched": fetched });
     if cache["fetched"].is_null() {
         cache.as_object_mut().unwrap().remove("fetched");
     }

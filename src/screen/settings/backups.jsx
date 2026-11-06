@@ -56,7 +56,7 @@ function Backups() {
       const [got, state] = await Promise.all([api("GET", "/v1/backups"), api("GET", "/v1/state")])
       setBackups(got)
       setAdmin(state.user?.role === "admin")
-      setNetwork(state.install || {})
+      setNetwork(state.network || {})
       setProblem(null)
     } catch (e) {
       setProblem(one.plain(e))

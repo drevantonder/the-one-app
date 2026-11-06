@@ -47,7 +47,7 @@ function k() {
 			l(({ [e.id]: t, ...n }) => n), P();
 		}
 	}
-	let I = e?.user?.id, L = e?.user?.role === "admin", R = [...e?.install?.users || []].sort((e, t) => (t.id === I) - (e.id === I) || e.name.localeCompare(t.name)), z = R.filter((e) => e.role === "admin").length, B = e?.install?.settings?.address, V = one.config.join_domain, H = R.find((e) => e.id === I)?.handle || "", U;
+	let I = e?.user?.id, L = e?.user?.role === "admin", R = [...e?.network?.users || []].sort((e, t) => (t.id === I) - (e.id === I) || e.name.localeCompare(t.name)), z = R.filter((e) => e.role === "admin").length, B = e?.network?.settings?.address, V = one.config.join_domain, H = R.find((e) => e.id === I)?.handle || "", U;
 	return U = e ? /* @__PURE__ */ C(x, { children: [
 		/* @__PURE__ */ S(h, { children: R.filter((e) => c[e.id] !== null).map((e) => {
 			let t = c[e.id] || e.role, n = !L || e.id === I || t === "admin" && z === 1 ? /* @__PURE__ */ S("span", {

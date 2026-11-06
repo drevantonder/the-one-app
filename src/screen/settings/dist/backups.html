@@ -48,7 +48,7 @@ function T() {
 	i[1] === Symbol.for("react.memo_cache_sentinel") ? (R = async function() {
 		try {
 			let [e, t] = await Promise.all([ne("GET", "/v1/backups"), ne("GET", "/v1/state")]);
-			u(e), _(t.user?.role === "admin"), x(t.install || {}), w(null);
+			u(e), _(t.user?.role === "admin"), x(t.network || {}), w(null);
 		} catch (e) {
 			let t = e;
 			w(one.plain(t));
