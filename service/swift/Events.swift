@@ -30,7 +30,6 @@ public final class Events: @unchecked Sendable {
             : "macOS doesn't let \(thisApp) see your calendars. Allow it in System Settings → Privacy & Security → Calendars: set \(thisApp) to Full Access.")
     }
 
-    /// The list or calendar with this name or id; nil when none is given.
     public func calendar(_ type: EKEntityType, _ name: String?) throws -> EKCalendar? {
         guard let name else { return nil }
         let all = store.calendars(for: type)

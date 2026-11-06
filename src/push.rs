@@ -145,7 +145,6 @@ pub fn describe() -> Value {
     })
 }
 
-/// A send's input, as apps and agents give it.
 #[cfg(feature = "node")]
 #[derive(Default, Deserialize)]
 #[serde(default)]
@@ -177,8 +176,6 @@ impl Send {
 mod tests {
     use super::*;
 
-    /// A note opens only on the device it's sealed to, as the device that signed it sent it; a body too long to push
-    /// is cut to fit.
     #[test]
     fn a_note_opens_only_where_it_was_sealed() {
         let by = SigningKey::from_bytes(&rand::random());

@@ -16,8 +16,9 @@ use crate::build::{self, PLATFORMS, Platform, cargo, git, quietly, show, succeed
 /// Builds the tip of main and has every device run it; with a tag, also publishes it on GitHub.
 /// An update sends out only what changed since the last one here: apps by their deploy, the Mac app by each Mac building
 /// it at once, then the iPhone app for the iPhone it reaches, and the node by building it, which every Linux device then
-/// takes, and which deploys the Workers on Cloudflare (and the Cloudflare node with it) from the device they're deployed from (the first to deploy them: no other does). Beside it runs `after-update` in this
-/// device's home, if there is one: what else is built from main here, like another custom build's update.
+/// takes, and which deploys the Workers on Cloudflare (and the Cloudflare node with it) from the device they're deployed from (the first to
+/// deploy them: no other does). Beside it runs `after-update` in this device's home, if there is one: what else is built from main here, like
+/// another custom build's update.
 pub fn run(tag: Option<&str>) -> Result<()> {
     ensure!(!REPO.is_empty(), "this custom build names no repo, so it has nothing to update from");
     ensure!(cfg!(target_os = "linux"), "run this on one of your Linux devices");
@@ -45,7 +46,6 @@ pub fn run(tag: Option<&str>) -> Result<()> {
     let last = std::fs::read_to_string(&done).ok();
     let mac_done = cache().join("updated-mac");
     let mac_last = std::fs::read_to_string(&mac_done).ok().or_else(|| last.clone());
-    // A service never sent out from here goes out all the same.
     let released = services_released();
     let unreleased = services(&src).iter().any(|n| !released.contains_key(n));
     if tag.is_none() && last.as_deref() == Some(this.as_str()) && mac_last.as_deref() == Some(this.as_str()) && !unreleased {
@@ -57,11 +57,9 @@ pub fn run(tag: Option<&str>) -> Result<()> {
     }
     let mut parts = last.as_deref().map_or_else(Parts::everything, |last| Parts::since(&src, last, &this));
     parts.mac = mac_last.as_deref().map_or_else(Parts::everything, |last| Parts::since(&src, last, &this)).mac;
-    // A release sends all of it; the diff still says which apps' folders went and what a rename became.
     if tag.is_some() {
         (parts.node, parts.mac) = (true, true);
     }
-    // A service's program is sent out when its folder changed, or it never was from here.
     for name in services(&src) {
         let rust = service_dir(&src, &name).join("Cargo.toml").is_file();
         if (tag.is_some() || last.is_none() || !released.contains_key(&name) || (rust && parts.service)) && !parts.services.contains(&name) {
@@ -131,12 +129,11 @@ pub fn run(tag: Option<&str>) -> Result<()> {
     timed("built the node", || quietly(&mut node))?;
 
     let binary = src.join("target/release").join(env!("CARGO_BIN_NAME"));
-    // The build devices say they run: main's commit, and a custom build's config's.
     let version = Version::of(&binary).context("ask the new build what it is")?;
     let short = version.commit.as_str();
     // Which devices to wait for, asked before this device's own node restarts on the new build.
     let linux: Vec<Value> = devices().into_iter().filter(|d| d["target"] == TARGET).collect();
-    // Services first, so a node that no longer carries one (it became its app's own program) finds it out.
+    // Services first, so a node that no longer carries one finds it out.
     let mut failed = !publish_services(&src, &parts.services, &key, &commit);
     if !linux.is_empty() && linux.iter().all(|d| d["build"] == short) {
         println!("  every Linux device already runs {short}");
@@ -215,7 +212,6 @@ pub fn run(tag: Option<&str>) -> Result<()> {
             println!("No device here builds {}, so {tag} has nothing for it.", p.target);
         }
     }
-    // Each file comes with its signature, which the installer checks.
     for asset in std::mem::take(&mut assets) {
         std::fs::write(dir.join(format!("{asset}.sig")), release::sign(&key, &std::fs::read(dir.join(&asset))?)?)?;
         assets.extend([format!("{asset}.sig"), asset]);
@@ -271,7 +267,6 @@ impl Parts {
                 Some((app(f.next()?), app(f.next()?)))
             })
             .collect();
-        // The config's change sends everything; the apps' diff still says which folders went and what a rename became.
         if was_config != now_config {
             (parts.node, parts.mac) = (true, true);
         }
@@ -500,7 +495,6 @@ fn follow(macs: &[Value], commit: &str, config_commit: Option<&str>) -> bool {
         }
         match shell(mac, &mac_follow(commit, config_commit), 60) {
             Ok(r) if r["exit"] == 0 => {
-                // Its report, with logs indented under what they're of.
                 for line in r["stdout"].as_str().unwrap_or("").lines() {
                     if line.starts_with(' ') { println!("  {line}") } else { println!("  {name}: {line}") }
                 }
@@ -557,10 +551,11 @@ fn turn_waiting() -> Result<std::fs::File> {
 /// has its Workers on Cloudflare, so it fails if no device deployed them. True if it failed.
 fn deploy_cloudflare(linux: &[Value], commit: &str) -> bool {
     let home = format!("${{{}_HOME:-${{XDG_DATA_HOME:-$HOME/.local/share}}/{CLI}}}", CLI.to_uppercase());
-    // The node's own build deploys it (what's called the CLI there may be something else), once it's the one sent
-    // out: `exit::NOT_YET` says it isn't yet, `exit::NO_SETTINGS` that this device has none to deploy. It's the node that wrote its home's pid: Shell's program, which runs this on another
-    // device, has its own folder in services/ as its home, so its home is two up, and its address (`_ADDR`) is the services' registry's, not the node's. As a login there would: its profile
-    // is where 1Password's sign-in, which the Cloudflare secrets are read with, usually is, and ~/.local/bin where op may be.
+    // The node's own build deploys it (what's called the CLI there may be something else), once it's the one sent out:
+    // `exit::NOT_YET` says it isn't yet, `exit::NO_SETTINGS` that this device has none to deploy. Shell's program, which runs this on another
+    // device, has its own folder in services/ as its home, so its home is two up, and its address (`_ADDR`) is the services' registry's, not
+    // the node's. It runs as a login would: its profile is where 1Password's sign-in, which the Cloudflare secrets are read with, usually is,
+    // and ~/.local/bin where op may be.
     let deploy = format!(
         r#"h="{home}"; [ -f "$h/pid" ] || h=$(cd "$h/../.." && pwd); [ -f "$h/cloudflare/settings.json" ] || exit {no_settings}; node=/proc/$(cat "$h/pid")/exe
 case "$("$node" version --json)" in *'"commit":"{commit}"'*) ;; *) echo "still on $("$node" version --json)"; exit {not_yet} ;; esac
@@ -585,7 +580,6 @@ case "$("$node" version --json)" in *'"commit":"{commit}"'*) ;; *) echo "still o
             let again = match &said {
                 Err(_) => true,
                 Ok(r) if r["exit"] == one::protocol::exit::NOT_YET => true,
-                // Refused: another device is where the Workers are deployed from. None: this one has no settings.
                 Ok(r) if r["exit"] == one::protocol::exit::REFUSED || r["exit"] == one::protocol::exit::NO_SETTINGS => false,
                 Ok(r) if r["exit"] != 0 => {
                     failures += 1;
@@ -630,7 +624,6 @@ struct After {
 }
 
 impl After {
-    /// Waits for it to finish, and shows what it said: → whether it succeeded.
     fn wait(&mut self) -> bool {
         let Some(mut child) = self.child.take() else { return true };
         let status = child.wait();
@@ -663,7 +656,6 @@ fn after_update() -> Result<Option<After>> {
     Ok(Some(After { child: Some(child), log }))
 }
 
-/// Waits for `after-update` to finish, and shows what it said.
 fn finish(after: Option<After>) -> Result<()> {
     ensure!(timed("waited for after-update", || after.is_none_or(|mut after| after.wait())), "after-update failed");
     Ok(())
@@ -825,7 +817,6 @@ fn wait_until(commit: &str, names: &[String], limit: Duration) -> Result<()> {
     for n in names {
         ensure!(all.iter().any(|d| d["name"] == n.as_str()), "no device named {n}: {}", all.iter().filter_map(|d| d["name"].as_str()).collect::<Vec<_>>().join(", "));
     }
-    // A device by its key and name, as it was at the start: and the build it was on, for what it changed from.
     let mut open: Vec<(String, String, String)> =
         all.iter().filter(|d| names.is_empty() || names.iter().any(|n| d["name"] == n.as_str())).map(|d| (d["key"].as_str().unwrap_or("").into(), d["name"].as_str().unwrap_or("").into(), d["build"].as_str().unwrap_or("?").into())).collect();
     let (started, deadline) = (Instant::now(), Instant::now() + limit);
@@ -837,7 +828,6 @@ fn wait_until(commit: &str, names: &[String], limit: Duration) -> Result<()> {
             let Some(d) = now.iter().find(|d| d["key"] == key.as_str()) else { return true };
             let build = d["build"].as_str().unwrap_or("");
             let mac = d["target"].as_str().is_some_and(|t| Platform::is_mac(t));
-            // What the Mac's build job says, not more than every few seconds: how its build is going, and its iPhone.
             let mut said = None;
             let running = has(commit, build, &mut fetched);
             if mac && d["online"] == true && asked.get(key).is_none_or(|t| t.elapsed() > Duration::from_secs(6)) {
@@ -848,7 +838,6 @@ fn wait_until(commit: &str, names: &[String], limit: Duration) -> Result<()> {
                 }
             }
             if running {
-                // Switched on and not yet answering: starting, or what went wrong.
                 let troubled: Vec<String> = d["parts"]
                     .as_array()
                     .into_iter()
@@ -984,7 +973,6 @@ fn run_here(command: &str) -> Result<Value> {
 }
 
 fn shell(device: &Value, command: &str, timeout: u64) -> Result<Value> {
-    // Shell's service on that device, by its name: its own program there, or built into an older node.
     let r = crate::node().post("/v1/call", json!({ "device": device["name"], "service": "shell", "app": "shell", "op": "run", "input": { "command": command, "timeout": timeout } }))?;
     Ok(r["ok"].clone())
 }
@@ -1069,7 +1057,6 @@ want() {{ cat "$c/want"; }}
 # A build that failed is tried again when its scripts change (a newer update's, if the job is running), and not otherwise.
 scripts() {{ cat "$c/build.sh" "$c/phone.sh" | cksum; }}
 retry() {{ [ -f "$c/tried.scripts" ] && [ "$(scripts)" != "$(cat "$c/tried.scripts")" ]; }}
-# Runs a build at a lower priority, so the Mac stays quick to use, and stops it for a newer update's (sets stopped).
 run() {{
 	stopped=
 	nice -n 10 /bin/sh "$@" & pid=$!
@@ -1109,7 +1096,6 @@ while :; do
 	fi
 	[ -s "$c/phone.built" ] && [ "$(cat "$c/phone.built")" != "$(cat "$c/phone.installed" 2>/dev/null)" ] || exit 0
 	if install >> "$c/phone.log" 2>&1; then cp "$c/phone.built" "$c/phone.installed"; continue; fi
-	# Away or locked: try again in a minute, or build a newer update at once.
 	for _ in $(seq 30); do sleep 2; if [ "$(want)" != "$want" ] || retry; then break; fi; done
 done
 JOB
@@ -1143,7 +1129,6 @@ cd "$c/src"
 git fetch -q --tags --force origin
 git checkout -q --detach --force "{commit}"
 git clean -qfdx -e /target -e /client/native/target
-# What the builds leave in target/ is kept in bounds, and a Mac with no room says so here, not in a link step.
 client/native/disk.sh prune
 {config}"#
     )
@@ -1202,12 +1187,10 @@ mod tests {
         Parts::of(files.iter().copied())
     }
 
-    /// What an update sends out for what changed: the part of a release no run of the tests sees.
     #[test]
     fn a_change_sends_out_what_is_made_of_it() {
         assert_eq!(of(&["docs/x.md", "README.md", "tests/e2e.rs", ".gitignore"]), Parts::default());
         assert_eq!(of(&["apps/board/app.js", "apps/board/screen.js"]), Parts { apps: vec!["board".into()], ..Default::default() });
-        // An app's service is built apart from its app, which its deploy leaves out.
         assert_eq!(of(&["apps/shell/service/main.go"]), Parts { services: vec!["shell".into()], ..Default::default() });
         assert!(of(&["service/src/lib.rs"]).service);
         assert!(of(&["src/node.rs"]).node && of(&["src/node.rs"]).mac);

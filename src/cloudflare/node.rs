@@ -21,7 +21,6 @@ pub fn modules() -> Result<Vec<(String, &'static str, Vec<u8>)>> {
 /// Its modules, from its WebAssembly's glue and the WebAssembly, as wasm-bindgen makes them.
 pub fn modules_from(glue: Vec<u8>, wasm: Vec<u8>) -> Vec<(String, &'static str, Vec<u8>)> {
     let shim = include_str!("../app/runtime/shim.js");
-    // And the services built for Cloudflare it carries, each `service-<app>.js`, by their app's name.
     let services = crate::config::CLOUDFLARE_SERVICES;
     let imports: String = services.iter().enumerate().map(|(i, (name, _))| format!("import s{i} from {};\n", json!(format!("./service-{name}.js")))).collect();
     let named: Vec<String> = services.iter().enumerate().map(|(i, (name, _))| format!("{}: s{i}", json!(name))).collect();
@@ -57,7 +56,6 @@ pub fn served(settings: &Settings, mut modules: Vec<(String, &'static str, Vec<u
 /// `Node` and that class's migration the first time, and its logs on.
 pub fn metadata(settings: &Settings, migration: Option<&str>, exists: impl Fn(&str) -> bool) -> Value {
     let (mut meta, _) = crate::cloudflare::metadata(settings, &NODE, migration, exists);
-    // Its logs say which calls ran here, for whoever owns the account.
     meta["observability"] = json!({ "enabled": true });
     meta
 }

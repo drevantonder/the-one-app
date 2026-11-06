@@ -32,7 +32,7 @@ pub struct Me {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Call {
     pub id: u64,
-    /// The function it runs: `op` on the wire, which older nodes send.
+    /// The function it runs: `op` on the wire.
     #[serde(rename = "op")]
     pub function: String,
     #[serde(default)]
@@ -98,7 +98,6 @@ impl Host {
         Ok(answer(self.agent.post(format!("{}{path}", self.node)).send_json(body))?.unwrap_or_default())
     }
 
-    /// `post`, given up on after `limit`.
     pub fn post_within(&self, path: &str, body: &Value, limit: Duration) -> Result<Value> {
         Ok(answer(self.agent.post(format!("{}{path}", self.node)).config().timeout_global(Some(limit)).build().send_json(body))?.unwrap_or_default())
     }
@@ -108,7 +107,6 @@ impl Host {
         self.node.rsplit(':').next().and_then(|p| p.parse().ok()).unwrap_or(0)
     }
 
-    /// One with `dir` and no node, for tests.
     pub fn for_test(dir: &std::path::Path) -> Host {
         Host { name: "test", dir: dir.to_path_buf(), node: "http://127.0.0.1:1".into(), agent: ureq::Agent::new_with_defaults() }
     }
@@ -152,7 +150,6 @@ pub fn input<T: serde::de::DeserializeOwned + Default>(input: &Value) -> Result<
     Ok(if input.is_null() { T::default() } else { serde_json::from_value(given(input)).map_err(|err| anyhow!("bad input: {err}"))? })
 }
 
-/// The node's answer: None for no content.
 fn answer(resp: Result<ureq::http::Response<ureq::Body>, ureq::Error>) -> Result<Option<Value>> {
     let mut resp = resp?;
     if resp.status() == 204 {

@@ -80,17 +80,14 @@ impl Coded {
         Coded::new(code::REFUSED, message)
     }
 
-    /// An error of kind `code` (one of `code`'s).
     pub fn error(code: &str, message: impl std::fmt::Display) -> anyhow::Error {
         Coded::new(code, message).into()
     }
 
-    /// The code `err` carries, if it's coded.
     pub fn of(err: &anyhow::Error) -> Option<String> {
         err.downcast_ref::<Coded>().map(|c| c.code.clone())
     }
 
-    /// An error with `message` and the `code` it was said with, if it had one.
     pub fn or_plain(code: Option<String>, message: impl std::fmt::Display) -> anyhow::Error {
         match code {
             Some(code) => Coded::error(&code, message),
@@ -98,7 +95,6 @@ impl Coded {
         }
     }
 
-    /// Whether `err` is of kind `code`.
     pub fn is(err: &anyhow::Error, code: &str) -> bool {
         Coded::of(err).as_deref() == Some(code)
     }
@@ -151,16 +147,13 @@ pub fn javascript() -> String {
          export const NOTE_FALLBACK = {fallback};\n\
          export const CODES = {codes};\n\
          \n\
-         /// A scope's folder in the bucket: `user:<id>` is written `user-<id>`.\n\
          export const folder = (scope) => scope.replace(\":\", \"-\");\n\
-         /// Where an app's database of a scope is in the bucket.\n\
          export const databasePrefix = (scope, app, database) => `${{folder(scope)}}/${{app}}/${{database}}`;\n\
          const at = (n) => String(n).padStart(STEP_DIGITS, \"0\");\n\
          export const stepName = (prefix, n) => `${{prefix}}/${{at(n)}}`;\n\
          export const copyName = (prefix, n) => `${{prefix}}/${{COPY}}/${{at(n)}}`;\n\
          export const tidiedName = (prefix) => `${{prefix}}/${{TIDIED}}`;\n\
          export const newestName = (prefix) => `${{prefix}}/${{NEWEST}}`;\n\
-         /// The refusal of a device that reads less than this build, for the network's name as people say it.\n\
          export const updateRefusal = (yours) => {update}.replace(\"{{yours}}\", yours);\n\
 ",
         urls = json!(URLS),

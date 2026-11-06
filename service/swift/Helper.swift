@@ -220,14 +220,12 @@ public func needs(_ what: String, status: Access, ask: () -> Void, settings: Str
     }
 }
 
-/// Runs `ask` only the first time it's called for `key` while this helper runs.
 public func once(_ key: String, _ ask: () -> Void) {
     if asked.withLock({ $0.insert(key).inserted }) { ask() }
 }
 
 private let asked = OSAllocatedUnfairLock(initialState: Set<String>())
 
-/// An object JSON leaves out the keys whose values are nil.
 public func object(_ fields: [String: Any?]) -> [String: Any] {
     fields.compactMapValues { $0 }
 }

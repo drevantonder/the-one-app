@@ -57,7 +57,6 @@ fn is_rust(source: &Path) -> Option<bool> {
     }
 }
 
-/// Whether the app in `dir` has a service (`service/go.mod` or `service/Cargo.toml`).
 pub fn has_service(dir: &Path) -> bool {
     is_rust(&dir.join("service")).is_some()
 }
@@ -90,7 +89,6 @@ pub fn built_from(dir: &Path, dirty: bool) -> Result<String> {
 /// of `platforms` this machine can: a service in Go for all of them, one in Rust for this machine's. Nodes never build.
 /// None if the app has no service.
 pub fn build_service(app: &Path, built: &str, platforms: impl IntoIterator<Item = &'static Platform>, out: &Path) -> Result<Option<Built>> {
-    // The builds run in the service's folder, so what they're given is by full paths.
     let source = std::fs::canonicalize(app).with_context(|| format!("{} isn't here", app.display()))?.join("service");
     let Some(rust) = is_rust(&source) else { return Ok(None) };
     std::fs::create_dir_all(out)?;
@@ -103,7 +101,6 @@ pub fn build_service(app: &Path, built: &str, platforms: impl IntoIterator<Item 
         }
         let program = out.join(platform.target);
         if rust {
-            // Cargo says where it put the program it built.
             let o = Command::new(cargo())
                 .current_dir(&source)
                 .env("ONE_BUILD", built)
@@ -137,7 +134,6 @@ pub fn publish(node: &crate::api::Client, path: &Path, key: &ssh_key::PrivateKey
     node.post(if service.is_some() { "/v1/service-release" } else { "/v1/node-release" }, body)
 }
 
-/// What publishing says, from what the node answered.
 pub fn published_said(published: &Value, service: Option<&str>) -> String {
     let (commit, target) = (published["commit"].as_str().unwrap_or(""), published["target"].as_str().unwrap_or(""));
     match service {
@@ -150,9 +146,7 @@ pub fn published_said(published: &Value, service: Option<&str>) -> String {
 struct Wasm<'a> {
     /// What it is, for what to install when it can't build.
     what: &'a str,
-    /// Cargo's arguments, after the program.
     cargo: &'a [&'a str],
-    /// Where cargo leaves it.
     wasm: PathBuf,
     /// Where the glue and the program go, and what it's called there.
     out: PathBuf,
@@ -219,7 +213,6 @@ pub fn git(dir: &Path, args: &[&str]) -> Result<String> {
     Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
-/// Runs a command, showing its output only if it fails.
 pub fn quietly(cmd: &mut Command) -> Result<()> {
     let out = cmd.output().with_context(|| format!("run {:?}", cmd.get_program()))?;
     if !out.status.success() {
@@ -228,14 +221,12 @@ pub fn quietly(cmd: &mut Command) -> Result<()> {
     Ok(())
 }
 
-/// Runs a command, showing its output.
 pub fn show(cmd: &mut Command) -> Result<()> {
     let status = cmd.status().with_context(|| format!("run {:?}", cmd.get_program()))?;
     ensure!(status.success(), "{} failed", said(cmd));
     Ok(())
 }
 
-/// Whether a command succeeds, saying nothing.
 pub fn succeeds(cmd: &mut Command) -> bool {
     cmd.stdout(Stdio::null()).stderr(Stdio::null()).status().is_ok_and(|s| s.success())
 }

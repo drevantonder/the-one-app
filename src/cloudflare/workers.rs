@@ -11,8 +11,6 @@ use sha2::{Digest, Sha256};
 
 use super::*;
 
-// Building and running.
-
 /// A binding: (name, value, whether it's secret). A value `service:<name>` is another Worker, or `service:<name>:<entrypoint>`
 /// one of its entrypoints, `object:<name>:<class>` another Worker's Durable Object class, `loader:` Worker Loader, `ai:` Workers
 /// AI, and `r2:<bucket>` an R2 bucket of the account's.
@@ -59,7 +57,6 @@ pub const WORKERS: &[Worker] = &[
 pub const NODE: Worker = Worker { name: "node", entry: "node/worker.js", class: Some("Node"), deleted: &[], place: None, node_build: false, serves_web: false, reads_bucket: true, bindings: node_bindings };
 
 impl Worker {
-    /// The Worker called `name`, one of `WORKERS`'.
     pub fn named(name: &str) -> &'static Worker {
         WORKERS.iter().find(|w| w.name == name).expect("one of the network's Workers")
     }
@@ -69,7 +66,6 @@ impl Worker {
         self.place.map(|place| place(settings))
     }
 
-    /// Its bindings.
     pub fn bindings(&self, settings: &Settings) -> Vec<Binding> {
         (self.bindings)(settings)
     }
@@ -84,7 +80,6 @@ impl Worker {
         Some(out)
     }
 
-    /// Its Worker's name on Cloudflare: `<cli>-<name>`, so custom builds sharing an account don't clash.
     pub fn worker_name(&self) -> String {
         worker_name(self.name)
     }
@@ -102,7 +97,6 @@ fn wasm(entry: &str) -> Vec<(String, Vec<u8>)> {
         .collect()
 }
 
-/// The Cloudflare node's modules, as `node::modules` gives them.
 pub type Modules = Vec<(String, &'static str, Vec<u8>)>;
 
 /// How a network's Workers are set up, wherever they run: kept in `<home>/cloudflare/settings.json`, with its secrets in
@@ -177,7 +171,6 @@ pub struct Settings {
     pub(super) dir: PathBuf,
 }
 
-/// Whether people sign in with Google.
 fn google() -> bool {
     crate::config::SIGN_IN == "google"
 }
@@ -227,7 +220,6 @@ WNS_CLIENT_ID=
 WNS_CLIENT_SECRET=
 ";
 
-/// The push Worker's secrets, as `SCHEMA` names them.
 const PUSH_SECRETS: &[&str] = &["VAPID_KEY", "APNS_KEY", "APNS_KEY_ID", "APNS_TEAM_ID", "FCM_ACCOUNT", "WNS_TENANT_ID", "WNS_CLIENT_ID", "WNS_CLIENT_SECRET"];
 
 /// A new VAPID key: base64url PKCS#8 of a P-256 key, as the push Worker imports it.
@@ -645,7 +637,6 @@ pub fn served_with(settings: &Settings, web: &Path, cloudflare_node: Option<Modu
         });
     }
     served.extend(node);
-    // What's bound to a Worker that isn't here isn't bound.
     let names: Vec<String> = served.iter().map(|s| s.name.clone()).collect();
     for s in &mut served {
         s.bindings.retain(|(_, v)| reaches(v).is_none_or(|other| names.iter().any(|n| n == other)));
@@ -897,7 +888,6 @@ pub fn build(dir: &Path, entry: &str) -> Result<Vec<u8>> {
 pub struct Served {
     pub name: String,
     pub module: Vec<u8>,
-    /// Its WebAssembly modules, (name, bytes).
     pub modules: Vec<(String, Vec<u8>)>,
     pub class: Option<String>,
     /// Where it listens, if anywhere but its binding.
@@ -1009,8 +999,6 @@ pub fn start(config: &Path, listening: Vec<(String, std::net::TcpListener)>) -> 
     crate::app::runtime::child(&mut command, &listening.iter().map(|(n, l)| (n.as_str(), l)).collect::<Vec<_>>());
     Ok(command.spawn()?)
 }
-
-// Cloudflare.
 
 /// Cloudflare's API, with an API token that may edit Workers.
 pub struct Cloudflare {
@@ -1150,7 +1138,6 @@ pub struct Invite {
     pub until: u64,
 }
 
-/// How long an invite works.
 pub const INVITE_DAYS: u64 = 3;
 
 /// Invites someone to join the network at `address`, `name` only a label, as `user` (who they'll be in the network; a
@@ -1175,7 +1162,6 @@ pub fn invite(address: &str, key: &ed25519_dalek::SigningKey, name: &str, user: 
     Ok(Invite { link: format!("{address}/invite#{secret}"), user, until })
 }
 
-/// A web file's type, by its extension.
 fn mime(path: &str) -> &'static str {
     match path.rsplit('.').next().unwrap_or("") {
         "html" => "text/html; charset=utf-8",
@@ -1248,7 +1234,6 @@ pub fn deploy(cf: &Cloudflare, settings: &Settings, web: &[(String, Vec<u8>)]) -
     deploy_some(cf, settings, web, &WORKERS.iter().collect::<Vec<_>>())
 }
 
-/// `deploy`, of only the services named.
 pub fn deploy_some(cf: &Cloudflare, settings: &Settings, web: &[(String, Vec<u8>)], workers: &[&Worker]) -> Result<()> {
     ensure!(settings.throwaway_person.is_none(), "a throwaway network's sign-in lets in anyone who reaches it, so its Workers run only beside its throwaway network");
     if workers.iter().any(|w| w.serves_web) {
@@ -1308,7 +1293,6 @@ pub fn deploy_some(cf: &Cloudflare, settings: &Settings, web: &[(String, Vec<u8>
     bail!("some services' bindings never resolved")
 }
 
-/// A Worker of the account's, as its list says.
 pub struct Script {
     /// The Durable Object migration it has had.
     pub migration: Option<String>,

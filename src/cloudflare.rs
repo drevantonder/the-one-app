@@ -9,8 +9,6 @@ use data_encoding::BASE64URL_NOPAD as B64U;
 use serde::Deserialize;
 use serde_json::Value;
 
-// Access tokens.
-
 /// What an access token says.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Claims {

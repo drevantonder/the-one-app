@@ -43,12 +43,10 @@ pub fn content(release: &Release) -> Content {
     Content { blobs: vec![release.blob.clone()], ..Content::new(APP, kind, json!(release)) }
 }
 
-/// Signs a binary as a release.
 pub fn sign(key: &PrivateKey, bytes: &[u8]) -> Result<String> {
     Ok(key.sign(NAMESPACE, HashAlg::Sha512, bytes)?.to_pem(LineEnding::LF)?)
 }
 
-/// Checks that `signature` is `key`'s, over `bytes`.
 pub fn verify(key: &str, bytes: &[u8], signature: &str) -> Result<()> {
     ensure!(signed_by(key, signature), "it isn't signed by this build's release key");
     let sig = SshSig::from_pem(signature)?;
@@ -90,7 +88,6 @@ pub fn latest_said(key: &str, said: &[(crate::database::content::Content, Key)],
     None
 }
 
-/// A release as `global` said it.
 struct Said<'a> {
     content: &'a crate::database::content::Content,
     author: Key,
@@ -192,7 +189,6 @@ mod tests {
         Release { commit: commit.into(), target: "t".into(), blob: "b".repeat(64), size: 3, committed, signature, service: None }
     }
 
-    /// One device publishing each release in turn.
     fn said(releases: &[Release]) -> Vec<(Content, Key)> {
         releases.iter().map(|r| (content(r), [1; 32])).collect()
     }

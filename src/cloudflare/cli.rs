@@ -157,7 +157,6 @@ pub fn commands() -> Command {
                     at_home(&mut settings)?;
                     let mut settings = devices_here(g.node, settings, true)?;
                     let cf = cloudflare(&flags, Some(&settings))?;
-                    // Its endpoint's key, made once and kept with the Workers' secrets.
                     if settings.cloudflare_node_endpoint().is_none() {
                         settings.cloudflare_node_key = data_encoding::HEXLOWER.encode(&rand::random::<[u8; 32]>());
                         settings.set_secret("CLOUDFLARE_NODE_KEY", &settings.cloudflare_node_key)?;
@@ -190,7 +189,6 @@ pub fn commands() -> Command {
                         let days = crate::cloudflare::INVITE_DAYS;
                         let how = if crate::config::SIGN_IN == "google" { "they sign in with Google and join" } else { "they make their passkey and join" };
                         println!("Send {name} this link. It works once, for {days} days: opening it, {how}.\n\n  {}", invite.link);
-                        // Their first device besides this machine: this machine lets it in.
                         let me = node.get("/v1/state").ok().and_then(|s| s["user"]["id"].as_str().map(str::to_string));
                         if user.is_some() && user == me {
                             println!("\nIt opens their browser waiting for approval, with a code: approve it here with {CLI} devices approve <code> --confirm.");
