@@ -96,13 +96,17 @@ a C# helper in the Windows VM by `windows/build.sh`; `one throwaway client windo
       Customize (Choose a Widget, "<Title> · <Page>", Done, Cancel), a toggle and a button run the widget's tool
       (`--call`), drawn at once then as it left them, a failing tool says "Couldn't do that: <why>", it reads again
       with `--widgets` when shown and every 5 minutes, and redraws when the app writes the cache; signed out, "Sign in
-      to <Name> to see your pages." (checked, a test app's toggle and button). Each headless call takes ~18 s, and a
-      fresh one isn't handed keys for `/v1/widgets` (the node folds "needs keys" into each widget's error rather than
-      answering 428): the lead's to decide
+      to <Name> to see your pages." (checked, a test app's toggle and button). While the app runs the helper's calls
+      are answered by it, over its loopback port (`headless.rs`): a button's tool answered in 60-80 ms, where a client
+      started each time took ~18 s; a fresh client draws its widgets at once (checked, Windows, `one throwaway client
+      windows`: Repos' "No repos yet." on the first start, and four `--widgets` at once leave no error)
 - [ ] Toasts from pushes (WNS through the helper, `--open-note`, `--register-push`), Approve / Not Me with no window
       (`--answer-join`): built as the old app's, not checked: The One App has no WNS app (`wns_app`/`wns_object` empty)
-- [ ] Links to the address (`https://<address>/…`, the AppUriHandler): the package names the config's host, but the
-      app doesn't claim the address it signs in to, as the old one did, until the page routes them (D7)
+- [x] Links to the address (`https://<address>/…`, the AppUriHandler): the package names the config's host, and the app
+      makes the address it signs in to its one app-link host (`claim`, at start and when an address is taken), so
+      Windows hands it those links, which open the screen they name (checked, Windows: a start of the program with
+      `<address>/app/repos/main` from the desktop's session opened Repos; an https address got Windows' own record of
+      the host for the package; the throwaway's address is http, which Windows takes no app links for)
 
 Mac (`apple/Mac`, `apple/Shared`), iPhone (`apple/Phone`, `Notifications`, `Widget`), Android (`android/`): each old
 app's full inventory lands here before that platform is written.
