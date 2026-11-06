@@ -1,208 +1,36 @@
-//! `global`'s scope database once its log is frozen (`database::switch`, `database::steps`): freezing the log in the
-//! ceremony an admin runs with the network's recovery key, or a new network runs as it's made (`switch`), reading the steps others wrote in the bucket, and writing this device's own and
-//! those its people's other devices sign. What this device has read of each it keeps in its folder, checked against
-//! its hash when it starts again (`scope-kept/`).
+//! `global`'s scope database (`database::steps`): reading the steps others wrote in the bucket, from the freeze the
+//! network's recovery key signed, and writing this device's own and those its people's other devices sign. What this
+//! device has read of each it keeps in its folder, checked against its hash when it starts again (`scope-kept/`).
 
 use super::*;
-use crate::config::CLI;
 use crate::database::steps;
 
-/// How long a writer of the log waits for the freeze a `FREEZING` step says is coming, from when it first sees it,
-/// before it writes on: the ceremony writes the freeze within half of it, or not at all, so a writer that has
-/// waited this long finds it, if it's ever written.
-const FREEZE_WAIT: Duration = Duration::from_secs(30);
-
 impl Node {
-    /// Whether `global`'s log is frozen here: its scope database is the truth, written as steps.
+    /// Whether this device has read who's who: `global`'s freeze, and the steps after it.
     pub fn frozen(&self) -> bool {
         self.with(|i| Ok(i.r.frozen.is_some())).unwrap_or(false)
     }
 
-    /// The ceremony that freezes `global`'s log, run once by an admin on their own machine with the network's recovery
-    /// key (`one switch`), which signs everything it writes and is never kept, if it isn't frozen yet: on a network made
-    /// before this release, or as a new one is made. It waits for no device: one that reads less than `switch::GATE` is
-    /// told to update once it's frozen. A `FREEZING` step first, so
-    /// writers of the log look whether the freeze holds what they write from then on; then where every log ends, the
-    /// freeze (`steps::freeze`) as the step of `global`'s log after its end, its mark, and the freeze at the next free
-    /// position of the scope database, within half of `FREEZE_WAIT` of the `FREEZING`, or it's tried again. Fails
-    /// saying why if it isn't frozen by it.
-    pub async fn switch(&self, caller: &Caller, recovery: &SigningKey) -> Result<()> {
-        ensure!(caller.token.is_none() && caller.key == self.0.id, "the recovery key is used only on the machine it's kept on");
-        self.read_log(&Scope::Global).await?;
-        self.read_steps().await?;
-        if self.frozen() {
-            return Err(self.frozen_already());
-        }
-        let user = self.user()?;
-        let gate = self.with(|i| {
-            let db = i.r.db();
-            ensure!(db.recovery() == Some(recovery.verifying_key().to_bytes()), "that isn't {YOURS}'s recovery key");
-            ensure!(db.may(&user, "change-settings", scopes::NETWORK), "only an admin of {YOURS} freezes its log");
-            Ok(i.r.members.gate())
-        })?;
-        // That the gate is open, from this admin's own device, in the log: a freeze counts only if the log it names
-        // ends after it (`steps::claimed`), so none signed before the release that reads it, by a recovery key since
-        // replaced, ever does.
-        if !gate {
-            self.member_content(caller, members::gate()).await?;
-            ensure!(self.with(|i| Ok(i.r.members.gate()))?, "the gate this device wrote to {YOURS}'s log doesn't count, so it froze nothing");
-        }
-        for _ in 0..5 {
-            if self.freeze_once(&user, recovery).await? {
-                return Ok(());
-            }
-        }
-        bail!("devices kept writing to {YOURS}'s log, so its freeze didn't land within {} s in 5 tries: run it again", (FREEZE_WAIT / 2).as_secs())
-    }
-
-    /// What the ceremony says when the log is frozen already, by a freeze it didn't write.
-    fn frozen_already(&self) -> anyhow::Error {
-        let at = self.with(|i| Ok(i.r.frozen.as_ref().map(|(f, _)| f.at))).ok().flatten().unwrap_or(0);
-        anyhow::anyhow!("{YOURS}'s log is frozen already, by a freeze at step {at} of who's who that this didn't write, so it froze nothing. If no one ran {CLI} switch for it before, find out who did")
-    }
-
-    /// One try at the ceremony's steps (`switch`). → whether it's frozen: not if it took too long, so it's tried again;
-    /// fails if the freeze it wrote doesn't count, saying why.
-    async fn freeze_once(&self, user: &str, recovery: &SigningKey) -> Result<bool> {
-        let _write = self.own_writes().await?;
-        // `global`'s log as the bucket has it, read before the `FREEZING`, so only what's written since is read after:
-        // read as every reader of the freeze reads it (`steps::Log`), so what it adds up to is what they find.
-        let (bucket, keys, prefix) = (self.bucket()?, self.log_key(&Scope::Global).await?, crate::log::prefix("global"));
-        let mut log = steps::Log::new(self.with(|i| Ok(i.r.root))?);
-        let unopened = "global's log has a step under an epoch this device hasn't opened yet: freeze it once it has";
-        steps::log_on(&bucket, &keys, &mut log).await.context(unopened)?;
-        if self.put_first(user, recovery, Content::new(members::APP, steps::FREEZING, json!({})), None, None).await?.is_none() {
-            return Err(self.frozen_already());
-        }
-        let deadline = std::time::Instant::now() + FREEZE_WAIT / 2;
-        // Every log as it is now, which no writer that looks after this adds to unawares.
-        self.read_entries_now(&Scope::Global).await?;
-        steps::log_on(&bucket, &keys, &mut log).await.context(unopened)?;
-        let mut logs = BTreeMap::new();
-        for scope in self.with(|i| Ok(i.r.db().scopes()))?.into_iter().filter(|s| *s != Scope::Global) {
-            logs.insert(scope.to_string(), log_end(&bucket, &scope).await?);
-        }
-        loop {
-            let end = log.last();
-            let (content, copy) = self.with(|i| i.r.freeze_now(log.entries(end), end, logs.clone(), now_ms()))?;
-            // Its mark, at the step after the log's end as read just now: the end it names is the real one.
-            let name = crate::db::step_name(&prefix, end + 1);
-            let mark = self.with(|i| steps::sign(recovery, &Scope::Global, end + 1, user, i.r.db().epoch(&Scope::Global), now_ms(), content.clone()))?;
-            if std::time::Instant::now() >= deadline {
-                tracing::warn!("freezing the log took too long, so writers may have written on: it's tried again");
-                return Ok(false);
-            }
-            if crate::bucket::Bucket::create(&bucket, &name, &crate::log::seal(&keys, &name, &steps::encode(&mark, None))?).await? {
-                let wrote = self.put_first(user, recovery, content, Some(&copy), Some(deadline)).await?;
-                let at = self.with(|i| Ok(i.r.frozen.as_ref().map(|(f, _)| f.at)))?;
-                return match (wrote, at) {
-                    (Some(wrote), Some(at)) if wrote == at => Ok(true),
-                    (_, Some(_)) => Err(self.frozen_already()),
-                    (None, None) => Ok(false),
-                    (Some(wrote), None) => {
-                        let root = self.with(|i| Ok(i.r.root))?;
-                        steps::freezes(root, &log, end, recovery.verifying_key().to_bytes()).with_context(|| format!("the freeze it wrote at step {wrote} of who's who doesn't count"))?;
-                        bail!("the freeze it wrote at step {wrote} of who's who doesn't count: step {} of {YOURS}'s log isn't its mark", end + 1)
-                    }
-                };
-            }
-            // Written on since: freeze where it ends now.
-            steps::log_on(&bucket, &keys, &mut log).await.context(unopened)?;
-        }
-    }
-
-    /// Writes a step of `global`'s scope database before its log is frozen (`FREEZING`, or the freeze with its `copy`),
-    /// signed by `recovery`, at the next free position, while this device holds its writes, unless it's `deadline` by
-    /// the moment it would. → where it was written: nowhere if the log froze, or the deadline came.
-    async fn put_first(&self, user: &str, recovery: &SigningKey, content: Content, copy: Option<&[u8]>, deadline: Option<std::time::Instant>) -> Result<Option<u64>> {
-        for _ in 0..50 {
-            self.read_steps_now().await?;
-            if self.frozen() {
-                return Ok(None);
-            }
-            let (at, epoch) = self.with(|i| Ok((i.r.looked + 1, i.r.db().epoch(&Scope::Global))))?;
-            let step = steps::sign(recovery, &Scope::Global, at, user, epoch, now_ms(), content.clone())?;
-            let keys = self.log_key(&Scope::Global).await?;
-            let name = crate::db::step_name(&steps::prefix("global"), at);
-            let sealed = crate::log::seal(&keys, &name, &steps::encode(&step, copy))?;
-            if deadline.is_some_and(|d| std::time::Instant::now() >= d) {
-                tracing::warn!("freezing the log took too long, so writers may have written on: it's tried again");
-                return Ok(None);
-            }
-            if crate::bucket::Bucket::create(&self.bucket()?, &name, &sealed).await? {
-                self.read_steps_now().await?;
-                self.ping(&Scope::Global, None);
-                return Ok(Some(at));
-            }
-        }
-        bail!("who's who changed too often to write to")
-    }
-
-    /// After this device wrote `entry` at step `at` of its scope's log: whether a freeze leaves it out, so it never
-    /// counts. Looks only once the recovery key's `FREEZING` step is there, and waits for the freeze it says is coming, up to
-    /// `FREEZE_WAIT` from when it first saw that one: after that it has lapsed, and the entry counts. While it can't
-    /// tell (the bucket doesn't answer, say), it asks again, less and less often, rather than take the entry as
-    /// counted: a freeze may have left it out, and its writer would never write it again.
-    pub(super) async fn left_out(&self, entry: &Entry, at: u64) -> bool {
-        let mut wait = Duration::from_secs(1);
-        loop {
-            match self.left_out_now(entry, at).await {
-                Ok(out) => return out,
-                Err(err) => {
-                    tracing::warn!("whether the log's freeze holds what this device wrote at step {at} of {}: {err:#}: asked again in {}s", entry.log(), wait.as_secs());
-                    tokio::time::sleep(wait).await;
-                    wait = (wait * 2).min(FREEZE_WAIT);
-                }
-            }
-        }
-    }
-
-    async fn left_out_now(&self, entry: &Entry, at: u64) -> Result<bool> {
-        loop {
-            self.read_steps_now().await?;
-            let (frozen, freezing) = self.with(|i| Ok((i.r.frozen.clone(), i.r.freezing)))?;
-            if let Some((freeze, _)) = frozen {
-                return Ok(!freeze.holds(entry, at));
-            }
-            let Some(freezing) = freezing else { return Ok(false) };
-            let seen = {
-                let mut seen = self.0.freezing_seen.lock().unwrap();
-                if seen.is_none_or(|(p, _)| p != freezing) {
-                    *seen = Some((freezing, std::time::Instant::now()));
-                }
-                seen.map(|(_, t)| t).expect("just set")
-            };
-            if seen.elapsed() >= FREEZE_WAIT {
-                return Ok(false);
-            }
-            tokio::time::sleep(Duration::from_secs(1)).await;
-        }
-    }
-
-    /// Reads `global`'s steps in the bucket after the last this device applied, once its log is frozen: each applied if
-    /// it counts, passed over if not. Before, it looks at each for its freeze. A step under an epoch above every key this
-    /// device opens waits for that epoch's key; one above every epoch made is looked at again once `global`'s log is
-    /// read to its end, and only then, if still above, junk, passed over: an epoch's entry or step is always written
-    /// before anything is sealed under it. → whether there were any.
+    /// Reads `global`'s steps in the bucket after the last this device applied: each applied if it counts, passed over
+    /// if not. Before it has read the freeze, it looks at each for it. A step under an epoch above every key this
+    /// device opens waits for that epoch's key; one above every epoch made is junk, passed over. → whether there were
+    /// any.
     pub(super) async fn read_steps(&self) -> Result<bool> {
         let _write = self.0.writes.lock().await;
         self.read_steps_now().await
     }
 
-    /// `read_steps`, while this device holds its writes. Before the log is frozen, it looks at each step for the
-    /// freeze (`Replica::take_first`): one the recovery key signed is taken once `global`'s log is read to its end (so
-    /// every key that was ever the recovery key is known) and from its steps up to the freeze's end of it.
+    /// `read_steps`, while this device holds its writes.
     pub(super) async fn read_steps_now(&self) -> Result<bool> {
         let bucket = self.bucket()?;
         let prefix = steps::prefix("global");
         let from = self.with(|i| Ok(i.r.at().unwrap_or(i.r.looked)))?;
         let mut at = from;
-        let mut log_read = false;
         loop {
             let name = crate::db::step_name(&prefix, at + 1);
             let keys = match self.log_key(&Scope::Global).await {
                 Ok(keys) => keys,
-                // Not given `global`'s newest epoch yet, as between its own new epoch's entry and its seals: it reads
+                // Not given `global`'s newest epoch yet, as between its own new epoch's step and its seals: it reads
                 // with those it holds, and a step under the newest waits for it, as one under any epoch not handed yet.
                 Err(err) if err.is::<NotGiven>() => self.log_key_of(&self.epochs_held(&Scope::Global).await?.0).await?,
                 Err(err) => return Err(err),
@@ -214,44 +42,18 @@ impl Node {
             let given = match steps::open(&keys, u32::MAX, &Scope::Global, at + 1, &o.bytes) {
                 steps::Opened::Step(given) => Some(given),
                 steps::Opened::Junk => None,
-                steps::Opened::Waits(epoch) if self.with(|i| Ok(i.r.epoch_made(&Scope::Global)))? >= epoch => {
-                    // Made, but not handed to this device yet: it reads on once it is.
+                steps::Opened::Waits(epoch) if !self.frozen() || self.with(|i| Ok(i.r.epoch_made(&Scope::Global)))? >= epoch => {
+                    // Made, but not handed to this device yet, or before it's read the freeze: it reads on once it is.
                     self.forget_epochs(&Scope::Global);
                     break;
                 }
-                // Before the freeze, `global`'s epochs are its log's: read it to its end, and look again.
-                steps::Opened::Waits(_) if !self.frozen() && !log_read => {
-                    self.read_entries_now(&Scope::Global).await?;
-                    log_read = true;
-                    continue;
-                }
                 steps::Opened::Waits(_) => None,
-            };
-            // A step shaped like a freeze: `global`'s log read to its end first, so the keys it says were ever the
-            // recovery key are every one the freeze's end could name.
-            if !self.frozen() && !log_read && given.as_ref().is_some_and(|g| g.step.content.kind == steps::FREEZE) {
-                self.read_entries_now(&Scope::Global).await?;
-            }
-            let candidate = match self.frozen() {
-                true => None,
-                false => steps::candidate(given.as_ref(), at + 1, &self.with(|i| Ok(i.r.recovery()))?),
-            };
-            let log = match candidate {
-                // The log past the end it names, to judge it there.
-                Some(freeze) => Some(self.global_log(freeze.global()).await?),
-                None => None,
             };
             let handled = self.with(|i| match i.r.frozen {
                 Some(_) => i.r.take_step(at + 1, given.as_ref().map(|g| &g.step), now_ms()),
-                None => i.r.take_first(at + 1, given.as_ref(), log.as_deref(), now_ms()),
-            });
-            // Nothing where its mark would be yet: read the log again the next time.
-            if handled.as_ref().is_err_and(|err| err.is::<steps::Unmarked>()) {
-                *self.0.frozen_log.lock().unwrap() = None;
-            }
-            let handled = handled?;
+                None => i.r.take_first(at + 1, given.as_ref(), now_ms()),
+            })?;
             at += 1;
-            log_read = false;
             self.after(handled).await?;
         }
         if at > from {
@@ -260,10 +62,10 @@ impl Node {
         Ok(at > from)
     }
 
-    /// `global`'s log past step `end`, where a freeze says it ends, from the bucket's steps (`steps::log_to`): kept
-    /// while this device runs, for each scope's database to start from, and read again for a freeze it doesn't reach.
+    /// `global`'s frozen log to step `end`, where its freeze says it ends (`steps::log_to`), read only: kept while this
+    /// device runs, for each other scope's database to start from.
     async fn global_log(&self, end: u64) -> Result<Arc<steps::Log>> {
-        if let Some(log) = self.0.frozen_log.lock().unwrap().clone().filter(|l| l.last() > end) {
+        if let Some(log) = self.0.frozen_log.lock().unwrap().clone().filter(|l| l.last() >= end) {
             return Ok(log);
         }
         let root = self.with(|i| Ok(i.r.root))?;
@@ -328,10 +130,16 @@ impl Node {
     /// Writes `content` to `global`'s scope database as a step this device signs as `user`, at the next position: when
     /// another device wrote there first, it reads that, and signs it again for the one after.
     pub(super) async fn write_step(&self, user: &str, content: Content) -> Result<Entry> {
+        self.write_step_as(&self.0.key, user, content).await
+    }
+
+    /// `write_step`, signed by `key`: this device's, or the network's recovery key, which only ever signs on the machine
+    /// it's kept on.
+    pub(super) async fn write_step_as(&self, key: &SigningKey, user: &str, content: Content) -> Result<Entry> {
         let _write = self.own_writes().await?;
         for _ in 0..50 {
             self.read_steps_now().await?;
-            let step = self.with(|i| i.r.make_step(&Scope::Global, user, content.clone(), now_ms()))?;
+            let step = self.with(|i| i.r.make_step(key, user, content.clone(), now_ms()))?;
             if self.put_step(&step).await? {
                 return Ok(step);
             }
@@ -505,16 +313,4 @@ impl Node {
         }
         bail!("{scope} changed too often to write to")
     }
-}
-
-/// The last step of `scope`'s log in order: the last of those from the first with none missing before it, as the
-/// bucket lists them, whatever's listed after a gap.
-async fn log_end(bucket: &impl crate::bucket::Bucket, scope: &Scope) -> Result<u64> {
-    let listed = crate::bucket::Bucket::objects(bucket, &crate::log::prefix(&scope.to_string())).await?;
-    let there: std::collections::BTreeSet<u64> = listed.iter().filter_map(|(n, _)| n.parse::<u64>().ok()).collect();
-    let mut end = 0;
-    while there.contains(&(end + 1)) {
-        end += 1;
-    }
-    Ok(end)
 }

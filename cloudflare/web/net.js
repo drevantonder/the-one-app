@@ -192,15 +192,13 @@ export const net = {
     if (net.has) send({ op: "nodes", user, nodes, ranks, wakes });
   },
 
-  /// `user`'s members as `global`'s entries say them, checked here: those kept and those `given` (a pack a node sent,
-  /// or none), replayed by the client's WebAssembly, and kept. Throws if one doesn't check, or they're another network's
-  /// than the one first kept.
-  /// `steps` are its scope database's this browser read from the bucket (`Device.bucketSteps`), with its log's to
-  /// where a freeze says it ends once it says so (`wants_log`), applied the same way.
-  async global(user, given, steps) {
+  /// `user`'s who's who as `global`'s scope database's steps say it, checked here by the client's WebAssembly and
+  /// kept: `steps` are those this browser read from the bucket (`Device.bucketSteps`), with its log's first step, its
+  /// genesis, once it asks for it (`wants_log`). Throws if one doesn't check, or they're another network's than the one
+  /// first kept.
+  async global(user, steps) {
     if (!net.has) throw new Error("This device can't check who's who in your One App network.");
-    const buffer = given && given.buffer.slice(given.byteOffset, given.byteOffset + given.byteLength);
-    return (await ask({ op: "global", user, given: buffer, steps }, buffer ? [buffer] : [])).members;
+    return (await ask({ op: "global", user, steps })).members;
   },
 
   /// What a new device (`key`, `seal`) signed in with, as its sign-in (`proof`, as sign-in passed it on) shows, checked

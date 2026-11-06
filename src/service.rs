@@ -623,15 +623,17 @@ fn merged(root: Hash, known: &[Entry], given: Vec<Entry>, depths: &HashMap<Hash,
 /// listed, and the scope database they add up to.
 fn placed(root: Hash, entries: Vec<Entry>, depths: &HashMap<Hash, u64>, steps: &[Option<crate::database::steps::Given>]) -> (Vec<Entry>, ScopeDb) {
     let ordered = crate::entry::causal(entries, depths);
-    // Once the log is frozen, who's who is the scope database its freeze anchors, and the steps after: the freeze the
-    // network's recovery key signed, as the entries say it, since it holds no keys to read the log with.
-    let built = crate::database::steps::view(Some(root), &ordered, now_ms()).and_then(|view| Ok(crate::database::steps::Truth::read_given(steps, view.recovery(), now_ms())?.map_or(view, |t| t.db)));
+    // Who's who is the scope database the freeze the network's recovery key signed anchors, as its genesis among the
+    // entries names it, and the steps after.
+    let built = crate::database::steps::recovery_of(root, &ordered)
+        .context("its genesis isn't among the entries")
+        .and_then(|recovery| crate::database::steps::Truth::read(steps, recovery, now_ms())?.map(|t| t.db).context("who's who has no freeze yet"));
     let db = built.unwrap_or_else(|err| {
         tracing::warn!("building the scope database: {err:#}");
         ScopeDb::build(&Members::default(), &crate::entry::Scope::Global, &Default::default(), 0).expect("an empty scope database builds")
     });
     let listed: std::collections::HashSet<Key> = db.machines().iter().map(|d| d.key).collect();
-    (ordered.into_iter().filter(|e| listed.contains(&e.author())).collect(), db)
+    (ordered.into_iter().filter(|e| e.hash() == root || listed.contains(&e.author())).collect(), db)
 }
 
 fn now_ms() -> u64 {

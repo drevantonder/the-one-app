@@ -165,14 +165,12 @@ impl Response {
     }
 }
 
-/// `global`'s entries this browser holds, checked, and who's who as they make it (src/members.rs): from what it kept
-/// (`kept`, a pack, of the network whose genesis is `root`, hex, or none the first time) and what a node just gave
-/// (`given`, a pack). Throws if any entry doesn't check, or they're another network's.
+/// Who's who as this browser reads it (src/database/steps.rs, client/src/members.rs): from where it read `global`'s
+/// scope database's steps to, as it kept that, of the network whose genesis is `root` (hex, or none the first time).
+/// Throws if a step doesn't check, or they're another network's.
 #[wasm_bindgen]
 pub struct Global {
     root: String,
-    pack: Vec<u8>,
-    have: String,
     steps: String,
     at: u64,
     members: String,
@@ -183,19 +181,14 @@ pub struct Global {
 impl Global {
     #[wasm_bindgen(constructor)]
     /// `steps`, as JSON: `{ kept, given, epochs, apps }`, where its scope database's steps were read to as it kept that
-    /// (`members::Global::kept`), and those this browser read since from the bucket itself (`{ steps, log }`, through
-    /// the URL signer's `get`) with the keys to open them: `global`'s epochs sealed to this device, opened (hex, by
-    /// number), and the node's key sealed in each (base64url, by number) (`members::Global::add_sealed`).
-    pub fn new(root: String, kept: Vec<u8>, given: Vec<u8>, steps: Option<String>) -> Result<Global, JsError> {
+    /// (`members::Global::kept`), and those this browser read since from the bucket itself (`{ steps, log, welcome,
+    /// freeze, start }`, through the URL signer's `get`) with the keys to open them: `global`'s epochs sealed to this
+    /// device, opened (hex, by number), and the node's key sealed in each (base64url, by number)
+    /// (`members::Global::add_sealed`).
+    pub fn new(root: String, steps: Option<String>) -> Result<Global, JsError> {
         let root = (!root.is_empty()).then(|| one::entry::Hash::from_hex(&root)).transpose().map_err(js)?;
         let mut g = crate::members::Global::new(root);
         let mut wants_log = 0;
-        if !kept.is_empty() {
-            g.add(&kept).map_err(js)?;
-        }
-        if !given.is_empty() {
-            g.add(&given).map_err(js)?;
-        }
         if let Some(steps) = steps.filter(|s| !s.is_empty()) {
             let steps: serde_json::Value = serde_json::from_str(&steps).map_err(js)?;
             if steps["kept"].is_object() {
@@ -206,14 +199,14 @@ impl Global {
             wants_log = g.add_sealed(&steps["given"], &epochs, &apps).map_err(js)?.unwrap_or(0);
         }
         let mut view = crate::members::view_of(&g.who().map_err(js)?).map_err(js)?;
-        // Whether who's who is written as steps now (`cloudflare/web/device.js` `write`).
+        // Whether it has read who's who (`cloudflare/web/device.js`).
         view["frozen"] = serde_json::json!(g.frozen());
         let members = view.to_string();
-        Ok(Global { root: g.root().map(|r| r.to_hex()).unwrap_or_default(), pack: g.pack(), have: g.have(), steps: g.kept().map_err(js)?.to_string(), at: g.at(), members, wants_log })
+        Ok(Global { root: g.root().map(|r| r.to_hex()).unwrap_or_default(), steps: g.kept().map_err(js)?.to_string(), at: g.at(), members, wants_log })
     }
 
-    /// The step of `global`'s log a freeze an admin's device signed says the log ends at, which this browser reads its
-    /// log's steps to and gives again (`given.log`), before it reads on: 0 for none.
+    /// The step of `global`'s log this browser reads to and gives again (`given.log`) before it reads on: its genesis's,
+    /// 1, which names the recovery key, while it doesn't know it; 0 for none.
     #[wasm_bindgen(getter)]
     pub fn wants_log(&self) -> f64 {
         self.wants_log as f64
@@ -237,19 +230,7 @@ impl Global {
         self.root.clone()
     }
 
-    /// Every entry held, packed: to keep.
-    #[wasm_bindgen(getter)]
-    pub fn pack(&self) -> Vec<u8> {
-        self.pack.clone()
-    }
-
-    /// What to ask a node for next: `GET /v1/entries/global?have=`.
-    #[wasm_bindgen(getter)]
-    pub fn have(&self) -> String {
-        self.have.clone()
-    }
-
-    /// Who's who, as JSON (`members::view`).
+    /// Who's who, as JSON (`members::view_of`).
     #[wasm_bindgen(getter)]
     pub fn members(&self) -> String {
         self.members.clone()

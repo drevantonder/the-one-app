@@ -213,7 +213,6 @@ impl View {
             }
             let read = one::log::open(bucket, &log_keys, &one::log::prefix("global"), "global").await?;
             let mut entries = Global::new(None);
-            entries.add_entries(read.entries)?;
             steps(bucket, &log_keys, &mut entries).await?;
             let db = built(&mut entries)?;
             let wrong: Vec<u32> = candidates.iter().filter(|(n, k)| db.epoch_hash(&Scope::Global, **n) != Some(one::keys::epoch_hash(k))).map(|(n, _)| *n).collect();
@@ -234,9 +233,6 @@ impl View {
         }
         (self.at, self.floor) = (read.at, read.floor);
         let (had, new) = (self.entries.at(), !read.entries.is_empty());
-        if new {
-            self.entries.add_entries(read.entries)?;
-        }
         steps(bucket, &self.global, &mut self.entries).await?;
         if new || had != self.entries.at() {
             self.db = built(&mut self.entries)?;

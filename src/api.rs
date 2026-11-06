@@ -196,11 +196,9 @@ pub fn routes() -> Router<Node> {
         .route("/v1/erase", post(erase))
         .route("/v1/role", post(role))
         .route("/v1/settings", post(settings))
-        .route("/v1/switch", post(switch))
         .route("/v1/steps", post(steps))
         .route("/v1/steps/global", get(global_steps))
-        .route("/v1/entries", get(heads).post(entries))
-        .route("/v1/entries/global", get(global_entries))
+        .route("/v1/entries", get(heads))
         .route("/v1/runs", post(runs))
         .route("/v1/group", post(group))
         .route("/v1/invite", post(invite))
@@ -323,7 +321,6 @@ pub const SIGNED_IN: &[&str] = &[
     "/v1/role",
     "/v1/settings",
     "/v1/entries",
-    "/v1/entries/global",
     "/v1/steps",
     "/v1/steps/global",
     "/v1/name",
@@ -881,16 +878,6 @@ async fn settings(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> 
 }
 
 
-/// `{ recovery }`: the ceremony that freezes `global`'s log, so its scope database is the truth (`Node::switch`), signed
-/// by `recovery`, the network's recovery key (hex), read from a file here by the CLI and never kept: only on this
-/// machine, by an admin. → `{ frozen }`.
-async fn switch(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
-    only(&body, &["recovery"])?;
-    let secret: [u8; 32] = crate::keys::unhex(text(&body, "recovery")?.trim()).map_err(|_| anyhow::anyhow!("a recovery key is 64 hex characters"))?;
-    node.switch(&me.caller, &ed25519_dalek::SigningKey::from_bytes(&secret)).await?;
-    Ok(Json(json!({ "frozen": true })))
-}
-
 /// `[{ header, signature, body }]` (each base64url): steps of `global`'s scope database the caller's own device
 /// signed, each for the next position, which this device checks count and writes (`database::steps`).
 async fn steps(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
@@ -908,36 +895,13 @@ async fn global_steps(State(node): State<Node>, me: Me, axum::extract::Query(q):
     Ok(Json(node.global_steps(&me.caller, from, welcome).await?))
 }
 
-/// `?scope=`: what a device signing an entry there needs: `{ epoch, previous, logs }` (`Node::entry_heads`).
+/// `?scope=`: what a device signing a step there needs: `{ epoch }` (`Node::entry_heads`).
 async fn heads(State(node): State<Node>, me: Me, axum::extract::Query(q): axum::extract::Query<std::collections::HashMap<String, String>>) -> Reply {
     let scope = match q.get("scope").map(String::as_str) {
         None | Some("user") => crate::entry::Scope::User(me.caller.user.clone()),
         Some(s) => crate::entry::Scope::parse(s)?,
     };
     Ok(Json(node.entry_heads(&me.caller, &scope).await?))
-}
-
-/// `?have=<key>.<seq>,…`: `global`'s entries, packed (`entry::pack`), but those below each author's seq given, which
-/// the caller holds; 204 if there's nothing new.
-async fn global_entries(State(node): State<Node>, me: Me, axum::extract::Query(q): axum::extract::Query<std::collections::HashMap<String, String>>) -> Result<Response, Error> {
-    let mut have = std::collections::HashMap::new();
-    for held in q.get("have").map(String::as_str).unwrap_or("").split(',').filter(|h| !h.is_empty()) {
-        let (key, seq) = held.split_once('.').ok_or_else(|| anyhow::anyhow!("have is <key>.<seq>, each"))?;
-        have.insert(crate::entry::unhex(key)?, seq.parse()?);
-    }
-    Ok(match node.global_entries(&me.caller, &have).await? {
-        Some(pack) => ([(axum::http::header::CONTENT_TYPE, "application/octet-stream")], pack).into_response(),
-        None => StatusCode::NO_CONTENT.into_response(),
-    })
-}
-
-/// `[{ header, signature, body }]` (each base64url): entries the caller's own device signed, which this device checks
-/// count and writes (`src/entry.rs`).
-async fn entries(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
-    let list = body.as_array().ok_or_else(|| anyhow::anyhow!("give a list of entries"))?;
-    let entries = list.iter().map(crate::entry::Entry::from_json).collect::<anyhow::Result<Vec<_>>>()?;
-    node.put_signed(&me.caller, entries).await?;
-    done()
 }
 
 /// `{ on: [device] }` (names or keys): the network's machines that run the caller's own things besides their own, as

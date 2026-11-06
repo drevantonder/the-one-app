@@ -1,5 +1,5 @@
 // The Workers' formats, for tests/contracts.rs to check against the Rust that reads them: POST { op, ... } → result.
-import { appOf, askedFor, b64u, BEHIND, canonical, certify, checkCertificate, epochHash, checkEntry, checkRequest, databaseKey, ed25519Public, epochOf, hex, idOf, inviteProof, joinChallenge, joinCode, joinNonce, keyPair, mayHand, MOST_NEEDED, oldestNeeded, open, openAppKey, openHandoff, openSealed, openUnder, passkeyKeys, seal, sealAppKey, sealHandoff, sealTo, sealUnder, signEntry, signStep, signedRequest, tokenId, twinPublic, waited, x25519Public } from "../shared/crypto.js";
+import { appOf, askedFor, b64u, BEHIND, canonical, certify, checkCertificate, epochHash, checkRequest, databaseKey, ed25519Public, epochOf, hex, idOf, inviteProof, joinChallenge, joinCode, joinNonce, keyPair, mayHand, MOST_NEEDED, oldestNeeded, open, openAppKey, openHandoff, openSealed, openUnder, passkeyKeys, seal, sealAppKey, sealHandoff, sealTo, sealUnder, signStep, signedRequest, tokenId, twinPublic, waited, x25519Public } from "../shared/crypto.js";
 import { members } from "../web/members.js";
 
 const ops = {
@@ -54,14 +54,6 @@ const ops = {
       passkey: { sign: hex.encode(await ed25519Public(pk.sign)), seal: b64u.encode(pk.seal), sealPublic: hex.encode(await x25519Public(pk.seal)) },
     };
   },
-  /// An entry signed with `seed`, and one Rust signed, checked: → the one signed, as POST /v1/entries takes it.
-  async entries({ seed, fields, body, entry }) {
-    const signed = await signEntry(b64u.decode(seed), await ed25519Public(b64u.decode(seed)), fields, body);
-    const checked = await checkEntry({ header: b64u.decode(entry.header), signature: b64u.decode(entry.signature), body: b64u.decode(entry.body) }).then((e) => ({ hash: e.hash, user: e.user, kind: e.content.kind }), (err) => ({ error: String(err) }));
-    const tampered = await checkEntry({ header: b64u.decode(entry.header), signature: b64u.decode(entry.signature), body: new TextEncoder().encode("{}") }).then(() => "checked", (err) => String(err));
-    const b = (v) => b64u.encode(v);
-    return { signed: { header: b(signed.header), signature: b(signed.signature), body: b(signed.body) }, hash: signed.hash, checked, tampered };
-  },
   /// A step signed with `seed` for `fields`' position: → it, as POST /v1/steps takes it.
   async step({ seed, fields, body }) {
     const signed = await signStep(b64u.decode(seed), await ed25519Public(b64u.decode(seed)), fields, body);
@@ -70,11 +62,6 @@ const ops = {
   /// Member entries' content as the web client builds it: `[[builder, args]]` → each content.
   async members({ calls }) {
     return { contents: calls.map(([name, args]) => members[name](args)) };
-  },
-  /// Entries Rust refuses: → why JavaScript does too, or "checked".
-  async refused({ entries }) {
-    const check = (e) => checkEntry({ header: b64u.decode(e.header), signature: b64u.decode(e.signature), body: b64u.decode(e.body) });
-    return { refused: await Promise.all(entries.map((e) => check(e).then(() => "checked", (err) => String(err)))) };
   },
   /// What a node is handed with each kind of request: `[[route, need]]` → whether each is, and `[[hint, newest]]` → the
   /// oldest epoch each needs.

@@ -16,7 +16,7 @@ use one::call::Append;
 use one::db::Db;
 use one::entry::{Entry, Hash, Scope, causal};
 use one::database::scopes::{ScopeDb, app, object};
-use one::members::{self, Members};
+use one::members::{Members, ScopeState};
 use serde_json::{Value, json};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
@@ -489,32 +489,23 @@ struct Log {
     /// Of another scope, once `global`'s log is frozen: its log's entries up to the freeze's end of it, which its
     /// database starts from (`steps::scope_anchor`).
     anchor: Option<Vec<Entry>>,
-    /// Of `global`, once its steps hold a freeze: its log past the end the freezes among them name, read from its
-    /// steps, which each is judged and checked against and every scope's database starts from (`steps::Log`).
+    /// Of `global`, once its steps hold the freeze: its log to the end the freeze names, read only, which every other
+    /// scope's database starts from (`steps::Log`).
     frozen: Option<one::database::steps::Log>,
 }
 
 impl Log {
-    /// Of `global`'s: who's who once its log is frozen, from its freeze and the steps after, each freeze judged at the
-    /// end of the log it names, as every reader judges it; none before, nor while its log isn't read that far, or
-    /// nothing is where its mark would be yet, when the entries still say who's who (`Truth::judged`). Fails at a
-    /// freeze the recovery key signed that doesn't check out, or a newer release's step, which stops this node there
-    /// as it stops every reader. Anything else shaped like a freeze is passed over, its log never read.
+    /// Of `global`'s: who's who from the freeze the recovery key its genesis names signed, and the steps after; none
+    /// before. Fails at a freeze the recovery key signed that doesn't check out, or a newer release's step, which stops
+    /// this node there as it stops every reader.
     fn truth(&self) -> Result<Option<one::database::steps::Truth>> {
-        one::database::steps::Truth::judged(&self.steps, root(&self.entries), self.frozen.as_ref(), &self.recovery(), now())
+        let Some(recovery) = root(&self.entries).and_then(|r| one::database::steps::recovery_of(r, &self.entries)) else { return Ok(None) };
+        one::database::steps::Truth::read(&self.steps, recovery, now())
     }
 
-    /// Of `global`'s: every key its entries say was ever the network's recovery key (`steps::recovery_keys`).
-    fn recovery(&self) -> one::database::steps::Recovery {
-        one::database::steps::recovery_keys(root(&self.entries), &self.entries)
-    }
-
-    /// The newest epoch of `scope` made, as `global`'s entries, or its steps once its log is frozen, say.
+    /// The newest epoch of `scope` made, as `global`'s steps say: any, before it's read the freeze.
     fn made(global: &Log, scope: &Scope) -> Result<u32> {
-        Ok(match global.truth()? {
-            Some(t) => t.db.epoch(scope),
-            None => one::database::steps::view(root(&global.entries), &global.entries, now())?.epoch(scope),
-        })
+        Ok(global.truth()?.map_or(u32::MAX, |t| t.db.epoch(scope)))
     }
 }
 
@@ -628,15 +619,14 @@ async fn read_steps(id: &(String, String), bucket: &Js) -> Result<()> {
             });
         }
         from += n;
+        // The frozen log to where the freeze says it ends, read once, which every other scope's database starts from.
         if id.1 == "global" {
-            loop {
-                let wants = LOGS.with(|l| {
-                    let logs = l.borrow();
-                    let Some(g) = logs.get(id) else { return None };
-                    one::database::steps::wants_log(&g.steps, root(&g.entries), g.frozen.as_ref(), &g.recovery())
-                });
-                let Some(end) = wants else { break };
-                let root = LOGS.with(|l| l.borrow().get(id).and_then(|g| root(&g.entries)));
+            let wants = LOGS.with(|l| {
+                let logs = l.borrow();
+                let g = logs.get(id)?;
+                Some((g.truth().ok()??.freeze.global(), root(&g.entries))).filter(|_| g.frozen.is_none())
+            });
+            if let Some((end, root)) = wants {
                 let log = one::database::steps::log_to(bucket, &keys, root, end).await?;
                 LOGS.with(|l| {
                     if let Some(g) = l.borrow_mut().get_mut(id) {
@@ -645,16 +635,6 @@ async fn read_steps(id: &(String, String), bucket: &Js) -> Result<()> {
                     }
                 });
             }
-        }
-        // Nothing where a freeze's mark would be when the log was read: read it again the next time.
-        if id.1 == "global" {
-            LOGS.with(|l| {
-                if let Some(g) = l.borrow_mut().get_mut(id)
-                    && one::database::steps::Truth::read(&g.steps, root(&g.entries), g.frozen.as_ref(), &g.recovery(), now()).is_err_and(|e| e.is::<one::database::steps::Unmarked>())
-                {
-                    g.frozen = None;
-                }
-            });
             // A freeze that counts, once, which no later step undoes: phase 2 is on for its databases from now on.
             if !frozen(&id.0) && LOGS.with(|l| l.borrow().get(id).is_some_and(|g| matches!(g.truth(), Ok(Some(_))))) {
                 FROZEN.with(|f| f.borrow_mut().insert(id.0.clone()));
@@ -718,34 +698,6 @@ fn root(global: &[Entry]) -> Option<Hash> {
     one::database::steps::genesis_of(GENESIS.with(|g| *g.borrow()), global)
 }
 
-/// `global`'s entries `owner`'s object read (`read_log`), for `user`, as a node on a machine gives them
-/// (`Node::global_entries`): packed (`entry::pack`), but those below each author's seq in `have` (`<key>.<seq>,…`),
-/// which the caller holds, with every entry of a device that forked from where it did; empty if there's nothing new.
-/// The caller checks them all: this trusts the node with nothing.
-#[wasm_bindgen]
-pub fn global_entries(owner: &str, user: &str, have: &str) -> Result<Vec<u8>, JsError> {
-    let mut held = HashMap::new();
-    for h in have.split(',').filter(|h| !h.is_empty()) {
-        let (key, seq) = h.split_once('.').ok_or_else(|| JsError::new("have is <key>.<seq>, each"))?;
-        held.insert(one::entry::unhex(key).map_err(thrown)?, seq.parse::<u32>()?);
-    }
-    let people = replayed(owner, &[], |r| r.global().may(user, "use", one::database::scopes::NETWORK)).map_err(thrown)?;
-    if !people {
-        return Err(JsError::new("you aren't one of this network's people"));
-    }
-    LOGS.with(|l| {
-        let logs = l.borrow();
-        let global = logs.get(&(owner.to_string(), "global".to_string())).ok_or_else(|| JsError::new("read global's entries first"))?;
-        let cuts = one::database::steps::forks(&global.entries);
-        let forked = |e: &Entry| cuts.get(&(e.author(), "global".to_string())).is_some_and(|c| e.seq() >= *c);
-        let new = |e: &&Entry| held.get(&e.author()).is_none_or(|n| e.seq() >= *n);
-        if !global.entries.iter().any(|e| new(&e)) {
-            return Ok(Vec::new());
-        }
-        Ok(one::entry::pack(&global.entries.iter().filter(|e| new(e) || forked(e)).collect::<Vec<_>>()))
-    })
-}
-
 /// `global`'s scope database's steps after `from` as the bucket holds them, sealed, for `user`, as a node on a machine
 /// gives them (`Node::global_steps`): `{ at, steps: [{ at, sealed }] }` (base64url), and for a device that starts
 /// from its `welcome` (`steps::Welcome`), its freeze's step and the copy before its step, `{ welcome, freeze, start }`.
@@ -802,10 +754,7 @@ fn replayed<R>(owner: &str, scopes: &[String], f: impl FnOnce(&Replays) -> R) ->
         let logs = logs.borrow();
         let log_of = |scope: &str| logs.get(&(owner.to_string(), scope.to_string()));
         let global = log_of("global").context("read global's entries first")?;
-        let member_entries: Vec<Entry> = global.entries.iter().filter(|e| members::is_member_entry(e)).cloned().collect();
         let root = root(&global.entries);
-        // Replayed as a node replays them, with the forks among the entries it read.
-        let known = Members::replay(root, &member_entries, &one::database::steps::forks(&global.entries));
         REPLAYED.with(|r| {
             let mut r = r.borrow_mut();
             let mut read = vec!["global".to_string()];
@@ -815,21 +764,14 @@ fn replayed<R>(owner: &str, scopes: &[String], f: impl FnOnce(&Replays) -> R) ->
                 let at = (global.read, log.read);
                 let id = (owner.to_string(), scope.clone());
                 if r.get(&id).is_none_or(|x| x.at != at) {
-                    let entries = match scope.as_str() {
-                        "global" => log.entries.clone(),
-                        _ => causal(log.entries.clone(), &global.entries.iter().map(|e| (e.hash(), e.depth)).collect()),
-                    };
-                    // Once `global`'s log is frozen, who's who is its scope database: its freeze's, and the steps after;
-                    // and a scope's own state its own steps', from its anchor on.
+                    // Who's who is `global`'s scope database: its freeze's, and the steps after; and a scope's own state
+                    // its own steps', from its anchor on. Nobody's until they're read.
                     let truth = global.truth()?;
                     let s = Scope::parse(scope)?;
                     let db = match (truth, scope.as_str(), &log.anchor, &global.frozen) {
                         (Some(t), "global", _, _) => t.db,
                         (Some(t), _, Some(anchor), Some(frozen)) => scope_truth(&t, root, frozen, anchor, &s, &log.steps)?,
-                        _ => {
-                            let (members, state) = members::replay(&known, &member_entries, &entries, |_, _, _| {});
-                            ScopeDb::build(&members, &s, &state, now())?
-                        }
+                        _ => ScopeDb::build(&Members::default(), &s, &ScopeState::default(), now())?,
                     };
                     r.insert(id.clone(), Replayed { at, db });
                 }

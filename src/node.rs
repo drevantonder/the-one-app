@@ -453,8 +453,6 @@ pub struct Inner {
     making_keys: tokio::sync::Mutex<()>,
     /// Positions of each database (by prefix) holding a step under an epoch no entry made, which every read passes over.
     junk: Mutex<HashMap<String, std::collections::BTreeSet<u64>>>,
-    /// The `FREEZING` step a writer of the log last waited on, and when it first saw it (`node::steps`).
-    freezing_seen: Mutex<Option<(u64, std::time::Instant)>>,
     /// `global`'s log up to its freeze's end of it, once read: what each scope's database starts from (`node::steps`).
     frozen_log: Mutex<Option<Arc<crate::database::steps::Log>>>,
     /// When this device last tidied each database (by prefix), ms.
@@ -604,7 +602,6 @@ impl Node {
             moved: Arc::default(),
             making_keys: tokio::sync::Mutex::new(()),
             junk: Mutex::new(HashMap::new()),
-            freezing_seen: Mutex::new(None),
             frozen_log: Mutex::new(None),
             tidied: Mutex::new(HashMap::new()),
             written: Mutex::new(HashMap::new()),
@@ -635,7 +632,7 @@ impl Node {
             if let Err(err) = node.bucket().and_then(|b| b.forget_sent()) {
                 tracing::warn!("forgetting steps other devices sent: {err:#}");
             }
-            node.replay_all().await?;
+            node.with(|i| Ok(update_views(i)))?;
             node.keep_alone_here()?;
             node.read_own_items();
             node.follow_net();
@@ -840,7 +837,7 @@ impl Node {
         name.clone()
     }
 
-    /// Creates this device's network, with its local user as the first admin, and installs the config's apps in
+    /// Creates this device's install, with its local user as the first admin, and installs the config's apps in
     /// `global`. Returns the recovery key's secret, given only this once.
     pub async fn create(&self, name: &str, user_name: &str) -> Result<String> {
         self.create_with(name, user_name, None, crate::config::STARTERS).await
@@ -848,19 +845,9 @@ impl Node {
 
     /// Creates the network, with every built-in app added (owned by admins), so anyone may add one to their own page,
     /// and these installed in `global`. Its first person is `user` if given (who they were in a network this one
-    /// replaces, so their account at its sign-in is still theirs), else someone new. Its log is frozen as it starts, by
-    /// the ceremony with its new recovery key (`Node::switch`): who's who is its scope database from its genesis on.
+    /// replaces, so their account at its sign-in is still theirs), else someone new. Who's who is its scope database from
+    /// its genesis on, at the freeze its new recovery key signs as it starts (`steps::first_freeze`).
     pub async fn create_with(&self, name: &str, user_name: &str, user: Option<&str>, apps: &[&str]) -> Result<String> {
-        self.create_frozen(name, user_name, user, apps, true).await
-    }
-
-    /// A network as one made before its log could be frozen, whose admin runs the ceremony later: for tests of it.
-    #[doc(hidden)]
-    pub async fn create_before_the_switch(&self, name: &str, user_name: &str) -> Result<String> {
-        self.create_frozen(name, user_name, None, crate::config::STARTERS, false).await
-    }
-
-    async fn create_frozen(&self, name: &str, user_name: &str, user: Option<&str>, apps: &[&str], frozen: bool) -> Result<String> {
         self.ensure_no_network()?;
         ensure!(!name.trim().is_empty() && !user_name.trim().is_empty(), "give the network a name, and yourself one");
         ensure!(user.is_none_or(|u| u.len() == 16 && u.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))), "a person's id is 16 hex digits, like 976091fe8c23a057");
@@ -878,7 +865,6 @@ impl Node {
         self.save_network(&NetworkFile { root: entry.hash().to_hex(), user: user.clone(), bucket: Some(bucket), folders: BTreeMap::new() })?;
         Store::open(&self.network_dir().join("entries.db"))?.insert_own(&entry, None)?;
         self.open_network()?;
-        self.replay_all().await?;
         let bucket = self.bucket()?;
         let recovery_seal = crate::cloudflare::twin_public(recovery.verifying_key().as_bytes())?;
         for (to, seal) in [("recovery".to_string(), recovery_seal), (hex(&me.key), me.seal)] {
@@ -890,10 +876,15 @@ impl Node {
             i.read = true;
             Ok(())
         })?;
+        // Who's who, as the freeze its recovery key signs at step 1 of its scope database: its genesis's.
+        let first = crate::database::steps::first_freeze(&recovery, &entry, &user, now_ms())?;
+        let keys = self.log_key_of(&crate::db::Keys::from([(1, global)])).await?;
+        let name = crate::db::step_name(&crate::database::steps::prefix("global"), 1);
+        let sealed = crate::log::seal(&keys, &name, &crate::database::steps::encode(&first.step, first.copy.as_deref()))?;
+        ensure!(crate::bucket::Bucket::create(&bucket, &name, &sealed).await?, "the new network's bucket isn't empty");
+        self.read_steps().await?;
+        ensure!(self.frozen(), "the new network's freeze didn't count");
         let me = Caller { key: self.0.id, user, agent: None, token: None };
-        if frozen {
-            self.switch(&me, &recovery).await.context("freezing the new network's log")?;
-        }
         // Its Vault and its first person's own open on this machine, so a new network fills items with no other step.
         for scope in [Scope::Global, Scope::User(me.user.clone())] {
             self.new_vault_key(&scope, 1, &[self.0.id], recovery.verifying_key().as_bytes()).await?;
@@ -918,45 +909,13 @@ impl Node {
 
     /// Writes an entry to this device's log of `scope`, signed by this device, as `user`.
     async fn append_as(&self, scope: &Scope, user: &str, content: Content) -> Result<Entry> {
-        // Once `global`'s log is frozen, what it said is a step of its scope's database (`database::steps`).
-        if self.frozen() {
-            return match scope {
-                Scope::Global => self.write_step(user, content).await,
-                _ => self.write_scope_step(scope, user, content).await,
-            };
+        if !self.frozen() {
+            self.read_steps().await?;
         }
-        self.first_epoch(scope).await?;
-        let _write = self.own_writes().await?;
-        // Whether the log froze, before writing to it: then it's a step.
-        self.read_steps_now().await?;
-        if self.frozen() {
-            drop(_write);
-            return Box::pin(self.append_as(scope, user, content)).await;
+        match scope {
+            Scope::Global => self.write_step(user, content).await,
+            _ => self.write_scope_step(scope, user, content).await,
         }
-        // What's in the bucket first, so the entry comes after all of it.
-        self.read_log_now(scope).await?;
-        // Its blobs first, so a device that reads the entry finds them; one the bucket doesn't take now is tried again
-        // each minute.
-        for blob in &content.blobs {
-            if let Err(err) = self.share_blob(scope, blob, false).await {
-                tracing::warn!("putting blob {} in the bucket, to try again: {err:#}", &blob[..12.min(blob.len())]);
-                self.0.unshared.lock().unwrap().push((scope.clone(), blob.clone()));
-            }
-        }
-        let entry = self.with(|i| i.r.make(scope, user, content, now_ms()))?;
-        // An entry that wouldn't count is never written: it would say it was done.
-        self.with(|i| i.r.check(&entry))?;
-        self.check_in_scope(&entry)?;
-        let at = self.put_entry(scope, &entry).await?;
-        let handled = self.with(|i| i.r.add_own(&entry, now_ms()))?;
-        self.after(handled).await?;
-        self.ping(scope, None);
-        // The log froze as it was written, without it: a step, then.
-        if self.left_out(&entry, at).await {
-            drop(_write);
-            return Box::pin(self.append_as(scope, user, entry.content.clone())).await;
-        }
-        Ok(entry)
     }
 
     /// A scope's first epoch, before anything is written there, made outside this device's writes, since its entry is
@@ -968,94 +927,15 @@ impl Node {
         Ok(())
     }
 
-    /// One of a scope's node entries that its replay would skip is never written: it would say it was done. In
-    /// `global` too, for those only a scope's replay checks.
-    fn check_in_scope(&self, entry: &Entry) -> Result<()> {
-        if entry.content.app == members::APP && !members::is_member_entry(entry) {
-            self.with(|i| members::applies_in_scope(&i.r.members, &i.views.get(entry.log()).map(|(_, s)| s.clone()).unwrap_or_default(), entry))?;
-        }
-        Ok(())
-    }
-
-    /// What a device signing an entry in `scope` for `caller` needs (`src/entry.rs`): the scope's `epoch`, the
-    /// `previous` it follows (every log's end there, and in `global`), and each log's end there by author (`logs`, its
-    /// own log's the backlink).
+    /// What a device signing a step in `scope` for `caller` needs: `{ epoch }`, the scope's newest, as clients ask it
+    /// at `GET /v1/entries`.
     pub async fn entry_heads(&self, caller: &Caller, scope: &Scope) -> Result<Value> {
         self.read_callers_logs(caller).await?;
         self.read_log(scope).await?;
         self.with(|i| {
             ensure!(i.r.db().may(&caller.user, "use", &scopes::object(scope)) && i.r.holds(scope), "this device doesn't hold {scope} for you");
-            let log = scope.to_string();
-            let mut previous = i.r.store.heads(&log, None)?;
-            if *scope != Scope::Global {
-                previous.extend(i.r.store.heads("global", None)?);
-            }
-            let mut logs = serde_json::Map::new();
-            for (author, _, next) in i.r.store.frontier()?.into_iter().filter(|(_, l, _)| *l == log) {
-                if let Some(e) = i.r.store.last(&author, &log)? {
-                    logs.insert(hex(&author), json!({ "seq": e.seq(), "hash": e.hash().to_hex(), "next": next }));
-                }
-            }
-            Ok(json!({ "epoch": i.r.db().epoch(scope), "previous": previous.iter().map(Hash::to_hex).collect::<Vec<_>>(), "logs": logs }))
+            Ok(json!({ "epoch": i.r.db().epoch(scope), "previous": [], "logs": {} }))
         })
-    }
-
-    /// `global`'s entries and its forks' evidence, packed, but those of each author's log below the seq `have` says the
-    /// caller holds: what a client device replays itself to know who's who (one-client's `members`), never taking it
-    /// from a node. None if there's nothing new.
-    pub async fn global_entries(&self, caller: &Caller, have: &HashMap<Key, u32>) -> Result<Option<Vec<u8>>> {
-        // Those it holds while its newest epoch is on its way: the device that just made it asks before sealing it.
-        if let Err(err) = self.read_log(&Scope::Global).await
-            && !err.is::<databases::NotGiven>()
-        {
-            return Err(err);
-        }
-        self.with(|i| {
-            ensure!(i.r.db().may(&caller.user, "use", scopes::NETWORK), "you aren't one of this network's people");
-            let new: Vec<Entry> = i.r.store.scope("global")?.into_iter().filter(|e| have.get(&e.author()).is_none_or(|n| e.seq() >= *n)).collect();
-            if new.is_empty() {
-                return Ok(None);
-            }
-            let forked = i.r.store.forked("global")?;
-            Ok(Some(crate::entry::pack(&new.iter().chain(&forked).collect::<Vec<_>>())))
-        })
-    }
-
-    /// Writes entries `caller`'s own device signed (a browser's, say), each once it's checked: it follows what this
-    /// device holds, and counts.
-    pub async fn put_signed(&self, caller: &Caller, entries: Vec<Entry>) -> Result<()> {
-        for entry in &entries {
-            ensure!(entry.user() == caller.user, "entry {} isn't written as you", entry.id());
-        }
-        self.read_callers_logs(caller).await?;
-        self.put_checked(entries).await
-    }
-
-    /// Writes entries another key signed, each once it's checked: it follows what this device holds, and counts.
-    pub(super) async fn put_checked(&self, entries: Vec<Entry>) -> Result<()> {
-        for entry in entries {
-            let scope = entry.scope();
-            // An older device's, which writes to the frozen logs, where it changes nothing.
-            ensure!(!self.frozen(), "update this device to change who's in: {YOURS}'s other devices have moved on");
-            self.first_epoch(&scope).await?;
-            {
-                let _write = self.0.writes.lock().await;
-                self.read_log_now(&scope).await?;
-                for blob in &entry.content.blobs {
-                    self.share_blob(&scope, blob, false).await.with_context(|| format!("blob {} isn't here: put it first", &blob[..12.min(blob.len())]))?;
-                }
-                self.with(|i| i.r.check_signed(&entry))?;
-                self.check_in_scope(&entry)?;
-                self.read_steps_now().await?;
-                ensure!(!self.frozen(), "update this device to change who's in: {YOURS}'s other devices have moved on");
-                let at = self.put_entry(&scope, &entry).await?;
-                let handled = self.with(|i| i.r.receive(vec![entry.clone()], now_ms()))?;
-                self.after(handled).await?;
-                ensure!(!self.left_out(&entry, at).await, "update this device to change who's in: {YOURS}'s other devices moved on as it wrote that");
-            }
-            self.ping(&scope, None);
-        }
-        Ok(())
     }
 
     /// Passes on new entries, follows what changed in the members, and brings each scope's state up to date.
@@ -1073,14 +953,8 @@ impl Node {
             for log in &handled.dropped {
                 i.views.remove(log);
             }
-            if handled.recount {
-                i.views.clear();
-                let all = i.r.store.ordered()?;
-                update_views(i, &all)?;
-            } else {
-                update_views(i, &handled.new)?;
-            }
-            Ok(i.r.frozen.is_some().then(|| i.views.get("global").map(|(_, s)| s.forgotten.clone()).unwrap_or_default()))
+            update_views(i);
+            Ok(i.views.get("global").map(|(_, s)| s.forgotten.clone()).unwrap_or_default())
         })?;
         // A scope this device no longer holds: it forgets what it read of it.
         self.close_dbs(|scope, _| handled.dropped.contains(&scope.to_string()));
@@ -1091,8 +965,8 @@ impl Node {
                 }
             }
         }
-        // A release is a step once the log is frozen, which changes who's who: the updater looks again.
-        if handled.members || handled.new.iter().any(|e| e.content.app == release::APP && e.content.kind == "node-release") {
+        // A release is a step, which changes who's who: the updater looks again.
+        if handled.members {
             self.0.released.notify_one();
         }
         if !handled.lost.is_empty() {
@@ -1108,27 +982,16 @@ impl Node {
             self.settle_own();
             self.follow_recovery();
         }
-        if handled.members || handled.new.iter().any(|e| e.log() == "global" && e.content.app == members::APP) {
+        if handled.members {
             self.follow_storage();
             self.follow_net();
         }
-        let mut forgotten: Vec<(String, String)> = handled.new.iter().filter(|e| e.content.app == members::APP && e.content.kind == "forget").filter_map(|e| Some((e.log().to_string(), e.content.data["blob"].as_str()?.to_string()))).collect();
-        forgotten.extend(forgotten_now.into_iter().flatten().filter(|b| !forgotten_before.contains(b)).map(|b| ("global".to_string(), b)));
+        let forgotten: Vec<(String, String)> = forgotten_now.into_iter().filter(|b| !forgotten_before.contains(b)).map(|b| ("global".to_string(), b)).collect();
         self.emit(Event::Changed { apps: Vec::new() });
         if !forgotten.is_empty() {
             self.delete_forgotten(forgotten);
         }
         Ok(())
-    }
-
-    /// Replays every scope's state from the start (when the node starts).
-    async fn replay_all(&self) -> Result<()> {
-        let _write = self.0.writes.lock().await;
-        self.with(|i| {
-            i.views.clear();
-            let all = i.r.store.ordered()?;
-            update_views(i, &all)
-        })
     }
 
     /// Brings this device in line with the members: runs each app's latest deploy, fetching bundles it lacks, and
@@ -1228,51 +1091,13 @@ impl Node {
     }
 }
 
-/// Which views to replay for new entries: the new entries that count, onto each scope's views, or, where one sorts
-/// before what a scope's views have replayed (a member entry of `global` included), that whole scope again.
-/// Only `apps`' stores are replayed.
-/// Brings each scope's state up to date with new entries: from the ones after what it has, or from the start when one
-/// sorts before them or the members changed earlier.
-fn update_views(i: &mut Network, new: &[Entry]) -> Result<()> {
-    let earliest_member = new.iter().filter(|e| members::is_member_entry(e)).map(Entry::order).min();
-    let mut logs: Vec<String> = new.iter().map(|e| e.log().to_string()).collect();
-    if let Some(m) = &earliest_member {
-        logs.extend(i.views.iter().filter(|(_, (pos, _))| m <= pos).map(|(log, _)| log.clone()));
-    }
-    logs.sort();
-    logs.dedup();
-    for log in logs {
-        let Ok(scope) = Scope::parse(&log) else { continue };
-        // Once its own database's steps say its state, its entries change nothing (`Node::read_scope_steps_now`).
-        if !i.r.holds(&scope) || i.scope_dbs.contains_key(&scope) {
-            continue;
-        }
-        let mut fresh: Vec<Entry> = new.iter().filter(|e| e.log() == log).cloned().collect();
-        fresh.sort_by_key(Entry::order);
-        let view = i.views.get(&log);
-        let rebuild = match view {
-            None => true,
-            Some((pos, _)) => fresh.first().is_some_and(|e| e.order() <= *pos) || earliest_member.as_ref().is_some_and(|m| m <= pos),
-        };
-        let (entries, state) = match rebuild {
-            true => (i.r.store.scope(&log)?, ScopeState::default()),
-            false => (fresh, view.unwrap().1.clone()),
-        };
-        let Some(last) = entries.last().map(Entry::order) else { continue };
-        let (_, state) = members::replay_from(&i.r.members, &i.r.member_entries, &entries, state, |_, _, _| {});
-        let position = match view {
-            Some((pos, _)) if !rebuild => pos.clone().max(last),
-            _ => last,
-        };
-        i.views.insert(log.clone(), (position, state));
-    }
-    // Once `global`'s log is frozen, its state is its scope database's, written as steps, whatever its entries said:
-    // as each other scope's is its own database's (`Node::read_scope_steps_now`).
+/// `global`'s state, as its scope database says it: each other scope's is its own database's
+/// (`Node::read_scope_steps_now`).
+fn update_views(i: &mut Network) {
     if i.r.frozen.is_some() {
         let position = i.views.get("global").map(|(p, _)| p.clone()).unwrap_or((0, Hash::from_bytes([0; 32])));
         i.views.insert("global".to_string(), (position, i.r.db().state()));
     }
-    Ok(())
 }
 
 /// The scopes a call of `app` as `user` may reach: their own if it's installed for them at all, each of their groups

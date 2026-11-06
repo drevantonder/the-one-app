@@ -163,54 +163,16 @@ async fn backups_go_to_a_folder_encrypted_and_restore_with_the_recovery_key_alon
     assert!(place("Sheet bucket").is_some_and(|p| p["kind"] == "s3"), "{}", a.backups().unwrap());
 }
 
-/// Phase 2's storage is on only once a device knows the log is frozen, never for what its build may do: in a build
-/// whose admin may freeze it, a node writes no step signed in it (which a device older than R1 would pass over, losing
-/// what's in it) and refuses nothing until the ceremony, and every step after is signed in it.
-#[tokio::test(flavor = "multi_thread")]
-async fn a_node_signs_in_its_steps_only_once_it_knows_the_log_is_frozen() {
-    let a = start("frozen-a").await;
-    let recovery = a.create_before_the_switch("Home", "Andre").await.unwrap();
-    add_notes(&a).await;
-    let recovery = one::entry::unhex(&recovery).unwrap();
-    let _relay = relay(&a).await;
-    let me = one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None, token: None };
-    eventually("notes to run", async || a.call(notes("post", json!({ "text": "before the freeze" }))).await.is_ok()).await;
-    a.call(notes("post", json!({ "text": "and another" }))).await.unwrap();
-    let dir = temp("frozen-disk").join("One Backups");
-    a.add_place(&me, &json!({ "path": dir, "title": "Disk" })).await.unwrap();
-    eventually("the first backup", async || !a.backups().unwrap()["places"][0]["last"].is_null()).await;
-    let network = one::backups::networks(&one::bucket::Place::Folder(dir.clone())).unwrap().remove(0);
-    let notes_db = async || {
-        let (copy, keys) = backed_up_keys(&dir, &network, &recovery, "global", "notes", "main");
-        one::db::Db::open_switched(&copy, &format!("{}/notes/main", one::bucket::folder("global")), keys).await.unwrap()
-    };
-    assert!(!a.frozen());
-    let before = notes_db().await;
-    assert_eq!((before.signed_from(), before.checks().refused), (None, 0), "no step is signed in it, and a reader that knows the log is frozen refuses none");
-    let written = before.at();
-
-    a.switch(&me, &ed25519_dalek::SigningKey::from_bytes(&recovery)).await.unwrap();
-    assert!(a.frozen());
-    a.call(notes("post", json!({ "text": "after the freeze" }))).await.unwrap();
-    let first = a.backups().unwrap()["places"][0]["last"]["time"].clone();
-    a.back_up_now();
-    eventually("the next backup", async || a.backups().unwrap()["places"][0]["last"]["time"] != first).await;
-    let after = notes_db().await;
-    assert_eq!(after.signed_from(), Some(written + 1), "the first step after the freeze is signed in it, and says so");
-    assert_eq!(after.checks().refused, 0);
-    assert_eq!(backed_up_posts(&dir, &network, &recovery).await, ["before the freeze", "and another", "after the freeze"]);
-}
-
 /// The notes' lines in `global` as a place's copy of the network's bucket holds them, opened with the recovery key
 /// alone: each epoch's key sealed to it, each app's key in the epoch sealed under that.
-async fn backed_up_posts(dir: &std::path::Path, network: &str, recovery: &[u8; 32]) -> Vec<String> {
-    backed_up(dir, network, recovery, "global", "notes", "main", "select text from posts order by n").await
+async fn backed_up_posts(dir: &std::path::Path, install: &str, recovery: &[u8; 32]) -> Vec<String> {
+    backed_up(dir, install, recovery, "global", "notes", "main", "select text from posts order by n").await
 }
 
 /// The first column of what `sql` reads from `app`'s `database` in `scope`, as the backup's copy of the bucket has it,
 /// opened with the recovery key alone.
-async fn backed_up(dir: &std::path::Path, network: &str, recovery: &[u8; 32], scope: &str, app: &str, database: &str, sql: &str) -> Vec<String> {
-    let (copy, keys) = backed_up_keys(dir, network, recovery, scope, app, database);
+async fn backed_up(dir: &std::path::Path, install: &str, recovery: &[u8; 32], scope: &str, app: &str, database: &str, sql: &str) -> Vec<String> {
+    let (copy, keys) = backed_up_keys(dir, install, recovery, scope, app, database);
     match one::db::Db::open(&copy, &format!("{}/{app}/{database}", one::bucket::folder(scope)), keys).await {
         Ok(db) => db.query(sql, &[]).unwrap().into_iter().filter_map(|r| r.values().next().and_then(|v| v.as_str()).map(str::to_string)).collect(),
         Err(_) => Vec::new(),
@@ -219,8 +181,8 @@ async fn backed_up(dir: &std::path::Path, network: &str, recovery: &[u8; 32], sc
 
 /// The backup's copy of the network's bucket, and the keys of `app`'s `database` in `scope` there, opened with the
 /// recovery key alone.
-fn backed_up_keys(dir: &std::path::Path, network: &str, recovery: &[u8; 32], scope: &str, app: &str, database: &str) -> (one::bucket::Place, one::db::Keys) {
-    let copy = one::bucket::Place::Folder(dir.join(network).join("bucket"));
+fn backed_up_keys(dir: &std::path::Path, install: &str, recovery: &[u8; 32], scope: &str, app: &str, database: &str) -> (one::bucket::Place, one::db::Keys) {
+    let copy = one::bucket::Place::Folder(dir.join(install).join("bucket"));
     let folder = one::bucket::folder(scope);
     let mut keys = one::db::Keys::new();
     for n in copy.list(&format!("{folder}/_epochs")).unwrap().iter().filter_map(|n| n.parse::<u32>().ok()) {

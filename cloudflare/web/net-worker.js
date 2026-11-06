@@ -77,25 +77,23 @@ export function server(version) {
     return keys.filter((key) => theirs.includes(key));
   }
 
-  /// `user`'s members from `global`'s entries kept and those `given` (a pack), checked and replayed by the client
-  /// (src/members.rs), then kept: the entries, the network's first, what to ask for next, and the members. The first
-  /// time, of the install its approval named (`genesis:<user>`), if it named one.
-  async function global(user, given, steps) {
+  /// `user`'s who's who from `global`'s scope database's steps, as kept and those this browser read since (`steps`),
+  /// checked by the client (client/src/members.rs), then kept. The first time, of the network its approval named
+  /// (`genesis:<user>`), if it named one.
+  async function global(user, steps) {
     const [, { get, put }] = await code;
     const kept = await get(`global:${user}`);
-    // What an older release kept, without all its answers (each person's `keeps` came last), is replayed again.
-    if (!given && !steps?.steps?.length && kept?.members?.people?.[user]?.keeps) return kept.members;
+    if (!steps && kept?.steps?.truth && kept?.members?.people?.[user]?.keeps) return kept.members;
     const { Global } = await glue;
     const root = kept?.root || (await get(`genesis:${user}`)) || "";
-    // Its scope database's steps: where they were read to, as kept, then those this browser read since from the
-    // bucket, sealed, its log's to where a freeze says it ends, and a Welcome's freeze and copy, with the keys it opens
-    // them with itself.
+    // Where they were read to, as kept, then those this browser read since from the bucket, sealed, its log's first
+    // step, and a Welcome's freeze and copy, with the keys it opens them with itself.
     const { welcome, freeze, start } = steps || {};
-    const held = { kept: kept?.steps || null, given: { steps: steps?.steps || [], log: steps?.log || null, entries: steps?.entries || null, welcome, freeze, start }, epochs: steps?.keys?.epochs || {}, apps: steps?.keys?.apps || {} };
-    const g = new Global(root, kept?.pack || new Uint8Array(), given || new Uint8Array(), JSON.stringify(held));
+    const held = { kept: kept?.steps || null, given: { steps: steps?.steps || [], log: steps?.log || null, welcome, freeze, start }, epochs: steps?.keys?.epochs || {}, apps: steps?.keys?.apps || {} };
+    const g = new Global(root, JSON.stringify(held));
     const members = JSON.parse(g.members);
     const wants_log = g.wants_log;
-    await put(`global:${user}`, { root: g.root, pack: g.pack, have: g.have, steps: JSON.parse(g.steps), at: g.at, members });
+    await put(`global:${user}`, { root: g.root, steps: JSON.parse(g.steps), at: g.at, members });
     g.free();
     return wants_log ? { ...members, wants_log } : members;
   }
@@ -266,7 +264,7 @@ export function server(version) {
             return s?.client.nodes(nodes);
           }
           case "global":
-            return post({ id, members: await global(m.user, m.given && new Uint8Array(m.given), m.steps) });
+            return post({ id, members: await global(m.user, m.steps) });
           // A new device's sign-in, checked by the client (`signedInWith`), its issuer's keys fetched from where it
           // publishes them.
           case "signedInWith": {

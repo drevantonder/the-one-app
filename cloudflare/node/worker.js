@@ -30,7 +30,7 @@
 // for Cloudflare it carries (`service-<app>.js`), each run here once an admin switches it on.
 
 import { DurableObject, RpcTarget } from "cloudflare:workers";
-import { initSync, check_certificate, open, opens, refresh, query, may, write, close, statements, vault_items, vault_fill, vault_schema, screen, client_screen, config, prefix, following as after, read_log, groups, scopes_of, epochs as epochsOf, runners, forward, network, bundle, endpoint_of, signed, handoff, epoch_name, app_key_name, needs as needed, endpoint_start, endpoint_deliver, endpoint_ask, endpoint_close, pin_genesis, global_entries, sealed_global_steps, reads } from "./one_cloudflare_node.js";
+import { initSync, check_certificate, open, opens, refresh, query, may, write, close, statements, vault_items, vault_fill, vault_schema, screen, client_screen, config, prefix, following as after, read_log, groups, scopes_of, epochs as epochsOf, runners, forward, install, bundle, endpoint_of, signed, handoff, epoch_name, app_key_name, needs as needed, endpoint_start, endpoint_deliver, endpoint_ask, endpoint_close, pin_genesis, sealed_global_steps, reads } from "./one_cloudflare_node.js";
 import wasm from "./one_cloudflare_node_bg.wasm";
 import { shim, compatibilityDate, services } from "./built.js";
 
@@ -1017,15 +1017,13 @@ async function route(p, request) {
     p.whom(request);
     return json(await sealedKeys(p.bucket, url.searchParams.get("scope") || "", url.searchParams.get("to"), url.searchParams.get("app")));
   }
-  // Who's who as the bucket holds it, for a device that checks it all itself (client/src/members.rs): `global`'s entries
-  // read with the keys its person handed, and its scope database's steps, sealed.
-  if (request.method === "GET" && (path === "/v1/entries/global" || path === "/v1/steps/global")) {
+  // Who's who as the bucket holds it, for a device that checks it all itself (client/src/members.rs): `global`'s scope
+  // database's steps, sealed.
+  if (request.method === "GET" && path === "/v1/steps/global") {
     const who = p.whom(request);
     await p.readLogs(who, ["global"]);
     p.forgetLost(who);
-    if (path === "/v1/steps/global") return json(JSON.parse(await sealed_global_steps(p.owner, who.user, p.bucket, Number(url.searchParams.get("from") || 0), url.searchParams.get("welcome") ?? undefined)));
-    const pack = global_entries(p.owner, who.user, url.searchParams.get("have") || "");
-    return pack.length ? new Response(pack, { headers: { "content-type": "application/octet-stream" } }) : new Response(null, { status: 204 });
+    return json(JSON.parse(await sealed_global_steps(p.owner, who.user, p.bucket, Number(url.searchParams.get("from") || 0), url.searchParams.get("welcome") ?? undefined)));
   }
   const own = request.method === "GET" && path.startsWith("/v1/client-screens/");
   if (own || (request.method === "GET" && ["/v1/state", "/v1/apps", "/v1/widgets", "/v1/badges", "/v1/events"].includes(path))) {

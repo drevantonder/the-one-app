@@ -35,8 +35,6 @@ fn every_command() -> String {
   {CLI} rename <name>                  rename this device
   {CLI} role <user> admin|member       (admins)
   {CLI} settings [<name> <value>|--default]   the network's settings (admins set them)
-  {CLI} switch check                   before the switch to the scope database: whether the bucket holds any of
-                                       its steps yet, or a freeze in everyone's log (reads only)
   {CLI} groups                         who's in {YOURS}, then every group: who's in it, as admin or member,
                                        and who's invited
   {CLI} group create <name>            a group, with you as its admin
@@ -398,39 +396,6 @@ fn run(args: Vec<String>) -> Result<()> {
             let value = if flags.contains_key("default") { Value::Null } else { json!(value.join(" ")) };
             post("/v1/settings", json!({ "name": name, "value": value }))?;
             println!("Set {name}.");
-        }
-        ["switch", "check"] => {
-            // Read-only, before the switch: nothing in the bucket is a step of who's who yet, nor a freeze's mark.
-            takes_only(&flags, &[])?;
-            // As this machine's device, reading the bucket itself through the URL signer, whatever build its node runs.
-            let state = get("/v1/state")?;
-            let address = state["install"]["settings"]["address"].as_str().context("this machine's node knows no address for its network yet")?.trim_end_matches('/').to_string();
-            let root = state["install"]["root"].as_str().and_then(|r| one::entry::Hash::from_hex(r).ok());
-            let key = one::node::device_key(&one::home())?;
-            let r = tokio::runtime::Builder::new_multi_thread().enable_all().build()?.block_on(one_client::switch_check(address, &key, root)).map_err(|e| anyhow::anyhow!("{e}"))?;
-            let database: Vec<&str> = r["database"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
-            match database.len() {
-                0 => println!("Who's who as the scope database: nothing in the bucket yet."),
-                n => println!("Who's who as the scope database: {n} objects in the bucket already: {}", database.join(", ")),
-            }
-            let shaped = r["steps"].as_array().cloned().unwrap_or_default();
-            match shaped.len() {
-                0 => println!("Everyone's log: {} steps, each of entries; none is a freeze.", r["log"]),
-                _ => {
-                    println!("Everyone's log: {} steps, of which these open to a step rather than entries:", r["log"]);
-                    for s in &shaped {
-                        println!("  step {}: {}, signed by {}", s["at"], s["kind"].as_str().unwrap_or(""), s["by"].as_str().unwrap_or(""));
-                    }
-                }
-            }
-        }
-        ["switch"] => {
-            // The ceremony that freezes the log, so the scope database is the truth, signed by the recovery key read
-            // from a file here and never printed (`Node::switch`): devices not updated yet are told to from then on.
-            takes_only(&flags, &["recovery-key"])?;
-            let at = flags.get("recovery-key").and_then(Value::as_str).context("give --recovery-key <file> (or - to read it from stdin): the file the network's recovery key is in")?;
-            post("/v1/switch", json!({ "recovery": recovery_key_from(at, "cli")? }))?;
-            println!("Who's who is the scope database now. A device not updated yet is told to update.");
         }
         ["role", user, role] => {
             post("/v1/role", json!({ "user": user, "role": role }))?;

@@ -157,26 +157,6 @@ async fn global_keys(bucket: &Signed, key: &SigningKey) -> Result<(BTreeMap<u32,
     Ok((epochs, log_keys))
 }
 
-/// Read-only, before the switch, as the device whose key is `key` at the network's `address` (`one switch check`),
-/// whatever build its node runs: which of the first positions of `global`'s scope database the bucket holds (none,
-/// before the ceremony), and every step of `global`'s log, of the network whose genesis is `root`, that opens to a
-/// step rather than entries (a freeze's mark is one). → `{ database: [names], log: n, steps: [{ at, kind, by }] }`.
-pub async fn switch_check(address: String, key: &SigningKey, root: Option<one::entry::Hash>) -> Result<Value, Error> {
-    let bucket = Signed::new(address, key.to_bytes());
-    let prefix = one::database::steps::prefix("global");
-    let mut database = Vec::new();
-    for name in [one::db::step_name(&prefix, 1), one::db::step_name(&prefix, 2), format!("{prefix}/newest")] {
-        if one::bucket::Bucket::get(&bucket, &name).await.map_err(failed)?.is_some() {
-            database.push(name);
-        }
-    }
-    let (_, log_keys) = global_keys(&bucket, key).await?;
-    let mut log = one::database::steps::Log::new(root);
-    one::database::steps::log_on(&bucket, &log_keys, &mut log).await.map_err(failed)?;
-    let shaped: Vec<Value> = log.steps().map(|(at, e)| json!({ "at": at, "kind": e.content.kind, "by": hex(&e.author()) })).collect();
-    Ok(json!({ "database": database, "log": log.last(), "steps": shaped }))
-}
-
 impl Device {
     /// The device whose key is `secret`, of the network at `address`, keeping what it needs to in `dir`.
     pub fn new(secret: [u8; 32], address: &str, dir: &str) -> Device {
@@ -290,7 +270,7 @@ impl Device {
     }
 
     /// Whether it's been let in: it reaches a node as itself. While it waits, what sign-in says of its request
-    /// (`keys::waited`) is acted on as every client does: once approved, the install the device that approved it said it's
+    /// (`keys::waited`) is acted on as every client does: once approved, the network the device that approved it said it's
     /// in (its genesis) is the only one it takes, kept before it reads any, so none it's shown first can be another; one
     /// gone from sign-in is asked again unless it's in; a sign-in that's no more fails, to sign in again.
     pub async fn wait(&self, token: &str) -> Result<bool, Error> {
@@ -416,28 +396,23 @@ impl Device {
         }
     }
 
-    /// `global`'s entries, read from the bucket and opened with the epochs sealed to this device, checked and replayed:
-    /// → the nodes it may ask, with their seal keys. The network's genesis is kept the first time, and must be the same
-    /// after.
+    /// `global`'s scope database's steps, read from the bucket and opened with the epochs sealed to this device, from the
+    /// freeze the recovery key its genesis names signed, or where the device that let it in had read to: → the nodes it
+    /// may ask, with their seal keys. The network's genesis is kept the first time, and must be the same after.
     async fn read_members(&self) -> Result<HashMap<[u8; 32], [u8; 32]>, Error> {
         let bucket = Signed::new(self.address.clone(), self.key.to_bytes());
         let (epochs, log_keys) = global_keys(&bucket, &self.key).await?;
-        let read = one::log::open(&bucket, &log_keys, &one::log::prefix("global"), "global").await.map_err(failed)?;
-        // Replayed as every client device replays them (crate::members), of the network whose genesis it kept.
         let pinned = self.dir.join("genesis");
         let kept = std::fs::read_to_string(&pinned).ok().and_then(|had| Hash::from_hex(had.trim()).ok());
         let mut global = crate::members::Global::new(kept);
-        global.add_entries(read.entries).map_err(|_| failed("This isn't the One App this device joined."))?;
-        // Its scope database's steps too, opened with the same keys (`one::database::steps`): who's who once it's frozen,
-        // from where the device that let it in read them to, if it said (its Welcome), else from the first.
+        // From where the device that let it in read who's who to, if it said (its Welcome), else from the first.
         let welcome = std::fs::read_to_string(self.dir.join("welcome")).ok().and_then(|w| one::database::steps::Welcome::parse(w.trim()));
         if let Some(welcome) = welcome {
-            match one::database::steps::welcomed(&bucket, &log_keys, global.root(), &welcome, now()).await {
+            match one::database::steps::welcomed(&bucket, &log_keys, &welcome, now()).await {
                 Ok(truth) => global.welcomed(truth),
                 Err(_) => drop(std::fs::remove_file(self.dir.join("welcome"))),
             }
         }
-        // A freeze the recovery key signed among them: judged and checked against global's log past where it says it ends.
         global.read_steps(&bucket, &log_keys).await.map_err(failed)?;
         let who = global.who().map_err(failed)?;
         if kept.is_none()

@@ -57,7 +57,7 @@ impl Node {
     /// `read_log_now`'s entries alone: what a freeze's signer is checked against, read to the log's end first.
     pub(super) async fn read_entries_now(&self, scope: &Scope) -> Result<bool> {
         let log = scope.to_string();
-        let (genesis, epoch) = self.with(|i| Ok((!i.r.db().users().is_empty(), i.r.db().epoch(scope))))?;
+        let (genesis, epoch) = self.with(|i| Ok((i.r.recovery().is_some(), i.r.db().epoch(scope))))?;
         if *scope != Scope::Global && epoch == 0 {
             return Ok(false);
         }
@@ -83,7 +83,7 @@ impl Node {
             let at = read.at;
             if at > from {
                 let handled = self.with(|i| {
-                    let handled = i.r.receive(read.entries, now_ms())?;
+                    let handled = i.r.receive(read.entries)?;
                     i.r.store.set_position(&log, at, read.floor)?;
                     Ok(handled)
                 })?;
@@ -382,35 +382,4 @@ pub(super) struct Sent {
 /// Where a database's steps are in the bucket.
 fn database_prefix(scope: &Scope, app: &str, database: &str) -> String {
     format!("{}/{app}/{database}", crate::bucket::folder(&scope.to_string()))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// A node whose who's who stops building answers nobody, yet still reads `global`, so the entry after builds it
-    /// again: one that couldn't read it would answer nobody for good. In a network whose log isn't frozen yet.
-    #[tokio::test(flavor = "multi_thread")]
-    async fn a_node_whose_whos_who_stops_building_answers_nobody_until_it_reads_global_and_builds_again() {
-        let dir = std::env::temp_dir().join(format!("one-whos-who-{}", rand::random::<u64>()));
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("device.json"), json!({ "secret": hex(&rand::random()), "name": "a" }).to_string()).unwrap();
-        let a = Node::start(&dir).await.unwrap();
-        a.create_before_the_switch("Home", "Andre").await.unwrap();
-        let me = Caller { key: a.id(), user: a.user().unwrap(), agent: None, token: None };
-        let may = || a.with(|i| Ok(i.r.db().may(&me.user, "use", scopes::NETWORK))).unwrap();
-        assert!(may());
-
-        // A setting is written, but who's who doesn't build with it: no one may do anything.
-        a.with(|i| Ok(i.r.fail = true)).unwrap();
-        assert!(a.set_setting(&me, "fails", Some("yes")).await.is_err());
-        assert!(!may());
-
-        // Once it builds, reading `global` finds the setting and builds it again.
-        a.with(|i| Ok(i.r.fail = false)).unwrap();
-        a.read_log(&Scope::Global).await.unwrap();
-        assert!(may());
-        assert_eq!(a.with(|i| Ok(i.r.db().settings().get("fails").cloned())).unwrap().as_deref(), Some("yes"));
-        let _ = std::fs::remove_dir_all(&dir);
-    }
 }

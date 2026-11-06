@@ -10,7 +10,7 @@
 // scope database and its permissions (client/src/members.rs, `Who`), and only looked up here. A hacked node holds no
 // keys, and gets none this way.
 
-import { askedFor, b64u, databaseKey, ed25519Public, epochHash, hex, hkdfKey, inviteProof, joinCode, oldestNeeded, openAppKey, openSealed, passkeyKeys, random, sealAppKey, sealHandoff, sealTo, sha256, signEntry, signStep, signedRequest, READS, twinPublic, untilTaken, x25519Public } from "../shared/crypto.js";
+import { askedFor, b64u, databaseKey, ed25519Public, epochHash, hex, hkdfKey, inviteProof, joinCode, oldestNeeded, openAppKey, openSealed, passkeyKeys, random, sealAppKey, sealHandoff, sealTo, sha256, signStep, signedRequest, READS, twinPublic, untilTaken, x25519Public } from "../shared/crypto.js";
 import { del, get, put } from "./kept.js";
 import { members } from "./members.js";
 
@@ -85,8 +85,7 @@ const runsAll = (k, node, scopes) => !!k?.runs_for[node] && scopes.every((s) => 
 export class Device {
   /// `me`: this browser's keys; `user`: its person; `state()`: the node's /v1/state as last read, for what it shows;
   /// `api(path, opts)`: a /v1 request as this person; `bearer(path, init)`: one to the address with the access token;
-  /// `replay(user, given)`: `global`'s entries this browser kept and those `given` (a pack), checked and replayed by
-  /// one-client (net.global).
+  /// `replay(user, steps)`: `global`'s scope database's steps this browser read, checked by one-client (net.global).
   constructor(me, { user, state, api, bearer, replay }) {
     Object.assign(this, { me, user, state, api, bearer, replay });
     /// The members as last checked (`checked`): what it seals and hands by.
@@ -115,22 +114,12 @@ export class Device {
     return this.fetching.get(id);
   }
 
-  /// The members as the network's signed entries say them, checked here: as last checked, or with what's new from a
-  /// node if `fresh` (before it changes who opens what) or never. The first time, the network's first entry is kept,
-  /// and a network that starts with any other refused. While no node gives the entries (the Cloudflare node doesn't),
-  /// it goes on with those it checked last, unless it's `fresh`.
+  /// Who's who as the network's signed steps say it, checked here: as last checked, or with what's new in the bucket
+  /// if `fresh` (before it changes who opens what) or never. The first time, the network's genesis is kept, and one
+  /// that starts with any other refused.
   async checked(fresh = false) {
     if (fresh || !this.known) {
       const kept = await get(`global:${this.user}`);
-      // With nothing kept, it can't yet tell whether a node that asks for keys runs Everyone's (the Cloudflare node
-      // does), so it hands none: it reads the log from the bucket itself instead, and checks it as it would a node's.
-      const r = await this.api(`/v1/entries/global?have=${kept?.have || ""}`, { raw: true, keyless: !kept }).catch((err) => {
-        if (fresh && kept) throw err;
-        return null;
-      });
-      // What an older release kept, without all its answers (each person's `keeps` came last), is replayed again.
-      const given = r && r.status !== 204 ? new Uint8Array(await r.arrayBuffer()) : undefined;
-      const entries = !kept && !given ? { steps: await this.bucketSteps("log", 0) } : null;
       // Who's who's scope database's steps after those kept, its freeze among them, which this browser reads from the
       // bucket and opens itself, never as a node passes them on.
       const read = await this.bucketSteps("scope", kept?.at || 0).catch((err) => {
@@ -141,16 +130,10 @@ export class Device {
       // freeze and copy a node passes on, checked against the Welcome's hash.
       const welcome = !kept?.steps?.truth && read.length && (await get(`welcome:${this.user}`));
       const welcomed = welcome ? await this.api(`/v1/steps/global?from=0&welcome=${welcome}`, { keyless: !kept }).catch(() => null) : null;
-      const steps = read.length || entries ? { steps: read, entries, welcome: welcomed?.welcome, freeze: welcomed?.freeze, start: welcomed?.start, keys: await this.logKeys() } : null;
-      let k = !given && !steps && kept?.members?.people?.[this.user]?.keeps ? kept.members : await this.replay(this.user, given, steps);
-      // A freeze among them: judged and checked against the log's steps from the bucket, to the step after where it
-      // says the log ends (its mark), or the log's end.
-      // Or to its end, when it says the most a log may (2⁵³): a step shaped like a freeze, judged once every key that
-      // was ever the recovery key is known.
-      if (k.wants_log) {
-        const all = k.wants_log >= 2 ** 53;
-        k = await this.replay(this.user, undefined, { ...steps, log: { to: k.wants_log, steps: await this.bucketSteps("log", 0, all ? Infinity : k.wants_log + 1, all ? 0 : k.wants_log) } });
-      }
+      const steps = read.length ? { steps: read, welcome: welcomed?.welcome, freeze: welcomed?.freeze, start: welcomed?.start, keys: await this.logKeys() } : null;
+      let k = !steps && kept?.steps?.truth && kept?.members?.people?.[this.user]?.keeps ? kept.members : await this.replay(this.user, steps);
+      // Before it knows the recovery key its network's genesis names: the log's first step, from the bucket.
+      if (k.wants_log) k = await this.replay(this.user, { ...steps, keys: steps?.keys || (await this.logKeys()), log: { to: k.wants_log, steps: await this.bucketSteps("log", 0, k.wants_log, k.wants_log) } });
       // One that didn't check out is read from the freeze on, the next time.
       if (welcome && !(await get(`global:${this.user}`))?.steps?.truth) await del(`welcome:${this.user}`).catch(() => {});
       if (!k.people[this.user]) throw new Error("Your One App network doesn't list you yet, so this device didn't use it.");
@@ -454,27 +437,14 @@ export class Device {
 
   // Signing.
 
-  /// Signs an entry of `content` in `log` as `as` (this browser, or a passkey), after what the node has, and writes it.
-  /// `content` may be a function of the entry's seq, for one that says which entry it is.
+  /// Writes `content` to `log`'s database as `as` (this browser, or a passkey): `global`'s only, as a step (`step`).
+  /// `content` may be a function of the entry's seq, for one that says which it is.
   async write(log, content, as = this.me) {
-    if (log === "global" && (await this.checked()).frozen) return this.step(content, as);
-    for (let tries = 0; ; tries++) {
-      const heads = await this.api(`/v1/entries?scope=${encodeURIComponent(log)}`);
-      const last = heads.logs?.[as.key];
-      const fields = { log, seq: last ? last.seq + 1 : 0, backlink: last?.hash ?? null, previous: (heads.previous || []).filter((h) => h !== last?.hash), time: Date.now(), user: this.user, epoch: heads.epoch };
-      const e = await signEntry(as.sign, hex.decode(as.key), fields, JSON.stringify(typeof content === "function" ? content(fields.seq) : content));
-      try {
-        return await this.api("/v1/entries", { method: "POST", body: [{ header: b64u.encode(e.header), signature: b64u.encode(e.signature), body: b64u.encode(e.body) }] });
-      } catch (err) {
-        // The log froze since this browser last looked: a step, then.
-        if (log === "global" && /update this device/.test(err.message) && (await this.checked(true)).frozen) return this.step(content, as);
-        // Another of the person's writes went first: once more, after it.
-        if (tries || !/already|follow/.test(err.message)) throw err;
-      }
-    }
+    if (log !== "global") throw new Error(`a browser writes only Everyone's who's who, not ${log}`);
+    return this.step(content, as);
   }
 
-  /// Once `global`'s log is frozen: `content` as a step of its scope database, signed by `as` for the next position
+  /// `content` as a step of `global`'s scope database, signed by `as` for the next position
   /// (src/database/steps.rs), and again for the one after while another device's goes first.
   async step(content, as = this.me) {
     for (let tries = 0; ; tries++) {

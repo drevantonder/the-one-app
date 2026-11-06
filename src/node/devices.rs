@@ -472,12 +472,7 @@ impl Node {
         self.read_log_now(&Scope::Global).await?;
         // Listed already by an approval that didn't finish: the rest is done again, each step once.
         if !self.with(|i| Ok(i.r.db().client(&endpoint.key).is_some_and(|c| c.user == r.user && c.seal == endpoint.seal)))? {
-            let entry = self.with(|i| {
-                let head = i.r.store.last(&at, "global")?.map(|e| e.head());
-                let ext = crate::entry::Ext { log: "global".into(), time: now_ms(), user: r.user.clone(), epoch: i.r.db().epoch(&Scope::Global), previous: i.r.store.heads("global", Some(&at))? };
-                Ok(Entry::create(recovery, ext, head, members::device(&endpoint, &r.user, &r.name, &[members::Kind::Client], None)))
-            })?;
-            self.put_checked(vec![entry]).await?;
+            self.write_step_as(recovery, &r.user, members::device(&endpoint, &r.user, &r.name, &[members::Kind::Client], None)).await?;
         }
         let relay = self.tell_relay_as(recovery.clone(), json!({ "add": r.key, "role": "client" })).await.err().map(|err| format!("{err:#}"));
         let scopes: Vec<Scope> = self.with(|i| Ok(i.r.db().may_scopes(&r.user, "use")))?;

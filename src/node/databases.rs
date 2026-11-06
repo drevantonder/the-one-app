@@ -96,10 +96,15 @@ impl Node {
     /// The epochs of a scope this device opens, as `epoch_keys` finds them, even while it wasn't given the newest (as
     /// between its own new epoch's entry and its seals), and the newest's number: 0 for none.
     pub(super) async fn epochs_held(&self, scope: &Scope) -> Result<(crate::db::Keys, u32)> {
-        // `global`'s as replay says, so it's read even while who's who doesn't build; another's not then.
+        let kept = self.0.epochs.lock().unwrap().get(scope).cloned().unwrap_or_default();
+        // Before this device has read `global`'s freeze, those it was given as it made the network, or checked against
+        // the steps as it first read them (`first_global_read`): what it reads the freeze with.
+        if *scope == Scope::Global && !self.frozen() {
+            let newest = kept.keys().next_back().copied().unwrap_or(0);
+            return Ok((kept, newest));
+        }
         let hashes = self.with(|i| Ok(if *scope == Scope::Global { i.r.global_epochs() } else { i.r.db().epoch_hashes(scope) }))?;
         let newest = hashes.keys().next_back().copied().unwrap_or(0);
-        let kept = self.0.epochs.lock().unwrap().get(scope).cloned().unwrap_or_default();
         // Kept only while each is still the one its entry made.
         let mut keys: crate::db::Keys = kept.into_iter().filter(|(n, k)| hashes.get(n) == Some(&crate::keys::epoch_hash(k))).collect();
         if newest == 0 || keys.contains_key(&newest) {
@@ -167,18 +172,14 @@ impl Node {
                 }
             }
             let read = crate::log::open(&bucket, &log_keys, &prefix, "global").await?;
-            // Once the log is frozen, the epochs its scope database's steps made since (`database::steps`).
-            let ordered = crate::entry::causal(read.entries.clone(), &HashMap::new());
-            let (mut steps, mut log) = (Vec::new(), None);
+            // Who's who as the steps say it, from the freeze the recovery key its genesis names signed: the epochs'
+            // hashes each key sealed to this device must have.
+            let recovery = root.and_then(|root| crate::database::steps::recovery_of(root, &read.entries)).with_context(|| format!("{YOURS}'s genesis isn't in its log"))?;
+            let mut steps = Vec::new();
             let who = loop {
                 let more = crate::database::steps::read(&bucket, &log_keys, &Scope::Global, steps.len() as u64).await?;
                 steps.extend(more.steps.iter().cloned());
-                let recovery = crate::database::steps::recovery_keys(root, &ordered);
-                log = match crate::database::steps::wants_log(&steps, root, log.as_ref(), &recovery) {
-                    Some(_) => crate::database::steps::log_for(&bucket, &log_keys, &steps, root, &recovery).await?,
-                    None => log,
-                };
-                let who = crate::database::steps::who(&steps, root, &ordered, log.as_ref(), now_ms())?;
+                let who = crate::database::steps::Truth::read(&steps, recovery, now_ms())?.with_context(|| format!("{YOURS}'s who's who has no freeze yet"))?.db;
                 if !more.junk_at_end(who.epoch(&Scope::Global)) {
                     break who;
                 }
