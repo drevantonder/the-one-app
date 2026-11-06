@@ -1,5 +1,5 @@
 //! What a request did on this device, step by step with how long each took, for a client in developer mode: it asks
-//! with `x-one-trace` and gets it back in the same header (`api::traced`), and another device asked for a call adds its
+//! with `x-one-trace` and gets it back in the same header (`api::guard`), and another device asked for a call adds its
 //! own, in its answer (`trace` beside `ok`). Steps hold timings, device, app and tool
 //! names, never data or keys.
 
