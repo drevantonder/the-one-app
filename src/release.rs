@@ -7,13 +7,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use ssh_key::{HashAlg, LineEnding, PrivateKey, PublicKey, SshSig};
 
-use crate::database::content::Content;
+use crate::database::content::{self, Change, Content};
 
 use crate::keys::Key;
 
-pub const APP: &str = "node";
-/// The kind of step that says a release of the node.
-pub const NODE_KIND: &str = "node-release";
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Release {
@@ -35,12 +32,13 @@ pub struct Release {
 /// The namespace release signatures are made in, so nothing else the key signs passes for a release.
 pub const NAMESPACE: &str = "release";
 
-/// A service's release is a step of its own kind, which a device that doesn't know it ignores.
-pub const SERVICE_KIND: &str = "service-release";
-
 pub fn content(release: &Release) -> Content {
-    let kind = if release.service.is_some() { SERVICE_KIND } else { NODE_KIND };
-    Content { blobs: vec![release.blob.clone()], ..Content::new(APP, kind, json!(release)) }
+    Content { blobs: vec![release.blob.clone()], ..content::node(kind(release.service.as_deref()), json!(release)) }
+}
+
+/// A service's release is a step of its own kind, which a device that doesn't know it ignores.
+fn kind(service: Option<&str>) -> Change {
+    if service.is_some() { Change::ServiceRelease } else { Change::NodeRelease }
 }
 
 pub fn sign(key: &PrivateKey, bytes: &[u8]) -> Result<String> {
@@ -69,8 +67,7 @@ pub fn said(steps: &[(crate::database::content::Content, Key, u64)]) -> Vec<(cra
 /// published it, of what `said` gives. Any device may publish or pass on a release: only the signature counts. The
 /// newest of any newer ones without it is logged.
 pub fn latest_said(key: &str, said: &[(crate::database::content::Content, Key)], target: &str, service: Option<&str>) -> Option<(Release, Key)> {
-    let kind = if service.is_some() { SERVICE_KIND } else { NODE_KIND };
-    let releases = said.iter().rev().filter(|(c, _)| c.app == APP && c.kind == kind);
+    let releases = said.iter().rev().filter(|(c, _)| c.is(kind(service)));
     let mut logged = false;
     for (content, author) in releases {
         let e = Said { content, author: *author };

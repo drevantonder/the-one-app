@@ -9,7 +9,7 @@
 use rusqlite::Connection;
 use serde_json::Value;
 
-use crate::database::content::Content;
+use crate::database::content::{Change, Content};
 
 /// A scope database as an earlier release made it, renamed in place: its tables, and its types', roles' and rules'
 /// names. Nothing changes in one this release made.
@@ -53,13 +53,19 @@ pub fn content(c: &mut Content) {
     if c.app != crate::database::scopes::APP {
         return;
     }
-    match c.kind.as_str() {
-        "grant" => c.kind = crate::database::scopes::APP_SCHEDULES.to_string(),
-        "install" => c.kind = crate::database::scopes::ADD_APP.to_string(),
-        "uninstall" => c.kind = crate::database::scopes::REMOVE_APP.to_string(),
-        "vault-request" if c.data["app"] == "agents" => c.data["app"] = crate::database::scopes::AGENTS.into(),
-        "setting" if c.data["name"] == "serverless" => c.data["name"] = crate::database::scopes::CLOUDFLARE_NODE.into(),
-        super::steps::DEFAULTS => renamed(&mut c.data),
+    let was = match c.kind.as_str() {
+        "grant" => Some(Change::AppSchedules),
+        "install" => Some(Change::AddApp),
+        "uninstall" => Some(Change::RemoveApp),
+        _ => None,
+    };
+    if let Some(now) = was {
+        c.kind = now.name().to_string();
+    }
+    match c.change() {
+        Some(Change::VaultRequest) if c.data["app"] == "agents" => c.data["app"] = crate::database::scopes::AGENTS.into(),
+        Some(Change::Setting) if c.data["name"] == "serverless" => c.data["name"] = crate::database::scopes::CLOUDFLARE_NODE.into(),
+        Some(Change::Defaults) => renamed(&mut c.data),
         _ => {}
     }
 }
@@ -123,11 +129,11 @@ mod tests {
     fn a_step_from_before_reads_in_this_releases_names() {
         let mut grant = Content::new(crate::database::scopes::APP, "grant", serde_json::json!({ "app": "notes" }));
         content(&mut grant);
-        assert_eq!(grant.kind, crate::database::scopes::APP_SCHEDULES);
-        for (old, new) in [("install", crate::database::scopes::ADD_APP), ("uninstall", crate::database::scopes::REMOVE_APP)] {
+        assert!(grant.is(Change::AppSchedules));
+        for (old, new) in [("install", Change::AddApp), ("uninstall", Change::RemoveApp)] {
             let mut step = Content::new(crate::database::scopes::APP, old, serde_json::json!({ "app": "notes" }));
             content(&mut step);
-            assert_eq!(step.kind, new);
+            assert!(step.is(new));
         }
         let mut setting = crate::database::content::setting("serverless", Some("abc"));
         content(&mut setting);
@@ -135,7 +141,7 @@ mod tests {
         let mut request = Content::new(crate::database::scopes::APP, "vault-request", serde_json::json!({ "id": "r", "app": "agents" }));
         content(&mut request);
         assert_eq!(request.data["app"], crate::database::scopes::AGENTS);
-        let mut defaults = Content::new(crate::database::scopes::APP, super::super::steps::DEFAULTS, serde_json::json!({
+        let mut defaults = Content::new(crate::database::scopes::APP, "defaults", serde_json::json!({
             "types": [["install", "[\"use\",\"keep\"]"]], "roles": [["install", "admin", "[\"keep\"]", "[]"]], "rules": [["install:global#admin", "admin", "install:*"]],
         }));
         content(&mut defaults);

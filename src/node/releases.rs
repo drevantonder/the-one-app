@@ -115,7 +115,7 @@ impl Node {
     /// The newest release of each service's program for this device's platform, signed with the release key.
     pub fn service_releases(&self) -> BTreeMap<String, Release> {
         let said = self.with_or(Default::default(), |i| Ok(release::said(&i.r.db().releases()?)));
-        let names: std::collections::BTreeSet<String> = said.iter().filter(|(c, _)| c.kind == release::SERVICE_KIND).filter_map(|(c, _)| c.data["service"].as_str().map(str::to_string)).collect();
+        let names: std::collections::BTreeSet<String> = said.iter().filter(|(c, _)| c.is(crate::database::content::Change::ServiceRelease)).filter_map(|(c, _)| c.data["service"].as_str().map(str::to_string)).collect();
         names.into_iter().filter_map(|n| Some((n.clone(), release::latest_said(crate::config::RELEASE_KEY, &said, crate::config::TARGET, Some(&n))?.0))).collect()
     }
 }

@@ -1,5 +1,5 @@
-//! What a step says, as a device writes it: the content of each kind of the node's steps (`rules` says who may
-//! write each, and what it does).
+//! What a step says, as a device writes it: each kind of the core's own steps (`Change`), and what each says (`rules`
+//! says who may write each, and what it does).
 
 use std::collections::BTreeMap;
 
@@ -10,7 +10,7 @@ use crate::keys::{Key, hex};
 
 use crate::database::scopes::Scope;
 
-use super::scopes::{ADD_APP, APP, APP_SCHEDULES, Kind, REMOVE_APP, Role};
+use super::scopes::{APP, Kind, Role};
 
 /// What a step says: its app, its kind, what it says, and the blobs it names.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
@@ -26,10 +26,115 @@ impl Content {
     pub fn new(app: &str, kind: &str, data: Value) -> Self {
         Content { app: app.into(), kind: kind.into(), data, blobs: Vec::new() }
     }
+
+    /// Which of the core's kinds it is: none for an app's own step, or one of a kind this release doesn't know.
+    pub fn change(&self) -> Option<Change> {
+        if self.app != APP {
+            return None;
+        }
+        NAMES.iter().find(|(_, name)| *name == self.kind).map(|(c, _)| *c)
+    }
+
+    pub fn is(&self, change: Change) -> bool {
+        self.change() == Some(change)
+    }
 }
 
-pub fn node(kind: &str, data: Value) -> Content {
-    Content::new(APP, kind, data)
+/// Each kind of the core's own steps.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Change {
+    /// Freezes the log (`steps::Truth::first`): `{ hash, logs }`, with its copy. The first the network's recovery key
+    /// signed is who's who from there; a network made since starts with it (`steps::first_freeze`).
+    Freeze,
+    /// Starts a scope's database (not `global`'s) whose frozen log the freeze names, at position 0: `{ hash }`, with its
+    /// copy, what that log's entries added up to at the freeze. Written once, by a device that holds the scope's keys
+    /// (it's sealed under them, as its steps are).
+    Start,
+    /// Moves a database on to a newer release's types, roles, rules and tables (`permissions::DEFAULTS`,
+    /// `scope::SCHEMA`): `{ reads, types, roles, rules }`, `reads` that release's `READS`, which the database keeps as
+    /// its version. An admin's device writes one once every device reads it, and only above the database's version: a
+    /// release never puts back what a newer one said, and two on different releases never write turn about. Readers
+    /// never run their own release's: each database keeps the rows its freeze and steps said. One that reads less stops
+    /// at it (`steps::Newer`): update it.
+    Defaults,
+    Device,
+    Refuse,
+    ForgetSignIn,
+    Role,
+    Remove,
+    Epoch,
+    Runs,
+    AppSchedules,
+    Vault,
+    Group,
+    Invite,
+    Accept,
+    Member,
+    Rename,
+    Setting,
+    Recovery,
+    App,
+    Deploy,
+    Service,
+    NodeRelease,
+    ServiceRelease,
+    AddApp,
+    RemoveApp,
+    Schedule,
+    VaultRequest,
+    Keep,
+    Forget,
+    Arrange,
+}
+
+const NAMES: [(Change, &str); 31] = [
+    (Change::Freeze, "freeze"),
+    (Change::Start, "start"),
+    (Change::Defaults, "defaults"),
+    (Change::Device, "device"),
+    (Change::Refuse, "refuse"),
+    (Change::ForgetSignIn, "forget-sign-in"),
+    (Change::Role, "role"),
+    (Change::Remove, "remove"),
+    (Change::Epoch, "epoch"),
+    (Change::Runs, "runs"),
+    (Change::AppSchedules, "app-schedules"),
+    (Change::Vault, "vault"),
+    (Change::Group, "group"),
+    (Change::Invite, "invite"),
+    (Change::Accept, "accept"),
+    (Change::Member, "member"),
+    (Change::Rename, "rename"),
+    (Change::Setting, "setting"),
+    (Change::Recovery, "recovery"),
+    (Change::App, "app"),
+    (Change::Deploy, "deploy"),
+    (Change::Service, "service"),
+    (Change::NodeRelease, "node-release"),
+    (Change::ServiceRelease, "service-release"),
+    (Change::AddApp, "add-app"),
+    (Change::RemoveApp, "remove-app"),
+    (Change::Schedule, "schedule"),
+    (Change::VaultRequest, "vault-request"),
+    (Change::Keep, "keep"),
+    (Change::Forget, "forget"),
+    (Change::Arrange, "arrange"),
+];
+
+impl Change {
+    pub fn name(self) -> &'static str {
+        NAMES.iter().find(|(c, _)| *c == self).expect("every kind is named").1
+    }
+
+    /// Whether it changes only its own scope's state, wherever it's written; every other kind written in `global` is
+    /// who's who, which only its person's own devices write.
+    pub fn own(self) -> bool {
+        matches!(self, Change::Schedule | Change::VaultRequest | Change::Keep | Change::Forget | Change::Arrange)
+    }
+}
+
+pub fn node(change: Change, data: Value) -> Content {
+    Content::new(APP, change.name(), data)
 }
 
 /// What a network starts with, as its first freeze's copy holds it (`steps::first_freeze`): its name, its first person
@@ -46,7 +151,7 @@ pub fn device(endpoint: &crate::keys::Endpoint, user: &str, name: &str, roles: &
         data["user_name"] = json!(user_name);
         data["role"] = json!(role);
     }
-    node("device", data)
+    node(Change::Device, data)
 }
 
 /// Lists a passkey as `user`'s device, by the credential it is: what's sealed to its keys (from its PRF) lets them back
@@ -59,73 +164,73 @@ pub fn passkey(endpoint: &crate::keys::Endpoint, user: &str, name: &str, credent
 
 
 pub fn role(user: &str, role: Role) -> Content {
-    node("role", json!({ "user": user, "role": role }))
+    node(Change::Role, json!({ "user": user, "role": role }))
 }
 
 pub fn remove_user(user: &str) -> Content {
-    node("remove", json!({ "user": user }))
+    node(Change::Remove, json!({ "user": user }))
 }
 
 pub fn remove_device(key: &Key) -> Content {
-    node("remove", json!({ "key": hex(key) }))
+    node(Change::Remove, json!({ "key": hex(key) }))
 }
 
 /// One of the network's settings; `None` puts back the custom build's default.
 pub fn setting(name: &str, value: Option<&str>) -> Content {
-    node("setting", json!({ "name": name, "value": value }))
+    node(Change::Setting, json!({ "name": name, "value": value }))
 }
 
 /// A new group, its writer its first admin.
 pub fn group(id: &str, name: &str) -> Content {
-    node("group", json!({ "group": id, "name": name }))
+    node(Change::Group, json!({ "group": id, "name": name }))
 }
 
 pub fn invite(group: &str, user: &str, role: Role) -> Content {
-    node("invite", json!({ "group": group, "user": user, "role": role }))
+    node(Change::Invite, json!({ "group": group, "user": user, "role": role }))
 }
 
 pub fn accept(group: &str) -> Content {
-    node("accept", json!({ "group": group }))
+    node(Change::Accept, json!({ "group": group }))
 }
 
 /// A group member's role, or `None` to take them out.
 pub fn member(group: &str, user: &str, role: Option<Role>) -> Content {
-    node("member", json!({ "group": group, "user": user, "role": role }))
+    node(Change::Member, json!({ "group": group, "user": user, "role": role }))
 }
 
 /// Turns down a device that asked to join as this person's, before it's listed ("Not Me"): every device of theirs
 /// then refuses it.
 pub fn refuse(endpoint: &crate::keys::Endpoint, name: &str) -> Content {
-    node("refuse", json!({ "key": hex(&endpoint.key), "seal": hex(&endpoint.seal), "name": name }))
+    node(Change::Refuse, json!({ "key": hex(&endpoint.key), "seal": hex(&endpoint.seal), "name": name }))
 }
 
 /// Forgets what one of this person's devices signed in with (`Machine::sign_in`).
 pub fn forget_sign_in(key: &Key) -> Content {
-    node("forget-sign-in", json!({ "key": hex(key) }))
+    node(Change::ForgetSignIn, json!({ "key": hex(key) }))
 }
 
 /// Renames a device (`key`), a person (`user`) or a group (`group`): `what` is which, `id` its key (hex) or id.
 pub fn rename(what: &str, id: &str, name: &str) -> Content {
     let mut data = json!({ "name": name });
     data[what] = json!(id);
-    node("rename", data)
+    node(Change::Rename, data)
 }
 
 /// Changes a person's (`what` user) or a group's (`group`) handle.
 pub fn handle(what: &str, id: &str, handle: &str) -> Content {
     let mut data = json!({ "handle": handle });
     data[what] = json!(id);
-    node("rename", data)
+    node(Change::Rename, data)
 }
 
 /// A scope's new epoch, sealed to `to`, its key's `keys::epoch_hash` as `hash`.
 pub fn epoch(scope: &Scope, n: u32, to: &[Key], hash: &str) -> Content {
-    node("epoch", json!({ "scope": scope.to_string(), "n": n, "to": to.iter().map(hex).collect::<Vec<_>>(), "hash": hash }))
+    node(Change::Epoch, json!({ "scope": scope.to_string(), "n": n, "to": to.iter().map(hex).collect::<Vec<_>>(), "hash": hash }))
 }
 
 /// A scope's Vault key `n`, its public half `public`, sealed to the machines `to`.
 pub fn vault(scope: &Scope, n: u32, public: &[u8; 32], to: &[Key]) -> Content {
-    node("vault", json!({ "scope": scope.to_string(), "n": n, "public": hex(public), "to": to.iter().map(hex).collect::<Vec<_>>() }))
+    node(Change::Vault, json!({ "scope": scope.to_string(), "n": n, "public": hex(public), "to": to.iter().map(hex).collect::<Vec<_>>() }))
 }
 
 /// A part of a device's oned (a service, or `apps`, the app runtime) switched on or off there; a service, for the app
@@ -135,18 +240,18 @@ pub fn service(device: &Key, name: &str, on: bool, scope: Option<&Scope>) -> Con
     if let Some(scope) = scope {
         data["scope"] = json!(scope.to_string());
     }
-    node("service", data)
+    node(Change::Service, data)
 }
 
 /// Where its writer's own things run besides their own machines: the network's others that run their own scope.
 pub fn runs(on: &[Key]) -> Content {
-    node("runs", json!({ "on": on.iter().map(hex).collect::<Vec<_>>() }))
+    node(Change::Runs, json!({ "on": on.iter().map(hex).collect::<Vec<_>>() }))
 }
 
 /// App schedules: `endpoint` runs `app`'s schedules in `scope` until `until`, or no longer with 0.
 pub fn app_schedules(endpoint: &Key, scope: &Scope, app: &str, until: u64, keys: &BTreeMap<u32, String>) -> Content {
     let keys: serde_json::Map<String, Value> = keys.iter().map(|(n, h)| (n.to_string(), json!(h))).collect();
-    node(APP_SCHEDULES, json!({ "endpoint": hex(endpoint), "scope": scope.to_string(), "app": app, "until": until, "keys": keys }))
+    node(Change::AppSchedules, json!({ "endpoint": hex(endpoint), "scope": scope.to_string(), "app": app, "until": until, "keys": keys }))
 }
 
 /// Deletes an app (`deleted`), restores it (`restored`) or erases it (`erased`), as its owner (`owner`) says.
@@ -158,49 +263,49 @@ pub fn retire(app: &str, owner: &str, how: &str) -> Result<Content> {
         "erased" => data["erased"] = json!(true),
         other => bail!("an app is deleted, restored or erased, not {other}"),
     }
-    Ok(node("app", data))
+    Ok(node(Change::App, data))
 }
 
 /// Adds an app to a scope, or removes it.
 pub fn added(app: &str, added: bool) -> Content {
-    node(if added { ADD_APP } else { REMOVE_APP }, json!({ "app": app }))
+    node(if added { Change::AddApp } else { Change::RemoveApp }, json!({ "app": app }))
 }
 
 /// A new app, or an app given to a new owner (`owner`, as `Principal` writes it).
 pub fn app(name: &str, owner: &str) -> Content {
-    node("app", json!({ "name": name, "owner": owner }))
+    node(Change::App, json!({ "name": name, "owner": owner }))
 }
 
 /// A new app `name`, a copy of `from`.
 pub fn fork(name: &str, owner: &str, from: &str) -> Content {
-    node("app", json!({ "name": name, "owner": owner, "from": from }))
+    node(Change::App, json!({ "name": name, "owner": owner, "from": from }))
 }
 
 /// Where an app's code is kept (`scopes::source_link`), or nowhere with "".
 pub fn source(name: &str, owner: &str, link: &str) -> Content {
-    node("app", json!({ "name": name, "owner": owner, "source": link }))
+    node(Change::App, json!({ "name": name, "owner": owner, "source": link }))
 }
 
 /// A deploy of `app`: the bundle at blob `bundle`, and the builds of its service it names (`bundle::SERVICES`), each a
 /// blob too, so a node that runs it finds it.
 pub fn deploy(app: &str, bundle: &str, builds: impl IntoIterator<Item = String>) -> Content {
     let blobs = std::iter::once(bundle.to_string()).chain(builds).collect();
-    Content { blobs, ..node("deploy", json!({ "app": app, "bundle": bundle })) }
+    Content { blobs, ..node(Change::Deploy, json!({ "app": app, "bundle": bundle })) }
 }
 
 /// Switches a schedule of an app added in the step's scope on or off.
 pub fn schedule(app: &str, schedule: &str, on: bool) -> Content {
-    node("schedule", json!({ "app": app, "schedule": schedule, "on": on }))
+    node(Change::Schedule, json!({ "app": app, "schedule": schedule, "on": on }))
 }
 
 /// The blobs its scope keeps.
 pub fn keep(blobs: Vec<String>) -> Content {
-    Content { blobs, ..node("keep", json!({})) }
+    Content { blobs, ..node(Change::Keep, json!({})) }
 }
 
 /// A blob its scope no longer needs (its hash, hex).
 pub fn forget(blob: &str) -> Content {
-    node("forget", json!({ "blob": blob.to_lowercase() }))
+    node(Change::Forget, json!({ "blob": blob.to_lowercase() }))
 }
 
 /// A page arranged by its person, in their own scope: its items, the apps taken off it, and with their own page
@@ -210,7 +315,7 @@ pub fn arrange(page: &str, items: Value, hidden: Value, pages: Value) -> Content
     if page == "user" && !pages.is_null() {
         data["pages"] = pages;
     }
-    node("arrange", data)
+    node(Change::Arrange, data)
 }
 
 /// What a Vault request asks for: `id`'s item for `app`, its `title`, `fields` (`{ name: { secret } }`) and `hosts`, the
@@ -228,14 +333,14 @@ pub struct Request<'a> {
 
 /// A Vault request made.
 pub fn vault_request(r: Request) -> Content {
-    node("vault-request", json!({ "id": r.id, "app": r.app, "title": r.title, "fields": r.fields, "hosts": r.hosts, "need": r.need, "why": r.why, "agent": r.agent }))
+    node(Change::VaultRequest, json!({ "id": r.id, "app": r.app, "title": r.title, "fields": r.fields, "hosts": r.hosts, "need": r.need, "why": r.why, "agent": r.agent }))
 }
 
 /// A Vault request answered: declined, or set once its item is in the scope's Vault.
 pub fn vault_answer(id: &str, declined: bool) -> Content {
     let mut data = json!({ "id": id });
     data[if declined { "declined" } else { "set" }] = json!(true);
-    node("vault-request", data)
+    node(Change::VaultRequest, data)
 }
 
 /// Lists a service endpoint offering `service` as `user`'s, a part of `device`, by that device: `shared` if it serves
@@ -245,7 +350,7 @@ pub fn service_endpoint(endpoint: &crate::keys::Endpoint, user: &str, name: &str
     if shared {
         data["shared"] = json!(true);
     }
-    node("device", data)
+    node(Change::Device, data)
 }
 
 #[cfg(test)]

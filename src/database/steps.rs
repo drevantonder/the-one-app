@@ -17,7 +17,7 @@
 //! `cloudflare/shared/crypto.js` signs and checks steps the same (`signStep`), and `tests/contracts.rs` checks they
 //! agree.
 //!
-//! `global`'s database starts at its first step that is a freeze (`FREEZE`, `Truth::first`): it carries the database
+//! `global`'s database starts at its first step that is a freeze (`Change::Freeze`, `Truth::first`): it carries the database
 //! there, its first copy, which counts only if it comes to the hash the freeze names, names the network (its `root`,
 //! which every device of the network pins) and its recovery key, and was signed by that key. A network starts with one
 //! (`first_freeze`); the two made before steps were frozen by their recovery key once, at step 2. A freeze whose copy a
@@ -25,7 +25,7 @@
 //! else shaped like a freeze is nothing. A device let in starts where the device that let it in had read to (its `Welcome`),
 //! which pins who's who by its hash.
 //!
-//! Every other scope's database starts, before its first step, from its start (`START`, step 0): for a scope whose
+//! Every other scope's database starts, before its first step, from its start (`Change::Start`, step 0): for a scope whose
 //! frozen log the freeze names, what that log's entries added up to there, written once by a device holding its keys;
 //! for any other, nothing.
 //!
@@ -60,7 +60,7 @@ use ed25519_dalek::SigningKey;
 use rusqlite::Connection;
 use serde_json::{Value, json};
 
-use crate::database::content::Content;
+use crate::database::content::{self, Change, Content};
 use crate::database::scopes::Scope;
 use crate::keys::{Hash, Key, hex, unhex};
 use crate::permissions;
@@ -331,10 +331,6 @@ fn gap(keys: &crate::database::stored::Keys, scope: &Scope, at: u64, after: Opti
     Ok(())
 }
 
-/// The kind of step that freezes the log (`Truth::first`): `{ hash, logs }`, with its copy. The first the network's
-/// recovery key signed is who's who from there; a network made since starts with it (`first_freeze`).
-pub const FREEZE: &str = "freeze";
-
 /// The furthest a freeze may say a log ends: 2⁵³, as far as a JSON number holds exactly, past any log's end.
 pub const MOST_STEPS: u64 = 1 << 53;
 
@@ -350,7 +346,7 @@ pub struct Freeze {
 
 impl Freeze {
     pub fn of(step: &Step, at: u64) -> Result<Freeze> {
-        ensure!(step.content.app == scopes::APP && step.content.kind == FREEZE && step.scope() == Scope::Global, "not a freeze");
+        ensure!(step.content.is(Change::Freeze) && step.scope() == Scope::Global, "not a freeze");
         Freeze::from_data(&step.content.data, at)
     }
 
@@ -368,7 +364,7 @@ impl Freeze {
 
     /// As a freeze says it, and as a reader keeps it.
     pub fn content(&self) -> Content {
-        Content::new(scopes::APP, FREEZE, json!({ "hash": self.hash, "logs": self.logs }))
+        content::node(Change::Freeze, json!({ "hash": self.hash, "logs": self.logs }))
     }
 
     /// The last step of `global`'s log it holds.
@@ -422,11 +418,6 @@ pub fn first(root: Hash, start: &Value, now: u64) -> Result<ScopeDb> {
     ScopeDb::open(db, now)
 }
 
-/// The kind of step that starts a scope's database (not `global`'s) whose frozen log the freeze names, at position 0:
-/// `{ hash }`, with its copy, what that log's entries added up to at the freeze. Written once, by a device that holds
-/// the scope's keys (it's sealed under them, as its steps are).
-pub const START: &str = "start";
-
 /// Where a scope's database's start is: position 0, before its first step.
 pub fn start_name(scope: &Scope) -> String {
     crate::database::stored::step_name(&prefix(&scope.to_string()), 0)
@@ -435,13 +426,13 @@ pub fn start_name(scope: &Scope) -> String {
 pub fn start(key: &SigningKey, scope: &Scope, user: &str, epoch: u32, now: u64, db: &mut ScopeDb) -> Result<Given> {
     ensure!(*scope != Scope::Global, "global's database starts from its freeze");
     let hash = crate::database::stored::state_hash(db.conn())?;
-    let step = sign(key, scope, 0, user, epoch, now, Content::new(scopes::APP, START, json!({ "hash": hash })))?;
+    let step = sign(key, scope, 0, user, epoch, now, content::node(Change::Start, json!({ "hash": hash })))?;
     Ok(Given { step, copy: Some(db.bytes()?) })
 }
 
 /// A scope's database before its first step (not `global`'s), as `global`'s database `global` says, the freeze
 /// `freeze` among it: one with nothing in it, unless the freeze names the scope's frozen log, when it's the copy its
-/// start carries (`START`, step 0, `given`), which counts only if its copy comes to the hash it names and its signer is
+/// start carries (`Change::Start`, step 0, `given`), which counts only if its copy comes to the hash it names and its signer is
 /// a device the network ever listed: it opened with the scope's keys, and was written once, by this release, so no
 /// later removal takes it back. Without one that counts, the scope can't be read yet.
 pub fn started(freeze: &Freeze, global: &ScopeDb, scope: &Scope, given: Option<&Given>, now: u64) -> Result<ScopeDb> {
@@ -451,7 +442,7 @@ pub fn started(freeze: &Freeze, global: &ScopeDb, scope: &Scope, given: Option<&
     }
     let given = given.with_context(|| format!("{scope}'s database has no start yet: one of its devices writes it"))?;
     let step = &given.step;
-    ensure!(step.content.app == scopes::APP && step.content.kind == START && step.seq() == 0 && step.scope() == *scope, "{scope}'s step 0 isn't its start");
+    ensure!(step.content.is(Change::Start) && step.seq() == 0 && step.scope() == *scope, "{scope}'s step 0 isn't its start");
     ensure!(global.machine_ever(&step.author())?.is_some(), "{scope}'s start isn't from one of the network's devices");
     let copy = connection(given.copy.as_deref().context("a start carries its copy")?)?;
     ensure!(Some(crate::database::stored::state_hash(&copy)?.as_str()) == step.content.data["hash"].as_str(), "{scope}'s start's copy isn't what it says");
@@ -483,7 +474,7 @@ impl Truth {
     /// is nothing. One whose copy a newer release wrote stops the reader here (`Newer`): it's never passed over for
     /// another.
     pub fn first(at: u64, given: Option<&Given>, root: Option<Hash>, now: u64) -> Result<Option<Truth>> {
-        let Some(g) = given.filter(|g| g.step.content.app == scopes::APP && g.step.content.kind == FREEZE) else { return Ok(None) };
+        let Some(g) = given.filter(|g| g.step.content.is(Change::Freeze)) else { return Ok(None) };
         match Truth::of_freeze(g, at, now) {
             Ok(t) if t.db.recovery()? == Some(g.step.author()) && root.map_or(Ok(true), |r| t.db.root().map(|n| n == Some(r)))? => Ok(Some(t)),
             Ok(_) => Ok(None),
@@ -926,7 +917,7 @@ pub struct Applied {
 pub fn apply(db: &ScopeDb, global: Option<&ScopeDb>, scope: &Scope, step: &Step) -> Result<Applied> {
     ensure!(step.scope() == *scope, "a step of another scope");
     let who = global.unwrap_or(db);
-    if step.content.app == scopes::APP && step.content.kind == DEFAULTS {
+    if step.content.is(Change::Defaults) {
         return defaults(db, who, scope, step);
     }
     ensure!(version(db.conn())? <= READS, Newer);
@@ -1002,14 +993,6 @@ impl ScopeReader {
     }
 }
 
-/// The kind of step that moves a database on to a newer release's types, roles, rules and tables
-/// (`permissions::DEFAULTS`, `scope::SCHEMA`): `{ reads, types, roles, rules }`, `reads` that release's
-/// `READS`, which the database keeps as its version. An admin's device writes one once every device reads it, and
-/// only above the database's version: a release never puts back what a newer one said, and two
-/// on different releases never write turn about. Readers never run their own release's: each database keeps the rows
-/// its freeze and steps said. One that reads less stops at it (`Newer`): update it.
-pub const DEFAULTS: &str = "defaults";
-
 /// A database's version: the `READS` of the release whose types, roles, rules and tables it has.
 pub fn version(db: &Connection) -> Result<u32> {
     Ok(db.query_row("pragma user_version", [], |r| r.get(0))?)
@@ -1027,17 +1010,17 @@ impl std::fmt::Display for Newer {
 
 impl std::error::Error for Newer {}
 
-/// This release's types, roles and rules as a `DEFAULTS` step says them, with its version.
+/// This release's types, roles and rules as a `Change::Defaults` step says them, with its version.
 pub fn release_defaults() -> Result<Content> {
     let db = Connection::open_in_memory()?;
     db.execute_batch(permissions::SCHEMA)?;
     db.execute_batch(permissions::DEFAULTS)?;
     let mut data = rules_of(&db)?;
     data["reads"] = json!(READS);
-    Ok(Content::new(scopes::APP, DEFAULTS, data))
+    Ok(content::node(Change::Defaults, data))
 }
 
-/// A database's types, roles and rules, as a `DEFAULTS` step says them.
+/// A database's types, roles and rules, as a `Change::Defaults` step says them.
 pub fn rules_of(db: &Connection) -> Result<serde_json::Value> {
     let rows = |sql: &str| -> Result<Vec<serde_json::Value>> {
         let mut q = db.prepare(sql)?;
@@ -1064,7 +1047,7 @@ pub fn rules_of(db: &Connection) -> Result<serde_json::Value> {
 }
 
 
-/// A `DEFAULTS` step: by an admin's device, the release's types, roles and rules as it says them, in place of those
+/// A `Change::Defaults` step: by an admin's device, the release's types, roles and rules as it says them, in place of those
 /// the database had; the network's own roles stay.
 fn defaults(db: &ScopeDb, who: &ScopeDb, scope: &Scope, step: &Step) -> Result<Applied> {
     // Whose it is first: one that doesn't count is passed over, whatever release it names.
@@ -1097,11 +1080,11 @@ fn defaults(db: &ScopeDb, who: &ScopeDb, scope: &Scope, step: &Step) -> Result<A
 
 /// What a counted step names that no other table keeps: its blobs, and a release.
 fn named(db: &Connection, step: &Step) -> Result<()> {
-    let pinned = step.content.app == scopes::APP && step.content.kind != "keep";
+    let pinned = step.content.app == scopes::APP && !step.content.is(Change::Keep);
     for blob in &step.content.blobs {
         db.execute("INSERT INTO blobs VALUES (?1, ?2) ON CONFLICT (blob) DO UPDATE SET pinned = max(pinned, ?2)", rusqlite::params![blob, pinned])?;
     }
-    if step.content.app == scopes::APP && scopes::RELEASES.contains(&step.content.kind.as_str()) {
+    if matches!(step.content.change(), Some(Change::NodeRelease | Change::ServiceRelease)) {
         db.execute(
             "INSERT INTO releases VALUES (?, ?, ?, ?, ?)",
             rusqlite::params![step.seq(), step.content.kind, serde_json::to_string(&step.content)?, crate::keys::hex(&step.author()), i64::try_from(step.time()).unwrap_or(i64::MAX)],
@@ -1290,7 +1273,7 @@ pub(crate) mod tests {
         });
     }
 
-    /// A release's roles that don't count stop no one: whatever release it names, a `DEFAULTS` step by a device that
+    /// A release's roles that don't count stop no one: whatever release it names, a `Change::Defaults` step by a device that
     /// isn't an admin's own is passed over; only an admin's of a newer release stops a reader.
     #[test]
     fn only_an_admin_s_newer_release_stops_a_reader() {
@@ -1349,7 +1332,8 @@ pub(crate) mod tests {
     #[test]
     fn a_step_counts_only_if_its_signer_may_make_that_change_there() -> anyhow::Result<()> {
         use crate::keys::Endpoint;
-        use crate::database::content::{device, group, node, remove_device, setting};
+        use crate::database::content::{device, group, remove_device, setting};
+        let node = |kind: &str, data: Value| Content::new(scopes::APP, kind, data);
         use crate::database::scopes::Kind;
         let (mac, laptop, phone) = (SigningKey::from_bytes(&[1; 32]), SigningKey::from_bytes(&[2; 32]), SigningKey::from_bytes(&[3; 32]));
         let mut db = first(ROOT, &content::first("Home", ANDRE, "Andre", &Endpoint::of(&mac), "mac", &[Kind::Client], &[7; 32], &"e".repeat(64)), 0).unwrap();

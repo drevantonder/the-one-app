@@ -764,15 +764,8 @@ pub const APP: &str = "node";
 pub const APP_DATABASE: &str = "main";
 /// The setting that names the Cloudflare node's endpoint (its key, hex).
 pub const CLOUDFLARE_NODE: &str = "cloudflare_node";
-/// The kind of node entry that sets app schedules.
-pub const APP_SCHEDULES: &str = "app-schedules";
-/// The kinds of a scope's own entry that add an app to it, and remove it.
-pub const ADD_APP: &str = "add-app";
-pub const REMOVE_APP: &str = "remove-app";
 /// The app service, as a part of a device's oned its `service` entries switch: running apps' calls.
 pub const APPS_PART: &str = "apps";
-/// The kinds of node entry that say a release of the node's or a service's program (`release`).
-pub const RELEASES: [&str; 2] = ["node-release", "service-release"];
 /// Who agents act as when the Vault fills their requests (`vault_fetch`), in an item's apps: no app's name.
 pub const AGENTS: &str = "ai-agents";
 

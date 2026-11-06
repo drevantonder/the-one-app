@@ -19,18 +19,15 @@ use crate::database::steps::Step;
 use crate::keys::{Hash, Key, hex, unhex};
 
 use crate::database::scopes::{Scope, is_id};
-use crate::database::scopes;
-use crate::database::scopes::{ADD_APP, AGENTS, APP, APP_SCHEDULES, REMOVE_APP, Kind, Machine, Principal, Role, handle_from, source_link, valid_app_name, valid_handle, valid_host, valid_page, valid_secret_name};
+use crate::database::content::Change;
+use crate::database::scopes::{AGENTS, APP, Kind, Machine, Principal, Role, handle_from, source_link, valid_app_name, valid_handle, valid_host, valid_page, valid_secret_name};
 
 use super::scope::{group, int, owner, person, role};
 use super::scopes::{NETWORK, ScopeDb, object, owner_object};
 
-/// Kinds of step that change only their own scope's state, wherever they're written.
-const OWN: &[&str] = &["schedule", "vault-request", "keep", "forget", "arrange"];
-
 /// Whether a step is one of `global`'s own: who's who, written only by its person's own device (or the recovery key).
 fn of_global(step: &Step, scope: &Scope) -> bool {
-    *scope == Scope::Global && step.content.app == APP && !OWN.contains(&step.content.kind.as_str())
+    *scope == Scope::Global && step.content.app == APP && !step.content.change().is_some_and(Change::own)
 }
 
 /// Whether `step`'s signer may write it as its person, in `scope`, by `who`, `global`'s database before it.
@@ -39,7 +36,7 @@ pub fn signed(who: &ScopeDb, scope: &Scope, step: &Step) -> Result<()> {
     if who.recovery()? == Some(author) {
         // The network's recovery key, kept offline by an admin, only lets a device of someone's in, as an admin's would,
         // and hands over to the next recovery key.
-        ensure!(of_global(step, scope) && matches!(step.content.kind.as_str(), "device" | "recovery") && who.user(w)?.is_some(), "the recovery key only lets a device in");
+        ensure!(of_global(step, scope) && matches!(step.content.change(), Some(Change::Device | Change::Recovery)) && who.user(w)?.is_some(), "the recovery key only lets a device in");
         return Ok(());
     }
     ensure!(who.may(w, "use", &object(scope)), "{w} can't write in {scope}");
@@ -55,35 +52,37 @@ pub fn apply(who: &ScopeDb, out: &Connection, scope: &Scope, step: &Step) -> Res
     if step.content.app != APP {
         return Ok(());
     }
-    let kind = step.content.kind.as_str();
-    if *scope != Scope::Global || OWN.contains(&kind) {
+    let change = step.content.change();
+    if *scope != Scope::Global || change.is_some_and(Change::own) {
         return own(who, out, scope, step);
     }
-    let c = Change { who, out, step, w: step.user(), data: &step.content.data };
-    match kind {
-        "device" if who.recovery()? == Some(step.author()) => c.recovered(),
-        "device" => c.device(),
-        "refuse" => c.refuse(),
-        "forget-sign-in" => c.forget_sign_in(),
-        "role" => c.role(),
-        "remove" => c.remove(),
-        "epoch" => c.epoch(),
-        "runs" => c.runs(),
-        APP_SCHEDULES => c.app_schedules(),
-        "vault" => c.vault(),
-        "group" => c.group(),
-        "invite" => c.invite(),
-        "accept" => c.accept(),
-        "member" => c.member(),
-        "rename" => c.rename(),
-        "setting" => c.setting(),
-        "recovery" => c.recovery(),
-        "app" => c.app(),
-        "deploy" => c.deploy(),
-        "service" => c.service(),
-        ADD_APP | REMOVE_APP => own(who, out, scope, step),
-        k if scopes::RELEASES.contains(&k) => Ok(()),
-        other => bail!("unknown kind {other}"),
+    let c = Rule { who, out, step, w: step.user(), data: &step.content.data };
+    match change {
+        Some(Change::Device) if who.recovery()? == Some(step.author()) => c.recovered(),
+        Some(Change::Device) => c.device(),
+        Some(Change::Refuse) => c.refuse(),
+        Some(Change::ForgetSignIn) => c.forget_sign_in(),
+        Some(Change::Role) => c.role(),
+        Some(Change::Remove) => c.remove(),
+        Some(Change::Epoch) => c.epoch(),
+        Some(Change::Runs) => c.runs(),
+        Some(Change::AppSchedules) => c.app_schedules(),
+        Some(Change::Vault) => c.vault(),
+        Some(Change::Group) => c.group(),
+        Some(Change::Invite) => c.invite(),
+        Some(Change::Accept) => c.accept(),
+        Some(Change::Member) => c.member(),
+        Some(Change::Rename) => c.rename(),
+        Some(Change::Setting) => c.setting(),
+        Some(Change::Recovery) => c.recovery(),
+        Some(Change::App) => c.app(),
+        Some(Change::Deploy) => c.deploy(),
+        Some(Change::Service) => c.service(),
+        Some(Change::AddApp | Change::RemoveApp) => own(who, out, scope, step),
+        Some(Change::NodeRelease | Change::ServiceRelease) => Ok(()),
+        Some(Change::Freeze | Change::Start | Change::Defaults | Change::Schedule | Change::VaultRequest | Change::Keep | Change::Forget | Change::Arrange) | None => {
+            bail!("unknown kind {}", step.content.kind)
+        }
     }
 }
 
@@ -106,7 +105,7 @@ pub fn first(out: &Connection, root: Hash, data: &Value, now: u64) -> Result<()>
     Ok(())
 }
 
-struct Change<'a> {
+struct Rule<'a> {
     who: &'a ScopeDb,
     out: &'a Connection,
     step: &'a Step,
@@ -114,7 +113,7 @@ struct Change<'a> {
     data: &'a Value,
 }
 
-impl Change<'_> {
+impl Rule<'_> {
     fn text(&self, k: &str) -> Result<String> {
         self.data[k].as_str().map(str::to_string).with_context(|| format!("no {k}"))
     }
@@ -551,18 +550,18 @@ fn own(who: &ScopeDb, out: &Connection, scope: &Scope, step: &Step) -> Result<()
     let data = &step.content.data;
     let time = int(step.time());
     let manages = || who.may(w, "add-apps", &object(scope));
-    match step.content.kind.as_str() {
-        ADD_APP | REMOVE_APP => {
+    match step.content.change() {
+        Some(change @ (Change::AddApp | Change::RemoveApp)) => {
             ensure!(manages(), crate::protocol::Coded::refused("not allowed to add apps there"));
             let app = data["app"].as_str().context("no app")?;
-            if step.content.kind == ADD_APP {
+            if change == Change::AddApp {
                 who.app(app)?.context("no such app")?;
                 out.execute("INSERT OR REPLACE INTO added VALUES (?, 1, ?, ?)", params![app, person(w), time])?;
             } else {
                 out.execute("UPDATE added SET added = 0 WHERE app = ?", [app])?;
             }
         }
-        "schedule" => {
+        Some(Change::Schedule) => {
             ensure!(manages(), crate::protocol::Coded::refused("not allowed to switch schedules there"));
             let app = data["app"].as_str().context("no app")?;
             let name = data["schedule"].as_str().context("no schedule")?;
@@ -570,13 +569,13 @@ fn own(who: &ScopeDb, out: &Connection, scope: &Scope, step: &Step) -> Result<()
             out.execute("INSERT OR REPLACE INTO schedules VALUES (?, ?, ?, ?, ?)", params![app, name, on, person(w), time])?;
         }
         // A blob the scope keeps, which its `blobs` names.
-        "keep" => {}
+        Some(Change::Keep) => {}
         // Only someone who may write there says a blob is no longer needed: its data goes from the bucket.
-        "forget" => {
+        Some(Change::Forget) => {
             let blob = data["blob"].as_str().filter(|b| b.len() == 64 && b.bytes().all(|c| c.is_ascii_hexdigit())).context("no blob")?;
             out.execute("INSERT OR IGNORE INTO forgotten VALUES (?)", [blob])?;
         }
-        "vault-request" => {
+        Some(Change::VaultRequest) => {
             ensure!(manages(), crate::protocol::Coded::refused("not allowed to change the Vault there"));
             let id = data["id"].as_str().filter(|id| is_id(id)).context("no id")?;
             let answered: Option<Option<String>> = out.query_row("SELECT answer FROM vault_requests WHERE id = ?", [id], |r| r.get(0)).optional()?;
@@ -607,7 +606,7 @@ fn own(who: &ScopeDb, out: &Connection, scope: &Scope, step: &Step) -> Result<()
                 params![id, app, title, fields.to_string(), json!(hosts).to_string(), data["why"].as_str().unwrap_or(""), data["need"].as_str(), person(w), data["agent"].as_str(), time],
             )?;
         }
-        "arrange" => {
+        Some(Change::Arrange) => {
             ensure!(*scope == Scope::User(w.to_string()), "each person arranges pages in their own scope");
             let page = data["page"].as_str().context("no page")?;
             ensure!(valid_page(page), "a page is user, group:<id> or global");
@@ -631,7 +630,7 @@ fn own(who: &ScopeDb, out: &Connection, scope: &Scope, step: &Step) -> Result<()
             }
             out.execute("INSERT OR REPLACE INTO pages VALUES (?, ?)", params![page, kept.to_string()])?;
         }
-        other => bail!("{other} isn't a step of a person's or group's own"),
+        _ => bail!("{} isn't a step of a person's or group's own", step.content.kind),
     }
     Ok(())
 }
@@ -737,6 +736,11 @@ mod tests {
 
     use super::super::scopes::ScopeDb;
     use super::super::steps;
+
+    /// A step of the core's of any kind, one this release doesn't know too, as an older or newer release may write it.
+    fn node(kind: &str, data: Value) -> Content {
+        Content::new(super::APP, kind, data)
+    }
 
     const ANDRE: &str = "a000000000000001";
     const BOB: &str = "b000000000000002";

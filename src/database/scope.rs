@@ -268,7 +268,7 @@ pub const RULE: &str = "(substr(subject, 1, 1) IN ('#', '@') OR instr(subject, '
 const OWN: &[&str] = &["added", "schedules", "vault_requests", "pages", "forgotten"];
 
 /// Tables of what steps said that no rule changes, kept as they were: the blobs and releases they named, and the
-/// release's types, roles and rules their `DEFAULTS` said (`steps::DEFAULTS`), not this reader's own release's.
+/// release's types, roles and rules their `Change::Defaults` said, not this reader's own release's.
 const KEPT: &[&str] = &["blobs", "releases", "types", "roles", "relations"];
 
 /// A scope's database with nothing in it yet: its tables, and this release's types, roles and rules.
