@@ -84,7 +84,7 @@ impl Node {
         let session = event["session_id"].as_str().unwrap_or("").to_string();
         let caller = Caller::local(self)?;
         let path = self.0.dir.join("hooks.json");
-        let mut seen: serde_json::Map<String, Value> = std::fs::read(&path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+        let mut seen: serde_json::Map<String, Value> = crate::files::read_json(&path);
         let now = now_ms();
         let mut asked = tokio::task::JoinSet::new();
         for (app, ctx, granted) in self.page_contexts(&caller, None)? {

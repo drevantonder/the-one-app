@@ -25,7 +25,7 @@ impl Node {
         let mut kept = self.offered_before();
         if kept.get(app) != Some(&title) {
             kept.insert(app.to_string(), title);
-            let _ = std::fs::write(self.0.dir.join(OFFERED), serde_json::to_vec(&kept).unwrap_or_default());
+            crate::files::write_json(&self.0.dir.join(OFFERED), &kept);
         }
         if let Some(why) = self.removed_here(app) {
             bail!("{why}");
@@ -248,7 +248,7 @@ impl Node {
     /// The services that registered here before, by their titles: what the device can run while what offers them
     /// isn't running.
     fn offered_before(&self) -> BTreeMap<String, Value> {
-        std::fs::read(self.0.dir.join(OFFERED)).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
+        crate::files::read_json(&self.0.dir.join(OFFERED))
     }
 
     /// Why a service isn't served here, if its person switched it off.

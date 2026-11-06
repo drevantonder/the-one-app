@@ -41,7 +41,7 @@ struct Known {
 impl Logos {
     pub fn open(dir: &Path) -> Logos {
         let path = dir.join("logos.json");
-        let known = std::fs::read(&path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+        let known = crate::files::read_json(&path);
         Logos { path, known: Mutex::new(known), fetching: Mutex::default(), urls: Mutex::default() }
     }
 

@@ -76,7 +76,7 @@ pub fn try_service(dir: &Path, device: Option<&str>) -> Result<()> {
 
 /// Each service's program last published from here, and the commit it was built from.
 pub(super) fn services_released() -> serde_json::Map<String, Value> {
-    std::fs::read(cache().join("services-released")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
+    one::files::read_json(&cache().join("services-released"))
 }
 
 /// Builds each service named for every platform the installer knows, signs it and publishes it, so each device that
@@ -107,6 +107,6 @@ pub(super) fn publish_services(src: &Path, names: &[String], key: &ssh_key::Priv
             }
         }
     }
-    let _ = std::fs::write(cache().join("services-released"), serde_json::to_vec(&released).unwrap_or_default());
+    one::files::write_json(&cache().join("services-released"), &released);
     ok
 }

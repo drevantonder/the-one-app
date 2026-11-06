@@ -10,7 +10,7 @@ use serde_json::{Value, json};
 
 /// The devices borrowed for the throwaway network, by kind: `{ "android": "<name>" }`.
 pub(crate) fn devices(dir: &Path) -> serde_json::Map<String, Value> {
-    std::fs::read(dir.join("devices.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
+    one::files::read_json(&dir.join("devices.json"))
 }
 
 /// One of this machine's network's Agent Devices tools (not the throwaway network's, which has none). When the node

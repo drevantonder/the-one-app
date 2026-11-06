@@ -1014,7 +1014,7 @@ fn end(child: &mut std::process::Child) {
 }
 
 fn read_steps(path: &Path) -> Vec<Option<crate::database::steps::Given>> {
-    let kept: Vec<Value> = std::fs::read(path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+    let kept: Vec<Value> = crate::files::read_json(path);
     kept.iter()
         .enumerate()
         .map(|(i, s)| crate::database::steps::given(&crate::database::scopes::Scope::Global, i as u64 + 1, s["step"].as_str().and_then(|b| data_encoding::BASE64URL_NOPAD.decode(b.as_bytes()).ok()).as_deref()))

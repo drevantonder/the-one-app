@@ -226,7 +226,8 @@ fn edit(file: &Path, create: bool, change: impl FnOnce(&str) -> Result<Option<St
     let text = match std::fs::read_to_string(&file) {
         Ok(text) => text,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound && create => String::new(),
-        Err(_) => return,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return,
+        Err(e) => return once(format!("left {} alone: it couldn't be read ({e})", file.display())),
     };
     let result = change(&text).and_then(|new| match new {
         Some(new) => replace(&file, &new).map(|()| true),
@@ -378,7 +379,7 @@ struct Written {
 impl Written {
     fn load(node_home: &Path) -> Self {
         let path = node_home.join("agents-written.json");
-        let hashes = std::fs::read(&path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+        let hashes = crate::files::read_json(&path);
         Written { path, hashes }
     }
 
@@ -394,8 +395,12 @@ impl Written {
             once(format!("left {} alone: it was edited on this device", file.display()));
             return;
         }
-        if now.as_deref() != Some(text) && file.parent().is_none_or(|d| std::fs::create_dir_all(d).is_ok()) && std::fs::write(file, text).is_err() {
-            return;
+        if now.as_deref() != Some(text) {
+            let written = file.parent().map_or(Ok(()), std::fs::create_dir_all).and_then(|()| std::fs::write(file, text));
+            if let Err(err) = written {
+                once(format!("couldn't write {}: {err}", file.display()));
+                return;
+            }
         }
         self.hashes.insert(key, hash(text));
     }
@@ -404,6 +409,6 @@ impl Written {
         if let Some(dir) = self.path.parent() {
             let _ = std::fs::create_dir_all(dir);
         }
-        let _ = std::fs::write(&self.path, serde_json::to_vec_pretty(&self.hashes).unwrap_or_default());
+        crate::files::write_json(&self.path, &self.hashes);
     }
 }

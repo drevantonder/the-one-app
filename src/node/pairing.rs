@@ -47,7 +47,7 @@ pub(super) struct JoinReply {
 }
 
 pub(super) fn load(dir: &Path) -> HashMap<[u8; 16], Pairing> {
-    let list: Vec<(String, Pairing)> = std::fs::read(dir.join("pairings.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+    let list: Vec<(String, Pairing)> = crate::files::read_json(&dir.join("pairings.json"));
     list.into_iter()
         .filter_map(|(k, v)| Some((data_encoding::HEXLOWER.decode(k.as_bytes()).ok()?.try_into().ok()?, v)))
         .collect()
