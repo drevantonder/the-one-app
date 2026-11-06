@@ -8,36 +8,22 @@
 //! <prefix>/newest            {"at": n, "copy": m, "epoch": e}, replaced while unchanged: a hint, so readers needn't
 //!                            list; e is the epoch copy m is sealed under, the oldest a reader starting there needs
 //! <prefix>/<n>               step n, from 1
-//! <prefix>/<n>.sig           who wrote step n, and on a copy's step what the database came to (`Sig`), sealed as
-//!                            the step is
+//! <prefix>/<n>.sig           an older writer's signature beside step n (`Sig`): read, never written
 //! <prefix>/copy/<n>          the whole database after step n, under the epoch of the steps it holds
 //! <prefix>/tidied            there once `tidy` has deleted steps, or may have: never deleted but by an admin's device
 //! ```
 //!
-//! A step's signature is its own object, which older readers never look for, and is written just after the step, so a
-//! step can be there without one for a moment, or for good (an older writer's, or one whose writer stopped between the
-//! two). A reader checks each one there is (`Checks`): the writer's endpoint key signed the step's sealed bytes at its
-//! position, and, on a step a copy follows, the only one that says it (hashing every row on every write would make each
-//! write as slow as the database is big), that the database it read comes to that state hash (`state_hash`). A copy
-//! needs no signer: it's good if it comes to the hash signed at the step it's at. From phase 2 a writer signs a step
-//! in it (`SIGNED`), one write, so no step is ever without one: readers from R1 on read both kinds, and older ones pass
-//! over the new kind, which is why a device older than the switch is told to update once it's frozen.
-//!
-//! Phase 2 is on for a database (`switched`) once the device opening it knows the log is frozen (a freeze that counts),
-//! never because of what a build is. Then the first step a writer signs in it says
-//! its own position, and every
-//! step signed in it after says the same (`Sig::from`), so the database records where its steps are signed in them
-//! from, a copy's step saying it for those that start there; before, every reader ignores what any step says of it,
-//! but a writer that reads a step saying it asks its device first whether the log is frozen (`MaybeFrozen`), so a
-//! device that hasn't read the freeze yet never writes a step every device that has refuses.
-//! Before that position a step and a copy count whatever their signatures say, as they do on older readers: older
-//! steps, and those whose signature beside them never landed, have none for good, and anyone with the key can write one
-//! beside an older writer's. From it, `refused` and `copy_holds` are the one check every device makes, readers, `tidy`,
-//! backups and writers of steps and copies alike: a step counts only if it's signed in it, its signature holds and says
-//! that position, the database it reads comes to the state hash it signs, and, for a database whose writers' rights are
-//! checked (`Signers`), its signer may make it; a copy only if it comes to its step's hash. A step that doesn't is
-//! passed over by every reader, its position taken. A key-holding writer is all an app database asks: a removed device
-//! gets no key to the next epoch, and its steps under an older one are passed over.
+//! A step is signed in it (`SIGNED`): its writer's endpoint key signs its sealed bytes at its position, and, on a step
+//! a copy follows, the state hash of the database after it (`state_hash`: hashing every row on every write would make
+//! each write as slow as the database is big). The first step signed in it says its own position, and every step after
+//! says the same (`Sig::from`), so the database records where its steps are signed in them from (`signed_from`), a
+//! copy's step saying it for readers that start there. Before that position a step counts whatever its signature says:
+//! older steps have none, or one beside them (`<n>.sig`, `Sig::check`), which is read and never written. From it,
+//! `refused` and `copy_holds` are the one check every device makes, readers, `tidy`, backups and writers alike: a step
+//! counts only if it's signed in it, its signature holds and says that position, and the database it reads comes to
+//! the state hash it signs; a copy only if it comes to its step's hash. A step that doesn't is passed over by every
+//! reader, its position taken. A key-holding writer is all an app database asks: a removed device gets no key to the
+//! next epoch, and its steps under an older one are passed over.
 //!
 //! What no reader needs goes from the bucket (`tidy`): copies before the newest that holds, once that has been there a
 //! day; and an app database's steps before it, once each has been there `KEEP_STEPS_FOR`, saying so first (`tidied`).
@@ -114,22 +100,6 @@ pub struct Gone {
 impl std::fmt::Display for Gone {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "steps it hadn't read were deleted, and its copy at step {}, which holds them, isn't one it can use with the keys it was given", self.copy)
-    }
-}
-
-/// Who may write a database whose writers' rights are checked (the scope database's, by its permissions), asked of each
-/// step from where steps are signed in them, with its signer's endpoint key and the step it signs (a changeset, `c`,
-/// or a schema change, `s`), by every reader and by the writer before it writes, so each must answer the same
-/// everywhere from those alone. App databases have none, and take any key-holding writer.
-pub trait Signers: Send + Sync {
-    /// Whether the signer may make the step, asked of the database as it is before it: a step it says no to is refused
-    /// (`refused`), and one it fails on stops the reader, to be read again.
-    fn may(&self, conn: &Connection, signer: &[u8; 32], step: &[u8]) -> Result<bool>;
-
-    /// After the step is applied, before what the database comes to is checked against the state hash it signs.
-    fn applied(&self, conn: &Connection, signer: &[u8; 32], step: &[u8]) -> Result<()> {
-        let _ = (conn, signer, step);
-        Ok(())
     }
 }
 
@@ -281,13 +251,12 @@ pub struct Db {
     junk_copies: BTreeSet<u64>,
     /// Whose endpoint key signs the steps it writes: none, and it writes them unsigned, as older writers do.
     signer: Option<ed25519_dalek::SigningKey>,
-    /// Whether it signs a step in it (`SIGNED`), one create-only write, rather than beside it (`<n>.sig`), as writers
-    /// before phase 2 did: always, but in a test of what they wrote.
+    /// Whether it signs a step in it (`SIGNED`), rather than beside it (`<n>.sig`), as writers before phase 2 did: a test
+    /// of what they wrote is the only one that writes beside.
+    #[cfg(test)]
     in_step: bool,
     /// Where the database's steps are signed in them from, as what it read says (`Sig::from`).
     signed_from: Option<u64>,
-    /// Who may write each step from there, if the database checks it.
-    signers: Option<std::sync::Arc<dyn Signers>>,
     /// What it found of the signatures beside the steps it applied.
     checks: Checks,
     /// When (`Bucket::now`) the bucket last had no step after `at`, as far as this database knows: it read to its end,
@@ -321,21 +290,11 @@ impl Db {
     /// at a copy or step under an epoch whose key it wasn't given, and with `Ahead` at a step under an epoch above them
     /// all.
     pub async fn open(bucket: &impl Bucket, prefix: &str, keys: Keys) -> Result<Db> {
-        Db::open_as(bucket, prefix, keys, BTreeSet::new(), None).await
-    }
-
-    /// `open`, checking who wrote each step from where steps are signed in them with `signers`, as the database's
-    /// writers must be.
-    pub async fn open_checking(bucket: &impl Bucket, prefix: &str, keys: Keys, signers: std::sync::Arc<dyn Signers>) -> Result<Db> {
-        Db::open_as(bucket, prefix, keys, BTreeSet::new(), Some(signers)).await
+        Db::open_passing(bucket, prefix, keys, BTreeSet::new()).await
     }
 
     /// `open`, passing over the steps at `junk`.
     pub async fn open_passing(bucket: &impl Bucket, prefix: &str, keys: Keys, junk: BTreeSet<u64>) -> Result<Db> {
-        Db::open_as(bucket, prefix, keys, junk, None).await
-    }
-
-    async fn open_as(bucket: &impl Bucket, prefix: &str, keys: Keys, junk: BTreeSet<u64>, signers: Option<std::sync::Arc<dyn Signers>>) -> Result<Db> {
         let mut db = Db {
             prefix: prefix.into(),
             keys,
@@ -348,9 +307,9 @@ impl Db {
             junk,
             junk_copies: BTreeSet::new(),
             signer: None,
+            #[cfg(test)]
             in_step: true,
             signed_from: None,
-            signers,
             checks: Checks::default(),
             current: 0,
             hint_later: false,
@@ -482,31 +441,27 @@ impl Db {
     }
 
     /// Applies step `at`, opened as `step`, with `signed` the signature in or beside it, unless phase 2 refuses it
-    /// (`refused`, `Signers`, and, from where steps are signed in them, a state hash it signs that what it reads doesn't
-    /// come to): whether it counts.
+    /// (`refused`, and, from where steps are signed in them, a state hash it signs that what it reads doesn't come to):
+    /// whether it counts.
     fn take(&mut self, at: u64, step: &[u8], signed: Option<Result<Sig>>) -> Result<bool> {
         let from = signed_from(self.signed_from, at, step, signed.as_ref());
         let checked = from.is_some_and(|f| at >= f);
-        if refused(from, at, step, signed.as_ref()) || checked && !self.may(step, signed.as_ref())? {
+        if refused(from, at, step, signed.as_ref()) {
             self.checks.refused += 1;
             tracing::warn!("{}: step {at} isn't signed as every step from {} must be: passed over", self.prefix, from.unwrap_or(0));
             return Ok(false);
         }
-        let by = match (&signed, checked) {
-            (Some(Ok(sig)), true) => Some(sig.by),
-            _ => None,
-        };
         let hash = self.count(at, signed);
         let Some(hash) = hash else {
             self.conn.execute_batch("savepoint take")?;
-            let took = self.apply(step).and_then(|()| self.applied(by.as_ref(), step));
+            let took = self.apply(step);
             self.conn.execute_batch(if took.is_ok() { "release take" } else { "rollback to take; release take" })?;
             took?;
             self.signed_from = from;
             return Ok(true);
         };
         self.conn.execute_batch("savepoint take")?;
-        let came = self.apply(step).and_then(|()| self.applied(by.as_ref(), step)).and_then(|()| state_hash(&self.conn));
+        let came = self.apply(step).and_then(|()| state_hash(&self.conn));
         let held = came.as_ref().is_ok_and(|h| *h == hash);
         if checked && !held {
             self.conn.execute_batch("rollback to take; release take")?;
@@ -523,23 +478,6 @@ impl Db {
         }
         self.signed_from = from;
         Ok(true)
-    }
-
-    /// Whether the signer of a step signed in it may make it (`Signers::may`), asked of the database as it is now.
-    fn may(&self, step: &[u8], signed: Option<&Result<Sig>>) -> Result<bool> {
-        let Some(signers) = &self.signers else { return Ok(true) };
-        match (signed, split_signed(step)) {
-            (Some(Ok(sig)), Some((_, inner))) => signers.may(&self.conn, &sig.by, inner),
-            _ => Ok(false),
-        }
-    }
-
-    /// After a step by `by` (signed in it, from where steps are) is applied: `Signers::applied`.
-    fn applied(&self, by: Option<&[u8; 32]>, step: &[u8]) -> Result<()> {
-        match (&self.signers, by, split_signed(step)) {
-            (Some(signers), Some(by), Some((_, inner))) => signers.applied(&self.conn, by, inner),
-            _ => Ok(()),
-        }
     }
 
     /// When the step after the last it read isn't there: whether steps it hasn't read were deleted, as when it read
@@ -638,12 +576,8 @@ impl Db {
             let step = [b"s".as_slice(), &serde_json::to_vec(&json!({ "version": version + 1, "sql": sql }))?].concat();
             // Tried here first, so a schema that fails is never written, and for what it comes to, if that's signed.
             let from = self.signs_from(self.at + 1)?;
-            if from.is_some() && !self.may_write(&self.conn, &step)? {
-                bail!("this device may not change {}'s schema", self.prefix);
-            }
-            let by = self.signer.as_ref().filter(|_| from.is_some()).map(|s| s.verifying_key().to_bytes());
             self.conn.execute_batch("savepoint migrate")?;
-            let tried = self.apply_own(by.as_ref(), &step).and_then(|()| self.hash_due(self.at + 1));
+            let tried = self.apply(&step).and_then(|()| self.hash_due(self.at + 1));
             self.conn.execute_batch("rollback to migrate; release migrate")?;
             let hash = tried?;
             let (epoch, key) = self.newest_key()?;
@@ -651,8 +585,9 @@ impl Db {
             let written = signed(self.signer.as_ref().filter(|_| from.is_some()), &name, &step, hash.as_deref(), from);
             let sealed = crate::keys::seal(epoch, &key, &name, &written);
             if bucket.create(&name, &sealed).await? {
-                self.apply_own(by.as_ref(), &step)?;
+                self.apply(&step)?;
                 self.wrote(epoch, from);
+                #[cfg(test)]
                 self.sign(bucket, &name, epoch, &key, &sealed, hash.as_deref(), from.is_none()).await;
                 self.written(bucket, &written).await;
             }
@@ -679,7 +614,6 @@ impl Db {
             let (epoch, key) = self.newest_key()?;
             let due = self.signer.is_some() && self.copy_due(self.at + 1);
             let from = self.signs_from(self.at + 1)?;
-            let checks = from.is_some() && self.signers.is_some();
             let open = Open::begin(&mut self.conn)?;
             open.execute_batch("savepoint write")?;
             let (result, changes) = changes(&open, &mut f)?;
@@ -688,14 +622,6 @@ impl Db {
                 return Ok(result);
             }
             let inner = [b"c".as_slice(), &changes].concat();
-            if checks {
-                // Asked of the database as it was before, as every reader asks it, then made again as they make it.
-                open.execute_batch("rollback to write")?;
-                let (signers, by) = (self.signers.as_ref().expect("checked"), self.signer.as_ref().expect("signs").verifying_key().to_bytes());
-                ensure!(signers.may(&open, &by, &inner)?, "this device may not make that change to {}", self.prefix);
-                apply_changes(&open, &changes)?;
-                signers.applied(&open, &by, &inner)?;
-            }
             let name = step_name(&self.prefix, self.at + 1);
             let hash = if due { Some(state_hash(&open)?) } else { None };
             let step = signed(self.signer.as_ref().filter(|_| from.is_some()), &name, &inner, hash.as_deref(), from);
@@ -705,6 +631,7 @@ impl Db {
                 drop(open);
                 self.wrote(epoch, from);
                 self.current = bucket.now();
+                #[cfg(test)]
                 self.sign(bucket, &name, epoch, &key, &sealed, hash.as_deref(), from.is_none()).await;
                 self.written(bucket, &step).await;
                 return Ok(result);
@@ -721,32 +648,22 @@ impl Db {
         self.signed_from = self.signed_from.or(from);
     }
 
+    fn in_step(&self) -> bool {
+        #[cfg(test)]
+        return self.in_step;
+        #[cfg(not(test))]
+        true
+    }
+
     /// The position its step at `at` says steps are signed in them from, if it signs it in it: the database's, once it
     /// has one, which it can't write without a key to sign with; or, signing in steps itself first, its own.
     fn signs_from(&self, at: u64) -> Result<Option<u64>> {
         Ok(match (self.signed_from, &self.signer) {
             (Some(from), Some(_)) => Some(from),
             (Some(from), None) => bail!("{}'s steps are signed in them from step {from}, and this device has no key to sign with", self.prefix),
-            (None, Some(_)) if self.in_step => Some(at),
+            (None, Some(_)) if self.in_step() => Some(at),
             (None, _) => None,
         })
-    }
-
-    /// Whether its own step, signed in it, is one its signer may make (`Signers::may`), asked of `conn` as it is before.
-    fn may_write(&self, conn: &Connection, step: &[u8]) -> Result<bool> {
-        match (&self.signers, &self.signer) {
-            (Some(signers), Some(signer)) => signers.may(conn, &signer.verifying_key().to_bytes(), step),
-            _ => Ok(true),
-        }
-    }
-
-    /// Applies its own step, as every reader does, by `by` if it signs it in it (`Signers::applied`).
-    fn apply_own(&self, by: Option<&[u8; 32]>, step: &[u8]) -> Result<()> {
-        self.apply(step)?;
-        match (&self.signers, by) {
-            (Some(signers), Some(by)) => signers.applied(&self.conn, by, step),
-            _ => Ok(()),
-        }
     }
 
     /// Reads with a statement that only reads: its rows, each column by name.
@@ -781,6 +698,7 @@ impl Db {
     /// After writing step `name`, sealed under `epoch`'s `key` as `sealed`: its signature beside it, saying `hash`, if
     /// it has a signer and signs `beside` the step. Tried once, since the step is written whatever happens to it: a
     /// reader takes a step with none as an older writer's.
+    #[cfg(test)]
     #[allow(clippy::too_many_arguments)]
     async fn sign(&mut self, bucket: &impl Bucket, name: &str, epoch: u32, key: &[u8; 32], sealed: &[u8], hash: Option<&str>, beside: bool) {
         let Some(signer) = self.signer.as_ref().filter(|_| beside) else { return };
@@ -1019,7 +937,7 @@ pub fn signed_from(before: Option<u64>, at: u64, step: &[u8], signed: Option<&Re
 /// the signature in or beside it, is refused, in a database whose steps are signed in them from `from` (`signed_from`).
 /// Before that position nothing is: older steps, and those signed beside them whose signature never landed, have none
 /// for good. From it, a step counts only if it's signed in it, and its signature holds and says that position. Its
-/// signer's rights (`Signers`) and its state hash are checked as it's applied.
+/// state hash is checked as it's applied.
 pub fn refused(from: Option<u64>, at: u64, step: &[u8], signed: Option<&Result<Sig>>) -> bool {
     let Some(from) = from.filter(|f| at >= *f) else { return false };
     !(step.first() == Some(&SIGNED) && matches!(signed, Some(Ok(sig)) if sig.from == Some(from)))
@@ -1097,10 +1015,10 @@ pub fn sig_name(prefix: &str, n: u64) -> String {
     format!("{}.sig", step_name(prefix, n))
 }
 
-/// Whether the steps at `prefix` are a database's, with signatures beside them, rather than a scope's log's
-/// (`log::prefix`), whose entries are signed by their authors already.
+/// Whether the steps at `prefix` may have signatures beside them, as an app database's older steps do, rather than the
+/// scope database's (`database::steps`), whose steps are signed in them.
 pub fn signed_beside(prefix: &str) -> bool {
-    !prefix.ends_with(&format!("/{}/{}", crate::database::scopes::APP, crate::database::steps::KEY_NAME))
+    !keeps_every_step(prefix)
 }
 
 /// A database's prefix and position, from the name of one of its steps or the signature beside one.
@@ -1172,6 +1090,7 @@ impl Sig {
     }
 
     /// Step `name`'s signature beside it, by `signer`, saying `hash`, sealed under `epoch`'s `key`.
+    #[cfg(test)]
     pub fn seal(signer: &ed25519_dalek::SigningKey, epoch: u32, key: &[u8; 32], name: &str, sealed: &[u8], hash: Option<&str>) -> Vec<u8> {
         crate::keys::seal(epoch, key, &format!("{name}.sig"), &Self::make(signer, Self::BESIDE, name, sealed, hash, None))
     }
@@ -1970,28 +1889,9 @@ mod tests {
             let from_start = Db::open(&bucket, "p", key.clone()).await.unwrap();
             assert_eq!((notes(&from_copy), notes(&from_start)), (all.clone(), all.clone()));
             assert_eq!((from_start.checks().refused, from_start.signed_from()), (a.checks().refused, Some(3)));
-            // A writer with no key to sign with doesn't write; one whose signer the database's check says no to
-            // doesn't either, and every reader passes over a step by it.
+            // A writer with no key to sign with doesn't write.
             let mut unsigned = Db::open(&bucket, "p", key.clone()).await.unwrap();
             assert!(unsigned.write(&bucket, |c| execute(c, "insert into notes values ('x')", &[]).map(|_| ())).await.is_err());
-            let only: [u8; 32] = a.signer.as_ref().unwrap().verifying_key().to_bytes();
-            struct Only([u8; 32]);
-            impl Signers for Only {
-                fn may(&self, _: &Connection, by: &[u8; 32], _: &[u8]) -> Result<bool> {
-                    Ok(*by == self.0)
-                }
-            }
-            let signers: std::sync::Arc<dyn Signers> = std::sync::Arc::new(Only(only));
-            let mut stranger = Db::open_as(&bucket, "p", key.clone(), BTreeSet::new(), Some(signers.clone())).await.unwrap();
-            stranger.sign_as(other.clone());
-            assert!(stranger.write(&bucket, |c| execute(c, "insert into notes values ('x')", &[]).map(|_| ())).await.is_err());
-            let mut ignored = Db::open(&bucket, "p", key.clone()).await.unwrap();
-            ignored.sign_as(other);
-            note(&mut ignored, &bucket, "by another").await;
-            // As a device that doesn't check would copy it, which every device checks before writing one.
-            bucket.objects.lock().unwrap().retain(|n, _| !n.contains("/copy/"));
-            let checked = Db::open_as(&bucket, "p", key.clone(), BTreeSet::new(), Some(signers)).await.unwrap();
-            assert_eq!((notes(&checked), checked.checks().refused), (all, from_start.checks().refused + 1));
         });
     }
 
