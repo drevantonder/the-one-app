@@ -255,7 +255,11 @@ pub const FORWARDED: &[&str] = &["forwarded", "x-forwarded-for", "x-forwarded-ho
 /// The skills for this machine's person (src/skills.rs).
 async fn skills(node: &Node) -> Vec<crate::skills::Skill> {
     let apps = match Caller::local(node) {
-        Ok(me) => node.apps(&me).await.map(|a| json!(a)).unwrap_or_default(),
+        Ok(me) => node.apps(&me).await.map(|a| json!(a)).unwrap_or_else(|err| {
+            tracing::warn!("the skills leave out apps' own: {err:#}");
+            json!([])
+        }),
+        // A node not in a network yet has no person whose apps they'd be.
         Err(_) => json!([]),
     };
     crate::skills::all(apps.as_array().map(Vec::as_slice).unwrap_or_default())

@@ -48,7 +48,10 @@ impl Node {
                 let widget = w["name"].as_str().unwrap_or_default();
                 let size = w["size"].as_str().unwrap_or("medium");
                 let options = match w["options"].as_array().is_some_and(|o| !o.is_empty()) {
-                    true => self.0.apps.widget_options(&app, widget, &ctx).await.unwrap_or_else(|_| w["options"].clone()),
+                    true => self.0.apps.widget_options(&app, widget, &ctx).await.unwrap_or_else(|err| {
+                        tracing::warn!("{app} {widget}'s options: {err:#}");
+                        w["options"].clone()
+                    }),
                     false => Value::Null,
                 };
                 match self.0.apps.widget(&app, widget, size, &none, &ctx).await {
