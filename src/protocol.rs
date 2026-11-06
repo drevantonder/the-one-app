@@ -28,6 +28,10 @@ pub const COPY: &str = "copy";
 /// The digits of a step's position in its name, so names sort in order.
 pub const STEP_DIGITS: usize = 12;
 
+/// Where iroh's relay protocol is reached at the network's address: the Workers' gateway sends these, and everything under
+/// `/relay`, to the relay.
+pub const IROH_PATHS: [(&str, &str); 3] = [("relay", "/relay"), ("ping", "/ping"), ("portal", "/generate_204")];
+
 /// The roles a device has, as the relay lists them (`scopes::Kind`, joined by spaces).
 pub const ROLES: [&str; 3] = ["client", "compute", "service"];
 
@@ -141,6 +145,7 @@ pub fn javascript() -> String {
          export const MOST_URLS = {most_urls};\n\
          export const MOST_NEEDED = {most_needed};\n\
          export const BEHIND = {behind};\n\
+         export const IROH_PATHS = {iroh};\n\
          export const ROLES = {roles};\n\
          export const NEWEST = {newest};\n\
          export const TIDIED = {tidied};\n\
@@ -178,6 +183,7 @@ pub fn javascript() -> String {
         most_urls = MOST_URLS,
         most_needed = crate::keys::MOST_NEEDED,
         behind = json!(crate::keys::BEHIND),
+        iroh = json!(IROH_PATHS.iter().copied().collect::<std::collections::BTreeMap<_, _>>()),
         roles = json!(ROLES),
         newest = json!(NEWEST),
         tidied = json!(TIDIED),

@@ -1,5 +1,5 @@
-//! Git and your One App network's repos, at one address on every computer, `<address>/repos/<owner>/<repo>.git`. Git is told
-//! (`url.<CLI>::<address>/repos/.insteadOf`) to reach it as `<CLI>::<address>/repos/…`, so it runs this program as
+//! Git and your One App network's apps that speak it (Repos), at one address on every computer, `<address>/<app>/…`. Git is told
+//! (`url.<CLI>::<address>/.insteadOf`) to reach it as `<CLI>::<address>/<app>/…`, so it runs this program as
 //! `git-remote-<CLI>`, its remote helper. That runs git's own HTTP transport (`git remote-http`) for the address, with
 //! this program as its proxy while it runs: what git asks goes where every command's request goes, to this machine's
 //! node, or from a computer that's only a device, over iroh to its person's nodes (`client_device::instead`). Git's own
@@ -18,8 +18,12 @@ use one::git_wire::helper;
 /// Run as git's remote helper, `git-remote-<CLI> <remote> <url>`: → the exit code of git's HTTP transport.
 pub fn run(args: &[String]) -> Result<i32> {
     let [remote, url] = args else { bail!("{} is git's, for {CLI}:: addresses: git clone <your repo's address>", helper()) };
-    let (address, path) = url.split_once("/repos/").map(|(a, p)| (a.trim_end_matches('/'), p)).with_context(|| format!("{url} isn't a repo's address in {NAME}, which is <address>/repos/<owner>/<repo>.git"))?;
-    let ours = here(address)?;
+    let bad = || format!("{url} isn't an address in {NAME}: <address>/<app>/…");
+    let (scheme, rest) = url.split_once("://").with_context(bad)?;
+    let (host, path) = rest.split_once('/').with_context(bad)?;
+    let (address, path) = (format!("{scheme}://{host}"), format!("/{path}"));
+    anyhow::ensure!(one::api::app_route(&path), bad());
+    let ours = here(&address)?;
     if ours != address {
         bail!("this computer is in {YOURS} at {ours}, not at {address}: {CLI} sign-in --address {address}, then try again");
     }
@@ -30,7 +34,7 @@ pub fn run(args: &[String]) -> Result<i32> {
     std::thread::spawn(move || proxy(listener, auth));
     // Git's proxy for this one address alone, in its environment (no other user reads it), not its command line.
     let config: usize = std::env::var("GIT_CONFIG_COUNT").ok().and_then(|n| n.parse().ok()).unwrap_or(0);
-    let plain = format!("http://{}/repos/{path}", address.split_once("://").map_or(address, |(_, rest)| rest));
+    let plain = format!("http://{host}{path}");
     let status = std::process::Command::new("git")
         .args(["remote-http", remote, &plain])
         .env("GIT_CONFIG_COUNT", (config + 2).to_string())
@@ -59,7 +63,7 @@ fn here(asked: &str) -> Result<String> {
     Ok(one::sign_in::kept().map(|k| k.address.trim_end_matches('/').to_string()).unwrap_or_default())
 }
 
-/// Carries what git asks to `/repos/…` on this machine's node, or its person's nodes, until this program exits.
+/// Carries what git asks of an app's address on this machine's node, or its person's nodes, until this program exits.
 fn proxy(listener: std::net::TcpListener, auth: String) {
     let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().expect("a runtime");
     runtime.block_on(async move {
@@ -76,8 +80,8 @@ async fn forward(auth: Arc<String>, req: axum::extract::Request) -> Response {
         return (StatusCode::PROXY_AUTHENTICATION_REQUIRED, [(header::PROXY_AUTHENTICATE, "Basic realm=\"git\"")]).into_response();
     }
     let path = req.uri().path_and_query().map(|p| p.as_str().to_string()).unwrap_or_default();
-    if !path.starts_with("/repos/") || !matches!(*req.method(), Method::GET | Method::POST) {
-        return (StatusCode::NOT_FOUND, "not a repo's").into_response();
+    if !one::api::app_route(&path) || !matches!(*req.method(), Method::GET | Method::POST) {
+        return (StatusCode::NOT_FOUND, "not an app's").into_response();
     }
     let post = req.method() == Method::POST;
     let headers: Vec<(String, String)> = ["content-type", "accept", "content-encoding", "git-protocol"]

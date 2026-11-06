@@ -59,7 +59,7 @@ import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
 import wasm from "./relay_protos_bg.wasm";
 import { initSync, challenge, verify, confirm, deny, from_client, endpoint_gone, datagrams_of, to_client } from "./relay_protos.js";
 import { b64u, behind, checkCertificate, checkRequest, hex, rolesOf, sha256 } from "../shared/crypto.js";
-import { FRESH, RELAY, ROLES, SOCKET, SOCKET_FRESH, updateRefusal } from "../shared/protocol.js";
+import { FRESH, IROH_PATHS, RELAY, ROLES, SOCKET, SOCKET_FRESH, updateRefusal } from "../shared/protocol.js";
 
 initSync({ module: wasm });
 
@@ -106,19 +106,20 @@ export default class extends WorkerEntrypoint {
   async fetch(request) {
     const url = new URL(request.url);
     // iroh's latency probe; a browser's endpoint needs CORS to read it.
-    if (url.pathname === "/ping") return new Response(null, { status: 200, headers: CORS });
+    if (url.pathname === IROH_PATHS.ping) return new Response(null, { status: 200, headers: CORS });
     // iroh's captive portal check, answered as iroh-relay's own server does.
-    if (url.pathname === "/generate_204") {
+    if (url.pathname === IROH_PATHS.portal) {
       const headers = { ...CORS };
       const challenge = request.headers.get("x-iroh-challenge");
       if (challenge && /^[A-Za-z0-9._-]{1,63}$/.test(challenge)) headers["X-Iroh-Response"] = `response ${challenge}`;
       return new Response(null, { status: 204, headers });
     }
-    if (url.pathname === "/relay/tell") return this.tell(request);
-    if (url.pathname === "/relay/computes") return this.ask(request, "computes");
-    if (url.pathname === "/relay/seen") return this.ask(request, "seen");
-    if (url.pathname === "/relay") return this.relay().fetch(request);
-    if (url.pathname === "/relay/test" && this.env.TEST) return Response.json(await this.relay().testing(await request.json()));
+    const relay = IROH_PATHS.relay;
+    if (url.pathname === `${relay}/tell`) return this.tell(request);
+    if (url.pathname === `${relay}/computes`) return this.ask(request, "computes");
+    if (url.pathname === `${relay}/seen`) return this.ask(request, "seen");
+    if (url.pathname === relay) return this.relay().fetch(request);
+    if (url.pathname === `${relay}/test` && this.env.TEST) return Response.json(await this.relay().testing(await request.json()));
     return refuse(404, "not the relay's");
   }
 

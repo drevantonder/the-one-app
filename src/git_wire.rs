@@ -1,4 +1,4 @@
-//! Telling git on this machine to reach the network's repos (`<address>/repos/…`) through this program, as `git-remote-<CLI>`
+//! Telling git on this machine to reach the network's apps' git (`<address>/<app>/…`) through this program, as `git-remote-<CLI>`
 //! (src/git_remote.rs), which a node does as it starts, `sign-in` does, and `one throwaway git` does for its own network only.
 
 use anyhow::{Context, Result, bail};
@@ -10,10 +10,10 @@ pub fn helper() -> String {
     format!("git-remote-{CLI}")
 }
 
-/// What tells git `address`'s repos are reached as `<CLI>::…`: a config key and its value.
+/// What tells git `address`'s apps are reached as `<CLI>::…`: a config key and its value.
 pub fn instead_of(address: &str) -> (String, String) {
     let address = address.trim_end_matches('/');
-    (format!("url.{CLI}::{address}/repos/.insteadOf"), format!("{address}/repos/"))
+    (format!("url.{CLI}::{address}/.insteadOf"), format!("{address}/"))
 }
 
 pub fn link_in(dir: &std::path::Path) -> Result<()> {

@@ -1,9 +1,10 @@
 // The gateway: the network's address, the one people use. It holds no keys and runs no app code; it only sends each
 // request where its path says: signing in to sign-in (with the gateway's host kept, since passkeys belong to it),
 // `/urls` to the URL signer, `/push/…` to the push Worker, `/mcp` and what MCP clients read to sign in to it to the
-// remote MCP server, `/relay` (and iroh's `/ping` and `/generate_204`) to the relay, and everything else to the web
-// client's files. Devices reach the network's nodes over iroh, never through here, and so does git: `/repos/…` here is
-// git on a computer without the CLI, told how to get it.
+// remote MCP server, everything under `/relay` (and iroh's `/ping` and `/generate_204`) to the relay, and everything
+// else to the web client's files. Devices reach the network's nodes over iroh, never through here, and so does git: a
+// git request here is git on a computer without the CLI, told how to get it.
+import { IROH_PATHS } from "../shared/protocol.js";
 
 const AUTH = ["/api/auth/", "/sign-in", "/invite", "/passkeys", "/.well-known/oauth-authorization-server", "/.well-known/openid-configuration"];
 // The authorization server's metadata is where MCP clients look for it: RFC 8414's path for the issuer `<address>/api/auth`.
@@ -84,11 +85,14 @@ async function toWeb(request, env, url) {
   return send(resp.body);
 }
 
+// Stock git's requests to any app's address: a `.git` in the path, or git's own files and services.
+const GIT = /\.git(\/|$)|\/(info\/refs|git-upload-pack|git-receive-pack)$/;
+
 // Git shows this body as the remote's error.
 function gitWithoutCli(env, url) {
   const name = env.NAME || "The One App", cli = env.CLI || "one";
   const said = [
-    `${url.origin}${url.pathname.replace(/\/(info\/refs|git-[a-z-]+|HEAD|objects\/.*)$/, "")} is a repo in ${env.YOURS || "your One App network"}, which git reaches through ${name}'s CLI, ${cli}.`,
+    `${url.origin}${url.pathname.replace(/(\.git)\/.*$|\/(info\/refs|git-[a-z-]+)$/, "$1")} is a git address in ${env.YOURS || "your One App network"}, which git reaches through ${name}'s CLI, ${cli}.`,
     `Install it on this computer, then run`,
     `  ${cli} sign-in --address ${url.origin}`,
     `and try again.`,
@@ -99,10 +103,10 @@ function gitWithoutCli(env, url) {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    if (["/relay", "/relay/tell", "/relay/computes", "/relay/seen", "/ping", "/generate_204"].includes(url.pathname)) return env.IROH.fetch(request);
+    if (under(url.pathname, Object.values(IROH_PATHS))) return env.IROH.fetch(request);
     if (url.pathname === "/urls") return env.SIGNER.fetch(request);
     if (url.pathname.startsWith("/push/")) return env.PUSH.fetch(request);
-    if (url.pathname.startsWith("/repos/")) return gitWithoutCli(env, url);
+    if (GIT.test(url.pathname)) return gitWithoutCli(env, url);
     switch (where(url.pathname)) {
       case "mcp": return env.MCP ? env.MCP.fetch(request) : refuse(503, "this network's MCP isn't set up yet");
       case "auth": return env.AUTH.fetch(request);
