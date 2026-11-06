@@ -4,7 +4,7 @@ import Foundation
 /// Where the person's browser comes back to once they've signed in (RFC 8252's loopback redirect): a port on this
 /// Mac, open until it hears from the browser or `stop` is called, however long a passkey takes. Sign-in and consent
 /// happen in their own browser, where their passkey is, and sign-in matches loopback redirects whatever the
-/// port. `windows/Auth.cs` does the same.
+/// port.
 final class Loopback: @unchecked Sendable {
     struct Failed: LocalizedError {
         var errorDescription: String? { String(localized: "Couldn’t listen for the browser to come back. Try again.") }

@@ -13,7 +13,7 @@ on a desktop.
 
 ## Replacing the old apps
 
-Until each platform's old app (`apple/`, `windows/`, `android/`) is gone, this is the list of what it does that this
+Until each platform's old app (`apple/`, `android/`) is gone, this is the list of what it does that this
 must too, ticked as it does and checked in `one throwaway`. Then this section goes, down to what the code can't say.
 
 Shared, every platform:
@@ -68,45 +68,14 @@ Linux (new):
       and starts it; no `one update` step, as no device of ours is a Linux desktop
 - [ ] Notifications: Linux has no push service, so notes show only while the app runs (from the node's events)
 
-Windows (`windows/`, replaced by this and `windows/` here: the package, MSIX, cross-built on Linux and packaged with
-a C# helper in the Windows VM by `windows/build.sh`; `one throwaway client windows`):
+Windows (the old app is gone; this is its package, MSIX, cross-built on Linux and packaged with a C# helper in the
+Windows VM by `windows/build.sh`; `one throwaway client windows`). The package keeps the old app's identity
+(`TheOneApp_ah4xyz62b3km4`, `windows_package()`), so it installs over it in place and keeps the sign-in:
 
-- [x] The same package as the old app's, which installs over it in place: `TheOneApp`, `CN=The One App`, family
-      `TheOneApp_ah4xyz62b3km4` (`windows_package()`), protocol, app-link host, widgets' COM class and its four
-      definitions, the toast activator, names; its program is this one (checked, Windows: installed over 1.305, the
-      board's three pinned widgets came back drawn by the new helper)
-- [x] Runs as the package (started by AUMID or by its path), so its folder is the package's own
-      (`LocalCache\Local\app.<cli>.windows`) and the badge, startup task and widgets have its identity (checked)
-- [x] Signs in, is let in by code, pages and screens; a new build keeps the sign-in; signing out takes the device out
-      (checked, Windows, `one throwaway client windows`)
-- [x] Named "<Name> on <COMPUTERNAME>"; `on` is the MachineGuid hashed, as the old app's (named: checked; replacing
-      an earlier sign-in: not checked)
-- [x] Screens reach none of the app's commands. WebView2 puts Tauri's internals and `chrome.webview` in every frame,
-      but a sandboxed frame's invoke is refused ("Origin header is not a valid URL"), its raw postMessage of `copy` runs
-      nothing (the clipboard kept its text, where the page's own `copy` lands), and the parent is unreachable (checked)
-- [x] `one://open?…` from outside goes to the running app (one process), a second start shows the hidden window
-      (checked)
-- [x] Closing leaves it in the tray; the tray item opens the panel; Open at Login is the package's startup task, on
-      from the first start (checked)
-- [x] Title bar (OS decorations) and page follow Windows' light and dark (checked)
-- [x] Taskbar count badge (BadgeUpdateManager): every badge the sidebar draws, totalled by web.js, said on the
-      window's first draw and on each change; 0 clears it, as sign-out does (checked: a badge set by hand shows, and
-      the next draw clears it)
-- [x] Widgets board: the helper draws each pinned widget from the app's widget cache with the old cards and words,
-      Customize (Choose a Widget, "<Title> · <Page>", Done, Cancel), a toggle and a button run the widget's tool
-      (`--call`), drawn at once then as it left them, a failing tool says "Couldn't do that: <why>", it reads again
-      with `--widgets` when shown and every 5 minutes, and redraws when the app writes the cache; signed out, "Sign in
-      to <Name> to see your pages." (checked, a test app's toggle and button). While the app runs the helper's calls
-      are answered by it, over its loopback port (`headless.rs`): a button's tool answered in 60-80 ms, where a client
-      started each time took ~18 s; a fresh client draws its widgets at once (checked, Windows, `one throwaway client
-      windows`: Repos' "No repos yet." on the first start, and four `--widgets` at once leave no error)
 - [ ] Toasts from pushes (WNS through the helper, `--open-note`, `--register-push`), Approve / Not Me with no window
       (`--answer-join`): built as the old app's, not checked: The One App has no WNS app (`wns_app`/`wns_object` empty)
-- [x] Links to the address (`https://<address>/…`, the AppUriHandler): the package names the config's host, and the app
-      makes the address it signs in to its one app-link host (`claim`, at start and when an address is taken), so
-      Windows hands it those links, which open the screen they name (checked, Windows: a start of the program with
-      `<address>/app/repos/main` from the desktop's session opened Repos; an https address got Windows' own record of
-      the host for the package; the throwaway's address is http, which Windows takes no app links for)
+- [ ] A link to the address while signed out (`<address>/invite#…`, which the address's web-links file hands the app)
+      is ignored, as the page takes invites only from what's typed; the old app took it, and the Welcome offered it
 
 Mac (`apple/Mac`, `apple/Shared`), iPhone (`apple/Phone`, `Notifications`, `Widget`), Android (`android/`): each old
 app's full inventory lands here before that platform is written.

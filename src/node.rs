@@ -410,7 +410,7 @@ pub struct Inner {
     built_in: BTreeMap<String, String>,
     /// Each bundle's `icon.png`, its finished app icon, as a data URL, once read, or none.
     images: Mutex<HashMap<String, Option<String>>>,
-    /// The pictures windows' app lists named (`/v1/images/<name>`), by name: each a data URL.
+    /// The pictures `apps_drawn` named (`/v1/images/<name>`), by name: each a data URL.
     named_images: Mutex<HashMap<String, String>>,
     /// The logos of the sites apps and services connect to.
     logos: crate::logos::Logos,

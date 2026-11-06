@@ -639,7 +639,7 @@ impl Settings {
     }
 }
 
-/// The Windows app's package family name, as Windows names the package windows/build.sh makes: the config's name in
+/// The Windows app's package family name, as Windows names the package client/native/windows/build.sh makes: the config's name in
 /// letters and digits, then its publisher's (`CN=` and the name in letters, digits and spaces) hash, the first 8 bytes
 /// of the SHA-256 of it in UTF-16LE, in Crockford's base32.
 pub fn windows_package() -> String {

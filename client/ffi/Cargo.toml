@@ -6,9 +6,8 @@ license = "MIT"
 publish = false
 
 # The client (one-client) for the native apps: one definition (src/lib.rs) from which uniffi makes Swift for the Mac and
-# iPhone apps, Kotlin for Android's, and, with NordSecurity's uniffi-bindgen-cs, C# for Windows', each by its app's
-# build from the library it links, so no binding is kept to drift. uniffi, since it's the one generator that serves all
-# three from the same Rust; pinned to the version uniffi-bindgen-cs is built for (v0.11.1+v0.31.0).
+# iPhone apps and Kotlin for Android's, each by its app's build from the library it links, so no binding is kept to
+# drift. (The Tauri app, client/native, links one-client itself.)
 [lib]
 crate-type = ["lib", "staticlib", "cdylib"]
 doctest = false

@@ -1,5 +1,5 @@
-//! The client as the native apps call it (Swift, Kotlin, C#): the app keeps its device's key in the Keychain, the
-//! keystore or the Credential Locker, and hands it here at start (`ThisDevice::new`); while it isn't let in yet, it shows
+//! The client as the native apps call it (Swift, Kotlin): the app keeps its device's key in the Keychain or the
+//! keystore, and hands it here at start (`ThisDevice::new`); while it isn't let in yet, it shows
 //! `code()` and asks `wait` every few seconds; then every request to its network's nodes is `fetch`, over iroh. Each
 //! call waits for its answer, so apps call from a thread of their own, never their main one.
 
