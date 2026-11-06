@@ -51,15 +51,16 @@ struct MessagesApp: Service {
         case noErr: return nil
         case OSStatus(errAEEventNotPermitted):
             return "\(thisApp) needs to control Messages to send. Allow it in System Settings → Privacy & Security → Automation: under \(thisApp), turn on Messages."
-        case OSStatus(procNotFound):
-            once("messages") {
-                guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: Automation.messages) else { return }
+        default:
+            // macOS asks only while Messages is open.
+            if NSRunningApplication.runningApplications(withBundleIdentifier: Automation.messages).isEmpty {
+                guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: Automation.messages) else { break }
                 let open = NSWorkspace.OpenConfiguration()
                 (open.activates, open.hides) = (false, true)
-                NSWorkspace.shared.openApplication(at: url, configuration: open)
+                NSWorkspace.shared.openApplication(at: url, configuration: open, completionHandler: nil)
+            } else {
+                once("automation") { Task.detached { _ = Automation.status(ask: true) } }
             }
-        default:
-            once("automation") { Task.detached { _ = Automation.status(ask: true) } }
         }
         return "\(thisApp) needs to control Messages to send. Click OK where macOS asks on the Mac's screen."
     }
