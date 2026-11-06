@@ -276,34 +276,22 @@ impl Place {
         }
     }
 
-    /// Writes a test file, reads it back and deletes it: each step, and what went wrong if it did. For a network's
-    /// own bucket, `conditional` also checks that it refuses to write over a file, and to replace a changed one.
-    pub fn try_it(&self, conditional: bool) -> Vec<(&'static str, Option<String>)> {
+    /// Writes a test file, reads it back and deletes it: each step, and what went wrong if it did.
+    pub fn try_it(&self) -> Vec<(&'static str, Option<String>)> {
         let name = format!("test-{}", hex(&rand::random::<[u8; 32]>()));
         let bytes = format!("{} tried this place", crate::config::NAME).into_bytes();
-        let wrote = match conditional {
-            true => self.can_hold_a_network().and_then(|()| self.create(&name, &bytes)).and_then(|new| if new { Ok(()) } else { bail!("a file had its name") }),
-            false => self.put(&name, &bytes),
-        };
-        let not_written = || anyhow!("Skipped, since writing failed.");
-        let read = wrote.as_ref().map_err(|_| not_written()).and_then(|_| match self.get_object(&name)? {
+        let wrote = self.put(&name, &bytes);
+        let read = wrote.as_ref().map_err(|_| anyhow!("Skipped, since writing failed.")).and_then(|_| match self.get_object(&name)? {
             Some(o) if o.bytes == bytes => Ok(o),
             Some(_) => bail!("It came back changed."),
             None => bail!("It wasn't there."),
         });
-        let mut steps = vec![("Wrote a test file", wrote.as_ref().err().map(|e| format!("{e:#}"))), ("Read it back", read.as_ref().err().map(|e| format!("{e:#}")))];
-        if conditional {
-            let refused = read.as_ref().map_err(|_| not_written()).and_then(|o| {
-                ensure!(!self.create(&name, b"again")?, "it wrote over the file: it can't write only if a file isn't there, which a network's bucket needs");
-                ensure!(!self.replace(&name, b"again", Some("\"stale\""))?, "it replaced a file that had changed: it can't write only if a file is unchanged");
-                ensure!(self.replace(&name, b"again", Some(&o.tag))?, "it wouldn't replace an unchanged file");
-                Ok(())
-            });
-            steps.push(("Refused to write over it", refused.err().map(|e| format!("{e:#}"))));
-        }
-        let deleted = wrote.as_ref().map_err(|_| not_written()).and_then(|_| self.delete(&name));
-        steps.push(("Deleted it", deleted.err().map(|e| format!("{e:#}"))));
-        steps
+        let deleted = wrote.as_ref().map_err(|_| anyhow!("Skipped, since writing failed.")).and_then(|_| self.delete(&name));
+        vec![
+            ("Wrote a test file", wrote.as_ref().err().map(|e| format!("{e:#}"))),
+            ("Read it back", read.as_ref().err().map(|e| format!("{e:#}"))),
+            ("Deleted it", deleted.err().map(|e| format!("{e:#}"))),
+        ]
     }
 
     /// For a folder: whether its disk is there now. A disk that's unplugged waits, rather than fails.

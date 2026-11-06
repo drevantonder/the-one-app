@@ -604,7 +604,7 @@ impl Node {
         let place = Place::from_fields(&fields)?;
         let tried = {
             let place = place.clone();
-            tokio::task::spawn_blocking(move || place.try_it(false)).await?
+            tokio::task::spawn_blocking(move || place.try_it()).await?
         };
         let steps: Vec<Value> = tried.iter().map(|(step, error)| json!({ "step": step, "error": error })).collect();
         if tried.iter().any(|(_, e)| e.is_some()) || body["test"] == true {
