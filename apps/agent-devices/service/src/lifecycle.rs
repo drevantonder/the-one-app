@@ -209,7 +209,7 @@ impl Devices {
             }
             tracing::info!("starting {}, which should be running", v.name);
             v.paused = false;
-            let _ = self.save_vm(&v);
+            self.remember(&v);
             if let Err(err) = k.start(self, &v) {
                 tracing::warn!("starting {}: {err:#}", v.name);
             }

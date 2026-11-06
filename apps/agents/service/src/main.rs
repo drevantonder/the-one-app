@@ -146,7 +146,17 @@ struct Written {
 impl Written {
     fn load(host: &Host) -> Self {
         let path = host.dir.join("written.json");
-        let hashes = std::fs::read(&path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+        let hashes = match std::fs::read(&path) {
+            Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_else(|err| {
+                once(format!("couldn't read {}, so every skill file counts as edited by hand: {err}", path.display()));
+                HashMap::new()
+            }),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => HashMap::new(),
+            Err(err) => {
+                once(format!("couldn't read {}: {err}", path.display()));
+                HashMap::new()
+            }
+        };
         Written { path, hashes }
     }
 
@@ -169,6 +179,9 @@ impl Written {
     }
 
     fn save(&self) {
-        let _ = std::fs::write(&self.path, serde_json::to_vec_pretty(&self.hashes).unwrap_or_default());
+        let saved = serde_json::to_vec_pretty(&self.hashes).map_err(|err| err.to_string()).and_then(|bytes| std::fs::write(&self.path, bytes).map_err(|err| err.to_string()));
+        if let Err(err) = saved {
+            once(format!("couldn't save {}: {err}", self.path.display()));
+        }
     }
 }

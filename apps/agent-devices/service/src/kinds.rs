@@ -486,6 +486,13 @@ impl Devices {
         Ok(())
     }
 
+    /// `save_vm` where the caller has nothing to do if it fails: the next start would find the device in the old state.
+    pub(super) fn remember(&self, v: &Vm) {
+        if let Err(err) = self.save_vm(v) {
+            tracing::warn!("saving device {}: {err:#}", v.name);
+        }
+    }
+
     pub(super) fn forget_vm(&self, name: &str) {
         let _files = self.vm_files.lock().unwrap();
         let _ = std::fs::remove_file(self.vm_dir().join(format!("{name}.json")));
@@ -505,7 +512,7 @@ impl Devices {
                 bail!("{} is stopped, and this machine has no memory to spare to start it now", v.name);
             }
             v.paused = false;
-            let _ = self.save_vm(v);
+            self.remember(v);
             k.start(self, v)?;
             self.want(&v.name, true);
             return Ok(());
@@ -864,7 +871,7 @@ impl Devices {
                 }
                 "stop" => {
                     v.paused = false;
-                    let _ = self.save_vm(&v);
+                    self.remember(&v);
                     k.stop(self, &v)?;
                     self.want(&v.name, false);
                     Ok(json!(format!("Stopped {}. Its files stay; it stays stopped until started.", v.name)))
@@ -1053,7 +1060,7 @@ impl Devices {
                     Ok(()) => self.want(&v.name, false),
                 }
                 v.paused = false;
-                let _ = self.save_vm(&v);
+                self.remember(&v);
             } else if idle >= IDLE_PAUSE_VM && !v.paused {
                 tracing::info!("pausing {}, idle for 15 minutes", v.name);
                 if let Err(err) = k.pause(self, &v) {
@@ -1064,7 +1071,7 @@ impl Devices {
                 if !v.paused {
                     self.want(&v.name, false); // pausing stopped it, as an iPhone's does
                 }
-                let _ = self.save_vm(&v);
+                self.remember(&v);
             }
         }
     }

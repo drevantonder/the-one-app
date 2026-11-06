@@ -550,8 +550,7 @@ impl Devices {
             _ => {}
         }
         let mut p = p.ok_or_else(|| anyhow!("which browser profile? the app gives it"))?;
-        if let Some(l) = loan.as_ref().filter(|l| l.signing_in && l.item == p.item) {
-            let _ = l;
+        if loan.as_ref().is_some_and(|l| l.signing_in && l.item == p.item) {
             // Given back, which starts it if it's stopped.
             self.hold_key(&name, &p);
             self.give_back(&name, "signed in")?;
