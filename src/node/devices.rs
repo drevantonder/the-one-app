@@ -607,7 +607,7 @@ impl Node {
                 if let Err(err) = self.tell_relay_now(json!({ "remove": hex(&old) })).await {
                     tracing::warn!("taking {}'s sign-in before off the network: {err:#}", r.name);
                 }
-                self.member_as(caller, "remove", content::remove_device(&old).data).await?;
+                self.member_content(caller, content::remove_device(&old)).await?;
             }
         }
         let admin = self.with(|i| Ok(i.r.db().may(&r.user, "invite", scopes::NETWORK)))?;

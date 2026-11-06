@@ -15,7 +15,7 @@ impl Node {
         crate::vault::blot(&mut answer.ok, &used);
         let scope = Scope::User(user.clone());
         if !answer.blobs.is_empty() {
-            self.append_as(&scope, &user, Content { blobs: answer.blobs, ..content::node("keep", json!({})) }).await?;
+            self.append_as(&scope, &user, content::keep(answer.blobs)).await?;
         }
         Ok(answer.ok)
     }

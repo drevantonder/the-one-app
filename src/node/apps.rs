@@ -335,8 +335,8 @@ impl Node {
             return Ok(());
         }
         ensure!(admin, "{app} is built in, but {} doesn't have it yet: an admin adds it first", crate::config::YOURS);
-        self.member_as(caller, "app", json!({ "name": app, "owner": "admins" })).await?;
-        self.member_content(caller, deploy(app, bundle, [])).await
+        self.member_content(caller, content::app(app, "admins")).await?;
+        self.member_content(caller, content::deploy(app, bundle, [])).await
     }
 
     /// What an app's latest deploy says it uses: (apps, services). Waits a while for this device to run that deploy.
@@ -431,8 +431,8 @@ impl Node {
         })?;
         let owner = owner.map(str::to_string).unwrap_or_else(|| format!("user:{}", caller.user));
         let builds = crate::app::bundle::services(&self.blob(&bundle).await?).into_values();
-        self.member_as(caller, "app", json!({ "name": name, "owner": owner, "from": app })).await?;
-        self.member_content(caller, deploy(name, &bundle, builds)).await
+        self.member_content(caller, content::fork(name, &owner, app)).await?;
+        self.member_content(caller, content::deploy(name, &bundle, builds)).await
     }
 
     /// Deploys `bundle` as `app`'s code, for someone acting for its owner. Deploying an older bundle again rolls back.
@@ -459,7 +459,7 @@ impl Node {
         for build in &builds {
             ensure!(mine(build)?, "{app}'s bundle names a build of its service, {build}, that isn't here: put it first");
         }
-        self.member_content(caller, deploy(app, &bundle, builds)).await?;
+        self.member_content(caller, content::deploy(app, &bundle, builds)).await?;
         Ok(wait && self.runs_latest(app, Duration::from_secs(10)).await)
     }
 
@@ -480,7 +480,7 @@ impl Node {
         if before.is_none() {
             ensure!(scopes::valid_app_name(app), "{app}: an app's name is lowercase words joined by -, like water-log");
             let owner = owner.map(str::to_string).unwrap_or_else(|| format!("user:{}", caller.user));
-            self.member_as(caller, "app", json!({ "name": app, "owner": owner })).await?;
+            self.member_content(caller, content::app(app, &owner)).await?;
         }
         let here = self.deploy(caller, app, bundle, wait).await?;
         let bundle = self.with(|i| Ok(i.r.db().app(app)?.and_then(|a| a.bundle.clone())))?;
@@ -562,9 +562,3 @@ pub fn built_in_bundle(files: &[(&str, &[u8])]) -> Result<Vec<u8>> {
     crate::app::bundle::pack(&bundle)
 }
 
-/// A deploy of `app`: the bundle at blob `bundle`, and the builds of its service it names (`bundle::SERVICES`), each a
-/// blob too, so a node that runs it finds it.
-pub fn deploy(app: &str, bundle: &str, builds: impl IntoIterator<Item = String>) -> Content {
-    let blobs = std::iter::once(bundle.to_string()).chain(builds).collect();
-    Content { blobs, ..content::node("deploy", json!({ "app": app, "bundle": bundle })) }
-}

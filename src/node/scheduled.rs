@@ -236,5 +236,5 @@ pub(super) fn switch_entry(i: &Network, user: &str, scope: &Scope, app: &str, ti
     ensure!(i.r.db().may(user, "add-apps", &scopes::object(scope)), "You can't switch schedules in {name}.");
     ensure!(i.views.get(&scope.to_string()).is_some_and(|s| s.added.contains(app)), "{title} isn't on {name}.");
     ensure!(i.r.holds(scope), "This device can't open {name} yet.");
-    Ok(content::node("schedule", json!({ "app": app, "schedule": schedule, "on": on })))
+    Ok(content::schedule(app, schedule, on))
 }

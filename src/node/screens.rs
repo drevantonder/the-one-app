@@ -163,11 +163,7 @@ impl Node {
         let content = self.with(|i| {
             ensure!(scopes::valid_page(page), "a page is user, group:<id> or global");
             ensure!(i.r.holds(&scope), "this device doesn't hold your data");
-            let mut data = json!({ "page": page, "items": items, "hidden": if hidden.is_null() { json!([]) } else { hidden } });
-            if page == "user" && !pages.is_null() {
-                data["pages"] = pages;
-            }
-            Ok(content::node("arrange", data))
+            Ok(content::arrange(page, items, hidden, pages))
         })?;
         self.append_as(&scope, &caller.user, content).await?;
         Ok(())

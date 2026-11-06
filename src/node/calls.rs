@@ -611,7 +611,7 @@ impl Node {
         };
         if !kept.is_empty() && reply.get("ok").is_some() {
             let user = me.user.clone();
-            self.append_as(&Scope::User(user.clone()), &user, Content { blobs: kept, ..content::node("keep", json!({})) }).await?;
+            self.append_as(&Scope::User(user.clone()), &user, content::keep(kept)).await?;
         }
         let theirs = reply.get_mut("trace").map(Value::take).filter(Value::is_object);
         Ok((Reply::from_json(reply), theirs))

@@ -9,7 +9,7 @@ impl Node {
 
     /// Sets one of the network's settings, for an admin; `None` puts back the custom build's default.
     pub async fn set_setting(&self, caller: &Caller, name: &str, value: Option<&str>) -> Result<()> {
-        self.member_as(caller, "setting", json!({ "name": name, "value": value })).await
+        self.member_content(caller, content::setting(name, value)).await
     }
 
     /// Gives a device (by name or key: all of its endpoints of that name and person), or the Cloudflare node
@@ -123,16 +123,6 @@ impl Node {
         crate::state::state(network.as_ref().map(|i| i.r.db()), me, here)
     }
 
-    /// Writes one of `global`'s node entries as the local user, after checking it would count.
-    pub async fn member(&self, kind: &str, data: Value) -> Result<()> {
-        self.member_as(&Caller::local(self)?, kind, data).await
-    }
-
-    /// The same, as `caller`, whose rights it's checked against.
-    pub async fn member_as(&self, caller: &Caller, kind: &str, data: Value) -> Result<()> {
-        self.member_content(caller, content::node(kind, data)).await
-    }
-
     /// Signs one of `global`'s node entries with this device, for `caller`: it counts only if this device is theirs
     /// (on this machine, the CLI, MCP and the Mac app), and one that wouldn't count is refused, not written.
     pub async fn member_content(&self, caller: &Caller, content: Content) -> Result<()> {
@@ -147,7 +137,7 @@ impl Node {
     pub async fn make_group(&self, caller: &Caller, name: &str) -> Result<String> {
         ensure!(!name.trim().is_empty(), "give the group a name");
         let group = new_id();
-        self.member_as(caller, "group", json!({ "group": group, "name": name })).await?;
+        self.member_content(caller, content::group(&group, name)).await?;
         Ok(group)
     }
 
@@ -159,7 +149,7 @@ impl Node {
         file.name = name.to_string();
         write_private(&path, &serde_json::to_vec_pretty(&file)?)?;
         if self.has_network() {
-            self.member("rename", json!({ "key": hex(&self.0.id), "name": name })).await?;
+            self.member_content(&Caller::local(self)?, content::rename("key", &hex(&self.0.id), name)).await?;
         }
         Ok(())
     }
@@ -179,7 +169,7 @@ impl Node {
         if key == self.0.id {
             return self.rename_device(name).await;
         }
-        self.member_as(caller, "rename", json!({ "key": hex(&key), "name": name })).await
+        self.member_content(caller, content::rename("key", &hex(&key), name)).await
     }
 
     pub fn find_device(&self, name: &str) -> Result<Key> {

@@ -3,7 +3,9 @@
 use axum::Json;
 use axum::routing::{get, post};
 use axum::extract::{Query, State};
-use serde_json::{Value, json};
+use serde_json::json;
+
+use crate::database::content;
 
 use crate::database::scopes::Role;
 use crate::node::Node;
@@ -88,7 +90,7 @@ struct SetRole {
 }
 
 async fn role(State(node): State<Node>, me: Me, Body(body): Body<SetRole>) -> Reply {
-    node.member_as(&me.caller, "role", json!({ "user": node.find_user(given(&body.user, "user")?)?, "role": body.role })).await?;
+    node.member_content(&me.caller, content::role(&node.find_user(given(&body.user, "user")?)?, body.role)).await?;
     done()
 }
 
@@ -98,11 +100,11 @@ async fn role(State(node): State<Node>, me: Me, Body(body): Body<SetRole>) -> Re
 struct Setting {
     name: String,
     #[serde(default)]
-    value: Value,
+    value: Option<String>,
 }
 
 async fn settings(State(node): State<Node>, me: Me, Body(body): Body<Setting>) -> Reply {
-    node.member_as(&me.caller, "setting", json!({ "name": given(&body.name, "name")?, "value": body.value })).await?;
+    node.member_content(&me.caller, content::setting(given(&body.name, "name")?, body.value.as_deref())).await?;
     done()
 }
 

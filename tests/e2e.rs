@@ -329,7 +329,7 @@ async fn only_a_devices_person_or_an_admin_reads_its_logs() {
     let refused = a.call_as(logs(json!({})), from_sam.clone()).await.unwrap_err();
     assert!(format!("{refused:#}").contains("reads its logs"), "{refused:#}");
     assert!(!a.may_read_logs(&sam.user).unwrap() && a.may_read_logs(&andre.user).unwrap());
-    a.member_as(&andre, "role", json!({ "user": sam.user, "role": one::database::scopes::Role::Admin })).await.unwrap();
+    a.member_content(&andre, one::database::content::role(&sam.user, one::database::scopes::Role::Admin)).await.unwrap();
     assert!(a.may_read_logs(&sam.user).unwrap(), "an admin of the network reads any device's logs");
 }
 

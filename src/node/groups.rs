@@ -156,7 +156,7 @@ pub(crate) mod routes {
 
     async fn invite(State(node): State<Node>, me: Me, Body(body): Body<Member<Option<Role>>>) -> Reply {
         let (group, user) = (node.find_group(given(&body.group, "group")?)?, node.find_user(given(&body.user, "user")?)?);
-        node.member_as(&me.caller, "invite", json!({ "group": group, "user": user, "role": body.role.unwrap_or(Role::Member) })).await?;
+        node.member_content(&me.caller, crate::database::content::invite(&group, &user, body.role.unwrap_or(Role::Member))).await?;
         done()
     }
 
@@ -167,13 +167,13 @@ pub(crate) mod routes {
     }
 
     async fn accept(State(node): State<Node>, me: Me, Body(body): Body<Accept>) -> Reply {
-        node.member_as(&me.caller, "accept", json!({ "group": node.find_group(given(&body.group, "group")?)? })).await?;
+        node.member_content(&me.caller, crate::database::content::accept(&node.find_group(given(&body.group, "group")?)?)).await?;
         done()
     }
 
     async fn member(State(node): State<Node>, me: Me, Body(body): Body<Member<Option<Role>>>) -> Reply {
         let (group, user) = (node.find_group(given(&body.group, "group")?)?, node.find_user(given(&body.user, "user")?)?);
-        node.member_as(&me.caller, "member", json!({ "group": group, "user": user, "role": body.role })).await?;
+        node.member_content(&me.caller, crate::database::content::member(&group, &user, body.role)).await?;
         done()
     }
 

@@ -166,6 +166,78 @@ pub fn added(app: &str, added: bool) -> Content {
     node(if added { ADD_APP } else { REMOVE_APP }, json!({ "app": app }))
 }
 
+/// A new app, or an app given to a new owner (`owner`, as `Principal` writes it).
+pub fn app(name: &str, owner: &str) -> Content {
+    node("app", json!({ "name": name, "owner": owner }))
+}
+
+/// A new app `name`, a copy of `from`.
+pub fn fork(name: &str, owner: &str, from: &str) -> Content {
+    node("app", json!({ "name": name, "owner": owner, "from": from }))
+}
+
+/// Where an app's code is kept (`scopes::source_link`), or nowhere with "".
+pub fn source(name: &str, owner: &str, link: &str) -> Content {
+    node("app", json!({ "name": name, "owner": owner, "source": link }))
+}
+
+/// A deploy of `app`: the bundle at blob `bundle`, and the builds of its service it names (`bundle::SERVICES`), each a
+/// blob too, so a node that runs it finds it.
+pub fn deploy(app: &str, bundle: &str, builds: impl IntoIterator<Item = String>) -> Content {
+    let blobs = std::iter::once(bundle.to_string()).chain(builds).collect();
+    Content { blobs, ..node("deploy", json!({ "app": app, "bundle": bundle })) }
+}
+
+/// Switches a schedule of an app added in the step's scope on or off.
+pub fn schedule(app: &str, schedule: &str, on: bool) -> Content {
+    node("schedule", json!({ "app": app, "schedule": schedule, "on": on }))
+}
+
+/// The blobs its scope keeps.
+pub fn keep(blobs: Vec<String>) -> Content {
+    Content { blobs, ..node("keep", json!({})) }
+}
+
+/// A blob its scope no longer needs (its hash, hex).
+pub fn forget(blob: &str) -> Content {
+    node("forget", json!({ "blob": blob.to_lowercase() }))
+}
+
+/// A page arranged by its person, in their own scope: its items, the apps taken off it, and with their own page
+/// (`user`), `pages`, the order of their groups' pages and those they hid.
+pub fn arrange(page: &str, items: Value, hidden: Value, pages: Value) -> Content {
+    let mut data = json!({ "page": page, "items": items, "hidden": if hidden.is_null() { json!([]) } else { hidden } });
+    if page == "user" && !pages.is_null() {
+        data["pages"] = pages;
+    }
+    node("arrange", data)
+}
+
+/// What a Vault request asks for: `id`'s item for `app`, its `title`, `fields` (`{ name: { secret } }`) and `hosts`, the
+/// `need` the app declares it as, if it does, `why` for the person, and the agent that asked.
+pub struct Request<'a> {
+    pub id: &'a str,
+    pub app: &'a str,
+    pub title: Value,
+    pub fields: Value,
+    pub hosts: Value,
+    pub need: Option<&'a str>,
+    pub why: &'a str,
+    pub agent: Option<&'a str>,
+}
+
+/// A Vault request made.
+pub fn vault_request(r: Request) -> Content {
+    node("vault-request", json!({ "id": r.id, "app": r.app, "title": r.title, "fields": r.fields, "hosts": r.hosts, "need": r.need, "why": r.why, "agent": r.agent }))
+}
+
+/// A Vault request answered: declined, or set once its item is in the scope's Vault.
+pub fn vault_answer(id: &str, declined: bool) -> Content {
+    let mut data = json!({ "id": id });
+    data[if declined { "declined" } else { "set" }] = json!(true);
+    node("vault-request", data)
+}
+
 /// Lists a service endpoint offering `service` as `user`'s, a part of `device`, by that device: `shared` if it serves
 /// everyone it may, not only them.
 pub fn service_endpoint(endpoint: &crate::keys::Endpoint, user: &str, name: &str, service: &str, shared: bool, device: &Key) -> Content {
@@ -174,4 +246,136 @@ pub fn service_endpoint(endpoint: &crate::keys::Endpoint, user: &str, name: &str
         data["shared"] = json!(true);
     }
     node("device", data)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every kind of the core's steps, built with fixed inputs, as the bytes its step's body signs: a step a release
+    /// writes must say exactly what the one before wrote, or a reader of either judges it differently.
+    #[test]
+    fn each_kind_says_what_it_always_said() {
+        let (user, other, g) = ("a000000000000001", "b000000000000002", "c000000000000003");
+        let endpoint = crate::keys::Endpoint { key: [1; 32], seal: [2; 32] };
+        let scope = Scope::Group(g.into());
+        let built = [
+            ("device", device(&endpoint, user, "mac", &[Kind::Client], None)),
+            ("device, new person", device(&endpoint, other, "phone", &[Kind::Client, Kind::Compute], Some(("Bob", Role::Member)))),
+            ("passkey", passkey(&endpoint, user, "Passkey", "cred")),
+            ("service endpoint", service_endpoint(&endpoint, user, "whatsapp", "whatsapp", false, &[4; 32])),
+            ("service endpoint, shared", service_endpoint(&endpoint, user, "whatsapp", "whatsapp", true, &[4; 32])),
+            ("role", role(other, Role::Admin)),
+            ("remove person", remove_user(other)),
+            ("remove device", remove_device(&[5; 32])),
+            ("setting", setting("name", Some("Ours"))),
+            ("setting back", setting("name", None)),
+            ("group", group(g, "Band")),
+            ("invite", invite(g, other, Role::Member)),
+            ("accept", accept(g)),
+            ("member", member(g, other, Some(Role::Admin))),
+            ("member out", member(g, other, None)),
+            ("refuse", refuse(&endpoint, "stranger")),
+            ("forget sign-in", forget_sign_in(&[5; 32])),
+            ("rename device", rename("key", &hex(&[5; 32]), "laptop")),
+            ("rename person", rename("user", other, "Robert")),
+            ("rename group", rename("group", g, "The Band")),
+            ("handle person", handle("user", other, "bob")),
+            ("handle group", handle("group", g, "band")),
+            ("epoch", epoch(&scope, 2, &[[6; 32], [7; 32]], &"f".repeat(64))),
+            ("vault", vault(&Scope::User(user.into()), 1, &[8; 32], &[[6; 32]])),
+            ("service on", service(&[4; 32], "whatsapp", true, Some(&scope))),
+            ("service off", service(&[4; 32], "apps", false, None)),
+            ("runs", runs(&[[6; 32], [7; 32]])),
+            ("app schedules", app_schedules(&[6; 32], &scope, "notes", 99, &BTreeMap::from([(1, "a".repeat(64)), (2, "b".repeat(64))]))),
+            ("app schedules off", app_schedules(&[6; 32], &Scope::Global, "notes", 0, &BTreeMap::new())),
+            ("deleted", retire("notes", "admins", "deleted").unwrap()),
+            ("restored", retire("notes", "admins", "restored").unwrap()),
+            ("erased", retire("notes", &format!("group:{g}"), "erased").unwrap()),
+            ("added", added("notes", true)),
+            ("removed", added("notes", false)),
+            ("app", app("notes", "admins")),
+            ("fork", fork("tally2", &format!("user:{user}"), "tally")),
+            ("source", source("notes", "admins", "https://example.com/notes.git")),
+            ("no source", source("notes", "admins", "")),
+            ("deploy", deploy("notes", &"d".repeat(64), ["e".repeat(64)])),
+            ("schedule", schedule("notes", "daily", true)),
+            ("keep", keep(vec!["c".repeat(64)])),
+            ("keep nothing", keep(Vec::new())),
+            ("forget", forget(&"C".repeat(64))),
+            ("arrange", arrange("user", json!([{ "app": "notes" }]), Value::Null, json!({ "order": [format!("group:{g}")], "hidden": [] }))),
+            ("arrange a group's", arrange(&format!("group:{g}"), json!([{ "app": "notes", "widget": "w", "id": "1" }]), json!(["tally"]), json!({ "order": [] }))),
+            (
+                "vault request",
+                vault_request(Request { id: "e000000000000008", app: "notes", title: json!("Token"), fields: json!({ "token": { "secret": true } }), hosts: json!(["api.example.com"]), need: Some("token"), why: "for notes", agent: Some("Claude") }),
+            ),
+            ("vault request, plain", vault_request(Request { id: "e000000000000009", app: "ai-agents", title: json!("Key"), fields: json!({}), hosts: Value::Null, need: None, why: "", agent: None })),
+            ("vault declined", vault_answer("e000000000000008", true)),
+            ("vault set", vault_answer("e000000000000008", false)),
+            ("freeze", crate::database::steps::Freeze { at: 2, hash: "a".repeat(64), logs: BTreeMap::from([("global".into(), 2), (scope.to_string(), 0)]) }.content()),
+            ("release", crate::release::content(&crate::release::Release { commit: "abc".into(), target: "x86_64-unknown-linux-gnu".into(), blob: "d".repeat(64), size: 9, committed: 1, signature: "sig".into(), service: None })),
+            (
+                "service release",
+                crate::release::content(&crate::release::Release { commit: "abc".into(), target: "x86_64-unknown-linux-gnu".into(), blob: "d".repeat(64), size: 9, committed: 1, signature: "sig".into(), service: Some("whatsapp".into()) }),
+            ),
+        ];
+        let first = first("Home", user, "Andre", &endpoint, "mac", &[Kind::Client], &[3; 32], &"e".repeat(64));
+        let said: String = std::iter::once(format!("first: {first}\n")).chain(built.iter().map(|(name, c)| format!("{name}: {}\n", serde_json::to_string(c).unwrap()))).collect();
+        assert_eq!(said, GOLDEN, "\n{said}");
+    }
+
+    const GOLDEN: &str = r#"first: {"device":{"key":"0101010101010101010101010101010101010101010101010101010101010101","name":"mac","roles":["client"],"seal":"0202020202020202020202020202020202020202020202020202020202020202"},"epoch":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","name":"Home","recovery":"0303030303030303030303030303030303030303030303030303030303030303","user":"a000000000000001","user_name":"Andre"}
+device: {"app":"node","kind":"device","data":{"key":"0101010101010101010101010101010101010101010101010101010101010101","name":"mac","roles":["client"],"seal":"0202020202020202020202020202020202020202020202020202020202020202","user":"a000000000000001"}}
+device, new person: {"app":"node","kind":"device","data":{"key":"0101010101010101010101010101010101010101010101010101010101010101","name":"phone","role":"member","roles":["client","compute"],"seal":"0202020202020202020202020202020202020202020202020202020202020202","user":"b000000000000002","user_name":"Bob"}}
+passkey: {"app":"node","kind":"device","data":{"key":"0101010101010101010101010101010101010101010101010101010101010101","name":"Passkey","passkey":"cred","roles":["client"],"seal":"0202020202020202020202020202020202020202020202020202020202020202","user":"a000000000000001"}}
+service endpoint: {"app":"node","kind":"device","data":{"device":"0404040404040404040404040404040404040404040404040404040404040404","key":"0101010101010101010101010101010101010101010101010101010101010101","name":"whatsapp","roles":["service"],"seal":"0202020202020202020202020202020202020202020202020202020202020202","service":"whatsapp","user":"a000000000000001"}}
+service endpoint, shared: {"app":"node","kind":"device","data":{"device":"0404040404040404040404040404040404040404040404040404040404040404","key":"0101010101010101010101010101010101010101010101010101010101010101","name":"whatsapp","roles":["service"],"seal":"0202020202020202020202020202020202020202020202020202020202020202","service":"whatsapp","shared":true,"user":"a000000000000001"}}
+role: {"app":"node","kind":"role","data":{"role":"admin","user":"b000000000000002"}}
+remove person: {"app":"node","kind":"remove","data":{"user":"b000000000000002"}}
+remove device: {"app":"node","kind":"remove","data":{"key":"0505050505050505050505050505050505050505050505050505050505050505"}}
+setting: {"app":"node","kind":"setting","data":{"name":"name","value":"Ours"}}
+setting back: {"app":"node","kind":"setting","data":{"name":"name","value":null}}
+group: {"app":"node","kind":"group","data":{"group":"c000000000000003","name":"Band"}}
+invite: {"app":"node","kind":"invite","data":{"group":"c000000000000003","role":"member","user":"b000000000000002"}}
+accept: {"app":"node","kind":"accept","data":{"group":"c000000000000003"}}
+member: {"app":"node","kind":"member","data":{"group":"c000000000000003","role":"admin","user":"b000000000000002"}}
+member out: {"app":"node","kind":"member","data":{"group":"c000000000000003","role":null,"user":"b000000000000002"}}
+refuse: {"app":"node","kind":"refuse","data":{"key":"0101010101010101010101010101010101010101010101010101010101010101","name":"stranger","seal":"0202020202020202020202020202020202020202020202020202020202020202"}}
+forget sign-in: {"app":"node","kind":"forget-sign-in","data":{"key":"0505050505050505050505050505050505050505050505050505050505050505"}}
+rename device: {"app":"node","kind":"rename","data":{"key":"0505050505050505050505050505050505050505050505050505050505050505","name":"laptop"}}
+rename person: {"app":"node","kind":"rename","data":{"name":"Robert","user":"b000000000000002"}}
+rename group: {"app":"node","kind":"rename","data":{"group":"c000000000000003","name":"The Band"}}
+handle person: {"app":"node","kind":"rename","data":{"handle":"bob","user":"b000000000000002"}}
+handle group: {"app":"node","kind":"rename","data":{"group":"c000000000000003","handle":"band"}}
+epoch: {"app":"node","kind":"epoch","data":{"hash":"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff","n":2,"scope":"group:c000000000000003","to":["0606060606060606060606060606060606060606060606060606060606060606","0707070707070707070707070707070707070707070707070707070707070707"]}}
+vault: {"app":"node","kind":"vault","data":{"n":1,"public":"0808080808080808080808080808080808080808080808080808080808080808","scope":"user:a000000000000001","to":["0606060606060606060606060606060606060606060606060606060606060606"]}}
+service on: {"app":"node","kind":"service","data":{"device":"0404040404040404040404040404040404040404040404040404040404040404","name":"whatsapp","on":true,"scope":"group:c000000000000003"}}
+service off: {"app":"node","kind":"service","data":{"device":"0404040404040404040404040404040404040404040404040404040404040404","name":"apps","on":false}}
+runs: {"app":"node","kind":"runs","data":{"on":["0606060606060606060606060606060606060606060606060606060606060606","0707070707070707070707070707070707070707070707070707070707070707"]}}
+app schedules: {"app":"node","kind":"app-schedules","data":{"app":"notes","endpoint":"0606060606060606060606060606060606060606060606060606060606060606","keys":{"1":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","2":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},"scope":"group:c000000000000003","until":99}}
+app schedules off: {"app":"node","kind":"app-schedules","data":{"app":"notes","endpoint":"0606060606060606060606060606060606060606060606060606060606060606","keys":{},"scope":"global","until":0}}
+deleted: {"app":"node","kind":"app","data":{"deleted":true,"name":"notes","owner":"admins"}}
+restored: {"app":"node","kind":"app","data":{"deleted":false,"name":"notes","owner":"admins"}}
+erased: {"app":"node","kind":"app","data":{"erased":true,"name":"notes","owner":"group:c000000000000003"}}
+added: {"app":"node","kind":"add-app","data":{"app":"notes"}}
+removed: {"app":"node","kind":"remove-app","data":{"app":"notes"}}
+app: {"app":"node","kind":"app","data":{"name":"notes","owner":"admins"}}
+fork: {"app":"node","kind":"app","data":{"from":"tally","name":"tally2","owner":"user:a000000000000001"}}
+source: {"app":"node","kind":"app","data":{"name":"notes","owner":"admins","source":"https://example.com/notes.git"}}
+no source: {"app":"node","kind":"app","data":{"name":"notes","owner":"admins","source":""}}
+deploy: {"app":"node","kind":"deploy","data":{"app":"notes","bundle":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"},"blobs":["dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"]}
+schedule: {"app":"node","kind":"schedule","data":{"app":"notes","on":true,"schedule":"daily"}}
+keep: {"app":"node","kind":"keep","data":{},"blobs":["cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"]}
+keep nothing: {"app":"node","kind":"keep","data":{}}
+forget: {"app":"node","kind":"forget","data":{"blob":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}}
+arrange: {"app":"node","kind":"arrange","data":{"hidden":[],"items":[{"app":"notes"}],"page":"user","pages":{"hidden":[],"order":["group:c000000000000003"]}}}
+arrange a group's: {"app":"node","kind":"arrange","data":{"hidden":["tally"],"items":[{"app":"notes","id":"1","widget":"w"}],"page":"group:c000000000000003"}}
+vault request: {"app":"node","kind":"vault-request","data":{"agent":"Claude","app":"notes","fields":{"token":{"secret":true}},"hosts":["api.example.com"],"id":"e000000000000008","need":"token","title":"Token","why":"for notes"}}
+vault request, plain: {"app":"node","kind":"vault-request","data":{"agent":null,"app":"ai-agents","fields":{},"hosts":null,"id":"e000000000000009","need":null,"title":"Key","why":""}}
+vault declined: {"app":"node","kind":"vault-request","data":{"declined":true,"id":"e000000000000008"}}
+vault set: {"app":"node","kind":"vault-request","data":{"id":"e000000000000008","set":true}}
+freeze: {"app":"node","kind":"freeze","data":{"hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","logs":{"global":2,"group:c000000000000003":0}}}
+release: {"app":"node","kind":"node-release","data":{"blob":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","commit":"abc","committed":1,"signature":"sig","size":9,"target":"x86_64-unknown-linux-gnu"},"blobs":["dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"]}
+service release: {"app":"node","kind":"service-release","data":{"blob":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","commit":"abc","committed":1,"service":"whatsapp","signature":"sig","size":9,"target":"x86_64-unknown-linux-gnu"},"blobs":["dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"]}
+"#;
 }

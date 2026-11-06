@@ -193,7 +193,7 @@ impl Node {
         }
         let to = self.with(|i| Ok(i.r.db().openers(scope)?))?;
         let hash = crate::keys::epoch_hash(&key);
-        self.append(&Scope::Global, content::node("epoch", json!({ "scope": name, "n": 1, "to": to.iter().map(|c| hex(&c.key)).collect::<Vec<_>>(), "hash": hash }))).await?;
+        self.append(&Scope::Global, content::epoch(scope, 1, &to.iter().map(|c| c.key).collect::<Vec<_>>(), &hash)).await?;
         if self.with(|i| Ok(i.r.db().epoch_hash(scope, 1)?.as_deref() != Some(hash.as_str())))? {
             tracing::info!("another device made {scope}'s first epoch first: its key is used");
             return self.settled_first_epoch(scope).await;

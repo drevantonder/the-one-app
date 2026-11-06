@@ -147,7 +147,7 @@ async fn only_a_repos_owner_and_collaborators_push_to_it_and_only_its_owners_del
     let group = a.make_group(&me, "Team").await.unwrap();
     a.call(repos("create", json!({ "name": "site", "owner": "team" }))).await.unwrap();
     assert!(!sams_push(&client, "team/site", "sams", false).await);
-    a.member_as(&me, "invite", json!({ "group": group, "user": sam.user, "role": "member" })).await.unwrap();
+    a.member_content(&me, one::database::content::invite(&group, &sam.user, one::database::scopes::Role::Member)).await.unwrap();
     signed_by(&a, &client, &sams, one::database::content::accept(&group)).await;
     assert!(sams_push(&client, "team/site", "sams", false).await, "a member of the group pushes to its repo");
     let refused = call(CallRequest { scopes: Some(vec!["global".into()]), ..repos("delete", json!({ "repo": "team/site" })) }, &client).await.unwrap_err();
@@ -297,7 +297,7 @@ async fn a_groups_github_organization_shows_only_to_its_members_and_a_persons_gi
     let refused = a.call_as(CallRequest { scopes: Some(vec!["global".into()]), ..repos("tree", json!({ "repo": "github.com/andre-gh/mine" })) }, client.clone()).await.unwrap_err();
     assert!(format!("{refused:#}").contains("Sign in to GitHub first"), "{refused:#}");
 
-    a.member_as(&me, "invite", json!({ "group": group, "user": sam.user, "role": "member" })).await.unwrap();
+    a.member_content(&me, one::database::content::invite(&group, &sam.user, one::database::scopes::Role::Member)).await.unwrap();
     signed_by(&a, &client, &sams, one::database::content::accept(&group)).await;
     let (list, sent) = sams_list().await;
     assert_eq!(list, ["github.com/org/site"]);

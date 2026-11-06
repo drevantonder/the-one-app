@@ -512,7 +512,7 @@ impl Node {
             None if manages(scope)? => scope,
             None => &own,
         };
-        let mut data = match need {
+        let (title, fields, hosts, said) = match need {
             Some(_) if app == scopes::AGENTS => bail!(
                 "Not asked: need names what an app declares it needs, like app gmail, need client. For an item you use yourself, leave out need and give title, fields and hosts, and why for the person"
             ),
@@ -536,23 +536,19 @@ impl Node {
                     true => d["why"].as_str().unwrap_or("").replace("{address}", &self.address().unwrap_or_default()),
                     false => why.to_string(),
                 };
-                json!({ "title": d["title"], "fields": fields, "hosts": d["hosts"], "need": need, "why": why })
+                (d["title"].clone(), json!(fields), d["hosts"].clone(), why)
             }
-            _ => json!({ "title": ask["title"], "fields": ask["fields"], "hosts": ask["hosts"], "need": need }),
+            _ => (ask["title"].clone(), ask["fields"].clone(), ask["hosts"].clone(), String::new()),
         };
         let id = new_id();
-        data["id"] = json!(id);
-        data["app"] = json!(app);
-        if data["why"].as_str().unwrap_or("").is_empty() {
-            data["why"] = json!(why);
-        }
-        data["agent"] = json!(caller.agent);
+        let why = if said.is_empty() { why } else { &said };
         self.with(|i| {
             ensure!(i.r.db().may(&caller.user, "add-apps", &scopes::object(&scope)), "Only its admins change {}’s Vault.", scope_name(i, &scope.to_string())?);
             ensure!(i.r.db().app(app)?.is_some_and(|a| !a.erased) || app == scopes::APP || app == scopes::AGENTS, "no app named {app}");
             Ok(())
         })?;
-        self.append_as(scope, &caller.user, content::node("vault-request", data)).await?;
+        let request = content::Request { id: &id, app, title, fields, hosts, need, why, agent: caller.agent.as_deref() };
+        self.append_as(scope, &caller.user, content::vault_request(request)).await?;
         // At the network's address (where people sign in) the web client opens it in any browser; a
         // network without one has only its apps to.
         let web = self.with(|i| Ok(crate::state::settings(&i.r.db().settings()?).remove("address")))?;
@@ -618,7 +614,7 @@ impl Node {
             Ok(r.clone())
         })?;
         if answer["declined"] == true {
-            return self.append_as(scope, &caller.user, content::node("vault-request", json!({ "id": id, "declined": true }))).await.map(|_| ());
+            return self.append_as(scope, &caller.user, content::vault_answer(id, true)).await.map(|_| ());
         }
         // Named by the request it answers, so answering again (its `set` step failed, or two devices answered at once)
         // changes that item rather than making another.
@@ -653,7 +649,7 @@ impl Node {
             })
         })
         .await?;
-        self.append_as(scope, &caller.user, content::node("vault-request", json!({ "id": id, "set": true }))).await?;
+        self.append_as(scope, &caller.user, content::vault_answer(id, false)).await?;
         // A place to back up to counts once an admin's device names it (`pin_place`), as answering does.
         if r.app == scopes::APP && r.need.as_deref() == Some(crate::backups::KIND) && *scope == Scope::Global {
             let item = answer["item"].as_str().unwrap_or(&made).to_string();
