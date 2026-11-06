@@ -113,7 +113,7 @@ impl Node {
             arrangements: json!(arrangements),
             backups,
             guide: crate::skills::address(),
-            passkeys: !throwaway(),
+            passkeys: matches!(crate::mode::here(), crate::mode::Mode::Own),
             device_now: &device_now,
             client_now: &client_now,
         };
@@ -274,12 +274,6 @@ impl Node {
 
 /// What a device says of each service serving there, as `GET /v1/state` lists it: what it is, its version (a
 /// service's own), whom it serves, and who installed it.
-/// Whether this node's network is a throwaway network (`one throwaway`), whose Workers beside it sign its person in with no passkey.
-fn throwaway() -> bool {
-    let settings = std::fs::read_to_string(crate::cloudflare::Settings::path()).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok());
-    settings.is_some_and(|s| !s["throwaway_person"].is_null())
-}
-
 fn installed_services(m: &ScopeDb, device: &scopes::Machine, services: &[Service], build: Option<&str>) -> Vec<Value> {
     let name_of = |u: &String| m.user_ever(u).map(|u| u.name);
     services

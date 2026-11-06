@@ -76,6 +76,8 @@ pub mod schedules;
 #[cfg(feature = "node")]
 pub mod services;
 #[cfg(feature = "node")]
+pub mod mode;
+#[cfg(feature = "node")]
 pub mod oned;
 pub mod cloudflare;
 pub mod keys;

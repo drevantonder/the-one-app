@@ -52,16 +52,9 @@ pub fn program(name: &str) -> PathBuf {
     carried(name).unwrap_or_else(|| fetched(name))
 }
 
-/// Where oned puts a service's program it fetched, and `<cli> services try` puts yours: in `~/.local/bin`, but for a
-/// throwaway network's node (it has a home and an address of its own, `one throwaway`), in its home's `bin`, so what it
-/// fetches never replaces the real network's program, which shares the user's home.
+/// Where oned puts a service's program it fetched, and `<cli> services try` puts yours (`Mode::bin`).
 pub fn fetched(name: &str) -> PathBuf {
-    let var = |v: &str| std::env::var_os(format!("{}_{v}", CLI.to_uppercase()));
-    if let (Some(home), Some(_)) = (var("HOME"), var("ADDR")) {
-        return PathBuf::from(home).join("bin").join(format!("{CLI}-{name}"));
-    }
-    let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
-    home.join(".local/bin").join(format!("{CLI}-{name}"))
+    crate::mode::here().bin().join(format!("{CLI}-{name}"))
 }
 
 /// A service's program built with this one and carried beside it, which oned runs as it is and fetches none of: the

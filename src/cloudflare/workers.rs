@@ -172,6 +172,9 @@ pub struct Settings {
     /// again (`at_home`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub home: Option<(String, String)>,
+    /// The node home these are kept in (`load_in`): this machine's, or a throwaway network's.
+    #[serde(skip)]
+    pub(super) dir: PathBuf,
 }
 
 /// Whether people sign in with Google.
@@ -291,8 +294,8 @@ fn varlock() -> Result<PathBuf> {
 }
 
 /// Where the Workers' secrets' values are: `KEY=value` lines, Varlock's `.env.local`.
-fn local() -> PathBuf {
-    Settings::path().with_file_name(".env.local")
+fn local(home: &Path) -> PathBuf {
+    Settings::path_in(home).with_file_name(".env.local")
 }
 
 /// Writes a file only its owner may read, in one step.
@@ -333,13 +336,24 @@ impl std::error::Error for NotHome {}
 
 impl Settings {
     pub fn path() -> PathBuf {
-        crate::home().join("cloudflare").join("settings.json")
+        Settings::path_in(&crate::home())
+    }
+
+    fn path_in(home: &Path) -> PathBuf {
+        home.join("cloudflare").join("settings.json")
     }
 
     pub fn load() -> Result<Settings> {
-        let path = Settings::path();
+        Settings::load_in(&crate::home())
+    }
+
+    /// The settings kept in `home`'s folder: a throwaway network's, read from `one throwaway` with its own home passed
+    /// rather than this process told it's there.
+    pub fn load_in(home: &Path) -> Result<Settings> {
+        let path = Settings::path_in(home);
         let text = std::fs::read_to_string(&path).with_context(|| format!("this machine has no Cloudflare settings yet: {} cloudflare serve --address <url> runs the Workers here, and their settings are on the machine that deployed them", crate::config::CLI))?;
         let mut settings: Settings = serde_json::from_str(&text).with_context(|| format!("{} isn't the Workers' settings", path.display()))?;
+        settings.dir = home.to_path_buf();
         let dir = path.parent().unwrap();
         std::fs::write(dir.join(".env.schema"), SCHEMA)?;
         let out = std::process::Command::new(varlock()?)
@@ -349,7 +363,7 @@ impl Settings {
             .env("DO_NOT_TRACK", "1")
             .output()?;
         // Varlock masks secrets in what it says when it can't load them.
-        ensure!(out.status.success(), "Varlock couldn't read the Workers' secrets ({}):\n{}{}", local().display(), String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        ensure!(out.status.success(), "Varlock couldn't read the Workers' secrets ({}):\n{}{}", local(home).display(), String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
         let secrets: std::collections::BTreeMap<String, String> = serde_json::from_slice(&out.stdout).context("Varlock said something other than the Workers' secrets")?;
         let get = |name: &str| secrets.get(name).filter(|v| !v.is_empty()).cloned();
         settings.auth_secret = get("AUTH_SECRET").context("no AUTH_SECRET")?;
@@ -415,19 +429,21 @@ impl Settings {
             root: None,
             throwaway_person: None,
             home: None,
+            dir: crate::home(),
         }
     }
 
     /// A throwaway network's Workers (`one throwaway`): on free ports here, its address its gateway's at 127.0.0.1, which `one throwaway`
     /// lets each device it borrows reach at the same address; its bucket where its node serves its data (`bucket`), and
     /// `person` signed in with nothing to show.
-    pub fn for_throwaway(bucket: &str, person: (String, String)) -> Result<Settings> {
+    pub fn for_throwaway(home: &Path, bucket: &str, person: (String, String)) -> Result<Settings> {
         let free = || -> Result<u16> { Ok(std::net::TcpListener::bind("127.0.0.1:0")?.local_addr()?.port()) };
         let ports = [free()?, free()?];
         let mut settings = Settings::new("Throwaway", &format!("http://127.0.0.1:{}", ports[1]));
         settings.sign_in_url = format!("http://127.0.0.1:{}", ports[0]);
         settings.ports = ports;
         settings.throwaway_person = Some(person);
+        settings.dir = home.to_path_buf();
         // Its node serves its data there (throwaway::bucket), signatures unchecked: the URL signer holds these.
         settings.bucket = Some(json!({ "endpoint": format!("http://{bucket}"), "bucket": "throwaway", "region": "auto", "key_id": "throwaway", "secret": "throwaway" }));
         Ok(settings)
@@ -436,8 +452,8 @@ impl Settings {
     /// Writes the settings, and, the first time, the secrets' values to `.env.local`; after that a secret changes
     /// only by `set_secret`, so a reference to 1Password there stays one.
     pub fn save(&self) -> Result<()> {
-        let path = Settings::path();
-        if !local().exists() {
+        let path = Settings::path_in(&self.dir);
+        if !local(&self.dir).exists() {
             let mut text = String::new();
             text += &format!("AUTH_SECRET={}\n", quoted(&self.auth_secret));
             if let Some(bucket) = &self.bucket {
@@ -449,7 +465,7 @@ impl Settings {
             for (name, value) in &self.push {
                 text += &format!("{name}={}\n", quoted(value));
             }
-            write_private(&local(), &text)?;
+            write_private(&local(&self.dir), &text)?;
         }
         std::fs::write(path.with_file_name(".env.schema"), SCHEMA)?;
         write_private(&path, &String::from_utf8(serde_json::to_vec_pretty(self)?)?)
@@ -458,7 +474,7 @@ impl Settings {
     /// Sets a secret's value in `.env.local`, unless it's a reference to 1Password, where it changes instead. A new
     /// one, where the others are references, is kept in 1Password too, in their vault, and referenced as they are.
     pub fn set_secret(&self, name: &str, value: &str) -> Result<()> {
-        let text = std::fs::read_to_string(local()).unwrap_or_default();
+        let text = std::fs::read_to_string(local(&self.dir)).unwrap_or_default();
         let mut lines: Vec<String> = text.lines().filter(|l| !l.starts_with(&format!("{name}="))).map(str::to_string).collect();
         if let Some(line) = text.lines().find(|l| l.starts_with(&format!("{name}="))) {
             ensure!(!line.contains("op("), "{name} is kept in 1Password: change it there ({})", line.trim_start_matches(&format!("{name}=")));
@@ -469,7 +485,7 @@ impl Settings {
             None => quoted(value),
         };
         lines.push(format!("{name}={kept}"));
-        write_private(&local(), &(lines.join("\n") + "\n"))
+        write_private(&local(&self.dir), &(lines.join("\n") + "\n"))
     }
 
     /// The Cloudflare node's endpoint (its public key, hex), once it has a key.
@@ -705,7 +721,7 @@ fn windows_links() -> Vec<u8> {
 /// Runs the network's Workers on this machine, in the pinned workerd, until it stops: their modules built from this
 /// release, the web client's files in `<home>/cloudflare/web`, and their storage in `<home>/cloudflare/data`.
 pub fn serve(settings: &Settings) -> Result<()> {
-    let dir = Settings::path().parent().unwrap().to_path_buf();
+    let dir = Settings::path_in(&settings.dir).parent().unwrap().to_path_buf();
     let web = dir.join("web");
     let served = served(settings, &web)?;
     let here = |a: &str| a.strip_prefix("127.0.0.1:").or_else(|| a.strip_prefix("http://127.0.0.1:")).is_some_and(|port| port.parse::<u16>().is_ok());

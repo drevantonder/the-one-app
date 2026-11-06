@@ -27,8 +27,7 @@ fn built_in(name: &str) -> bool {
 /// Sets up every harness installed on this device: the MCP server, the prompt hook, git's token for Repos and the
 /// built-in skills. The node does it as it starts and every minute, so a harness installed later gets them too.
 pub fn set_up() {
-    // A node given a home of its own (a throwaway network's, say) writes nowhere else, so it leaves the harnesses alone.
-    if std::env::var_os(format!("{}_HOME", crate::config::CLI.to_uppercase())).is_some() {
+    if matches!(crate::mode::here(), crate::mode::Mode::Throwaway(_)) {
         return;
     }
     let _turn = turn();

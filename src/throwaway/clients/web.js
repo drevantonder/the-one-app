@@ -1,4 +1,4 @@
-// `one throwaway client web`'s hands (src/throwaway.rs), in one of the throwaway network's browsers, over the DevTools protocol.
+// `one throwaway client web`'s hands (src/throwaway/clients/web.rs), in one of the throwaway network's browsers, over the DevTools protocol.
 // Bun runs it:
 //   sign-in <devtools port> <address> <picture> [invite link]: the web client is opened at the throwaway network's address
 //     and signed in, as a person would, pressing Sign In, the throwaway network's sign-in going straight on. With an invite

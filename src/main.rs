@@ -98,17 +98,16 @@ fn main() {
 }
 
 fn run(args: Vec<String>) -> Result<()> {
+    // A throwaway's command is run again as a program of its network, which reads what follows itself.
+    if args.first().map(String::as_str) == Some("throwaway") {
+        return throwaway::run(&args[1..]);
+    }
     // --json is everyone's, wherever it's typed: what a tool gives back, as JSON.
     let end = args.iter().position(|a| a == "--").unwrap_or(args.len());
     let json = args[..end].iter().any(|a| a == "--json");
     // --trace too: a call prints what it did, and where, after its answer.
     let trace = args[..end].iter().any(|a| a == "--trace");
-    // A throwaway's command is run by what it starts (a client's CLI, this again), which takes it out itself.
-    let keep_trace = args.first().map(String::as_str) == Some("throwaway");
-    let args: Vec<String> = args.iter().enumerate().filter(|(i, a)| *i >= end || (*a != "--json" && (keep_trace || *a != "--trace"))).map(|(_, a)| a.clone()).collect();
-    if args.first().map(String::as_str) == Some("throwaway") {
-        return throwaway::run(&args[1..]);
-    }
+    let args: Vec<String> = args.iter().enumerate().filter(|(i, a)| *i >= end || (*a != "--json" && *a != "--trace")).map(|(_, a)| a.clone()).collect();
     let (positional, flags) = parse(&args);
     if positional.first().map(String::as_str) != Some("mcp") {
         // Printing into `| head` ends quietly, as other commands do, instead of panicking.
@@ -965,12 +964,6 @@ fn usual_path() {
     }
 }
 
-/// How long a throwaway network's node runs with nobody asking it anything.
-const THROWAWAY_IDLE: std::time::Duration = std::time::Duration::from_secs(60 * 60);
-
-/// When a throwaway network's node was last asked something, in seconds since it started.
-static ASKED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-
 /// oned: with no part named, this device, for good (`serve`); with one, that part (`service::run`).
 fn oned(args: &[String]) -> Result<()> {
     let named: Vec<&String> = args.iter().filter(|a| !a.starts_with("--")).collect();
@@ -979,7 +972,7 @@ fn oned(args: &[String]) -> Result<()> {
         [] if let Some(dir) = args.iter().find_map(|a| a.strip_prefix("--sandboxed=")) => one::services::sandbox::launch(std::path::Path::new(dir)),
         [] => {
             usual_path();
-            serve(args.iter().any(|a| a == "--throwaway"), args)
+            serve(args)
         }
         [name] if *name == one::database::scopes::APPS_PART && let Some(dir) = args.iter().find_map(|a| a.strip_prefix("--runtime=")) => one::app::runtime::run(std::path::Path::new(dir)),
         [name] => one::services::endpoint::run(name),
@@ -988,7 +981,7 @@ fn oned(args: &[String]) -> Result<()> {
 }
 
 #[tokio::main]
-async fn serve(is_try: bool, args: &[String]) -> Result<()> {
+async fn serve(args: &[String]) -> Result<()> {
     // What it says is kept too, for `one logs`.
     one::logs::keep(one::logs::NODE);
     tracing_subscriber::fmt()
@@ -1018,7 +1011,8 @@ async fn serve(is_try: bool, args: &[String]) -> Result<()> {
     // Its parts that run as processes of their own, as its entries switch them.
     one::oned::keep_parts(node.clone(), tokio::runtime::Handle::current());
     // Git here reaches the network's repos at their address, as on every computer of its person's.
-    if !is_try && let Ok(address) = node.address() {
+    let mode = one::mode::here();
+    if matches!(mode, one::mode::Mode::Own) && let Ok(address) = node.address() {
         std::thread::spawn(move || {
             if let Err(err) = git_remote::wire(&address) {
                 tracing::warn!("{err:#}");
@@ -1032,30 +1026,8 @@ async fn serve(is_try: bool, args: &[String]) -> Result<()> {
     tracing::info!("{NAME} node {} serving {} from {}", &one::keys::hex(&node.id())[..8], api::addr(), dir.display());
     tokio::spawn(api::serve_guide(node.clone()));
     let mut routes = api::guarded(api::routes(), node.clone());
-    if is_try {
-        let home = dir.clone();
-        tokio::spawn(async move {
-            if let Err(err) = throwaway::bucket(home).await {
-                tracing::warn!("the throwaway network's bucket stopped: {err:#}");
-            }
-        });
-        // Left running, a throwaway network stops by itself; `throwaway` starts it again.
-        let started = std::time::Instant::now();
-        routes = routes.layer(axum::middleware::from_fn(move |req: axum::extract::Request, next: axum::middleware::Next| {
-            ASKED.store(started.elapsed().as_secs(), std::sync::atomic::Ordering::Relaxed);
-            next.run(req)
-        }));
-        let dir = dir.clone();
-        tokio::spawn(async move {
-            while started.elapsed().as_secs().saturating_sub(ASKED.load(std::sync::atomic::Ordering::Relaxed)) < THROWAWAY_IDLE.as_secs() {
-                tokio::time::sleep(std::time::Duration::from_secs(60)).await;
-            }
-            tracing::info!("nobody asked the throwaway network anything for {} minutes: stopping", THROWAWAY_IDLE.as_secs() / 60);
-            let _ = std::fs::remove_file(dir.join("pid"));
-            // Its Workers and browser, then its own group: it keeps its data, for `throwaway` to start it again.
-            throwaway::stop_others(&dir);
-            unsafe { libc::kill(0, libc::SIGTERM) };
-        });
+    if let one::mode::Mode::Throwaway(network) = mode {
+        routes = network.serve_beside(routes);
     }
     // Asked to restart (an update, or SIGHUP): the program now at this one's path takes over, and this one stops
     // taking connections, finishes what it's answering, and exits.

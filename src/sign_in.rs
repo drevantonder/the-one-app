@@ -29,8 +29,12 @@ pub struct Kept {
     pub until: u64,
 }
 
-/// Where it's kept: in the person's config, one for each node this CLI reaches (`<CLI>_ADDR`, as `throwaway` sets it).
+/// Where it's kept: in the person's config, one for each node this CLI reaches (`<CLI>_ADDR`); a throwaway network's, in its
+/// folder, which stopping it deletes.
 pub fn path() -> PathBuf {
+    if let crate::mode::Mode::Throwaway(t) = crate::mode::here() {
+        return t.home().join("sign-in.json");
+    }
     let config = std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(std::env::var_os("HOME").unwrap_or_else(|| ".".into())).join(".config"));
     let name = match std::env::var(format!("{}_ADDR", CLI.to_uppercase())) {
         Ok(addr) => format!("sign-in-{}.json", addr.replace(|c: char| !c.is_ascii_alphanumeric(), "-")),
