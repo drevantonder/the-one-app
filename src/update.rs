@@ -1196,7 +1196,6 @@ fn mac_follow(commit: &str, config_commit: Option<&str>) -> String {
         r#"set -e
 c="$HOME/Library/Caches/{CLI}"; label=app.{CLI}.update
 mkdir -p "$c"; cd "$c"
-echo "{commit} {config}" > want
 if [ -f failed ]; then echo "its build of $(cut -c1-12 failed) failed:"; sed 's/^/    /' failed.log; rm -f failed; fi
 if [ -f phone.failed ]; then echo "its iPhone build of $(cut -c1-12 phone.failed) failed:"; sed 's/^/    /' phone.failed.log; rm -f phone.failed; fi
 if [ -s phone.built ]; then
@@ -1204,15 +1203,15 @@ if [ -s phone.built ]; then
 	if [ "$(cat phone.built)" = "$(cat phone.installed 2>/dev/null)" ]; then echo "iPhone: installed $b"; else echo "iPhone: not reachable, will install $b when it is"; fi
 fi
 echo "builds {short} now, instead of anything older, then the iPhone app if it changed"
-pid=$(launchctl list | awk -v l="$label" '$3 == l {{ print $1 }}')
-if [ -n "$pid" ] && [ "$pid" != "-" ]; then exit 0; fi
-cat > build.sh <<'JOB'
+# The scripts are replaced whole, so a job that's running them keeps the old ones until its next build takes the new.
+put() {{ cat > "$1.new"; mv "$1.new" "$1"; }}
+put build.sh <<'JOB'
 set -e
 c="$HOME/Library/Caches/{CLI}"
 {checkout}
 CONFIG="$config" client/native/disk.sh retry client/native/mac/build.sh
 JOB
-cat > phone.sh <<'JOB'
+put phone.sh <<'JOB'
 set -e
 c="$HOME/Library/Caches/{CLI}"
 {checkout}
@@ -1222,13 +1221,16 @@ last=$(cat "$c/phone.built" 2>/dev/null || true)
 if [ "${{last#* }}" = "${{2:-}}" ] && git diff --quiet "${{last%% *}}" "$1" -- . ':!client/native/mac' ':!client/native/windows' ':!service' ':!apps' ':!docs' ':!tests' ':!android' ':!*.md' 2>/dev/null; then exit 3; fi
 CONFIG="$config" client/native/disk.sh retry client/native/iphone/build.sh device "$c/phone"
 JOB
-cat > follow.sh <<'JOB'
+put follow.sh <<'JOB'
 # launchd runs this in the login shell, zsh on a Mac; the job control it uses is bash's.
 [ -n "$BASH_VERSION" ] || exec /bin/bash "$0" "$@"
 c="$HOME/Library/Caches/{CLI}"
 # Each build in a process group of its own, which a newer update stops (client/native/mac/build.sh's install ignores that).
 set -m
 want() {{ cat "$c/want"; }}
+# A build that failed is tried again when its scripts change (a newer update's, if the job is running), and not otherwise.
+scripts() {{ cat "$c/build.sh" "$c/phone.sh" | cksum; }}
+retry() {{ [ -f "$c/tried.scripts" ] && [ "$(scripts)" != "$(cat "$c/tried.scripts")" ]; }}
 # Runs a build at a lower priority, so the Mac stays quick to use, and stops it for a newer update's (sets stopped).
 run() {{
 	stopped=
@@ -1248,13 +1250,14 @@ install() {{
 }}
 while :; do
 	want=$(want)
-	if [ "$want" != "$(cat "$c/tried" 2>/dev/null)" ]; then
+	if [ "$want" != "$(cat "$c/tried" 2>/dev/null)" ] || retry; then
+		with=$(scripts); rm -f "$c/tried" "$c/tried.scripts"
 		# zsh doesn't split "$want" into its commit and config: this is bash.
 		set -- ${{want%% *}} "${{want#* }}"
 		run "$c/build.sh" "$1" "$2" > "$c/update.log" 2>&1; status=$?
 		[ -z "$stopped" ] || continue
 		if [ $status = 0 ]; then echo "$want" > "$c/built"; else
-			tail -n 25 "$c/update.log" > "$c/failed.log"; echo "$want" | tee "$c/failed" > "$c/tried"; continue
+			tail -n 25 "$c/update.log" > "$c/failed.log"; echo "$want" | tee "$c/failed" > "$c/tried"; echo "$with" > "$c/tried.scripts"; continue
 		fi
 		# 3: nothing the iPhone app is made of changed.
 		run "$c/phone.sh" "$1" "$2" > "$c/phone.log" 2>&1; status=$?
@@ -1269,9 +1272,13 @@ while :; do
 	[ -s "$c/phone.built" ] && [ "$(cat "$c/phone.built")" != "$(cat "$c/phone.installed" 2>/dev/null)" ] || exit 0
 	if install >> "$c/phone.log" 2>&1; then cp "$c/phone.built" "$c/phone.installed"; continue; fi
 	# Away or locked: try again in a minute, or build a newer update at once.
-	for _ in $(seq 30); do sleep 2; [ "$(want)" = "$want" ] || break; done
+	for _ in $(seq 30); do sleep 2; if [ "$(want)" != "$want" ] || retry; then break; fi; done
 done
 JOB
+# The scripts first: a running job stops its build for this and starts the next with them.
+echo "{commit} {config}" > want
+pid=$(launchctl list | awk -v l="$label" '$3 == l {{ print $1 }}')
+if [ -n "$pid" ] && [ "$pid" != "-" ]; then exit 0; fi
 {start}"#,
         config = config_commit.unwrap_or(""),
         checkout = mac_checkout("$1", "${2:-}"),
