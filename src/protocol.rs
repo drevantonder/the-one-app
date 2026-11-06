@@ -45,6 +45,8 @@ pub fn update_refusal(yours: &str) -> String {
 pub const NOTE_FALLBACK: &str = "You have a new notification.";
 
 /// The codes the node's errors carry beside their text (`{ error, code }`), which callers act on, never on the text.
+/// An app's error may carry one too (an error with a `code`), the Workers and clients of other languages read the
+/// same ones from `shared/protocol.js`.
 pub mod code {
     /// A device that reads less of who's who than this build.
     pub const UPDATE: &str = "update";
@@ -52,10 +54,74 @@ pub mod code {
     pub const NOT_LET_IN: &str = "not_let_in";
     /// What was asked isn't the caller's to do, or needs `--confirm`.
     pub const REFUSED: &str = "refused";
-    /// The node, or the service it asked, is starting: asking again in a moment answers.
+    /// What was asked needs an account or a sign-in that isn't there.
+    pub const NOT_SIGNED_IN: &str = "not_signed_in";
+    /// No device runs what was asked now: its node or service is starting, asking again in a moment answers.
     pub const RESTARTING: &str = "restarting";
     /// An app that isn't installed, or isn't on the person's pages.
     pub const NOT_INSTALLED: &str = "not_installed";
+}
+
+/// An error that says what kind it is, as `{ error, code }` on the wire: the node's answers, and what a device passes
+/// on to the one that asked.
+#[derive(Debug)]
+pub struct Coded {
+    pub code: String,
+    pub message: String,
+}
+
+impl Coded {
+    pub fn new(code: &str, message: impl std::fmt::Display) -> Coded {
+        Coded { code: code.into(), message: message.to_string() }
+    }
+
+    /// What isn't allowed: `refused`.
+    pub fn refused(message: impl std::fmt::Display) -> Coded {
+        Coded::new(code::REFUSED, message)
+    }
+
+    /// An error of kind `code` (one of `code`'s).
+    pub fn error(code: &str, message: impl std::fmt::Display) -> anyhow::Error {
+        Coded::new(code, message).into()
+    }
+
+    /// The code `err` carries, if it's coded.
+    pub fn of(err: &anyhow::Error) -> Option<String> {
+        err.downcast_ref::<Coded>().map(|c| c.code.clone())
+    }
+
+    /// An error with `message` and the `code` it was said with, if it had one.
+    pub fn or_plain(code: Option<String>, message: impl std::fmt::Display) -> anyhow::Error {
+        match code {
+            Some(code) => Coded::error(&code, message),
+            None => anyhow::anyhow!("{message}"),
+        }
+    }
+
+    /// Whether `err` is of kind `code`.
+    pub fn is(err: &anyhow::Error, code: &str) -> bool {
+        Coded::of(err).as_deref() == Some(code)
+    }
+}
+
+impl std::fmt::Display for Coded {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for Coded {}
+
+/// What `<cli> cloudflare deploy` and the shell `update` runs it in exit with, which `update` acts on.
+pub mod exit {
+    /// Refused: a command that wasn't allowed, or needs `--confirm` (`tools::exit_code`); a deploy from a device that isn't
+    /// the Workers' home.
+    pub const REFUSED: i32 = 3;
+    /// This device has no Cloudflare settings, so it has nothing to deploy.
+    pub const NO_SETTINGS: i32 = 4;
+    /// The device's node isn't the build being sent out yet: ask again once it is (the exit code `sh` programs use for
+    /// "try again", EX_TEMPFAIL).
+    pub const NOT_YET: i32 = 75;
 }
 
 /// `shared/protocol.js`: the constants above, and what the Workers need to say names of the bucket in them.
@@ -117,7 +183,7 @@ pub fn javascript() -> String {
         copy = json!(COPY),
         digits = STEP_DIGITS,
         fallback = json!(NOTE_FALLBACK),
-        codes = json!({ "update": code::UPDATE, "notLetIn": code::NOT_LET_IN, "refused": code::REFUSED, "restarting": code::RESTARTING, "notInstalled": code::NOT_INSTALLED }),
+        codes = json!({ "update": code::UPDATE, "notLetIn": code::NOT_LET_IN, "refused": code::REFUSED, "notSignedIn": code::NOT_SIGNED_IN, "restarting": code::RESTARTING, "notInstalled": code::NOT_INSTALLED }),
         update = json!(UPDATE_REFUSAL),
     )
 }

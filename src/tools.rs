@@ -67,14 +67,11 @@ impl std::error::Error for Failed {}
 pub fn exit_code(err: &anyhow::Error) -> i32 {
     match err.downcast_ref::<Failed>() {
         Some(Failed::Typed(_)) => 2,
-        Some(Failed::Refused(_)) => 3,
-        None => {
-            let said = format!("{err:#}").to_lowercase();
-            match ["not allowed", "aren't allowed", "isn't allowed", "sign in first", "sign in to", "signed in first"].iter().any(|r| said.contains(r)) {
-                true => 3,
-                false => 1,
-            }
-        }
+        Some(Failed::Refused(_)) => one::protocol::exit::REFUSED,
+        None => match one::protocol::Coded::of(err).as_deref() {
+            Some(one::protocol::code::REFUSED | one::protocol::code::NOT_SIGNED_IN) => one::protocol::exit::REFUSED,
+            _ => 1,
+        },
     }
 }
 
@@ -143,7 +140,7 @@ pub fn run(app: &str, tool: &str, args: &[String]) -> Result<()> {
             return Err(match e.downcast::<Failed>() {
                 Ok(Failed::Refused(_)) => Failed::Refused(said).into(),
                 Ok(Failed::Typed(_)) => Failed::Typed(said).into(),
-                Err(_) => anyhow::anyhow!(said),
+                Err(e) => one::protocol::Coded::or_plain(one::protocol::Coded::of(&e), said),
             });
         }
     };

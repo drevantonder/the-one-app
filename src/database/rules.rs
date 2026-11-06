@@ -419,12 +419,12 @@ impl Change<'_> {
             ensure!(valid_handle(handle), "a handle is lowercase letters, digits and single hyphens, up to 39, like {}", handle_from(handle, "name"));
             let mine = match (self.id("user"), self.id("group")) {
                 (Ok(user), _) => {
-                    ensure!(user == self.w || self.admin(), "not allowed to change that person's handle");
+                    ensure!(user == self.w || self.admin(), crate::protocol::Coded::refused("not allowed to change that person's handle"));
                     self.who.user(&user).context("no such user")?;
                     Principal::User(user)
                 }
                 (_, Ok(g)) => {
-                    ensure!(self.manages(&g), "not allowed to change that group's handle");
+                    ensure!(self.manages(&g), crate::protocol::Coded::refused("not allowed to change that group's handle"));
                     Principal::Group(g)
                 }
                 _ => bail!("a handle is a person's or a group's"),
@@ -437,15 +437,15 @@ impl Change<'_> {
         ensure!(!name.trim().is_empty(), "no name");
         if let Ok(key) = self.key("key") {
             self.who.machine(&key).context("no such key")?;
-            ensure!(self.who.may(self.w, "remove", &super::scopes::device(&key)), "not allowed to rename that");
+            ensure!(self.who.may(self.w, "remove", &super::scopes::device(&key)), crate::protocol::Coded::refused("not allowed to rename that"));
             self.out.execute("UPDATE devices SET name = ? WHERE key = ?", params![name, hex(&key)])?;
         } else if let Ok(user) = self.id("user") {
-            ensure!(user == self.w || self.admin(), "not allowed to rename that user");
+            ensure!(user == self.w || self.admin(), crate::protocol::Coded::refused("not allowed to rename that user"));
             self.who.user(&user).context("no such user")?;
             self.out.execute("UPDATE principals SET name = ? WHERE id = ?", params![name, person(&user)])?;
         } else {
             let g = self.id("group")?;
-            ensure!(self.manages(&g), "not allowed to rename that group");
+            ensure!(self.manages(&g), crate::protocol::Coded::refused("not allowed to rename that group"));
             self.out.execute("UPDATE principals SET name = ? WHERE id = ?", params![name, group(&g)])?;
         }
         Ok(())
@@ -549,7 +549,7 @@ fn own(who: &ScopeDb, out: &Connection, scope: &Scope, step: &Step) -> Result<()
     let manages = || who.may(w, "add-apps", &object(scope));
     match step.content.kind.as_str() {
         "install" | "uninstall" => {
-            ensure!(manages(), "not allowed to install there");
+            ensure!(manages(), crate::protocol::Coded::refused("not allowed to install there"));
             let app = data["app"].as_str().context("no app")?;
             if step.content.kind == "install" {
                 who.app(app).context("no such app")?;
@@ -559,7 +559,7 @@ fn own(who: &ScopeDb, out: &Connection, scope: &Scope, step: &Step) -> Result<()
             }
         }
         "schedule" => {
-            ensure!(manages(), "not allowed to switch schedules there");
+            ensure!(manages(), crate::protocol::Coded::refused("not allowed to switch schedules there"));
             let app = data["app"].as_str().context("no app")?;
             let name = data["schedule"].as_str().context("no schedule")?;
             let on = data["on"].as_bool().context("on or off?")?;
@@ -573,7 +573,7 @@ fn own(who: &ScopeDb, out: &Connection, scope: &Scope, step: &Step) -> Result<()
             out.execute("INSERT OR IGNORE INTO forgotten VALUES (?)", [blob])?;
         }
         "vault-request" => {
-            ensure!(manages(), "not allowed to change the Vault there");
+            ensure!(manages(), crate::protocol::Coded::refused("not allowed to change the Vault there"));
             let id = data["id"].as_str().filter(|id| is_id(id)).context("no id")?;
             let answered: Option<Option<String>> = out.query_row("SELECT answer FROM vault_requests WHERE id = ?", [id], |r| r.get(0)).optional()?;
             // Answered: declined, or set once the item it asked for is in the scope's Vault (`src/node/vault.rs`).

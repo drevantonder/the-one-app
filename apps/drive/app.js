@@ -23,7 +23,7 @@ const b64url = (bytes) => btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-"
 /// What Drive said, with its status: callers tell a missing file (404) from a refused one.
 export class DriveError extends Error {}
 // "needs connecting" is how apps that save to Drive tell this from other errors.
-const needsConnecting = () => new DriveError(`Drive needs connecting: sign in to a Google account first; ${APP}_sign_in signs one in`);
+const needsConnecting = () => Object.assign(new DriveError(`Drive needs connecting: sign in to a Google account first; ${APP}_sign_in signs one in`), { code: "not_signed_in" });
 
 // The Vault keeps what signing in needs, the same for every Google app: one "Google sign-in" item, the OAuth client
 // (its id, and its secret), and a "Google account" item for each account (its address, its refresh token and the
@@ -67,7 +67,7 @@ async function accounts(ctx) {
 /// The account named, by its address or a part of it only it has; the first signed in when none is named.
 async function account(ctx, name) {
   const all = await accounts(ctx);
-  if (!all.length) throw new Error(`Sign in to a Google account first: ${APP}_sign_in signs one in`);
+  if (!all.length) throw Object.assign(new Error(`Sign in to a Google account first: ${APP}_sign_in signs one in`), { code: "not_signed_in" });
   if (!name) return all[0];
   const n = String(name).toLowerCase();
   const found = all.find((e) => e.toLowerCase() === n) || (all.filter((e) => e.toLowerCase().includes(n)).length === 1 && all.find((e) => e.toLowerCase().includes(n)));
@@ -81,7 +81,7 @@ const allowed = (item) => !item.fields.scopes || SCOPES.split(" ").every((s) => 
 const tokens = new Map(); // `${user}/${email}` → { value, expires }, for this runtime only
 async function token(ctx, email) {
   const item = (await accountItems(ctx)).find((i) => i.fields.email.value === email);
-  if (!item) throw new Error(`Sign in to ${email} first: ${APP}_sign_in signs it in`);
+  if (!item) throw Object.assign(new Error(`Sign in to ${email} first: ${APP}_sign_in signs it in`), { code: "not_signed_in" });
   if (!allowed(item)) throw new Error(`Needs signing in again, to allow ${TITLE}: ${APP}_sign_in with account ${email} signs it in`);
   const key = `${ctx.user.id}/${email}`;
   const t = tokens.get(key);

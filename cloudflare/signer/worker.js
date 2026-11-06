@@ -20,7 +20,7 @@
 // database's newest hint says (`<prefix>/newest`, never sealed), and `get` each object's bytes, sealed as they are, for
 // browsers, which can't read the bucket: all open nothing. It knows
 // nobody's scopes and checks none: everything in the bucket is sealed, so what it hands out opens nothing without keys.
-// A request from a device that says it reads less of who's who than this build (`reads`, shared/crypto.js's `READS`;
+// A request from a device that says it reads less of who's who than this build (`reads`, shared/protocol.js's `READS`;
 // an older build says nothing) is 426, telling it to update, if it would create, replace or remove, or comes from a
 // client alone. A machine that runs things still reads, so a node takes the release it updates to.
 

@@ -570,11 +570,15 @@ impl IntoResponse for Error {
     }
 }
 
-/// Why something failed, as the API says it: `{ error }`, with `{ need, to, seal }` for keys a call wasn't handed.
+/// Why something failed, as the API says it: `{ error }`, with `{ code }` for the kinds callers act on (`protocol::code`),
+/// and `{ need, to, seal }` for keys a call wasn't handed.
 fn failed(err: &anyhow::Error) -> Value {
     match err.downcast_ref::<crate::node::Needs>() {
         Some(n) => json!({ "error": n.to_string(), "need": n.need, "to": n.to, "seal": n.seal }),
-        None => json!({ "error": format!("{err:#}") }),
+        None => match crate::protocol::Coded::of(err) {
+            Some(code) => json!({ "error": format!("{err:#}"), "code": code }),
+            None => json!({ "error": format!("{err:#}") }),
+        },
     }
 }
 

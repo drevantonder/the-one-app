@@ -196,7 +196,8 @@ impl Node {
         let req = CallRequest { app: app.to_string(), tool: tool.to_string(), input, scopes: Some(vec![scope.to_string()]), client: Some(client.into()), id: Some(new_id()), ..Default::default() };
         match self.run_or_need(&req, &me).await {
             Ok(Reply::Ok(v)) => Ok(v),
-            Ok(Reply::Error(e) | Reply::Elsewhere(e)) => Err(anyhow!(e)),
+            Ok(Reply::Error(e, code)) => Err(crate::protocol::Coded::or_plain(code, e)),
+            Ok(Reply::Elsewhere(e)) => Err(anyhow!(e)),
             Ok(Reply::Needs(need)) | Err(need) => Err(need.into()),
         }
     }

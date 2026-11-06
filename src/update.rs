@@ -652,14 +652,16 @@ fn turn_waiting() -> Result<std::fs::File> {
 fn deploy_cloudflare(linux: &[Value], commit: &str) -> bool {
     let home = format!("${{{}_HOME:-${{XDG_DATA_HOME:-$HOME/.local/share}}/{CLI}}}", CLI.to_uppercase());
     // The node's own build deploys it (what's called the CLI there may be something else), once it's the one sent
-    // out: 75 says it isn't yet. It's the node that wrote its home's pid: Shell's program, which runs this on another
+    // out: `exit::NOT_YET` says it isn't yet, `exit::NO_SETTINGS` that this device has none to deploy. It's the node that wrote its home's pid: Shell's program, which runs this on another
     // device, has its own folder in services/ as its home, so its home is two up, and its address (`_ADDR`) is the services' registry's, not the node's. As a login there would: its profile
     // is where 1Password's sign-in, which the Cloudflare secrets are read with, usually is, and ~/.local/bin where op may be.
     let deploy = format!(
-        r#"h="{home}"; [ -f "$h/pid" ] || h=$(cd "$h/../.." && pwd); [ -f "$h/cloudflare/settings.json" ] || {{ echo none; exit 0; }}; node=/proc/$(cat "$h/pid")/exe
-case "$("$node" version --json)" in *'"commit":"{commit}"'*) ;; *) echo "still on $("$node" version --json)"; exit 75 ;; esac
+        r#"h="{home}"; [ -f "$h/pid" ] || h=$(cd "$h/../.." && pwd); [ -f "$h/cloudflare/settings.json" ] || exit {no_settings}; node=/proc/$(cat "$h/pid")/exe
+case "$("$node" version --json)" in *'"commit":"{commit}"'*) ;; *) echo "still on $("$node" version --json)"; exit {not_yet} ;; esac
 . "$HOME/.profile" >/dev/null 2>&1; unset {var}_ADDR; {var}_HOME="$h" PATH="$HOME/.local/bin:$PATH" "$node" cloudflare deploy"#,
-        var = CLI.to_uppercase()
+        var = CLI.to_uppercase(),
+        no_settings = one::protocol::exit::NO_SETTINGS,
+        not_yet = one::protocol::exit::NOT_YET,
     );
     let (here, others): (Vec<&Value>, Vec<&Value>) = linux.iter().filter(|d| d["online"] == true).partition(|d| d["here"] == true);
     let (mut failed, mut deployed) = (false, false);
@@ -676,9 +678,9 @@ case "$("$node" version --json)" in *'"commit":"{commit}"'*) ;; *) echo "still o
             let said = if local { run_here(&deploy) } else { shell(device, &deploy, 600) };
             let again = match &said {
                 Err(_) => true,
-                Ok(r) if r["exit"] == 75 => true,
-                // Refused: another device is where the Workers are deployed from.
-                Ok(r) if r["exit"] == 3 => false,
+                Ok(r) if r["exit"] == one::protocol::exit::NOT_YET => true,
+                // Refused: another device is where the Workers are deployed from. None: this one has no settings.
+                Ok(r) if r["exit"] == one::protocol::exit::REFUSED || r["exit"] == one::protocol::exit::NO_SETTINGS => false,
                 Ok(r) if r["exit"] != 0 => {
                     failures += 1;
                     failures < 3
@@ -691,8 +693,8 @@ case "$("$node" version --json)" in *'"commit":"{commit}"'*) ;; *) echo "still o
             std::thread::sleep(Duration::from_secs(10));
         };
         match said {
-            Ok(r) if r["exit"] == 0 && r["stdout"].as_str().is_some_and(|o| o.trim() == "none") => {}
-            Ok(r) if r["exit"] == 3 => println!("  {name}: {}", r["stderr"].as_str().unwrap_or("").trim()),
+            Ok(r) if r["exit"] == one::protocol::exit::NO_SETTINGS => {}
+            Ok(r) if r["exit"] == one::protocol::exit::REFUSED => println!("  {name}: {}", r["stderr"].as_str().unwrap_or("").trim()),
             Ok(r) if r["exit"] == 0 => {
                 deployed = true;
                 println!("  {name}: deployed to Cloudflare at {commit}");
@@ -703,7 +705,7 @@ case "$("$node" version --json)" in *'"commit":"{commit}"'*) ;; *) echo "still o
             }
             Err(err) => {
                 failed = true;
-                let hint = if format!("{err:#}").contains("isn't on your pages") { " (add Shell in the App Store, or run one update on the device with the Cloudflare settings)" } else { "" };
+                let hint = if one::protocol::Coded::is(&err, one::protocol::code::NOT_INSTALLED) { " (add Shell in the App Store, or run one update on the device with the Cloudflare settings)" } else { "" };
                 println!("  {name}: couldn't deploy to Cloudflare: {err:#}{hint}");
             }
         }

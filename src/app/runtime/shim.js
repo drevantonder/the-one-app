@@ -330,7 +330,8 @@ async function handle(what, name, body, ask, waitUntil, out) {
     if (keep) waitUntil(calls.run(call, () => finish(ask, later, appends)));
     return reply;
   } catch (err) {
-    return { error: String(err?.message ?? err) };
+    // An error with a `code` (`not_signed_in`, `refused`…: src/protocol.rs) says what kind it is, which callers act on.
+    return { error: String(err?.message ?? err), ...(typeof err?.code === "string" ? { code: err.code } : {}) };
   }
 }
 

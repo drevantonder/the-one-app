@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use anyhow::{Result, anyhow, bail};
+use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::sync::{mpsc, oneshot};
@@ -141,7 +141,7 @@ impl Services {
             tokio::time::sleep(Duration::from_millis(50)).await;
             p = self.get(app);
         }
-        let p = p.ok_or_else(|| anyhow!("{app} isn't running on this device"))?;
+        let p = p.ok_or_else(|| crate::protocol::Coded::error(crate::protocol::code::RESTARTING, format!("{app} isn't running on this device")))?;
         let title = p.describe["title"].as_str().filter(|t| !t.trim().is_empty()).unwrap_or(app).to_string();
         let id = self.next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let (tx, rx) = oneshot::channel();
@@ -152,7 +152,7 @@ impl Services {
             return Err(Elsewhere(why.as_str().unwrap_or("it can't run here").into()).into());
         }
         if let Some(err) = reply.get("error") {
-            bail!("{}", err.as_str().unwrap_or("failed"));
+            return Err(crate::protocol::Coded::or_plain(reply["code"].as_str().map(str::to_string), err.as_str().unwrap_or("failed")));
         }
         let blobs = reply["blobs"].as_array().into_iter().flatten().filter_map(|b| b.as_str().map(str::to_string)).collect();
         Ok(Answer { ok: reply["ok"].clone(), blobs })

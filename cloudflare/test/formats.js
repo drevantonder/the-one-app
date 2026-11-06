@@ -1,6 +1,6 @@
 // The Workers' formats, for tests/contracts.rs to check against the Rust that reads them: POST { op, ... } → result.
 import { appOf, askedFor, b64u, canonical, certify, checkCertificate, epochHash, checkRequest, databaseKey, ed25519Public, epochOf, hex, idOf, inviteProof, joinChallenge, joinCode, joinNonce, keyPair, mayHand, oldestNeeded, open, openAppKey, openHandoff, openSealed, openUnder, passkeyKeys, seal, sealAppKey, sealHandoff, sealTo, sealUnder, signStep, signedRequest, tokenId, twinPublic, waited, x25519Public } from "../shared/crypto.js";
-import { copyName, databasePrefix, newestName, stepName, tidiedName, updateRefusal } from "../shared/protocol.js";
+import { CODES, copyName, databasePrefix, newestName, stepName, tidiedName, updateRefusal } from "../shared/protocol.js";
 import { members } from "../web/members.js";
 
 const ops = {
@@ -74,13 +74,14 @@ const ops = {
   async joining({ asked, said }) {
     return { asked: asked.map(([route, node, answer]) => askedFor(route, node, answer)), said: said.map(([status, body]) => waited(status, body)) };
   },
-  /// The bucket's names and the refusal the Workers make: `[prefix, n]` → each of the names, and `[scope, app, database]`
+  /// The bucket's names, the refusal the Workers make and the codes answers carry: `[prefix, n]` → each of the names, and `[scope, app, database]`
   /// → its prefix.
   async names({ names, prefixes, yours }) {
     return {
       names: names.map(([prefix, n]) => [stepName(prefix, n), copyName(prefix, n), tidiedName(prefix), newestName(prefix)]),
       prefixes: prefixes.map(([scope, app, database]) => databasePrefix(scope, app, database)),
       refusal: updateRefusal(yours),
+      codes: CODES,
     };
   },
   async openUnder({ secret, sealed }) {

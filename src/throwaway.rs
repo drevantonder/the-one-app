@@ -642,18 +642,13 @@ fn again(ask: impl Fn() -> Result<Value>) -> Result<Value> {
     let start = Instant::now();
     loop {
         match ask() {
-            Err(err) if start.elapsed() < Duration::from_secs(180) && restarting(&format!("{err:#}")) => {
+            Err(err) if start.elapsed() < Duration::from_secs(180) && one::protocol::Coded::is(&err, one::protocol::code::RESTARTING) => {
                 eprintln!("{NAME} is restarting here; asking again once it's back…");
                 std::thread::sleep(Duration::from_secs(5));
             }
             out => return out,
         }
     }
-}
-
-/// Whether an error is the node or a service of it restarting, not the call failing.
-fn restarting(err: &str) -> bool {
-    ["isn't running here", "isn't running on this device", "no device runs agent-devices", "none of yours runs it"].iter().any(|s| err.contains(s))
 }
 
 /// A command run on a device, and what it said.

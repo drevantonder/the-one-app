@@ -215,7 +215,7 @@ impl Apps {
         })
         .await??;
         if let Some(err) = reply.get("error") {
-            bail!("{}", err.as_str().unwrap_or("the app failed"));
+            return Err(crate::protocol::Coded::or_plain(reply["code"].as_str().map(str::to_string), err.as_str().unwrap_or("the app failed")));
         }
         Ok(reply)
     }

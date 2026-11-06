@@ -313,7 +313,8 @@ pub struct CallRequest {
 /// What a device says to a call.
 enum Reply {
     Ok(Value),
-    Error(String),
+    /// It failed, saying why and, for the kinds callers act on, which kind (`protocol::code`).
+    Error(String, Option<String>),
     /// It can't run here; try another device.
     Elsewhere(String),
     /// It lacks keys its caller hands: said as the API says it (`{ error, need, to, seal }`), so the device that passed
@@ -322,10 +323,21 @@ enum Reply {
 }
 
 impl Reply {
+    /// It failed without a kind.
+    fn error(why: impl Into<String>) -> Reply {
+        Reply::Error(why.into(), None)
+    }
+
+    /// It failed as `err` says, with the kind `err` is.
+    fn failed(err: &anyhow::Error) -> Reply {
+        Reply::Error(format!("{err:#}"), crate::protocol::Coded::of(err))
+    }
+
     fn json(self) -> Value {
         match self {
             Reply::Ok(v) => json!({ "ok": v }),
-            Reply::Error(e) => json!({ "error": e }),
+            Reply::Error(e, None) => json!({ "error": e }),
+            Reply::Error(e, Some(code)) => json!({ "error": e, "code": code }),
             Reply::Elsewhere(w) => json!({ "elsewhere": w }),
             Reply::Needs(n) => json!({ "error": n.to_string(), "need": n.need, "to": n.to, "seal": n.seal }),
         }
@@ -342,7 +354,7 @@ impl Reply {
             return Reply::Needs(Needs { need, to: said("to"), seal: said("seal") });
         }
         match v.get("error") {
-            Some(e) => Reply::Error(e.as_str().unwrap_or("failed").into()),
+            Some(e) => Reply::Error(e.as_str().unwrap_or("failed").into(), v["code"].as_str().map(str::to_string)),
             None => Reply::Ok(v["ok"].clone()),
         }
     }

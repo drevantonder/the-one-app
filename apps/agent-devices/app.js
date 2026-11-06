@@ -16,7 +16,7 @@ async function service(ctx, fn, input, on) {
   try {
     return await ctx.services["agent-devices"][fn](input, on ? { device: on } : undefined);
   } catch (err) {
-    if (String(err.message).includes("no device runs agent-devices for you")) throw new Error(NEEDS);
+    if (String(err.message).includes("no device runs agent-devices for you")) throw Object.assign(new Error(NEEDS), { code: "restarting" });
     throw err;
   }
 }

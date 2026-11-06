@@ -200,6 +200,7 @@ function pick(chats, want) {
 
 /// A browser profile Messenger reads isn't signed in to it.
 class NotSignedIn extends Error {
+  code = "not_signed_in";
   constructor() {
     super("Messenger isn't signed in on that browser profile. Ask the person to sign in again: messenger_sign_in with the profile gives them a link, where they sign in at messenger.com (with Keep me signed in), then save the profile");
   }

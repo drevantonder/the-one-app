@@ -47,6 +47,11 @@ async fn unless_writing<T>(deadline: tokio::time::Instant, writing: &AtomicBool,
     if writing.load(Ordering::Relaxed) { Some(work.await) } else { None }
 }
 
+/// No device of the person's runs `app`: it isn't installed anywhere, or its node or service is starting (`restarting`).
+fn no_device(app: &str) -> crate::protocol::Coded {
+    crate::protocol::Coded::new(crate::protocol::code::RESTARTING, format!("None of your devices can do this: no device runs {app} for you"))
+}
+
 /// A call a client device picked this node for that this node can't run: the API answers 421 with the nodes that can,
 /// in the order to ask them (`{ error, elsewhere }`), which the client asks itself, handing each its own keys.
 #[derive(Debug)]
@@ -97,7 +102,7 @@ impl Node {
         }
         let req = self.reaching(req, &me)?;
         let devices = self.candidates(&req, &me)?;
-        ensure!(!devices.is_empty(), "None of your devices can do this: no device runs {} for you", req.app);
+        ensure!(!devices.is_empty(), no_device(&req.app));
         let others: Vec<String> = devices.iter().filter(|k| **k != self.0.id).map(hex).collect();
         let started = Instant::now();
         let name = self.device_name();
@@ -112,9 +117,9 @@ impl Node {
                 tried("ran", None);
                 Ok(v)
             }
-            Ok(Reply::Error(e)) => {
+            Ok(Reply::Error(e, code)) => {
                 tried("failed", None);
-                bail!("{e}")
+                return Err(crate::protocol::Coded::or_plain(code, e))
             }
             Ok(Reply::Elsewhere(why)) if !others.is_empty() => {
                 tried("elsewhere", Some(&why));
@@ -197,9 +202,9 @@ impl Node {
                     let _ = self.with(|i| Ok(i.nearest.insert(device, started.elapsed())));
                     return Ok(v);
                 }
-                Ok((Reply::Error(e), theirs)) => {
+                Ok((Reply::Error(e, code), theirs)) => {
                     tried("failed", json!({ "here": here, "trace": theirs }));
-                    bail!("{e}")
+                    return Err(crate::protocol::Coded::or_plain(code, e))
                 }
                 Ok((Reply::Elsewhere(w), theirs)) => {
                     tried("elsewhere", json!({ "here": here, "why": w, "trace": theirs }));
@@ -224,7 +229,7 @@ impl Node {
             bail!("{problem}");
         }
         if why.is_empty() {
-            bail!("None of your devices can do this: no device runs {} for you", req.app);
+            bail!(no_device(&req.app));
         }
         bail!("None of your devices can do this now. Try again soon. ({})", why.join("; "))
     }
@@ -262,13 +267,13 @@ impl Node {
             };
             let answer = match reply {
                 Ok(Reply::Ok(v)) => v,
-                Ok(Reply::Error(e) | Reply::Elsewhere(e)) => json!({ "error": e }),
+                Ok(Reply::Error(e, _) | Reply::Elsewhere(e)) => json!({ "error": e }),
                 Ok(Reply::Needs(n)) => json!({ "error": n.to_string() }),
                 Err(err) => json!({ "error": format!("{err:#}") }),
             };
             out.insert(self.name_of(&device), answer);
         }
-        ensure!(!out.is_empty(), "None of your devices can do this: no device runs {} for you", req.app);
+        ensure!(!out.is_empty(), no_device(&req.app));
         Ok(Value::Object(out))
     }
 
@@ -452,9 +457,9 @@ impl Node {
             Some(Ok(reply)) => reply,
             Some(Err(err)) => match err.downcast::<sessions::Needs>() {
                 Ok(need) => return Err(need),
-                Err(err) => Reply::Error(format!("{err:#}")),
+                Err(err) => Reply::failed(&err),
             },
-            None => Reply::Error(stopped(limit)),
+            None => Reply::error(stopped(limit)),
         })
     }
 
@@ -486,7 +491,7 @@ impl Node {
         if req.service.as_deref() == Some(crate::push::NAME) {
             return Ok(match self.push(&req.tool, &input, me, req.from.as_deref()).await {
                 Ok(v) => Reply::Ok(v),
-                Err(err) => Reply::Error(format!("{err:#}")),
+                Err(err) => Reply::failed(&err),
             });
         }
         if req.service.is_some() {
@@ -496,7 +501,7 @@ impl Node {
             // A service that runs as this device's own person (Shell, say) never runs for a call another node passed
             // on, from whichever path it came: a hacked node gets only the calls it ran.
             if passed(me) && !self.0.services.serves_everyone(&req.app) {
-                return Ok(Reply::Error(format!("{} runs only for its person's own devices", req.app)));
+                return Ok(Reply::error(format!("{} runs only for its person's own devices", req.app)));
             }
             return match self.run_service(&req.app, &req.tool, input, me, req.from.clone()).await {
                 Err(err) if err.is::<crate::services::Elsewhere>() => Ok(Reply::Elsewhere(err.to_string())),
@@ -523,11 +528,11 @@ impl Node {
             return Ok(Reply::Elsewhere(format!("it doesn't have {}'s latest version yet", req.app)));
         }
         if self.deleted(&req.app) {
-            return Ok(Reply::Error(format!("{title} was deleted: its owners can restore it from Recently Deleted in the App Store")));
+            return Ok(Reply::error(format!("{title} was deleted: its owners can restore it from Recently Deleted in the App Store")));
         }
         if let Some(why) = self.stopped(&req.app) {
             self.record(&req.app, req, me, Some(&why));
-            return Ok(Reply::Error(why));
+            return Ok(Reply::error(why));
         }
         // A tool of a lab that's off isn't there.
         let described = self.0.apps.describe(&req.app).await?;
@@ -535,7 +540,7 @@ impl Node {
             && !self.with(|i| Ok(crate::labs::on(&i.r.db().settings(), &crate::labs::app_key(&req.app, lab))))?
         {
             let lab_title = described["labs"][lab]["title"].as_str().unwrap_or(lab);
-            return Ok(Reply::Error(format!("{lab_title} is off. An admin can turn it on in Settings › Labs.")));
+            return Ok(Reply::error(format!("{lab_title} is off. An admin can turn it on in Settings › Labs.")));
         }
         // A sign-in's call that lacks a key of a scope it names fails here, before it runs or writes anything: its
         // app's database's, and the Vault's there too if it says it uses items.
@@ -556,7 +561,7 @@ impl Node {
                 let taken = self.take_lease(&base).await?;
                 trace::note(json!({ "step": "lease" }), leasing.elapsed());
                 let Some(taken) = taken else {
-                    return Ok(Reply::Error("This may already be done: it ran on another device, whose answer was lost. Check before trying again.".into()));
+                    return Ok(Reply::error("This may already be done: it ran on another device, whose answer was lost. Check before trying again."));
                 };
                 lease = Some(taken);
             }
@@ -1231,7 +1236,7 @@ impl Node {
             Ok((mut req, me)) => {
                 req.puts = match self.take_carried(&me, request) {
                     Ok(puts) => puts,
-                    Err(err) => return Reply::Error(format!("{err:#}")),
+                    Err(err) => return Reply::failed(&err),
                 };
                 let reply = self.run(&req, &me).await;
                 for hash in &req.puts {
@@ -1239,7 +1244,7 @@ impl Node {
                 }
                 reply
             }
-            Err(err) => Reply::Error(format!("{err:#}")),
+            Err(err) => Reply::failed(&err),
         }
     }
 
@@ -1250,10 +1255,10 @@ impl Node {
             // Its own service on another of its person's devices: sent there.
             Ok((req, me)) if req.device.is_some() => match self.route(req, me).await {
                 Ok(ok) => Reply::Ok(ok),
-                Err(err) => Reply::Error(format!("{err:#}")),
+                Err(err) => Reply::failed(&err),
             },
             Ok((req, me)) => self.run(&req, &me).await,
-            Err(err) => Reply::Error(format!("{err:#}")),
+            Err(err) => Reply::failed(&err),
         }
     }
 
@@ -1400,7 +1405,7 @@ fn prepare(node: &Node, i: &Network, req: &CallRequest, me: &Caller, title: &str
         }
     };
     if reach.is_empty() {
-        bail!("{title} isn't on your pages: add it first");
+        bail!(crate::protocol::Coded::new(crate::protocol::code::NOT_INSTALLED, format!("{title} isn't on your pages: add it first")));
     }
     if let Some(s) = scopes.iter().find(|s| !i.r.holds(s)) {
         return Ok(Err(format!("it can't open {} yet", scope_name(i, &s.to_string()))));

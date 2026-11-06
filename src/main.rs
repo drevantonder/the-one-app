@@ -1182,9 +1182,10 @@ fn request(resp: Result<ureq::http::Response<ureq::Body>, ureq::Error>) -> Resul
             NEEDED.with(|n| *n.borrow_mut() = Some(body.clone()));
         }
         let err = err.as_str().unwrap_or("failed").to_string();
-        return Err(match refused {
+        let code = body.get("code").and_then(Value::as_str).map(str::to_string);
+        return Err(match refused || code.as_deref() == Some(one::protocol::code::REFUSED) {
             true => tools::Failed::Refused(err).into(),
-            false => anyhow::anyhow!(err),
+            false => one::protocol::Coded::or_plain(code, err),
         });
     }
     Ok(body)
