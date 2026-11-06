@@ -308,6 +308,7 @@ impl Node {
                     tracing::warn!("reading {scope}'s status: {err:#}");
                 }
             }
+            node.emit(super::Event::Changed { apps: Vec::new() });
         });
     }
 }
