@@ -772,6 +772,9 @@ pub const PROBLEM: &str = "problem";
 enum Running {
     Child(std::process::Child),
     Unit(String),
+    /// A Mac helper app's program (`oned::helper`), a process macOS holds responsible for itself.
+    #[cfg(target_os = "macos")]
+    Own(libc::pid_t),
 }
 
 impl Running {
@@ -782,6 +785,16 @@ impl Running {
             Running::Unit(unit) => {
                 let state = crate::sandbox::systemctl(&["is-active", unit])?;
                 (!["active", "activating", "reloading"].contains(&state.as_str())).then_some(state)
+            }
+            #[cfg(target_os = "macos")]
+            Running::Own(pid) => {
+                let mut status = 0;
+                // SAFETY: waits without blocking for a child of this process.
+                match unsafe { libc::waitpid(*pid, &mut status, libc::WNOHANG) } {
+                    0 => None,
+                    -1 => Some("gone".into()),
+                    _ => Some(format!("wait status {status}")),
+                }
             }
         })
     }
@@ -794,7 +807,60 @@ impl Running {
                     eprintln!("stopping {unit}: {err:#}");
                 }
             }
+            #[cfg(target_os = "macos")]
+            Running::Own(pid) => {
+                // SAFETY: signals to, and waits for, a child of this process, which it hasn't reaped.
+                unsafe {
+                    libc::kill(*pid, libc::SIGTERM);
+                    for _ in 0..100 {
+                        if libc::waitpid(*pid, std::ptr::null_mut(), libc::WNOHANG) != 0 {
+                            return;
+                        }
+                        std::thread::sleep(Duration::from_millis(100));
+                    }
+                    libc::kill(*pid, libc::SIGKILL);
+                    libc::waitpid(*pid, std::ptr::null_mut(), 0);
+                }
+            }
         }
+    }
+}
+
+/// Starts `command` as a process macOS holds responsible for itself, not for this one: so a Mac helper app's
+/// permissions are asked for and recorded under its own name, not the Mac app's that started oned. Its id.
+#[cfg(target_os = "macos")]
+fn disclaimed(command: &std::process::Command) -> Result<libc::pid_t> {
+    use std::ffi::{CString, OsStr, OsString};
+    use std::os::unix::ffi::OsStrExt;
+    unsafe extern "C" {
+        // libSystem's, as Chromium and LLDB start what they run.
+        fn responsibility_spawnattrs_setdisclaim(attr: *mut libc::posix_spawnattr_t, disclaim: libc::c_int) -> libc::c_int;
+    }
+    let c = |s: &OsStr| CString::new(s.as_bytes());
+    let program = c(command.get_program())?;
+    let args: Vec<CString> = std::iter::once(command.get_program()).chain(command.get_args()).map(c).collect::<Result<_, _>>()?;
+    let mut vars: std::collections::BTreeMap<OsString, OsString> = std::env::vars_os().collect();
+    for (k, v) in command.get_envs() {
+        match v {
+            Some(v) => vars.insert(k.into(), v.into()),
+            None => vars.remove(k),
+        };
+    }
+    let env: Vec<CString> = vars.iter().map(|(k, v)| CString::new([k.as_bytes(), b"=", v.as_bytes()].concat())).collect::<Result<_, _>>()?;
+    let pointers = |all: &[CString]| all.iter().map(|a| a.as_ptr() as *mut libc::c_char).chain(std::iter::once(std::ptr::null_mut())).collect::<Vec<_>>();
+    let (argv, envp) = (pointers(&args), pointers(&env));
+    // SAFETY: the attributes are made, used and destroyed here; every string outlives the call.
+    unsafe {
+        let mut attr: libc::posix_spawnattr_t = std::ptr::null_mut();
+        ensure!(libc::posix_spawnattr_init(&mut attr) == 0, "posix_spawnattr_init failed");
+        let mut pid = 0;
+        let mut r = responsibility_spawnattrs_setdisclaim(&mut attr, 1);
+        if r == 0 {
+            r = libc::posix_spawn(&mut pid, program.as_ptr(), std::ptr::null(), &attr, argv.as_ptr(), envp.as_ptr());
+        }
+        libc::posix_spawnattr_destroy(&mut attr);
+        ensure!(r == 0, "{}", std::io::Error::from_raw_os_error(r));
+        Ok(pid)
     }
 }
 
@@ -858,6 +924,10 @@ fn begin(name: &str, program: &Path, data: &Path, at: std::net::SocketAddr, serv
                 Ok(())
             });
         }
+    }
+    #[cfg(target_os = "macos")]
+    if crate::oned::helper(name).as_deref() == Some(program) {
+        return Ok(Running::Own(disclaimed(&command).with_context(|| format!("starting {}", program.display()))?));
     }
     Ok(Running::Child(command.spawn().with_context(|| format!("starting {}", program.display()))?))
 }

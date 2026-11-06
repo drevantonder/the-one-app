@@ -25,6 +25,7 @@ impl Node {
         if let Some(why) = self.removed_here(app) {
             bail!("{why}");
         }
+        self.stand_down(app)?;
         if let Some(domain) = describe["domain"].as_str() {
             self.logo(domain, app);
         }
@@ -66,6 +67,26 @@ impl Node {
     pub fn parts_changed(&self) {
         self.emit(Event::Devices);
         self.say_hello();
+    }
+
+    /// Whether this device's own endpoint for the service `name` serves it, as its last hello said: a Mac's helper app,
+    /// once macOS gave it its permission.
+    pub fn part_serves(&self, name: &str) -> bool {
+        self.with(|i| Ok(i.r.db().offering(name).into_iter().any(|s| s.device == Some(self.0.id) && i.online(&s.key) && i.peers.get(&s.key).is_some_and(|p| p.services.iter().any(|(n, ..)| n == name)))))
+            .unwrap_or(false)
+    }
+
+    /// Refuses the Mac app's own copy of a service whose helper app serves it here now, and forgets it if it was
+    /// registered: the Mac app, asking again every few seconds, answers again only if the helper stops.
+    pub fn stand_down(&self, app: &str) -> Result<()> {
+        if self.part_serves(app) {
+            if self.0.services.forget(app) {
+                self.emit(Event::Changed { apps: vec![app.to_string()] });
+                self.say_hello();
+            }
+            bail!("{} runs as its own program on {} now", self.service_title(app), self.device_name());
+        }
+        Ok(())
     }
 
     /// Says hello to this device's part `name`, a service endpoint of its own, which answers once it's up.
@@ -167,7 +188,7 @@ impl Node {
     }
 
     /// Why a service isn't served here, if its person switched it off.
-    pub(super) fn removed_here(&self, name: &str) -> Option<String> {
+    pub fn removed_here(&self, name: &str) -> Option<String> {
         self.with(|i| {
             let m = i.r.db();
             Ok(Self::off(m, &self.0.id, name).then(|| format!("{} is switched off on {}; its person switches it on in Settings › Devices", self.service_title(name), self.device_name())))

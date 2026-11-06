@@ -1,5 +1,5 @@
-// Contacts: Contacts on the person's Mac. The contacts service lives in the Mac app, which macOS lets reach Contacts;
-// this app is what people and agents use, wherever they are.
+// Contacts: Contacts on the person's Mac. Its service (service/) is a helper app inside the Mac app, which macOS lets
+// reach Contacts; this app is what people and agents use, wherever they are.
 
 /// Runs one of the contacts service's functions, wherever it runs for the caller. When none of their devices runs it,
 /// says what's needed instead of how the call failed.
@@ -27,6 +27,7 @@ export default {
   needs: "Needs a Mac",
   instructions: "Contacts are the person's Apple Contacts, through their Mac. contacts_search finds people by name, email address or phone number; contacts_me is the person's own card.",
   uses: { services: ["contacts"] },
+  service: { network: [], person: true, platforms: ["mac"] },
 
   tools: {
     devices: {

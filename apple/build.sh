@@ -86,6 +86,11 @@ if [ -n "$PUSH" ]; then
 	/usr/libexec/PlistBuddy -c "Add :com.apple.developer.aps-environment string $aps" "$entitlements"
 	keychain "${sign[@]}" --entitlements "$PWD/build/MacNotifications.entitlements" "$PWD/$appex" || { echo "couldn't sign the notification extension as ${identity:-ad hoc}"; exit 1; }
 fi
+# Its Mac services in Swift, each a helper app of its own holding its own permission (service/mac-helpers.sh), which
+# oned runs from here.
+keychain env CONFIG="$config" SIGN="$identity" ICON="$PWD/build/AppIcon.icns" "$root/service/mac-helpers.sh" || { echo "couldn't build the Mac's helper apps"; exit 1; }
+rm -rf "$app/Contents/Helpers"
+[ -z "$(ls "$root/target/mac-helpers")" ] || ditto "$root/target/mac-helpers" "$app/Contents/Helpers"
 for s in "$app/Contents/MacOS/$CONFIG_CLI"-*; do
 	[ -e "$s" ] || continue
 	keychain "${sign[@]}" "$PWD/$s" || { echo "couldn't sign $s as ${identity:-ad hoc}"; exit 1; }

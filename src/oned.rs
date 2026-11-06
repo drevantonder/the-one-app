@@ -67,7 +67,21 @@ pub fn fetched(name: &str) -> PathBuf {
 pub fn carried(name: &str) -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
     let path = exe.parent()?.join(format!("{CLI}-{name}"));
-    (path.exists() && path != fetched(name)).then_some(path)
+    (path.exists() && path != fetched(name)).then_some(path).or_else(|| helper(name))
+}
+
+/// A Mac service's helper app the Mac app carries (`Contents/Helpers/<Title> — <App>.app`, service/mac-helpers.sh):
+/// its program, which holds its own macOS permission.
+pub fn helper(name: &str) -> Option<PathBuf> {
+    let program = format!("{CLI}-{name}");
+    helpers().into_iter().find(|p| p.file_name().is_some_and(|f| f.to_string_lossy() == program))
+}
+
+/// Every helper app's program the Mac app carries.
+fn helpers() -> Vec<PathBuf> {
+    let Some(dir) = std::env::current_exe().ok().and_then(|e| Some(e.parent()?.parent()?.join("Helpers"))) else { return Vec::new() };
+    let apps = std::fs::read_dir(dir).into_iter().flatten().flatten().map(|e| e.path().join("Contents/MacOS"));
+    apps.flat_map(std::fs::read_dir).flatten().flatten().map(|e| e.path()).filter(|p| p.file_name().is_some_and(|f| f.to_string_lossy().starts_with(&format!("{CLI}-")))).collect()
 }
 
 /// The services this device could run as processes of oned's: those with a release for its platform (`released`),
@@ -77,6 +91,10 @@ fn offered(released: &BTreeSet<String>, on: &BTreeMap<String, u64>) -> BTreeSet<
     let mut names = BTreeSet::new();
     let dirs = [fetched("x"), std::env::current_exe().unwrap_or_default()].map(|p| p.parent().map(|p| p.to_path_buf()).unwrap_or_default());
     let prefix = format!("{CLI}-");
+    // A helper runs unless switched off, as the Mac app's own services did.
+    for program in helpers() {
+        names.extend(program.file_name().and_then(|f| f.to_string_lossy().strip_prefix(&prefix).map(str::to_string)));
+    }
     for entry in dirs.iter().flat_map(std::fs::read_dir).flatten().flatten() {
         let file = entry.file_name().to_string_lossy().to_string();
         let Some(name) = file.strip_prefix(&prefix).filter(|n| crate::members::valid_app_name(n)) else { continue };
@@ -252,7 +270,9 @@ pub fn keep_parts(node: Node, runtime: tokio::runtime::Handle) {
                     let names = offered(&released.iter().filter(|(_, b)| **b != Build::None).map(|(n, _)| n.clone()).collect(), &on);
                     NOW.lock().unwrap().1 = names.clone();
                     for name in &names {
-                        let wanted = on.contains_key(name);
+                        // A Mac service's helper the Mac app carries runs unless its person switched it off there, as
+                        // the Mac app's own services did; any other, only where it's switched on.
+                        let wanted = on.contains_key(name) || (helper(name).is_some() && node.removed_here(name).is_none());
                         if let Some(at) = on.get(name)
                             && switched.insert(name.clone(), *at).is_some_and(|was| was != *at)
                         {

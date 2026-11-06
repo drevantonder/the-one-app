@@ -85,6 +85,11 @@ impl Services {
         before.is_none_or(|p| p.describe != describe || p.seen.lock().unwrap().elapsed() >= GONE_AFTER)
     }
 
+    /// Forgets `app`, registered here; whether it was. Calls waiting for its answer fail.
+    pub fn forget(&self, app: &str) -> bool {
+        self.by_app.lock().unwrap().remove(app).is_some()
+    }
+
     /// Notes that `app` asked to register here, switched on or not.
     pub fn offer(&self, app: &str, describe: &Value) {
         self.offered.lock().unwrap().insert(app.to_string(), (describe.clone(), Instant::now()));

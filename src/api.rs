@@ -1233,6 +1233,7 @@ async fn register(State(node): State<Node>, Path(app): Path<String>, Json(descri
 }
 
 async fn next_call(State(node): State<Node>, Path(app): Path<String>) -> Result<Response, Error> {
+    node.stand_down(&app)?;
     Ok(match node.services().next(&app).await? {
         Some(call) => Json(json!(call)).into_response(),
         None => StatusCode::NO_CONTENT.into_response(),
