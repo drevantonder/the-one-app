@@ -7,7 +7,7 @@
 //! its databases (`src/db.rs`), and runs its tools, widgets, hooks and screens.
 //! When the deploys change, the node writes the config again and restarts workerd.
 //! Every request an app makes (its `fetch`es, and the shim's asks of the node) goes to the node's outbound port,
-//! `src/outbound.rs`, carrying the token of the call it's made in.
+//! `src/app/outbound.rs`, carrying the token of the call it's made in.
 
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
@@ -69,7 +69,7 @@ pub struct Context {
     pub scopes: Vec<ScopeHandle>,
     /// A call on data opened for its caller: appends fail.
     pub read_only: bool,
-    /// What the call's requests carry, so the node knows whose they are (see `src/outbound.rs`).
+    /// What the call's requests carry, so the node knows whose they are (see `src/app/outbound.rs`).
     pub token: String,
     /// The app whose `ctx.apps` made the call, if one did.
     pub from: Option<String>,

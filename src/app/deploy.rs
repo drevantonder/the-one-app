@@ -23,7 +23,7 @@ pub fn bun() -> Result<PathBuf> {
     let (_, package, integrity) =
         PACKAGES.iter().find(|(target, _, _)| *target == crate::config::TARGET).ok_or_else(|| anyhow!("deploying from {} isn't possible yet: Bun has no build for it", crate::config::TARGET))?;
     let url = format!("https://registry.npmjs.org/@oven/bun-{package}/-/bun-{package}-{BUN}.tgz");
-    crate::apps::pinned(&format!("bun-{BUN}"), "bun", &url, integrity)
+    crate::app::runtime::pinned(&format!("bun-{BUN}"), "bun", &url, integrity)
 }
 
 /// A browser with no window on this machine, for drawing screens (one throwaway's web client, the tests), started as lean as
@@ -69,11 +69,11 @@ pub fn chrome() -> Option<std::process::Command> {
 /// `src/`, the folder's files as written (without `node_modules` and dot files), and `services`, its service's builds
 /// by platform, as blobs (`bundle::SERVICES`).
 pub fn build(dir: &Path, services: &std::collections::BTreeMap<String, String>) -> Result<Vec<u8>> {
-    let mut files = crate::bundle::unpack(&bundle(dir, true)?)?;
+    let mut files = crate::app::bundle::unpack(&bundle(dir, true)?)?;
     if !services.is_empty() {
-        files.insert(1, (crate::bundle::SERVICES.to_string(), serde_json::to_vec(services)?));
+        files.insert(1, (crate::app::bundle::SERVICES.to_string(), serde_json::to_vec(services)?));
     }
-    crate::bundle::pack(&files)
+    crate::app::bundle::pack(&files)
 }
 
 /// `build`, with the React screens built first (`screens`) or, for a built-in app, whose `dist/` was built when it was
@@ -125,8 +125,8 @@ fn bundle(dir: &Path, build_screens: bool) -> Result<Vec<u8>> {
     });
     let _ = std::fs::remove_dir_all(&out);
     let mut files = vec![("app.js".to_string(), module?)];
-    files.extend(crate::bundle::sources(dir)?.into_iter().map(|(path, bytes)| (format!("src/{path}"), bytes)));
-    crate::bundle::pack(&files)
+    files.extend(crate::app::bundle::sources(dir)?.into_iter().map(|(path, bytes)| (format!("src/{path}"), bytes)));
+    crate::app::bundle::pack(&files)
 }
 
 /// Whether an app's files, by path, have a React screen: `screens/<name>.jsx` or `.tsx`, which `screens` builds.
@@ -165,7 +165,7 @@ fn screens(dir: &Path) -> Result<()> {
         ),
     };
     let tools = screen_tools(&install.0, install.1)?;
-    let shared: serde_json::Value = serde_json::from_str(include_str!("screen/ui/dist/importmap.json"))?;
+    let shared: serde_json::Value = serde_json::from_str(include_str!("../screen/ui/dist/importmap.json"))?;
     let shared: Vec<&String> = shared["imports"].as_object().context("@one/ui's import map has no imports")?.keys().collect();
     let out = std::process::Command::new(&runtime)
         .arg(tools.join("screens.mjs"))
@@ -190,10 +190,10 @@ fn screens(dir: &Path) -> Result<()> {
 fn screen_tools(installer: &Path, install: &[&str]) -> Result<PathBuf> {
     use sha2::Digest;
     let files: [(&str, &str); 4] = [
-        ("package.json", include_str!("screen/ui/package.json")),
-        ("bun.lock", include_str!("screen/ui/bun.lock")),
-        ("src/theme.css", include_str!("screen/ui/src/theme.css")),
-        ("screens.mjs", include_str!("screen/ui/screens.mjs")),
+        ("package.json", include_str!("../screen/ui/package.json")),
+        ("bun.lock", include_str!("../screen/ui/bun.lock")),
+        ("src/theme.css", include_str!("../screen/ui/src/theme.css")),
+        ("screens.mjs", include_str!("../screen/ui/screens.mjs")),
     ];
     let mut hash = sha2::Sha256::new();
     for (path, text) in files {
@@ -305,7 +305,7 @@ fn tempdir() -> Result<PathBuf> {
 /// The files of a bundle, or one of them: `{ files: [{ path, size }] }`, or `{ path, text }` (`{ path, base64 }` if
 /// it isn't text).
 pub fn show(bundle: &[u8], path: Option<&str>) -> Result<serde_json::Value> {
-    let files = crate::bundle::unpack(bundle)?;
+    let files = crate::app::bundle::unpack(bundle)?;
     Ok(match path {
         None => serde_json::json!({ "files": files.iter().map(|(p, b)| serde_json::json!({ "path": p, "size": b.len() })).collect::<Vec<_>>() }),
         Some(path) => {

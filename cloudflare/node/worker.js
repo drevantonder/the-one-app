@@ -6,7 +6,7 @@
 // some is answered 428 with what it needs, as a node on a machine answers. Who can do what it reads from the network's
 // log in the bucket and asks of the scope database it builds from it (src/lib.rs, the machine node's own Rust), and
 // each app's latest deploy from the bucket too, through the URL signer's URLs, keeping what it read sealed in its
-// Durable Object's storage, so a wake fetches only what's newer; it runs an app in an isolate of its own (Worker Loader, src/runtime/shim.js as its `ctx`) and writes
+// Durable Object's storage, so a wake fetches only what's newer; it runs an app in an isolate of its own (Worker Loader, src/app/runtime/shim.js as its `ctx`) and writes
 // what a call wrote as one step (src/db.rs). An app's requests go out from here, filled in with the Vault's items it's
 // switched on for, read as any node reads them: each scope's `vault` database, opened with the keys handed for it.
 //
@@ -526,7 +526,7 @@ class Person {
     }));
   }
 
-  /// What an app's latest deploy says it is and does (src/runtime/shim.js: `describe`).
+  /// What an app's latest deploy says it is and does (src/app/runtime/shim.js: `describe`).
   describe(who, app) {
     const id = `${app.name}-${app.bundle}`;
     if (!this.described.has(id)) {

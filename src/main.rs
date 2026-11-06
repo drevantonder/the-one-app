@@ -990,7 +990,7 @@ fn built_with_service(dir: &std::path::Path) -> Result<(String, String)> {
             service += &format!(" Not for {}: this machine can't build it for them, so deploy it again from one that can.", said(missed));
         }
     }
-    Ok((put_blob(&one::deploy::build(dir, &builds)?)?, service))
+    Ok((put_blob(&one::app::deploy::build(dir, &builds)?)?, service))
 }
 
 /// Keeps `bytes` as a blob on this machine's node, giving its hash.
@@ -1002,9 +1002,9 @@ fn put_blob(bytes: &[u8]) -> Result<String> {
 /// service in Go, which only the machine that deploys builds. → the bundle, and what was built of its service.
 fn built_here(files: &Map<String, Value>) -> Result<(String, String)> {
     anyhow::ensure!(!files.contains_key("service/Cargo.toml"), "its service is in Rust, whose build would run its build scripts here: deploy it with {CLI} deploy <its folder>");
-    let files = one::deploy::given(files)?;
+    let files = one::app::deploy::given(files)?;
     if !files.iter().any(|(p, _)| p == "service/go.mod") {
-        return Ok((put_blob(&one::deploy::build_files(&files.iter().map(|(p, b)| (p.as_str(), b.as_slice())).collect::<Vec<_>>())?)?, String::new()));
+        return Ok((put_blob(&one::app::deploy::build_files(&files.iter().map(|(p, b)| (p.as_str(), b.as_slice())).collect::<Vec<_>>())?)?, String::new()));
     }
     let dir = std::env::temp_dir().join(format!("{CLI}-deploy-{}", std::process::id()));
     let built = (|| {
@@ -1454,7 +1454,7 @@ fn oned(args: &[String]) -> Result<()> {
             IN_NODE.store(true, std::sync::atomic::Ordering::Relaxed);
             serve(args.iter().any(|a| a == "--throwaway"), args)
         }
-        [name] if *name == one::members::APPS_PART && let Some(dir) = args.iter().find_map(|a| a.strip_prefix("--runtime=")) => one::apps::run(std::path::Path::new(dir)),
+        [name] if *name == one::members::APPS_PART && let Some(dir) = args.iter().find_map(|a| a.strip_prefix("--runtime=")) => one::app::runtime::run(std::path::Path::new(dir)),
         [name] => one::service::run(name),
         _ => bail!("{} runs this device, or with a service's name, that service, as its oned starts it", one::oned::name()),
     }
@@ -1470,7 +1470,7 @@ async fn serve(is_try: bool, args: &[String]) -> Result<()> {
     let stop = stopped()?;
     tokio::spawn(async move {
         stop.await;
-        one::apps::stop_all();
+        one::app::runtime::stop_all();
         std::process::exit(0)
     });
     let dir = one::home();
@@ -1483,7 +1483,7 @@ async fn serve(is_try: bool, args: &[String]) -> Result<()> {
         None => listen(&dir).await?,
     };
     // Its app runtime is a program of its own, which oned starts as its parts.
-    one::apps::APART.store(true, std::sync::atomic::Ordering::SeqCst);
+    one::app::runtime::APART.store(true, std::sync::atomic::Ordering::SeqCst);
     let node = Node::start(&dir).await?;
     // Its parts that run as processes of their own, as its entries switch them.
     one::oned::keep_parts(node.clone(), tokio::runtime::Handle::current());
@@ -1576,7 +1576,7 @@ async fn serve(is_try: bool, args: &[String]) -> Result<()> {
     tracing::info!("{NAME} node {} answering", &one::entry::hex(&node.id())[..8]);
     one::handoff::watch();
     let served = http.await;
-    one::apps::stop_all();
+    one::app::runtime::stop_all();
     if one::handoff::stopped() {
         std::process::exit(0);
     }
@@ -2402,7 +2402,7 @@ fn answer_tool(params: &Value, agent: Option<&str>, mode: Mode) -> Value {
             let mut service = String::new();
             let body = match (input.get("files"), input.get("version")) {
                 // React screens and a service are built here, on the machine that deploys, as `deploy <folder>` builds them.
-                (Some(Value::Object(files)), None) if !signed_in() && (one::deploy::has_screens(files.keys().map(String::as_str)) || files.keys().any(|p| p.starts_with("service/"))) => match built_here(files) {
+                (Some(Value::Object(files)), None) if !signed_in() && (one::app::deploy::has_screens(files.keys().map(String::as_str)) || files.keys().any(|p| p.starts_with("service/"))) => match built_here(files) {
                     Ok((bundle, built)) => {
                         service = built;
                         json!({ "app": app, "bundle": bundle, "wait": true })

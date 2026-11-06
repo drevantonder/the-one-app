@@ -218,7 +218,7 @@ impl Node {
         ensure!(matches!(uri.scheme_str(), Some("https" | "http")), "only http and https addresses");
         let host = uri.host().context("the address has no host")?.trim_start_matches('[').trim_end_matches(']').to_lowercase();
         let port = uri.port_u16().unwrap_or(if uri.scheme_str() == Some("https") { 443 } else { 80 });
-        ensure!(!crate::outbound::own_port(self, &host, port), "that's this device's own port");
+        ensure!(!crate::app::outbound::own_port(self, &host, port), "that's this device's own port");
         ensure!(!self.names_app(&host), "{host} is an app's name, not a site's");
         let lookup = self.lookup(caller, members::AGENTS, &self.usable_scopes(&caller.user)?).await?;
         let used = std::sync::Mutex::new(Vec::<String>::new());
@@ -250,7 +250,7 @@ impl Node {
             bail!("Not sent: {}", Self::why_unfilled(&lookup, name));
         }
         let method = req["method"].as_str().unwrap_or(if body.is_empty() { "GET" } else { "POST" }).to_uppercase();
-        let (status, headers, bytes) = tokio::task::spawn_blocking(move || crate::outbound::send(&method, &filled, headers, body)).await??;
+        let (status, headers, bytes) = tokio::task::spawn_blocking(move || crate::app::outbound::send(&method, &filled, headers, body)).await??;
         let secrets = used.into_inner().unwrap();
         let blot = |text: &str| secrets.iter().filter(|s| !s.is_empty()).fold(text.to_string(), |t, s| t.replace(s.as_str(), "••••"));
         let headers: serde_json::Map<String, Value> = headers.iter().map(|(n, v)| (n.clone(), json!(blot(&String::from_utf8_lossy(v))))).collect();

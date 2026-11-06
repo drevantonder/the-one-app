@@ -208,7 +208,7 @@ whose app declares `"*"` and `person: true` (Shell, Agent Devices) runs as befor
 
 ### Phase 5: the deploy names its services' builds
 
-Done (2026-11-05). The builds' hashes are in the bundle (`services.json`, `src/bundle.rs`), which the deploy names, so
+Done (2026-11-05). The builds' hashes are in the bundle (`services.json`, `src/app/bundle.rs`), which the deploy names, so
 a rollback brings its builds back with it, and the deploy lists them among its blobs; no field or table changed. Built-in
 apps' bundles name none yet: a service whose deploy names no build runs its newest release, as before. The deploy tool
 builds a service in Go only (one in Rust would run its build scripts on that machine).
@@ -262,7 +262,7 @@ Check: `one throwaway` from nothing, every client: open apps, run tools, a sched
 over without dropping a call.
 
 The split is done (2026-11-06), simpler than the above: the app runtime has no key and no endpoint (`oned apps`,
-`src/apps.rs`). oned stays what everyone calls, holds workerd's port and writes its config, and hands each call to it
+`src/app/runtime.rs`). oned stays what everyone calls, holds workerd's port and writes its config, and hands each call to it
 over that loopback; its asks come back through oned's outbound port, which holds the call's keys. oned starts it while
 the `apps` switch is on, and again when it stops, the services left running; a handover's new oned starts its own in its
 own folder. Calls' bookkeeping (keys, databases, steps) stays in oned, since only a holder of the call's keys can do it.

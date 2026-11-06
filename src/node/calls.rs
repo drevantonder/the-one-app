@@ -1041,7 +1041,7 @@ impl Node {
         Ok(db)
     }
 
-    /// What the shim asks the node for a running call (`src/outbound.rs`): `POST /call { app, op, input }` runs a
+    /// What the shim asks the node for a running call (`src/app/outbound.rs`): `POST /call { app, op, input }` runs a
     /// tool of an app the calling app uses, or a function of its own service, as its caller; `POST /blob` keeps a blob, `GET
     /// /blob/<hash>` gets one the caller may read; `GET /catalog` lists the network's apps, `GET /devices` its devices.
     pub async fn internal(&self, token: &str, method: &str, path: &str, body: Vec<u8>) -> Result<axum::response::Response> {

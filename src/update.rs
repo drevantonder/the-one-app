@@ -565,7 +565,7 @@ fn deploy_apps(src: &Path, names: &[String]) -> Result<()> {
         if !dir.join("app.js").is_file() {
             continue;
         }
-        let files = one::bundle::sources(&dir)?;
+        let files = one::app::bundle::sources(&dir)?;
         let files: Vec<(&str, &[u8])> = files.iter().map(|(p, b)| (p.as_str(), b.as_slice())).collect();
         let bundle = one::node::built_in_bundle(&files)?;
         let blob = crate::request(crate::agent().post(format!("http://{}/v1/blobs", crate::addr())).send(&bundle[..]))?["blob"].as_str().unwrap_or("").to_string();

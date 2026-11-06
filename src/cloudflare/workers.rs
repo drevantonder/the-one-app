@@ -716,7 +716,7 @@ pub fn precompressed(web: &[(String, Vec<u8>)]) -> Result<Vec<(String, Vec<u8>)>
                 std::fs::write(dir.join("in").join(i.to_string()), &wanted[i].1)?;
             }
             std::fs::write(dir.join("brotli.mjs"), BROTLI)?;
-            let out = std::process::Command::new(crate::deploy::bun()?).args(["brotli.mjs"]).current_dir(&dir).env("DO_NOT_TRACK", "1").output()?;
+            let out = std::process::Command::new(crate::app::deploy::bun()?).args(["brotli.mjs"]).current_dir(&dir).env("DO_NOT_TRACK", "1").output()?;
             ensure!(out.status.success(), "couldn't compress the files the address serves:\n{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
             for &i in &missing {
                 let part = names[i].with_extension(format!("{}.part", rand::random::<u64>()));
@@ -764,7 +764,7 @@ pub fn parses(web: &[(String, Vec<u8>)]) -> Result<()> {
             std::fs::create_dir_all(file.parent().unwrap())?;
             std::fs::write(file, text)?;
         }
-        let out = std::process::Command::new(crate::deploy::bun()?)
+        let out = std::process::Command::new(crate::app::deploy::bun()?)
             .args(["build", "--no-bundle", "--outdir=out"])
             .args(scripts.iter().map(|(path, _)| path))
             .current_dir(&dir)
@@ -815,7 +815,7 @@ pub fn module_from(files: Vec<(String, Vec<u8>)>, entry: &str) -> Result<Vec<u8>
 
 /// Builds `entry` in the Workers' folder `dir` into one ES module.
 pub fn build(dir: &Path, entry: &str) -> Result<Vec<u8>> {
-    let bun = crate::deploy::bun()?;
+    let bun = crate::app::deploy::bun()?;
     let cache = bun.parent().unwrap().join("cache");
     let run = |args: &[&str]| -> Result<()> {
         let out = std::process::Command::new(&bun).args(args).current_dir(dir).env("BUN_INSTALL_CACHE_DIR", &cache).env("DO_NOT_TRACK", "1").output()?;
@@ -915,7 +915,7 @@ pub fn write_config(dir: &Path, served: &[Served]) -> Result<PathBuf> {
         workers.push(format!(
             "const w{i} :Workerd.Worker = (\n  modules = [{}],\n  compatibilityDate = \"{}\",\n  bindings = [{}],\n{objects}{});",
             modules.join(", "),
-            crate::apps::COMPATIBILITY_DATE,
+            crate::app::runtime::COMPATIBILITY_DATE,
             bindings.join(", "),
             s.outbound.as_ref().map(|o| format!("  globalOutbound = {},\n", quote(o))).unwrap_or_default(),
         ));
@@ -940,11 +940,11 @@ pub fn write_config(dir: &Path, served: &[Served]) -> Result<PathBuf> {
 /// service of its name, there in place of the config's address, so no one else can take the port before workerd does,
 /// and what reaches it waits for workerd rather than being refused. Only the process holds them once it's started.
 pub fn start(config: &Path, listening: Vec<(String, std::net::TcpListener)>) -> Result<std::process::Child> {
-    let mut command = std::process::Command::new(crate::apps::workerd()?);
+    let mut command = std::process::Command::new(crate::app::runtime::workerd()?);
     command.arg("serve").arg(config).arg("--experimental").stdin(std::process::Stdio::null());
     #[cfg(not(unix))]
     ensure!(listening.is_empty(), "workerd takes listening sockets only on Unix");
-    crate::apps::child(&mut command, &listening.iter().map(|(n, l)| (n.as_str(), l)).collect::<Vec<_>>());
+    crate::app::runtime::child(&mut command, &listening.iter().map(|(n, l)| (n.as_str(), l)).collect::<Vec<_>>());
     Ok(command.spawn()?)
 }
 
@@ -1166,7 +1166,7 @@ pub fn metadata(settings: &Settings, service: &str, class: Option<&str>, migrati
             },
         }
     }
-    let mut meta = json!({ "main_module": "worker.js", "compatibility_date": crate::apps::COMPATIBILITY_DATE, "bindings": bindings });
+    let mut meta = json!({ "main_module": "worker.js", "compatibility_date": crate::app::runtime::COMPATIBILITY_DATE, "bindings": bindings });
     if let Some(class) = class.filter(|_| migration != Some("v1")) {
         meta["migrations"] = json!({ "new_tag": "v1", "new_sqlite_classes": [class] });
     }

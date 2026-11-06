@@ -1,6 +1,6 @@
 // React screens, each <name>.jsx or .tsx in a folder built into <name>.html: one screen's HTML with its own styles and
 // module in it. React and @one/ui (`shared`) are left to the page's import map, so a screen never brings its own copy.
-// The one way a screen is built: an app's (`one deploy`, src/deploy.rs, which runs this with the deploying machine's
+// The one way a screen is built: an app's (`one deploy`, src/app/deploy.rs, which runs this with the deploying machine's
 // Bun or Node from a folder holding these tools), and the client's own Settings screens (build.js, here).
 //
 // node screens.mjs <screens folder> <out folder> <folder their classes are in> <the tag a screen opts in with> <shared name>...

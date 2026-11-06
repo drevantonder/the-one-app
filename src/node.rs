@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::sync::broadcast;
 
-use crate::apps::{Apps, Context, Me, ScopeHandle};
+use crate::app::runtime::{Apps, Context, Me, ScopeHandle};
 use crate::call::Append;
 use crate::bucket::{Copied, Place};
 use crate::db::Db;
@@ -634,7 +634,7 @@ impl Node {
             settling: tokio::sync::Mutex::new(()),
             unfetched: Default::default(),
         }));
-        let outbound_router = crate::outbound::router(node.clone());
+        let outbound_router = crate::app::outbound::router(node.clone());
         tokio::spawn(async move {
             if let Err(err) = axum::serve(outbound, outbound_router).await {
                 tracing::warn!("apps' outbound requests stopped: {err:#}");
@@ -1032,12 +1032,12 @@ impl Node {
         let broken = self.0.broken.lock().unwrap().clone();
         let ran = self.0.bundles.lock().unwrap().clone();
         for (app, bundle) in wanted.iter().filter(|(a, b)| broken.get(*a) != Some(*b)) {
-            let mut fetched = self.blob(bundle).await.and_then(|b| crate::bundle::module(&b)).map(|m| (m, bundle));
+            let mut fetched = self.blob(bundle).await.and_then(|b| crate::app::bundle::module(&b)).map(|m| (m, bundle));
             if let Err(err) = &fetched {
                 tracing::warn!("{app}'s deploy: {err:#}: tried again soon");
                 unfetched = true;
                 if let Some(old) = ran.get(app).filter(|old| *old != bundle)
-                    && let Ok(module) = self.blob(old).await.and_then(|b| crate::bundle::module(&b))
+                    && let Ok(module) = self.blob(old).await.and_then(|b| crate::app::bundle::module(&b))
                 {
                     fetched = Ok((module, old));
                 }
@@ -1054,7 +1054,7 @@ impl Node {
             let _write = self.0.writes.lock().await;
             // An app whose code doesn't start is left out, so the rest run.
             while let Err(err) = self.0.apps.load(modules.clone()).await {
-                let Some(broken) = err.downcast_ref::<crate::apps::Broken>() else { return Err(err) };
+                let Some(broken) = err.downcast_ref::<crate::app::runtime::Broken>() else { return Err(err) };
                 tracing::warn!("{broken}: it's left out until it's deployed again");
                 if let Some(bundle) = used.get(&broken.app) {
                     self.0.broken.lock().unwrap().insert(broken.app.clone(), bundle.clone());
@@ -1284,12 +1284,12 @@ fn switch_entry(i: &Network, user: &str, scope: &Scope, app: &str, title: &str, 
 /// builds any app, its screens as they are.
 pub fn built_in_bundle(files: &[(&str, &[u8])]) -> Result<Vec<u8>> {
     if files.iter().any(|(p, _)| *p == "package.json" || p.starts_with("dist/")) {
-        return crate::deploy::build_built_in(files);
+        return crate::app::deploy::build_built_in(files);
     }
     let module = files.iter().find(|(p, _)| *p == "app.js").context("a built-in app has no app.js")?.1;
     let mut bundle = vec![("app.js".to_string(), module.to_vec())];
     bundle.extend(files.iter().map(|(p, b)| (format!("src/{p}"), b.to_vec())));
-    crate::bundle::pack(&bundle)
+    crate::app::bundle::pack(&bundle)
 }
 
 /// A deploy of `app`: the bundle at blob `bundle`, and the builds of its service it names (`bundle::SERVICES`), each a

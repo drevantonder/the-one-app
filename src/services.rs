@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::sync::{mpsc, oneshot};
 
-use crate::apps::Me;
+use crate::app::runtime::Me;
 
 /// What a service's call gives back: its answer, and blobs the caller's scope keeps.
 #[derive(Debug, Default)]

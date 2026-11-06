@@ -158,7 +158,7 @@ Every row change is in a signed step, so "who did what" for seven years is the s
 | F1 | 1.3 | The node reads the scope database and `may` | B, C | `src/node/`, `src/*.rs` callers |
 | F2 | 1.3 | The client crate and the browser | B, C | `client/`, `cloudflare/web/` |
 | F3 | 1.3 | The remote MCP server and the Cloudflare node | B, C | `cloudflare/mcp/`, `cloudflare/node/` |
-| G | 1.5 | Apps' `ctx.may` and Repos | F1 | `src/apps.rs`, `apps/repos/` |
+| G | 1.5 | Apps' `ctx.may` and Repos | F1 | `src/app/runtime.rs`, `apps/repos/` |
 | H | 2 | Switching over, with its gate | all of phase 1, and every device on R1 | one owner |
 | I1–I4 | 3 | Delete, rename to keep, move folders, finish the docs | H | split by area |
 

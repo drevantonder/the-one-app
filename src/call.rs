@@ -1,4 +1,4 @@
-//! What a call hands back when it returns, as `src/runtime/shim.js` gives it, on a machine and on Workers alike.
+//! What a call hands back when it returns, as `src/app/runtime/shim.js` gives it, on a machine and on Workers alike.
 
 use anyhow::{Context as _, Result};
 use serde_json::Value;

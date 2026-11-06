@@ -136,7 +136,7 @@ impl Node {
     }
 
     /// The app runtime this node hands apps' calls to.
-    pub fn app_runtime(&self) -> &crate::apps::Apps {
+    pub fn app_runtime(&self) -> &crate::app::runtime::Apps {
         &self.0.apps
     }
 

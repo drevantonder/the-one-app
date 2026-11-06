@@ -276,7 +276,7 @@ pub fn keep_parts(node: Node, runtime: tokio::runtime::Handle) {
                 if let Some(child) = apps.take() {
                     stop(crate::members::APPS_PART, child);
                 }
-                crate::apps::stop_all();
+                crate::app::runtime::stop_all();
                 if let Err(err) = std::fs::remove_dir_all(&dir) {
                     tracing::warn!("erasing {}: {err:#}", dir.display());
                 }

@@ -334,7 +334,7 @@ pub fn vault_items(opened: &str, app: &str, user: &str) -> Result<String, JsErro
 
 /// An app's request out (JSON `{ url, headers, body }`, its body text or null) with the fields of the items it's
 /// switched on for filled in from `opened` (as `vault_items`), a secret one only if `host` is one of its item's hosts,
-/// as a node on a machine fills an app's requests (`src/outbound.rs`).
+/// as a node on a machine fills an app's requests (`src/app/outbound.rs`).
 #[wasm_bindgen]
 pub fn vault_fill(opened: &str, app: &str, user: &str, host: &str, request: &str) -> Result<String, JsError> {
     let found = lookup(opened, app, user)?;
@@ -875,5 +875,5 @@ pub async fn bundle(bucket: JsValue, keys: String, hash: String) -> Result<Strin
     if blake3::hash(&bytes).to_hex().as_str() != hash {
         return Err(failed(anyhow!("the bundle kept as {hash} isn't it")));
     }
-    one::bundle::module(&bytes).map_err(failed)
+    one::app::bundle::module(&bytes).map_err(failed)
 }

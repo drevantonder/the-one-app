@@ -283,7 +283,7 @@ impl Node {
             return image.clone();
         }
         let bytes = std::fs::read(release::blob_path(&self.0.dir, bundle).ok()?).ok()?;
-        let files = crate::bundle::unpack(&bytes).ok()?;
+        let files = crate::app::bundle::unpack(&bytes).ok()?;
         let png = files.into_iter().find(|(path, _)| path == "src/icon.png").map(|(_, png)| format!("data:image/png;base64,{}", data_encoding::BASE64.encode(&png)));
         self.0.images.lock().unwrap().insert(bundle.to_string(), png.clone());
         png
@@ -405,7 +405,7 @@ impl Node {
             m.app(app).with_context(|| format!("no app named {app}"))?.bundle.with_context(|| format!("{app} has no deploy to fork"))
         })?;
         let owner = owner.map(str::to_string).unwrap_or_else(|| format!("user:{}", caller.user));
-        let builds = crate::bundle::services(&self.blob(&bundle).await?).into_values();
+        let builds = crate::app::bundle::services(&self.blob(&bundle).await?).into_values();
         self.member_as(caller, "app", json!({ "name": name, "owner": owner, "from": app })).await?;
         self.member_content(caller, deploy(name, &bundle, builds)).await
     }
@@ -429,8 +429,8 @@ impl Node {
         let mine = |blob: &str| -> Result<bool> { Ok(caller.key == self.0.id || self.may_read_blob(&caller.user, blob)?) };
         ensure!(mine(&bundle)?, "{app} has no deploy {bundle}: its versions are in apps_list's history");
         let bytes = self.blob(&bundle).await?;
-        crate::bundle::module(&bytes)?;
-        let builds: Vec<String> = crate::bundle::services(&bytes).into_values().collect();
+        crate::app::bundle::module(&bytes)?;
+        let builds: Vec<String> = crate::app::bundle::services(&bytes).into_values().collect();
         for build in &builds {
             ensure!(mine(build)?, "{app}'s bundle names a build of its service, {build}, that isn't here: put it first");
         }
@@ -477,7 +477,7 @@ impl Node {
             Some(b) => history.iter().find(|(h, ..)| h.starts_with(b)).with_context(|| format!("{app} has no deploy {b}"))?.0.clone(),
             None => history.last().with_context(|| format!("{app} has no deploy yet"))?.0.clone(),
         };
-        let mut out = crate::deploy::show(&self.blob(&bundle).await?, path)?;
+        let mut out = crate::app::deploy::show(&self.blob(&bundle).await?, path)?;
         out["app"] = json!(app);
         out["bundle"] = json!(bundle);
         Ok(out)

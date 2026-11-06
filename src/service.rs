@@ -455,7 +455,7 @@ impl Service {
                 return json!({ "error": format!("{err:#}") });
             }
             let person = m.user(&user);
-            crate::apps::Me {
+            crate::app::runtime::Me {
                 key: hex(&key),
                 user: user.clone(),
                 name: m.machine(&key).map(|d| d.name).unwrap_or_default(),

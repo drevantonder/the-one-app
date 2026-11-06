@@ -51,7 +51,7 @@ fn notes(tool: &str, input: Value) -> CallRequest {
 /// would add an app, and waits for this device to run it.
 async fn add_notes(a: &Node) {
     let me = one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None, token: None };
-    let bundle = a.put_blob(&one::bundle::pack(&[("app.js".to_string(), include_bytes!("notes/app.js").to_vec())]).unwrap()).unwrap();
+    let bundle = a.put_blob(&one::app::bundle::pack(&[("app.js".to_string(), include_bytes!("notes/app.js").to_vec())]).unwrap()).unwrap();
     a.deploy_making(&me, "notes", &bundle, Some("admins"), true).await.unwrap();
     a.install(&me, "notes", &one::entry::Scope::Global, true, None).await.unwrap();
 }
@@ -624,8 +624,8 @@ async fn a_service_runs_only_the_build_its_apps_deploy_names() {
     let me = one::node::Caller { key: a.id(), user: a.user().unwrap(), agent: None, token: None };
     let build = a.put_blob(b"a program").unwrap();
     let bundle = |services: Value| {
-        let files = vec![("app.js".to_string(), b"export default { tools: {} }".to_vec()), (one::bundle::SERVICES.to_string(), services.to_string().into_bytes())];
-        a.put_blob(&one::bundle::pack(&files).unwrap()).unwrap()
+        let files = vec![("app.js".to_string(), b"export default { tools: {} }".to_vec()), (one::app::bundle::SERVICES.to_string(), services.to_string().into_bytes())];
+        a.put_blob(&one::app::bundle::pack(&files).unwrap()).unwrap()
     };
     let named = bundle(json!({ one::config::TARGET: build }));
     a.deploy_making(&me, "tiny", &named, None, false).await.unwrap();
@@ -647,7 +647,7 @@ async fn a_service_runs_only_the_build_its_apps_deploy_names() {
     // Nor does Andre, from elsewhere, name a build he can't read: one Sam put, by its hash.
     let away = one::node::Caller { key: [7; 32], token: Some("Andre's".into()), ..me.clone() };
     let (sams, _) = a.put_blob_from(&sam, axum::body::Body::from("Sam's program")).await.unwrap();
-    let (his, _) = a.put_blob_from(&away, axum::body::Body::from(one::bundle::pack(&[("app.js".to_string(), b"export default {}".to_vec()), (one::bundle::SERVICES.to_string(), json!({ one::config::TARGET: sams }).to_string().into_bytes())]).unwrap())).await.unwrap();
+    let (his, _) = a.put_blob_from(&away, axum::body::Body::from(one::app::bundle::pack(&[("app.js".to_string(), b"export default {}".to_vec()), (one::app::bundle::SERVICES.to_string(), json!({ one::config::TARGET: sams }).to_string().into_bytes())]).unwrap())).await.unwrap();
     let refused = a.deploy(&away, "tiny", &his, false).await.unwrap_err();
     assert!(format!("{refused:#}").contains("put it first"), "{refused:#}");
 }

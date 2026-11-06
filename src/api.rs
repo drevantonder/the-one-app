@@ -1011,12 +1011,12 @@ async fn app(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
 async fn deploy(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
     let bundle = match body["files"].as_object() {
         Some(files) => {
-            let files = crate::deploy::given(files)?;
+            let files = crate::app::deploy::given(files)?;
             // Built only where the deploy was asked, by its runtime: never on a node for someone elsewhere.
-            if let Some((screen, _)) = files.iter().find(|(p, _)| crate::deploy::has_screens([p.as_str()])) {
+            if let Some((screen, _)) = files.iter().find(|(p, _)| crate::app::deploy::has_screens([p.as_str()])) {
                 return Err(anyhow::anyhow!("{screen} is a React screen, built on the machine that deploys it with Bun or Node: deploy it from there, with {cli} deploy <folder> or {cli} mcp's deploy tool", cli = crate::config::CLI).into());
             }
-            let built = tokio::task::spawn_blocking(move || crate::deploy::build_files(&files.iter().map(|(p, b)| (p.as_str(), b.as_slice())).collect::<Vec<_>>()));
+            let built = tokio::task::spawn_blocking(move || crate::app::deploy::build_files(&files.iter().map(|(p, b)| (p.as_str(), b.as_slice())).collect::<Vec<_>>()));
             node.put_blob_for(&me.caller, &built.await.map_err(anyhow::Error::from)??)?
         }
         None => text(&body, "bundle")?.to_string(),

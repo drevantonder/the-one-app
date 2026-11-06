@@ -159,7 +159,7 @@ pub fn deeper(apps: &[Value]) -> Vec<Skill> {
     // the app with a React screen to copy.
     if let Some(build) = skills.iter_mut().find(|s| s.name.ends_with("-build")) {
         build.files = [
-            ("ctx.js", include_str!("runtime/shim.js")),
+            ("ctx.js", include_str!("app/runtime/shim.js")),
             ("one.js", include_str!("screen/bridge.js")),
             ("ui/index.ts", include_str!("screen/ui/src/index.ts")),
             ("ui/layout.tsx", include_str!("screen/ui/src/components/layout.tsx")),
