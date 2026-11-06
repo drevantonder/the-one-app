@@ -2,6 +2,8 @@
 
 use super::*;
 
+pub(crate) mod routes;
+
 /// How long a page waits for an app's badge.
 const BADGE_LIMIT: Duration = Duration::from_secs(5);
 

@@ -12,18 +12,14 @@
 //! yet, deleted an hour on (or once its request is answered) unless something does.
 
 use crate::config::YOURS;
-use std::convert::Infallible;
 
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
-use axum::response::sse::{Event as SseEvent, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{any, get, post};
 use axum::{Json, Router};
-use serde::Deserialize;
 use serde_json::{Value, json};
 use tokio_stream::StreamExt;
-use tokio_stream::wrappers::BroadcastStream;
 
 use crate::database::scopes::Role;
 use crate::node::{CallRequest, Caller, Node};
@@ -227,19 +223,7 @@ pub fn routes() -> Routes {
         .route("/v1/settings", SignedIn, post(settings))
         .route("/v1/steps", SignedIn, post(steps))
         .route("/v1/steps/global", SignedIn, get(global_steps))
-        .route("/v1/service", SignedIn, post(service))
-        .route("/v1/node-release", ThisMachine, post(release))
-        .route("/v1/service-release", ThisMachine, post(service_release))
-        .route("/v1/blobs", SignedIn, post(put_blob))
-        .route("/v1/blobs/{hash}", SignedIn, get(blob))
-        .route("/v1/events", SignedIn, get(events))
-        .route("/v1/screens/{app}/{screen}", SignedIn, get(screen))
-        .route("/v1/client-screens/{name}", SignedIn, get(client_screen))
         .route("/hooks/prompt", ThisMachine, post(prompt))
-        .route("/v1/services/{app}", ThisMachine, post(register))
-        .route("/v1/services/{app}/calls", ThisMachine, get(next_call))
-        .route("/v1/services/{app}/calls/{id}", ThisMachine, post(reply))
-        .route("/v1/services/{app}/calls/{id}/vault", ThisMachine, post(fill))
         // An app's own requests, run as its tool `_http` for its person, whose checks are the app's: git's, to Repos.
         .route(APP_ROUTE, SignedIn, any(app_http))
         .merge(crate::node::vault::routes::routes())
@@ -249,6 +233,10 @@ pub fn routes() -> Routes {
         .merge(crate::node::groups::routes::routes())
         .merge(crate::node::widgets::routes::routes())
         .merge(crate::node::apps::routes::routes())
+        .merge(crate::node::services::routes::routes())
+        .merge(crate::node::releases::routes::routes())
+        .merge(crate::node::blobs::routes::routes())
+        .merge(crate::node::screens::routes::routes())
 }
 
 /// An app's own requests (`app_http`): how stock git reaches Repos.
@@ -261,7 +249,7 @@ pub fn app_route(path: &str) -> bool {
 }
 
 /// The most this machine's own programs put in one file.
-const LOCAL_PUT: u64 = 1 << 30;
+pub(crate) const LOCAL_PUT: u64 = 1 << 30;
 
 /// `routes` as `Who` says each may be asked, with this machine's own programs asking any.
 pub fn guarded(routes: Routes, node: Node) -> Router {
@@ -677,13 +665,6 @@ async fn state(State(node): State<Node>, signed_in: Option<axum::Extension<Me>>)
 
 
 
-/// `{ name, device?, installed? }`: removes a service from a device (this one by default, for this machine's own
-/// programs), or with `installed` lets it register there again.
-async fn service(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> Reply {
-    only(&body, &["name", "device", "on"])?;
-    node.set_service(&me.caller, body["device"].as_str(), text(&body, "name")?, body["on"] == true).await?;
-    done()
-}
 
 
 
@@ -807,31 +788,8 @@ async fn prompt(State(node): State<Node>, body: String) -> Response {
     }
 }
 
-#[derive(Deserialize)]
-struct ReleaseRequest {
-    path: String,
-    /// For a service's program, which.
-    #[serde(default)]
-    service: Option<String>,
-    commit: String,
-    target: String,
-    #[serde(default)]
-    committed: u64,
-    signature: String,
-}
 
-async fn release(State(node): State<Node>, Json(req): Json<ReleaseRequest>) -> Reply {
-    let r = node.publish(std::path::Path::new(&req.path), None, &req.commit, &req.target, req.committed, &req.signature).await?;
-    Ok(Json(json!(r)))
-}
 
-/// A service's program, built for `target` and signed, published as its newest release (its own path, so a node too
-/// old to know them refuses it, rather than taking it for its own).
-async fn service_release(State(node): State<Node>, Json(req): Json<ReleaseRequest>) -> Reply {
-    let service = req.service.as_deref().ok_or_else(|| anyhow::anyhow!("say which service"))?;
-    let r = node.publish(std::path::Path::new(&req.path), Some(service), &req.commit, &req.target, req.committed, &req.signature).await?;
-    Ok(Json(json!(r)))
-}
 
 /// A request to `/<app>/<path>`, answered by the app's `_http` tool, run as whoever asked (this machine's person,
 /// a client device's, or a sign-in's), whose checks are the app's own: the body reaches it as a blob, read as it comes
@@ -868,67 +826,14 @@ async fn app_http(State(node): State<Node>, me: Me, Path((app, path)): Path<(Str
     Ok((status, [(axum::http::header::CONTENT_TYPE, kind)], bytes).into_response())
 }
 
-/// A file to keep, read as it comes: from elsewhere, within the room `Node::put_blob_from` gives its person.
-async fn put_blob(State(node): State<Node>, me: Me, req: axum::extract::Request) -> Reply {
-    let (hash, size) = match me.sign_in {
-        Some(_) => node.put_blob_from(&me.caller, req.into_body()).await?,
-        None => node.put_blob_streamed(req.into_body(), LOCAL_PUT).await?,
-    };
-    Ok(Json(json!({ "blob": hash, "size": size })))
-}
 
-async fn blob(State(node): State<Node>, me: Me, Path(hash): Path<String>) -> Result<Response, Error> {
-    let bytes = match me.sign_in {
-        Some(_) => node.blob_for(&me.caller, &hash).await?,
-        None => node.blob(&hash).await?,
-    };
-    Ok(([(axum::http::header::CONTENT_TYPE, "application/octet-stream")], bytes).into_response())
-}
 
-async fn register(State(node): State<Node>, Path(app): Path<String>, Json(describe): Json<Value>) -> Reply {
-    node.register_service(&app, describe).await?;
-    done()
-}
 
-async fn next_call(State(node): State<Node>, Path(app): Path<String>) -> Result<Response, Error> {
-    node.stand_down(&app)?;
-    Ok(match node.services().next(&app).await? {
-        Some(call) => Json(json!(call)).into_response(),
-        None => StatusCode::NO_CONTENT.into_response(),
-    })
-}
 
-async fn reply(State(node): State<Node>, Path((app, id)): Path<(String, u64)>, Json(body): Json<Value>) -> Reply {
-    node.services().reply(&app, id, body)?;
-    done()
-}
 
-/// A service's text filled from the Vault for a call of its that waits, for the host it's going to.
-async fn fill(State(node): State<Node>, Path((app, id)): Path<(String, u64)>, Json(body): Json<Value>) -> Reply {
-    let text = node.service_fill(&app, id, text(&body, "text")?, text(&body, "host")?).await?;
-    Ok(Json(json!({ "text": text })))
-}
 
-#[derive(Deserialize)]
-struct ScreenQuery {
-    params: Option<String>,
-    scope: Option<String>,
-    /// `@one/ui` and the bridge as the address's files (`crate::screen::page`), for the web client, which has them.
-    linked: Option<bool>,
-}
 
-/// An app screen as a page, for shells' web views and the web client's frames.
-async fn screen(State(node): State<Node>, me: Me, headers: axum::http::HeaderMap, Path((app, name)): Path<(String, String)>, Query(q): Query<ScreenQuery>) -> Result<Response, Error> {
-    let params: Value = q.params.as_deref().map(serde_json::from_str).transpose()?.unwrap_or(json!({}));
-    let html = node.screen(me.caller, &app, &name, params, q.scope.as_deref(), q.linked == Some(true)).await?;
-    Ok(page(&headers, html))
-}
 
-/// A screen's page, named by its content but for its nonce (its ETag).
-fn page(headers: &axum::http::HeaderMap, html: String) -> Response {
-    let tag = crate::screen::tag(&html);
-    tagged(headers, tag, axum::response::Html(html))
-}
 
 /// An answer named by its content (`tag`, its ETag): to a client that has it already, only that.
 pub(crate) fn tagged(headers: &axum::http::HeaderMap, tag: String, answer: impl IntoResponse) -> Response {
@@ -938,28 +843,7 @@ pub(crate) fn tagged(headers: &axum::http::HeaderMap, tag: String, answer: impl 
     ([(axum::http::header::ETAG, tag)], answer).into_response()
 }
 
-/// A client's own screen as a page (see `Node::client_screen`), for clients built before they made them themselves
-/// (`screen::client_page`); none since asks.
-async fn client_screen(State(node): State<Node>, me: Me, headers: axum::http::HeaderMap, Path(name): Path<String>, Query(q): Query<ScreenQuery>) -> Result<Response, Error> {
-    let params: Value = q.params.as_deref().map(serde_json::from_str).transpose()?.unwrap_or(json!({}));
-    Ok(page(&headers, node.client_screen(me.caller, &name, params, q.linked == Some(true))?))
-}
 
-async fn events(State(node): State<Node>, me: Me) -> Sse<impl tokio_stream::Stream<Item = Result<SseEvent, Infallible>>> {
-    // Someone other than this machine's person hears only of the apps they reach.
-    let user = (node.user().ok().as_deref() != Some(me.caller.user.as_str())).then_some(me.caller.user);
-    let events = node.clone();
-    let stream = BroadcastStream::new(node.subscribe())
-        .filter_map(|e| e.ok())
-        .map(move |e| match &user {
-            Some(user) => events.event_for(e, user),
-            None => e,
-        })
-        .map(|e| Ok(SseEvent::default().json_data(e).unwrap_or_default()));
-    // Ended as the node hands over, so its client asks the new one.
-    let stream = futures_util::StreamExt::take_until(stream, Box::pin(crate::handoff::stopping()));
-    Sse::new(stream).keep_alive(KeepAlive::default())
-}
 
 #[cfg(test)]
 mod tests {

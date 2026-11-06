@@ -3,6 +3,8 @@
 
 use super::*;
 
+pub(crate) mod routes;
+
 /// How long after asking to hand over to a build it installed a node that still runs asks again: longer than a node
 /// taking over takes to warm.
 const HAND_OVER_AGAIN: Duration = Duration::from_secs(150);
