@@ -51,7 +51,6 @@ pub(crate) fn android(dir: &Path, checkout: &Path, device: &str, settings: &one:
         ),
     )?;
     // Its page's JavaScript, run through the control port, which only the device reaches.
-    let click = "document.querySelector('[data-slot=welcome-action]')?.click()";
     let eval = |js: &str| on_device(device, &format!("(printf 'POST /eval HTTP/1.0\\r\\ncontent-length: {}\\r\\n\\r\\n'; printf '%s' \"{js}\") | nc -w 2 127.0.0.1 {control}", js.len()));
     let start = Instant::now();
     let (mut signed, mut approved) = (false, false);
@@ -77,7 +76,7 @@ pub(crate) fn android(dir: &Path, checkout: &Path, device: &str, settings: &one:
             }
             Some(_) => {}
             // Signed out: its Sign In, pressed for the person.
-            None => drop(eval(click)),
+            None => drop(eval(super::PRESS_SIGN_IN)),
         }
         if let Some(code) = said.iter().rev().find_map(|l| l.strip_prefix("Code: "))
             && !approved

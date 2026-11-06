@@ -80,7 +80,7 @@ pub(crate) fn linux(dir: &Path, checkout: &Path, settings: &one::cloudflare::Set
             }
             Some(_) => {}
             // Signed out: its Sign In, pressed for the person.
-            None => drop(eval("document.querySelector('[data-slot=welcome-action]')?.click()")),
+            None => drop(eval(super::PRESS_SIGN_IN)),
         }
         if let Some(code) = said.lines().rev().find_map(|l| l.strip_prefix("Code: "))
             && !approved

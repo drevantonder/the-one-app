@@ -17,6 +17,9 @@ mod linux;
 mod web;
 mod windows;
 
+/// What a client signed out is told in its page to press Sign In, the same in each one's screen.
+const PRESS_SIGN_IN: &str = "document.querySelector('[data-slot=welcome-action]')?.click()";
+
 /// `throwaway client <kind> [--as <name>]`: a client of this checkout's build, signed in to the throwaway network as its first
 /// person, or as someone else they invited, and how to see and use it. Again, it's the same client, with this
 /// checkout's build as it is now.
