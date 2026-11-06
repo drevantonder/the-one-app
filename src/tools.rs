@@ -21,8 +21,7 @@ pub const MCP_FILE_LIMIT: usize = 1 << 20;
 
 /// A tool as `GET /v1/apps` describes it, with its app; None when no app or service here lists it.
 pub fn find(node: &Client, app: &str, tool: &str) -> Option<(Value, Value)> {
-    let mut apps = node.get("/v1/apps").ok()?.as_array()?.clone();
-    apps.extend(crate::node::own::listed());
+    let apps = node.apps().ok()?;
     let a = apps.iter().find(|a| a["name"] == app)?.clone();
     let o = a["ops"].as_array()?.iter().find(|o| o["name"] == tool)?.clone();
     Some((a, o))
@@ -62,8 +61,7 @@ pub fn run(g: &crate::cli::Given, app: &str, tool: &str, args: &[String]) -> Res
         return Ok(());
     }
     let mut take = |k: &str| flags.remove(k).and_then(|v| v.into_iter().last().flatten());
-    let own = crate::node::own::find(app).is_some();
-    let device = if own_device(o) || own { None } else { take("device") };
+    let device = if own_device(o) || on_the_node(a) { None } else { take("device") };
     let scopes = take("scopes").map(|s| s.split(',').map(|s| s.trim().to_string()).collect::<Vec<_>>());
     let out = take("out");
     let confirmed = flags.remove("confirm").is_some();
@@ -126,8 +124,7 @@ pub fn print_trace(lines: Option<&[String]>) {
 /// What an app says, as the command line says it: each tool it names (`gmail_sign_in`) as its command
 /// (`one gmail sign_in`).
 pub fn in_cli_words(node: &Client, text: &str) -> String {
-    let mut apps = node.get("/v1/apps").ok().and_then(|a| a.as_array().cloned()).unwrap_or_default();
-    apps.extend(crate::node::own::listed());
+    let apps = node.apps().unwrap_or_default();
     let command = |word: &str| -> Option<String> {
         word.match_indices('_').find_map(|(i, _)| {
             let (app, tool) = (&word[..i], &word[i + 1..]);
@@ -159,16 +156,12 @@ pub fn named(app: &str, tool: &str, cli: bool) -> String {
     }
 }
 
-/// An empty list of accounts, or of the devices a service over a device runs on, in words, with what to do: screens
-/// want the list, a person or agent reading wants this.
+/// An empty list of accounts in words, with what to do: screens want the list, a person or agent reading wants this.
 pub fn none_said(node: &Client, app: &Value, tool: &str, ok: &Value, cli: bool) -> Option<String> {
-    if !["accounts", "devices"].contains(&tool) || ok.as_array().is_none_or(|a| !a.is_empty()) {
+    if tool != "accounts" || ok.as_array().is_none_or(|a| !a.is_empty()) {
         return None;
     }
     let (name, title) = (app["name"].as_str().unwrap_or(""), app["title"].as_str().unwrap_or(""));
-    if tool == "devices" {
-        return Some(format!("{title} isn't on any of your devices yet.{}", app["needs"].as_str().map(|n| format!(" {n}.")).unwrap_or_default()));
-    }
     let signs_in = app["ops"].as_array().into_iter().flatten().any(|o| o["name"] == "sign_in");
     // One that needs a part on a device, with none of yours running it: signing in can't work yet.
     let parts: Vec<&Value> = app["uses"]["services"].as_array().into_iter().flatten().collect();
@@ -189,8 +182,7 @@ pub fn none_said(node: &Client, app: &Value, tool: &str, ok: &Value, cli: bool) 
 /// `commands` are the command line's own words, when it asks.
 pub fn unknown(node: &Client, app: &str, tool: Option<&str>, commands: Option<&[String]>) -> Result<String> {
     let cli = commands.is_some();
-    let mut apps = node.get("/v1/apps")?.as_array().cloned().unwrap_or_default();
-    apps.extend(crate::node::own::listed());
+    let apps = node.apps()?;
     let tools_of = |a: &Value| -> Vec<String> { a["ops"].as_array().into_iter().flatten().filter_map(|o| o["name"].as_str()).filter(|o| !o.starts_with('_')).map(String::from).collect() };
     // One the person could add: the node lists it, without tools for them, since it isn't added where they are.
     let addable = |a: &Value| a["ops"].is_null() && a["deleted"].is_null();
@@ -614,7 +606,7 @@ pub fn help(app: &Value, tool: &Value) -> String {
         }
         rows.push((flag, about.join("; ")));
     }
-    if !own_device(tool) && crate::node::own::find(app["name"].as_str().unwrap_or("")).is_none() {
+    if !own_device(tool) && !on_the_node(app) {
         rows.push(("--device <name>".into(), device_about(app).into()));
     }
     rows.push(("--out <path>".into(), "save what it gives back there".into()));
@@ -682,6 +674,11 @@ fn runs_on_devices(app: &Value) -> bool {
     app["runs"] == "here" || app["uses"]["services"].as_array().is_some_and(|s| !s.is_empty())
 }
 
+/// Whether `app` is one of the node's own (`node::own`), whose tools the node asked runs, never another device.
+pub fn on_the_node(app: &Value) -> bool {
+    app["runs"] == "node"
+}
+
 /// What `device` says it does: which device runs the call, and which when none is given.
 fn device_about(app: &Value) -> &'static str {
     match (app["runs"] == "here", runs_on_devices(app)) {
@@ -711,8 +708,8 @@ pub fn mcp_schema(app: &Value, tool: &Value) -> Value {
     if runs_on_devices(app) && !own_device(tool) {
         schema["properties"]["device"] = json!({ "type": "string", "description": device_about(app) });
     }
-    // Every app's call runs on a device, which can say what it did; the node's own tools run here.
-    if crate::node::own::find(app["name"].as_str().unwrap_or("")).is_none() {
+    // Every app's call runs on a device, which can say what it did; the node's own apps' tools on the node asked.
+    if !on_the_node(app) {
         schema["properties"]["trace"] = json!({ "type": "boolean", "description": "true also gives what the call did and where, as lines after the answer, or after why it failed: the devices tried, the one that ran it, each wait in ms, where its data came from" });
     }
     if tool["confirm"] == true {

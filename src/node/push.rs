@@ -1,33 +1,30 @@
-//! The `push` tools (`crate::push`), which every node answers itself for any caller, through the network's push Worker:
-//! never a service a device runs.
+//! Push (`crate::push`), which every node does itself for any caller, through the network's push Worker: never a
+//! service a device runs.
+
+pub(crate) mod app;
+pub(crate) mod routes;
 
 use crate::config::YOURS;
 use super::*;
 use data_encoding::BASE64URL_NOPAD as B64U;
 
-use crate::push::{self, Send};
+use crate::push;
 
 impl Node {
-    pub(super) async fn push(&self, tool: &str, input: &Value, me: &Caller, from: Option<&str>) -> Result<Value> {
-        match tool {
-            "send" => {
-                let note = crate::services::input::<Send>(input)?.note(from.unwrap_or(""))?;
-                self.push_note(&me.user, &note).await
-            }
-            "devices" => {
-                let mine = self.devices_of(&me.user)?;
-                let said = self.ask_push("/push/devices", json!({ "user": me.user, "keys": mine.iter().map(|(k, _, _)| hex(k)).collect::<Vec<_>>() })).await?;
-                let name = |key: &str| mine.iter().find(|(k, _, _)| hex(k) == key).map(|(_, _, n)| n.clone()).unwrap_or_default();
-                let out: Vec<Value> = said["registered"].as_array().into_iter().flatten().map(|d| json!({ "name": name(d["key"].as_str().unwrap_or("")), "via": d["via"], "since": d["at"] })).collect();
-                Ok(json!(out))
-            }
-            "status" => {
-                let address = self.address()?;
-                let said = tokio::task::spawn_blocking(move || -> Result<Value> { Ok(agent().get(format!("{address}/push/key")).call()?.body_mut().read_json()?) }).await??;
-                Ok(json!({ "via": said["via"] }))
-            }
-            tool => bail!("push has no tool {tool}"),
-        }
+    /// The caller's devices that get pushes, as the push Worker has them registered.
+    pub(super) async fn push_devices(&self, user: &str) -> Result<Value> {
+        let mine = self.devices_of(user)?;
+        let said = self.ask_push("/push/devices", json!({ "user": user, "keys": mine.iter().map(|(k, _, _)| hex(k)).collect::<Vec<_>>() })).await?;
+        let name = |key: &str| mine.iter().find(|(k, _, _)| hex(k) == key).map(|(_, _, n)| n.clone()).unwrap_or_default();
+        let out: Vec<Value> = said["registered"].as_array().into_iter().flatten().map(|d| json!({ "name": name(d["key"].as_str().unwrap_or("")), "via": d["via"], "since": d["at"] })).collect();
+        Ok(json!(out))
+    }
+
+    /// Which push services the network's push Worker sends through.
+    pub(super) async fn push_status(&self) -> Result<Value> {
+        let address = self.address()?;
+        let said = tokio::task::spawn_blocking(move || -> Result<Value> { Ok(agent().get(format!("{address}/push/key")).call()?.body_mut().read_json()?) }).await??;
+        Ok(json!({ "via": said["via"] }))
     }
 
     /// Pushes `note` to each of `user`'s devices, sealed to each: → how many it went to, and how many of their devices

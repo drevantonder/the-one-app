@@ -1,6 +1,6 @@
-//! The node's own apps (the Vault, Backups, Groups, Devices, Widgets): tools that search, scripts, skills, MCP and
-//! the command line show as an app's, each defined beside what it does, and run by this machine's CLI and MCP against
-//! its node's API (`api::Client`), as the person, never on another device.
+//! The node's own apps (the Vault, Backups, Groups, Devices, Widgets, Push): each defined beside what it does, listed by
+//! the node with every other app (`GET /v1/apps`, marked `runs: "node"`), and run by the CLI and MCP against the API
+//! of the node they ask (`api::Client`), as the person, never on another device.
 
 use anyhow::Result;
 use serde_json::{Map, Value, json};
@@ -28,11 +28,11 @@ pub struct NodeApp {
 }
 
 impl NodeApp {
-    /// As `GET /v1/apps` describes an app, for search, scripts, skills and the command line.
+    /// As `GET /v1/apps` describes it among the rest.
     pub fn listed(&self) -> Value {
         let name = self.name;
         json!({
-            "name": name, "title": self.title, "description": self.description, "instructions": self.guide,
+            "name": name, "title": self.title, "description": self.description, "instructions": self.guide, "runs": "node", "elsewhere": self.elsewhere,
             "ops": self.tools.iter().map(|t| {
                 let confirm = t["annotations"]["destructiveHint"] == true;
                 json!({ "name": t["name"].as_str().unwrap_or("").trim_start_matches(&format!("{name}_")), "description": t["description"], "input": t["inputSchema"], "reads": t["annotations"]["readOnlyHint"] == true, "confirm": confirm })
@@ -42,15 +42,11 @@ impl NodeApp {
 }
 
 pub fn all() -> Vec<NodeApp> {
-    vec![super::vault::app::app(), super::backups::app::app(), super::groups::app(), super::devices::app::app(), super::widgets::app()]
+    vec![super::vault::app::app(), super::backups::app::app(), super::groups::app(), super::devices::app::app(), super::widgets::app(), super::push::app::app()]
 }
 
 pub fn find(name: &str) -> Option<NodeApp> {
     all().into_iter().find(|a| a.name == name)
-}
-
-pub fn listed() -> Vec<Value> {
-    all().iter().map(NodeApp::listed).collect()
 }
 
 /// A string input, or what to give.

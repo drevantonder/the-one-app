@@ -22,14 +22,15 @@ pub struct Session {
 }
 
 /// Serves MCP over stdio, asking `node`, for an agent on this machine.
-pub fn stdio(node: std::sync::Arc<Client>, mode: Mode) -> Result<()> {
+pub fn stdio(node: Client, mode: Mode) -> Result<()> {
     use std::io::{BufRead, Write};
     let mut session = Session { agent: agent_from_env(), mode, stdio: true };
     for line in std::io::stdin().lock().lines() {
         let Ok(msg) = serde_json::from_str::<Value>(&line?) else { continue };
+        let node = node.again();
         // A chat's view waiting on a change is answered beside the rest, which go on meanwhile.
         if msg["method"] == "tools/call" && msg["params"]["name"] == "screens_changes" {
-            let (node, mut session) = (node.clone(), Session { agent: session.agent.clone(), ..session });
+            let mut session = Session { agent: session.agent.clone(), ..session };
             std::thread::spawn(move || {
                 if let Some((reply, _)) = answer(&node, &msg, &mut session) {
                     let mut out = std::io::stdout().lock();
@@ -150,8 +151,8 @@ pub fn answer(node: &Client, msg: &Value, session: &mut Session) -> Option<(Valu
 }
 
 /// Every app's tools by name, as `GET /v1/apps` gives them: what a session's list of tools is made of.
-fn tool_names(apps: &Value) -> Vec<String> {
-    let mut names: Vec<String> = apps.as_array().into_iter().flatten().flat_map(|a| a["ops"].as_array().into_iter().flatten().map(move |o| format!("{}_{}", a["name"].as_str().unwrap_or(""), o["name"].as_str().unwrap_or("")))).collect();
+fn tool_names(apps: &[Value]) -> Vec<String> {
+    let mut names: Vec<String> = apps.iter().flat_map(|a| a["ops"].as_array().into_iter().flatten().map(move |o| format!("{}_{}", a["name"].as_str().unwrap_or(""), o["name"].as_str().unwrap_or("")))).collect();
     names.sort();
     names
 }
@@ -160,15 +161,15 @@ fn tool_names(apps: &Value) -> Vec<String> {
 /// MCP's notification after the answer; over HTTP, which sends nothing unasked, the answer says which tools are new.
 fn call_and_tell(node: &Client, params: &Value, session: &Session) -> (Value, bool) {
     let name = params["name"].as_str().unwrap_or("");
-    let apps = (session.mode == Mode::All && name != "search").then(|| node.get("/v1/apps").ok()).flatten();
-    let reads = |apps: &Value| match name.split_once('_') {
-        Some((a, o)) => crate::node::own::find(a).is_some() || apps.as_array().into_iter().flatten().filter(|x| x["name"] == a).flat_map(|x| x["ops"].as_array().into_iter().flatten()).any(|x| x["name"] == o && x["reads"] == true),
+    let apps = (session.mode == Mode::All && name != "search").then(|| node.apps().ok()).flatten();
+    let reads = |apps: &[Value]| match name.split_once('_') {
+        Some((a, o)) => apps.iter().filter(|x| x["name"] == a).flat_map(|x| x["ops"].as_array().into_iter().flatten()).any(|x| x["name"] == o && x["reads"] == true),
         None => name == "search",
     };
     let before = apps.filter(|a| !reads(a)).map(|a| tool_names(&a));
     let mut out = call_tool(node, params, session);
     let Some(before) = before else { return (out, false) };
-    let Ok(after) = node.get("/v1/apps").map(|a| tool_names(&a)) else { return (out, false) };
+    let Ok(after) = node.get("/v1/apps").map(|a| tool_names(a.as_array().map(Vec::as_slice).unwrap_or_default())) else { return (out, false) };
     if after == before {
         return (out, false);
     }
@@ -185,8 +186,7 @@ fn call_and_tell(node: &Client, params: &Value, session: &Session) -> (Value, bo
 
 /// The skills for this person: the root first (src/skills.rs).
 pub fn skills(node: &Client) -> Vec<crate::skills::Skill> {
-    let apps = node.get("/v1/apps").ok().and_then(|a| a.as_array().cloned()).unwrap_or_default();
-    crate::skills::all(&apps)
+    crate::skills::all(&node.apps().unwrap_or_default())
 }
 
 /// A skill as `skills/list` lists it: where its SKILL.md is, its frontmatter, and each of its files with its digest.
@@ -240,8 +240,8 @@ fn agent_name(raw: &str) -> String {
 
 /// The MCP server's instructions (src/skills.rs): the rules first, short enough that every harness keeps all of them.
 fn instructions(node: &Client, mode: Mode) -> String {
-    let apps = node.get("/v1/apps").ok().and_then(|a| a.as_array().cloned()).unwrap_or_default();
     let state = node.get("/v1/state").unwrap_or_default();
+    let apps: Vec<Value> = node.apps().unwrap_or_default().into_iter().filter(|a| usable(node, a)).collect();
     crate::skills::instructions(mode, &apps, state["user"]["name"].as_str())
 }
 
@@ -326,27 +326,30 @@ fn deploy_said(app: &str, r: &Value, installed: bool) -> String {
     out.join("\n")
 }
 
-/// The tools it lists: its own, the node's own apps' and every app's.
+/// The tools it lists: its own and every app's.
 fn listed(node: &Client) -> Result<Vec<Value>, Value> {
-    let apps = node.get("/v1/apps").map_err(|e| json!({ "code": -32000, "message": e.to_string() }))?;
+    let apps = node.apps().map_err(|e| json!({ "code": -32000, "message": e.to_string() }))?;
     let mut tools = vec![deploy_tool()];
     // A sign-in from elsewhere can't ask a device for its log.
     if !node.elsewhere() {
         tools.push(logs_tool());
     }
-    // What only this machine's person runs, a sign-in from elsewhere can't; and MCP Apps' own version of a tool wins.
+    // MCP Apps' own version of a tool wins.
     let drawn: Vec<Value> = apps::tools().iter().map(|t| t["name"].clone()).collect();
-    for app in crate::node::own::all().into_iter().filter(|a| a.elsewhere || !node.elsewhere()) {
-        tools.extend(app.tools.into_iter().filter(|t| !drawn.contains(&t["name"])));
-    }
-    for app in apps.as_array().into_iter().flatten() {
+    for app in apps.iter().filter(|a| usable(node, a)) {
         let name = app["name"].as_str().unwrap_or("");
         // Tools starting with `_` are for the screens, and the node's own.
-        for tool in app["ops"].as_array().into_iter().flatten().filter(|tool| !tool["name"].as_str().unwrap_or("").starts_with('_')) {
+        for tool in app["ops"].as_array().into_iter().flatten().filter(|tool| !tool["name"].as_str().unwrap_or("").starts_with('_')).filter(|tool| !drawn.contains(&json!(format!("{name}_{}", tool["name"].as_str().unwrap_or(""))))) {
             tools.push(json!({ "name": format!("{name}_{}", tool["name"].as_str().unwrap_or("")), "description": tool["description"], "inputSchema": tools::mcp_schema(app, tool), "annotations": tools::mcp_annotations(tool) }));
         }
     }
     Ok(tools)
+}
+
+/// Whether whoever this asks for may use `app`: a node app that's this machine's own person's (`elsewhere: false`)
+/// isn't for someone signed in from elsewhere.
+fn usable(node: &Client, app: &Value) -> bool {
+    app["elsewhere"] != false || !node.elsewhere()
 }
 
 /// A tool's answer, within the budget an agent reads (tools::BUDGET).
@@ -438,7 +441,7 @@ fn answer_tool(node: &Client, params: &Value, session: &Session) -> Value {
             with_trace(
                 match ran.ok {
                     // A script gets an empty list as it is; an agent reading gets it in words.
-                    Ok(ok) => match ["accounts", "devices"].into_iter().find_map(|tool| Some((name.strip_suffix(&format!("_{tool}"))?, tool))).filter(|_| ok == json!([])).and_then(|(app, tool)| Some((tools::find(node, app, tool)?.0, tool))).and_then(|(a, tool)| tools::none_said(node, &a, tool, &ok, false)) {
+                    Ok(ok) => match name.strip_suffix("_accounts").filter(|_| ok == json!([])).and_then(|app| tools::find(node, app, "accounts")).and_then(|(a, _)| tools::none_said(node, &a, "accounts", &ok, false)) {
                         Some(none) => json!({ "content": [{ "type": "text", "text": none }] }),
                         None => json!({ "content": tools::mcp_content(node, &ok) }),
                     },
@@ -453,7 +456,7 @@ fn answer_tool(node: &Client, params: &Value, session: &Session) -> Value {
 /// What to say for a tool nobody here lists: an app's tools when the app is right, else the nearest tools.
 fn unknown_tool(node: &Client, name: &str) -> Result<String> {
     if let Some((app, tool)) = name.split_once('_')
-        && node.get("/v1/apps")?.as_array().into_iter().flatten().chain(&crate::node::own::listed()).any(|a| a["name"] == app)
+        && node.apps()?.iter().any(|a| a["name"] == app)
     {
         return tools::unknown(node, app, Some(tool), None);
     }
@@ -474,15 +477,16 @@ pub fn dispatch(node: &Client, name: &str, mut input: Map<String, Value>, agent:
     let checked = (|| {
         let Some((app, tool)) = name.split_once('_') else { bail!("{}", unknown_tool(node, name)?) };
         let Some((a, spec)) = spec.or_else(|| tools::find(node, app, tool)) else { bail!("{}", unknown_tool(node, name)?) };
+        if !usable(node, &a) {
+            bail!(crate::cli::Failed::Refused(format!("{} is this machine's own person's to use, not someone signed in from elsewhere", a["title"].as_str().unwrap_or(app))));
+        }
         // Checked as MCP lists it, before anything runs: a wrong input says what's wrong, never runs as something else.
         tools::check(&tools::mcp_schema(&a, &spec), &Value::Object(input.clone()))?;
-        let device = if crate::node::own::find(app).is_some() || tools::own_device(&spec) { None } else { input.remove("device").and_then(|d| d.as_str().map(str::to_string)) };
+        let device = if tools::on_the_node(&a) || tools::own_device(&spec) { None } else { input.remove("device").and_then(|d| d.as_str().map(str::to_string)) };
         let confirmed = input.remove("confirm") == Some(json!(true));
         // `trace: true` gives, beside the answer, what the call did and where (`one <app> <tool> --trace`).
         let trace = input.remove("trace") == Some(json!(true));
-        if crate::node::own::find(app).is_none() {
-            tools::mcp_files(node, &spec, &mut input)?;
-        }
+        tools::mcp_files(node, &spec, &mut input)?;
         Ok((app.to_string(), tool.to_string(), spec, Run { device, scopes: None, agent, client, confirmed, trace }))
     })();
     match checked {
@@ -505,8 +509,8 @@ pub struct Run<'a> {
     pub trace: bool,
 }
 
-/// Runs an app's tool, or a node app's, as the person: what sends or can't be undone only once they agreed, and a node
-/// app's that is this machine's own person's never for someone from elsewhere.
+/// Runs an app's tool, or a node app's (`node::own`), as the person: what sends or can't be undone only once they
+/// agreed.
 pub fn run(node: &Client, app: &str, tool: &str, spec: &Value, input: Map<String, Value>, how: Run) -> crate::api::client::Called {
     let cli = how.client == "cli";
     if spec["confirm"] == true && !how.confirmed {
@@ -515,10 +519,7 @@ pub fn run(node: &Client, app: &str, tool: &str, spec: &Value, input: Map<String
         return crate::api::client::Called { ok: Err(crate::cli::Failed::Refused(refused).into()), trace: None };
     }
     if let Some(own) = crate::node::own::find(app) {
-        let ok = match own.elsewhere || !node.elsewhere() {
-            true => (own.run)(tool, &input, &crate::node::own::Asked { node, agent: how.agent, client: how.client, confirmed: how.confirmed }),
-            false => Err(anyhow::anyhow!("{} is this machine's own person's to use, not someone signed in from elsewhere", own.title)),
-        };
+        let ok = (own.run)(tool, &input, &crate::node::own::Asked { node, agent: how.agent, client: how.client, confirmed: how.confirmed });
         return crate::api::client::Called { ok, trace: None };
     }
     node.call(&json!({ "device": how.device, "scopes": how.scopes, "app": app, "op": tool, "input": input, "agent": how.agent, "client": how.client }), how.trace)

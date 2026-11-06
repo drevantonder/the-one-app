@@ -113,8 +113,8 @@ fn screen(node: &Client, input: &Value) -> anyhow::Result<Value> {
     std::io::Read::read_to_string(&mut { page.body }, &mut html)?;
     anyhow::ensure!(page.status == 200, "{}", html.trim());
     // Its title, as the web client names it; and where the web client shows it, for what a chat can't do (give files).
-    let apps = node.get("/v1/apps").unwrap_or_default();
-    let found = apps.as_array().into_iter().flatten().find(|a| a["name"] == app);
+    let apps = node.apps().unwrap_or_default();
+    let found = apps.iter().find(|a| a["name"] == app);
     let title = found
         .and_then(|a| a["screens"].as_array().into_iter().flatten().find(|s| s["name"] == screen)?["title"].as_str())
         .or_else(|| found.and_then(|a| a["title"].as_str().or(a["name"].as_str())))

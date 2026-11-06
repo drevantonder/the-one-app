@@ -196,10 +196,6 @@ impl Node {
     /// or says to go elsewhere.
     pub(super) async fn route(&self, req: CallRequest, me: Caller) -> Result<Value> {
         let req = self.identified(req)?;
-        // Push runs on whichever node is asked, for anyone: it goes through the network's push Worker.
-        if req.service.as_deref() == Some(crate::push::NAME) {
-            return self.push(&req.tool, &req.input, &me, req.from.as_deref()).await;
-        }
         if req.device.as_deref() == Some("all") {
             return self.everywhere(req, me).await;
         }
@@ -542,12 +538,6 @@ impl Node {
         }
         if req.app == scopes::APP {
             return self.read_logs(&req.tool, &input, me).map(Reply::Ok);
-        }
-        if req.service.as_deref() == Some(crate::push::NAME) {
-            return Ok(match self.push(&req.tool, &input, me, req.from.as_deref()).await {
-                Ok(v) => Reply::Ok(v),
-                Err(err) => Reply::failed(&err),
-            });
         }
         if req.service.is_some() {
             if !self.runs_service_here(&req.app) {
@@ -1206,8 +1196,8 @@ impl Node {
             // A push to the caller's devices, from this app, through the network's push Worker.
             ("POST", "/notify") => {
                 ensure!(!grant.read_only, "this call only reads: it can't push");
-                let input: Value = serde_json::from_slice(&body)?;
-                ok(json!({ "ok": self.push("send", &input, &grant.caller, Some(&grant.app)).await? }))
+                let send: crate::push::Send = serde_json::from_slice(&body)?;
+                ok(json!({ "ok": self.push_note(&grant.caller.user, &send.note(&grant.app)?).await? }))
             }
             ("GET", "/devices") => ok(self.state_for(&grant.caller)["network"]["devices"].take()),
             // Run priority's order, as the person the call is for: only an admin changes it.

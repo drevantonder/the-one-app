@@ -169,8 +169,8 @@ pub fn deeper(apps: &[Value]) -> Vec<Skill> {
             .map(|(p, t)| (p.to_string(), t.to_string()))
             .collect();
     }
-    // The node's own apps first, then the person's, each with a guide and tools.
-    skills.extend(crate::node::own::listed().iter().chain(apps).filter(|a| a["instructions"].as_str().is_some_and(|i| !i.trim().is_empty()) && a["ops"].as_array().is_some_and(|o| !o.is_empty())).map(app_skill));
+    // Each app with a guide and tools, the node's own first, as the node lists them.
+    skills.extend(apps.iter().filter(|a| a["instructions"].as_str().is_some_and(|i| !i.trim().is_empty()) && a["ops"].as_array().is_some_and(|o| !o.is_empty())).map(app_skill));
     skills
 }
 

@@ -7,9 +7,8 @@
 //! network's devices it's from; a note the network's own Workers send is unsigned), then sealed to the receiving device's
 //! seal key (`keys::seal_to`), the key the network's signed entries list for it, never one a node or a Worker says.
 //!
-//! Each device that gets pushes registers its address with the Worker itself (`register_request`). A node answers the
-//! `push` tools for any caller (`node::push`): `send` seals a note to each of the caller's devices and hands them to the
-//! Worker.
+//! Each device that gets pushes registers its address with the Worker itself (`register_request`). A node pushes for any
+//! caller (`node::push`): it seals a note to each of the caller's devices and hands them to the Worker.
 
 use anyhow::{Result, anyhow, ensure};
 use data_encoding::{BASE64URL_NOPAD as B64U, HEXLOWER};
@@ -17,8 +16,6 @@ use ed25519_dalek::SigningKey;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
-/// What agents call push by: `push_send`. Apps push with `ctx.notify`.
-pub const NAME: &str = "push";
 /// What a device signs its requests to the push Worker for.
 pub const DOMAIN: &str = "one/push";
 /// What a device signs a note for.
@@ -122,27 +119,6 @@ pub fn register_request(key: &SigningKey, seal: &[u8; 32], address: &Address, us
 /// What a device sends the push Worker to stop getting pushes (`POST <address>/push/unregister`).
 pub fn unregister_request(key: &SigningKey, at: u64) -> Value {
     crate::keys::signed_request(key, DOMAIN, json!({ "route": "POST /push/unregister" }), at)
-}
-
-#[cfg(feature = "node")]
-pub fn describe() -> Value {
-    json!({
-        "title": "Push", "description": "Sends notifications to your devices", "icon": "bell-ringing",
-        "instructions": "Push sends a notification to every device of yours that gets them: push_send with a title and a body. An app pushes with ctx.notify, and tapping its push opens its screen. Each one is sealed to the device it's for, so nothing on the way reads it. It says how many devices it went to, never whether anyone saw it.",
-        "ops": [
-            { "name": "send", "reads": false, "description": "Push a notification to your devices: { title, body?, screen?, params? }; from an app, tapping it opens that app's screen (main unless given). Says how many devices it went to.",
-              "input": { "type": "object", "required": ["title"], "properties": {
-                "title": { "type": "string", "description": "one line" },
-                "body": { "type": "string", "description": "the text under it" },
-                "app": { "type": "string", "description": "the app it opens, when no app sends it" },
-                "screen": { "type": "string", "description": "the screen it opens" },
-                "params": { "type": "object", "description": "that screen's params" },
-                "badge": { "type": "integer", "description": "the number on the app's icon; 0 clears it" },
-              }}},
-            { "name": "devices", "reads": true, "description": "Your devices that get notifications.", "input": { "type": "object", "properties": {} }},
-            { "name": "status", "reads": true, "description": format!("Which push services {} sends through: apns, fcm, wns, webpush.", crate::config::YOURS), "input": { "type": "object", "properties": {} }},
-        ],
-    })
 }
 
 #[cfg(feature = "node")]

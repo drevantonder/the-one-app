@@ -438,6 +438,11 @@ async fn a_client_devices_mcp_runs_as_its_person() {
     let (_, listed) = mcp(json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" })).await;
     let names: Vec<&str> = listed["result"]["tools"].as_array().unwrap().iter().filter_map(|t| t["name"].as_str()).collect();
     assert!(names.contains(&"notes_post") && !names.contains(&"logs"), "a sign-in from elsewhere reads no device's log: {names:?}");
+    assert!(names.contains(&"vault_list") && names.contains(&"push_send") && !names.contains(&"devices_remove") && !names.contains(&"backups_now"), "their own Vault and Push, not this machine's Devices or Backups: {names:?}");
+    let (status, vault) = mcp(json!({ "jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": { "name": "vault_list", "arguments": {} } })).await;
+    assert!(status == 200 && vault["result"]["isError"] != true, "Sam uses his own Vault: {vault}");
+    let (_, devices) = mcp(json!({ "jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": { "name": "devices_remove", "arguments": { "device": "mac" } } })).await;
+    assert!(devices["result"]["isError"] == true, "{devices}");
     let (status, needs) = mcp(json!({ "jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": { "name": "notes_post", "arguments": { "text": "from Sam" } } })).await;
     assert_eq!(status, 428, "{needs}");
     assert!(needs["need"].as_array().is_some_and(|n| !n.is_empty()), "{needs}");

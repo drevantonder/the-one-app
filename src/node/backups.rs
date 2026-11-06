@@ -294,8 +294,8 @@ impl Node {
             }
             let mut told = false;
             for admin in &admins {
-                let input = json!({ "title": p.title, "body": format!("{} {}", p.text, p.fix) });
-                match self.push("send", &input, &Caller::own(me, admin.clone()), None).await {
+                let note = crate::push::Send { title: p.title.clone(), body: format!("{} {}", p.text, p.fix), ..Default::default() }.note("")?;
+                match self.push_note(admin, &note).await {
                     Ok(sent) => {
                         told = true;
                         tracing::info!("told {admin} about backups: {sent}");

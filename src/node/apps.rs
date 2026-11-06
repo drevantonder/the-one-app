@@ -38,18 +38,15 @@ impl Node {
         Ok(())
     }
 
-    /// Every app in the network, with what each does for `viewer` where it's installed for them; and the services
-    /// that serve them.
+    /// Every app in the network: the node's own (`own`), then each app with what it does for `viewer` where it's
+    /// installed for them; and the services that serve them.
     pub async fn apps(&self, viewer: &Caller) -> Result<Vec<Value>> {
-        let mut out = self.catalog(viewer, false).await?;
+        let mut out: Vec<Value> = super::own::all().iter().map(super::own::NodeApp::listed).collect();
+        out.extend(self.catalog(viewer, false).await?);
         let mut services = Vec::new();
         if viewer.user == self.user()? {
             services.extend(self.with(|i| Ok(self.services_here(i)))?.into_iter().map(|d| d.2));
         }
-        // Push, which every node answers itself.
-        let mut push = crate::push::describe();
-        push["name"] = json!(crate::push::NAME);
-        services.push(push);
         let remote = self.with(|i| {
             let mut d: Vec<Value> = i.peers.iter().filter(|(k, _)| i.online(k)).flat_map(|(_, s)| s.services.iter()).filter(|d| d.1.contains(&viewer.user)).map(|d| d.2.clone()).collect();
             d.sort_by_key(|v| v["name"].as_str().unwrap_or("").to_string());

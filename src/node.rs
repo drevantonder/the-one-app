@@ -37,7 +37,7 @@ pub mod devices;
 mod sync;
 mod net;
 mod pairing;
-mod push;
+pub(crate) mod push;
 pub(crate) mod releases;
 mod scheduled;
 pub(crate) mod screens;

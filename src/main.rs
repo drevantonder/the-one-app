@@ -33,7 +33,7 @@ fn command_words() -> Vec<String> {
 
 /// What `help` and the bare command say: what an agent needs to start, and where the rest is.
 fn help(node: &Client) -> String {
-    let apps = node.get("/v1/apps").ok().and_then(|a| a.as_array().cloned()).unwrap_or_default();
+    let apps = node.apps().unwrap_or_default();
     let names: Vec<&str> = apps.iter().filter(|a| a["ops"].as_array().is_some_and(|o| !o.is_empty())).filter_map(|a| a["name"].as_str()).collect();
     let yours = match names.is_empty() {
         true => String::new(),
@@ -227,7 +227,7 @@ fn apps() -> Command {
                         Some(("user", _)) => "you".to_string(),
                         _ => "everyone".to_string(),
                     };
-                    for app in g.node.get("/v1/apps")?.as_array().into_iter().flatten() {
+                    for app in &g.node.apps()? {
                         let from = app["from"].as_str().map(|f| format!(", a fork of {f}")).unwrap_or_default();
                         let installed: Vec<String> = app["installed"].as_array().into_iter().flatten().filter_map(Value::as_str).map(place).collect();
                         let installed = if installed.is_empty() { String::new() } else { format!(", added for {}", installed.join(", ")) };
@@ -242,8 +242,8 @@ fn apps() -> Command {
                 }
                 ["deploy", dir] => deploy(g.node, std::path::Path::new(dir), &flags)?,
                 ["deploys", app] => {
-                    let apps = g.node.get("/v1/apps")?;
-                    let found = apps.as_array().into_iter().flatten().find(|a| a["name"] == *app).with_context(|| format!("no app named {app}"))?;
+                    let apps = g.node.apps()?;
+                    let found = apps.iter().find(|a| a["name"] == *app).with_context(|| format!("no app named {app}"))?;
                     for d in found["history"].as_array().into_iter().flatten() {
                         let current = if d["bundle"] == found["bundle"] { "  (running)" } else { "" };
                         println!("{}  {}{current}", &d["bundle"].as_str().unwrap_or("")[..12], ago(d["time"].as_u64().unwrap_or(0)));
@@ -370,7 +370,7 @@ fn running() -> Command {
                     }
                 }
                 ["schedules"] => {
-                    for app in g.node.get("/v1/apps")?.as_array().into_iter().flatten() {
+                    for app in &g.node.apps()? {
                         for s in app["schedules"].as_array().into_iter().flatten() {
                             let state = match (&s["invalid"], s["removed"] == true, s["on"] == true) {
                                 (Value::String(why), ..) => format!("doesn't make sense: {why}"),
@@ -481,7 +481,7 @@ fn agents() -> Command {
                     Some(text) => print!("{text}"),
                     None => bail!("{}", tools::unknown(g.node, rest[0], None, Some(g.commands))?),
                 },
-                ["mcp"] => one::mcp::stdio(std::sync::Arc::new(node()), if flags.contains_key("code") { Mode::Code } else { Mode::All })?,
+                ["mcp"] => one::mcp::stdio(node(), if flags.contains_key("code") { Mode::Code } else { Mode::All })?,
                 ["run", file] => {
                     let script = match *file {
                         "-" => std::io::read_to_string(std::io::stdin())?,
@@ -539,10 +539,8 @@ fn generic() -> Command {
             let args = g.args;
             match g.words().as_slice() {
                 [app] if !app.starts_with('-') => {
-                    // The node's own apps (Devices, Widgets) aren't in its app list, but read the same.
-                    let apps = g.node.get("/v1/apps")?;
-                    let own = one::node::own::listed();
-                    let Some(found) = apps.as_array().into_iter().flatten().chain(own.iter()).find(|a| a["name"] == *app) else { bail!("{}", tools::unknown(g.node, app, None, Some(g.commands))?) };
+                    let apps = g.node.apps()?;
+                    let Some(found) = apps.iter().find(|a| a["name"] == *app) else { bail!("{}", tools::unknown(g.node, app, None, Some(g.commands))?) };
                     println!("{} ({app})", found["title"].as_str().unwrap_or(app));
                     if let Some(i) = found["instructions"].as_str().filter(|i| !i.is_empty()) {
                         println!("\n{i}\n");
@@ -625,7 +623,7 @@ fn command_help(node: &Client, words: &[String]) -> Option<String> {
     };
     let commands: Vec<&String> = words.iter().take_while(|w| !w.starts_with('-')).collect();
     let (said, out) = (1..=commands.len()).rev().map(|n| (n, lines(&commands[..n].iter().map(|w| w.as_str()).collect::<Vec<_>>().join(" ")))).find(|(_, o)| !o.is_empty()).unwrap_or_default();
-    let app = node.get("/v1/apps").ok().and_then(|a| a.as_array().cloned()).unwrap_or_default().iter().chain(&one::node::own::listed()).any(|a| a["name"] == first.as_str());
+    let app = node.apps().unwrap_or_default().iter().any(|a| a["name"] == first.as_str());
     match (app, out.is_empty()) {
         (true, _) if words.len() > 1 && said < commands.len() => None,
         (true, true) => None,
@@ -840,7 +838,7 @@ fn status(node: &Client, state: &Value) {
             println!("  {}  {}", g["name"].as_str().unwrap_or(""), members.join(", "));
         }
     }
-    let apps = node.get("/v1/apps").ok().and_then(|a| a.as_array().cloned()).unwrap_or_default();
+    let apps = node.apps().unwrap_or_default();
     let title = |app: &str| apps.iter().find(|a| a["name"] == app).and_then(|a| a["title"].as_str()).unwrap_or(app).to_string();
     let all = i["devices"].as_array().cloned().unwrap_or_default();
     println!("\nDevices");

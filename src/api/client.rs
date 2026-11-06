@@ -31,11 +31,12 @@ pub trait Via: Send + Sync {
     }
 }
 
-/// A client of the node: what the CLI's commands and the MCP server ask it with.
+/// A client of the node: what the CLI's commands and the MCP server ask it with, one for each command or MCP message.
 pub struct Client {
-    via: Box<dyn Via>,
+    via: std::sync::Arc<dyn Via>,
     elsewhere: bool,
     needed: Mutex<Option<Value>>,
+    apps: Mutex<Option<Vec<Value>>>,
 }
 
 /// A call's answer, with what it did as lines when its trace was asked for (`node::trace::said`).
@@ -48,7 +49,21 @@ impl Client {
     /// `elsewhere`: it asks for someone who isn't this machine's own person, a device of theirs or a sign-in, whose MCP
     /// request the node answers.
     pub fn new(via: impl Via + 'static, elsewhere: bool) -> Client {
-        Client { via: Box::new(via), elsewhere, needed: Mutex::new(None) }
+        Client { via: std::sync::Arc::new(via), elsewhere, needed: Mutex::new(None), apps: Mutex::new(None) }
+    }
+
+    /// Another, asking the same way, for the next MCP message of a session that serves many.
+    pub fn again(&self) -> Client {
+        Client { via: self.via.clone(), elsewhere: self.elsewhere, needed: Mutex::new(None), apps: Mutex::new(None) }
+    }
+
+    /// Every app, the node's own among them, as `GET /v1/apps` gives them: asked once, the first time.
+    pub fn apps(&self) -> Result<Vec<Value>> {
+        let mut kept = self.apps.lock().unwrap();
+        if kept.is_none() {
+            *kept = Some(self.get("/v1/apps")?.as_array().cloned().unwrap_or_default());
+        }
+        Ok(kept.clone().unwrap_or_default())
     }
 
     pub fn elsewhere(&self) -> bool {
