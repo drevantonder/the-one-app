@@ -196,7 +196,6 @@ pub fn routes() -> Router<Node> {
         .route("/v1/erase", post(erase))
         .route("/v1/role", post(role))
         .route("/v1/settings", post(settings))
-        .route("/v1/reads", post(reads))
         .route("/v1/switch", post(switch))
         .route("/v1/steps", post(steps))
         .route("/v1/steps/global", get(global_steps))
@@ -495,16 +494,8 @@ async fn from_client(node: &Node, key: crate::entry::Key, until: u64, path: &str
     {
         return refuse(req, (StatusCode::BAD_REQUEST, Json(json!({ "error": format!("{err:#}") }))).into_response()).await;
     }
-    // What it reads of who's who, which phase 2's switch waits for (`database::switch`).
-    let said = req.headers().get(crate::database::switch::HEADER).and_then(|h| h.to_str().ok()).and_then(crate::database::switch::parse);
-    if let Some((reads, build)) = said.clone() {
-        let node = node.clone();
-        tokio::spawn(async move { node.said_reads(key, reads, &build).await });
-    }
-    // Once who's who is written as steps, a client that missed the switch (one that reads less than its gate, or than
-    // this build, before a release that reads it) is told to update before it does anything: whatever it would seal or
-    // write it takes from the frozen log.
-    if said.is_none_or(|(reads, _)| reads < crate::database::switch::GATE.min(crate::database::switch::READS)) && node.frozen() {
+    // A client older than what this build reads of who's who is told to update before it does anything.
+    if crate::database::reads_of(req.headers().get(crate::database::HEADER).and_then(|h| h.to_str().ok())) < crate::database::READS {
         return refuse(req, (StatusCode::UPGRADE_REQUIRED, Json(json!({ "error": format!("Update this device: {YOURS}'s other devices have moved on to what this one doesn't read yet."), "code": "update" }))).into_response()).await;
     }
     req.extensions_mut().insert(Me { caller: Caller { key, user, agent: None, token: Some(token) }, sign_in: Some(name) });
@@ -889,14 +880,6 @@ async fn settings(State(node): State<Node>, me: Me, Json(body): Json<Value>) -> 
     done()
 }
 
-/// What a device of the install reads of who's who (`database::switch`), as this machine's own program says it: the
-/// Cloudflare node, which says nothing itself, once this machine deployed its build there.
-async fn reads(State(node): State<Node>, Json(body): Json<Value>) -> Reply {
-    let device = crate::entry::unhex(&text(&body, "device")?)?;
-    let reads = anyhow::Context::context(body["reads"].as_u64(), "reads is a number")? as u32;
-    node.said_reads(device, reads, &text(&body, "build")?).await;
-    done()
-}
 
 /// `{ recovery }`: the ceremony that freezes `global`'s log, so its scope database is the truth (`Node::switch`), signed
 /// by `recovery`, the install's recovery key (hex), read from a file here by the CLI and never kept: only on this

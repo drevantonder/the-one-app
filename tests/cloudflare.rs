@@ -405,7 +405,7 @@ fn a_sign_in_for_a_device_names_it_and_auth_passes_it_on() {
     assert_eq!(new.post("/api/auth/passkey/verify-authentication", json!({ "response": passkey.get(&options) })).0, 200);
     assert_eq!(signed_in_as(&mut new).as_deref(), Some(andre.as_str()));
     let asked = |b: &mut Browser, d: &one::keys::Endpoint| {
-        let (status, out) = b.post("/api/auth/devices/requests", json!({ "key": data_encoding::HEXLOWER.encode(&d.key), "seal": data_encoding::HEXLOWER.encode(&d.seal), "name": "MacBook Pro" }));
+        let (status, out) = b.post("/api/auth/devices/requests", json!({ "key": data_encoding::HEXLOWER.encode(&d.key), "seal": data_encoding::HEXLOWER.encode(&d.seal), "name": "MacBook Pro", "reads": one::database::READS }));
         assert_eq!(status, 200, "{out}");
         let (_, out, _) = b.get(&format!("/api/auth/devices/requests/{}", data_encoding::HEXLOWER.encode(&d.key)));
         out["sign_in"].clone()
@@ -481,7 +481,7 @@ fn a_sign_in_finished_from_a_link_lets_its_device_in_only_by_a_tap() {
         assert_eq!(status, 200, "{out}");
         let token = out["access_token"].as_str().unwrap().to_string();
         let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).build().into();
-        let resp = agent.post(format!("{}/api/auth/devices/requests", k.address)).header("authorization", format!("Bearer {token}")).send_json(json!({ "key": key, "seal": data_encoding::HEXLOWER.encode(&device.seal), "name": "MacBook Pro" })).unwrap();
+        let resp = agent.post(format!("{}/api/auth/devices/requests", k.address)).header("authorization", format!("Bearer {token}")).send_json(json!({ "key": key, "seal": data_encoding::HEXLOWER.encode(&device.seal), "name": "MacBook Pro", "reads": one::database::READS })).unwrap();
         assert_eq!(resp.status(), 200);
         let mut resp = agent.get(format!("{}/api/auth/devices/requests/{key}", k.address)).header("authorization", format!("Bearer {token}")).call().unwrap();
         let sign_in = resp.body_mut().read_json::<Value>().unwrap()["sign_in"].clone();
@@ -557,7 +557,7 @@ fn a_device_asking_to_join_is_pushed_to_its_persons_other_devices() {
     let (_, options, _) = andre.get(&format!("/api/auth/passkey/generate-register-options?context={secret}"));
     assert_eq!(andre.post("/api/auth/passkey/verify-registration", json!({ "response": passkey.create(&options), "createSession": true })).0, 200);
     let ask = |b: &mut Browser, d: &one::keys::Endpoint| {
-        let (status, out) = b.post("/api/auth/devices/requests", json!({ "key": HEXLOWER.encode(&d.key), "seal": HEXLOWER.encode(&d.seal), "name": "MacBook Pro" }));
+        let (status, out) = b.post("/api/auth/devices/requests", json!({ "key": HEXLOWER.encode(&d.key), "seal": HEXLOWER.encode(&d.seal), "name": "MacBook Pro", "reads": one::database::READS }));
         assert_eq!(status, 200, "{out}");
     };
     // Their phone joined as theirs, and gets pushes.
@@ -975,7 +975,7 @@ mod relay {
     }
 
     #[test]
-    fn once_switched_a_device_that_reads_less_is_told_to_update_by_the_relay() {
+    fn a_device_that_reads_less_is_told_to_update_by_the_relay() {
         let first = SecretKey::generate();
         let k = super::Workers::for_devices(vec![hex(&first)]);
         let address = k.address.replace("localhost", "127.0.0.1");
@@ -983,18 +983,12 @@ mod relay {
         let signer = |k: &SecretKey| ed25519_dalek::SigningKey::from_bytes(&k.to_bytes());
         let computes = |by: &SecretKey, fields: Value| super::post(&format!("{address}/relay/computes"), &[], one::keys::signed_request(&signer(by), "one/relay", fields, at()));
         assert_eq!(tell(&address, &first, json!({ "add": hex(&phone), "role": "client" })), 204);
-        // Before it's switched, an older device, which says nothing of what it reads, is told the computes.
-        assert_eq!(computes(&phone, json!({ "computes": true })).0, 200);
-        // Only an admin's device says it was switched.
-        assert_eq!(tell(&address, &phone, json!({ "switched": 2 })), 403, "a device that isn't an admin's said who's who was switched");
-        assert_eq!(tell(&address, &first, json!({ "switched": 0 })), 403);
-        assert_eq!(tell(&address, &first, json!({ "switched": 2 })), 204);
-        for older in [json!({ "computes": true }), json!({ "computes": true, "reads": 1 })] {
+        for older in [json!({ "computes": true }), json!({ "computes": true, "reads": one::database::READS - 1 })] {
             let (status, said) = computes(&phone, older);
-            assert_eq!(status, 426, "a device that reads less than the switch wasn't told to update");
+            assert_eq!(status, 426, "a device that reads less than this build wasn't told to update");
             assert!(said["error"].as_str().is_some_and(|e| e.starts_with("Update this device")), "{said}");
         }
-        assert_eq!(computes(&phone, json!({ "computes": true, "reads": 2 })).0, 200);
+        assert_eq!(computes(&phone, json!({ "computes": true, "reads": one::database::READS })).0, 200);
         // A browser's session runs the code the address serves, the newest: it isn't asked.
         let session = SecretKey::generate();
         let cert = one::keys::certify(&signer(&phone), session.public().as_bytes(), super::now() + 60_000, super::now());
@@ -1023,7 +1017,7 @@ mod relay {
             let s = online(&address, &session, Some(&cert)).await.expect("a session its device vouched for isn't let in");
             assert!(reaches(&address, &s, &a).await, "a session's endpoint doesn't reach the install's devices");
             // Its first nodes to ask: the computes, for it or a device on the list, and no one else.
-            let asked = one::keys::signed_request(&signer(&phone), "one/relay", json!({ "computes": true }), at());
+            let asked = one::keys::signed_request(&signer(&phone), "one/relay", json!({ "computes": true, "reads": one::database::READS }), at());
             let by_session = ask(&session, &cert);
             // And which of them are on the relay's network now, which a client races first.
             for body in [by_session.clone(), asked.clone()] {
@@ -1040,7 +1034,7 @@ mod relay {
             let late = one::keys::signed_request(&signer(&session), "one/relay", json!({ "computes": true, "certificate": cert }), super::now() - 120_000);
             assert_eq!(computes(late).0, 400);
             let stranger = SecretKey::generate();
-            assert_eq!(computes(one::keys::signed_request(&signer(&stranger), "one/relay", json!({ "computes": true }), at())).0, 403, "a stranger was told the computes");
+            assert_eq!(computes(one::keys::signed_request(&signer(&stranger), "one/relay", json!({ "computes": true, "reads": one::database::READS }), at())).0, 403, "a stranger was told the computes");
             // When each was last here, a session's as the device that vouched for it: told the install's own devices
             // and their sessions, as the computes are, and no one else.
             let seen = |by: &SecretKey| super::post(&format!("{address}/relay/seen"), &[], one::keys::signed_request(&signer(by), "one/relay", json!({ "seen": true }), at()));

@@ -5,7 +5,7 @@
 
 use super::*;
 use crate::config::CLI;
-use crate::database::{steps, switch};
+use crate::database::steps;
 
 /// How long a writer of the log waits for the freeze a `FREEZING` step says is coming, from when it first sees it,
 /// before it writes on: the ceremony writes the freeze within half of it, or not at all, so a writer that has
@@ -49,9 +49,6 @@ impl Node {
         }
         for _ in 0..5 {
             if self.freeze_once(&user, recovery).await? {
-                // So a device of an older build is told to update when it next asks the relay, rather than wait for
-                // good to find itself in the frozen log.
-                self.tell_relay(json!({ "switched": switch::GATE.min(switch::READS) }));
                 return Ok(());
             }
         }
@@ -180,22 +177,6 @@ impl Node {
             }
             tokio::time::sleep(Duration::from_secs(1)).await;
         }
-    }
-
-    /// Once `global`'s log is frozen, this release's types, roles, rules and tables as a step (`steps::DEFAULTS`), if
-    /// this device signs for an admin, its database is an older release's, and every device reads this one
-    /// (`switch::gate`).
-    pub async fn say_defaults(&self) -> Result<()> {
-        let Ok(user) = self.user() else { return Ok(()) };
-        let due = self.with(|i| {
-            let db = i.r.db();
-            let signs = db.client(&self.0.id).is_some_and(|c| c.user == user) && db.may(&user, "change-roles", scopes::INSTALL);
-            Ok(i.r.frozen.is_some() && signs && steps::version(db.conn())? < switch::READS && switch::gate_at(db, &i.reads, switch::READS).open())
-        })?;
-        if due {
-            self.write_step(&user, steps::release_defaults()?).await?;
-        }
-        Ok(())
     }
 
     /// Reads `global`'s steps in the bucket after the last this device applied, once its log is frozen: each applied if

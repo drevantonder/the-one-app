@@ -272,7 +272,7 @@ impl Device {
     /// Asks sign-in to let it in, as the person signed in with `token`, calling it `name` (and with someone new's invite
     /// secret, its proof).
     pub async fn ask(&self, token: &str, name: &str, invite: Option<&str>) -> Result<(), Error> {
-        let mut asked = json!({ "key": self.key(), "seal": hex(&self.me.seal), "name": name, "reads": one::database::switch::READS });
+        let mut asked = json!({ "key": self.key(), "seal": hex(&self.me.seal), "name": name, "reads": one::database::READS });
         if let Some(on) = self.on.lock().unwrap().clone() {
             asked["device"] = json!(on);
         }
@@ -384,11 +384,11 @@ impl Device {
         let url = format!("{}/relay/computes", self.address);
         // Signed again once if another process of this device signed in the same millisecond, which the relay takes once.
         let mut at = keys::next_at(now());
-        let (mut status, mut out) = http("POST", &url, None, Some(keys::signed_request(&self.key, "one/relay", json!({ "computes": true, "reads": one::database::switch::READS }), at))).await?;
+        let (mut status, mut out) = http("POST", &url, None, Some(keys::signed_request(&self.key, "one/relay", json!({ "computes": true, "reads": one::database::READS }), at))).await?;
         if error(&out).is_some_and(|e| keys::taken_already(&e)) {
             tokio::time::sleep(keys::again_in(at)).await;
             at = keys::next_at(now());
-            (status, out) = http("POST", &url, None, Some(keys::signed_request(&self.key, "one/relay", json!({ "computes": true, "reads": one::database::switch::READS }), at))).await?;
+            (status, out) = http("POST", &url, None, Some(keys::signed_request(&self.key, "one/relay", json!({ "computes": true, "reads": one::database::READS }), at))).await?;
         }
         // The relay answers 403 only for a key it doesn't let in.
         if status == 403 {

@@ -69,7 +69,7 @@ impl Bucket for Signed {
                 _ => json!(name),
             };
             let key = ed25519_dalek::SigningKey::from_bytes(&secret);
-            let body = one::keys::signed_request(&key, "one/urls", json!({ "read": [item], "reads": one::database::switch::READS }), crate::device::now());
+            let body = one::keys::signed_request(&key, "one/urls", json!({ "read": [item], "reads": one::database::READS }), crate::device::now());
             let mut r = AGENT.post(format!("{address}/urls")).send_json(body).with_context(|| format!("Couldn't reach {YOURS}"))?;
             let status = r.status().as_u16();
             let out: serde_json::Value = r.body_mut().read_json().unwrap_or_default();

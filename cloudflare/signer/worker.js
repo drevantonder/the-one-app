@@ -18,12 +18,11 @@
 // database's newest hint says (`<prefix>/newest`, never sealed), and `get` each object's bytes, sealed as they are, for
 // browsers, which can't read the bucket: all open nothing. It knows
 // nobody's scopes and checks none: everything in the bucket is sealed, so what it hands out opens nothing without keys.
-// Once who's who was switched (`database::switch`), a request from a device that says it reads less than the relay says
-// it must (`reads`, which an older build doesn't say) is 426, telling it to update, if it would create, replace or
-// remove (an older build would write to the frozen log), or comes from a client alone, which would otherwise read on
-// to a freeze it can't judge. A machine that runs things still reads, so a node takes the release it updates to.
+// A request from a device that says it reads less of who's who than this build (`reads`, shared/crypto.js's `READS`;
+// an older build says nothing) is 426, telling it to update, if it would create, replace or remove, or comes from a
+// client alone. A machine that runs things still reads, so a node takes the release it updates to.
 
-import { b64u, checkRequest } from "../shared/crypto.js";
+import { b64u, checkRequest, READS } from "../shared/crypto.js";
 import { bucketUrls } from "../shared/s3.js";
 
 /// How long URLs work, in seconds, the most it signs at once, and the most objects it confirms at once.
@@ -178,7 +177,7 @@ async function urls(request, env) {
   if (remove.length && !who.admin) fail(403, "only an admin's device removes from the bucket");
   const reads = Number.isSafeInteger(fields.reads) ? fields.reads : 0;
   const client = String(who.role || "").split(" ").every((r) => r === "client");
-  if ((client || create.length + replace.length + remove.length) && reads < (who.reads ?? 0)) fail(426, `Update this device: ${env.YOURS}'s other devices have moved on to what this one doesn't read yet.`);
+  if ((client || create.length + replace.length + remove.length) && reads < READS) fail(426, `Update this device: ${env.YOURS}'s other devices have moved on to what this one doesn't read yet.`);
   for (const p of pages) {
     const ok = p && (p.prefix === "" || (typeof p.prefix === "string" && p.prefix.endsWith("/") && isName(p.prefix.slice(0, -1))));
     if (!ok || ![undefined, "/"].includes(p.delimiter) || ![undefined, null].includes(p.token) && typeof p.token !== "string") fail(400, "a list is { prefix, delimiter?, token? }, its prefix a folder's, ending in /");

@@ -59,7 +59,7 @@ use crate::members::{self, Cuts, Members, Principal, Role, ScopeState};
 use crate::permissions;
 
 use super::scopes::{self, ScopeDb};
-use super::switch;
+use super::READS;
 
 /// The node's database of a scope that its steps are: its `scope`.
 pub const NAME: &str = "scope";
@@ -605,7 +605,7 @@ pub fn connection(bytes: &[u8]) -> Result<Connection> {
 /// A scope's database another device wrote (a copy), or one this device kept from an older release, in this release's
 /// form: what it says, built again here, with what only its steps said carried over (`carry`).
 pub fn normalize(copy: Connection, scope: &Scope, now: u64) -> Result<ScopeDb> {
-    ensure!(version(&copy)? <= switch::READS, Newer);
+    ensure!(version(&copy)? <= READS, Newer);
     let copy = ScopeDb::open(copy, now)?;
     let built = super::scope::build(&if *scope == Scope::Global { copy.members() } else { Members::default() }, scope, &copy.state())?;
     carry(copy.conn(), &built)?;
@@ -655,7 +655,7 @@ pub fn anchor(given: &Given, at: u64, root: Option<Hash>, log: &Log, now: u64) -
     ensure!(log.last() >= freeze.global(), "global's log was read to {}, not to the freeze's {}", log.last(), freeze.global());
     let copy = connection(given.copy.as_deref().context("a freeze carries its copy")?)?;
     ensure!(crate::db::state_hash(&copy)? == freeze.hash, "a freeze's copy isn't what it says");
-    ensure!(version(&copy)? <= switch::READS, Newer);
+    ensure!(version(&copy)? <= READS, Newer);
     let r = replay_all(root, log.entries(freeze.global()));
     let own = super::scope::build(&r.members, &Scope::Global, &r.state)?;
     carry(&copy, &own)?;
@@ -672,7 +672,7 @@ pub fn freeze(root: Option<Hash>, entries: &[Entry], to: u64, mut logs: BTreeMap
     logs.insert("global".into(), to);
     let r = replay_all(root, entries);
     let mut db = ScopeDb::build(&r.members, &Scope::Global, &r.state, now)?;
-    db.conn().pragma_update(None, "user_version", switch::READS)?;
+    db.conn().pragma_update(None, "user_version", READS)?;
     let freeze = Freeze { at: 0, hash: crate::db::state_hash(db.conn())?, logs };
     Ok((freeze.content(), db.bytes()?))
 }
@@ -955,7 +955,7 @@ pub fn apply(db: &ScopeDb, global: Option<&ScopeDb>, scope: &Scope, step: &Entry
     if step.content.app == members::APP && step.content.kind == DEFAULTS {
         return defaults(db, who, scope, step);
     }
-    ensure!(version(db.conn())? <= switch::READS, Newer);
+    ensure!(version(db.conn())? <= READS, Newer);
     let mut m = who.members();
     let mut state = db.state();
     ensure!(step.epoch() <= m.epoch(scope), "it names an epoch its scope hasn't reached");
@@ -1007,13 +1007,13 @@ pub fn take_scope(mut at: u64, mut db: ScopeDb, global: &ScopeDb, scope: &Scope,
 
 /// The kind of step that moves a database on to a newer release's types, roles, rules and tables
 /// (`permissions::DEFAULTS`, `scope::SCHEMA`): `{ reads, types, roles, rules }`, `reads` that release's
-/// `switch::READS`, which the database keeps as its version. An admin's device writes one once every device reads it
-/// (`switch::gate`), and only above the database's version: a release never puts back what a newer one said, and two
+/// `READS`, which the database keeps as its version. An admin's device writes one once every device reads it, and
+/// only above the database's version: a release never puts back what a newer one said, and two
 /// on different releases never write turn about. Readers never run their own release's: each database keeps the rows
 /// its freeze and steps said. One that reads less stops at it (`Newer`): update it.
 pub const DEFAULTS: &str = "defaults";
 
-/// A database's version: the `switch::READS` of the release whose types, roles, rules and tables it has.
+/// A database's version: the `READS` of the release whose types, roles, rules and tables it has.
 pub fn version(db: &Connection) -> Result<u32> {
     Ok(db.query_row("pragma user_version", [], |r| r.get(0))?)
 }
@@ -1036,7 +1036,7 @@ pub fn release_defaults() -> Result<Content> {
     db.execute_batch(permissions::SCHEMA)?;
     permissions::defaults(&db)?;
     let mut data = rules_of(&db)?;
-    data["reads"] = json!(switch::READS);
+    data["reads"] = json!(READS);
     Ok(Content::new(members::APP, DEFAULTS, data))
 }
 
@@ -1076,7 +1076,7 @@ fn defaults(db: &ScopeDb, who: &ScopeDb, scope: &Scope, step: &Entry) -> Result<
     ensure!(who.client(&step.author()).is_some_and(|c| c.user == step.user()), "only a person's own device writes for them");
     ensure!(who.may(step.user(), "change-roles", scopes::INSTALL), "only the install's admins say the release's roles");
     let reads = u32::try_from(step.content.data["reads"].as_u64().context("a release's roles name its version")?)?;
-    ensure!(reads <= switch::READS, Newer);
+    ensure!(reads <= READS, Newer);
     ensure!(reads > version(db.conn())?, "a release's roles only ever move on");
     let out = super::scope::build(&if *scope == Scope::Global { who.members() } else { Members::default() }, scope, &db.state())?;
     carry(db.conn(), &out)?;
@@ -1815,7 +1815,7 @@ pub(crate) mod tests {
         let scope = Scope::User(ANDRE.into());
         let db = || ScopeDb::open(super::super::scope::build(&Members::default(), &scope, &ScopeState::default()).unwrap(), 0).unwrap();
         let mut newer = release_defaults().unwrap();
-        newer.data["reads"] = json!(switch::READS + 1);
+        newer.data["reads"] = json!(READS + 1);
         let newer = Some(Given { step: sign(&mac, &scope, 2, ANDRE, 1, 0, newer).unwrap(), copy: None });
         let took = take_scope(0, db(), &global, &scope, &[None, newer, None], 0).unwrap();
         assert!(took.newer && took.at == 1, "stopped before it");
@@ -1895,12 +1895,12 @@ pub(crate) mod tests {
             content.data["reads"] = json!(reads);
             sign(&mac, &Scope::Global, at, ANDRE, 1, 0, content).unwrap()
         };
-        let newer = apply(&db, None, &Scope::Global, &step(1, switch::READS + 1)).err().unwrap();
+        let newer = apply(&db, None, &Scope::Global, &step(1, READS + 1)).err().unwrap();
         assert!(newer.is::<Newer>(), "a newer release's stops this reader");
-        let db = ScopeDb::open(apply(&db, None, &Scope::Global, &step(1, switch::READS)).unwrap().db, 0).unwrap();
-        assert_eq!(version(db.conn()).unwrap(), switch::READS);
-        assert!(apply(&db, None, &Scope::Global, &step(2, switch::READS)).is_err(), "the same release's again changes nothing");
-        // What each `READS` reads, from the first that reads the scope database (`switch::GATE`): add `(READS, hash)`
+        let db = ScopeDb::open(apply(&db, None, &Scope::Global, &step(1, READS)).unwrap().db, 0).unwrap();
+        assert_eq!(version(db.conn()).unwrap(), READS);
+        assert!(apply(&db, None, &Scope::Global, &step(2, READS)).is_err(), "the same release's again changes nothing");
+        // What each `READS` reads, from the first that reads the scope database (2): add `(READS, hash)`
         // when a release changes them, and read one more.
         const PINNED: &[(u32, &str)] = &[(2, "1a26a7b14a1b8998d5edcf6b6d00db14a698c6109eb865f7bd8e7c86dcd295a4")];
         let mut h = blake3::Hasher::new();
@@ -1908,9 +1908,7 @@ pub(crate) mod tests {
         h.update(permissions::SCHEMA.as_bytes());
         h.update(rules_of(db.conn()).unwrap().to_string().as_bytes());
         let hash = h.finalize().to_hex().to_string();
-        if switch::READS >= switch::GATE {
-            assert!(PINNED.contains(&(switch::READS, hash.as_str())), "the scope database's tables, types, roles or rules changed: read one more in switch::READS, and pin ({}, \"{hash}\")", switch::READS + 1);
-        }
+        assert!(PINNED.contains(&(READS, hash.as_str())), "the scope database's tables, types, roles or rules changed: read one more in READS, and pin ({}, \"{hash}\")", READS + 1);
     }
 
     /// Who may write what as a step, by the rows at that step: a member makes a group but changes no setting, a removed

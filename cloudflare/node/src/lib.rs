@@ -693,10 +693,10 @@ fn scope_truth(truth: &one::database::steps::Truth, root: Option<Hash>, frozen: 
     Ok(took.db)
 }
 
-/// What this build reads of who's who (`one::database::switch::READS`), which its writes to the bucket say.
+/// What this build reads of who's who (`one::database::READS`), which its writes to the bucket say.
 #[wasm_bindgen]
 pub fn reads() -> u32 {
-    one::database::switch::READS
+    one::database::READS
 }
 
 thread_local! {

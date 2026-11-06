@@ -120,13 +120,6 @@ impl Node {
         if let Some(i) = install.as_ref().filter(|_| state["install"].is_object()) {
             state["install"]["frozen"] = json!(i.r.frozen.is_some());
         }
-        // Where phase 2's switch is, for the install's admins, who skip a device gone for good.
-        if let Some(i) = install.as_ref().filter(|i| i.r.db().may(me, "change-settings", scopes::INSTALL))
-            && state["install"].is_object()
-        {
-            state["install"]["switch"] = crate::database::switch::gate_json(i.r.db(), &i.reads);
-            state["install"]["switch"]["frozen"] = json!(i.r.frozen.is_some());
-        }
         state
     }
 

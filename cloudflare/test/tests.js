@@ -1,5 +1,5 @@
 // The Workers' own tests, run by `workerd test` (tests/cloudflare.rs runs them with cargo test).
-import { b64u, databaseKey, idOf, keyPair, openAppKey, openSealed, openUnder, ed25519Public, random, sealAppKey, sealTo, sealUnder, signedRequest } from "../shared/crypto.js";
+import { b64u, databaseKey, idOf, keyPair, openAppKey, openSealed, openUnder, ed25519Public, random, READS, sealAppKey, sealTo, sealUnder, signedRequest } from "../shared/crypto.js";
 import signer from "../signer/worker.js";
 import { presign } from "../shared/s3.js";
 import { verify } from "../shared/token.js";
@@ -87,7 +87,7 @@ export default {
     await remoteMcpClientsSecrets();
     await browsersReadStepsFromTheBucket();
     await stepsAreCreatedInTurn();
-    await anOlderBuildWritesNothingOnceSwitched();
+    await anOlderBuildWritesNothing();
     await pushRequests();
     const token = await sign({ iss: "https://a", sub: "u", exp });
     const forged = token.slice(0, token.lastIndexOf(".") + 1) + b64u.encode(new Uint8Array(64));
@@ -104,7 +104,7 @@ async function browsersReadStepsFromTheBucket() {
   const device = random(32);
   const env = { R2, BUCKET: JSON.stringify({ endpoint: "https://s3.test", bucket: "b", region: "auto", key_id: "k", secret: "s" }), RELAY: { allowed: async () => ({}) } };
   const ask = async (fields, e = env, key = device) => {
-    const body = await signedRequest(key, await ed25519Public(key), "one/urls", fields, Date.now());
+    const body = await signedRequest(key, await ed25519Public(key), "one/urls", { reads: READS, ...fields }, Date.now());
     return signer.fetch(new Request("https://one.test/urls", { method: "POST", body: JSON.stringify(body) }), e);
   };
   const r = await ask({ get: [{ steps: "global/node/scope", from: 1, to: 3 }] });
@@ -117,23 +117,22 @@ async function browsersReadStepsFromTheBucket() {
   equal((await ask({ get: ["global/node/scope/000000000001"] }, { ...env, RELAY: { allowed: async () => null } }, random(32))).status, 403, "only the install's devices");
 }
 
-/// Once who's who was switched, the URL signer lets a device whose build reads less (an older one says nothing) create,
-/// replace or remove nothing, as it would write to the frozen log, and a client alone read nothing; a machine that runs
-/// things still reads, so it takes the release it updates to. Before, nothing changes for any.
-async function anOlderBuildWritesNothingOnceSwitched() {
+/// The URL signer lets a device whose build reads less of who's who (an older one says nothing) create, replace or
+/// remove nothing, and a client alone read nothing; a machine that runs things still reads, so it takes the release it
+/// updates to.
+async function anOlderBuildWritesNothing() {
   const R2 = { head: async () => null };
-  const env = (role, reads) => ({ R2, BUCKET: JSON.stringify({ endpoint: "https://s3.test", bucket: "b", region: "auto", key_id: "k", secret: "s" }), RELAY: { allowed: async () => ({ admin: false, role, reads }) } });
+  const env = (role) => ({ R2, BUCKET: JSON.stringify({ endpoint: "https://s3.test", bucket: "b", region: "auto", key_id: "k", secret: "s" }), RELAY: { allowed: async () => ({ admin: false, role }) } });
   // A new device each time: the signer keeps what the relay said of a key for a few seconds.
   const ask = async (fields, e) => {
     const device = random(32);
     return (await signer.fetch(new Request("https://one.test/urls", { method: "POST", body: JSON.stringify(await signedRequest(device, await ed25519Public(device), "one/urls", fields, Date.now())) }), e)).status;
   };
   const write = { create: ["s/a/blobs/x"] }, read = { read: ["s/a/blobs/x"] };
-  equal([await ask(write, env("compute", 0)), await ask(read, env("client", 0))], [200, 200], "before the switch, an older build writes and reads");
-  equal([await ask(write, env("compute", 2)), await ask(write, env("client compute", 2))], [426, 426], "once switched, an older node writes nothing");
-  equal(await ask(read, env("compute", 2)), 200, "and still reads");
-  equal(await ask(read, env("client", 2)), 426, "an older client reads nothing");
-  equal([await ask({ ...write, reads: 2 }, env("compute", 2)), await ask({ ...read, reads: 2 }, env("client", 2))], [200, 200], "a build that reads it does both");
+  equal([await ask(write, env("compute")), await ask(write, env("client compute"))], [426, 426], "an older node writes nothing");
+  equal(await ask(read, env("compute")), 200, "and still reads");
+  equal(await ask(read, env("client")), 426, "an older client reads nothing");
+  equal([await ask({ ...write, reads: READS }, env("compute")), await ask({ ...read, reads: READS }, env("client"))], [200, 200], "a build that reads it does both");
 }
 
 /// The URL signer creates a step only once the one before it is there (or the copy up to it), and a copy only once its
@@ -145,7 +144,7 @@ async function stepsAreCreatedInTurn() {
   const device = random(32);
   const env = { R2, BUCKET: JSON.stringify({ endpoint: "https://s3.test", bucket: "b", region: "auto", key_id: "k", secret: "s" }), RELAY: { allowed: async () => ({}) } };
   const ask = async (fields) => {
-    const body = await signedRequest(device, await ed25519Public(device), "one/urls", fields, Date.now());
+    const body = await signedRequest(device, await ed25519Public(device), "one/urls", { reads: READS, ...fields }, Date.now());
     return signer.fetch(new Request("https://one.test/urls", { method: "POST", body: JSON.stringify(body) }), env);
   };
   const created = async (create) => {

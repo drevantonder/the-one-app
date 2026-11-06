@@ -6,11 +6,11 @@ use std::collections::BTreeSet;
 use serde_json::{Value, json};
 
 /// What the Workers' JavaScript says a browser and the remote MCP server's devices read of who's who is what this build
-/// reads, which the URL signer asks of a client once who's who was switched.
+/// reads, which the URL signer, the relay and sign-in check.
 #[test]
 fn the_workers_say_they_read_what_this_build_reads() {
     let crypto = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../cloudflare/shared/crypto.js")).unwrap();
-    assert!(crypto.contains(&format!("export const READS = {};", one::database::switch::READS)), "cloudflare/shared/crypto.js's READS is src/database/switch.rs's");
+    assert!(crypto.contains(&format!("export const READS = {};", one::database::READS)), "cloudflare/shared/crypto.js's READS is src/database.rs's");
 }
 
 /// The Workers (JavaScript, `cloudflare/shared/crypto.js`) and nodes (`src/cloudflare.rs`) each open what the

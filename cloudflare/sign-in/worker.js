@@ -64,7 +64,7 @@ import { APIError, createAuthEndpoint, createAuthMiddleware, getSessionFromCtx }
 import { setSessionCookie } from "better-auth/cookies";
 import { getMigrations } from "better-auth/db/migration";
 import { jwt } from "better-auth/plugins";
-import { b64u, checkRequest, hex, joinChallenge, joinCode, joinNonce } from "../shared/crypto.js";
+import { b64u, checkRequest, hex, joinChallenge, joinCode, joinNonce, READS } from "../shared/crypto.js";
 import { bearer, verify } from "../shared/token.js";
 import { codePage, invitePage, passkeysPage, signInPage, throwawayPage } from "./pages.js";
 import { DurableObjectDialect } from "./sql.js";
@@ -543,7 +543,7 @@ export class Auth extends DurableObject {
   }
 
   /// A device signed in asks to join: `{ key, seal, name, reads, proof?, device? }`, its endpoint keys (hex), its name,
-  /// what its build reads of who's who (`database::switch`), for a
+  /// what its build reads of who's who (`READS`), for a
   /// newcomer's first device, `keys::invite_proof` of its invite's secret, key and seal key, kept with that invite for the
   /// inviting admin's device to check, and for a native app, the device it's on (64 hex). → until when it waits.
   async ask(request) {
@@ -551,9 +551,9 @@ export class Auth extends DurableObject {
     const { user, here } = (await this.asker(request)) || refuse(401, "Sign in first.");
     const { key, seal, name, proof, device, reads } = body;
     if (!KEY.test(key || "") || !KEY.test(seal || "")) refuse(400, "key and seal are endpoint keys, 64 hex characters each");
-    // A device whose build reads less of who's who than the install was switched to (an older one says nothing) would
-    // be let in to what it can't read: it's told to update first.
-    if ((Number.isSafeInteger(reads) ? reads : 0) < ((await this.env.RELAY.mustRead?.()) ?? 0)) refuse(426, `Update this device: ${this.env.YOURS}'s other devices have moved on to what this one doesn't read yet.`);
+    // A device whose build reads less of who's who than this one (an older one says nothing) would be let in to what it
+    // can't read: it's told to update first.
+    if ((Number.isSafeInteger(reads) ? reads : 0) < READS) refuse(426, `Update this device: ${this.env.YOURS}'s other devices have moved on to what this one doesn't read yet.`);
     if (typeof name !== "string" || !name.trim() || name.length > 64) refuse(400, "give the device's name, up to 64 characters");
     if (proof != null && !KEY.test(proof)) refuse(400, "a proof is 64 hex characters");
     if (device != null && !KEY.test(device)) refuse(400, "a device is 64 hex characters");

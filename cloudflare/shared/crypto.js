@@ -208,9 +208,8 @@ export async function verify(publicKey, domain, v, signature) {
 /// How old a signed request may be, in milliseconds, either way.
 export const FRESH = 60_000;
 
-/// What this build reads of who's who (src/database/switch.rs `READS`, which tests/contracts.rs holds it to): what a
-/// browser or the remote MCP server's device says as it asks the URL signer, which once who's who was switched lets
-/// one that reads less read or write nothing.
+/// What this build reads of who's who (src/database.rs `READS`, which tests/contracts.rs holds it to): what a device
+/// says as it asks the URL signer, the relay and sign-in, which tell one that reads less to update.
 export const READS = 2;
 
 let lastAt = 0;

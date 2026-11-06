@@ -234,7 +234,7 @@ fn devices_here(settings: one::cloudflare::Settings, needed: bool) -> Result<one
     // The install's recovery key too, as a client, not an admin's and not a node: what it lets in, the relay takes.
     devices.extend(install["recovery"].as_str().map(|k| json!({ "key": k, "role": "client", "admin": false })));
     let genesis = install["root"].as_str().filter(|r| r.len() == 64).map(str::to_string);
-    Ok(one::cloudflare::Settings { devices, genesis, switched: install["frozen"] == true, ..settings })
+    Ok(one::cloudflare::Settings { devices, genesis, ..settings })
 }
 
 fn addr() -> String {
@@ -557,7 +557,6 @@ fn run(args: Vec<String>) -> Result<()> {
             one::cloudflare::deploy(&cf, &settings, &modules, &web)?;
             if settings.cloudflare_node {
                 one::cloudflare::node::deploy(&cf, &settings)?;
-                cloudflare_node_reads(&settings);
             }
             // The Google client its people sign in with, signed by this admin's device: a new device's sign-in counts
             // only for it (`sign_in_proof::CLIENTS`), whatever sign-in says.
@@ -585,7 +584,6 @@ fn run(args: Vec<String>) -> Result<()> {
             // The relay it deploys again binds the Cloudflare node's endpoint only for an install that has one.
             let was = std::mem::replace(&mut settings.cloudflare_node, true);
             one::cloudflare::node::deploy(&cf, &settings)?;
-            cloudflare_node_reads(&settings);
             if !was {
                 settings.save()?;
             }
@@ -1370,7 +1368,6 @@ fn status(state: &Value) {
         let glyph = if is_phone(c["name"].as_str().unwrap_or("")) { "▯" } else { "▭" };
         println!("  {glyph} {}{}  {}'s{asked}", c["name"].as_str().unwrap_or(""), this(c), name(c["user"].as_str().unwrap_or("")));
     }
-    switch_gate(&i["switch"], &name);
     if !browsers.is_empty() {
         println!("\nBrowsers");
         for c in &browsers {
@@ -1388,38 +1385,6 @@ fn is_browser(name: &str) -> bool {
 fn is_phone(name: &str) -> bool {
     let name = name.to_lowercase();
     ["phone", "ipad", "tablet", "android", "pixel", "galaxy"].iter().any(|w| name.contains(w))
-}
-
-/// Before the switch to the scope database (`database::switch`), for an admin: the devices not updated yet, which are
-/// told to update once it's switched, each with what it said it reads, and how to switch. Nothing once it's switched.
-fn switch_gate(gate: &Value, name: &dyn Fn(&str) -> String) {
-    if gate.is_null() || gate["frozen"] == true {
-        return;
-    }
-    // With its whole key, and whose it is: the Cloudflare node is no one's.
-    let device = |d: &Value| {
-        let key = d["key"].as_str().unwrap_or("");
-        let whose = d["user"].as_str().map(|u| format!("{}'s, ", name(u))).unwrap_or_default();
-        format!("{} ({whose}{key})", d["name"].as_str().unwrap_or(&key[..8.min(key.len())]))
-    };
-    println!("\nNot switched to the scope database yet: an admin switches it with {CLI} switch --recovery-key <file>");
-    for d in gate["waiting"].as_array().into_iter().flatten() {
-        let reads = match d["reads"].as_u64() {
-            Some(r) => format!("reads {r} of {}, build {}", gate["gate"], d["build"].as_str().unwrap_or("?")),
-            None => "hasn't said what it reads: update it, or open it".into(),
-        };
-        println!("  Not updated yet, told to once it's switched: {}: {reads}", device(d));
-    }
-}
-
-/// Tells this machine's node what the Cloudflare node it deployed reads of who's who: this build's, which it can't
-/// say itself (`database::switch`).
-fn cloudflare_node_reads(settings: &one::cloudflare::Settings) {
-    let Some(key) = settings.cloudflare_node_endpoint() else { return };
-    let said = post("/v1/reads", json!({ "device": key, "reads": one::database::switch::READS, "build": one::config::BUILD }));
-    if let Err(err) = said {
-        eprintln!("Couldn't say what the Cloudflare node reads: {err:#}");
-    }
 }
 
 /// The people in the One App, you first, each with their role; then every group in words: its people with their

@@ -51,8 +51,6 @@ pub struct Status {
     pub changed: BTreeMap<(String, String), (Value, Value, u64)>,
     /// In `global`: the build each device runs.
     pub builds: HashMap<Key, release::Running>,
-    /// In `global`: what each device said it reads of who's who (`database::switch`).
-    pub reads: HashMap<Key, crate::database::switch::Reads>,
     /// In `global`: the latest backup runs, oldest first.
     pub backups: Vec<BackupRun>,
     /// In `global`: by (place, scope), the newest entry's time a snapshot there holds, and when it was written.
@@ -152,8 +150,6 @@ pub enum Said {
     Cost { app: String, model: String, usd: f64, input: u64, output: u64 },
     Ran { app: String, schedule: String, run: Run },
     Build { device: Key, build: String, target: String },
-    /// What a device reads of who's who, and its build (`database::switch`).
-    Reads { device: Key, reads: u32, build: String },
     BackedUp(BackupRun),
     Alerted { place: String },
     Checked(CheckRun),
@@ -194,7 +190,6 @@ impl Node {
                     )
                 }
                 Said::Build { device, build, target } => ex("insert or replace into builds values (?, ?, ?, ?)", &[json!(hex(device)), json!(build), json!(target), json!(now)]),
-                Said::Reads { device, reads, build } => ex("insert or replace into reads values (?, ?, ?, ?)", &[json!(hex(device)), json!(reads), json!(build), json!(now)]),
                 Said::BackedUp(r) => {
                     ex(
                         "insert or replace into backups values (?, ?, ?, ?, ?, ?)",
@@ -217,27 +212,6 @@ impl Node {
         })
         .await?;
         self.read_status(scope).await
-    }
-
-    /// What a device said it reads of who's who (`database::switch`), kept in `global`'s node database when it
-    /// changed. Noted here first, so the requests that say it again while it's written don't write it again, and put
-    /// back as it was if the write doesn't land, so the next request writes it again.
-    pub(crate) async fn said_reads(&self, device: Key, reads: u32, build: &str) {
-        let kept = crate::database::switch::Reads { reads, build: build.to_string(), time: now_ms() };
-        let was = self.with(|i| Ok(i.reads.get(&device).is_none_or(|r| r.reads != reads || r.build != build).then(|| i.reads.insert(device, kept.clone()))));
-        let Ok(Some(was)) = was else { return };
-        if let Err(err) = self.say(&Scope::Global, Said::Reads { device, reads, build: build.to_string() }).await {
-            tracing::debug!("keeping what {} reads: {err:#}", short(&device));
-            let _ = self.with(|i| {
-                if i.reads.get(&device) == Some(&kept) {
-                    match was {
-                        Some(was) => i.reads.insert(device, was),
-                        None => i.reads.remove(&device),
-                    };
-                }
-                Ok(())
-            });
-        }
     }
 
     /// Reads a scope's rows into its `Status`, up to date.
@@ -284,11 +258,6 @@ impl Node {
                 s.builds.insert(device, release::Running { commit: text(&r["build"]), target: text(&r["target"]) });
             }
         }
-        for r in rows("select * from reads")? {
-            if let Ok(device) = unhex(r["device"].as_str().unwrap_or("")) {
-                s.reads.insert(device, crate::database::switch::Reads { reads: n(&r["reads"]) as u32, build: text(&r["build"]), time: n(&r["time"]) });
-            }
-        }
         for r in rows("select * from backups order by time")? {
             let snapshots: Vec<BackedUp> = serde_json::from_str(r["snapshots"].as_str().unwrap_or("[]")).unwrap_or_default();
             let run = BackupRun {
@@ -323,7 +292,6 @@ impl Node {
         self.with(|i| {
             if *scope == Scope::Global {
                 i.builds = s.builds.clone();
-                i.reads = s.reads.clone();
             }
             i.status.insert(scope.to_string(), s);
             Ok(())
@@ -341,34 +309,5 @@ impl Node {
                 }
             }
         });
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// A step in `global`'s node database that says the log may be frozen, which anyone with its key can write, is
-    /// answered before the node writes there: what a device says it reads still lands, so the gate can open.
-    #[tokio::test(flavor = "multi_thread")]
-    async fn what_a_device_reads_lands_after_a_step_that_says_the_log_may_be_frozen() {
-        let dir = std::env::temp_dir().join(format!("one-reads-{}", rand::random::<u64>()));
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("device.json"), json!({ "secret": hex(&rand::random()), "name": "a" }).to_string()).unwrap();
-        let a = Node::start(&dir).await.unwrap();
-        a.create("Home", "Andre").await.unwrap();
-        let (app, database) = NODE_DATABASE;
-        let bucket = a.bucket().unwrap();
-        let keys = a.database_keys(&Scope::Global, app, database, true).await.unwrap();
-        let mut fake = crate::db::Db::open_switched(&bucket, &format!("{}/{app}/{database}", crate::bucket::folder("global")), keys).await.unwrap();
-        fake.sign_as(SigningKey::from_bytes(&rand::random()));
-        fake.write(&bucket, |c| crate::db::execute(c, "insert or replace into alerts values ('fake', 1)", &[]).map(|_| ())).await.unwrap();
-        assert!(fake.signed_from().is_some());
-
-        let device = rand::random();
-        a.said_reads(device, 2, "b").await;
-        let reads = |i: &Install| i.status.get("global").and_then(|s| s.reads.get(&device)).map(|r| r.reads);
-        assert_eq!(a.with(|i| Ok(reads(i))).unwrap(), Some(2), "its row landed, and was read back");
-        let _ = std::fs::remove_dir_all(&dir);
     }
 }
